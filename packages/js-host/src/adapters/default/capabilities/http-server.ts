@@ -1076,9 +1076,10 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
       host,
       effectId: HTTP_SERVER_EFFECT_ID,
       opName: "listen_raw",
-      handler: async ({ tail }, payload) => {
+      handler: async ({ tail, registerResourceCleanup }, payload) => {
         try {
           const serverId = await httpServerSource.listen(decodeConfig(payload));
+          registerResourceCleanup?.(() => httpServerSource.close(serverId));
           return tail(hostOk(serverId));
         } catch (error) {
           return tail(hostError(error instanceof Error ? error.message : String(error)));

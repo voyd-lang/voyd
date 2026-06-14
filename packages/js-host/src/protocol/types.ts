@@ -16,6 +16,7 @@ export type VoydRunHandle<T = unknown> = {
 };
 
 export type EffectContinuationKind = "resume" | "tail" | "end";
+export type EffectResourceCleanup = () => void | Promise<void>;
 
 export type EffectHandler<
   TArgs extends unknown[] = unknown[],
@@ -34,6 +35,7 @@ export type EffectContinuation = {
   resume: (...args: unknown[]) => EffectContinuationCall;
   tail: (...args: unknown[]) => EffectContinuationCall;
   end: (result: unknown) => EffectContinuationCall;
+  registerResourceCleanup?: (cleanup: EffectResourceCleanup) => void;
 };
 
 export type EffectDescriptor = {

@@ -28,6 +28,13 @@ export const releaseTargets = {
     packRequiredFiles: ["package.json", "src/pkg.voyd", "dist/.placeholder"],
     relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
   }),
+  "@voyd-lang/web": npmTarget({
+    workspace: "@voyd-lang/web",
+    cwd: "packages/web",
+    description: "Voyd web framework source bundle",
+    packRequiredFiles: ["package.json", "src/pkg.voyd", "dist/.placeholder"],
+    relatedTests: ["own", "smoke"],
+  }),
   "@voyd-lang/lib": npmTarget({
     workspace: "@voyd-lang/lib",
     cwd: "packages/lib",

@@ -6,7 +6,7 @@ use std::dict::Dict
 use std::http::self as http
 use std::http::{ Header, Headers, HttpError, IncomingRequest, QueryString, Response, Status }
 use std::json::{ JsonArray, JsonBool, JsonNull, JsonNumber, JsonObject, JsonString, JsonValue, parse as parse_json }
-use std::msgpack::MsgPack
+use std::msgpack::{ Bool, F32, F64, I32, I64, MsgPack, MsgPackError, Null }
 use std::msgpack::self as msgpack
 use std::number::cast::self as cast
 use std::optional::types::all
@@ -27,6 +27,10 @@ pub obj QueryParams {
   api entries: Array<NameValue>
 }
 
+pub obj CookieJar {
+  api entries: Array<NameValue>
+}
+
 pub obj Rejection {
   api status: Status,
   api message: String
@@ -41,6 +45,18 @@ pub obj TextBody {}
 pub obj BytesBody {}
 pub obj RequiredSession {}
 pub obj OptionalSession {}
+pub obj BodyLimit {
+  api max_bytes: i32
+}
+pub obj LimitedJsonBody {
+  api limit: BodyLimit
+}
+pub obj LimitedTextBody {
+  api limit: BodyLimit
+}
+pub obj LimitedBytesBody {
+  api limit: BodyLimit
+}
 
 pub type AuthExtractor<T> = fn(IncomingRequest) : (open) -> Result<T, Rejection>
 
@@ -77,6 +93,21 @@ impl QueryParams
     let ~next = self.entries.copied(1)
     next.push({ name: name, value: value })
     QueryParams { entries: next }
+
+  api fn get(self, name: StringSlice) -> Option<String>
+    find_value(self.entries, name)
+
+  api fn get(self, name: String) -> Option<String>
+    self.get(name.as_slice())
+
+impl CookieJar
+  api fn empty() -> CookieJar
+    CookieJar { entries: Array<NameValue>::init() }
+
+  api fn append(self, { name: String, value: String }) -> CookieJar
+    let ~next = self.entries.copied(1)
+    next.push({ name: name, value: value })
+    CookieJar { entries: next }
 
   api fn get(self, name: StringSlice) -> Option<String>
     find_value(self.entries, name)
@@ -135,6 +166,30 @@ impl FromBody<Bytes> for BytesBody
     self
     bytes_body(request)
 
+impl<T> FromBody<T> for LimitedJsonBody
+  fn extract_body(self, request: IncomingRequest) : (open) -> Result<T, Rejection>
+    if request.body.len() > self.limit.max_bytes:
+      return Err<Rejection> {
+        error: Rejection::payload_too_large("request body exceeds configured limit".as_slice())
+      }
+    extract_json_body<T>(JsonBody {}, request)
+
+impl FromBody<String> for LimitedTextBody
+  fn extract_body(self, request: IncomingRequest) : (open) -> Result<String, Rejection>
+    if request.body.len() > self.limit.max_bytes:
+      return Err<Rejection> {
+        error: Rejection::payload_too_large("request body exceeds configured limit".as_slice())
+      }
+    text_body(request)
+
+impl FromBody<Bytes> for LimitedBytesBody
+  fn extract_body(self, request: IncomingRequest) : (open) -> Result<Bytes, Rejection>
+    if request.body.len() > self.limit.max_bytes:
+      return Err<Rejection> {
+        error: Rejection::payload_too_large("request body exceeds configured limit".as_slice())
+      }
+    bytes_body(request)
+
 pub fn text_body(request: IncomingRequest) -> Result<String, Rejection>
   match(request.text())
     Ok<String> { value }:
@@ -146,13 +201,47 @@ pub fn bytes_body(request: IncomingRequest) -> Result<Bytes, Rejection>
   Ok<Bytes> { value: request.body_bytes() }
 
 pub fn extract_params<T>(params: RouteParams) -> Result<T, Rejection>
-  Ok<T> { value: decode_params<T>(params) }
+  match(validate_params<T>(RouteParams { entries: params.entries.copied() }))
+    Some<Rejection> { value }:
+      Err<Rejection> { error: value }
+    None:
+      Ok<T> { value: decode_params<T>(params) }
 
 pub fn extract_query<T>(query: QueryParams) -> Result<T, Rejection>
-  Ok<T> { value: decode_query<T>(query) }
+  match(validate_query<T>(QueryParams { entries: query.entries.copied() }))
+    Some<Rejection> { value }:
+      Err<Rejection> { error: value }
+    None:
+      Ok<T> { value: decode_query<T>(query) }
+
+pub fn validate_params<T>(params: RouteParams) -> Option<Rejection>
+  let entries = params.entries
+  let expected = msgpack::pack_boundary_value<T>(
+    msgpack::unpack_boundary_value<T>(name_values_to_msgpack(entries.copied()))
+  )
+  validate_boundary_struct(name_values_to_msgpack(entries), expected, label: "params".as_slice())
+
+pub fn validate_query<T>(query: QueryParams) -> Option<Rejection>
+  let entries = query.entries
+  let expected = msgpack::pack_boundary_value<T>(
+    msgpack::unpack_boundary_value<T>(query_values_to_msgpack(entries.copied()))
+  )
+  validate_boundary_struct(query_values_to_msgpack(entries), expected, label: "query".as_slice())
 
 pub fn extract_headers<T>(headers: Headers) -> Result<T, Rejection>
-  Ok<T> { value: decode_headers<T>(headers) }
+  let payload = headers_to_msgpack(headers)
+  extract_boundary_struct<T>(payload, label: "headers".as_slice())
+
+pub fn extract_cookies<T>(cookies: CookieJar) -> Result<T, Rejection>
+  let entries = cookies.entries
+  let expected = msgpack::pack_boundary_value<T>(
+    msgpack::unpack_boundary_value<T>(name_values_to_msgpack(entries.copied()))
+  )
+  match(validate_boundary_struct(name_values_to_msgpack(entries.copied()), expected, label: "cookies".as_slice()))
+    Some<Rejection> { value }:
+      Err<Rejection> { error: value }
+    None:
+      Ok<T> { value: msgpack::unpack_boundary_value<T>(name_values_to_msgpack(entries)) }
 
 pub fn decode_params<T>(params: RouteParams) -> T
   msgpack::unpack_boundary_value<T>(name_values_to_msgpack(params.entries))
@@ -163,8 +252,142 @@ pub fn decode_query<T>(query: QueryParams) -> T
 pub fn decode_headers<T>(headers: Headers) -> T
   msgpack::unpack_boundary_value<T>(headers_to_msgpack(headers))
 
+pub fn decode_cookies<T>(cookies: CookieJar) -> T
+  msgpack::unpack_boundary_value<T>(name_values_to_msgpack(cookies.entries))
+
 pub fn decode_json_value<T>(value: JsonValue) -> T
   msgpack::unpack_boundary_value<T>(json_to_msgpack(value))
+
+fn extract_boundary_struct<T>(payload: MsgPack, { label: StringSlice }) -> Result<T, Rejection>
+  let decoded = msgpack::unpack_boundary_value<T>(payload)
+  let expected = msgpack::pack_boundary_value<T>(msgpack::unpack_boundary_value<T>(payload))
+  match(validate_boundary_struct(payload, expected, label: label))
+    Some<Rejection> { value }:
+      Err<Rejection> { error: value }
+    None:
+      Ok<T> { value: decoded }
+
+fn validate_boundary_struct(source: MsgPack, expected: MsgPack, { label: StringSlice }) -> Option<Rejection>
+  match(msgpack::unpack_map(source))
+    Err<MsgPackError>:
+      Some<Rejection> { value: Rejection::bad_request(label.to_string().concat(" must decode to an object").as_slice()) }
+    Ok<Dict<String, MsgPack>> { value: source_map }:
+      match(msgpack::unpack_map(expected))
+        Err<MsgPackError>:
+          None {}
+        Ok<Dict<String, MsgPack>> { value: expected_map }:
+          validate_expected_fields(source_map, expected_map, label: label)
+
+fn validate_expected_fields(
+  source: Dict<String, MsgPack>,
+  expected: Dict<String, MsgPack>,
+  { label: StringSlice }
+) -> Option<Rejection>
+  let entries = expected.entries()
+  var index = 0
+  while index < entries.len():
+    match(entries.get(index))
+      Some<(String, MsgPack)> { value: entry }:
+        let key = entry.0
+        let expected_value = entry.1
+        match(source.get(key))
+          Some<MsgPack> { value: actual_value }:
+            if msgpack_shape_compatible(actual_value, expected_value) == false:
+              return Some<Rejection> {
+                value: Rejection::bad_request(
+                  label.to_string().concat(" field `").concat(key).concat("` has invalid type").as_slice()
+                )
+              }
+          None:
+            if is_optional_absent(expected_value) == false:
+              return Some<Rejection> {
+                value: Rejection::bad_request(
+                  label.to_string().concat(" field `").concat(key).concat("` is required").as_slice()
+                )
+              }
+      None:
+        void
+    index = index + 1
+  None {}
+
+fn is_optional_absent(value: MsgPack): () -> bool
+  value.match(decoded)
+    Null:
+      true
+    else:
+      false
+
+fn msgpack_shape_compatible(actual: MsgPack, expected: MsgPack): () -> bool
+  expected.match(decoded)
+    Null:
+      true
+    Bool:
+      is_bool_msgpack(actual)
+    I32:
+      is_numeric_msgpack(actual)
+    I64:
+      is_numeric_msgpack(actual)
+    F32:
+      is_numeric_msgpack(actual)
+    F64:
+      is_numeric_msgpack(actual)
+    String:
+      is_string_compatible_msgpack(actual)
+    Array<MsgPack>:
+      is_array_msgpack(actual)
+    else:
+      is_map_msgpack(actual)
+
+fn is_bool_msgpack(value: MsgPack): () -> bool
+  value.match(decoded)
+    Bool:
+      true
+    else:
+      false
+
+fn is_numeric_msgpack(value: MsgPack): () -> bool
+  value.match(decoded)
+    I32:
+      true
+    I64:
+      true
+    F32:
+      true
+    F64:
+      true
+    else:
+      false
+
+fn is_string_compatible_msgpack(value: MsgPack): () -> bool
+  value.match(decoded)
+    String:
+      true
+    Bool:
+      true
+    I32:
+      true
+    I64:
+      true
+    F32:
+      true
+    F64:
+      true
+    else:
+      false
+
+fn is_array_msgpack(value: MsgPack): () -> bool
+  value.match(decoded)
+    Array<MsgPack>:
+      true
+    else:
+      false
+
+fn is_map_msgpack(value: MsgPack): () -> bool
+  match(msgpack::unpack_map(value))
+    Ok<Dict<String, MsgPack>>:
+      true
+    Err<MsgPackError>:
+      false
 
 pub fn extract_json_body<T>(body: JsonBody, request: IncomingRequest) : (open) -> Result<T, Rejection>
   body
@@ -200,6 +423,30 @@ pub fn text_body() -> TextBody
 pub fn bytes() -> BytesBody
   BytesBody {}
 
+pub fn body_limit(max_bytes: i32) -> BodyLimit
+  BodyLimit { max_bytes: max_bytes }
+
+pub fn limit_body(body: JsonBody, { limit: BodyLimit }) -> LimitedJsonBody
+  body
+  LimitedJsonBody { limit: limit }
+
+pub fn limit_body(body: TextBody, { limit: BodyLimit }) -> LimitedTextBody
+  body
+  LimitedTextBody { limit: limit }
+
+pub fn limit_body(body: BytesBody, { limit: BodyLimit }) -> LimitedBytesBody
+  body
+  LimitedBytesBody { limit: limit }
+
+pub fn limited(body: JsonBody, { limit: BodyLimit }) -> LimitedJsonBody
+  limit_body(body, limit: limit)
+
+pub fn limited(body: TextBody, { limit: BodyLimit }) -> LimitedTextBody
+  limit_body(body, limit: limit)
+
+pub fn limited(body: BytesBody, { limit: BodyLimit }) -> LimitedBytesBody
+  limit_body(body, limit: limit)
+
 pub fn required_session<T>({ extract: AuthExtractor<T> }) -> AuthPolicy<T>
   AuthPolicy<T> { extractor: extract }
 
@@ -223,6 +470,13 @@ pub fn query_from(request: IncomingRequest) -> QueryParams
     None:
       QueryParams::empty()
 
+pub fn cookies_from(request: IncomingRequest) -> CookieJar
+  match(request.header("cookie".as_slice()))
+    Some<String> { value }:
+      parse_cookies(value)
+    None:
+      CookieJar::empty()
+
 pub fn parse_query(raw: String) -> QueryParams
   parse_query(raw.as_slice())
 
@@ -234,6 +488,22 @@ pub fn parse_query(raw: StringSlice) -> QueryParams
     match(parts.get(index))
       Some<StringSlice> { value }:
         out = append_query_part(out, value)
+      None:
+        void
+    index = index + 1
+  out
+
+pub fn parse_cookies(raw: String) -> CookieJar
+  parse_cookies(raw.as_slice())
+
+pub fn parse_cookies(raw: StringSlice) -> CookieJar
+  let parts = raw.split(on: 59, keep_empty: false)
+  var out = CookieJar::empty()
+  var index = 0
+  while index < parts.len():
+    match(parts.get(index))
+      Some<StringSlice> { value }:
+        out = append_cookie_part(out, value.trimmed())
       None:
         void
     index = index + 1
@@ -276,6 +546,19 @@ fn append_query_part(params: QueryParams, part: StringSlice): () -> QueryParams
         name: percent_decode(part, plus_as_space: true),
         value: String::init()
       )
+
+fn append_cookie_part(cookies: CookieJar, part: StringSlice): () -> CookieJar
+  match(part.split_once(on: 61))
+    Some<(StringSlice, StringSlice)> { value }:
+      let name = value.0.trimmed()
+      if name.is_empty():
+        return cookies
+      cookies.append(
+        name: name.to_string(),
+        value: value.1.trimmed().to_string()
+      )
+    None:
+      cookies
 
 pub fn default_required_session(request: IncomingRequest) -> Result<String, Rejection>
   match(request.header("authorization".as_slice()))

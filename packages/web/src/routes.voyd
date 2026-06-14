@@ -1,12 +1,19 @@
 //! Builder helper functions for apps assembled with `build_app`.
 
+use std::async::types::{ Cancelled }
 use std::bytes::Bytes
+use std::error::{ panic }
 use std::http::{ Method, Response, Status }
 use std::json::JsonValue
+use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
+use std::task::self as task
+use std::time::self as time
+use std::time::{ Duration, Time }
 use super::extract::{
+  BodyLimit,
   FromAuth,
   FromBody,
   JsonBody,
@@ -14,21 +21,83 @@ use super::extract::{
   Rejection,
   RequiredSession,
   TextBody,
+  cookies_from,
   decode_json_value,
-  decode_params,
-  decode_query,
   default_optional_session,
   default_optional_session_as,
   default_required_session,
   default_required_session_as,
+  extract_cookies,
   extract_headers,
   extract_params,
   extract_query,
   json_body_value,
-  query_from,
+  query_from
 }
-use super::response::{ IntoResponse, json_value, to_response }
+use super::response::{ IntoResponse, json_dto, json_value, option_dto_json, result_dto_json, to_response }
 use super::router::{ AppBuild, Context, ErrorHandler, Handler, Middleware }
+
+pub obj TimeoutPolicy {
+  api duration: Duration
+}
+
+pub fn timeout(duration: Duration) -> TimeoutPolicy
+  TimeoutPolicy { duration: duration }
+
+pub fn timeout_millis(millis: i64) -> TimeoutPolicy
+  timeout(Duration::from_millis(millis))
+
+pub fn timeout_millis(millis: i32) -> TimeoutPolicy
+  timeout(Duration::from_millis(cast::to_i64(millis)))
+
+fn gateway_timeout() -> Response
+  match(Status::from(504))
+    Ok<Status> { value }:
+      Response::new(status: value).text("route timed out".as_slice())
+    Err:
+      Response::internal_server_error().text("route timed out".as_slice())
+
+fn run_with_timeout(
+  timeout: TimeoutPolicy,
+  work: fn() : (open) -> Response
+): (task::TaskRuntime, Time, open) -> Response
+  let worker = task::spawn do:
+    work()
+  let timer = time::set_timeout(timeout.duration) do:
+    task::cancel<Response>(worker)
+  match(task::join(worker))
+    Ok<Response> { value }:
+      let _ = task::cancel<bool>(timer)
+      value
+    Err { error }:
+      let _ = task::cancel<bool>(timer)
+      panic(error.message)
+      Response::internal_server_error()
+    Cancelled:
+      gateway_timeout()
+
+fn body_limit_rejection(ctx: Context, limit: BodyLimit): () -> Option<Response>
+  if ctx.request.body.len() > limit.max_bytes:
+    Some<Response> {
+      value: ctx.reject(Rejection::payload_too_large("request body exceeds configured limit".as_slice()))
+    }
+  else:
+    None {}
+
+fn with_params_query<P, Q>(
+  ctx: Context,
+  work: fn(P, Q) : (open) -> Response
+): (open) -> Response
+  let query_source = ctx.query()
+  match(extract_params<P>(ctx.route.params))
+    Err<Rejection> { error }:
+      ctx.reject(error)
+    Ok<P> { value: params }:
+      match(extract_query<Q>(query_source))
+        Ok<Q> { value: query }:
+          work(params, query)
+        Err<Rejection> { error }:
+          ctx.reject(error)
 
 pub fn get_context(
   app: AppBuild,
@@ -36,6 +105,14 @@ pub fn get_context(
   handler: Handler
 ) -> AppBuild
   app.route_context(path, method: Method::Get {}, handler: handler)
+
+pub fn get_context<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { timeout: TimeoutPolicy },
+  handler: fn(Context) : (open) -> R
+) -> AppBuild
+  route_context(app, path, method: Method::Get {}, timeout: timeout, handler)
 
 pub fn get_context(
   app: AppBuild,
@@ -318,6 +395,36 @@ pub fn get<S, A: FromAuth<S>, R: IntoResponse<R>>(
         ctx.reject(error)
   )
 
+pub fn get<S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: A, timeout: TimeoutPolicy },
+  handler: fn(S) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(auth.extract_auth(ctx.request))
+        Ok<S> { value }:
+          to_response<R>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn get<S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: A, timeout: TimeoutPolicy },
+  handler: fn(S, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(auth.extract_auth(ctx.request))
+        Ok<S> { value }:
+          to_response<R>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
 pub fn get<S, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -351,6 +458,38 @@ pub fn get<S, R: IntoResponse<R>>(
 pub fn get<S, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
+  { auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(default_required_session_as<S>(ctx.request))
+        Ok<S> { value }:
+          to_response<R>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn get<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(default_required_session_as<S>(ctx.request))
+        Ok<S> { value }:
+          to_response<R>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn get<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
   { auth: OptionalSession },
   handler: fn(Option<S>) : (open) -> R
 ) -> AppBuild
@@ -376,6 +515,38 @@ pub fn get<S, R: IntoResponse<R>>(
         to_response<R>(handler(value, ctx))
       Err<Rejection> { error }:
         ctx.reject(error)
+  )
+
+pub fn get<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(default_optional_session_as<S>(ctx.request))
+        Ok<Option<S>> { value }:
+          to_response<R>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn get<S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: Method::Get {}, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(default_optional_session_as<S>(ctx.request))
+        Ok<Option<S>> { value }:
+          to_response<R>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
   )
 
 pub fn post_unit<R: IntoResponse<R>>(
@@ -451,6 +622,54 @@ pub fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
 ) -> AppBuild
   route(app, path, method: Method::Put {}, body: body, handler)
 
+pub fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, limit: limit, handler)
+
+pub fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, limit: limit, handler)
+
+pub fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, timeout: TimeoutPolicy },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, limit: limit, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, limit: limit, timeout: timeout, handler)
+
 pub fn put<I, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -483,6 +702,54 @@ pub fn put<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
 ) -> AppBuild
   route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
 
+pub fn put<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn put<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn put<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
 pub fn put<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -514,6 +781,54 @@ pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
   handler: fn(I, S, Context) : (open) -> R
 ) -> AppBuild
   route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
 
 pub fn put<I, S, R: IntoResponse<R>>(
   app: AppBuild,
@@ -546,6 +861,54 @@ pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
   handler: fn(I, Option<S>, Context) : (open) -> R
 ) -> AppBuild
   route(app, path, method: Method::Put {}, body: body, auth: auth, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn put<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Put {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
 
 pub fn put<I, S, R: IntoResponse<R>>(
   app: AppBuild,
@@ -633,6 +996,54 @@ pub fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
 ) -> AppBuild
   route(app, path, method: Method::Patch {}, body: body, handler)
 
+pub fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, limit: limit, handler)
+
+pub fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, limit: limit, handler)
+
+pub fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, timeout: TimeoutPolicy },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, limit: limit, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, limit: limit, timeout: timeout, handler)
+
 pub fn patch<I, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -665,6 +1076,54 @@ pub fn patch<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
 ) -> AppBuild
   route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
 
+pub fn patch<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn patch<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn patch<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
 pub fn patch<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -696,6 +1155,54 @@ pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
   handler: fn(I, S, Context) : (open) -> R
 ) -> AppBuild
   route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
 
 pub fn patch<I, S, R: IntoResponse<R>>(
   app: AppBuild,
@@ -728,6 +1235,54 @@ pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
   handler: fn(I, Option<S>, Context) : (open) -> R
 ) -> AppBuild
   route(app, path, method: Method::Patch {}, body: body, auth: auth, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn patch<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Patch {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
 
 pub fn patch<I, S, R: IntoResponse<R>>(
   app: AppBuild,
@@ -810,6 +1365,54 @@ pub fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
 ) -> AppBuild
   route(app, path, method: Method::Delete {}, body: body, handler)
 
+pub fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, limit: limit, handler)
+
+pub fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, limit: limit, handler)
+
+pub fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, timeout: TimeoutPolicy },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, limit: limit, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, limit: limit, timeout: timeout, handler)
+
 pub fn delete<I, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -842,6 +1445,54 @@ pub fn delete<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
 ) -> AppBuild
   route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
 
+pub fn delete<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn delete<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn delete<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
 pub fn delete<I, S, A: FromAuth<S>, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -873,6 +1524,54 @@ pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
   handler: fn(I, S, Context) : (open) -> R
 ) -> AppBuild
   route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
 
 pub fn delete<I, S, R: IntoResponse<R>>(
   app: AppBuild,
@@ -905,6 +1604,54 @@ pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
   handler: fn(I, Option<S>, Context) : (open) -> R
 ) -> AppBuild
   route(app, path, method: Method::Delete {}, body: body, auth: auth, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn delete<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Delete {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
 
 pub fn delete<I, S, R: IntoResponse<R>>(
   app: AppBuild,
@@ -970,6 +1717,54 @@ pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
       Err<Rejection> { error }:
         ctx.reject(error)
   )
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, limit: limit, handler)
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, limit: limit, handler)
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, timeout: TimeoutPolicy },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, limit: limit, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, limit: limit, timeout: timeout, handler)
 
 pub fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
   app: AppBuild,
@@ -1224,6 +2019,54 @@ pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
 pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: RequiredSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
   { body: P, auth: RequiredSession },
   handler: fn(I, S, Context) : (open) -> R
 ) -> AppBuild
@@ -1403,6 +2246,54 @@ pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
 pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: OptionalSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
   { body: P, auth: OptionalSession },
   handler: fn(I, Option<S>, Context) : (open) -> R
 ) -> AppBuild
@@ -1496,6 +2387,54 @@ pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
           Err<Rejection> { error }:
             ctx.reject(error)
   )
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, handler)
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
+
+pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { body: P, auth: A, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  route(app, path, method: Method::Post {}, body: body, auth: auth, limit: limit, timeout: timeout, handler)
 
 pub fn post<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
   app: AppBuild,
@@ -1645,6 +2584,398 @@ pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
 ) -> AppBuild
   app.route<I, P, R>(path, method: method, body: body, handler: handler)
 
+pub fn route_body_dto<I, P: FromBody<I>, R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Ok<I> { value }:
+        json_dto<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_body_dto<I, P: FromBody<I>, R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Ok<I> { value }:
+          json_dto<R>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_body_result_dto<I, P: FromBody<I>, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P },
+  handler: fn(I) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Ok<I> { value }:
+        result_dto_json<T, E>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_body_result_dto<I, P: FromBody<I>, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Ok<I> { value }:
+          result_dto_json<T, E>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_body_auth_dto<I, P: FromBody<I>, S, A: FromAuth<S>, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A },
+  handler: fn(I, S) : (open) -> T
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(auth.extract_auth(ctx.request))
+          Ok<S> { value: session }:
+            json_dto<T>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_body_auth_dto<I, P: FromBody<I>, S, A: FromAuth<S>, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> T
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              json_dto<T>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route_body_auth_result_dto<I, P: FromBody<I>, S, A: FromAuth<S>, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A },
+  handler: fn(I, S) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(auth.extract_auth(ctx.request))
+          Ok<S> { value: session }:
+            result_dto_json<T, E>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_body_auth_result_dto<I, P: FromBody<I>, S, A: FromAuth<S>, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              result_dto_json<T, E>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route_body_auth_dto<I, P: FromBody<I>, S, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> T
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            json_dto<T>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_body_auth_dto<I, P: FromBody<I>, S, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> T
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(default_required_session_as<S>(ctx.request))
+            Ok<S> { value: session }:
+              json_dto<T>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route_body_auth_result_dto<I, P: FromBody<I>, S, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession },
+  handler: fn(I, S) : (open) -> Result<T, E>
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_required_session_as<S>(ctx.request))
+          Ok<S> { value: session }:
+            result_dto_json<T, E>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_body_auth_result_dto<I, P: FromBody<I>, S, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> Result<T, E>
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(default_required_session_as<S>(ctx.request))
+            Ok<S> { value: session }:
+              result_dto_json<T, E>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route_body_auth_dto<I, P: FromBody<I>, S, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> T
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_optional_session_as<S>(ctx.request))
+          Ok<Option<S>> { value: session }:
+            json_dto<T>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_body_auth_dto<I, P: FromBody<I>, S, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> T
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(default_optional_session_as<S>(ctx.request))
+            Ok<Option<S>> { value: session }:
+              json_dto<T>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route_body_auth_result_dto<I, P: FromBody<I>, S, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession },
+  handler: fn(I, Option<S>) : (open) -> Result<T, E>
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body.extract_body(ctx.request))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+      Ok<I> { value: input }:
+        match(default_optional_session_as<S>(ctx.request))
+          Ok<Option<S>> { value: session }:
+            result_dto_json<T, E>(handler(input, session))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route_body_auth_result_dto<I, P: FromBody<I>, S, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> Result<T, E>
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(default_optional_session_as<S>(ctx.request))
+            Ok<Option<S>> { value: session }:
+              result_dto_json<T, E>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, limit: BodyLimit },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        match(body.extract_body(ctx.request))
+          Ok<I> { value }:
+            to_response<R>(handler(value))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, limit: BodyLimit },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        match(body.extract_body(ctx.request))
+          Ok<I> { value }:
+            to_response<R>(handler(value, ctx))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Ok<I> { value }:
+          to_response<R>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, timeout: TimeoutPolicy },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Ok<I> { value }:
+          to_response<R>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        run_with_timeout(timeout) do:
+          match(body.extract_body(ctx.request))
+            Ok<I> { value }:
+              to_response<R>(handler(value))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        run_with_timeout(timeout) do:
+          match(body.extract_body(ctx.request))
+            Ok<I> { value }:
+              to_response<R>(handler(value, ctx))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
 pub fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -1722,6 +3053,134 @@ pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
 pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
+  { method: Method, body: P, auth: A, limit: BodyLimit },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        match(body.extract_body(ctx.request))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<I> { value: input }:
+            match(auth.extract_auth(ctx.request))
+              Ok<S> { value: session }:
+                to_response<R>(handler(input, session))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A, limit: BodyLimit },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        match(body.extract_body(ctx.request))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<I> { value: input }:
+            match(auth.extract_auth(ctx.request))
+              Ok<S> { value: session }:
+                to_response<R>(handler(input, session, ctx))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              to_response<R>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(auth.extract_auth(ctx.request))
+            Ok<S> { value: session }:
+              to_response<R>(handler(input, session, ctx))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        run_with_timeout(timeout) do:
+          match(body.extract_body(ctx.request))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+            Ok<I> { value: input }:
+              match(auth.extract_auth(ctx.request))
+                Ok<S> { value: session }:
+                  to_response<R>(handler(input, session))
+                Err<Rejection> { error }:
+                  ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: A, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        run_with_timeout(timeout) do:
+          match(body.extract_body(ctx.request))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+            Ok<I> { value: input }:
+              match(auth.extract_auth(ctx.request))
+                Ok<S> { value: session }:
+                  to_response<R>(handler(input, session, ctx))
+                Err<Rejection> { error }:
+                  ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, A: FromAuth<S>, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
   { method: Method, body: P, auth: A },
   handler: fn(I, S, Context) : (open) -> R
 ) -> AppBuild
@@ -1788,6 +3247,140 @@ pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
             to_response<R>(handler(input, session))
           Err<Rejection> { error }:
             ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession, limit: BodyLimit },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        match(body.extract_body(ctx.request))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<I> { value: input }:
+            match(default_required_session_as<S>(ctx.request))
+              Ok<S> { value: session }:
+                to_response<R>(handler(input, session))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession, limit: BodyLimit },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        match(body.extract_body(ctx.request))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<I> { value: input }:
+            match(default_required_session_as<S>(ctx.request))
+              Ok<S> { value: session }:
+                to_response<R>(handler(input, session, ctx))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(default_required_session_as<S>(ctx.request))
+            Ok<S> { value: session }:
+              to_response<R>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(default_required_session_as<S>(ctx.request))
+            Ok<S> { value: session }:
+              to_response<R>(handler(input, session, ctx))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        run_with_timeout(timeout) do:
+          match(body.extract_body(ctx.request))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+            Ok<I> { value: input }:
+              match(default_required_session_as<S>(ctx.request))
+                Ok<S> { value: session }:
+                  to_response<R>(handler(input, session))
+                Err<Rejection> { error }:
+                  ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: RequiredSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, S, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        run_with_timeout(timeout) do:
+          match(body.extract_body(ctx.request))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+            Ok<I> { value: input }:
+              match(default_required_session_as<S>(ctx.request))
+                Ok<S> { value: session }:
+                  to_response<R>(handler(input, session, ctx))
+                Err<Rejection> { error }:
+                  ctx.reject(error)
   )
 
 pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
@@ -1901,6 +3494,140 @@ pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
 pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession, limit: BodyLimit },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        match(body.extract_body(ctx.request))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<I> { value: input }:
+            match(default_optional_session_as<S>(ctx.request))
+              Ok<Option<S>> { value: session }:
+                to_response<R>(handler(input, session))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession, limit: BodyLimit },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        match(body.extract_body(ctx.request))
+          Err<Rejection> { error }:
+            ctx.reject(error)
+          Ok<I> { value: input }:
+            match(default_optional_session_as<S>(ctx.request))
+              Ok<Option<S>> { value: session }:
+                to_response<R>(handler(input, session, ctx))
+              Err<Rejection> { error }:
+                ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(default_optional_session_as<S>(ctx.request))
+            Ok<Option<S>> { value: session }:
+              to_response<R>(handler(input, session))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(body.extract_body(ctx.request))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<I> { value: input }:
+          match(default_optional_session_as<S>(ctx.request))
+            Ok<Option<S>> { value: session }:
+              to_response<R>(handler(input, session, ctx))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        run_with_timeout(timeout) do:
+          match(body.extract_body(ctx.request))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+            Ok<I> { value: input }:
+              match(default_optional_session_as<S>(ctx.request))
+                Ok<Option<S>> { value: session }:
+                  to_response<R>(handler(input, session))
+                Err<Rejection> { error }:
+                  ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, body: P, auth: OptionalSession, limit: BodyLimit, timeout: TimeoutPolicy },
+  handler: fn(I, Option<S>, Context) : (open) -> R
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(body_limit_rejection(ctx, limit))
+      Some<Response> { value }:
+        value
+      None:
+        run_with_timeout(timeout) do:
+          match(body.extract_body(ctx.request))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+            Ok<I> { value: input }:
+              match(default_optional_session_as<S>(ctx.request))
+                Ok<Option<S>> { value: session }:
+                  to_response<R>(handler(input, session, ctx))
+                Err<Rejection> { error }:
+                  ctx.reject(error)
+  )
+
+pub fn route<I, P: FromBody<I>, S, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
   { method: Method, body: P, auth: OptionalSession },
   handler: fn(I, Option<S>, Context) : (open) -> R
 ) -> AppBuild
@@ -2005,6 +3732,17 @@ pub fn route_unit<R: IntoResponse<R>>(
     to_response<R>(handler())
   )
 
+pub fn route_unit<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn() : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (_ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      to_response<R>(handler())
+  )
+
 pub fn route_unit(
   app: AppBuild,
   path: StringSlice,
@@ -2087,6 +3825,59 @@ pub fn route_context<R: IntoResponse<R>>(
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
     to_response<R>(handler(ctx))
+  )
+
+pub fn route_context_dto<R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    json_dto<R>(handler(ctx))
+  )
+
+pub fn route_context_dto<R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      json_dto<R>(handler(ctx))
+  )
+
+pub fn route_context_result_dto<T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    result_dto_json<T, E>(handler(ctx))
+  )
+
+pub fn route_context_result_dto<T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      result_dto_json<T, E>(handler(ctx))
+  )
+
+pub fn route_context<R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      to_response<R>(handler(ctx))
   )
 
 pub fn route_context(
@@ -2279,6 +4070,64 @@ pub fn route_auth<S, A: FromAuth<S>, R: IntoResponse<R>>(
         ctx.reject(error)
   )
 
+pub fn route_auth_dto<S, A: FromAuth<S>, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: A },
+  handler: fn(S) : (open) -> T
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(auth.extract_auth(ctx.request))
+      Ok<S> { value }:
+        json_dto<T>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth_dto<S, A: FromAuth<S>, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: A, timeout: TimeoutPolicy },
+  handler: fn(S) : (open) -> T
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(auth.extract_auth(ctx.request))
+        Ok<S> { value }:
+          json_dto<T>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_auth_result_dto<S, A: FromAuth<S>, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: A },
+  handler: fn(S) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(auth.extract_auth(ctx.request))
+      Ok<S> { value }:
+        result_dto_json<T, E>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth_result_dto<S, A: FromAuth<S>, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: A, timeout: TimeoutPolicy },
+  handler: fn(S) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(auth.extract_auth(ctx.request))
+        Ok<S> { value }:
+          result_dto_json<T, E>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
 pub fn route_auth<S, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -2309,6 +4158,68 @@ pub fn route_auth<S, R: IntoResponse<R>>(
         ctx.reject(error)
   )
 
+pub fn route_auth_dto<S, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: RequiredSession },
+  handler: fn(S) : (open) -> T
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_required_session_as<S>(ctx.request))
+      Ok<S> { value }:
+        json_dto<T>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth_dto<S, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(S) : (open) -> T
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(default_required_session_as<S>(ctx.request))
+        Ok<S> { value }:
+          json_dto<T>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_auth_result_dto<S, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: RequiredSession },
+  handler: fn(S) : (open) -> Result<T, E>
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_required_session_as<S>(ctx.request))
+      Ok<S> { value }:
+        result_dto_json<T, E>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth_result_dto<S, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: RequiredSession, timeout: TimeoutPolicy },
+  handler: fn(S) : (open) -> Result<T, E>
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(default_required_session_as<S>(ctx.request))
+        Ok<S> { value }:
+          result_dto_json<T, E>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
 pub fn route_auth<S, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -2322,6 +4233,68 @@ pub fn route_auth<S, R: IntoResponse<R>>(
         to_response<R>(handler(value))
       Err<Rejection> { error }:
         ctx.reject(error)
+  )
+
+pub fn route_auth_dto<S, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: OptionalSession },
+  handler: fn(Option<S>) : (open) -> T
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_optional_session_as<S>(ctx.request))
+      Ok<Option<S>> { value }:
+        json_dto<T>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth_dto<S, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(Option<S>) : (open) -> T
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(default_optional_session_as<S>(ctx.request))
+        Ok<Option<S>> { value }:
+          json_dto<T>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_auth_result_dto<S, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: OptionalSession },
+  handler: fn(Option<S>) : (open) -> Result<T, E>
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(default_optional_session_as<S>(ctx.request))
+      Ok<Option<S>> { value }:
+        result_dto_json<T, E>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_auth_result_dto<S, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, auth: OptionalSession, timeout: TimeoutPolicy },
+  handler: fn(Option<S>) : (open) -> Result<T, E>
+) -> AppBuild
+  auth
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(default_optional_session_as<S>(ctx.request))
+        Ok<Option<S>> { value }:
+          result_dto_json<T, E>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
   )
 
 pub fn route_auth<S, R: IntoResponse<R>>(
@@ -2407,6 +4380,79 @@ pub fn route_query_context<Q, R: IntoResponse<R>>(
         to_response<R>(handler(value, ctx))
       Err<Rejection> { error }:
         ctx.reject(error)
+  )
+
+pub fn route_query_context<Q, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(Q, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_query<Q>(query_from(ctx.request)))
+        Ok<Q> { value }:
+          to_response<R>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_query_context_dto<Q, R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(query_from(ctx.request)))
+      Ok<Q> { value }:
+        json_dto<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_query_context_dto<Q, R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(Q, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_query<Q>(query_from(ctx.request)))
+        Ok<Q> { value }:
+          json_dto<R>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_query_context_result_dto<Q, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(Q, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_query<Q>(query_from(ctx.request)))
+      Ok<Q> { value }:
+        result_dto_json<T, E>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_query_context_result_dto<Q, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(Q, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_query<Q>(query_from(ctx.request)))
+        Ok<Q> { value }:
+          result_dto_json<T, E>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
   )
 
 pub fn route_query_context<Q, T: IntoResponse<T>, E: IntoResponse<E>>(
@@ -2511,6 +4557,21 @@ pub fn route_headers<H, R: IntoResponse<R>>(
         ctx.reject(error)
   )
 
+pub fn route_headers<H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(H) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_headers<H>(ctx.request.headers))
+        Ok<H> { value }:
+          to_response<R>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
 pub fn route_headers_context<H>(
   app: AppBuild,
   path: StringSlice,
@@ -2595,6 +4656,21 @@ pub fn route_headers_context<H, R: IntoResponse<R>>(
         ctx.reject(error)
   )
 
+pub fn route_headers_context<H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(H, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_headers<H>(ctx.request.headers))
+        Ok<H> { value }:
+          to_response<R>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
 pub fn route_headers_context<H, T: IntoResponse<T>, E: IntoResponse<E>>(
   app: AppBuild,
   path: StringSlice,
@@ -2627,6 +4703,222 @@ pub fn route_headers_context<H, T: IntoResponse<T>>(
         ctx.reject(error)
   )
 
+pub fn route_cookies_context<C>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(C, Context) : (open) -> Response
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_cookies<C>(cookies_from(ctx.request)))
+      Ok<C> { value }:
+        handler(value, ctx)
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies_context<C>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(C, Context) : (open) -> JsonValue
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_cookies<C>(cookies_from(ctx.request)))
+      Ok<C> { value }:
+        json_value(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies_context<C>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(C, Context) : (open) -> String
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_cookies<C>(cookies_from(ctx.request)))
+      Ok<C> { value }:
+        to_response(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies_context<C, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(C, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_cookies<C>(cookies_from(ctx.request)))
+      Ok<C> { value }:
+        to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies<C, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(C) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_cookies<C>(cookies_from(ctx.request)))
+      Ok<C> { value }:
+        to_response<R>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies<C, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(C) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_cookies<C>(cookies_from(ctx.request)))
+        Ok<C> { value }:
+          to_response<R>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_cookies_context<C, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(C, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_cookies<C>(cookies_from(ctx.request)))
+        Ok<C> { value }:
+          to_response<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies_dto<C, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(C) : (open) -> T
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_cookies<C>(cookies_from(ctx.request)))
+      Ok<C> { value }:
+        json_dto<T>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies_dto<C, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(C) : (open) -> T
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_cookies<C>(cookies_from(ctx.request)))
+        Ok<C> { value }:
+          json_dto<T>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_cookies_context_dto<C, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(C, Context) : (open) -> T
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_cookies<C>(cookies_from(ctx.request)))
+      Ok<C> { value }:
+        json_dto<T>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies_context_dto<C, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(C, Context) : (open) -> T
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_cookies<C>(cookies_from(ctx.request)))
+        Ok<C> { value }:
+          json_dto<T>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies_result_dto<C, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(C) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_cookies<C>(cookies_from(ctx.request)))
+      Ok<C> { value }:
+        result_dto_json<T, E>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies_result_dto<C, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(C) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_cookies<C>(cookies_from(ctx.request)))
+        Ok<C> { value }:
+          result_dto_json<T, E>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_cookies_context_result_dto<C, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(C, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_cookies<C>(cookies_from(ctx.request)))
+      Ok<C> { value }:
+        result_dto_json<T, E>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_cookies_context_result_dto<C, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(C, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_cookies<C>(cookies_from(ctx.request)))
+        Ok<C> { value }:
+          result_dto_json<T, E>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
 pub fn route_params<P, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -2639,6 +4931,79 @@ pub fn route_params<P, R: IntoResponse<R>>(
         to_response<R>(handler(value))
       Err<Rejection> { error }:
         ctx.reject(error)
+  )
+
+pub fn route_params<P, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_params<P>(ctx.route.params))
+        Ok<P> { value }:
+          to_response<R>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_params_dto<P, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P) : (open) -> T
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        json_dto<T>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_dto<P, T>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P) : (open) -> T
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_params<P>(ctx.route.params))
+        Ok<P> { value }:
+          json_dto<T>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_params_result_dto<P, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        result_dto_json<T, E>(handler(value))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_result_dto<P, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_params<P>(ctx.route.params))
+        Ok<P> { value }:
+          result_dto_json<T, E>(handler(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
   )
 
 pub fn route_params<P>(
@@ -2831,6 +5196,79 @@ pub fn route_params_context<P, R: IntoResponse<R>>(
         ctx.reject(error)
   )
 
+pub fn route_params_context<P, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_params<P>(ctx.route.params))
+        Ok<P> { value }:
+          to_response<R>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_params_context_dto<P, R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        json_dto<R>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_context_dto<P, R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_params<P>(ctx.route.params))
+        Ok<P> { value }:
+          json_dto<R>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
+pub fn route_params_context_result_dto<P, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    match(extract_params<P>(ctx.route.params))
+      Ok<P> { value }:
+        result_dto_json<T, E>(handler(value, ctx))
+      Err<Rejection> { error }:
+        ctx.reject(error)
+  )
+
+pub fn route_params_context_result_dto<P, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_params<P>(ctx.route.params))
+        Ok<P> { value }:
+          result_dto_json<T, E>(handler(value, ctx))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+  )
+
 pub fn route_params_query<P, Q, R: IntoResponse<R>>(
   app: AppBuild,
   path: StringSlice,
@@ -2838,9 +5276,66 @@ pub fn route_params_query<P, Q, R: IntoResponse<R>>(
   handler: fn(P, Q) : (open) -> R
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    to_response<R>(handler(params, query))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+      to_response<R>(handler(params, query))
+  )
+
+pub fn route_params_query<P, Q, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Q) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        to_response<R>(handler(params, query))
+  )
+
+pub fn route_params_query_dto<P, Q, R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        json_dto<R>(handler(params, query))
+  )
+
+pub fn route_params_query_dto<P, Q, R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Q) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      with_params_query<P, Q>(ctx) do(params: P, query: Q):
+          json_dto<R>(handler(params, query))
+  )
+
+pub fn route_params_query_result_dto<P, Q, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        result_dto_json<T, E>(handler(params, query))
+  )
+
+pub fn route_params_query_result_dto<P, Q, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Q) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      with_params_query<P, Q>(ctx) do(params: P, query: Q):
+          result_dto_json<T, E>(handler(params, query))
   )
 
 pub fn route_params_query<P, Q>(
@@ -2850,9 +5345,8 @@ pub fn route_params_query<P, Q>(
   handler: fn(P, Q) : (open) -> JsonValue
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    json_value(handler(params, query))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        json_value(handler(params, query))
   )
 
 pub fn route_params_query<P, Q>(
@@ -2862,9 +5356,8 @@ pub fn route_params_query<P, Q>(
   handler: fn(P, Q) : (open) -> (Status, String)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    to_response(handler(params, query))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        to_response(handler(params, query))
   )
 
 pub fn route_params_query<P, Q>(
@@ -2874,9 +5367,8 @@ pub fn route_params_query<P, Q>(
   handler: fn(P, Q) : (open) -> (Status, Bytes)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    to_response(handler(params, query))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        to_response(handler(params, query))
   )
 
 pub fn route_params_query<P, Q>(
@@ -2886,9 +5378,8 @@ pub fn route_params_query<P, Q>(
   handler: fn(P, Q) : (open) -> (Status, JsonValue)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    to_response(handler(params, query))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        to_response(handler(params, query))
   )
 
 pub fn route_params_query<P, Q, T: IntoResponse<T>, E: IntoResponse<E>>(
@@ -2898,9 +5389,8 @@ pub fn route_params_query<P, Q, T: IntoResponse<T>, E: IntoResponse<E>>(
   handler: fn(P, Q) : (open) -> Result<T, E>
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    to_response<T, E>(handler(params, query))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+      to_response<T, E>(handler(params, query))
   )
 
 pub fn route_params_query<P, Q, T: IntoResponse<T>>(
@@ -2910,13 +5400,12 @@ pub fn route_params_query<P, Q, T: IntoResponse<T>>(
   handler: fn(P, Q) : (open) -> Option<T>
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    match(handler(params, query))
-      Some<T> { value }:
-        to_response<T>(value)
-      None:
-        Response::not_found().empty()
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        match(handler(params, query))
+          Some<T> { value }:
+            to_response<T>(value)
+          None:
+            Response::not_found().empty()
   )
 
 pub fn route_params_query_context<P, Q>(
@@ -2926,9 +5415,8 @@ pub fn route_params_query_context<P, Q>(
   handler: fn(P, Q, Context) : (open) -> JsonValue
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    json_value(handler(params, query, ctx))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        json_value(handler(params, query, ctx))
   )
 
 pub fn route_params_query_context<P, Q>(
@@ -2938,9 +5426,8 @@ pub fn route_params_query_context<P, Q>(
   handler: fn(P, Q, Context) : (open) -> (Status, String)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    to_response(handler(params, query, ctx))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        to_response(handler(params, query, ctx))
   )
 
 pub fn route_params_query_context<P, Q>(
@@ -2950,9 +5437,8 @@ pub fn route_params_query_context<P, Q>(
   handler: fn(P, Q, Context) : (open) -> (Status, Bytes)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    to_response(handler(params, query, ctx))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        to_response(handler(params, query, ctx))
   )
 
 pub fn route_params_query_context<P, Q>(
@@ -2962,9 +5448,8 @@ pub fn route_params_query_context<P, Q>(
   handler: fn(P, Q, Context) : (open) -> (Status, JsonValue)
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    to_response(handler(params, query, ctx))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        to_response(handler(params, query, ctx))
   )
 
 pub fn route_params_query_context<P, Q, R: IntoResponse<R>>(
@@ -2974,9 +5459,66 @@ pub fn route_params_query_context<P, Q, R: IntoResponse<R>>(
   handler: fn(P, Q, Context) : (open) -> R
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    to_response<R>(handler(params, query, ctx))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        to_response<R>(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context<P, Q, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Q, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      with_params_query<P, Q>(ctx) do(params: P, query: Q):
+          to_response<R>(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context_dto<P, Q, R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        json_dto<R>(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context_dto<P, Q, R>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Q, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      with_params_query<P, Q>(ctx) do(params: P, query: Q):
+          json_dto<R>(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context_result_dto<P, Q, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method },
+  handler: fn(P, Q, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        result_dto_json<T, E>(handler(params, query, ctx))
+  )
+
+pub fn route_params_query_context_result_dto<P, Q, T, E: IntoResponse<E>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Q, Context) : (open) -> Result<T, E>
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      with_params_query<P, Q>(ctx) do(params: P, query: Q):
+          result_dto_json<T, E>(handler(params, query, ctx))
   )
 
 pub fn route_params_query_context<P, Q, T: IntoResponse<T>, E: IntoResponse<E>>(
@@ -2986,9 +5528,8 @@ pub fn route_params_query_context<P, Q, T: IntoResponse<T>, E: IntoResponse<E>>(
   handler: fn(P, Q, Context) : (open) -> Result<T, E>
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    to_response<T, E>(handler(params, query, ctx))
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        to_response<T, E>(handler(params, query, ctx))
   )
 
 pub fn route_params_query_context<P, Q, T: IntoResponse<T>>(
@@ -2998,13 +5539,12 @@ pub fn route_params_query_context<P, Q, T: IntoResponse<T>>(
   handler: fn(P, Q, Context) : (open) -> Option<T>
 ) -> AppBuild
   app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
-    let params = decode_params<P>(ctx.route.params)
-    let query = decode_query<Q>(ctx.query())
-    match(handler(params, query, ctx))
-      Some<T> { value }:
-        to_response<T>(value)
-      None:
-        Response::not_found().empty()
+    with_params_query<P, Q>(ctx) do(params: P, query: Q):
+        match(handler(params, query, ctx))
+          Some<T> { value }:
+            to_response<T>(value)
+          None:
+            Response::not_found().empty()
   )
 
 pub fn route_params_headers<P, H, R: IntoResponse<R>>(
@@ -3023,6 +5563,25 @@ pub fn route_params_headers<P, H, R: IntoResponse<R>>(
             to_response<R>(handler(params, headers))
           Err<Rejection> { error }:
             ctx.reject(error)
+  )
+
+pub fn route_params_headers<P, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, H) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_params<P>(ctx.route.params))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<P> { value: params }:
+          match(extract_headers<H>(ctx.request.headers))
+            Ok<H> { value: headers }:
+              to_response<R>(handler(params, headers))
+            Err<Rejection> { error }:
+              ctx.reject(error)
   )
 
 pub fn route_params_headers<P, H>(
@@ -3113,6 +5672,25 @@ pub fn route_params_headers_context<P, H, R: IntoResponse<R>>(
             to_response<R>(handler(params, headers, ctx))
           Err<Rejection> { error }:
             ctx.reject(error)
+  )
+
+pub fn route_params_headers_context<P, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, H, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_params<P>(ctx.route.params))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<P> { value: params }:
+          match(extract_headers<H>(ctx.request.headers))
+            Ok<H> { value: headers }:
+              to_response<R>(handler(params, headers, ctx))
+            Err<Rejection> { error }:
+              ctx.reject(error)
   )
 
 pub fn route_params_headers_context<P, H>(
@@ -3245,6 +5823,25 @@ pub fn route_query_headers<Q, H, R: IntoResponse<R>>(
             ctx.reject(error)
   )
 
+pub fn route_query_headers<Q, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(Q, H) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_query<Q>(ctx.query()))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<Q> { value: query }:
+          match(extract_headers<H>(ctx.request.headers))
+            Ok<H> { value: headers }:
+              to_response<R>(handler(query, headers))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+  )
+
 pub fn route_query_headers<Q, H>(
   app: AppBuild,
   path: StringSlice,
@@ -3333,6 +5930,25 @@ pub fn route_query_headers_context<Q, H, R: IntoResponse<R>>(
             to_response<R>(handler(query, headers, ctx))
           Err<Rejection> { error }:
             ctx.reject(error)
+  )
+
+pub fn route_query_headers_context<Q, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(Q, H, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_query<Q>(ctx.query()))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<Q> { value: query }:
+          match(extract_headers<H>(ctx.request.headers))
+            Ok<H> { value: headers }:
+              to_response<R>(handler(query, headers, ctx))
+            Err<Rejection> { error }:
+              ctx.reject(error)
   )
 
 pub fn route_query_headers_context<Q, H>(
@@ -3467,6 +6083,29 @@ pub fn route_params_query_headers<P, Q, H, R: IntoResponse<R>>(
                 to_response<R>(handler(params, query, headers))
               Err<Rejection> { error }:
                 ctx.reject(error)
+  )
+
+pub fn route_params_query_headers<P, Q, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Q, H) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_params<P>(ctx.route.params))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<P> { value: params }:
+          match(extract_query<Q>(ctx.query()))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+            Ok<Q> { value: query }:
+              match(extract_headers<H>(ctx.request.headers))
+                Ok<H> { value: headers }:
+                  to_response<R>(handler(params, query, headers))
+                Err<Rejection> { error }:
+                  ctx.reject(error)
   )
 
 pub fn route_params_query_headers<P, Q, H>(
@@ -3687,6 +6326,29 @@ pub fn route_params_query_headers_context<P, Q, H, R: IntoResponse<R>>(
                 to_response<R>(handler(params, query, headers, ctx))
               Err<Rejection> { error }:
                 ctx.reject(error)
+  )
+
+pub fn route_params_query_headers_context<P, Q, H, R: IntoResponse<R>>(
+  app: AppBuild,
+  path: StringSlice,
+  { method: Method, timeout: TimeoutPolicy },
+  handler: fn(P, Q, H, Context) : (open) -> R
+) -> AppBuild
+  app.route_context(path, method: method, handler: (ctx: Context) -> Response =>
+    run_with_timeout(timeout) do:
+      match(extract_params<P>(ctx.route.params))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+        Ok<P> { value: params }:
+          match(extract_query<Q>(ctx.query()))
+            Err<Rejection> { error }:
+              ctx.reject(error)
+            Ok<Q> { value: query }:
+              match(extract_headers<H>(ctx.request.headers))
+                Ok<H> { value: headers }:
+                  to_response<R>(handler(params, query, headers, ctx))
+                Err<Rejection> { error }:
+                  ctx.reject(error)
   )
 
 pub fn route_params_query_headers_context<P, Q, H, T: IntoResponse<T>, E: IntoResponse<E>>(

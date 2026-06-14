@@ -221,6 +221,77 @@ pub fn method_body_route_probe() -> i32
     await expect(result.run<number>({ entryName: "method_body_route_probe" })).resolves.toBe(200);
   });
 
+  it("cancels route handlers that exceed timeout policies", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: `
+use pkg::web::{
+  Body,
+  Context,
+  Headers,
+  IncomingRequest,
+  Method,
+  Response,
+  app,
+  route_context,
+  timeout_millis
+}
+use std::number::cast::self as cast
+use std::optional::types::all
+use std::string::type::String
+use std::task::self as task
+use std::time::self as time
+use std::time::{ Duration, Time }
+
+fn request(method: Method, path: String) -> IncomingRequest
+  IncomingRequest {
+    method: method,
+    path: path,
+    query: None {},
+    headers: Headers::empty(),
+    body: Body::empty()
+  }
+
+fn response_text(response: Response) -> String
+  match(response.text())
+    Ok<String> { value }:
+      value
+    Err:
+      "error".as_slice().to_string()
+
+pub fn timeout_route_probe(): (task::TaskRuntime, Time) -> i32
+  let built = route_context(
+    app(),
+    "/slow".as_slice(),
+    method: Method::Get {},
+    timeout: timeout_millis(1)
+  ) do(_ctx: Context):
+    let _ = time::sleep(Duration::from_millis(cast::to_i64(20)))
+    Response::ok().text("slow".as_slice())
+
+  let response = built.handle(request(Method::Get {}, "/slow".as_slice().to_string()))
+  if response.status.code() != 504:
+    return response.status.code()
+  if not response_text(response).equals("route timed out"):
+    return -40
+  response.status.code()
+`,
+        roots: {
+          src: fixtureRoot,
+          pkgDirs: [path.join(repoRoot, "packages")],
+        },
+      }),
+    );
+
+    await expect(
+      result.run<number>({
+        entryName: "timeout_route_probe",
+        defaultAdapters: true,
+      }),
+    ).resolves.toBe(504);
+  });
+
   it("converts responses from free get helpers", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(

@@ -71,6 +71,28 @@ export type CompileFailureResult = {
 
 export type CompileResult = CompileSuccessResult | CompileFailureResult;
 
+export type ServeWebAppOptions = CompileOptions & {
+  port: number;
+  host?: string;
+  entryName?: string;
+  readinessTimeoutMs?: number;
+  run?: Omit<RunOptions, "wasm" | "entryName">;
+};
+
+export type ServeWebAppSuccessResult = {
+  success: true;
+  result: CompileSuccessResult;
+  host: string;
+  port: number;
+  url: string;
+  ready: Promise<void>;
+  closed: Promise<unknown>;
+  running: Promise<unknown>;
+  close: (reason?: unknown) => Promise<unknown>;
+};
+
+export type ServeWebAppResult = ServeWebAppSuccessResult | CompileFailureResult;
+
 export type EffectsInfo = {
   table: HostProtocolTable;
   findUniqueOpByLabelSuffix: (
@@ -157,4 +179,5 @@ export type TestRunSummary = {
 export type VoydSdk = {
   compile: (opts: CompileOptions) => Promise<CompileResult>;
   run: <T = unknown>(opts: RunOptions) => Promise<T>;
+  serveWebApp: (opts: ServeWebAppOptions) => Promise<ServeWebAppResult>;
 };

@@ -2,6 +2,7 @@ import type {
   EffectContinuation,
   EffectContinuationCall,
   EffectContinuationKind,
+  EffectResourceCleanup,
 } from "../protocol/types.js";
 
 const CONTINUATION_CALL_BRAND = Symbol.for("voyd.effect.continuation.call");
@@ -22,10 +23,15 @@ const createCall = (
   value,
 });
 
-export const createEffectContinuation = (): EffectContinuation => ({
+export const createEffectContinuation = ({
+  registerResourceCleanup,
+}: {
+  registerResourceCleanup?: (cleanup: EffectResourceCleanup) => void;
+} = {}): EffectContinuation => ({
   resume: (...args) => createCall("resume", valueFromArgs(args)),
   tail: (...args) => createCall("tail", valueFromArgs(args)),
   end: (value) => createCall("end", value),
+  ...(registerResourceCleanup ? { registerResourceCleanup } : {}),
 });
 
 export const isEffectContinuationCall = (

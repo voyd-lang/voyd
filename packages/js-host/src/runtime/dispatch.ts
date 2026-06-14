@@ -1,5 +1,8 @@
 import { decode, encode } from "@msgpack/msgpack";
-import type { EffectHandler } from "../protocol/types.js";
+import type {
+  EffectHandler,
+  EffectResourceCleanup,
+} from "../protocol/types.js";
 import type { ParsedEffectTable } from "../protocol/table.js";
 import {
   resolveParsedEffectOp,
@@ -110,6 +113,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   bufferPtr,
   bufferSize,
   shouldContinue = () => true,
+  registerResourceCleanup,
   annotateTrap,
   fallbackFunctionName,
 }: {
@@ -124,6 +128,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   bufferPtr: number;
   bufferSize: number;
   shouldContinue?: () => boolean;
+  registerResourceCleanup?: (cleanup: EffectResourceCleanup) => void;
   annotateTrap?: (error: unknown, opts: {
     effect?: VoydRuntimeEffectContext;
     transition?: VoydRuntimeTransitionContext;
@@ -193,7 +198,7 @@ export const continueEffectLoopStep = async <T = unknown>({
         `Unhandled effect ${opEntry.label} (${resumeKindName(opEntry.resumeKind)})`
       );
     }
-    const continuation = createEffectContinuation();
+    const continuation = createEffectContinuation({ registerResourceCleanup });
     const handlerResult = await handler(
       continuation,
       ...(decodedEffect.args ?? [])

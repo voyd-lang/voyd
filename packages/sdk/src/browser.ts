@@ -7,7 +7,13 @@ import {
   createUnexpectedDiagnostic,
   diagnosticsFromUnknownError,
 } from "./shared/diagnostics.js";
-import type { CompileOptions, CompileResult, VoydSdk } from "./shared/types.js";
+import type {
+  CompileOptions,
+  CompileResult,
+  ServeWebAppOptions,
+  ServeWebAppResult,
+  VoydSdk,
+} from "./shared/types.js";
 import {
   browserParseModule,
   compile,
@@ -22,7 +28,22 @@ import {
 export const createSdk = (): VoydSdk => ({
   compile: compileSdk,
   run: runWithHandlers,
+  serveWebApp,
 });
+
+export const serveWebApp = async (
+  options: ServeWebAppOptions,
+): Promise<ServeWebAppResult> => {
+  return {
+    success: false,
+    diagnostics: [
+      createUnexpectedDiagnostic({
+        message: "serveWebApp is only supported by the Node SDK",
+        file: options.entryPath ?? "index.voyd",
+      }),
+    ],
+  };
+};
 
 const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
   const fallbackFile = options.entryPath ?? "index.voyd";
@@ -122,6 +143,9 @@ export type {
   HostProtocolTable,
   ModuleRoots,
   RunOptions,
+  ServeWebAppOptions,
+  ServeWebAppResult,
+  ServeWebAppSuccessResult,
   SignatureHash,
   TestCase,
   TestCollection,
