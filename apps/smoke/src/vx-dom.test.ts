@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 import { createVoydHost } from "@voyd-lang/sdk/js-host";
 import {
@@ -13,6 +13,10 @@ import {
 
 const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
 const siteExampleRoot = path.resolve(import.meta.dirname, "../../site/examples");
+const miniWikipediaRoot = path.resolve(
+  import.meta.dirname,
+  "../../../examples/mini-wikipedia",
+);
 const typedCounterEntryPath = path.join(fixtureRoot, "vx-typed-counter.voyd");
 const asyncTaskCommandEntryPath = path.join(
   fixtureRoot,
@@ -209,6 +213,106 @@ describe("smoke: compiled VX DOM rendering", () => {
     mounted.dispose();
     expect(container.innerHTML).toBe("");
   });
+
+  it("runs the mini-wikipedia browser edit, save, and reload flow", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        entryPath: path.join(miniWikipediaRoot, "src/client.voyd"),
+        roots: {
+          src: path.join(miniWikipediaRoot, "src"),
+          pkgDirs: [path.resolve(import.meta.dirname, "../../../packages")],
+        },
+      }),
+    );
+    const savedBodies = new Map([["home", "# Mini Voydpedia\n\nSaved body."]]);
+    let saveStatus = 200;
+    const fetchSpy = vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation(async (input, init) => {
+        const request = normalizeFetchRequest(input, init);
+        if (request.method === "POST" && request.url.endsWith("/wiki/home/body")) {
+          if (saveStatus >= 200 && saveStatus < 300) {
+            savedBodies.set("home", request.body);
+          }
+          return new Response(saveStatus >= 200 && saveStatus < 300 ? "saved" : "failed", {
+            status: saveStatus,
+          });
+        }
+        return new Response("not found", { status: 404 });
+      });
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 1024 * 1024,
+      defaultAdapters: { runtime: "browser" },
+    });
+
+    try {
+      const firstContainer = document.createElement("div");
+      const firstMounted = await mountVxApp({
+        container: firstContainer,
+        app: createVoydVxAppRuntime({
+          host,
+          initialModel: miniWikipediaModel(savedBodies.get("home")!),
+        }),
+      });
+
+      const editedBody = "# Mini Voydpedia\n\nOne two three";
+      const textarea = firstContainer.querySelector<HTMLTextAreaElement>("textarea")!;
+      textarea.value = editedBody;
+      textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+      await nextTurn();
+
+      expect(firstContainer.textContent).toContain("Unsaved changes");
+      expect(firstContainer.textContent).toContain("Words6");
+      expect(firstContainer.querySelector("pre")?.textContent).toBe(editedBody);
+
+      firstContainer.querySelector<HTMLButtonElement>('button[type="button"]:last-of-type')?.click();
+
+      await waitForTextContaining(firstContainer, "form", "Saving...");
+      expect(firstContainer.querySelector<HTMLButtonElement>('button[type="button"]:last-of-type')?.disabled).toBe(
+        true,
+      );
+
+      await waitForTextContaining(firstContainer, "form", "Client saves1");
+      expect(savedBodies.get("home")).toBe(editedBody);
+      expect(firstContainer.textContent).toContain("Client saves1");
+
+      saveStatus = 500;
+      const failedBody = "# Mini Voydpedia\n\nThis will not save";
+      textarea.value = failedBody;
+      textarea.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText" }));
+      await waitForTextContaining(firstContainer, "form", "Unsaved changes");
+
+      firstContainer.querySelector<HTMLButtonElement>('button[type="button"]:last-of-type')?.click();
+      await waitForTextContaining(firstContainer, "form", "Save failed");
+
+      expect(savedBodies.get("home")).toBe(editedBody);
+      expect(firstContainer.textContent).toContain("Save failed");
+
+      firstMounted.dispose();
+
+      const reloadedContainer = document.createElement("div");
+      const reloadedMounted = await mountVxApp({
+        container: reloadedContainer,
+        app: createVoydVxAppRuntime({
+          host,
+          initialModel: miniWikipediaModel(savedBodies.get("home")!),
+        }),
+      });
+
+      expect(reloadedContainer.querySelector<HTMLTextAreaElement>("textarea")?.value).toBe(
+        editedBody,
+      );
+      expect(reloadedContainer.textContent).toContain("Saved");
+
+      reloadedMounted.dispose();
+      expect(firstContainer.innerHTML).toBe("");
+      expect(reloadedContainer.innerHTML).toBe("");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  }, 120_000);
 
   it("marshals wide value models through typed VX export wrappers", async () => {
     const sdk = createSdk();
@@ -544,6 +648,44 @@ fn count_label(value: i32) -> String
 
 function nextTurn(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+type MiniWikipediaModel = {
+  slug: string;
+  title: string;
+  body: string;
+  saved_body: string;
+  state_kind: string;
+  state_message: string;
+  preview_open: boolean;
+  save_count: number;
+};
+
+function miniWikipediaModel(body: string): MiniWikipediaModel {
+  return {
+    slug: "home",
+    title: "Mini Voydpedia",
+    body,
+    saved_body: body,
+    state_kind: "saved",
+    state_message: "Saved",
+    preview_open: true,
+    save_count: 0,
+  };
+}
+
+function normalizeFetchRequest(
+  input: RequestInfo | URL,
+  init: RequestInit | undefined,
+): { url: string; method: string; body: string } {
+  const url = typeof input === "string" ? input : input instanceof URL ? input.href : input.url;
+  const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase();
+  const body = typeof init?.body === "string"
+    ? init.body
+    : init?.body instanceof Uint8Array
+      ? new TextDecoder().decode(init.body)
+      : "";
+  return { url, method, body };
 }
 
 function wait(ms: number): Promise<void> {

@@ -142,6 +142,10 @@ describe("runBootstrap", () => {
       const clientVoyd = await readFile(resolve(target, "src/client.voyd"), "utf8");
       expect(clientVoyd).toContain("pub fn app() -> Program<ClientArticle, Msg>");
       expect(clientVoyd).toContain("on_input={(event: InputEvent) -> Msg");
+      expect(clientVoyd).toContain("state_kind: String");
+      expect(clientVoyd).toContain("tasks::detach do:");
+      expect(clientVoyd).toContain("Cmd<Msg>::perform<i32>");
+      expect(clientVoyd).toContain("on_click={Msg::Save {}}");
       expect(clientVoyd).toContain("http_client::post");
 
       const css = await readFile(resolve(target, "src/style.css"), "utf8");
@@ -165,7 +169,8 @@ describe("runBootstrap", () => {
       expect(mainVoyd).toContain("write_file_string(article_path(slug), body)");
       expect(mainVoyd).toContain("fn is_slug_rune(rune: i32) -> bool");
       expect(mainVoyd).toContain("not is_slug_rune(rune)");
-      expect(mainVoyd).toContain("{article.status}");
+      expect(mainVoyd).toContain("state_kind: String");
+      expect(mainVoyd).toContain("{article.state_message}");
       expect(mainVoyd).not.toContain('>Saved</span>');
       expect(mainVoyd).toContain('href="/assets/client.css"');
       expect(mainVoyd).toContain("document<MsgPack, ClientArticle>");

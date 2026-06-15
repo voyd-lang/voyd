@@ -20,7 +20,8 @@ type Article = {
   slug: String,
   title: String,
   body: String,
-  status: String
+  state_kind: String,
+  state_message: String
 }
 
 obj ClientArticle {
@@ -28,7 +29,8 @@ obj ClientArticle {
   title: String,
   body: String,
   saved_body: String,
-  status: String,
+  state_kind: String,
+  state_message: String,
   preview_open: bool,
   save_count: i32
 }
@@ -93,14 +95,16 @@ fn load_article(slug: String): fs::Fs -> Article
         slug: clean,
         title: title_for(clean),
         body: value,
-        status: "Saved".as_slice().to_string()
+        state_kind: "saved".as_slice().to_string(),
+        state_message: "Saved".as_slice().to_string()
       }
     Err<IoError>:
       {
         slug: clean,
         title: title_for(clean),
         body: "# New article\n\nStart writing. Click Save to create the local file.".as_slice().to_string(),
-        status: "Draft".as_slice().to_string()
+        state_kind: "unsaved".as_slice().to_string(),
+        state_message: "Unsaved changes".as_slice().to_string()
       }
 
 fn article_slug_from(ctx: Context) -> String
@@ -120,7 +124,8 @@ fn save_article(body: String, slug: String): fs::Fs -> Response
         slug: slug,
         title: title_for(slug),
         body: body,
-        status: "Saved".as_slice().to_string()
+        state_kind: "saved".as_slice().to_string(),
+        state_message: "Saved".as_slice().to_string()
       })
     Err<IoError> { error }:
       Response::internal_server_error().text(error.message)
@@ -175,7 +180,8 @@ fn client_article(article: Article) -> ClientArticle
     title: article.title,
     body: article.body,
     saved_body: article.body,
-    status: article.status,
+    state_kind: article.state_kind,
+    state_message: article.state_message,
     preview_open: true,
     save_count: 0
   }
@@ -227,7 +233,7 @@ fn ArticleEditor({ article: Article }) -> Html<MsgPack>
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-3">
-        <span class="rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800">{article.status}</span>
+        <span class={status_class(article.state_kind)}>{article.state_message}</span>
         <button
           class="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
           type="submit"
@@ -259,3 +265,15 @@ fn nav_class(active: bool) -> String
 
 fn article_form_action(slug: String) -> String
   "/wiki/".as_slice().to_string().concat(slug)
+
+fn status_class(state_kind: String) -> String
+  if state_is(state_kind, "saved".as_slice().to_string()):
+    return "rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800".as_slice().to_string()
+  if state_is(state_kind, "saving".as_slice().to_string()):
+    return "rounded-full bg-sky-100 px-3 py-1 text-sm font-medium text-sky-800".as_slice().to_string()
+  if state_is(state_kind, "failed".as_slice().to_string()):
+    return "rounded-full bg-rose-100 px-3 py-1 text-sm font-medium text-rose-800".as_slice().to_string()
+  "rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800".as_slice().to_string()
+
+fn state_is(kind: String, expected: String) -> bool
+  kind.equals(expected)
