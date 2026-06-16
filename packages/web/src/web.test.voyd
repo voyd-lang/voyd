@@ -274,7 +274,7 @@ test "params query route extracts bool query DTOs":
 
 test "builder routes match methods static segments params and query":
   let web_app = app()
-    .get_unit("/ping".as_slice().to_string(), handler: () -> Response =>
+    .get("/ping".as_slice().to_string(), handler: () -> Response =>
       Response::ok().text("pong".as_slice())
     )
     .get("/users/:id".as_slice(), handler: (ctx: Context) -> Response =>
