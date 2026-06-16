@@ -23,7 +23,7 @@ use std::task
 pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
   serve(port: 3000) routes():
     get("/health") do:
-      "ok".as_slice().to_string()
+      "ok".to_string()
 ```
 
 Most applications should import `pkg::web::all`. Larger packages can import
@@ -53,14 +53,14 @@ use std::task
 pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
   serve(port: 3000, host: "127.0.0.1", shutdown_timeout: 250) routes():
     get("/health") do:
-      "ok".as_slice().to_string()
+      "ok".to_string()
 
     post("/events") do(ctx: Context):
       ctx
-      status(code: 202, reason: "Accepted".as_slice()).empty()
+      status(code: 202, reason: "Accepted").empty()
 
     route("/resource", method: Method::Delete {}) do:
-      Response::ok().text("deleted".as_slice())
+      Response::ok().text("deleted")
 ```
 
 Path segments that begin with `:` are path parameters.
@@ -93,7 +93,7 @@ serve(port: 3000) routes():
     Response::ok().text(params.id)
 
   get("/users/new") do:
-    Response::ok().text("new".as_slice())
+    Response::ok().text("new")
 ```
 
 Group related routes with a prefix. Middleware adopted before a group applies
@@ -104,7 +104,7 @@ group.
 serve(port: 3000) routes():
   group("/api") routes():
     get("/health") do:
-      "ok".as_slice().to_string()
+      "ok".to_string()
 
     group("/users") routes():
       get("/:id") do(params: UserParams):
@@ -118,13 +118,13 @@ framework converts supported values with `IntoResponse`.
 
 ```voyd
 get("/text") do:
-  "hello".as_slice().to_string()
+  "hello".to_string()
 
 get("/raw") do:
-  Response::ok().text("already a response".as_slice())
+  Response::ok().text("already a response")
 
 get("/created") do:
-  (Status::created(), "created".as_slice().to_string())
+  (Status::created(), "created".to_string())
 ```
 
 Useful return shapes include:
@@ -150,13 +150,13 @@ fn feature_flag() -> JsonValue
 
 fn find_name(id: String) -> Option<String>
   if id.equals("1") then:
-    Some<String> { value: "Ada".as_slice().to_string() }
+    Some<String> { value: "Ada".to_string() }
   else:
     None {}
 
 fn create_name(name: String) -> Result<(Status, String), Rejection>
   if name.is_empty() then:
-    Err<Rejection> { error: Rejection::bad_request("missing name".as_slice()) }
+    Err<Rejection> { error: Rejection::bad_request("missing name") }
   else:
     Ok<(Status, String)> { value: (Status::created(), name) }
 
@@ -187,9 +187,9 @@ headers, path values, query values, or explicit rejection handling.
 
 ```voyd
 get("/inspect/:id") do(ctx: Context):
-  let id = ctx.param("id".as_slice()) ?? "missing".as_slice().to_string()
-  let mode = ctx.query_value("mode".as_slice()) ?? "default".as_slice().to_string()
-  Response::ok().text(id.concat(":".as_slice()).concat(mode))
+  let id = ctx.param("id") ?? "missing".to_string()
+  let mode = ctx.query_value("mode") ?? "default".to_string()
+  Response::ok().text(id.concat(":").concat(mode))
 ```
 
 Common `Context` methods:
@@ -241,14 +241,14 @@ serve(port: 3000) routes():
     headers: RequestHeaders,
     ctx: Context
   ):
-    let request_id = ctx.header("x-request-id".as_slice()) ?? "missing".as_slice().to_string()
+    let request_id = ctx.header("x-request-id") ?? "missing".to_string()
     Response::ok().text(
       params.org
-        .concat(":".as_slice())
+        .concat(":")
         .concat(query.q)
-        .concat(":".as_slice())
+        .concat(":")
         .concat(headers.authorization)
-        .concat(":".as_slice())
+        .concat(":")
         .concat(request_id)
     )
 ```
@@ -262,14 +262,14 @@ shape cannot be inferred from a free route helper name.
 
 ```voyd
 let app = build_app do(base):
-  route_query_context(base, "/search".as_slice(), method: Method::Get {}) do(
+  route_query_context(base, "/search", method: Method::Get {}) do(
     query: SearchQuery,
     _ctx: Context
   ):
     if query.exact then:
-      Response::ok().text("exact".as_slice())
+      Response::ok().text("exact")
     else:
-      Response::ok().text("fuzzy".as_slice())
+      Response::ok().text("fuzzy")
 ```
 
 ## Request Bodies
@@ -344,13 +344,13 @@ obj Session {
 }
 
 fn extract_session(request: IncomingRequest) -> Result<Session, Rejection>
-  match(request.header("authorization".as_slice()))
+  match(request.header("authorization"))
     Some<String> { value }:
       Ok<Session> {
-        value: Session { user_id: value, role: "member".as_slice().to_string() }
+        value: Session { user_id: value, role: "member".to_string() }
       }
     None:
-      Err<Rejection> { error: Rejection::unauthorized("missing auth".as_slice()) }
+      Err<Rejection> { error: Rejection::unauthorized("missing auth") }
 
 serve(port: 3000) routes():
   get(
@@ -373,17 +373,17 @@ use std::optional::types::all
 use std::string::type::String
 
 fn require_request_id(ctx: Context, next: Next) -> Response
-  match(ctx.header("x-request-id".as_slice()))
+  match(ctx.header("x-request-id"))
     Some<String>:
       next(ctx)
     None:
-      Response::bad_request().text("missing request id".as_slice())
+      Response::bad_request().text("missing request id")
 
 serve(port: 3000) routes():
   adopt(require_request_id)
 
   get("/health") do:
-    "ok".as_slice().to_string()
+    "ok".to_string()
 ```
 
 Middleware is ordered by registration. Middleware adopted before a route applies
@@ -392,12 +392,12 @@ to that route. Middleware adopted later does not affect earlier routes.
 ```voyd
 serve(port: 3000) routes():
   get("/public") do:
-    "public".as_slice().to_string()
+    "public".to_string()
 
   adopt(require_request_id)
 
   get("/private") do:
-    "private".as_slice().to_string()
+    "private".to_string()
 ```
 
 The package includes `request_id_required`, which rejects requests that do not
@@ -424,11 +424,11 @@ Route matching failures and extractor failures are handled separately.
 serve(port: 3000) routes():
   not_found() do(ctx: Context):
     ctx
-    Response::not_found().text("custom 404".as_slice())
+    Response::not_found().text("custom 404")
 
   method_not_allowed() do(ctx: Context):
     ctx
-    Response::method_not_allowed().text("custom method".as_slice())
+    Response::method_not_allowed().text("custom method")
 
   on_rejection() do(rejection: Rejection, ctx: Context):
     ctx
@@ -444,7 +444,7 @@ should use the same response shape as extraction failures.
 ```voyd
 fn validate_name(input: CreateUser) -> Result<CreateUser, Rejection>
   if input.name.is_empty() then:
-    Err<Rejection> { error: Rejection::bad_request("name is required".as_slice()) }
+    Err<Rejection> { error: Rejection::bad_request("name is required") }
   else:
     Ok<CreateUser> { value: input }
 
@@ -466,10 +466,10 @@ when the file is missing or cannot be read.
 use pkg::web::all
 
 serve(port: 3000) routes():
-  adopt(serve_dir("./public".as_slice()))
+  adopt(serve_dir("./public"))
 
   get("/api/health") do:
-    "ok".as_slice().to_string()
+    "ok".to_string()
 ```
 
 Static files infer common content types for `.html`, `.css`, `.js`, `.json`,
@@ -482,9 +482,9 @@ Place it after API routes when the API should win.
 ```voyd
 serve(port: 3000) routes():
   get("/api/health") do:
-    "ok".as_slice().to_string()
+    "ok".to_string()
 
-  adopt(serve_dir("./public".as_slice()))
+  adopt(serve_dir("./public"))
 
   get("/:slug") do(params: PageParams):
     render_page(params.slug)
@@ -538,11 +538,11 @@ use pkg::web::all
 use std::http::Response
 
 fn health() -> Response
-  Response::ok().text("ok".as_slice())
+  Response::ok().text("ok")
 
 let web_app = app()
-  .get_unit("/health".as_slice(), handler: health)
-  .get("/debug".as_slice(), handler: (ctx: Context) -> Response =>
+  .get("/health", handler: health)
+  .get("/debug", handler: (ctx: Context) -> Response =>
     Response::ok().text(ctx.path())
   )
 ```
@@ -553,14 +553,14 @@ lambdas.
 
 ```voyd
 let web_app = app()
-  .get_params("/users/:id".as_slice(), handler: (params: UserParams) -> Response =>
+  .get_params("/users/:id", handler: (params: UserParams) -> Response =>
     Response::ok().text(params.id)
   )
   .get_params_query(
-    "/users/:id/activity".as_slice(),
+    "/users/:id/activity",
     handler: (params: UserParams, query: UserQuery) -> Response =>
-      let verbose = if query.verbose then: "true".as_slice().to_string() else: "false".as_slice().to_string()
-      Response::ok().text(params.id.concat(":".as_slice()).concat(verbose))
+      let verbose = if query.verbose then: "true".to_string() else: "false".to_string()
+      Response::ok().text(params.id.concat(":").concat(verbose))
   )
 ```
 
@@ -568,15 +568,15 @@ let web_app = app()
 
 ```voyd
 let web_app = build_app do(base):
-  let with_health = get_context(base, "/health".as_slice()) do(_ctx: Context):
-    Response::ok().text("ok".as_slice())
+  let with_health = get_context(base, "/health") do(_ctx: Context):
+    Response::ok().text("ok")
 
-  let with_item = get(with_health, "/items/:id".as_slice()) do(params: UserParams):
+  let with_item = get(with_health, "/items/:id") do(params: UserParams):
     Response::ok().text(params.id)
 
   post(
     with_item,
-    "/echo".as_slice(),
+    "/echo",
     body: text_body(),
     handler: (input: String) -> Response => Response::ok().text(input)
   )
@@ -590,11 +590,11 @@ use pkg::web::all
 use pkg::web::router
 
 let api = router::Router::init()
-  .get_unit("/health".as_slice(), handler: () -> Response =>
-    Response::ok().text("router".as_slice())
+  .get("/health", handler: () -> Response =>
+    Response::ok().text("router")
   )
 
-let web_app = app().mount("/api".as_slice(), api)
+let web_app = app().mount("/api", api)
 ```
 
 The package root reserves `pkg::web::router` for the module path, so there is no
@@ -615,7 +615,7 @@ use std::task
 pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
   serve(port: 3000) routes():
     get("/health") do:
-      "ok".as_slice().to_string()
+      "ok".to_string()
 ```
 
 Use `serve(app, port:)` or `serve_app(...)` when you already have an `App`.
@@ -628,8 +628,8 @@ use std::result::types::all
 use std::task
 
 fn make_app() -> App
-  app().get_unit("/health".as_slice(), handler: () -> Response =>
-    Response::ok().text("ok".as_slice())
+  app().get("/health", handler: () -> Response =>
+    Response::ok().text("ok")
   )
 
 pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
@@ -648,8 +648,8 @@ use std::task
 
 pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
   serve_build(port: 3000, host: "127.0.0.1") do(base):
-    get_unit(base, "/health".as_slice()) do:
-      "ok".as_slice().to_string()
+    get_context(base, "/health") do(_ctx: Context):
+      "ok".to_string()
 ```
 
 `serve` is backed by `std::http::server`, so the surrounding function must
