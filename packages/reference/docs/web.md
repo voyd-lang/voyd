@@ -23,7 +23,7 @@ use std::task
 pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
   serve(port: 3000) routes():
     get("/health") do:
-      "ok".to_string()
+      "ok"
 ```
 
 Most applications should import `pkg::web::all`. Larger packages can import
@@ -53,7 +53,7 @@ use std::task
 pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
   serve(port: 3000, host: "127.0.0.1", shutdown_timeout: 250) routes():
     get("/health") do:
-      "ok".to_string()
+      "ok"
 
     post("/events") do(ctx: Context):
       ctx
@@ -104,7 +104,7 @@ group.
 serve(port: 3000) routes():
   group("/api") routes():
     get("/health") do:
-      "ok".to_string()
+      "ok"
 
     group("/users") routes():
       get("/:id") do(params: UserParams):
@@ -118,13 +118,13 @@ framework converts supported values with `IntoResponse`.
 
 ```voyd
 get("/text") do:
-  "hello".to_string()
+  "hello"
 
 get("/raw") do:
   Response::ok().text("already a response")
 
 get("/created") do:
-  (Status::created(), "created".to_string())
+  (Status::created(), "created")
 ```
 
 Useful return shapes include:
@@ -150,7 +150,7 @@ fn feature_flag() -> JsonValue
 
 fn find_name(id: String) -> Option<String>
   if id.equals("1") then:
-    Some<String> { value: "Ada".to_string() }
+    Some<String> { value: "Ada" }
   else:
     None {}
 
@@ -187,8 +187,8 @@ headers, path values, query values, or explicit rejection handling.
 
 ```voyd
 get("/inspect/:id") do(ctx: Context):
-  let id = ctx.param("id") ?? "missing".to_string()
-  let mode = ctx.query_value("mode") ?? "default".to_string()
+  let id = ctx.param("id") ?? "missing"
+  let mode = ctx.query_value("mode") ?? "default"
   Response::ok().text(id.concat(":").concat(mode))
 ```
 
@@ -241,7 +241,7 @@ serve(port: 3000) routes():
     headers: RequestHeaders,
     ctx: Context
   ):
-    let request_id = ctx.header("x-request-id") ?? "missing".to_string()
+    let request_id = ctx.header("x-request-id") ?? "missing"
     Response::ok().text(
       params.org
         .concat(":")
@@ -347,7 +347,7 @@ fn extract_session(request: IncomingRequest) -> Result<Session, Rejection>
   match(request.header("authorization"))
     Some<String> { value }:
       Ok<Session> {
-        value: Session { user_id: value, role: "member".to_string() }
+        value: Session { user_id: value, role: "member" }
       }
     None:
       Err<Rejection> { error: Rejection::unauthorized("missing auth") }
@@ -383,7 +383,7 @@ serve(port: 3000) routes():
   adopt(require_request_id)
 
   get("/health") do:
-    "ok".to_string()
+    "ok"
 ```
 
 Middleware is ordered by registration. Middleware adopted before a route applies
@@ -392,12 +392,12 @@ to that route. Middleware adopted later does not affect earlier routes.
 ```voyd
 serve(port: 3000) routes():
   get("/public") do:
-    "public".to_string()
+    "public"
 
   adopt(require_request_id)
 
   get("/private") do:
-    "private".to_string()
+    "private"
 ```
 
 The package includes `request_id_required`, which rejects requests that do not
@@ -469,7 +469,7 @@ serve(port: 3000) routes():
   adopt(serve_dir("./public"))
 
   get("/api/health") do:
-    "ok".to_string()
+    "ok"
 ```
 
 Static files infer common content types for `.html`, `.css`, `.js`, `.json`,
@@ -482,7 +482,7 @@ Place it after API routes when the API should win.
 ```voyd
 serve(port: 3000) routes():
   get("/api/health") do:
-    "ok".to_string()
+    "ok"
 
   adopt(serve_dir("./public"))
 
@@ -559,7 +559,7 @@ let web_app = app()
   .get_params_query(
     "/users/:id/activity",
     handler: (params: UserParams, query: UserQuery) -> Response =>
-      let verbose = if query.verbose then: "true".to_string() else: "false".to_string()
+      let verbose = if query.verbose then: "true" else: "false"
       Response::ok().text(params.id.concat(":").concat(verbose))
   )
 ```
@@ -615,7 +615,7 @@ use std::task
 pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
   serve(port: 3000) routes():
     get("/health") do:
-      "ok".to_string()
+      "ok"
 ```
 
 Use `serve(app, port:)` or `serve_app(...)` when you already have an `App`.
@@ -649,7 +649,7 @@ use std::task
 pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
   serve_build(port: 3000, host: "127.0.0.1") do(base):
     get_context(base, "/health") do(_ctx: Context):
-      "ok".to_string()
+      "ok"
 ```
 
 `serve` is backed by `std::http::server`, so the surrounding function must
