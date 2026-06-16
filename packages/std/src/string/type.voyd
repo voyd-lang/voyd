@@ -414,6 +414,10 @@ impl StringSlice
 
     new_string_slice(self.source, start, end - start)
 
+  /// Returns a lowercase ASCII copy of this slice.
+  api fn lowered(self): () -> String
+    self.to_string().lowered()
+
   /// Parses this string as an `i32`.
   api fn parse_int(self, { radix?: i32 }): () -> Result<i32, ParseIntError>
     parse_i32_from_slice(self, radix: radix)

@@ -311,7 +311,7 @@ pub fn option_response_probe() -> i32
 
 pub fn router_export_probe() -> i32
   let api = router::Router::init()
-    .get_unit("/health".as_slice().to_string(), handler: () -> Response =>
+    .get("/health".as_slice().to_string(), handler: () -> Response =>
       Response::ok().text("router".as_slice())
     )
   let built = app().mount("/api".as_slice(), api)

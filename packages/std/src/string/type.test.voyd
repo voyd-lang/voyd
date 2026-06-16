@@ -298,6 +298,7 @@ test "string trim pairs":
 
 test "string case and replace pairs":
   assert("AbC".lowered().equals("abc"), eq: true)
+  assert("  AbC  ".trimmed().lowered().equals("abc"), eq: true)
   assert("AbC".uppered().equals("ABC"), eq: true)
   assert("banana".replaced(old: "na", with: "X").equals("baXX"), eq: true)
   assert(

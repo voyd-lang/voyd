@@ -81,10 +81,17 @@ impl ServerConfig
     ServerConfig {
       port: port,
       host: host,
-      max_body_bytes: max_body_bytes,
-      max_pending_requests: max_pending_requests,
-      response_timeout_millis: response_timeout_millis
+      max_body_bytes: rebox_optional_i32(max_body_bytes),
+      max_pending_requests: rebox_optional_i32(max_pending_requests),
+      response_timeout_millis: rebox_optional_i32(response_timeout_millis)
     }
+
+fn rebox_optional_i32(value: Option<i32>) -> Option<i32>
+  match(value)
+    Some<i32> { value }:
+      Some<i32> { value: value }
+    None:
+      None {}
 
 /// Starts a host HTTP server.
 pub fn listen(config: ServerConfig): HttpServer -> Result<Server, HostError>

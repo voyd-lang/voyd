@@ -94,7 +94,15 @@ type ListenerRecord = {
 };
 
 const mapHandlerIdsProperty = "__vxMapHandlerIds";
+const taskObserverProperty = Symbol.for("voyd.taskObserver");
 const listenerState = new WeakMap<Element, Map<string, ListenerRecord>>();
+
+type TaskRunOutcome =
+  | { kind: "value"; value: unknown }
+  | { kind: "failed"; error: Error }
+  | { kind: "cancelled"; reason?: unknown };
+
+type TaskObserver = (taskId: number) => Promise<TaskRunOutcome>;
 
 export function createBrowserVxRuntimeHost(
   overrides: VxRuntimeHostOptions = {},
@@ -104,6 +112,7 @@ export function createBrowserVxRuntimeHost(
       delay: runDelayCommand,
       focus: runFocusCommand,
       scroll_into_view: runScrollIntoViewCommand,
+      task: runTaskCommand,
       ...overrides.commands,
     },
     subscriptions: {
@@ -707,30 +716,40 @@ async function runCommands(
   input: unknown,
   host: VxRuntimeHostOptions | undefined,
   context: VxRuntimeExecutionContext,
+  taskObserver?: TaskObserver,
 ): Promise<void> {
   if (input === undefined || input === null) return;
   if (Array.isArray(input)) {
-    for (const child of input) await runCommands(child, host, context);
+    for (const child of input) await runCommands(child, host, context, taskObserver);
     return;
   }
   if (!isRuntimeEnvelope(input, "cmd")) return;
 
+  const nextTaskObserver = readTaskObserver(input) ?? taskObserver;
   if (input.kind === "none") return;
   if (input.kind === "message") {
     await context.dispatch(toVxMessage(input.value));
     return;
   }
   if (input.kind === "batch") {
-    await runCommands(input.children, host, context);
+    await runCommands(input.children, host, context, nextTaskObserver);
     return;
   }
   if (input.kind === "map") {
     const handlerId = readHandlerId(input);
     if (handlerId === undefined) return;
-    await runCommands(readMappedChild(input), host, mapExecutionContext(context, handlerId));
+    await runCommands(
+      readMappedChild(input),
+      host,
+      mapExecutionContext(context, handlerId),
+      nextTaskObserver,
+    );
     return;
   }
-  await host?.commands?.[input.kind]?.(input, context);
+  const command = nextTaskObserver
+    ? attachTaskObserver(input, nextTaskObserver)
+    : input;
+  await host?.commands?.[input.kind]?.(command, context);
 }
 
 function runDelayCommand(
@@ -744,6 +763,26 @@ function runDelayCommand(
     void context.dispatch(toVxMessage(command.value));
   }, ms);
   context.signal.addEventListener("abort", () => clearTimeout(timeout), { once: true });
+}
+
+function runTaskCommand(
+  command: VxCommandEnvelope,
+  context: VxRuntimeExecutionContext,
+): void {
+  const taskId = readTaskId(command);
+  const observeTask = readTaskObserver(command);
+  if (taskId === undefined || !observeTask) return;
+
+  void observeTask(taskId).then((outcome) => {
+    if (context.signal.aborted || outcome.kind !== "value") return;
+    const handlerId = readHandlerId(command);
+    const message = toVxMessage(outcome.value);
+    return context.dispatch(
+      handlerId === undefined
+        ? message
+        : { kind: "map", handlerId, message },
+    );
+  });
 }
 
 function runFocusCommand(command: VxCommandEnvelope): void {
@@ -925,6 +964,33 @@ function readHandlerId(input: Record<string, unknown>): number | undefined {
       : undefined;
 }
 
+function readTaskId(input: Record<string, unknown>): number | undefined {
+  return typeof input.taskId === "number"
+    ? input.taskId
+    : typeof input.task_id === "number"
+      ? input.task_id
+      : undefined;
+}
+
+function readTaskObserver(input: unknown): TaskObserver | undefined {
+  if (!isRecord(input)) return undefined;
+  const observer = input[taskObserverProperty];
+  return typeof observer === "function" ? observer as TaskObserver : undefined;
+}
+
+function attachTaskObserver(
+  input: VxCommandEnvelope,
+  observer: TaskObserver,
+): VxCommandEnvelope {
+  if (readTaskObserver(input) === observer) return input;
+  Object.defineProperty(input, taskObserverProperty, {
+    configurable: true,
+    enumerable: false,
+    value: observer,
+  });
+  return input;
+}
+
 function readMappedChild(input: Record<string, unknown>): unknown {
   return input.child ?? input.command ?? input.subscription;
 }
@@ -982,7 +1048,7 @@ function requiredInstance(instance: WebAssembly.Instance | undefined): WebAssemb
   throw new Error("vx-dom: mountVxApp requires callOptions, an instance, wasm, frame, app, or componentFn");
 }
 
-function isRecord(input: unknown): input is Record<string, unknown> {
+function isRecord(input: unknown): input is Record<PropertyKey, unknown> {
   return typeof input === "object" && input !== null;
 }
 

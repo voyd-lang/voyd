@@ -3,7 +3,7 @@ use std::dict::{ Dict, DictKey }
 use std::error::panic
 use std::msgpack::self as msgpack
 use std::optional::types::all
-use std::result::types::Unit
+use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
 use std::task::{ Task }
 pub use std::msgpack::MsgPack
@@ -1581,9 +1581,9 @@ pub fn program<Model, Msg>({
   msgpack::make_map(out)
 
 pub fn program<Model, Msg>({
-  init: fn() -> Model,
-  update: fn(Model, Msg) -> Program<Model, Msg>,
-  view: fn(Model) -> Html<Msg>
+  init: fn() : (open) -> Model,
+  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
+  view: fn(Model) : (open) -> Html<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
@@ -1592,9 +1592,9 @@ pub fn program<Model, Msg>({
   )
 
 pub fn program<Model, Msg>({
-  init: fn() -> Program<Model, Msg>,
-  update: fn(Model, Msg) -> Program<Model, Msg>,
-  view: fn(Model) -> Html<Msg>
+  init: fn() : (open) -> Program<Model, Msg>,
+  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
+  view: fn(Model) : (open) -> Html<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
@@ -1603,10 +1603,10 @@ pub fn program<Model, Msg>({
   )
 
 pub fn program<Model, Msg>({
-  init: fn() -> Model,
-  update: fn(Model, Msg) -> Program<Model, Msg>,
-  view: fn(Model) -> Html<Msg>,
-  subscriptions: fn(Model) -> Sub<Msg>
+  init: fn() : (open) -> Model,
+  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
+  view: fn(Model) : (open) -> Html<Msg>,
+  subscriptions: fn(Model) : (open) -> Sub<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
@@ -1616,10 +1616,10 @@ pub fn program<Model, Msg>({
   )
 
 pub fn program<Model, Msg>({
-  init: fn() -> Program<Model, Msg>,
-  update: fn(Model, Msg) -> Program<Model, Msg>,
-  view: fn(Model) -> Html<Msg>,
-  subscriptions: fn(Model) -> Sub<Msg>
+  init: fn() : (open) -> Program<Model, Msg>,
+  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
+  view: fn(Model) : (open) -> Html<Msg>,
+  subscriptions: fn(Model) : (open) -> Sub<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),

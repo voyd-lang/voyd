@@ -1,5 +1,5 @@
 import binaryen from "binaryen";
-import type { CodegenContext } from "../context.js";
+import type { CodegenContext, FunctionMetadata } from "../context.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
 import { isPackageVisible } from "../../semantics/hir/index.js";
 import {
@@ -217,7 +217,11 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
   });
   ensureEffectResultAccessors({ ctx: entryCtx, runtime: entryCtx.effectsRuntime });
 
-  effectfulExports.forEach(({ meta, exportName }) => {
+  effectfulExports
+    .filter((target): target is typeof target & { meta: FunctionMetadata } =>
+      target.emitEntry !== false
+    )
+    .forEach(({ meta, exportName }) => {
     createEffectfulEntry({
       ctx: entryCtx,
       runtime: entryCtx.effectsRuntime,

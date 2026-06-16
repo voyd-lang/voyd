@@ -19,8 +19,9 @@ import { createGcTrampolineBackend } from "./gc-trampoline-backend.js";
 export type EffectsBackendKind = "gc-trampoline" | "stack-switch";
 
 export type EffectfulExportTarget = {
-  meta: FunctionMetadata;
+  meta: FunctionMetadata | { effectRow?: number };
   exportName: string;
+  emitEntry?: boolean;
 };
 
 export interface EffectAbiSignature {

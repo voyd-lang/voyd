@@ -536,7 +536,7 @@ if (!hydration || !target) {
   throw new Error("Mini Voydpedia hydration target was not found.");
 }
 
-const initialModel = JSON.parse(hydration.textContent ?? "null");
+const initialModel = JSON.parse(hydration.textContent ?? "null") as unknown;
 
 const start = async () => {
   const wasm = new Uint8Array(await (await fetch(wasmUrl)).arrayBuffer());
@@ -579,7 +579,8 @@ type Article = {
   slug: String,
   title: String,
   body: String,
-  status: String
+  state_kind: String,
+  state_message: String
 }
 
 obj ClientArticle {
@@ -587,42 +588,30 @@ obj ClientArticle {
   title: String,
   body: String,
   saved_body: String,
-  status: String,
+  state_kind: String,
+  state_message: String,
   preview_open: bool,
   save_count: i32
 }
 
 pub fn main(): (server::HttpServer, tasks::TaskRuntime, env::Env, fs::Fs) -> i32
-  let port = app_port()
-  let host = app_host()
-  let web_app = app()
-    .adopt(serve_dir("./public".as_slice()))
-    .get_unit("/".as_slice(), handler: () -> Response =>
-      article_page(load_article("home".as_slice().to_string()))
-    )
-    .get_context("/wiki".as_slice(), handler: (ctx: Context) -> Response =>
-      article_page(load_article(article_slug_from(ctx)))
-    )
-    .get_context("/wiki/:slug".as_slice(), handler: (ctx: Context) -> Response =>
-      article_page(load_article(article_slug_from(ctx)))
-    )
-    .post_context("/wiki/:slug/body".as_slice(), handler: (ctx: Context) -> Response =>
-      save_article_body(request_text_body(ctx), article_slug_from(ctx))
-    )
-    .post_context("/wiki/:slug".as_slice(), handler: (ctx: Context) -> Response =>
-      save_article(form_article_body(request_text_body(ctx)), article_slug_from(ctx))
-    )
+  let result = serve(port: app_port(), host: app_host(), shutdown_timeout: 30000, max_body_bytes: 65536) routes():
+    adopt(serve_dir("./public"))
 
-  let result = server::serve_each(
-    config: server::ServerConfig::init(
-      port: port,
-      host: host,
-      max_body_bytes: 65536,
-      response_timeout_millis: 30000
-    ),
-    policy: server::ServeTaskPolicy::sequential(),
-    handle: (request: IncomingRequest) -> Response => web_app.handle(request)
-  )
+    get("/") do:
+      article_page(load_article("home"))
+
+    get("/wiki") do(ctx: Context):
+      article_page(load_article(article_slug_from(ctx)))
+
+    get("/wiki/:slug") do(ctx: Context):
+      article_page(load_article(article_slug_from(ctx)))
+
+    post("/wiki/:slug/body") do(ctx: Context):
+      save_article_body(request_text_body(ctx), article_slug_from(ctx))
+
+    post("/wiki/:slug") do(ctx: Context):
+      save_article(form_article_body(request_text_body(ctx)), article_slug_from(ctx))
 
   match(result)
     Ok<Unit>:
@@ -652,14 +641,16 @@ fn load_article(slug: String): fs::Fs -> Article
         slug: clean,
         title: title_for(clean),
         body: value,
-        status: "Saved".as_slice().to_string()
+        state_kind: "saved".as_slice().to_string(),
+        state_message: "Saved".as_slice().to_string()
       }
     Err<IoError>:
       {
         slug: clean,
         title: title_for(clean),
         body: "# New article\\n\\nStart writing. Click Save to create the local file.".as_slice().to_string(),
-        status: "Draft".as_slice().to_string()
+        state_kind: "unsaved".as_slice().to_string(),
+        state_message: "Unsaved changes".as_slice().to_string()
       }
 
 fn article_slug_from(ctx: Context) -> String
@@ -679,7 +670,8 @@ fn save_article(body: String, slug: String): fs::Fs -> Response
         slug: slug,
         title: title_for(slug),
         body: body,
-        status: "Saved".as_slice().to_string()
+        state_kind: "saved".as_slice().to_string(),
+        state_message: "Saved".as_slice().to_string()
       })
     Err<IoError> { error }:
       Response::internal_server_error().text(error.message)
@@ -734,7 +726,8 @@ fn client_article(article: Article) -> ClientArticle
     title: article.title,
     body: article.body,
     saved_body: article.body,
-    status: article.status,
+    state_kind: article.state_kind,
+    state_message: article.state_message,
     preview_open: true,
     save_count: 0
   }
@@ -786,7 +779,7 @@ fn ArticleEditor({ article: Article }) -> Html<MsgPack>
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-3">
-        <span class="rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800">{article.status}</span>
+        <span class={status_class(article.state_kind)}>{article.state_message}</span>
         <button
           class="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
           type="submit"
@@ -818,6 +811,18 @@ fn nav_class(active: bool) -> String
 
 fn article_form_action(slug: String) -> String
   "/wiki/".as_slice().to_string().concat(slug)
+
+fn status_class(state_kind: String) -> String
+  if state_is(state_kind, "saved".as_slice().to_string()):
+    return "rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800".as_slice().to_string()
+  if state_is(state_kind, "saving".as_slice().to_string()):
+    return "rounded-full bg-sky-100 px-3 py-1 text-sm font-medium text-sky-800".as_slice().to_string()
+  if state_is(state_kind, "failed".as_slice().to_string()):
+    return "rounded-full bg-rose-100 px-3 py-1 text-sm font-medium text-rose-800".as_slice().to_string()
+  "rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800".as_slice().to_string()
+
+fn state_is(kind: String, expected: String) -> bool
+  kind.equals(expected)
 `;
 
 const clientVoyd = `use std::array::Array
@@ -829,20 +834,16 @@ use std::msgpack::MsgPack
 use std::number::cast::to_string
 use std::result::types::all
 use std::string::type::String
+use std::task::self as tasks
 use std::vx::all
-
-obj SaveResult {
-  ok: bool,
-  body: String,
-  message: String
-}
 
 obj ClientArticle {
   slug: String,
   title: String,
   body: String,
   saved_body: String,
-  status: String,
+  state_kind: String,
+  state_message: String,
   preview_open: bool,
   save_count: i32
 }
@@ -850,6 +851,7 @@ obj ClientArticle {
 enum Msg
   Edit { value: String }
   Save
+  SaveFinished { code: i32 }
   Reset
   TogglePreview
 
@@ -866,12 +868,13 @@ fn init() -> ClientArticle
     title: "Mini Voydpedia",
     body: String::init(),
     saved_body: String::init(),
-    status: "Saved",
+    state_kind: "saved",
+    state_message: "Saved",
     preview_open: true,
     save_count: 0
   }
 
-fn update(model: ClientArticle, message: Msg): http_client::HttpClient -> Program<ClientArticle, Msg>
+fn update(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::TaskRuntime) -> Program<ClientArticle, Msg>
   match(message)
     Msg::Edit { value }:
       next(ClientArticle {
@@ -879,7 +882,8 @@ fn update(model: ClientArticle, message: Msg): http_client::HttpClient -> Progra
         title: model.title,
         body: value,
         saved_body: model.saved_body,
-        status: dirty_status(value, model.saved_body),
+        state_kind: state_kind_for_body(value, model.saved_body),
+        state_message: state_message_for_body(value, model.saved_body),
         preview_open: model.preview_open,
         save_count: model.save_count
       })
@@ -889,7 +893,8 @@ fn update(model: ClientArticle, message: Msg): http_client::HttpClient -> Progra
         title: model.title,
         body: model.saved_body,
         saved_body: model.saved_body,
-        status: "Restored saved article",
+        state_kind: "saved",
+        state_message: "Saved",
         preview_open: model.preview_open,
         save_count: model.save_count
       })
@@ -899,19 +904,41 @@ fn update(model: ClientArticle, message: Msg): http_client::HttpClient -> Progra
         title: model.title,
         body: model.body,
         saved_body: model.saved_body,
-        status: model.status,
+        state_kind: model.state_kind,
+        state_message: model.state_message,
         preview_open: not model.preview_open,
         save_count: model.save_count
       })
     Msg::Save:
-      let result = save_article(model.slug, model.body)
-      if result.ok:
+      if is_saving(model) or not is_dirty(model):
+        return next(model)
+      let save = tasks::detach do:
+        save_article(model.slug, model.body)
+      program<ClientArticle, Msg>(
+        model: ClientArticle {
+          slug: model.slug,
+          title: model.title,
+          body: model.body,
+          saved_body: model.saved_body,
+          state_kind: "saving",
+          state_message: "Saving...",
+          preview_open: model.preview_open,
+          save_count: model.save_count
+        },
+        commands: Cmd<Msg>::perform<i32>(
+          task: save,
+          handler: (code: i32) -> Msg => Msg::SaveFinished { code: code }
+        )
+      )
+    Msg::SaveFinished { code }:
+      if code == 1:
         return next(ClientArticle {
           slug: model.slug,
           title: model.title,
-          body: result.body,
-          saved_body: result.body,
-          status: result.message,
+          body: model.body,
+          saved_body: model.body,
+          state_kind: "saved",
+          state_message: "Saved",
           preview_open: model.preview_open,
           save_count: model.save_count + 1
         })
@@ -920,7 +947,8 @@ fn update(model: ClientArticle, message: Msg): http_client::HttpClient -> Progra
         title: model.title,
         body: model.body,
         saved_body: model.saved_body,
-        status: result.message,
+        state_kind: "failed",
+        state_message: "Save failed",
         preview_open: model.preview_open,
         save_count: model.save_count
       })
@@ -940,11 +968,11 @@ fn view(model: ClientArticle) -> Html<Msg>
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-3">
-        <span class={status_class(model)}>{model.status}</span>
+        <span class={status_class(model)}>{status_label(model)}</span>
         <button
           class="rounded-md border border-zinc-300 bg-white px-4 py-2 text-sm font-semibold text-zinc-800 shadow-sm transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:text-zinc-400"
           type="button"
-          disabled={not is_dirty(model)}
+          disabled={not can_save_or_reset(model)}
           on_click={Msg::Reset {}}
         >
           Reset
@@ -952,6 +980,7 @@ fn view(model: ClientArticle) -> Html<Msg>
         <button
           class="rounded-md border border-emerald-700 bg-white px-4 py-2 text-sm font-semibold text-emerald-800 shadow-sm transition hover:bg-emerald-50"
           type="button"
+          disabled={is_saving(model)}
           on_click={Msg::TogglePreview {}}
         >
           {preview_button_label(model)}
@@ -959,10 +988,10 @@ fn view(model: ClientArticle) -> Html<Msg>
         <button
           class="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
           type="button"
-          disabled={not is_dirty(model)}
+          disabled={not can_save_or_reset(model)}
           on_click={Msg::Save {}}
         >
-          Save
+          {save_button_label(model)}
         </button>
       </div>
     </header>
@@ -980,6 +1009,7 @@ fn view(model: ClientArticle) -> Html<Msg>
           name="body"
           spellcheck="true"
           value={model.body}
+          disabled={is_saving(model)}
           on_input={(event: InputEvent) -> Msg => Msg::Edit { value: event.value }}
         >{model.body}</textarea>
       </label>
@@ -1011,28 +1041,17 @@ fn Stat({ label: String, value: String }) -> Html<Msg>
 fn next(model: ClientArticle) -> Program<ClientArticle, Msg>
   program<ClientArticle, Msg>(model: model)
 
-fn save_article(slug: String, body: String): http_client::HttpClient -> SaveResult
+fn save_article(slug: String, body: String): http_client::HttpClient -> i32
   let result: Result<Response, HostError> = http_client::post(url: article_body_action(slug), body: Body::text(body))
   match(result)
     Ok<Response> { value }:
       if value.is_success():
-        SaveResult {
-          ok: true,
-          body: body,
-          message: "Saved from Voyd client"
-        }
+        1
       else:
-        SaveResult {
-          ok: false,
-          body: body,
-          message: "Save failed"
-        }
-    Err<HostError> { error }:
-      SaveResult {
-        ok: false,
-        body: body,
-        message: error.message
-      }
+        0
+    Err<HostError>:
+      0
+
 
 fn article_form_action(slug: String) -> String
   "/wiki/".as_slice().to_string().concat(slug)
@@ -1043,29 +1062,60 @@ fn article_body_action(slug: String) -> String
 fn is_dirty(model: ClientArticle) -> bool
   not (model.body == model.saved_body)
 
-fn dirty_status(body: String, saved_body: String) -> String
+fn can_save_or_reset(model: ClientArticle) -> bool
+  is_dirty(model) and not is_saving(model)
+
+fn is_saving(model: ClientArticle) -> bool
+  state_is(model.state_kind, "saving")
+
+fn state_kind_for_body(body: String, saved_body: String) -> String
+  if body == saved_body:
+    "saved"
+  else:
+    "unsaved"
+
+fn state_message_for_body(body: String, saved_body: String) -> String
   if body == saved_body:
     "Saved"
   else:
     "Unsaved changes"
 
 fn dirty_label(model: ClientArticle) -> String
+  if state_is(model.state_kind, "saving"):
+    return "Saving"
+  if state_is(model.state_kind, "failed"):
+    return "Save failed"
   if is_dirty(model):
     "Unsaved"
   else:
     "Saved"
 
+fn status_label(model: ClientArticle) -> String
+  model.state_message
+
 fn status_class(model: ClientArticle) -> String
-  if is_dirty(model):
-    "rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800"
-  else:
-    "rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800"
+  if state_is(model.state_kind, "saved"):
+    return "rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800"
+  if state_is(model.state_kind, "saving"):
+    return "rounded-full bg-sky-100 px-3 py-1 text-sm font-medium text-sky-800"
+  if state_is(model.state_kind, "failed"):
+    return "rounded-full bg-rose-100 px-3 py-1 text-sm font-medium text-rose-800"
+  "rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800"
 
 fn preview_button_label(model: ClientArticle) -> String
   if model.preview_open:
     "Hide preview"
   else:
     "Show preview"
+
+fn save_button_label(model: ClientArticle) -> String
+  if is_saving(model):
+    "Saving..."
+  else:
+    "Save"
+
+fn state_is(kind: String, expected: String) -> bool
+  kind.equals(expected)
 
 fn editor_grid_class(model: ClientArticle) -> String
   if model.preview_open:

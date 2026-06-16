@@ -437,6 +437,44 @@ describe("vx-dom browser renderer", () => {
     expect(container.textContent).toBe("Count: 1");
   });
 
+  it("runs task commands with the default browser runtime host", async () => {
+    let count = 0;
+    let resolveTask:
+      | ((outcome: { kind: "value"; value: { type: "increment" } }) => void)
+      | undefined;
+    const observeTask = vi.fn(
+      () =>
+        new Promise<{ kind: "value"; value: { type: "increment" } }>((resolve) => {
+          resolveTask = resolve;
+        }),
+    );
+    const commands = { type: "cmd", kind: "task", taskId: 7 };
+    Object.defineProperty(commands, Symbol.for("voyd.taskObserver"), {
+      configurable: true,
+      value: observeTask,
+    });
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(count),
+        commands,
+      }),
+      render: () => counterNode(count),
+      dispatch: (message) => {
+        if (message.kind === "msgpack" && isIncrement(message.value)) count += 1;
+        return counterNode(count);
+      },
+    };
+
+    await mountVxApp({ container, app });
+    expect(container.textContent).toBe("Count: 0");
+    expect(observeTask).toHaveBeenCalledWith(7);
+
+    resolveTask?.({ kind: "value", value: { type: "increment" } });
+    await nextTurn();
+
+    expect(container.textContent).toBe("Count: 1");
+  });
+
   it("runs ref DOM commands with the default browser runtime host", async () => {
     const focus = vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => undefined);
     const scrollIntoView = vi.fn();

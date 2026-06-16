@@ -20,7 +20,8 @@ type Article = {
   slug: String,
   title: String,
   body: String,
-  status: String
+  state_kind: String,
+  state_message: String
 }
 
 obj ClientArticle {
@@ -28,42 +29,30 @@ obj ClientArticle {
   title: String,
   body: String,
   saved_body: String,
-  status: String,
+  state_kind: String,
+  state_message: String,
   preview_open: bool,
   save_count: i32
 }
 
 pub fn main(): (server::HttpServer, tasks::TaskRuntime, env::Env, fs::Fs) -> i32
-  let port = app_port()
-  let host = app_host()
-  let web_app = app()
-    .adopt(serve_dir("./public".as_slice()))
-    .get_unit("/".as_slice(), handler: () -> Response =>
-      article_page(load_article("home".as_slice().to_string()))
-    )
-    .get_context("/wiki".as_slice(), handler: (ctx: Context) -> Response =>
-      article_page(load_article(article_slug_from(ctx)))
-    )
-    .get_context("/wiki/:slug".as_slice(), handler: (ctx: Context) -> Response =>
-      article_page(load_article(article_slug_from(ctx)))
-    )
-    .post_context("/wiki/:slug/body".as_slice(), handler: (ctx: Context) -> Response =>
-      save_article_body(request_text_body(ctx), article_slug_from(ctx))
-    )
-    .post_context("/wiki/:slug".as_slice(), handler: (ctx: Context) -> Response =>
-      save_article(form_article_body(request_text_body(ctx)), article_slug_from(ctx))
-    )
+  let result = serve(port: app_port(), host: app_host(), shutdown_timeout: 30000, max_body_bytes: 65536) routes():
+    adopt(serve_dir("./public"))
 
-  let result = server::serve_each(
-    config: server::ServerConfig::init(
-      port: port,
-      host: host,
-      max_body_bytes: 65536,
-      response_timeout_millis: 30000
-    ),
-    policy: server::ServeTaskPolicy::sequential(),
-    handle: (request: IncomingRequest) -> Response => web_app.handle(request)
-  )
+    get("/") do:
+      article_page(load_article("home"))
+
+    get("/wiki") do(ctx: Context):
+      article_page(load_article(article_slug_from(ctx)))
+
+    get("/wiki/:slug") do(ctx: Context):
+      article_page(load_article(article_slug_from(ctx)))
+
+    post("/wiki/:slug/body") do(ctx: Context):
+      save_article_body(request_text_body(ctx), article_slug_from(ctx))
+
+    post("/wiki/:slug") do(ctx: Context):
+      save_article(form_article_body(request_text_body(ctx)), article_slug_from(ctx))
 
   match(result)
     Ok<Unit>:
@@ -72,18 +61,18 @@ pub fn main(): (server::HttpServer, tasks::TaskRuntime, env::Env, fs::Fs) -> i32
       -error.code
 
 fn app_port(): env::Env -> i32
-  match(env::get_int("VOYD_WEB_PORT".as_slice()))
+  match(env::get_int("VOYD_WEB_PORT"))
     Some<i32> { value }:
       value
     None:
       3000
 
 fn app_host(): env::Env -> String
-  match(env::get("VOYD_WEB_HOST".as_slice()))
+  match(env::get("VOYD_WEB_HOST"))
     Some<String> { value }:
       value
     None:
-      "127.0.0.1".as_slice().to_string()
+      "127.0.0.1"
 
 fn load_article(slug: String): fs::Fs -> Article
   let clean = safe_slug(slug)
@@ -93,18 +82,20 @@ fn load_article(slug: String): fs::Fs -> Article
         slug: clean,
         title: title_for(clean),
         body: value,
-        status: "Saved".as_slice().to_string()
+        state_kind: "saved",
+        state_message: "Saved"
       }
     Err<IoError>:
       {
         slug: clean,
         title: title_for(clean),
-        body: "# New article\n\nStart writing. Click Save to create the local file.".as_slice().to_string(),
-        status: "Draft".as_slice().to_string()
+        body: "# New article\n\nStart writing. Click Save to create the local file.",
+        state_kind: "unsaved",
+        state_message: "Unsaved changes"
       }
 
 fn article_slug_from(ctx: Context) -> String
-  safe_slug(ctx.param("slug".as_slice()) ?? ctx.query_value("slug".as_slice()) ?? "home".as_slice().to_string())
+  safe_slug(ctx.param("slug") ?? ctx.query_value("slug") ?? "home")
 
 fn request_text_body(ctx: Context) -> String
   match(ctx.request.body.as_text())
@@ -120,7 +111,8 @@ fn save_article(body: String, slug: String): fs::Fs -> Response
         slug: slug,
         title: title_for(slug),
         body: body,
-        status: "Saved".as_slice().to_string()
+        state_kind: "saved",
+        state_message: "Saved"
       })
     Err<IoError> { error }:
       Response::internal_server_error().text(error.message)
@@ -129,23 +121,23 @@ fn save_article_body(body: String, slug: String): fs::Fs -> Response
   match(write_file_string(article_path(slug), body))
     Ok<Unit>:
       Response::ok()
-        .with(header: "content-type".as_slice(), value: "text/plain; charset=utf-8".as_slice())
-        .text("saved".as_slice())
+        .with(header: "content-type", value: "text/plain; charset=utf-8")
+        .text("saved")
     Err<IoError> { error }:
       Response::internal_server_error().text(error.message)
 
 fn form_article_body(input: String) -> String
-  parse_query(input).get("body".as_slice()) ?? String::init()
+  parse_query(input).get("body") ?? String::init()
 
 fn article_path(slug: String) -> Path
-  Path::new("./data/articles".as_slice()).join(slug.concat(".md".as_slice()))
+  Path::new("./data/articles").join(slug.concat(".md"))
 
 fn safe_slug(value: String) -> String
-  let lower = value.as_slice().trimmed().to_string().lowered()
+  let lower = value.trimmed().lowered()
   if lower.is_empty():
-    return "home".as_slice().to_string()
+    return "home"
   if lower.contains(where: (rune: i32) -> bool => not is_slug_rune(rune)):
-    return "home".as_slice().to_string()
+    return "home"
   lower
 
 fn is_slug_rune(rune: i32) -> bool
@@ -153,18 +145,18 @@ fn is_slug_rune(rune: i32) -> bool
 
 fn title_for(slug: String) -> String
   if slug.equals("home"):
-    "Mini Voydpedia".as_slice().to_string()
+    "Mini Voydpedia"
   else:
     slug
 
 fn article_page(article: Article) -> Response
   Response::ok()
-    .with(header: "content-type".as_slice(), value: "text/html; charset=utf-8".as_slice())
+    .with(header: "content-type", value: "text/html; charset=utf-8")
     .text(document<MsgPack, ClientArticle>(
       view: page_view(article),
       hydrate: hydrate<ClientArticle>(
-        target: "#article-app".as_slice(),
-        entry: "/assets/client.js".as_slice(),
+        target: "#article-app",
+        entry: "/assets/client.js",
         model: client_article(article)
       )
     ))
@@ -175,7 +167,8 @@ fn client_article(article: Article) -> ClientArticle
     title: article.title,
     body: article.body,
     saved_body: article.body,
-    status: article.status,
+    state_kind: article.state_kind,
+    state_message: article.state_message,
     preview_open: true,
     save_count: 0
   }
@@ -227,7 +220,7 @@ fn ArticleEditor({ article: Article }) -> Html<MsgPack>
         </p>
       </div>
       <div class="flex flex-wrap items-center gap-3">
-        <span class="rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800">{article.status}</span>
+        <span class={status_class(article.state_kind)}>{article.state_message}</span>
         <button
           class="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-emerald-800"
           type="submit"
@@ -253,9 +246,21 @@ fn NavLink({ href: String, label: String, active: bool }) -> Html<MsgPack>
 
 fn nav_class(active: bool) -> String
   if active:
-    "rounded-md bg-emerald-50 px-3 py-2 font-medium text-emerald-800".as_slice().to_string()
+    "rounded-md bg-emerald-50 px-3 py-2 font-medium text-emerald-800"
   else:
-    "rounded-md px-3 py-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950".as_slice().to_string()
+    "rounded-md px-3 py-2 text-zinc-600 hover:bg-zinc-100 hover:text-zinc-950"
 
 fn article_form_action(slug: String) -> String
-  "/wiki/".as_slice().to_string().concat(slug)
+  "/wiki/".concat(slug)
+
+fn status_class(state_kind: String) -> String
+  if state_is(state_kind, "saved"):
+    return "rounded-full bg-emerald-100 px-3 py-1 text-sm font-medium text-emerald-800"
+  if state_is(state_kind, "saving"):
+    return "rounded-full bg-sky-100 px-3 py-1 text-sm font-medium text-sky-800"
+  if state_is(state_kind, "failed"):
+    return "rounded-full bg-rose-100 px-3 py-1 text-sm font-medium text-rose-800"
+  "rounded-full bg-amber-100 px-3 py-1 text-sm font-medium text-amber-800"
+
+fn state_is(kind: String, expected: String) -> bool
+  kind.equals(expected)

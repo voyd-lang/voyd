@@ -214,10 +214,28 @@ impl App
       trailing_slash_policy: trailing_slash
     }
 
+  api fn get<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> App
+    self.route<R>(path, method: Method::Get {}, handler: handler)
+
   api fn get(self, path: StringSlice, { handler: Handler }) -> App
     self.with_route(path, Method::Get {}, handler)
 
+  api fn get<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> App
+    self.get<R>(path.as_slice(), handler: handler)
+
   api fn get(self, path: String, { handler: Handler }) -> App
+    self.get(path.as_slice(), handler: handler)
+
+  api fn get<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> App
+    self.route<R>(path, method: Method::Get {}, handler: handler)
+
+  api fn get(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
+    self.with_unit_response_route(path, Method::Get {}, handler)
+
+  api fn get<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> App
+    self.get<R>(path.as_slice(), handler: handler)
+
+  api fn get(self, path: String, { handler: fn() : (open) -> Response }) -> App
     self.get(path.as_slice(), handler: handler)
 
   api fn get_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
@@ -302,8 +320,23 @@ impl App
           ctx.reject(error)
     )
 
+  api fn post<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> App
+    self.route<R>(path, method: Method::Post {}, handler: handler)
+
   api fn post(self, path: StringSlice, { handler: Handler }) -> App
     self.with_route(path, Method::Post {}, handler)
+
+  api fn post<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> App
+    self.post<R>(path.as_slice(), handler: handler)
+
+  api fn post<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> App
+    self.route<R>(path, method: Method::Post {}, handler: handler)
+
+  api fn post(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
+    self.with_unit_response_route(path, Method::Post {}, handler)
+
+  api fn post<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> App
+    self.post<R>(path.as_slice(), handler: handler)
 
   api fn post_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
     self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
@@ -461,8 +494,17 @@ impl App
               ctx.reject(error)
     )
 
+  api fn put<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> App
+    self.route<R>(path, method: Method::Put {}, handler: handler)
+
   api fn put(self, path: StringSlice, { handler: Handler }) -> App
     self.with_route(path, Method::Put {}, handler)
+
+  api fn put<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> App
+    self.route<R>(path, method: Method::Put {}, handler: handler)
+
+  api fn put(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
+    self.with_unit_response_route(path, Method::Put {}, handler)
 
   api fn put_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
     self.with_route(path, Method::Put {}, (ctx: Context) -> Response =>
@@ -488,8 +530,17 @@ impl App
   api fn put_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> App
     self.put_params_query<P, Q>(path.as_slice(), handler: handler)
 
+  api fn patch<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> App
+    self.route<R>(path, method: Method::Patch {}, handler: handler)
+
   api fn patch(self, path: StringSlice, { handler: Handler }) -> App
     self.with_route(path, Method::Patch {}, handler)
+
+  api fn patch<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> App
+    self.route<R>(path, method: Method::Patch {}, handler: handler)
+
+  api fn patch(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
+    self.with_unit_response_route(path, Method::Patch {}, handler)
 
   api fn patch_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
     self.with_route(path, Method::Patch {}, (ctx: Context) -> Response =>
@@ -515,8 +566,17 @@ impl App
   api fn patch_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> App
     self.patch_params_query<P, Q>(path.as_slice(), handler: handler)
 
+  api fn delete<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> App
+    self.route<R>(path, method: Method::Delete {}, handler: handler)
+
   api fn delete(self, path: StringSlice, { handler: Handler }) -> App
     self.with_route(path, Method::Delete {}, handler)
+
+  api fn delete<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> App
+    self.route<R>(path, method: Method::Delete {}, handler: handler)
+
+  api fn delete(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
+    self.with_unit_response_route(path, Method::Delete {}, handler)
 
   api fn delete_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
     self.with_route(path, Method::Delete {}, (ctx: Context) -> Response =>
@@ -1086,10 +1146,28 @@ impl Router
   api fn with(self, { trailing_slash: TrailingSlashPolicy }) -> Router
     Router { app: self.app.with(trailing_slash: trailing_slash) }
 
+  api fn get<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> Router
+    Router { app: self.app.get<R>(path, handler: handler) }
+
   api fn get(self, path: StringSlice, { handler: Handler }) -> Router
     Router { app: self.app.get(path, handler: handler) }
 
+  api fn get<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> Router
+    self.get<R>(path.as_slice(), handler: handler)
+
   api fn get(self, path: String, { handler: Handler }) -> Router
+    self.get(path.as_slice(), handler: handler)
+
+  api fn get<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> Router
+    Router { app: self.app.get<R>(path, handler: handler) }
+
+  api fn get(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
+    Router { app: self.app.get(path, handler: handler) }
+
+  api fn get<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> Router
+    self.get<R>(path.as_slice(), handler: handler)
+
+  api fn get(self, path: String, { handler: fn() : (open) -> Response }) -> Router
     self.get(path.as_slice(), handler: handler)
 
   api fn get_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
@@ -1131,8 +1209,23 @@ impl Router
   api fn get<S>(self, path: StringSlice, { auth: OptionalSession, handler: fn(Option<S>, Context) : (open) -> Response }) -> Router
     Router { app: self.app.get<S>(path, auth: auth, handler: handler) }
 
+  api fn post<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> Router
+    Router { app: self.app.post<R>(path, handler: handler) }
+
   api fn post(self, path: StringSlice, { handler: Handler }) -> Router
     Router { app: self.app.post(path, handler: handler) }
+
+  api fn post<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> Router
+    self.post<R>(path.as_slice(), handler: handler)
+
+  api fn post<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> Router
+    Router { app: self.app.post<R>(path, handler: handler) }
+
+  api fn post(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
+    Router { app: self.app.post(path, handler: handler) }
+
+  api fn post<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> Router
+    self.post<R>(path.as_slice(), handler: handler)
 
   api fn post_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
     Router { app: self.app.post_context<T>(path, handler: handler) }
@@ -1211,7 +1304,16 @@ impl Router
   ) -> Router
     Router { app: self.app.post<I, S, A, T>(path, body: body, auth: auth, handler: handler) }
 
+  api fn put<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> Router
+    Router { app: self.app.put<R>(path, handler: handler) }
+
   api fn put(self, path: StringSlice, { handler: Handler }) -> Router
+    Router { app: self.app.put(path, handler: handler) }
+
+  api fn put<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> Router
+    Router { app: self.app.put<R>(path, handler: handler) }
+
+  api fn put(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
     Router { app: self.app.put(path, handler: handler) }
 
   api fn put_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
@@ -1235,7 +1337,16 @@ impl Router
   api fn put_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> Router
     self.put_params_query<P, Q>(path.as_slice(), handler: handler)
 
+  api fn patch<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> Router
+    Router { app: self.app.patch<R>(path, handler: handler) }
+
   api fn patch(self, path: StringSlice, { handler: Handler }) -> Router
+    Router { app: self.app.patch(path, handler: handler) }
+
+  api fn patch<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> Router
+    Router { app: self.app.patch<R>(path, handler: handler) }
+
+  api fn patch(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
     Router { app: self.app.patch(path, handler: handler) }
 
   api fn patch_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
@@ -1259,7 +1370,16 @@ impl Router
   api fn patch_params_query<P, Q>(self, path: String, { handler: fn(P, Q) : (open) -> Response }) -> Router
     self.patch_params_query<P, Q>(path.as_slice(), handler: handler)
 
+  api fn delete<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> Router
+    Router { app: self.app.delete<R>(path, handler: handler) }
+
   api fn delete(self, path: StringSlice, { handler: Handler }) -> Router
+    Router { app: self.app.delete(path, handler: handler) }
+
+  api fn delete<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> Router
+    Router { app: self.app.delete<R>(path, handler: handler) }
+
+  api fn delete(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
     Router { app: self.app.delete(path, handler: handler) }
 
   api fn delete_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
@@ -1463,312 +1583,178 @@ pub fn serve_app(
 pub macro serve(first, second)
   let all_args = body
   let routes_arg = all_args.get(all_args.length - 1)
+  let fallback = () =>
+    if
+      is_list(first) and first.calls(:):
+        `(serve_build($$all_args))
+      else:
+        `(serve_app($$all_args))
   if is_list(routes_arg) and routes_arg.calls(:):
     let routes_callback = routes_arg.get(2)
     if is_list(routes_callback) and routes_callback.calls(=>):
       let callback_params = routes_callback.get(1)
       if is_list(callback_params) and callback_params.length == 0:
         let serve_args = all_args.slice(0, all_args.length - 1)
+        let invalid_handler = () =>
+          panic("web route handler extractor parameters must be named params, query, headers, cookies, and optional final ctx")
+        let query_requires_context = () =>
+          panic("web query-only route handlers must include a final ctx parameter in Phase 1; use do(query: Query, ctx: Context): ...")
         let handler_param_count = (handler) =>
           if is_list(handler) and handler.calls(=>):
             let handler_params = handler.get(1)
-            if is_list(handler_params):
-              if handler_params.length == 0:
-                0
-              else:
-                if handler_params.calls(:) and handler_params.length == 3:
-                  1
-                else:
-                  handler_params.length
-            else:
-              0
+            if
+              not is_list(handler_params): 0
+              handler_params.length == 0: 0
+              handler_params.calls(:) and handler_params.length == 3: 1
+              else: handler_params.length
           else:
             -1
         let handler_param_at = (handler, index) =>
           if is_list(handler) and handler.calls(=>):
             let handler_params = handler.get(1)
-            if is_list(handler_params):
-              if handler_params.calls(:) and handler_params.length == 3:
-                if index == 0:
-                  handler_params
-                else:
-                  void
-              else:
-                handler_params.get(index)
-            else:
-              void
+            if
+              not is_list(handler_params): void
+              handler_params.calls(:) and handler_params.length == 3 and index == 0: handler_params
+              handler_params.calls(:) and handler_params.length == 3: void
+              else: handler_params.get(index)
           else:
             void
         let handler_param_name_at = (handler, index) =>
           let param = handler_param_at(handler, index)
-          if is_list(param) and param.calls(:):
-            param.get(1)
-          else:
-            param
-        let is_context_handler = (handler) =>
-          if is_list(handler) and handler.calls(=>):
-            let handler_params = handler.get(1)
-            if is_list(handler_params) and handler_params.calls(:) and handler_params.length == 3:
-              handler_params.get(1) == ctx
-            else:
-              false
-          else:
-            false
+          if
+            is_list(param) and param.calls(:): param.get(1)
+            else: param
         let handler_has_final_ctx = (handler) =>
           let count = handler_param_count(handler)
-          if count > 0:
-            handler_param_name_at(handler, count - 1) == ctx
-          else:
-            false
-        let lower_named_method_route = (builder, name, path, args, method_expr, handler) =>
-          let invalid_handler = () =>
-            panic("web route handler extractor parameters must be named params, query, headers, cookies, and optional final ctx")
-          let query_requires_context = () =>
-            panic("web query-only route handlers must include a final ctx parameter in Phase 1; use do(query: Query, ctx: Context): ...")
+          if
+            count > 0: handler_param_name_at(handler, count - 1) == ctx
+            else: false
+        let route_extractor_name = (first, second, third, extraction_count, final_ctx) =>
+          if
+            extraction_count == 1 and first == params:
+              if final_ctx then: route_params_context else: route_params
+            extraction_count == 1 and first == query:
+              if final_ctx then: route_query_context else: query_requires_context()
+            extraction_count == 1 and first == headers:
+              if final_ctx then: route_headers_context else: route_headers
+            extraction_count == 1 and first == cookies:
+              if final_ctx then: route_cookies_context else: route_cookies
+            extraction_count == 2 and first == params and second == query:
+              if final_ctx then: route_params_query_context else: route_params_query
+            extraction_count == 2 and first == params and second == headers:
+              if final_ctx then: route_params_headers_context else: route_params_headers
+            extraction_count == 2 and first == query and second == headers:
+              if final_ctx then: route_query_headers_context else: route_query_headers
+            extraction_count == 3 and first == params and second == query and third == headers:
+              if final_ctx then: route_params_query_headers_context else: route_params_query_headers
+            else:
+              invalid_handler()
+        let route_helper_for = (handler) =>
           let count = handler_param_count(handler)
           let final_ctx = handler_has_final_ctx(handler)
-          let extraction_count =
-            if final_ctx:
-              count - 1
+          if
+            count == 0:
+              route_unit
+            count == 1 and final_ctx:
+              route_context
             else:
-              count
-          let first = handler_param_name_at(handler, 0)
-          let second = handler_param_name_at(handler, 1)
-          let third = handler_param_name_at(handler, 2)
-          if count == 0:
-            `(route_unit $builder ($path).as_slice() method: $method_expr $$args)
-          else:
-            if count == 1 and final_ctx:
-              `(route_context $builder ($path).as_slice() method: $method_expr $$args)
-            else:
-              if extraction_count == 1:
-                if first == params:
-                  if final_ctx:
-                    `(route_params_context $builder ($path).as_slice() method: $method_expr $$args)
-                  else:
-                    `(route_params $builder ($path).as_slice() method: $method_expr $$args)
-                else:
-                  if first == query:
-                    if final_ctx:
-                      `(route_query_context $builder ($path).as_slice() method: $method_expr $$args)
-                    else:
-                      query_requires_context()
-                  else:
-                    if first == headers:
-                      if final_ctx:
-                        `(route_headers_context $builder ($path).as_slice() method: $method_expr $$args)
-                      else:
-                        `(route_headers $builder ($path).as_slice() method: $method_expr $$args)
-                    else:
-                      if first == cookies:
-                        if final_ctx:
-                          `(route_cookies_context $builder ($path).as_slice() method: $method_expr $$args)
-                        else:
-                          `(route_cookies $builder ($path).as_slice() method: $method_expr $$args)
-                      else:
-                        invalid_handler()
-              else:
-                if extraction_count == 2:
-                  if first == params and second == query:
-                    if final_ctx:
-                      `(route_params_query_context $builder ($path).as_slice() method: $method_expr $$args)
-                    else:
-                      `(route_params_query $builder ($path).as_slice() method: $method_expr $$args)
-                  else:
-                    if first == params and second == headers:
-                      if final_ctx:
-                        `(route_params_headers_context $builder ($path).as_slice() method: $method_expr $$args)
-                      else:
-                        `(route_params_headers $builder ($path).as_slice() method: $method_expr $$args)
-                    else:
-                      if first == query and second == headers:
-                        if final_ctx:
-                          `(route_query_headers_context $builder ($path).as_slice() method: $method_expr $$args)
-                        else:
-                          `(route_query_headers $builder ($path).as_slice() method: $method_expr $$args)
-                      else:
-                        invalid_handler()
-                else:
-                  if extraction_count == 3 and first == params and second == query and third == headers and final_ctx:
-                    `(route_params_query_headers_context $builder ($path).as_slice() method: $method_expr $$args)
-                  else:
-                    if extraction_count == 3 and first == params and second == query and third == headers:
-                      `(route_params_query_headers $builder ($path).as_slice() method: $method_expr $$args)
-                    else:
-                      invalid_handler()
+              let extraction_count =
+                if
+                  final_ctx: count - 1
+                  else: count
+              route_extractor_name(
+                handler_param_name_at(handler, 0),
+                handler_param_name_at(handler, 1),
+                handler_param_name_at(handler, 2),
+                extraction_count,
+                final_ctx
+              )
+        let is_route_extractor_param = (name) =>
+          name == params or name == query or name == headers or name == cookies or name == ctx
+        let should_infer_method_route = (args, handler) =>
+          args.length == 1 or handler_param_count(handler) == 0 or is_route_extractor_param(handler_param_name_at(handler, 0))
+        let should_infer_manual_route = (args, handler) =>
+          args.length <= 2 or handler_param_count(handler) == 0 or is_route_extractor_param(handler_param_name_at(handler, 0))
         let lower_method_route = (builder, statement, method_expr) =>
           let name = statement.get(0)
           let path = statement.get(1)
           let args = statement.slice(2)
           let handler = statement.get(statement.length - 1)
-          let first = handler_param_name_at(handler, 0)
-          let route_extractor_handler =
-            args.length == 1 or handler_param_count(handler) == 0 or first == params or first == query or first == headers or first == cookies or first == ctx
-          if route_extractor_handler:
-            lower_named_method_route(builder, name, path, args, method_expr, handler)
-          else:
-            `($name $builder ($path).as_slice() $$args)
-        let lower_route = (builder, statement) =>
-          let invalid_handler = () =>
-            panic("web route handler extractor parameters must be named params, query, headers, cookies, and optional final ctx")
-          let query_requires_context = () =>
-            panic("web query-only route handlers must include a final ctx parameter in Phase 1; use do(query: Query, ctx: Context): ...")
+          if
+            should_infer_method_route(args, handler):
+              let helper = route_helper_for(handler)
+              `($helper $builder ($path).as_slice() method: $method_expr $$args)
+            else:
+              `($name $builder ($path).as_slice() $$args)
+        let lower_manual_route = (builder, statement) =>
           let path = statement.get(1)
           let args = statement.slice(2)
           let handler = statement.get(statement.length - 1)
-          let count = handler_param_count(handler)
-          let final_ctx = handler_has_final_ctx(handler)
-          let extraction_count =
-            if final_ctx:
-              count - 1
+          if
+            should_infer_manual_route(args, handler):
+              let helper = route_helper_for(handler)
+              `($helper $builder ($path).as_slice() $$args)
             else:
-              count
-          let first = handler_param_name_at(handler, 0)
-          let second = handler_param_name_at(handler, 1)
-          let third = handler_param_name_at(handler, 2)
-          if count == 0:
-            `(route_unit $builder ($path).as_slice() $$args)
-          else:
-            if count == 1 and final_ctx:
-              `(route_context $builder ($path).as_slice() $$args)
-            else:
-              if extraction_count == 1:
-                if first == params:
-                  if final_ctx:
-                    `(route_params_context $builder ($path).as_slice() $$args)
-                  else:
-                    `(route_params $builder ($path).as_slice() $$args)
-                else:
-                  if first == query:
-                    if final_ctx:
-                      `(route_query_context $builder ($path).as_slice() $$args)
-                    else:
-                      query_requires_context()
-                  else:
-                    if first == headers:
-                      if final_ctx:
-                        `(route_headers_context $builder ($path).as_slice() $$args)
-                      else:
-                        `(route_headers $builder ($path).as_slice() $$args)
-                    else:
-                      if first == cookies:
-                        if final_ctx:
-                          `(route_cookies_context $builder ($path).as_slice() $$args)
-                        else:
-                          `(route_cookies $builder ($path).as_slice() $$args)
-                      else:
-                        invalid_handler()
+              `(route $builder ($path).as_slice() $$args)
+        let lower_group = (builder, statement) =>
+          let prefix = statement.get(1)
+          let group_routes_arg = statement.get(2)
+          if is_list(group_routes_arg) and group_routes_arg.calls(:):
+            let group_callback = group_routes_arg.get(2)
+            if is_list(group_callback) and group_callback.calls(=>):
+              let group_params = group_callback.get(1)
+              if is_list(group_params) and group_params.length == 0:
+                let group_body = group_callback.get(2)
+                let group_statements = group_body.slice(1)
+                `(group $builder ($prefix).as_slice() routes: (child: AppBuild) -> AppBuild =>
+                  $(build_routes(`(child), group_statements))
+                )
               else:
-                if extraction_count == 2:
-                  if first == params and second == query:
-                    if final_ctx:
-                      `(route_params_query_context $builder ($path).as_slice() $$args)
-                    else:
-                      `(route_params_query $builder ($path).as_slice() $$args)
-                  else:
-                    if first == params and second == headers:
-                      if final_ctx:
-                        `(route_params_headers_context $builder ($path).as_slice() $$args)
-                      else:
-                        `(route_params_headers $builder ($path).as_slice() $$args)
-                    else:
-                      if first == query and second == headers:
-                        if final_ctx:
-                          `(route_query_headers_context $builder ($path).as_slice() $$args)
-                        else:
-                          `(route_query_headers $builder ($path).as_slice() $$args)
-                      else:
-                        invalid_handler()
-                else:
-                  if extraction_count == 3 and first == params and second == query and third == headers and final_ctx:
-                    `(route_params_query_headers_context $builder ($path).as_slice() $$args)
-                  else:
-                    if extraction_count == 3 and first == params and second == query and third == headers:
-                      `(route_params_query_headers $builder ($path).as_slice() $$args)
-                    else:
-                      invalid_handler()
+                `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
+            else:
+              `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
+          else:
+            `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
         let build_routes = (initial, route_statements) =>
           route_statements.reduce(initial, (builder, statement) =>
-            if statement.calls(adopt):
-              let args = statement.slice(1)
-              `(adopt $builder $$args)
-            else:
-              if statement.calls(not_found) or statement.calls(method_not_allowed) or statement.calls(on_error) or statement.calls(on_rejection):
+            if
+              statement.calls(adopt):
+                let args = statement.slice(1)
+                `(adopt $builder $$args)
+              statement.calls(not_found) or statement.calls(method_not_allowed) or statement.calls(on_error) or statement.calls(on_rejection):
                 let args = statement.slice(1)
                 let name = statement.get(0)
                 `($name $builder $$args)
+              statement.calls(group):
+                lower_group(builder, statement)
+              statement.calls(get):
+                lower_method_route(builder, statement, `(Method::Get {}))
+              statement.calls(post):
+                lower_method_route(builder, statement, `(Method::Post {}))
+              statement.calls(put):
+                lower_method_route(builder, statement, `(Method::Put {}))
+              statement.calls(patch):
+                lower_method_route(builder, statement, `(Method::Patch {}))
+              statement.calls(delete):
+                lower_method_route(builder, statement, `(Method::Delete {}))
+              statement.calls(route):
+                lower_manual_route(builder, statement)
               else:
-                if statement.calls(group):
-                  let prefix = statement.get(1)
-                  let group_routes_arg = statement.get(2)
-                  if is_list(group_routes_arg) and group_routes_arg.calls(:):
-                    let group_callback = group_routes_arg.get(2)
-                    if is_list(group_callback) and group_callback.calls(=>):
-                      let group_params = group_callback.get(1)
-                      if is_list(group_params) and group_params.length == 0:
-                        let group_body = group_callback.get(2)
-                        let group_statements = group_body.slice(1)
-                        `(group $builder ($prefix).as_slice() routes: (child: AppBuild) -> AppBuild =>
-                          $(build_routes(`(child), group_statements))
-                        )
-                      else:
-                        `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
-                    else:
-                      `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
-                  else:
-                    `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
-                else:
-                  if statement.calls(get):
-                    lower_method_route(builder, statement, `(Method::Get {}))
-                  else:
-                    if statement.calls(post):
-                      lower_method_route(builder, statement, `(Method::Post {}))
-                    else:
-                      if statement.calls(put):
-                        lower_method_route(builder, statement, `(Method::Put {}))
-                      else:
-                        if statement.calls(patch):
-                          lower_method_route(builder, statement, `(Method::Patch {}))
-                        else:
-                          if statement.calls(delete):
-                            lower_method_route(builder, statement, `(Method::Delete {}))
-                          else:
-                            if statement.calls(route):
-                              let path = statement.get(1)
-                              let args = statement.slice(2)
-                              let handler = statement.get(statement.length - 1)
-                              let first = handler_param_name_at(handler, 0)
-                              let route_extractor_handler =
-                                args.length <= 2 or handler_param_count(handler) == 0 or first == params or first == query or first == headers or first == cookies or first == ctx
-                              if route_extractor_handler:
-                                lower_route(builder, statement)
-                              else:
-                                `(route $builder ($path).as_slice() $$args)
-                            else:
-                              let name = statement.get(0)
-                              let path = statement.get(1)
-                              let args = statement.slice(2)
-                              `($name $builder ($path).as_slice() $$args)
+                let name = statement.get(0)
+                let path = statement.get(1)
+                let args = statement.slice(2)
+                `($name $builder ($path).as_slice() $$args)
           )
         let route_body = routes_callback.get(2)
         let statements = route_body.slice(1)
         let app_expr = build_routes(`(app()), statements)
         `(serve_app($app_expr, $$serve_args))
       else:
-        if is_list(first) and first.calls(:):
-          `(serve_build($$all_args))
-        else:
-          `(serve_app($$all_args))
+        fallback()
     else:
-      if is_list(first) and first.calls(:):
-        `(serve_build($$all_args))
-      else:
-        `(serve_app($$all_args))
+      fallback()
   else:
-    if is_list(first) and first.calls(:):
-      `(serve_build($$all_args))
-    else:
-      `(serve_app($$all_args))
+    fallback()
 
 
 pub fn make_route(path: StringSlice, method: Method, handler: Handler): () -> Route
