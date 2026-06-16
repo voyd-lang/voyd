@@ -133,7 +133,7 @@ fn article_path(slug: String) -> Path
   Path::new("./data/articles").join(slug.concat(".md"))
 
 fn safe_slug(value: String) -> String
-  let lower = value.as_slice().trimmed().to_string().lowered()
+  let lower = value.trimmed().lowered()
   if lower.is_empty():
     return "home"
   if lower.contains(where: (rune: i32) -> bool => not is_slug_rune(rune)):
