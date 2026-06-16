@@ -36,36 +36,23 @@ obj ClientArticle {
 }
 
 pub fn main(): (server::HttpServer, tasks::TaskRuntime, env::Env, fs::Fs) -> i32
-  let port = app_port()
-  let host = app_host()
-  let web_app = app()
-    .adopt(serve_dir("./public".as_slice()))
-    .get_unit("/".as_slice(), handler: () -> Response =>
-      article_page(load_article("home".as_slice().to_string()))
-    )
-    .get_context("/wiki".as_slice(), handler: (ctx: Context) -> Response =>
-      article_page(load_article(article_slug_from(ctx)))
-    )
-    .get_context("/wiki/:slug".as_slice(), handler: (ctx: Context) -> Response =>
-      article_page(load_article(article_slug_from(ctx)))
-    )
-    .post_context("/wiki/:slug/body".as_slice(), handler: (ctx: Context) -> Response =>
-      save_article_body(request_text_body(ctx), article_slug_from(ctx))
-    )
-    .post_context("/wiki/:slug".as_slice(), handler: (ctx: Context) -> Response =>
-      save_article(form_article_body(request_text_body(ctx)), article_slug_from(ctx))
-    )
+  let result = serve(port: app_port(), host: app_host(), shutdown_timeout: 30000, max_body_bytes: 65536) routes():
+    adopt(serve_dir("./public"))
 
-  let result = server::serve_each(
-    config: server::ServerConfig::init(
-      port: port,
-      host: host,
-      max_body_bytes: 65536,
-      response_timeout_millis: 30000
-    ),
-    policy: server::ServeTaskPolicy::sequential(),
-    handle: (request: IncomingRequest) -> Response => web_app.handle(request)
-  )
+    get("/") do:
+      article_page(load_article("home"))
+
+    get("/wiki") do(ctx: Context):
+      article_page(load_article(article_slug_from(ctx)))
+
+    get("/wiki/:slug") do(ctx: Context):
+      article_page(load_article(article_slug_from(ctx)))
+
+    post("/wiki/:slug/body") do(ctx: Context):
+      save_article_body(request_text_body(ctx), article_slug_from(ctx))
+
+    post("/wiki/:slug") do(ctx: Context):
+      save_article(form_article_body(request_text_body(ctx)), article_slug_from(ctx))
 
   match(result)
     Ok<Unit>:
