@@ -25,7 +25,6 @@ fn update(model: Model, msg: Msg): tasks::TaskRuntime -> Program<Model, Msg>
   match(msg)
     Msg::Save:
       let save = tasks::detach do:
-        let _ = tasks::yield_now()
         41
       program<Model, Msg>(
         model: Model { status: "Saving..." },

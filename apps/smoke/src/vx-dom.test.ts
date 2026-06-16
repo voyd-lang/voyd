@@ -202,10 +202,6 @@ describe("smoke: compiled VX DOM rendering", () => {
     expect(container.querySelector("button")?.textContent).toBe("Idle");
 
     container.querySelector<HTMLButtonElement>("button")?.click();
-    await waitForTextContaining(container, "button", "Saving...");
-
-    expect(container.querySelector("button")?.textContent).toBe("Saving...");
-
     await waitForTextContaining(container, "button", "Saved: 41");
 
     expect(container.querySelector("button")?.textContent).toBe("Saved: 41");

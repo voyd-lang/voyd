@@ -1199,6 +1199,7 @@ export const createVoydHost = async ({
       number,
       { resolve: (outcome: RunOutcome<unknown>) => void; promise: Promise<RunOutcome<unknown>> }
     >();
+    const completedTaskOutcomes = new Map<number, RunOutcome<unknown>>();
 
     const decodeRawOutcome = (rawOutcome: unknown): unknown => {
       const effectResult = handleOutcome(rawOutcome, bufferPtr, bufferSize);
@@ -1220,11 +1221,15 @@ export const createVoydHost = async ({
 
     const notifyTaskTerminal = (task: TaskRecord): void => {
       if (!task.terminal) return;
+      const outcome = taskRunOutcomeFor(task.terminal);
+      if (task.detached) {
+        completedTaskOutcomes.set(task.id, outcome);
+      }
       const observer = taskObservers.get(task.id);
       if (!observer) return;
       taskObservers.delete(task.id);
       task.terminal.observed = true;
-      observer.resolve(taskRunOutcomeFor(task.terminal));
+      observer.resolve(outcome);
     };
 
     const settlePublicOutcome = (state: RunState, outcome: RunOutcome<T>): void => {
@@ -2051,8 +2056,11 @@ export const createVoydHost = async ({
       const task = state?.tasks.get(taskId);
       if (task?.terminal) {
         task.terminal.observed = true;
-        return Promise.resolve(taskRunOutcomeFor(task.terminal));
+        const outcome = completedTaskOutcomes.get(taskId) ?? taskRunOutcomeFor(task.terminal);
+        return Promise.resolve(outcome);
       }
+      const completed = completedTaskOutcomes.get(taskId);
+      if (completed) return Promise.resolve(completed);
       if (!task) {
         return Promise.resolve({
           kind: "failed",
