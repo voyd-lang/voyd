@@ -11,7 +11,7 @@ enum Msg
 pub fn app() -> Program<Model, Msg>
   program<Model, Msg>(
     init: init,
-    update: update,
+    step: step,
     view: view
   )
 
@@ -21,7 +21,7 @@ fn init() -> Model
   points.push({ x: 3, y: 4 })
   points
 
-fn update(model: Model, msg: Msg) -> Program<Model, Msg>
+fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Shift:
       let ~points = Array<Point>::with_capacity(2)

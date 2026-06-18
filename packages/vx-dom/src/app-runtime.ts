@@ -23,7 +23,7 @@ type ComponentEffectHandler = (continuation: any, ...args: any[]) => any;
 
 export type VoydVxAppRuntimeExports = {
   init?: string;
-  update?: string;
+  step?: string;
   view?: string;
   subscriptions?: string;
 };
@@ -46,7 +46,7 @@ type RuntimeResult = Record<string, unknown> & {
 
 type ProgramDescriptor = {
   initHandlerId: number;
-  updateHandlerId: number;
+  stepHandlerId: number;
   viewHandlerId: number;
   subscriptionsHandlerId?: number;
 };
@@ -57,7 +57,7 @@ const taskObserverProperty = Symbol.for("voyd.taskObserver");
 
 const defaultExports = {
   init: "init",
-  update: "update",
+  step: "step",
   view: "view",
 } satisfies Required<Omit<VoydVxAppRuntimeExports, "subscriptions">>;
 
@@ -187,8 +187,8 @@ export function createVoydVxAppRuntime(
       }
       const descriptor = await readProgramDescriptor();
       const result = descriptor
-        ? await runProgramHandler(descriptor.updateHandlerId, [requireModel(), resolved])
-        : await options.host.run(entryNames.update, [
+        ? await runProgramHandler(descriptor.stepHandlerId, [requireModel(), resolved])
+        : await options.host.run(entryNames.step, [
             requireModel(),
             resolved,
           ]);
@@ -360,7 +360,7 @@ function parseProgramDescriptor(input: unknown): ProgramDescriptor {
     throw new Error("vx-dom: app export did not return a VX program descriptor");
   }
   const initHandlerId = readNumberField(input, "initHandlerId");
-  const updateHandlerId = readNumberField(input, "updateHandlerId");
+  const stepHandlerId = readNumberField(input, "stepHandlerId");
   const viewHandlerId = readNumberField(input, "viewHandlerId");
   const subscriptionsHandlerId = readOptionalNumberField(
     input,
@@ -368,7 +368,7 @@ function parseProgramDescriptor(input: unknown): ProgramDescriptor {
   );
   return {
     initHandlerId,
-    updateHandlerId,
+    stepHandlerId,
     viewHandlerId,
     ...(subscriptionsHandlerId !== undefined ? { subscriptionsHandlerId } : {}),
   };

@@ -1580,64 +1580,72 @@ pub fn program<Model, Msg>({
     out.set("subscriptions", subscriptions.value.payload)
   msgpack::make_map(out)
 
+/// Creates the next program transition from an explicit model.
+pub fn next<Model, Msg>(model: Model) -> Program<Model, Msg>
+  program<Model, Msg>(model: model)
+
+/// Creates the next program transition with one command.
+pub fn next<Model, Msg>({ model: Model, cmd: Cmd<Msg> }) -> Program<Model, Msg>
+  program<Model, Msg>(model: model, commands: cmd)
+
 pub fn program<Model, Msg>({
   init: fn() : (open) -> Model,
-  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
+  step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
-    update_id: retain_program_callback_id(update),
+    step_id: retain_program_callback_id(step),
     view_id: retain_program_callback_id(view)
   )
 
 pub fn program<Model, Msg>({
   init: fn() : (open) -> Program<Model, Msg>,
-  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
+  step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
-    update_id: retain_program_callback_id(update),
+    step_id: retain_program_callback_id(step),
     view_id: retain_program_callback_id(view)
   )
 
 pub fn program<Model, Msg>({
   init: fn() : (open) -> Model,
-  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
+  step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>,
   subscriptions: fn(Model) : (open) -> Sub<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
-    update_id: retain_program_callback_id(update),
+    step_id: retain_program_callback_id(step),
     view_id: retain_program_callback_id(view),
     subscriptions_id: retain_program_callback_id(subscriptions)
   )
 
 pub fn program<Model, Msg>({
   init: fn() : (open) -> Program<Model, Msg>,
-  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
+  step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>,
   subscriptions: fn(Model) : (open) -> Sub<Msg>
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
-    update_id: retain_program_callback_id(update),
+    step_id: retain_program_callback_id(step),
     view_id: retain_program_callback_id(view),
     subscriptions_id: retain_program_callback_id(subscriptions)
   )
 
 fn program_handlers<Model, Msg>({
   init_id: i32,
-  update_id: i32,
+  step_id: i32,
   view_id: i32,
   subscriptions_id?: i32
 }) -> Program<Model, Msg>
   let ~out = Dict<String, MsgPack>::init()
   out.set("kind", "program")
   out.set("initHandlerId", msgpack::make_i32(init_id))
-  out.set("updateHandlerId", msgpack::make_i32(update_id))
+  out.set("stepHandlerId", msgpack::make_i32(step_id))
   out.set("viewHandlerId", msgpack::make_i32(view_id))
   if subscriptions_id is Some:
     out.set("subscriptionsHandlerId", msgpack::make_i32(subscriptions_id.value))

@@ -13,6 +13,7 @@ export const listenerKey = (event: EventDescriptor): string =>
   [
     event.event,
     event.handlerId ?? `message:${stableEventValue(event.message)}`,
+    event.mapHandlerIds?.join(",") ?? "",
     bool(event.options?.capture),
     bool(event.options?.passive),
     bool(event.options?.preventDefault),

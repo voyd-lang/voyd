@@ -14,27 +14,27 @@ enum Msg
 pub fn app() -> Program<Model, Msg>
   program<Model, Msg>(
     init: init,
-    update: update,
+    step: step,
     view: view
   )
 
 fn init() -> Model
   Model { status: "Idle" }
 
-fn update(model: Model, msg: Msg): tasks::TaskRuntime -> Program<Model, Msg>
+fn step(model: Model, msg: Msg): tasks::TaskRuntime -> Program<Model, Msg>
   match(msg)
     Msg::Save:
       let save = tasks::detach do:
         41
-      program<Model, Msg>(
+      next<Model, Msg>(
         model: Model { status: "Saving..." },
-        commands: Cmd<Msg>::perform<i32>(
+        cmd: Cmd<Msg>::perform<i32>(
           task: save,
           handler: (value: i32) -> Msg => Msg::Saved { value: value }
         )
       )
     Msg::Saved { value }:
-      program<Model, Msg>(model: Model { status: saved_label(value) })
+      next<Model, Msg>(Model { status: saved_label(value) })
 
 fn view(model: Model) -> Html<Msg>
   <button type="button" on_click={Msg::Save {}}>{model.status}</button>

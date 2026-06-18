@@ -436,14 +436,14 @@ enum Msg
 pub fn app() -> Program<Model, Msg>
   program<Model, Msg>(
     init: init,
-    update: update,
+    step: step,
     view: view
   )
 
 fn init() -> Model
   Model { count: 0 }
 
-fn update(model: Model, msg: Msg) -> Program<Model, Msg>
+fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Save { value }:
       program<Model, Msg>(model: Model { count: model.count + optional_bonus(value) })
@@ -510,7 +510,7 @@ fn count_label(value: i32) -> String
     expect(container.innerHTML).toBe("");
   });
 
-  it("mounts the site wiki example with a Voyd-owned update loop", async () => {
+  it("mounts the site wiki example with a Voyd-owned step loop", async () => {
     const sdk = createSdk();
     const entryPath = path.join(siteExampleRoot, "wiki/wiki.voyd");
     const result = expectCompileSuccess(await sdk.compile({ entryPath }));
@@ -523,7 +523,7 @@ fn count_label(value: i32) -> String
       host,
       exports: {
         init: "component_state_init",
-        update: "component_state_update",
+        step: "component_state_step",
         view: "component_state_view",
       },
       viewReceivesModel: false,

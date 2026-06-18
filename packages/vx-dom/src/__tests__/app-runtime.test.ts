@@ -7,7 +7,7 @@ describe("createVoydVxAppRuntime", () => {
     const host = fakeHost({
       init: async () => model,
       view: async ([current]) => textFrame(`Page: ${String(current)}`),
-      update: async ([current, message]) => {
+      step: async ([current, message]) => {
         model = message === "state" ? "state" : String(current);
         return model;
       },
@@ -47,7 +47,7 @@ describe("createVoydVxAppRuntime", () => {
         commands: { type: "cmd", kind: "message", value: "tick" },
       }),
       view: async ([count]) => textFrame(`Count: ${String(count)}`),
-      update: async ([count]) => ({
+      step: async ([count]) => ({
         $vx: "runtime_result",
         model: Number(count) + 1,
         frame: textFrame("Updated"),
@@ -84,7 +84,7 @@ describe("createVoydVxAppRuntime", () => {
     const host = fakeHost({
       init: async () => firstModel,
       view: async ([current]) => textFrame(`Model: ${JSON.stringify(current)}`),
-      update: async () => secondModel,
+      step: async () => secondModel,
     });
     const app = createVoydVxAppRuntime({ host });
 
@@ -102,7 +102,7 @@ describe("createVoydVxAppRuntime", () => {
     });
   });
 
-  it("resolves retained event and mapped runtime messages before update", async () => {
+  it("resolves retained event and mapped runtime messages before step", async () => {
     const seenMessages: unknown[] = [];
     const retainedDispatch = vi.fn(async (id: number, payload: unknown) => ({
       id,
@@ -111,7 +111,7 @@ describe("createVoydVxAppRuntime", () => {
     const host = fakeHost({
       init: async () => "ready",
       view: async ([current]) => textFrame(String(current)),
-      update: async ([current, message]) => {
+      step: async ([current, message]) => {
         seenMessages.push(message);
         return current;
       },
@@ -137,7 +137,7 @@ describe("createVoydVxAppRuntime", () => {
     ]);
   });
 
-  it("rerenders mapped local-only retained callbacks without update or mapper dispatch", async () => {
+  it("rerenders mapped local-only retained callbacks without step or mapper dispatch", async () => {
     const seenMessages: unknown[] = [];
     const retainedDispatch = vi.fn(async (id: number) => {
       if (id === 7) return undefined;
@@ -146,7 +146,7 @@ describe("createVoydVxAppRuntime", () => {
     const host = fakeHost({
       init: async () => "ready",
       view: async ([current]) => textFrame(`View: ${String(current)}`),
-      update: async ([current, message]) => {
+      step: async ([current, message]) => {
         seenMessages.push(message);
         return current;
       },
@@ -177,6 +177,39 @@ describe("createVoydVxAppRuntime", () => {
     expect(retainedDispatch).toHaveBeenCalledWith(7, {
       kind: "event",
       event: "click",
+    });
+  });
+
+  it("uses stepHandlerId from program descriptors", async () => {
+    const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
+      if (id === 1) return "ready";
+      if (id === 2) return `stepped:${String((payload as unknown[])[1])}`;
+      if (id === 3) return textFrame(`View: ${String(payload)}`);
+      throw new Error(`unexpected retained handler ${id}`);
+    });
+    const host = fakeHost({
+      app: async () => ({
+        kind: "program",
+        initHandlerId: 1,
+        stepHandlerId: 2,
+        viewHandlerId: 3,
+      }),
+    });
+    host.hasExport = (entryName) => entryName === "app";
+    host.retainedCallbacks = { dispatch: retainedDispatch };
+    const app = createVoydVxAppRuntime({ host });
+
+    await expect(app.init?.()).resolves.toEqual({
+      frame: textFrame("View: ready"),
+      commands: undefined,
+      subscriptions: undefined,
+      snapshot: "ready",
+    });
+    await expect(app.dispatch({ kind: "msgpack", value: "tick" })).resolves.toEqual({
+      frame: textFrame("View: stepped:tick"),
+      commands: undefined,
+      subscriptions: undefined,
+      snapshot: "stepped:tick",
     });
   });
 

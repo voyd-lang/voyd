@@ -16,6 +16,8 @@ import type {
   VxMessage,
   VxRenderFrame,
   VxRuntimeEnvelope,
+  VxRuntimeErrorContext,
+  VxRuntimeErrorHandler,
   VxRuntimeExecutionContext,
   VxRuntimeHostOptions,
   VxRuntimeMessage,
@@ -83,6 +85,7 @@ export type MountVxAppOptions = {
   handlers?: RetainedEventHandlerRegistry;
   app?: VxAppRuntime;
   runtimeHost?: VxRuntimeHostOptions;
+  onError?: VxRuntimeErrorHandler;
   dispatch?: (message: VxMessage) => Promise<void> | void;
 };
 
@@ -91,6 +94,11 @@ type ListenerRecord = {
   listener: EventListener;
   options: AddEventListenerOptions;
   handlerId: number;
+};
+
+type ActiveSubscription = {
+  signature: string;
+  dispose: VxSubscriptionDisposer;
 };
 
 const mapHandlerIdsProperty = "__vxMapHandlerIds";
@@ -120,6 +128,7 @@ export function createBrowserVxRuntimeHost(
       keyboard: runKeyboardSubscription,
       ...overrides.subscriptions,
     },
+    onError: overrides.onError,
   };
 }
 
@@ -165,14 +174,14 @@ export function createVxDomRenderer(
 
   return {
     render(input: unknown) {
-      const nextFrame = normalizeRenderFrame(input);
+      const nextFrame = flattenRenderFrame(normalizeRenderFrame(input));
       const nextHandlers = collectHandlerIds(nextFrame.root);
       patchContainer(container, currentFrame?.root, nextFrame.root, options.handlers);
       releaseRemovedHandlers(nextHandlers);
       currentFrame = nextFrame;
     },
     hydrate(input: unknown) {
-      const nextFrame = normalizeRenderFrame(input);
+      const nextFrame = flattenRenderFrame(normalizeRenderFrame(input));
       const nextHandlers = collectHandlerIds(nextFrame.root);
       hydrateContainer(container, nextFrame.root, options.handlers);
       releaseRemovedHandlers(nextHandlers);
@@ -266,8 +275,9 @@ async function mountRuntimeApp(
   let disposed = false;
   let previousSubscriptions: unknown;
   const abortController = new AbortController();
-  const activeSubscriptions = new Map<string, VxSubscriptionDisposer>();
+  const activeSubscriptions = new Map<string, ActiveSubscription>();
   const runtimeHost = createBrowserVxRuntimeHost(options.runtimeHost);
+  const reportError = createRuntimeErrorReporter(options.onError ?? runtimeHost.onError);
   let queue = Promise.resolve();
 
   const dispatchNow = async (message: VxRuntimeMessage): Promise<void> => {
@@ -277,11 +287,13 @@ async function mountRuntimeApp(
   };
 
   const dispatchQueued = async (message: VxRuntimeMessage): Promise<void> => {
-    queue = queue.then(() => dispatchNow(message));
-    await queue;
+    const run = queue.catch(() => undefined).then(() => dispatchNow(message));
+    queue = run.catch((error) => reportError(error, { phase: "dispatch", message }));
+    await run;
   };
   const executionContext: VxRuntimeExecutionContext = {
     dispatch: dispatchQueued,
+    reportError,
     signal: abortController.signal,
   };
 
@@ -289,7 +301,7 @@ async function mountRuntimeApp(
     dispatch: (handlerId, payload) =>
       options.handlers?.dispatch?.(handlerId, payload) ??
       dispatchQueued({ kind: "event", handlerId, payload }),
-    dispatchMessage: (message) => dispatchQueued(toVxMessage(message)),
+    dispatchMessage: (message) => dispatchQueued(toRuntimeMessage(message)),
     release: options.handlers?.release,
     releaseMany: options.handlers?.releaseMany,
   };
@@ -300,33 +312,58 @@ async function mountRuntimeApp(
   const applyRuntimeStep = async (result: unknown, renderMode: "hydrate" | "render" = "render") => {
     if (disposed) return;
     const step = normalizeRuntimeStep(result);
-    const frame = step.frame ?? (await app.render());
-    if (renderMode === "hydrate") renderer.hydrate(frame);
-    else renderer.render(frame);
+    try {
+      const frame = step.frame ?? (await app.render());
+      if (renderMode === "hydrate") renderer.hydrate(frame);
+      else renderer.render(frame);
+    } catch (error) {
+      reportError(error, { phase: "render" });
+      throw error;
+    }
 
     if (step.subscriptions !== undefined && app.syncSubscriptions) {
       const previous = previousSubscriptions;
       previousSubscriptions = step.subscriptions;
-      await app.syncSubscriptions(step.subscriptions, {
-        previous,
-        dispatch: dispatchQueued,
-      });
+      try {
+        await app.syncSubscriptions(step.subscriptions, {
+          previous,
+          dispatch: dispatchQueued,
+        });
+      } catch (error) {
+        reportError(error, { phase: "subscriptions" });
+        throw error;
+      }
     } else if (step.subscriptions !== undefined) {
-      await syncRuntimeSubscriptions(
-        step.subscriptions,
-        activeSubscriptions,
-        runtimeHost,
-        executionContext,
-      );
+      try {
+        await syncRuntimeSubscriptions(
+          step.subscriptions,
+          activeSubscriptions,
+          runtimeHost,
+          executionContext,
+        );
+      } catch (error) {
+        reportError(error, { phase: "subscriptions" });
+        throw error;
+      }
     }
 
-    await runCommands(step.commands, runtimeHost, executionContext);
+    try {
+      await runCommands(step.commands, runtimeHost, executionContext);
+    } catch (error) {
+      reportError(error, { phase: "commands" });
+      throw error;
+    }
   };
 
-  const initial = app.init
-    ? await app.init()
-    : initialHydrationFrame(options) ?? await app.render();
-  await applyRuntimeStep(initial, mode);
+  try {
+    const initial = app.init
+      ? await app.init()
+      : initialHydrationFrame(options) ?? await app.render();
+    await applyRuntimeStep(initial, mode);
+  } catch (error) {
+    reportError(error, { phase: "init" });
+    throw error;
+  }
 
   return {
     dispatch: (message) => dispatchQueued(message),
@@ -334,9 +371,9 @@ async function mountRuntimeApp(
     dispose() {
       disposed = true;
       abortController.abort();
-      void disposeSubscriptions(activeSubscriptions);
+      void disposeSubscriptions(activeSubscriptions).catch((error) => reportError(error, { phase: "dispose" }));
       renderer.dispose();
-      void app.dispose?.();
+      void Promise.resolve(app.dispose?.()).catch((error) => reportError(error, { phase: "dispose" }));
     },
     getSnapshot() {
       return app.getSnapshot?.() ?? renderer.getSnapshot();
@@ -363,14 +400,52 @@ function patchContainer(
     return;
   }
 
-  const patched = patchNode(container, current, oldNode, newNode, handlers);
-  if (patched !== current) {
-    container.replaceChild(patched, current);
-  }
+  patchNode(container, current, oldNode, newNode, handlers);
 
   while (container.childNodes.length > 1) {
     removeDom(container.lastChild);
   }
+}
+
+function flattenRenderFrame(frame: VxRenderFrame): VxRenderFrame {
+  return { ...frame, root: flattenVNode(frame.root) };
+}
+
+function flattenVNode(vnode: VNode): VNode {
+  if (vnode.kind === "element") {
+    return {
+      ...vnode,
+      children: flattenChildren(vnode.children ?? []),
+    };
+  }
+  if (vnode.kind === "fragment") {
+    return {
+      ...vnode,
+      children: flattenChildren(vnode.children),
+    };
+  }
+  return vnode;
+}
+
+function flattenChildren(children: VNode[]): VNode[] {
+  return children.flatMap((child) => {
+    const flattened = flattenVNode(child);
+    if (flattened.kind !== "fragment") return [flattened];
+    if (flattened.key) {
+      return flattened.children.map((fragmentChild, index) =>
+        withVNodeKey(
+          fragmentChild,
+          flattened.children.length === 1
+            ? flattened.key!
+            : `${flattened.key}:${fragmentChild.key ?? index}`,
+        ));
+    }
+    return flattened.children;
+  });
+}
+
+function withVNodeKey(vnode: VNode, key: string): VNode {
+  return { ...vnode, key };
 }
 
 function patchNode(
@@ -546,17 +621,36 @@ function patchEvents(
       if (event.options?.preventDefault) browserEvent.preventDefault();
       if (event.options?.stopPropagation) browserEvent.stopPropagation();
       if (typeof event.handlerId === "number") {
+        if (event.mapHandlerIds?.length) {
+          settleAsyncDispatch(handlers?.dispatchMessage?.(
+            mapRuntimeMessage({
+              kind: "event",
+              handlerId: event.handlerId,
+              payload: normalizeBrowserEvent(browserEvent),
+            }, event.mapHandlerIds),
+          ));
+          return;
+        }
         void Promise.resolve(
           handlers?.dispatch(event.handlerId, normalizeBrowserEvent(browserEvent)),
         ).then((message) => {
           if (message !== undefined) {
-            return handlers?.dispatchMessage?.(message);
+            return handlers?.dispatchMessage?.(
+              event.mapHandlerIds?.length
+                ? mapRuntimeMessage(toVxMessage(message), event.mapHandlerIds)
+                : message,
+            );
           }
-        });
+        }).catch(() => undefined);
         return;
       }
       if (Object.hasOwn(event, "message")) {
-        void handlers?.dispatchMessage?.(event.message);
+        const message = toVxMessage(event.message);
+        settleAsyncDispatch(handlers?.dispatchMessage?.(
+          event.mapHandlerIds?.length
+            ? mapRuntimeMessage(message, event.mapHandlerIds)
+            : event.message,
+        ));
       }
     };
     const options = toListenerOptions(event.options);
@@ -688,6 +782,7 @@ function collectHandlerIds(vnode: VNode): Set<number> {
     if (node.kind === "element") {
       (node.events ?? []).forEach((event) => {
         if (typeof event.handlerId === "number") ids.add(event.handlerId);
+        event.mapHandlerIds?.forEach((handlerId) => ids.add(handlerId));
       });
       (node.children ?? []).forEach(visit);
       return;
@@ -723,23 +818,30 @@ async function runCommands(
     for (const child of input) await runCommands(child, host, context, taskObserver);
     return;
   }
-  if (!isRuntimeEnvelope(input, "cmd")) return;
+  const commandEnvelope = readRuntimeEnvelope(input, "cmd", "commands");
 
-  const nextTaskObserver = readTaskObserver(input) ?? taskObserver;
-  if (input.kind === "none") return;
-  if (input.kind === "message") {
-    await context.dispatch(toVxMessage(input.value));
+  const nextTaskObserver = readTaskObserver(commandEnvelope) ?? taskObserver;
+  if (commandEnvelope.kind === "none") return;
+  if (commandEnvelope.kind === "message") {
+    if (!Object.hasOwn(commandEnvelope, "value")) {
+      throw new Error("vx-dom: command message missing required value");
+    }
+    await context.dispatch(toVxMessage(commandEnvelope.value));
     return;
   }
-  if (input.kind === "batch") {
-    await runCommands(input.children, host, context, nextTaskObserver);
+  if (commandEnvelope.kind === "batch") {
+    if (!Object.hasOwn(commandEnvelope, "children")) {
+      throw new Error("vx-dom: command batch missing required children");
+    }
+    await runCommands(commandEnvelope.children, host, context, nextTaskObserver);
     return;
   }
-  if (input.kind === "map") {
-    const handlerId = readHandlerId(input);
-    if (handlerId === undefined) return;
+  if (commandEnvelope.kind === "map") {
+    const handlerId = readHandlerId(commandEnvelope);
+    if (handlerId === undefined) throw new Error("vx-dom: command map missing numeric handlerId");
+    const child = readRequiredMappedChild(commandEnvelope, "command map");
     await runCommands(
-      readMappedChild(input),
+      child,
       host,
       mapExecutionContext(context, handlerId),
       nextTaskObserver,
@@ -747,9 +849,11 @@ async function runCommands(
     return;
   }
   const command = nextTaskObserver
-    ? attachTaskObserver(input, nextTaskObserver)
-    : input;
-  await host?.commands?.[input.kind]?.(command, context);
+    ? attachTaskObserver(commandEnvelope, nextTaskObserver)
+    : commandEnvelope;
+  const executor = host?.commands?.[commandEnvelope.kind];
+  if (!executor) throw new Error(`vx-dom: no runtime command handler registered for "${commandEnvelope.kind}"`);
+  await executor(command, context);
 }
 
 function runDelayCommand(
@@ -757,10 +861,11 @@ function runDelayCommand(
   context: VxRuntimeExecutionContext,
 ): void {
   const ms = readMillis(command);
-  if (ms === undefined) return;
+  if (ms === undefined) throw new Error("vx-dom: delay command missing non-negative millis");
+  if (!Object.hasOwn(command, "value")) throw new Error("vx-dom: delay command missing value");
   const timeout = setTimeout(() => {
-    if (context.signal.aborted || !Object.hasOwn(command, "value")) return;
-    void context.dispatch(toVxMessage(command.value));
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(toVxMessage(command.value)));
   }, ms);
   context.signal.addEventListener("abort", () => clearTimeout(timeout), { once: true });
 }
@@ -771,10 +876,16 @@ function runTaskCommand(
 ): void {
   const taskId = readTaskId(command);
   const observeTask = readTaskObserver(command);
-  if (taskId === undefined || !observeTask) return;
+  if (taskId === undefined) throw new Error("vx-dom: task command missing numeric taskId");
+  if (!observeTask) throw new Error("vx-dom: task command requires task runtime support");
 
   void observeTask(taskId).then((outcome) => {
-    if (context.signal.aborted || outcome.kind !== "value") return;
+    if (context.signal.aborted) return;
+    if (outcome.kind === "failed") {
+      context.reportError?.(outcome.error, { phase: "commands" });
+      return;
+    }
+    if (outcome.kind !== "value") return;
     const handlerId = readHandlerId(command);
     const message = toVxMessage(outcome.value);
     return context.dispatch(
@@ -782,15 +893,19 @@ function runTaskCommand(
         ? message
         : { kind: "map", handlerId, message },
     );
+  }).catch((error) => {
+    context.reportError?.(error, { phase: "commands" });
   });
 }
 
 function runFocusCommand(command: VxCommandEnvelope): void {
+  if (typeof command.value !== "string") throw new Error("vx-dom: focus command missing string value");
   const target = findRefElement(command.value);
   if (target instanceof HTMLElement) target.focus();
 }
 
 function runScrollIntoViewCommand(command: VxCommandEnvelope): void {
+  if (typeof command.value !== "string") throw new Error("vx-dom: scroll_into_view command missing string value");
   const target = findRefElement(command.value);
   if (typeof target?.scrollIntoView === "function") target.scrollIntoView();
 }
@@ -800,10 +915,11 @@ function runIntervalSubscription(
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
   const ms = readMillis(subscription);
-  if (ms === undefined || !Object.hasOwn(subscription, "value")) return;
+  if (ms === undefined) throw new Error("vx-dom: interval subscription missing non-negative millis");
+  if (!Object.hasOwn(subscription, "value")) throw new Error("vx-dom: interval subscription missing value");
   const interval = setInterval(() => {
     if (context.signal.aborted) return;
-    void context.dispatch(toVxMessage(subscription.value));
+    settleAsyncDispatch(context.dispatch(toVxMessage(subscription.value)));
   }, ms);
   return () => clearInterval(interval);
 }
@@ -812,6 +928,7 @@ function runKeyboardSubscription(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
+  if (!Object.hasOwn(subscription, "value")) throw new Error("vx-dom: keyboard subscription missing value");
   const eventName = typeof subscription.event === "string"
     ? subscription.event
     : "keydown";
@@ -820,13 +937,13 @@ function runKeyboardSubscription(
     if (context.signal.aborted) return;
     const subscribedKey = optionalSubscriptionKey(subscription);
     if (subscribedKey && isKeyboardEvent(event) && event.key !== subscribedKey) return;
-    void context.dispatch({
+    settleAsyncDispatch(context.dispatch({
       kind: "subscription",
       subscriptionKind: "keyboard",
       key: subscribedKey,
       value: subscription.value,
       payload: normalizeBrowserEvent(event),
-    });
+    }));
   };
   window.addEventListener(eventName, listener);
   return () => window.removeEventListener(eventName, listener);
@@ -834,33 +951,39 @@ function runKeyboardSubscription(
 
 async function syncRuntimeSubscriptions(
   input: unknown,
-  active: Map<string, VxSubscriptionDisposer>,
+  active: Map<string, ActiveSubscription>,
   host: VxRuntimeHostOptions | undefined,
   context: VxRuntimeExecutionContext,
 ): Promise<void> {
   const next = flattenSubscriptions(input);
-  const nextKeys = new Set(next.map(subscriptionKey));
+  const nextKeys = new Set(next.map(subscriptionIdentityKey));
 
-  for (const [key, dispose] of active) {
+  for (const [key, record] of active) {
     if (nextKeys.has(key)) continue;
-    await dispose();
+    await record.dispose();
     active.delete(key);
   }
 
   for (const subscription of next) {
-    const key = subscriptionKey(subscription);
-    if (active.has(key)) continue;
+    const key = subscriptionIdentityKey(subscription);
+    const signature = subscriptionSignature(subscription);
+    const previous = active.get(key);
+    if (previous?.signature === signature) continue;
+    if (previous) {
+      await previous.dispose();
+      active.delete(key);
+    }
     const runner = host?.subscriptions?.[subscription.kind];
-    if (!runner) continue;
+    if (!runner) throw new Error(`vx-dom: no runtime subscription handler registered for "${subscription.kind}"`);
     const dispose = await runner(subscription, mapSubscriptionContext(subscription, context));
-    active.set(key, dispose ?? (() => undefined));
+    active.set(key, { signature, dispose: dispose ?? (() => undefined) });
   }
 }
 
 async function disposeSubscriptions(
-  active: Map<string, VxSubscriptionDisposer>,
+  active: Map<string, ActiveSubscription>,
 ): Promise<void> {
-  const disposers = Array.from(active.values());
+  const disposers = Array.from(active.values()).map((record) => record.dispose);
   active.clear();
   for (const dispose of disposers) await dispose();
 }
@@ -873,27 +996,37 @@ function flattenSubscriptions(
   if (Array.isArray(input)) {
     return input.flatMap((child) => flattenSubscriptions(child, mapHandlerIds));
   }
-  if (!isRuntimeEnvelope(input, "sub")) return [];
-  if (input.kind === "none") return [];
-  if (input.kind === "batch") return flattenSubscriptions(input.children, mapHandlerIds);
-  if (input.kind === "map") {
-    const handlerId = readHandlerId(input);
-    if (handlerId === undefined) return [];
-    return flattenSubscriptions(readMappedChild(input), [...mapHandlerIds, handlerId]);
+  const envelope = readRuntimeEnvelope(input, "sub", "subscriptions");
+  if (envelope.kind === "none") return [];
+  if (envelope.kind === "batch") {
+    if (!Object.hasOwn(envelope, "children")) {
+      throw new Error("vx-dom: subscription batch missing required children");
+    }
+    return flattenSubscriptions(envelope.children, mapHandlerIds);
   }
-  if (mapHandlerIds.length === 0) return [input];
-  return [{ ...input, [mapHandlerIdsProperty]: mapHandlerIds }];
+  if (envelope.kind === "map") {
+    const handlerId = readHandlerId(envelope);
+    if (handlerId === undefined) throw new Error("vx-dom: subscription map missing numeric handlerId");
+    return flattenSubscriptions(readRequiredMappedChild(envelope, "subscription map"), [...mapHandlerIds, handlerId]);
+  }
+  if (!optionalSubscriptionKey(envelope)) {
+    throw new Error(`vx-dom: subscription "${envelope.kind}" requires a stable key`);
+  }
+  if (mapHandlerIds.length === 0) return [envelope];
+  return [{ ...envelope, [mapHandlerIdsProperty]: mapHandlerIds }];
 }
 
-function subscriptionKey(subscription: VxSubscriptionEnvelope): string {
+function subscriptionIdentityKey(subscription: VxSubscriptionEnvelope): string {
   const mapPrefix = mappedHandlerIds(subscription)
     .map((id) => `map:${id}`)
     .join("/");
   const explicitKey = subscription.key ?? subscription.id;
-  const base = typeof explicitKey === "string" || typeof explicitKey === "number"
-    ? `${subscription.kind}:${String(explicitKey)}`
-    : `${subscription.kind}:${stableStringify(subscription)}`;
+  const base = `${subscription.kind}:${String(explicitKey)}`;
   return mapPrefix ? `${mapPrefix}|${base}` : base;
+}
+
+function subscriptionSignature(subscription: VxSubscriptionEnvelope): string {
+  return stableStringify(subscription);
 }
 
 function optionalSubscriptionKey(subscription: VxSubscriptionEnvelope): string | undefined {
@@ -907,6 +1040,7 @@ function isKeyboardEvent(event: Event): event is KeyboardEvent {
 
 function stableStringify(input: unknown): string {
   if (Array.isArray(input)) return `[${input.map(stableStringify).join(",")}]`;
+  if (typeof input === "bigint") return `${input}n`;
   if (!isRecord(input)) return JSON.stringify(input);
   const entries = Object.keys(input)
     .sort()
@@ -919,6 +1053,17 @@ function isRuntimeEnvelope<T extends VxRuntimeEnvelope["type"]>(
   type: T,
 ): input is T extends "cmd" ? VxCommandEnvelope : VxSubscriptionEnvelope {
   return isRecord(input) && input.type === type && typeof input.kind === "string";
+}
+
+function readRuntimeEnvelope<T extends VxRuntimeEnvelope["type"]>(
+  input: unknown,
+  type: T,
+  path: string,
+): T extends "cmd" ? VxCommandEnvelope : VxSubscriptionEnvelope {
+  if (!isRuntimeEnvelope(input, type)) {
+    throw new Error(`vx-dom: invalid ${type === "cmd" ? "command" : "subscription"} envelope at ${path}`);
+  }
+  return input as T extends "cmd" ? VxCommandEnvelope : VxSubscriptionEnvelope;
 }
 
 function readMillis(input: Record<string, unknown>): number | undefined {
@@ -937,6 +1082,7 @@ function mapExecutionContext(
 ): VxRuntimeExecutionContext {
   return {
     signal: context.signal,
+    reportError: context.reportError,
     dispatch: (message) => context.dispatch({ kind: "map", handlerId, message }),
   };
 }
@@ -945,7 +1091,7 @@ function mapSubscriptionContext(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
 ): VxRuntimeExecutionContext {
-  return mappedHandlerIds(subscription).reduceRight(
+  return mappedHandlerIds(subscription).reduce(
     (next, handlerId) => mapExecutionContext(next, handlerId),
     context,
   );
@@ -995,6 +1141,12 @@ function readMappedChild(input: Record<string, unknown>): unknown {
   return input.child ?? input.command ?? input.subscription;
 }
 
+function readRequiredMappedChild(input: Record<string, unknown>, label: string): unknown {
+  const child = readMappedChild(input);
+  if (child === undefined) throw new Error(`vx-dom: ${label} missing required child`);
+  return child;
+}
+
 function findRefElement(value: unknown): Element | undefined {
   if (typeof document === "undefined" || typeof value !== "string") return undefined;
   const refs = Array.from(document.querySelectorAll("[data-vx-ref]"));
@@ -1016,6 +1168,19 @@ function normalizeRuntimeStep(input: unknown): VxRuntimeStep {
   return { frame: input };
 }
 
+function toRuntimeMessage(input: unknown): VxRuntimeMessage {
+  if (isRecord(input) && input.kind === "event" && typeof input.handlerId === "number") {
+    return input as VxRuntimeMessage;
+  }
+  if (isRecord(input) && input.kind === "subscription" && typeof input.subscriptionKind === "string") {
+    return input as VxRuntimeMessage;
+  }
+  if (isRecord(input) && input.kind === "map" && typeof input.handlerId === "number") {
+    return input as VxRuntimeMessage;
+  }
+  return toVxMessage(input);
+}
+
 function toVxMessage(input: unknown): VxMessage {
   if (isRecord(input) && input.kind === "debug" && typeof input.name === "string") {
     return input as VxMessage;
@@ -1026,6 +1191,17 @@ function toVxMessage(input: unknown): VxMessage {
   return { kind: "msgpack", value: input };
 }
 
+function mapRuntimeMessage(message: VxRuntimeMessage, handlerIds: number[]): VxRuntimeMessage {
+  return handlerIds.reduce<VxRuntimeMessage>(
+    (child, handlerId) => ({ kind: "map", handlerId, message: child }),
+    message,
+  );
+}
+
+function settleAsyncDispatch(result: Promise<unknown> | unknown): void {
+  void Promise.resolve(result).catch(() => undefined);
+}
+
 function initialHydrationFrame(
   options: { hydrationData?: string | VxRenderFrame },
 ): unknown {
@@ -1033,6 +1209,14 @@ function initialHydrationFrame(
     return JSON.parse(options.hydrationData) as unknown;
   }
   return options.hydrationData;
+}
+
+function createRuntimeErrorReporter(
+  onError: VxRuntimeErrorHandler | undefined,
+): VxRuntimeErrorHandler {
+  return (error: unknown, context: VxRuntimeErrorContext) => {
+    onError?.(error, context);
+  };
 }
 
 async function resolveInstanceForMount(

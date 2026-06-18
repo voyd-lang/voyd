@@ -858,7 +858,7 @@ enum Msg
 pub fn app() -> Program<ClientArticle, Msg>
   program<ClientArticle, Msg>(
     init: init,
-    update: update,
+    step: step,
     view: view
   )
 
@@ -874,10 +874,10 @@ fn init() -> ClientArticle
     save_count: 0
   }
 
-fn update(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::TaskRuntime) -> Program<ClientArticle, Msg>
+fn step(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::TaskRuntime) -> Program<ClientArticle, Msg>
   match(message)
     Msg::Edit { value }:
-      next(ClientArticle {
+      next<ClientArticle, Msg>(ClientArticle {
         slug: model.slug,
         title: model.title,
         body: value,
@@ -888,7 +888,7 @@ fn update(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::
         save_count: model.save_count
       })
     Msg::Reset:
-      next(ClientArticle {
+      next<ClientArticle, Msg>(ClientArticle {
         slug: model.slug,
         title: model.title,
         body: model.saved_body,
@@ -899,7 +899,7 @@ fn update(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::
         save_count: model.save_count
       })
     Msg::TogglePreview:
-      next(ClientArticle {
+      next<ClientArticle, Msg>(ClientArticle {
         slug: model.slug,
         title: model.title,
         body: model.body,
@@ -911,7 +911,7 @@ fn update(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::
       })
     Msg::Save:
       if is_saving(model) or not is_dirty(model):
-        return next(model)
+        return next<ClientArticle, Msg>(model)
       let save = tasks::detach do:
         save_article(model.slug, model.body)
       program<ClientArticle, Msg>(
@@ -932,7 +932,7 @@ fn update(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::
       )
     Msg::SaveFinished { code }:
       if code == 1:
-        return next(ClientArticle {
+        return next<ClientArticle, Msg>(ClientArticle {
           slug: model.slug,
           title: model.title,
           body: model.body,
@@ -942,7 +942,7 @@ fn update(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::
           preview_open: model.preview_open,
           save_count: model.save_count + 1
         })
-      next(ClientArticle {
+      next<ClientArticle, Msg>(ClientArticle {
         slug: model.slug,
         title: model.title,
         body: model.body,
@@ -1037,9 +1037,6 @@ fn Stat({ label: String, value: String }) -> Html<Msg>
     <div class="text-xs font-medium uppercase tracking-wide text-zinc-500">{label}</div>
     <div class="mt-1 font-semibold text-zinc-950">{value}</div>
   </div>
-
-fn next(model: ClientArticle) -> Program<ClientArticle, Msg>
-  program<ClientArticle, Msg>(model: model)
 
 fn save_article(slug: String, body: String): http_client::HttpClient -> i32
   let result: Result<Response, HostError> = http_client::post(url: article_body_action(slug), body: Body::text(body))

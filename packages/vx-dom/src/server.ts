@@ -1,5 +1,10 @@
 import { callComponentFn } from "./memory.js";
-import { normalizeRenderFrame } from "./normalize.js";
+import {
+  normalizeRenderFrame,
+  validateCssPropertyName,
+  validateHtmlAttributeName,
+  validateHtmlTagName,
+} from "./normalize.js";
 import type { CallOptions, VNode, VxRenderFrame, VoydComponentFn } from "./types.js";
 
 export type ServerRenderResult = {
@@ -71,6 +76,7 @@ export function renderNodeToString(vnode: VNode): string {
   if (vnode.kind === "text") return escapeText(vnode.value);
   if (vnode.kind === "fragment") return vnode.children.map(renderNodeToString).join("");
 
+  validateHtmlTagName(vnode.tag, "server.tag");
   const attrs = renderAttrs(vnode);
   if (voidTags.has(vnode.tag)) return `<${vnode.tag}${attrs}>`;
   const children = (vnode.children ?? []).map(renderNodeToString).join("");
@@ -84,13 +90,17 @@ function renderAttrs(vnode: Extract<VNode, { kind: "element" }>): string {
     else attrs[key] = value;
   });
   const style = Object.entries(vnode.styles ?? {})
-    .map(([key, value]) => `${key}: ${value}`)
+    .map(([key, value]) => {
+      validateCssPropertyName(key, `server.styles.${key}`);
+      return `${key}: ${value}`;
+    })
     .join("; ");
   if (style) attrs.style = style;
 
   return Object.entries(attrs)
     .flatMap(([key, value]) => {
       if (key === "key" || value == null || value === false) return [];
+      validateHtmlAttributeName(key, `server.attrs.${key}`);
       if (value === true) return [` ${key}`];
       return [` ${key}="${escapeAttribute(String(value))}"`];
     })

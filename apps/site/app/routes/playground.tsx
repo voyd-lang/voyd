@@ -28,17 +28,17 @@ enum Msg
 pub fn app() -> Program<Model, Msg>
   program<Model, Msg>(
     init: init,
-    update: update,
+    step: step,
     view: view
   )
 
 fn init() -> Model
   Model { count: 0 }
 
-fn update(model: Model, message: Msg) -> Program<Model, Msg>
+fn step(model: Model, message: Msg) -> Program<Model, Msg>
   match(message)
     Msg::Increment:
-      program<Model, Msg>(model: Model { count: model.count + 1 })
+      next<Model, Msg>(Model { count: model.count + 1 })
 
 fn view(model: Model) -> Html<Msg>
   <main style="
@@ -56,7 +56,7 @@ fn view(model: Model) -> Html<Msg>
       background: rgba(148, 163, 184, 0.12);
     ">
       <p>
-        Typed messages update the model in Voyd.
+        Typed messages step the model in Voyd.
       </p>
       <button
         type="button"
