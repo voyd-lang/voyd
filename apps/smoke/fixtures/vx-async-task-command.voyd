@@ -1,4 +1,7 @@
 use std::enums::{ enum }
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
+use std::result::types::all
 use std::string::type::String
 use std::task::self as tasks
 use std::vx::all
@@ -24,13 +27,11 @@ fn init() -> Model
 fn step(model: Model, msg: Msg): tasks::TaskRuntime -> Program<Model, Msg>
   match(msg)
     Msg::Save:
-      let save = tasks::detach do:
-        41
       next<Model, Msg>(
         model: Model { status: "Saving..." },
-        cmd: Cmd<Msg>::perform<i32>(
-          task: save,
-          handler: (value: i32) -> Msg => Msg::Saved { value: value }
+        cmd: Cmd<Msg>::task(
+          work: () -> MsgPack => msgpack::make_i32(41),
+          handler: (value: MsgPack) -> Msg => Msg::Saved { value: saved_value(value) }
         )
       )
     Msg::Saved { value }:
@@ -43,3 +44,10 @@ fn saved_label(value: i32) -> String
   if
     value == 41: "Saved: 41"
     else: "Saved"
+
+fn saved_value(value: MsgPack) -> i32
+  match(msgpack::unpack_i32(value))
+    Ok<i32> { value }:
+      value
+    Err:
+      0

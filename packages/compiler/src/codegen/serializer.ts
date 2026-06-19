@@ -7,6 +7,35 @@ export const findSerializerForType = (
   ctx: CodegenContext
 ): SerializerMetadata | undefined => {
   const serializers: SerializerMetadata[] = [];
+  collectSerializersForType({ typeId, ctx, serializers, seen: new Set() });
+
+  if (serializers.length === 0) {
+    return undefined;
+  }
+
+  const reference = serializers[0]!;
+  const mismatch = serializers.find((serializer) => !sameSerializer(serializer, reference));
+  if (mismatch) {
+    throw new Error(`conflicting serializers for type ${typeId}`);
+  }
+  return reference;
+};
+
+const collectSerializersForType = ({
+  typeId,
+  ctx,
+  serializers,
+  seen,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+  serializers: SerializerMetadata[];
+  seen: Set<TypeId>;
+}): void => {
+  if (seen.has(typeId)) {
+    return;
+  }
+  seen.add(typeId);
 
   const aliasSymbols = ctx.program.types.getAliasSymbols(typeId);
   aliasSymbols.forEach((symbol) => {
@@ -24,16 +53,34 @@ export const findSerializerForType = (
     }
   }
 
-  if (serializers.length === 0) {
-    return undefined;
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  if (desc.kind === "recursive") {
+    collectSerializersForType({
+      typeId: desc.body,
+      ctx,
+      serializers,
+      seen,
+    });
+    return;
   }
-
-  const reference = serializers[0]!;
-  const mismatch = serializers.find((serializer) => !sameSerializer(serializer, reference));
-  if (mismatch) {
-    throw new Error(`conflicting serializers for type ${typeId}`);
+  if (desc.kind === "intersection") {
+    if (typeof desc.nominal === "number") {
+      collectSerializersForType({
+        typeId: desc.nominal,
+        ctx,
+        serializers,
+        seen,
+      });
+    }
+    if (typeof desc.structural === "number") {
+      collectSerializersForType({
+        typeId: desc.structural,
+        ctx,
+        serializers,
+        seen,
+      });
+    }
   }
-  return reference;
 };
 
 export const resolveSerializerForTypes = (

@@ -70,6 +70,59 @@ describe("createVoydVxAppRuntime", () => {
     });
   });
 
+  it("maps program result models and outward messages", async () => {
+    const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
+      if (id === 31) return { parent: payload };
+      throw new Error(`unexpected retained handler ${id}`);
+    });
+    const childResult = {
+      $vx: "runtime_result",
+      model: { count: 1 },
+      frame: { version: 1, root: textFrame("Child").root },
+      commands: { type: "cmd", kind: "message", value: "child" },
+      subscriptions: { type: "sub", kind: "keyboard", key: "child" },
+    };
+    const host = fakeHost({
+      init: async () => ({
+        kind: "program_map_model",
+        handlerId: 31,
+        child: {
+          kind: "program_map_message",
+          handlerId: 42,
+          child: childResult,
+        },
+      }),
+      view: async ([current]) => textFrame(`Parent: ${JSON.stringify(current)}`),
+    });
+    host.retainedCallbacks = { dispatch: retainedDispatch };
+    const app = createVoydVxAppRuntime({ host });
+
+    await expect(app.init?.()).resolves.toEqual({
+      frame: {
+        version: 1,
+        root: {
+          kind: "map",
+          child: textFrame("Child").root,
+          handlerId: 42,
+        },
+      },
+      commands: {
+        type: "cmd",
+        kind: "map",
+        child: { type: "cmd", kind: "message", value: "child" },
+        handlerId: 42,
+      },
+      subscriptions: {
+        type: "sub",
+        kind: "map",
+        child: { type: "sub", kind: "keyboard", key: "child" },
+        handlerId: 42,
+      },
+      snapshot: { parent: { count: 1 } },
+    });
+    expect(retainedDispatch).toHaveBeenCalledWith(31, { count: 1 });
+  });
+
   it("treats plain object results as models even when they use runtime field names", async () => {
     const firstModel = {
       model: "nested",
@@ -211,6 +264,112 @@ describe("createVoydVxAppRuntime", () => {
       subscriptions: undefined,
       snapshot: "stepped:tick",
     });
+  });
+
+  it("maps program descriptors for model snapshots and outward messages", async () => {
+    const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
+      if (id === 1) return { count: 1 };
+      if (id === 2) {
+        const [current, message] = payload as unknown[];
+        return {
+          $vx: "runtime_result",
+          model: { count: Number((current as { count: number }).count) + 1 },
+          commands: { type: "cmd", kind: "message", value: message },
+        };
+      }
+      if (id === 3) return textFrame(`Child: ${String((payload as { count: number }).count)}`);
+      if (id === 31) return { child: payload };
+      throw new Error(`unexpected retained handler ${id}`);
+    });
+    const host = fakeHost({
+      app: async () => ({
+        kind: "program_map_model",
+        handlerId: 31,
+        child: {
+          kind: "program_map_message",
+          handlerId: 42,
+          child: {
+            kind: "program",
+            initHandlerId: 1,
+            stepHandlerId: 2,
+            viewHandlerId: 3,
+          },
+        },
+      }),
+    });
+    host.hasExport = (entryName) => entryName === "app";
+    host.retainedCallbacks = { dispatch: retainedDispatch };
+    const app = createVoydVxAppRuntime({ host });
+
+    await expect(app.init?.()).resolves.toMatchObject({
+      frame: {
+        version: 1,
+        root: { kind: "map", handlerId: 42 },
+      },
+      snapshot: { child: { count: 1 } },
+    });
+    await expect(
+      app.dispatch({
+        kind: "map",
+        handlerId: 42,
+        message: { kind: "msgpack", value: "child-tick" },
+      }),
+    ).resolves.toMatchObject({
+      commands: {
+        type: "cmd",
+        kind: "map",
+        handlerId: 42,
+        child: { type: "cmd", kind: "message", value: "child-tick" },
+      },
+      snapshot: { child: { count: 2 } },
+    });
+    expect(retainedDispatch).toHaveBeenCalledWith(2, [{ count: 1 }, "child-tick"]);
+    expect(retainedDispatch).toHaveBeenCalledWith(31, { count: 2 });
+  });
+
+  it("does not hydrate mapped-model descriptors with parent-shaped snapshots", async () => {
+    const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
+      if (id === 1) return { count: 1 };
+      if (id === 2) {
+        const [current] = payload as unknown[];
+        return {
+          $vx: "runtime_result",
+          model: { count: Number((current as { count: number }).count) + 1 },
+        };
+      }
+      if (id === 3) return textFrame(`Child: ${String((payload as { count: number }).count)}`);
+      if (id === 31) return { parent: payload };
+      throw new Error(`unexpected retained handler ${id}`);
+    });
+    const host = fakeHost({
+      app: async () => ({
+        kind: "program_map_model",
+        handlerId: 31,
+        child: {
+          kind: "program",
+          initHandlerId: 1,
+          stepHandlerId: 2,
+          viewHandlerId: 3,
+        },
+      }),
+    });
+    host.hasExport = (entryName) => entryName === "app";
+    host.retainedCallbacks = { dispatch: retainedDispatch };
+    const app = createVoydVxAppRuntime({
+      host,
+      initialModel: { parent: { count: 99 } },
+    });
+
+    await expect(app.init?.()).resolves.toMatchObject({
+      frame: textFrame("Child: 1"),
+      snapshot: { parent: { count: 1 } },
+    });
+    await expect(app.dispatch({ kind: "msgpack", value: "tick" })).resolves.toMatchObject({
+      frame: textFrame("Child: 2"),
+      snapshot: { parent: { count: 2 } },
+    });
+    expect(retainedDispatch).toHaveBeenCalledWith(3, { count: 1 });
+    expect(retainedDispatch).toHaveBeenCalledWith(2, [{ count: 1 }, "tick"]);
   });
 
   it("keeps repeated component state call-site occurrences in distinct slots", async () => {

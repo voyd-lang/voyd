@@ -160,7 +160,11 @@ describe("smoke: compiled VX DOM rendering", () => {
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const app = createVoydVxAppRuntime({ host });
+    await expect(host.run("mapped_program_result")).resolves.toMatchObject({
+      kind: "program_map_message",
+      child: { kind: "program_map_model" },
+    });
+    const app = createVoydVxAppRuntime({ host, app: "mapped_app" });
 
     const container = document.createElement("div");
     const mounted = await mountVxApp({ container, app });

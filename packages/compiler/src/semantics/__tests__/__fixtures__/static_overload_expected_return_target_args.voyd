@@ -1,0 +1,12 @@
+obj StaticBox<Owner> { }
+
+impl<Owner> StaticBox<Owner>
+  fn produce(value: Owner) -> Owner
+    value
+
+  fn produce<T>(value: T) -> bool
+    true
+
+fn main() -> i32
+  let produced: i32 = StaticBox<i32>::produce(19)
+  produced

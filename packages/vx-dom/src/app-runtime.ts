@@ -45,13 +45,31 @@ type RuntimeResult = Record<string, unknown> & {
 };
 
 type ProgramDescriptor = {
+  kind: "program";
   initHandlerId: number;
   stepHandlerId: number;
   viewHandlerId: number;
   subscriptionsHandlerId?: number;
+} | {
+  kind: "program_map_model";
+  handlerId: number;
+  child: ProgramDescriptor;
+} | {
+  kind: "program_map_message";
+  handlerId: number;
+  child: ProgramDescriptor;
 };
 
 type TaskObserver = (taskId: number) => Promise<unknown>;
+type RetainedDispatch = (handlerId: number, payload: unknown) => Promise<unknown>;
+
+type ProgramDescriptorRunner = {
+  hydrate(model: unknown): boolean;
+  init(): Promise<RuntimeResult>;
+  step(message: VxRuntimeMessage): Promise<RuntimeResult>;
+  view(): Promise<unknown>;
+  subscriptions(): Promise<unknown>;
+};
 
 const taskObserverProperty = Symbol.for("voyd.taskObserver");
 
@@ -77,7 +95,7 @@ export function createVoydVxAppRuntime(
     !options.exports &&
     appEntryName !== undefined &&
     options.host.hasExport?.(appEntryName) === true;
-  let programDescriptor: ProgramDescriptor | undefined;
+  let programRunner: ProgramDescriptorRunner | undefined;
   let model = options.initialModel;
   let initialized = Object.hasOwn(options, "initialModel");
   const componentState = createComponentStateRuntime(options.host);
@@ -96,11 +114,15 @@ export function createVoydVxAppRuntime(
     return options.host.retainedCallbacks;
   };
 
-  const readProgramDescriptor = async (): Promise<ProgramDescriptor | undefined> => {
+  const readProgramRunner = async (): Promise<ProgramDescriptorRunner | undefined> => {
     if (!shouldUseProgramDescriptor || !appEntryName) return undefined;
-    if (programDescriptor) return programDescriptor;
-    programDescriptor = parseProgramDescriptor(await options.host.run(appEntryName));
-    return programDescriptor;
+    if (programRunner) return programRunner;
+    programRunner = createProgramDescriptorRunner({
+      descriptor: parseProgramDescriptor(await options.host.run(appEntryName)),
+      host: options.host,
+      dispatch: runProgramHandler,
+    });
+    return programRunner;
   };
 
   const runProgramHandler = async <T = unknown>(
@@ -114,9 +136,9 @@ export function createVoydVxAppRuntime(
     for (let pass = 0; pass < 5; pass += 1) {
       componentState.resetDirty();
       componentState.beginRender();
-      const descriptor = await readProgramDescriptor();
+      const descriptor = await readProgramRunner();
       frame = descriptor
-        ? await runProgramHandler(descriptor.viewHandlerId, requireModel())
+        ? await descriptor.view()
         : await options.host.run(
             entryNames.view,
             options.viewReceivesModel === false ? [] : [requireModel()],
@@ -128,9 +150,9 @@ export function createVoydVxAppRuntime(
   };
 
   const readSubscriptions = async (): Promise<unknown> =>
-    readProgramDescriptor().then((descriptor) =>
-      descriptor?.subscriptionsHandlerId !== undefined
-        ? runProgramHandler(descriptor.subscriptionsHandlerId, requireModel())
+    readProgramRunner().then((descriptor) =>
+      descriptor
+        ? descriptor.subscriptions()
         : entryNames.subscriptions
           ? options.host.run(entryNames.subscriptions, [requireModel()])
           : undefined,
@@ -140,12 +162,18 @@ export function createVoydVxAppRuntime(
     result: unknown,
     adoptPlainModel: boolean,
   ): Promise<VxRuntimeStep> => {
-    const runtimeResult = isRuntimeResult(result) ? result : undefined;
+    const resolvedResult = await resolveProgramResultMaps(
+      result,
+      runProgramHandler,
+    );
+    const runtimeResult = isRuntimeResult(resolvedResult)
+      ? resolvedResult
+      : undefined;
     if (runtimeResult && Object.hasOwn(runtimeResult, "model")) {
       model = runtimeResult.model;
       initialized = true;
     } else if (adoptPlainModel) {
-      model = result;
+      model = resolvedResult;
       initialized = true;
     }
 
@@ -158,7 +186,7 @@ export function createVoydVxAppRuntime(
 
     const commands = attachTaskObserver(
       runtimeResult?.commands,
-      readTaskObserver(result),
+      readTaskObserver(resolvedResult) ?? readTaskObserver(result),
     );
 
     return {
@@ -171,27 +199,38 @@ export function createVoydVxAppRuntime(
 
   return {
     init: async () => {
-      const descriptor = await readProgramDescriptor();
+      const descriptor = await readProgramRunner();
+      if (initialized && descriptor?.hydrate(model)) {
+        const result = runtimeResult({ model });
+        return toRuntimeStep(result, true);
+      }
       const result = initialized
-        ? runtimeResult({ model })
+        ? descriptor
+          ? await descriptor.init()
+          : runtimeResult({ model })
         : descriptor
-          ? await runProgramHandler(descriptor.initHandlerId, undefined)
+          ? await descriptor.init()
           : await options.host.run(entryNames.init);
       return toRuntimeStep(result, true);
     },
     render,
     dispatch: async (message) => {
-      const resolved = await resolveRuntimeMessage(options.host, message);
-      if (resolved === noRuntimeMessage) {
-        return toRuntimeStep(runtimeResult({ model: requireModel() }), false);
+      const descriptor = await readProgramRunner();
+      if (!descriptor) {
+        const resolved = await resolveRuntimeMessage(options.host, message);
+        if (resolved === noRuntimeMessage) {
+          return toRuntimeStep(runtimeResult({ model: requireModel() }), false);
+        }
+        const result = await options.host.run(entryNames.step, [
+          requireModel(),
+          resolved,
+        ]);
+        return toRuntimeStep(result, true);
       }
-      const descriptor = await readProgramDescriptor();
+
       const result = descriptor
-        ? await runProgramHandler(descriptor.stepHandlerId, [requireModel(), resolved])
-        : await options.host.run(entryNames.step, [
-            requireModel(),
-            resolved,
-          ]);
+        ? await descriptor.step(message)
+        : runtimeResult({ model: requireModel() });
       return toRuntimeStep(result, true);
     },
     getSnapshot: () => model,
@@ -271,6 +310,135 @@ function createComponentStateRuntime(host: VoydVxAppHost): {
   };
 }
 
+function createProgramDescriptorRunner({
+  descriptor,
+  host,
+  dispatch,
+}: {
+  descriptor: ProgramDescriptor;
+  host: VoydVxAppHost;
+  dispatch: RetainedDispatch;
+}): ProgramDescriptorRunner {
+  if (descriptor.kind === "program_map_model") {
+    const child = createProgramDescriptorRunner({
+      descriptor: descriptor.child,
+      host,
+      dispatch,
+    });
+    const mapModel = async (result: RuntimeResult): Promise<RuntimeResult> => {
+      const modelInput = Object.hasOwn(result, "model")
+        ? result.model
+        : undefined;
+      const mappedModel = await dispatch(descriptor.handlerId, modelInput);
+      return copyTaskObserver(result, { ...result, model: mappedModel }) as RuntimeResult;
+    };
+    return {
+      hydrate: () => false,
+      init: async () => mapModel(await child.init()),
+      step: async (message) => mapModel(await child.step(message)),
+      view: () => child.view(),
+      subscriptions: () => child.subscriptions(),
+    };
+  }
+
+  if (descriptor.kind === "program_map_message") {
+    const child = createProgramDescriptorRunner({
+      descriptor: descriptor.child,
+      host,
+      dispatch,
+    });
+    const mapMessages = (result: RuntimeResult): RuntimeResult =>
+      copyTaskObserver(result, {
+        ...result,
+        ...(Object.hasOwn(result, "frame")
+          ? { frame: mapProgramFrame(result.frame, descriptor.handlerId) }
+          : {}),
+        ...(Object.hasOwn(result, "commands")
+          ? { commands: mapProgramEnvelope(result.commands, "cmd", descriptor.handlerId) }
+          : {}),
+        ...(Object.hasOwn(result, "subscriptions")
+          ? {
+              subscriptions: mapProgramEnvelope(
+                result.subscriptions,
+                "sub",
+                descriptor.handlerId,
+              ),
+            }
+          : {}),
+      }) as RuntimeResult;
+    return {
+      hydrate: (model) => child.hydrate(model),
+      init: async () => mapMessages(await child.init()),
+      step: async (message) => {
+        const childMessage =
+          message.kind === "map" && message.handlerId === descriptor.handlerId
+            ? message.message
+            : message;
+        return mapMessages(await child.step(childMessage));
+      },
+      view: async () => mapProgramFrame(await child.view(), descriptor.handlerId),
+      subscriptions: async () =>
+        mapProgramEnvelope(
+          await child.subscriptions(),
+          "sub",
+          descriptor.handlerId,
+        ),
+    };
+  }
+
+  let model: unknown;
+  let initialized = false;
+  const requireLocalModel = (): unknown => {
+    if (!initialized) {
+      throw new Error("vx-dom: Voyd VX app runtime has not been initialized");
+    }
+    return model;
+  };
+  const adoptResult = (
+    result: unknown,
+    adoptPlainModel: boolean,
+  ): RuntimeResult => {
+    if (isRuntimeResult(result)) {
+      if (Object.hasOwn(result, "model")) {
+        model = result.model;
+        initialized = true;
+      }
+      return result;
+    }
+    if (adoptPlainModel) {
+      model = result;
+      initialized = true;
+      return runtimeResult({ model: result });
+    }
+    return runtimeResult({ model: requireLocalModel() });
+  };
+
+  return {
+    hydrate: (nextModel) => {
+      model = nextModel;
+      initialized = true;
+      return true;
+    },
+    init: async () =>
+      adoptResult(await dispatch(descriptor.initHandlerId, undefined), true),
+    step: async (message) => {
+      const resolved = await resolveRuntimeMessage(host, message);
+      if (resolved === noRuntimeMessage) {
+        return runtimeResult({ model: requireLocalModel() });
+      }
+      return adoptResult(
+        await dispatch(descriptor.stepHandlerId, [requireLocalModel(), resolved]),
+        true,
+      );
+    },
+    view: () => dispatch(descriptor.viewHandlerId, requireLocalModel()),
+    subscriptions: () =>
+      descriptor.subscriptionsHandlerId !== undefined
+        ? dispatch(descriptor.subscriptionsHandlerId, requireLocalModel())
+        : Promise.resolve(undefined),
+  };
+}
+
 const slotKey = (
   baseId: number,
   scopeStack: readonly string[],
@@ -342,6 +510,97 @@ function attachTaskObserver(input: unknown, observer: TaskObserver | undefined):
   return input;
 }
 
+async function resolveProgramResultMaps(
+  input: unknown,
+  dispatch: RetainedDispatch,
+): Promise<unknown> {
+  if (!isRecord(input)) return input;
+
+  if (input.kind === "program_map_model") {
+    const child = await resolveProgramResultMaps(input.child, dispatch);
+    const handlerId = readProgramMapHandlerId(input, "program_map_model");
+    const modelInput = isRuntimeResult(child) && Object.hasOwn(child, "model")
+      ? child.model
+      : child;
+    const mappedModel = await dispatch(handlerId, modelInput);
+    if (!isRuntimeResult(child)) return mappedModel;
+    return copyTaskObserver(child, { ...child, model: mappedModel });
+  }
+
+  if (input.kind === "program_map_message") {
+    const child = await resolveProgramResultMaps(input.child, dispatch);
+    if (!isRuntimeResult(child)) return child;
+    const handlerId = readProgramMapHandlerId(input, "program_map_message");
+    return copyTaskObserver(child, {
+      ...child,
+      ...(Object.hasOwn(child, "frame")
+        ? { frame: mapProgramFrame(child.frame, handlerId) }
+        : {}),
+      ...(Object.hasOwn(child, "commands")
+        ? { commands: mapProgramEnvelope(child.commands, "cmd", handlerId) }
+        : {}),
+      ...(Object.hasOwn(child, "subscriptions")
+        ? { subscriptions: mapProgramEnvelope(child.subscriptions, "sub", handlerId) }
+        : {}),
+    });
+  }
+
+  return input;
+}
+
+function readProgramMapHandlerId(
+  input: Record<PropertyKey, unknown>,
+  kind: string,
+): number {
+  if (typeof input.handlerId !== "number") {
+    throw new Error(`vx-dom: ${kind} missing numeric handlerId`);
+  }
+  return input.handlerId;
+}
+
+function copyTaskObserver(source: unknown, target: unknown): unknown {
+  const observer = readTaskObserver(source);
+  if (!observer || !isRecord(target)) return target;
+  Object.defineProperty(target, taskObserverProperty, {
+    configurable: true,
+    enumerable: false,
+    value: observer,
+  });
+  return target;
+}
+
+function mapProgramFrame(frame: unknown, handlerId: number): unknown {
+  if (isRecord(frame) && frame.version === 1 && Object.hasOwn(frame, "root")) {
+    return {
+      ...frame,
+      root: mapProgramHtml(frame.root, handlerId),
+    };
+  }
+  return mapProgramHtml(frame, handlerId);
+}
+
+function mapProgramHtml(html: unknown, handlerId: number): unknown {
+  return {
+    kind: "map",
+    child: html,
+    handlerId,
+  };
+}
+
+function mapProgramEnvelope(
+  envelope: unknown,
+  type: "cmd" | "sub",
+  handlerId: number,
+): unknown {
+  if (envelope === undefined) return undefined;
+  return {
+    type,
+    kind: "map",
+    child: envelope,
+    handlerId,
+  };
+}
+
 function isRuntimeResult(input: unknown): input is RuntimeResult {
   return (
     !!input &&
@@ -356,7 +615,16 @@ function isRecord(input: unknown): input is Record<PropertyKey, unknown> {
 }
 
 function parseProgramDescriptor(input: unknown): ProgramDescriptor {
-  if (readField(input, "kind") !== "program") {
+  const kind = readField(input, "kind");
+  if (kind === "program_map_model" || kind === "program_map_message") {
+    return {
+      kind,
+      handlerId: readNumberField(input, "handlerId"),
+      child: parseProgramDescriptor(readField(input, "child")),
+    };
+  }
+
+  if (kind !== "program") {
     throw new Error("vx-dom: app export did not return a VX program descriptor");
   }
   const initHandlerId = readNumberField(input, "initHandlerId");
@@ -367,6 +635,7 @@ function parseProgramDescriptor(input: unknown): ProgramDescriptor {
     "subscriptionsHandlerId",
   );
   return {
+    kind: "program",
     initHandlerId,
     stepHandlerId,
     viewHandlerId,

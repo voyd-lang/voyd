@@ -97,6 +97,24 @@ describe("overload lambda return hint", () => {
     ).not.toThrow();
   });
 
+  it("applies target type arguments to expected return overload hints", () => {
+    const semantics = semanticsPipeline(
+      loadAst("static_overload_expected_return_target_args.voyd"),
+    );
+    const { hir, typing } = semantics;
+    const i32 = typing.arena.internPrimitive("i32");
+
+    const calls = Array.from(hir.expressions.values()).filter(
+      (expr): expr is HirCallExpr => expr.exprKind === "call",
+    );
+    const produceCall = calls.find(
+      (call) => (call.targetTypeArguments?.length ?? 0) > 0,
+    );
+    expect(produceCall).toBeDefined();
+    if (!produceCall) return;
+    expect(typing.table.getExprType(produceCall.id)).toBe(i32);
+  });
+
   it("uses inline lambda parameter shape to disambiguate method overloads", () => {
     const semantics = semanticsPipeline(
       loadAst("overload_lambda_method_parameter_shape_disambiguation.voyd"),

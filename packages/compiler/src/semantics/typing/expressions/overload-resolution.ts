@@ -49,6 +49,7 @@ export const enforceOverloadCandidateBudget = ({
 export const selectHintedOverloadCandidates = <T extends OverloadResolutionCandidate>({
   candidates,
   typeArguments,
+  targetTypeArguments,
   expectedReturnType,
   expectedReturnCandidates,
   ctx,
@@ -56,6 +57,7 @@ export const selectHintedOverloadCandidates = <T extends OverloadResolutionCandi
 }: {
   candidates: readonly T[];
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
   expectedReturnType: TypeId | undefined;
   expectedReturnCandidates: ReadonlySet<SymbolId> | undefined;
   ctx: TypingContext;
@@ -67,6 +69,7 @@ export const selectHintedOverloadCandidates = <T extends OverloadResolutionCandi
   const candidatesForBudget = filterCandidatesByExplicitTypeArguments({
     candidates,
     typeArguments,
+    targetTypeArguments,
   });
 
   const returnHintCandidates =
@@ -78,6 +81,7 @@ export const selectHintedOverloadCandidates = <T extends OverloadResolutionCandi
           candidates: candidatesForBudget,
           expectedReturnType,
           typeArguments,
+          targetTypeArguments,
           ctx,
           state,
         });
@@ -100,6 +104,7 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
   candidates,
   args,
   typeArguments,
+  targetTypeArguments,
   span,
   ctx,
   state,
@@ -111,6 +116,7 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
   candidates: readonly T[];
   args: readonly Arg[];
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
   span: SourceSpan;
   ctx: TypingContext;
   state: TypingState;
@@ -136,10 +142,16 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
     matchesCandidate(candidate, argsForCandidate ? argsForCandidate(candidate) : args),
   );
   const refined = refineMatches ? refineMatches(matches) : matches;
-  return narrowOverloadMatches({ matches: refined, typeArguments, ctx, state });
+  return narrowOverloadMatches({
+    matches: refined,
+    typeArguments,
+    targetTypeArguments,
+    ctx,
+    state,
+  });
 };
 
-const signatureCallShapeCouldMatch = ({
+export const signatureCallShapeCouldMatch = ({
   args,
   signature,
   ctx,
@@ -353,37 +365,91 @@ export const applyExplicitTypeArgumentSubstitution = ({
   symbol,
   signature,
   typeArguments,
+  targetTypeArguments,
   ctx,
 }: {
   symbol: SymbolId;
   signature: FunctionSignature;
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
   ctx: TypingContext;
 }) =>
   signature.typeParams && signature.typeParams.length > 0
-    ? applyExplicitTypeArguments({
+    ? mergeTypeArgumentSubstitutions({
         signature,
         typeArguments,
+        targetTypeArguments,
         calleeSymbol: symbol,
         ctx,
       })
     : undefined;
 
+const mergeTypeArgumentSubstitutions = ({
+  signature,
+  typeArguments,
+  targetTypeArguments,
+  calleeSymbol,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
+  calleeSymbol: SymbolId;
+  ctx: TypingContext;
+}): ReadonlyMap<TypeParamId, TypeId> | undefined => {
+  const explicit = applyExplicitTypeArguments({
+    signature,
+    typeArguments,
+    calleeSymbol,
+    ctx,
+  });
+  if (!targetTypeArguments || targetTypeArguments.length === 0) {
+    return explicit;
+  }
+
+  const params = signature.typeParams ?? [];
+  const explicitCount = typeArguments?.length ?? 0;
+  const totalCount = explicitCount + targetTypeArguments.length;
+  if (totalCount > params.length) {
+    throw new Error(
+      `function ${getSymbolName(calleeSymbol, ctx)} received too many type arguments`,
+    );
+  }
+
+  const start = params.length - targetTypeArguments.length;
+  const target = new Map<TypeParamId, TypeId>();
+  targetTypeArguments.forEach((arg, index) => {
+    const param = params[start + index];
+    if (param) {
+      target.set(param.typeParam, arg);
+    }
+  });
+  if (!explicit || explicit.size === 0) {
+    return target.size > 0 ? target : undefined;
+  }
+  const merged = new Map<TypeParamId, TypeId>(explicit);
+  target.forEach((value, key) => merged.set(key, value));
+  return merged;
+};
+
 export const specializeOverloadParameters = ({
   symbol,
   signature,
   typeArguments,
+  targetTypeArguments,
   ctx,
 }: {
   symbol: SymbolId;
   signature: FunctionSignature;
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
   ctx: TypingContext;
 }): readonly ParamSignature[] => {
   const explicitSubstitution = applyExplicitTypeArgumentSubstitution({
     symbol,
     signature,
     typeArguments,
+    targetTypeArguments,
     ctx,
   });
   if (!explicitSubstitution) {
@@ -400,12 +466,14 @@ const overloadDominates = ({
   candidate,
   other,
   typeArguments,
+  targetTypeArguments,
   ctx,
   state,
 }: {
   candidate: OverloadResolutionCandidate;
   other: OverloadResolutionCandidate;
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
 }): boolean => {
@@ -413,12 +481,14 @@ const overloadDominates = ({
     symbol: candidate.symbol,
     signature: candidate.signature,
     typeArguments,
+    targetTypeArguments,
     ctx,
   });
   const otherParams = specializeOverloadParameters({
     symbol: other.symbol,
     signature: other.signature,
     typeArguments,
+    targetTypeArguments,
     ctx,
   });
   if (candidateParams.length !== otherParams.length) {
@@ -537,16 +607,19 @@ const unresolvedTypeParamPenalty = ({
 const overloadGenericityPenalty = ({
   candidate,
   typeArguments,
+  targetTypeArguments,
   ctx,
 }: {
   candidate: OverloadResolutionCandidate;
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments: readonly TypeId[] | undefined;
   ctx: TypingContext;
 }): number =>
   specializeOverloadParameters({
     symbol: candidate.symbol,
     signature: candidate.signature,
     typeArguments,
+    targetTypeArguments,
     ctx,
   }).reduce(
     (sum, param) =>
@@ -572,11 +645,13 @@ const overloadConstraintSpecificity = (
 export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
   matches,
   typeArguments,
+  targetTypeArguments,
   ctx,
   state,
 }: {
   matches: readonly T[];
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
 }): readonly T[] => {
@@ -592,6 +667,7 @@ export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
           candidate: other,
           other: candidate,
           typeArguments,
+          targetTypeArguments,
           ctx,
           state,
         }),
@@ -607,6 +683,7 @@ export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
       overloadGenericityPenalty({
         candidate,
         typeArguments,
+        targetTypeArguments,
         ctx,
       }),
     ),
@@ -616,6 +693,7 @@ export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
       overloadGenericityPenalty({
         candidate,
         typeArguments,
+        targetTypeArguments,
         ctx,
       }) === minPenalty,
   );

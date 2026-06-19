@@ -714,6 +714,17 @@ export const buildProgramCodegenView = (
     }
   });
 
+  Array.from(aliasSymbolsByType.entries()).forEach(([typeId, symbolSet]) => {
+    const desc = arena.get(typeId);
+    if (desc.kind !== "recursive") {
+      return;
+    }
+    const bodyBucket =
+      aliasSymbolsByType.get(desc.body) ?? new Set<ProgramSymbolId>();
+    symbolSet.forEach((symbol) => bodyBucket.add(symbol));
+    aliasSymbolsByType.set(desc.body, bodyBucket);
+  });
+
   const moduleMetaById = new Map<string, ModuleCodegenMetadata>();
   const importTargetsByModule = new Map<string, Map<SymbolId, SymbolRef>>();
   const importTargetIdsByModule = new Map<

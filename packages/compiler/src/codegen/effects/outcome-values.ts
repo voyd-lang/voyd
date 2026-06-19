@@ -12,6 +12,7 @@ export interface OutcomeValueBox {
   key: string;
   boxType: binaryen.Type;
   valueType: binaryen.Type;
+  typeId?: TypeId;
   abiTypes: readonly binaryen.Type[];
   storageTypes: readonly binaryen.Type[];
   markerValue?: number;
@@ -26,7 +27,11 @@ const valueTypeKey = ({
   typeId?: TypeId;
   ctx: CodegenContext;
 }): string =>
-  typeId === ctx.program.primitives.bool ? `bool:${valueType}` : `${valueType}`;
+  typeId === ctx.program.primitives.bool
+    ? `bool:${valueType}`
+    : typeof typeId === "number"
+      ? `${valueType}:type:${typeId}`
+      : `${valueType}`;
 
 const sanitize = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
@@ -86,6 +91,7 @@ const ensureOutcomeValueBox = ({
     key,
     boxType,
     valueType,
+    typeId,
     abiTypes,
     storageTypes,
     markerValue,
@@ -103,6 +109,9 @@ export const getOutcomeValueBoxType = ({
   typeId?: TypeId;
   ctx: CodegenContext;
 }): binaryen.Type => ensureOutcomeValueBox({ valueType, typeId, ctx }).boxType;
+
+export const getOutcomeValueBoxes = (ctx: CodegenContext): readonly OutcomeValueBox[] =>
+  Array.from(ctx.outcomeValueTypes.values());
 
 export const boxOutcomeValue = ({
   value,

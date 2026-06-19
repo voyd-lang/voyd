@@ -143,8 +143,8 @@ describe("runBootstrap", () => {
       expect(clientVoyd).toContain("pub fn app() -> Program<ClientArticle, Msg>");
       expect(clientVoyd).toContain("on_input={(event: InputEvent) -> Msg");
       expect(clientVoyd).toContain("state_kind: String");
-      expect(clientVoyd).toContain("tasks::detach do:");
-      expect(clientVoyd).toContain("Cmd<Msg>::perform<i32>");
+      expect(clientVoyd).toContain("Cmd<Msg>::task");
+      expect(clientVoyd).toContain("work: () -> i32 => save_article");
       expect(clientVoyd).toContain("on_click={Msg::Save {}}");
       expect(clientVoyd).toContain("http_client::post");
 

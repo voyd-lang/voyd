@@ -14,7 +14,11 @@ enum TypedVxTestMsg
   Rename { value: String }
 
 obj TypedVxTestModel {
-  count: i32
+  api count: i32
+}
+
+obj ParentVxTestModel {
+  api child: TypedVxTestModel
 }
 
 test "vx text node encodes versioned renderer shape":
@@ -395,6 +399,16 @@ test "vx typed command constructors encode messages through the boundary":
   assert_i32_payload_field(performed.payload, "taskId", 23)
   assert_payload_has_field(performed.payload, "handlerId")
 
+  try open
+    let spawned = Cmd<TypedVxTestMsg>::task(
+      work: () -> String => "done".to_string(),
+      handler: (value: String) -> TypedVxTestMsg => TypedVxTestMsg::Rename { value: value }
+    )
+    assert_string_payload_field(spawned.payload, "type", "cmd")
+    assert_string_payload_field(spawned.payload, "kind", "task")
+    assert_payload_has_field(spawned.payload, "taskId")
+    assert_payload_has_field(spawned.payload, "handlerId")
+
 test "vx subscription constructors encode runtime payloads":
   let none = Sub<MsgPack>::none()
   assert_string_payload_field(none.payload, "type", "sub")
@@ -528,7 +542,7 @@ test "vx program constructor encodes lifecycle handles":
     commands: Cmd<TypedVxTestMsg>::message(TypedVxTestMsg::Saved {})
   )
 
-  match(msgpack::unpack_map(step))
+  match(msgpack::unpack_map(step.payload))
     Ok<Dict<String, MsgPack>> { value }:
       assert_string_field(value, "$vx", "runtime_result")
       match(value.get("model"))
@@ -537,6 +551,74 @@ test "vx program constructor encodes lifecycle handles":
         None:
           assert(false, eq: true)
       match(value.get("commands"))
+        Some<MsgPack>:
+          assert(true, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+test "vx program map helpers encode retained mappers":
+  let step = program<TypedVxTestModel, TypedVxTestMsg>(
+    model: TypedVxTestModel { count: 1 },
+    commands: Cmd<TypedVxTestMsg>::message(TypedVxTestMsg::Saved {})
+  )
+
+  let mapped_model = map_model<TypedVxTestModel, ParentVxTestModel, TypedVxTestMsg>(
+    program: step,
+    handler_id: 31
+  )
+  match(msgpack::unpack_map(mapped_model.payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "program_map_model")
+      assert_i32_field(value, "handlerId", 31)
+      match(value.get("child"))
+        Some<MsgPack>:
+          assert(true, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+  let mapped_message = map_message<TypedVxTestModel, TypedVxTestMsg, MsgPack>(
+    program: step,
+    handler_id: 42
+  )
+  match(msgpack::unpack_map(mapped_message.payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "program_map_message")
+      assert_i32_field(value, "handlerId", 42)
+      match(value.get("child"))
+        Some<MsgPack>:
+          assert(true, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+  let typed_model = map_model(
+    step,
+    (model: TypedVxTestModel) -> i32 => model.count
+  )
+  match(msgpack::unpack_map(typed_model.payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "program_map_model")
+      match(value.get("handlerId"))
+        Some<MsgPack>:
+          assert(true, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+  let typed_message = map_message(
+    step,
+    (message: TypedVxTestMsg) -> MsgPack => msgpack::make_string("parent")
+  )
+  match(msgpack::unpack_map(typed_message.payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "program_map_message")
+      match(value.get("handlerId"))
         Some<MsgPack>:
           assert(true, eq: true)
         None:

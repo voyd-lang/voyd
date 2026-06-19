@@ -124,15 +124,12 @@ Cmd<Msg>::scroll_into_view<DomElement>(editor_ref)
 ```
 
 Use named command constructors so `step` stays focused on state transitions.
-Today, async work uses `detach` plus `Cmd.perform`; a higher-level `Cmd.task`
-helper is tracked as follow-up work.
+Use `Cmd.task` for one-off async work that should dispatch a typed result.
 
 ```voyd
 fn save_title(title: String): TaskRuntime -> Cmd<Msg>
-  let task = detach<SaveResult> do:
-    api_save_title(title)
-  Cmd<Msg>::perform<SaveResult>(
-    task: task,
+  Cmd<Msg>::task(
+    work: () -> SaveResult => api_save_title(title),
     handler: (result: SaveResult) -> Msg => Msg::Saved { result: result }
   )
 ```
@@ -171,24 +168,27 @@ is replaced.
 ## Feature Composition
 
 Feature modules should own their own `Model`, `Msg`, `step`, `view`, command
-constructors, and subscriptions. Parent features delegate child work and map
-messages at the command, subscription, and view boundaries:
+constructors, and subscriptions. Parent features can delegate child work and
+lift the complete child `Program` result back into the parent model/message
+space:
 
 ```voyd
 AppMsg::Todos { value }:
   let child = todos::step(model.todos, value)
-  next<AppModel, AppMsg>(
-    model: AppModel { todos: next_todos_model, session: model.session },
-    cmd: child_command.map<AppMsg>(
-      (msg: todos::Msg) -> AppMsg => AppMsg::Todos { value: msg }
-    )
+  let with_parent_model = map_model(
+    child,
+    (todos_model: todos::Model) -> AppModel =>
+      AppModel { todos: todos_model, session: model.session }
+  )
+  map_message(
+    with_parent_model,
+    (msg: todos::Msg) -> AppMsg => AppMsg::Todos { value: msg }
   )
 ```
 
 Compose views with `map_html`, commands with `Cmd.map`, subscriptions with
-`Sub.map`. Typed program-level `map_model` / `map_message` helpers are the
-intended next step, but they are tracked separately because the current compiler
-cannot type-check those generic DTO helper paths within budget.
+`Sub.map`, and complete child program results with `map_model` and
+`map_message`.
 
 ## Runtime And Interop
 
@@ -323,34 +323,26 @@ fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
       next<Model, Msg>(cancel_edit(model))
 
 fn load_todos(): TaskRuntime -> Cmd<Msg>
-  let task = detach<Array<Todo>> do:
-    db_load_todos()
-  Cmd<Msg>::perform<Array<Todo>>(
-    task: task,
+  Cmd<Msg>::task(
+    work: () -> Array<Todo> => db_load_todos(),
     handler: (todos: Array<Todo>) -> Msg => Msg::Loaded { result: Ok<Array<Todo>> { value: todos } }
   )
 
 fn create_todo(title: String): TaskRuntime -> Cmd<Msg>
-  let task = detach<Todo> do:
-    db_create_todo(title)
-  Cmd<Msg>::perform<Todo>(
-    task: task,
+  Cmd<Msg>::task(
+    work: () -> Todo => db_create_todo(title),
     handler: (todo: Todo) -> Msg => Msg::Created { result: Ok<Todo> { value: todo } }
   )
 
 fn save_todo(id: String, title: String): TaskRuntime -> Cmd<Msg>
-  let task = detach<Todo> do:
-    db_save_todo(id, title)
-  Cmd<Msg>::perform<Todo>(
-    task: task,
+  Cmd<Msg>::task(
+    work: () -> Todo => db_save_todo(id, title),
     handler: (todo: Todo) -> Msg => Msg::Saved { result: Ok<Todo> { value: todo } }
   )
 
 fn delete_todo(id: String): TaskRuntime -> Cmd<Msg>
-  let task = detach<String> do:
-    db_delete_todo(id)
-  Cmd<Msg>::perform<String>(
-    task: task,
+  Cmd<Msg>::task(
+    work: () -> String => db_delete_todo(id),
     handler: (deleted_id: String) -> Msg => Msg::Deleted { result: Ok<String> { value: deleted_id } }
   )
 

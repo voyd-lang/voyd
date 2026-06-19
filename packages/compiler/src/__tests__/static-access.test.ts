@@ -18,10 +18,10 @@ const createFixtureHost = (files: Record<string, string>): ModuleHost =>
 const expectCompileSuccess = (
   result: CompileProgramResult,
 ): Extract<CompileProgramResult, { success: true }> => {
-  expect(result.success).toBe(true);
   if (!result.success) {
     throw new Error(JSON.stringify(result.diagnostics, null, 2));
   }
+  expect(result.success).toBe(true);
   return result;
 };
 
@@ -42,6 +42,42 @@ describe("static access e2e", () => {
 
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(11);
+  });
+
+  it("infers static method type arguments separately from target type arguments", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("static_method_generic_method_inference.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(17);
+  });
+
+  it("uses target type arguments when ranking static overloads", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("static_method_target_overload_ranking.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(14);
   });
 
   it("calls module-qualified functions without importing into scope", async () => {

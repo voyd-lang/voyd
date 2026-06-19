@@ -1240,18 +1240,6 @@ export const createTypeArena = (): TypeArena => {
       subst: Substitution,
       localSeen: Set<string>,
     ): UnificationResult => {
-      if (stepBudget) {
-        stepBudget.stepsUsed.value += 1;
-        if (stepBudget.stepsUsed.value > stepBudget.maxSteps) {
-          return conflict(
-            left,
-            right,
-            `type-check unification budget exceeded (${stepBudget.stepsUsed.value}/${stepBudget.maxSteps})`,
-            "budget-exceeded",
-          );
-        }
-      }
-
       const substitutedLeft = substitute(left, subst);
       const substitutedRight = substitute(right, subst);
       const resolvedLeft = normalizeStructural(substitutedLeft);
@@ -1287,6 +1275,18 @@ export const createTypeArena = (): TypeArena => {
           subst,
           localSeen,
         );
+      }
+
+      if (stepBudget) {
+        stepBudget.stepsUsed.value += 1;
+        if (stepBudget.stepsUsed.value > stepBudget.maxSteps) {
+          return conflict(
+            resolvedLeft,
+            resolvedRight,
+            `type-check unification budget exceeded (${stepBudget.stepsUsed.value}/${stepBudget.maxSteps})`,
+            "budget-exceeded",
+          );
+        }
       }
 
       const leftUnknown = isUnknownPrimitive(resolvedLeft);

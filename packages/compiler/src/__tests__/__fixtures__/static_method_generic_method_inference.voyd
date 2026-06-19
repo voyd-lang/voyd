@@ -1,0 +1,11 @@
+pub obj StaticBox<Owner> { }
+
+impl<Owner> StaticBox<Owner>
+  pub fn map<T>({ value: T, mapper: fn(T) -> Owner }) -> Owner
+    mapper(value)
+
+pub fn main() -> i32
+  StaticBox<i32>::map(
+    value: true,
+    mapper: (flag: bool) -> i32 => if flag then: 17 else: 0
+  )

@@ -4,14 +4,24 @@ import {
   refTest,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { wasmTypeFor } from "../../types.js";
-import { getOutcomeValueBoxType, unboxOutcomeValue } from "../outcome-values.js";
-import type { CodegenContext } from "../../context.js";
+import {
+  getOutcomeValueBoxes,
+  getOutcomeValueBoxType,
+  unboxOutcomeValue,
+} from "../outcome-values.js";
+import type { CodegenContext, FunctionContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
+import {
+  BoundarySchemaError,
+  deriveBoundarySchema,
+} from "../../boundary/schema.js";
+import { packBoundaryValueAsMsgPack } from "../../boundary/msgpack-codec.js";
 import { EFFECT_RESULT_STATUS } from "./constants.js";
 import { buildEffectRequestMsgPack } from "./effect-request-msgpack.js";
 import { ensureMsgPackFunctions } from "./msgpack.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
+import { findSerializerForType } from "../../serializer.js";
 
 const HANDLE_OUTCOME_DYNAMIC_KEY = Symbol("voyd.effects.hostBoundary.handleOutcomeDynamic");
 
@@ -49,6 +59,14 @@ export const createHandleOutcomeDynamic = ({
     const payloadLocal = 6;
     const arrayLocal = 7;
     const mapLocal = 8;
+    const fnCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals,
+      nextLocalIndex: 9,
+      returnTypeId: ctx.program.primitives.void,
+      effectful: false,
+    };
 
     const boxTypeI32 = getOutcomeValueBoxType({ valueType: binaryen.i32, ctx });
     const boxTypeBool = getOutcomeValueBoxType({
@@ -60,6 +78,14 @@ export const createHandleOutcomeDynamic = ({
     const boxTypeF32 = getOutcomeValueBoxType({ valueType: binaryen.f32, ctx });
     const boxTypeF64 = getOutcomeValueBoxType({ valueType: binaryen.f64, ctx });
     const boxTypeMsgPack = getOutcomeValueBoxType({ valueType: msgPackType, ctx });
+    const fixedBoxTypes = new Set([
+      boxTypeI32,
+      boxTypeBool,
+      boxTypeI64,
+      boxTypeF32,
+      boxTypeF64,
+      boxTypeMsgPack,
+    ]);
 
     const encodeToBuffer = (value: binaryen.ExpressionRef): binaryen.ExpressionRef =>
       ctx.mod.block(null, [
@@ -235,6 +261,82 @@ export const createHandleOutcomeDynamic = ({
           finishValue(),
         ])
       ),
+      ...getOutcomeValueBoxes(ctx)
+        .filter(
+          (box) =>
+            typeof box.typeId === "number" &&
+            box.valueType !== binaryen.none &&
+            !fixedBoxTypes.has(box.boxType)
+        )
+        .flatMap((box) => {
+          const serializer = findSerializerForType(box.typeId!, ctx);
+          if (serializer) {
+            if (serializer.formatId !== "msgpack") {
+              return [];
+            }
+            return [
+              ctx.mod.if(
+                refTest(
+                  ctx.mod,
+                  ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                  box.boxType
+                ),
+                ctx.mod.block(null, [
+                  encodeToBuffer(
+                    refCast(
+                      ctx.mod,
+                      unboxOutcomeValue({
+                        payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                        valueType: box.valueType,
+                        typeId: box.typeId,
+                        ctx,
+                      }),
+                      msgPackType
+                    )
+                  ),
+                  finishValue(),
+                ])
+              ),
+            ];
+          }
+          try {
+            const schema = deriveBoundarySchema({
+              typeId: box.typeId!,
+              ctx,
+              label: "task outcome",
+            });
+            return [
+              ctx.mod.if(
+                refTest(
+                  ctx.mod,
+                  ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                  box.boxType
+                ),
+                ctx.mod.block(null, [
+                  encodeToBuffer(
+                    packBoundaryValueAsMsgPack({
+                      value: unboxOutcomeValue({
+                        payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                        valueType: box.valueType,
+                        typeId: box.typeId,
+                        ctx,
+                      }),
+                      schema,
+                      ctx,
+                      fnCtx,
+                    })
+                  ),
+                  finishValue(),
+                ])
+              ),
+            ];
+          } catch (error) {
+            if (error instanceof BoundarySchemaError) {
+              return [];
+            }
+            throw error;
+          }
+        }),
       ctx.mod.unreachable(),
     ];
 

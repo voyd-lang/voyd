@@ -912,8 +912,6 @@ fn step(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::Ta
     Msg::Save:
       if is_saving(model) or not is_dirty(model):
         return next<ClientArticle, Msg>(model)
-      let save = tasks::detach do:
-        save_article(model.slug, model.body)
       program<ClientArticle, Msg>(
         model: ClientArticle {
           slug: model.slug,
@@ -925,8 +923,8 @@ fn step(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::Ta
           preview_open: model.preview_open,
           save_count: model.save_count
         },
-        commands: Cmd<Msg>::perform<i32>(
-          task: save,
+        commands: Cmd<Msg>::task(
+          work: () -> i32 => save_article(model.slug, model.body),
           handler: (code: i32) -> Msg => Msg::SaveFinished { code: code }
         )
       )
