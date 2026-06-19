@@ -301,6 +301,16 @@ async function mountRuntimeApp(
     dispatch: (handlerId, payload) =>
       options.handlers?.dispatch?.(handlerId, payload) ??
       dispatchQueued({ kind: "event", handlerId, payload }),
+    dispatchMapped: async (handlerId, payload, mapHandlerIds) => {
+      if (!options.handlers?.dispatch) {
+        await dispatchQueued(mapRuntimeMessage({ kind: "event", handlerId, payload }, mapHandlerIds));
+        return;
+      }
+      const message = await options.handlers.dispatch(handlerId, payload);
+      if (message !== undefined) {
+        await dispatchQueued(mapRuntimeMessage(toRuntimeMessage(message), mapHandlerIds));
+      }
+    },
     dispatchMessage: (message) => dispatchQueued(toRuntimeMessage(message)),
     release: options.handlers?.release,
     releaseMany: options.handlers?.releaseMany,
@@ -622,11 +632,16 @@ function patchEvents(
       if (event.options?.stopPropagation) browserEvent.stopPropagation();
       if (typeof event.handlerId === "number") {
         if (event.mapHandlerIds?.length) {
+          const payload = normalizeBrowserEvent(browserEvent);
+          if (handlers?.dispatchMapped) {
+            settleAsyncDispatch(handlers.dispatchMapped(event.handlerId, payload, event.mapHandlerIds));
+            return;
+          }
           settleAsyncDispatch(handlers?.dispatchMessage?.(
             mapRuntimeMessage({
               kind: "event",
               handlerId: event.handlerId,
-              payload: normalizeBrowserEvent(browserEvent),
+              payload,
             }, event.mapHandlerIds),
           ));
           return;
@@ -1191,7 +1206,7 @@ function toVxMessage(input: unknown): VxMessage {
   return { kind: "msgpack", value: input };
 }
 
-function mapRuntimeMessage(message: VxRuntimeMessage, handlerIds: number[]): VxRuntimeMessage {
+function mapRuntimeMessage(message: VxRuntimeMessage, handlerIds: readonly number[]): VxRuntimeMessage {
   return handlerIds.reduce<VxRuntimeMessage>(
     (child, handlerId) => ({ kind: "map", handlerId, message: child }),
     message,

@@ -102,6 +102,11 @@ export type GenericEventPayload = {
 
 export type RetainedEventHandlerRegistry = {
   dispatch(id: number, payload: NormalizedEventPayload): Promise<unknown> | unknown;
+  dispatchMapped?: (
+    id: number,
+    payload: NormalizedEventPayload,
+    mapHandlerIds: readonly number[],
+  ) => Promise<void> | void;
   dispatchMessage?: (message: unknown) => Promise<void> | void;
   release?: (id: number) => void;
   releaseMany?: (ids: Iterable<number>) => void;

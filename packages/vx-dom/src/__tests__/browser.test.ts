@@ -388,6 +388,45 @@ describe("vx-dom browser renderer", () => {
     expect(runtimeDispatch).not.toHaveBeenCalled();
   });
 
+  it("maps explicit handler override results for mapped runtime events", async () => {
+    const seenMessages: unknown[] = [];
+    const handlerDispatch = vi.fn<RetainedDispatch>(() => ({ type: "child" }));
+    const app: VxAppRuntime = {
+      init: () => frame({
+        kind: "map",
+        handlerId: 9,
+        child: {
+          kind: "element",
+          tag: "button",
+          events: [{ kind: "event", event: "click", handlerId: 5 }],
+          children: [{ kind: "text", value: "Child" }],
+        },
+      } as unknown as VNode),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    await mountVxApp({
+      container,
+      app,
+      handlers: { dispatch: handlerDispatch },
+    });
+    container.querySelector("button")!.click();
+    await nextTurn();
+
+    expect(handlerDispatch).toHaveBeenCalledWith(5, expect.objectContaining({ kind: "mouse" }));
+    expect(seenMessages).toEqual([
+      {
+        kind: "map",
+        handlerId: 9,
+        message: { kind: "msgpack", value: { type: "child" } },
+      },
+    ]);
+  });
+
   it("normalizes input events from controlled form fields", async () => {
     const seenMessages: unknown[] = [];
     const app: VxAppRuntime = {
@@ -1263,7 +1302,7 @@ describe("vx-dom browser renderer", () => {
 type RetainedDispatch = (
   id: number,
   payload: NormalizedEventPayload,
-) => Promise<void> | void;
+) => Promise<unknown> | unknown;
 
 function frame(root: VNode): VxRenderFrame {
   return { version: 1, root };
