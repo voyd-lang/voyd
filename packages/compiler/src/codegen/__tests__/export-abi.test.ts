@@ -62,7 +62,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     expect(abi.exports).toEqual([
       { name: "add", abi: "direct" },
       { name: "echo", abi: "serialized", formatId: "msgpack" },
-      { name: "fetch_items", abi: "serialized", formatId: "msgpack" },
+      { name: "fetch_items", abi: "serialized", formatId: "msgpack", params: [] },
     ]);
   });
 
