@@ -1,7 +1,7 @@
 import binaryen from "binaryen";
 import { arrayGet } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { CodegenContext, FunctionContext, FunctionMetadata } from "../../context.js";
-import { findSerializerForType } from "../../serializer.js";
+import { findSerializerFormatForType } from "../../serializer.js";
 import { coerceValueToType } from "../../structural.js";
 import { wasmTypeFor } from "../../types.js";
 import type { EffectRuntime } from "../runtime-abi.js";
@@ -196,8 +196,10 @@ const buildEffectfulEntryBody = ({
       msgPackType,
       false
     );
-    const serializer = findSerializerForType(typeId, ctx);
-    if (serializer) {
+    const serializerFormat =
+      meta.parameters[index]?.serializer?.formatId ??
+      findSerializerFormatForType(typeId, ctx);
+    if (serializerFormat === "msgpack") {
       return coerceValueToType({
         value: element,
         actualType: msgpack.msgPackTypeId,
@@ -212,6 +214,7 @@ const buildEffectfulEntryBody = ({
       value: element,
       typeId,
       label: `${exportName} arg${index}`,
+      serializerOverride: meta.parameters[index]?.serializer,
     });
   });
   const result = effectfulCall({ ctx, runtime, meta, args: userArgs });

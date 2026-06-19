@@ -1,7 +1,8 @@
 import type { SourceSpan } from "../../../diagnostics/types.js";
 import type { TypeId } from "../../../semantics/ids.js";
+import type { SerializerMetadata } from "../../../semantics/symbol-index.js";
 import type { CodegenContext } from "../../context.js";
-import { findSerializerForType } from "../../serializer.js";
+import { findSerializerFormatForType } from "../../serializer.js";
 import type { EffectOpSignature } from "./types.js";
 
 type HostBoundaryPrimitive = "bool" | "i32" | "i64" | "f32" | "f64" | "void";
@@ -167,20 +168,23 @@ const formatTypeForHostBoundary = ({
 export const hostBoundaryPayloadSupportForType = ({
   typeId,
   ctx,
+  serializerOverride,
 }: {
   typeId: TypeId;
   ctx: CodegenContext;
+  serializerOverride?: SerializerMetadata;
 }): HostBoundaryPayloadSupport => {
-  const serializer = findSerializerForType(typeId, ctx);
-  if (serializer) {
-    if (serializer.formatId === "msgpack") {
+  const formatId =
+    serializerOverride?.formatId ?? findSerializerFormatForType(typeId, ctx);
+  if (formatId) {
+    if (formatId === "msgpack") {
       return { supported: true, strategy: "serializer-msgpack" };
     }
     return {
       supported: false,
       reason: {
         kind: "unsupported-serializer-format",
-        formatId: serializer.formatId,
+        formatId,
       },
       typeLabel: formatTypeForHostBoundary({
         typeId,
@@ -210,16 +214,22 @@ const collectViolation = ({
   signature,
   position,
   typeId,
+  serializerOverride,
   ctx,
   out,
 }: {
   signature: EffectOpSignature;
   position: HostBoundaryPayloadPosition;
   typeId: TypeId;
+  serializerOverride?: SerializerMetadata;
   ctx: CodegenContext;
   out: HostBoundaryPayloadViolation[];
 }): void => {
-  const support = hostBoundaryPayloadSupportForType({ typeId, ctx });
+  const support = hostBoundaryPayloadSupportForType({
+    typeId,
+    ctx,
+    serializerOverride,
+  });
   if (support.supported) {
     return;
   }
@@ -246,6 +256,7 @@ export const collectHostBoundaryPayloadViolations = ({
         signature,
         position: { kind: "argument", index: index + 1 },
         typeId,
+        serializerOverride: signature.paramSerializerOverrides?.[index],
         ctx,
         out: violations,
       });
@@ -254,6 +265,7 @@ export const collectHostBoundaryPayloadViolations = ({
       signature,
       position: { kind: "return" },
       typeId: signature.returnTypeId,
+      serializerOverride: signature.returnSerializerOverride,
       ctx,
       out: violations,
     });

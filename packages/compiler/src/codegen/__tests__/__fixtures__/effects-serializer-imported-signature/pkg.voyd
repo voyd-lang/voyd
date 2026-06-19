@@ -1,0 +1,4 @@
+use src::dep::{ Alias, ImportedSerializer, payload }
+
+pub fn imported_roundtrip(): ImportedSerializer -> Alias
+  ImportedSerializer::roundtrip(payload())

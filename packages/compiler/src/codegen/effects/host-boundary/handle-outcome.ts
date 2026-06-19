@@ -21,7 +21,7 @@ import { buildEffectRequestMsgPack } from "./effect-request-msgpack.js";
 import { ensureMsgPackFunctions } from "./msgpack.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
-import { findSerializerForType } from "../../serializer.js";
+import { findSerializerFormatForType } from "../../serializer.js";
 
 const HANDLE_OUTCOME_DYNAMIC_KEY = Symbol("voyd.effects.hostBoundary.handleOutcomeDynamic");
 
@@ -269,9 +269,10 @@ export const createHandleOutcomeDynamic = ({
             !fixedBoxTypes.has(box.boxType)
         )
         .flatMap((box) => {
-          const serializer = findSerializerForType(box.typeId!, ctx);
-          if (serializer) {
-            if (serializer.formatId !== "msgpack") {
+          const serializerFormat =
+            box.serializer?.formatId ?? findSerializerFormatForType(box.typeId!, ctx);
+          if (serializerFormat) {
+            if (serializerFormat !== "msgpack") {
               return [];
             }
             return [

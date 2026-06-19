@@ -2,6 +2,7 @@ import binaryen from "binaryen";
 import { refCast } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { wasmTypeFor } from "../../types.js";
 import type { CodegenContext } from "../../context.js";
+import type { SerializerMetadata } from "../../../semantics/symbol-index.js";
 import { ensureMsgPackFunctions } from "./msgpack.js";
 import { hostBoundaryPayloadSupportForType } from "./payload-compatibility.js";
 
@@ -12,6 +13,7 @@ export const packMsgPackValueForType = ({
   msgpack,
   ctx,
   label,
+  serializerOverride,
   onUnsupported = "trap",
 }: {
   value: binaryen.ExpressionRef;
@@ -20,9 +22,14 @@ export const packMsgPackValueForType = ({
   msgpack: ReturnType<typeof ensureMsgPackFunctions>;
   ctx: CodegenContext;
   label: string;
+  serializerOverride?: SerializerMetadata;
   onUnsupported?: "trap" | "throw";
 }): binaryen.ExpressionRef => {
-  const support = hostBoundaryPayloadSupportForType({ typeId, ctx });
+  const support = hostBoundaryPayloadSupportForType({
+    typeId,
+    ctx,
+    serializerOverride,
+  });
   if (support.supported) {
     if (support.strategy === "serializer-msgpack") {
       return refCast(ctx.mod, value, msgPackType);
@@ -61,14 +68,20 @@ export const unpackMsgPackValueForType = ({
   msgpack,
   ctx,
   label,
+  serializerOverride,
 }: {
   value: binaryen.ExpressionRef;
   typeId: number;
   msgpack: ReturnType<typeof ensureMsgPackFunctions>;
   ctx: CodegenContext;
   label: string;
+  serializerOverride?: SerializerMetadata;
 }): binaryen.ExpressionRef => {
-  const support = hostBoundaryPayloadSupportForType({ typeId, ctx });
+  const support = hostBoundaryPayloadSupportForType({
+    typeId,
+    ctx,
+    serializerOverride,
+  });
   if (support.supported) {
     if (support.strategy === "serializer-msgpack") {
       return refCast(ctx.mod, value, wasmTypeFor(typeId, ctx));

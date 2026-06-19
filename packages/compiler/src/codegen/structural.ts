@@ -41,7 +41,10 @@ import {
 } from "./types.js";
 import { wrapValueInOutcome } from "./effects/outcome-values.js";
 import { coerceExprToWasmType } from "./wasm-type-coercions.js";
-import { findSerializerForType, serializerKeyFor } from "./serializer.js";
+import {
+  findUnambiguousSerializerForType,
+  serializerKeyFor,
+} from "./serializer.js";
 import { captureMultivalueLanes } from "./multivalue.js";
 
 const NON_REF_TYPES = new Set<number>([
@@ -1280,8 +1283,8 @@ export const coerceValueToType = ({
 
   const targetDesc = ctx.program.types.getTypeDesc(targetType);
   const actualDesc = ctx.program.types.getTypeDesc(actualType);
-  const actualSerializer = findSerializerForType(actualType, ctx);
-  const targetSerializer = findSerializerForType(targetType, ctx);
+  const actualSerializer = findUnambiguousSerializerForType(actualType, ctx);
+  const targetSerializer = findUnambiguousSerializerForType(targetType, ctx);
   if (
     actualSerializer &&
     targetSerializer &&

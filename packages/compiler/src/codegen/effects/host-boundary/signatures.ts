@@ -114,8 +114,10 @@ export const collectEffectOperationSignatures = (
               signatureHash: opInfo.signatureHash,
               params,
               paramTypeIds: signature.params,
+              paramSerializerOverrides: signature.paramSerializerOverrides,
               returnType,
               returnTypeId: signature.returnType,
+              returnSerializerOverride: signature.returnSerializerOverride,
               argsType,
               label: opInfo.label,
               span:

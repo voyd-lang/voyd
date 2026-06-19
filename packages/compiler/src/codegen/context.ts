@@ -43,6 +43,7 @@ import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
 import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
+import type { SerializerMetadata } from "../semantics/symbol-index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 import type { ProgramHelperRegistry } from "./program-helpers.js";
 import type { ProgramOptimizationFacts } from "../optimize/ir.js";
@@ -94,6 +95,7 @@ export interface FunctionMetadata {
   paramTypeIds: readonly TypeId[];
   parameters: readonly {
     typeId: TypeId;
+    serializer?: SerializerMetadata;
     symbol?: SymbolId;
     label?: string;
     optional?: boolean;
@@ -103,6 +105,7 @@ export interface FunctionMetadata {
   }[];
   paramAbiKinds: readonly OptimizedValueAbiKind[];
   resultTypeId: TypeId;
+  resultSerializer?: SerializerMetadata;
   resultAbiKind: OptimizedValueAbiKind;
   outParamType?: binaryen.Type;
   typeArgs: readonly TypeId[];

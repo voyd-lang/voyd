@@ -2,6 +2,7 @@ import type {
   HirBindingKind,
   HirEffectHandlerClause,
   HirGraph,
+  HirTypeExpr,
   HirVisibility,
 } from "../hir/index.js";
 import type { EffectInterner } from "../effects/effect-table.js";
@@ -46,6 +47,7 @@ import {
   getOptionalInfo,
   type OptionalResolverContext,
 } from "../typing/optionals.js";
+import type { SerializerMetadata } from "../symbol-index.js";
 import { buildProgramSymbolArena } from "../program-symbol-arena.js";
 import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
@@ -174,6 +176,8 @@ export type CodegenFunctionSignature = {
   scheme: TypeSchemeId;
   parameters: readonly {
     typeId: TypeId;
+    declaredType?: HirTypeExpr;
+    declaredSerializer?: SerializerMetadata;
     label?: string;
     optional: boolean;
     name?: string;
@@ -182,6 +186,8 @@ export type CodegenFunctionSignature = {
     synthetic?: "stable-callsite-id";
   }[];
   returnType: TypeId;
+  declaredReturnType?: HirTypeExpr;
+  declaredReturnSerializer?: SerializerMetadata;
   effectRow: number;
   typeParams: readonly {
     symbol: SymbolId;
@@ -2123,6 +2129,8 @@ export const buildProgramCodegenView = (
         scheme: signature.scheme,
         parameters: signature.parameters.map((param) => ({
           typeId: param.type,
+          declaredType: param.declaredType,
+          declaredSerializer: param.declaredSerializer,
           label: param.label,
           optional: param.optional === true,
           name: param.name,
@@ -2136,6 +2144,8 @@ export const buildProgramCodegenView = (
             : {}),
         })),
         returnType: signature.returnType,
+        declaredReturnType: signature.declaredReturnType,
+        declaredReturnSerializer: signature.declaredReturnSerializer,
         effectRow: signature.effectRow,
         typeParams: (signature.typeParams ?? []).map((param) => ({
           symbol: param.symbol,

@@ -1,0 +1,17 @@
+use std::msgpack::{ MsgPack, make_null }
+use std::msgpack::fns::{ encode_value as encode_msgpack, decode_value as decode_msgpack }
+
+@serializer("msgpack", encode_alias, decode_alias)
+pub type Alias = MsgPack
+
+fn encode_alias(value: Alias, ptr: i32, len: i32): () -> i32
+  encode_msgpack(value, ptr, len)
+
+fn decode_alias(ptr: i32, len: i32): () -> Alias
+  decode_msgpack(ptr, len)
+
+pub eff ImportedSerializer
+  roundtrip(resume, value: Alias) -> Alias
+
+pub fn payload(): () -> Alias
+  make_null()

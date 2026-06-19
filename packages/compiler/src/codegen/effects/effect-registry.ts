@@ -13,7 +13,12 @@ import { walkHirExpression } from "../hir-walk.js";
 import type { ContinuationSite } from "./effect-lowering/types.js";
 import { performSiteArgTypes } from "./perform-site.js";
 import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
-import { findSerializerForType, serializerKeyFor } from "../serializer.js";
+import type { SerializerMetadata } from "../../semantics/symbol-index.js";
+import {
+  findSerializerForDeclaredType,
+  findSerializerForType,
+  serializerKeyFor,
+} from "../serializer.js";
 
 const encoder = new TextEncoder();
 const FNV_OFFSET = 14695981039346656037n;
@@ -109,20 +114,24 @@ type SignatureTypeKeyState = {
   ctx: CodegenContext;
   active: Map<TypeId, number>;
   binders: Map<TypeParamId, number>;
+  serializerOverride?: SerializerMetadata;
 };
 
 const signatureTypeKeyFor = ({
   typeId,
   ctx,
+  serializerOverride,
 }: {
   typeId: TypeId;
   ctx: CodegenContext;
+  serializerOverride?: SerializerMetadata;
 }): string =>
   signatureTypeKeyForInternal({
     typeId,
     ctx,
     active: new Map<TypeId, number>(),
     binders: new Map<TypeParamId, number>(),
+    serializerOverride,
   });
 
 const signatureTypeKeyForInternal = ({
@@ -130,10 +139,11 @@ const signatureTypeKeyForInternal = ({
   ctx,
   active,
   binders,
+  serializerOverride,
 }: SignatureTypeKeyState): string => {
   const activeIndex = active.get(typeId);
   if (typeof activeIndex === "number") {
-    const serializer = findSerializerForType(typeId, ctx);
+    const serializer = serializerOverride ?? findSerializerForType(typeId, ctx);
     const suffix = serializer ? `#${serializerKeyFor(serializer)}` : "";
     return `recursive:${activeIndex}${suffix}`;
   }
@@ -154,6 +164,7 @@ const signatureTypeKeyForInternal = ({
           ctx,
           active,
           binders: nextBinders,
+          serializerOverride,
         })}`;
         break;
       }
@@ -279,7 +290,7 @@ const signatureTypeKeyForInternal = ({
         baseKey = `${(desc as { kind: string }).kind}:${typeId}`;
         break;
     }
-    const serializer = findSerializerForType(typeId, ctx);
+    const serializer = serializerOverride ?? findSerializerForType(typeId, ctx);
     return serializer ? `${baseKey}#${serializerKeyFor(serializer)}` : baseKey;
   } finally {
     active.delete(typeId);
@@ -290,15 +301,27 @@ export const signatureHashFor = ({
   params,
   returnType,
   ctx,
+  paramSerializerOverrides,
+  returnSerializerOverride,
 }: {
   params: readonly TypeId[];
   returnType: TypeId;
   ctx: CodegenContext;
+  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
+  returnSerializerOverride?: SerializerMetadata;
 }): number => {
-  const paramKeys = params.map((param) =>
-    signatureTypeKeyFor({ typeId: param, ctx }),
+  const paramKeys = params.map((param, index) =>
+    signatureTypeKeyFor({
+      typeId: param,
+      ctx,
+      serializerOverride: paramSerializerOverrides?.[index],
+    }),
   );
-  const returnKey = signatureTypeKeyFor({ typeId: returnType, ctx });
+  const returnKey = signatureTypeKeyFor({
+    typeId: returnType,
+    ctx,
+    serializerOverride: returnSerializerOverride,
+  });
   return murmurHash3(`(${paramKeys.join(",")})->${returnKey}`);
 };
 
@@ -310,7 +333,12 @@ export const resolvePerformSignature = ({
   site: Extract<ContinuationSite, { kind: "perform" }>;
   ctx: CodegenContext;
   typeInstanceId?: ProgramFunctionInstanceId;
-}): { params: readonly TypeId[]; returnType: TypeId } => {
+}): {
+  params: readonly TypeId[];
+  returnType: TypeId;
+  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
+  returnSerializerOverride?: SerializerMetadata;
+} => {
   const signature = ctx.program.functions.getSignature(
     ctx.moduleId,
     site.effectSymbol,
@@ -332,16 +360,25 @@ export const resolvePerformSignature = ({
     callTypeArgs.length === signatureTypeParams.length;
   if (signature && (signatureTypeParams.length === 0 || hasCallTypeArgs)) {
     const paramTypes = signature.parameters.map((param) => param.typeId);
-    return resolveEffectSignatureTypes({
-      ctx,
-      signature,
-      typeInstanceId,
-      typeArgs: hasCallTypeArgs ? callTypeArgs : undefined,
-      paramTypes,
-      fallbackParams: paramTypes,
-      returnType: signature.returnType,
-      fallbackReturnType: signature.returnType,
-    });
+    return {
+      ...resolveEffectSignatureTypes({
+        ctx,
+        signature,
+        typeInstanceId,
+        typeArgs: hasCallTypeArgs ? callTypeArgs : undefined,
+        paramTypes,
+        fallbackParams: paramTypes,
+        returnType: signature.returnType,
+        fallbackReturnType: signature.returnType,
+      }),
+      paramSerializerOverrides: signature.parameters.map((param) =>
+        param.declaredSerializer ??
+        findSerializerForDeclaredType(param.declaredType, ctx),
+      ),
+      returnSerializerOverride:
+        signature.declaredReturnSerializer ??
+        findSerializerForDeclaredType(signature.declaredReturnType, ctx),
+    };
   }
   const signatureParams =
     signature?.parameters.map((param) => param.typeId) ?? [];
@@ -351,16 +388,25 @@ export const resolvePerformSignature = ({
     typeInstanceId,
   });
   const exprType = getRequiredExprType(site.exprId, ctx, typeInstanceId);
-  return resolveEffectSignatureTypes({
-    ctx,
-    signature,
-    typeInstanceId,
-    typeArgs: hasCallTypeArgs ? callTypeArgs : undefined,
-    paramTypes,
-    fallbackParams: signatureParams,
-    returnType: exprType,
-    fallbackReturnType: signature?.returnType,
-  });
+  return {
+    ...resolveEffectSignatureTypes({
+      ctx,
+      signature,
+      typeInstanceId,
+      typeArgs: hasCallTypeArgs ? callTypeArgs : undefined,
+      paramTypes,
+      fallbackParams: signatureParams,
+      returnType: exprType,
+      fallbackReturnType: signature?.returnType,
+    }),
+    paramSerializerOverrides: signature?.parameters.map((param) =>
+      param.declaredSerializer ??
+      findSerializerForDeclaredType(param.declaredType, ctx),
+    ),
+    returnSerializerOverride:
+      signature?.declaredReturnSerializer ??
+      findSerializerForDeclaredType(signature?.declaredReturnType, ctx),
+  };
 };
 
 const buildOwnerMap = (ctx: CodegenContext): Map<HirExprId, SymbolId> => {
@@ -471,6 +517,8 @@ export const buildEffectRegistry = (
           params: signature.params,
           returnType: signature.returnType,
           ctx,
+          paramSerializerOverrides: signature.paramSerializerOverrides,
+          returnSerializerOverride: signature.returnSerializerOverride,
         });
         const key = toEffectOpKey(effectId.hash, info.opIndex, signatureHash);
         if (!entriesByKey.has(key)) {
@@ -567,6 +615,8 @@ export const getEffectOpInstanceInfo = ({
     params: signature.params,
     returnType: signature.returnType,
     ctx,
+    paramSerializerOverrides: signature.paramSerializerOverrides,
+    returnSerializerOverride: signature.returnSerializerOverride,
   });
   const key = registry.keyFor(effectId.hash, info.opIndex, signatureHash);
   const opIndex = registry.getOpIndex(key);
