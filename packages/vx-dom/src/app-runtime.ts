@@ -412,6 +412,11 @@ function createProgramDescriptorRunner({
     }
     return runtimeResult({ model: requireLocalModel() });
   };
+  const adoptLifecycleResult = async (
+    result: unknown,
+    adoptPlainModel: boolean,
+  ): Promise<RuntimeResult> =>
+    adoptResult(await resolveProgramResultMaps(result, dispatch), adoptPlainModel);
 
   return {
     hydrate: (nextModel) => {
@@ -420,13 +425,13 @@ function createProgramDescriptorRunner({
       return true;
     },
     init: async () =>
-      adoptResult(await dispatch(descriptor.initHandlerId, undefined), true),
+      adoptLifecycleResult(await dispatch(descriptor.initHandlerId, undefined), true),
     step: async (message) => {
       const resolved = await resolveRuntimeMessage(host, message);
       if (resolved === noRuntimeMessage) {
         return runtimeResult({ model: requireLocalModel() });
       }
-      return adoptResult(
+      return adoptLifecycleResult(
         await dispatch(descriptor.stepHandlerId, [requireLocalModel(), resolved]),
         true,
       );

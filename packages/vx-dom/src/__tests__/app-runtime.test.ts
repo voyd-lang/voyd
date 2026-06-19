@@ -327,6 +327,52 @@ describe("createVoydVxAppRuntime", () => {
     expect(retainedDispatch).toHaveBeenCalledWith(31, { count: 2 });
   });
 
+  it("resolves mapped program results returned from descriptor steps before adopting the model", async () => {
+    const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
+      if (id === 1) return { parent: { count: 1 } };
+      if (id === 2) {
+        const [current] = payload as unknown[];
+        const parent = current as { parent: { count: number } };
+        return {
+          kind: "program_map_model",
+          handlerId: 31,
+          child: {
+            $vx: "runtime_result",
+            model: { count: parent.parent.count + 1 },
+          },
+        };
+      }
+      if (id === 3) {
+        const model = payload as { parent: { count: number } };
+        return textFrame(`Parent: ${String(model.parent.count)}`);
+      }
+      if (id === 31) return { parent: payload };
+      throw new Error(`unexpected retained handler ${id}`);
+    });
+    const host = fakeHost({
+      app: async () => ({
+        kind: "program",
+        initHandlerId: 1,
+        stepHandlerId: 2,
+        viewHandlerId: 3,
+      }),
+    });
+    host.hasExport = (entryName) => entryName === "app";
+    host.retainedCallbacks = { dispatch: retainedDispatch };
+    const app = createVoydVxAppRuntime({ host });
+
+    await expect(app.init?.()).resolves.toMatchObject({
+      frame: textFrame("Parent: 1"),
+      snapshot: { parent: { count: 1 } },
+    });
+    await expect(app.dispatch({ kind: "msgpack", value: "tick" })).resolves.toMatchObject({
+      frame: textFrame("Parent: 2"),
+      snapshot: { parent: { count: 2 } },
+    });
+    expect(retainedDispatch).toHaveBeenCalledWith(2, [{ parent: { count: 1 } }, "tick"]);
+    expect(retainedDispatch).toHaveBeenCalledWith(31, { count: 2 });
+  });
+
   it("does not hydrate mapped-model descriptors with parent-shaped snapshots", async () => {
     const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
       if (id === 1) return { count: 1 };
