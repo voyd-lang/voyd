@@ -9,17 +9,13 @@ enum Msg
   Noop
 
 pub fn app() -> Program<CallbackModel, Msg>
-  program<CallbackModel, Msg>(
-    init: init,
-    update: update,
-    view: view
-  )
+  program({ init, step, view })
 
 fn init() -> CallbackModel
   CallbackModel { apply: read_value }
 
-fn update(model: CallbackModel, _msg: Msg) -> Program<CallbackModel, Msg>
-  program<CallbackModel, Msg>(model: model)
+fn step(model: CallbackModel, _msg: Msg) -> Program<CallbackModel, Msg>
+  next<CallbackModel, Msg>(model)
 
 fn view(_model: CallbackModel) -> Html<Msg>
   <div></div>

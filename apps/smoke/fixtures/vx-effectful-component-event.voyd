@@ -6,7 +6,7 @@ use std::vx::all
 pub fn init() -> MsgPack
   msgpack::make_null()
 
-pub fn update(model: MsgPack, message: MsgPack) -> MsgPack
+pub fn step(model: MsgPack, message: MsgPack) -> MsgPack
   model
 
 pub fn view(): Component -> MsgPack

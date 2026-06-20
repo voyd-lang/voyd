@@ -62,7 +62,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     expect(abi.exports).toEqual([
       { name: "add", abi: "direct" },
       { name: "echo", abi: "serialized", formatId: "msgpack" },
-      { name: "fetch_items", abi: "serialized", formatId: "msgpack" },
+      { name: "fetch_items", abi: "serialized", formatId: "msgpack", params: [] },
     ]);
   });
 
@@ -119,6 +119,12 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
         expect.objectContaining({ name: "init", abi: "direct" }),
       ]),
     );
+  });
+
+  it("retains callbacks returning the public recursive MsgPack alias", async () => {
+    await expect(
+      buildModule({ entryFile: "retained-callback-public-msgpack.voyd" }),
+    ).resolves.toBeInstanceOf(Uint8Array);
   });
 
   it("reports unsupported explicit boundary export DTOs", async () => {

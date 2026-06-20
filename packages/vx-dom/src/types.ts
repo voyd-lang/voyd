@@ -39,6 +39,7 @@ export type EventDescriptor = {
   handlerId?: number;
   message?: unknown;
   options?: EventOptions;
+  mapHandlerIds?: number[];
 };
 
 export type EventOptions = {
@@ -101,6 +102,11 @@ export type GenericEventPayload = {
 
 export type RetainedEventHandlerRegistry = {
   dispatch(id: number, payload: NormalizedEventPayload): Promise<unknown> | unknown;
+  dispatchMapped?: (
+    id: number,
+    payload: NormalizedEventPayload,
+    mapHandlerIds: readonly number[],
+  ) => Promise<void> | void;
   dispatchMessage?: (message: unknown) => Promise<void> | void;
   release?: (id: number) => void;
   releaseMany?: (ids: Iterable<number>) => void;
@@ -164,8 +170,27 @@ export type VxSubscriptionEnvelope = VxRuntimeEnvelope & {
 
 export type VxRuntimeExecutionContext = {
   dispatch(message: VxRuntimeMessage): Promise<void>;
+  reportError?: VxRuntimeErrorHandler;
   signal: AbortSignal;
 };
+
+export type VxRuntimeErrorPhase =
+  | "init"
+  | "dispatch"
+  | "render"
+  | "subscriptions"
+  | "commands"
+  | "dispose";
+
+export type VxRuntimeErrorContext = {
+  phase: VxRuntimeErrorPhase;
+  message?: VxRuntimeMessage;
+};
+
+export type VxRuntimeErrorHandler = (
+  error: unknown,
+  context: VxRuntimeErrorContext,
+) => void;
 
 export type VxCommandExecutor = (
   command: VxCommandEnvelope,
@@ -182,6 +207,7 @@ export type VxSubscriptionRunner = (
 export type VxRuntimeHostOptions = {
   commands?: Record<string, VxCommandExecutor>;
   subscriptions?: Record<string, VxSubscriptionRunner>;
+  onError?: VxRuntimeErrorHandler;
 };
 
 export type VxSubscriptionSyncContext = {

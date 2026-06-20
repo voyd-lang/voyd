@@ -585,6 +585,13 @@ const validateExpressionTypeExprs = (
           `call type argument ${index + 1}`
         )
       );
+      expr.targetTypeArguments?.forEach((arg, index) =>
+        visitTypeExpr(
+          arg,
+          validateType,
+          `call target type argument ${index + 1}`
+        )
+      );
       return;
     case "method-call":
       expr.typeArguments?.forEach((arg, index) =>

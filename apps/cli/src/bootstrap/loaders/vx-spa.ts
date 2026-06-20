@@ -235,20 +235,27 @@ enum Msg
   Decrement
   Rename { value: String }
 
+pub fn app() -> Program<Model, Msg>
+  program<Model, Msg>(
+    init: init,
+    step: step,
+    view: view
+  )
+
 pub fn init() -> Model
   Model {
     count: 0,
     title: "Voyd VX"
   }
 
-pub fn update(model: Model, message: Msg) -> Model
+pub fn step(model: Model, message: Msg) -> Program<Model, Msg>
   match(message)
     Msg::Increment:
-      Model { count: model.count + 1, title: model.title }
+      next<Model, Msg>(Model { count: model.count + 1, title: model.title })
     Msg::Decrement:
-      Model { count: model.count - 1, title: model.title }
+      next<Model, Msg>(Model { count: model.count - 1, title: model.title })
     Msg::Rename { value }:
-      Model { count: model.count, title: value }
+      next<Model, Msg>(Model { count: model.count, title: value })
 
 pub fn view(model: Model) -> Html<Msg>
   <main class="min-h-screen bg-slate-950 px-6 py-12 text-slate-100">

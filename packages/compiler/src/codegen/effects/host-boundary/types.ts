@@ -1,6 +1,7 @@
 import type binaryen from "binaryen";
 import type { TypeId } from "../../../semantics/ids.js";
 import type { SourceSpan } from "../../../diagnostics/types.js";
+import type { SerializerMetadata } from "../../../semantics/symbol-index.js";
 
 export type EffectOpSignature = {
   opIndex: number;
@@ -10,8 +11,10 @@ export type EffectOpSignature = {
   signatureHash: number;
   params: readonly binaryen.Type[];
   paramTypeIds: readonly TypeId[];
+  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
   returnType: binaryen.Type;
   returnTypeId: TypeId;
+  returnSerializerOverride?: SerializerMetadata;
   argsType?: binaryen.Type;
   label: string;
   span: SourceSpan;

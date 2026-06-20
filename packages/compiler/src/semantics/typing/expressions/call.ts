@@ -70,7 +70,7 @@ import {
   findOverloadMatches,
   narrowOverloadMatches,
   selectHintedOverloadCandidates,
-  specializeOverloadParameters,
+  signatureCallShapeCouldMatch,
 } from "./overload-resolution.js";
 import { typeExpression, withSpeculativeExprTyping } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
@@ -254,10 +254,15 @@ export const typeCallExpr = (
     expr.typeArguments && expr.typeArguments.length > 0
       ? resolveTypeArguments(expr.typeArguments, ctx, state)
       : undefined;
+  const targetTypeArguments =
+    expr.targetTypeArguments && expr.targetTypeArguments.length > 0
+      ? resolveTypeArguments(expr.targetTypeArguments, ctx, state)
+      : undefined;
 
   const expectedCallContext = getExpectedCallParameters({
     callee: calleeExpr,
     typeArguments,
+    targetTypeArguments,
     expectedReturnType,
     callSpan: expr.span,
     ctx,
@@ -330,6 +335,7 @@ export const typeCallExpr = (
       state,
       expectedReturnType,
       typeArguments,
+      targetTypeArguments,
       expectedCallContext.expectedReturnCandidates,
     );
     return finalizeCall({
@@ -391,6 +397,7 @@ export const typeCallExpr = (
             ctx,
             state,
             typeArguments,
+            targetTypeArguments,
             expectedReturnType,
           })
         : undefined;
@@ -425,6 +432,7 @@ export const typeCallExpr = (
             ctx,
             state,
             typeArguments,
+            targetTypeArguments,
           })
         : undefined;
     if (intrinsicFallbackForIdentifier) {
@@ -559,6 +567,7 @@ export const typeCallExpr = (
           ctx,
           state,
           typeArguments,
+          targetTypeArguments,
         );
       if (shouldTryIntrinsicFallback) {
         const intrinsicFallback = typeIntrinsicFallbackCall({
@@ -588,6 +597,7 @@ export const typeCallExpr = (
         signature,
         calleeSymbol: calleeExpr.symbol,
         typeArguments,
+        targetTypeArguments,
         expectedReturnType,
         callId: expr.id,
         calleeExprId: calleeExpr.id,
@@ -640,7 +650,10 @@ export const typeCallExpr = (
     expectedType: expectedCalleeType(args, ctx),
   });
 
-  if (expr.typeArguments && expr.typeArguments.length > 0) {
+  if (
+    (expr.typeArguments && expr.typeArguments.length > 0) ||
+    (expr.targetTypeArguments && expr.targetTypeArguments.length > 0)
+  ) {
     throw new Error("call does not accept type arguments");
   }
 
@@ -912,6 +925,7 @@ const uniqueOverloadSymbols = (
 const getExpectedCallParameters = ({
   callee,
   typeArguments,
+  targetTypeArguments,
   expectedReturnType,
   callSpan,
   ctx,
@@ -919,6 +933,7 @@ const getExpectedCallParameters = ({
 }: {
   callee: HirExpression;
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments: readonly TypeId[] | undefined;
   expectedReturnType: TypeId | undefined;
   callSpan?: SourceSpan;
   ctx: TypingContext;
@@ -945,11 +960,13 @@ const getExpectedCallParameters = ({
     const explicitTypeMatches = filterCandidatesByExplicitTypeArguments({
       candidates,
       typeArguments,
+      targetTypeArguments,
     });
     const matchingReturn = filterCandidatesByExpectedReturnType({
       candidates: explicitTypeMatches,
       expectedReturnType,
       typeArguments,
+      targetTypeArguments,
       ctx,
       state,
     });
@@ -981,11 +998,24 @@ const getExpectedCallParameters = ({
             ctx,
           })
         : undefined;
+    const combinedSubstitution = mergeInitialCallSubstitutions(
+      substitution,
+      buildTargetTypeArgumentSubstitution({
+        signature: selected.signature,
+        typeArguments,
+        targetTypeArguments,
+        calleeSymbol: selected.symbol,
+        ctx,
+      }),
+    );
     return {
       params: publicCallParametersFor({ signature: selected.signature }).map(
         (param) =>
-          substitution
-            ? { ...param, type: ctx.arena.substitute(param.type, substitution) }
+          combinedSubstitution
+            ? {
+                ...param,
+                type: ctx.arena.substitute(param.type, combinedSubstitution),
+              }
             : param,
       ),
       expectedReturnCandidates,
@@ -1008,10 +1038,20 @@ const getExpectedCallParameters = ({
           ctx,
         })
       : undefined;
+  const combinedSubstitution = mergeInitialCallSubstitutions(
+    substitution,
+    buildTargetTypeArgumentSubstitution({
+      signature,
+      typeArguments,
+      targetTypeArguments,
+      calleeSymbol: callee.symbol,
+      ctx,
+    }),
+  );
   return {
     params: publicCallParametersFor({ signature }).map((param) =>
-      substitution
-        ? { ...param, type: ctx.arena.substitute(param.type, substitution) }
+      combinedSubstitution
+        ? { ...param, type: ctx.arena.substitute(param.type, combinedSubstitution) }
         : param,
     ),
   };
@@ -1020,12 +1060,14 @@ const getExpectedCallParameters = ({
 const mergeExplicitTypeArgumentSubstitution = ({
   signature,
   typeArguments,
+  targetTypeArguments,
   calleeSymbol,
   seedSubstitution,
   ctx,
 }: {
   signature: FunctionSignature;
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
   calleeSymbol: SymbolId;
   seedSubstitution?: ReadonlyMap<TypeParamId, TypeId>;
   ctx: TypingContext;
@@ -1039,17 +1081,98 @@ const mergeExplicitTypeArgumentSubstitution = ({
           ctx,
         })
       : undefined;
+  const targetSubstitution = buildTargetTypeArgumentSubstitution({
+    signature,
+    typeArguments,
+    targetTypeArguments,
+    calleeSymbol,
+    ctx,
+  });
+  const typeArgumentSubstitution = mergeInitialCallSubstitutions(
+    explicitSubstitution,
+    targetSubstitution,
+  );
 
   if (!seedSubstitution || seedSubstitution.size === 0) {
-    return explicitSubstitution;
+    return typeArgumentSubstitution;
   }
-  if (!explicitSubstitution || explicitSubstitution.size === 0) {
+  if (!typeArgumentSubstitution || typeArgumentSubstitution.size === 0) {
     return seedSubstitution;
   }
 
   const merged = new Map<TypeParamId, TypeId>(seedSubstitution);
-  explicitSubstitution.forEach((value, key) => merged.set(key, value));
+  typeArgumentSubstitution.forEach((value, key) => merged.set(key, value));
   return merged;
+};
+
+const buildTargetTypeArgumentSubstitution = ({
+  signature,
+  typeArguments,
+  targetTypeArguments,
+  calleeSymbol,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments: readonly TypeId[] | undefined;
+  calleeSymbol: SymbolId;
+  ctx: TypingContext;
+}): ReadonlyMap<TypeParamId, TypeId> | undefined => {
+  if (!targetTypeArguments || targetTypeArguments.length === 0) {
+    return undefined;
+  }
+
+  const params = signature.typeParams ?? [];
+  const explicitCount = typeArguments?.length ?? 0;
+  const totalCount = explicitCount + targetTypeArguments.length;
+  if (totalCount > params.length) {
+    throw new Error(
+      `function ${getSymbolName(
+        calleeSymbol,
+        ctx,
+      )} received too many type arguments`,
+    );
+  }
+
+  const start = params.length - targetTypeArguments.length;
+  const substitution = new Map<TypeParamId, TypeId>();
+  targetTypeArguments.forEach((arg, index) => {
+    const param = params[start + index];
+    if (param) {
+      substitution.set(param.typeParam, arg);
+    }
+  });
+  return substitution.size > 0 ? substitution : undefined;
+};
+
+const specializeOverloadParametersWithTargetTypeArguments = ({
+  symbol,
+  signature,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
+  ctx: TypingContext;
+}): readonly ParamSignature[] => {
+  const substitution = mergeExplicitTypeArgumentSubstitution({
+    signature,
+    typeArguments,
+    targetTypeArguments,
+    calleeSymbol: symbol,
+    ctx,
+  });
+  if (!substitution || substitution.size === 0) {
+    return signature.parameters;
+  }
+
+  return signature.parameters.map((param) => ({
+    ...param,
+    type: ctx.arena.substitute(param.type, substitution),
+  }));
 };
 
 const findMatchingOverloadCandidates = <
@@ -1060,6 +1183,7 @@ const findMatchingOverloadCandidates = <
   ctx,
   state,
   typeArguments,
+  targetTypeArguments,
   argsForCandidate,
   refineMatches,
 }: {
@@ -1068,6 +1192,7 @@ const findMatchingOverloadCandidates = <
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
   argsForCandidate?: (candidate: T) => readonly Arg[];
   refineMatches?: (matches: readonly T[]) => readonly T[];
 }): readonly T[] => {
@@ -1079,10 +1204,17 @@ const findMatchingOverloadCandidates = <
       ctx,
       state,
       typeArguments,
+      targetTypeArguments,
     ),
   );
   const refined = refineMatches ? refineMatches(matches) : matches;
-  return narrowOverloadMatches({ matches: refined, typeArguments, ctx, state });
+  return narrowOverloadMatches({
+    matches: refined,
+    typeArguments,
+    targetTypeArguments,
+    ctx,
+    state,
+  });
 };
 
 const expectedCalleeType = (args: readonly Arg[], ctx: TypingContext): TypeId =>
@@ -1742,6 +1874,19 @@ const ensureOptionalParameterIsSkippable = ({
 const isStableCallsiteIdParam = (param: ParamSignature): boolean =>
   param.synthetic === "stable-callsite-id";
 
+const providedArgumentTypeForParam = (
+  param: ParamSignature,
+  ctx: TypingContext,
+): TypeId => {
+  if (typeof param.defaultValue !== "number") {
+    return param.type;
+  }
+  return (
+    getOptionalInfo(param.type, optionalResolverContextForTypingContext(ctx))
+      ?.innerType ?? param.type
+  );
+};
+
 const argumentTargetsSyntheticParam = (
   arg: Arg,
   params: readonly ParamSignature[],
@@ -1809,7 +1954,7 @@ const validateCallArgs = (
       if (!(state.mode === "relaxed" && hasUnknownArgs)) {
         ensureTypeMatches(
           match.matchedType,
-          match.param.type,
+          providedArgumentTypeForParam(match.param, ctx),
           ctx,
           state,
           `call argument ${match.paramIndex + 1}`,
@@ -1821,7 +1966,10 @@ const validateCallArgs = (
             type: match.matchedType,
             exprId: match.matchedExprId ?? match.arg.exprId,
           },
-          param: match.param,
+          param: {
+            ...match.param,
+            type: providedArgumentTypeForParam(match.param, ctx),
+          },
           index: match.paramIndex,
           ctx,
           state,
@@ -1949,10 +2097,16 @@ const callArgumentsSatisfyParams = ({
         ? true
         : !valueTraitObjectWideningFor({
             actual: match.matchedType,
-            expected: match.param.type,
+            expected: providedArgumentTypeForParam(match.param, ctx),
             ctx,
             state,
-          }) && typeSatisfies(match.matchedType, match.param.type, ctx, state),
+          }) &&
+          typeSatisfies(
+            match.matchedType,
+            providedArgumentTypeForParam(match.param, ctx),
+            ctx,
+            state,
+          ),
     onSkipOptionalParam: () => true,
   }).kind === "ok";
 
@@ -1980,7 +2134,7 @@ const callArgumentFunctionReturnsSatisfyParams = ({
     onMatch: (match) =>
       functionReturnSatisfiesParameterReturn({
         actual: match.matchedType,
-        expected: match.param.type,
+        expected: providedArgumentTypeForParam(match.param, ctx),
         signatureTypeParamIds,
         ctx,
         state,
@@ -2099,27 +2253,36 @@ const signatureWithExplicitTypeArgumentsForDiagnostic = ({
   symbol,
   signature,
   typeArguments,
+  targetTypeArguments,
   ctx,
 }: {
   symbol: SymbolId;
   signature: FunctionSignature;
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
   ctx: TypingContext;
 }): FunctionSignature => {
-  if (!typeArguments || typeArguments.length === 0) {
+  if (
+    (!typeArguments || typeArguments.length === 0) &&
+    (!targetTypeArguments || targetTypeArguments.length === 0)
+  ) {
     return signature;
   }
 
   const typeParamCount = signature.typeParams?.length ?? 0;
-  if (typeArguments.length > typeParamCount) {
+  if (
+    (typeArguments?.length ?? 0) + (targetTypeArguments?.length ?? 0) >
+    typeParamCount
+  ) {
     return signature;
   }
 
   const explicitSubstitution =
     signature.typeParams && signature.typeParams.length > 0
-      ? applyExplicitTypeArguments({
+      ? mergeExplicitTypeArgumentSubstitution({
           signature,
           typeArguments,
+          targetTypeArguments,
           calleeSymbol: symbol,
           ctx,
         })
@@ -2209,6 +2372,7 @@ const overloadCandidateFailureReason = ({
   ctx,
   state,
   typeArguments,
+  targetTypeArguments,
 }: {
   symbol: SymbolId;
   signature: FunctionSignature;
@@ -2216,17 +2380,21 @@ const overloadCandidateFailureReason = ({
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
 }): string | undefined => {
   const typeParamCount = signature.typeParams?.length ?? 0;
-  if (typeArguments && typeArguments.length > typeParamCount) {
-    return `type argument arity mismatch: expected at most ${typeParamCount}, got ${typeArguments.length}`;
+  const typeArgumentCount =
+    (typeArguments?.length ?? 0) + (targetTypeArguments?.length ?? 0);
+  if (typeArgumentCount > typeParamCount) {
+    return `type argument arity mismatch: expected at most ${typeParamCount}, got ${typeArgumentCount}`;
   }
 
   const explicitSubstitution =
     signature.typeParams && signature.typeParams.length > 0
-      ? applyExplicitTypeArguments({
+      ? mergeExplicitTypeArgumentSubstitution({
           signature,
           typeArguments,
+          targetTypeArguments,
           calleeSymbol: symbol,
           ctx,
         })
@@ -2332,6 +2500,7 @@ const overloadDiagnosticCandidates = <
   ctx,
   state,
   typeArguments,
+  targetTypeArguments,
   includeFailureReasons,
   argsForCandidate,
   signatureForCandidate,
@@ -2341,6 +2510,7 @@ const overloadDiagnosticCandidates = <
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
   includeFailureReasons: boolean;
   argsForCandidate?: (candidate: T) => readonly Arg[];
   signatureForCandidate?: (candidate: T) => FunctionSignature;
@@ -2357,6 +2527,7 @@ const overloadDiagnosticCandidates = <
       symbol: candidate.symbol,
       signature: signatureForCandidateEntry,
       typeArguments,
+      targetTypeArguments,
       ctx,
     });
     const signatureLabel = formatFunctionSignatureForDiagnostic({
@@ -2377,6 +2548,7 @@ const overloadDiagnosticCandidates = <
       ctx,
       state,
       typeArguments,
+      targetTypeArguments,
     });
 
     return reason
@@ -2406,6 +2578,7 @@ const noOverloadDiagnosticParams = <
   ctx,
   state,
   typeArguments,
+  targetTypeArguments,
   argsForCandidate,
   signatureForCandidate,
 }: {
@@ -2415,6 +2588,7 @@ const noOverloadDiagnosticParams = <
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
   argsForCandidate?: (candidate: T) => readonly Arg[];
   signatureForCandidate?: (candidate: T) => FunctionSignature;
 }) => ({
@@ -2427,6 +2601,7 @@ const noOverloadDiagnosticParams = <
     ctx,
     state,
     typeArguments,
+    targetTypeArguments,
     includeFailureReasons: true,
     argsForCandidate,
     signatureForCandidate,
@@ -2446,6 +2621,7 @@ const ambiguousOverloadDiagnosticParams = <
   ctx,
   state,
   typeArguments,
+  targetTypeArguments,
   argsForCandidate,
 }: {
   name: string;
@@ -2454,6 +2630,7 @@ const ambiguousOverloadDiagnosticParams = <
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
   argsForCandidate?: (candidate: T) => readonly Arg[];
 }) => ({
   kind: "ambiguous-overload" as const,
@@ -2465,6 +2642,7 @@ const ambiguousOverloadDiagnosticParams = <
     ctx,
     state,
     typeArguments,
+    targetTypeArguments,
     includeFailureReasons: false,
     argsForCandidate,
   }),
@@ -3650,6 +3828,7 @@ const typeOperatorOverloadCall = ({
   ctx,
   state,
   typeArguments,
+  targetTypeArguments,
   expectedReturnType,
 }: {
   call: HirCallExpr;
@@ -3659,6 +3838,7 @@ const typeOperatorOverloadCall = ({
   ctx: TypingContext;
   state: TypingState;
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments: readonly TypeId[] | undefined;
   expectedReturnType: TypeId | undefined;
 }): { returnType: TypeId; effectRow: number } | undefined => {
   if (callee.exprKind !== "identifier") {
@@ -3738,6 +3918,7 @@ const typeOperatorOverloadCall = ({
           ctx,
           state,
           typeArguments,
+          targetTypeArguments,
         }),
         span: call.span,
       });
@@ -3754,6 +3935,7 @@ const typeOperatorOverloadCall = ({
           ctx,
           state,
           typeArguments,
+          targetTypeArguments,
         }),
         span: call.span,
       });
@@ -3812,6 +3994,7 @@ const typeOperatorOverloadCall = ({
     signature: selected.signature,
     calleeSymbol: selected.symbol,
     typeArguments,
+    targetTypeArguments,
     expectedReturnType,
     callId: call.id,
     ctx,
@@ -4558,6 +4741,7 @@ const typeFunctionCall = ({
   signature,
   calleeSymbol,
   typeArguments,
+  targetTypeArguments,
   expectedReturnType,
   callId,
   ctx,
@@ -4571,6 +4755,7 @@ const typeFunctionCall = ({
   signature: FunctionSignature;
   calleeSymbol: SymbolId;
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
   expectedReturnType?: TypeId;
   callId: HirExprId;
   ctx: TypingContext;
@@ -4609,8 +4794,15 @@ const typeFunctionCall = ({
           state,
         })
       : undefined;
+  const typeArgumentSubstitution = buildTargetTypeArgumentSubstitution({
+    signature,
+    typeArguments,
+    targetTypeArguments,
+    calleeSymbol,
+    ctx,
+  });
   const prefilledSubstitution = mergeInitialCallSubstitutions(
-    seedSubstitution,
+    mergeInitialCallSubstitutions(seedSubstitution, typeArgumentSubstitution),
     traitSubstitution,
   );
   const instantiation = hasTypeParams
@@ -4999,6 +5191,7 @@ export const typeGenericFunctionBody = ({
     const defaultParameterValues = typeDefaultParameterValues({
       fn,
       signature,
+      substitution: mergedSubstitution,
       ctx,
       state,
       typeExpression,
@@ -5309,6 +5502,7 @@ const resolveIntrinsicFallbackForIdentifierCall = ({
   ctx,
   state,
   typeArguments,
+  targetTypeArguments,
 }: {
   call: HirCallExpr;
   calleeSymbol: SymbolId;
@@ -5317,6 +5511,7 @@ const resolveIntrinsicFallbackForIdentifierCall = ({
   ctx: TypingContext;
   state: TypingState;
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments: readonly TypeId[] | undefined;
 }):
   | { returnType: TypeId; effectRow: number; calleeType: TypeId }
   | undefined => {
@@ -5327,6 +5522,7 @@ const resolveIntrinsicFallbackForIdentifierCall = ({
     ctx,
     state,
     typeArguments,
+    targetTypeArguments,
   );
   if (signatureMatchesCall) {
     return undefined;
@@ -5370,6 +5566,7 @@ const typeOverloadedCall = (
   state: TypingState,
   expectedReturnType?: TypeId,
   typeArguments?: readonly TypeId[],
+  targetTypeArguments?: readonly TypeId[],
   expectedReturnCandidates?: ReadonlySet<SymbolId>,
 ): { returnType: TypeId; effectRow: number } => {
   const options = uniqueOverloadSymbols(ctx.overloads.get(callee.set), ctx);
@@ -5395,6 +5592,7 @@ const typeOverloadedCall = (
     selectHintedOverloadCandidates({
       candidates,
       typeArguments,
+      targetTypeArguments,
       expectedReturnType,
       expectedReturnCandidates,
       ctx,
@@ -5407,6 +5605,7 @@ const typeOverloadedCall = (
     candidates: candidatesForResolution,
     args: probeArgs,
     typeArguments,
+    targetTypeArguments,
     span: call.span,
     ctx,
     state,
@@ -5418,12 +5617,14 @@ const typeOverloadedCall = (
         ctx,
         state,
         typeArguments,
+        targetTypeArguments,
       ),
     refineMatches: (rawMatches) => {
       const lambdaCompatible = narrowOverloadMatchesByLambdaCompatibility({
         matches: rawMatches,
         args: probeArgs,
         typeArguments,
+        targetTypeArguments,
         ctx,
         state,
       });
@@ -5431,6 +5632,7 @@ const typeOverloadedCall = (
         matches: lambdaCompatible,
         callArgs: call.args,
         typeArguments,
+        targetTypeArguments,
         ctx,
         state,
       });
@@ -5445,6 +5647,7 @@ const typeOverloadedCall = (
       candidates: candidatesForResolution,
       args: probeArgs,
       typeArguments,
+      targetTypeArguments,
       span: call.span,
       ctx,
       state,
@@ -5456,12 +5659,14 @@ const typeOverloadedCall = (
           ctx,
           state,
           typeArguments,
+          targetTypeArguments,
         ),
       refineMatches: (rawMatches) => {
         const lambdaCompatible = narrowOverloadMatchesByLambdaCompatibility({
           matches: rawMatches,
           args: probeArgs,
           typeArguments,
+          targetTypeArguments,
           ctx,
           state,
         });
@@ -5469,6 +5674,7 @@ const typeOverloadedCall = (
           matches: lambdaCompatible,
           callArgs: call.args,
           typeArguments,
+          targetTypeArguments,
           ctx,
           state,
         });
@@ -5526,6 +5732,7 @@ const typeOverloadedCall = (
           ctx,
           state,
           typeArguments,
+          targetTypeArguments,
         }),
         span: call.span,
       });
@@ -5582,6 +5789,7 @@ const typeOverloadedCall = (
     candidate: selected,
     callArgs: call.args,
     typeArguments,
+    targetTypeArguments,
     ctx,
     state,
   })?.substitution;
@@ -5592,6 +5800,7 @@ const typeOverloadedCall = (
     seedSubstitution: mergeExplicitTypeArgumentSubstitution({
       signature: selected.signature,
       typeArguments,
+      targetTypeArguments,
       calleeSymbol: selected.symbol,
       seedSubstitution: lambdaReturnSubstitution,
       ctx,
@@ -5613,6 +5822,7 @@ const typeOverloadedCall = (
     signature: selected.signature,
     calleeSymbol: selected.symbol,
     typeArguments,
+    targetTypeArguments,
     expectedReturnType,
     callId: call.id,
     ctx,
@@ -5643,12 +5853,14 @@ const narrowOverloadMatchesByLambdaReturn = <
   matches,
   callArgs,
   typeArguments,
+  targetTypeArguments,
   ctx,
   state,
 }: {
   matches: readonly T[];
   callArgs: readonly { expr: HirExprId; label?: string }[];
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
 }): readonly T[] => {
@@ -5671,6 +5883,7 @@ const narrowOverloadMatchesByLambdaReturn = <
         candidate,
         callArgs,
         typeArguments,
+        targetTypeArguments,
         ctx,
         state,
       }),
@@ -5699,12 +5912,14 @@ const inferLambdaReturnSubstitutionForCandidate = <
   candidate,
   callArgs,
   typeArguments,
+  targetTypeArguments,
   ctx,
   state,
 }: {
   candidate: T;
   callArgs: readonly { expr: HirExprId; label?: string }[];
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
 }):
@@ -5722,6 +5937,13 @@ const inferLambdaReturnSubstitutionForCandidate = <
       ctx,
     }),
   );
+  buildTargetTypeArgumentSubstitution({
+    signature: candidate.signature,
+    typeArguments,
+    targetTypeArguments,
+    calleeSymbol: candidate.symbol,
+    ctx,
+  })?.forEach((value, key) => substitution.set(key, value));
   const lambdaArgIndexes = callArgs
     .map((arg, index) => ({ arg, index }))
     .filter(({ arg }) => ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda")
@@ -5810,6 +6032,7 @@ const narrowOverloadMatchesByLambdaCompatibility = <
   args,
   argsForCandidate,
   typeArguments,
+  targetTypeArguments,
   ctx,
   state,
 }: {
@@ -5817,6 +6040,7 @@ const narrowOverloadMatchesByLambdaCompatibility = <
   args: readonly Arg[];
   argsForCandidate?: (candidate: T) => readonly Arg[];
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
 }): readonly T[] => {
@@ -5838,6 +6062,7 @@ const narrowOverloadMatchesByLambdaCompatibility = <
       candidate,
       args: argsForCandidate ? argsForCandidate(candidate) : args,
       typeArguments,
+      targetTypeArguments,
       ctx,
       state,
     }),
@@ -5853,6 +6078,7 @@ const narrowOverloadMatchesByLambdaCompatibility = <
         candidate,
         args: argsForCandidate ? argsForCandidate(candidate) : args,
         typeArguments,
+        targetTypeArguments,
         ctx,
         state,
       }),
@@ -5879,19 +6105,22 @@ const candidateAcceptsInlineLambdas = <
   candidate,
   args,
   typeArguments,
+  targetTypeArguments,
   ctx,
   state,
 }: {
   candidate: T;
   args: readonly Arg[];
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
 }): boolean => {
-  const params = specializeOverloadParameters({
+  const params = specializeOverloadParametersWithTargetTypeArguments({
     symbol: candidate.symbol,
     signature: candidate.signature,
     typeArguments,
+    targetTypeArguments,
     ctx,
   }).filter((param) => !isStableCallsiteIdParam(param));
   const callArgs = callArgInputsFromArgs(args);
@@ -5961,19 +6190,22 @@ const inlineLambdaExpectedTypeParamPenalty = <
   candidate,
   args,
   typeArguments,
+  targetTypeArguments,
   ctx,
   state,
 }: {
   candidate: T;
   args: readonly Arg[];
   typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
 }): number => {
-  const params = specializeOverloadParameters({
+  const params = specializeOverloadParametersWithTargetTypeArguments({
     symbol: candidate.symbol,
     signature: candidate.signature,
     typeArguments,
+    targetTypeArguments,
     ctx,
   }).filter((param) => !isStableCallsiteIdParam(param));
   const callArgs = callArgInputsFromArgs(args);
@@ -6404,9 +6636,16 @@ const matchesOverloadSignature = (
   ctx: TypingContext,
   state: TypingState,
   typeArguments?: readonly TypeId[],
+  targetTypeArguments?: readonly TypeId[],
 ): boolean => {
   const typeParamCount = signature.typeParams?.length ?? 0;
-  if (typeArguments && typeArguments.length > typeParamCount) {
+  if (
+    (typeArguments?.length ?? 0) + (targetTypeArguments?.length ?? 0) >
+    typeParamCount
+  ) {
+    return false;
+  }
+  if (!signatureCallShapeCouldMatch({ args, signature, ctx, state })) {
     return false;
   }
   const substitution =
@@ -6415,6 +6654,7 @@ const matchesOverloadSignature = (
           signature,
           args,
           typeArguments,
+          targetTypeArguments,
           calleeSymbol: symbol,
           ctx,
           state,
@@ -6468,6 +6708,7 @@ const inferOverloadCandidateSubstitution = ({
   signature,
   args,
   typeArguments,
+  targetTypeArguments,
   calleeSymbol,
   ctx,
   state,
@@ -6475,6 +6716,7 @@ const inferOverloadCandidateSubstitution = ({
   signature: FunctionSignature;
   args: readonly Arg[];
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
   calleeSymbol: SymbolId;
   ctx: TypingContext;
   state: TypingState;
@@ -6485,9 +6727,10 @@ const inferOverloadCandidateSubstitution = ({
   }
 
   const substitution = new Map<TypeParamId, TypeId>(
-    applyExplicitTypeArguments({
+    mergeExplicitTypeArgumentSubstitution({
       signature,
       typeArguments,
+      targetTypeArguments,
       calleeSymbol,
       ctx,
     }),

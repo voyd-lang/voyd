@@ -52,6 +52,7 @@ const buildArgsArray = ({
       msgpack,
       ctx,
       label: `${sig.label} arg${index}`,
+      serializerOverride: sig.paramSerializerOverrides?.[index],
       onUnsupported: "trap",
     });
     ops.push(

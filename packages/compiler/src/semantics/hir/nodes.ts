@@ -493,6 +493,7 @@ export interface HirCallExpr extends HirExpressionBase {
   callee: HirExprId;
   args: readonly { label?: string; expr: HirExprId }[];
   typeArguments?: readonly HirTypeExpr[];
+  targetTypeArguments?: readonly HirTypeExpr[];
 }
 
 export interface HirMethodCallExpr extends HirExpressionBase {

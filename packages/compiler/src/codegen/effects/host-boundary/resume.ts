@@ -158,6 +158,7 @@ export const createResumeContinuation = ({
               msgpack,
               ctx,
               label: sig.label,
+              serializerOverride: sig.returnSerializerOverride,
             });
       const resumeBox =
         sig.returnType === binaryen.none
@@ -166,6 +167,7 @@ export const createResumeContinuation = ({
               value: resumeValue,
               valueType: sig.returnType,
               typeId: sig.returnTypeId,
+              serializer: sig.returnSerializerOverride,
               ctx,
               fnCtx: scratch,
             });
@@ -428,9 +430,11 @@ export const createEndRequestRaw = ({
                 msgpack,
                 ctx,
                 label: sig.label,
+                serializerOverride: sig.returnSerializerOverride,
               }),
               valueType: sig.returnType,
               typeId: sig.returnTypeId,
+              serializer: sig.returnSerializerOverride,
               ctx,
               fnCtx: scratch,
             });

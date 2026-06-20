@@ -1159,10 +1159,11 @@ fn main()
     const block = hir.expressions.get(mainFn.body) as HirBlockExpr;
     const call = hir.expressions.get(block.value!) as HirCallExpr;
     expect(call.exprKind).toBe("call");
-    expect(call.typeArguments).toHaveLength(1);
-    expect(call.typeArguments?.[0]?.typeKind).toBe("named");
-    if (call.typeArguments?.[0]?.typeKind === "named") {
-      expect(call.typeArguments[0].path).toEqual(["i32"]);
+    expect(call.typeArguments).toBeUndefined();
+    expect(call.targetTypeArguments).toHaveLength(1);
+    expect(call.targetTypeArguments?.[0]?.typeKind).toBe("named");
+    if (call.targetTypeArguments?.[0]?.typeKind === "named") {
+      expect(call.targetTypeArguments[0].path).toEqual(["i32"]);
     }
   });
 

@@ -64,7 +64,11 @@ import {
   deriveBoundarySchema,
   type BoundarySchema,
 } from "./boundary/schema.js";
-import { resolveSerializerForTypes } from "./serializer.js";
+import {
+  findUnambiguousSerializerForType,
+  serializerKeyFor,
+} from "./serializer.js";
+import type { SerializerMetadata } from "../semantics/symbol-index.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
@@ -104,6 +108,72 @@ type ReachabilityState = {
 
 type FunctionMetadataRegistrationState = {
   active?: boolean;
+};
+
+const resolveExportSerializers = ({
+  meta,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+}): readonly SerializerMetadata[] => {
+  const signature = ctx.program.functions.getSignature(meta.moduleId, meta.symbol);
+  const typeIds = [...meta.paramTypeIds, meta.resultTypeId];
+  const overrides = [
+    ...(signature?.parameters.map((param) => param.declaredSerializer) ?? []),
+    signature?.declaredReturnSerializer,
+  ];
+  const serializers = typeIds
+    .map((typeId, index) =>
+      overrides[index] ?? findUnambiguousSerializerForType(typeId, ctx),
+    )
+    .filter((serializer): serializer is SerializerMetadata => Boolean(serializer));
+
+  if (serializers.length === 0) {
+    return [];
+  }
+  const unsupported = serializers.find((serializer) => serializer.formatId !== "msgpack");
+  if (unsupported) {
+    throw new Error(
+      `unsupported export serializer format for ${meta.wasmName}: ${unsupported.formatId}`,
+    );
+  }
+  const byKey = new Map<string, SerializerMetadata>();
+  serializers.forEach((serializer) => byKey.set(serializerKeyFor(serializer), serializer));
+  return Array.from(byKey.values());
+};
+
+const resolveExportReturnSerializer = ({
+  meta,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+}): SerializerMetadata | undefined => {
+  const signature = ctx.program.functions.getSignature(meta.moduleId, meta.symbol);
+  return (
+    signature?.declaredReturnSerializer ??
+    findUnambiguousSerializerForType(meta.resultTypeId, ctx)
+  );
+};
+
+const serializerOverridesForExport = ({
+  meta,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+}): {
+  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
+  returnSerializerOverride?: SerializerMetadata;
+} => {
+  const signature = ctx.program.functions.getSignature(meta.moduleId, meta.symbol);
+  return {
+    paramSerializerOverrides: signature?.parameters.map(
+      (param) => param.declaredSerializer,
+    ),
+    returnSerializerOverride: signature?.declaredReturnSerializer,
+  };
 };
 
 type ResolvedBoundaryExportOptions = {
@@ -760,7 +830,7 @@ const markSerializerReachable = ({
   serializer,
 }: {
   ctx: CodegenContext;
-  serializer: NonNullable<ReturnType<typeof resolveSerializerForTypes>>;
+  serializer: SerializerMetadata;
 }): void => {
   markFunctionReachable({
     ctx,
@@ -1049,6 +1119,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           paramTypeIds: descriptor.parameters.map((param) => param.type),
           parameters: descriptor.parameters.map((param, index) => ({
             typeId: param.type,
+            serializer: signature.parameters[index]?.declaredSerializer,
             symbol: item.parameters[index]?.symbol,
             label: param.label,
             optional: param.optional,
@@ -1061,6 +1132,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           })),
           paramAbiKinds,
           resultTypeId: descriptor.returnType,
+          resultSerializer: signature.declaredReturnSerializer,
           resultAbiKind,
           outParamType,
           typeArgs,
@@ -1303,6 +1375,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         ),
         parameters: instantiatedTypeDesc.parameters.map((param, index) => ({
           typeId: param.type,
+          serializer: signature.parameters[index]?.declaredSerializer,
           symbol: signature.parameters[index]?.symbol,
           label: param.label,
           optional: param.optional,
@@ -1312,6 +1385,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         })),
         paramAbiKinds,
         resultTypeId: instantiatedTypeDesc.returnType,
+        resultSerializer: signature.declaredReturnSerializer,
         resultAbiKind,
         outParamType,
         typeArgs,
@@ -1433,10 +1507,10 @@ export const emitModuleExports = (
           return;
         }
           const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
-        const serializer = resolveSerializerForTypes(
-          [meta.resultTypeId],
-          exportCtx,
-        );
+        const serializer = resolveExportReturnSerializer({
+          meta,
+          ctx: exportCtx,
+        });
         if (serializer) {
           markSerializerReachable({ ctx: exportCtx, serializer });
         }
@@ -1464,12 +1538,9 @@ export const emitModuleExports = (
         effectfulExports.push({ meta, exportName, emitEntry: true });
         return;
       }
-      let serializer: ReturnType<typeof resolveSerializerForTypes> | undefined;
+      let serializers: readonly SerializerMetadata[];
       try {
-        serializer = resolveSerializerForTypes(
-          [...meta.paramTypeIds, meta.resultTypeId],
-          exportCtx,
-        );
+        serializers = resolveExportSerializers({ meta, ctx: exportCtx });
       } catch (error) {
         exportCtx.diagnostics.report(
           diagnosticFromCode({
@@ -1489,16 +1560,17 @@ export const emitModuleExports = (
         meta,
       });
 
-      if (serializer || specialSerializedExport) {
-        if (serializer) {
-          markSerializerReachable({ ctx: exportCtx, serializer });
-        }
+      if (serializers.length > 0 || specialSerializedExport) {
+        serializers.forEach((serializer) =>
+          markSerializerReachable({ ctx: exportCtx, serializer }),
+        );
         try {
           emitSerializedExportWrapper({
             ctx: exportCtx,
             meta,
             exportName,
             typeAdapter: specialSerializedExport?.typeAdapter,
+            ...serializerOverridesForExport({ meta, ctx: exportCtx }),
           });
           exportAbiEntries.push({
             name: exportName,
@@ -1553,6 +1625,7 @@ export const emitModuleExports = (
             meta,
             exportName,
             wrapperExportName,
+            ...serializerOverridesForExport({ meta, ctx: exportCtx }),
           });
           exportAbiEntries.push({
             name: exportName,
@@ -1786,6 +1859,7 @@ const compileFunctionItem = (
           valueExpr: implFunctionBody,
           valueType: wrappedValueType,
           typeId: meta.resultTypeId,
+          serializer: meta.resultSerializer,
           ctx,
           fnCtx: implCtx,
         })
@@ -1942,6 +2016,7 @@ const compileFunctionItem = (
         valueExpr: functionBodyBeforeWrap,
         valueType: wrappedValueType,
         typeId: meta.resultTypeId,
+        serializer: meta.resultSerializer,
         ctx,
         fnCtx,
       })
@@ -2128,6 +2203,7 @@ const compileStaticEffectSpecialization = (
         valueExpr: bodyExpr,
         valueType: wasmTypeFor(meta.resultTypeId, ctx),
         typeId: meta.resultTypeId,
+        serializer: meta.resultSerializer,
         ctx,
         fnCtx,
       })
@@ -2293,6 +2369,7 @@ const compileReceiverSpecialization = (
           valueExpr: implFunctionBody,
           valueType: wrappedValueType,
           typeId: meta.resultTypeId,
+          serializer: meta.resultSerializer,
           ctx,
           fnCtx: implCtx,
         })
@@ -2433,6 +2510,7 @@ const compileReceiverSpecialization = (
         valueExpr: functionBodyBeforeWrap,
         valueType: wrappedValueType,
         typeId: meta.resultTypeId,
+        serializer: meta.resultSerializer,
         ctx,
         fnCtx,
       })

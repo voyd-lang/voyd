@@ -10,16 +10,12 @@ enum Msg
   Moved { x: f64 }
 
 pub fn app() -> Program<Model, Msg>
-  program<Model, Msg>(
-    init: init,
-    update: update,
-    view: view
-  )
+  program({ init, step, view })
 
 fn init() -> Model
   Model { x: 0.0 }
 
-fn update(model: Model, msg: Msg) -> Program<Model, Msg>
+fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Moved { x }:
       program<Model, Msg>(model: Model { x: x })

@@ -39,6 +39,56 @@ describe("vx-dom server renderer", () => {
     expect(result.html).toBe(`<main role="main"><h1>Wiki</h1></main>`);
   });
 
+  it("rejects invalid SSR tag, attribute, and style names", async () => {
+    await expect(renderVxToString({
+      frame: { version: 1, root: { kind: "element", tag: "script>alert(1)</script" } },
+    })).rejects.toThrow("invalid HTML tag name");
+
+    await expect(renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "div",
+          attrs: { "bad attr": "x" },
+        },
+      },
+    })).rejects.toThrow("invalid HTML attribute name");
+
+    await expect(renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "div",
+          styles: { "color;position": "fixed" },
+        },
+      },
+    })).rejects.toThrow("invalid CSS property name");
+  });
+
+  it("allows vendor-prefixed and custom CSS property names", async () => {
+    const result = await renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "p",
+          styles: {
+            "-webkit-line-clamp": "2",
+            "--accent-color": "red",
+          },
+          children: [{ kind: "text", value: "Preview" }],
+        },
+      },
+    });
+
+    expect(result.html).toBe(
+      `<p style="-webkit-line-clamp: 2; --accent-color: red">Preview</p>`,
+    );
+  });
+
+
   it("renders from an existing Wasm instance export without a DOM", async () => {
     const memory = new WebAssembly.Memory({ initial: 1 });
     const frame = {

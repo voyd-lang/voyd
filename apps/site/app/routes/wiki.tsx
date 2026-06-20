@@ -77,7 +77,7 @@ export default function WikiDemoRoute() {
           host,
           exports: {
             init: "component_state_init",
-            update: "component_state_update",
+            step: "component_state_step",
             view: "component_state_view",
           },
           viewReceivesModel: false,

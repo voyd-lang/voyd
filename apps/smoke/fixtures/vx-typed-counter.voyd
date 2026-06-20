@@ -3,8 +3,8 @@ use std::string::type::String
 use std::vx::all
 
 obj Model {
-  count: i32,
-  title: String
+  api count: i32,
+  api title: String
 }
 
 enum Msg
@@ -12,20 +12,30 @@ enum Msg
   Rename { value: String }
 
 pub fn app() -> Program<Model, Msg>
-  program({ init, update, view, subscriptions })
+  program({ init, step, view, subscriptions })
 
 pub fn app_explicit_config() -> Program<Model, Msg>
-  program<Model, Msg>({ init, update, view, subscriptions })
+  program<Model, Msg>({ init, step, view, subscriptions })
+
+pub fn mapped_app() -> Program<Model, Msg>
+  let mapped_model = map_model(
+    program({ init, step, view, subscriptions }),
+    (next_model: Model) -> Model => next_model
+  )
+  map_message(
+    mapped_model,
+    (message: Msg) -> Msg => message
+  )
 
 fn init() -> Model
   Model { count: 1, title: "Ready" }
 
-fn update(model: Model, msg: Msg) -> Program<Model, Msg>
+fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Increment:
-      program<Model, Msg>(model: Model { count: model.count + 1, title: model.title })
+      next<Model, Msg>(Model { count: model.count + 1, title: model.title })
     Msg::Rename { value }:
-      program<Model, Msg>(model: Model { count: model.count, title: value })
+      next<Model, Msg>(Model { count: model.count, title: value })
 
 fn view(model: Model) -> Html<Msg>
   <div>
@@ -40,7 +50,21 @@ pub fn delayed() -> Cmd<Msg>
   Cmd<Msg>::delay(millis: 25i64, value: Msg::Increment {})
 
 pub fn program_command(model: Model) -> Program<Model, Msg>
-  program<Model, Msg>(model: model, commands: Cmd<Msg>::message(Msg::Increment {}))
+  next<Model, Msg>(model: model, cmd: Cmd<Msg>::message(Msg::Increment {}))
+
+pub fn mapped_program_result() -> Program<Model, Msg>
+  let child = next<Model, Msg>(
+    model: Model { count: 3, title: "Mapped" },
+    cmd: Cmd<Msg>::message(Msg::Increment {})
+  )
+  let mapped_model = map_model(
+    child,
+    (next_model: Model) -> Model => next_model
+  )
+  map_message(
+    mapped_model,
+    (message: Msg) -> Msg => message
+  )
 
 pub fn mapped_command() -> Cmd<Msg>
   Cmd<Msg>::message(Msg::Increment {}).map<Msg>((message: Msg) -> Msg => message)

@@ -13,6 +13,7 @@ import {
   type TypingContext,
   type TypingState,
 } from "./types.js";
+import type { SerializerMetadata } from "../symbol-index.js";
 import { canonicalSymbolRefForTypingContext } from "./symbol-ref-utils.js";
 import type {
   HirFunction,
@@ -69,6 +70,22 @@ const defaultValueIsStableCallsiteId = ({
     intrinsicName?: unknown;
   };
   return metadata.intrinsic === true && metadata.intrinsicName === "__stable_callsite_id";
+};
+
+const serializerForDeclaredType = (
+  typeExpr: HirTypeExpr | undefined,
+  ctx: TypingContext,
+): SerializerMetadata | undefined => {
+  if (!typeExpr || typeExpr.typeKind !== "named") {
+    return undefined;
+  }
+  if (typeof typeExpr.symbol !== "number") {
+    return undefined;
+  }
+  const metadata = ctx.symbolTable.getSymbol(typeExpr.symbol).metadata as
+    | { serializer?: SerializerMetadata }
+    | undefined;
+  return metadata?.serializer;
 };
 
 type ConstraintTypeParameterDecl = {
@@ -454,6 +471,8 @@ export const registerFunctionSignatures = (
 
       return {
         type: callParameterType,
+        declaredType: param.type,
+        declaredSerializer: serializerForDeclaredType(param.type, ctx),
         label: declParam?.label ?? param.label,
         bindingKind: param.pattern.bindingKind,
         span: param.span,
@@ -504,6 +523,8 @@ export const registerFunctionSignatures = (
       typeId: functionType,
       parameters,
       returnType: declaredReturn,
+      declaredReturnType: item.returnType,
+      declaredReturnSerializer: serializerForDeclaredType(item.returnType, ctx),
       hasExplicitReturn,
       annotatedReturn: hasExplicitReturn,
       effectRow: initialEffectRow,
@@ -548,6 +569,8 @@ export const registerEffectOperations = (
             ctx.primitives.unknown,
             typeParamMapRef
           ) ?? ctx.primitives.unknown,
+        declaredType: param.type,
+        declaredSerializer: serializerForDeclaredType(param.type, ctx),
         label: undefined,
         bindingKind: param.bindingKind,
         span: param.span,
@@ -591,6 +614,8 @@ export const registerEffectOperations = (
         typeId: functionType,
         parameters,
         returnType,
+        declaredReturnType: op.returnType,
+        declaredReturnSerializer: serializerForDeclaredType(op.returnType, ctx),
         hasExplicitReturn,
         annotatedReturn: hasExplicitReturn,
         effectRow,

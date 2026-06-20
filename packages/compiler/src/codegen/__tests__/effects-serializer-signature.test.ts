@@ -7,6 +7,12 @@ const fixturePath = resolve(
   "__fixtures__",
   "effects-serializer-signature.voyd"
 );
+const importedFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-serializer-imported-signature",
+  "pkg.voyd"
+);
 
 describe("effect signature hashing", () => {
   it("includes serializer metadata in signature hashes", async () => {
@@ -18,5 +24,14 @@ describe("effect signature hashing", () => {
       throw new Error("missing Serializer ops in effect table");
     }
     expect(direct.signatureHash).not.toBe(alias.signatureHash);
+  });
+
+  it("preserves imported declared alias serializers for effect signatures", async () => {
+    const { module } = await compileEffectFixture({ entryPath: importedFixturePath });
+    const table = parseEffectTable(module);
+    const op = table.ops.find((entry) =>
+      entry.label.endsWith("ImportedSerializer.roundtrip")
+    );
+    expect(op).toBeDefined();
   });
 });

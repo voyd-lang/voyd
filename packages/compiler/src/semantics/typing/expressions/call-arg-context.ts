@@ -10,6 +10,10 @@ import { bindTypeParams as bindTypeParamsFromType } from "../type-relations.js";
 import { getStructuralFields } from "../type-system.js";
 import { typeExpression } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
+import {
+  getOptionalInfo,
+  optionalResolverContextForTypingContext,
+} from "../optionals.js";
 
 export type CallArgInput = {
   expr: HirExprId;
@@ -111,9 +115,11 @@ export const expectedCallArgType = ({
   if (!param) {
     return undefined;
   }
-  const directType = hintSubstitution
-    ? ctx.arena.substitute(param.type, hintSubstitution)
-    : param.type;
+  const directType = providedArgumentTypeForParam({
+    param,
+    hintSubstitution,
+    ctx,
+  });
   const arg = args[argIndex];
   if (!arg || !param.label || arg.label !== undefined) {
     return directType;
@@ -127,6 +133,11 @@ export const expectedCallArgType = ({
     return directType;
   }
 
+  const explicitFieldNames = new Set(
+    expr.entries
+      .filter((entry) => entry.kind === "field")
+      .map((entry) => entry.name),
+  );
   const fields: { name: string; type: TypeId }[] = [];
   let cursor = index;
   while (cursor < params.length) {
@@ -134,11 +145,17 @@ export const expectedCallArgType = ({
     if (!runParam.label) {
       break;
     }
+    if (runParam.optional && !explicitFieldNames.has(runParam.label)) {
+      cursor += 1;
+      continue;
+    }
     fields.push({
       name: runParam.label,
-      type: hintSubstitution
-        ? ctx.arena.substitute(runParam.type, hintSubstitution)
-        : runParam.type,
+      type: providedArgumentTypeForParam({
+        param: runParam,
+        hintSubstitution,
+        ctx,
+      }),
     });
     cursor += 1;
   }
@@ -167,7 +184,11 @@ export const bindCallArgumentTypeParams = ({
     ctx,
     state,
     onMatch: ({ param, actualType }) => {
-      const expectedType = ctx.arena.substitute(param.type, substitution);
+      const expectedType = providedArgumentTypeForParam({
+        param,
+        hintSubstitution: substitution,
+        ctx,
+      });
       bindTypeParamsFromType(
         expectedType,
         actualType,
@@ -258,4 +279,25 @@ const forEachCallArgumentMatch = ({
     paramIndex += 1;
     argIndex += 1;
   }
+};
+
+const providedArgumentTypeForParam = ({
+  param,
+  hintSubstitution,
+  ctx,
+}: {
+  param: ParamSignature;
+  hintSubstitution: ReadonlyMap<TypeParamId, TypeId> | undefined;
+  ctx: TypingContext;
+}): TypeId => {
+  const type = hintSubstitution
+    ? ctx.arena.substitute(param.type, hintSubstitution)
+    : param.type;
+  if (typeof param.defaultValue !== "number") {
+    return type;
+  }
+  return (
+    getOptionalInfo(type, optionalResolverContextForTypingContext(ctx))
+      ?.innerType ?? type
+  );
 };

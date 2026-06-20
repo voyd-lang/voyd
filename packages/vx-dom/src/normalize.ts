@@ -17,10 +17,28 @@ export function normalizeRenderFrame(input: unknown): VxRenderFrame {
     if (record.version !== 1) {
       throw new Error(`vx-dom: unsupported VX render frame version ${String(record.version)}`);
     }
-    return { version: 1, root: normalizeVNode(record.root) };
+    return { version: 1, root: normalizeVersionedVNode(record.root, "root") };
   }
 
   return { version: 1, root: normalizeVNode(input) };
+}
+
+export function validateHtmlTagName(value: string, path = "tag"): void {
+  if (!/^[a-zA-Z][a-zA-Z0-9:-]*$/.test(value)) {
+    throw new Error(`vx-dom: invalid HTML tag name at ${path}: ${JSON.stringify(value)}`);
+  }
+}
+
+export function validateHtmlAttributeName(value: string, path = "attribute"): void {
+  if (!/^[^\s"'/>=\u0000-\u001f\u007f]+$/.test(value)) {
+    throw new Error(`vx-dom: invalid HTML attribute name at ${path}: ${JSON.stringify(value)}`);
+  }
+}
+
+export function validateCssPropertyName(value: string, path = "style"): void {
+  if (!/^(--[a-zA-Z0-9_-]+|-[a-zA-Z][a-zA-Z0-9-]*|[a-zA-Z][a-zA-Z0-9-]*)$/.test(value)) {
+    throw new Error(`vx-dom: invalid CSS property name at ${path}: ${JSON.stringify(value)}`);
+  }
 }
 
 export function normalizeVNode(input: unknown): VNode {
@@ -54,7 +72,10 @@ export function normalizeVNode(input: unknown): VNode {
     return normalizeElement(record);
   }
   if (record.kind === "map") {
-    return normalizeVNode(record.child);
+    const child = normalizeVNode(record.child);
+    return typeof record.handlerId === "number"
+      ? applyVNodeMessageMap(child, record.handlerId)
+      : child;
   }
   if (typeof record.name === "string") {
     return normalizeLegacyElement(record as LegacyElement);
@@ -64,9 +85,10 @@ export function normalizeVNode(input: unknown): VNode {
 }
 
 function normalizeElement(input: Record<string, unknown>): VxElementNode {
+  const tag = typeof input.tag === "string" && input.tag ? input.tag : "div";
   return {
     kind: "element",
-    tag: typeof input.tag === "string" && input.tag ? input.tag : "div",
+    tag,
     key: optionalString(input.key),
     attrs: normalizeRecord(input.attrs),
     props: normalizeRecord(input.props),
@@ -78,9 +100,12 @@ function normalizeElement(input: Record<string, unknown>): VxElementNode {
 
 function normalizeLegacyElement(input: LegacyElement): VxElementNode {
   const attributes = normalizeLegacyAttributes(input.attributes);
+  const tag = input.name || "div";
+  validateHtmlTagName(tag, "legacy.name");
+  Object.keys(attributes ?? {}).forEach((key) => validateHtmlAttributeName(key, `legacy.attributes.${key}`));
   return {
     kind: "element",
-    tag: input.name || "div",
+    tag,
     key: optionalString(attributes?.key),
     attrs: attributes,
     children: normalizeChildren(input.children),
@@ -142,6 +167,176 @@ function normalizeEvents(input: unknown): EventDescriptor[] | undefined {
     ];
   });
   return events.length > 0 ? events : undefined;
+}
+
+function normalizeVersionedVNode(input: unknown, path: string): VNode {
+  const record = toRecord(input);
+  if (!record) {
+    throw new Error(`vx-dom: invalid VX frame at ${path}: expected node object`);
+  }
+
+  if (record.kind === "text") {
+    if (typeof record.value !== "string" && typeof record.value !== "number" && typeof record.value !== "boolean") {
+      throw new Error(`vx-dom: invalid VX frame at ${path}.value: expected text value`);
+    }
+    return {
+      kind: "text",
+      value: String(record.value),
+      key: strictOptionalString(record.key, `${path}.key`),
+    };
+  }
+
+  if (record.kind === "fragment") {
+    return {
+      kind: "fragment",
+      key: strictOptionalString(record.key, `${path}.key`),
+      children: normalizeVersionedChildren(record.children, `${path}.children`),
+    };
+  }
+
+  if (record.kind === "element") {
+    return normalizeVersionedElement(record, path);
+  }
+
+  if (record.kind === "map") {
+    if (typeof record.handlerId !== "number") {
+      throw new Error(`vx-dom: invalid VX frame at ${path}.handlerId: expected number`);
+    }
+    return applyVNodeMessageMap(
+      normalizeVersionedVNode(readRequiredField(record, "child", path), `${path}.child`),
+      record.handlerId,
+    );
+  }
+
+  throw new Error(`vx-dom: invalid VX frame at ${path}.kind: expected text, fragment, element, or map`);
+}
+
+function normalizeVersionedElement(input: Record<string, unknown>, path: string): VxElementNode {
+  if (typeof input.tag !== "string" || input.tag.length === 0) {
+    throw new Error(`vx-dom: invalid VX frame at ${path}.tag: expected non-empty string`);
+  }
+  validateHtmlTagName(input.tag, `${path}.tag`);
+  return {
+    kind: "element",
+    tag: input.tag,
+    key: strictOptionalString(input.key, `${path}.key`),
+    attrs: normalizeVersionedRecord(input.attrs, `${path}.attrs`, validateHtmlAttributeName),
+    props: normalizeVersionedRecord(input.props, `${path}.props`),
+    styles: normalizeVersionedStyles(input.styles, `${path}.styles`),
+    events: normalizeVersionedEvents(input.events, `${path}.events`),
+    children: normalizeVersionedChildren(input.children, `${path}.children`),
+  };
+}
+
+function normalizeVersionedChildren(input: unknown, path: string): VNode[] {
+  if (input === undefined) return [];
+  if (!Array.isArray(input)) {
+    throw new Error(`vx-dom: invalid VX frame at ${path}: expected array`);
+  }
+  return input.map((child, index) => normalizeVersionedVNode(child, `${path}[${index}]`));
+}
+
+function normalizeVersionedRecord(
+  input: unknown,
+  path: string,
+  validateName?: (name: string, path: string) => void,
+): Record<string, unknown> | undefined {
+  if (input === undefined) return undefined;
+  const record = toRecord(input);
+  if (!record) {
+    throw new Error(`vx-dom: invalid VX frame at ${path}: expected object`);
+  }
+  const entries = Object.entries(record).filter(([, value]) => value !== undefined);
+  entries.forEach(([key]) => validateName?.(key, `${path}.${key}`));
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeVersionedStyles(input: unknown, path: string): Record<string, string> | undefined {
+  if (input === undefined) return undefined;
+  const record = normalizeVersionedRecord(input, path, validateCssPropertyName);
+  if (!record) return undefined;
+  const entries = Object.entries(record)
+    .filter(([, value]) => value != null)
+    .map(([key, value]) => [key, String(value)]);
+  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
+}
+
+function normalizeVersionedEvents(input: unknown, path: string): EventDescriptor[] | undefined {
+  if (input === undefined) return undefined;
+  if (!Array.isArray(input)) {
+    throw new Error(`vx-dom: invalid VX frame at ${path}: expected array`);
+  }
+  const events = input.map((entry, index) => {
+    const eventPath = `${path}[${index}]`;
+    const record = toRecord(entry);
+    if (!record || record.kind !== "event") {
+      throw new Error(`vx-dom: invalid VX frame at ${eventPath}.kind: expected event`);
+    }
+    if (typeof record.event !== "string" || record.event.length === 0) {
+      throw new Error(`vx-dom: invalid VX frame at ${eventPath}.event: expected non-empty string`);
+    }
+    const handlerId = typeof record.handlerId === "number" ? record.handlerId : undefined;
+    const hasMessage = Object.hasOwn(record, "message");
+    if (handlerId === undefined && !hasMessage) {
+      throw new Error(`vx-dom: invalid VX frame at ${eventPath}: expected handlerId or message`);
+    }
+    const mapHandlerIds = normalizeMapHandlerIds(record.mapHandlerIds, `${eventPath}.mapHandlerIds`);
+    const options = normalizeEventOptions(record.options);
+    return {
+      kind: "event" as const,
+      event: record.event,
+      ...(handlerId !== undefined ? { handlerId } : {}),
+      ...(hasMessage ? { message: record.message } : {}),
+      ...(mapHandlerIds ? { mapHandlerIds } : {}),
+      ...(options ? { options } : {}),
+    };
+  });
+  return events.length > 0 ? events : undefined;
+}
+
+function applyVNodeMessageMap(vnode: VNode, handlerId: number): VNode {
+  if (vnode.kind === "text") return vnode;
+  if (vnode.kind === "fragment") {
+    return {
+      ...vnode,
+      children: vnode.children.map((child) => applyVNodeMessageMap(child, handlerId)),
+    };
+  }
+  return {
+    ...vnode,
+    events: vnode.events?.map((event) => ({
+      ...event,
+      mapHandlerIds: [...(event.mapHandlerIds ?? []), handlerId],
+    })),
+    children: vnode.children?.map((child) => applyVNodeMessageMap(child, handlerId)),
+  };
+}
+
+function readRequiredField(input: Record<string, unknown>, field: string, path: string): unknown {
+  if (!Object.hasOwn(input, field)) {
+    throw new Error(`vx-dom: invalid VX frame at ${path}.${field}: missing required field`);
+  }
+  return input[field];
+}
+
+function normalizeMapHandlerIds(input: unknown, path: string): number[] | undefined {
+  if (input === undefined) return undefined;
+  if (!Array.isArray(input)) {
+    throw new Error(`vx-dom: invalid VX frame at ${path}: expected array`);
+  }
+  const ids = input.map((entry, index) => {
+    if (typeof entry !== "number") {
+      throw new Error(`vx-dom: invalid VX frame at ${path}[${index}]: expected number`);
+    }
+    return entry;
+  });
+  return ids.length > 0 ? ids : undefined;
+}
+
+function strictOptionalString(input: unknown, path: string): string | undefined {
+  if (input === undefined) return undefined;
+  if (typeof input === "string" || typeof input === "number") return String(input);
+  throw new Error(`vx-dom: invalid VX frame at ${path}: expected string key`);
 }
 
 function isEventDescriptor(input: unknown): input is EventDescriptor {

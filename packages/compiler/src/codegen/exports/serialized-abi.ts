@@ -6,6 +6,7 @@ import type {
   FunctionMetadata,
   TypeId,
 } from "../context.js";
+import type { SerializerMetadata } from "../../semantics/symbol-index.js";
 import { findSerializerForType } from "../serializer.js";
 import {
   coerceValueToType,
@@ -63,15 +64,26 @@ export const emitSerializedExportWrapper = ({
   exportName,
   wrapperExportName = exportName,
   typeAdapter,
+  paramSerializerOverrides,
+  returnSerializerOverride,
 }: {
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
   wrapperExportName?: string;
   typeAdapter?: SerializedExportTypeAdapter;
+  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
+  returnSerializerOverride?: SerializerMetadata;
 }): { wrapperName: string; formatId: "msgpack" } => {
   ensureLinearMemoryExport(ctx);
-  validateExportTypes({ ctx, meta, exportName, typeAdapter });
+  validateExportTypes({
+    ctx,
+    meta,
+    exportName,
+    typeAdapter,
+    paramSerializerOverrides,
+    returnSerializerOverride,
+  });
 
   const msgpack = ensureMsgPackFunctions(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
@@ -152,7 +164,7 @@ export const emitSerializedExportWrapper = ({
       msgPackType,
       false
     );
-    const serializer = findSerializerForType(typeId, ctx);
+    const serializer = paramSerializerOverrides?.[index] ?? findSerializerForType(typeId, ctx);
     if (serializer) {
       if (serializer.formatId !== "msgpack") {
         throw new Error(
@@ -215,6 +227,7 @@ export const emitSerializedExportWrapper = ({
     fnCtx,
     exportName,
     typeAdapter,
+    serializerOverride: returnSerializerOverride,
   });
   const encodedLength = ctx.mod.call(
     msgpack.encodeValue.wasmName,
@@ -542,15 +555,22 @@ const validateExportTypes = ({
   meta,
   exportName,
   typeAdapter,
+  paramSerializerOverrides,
+  returnSerializerOverride,
 }: {
   ctx: CodegenContext;
   meta: FunctionMetadata;
   exportName: string;
   typeAdapter?: SerializedExportTypeAdapter;
+  paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
+  returnSerializerOverride?: SerializerMetadata;
 }): void => {
   const allTypes = [...meta.paramTypeIds, meta.resultTypeId];
   allTypes.forEach((typeId, index) => {
-    const serializer = findSerializerForType(typeId, ctx);
+    const serializer =
+      index < meta.paramTypeIds.length
+        ? (paramSerializerOverrides?.[index] ?? findSerializerForType(typeId, ctx))
+        : (returnSerializerOverride ?? findSerializerForType(typeId, ctx));
     if (serializer) {
       if (serializer.formatId !== "msgpack") {
         throw new Error(
@@ -578,6 +598,7 @@ const packSerializedResultValue = ({
   fnCtx,
   exportName,
   typeAdapter,
+  serializerOverride,
 }: {
   value: binaryen.ExpressionRef;
   typeId: TypeId;
@@ -585,9 +606,10 @@ const packSerializedResultValue = ({
   fnCtx: FunctionContext;
   exportName: string;
   typeAdapter?: SerializedExportTypeAdapter;
+  serializerOverride?: SerializerMetadata;
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
-  const serializer = findSerializerForType(typeId, ctx);
+  const serializer = serializerOverride ?? findSerializerForType(typeId, ctx);
   if (serializer) {
     if (serializer.formatId !== "msgpack") {
       throw new Error(

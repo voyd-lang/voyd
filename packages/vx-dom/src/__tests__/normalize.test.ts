@@ -30,6 +30,32 @@ describe("vx-dom VNode normalization", () => {
     );
   });
 
+  it("rejects malformed versioned frames with field paths", () => {
+    expect(() => normalizeRenderFrame({ version: 1 })).toThrow(
+      "invalid VX frame at root",
+    );
+    expect(() => normalizeRenderFrame({
+      version: 1,
+      root: { kind: "element", tag: "" },
+    })).toThrow("invalid VX frame at root.tag");
+    expect(() => normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "button",
+        attrs: { "bad attr": "x" },
+      },
+    })).toThrow("invalid HTML attribute name at root.attrs.bad attr");
+    expect(() => normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "button",
+        events: [{ kind: "event", event: "click" }],
+      },
+    })).toThrow("expected handlerId or message");
+  });
+
   it("unwraps mapped HTML nodes for DOM rendering", () => {
     expect(
       normalizeRenderFrame({
@@ -50,6 +76,28 @@ describe("vx-dom VNode normalization", () => {
         kind: "element",
         tag: "p",
         children: [{ kind: "text", value: "Child" }],
+      },
+    });
+  });
+
+  it("preserves mapped HTML event handlers for runtime dispatch", () => {
+    expect(
+      normalizeRenderFrame({
+        version: 1,
+        root: {
+          kind: "map",
+          handlerId: 9,
+          child: {
+            kind: "element",
+            tag: "button",
+            events: [{ kind: "event", event: "click", message: { type: "child" } }],
+          },
+        },
+      }),
+    ).toMatchObject({
+      root: {
+        kind: "element",
+        events: [{ event: "click", mapHandlerIds: [9] }],
       },
     });
   });

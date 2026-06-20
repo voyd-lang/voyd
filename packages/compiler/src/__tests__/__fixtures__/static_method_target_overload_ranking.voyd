@@ -1,0 +1,11 @@
+pub obj StaticBox<Owner> { }
+
+impl<Owner> StaticBox<Owner>
+  fn pick(value: Owner) -> i32
+    11
+
+  fn pick<T>(value: T) -> i32
+    3
+
+pub fn main() -> i32
+  StaticBox<i32>::pick(1) + StaticBox<i32>::pick(true)

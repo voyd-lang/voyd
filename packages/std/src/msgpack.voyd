@@ -6,7 +6,7 @@
 //! bridge MessagePack bytes across linear memory.
 
 use self::fns::self as msgpack_fns
-use self::fns::MsgPack
+use self::fns::{ MsgPack as RawMsgPack }
 use std::array::Array
 use std::dict::{ Dict, DictKey }
 use std::msgpack::errors::{
@@ -20,10 +20,12 @@ use std::number::cast::self as cast
 use std::number::cast::CastError
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
-pub use self::fns::MsgPack
 pub use self::fns::MsgPackMap
 pub use self::errors::MsgPackError
 pub use self::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
+
+@serializer("msgpack", std::msgpack::fns::encode_value_raw, std::msgpack::fns::decode_value_raw)
+pub type MsgPack = RawMsgPack
 
 /// Constructs the MessagePack `null` value.
 pub fn make_null(): () -> MsgPack

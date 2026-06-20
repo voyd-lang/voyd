@@ -1,5 +1,5 @@
 import type { HirFunction, HirNamedTypeExpr } from "../hir/index.js";
-import type { HirExprId, TypeId } from "../ids.js";
+import type { HirExprId, TypeId, TypeParamId } from "../ids.js";
 import { walkExpression } from "../hir/walk.js";
 import { emitDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
 import { getExprEffectRow } from "./effects.js";
@@ -118,12 +118,14 @@ export const resolveOptionalTypeForDefaultParameter = ({
 export const typeDefaultParameterValues = ({
   fn,
   signature,
+  substitution,
   ctx,
   state,
   typeExpression,
 }: {
   fn: HirFunction;
   signature: FunctionSignature;
+  substitution?: ReadonlyMap<TypeParamId, TypeId>;
   ctx: TypingContext;
   state: TypingState;
   typeExpression: TypeExpressionFn;
@@ -168,13 +170,16 @@ export const typeDefaultParameterValues = ({
       span: param.span,
       ctx,
     });
+    const checkType = substitution
+      ? ctx.arena.substitute(signatureParam.type, substitution)
+      : signatureParam.type;
     const optionalInfo = getOptionalInfo(
-      signatureParam.type,
+      checkType,
       optionalResolverContextForTypingContext(ctx),
     );
     const hasUnknownOptionalPlaceholder =
       signatureParam.optional === true &&
-      signatureParam.type === ctx.primitives.unknown;
+      checkType === ctx.primitives.unknown;
     if (!optionalInfo && !hasUnknownOptionalPlaceholder) {
       throw new Error("default parameter type must be Optional");
     }
@@ -200,7 +205,7 @@ export const typeDefaultParameterValues = ({
         `default value for parameter ${parameterName}`,
         param.span,
       );
-    } else {
+    } else if (!substitution || substitution.size === 0) {
       const updatedOptionalType = resolveOptionalTypeForDefaultParameter({
         innerType: inferredInnerType,
         scope: functionScope,

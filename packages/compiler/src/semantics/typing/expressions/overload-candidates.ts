@@ -24,17 +24,22 @@ export const filterCandidatesByExplicitTypeArguments = <
 >({
   candidates,
   typeArguments,
+  targetTypeArguments,
 }: {
   candidates: readonly T[];
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
 }): T[] => {
-  if (!typeArguments || typeArguments.length === 0) {
+  if (
+    (!typeArguments || typeArguments.length === 0) &&
+    (!targetTypeArguments || targetTypeArguments.length === 0)
+  ) {
     return [...candidates];
   }
   return candidates.filter((candidate) => {
     const signature = signatureForOverloadCandidate(candidate);
     const typeParamCount = signature.typeParams?.length ?? 0;
-    return typeArguments.length <= typeParamCount;
+    return (typeArguments?.length ?? 0) + (targetTypeArguments?.length ?? 0) <= typeParamCount;
   });
 };
 
@@ -44,12 +49,14 @@ export const filterCandidatesByExpectedReturnType = <
   candidates,
   expectedReturnType,
   typeArguments,
+  targetTypeArguments,
   ctx,
   state,
 }: {
   candidates: readonly T[];
   expectedReturnType: TypeId | undefined;
   typeArguments?: readonly TypeId[];
+  targetTypeArguments?: readonly TypeId[];
   ctx: TypingContext;
   state: TypingState;
 }): T[] => {
@@ -62,11 +69,9 @@ export const filterCandidatesByExpectedReturnType = <
   return candidates.filter((candidate) => {
     const signature = signatureForOverloadCandidate(candidate);
     const typeParams = signature.typeParams ?? [];
-    if (
-      typeArguments &&
-      typeArguments.length > 0 &&
-      typeArguments.length > typeParams.length
-    ) {
+    const explicitCount = typeArguments?.length ?? 0;
+    const targetCount = targetTypeArguments?.length ?? 0;
+    if (explicitCount + targetCount > typeParams.length) {
       return false;
     }
     const substitution = new Map<TypeParamId, TypeId>();
@@ -74,6 +79,13 @@ export const filterCandidatesByExpectedReturnType = <
       const explicitArg = typeArguments?.[index];
       if (typeof explicitArg === "number") {
         substitution.set(param.typeParam, explicitArg);
+      }
+    });
+    const targetStart = typeParams.length - targetCount;
+    targetTypeArguments?.forEach((arg, index) => {
+      const param = typeParams[targetStart + index];
+      if (param) {
+        substitution.set(param.typeParam, arg);
       }
     });
     const returnType =

@@ -34,12 +34,7 @@ type TextInputEvent = {
 }
 
 pub fn app() -> Program<WikiModel, WikiMsg>
-  program<WikiModel, WikiMsg>(
-    init: init,
-    update: update,
-    view: view,
-    subscriptions: subscriptions
-  )
+  program({ init, step, view, subscriptions })
 
 fn init() -> WikiModel
   WikiModel {
@@ -53,10 +48,10 @@ fn init() -> WikiModel
     status: "Ready"
   }
 
-fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
+fn step(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
   match(message)
     WikiMsg::Select { page }:
-      next(WikiModel {
+      next<WikiModel, WikiMsg>(WikiModel {
         selected: page,
         query: model.query,
         title: page_title(page),
@@ -67,7 +62,7 @@ fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "Page opened"
       })
     WikiMsg::Search { value }:
-      next(WikiModel {
+      next<WikiModel, WikiMsg>(WikiModel {
         selected: model.selected,
         query: value,
         title: model.title,
@@ -78,7 +73,7 @@ fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: search_status(value)
       })
     WikiMsg::New:
-      next(WikiModel {
+      next<WikiModel, WikiMsg>(WikiModel {
         selected: "draft",
         query: String::init(),
         title: "Untitled page",
@@ -89,7 +84,7 @@ fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "New page"
       })
     WikiMsg::EditTitle { value }:
-      next(WikiModel {
+      next<WikiModel, WikiMsg>(WikiModel {
         selected: model.selected,
         query: model.query,
         title: value,
@@ -100,7 +95,7 @@ fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "Unsaved changes"
       })
     WikiMsg::EditBody { value }:
-      next(WikiModel {
+      next<WikiModel, WikiMsg>(WikiModel {
         selected: model.selected,
         query: model.query,
         title: model.title,
@@ -111,7 +106,7 @@ fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "Unsaved changes"
       })
     WikiMsg::Save:
-      next(
+      next<WikiModel, WikiMsg>(
         model: WikiModel {
           selected: model.selected,
           query: model.query,
@@ -122,10 +117,10 @@ fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
           panel: model.panel,
           status: "Saving..."
         },
-        commands: Cmd<WikiMsg>::delay(millis: 1i64, value: WikiMsg::Saved {})
+        cmd: Cmd<WikiMsg>::delay(millis: 1i64, value: WikiMsg::Saved {})
       )
     WikiMsg::Saved:
-      next(WikiModel {
+      next<WikiModel, WikiMsg>(WikiModel {
         selected: model.selected,
         query: model.query,
         title: model.title,
@@ -136,7 +131,7 @@ fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "Saved"
       })
     WikiMsg::Cancel:
-      next(WikiModel {
+      next<WikiModel, WikiMsg>(WikiModel {
         selected: model.selected,
         query: model.query,
         title: model.saved_title,
@@ -147,7 +142,7 @@ fn update(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "Draft restored"
       })
     WikiMsg::TogglePanel:
-      next(WikiModel {
+      next<WikiModel, WikiMsg>(WikiModel {
         selected: model.selected,
         query: model.query,
         title: model.title,
@@ -172,7 +167,7 @@ pub fn main() -> MsgPack
 pub fn component_state_init() -> MsgPack
   text("")
 
-pub fn component_state_update(model: MsgPack, message: MsgPack) -> MsgPack
+pub fn component_state_step(model: MsgPack, message: MsgPack) -> MsgPack
   model
 
 pub fn component_state_view(): Component -> MsgPack
@@ -287,12 +282,6 @@ fn ActionButton({ label: String, button_class: String, on_press: fn() -> WikiMsg
     {label}
   </button>
 
-fn next(model: WikiModel) -> Program<WikiModel, WikiMsg>
-  program<WikiModel, WikiMsg>(model: model)
-
-fn next({ model: WikiModel, commands: Cmd<WikiMsg> }) -> Program<WikiModel, WikiMsg>
-  program<WikiModel, WikiMsg>(model: model, commands: commands)
-
 fn selected_class(selected: String, id: String) -> String
   if selected == id:
     "is-selected"
@@ -363,7 +352,7 @@ fn page_title(selected: String) -> String
 
 fn page_body(selected: String) -> String
   if selected == "state":
-    "The model, draft fields, selected page, save status, and side panel all update through Voyd."
+    "The model, draft fields, selected page, save status, and side panel all step through Voyd."
   else:
     if selected == "events":
       "Static messages, inline payload closures, and passed button closures all produce app messages."

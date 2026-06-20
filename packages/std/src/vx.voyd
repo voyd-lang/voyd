@@ -5,7 +5,8 @@ use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
-use std::task::{ Task }
+use std::task::{ Task, TaskRuntime }
+use std::task::self as tasks
 pub use std::msgpack::MsgPack
 
 @boundary(type: "value")
@@ -14,9 +15,12 @@ pub type HtmlNode = MsgPack
 @boundary(type: "value")
 pub type Attr<Msg> = MsgPack
 pub type HtmlAttr = MsgPack
-@boundary(type: "value")
-pub type Program<Model, Msg> = MsgPack
 pub type RenderKey = String
+
+@boundary(type: "payload", field: "payload")
+pub obj Program<Model, Msg> {
+  api payload: MsgPack
+}
 
 @boundary(type: "payload", field: "payload")
 pub obj Cmd<Msg> {
@@ -257,6 +261,16 @@ impl<Msg> Cmd<Msg>
   /// Creates a task command envelope from a Voyd task and retained typed result mapper.
   api fn perform<T>({ task: Task<T>, handler: fn(T) -> Msg }) -> Cmd<Msg>
     Cmd<Msg>::perform<T>(task: task, handler_id: retain_typed_message_mapper(handler))
+
+  /// Starts one-off async work and dispatches the mapped result when it completes.
+  api fn task<T>({
+    work: fn() : (open) -> T,
+    handler: fn(T) -> Msg
+  }): (TaskRuntime, open) -> Cmd<Msg>
+    Cmd<Msg>::perform<T>(
+      task: tasks::detach(work),
+      handler_id: retain_typed_message_mapper(handler)
+    )
 
   /// Creates a timer command that dispatches a serialized value after the delay.
   api fn delay_serialized({ millis: i64, value: MsgPack }) -> Cmd<Msg>
@@ -1578,70 +1592,98 @@ pub fn program<Model, Msg>({
     out.set("commands", commands.value.payload)
   if subscriptions is Some:
     out.set("subscriptions", subscriptions.value.payload)
-  msgpack::make_map(out)
+  Program<Model, Msg> { payload: msgpack::make_map(out) }
 
-pub fn program<Model, Msg>({
-  init: fn() : (open) -> Model,
-  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
-  view: fn(Model) : (open) -> Html<Msg>
-}) -> Program<Model, Msg>
-  program_handlers<Model, Msg>(
-    init_id: retain_program_callback_id(init),
-    update_id: retain_program_callback_id(update),
-    view_id: retain_program_callback_id(view)
+/// Creates the next program transition from an explicit model.
+pub fn next<Model, Msg>(model: Model) -> Program<Model, Msg>
+  program<Model, Msg>(model: model)
+
+/// Creates the next program transition with one command.
+pub fn next<Model, Msg>({ model: Model, cmd: Cmd<Msg> }) -> Program<Model, Msg>
+  program<Model, Msg>(model: model, commands: cmd)
+
+/// Lifts a child program result through a retained model mapper.
+pub fn map_model<Model, NextModel, Msg>({
+  program: Program<Model, Msg>,
+  handler_id: i32
+}) -> Program<NextModel, Msg>
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "program_map_model")
+  out.set("child", program.payload)
+  out.set("handlerId", msgpack::make_i32(handler_id))
+  Program<NextModel, Msg> { payload: msgpack::make_map(out) }
+
+/// Lifts a child program result through a typed model mapper.
+pub fn map_model<Model, NextModel, Msg>(
+  program: Program<Model, Msg>,
+  handler: fn(Model) -> NextModel
+) -> Program<NextModel, Msg>
+  map_model<Model, NextModel, Msg>(
+    program: program,
+    handler_id: retain_program_callback_id(handler)
+  )
+
+/// Lifts a child program result through a retained message mapper.
+pub fn map_message<Model, ChildMsg, ParentMsg>({
+  program: Program<Model, ChildMsg>,
+  handler_id: i32
+}) -> Program<Model, ParentMsg>
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", "program_map_message")
+  out.set("child", program.payload)
+  out.set("handlerId", msgpack::make_i32(handler_id))
+  Program<Model, ParentMsg> { payload: msgpack::make_map(out) }
+
+/// Lifts a child program result through a typed message mapper.
+pub fn map_message<Model, ChildMsg, ParentMsg>(
+  program: Program<Model, ChildMsg>,
+  handler: fn(ChildMsg) -> ParentMsg
+) -> Program<Model, ParentMsg>
+  map_message<Model, ChildMsg, ParentMsg>(
+    program: program,
+    handler_id: retain_program_callback_id(handler)
   )
 
 pub fn program<Model, Msg>({
-  init: fn() : (open) -> Program<Model, Msg>,
-  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
-  view: fn(Model) : (open) -> Html<Msg>
-}) -> Program<Model, Msg>
-  program_handlers<Model, Msg>(
-    init_id: retain_program_callback_id(init),
-    update_id: retain_program_callback_id(update),
-    view_id: retain_program_callback_id(view)
-  )
-
-pub fn program<Model, Msg>({
   init: fn() : (open) -> Model,
-  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
+  step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>,
-  subscriptions: fn(Model) : (open) -> Sub<Msg>
+  subscriptions: fn(Model) : (open) -> Sub<Msg> = ((_model: Model) : (open) -> Sub<Msg>) => Sub<Msg>::none()
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
-    update_id: retain_program_callback_id(update),
+    step_id: retain_program_callback_id(step),
     view_id: retain_program_callback_id(view),
     subscriptions_id: retain_program_callback_id(subscriptions)
   )
 
 pub fn program<Model, Msg>({
   init: fn() : (open) -> Program<Model, Msg>,
-  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
+  step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>,
-  subscriptions: fn(Model) : (open) -> Sub<Msg>
+  subscriptions: fn(Model) : (open) -> Sub<Msg> = ((_model: Model) : (open) -> Sub<Msg>) => Sub<Msg>::none()
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
-    update_id: retain_program_callback_id(update),
+    step_id: retain_program_callback_id(step),
     view_id: retain_program_callback_id(view),
     subscriptions_id: retain_program_callback_id(subscriptions)
   )
 
 fn program_handlers<Model, Msg>({
   init_id: i32,
-  update_id: i32,
+  step_id: i32,
   view_id: i32,
   subscriptions_id?: i32
 }) -> Program<Model, Msg>
   let ~out = Dict<String, MsgPack>::init()
   out.set("kind", "program")
   out.set("initHandlerId", msgpack::make_i32(init_id))
-  out.set("updateHandlerId", msgpack::make_i32(update_id))
+  out.set("stepHandlerId", msgpack::make_i32(step_id))
   out.set("viewHandlerId", msgpack::make_i32(view_id))
   if subscriptions_id is Some:
     out.set("subscriptionsHandlerId", msgpack::make_i32(subscriptions_id.value))
-  msgpack::make_map(out)
+  Program<Model, Msg> { payload: msgpack::make_map(out) }
 
 /// Creates a virtual DOM element payload for renderer consumption.
 ///

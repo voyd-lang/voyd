@@ -37,6 +37,32 @@ Voyd supports function overloading.
 - Overloads are selected by argument types and labels.
 - Overloads may differ by label style.
 - Overloads may not differ only by return type.
+- Labeled parameter groups are structural. A structural object with extra
+  fields can satisfy a smaller labeled parameter shape.
+- Avoid overloads where one labeled structural shape is a subset of another
+  compatible shape. Use optional parameters or a distinct function name instead.
+
+For example, this overload set is ambiguous because a value with `url` and
+`timeout` also satisfies the smaller `{ url }` shape:
+
+```voyd
+fn request({ url: String }) -> Response
+fn request({ url: String, timeout: i32 }) -> Response
+```
+
+Prefer one function with an optional field:
+
+```voyd
+fn request({ url: String, timeout?: i32 }) -> Response
+```
+
+Overloads are a good fit when the accepted shapes are not subset/superset
+variants of the same structural object.
+
+```voyd
+fn contains({ key: String }) -> bool
+fn contains({ value: User }) -> bool
+```
 
 ## Labeled parameters
 

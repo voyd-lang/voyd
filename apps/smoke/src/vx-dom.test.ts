@@ -58,7 +58,7 @@ describe("smoke: compiled VX DOM rendering", () => {
       return;
     }
     expect(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain(
-      "{ id: i32, initial: i32 }",
+      "call has 1 extra argument(s)",
     );
   });
 
@@ -160,7 +160,11 @@ describe("smoke: compiled VX DOM rendering", () => {
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
-    const app = createVoydVxAppRuntime({ host });
+    await expect(host.run("mapped_program_result")).resolves.toMatchObject({
+      kind: "program_map_message",
+      child: { kind: "program_map_model" },
+    });
+    const app = createVoydVxAppRuntime({ host, app: "mapped_app" });
 
     const container = document.createElement("div");
     const mounted = await mountVxApp({ container, app });
@@ -183,6 +187,21 @@ describe("smoke: compiled VX DOM rendering", () => {
 
     mounted.dispose();
     expect(container.innerHTML).toBe("");
+  });
+
+  it("retains subscriptions from object syntax program lifecycle config", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(await sdk.compile({ entryPath: typedCounterEntryPath }));
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+
+    const inferred = await host.run<{ subscriptionsHandlerId?: number }>("app");
+    const explicit = await host.run<{ subscriptionsHandlerId?: number }>("app_explicit_config");
+
+    expect(typeof inferred.subscriptionsHandlerId).toBe("number");
+    expect(typeof explicit.subscriptionsHandlerId).toBe("number");
   });
 
   it("dispatches typed task command results from a mounted Voyd app", async () => {
@@ -434,16 +453,12 @@ enum Msg
   Save { value?: String }
 
 pub fn app() -> Program<Model, Msg>
-  program<Model, Msg>(
-    init: init,
-    update: update,
-    view: view
-  )
+  program({ init, step, view })
 
 fn init() -> Model
   Model { count: 0 }
 
-fn update(model: Model, msg: Msg) -> Program<Model, Msg>
+fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Save { value }:
       program<Model, Msg>(model: Model { count: model.count + optional_bonus(value) })
@@ -510,7 +525,7 @@ fn count_label(value: i32) -> String
     expect(container.innerHTML).toBe("");
   });
 
-  it("mounts the site wiki example with a Voyd-owned update loop", async () => {
+  it("mounts the site wiki example with a Voyd-owned step loop", async () => {
     const sdk = createSdk();
     const entryPath = path.join(siteExampleRoot, "wiki/wiki.voyd");
     const result = expectCompileSuccess(await sdk.compile({ entryPath }));
@@ -523,7 +538,7 @@ fn count_label(value: i32) -> String
       host,
       exports: {
         init: "component_state_init",
-        update: "component_state_update",
+        step: "component_state_step",
         view: "component_state_view",
       },
       viewReceivesModel: false,

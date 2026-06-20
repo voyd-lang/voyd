@@ -281,12 +281,15 @@ const lowerStaticMethodCall = ({
     scope: scopes.current(),
     ctx,
   });
-  const combinedTypeArguments = [
-    ...(typeArguments ?? []),
+  const namespaceTypeArguments = [
     ...(enumNamespaceTypeArguments.typeArguments ?? []),
     ...(enumNamespaceTypeArguments.consumeNamespaceTypeArguments
       ? []
       : (targetTypeArguments ?? [])),
+  ];
+  const combinedTypeArguments = [
+    ...(typeArguments ?? []),
+    ...namespaceTypeArguments,
   ];
 
   const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
@@ -357,7 +360,7 @@ const lowerStaticMethodCall = ({
   const callTypeArguments =
     aliasConstructorTypeArguments.consumeNamespaceTypeArguments
       ? aliasConstructorTypeArguments.typeArguments
-      : combinedTypeArguments;
+      : typeArguments;
 
   return ctx.builder.addExpression({
     kind: "expr",
@@ -369,6 +372,11 @@ const lowerStaticMethodCall = ({
     typeArguments:
       callTypeArguments && callTypeArguments.length > 0
         ? callTypeArguments
+        : undefined,
+    targetTypeArguments:
+      !aliasConstructorTypeArguments.consumeNamespaceTypeArguments &&
+      namespaceTypeArguments.length > 0
+        ? namespaceTypeArguments
         : undefined,
   });
 };
@@ -489,11 +497,15 @@ const lowerModuleQualifiedCall = ({
         .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
         .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
     : undefined;
-  const combinedTypeArguments =
+  const targetCallTypeArguments =
     targetTypeArguments &&
     targetTypeArguments.length > 0 &&
     ctx.symbolTable.getSymbol(moduleSymbol).kind === "effect"
-      ? [...(typeArguments ?? []), ...targetTypeArguments]
+      ? targetTypeArguments
+      : undefined;
+  const combinedTypeArguments =
+    targetCallTypeArguments && targetCallTypeArguments.length > 0
+      ? [...(typeArguments ?? []), ...targetCallTypeArguments]
       : typeArguments;
 
   const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
@@ -565,7 +577,7 @@ const lowerModuleQualifiedCall = ({
   const callTypeArguments =
     aliasConstructorTypeArguments.consumeNamespaceTypeArguments
       ? aliasConstructorTypeArguments.typeArguments
-      : combinedTypeArguments;
+      : typeArguments;
 
   return ctx.builder.addExpression({
     kind: "expr",
@@ -577,6 +589,12 @@ const lowerModuleQualifiedCall = ({
     typeArguments:
       callTypeArguments && callTypeArguments.length > 0
         ? callTypeArguments
+        : undefined,
+    targetTypeArguments:
+      !aliasConstructorTypeArguments.consumeNamespaceTypeArguments &&
+      targetCallTypeArguments &&
+      targetCallTypeArguments.length > 0
+        ? targetCallTypeArguments
         : undefined,
   });
 };
