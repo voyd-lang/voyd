@@ -420,14 +420,19 @@ const structuralShapesOverlap = ({
     if (!rightField) {
       continue;
     }
+    if (leftField.optional && rightField.optional) {
+      continue;
+    }
     if (
-      !typesOverlap({
-        left: leftField.type,
-        right: rightField.type,
-        ctx,
-        state,
-        overlap,
-      })
+      !withForkedOverlap(overlap, (candidate) =>
+        typesOverlap({
+          left: leftField.type,
+          right: rightField.type,
+          ctx,
+          state,
+          overlap: candidate,
+        }),
+      )
     ) {
       return false;
     }

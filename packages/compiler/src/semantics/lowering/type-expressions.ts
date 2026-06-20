@@ -157,7 +157,7 @@ const lowerObjectTypeField = (
   ctx: LowerContext,
   scope: ScopeId
 ): HirRecordTypeField => {
-  if (!isForm(entry) || !entry.calls(":")) {
+  if (!isForm(entry) || (!entry.calls(":") && !entry.calls("?:"))) {
     throw new Error("object type fields must be labeled");
   }
   const nameExpr = entry.at(1);
@@ -172,9 +172,11 @@ const lowerObjectTypeField = (
   if (!type) {
     throw new Error("object type field missing resolved type expression");
   }
+  const optional = entry.calls("?:");
   return {
     name: nameExpr.value,
-    type,
+    type: optional ? wrapInOptionalTypeExpr({ inner: type, ctx, scope }) : type,
+    ...(optional ? { optional: true } : {}),
     span: toSourceSpan(entry),
   };
 };

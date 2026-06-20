@@ -1293,6 +1293,7 @@ const resolveObjectTypeExpr = (
     return {
       name: field.name,
       type,
+      ...(field.optional ? { optional: true } : {}),
       declaringParams: allowedParams
         ? declaringParamsForField(type, allowedParams, ctx)
         : undefined,
