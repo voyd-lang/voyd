@@ -438,11 +438,7 @@ enum Msg
   Save { value?: String }
 
 pub fn app() -> Program<Model, Msg>
-  program<Model, Msg>(
-    init: init,
-    step: step,
-    view: view
-  )
+  program({ init, step, view })
 
 fn init() -> Model
   Model { count: 0 }

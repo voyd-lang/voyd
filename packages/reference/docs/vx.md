@@ -13,12 +13,7 @@ The canonical app entrypoint is:
 
 ```voyd
 pub fn app() -> Program<Model, Msg>
-  program<Model, Msg>(
-    init: init,
-    step: step,
-    view: view,
-    subscriptions: subscriptions
-  )
+  program({ init, step, view, subscriptions })
 ```
 
 `step`, not `update`, handles messages:
