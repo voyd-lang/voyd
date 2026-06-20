@@ -1,5 +1,5 @@
 import { diagnosticFromCode, emitDiagnostic } from "../../diagnostics/index.js";
-import type { SourceSpan, SymbolId } from "../ids.js";
+import type { SourceSpan, SymbolId, TypeId, TypeParamId } from "../ids.js";
 import type {
   FunctionSignature,
   ParamSignature,
@@ -14,6 +14,10 @@ type LabeledOverloadShape = {
   signature: FunctionSignature;
   labelStart: number;
   fields: ReadonlyMap<string, ParamSignature>;
+};
+
+type OverlapContext = {
+  bindings: Map<TypeParamId, TypeId>;
 };
 
 export const validateSubsumingLabeledOverloads = (
@@ -98,11 +102,20 @@ const reportSubsumingPair = ({
   ctx: TypingContext;
   state: TypingState;
 }): void => {
-  if (!positionalPrefixesOverlap({ left, right, ctx, state })) {
+  const prefixOverlap = positionalPrefixesOverlap({ left, right, ctx, state });
+  if (!prefixOverlap) {
     return;
   }
 
-  if (shapeSubsumes({ candidate: left, other: right, ctx, state })) {
+  if (
+    shapeSubsumes({
+      candidate: left,
+      other: right,
+      ctx,
+      state,
+      overlap: cloneOverlap(prefixOverlap),
+    })
+  ) {
     reportSubsumingOverload({
       subsuming: left,
       subsumed: right,
@@ -111,7 +124,15 @@ const reportSubsumingPair = ({
     return;
   }
 
-  if (shapeSubsumes({ candidate: right, other: left, ctx, state })) {
+  if (
+    shapeSubsumes({
+      candidate: right,
+      other: left,
+      ctx,
+      state,
+      overlap: cloneOverlap(prefixOverlap),
+    })
+  ) {
     reportSubsumingOverload({
       subsuming: right,
       subsumed: left,
@@ -130,16 +151,17 @@ const positionalPrefixesOverlap = ({
   right: LabeledOverloadShape;
   ctx: TypingContext;
   state: TypingState;
-}): boolean => {
+}): OverlapContext | undefined => {
   if (left.labelStart !== right.labelStart) {
-    return false;
+    return undefined;
   }
 
+  const overlap = createOverlapContext();
   for (let index = 0; index < left.labelStart; index += 1) {
     const leftParam = left.signature.parameters[index]!;
     const rightParam = right.signature.parameters[index]!;
     if (leftParam.label !== rightParam.label) {
-      return false;
+      return undefined;
     }
     if (
       !typesOverlap({
@@ -147,13 +169,14 @@ const positionalPrefixesOverlap = ({
         right: rightParam.type,
         ctx,
         state,
+        overlap,
       })
     ) {
-      return false;
+      return undefined;
     }
   }
 
-  return true;
+  return overlap;
 };
 
 const shapeSubsumes = ({
@@ -161,11 +184,13 @@ const shapeSubsumes = ({
   other,
   ctx,
   state,
+  overlap,
 }: {
   candidate: LabeledOverloadShape;
   other: LabeledOverloadShape;
   ctx: TypingContext;
   state: TypingState;
+  overlap: OverlapContext;
 }): boolean => {
   if (candidate.fields.size <= other.fields.size) {
     return false;
@@ -182,6 +207,7 @@ const shapeSubsumes = ({
         right: otherParam.type,
         ctx,
         state,
+        overlap,
       })
     ) {
       return false;
@@ -196,36 +222,68 @@ const typesOverlap = ({
   right,
   ctx,
   state,
+  overlap,
 }: {
-  left: number;
-  right: number;
+  left: TypeId;
+  right: TypeId;
   ctx: TypingContext;
   state: TypingState;
+  overlap: OverlapContext;
 }): boolean => {
+  left = resolveBoundType({ type: left, overlap, ctx });
+  right = resolveBoundType({ type: right, overlap, ctx });
   if (left === right) {
     return true;
   }
 
   const leftDesc = ctx.arena.get(left);
   if (leftDesc.kind === "type-param-ref") {
-    return true;
+    return bindTypeParameter({
+      param: leftDesc.param,
+      type: right,
+      ctx,
+      state,
+      overlap,
+    });
   }
 
   if (leftDesc.kind === "union") {
     return leftDesc.members.some((member) =>
-      typesOverlap({ left: member, right, ctx, state }),
+      withForkedOverlap(overlap, (candidate) =>
+        typesOverlap({ left: member, right, ctx, state, overlap: candidate }),
+      ),
     );
   }
 
   const rightDesc = ctx.arena.get(right);
   if (rightDesc.kind === "type-param-ref") {
-    return true;
+    return bindTypeParameter({
+      param: rightDesc.param,
+      type: left,
+      ctx,
+      state,
+      overlap,
+    });
   }
 
   if (rightDesc.kind === "union") {
     return rightDesc.members.some((member) =>
-      typesOverlap({ left, right: member, ctx, state }),
+      withForkedOverlap(overlap, (candidate) =>
+        typesOverlap({ left, right: member, ctx, state, overlap: candidate }),
+      ),
     );
+  }
+
+  const leftFields = structuralFieldsFor({ type: left, ctx });
+  const rightFields = structuralFieldsFor({ type: right, ctx });
+  if (leftFields && rightFields) {
+    return structuralShapesOverlap({
+      left: leftFields,
+      right: rightFields,
+      ctx,
+      state,
+      overlap,
+    });
   }
 
   if (
@@ -239,6 +297,143 @@ const typesOverlap = ({
     typeSatisfies(left, right, ctx, state) ||
     typeSatisfies(right, left, ctx, state)
   );
+};
+
+const createOverlapContext = (): OverlapContext => ({
+  bindings: new Map(),
+});
+
+const cloneOverlap = (overlap: OverlapContext): OverlapContext => ({
+  bindings: new Map(overlap.bindings),
+});
+
+const withForkedOverlap = (
+  overlap: OverlapContext,
+  run: (candidate: OverlapContext) => boolean,
+): boolean => {
+  const candidate = cloneOverlap(overlap);
+  if (!run(candidate)) {
+    return false;
+  }
+  overlap.bindings.clear();
+  candidate.bindings.forEach((value, key) => overlap.bindings.set(key, value));
+  return true;
+};
+
+const resolveBoundType = ({
+  type,
+  overlap,
+  ctx,
+}: {
+  type: TypeId;
+  overlap: OverlapContext;
+  ctx: TypingContext;
+}): TypeId => {
+  const seen = new Set<TypeParamId>();
+  let current = type;
+  while (true) {
+    const desc = ctx.arena.get(current);
+    if (desc.kind !== "type-param-ref") {
+      return current;
+    }
+    if (seen.has(desc.param)) {
+      return current;
+    }
+    seen.add(desc.param);
+    const binding = overlap.bindings.get(desc.param);
+    if (typeof binding !== "number") {
+      return current;
+    }
+    current = binding;
+  }
+};
+
+const bindTypeParameter = ({
+  param,
+  type,
+  ctx,
+  state,
+  overlap,
+}: {
+  param: TypeParamId;
+  type: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+  overlap: OverlapContext;
+}): boolean => {
+  const typeDesc = ctx.arena.get(type);
+  if (typeDesc.kind === "type-param-ref" && typeDesc.param === param) {
+    return true;
+  }
+  const existing = overlap.bindings.get(param);
+  if (typeof existing === "number") {
+    return typesOverlap({ left: existing, right: type, ctx, state, overlap });
+  }
+  overlap.bindings.set(param, type);
+  return true;
+};
+
+const structuralFieldsFor = ({
+  type,
+  ctx,
+}: {
+  type: TypeId;
+  ctx: TypingContext;
+}): readonly ParamSignature[] | undefined => {
+  const desc = ctx.arena.get(type);
+  if (desc.kind === "structural-object") {
+    return desc.fields.map((field) => ({
+      type: field.type,
+      label: field.name,
+      name: field.name,
+      optional: field.optional,
+    }));
+  }
+  return undefined;
+};
+
+const structuralShapesOverlap = ({
+  left,
+  right,
+  ctx,
+  state,
+  overlap,
+}: {
+  left: readonly ParamSignature[];
+  right: readonly ParamSignature[];
+  ctx: TypingContext;
+  state: TypingState;
+  overlap: OverlapContext;
+}): boolean => {
+  const rightByName = new Map(
+    right
+      .map((field) => [field.label ?? field.name, field] as const)
+      .filter((entry): entry is [string, ParamSignature] => Boolean(entry[0])),
+  );
+
+  for (const leftField of left) {
+    const name = leftField.label ?? leftField.name;
+    if (!name) {
+      continue;
+    }
+    const rightField = rightByName.get(name);
+    if (!rightField) {
+      continue;
+    }
+    if (
+      !typesOverlap({
+        left: leftField.type,
+        right: rightField.type,
+        ctx,
+        state,
+        overlap,
+      })
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 };
 
 const containsTypeParamRef = ({

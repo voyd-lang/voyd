@@ -1,0 +1,9 @@
+fn program<T>({ a: T, b: T }) -> i32
+  1
+
+fn program({ a: i32, b: bool, tag: i32 }) -> i32
+  tag
+
+pub fn main() -> i32
+  program(a: 1, b: false, tag: 2)
+

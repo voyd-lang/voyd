@@ -1439,6 +1439,23 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("rejects labeled overload supersets when shared structural field types can intersect", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_structural_field_overlap.voyd"
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(item, tag\) subsumes program\(item\)/
+    );
+  });
+
+  it("allows generic labeled overload supersets when field correlations cannot overlap", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_generic_field_correlation.voyd"
+    );
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("rejects mixed positional and labeled overload supersets with compatible prefixes", () => {
     const ast = loadAst(
       "function_overloads_labeled_compatible_positional_prefix.voyd"
