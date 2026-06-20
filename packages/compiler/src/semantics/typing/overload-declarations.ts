@@ -207,6 +207,10 @@ const typesOverlap = ({
   }
 
   const leftDesc = ctx.arena.get(left);
+  if (leftDesc.kind === "type-param-ref") {
+    return true;
+  }
+
   if (leftDesc.kind === "union") {
     return leftDesc.members.some((member) =>
       typesOverlap({ left: member, right, ctx, state }),
@@ -214,6 +218,10 @@ const typesOverlap = ({
   }
 
   const rightDesc = ctx.arena.get(right);
+  if (rightDesc.kind === "type-param-ref") {
+    return true;
+  }
+
   if (rightDesc.kind === "union") {
     return rightDesc.members.some((member) =>
       typesOverlap({ left, right: member, ctx, state }),

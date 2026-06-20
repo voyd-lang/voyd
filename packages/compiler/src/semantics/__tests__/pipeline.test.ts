@@ -1432,6 +1432,13 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("rejects labeled overload supersets when shared generic fields can overlap", () => {
+    const ast = loadAst("function_overloads_labeled_generic_field_overlap.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(item, tag\) subsumes program\(item\)/
+    );
+  });
+
   it("rejects mixed positional and labeled overload supersets with compatible prefixes", () => {
     const ast = loadAst(
       "function_overloads_labeled_compatible_positional_prefix.voyd"
