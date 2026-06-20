@@ -626,19 +626,13 @@ describe("next codegen", () => {
 
   it("infers generic labeled params from function-valued structural objects", () => {
     const instance = loadWasmInstance("generic_labeled_function_object.voyd");
-    const {
-      explicit_structural,
-      inferred_structural,
-      inferred_structural_with_subscriptions,
-      inferred_labeled,
-      main,
-    } = instance.exports as Record<string, unknown>;
+    const { explicit_structural, inferred_structural, inferred_labeled, main } =
+      instance.exports as Record<string, unknown>;
 
     expect((explicit_structural as () => number)()).toBe(7);
     expect((inferred_structural as () => number)()).toBe(7);
-    expect((inferred_structural_with_subscriptions as () => number)()).toBe(11);
     expect((inferred_labeled as () => number)()).toBe(7);
-    expect((main as () => number)()).toBe(32);
+    expect((main as () => number)()).toBe(21);
   });
 
   it("supports default function parameters with and without annotations", () => {

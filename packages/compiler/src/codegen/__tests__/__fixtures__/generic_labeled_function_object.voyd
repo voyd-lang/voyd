@@ -16,17 +16,6 @@ fn configure<T, U>({
   update(model, message)
   7
 
-fn configure<T, U>({
-  init: fn() -> T,
-  update: fn(T, U) -> T,
-  view: fn(T) -> U,
-  subscriptions: fn(T) -> i32
-}) -> i32
-  let model = init()
-  let message = view(model)
-  update(model, message)
-  subscriptions(model)
-
 fn configure<T>({ model: T }) -> i32
   99
 
@@ -39,20 +28,14 @@ fn update(model: Model, message: Msg) -> Model
 fn view(model: Model) -> Msg
   Msg { value: model.value + 1 }
 
-fn subscriptions(model: Model) -> i32
-  model.value + 10
-
 pub fn explicit_structural() -> i32
   configure<Model, Msg>({ init, update, view })
 
 pub fn inferred_structural() -> i32
   configure({ init, update, view })
 
-pub fn inferred_structural_with_subscriptions() -> i32
-  configure({ init, update, view, subscriptions })
-
 pub fn inferred_labeled() -> i32
   configure(init: init, update: update, view: view)
 
 pub fn main() -> i32
-  explicit_structural() + inferred_structural() + inferred_structural_with_subscriptions() + inferred_labeled()
+  explicit_structural() + inferred_structural() + inferred_labeled()

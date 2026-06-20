@@ -1583,30 +1583,8 @@ pub fn program<Model, Msg>({
 pub fn program<Model, Msg>({
   init: fn() : (open) -> Model,
   update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
-  view: fn(Model) : (open) -> Html<Msg>
-}) -> Program<Model, Msg>
-  program_handlers<Model, Msg>(
-    init_id: retain_program_callback_id(init),
-    update_id: retain_program_callback_id(update),
-    view_id: retain_program_callback_id(view)
-  )
-
-pub fn program<Model, Msg>({
-  init: fn() : (open) -> Program<Model, Msg>,
-  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
-  view: fn(Model) : (open) -> Html<Msg>
-}) -> Program<Model, Msg>
-  program_handlers<Model, Msg>(
-    init_id: retain_program_callback_id(init),
-    update_id: retain_program_callback_id(update),
-    view_id: retain_program_callback_id(view)
-  )
-
-pub fn program<Model, Msg>({
-  init: fn() : (open) -> Model,
-  update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>,
-  subscriptions: fn(Model) : (open) -> Sub<Msg>
+  subscriptions: fn(Model) : (open) -> Sub<Msg> = ((_model: Model) : (open) -> Sub<Msg>) => Sub<Msg>::none()
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
@@ -1619,7 +1597,7 @@ pub fn program<Model, Msg>({
   init: fn() : (open) -> Program<Model, Msg>,
   update: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>,
-  subscriptions: fn(Model) : (open) -> Sub<Msg>
+  subscriptions: fn(Model) : (open) -> Sub<Msg> = ((_model: Model) : (open) -> Sub<Msg>) => Sub<Msg>::none()
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),

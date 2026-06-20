@@ -136,7 +136,7 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
     matchesCandidate(candidate, argsForCandidate ? argsForCandidate(candidate) : args),
   );
   const refined = refineMatches ? refineMatches(matches) : matches;
-  return narrowOverloadMatches({ matches: refined, args, typeArguments, ctx, state });
+  return narrowOverloadMatches({ matches: refined, typeArguments, ctx, state });
 };
 
 const signatureCallShapeCouldMatch = ({
@@ -571,13 +571,11 @@ const overloadConstraintSpecificity = (
 
 export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
   matches,
-  args,
   typeArguments,
   ctx,
   state,
 }: {
   matches: readonly T[];
-  args?: readonly Arg[];
   typeArguments: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
@@ -604,23 +602,12 @@ export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
     return maximalMatches;
   }
 
-  const structurallyBestMatches =
-    args && maximalMatches.length > 1
-      ? narrowByStructuralObjectExtraFields({
-          matches: maximalMatches,
-          args,
-          typeArguments,
-          ctx,
-          state,
-        })
-      : maximalMatches;
-
-  if (structurallyBestMatches.length === 1) {
-    return structurallyBestMatches;
-  }
-
+  // Labeled parameter groups are structural: a value with extra fields can
+  // satisfy a smaller labeled shape. Do not rank matches by "most fields
+  // consumed" here; subset/superset structural overloads should remain
+  // ambiguous until declaration-time validation rejects them.
   const minPenalty = Math.min(
-    ...structurallyBestMatches.map((candidate) =>
+    ...maximalMatches.map((candidate) =>
       overloadGenericityPenalty({
         candidate,
         typeArguments,
@@ -628,7 +615,7 @@ export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
       }),
     ),
   );
-  const leastGenericMatches = structurallyBestMatches.filter(
+  const leastGenericMatches = maximalMatches.filter(
     (candidate) =>
       overloadGenericityPenalty({
         candidate,
@@ -649,115 +636,4 @@ export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
   );
 
   return mostConstrainedMatches.length === 1 ? mostConstrainedMatches : matches;
-};
-
-const narrowByStructuralObjectExtraFields = <T extends OverloadResolutionCandidate>({
-  matches,
-  args,
-  typeArguments,
-  ctx,
-  state,
-}: {
-  matches: readonly T[];
-  args: readonly Arg[];
-  typeArguments: readonly TypeId[] | undefined;
-  ctx: TypingContext;
-  state: TypingState;
-}): readonly T[] => {
-  const minPenalty = Math.min(
-    ...matches.map((candidate) =>
-      structuralObjectExtraFieldPenalty({
-        candidate,
-        args,
-        typeArguments,
-        ctx,
-        state,
-      }),
-    ),
-  );
-  return matches.filter(
-    (candidate) =>
-      structuralObjectExtraFieldPenalty({
-        candidate,
-        args,
-        typeArguments,
-        ctx,
-        state,
-      }) === minPenalty,
-  );
-};
-
-const structuralObjectExtraFieldPenalty = ({
-  candidate,
-  args,
-  typeArguments,
-  ctx,
-  state,
-}: {
-  candidate: OverloadResolutionCandidate;
-  args: readonly Arg[];
-  typeArguments: readonly TypeId[] | undefined;
-  ctx: TypingContext;
-  state: TypingState;
-}): number => {
-  const params = specializeOverloadParameters({
-    symbol: candidate.symbol,
-    signature: candidate.signature,
-    typeArguments,
-    ctx,
-  }).filter((param) => param.synthetic !== "stable-callsite-id");
-
-  let argIndex = 0;
-  let paramIndex = 0;
-  let penalty = 0;
-
-  while (paramIndex < params.length && argIndex < args.length) {
-    const param = params[paramIndex]!;
-    const arg = args[argIndex]!;
-
-    if (param.label && arg.label === undefined) {
-      const structuralFields = getStructuralFields(arg.type, ctx, state);
-      if (!structuralFields) {
-        return penalty;
-      }
-
-      let cursor = paramIndex;
-      const matchedLabels = new Set<string>();
-      while (cursor < params.length) {
-        const runParam = params[cursor]!;
-        if (!runParam.label) {
-          break;
-        }
-        const hasField = structuralFields.some(
-          (field) => field.name === runParam.label,
-        );
-        if (hasField) {
-          matchedLabels.add(runParam.label);
-          cursor += 1;
-          continue;
-        }
-        if (runParam.optional) {
-          cursor += 1;
-          continue;
-        }
-        break;
-      }
-
-      if (cursor === paramIndex) {
-        return penalty;
-      }
-
-      penalty += structuralFields.filter(
-        (field) => !matchedLabels.has(field.name),
-      ).length;
-      paramIndex = cursor;
-      argIndex += 1;
-      continue;
-    }
-
-    argIndex += 1;
-    paramIndex += 1;
-  }
-
-  return penalty;
 };

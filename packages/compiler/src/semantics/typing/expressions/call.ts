@@ -1742,6 +1742,19 @@ const ensureOptionalParameterIsSkippable = ({
 const isStableCallsiteIdParam = (param: ParamSignature): boolean =>
   param.synthetic === "stable-callsite-id";
 
+const providedArgumentTypeForParam = (
+  param: ParamSignature,
+  ctx: TypingContext,
+): TypeId => {
+  if (typeof param.defaultValue !== "number") {
+    return param.type;
+  }
+  return (
+    getOptionalInfo(param.type, optionalResolverContextForTypingContext(ctx))
+      ?.innerType ?? param.type
+  );
+};
+
 const argumentTargetsSyntheticParam = (
   arg: Arg,
   params: readonly ParamSignature[],
@@ -1809,7 +1822,7 @@ const validateCallArgs = (
       if (!(state.mode === "relaxed" && hasUnknownArgs)) {
         ensureTypeMatches(
           match.matchedType,
-          match.param.type,
+          providedArgumentTypeForParam(match.param, ctx),
           ctx,
           state,
           `call argument ${match.paramIndex + 1}`,
@@ -1821,7 +1834,10 @@ const validateCallArgs = (
             type: match.matchedType,
             exprId: match.matchedExprId ?? match.arg.exprId,
           },
-          param: match.param,
+          param: {
+            ...match.param,
+            type: providedArgumentTypeForParam(match.param, ctx),
+          },
           index: match.paramIndex,
           ctx,
           state,
@@ -1949,10 +1965,16 @@ const callArgumentsSatisfyParams = ({
         ? true
         : !valueTraitObjectWideningFor({
             actual: match.matchedType,
-            expected: match.param.type,
+            expected: providedArgumentTypeForParam(match.param, ctx),
             ctx,
             state,
-          }) && typeSatisfies(match.matchedType, match.param.type, ctx, state),
+          }) &&
+          typeSatisfies(
+            match.matchedType,
+            providedArgumentTypeForParam(match.param, ctx),
+            ctx,
+            state,
+          ),
     onSkipOptionalParam: () => true,
   }).kind === "ok";
 
@@ -1980,7 +2002,7 @@ const callArgumentFunctionReturnsSatisfyParams = ({
     onMatch: (match) =>
       functionReturnSatisfiesParameterReturn({
         actual: match.matchedType,
-        expected: match.param.type,
+        expected: providedArgumentTypeForParam(match.param, ctx),
         signatureTypeParamIds,
         ctx,
         state,
@@ -4999,6 +5021,7 @@ export const typeGenericFunctionBody = ({
     const defaultParameterValues = typeDefaultParameterValues({
       fn,
       signature,
+      substitution: mergedSubstitution,
       ctx,
       state,
       typeExpression,
