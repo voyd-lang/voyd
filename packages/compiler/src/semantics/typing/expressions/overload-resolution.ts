@@ -644,14 +644,12 @@ const overloadConstraintSpecificity = (
 
 export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
   matches,
-  args,
   typeArguments,
   targetTypeArguments,
   ctx,
   state,
 }: {
   matches: readonly T[];
-  args?: readonly Arg[];
   typeArguments: readonly TypeId[] | undefined;
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;

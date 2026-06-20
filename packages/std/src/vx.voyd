@@ -1647,30 +1647,8 @@ pub fn map_message<Model, ChildMsg, ParentMsg>(
 pub fn program<Model, Msg>({
   init: fn() : (open) -> Model,
   step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
-  view: fn(Model) : (open) -> Html<Msg>
-}) -> Program<Model, Msg>
-  program_handlers<Model, Msg>(
-    init_id: retain_program_callback_id(init),
-    step_id: retain_program_callback_id(step),
-    view_id: retain_program_callback_id(view)
-  )
-
-pub fn program<Model, Msg>({
-  init: fn() : (open) -> Program<Model, Msg>,
-  step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
-  view: fn(Model) : (open) -> Html<Msg>
-}) -> Program<Model, Msg>
-  program_handlers<Model, Msg>(
-    init_id: retain_program_callback_id(init),
-    step_id: retain_program_callback_id(step),
-    view_id: retain_program_callback_id(view)
-  )
-
-pub fn program<Model, Msg>({
-  init: fn() : (open) -> Model,
-  step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>,
-  subscriptions: fn(Model) : (open) -> Sub<Msg>
+  subscriptions: fn(Model) : (open) -> Sub<Msg> = ((_model: Model) : (open) -> Sub<Msg>) => Sub<Msg>::none()
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
@@ -1683,7 +1661,7 @@ pub fn program<Model, Msg>({
   init: fn() : (open) -> Program<Model, Msg>,
   step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>,
-  subscriptions: fn(Model) : (open) -> Sub<Msg>
+  subscriptions: fn(Model) : (open) -> Sub<Msg> = ((_model: Model) : (open) -> Sub<Msg>) => Sub<Msg>::none()
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),

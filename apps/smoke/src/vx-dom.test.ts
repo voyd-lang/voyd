@@ -58,7 +58,7 @@ describe("smoke: compiled VX DOM rendering", () => {
       return;
     }
     expect(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain(
-      "{ id: i32, initial: i32 }",
+      "call has 1 extra argument(s)",
     );
   });
 
