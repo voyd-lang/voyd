@@ -461,8 +461,8 @@ export const createEndRequestRaw = ({
             msgPackType
           )
         ),
-        ...signatureBranches,
         ...siteBranches,
+        ...signatureBranches,
         ctx.mod.unreachable(),
       ])
     );
