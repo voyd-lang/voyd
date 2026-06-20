@@ -44,11 +44,7 @@ type TextInput = {
 }
 
 pub fn app() -> Program<Model, Msg>
-  program<Model, Msg>(
-    init: init,
-    update: update,
-    view: view
-  )
+  program({ init, update, view })
 
 fn init() -> Model
   Model { title: "Draft", saved: false }

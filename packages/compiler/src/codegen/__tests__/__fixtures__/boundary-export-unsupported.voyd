@@ -9,11 +9,7 @@ enum Msg
   Noop
 
 pub fn app() -> Program<CallbackModel, Msg>
-  program<CallbackModel, Msg>(
-    init: init,
-    update: update,
-    view: view
-  )
+  program({ init, update, view })
 
 fn init() -> CallbackModel
   CallbackModel { apply: read_value }

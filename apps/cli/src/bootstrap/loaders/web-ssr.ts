@@ -856,11 +856,7 @@ enum Msg
   TogglePreview
 
 pub fn app() -> Program<ClientArticle, Msg>
-  program<ClientArticle, Msg>(
-    init: init,
-    update: update,
-    view: view
-  )
+  program({ init, update, view })
 
 fn init() -> ClientArticle
   ClientArticle {
