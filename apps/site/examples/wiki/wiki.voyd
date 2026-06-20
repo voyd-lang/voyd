@@ -34,12 +34,7 @@ type TextInputEvent = {
 }
 
 pub fn app() -> Program<WikiModel, WikiMsg>
-  program<WikiModel, WikiMsg>(
-    init: init,
-    update: update,
-    view: view,
-    subscriptions: subscriptions
-  )
+  program({ init, update, view, subscriptions })
 
 fn init() -> WikiModel
   WikiModel {
