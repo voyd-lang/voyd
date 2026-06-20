@@ -1,0 +1,9 @@
+fn program(seed: i32, { init: i32, step: i32 }) -> i32
+  seed + init + step
+
+fn program(seed: bool, { init: i32, step: i32, subscriptions: i32 }) -> i32
+  init + step + subscriptions
+
+pub fn main() -> i32
+  program(1, init: 2, step: 3)
+

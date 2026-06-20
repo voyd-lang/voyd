@@ -318,6 +318,14 @@ type DiagnosticParamsMap = {
     valueMemberType: string;
     otherMemberType: string;
   };
+  TY0047:
+    | {
+        kind: "subsuming-labeled-overload";
+        functionName: string;
+        subsumingSignature: string;
+        subsumedSignature: string;
+      }
+    | { kind: "subsumed-labeled-overload" };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -987,6 +995,21 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0046"]>,
+  TY0047: {
+    code: "TY0047",
+    message: (params) =>
+      params.kind === "subsuming-labeled-overload"
+        ? `overload ${params.subsumingSignature} subsumes ${params.subsumedSignature}; labeled structural overloads with subset/superset shapes are ambiguous`
+        : "subsumed labeled overload declared here",
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Use a single overload with an optional or defaulted parameter, or give the overloads distinct function names.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0047"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

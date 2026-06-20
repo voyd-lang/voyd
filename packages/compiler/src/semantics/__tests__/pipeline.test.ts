@@ -1410,6 +1410,29 @@ describe("semanticsPipeline", () => {
     ).toBe(true);
   });
 
+  it("rejects subsuming labeled structural overloads", () => {
+    const ast = loadAst("function_overloads_subsuming_labeled.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(init, step, view, subscriptions\) subsumes program\(init, step, view\)/
+    );
+  });
+
+  it("allows labeled overload supersets when shared field types are incompatible", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_incompatible_shared_field.voyd"
+    );
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("allows mixed positional and labeled overload supersets", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_distinct_positional_prefix.voyd"
+    );
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("allows overloads that differ by generic constraints and falls back when unsatisfied", () => {
     const ast = loadAst("function_overloads_constraint_fallback.voyd");
     const result = semanticsPipeline(ast);
