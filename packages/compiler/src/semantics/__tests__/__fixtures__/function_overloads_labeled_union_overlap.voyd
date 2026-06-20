@@ -1,0 +1,21 @@
+obj A {
+  value: i32
+}
+
+obj B {
+  value: i32
+}
+
+obj C {
+  value: i32
+}
+
+type Left = A | B
+type Right = B | C
+
+fn program({ item: Left }) -> i32
+  1
+
+fn program({ item: Right, tag: i32 }) -> i32
+  tag
+

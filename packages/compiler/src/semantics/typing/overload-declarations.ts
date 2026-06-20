@@ -12,6 +12,7 @@ import { getSymbolName } from "./type-system.js";
 type LabeledOverloadShape = {
   symbol: SymbolId;
   signature: FunctionSignature;
+  labelStart: number;
   fields: ReadonlyMap<string, ParamSignature>;
 };
 
@@ -58,10 +59,7 @@ const labeledShapeFor = ({
     (param) => param.synthetic !== "stable-callsite-id",
   );
   const labelStart = parameters.findIndex((param) => param.label !== undefined);
-  // V-405 targets overloads where the entire parameter surface is a structural
-  // labeled shape. Mixed positional/labeled builder APIs have separate call
-  // compatibility rules and are intentionally left to call resolution.
-  if (labelStart !== 0) {
+  if (labelStart < 0) {
     return undefined;
   }
   if (parameters.slice(labelStart).some((param) => param.label === undefined)) {
@@ -84,6 +82,7 @@ const labeledShapeFor = ({
       ...signature,
       parameters,
     },
+    labelStart,
     fields,
   };
 };
@@ -99,6 +98,10 @@ const reportSubsumingPair = ({
   ctx: TypingContext;
   state: TypingState;
 }): void => {
+  if (!positionalPrefixesOverlap({ left, right, ctx, state })) {
+    return;
+  }
+
   if (shapeSubsumes({ candidate: left, other: right, ctx, state })) {
     reportSubsumingOverload({
       subsuming: left,
@@ -115,6 +118,42 @@ const reportSubsumingPair = ({
       ctx,
     });
   }
+};
+
+const positionalPrefixesOverlap = ({
+  left,
+  right,
+  ctx,
+  state,
+}: {
+  left: LabeledOverloadShape;
+  right: LabeledOverloadShape;
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  if (left.labelStart !== right.labelStart) {
+    return false;
+  }
+
+  for (let index = 0; index < left.labelStart; index += 1) {
+    const leftParam = left.signature.parameters[index]!;
+    const rightParam = right.signature.parameters[index]!;
+    if (leftParam.label !== rightParam.label) {
+      return false;
+    }
+    if (
+      !typesOverlap({
+        left: leftParam.type,
+        right: rightParam.type,
+        ctx,
+        state,
+      })
+    ) {
+      return false;
+    }
+  }
+
+  return true;
 };
 
 const shapeSubsumes = ({
@@ -138,7 +177,7 @@ const shapeSubsumes = ({
       return false;
     }
     if (
-      !typesCompatible({
+      !typesOverlap({
         left: candidateParam.type,
         right: otherParam.type,
         ctx,
@@ -152,7 +191,7 @@ const shapeSubsumes = ({
   return true;
 };
 
-const typesCompatible = ({
+const typesOverlap = ({
   left,
   right,
   ctx,
@@ -162,10 +201,94 @@ const typesCompatible = ({
   right: number;
   ctx: TypingContext;
   state: TypingState;
-}): boolean =>
-  left === right ||
-  typeSatisfies(left, right, ctx, state) ||
-  typeSatisfies(right, left, ctx, state);
+}): boolean => {
+  if (left === right) {
+    return true;
+  }
+
+  const leftDesc = ctx.arena.get(left);
+  if (leftDesc.kind === "union") {
+    return leftDesc.members.some((member) =>
+      typesOverlap({ left: member, right, ctx, state }),
+    );
+  }
+
+  const rightDesc = ctx.arena.get(right);
+  if (rightDesc.kind === "union") {
+    return rightDesc.members.some((member) =>
+      typesOverlap({ left, right: member, ctx, state }),
+    );
+  }
+
+  if (
+    containsTypeParamRef({ type: left, ctx }) ||
+    containsTypeParamRef({ type: right, ctx })
+  ) {
+    return false;
+  }
+
+  return (
+    typeSatisfies(left, right, ctx, state) ||
+    typeSatisfies(right, left, ctx, state)
+  );
+};
+
+const containsTypeParamRef = ({
+  type,
+  ctx,
+  seen = new Set<number>(),
+}: {
+  type: number;
+  ctx: TypingContext;
+  seen?: Set<number>;
+}): boolean => {
+  if (seen.has(type)) {
+    return false;
+  }
+  seen.add(type);
+
+  const desc = ctx.arena.get(type);
+  switch (desc.kind) {
+    case "type-param-ref":
+      return true;
+    case "recursive":
+      return containsTypeParamRef({ type: desc.body, ctx, seen });
+    case "trait":
+    case "nominal-object":
+    case "value-object":
+      return desc.typeArgs.some((arg) =>
+        containsTypeParamRef({ type: arg, ctx, seen }),
+      );
+    case "structural-object":
+      return desc.fields.some((field) =>
+        containsTypeParamRef({ type: field.type, ctx, seen }),
+      );
+    case "function":
+      return (
+        desc.parameters.some((param) =>
+          containsTypeParamRef({ type: param.type, ctx, seen }),
+        ) || containsTypeParamRef({ type: desc.returnType, ctx, seen })
+      );
+    case "union":
+      return desc.members.some((member) =>
+        containsTypeParamRef({ type: member, ctx, seen }),
+      );
+    case "intersection":
+      return [
+        desc.nominal,
+        desc.structural,
+        ...(desc.traits ?? []),
+      ].some(
+        (component): component is number =>
+          typeof component === "number" &&
+          containsTypeParamRef({ type: component, ctx, seen }),
+      );
+    case "fixed-array":
+      return containsTypeParamRef({ type: desc.element, ctx, seen });
+    case "primitive":
+      return false;
+  }
+};
 
 const reportSubsumingOverload = ({
   subsuming,

@@ -1425,6 +1425,22 @@ describe("semanticsPipeline", () => {
     expect(result.diagnostics).toHaveLength(0);
   });
 
+  it("rejects labeled overload supersets when shared field unions overlap", () => {
+    const ast = loadAst("function_overloads_labeled_union_overlap.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(item, tag\) subsumes program\(item\)/
+    );
+  });
+
+  it("rejects mixed positional and labeled overload supersets with compatible prefixes", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_compatible_positional_prefix.voyd"
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(seed, init, step, subscriptions\) subsumes program\(seed, init, step\)/
+    );
+  });
+
   it("allows mixed positional and labeled overload supersets", () => {
     const ast = loadAst(
       "function_overloads_labeled_distinct_positional_prefix.voyd"
