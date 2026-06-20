@@ -189,6 +189,21 @@ describe("smoke: compiled VX DOM rendering", () => {
     expect(container.innerHTML).toBe("");
   });
 
+  it("retains subscriptions from object syntax program lifecycle config", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(await sdk.compile({ entryPath: typedCounterEntryPath }));
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+
+    const inferred = await host.run<{ subscriptionsHandlerId?: number }>("app");
+    const explicit = await host.run<{ subscriptionsHandlerId?: number }>("app_explicit_config");
+
+    expect(typeof inferred.subscriptionsHandlerId).toBe("number");
+    expect(typeof explicit.subscriptionsHandlerId).toBe("number");
+  });
+
   it("dispatches typed task command results from a mounted Voyd app", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(

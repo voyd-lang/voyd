@@ -644,12 +644,14 @@ const overloadConstraintSpecificity = (
 
 export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
   matches,
+  args,
   typeArguments,
   targetTypeArguments,
   ctx,
   state,
 }: {
   matches: readonly T[];
+  args?: readonly Arg[];
   typeArguments: readonly TypeId[] | undefined;
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
@@ -678,6 +680,10 @@ export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
     return maximalMatches;
   }
 
+  // Labeled parameter groups are structural: a value with extra fields can
+  // satisfy a smaller labeled shape. Do not rank matches by "most fields
+  // consumed" here; subset/superset structural overloads should remain
+  // ambiguous until declaration-time validation rejects them.
   const minPenalty = Math.min(
     ...maximalMatches.map((candidate) =>
       overloadGenericityPenalty({
