@@ -4,14 +4,41 @@ import { createSdk, type CompileResult, type TestEvent } from "@voyd-lang/sdk";
 const expectCompileSuccess = (
   result: CompileResult,
 ): Extract<CompileResult, { success: true }> => {
-  expect(result.success).toBe(true);
   if (!result.success) {
     throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
   }
+  expect(result.success).toBe(true);
   return result;
 };
 
 describe("sdk tests collection", { timeout: 120_000 }, () => {
+  it("invalidates compile reuse when a companion test file changes", async () => {
+    const sdk = createSdk();
+    const compile = (description: string) =>
+      sdk.compile({
+        includeTests: true,
+        entryPath: "main.voyd",
+        source: `pub fn main() -> i32
+  1
+`,
+        files: {
+          "main.test.voyd": `test "${description}":
+  1
+`,
+        },
+      });
+
+    const first = expectCompileSuccess(await compile("first companion test"));
+    expect(first.tests?.cases.map((test) => test.description)).toEqual([
+      "first companion test",
+    ]);
+
+    const second = expectCompileSuccess(await compile("updated companion test"));
+    expect(second.tests?.cases.map((test) => test.description)).toEqual([
+      "updated companion test",
+    ]);
+  });
+
   it("keeps explicit boundary export includes scoped to the runnable module", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(await sdk.compile({

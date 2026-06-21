@@ -293,6 +293,15 @@ export class FunctionStore {
       ])
     );
   }
+
+  clone(): FunctionStore {
+    const copy = new FunctionStore();
+    this.#bySymbol.forEach((fn, symbol) => copy.#bySymbol.set(symbol, fn));
+    this.#signatures.forEach((signature, symbol) =>
+      copy.#signatures.set(symbol, cloneFunctionSignature(signature)),
+    );
+    return copy;
+  }
 }
 
 export interface BaseObjectInfo {
@@ -408,6 +417,23 @@ export class ObjectStore {
   isResolving(symbol: SymbolId): boolean {
     return this.#resolving.has(symbol);
   }
+
+  clone(): ObjectStore {
+    const copy = new ObjectStore();
+    copy.#base = { ...this.#base };
+    this.#templates.forEach((template, symbol) =>
+      copy.#templates.set(symbol, cloneObjectTemplate(template)),
+    );
+    this.#instances.forEach((info, key) =>
+      copy.#instances.set(key, cloneObjectTypeInfo(info)),
+    );
+    this.#byName.forEach((symbol, name) => copy.#byName.set(name, symbol));
+    this.#byNominal.forEach((info, nominal) =>
+      copy.#byNominal.set(nominal, cloneObjectTypeInfo(info)),
+    );
+    this.#decls.forEach((decl, symbol) => copy.#decls.set(symbol, decl));
+    return copy;
+  }
 }
 
 export class TraitStore {
@@ -469,6 +495,16 @@ export class TraitStore {
 
   getImplTemplatesForTrait(symbol: SymbolId): readonly TraitImplTemplate[] {
     return this.#implTemplatesByTrait.get(symbol) ?? [];
+  }
+
+  clone(): TraitStore {
+    const copy = new TraitStore();
+    this.#decls.forEach((decl, symbol) => copy.#decls.set(symbol, decl));
+    this.#byName.forEach((symbol, name) => copy.#byName.set(name, symbol));
+    this.#implTemplates.forEach((template) =>
+      copy.registerImplTemplate(cloneTraitImplTemplate(template)),
+    );
+    return copy;
   }
 }
 
@@ -583,6 +619,27 @@ export class TypeAliasStore {
 
   instanceEntries(): IterableIterator<[string, TypeId]> {
     return this.#instances.entries();
+  }
+
+  clone(): TypeAliasStore {
+    const copy = new TypeAliasStore();
+    this.#templates.forEach((template, symbol) =>
+      copy.#templates.set(symbol, {
+        symbol: template.symbol,
+        params: template.params.map((param) => ({ ...param })),
+        target: template.target,
+      }),
+    );
+    this.#instances.forEach((type, key) => copy.#instances.set(key, type));
+    this.#instanceSymbols.forEach((symbols, type) =>
+      copy.#instanceSymbols.set(type, new Set(symbols)),
+    );
+    this.#validatedInstances.forEach((key) => copy.#validatedInstances.add(key));
+    this.#byName.forEach((symbol, name) => copy.#byName.set(name, symbol));
+    this.#failedInstantiations.forEach((key) =>
+      copy.#failedInstantiations.add(key),
+    );
+    return copy;
   }
 }
 
@@ -722,3 +779,76 @@ export interface TraitImplInstance {
 
 export const DEFAULT_EFFECT_ROW: EffectRowId = 0;
 export const BASE_OBJECT_NAME = "Object";
+
+const cloneFunctionSignature = (
+  signature: FunctionSignature,
+): FunctionSignature => ({
+  typeId: signature.typeId,
+  parameters: signature.parameters.map((param) => ({ ...param })),
+  returnType: signature.returnType,
+  declaredReturnType: signature.declaredReturnType,
+  declaredReturnSerializer: signature.declaredReturnSerializer,
+  hasExplicitReturn: signature.hasExplicitReturn,
+  annotatedReturn: signature.annotatedReturn,
+  effectRow: signature.effectRow,
+  annotatedEffects: signature.annotatedEffects,
+  typeParams: signature.typeParams?.map((param) => ({ ...param })),
+  scheme: signature.scheme,
+  typeParamMap: signature.typeParamMap
+    ? new Map(signature.typeParamMap)
+    : undefined,
+});
+
+const cloneObjectField = (field: ObjectField): ObjectField => ({
+  name: field.name,
+  type: field.type,
+  optional: field.optional,
+  declaringParams: field.declaringParams ? [...field.declaringParams] : undefined,
+  visibility: field.visibility ? { ...field.visibility } : undefined,
+  owner: field.owner,
+  packageId: field.packageId,
+});
+
+const cloneObjectTypeInfo = (info: ObjectTypeInfo): ObjectTypeInfo => ({
+  objectKind: info.objectKind,
+  nominal: info.nominal,
+  structural: info.structural,
+  type: info.type,
+  fields: info.fields.map(cloneObjectField),
+  visibility: info.visibility ? { ...info.visibility } : undefined,
+  baseNominal: info.baseNominal,
+  traitImpls: info.traitImpls?.map(cloneTraitImplInstance),
+});
+
+const cloneObjectTemplate = (template: ObjectTemplate): ObjectTemplate => ({
+  symbol: template.symbol,
+  objectKind: template.objectKind,
+  params: template.params.map((param) => ({ ...param })),
+  nominal: template.nominal,
+  structural: template.structural,
+  type: template.type,
+  fields: template.fields.map(cloneObjectField),
+  visibility: template.visibility ? { ...template.visibility } : undefined,
+  baseNominal: template.baseNominal,
+});
+
+const cloneTraitImplTemplate = (
+  template: TraitImplTemplate,
+): TraitImplTemplate => ({
+  trait: template.trait,
+  traitSymbol: template.traitSymbol,
+  target: template.target,
+  typeParams: template.typeParams.map((param) => ({ ...param })),
+  methods: new Map(template.methods),
+  implSymbol: template.implSymbol,
+});
+
+const cloneTraitImplInstance = (
+  impl: TraitImplInstance,
+): TraitImplInstance => ({
+  trait: impl.trait,
+  traitSymbol: impl.traitSymbol,
+  target: impl.target,
+  methods: new Map(impl.methods),
+  implSymbol: impl.implSymbol,
+});

@@ -366,6 +366,172 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env, time::Time) -> i32
     expect(output).toBe(42);
   });
 
+  it("does not expose mutable cached wasm across repeat compiles", async () => {
+    const sdk = createSdk();
+    const options = {
+      source: `#!no_prelude
+pub fn main() -> i32
+  42
+`,
+    };
+    const first = expectCompileSuccess(await sdk.compile(options));
+    const originalFirstByte = first.wasm[0]!;
+    first.wasm[0] = originalFirstByte ^ 0xff;
+
+    const second = expectCompileSuccess(await sdk.compile(options));
+
+    expect(second.wasm).not.toBe(first.wasm);
+    expect(second.wasm[0]).toBe(originalFirstByte);
+    await expect(second.run<number>({ entryName: "main" })).resolves.toBe(42);
+  });
+
+  it("invalidates SDK compile reuse when an imported source file changes", async () => {
+    const sdk = createSdk();
+    const source = `#!no_prelude
+use src::util::value
+
+pub fn main() -> i32
+  value()
+`;
+    const compile = (value: number) =>
+      sdk.compile({
+        entryPath: "main.voyd",
+        source,
+        files: {
+          "util.voyd": `#!no_prelude
+pub fn value() -> i32
+  ${value}
+`,
+        },
+      });
+
+    const first = expectCompileSuccess(await compile(1));
+    await expect(first.run<number>({ entryName: "main" })).resolves.toBe(1);
+
+    const second = expectCompileSuccess(await compile(2));
+    await expect(second.run<number>({ entryName: "main" })).resolves.toBe(2);
+
+    const repeatedSecond = expectCompileSuccess(await compile(2));
+    await expect(repeatedSecond.run<number>({ entryName: "main" })).resolves.toBe(2);
+  });
+
+  it("re-emits across codegen option changes", async () => {
+    const sdk = createSdk();
+    const source = `#!no_prelude
+pub fn main() -> i32
+  1
+`;
+
+    const withoutRuntimeDiagnostics = expectCompileSuccess(
+      await sdk.compile({ source, runtimeDiagnostics: false }),
+    );
+    const withRuntimeDiagnostics = expectCompileSuccess(
+      await sdk.compile({ source, runtimeDiagnostics: true }),
+    );
+
+    expect(hasRuntimeDiagnosticsSection(withoutRuntimeDiagnostics.wasm)).toBe(false);
+    expect(hasRuntimeDiagnosticsSection(withRuntimeDiagnostics.wasm)).toBe(true);
+  });
+
+  it("reuses dependency snapshots for app edits and invalidates std/pkg edits", async () => {
+    const sdk = createSdk();
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-voyd-sdk-dependency-snapshot-"),
+    );
+    const srcDir = path.join(projectRoot, "src");
+    const stdDir = path.join(projectRoot, "std");
+    const packageRoot = path.join(projectRoot, "packages");
+    const packageSrcDir = path.join(packageRoot, "dep", "src");
+    const entryPath = path.join(srcDir, "main.voyd");
+    const stdPath = path.join(stdDir, "mathdep.voyd");
+    const pkgApiPath = path.join(packageSrcDir, "api.voyd");
+
+    const writeApp = (value: number) =>
+      fs.writeFile(
+        entryPath,
+        [
+          "#!no_prelude",
+          "use std::mathdep::{ std_value }",
+          "use pkg::dep::all",
+          "",
+          "pub fn main() -> i32",
+          `  std_value() + pkg_value() + ${value}`,
+        ].join("\n"),
+      );
+    const writeStd = (value: number) =>
+      fs.writeFile(
+        stdPath,
+        ["#!no_prelude", "pub fn std_value() -> i32", `  ${value}`].join("\n"),
+      );
+    const writePkg = (value: number) =>
+      fs.writeFile(
+        pkgApiPath,
+        ["#!no_prelude", "pub fn pkg_value() -> i32", `  ${value}`].join("\n"),
+      );
+    const compileAndRun = async () => {
+      const result = expectCompileSuccess(
+        await sdk.compile({
+          entryPath,
+          roots: { src: srcDir, std: stdDir, pkgDirs: [packageRoot] },
+        }),
+      );
+      return result.run<number>({ entryName: "main" });
+    };
+
+    try {
+      await fs.mkdir(srcDir, { recursive: true });
+      await fs.mkdir(stdDir, { recursive: true });
+      await fs.mkdir(packageSrcDir, { recursive: true });
+      await fs.writeFile(
+        path.join(packageSrcDir, "pkg.voyd"),
+        ["#!no_prelude", "pub use src::api::pkg_value"].join("\n"),
+      );
+      await writeApp(1);
+      await writeStd(10);
+      await writePkg(100);
+
+      await expect(compileAndRun()).resolves.toBe(111);
+
+      await writeApp(2);
+      await expect(compileAndRun()).resolves.toBe(112);
+
+      await writeStd(11);
+      await expect(compileAndRun()).resolves.toBe(113);
+
+      await writePkg(101);
+      await expect(compileAndRun()).resolves.toBe(114);
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
+  it("keeps dependency snapshot app edits valid for generic-heavy programs", async () => {
+    const sdk = createSdk();
+    const entryPath = path.join(
+      repoRoot,
+      "apps",
+      "smoke",
+      "fixtures",
+      "vtrace-compute-benchmark.voyd",
+    );
+    const source = await fs.readFile(entryPath, "utf8");
+
+    const cold = expectCompileSuccess(
+      await sdk.compile({ entryPath, source }),
+    );
+    expect(cold.wasm.byteLength).toBeGreaterThan(0);
+
+    const warm = expectCompileSuccess(
+      await sdk.compile({
+        entryPath,
+        source: `${source}\nfn dependency_snapshot_app_edit_marker() -> i32\n  1\n`,
+      }),
+    );
+    await expect(warm.run<number>({ entryName: "main" })).resolves.toBe(
+      3_825_271,
+    );
+  });
+
   it("runs typed boundary exports through the existing host and sdk APIs", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(

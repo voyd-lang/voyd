@@ -1,6 +1,11 @@
 import { createMemoryModuleHost } from "@voyd-lang/compiler/modules/memory-host.js";
 import { loadModuleGraph } from "@voyd-lang/compiler/pipeline-browser.js";
-import { compileWithLoader } from "./shared/compile.js";
+import { isCompilerPerfEnabled } from "@voyd-lang/compiler/perf.js";
+import {
+  compileWithLoader,
+  createCompilerReuseCache,
+  type CompilerReuseCache,
+} from "./shared/compile.js";
 import { runWithHandlers } from "./shared/host.js";
 import { createCompileResult } from "./shared/result.js";
 import {
@@ -25,11 +30,14 @@ import {
   type ParsedModule,
 } from "./compiler-browser.js";
 
-export const createSdk = (): VoydSdk => ({
-  compile: compileSdk,
-  run: runWithHandlers,
-  serveWebApp,
-});
+export const createSdk = (): VoydSdk => {
+  const compilerCache = createCompilerReuseCache();
+  return {
+    compile: (options) => compileSdk(options, compilerCache),
+    run: runWithHandlers,
+    serveWebApp,
+  };
+};
 
 export const serveWebApp = async (
   options: ServeWebAppOptions,
@@ -45,7 +53,10 @@ export const serveWebApp = async (
   };
 };
 
-const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
+const compileSdk = async (
+  options: CompileOptions,
+  compilerCache?: CompilerReuseCache,
+): Promise<CompileResult> => {
   const fallbackFile = options.entryPath ?? "index.voyd";
 
   if (options.emitWasmText) {
@@ -73,11 +84,23 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
   }
 
   try {
+    const setupPhasesMs: Record<string, number> = {};
+    const perfEnabled = isCompilerPerfEnabled();
+    const setupStartedAt = perfEnabled ? performance.now() : 0;
+    const parseStartedAt = perfEnabled ? performance.now() : 0;
     const parsed = await browserParseModule(options.source, {
       entryPath: options.entryPath,
       files: options.files,
       roots: options.roots,
     });
+    recordSetupPhase({
+      phasesMs: setupPhasesMs,
+      enabled: perfEnabled,
+      name: "sdkSetup.browserParseModule",
+      startedAt: parseStartedAt,
+    });
+
+    const rootStartedAt = perfEnabled ? performance.now() : 0;
     const roots = parsed.roots ?? options.roots;
     if (!roots) {
       return {
@@ -90,8 +113,28 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
         ],
       };
     }
+    recordSetupPhase({
+      phasesMs: setupPhasesMs,
+      enabled: perfEnabled,
+      name: "sdkSetup.resolveRoots",
+      startedAt: rootStartedAt,
+    });
 
+    const hostStartedAt = perfEnabled ? performance.now() : 0;
     const host = createMemoryModuleHost({ files: parsed.files });
+    recordSetupPhase({
+      phasesMs: setupPhasesMs,
+      enabled: perfEnabled,
+      name: "sdkSetup.createHost",
+      startedAt: hostStartedAt,
+    });
+    recordSetupPhase({
+      phasesMs: setupPhasesMs,
+      enabled: perfEnabled,
+      name: "sdkSetup.total",
+      startedAt: setupStartedAt,
+    });
+
     const result = await compileWithLoader({
       entryPath: parsed.entryPath,
       roots,
@@ -103,6 +146,8 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       optimize: options.optimize,
       loadModuleGraph,
       boundaryExports: options.boundaryExports,
+      cache: compilerCache,
+      setupPhasesMs,
     });
     if (!result.success) {
       return result;
@@ -118,6 +163,23 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       }),
     };
   }
+};
+
+const recordSetupPhase = ({
+  phasesMs,
+  enabled,
+  name,
+  startedAt,
+}: {
+  phasesMs: Record<string, number>;
+  enabled: boolean;
+  name: string;
+  startedAt: number;
+}): void => {
+  if (!enabled) {
+    return;
+  }
+  phasesMs[name] = performance.now() - startedAt;
 };
 
 export {

@@ -123,6 +123,15 @@ export interface TypeScheme {
   constraints?: ConstraintSet;
 }
 
+export interface TypeArenaSnapshot {
+  nextTypeId: TypeId;
+  nextSchemeId: TypeSchemeId;
+  nextTypeParamId: TypeParamId;
+  descriptors: readonly TypeDescriptor[];
+  schemes: readonly TypeScheme[];
+  recursiveUnfoldCache: readonly [TypeId, TypeId][];
+}
+
 export type Variance = "invariant" | "covariant" | "contravariant";
 
 export interface UnificationStepBudget {
@@ -188,17 +197,24 @@ export interface TypeArena {
   unify(a: TypeId, b: TypeId, ctx: UnificationContext): UnificationResult;
   substitute(type: TypeId, subst: Substitution): TypeId;
   widen(type: TypeId, constraint: ConstraintSet): TypeId;
+  snapshot(): TypeArenaSnapshot;
+  clone(): TypeArena;
 }
 
-export const createTypeArena = (): TypeArena => {
-  let nextTypeId: TypeId = 0;
-  let nextSchemeId: TypeSchemeId = 0;
-  let nextTypeParamId: TypeParamId = 0;
+export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
+  let nextTypeId: TypeId = snapshot?.nextTypeId ?? 0;
+  let nextSchemeId: TypeSchemeId = snapshot?.nextSchemeId ?? 0;
+  let nextTypeParamId: TypeParamId = snapshot?.nextTypeParamId ?? 0;
 
-  const descriptors: TypeDescriptor[] = [];
+  const descriptors: TypeDescriptor[] =
+    snapshot?.descriptors.map(cloneTypeDescriptor) ?? [];
   const descriptorCache = new Map<string, TypeId>();
-  const schemes = new Map<TypeSchemeId, TypeScheme>();
-  const recursiveUnfoldCache = new Map<TypeId, TypeId>();
+  const schemes = new Map<TypeSchemeId, TypeScheme>(
+    snapshot?.schemes.map((scheme) => [scheme.id, cloneTypeScheme(scheme)]) ?? [],
+  );
+  const recursiveUnfoldCache = new Map<TypeId, TypeId>(
+    snapshot?.recursiveUnfoldCache ?? [],
+  );
 
   const jsonStringKey = (value: string): string => JSON.stringify(value);
 
@@ -280,6 +296,13 @@ export const createTypeArena = (): TypeArena => {
       }
     }
   };
+
+  descriptors.forEach((desc, id) => {
+    const key = keyFor(desc);
+    if (!descriptorCache.has(key)) {
+      descriptorCache.set(key, id as TypeId);
+    }
+  });
 
   const storeDescriptor = (desc: TypeDescriptor): TypeId => {
     const key = keyFor(desc);
@@ -1901,6 +1924,15 @@ export const createTypeArena = (): TypeArena => {
 
   const get = (id: TypeId): Readonly<TypeDescriptor> => getDescriptor(id);
 
+  const snapshotArena = (): TypeArenaSnapshot => ({
+    nextTypeId,
+    nextSchemeId,
+    nextTypeParamId,
+    descriptors: descriptors.map(cloneTypeDescriptor),
+    schemes: Array.from(schemes.values(), cloneTypeScheme),
+    recursiveUnfoldCache: Array.from(recursiveUnfoldCache.entries()),
+  });
+
   return {
     get,
     getScheme,
@@ -1925,7 +1957,104 @@ export const createTypeArena = (): TypeArena => {
     unify,
     substitute,
     widen,
+    snapshot: snapshotArena,
+    clone: () => createTypeArena(snapshotArena()),
   };
+};
+
+const cloneConstraintSet = (
+  constraints: ConstraintSet | undefined,
+): ConstraintSet | undefined =>
+  constraints
+    ? {
+        traits: constraints.traits ? [...constraints.traits] : undefined,
+        structural: constraints.structural
+          ? constraints.structural.map((entry) => ({
+              field: entry.field,
+              type: entry.type,
+            }))
+          : undefined,
+      }
+    : undefined;
+
+const cloneTypeScheme = (scheme: TypeScheme): TypeScheme => ({
+  id: scheme.id,
+  params: [...scheme.params],
+  body: scheme.body,
+  constraints: cloneConstraintSet(scheme.constraints),
+});
+
+const cloneTypeDescriptor = (desc: TypeDescriptor): TypeDescriptor => {
+  switch (desc.kind) {
+    case "primitive":
+      return { kind: "primitive", name: desc.name };
+    case "recursive":
+      return { kind: "recursive", binder: desc.binder, body: desc.body };
+    case "trait":
+      return {
+        kind: "trait",
+        owner: { ...desc.owner },
+        name: desc.name,
+        typeArgs: [...desc.typeArgs],
+      };
+    case "nominal-object":
+      return {
+        kind: "nominal-object",
+        owner: { ...desc.owner },
+        name: desc.name,
+        typeArgs: [...desc.typeArgs],
+      };
+    case "value-object":
+      return {
+        kind: "value-object",
+        owner: { ...desc.owner },
+        name: desc.name,
+        typeArgs: [...desc.typeArgs],
+      };
+    case "structural-object":
+      return {
+        kind: "structural-object",
+        fields: desc.fields.map((field) => ({
+          name: field.name,
+          type: field.type,
+          optional: field.optional,
+          declaringParams: field.declaringParams
+            ? [...field.declaringParams]
+            : undefined,
+          visibility: field.visibility ? { ...field.visibility } : undefined,
+          owner: field.owner,
+          packageId: field.packageId,
+        })),
+      };
+    case "function":
+      return {
+        kind: "function",
+        parameters: desc.parameters.map((param) => ({
+          type: param.type,
+          label: param.label,
+          optional: param.optional,
+        })),
+        returnType: desc.returnType,
+        effectRow: desc.effectRow,
+      };
+    case "union":
+      return { kind: "union", members: [...desc.members] };
+    case "intersection":
+      return {
+        kind: "intersection",
+        nominal: desc.nominal,
+        structural: desc.structural,
+        traits: desc.traits ? [...desc.traits] : undefined,
+      };
+    case "fixed-array":
+      return { kind: "fixed-array", element: desc.element };
+    case "type-param-ref":
+      return { kind: "type-param-ref", param: desc.param };
+    default: {
+      const exhaustive: never = desc;
+      return exhaustive;
+    }
+  }
 };
 
 export const typeDescriptorToUserString = (

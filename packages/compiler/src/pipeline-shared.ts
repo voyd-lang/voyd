@@ -17,6 +17,15 @@ import type { ContinuationBackendKind } from "./codegen/codegen.js";
 import { buildProgramCodegenView } from "./semantics/codegen-view/index.js";
 import { optimizeProgram } from "./optimize/pipeline.js";
 import { analyzeModuleSemantics } from "./modules/semantic-analysis.js";
+import type { ReusableDependencySemanticsSnapshot } from "./modules/semantic-analysis.js";
+import {
+  commitDependencySnapshot,
+  createCompilerDependencySnapshotCache,
+  prepareDependencySnapshotReuse,
+  type CompilerDependencySnapshotCache,
+} from "./modules/dependency-snapshot-cache.js";
+import type { EffectInterner } from "./semantics/effects/effect-table.js";
+import type { TypeArena } from "./semantics/typing/type-arena.js";
 import { formatTestExportName } from "./tests/exports.js";
 import type { SourceSpan, SymbolId } from "./semantics/ids.js";
 import { getSymbolTable } from "./semantics/_internal/symbol-table.js";
@@ -25,8 +34,14 @@ import {
   diffCompilerPerfCounters,
   isCompilerPerfEnabled,
   logCompilerPerfSummary,
+  recordCompilerPerfDuration,
   snapshotCompilerPerfCounters,
 } from "./perf.js";
+
+export {
+  createCompilerDependencySnapshotCache,
+  type CompilerDependencySnapshotCache,
+};
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -42,6 +57,10 @@ export type AnalyzeModulesOptions = {
   recoverFromTypingErrors?: boolean;
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
+  typingState?: {
+    arena: TypeArena;
+    effectInterner: EffectInterner;
+  };
   isCancelled?: () => boolean;
 };
 
@@ -50,6 +69,7 @@ export type AnalyzeModulesResult = {
   diagnostics: Diagnostic[];
   tests: readonly TestCase[];
   recomputedModuleIds: readonly string[];
+  dependencySnapshot?: ReusableDependencySemanticsSnapshot;
 };
 
 export type TestScope = "all" | "entry";
@@ -89,6 +109,7 @@ export type CompileProgramOptions = LoadModulesOptions &
      * graph. Defaults to false.
      */
     skipSemantics?: boolean;
+    dependencySnapshotCache?: CompilerDependencySnapshotCache;
   };
 
 export type CompileProgramSuccessResult = {
@@ -114,14 +135,21 @@ export const analyzeModules = ({
   recoverFromTypingErrors,
   previousSemantics,
   changedModuleIds,
+  typingState,
   isCancelled,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
-  const { semantics, diagnostics, recomputedModuleIds } = analyzeModuleSemantics({
+  const {
+    semantics,
+    diagnostics,
+    recomputedModuleIds,
+    dependencySnapshot,
+  } = analyzeModuleSemantics({
     graph,
     includeTests,
     recoverFromTypingErrors,
     previousSemantics,
     changedModuleIds,
+    typingState,
     isCancelled,
   });
 
@@ -135,6 +163,7 @@ export const analyzeModules = ({
     diagnostics,
     tests,
     recomputedModuleIds,
+    dependencySnapshot,
   };
 };
 
@@ -404,7 +433,12 @@ export const emitProgram = async ({
   module: binaryen.Module;
   diagnostics: Diagnostic[];
 }> => {
+  const lowerStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const { orderedModules, entry } = lowerProgram({ graph, semantics });
+  recordCompilerPerfDuration({
+    name: "emit.lower_program.ms",
+    startedAt: lowerStartedAt,
+  });
   const targetModuleId = entryModuleId ?? entry;
   const modules = orderedModules
     .map((id) => semantics.get(id))
@@ -413,15 +447,34 @@ export const emitProgram = async ({
     throw new Error("No semantics available for codegen");
   }
 
+  const loadCodegenStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const codegen = await lazyCodegen();
+  recordCompilerPerfDuration({
+    name: "emit.load_codegen.ms",
+    startedAt: loadCodegenStartedAt,
+  });
+
+  const linkStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const monomorphized =
     linkSemantics !== false
       ? monomorphizeProgram({ modules, semantics })
       : { instances: [], moduleTyping: new Map() };
+  recordCompilerPerfDuration({
+    name: "emit.link_semantics.ms",
+    startedAt: linkStartedAt,
+  });
+
+  const codegenViewStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const program = buildProgramCodegenView(modules, {
     instances: monomorphized.instances,
     moduleTyping: monomorphized.moduleTyping,
   });
+  recordCompilerPerfDuration({
+    name: "emit.build_codegen_view.ms",
+    startedAt: codegenViewStartedAt,
+  });
+
+  const optimizeStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const optimized = codegenOptions?.optimize
     ? optimizeProgram({
         program,
@@ -430,13 +483,31 @@ export const emitProgram = async ({
         options: codegenOptions,
       })
     : undefined;
+  if (codegenOptions?.optimize) {
+    recordCompilerPerfDuration({
+      name: "emit.optimize_program.ms",
+      startedAt: optimizeStartedAt,
+    });
+  }
+
+  const codegenStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const result = codegen.codegenProgram({
     program: optimized?.program ?? program,
     entryModuleId: targetModuleId,
     options: codegenOptions,
     optimization: optimized?.facts,
   });
+  recordCompilerPerfDuration({
+    name: "emit.codegen_program.ms",
+    startedAt: codegenStartedAt,
+  });
+
+  const emitBinaryStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const wasm = result.wasm ?? emitBinary(result.module);
+  recordCompilerPerfDuration({
+    name: "emit.emit_binary.ms",
+    startedAt: emitBinaryStartedAt,
+  });
   return { wasm, module: result.module, diagnostics: result.diagnostics };
 };
 
@@ -453,7 +524,12 @@ export const emitProgramWithContinuationFallback = async ({
   entryModuleId,
   linkSemantics,
 }: EmitProgramOptions): Promise<ContinuationFallbackBundle> => {
+  const lowerStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const { orderedModules, entry } = lowerProgram({ graph, semantics });
+  recordCompilerPerfDuration({
+    name: "emit_fallback.lower_program.ms",
+    startedAt: lowerStartedAt,
+  });
   const targetModuleId = entryModuleId ?? entry;
   const modules = orderedModules
     .map((id) => semantics.get(id))
@@ -462,14 +538,27 @@ export const emitProgramWithContinuationFallback = async ({
     throw new Error("No semantics available for codegen");
   }
 
+  const linkStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const monomorphized =
     linkSemantics !== false
       ? monomorphizeProgram({ modules, semantics })
       : { instances: [], moduleTyping: new Map() };
+  recordCompilerPerfDuration({
+    name: "emit_fallback.link_semantics.ms",
+    startedAt: linkStartedAt,
+  });
+
+  const codegenViewStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const program = buildProgramCodegenView(modules, {
     instances: monomorphized.instances,
     moduleTyping: monomorphized.moduleTyping,
   });
+  recordCompilerPerfDuration({
+    name: "emit_fallback.build_codegen_view.ms",
+    startedAt: codegenViewStartedAt,
+  });
+
+  const optimizeStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const optimized = codegenOptions?.optimize
     ? optimizeProgram({
         program,
@@ -478,8 +567,20 @@ export const emitProgramWithContinuationFallback = async ({
         options: codegenOptions,
       })
     : undefined;
+  if (codegenOptions?.optimize) {
+    recordCompilerPerfDuration({
+      name: "emit_fallback.optimize_program.ms",
+      startedAt: optimizeStartedAt,
+    });
+  }
 
+  const loadCodegenStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const codegenImpl = await lazyCodegen();
+  recordCompilerPerfDuration({
+    name: "emit_fallback.load_codegen.ms",
+    startedAt: loadCodegenStartedAt,
+  });
+  const codegenStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const { preferredKind, preferred, fallback } =
     codegenImpl.codegenProgramWithContinuationFallback({
       program: optimized?.program ?? program,
@@ -487,11 +588,21 @@ export const emitProgramWithContinuationFallback = async ({
       options: codegenOptions,
       optimization: optimized?.facts,
     });
+  recordCompilerPerfDuration({
+    name: "emit_fallback.codegen_program.ms",
+    startedAt: codegenStartedAt,
+  });
 
   const toWasmBytes = (result: { module: binaryen.Module }): Uint8Array => {
-    return "wasm" in result && result.wasm instanceof Uint8Array
+    const emitBinaryStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
+    const wasm = "wasm" in result && result.wasm instanceof Uint8Array
       ? result.wasm
       : emitBinary(result.module);
+    recordCompilerPerfDuration({
+      name: "emit_fallback.emit_binary.ms",
+      startedAt: emitBinaryStartedAt,
+    });
+    return wasm;
   };
 
   return {
@@ -624,9 +735,21 @@ export const compileProgramWithLoader = async (
   }
 
   const analyzeStartedAt = perfEnabled ? performance.now() : 0;
-  const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
+  const dependencySnapshotReuse = prepareDependencySnapshotReuse({
+    cache: options.dependencySnapshotCache,
+    graph,
+    roots: options.roots,
+    includeTests: options.includeTests,
+  });
+  const {
+    semantics,
+    diagnostics: semanticDiagnostics,
+    dependencySnapshot,
+  } = analyzeModules({
     graph,
     includeTests: options.includeTests,
+    previousSemantics: dependencySnapshotReuse.previousSemantics,
+    typingState: dependencySnapshotReuse.typingState,
   });
   markPhaseDuration("analyzeModules", analyzeStartedAt);
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
@@ -634,6 +757,11 @@ export const compileProgramWithLoader = async (
   if (hasErrorDiagnostics(diagnostics)) {
     return complete(compileProgramFailure(diagnostics));
   }
+
+  commitDependencySnapshot({
+    prepared: dependencySnapshotReuse,
+    dependencySnapshot,
+  });
 
   const shouldLinkSemantics = options.linkSemantics !== false;
 
