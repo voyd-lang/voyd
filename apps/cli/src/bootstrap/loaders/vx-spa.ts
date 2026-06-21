@@ -251,11 +251,11 @@ pub fn init() -> Model
 pub fn step(model: Model, message: Msg) -> Program<Model, Msg>
   match(message)
     Msg::Increment:
-      next<Model, Msg>(Model { count: model.count + 1, title: model.title })
+      next(Model { count: model.count + 1, title: model.title })
     Msg::Decrement:
-      next<Model, Msg>(Model { count: model.count - 1, title: model.title })
+      next(Model { count: model.count - 1, title: model.title })
     Msg::Rename { value }:
-      next<Model, Msg>(Model { count: model.count, title: value })
+      next(Model { count: model.count, title: value })
 
 pub fn view(model: Model) -> Html<Msg>
   <main class="min-h-screen bg-slate-950 px-6 py-12 text-slate-100">

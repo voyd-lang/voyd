@@ -36,6 +36,7 @@ export const typeMatchExpr = (
   options: TypeExpressionOptions
 ): TypeId => {
   const discardValue = options.discardValue === true;
+  const expectedArmType = discardValue ? undefined : options.expectedType;
   const rawDiscriminantType = typeExpression(expr.discriminant, ctx, state);
   const discriminantType = ctx.arena.unfoldRecursive(rawDiscriminantType);
   const discriminantExpr = ctx.hir.expressions.get(expr.discriminant);
@@ -89,7 +90,11 @@ export const typeMatchExpr = (
       discriminantSymbol,
       narrowed,
       ctx,
-      () => typeExpression(arm.value, ctx, state, { discardValue })
+      () =>
+        typeExpression(arm.value, ctx, state, {
+          discardValue,
+          expectedType: expectedArmType,
+        })
     );
     armEffectRow = ctx.effects.compose(
       armEffectRow,

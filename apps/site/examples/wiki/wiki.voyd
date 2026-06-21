@@ -51,7 +51,7 @@ fn init() -> WikiModel
 fn step(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
   match(message)
     WikiMsg::Select { page }:
-      next<WikiModel, WikiMsg>(WikiModel {
+      next(WikiModel {
         selected: page,
         query: model.query,
         title: page_title(page),
@@ -62,7 +62,7 @@ fn step(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "Page opened"
       })
     WikiMsg::Search { value }:
-      next<WikiModel, WikiMsg>(WikiModel {
+      next(WikiModel {
         selected: model.selected,
         query: value,
         title: model.title,
@@ -73,7 +73,7 @@ fn step(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: search_status(value)
       })
     WikiMsg::New:
-      next<WikiModel, WikiMsg>(WikiModel {
+      next(WikiModel {
         selected: "draft",
         query: String::init(),
         title: "Untitled page",
@@ -84,7 +84,7 @@ fn step(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "New page"
       })
     WikiMsg::EditTitle { value }:
-      next<WikiModel, WikiMsg>(WikiModel {
+      next(WikiModel {
         selected: model.selected,
         query: model.query,
         title: value,
@@ -95,7 +95,7 @@ fn step(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "Unsaved changes"
       })
     WikiMsg::EditBody { value }:
-      next<WikiModel, WikiMsg>(WikiModel {
+      next(WikiModel {
         selected: model.selected,
         query: model.query,
         title: model.title,
@@ -106,7 +106,7 @@ fn step(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "Unsaved changes"
       })
     WikiMsg::Save:
-      next<WikiModel, WikiMsg>(
+      next(
         model: WikiModel {
           selected: model.selected,
           query: model.query,
@@ -120,7 +120,7 @@ fn step(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         cmd: Cmd<WikiMsg>::delay(millis: 1i64, value: WikiMsg::Saved {})
       )
     WikiMsg::Saved:
-      next<WikiModel, WikiMsg>(WikiModel {
+      next(WikiModel {
         selected: model.selected,
         query: model.query,
         title: model.title,
@@ -131,7 +131,7 @@ fn step(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "Saved"
       })
     WikiMsg::Cancel:
-      next<WikiModel, WikiMsg>(WikiModel {
+      next(WikiModel {
         selected: model.selected,
         query: model.query,
         title: model.saved_title,
@@ -142,7 +142,7 @@ fn step(model: WikiModel, message: WikiMsg) -> Program<WikiModel, WikiMsg>
         status: "Draft restored"
       })
     WikiMsg::TogglePanel:
-      next<WikiModel, WikiMsg>(WikiModel {
+      next(WikiModel {
         selected: model.selected,
         query: model.query,
         title: model.title,
