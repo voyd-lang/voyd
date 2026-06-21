@@ -19,6 +19,26 @@ export type OverloadResolutionCandidate = {
   signature: FunctionSignature;
 };
 
+export type OverloadCandidateScore<T extends OverloadResolutionCandidate> = {
+  candidate: T;
+  shapeMatch: boolean;
+  argumentMatch: boolean;
+  dominance: number;
+  genericityPenalty: number;
+  constraintSpecificity: number;
+  lambdaCompatibility: number;
+  expectedReturnCompatibility: boolean;
+};
+
+type OverloadScoreInput<T extends OverloadResolutionCandidate> = Omit<
+  OverloadCandidateScore<T>,
+  "dominance" | "genericityPenalty" | "constraintSpecificity"
+>;
+
+export type OverloadMatchScoreOverrides = {
+  lambdaCompatibility?: number;
+};
+
 export const enforceOverloadCandidateBudget = ({
   name,
   candidateCount,
@@ -63,8 +83,8 @@ export const selectHintedOverloadCandidates = <T extends OverloadResolutionCandi
   ctx: TypingContext;
   state: TypingState;
 }): {
-  hintedCandidates: readonly T[];
-  fallbackCandidates?: readonly T[];
+  candidates: readonly T[];
+  expectedReturnCompatibleSymbols?: ReadonlySet<SymbolId>;
 } => {
   const candidatesForBudget = filterCandidatesByExplicitTypeArguments({
     candidates,
@@ -90,12 +110,14 @@ export const selectHintedOverloadCandidates = <T extends OverloadResolutionCandi
     returnHintCandidates.length === 0 ||
     returnHintCandidates.length === candidatesForBudget.length
   ) {
-    return { hintedCandidates: candidatesForBudget };
+    return { candidates: candidatesForBudget };
   }
 
   return {
-    hintedCandidates: returnHintCandidates,
-    fallbackCandidates: candidatesForBudget,
+    candidates: candidatesForBudget,
+    expectedReturnCompatibleSymbols: new Set(
+      returnHintCandidates.map((candidate) => candidate.symbol),
+    ),
   };
 };
 
@@ -110,7 +132,8 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
   state,
   matchesCandidate,
   argsForCandidate,
-  refineMatches,
+  scoreMatches,
+  expectedReturnCompatible,
 }: {
   name: string;
   candidates: readonly T[];
@@ -122,28 +145,75 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
   state: TypingState;
   matchesCandidate: (candidate: T, args: readonly Arg[]) => boolean;
   argsForCandidate?: (candidate: T) => readonly Arg[];
-  refineMatches?: (matches: readonly T[]) => readonly T[];
+  scoreMatches?: (
+    matches: readonly T[],
+  ) => ReadonlyMap<T, OverloadMatchScoreOverrides>;
+  expectedReturnCompatible?: (candidate: T) => boolean;
 }): readonly T[] => {
-  const shapeCompatibleCandidates = candidates.filter((candidate) =>
-    signatureCallShapeCouldMatch({
+  const shapedScores = candidates.map((candidate) => ({
+    candidate,
+    shapeMatch: signatureCallShapeCouldMatch({
       args,
       signature: candidate.signature,
       ctx,
       state,
     }),
-  );
+    argumentMatch: false,
+    lambdaCompatibility: 0,
+    expectedReturnCompatibility: expectedReturnCompatible
+      ? expectedReturnCompatible(candidate)
+      : true,
+  }));
+  const shapeCompatibleCandidates = shapedScores
+    .filter((score) => score.shapeMatch)
+    .map(({ candidate }) => candidate);
+  const expectedReturnShapeCompatibleCandidates = shapedScores
+    .filter((score) => score.shapeMatch && score.expectedReturnCompatibility)
+    .map(({ candidate }) => candidate);
+  const candidatesForBudget =
+    expectedReturnShapeCompatibleCandidates.length > 0
+      ? expectedReturnShapeCompatibleCandidates
+      : shapeCompatibleCandidates;
   enforceOverloadCandidateBudget({
     name,
-    candidateCount: shapeCompatibleCandidates.length,
+    candidateCount: candidatesForBudget.length,
     ctx,
     span,
   });
-  const matches = shapeCompatibleCandidates.filter((candidate) =>
+
+  const candidatesForInitialMatch = candidatesForBudget;
+  const initialMatches = candidatesForInitialMatch.filter((candidate) =>
     matchesCandidate(candidate, argsForCandidate ? argsForCandidate(candidate) : args),
   );
-  const refined = refineMatches ? refineMatches(matches) : matches;
-  return narrowOverloadMatches({
-    matches: refined,
+  const shouldCheckFallback =
+    expectedReturnShapeCompatibleCandidates.length > 0 &&
+    initialMatches.length === 0;
+  if (shouldCheckFallback) {
+    enforceOverloadCandidateBudget({
+      name,
+      candidateCount: shapeCompatibleCandidates.length,
+      ctx,
+      span,
+    });
+  }
+  const matches = shouldCheckFallback
+    ? shapeCompatibleCandidates.filter((candidate) =>
+        matchesCandidate(
+          candidate,
+          argsForCandidate ? argsForCandidate(candidate) : args,
+        ),
+      )
+    : initialMatches;
+  const scoreOverrides = scoreMatches?.(matches) ?? new Map();
+  const matchesSet = new Set(matches);
+  const scoreInputs = shapedScores.map((score) => ({
+    ...score,
+    argumentMatch: matchesSet.has(score.candidate),
+    lambdaCompatibility:
+      scoreOverrides.get(score.candidate)?.lambdaCompatibility ?? 0,
+  }));
+  return selectOverloadMatchesFromScores({
+    scores: scoreInputs,
     typeArguments,
     targetTypeArguments,
     ctx,
@@ -642,6 +712,181 @@ const overloadConstraintSpecificity = (
     0
   );
 
+const scoreOverloadMatches = <T extends OverloadResolutionCandidate>({
+  matches,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+  state,
+}: {
+  matches: readonly T[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): readonly OverloadCandidateScore<T>[] =>
+  matches.map((candidate) => {
+    const isDominated = matches.some(
+      (other) =>
+        candidate !== other &&
+        overloadDominates({
+          candidate: other,
+          other: candidate,
+          typeArguments,
+          targetTypeArguments,
+          ctx,
+          state,
+        }),
+    );
+    return {
+      candidate,
+      shapeMatch: true,
+      argumentMatch: true,
+      dominance: isDominated ? 0 : 1,
+      genericityPenalty: overloadGenericityPenalty({
+        candidate,
+        typeArguments,
+        targetTypeArguments,
+        ctx,
+      }),
+      constraintSpecificity: overloadConstraintSpecificity(candidate),
+      lambdaCompatibility: 0,
+      expectedReturnCompatibility: true,
+    };
+  });
+
+const completeOverloadScores = <T extends OverloadResolutionCandidate>({
+  scores,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+  state,
+}: {
+  scores: readonly OverloadScoreInput<T>[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): readonly OverloadCandidateScore<T>[] => {
+  const candidates = scores
+    .filter(
+      (score) =>
+        score.shapeMatch &&
+        score.argumentMatch &&
+        Number.isFinite(score.lambdaCompatibility),
+    )
+    .map(({ candidate }) => candidate);
+  const scoredMatches = scoreOverloadMatches({
+    matches: candidates,
+    typeArguments,
+    targetTypeArguments,
+    ctx,
+    state,
+  });
+  const scoredByCandidate = new Map(
+    scoredMatches.map((score) => [score.candidate, score]),
+  );
+
+  return scores.map((score) => {
+    const scored = scoredByCandidate.get(score.candidate);
+    return {
+      ...score,
+      dominance: scored?.dominance ?? 0,
+      genericityPenalty: scored?.genericityPenalty ?? Number.POSITIVE_INFINITY,
+      constraintSpecificity: scored?.constraintSpecificity ?? 0,
+    };
+  });
+};
+
+const selectOverloadMatchesFromScores = <T extends OverloadResolutionCandidate>({
+  scores,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+  state,
+}: {
+  scores: readonly OverloadScoreInput<T>[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): readonly T[] => {
+  const completedScores = completeOverloadScores({
+    scores,
+    typeArguments,
+    targetTypeArguments,
+    ctx,
+    state,
+  });
+  const compatibleScores = completedScores.filter(
+    (score) =>
+      score.shapeMatch &&
+      score.argumentMatch,
+  );
+  if (compatibleScores.length <= 1) {
+    return compatibleScores.map(({ candidate }) => candidate);
+  }
+
+  const expectedReturnScores = selectExpectedReturnCompatibleScores(compatibleScores);
+  if (expectedReturnScores.length === 1) {
+    return expectedReturnScores.map(({ candidate }) => candidate);
+  }
+
+  const lambdaCompatibleScores = selectScoresByMax(
+    expectedReturnScores,
+    "lambdaCompatibility",
+  );
+  if (lambdaCompatibleScores.length === 1) {
+    return lambdaCompatibleScores.map(({ candidate }) => candidate);
+  }
+
+  const maximalScores = selectScoresByMax(lambdaCompatibleScores, "dominance");
+  if (maximalScores.length === 1) {
+    return maximalScores.map(({ candidate }) => candidate);
+  }
+
+  // Labeled parameter groups are structural: a value with extra fields can
+  // satisfy a smaller labeled shape. Do not rank matches by "most fields
+  // consumed" here; subset/superset structural overloads should remain
+  // ambiguous until declaration-time validation rejects them.
+  const leastGenericScores = selectScoresByMin(
+    maximalScores,
+    "genericityPenalty",
+  );
+  if (leastGenericScores.length === 1) {
+    return leastGenericScores.map(({ candidate }) => candidate);
+  }
+
+  const mostConstrainedScores = selectScoresByMax(
+    leastGenericScores,
+    "constraintSpecificity",
+  );
+  return mostConstrainedScores.map(({ candidate }) => candidate);
+};
+
+const selectExpectedReturnCompatibleScores = <T extends OverloadResolutionCandidate>(
+  scores: readonly OverloadCandidateScore<T>[],
+): readonly OverloadCandidateScore<T>[] => {
+  const compatible = scores.filter((score) => score.expectedReturnCompatibility);
+  return compatible.length > 0 ? compatible : scores;
+};
+
+const selectScoresByMax = <T extends OverloadResolutionCandidate>(
+  scores: readonly OverloadCandidateScore<T>[],
+  dimension: "lambdaCompatibility" | "dominance" | "constraintSpecificity",
+): readonly OverloadCandidateScore<T>[] => {
+  const max = Math.max(...scores.map((score) => score[dimension]));
+  return scores.filter((score) => score[dimension] === max);
+};
+
+const selectScoresByMin = <T extends OverloadResolutionCandidate>(
+  scores: readonly OverloadCandidateScore<T>[],
+  dimension: "genericityPenalty",
+): readonly OverloadCandidateScore<T>[] => {
+  const min = Math.min(...scores.map((score) => score[dimension]));
+  return scores.filter((score) => score[dimension] === min);
+};
+
 export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
   matches,
   typeArguments,
@@ -659,59 +904,17 @@ export const narrowOverloadMatches = <T extends OverloadResolutionCandidate>({
     return matches;
   }
 
-  const maximalMatches = matches.filter((candidate) =>
-    matches.every(
-      (other) =>
-        candidate === other ||
-        !overloadDominates({
-          candidate: other,
-          other: candidate,
-          typeArguments,
-          targetTypeArguments,
-          ctx,
-          state,
-        }),
-    ),
-  );
-
-  if (maximalMatches.length === 1) {
-    return maximalMatches;
-  }
-
-  // Labeled parameter groups are structural: a value with extra fields can
-  // satisfy a smaller labeled shape. Do not rank matches by "most fields
-  // consumed" here; subset/superset structural overloads should remain
-  // ambiguous until declaration-time validation rejects them.
-  const minPenalty = Math.min(
-    ...maximalMatches.map((candidate) =>
-      overloadGenericityPenalty({
-        candidate,
-        typeArguments,
-        targetTypeArguments,
-        ctx,
-      }),
-    ),
-  );
-  const leastGenericMatches = maximalMatches.filter(
-    (candidate) =>
-      overloadGenericityPenalty({
-        candidate,
-        typeArguments,
-        targetTypeArguments,
-        ctx,
-      }) === minPenalty,
-  );
-
-  if (leastGenericMatches.length === 1) {
-    return leastGenericMatches;
-  }
-
-  const maxConstraintSpecificity = Math.max(
-    ...leastGenericMatches.map(overloadConstraintSpecificity)
-  );
-  const mostConstrainedMatches = leastGenericMatches.filter(
-    (candidate) => overloadConstraintSpecificity(candidate) === maxConstraintSpecificity
-  );
-
-  return mostConstrainedMatches.length === 1 ? mostConstrainedMatches : matches;
+  return selectOverloadMatchesFromScores({
+    scores: matches.map((candidate) => ({
+      candidate,
+      shapeMatch: true,
+      argumentMatch: true,
+      lambdaCompatibility: 0,
+      expectedReturnCompatibility: true,
+    })),
+    typeArguments,
+    targetTypeArguments,
+    ctx,
+    state,
+  });
 };
