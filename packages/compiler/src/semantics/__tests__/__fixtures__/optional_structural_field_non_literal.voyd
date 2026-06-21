@@ -1,0 +1,16 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+type Config = { x?: i32, y: i32 }
+
+fn accept(config: Config) -> i32
+  config.y
+
+pub fn main() -> i32
+  let config = { x: 1, y: 2 }
+  accept(config)

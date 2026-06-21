@@ -8,7 +8,7 @@
     "packages/*"
   ],
   "type": "module",
-  "packageManager": "npm@11.4.2",
+  "packageManager": "npm@11.5.2",
   "scripts": {
     "build": "turbo run build --affected",
     "test": "turbo run test --affected --output-logs=errors-only --concurrency=50%",
@@ -36,9 +36,9 @@
     "vitest": "^3.2.4"
   },
   "optionalDependencies": {
-    "@rollup/rollup-darwin-arm64": "4.46.2",
-    "@rollup/rollup-linux-x64-gnu": "4.46.2",
-    "@tailwindcss/oxide-darwin-arm64": "4.1.18",
-    "@tailwindcss/oxide-linux-x64-gnu": "4.1.18"
+    "@rollup/rollup-darwin-arm64": "4.62.0",
+    "@rollup/rollup-linux-x64-gnu": "4.62.0",
+    "@tailwindcss/oxide-darwin-arm64": "4.3.1",
+    "@tailwindcss/oxide-linux-x64-gnu": "4.3.1"
   }
 }

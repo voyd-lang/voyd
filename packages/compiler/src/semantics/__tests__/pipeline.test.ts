@@ -1457,6 +1457,17 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("lifts fresh object literal fields into expected optional structural fields", () => {
+    const ast = loadAst("optional_structural_field_lifting.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("does not lift non-literal structural values into optional structural fields", () => {
+    const ast = loadAst("optional_structural_field_non_literal.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(/TY0027: type mismatch/);
+  });
+
   it("allows generic labeled overload supersets when field correlations cannot overlap", () => {
     const ast = loadAst(
       "function_overloads_labeled_generic_field_correlation.voyd"

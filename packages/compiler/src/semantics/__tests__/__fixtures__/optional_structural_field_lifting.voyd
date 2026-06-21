@@ -1,0 +1,27 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+type Config = { x?: i32, y: i32 }
+
+fn accept(config: Config) -> i32
+  config.y
+
+pub fn provided_inner_value() -> i32
+  accept({ x: 1, y: 2 })
+
+pub fn provided_optional_value() -> i32
+  let x: Optional<i32> = Some { value: 1 }
+  accept({ x, y: 2 })
+
+pub fn omitted_optional_value() -> i32
+  accept({ y: 2 })
+
+pub fn main() -> i32
+  provided_inner_value() +
+  provided_optional_value() +
+  omitted_optional_value()
