@@ -287,7 +287,10 @@ const createLabeledShapeNarrowingCase = (overloadCount: number) => {
   };
 };
 
-const createReturnTypeNarrowingCase = (overloadCount: number) => {
+const createReturnTypeNarrowingCase = (
+  overloadCount: number,
+  options?: { expectedReturnParamType?: "i32" | "bool" },
+) => {
   const ctx = createModuleContext();
   const overloadSetId: OverloadSetId = 0;
   const functionScope = ctx.symbolTable.rootScope as ScopeId;
@@ -332,7 +335,10 @@ const createReturnTypeNarrowingCase = (overloadCount: number) => {
           pattern: { kind: "identifier", symbol: valueParam },
           mutable: false,
           span: ctx.span,
-          type: i32(),
+          type:
+            returnsI32 && options?.expectedReturnParamType === "bool"
+              ? bool()
+              : i32(),
         },
       ],
       returnType: returnsI32 ? i32() : bool(),
@@ -1405,6 +1411,21 @@ describe("type-check budgets", () => {
       moduleId: "local",
       symbol: fanout.selectedSymbol,
     });
+  });
+
+  it("applies fallback overload budget checks when expected return matches fail arguments", () => {
+    const fanout = createReturnTypeNarrowingCase(18, {
+      expectedReturnParamType: "bool",
+    });
+    const error = expectDiagnosticError(() =>
+      runTypingPipeline({
+        ...fanout.inputs,
+        typeCheckBudget: { maxOverloadCandidates: 5 },
+      }),
+    );
+
+    expect(error.diagnostic.code).toBe("TY0041");
+    expect(error.diagnostic.message).toContain("pick_by_return");
   });
 
   it("applies explicit type argument narrowing before overload candidate budget checks", () => {

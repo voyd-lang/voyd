@@ -1,10 +1,27 @@
 import { describe, expect, it } from "vitest";
+import { SymbolTable } from "../../binder/index.js";
+import { DeclTable } from "../../decls.js";
 import { runTypingPipeline } from "../typing.js";
-import type { HirNamedTypeExpr, HirObjectTypeExpr } from "../../hir/nodes.js";
-import type { OverloadSetId, ScopeId } from "../../ids.js";
+import type { HirGraph, HirNamedTypeExpr, HirObjectTypeExpr } from "../../hir/index.js";
+import type { OverloadSetId, ScopeId, SourceSpan, SymbolId, TypeId } from "../../ids.js";
 import { createModuleContext } from "./helpers.js";
 import { Expr } from "../../../parser/index.js";
 import { moduleVisibility, packageVisibility } from "../../hir/index.js";
+import { createTypingContext, createTypingState } from "../context.js";
+import {
+  findOverloadMatches,
+  narrowOverloadMatches,
+  type OverloadResolutionCandidate,
+} from "../expressions/overload-resolution.js";
+import { seedBaseObjectType, seedPrimitiveTypes } from "../registry.js";
+import type {
+  FunctionSignature,
+  FunctionTypeParam,
+  ParamSignature,
+  TypingContext,
+} from "../types.js";
+
+const DUMMY_SPAN: SourceSpan = { file: "<test>", start: 0, end: 0 };
 
 const createNamedType = (
   name: string,
@@ -17,7 +34,413 @@ const createNamedType = (
   span,
 });
 
+const createScoringContext = () => {
+  const symbolTable = new SymbolTable({ rootOwner: 0 });
+  const hir: HirGraph = {
+    module: {
+      kind: "module",
+      id: 0,
+      path: "<test>",
+      scope: symbolTable.rootScope,
+      ast: 0,
+      span: DUMMY_SPAN,
+      items: [],
+      exports: [],
+    },
+    items: new Map(),
+    statements: new Map(),
+    expressions: new Map(),
+  };
+  const ctx = createTypingContext({
+    symbolTable,
+    hir,
+    overloads: new Map(),
+    decls: new DeclTable(),
+    moduleId: "test",
+  });
+  seedPrimitiveTypes(ctx);
+  seedBaseObjectType(ctx);
+  return { ctx, state: createTypingState() };
+};
+
+const createSignature = ({
+  ctx,
+  parameters,
+  returnType = ctx.primitives.void,
+  typeParams,
+}: {
+  ctx: TypingContext;
+  parameters: readonly ParamSignature[];
+  returnType?: TypeId;
+  typeParams?: readonly FunctionTypeParam[];
+}): FunctionSignature => {
+  const typeId = ctx.arena.internFunction({
+    parameters,
+    returnType,
+    effectRow: ctx.effects.emptyRow,
+  });
+  return {
+    typeId,
+    parameters,
+    returnType,
+    hasExplicitReturn: true,
+    annotatedReturn: true,
+    effectRow: ctx.effects.emptyRow,
+    annotatedEffects: false,
+    typeParams,
+    scheme: ctx.arena.newScheme(
+      typeParams?.map((param) => param.typeParam) ?? [],
+      typeId,
+    ),
+  };
+};
+
+const createTypeParam = (
+  ctx: TypingContext,
+  constraint?: TypeId,
+): FunctionTypeParam => {
+  const typeParam = ctx.arena.freshTypeParam();
+  return {
+    symbol: -typeParam - 1,
+    typeParam,
+    constraint,
+    typeRef: ctx.arena.internTypeParamRef(typeParam),
+  };
+};
+
+const createCandidate = (
+  symbol: SymbolId,
+  signature: FunctionSignature,
+): OverloadResolutionCandidate => ({ symbol, signature });
+
 describe("overload resolution", () => {
+  it("records call-shape compatibility before argument matching", () => {
+    const { ctx, state } = createScoringContext();
+    const oneArg = createCandidate(
+      1,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+    const twoArgs = createCandidate(
+      2,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }, { type: ctx.primitives.i32 }],
+      }),
+    );
+
+    const matches = findOverloadMatches({
+      name: "shape",
+      candidates: [oneArg, twoArgs],
+      args: [{ type: ctx.primitives.i32 }],
+      typeArguments: undefined,
+      span: DUMMY_SPAN,
+      ctx,
+      state,
+      matchesCandidate: () => true,
+    });
+
+    expect(matches).toEqual([oneArg]);
+  });
+
+  it("records argument compatibility separately from call shape", () => {
+    const { ctx, state } = createScoringContext();
+    const rejected = createCandidate(
+      1,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+    const accepted = createCandidate(
+      2,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+
+    const matches = findOverloadMatches({
+      name: "argument",
+      candidates: [rejected, accepted],
+      args: [{ type: ctx.primitives.i32 }],
+      typeArguments: undefined,
+      span: DUMMY_SPAN,
+      ctx,
+      state,
+      matchesCandidate: (candidate) => candidate === accepted,
+    });
+
+    expect(matches).toEqual([accepted]);
+  });
+
+  it("keeps lambda compatibility as a score dimension", () => {
+    const { ctx, state } = createScoringContext();
+    const first = createCandidate(
+      1,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+    const refined = createCandidate(
+      2,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+
+    const matches = findOverloadMatches({
+      name: "refined",
+      candidates: [first, refined],
+      args: [{ type: ctx.primitives.i32 }],
+      typeArguments: undefined,
+      span: DUMMY_SPAN,
+      ctx,
+      state,
+      matchesCandidate: () => true,
+      scoreMatches: () =>
+        new Map([
+          [first, { lambdaCompatibility: 0 }],
+          [refined, { lambdaCompatibility: 1 }],
+        ]),
+    });
+
+    expect(matches).toEqual([refined]);
+  });
+
+  it("prefers expected-return-compatible matches as a score dimension", () => {
+    const { ctx, state } = createScoringContext();
+    const first = createCandidate(
+      1,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+    const expected = createCandidate(
+      2,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+
+    const matches = findOverloadMatches({
+      name: "expected",
+      candidates: [first, expected],
+      args: [{ type: ctx.primitives.i32 }],
+      typeArguments: undefined,
+      span: DUMMY_SPAN,
+      ctx,
+      state,
+      matchesCandidate: () => true,
+      expectedReturnCompatible: (candidate) => candidate === expected,
+    });
+
+    expect(matches).toEqual([expected]);
+  });
+
+  it("falls back when no expected-return-compatible candidate matches", () => {
+    const { ctx, state } = createScoringContext();
+    const expected = createCandidate(
+      1,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+    const fallback = createCandidate(
+      2,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+
+    const matches = findOverloadMatches({
+      name: "expectedFallback",
+      candidates: [expected, fallback],
+      args: [{ type: ctx.primitives.i32 }],
+      typeArguments: undefined,
+      span: DUMMY_SPAN,
+      ctx,
+      state,
+      matchesCandidate: (candidate) => candidate === fallback,
+      expectedReturnCompatible: (candidate) => candidate === expected,
+    });
+
+    expect(matches).toEqual([fallback]);
+  });
+
+  it("uses dominance before later scoring dimensions", () => {
+    const { ctx, state } = createScoringContext();
+    const typeParam = createTypeParam(ctx);
+    const concrete = createCandidate(
+      1,
+      createSignature({
+        ctx,
+        parameters: [{ type: ctx.primitives.i32 }],
+      }),
+    );
+    const generic = createCandidate(
+      2,
+      createSignature({
+        ctx,
+        parameters: [{ type: typeParam.typeRef }],
+        typeParams: [typeParam],
+      }),
+    );
+
+    const matches = narrowOverloadMatches({
+      matches: [generic, concrete],
+      typeArguments: undefined,
+      ctx,
+      state,
+    });
+
+    expect(matches).toEqual([concrete]);
+  });
+
+  it("uses genericity penalty after dominance", () => {
+    const { ctx, state } = createScoringContext();
+    const fieldParam = createTypeParam(ctx);
+    const callbackParam = createTypeParam(ctx);
+    const structuralGeneric = createCandidate(
+      1,
+      createSignature({
+        ctx,
+        parameters: [
+          {
+            type: ctx.arena.internStructuralObject({
+              fields: [{ name: "value", type: fieldParam.typeRef }],
+            }),
+          },
+        ],
+        typeParams: [fieldParam],
+      }),
+    );
+    const callbackReturnGeneric = createCandidate(
+      2,
+      createSignature({
+        ctx,
+        parameters: [
+          {
+            type: ctx.arena.internFunction({
+              parameters: [{ type: ctx.primitives.i32 }],
+              returnType: callbackParam.typeRef,
+              effectRow: ctx.effects.emptyRow,
+            }),
+          },
+        ],
+        typeParams: [callbackParam],
+      }),
+    );
+
+    const matches = narrowOverloadMatches({
+      matches: [callbackReturnGeneric, structuralGeneric],
+      typeArguments: undefined,
+      ctx,
+      state,
+    });
+
+    expect(matches).toEqual([structuralGeneric]);
+  });
+
+  it("does not reintroduce candidates eliminated by earlier score dimensions", () => {
+    const { ctx, state } = createScoringContext();
+    const leftParam = createTypeParam(ctx);
+    const rightParam = createTypeParam(ctx);
+    const callbackParam = createTypeParam(ctx);
+    const leftStructural = createCandidate(
+      1,
+      createSignature({
+        ctx,
+        parameters: [
+          {
+            type: ctx.arena.internStructuralObject({
+              fields: [{ name: "left", type: leftParam.typeRef }],
+            }),
+          },
+        ],
+        typeParams: [leftParam],
+      }),
+    );
+    const rightStructural = createCandidate(
+      2,
+      createSignature({
+        ctx,
+        parameters: [
+          {
+            type: ctx.arena.internStructuralObject({
+              fields: [{ name: "right", type: rightParam.typeRef }],
+            }),
+          },
+        ],
+        typeParams: [rightParam],
+      }),
+    );
+    const callbackReturnGeneric = createCandidate(
+      3,
+      createSignature({
+        ctx,
+        parameters: [
+          {
+            type: ctx.arena.internFunction({
+              parameters: [{ type: ctx.primitives.i32 }],
+              returnType: callbackParam.typeRef,
+              effectRow: ctx.effects.emptyRow,
+            }),
+          },
+        ],
+        typeParams: [callbackParam],
+      }),
+    );
+
+    const matches = narrowOverloadMatches({
+      matches: [callbackReturnGeneric, leftStructural, rightStructural],
+      typeArguments: undefined,
+      ctx,
+      state,
+    });
+
+    expect(matches).toEqual([leftStructural, rightStructural]);
+  });
+
+  it("uses constraint specificity after genericity", () => {
+    const { ctx, state } = createScoringContext();
+    const unconstrainedParam = createTypeParam(ctx);
+    const constrainedParam = createTypeParam(ctx, ctx.primitives.i32);
+    const unconstrained = createCandidate(
+      1,
+      createSignature({
+        ctx,
+        parameters: [{ type: unconstrainedParam.typeRef }],
+        typeParams: [unconstrainedParam],
+      }),
+    );
+    const constrained = createCandidate(
+      2,
+      createSignature({
+        ctx,
+        parameters: [{ type: constrainedParam.typeRef }],
+        typeParams: [constrainedParam],
+      }),
+    );
+
+    const matches = narrowOverloadMatches({
+      matches: [unconstrained, constrained],
+      typeArguments: undefined,
+      ctx,
+      state,
+    });
+
+    expect(matches).toEqual([constrained]);
+  });
+
   it("matches structural arguments against overload parameters", () => {
     const ctx = createModuleContext();
     const overloadSetId: OverloadSetId = 0;

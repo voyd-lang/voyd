@@ -68,7 +68,7 @@ import {
   applyExplicitTypeArguments,
   enforceOverloadCandidateBudget,
   findOverloadMatches,
-  narrowOverloadMatches,
+  type OverloadMatchScoreOverrides,
   selectHintedOverloadCandidates,
   signatureCallShapeCouldMatch,
 } from "./overload-resolution.js";
@@ -1178,42 +1178,51 @@ const specializeOverloadParametersWithTargetTypeArguments = ({
 const findMatchingOverloadCandidates = <
   T extends { symbol: SymbolId; signature: FunctionSignature },
 >({
+  name,
   candidates,
   args,
+  span,
   ctx,
   state,
   typeArguments,
   targetTypeArguments,
   argsForCandidate,
-  refineMatches,
+  scoreMatches,
 }: {
+  name: string;
   candidates: readonly T[];
   args: readonly Arg[];
+  span: SourceSpan;
   ctx: TypingContext;
   state: TypingState;
   typeArguments?: readonly TypeId[];
   targetTypeArguments?: readonly TypeId[];
   argsForCandidate?: (candidate: T) => readonly Arg[];
-  refineMatches?: (matches: readonly T[]) => readonly T[];
+  scoreMatches?: (
+    matches: readonly T[],
+  ) => ReadonlyMap<T, OverloadMatchScoreOverrides>;
 }): readonly T[] => {
-  const matches = candidates.filter((candidate) =>
-    matchesOverloadSignature(
-      candidate.symbol,
-      candidate.signature,
-      argsForCandidate ? argsForCandidate(candidate) : args,
-      ctx,
-      state,
-      typeArguments,
-      targetTypeArguments,
-    ),
-  );
-  const refined = refineMatches ? refineMatches(matches) : matches;
-  return narrowOverloadMatches({
-    matches: refined,
+  return findOverloadMatches({
+    name,
+    candidates,
+    args,
     typeArguments,
     targetTypeArguments,
+    span,
     ctx,
     state,
+    matchesCandidate: (candidate, argsForMatch) =>
+      matchesOverloadSignature(
+        candidate.symbol,
+        candidate.signature,
+        argsForMatch,
+        ctx,
+        state,
+        typeArguments,
+        targetTypeArguments,
+    ),
+    argsForCandidate,
+    scoreMatches,
   });
 };
 
@@ -3479,16 +3488,19 @@ const selectMethodCallCandidate = ({
     span: expr.span,
   });
   let matches = findMatchingOverloadCandidates({
+    name: expr.method,
     candidates,
     args: probeArgs,
+    span: expr.span,
     ctx,
     state,
     typeArguments,
     argsForCandidate,
-    refineMatches: (rawMatches) =>
-      narrowOverloadMatchesByLambdaCompatibility({
+    scoreMatches: (rawMatches) =>
+      scoreOverloadMatchesByLambdaCompatibility({
         matches: rawMatches,
         args: probeArgs,
+        callArgs: [{ expr: expr.target }, ...expr.args],
         argsForCandidate,
         typeArguments,
         ctx,
@@ -3540,16 +3552,19 @@ const selectMethodCallCandidate = ({
         span: expr.span,
       });
       matches = findMatchingOverloadCandidates({
+        name: expr.method,
         candidates,
         args: probeArgs,
+        span: expr.span,
         ctx,
         state,
         typeArguments,
         argsForCandidate,
-        refineMatches: (rawMatches) =>
-          narrowOverloadMatchesByLambdaCompatibility({
+        scoreMatches: (rawMatches) =>
+          scoreOverloadMatchesByLambdaCompatibility({
             matches: rawMatches,
             args: probeArgs,
+            callArgs: [{ expr: expr.target }, ...expr.args],
             argsForCandidate,
             typeArguments,
             ctx,
@@ -3874,11 +3889,22 @@ const typeOperatorOverloadCall = ({
   });
 
   const matches = findMatchingOverloadCandidates({
+    name: operatorName,
     candidates,
     args,
+    span: call.span,
     ctx,
     state,
     typeArguments,
+    scoreMatches: (rawMatches) =>
+      scoreOverloadMatchesByLambdaCompatibility({
+        matches: rawMatches,
+        args,
+        callArgs: call.args,
+        typeArguments,
+        ctx,
+        state,
+      }),
   });
   const traitDispatch =
     matches.length === 0
@@ -5588,7 +5614,7 @@ const typeOverloadedCall = (
     }
     return { symbol, signature };
   });
-  const { hintedCandidates, fallbackCandidates } =
+  const { candidates: candidatesForResolution, expectedReturnCompatibleSymbols } =
     selectHintedOverloadCandidates({
       candidates,
       typeArguments,
@@ -5599,8 +5625,7 @@ const typeOverloadedCall = (
       state,
     });
 
-  let candidatesForResolution = hintedCandidates;
-  let matches = findOverloadMatches({
+  const matches = findOverloadMatches({
     name: callee.name,
     candidates: candidatesForResolution,
     args: probeArgs,
@@ -5619,68 +5644,20 @@ const typeOverloadedCall = (
         typeArguments,
         targetTypeArguments,
       ),
-    refineMatches: (rawMatches) => {
-      const lambdaCompatible = narrowOverloadMatchesByLambdaCompatibility({
+    expectedReturnCompatible: expectedReturnCompatibleSymbols
+      ? (candidate) => expectedReturnCompatibleSymbols.has(candidate.symbol)
+      : undefined,
+    scoreMatches: (rawMatches) =>
+      scoreOverloadMatchesByLambdaCompatibility({
         matches: rawMatches,
         args: probeArgs,
-        typeArguments,
-        targetTypeArguments,
-        ctx,
-        state,
-      });
-      return narrowOverloadMatchesByLambdaReturn({
-        matches: lambdaCompatible,
         callArgs: call.args,
         typeArguments,
         targetTypeArguments,
         ctx,
         state,
-      });
-    },
+      }),
   });
-  if (matches.length === 0 && fallbackCandidates) {
-    // Expected-return narrowing is a hint. If it removes all valid matches,
-    // retry with the full overload set before failing.
-    candidatesForResolution = fallbackCandidates;
-    matches = findOverloadMatches({
-      name: callee.name,
-      candidates: candidatesForResolution,
-      args: probeArgs,
-      typeArguments,
-      targetTypeArguments,
-      span: call.span,
-      ctx,
-      state,
-      matchesCandidate: (candidate, argsForMatch) =>
-        matchesOverloadSignature(
-          candidate.symbol,
-          candidate.signature,
-          argsForMatch,
-          ctx,
-          state,
-          typeArguments,
-          targetTypeArguments,
-        ),
-      refineMatches: (rawMatches) => {
-        const lambdaCompatible = narrowOverloadMatchesByLambdaCompatibility({
-          matches: rawMatches,
-          args: probeArgs,
-          typeArguments,
-          targetTypeArguments,
-          ctx,
-          state,
-        });
-        return narrowOverloadMatchesByLambdaReturn({
-          matches: lambdaCompatible,
-          callArgs: call.args,
-          typeArguments,
-          targetTypeArguments,
-          ctx,
-          state,
-        });
-      },
-    });
-  }
 
   const traitDispatch =
     matches.length === 0 && (!typeArguments || typeArguments.length === 0)
@@ -5904,6 +5881,68 @@ const narrowOverloadMatchesByLambdaReturn = <
     return checkedMatches.map(({ candidate }) => candidate);
   }
   return matches;
+};
+
+const scoreOverloadMatchesByLambdaCompatibility = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  matches,
+  args,
+  callArgs,
+  argsForCandidate,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+  state,
+}: {
+  matches: readonly T[];
+  args: readonly Arg[];
+  callArgs: readonly { expr: HirExprId; label?: string }[];
+  argsForCandidate?: (candidate: T) => readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): ReadonlyMap<T, OverloadMatchScoreOverrides> => {
+  if (matches.length <= 1) {
+    return new Map(matches.map((candidate) => [candidate, { lambdaCompatibility: 0 }]));
+  }
+
+  const lambdaCompatible = narrowOverloadMatchesByLambdaCompatibility({
+    matches,
+    args,
+    argsForCandidate,
+    typeArguments,
+    targetTypeArguments,
+    ctx,
+    state,
+  });
+  const lambdaReturnCompatible = narrowOverloadMatchesByLambdaReturn({
+    matches: lambdaCompatible,
+    callArgs,
+    typeArguments,
+    targetTypeArguments,
+    ctx,
+    state,
+  });
+  const compatibilityNarrowed = lambdaCompatible.length < matches.length;
+  const returnNarrowed =
+    lambdaReturnCompatible.length < lambdaCompatible.length;
+  const compatibleSet = new Set(lambdaCompatible);
+  const returnCompatibleSet = new Set(lambdaReturnCompatible);
+
+  return new Map(
+    matches.map((candidate) => {
+      const compatibilityScore =
+        !compatibilityNarrowed || compatibleSet.has(candidate) ? 1 : 0;
+      const returnScore =
+        returnNarrowed && returnCompatibleSet.has(candidate) ? 1 : 0;
+      return [
+        candidate,
+        { lambdaCompatibility: compatibilityScore + returnScore },
+      ];
+    }),
+  );
 };
 
 const inferLambdaReturnSubstitutionForCandidate = <

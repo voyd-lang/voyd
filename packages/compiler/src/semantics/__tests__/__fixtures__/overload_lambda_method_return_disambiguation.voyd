@@ -1,0 +1,16 @@
+obj App {}
+
+impl App
+  api fn get(self, path: i32, { handler: fn() -> i32 }) -> i32
+    self
+    path
+    handler()
+
+  api fn get(self, path: i32, { handler: fn() -> bool }) -> i32
+    self
+    path
+    if handler() then: 1 else: 0
+
+pub fn main() -> i32
+  let app = App {}
+  app.get(1, handler: () -> bool => true)

@@ -97,6 +97,35 @@ describe("overload lambda return hint", () => {
     ).not.toThrow();
   });
 
+  it("uses callback return types to disambiguate method overloads", () => {
+    const semantics = semanticsPipeline(
+      loadAst("overload_lambda_method_return_disambiguation.voyd"),
+    );
+    const { hir, typing } = semantics;
+    const bool = typing.arena.internPrimitive("bool");
+
+    const call = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirMethodCallExpr =>
+        expr.exprKind === "method-call" && expr.method === "get",
+    );
+    expect(call).toBeDefined();
+    if (!call) return;
+
+    const targets = typing.callTargets.get(call.id);
+    const target = targets?.values().next().value;
+    expect(target).toBeDefined();
+    if (!target) return;
+    const signature = typing.functions.getSignature(target.symbol);
+    expect(signature).toBeDefined();
+    const handlerParam = signature?.parameters[2];
+    expect(handlerParam).toBeDefined();
+    if (!handlerParam) return;
+    const handlerType = typing.arena.get(handlerParam.type);
+    expect(handlerType.kind).toBe("function");
+    if (handlerType.kind !== "function") return;
+    expect(handlerType.returnType).toBe(bool);
+  });
+
   it("applies target type arguments to expected return overload hints", () => {
     const semantics = semanticsPipeline(
       loadAst("static_overload_expected_return_target_args.voyd"),
