@@ -695,6 +695,20 @@ Most application code should prefer `Cmd.task`.
 Cmd<Msg>::copy_to_clipboard("Saved URL")
 ```
 
+`Cmd.read_clipboard(handler:)` reads text from the browser clipboard and
+dispatches the handler result.
+
+```voyd
+Cmd<Msg>::read_clipboard(
+  (value: String) -> Msg => Msg::ClipboardRead { value: value }
+)
+```
+
+Clipboard reads can fail because of browser permissions or unavailable APIs.
+Those failures are reported through the runtime command error path. Use
+`Cmd.task` when the response-producing work should be owned by Voyd task code
+instead of the browser runtime host.
+
 `Cmd.focus(target)` focuses a DOM element found by `data-vx-ref`.
 
 ```voyd
@@ -708,8 +722,15 @@ Cmd<Msg>::focus(editor)
 Cmd<Msg>::scroll_into_view(editor)
 ```
 
+`Cmd.select_text(target)` selects text in an input-like DOM element found by
+`data-vx-ref`.
+
+```voyd
+Cmd<Msg>::select_text(editor)
+```
+
 `Cmd.set_document_title(value:)`, `Cmd.push_url(value:)`,
-`Cmd.replace_url(value:)`, `Cmd.navigate_back()`, and
+`Cmd.replace_url(value:)`, `Cmd.set_hash(value:)`, `Cmd.navigate_back()`, and
 `Cmd.navigate_forward()` cover common document and history effects.
 
 ```voyd
@@ -717,6 +738,32 @@ Cmd::batch([
   Cmd<Msg>::set_document_title("Editing"),
   Cmd<Msg>::push_url("/todos/active")
 ])
+```
+
+`Cmd.scroll_window_to(x:, y:)` and `Cmd.scroll_window_by(x:, y:)` control the
+browser window scroll position.
+
+```voyd
+Cmd<Msg>::scroll_window_to(x: 0.0, y: 240.0)
+Cmd<Msg>::scroll_window_by(x: 0.0, y: 80.0)
+```
+
+`Cmd.local_storage_set(key:, value:)`, `Cmd.local_storage_remove(key:)`,
+`Cmd.local_storage_clear()`, `Cmd.session_storage_set(key:, value:)`,
+`Cmd.session_storage_remove(key:)`, and `Cmd.session_storage_clear()` cover
+string storage writes and removals.
+
+```voyd
+Cmd<Msg>::local_storage_set(key: "draft", value: model.draft)
+Cmd<Msg>::session_storage_remove("wizard-step")
+```
+
+`Cmd.open_url(value:)` opens a URL in a new browser context. Use the labeled
+form to choose the browser target.
+
+```voyd
+Cmd<Msg>::open_url("https://voyd.dev")
+Cmd<Msg>::open_url(url: "/help", target: "_self")
 ```
 
 `Cmd.runtime(kind:)` creates a host command envelope for custom browser or
@@ -959,10 +1006,56 @@ document_on_visibility_change(
   handler: (visibility: DocumentVisibility) -> Msg =>
     Msg::VisibilityChanged { hidden: visibility.hidden }
 )
+
+location_on_change(
+  key: "location",
+  handler: (location: Location) -> Msg =>
+    Msg::LocationChanged { href: location.href }
+)
+
+window_on_focus(key: "focus", value: Msg::WindowFocused {})
+window_on_blur(key: "blur", value: Msg::WindowBlurred {})
 ```
 
 Each helper also has a fixed-message form with `value:` when the app only needs
 to know that the event happened.
+
+For rendering loops and browser preferences, use animation frame and media query
+subscriptions:
+
+```voyd
+animation_frame(
+  key: "render-loop",
+  handler: (frame: AnimationFrame) -> Msg =>
+    Msg::Frame { timestamp: frame.timestamp }
+)
+
+media_query(
+  query: "(prefers-reduced-motion: reduce)",
+  handler: (query: MediaQuery) -> Msg =>
+    Msg::ReducedMotionChanged { enabled: query.matches }
+)
+```
+
+For cross-tab and cross-context coordination, use storage and broadcast channel
+subscriptions:
+
+```voyd
+storage_on_change(
+  key: "storage",
+  handler: (change: StorageChange) -> Msg =>
+    Msg::StorageChanged { key: change.key }
+)
+
+broadcast_channel<String, Msg>(
+  name: "updates",
+  handler: (value: String) -> Msg =>
+    Msg::Broadcast { value: value }
+)
+```
+
+`StorageChange.key`, `old_value`, and `new_value` are optional because browser
+storage events use `null` for clears, missing old values, and removals.
 
 ### Runtime Subscriptions
 
@@ -1312,10 +1405,14 @@ reports asynchronous listener failures with `phase: "subscriptions"`.
 The built-in browser runtime host already handles:
 
 - Commands: `delay`, `task`, `copy_to_clipboard`, `focus`,
-  `scroll_into_view`, `set_document_title`, `push_url`, `replace_url`,
-  `navigate_back`, `navigate_forward`.
+  `read_clipboard`, `scroll_into_view`, `select_text`, `set_document_title`,
+  `push_url`, `replace_url`, `set_hash`, `navigate_back`,
+  `navigate_forward`, `open_url`, `scroll_window_to`, `scroll_window_by`,
+  `local_storage_set`, `local_storage_remove`, `local_storage_clear`,
+  `session_storage_set`, `session_storage_remove`, `session_storage_clear`.
 - Subscriptions: `interval`, `keyboard`, `online_status`, `window_resize`,
-  `visibility_change`.
+  `visibility_change`, `location_change`, `window_focus`, `window_blur`,
+  `animation_frame`, `media_query`, `storage`, `broadcast_channel`.
 
 Lower-level renderer APIs are available for integration work:
 

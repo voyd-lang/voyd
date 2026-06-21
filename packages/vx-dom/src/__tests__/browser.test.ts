@@ -833,6 +833,7 @@ describe("vx-dom browser renderer", () => {
 
   it("runs ref DOM commands with the default browser runtime host", async () => {
     const focus = vi.spyOn(HTMLElement.prototype, "focus").mockImplementation(() => undefined);
+    const select = vi.spyOn(HTMLInputElement.prototype, "select").mockImplementation(() => undefined);
     const scrollIntoView = vi.fn();
     const previousScrollIntoView = HTMLElement.prototype.scrollIntoView;
     HTMLElement.prototype.scrollIntoView = scrollIntoView;
@@ -852,6 +853,7 @@ describe("vx-dom browser renderer", () => {
             children: [
               { type: "cmd", kind: "focus", value: "editor" },
               { type: "cmd", kind: "scroll_into_view", value: "editor" },
+              { type: "cmd", kind: "select_text", value: "editor" },
             ],
           },
         }),
@@ -868,49 +870,104 @@ describe("vx-dom browser renderer", () => {
 
       expect(focus).toHaveBeenCalledOnce();
       expect(scrollIntoView).toHaveBeenCalledOnce();
+      expect(select).toHaveBeenCalledOnce();
     } finally {
       HTMLElement.prototype.scrollIntoView = previousScrollIntoView;
     }
   });
 
   it("runs browser runtime commands with the default browser runtime host", async () => {
+    const seenMessages: unknown[] = [];
     const writeText = vi.fn(async () => undefined);
+    const readText = vi.fn(async () => "Clipboard text");
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
-      value: { writeText },
+      value: { readText, writeText },
     });
-    const pushState = vi.spyOn(history, "pushState").mockImplementation(() => undefined);
-    const replaceState = vi.spyOn(history, "replaceState").mockImplementation(() => undefined);
+    Object.defineProperty(window, "open", { configurable: true, value: vi.fn() });
+    Object.defineProperty(window, "scrollBy", { configurable: true, value: vi.fn() });
+    Object.defineProperty(window, "scrollTo", { configurable: true, value: vi.fn() });
+    localStorage.clear();
+    sessionStorage.clear();
+    const originalPushState = history.pushState.bind(history);
+    const originalReplaceState = history.replaceState.bind(history);
+    const pushState = vi.spyOn(history, "pushState")
+      .mockImplementation((data, title, url) => originalPushState(data, title, url));
+    const replaceState = vi.spyOn(history, "replaceState")
+      .mockImplementation((data, title, url) => originalReplaceState(data, title, url));
     const back = vi.spyOn(history, "back").mockImplementation(() => undefined);
     const forward = vi.spyOn(history, "forward").mockImplementation(() => undefined);
     const app: VxAppRuntime = {
       init: () => ({
         frame: counterNode(0),
+        subscriptions: { type: "sub", kind: "location_change", key: "location" },
         commands: {
           type: "cmd",
           kind: "batch",
           children: [
             { type: "cmd", kind: "copy_to_clipboard", value: "Draft" },
+            { type: "cmd", kind: "read_clipboard", handlerId: 77 },
             { type: "cmd", kind: "set_document_title", value: "VX Draft" },
             { type: "cmd", kind: "push_url", value: "/draft" },
             { type: "cmd", kind: "replace_url", value: "/draft?edited=1" },
+            { type: "cmd", kind: "set_hash", value: "section" },
             { type: "cmd", kind: "navigate_back" },
             { type: "cmd", kind: "navigate_forward" },
+            { type: "cmd", kind: "open_url", value: { url: "/external", target: "_self" } },
+            { type: "cmd", kind: "scroll_window_to", value: { x: 10, y: 20 } },
+            { type: "cmd", kind: "scroll_window_by", value: { x: 1, y: 2 } },
+            { type: "cmd", kind: "local_storage_set", value: { key: "draft", value: "yes" } },
+            { type: "cmd", kind: "local_storage_remove", value: "draft" },
+            { type: "cmd", kind: "local_storage_clear" },
+            { type: "cmd", kind: "session_storage_set", value: { key: "draft", value: "yes" } },
+            { type: "cmd", kind: "session_storage_remove", value: "draft" },
+            { type: "cmd", kind: "session_storage_clear" },
           ],
         },
       }),
       render: () => counterNode(0),
-      dispatch: () => counterNode(0),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
     };
 
     await mountVxApp({ container, app });
+    await nextTurn();
 
     expect(writeText).toHaveBeenCalledWith("Draft");
+    expect(readText).toHaveBeenCalledOnce();
+    expect(seenMessages).toContainEqual({
+      kind: "map",
+      handlerId: 77,
+      message: { kind: "msgpack", value: "Clipboard text" },
+    });
+    expect(seenMessages).toContainEqual(expect.objectContaining({
+      kind: "subscription",
+      subscriptionKind: "location_change",
+      payload: expect.objectContaining({
+        pathname: "/draft",
+      }),
+    }));
+    expect(seenMessages).toContainEqual(expect.objectContaining({
+      kind: "subscription",
+      subscriptionKind: "location_change",
+      payload: expect.objectContaining({
+        pathname: "/draft",
+        search: "?edited=1",
+      }),
+    }));
     expect(document.title).toBe("VX Draft");
     expect(pushState).toHaveBeenCalledWith(null, "", "/draft");
     expect(replaceState).toHaveBeenCalledWith(null, "", "/draft?edited=1");
+    expect(location.hash).toBe("#section");
     expect(back).toHaveBeenCalledOnce();
     expect(forward).toHaveBeenCalledOnce();
+    expect(window.open).toHaveBeenCalledWith("/external", "_self");
+    expect(window.scrollTo).toHaveBeenCalledWith(10, 20);
+    expect(window.scrollBy).toHaveBeenCalledWith(1, 2);
+    expect(localStorage.length).toBe(0);
+    expect(sessionStorage.length).toBe(0);
   });
 
   it("reports diagnostics for malformed ref DOM commands", async () => {
@@ -1358,6 +1415,183 @@ describe("vx-dom browser renderer", () => {
     window.dispatchEvent(new Event("resize"));
     await nextTurn();
     expect(seenMessages).toHaveLength(2);
+  });
+
+  it("runs expanded browser subscriptions with structured payloads", async () => {
+    const seenMessages: unknown[] = [];
+    let mediaMatches = false;
+    let mediaListener: (() => void) | undefined;
+    let animationFrame: ((timestamp: number) => void) | undefined;
+    const broadcastInstances: Array<{
+      close: ReturnType<typeof vi.fn>;
+      emit(data: unknown): void;
+    }> = [];
+    class TestBroadcastChannel {
+      close = vi.fn();
+      private listener: ((event: MessageEvent) => void) | undefined;
+
+      constructor(readonly name: string) {
+        void name;
+        broadcastInstances.push(this);
+      }
+
+      addEventListener(event: string, listener: (event: MessageEvent) => void): void {
+        if (event === "message") this.listener = listener;
+      }
+
+      removeEventListener(event: string): void {
+        if (event === "message") this.listener = undefined;
+      }
+
+      emit(data: unknown): void {
+        this.listener?.({ data } as MessageEvent);
+      }
+    }
+    Object.defineProperty(globalThis, "BroadcastChannel", {
+      configurable: true,
+      value: TestBroadcastChannel,
+    });
+    Object.defineProperty(window, "matchMedia", {
+      configurable: true,
+      value: vi.fn((query: string) => ({
+        media: query,
+        get matches() {
+          return mediaMatches;
+        },
+        addEventListener: (_event: string, listener: () => void) => {
+          mediaListener = listener;
+        },
+        removeEventListener: vi.fn(),
+      })),
+    });
+    Object.defineProperty(window, "requestAnimationFrame", {
+      configurable: true,
+      value: vi.fn((callback: (timestamp: number) => void) => {
+        animationFrame = callback;
+        return 1;
+      }),
+    });
+    Object.defineProperty(window, "cancelAnimationFrame", {
+      configurable: true,
+      value: vi.fn(),
+    });
+    history.replaceState(null, "", "/start");
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: [
+          { type: "sub", kind: "location_change", key: "location" },
+          { type: "sub", kind: "window_focus", key: "focus", event: "focus" },
+          { type: "sub", kind: "window_blur", key: "blur", event: "blur", value: { type: "blur" } },
+          { type: "sub", kind: "animation_frame", key: "frame" },
+          {
+            type: "sub",
+            kind: "media_query",
+            key: "(prefers-reduced-motion: reduce)",
+            query: "(prefers-reduced-motion: reduce)",
+          },
+          { type: "sub", kind: "storage", key: "storage" },
+          { type: "sub", kind: "broadcast_channel", key: "updates", name: "updates" },
+        ],
+      }),
+      render: () => counterNode(0),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    const mounted = await mountVxApp({ container, app });
+    await nextTurn();
+
+    history.replaceState(null, "", "/next?x=1#top");
+    window.dispatchEvent(new Event("hashchange"));
+    window.dispatchEvent(new Event("focus"));
+    window.dispatchEvent(new Event("blur"));
+    animationFrame?.(123);
+    mediaMatches = true;
+    mediaListener?.();
+    window.dispatchEvent(new StorageEvent("storage", {
+      key: "draft",
+      oldValue: "no",
+      newValue: "yes",
+      storageArea: localStorage,
+      url: location.href,
+    }));
+    window.dispatchEvent(new StorageEvent("storage", {
+      storageArea: localStorage,
+      url: location.href,
+    }));
+    broadcastInstances[0]?.emit("hello");
+    await nextTurn();
+
+    expect(seenMessages).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "location_change",
+        payload: expect.objectContaining({
+          kind: "location",
+          pathname: "/next",
+          search: "?x=1",
+          hash: "#top",
+        }),
+      }),
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "window_focus",
+        payload: { kind: "event", event: "focus" },
+      }),
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "window_blur",
+        value: { type: "blur" },
+        payload: { kind: "event", event: "blur" },
+      }),
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "animation_frame",
+        payload: { kind: "animation_frame", timestamp: 123 },
+      }),
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "media_query",
+        payload: {
+          kind: "media_query",
+          query: "(prefers-reduced-motion: reduce)",
+          matches: true,
+        },
+      }),
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "storage",
+        payload: expect.objectContaining({
+          kind: "storage",
+          storage: "local",
+          key: "draft",
+          old_value: "no",
+          new_value: "yes",
+        }),
+      }),
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "storage",
+        payload: {
+          kind: "storage",
+          storage: "local",
+          url: location.href,
+        },
+      }),
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "broadcast_channel",
+        payload: "hello",
+      }),
+    ]));
+
+    mounted.dispose();
+    await nextTurn();
+    expect(broadcastInstances[0]?.close).toHaveBeenCalledOnce();
+    expect(window.cancelAnimationFrame).toHaveBeenCalledWith(1);
   });
 
   it("hydrates a runtime-owned app without replacing matching server nodes", async () => {

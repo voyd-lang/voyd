@@ -11,6 +11,14 @@ obj Model {
 
 enum Msg
   KeyDown { key: String, code: String, ctrl: bool }
+  ClipboardRead { value: String }
+  LocationChanged { href: String }
+  WindowEvent { event: String }
+  Frame { timestamp: f64 }
+  Media { matches: bool }
+  Storage { key: String }
+  Broadcast { value: String }
+  Changed
 
 pub fn app() -> Program<Model, Msg>
   program({ init, step, view, subscriptions })
@@ -25,6 +33,8 @@ fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::KeyDown { key, code, ctrl }:
       next<Model, Msg>(Model { status: "key", key: key, code: code, ctrl: ctrl })
+    else:
+      next<Model, Msg>(model)
 
 fn view(model: Model) -> Html<Msg>
   <div>
@@ -40,6 +50,80 @@ fn subscriptions(model: Model) -> Sub<Msg>
     handler: (event: KeyboardEvent) -> Msg =>
       Msg::KeyDown { key: event.key, code: event.code, ctrl: event.ctrl_key }
   )
+
+pub fn standard_commands() -> Cmd<Msg>
+  let editor = Ref<DomElement> { id: "editor" }
+  Cmd::batch([
+    Cmd<Msg>::copy_to_clipboard("Copied from Voyd"),
+    Cmd<Msg>::read_clipboard((value: String) -> Msg => Msg::ClipboardRead { value: value }),
+    Cmd<Msg>::set_document_title("VX"),
+    Cmd<Msg>::push_url("/next"),
+    Cmd<Msg>::replace_url("/next?replace=1"),
+    Cmd<Msg>::set_hash("section"),
+    Cmd<Msg>::navigate_back(),
+    Cmd<Msg>::navigate_forward(),
+    Cmd<Msg>::open_url("/external"),
+    Cmd<Msg>::open_url(url: "/external", target: "_self"),
+    Cmd<Msg>::scroll_window_to(x: 0.0, y: 10.0),
+    Cmd<Msg>::scroll_window_by(x: 1.0, y: 2.0),
+    Cmd<Msg>::local_storage_set(key: "draft", value: "yes"),
+    Cmd<Msg>::local_storage_remove("draft"),
+    Cmd<Msg>::local_storage_clear(),
+    Cmd<Msg>::session_storage_set(key: "draft", value: "yes"),
+    Cmd<Msg>::session_storage_remove("draft"),
+    Cmd<Msg>::session_storage_clear(),
+    Cmd<Msg>::focus(editor),
+    Cmd<Msg>::scroll_into_view(editor),
+    Cmd<Msg>::select_text(editor)
+  ])
+
+pub fn standard_subscriptions() -> Sub<Msg>
+  Sub::batch([
+    keyboard_on_key_down(key: "s", value: Msg::Changed {}),
+    keyboard_on_key_up(
+      key: "s",
+      handler: (event: KeyboardEvent) -> Msg =>
+        Msg::KeyDown { key: event.key, code: event.code, ctrl: event.ctrl_key }
+    ),
+    online_status(key: "network", value: Msg::Changed {}),
+    online_status(
+      key: "network-payload",
+      handler: (_online: bool) -> Msg => Msg::Changed {}
+    ),
+    window_on_resize(
+      key: "viewport",
+      handler: (_size: WindowSize) -> Msg => Msg::Changed {}
+    ),
+    document_on_visibility_change(
+      key: "visibility",
+      handler: (_visibility: DocumentVisibility) -> Msg => Msg::Changed {}
+    ),
+    location_on_change(
+      key: "location",
+      handler: (location: Location) -> Msg => Msg::LocationChanged { href: location.href }
+    ),
+    window_on_focus(
+      key: "focus",
+      handler: (event: GenericEvent) -> Msg => Msg::WindowEvent { event: event.event }
+    ),
+    window_on_blur(key: "blur", value: Msg::Changed {}),
+    animation_frame(
+      key: "frame",
+      handler: (frame: AnimationFrame) -> Msg => Msg::Frame { timestamp: frame.timestamp }
+    ),
+    media_query(
+      query: "(prefers-reduced-motion: reduce)",
+      handler: (query: MediaQuery) -> Msg => Msg::Media { matches: query.matches }
+    ),
+    storage_on_change(
+      key: "storage",
+      handler: (_change: StorageChange) -> Msg => Msg::Changed {}
+    ),
+    broadcast_channel<String, Msg>(
+      name: "updates",
+      handler: (value: String) -> Msg => Msg::Broadcast { value: value }
+    )
+  ])
 
 fn ctrl_label(value: bool) -> String
   if

@@ -104,6 +104,7 @@ type ActiveSubscription = {
 
 const mapHandlerIdsProperty = "__vxMapHandlerIds";
 const taskObserverProperty = Symbol.for("voyd.taskObserver");
+const locationChangeEvent = "vxlocationchange";
 const listenerState = new WeakMap<Element, Map<string, ListenerRecord>>();
 
 type TaskRunOutcome =
@@ -121,20 +122,39 @@ export function createBrowserVxRuntimeHost(
       copy_to_clipboard: runCopyToClipboardCommand,
       delay: runDelayCommand,
       focus: runFocusCommand,
+      local_storage_clear: runLocalStorageClearCommand,
+      local_storage_remove: runLocalStorageRemoveCommand,
+      local_storage_set: runLocalStorageSetCommand,
       navigate_back: runNavigateBackCommand,
       navigate_forward: runNavigateForwardCommand,
+      open_url: runOpenUrlCommand,
       push_url: runPushUrlCommand,
+      read_clipboard: runReadClipboardCommand,
       replace_url: runReplaceUrlCommand,
       scroll_into_view: runScrollIntoViewCommand,
+      scroll_window_by: runScrollWindowByCommand,
+      scroll_window_to: runScrollWindowToCommand,
+      select_text: runSelectTextCommand,
+      session_storage_clear: runSessionStorageClearCommand,
+      session_storage_remove: runSessionStorageRemoveCommand,
+      session_storage_set: runSessionStorageSetCommand,
+      set_hash: runSetHashCommand,
       set_document_title: runSetDocumentTitleCommand,
       task: runTaskCommand,
       ...overrides.commands,
     },
     subscriptions: {
+      animation_frame: runAnimationFrameSubscription,
+      broadcast_channel: runBroadcastChannelSubscription,
       interval: runIntervalSubscription,
       keyboard: runKeyboardSubscription,
+      location_change: runLocationChangeSubscription,
+      media_query: runMediaQuerySubscription,
       online_status: runOnlineStatusSubscription,
+      storage: runStorageSubscription,
       visibility_change: runVisibilityChangeSubscription,
+      window_blur: runWindowEventSubscription,
+      window_focus: runWindowEventSubscription,
       window_resize: runWindowResizeSubscription,
       ...overrides.subscriptions,
     },
@@ -932,6 +952,21 @@ async function runCopyToClipboardCommand(command: VxCommandEnvelope): Promise<vo
   await clipboard.writeText(value);
 }
 
+function runLocalStorageClearCommand(): void {
+  readBrowserStorage("local_storage_clear", "local").clear();
+}
+
+function runLocalStorageRemoveCommand(command: VxCommandEnvelope): void {
+  readBrowserStorage("local_storage_remove", "local").removeItem(
+    readRequiredStringValue(command, "local_storage_remove"),
+  );
+}
+
+function runLocalStorageSetCommand(command: VxCommandEnvelope): void {
+  const entry = readStorageEntry(command, "local_storage_set");
+  readBrowserStorage("local_storage_set", "local").setItem(entry.key, entry.value);
+}
+
 function runFocusCommand(command: VxCommandEnvelope): void {
   const target = findRefElement(readRequiredStringValue(command, "focus"));
   if (target instanceof HTMLElement) target.focus();
@@ -945,19 +980,90 @@ function runNavigateForwardCommand(): void {
   if (typeof history !== "undefined") history.forward();
 }
 
+function runOpenUrlCommand(command: VxCommandEnvelope): void {
+  const target = readOpenUrlTarget(command);
+  if (typeof window !== "undefined" && typeof window.open === "function") {
+    window.open(target.url, target.target);
+  }
+}
+
 function runPushUrlCommand(command: VxCommandEnvelope): void {
   const value = readRequiredStringValue(command, "push_url");
-  if (typeof history !== "undefined") history.pushState(null, "", value);
+  if (typeof history !== "undefined") {
+    history.pushState(null, "", value);
+    dispatchLocationChange();
+  }
+}
+
+async function runReadClipboardCommand(
+  command: VxCommandEnvelope,
+  context: VxRuntimeExecutionContext,
+): Promise<void> {
+  const handlerId = readHandlerId(command);
+  if (handlerId === undefined) {
+    throw new Error("vx-dom: read_clipboard command missing numeric handlerId");
+  }
+  const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+  if (!clipboard || typeof clipboard.readText !== "function") {
+    throw new Error("vx-dom: read_clipboard command requires navigator.clipboard.readText");
+  }
+  const value = await clipboard.readText();
+  if (context.signal.aborted) return;
+  await context.dispatch({ kind: "map", handlerId, message: toVxMessage(value) });
 }
 
 function runReplaceUrlCommand(command: VxCommandEnvelope): void {
   const value = readRequiredStringValue(command, "replace_url");
-  if (typeof history !== "undefined") history.replaceState(null, "", value);
+  if (typeof history !== "undefined") {
+    history.replaceState(null, "", value);
+    dispatchLocationChange();
+  }
 }
 
 function runScrollIntoViewCommand(command: VxCommandEnvelope): void {
   const target = findRefElement(readRequiredStringValue(command, "scroll_into_view"));
   if (typeof target?.scrollIntoView === "function") target.scrollIntoView();
+}
+
+function runScrollWindowByCommand(command: VxCommandEnvelope): void {
+  const point = readPointValue(command, "scroll_window_by");
+  if (typeof window !== "undefined" && typeof window.scrollBy === "function") {
+    window.scrollBy(point.x, point.y);
+  }
+}
+
+function runScrollWindowToCommand(command: VxCommandEnvelope): void {
+  const point = readPointValue(command, "scroll_window_to");
+  if (typeof window !== "undefined" && typeof window.scrollTo === "function") {
+    window.scrollTo(point.x, point.y);
+  }
+}
+
+function runSelectTextCommand(command: VxCommandEnvelope): void {
+  const target = findRefElement(readRequiredStringValue(command, "select_text"));
+  if (target && "select" in target && typeof target.select === "function") {
+    target.select();
+  }
+}
+
+function runSessionStorageClearCommand(): void {
+  readBrowserStorage("session_storage_clear", "session").clear();
+}
+
+function runSessionStorageRemoveCommand(command: VxCommandEnvelope): void {
+  readBrowserStorage("session_storage_remove", "session").removeItem(
+    readRequiredStringValue(command, "session_storage_remove"),
+  );
+}
+
+function runSessionStorageSetCommand(command: VxCommandEnvelope): void {
+  const entry = readStorageEntry(command, "session_storage_set");
+  readBrowserStorage("session_storage_set", "session").setItem(entry.key, entry.value);
+}
+
+function runSetHashCommand(command: VxCommandEnvelope): void {
+  const value = readRequiredStringValue(command, "set_hash");
+  if (typeof location !== "undefined") location.hash = value;
 }
 
 function runSetDocumentTitleCommand(command: VxCommandEnvelope): void {
@@ -1000,6 +1106,94 @@ function runKeyboardSubscription(
   return () => window.removeEventListener(eventName, listener);
 }
 
+function runAnimationFrameSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") return;
+  let frameId: number | undefined;
+  const tick = (timestamp: number) => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
+      kind: "animation_frame",
+      timestamp,
+    })));
+    frameId = window.requestAnimationFrame(tick);
+  };
+  frameId = window.requestAnimationFrame(tick);
+  return () => {
+    if (frameId !== undefined && typeof window.cancelAnimationFrame === "function") {
+      window.cancelAnimationFrame(frameId);
+    }
+  };
+}
+
+function runBroadcastChannelSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  const channelName = readRequiredStringField(subscription, "name", "broadcast_channel subscription");
+  if (typeof BroadcastChannel === "undefined") {
+    throw new Error("vx-dom: broadcast_channel subscription requires BroadcastChannel");
+  }
+  const channel = new BroadcastChannel(channelName);
+  const listener = (event: MessageEvent) => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, event.data)));
+  };
+  channel.addEventListener("message", listener);
+  return () => {
+    channel.removeEventListener("message", listener);
+    channel.close();
+  };
+}
+
+function runLocationChangeSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined") return;
+  const dispatch = () => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, locationPayload())));
+  };
+  window.addEventListener("popstate", dispatch);
+  window.addEventListener("hashchange", dispatch);
+  window.addEventListener(locationChangeEvent, dispatch);
+  dispatch();
+  return () => {
+    window.removeEventListener("popstate", dispatch);
+    window.removeEventListener("hashchange", dispatch);
+    window.removeEventListener(locationChangeEvent, dispatch);
+  };
+}
+
+function runMediaQuerySubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  const query = readRequiredStringField(subscription, "query", "media_query subscription");
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    throw new Error("vx-dom: media_query subscription requires window.matchMedia");
+  }
+  const media = window.matchMedia(query);
+  const dispatch = () => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
+      kind: "media_query",
+      query,
+      matches: media.matches,
+    })));
+  };
+  dispatch();
+  if (typeof media.addEventListener === "function") {
+    media.addEventListener("change", dispatch);
+    return () => media.removeEventListener("change", dispatch);
+  }
+  media.addListener(dispatch);
+  return () => media.removeListener(dispatch);
+}
+
 function runOnlineStatusSubscription(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
@@ -1017,6 +1211,19 @@ function runOnlineStatusSubscription(
     window.removeEventListener("online", dispatch);
     window.removeEventListener("offline", dispatch);
   };
+}
+
+function runStorageSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined") return;
+  const listener = (event: StorageEvent) => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, storagePayload(event))));
+  };
+  window.addEventListener("storage", listener);
+  return () => window.removeEventListener("storage", listener);
 }
 
 function runVisibilityChangeSubscription(
@@ -1053,6 +1260,23 @@ function runWindowResizeSubscription(
   window.addEventListener("resize", dispatch);
   dispatch();
   return () => window.removeEventListener("resize", dispatch);
+}
+
+function runWindowEventSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined") return;
+  const eventName = typeof subscription.event === "string" ? subscription.event : subscription.kind;
+  const listener = () => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
+      kind: "event",
+      event: eventName,
+    })));
+  };
+  window.addEventListener(eventName, listener);
+  return () => window.removeEventListener(eventName, listener);
 }
 
 async function syncRuntimeSubscriptions(
@@ -1192,6 +1416,67 @@ function readRequiredStringValue(
   return input.value;
 }
 
+function readBrowserStorage(commandKind: string, storageKind: "local" | "session"): Storage {
+  const storage = storageKind === "local"
+    ? typeof localStorage === "undefined" ? undefined : localStorage
+    : typeof sessionStorage === "undefined" ? undefined : sessionStorage;
+  if (!storage) throw new Error(`vx-dom: ${commandKind} command requires ${storageKind}Storage`);
+  return storage;
+}
+
+function readOpenUrlTarget(command: VxCommandEnvelope): { url: string; target?: string } {
+  if (typeof command.value === "string") return { url: command.value, target: "_blank" };
+  if (!isRecord(command.value) || typeof command.value.url !== "string") {
+    throw new Error("vx-dom: open_url command missing string url");
+  }
+  return {
+    url: command.value.url,
+    target: typeof command.value.target === "string" ? command.value.target : "_blank",
+  };
+}
+
+function readPointValue(
+  command: VxCommandEnvelope,
+  commandKind: string,
+): { x: number; y: number } {
+  if (
+    !isRecord(command.value) ||
+    typeof command.value.x !== "number" ||
+    typeof command.value.y !== "number" ||
+    !Number.isFinite(command.value.x) ||
+    !Number.isFinite(command.value.y)
+  ) {
+    throw new Error(`vx-dom: ${commandKind} command missing numeric x/y value`);
+  }
+  return { x: command.value.x, y: command.value.y };
+}
+
+function readRequiredStringField(
+  input: Record<string, unknown>,
+  field: string,
+  label: string,
+): string {
+  const value = input[field];
+  if (typeof value !== "string") {
+    throw new Error(`vx-dom: ${label} missing string ${field}`);
+  }
+  return value;
+}
+
+function readStorageEntry(
+  command: VxCommandEnvelope,
+  commandKind: string,
+): { key: string; value: string } {
+  if (
+    !isRecord(command.value) ||
+    typeof command.value.key !== "string" ||
+    typeof command.value.value !== "string"
+  ) {
+    throw new Error(`vx-dom: ${commandKind} command missing string key/value`);
+  }
+  return { key: command.value.key, value: command.value.value };
+}
+
 function subscriptionMessage(
   subscription: VxSubscriptionEnvelope,
   payload: unknown,
@@ -1203,6 +1488,46 @@ function subscriptionMessage(
     ...(Object.hasOwn(subscription, "value") ? { value: subscription.value } : {}),
     payload,
   };
+}
+
+function dispatchLocationChange(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(locationChangeEvent));
+}
+
+function locationPayload(): Record<string, string> {
+  if (typeof location === "undefined") {
+    return {
+      kind: "location",
+      href: "",
+      pathname: "",
+      search: "",
+      hash: "",
+    };
+  }
+  return {
+    kind: "location",
+    href: location.href,
+    pathname: location.pathname,
+    search: location.search,
+    hash: location.hash,
+  };
+}
+
+function storagePayload(event: StorageEvent): Record<string, unknown> {
+  return {
+    kind: "storage",
+    storage: storageKind(event.storageArea),
+    ...(event.key !== null ? { key: event.key } : {}),
+    ...(event.oldValue !== null ? { old_value: event.oldValue } : {}),
+    ...(event.newValue !== null ? { new_value: event.newValue } : {}),
+    url: event.url ?? "",
+  };
+}
+
+function storageKind(storageArea: Storage | null): string {
+  if (typeof sessionStorage !== "undefined" && storageArea === sessionStorage) return "session";
+  if (typeof localStorage !== "undefined" && storageArea === localStorage) return "local";
+  return "unknown";
 }
 
 function mapExecutionContext(

@@ -87,6 +87,34 @@ pub type DocumentVisibility = {
   hidden: bool
 }
 
+pub type Location = {
+  kind: String,
+  href: String,
+  pathname: String,
+  search: String,
+  hash: String
+}
+
+pub type AnimationFrame = {
+  kind: String,
+  timestamp: f64
+}
+
+pub type MediaQuery = {
+  kind: String,
+  query: String,
+  matches: bool
+}
+
+pub type StorageChange = {
+  kind: String,
+  storage: String,
+  key?: String,
+  old_value?: String,
+  new_value?: String,
+  url: String
+}
+
 pub type InputEvent = {
   kind: String,
   value: String,
@@ -251,6 +279,15 @@ impl<Msg> Cmd<Msg>
   api fn copy_to_clipboard(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::copy_to_clipboard(value.to_string())
 
+  /// Reads text from the browser clipboard and dispatches the handler result.
+  api fn read_clipboard({ handler_id: i32 }) -> Cmd<Msg>
+    let ~out = command_map("read_clipboard")
+    out.set("handlerId", msgpack::make_i32(handler_id))
+    Cmd<Msg> { payload: msgpack::make_map(out) }
+
+  api fn read_clipboard(handler: fn(String) -> Msg) -> Cmd<Msg>
+    Cmd<Msg>::read_clipboard(handler_id: retain_typed_message_mapper(handler))
+
   /// Sets the browser document title through the VX runtime host.
   api fn set_document_title(value: String) -> Cmd<Msg>
     Cmd<Msg>::runtime(kind: "set_document_title", value: msgpack::make_string(value))
@@ -272,6 +309,13 @@ impl<Msg> Cmd<Msg>
   api fn replace_url(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::replace_url(value.to_string())
 
+  /// Replaces the browser location hash through the VX runtime host.
+  api fn set_hash(value: String) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "set_hash", value: msgpack::make_string(value))
+
+  api fn set_hash(value: StringSlice) -> Cmd<Msg>
+    Cmd<Msg>::set_hash(value.to_string())
+
   /// Navigates one entry back in browser history.
   api fn navigate_back() -> Cmd<Msg>
     Cmd<Msg>::runtime(kind: "navigate_back")
@@ -279,6 +323,63 @@ impl<Msg> Cmd<Msg>
   /// Navigates one entry forward in browser history.
   api fn navigate_forward() -> Cmd<Msg>
     Cmd<Msg>::runtime(kind: "navigate_forward")
+
+  /// Opens a URL in a browser window or tab.
+  api fn open_url(value: String) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "open_url", value: msgpack::make_string(value))
+
+  api fn open_url(value: StringSlice) -> Cmd<Msg>
+    Cmd<Msg>::open_url(value.to_string())
+
+  api fn open_url({ url: String, target: String }) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "open_url", value: open_url_value(url: url, target: target))
+
+  api fn open_url({ url: StringSlice, target: StringSlice }) -> Cmd<Msg>
+    Cmd<Msg>::open_url(url: url.to_string(), target: target.to_string())
+
+  /// Scrolls the browser window to an absolute coordinate.
+  api fn scroll_window_to({ x: f64, y: f64 }) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "scroll_window_to", value: window_scroll_value(x: x, y: y))
+
+  /// Scrolls the browser window by a relative coordinate.
+  api fn scroll_window_by({ x: f64, y: f64 }) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "scroll_window_by", value: window_scroll_value(x: x, y: y))
+
+  /// Writes a string value into localStorage.
+  api fn local_storage_set({ key: String, value: String }) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "local_storage_set", value: storage_entry_value(key: key, value: value))
+
+  api fn local_storage_set({ key: StringSlice, value: StringSlice }) -> Cmd<Msg>
+    Cmd<Msg>::local_storage_set(key: key.to_string(), value: value.to_string())
+
+  /// Removes a localStorage key.
+  api fn local_storage_remove(key: String) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "local_storage_remove", value: msgpack::make_string(key))
+
+  api fn local_storage_remove(key: StringSlice) -> Cmd<Msg>
+    Cmd<Msg>::local_storage_remove(key.to_string())
+
+  /// Clears localStorage.
+  api fn local_storage_clear() -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "local_storage_clear")
+
+  /// Writes a string value into sessionStorage.
+  api fn session_storage_set({ key: String, value: String }) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "session_storage_set", value: storage_entry_value(key: key, value: value))
+
+  api fn session_storage_set({ key: StringSlice, value: StringSlice }) -> Cmd<Msg>
+    Cmd<Msg>::session_storage_set(key: key.to_string(), value: value.to_string())
+
+  /// Removes a sessionStorage key.
+  api fn session_storage_remove(key: String) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "session_storage_remove", value: msgpack::make_string(key))
+
+  api fn session_storage_remove(key: StringSlice) -> Cmd<Msg>
+    Cmd<Msg>::session_storage_remove(key.to_string())
+
+  /// Clears sessionStorage.
+  api fn session_storage_clear() -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "session_storage_clear")
 
   /// Creates a task command envelope for a retained result mapper.
   api fn perform({ task_id: i32, handler_id: i32 }) -> Cmd<Msg>
@@ -341,6 +442,10 @@ impl<Msg> Cmd<Msg>
   /// Creates a scroll-into-view command for a constrained VX ref.
   api fn scroll_into_view<T>(target: Ref<T>) -> Cmd<Msg>
     Cmd<Msg>::runtime(kind: "scroll_into_view", value: msgpack::make_string(target.id))
+
+  /// Selects text in an input-like DOM element found by `data-vx-ref`.
+  api fn select_text<T>(target: Ref<T>) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "select_text", value: msgpack::make_string(target.id))
 
 impl<Msg> Sub<Msg>
   /// Creates an empty subscription set.
@@ -559,6 +664,140 @@ pub fn document_on_visibility_change<Msg>({
   handler: fn(DocumentVisibility) -> Msg
 }) -> Sub<Msg>
   document_on_visibility_change<Msg>(key: key.to_string(), handler: handler)
+
+/// Subscribes to browser URL changes from history traversal or hash changes.
+pub fn location_on_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
+  Sub<Msg>::runtime(
+    kind: "location_change",
+    key: key,
+    value: boundary_value_to_msgpack(value)
+  )
+
+pub fn location_on_change<Msg>({ key: String, handler: fn(Location) -> Msg }) -> Sub<Msg>
+  Sub<Msg>::runtime_payload<Location>(kind: "location_change", key: key, handler: handler)
+
+pub fn location_on_change<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
+  location_on_change<Msg>(key: key.to_string(), value: value)
+
+pub fn location_on_change<Msg>({ key: StringSlice, handler: fn(Location) -> Msg }) -> Sub<Msg>
+  location_on_change<Msg>(key: key.to_string(), handler: handler)
+
+/// Subscribes to browser window focus events.
+pub fn window_on_focus<Msg>({ key: String, value: Msg }) -> Sub<Msg>
+  window_event_subscription<Msg>(
+    kind: "window_focus",
+    event: "focus",
+    key: key,
+    value: boundary_value_to_msgpack(value)
+  )
+
+pub fn window_on_focus<Msg>({ key: String, handler: fn(GenericEvent) -> Msg }) -> Sub<Msg>
+  window_event_payload_subscription(kind: "window_focus", event: "focus", key: key).map<Msg>(handler)
+
+pub fn window_on_focus<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
+  window_on_focus<Msg>(key: key.to_string(), value: value)
+
+pub fn window_on_focus<Msg>({
+  key: StringSlice,
+  handler: fn(GenericEvent) -> Msg
+}) -> Sub<Msg>
+  window_on_focus<Msg>(key: key.to_string(), handler: handler)
+
+/// Subscribes to browser window blur events.
+pub fn window_on_blur<Msg>({ key: String, value: Msg }) -> Sub<Msg>
+  window_event_subscription<Msg>(
+    kind: "window_blur",
+    event: "blur",
+    key: key,
+    value: boundary_value_to_msgpack(value)
+  )
+
+pub fn window_on_blur<Msg>({ key: String, handler: fn(GenericEvent) -> Msg }) -> Sub<Msg>
+  window_event_payload_subscription(kind: "window_blur", event: "blur", key: key).map<Msg>(handler)
+
+pub fn window_on_blur<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
+  window_on_blur<Msg>(key: key.to_string(), value: value)
+
+pub fn window_on_blur<Msg>({
+  key: StringSlice,
+  handler: fn(GenericEvent) -> Msg
+}) -> Sub<Msg>
+  window_on_blur<Msg>(key: key.to_string(), handler: handler)
+
+/// Subscribes to browser animation frames.
+pub fn animation_frame<Msg>({ key: String, value: Msg }) -> Sub<Msg>
+  Sub<Msg>::runtime(
+    kind: "animation_frame",
+    key: key,
+    value: boundary_value_to_msgpack(value)
+  )
+
+pub fn animation_frame<Msg>({
+  key: String,
+  handler: fn(AnimationFrame) -> Msg
+}) -> Sub<Msg>
+  Sub<Msg>::runtime_payload<AnimationFrame>(kind: "animation_frame", key: key, handler: handler)
+
+pub fn animation_frame<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
+  animation_frame<Msg>(key: key.to_string(), value: value)
+
+pub fn animation_frame<Msg>({
+  key: StringSlice,
+  handler: fn(AnimationFrame) -> Msg
+}) -> Sub<Msg>
+  animation_frame<Msg>(key: key.to_string(), handler: handler)
+
+/// Subscribes to a browser media query.
+pub fn media_query<Msg>({ query: String, value: Msg }) -> Sub<Msg>
+  media_query_subscription<Msg>(query: query, value: boundary_value_to_msgpack(value))
+
+pub fn media_query<Msg>({ query: String, handler: fn(MediaQuery) -> Msg }) -> Sub<Msg>
+  media_query_payload_subscription(query).map<Msg>(handler)
+
+pub fn media_query<Msg>({ query: StringSlice, value: Msg }) -> Sub<Msg>
+  media_query<Msg>(query: query.to_string(), value: value)
+
+pub fn media_query<Msg>({ query: StringSlice, handler: fn(MediaQuery) -> Msg }) -> Sub<Msg>
+  media_query<Msg>(query: query.to_string(), handler: handler)
+
+/// Subscribes to browser storage events.
+pub fn storage_on_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
+  Sub<Msg>::runtime(
+    kind: "storage",
+    key: key,
+    value: boundary_value_to_msgpack(value)
+  )
+
+pub fn storage_on_change<Msg>({ key: String, handler: fn(StorageChange) -> Msg }) -> Sub<Msg>
+  Sub<Msg>::runtime_payload<StorageChange>(kind: "storage", key: key, handler: handler)
+
+pub fn storage_on_change<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
+  storage_on_change<Msg>(key: key.to_string(), value: value)
+
+pub fn storage_on_change<Msg>({
+  key: StringSlice,
+  handler: fn(StorageChange) -> Msg
+}) -> Sub<Msg>
+  storage_on_change<Msg>(key: key.to_string(), handler: handler)
+
+/// Subscribes to messages from a browser BroadcastChannel.
+pub fn broadcast_channel<Msg>({ name: String, value: Msg }) -> Sub<Msg>
+  broadcast_channel_subscription<Msg>(name: name, value: boundary_value_to_msgpack(value))
+
+pub fn broadcast_channel<Payload, Msg>({
+  name: String,
+  handler: fn(Payload) -> Msg
+}) -> Sub<Msg>
+  broadcast_channel_payload_subscription<Payload>(name).map<Msg>(handler)
+
+pub fn broadcast_channel<Msg>({ name: StringSlice, value: Msg }) -> Sub<Msg>
+  broadcast_channel<Msg>(name: name.to_string(), value: value)
+
+pub fn broadcast_channel<Payload, Msg>({
+  name: StringSlice,
+  handler: fn(Payload) -> Msg
+}) -> Sub<Msg>
+  broadcast_channel<Payload, Msg>(name: name.to_string(), handler: handler)
 
 /// Reads a component-local serialized state handle.
 pub fn state_handle({
@@ -1988,6 +2227,24 @@ fn set_bool_option(~out: Dict<String, MsgPack>, name: String, value: Optional<bo
     None:
       void
 
+fn window_scroll_value({ x: f64, y: f64 }) -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("x", msgpack::make_f64(x))
+  out.set("y", msgpack::make_f64(y))
+  msgpack::make_map(out)
+
+fn storage_entry_value({ key: String, value: String }) -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("key", key)
+  out.set("value", value)
+  msgpack::make_map(out)
+
+fn open_url_value({ url: String, target: String }) -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("url", url)
+  out.set("target", target)
+  msgpack::make_map(out)
+
 fn command_payload(kind: String): () -> MsgPack
   msgpack::make_map(command_map(kind))
 
@@ -2012,6 +2269,54 @@ fn keyboard_payload_subscription({ kind: String, key: String }) -> Sub<KeyboardE
   out.set("key", key)
   out.set("event", kind)
   Sub<KeyboardEvent> { payload: msgpack::make_map(out) }
+
+fn window_event_subscription<Msg>({
+  kind: String,
+  event: String,
+  key: String,
+  value: MsgPack
+}) -> Sub<Msg>
+  let ~out = subscription_map(kind)
+  out.set("key", key)
+  out.set("event", event)
+  out.set("value", value)
+  Sub<Msg> { payload: msgpack::make_map(out) }
+
+fn window_event_payload_subscription({
+  kind: String,
+  event: String,
+  key: String
+}) -> Sub<GenericEvent>
+  let ~out = subscription_map(kind)
+  out.set("key", key)
+  out.set("event", event)
+  Sub<GenericEvent> { payload: msgpack::make_map(out) }
+
+fn media_query_subscription<Msg>({ query: String, value: MsgPack }) -> Sub<Msg>
+  let ~out = subscription_map("media_query")
+  out.set("key", query)
+  out.set("query", query)
+  out.set("value", value)
+  Sub<Msg> { payload: msgpack::make_map(out) }
+
+fn media_query_payload_subscription(query: String) -> Sub<MediaQuery>
+  let ~out = subscription_map("media_query")
+  out.set("key", query)
+  out.set("query", query)
+  Sub<MediaQuery> { payload: msgpack::make_map(out) }
+
+fn broadcast_channel_subscription<Msg>({ name: String, value: MsgPack }) -> Sub<Msg>
+  let ~out = subscription_map("broadcast_channel")
+  out.set("key", name)
+  out.set("name", name)
+  out.set("value", value)
+  Sub<Msg> { payload: msgpack::make_map(out) }
+
+fn broadcast_channel_payload_subscription<Payload>(name: String) -> Sub<Payload>
+  let ~out = subscription_map("broadcast_channel")
+  out.set("key", name)
+  out.set("name", name)
+  Sub<Payload> { payload: msgpack::make_map(out) }
 
 fn tagged_vx_runtime_map(type_name: String, kind: String): () -> Dict<String, MsgPack>
   let ~out = Dict<String, MsgPack>::init()

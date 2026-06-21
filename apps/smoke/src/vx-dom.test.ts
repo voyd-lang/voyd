@@ -451,6 +451,12 @@ describe("smoke: compiled VX DOM rendering", () => {
       wasm: result.wasm,
       bufferSize: 256 * 1024,
     });
+    const commands = await host.run<{ children?: unknown[] }>("standard_commands");
+    const subscriptions = await host.run<{ children?: unknown[] }>("standard_subscriptions");
+
+    expect(commands.children).toHaveLength(21);
+    expect(subscriptions.children).toHaveLength(13);
+
     const app = createVoydVxAppRuntime({ host });
 
     const container = document.createElement("div");
