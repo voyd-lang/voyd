@@ -12,6 +12,7 @@ import {
   getStructuralFields,
   getSymbolName,
   resolveTypeExpr,
+  typeSatisfies,
 } from "../type-system.js";
 import { bindTypeParams as bindTypeParamsFromType } from "../type-relations.js";
 import { typeDescriptorToUserString } from "../type-arena.js";
@@ -23,6 +24,8 @@ import {
   reportInaccessibleFieldRequirement,
 } from "../visibility.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
+
+type StructuralLiteralField = Pick<ObjectField, "name" | "type" | "optional">;
 
 export const typeObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
@@ -43,15 +46,22 @@ export const typeObjectLiteralExpr = (
           ]),
         )
       : undefined;
-  const fields = new Map<string, TypeId>();
+  const fields = new Map<string, StructuralLiteralField>();
   expr.entries.forEach((entry) =>
     mergeObjectLiteralEntry(entry, fields, ctx, state, expectedFields),
   );
 
-  const orderedFields = Array.from(fields.entries()).map(([name, type]) => ({
-    name,
-    type,
-  }));
+  expectedFields?.forEach((field) => {
+    if (field.optional && !fields.has(field.name)) {
+      fields.set(field.name, {
+        name: field.name,
+        type: field.type,
+        optional: true,
+      });
+    }
+  });
+
+  const orderedFields = Array.from(fields.values());
   const effectRow = composeEffectRows(
     ctx.effects,
     expr.entries.map((entry) => getExprEffectRow(entry.value, ctx)),
@@ -62,7 +72,7 @@ export const typeObjectLiteralExpr = (
 
 const mergeObjectLiteralEntry = (
   entry: HirObjectLiteralEntry,
-  fields: Map<string, TypeId>,
+  fields: Map<string, StructuralLiteralField>,
   ctx: TypingContext,
   state: TypingState,
   expectedFields?: ReadonlyMap<string, ObjectField>,
@@ -72,7 +82,16 @@ const mergeObjectLiteralEntry = (
     const valueType = typeExpression(entry.value, ctx, state, {
       expectedType: expectedField?.type,
     });
-    fields.set(entry.name, valueType);
+    fields.set(
+      entry.name,
+      structuralLiteralFieldForValue({
+        name: entry.name,
+        valueType,
+        expectedField,
+        ctx,
+        state,
+      }),
+    );
     return;
   }
 
@@ -85,7 +104,53 @@ const mergeObjectLiteralEntry = (
     return;
   }
 
-  spreadFields.forEach((field) => fields.set(field.name, field.type));
+  spreadFields.forEach((field) => {
+    const expectedField = expectedFields?.get(field.name);
+    fields.set(
+      field.name,
+      structuralLiteralFieldForValue({
+        name: field.name,
+        valueType: field.type,
+        expectedField,
+        fallbackOptional: field.optional,
+        ctx,
+        state,
+      }),
+    );
+  });
+};
+
+const structuralLiteralFieldForValue = ({
+  name,
+  valueType,
+  expectedField,
+  fallbackOptional,
+  ctx,
+  state,
+}: {
+  name: string;
+  valueType: TypeId;
+  expectedField: ObjectField | undefined;
+  fallbackOptional?: boolean;
+  ctx: TypingContext;
+  state: TypingState;
+}): StructuralLiteralField => {
+  if (
+    expectedField?.optional &&
+    typeSatisfies(valueType, expectedField.type, ctx, state)
+  ) {
+    return {
+      name,
+      type: expectedField.type,
+      optional: true,
+    };
+  }
+
+  return {
+    name,
+    type: valueType,
+    optional: fallbackOptional ? true : undefined,
+  };
 };
 
 const typeNominalObjectLiteral = (
