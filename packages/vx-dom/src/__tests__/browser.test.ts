@@ -873,6 +873,46 @@ describe("vx-dom browser renderer", () => {
     }
   });
 
+  it("runs browser runtime commands with the default browser runtime host", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const pushState = vi.spyOn(history, "pushState").mockImplementation(() => undefined);
+    const replaceState = vi.spyOn(history, "replaceState").mockImplementation(() => undefined);
+    const back = vi.spyOn(history, "back").mockImplementation(() => undefined);
+    const forward = vi.spyOn(history, "forward").mockImplementation(() => undefined);
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        commands: {
+          type: "cmd",
+          kind: "batch",
+          children: [
+            { type: "cmd", kind: "copy_to_clipboard", value: "Draft" },
+            { type: "cmd", kind: "set_document_title", value: "VX Draft" },
+            { type: "cmd", kind: "push_url", value: "/draft" },
+            { type: "cmd", kind: "replace_url", value: "/draft?edited=1" },
+            { type: "cmd", kind: "navigate_back" },
+            { type: "cmd", kind: "navigate_forward" },
+          ],
+        },
+      }),
+      render: () => counterNode(0),
+      dispatch: () => counterNode(0),
+    };
+
+    await mountVxApp({ container, app });
+
+    expect(writeText).toHaveBeenCalledWith("Draft");
+    expect(document.title).toBe("VX Draft");
+    expect(pushState).toHaveBeenCalledWith(null, "", "/draft");
+    expect(replaceState).toHaveBeenCalledWith(null, "", "/draft?edited=1");
+    expect(back).toHaveBeenCalledOnce();
+    expect(forward).toHaveBeenCalledOnce();
+  });
+
   it("reports diagnostics for malformed ref DOM commands", async () => {
     const app: VxAppRuntime = {
       init: () => ({
@@ -903,7 +943,12 @@ describe("vx-dom browser renderer", () => {
     let tick: (() => Promise<void>) | undefined;
     const dispose = vi.fn();
     const runSubscription = vi.fn((_subscription, { dispatch }) => {
-      tick = () => dispatch({ kind: "debug", name: "tick" });
+      tick = () => dispatch({
+        kind: "subscription",
+        subscriptionKind: "timer",
+        key: "main",
+        payload: { type: "tick" },
+      });
       return dispose;
     });
     const app: VxAppRuntime = {
@@ -913,7 +958,10 @@ describe("vx-dom browser renderer", () => {
       }),
       render: () => counterNode(count),
       dispatch: (message) => {
-        if (message.kind === "debug" && message.name === "tick") count += 1;
+        if (message.kind === "subscription" && message.subscriptionKind === "timer") {
+          const payload = message.payload as { type?: unknown };
+          if (payload.type === "tick") count += 1;
+        }
         if (message.kind === "debug" && message.name === "stop") subscribed = false;
         return {
           frame: counterNode(count),
@@ -1014,21 +1062,6 @@ describe("vx-dom browser renderer", () => {
 
     await expect(mountVxApp({ container, app, onError })).rejects.toThrow(
       "subscription map missing required child",
-    );
-  });
-
-  it("reports subscription diagnostics for malformed keyboard envelopes", async () => {
-    const app: VxAppRuntime = {
-      init: () => ({
-        frame: counterNode(0),
-        subscriptions: { type: "sub", kind: "keyboard", key: "Escape" },
-      }),
-      render: () => counterNode(0),
-      dispatch: () => counterNode(0),
-    };
-
-    await expect(mountVxApp({ container, app })).rejects.toThrow(
-      "keyboard subscription missing value",
     );
   });
 
@@ -1234,6 +1267,97 @@ describe("vx-dom browser renderer", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "s" }));
     await nextTurn();
     expect(seenMessages).toHaveLength(1);
+  });
+
+  it("runs keyboard payload subscriptions without fixed message values", async () => {
+    const seenMessages: unknown[] = [];
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: {
+          type: "sub",
+          kind: "keyboard",
+          key: "s",
+          event: "keydown",
+        },
+      }),
+      render: () => counterNode(0),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    await mountVxApp({ container, app });
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "s",
+      code: "KeyS",
+      ctrlKey: true,
+    }));
+    await nextTurn();
+
+    expect(container.textContent).toBe("Count: 1");
+    expect(seenMessages[0]).toEqual(expect.objectContaining({
+      kind: "subscription",
+      subscriptionKind: "keyboard",
+      key: "s",
+      payload: expect.objectContaining({
+        kind: "keyboard",
+        key: "s",
+        code: "KeyS",
+        ctrl_key: true,
+      }),
+    }));
+    expect(Object.hasOwn(seenMessages[0] as object, "value")).toBe(false);
+  });
+
+  it("runs window resize subscriptions with structured payloads", async () => {
+    const seenMessages: unknown[] = [];
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: {
+          type: "sub",
+          kind: "window_resize",
+          key: "viewport",
+        },
+      }),
+      render: () => counterNode(0),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 800 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 600 });
+
+    const mounted = await mountVxApp({ container, app });
+    await nextTurn();
+
+    Object.defineProperty(window, "innerWidth", { configurable: true, value: 1024 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 768 });
+    window.dispatchEvent(new Event("resize"));
+    await nextTurn();
+
+    expect(seenMessages).toEqual([
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "window_resize",
+        key: "viewport",
+        payload: { kind: "window_size", width: 800, height: 600 },
+      }),
+      expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "window_resize",
+        key: "viewport",
+        payload: { kind: "window_size", width: 1024, height: 768 },
+      }),
+    ]);
+
+    mounted.dispose();
+    window.dispatchEvent(new Event("resize"));
+    await nextTurn();
+    expect(seenMessages).toHaveLength(2);
   });
 
   it("hydrates a runtime-owned app without replacing matching server nodes", async () => {

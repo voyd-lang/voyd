@@ -689,14 +689,11 @@ Cmd<Msg>::perform(task_id: task_id, handler_id: mapper_id)
 
 Most application code should prefer `Cmd.task`.
 
-`Cmd.runtime(kind:)` creates a host command envelope.
+`Cmd.copy_to_clipboard(value:)` copies text to the browser clipboard.
 
 ```voyd
-Cmd<Msg>::runtime(kind: "copy_to_clipboard")
+Cmd<Msg>::copy_to_clipboard("Saved URL")
 ```
-
-The browser host must register a command executor for the `kind`. Use runtime
-commands for browser capabilities beyond VX's built-in set.
 
 `Cmd.focus(target)` focuses a DOM element found by `data-vx-ref`.
 
@@ -710,6 +707,28 @@ Cmd<Msg>::focus(editor)
 ```voyd
 Cmd<Msg>::scroll_into_view(editor)
 ```
+
+`Cmd.set_document_title(value:)`, `Cmd.push_url(value:)`,
+`Cmd.replace_url(value:)`, `Cmd.navigate_back()`, and
+`Cmd.navigate_forward()` cover common document and history effects.
+
+```voyd
+Cmd::batch([
+  Cmd<Msg>::set_document_title("Editing"),
+  Cmd<Msg>::push_url("/todos/active")
+])
+```
+
+`Cmd.runtime(kind:)` creates a host command envelope for custom browser or
+application capabilities.
+
+```voyd
+Cmd<Msg>::runtime(kind: "analytics_track", value: analytics_payload(event))
+```
+
+The browser host must register a command executor for the `kind`. Use runtime
+commands when the effect is app-specific or not part of VX's built-in browser
+host.
 
 `Cmd.map(handler)` lifts child commands into parent message space.
 
@@ -893,6 +912,19 @@ keyboard_on_key_up(key: "Enter", value: Msg::Submit {})
 The `key` parameter is both the browser key filter and the stable key for the
 subscription. The dispatched `value` is a typed message.
 
+Use the `handler` form when the app needs the normalized keyboard payload:
+
+```voyd
+keyboard_on_key_down(
+  key: "Escape",
+  handler: (event: KeyboardEvent) -> Msg =>
+    Msg::KeyPressed { key: event.key, code: event.code }
+)
+```
+
+The handler receives the same `KeyboardEvent` payload shape used by typed DOM
+keyboard event handlers.
+
 Keyboard subscriptions are especially useful for mode-dependent shortcuts:
 
 ```voyd
@@ -904,18 +936,49 @@ fn subscriptions(model: Model) -> Sub<Msg>
       Sub<Msg>::none()
 ```
 
+### Browser State Subscriptions
+
+The default browser runtime host also exposes subscriptions for common window
+and document state:
+
+```voyd
+online_status(
+  key: "network",
+  handler: (online: bool) -> Msg =>
+    Msg::OnlineChanged { online: online }
+)
+
+window_on_resize(
+  key: "viewport",
+  handler: (size: WindowSize) -> Msg =>
+    Msg::ViewportChanged { width: size.width, height: size.height }
+)
+
+document_on_visibility_change(
+  key: "visibility",
+  handler: (visibility: DocumentVisibility) -> Msg =>
+    Msg::VisibilityChanged { hidden: visibility.hidden }
+)
+```
+
+Each helper also has a fixed-message form with `value:` when the app only needs
+to know that the event happened.
+
 ### Runtime Subscriptions
 
-`Sub.runtime(kind:, key:)` creates a host subscription envelope for browser or
-application capabilities supplied by JavaScript.
+`Sub.runtime_payload(kind:, key:, handler:)` creates a host subscription
+envelope and maps incoming host payloads through a typed handler.
 
 ```voyd
 enum Msg
   OnlineChanged { online: bool }
 
 fn subscriptions(model: Model) -> Sub<Msg>
-  Sub<bool>::runtime(kind: "online_status", key: "network").map(
-    (online: bool) -> Msg => Msg::OnlineChanged { online: online }
+  Sub::runtime_payload(
+    kind: "online_status",
+    key: "network",
+    handler: (online: bool) -> Msg =>
+      Msg::OnlineChanged { online: online }
   )
 ```
 
@@ -955,17 +1018,18 @@ await mountVxApp({
 
 The runner returns an optional disposer that VX calls when the subscription
 disappears or is replaced. In this example, the host dispatches a `bool` payload
-and the Voyd `map` closure turns that payload into `Msg::OnlineChanged`.
+and the Voyd `handler` closure turns that payload into `Msg::OnlineChanged`.
 
-Use `value` when the host runner needs configuration:
+Use `Sub.runtime_configured(kind:, key:, value:, handler:)` when the host runner
+needs configuration:
 
 ```voyd
-Sub<String>::runtime(
+Sub::runtime_configured(
   kind: "websocket",
   key: "project:" + model.project_id,
-  value: websocket_config(model.project_id)
-).map(
-  (message: String) -> Msg => Msg::SocketMessage { value: message }
+  value: websocket_config(model.project_id),
+  handler: (message: String) -> Msg =>
+    Msg::SocketMessage { value: message }
 )
 ```
 
@@ -973,6 +1037,13 @@ The `value` field is sent to the host in the subscription descriptor. It is
 configuration for starting the listener, such as a channel name, URL, or topic.
 Data from the listener reaches Voyd when the host runner calls
 `context.dispatch`.
+
+The lower-level composition form is still available:
+
+```voyd
+Sub<String>::runtime(kind: "websocket", key: "project:" + model.project_id)
+  .map((message: String) -> Msg => Msg::SocketMessage { value: message })
+```
 
 ### Mapping Child Subscriptions
 
@@ -1207,10 +1278,44 @@ await mountVxApp({
 });
 ```
 
+Command handlers receive the command descriptor that Voyd produced. The
+descriptor always has `type: "cmd"` and `kind`; constructors that take input put
+that input in `value` after boundary encoding. A handler may be synchronous or
+async. Unknown command kinds, thrown errors, and rejected promises are reported
+through the runtime error handler with `phase: "commands"`. Runtime commands are
+best for fire-and-forget host effects. Use `Cmd.task` when the work should
+produce a typed result message through Voyd's task runtime.
+
+Subscription runners receive the subscription descriptor that Voyd produced. The
+descriptor always has `type: "sub"`, `kind`, and a stable `key`; optional
+configuration is in `value`. A runner starts the listener and returns an
+optional disposer. VX calls the disposer when the descriptor disappears, when the
+same kind/key is replaced by a changed descriptor, and when the app is disposed.
+
+Send data back by calling `context.dispatch`:
+
+```ts
+context.dispatch({
+  kind: "subscription",
+  subscriptionKind: String(subscription.kind),
+  key: String(subscription.key),
+  payload: nextValue,
+});
+```
+
+The `payload` becomes the input to the Voyd `handler:` or `Sub.map` closure. If
+the dispatched message includes `value`, VX treats it as a fixed message and the
+payload is still available to custom runtime code but is not passed to the Voyd
+mapper. `context.signal` is aborted during teardown, and `context.reportError`
+reports asynchronous listener failures with `phase: "subscriptions"`.
+
 The built-in browser runtime host already handles:
 
-- Commands: `delay`, `task`, `focus`, `scroll_into_view`.
-- Subscriptions: `interval`, `keyboard`.
+- Commands: `delay`, `task`, `copy_to_clipboard`, `focus`,
+  `scroll_into_view`, `set_document_title`, `push_url`, `replace_url`,
+  `navigate_back`, `navigate_forward`.
+- Subscriptions: `interval`, `keyboard`, `online_status`, `window_resize`,
+  `visibility_change`.
 
 Lower-level renderer APIs are available for integration work:
 

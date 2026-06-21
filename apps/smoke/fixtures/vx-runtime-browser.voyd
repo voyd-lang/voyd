@@ -1,0 +1,47 @@
+use std::enums::{ enum }
+use std::string::type::String
+use std::vx::all
+
+obj Model {
+  api status: String,
+  api key: String,
+  api code: String,
+  api ctrl: bool
+}
+
+enum Msg
+  KeyDown { key: String, code: String, ctrl: bool }
+
+pub fn app() -> Program<Model, Msg>
+  program({ init, step, view, subscriptions })
+
+fn init() -> Program<Model, Msg>
+  next<Model, Msg>(
+    model: Model { status: "ready", key: "none", code: "none", ctrl: false },
+    cmd: Cmd<Msg>::copy_to_clipboard("Copied from Voyd")
+  )
+
+fn step(model: Model, msg: Msg) -> Program<Model, Msg>
+  match(msg)
+    Msg::KeyDown { key, code, ctrl }:
+      next<Model, Msg>(Model { status: "key", key: key, code: code, ctrl: ctrl })
+
+fn view(model: Model) -> Html<Msg>
+  <div>
+    <p class="status">{model.status}</p>
+    <p class="key">{model.key}</p>
+    <p class="code">{model.code}</p>
+    <p class="ctrl">{ctrl_label(model.ctrl)}</p>
+  </div>
+
+fn subscriptions(model: Model) -> Sub<Msg>
+  keyboard_on_key_down(
+    key: "s",
+    handler: (event: KeyboardEvent) -> Msg =>
+      Msg::KeyDown { key: event.key, code: event.code, ctrl: event.ctrl_key }
+  )
+
+fn ctrl_label(value: bool) -> String
+  if
+    value: "ctrl"
+    else: "no-ctrl"

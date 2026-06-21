@@ -21,6 +21,7 @@ import type {
   VxRuntimeExecutionContext,
   VxRuntimeHostOptions,
   VxRuntimeMessage,
+  VxRuntimeSubscriptionMessage,
   VxRuntimeStep,
   VxSubscriptionDisposer,
   VxSubscriptionEnvelope,
@@ -117,15 +118,24 @@ export function createBrowserVxRuntimeHost(
 ): VxRuntimeHostOptions {
   return {
     commands: {
+      copy_to_clipboard: runCopyToClipboardCommand,
       delay: runDelayCommand,
       focus: runFocusCommand,
+      navigate_back: runNavigateBackCommand,
+      navigate_forward: runNavigateForwardCommand,
+      push_url: runPushUrlCommand,
+      replace_url: runReplaceUrlCommand,
       scroll_into_view: runScrollIntoViewCommand,
+      set_document_title: runSetDocumentTitleCommand,
       task: runTaskCommand,
       ...overrides.commands,
     },
     subscriptions: {
       interval: runIntervalSubscription,
       keyboard: runKeyboardSubscription,
+      online_status: runOnlineStatusSubscription,
+      visibility_change: runVisibilityChangeSubscription,
+      window_resize: runWindowResizeSubscription,
       ...overrides.subscriptions,
     },
     onError: overrides.onError,
@@ -913,16 +923,46 @@ function runTaskCommand(
   });
 }
 
+async function runCopyToClipboardCommand(command: VxCommandEnvelope): Promise<void> {
+  const value = readRequiredStringValue(command, "copy_to_clipboard");
+  const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+  if (!clipboard || typeof clipboard.writeText !== "function") {
+    throw new Error("vx-dom: copy_to_clipboard command requires navigator.clipboard.writeText");
+  }
+  await clipboard.writeText(value);
+}
+
 function runFocusCommand(command: VxCommandEnvelope): void {
-  if (typeof command.value !== "string") throw new Error("vx-dom: focus command missing string value");
-  const target = findRefElement(command.value);
+  const target = findRefElement(readRequiredStringValue(command, "focus"));
   if (target instanceof HTMLElement) target.focus();
 }
 
+function runNavigateBackCommand(): void {
+  if (typeof history !== "undefined") history.back();
+}
+
+function runNavigateForwardCommand(): void {
+  if (typeof history !== "undefined") history.forward();
+}
+
+function runPushUrlCommand(command: VxCommandEnvelope): void {
+  const value = readRequiredStringValue(command, "push_url");
+  if (typeof history !== "undefined") history.pushState(null, "", value);
+}
+
+function runReplaceUrlCommand(command: VxCommandEnvelope): void {
+  const value = readRequiredStringValue(command, "replace_url");
+  if (typeof history !== "undefined") history.replaceState(null, "", value);
+}
+
 function runScrollIntoViewCommand(command: VxCommandEnvelope): void {
-  if (typeof command.value !== "string") throw new Error("vx-dom: scroll_into_view command missing string value");
-  const target = findRefElement(command.value);
+  const target = findRefElement(readRequiredStringValue(command, "scroll_into_view"));
   if (typeof target?.scrollIntoView === "function") target.scrollIntoView();
+}
+
+function runSetDocumentTitleCommand(command: VxCommandEnvelope): void {
+  const value = readRequiredStringValue(command, "set_document_title");
+  if (typeof document !== "undefined") document.title = value;
 }
 
 function runIntervalSubscription(
@@ -943,7 +983,6 @@ function runKeyboardSubscription(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
-  if (!Object.hasOwn(subscription, "value")) throw new Error("vx-dom: keyboard subscription missing value");
   const eventName = typeof subscription.event === "string"
     ? subscription.event
     : "keydown";
@@ -952,16 +991,68 @@ function runKeyboardSubscription(
     if (context.signal.aborted) return;
     const subscribedKey = optionalSubscriptionKey(subscription);
     if (subscribedKey && isKeyboardEvent(event) && event.key !== subscribedKey) return;
-    settleAsyncDispatch(context.dispatch({
-      kind: "subscription",
-      subscriptionKind: "keyboard",
-      key: subscribedKey,
-      value: subscription.value,
-      payload: normalizeBrowserEvent(event),
-    }));
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(
+      subscription,
+      normalizeBrowserEvent(event),
+    )));
   };
   window.addEventListener(eventName, listener);
   return () => window.removeEventListener(eventName, listener);
+}
+
+function runOnlineStatusSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined") return;
+  const dispatch = () => {
+    if (context.signal.aborted) return;
+    const online = typeof navigator === "undefined" ? true : navigator.onLine;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, online)));
+  };
+  window.addEventListener("online", dispatch);
+  window.addEventListener("offline", dispatch);
+  dispatch();
+  return () => {
+    window.removeEventListener("online", dispatch);
+    window.removeEventListener("offline", dispatch);
+  };
+}
+
+function runVisibilityChangeSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof document === "undefined") return;
+  const dispatch = () => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
+      kind: "visibility",
+      state: document.visibilityState,
+      hidden: document.hidden,
+    })));
+  };
+  document.addEventListener("visibilitychange", dispatch);
+  dispatch();
+  return () => document.removeEventListener("visibilitychange", dispatch);
+}
+
+function runWindowResizeSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined") return;
+  const dispatch = () => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
+      kind: "window_size",
+      width: window.innerWidth,
+      height: window.innerHeight,
+    })));
+  };
+  window.addEventListener("resize", dispatch);
+  dispatch();
+  return () => window.removeEventListener("resize", dispatch);
 }
 
 async function syncRuntimeSubscriptions(
@@ -1089,6 +1180,29 @@ function readMillis(input: Record<string, unknown>): number | undefined {
   }
   if (typeof raw !== "number" || !Number.isFinite(raw) || raw < 0) return undefined;
   return raw;
+}
+
+function readRequiredStringValue(
+  input: Record<string, unknown>,
+  commandKind: string,
+): string {
+  if (typeof input.value !== "string") {
+    throw new Error(`vx-dom: ${commandKind} command missing string value`);
+  }
+  return input.value;
+}
+
+function subscriptionMessage(
+  subscription: VxSubscriptionEnvelope,
+  payload: unknown,
+): VxRuntimeSubscriptionMessage {
+  return {
+    kind: "subscription",
+    subscriptionKind: subscription.kind,
+    key: optionalSubscriptionKey(subscription),
+    ...(Object.hasOwn(subscription, "value") ? { value: subscription.value } : {}),
+    payload,
+  };
 }
 
 function mapExecutionContext(

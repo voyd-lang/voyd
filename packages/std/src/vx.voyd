@@ -75,6 +75,18 @@ pub type KeyboardEvent = {
   shift_key: bool
 }
 
+pub type WindowSize = {
+  kind: String,
+  width: f64,
+  height: f64
+}
+
+pub type DocumentVisibility = {
+  kind: String,
+  state: String,
+  hidden: bool
+}
+
 pub type InputEvent = {
   kind: String,
   value: String,
@@ -232,6 +244,42 @@ impl<Msg> Cmd<Msg>
   api fn runtime({ kind: StringSlice, value?: MsgPack }) -> Cmd<Msg>
     Cmd<Msg>::runtime(kind: kind.to_string(), value: value)
 
+  /// Copies text to the browser clipboard through the VX runtime host.
+  api fn copy_to_clipboard(value: String) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "copy_to_clipboard", value: msgpack::make_string(value))
+
+  api fn copy_to_clipboard(value: StringSlice) -> Cmd<Msg>
+    Cmd<Msg>::copy_to_clipboard(value.to_string())
+
+  /// Sets the browser document title through the VX runtime host.
+  api fn set_document_title(value: String) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "set_document_title", value: msgpack::make_string(value))
+
+  api fn set_document_title(value: StringSlice) -> Cmd<Msg>
+    Cmd<Msg>::set_document_title(value.to_string())
+
+  /// Pushes a URL into browser history through the VX runtime host.
+  api fn push_url(value: String) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "push_url", value: msgpack::make_string(value))
+
+  api fn push_url(value: StringSlice) -> Cmd<Msg>
+    Cmd<Msg>::push_url(value.to_string())
+
+  /// Replaces the current browser history URL through the VX runtime host.
+  api fn replace_url(value: String) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "replace_url", value: msgpack::make_string(value))
+
+  api fn replace_url(value: StringSlice) -> Cmd<Msg>
+    Cmd<Msg>::replace_url(value.to_string())
+
+  /// Navigates one entry back in browser history.
+  api fn navigate_back() -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "navigate_back")
+
+  /// Navigates one entry forward in browser history.
+  api fn navigate_forward() -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "navigate_forward")
+
   /// Creates a task command envelope for a retained result mapper.
   api fn perform({ task_id: i32, handler_id: i32 }) -> Cmd<Msg>
     let ~out = command_map("task")
@@ -338,6 +386,47 @@ impl<Msg> Sub<Msg>
   api fn runtime({ kind: StringSlice, key: StringSlice, value?: MsgPack }) -> Sub<Msg>
     Sub<Msg>::runtime(kind: kind.to_string(), key: key.to_string(), value: value)
 
+  /// Creates a host/runtime subscription and maps incoming payloads through a typed handler.
+  api fn runtime_payload<Payload>({
+    kind: String,
+    key: String,
+    handler: fn(Payload) -> Msg
+  }) -> Sub<Msg>
+    Sub<Payload>::runtime(kind: kind, key: key).map<Msg>(handler)
+
+  api fn runtime_payload<Payload>({
+    kind: StringSlice,
+    key: StringSlice,
+    handler: fn(Payload) -> Msg
+  }) -> Sub<Msg>
+    Sub<Msg>::runtime_payload<Payload>(
+      kind: kind.to_string(),
+      key: key.to_string(),
+      handler: handler
+    )
+
+  /// Creates a configured host/runtime subscription and maps incoming payloads.
+  api fn runtime_configured<Payload>({
+    kind: String,
+    key: String,
+    value: MsgPack,
+    handler: fn(Payload) -> Msg
+  }) -> Sub<Msg>
+    Sub<Payload>::runtime(kind: kind, key: key, value: value).map<Msg>(handler)
+
+  api fn runtime_configured<Payload>({
+    kind: StringSlice,
+    key: StringSlice,
+    value: MsgPack,
+    handler: fn(Payload) -> Msg
+  }) -> Sub<Msg>
+    Sub<Msg>::runtime_configured<Payload>(
+      kind: kind.to_string(),
+      key: key.to_string(),
+      value: value,
+      handler: handler
+    )
+
   /// Creates an interval subscription envelope for a serialized host runtime value.
   api fn every_serialized({ key: String, millis: i64, value: MsgPack }) -> Sub<Msg>
     let ~out = subscription_map("interval")
@@ -367,11 +456,20 @@ pub fn keyboard_on_key_down_serialized<Msg>({ key: String, value: MsgPack }) -> 
 pub fn keyboard_on_key_down<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   keyboard_subscription(kind: "keydown", key: key, value: boundary_value_to_msgpack(value))
 
+pub fn keyboard_on_key_down<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
+  keyboard_payload_subscription(kind: "keydown", key: key).map<Msg>(handler)
+
 pub fn keyboard_on_key_down_serialized<Msg>({ key: StringSlice, value: MsgPack }) -> Sub<Msg>
   keyboard_on_key_down_serialized<Msg>(key: key.to_string(), value: value)
 
 pub fn keyboard_on_key_down<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
   keyboard_on_key_down<Msg>(key: key.to_string(), value: value)
+
+pub fn keyboard_on_key_down<Msg>({
+  key: StringSlice,
+  handler: fn(KeyboardEvent) -> Msg
+}) -> Sub<Msg>
+  keyboard_on_key_down<Msg>(key: key.to_string(), handler: handler)
 
 /// Subscribes to global keyup events through the browser VX runtime host.
 pub fn keyboard_on_key_up_serialized<Msg>({ key: String, value: MsgPack }) -> Sub<Msg>
@@ -380,11 +478,87 @@ pub fn keyboard_on_key_up_serialized<Msg>({ key: String, value: MsgPack }) -> Su
 pub fn keyboard_on_key_up<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   keyboard_subscription(kind: "keyup", key: key, value: boundary_value_to_msgpack(value))
 
+pub fn keyboard_on_key_up<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
+  keyboard_payload_subscription(kind: "keyup", key: key).map<Msg>(handler)
+
 pub fn keyboard_on_key_up_serialized<Msg>({ key: StringSlice, value: MsgPack }) -> Sub<Msg>
   keyboard_on_key_up_serialized<Msg>(key: key.to_string(), value: value)
 
 pub fn keyboard_on_key_up<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
   keyboard_on_key_up<Msg>(key: key.to_string(), value: value)
+
+pub fn keyboard_on_key_up<Msg>({
+  key: StringSlice,
+  handler: fn(KeyboardEvent) -> Msg
+}) -> Sub<Msg>
+  keyboard_on_key_up<Msg>(key: key.to_string(), handler: handler)
+
+/// Subscribes to browser online/offline changes through the VX runtime host.
+pub fn online_status<Msg>({ key: String, value: Msg }) -> Sub<Msg>
+  Sub<Msg>::runtime(
+    kind: "online_status",
+    key: key,
+    value: boundary_value_to_msgpack(value)
+  )
+
+pub fn online_status<Msg>({ key: String, handler: fn(bool) -> Msg }) -> Sub<Msg>
+  Sub<Msg>::runtime_payload<bool>(kind: "online_status", key: key, handler: handler)
+
+pub fn online_status<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
+  online_status<Msg>(key: key.to_string(), value: value)
+
+pub fn online_status<Msg>({ key: StringSlice, handler: fn(bool) -> Msg }) -> Sub<Msg>
+  online_status<Msg>(key: key.to_string(), handler: handler)
+
+/// Subscribes to browser window resize changes through the VX runtime host.
+pub fn window_on_resize<Msg>({ key: String, value: Msg }) -> Sub<Msg>
+  Sub<Msg>::runtime(
+    kind: "window_resize",
+    key: key,
+    value: boundary_value_to_msgpack(value)
+  )
+
+pub fn window_on_resize<Msg>({
+  key: String,
+  handler: fn(WindowSize) -> Msg
+}) -> Sub<Msg>
+  Sub<Msg>::runtime_payload<WindowSize>(kind: "window_resize", key: key, handler: handler)
+
+pub fn window_on_resize<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
+  window_on_resize<Msg>(key: key.to_string(), value: value)
+
+pub fn window_on_resize<Msg>({
+  key: StringSlice,
+  handler: fn(WindowSize) -> Msg
+}) -> Sub<Msg>
+  window_on_resize<Msg>(key: key.to_string(), handler: handler)
+
+/// Subscribes to document visibility changes through the VX runtime host.
+pub fn document_on_visibility_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
+  Sub<Msg>::runtime(
+    kind: "visibility_change",
+    key: key,
+    value: boundary_value_to_msgpack(value)
+  )
+
+pub fn document_on_visibility_change<Msg>({
+  key: String,
+  handler: fn(DocumentVisibility) -> Msg
+}) -> Sub<Msg>
+  Sub<Msg>::runtime_payload<DocumentVisibility>(
+    kind: "visibility_change",
+    key: key,
+    handler: handler
+  )
+
+pub fn document_on_visibility_change<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
+  document_on_visibility_change<Msg>(key: key.to_string(), value: value)
+
+pub fn document_on_visibility_change<Msg>({
+  key: StringSlice,
+  handler: fn(DocumentVisibility) -> Msg
+}) -> Sub<Msg>
+  document_on_visibility_change<Msg>(key: key.to_string(), handler: handler)
 
 /// Reads a component-local serialized state handle.
 pub fn state_handle({
@@ -1832,6 +2006,12 @@ fn keyboard_subscription<Msg>({ kind: String, key: String, value: MsgPack }) -> 
   out.set("event", kind)
   out.set("value", value)
   Sub<Msg> { payload: msgpack::make_map(out) }
+
+fn keyboard_payload_subscription({ kind: String, key: String }) -> Sub<KeyboardEvent>
+  let ~out = subscription_map("keyboard")
+  out.set("key", key)
+  out.set("event", kind)
+  Sub<KeyboardEvent> { payload: msgpack::make_map(out) }
 
 fn tagged_vx_runtime_map(type_name: String, kind: String): () -> Dict<String, MsgPack>
   let ~out = Dict<String, MsgPack>::init()

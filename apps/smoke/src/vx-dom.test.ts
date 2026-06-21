@@ -36,6 +36,7 @@ const valueArrayModelEntryPath = path.join(
 );
 const typedMouseEventEntryPath = path.join(fixtureRoot, "vx-typed-mouse-event.voyd");
 const userProgramNameEntryPath = path.join(fixtureRoot, "vx-user-program-name.voyd");
+const runtimeBrowserEntryPath = path.join(fixtureRoot, "vx-runtime-browser.voyd");
 const wideValueModelEntryPath = path.join(fixtureRoot, "vx-wide-value-model.voyd");
 
 const expectCompileSuccess = (
@@ -433,6 +434,42 @@ describe("smoke: compiled VX DOM rendering", () => {
     await nextTurn();
 
     expect(container.querySelector("button")?.textContent).toContain("X: 10");
+
+    mounted.dispose();
+    expect(container.innerHTML).toBe("");
+  });
+
+  it("runs compiled browser runtime commands and payload subscriptions", async () => {
+    const writeText = vi.fn(async () => undefined);
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText },
+    });
+    const sdk = createSdk();
+    const result = expectCompileSuccess(await sdk.compile({ entryPath: runtimeBrowserEntryPath }));
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+    const app = createVoydVxAppRuntime({ host });
+
+    const container = document.createElement("div");
+    const mounted = await mountVxApp({ container, app });
+
+    expect(writeText).toHaveBeenCalledWith("Copied from Voyd");
+    expect(container.querySelector(".status")?.textContent).toBe("ready");
+
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "s",
+      code: "KeyS",
+      ctrlKey: true,
+    }));
+    await nextTurn();
+
+    expect(container.querySelector(".status")?.textContent).toBe("key");
+    expect(container.querySelector(".key")?.textContent).toBe("s");
+    expect(container.querySelector(".code")?.textContent).toBe("KeyS");
+    expect(container.querySelector(".ctrl")?.textContent).toBe("ctrl");
 
     mounted.dispose();
     expect(container.innerHTML).toBe("");
