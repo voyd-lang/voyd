@@ -72,6 +72,44 @@ pub fn main()
   t.expect(findFirstCall(ast, "html_event_handler")).toBeUndefined();
 });
 
+test("lowers HTML key attributes to keyed nodes", (t) => {
+  const code = `
+use std::all
+use std::vx::all
+
+pub fn main()
+  let items = ["first"]
+  <ul>
+    {items.map(item => <li key={item} class="row">{item}</li>)}
+  </ul>
+`;
+
+  const ast = toPlain(code);
+  t.expect(findFirstCall(ast, "keyed")).toBeDefined();
+  t.expect(findFirstCall(ast, "class")).toBeDefined();
+});
+
+test("lowers component key attributes to keyed component nodes", (t) => {
+  const code = `
+use std::all
+use std::vx::all
+
+enum Msg
+  Noop
+
+fn Row({ title: String }) -> Html<Msg>
+  <li>{title}</li>
+
+pub fn main()
+  let title = "first"
+  <Row key={title} title={title} />
+`;
+
+  const ast = toPlain(code);
+  t.expect(findFirstCall(ast, "keyed")).toBeDefined();
+  t.expect(findFirstCall(ast, "Row")).toBeDefined();
+});
+
 test("lowers closure-valued HTML events to retained HTML event helpers", (t) => {
   const code = `
 use std::msgpack

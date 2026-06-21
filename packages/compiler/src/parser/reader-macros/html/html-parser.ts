@@ -19,6 +19,8 @@ type ParseOptions = {
   onUnescapedCurlyBrace: (stream: CharStream) => Expr | undefined;
 };
 
+type HtmlAttribute = { name: string; value: Expr };
+
 export class HTMLParser {
   private stream: CharStream;
   private options: ParseOptions;
@@ -58,7 +60,9 @@ export class HTMLParser {
     const lastSegment = tagName.split("::").pop() ?? "";
     const isComponent = /^[A-Z]/.test(lastSegment);
     // Parse attributes/props before closing the tag
-    const propsOrAttrs = this.parseAttributes();
+    const { key, attributes: propsOrAttrs } = splitKeyAttribute(
+      this.parseAttributes(),
+    );
 
     const selfClosing = this.stream.next === "/";
     if (selfClosing) this.stream.consumeChar();
@@ -85,13 +89,19 @@ export class HTMLParser {
         const inner = call(identifier(last), propsObj).setLocation(
           this.stream.currentSourceLocation(),
         );
-        return surfaceCall("::", left, inner).setLocation(
-          this.stream.currentSourceLocation(),
+        return this.applyKeyAttribute(
+          surfaceCall("::", left, inner).setLocation(
+            this.stream.currentSourceLocation(),
+          ),
+          key,
         );
       }
 
-      return surfaceCall(tagName, propsObj).setLocation(
-        this.stream.currentSourceLocation(),
+      return this.applyKeyAttribute(
+        surfaceCall(tagName, propsObj).setLocation(
+          this.stream.currentSourceLocation(),
+        ),
+        key,
       );
     }
 
@@ -108,8 +118,11 @@ export class HTMLParser {
 
     args.push(label("children", children));
 
-    return surfaceCall("html_element", ...args).setLocation(
-      this.stream.currentSourceLocation(),
+    return this.applyKeyAttribute(
+      surfaceCall("html_element", ...args).setLocation(
+        this.stream.currentSourceLocation(),
+      ),
+      key,
     );
   }
 
@@ -227,6 +240,15 @@ export class HTMLParser {
     ).setLocation(this.stream.currentSourceLocation());
   }
 
+  private applyKeyAttribute(node: Expr, key: Expr | undefined): Expr {
+    if (!key) return node;
+    return surfaceCall(
+      "keyed",
+      label("key", key),
+      label("child", node),
+    ).setLocation(this.stream.currentSourceLocation());
+  }
+
   private parseChildren(tagName: string) {
     const lower = tagName.toLowerCase();
     const preserve = lower === "pre" || lower === "textarea";
@@ -334,7 +356,7 @@ export class HTMLParser {
   }
 
   private withChildrenProp(
-    props: { name: string; value: Expr }[],
+    props: HtmlAttribute[],
     tagName: string,
   ) {
     const children = this.parseChildren(tagName);
@@ -359,6 +381,17 @@ export class HTMLParser {
     throw new ParserSyntaxError(message, location);
   }
 }
+
+const splitKeyAttribute = (
+  attributes: HtmlAttribute[],
+): { key?: Expr; attributes: HtmlAttribute[] } => {
+  const key = attributes.find((attribute) => attribute.name === "key")?.value;
+  if (!key) return { attributes };
+  return {
+    key,
+    attributes: attributes.filter((attribute) => attribute.name !== "key"),
+  };
+};
 
 const unwrapInlineExpr = (expr: Expr): Expr => {
   const lambda = unwrapInlineLambdaExpr(expr);
