@@ -1,0 +1,12 @@
+trait Marked
+  fn marker(self) -> i32
+
+fn program<T: Marked>({ item: T }) -> i32
+  item.marker()
+
+fn program({ item: i32, tag: i32 }) -> i32
+  item + tag
+
+pub fn main() -> i32
+  program(item: 1, tag: 2)
+

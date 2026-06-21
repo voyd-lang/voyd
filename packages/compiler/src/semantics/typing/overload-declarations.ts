@@ -18,6 +18,7 @@ type LabeledOverloadShape = {
 
 type OverlapContext = {
   bindings: Map<TypeParamId, TypeId>;
+  constraints: Map<TypeParamId, TypeId>;
 };
 
 export const validateSubsumingLabeledOverloads = (
@@ -152,31 +153,127 @@ const positionalPrefixesOverlap = ({
   ctx: TypingContext;
   state: TypingState;
 }): OverlapContext | undefined => {
-  if (left.labelStart !== right.labelStart) {
-    return undefined;
+  const overlap = createOverlapContext({ left, right });
+  if (left.labelStart === right.labelStart) {
+    for (let index = 0; index < left.labelStart; index += 1) {
+      const leftParam = left.signature.parameters[index]!;
+      const rightParam = right.signature.parameters[index]!;
+      if (leftParam.label !== rightParam.label) {
+        return undefined;
+      }
+      if (
+        !typesOverlap({
+          left: leftParam.type,
+          right: rightParam.type,
+          ctx,
+          state,
+          overlap,
+        })
+      ) {
+        return undefined;
+      }
+    }
+    return overlap;
   }
 
-  const overlap = createOverlapContext();
-  for (let index = 0; index < left.labelStart; index += 1) {
-    const leftParam = left.signature.parameters[index]!;
-    const rightParam = right.signature.parameters[index]!;
-    if (leftParam.label !== rightParam.label) {
-      return undefined;
-    }
+  return prefixesOverlapAt({
+    left,
+    right,
+    leftIndex: 0,
+    rightIndex: 0,
+    ctx,
+    state,
+    overlap,
+  })
+    ? overlap
+    : undefined;
+};
+
+const prefixesOverlapAt = ({
+  left,
+  right,
+  leftIndex,
+  rightIndex,
+  ctx,
+  state,
+  overlap,
+}: {
+  left: LabeledOverloadShape;
+  right: LabeledOverloadShape;
+  leftIndex: number;
+  rightIndex: number;
+  ctx: TypingContext;
+  state: TypingState;
+  overlap: OverlapContext;
+}): boolean => {
+  if (leftIndex === left.labelStart && rightIndex === right.labelStart) {
+    return true;
+  }
+
+  const leftParam = left.signature.parameters[leftIndex];
+  const rightParam = right.signature.parameters[rightIndex];
+  if (leftIndex < left.labelStart && leftParam?.optional) {
     if (
-      !typesOverlap({
-        left: leftParam.type,
-        right: rightParam.type,
-        ctx,
-        state,
-        overlap,
-      })
+      withForkedOverlap(overlap, (candidate) =>
+        prefixesOverlapAt({
+          left,
+          right,
+          leftIndex: leftIndex + 1,
+          rightIndex,
+          ctx,
+          state,
+          overlap: candidate,
+        }),
+      )
     ) {
-      return undefined;
+      return true;
     }
   }
+  if (rightIndex < right.labelStart && rightParam?.optional) {
+    if (
+      withForkedOverlap(overlap, (candidate) =>
+        prefixesOverlapAt({
+          left,
+          right,
+          leftIndex,
+          rightIndex: rightIndex + 1,
+          ctx,
+          state,
+          overlap: candidate,
+        }),
+      )
+    ) {
+      return true;
+    }
+  }
+  if (
+    leftIndex >= left.labelStart ||
+    rightIndex >= right.labelStart ||
+    !leftParam ||
+    !rightParam ||
+    leftParam.label !== rightParam.label
+  ) {
+    return false;
+  }
 
-  return overlap;
+  return withForkedOverlap(overlap, (candidate) =>
+    typesOverlap({
+      left: leftParam.type,
+      right: rightParam.type,
+      ctx,
+      state,
+      overlap: candidate,
+    }) &&
+    prefixesOverlapAt({
+      left,
+      right,
+      leftIndex: leftIndex + 1,
+      rightIndex: rightIndex + 1,
+      ctx,
+      state,
+      overlap: candidate,
+    }),
+  );
 };
 
 const shapeSubsumes = ({
@@ -192,11 +289,14 @@ const shapeSubsumes = ({
   state: TypingState;
   overlap: OverlapContext;
 }): boolean => {
-  if (candidate.fields.size <= other.fields.size) {
+  if (!hasShapeSubsumptionSignal({ candidate, other })) {
     return false;
   }
 
   for (const [label, otherParam] of other.fields) {
+    if (otherParam.optional) {
+      continue;
+    }
     const candidateParam = candidate.fields.get(label);
     if (!candidateParam) {
       return false;
@@ -216,6 +316,41 @@ const shapeSubsumes = ({
 
   return true;
 };
+
+const hasShapeSubsumptionSignal = ({
+  candidate,
+  other,
+}: {
+  candidate: LabeledOverloadShape;
+  other: LabeledOverloadShape;
+}): boolean => {
+  const otherLabels = new Set(other.fields.keys());
+  const hasExtraCandidateLabel = [...candidate.fields.keys()].some(
+    (label) => !otherLabels.has(label),
+  );
+  if (hasExtraCandidateLabel) {
+    return true;
+  }
+
+  const requiredLabels = (shape: LabeledOverloadShape): string[] =>
+    [...shape.fields]
+      .filter(([, param]) => !param.optional)
+      .map(([label]) => label)
+      .sort();
+  const optionalLabels = (shape: LabeledOverloadShape): string[] =>
+    [...shape.fields]
+      .filter(([, param]) => param.optional)
+      .map(([label]) => label)
+      .sort();
+  return (
+    labelsEqual(requiredLabels(candidate), requiredLabels(other)) &&
+    !labelsEqual(optionalLabels(candidate), optionalLabels(other))
+  );
+};
+
+const labelsEqual = (left: readonly string[], right: readonly string[]): boolean =>
+  left.length === right.length &&
+  left.every((label, index) => label === right[index]);
 
 const typesOverlap = ({
   left,
@@ -299,13 +434,39 @@ const typesOverlap = ({
   );
 };
 
-const createOverlapContext = (): OverlapContext => ({
+const createOverlapContext = ({
+  left,
+  right,
+}: {
+  left: LabeledOverloadShape;
+  right: LabeledOverloadShape;
+}): OverlapContext => ({
   bindings: new Map(),
+  constraints: constraintsFor({ left, right }),
 });
 
 const cloneOverlap = (overlap: OverlapContext): OverlapContext => ({
   bindings: new Map(overlap.bindings),
+  constraints: new Map(overlap.constraints),
 });
+
+const constraintsFor = ({
+  left,
+  right,
+}: {
+  left: LabeledOverloadShape;
+  right: LabeledOverloadShape;
+}): Map<TypeParamId, TypeId> => {
+  const constraints = new Map<TypeParamId, TypeId>();
+  [left.signature, right.signature].forEach((signature) => {
+    signature.typeParams?.forEach((param) => {
+      if (typeof param.constraint === "number") {
+        constraints.set(param.typeParam, param.constraint);
+      }
+    });
+  });
+  return constraints;
+};
 
 const withForkedOverlap = (
   overlap: OverlapContext,
@@ -370,6 +531,32 @@ const bindTypeParameter = ({
     return typesOverlap({ left: existing, right: type, ctx, state, overlap });
   }
   overlap.bindings.set(param, type);
+  return bindingsSatisfyConstraints({ ctx, state, overlap });
+};
+
+const bindingsSatisfyConstraints = ({
+  ctx,
+  state,
+  overlap,
+}: {
+  ctx: TypingContext;
+  state: TypingState;
+  overlap: OverlapContext;
+}): boolean => {
+  for (const [param, constraint] of overlap.constraints) {
+    const binding = overlap.bindings.get(param);
+    if (typeof binding !== "number") {
+      continue;
+    }
+    const actual = resolveBoundType({ type: binding, overlap, ctx });
+    if (ctx.arena.get(actual).kind === "type-param-ref") {
+      continue;
+    }
+    const expected = ctx.arena.substitute(constraint, overlap.bindings);
+    if (!typeSatisfies(actual, expected, ctx, state)) {
+      return false;
+    }
+  }
   return true;
 };
 

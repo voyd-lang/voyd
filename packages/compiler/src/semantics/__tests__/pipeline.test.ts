@@ -1465,6 +1465,28 @@ describe("semanticsPipeline", () => {
     expect(result.diagnostics).toHaveLength(0);
   });
 
+  it("allows labeled overload fallback when generic constraints cannot overlap", () => {
+    const ast = loadAst("function_overloads_labeled_constraint_fallback.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects labeled overloads when only optional labels differ", () => {
+    const ast = loadAst("function_overloads_labeled_optional_label_overlap.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(init, step\) subsumes program\(init, view\)/
+    );
+  });
+
+  it("rejects labeled overloads when optional positional prefixes can be skipped", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_optional_positional_prefix_overlap.voyd"
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(seed, init\) subsumes program\(init, view\)/
+    );
+  });
+
   it("rejects mixed positional and labeled overload supersets with compatible prefixes", () => {
     const ast = loadAst(
       "function_overloads_labeled_compatible_positional_prefix.voyd"
