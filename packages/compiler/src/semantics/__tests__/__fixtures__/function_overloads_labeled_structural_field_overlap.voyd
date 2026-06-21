@@ -1,0 +1,9 @@
+type Left = { a: i32 }
+type Right = { b: i32 }
+
+fn program({ item: Left }) -> i32
+  1
+
+fn program({ item: Right, tag: i32 }) -> i32
+  tag
+

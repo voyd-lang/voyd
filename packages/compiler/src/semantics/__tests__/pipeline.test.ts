@@ -1410,6 +1410,100 @@ describe("semanticsPipeline", () => {
     ).toBe(true);
   });
 
+  it("rejects subsuming labeled structural overloads", () => {
+    const ast = loadAst("function_overloads_subsuming_labeled.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(init, step, view, subscriptions\) subsumes program\(init, step, view\)/
+    );
+  });
+
+  it("allows labeled overload supersets when shared field types are incompatible", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_incompatible_shared_field.voyd"
+    );
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects labeled overload supersets when shared field unions overlap", () => {
+    const ast = loadAst("function_overloads_labeled_union_overlap.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(item, tag\) subsumes program\(item\)/
+    );
+  });
+
+  it("rejects labeled overload supersets when shared generic fields can overlap", () => {
+    const ast = loadAst("function_overloads_labeled_generic_field_overlap.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(item, tag\) subsumes program\(item\)/
+    );
+  });
+
+  it("rejects labeled overload supersets when shared structural field types can intersect", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_structural_field_overlap.voyd"
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(item, tag\) subsumes program\(item\)/
+    );
+  });
+
+  it("rejects labeled overload supersets when shared optional structural fields can be omitted", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_optional_structural_field_overlap.voyd"
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(item, tag\) subsumes program\(item\)/
+    );
+  });
+
+  it("allows generic labeled overload supersets when field correlations cannot overlap", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_generic_field_correlation.voyd"
+    );
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("allows labeled overload fallback when generic constraints cannot overlap", () => {
+    const ast = loadAst("function_overloads_labeled_constraint_fallback.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects labeled overloads when only optional labels differ", () => {
+    const ast = loadAst("function_overloads_labeled_optional_label_overlap.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(init, step\) subsumes program\(init, view\)/
+    );
+  });
+
+  it("rejects labeled overloads when optional positional prefixes can be skipped", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_optional_positional_prefix_overlap.voyd"
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(seed, init\) subsumes program\(init, view\)/
+    );
+  });
+
+  it("rejects mixed positional and labeled overload supersets with compatible prefixes", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_compatible_positional_prefix.voyd"
+    );
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0047: overload program\(seed, init, step, subscriptions\) subsumes program\(seed, init, step\)/
+    );
+  });
+
+  it("allows mixed positional and labeled overload supersets", () => {
+    const ast = loadAst(
+      "function_overloads_labeled_distinct_positional_prefix.voyd"
+    );
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("allows overloads that differ by generic constraints and falls back when unsatisfied", () => {
     const ast = loadAst("function_overloads_constraint_fallback.voyd");
     const result = semanticsPipeline(ast);

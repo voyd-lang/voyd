@@ -1,0 +1,6 @@
+fn program(seed: i32, { init: i32, step: i32 }) -> i32
+  seed + init + step
+
+fn program(seed: i32, { init: i32, step: i32, subscriptions: i32 }) -> i32
+  seed + init + step + subscriptions
+

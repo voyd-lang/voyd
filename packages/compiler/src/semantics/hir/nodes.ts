@@ -119,6 +119,7 @@ export interface HirObjectTypeExpr extends HirTypeExprBase {
 export interface HirRecordTypeField {
   name: string;
   type: HirTypeExpr;
+  optional?: boolean;
   span: SourceSpan;
 }
 

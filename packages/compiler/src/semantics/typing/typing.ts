@@ -31,6 +31,7 @@ import {
 import { DiagnosticError, type Diagnostic } from "../../diagnostics/index.js";
 import { hydrateImportedTraitMetadataForDependencySymbol } from "./import-trait-impl-hydration.js";
 import { hydrateImportedValueLikeSymbol } from "./import-hydration.js";
+import { validateSubsumingLabeledOverloads } from "./overload-declarations.js";
 
 export * from "./types.js";
 
@@ -50,6 +51,7 @@ export const runTypingPipeline = (inputs: TypingInputs): TypingResult => {
     primeImportedTypes(ctx);
     primeTypeAliases(ctx, state);
     registerFunctionSignatures(ctx, state);
+    validateSubsumingLabeledOverloads(ctx, state);
     registerEffectOperations(ctx, state);
     registerImpls(ctx, state);
     refreshTraitImplInstances(ctx, state);

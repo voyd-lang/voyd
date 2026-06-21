@@ -1,0 +1,14 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn program(seed?: i32, { init: i32 }) -> i32
+  init
+
+fn program({ init: i32, view?: i32 }) -> i32
+  init
+
