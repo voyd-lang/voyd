@@ -39,7 +39,7 @@ fn Card({ children: Array<MsgPack> })
 
 fn List({ value: Array<String> })
   <ul style="margin: 0; padding-left: 16px;">
-    {value.map(f => <li style="line-height: 1.6;">{f}</li>)}
+    {value.map(f => <li key={f} style="line-height: 1.6;">{f}</li>)}
   </ul>
 
 fn feature_list() -> Array<String>
