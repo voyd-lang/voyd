@@ -128,6 +128,7 @@ export interface TypeArenaSnapshot {
   nextSchemeId: TypeSchemeId;
   nextTypeParamId: TypeParamId;
   descriptors: readonly TypeDescriptor[];
+  descriptorCache: readonly [string, TypeId][];
   schemes: readonly TypeScheme[];
   recursiveUnfoldCache: readonly [TypeId, TypeId][];
 }
@@ -297,12 +298,18 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     }
   };
 
-  descriptors.forEach((desc, id) => {
-    const key = keyFor(desc);
-    if (!descriptorCache.has(key)) {
-      descriptorCache.set(key, id as TypeId);
-    }
-  });
+  if (snapshot) {
+    snapshot.descriptorCache.forEach(([key, id]) =>
+      descriptorCache.set(key, id),
+    );
+  } else {
+    descriptors.forEach((desc, id) => {
+      const key = keyFor(desc);
+      if (!descriptorCache.has(key)) {
+        descriptorCache.set(key, id as TypeId);
+      }
+    });
+  }
 
   const storeDescriptor = (desc: TypeDescriptor): TypeId => {
     const key = keyFor(desc);
@@ -1929,6 +1936,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     nextSchemeId,
     nextTypeParamId,
     descriptors: descriptors.map(cloneTypeDescriptor),
+    descriptorCache: Array.from(descriptorCache.entries()),
     schemes: Array.from(schemes.values(), cloneTypeScheme),
     recursiveUnfoldCache: Array.from(recursiveUnfoldCache.entries()),
   });

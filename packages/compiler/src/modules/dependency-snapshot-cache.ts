@@ -24,7 +24,7 @@ import type {
 } from "./semantic-analysis.js";
 
 const COMPILER_DEPENDENCY_SNAPSHOT_VERSION =
-  "0.2.0:v375-dependency-snapshot-v1";
+  "0.2.0:v375-dependency-snapshot-v2";
 
 export type CompilerDependencySnapshotCache = {
   dependency?: CompilerDependencySnapshotEntry;

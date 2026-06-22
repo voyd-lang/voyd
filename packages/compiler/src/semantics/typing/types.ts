@@ -300,6 +300,24 @@ export class FunctionStore {
     this.#signatures.forEach((signature, symbol) =>
       copy.#signatures.set(symbol, cloneFunctionSignature(signature)),
     );
+    this.#instances.forEach((type, key) => copy.#instances.set(key, type));
+    this.#instantiationInfo.forEach((info, symbolRefKey) =>
+      copy.#instantiationInfo.set(
+        symbolRefKey,
+        new Map(
+          Array.from(info.entries()).map(([key, typeArgs]) => [
+            key,
+            [...typeArgs],
+          ]),
+        ),
+      ),
+    );
+    this.#instanceExprTypes.forEach((exprs, key) =>
+      copy.#instanceExprTypes.set(key, new Map(exprs)),
+    );
+    this.#instanceValueTypes.forEach((types, key) =>
+      copy.#instanceValueTypes.set(key, new Map(types)),
+    );
     return copy;
   }
 }

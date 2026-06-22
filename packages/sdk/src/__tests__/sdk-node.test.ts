@@ -532,6 +532,37 @@ pub fn main() -> i32
     );
   });
 
+  it("emits the same optimized wasm for fresh and dependency snapshot app edits", async () => {
+    const sdk = createSdk();
+    const entryPath = path.join(
+      repoRoot,
+      "apps",
+      "smoke",
+      "fixtures",
+      "std-math-transcendentals.voyd",
+    );
+    const source = await fs.readFile(entryPath, "utf8");
+    const editedSource = `${source}\nfn dependency_snapshot_app_edit_marker() -> i32\n  1\n`;
+
+    expectCompileSuccess(
+      await sdk.compile({ entryPath, source, optimize: true }),
+    );
+    const warm = expectCompileSuccess(
+      await sdk.compile({ entryPath, source: editedSource, optimize: true }),
+    );
+    const fresh = expectCompileSuccess(
+      await createSdk().compile({
+        entryPath,
+        source: editedSource,
+        optimize: true,
+      }),
+    );
+
+    expect(warm.wasm.byteLength).toBe(fresh.wasm.byteLength);
+    await expect(warm.run<number>({ entryName: "main" })).resolves.toBe(1);
+    await expect(fresh.run<number>({ entryName: "main" })).resolves.toBe(1);
+  });
+
   it("runs typed boundary exports through the existing host and sdk APIs", async () => {
     const sdk = createSdk();
     const result = expectCompileSuccess(

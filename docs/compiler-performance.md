@@ -24,10 +24,10 @@ Snapshot safety:
 - The snapshot freezes a cloned dependency semantics map at the pre-`src`
   boundary. This avoids source-time generic/type mutations leaking back into the
   cached std/pkg state.
-- `TypeArena` is cloneable through an internal snapshot of descriptors, schemes,
-  recursive unfold cache, and ID counters. Its descriptor cache is rebuilt with
-  first occurrence wins so noncanonical duplicate descriptor slots do not become
-  canonical after cloning.
+- `TypeArena` is cloneable through an internal snapshot of descriptors,
+  descriptor cache canonical ids, schemes, recursive unfold cache, and ID
+  counters. Restored arenas preserve the same canonical type ids as the
+  original arena.
 - `EffectInterner`, `EffectTable`, `TypeTable`, and the typing stores are
   cloned into the per-compile arena/effect state. Source modules get an overlay
   typing state; cached dependency modules never share mutable emit-time state
