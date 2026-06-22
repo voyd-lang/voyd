@@ -244,14 +244,14 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       runtimeDiagnostics,
       loadModuleGraph,
       boundaryExports: options.boundaryExports,
+      finalizeSuccess: (result) => finalizeCompile({ options, result }),
     });
 
     if (!result.success) {
       return result;
     }
 
-    const finalized = finalizeCompile({ options, result });
-    return createCompileResult(finalized);
+    return createCompileResult(result);
   } catch (error) {
     return {
       success: false,
