@@ -316,10 +316,7 @@ async function mountRuntimeApp(
   const activeSubscriptions = new Map<string, ActiveSubscription>();
   const runtimeHost = createBrowserVxRuntimeHost(options.runtimeHost);
   const reportError = createRuntimeErrorReporter(options.onError ?? runtimeHost.onError);
-  const retainedHandlerReleaser: RetainedHandlerReleaser = {
-    release: app.retainedCallbacks?.release ?? options.handlers?.release,
-    releaseMany: app.retainedCallbacks?.releaseMany ?? options.handlers?.releaseMany,
-  };
+  const retainedHandlerReleaser = retainedHandlerReleaserFor(app, options.handlers);
   const afterCommandCallbacks: Array<Array<() => void>> = [];
   let queue = Promise.resolve();
   const queuedRetainedHandlerReleaser: RetainedHandlerReleaser = {
@@ -469,6 +466,22 @@ async function mountRuntimeApp(
     getSnapshot() {
       return app.getSnapshot?.() ?? renderer.getSnapshot();
     },
+  };
+}
+
+function retainedHandlerReleaserFor(
+  app: VxAppRuntime,
+  handlers: RetainedEventHandlerRegistry | undefined,
+): RetainedHandlerReleaser {
+  if (app.retainedCallbacks?.release || app.retainedCallbacks?.releaseMany) {
+    return {
+      release: app.retainedCallbacks.release,
+      releaseMany: app.retainedCallbacks.releaseMany,
+    };
+  }
+  return {
+    release: handlers?.release,
+    releaseMany: handlers?.releaseMany,
   };
 }
 

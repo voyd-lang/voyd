@@ -1430,6 +1430,44 @@ describe("vx-dom browser renderer", () => {
     expect(releaseMany).toHaveBeenCalledWith([1]);
   });
 
+  it("releases app-owned subscription handlers through the app registry", async () => {
+    let nextHandlerId = 1;
+    const appRelease = vi.fn<(id: number) => void>();
+    const overrideReleaseMany = vi.fn<(ids: Iterable<number>) => void>();
+    const mappedSubscription = () => ({
+      type: "sub",
+      kind: "map",
+      handlerId: nextHandlerId++,
+      handlerKey: 9001,
+      child: { type: "sub", kind: "timer", key: "main" },
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release: appRelease },
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: mappedSubscription(),
+      }),
+      render: () => counterNode(0),
+      dispatch: () => ({
+        frame: counterNode(0),
+        subscriptions: mappedSubscription(),
+      }),
+    };
+
+    const mounted = await mountVxApp({
+      container,
+      app,
+      handlers: { dispatch: vi.fn(), releaseMany: overrideReleaseMany },
+      runtimeHost: { subscriptions: { timer: () => undefined } },
+    });
+
+    await mounted.dispatch({ kind: "debug", name: "refresh" });
+    await nextTurn();
+
+    expect(appRelease).toHaveBeenCalledWith(1);
+    expect(overrideReleaseMany).not.toHaveBeenCalled();
+  });
+
   it("does not release outer mapped subscription handlers", async () => {
     const seenMessages: unknown[] = [];
     let nextHandlerId = 1;
