@@ -8,6 +8,7 @@ import type {
   VxAppRuntime,
   VxElementNode,
   VxRenderFrame,
+  VxRuntimeMessage,
   VxSubscriptionSyncContext,
   VxSubscriptionRunner,
 } from "../types.js";
@@ -942,6 +943,16 @@ describe("vx-dom browser renderer", () => {
       handlerId: 77,
       message: { kind: "msgpack", value: "Clipboard text" },
     });
+    const locationMessages = seenMessages.filter((message) =>
+      isRecord(message) &&
+      message.kind === "subscription" &&
+      message.subscriptionKind === "location_change"
+    );
+    expect(locationMessages[0]).toEqual(expect.objectContaining({
+      payload: expect.objectContaining({
+        pathname: "/draft",
+      }),
+    }));
     expect(seenMessages).toContainEqual(expect.objectContaining({
       kind: "subscription",
       subscriptionKind: "location_change",
@@ -1191,6 +1202,69 @@ describe("vx-dom browser renderer", () => {
 
     await mounted.dispatch({ kind: "debug", name: "stop" });
     expect(dispose).toHaveBeenCalledTimes(2);
+  });
+
+  it("updates stable mapped subscription handlers without reinstalling listeners", async () => {
+    const seenMessages: unknown[] = [];
+    let nextHandlerId = 1;
+    let dispatchSubscription: ((message: VxRuntimeMessage) => Promise<void>) | undefined;
+    const dispose = vi.fn();
+    const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
+    const mappedSubscription = () => ({
+      type: "sub",
+      kind: "map",
+      handlerId: nextHandlerId++,
+      handlerKey: 9001,
+      child: { type: "sub", kind: "timer", key: "main" },
+    });
+    const runSubscription = vi.fn<VxSubscriptionRunner>((_subscription, context) => {
+      dispatchSubscription = context.dispatch;
+      return dispose;
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { releaseMany },
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: mappedSubscription(),
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return {
+          frame: counterNode(seenMessages.length),
+          subscriptions: mappedSubscription(),
+        };
+      },
+    };
+
+    const mounted = await mountVxApp({
+      container,
+      app,
+      runtimeHost: { subscriptions: { timer: runSubscription } },
+    });
+
+    expect(runSubscription).toHaveBeenCalledOnce();
+
+    await mounted.dispatch({ kind: "debug", name: "refresh" });
+
+    expect(runSubscription).toHaveBeenCalledOnce();
+    expect(releaseMany).toHaveBeenCalledWith([1]);
+
+    await dispatchSubscription?.({ kind: "debug", name: "tick" });
+
+    expect(seenMessages).toContainEqual({
+      kind: "map",
+      handlerId: 2,
+      message: { kind: "debug", name: "tick" },
+    });
+    expect(runSubscription).toHaveBeenCalledOnce();
+    expect(releaseMany).toHaveBeenCalledWith([2]);
+
+    mounted.dispose();
+    await nextTurn();
+
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(releaseMany).toHaveBeenCalledWith([3]);
   });
 
   it("runs interval subscriptions with the default browser runtime host", async () => {
@@ -1661,6 +1735,10 @@ type RetainedDispatch = (
   id: number,
   payload: NormalizedEventPayload,
 ) => Promise<unknown> | unknown;
+
+function isRecord(input: unknown): input is Record<string, unknown> {
+  return typeof input === "object" && input !== null;
+}
 
 function frame(root: VNode): VxRenderFrame {
   return { version: 1, root };

@@ -466,19 +466,35 @@ impl<Msg> Sub<Msg>
     Sub<Msg> { payload: msgpack::make_map(out) }
 
   /// Lifts a child subscription through a retained message mapper.
-  api fn map<NextMsg>(self, { handler_id: i32 }) -> Sub<NextMsg>
+  api fn map<NextMsg>(self, { handler_id: i32, handler_key?: i32 }) -> Sub<NextMsg>
     let ~out = subscription_map("map")
     out.set("child", self.payload)
     out.set("handlerId", msgpack::make_i32(handler_id))
+    if handler_key is Some:
+      out.set("handlerKey", msgpack::make_i32(handler_key.value))
     Sub<NextMsg> { payload: msgpack::make_map(out) }
 
   /// Lifts a child subscription through a retained serialized message mapper.
-  api fn map_serialized<NextMsg>(self, handler: fn(MsgPack) -> MsgPack) -> Sub<NextMsg>
-    self.map<NextMsg>(handler_id: retain_message_mapper(handler))
+  api fn map_serialized<NextMsg>(
+    self,
+    handler: fn(MsgPack) -> MsgPack,
+    { handler_key: i32 = stable_callsite_id() }
+  ) -> Sub<NextMsg>
+    self.map<NextMsg>(
+      handler_id: retain_message_mapper(handler),
+      handler_key: handler_key
+    )
 
   /// Lifts a child subscription through a retained typed message mapper.
-  api fn map<NextMsg>(self, handler: fn(Msg) -> NextMsg) -> Sub<NextMsg>
-    self.map<NextMsg>(handler_id: retain_typed_message_mapper(handler))
+  api fn map<NextMsg>(
+    self,
+    handler: fn(Msg) -> NextMsg,
+    { handler_key: i32 = stable_callsite_id() }
+  ) -> Sub<NextMsg>
+    self.map<NextMsg>(
+      handler_id: retain_typed_message_mapper(handler),
+      handler_key: handler_key
+    )
 
   /// Creates a host/runtime subscription envelope for a registered VX subscription runner.
   api fn runtime({ kind: String, key: String, value?: MsgPack }) -> Sub<Msg>

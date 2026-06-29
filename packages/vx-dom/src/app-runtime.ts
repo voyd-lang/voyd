@@ -16,6 +16,8 @@ export type VoydVxAppHost = {
   ) => unknown;
   retainedCallbacks?: {
     dispatch(id: number, payload: unknown): Promise<unknown> | unknown;
+    release?: (id: number) => void;
+    releaseMany?: (ids: Iterable<number>) => void;
   };
 };
 
@@ -198,6 +200,7 @@ export function createVoydVxAppRuntime(
   };
 
   return {
+    retainedCallbacks: options.host.retainedCallbacks,
     init: async () => {
       const descriptor = await readProgramRunner();
       if (initialized && descriptor?.hydrate(model)) {

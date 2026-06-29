@@ -100,9 +100,15 @@ type ListenerRecord = {
 type ActiveSubscription = {
   signature: string;
   dispose: VxSubscriptionDisposer;
+  mapHandlerIds: number[];
+  setMapHandlerIds: (ids: number[]) => void;
 };
 
+type RetainedHandlerReleaser = Pick<RetainedEventHandlerRegistry, "release" | "releaseMany">;
+
 const mapHandlerIdsProperty = "__vxMapHandlerIds";
+const mapHandlerKeysProperty = "__vxMapHandlerKeys";
+const mapHandlerIdentityProperty = "__vxMapHandlerIdentity";
 const taskObserverProperty = Symbol.for("voyd.taskObserver");
 const locationChangeEvent = "vxlocationchange";
 const listenerState = new WeakMap<Element, Map<string, ListenerRecord>>();
@@ -308,6 +314,11 @@ async function mountRuntimeApp(
   const activeSubscriptions = new Map<string, ActiveSubscription>();
   const runtimeHost = createBrowserVxRuntimeHost(options.runtimeHost);
   const reportError = createRuntimeErrorReporter(options.onError ?? runtimeHost.onError);
+  const retainedHandlerReleaser: RetainedHandlerReleaser = {
+    release: app.retainedCallbacks?.release ?? options.handlers?.release,
+    releaseMany: app.retainedCallbacks?.releaseMany ?? options.handlers?.releaseMany,
+  };
+  const afterCommandCallbacks: Array<Array<() => void>> = [];
   let queue = Promise.resolve();
 
   const dispatchNow = async (message: VxRuntimeMessage): Promise<void> => {
@@ -323,6 +334,14 @@ async function mountRuntimeApp(
   };
   const executionContext: VxRuntimeExecutionContext = {
     dispatch: dispatchQueued,
+    deferAfterCommands: (callback) => {
+      const callbacks = afterCommandCallbacks.at(-1);
+      if (callbacks) {
+        callbacks.push(callback);
+        return;
+      }
+      callback();
+    },
     reportError,
     signal: abortController.signal,
   };
@@ -361,38 +380,46 @@ async function mountRuntimeApp(
       throw error;
     }
 
-    if (step.subscriptions !== undefined && app.syncSubscriptions) {
-      const previous = previousSubscriptions;
-      previousSubscriptions = step.subscriptions;
-      try {
-        await app.syncSubscriptions(step.subscriptions, {
-          previous,
-          dispatch: dispatchQueued,
-        });
-      } catch (error) {
-        reportError(error, { phase: "subscriptions" });
-        throw error;
-      }
-    } else if (step.subscriptions !== undefined) {
-      try {
-        await syncRuntimeSubscriptions(
-          step.subscriptions,
-          activeSubscriptions,
-          runtimeHost,
-          executionContext,
-        );
-      } catch (error) {
-        reportError(error, { phase: "subscriptions" });
-        throw error;
-      }
-    }
-
+    const deferredCallbacks: Array<() => void> = [];
+    afterCommandCallbacks.push(deferredCallbacks);
+    let commandPhaseStarted = false;
     try {
+      if (step.subscriptions !== undefined && app.syncSubscriptions) {
+        const previous = previousSubscriptions;
+        previousSubscriptions = step.subscriptions;
+        try {
+          await app.syncSubscriptions(step.subscriptions, {
+            previous,
+            dispatch: dispatchQueued,
+          });
+        } catch (error) {
+          reportError(error, { phase: "subscriptions" });
+          throw error;
+        }
+      } else if (step.subscriptions !== undefined) {
+        try {
+          await syncRuntimeSubscriptions(
+            step.subscriptions,
+            activeSubscriptions,
+            runtimeHost,
+            executionContext,
+            retainedHandlerReleaser,
+          );
+        } catch (error) {
+          reportError(error, { phase: "subscriptions" });
+          throw error;
+        }
+      }
+
+      commandPhaseStarted = true;
       await runCommands(step.commands, runtimeHost, executionContext);
     } catch (error) {
-      reportError(error, { phase: "commands" });
+      if (commandPhaseStarted) reportError(error, { phase: "commands" });
       throw error;
+    } finally {
+      afterCommandCallbacks.pop();
     }
+    deferredCallbacks.forEach((callback) => callback());
   };
 
   try {
@@ -411,7 +438,8 @@ async function mountRuntimeApp(
     dispose() {
       disposed = true;
       abortController.abort();
-      void disposeSubscriptions(activeSubscriptions).catch((error) => reportError(error, { phase: "dispose" }));
+      void disposeSubscriptions(activeSubscriptions, retainedHandlerReleaser)
+        .catch((error) => reportError(error, { phase: "dispose" }));
       renderer.dispose();
       void Promise.resolve(app.dispose?.()).catch((error) => reportError(error, { phase: "dispose" }));
     },
@@ -1160,7 +1188,11 @@ function runLocationChangeSubscription(
   window.addEventListener("popstate", dispatch);
   window.addEventListener("hashchange", dispatch);
   window.addEventListener(locationChangeEvent, dispatch);
-  dispatch();
+  if (context.deferAfterCommands) {
+    context.deferAfterCommands(dispatch);
+  } else {
+    setTimeout(dispatch, 0);
+  }
   return () => {
     window.removeEventListener("popstate", dispatch);
     window.removeEventListener("hashchange", dispatch);
@@ -1284,47 +1316,106 @@ async function syncRuntimeSubscriptions(
   active: Map<string, ActiveSubscription>,
   host: VxRuntimeHostOptions | undefined,
   context: VxRuntimeExecutionContext,
+  releaser?: RetainedHandlerReleaser,
 ): Promise<void> {
   const next = flattenSubscriptions(input);
   const nextKeys = new Set(next.map(subscriptionIdentityKey));
 
   for (const [key, record] of active) {
     if (nextKeys.has(key)) continue;
-    await record.dispose();
     active.delete(key);
+    await disposeActiveSubscription(record, releaser, active);
   }
 
   for (const subscription of next) {
     const key = subscriptionIdentityKey(subscription);
     const signature = subscriptionSignature(subscription);
+    const mapHandlerIds = mappedHandlerIds(subscription);
     const previous = active.get(key);
-    if (previous?.signature === signature) continue;
+    if (previous?.signature === signature) {
+      updateActiveSubscriptionMapHandlers(previous, mapHandlerIds, releaser, active);
+      continue;
+    }
     if (previous) {
-      await previous.dispose();
       active.delete(key);
+      await disposeActiveSubscription(previous, releaser, active);
     }
     const runner = host?.subscriptions?.[subscription.kind];
     if (!runner) throw new Error(`vx-dom: no runtime subscription handler registered for "${subscription.kind}"`);
-    const dispose = await runner(subscription, mapSubscriptionContext(subscription, context));
-    active.set(key, { signature, dispose: dispose ?? (() => undefined) });
+    const mappedContext = mutableMappedSubscriptionContext(subscription, context);
+    const dispose = await runner(subscription, mappedContext.context);
+    active.set(key, {
+      signature,
+      dispose: dispose ?? (() => undefined),
+      mapHandlerIds,
+      setMapHandlerIds: mappedContext.setMapHandlerIds,
+    });
   }
 }
 
 async function disposeSubscriptions(
   active: Map<string, ActiveSubscription>,
+  releaser?: RetainedHandlerReleaser,
 ): Promise<void> {
-  const disposers = Array.from(active.values()).map((record) => record.dispose);
+  const records = Array.from(active.values());
   active.clear();
-  for (const dispose of disposers) await dispose();
+  for (const record of records) await disposeActiveSubscription(record, releaser, active);
+}
+
+async function disposeActiveSubscription(
+  record: ActiveSubscription,
+  releaser: RetainedHandlerReleaser | undefined,
+  active: Map<string, ActiveSubscription>,
+): Promise<void> {
+  try {
+    await record.dispose();
+  } finally {
+    releaseRetainedHandlers(record.mapHandlerIds, releaser, active);
+  }
+}
+
+function updateActiveSubscriptionMapHandlers(
+  record: ActiveSubscription,
+  nextIds: number[],
+  releaser: RetainedHandlerReleaser | undefined,
+  active: Map<string, ActiveSubscription>,
+): void {
+  const removed = record.mapHandlerIds.filter((id) => !nextIds.includes(id));
+  record.mapHandlerIds = nextIds;
+  record.setMapHandlerIds(nextIds);
+  releaseRetainedHandlers(removed, releaser, active);
+}
+
+function releaseRetainedHandlers(
+  ids: readonly number[],
+  releaser: RetainedHandlerReleaser | undefined,
+  active: Map<string, ActiveSubscription>,
+): void {
+  const inactiveIds = Array.from(new Set(ids))
+    .filter((id) => !activeSubscriptionUsesHandler(active, id));
+  if (inactiveIds.length === 0) return;
+  if (releaser?.releaseMany) {
+    releaser.releaseMany(inactiveIds);
+    return;
+  }
+  inactiveIds.forEach((id) => releaser?.release?.(id));
+}
+
+function activeSubscriptionUsesHandler(
+  active: Map<string, ActiveSubscription>,
+  id: number,
+): boolean {
+  return Array.from(active.values()).some((record) => record.mapHandlerIds.includes(id));
 }
 
 function flattenSubscriptions(
   input: unknown,
   mapHandlerIds: number[] = [],
+  mapHandlerKeys: string[] = [],
 ): VxSubscriptionEnvelope[] {
   if (input === undefined || input === null) return [];
   if (Array.isArray(input)) {
-    return input.flatMap((child) => flattenSubscriptions(child, mapHandlerIds));
+    return input.flatMap((child) => flattenSubscriptions(child, mapHandlerIds, mapHandlerKeys));
   }
   const envelope = readRuntimeEnvelope(input, "sub", "subscriptions");
   if (envelope.kind === "none") return [];
@@ -1332,23 +1423,31 @@ function flattenSubscriptions(
     if (!Object.hasOwn(envelope, "children")) {
       throw new Error("vx-dom: subscription batch missing required children");
     }
-    return flattenSubscriptions(envelope.children, mapHandlerIds);
+    return flattenSubscriptions(envelope.children, mapHandlerIds, mapHandlerKeys);
   }
   if (envelope.kind === "map") {
     const handlerId = readHandlerId(envelope);
     if (handlerId === undefined) throw new Error("vx-dom: subscription map missing numeric handlerId");
-    return flattenSubscriptions(readRequiredMappedChild(envelope, "subscription map"), [...mapHandlerIds, handlerId]);
+    const handlerKey = readHandlerKey(envelope) ?? `id:${handlerId}`;
+    return flattenSubscriptions(
+      readRequiredMappedChild(envelope, "subscription map"),
+      [...mapHandlerIds, handlerId],
+      [...mapHandlerKeys, handlerKey],
+    );
   }
   if (!optionalSubscriptionKey(envelope)) {
     throw new Error(`vx-dom: subscription "${envelope.kind}" requires a stable key`);
   }
   if (mapHandlerIds.length === 0) return [envelope];
-  return [{ ...envelope, [mapHandlerIdsProperty]: mapHandlerIds }];
+  return [{
+    ...envelope,
+    [mapHandlerIdsProperty]: mapHandlerIds,
+    [mapHandlerKeysProperty]: mapHandlerKeys,
+  }];
 }
 
 function subscriptionIdentityKey(subscription: VxSubscriptionEnvelope): string {
-  const mapPrefix = mappedHandlerIds(subscription)
-    .map((id) => `map:${id}`)
+  const mapPrefix = mappedHandlerIdentityParts(subscription)
     .join("/");
   const explicitKey = subscription.key ?? subscription.id;
   const base = `${subscription.kind}:${String(explicitKey)}`;
@@ -1356,7 +1455,12 @@ function subscriptionIdentityKey(subscription: VxSubscriptionEnvelope): string {
 }
 
 function subscriptionSignature(subscription: VxSubscriptionEnvelope): string {
-  return stableStringify(subscription);
+  const normalized = { ...subscription };
+  delete normalized[mapHandlerIdsProperty];
+  delete normalized[mapHandlerKeysProperty];
+  const mappedIdentity = mappedHandlerIdentityParts(subscription);
+  if (mappedIdentity.length > 0) normalized[mapHandlerIdentityProperty] = mappedIdentity;
+  return stableStringify(normalized);
 }
 
 function optionalSubscriptionKey(subscription: VxSubscriptionEnvelope): string | undefined {
@@ -1541,19 +1645,45 @@ function mapExecutionContext(
   };
 }
 
-function mapSubscriptionContext(
+function mutableMappedSubscriptionContext(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
-): VxRuntimeExecutionContext {
-  return mappedHandlerIds(subscription).reduce(
-    (next, handlerId) => mapExecutionContext(next, handlerId),
-    context,
-  );
+): {
+  context: VxRuntimeExecutionContext;
+  setMapHandlerIds: (ids: number[]) => void;
+} {
+  let mapHandlerIds = mappedHandlerIds(subscription);
+  return {
+    context: {
+      signal: context.signal,
+      deferAfterCommands: context.deferAfterCommands,
+      reportError: context.reportError,
+      dispatch: (message) => context.dispatch(mapRuntimeMessage(message, mapHandlerIds)),
+    },
+    setMapHandlerIds: (ids) => {
+      mapHandlerIds = ids;
+    },
+  };
 }
 
 function mappedHandlerIds(subscription: VxSubscriptionEnvelope): number[] {
   const raw = subscription[mapHandlerIdsProperty];
   return Array.isArray(raw) ? raw.filter((id): id is number => typeof id === "number") : [];
+}
+
+function mappedHandlerKeys(subscription: VxSubscriptionEnvelope): string[] {
+  const raw = subscription[mapHandlerKeysProperty];
+  return Array.isArray(raw)
+    ? raw
+        .filter((key): key is string | number => typeof key === "string" || typeof key === "number")
+        .map((key) => String(key))
+    : [];
+}
+
+function mappedHandlerIdentityParts(subscription: VxSubscriptionEnvelope): string[] {
+  const keys = mappedHandlerKeys(subscription);
+  if (keys.length > 0) return keys.map((key) => `key:${key}`);
+  return mappedHandlerIds(subscription).map((id) => `id:${id}`);
 }
 
 function readHandlerId(input: Record<string, unknown>): number | undefined {
@@ -1562,6 +1692,11 @@ function readHandlerId(input: Record<string, unknown>): number | undefined {
     : typeof input.handler_id === "number"
       ? input.handler_id
       : undefined;
+}
+
+function readHandlerKey(input: Record<string, unknown>): string | undefined {
+  const raw = input.handlerKey ?? input.handler_key;
+  return typeof raw === "string" || typeof raw === "number" ? String(raw) : undefined;
 }
 
 function readTaskId(input: Record<string, unknown>): number | undefined {
@@ -1646,7 +1781,7 @@ function toVxMessage(input: unknown): VxMessage {
 }
 
 function mapRuntimeMessage(message: VxRuntimeMessage, handlerIds: readonly number[]): VxRuntimeMessage {
-  return handlerIds.reduce<VxRuntimeMessage>(
+  return handlerIds.reduceRight<VxRuntimeMessage>(
     (child, handlerId) => ({ kind: "map", handlerId, message: child }),
     message,
   );
