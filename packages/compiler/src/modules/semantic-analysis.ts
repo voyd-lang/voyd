@@ -29,6 +29,7 @@ export type AnalyzeModuleSemanticsOptions = {
   graph: ModuleGraph;
   includeTests?: boolean;
   recoverFromTypingErrors?: boolean;
+  captureDependencySnapshot?: boolean;
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
   typingState?: {
@@ -83,6 +84,7 @@ export const analyzeModuleSemantics = ({
   graph,
   includeTests,
   recoverFromTypingErrors,
+  captureDependencySnapshot,
   previousSemantics,
   changedModuleIds,
   typingState,
@@ -96,6 +98,16 @@ export const analyzeModuleSemantics = ({
   const arena = typingState?.arena ?? createTypeArena();
   const effectInterner = typingState?.effectInterner ?? createEffectInterner();
   let dependencySnapshot: ReusableDependencySemanticsSnapshot | undefined;
+  const shouldCaptureDependencySnapshot = captureDependencySnapshot === true;
+  const isReusableDependencyScc = createReusableDependencySccPredicate({
+    graph,
+    groups: sccGroups,
+  });
+  const reusableDependencyModuleIds = new Set(
+    sccGroups
+      .filter(isReusableDependencyScc)
+      .flatMap((group) => group.moduleIds),
+  );
 
   const cycleModuleIdsByModuleId = new Map<string, readonly string[]>();
   sccGroups.forEach((group) => {
@@ -128,23 +140,27 @@ export const analyzeModuleSemantics = ({
     });
   }
 
-  const analysisGroups = orderSccGroupsForDependencySnapshot({
-    graph,
-    groups: sccGroups,
-  });
+  const analysisGroups = shouldCaptureDependencySnapshot
+    ? orderSccGroupsForDependencySnapshot({
+        groups: sccGroups,
+        isReusableDependencyScc,
+      })
+    : sccGroups;
 
   analysisGroups.forEach((group) => {
     throwIfCancelled(isCancelled);
 
     if (
+      shouldCaptureDependencySnapshot &&
       !dependencySnapshot &&
-      !isReusableDependencyScc({ graph, group })
+      !isReusableDependencyScc(group)
     ) {
       dependencySnapshot = captureReusableDependencySnapshot({
         graph,
         semantics,
         arena,
         effectInterner,
+        reusableModuleIds: reusableDependencyModuleIds,
       });
     }
 
@@ -203,12 +219,15 @@ export const analyzeModuleSemantics = ({
     exports.set(moduleId, result.exports);
   });
 
-  dependencySnapshot ??= captureReusableDependencySnapshot({
-    graph,
-    semantics,
-    arena,
-    effectInterner,
-  });
+  if (shouldCaptureDependencySnapshot) {
+    dependencySnapshot ??= captureReusableDependencySnapshot({
+      graph,
+      semantics,
+      arena,
+      effectInterner,
+      reusableModuleIds: reusableDependencyModuleIds,
+    });
+  }
 
   return {
     semantics,
@@ -219,51 +238,103 @@ export const analyzeModuleSemantics = ({
 };
 
 const orderSccGroupsForDependencySnapshot = ({
+  groups,
+  isReusableDependencyScc,
+}: {
+  groups: readonly ReturnType<typeof getModuleSccGroups>[number][];
+  isReusableDependencyScc: ReusableDependencySccPredicate;
+}): ReturnType<typeof getModuleSccGroups> => {
+  const reusableDependencyGroups = groups.filter(isReusableDependencyScc);
+  const sourceOrUnsafeGroups = groups.filter(
+    (group) => !isReusableDependencyScc(group),
+  );
+  return [...reusableDependencyGroups, ...sourceOrUnsafeGroups];
+};
+
+type ReusableDependencySccPredicate = (
+  group: ReturnType<typeof getModuleSccGroups>[number],
+) => boolean;
+
+const createReusableDependencySccPredicate = ({
   graph,
   groups,
 }: {
   graph: ModuleGraph;
   groups: readonly ReturnType<typeof getModuleSccGroups>[number][];
-}): ReturnType<typeof getModuleSccGroups> => {
-  const reusableDependencyGroups = groups.filter((group) =>
-    isReusableDependencyScc({ graph, group }),
-  );
-  const sourceOrUnsafeGroups = groups.filter(
-    (group) => !isReusableDependencyScc({ graph, group }),
-  );
-  return [...reusableDependencyGroups, ...sourceOrUnsafeGroups];
-};
+}): ReusableDependencySccPredicate => {
+  const groupIndexByModuleId = new Map<string, number>();
+  groups.forEach((group, groupIndex) => {
+    group.moduleIds.forEach((moduleId) => {
+      groupIndexByModuleId.set(moduleId, groupIndex);
+    });
+  });
 
-const isReusableDependencyScc = ({
-  graph,
-  group,
-}: {
-  graph: ModuleGraph;
-  group: ReturnType<typeof getModuleSccGroups>[number];
-}): boolean =>
-  group.moduleIds.every((moduleId) => {
-    const module = graph.modules.get(moduleId);
-    if (!module || module.path.namespace === "src") {
+  const reusableByGroupIndex = new Map<number, boolean>();
+
+  const isReusableGroup = (groupIndex: number): boolean => {
+    const cached = reusableByGroupIndex.get(groupIndex);
+    if (typeof cached === "boolean") {
+      return cached;
+    }
+
+    const group = groups[groupIndex];
+    if (!group) {
       return false;
     }
-    return module.dependencies.every(
-      (dependency) => dependency.path.namespace !== "src",
-    );
-  });
+
+    const reusable = group.moduleIds.every((moduleId) => {
+      const module = graph.modules.get(moduleId);
+      if (!module || module.path.namespace === "src") {
+        return false;
+      }
+
+      return module.dependencies.every((dependency) => {
+        if (dependency.path.namespace === "src") {
+          return false;
+        }
+        const dependencyId = modulePathToString(dependency.path);
+        const dependencyGroupIndex = groupIndexByModuleId.get(dependencyId);
+        if (dependencyGroupIndex === undefined) {
+          return false;
+        }
+        if (dependencyGroupIndex === groupIndex) {
+          return true;
+        }
+        return isReusableGroup(dependencyGroupIndex);
+      });
+    });
+
+    reusableByGroupIndex.set(groupIndex, reusable);
+    return reusable;
+  };
+
+  return (group) => {
+    const moduleId = group.moduleIds[0];
+    const groupIndex =
+      moduleId === undefined ? undefined : groupIndexByModuleId.get(moduleId);
+    return groupIndex === undefined ? false : isReusableGroup(groupIndex);
+  };
+};
 
 const captureReusableDependencySnapshot = ({
   graph,
   semantics,
   arena,
   effectInterner,
+  reusableModuleIds,
 }: {
   graph: ModuleGraph;
   semantics: Map<string, SemanticsPipelineResult>;
   arena: TypeArena;
   effectInterner: EffectInterner;
+  reusableModuleIds: ReadonlySet<string>;
 }): ReusableDependencySemanticsSnapshot | undefined => {
   const entries = Array.from(semantics.entries())
-    .filter(([moduleId]) => graph.modules.get(moduleId)?.path.namespace !== "src")
+    .filter(
+      ([moduleId]) =>
+        reusableModuleIds.has(moduleId) &&
+        graph.modules.get(moduleId)?.path.namespace !== "src",
+    )
     .sort(([left], [right]) => left.localeCompare(right, undefined, {
       numeric: true,
     }));

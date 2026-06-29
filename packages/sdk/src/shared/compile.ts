@@ -134,6 +134,7 @@ export const compileWithLoader = async ({
     graph,
     includeTests: shouldIncludeTests,
     testScope: scopedTestScope,
+    captureDependencySnapshot: Boolean(dependencySnapshotReuse.key),
     previousSemantics: dependencySnapshotReuse.previousSemantics,
     typingState: dependencySnapshotReuse.typingState,
   });

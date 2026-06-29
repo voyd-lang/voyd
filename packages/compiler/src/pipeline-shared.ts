@@ -55,6 +55,7 @@ export type AnalyzeModulesOptions = {
   includeTests?: boolean;
   testScope?: TestScope;
   recoverFromTypingErrors?: boolean;
+  captureDependencySnapshot?: boolean;
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
   typingState?: {
@@ -133,6 +134,7 @@ export const analyzeModules = ({
   includeTests,
   testScope,
   recoverFromTypingErrors,
+  captureDependencySnapshot,
   previousSemantics,
   changedModuleIds,
   typingState,
@@ -147,6 +149,7 @@ export const analyzeModules = ({
     graph,
     includeTests,
     recoverFromTypingErrors,
+    captureDependencySnapshot,
     previousSemantics,
     changedModuleIds,
     typingState,
@@ -748,6 +751,7 @@ export const compileProgramWithLoader = async (
   } = analyzeModules({
     graph,
     includeTests: options.includeTests,
+    captureDependencySnapshot: Boolean(dependencySnapshotReuse.key),
     previousSemantics: dependencySnapshotReuse.previousSemantics,
     typingState: dependencySnapshotReuse.typingState,
   });

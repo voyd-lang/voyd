@@ -35,6 +35,7 @@ const loadAndAnalyze = async ({
   });
   const analyzed = analyzeModules({
     graph,
+    captureDependencySnapshot: Boolean(prepared.key),
     previousSemantics: prepared.previousSemantics,
     typingState: prepared.typingState,
   });
@@ -89,6 +90,20 @@ const buildFiles = ({
 };
 
 describe("compiler dependency snapshots", () => {
+  it("does not capture dependency semantics unless requested", async () => {
+    const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
+    const host = createMemoryHost(initial.files);
+    const graph = await loadModuleGraph({
+      entryPath: `${initial.roots.src}${sep}main.voyd`,
+      roots: initial.roots,
+      host,
+    });
+
+    const analyzed = analyzeModules({ graph });
+
+    expect(analyzed.dependencySnapshot).toBeUndefined();
+  });
+
   it("reuses std and installed package semantics after a source edit", async () => {
     const cache = createCompilerDependencySnapshotCache();
     const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
@@ -187,5 +202,60 @@ describe("compiler dependency snapshots", () => {
       "src::helper",
       "src::main",
     ]);
+  });
+
+  it("does not snapshot package modules with unresolved transitive dependencies", async () => {
+    const cache = createCompilerDependencySnapshotCache();
+    const srcRoot = resolve("/unsafe/src");
+    const pkgRoot = resolve("/unsafe/packages");
+    const roots = { src: srcRoot, pkgDirs: [pkgRoot] };
+    const files = {
+      [`${srcRoot}${sep}main.voyd`]: [
+        "#!no_prelude",
+        "use pkg::dep::all",
+        "",
+        "pub fn main() -> i32",
+        "  outer_value()",
+      ].join("\n"),
+      [`${srcRoot}${sep}helper.voyd`]: [
+        "#!no_prelude",
+        "pub fn helper_value() -> i32",
+        "  1",
+      ].join("\n"),
+      [`${pkgRoot}${sep}dep${sep}src${sep}pkg.voyd`]: [
+        "#!no_prelude",
+        "pub use src::outer::outer_value",
+      ].join("\n"),
+      [`${pkgRoot}${sep}dep${sep}src${sep}outer.voyd`]: [
+        "#!no_prelude",
+        "use pkg::dep::inner::{ inner_value }",
+        "",
+        "pub fn outer_value() -> i32",
+        "  inner_value() + 1",
+      ].join("\n"),
+      [`${pkgRoot}${sep}dep${sep}src${sep}inner.voyd`]: [
+        "#!no_prelude",
+        "use src::missing::{ missing_value }",
+        "",
+        "pub fn inner_value() -> i32",
+        "  missing_value() + 1",
+      ].join("\n"),
+    };
+
+    const host = createMemoryHost(files);
+    const graph = await loadModuleGraph({
+      entryPath: `${roots.src}${sep}main.voyd`,
+      roots,
+      host,
+    });
+    const prepared = prepareDependencySnapshotReuse({ cache, graph, roots });
+    const analyzed = analyzeModules({
+      graph,
+      captureDependencySnapshot: Boolean(prepared.key),
+    });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+
+    expect(diagnostics.length).toBeGreaterThan(0);
+    expect(analyzed.dependencySnapshot).toBeUndefined();
   });
 });
