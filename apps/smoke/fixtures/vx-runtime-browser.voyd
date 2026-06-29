@@ -1,4 +1,5 @@
 use std::enums::{ enum }
+use std::msgpack::self as msgpack
 use std::string::type::String
 use std::vx::all
 
@@ -118,6 +119,12 @@ pub fn standard_subscriptions() -> Sub<Msg>
     storage_on_change(
       key: "storage",
       handler: (_change: StorageChange) -> Msg => Msg::Changed {}
+    ),
+    Sub<Msg>::runtime_configured<String>(
+      kind: "websocket",
+      key: "socket",
+      value: msgpack::make_string("updates"),
+      handler: (value: String) -> Msg => Msg::Broadcast { value: value }
     ),
     broadcast_channel<String, Msg>(
       name: "updates",

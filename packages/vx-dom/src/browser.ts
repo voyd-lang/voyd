@@ -354,12 +354,12 @@ async function mountRuntimeApp(
       dispatchQueued({ kind: "event", handlerId, payload }),
     dispatchMapped: async (handlerId, payload, mapHandlerIds) => {
       if (!options.handlers?.dispatch) {
-        await dispatchQueued(mapRuntimeMessage({ kind: "event", handlerId, payload }, mapHandlerIds));
+        await dispatchQueued(mapDomEventMessage({ kind: "event", handlerId, payload }, mapHandlerIds));
         return;
       }
       const message = await options.handlers.dispatch(handlerId, payload);
       if (message !== undefined) {
-        await dispatchQueued(mapRuntimeMessage(toRuntimeMessage(message), mapHandlerIds));
+        await dispatchQueued(mapDomEventMessage(toRuntimeMessage(message), mapHandlerIds));
       }
     },
     dispatchMessage: (message) => dispatchQueued(toRuntimeMessage(message)),
@@ -698,7 +698,7 @@ function patchEvents(
             return;
           }
           settleAsyncDispatch(handlers?.dispatchMessage?.(
-            mapRuntimeMessage({
+            mapDomEventMessage({
               kind: "event",
               handlerId: event.handlerId,
               payload,
@@ -712,7 +712,7 @@ function patchEvents(
           if (message !== undefined) {
             return handlers?.dispatchMessage?.(
               event.mapHandlerIds?.length
-                ? mapRuntimeMessage(toVxMessage(message), event.mapHandlerIds)
+                ? mapDomEventMessage(toVxMessage(message), event.mapHandlerIds)
                 : message,
             );
           }
@@ -723,7 +723,7 @@ function patchEvents(
         const message = toVxMessage(event.message);
         settleAsyncDispatch(handlers?.dispatchMessage?.(
           event.mapHandlerIds?.length
-            ? mapRuntimeMessage(message, event.mapHandlerIds)
+            ? mapDomEventMessage(message, event.mapHandlerIds)
             : event.message,
         ));
       }
@@ -1610,9 +1610,13 @@ function subscriptionMessage(
     kind: "subscription",
     subscriptionKind: subscription.kind,
     key: optionalSubscriptionKey(subscription),
-    ...(Object.hasOwn(subscription, "value") ? { value: subscription.value } : {}),
+    ...(shouldDispatchSubscriptionValue(subscription) ? { value: subscription.value } : {}),
     payload,
   };
+}
+
+function shouldDispatchSubscriptionValue(subscription: VxSubscriptionEnvelope): boolean {
+  return Object.hasOwn(subscription, "value") && subscription.valueRole !== "config";
 }
 
 function dispatchLocationChange(): void {
@@ -1808,6 +1812,13 @@ function toVxMessage(input: unknown): VxMessage {
 
 function mapRuntimeMessage(message: VxRuntimeMessage, handlerIds: readonly number[]): VxRuntimeMessage {
   return handlerIds.reduceRight<VxRuntimeMessage>(
+    (child, handlerId) => ({ kind: "map", handlerId, message: child }),
+    message,
+  );
+}
+
+function mapDomEventMessage(message: VxRuntimeMessage, handlerIds: readonly number[]): VxRuntimeMessage {
+  return handlerIds.reduce<VxRuntimeMessage>(
     (child, handlerId) => ({ kind: "map", handlerId, message: child }),
     message,
   );

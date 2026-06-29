@@ -455,7 +455,7 @@ describe("smoke: compiled VX DOM rendering", () => {
     const subscriptions = await host.run<{ children?: unknown[] }>("standard_subscriptions");
 
     expect(commands.children).toHaveLength(21);
-    expect(subscriptions.children).toHaveLength(13);
+    expect(subscriptions.children).toHaveLength(14);
 
     const app = createVoydVxAppRuntime({ host });
 

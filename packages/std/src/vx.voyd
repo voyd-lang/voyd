@@ -533,7 +533,11 @@ impl<Msg> Sub<Msg>
     value: MsgPack,
     handler: fn(Payload) -> Msg
   }) -> Sub<Msg>
-    Sub<Payload>::runtime(kind: kind, key: key, value: value).map<Msg>(handler)
+    let ~out = subscription_map(kind)
+    out.set("key", key)
+    out.set("value", value)
+    out.set("valueRole", "config")
+    Sub<Payload> { payload: msgpack::make_map(out) }.map<Msg>(handler)
 
   api fn runtime_configured<Payload>({
     kind: StringSlice,

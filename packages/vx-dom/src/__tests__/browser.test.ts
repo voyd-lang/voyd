@@ -368,6 +368,54 @@ describe("vx-dom browser renderer", () => {
     ]);
   });
 
+  it("preserves nested DOM event mapper order", async () => {
+    const seenMessages: unknown[] = [];
+    const app: VxAppRuntime = {
+      init: () => ({
+        version: 1,
+        root: {
+          kind: "map",
+          handlerId: 20,
+          child: {
+            kind: "map",
+            handlerId: 10,
+            child: {
+              kind: "element",
+              tag: "button",
+              events: [{
+                kind: "event",
+                event: "click",
+                message: { type: "child" },
+              }],
+              children: [{ kind: "text", value: "Child" }],
+            },
+          },
+        },
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    await mountVxApp({ container, app });
+    container.querySelector("button")!.click();
+    await nextTurn();
+
+    expect(seenMessages).toEqual([
+      {
+        kind: "map",
+        handlerId: 20,
+        message: {
+          kind: "map",
+          handlerId: 10,
+          message: { kind: "msgpack", value: { type: "child" } },
+        },
+      },
+    ]);
+  });
+
   it("allows explicit handler registries to override runtime event dispatch", async () => {
     const runtimeDispatch = vi.fn<VxAppRuntime["dispatch"]>();
     const handlerDispatch = vi.fn<RetainedDispatch>();
@@ -1548,6 +1596,56 @@ describe("vx-dom browser renderer", () => {
       }),
     }));
     expect(Object.hasOwn(seenMessages[0] as object, "value")).toBe(false);
+  });
+
+  it("passes configured subscription payloads through mapped handlers", async () => {
+    const seenMessages: unknown[] = [];
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: {
+          type: "sub",
+          kind: "map",
+          handlerId: 42,
+          child: {
+            type: "sub",
+            kind: "keyboard",
+            key: "s",
+            value: { topic: "config" },
+            valueRole: "config",
+          },
+        },
+      }),
+      render: () => counterNode(0),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    await mountVxApp({ container, app });
+    window.dispatchEvent(new KeyboardEvent("keydown", {
+      key: "s",
+      code: "KeyS",
+    }));
+    await nextTurn();
+
+    expect(seenMessages[0]).toEqual({
+      kind: "map",
+      handlerId: 42,
+      message: expect.objectContaining({
+        kind: "subscription",
+        subscriptionKind: "keyboard",
+        key: "s",
+        payload: expect.objectContaining({
+          kind: "keyboard",
+          key: "s",
+          code: "KeyS",
+        }),
+      }),
+    });
+    const childMessage = (seenMessages[0] as { message: object }).message;
+    expect(Object.hasOwn(childMessage, "value")).toBe(false);
   });
 
   it("runs window resize subscriptions with structured payloads", async () => {
