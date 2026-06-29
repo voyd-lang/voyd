@@ -1,0 +1,34 @@
+pub obj Cmd<T> {
+  value: T
+}
+
+pub obj Program<T, U> {
+  model: T
+}
+
+pub fn message<Msg>(value: Msg) -> Cmd<Msg>
+  Cmd<Msg> { value }
+
+pub fn next<Model, Msg>(model: Model) -> Program<Model, Msg>
+  Program<Model, Msg> { model }
+
+pub fn next<Model, Msg>({ model: Model, cmd: Cmd<Msg> }) -> Program<Model, Msg>
+  Program<Model, Msg> { model }
+
+pub obj Model {
+  count: i32
+}
+
+pub obj Tick {}
+pub obj Done {}
+pub type Msg = Tick | Done
+
+fn step(model: Model, msg: Msg) -> Program<Model, Msg>
+  match(msg)
+    Tick:
+      next(model: Model { count: model.count + 1 }, cmd: message(Done {}))
+    Done:
+      next(model)
+
+pub fn main() -> i32
+  0

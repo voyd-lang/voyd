@@ -23,7 +23,7 @@ fn init() -> Model
 fn step(model: Model, msg: Msg): tasks::TaskRuntime -> Program<Model, Msg>
   match(msg)
     Msg::Save:
-      next<Model, Msg>(
+      next(
         model: Model { status: "Saving..." },
         cmd: Cmd<Msg>::task(
           work: () -> MsgPack => msgpack::make_i32(41),
@@ -31,7 +31,7 @@ fn step(model: Model, msg: Msg): tasks::TaskRuntime -> Program<Model, Msg>
         )
       )
     Msg::Saved { value }:
-      next<Model, Msg>(Model { status: saved_label(value) })
+      next(Model { status: saved_label(value) })
 
 fn view(model: Model) -> Html<Msg>
   <button type="button" on_click={Msg::Save {}}>{model.status}</button>

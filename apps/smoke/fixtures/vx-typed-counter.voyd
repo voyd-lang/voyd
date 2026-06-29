@@ -33,9 +33,9 @@ fn init() -> Model
 fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Increment:
-      next<Model, Msg>(Model { count: model.count + 1, title: model.title })
+      next(Model { count: model.count + 1, title: model.title })
     Msg::Rename { value }:
-      next<Model, Msg>(Model { count: model.count, title: value })
+      next(Model { count: model.count, title: value })
 
 fn view(model: Model) -> Html<Msg>
   <div>
@@ -50,10 +50,10 @@ pub fn delayed() -> Cmd<Msg>
   Cmd<Msg>::delay(millis: 25i64, value: Msg::Increment {})
 
 pub fn program_command(model: Model) -> Program<Model, Msg>
-  next<Model, Msg>(model: model, cmd: Cmd<Msg>::message(Msg::Increment {}))
+  next(model: model, cmd: Cmd<Msg>::message(Msg::Increment {}))
 
 pub fn mapped_program_result() -> Program<Model, Msg>
-  let child = next<Model, Msg>(
+  let child = next(
     model: Model { count: 3, title: "Mapped" },
     cmd: Cmd<Msg>::message(Msg::Increment {})
   )

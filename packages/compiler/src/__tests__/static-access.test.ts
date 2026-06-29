@@ -178,6 +178,22 @@ describe("static access e2e", () => {
     expect((instance.exports.main as () => number)()).toBe(1);
   });
 
+  it("infers return-only generic type arguments for overloaded calls in expected branch contexts", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("overload_generic_expected_return_match.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(0);
+  });
+
   it("keeps codegen call argument planning aligned with typing labels", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;
