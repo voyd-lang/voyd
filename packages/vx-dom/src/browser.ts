@@ -1299,7 +1299,7 @@ function runWindowEventSubscription(
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
   if (typeof window === "undefined") return;
-  const eventName = typeof subscription.event === "string" ? subscription.event : subscription.kind;
+  const eventName = windowEventName(subscription);
   const listener = () => {
     if (context.signal.aborted) return;
     settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
@@ -1309,6 +1309,13 @@ function runWindowEventSubscription(
   };
   window.addEventListener(eventName, listener);
   return () => window.removeEventListener(eventName, listener);
+}
+
+function windowEventName(subscription: VxSubscriptionEnvelope): string {
+  if (typeof subscription.event === "string") return subscription.event;
+  if (subscription.kind === "window_focus") return "focus";
+  if (subscription.kind === "window_blur") return "blur";
+  return subscription.kind;
 }
 
 async function syncRuntimeSubscriptions(

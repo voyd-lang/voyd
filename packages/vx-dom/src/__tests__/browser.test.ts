@@ -1555,8 +1555,8 @@ describe("vx-dom browser renderer", () => {
         frame: counterNode(0),
         subscriptions: [
           { type: "sub", kind: "location_change", key: "location" },
-          { type: "sub", kind: "window_focus", key: "focus", event: "focus" },
-          { type: "sub", kind: "window_blur", key: "blur", event: "blur", value: { type: "blur" } },
+          { type: "sub", kind: "window_focus", key: "focus" },
+          { type: "sub", kind: "window_blur", key: "blur", value: { type: "blur" } },
           { type: "sub", kind: "animation_frame", key: "frame" },
           {
             type: "sub",
