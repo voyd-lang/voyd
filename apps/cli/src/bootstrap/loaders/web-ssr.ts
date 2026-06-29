@@ -873,7 +873,7 @@ fn init() -> ClientArticle
 fn step(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::TaskRuntime) -> Program<ClientArticle, Msg>
   match(message)
     Msg::Edit { value }:
-      next<ClientArticle, Msg>(ClientArticle {
+      next(ClientArticle {
         slug: model.slug,
         title: model.title,
         body: value,
@@ -884,7 +884,7 @@ fn step(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::Ta
         save_count: model.save_count
       })
     Msg::Reset:
-      next<ClientArticle, Msg>(ClientArticle {
+      next(ClientArticle {
         slug: model.slug,
         title: model.title,
         body: model.saved_body,
@@ -895,7 +895,7 @@ fn step(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::Ta
         save_count: model.save_count
       })
     Msg::TogglePreview:
-      next<ClientArticle, Msg>(ClientArticle {
+      next(ClientArticle {
         slug: model.slug,
         title: model.title,
         body: model.body,
@@ -907,7 +907,7 @@ fn step(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::Ta
       })
     Msg::Save:
       if is_saving(model) or not is_dirty(model):
-        return next<ClientArticle, Msg>(model)
+        return next(model)
       program<ClientArticle, Msg>(
         model: ClientArticle {
           slug: model.slug,
@@ -926,7 +926,7 @@ fn step(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::Ta
       )
     Msg::SaveFinished { code }:
       if code == 1:
-        return next<ClientArticle, Msg>(ClientArticle {
+        return next(ClientArticle {
           slug: model.slug,
           title: model.title,
           body: model.body,
@@ -936,7 +936,7 @@ fn step(model: ClientArticle, message: Msg): (http_client::HttpClient, tasks::Ta
           preview_open: model.preview_open,
           save_count: model.save_count + 1
         })
-      next<ClientArticle, Msg>(ClientArticle {
+      next(ClientArticle {
         slug: model.slug,
         title: model.title,
         body: model.body,

@@ -34,7 +34,7 @@ fn init() -> Model
 fn step(model: Model, message: Msg) -> Program<Model, Msg>
   match(message)
     Msg::Increment:
-      next<Model, Msg>(Model { count: model.count + 1 })
+      next(Model { count: model.count + 1 })
 
 fn view(model: Model) -> Html<Msg>
   <main style="

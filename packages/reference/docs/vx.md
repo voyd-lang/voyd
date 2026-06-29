@@ -89,9 +89,9 @@ fn init() -> Model
 fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Increment:
-      next<Model, Msg>(Model { count: model.count + 1 })
+      next(Model { count: model.count + 1 })
     Msg::Decrement:
-      next<Model, Msg>(Model { count: model.count - 1 })
+      next(Model { count: model.count - 1 })
 
 fn view(model: Model) -> Html<Msg>
   <main>
@@ -151,7 +151,7 @@ case `init` returns `next(model: initial_model, cmd: load())`.
 Inside `step`, return `next`:
 
 ```voyd
-next<Model, Msg>(next_model)
+next(next_model)
 next(model: next_model, cmd: save_title(next_model.title))
 ```
 
@@ -184,7 +184,7 @@ This keeps `step` readable. Each branch answers two questions:
 fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
   match(msg)
     Msg::DraftChanged { value }:
-      next<Model, Msg>(Model { draft: value, saving: model.saving })
+      next(Model { draft: value, saving: model.saving })
     Msg::Submit:
       next(
         model: Model { draft: model.draft, saving: true },
@@ -213,12 +213,12 @@ Most branches have this shape:
 
 ```voyd
 Msg::DraftChanged { value }:
-  next<Model, Msg>(with_draft(model, value))
+  next(with_draft(model, value))
 Msg::Submit:
   next(model: saving_now(model), cmd: save_draft(model.draft))
 ```
 
-Use `next<Model, Msg>(next_model)` for a pure state transition. Use
+Use `next(next_model)` for a pure state transition. Use
 `next(model:, cmd:)` when the transition also starts one-off work.
 
 Commands returned from `step` are descriptions. The runtime runs them after it
@@ -232,9 +232,9 @@ When a branch becomes large, extract the model update into a named helper:
 Msg::Saved { result }:
   match(result)
     Ok { value }:
-      next<Model, Msg>(saved(model, value))
+      next(saved(model, value))
     Err { error }:
-      next<Model, Msg>(with_error(model, error))
+      next(with_error(model, error))
 
 fn saved(model: Model, todo: Todo) -> Model
   Model {
@@ -876,7 +876,7 @@ button click or command result:
 fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
   match(msg)
     Msg::Tick:
-      next<Model, Msg>(Model { ticks: model.ticks + 1 })
+      next(Model { ticks: model.ticks + 1 })
     Msg::Autosave:
       next(model: model, cmd: save_draft(model.draft))
 ```
@@ -1014,9 +1014,9 @@ fn subscriptions(model: Model) -> Sub<Msg>
 fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::StartEdit { id }:
-      next<Model, Msg>(Model { editing_id: id })
+      next(Model { editing_id: id })
     Msg::CancelEdit:
-      next<Model, Msg>(Model { editing_id: String::init() })
+      next(Model { editing_id: String::init() })
 ```
 
 When `StartEdit` sets `editing_id`, the next subscription pass starts the Escape
@@ -1047,15 +1047,15 @@ enum Msg
 pub fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
   match(msg)
     Msg::DraftChanged { value }:
-      next<Model, Msg>(with_draft(model, value))
+      next(with_draft(model, value))
     Msg::Submit:
       next(model: saving_now(model), cmd: create_todo(model.draft))
     Msg::Created { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(adding(model, value))
+          next(adding(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
 ```
 
 The parent model keeps the feature model as a field:
@@ -1338,23 +1338,23 @@ fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
     Msg::Loaded { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(with_todos(model, value))
+          next(with_todos(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::DraftChanged { value }:
-      next<Model, Msg>(with_draft(model, value))
+      next(with_draft(model, value))
     Msg::Submit:
       next(model: saving_now(model), cmd: create_todo(model.draft))
     Msg::Created { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(adding(model, value))
+          next(adding(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::StartEdit { id, title }:
-      next<Model, Msg>(start_edit(model, id, title))
+      next(start_edit(model, id, title))
     Msg::EditChanged { value }:
-      next<Model, Msg>(with_edit(model, value))
+      next(with_edit(model, value))
     Msg::SaveEdit:
       next(
         model: saving_now(model),
@@ -1363,19 +1363,19 @@ fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
     Msg::Saved { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(replacing(model, value))
+          next(replacing(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::Delete { id }:
       next(model: saving_now(model), cmd: delete_todo(id))
     Msg::Deleted { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(removing(model, value))
+          next(removing(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::CancelEdit:
-      next<Model, Msg>(cancel_edit(model))
+      next(cancel_edit(model))
 ```
 
 This example is pessimistic: it waits for persistence to succeed before changing
@@ -1527,23 +1527,23 @@ fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
     Msg::Loaded { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(with_todos(model, value))
+          next(with_todos(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::DraftChanged { value }:
-      next<Model, Msg>(with_draft(model, value))
+      next(with_draft(model, value))
     Msg::Submit:
       next(model: saving_now(model), cmd: create_todo(model.draft))
     Msg::Created { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(adding(model, value))
+          next(adding(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::StartEdit { id, title }:
-      next<Model, Msg>(start_edit(model, id, title))
+      next(start_edit(model, id, title))
     Msg::EditChanged { value }:
-      next<Model, Msg>(with_edit(model, value))
+      next(with_edit(model, value))
     Msg::SaveEdit:
       next(
         model: saving_now(model),
@@ -1552,19 +1552,19 @@ fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
     Msg::Saved { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(replacing(model, value))
+          next(replacing(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::Delete { id }:
       next(model: saving_now(model), cmd: delete_todo(id))
     Msg::Deleted { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(removing(model, value))
+          next(removing(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::CancelEdit:
-      next<Model, Msg>(cancel_edit(model))
+      next(cancel_edit(model))
 
 fn load_todos(): TaskRuntime -> Cmd<Msg>
   Cmd::task(
