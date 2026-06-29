@@ -171,6 +171,7 @@ export type VxSubscriptionEnvelope = VxRuntimeEnvelope & {
 export type VxRuntimeExecutionContext = {
   dispatch(message: VxRuntimeMessage): Promise<void>;
   deferAfterCommands?: (callback: () => void) => void;
+  releaseRetainedHandler?: (id: number) => void;
   reportError?: VxRuntimeErrorHandler;
   signal: AbortSignal;
 };

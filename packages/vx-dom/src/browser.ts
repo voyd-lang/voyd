@@ -362,6 +362,7 @@ async function mountRuntimeApp(
       }
       callback();
     },
+    releaseRetainedHandler: (id) => queuedRetainedHandlerReleaser.release?.(id),
     reportError,
     signal: abortController.signal,
   };
@@ -1071,9 +1072,13 @@ async function runReadClipboardCommand(
   if (!clipboard || typeof clipboard.readText !== "function") {
     throw new Error("vx-dom: read_clipboard command requires navigator.clipboard.readText");
   }
-  const value = await clipboard.readText();
-  if (context.signal.aborted) return;
-  settleAsyncDispatch(context.dispatch({ kind: "map", handlerId, message: toVxMessage(value) }));
+  try {
+    const value = await clipboard.readText();
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch({ kind: "map", handlerId, message: toVxMessage(value) }));
+  } finally {
+    context.releaseRetainedHandler?.(handlerId);
+  }
 }
 
 function runReplaceUrlCommand(command: VxCommandEnvelope): void {

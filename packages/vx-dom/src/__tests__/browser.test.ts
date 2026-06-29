@@ -1032,6 +1032,7 @@ describe("vx-dom browser renderer", () => {
   it("does not await queued clipboard dispatches from step commands", async () => {
     const seenMessages: unknown[] = [];
     const readText = vi.fn(async () => "Clipboard text");
+    const release = vi.fn<(id: number) => void>();
     Object.defineProperty(navigator, "clipboard", {
       configurable: true,
       value: { readText },
@@ -1053,6 +1054,7 @@ describe("vx-dom browser renderer", () => {
       },
     };
 
+    app.retainedCallbacks = { release };
     const mounted = await mountVxApp({ container, app });
     const dispatch = mounted.dispatch({ kind: "debug", name: "read" });
 
@@ -1069,6 +1071,31 @@ describe("vx-dom browser renderer", () => {
       handlerId: 77,
       message: { kind: "msgpack", value: "Clipboard text" },
     });
+    expect(release).toHaveBeenCalledWith(77);
+  });
+
+  it("releases clipboard read handlers when the clipboard read fails", async () => {
+    const release = vi.fn<(id: number) => void>();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { readText: vi.fn(async () => {
+        throw new Error("clipboard denied");
+      }) },
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => ({
+        frame: counterNode(0),
+        commands: { type: "cmd", kind: "read_clipboard", handlerId: 77 },
+      }),
+      render: () => counterNode(0),
+      dispatch: () => counterNode(0),
+    };
+
+    await expect(mountVxApp({ container, app })).rejects.toThrow("clipboard denied");
+    await nextTurn();
+
+    expect(release).toHaveBeenCalledWith(77);
   });
 
   it("reports diagnostics for malformed ref DOM commands", async () => {
