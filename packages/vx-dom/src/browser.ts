@@ -322,6 +322,27 @@ async function mountRuntimeApp(
   };
   const afterCommandCallbacks: Array<Array<() => void>> = [];
   let queue = Promise.resolve();
+  const queuedRetainedHandlerReleaser: RetainedHandlerReleaser = {
+    release: (id) => {
+      void queue.catch(() => undefined).then(() => {
+        if (retainedHandlerReleaser.release) {
+          retainedHandlerReleaser.release(id);
+          return;
+        }
+        retainedHandlerReleaser.releaseMany?.([id]);
+      });
+    },
+    releaseMany: (ids) => {
+      const retainedIds = Array.from(ids);
+      void queue.catch(() => undefined).then(() => {
+        if (retainedHandlerReleaser.releaseMany) {
+          retainedHandlerReleaser.releaseMany(retainedIds);
+          return;
+        }
+        retainedIds.forEach((id) => retainedHandlerReleaser.release?.(id));
+      });
+    },
+  };
 
   const dispatchNow = async (message: VxRuntimeMessage): Promise<void> => {
     if (disposed) return;
@@ -405,7 +426,7 @@ async function mountRuntimeApp(
             activeSubscriptions,
             runtimeHost,
             executionContext,
-            retainedHandlerReleaser,
+            queuedRetainedHandlerReleaser,
           );
         } catch (error) {
           reportError(error, { phase: "subscriptions" });

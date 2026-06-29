@@ -1338,6 +1338,7 @@ describe("vx-dom browser renderer", () => {
     await mounted.dispatch({ kind: "debug", name: "refresh" });
 
     expect(runSubscription).toHaveBeenCalledOnce();
+    await nextTurn();
     expect(releaseMany).toHaveBeenCalledWith([1]);
 
     await dispatchSubscription?.({ kind: "debug", name: "tick" });
@@ -1348,6 +1349,7 @@ describe("vx-dom browser renderer", () => {
       message: { kind: "debug", name: "tick" },
     });
     expect(runSubscription).toHaveBeenCalledOnce();
+    await nextTurn();
     expect(releaseMany).toHaveBeenCalledWith([2]);
 
     mounted.dispose();
@@ -1355,6 +1357,77 @@ describe("vx-dom browser renderer", () => {
 
     expect(dispose).toHaveBeenCalledOnce();
     expect(releaseMany).toHaveBeenCalledWith([3]);
+  });
+
+  it("delays releasing refreshed subscription handlers until queued messages drain", async () => {
+    const seenMessages: unknown[] = [];
+    let nextHandlerId = 1;
+    let dispatchSubscription: ((message: VxRuntimeMessage) => Promise<void>) | undefined;
+    let resolveQueuedTick: (() => void) | undefined;
+    const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
+    const mappedSubscription = () => ({
+      type: "sub",
+      kind: "map",
+      handlerId: nextHandlerId++,
+      handlerKey: 9001,
+      child: { type: "sub", kind: "timer", key: "main" },
+    });
+    const runSubscription = vi.fn<VxSubscriptionRunner>((_subscription, context) => {
+      dispatchSubscription = context.dispatch;
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { releaseMany },
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: mappedSubscription(),
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        if (message.kind === "debug" && message.name === "refresh") {
+          void dispatchSubscription?.({ kind: "debug", name: "queued-tick" });
+        }
+        if (
+          message.kind === "map" &&
+          message.handlerId === 1 &&
+          message.message.kind === "debug" &&
+          message.message.name === "queued-tick"
+        ) {
+          return new Promise((resolve) => {
+            resolveQueuedTick = () =>
+              resolve({
+                frame: counterNode(seenMessages.length),
+                subscriptions: mappedSubscription(),
+              });
+          });
+        }
+        return {
+          frame: counterNode(seenMessages.length),
+          subscriptions: mappedSubscription(),
+        };
+      },
+    };
+
+    const mounted = await mountVxApp({
+      container,
+      app,
+      runtimeHost: { subscriptions: { timer: runSubscription } },
+    });
+
+    await mounted.dispatch({ kind: "debug", name: "refresh" });
+    await nextTurn();
+
+    expect(seenMessages).toContainEqual({
+      kind: "map",
+      handlerId: 1,
+      message: { kind: "debug", name: "queued-tick" },
+    });
+    expect(releaseMany).not.toHaveBeenCalled();
+
+    resolveQueuedTick?.();
+    await nextTurn();
+
+    expect(releaseMany).toHaveBeenCalledWith([1]);
   });
 
   it("does not release outer mapped subscription handlers", async () => {
