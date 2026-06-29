@@ -101,6 +101,7 @@ type ActiveSubscription = {
   signature: string;
   dispose: VxSubscriptionDisposer;
   mapHandlerIds: number[];
+  ownedMapHandlerIds: number[];
   setMapHandlerIds: (ids: number[]) => void;
 };
 
@@ -108,6 +109,7 @@ type RetainedHandlerReleaser = Pick<RetainedEventHandlerRegistry, "release" | "r
 
 const mapHandlerIdsProperty = "__vxMapHandlerIds";
 const mapHandlerKeysProperty = "__vxMapHandlerKeys";
+const ownedMapHandlerIdsProperty = "__vxOwnedMapHandlerIds";
 const mapHandlerIdentityProperty = "__vxMapHandlerIdentity";
 const taskObserverProperty = Symbol.for("voyd.taskObserver");
 const locationChangeEvent = "vxlocationchange";
@@ -1037,7 +1039,7 @@ async function runReadClipboardCommand(
   }
   const value = await clipboard.readText();
   if (context.signal.aborted) return;
-  await context.dispatch({ kind: "map", handlerId, message: toVxMessage(value) });
+  settleAsyncDispatch(context.dispatch({ kind: "map", handlerId, message: toVxMessage(value) }));
 }
 
 function runReplaceUrlCommand(command: VxCommandEnvelope): void {
@@ -1338,9 +1340,10 @@ async function syncRuntimeSubscriptions(
     const key = subscriptionIdentityKey(subscription);
     const signature = subscriptionSignature(subscription);
     const mapHandlerIds = mappedHandlerIds(subscription);
+    const ownedMapHandlerIds = mappedOwnedHandlerIds(subscription);
     const previous = active.get(key);
     if (previous?.signature === signature) {
-      updateActiveSubscriptionMapHandlers(previous, mapHandlerIds, releaser, active);
+      updateActiveSubscriptionMapHandlers(previous, mapHandlerIds, ownedMapHandlerIds, releaser, active);
       continue;
     }
     if (previous) {
@@ -1355,6 +1358,7 @@ async function syncRuntimeSubscriptions(
       signature,
       dispose: dispose ?? (() => undefined),
       mapHandlerIds,
+      ownedMapHandlerIds,
       setMapHandlerIds: mappedContext.setMapHandlerIds,
     });
   }
@@ -1377,18 +1381,20 @@ async function disposeActiveSubscription(
   try {
     await record.dispose();
   } finally {
-    releaseRetainedHandlers(record.mapHandlerIds, releaser, active);
+    releaseRetainedHandlers(record.ownedMapHandlerIds, releaser, active);
   }
 }
 
 function updateActiveSubscriptionMapHandlers(
   record: ActiveSubscription,
   nextIds: number[],
+  nextOwnedIds: number[],
   releaser: RetainedHandlerReleaser | undefined,
   active: Map<string, ActiveSubscription>,
 ): void {
-  const removed = record.mapHandlerIds.filter((id) => !nextIds.includes(id));
+  const removed = record.ownedMapHandlerIds.filter((id) => !nextOwnedIds.includes(id));
   record.mapHandlerIds = nextIds;
+  record.ownedMapHandlerIds = nextOwnedIds;
   record.setMapHandlerIds(nextIds);
   releaseRetainedHandlers(removed, releaser, active);
 }
@@ -1412,17 +1418,20 @@ function activeSubscriptionUsesHandler(
   active: Map<string, ActiveSubscription>,
   id: number,
 ): boolean {
-  return Array.from(active.values()).some((record) => record.mapHandlerIds.includes(id));
+  return Array.from(active.values()).some((record) => record.ownedMapHandlerIds.includes(id));
 }
 
 function flattenSubscriptions(
   input: unknown,
   mapHandlerIds: number[] = [],
   mapHandlerKeys: string[] = [],
+  ownedMapHandlerIds: number[] = [],
 ): VxSubscriptionEnvelope[] {
   if (input === undefined || input === null) return [];
   if (Array.isArray(input)) {
-    return input.flatMap((child) => flattenSubscriptions(child, mapHandlerIds, mapHandlerKeys));
+    return input.flatMap((child) =>
+      flattenSubscriptions(child, mapHandlerIds, mapHandlerKeys, ownedMapHandlerIds)
+    );
   }
   const envelope = readRuntimeEnvelope(input, "sub", "subscriptions");
   if (envelope.kind === "none") return [];
@@ -1430,16 +1439,17 @@ function flattenSubscriptions(
     if (!Object.hasOwn(envelope, "children")) {
       throw new Error("vx-dom: subscription batch missing required children");
     }
-    return flattenSubscriptions(envelope.children, mapHandlerIds, mapHandlerKeys);
+    return flattenSubscriptions(envelope.children, mapHandlerIds, mapHandlerKeys, ownedMapHandlerIds);
   }
   if (envelope.kind === "map") {
     const handlerId = readHandlerId(envelope);
     if (handlerId === undefined) throw new Error("vx-dom: subscription map missing numeric handlerId");
-    const handlerKey = readHandlerKey(envelope) ?? `id:${handlerId}`;
+    const handlerKey = readHandlerKey(envelope);
     return flattenSubscriptions(
       readRequiredMappedChild(envelope, "subscription map"),
       [...mapHandlerIds, handlerId],
-      [...mapHandlerKeys, handlerKey],
+      [...mapHandlerKeys, handlerKey ?? `id:${handlerId}`],
+      handlerKey === undefined ? ownedMapHandlerIds : [...ownedMapHandlerIds, handlerId],
     );
   }
   if (!optionalSubscriptionKey(envelope)) {
@@ -1450,6 +1460,9 @@ function flattenSubscriptions(
     ...envelope,
     [mapHandlerIdsProperty]: mapHandlerIds,
     [mapHandlerKeysProperty]: mapHandlerKeys,
+    ...(ownedMapHandlerIds.length > 0
+      ? { [ownedMapHandlerIdsProperty]: ownedMapHandlerIds }
+      : {}),
   }];
 }
 
@@ -1465,6 +1478,7 @@ function subscriptionSignature(subscription: VxSubscriptionEnvelope): string {
   const normalized = { ...subscription };
   delete normalized[mapHandlerIdsProperty];
   delete normalized[mapHandlerKeysProperty];
+  delete normalized[ownedMapHandlerIdsProperty];
   const mappedIdentity = mappedHandlerIdentityParts(subscription);
   if (mappedIdentity.length > 0) normalized[mapHandlerIdentityProperty] = mappedIdentity;
   return stableStringify(normalized);
@@ -1675,6 +1689,11 @@ function mutableMappedSubscriptionContext(
 
 function mappedHandlerIds(subscription: VxSubscriptionEnvelope): number[] {
   const raw = subscription[mapHandlerIdsProperty];
+  return Array.isArray(raw) ? raw.filter((id): id is number => typeof id === "number") : [];
+}
+
+function mappedOwnedHandlerIds(subscription: VxSubscriptionEnvelope): number[] {
+  const raw = subscription[ownedMapHandlerIdsProperty];
   return Array.isArray(raw) ? raw.filter((id): id is number => typeof id === "number") : [];
 }
 

@@ -981,6 +981,48 @@ describe("vx-dom browser renderer", () => {
     expect(sessionStorage.length).toBe(0);
   });
 
+  it("does not await queued clipboard dispatches from step commands", async () => {
+    const seenMessages: unknown[] = [];
+    const readText = vi.fn(async () => "Clipboard text");
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { readText },
+    });
+    const app: VxAppRuntime = {
+      init: () => ({ frame: counterNode(0) }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        const shouldReadClipboard = isRecord(message) &&
+          message.kind === "debug" &&
+          message.name === "read";
+        return {
+          frame: counterNode(seenMessages.length),
+          ...(shouldReadClipboard
+            ? { commands: { type: "cmd", kind: "read_clipboard", handlerId: 77 } }
+            : {}),
+        };
+      },
+    };
+
+    const mounted = await mountVxApp({ container, app });
+    const dispatch = mounted.dispatch({ kind: "debug", name: "read" });
+
+    await expect(Promise.race([
+      dispatch.then(() => "resolved"),
+      new Promise((resolve) => setTimeout(() => resolve("timeout"), 50)),
+    ])).resolves.toBe("resolved");
+    expect(readText).toHaveBeenCalledOnce();
+
+    await nextTurn();
+
+    expect(seenMessages).toContainEqual({
+      kind: "map",
+      handlerId: 77,
+      message: { kind: "msgpack", value: "Clipboard text" },
+    });
+  });
+
   it("reports diagnostics for malformed ref DOM commands", async () => {
     const app: VxAppRuntime = {
       init: () => ({
@@ -1265,6 +1307,72 @@ describe("vx-dom browser renderer", () => {
 
     expect(dispose).toHaveBeenCalledOnce();
     expect(releaseMany).toHaveBeenCalledWith([3]);
+  });
+
+  it("does not release outer mapped subscription handlers", async () => {
+    const seenMessages: unknown[] = [];
+    let nextHandlerId = 1;
+    let dispatchSubscription: ((message: VxRuntimeMessage) => Promise<void>) | undefined;
+    const dispose = vi.fn();
+    const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
+    const mappedSubscription = () => ({
+      type: "sub",
+      kind: "map",
+      handlerId: 99,
+      child: {
+        type: "sub",
+        kind: "map",
+        handlerId: nextHandlerId++,
+        handlerKey: 9001,
+        child: { type: "sub", kind: "timer", key: "main" },
+      },
+    });
+    const runSubscription = vi.fn<VxSubscriptionRunner>((_subscription, context) => {
+      dispatchSubscription = context.dispatch;
+      return dispose;
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { releaseMany },
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: mappedSubscription(),
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return {
+          frame: counterNode(seenMessages.length),
+          subscriptions: mappedSubscription(),
+        };
+      },
+    };
+
+    const mounted = await mountVxApp({
+      container,
+      app,
+      runtimeHost: { subscriptions: { timer: runSubscription } },
+    });
+
+    await mounted.dispatch({ kind: "debug", name: "refresh" });
+    await dispatchSubscription?.({ kind: "debug", name: "tick" });
+
+    expect(seenMessages).toContainEqual({
+      kind: "map",
+      handlerId: 99,
+      message: {
+        kind: "map",
+        handlerId: 2,
+        message: { kind: "debug", name: "tick" },
+      },
+    });
+    expect(releaseMany).toHaveBeenCalledWith([1]);
+
+    mounted.dispose();
+    await nextTurn();
+
+    const releasedIds = releaseMany.mock.calls.flatMap(([ids]) => Array.from(ids));
+    expect(releasedIds).not.toContain(99);
+    expect(releasedIds).toEqual([1, 2, 3]);
   });
 
   it("runs interval subscriptions with the default browser runtime host", async () => {
