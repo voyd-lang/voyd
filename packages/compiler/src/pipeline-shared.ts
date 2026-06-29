@@ -22,10 +22,10 @@ import type { SourceSpan, SymbolId } from "./semantics/ids.js";
 import { getSymbolTable } from "./semantics/_internal/symbol-table.js";
 import { formatEffectRow } from "./semantics/effects/format.js";
 import {
-  diffCompilerPerfCounters,
-  isCompilerPerfEnabled,
-  logCompilerPerfSummary,
-  snapshotCompilerPerfCounters,
+  completeCompilerPerfSession,
+  markCompilerPerfPhaseDuration,
+  startCompilerPerfPhase,
+  startCompilerPerfSession,
 } from "./perf.js";
 
 export type LoadModulesOptions = {
@@ -404,7 +404,9 @@ export const emitProgram = async ({
   module: binaryen.Module;
   diagnostics: Diagnostic[];
 }> => {
+  const lowerStartedAt = startCompilerPerfPhase();
   const { orderedModules, entry } = lowerProgram({ graph, semantics });
+  markCompilerPerfPhaseDuration("lowerProgram", lowerStartedAt);
   const targetModuleId = entryModuleId ?? entry;
   const modules = orderedModules
     .map((id) => semantics.get(id))
@@ -413,15 +415,22 @@ export const emitProgram = async ({
     throw new Error("No semantics available for codegen");
   }
 
+  const codegenLoadStartedAt = startCompilerPerfPhase();
   const codegen = await lazyCodegen();
+  markCompilerPerfPhaseDuration("loadCodegen", codegenLoadStartedAt);
+  const monomorphizeStartedAt = startCompilerPerfPhase();
   const monomorphized =
     linkSemantics !== false
       ? monomorphizeProgram({ modules, semantics })
       : { instances: [], moduleTyping: new Map() };
+  markCompilerPerfPhaseDuration("monomorphizeProgram", monomorphizeStartedAt);
+  const viewStartedAt = startCompilerPerfPhase();
   const program = buildProgramCodegenView(modules, {
     instances: monomorphized.instances,
     moduleTyping: monomorphized.moduleTyping,
   });
+  markCompilerPerfPhaseDuration("buildProgramCodegenView", viewStartedAt);
+  const optimizeStartedAt = startCompilerPerfPhase();
   const optimized = codegenOptions?.optimize
     ? optimizeProgram({
         program,
@@ -430,13 +439,18 @@ export const emitProgram = async ({
         options: codegenOptions,
       })
     : undefined;
+  markCompilerPerfPhaseDuration("optimizeProgram", optimizeStartedAt);
+  const codegenStartedAt = startCompilerPerfPhase();
   const result = codegen.codegenProgram({
     program: optimized?.program ?? program,
     entryModuleId: targetModuleId,
     options: codegenOptions,
     optimization: optimized?.facts,
   });
+  markCompilerPerfPhaseDuration("codegenProgram", codegenStartedAt);
+  const emitStartedAt = startCompilerPerfPhase();
   const wasm = result.wasm ?? emitBinary(result.module);
+  markCompilerPerfPhaseDuration("emitBinary", emitStartedAt);
   return { wasm, module: result.module, diagnostics: result.diagnostics };
 };
 
@@ -564,50 +578,27 @@ export const compileProgramWithLoader = async (
     ? undefined
     : preloadCodegen();
   void codegenLoadPromise?.catch(() => undefined);
-  const perfEnabled = isCompilerPerfEnabled();
-  const compileStartedAt = perfEnabled ? performance.now() : 0;
-  const perfCountersBefore = perfEnabled
-    ? snapshotCompilerPerfCounters()
-    : undefined;
-  const phaseDurationsMs: Record<string, number> = {};
-  const markPhaseDuration = (phase: string, startedAt: number) => {
-    if (!perfEnabled) {
-      return;
-    }
-    phaseDurationsMs[phase] = performance.now() - startedAt;
-  };
+  const perfSession = startCompilerPerfSession({
+    entryPath: options.entryPath,
+  });
   const complete = (
     result: CompileProgramResult,
   ): CompileProgramResult => {
-    if (!perfEnabled || !perfCountersBefore) {
-      return result;
-    }
-
-    phaseDurationsMs.total = performance.now() - compileStartedAt;
-    const perfCountersAfter = snapshotCompilerPerfCounters();
-    const diagnostics = result.success ? 0 : result.diagnostics.length;
-
-    logCompilerPerfSummary({
-      entryPath: options.entryPath,
+    completeCompilerPerfSession({
+      session: perfSession,
       success: result.success,
-      diagnostics,
-      phasesMs: phaseDurationsMs,
-      counters: diffCompilerPerfCounters({
-        before: perfCountersBefore,
-        after: perfCountersAfter,
-      }),
+      diagnostics: result.success ? 0 : result.diagnostics.length,
     });
-
     return result;
   };
 
   let graph: ModuleGraph;
-  const loadStartedAt = perfEnabled ? performance.now() : 0;
+  const loadStartedAt = startCompilerPerfPhase();
   try {
     graph = await loadModuleGraph(options);
-    markPhaseDuration("loadModuleGraph", loadStartedAt);
+    markCompilerPerfPhaseDuration("loadModuleGraph", loadStartedAt);
   } catch (error) {
-    markPhaseDuration("loadModuleGraph", loadStartedAt);
+    markCompilerPerfPhaseDuration("loadModuleGraph", loadStartedAt);
     return complete(compileProgramFailure(
       diagnosticsFromUnexpectedError({
         error,
@@ -623,12 +614,12 @@ export const compileProgramWithLoader = async (
       : compileProgramSuccess({ graph }));
   }
 
-  const analyzeStartedAt = perfEnabled ? performance.now() : 0;
+  const analyzeStartedAt = startCompilerPerfPhase();
   const { semantics, diagnostics: semanticDiagnostics } = analyzeModules({
     graph,
     includeTests: options.includeTests,
   });
-  markPhaseDuration("analyzeModules", analyzeStartedAt);
+  markCompilerPerfPhaseDuration("analyzeModules", analyzeStartedAt);
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
 
   if (hasErrorDiagnostics(diagnostics)) {
@@ -637,7 +628,7 @@ export const compileProgramWithLoader = async (
 
   const shouldLinkSemantics = options.linkSemantics !== false;
 
-  const emitStartedAt = perfEnabled ? performance.now() : 0;
+  const emitStartedAt = startCompilerPerfPhase();
   try {
     const wasmResult = await emitProgram({
       graph,
@@ -646,7 +637,7 @@ export const compileProgramWithLoader = async (
       entryModuleId: options.entryModuleId,
       linkSemantics: shouldLinkSemantics,
     });
-    markPhaseDuration("emitProgram", emitStartedAt);
+    markCompilerPerfPhaseDuration("emitProgram", emitStartedAt);
 
     diagnostics.push(...wasmResult.diagnostics);
 
@@ -660,7 +651,7 @@ export const compileProgramWithLoader = async (
       wasm: wasmResult.wasm,
     }));
   } catch (error) {
-    markPhaseDuration("emitProgram", emitStartedAt);
+    markCompilerPerfPhaseDuration("emitProgram", emitStartedAt);
     return complete(compileProgramFailure([
       ...diagnostics,
       codegenErrorToDiagnostic(error, {

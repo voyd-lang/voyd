@@ -49,6 +49,10 @@ import type {
   SymbolId,
   TypeId,
 } from "../semantics/ids.js";
+import {
+  markCompilerPerfPhaseDuration,
+  startCompilerPerfPhase,
+} from "../perf.js";
 import { DiagnosticEmitter } from "../diagnostics/index.js";
 import { createCodegenModule } from "./wasm-module.js";
 import { createProgramHelperRegistry } from "./program-helpers.js";
@@ -94,6 +98,7 @@ export const codegenProgram = ({
   options = {},
   optimization,
 }: CodegenProgramParams): CodegenResult => {
+  const codegenStartedAt = startCompilerPerfPhase();
   const modules = Array.from(program.modules.values());
   const mod = createCodegenModule();
   const mergedOptions = normalizeCodegenOptions(options);
@@ -220,18 +225,28 @@ export const codegenProgram = ({
     entryCtx.programHelpers.ensureEffectHelpers(entryCtx);
   }
 
-  const outputModule = mergedOptions.optimize
-    ? binaryen.readBinary(emitWasmBytes(mod))
-    : mod;
+  markCompilerPerfPhaseDuration("codegen", codegenStartedAt);
+
+  let outputModule = mod;
   if (mergedOptions.optimize) {
+    const prepareStartedAt = startCompilerPerfPhase();
+    outputModule = binaryen.readBinary(emitWasmBytes(mod));
+    markCompilerPerfPhaseDuration("binaryen.prepareOptimizeModule", prepareStartedAt);
     outputModule.setFeatures(VOYD_BINARYEN_FEATURES);
+    const optimizeStartedAt = startCompilerPerfPhase();
     optimizeBinaryenModule({
       module: outputModule,
       profile: mergedOptions.optimizationProfile,
     });
+    markCompilerPerfPhaseDuration("binaryen.optimize", optimizeStartedAt);
   }
 
-  const wasm = mergedOptions.validate ? emitWasmBytes(outputModule) : undefined;
+  let wasm: Uint8Array | undefined;
+  if (mergedOptions.validate) {
+    const validateEmitStartedAt = startCompilerPerfPhase();
+    wasm = emitWasmBytes(outputModule);
+    markCompilerPerfPhaseDuration("binaryen.emitValidatedWasm", validateEmitStartedAt);
+  }
   if (wasm) {
     if (!WebAssembly.validate(wasm as BufferSource)) {
       outputModule.validate();
