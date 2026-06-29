@@ -10,6 +10,11 @@ export interface ExprTypeEntry {
   weak: boolean;
 }
 
+export interface TypeTableSnapshot {
+  exprTypes: readonly [HirExprId, ExprTypeEntry][];
+  symbolSchemes: readonly [SymbolId, TypeSchemeId][];
+}
+
 export interface TypeTable {
   setExprType(
     id: HirExprId,
@@ -24,11 +29,22 @@ export interface TypeTable {
   setSymbolScheme(symbol: SymbolId, scheme: TypeSchemeId): void;
   getSymbolScheme(symbol: SymbolId): TypeSchemeId | undefined;
   entries(): Iterable<[HirExprId, TypeId]>;
+  snapshot(): TypeTableSnapshot;
+  clone(): TypeTable;
 }
 
-export const createTypeTable = (): TypeTable => {
-  const exprTypeStack = [new Map<HirExprId, ExprTypeEntry>()];
-  const symbolSchemes = new Map<SymbolId, TypeSchemeId>();
+export const createTypeTable = (snapshot?: TypeTableSnapshot): TypeTable => {
+  const exprTypeStack = [
+    new Map<HirExprId, ExprTypeEntry>(
+      snapshot?.exprTypes.map(([id, entry]) => [
+        id,
+        { type: entry.type, weak: entry.weak },
+      ]) ?? [],
+    ),
+  ];
+  const symbolSchemes = new Map<SymbolId, TypeSchemeId>(
+    snapshot?.symbolSchemes ?? [],
+  );
 
   const currentExprTypes = (): Map<HirExprId, ExprTypeEntry> =>
     exprTypeStack[exprTypeStack.length - 1]!;
@@ -73,6 +89,14 @@ export const createTypeTable = (): TypeTable => {
   const entries = (): Iterable<[HirExprId, TypeId]> =>
     Array.from(currentExprTypes().entries(), ([id, entry]) => [id, entry.type]);
 
+  const snapshotTable = (): TypeTableSnapshot => ({
+    exprTypes: Array.from(currentExprTypes().entries(), ([id, entry]) => [
+      id,
+      { type: entry.type, weak: entry.weak },
+    ]),
+    symbolSchemes: Array.from(symbolSchemes.entries()),
+  });
+
   return {
     setExprType,
     getExprType,
@@ -83,5 +107,7 @@ export const createTypeTable = (): TypeTable => {
     setSymbolScheme,
     getSymbolScheme,
     entries,
+    snapshot: snapshotTable,
+    clone: () => createTypeTable(snapshotTable()),
   };
 };
