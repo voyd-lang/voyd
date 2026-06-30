@@ -172,6 +172,7 @@ export type VxRuntimeExecutionContext = {
   dispatch(message: VxRuntimeMessage): Promise<void>;
   deferAfterCommands?: (callback: () => void) => void;
   releaseRetainedHandler?: (id: number) => void;
+  trackRetainedHandlerUse?: (result: Promise<unknown> | unknown) => void;
   reportError?: VxRuntimeErrorHandler;
   signal: AbortSignal;
 };

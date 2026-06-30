@@ -382,8 +382,8 @@ async function mountRuntimeApp(
       }
     },
     dispatchMessage: (message) => dispatchQueued(toRuntimeMessage(message)),
-    release: options.handlers?.release,
-    releaseMany: options.handlers?.releaseMany,
+    release: queuedRetainedHandlerReleaser.release,
+    releaseMany: queuedRetainedHandlerReleaser.releaseMany,
   };
   const renderer = createVxDomRenderer(options.container, {
     handlers: runtimeHandlers,
@@ -950,12 +950,21 @@ async function runCommands(
     const handlerId = readHandlerId(commandEnvelope);
     if (handlerId === undefined) throw new Error("vx-dom: command map missing numeric handlerId");
     const child = readRequiredMappedChild(commandEnvelope, "command map");
-    await runCommands(
-      child,
-      host,
-      mapExecutionContext(context, handlerId),
-      nextTaskObserver,
+    const mapped = ownedCommandMapExecutionContext(
+      context,
+      handlerId,
+      mappedOwnedHandlerIds(commandEnvelope),
     );
+    try {
+      await runCommands(
+        child,
+        host,
+        mapped.context,
+        nextTaskObserver,
+      );
+    } finally {
+      mapped.finish();
+    }
     return;
   }
   const command = nextTaskObserver
@@ -973,11 +982,23 @@ function runDelayCommand(
   const ms = readMillis(command);
   if (ms === undefined) throw new Error("vx-dom: delay command missing non-negative millis");
   if (!Object.hasOwn(command, "value")) throw new Error("vx-dom: delay command missing value");
+  let resolveCompletion: () => void = () => undefined;
+  const completion = new Promise<void>((resolve) => {
+    resolveCompletion = resolve;
+  });
   const timeout = setTimeout(() => {
-    if (context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch(toVxMessage(command.value)));
+    if (context.signal.aborted) {
+      resolveCompletion();
+      return;
+    }
+    Promise.resolve(context.dispatch(toVxMessage(command.value))).then(resolveCompletion, resolveCompletion);
   }, ms);
-  context.signal.addEventListener("abort", () => clearTimeout(timeout), { once: true });
+  context.signal.addEventListener("abort", () => {
+    clearTimeout(timeout);
+    resolveCompletion();
+  }, { once: true });
+  context.trackRetainedHandlerUse?.(completion);
+  settleAsyncDispatch(completion);
 }
 
 function runTaskCommand(
@@ -989,7 +1010,24 @@ function runTaskCommand(
   if (taskId === undefined) throw new Error("vx-dom: task command missing numeric taskId");
   if (!observeTask) throw new Error("vx-dom: task command requires task runtime support");
 
-  void observeTask(taskId).then((outcome) => {
+  const ownedHandlerIds = mappedOwnedHandlerIds(command);
+  let released = false;
+  const releaseOwnedHandlers = () => {
+    if (released) return;
+    released = true;
+    ownedHandlerIds.forEach((id) => context.releaseRetainedHandler?.(id));
+  };
+  let resolveAbort: () => void = () => undefined;
+  const abortCompletion = new Promise<void>((resolve) => {
+    resolveAbort = resolve;
+  });
+  const abortListener = () => {
+    releaseOwnedHandlers();
+    resolveAbort();
+  };
+  context.signal.addEventListener("abort", abortListener, { once: true });
+
+  const completion = observeTask(taskId).then((outcome) => {
     if (context.signal.aborted) return;
     if (outcome.kind === "failed") {
       context.reportError?.(outcome.error, { phase: "commands" });
@@ -1005,7 +1043,13 @@ function runTaskCommand(
     );
   }).catch((error) => {
     context.reportError?.(error, { phase: "commands" });
+  }).finally(() => {
+    context.signal.removeEventListener("abort", abortListener);
+    releaseOwnedHandlers();
+    resolveAbort();
   });
+  context.trackRetainedHandlerUse?.(Promise.race([completion, abortCompletion]));
+  settleAsyncDispatch(completion);
 }
 
 async function runCopyToClipboardCommand(command: VxCommandEnvelope): Promise<void> {
@@ -1704,8 +1748,63 @@ function mapExecutionContext(
 ): VxRuntimeExecutionContext {
   return {
     signal: context.signal,
+    deferAfterCommands: context.deferAfterCommands,
+    releaseRetainedHandler: context.releaseRetainedHandler,
+    trackRetainedHandlerUse: context.trackRetainedHandlerUse,
     reportError: context.reportError,
     dispatch: (message) => context.dispatch({ kind: "map", handlerId, message }),
+  };
+}
+
+function ownedCommandMapExecutionContext(
+  context: VxRuntimeExecutionContext,
+  handlerId: number,
+  ownedHandlerIds: readonly number[],
+): {
+  context: VxRuntimeExecutionContext;
+  finish: () => void;
+} {
+  if (ownedHandlerIds.length === 0) {
+    return {
+      context: mapExecutionContext(context, handlerId),
+      finish: () => undefined,
+    };
+  }
+
+  let commandReturned = false;
+  let pendingUses = 0;
+  let released = false;
+  const releaseIfDone = () => {
+    if (!commandReturned || pendingUses > 0 || released) return;
+    released = true;
+    ownedHandlerIds.forEach((id) => context.releaseRetainedHandler?.(id));
+  };
+  const trackUse = (result: Promise<unknown> | unknown) => {
+    pendingUses += 1;
+    context.trackRetainedHandlerUse?.(result);
+    void Promise.resolve(result).catch(() => undefined).then(() => {
+      pendingUses -= 1;
+      releaseIfDone();
+    });
+  };
+
+  return {
+    context: {
+      signal: context.signal,
+      deferAfterCommands: context.deferAfterCommands,
+      releaseRetainedHandler: context.releaseRetainedHandler,
+      trackRetainedHandlerUse: trackUse,
+      reportError: context.reportError,
+      dispatch: (message) => {
+        const result = context.dispatch({ kind: "map", handlerId, message });
+        trackUse(result);
+        return result;
+      },
+    },
+    finish: () => {
+      commandReturned = true;
+      releaseIfDone();
+    },
   };
 }
 
@@ -1721,6 +1820,8 @@ function mutableMappedSubscriptionContext(
     context: {
       signal: context.signal,
       deferAfterCommands: context.deferAfterCommands,
+      releaseRetainedHandler: context.releaseRetainedHandler,
+      trackRetainedHandlerUse: context.trackRetainedHandlerUse,
       reportError: context.reportError,
       dispatch: (message) => context.dispatch(mapRuntimeMessage(message, mapHandlerIds)),
     },
@@ -1735,8 +1836,8 @@ function mappedHandlerIds(subscription: VxSubscriptionEnvelope): number[] {
   return Array.isArray(raw) ? raw.filter((id): id is number => typeof id === "number") : [];
 }
 
-function mappedOwnedHandlerIds(subscription: VxSubscriptionEnvelope): number[] {
-  const raw = subscription[ownedMapHandlerIdsProperty];
+function mappedOwnedHandlerIds(input: Record<string, unknown>): number[] {
+  const raw = input[ownedMapHandlerIdsProperty];
   return Array.isArray(raw) ? raw.filter((id): id is number => typeof id === "number") : [];
 }
 

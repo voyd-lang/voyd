@@ -704,6 +704,52 @@ describe("vx-dom browser renderer", () => {
     ]);
   });
 
+  it("releases app-retained DOM handlers through the app registry", async () => {
+    const release = vi.fn<(id: number) => void>();
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => ({ frame: frame(buttonNode(1)) }),
+      render: () => frame(buttonNode(1)),
+      dispatch: () => ({ frame: frame(buttonNode(2)) }),
+    };
+
+    const mounted = await mountVxApp({ container, app });
+    container.querySelector("button")!.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    await nextTurn();
+
+    expect(release).toHaveBeenCalledWith(1);
+
+    mounted.dispose();
+    await nextTurn();
+
+    expect(release).toHaveBeenCalledWith(2);
+  });
+
+  it("delays app-retained DOM handler release until queued events drain", async () => {
+    const release = vi.fn<(id: number) => void>();
+    const releaseCountsAtDispatch: number[] = [];
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => ({ frame: frame(buttonNode(1)) }),
+      render: () => frame(buttonNode(1)),
+      dispatch: () => {
+        releaseCountsAtDispatch.push(release.mock.calls.length);
+        return { frame: frame({ kind: "fragment", children: [] }) };
+      },
+    };
+
+    await mountVxApp({ container, app });
+    const button = container.querySelector("button")!;
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    button.dispatchEvent(new MouseEvent("click", { bubbles: true }));
+
+    await nextTurn();
+
+    expect(releaseCountsAtDispatch).toEqual([0, 0]);
+    expect(release).toHaveBeenCalledWith(1);
+  });
+
   it("runs delay commands with the default browser runtime host", async () => {
     vi.useFakeTimers();
     let count = 0;
@@ -770,6 +816,128 @@ describe("vx-dom browser renderer", () => {
     await nextTurn();
 
     expect(container.textContent).toBe("Count: 1");
+  });
+
+  it("releases owned task command handlers after task completion dispatches", async () => {
+    const seenMessages: unknown[] = [];
+    const release = vi.fn<(id: number) => void>();
+    let resolveTask:
+      | ((outcome: { kind: "value"; value: { type: "increment" } }) => void)
+      | undefined;
+    const observeTask = vi.fn(
+      () =>
+        new Promise<{ kind: "value"; value: { type: "increment" } }>((resolve) => {
+          resolveTask = resolve;
+        }),
+    );
+    const commands = {
+      type: "cmd",
+      kind: "task",
+      taskId: 7,
+      handlerId: 88,
+      __vxOwnedMapHandlerIds: [88],
+    };
+    Object.defineProperty(commands, Symbol.for("voyd.taskObserver"), {
+      configurable: true,
+      value: observeTask,
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => ({
+        frame: counterNode(0),
+        commands,
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        expect(release).not.toHaveBeenCalledWith(88);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    await mountVxApp({ container, app });
+
+    expect(release).not.toHaveBeenCalledWith(88);
+
+    resolveTask?.({ kind: "value", value: { type: "increment" } });
+    await nextTurn();
+
+    expect(seenMessages).toContainEqual({
+      kind: "map",
+      handlerId: 88,
+      message: { kind: "msgpack", value: { type: "increment" } },
+    });
+    expect(release).toHaveBeenCalledWith(88);
+  });
+
+  it("releases owned task command handlers after failed task outcomes", async () => {
+    const error = new Error("task failed");
+    const onError = vi.fn();
+    const release = vi.fn<(id: number) => void>();
+    const observeTask = vi.fn(async () => ({ kind: "failed" as const, error }));
+    const commands = {
+      type: "cmd",
+      kind: "task",
+      taskId: 7,
+      handlerId: 88,
+      __vxOwnedMapHandlerIds: [88],
+    };
+    Object.defineProperty(commands, Symbol.for("voyd.taskObserver"), {
+      configurable: true,
+      value: observeTask,
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => ({
+        frame: counterNode(0),
+        commands,
+      }),
+      render: () => counterNode(0),
+      dispatch: () => counterNode(0),
+    };
+
+    await mountVxApp({ container, app, onError });
+    await nextTurn();
+
+    expect(onError).toHaveBeenCalledWith(
+      error,
+      expect.objectContaining({ phase: "commands" }),
+    );
+    expect(release).toHaveBeenCalledWith(88);
+  });
+
+  it("releases owned task command handlers when disposed before task completion", async () => {
+    const release = vi.fn<(id: number) => void>();
+    const observeTask = vi.fn(() => new Promise<{ kind: "value"; value: { type: "increment" } }>(() => undefined));
+    const commands = {
+      type: "cmd",
+      kind: "task",
+      taskId: 7,
+      handlerId: 88,
+      __vxOwnedMapHandlerIds: [88],
+    };
+    Object.defineProperty(commands, Symbol.for("voyd.taskObserver"), {
+      configurable: true,
+      value: observeTask,
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => ({
+        frame: counterNode(0),
+        commands,
+      }),
+      render: () => counterNode(0),
+      dispatch: () => counterNode(0),
+    };
+
+    const mounted = await mountVxApp({ container, app });
+
+    expect(release).not.toHaveBeenCalledWith(88);
+
+    mounted.dispose();
+    await nextTurn();
+
+    expect(release).toHaveBeenCalledWith(88);
   });
 
   it("reports asynchronous task command failures through onError", async () => {
@@ -1072,6 +1240,94 @@ describe("vx-dom browser renderer", () => {
       message: { kind: "msgpack", value: "Clipboard text" },
     });
     expect(release).toHaveBeenCalledWith(77);
+  });
+
+  it("releases mapped clipboard read handlers", async () => {
+    const seenMessages: unknown[] = [];
+    const readText = vi.fn(async () => "Clipboard text");
+    const release = vi.fn<(id: number) => void>();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { readText },
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => ({
+        frame: counterNode(0),
+        commands: {
+          type: "cmd",
+          kind: "map",
+          handlerId: 44,
+          __vxOwnedMapHandlerIds: [44],
+          child: { type: "cmd", kind: "read_clipboard", handlerId: 77 },
+        },
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    await mountVxApp({ container, app });
+    await nextTurn();
+
+    expect(readText).toHaveBeenCalledOnce();
+    expect(seenMessages).toContainEqual({
+      kind: "map",
+      handlerId: 44,
+      message: {
+        kind: "map",
+        handlerId: 77,
+        message: { kind: "msgpack", value: "Clipboard text" },
+      },
+    });
+    expect(release).toHaveBeenCalledWith(77);
+    expect(release).toHaveBeenCalledWith(44);
+  });
+
+  it("keeps owned mapped command handlers until async commands dispatch", async () => {
+    vi.useFakeTimers();
+    const seenMessages: unknown[] = [];
+    const release = vi.fn<(id: number) => void>();
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => ({
+        frame: counterNode(0),
+        commands: {
+          type: "cmd",
+          kind: "map",
+          handlerId: 44,
+          __vxOwnedMapHandlerIds: [44],
+          child: {
+            type: "cmd",
+            kind: "delay",
+            ms: 25,
+            value: { type: "increment" },
+          },
+        },
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        expect(release).not.toHaveBeenCalledWith(44);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    await mountVxApp({ container, app });
+    await vi.advanceTimersByTimeAsync(24);
+
+    expect(release).not.toHaveBeenCalledWith(44);
+
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(seenMessages).toContainEqual({
+      kind: "map",
+      handlerId: 44,
+      message: { kind: "msgpack", value: { type: "increment" } },
+    });
+    expect(release).toHaveBeenCalledWith(44);
   });
 
   it("releases clipboard read handlers when the clipboard read fails", async () => {
