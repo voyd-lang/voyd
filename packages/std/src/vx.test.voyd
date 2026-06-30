@@ -396,6 +396,14 @@ test "vx typed command constructors encode messages through the boundary":
   assert_payload_has_field(mapped.payload, "child")
   assert_array_payload_len(mapped.payload, "__vxOwnedMapHandlerIds", 1)
 
+  let read_clipboard = Cmd<TypedVxTestMsg>::read_clipboard(
+    (value: String) -> TypedVxTestMsg => TypedVxTestMsg::Rename { value: value }
+  )
+  assert_string_payload_field(read_clipboard.payload, "type", "cmd")
+  assert_string_payload_field(read_clipboard.payload, "kind", "read_clipboard")
+  assert_payload_has_field(read_clipboard.payload, "handlerId")
+  assert_array_payload_len(read_clipboard.payload, "__vxOwnedMapHandlerIds", 1)
+
   let task = Task<String> { id: 23 }
   let performed = Cmd<TypedVxTestMsg>::perform<String>(
     task: task,

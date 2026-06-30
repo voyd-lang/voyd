@@ -288,7 +288,8 @@ impl<Msg> Cmd<Msg>
     Cmd<Msg> { payload: msgpack::make_map(out) }
 
   api fn read_clipboard(handler: fn(String) -> Msg) -> Cmd<Msg>
-    Cmd<Msg>::read_clipboard(handler_id: retain_typed_message_mapper(handler))
+    let handler_id = retain_typed_message_mapper(handler)
+    mark_owned_handler(Cmd<Msg>::read_clipboard(handler_id: handler_id), handler_id)
 
   /// Sets the browser document title through the VX runtime host.
   api fn set_document_title(value: String) -> Cmd<Msg>

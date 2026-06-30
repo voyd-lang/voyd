@@ -892,7 +892,6 @@ function collectHandlerIds(vnode: VNode): Set<number> {
     if (node.kind === "element") {
       (node.events ?? []).forEach((event) => {
         if (typeof event.handlerId === "number") ids.add(event.handlerId);
-        event.mapHandlerIds?.forEach((handlerId) => ids.add(handlerId));
       });
       (node.children ?? []).forEach(visit);
       return;
@@ -1121,7 +1120,7 @@ async function runReadClipboardCommand(
     if (context.signal.aborted) return;
     settleAsyncDispatch(context.dispatch({ kind: "map", handlerId, message: toVxMessage(value) }));
   } finally {
-    context.releaseRetainedHandler?.(handlerId);
+    mappedOwnedHandlerIds(command).forEach((id) => context.releaseRetainedHandler?.(id));
   }
 }
 
@@ -1553,8 +1552,15 @@ function subscriptionIdentityKey(subscription: VxSubscriptionEnvelope): string {
   const mapPrefix = mappedHandlerIdentityParts(subscription)
     .join("/");
   const explicitKey = subscription.key ?? subscription.id;
-  const base = `${subscription.kind}:${String(explicitKey)}`;
+  const base = `${subscriptionIdentityKind(subscription)}:${String(explicitKey)}`;
   return mapPrefix ? `${mapPrefix}|${base}` : base;
+}
+
+function subscriptionIdentityKind(subscription: VxSubscriptionEnvelope): string {
+  if (subscription.kind === "keyboard" && typeof subscription.event === "string") {
+    return `${subscription.kind}:${subscription.event}`;
+  }
+  return subscription.kind;
 }
 
 function subscriptionSignature(subscription: VxSubscriptionEnvelope): string {

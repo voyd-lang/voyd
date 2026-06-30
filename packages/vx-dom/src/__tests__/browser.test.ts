@@ -136,7 +136,7 @@ describe("vx-dom browser renderer", () => {
     expect(dispatch).toHaveBeenLastCalledWith(2, expect.objectContaining({ kind: "mouse" }));
   });
 
-  it("releases mapped event handler ids when mapped views are removed", () => {
+  it("does not release outer mapped event handler ids when mapped views are removed", () => {
     const dispatch = vi.fn<RetainedDispatch>();
     const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
     const renderer = createVxDomRenderer(container, {
@@ -153,7 +153,7 @@ describe("vx-dom browser renderer", () => {
     });
     renderer.render(frame(buttonNode(2)));
 
-    expect(releaseMany).toHaveBeenCalledWith([1, 9]);
+    expect(releaseMany).toHaveBeenCalledWith([1]);
 
     renderer.dispose();
     expect(releaseMany).toHaveBeenLastCalledWith(new Set([2]));
@@ -1216,7 +1216,14 @@ describe("vx-dom browser renderer", () => {
         return {
           frame: counterNode(seenMessages.length),
           ...(shouldReadClipboard
-            ? { commands: { type: "cmd", kind: "read_clipboard", handlerId: 77 } }
+            ? {
+                commands: {
+                  type: "cmd",
+                  kind: "read_clipboard",
+                  handlerId: 77,
+                  __vxOwnedMapHandlerIds: [77],
+                },
+              }
             : {}),
         };
       },
@@ -1259,7 +1266,12 @@ describe("vx-dom browser renderer", () => {
           kind: "map",
           handlerId: 44,
           __vxOwnedMapHandlerIds: [44],
-          child: { type: "cmd", kind: "read_clipboard", handlerId: 77 },
+          child: {
+            type: "cmd",
+            kind: "read_clipboard",
+            handlerId: 77,
+            __vxOwnedMapHandlerIds: [77],
+          },
         },
       }),
       render: () => counterNode(seenMessages.length),
@@ -1284,6 +1296,38 @@ describe("vx-dom browser renderer", () => {
     });
     expect(release).toHaveBeenCalledWith(77);
     expect(release).toHaveBeenCalledWith(44);
+  });
+
+  it("does not release caller-owned clipboard read handlers", async () => {
+    const seenMessages: unknown[] = [];
+    const readText = vi.fn(async () => "Clipboard text");
+    const release = vi.fn<(id: number) => void>();
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { readText },
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => ({
+        frame: counterNode(0),
+        commands: { type: "cmd", kind: "read_clipboard", handlerId: 77 },
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    await mountVxApp({ container, app });
+    await nextTurn();
+
+    expect(seenMessages).toContainEqual({
+      kind: "map",
+      handlerId: 77,
+      message: { kind: "msgpack", value: "Clipboard text" },
+    });
+    expect(release).not.toHaveBeenCalled();
   });
 
   it("keeps owned mapped command handlers until async commands dispatch", async () => {
@@ -1342,7 +1386,12 @@ describe("vx-dom browser renderer", () => {
       retainedCallbacks: { release },
       init: () => ({
         frame: counterNode(0),
-        commands: { type: "cmd", kind: "read_clipboard", handlerId: 77 },
+        commands: {
+          type: "cmd",
+          kind: "read_clipboard",
+          handlerId: 77,
+          __vxOwnedMapHandlerIds: [77],
+        },
       }),
       render: () => counterNode(0),
       dispatch: () => counterNode(0),
@@ -1948,6 +1997,50 @@ describe("vx-dom browser renderer", () => {
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "s" }));
     await nextTurn();
     expect(seenMessages).toHaveLength(1);
+  });
+
+  it("keeps keyboard down and up subscriptions distinct for the same key", async () => {
+    const seenMessages: unknown[] = [];
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: {
+          type: "sub",
+          kind: "batch",
+          children: [
+            {
+              type: "sub",
+              kind: "keyboard",
+              key: "Escape",
+              event: "keydown",
+              value: { type: "down" },
+            },
+            {
+              type: "sub",
+              kind: "keyboard",
+              key: "Escape",
+              event: "keyup",
+              value: { type: "up" },
+            },
+          ],
+        },
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    await mountVxApp({ container, app });
+    window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    window.dispatchEvent(new KeyboardEvent("keyup", { key: "Escape" }));
+    await nextTurn();
+
+    expect(seenMessages).toEqual([
+      expect.objectContaining({ value: { type: "down" } }),
+      expect.objectContaining({ value: { type: "up" } }),
+    ]);
   });
 
   it("runs keyboard payload subscriptions without fixed message values", async () => {
