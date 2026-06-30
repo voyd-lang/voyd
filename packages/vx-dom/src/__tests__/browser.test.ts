@@ -1184,6 +1184,14 @@ describe("vx-dom browser renderer", () => {
         search: "?edited=1",
       }),
     }));
+    const finalLocationMessages = locationMessages.filter((message) =>
+      isRecord(message) &&
+      isRecord(message.payload) &&
+      message.payload.pathname === "/draft" &&
+      message.payload.search === "?edited=1" &&
+      message.payload.hash === "#section"
+    );
+    expect(finalLocationMessages).toHaveLength(1);
     expect(document.title).toBe("VX Draft");
     expect(pushState).toHaveBeenCalledWith(null, "", "/draft");
     expect(replaceState).toHaveBeenCalledWith(null, "", "/draft?edited=1");
@@ -1632,13 +1640,17 @@ describe("vx-dom browser renderer", () => {
     let dispatchSubscription: ((message: VxRuntimeMessage) => Promise<void>) | undefined;
     const dispose = vi.fn();
     const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
-    const mappedSubscription = () => ({
-      type: "sub",
-      kind: "map",
-      handlerId: nextHandlerId++,
-      handlerKey: 9001,
-      child: { type: "sub", kind: "timer", key: "main" },
-    });
+    const mappedSubscription = () => {
+      const handlerId = nextHandlerId++;
+      return {
+        type: "sub",
+        kind: "map",
+        handlerId,
+        handlerKey: 9001,
+        __vxOwnedMapHandlerIds: [handlerId],
+        child: { type: "sub", kind: "timer", key: "main" },
+      };
+    };
     const runSubscription = vi.fn<VxSubscriptionRunner>((_subscription, context) => {
       dispatchSubscription = context.dispatch;
       return dispose;
@@ -1697,13 +1709,17 @@ describe("vx-dom browser renderer", () => {
     let dispatchSubscription: ((message: VxRuntimeMessage) => Promise<void>) | undefined;
     let resolveQueuedTick: (() => void) | undefined;
     const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
-    const mappedSubscription = () => ({
-      type: "sub",
-      kind: "map",
-      handlerId: nextHandlerId++,
-      handlerKey: 9001,
-      child: { type: "sub", kind: "timer", key: "main" },
-    });
+    const mappedSubscription = () => {
+      const handlerId = nextHandlerId++;
+      return {
+        type: "sub",
+        kind: "map",
+        handlerId,
+        handlerKey: 9001,
+        __vxOwnedMapHandlerIds: [handlerId],
+        child: { type: "sub", kind: "timer", key: "main" },
+      };
+    };
     const runSubscription = vi.fn<VxSubscriptionRunner>((_subscription, context) => {
       dispatchSubscription = context.dispatch;
     });
@@ -1766,13 +1782,17 @@ describe("vx-dom browser renderer", () => {
     let nextHandlerId = 1;
     const appRelease = vi.fn<(id: number) => void>();
     const overrideReleaseMany = vi.fn<(ids: Iterable<number>) => void>();
-    const mappedSubscription = () => ({
-      type: "sub",
-      kind: "map",
-      handlerId: nextHandlerId++,
-      handlerKey: 9001,
-      child: { type: "sub", kind: "timer", key: "main" },
-    });
+    const mappedSubscription = () => {
+      const handlerId = nextHandlerId++;
+      return {
+        type: "sub",
+        kind: "map",
+        handlerId,
+        handlerKey: 9001,
+        __vxOwnedMapHandlerIds: [handlerId],
+        child: { type: "sub", kind: "timer", key: "main" },
+      };
+    };
     const app: VxAppRuntime = {
       retainedCallbacks: { release: appRelease },
       init: () => ({
@@ -1800,24 +1820,65 @@ describe("vx-dom browser renderer", () => {
     expect(overrideReleaseMany).not.toHaveBeenCalled();
   });
 
+  it("does not release caller-owned stable subscription handlers", async () => {
+    let nextHandlerId = 1;
+    const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
+    const mappedSubscription = () => ({
+      type: "sub",
+      kind: "map",
+      handlerId: nextHandlerId++,
+      handlerKey: 9001,
+      child: { type: "sub", kind: "timer", key: "main" },
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { releaseMany },
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: mappedSubscription(),
+      }),
+      render: () => counterNode(0),
+      dispatch: () => ({
+        frame: counterNode(0),
+        subscriptions: mappedSubscription(),
+      }),
+    };
+
+    const mounted = await mountVxApp({
+      container,
+      app,
+      runtimeHost: { subscriptions: { timer: () => undefined } },
+    });
+
+    await mounted.dispatch({ kind: "debug", name: "refresh" });
+    mounted.dispose();
+    await nextTurn();
+
+    const releasedIds = releaseMany.mock.calls.flatMap(([ids]) => Array.from(ids));
+    expect(releasedIds).toEqual([]);
+  });
+
   it("does not release outer mapped subscription handlers", async () => {
     const seenMessages: unknown[] = [];
     let nextHandlerId = 1;
     let dispatchSubscription: ((message: VxRuntimeMessage) => Promise<void>) | undefined;
     const dispose = vi.fn();
     const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
-    const mappedSubscription = () => ({
-      type: "sub",
-      kind: "map",
-      handlerId: 99,
-      child: {
+    const mappedSubscription = () => {
+      const handlerId = nextHandlerId++;
+      return {
         type: "sub",
         kind: "map",
-        handlerId: nextHandlerId++,
-        handlerKey: 9001,
-        child: { type: "sub", kind: "timer", key: "main" },
-      },
-    });
+        handlerId: 99,
+        child: {
+          type: "sub",
+          kind: "map",
+          handlerId,
+          handlerKey: 9001,
+          __vxOwnedMapHandlerIds: [handlerId],
+          child: { type: "sub", kind: "timer", key: "main" },
+        },
+      };
+    };
     const runSubscription = vi.fn<VxSubscriptionRunner>((_subscription, context) => {
       dispatchSubscription = context.dispatch;
       return dispose;

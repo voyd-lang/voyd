@@ -1265,22 +1265,30 @@ function runLocationChangeSubscription(
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
   if (typeof window === "undefined") return;
+  let observedChange = false;
   const dispatch = () => {
     if (context.signal.aborted) return;
     settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, locationPayload())));
   };
-  window.addEventListener("popstate", dispatch);
-  window.addEventListener("hashchange", dispatch);
-  window.addEventListener(locationChangeEvent, dispatch);
+  const dispatchObserved = () => {
+    observedChange = true;
+    dispatch();
+  };
+  const dispatchInitial = () => {
+    if (!observedChange) dispatch();
+  };
+  window.addEventListener("popstate", dispatchObserved);
+  window.addEventListener("hashchange", dispatchObserved);
+  window.addEventListener(locationChangeEvent, dispatchObserved);
   if (context.deferAfterCommands) {
-    context.deferAfterCommands(dispatch);
+    context.deferAfterCommands(dispatchInitial);
   } else {
-    setTimeout(dispatch, 0);
+    setTimeout(dispatchInitial, 0);
   }
   return () => {
-    window.removeEventListener("popstate", dispatch);
-    window.removeEventListener("hashchange", dispatch);
-    window.removeEventListener(locationChangeEvent, dispatch);
+    window.removeEventListener("popstate", dispatchObserved);
+    window.removeEventListener("hashchange", dispatchObserved);
+    window.removeEventListener(locationChangeEvent, dispatchObserved);
   };
 }
 
@@ -1527,11 +1535,12 @@ function flattenSubscriptions(
     const handlerId = readHandlerId(envelope);
     if (handlerId === undefined) throw new Error("vx-dom: subscription map missing numeric handlerId");
     const handlerKey = readHandlerKey(envelope);
+    const ownedHandlerIds = mappedOwnedHandlerIds(envelope);
     return flattenSubscriptions(
       readRequiredMappedChild(envelope, "subscription map"),
       [...mapHandlerIds, handlerId],
       [...mapHandlerKeys, handlerKey ?? `id:${handlerId}`],
-      handlerKey === undefined ? ownedMapHandlerIds : [...ownedMapHandlerIds, handlerId],
+      [...ownedMapHandlerIds, ...ownedHandlerIds],
     );
   }
   if (!optionalSubscriptionKey(envelope)) {

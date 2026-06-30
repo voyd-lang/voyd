@@ -490,6 +490,13 @@ test "vx typed subscription constructors encode messages through the boundary":
   assert_string_payload_field(batch.payload, "kind", "batch")
   assert_array_payload_len(batch.payload, "children", 1)
 
+  let mapped = every.map<MsgPack>((_msg: TypedVxTestMsg) -> MsgPack => msgpack::make_string("mapped"))
+  assert_string_payload_field(mapped.payload, "type", "sub")
+  assert_string_payload_field(mapped.payload, "kind", "map")
+  assert_payload_has_field(mapped.payload, "handlerId")
+  assert_payload_has_field(mapped.payload, "child")
+  assert_array_payload_len(mapped.payload, "__vxOwnedMapHandlerIds", 1)
+
 test "vx component state and task APIs use component effect":
   let ~seen = Array<String>::init()
 

@@ -488,9 +488,10 @@ impl<Msg> Sub<Msg>
     handler: fn(MsgPack) -> MsgPack,
     { handler_key: i32 = stable_callsite_id() }
   ) -> Sub<NextMsg>
-    self.map<NextMsg>(
-      handler_id: retain_message_mapper(handler),
-      handler_key: handler_key
+    let handler_id = retain_message_mapper(handler)
+    mark_owned_subscription(
+      self.map<NextMsg>(handler_id: handler_id, handler_key: handler_key),
+      handler_id
     )
 
   /// Lifts a child subscription through a retained typed message mapper.
@@ -499,9 +500,10 @@ impl<Msg> Sub<Msg>
     handler: fn(Msg) -> NextMsg,
     { handler_key: i32 = stable_callsite_id() }
   ) -> Sub<NextMsg>
-    self.map<NextMsg>(
-      handler_id: retain_typed_message_mapper(handler),
-      handler_key: handler_key
+    let handler_id = retain_typed_message_mapper(handler)
+    mark_owned_subscription(
+      self.map<NextMsg>(handler_id: handler_id, handler_key: handler_key),
+      handler_id
     )
 
   /// Creates a host/runtime subscription envelope for a registered VX subscription runner.
@@ -2294,6 +2296,15 @@ fn mark_owned_handler<Msg>(cmd: Cmd<Msg>, handler_id: i32) -> Cmd<Msg>
       Cmd<Msg> { payload: msgpack::make_map(out) }
     Err:
       cmd
+
+fn mark_owned_subscription<Msg>(sub: Sub<Msg>, handler_id: i32) -> Sub<Msg>
+  match(msgpack::unpack_map(sub.payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      let ~out = value
+      set_owned_handler(~out, handler_id)
+      Sub<Msg> { payload: msgpack::make_map(out) }
+    Err:
+      sub
 
 fn set_owned_handler(~out: Dict<String, MsgPack>, handler_id: i32) -> void
   let ~owned = Array<MsgPack>::with_capacity(1)
