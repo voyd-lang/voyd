@@ -190,6 +190,39 @@ describe("createVoydVxAppRuntime", () => {
     ]);
   });
 
+  it("resolves mapped subscription payloads through retained callbacks before step", async () => {
+    const seenMessages: unknown[] = [];
+    const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
+      if (id === 9) return { type: "online", online: payload };
+      throw new Error(`unexpected retained handler ${id}`);
+    });
+    const host = fakeHost({
+      init: async () => "ready",
+      view: async ([current]) => textFrame(String(current)),
+      step: async ([current, message]) => {
+        seenMessages.push(message);
+        return current;
+      },
+    });
+    host.retainedCallbacks = { dispatch: retainedDispatch };
+    const app = createVoydVxAppRuntime({ host });
+
+    await app.init?.();
+    await app.dispatch({
+      kind: "map",
+      handlerId: 9,
+      message: {
+        kind: "subscription",
+        subscriptionKind: "online_status",
+        key: "network",
+        payload: true,
+      },
+    });
+
+    expect(seenMessages).toEqual([{ type: "online", online: true }]);
+    expect(retainedDispatch).toHaveBeenCalledWith(9, true);
+  });
+
   it("rerenders mapped local-only retained callbacks without step or mapper dispatch", async () => {
     const seenMessages: unknown[] = [];
     const retainedDispatch = vi.fn(async (id: number) => {

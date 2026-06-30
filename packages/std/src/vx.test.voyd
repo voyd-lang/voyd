@@ -389,6 +389,21 @@ test "vx typed command constructors encode messages through the boundary":
   assert_string_payload_field(batch.payload, "kind", "batch")
   assert_array_payload_len(batch.payload, "children", 2)
 
+  let mapped = message.map<MsgPack>((_msg: TypedVxTestMsg) -> MsgPack => msgpack::make_string("mapped"))
+  assert_string_payload_field(mapped.payload, "type", "cmd")
+  assert_string_payload_field(mapped.payload, "kind", "map")
+  assert_payload_has_field(mapped.payload, "handlerId")
+  assert_payload_has_field(mapped.payload, "child")
+  assert_array_payload_len(mapped.payload, "__vxOwnedMapHandlerIds", 1)
+
+  let read_clipboard = Cmd<TypedVxTestMsg>::read_clipboard(
+    (value: String) -> TypedVxTestMsg => TypedVxTestMsg::Rename { value: value }
+  )
+  assert_string_payload_field(read_clipboard.payload, "type", "cmd")
+  assert_string_payload_field(read_clipboard.payload, "kind", "read_clipboard")
+  assert_payload_has_field(read_clipboard.payload, "handlerId")
+  assert_array_payload_len(read_clipboard.payload, "__vxOwnedMapHandlerIds", 1)
+
   let task = Task<String> { id: 23 }
   let performed = Cmd<TypedVxTestMsg>::perform<String>(
     task: task,
@@ -398,6 +413,7 @@ test "vx typed command constructors encode messages through the boundary":
   assert_string_payload_field(performed.payload, "kind", "task")
   assert_i32_payload_field(performed.payload, "taskId", 23)
   assert_payload_has_field(performed.payload, "handlerId")
+  assert_array_payload_len(performed.payload, "__vxOwnedMapHandlerIds", 1)
 
   try open
     let spawned = Cmd<TypedVxTestMsg>::task(
@@ -408,6 +424,7 @@ test "vx typed command constructors encode messages through the boundary":
     assert_string_payload_field(spawned.payload, "kind", "task")
     assert_payload_has_field(spawned.payload, "taskId")
     assert_payload_has_field(spawned.payload, "handlerId")
+    assert_array_payload_len(spawned.payload, "__vxOwnedMapHandlerIds", 1)
 
 test "vx subscription constructors encode runtime payloads":
   let none = Sub<MsgPack>::none()
@@ -472,6 +489,13 @@ test "vx typed subscription constructors encode messages through the boundary":
   assert_string_payload_field(batch.payload, "type", "sub")
   assert_string_payload_field(batch.payload, "kind", "batch")
   assert_array_payload_len(batch.payload, "children", 1)
+
+  let mapped = every.map<MsgPack>((_msg: TypedVxTestMsg) -> MsgPack => msgpack::make_string("mapped"))
+  assert_string_payload_field(mapped.payload, "type", "sub")
+  assert_string_payload_field(mapped.payload, "kind", "map")
+  assert_payload_has_field(mapped.payload, "handlerId")
+  assert_payload_has_field(mapped.payload, "child")
+  assert_array_payload_len(mapped.payload, "__vxOwnedMapHandlerIds", 1)
 
 test "vx component state and task APIs use component effect":
   let ~seen = Array<String>::init()

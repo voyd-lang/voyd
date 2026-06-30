@@ -21,6 +21,7 @@ import type {
   VxRuntimeExecutionContext,
   VxRuntimeHostOptions,
   VxRuntimeMessage,
+  VxRuntimeSubscriptionMessage,
   VxRuntimeStep,
   VxSubscriptionDisposer,
   VxSubscriptionEnvelope,
@@ -99,10 +100,19 @@ type ListenerRecord = {
 type ActiveSubscription = {
   signature: string;
   dispose: VxSubscriptionDisposer;
+  mapHandlerIds: number[];
+  ownedMapHandlerIds: number[];
+  setMapHandlerIds: (ids: number[]) => void;
 };
 
+type RetainedHandlerReleaser = Pick<RetainedEventHandlerRegistry, "release" | "releaseMany">;
+
 const mapHandlerIdsProperty = "__vxMapHandlerIds";
+const mapHandlerKeysProperty = "__vxMapHandlerKeys";
+const ownedMapHandlerIdsProperty = "__vxOwnedMapHandlerIds";
+const mapHandlerIdentityProperty = "__vxMapHandlerIdentity";
 const taskObserverProperty = Symbol.for("voyd.taskObserver");
+const locationChangeEvent = "vxlocationchange";
 const listenerState = new WeakMap<Element, Map<string, ListenerRecord>>();
 
 type TaskRunOutcome =
@@ -117,15 +127,43 @@ export function createBrowserVxRuntimeHost(
 ): VxRuntimeHostOptions {
   return {
     commands: {
+      copy_to_clipboard: runCopyToClipboardCommand,
       delay: runDelayCommand,
       focus: runFocusCommand,
+      local_storage_clear: runLocalStorageClearCommand,
+      local_storage_remove: runLocalStorageRemoveCommand,
+      local_storage_set: runLocalStorageSetCommand,
+      navigate_back: runNavigateBackCommand,
+      navigate_forward: runNavigateForwardCommand,
+      open_url: runOpenUrlCommand,
+      push_url: runPushUrlCommand,
+      read_clipboard: runReadClipboardCommand,
+      replace_url: runReplaceUrlCommand,
       scroll_into_view: runScrollIntoViewCommand,
+      scroll_window_by: runScrollWindowByCommand,
+      scroll_window_to: runScrollWindowToCommand,
+      select_text: runSelectTextCommand,
+      session_storage_clear: runSessionStorageClearCommand,
+      session_storage_remove: runSessionStorageRemoveCommand,
+      session_storage_set: runSessionStorageSetCommand,
+      set_hash: runSetHashCommand,
+      set_document_title: runSetDocumentTitleCommand,
       task: runTaskCommand,
       ...overrides.commands,
     },
     subscriptions: {
+      animation_frame: runAnimationFrameSubscription,
+      broadcast_channel: runBroadcastChannelSubscription,
       interval: runIntervalSubscription,
       keyboard: runKeyboardSubscription,
+      location_change: runLocationChangeSubscription,
+      media_query: runMediaQuerySubscription,
+      online_status: runOnlineStatusSubscription,
+      storage: runStorageSubscription,
+      visibility_change: runVisibilityChangeSubscription,
+      window_blur: runWindowEventSubscription,
+      window_focus: runWindowEventSubscription,
+      window_resize: runWindowResizeSubscription,
       ...overrides.subscriptions,
     },
     onError: overrides.onError,
@@ -278,7 +316,30 @@ async function mountRuntimeApp(
   const activeSubscriptions = new Map<string, ActiveSubscription>();
   const runtimeHost = createBrowserVxRuntimeHost(options.runtimeHost);
   const reportError = createRuntimeErrorReporter(options.onError ?? runtimeHost.onError);
+  const retainedHandlerReleaser = retainedHandlerReleaserFor(app, options.handlers);
+  const afterCommandCallbacks: Array<Array<() => void>> = [];
   let queue = Promise.resolve();
+  const queuedRetainedHandlerReleaser: RetainedHandlerReleaser = {
+    release: (id) => {
+      void queue.catch(() => undefined).then(() => {
+        if (retainedHandlerReleaser.release) {
+          retainedHandlerReleaser.release(id);
+          return;
+        }
+        retainedHandlerReleaser.releaseMany?.([id]);
+      });
+    },
+    releaseMany: (ids) => {
+      const retainedIds = Array.from(ids);
+      void queue.catch(() => undefined).then(() => {
+        if (retainedHandlerReleaser.releaseMany) {
+          retainedHandlerReleaser.releaseMany(retainedIds);
+          return;
+        }
+        retainedIds.forEach((id) => retainedHandlerReleaser.release?.(id));
+      });
+    },
+  };
 
   const dispatchNow = async (message: VxRuntimeMessage): Promise<void> => {
     if (disposed) return;
@@ -293,6 +354,15 @@ async function mountRuntimeApp(
   };
   const executionContext: VxRuntimeExecutionContext = {
     dispatch: dispatchQueued,
+    deferAfterCommands: (callback) => {
+      const callbacks = afterCommandCallbacks.at(-1);
+      if (callbacks) {
+        callbacks.push(callback);
+        return;
+      }
+      callback();
+    },
+    releaseRetainedHandler: (id) => queuedRetainedHandlerReleaser.release?.(id),
     reportError,
     signal: abortController.signal,
   };
@@ -303,17 +373,17 @@ async function mountRuntimeApp(
       dispatchQueued({ kind: "event", handlerId, payload }),
     dispatchMapped: async (handlerId, payload, mapHandlerIds) => {
       if (!options.handlers?.dispatch) {
-        await dispatchQueued(mapRuntimeMessage({ kind: "event", handlerId, payload }, mapHandlerIds));
+        await dispatchQueued(mapDomEventMessage({ kind: "event", handlerId, payload }, mapHandlerIds));
         return;
       }
       const message = await options.handlers.dispatch(handlerId, payload);
       if (message !== undefined) {
-        await dispatchQueued(mapRuntimeMessage(toRuntimeMessage(message), mapHandlerIds));
+        await dispatchQueued(mapDomEventMessage(toRuntimeMessage(message), mapHandlerIds));
       }
     },
     dispatchMessage: (message) => dispatchQueued(toRuntimeMessage(message)),
-    release: options.handlers?.release,
-    releaseMany: options.handlers?.releaseMany,
+    release: queuedRetainedHandlerReleaser.release,
+    releaseMany: queuedRetainedHandlerReleaser.releaseMany,
   };
   const renderer = createVxDomRenderer(options.container, {
     handlers: runtimeHandlers,
@@ -331,38 +401,46 @@ async function mountRuntimeApp(
       throw error;
     }
 
-    if (step.subscriptions !== undefined && app.syncSubscriptions) {
-      const previous = previousSubscriptions;
-      previousSubscriptions = step.subscriptions;
-      try {
-        await app.syncSubscriptions(step.subscriptions, {
-          previous,
-          dispatch: dispatchQueued,
-        });
-      } catch (error) {
-        reportError(error, { phase: "subscriptions" });
-        throw error;
-      }
-    } else if (step.subscriptions !== undefined) {
-      try {
-        await syncRuntimeSubscriptions(
-          step.subscriptions,
-          activeSubscriptions,
-          runtimeHost,
-          executionContext,
-        );
-      } catch (error) {
-        reportError(error, { phase: "subscriptions" });
-        throw error;
-      }
-    }
-
+    const deferredCallbacks: Array<() => void> = [];
+    afterCommandCallbacks.push(deferredCallbacks);
+    let commandPhaseStarted = false;
     try {
+      if (step.subscriptions !== undefined && app.syncSubscriptions) {
+        const previous = previousSubscriptions;
+        previousSubscriptions = step.subscriptions;
+        try {
+          await app.syncSubscriptions(step.subscriptions, {
+            previous,
+            dispatch: dispatchQueued,
+          });
+        } catch (error) {
+          reportError(error, { phase: "subscriptions" });
+          throw error;
+        }
+      } else if (step.subscriptions !== undefined) {
+        try {
+          await syncRuntimeSubscriptions(
+            step.subscriptions,
+            activeSubscriptions,
+            runtimeHost,
+            executionContext,
+            queuedRetainedHandlerReleaser,
+          );
+        } catch (error) {
+          reportError(error, { phase: "subscriptions" });
+          throw error;
+        }
+      }
+
+      commandPhaseStarted = true;
       await runCommands(step.commands, runtimeHost, executionContext);
     } catch (error) {
-      reportError(error, { phase: "commands" });
+      if (commandPhaseStarted) reportError(error, { phase: "commands" });
       throw error;
+    } finally {
+      afterCommandCallbacks.pop();
     }
+    deferredCallbacks.forEach((callback) => callback());
   };
 
   try {
@@ -381,13 +459,30 @@ async function mountRuntimeApp(
     dispose() {
       disposed = true;
       abortController.abort();
-      void disposeSubscriptions(activeSubscriptions).catch((error) => reportError(error, { phase: "dispose" }));
+      void disposeSubscriptions(activeSubscriptions, retainedHandlerReleaser)
+        .catch((error) => reportError(error, { phase: "dispose" }));
       renderer.dispose();
       void Promise.resolve(app.dispose?.()).catch((error) => reportError(error, { phase: "dispose" }));
     },
     getSnapshot() {
       return app.getSnapshot?.() ?? renderer.getSnapshot();
     },
+  };
+}
+
+function retainedHandlerReleaserFor(
+  app: VxAppRuntime,
+  handlers: RetainedEventHandlerRegistry | undefined,
+): RetainedHandlerReleaser {
+  if (app.retainedCallbacks?.release || app.retainedCallbacks?.releaseMany) {
+    return {
+      release: app.retainedCallbacks.release,
+      releaseMany: app.retainedCallbacks.releaseMany,
+    };
+  }
+  return {
+    release: handlers?.release,
+    releaseMany: handlers?.releaseMany,
   };
 }
 
@@ -638,7 +733,7 @@ function patchEvents(
             return;
           }
           settleAsyncDispatch(handlers?.dispatchMessage?.(
-            mapRuntimeMessage({
+            mapDomEventMessage({
               kind: "event",
               handlerId: event.handlerId,
               payload,
@@ -652,7 +747,7 @@ function patchEvents(
           if (message !== undefined) {
             return handlers?.dispatchMessage?.(
               event.mapHandlerIds?.length
-                ? mapRuntimeMessage(toVxMessage(message), event.mapHandlerIds)
+                ? mapDomEventMessage(toVxMessage(message), event.mapHandlerIds)
                 : message,
             );
           }
@@ -663,7 +758,7 @@ function patchEvents(
         const message = toVxMessage(event.message);
         settleAsyncDispatch(handlers?.dispatchMessage?.(
           event.mapHandlerIds?.length
-            ? mapRuntimeMessage(message, event.mapHandlerIds)
+            ? mapDomEventMessage(message, event.mapHandlerIds)
             : event.message,
         ));
       }
@@ -797,7 +892,6 @@ function collectHandlerIds(vnode: VNode): Set<number> {
     if (node.kind === "element") {
       (node.events ?? []).forEach((event) => {
         if (typeof event.handlerId === "number") ids.add(event.handlerId);
-        event.mapHandlerIds?.forEach((handlerId) => ids.add(handlerId));
       });
       (node.children ?? []).forEach(visit);
       return;
@@ -855,12 +949,21 @@ async function runCommands(
     const handlerId = readHandlerId(commandEnvelope);
     if (handlerId === undefined) throw new Error("vx-dom: command map missing numeric handlerId");
     const child = readRequiredMappedChild(commandEnvelope, "command map");
-    await runCommands(
-      child,
-      host,
-      mapExecutionContext(context, handlerId),
-      nextTaskObserver,
+    const mapped = ownedCommandMapExecutionContext(
+      context,
+      handlerId,
+      mappedOwnedHandlerIds(commandEnvelope),
     );
+    try {
+      await runCommands(
+        child,
+        host,
+        mapped.context,
+        nextTaskObserver,
+      );
+    } finally {
+      mapped.finish();
+    }
     return;
   }
   const command = nextTaskObserver
@@ -878,11 +981,23 @@ function runDelayCommand(
   const ms = readMillis(command);
   if (ms === undefined) throw new Error("vx-dom: delay command missing non-negative millis");
   if (!Object.hasOwn(command, "value")) throw new Error("vx-dom: delay command missing value");
+  let resolveCompletion: () => void = () => undefined;
+  const completion = new Promise<void>((resolve) => {
+    resolveCompletion = resolve;
+  });
   const timeout = setTimeout(() => {
-    if (context.signal.aborted) return;
-    settleAsyncDispatch(context.dispatch(toVxMessage(command.value)));
+    if (context.signal.aborted) {
+      resolveCompletion();
+      return;
+    }
+    Promise.resolve(context.dispatch(toVxMessage(command.value))).then(resolveCompletion, resolveCompletion);
   }, ms);
-  context.signal.addEventListener("abort", () => clearTimeout(timeout), { once: true });
+  context.signal.addEventListener("abort", () => {
+    clearTimeout(timeout);
+    resolveCompletion();
+  }, { once: true });
+  context.trackRetainedHandlerUse?.(completion);
+  settleAsyncDispatch(completion);
 }
 
 function runTaskCommand(
@@ -894,7 +1009,24 @@ function runTaskCommand(
   if (taskId === undefined) throw new Error("vx-dom: task command missing numeric taskId");
   if (!observeTask) throw new Error("vx-dom: task command requires task runtime support");
 
-  void observeTask(taskId).then((outcome) => {
+  const ownedHandlerIds = mappedOwnedHandlerIds(command);
+  let released = false;
+  const releaseOwnedHandlers = () => {
+    if (released) return;
+    released = true;
+    ownedHandlerIds.forEach((id) => context.releaseRetainedHandler?.(id));
+  };
+  let resolveAbort: () => void = () => undefined;
+  const abortCompletion = new Promise<void>((resolve) => {
+    resolveAbort = resolve;
+  });
+  const abortListener = () => {
+    releaseOwnedHandlers();
+    resolveAbort();
+  };
+  context.signal.addEventListener("abort", abortListener, { once: true });
+
+  const completion = observeTask(taskId).then((outcome) => {
     if (context.signal.aborted) return;
     if (outcome.kind === "failed") {
       context.reportError?.(outcome.error, { phase: "commands" });
@@ -910,19 +1042,145 @@ function runTaskCommand(
     );
   }).catch((error) => {
     context.reportError?.(error, { phase: "commands" });
+  }).finally(() => {
+    context.signal.removeEventListener("abort", abortListener);
+    releaseOwnedHandlers();
+    resolveAbort();
   });
+  context.trackRetainedHandlerUse?.(Promise.race([completion, abortCompletion]));
+  settleAsyncDispatch(completion);
+}
+
+async function runCopyToClipboardCommand(command: VxCommandEnvelope): Promise<void> {
+  const value = readRequiredStringValue(command, "copy_to_clipboard");
+  const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+  if (!clipboard || typeof clipboard.writeText !== "function") {
+    throw new Error("vx-dom: copy_to_clipboard command requires navigator.clipboard.writeText");
+  }
+  await clipboard.writeText(value);
+}
+
+function runLocalStorageClearCommand(): void {
+  readBrowserStorage("local_storage_clear", "local").clear();
+}
+
+function runLocalStorageRemoveCommand(command: VxCommandEnvelope): void {
+  readBrowserStorage("local_storage_remove", "local").removeItem(
+    readRequiredStringValue(command, "local_storage_remove"),
+  );
+}
+
+function runLocalStorageSetCommand(command: VxCommandEnvelope): void {
+  const entry = readStorageEntry(command, "local_storage_set");
+  readBrowserStorage("local_storage_set", "local").setItem(entry.key, entry.value);
 }
 
 function runFocusCommand(command: VxCommandEnvelope): void {
-  if (typeof command.value !== "string") throw new Error("vx-dom: focus command missing string value");
-  const target = findRefElement(command.value);
+  const target = findRefElement(readRequiredStringValue(command, "focus"));
   if (target instanceof HTMLElement) target.focus();
 }
 
+function runNavigateBackCommand(): void {
+  if (typeof history !== "undefined") history.back();
+}
+
+function runNavigateForwardCommand(): void {
+  if (typeof history !== "undefined") history.forward();
+}
+
+function runOpenUrlCommand(command: VxCommandEnvelope): void {
+  const target = readOpenUrlTarget(command);
+  if (typeof window !== "undefined" && typeof window.open === "function") {
+    window.open(target.url, target.target);
+  }
+}
+
+function runPushUrlCommand(command: VxCommandEnvelope): void {
+  const value = readRequiredStringValue(command, "push_url");
+  if (typeof history !== "undefined") {
+    history.pushState(null, "", value);
+    dispatchLocationChange();
+  }
+}
+
+async function runReadClipboardCommand(
+  command: VxCommandEnvelope,
+  context: VxRuntimeExecutionContext,
+): Promise<void> {
+  const handlerId = readHandlerId(command);
+  if (handlerId === undefined) {
+    throw new Error("vx-dom: read_clipboard command missing numeric handlerId");
+  }
+  const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
+  if (!clipboard || typeof clipboard.readText !== "function") {
+    throw new Error("vx-dom: read_clipboard command requires navigator.clipboard.readText");
+  }
+  try {
+    const value = await clipboard.readText();
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch({ kind: "map", handlerId, message: toVxMessage(value) }));
+  } finally {
+    mappedOwnedHandlerIds(command).forEach((id) => context.releaseRetainedHandler?.(id));
+  }
+}
+
+function runReplaceUrlCommand(command: VxCommandEnvelope): void {
+  const value = readRequiredStringValue(command, "replace_url");
+  if (typeof history !== "undefined") {
+    history.replaceState(null, "", value);
+    dispatchLocationChange();
+  }
+}
+
 function runScrollIntoViewCommand(command: VxCommandEnvelope): void {
-  if (typeof command.value !== "string") throw new Error("vx-dom: scroll_into_view command missing string value");
-  const target = findRefElement(command.value);
+  const target = findRefElement(readRequiredStringValue(command, "scroll_into_view"));
   if (typeof target?.scrollIntoView === "function") target.scrollIntoView();
+}
+
+function runScrollWindowByCommand(command: VxCommandEnvelope): void {
+  const point = readPointValue(command, "scroll_window_by");
+  if (typeof window !== "undefined" && typeof window.scrollBy === "function") {
+    window.scrollBy(point.x, point.y);
+  }
+}
+
+function runScrollWindowToCommand(command: VxCommandEnvelope): void {
+  const point = readPointValue(command, "scroll_window_to");
+  if (typeof window !== "undefined" && typeof window.scrollTo === "function") {
+    window.scrollTo(point.x, point.y);
+  }
+}
+
+function runSelectTextCommand(command: VxCommandEnvelope): void {
+  const target = findRefElement(readRequiredStringValue(command, "select_text"));
+  if (target && "select" in target && typeof target.select === "function") {
+    target.select();
+  }
+}
+
+function runSessionStorageClearCommand(): void {
+  readBrowserStorage("session_storage_clear", "session").clear();
+}
+
+function runSessionStorageRemoveCommand(command: VxCommandEnvelope): void {
+  readBrowserStorage("session_storage_remove", "session").removeItem(
+    readRequiredStringValue(command, "session_storage_remove"),
+  );
+}
+
+function runSessionStorageSetCommand(command: VxCommandEnvelope): void {
+  const entry = readStorageEntry(command, "session_storage_set");
+  readBrowserStorage("session_storage_set", "session").setItem(entry.key, entry.value);
+}
+
+function runSetHashCommand(command: VxCommandEnvelope): void {
+  const value = readRequiredStringValue(command, "set_hash");
+  if (typeof location !== "undefined") location.hash = value;
+}
+
+function runSetDocumentTitleCommand(command: VxCommandEnvelope): void {
+  const value = readRequiredStringValue(command, "set_document_title");
+  if (typeof document !== "undefined") document.title = value;
 }
 
 function runIntervalSubscription(
@@ -943,7 +1201,6 @@ function runKeyboardSubscription(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
 ): VxSubscriptionDisposer | void {
-  if (!Object.hasOwn(subscription, "value")) throw new Error("vx-dom: keyboard subscription missing value");
   const eventName = typeof subscription.event === "string"
     ? subscription.event
     : "keydown";
@@ -952,16 +1209,205 @@ function runKeyboardSubscription(
     if (context.signal.aborted) return;
     const subscribedKey = optionalSubscriptionKey(subscription);
     if (subscribedKey && isKeyboardEvent(event) && event.key !== subscribedKey) return;
-    settleAsyncDispatch(context.dispatch({
-      kind: "subscription",
-      subscriptionKind: "keyboard",
-      key: subscribedKey,
-      value: subscription.value,
-      payload: normalizeBrowserEvent(event),
-    }));
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(
+      subscription,
+      normalizeBrowserEvent(event),
+    )));
   };
   window.addEventListener(eventName, listener);
   return () => window.removeEventListener(eventName, listener);
+}
+
+function runAnimationFrameSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined" || typeof window.requestAnimationFrame !== "function") return;
+  let frameId: number | undefined;
+  const tick = (timestamp: number) => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
+      kind: "animation_frame",
+      timestamp,
+    })));
+    frameId = window.requestAnimationFrame(tick);
+  };
+  frameId = window.requestAnimationFrame(tick);
+  return () => {
+    if (frameId !== undefined && typeof window.cancelAnimationFrame === "function") {
+      window.cancelAnimationFrame(frameId);
+    }
+  };
+}
+
+function runBroadcastChannelSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  const channelName = readRequiredStringField(subscription, "name", "broadcast_channel subscription");
+  if (typeof BroadcastChannel === "undefined") {
+    throw new Error("vx-dom: broadcast_channel subscription requires BroadcastChannel");
+  }
+  const channel = new BroadcastChannel(channelName);
+  const listener = (event: MessageEvent) => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, event.data)));
+  };
+  channel.addEventListener("message", listener);
+  return () => {
+    channel.removeEventListener("message", listener);
+    channel.close();
+  };
+}
+
+function runLocationChangeSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined") return;
+  let observedChange = false;
+  const dispatch = () => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, locationPayload())));
+  };
+  const dispatchObserved = () => {
+    observedChange = true;
+    dispatch();
+  };
+  const dispatchInitial = () => {
+    if (!observedChange) dispatch();
+  };
+  window.addEventListener("popstate", dispatchObserved);
+  window.addEventListener("hashchange", dispatchObserved);
+  window.addEventListener(locationChangeEvent, dispatchObserved);
+  if (context.deferAfterCommands) {
+    context.deferAfterCommands(dispatchInitial);
+  } else {
+    setTimeout(dispatchInitial, 0);
+  }
+  return () => {
+    window.removeEventListener("popstate", dispatchObserved);
+    window.removeEventListener("hashchange", dispatchObserved);
+    window.removeEventListener(locationChangeEvent, dispatchObserved);
+  };
+}
+
+function runMediaQuerySubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  const query = readRequiredStringField(subscription, "query", "media_query subscription");
+  if (typeof window === "undefined" || typeof window.matchMedia !== "function") {
+    throw new Error("vx-dom: media_query subscription requires window.matchMedia");
+  }
+  const media = window.matchMedia(query);
+  const dispatch = () => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
+      kind: "media_query",
+      query,
+      matches: media.matches,
+    })));
+  };
+  dispatch();
+  if (typeof media.addEventListener === "function") {
+    media.addEventListener("change", dispatch);
+    return () => media.removeEventListener("change", dispatch);
+  }
+  media.addListener(dispatch);
+  return () => media.removeListener(dispatch);
+}
+
+function runOnlineStatusSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined") return;
+  const dispatch = () => {
+    if (context.signal.aborted) return;
+    const online = typeof navigator === "undefined" ? true : navigator.onLine;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, online)));
+  };
+  window.addEventListener("online", dispatch);
+  window.addEventListener("offline", dispatch);
+  dispatch();
+  return () => {
+    window.removeEventListener("online", dispatch);
+    window.removeEventListener("offline", dispatch);
+  };
+}
+
+function runStorageSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined") return;
+  const listener = (event: StorageEvent) => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, storagePayload(event))));
+  };
+  window.addEventListener("storage", listener);
+  return () => window.removeEventListener("storage", listener);
+}
+
+function runVisibilityChangeSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof document === "undefined") return;
+  const dispatch = () => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
+      kind: "visibility",
+      state: document.visibilityState,
+      hidden: document.hidden,
+    })));
+  };
+  document.addEventListener("visibilitychange", dispatch);
+  dispatch();
+  return () => document.removeEventListener("visibilitychange", dispatch);
+}
+
+function runWindowResizeSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined") return;
+  const dispatch = () => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
+      kind: "window_size",
+      width: window.innerWidth,
+      height: window.innerHeight,
+    })));
+  };
+  window.addEventListener("resize", dispatch);
+  dispatch();
+  return () => window.removeEventListener("resize", dispatch);
+}
+
+function runWindowEventSubscription(
+  subscription: VxSubscriptionEnvelope,
+  context: VxRuntimeExecutionContext,
+): VxSubscriptionDisposer | void {
+  if (typeof window === "undefined") return;
+  const eventName = windowEventName(subscription);
+  const listener = () => {
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, {
+      kind: "event",
+      event: eventName,
+    })));
+  };
+  window.addEventListener(eventName, listener);
+  return () => window.removeEventListener(eventName, listener);
+}
+
+function windowEventName(subscription: VxSubscriptionEnvelope): string {
+  if (typeof subscription.event === "string") return subscription.event;
+  if (subscription.kind === "window_focus") return "focus";
+  if (subscription.kind === "window_blur") return "blur";
+  return subscription.kind;
 }
 
 async function syncRuntimeSubscriptions(
@@ -969,47 +1415,113 @@ async function syncRuntimeSubscriptions(
   active: Map<string, ActiveSubscription>,
   host: VxRuntimeHostOptions | undefined,
   context: VxRuntimeExecutionContext,
+  releaser?: RetainedHandlerReleaser,
 ): Promise<void> {
   const next = flattenSubscriptions(input);
   const nextKeys = new Set(next.map(subscriptionIdentityKey));
 
   for (const [key, record] of active) {
     if (nextKeys.has(key)) continue;
-    await record.dispose();
     active.delete(key);
+    await disposeActiveSubscription(record, releaser, active);
   }
 
   for (const subscription of next) {
     const key = subscriptionIdentityKey(subscription);
     const signature = subscriptionSignature(subscription);
+    const mapHandlerIds = mappedHandlerIds(subscription);
+    const ownedMapHandlerIds = mappedOwnedHandlerIds(subscription);
     const previous = active.get(key);
-    if (previous?.signature === signature) continue;
+    if (previous?.signature === signature) {
+      updateActiveSubscriptionMapHandlers(previous, mapHandlerIds, ownedMapHandlerIds, releaser, active);
+      continue;
+    }
     if (previous) {
-      await previous.dispose();
       active.delete(key);
+      await disposeActiveSubscription(previous, releaser, active);
     }
     const runner = host?.subscriptions?.[subscription.kind];
     if (!runner) throw new Error(`vx-dom: no runtime subscription handler registered for "${subscription.kind}"`);
-    const dispose = await runner(subscription, mapSubscriptionContext(subscription, context));
-    active.set(key, { signature, dispose: dispose ?? (() => undefined) });
+    const mappedContext = mutableMappedSubscriptionContext(subscription, context);
+    const dispose = await runner(subscription, mappedContext.context);
+    active.set(key, {
+      signature,
+      dispose: dispose ?? (() => undefined),
+      mapHandlerIds,
+      ownedMapHandlerIds,
+      setMapHandlerIds: mappedContext.setMapHandlerIds,
+    });
   }
 }
 
 async function disposeSubscriptions(
   active: Map<string, ActiveSubscription>,
+  releaser?: RetainedHandlerReleaser,
 ): Promise<void> {
-  const disposers = Array.from(active.values()).map((record) => record.dispose);
+  const records = Array.from(active.values());
   active.clear();
-  for (const dispose of disposers) await dispose();
+  for (const record of records) await disposeActiveSubscription(record, releaser, active);
+}
+
+async function disposeActiveSubscription(
+  record: ActiveSubscription,
+  releaser: RetainedHandlerReleaser | undefined,
+  active: Map<string, ActiveSubscription>,
+): Promise<void> {
+  try {
+    await record.dispose();
+  } finally {
+    releaseRetainedHandlers(record.ownedMapHandlerIds, releaser, active);
+  }
+}
+
+function updateActiveSubscriptionMapHandlers(
+  record: ActiveSubscription,
+  nextIds: number[],
+  nextOwnedIds: number[],
+  releaser: RetainedHandlerReleaser | undefined,
+  active: Map<string, ActiveSubscription>,
+): void {
+  const removed = record.ownedMapHandlerIds.filter((id) => !nextOwnedIds.includes(id));
+  record.mapHandlerIds = nextIds;
+  record.ownedMapHandlerIds = nextOwnedIds;
+  record.setMapHandlerIds(nextIds);
+  releaseRetainedHandlers(removed, releaser, active);
+}
+
+function releaseRetainedHandlers(
+  ids: readonly number[],
+  releaser: RetainedHandlerReleaser | undefined,
+  active: Map<string, ActiveSubscription>,
+): void {
+  const inactiveIds = Array.from(new Set(ids))
+    .filter((id) => !activeSubscriptionUsesHandler(active, id));
+  if (inactiveIds.length === 0) return;
+  if (releaser?.releaseMany) {
+    releaser.releaseMany(inactiveIds);
+    return;
+  }
+  inactiveIds.forEach((id) => releaser?.release?.(id));
+}
+
+function activeSubscriptionUsesHandler(
+  active: Map<string, ActiveSubscription>,
+  id: number,
+): boolean {
+  return Array.from(active.values()).some((record) => record.ownedMapHandlerIds.includes(id));
 }
 
 function flattenSubscriptions(
   input: unknown,
   mapHandlerIds: number[] = [],
+  mapHandlerKeys: string[] = [],
+  ownedMapHandlerIds: number[] = [],
 ): VxSubscriptionEnvelope[] {
   if (input === undefined || input === null) return [];
   if (Array.isArray(input)) {
-    return input.flatMap((child) => flattenSubscriptions(child, mapHandlerIds));
+    return input.flatMap((child) =>
+      flattenSubscriptions(child, mapHandlerIds, mapHandlerKeys, ownedMapHandlerIds)
+    );
   }
   const envelope = readRuntimeEnvelope(input, "sub", "subscriptions");
   if (envelope.kind === "none") return [];
@@ -1017,31 +1529,57 @@ function flattenSubscriptions(
     if (!Object.hasOwn(envelope, "children")) {
       throw new Error("vx-dom: subscription batch missing required children");
     }
-    return flattenSubscriptions(envelope.children, mapHandlerIds);
+    return flattenSubscriptions(envelope.children, mapHandlerIds, mapHandlerKeys, ownedMapHandlerIds);
   }
   if (envelope.kind === "map") {
     const handlerId = readHandlerId(envelope);
     if (handlerId === undefined) throw new Error("vx-dom: subscription map missing numeric handlerId");
-    return flattenSubscriptions(readRequiredMappedChild(envelope, "subscription map"), [...mapHandlerIds, handlerId]);
+    const handlerKey = readHandlerKey(envelope);
+    const ownedHandlerIds = mappedOwnedHandlerIds(envelope);
+    return flattenSubscriptions(
+      readRequiredMappedChild(envelope, "subscription map"),
+      [...mapHandlerIds, handlerId],
+      [...mapHandlerKeys, handlerKey ?? `id:${handlerId}`],
+      [...ownedMapHandlerIds, ...ownedHandlerIds],
+    );
   }
   if (!optionalSubscriptionKey(envelope)) {
     throw new Error(`vx-dom: subscription "${envelope.kind}" requires a stable key`);
   }
   if (mapHandlerIds.length === 0) return [envelope];
-  return [{ ...envelope, [mapHandlerIdsProperty]: mapHandlerIds }];
+  return [{
+    ...envelope,
+    [mapHandlerIdsProperty]: mapHandlerIds,
+    [mapHandlerKeysProperty]: mapHandlerKeys,
+    ...(ownedMapHandlerIds.length > 0
+      ? { [ownedMapHandlerIdsProperty]: ownedMapHandlerIds }
+      : {}),
+  }];
 }
 
 function subscriptionIdentityKey(subscription: VxSubscriptionEnvelope): string {
-  const mapPrefix = mappedHandlerIds(subscription)
-    .map((id) => `map:${id}`)
+  const mapPrefix = mappedHandlerIdentityParts(subscription)
     .join("/");
   const explicitKey = subscription.key ?? subscription.id;
-  const base = `${subscription.kind}:${String(explicitKey)}`;
+  const base = `${subscriptionIdentityKind(subscription)}:${String(explicitKey)}`;
   return mapPrefix ? `${mapPrefix}|${base}` : base;
 }
 
+function subscriptionIdentityKind(subscription: VxSubscriptionEnvelope): string {
+  if (subscription.kind === "keyboard" && typeof subscription.event === "string") {
+    return `${subscription.kind}:${subscription.event}`;
+  }
+  return subscription.kind;
+}
+
 function subscriptionSignature(subscription: VxSubscriptionEnvelope): string {
-  return stableStringify(subscription);
+  const normalized = { ...subscription };
+  delete normalized[mapHandlerIdsProperty];
+  delete normalized[mapHandlerKeysProperty];
+  delete normalized[ownedMapHandlerIdsProperty];
+  const mappedIdentity = mappedHandlerIdentityParts(subscription);
+  if (mappedIdentity.length > 0) normalized[mapHandlerIdentityProperty] = mappedIdentity;
+  return stableStringify(normalized);
 }
 
 function optionalSubscriptionKey(subscription: VxSubscriptionEnvelope): string | undefined {
@@ -1091,30 +1629,246 @@ function readMillis(input: Record<string, unknown>): number | undefined {
   return raw;
 }
 
+function readRequiredStringValue(
+  input: Record<string, unknown>,
+  commandKind: string,
+): string {
+  if (typeof input.value !== "string") {
+    throw new Error(`vx-dom: ${commandKind} command missing string value`);
+  }
+  return input.value;
+}
+
+function readBrowserStorage(commandKind: string, storageKind: "local" | "session"): Storage {
+  const storage = storageKind === "local"
+    ? typeof localStorage === "undefined" ? undefined : localStorage
+    : typeof sessionStorage === "undefined" ? undefined : sessionStorage;
+  if (!storage) throw new Error(`vx-dom: ${commandKind} command requires ${storageKind}Storage`);
+  return storage;
+}
+
+function readOpenUrlTarget(command: VxCommandEnvelope): { url: string; target?: string } {
+  if (typeof command.value === "string") return { url: command.value, target: "_blank" };
+  if (!isRecord(command.value) || typeof command.value.url !== "string") {
+    throw new Error("vx-dom: open_url command missing string url");
+  }
+  return {
+    url: command.value.url,
+    target: typeof command.value.target === "string" ? command.value.target : "_blank",
+  };
+}
+
+function readPointValue(
+  command: VxCommandEnvelope,
+  commandKind: string,
+): { x: number; y: number } {
+  if (
+    !isRecord(command.value) ||
+    typeof command.value.x !== "number" ||
+    typeof command.value.y !== "number" ||
+    !Number.isFinite(command.value.x) ||
+    !Number.isFinite(command.value.y)
+  ) {
+    throw new Error(`vx-dom: ${commandKind} command missing numeric x/y value`);
+  }
+  return { x: command.value.x, y: command.value.y };
+}
+
+function readRequiredStringField(
+  input: Record<string, unknown>,
+  field: string,
+  label: string,
+): string {
+  const value = input[field];
+  if (typeof value !== "string") {
+    throw new Error(`vx-dom: ${label} missing string ${field}`);
+  }
+  return value;
+}
+
+function readStorageEntry(
+  command: VxCommandEnvelope,
+  commandKind: string,
+): { key: string; value: string } {
+  if (
+    !isRecord(command.value) ||
+    typeof command.value.key !== "string" ||
+    typeof command.value.value !== "string"
+  ) {
+    throw new Error(`vx-dom: ${commandKind} command missing string key/value`);
+  }
+  return { key: command.value.key, value: command.value.value };
+}
+
+function subscriptionMessage(
+  subscription: VxSubscriptionEnvelope,
+  payload: unknown,
+): VxRuntimeSubscriptionMessage {
+  return {
+    kind: "subscription",
+    subscriptionKind: subscription.kind,
+    key: optionalSubscriptionKey(subscription),
+    ...(shouldDispatchSubscriptionValue(subscription) ? { value: subscription.value } : {}),
+    payload,
+  };
+}
+
+function shouldDispatchSubscriptionValue(subscription: VxSubscriptionEnvelope): boolean {
+  return Object.hasOwn(subscription, "value") && subscription.valueRole !== "config";
+}
+
+function dispatchLocationChange(): void {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(locationChangeEvent));
+}
+
+function locationPayload(): Record<string, string> {
+  if (typeof location === "undefined") {
+    return {
+      kind: "location",
+      href: "",
+      pathname: "",
+      search: "",
+      hash: "",
+    };
+  }
+  return {
+    kind: "location",
+    href: location.href,
+    pathname: location.pathname,
+    search: location.search,
+    hash: location.hash,
+  };
+}
+
+function storagePayload(event: StorageEvent): Record<string, unknown> {
+  return {
+    kind: "storage",
+    storage: storageKind(event.storageArea),
+    ...(event.key !== null ? { key: event.key } : {}),
+    ...(event.oldValue !== null ? { old_value: event.oldValue } : {}),
+    ...(event.newValue !== null ? { new_value: event.newValue } : {}),
+    url: event.url ?? "",
+  };
+}
+
+function storageKind(storageArea: Storage | null): string {
+  if (typeof sessionStorage !== "undefined" && storageArea === sessionStorage) return "session";
+  if (typeof localStorage !== "undefined" && storageArea === localStorage) return "local";
+  return "unknown";
+}
+
 function mapExecutionContext(
   context: VxRuntimeExecutionContext,
   handlerId: number,
 ): VxRuntimeExecutionContext {
   return {
     signal: context.signal,
+    deferAfterCommands: context.deferAfterCommands,
+    releaseRetainedHandler: context.releaseRetainedHandler,
+    trackRetainedHandlerUse: context.trackRetainedHandlerUse,
     reportError: context.reportError,
     dispatch: (message) => context.dispatch({ kind: "map", handlerId, message }),
   };
 }
 
-function mapSubscriptionContext(
+function ownedCommandMapExecutionContext(
+  context: VxRuntimeExecutionContext,
+  handlerId: number,
+  ownedHandlerIds: readonly number[],
+): {
+  context: VxRuntimeExecutionContext;
+  finish: () => void;
+} {
+  if (ownedHandlerIds.length === 0) {
+    return {
+      context: mapExecutionContext(context, handlerId),
+      finish: () => undefined,
+    };
+  }
+
+  let commandReturned = false;
+  let pendingUses = 0;
+  let released = false;
+  const releaseIfDone = () => {
+    if (!commandReturned || pendingUses > 0 || released) return;
+    released = true;
+    ownedHandlerIds.forEach((id) => context.releaseRetainedHandler?.(id));
+  };
+  const trackUse = (result: Promise<unknown> | unknown) => {
+    pendingUses += 1;
+    context.trackRetainedHandlerUse?.(result);
+    void Promise.resolve(result).catch(() => undefined).then(() => {
+      pendingUses -= 1;
+      releaseIfDone();
+    });
+  };
+
+  return {
+    context: {
+      signal: context.signal,
+      deferAfterCommands: context.deferAfterCommands,
+      releaseRetainedHandler: context.releaseRetainedHandler,
+      trackRetainedHandlerUse: trackUse,
+      reportError: context.reportError,
+      dispatch: (message) => {
+        const result = context.dispatch({ kind: "map", handlerId, message });
+        trackUse(result);
+        return result;
+      },
+    },
+    finish: () => {
+      commandReturned = true;
+      releaseIfDone();
+    },
+  };
+}
+
+function mutableMappedSubscriptionContext(
   subscription: VxSubscriptionEnvelope,
   context: VxRuntimeExecutionContext,
-): VxRuntimeExecutionContext {
-  return mappedHandlerIds(subscription).reduce(
-    (next, handlerId) => mapExecutionContext(next, handlerId),
-    context,
-  );
+): {
+  context: VxRuntimeExecutionContext;
+  setMapHandlerIds: (ids: number[]) => void;
+} {
+  let mapHandlerIds = mappedHandlerIds(subscription);
+  return {
+    context: {
+      signal: context.signal,
+      deferAfterCommands: context.deferAfterCommands,
+      releaseRetainedHandler: context.releaseRetainedHandler,
+      trackRetainedHandlerUse: context.trackRetainedHandlerUse,
+      reportError: context.reportError,
+      dispatch: (message) => context.dispatch(mapRuntimeMessage(message, mapHandlerIds)),
+    },
+    setMapHandlerIds: (ids) => {
+      mapHandlerIds = ids;
+    },
+  };
 }
 
 function mappedHandlerIds(subscription: VxSubscriptionEnvelope): number[] {
   const raw = subscription[mapHandlerIdsProperty];
   return Array.isArray(raw) ? raw.filter((id): id is number => typeof id === "number") : [];
+}
+
+function mappedOwnedHandlerIds(input: Record<string, unknown>): number[] {
+  const raw = input[ownedMapHandlerIdsProperty];
+  return Array.isArray(raw) ? raw.filter((id): id is number => typeof id === "number") : [];
+}
+
+function mappedHandlerKeys(subscription: VxSubscriptionEnvelope): string[] {
+  const raw = subscription[mapHandlerKeysProperty];
+  return Array.isArray(raw)
+    ? raw
+        .filter((key): key is string | number => typeof key === "string" || typeof key === "number")
+        .map((key) => String(key))
+    : [];
+}
+
+function mappedHandlerIdentityParts(subscription: VxSubscriptionEnvelope): string[] {
+  const keys = mappedHandlerKeys(subscription);
+  if (keys.length > 0) return keys.map((key) => `key:${key}`);
+  return mappedHandlerIds(subscription).map((id) => `id:${id}`);
 }
 
 function readHandlerId(input: Record<string, unknown>): number | undefined {
@@ -1123,6 +1877,11 @@ function readHandlerId(input: Record<string, unknown>): number | undefined {
     : typeof input.handler_id === "number"
       ? input.handler_id
       : undefined;
+}
+
+function readHandlerKey(input: Record<string, unknown>): string | undefined {
+  const raw = input.handlerKey ?? input.handler_key;
+  return typeof raw === "string" || typeof raw === "number" ? String(raw) : undefined;
 }
 
 function readTaskId(input: Record<string, unknown>): number | undefined {
@@ -1207,6 +1966,13 @@ function toVxMessage(input: unknown): VxMessage {
 }
 
 function mapRuntimeMessage(message: VxRuntimeMessage, handlerIds: readonly number[]): VxRuntimeMessage {
+  return handlerIds.reduceRight<VxRuntimeMessage>(
+    (child, handlerId) => ({ kind: "map", handlerId, message: child }),
+    message,
+  );
+}
+
+function mapDomEventMessage(message: VxRuntimeMessage, handlerIds: readonly number[]): VxRuntimeMessage {
   return handlerIds.reduce<VxRuntimeMessage>(
     (child, handlerId) => ({ kind: "map", handlerId, message: child }),
     message,
