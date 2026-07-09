@@ -136,6 +136,8 @@ fn handle_static_with_fs(
     tail(host_dto_test::host_default_error_payload())
   Fs::write_string(tail, _payload: MsgPack):
     tail(host_dto_test::host_default_error_payload())
+  Fs::remove(tail, _path: MsgPack):
+    tail(host_dto_test::host_default_error_payload())
   Fs::list_dir(tail, _path: MsgPack):
     tail(host_dto_test::host_default_error_payload())
 
