@@ -28,6 +28,11 @@ import type {
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { CodegenOptions } from "../codegen/context.js";
 import {
+  incrementCompilerPerfCounter,
+  isCompilerPerfEnabled,
+  recordCompilerPerfDuration,
+} from "../perf.js";
+import {
   type ProgramOptimizationContext,
   type ProgramOptimizationPass,
   type OptimizationAnalysisKey,
@@ -6042,9 +6047,25 @@ export const optimizeProgram = ({
   void entryModuleId;
   void options;
 
-  OPTIMIZATION_PASSES.forEach((pass) => {
+  OPTIMIZATION_PASSES.forEach((pass, index) => {
+    const passStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
     const result = pass.run(context);
+    recordCompilerPerfDuration({
+      name: `optimize.pass.${pass.name}.ms`,
+      startedAt: passStartedAt,
+    });
+    recordCompilerPerfDuration({
+      name: `optimize.pass.${index}.${pass.name}.ms`,
+      startedAt: passStartedAt,
+    });
+    if (result.changed) {
+      incrementCompilerPerfCounter(`optimize.pass.${pass.name}.changed`);
+    }
     if (result.invalidates?.length) {
+      incrementCompilerPerfCounter(
+        `optimize.pass.${pass.name}.invalidates`,
+        result.invalidates.length,
+      );
       context.invalidateAnalyses(result.invalidates);
     }
   });

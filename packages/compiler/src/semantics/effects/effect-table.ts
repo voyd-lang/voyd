@@ -23,6 +23,22 @@ export interface EffectRowDesc {
   tailVar?: EffectRowVariable;
 }
 
+export interface EffectInternerSnapshot {
+  nextRowId: EffectRowId;
+  nextTailVarId: number;
+  emptyRow: EffectRowId;
+  unknownRow: EffectRowId;
+  rows: readonly EffectRowDesc[];
+}
+
+export interface EffectTableSnapshot {
+  exprEffects: readonly [HirExprId, EffectRowId][];
+  functionEffects: readonly [
+    SymbolId,
+    { scheme: TypeSchemeId; row: EffectRowId },
+  ][];
+}
+
 export interface UnificationContext {
   location: NodeId;
   reason: string;
@@ -56,12 +72,15 @@ export interface EffectTable {
   isEmpty(id: EffectRowId): boolean;
   isOpen(id: EffectRowId): boolean;
   freshTailVar(options?: { rigid?: boolean }): EffectRowVariable;
+  snapshotInterner(): EffectInternerSnapshot;
+  cloneInterner(): EffectInterner;
   setExprEffect(expr: HirExprId, row: EffectRowId): void;
   getExprEffect(expr: HirExprId): EffectRowId | undefined;
   snapshotExprEffects(): ReadonlyMap<HirExprId, EffectRowId>;
   restoreExprEffects(snapshot: ReadonlyMap<HirExprId, EffectRowId>): void;
   setFunctionEffect(symbol: SymbolId, scheme: TypeSchemeId, row: EffectRowId): void;
   getFunctionEffect(symbol: SymbolId): EffectRowId | undefined;
+  snapshotTable(): EffectTableSnapshot;
 }
 
 export type EffectInterner = Omit<
@@ -72,12 +91,15 @@ export type EffectInterner = Omit<
   | "restoreExprEffects"
   | "setFunctionEffect"
   | "getFunctionEffect"
+  | "snapshotTable"
 >;
 
-export const createEffectInterner = (): EffectInterner => {
-  let nextRowId: EffectRowId = 0;
-  let nextTailVarId = 0;
-  const rows: EffectRowDesc[] = [];
+export const createEffectInterner = (
+  snapshot?: EffectInternerSnapshot,
+): EffectInterner => {
+  let nextRowId: EffectRowId = snapshot?.nextRowId ?? 0;
+  let nextTailVarId = snapshot?.nextTailVarId ?? 0;
+  const rows: EffectRowDesc[] = snapshot?.rows.map(cloneEffectRowDesc) ?? [];
   const rowCache = new Map<string, EffectRowId>();
 
   const opKey = (op: EffectOp): string =>
@@ -125,6 +147,10 @@ export const createEffectInterner = (): EffectInterner => {
 
   const rowKey = (desc: EffectRowDesc): string =>
     JSON.stringify(desc, (_, value) => value);
+
+  rows.forEach((row, id) => {
+    rowCache.set(rowKey(row), id as EffectRowId);
+  });
 
   const getRow = (id: EffectRowId): Readonly<EffectRowDesc> => {
     const row = rows[id];
@@ -256,10 +282,20 @@ export const createEffectInterner = (): EffectInterner => {
 
   const isOpen = (row: EffectRowId): boolean => Boolean(getRow(row).tailVar);
 
-  const emptyRow = internRow({ operations: [] });
-  const unknownRow = internRow({
-    operations: [],
-    tailVar: freshTailVar(),
+  const emptyRow = snapshot?.emptyRow ?? internRow({ operations: [] });
+  const unknownRow =
+    snapshot?.unknownRow ??
+    internRow({
+      operations: [],
+      tailVar: freshTailVar(),
+    });
+
+  const snapshotInterner = (): EffectInternerSnapshot => ({
+    nextRowId,
+    nextTailVarId,
+    emptyRow,
+    unknownRow,
+    rows: rows.map(cloneEffectRowDesc),
   });
 
   return {
@@ -272,18 +308,28 @@ export const createEffectInterner = (): EffectInterner => {
     isEmpty,
     isOpen,
     freshTailVar,
+    snapshotInterner,
+    cloneInterner: () => createEffectInterner(snapshotInterner()),
   };
 };
 
 export const createEffectTable = ({
   interner,
-}: { interner?: EffectInterner } = {}): EffectTable => {
+  snapshot,
+}: { interner?: EffectInterner; snapshot?: EffectTableSnapshot } = {}): EffectTable => {
   const shared = interner ?? createEffectInterner();
-  const exprEffects = new Map<HirExprId, EffectRowId>();
+  const exprEffects = new Map<HirExprId, EffectRowId>(
+    snapshot?.exprEffects ?? [],
+  );
   const functionEffects = new Map<
     SymbolId,
     { scheme: TypeSchemeId; row: EffectRowId }
-  >();
+  >(
+    snapshot?.functionEffects.map(([symbol, effect]) => [
+      symbol,
+      { scheme: effect.scheme, row: effect.row },
+    ]) ?? [],
+  );
 
   const setExprEffect = (expr: HirExprId, row: EffectRowId): void => {
     const existing = exprEffects.get(expr);
@@ -328,6 +374,14 @@ export const createEffectTable = ({
   const getFunctionEffect = (symbol: SymbolId): EffectRowId | undefined =>
     functionEffects.get(symbol)?.row;
 
+  const snapshotTable = (): EffectTableSnapshot => ({
+    exprEffects: Array.from(exprEffects.entries()),
+    functionEffects: Array.from(functionEffects.entries(), ([symbol, effect]) => [
+      symbol,
+      { scheme: effect.scheme, row: effect.row },
+    ]),
+  });
+
   return {
     ...shared,
     setExprEffect,
@@ -336,5 +390,16 @@ export const createEffectTable = ({
     restoreExprEffects,
     setFunctionEffect,
     getFunctionEffect,
+    snapshotTable,
   };
 };
+
+const cloneEffectRowDesc = (desc: EffectRowDesc): EffectRowDesc => ({
+  operations: desc.operations.map((op) => ({
+    name: op.name,
+    region: typeof op.region === "number" ? op.region : undefined,
+  })),
+  tailVar: desc.tailVar
+    ? { id: desc.tailVar.id, rigid: desc.tailVar.rigid }
+    : undefined,
+});

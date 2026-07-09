@@ -170,6 +170,9 @@ export type VxSubscriptionEnvelope = VxRuntimeEnvelope & {
 
 export type VxRuntimeExecutionContext = {
   dispatch(message: VxRuntimeMessage): Promise<void>;
+  deferAfterCommands?: (callback: () => void) => void;
+  releaseRetainedHandler?: (id: number) => void;
+  trackRetainedHandlerUse?: (result: Promise<unknown> | unknown) => void;
   reportError?: VxRuntimeErrorHandler;
   signal: AbortSignal;
 };
@@ -219,6 +222,10 @@ export type VxAppRuntime = {
   init?: () => Promise<unknown> | unknown;
   render: () => Promise<unknown> | unknown;
   dispatch(message: VxRuntimeMessage): Promise<unknown> | unknown;
+  retainedCallbacks?: {
+    release?: (id: number) => void;
+    releaseMany?: (ids: Iterable<number>) => void;
+  };
   syncSubscriptions?: (
     next: unknown,
     context: VxSubscriptionSyncContext,

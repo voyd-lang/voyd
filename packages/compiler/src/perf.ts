@@ -50,6 +50,19 @@ export const incrementCompilerPerfCounter = (
   counters.set(name, (counters.get(name) ?? 0) + amount);
 };
 
+export const recordCompilerPerfDuration = ({
+  name,
+  startedAt,
+}: {
+  name: string;
+  startedAt: number;
+}): void => {
+  if (!PERF_ENABLED) {
+    return;
+  }
+  incrementCompilerPerfCounter(name, performance.now() - startedAt);
+};
+
 export const snapshotCompilerPerfCounters = (): CompilerPerfCounterSnapshot =>
   PERF_ENABLED ? new Map(counters) : new Map();
 
