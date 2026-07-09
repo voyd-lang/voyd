@@ -4,6 +4,7 @@ import {
   resolveTypeExpr,
   getSymbolName,
   getNominalComponent,
+  ensureTypeMatches,
   unifyWithBudget,
 } from "./type-system.js";
 import type { SymbolId, TypeId } from "../ids.js";
@@ -304,6 +305,7 @@ export const registerFunctionSignatures = (
     const symbolMetadata = (symbolRecord.metadata ?? {}) as {
       intrinsic?: unknown;
       intrinsicName?: unknown;
+      static?: unknown;
     };
     const intrinsicName =
       typeof symbolMetadata.intrinsicName === "string"
@@ -494,8 +496,7 @@ export const registerFunctionSignatures = (
     const initialEffectRow = effectAnnotation ?? ctx.primitives.defaultEffectRow;
     const annotatedEffects = effectAnnotation !== undefined;
 
-    const hasExplicitReturn = Boolean(item.returnType);
-    const declaredReturn =
+    const annotatedReturn =
       resolveTypeExpr(
         item.returnType,
         ctx,
@@ -503,6 +504,33 @@ export const registerFunctionSignatures = (
         ctx.primitives.unknown,
         paramMap
       ) ?? ctx.primitives.unknown;
+    const constructorReturn =
+      symbolRecord.name === "init" &&
+      symbolMetadata.static === true &&
+      implItem
+        ? resolveTypeExpr(
+            implItem.target,
+            ctx,
+            state,
+            ctx.primitives.unknown,
+            paramMap,
+          )
+        : undefined;
+
+    if (typeof constructorReturn === "number" && item.returnType) {
+      ensureTypeMatches(
+        annotatedReturn,
+        constructorReturn,
+        ctx,
+        state,
+        "constructor return type",
+        item.returnType.span,
+      );
+    }
+
+    const declaredReturn = constructorReturn ?? annotatedReturn;
+    const hasExplicitReturn =
+      Boolean(item.returnType) || typeof constructorReturn === "number";
 
     const functionType = ctx.arena.internFunction({
       parameters: parameters.map(({ type, label, optional }) => ({
