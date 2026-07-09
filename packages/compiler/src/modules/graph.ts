@@ -37,6 +37,7 @@ import type { SourceSpan } from "../semantics/ids.js";
 import {
   incrementCompilerPerfCounter,
   isCompilerPerfEnabled,
+  recordCompilerPerfDuration,
 } from "../perf.js";
 
 type BuildGraphOptions = {
@@ -124,9 +125,14 @@ export const buildModuleGraph = async ({
     missingModules.set(importer, new Set([pathKey]));
   };
 
+  const preludeStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const hasStdPreludeModule = await supportsStdPreludeAutoImport({
     roots,
     host,
+  });
+  recordCompilerPerfDuration({
+    name: "graph.supports_std_prelude.ms",
+    startedAt: preludeStartedAt,
   });
 
   const entryFile = host.path.resolve(entryPath);
@@ -448,13 +454,28 @@ const loadFileModule = async ({
   includeTests: boolean;
   hasStdPreludeModule: boolean;
 }): Promise<LoadedModule> => {
+  const moduleStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
+  incrementCompilerPerfCounter(`graph.load_module.${modulePath.namespace}.count`);
+
+  const readStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const source = await host.readFile(filePath);
+  recordCompilerPerfDuration({
+    name: `graph.read_file.${modulePath.namespace}.ms`,
+    startedAt: readStartedAt,
+  });
+
+  const parseStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const primaryParsed = parseModuleDirectives(source);
   const primaryAst = parseModuleAst({
     source: primaryParsed.sanitizedSource,
     filePath,
     modulePath,
   });
+  recordCompilerPerfDuration({
+    name: `graph.parse.${modulePath.namespace}.ms`,
+    startedAt: parseStartedAt,
+  });
+
   let ast = primaryAst.ast;
   const parseDiagnostics: Diagnostic[] = [...primaryAst.diagnostics];
   let noPrelude = primaryParsed.noPrelude;
@@ -465,6 +486,7 @@ const loadFileModule = async ({
   if (includeTests && !isCompanionTestFile(filePath)) {
     const companionFilePath = companionFileFor(filePath);
     if (await host.fileExists(companionFilePath)) {
+      const companionStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
       const companionSource = await host.readFile(companionFilePath);
       const companionParsed = parseModuleDirectives(companionSource);
       noPrelude = noPrelude || companionParsed.noPrelude;
@@ -476,6 +498,10 @@ const loadFileModule = async ({
       parseDiagnostics.push(...companion.diagnostics);
       ast = mergeCompanionAst({ primary: ast, companion: companion.ast });
       sourceByFile.set(companionFilePath, companionParsed.sanitizedSource);
+      recordCompilerPerfDuration({
+        name: `graph.parse_companion.${modulePath.namespace}.ms`,
+        startedAt: companionStartedAt,
+      });
     }
   }
 
@@ -485,12 +511,18 @@ const loadFileModule = async ({
     hasStdPreludeModule,
     noPrelude,
   });
+  const packageRootStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const sourcePackageRoot = await discoverSourcePackageRoot({
     modulePath,
     host,
     roots,
   });
+  recordCompilerPerfDuration({
+    name: `graph.discover_package_root.${modulePath.namespace}.ms`,
+    startedAt: packageRootStartedAt,
+  });
 
+  const collectStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const info = collectModuleInfo({
     modulePath,
     ast,
@@ -501,10 +533,20 @@ const loadFileModule = async ({
     hasStdPreludeModule,
     noPrelude,
   });
+  recordCompilerPerfDuration({
+    name: `graph.collect_module_info.${modulePath.namespace}.ms`,
+    startedAt: collectStartedAt,
+  });
+
+  const submodulesStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const submoduleDeps = await discoverSubmodules({
     filePath,
     modulePath,
     host,
+  });
+  recordCompilerPerfDuration({
+    name: `graph.discover_submodules.${modulePath.namespace}.ms`,
+    startedAt: submodulesStartedAt,
   });
 
   const node: ModuleNode = {
@@ -514,9 +556,15 @@ const loadFileModule = async ({
     origin: { kind: "file", filePath },
     ast,
     source,
+    sourceFiles: sourceFilesFrom(sourceByFile),
     docs: info.docs,
     dependencies: [...info.dependencies, ...submoduleDeps],
   };
+
+  recordCompilerPerfDuration({
+    name: `graph.load_module.${modulePath.namespace}.ms`,
+    startedAt: moduleStartedAt,
+  });
 
   return {
     node,
@@ -771,6 +819,7 @@ const parseInlineModuleDecl = ({
     },
     ast,
     source: sliceSource(sourceForModule, span),
+    sourceFiles: sourceFilesFrom(sourceByFile),
     docs: {
       ...info.docs,
       module: combineDocumentation(outerModuleDoc, info.docs.module),
@@ -795,6 +844,13 @@ const toModuleAst = (block: Form): Form => {
 
 const sliceSource = (source: string, span: SourceSpan): string =>
   source.slice(span.start, span.end);
+
+const sourceFilesFrom = (
+  sourceByFile: ReadonlyMap<string, string>,
+): readonly { filePath: string; source: string }[] =>
+  Array.from(sourceByFile.entries())
+    .map(([filePath, source]) => ({ filePath, source }))
+    .sort((left, right) => left.filePath.localeCompare(right.filePath));
 
 const sourceForModuleAst = ({
   ast,

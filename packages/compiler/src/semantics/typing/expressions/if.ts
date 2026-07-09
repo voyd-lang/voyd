@@ -14,6 +14,7 @@ export const typeIfExpr = (
 ): TypeId => {
   const hasDefault = typeof expr.defaultBranch === "number";
   const discardValue = options.discardValue === true || !hasDefault;
+  const expectedBranchType = discardValue ? undefined : options.expectedType;
   let branchType: TypeId | undefined;
   let effectRow = ctx.effects.emptyRow;
 
@@ -30,7 +31,10 @@ export const typeIfExpr = (
       conditionSpan,
     );
 
-    const valueType = typeExpression(branch.value, ctx, state, { discardValue });
+    const valueType = typeExpression(branch.value, ctx, state, {
+      discardValue,
+      expectedType: expectedBranchType,
+    });
     effectRow = ctx.effects.compose(
       effectRow,
       composeEffectRows(ctx.effects, [
@@ -53,6 +57,7 @@ export const typeIfExpr = (
   if (hasDefault) {
     const defaultType = typeExpression(expr.defaultBranch!, ctx, state, {
       discardValue,
+      expectedType: expectedBranchType,
     });
     effectRow = ctx.effects.compose(
       effectRow,

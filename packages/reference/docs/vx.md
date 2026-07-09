@@ -89,9 +89,9 @@ fn init() -> Model
 fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Increment:
-      next<Model, Msg>(Model { count: model.count + 1 })
+      next(Model { count: model.count + 1 })
     Msg::Decrement:
-      next<Model, Msg>(Model { count: model.count - 1 })
+      next(Model { count: model.count - 1 })
 
 fn view(model: Model) -> Html<Msg>
   <main>
@@ -151,7 +151,7 @@ case `init` returns `next(model: initial_model, cmd: load())`.
 Inside `step`, return `next`:
 
 ```voyd
-next<Model, Msg>(next_model)
+next(next_model)
 next(model: next_model, cmd: save_title(next_model.title))
 ```
 
@@ -184,7 +184,7 @@ This keeps `step` readable. Each branch answers two questions:
 fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
   match(msg)
     Msg::DraftChanged { value }:
-      next<Model, Msg>(Model { draft: value, saving: model.saving })
+      next(Model { draft: value, saving: model.saving })
     Msg::Submit:
       next(
         model: Model { draft: model.draft, saving: true },
@@ -213,12 +213,12 @@ Most branches have this shape:
 
 ```voyd
 Msg::DraftChanged { value }:
-  next<Model, Msg>(with_draft(model, value))
+  next(with_draft(model, value))
 Msg::Submit:
   next(model: saving_now(model), cmd: save_draft(model.draft))
 ```
 
-Use `next<Model, Msg>(next_model)` for a pure state transition. Use
+Use `next(next_model)` for a pure state transition. Use
 `next(model:, cmd:)` when the transition also starts one-off work.
 
 Commands returned from `step` are descriptions. The runtime runs them after it
@@ -232,9 +232,9 @@ When a branch becomes large, extract the model update into a named helper:
 Msg::Saved { result }:
   match(result)
     Ok { value }:
-      next<Model, Msg>(saved(model, value))
+      next(saved(model, value))
     Err { error }:
-      next<Model, Msg>(with_error(model, error))
+      next(with_error(model, error))
 
 fn saved(model: Model, todo: Todo) -> Model
   Model {
@@ -689,14 +689,25 @@ Cmd<Msg>::perform(task_id: task_id, handler_id: mapper_id)
 
 Most application code should prefer `Cmd.task`.
 
-`Cmd.runtime(kind:)` creates a host command envelope.
+`Cmd.copy_to_clipboard(value:)` copies text to the browser clipboard.
 
 ```voyd
-Cmd<Msg>::runtime(kind: "copy_to_clipboard")
+Cmd<Msg>::copy_to_clipboard("Saved URL")
 ```
 
-The browser host must register a command executor for the `kind`. Use runtime
-commands for browser capabilities beyond VX's built-in set.
+`Cmd.read_clipboard(handler:)` reads text from the browser clipboard and
+dispatches the handler result.
+
+```voyd
+Cmd<Msg>::read_clipboard(
+  (value: String) -> Msg => Msg::ClipboardRead { value: value }
+)
+```
+
+Clipboard reads can fail because of browser permissions or unavailable APIs.
+Those failures are reported through the runtime command error path. Use
+`Cmd.task` when the response-producing work should be owned by Voyd task code
+instead of the browser runtime host.
 
 `Cmd.focus(target)` focuses a DOM element found by `data-vx-ref`.
 
@@ -710,6 +721,61 @@ Cmd<Msg>::focus(editor)
 ```voyd
 Cmd<Msg>::scroll_into_view(editor)
 ```
+
+`Cmd.select_text(target)` selects text in an input-like DOM element found by
+`data-vx-ref`.
+
+```voyd
+Cmd<Msg>::select_text(editor)
+```
+
+`Cmd.set_document_title(value:)`, `Cmd.push_url(value:)`,
+`Cmd.replace_url(value:)`, `Cmd.set_hash(value:)`, `Cmd.navigate_back()`, and
+`Cmd.navigate_forward()` cover common document and history effects.
+
+```voyd
+Cmd::batch([
+  Cmd<Msg>::set_document_title("Editing"),
+  Cmd<Msg>::push_url("/todos/active")
+])
+```
+
+`Cmd.scroll_window_to(x:, y:)` and `Cmd.scroll_window_by(x:, y:)` control the
+browser window scroll position.
+
+```voyd
+Cmd<Msg>::scroll_window_to(x: 0.0, y: 240.0)
+Cmd<Msg>::scroll_window_by(x: 0.0, y: 80.0)
+```
+
+`Cmd.local_storage_set(key:, value:)`, `Cmd.local_storage_remove(key:)`,
+`Cmd.local_storage_clear()`, `Cmd.session_storage_set(key:, value:)`,
+`Cmd.session_storage_remove(key:)`, and `Cmd.session_storage_clear()` cover
+string storage writes and removals.
+
+```voyd
+Cmd<Msg>::local_storage_set(key: "draft", value: model.draft)
+Cmd<Msg>::session_storage_remove("wizard-step")
+```
+
+`Cmd.open_url(value:)` opens a URL in a new browser context. Use the labeled
+form to choose the browser target.
+
+```voyd
+Cmd<Msg>::open_url("https://voyd.dev")
+Cmd<Msg>::open_url(url: "/help", target: "_self")
+```
+
+`Cmd.runtime(kind:)` creates a host command envelope for custom browser or
+application capabilities.
+
+```voyd
+Cmd<Msg>::runtime(kind: "analytics_track", value: analytics_payload(event))
+```
+
+The browser host must register a command executor for the `kind`. Use runtime
+commands when the effect is app-specific or not part of VX's built-in browser
+host.
 
 `Cmd.map(handler)` lifts child commands into parent message space.
 
@@ -876,7 +942,7 @@ button click or command result:
 fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
   match(msg)
     Msg::Tick:
-      next<Model, Msg>(Model { ticks: model.ticks + 1 })
+      next(Model { ticks: model.ticks + 1 })
     Msg::Autosave:
       next(model: model, cmd: save_draft(model.draft))
 ```
@@ -893,6 +959,19 @@ keyboard_on_key_up(key: "Enter", value: Msg::Submit {})
 The `key` parameter is both the browser key filter and the stable key for the
 subscription. The dispatched `value` is a typed message.
 
+Use the `handler` form when the app needs the normalized keyboard payload:
+
+```voyd
+keyboard_on_key_down(
+  key: "Escape",
+  handler: (event: KeyboardEvent) -> Msg =>
+    Msg::KeyPressed { key: event.key, code: event.code }
+)
+```
+
+The handler receives the same `KeyboardEvent` payload shape used by typed DOM
+keyboard event handlers.
+
 Keyboard subscriptions are especially useful for mode-dependent shortcuts:
 
 ```voyd
@@ -904,18 +983,95 @@ fn subscriptions(model: Model) -> Sub<Msg>
       Sub<Msg>::none()
 ```
 
+### Browser State Subscriptions
+
+The default browser runtime host also exposes subscriptions for common window
+and document state:
+
+```voyd
+online_status(
+  key: "network",
+  handler: (online: bool) -> Msg =>
+    Msg::OnlineChanged { online: online }
+)
+
+window_on_resize(
+  key: "viewport",
+  handler: (size: WindowSize) -> Msg =>
+    Msg::ViewportChanged { width: size.width, height: size.height }
+)
+
+document_on_visibility_change(
+  key: "visibility",
+  handler: (visibility: DocumentVisibility) -> Msg =>
+    Msg::VisibilityChanged { hidden: visibility.hidden }
+)
+
+location_on_change(
+  key: "location",
+  handler: (location: Location) -> Msg =>
+    Msg::LocationChanged { href: location.href }
+)
+
+window_on_focus(key: "focus", value: Msg::WindowFocused {})
+window_on_blur(key: "blur", value: Msg::WindowBlurred {})
+```
+
+Each helper also has a fixed-message form with `value:` when the app only needs
+to know that the event happened.
+
+For rendering loops and browser preferences, use animation frame and media query
+subscriptions:
+
+```voyd
+animation_frame(
+  key: "render-loop",
+  handler: (frame: AnimationFrame) -> Msg =>
+    Msg::Frame { timestamp: frame.timestamp }
+)
+
+media_query(
+  query: "(prefers-reduced-motion: reduce)",
+  handler: (query: MediaQuery) -> Msg =>
+    Msg::ReducedMotionChanged { enabled: query.matches }
+)
+```
+
+For cross-tab and cross-context coordination, use storage and broadcast channel
+subscriptions:
+
+```voyd
+storage_on_change(
+  key: "storage",
+  handler: (change: StorageChange) -> Msg =>
+    Msg::StorageChanged { key: change.key }
+)
+
+broadcast_channel<String, Msg>(
+  name: "updates",
+  handler: (value: String) -> Msg =>
+    Msg::Broadcast { value: value }
+)
+```
+
+`StorageChange.key`, `old_value`, and `new_value` are optional because browser
+storage events use `null` for clears, missing old values, and removals.
+
 ### Runtime Subscriptions
 
-`Sub.runtime(kind:, key:)` creates a host subscription envelope for browser or
-application capabilities supplied by JavaScript.
+`Sub.runtime_payload(kind:, key:, handler:)` creates a host subscription
+envelope and maps incoming host payloads through a typed handler.
 
 ```voyd
 enum Msg
   OnlineChanged { online: bool }
 
 fn subscriptions(model: Model) -> Sub<Msg>
-  Sub<bool>::runtime(kind: "online_status", key: "network").map(
-    (online: bool) -> Msg => Msg::OnlineChanged { online: online }
+  Sub::runtime_payload(
+    kind: "online_status",
+    key: "network",
+    handler: (online: bool) -> Msg =>
+      Msg::OnlineChanged { online: online }
   )
 ```
 
@@ -955,17 +1111,18 @@ await mountVxApp({
 
 The runner returns an optional disposer that VX calls when the subscription
 disappears or is replaced. In this example, the host dispatches a `bool` payload
-and the Voyd `map` closure turns that payload into `Msg::OnlineChanged`.
+and the Voyd `handler` closure turns that payload into `Msg::OnlineChanged`.
 
-Use `value` when the host runner needs configuration:
+Use `Sub.runtime_configured(kind:, key:, value:, handler:)` when the host runner
+needs configuration:
 
 ```voyd
-Sub<String>::runtime(
+Sub::runtime_configured(
   kind: "websocket",
   key: "project:" + model.project_id,
-  value: websocket_config(model.project_id)
-).map(
-  (message: String) -> Msg => Msg::SocketMessage { value: message }
+  value: websocket_config(model.project_id),
+  handler: (message: String) -> Msg =>
+    Msg::SocketMessage { value: message }
 )
 ```
 
@@ -973,6 +1130,13 @@ The `value` field is sent to the host in the subscription descriptor. It is
 configuration for starting the listener, such as a channel name, URL, or topic.
 Data from the listener reaches Voyd when the host runner calls
 `context.dispatch`.
+
+The lower-level composition form is still available:
+
+```voyd
+Sub<String>::runtime(kind: "websocket", key: "project:" + model.project_id)
+  .map((message: String) -> Msg => Msg::SocketMessage { value: message })
+```
 
 ### Mapping Child Subscriptions
 
@@ -1014,9 +1178,9 @@ fn subscriptions(model: Model) -> Sub<Msg>
 fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::StartEdit { id }:
-      next<Model, Msg>(Model { editing_id: id })
+      next(Model { editing_id: id })
     Msg::CancelEdit:
-      next<Model, Msg>(Model { editing_id: String::init() })
+      next(Model { editing_id: String::init() })
 ```
 
 When `StartEdit` sets `editing_id`, the next subscription pass starts the Escape
@@ -1047,15 +1211,15 @@ enum Msg
 pub fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
   match(msg)
     Msg::DraftChanged { value }:
-      next<Model, Msg>(with_draft(model, value))
+      next(with_draft(model, value))
     Msg::Submit:
       next(model: saving_now(model), cmd: create_todo(model.draft))
     Msg::Created { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(adding(model, value))
+          next(adding(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
 ```
 
 The parent model keeps the feature model as a field:
@@ -1207,10 +1371,48 @@ await mountVxApp({
 });
 ```
 
+Command handlers receive the command descriptor that Voyd produced. The
+descriptor always has `type: "cmd"` and `kind`; constructors that take input put
+that input in `value` after boundary encoding. A handler may be synchronous or
+async. Unknown command kinds, thrown errors, and rejected promises are reported
+through the runtime error handler with `phase: "commands"`. Runtime commands are
+best for fire-and-forget host effects. Use `Cmd.task` when the work should
+produce a typed result message through Voyd's task runtime.
+
+Subscription runners receive the subscription descriptor that Voyd produced. The
+descriptor always has `type: "sub"`, `kind`, and a stable `key`; optional
+configuration is in `value`. A runner starts the listener and returns an
+optional disposer. VX calls the disposer when the descriptor disappears, when the
+same kind/key is replaced by a changed descriptor, and when the app is disposed.
+
+Send data back by calling `context.dispatch`:
+
+```ts
+context.dispatch({
+  kind: "subscription",
+  subscriptionKind: String(subscription.kind),
+  key: String(subscription.key),
+  payload: nextValue,
+});
+```
+
+The `payload` becomes the input to the Voyd `handler:` or `Sub.map` closure. If
+the dispatched message includes `value`, VX treats it as a fixed message and the
+payload is still available to custom runtime code but is not passed to the Voyd
+mapper. `context.signal` is aborted during teardown, and `context.reportError`
+reports asynchronous listener failures with `phase: "subscriptions"`.
+
 The built-in browser runtime host already handles:
 
-- Commands: `delay`, `task`, `focus`, `scroll_into_view`.
-- Subscriptions: `interval`, `keyboard`.
+- Commands: `delay`, `task`, `copy_to_clipboard`, `focus`,
+  `read_clipboard`, `scroll_into_view`, `select_text`, `set_document_title`,
+  `push_url`, `replace_url`, `set_hash`, `navigate_back`,
+  `navigate_forward`, `open_url`, `scroll_window_to`, `scroll_window_by`,
+  `local_storage_set`, `local_storage_remove`, `local_storage_clear`,
+  `session_storage_set`, `session_storage_remove`, `session_storage_clear`.
+- Subscriptions: `interval`, `keyboard`, `online_status`, `window_resize`,
+  `visibility_change`, `location_change`, `window_focus`, `window_blur`,
+  `animation_frame`, `media_query`, `storage`, `broadcast_channel`.
 
 Lower-level renderer APIs are available for integration work:
 
@@ -1338,23 +1540,23 @@ fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
     Msg::Loaded { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(with_todos(model, value))
+          next(with_todos(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::DraftChanged { value }:
-      next<Model, Msg>(with_draft(model, value))
+      next(with_draft(model, value))
     Msg::Submit:
       next(model: saving_now(model), cmd: create_todo(model.draft))
     Msg::Created { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(adding(model, value))
+          next(adding(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::StartEdit { id, title }:
-      next<Model, Msg>(start_edit(model, id, title))
+      next(start_edit(model, id, title))
     Msg::EditChanged { value }:
-      next<Model, Msg>(with_edit(model, value))
+      next(with_edit(model, value))
     Msg::SaveEdit:
       next(
         model: saving_now(model),
@@ -1363,19 +1565,19 @@ fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
     Msg::Saved { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(replacing(model, value))
+          next(replacing(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::Delete { id }:
       next(model: saving_now(model), cmd: delete_todo(id))
     Msg::Deleted { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(removing(model, value))
+          next(removing(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::CancelEdit:
-      next<Model, Msg>(cancel_edit(model))
+      next(cancel_edit(model))
 ```
 
 This example is pessimistic: it waits for persistence to succeed before changing
@@ -1527,23 +1729,23 @@ fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
     Msg::Loaded { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(with_todos(model, value))
+          next(with_todos(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::DraftChanged { value }:
-      next<Model, Msg>(with_draft(model, value))
+      next(with_draft(model, value))
     Msg::Submit:
       next(model: saving_now(model), cmd: create_todo(model.draft))
     Msg::Created { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(adding(model, value))
+          next(adding(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::StartEdit { id, title }:
-      next<Model, Msg>(start_edit(model, id, title))
+      next(start_edit(model, id, title))
     Msg::EditChanged { value }:
-      next<Model, Msg>(with_edit(model, value))
+      next(with_edit(model, value))
     Msg::SaveEdit:
       next(
         model: saving_now(model),
@@ -1552,19 +1754,19 @@ fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
     Msg::Saved { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(replacing(model, value))
+          next(replacing(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::Delete { id }:
       next(model: saving_now(model), cmd: delete_todo(id))
     Msg::Deleted { result }:
       match(result)
         Ok { value }:
-          next<Model, Msg>(removing(model, value))
+          next(removing(model, value))
         Err { error }:
-          next<Model, Msg>(with_error(model, error))
+          next(with_error(model, error))
     Msg::CancelEdit:
-      next<Model, Msg>(cancel_edit(model))
+      next(cancel_edit(model))
 
 fn load_todos(): TaskRuntime -> Cmd<Msg>
   Cmd::task(

@@ -30,6 +30,7 @@ import type { CodegenOptions } from "../codegen/context.js";
 import {
   incrementCompilerPerfCounter,
   markCompilerPerfPhaseDuration,
+  recordCompilerPerfDuration,
   startCompilerPerfPhase,
 } from "../perf.js";
 import {
@@ -6047,23 +6048,29 @@ export const optimizeProgram = ({
   void entryModuleId;
   void options;
 
-  OPTIMIZATION_PASSES.forEach((pass) => {
+  OPTIMIZATION_PASSES.forEach((pass, index) => {
     const passStartedAt = startCompilerPerfPhase();
     const result = pass.run(context);
     markCompilerPerfPhaseDuration(
       `optimize.pass.${pass.name}`,
       passStartedAt,
     );
+    recordCompilerPerfDuration({
+      name: `optimize.pass.${pass.name}.ms`,
+      startedAt: passStartedAt,
+    });
+    recordCompilerPerfDuration({
+      name: `optimize.pass.${index}.${pass.name}.ms`,
+      startedAt: passStartedAt,
+    });
     if (result.changed) {
       incrementCompilerPerfCounter(`optimize.pass.${pass.name}.changed`);
     }
     if (result.invalidates?.length) {
       incrementCompilerPerfCounter(
-        `optimize.pass.${pass.name}.invalidations`,
+        `optimize.pass.${pass.name}.invalidates`,
         result.invalidates.length,
       );
-    }
-    if (result.invalidates?.length) {
       context.invalidateAnalyses(result.invalidates);
     }
   });

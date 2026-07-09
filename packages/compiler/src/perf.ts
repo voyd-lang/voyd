@@ -17,6 +17,7 @@ export type CompilerPerfSession = {
   countersBefore?: CompilerPerfCounterSnapshot;
   phasesBefore?: CompilerPerfPhaseSnapshot;
   overlapped?: boolean;
+  completed?: boolean;
 };
 
 const COMPILER_PERF_ENV = "VOYD_COMPILER_PERF";
@@ -84,6 +85,19 @@ export const markCompilerPerfPhaseDuration = (
     return;
   }
   addCompilerPerfPhaseDuration(name, performance.now() - startedAt);
+};
+
+export const recordCompilerPerfDuration = ({
+  name,
+  startedAt,
+}: {
+  name: string;
+  startedAt: number;
+}): void => {
+  if (!PERF_ENABLED) {
+    return;
+  }
+  incrementCompilerPerfCounter(name, performance.now() - startedAt);
 };
 
 export const snapshotCompilerPerfCounters = (): CompilerPerfCounterSnapshot =>
@@ -203,14 +217,22 @@ export const completeCompilerPerfSession = ({
   session,
   success,
   diagnostics,
+  extraTotalMs = 0,
 }: {
   session: CompilerPerfSession;
   success: boolean;
   diagnostics: number;
+  extraTotalMs?: number;
 }): void => {
-  if (!session.enabled || !session.countersBefore || !session.phasesBefore) {
+  if (
+    !session.enabled ||
+    session.completed ||
+    !session.countersBefore ||
+    !session.phasesBefore
+  ) {
     return;
   }
+  session.completed = true;
   activeSessions.delete(session);
 
   const phases = diffCompilerPerfPhases({
@@ -224,7 +246,7 @@ export const completeCompilerPerfSession = ({
     diagnostics,
     phasesMs: {
       ...phases,
-      total: performance.now() - session.startedAt,
+      total: performance.now() - session.startedAt + extraTotalMs,
     },
     counters: diffCompilerPerfCounters({
       before: session.countersBefore,

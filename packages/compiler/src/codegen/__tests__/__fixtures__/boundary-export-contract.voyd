@@ -17,7 +17,7 @@ fn init() -> Model
 fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
     Msg::Increment:
-      next<Model, Msg>(Model { count: model.count + 1 })
+      next(Model { count: model.count + 1 })
 
 fn view(model: Model) -> Html<Msg>
   <button on_click={Msg::Increment {}}>

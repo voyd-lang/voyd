@@ -1,6 +1,12 @@
 import { codegenErrorToDiagnostic } from "@voyd-lang/compiler/codegen/diagnostics.js";
 import type { Diagnostic } from "@voyd-lang/compiler/diagnostics/index.js";
 import { DiagnosticError } from "@voyd-lang/compiler/diagnostics/index.js";
+import {
+  commitDependencySnapshot,
+  createCompilerDependencySnapshotCache,
+  prepareDependencySnapshotReuse,
+  type CompilerDependencySnapshotCache,
+} from "@voyd-lang/compiler/modules/dependency-snapshot-cache.js";
 import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
 import {
   analyzeModules,
@@ -10,6 +16,7 @@ import {
   type TestScope,
 } from "@voyd-lang/compiler/pipeline-shared.js";
 import {
+  addCompilerPerfPhaseDuration,
   completeCompilerPerfSession,
   markCompilerPerfPhaseDuration,
   startCompilerPerfPhase,
@@ -34,8 +41,12 @@ export type CompileArtifactsFailure = {
 
 export type CompileArtifacts = CompileArtifactsSuccess | CompileArtifactsFailure;
 
+export type CompilerReuseCache = CompilerDependencySnapshotCache;
+
 const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === "error");
+
+export const createCompilerReuseCache = createCompilerDependencySnapshotCache;
 
 export const compileWithLoader = async ({
   entryPath,
@@ -48,6 +59,8 @@ export const compileWithLoader = async ({
   loadModuleGraph,
   testScope,
   boundaryExports,
+  cache,
+  setupPhasesMs,
   finalizeSuccess,
 }: {
   entryPath: string;
@@ -60,59 +73,189 @@ export const compileWithLoader = async ({
   loadModuleGraph: LoadModuleGraphFn;
   testScope?: TestScope;
   boundaryExports?: BoundaryExportsOption;
+  cache?: CompilerReuseCache;
+  setupPhasesMs?: Readonly<Record<string, number>>;
   finalizeSuccess?: (
     result: CompileArtifactsSuccess,
   ) => CompileArtifactsSuccess | Promise<CompileArtifactsSuccess>;
 }): Promise<CompileArtifacts> => {
-  const shouldIncludeTests = includeTests || testsOnly;
-  const codegenLoadPromise = preloadCodegen();
-  void codegenLoadPromise.catch(() => undefined);
-  const perfSession = startCompilerPerfSession({ entryPath });
-  const complete = (result: CompileArtifacts): CompileArtifacts => {
-    completeCompilerPerfSession({
-      session: perfSession,
-      success: result.success,
-      diagnostics: result.success ? 0 : result.diagnostics.length,
-    });
-    return result;
-  };
-  const finalize = async (
-    result: CompileArtifactsSuccess,
-  ): Promise<CompileArtifactsSuccess> => {
-    if (!finalizeSuccess) {
-      return result;
-    }
-    const finalizeStartedAt = startCompilerPerfPhase();
-    try {
-      return await finalizeSuccess(result);
-    } finally {
-      markCompilerPerfPhaseDuration("sdk.finalizeCompile", finalizeStartedAt);
-    }
-  };
-  const emitProgramWithPerf = async (
-    phase: string,
-    options: Parameters<typeof emitProgram>[0],
-  ): Promise<Awaited<ReturnType<typeof emitProgram>>> => {
-    const startedAt = startCompilerPerfPhase();
-    try {
-      return await emitProgram(options);
-    } finally {
-      markCompilerPerfPhaseDuration(phase, startedAt);
-    }
-  };
-  let graph: Awaited<ReturnType<LoadModuleGraphFn>>;
-  const loadStartedAt = startCompilerPerfPhase();
+  const perf = createCompilePerfScope({ entryPath, setupPhasesMs });
+
   try {
-    graph = await loadModuleGraph({
-      entryPath,
+    const shouldIncludeTests = includeTests || testsOnly;
+    const codegenLoadPromise = preloadCodegen();
+    void codegenLoadPromise.catch(() => undefined);
+    const finalize = async (
+      result: CompileArtifactsSuccess,
+    ): Promise<CompileArtifactsSuccess> => {
+      if (!finalizeSuccess) {
+        return result;
+      }
+      const finalizeStartedAt = perf.start();
+      try {
+        return await finalizeSuccess(result);
+      } finally {
+        perf.mark("sdk.finalizeCompile", finalizeStartedAt);
+      }
+    };
+
+    let graph: Awaited<ReturnType<LoadModuleGraphFn>>;
+    const loadStartedAt = perf.start();
+    try {
+      graph = await loadModuleGraph({
+        entryPath,
+        roots,
+        host,
+        includeTests: shouldIncludeTests,
+      });
+      perf.mark("loadModuleGraph", loadStartedAt);
+    } catch (error) {
+      perf.mark("loadModuleGraph", loadStartedAt);
+      return perf.complete({
+        success: false,
+        diagnostics: diagnosticsFromUnknownError({
+          error,
+          fallbackFile: entryPath,
+        }),
+      });
+    }
+
+    const scopedTestScope = testScope ?? "all";
+    const runtimeDiagnosticsCodegenOption =
+      typeof runtimeDiagnostics === "boolean"
+        ? { runtimeDiagnostics, emitEffectHelpers: true }
+        : { emitEffectHelpers: true };
+    const optimizationCodegenOption =
+      typeof optimize === "boolean" ? { optimize } : {};
+    const codegenOption = {
+      ...optimizationCodegenOption,
+      ...runtimeDiagnosticsCodegenOption,
+      boundaryExports: boundaryExports ?? "auto",
+    } as const;
+    const testCodegenOption = {
+      ...optimizationCodegenOption,
+      ...runtimeDiagnosticsCodegenOption,
+      boundaryExports: false,
+    } as const;
+
+    const dependencySnapshotReuse = prepareDependencySnapshotReuse({
+      cache,
+      graph,
       roots,
-      host,
       includeTests: shouldIncludeTests,
     });
-    markCompilerPerfPhaseDuration("loadModuleGraph", loadStartedAt);
+
+    const analyzeStartedAt = perf.start();
+    const {
+      semantics,
+      diagnostics: semanticDiagnostics,
+      tests,
+      dependencySnapshot,
+    } = analyzeModules({
+      graph,
+      includeTests: shouldIncludeTests,
+      testScope: scopedTestScope,
+      captureDependencySnapshot: Boolean(dependencySnapshotReuse.key),
+      previousSemantics: dependencySnapshotReuse.previousSemantics,
+      typingState: dependencySnapshotReuse.typingState,
+    });
+    perf.mark("analyzeModules", analyzeStartedAt);
+    const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
+    const testCases = shouldIncludeTests ? tests : undefined;
+
+    if (hasErrorDiagnostics(diagnostics)) {
+      return perf.complete({
+        success: false,
+        diagnostics,
+      });
+    }
+
+    commitDependencySnapshot({
+      prepared: dependencySnapshotReuse,
+      dependencySnapshot,
+    });
+
+    try {
+      if (testsOnly) {
+        const emitStartedAt = perf.start();
+        const testResult = await emitProgram({
+          graph,
+          semantics,
+          codegenOptions: {
+            testMode: true,
+            testScope: scopedTestScope,
+            ...testCodegenOption,
+          },
+        });
+        perf.mark("emitProgram.tests", emitStartedAt);
+        const allDiagnostics = [...diagnostics, ...testResult.diagnostics];
+        if (hasErrorDiagnostics(allDiagnostics)) {
+          return perf.complete({ success: false, diagnostics: allDiagnostics });
+        }
+
+        return perf.complete(await finalize({
+          success: true,
+          wasm: testResult.wasm,
+          tests: testCases,
+          testsWasm: testResult.wasm,
+        }));
+      }
+
+      const emitStartedAt = perf.start();
+      const wasmResult = await emitProgram({
+        graph,
+        semantics,
+        codegenOptions: codegenOption,
+      });
+      perf.mark("emitProgram", emitStartedAt);
+      const baseDiagnostics = [...diagnostics, ...wasmResult.diagnostics];
+      if (hasErrorDiagnostics(baseDiagnostics)) {
+        return perf.complete({ success: false, diagnostics: baseDiagnostics });
+      }
+
+      let testsWasm: Uint8Array | undefined;
+
+      if (shouldIncludeTests && tests.length > 0) {
+        const testEmitStartedAt = perf.start();
+        const testResult = await emitProgram({
+          graph,
+          semantics,
+          codegenOptions: {
+            testMode: true,
+            testScope: scopedTestScope,
+            ...testCodegenOption,
+          },
+        });
+        perf.mark("emitProgram.tests", testEmitStartedAt);
+        const allDiagnostics = [...baseDiagnostics, ...testResult.diagnostics];
+        if (hasErrorDiagnostics(allDiagnostics)) {
+          return perf.complete({ success: false, diagnostics: allDiagnostics });
+        }
+        testsWasm = testResult.wasm;
+      }
+
+      return perf.complete(await finalize({
+        success: true,
+        wasm: wasmResult.wasm,
+        tests: testCases,
+        testsWasm,
+      }));
+    } catch (error) {
+      const codegenDiagnostics =
+        error instanceof DiagnosticError
+          ? error.diagnostics
+          : [
+              codegenErrorToDiagnostic(error, {
+                moduleId: graph.entry ?? entryPath,
+              }),
+            ];
+      return perf.complete({
+        success: false,
+        diagnostics: [...diagnostics, ...codegenDiagnostics],
+      });
+    }
   } catch (error) {
-    markCompilerPerfPhaseDuration("loadModuleGraph", loadStartedAt);
-    return complete({
+    return perf.complete({
       success: false,
       diagnostics: diagnosticsFromUnknownError({
         error,
@@ -120,112 +263,31 @@ export const compileWithLoader = async ({
       }),
     });
   }
+};
 
-  const scopedTestScope = testScope ?? "all";
-  const runtimeDiagnosticsCodegenOption =
-    typeof runtimeDiagnostics === "boolean"
-      ? { runtimeDiagnostics, emitEffectHelpers: true }
-      : { emitEffectHelpers: true };
-  const optimizationCodegenOption =
-    typeof optimize === "boolean" ? { optimize } : {};
-  const codegenOption = {
-    ...optimizationCodegenOption,
-    ...runtimeDiagnosticsCodegenOption,
-    boundaryExports: boundaryExports ?? "auto",
-  } as const;
-  const testCodegenOption = {
-    ...optimizationCodegenOption,
-    ...runtimeDiagnosticsCodegenOption,
-    boundaryExports: false,
-  } as const;
-  const analyzeStartedAt = startCompilerPerfPhase();
-  const { semantics, diagnostics: semanticDiagnostics, tests } = analyzeModules({
-    graph,
-    includeTests: shouldIncludeTests,
-    testScope: scopedTestScope,
+const createCompilePerfScope = ({
+  entryPath,
+  setupPhasesMs,
+}: {
+  entryPath: string;
+  setupPhasesMs?: Readonly<Record<string, number>>;
+}) => {
+  const session = startCompilerPerfSession({ entryPath });
+  Object.entries(setupPhasesMs ?? {}).forEach(([phase, durationMs]) => {
+    addCompilerPerfPhaseDuration(phase, durationMs);
   });
-  markCompilerPerfPhaseDuration("analyzeModules", analyzeStartedAt);
-  const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
-  const testCases = shouldIncludeTests ? tests : undefined;
 
-  if (hasErrorDiagnostics(diagnostics)) {
-    return complete({
-      success: false,
-      diagnostics,
+  const start = startCompilerPerfPhase;
+  const mark = markCompilerPerfPhaseDuration;
+  const complete = <T extends CompileArtifacts>(result: T): T => {
+    completeCompilerPerfSession({
+      session,
+      success: result.success,
+      diagnostics: result.success ? 0 : result.diagnostics.length,
+      extraTotalMs: setupPhasesMs?.["sdkSetup.total"] ?? 0,
     });
-  }
+    return result;
+  };
 
-  try {
-    if (testsOnly) {
-      const testResult = await emitProgramWithPerf("emitProgram", {
-        graph,
-        semantics,
-        codegenOptions: {
-          testMode: true,
-          testScope: scopedTestScope,
-          ...testCodegenOption,
-        },
-      });
-      const allDiagnostics = [...diagnostics, ...testResult.diagnostics];
-      if (hasErrorDiagnostics(allDiagnostics)) {
-        return complete({ success: false, diagnostics: allDiagnostics });
-      }
-
-      return complete(await finalize({
-        success: true,
-        wasm: testResult.wasm,
-        tests: testCases,
-        testsWasm: testResult.wasm,
-      }));
-    }
-
-    const wasmResult = await emitProgramWithPerf("emitProgram", {
-      graph,
-      semantics,
-      codegenOptions: codegenOption,
-    });
-    const baseDiagnostics = [...diagnostics, ...wasmResult.diagnostics];
-    if (hasErrorDiagnostics(baseDiagnostics)) {
-      return complete({ success: false, diagnostics: baseDiagnostics });
-    }
-
-    let testsWasm: Uint8Array | undefined;
-
-    if (shouldIncludeTests && tests.length > 0) {
-      const testResult = await emitProgramWithPerf("emitProgram.tests", {
-        graph,
-        semantics,
-        codegenOptions: {
-          testMode: true,
-          testScope: scopedTestScope,
-          ...testCodegenOption,
-        },
-      });
-      const allDiagnostics = [...baseDiagnostics, ...testResult.diagnostics];
-      if (hasErrorDiagnostics(allDiagnostics)) {
-        return complete({ success: false, diagnostics: allDiagnostics });
-      }
-      testsWasm = testResult.wasm;
-    }
-
-    return complete(await finalize({
-      success: true,
-      wasm: wasmResult.wasm,
-      tests: testCases,
-      testsWasm,
-    }));
-  } catch (error) {
-    const codegenDiagnostics =
-      error instanceof DiagnosticError
-        ? error.diagnostics
-        : [
-            codegenErrorToDiagnostic(error, {
-              moduleId: graph.entry ?? entryPath,
-            }),
-          ];
-    return complete({
-      success: false,
-      diagnostics: [...diagnostics, ...codegenDiagnostics],
-    });
-  }
+  return { start, mark, complete };
 };

@@ -80,4 +80,27 @@ describe("TypeArena shape normalization", () => {
 
     expect(restrictedShape).not.toBe(publicShape);
   });
+
+  it("preserves canonical descriptor ids across snapshot restore", () => {
+    const arena = createTypeArena();
+    const i32 = arena.internPrimitive("i32");
+    const canonical = arena.createRecursiveType(() => ({
+      kind: "structural-object",
+      fields: [{ name: "value", type: i32 }],
+    }));
+
+    expect(
+      arena.internStructuralObject({
+        fields: [{ name: "value", type: i32 }],
+      }),
+    ).toBe(canonical);
+
+    const restored = createTypeArena(arena.snapshot());
+
+    expect(
+      restored.internStructuralObject({
+        fields: [{ name: "value", type: i32 }],
+      }),
+    ).toBe(canonical);
+  });
 });

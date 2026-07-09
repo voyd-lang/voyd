@@ -6,8 +6,13 @@ import { createMemoryModuleHost } from "@voyd-lang/compiler/modules/memory-host.
 import { createNodePathAdapter } from "@voyd-lang/compiler/modules/node-path-adapter.js";
 import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
 import { loadModuleGraph } from "@voyd-lang/compiler/pipeline.js";
+import { isCompilerPerfEnabled } from "@voyd-lang/compiler/perf.js";
 import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
-import { compileWithLoader } from "./shared/compile.js";
+import {
+  compileWithLoader,
+  createCompilerReuseCache,
+  type CompilerReuseCache,
+} from "./shared/compile.js";
 import {
   createHost,
   registerHandlers,
@@ -35,16 +40,20 @@ export { detectSrcRootForPath } from "./shared/source-root.js";
 const DEFAULT_ENTRY = "index.voyd";
 const DEFAULT_VIRTUAL_ROOT = ".voyd";
 
-export const createSdk = (): VoydSdk => ({
-  compile: compileSdk,
-  run: runWithHandlers,
-  serveWebApp,
-});
+export const createSdk = (): VoydSdk => {
+  const compilerCache = createCompilerReuseCache();
+  return {
+    compile: (options) => compileSdk(options, compilerCache),
+    run: runWithHandlers,
+    serveWebApp: (options) => serveWebApp(options, compilerCache),
+  };
+};
 
 export const serveWebApp = async (
   options: ServeWebAppOptions,
+  compilerCache?: CompilerReuseCache,
 ): Promise<ServeWebAppResult> => {
-  const result = await compileSdk(options);
+  const result = await compileSdk(options, compilerCache);
   if (!result.success) {
     return result;
   }
@@ -187,7 +196,27 @@ const restoreEnv = (key: string, value: string | undefined): void => {
   process.env[key] = value;
 };
 
-const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
+const recordSetupPhase = ({
+  phasesMs,
+  enabled,
+  name,
+  startedAt,
+}: {
+  phasesMs: Record<string, number>;
+  enabled: boolean;
+  name: string;
+  startedAt: number;
+}): void => {
+  if (!enabled) {
+    return;
+  }
+  phasesMs[name] = performance.now() - startedAt;
+};
+
+const compileSdk = async (
+  options: CompileOptions,
+  compilerCache?: CompilerReuseCache,
+): Promise<CompileResult> => {
   if (!options.entryPath && options.source === undefined) {
     return {
       success: false,
@@ -203,6 +232,10 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
   const entryName = options.entryPath ?? DEFAULT_ENTRY;
 
   try {
+    const setupPhasesMs: Record<string, number> = {};
+    const perfEnabled = isCompilerPerfEnabled();
+    const setupStartedAt = perfEnabled ? performance.now() : 0;
+    const rootResolutionStartedAt = perfEnabled ? performance.now() : 0;
     const srcRoot = resolveSrcRoot({
       roots: options.roots,
       entryPath: entryName,
@@ -214,6 +247,14 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       source: options.source,
     });
     const roots = resolveRoots({ roots: options.roots, srcRoot });
+    recordSetupPhase({
+      phasesMs: setupPhasesMs,
+      enabled: perfEnabled,
+      name: "sdkSetup.resolveRoots",
+      startedAt: rootResolutionStartedAt,
+    });
+
+    const hostStartedAt = perfEnabled ? performance.now() : 0;
     const host = options.source
       ? createOverlayModuleHost({
           primary: createMemoryModuleHost({
@@ -228,6 +269,18 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
           fallback: createFsModuleHost(),
         })
       : createFsModuleHost();
+    recordSetupPhase({
+      phasesMs: setupPhasesMs,
+      enabled: perfEnabled,
+      name: "sdkSetup.createHost",
+      startedAt: hostStartedAt,
+    });
+    recordSetupPhase({
+      phasesMs: setupPhasesMs,
+      enabled: perfEnabled,
+      name: "sdkSetup.total",
+      startedAt: setupStartedAt,
+    });
 
     const testScope = options.testScope ?? (options.source ? "entry" : "all");
     const runtimeDiagnostics = resolveRuntimeDiagnostics({
@@ -244,6 +297,8 @@ const compileSdk = async (options: CompileOptions): Promise<CompileResult> => {
       runtimeDiagnostics,
       loadModuleGraph,
       boundaryExports: options.boundaryExports,
+      cache: compilerCache,
+      setupPhasesMs,
       finalizeSuccess: (result) => finalizeCompile({ options, result }),
     });
 

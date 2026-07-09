@@ -70,6 +70,11 @@ export interface ModuleNode {
   origin: ModuleOrigin;
   ast: Form;
   source: string;
+  /**
+   * Source files that contributed to this module's AST. This includes merged
+   * companion test files when test modules are loaded.
+   */
+  sourceFiles?: readonly { filePath: string; source: string }[];
   docs?: ModuleDocumentation;
   dependencies: readonly ModuleDependency[];
   /**

@@ -15,7 +15,7 @@ fn init() -> CallbackModel
   CallbackModel { apply: read_value }
 
 fn step(model: CallbackModel, _msg: Msg) -> Program<CallbackModel, Msg>
-  next<CallbackModel, Msg>(model)
+  next(model)
 
 fn view(_model: CallbackModel) -> Html<Msg>
   <div></div>
