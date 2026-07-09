@@ -17,7 +17,7 @@ If both `VOYD_USE_DIST=1` and `VOYD_USE_SRC=1` are set, source mode wins and a w
 PR workflow (`.github/workflows/pr.yml`) runs complementary checks:
 
 1. Main test sweep in source mode:
-   - `VOYD_USE_SRC=1 npx turbo run test --affected ...`
+   - `VOYD_USE_SRC=1 npm run test:affected`
    - Fast path for broad correctness checks. Compiler codegen tests are split
      into their own sharded CI job because they dominate wall-clock time.
 2. Compiler codegen in a separate sharded job (when compiler/runtime files change):
@@ -48,7 +48,7 @@ If you modify any of the following, ensure dist CLI e2e still runs:
 
 Recommended local commands before merging CLI/runtime changes:
 
-- `VOYD_USE_SRC=1 npm test`
+- `VOYD_USE_SRC=1 npm run test:full`
 - `npm run test:codegen`
 - `npx turbo run build --filter=@voyd-lang/cli...`
 - `VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd-lang/cli test:e2e`
