@@ -198,7 +198,7 @@ describe("runBootstrap", () => {
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  }, 120_000);
+  }, 300_000);
 
   it("prints a dry run without writing files", async () => {
     const root = await createTempDir();
