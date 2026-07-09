@@ -17,9 +17,12 @@ If both `VOYD_USE_DIST=1` and `VOYD_USE_SRC=1` are set, source mode wins and a w
 PR workflow (`.github/workflows/pr.yml`) runs complementary checks:
 
 1. Main test sweep in source mode:
-   - `VOYD_USE_SRC=1 npm run test:affected`
-   - Fast path for broad correctness checks. Compiler codegen tests are split
-     into their own sharded CI job because they dominate wall-clock time.
+   - `VOYD_USE_SRC=1 npm run test:affected:ci`
+   - Fast path for broad correctness checks. This uses the same affected
+     package selection as `npm run test:affected`, with a CI-specific Turbo
+     concurrency cap so hosted runners are not oversubscribed by many package
+     test tasks at once. Compiler codegen tests are split into their own
+     sharded CI job because they dominate wall-clock time.
 2. Compiler codegen in a separate sharded job (when compiler/runtime files change):
    - `npm run --workspace @voyd-lang/compiler test:codegen -- --shard=N/4`
    - Keeps the slowest compiler e2e-style tests off the main PR critical path.
@@ -49,6 +52,8 @@ If you modify any of the following, ensure dist CLI e2e still runs:
 Recommended local commands before merging CLI/runtime changes:
 
 - `VOYD_USE_SRC=1 npm run test:full`
+- `VOYD_USE_SRC=1 npm run test:affected:ci` when reproducing PR runner load
+  locally
 - `npm run test:codegen`
 - `npx turbo run build --filter=@voyd-lang/cli...`
 - `VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd-lang/cli test:e2e`
