@@ -1,0 +1,57 @@
+use std::string::type::{ String }
+
+eff Async
+  await(resume, value: i32) -> i32
+
+obj Response {
+  value: String
+}
+
+obj Context {
+  marker: i32
+}
+
+trait IntoResponse<T>
+  fn into_response(self) -> Response
+
+impl IntoResponse<String> for String
+  fn into_response(self) -> Response
+    Response { value: self }
+
+type Handler = fn(Context) : (open) -> Response
+
+fn to_response<T: IntoResponse<T>>(value: T) -> Response
+  value.into_response()
+
+fn wrap_handler<R: IntoResponse<R>>(
+  handler: fn() : (open) -> R
+) -> Handler
+  (_context: Context) -> Response =>
+    let result = handler()
+    to_response<R>(result)
+
+fn run_callback<R>(callback: fn() : (open) -> R): (open) -> R
+  callback()
+
+fn wrap_nested_handler<R: IntoResponse<R>>(
+  handler: fn() : (open) -> R
+) -> Handler
+  (context: Context) -> Response =>
+    run_callback<Response> do:
+      let result = handler()
+      let response = to_response<R>(result)
+      if context.marker == 1 then: response else: Response { value: "bad" }
+
+pub fn main(): Async -> i32
+  let direct_route = wrap_handler<String> do:
+    let _ = Async::await(5)
+    "ok"
+  let nested_route = wrap_nested_handler<String> do:
+    let _ = Async::await(6)
+    "ok"
+  let context = Context { marker: 1 }
+  let direct_result =
+    if direct_route(context).value.equals("ok") then: 1 else: 0
+  let nested_result =
+    if nested_route(context).value.equals("ok") then: 1 else: 0
+  direct_result + nested_result

@@ -17,3 +17,15 @@ fn call_mix(cb: fn() -> i32): Async -> i32
   pure_add(1, 2)
   cb()
   effectful()
+
+type GenericWrapper = fn(i32) : (open) -> i32
+
+fn generic_wrapper<T>(callback: fn() : (open) -> T) -> GenericWrapper
+  (_context: i32) -> i32 =>
+    let _ = callback()
+    1
+
+fn call_generic_wrapper(): Async -> i32
+  let wrapped = generic_wrapper<i32> do:
+    effectful()
+  wrapped(0)

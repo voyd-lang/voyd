@@ -114,4 +114,21 @@ describe("EffectsLoweringInfo", () => {
     expect(effectfulCall?.effectful).toBe(true);
     expect(semantics.typing.effects.isEmpty(effectfulCall!.effectRow)).toBe(false);
   });
+
+  it("lowers a generic lambda whose body has an open effect row", () => {
+    const semantics = loadSemantics();
+    const info = buildEffectsLoweringInfo({
+      binding: semantics.binding,
+      symbolTable: getSymbolTable(semantics),
+      hir: semantics.hir,
+      typing: semantics.typing,
+    });
+
+    const escaped = Array.from(info.lambdas.values()).find((lambda) => {
+      const expr = semantics.hir.expressions.get(lambda.exprId);
+      return expr?.exprKind === "lambda" && expr.captures.length > 0;
+    });
+    expect(escaped?.abiEffectful).toBe(true);
+    expect(escaped?.shouldLower).toBe(true);
+  });
 });
