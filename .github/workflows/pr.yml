@@ -70,7 +70,8 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
       # Main PR tests run in source mode for speed and broad coverage.
-      - run: VOYD_USE_SRC=1 npm run test:affected
+      # CI caps package-level Turbo concurrency to avoid oversubscribing hosted runners.
+      - run: VOYD_USE_SRC=1 npm run test:affected:ci
       # Build-only checks for non-CLI artifacts that are not exercised by package tests.
       - name: Build non-CLI artifacts
         if: steps.changes.outputs.non_cli_build == 'true'
