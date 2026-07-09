@@ -1266,8 +1266,10 @@ function runLocationChangeSubscription(
 ): VxSubscriptionDisposer | void {
   if (typeof window === "undefined") return;
   let observedChange = false;
+  let cancelled = false;
+  let timeout: ReturnType<typeof setTimeout> | undefined;
   const dispatch = () => {
-    if (context.signal.aborted) return;
+    if (cancelled || context.signal.aborted) return;
     settleAsyncDispatch(context.dispatch(subscriptionMessage(subscription, locationPayload())));
   };
   const dispatchObserved = () => {
@@ -1283,9 +1285,11 @@ function runLocationChangeSubscription(
   if (context.deferAfterCommands) {
     context.deferAfterCommands(dispatchInitial);
   } else {
-    setTimeout(dispatchInitial, 0);
+    timeout = setTimeout(dispatchInitial, 0);
   }
   return () => {
+    cancelled = true;
+    if (timeout !== undefined) clearTimeout(timeout);
     window.removeEventListener("popstate", dispatchObserved);
     window.removeEventListener("hashchange", dispatchObserved);
     window.removeEventListener(locationChangeEvent, dispatchObserved);

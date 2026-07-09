@@ -1205,6 +1205,32 @@ describe("vx-dom browser renderer", () => {
     expect(sessionStorage.length).toBe(0);
   });
 
+  it("cancels deferred initial location_change emits after subscription removal", async () => {
+    const seenMessages: unknown[] = [];
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: { type: "sub", kind: "location_change", key: "location" },
+        commands: { type: "cmd", kind: "message", value: { type: "remove-location" } },
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return {
+          frame: counterNode(seenMessages.length),
+          subscriptions: { type: "sub", kind: "none" },
+        };
+      },
+    };
+
+    await mountVxApp({ container, app });
+    await nextTurn();
+
+    expect(seenMessages).toEqual([
+      { kind: "msgpack", value: { type: "remove-location" } },
+    ]);
+  });
+
   it("does not await queued clipboard dispatches from step commands", async () => {
     const seenMessages: unknown[] = [];
     const readText = vi.fn(async () => "Clipboard text");
