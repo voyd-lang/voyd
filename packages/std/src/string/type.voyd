@@ -478,16 +478,14 @@ impl String
   /// Returns a UTF-8 byte array copy.
   ///
   /// This allocates a new `Array<i32>` containing the exact encoded bytes.
+  /// Mutating the returned array never changes the string or slices derived
+  /// from it.
   ///
   /// Example:
   /// `String::from_utf8(text.to_utf8())`
   /// round-trips `text` through bytes validation.
   api fn to_utf8(self): () -> Array<i32>
-    match(Array<i32>::from(self.raw_bytes()))
-      Some<Array<i32>> { value }:
-        value
-      None:
-        Array<i32>::init()
+    new_array_unchecked<i32>({ from: self.copy_raw_bytes() })
 
   /// Returns this value as an owned string.
   api fn to_string(self): () -> String
@@ -584,9 +582,23 @@ impl String
       None:
         None {}
 
-  /// Returns the underlying UTF-8 byte storage.
-  api fn raw_bytes(self): () -> FixedArray<i32>
-    self.bytes.raw_storage()
+  /// Copies the underlying UTF-8 bytes.
+  fn copy_raw_bytes(self): () -> FixedArray<i32>
+    let out = new_fixed_array<i32>(self.byte_count)
+    __array_copy(out, {
+      from: self.raw_bytes(),
+      to_index: 0,
+      from_index: 0,
+      count: self.byte_count
+    })
+    out
+
+  /// Returns the backing UTF-8 storage for std-internal read-only scans.
+  ///
+  /// This is intentionally not `api`: public byte access must go through
+  /// `to_utf8()`, which returns a mutable copy.
+  fn raw_bytes(self): () -> FixedArray<i32>
+    self.bytes.internal_storage()
 
   /// Returns true when both strings have identical bytes.
   api fn equals(self, other: String): () -> bool

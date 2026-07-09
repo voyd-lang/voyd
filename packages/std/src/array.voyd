@@ -328,9 +328,16 @@ impl<T> Array<T>
     })
     next_raw
 
-  /// Returns the underlying backing storage array.
+  /// Copies values into a fixed-size array.
   api fn raw_storage(self) -> FixedArray<T>
     self.to_fixed_array()
+
+  /// Returns the backing storage for std-internal read paths.
+  ///
+  /// Callers must not mutate the returned storage unless they own the array
+  /// and have first established unique access.
+  fn internal_storage(self) -> FixedArray<T>
+    self.storage
 
   /// Returns pairs of `(index, value)` for each element.
   api fn enumerate(self) -> Array<(i32, T)>
