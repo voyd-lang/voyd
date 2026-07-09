@@ -3830,8 +3830,16 @@ const resolveOperatorOverloadCandidates = ({
     methodName: operatorName,
     ctx,
   });
-  return nominalResolution && nominalResolution.candidates.length > 0
-    ? nominalResolution
+  if (nominalResolution && nominalResolution.candidates.length > 0) {
+    return nominalResolution;
+  }
+
+  const freeFunctionCandidates = resolveFreeFunctionCandidates({
+    methodName: operatorName,
+    ctx,
+  });
+  return freeFunctionCandidates.length > 0
+    ? { candidates: freeFunctionCandidates }
     : undefined;
 };
 
@@ -3919,6 +3927,20 @@ const typeOperatorOverloadCall = ({
 
   if (!selected) {
     if (matches.length === 0) {
+      const intrinsicFallback = typeIntrinsicFallbackCall({
+        name: operatorName,
+        args,
+        typeArguments,
+        callId: call.id,
+        callSpan: call.span,
+        calleeExprId: callee.id,
+        ctx,
+        state,
+      });
+      if (intrinsicFallback) {
+        return intrinsicFallback;
+      }
+
       if (
         emitConsensusCallArgumentShapeDiagnostic({
           candidates,

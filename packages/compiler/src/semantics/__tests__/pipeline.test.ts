@@ -1537,6 +1537,17 @@ describe("semanticsPipeline", () => {
     ).toBe(true);
   });
 
+  it("resolves functions declared below impl methods", () => {
+    const ast = loadAst("function_below_impl_method.voyd");
+    const result = semanticsPipeline(ast);
+
+    expect(result.diagnostics).toHaveLength(0);
+    const symbolTable = getSymbolTable(result);
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    expect(mainSymbol).toBeDefined();
+    expectFunctionReturnPrimitive(result.typing, mainSymbol!, "f64");
+  });
+
   it("infers forward-referenced helpers used by overloaded operators across modules", () => {
     const result = runMainWithSingleFixtureDependency({
       depFixture: "forward_inference_overloaded_operator_cross_module/dep.voyd",
