@@ -3,4 +3,4 @@ version = 1
 name = "voyd"
 
 [setup]
-script = "npm i"
+script = "npm ci"
