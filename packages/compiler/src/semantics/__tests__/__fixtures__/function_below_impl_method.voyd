@@ -1,0 +1,19 @@
+pub obj Vec {
+  x: f64
+}
+
+impl Vec
+  fn init(x: f64) -> Vec
+    Vec { x }
+
+  fn '*'(self, scalar: f64) -> Vec
+    Vec { x: self.x * scalar }
+
+  fn scaled_from_left(self) -> Vec
+    2.0 * self
+
+pub fn '*'(scalar: f64, vec: Vec) -> Vec
+  Vec { x: scalar * vec.x }
+
+pub fn main() -> f64
+  Vec(3.0).scaled_from_left().x
