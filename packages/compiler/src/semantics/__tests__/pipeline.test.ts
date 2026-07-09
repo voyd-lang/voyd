@@ -1095,6 +1095,13 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("derives generic constructor return types from the impl target", () => {
+    const result = semanticsPipeline(
+      loadAst("constructor_init_generic_inferred_return.voyd"),
+    );
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("resolves operator calls to impl overloads", () => {
     const ast = loadAst("operator_overload_eq.voyd");
     const result = semanticsPipeline(ast);

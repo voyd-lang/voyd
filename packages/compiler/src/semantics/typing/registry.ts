@@ -373,8 +373,24 @@ export const registerFunctionSignatures = (
         state,
       });
     const signatureTypeParams = typeParams.length > 0 ? typeParams : undefined;
+    const constructorReturn =
+      symbolRecord.name === "init" &&
+      symbolMetadata.static === true &&
+      implItem
+        ? resolveTypeExpr(
+            implItem.target,
+            ctx,
+            state,
+            ctx.primitives.unknown,
+            paramMap,
+          )
+        : undefined;
 
-    if (signatureTypeParams && !item.returnType) {
+    if (
+      signatureTypeParams &&
+      !item.returnType &&
+      typeof constructorReturn !== "number"
+    ) {
       ctx.diagnostics.report(
         diagnosticFromCode({
           code: "TY0034",
@@ -504,18 +520,6 @@ export const registerFunctionSignatures = (
         ctx.primitives.unknown,
         paramMap
       ) ?? ctx.primitives.unknown;
-    const constructorReturn =
-      symbolRecord.name === "init" &&
-      symbolMetadata.static === true &&
-      implItem
-        ? resolveTypeExpr(
-            implItem.target,
-            ctx,
-            state,
-            ctx.primitives.unknown,
-            paramMap,
-          )
-        : undefined;
 
     if (typeof constructorReturn === "number" && item.returnType) {
       ensureTypeMatches(
