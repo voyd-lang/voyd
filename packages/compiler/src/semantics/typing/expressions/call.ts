@@ -3822,7 +3822,12 @@ const resolveOperatorOverloadCandidates = ({
       methodName: operatorName,
       ctx,
     });
-    return traitResolution.candidates.length > 0 ? traitResolution : undefined;
+    if (traitResolution.candidates.length > 0) {
+      return {
+        ...traitResolution,
+        includesMethodCandidates: true,
+      };
+    }
   }
 
   const nominalResolution = resolveNominalMethodCandidates({
@@ -3831,7 +3836,10 @@ const resolveOperatorOverloadCandidates = ({
     ctx,
   });
   if (nominalResolution && nominalResolution.candidates.length > 0) {
-    return nominalResolution;
+    return {
+      ...nominalResolution,
+      includesMethodCandidates: true,
+    };
   }
 
   const freeFunctionCandidates = resolveFreeFunctionCandidates({
@@ -3839,7 +3847,7 @@ const resolveOperatorOverloadCandidates = ({
     ctx,
   });
   return freeFunctionCandidates.length > 0
-    ? { candidates: freeFunctionCandidates }
+    ? { candidates: freeFunctionCandidates, includesMethodCandidates: false }
     : undefined;
 };
 
@@ -3885,10 +3893,12 @@ const typeOperatorOverloadCall = ({
     return undefined;
   }
 
-  const candidates = filterCandidatesByExplicitTypeArguments({
+  const methodCandidates = filterCandidatesByExplicitTypeArguments({
     candidates: resolution.candidates,
     typeArguments,
   });
+  let candidates = methodCandidates;
+  let noOverloadDiagnosticCandidates = methodCandidates;
   enforceOverloadCandidateBudget({
     name: operatorName,
     candidateCount: candidates.length,
@@ -3896,7 +3906,7 @@ const typeOperatorOverloadCall = ({
     span: call.span,
   });
 
-  const matches = findMatchingOverloadCandidates({
+  let matches = findMatchingOverloadCandidates({
     name: operatorName,
     candidates,
     args,
@@ -3923,6 +3933,57 @@ const typeOperatorOverloadCall = ({
           state,
         })
       : undefined;
+
+  if (
+    !traitDispatch &&
+    matches.length === 0 &&
+    resolution.includesMethodCandidates === true
+  ) {
+    const fallbackCandidates = resolveFreeFunctionFallbackCandidates({
+      methodName: operatorName,
+      existing: resolution.candidates,
+      ctx,
+    });
+    if (fallbackCandidates.length > 0) {
+      const filteredFallbackCandidates =
+        filterCandidatesByExplicitTypeArguments({
+          candidates: fallbackCandidates,
+          typeArguments,
+        });
+      candidates = filteredFallbackCandidates;
+      noOverloadDiagnosticCandidates =
+        mergeCandidatesForMethodNoOverloadDiagnostic({
+          methodCandidates,
+          fallbackCandidates: filteredFallbackCandidates,
+          ctx,
+        });
+      enforceOverloadCandidateBudget({
+        name: operatorName,
+        candidateCount: candidates.length,
+        ctx,
+        span: call.span,
+      });
+      matches = findMatchingOverloadCandidates({
+        name: operatorName,
+        candidates,
+        args,
+        span: call.span,
+        ctx,
+        state,
+        typeArguments,
+        scoreMatches: (rawMatches) =>
+          scoreOverloadMatchesByLambdaCompatibility({
+            matches: rawMatches,
+            args,
+            callArgs: call.args,
+            typeArguments,
+            ctx,
+            state,
+          }),
+      });
+    }
+  }
+
   let selected: MethodCallCandidate | undefined = traitDispatch;
 
   if (!selected) {
@@ -3943,7 +4004,7 @@ const typeOperatorOverloadCall = ({
 
       if (
         emitConsensusCallArgumentShapeDiagnostic({
-          candidates,
+          candidates: noOverloadDiagnosticCandidates,
           args,
           ctx,
           state,
@@ -3961,7 +4022,7 @@ const typeOperatorOverloadCall = ({
         code: "TY0008",
         params: noOverloadDiagnosticParams({
           name: operatorName,
-          candidates,
+          candidates: noOverloadDiagnosticCandidates,
           args,
           ctx,
           state,

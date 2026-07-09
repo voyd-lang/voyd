@@ -6,14 +6,20 @@ impl Vec
   fn init(x: f64) -> Vec
     Vec { x }
 
-  fn '*'(self, scalar: f64) -> Vec
-    Vec { x: self.x * scalar }
+  fn '*'(self, other: Vec) -> Vec
+    Vec { x: self.x * other.x }
 
   fn scaled_from_left(self) -> Vec
     2.0 * self
 
+  fn scaled_from_right(self) -> Vec
+    self * 2.0
+
 pub fn '*'(scalar: f64, vec: Vec) -> Vec
   Vec { x: scalar * vec.x }
 
+pub fn '*'(vec: Vec, scalar: f64) -> Vec
+  Vec { x: vec.x * scalar }
+
 pub fn main() -> f64
-  Vec(3.0).scaled_from_left().x
+  Vec(3.0).scaled_from_left().x + Vec(3.0).scaled_from_right().x
