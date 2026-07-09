@@ -1102,6 +1102,17 @@ describe("semanticsPipeline", () => {
     expect(result.diagnostics).toHaveLength(0);
   });
 
+  it("checks generic constructor bodies before exporting their signatures", () => {
+    expect(() =>
+      runMainWithSingleFixtureDependency({
+        depFixture: "constructor_init_generic_cross_module/dep.voyd",
+        mainFixture: "constructor_init_generic_cross_module/main.voyd",
+      }),
+    ).toThrow(
+      /TY0027: type mismatch: expected 'object Box.*received 'i32'/,
+    );
+  });
+
   it("resolves operator calls to impl overloads", () => {
     const ast = loadAst("operator_overload_eq.voyd");
     const result = semanticsPipeline(ast);
