@@ -225,6 +225,11 @@ const lambdaEffectfulType = (expr: HirLambdaExpr, typing: TypingResult): boolean
   return typeof effectRow === "number" && !typing.effects.isEmpty(effectRow);
 };
 
+const lambdaBodyIsEffectful = (
+  expr: HirLambdaExpr,
+  typing: TypingResult,
+): boolean => !isPureEffectRow(exprEffectRow({ expr: expr.body, typing }), typing);
+
 export const buildEffectsLoweringInfo = ({
   binding,
   symbolTable,
@@ -346,7 +351,8 @@ export const buildEffectsLoweringInfo = ({
       visitLambdaBodies: false,
     });
     const effectfulType = lambdaEffectfulType(expr, typing);
-    const abiEffectful = effectfulType || hasHandlerInBody;
+    const abiEffectful =
+      effectfulType || lambdaBodyIsEffectful(expr, typing) || hasHandlerInBody;
     lambdas.set(expr.id, {
       exprId: expr.id,
       hasHandlerInBody,

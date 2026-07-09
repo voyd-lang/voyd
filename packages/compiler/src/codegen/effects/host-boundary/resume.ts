@@ -334,7 +334,19 @@ export const createEndRequestRaw = ({
   stateFor(ctx, END_REQUEST_RAW_KEY, () => {
     const msgpack = ensureMsgPackFunctions(ctx);
     const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
-    const endSites = [...ctx.effectsState.contSiteByKey.values(), ...ctx.effectLowering.sites]
+    const specializedSites = [...ctx.effectsState.contSiteByKey.values()];
+    const specializedSiteIds = new Set(
+      specializedSites.map((site) => site.siteId),
+    );
+    // A specialized site replaces its generic template in emitted code. The
+    // template can still contain unresolved owner types, so it cannot safely
+    // participate in host-boundary payload decoding.
+    const endSites = [
+      ...specializedSites,
+      ...ctx.effectLowering.sites.filter(
+        (site) => !specializedSiteIds.has(site.siteId),
+      ),
+    ]
       .reduce((sites, variant) => {
         if (sites.some((site) => site.siteOrder === variant.siteOrder)) {
           return sites;

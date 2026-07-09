@@ -27,7 +27,11 @@ import {
   allocateTempLocal,
   storeLocalValue,
 } from "../../locals.js";
-import { getRequiredExprType, wasmTypeFor } from "../../types.js";
+import {
+  getRequiredExprType,
+  getSymbolTypeId,
+  wasmTypeFor,
+} from "../../types.js";
 import { walkHirExpression, walkHirPattern } from "../../hir-walk.js";
 import { buildGroupContinuationCfg } from "../continuation-cfg.js";
 import { createGroupedContinuationExpressionCompiler } from "../continuation-compiler.js";
@@ -99,9 +103,15 @@ const collectIdentifierExprTypes = ({
         const setType = (symbol: SymbolId, typeId?: TypeId): void => {
           if (!shouldCaptureIdentifierSymbol(symbol, ctx)) return;
           if (types.has(symbol)) return;
+          let symbolTypeId: TypeId | undefined;
+          try {
+            symbolTypeId = getSymbolTypeId(symbol, ctx, typeInstanceId);
+          } catch {
+            symbolTypeId = undefined;
+          }
           types.set(
             symbol,
-            ctx.module.types.getValueType(symbol) ??
+            symbolTypeId ??
               typeId ??
               ctx.program.primitives.unknown,
           );
