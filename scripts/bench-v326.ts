@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { gzipSync } from "node:zlib";
-import { createSdk, type CompileResult } from "@voyd-lang/sdk";
+import { createSdk, type CompileResult, type ModuleRoots } from "@voyd-lang/sdk";
 import { createVoydHost } from "@voyd-lang/sdk/js-host";
 
 type Scenario = {
@@ -13,8 +13,10 @@ type Scenario = {
   optional?: boolean;
   source?: string;
   entryPath?: string;
+  roots?: ModuleRoots;
   entryName?: string;
-  expected?: number;
+  expected?: unknown;
+  expectedJsonSha256?: string;
 };
 
 type ScenarioResult = {
@@ -28,6 +30,9 @@ type ScenarioResult = {
   wasmTextBytes: number;
   structNewCount: number;
   structNewDefaultCount: number;
+  arrayNewCount: number;
+  refCastCount: number;
+  callRefCount: number;
   tupleMakeCount: number;
   medianMs?: number;
   samplesMs: number[];
@@ -138,6 +143,8 @@ const optimizeModes = (process.env.VOYD_BENCH_OPTIMIZE_MODES ?? "false,true")
     throw new Error(`invalid VOYD_BENCH_OPTIMIZE_MODES entry ${value}`);
   });
 const revisionLabel = process.env.VOYD_BENCH_REVISION ?? "worktree";
+const repoRoot = path.join(import.meta.dirname, "..");
+const smokeFixtureRoot = path.join(repoRoot, "apps", "smoke", "fixtures");
 
 const maybeFileScenario = (scenario: Scenario): Scenario[] =>
   scenario.entryPath && !fs.existsSync(scenario.entryPath) ? [] : [scenario];
@@ -201,29 +208,36 @@ const scenarios: Scenario[] = [
   },
   {
     name: "representative/vtrace-compute-main",
-    entryPath: path.join(
-      import.meta.dirname,
-      "..",
-      "apps",
-      "smoke",
-      "fixtures",
-      "vtrace-compute-benchmark.voyd",
-    ),
+    entryPath: path.join(smokeFixtureRoot, "vtrace-compute-benchmark.voyd"),
     entryName: "main",
     expected: 3_825_271,
     iterations: representativeIterations,
     warmups: 1,
   },
   {
+    name: "representative/web-framework-route-probe",
+    entryPath: path.join(smokeFixtureRoot, "web-framework.voyd"),
+    roots: {
+      src: smokeFixtureRoot,
+      pkgDirs: [path.join(repoRoot, "packages")],
+    },
+    entryName: "route_probe",
+    expected: 405,
+    iterations: representativeIterations,
+    warmups: 1,
+  },
+  {
+    name: "representative/vx-main",
+    entryPath: path.join(smokeFixtureRoot, "vx.voyd"),
+    entryName: "main",
+    expectedJsonSha256:
+      "29db61d8716594c93e18f6ebe7f72eb2ebc9c3fdef0e8e554066e11011c6507b",
+    iterations: representativeIterations,
+    warmups: 1,
+  },
+  {
     name: "representative/scalar-aggregate-particle-step",
-    entryPath: path.join(
-      import.meta.dirname,
-      "..",
-      "apps",
-      "smoke",
-      "fixtures",
-      "scalar-aggregate-representative.voyd",
-    ),
+    entryPath: path.join(smokeFixtureRoot, "scalar-aggregate-representative.voyd"),
     entryName: "main",
     expected: 1_100_340_000,
     iterations: representativeIterations,
@@ -267,6 +281,34 @@ const median = (values: readonly number[]): number | undefined => {
 const countMatches = (source: string, pattern: RegExp): number =>
   source.match(pattern)?.length ?? 0;
 
+const assertScenarioResult = ({
+  scenario,
+  result,
+  phase,
+}: {
+  scenario: Scenario;
+  result: unknown;
+  phase: "warmup" | "iteration";
+}): void => {
+  if (scenario.expected !== undefined && result !== scenario.expected) {
+    throw new Error(
+      `${scenario.name} returned ${String(result)} during ${phase}, expected ${String(
+        scenario.expected,
+      )}`,
+    );
+  }
+  if (scenario.expectedJsonSha256) {
+    const actualHash = createHash("sha256")
+      .update(JSON.stringify(result))
+      .digest("hex");
+    if (actualHash !== scenario.expectedJsonSha256) {
+      throw new Error(
+        `${scenario.name} returned JSON hash ${actualHash} during ${phase}, expected ${scenario.expectedJsonSha256}`,
+      );
+    }
+  }
+};
+
 const runScenario = async ({
   scenario,
   optimize,
@@ -280,6 +322,7 @@ const runScenario = async ({
     await sdk.compile({
       entryPath: scenario.entryPath,
       source: scenario.source,
+      roots: scenario.roots,
       optimize,
       emitWasmText: true,
     }),
@@ -288,25 +331,21 @@ const runScenario = async ({
   const compileMs = performance.now() - compileStartedAt;
 
   const samplesMs: number[] = [];
-  if (scenario.entryName && typeof scenario.expected === "number") {
+  if (
+    scenario.entryName &&
+    (scenario.expected !== undefined || scenario.expectedJsonSha256)
+  ) {
     const host = await createVoydHost({ wasm: compiled.wasm });
     for (let warmup = 0; warmup < scenario.warmups; warmup += 1) {
-      const result = await host.run<number>(scenario.entryName);
-      if (result !== scenario.expected) {
-        throw new Error(
-          `${scenario.name} returned ${result} during warmup, expected ${scenario.expected}`,
-        );
-      }
+      const result = await host.run<unknown>(scenario.entryName);
+      assertScenarioResult({ scenario, result, phase: "warmup" });
     }
     for (let iteration = 0; iteration < scenario.iterations; iteration += 1) {
       const startedAt = performance.now();
-      const result = await host.run<number>(scenario.entryName);
-      if (result !== scenario.expected) {
-        throw new Error(
-          `${scenario.name} returned ${result}, expected ${scenario.expected}`,
-        );
-      }
-      samplesMs.push(performance.now() - startedAt);
+      const result = await host.run<unknown>(scenario.entryName);
+      const elapsedMs = performance.now() - startedAt;
+      assertScenarioResult({ scenario, result, phase: "iteration" });
+      samplesMs.push(elapsedMs);
     }
   }
 
@@ -324,6 +363,12 @@ const runScenario = async ({
       compiled.wasmText ?? "",
       /\(struct\.new_default /g,
     ),
+    arrayNewCount: countMatches(
+      compiled.wasmText ?? "",
+      /\(array\.new(?:_[a-z_]+)?[\s)]/g,
+    ),
+    refCastCount: countMatches(compiled.wasmText ?? "", /\(ref\.cast/g),
+    callRefCount: countMatches(compiled.wasmText ?? "", /\(call_ref\b/g),
     tupleMakeCount: countMatches(compiled.wasmText ?? "", /\(tuple\.make/g),
     medianMs: median(samplesMs),
     samplesMs,
@@ -332,7 +377,7 @@ const runScenario = async ({
 
 const printResults = (results: readonly ScenarioResult[]): void => {
   console.log(
-    "revision,name,optimize,compileMs,wasmBytes,gzipBytes,wasmTextBytes,structNewCount,structNewDefaultCount,tupleMakeCount,wasmSha256,medianMs,samplesMs",
+    "revision,name,optimize,compileMs,wasmBytes,gzipBytes,wasmTextBytes,structNewCount,structNewDefaultCount,arrayNewCount,refCastCount,callRefCount,tupleMakeCount,wasmSha256,medianMs,samplesMs",
   );
   results.forEach((result) => {
     console.log(
@@ -346,6 +391,9 @@ const printResults = (results: readonly ScenarioResult[]): void => {
         result.wasmTextBytes.toString(),
         result.structNewCount.toString(),
         result.structNewDefaultCount.toString(),
+        result.arrayNewCount.toString(),
+        result.refCastCount.toString(),
+        result.callRefCount.toString(),
         result.tupleMakeCount.toString(),
         result.wasmSha256,
         result.medianMs === undefined ? "" : result.medianMs.toFixed(3),
@@ -382,6 +430,9 @@ const parseResultsCsv = (filePath: string): ScenarioResult[] => {
   const wasmTextBytesIndex = index("wasmTextBytes");
   const structNewCountIndex = index("structNewCount");
   const structNewDefaultCountIndex = index("structNewDefaultCount");
+  const arrayNewCountIndex = index("arrayNewCount");
+  const refCastCountIndex = index("refCastCount");
+  const callRefCountIndex = index("callRefCount");
   const tupleMakeCountIndex = index("tupleMakeCount");
   const wasmSha256Index = index("wasmSha256");
   const medianMsIndex = index("medianMs");
@@ -403,6 +454,9 @@ const parseResultsCsv = (filePath: string): ScenarioResult[] => {
         columns[structNewDefaultCountIndex] ?? "0",
         10,
       ),
+      arrayNewCount: Number.parseInt(columns[arrayNewCountIndex] ?? "0", 10),
+      refCastCount: Number.parseInt(columns[refCastCountIndex] ?? "0", 10),
+      callRefCount: Number.parseInt(columns[callRefCountIndex] ?? "0", 10),
       tupleMakeCount: Number.parseInt(columns[tupleMakeCountIndex] ?? "0", 10),
       wasmSha256: columns[wasmSha256Index] ?? "",
       medianMs:
@@ -444,7 +498,7 @@ const printComparison = ({
     );
 
   console.log(
-    "name,optimize,baseRevision,headRevision,compileMsBase,compileMsHead,compileMsDeltaPct,medianMsBase,medianMsHead,medianMsDeltaPct,wasmBytesBase,wasmBytesHead,wasmBytesDeltaPct,gzipBytesBase,gzipBytesHead,gzipBytesDeltaPct,wasmTextBytesBase,wasmTextBytesHead,wasmTextBytesDeltaPct,structNewBase,structNewHead,structNewDelta,structNewDefaultBase,structNewDefaultHead,structNewDefaultDelta,tupleMakeBase,tupleMakeHead,tupleMakeDelta,baseWasmSha256,headWasmSha256",
+    "name,optimize,baseRevision,headRevision,compileMsBase,compileMsHead,compileMsDeltaPct,medianMsBase,medianMsHead,medianMsDeltaPct,wasmBytesBase,wasmBytesHead,wasmBytesDeltaPct,gzipBytesBase,gzipBytesHead,gzipBytesDeltaPct,wasmTextBytesBase,wasmTextBytesHead,wasmTextBytesDeltaPct,structNewBase,structNewHead,structNewDelta,structNewDefaultBase,structNewDefaultHead,structNewDefaultDelta,arrayNewBase,arrayNewHead,arrayNewDelta,refCastBase,refCastHead,refCastDelta,callRefBase,callRefHead,callRefDelta,tupleMakeBase,tupleMakeHead,tupleMakeDelta,baseWasmSha256,headWasmSha256",
   );
   matched.forEach(({ base, head }) => {
     console.log(
@@ -476,6 +530,15 @@ const printComparison = ({
         base.structNewDefaultCount.toString(),
         head.structNewDefaultCount.toString(),
         (head.structNewDefaultCount - base.structNewDefaultCount).toString(),
+        base.arrayNewCount.toString(),
+        head.arrayNewCount.toString(),
+        (head.arrayNewCount - base.arrayNewCount).toString(),
+        base.refCastCount.toString(),
+        head.refCastCount.toString(),
+        (head.refCastCount - base.refCastCount).toString(),
+        base.callRefCount.toString(),
+        head.callRefCount.toString(),
+        (head.callRefCount - base.callRefCount).toString(),
         base.tupleMakeCount.toString(),
         head.tupleMakeCount.toString(),
         (head.tupleMakeCount - base.tupleMakeCount).toString(),

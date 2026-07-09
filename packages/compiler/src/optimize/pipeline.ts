@@ -29,8 +29,9 @@ import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { CodegenOptions } from "../codegen/context.js";
 import {
   incrementCompilerPerfCounter,
-  isCompilerPerfEnabled,
+  markCompilerPerfPhaseDuration,
   recordCompilerPerfDuration,
+  startCompilerPerfPhase,
 } from "../perf.js";
 import {
   type ProgramOptimizationContext,
@@ -6048,8 +6049,12 @@ export const optimizeProgram = ({
   void options;
 
   OPTIMIZATION_PASSES.forEach((pass, index) => {
-    const passStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
+    const passStartedAt = startCompilerPerfPhase();
     const result = pass.run(context);
+    markCompilerPerfPhaseDuration(
+      `optimize.pass.${pass.name}`,
+      passStartedAt,
+    );
     recordCompilerPerfDuration({
       name: `optimize.pass.${pass.name}.ms`,
       startedAt: passStartedAt,

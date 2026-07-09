@@ -299,14 +299,14 @@ const compileSdk = async (
       boundaryExports: options.boundaryExports,
       cache: compilerCache,
       setupPhasesMs,
+      finalizeSuccess: (result) => finalizeCompile({ options, result }),
     });
 
     if (!result.success) {
       return result;
     }
 
-    const finalized = finalizeCompile({ options, result });
-    return createCompileResult(finalized);
+    return createCompileResult(result);
   } catch (error) {
     return {
       success: false,
