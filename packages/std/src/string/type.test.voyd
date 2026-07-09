@@ -63,6 +63,21 @@ test "string utf8 decode and encode":
       assert(error.code, eq: 1)
       assert(error.message.equals("utf8 decode failed: invalid utf-8 byte sequence"), eq: true)
 
+test "string to_utf8 returns an isolated mutable copy":
+  let source = "alpha"
+  let slice = source.as_slice().slice(bytes: 1, len: 3)
+  let ~bytes = source.to_utf8()
+
+  assert(bytes.replace(0, with: 90), eq: true)
+  match(bytes.get(0))
+    Some<i32> { value }:
+      assert(value, eq: 90)
+    None:
+      assert(false)
+
+  assert(source.equals("alpha"), eq: true)
+  assert(slice.to_string().equals("lph"), eq: true)
+
 test "string slice and as_slice":
   let value = "a😀b"
   let sliced = value.slice(Range<i32> {
