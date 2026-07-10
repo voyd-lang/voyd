@@ -1544,8 +1544,18 @@ describe("semanticsPipeline", () => {
     expect(result.diagnostics).toHaveLength(0);
     const symbolTable = getSymbolTable(result);
     const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    const forwardProductSymbol = symbolTable.resolve(
+      "intrinsic_forward_product",
+      symbolTable.rootScope,
+    );
     expect(mainSymbol).toBeDefined();
+    expect(forwardProductSymbol).toBeDefined();
     expectFunctionReturnPrimitive(result.typing, mainSymbol!, "f64");
+    expectFunctionReturnPrimitive(
+      result.typing,
+      forwardProductSymbol!,
+      "f64",
+    );
   });
 
   it("infers forward-referenced helpers used by overloaded operators across modules", () => {

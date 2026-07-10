@@ -21,5 +21,11 @@ pub fn '*'(scalar: f64, vec: Vec) -> Vec
 pub fn '*'(vec: Vec, scalar: f64) -> Vec
   Vec { x: vec.x * scalar }
 
+fn intrinsic_forward_product() -> f64
+  1.0 * later()
+
+fn later()
+  2.0
+
 pub fn main() -> f64
-  Vec(3.0).scaled_from_left().x + Vec(3.0).scaled_from_right().x
+  Vec(3.0).scaled_from_left().x + Vec(3.0).scaled_from_right().x + intrinsic_forward_product()

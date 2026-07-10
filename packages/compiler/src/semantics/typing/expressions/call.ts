@@ -3893,6 +3893,16 @@ const typeOperatorOverloadCall = ({
     return undefined;
   }
 
+  const hasUnresolvedOperand = args.some(
+    (arg) => arg.type === ctx.primitives.unknown,
+  );
+  if (
+    hasUnresolvedOperand &&
+    resolution.includesMethodCandidates !== true
+  ) {
+    return undefined;
+  }
+
   const methodCandidates = filterCandidatesByExplicitTypeArguments({
     candidates: resolution.candidates,
     typeArguments,
@@ -3937,6 +3947,7 @@ const typeOperatorOverloadCall = ({
   if (
     !traitDispatch &&
     matches.length === 0 &&
+    !hasUnresolvedOperand &&
     resolution.includesMethodCandidates === true
   ) {
     const fallbackCandidates = resolveFreeFunctionFallbackCandidates({
