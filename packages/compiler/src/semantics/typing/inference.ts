@@ -1,7 +1,11 @@
 import type { HirFunction, HirModuleLet } from "../hir/index.js";
 import { ensureTypeMatches } from "./type-system.js";
 import type { FunctionSignature, TypingContext, TypingState } from "./types.js";
-import { formatFunctionInstanceKey, typeExpression } from "./expressions.js";
+import {
+  formatFunctionInstanceKey,
+  typeExpression,
+  validateGenericFunctionBody,
+} from "./expressions.js";
 import { getValueType } from "./expressions/identifier.js";
 import { mergeBranchType } from "./expressions/branching.js";
 import { composeEffectRows, ensureEffectCompatibility, getExprEffectRow } from "./effects.js";
@@ -38,6 +42,44 @@ export const runStrictTypeCheck = (
   ctx.resolvedExprTypes.clear();
   typeAllModuleLets(ctx, state, { collectChanges: false });
   typeAllFunctions(ctx, state, { collectChanges: false });
+  validateGenericConstructorBodies(ctx, state);
+};
+
+const validateGenericConstructorBodies = (
+  ctx: TypingContext,
+  state: TypingState,
+): void => {
+  for (const fn of ctx.hir.items.values()) {
+    if (fn.kind !== "function") {
+      continue;
+    }
+    const signature = ctx.functions.getSignature(fn.symbol);
+    if (!signature?.typeParams || signature.typeParams.length === 0) {
+      continue;
+    }
+    const record = ctx.symbolTable.getSymbol(fn.symbol);
+    const metadata = (record.metadata ?? {}) as {
+      implTarget?: unknown;
+      static?: unknown;
+    };
+    if (
+      record.name !== "init" ||
+      metadata.static !== true ||
+      typeof metadata.implTarget !== "number"
+    ) {
+      continue;
+    }
+    const substitution = new Map(
+      signature.typeParams.map((param) => [param.typeParam, param.typeRef]),
+    );
+    validateGenericFunctionBody({
+      symbol: fn.symbol,
+      signature,
+      substitution,
+      ctx,
+      state,
+    });
+  }
 };
 
 export const requireInferredReturnTypes = (

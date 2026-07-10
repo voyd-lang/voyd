@@ -5,6 +5,7 @@ export {
   formatFunctionInstanceKey,
   mergeSubstitutions,
   typeCallExpr,
+  validateGenericFunctionBody,
   typeMethodCallExpr,
 } from "./call.js";
 export { typeFieldAccessExpr } from "./field-access.js";

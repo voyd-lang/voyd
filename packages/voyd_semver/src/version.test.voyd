@@ -1,8 +1,8 @@
 use std::test::assertions::all
 use std::string::type::new_string
 
-test "string init parses strict versions":
-  match(Version("1.2.3"))
+test "parse accepts strict versions":
+  match(parse("1.2.3"))
     Some { value: version }:
       assert(version.major, eq: 1)
       assert(version.minor, eq: 2)
