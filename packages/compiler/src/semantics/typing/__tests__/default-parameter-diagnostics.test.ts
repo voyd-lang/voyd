@@ -57,4 +57,26 @@ describe("default parameter diagnostics", () => {
     expect(caught.diagnostic.message).toMatch(/default parameter a/i);
     expect(caught.diagnostic.message).toMatch(/parameter b/i);
   });
+
+  it("rejects defaults on reference-bound parameters", () => {
+    const ast = loadAst("default_param_reference_binding.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0048");
+    expect(caught.diagnostic.message).toMatch(
+      /reference-bound parameter value/i,
+    );
+    expect(caught.diagnostic.message).toMatch(/function mutate/i);
+  });
 });

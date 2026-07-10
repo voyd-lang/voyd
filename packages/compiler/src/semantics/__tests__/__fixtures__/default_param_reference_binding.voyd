@@ -1,0 +1,13 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn mutate(~value: i32 = 1) -> i32
+  value
+
+pub fn main() -> i32
+  mutate()

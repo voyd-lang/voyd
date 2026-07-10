@@ -439,6 +439,22 @@ export const registerFunctionSignatures = (
       const hasDefaultValue = typeof param.defaultValue === "number";
       if (
         hasDefaultValue &&
+        param.pattern.bindingKind !== undefined &&
+        param.pattern.bindingKind !== "value"
+      ) {
+        return emitDiagnostic({
+          ctx,
+          code: "TY0048",
+          params: {
+            kind: "reference-bound-default-parameter",
+            functionName,
+            parameterName,
+          },
+          span: normalizeSpan(param.span, item.span, ctx.hir.module.span),
+        });
+      }
+      if (
+        hasDefaultValue &&
         !param.type &&
         signatureTypeParams &&
         signatureTypeParams.length > 0
