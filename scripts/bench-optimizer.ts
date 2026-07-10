@@ -708,6 +708,12 @@ const runScorecardCase = ({
 };
 
 const runController = (options: ControllerOptions): void => {
+  if (process.argv.includes("--print-plan")) {
+    process.stdout.write(
+      `${JSON.stringify({ scenarioNames: options.scenarioNames })}\n`,
+    );
+    return;
+  }
   const rows = options.scenarioNames.flatMap((scenarioName) =>
     options.modes.flatMap((mode) =>
       [undefined, ...(mode === "release" ? options.binaryenAblations : [])].map(

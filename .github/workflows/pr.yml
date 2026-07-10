@@ -215,6 +215,7 @@ jobs:
               - "packages/sdk/**"
               - "scripts/bench-optimizer.ts"
               - "scripts/ci/check-optimizer-bench-regression.mjs"
+              - "scripts/ci/check-optimizer-bench-regression.test.mjs"
               - "package.json"
               - "package-lock.json"
       - name: Use Node.js
@@ -227,6 +228,9 @@ jobs:
       - name: Install dependencies
         if: steps.changes.outputs.optimizer == 'true'
         run: npm ci --include=optional
+      - name: Test optimizer scorecard gate
+        if: steps.changes.outputs.optimizer == 'true'
+        run: npx vitest run scripts/ci/check-optimizer-bench-regression.test.mjs
       - name: Compare optimizer scorecards
         if: steps.changes.outputs.optimizer == 'true'
         env:
