@@ -40,6 +40,32 @@ test "string init and capacity constructors":
   assert(reserved.is_empty(), eq: true)
   assert(reserved.byte_len(), eq: 0)
 
+test "owned strings support equality operators and generic assertions":
+  let actual = "Voyd".to_string()
+  let equal = "Voyd".to_string()
+  let unequal = "voyd".to_string()
+
+  assert(actual.eq(other: equal), eq: true)
+  assert(actual.ne(other: unequal), eq: true)
+  assert(actual == equal, eq: true)
+  assert(actual != unequal, eq: true)
+  assert(actual != "Voyd!".to_string(), eq: true)
+  assert(actual, eq: equal)
+  assert(actual, neq: unequal)
+
+test "string slices support equality operators and generic assertions":
+  let actual = "aVoydz".slice(bytes: 1, len: 4)
+  let equal = "Voyd".as_slice()
+  let unequal = "voyd".as_slice()
+
+  assert(actual.eq(other: equal), eq: true)
+  assert(actual.ne(other: unequal), eq: true)
+  assert(actual == equal, eq: true)
+  assert(actual != unequal, eq: true)
+  assert(actual != "Voyd!".as_slice(), eq: true)
+  assert(actual, eq: equal)
+  assert(actual, neq: unequal)
+
 test "string utf8 decode and encode":
   let value = must_utf8([104, 105])
   assert(value.equals("hi"), eq: true)
