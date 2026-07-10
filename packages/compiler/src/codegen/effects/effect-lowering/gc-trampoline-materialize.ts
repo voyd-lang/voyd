@@ -85,7 +85,12 @@ const captureFields = ({
       return {
         name: `tmp_${tempId}`,
         wasmType: wasmTypeFor(field.typeId, ctx),
-        storageType: wasmHeapFieldTypeFor(field.typeId, ctx, new Set(), "runtime"),
+        storageType: wasmHeapFieldTypeFor(
+          field.typeId,
+          ctx,
+          new Set(),
+          "runtime",
+        ),
         typeId: field.typeId,
         sourceKind: "local",
         tempId,
@@ -96,13 +101,21 @@ const captureFields = ({
     if (typeof symbol !== "number") {
       throw new Error("missing symbol for continuation capture");
     }
-    const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol });
+    const symbolId = ctx.program.symbols.idOf({
+      moduleId: ctx.moduleId,
+      symbol,
+    });
     return {
       name: ctx.program.symbols.getName(symbolId) ?? `${symbol}`,
       symbol,
       typeId: field.typeId,
       wasmType: wasmTypeFor(field.typeId, ctx),
-      storageType: wasmHeapFieldTypeFor(field.typeId, ctx, new Set(), "runtime"),
+      storageType: wasmHeapFieldTypeFor(
+        field.typeId,
+        ctx,
+        new Set(),
+        "runtime",
+      ),
       sourceKind: field.sourceKind,
     };
   });
@@ -127,7 +140,7 @@ export const materializeGcTrampolineEffectLowering = ({
     ];
     const envType = defineStructType(ctx.mod, {
       name: `voydContEnv_${sanitizeIdentifier(ctx.moduleLabel)}_${sanitizeIdentifier(
-        eirSite.contBaseName
+        eirSite.contBaseName,
       )}_${eirSite.siteId}`,
       fields: envFields.map((field) => ({
         name: field.name,
@@ -177,5 +190,6 @@ export const materializeGcTrampolineEffectLowering = ({
     sites,
     callArgTemps: eir.callArgTemps,
     tempTypeIds: eir.tempTypeIds,
+    defaultParamTemps: eir.defaultParamTemps,
   };
 };
