@@ -24,6 +24,7 @@ import {
 } from "../../nominal-type-target.js";
 import { importedModuleIdFrom } from "../../imports/metadata.js";
 import { toSourceSpan } from "../../utils.js";
+import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contracts.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -40,6 +41,12 @@ export const bindTypeAlias = (
   });
 
   const intrinsicType = decl.form.attributes?.intrinsicType;
+  resolveStdIntrinsicTypeContractProvider({
+    id: intrinsicType,
+    declarationName: decl.name.value,
+    declarationKind: "type-alias",
+    ctx,
+  });
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
   const boundaryMetadata = boundaryMetadataFromAttribute(decl.form.attributes?.boundary);

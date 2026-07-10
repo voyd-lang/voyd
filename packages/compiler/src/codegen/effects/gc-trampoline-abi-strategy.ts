@@ -1,6 +1,7 @@
 import binaryen from "binaryen";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
+import { BOUNDARY_MSGPACK_CONTRACT_IDS } from "../../compiler-contracts/index.js";
 import { isPackageVisible } from "../../semantics/hir/index.js";
 import {
   collectEffectOperationSignatures,
@@ -14,7 +15,6 @@ import {
   ensureEffectResultAccessors,
   ensureEffectsMemory,
 } from "./host-boundary.js";
-import { EFFECTS_HOST_BOUNDARY_STD_DEPS } from "./host-boundary/constants.js";
 import {
   collectHostBoundaryPayloadViolations,
   formatHostBoundaryPayloadViolation,
@@ -134,18 +134,20 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
     return;
   }
 
-  const missingStdModules = EFFECTS_HOST_BOUNDARY_STD_DEPS.filter(
-    (moduleId) => !entryCtx.program.modules.has(moduleId)
+  const missingContracts = Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS).filter(
+    (contractId) =>
+      entryCtx.program.symbols.resolveCompilerFunctionContract(contractId) ===
+      undefined,
   );
-  if (missingStdModules.length > 0) {
+  if (missingContracts.length > 0) {
     entryCtx.diagnostics.report(
       diagnosticFromCode({
         code: "CG0001",
         params: {
           kind: "codegen-error",
-          message: `effectful exports require ${missingStdModules.join(
-            " and "
-          )} (provide a std root or disable the host boundary via effectsHostBoundary: "off")`,
+          message: `effectful exports require boundary-msgpack compiler contracts; missing: ${missingContracts.join(
+            ", ",
+          )} (provide a compatible std root or disable the host boundary via effectsHostBoundary: "off")`,
         },
         span: entryCtx.module.hir.module.span,
       })

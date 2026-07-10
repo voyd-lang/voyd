@@ -15,6 +15,7 @@ import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { toSourceSpan } from "../../utils.js";
 import { declareValueOrParameter } from "../redefinitions.js";
+import { getCompilerFunctionContractSpec } from "../../../compiler-contracts/index.js";
 
 export type BindFunctionOptions = {
   declarationScope?: ScopeId;
@@ -35,11 +36,19 @@ export const bindFunctionDecl = (
   const declarationScope = options.declarationScope ?? tracker.current();
   rememberSyntax(decl.form, ctx);
   const intrinsicMetadata = decl.intrinsic;
+  const compilerFunctionContract = resolveCompilerFunctionContract({
+    id: decl.compilerContract?.id,
+    functionName: decl.signature.name.value,
+    arity: decl.signature.params.length,
+    declarationScope,
+    ctx,
+  });
   const boundaryMetadata = boundaryMetadataFromAttribute(decl.form.attributes?.boundary);
   const symbolMetadata: Record<string, unknown> = {
     entity: "function",
     ...options.metadata,
     ...(boundaryMetadata ? { boundary: boundaryMetadata } : {}),
+    ...(compilerFunctionContract ? { compilerFunctionContract } : {}),
   };
   if (decl.signature.name.isQuoted) {
     symbolMetadata.quotedName = true;
@@ -99,6 +108,45 @@ export const bindFunctionDecl = (
 
   recordFunctionOverload(fnDecl, declarationScope, ctx);
   return fnDecl;
+};
+
+const resolveCompilerFunctionContract = ({
+  id,
+  functionName,
+  arity,
+  declarationScope,
+  ctx,
+}: {
+  id: string | undefined;
+  functionName: string;
+  arity: number;
+  declarationScope: ScopeId;
+  ctx: BindingContext;
+}) => {
+  if (!id) {
+    return undefined;
+  }
+  if (ctx.module.path.namespace !== "std") {
+    throw new Error(
+      `@compiler_contract '${id}' on ${functionName} is restricted to the std namespace`,
+    );
+  }
+  if (declarationScope !== ctx.symbolTable.rootScope) {
+    throw new Error(
+      `@compiler_contract '${id}' on ${functionName} can only annotate an ordinary top-level function`,
+    );
+  }
+
+  const spec = getCompilerFunctionContractSpec(id);
+  if (!spec) {
+    throw new Error(`unknown @compiler_contract id '${id}' on ${functionName}`);
+  }
+  if (arity !== spec.expectedArity) {
+    throw new Error(
+      `@compiler_contract '${id}' on ${functionName} expects ${spec.expectedArity} parameter(s), but the function declares ${arity}`,
+    );
+  }
+  return { ...spec };
 };
 
 const boundaryMetadataFromAttribute = (_value: unknown): unknown | undefined => {

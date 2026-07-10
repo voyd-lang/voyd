@@ -11,6 +11,7 @@ import { reportOverloadNameCollision } from "../name-collisions.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 import { bindTypeExpr } from "./expressions.js";
+import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contracts.js";
 
 export const bindObjectDecl = (
   decl: ParsedObjectDecl,
@@ -30,6 +31,14 @@ export const bindObjectDecl = (
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
+  const stdIntrinsicTypeContract =
+    resolveStdIntrinsicTypeContractProvider({
+      id: intrinsicType,
+      declarationName: decl.name.value,
+      declarationKind:
+        decl.objectKind === "obj" ? "nominal-object" : "value-object",
+      ctx,
+    });
   const boundaryMetadata = boundaryMetadataFromAttribute(decl.form.attributes?.boundary);
   reportOverloadNameCollision({
     name: decl.name.value,
@@ -46,6 +55,7 @@ export const bindObjectDecl = (
       entity: "object",
       objectKind: decl.objectKind,
       ...intrinsicTypeMetadata,
+      ...(stdIntrinsicTypeContract ? { stdIntrinsicTypeContract } : {}),
       ...(boundaryMetadata ? { boundary: boundaryMetadata } : {}),
     },
   });

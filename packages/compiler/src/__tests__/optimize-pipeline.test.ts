@@ -15,6 +15,7 @@ import type {
   HirMethodCallExpr,
   HirModuleLet,
 } from "../semantics/hir/index.js";
+import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
@@ -32,26 +33,26 @@ const buildOptimized = async ({
   entryFile?: string;
   includeTests?: boolean;
   optimizeOptions?: CodegenOptions;
-  transformProgram?: (program: ReturnType<typeof buildProgramCodegenView>) => void;
+  transformProgram?: (
+    program: ReturnType<typeof buildProgramCodegenView>,
+  ) => void;
 }) => {
   const srcRoot = resolve("/proj/src");
   const stdRoot = resolve("/proj/std");
-  const host = createMemoryHost(
-    {
-      ...Object.fromEntries(
-        Object.entries(files).map(([fileName, source]) => [
-          `${srcRoot}${sep}${fileName}`,
-          source,
-        ]),
-      ),
-      ...Object.fromEntries(
-        Object.entries(stdFiles).map(([fileName, source]) => [
-          `${stdRoot}${sep}${fileName}`,
-          source,
-        ]),
-      ),
-    },
-  );
+  const host = createMemoryHost({
+    ...Object.fromEntries(
+      Object.entries(files).map(([fileName, source]) => [
+        `${srcRoot}${sep}${fileName}`,
+        source,
+      ]),
+    ),
+    ...Object.fromEntries(
+      Object.entries(stdFiles).map(([fileName, source]) => [
+        `${stdRoot}${sep}${fileName}`,
+        source,
+      ]),
+    ),
+  });
   const entryPath = `${srcRoot}${sep}${entryFile}`;
   const graph = await loadModuleGraph({
     entryPath,
@@ -106,7 +107,9 @@ const findFunction = ({
   Array.from(program.modules.get(moduleId)?.hir.items.values() ?? []).find(
     (item) =>
       item.kind === "function" &&
-      program.symbols.getName(program.symbols.idOf({ moduleId, symbol: item.symbol })) === name,
+      program.symbols.getName(
+        program.symbols.idOf({ moduleId, symbol: item.symbol }),
+      ) === name,
   );
 
 const findModuleLet = ({
@@ -121,7 +124,9 @@ const findModuleLet = ({
   Array.from(program.modules.get(moduleId)?.hir.items.values() ?? []).find(
     (item): item is HirModuleLet =>
       item.kind === "module-let" &&
-      program.symbols.getName(program.symbols.idOf({ moduleId, symbol: item.symbol })) === name,
+      program.symbols.getName(
+        program.symbols.idOf({ moduleId, symbol: item.symbol }),
+      ) === name,
   );
 
 const findObjectNominal = ({
@@ -133,10 +138,15 @@ const findObjectNominal = ({
   name: string;
   program: ReturnType<typeof buildProgramCodegenView>;
 }) => {
-  const item = Array.from(program.modules.get(moduleId)?.hir.items.values() ?? [])
-    .find((candidate) => candidate.kind === "object" && program.symbols.getName(
-      program.symbols.idOf({ moduleId, symbol: candidate.symbol }),
-    ) === name);
+  const item = Array.from(
+    program.modules.get(moduleId)?.hir.items.values() ?? [],
+  ).find(
+    (candidate) =>
+      candidate.kind === "object" &&
+      program.symbols.getName(
+        program.symbols.idOf({ moduleId, symbol: candidate.symbol }),
+      ) === name,
+  );
   return item?.kind === "object"
     ? program.objects.getTemplate(
         program.symbols.idOf({ moduleId, symbol: item.symbol }),
@@ -194,15 +204,18 @@ pub fn main() -> i32
 
     const program = optimized.program;
     const moduleId = "src::main";
-    const lambda = Array.from(program.modules.get(moduleId)?.hir.expressions.values() ?? []).find(
-      (expr): expr is HirLambdaExpr => expr.exprKind === "lambda",
-    );
+    const lambda = Array.from(
+      program.modules.get(moduleId)?.hir.expressions.values() ?? [],
+    ).find((expr): expr is HirLambdaExpr => expr.exprKind === "lambda");
     expect(lambda?.captures.map((capture) => capture.symbol)).toHaveLength(1);
 
     const deadFn = findFunction({ moduleId, name: "dead", program });
     expect(deadFn?.kind).toBe("function");
     if (!deadFn || deadFn.kind !== "function") return;
-    const deadInstantiations = program.functions.getInstantiationInfo(moduleId, deadFn.symbol);
+    const deadInstantiations = program.functions.getInstantiationInfo(
+      moduleId,
+      deadFn.symbol,
+    );
     expect(deadInstantiations?.size ?? 0).toBe(0);
   });
 
@@ -232,7 +245,9 @@ pub fn main() -> i32
     });
     expect(mainFn?.kind).toBe("function");
     if (!mainFn || mainFn.kind !== "function") return;
-    const body = optimized.program.modules.get("src::main")?.hir.expressions.get(mainFn.body);
+    const body = optimized.program.modules
+      .get("src::main")
+      ?.hir.expressions.get(mainFn.body);
     expect(body?.exprKind).toBe("block");
   });
 
@@ -257,11 +272,51 @@ pub fn main(): () -> i32
       },
     });
 
-    const handlerCaptures = optimized.facts.handlerClauseCaptures.get("src::main");
+    const handlerCaptures =
+      optimized.facts.handlerClauseCaptures.get("src::main");
     expect(handlerCaptures?.size ?? 0).toBe(1);
     const captures = Array.from(handlerCaptures?.values() ?? [])
       .flatMap((byClause) => Array.from(byClause.values()))
       .flat();
+    expect(captures).toHaveLength(1);
+  });
+
+  it("recomputes handler captures after fixed-point match simplification", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+eff Log
+  info(resume, x: i32) -> i32
+
+obj Box { value: i32 }
+obj Alt { value: i32 }
+type Runner = Box | Alt
+
+fn worker(): Log -> i32
+  Log::info(5)
+
+fn classify(runner: Runner) -> i32
+  let eliminated_capture = 100
+  try
+    worker()
+  Log::info(resume, x):
+    match(runner)
+      Box: x
+      else: eliminated_capture + x
+
+pub fn main() -> i32
+  classify(Box { value: 1 })
+`,
+      },
+    });
+
+    const captures = Array.from(
+      optimized.facts.handlerClauseCaptures.get("src::main")?.values() ?? [],
+    )
+      .flatMap((byClause) => Array.from(byClause.values()))
+      .flat();
+    // The discriminant still evaluates `runner`, but the eliminated match arm's
+    // local must not survive in the handler environment.
     expect(captures).toHaveLength(1);
   });
 
@@ -317,7 +372,10 @@ pub fn main() -> i32
     })();
     expect(callExpr?.exprKind).toBe("method-call");
     if (!callExpr || callExpr.exprKind !== "method-call") return;
-    const callInfo = optimized.program.calls.getCallInfo("src::main", callExpr.id);
+    const callInfo = optimized.program.calls.getCallInfo(
+      "src::main",
+      callExpr.id,
+    );
     expect(callInfo.traitDispatch).toBe(false);
   });
 
@@ -358,10 +416,15 @@ pub fn main() -> i32
 
     const moduleId = "src::main";
     const program = optimized.program;
-    const boxItem = Array.from(program.modules.get(moduleId)?.hir.items.values() ?? [])
-      .find((item) => item.kind === "object" && program.symbols.getName(
-        program.symbols.idOf({ moduleId, symbol: item.symbol }),
-      ) === "Box");
+    const boxItem = Array.from(
+      program.modules.get(moduleId)?.hir.items.values() ?? [],
+    ).find(
+      (item) =>
+        item.kind === "object" &&
+        program.symbols.getName(
+          program.symbols.idOf({ moduleId, symbol: item.symbol }),
+        ) === "Box",
+    );
     const boxType =
       boxItem?.kind === "object"
         ? program.objects.getTemplate(
@@ -375,7 +438,11 @@ pub fn main() -> i32
       const fn = findFunction({ moduleId, name, program });
       expect(fn?.kind, name).toBe("function");
       if (!fn || fn.kind !== "function") continue;
-      const instanceId = program.functions.getInstanceId(moduleId, fn.symbol, []);
+      const instanceId = program.functions.getInstanceId(
+        moduleId,
+        fn.symbol,
+        [],
+      );
       expect(typeof instanceId, name).toBe("number");
       if (typeof instanceId !== "number") continue;
       expect(
@@ -432,16 +499,20 @@ pub fn main() -> i32
       const fn = findFunction({ moduleId, name, program });
       expect(fn?.kind, name).toBe("function");
       if (!fn || fn.kind !== "function") continue;
-      const runner = fn.parameters.find((parameter) => parameter.label === "runner");
+      const runner = fn.parameters.find(
+        (parameter) => parameter.label === "runner",
+      );
       expect(runner, name).toBeDefined();
       if (!runner) continue;
-      const instanceId = program.functions.getInstanceId(moduleId, fn.symbol, []);
+      const instanceId = program.functions.getInstanceId(
+        moduleId,
+        fn.symbol,
+        [],
+      );
       expect(typeof instanceId, name).toBe("number");
       if (typeof instanceId !== "number") continue;
       expect(
-        optimized.facts.exactParameterTypes
-          .get(instanceId)
-          ?.get(runner.symbol),
+        optimized.facts.exactParameterTypes.get(instanceId)?.get(runner.symbol),
         name,
       ).toBe(boxType);
     }
@@ -507,7 +578,10 @@ pub fn main() -> i32
     })();
     expect(callExpr?.exprKind).toBe("method-call");
     if (!callExpr || callExpr.exprKind !== "method-call") return;
-    const callInfo = optimized.program.calls.getCallInfo("src::main", callExpr.id);
+    const callInfo = optimized.program.calls.getCallInfo(
+      "src::main",
+      callExpr.id,
+    );
     expect(callInfo.traitDispatch).toBe(false);
     expect(new Set(callInfo.targets?.values()).size).toBe(1);
 
@@ -603,9 +677,9 @@ pub fn main() -> i32
     });
     expect(dispatchCall?.exprKind).toBe("method-call");
     if (!dispatchCall) return;
-    expect(program.calls.getCallInfo(moduleId, dispatchCall.id).traitDispatch).toBe(
-      true,
-    );
+    expect(
+      program.calls.getCallInfo(moduleId, dispatchCall.id).traitDispatch,
+    ).toBe(true);
   });
 
   it("treats entry-module re-exported trait-parameter functions as externally callable", async () => {
@@ -690,9 +764,9 @@ pub fn internal() -> i32
     });
     expect(dispatchCall?.exprKind).toBe("method-call");
     if (!dispatchCall) return;
-    expect(program.calls.getCallInfo(moduleId, dispatchCall.id).traitDispatch).toBe(
-      true,
-    );
+    expect(
+      program.calls.getCallInfo(moduleId, dispatchCall.id).traitDispatch,
+    ).toBe(true);
   });
 
   it("keeps functions used as values open for exact receiver facts", async () => {
@@ -774,9 +848,9 @@ pub fn main() -> i32
     });
     expect(dispatchCall?.exprKind).toBe("method-call");
     if (!dispatchCall) return;
-    expect(program.calls.getCallInfo(moduleId, dispatchCall.id).traitDispatch).toBe(
-      true,
-    );
+    expect(
+      program.calls.getCallInfo(moduleId, dispatchCall.id).traitDispatch,
+    ).toBe(true);
   });
 
   it("still propagates exact facts for non-entry public helper exports", async () => {
@@ -885,7 +959,9 @@ fn use_alt() -> i32
       },
     });
 
-    expect(optimized.facts.receiverSpecializationRequests.size).toBeGreaterThan(0);
+    expect(optimized.facts.receiverSpecializationRequests.size).toBeGreaterThan(
+      0,
+    );
 
     const { module } = codegenProgram({
       program: optimized.program,
@@ -901,6 +977,63 @@ fn use_alt() -> i32
     expect(wasmText).toMatch(/call \$src__main__invoke_\d+__receiver_/);
     expect(wasmText).toMatch(/call \$src__main__helper_\d+__receiver_/);
     expect(wasmText).not.toContain("call $__lookup_method_accessor");
+  });
+
+  it("propagates receiver specialization through mutually recursive forwarding", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+trait Runner
+  fn run(self) -> i32
+
+obj Box { value: i32 }
+obj Alt { value: i32 }
+
+impl Runner for Box
+  fn run(self) -> i32
+    self.value
+
+impl Runner for Alt
+  fn run(self) -> i32
+    self.value + 1
+
+fn a(runner: Runner, depth: i32) -> i32
+  if depth == 0 then:
+    runner.run()
+  else:
+    b(runner, depth - 1)
+
+fn b(runner: Runner, depth: i32) -> i32
+  if depth == 0 then:
+    0
+  else:
+    a(runner, depth - 1)
+
+fn use_box() -> i32
+  a(Box { value: 4 }, 2)
+
+fn use_alt() -> i32
+  a(Alt { value: 5 }, 3)
+
+pub fn main() -> i32
+  use_box() + use_alt()
+`,
+      },
+    });
+
+    const { module } = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: true,
+        runtimeDiagnostics: false,
+      },
+    });
+    const wasmText = module.emitText();
+    expect(wasmText).toMatch(/call \$src__main__a_\d+__receiver_/);
+    expect(wasmText).toMatch(/call \$src__main__b_\d+__receiver_/);
   });
 
   it("uses global exact facts when ordinary functions request downstream receiver clones", async () => {
@@ -1129,7 +1262,8 @@ pub fn get_value() -> i32
     );
     expect(dropInstantiations?.size ?? 0).toBe(0);
 
-    const reachableModuleLets = optimized.facts.reachableModuleLets.get(utilModuleId);
+    const reachableModuleLets =
+      optimized.facts.reachableModuleLets.get(utilModuleId);
     expect(reachableModuleLets?.has(kept.symbol)).toBe(true);
     expect(reachableModuleLets?.has(discarded.symbol)).toBe(false);
   });
@@ -1392,6 +1526,45 @@ pub fn main() -> i32
     expect(sawMatch).toBe(false);
   });
 
+  it("scales the convergence budget for specialization chains deeper than 32 rounds", async () => {
+    const stageCount = 40;
+    const stages = Array.from({ length: stageCount }, (_, offset) => {
+      const stage = stageCount - offset - 1;
+      if (stage === stageCount - 1) {
+        return `fn stage_${stage}(runner: Runner) -> i32
+  match(runner)
+    Box: 7
+    else: 8`;
+      }
+      return `fn stage_${stage}(runner: Runner) -> i32
+  match(runner)
+    Box: stage_${stage + 1}(runner)
+    else: stage_${stage + 1}(Alt { value: 0 })`;
+    }).join("\n\n");
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Box { value: i32 }
+obj Alt { value: i32 }
+type Runner = Box | Alt
+
+${stages}
+
+pub fn main() -> i32
+  stage_0(Box { value: 1 })
+`,
+      },
+    });
+
+    const moduleView = optimized.program.modules.get("src::main");
+    expect(moduleView).toBeDefined();
+    if (!moduleView) return;
+    const remainingMatches = Array.from(
+      moduleView.hir.expressions.values(),
+    ).filter((expr) => expr.exprKind === "match");
+    expect(remainingMatches).toEqual([]);
+  });
+
   it("records non-escaping aggregate and parameter facts across direct pure calls", async () => {
     const { optimized } = await buildOptimized({
       files: {
@@ -1431,7 +1604,11 @@ pub fn main() -> i32
     const sumFn = findFunction({ moduleId, name: "sum", program });
     expect(sumFn?.kind).toBe("function");
     if (!sumFn || sumFn.kind !== "function") return;
-    const sumInstanceId = program.functions.getInstanceId(moduleId, sumFn.symbol, []);
+    const sumInstanceId = program.functions.getInstanceId(
+      moduleId,
+      sumFn.symbol,
+      [],
+    );
     expect(typeof sumInstanceId).toBe("number");
     if (typeof sumInstanceId !== "number") return;
     expect(
@@ -1499,6 +1676,62 @@ pub fn main() -> i32
     });
   });
 
+  it("propagates parameter escapes through a multi-hop caller worklist", async () => {
+    const { optimized } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Vec2 { x: i32, y: i32 }
+
+fn sink(vec: Vec2) -> Vec2
+  vec
+
+fn middle(vec: Vec2) -> Vec2
+  sink(vec)
+
+fn outer(vec: Vec2) -> Vec2
+  middle(vec)
+
+pub fn main() -> i32
+  outer(Vec2 { x: 1, y: 2 }).x
+`,
+      },
+    });
+
+    const moduleId = "src::main";
+    const parameterFact = (name: string) => {
+      const fn = findFunction({
+        moduleId,
+        name,
+        program: optimized.program,
+      });
+      expect(fn?.kind).toBe("function");
+      if (!fn || fn.kind !== "function") return undefined;
+      const instanceId = optimized.program.functions.getInstanceId(
+        moduleId,
+        fn.symbol,
+        [],
+      );
+      return typeof instanceId === "number"
+        ? optimized.facts.escapeAnalysis.parameters
+            .get(instanceId)
+            ?.get(fn.parameters[0]!.symbol)
+        : undefined;
+    };
+
+    expect(parameterFact("sink")).toMatchObject({
+      escapes: true,
+      escapeReasons: ["return"],
+    });
+    expect(parameterFact("middle")).toMatchObject({
+      escapes: true,
+      escapeReasons: ["call-boundary"],
+    });
+    expect(parameterFact("outer")).toMatchObject({
+      escapes: true,
+      escapeReasons: ["call-boundary"],
+    });
+  });
+
   it("tracks local aliases back to parameter escape facts", async () => {
     const { optimized } = await buildOptimized({
       files: {
@@ -1559,7 +1792,11 @@ pub fn main(): () -> i32
       if (!fn || fn.kind !== "function") {
         return undefined;
       }
-      const instanceId = program.functions.getInstanceId(moduleId, fn.symbol, []);
+      const instanceId = program.functions.getInstanceId(
+        moduleId,
+        fn.symbol,
+        [],
+      );
       expect(typeof instanceId, name).toBe("number");
       if (typeof instanceId !== "number") {
         return undefined;
@@ -1645,7 +1882,11 @@ pub fn main() -> i32
       if (!fn || fn.kind !== "function") {
         return undefined;
       }
-      const instanceId = program.functions.getInstanceId(moduleId, fn.symbol, []);
+      const instanceId = program.functions.getInstanceId(
+        moduleId,
+        fn.symbol,
+        [],
+      );
       expect(typeof instanceId, name).toBe("number");
       if (typeof instanceId !== "number") {
         return undefined;
@@ -1781,7 +2022,8 @@ pub fn main() -> i32
     const runnerParam = invokeFn.parameters[0]!;
     expect(
       program.types.getTypeDesc(
-        program.functions.getSignature(moduleId, invokeFn.symbol)!.parameters[0]!.typeId,
+        program.functions.getSignature(moduleId, invokeFn.symbol)!
+          .parameters[0]!.typeId,
       ).kind,
     ).toBe("trait");
     expect(
@@ -1891,21 +2133,33 @@ test "reachable from export root":
     if (!utilTest?.exportName) return;
 
     const utilModuleId = "src::util";
-    const testFn = Array.from(optimized.program.modules.get(utilModuleId)?.hir.items.values() ?? [])
-      .find(
-        (item) =>
-          item.kind === "function" &&
-          optimized.program.symbols
-            .getName(optimized.program.symbols.idOf({ moduleId: utilModuleId, symbol: item.symbol }))
-            ?.startsWith("__test__"),
-      );
+    const testFn = Array.from(
+      optimized.program.modules.get(utilModuleId)?.hir.items.values() ?? [],
+    ).find(
+      (item) =>
+        item.kind === "function" &&
+        optimized.program.symbols
+          .getName(
+            optimized.program.symbols.idOf({
+              moduleId: utilModuleId,
+              symbol: item.symbol,
+            }),
+          )
+          ?.startsWith("__test__"),
+    );
     expect(testFn?.kind).toBe("function");
     if (!testFn || testFn.kind !== "function") return;
 
-    const instanceId = optimized.program.functions.getInstanceId(utilModuleId, testFn.symbol, []);
+    const instanceId = optimized.program.functions.getInstanceId(
+      utilModuleId,
+      testFn.symbol,
+      [],
+    );
     expect(typeof instanceId).toBe("number");
     if (typeof instanceId !== "number") return;
-    expect(optimized.facts.reachableFunctionInstances.has(instanceId)).toBe(true);
+    expect(optimized.facts.reachableFunctionInstances.has(instanceId)).toBe(
+      true,
+    );
 
     const codegen = codegenProgram({
       program: optimized.program,
@@ -1920,7 +2174,9 @@ test "reachable from export root":
       },
     });
     expect(codegen.diagnostics).toHaveLength(0);
-    expect(codegen.module.emitText()).toContain(`(export "${utilTest.exportName}"`);
+    expect(codegen.module.emitText()).toContain(
+      `(export "${utilTest.exportName}"`,
+    );
   });
 
   it("lowers exact nominal field reads to direct struct loads", async () => {
@@ -1942,7 +2198,8 @@ pub fn main() -> i32
       },
     });
 
-    const candidates = optimized.facts.runtimeTypeCheckElisionFieldAccesses.get("src::main");
+    const candidates =
+      optimized.facts.runtimeTypeCheckElisionFieldAccesses.get("src::main");
     expect(candidates?.size).toBeGreaterThanOrEqual(2);
 
     const optimizedCodegen = codegenProgram({
@@ -1990,7 +2247,8 @@ pub fn main() -> i32
       },
     });
 
-    const candidates = optimized.facts.semanticCopyForwardingFieldAccesses.get("src::main");
+    const candidates =
+      optimized.facts.semanticCopyForwardingFieldAccesses.get("src::main");
     expect(candidates?.size).toBe(1);
 
     const codegen = codegenProgram({
@@ -2115,5 +2373,231 @@ pub fn main() -> i32
     });
 
     expect(diagnostics).toHaveLength(0);
+  });
+
+  it("plans and emits compact recursive default-argument call shapes", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn sum_to(n: i32, step: i32 = 1) -> i32
+  if
+    n <= 0:
+      0
+    else:
+      n + sum_to(n - step, step)
+
+fn combine({ left: i32 = 4, right: i32 }) -> i32
+  left + right
+
+fn optional_state(value?: i32) -> i32
+  match(value)
+    Some<i32>:
+      2
+    None:
+      1
+
+obj Counter {
+  value: i32
+}
+
+fn bump(~counter: Counter) -> i32
+  counter.value = counter.value + 1
+  counter.value
+
+fn resolve(~counter: Counter, value: i32 = bump(counter)) -> i32
+  value
+
+val Wide {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+fn wide_sum(value: Wide = Wide { a: 1, b: 2, c: 3, d: 4, e: 5 }) -> i32
+  value.a + value.b + value.c + value.d + value.e
+
+eff Tick
+  next(tail) -> i32
+
+fn effect_with_default(value: i32 = 3): Tick -> i32
+  Tick::next() + value
+
+fn run_effect_with_default() -> i32
+  try
+    effect_with_default()
+  Tick::next(tail):
+    tail(7)
+
+pub fn main() -> i32
+  let ~counter = Counter { value: 0 }
+  let options = { left: 6, right: 7 }
+  let default_result = resolve(counter)
+  let provided_result = resolve(counter, 9)
+  sum_to(5) + sum_to(5, 2) +
+    combine({ right: 3 }) + combine({ left: 5, right: 3 }) + combine(options) +
+    optional_state() + optional_state(9) +
+    default_result * 100 + counter.value * 10 + provided_result +
+    wide_sum() + wide_sum(Wide { a: 2, b: 2, c: 2, d: 2, e: 2 }) +
+    run_effect_with_default()
+`,
+      },
+    });
+
+    const requests = Array.from(
+      optimized.facts.callShapeSpecializationRequests.values(),
+    ).flatMap((byCaller) => Array.from(byCaller.values()));
+    expect(requests.map((request) => request.keyTokens.join("|"))).toEqual(
+      expect.arrayContaining(["v1|provided|omitted", "v1|provided|provided"]),
+    );
+
+    const codegen = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: true,
+        runtimeDiagnostics: false,
+      },
+    });
+    expect(codegen.diagnostics).toHaveLength(0);
+    const wasmText = codegen.module.emitText();
+    expect(wasmText).toContain("__call_shape_po");
+    expect(wasmText).toContain("__call_shape_pp");
+    expect(wasmText).toMatch(/combine_\d+__call_shape_op/);
+    expect(wasmText).toMatch(/combine_\d+__call_shape_pp/);
+    expect(wasmText).toMatch(/optional_state_\d+__call_shape_o/);
+    expect(wasmText).toMatch(/wide_sum_\d+__call_shape_o/);
+    expect(wasmText).toMatch(/wide_sum_\d+__call_shape_p/);
+    expect(wasmText).toMatch(/effect_with_default_\d+__call_shape_o/);
+    const signatures = wasmText
+      .split("\n")
+      .filter((line) => line.includes("sum_to") && line.includes("(func $"));
+    const providedSignature = signatures.find((line) =>
+      line.includes("__call_shape_pp"),
+    );
+    const omittedSignature = signatures.find((line) =>
+      line.includes("__call_shape_po"),
+    );
+    expect(providedSignature?.match(/\(param/g)).toHaveLength(2);
+    expect(omittedSignature?.match(/\(param/g)).toHaveLength(1);
+
+    const instance = getWasmInstance(codegen.module);
+    expect((instance.exports.main as () => number)()).toBe(209);
+
+    const fallbackFacts = {
+      ...optimized.facts,
+      codegenPlan: {
+        ...optimized.facts.codegenPlan,
+        specializationPolicy: {
+          ...optimized.facts.codegenPlan.specializationPolicy,
+          callShapeContextsPerFunction: 0,
+        },
+      },
+    };
+    const fallbackCodegen = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: fallbackFacts,
+      options: {
+        optimize: false,
+        validate: true,
+        runtimeDiagnostics: false,
+      },
+    });
+    expect(fallbackCodegen.module.emitText()).not.toContain("__call_shape_");
+    const fallbackInstance = getWasmInstance(fallbackCodegen.module);
+    expect((fallbackInstance.exports.main as () => number)()).toBe(209);
+  });
+
+  it("shares a raw stable-callsite shape while preserving per-site ids", async () => {
+    const { optimized, entryModuleId } = await buildOptimized({
+      files: {
+        "main.voyd": `
+use std::ids::{ tagged, choose }
+
+fn first() -> i32
+  tagged()
+
+fn second() -> i32
+  tagged()
+
+pub fn main() -> i32
+  if
+    first() != second():
+      choose<i32>(3) + choose<i32>(3, 4)
+    else:
+      0
+`,
+      },
+      stdFiles: {
+        "ids.voyd": `
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+@intrinsic(name: "__stable_callsite_id")
+fn stable_callsite_id(): () -> i32
+  0
+
+pub fn tagged(id: i32 = stable_callsite_id()) -> i32
+  id
+
+pub fn choose<T>(fallback: T, value: T = fallback) -> T
+  value
+`,
+      },
+    });
+
+    const stableRequests = Array.from(
+      optimized.facts.callShapeSpecializationRequests.values(),
+    )
+      .flatMap((byCaller) => Array.from(byCaller.values()))
+      .filter((request) => request.keyTokens.includes("stable-callsite-id"));
+    expect(stableRequests).toHaveLength(2);
+    expect(
+      new Set(stableRequests.map((request) => request.keyTokens.join("|"))),
+    ).toEqual(new Set(["v1|stable-callsite-id"]));
+
+    const codegen = codegenProgram({
+      program: optimized.program,
+      entryModuleId,
+      optimization: optimized.facts,
+      options: {
+        optimize: false,
+        validate: true,
+        runtimeDiagnostics: false,
+      },
+    });
+    const wasmText = codegen.module.emitText();
+    const stableDefinitions = wasmText
+      .split("\n")
+      .filter(
+        (line) =>
+          line.includes("(func $") &&
+          line.includes("tagged_") &&
+          line.includes("__call_shape_s"),
+      );
+    expect(stableDefinitions).toHaveLength(1);
+    expect(stableDefinitions[0]?.match(/\(param/g)).toHaveLength(1);
+    expect(wasmText).toMatch(/choose_\d+__inst_\d+__call_shape_po/);
+    expect(wasmText).toMatch(/choose_\d+__inst_\d+__call_shape_pp/);
+
+    const instance = getWasmInstance(codegen.module);
+    expect((instance.exports.main as () => number)()).toBe(7);
   });
 });

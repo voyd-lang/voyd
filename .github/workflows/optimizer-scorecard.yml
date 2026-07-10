@@ -1,0 +1,30 @@
+name: Optimizer Scorecard
+
+on:
+  schedule:
+    - cron: "0 9 * * *"
+  workflow_dispatch:
+
+jobs:
+  full-scorecard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - run: npm ci --include=optional
+      - name: Run full optimizer scorecard
+        run: npm run bench:optimizer -- --preset full --output optimizer-scorecard.json > /dev/null
+      - name: Upload optimizer scorecard
+        uses: actions/upload-artifact@v4
+        with:
+          name: optimizer-scorecard-${{ github.sha }}
+          path: optimizer-scorecard.json
+          retention-days: 30

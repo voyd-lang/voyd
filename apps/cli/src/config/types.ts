@@ -1,3 +1,5 @@
+import type { OptimizationLevel } from "@voyd-lang/sdk";
+
 export type DocumentationFormat = "html" | "json";
 export type BootstrapTemplate = "vx-spa" | "web-ssr";
 
@@ -12,8 +14,8 @@ export type VoydConfig = {
   emitWasm?: boolean;
   /** Write wasm bytecode to stdout (binaryen flavor) */
   emitWasmText?: boolean;
-  /** Have binaryen run an optimization pass */
-  runBinaryenOptimizationPass?: boolean;
+  /** Select the compiler optimization policy. */
+  optimizationLevel?: OptimizationLevel;
   /** Run voyd from src/ or provided path */
   run?: boolean;
   /** Run emitted wasm directly */

@@ -6,17 +6,11 @@ import type {
 import { walkExpression } from "../semantics/hir/index.js";
 import type {
   CodegenFunctionSignature,
-  CallLoweringInfo,
   ModuleCodegenView,
-  MonomorphizedInstanceInfo,
   ProgramCodegenView,
 } from "../semantics/codegen-view/index.js";
-import { buildEffectsLoweringInfo } from "../semantics/effects/analysis.js";
-import { buildEffectsIr } from "../semantics/effects/ir/build.js";
 import { getSymbolTable } from "../semantics/_internal/symbol-table.js";
-import {
-  analyzeLambdaCaptures,
-} from "../semantics/lowering/captures.js";
+import { analyzeLambdaCaptures } from "../semantics/lowering/captures.js";
 import type {
   HirExprId,
   ProgramFunctionId,
@@ -28,75 +22,40 @@ import type {
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { CodegenOptions } from "../codegen/context.js";
 import {
-  incrementCompilerPerfCounter,
-  markCompilerPerfPhaseDuration,
-  recordCompilerPerfDuration,
-  startCompilerPerfPhase,
-} from "../perf.js";
-import {
-  type ProgramOptimizationContext,
-  type ProgramOptimizationPass,
-  type OptimizationAnalysisKey,
-} from "./pass.js";
+  BOUNDARY_MSGPACK_CONTRACT_IDS,
+  type CompilerFunctionContractId,
+} from "../compiler-contracts/index.js";
+import { type ProgramOptimizationPass } from "./pass.js";
 import type {
   EscapeAnalysisEscapeReason,
   EscapeAnalysisOriginFact,
   EscapeAnalysisOriginKind,
   EscapeAnalysisParameterFact,
+  CallShapeParameterState,
+  CallShapeSpecializationRequest,
   OptimizedCallInfo,
   OptimizedModuleView,
   ProgramOptimizationResult,
 } from "./ir.js";
-import type { ProgramCodegenOptimizationPlan } from "./codegen-plan.js";
-
-type MutableOptimizationIr = {
-  baseProgram: ProgramCodegenView;
-  entryModuleId: string;
-  options: {
-    testMode: boolean;
-    testScope: "all" | "entry";
-    boundaryExports?: CodegenOptions["boundaryExports"];
-  };
-  modules: Map<string, OptimizedModuleView>;
-  calls: Map<string, Map<HirExprId, OptimizedCallInfo>>;
-  functionInstantiations: Map<
-    string,
-    Map<SymbolId, Map<ProgramFunctionInstanceId, readonly TypeId[]>>
-  >;
-  survivingInstances: MonomorphizedInstanceInfo[];
-  facts: {
-    handlerClauseCaptures: Map<
-      string,
-      Map<HirExprId, Map<number, readonly SymbolId[]>>
-    >;
-    reachableFunctionInstances: Set<ProgramFunctionInstanceId>;
-    reachableFunctionSymbols: Set<ProgramSymbolId>;
-    reachableModuleLets: Map<string, Set<SymbolId>>;
-    usedTraitDispatchSignatures: Set<string>;
-    receiverSpecializationRequests: Map<
-      string,
-      Map<string, Map<SymbolId, TypeId>>
-    >;
-    exactParameterTypes: Map<
-      ProgramFunctionInstanceId,
-      Map<SymbolId, TypeId>
-    >;
-    knownParameterTypes: Map<
-      ProgramFunctionInstanceId,
-      Map<SymbolId, Set<TypeId>>
-    >;
-    escapeAnalysis: {
-      origins: Map<string, Map<HirExprId, EscapeAnalysisOriginFact>>;
-      parameters: Map<
-        ProgramFunctionInstanceId,
-        Map<SymbolId, EscapeAnalysisParameterFact>
-      >;
-    };
-    runtimeTypeCheckElisionFieldAccesses: Map<string, Set<HirExprId>>;
-    semanticCopyForwardingFieldAccesses: Map<string, Set<HirExprId>>;
-    codegenPlan: ProgramCodegenOptimizationPlan;
-  };
-};
+import { MutableOptimizationContext } from "./context.js";
+import { finalizeOptimization } from "./finalize.js";
+import {
+  runOptimizationPassSequence,
+  runOptimizationPassesToFixedPoint,
+} from "./runner.js";
+import {
+  createOptimizationSchedule,
+  optimizationFixedPointIterationBudget,
+} from "./schedule.js";
+import { recordOptimizationBodyIndexCounters } from "./telemetry.js";
+import {
+  buildOptimizationIr,
+  mutableExpressions,
+  mutableHandlerClauseCaptures,
+  mutableStatements,
+  normalizeFunctionInstantiations,
+  type MutableOptimizationIr,
+} from "./state.js";
 
 type ConstantValue =
   | { literalKind: "i32" | "f32" | "f64"; value: number }
@@ -105,39 +64,16 @@ type ConstantValue =
   | { literalKind: "string"; value: string }
   | { literalKind: "void"; value: "" };
 
-const cloneHir = <T>(value: T): T => structuredClone(value);
+const BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS = new Set([
+  "__retain_callback",
+  "__boundary_retain_callback",
+  "__boundary_value_to_msgpack",
+  "__boundary_msgpack_to_value",
+]);
 
-const mutableExpressions = ({
-  moduleView,
-}: {
-  moduleView: OptimizedModuleView;
-}): Map<HirExprId, HirExpression> =>
-  moduleView.hir.expressions as Map<HirExprId, HirExpression>;
-
-const mutableStatements = ({
-  moduleView,
-}: {
-  moduleView: OptimizedModuleView;
-}) => moduleView.hir.statements as Map<number, (typeof moduleView.hir.statements extends ReadonlyMap<number, infer T> ? T : never)>;
-
-const mutableHandlerClauseCaptures = ({
-  ir,
-}: {
-  ir: MutableOptimizationIr;
-}): Map<string, Map<HirExprId, Map<number, readonly SymbolId[]>>> =>
-  ir.facts.handlerClauseCaptures as Map<
-    string,
-    Map<HirExprId, Map<number, readonly SymbolId[]>>
-  >;
-
-const cloneCallInfo = (callInfo: CallLoweringInfo): OptimizedCallInfo => ({
-  targets: callInfo.targets ? new Map(callInfo.targets) : undefined,
-  argPlans: callInfo.argPlans ? new Map(callInfo.argPlans) : undefined,
-  typeArgs: callInfo.typeArgs ? new Map(callInfo.typeArgs) : undefined,
-  traitDispatch: callInfo.traitDispatch,
-});
-
-const exprLiteralBoolean = (expr: HirExpression | undefined): boolean | undefined =>
+const exprLiteralBoolean = (
+  expr: HirExpression | undefined,
+): boolean | undefined =>
   expr?.exprKind === "literal" && expr.literalKind === "boolean"
     ? expr.value === "true"
     : undefined;
@@ -226,118 +162,6 @@ const toEvaluatedValueBlockExpr = ({
   };
 };
 
-const normalizeFunctionInstantiations = ({
-  program,
-}: {
-  program: ProgramCodegenView;
-}): Map<string, Map<SymbolId, Map<ProgramFunctionInstanceId, readonly TypeId[]>>> => {
-  const byModule = new Map<
-    string,
-    Map<SymbolId, Map<ProgramFunctionInstanceId, readonly TypeId[]>>
-  >();
-
-  program.modules.forEach((moduleView, moduleId) => {
-    const bySymbol = new Map<SymbolId, Map<ProgramFunctionInstanceId, readonly TypeId[]>>();
-    moduleView.hir.items.forEach((item) => {
-      if (item.kind !== "function") {
-        return;
-      }
-      const instantiationInfo = program.functions.getInstantiationInfo(moduleId, item.symbol);
-      if (!instantiationInfo) {
-        return;
-      }
-      bySymbol.set(item.symbol, new Map(instantiationInfo));
-    });
-    byModule.set(moduleId, bySymbol);
-  });
-
-  return byModule;
-};
-
-const normalizeCalls = ({
-  program,
-}: {
-  program: ProgramCodegenView;
-}): Map<string, Map<HirExprId, OptimizedCallInfo>> => {
-  const byModule = new Map<string, Map<HirExprId, OptimizedCallInfo>>();
-
-  program.modules.forEach((moduleView, moduleId) => {
-    const calls = new Map<HirExprId, OptimizedCallInfo>();
-    moduleView.hir.expressions.forEach((expr, exprId) => {
-      if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
-        return;
-      }
-      calls.set(exprId, cloneCallInfo(program.calls.getCallInfo(moduleId, exprId)));
-    });
-    byModule.set(moduleId, calls);
-  });
-
-  return byModule;
-};
-
-const buildOptimizationIr = ({
-  program,
-  modules,
-  entryModuleId,
-  options,
-}: {
-  program: ProgramCodegenView;
-  modules: readonly SemanticsPipelineResult[];
-  entryModuleId: string;
-  options?: CodegenOptions;
-}): MutableOptimizationIr => {
-  const semanticsByModuleId = new Map(modules.map((module) => [module.moduleId, module] as const));
-  const optimizedModules = new Map<string, OptimizedModuleView>();
-
-  program.modules.forEach((moduleView, moduleId) => {
-    const semantics = semanticsByModuleId.get(moduleId);
-    if (!semantics) {
-      return;
-    }
-    optimizedModules.set(moduleId, {
-      ...moduleView,
-      semantics,
-      hir: cloneHir(moduleView.hir),
-      effectsInfo: cloneHir(moduleView.effectsInfo),
-      effectsIr: buildEffectsIr({
-        hir: moduleView.hir,
-        info: moduleView.effectsInfo,
-      }),
-    });
-  });
-
-  return {
-    baseProgram: program,
-    entryModuleId,
-    options: {
-      testMode: options?.testMode ?? false,
-      testScope: options?.testScope ?? "all",
-      boundaryExports: options?.boundaryExports,
-    },
-    modules: optimizedModules,
-    calls: normalizeCalls({ program }),
-    functionInstantiations: normalizeFunctionInstantiations({ program }),
-    survivingInstances: [...program.instances.getAll()],
-    facts: {
-      handlerClauseCaptures: new Map(),
-      reachableFunctionInstances: new Set(),
-      reachableFunctionSymbols: new Set(),
-      reachableModuleLets: new Map(),
-      usedTraitDispatchSignatures: new Set(),
-      receiverSpecializationRequests: new Map(),
-      exactParameterTypes: new Map(),
-      knownParameterTypes: new Map(),
-      escapeAnalysis: {
-        origins: new Map(),
-        parameters: new Map(),
-      },
-      runtimeTypeCheckElisionFieldAccesses: new Map(),
-      semanticCopyForwardingFieldAccesses: new Map(),
-      codegenPlan: { representations: {} },
-    },
-  };
-};
-
 const collectPostOrderExprIds = ({
   rootExprId,
   moduleView,
@@ -364,9 +188,12 @@ const collectModuleRootExprIds = ({
   const roots: HirExprId[] = [];
   moduleView.hir.items.forEach((item) => {
     if (item.kind === "function") {
-      roots.push(item.body, ...item.parameters.flatMap((param) =>
-        typeof param.defaultValue === "number" ? [param.defaultValue] : [],
-      ));
+      roots.push(
+        item.body,
+        ...item.parameters.flatMap((param) =>
+          typeof param.defaultValue === "number" ? [param.defaultValue] : [],
+        ),
+      );
       return;
     }
     if (item.kind === "module-let") {
@@ -425,7 +252,8 @@ const exprTypeFor = ({
   moduleView: ModuleCodegenView;
   exprId: HirExprId;
 }): TypeId | undefined =>
-  moduleView.types.getResolvedExprType(exprId) ?? moduleView.types.getExprType(exprId);
+  moduleView.types.getResolvedExprType(exprId) ??
+  moduleView.types.getExprType(exprId);
 
 const I32_MIN = -(1n << 31n);
 const I64_MIN = -(1n << 63n);
@@ -551,9 +379,7 @@ const constantI64Op = (
     case "__shift_l":
       return wrapI64(left << normalizeI64ShiftCount(right));
     case "__shift_ru":
-      return wrapI64(
-        BigInt.asUintN(64, left) >> normalizeI64ShiftCount(right),
-      );
+      return wrapI64(BigInt.asUintN(64, left) >> normalizeI64ShiftCount(right));
     case "__bit_and":
       return wrapI64(left & right);
     case "__bit_or":
@@ -632,7 +458,9 @@ const constantBooleanOp = (
   }
 };
 
-const parseConstantLiteral = (expr: HirExpression): ConstantValue | undefined => {
+const parseConstantLiteral = (
+  expr: HirExpression,
+): ConstantValue | undefined => {
   if (expr.exprKind !== "literal") {
     return undefined;
   }
@@ -680,7 +508,9 @@ const resolveCallTarget = ({
   ) {
     return callInfo.targets.get(callerInstanceId);
   }
-  return callInfo.targets?.size === 1 ? callInfo.targets.values().next().value : undefined;
+  return callInfo.targets?.size === 1
+    ? callInfo.targets.values().next().value
+    : undefined;
 };
 
 const resolveCallTypeArgs = ({
@@ -696,7 +526,9 @@ const resolveCallTypeArgs = ({
   ) {
     return callInfo.typeArgs.get(callerInstanceId) ?? [];
   }
-  return callInfo.typeArgs?.size === 1 ? callInfo.typeArgs.values().next().value ?? [] : [];
+  return callInfo.typeArgs?.size === 1
+    ? (callInfo.typeArgs.values().next().value ?? [])
+    : [];
 };
 
 const resolveCallArgPlan = ({
@@ -759,7 +591,8 @@ const isPureHelperCandidate = ({
   }
   const moduleView = program.modules.get(moduleId);
   return Array.from(moduleView?.hir.items.values() ?? []).find(
-    (item): item is HirFunction => item.kind === "function" && item.symbol === symbol,
+    (item): item is HirFunction =>
+      item.kind === "function" && item.symbol === symbol,
   );
 };
 
@@ -770,21 +603,25 @@ const evaluateIntrinsic = ({
   name: string;
   args: readonly ConstantValue[];
 }): ConstantValue | undefined => {
-  if (args.length === 1 && name === "not" && args[0]?.literalKind === "boolean") {
+  if (
+    args.length === 1 &&
+    name === "not" &&
+    args[0]?.literalKind === "boolean"
+  ) {
     return { literalKind: "boolean", value: !args[0].value };
   }
 
-  if (args.length === 1 && name === "__f32_demote_f64" && args[0]?.literalKind === "f64") {
+  if (
+    args.length === 1 &&
+    name === "__f32_demote_f64" &&
+    args[0]?.literalKind === "f64"
+  ) {
     return { literalKind: "f32", value: normalizeF32(args[0].value) };
   }
 
   if (args.length === 2) {
     const [left, right] = args;
-    if (
-      left &&
-      right &&
-      left.literalKind === right.literalKind
-    ) {
+    if (left && right && left.literalKind === right.literalKind) {
       if (left.literalKind === "i64" && right.literalKind === "i64") {
         const compare = constantI64CompareOp(left.value, right.value, name);
         if (typeof compare === "boolean") {
@@ -839,10 +676,7 @@ const evaluateIntrinsic = ({
       }
     }
 
-    if (
-      left?.literalKind === "boolean" &&
-      right?.literalKind === "boolean"
-    ) {
+    if (left?.literalKind === "boolean" && right?.literalKind === "boolean") {
       const value = constantBooleanOp(left.value, right.value, name);
       if (typeof value === "boolean") {
         return { literalKind: "boolean", value };
@@ -934,16 +768,12 @@ const evaluateConstantExpr = ({
   }
 
   const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
-  if (
-    expr.exprKind !== "call" &&
-    expr.exprKind !== "method-call"
-  ) {
+  if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
     return undefined;
   }
 
-  const args = (expr.exprKind === "call"
-    ? expr.args
-    : [{ expr: expr.target }, ...expr.args]
+  const args = (
+    expr.exprKind === "call" ? expr.args : [{ expr: expr.target }, ...expr.args]
   ).map((arg) =>
     evaluateConstantExpr({
       exprId: arg.expr,
@@ -986,7 +816,10 @@ const evaluateConstantExpr = ({
     ir.baseProgram.symbols.getName(targetProgramSymbol);
   const intrinsicFlags =
     ir.baseProgram.symbols.getIntrinsicFunctionFlags(targetProgramSymbol);
-  if (intrinsicFlags.intrinsic === true && intrinsicFlags.intrinsicUsesSignature !== true) {
+  if (
+    intrinsicFlags.intrinsic === true &&
+    intrinsicFlags.intrinsicUsesSignature !== true
+  ) {
     return evaluateIntrinsic({
       name: intrinsicName ?? `${targetSymbol}`,
       args: args as ConstantValue[],
@@ -1043,39 +876,55 @@ const pureCompileTimeEvaluationPass: ProgramOptimizationPass = {
   name: "pure-compile-time-evaluation",
   run(ctx) {
     let changed = false;
+    let foldedCalls = 0;
+    const changedModules = new Set<string>();
 
     ctx.ir.modules.forEach((moduleView) => {
       const rootExprIds = collectModuleRootExprIds({ moduleView });
       rootExprIds.forEach((rootExprId) => {
-        collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
-          const expr = moduleView.hir.expressions.get(exprId);
-          if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
-            return;
-          }
-          const constant = evaluateConstantExpr({
-            exprId,
-            moduleView,
-            ir: ctx.ir as MutableOptimizationIr,
-            localEnv: new Map(),
-            visited: new Set(),
-          });
-          if (!constant) {
-            return;
-          }
-          mutableExpressions({ moduleView }).set(
-            exprId,
-            toLiteralExpr({ original: expr, constant }),
-          );
-          changed = true;
-        });
+        collectPostOrderExprIds({ rootExprId, moduleView }).forEach(
+          (exprId) => {
+            const expr = moduleView.hir.expressions.get(exprId);
+            if (
+              !expr ||
+              (expr.exprKind !== "call" && expr.exprKind !== "method-call")
+            ) {
+              return;
+            }
+            const constant = evaluateConstantExpr({
+              exprId,
+              moduleView,
+              ir: ctx.ir as MutableOptimizationIr,
+              localEnv: new Map(),
+              visited: new Set(),
+            });
+            if (!constant) {
+              return;
+            }
+            mutableExpressions({ moduleView }).set(
+              exprId,
+              toLiteralExpr({ original: expr, constant }),
+            );
+            changed = true;
+            changedModules.add(moduleView.moduleId);
+            foldedCalls += 1;
+          },
+        );
       });
     });
 
     return {
       changed,
       invalidates: changed
-        ? (["reachable-function-instances", "handler-captures", "trait-dispatch-signatures"] as const)
+        ? ([
+            "reachable-function-instances",
+            "handler-captures",
+            "trait-dispatch-signatures",
+            "hir-body-topology",
+          ] as const)
         : undefined,
+      invalidatedHirModuleIds: [...changedModules],
+      metrics: { folded_calls: foldedCalls },
     };
   },
 };
@@ -1084,68 +933,93 @@ const simplifyBooleanBranchPass: ProgramOptimizationPass = {
   name: "boolean-branch-simplification",
   run(ctx) {
     let changed = false;
+    let removedBranches = 0;
+    let simplifiedBranches = 0;
+    const changedModules = new Set<string>();
 
     ctx.ir.modules.forEach((moduleView) => {
       const rootExprIds = collectModuleRootExprIds({ moduleView });
       rootExprIds.forEach((rootExprId) => {
-        collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
-          const expr = moduleView.hir.expressions.get(exprId);
-          if (!expr || (expr.exprKind !== "if" && expr.exprKind !== "cond")) {
-            return;
-          }
-
-          let sawUnknown = false;
-          const nextBranches: Array<(typeof expr.branches)[number]> = [];
-          let selectedValue: HirExprId | undefined;
-
-          for (const branch of expr.branches) {
-            const conditionExpr = moduleView.hir.expressions.get(branch.condition);
-            const constant = exprLiteralBoolean(conditionExpr);
-            if (constant === false && !sawUnknown) {
-              changed = true;
-              continue;
+        collectPostOrderExprIds({ rootExprId, moduleView }).forEach(
+          (exprId) => {
+            const expr = moduleView.hir.expressions.get(exprId);
+            if (!expr || (expr.exprKind !== "if" && expr.exprKind !== "cond")) {
+              return;
             }
-            if (constant === true && !sawUnknown) {
-              selectedValue = branch.value;
-              changed = true;
-              break;
+
+            let sawUnknown = false;
+            const nextBranches: Array<(typeof expr.branches)[number]> = [];
+            let selectedValue: HirExprId | undefined;
+
+            for (const branch of expr.branches) {
+              const conditionExpr = moduleView.hir.expressions.get(
+                branch.condition,
+              );
+              const constant = exprLiteralBoolean(conditionExpr);
+              if (constant === false && !sawUnknown) {
+                changed = true;
+                changedModules.add(moduleView.moduleId);
+                removedBranches += 1;
+                continue;
+              }
+              if (constant === true && !sawUnknown) {
+                selectedValue = branch.value;
+                changed = true;
+                changedModules.add(moduleView.moduleId);
+                simplifiedBranches += 1;
+                break;
+              }
+              sawUnknown = true;
+              nextBranches.push(branch);
             }
-            sawUnknown = true;
-            nextBranches.push(branch);
-          }
 
-          if (typeof selectedValue === "number") {
-            mutableExpressions({ moduleView }).set(
-              exprId,
-              toValueBlockExpr({ original: expr, value: selectedValue }),
-            );
-            return;
-          }
+            if (typeof selectedValue === "number") {
+              mutableExpressions({ moduleView }).set(
+                exprId,
+                toValueBlockExpr({ original: expr, value: selectedValue }),
+              );
+              return;
+            }
 
-          if (nextBranches.length === 0 && typeof expr.defaultBranch === "number") {
-            mutableExpressions({ moduleView }).set(
-              exprId,
-              toValueBlockExpr({ original: expr, value: expr.defaultBranch }),
-            );
-            changed = true;
-            return;
-          }
+            if (
+              nextBranches.length === 0 &&
+              typeof expr.defaultBranch === "number"
+            ) {
+              mutableExpressions({ moduleView }).set(
+                exprId,
+                toValueBlockExpr({ original: expr, value: expr.defaultBranch }),
+              );
+              changed = true;
+              changedModules.add(moduleView.moduleId);
+              simplifiedBranches += 1;
+              return;
+            }
 
-          if (nextBranches.length !== expr.branches.length) {
-            mutableExpressions({ moduleView }).set(exprId, {
-              ...expr,
-              branches: nextBranches,
-            });
-          }
-        });
+            if (nextBranches.length !== expr.branches.length) {
+              mutableExpressions({ moduleView }).set(exprId, {
+                ...expr,
+                branches: nextBranches,
+              });
+            }
+          },
+        );
       });
     });
 
     return {
       changed,
       invalidates: changed
-        ? (["reachable-function-instances", "handler-captures"] as const)
+        ? ([
+            "reachable-function-instances",
+            "handler-captures",
+            "hir-body-topology",
+          ] as const)
         : undefined,
+      invalidatedHirModuleIds: [...changedModules],
+      metrics: {
+        removed_branches: removedBranches,
+        simplified_branches: simplifiedBranches,
+      },
     };
   },
 };
@@ -1154,6 +1028,8 @@ const constructorKnownSimplificationPass: ProgramOptimizationPass = {
   name: "constructor-known-simplification",
   run(ctx) {
     let changed = false;
+    let simplifiedMatches = 0;
+    const changedModules = new Set<string>();
 
     const exactDiscriminantType = ({
       moduleView,
@@ -1230,10 +1106,7 @@ const constructorKnownSimplificationPass: ProgramOptimizationPass = {
         }
 
         const selectedArm = expr.arms.find((arm) => {
-          if (
-            arm.pattern.kind === "type" &&
-            arm.pattern.binding
-          ) {
+          if (arm.pattern.kind === "type" && arm.pattern.binding) {
             return false;
           }
           if (arm.pattern.kind !== "wildcard" && arm.pattern.kind !== "type") {
@@ -1243,7 +1116,9 @@ const constructorKnownSimplificationPass: ProgramOptimizationPass = {
             return true;
           }
           const patternTypeId =
-            typeof arm.pattern.typeId === "number" ? arm.pattern.typeId : undefined;
+            typeof arm.pattern.typeId === "number"
+              ? arm.pattern.typeId
+              : undefined;
           if (typeof patternTypeId !== "number") {
             return false;
           }
@@ -1270,6 +1145,8 @@ const constructorKnownSimplificationPass: ProgramOptimizationPass = {
           }),
         );
         changed = true;
+        changedModules.add(moduleView.moduleId);
+        simplifiedMatches += 1;
       });
     };
 
@@ -1279,10 +1156,12 @@ const constructorKnownSimplificationPass: ProgramOptimizationPass = {
           [
             item.body,
             ...item.parameters.flatMap((param) =>
-              typeof param.defaultValue === "number" ? [param.defaultValue] : [],
+              typeof param.defaultValue === "number"
+                ? [param.defaultValue]
+                : [],
             ),
           ].forEach((rootExprId) =>
-            simplifyRoot({ moduleView, rootExprId, functionItem: item })
+            simplifyRoot({ moduleView, rootExprId, functionItem: item }),
           );
           return;
         }
@@ -1296,8 +1175,14 @@ const constructorKnownSimplificationPass: ProgramOptimizationPass = {
     return {
       changed,
       invalidates: changed
-        ? (["reachable-function-instances", "handler-captures"] as const)
+        ? ([
+            "reachable-function-instances",
+            "handler-captures",
+            "hir-body-topology",
+          ] as const)
         : undefined,
+      invalidatedHirModuleIds: [...changedModules],
+      metrics: { simplified_matches: simplifiedMatches },
     };
   },
 };
@@ -1306,10 +1191,15 @@ const effectFastPathEliminationPass: ProgramOptimizationPass = {
   name: "effect-fast-path-elimination",
   run(ctx) {
     let changed = false;
+    let eliminatedHandlers = 0;
+    const changedModules = new Set<string>();
 
     ctx.ir.modules.forEach((moduleView) => {
       moduleView.hir.expressions.forEach((expr, exprId) => {
-        if (expr.exprKind !== "effect-handler" || typeof expr.finallyBranch === "number") {
+        if (
+          expr.exprKind !== "effect-handler" ||
+          typeof expr.finallyBranch === "number"
+        ) {
           return;
         }
         const handlerInfo = moduleView.effectsInfo.handlers.get(exprId);
@@ -1325,7 +1215,10 @@ const effectFastPathEliminationPass: ProgramOptimizationPass = {
         }
         const handledOps = new Set(
           handlerInfo.clauses
-            .map((clause) => moduleView.effectsInfo.operations.get(clause.operation)?.name)
+            .map(
+              (clause) =>
+                moduleView.effectsInfo.operations.get(clause.operation)?.name,
+            )
             .filter((name): name is string => typeof name === "string"),
         );
         const canHandle = row.operations.some((operation) =>
@@ -1343,14 +1236,23 @@ const effectFastPathEliminationPass: ProgramOptimizationPass = {
           toValueBlockExpr({ original: expr, value: expr.body }),
         );
         changed = true;
+        changedModules.add(moduleView.moduleId);
+        eliminatedHandlers += 1;
       });
     });
 
     return {
       changed,
       invalidates: changed
-        ? (["reachable-function-instances", "handler-captures", "trait-dispatch-signatures"] as const)
+        ? ([
+            "reachable-function-instances",
+            "handler-captures",
+            "trait-dispatch-signatures",
+            "hir-body-topology",
+          ] as const)
         : undefined,
+      invalidatedHirModuleIds: [...changedModules],
+      metrics: { eliminated_handlers: eliminatedHandlers },
     };
   },
 };
@@ -1373,8 +1275,8 @@ const exactNominalForExpr = ({
 }): TypeId | undefined => {
   const typeId =
     typeof callerInstanceId === "number"
-      ? program.functions.getInstanceExprType(callerInstanceId, exprId) ??
-        exprTypeFor({ moduleView, exprId })
+      ? (program.functions.getInstanceExprType(callerInstanceId, exprId) ??
+        exprTypeFor({ moduleView, exprId }))
       : exprTypeFor({ moduleView, exprId });
   const exactStaticType = exactNominalForType({ typeId, program });
   if (typeof exactStaticType === "number") {
@@ -1398,11 +1300,10 @@ const exactNominalForExpr = ({
     }
   }
 
-  if (
-    expr?.exprKind === "identifier" &&
-    typeof callerInstanceId === "number"
-  ) {
-    const exactParam = exactParameterTypes?.get(callerInstanceId)?.get(expr.symbol);
+  if (expr?.exprKind === "identifier" && typeof callerInstanceId === "number") {
+    const exactParam = exactParameterTypes
+      ?.get(callerInstanceId)
+      ?.get(expr.symbol);
     if (typeof exactParam === "number") {
       return exactParam;
     }
@@ -1424,7 +1325,9 @@ const functionTypeSubstitution = ({
   typeArgs,
   program,
 }: {
-  signature: NonNullable<ReturnType<ProgramCodegenView["functions"]["getSignature"]>>;
+  signature: NonNullable<
+    ReturnType<ProgramCodegenView["functions"]["getSignature"]>
+  >;
   typeArgs: readonly TypeId[];
   program: ProgramCodegenView;
 }) => {
@@ -1436,7 +1339,9 @@ const functionTypeSubstitution = ({
       ? signature.typeParams.map((param) => param.typeParam)
       : program.types.getScheme(signature.scheme).params;
   return paramIds.length === typeArgs.length
-    ? new Map(paramIds.map((param, index) => [param, typeArgs[index]!] as const))
+    ? new Map(
+        paramIds.map((param, index) => [param, typeArgs[index]!] as const),
+      )
     : undefined;
 };
 
@@ -1445,7 +1350,9 @@ const receiverParamNominalForTypeArgs = ({
   typeArgs,
   program,
 }: {
-  signature: NonNullable<ReturnType<ProgramCodegenView["functions"]["getSignature"]>>;
+  signature: NonNullable<
+    ReturnType<ProgramCodegenView["functions"]["getSignature"]>
+  >;
   typeArgs: readonly TypeId[];
   program: ProgramCodegenView;
 }): TypeId | undefined => {
@@ -1453,7 +1360,11 @@ const receiverParamNominalForTypeArgs = ({
   if (typeof receiverType !== "number") {
     return undefined;
   }
-  const substitution = functionTypeSubstitution({ signature, typeArgs, program });
+  const substitution = functionTypeSubstitution({
+    signature,
+    typeArgs,
+    program,
+  });
   const resolvedReceiverType = substitution
     ? program.types.substitute(receiverType, substitution)
     : receiverType;
@@ -1470,7 +1381,9 @@ const exactReceiverTraitTarget = ({
   callerInstanceId: ProgramFunctionInstanceId;
   exactReceiver: TypeId;
   program: ProgramCodegenView;
-}): { functionId: ProgramFunctionId; typeArgs: readonly TypeId[] } | undefined => {
+}):
+  | { functionId: ProgramFunctionId; typeArgs: readonly TypeId[] }
+  | undefined => {
   if (program.types.getTypeDesc(exactReceiver).kind !== "nominal-object") {
     return undefined;
   }
@@ -1483,7 +1396,9 @@ const exactReceiverTraitTarget = ({
 
   const candidateTraitMethods = new Set<string>();
   candidateTargets.forEach((target) => {
-    const mapping = program.traits.getTraitMethodImpl(target as ProgramSymbolId);
+    const mapping = program.traits.getTraitMethodImpl(
+      target as ProgramSymbolId,
+    );
     if (!mapping) {
       return;
     }
@@ -1575,7 +1490,11 @@ const devirtualizedCallInfo = ({
     ReadonlyMap<SymbolId, TypeId>
   >;
 }): OptimizedCallInfo | undefined => {
-  if (!callInfo.traitDispatch || !callInfo.targets || callInfo.targets.size === 0) {
+  if (
+    !callInfo.traitDispatch ||
+    !callInfo.targets ||
+    callInfo.targets.size === 0
+  ) {
     return undefined;
   }
   const expr = moduleView.hir.expressions.get(exprId);
@@ -1639,7 +1558,9 @@ const devirtualizedCallInfo = ({
   if (typeof target !== "number") {
     return undefined;
   }
-  const traitMethodImpl = program.traits.getTraitMethodImpl(target as ProgramSymbolId);
+  const traitMethodImpl = program.traits.getTraitMethodImpl(
+    target as ProgramSymbolId,
+  );
   if (!traitMethodImpl) {
     return undefined;
   }
@@ -1655,6 +1576,7 @@ const traitDispatchDevirtualizationPass: ProgramOptimizationPass = {
   name: "trait-dispatch-devirtualization",
   run(ctx) {
     let changed = false;
+    let devirtualizedCalls = 0;
 
     ctx.ir.calls.forEach((callsByExpr, moduleId) => {
       const moduleView = ctx.ir.modules.get(moduleId);
@@ -1674,14 +1596,19 @@ const traitDispatchDevirtualizationPass: ProgramOptimizationPass = {
         }
         (callsByExpr as Map<HirExprId, OptimizedCallInfo>).set(exprId, next);
         changed = true;
+        devirtualizedCalls += 1;
       });
     });
 
     return {
       changed,
       invalidates: changed
-        ? (["reachable-function-instances", "trait-dispatch-signatures"] as const)
+        ? ([
+            "reachable-function-instances",
+            "trait-dispatch-signatures",
+          ] as const)
         : undefined,
+      metrics: { devirtualized_calls: devirtualizedCalls },
     };
   },
 };
@@ -1690,12 +1617,25 @@ const closureEnvironmentShrinkingPass: ProgramOptimizationPass = {
   name: "closure-environment-shrinking",
   run(ctx) {
     let changed = false;
+    let removedCaptures = 0;
 
     ctx.ir.modules.forEach((moduleView) => {
-      const before = Array.from(moduleView.hir.expressions.values())
-        .filter((expr): expr is Extract<HirExpression, { exprKind: "lambda" }> => expr.exprKind === "lambda")
-        .map((expr) => `${expr.id}:${expr.captures.map((capture) => capture.symbol).join(",")}`)
+      const beforeLambdas = Array.from(
+        moduleView.hir.expressions.values(),
+      ).filter(
+        (expr): expr is Extract<HirExpression, { exprKind: "lambda" }> =>
+          expr.exprKind === "lambda",
+      );
+      const before = beforeLambdas
+        .map(
+          (expr) =>
+            `${expr.id}:${expr.captures.map((capture) => capture.symbol).join(",")}`,
+        )
         .join("|");
+      const beforeCaptureCount = beforeLambdas.reduce(
+        (count, expr) => count + expr.captures.length,
+        0,
+      );
 
       analyzeLambdaCaptures({
         hir: moduleView.hir,
@@ -1703,18 +1643,32 @@ const closureEnvironmentShrinkingPass: ProgramOptimizationPass = {
         scopeByNode: moduleView.semantics.binding.scopeByNode,
       });
 
-      const after = Array.from(moduleView.hir.expressions.values())
-        .filter((expr): expr is Extract<HirExpression, { exprKind: "lambda" }> => expr.exprKind === "lambda")
-        .map((expr) => `${expr.id}:${expr.captures.map((capture) => capture.symbol).join(",")}`)
+      const afterLambdas = Array.from(
+        moduleView.hir.expressions.values(),
+      ).filter(
+        (expr): expr is Extract<HirExpression, { exprKind: "lambda" }> =>
+          expr.exprKind === "lambda",
+      );
+      const after = afterLambdas
+        .map(
+          (expr) =>
+            `${expr.id}:${expr.captures.map((capture) => capture.symbol).join(",")}`,
+        )
         .join("|");
       if (before !== after) {
         changed = true;
       }
+      const afterCaptureCount = afterLambdas.reduce(
+        (count, expr) => count + expr.captures.length,
+        0,
+      );
+      removedCaptures += Math.max(0, beforeCaptureCount - afterCaptureCount);
     });
 
     return {
       changed,
       invalidates: changed ? (["handler-captures"] as const) : undefined,
+      metrics: { removed_captures: removedCaptures },
     };
   },
 };
@@ -1724,7 +1678,10 @@ const collectHandlerCaptures = ({
 }: {
   moduleView: OptimizedModuleView;
 }): Map<HirExprId, Map<number, readonly SymbolId[]>> => {
-  const handlerCaptures = new Map<HirExprId, Map<number, readonly SymbolId[]>>();
+  const handlerCaptures = new Map<
+    HirExprId,
+    Map<number, readonly SymbolId[]>
+  >();
   const symbolTable = getSymbolTable(moduleView.semantics);
 
   moduleView.hir.expressions.forEach((expr) => {
@@ -1733,7 +1690,9 @@ const collectHandlerCaptures = ({
     }
     const clauseCaptures = new Map<number, readonly SymbolId[]>();
     expr.handlers.forEach((clause, clauseIndex) => {
-      const clauseParams = new Set(clause.parameters.map((parameter) => parameter.symbol));
+      const clauseParams = new Set(
+        clause.parameters.map((parameter) => parameter.symbol),
+      );
       const captures = new Set<SymbolId>();
       walkExpression({
         exprId: clause.body,
@@ -1746,7 +1705,9 @@ const collectHandlerCaptures = ({
             return;
           }
           const symbolRecord = symbolTable.getSymbol(nestedExpr.symbol);
-          const metadata = (symbolRecord.metadata ?? {}) as { import?: unknown };
+          const metadata = (symbolRecord.metadata ?? {}) as {
+            import?: unknown;
+          };
           if (metadata.import) {
             return;
           }
@@ -1756,7 +1717,10 @@ const collectHandlerCaptures = ({
           captures.add(nestedExpr.symbol);
         },
       });
-      clauseCaptures.set(clauseIndex, [...captures].sort((a, b) => a - b));
+      clauseCaptures.set(
+        clauseIndex,
+        [...captures].sort((a, b) => a - b),
+      );
     });
     handlerCaptures.set(expr.id, clauseCaptures);
   });
@@ -1764,56 +1728,133 @@ const collectHandlerCaptures = ({
   return handlerCaptures;
 };
 
-const continuationAndHandlerEnvironmentShrinkingPass: ProgramOptimizationPass = {
-  name: "continuation-handler-environment-shrinking",
-  run(ctx) {
-    let changed = false;
+const continuationAndHandlerEnvironmentShrinkingPass: ProgramOptimizationPass =
+  {
+    name: "continuation-handler-environment-shrinking",
+    run(ctx) {
+      let changed = false;
+      let removedCaptures = 0;
 
-    ctx.ir.modules.forEach((moduleView, moduleId) => {
-      const captures = collectHandlerCaptures({
-        moduleView,
+      ctx.ir.modules.forEach((moduleView, moduleId) => {
+        const captures = collectHandlerCaptures({
+          moduleView,
+        });
+        const existing = ctx.ir.facts.handlerClauseCaptures.get(moduleId);
+        const serialize = (
+          value?:
+            | ReadonlyMap<HirExprId, ReadonlyMap<number, readonly SymbolId[]>>
+            | Map<HirExprId, Map<number, readonly SymbolId[]>>,
+        ) =>
+          JSON.stringify(
+            Array.from(value?.entries() ?? []).map(([exprId, clauses]) => [
+              exprId,
+              Array.from(clauses.entries()),
+            ]),
+          );
+        if (serialize(existing) !== serialize(captures)) {
+          const captureCount = (
+            value?: ReadonlyMap<
+              HirExprId,
+              ReadonlyMap<number, readonly SymbolId[]>
+            >,
+          ): number =>
+            Array.from(value?.values() ?? []).reduce(
+              (handlerCount, clauses) =>
+                handlerCount +
+                Array.from(clauses.values()).reduce(
+                  (clauseCount, symbols) => clauseCount + symbols.length,
+                  0,
+                ),
+              0,
+            );
+          removedCaptures += Math.max(
+            0,
+            captureCount(existing) - captureCount(captures),
+          );
+          mutableHandlerClauseCaptures({
+            ir: ctx.ir as MutableOptimizationIr,
+          }).set(moduleId, captures);
+          changed = true;
+        }
       });
-      const existing = ctx.ir.facts.handlerClauseCaptures.get(moduleId);
-      const serialize = (
-        value?:
-          | ReadonlyMap<HirExprId, ReadonlyMap<number, readonly SymbolId[]>>
-          | Map<HirExprId, Map<number, readonly SymbolId[]>>
-      ) =>
-        JSON.stringify(
-          Array.from(value?.entries() ?? []).map(([exprId, clauses]) => [
-            exprId,
-            Array.from(clauses.entries()),
-          ]),
-        );
-      if (serialize(existing) !== serialize(captures)) {
-        mutableHandlerClauseCaptures({ ir: ctx.ir as MutableOptimizationIr }).set(
-          moduleId,
-          captures,
-        );
-        changed = true;
-      }
-    });
 
-    return { changed };
-  },
-};
+      return { changed, metrics: { removed_captures: removedCaptures } };
+    },
+  };
 
 const functionItemBySymbol = ({
+  ir,
   moduleView,
   symbol,
 }: {
+  ir: MutableOptimizationIr;
   moduleView: ModuleCodegenView;
   symbol: SymbolId;
 }): HirFunction | undefined =>
-  Array.from(moduleView.hir.items.values()).find(
-    (item): item is HirFunction => item.kind === "function" && item.symbol === symbol,
-  );
+  ir.index.getFunction(moduleView.moduleId, symbol)?.item;
+
+type IndexedInstanceCallSite = {
+  moduleView: OptimizedModuleView;
+  exprId: HirExprId;
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
+};
+
+type InstanceCallSiteIndex = ReadonlyMap<
+  ProgramFunctionInstanceId,
+  readonly IndexedInstanceCallSite[]
+>;
+
+const buildInstanceCallSiteIndex = ({
+  ir,
+}: {
+  ir: MutableOptimizationIr;
+}): Map<ProgramFunctionInstanceId, IndexedInstanceCallSite[]> => {
+  const callSites = new Map<
+    ProgramFunctionInstanceId,
+    IndexedInstanceCallSite[]
+  >();
+  ir.facts.reachableFunctionInstances.forEach((instanceId) => {
+    const instance = ir.baseProgram.functions.getInstance(instanceId);
+    const moduleView = ir.modules.get(instance.symbolRef.moduleId);
+    const item = ir.index.getFunction(
+      instance.symbolRef.moduleId,
+      instance.symbolRef.symbol,
+    )?.item;
+    if (!moduleView || !item) {
+      return;
+    }
+    const seenExprIds = new Set<HirExprId>();
+    const indexed: IndexedInstanceCallSite[] = [];
+    const roots = ir.index.getFunctionRootExprIds(
+      moduleView.moduleId,
+      item.symbol,
+    );
+    roots.forEach((rootExprId) => {
+      ir.index
+        .getBodyTopology({ moduleId: moduleView.moduleId, rootExprId })
+        .callSiteExprIds.forEach((exprId) => {
+          if (seenExprIds.has(exprId)) {
+            return;
+          }
+          seenExprIds.add(exprId);
+          const expr = moduleView.hir.expressions.get(exprId);
+          if (
+            !expr ||
+            (expr.exprKind !== "call" && expr.exprKind !== "method-call")
+          ) {
+            return;
+          }
+          indexed.push({ moduleView, exprId, expr });
+        });
+    });
+    callSites.set(instanceId, indexed);
+  });
+  return callSites;
+};
 
 type ExactParameterCandidate = TypeId | "conflict";
 
-const callArgumentExprIds = (
-  expr: HirExpression,
-): readonly HirExprId[] =>
+const callArgumentExprIds = (expr: HirExpression): readonly HirExprId[] =>
   expr.exprKind === "call"
     ? expr.args.map((arg) => arg.expr)
     : expr.exprKind === "method-call"
@@ -1834,7 +1875,8 @@ const mergeExactParameterCandidate = ({
   symbol: SymbolId;
   exactType: TypeId;
 }): void => {
-  const bySymbol = candidates.get(instanceId) ?? new Map<SymbolId, ExactParameterCandidate>();
+  const bySymbol =
+    candidates.get(instanceId) ?? new Map<SymbolId, ExactParameterCandidate>();
   const existing = bySymbol.get(symbol);
   bySymbol.set(
     symbol,
@@ -1853,7 +1895,10 @@ const resolveDirectIdentifierCallTarget = ({
   expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
   typeArgs: readonly TypeId[];
   ir: MutableOptimizationIr;
-}): readonly { functionId: ProgramFunctionId; instanceId?: ProgramFunctionInstanceId }[] => {
+}): readonly {
+  functionId: ProgramFunctionId;
+  instanceId?: ProgramFunctionInstanceId;
+}[] => {
   if (expr.exprKind !== "call") {
     return [];
   }
@@ -1867,7 +1912,10 @@ const resolveDirectIdentifierCallTarget = ({
     ir,
   });
   const module = ir.modules.get(resolved.moduleId);
-  if (!module || !functionItemBySymbol({ moduleView: module, symbol: resolved.symbol })) {
+  if (
+    !module ||
+    !functionItemBySymbol({ ir, moduleView: module, symbol: resolved.symbol })
+  ) {
     return [];
   }
   const functionId = canonicalProgramSymbolIdOf({
@@ -1899,7 +1947,10 @@ const resolveTargetsForExactPropagation = ({
   expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
   callerInstanceId: ProgramFunctionInstanceId;
   ir: MutableOptimizationIr;
-}): readonly { functionId: ProgramFunctionId; instanceId?: ProgramFunctionInstanceId }[] => {
+}): readonly {
+  functionId: ProgramFunctionId;
+  instanceId?: ProgramFunctionInstanceId;
+}[] => {
   const resolvedTargets = resolveTargetsForCaller({
     moduleId: moduleView.moduleId,
     exprId,
@@ -1963,6 +2014,7 @@ const externallyCallableFunctionInstances = (
       if (
         !resolvedModule ||
         !functionItemBySymbol({
+          ir,
           moduleView: resolvedModule,
           symbol: resolved.symbol,
         })
@@ -1981,7 +2033,10 @@ const externallyCallableFunctionInstances = (
     rootExprId: HirExprId;
   }): void => {
     const directCallCallees = new Set<HirExprId>();
-    const exprIds = collectPostOrderExprIds({ rootExprId, moduleView });
+    const exprIds = ir.index.getBodyTopology({
+      moduleId: moduleView.moduleId,
+      rootExprId,
+    }).postOrderExprIds;
     exprIds.forEach((exprId) => {
       const expr = moduleView.hir.expressions.get(exprId);
       if (expr?.exprKind === "call") {
@@ -2006,6 +2061,7 @@ const externallyCallableFunctionInstances = (
       if (
         !resolvedModule ||
         !functionItemBySymbol({
+          ir,
           moduleView: resolvedModule,
           symbol: resolved.symbol,
         })
@@ -2021,6 +2077,7 @@ const externallyCallableFunctionInstances = (
     const moduleView = ir.modules.get(instance.symbolRef.moduleId);
     const item = moduleView
       ? functionItemBySymbol({
+          ir,
           moduleView,
           symbol: instance.symbolRef.symbol,
         })
@@ -2031,7 +2088,9 @@ const externallyCallableFunctionInstances = (
     [
       item.body,
       ...item.parameters.flatMap((parameter) =>
-        typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
+        typeof parameter.defaultValue === "number"
+          ? [parameter.defaultValue]
+          : [],
       ),
     ].forEach((rootExprId) => {
       markEscapedFunctionValues({ moduleView, rootExprId });
@@ -2044,7 +2103,7 @@ const externallyCallableFunctionInstances = (
       return;
     }
     symbols.forEach((symbol) => {
-      const moduleLet = moduleLetBySymbol({ moduleView, symbol });
+      const moduleLet = moduleLetBySymbol({ ir, moduleView, symbol });
       if (!moduleLet) {
         return;
       }
@@ -2059,10 +2118,12 @@ const externallyCallableFunctionInstances = (
 
 const collectExactParameterCandidates = ({
   ir,
+  callSites,
   seedFacts,
   externallyCallableInstances,
 }: {
   ir: MutableOptimizationIr;
+  callSites: InstanceCallSiteIndex;
   seedFacts: ReadonlyMap<
     ProgramFunctionInstanceId,
     ReadonlyMap<SymbolId, TypeId>
@@ -2074,85 +2135,60 @@ const collectExactParameterCandidates = ({
     Map<SymbolId, ExactParameterCandidate>
   >();
 
-  ir.facts.reachableFunctionInstances.forEach((callerInstanceId) => {
-    const caller = ir.baseProgram.functions.getInstance(callerInstanceId);
-    const moduleView = ir.modules.get(caller.symbolRef.moduleId);
-    if (!moduleView) {
-      return;
-    }
-    const item = functionItemBySymbol({
-      moduleView,
-      symbol: caller.symbolRef.symbol,
-    });
-    if (!item) {
-      return;
-    }
-
-    const roots = [
-      item.body,
-      ...item.parameters.flatMap((parameter) =>
-        typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
-      ),
-    ];
-    roots.forEach((rootExprId) => {
-      collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
-        const expr = moduleView.hir.expressions.get(exprId);
-        if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
+  callSites.forEach((sites, callerInstanceId) => {
+    sites.forEach(({ moduleView, exprId, expr }) => {
+      const argExprIds = callArgumentExprIds(expr);
+      const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+      const targets = resolveTargetsForExactPropagation({
+        moduleView,
+        exprId,
+        expr,
+        callerInstanceId,
+        ir,
+      });
+      targets.forEach(({ instanceId }) => {
+        if (typeof instanceId !== "number") {
           return;
         }
-        const argExprIds = callArgumentExprIds(expr);
-        const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
-        const targets = resolveTargetsForExactPropagation({
-          moduleView,
-          exprId,
-          expr,
-          callerInstanceId,
-          ir,
-        });
-        targets.forEach(({ instanceId }) => {
-          if (typeof instanceId !== "number") {
+        if (externallyCallableInstances.has(instanceId)) {
+          return;
+        }
+        const target = ir.baseProgram.functions.getInstance(instanceId);
+        const signature = ir.baseProgram.functions.getSignature(
+          target.symbolRef.moduleId,
+          target.symbolRef.symbol,
+        );
+        if (!signature) {
+          return;
+        }
+        signature.parameters.forEach((parameter, index) => {
+          if (typeof parameter.symbol !== "number") {
             return;
           }
-          if (externallyCallableInstances.has(instanceId)) {
+          const argExprId = callArgumentExprIdForParameter({
+            argExprIds,
+            callInfo,
+            callerInstanceId,
+            parameterIndex: index,
+          });
+          if (typeof argExprId !== "number") {
             return;
           }
-          const target = ir.baseProgram.functions.getInstance(instanceId);
-          const signature = ir.baseProgram.functions.getSignature(
-            target.symbolRef.moduleId,
-            target.symbolRef.symbol,
-          );
-          if (!signature) {
+          const exactType = exactNominalForExpr({
+            moduleView,
+            exprId: argExprId,
+            callerInstanceId,
+            program: ir.baseProgram,
+            exactParameterTypes: seedFacts,
+          });
+          if (typeof exactType !== "number") {
             return;
           }
-          signature.parameters.forEach((parameter, index) => {
-            if (typeof parameter.symbol !== "number") {
-              return;
-            }
-            const argExprId = callArgumentExprIdForParameter({
-              argExprIds,
-              callInfo,
-              callerInstanceId,
-              parameterIndex: index,
-            });
-            if (typeof argExprId !== "number") {
-              return;
-            }
-            const exactType = exactNominalForExpr({
-              moduleView,
-              exprId: argExprId,
-              callerInstanceId,
-              program: ir.baseProgram,
-              exactParameterTypes: seedFacts,
-            });
-            if (typeof exactType !== "number") {
-              return;
-            }
-            mergeExactParameterCandidate({
-              candidates,
-              instanceId,
-              symbol: parameter.symbol,
-              exactType,
-            });
+          mergeExactParameterCandidate({
+            candidates,
+            instanceId,
+            symbol: parameter.symbol,
+            exactType,
           });
         });
       });
@@ -2184,10 +2220,7 @@ const materializeExactParameterFacts = (
 };
 
 const cloneExactParameterFacts = (
-  facts: ReadonlyMap<
-    ProgramFunctionInstanceId,
-    ReadonlyMap<SymbolId, TypeId>
-  >,
+  facts: ReadonlyMap<ProgramFunctionInstanceId, ReadonlyMap<SymbolId, TypeId>>,
 ): Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>> =>
   new Map(
     Array.from(facts.entries()).map(([instanceId, bySymbol]) => [
@@ -2219,9 +2252,6 @@ const cloneKnownParameterFacts = (
     ]),
   );
 
-const MAX_RECEIVER_SPECIALIZATIONS_PER_FUNCTION = 4;
-const MAX_EXACT_PARAMETERS_PER_RECEIVER_SPECIALIZATION = 2;
-
 const receiverSpecializationCallSiteKey = ({
   moduleId,
   exprId,
@@ -2243,24 +2273,6 @@ const receiverSpecializationContextKey = ({
     .join(",");
   return `${instanceId}:${serializedFacts}`;
 };
-
-const cloneReceiverSpecializationRequests = (
-  requests: ReadonlyMap<
-    string,
-    ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>
-  >,
-): Map<string, Map<string, Map<SymbolId, TypeId>>> =>
-  new Map(
-    Array.from(requests.entries()).map(([callSiteKey, byContext]) => [
-      callSiteKey,
-      new Map(
-        Array.from(byContext.entries()).map(([contextKey, exactTypes]) => [
-          contextKey,
-          new Map(exactTypes),
-        ]),
-      ),
-    ]),
-  );
 
 const serializeReceiverSpecializationRequests = (
   requests: ReadonlyMap<
@@ -2341,8 +2353,10 @@ const mergeKnownParameterCandidate = ({
 }): void => {
   const bySymbol =
     candidates.get(instanceId) ?? new Map<SymbolId, KnownParameterCandidate>();
-  const existing =
-    bySymbol.get(symbol) ?? { types: new Set<TypeId>(), unknown: false };
+  const existing = bySymbol.get(symbol) ?? {
+    types: new Set<TypeId>(),
+    unknown: false,
+  };
   if (!knownTypes || knownTypes.size === 0) {
     existing.unknown = true;
   } else {
@@ -2354,11 +2368,13 @@ const mergeKnownParameterCandidate = ({
 
 const collectKnownParameterCandidates = ({
   ir,
+  callSites,
   exactParameterTypes,
   seedFacts,
   externallyCallableInstances,
 }: {
   ir: MutableOptimizationIr;
+  callSites: InstanceCallSiteIndex;
   exactParameterTypes: ReadonlyMap<
     ProgramFunctionInstanceId,
     ReadonlyMap<SymbolId, TypeId>
@@ -2374,83 +2390,58 @@ const collectKnownParameterCandidates = ({
     Map<SymbolId, KnownParameterCandidate>
   >();
 
-  ir.facts.reachableFunctionInstances.forEach((callerInstanceId) => {
-    const caller = ir.baseProgram.functions.getInstance(callerInstanceId);
-    const moduleView = ir.modules.get(caller.symbolRef.moduleId);
-    if (!moduleView) {
-      return;
-    }
-    const item = functionItemBySymbol({
-      moduleView,
-      symbol: caller.symbolRef.symbol,
-    });
-    if (!item) {
-      return;
-    }
-
-    const roots = [
-      item.body,
-      ...item.parameters.flatMap((parameter) =>
-        typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
-      ),
-    ];
-    roots.forEach((rootExprId) => {
-      collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
-        const expr = moduleView.hir.expressions.get(exprId);
-        if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
+  callSites.forEach((sites, callerInstanceId) => {
+    sites.forEach(({ moduleView, exprId, expr }) => {
+      const argExprIds = callArgumentExprIds(expr);
+      const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+      const targets = resolveTargetsForExactPropagation({
+        moduleView,
+        exprId,
+        expr,
+        callerInstanceId,
+        ir,
+      });
+      targets.forEach(({ instanceId }) => {
+        if (typeof instanceId !== "number") {
           return;
         }
-        const argExprIds = callArgumentExprIds(expr);
-        const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
-        const targets = resolveTargetsForExactPropagation({
-          moduleView,
-          exprId,
-          expr,
-          callerInstanceId,
-          ir,
-        });
-        targets.forEach(({ instanceId }) => {
-          if (typeof instanceId !== "number") {
+        if (externallyCallableInstances.has(instanceId)) {
+          return;
+        }
+        const target = ir.baseProgram.functions.getInstance(instanceId);
+        const signature = ir.baseProgram.functions.getSignature(
+          target.symbolRef.moduleId,
+          target.symbolRef.symbol,
+        );
+        if (!signature) {
+          return;
+        }
+        signature.parameters.forEach((parameter, index) => {
+          if (typeof parameter.symbol !== "number") {
             return;
           }
-          if (externallyCallableInstances.has(instanceId)) {
-            return;
-          }
-          const target = ir.baseProgram.functions.getInstance(instanceId);
-          const signature = ir.baseProgram.functions.getSignature(
-            target.symbolRef.moduleId,
-            target.symbolRef.symbol,
-          );
-          if (!signature) {
-            return;
-          }
-          signature.parameters.forEach((parameter, index) => {
-            if (typeof parameter.symbol !== "number") {
-              return;
-            }
-            const argExprId = callArgumentExprIdForParameter({
-              argExprIds,
-              callInfo,
-              callerInstanceId,
-              parameterIndex: index,
-            });
-            const knownTypes =
-              typeof argExprId === "number"
-                ? knownNominalsForExpr({
-                    moduleView,
-                    exprId: argExprId,
-                    callerInstanceId,
-                    program: ir.baseProgram,
-                    exactParameterTypes,
-                    knownParameterTypes: seedFacts,
-                  })
-                : undefined;
-            mergeKnownParameterCandidate({
-              candidates,
-              instanceId,
-              symbol: parameter.symbol,
-              knownTypes,
-            });
+          const argExprId = callArgumentExprIdForParameter({
+            argExprIds,
+            callInfo,
+            callerInstanceId,
+            parameterIndex: index,
+          });
+          const knownTypes =
+            typeof argExprId === "number"
+              ? knownNominalsForExpr({
+                  moduleView,
+                  exprId: argExprId,
+                  callerInstanceId,
+                  program: ir.baseProgram,
+                  exactParameterTypes,
+                  knownParameterTypes: seedFacts,
+                })
+              : undefined;
+          mergeKnownParameterCandidate({
+            candidates,
+            instanceId,
+            symbol: parameter.symbol,
+            knownTypes,
           });
         });
       });
@@ -2466,7 +2457,10 @@ const materializeKnownParameterFacts = (
     ReadonlyMap<SymbolId, KnownParameterCandidate>
   >,
 ): Map<ProgramFunctionInstanceId, Map<SymbolId, Set<TypeId>>> => {
-  const facts = new Map<ProgramFunctionInstanceId, Map<SymbolId, Set<TypeId>>>();
+  const facts = new Map<
+    ProgramFunctionInstanceId,
+    Map<SymbolId, Set<TypeId>>
+  >();
   candidates.forEach((bySymbol, instanceId) => {
     const knownBySymbol = new Map<SymbolId, Set<TypeId>>();
     bySymbol.forEach((candidate, symbol) => {
@@ -2488,10 +2482,12 @@ const setContainsAll = (
 
 const validateKnownParameterFacts = ({
   ir,
+  callSites,
   exactParameterTypes,
   facts,
 }: {
   ir: MutableOptimizationIr;
+  callSites: InstanceCallSiteIndex;
   exactParameterTypes: ReadonlyMap<
     ProgramFunctionInstanceId,
     ReadonlyMap<SymbolId, TypeId>
@@ -2503,87 +2499,63 @@ const validateKnownParameterFacts = ({
 
   while (changed) {
     changed = false;
-    ir.facts.reachableFunctionInstances.forEach((callerInstanceId) => {
-      const caller = ir.baseProgram.functions.getInstance(callerInstanceId);
-      const moduleView = ir.modules.get(caller.symbolRef.moduleId);
-      if (!moduleView) {
-        return;
-      }
-      const item = functionItemBySymbol({
-        moduleView,
-        symbol: caller.symbolRef.symbol,
-      });
-      if (!item) {
-        return;
-      }
-      const roots = [
-        item.body,
-        ...item.parameters.flatMap((parameter) =>
-          typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
-        ),
-      ];
-      roots.forEach((rootExprId) => {
-        collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
-          const expr = moduleView.hir.expressions.get(exprId);
-          if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
+    callSites.forEach((sites, callerInstanceId) => {
+      sites.forEach(({ moduleView, exprId, expr }) => {
+        const argExprIds = callArgumentExprIds(expr);
+        const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+        resolveTargetsForExactPropagation({
+          moduleView,
+          exprId,
+          expr,
+          callerInstanceId,
+          ir,
+        }).forEach(({ instanceId }) => {
+          if (typeof instanceId !== "number") {
             return;
           }
-          const argExprIds = callArgumentExprIds(expr);
-          const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
-          resolveTargetsForExactPropagation({
-            moduleView,
-            exprId,
-            expr,
-            callerInstanceId,
-            ir,
-          }).forEach(({ instanceId }) => {
-            if (typeof instanceId !== "number") {
+          const factsBySymbol = validated.get(instanceId);
+          if (!factsBySymbol || factsBySymbol.size === 0) {
+            return;
+          }
+          const target = ir.baseProgram.functions.getInstance(instanceId);
+          const signature = ir.baseProgram.functions.getSignature(
+            target.symbolRef.moduleId,
+            target.symbolRef.symbol,
+          );
+          signature?.parameters.forEach((parameter, index) => {
+            if (typeof parameter.symbol !== "number") {
               return;
             }
-            const factsBySymbol = validated.get(instanceId);
-            if (!factsBySymbol || factsBySymbol.size === 0) {
+            const expected = factsBySymbol.get(parameter.symbol);
+            if (!expected) {
               return;
             }
-            const target = ir.baseProgram.functions.getInstance(instanceId);
-            const signature = ir.baseProgram.functions.getSignature(
-              target.symbolRef.moduleId,
-              target.symbolRef.symbol,
-            );
-            signature?.parameters.forEach((parameter, index) => {
-              if (typeof parameter.symbol !== "number") {
-                return;
-              }
-              const expected = factsBySymbol.get(parameter.symbol);
-              if (!expected) {
-                return;
-              }
-              const argExprId = callArgumentExprIdForParameter({
-                argExprIds,
-                callInfo,
-                callerInstanceId,
-                parameterIndex: index,
-              });
-              const actual =
-                typeof argExprId === "number"
-                  ? knownNominalsForExpr({
-                      moduleView,
-                      exprId: argExprId,
-                      callerInstanceId,
-                      program: ir.baseProgram,
-                      exactParameterTypes,
-                      knownParameterTypes: validated,
-                    })
-                  : undefined;
-              if (actual && setContainsAll(expected, actual)) {
-                return;
-              }
-              factsBySymbol.delete(parameter.symbol);
-              changed = true;
+            const argExprId = callArgumentExprIdForParameter({
+              argExprIds,
+              callInfo,
+              callerInstanceId,
+              parameterIndex: index,
             });
-            if (factsBySymbol.size === 0) {
-              validated.delete(instanceId);
+            const actual =
+              typeof argExprId === "number"
+                ? knownNominalsForExpr({
+                    moduleView,
+                    exprId: argExprId,
+                    callerInstanceId,
+                    program: ir.baseProgram,
+                    exactParameterTypes,
+                    knownParameterTypes: validated,
+                  })
+                : undefined;
+            if (actual && setContainsAll(expected, actual)) {
+              return;
             }
+            factsBySymbol.delete(parameter.symbol);
+            changed = true;
           });
+          if (factsBySymbol.size === 0) {
+            validated.delete(instanceId);
+          }
         });
       });
     });
@@ -2614,9 +2586,11 @@ const serializeKnownParameterFacts = (
 
 const validateExactParameterFacts = ({
   ir,
+  callSites,
   facts,
 }: {
   ir: MutableOptimizationIr;
+  callSites: InstanceCallSiteIndex;
   facts: Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>>;
 }): Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>> => {
   const validated = cloneExactParameterFacts(facts);
@@ -2624,86 +2598,62 @@ const validateExactParameterFacts = ({
 
   while (changed) {
     changed = false;
-    ir.facts.reachableFunctionInstances.forEach((callerInstanceId) => {
-      const caller = ir.baseProgram.functions.getInstance(callerInstanceId);
-      const moduleView = ir.modules.get(caller.symbolRef.moduleId);
-      if (!moduleView) {
-        return;
-      }
-      const item = functionItemBySymbol({
-        moduleView,
-        symbol: caller.symbolRef.symbol,
-      });
-      if (!item) {
-        return;
-      }
-      const roots = [
-        item.body,
-        ...item.parameters.flatMap((parameter) =>
-          typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
-        ),
-      ];
-      roots.forEach((rootExprId) => {
-        collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
-          const expr = moduleView.hir.expressions.get(exprId);
-          if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
+    callSites.forEach((sites, callerInstanceId) => {
+      sites.forEach(({ moduleView, exprId, expr }) => {
+        const argExprIds = callArgumentExprIds(expr);
+        const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+        resolveTargetsForExactPropagation({
+          moduleView,
+          exprId,
+          expr,
+          callerInstanceId,
+          ir,
+        }).forEach(({ instanceId }) => {
+          if (typeof instanceId !== "number") {
             return;
           }
-          const argExprIds = callArgumentExprIds(expr);
-          const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
-          resolveTargetsForExactPropagation({
-            moduleView,
-            exprId,
-            expr,
-            callerInstanceId,
-            ir,
-          }).forEach(({ instanceId }) => {
-            if (typeof instanceId !== "number") {
+          const factsBySymbol = validated.get(instanceId);
+          if (!factsBySymbol || factsBySymbol.size === 0) {
+            return;
+          }
+          const target = ir.baseProgram.functions.getInstance(instanceId);
+          const signature = ir.baseProgram.functions.getSignature(
+            target.symbolRef.moduleId,
+            target.symbolRef.symbol,
+          );
+          signature?.parameters.forEach((parameter, index) => {
+            if (typeof parameter.symbol !== "number") {
               return;
             }
-            const factsBySymbol = validated.get(instanceId);
-            if (!factsBySymbol || factsBySymbol.size === 0) {
+            const expected = factsBySymbol.get(parameter.symbol);
+            if (typeof expected !== "number") {
               return;
             }
-            const target = ir.baseProgram.functions.getInstance(instanceId);
-            const signature = ir.baseProgram.functions.getSignature(
-              target.symbolRef.moduleId,
-              target.symbolRef.symbol,
-            );
-            signature?.parameters.forEach((parameter, index) => {
-              if (typeof parameter.symbol !== "number") {
-                return;
-              }
-              const expected = factsBySymbol.get(parameter.symbol);
-              if (typeof expected !== "number") {
-                return;
-              }
-              const argExprId = callArgumentExprIdForParameter({
-                argExprIds,
-                callInfo,
-                callerInstanceId,
-                parameterIndex: index,
-              });
-              const actual =
-                typeof argExprId === "number"
-                  ? exactNominalForExpr({
-                      moduleView,
-                      exprId: argExprId,
-                      callerInstanceId,
-                      program: ir.baseProgram,
-                      exactParameterTypes: validated,
-                    })
-                  : undefined;
-              if (actual === expected) {
-                return;
-              }
-              factsBySymbol.delete(parameter.symbol);
-              changed = true;
+            const argExprId = callArgumentExprIdForParameter({
+              argExprIds,
+              callInfo,
+              callerInstanceId,
+              parameterIndex: index,
             });
-            if (factsBySymbol.size === 0) {
-              validated.delete(instanceId);
+            const actual =
+              typeof argExprId === "number"
+                ? exactNominalForExpr({
+                    moduleView,
+                    exprId: argExprId,
+                    callerInstanceId,
+                    program: ir.baseProgram,
+                    exactParameterTypes: validated,
+                  })
+                : undefined;
+            if (actual === expected) {
+              return;
             }
+            factsBySymbol.delete(parameter.symbol);
+            changed = true;
           });
+          if (factsBySymbol.size === 0) {
+            validated.delete(instanceId);
+          }
         });
       });
     });
@@ -2713,10 +2663,7 @@ const validateExactParameterFacts = ({
 };
 
 const serializeExactParameterFacts = (
-  facts: ReadonlyMap<
-    ProgramFunctionInstanceId,
-    ReadonlyMap<SymbolId, TypeId>
-  >,
+  facts: ReadonlyMap<ProgramFunctionInstanceId, ReadonlyMap<SymbolId, TypeId>>,
 ): string =>
   JSON.stringify(
     Array.from(facts.entries())
@@ -2736,10 +2683,7 @@ const exactParameterFactsForContext = ({
   facts,
   context,
 }: {
-  facts: ReadonlyMap<
-    ProgramFunctionInstanceId,
-    ReadonlyMap<SymbolId, TypeId>
-  >;
+  facts: ReadonlyMap<ProgramFunctionInstanceId, ReadonlyMap<SymbolId, TypeId>>;
   context: ReceiverSpecializationContext;
 }): Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>> => {
   const merged = cloneExactParameterFacts(facts);
@@ -2754,49 +2698,26 @@ const exactParameterFactsForContext = ({
   return merged;
 };
 
-const functionParamCanReachTraitDispatch = ({
-  ir,
+const functionParameterNodeKey = ({
   functionInstanceId,
   parameterSymbol,
-  seen,
 }: {
-  ir: MutableOptimizationIr;
   functionInstanceId: ProgramFunctionInstanceId;
   parameterSymbol: SymbolId;
-  seen: Set<string>;
-}): boolean => {
-  const key = `${functionInstanceId}:${parameterSymbol}`;
-  if (seen.has(key)) {
-    return false;
-  }
-  seen.add(key);
+}): string => `${functionInstanceId}:${parameterSymbol}`;
 
-  const instance = ir.baseProgram.functions.getInstance(functionInstanceId);
-  const moduleView = ir.modules.get(instance.symbolRef.moduleId);
-  if (!moduleView) {
-    return false;
-  }
-  const item = functionItemBySymbol({
-    moduleView,
-    symbol: instance.symbolRef.symbol,
-  });
-  if (!item) {
-    return false;
-  }
+const computeTraitDispatchReachableParameters = ({
+  ir,
+  callSites,
+}: {
+  ir: MutableOptimizationIr;
+  callSites: InstanceCallSiteIndex;
+}): Set<string> => {
+  const reachable = new Set<string>();
+  const predecessors = new Map<string, Set<string>>();
 
-  const roots = [
-    item.body,
-    ...item.parameters.flatMap((parameter) =>
-      typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
-    ),
-  ];
-  return roots.some((rootExprId) =>
-    collectPostOrderExprIds({ rootExprId, moduleView }).some((exprId) => {
-      const expr = moduleView.hir.expressions.get(exprId);
-      if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
-        return false;
-      }
-
+  callSites.forEach((sites, functionInstanceId) => {
+    sites.forEach(({ moduleView, exprId, expr }) => {
       const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
       if (callInfo?.traitDispatch) {
         const receiverExprId =
@@ -2807,34 +2728,42 @@ const functionParamCanReachTraitDispatch = ({
             : undefined;
         if (
           receiverExpr?.exprKind === "identifier" &&
-          receiverExpr.symbol === parameterSymbol
+          typeof receiverExpr.symbol === "number"
         ) {
-          return true;
+          reachable.add(
+            functionParameterNodeKey({
+              functionInstanceId,
+              parameterSymbol: receiverExpr.symbol,
+            }),
+          );
         }
       }
 
       const argExprIds = callArgumentExprIds(expr);
-      return resolveTargetsForExactPropagation({
+      resolveTargetsForExactPropagation({
         moduleView,
         exprId,
         expr,
         callerInstanceId: functionInstanceId,
         ir,
-      }).some(({ instanceId }) => {
+      }).forEach(({ instanceId }) => {
         if (typeof instanceId !== "number") {
-          return false;
+          return;
         }
         const target = ir.baseProgram.functions.getInstance(instanceId);
         const signature = ir.baseProgram.functions.getSignature(
           target.symbolRef.moduleId,
           target.symbolRef.symbol,
         );
-        return signature?.parameters.some((targetParam, paramIndex) => {
+        signature?.parameters.forEach((targetParam, paramIndex) => {
           if (typeof targetParam.symbol !== "number") {
-            return false;
+            return;
           }
-          if (ir.baseProgram.types.getTypeDesc(targetParam.typeId).kind !== "trait") {
-            return false;
+          if (
+            ir.baseProgram.types.getTypeDesc(targetParam.typeId).kind !==
+            "trait"
+          ) {
+            return;
           }
           const argExprId = callArgumentExprIdForParameter({
             argExprIds,
@@ -2846,27 +2775,47 @@ const functionParamCanReachTraitDispatch = ({
             typeof argExprId === "number"
               ? moduleView.hir.expressions.get(argExprId)
               : undefined;
-          return (
-            argExpr?.exprKind === "identifier" &&
-            argExpr.symbol === parameterSymbol &&
-            functionParamCanReachTraitDispatch({
-              ir,
-              functionInstanceId: instanceId,
-              parameterSymbol: targetParam.symbol,
-              seen,
-            })
-          );
-        }) ?? false;
+          if (argExpr?.exprKind !== "identifier") {
+            return;
+          }
+          const sourceKey = functionParameterNodeKey({
+            functionInstanceId,
+            parameterSymbol: argExpr.symbol,
+          });
+          const targetKey = functionParameterNodeKey({
+            functionInstanceId: instanceId,
+            parameterSymbol: targetParam.symbol,
+          });
+          const targetPredecessors = predecessors.get(targetKey) ?? new Set();
+          targetPredecessors.add(sourceKey);
+          predecessors.set(targetKey, targetPredecessors);
+        });
       });
-    }),
-  );
+    });
+  });
+
+  const pending = [...reachable];
+  while (pending.length > 0) {
+    const targetKey = pending.pop()!;
+    predecessors.get(targetKey)?.forEach((sourceKey) => {
+      if (reachable.has(sourceKey)) {
+        return;
+      }
+      reachable.add(sourceKey);
+      pending.push(sourceKey);
+    });
+  }
+
+  return reachable;
 };
 
 const collectReceiverSpecializationRequests = ({
   ir,
+  callSites,
   exactParameterTypes,
 }: {
   ir: MutableOptimizationIr;
+  callSites: InstanceCallSiteIndex;
   exactParameterTypes: ReadonlyMap<
     ProgramFunctionInstanceId,
     ReadonlyMap<SymbolId, TypeId>
@@ -2880,6 +2829,8 @@ const collectReceiverSpecializationRequests = ({
     ProgramFunctionInstanceId,
     Set<string>
   >();
+  const traitDispatchReachableParameters =
+    computeTraitDispatchReachableParameters({ ir, callSites });
 
   const enqueueContext = ({
     instanceId,
@@ -2901,7 +2852,9 @@ const collectReceiverSpecializationRequests = ({
     if (countsAsSpecialization) {
       if (
         exactParameterMap.size === 0 ||
-        exactParameterMap.size > MAX_EXACT_PARAMETERS_PER_RECEIVER_SPECIALIZATION
+        exactParameterMap.size >
+          ir.facts.codegenPlan.specializationPolicy
+            .receiverExactParametersPerContext
       ) {
         return;
       }
@@ -2909,7 +2862,8 @@ const collectReceiverSpecializationRequests = ({
         specializationKeysByFunction.get(instanceId) ?? new Set<string>();
       if (
         !knownKeys.has(contextKey) &&
-        knownKeys.size >= MAX_RECEIVER_SPECIALIZATIONS_PER_FUNCTION
+        knownKeys.size >=
+          ir.facts.codegenPlan.specializationPolicy.receiverContextsPerFunction
       ) {
         return;
       }
@@ -2943,129 +2897,110 @@ const collectReceiverSpecializationRequests = ({
     }
     seen.add(callerContextKey);
 
-    const caller = ir.baseProgram.functions.getInstance(context.instanceId);
-    const moduleView = ir.modules.get(caller.symbolRef.moduleId);
-    if (!moduleView) {
-      continue;
-    }
-    const item = functionItemBySymbol({
-      moduleView,
-      symbol: caller.symbolRef.symbol,
-    });
-    if (!item) {
-      continue;
-    }
     const contextExactFacts = exactParameterFactsForContext({
       facts: exactParameterTypes,
       context,
     });
-    const roots = [
-      item.body,
-      ...item.parameters.flatMap((parameter) =>
-        typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
-      ),
-    ];
-    roots.forEach((rootExprId) => {
-      collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
-        const expr = moduleView.hir.expressions.get(exprId);
-        if (!expr || (expr.exprKind !== "call" && expr.exprKind !== "method-call")) {
-          return;
-        }
-        const targets = resolveTargetsForExactPropagation({
-          moduleView,
-          exprId,
-          expr,
-          callerInstanceId: context.instanceId,
-          ir,
-        });
-        if (targets.length !== 1 || typeof targets[0]?.instanceId !== "number") {
-          return;
-        }
+    const sites = callSites.get(context.instanceId) ?? [];
+    sites.forEach(({ moduleView, exprId, expr }) => {
+      const targets = resolveTargetsForExactPropagation({
+        moduleView,
+        exprId,
+        expr,
+        callerInstanceId: context.instanceId,
+        ir,
+      });
+      if (targets.length !== 1 || typeof targets[0]?.instanceId !== "number") {
+        return;
+      }
 
-        const targetInstanceId = targets[0].instanceId;
-        const target = ir.baseProgram.functions.getInstance(targetInstanceId);
-        const signature = ir.baseProgram.functions.getSignature(
-          target.symbolRef.moduleId,
-          target.symbolRef.symbol,
-        );
-        if (!signature) {
+      const targetInstanceId = targets[0].instanceId;
+      const target = ir.baseProgram.functions.getInstance(targetInstanceId);
+      const signature = ir.baseProgram.functions.getSignature(
+        target.symbolRef.moduleId,
+        target.symbolRef.symbol,
+      );
+      if (!signature) {
+        return;
+      }
+      const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+      const argExprIds = callArgumentExprIds(expr);
+      const requestedExactTypes = new Map<SymbolId, TypeId>();
+      signature.parameters.forEach((parameter, paramIndex) => {
+        if (typeof parameter.symbol !== "number") {
           return;
         }
-        const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
-        const argExprIds = callArgumentExprIds(expr);
-        const requestedExactTypes = new Map<SymbolId, TypeId>();
-        signature.parameters.forEach((parameter, paramIndex) => {
-          if (typeof parameter.symbol !== "number") {
-            return;
-          }
-          if (ir.baseProgram.types.getTypeDesc(parameter.typeId).kind !== "trait") {
-            return;
-          }
-          const argExprId = callArgumentExprIdForParameter({
-            argExprIds,
-            callInfo,
-            callerInstanceId: context.instanceId,
-            parameterIndex: paramIndex,
-          });
-          if (typeof argExprId !== "number") {
-            return;
-          }
-          const exactType = exactNominalForExpr({
-            moduleView,
-            exprId: argExprId,
-            callerInstanceId: context.instanceId,
-            program: ir.baseProgram,
-            exactParameterTypes: contextExactFacts,
-          });
-          if (typeof exactType !== "number") {
-            return;
-          }
-          const existingExact = exactParameterTypes
-            .get(targetInstanceId)
-            ?.get(parameter.symbol);
-          if (existingExact === exactType) {
-            return;
-          }
-          if (
-            !functionParamCanReachTraitDispatch({
-              ir,
-              functionInstanceId: targetInstanceId,
-              parameterSymbol: parameter.symbol,
-              seen: new Set(),
-            })
-          ) {
-            return;
-          }
-          requestedExactTypes.set(parameter.symbol, exactType);
-        });
-
         if (
-          requestedExactTypes.size === 0 ||
-          requestedExactTypes.size > MAX_EXACT_PARAMETERS_PER_RECEIVER_SPECIALIZATION
+          ir.baseProgram.types.getTypeDesc(parameter.typeId).kind !== "trait"
         ) {
           return;
         }
+        const argExprId = callArgumentExprIdForParameter({
+          argExprIds,
+          callInfo,
+          callerInstanceId: context.instanceId,
+          parameterIndex: paramIndex,
+        });
+        if (typeof argExprId !== "number") {
+          return;
+        }
+        const exactType = exactNominalForExpr({
+          moduleView,
+          exprId: argExprId,
+          callerInstanceId: context.instanceId,
+          program: ir.baseProgram,
+          exactParameterTypes: contextExactFacts,
+        });
+        if (typeof exactType !== "number") {
+          return;
+        }
+        const existingExact = exactParameterTypes
+          .get(targetInstanceId)
+          ?.get(parameter.symbol);
+        if (existingExact === exactType) {
+          return;
+        }
+        if (
+          !traitDispatchReachableParameters.has(
+            functionParameterNodeKey({
+              functionInstanceId: targetInstanceId,
+              parameterSymbol: parameter.symbol,
+            }),
+          )
+        ) {
+          return;
+        }
+        requestedExactTypes.set(parameter.symbol, exactType);
+      });
 
-        const callSiteKey = receiverSpecializationCallSiteKey({
-          moduleId: moduleView.moduleId,
-          exprId,
-        });
-        const byContext =
-          requests.get(callSiteKey) ?? new Map<string, Map<SymbolId, TypeId>>();
-        byContext.set(callerContextKey, requestedExactTypes);
-        requests.set(callSiteKey, byContext);
+      if (
+        requestedExactTypes.size === 0 ||
+        requestedExactTypes.size >
+          ir.facts.codegenPlan.specializationPolicy
+            .receiverExactParametersPerContext
+      ) {
+        return;
+      }
 
-        const targetContextExactTypes = new Map(
-          exactParameterTypes.get(targetInstanceId) ?? [],
-        );
-        requestedExactTypes.forEach((type, symbol) => {
-          targetContextExactTypes.set(symbol, type);
-        });
-        enqueueContext({
-          instanceId: targetInstanceId,
-          exactTypes: targetContextExactTypes,
-          countsAsSpecialization: true,
-        });
+      const callSiteKey = receiverSpecializationCallSiteKey({
+        moduleId: moduleView.moduleId,
+        exprId,
+      });
+      const byContext =
+        requests.get(callSiteKey) ?? new Map<string, Map<SymbolId, TypeId>>();
+      byContext.set(callerContextKey, requestedExactTypes);
+      requests.set(callSiteKey, byContext);
+
+      const targetContextExactTypes = new Map(
+        exactParameterTypes.get(targetInstanceId) ?? [],
+      );
+      requestedExactTypes.forEach((type, symbol) => {
+        targetContextExactTypes.set(symbol, type);
+      });
+      enqueueContext({
+        instanceId: targetInstanceId,
+        exactTypes: targetContextExactTypes,
+        countsAsSpecialization: true,
       });
     });
   }
@@ -3076,15 +3011,22 @@ const collectReceiverSpecializationRequests = ({
 const exactReceiverPropagationPass: ProgramOptimizationPass = {
   name: "exact-receiver-propagation",
   run(ctx) {
+    const callSites = buildInstanceCallSiteIndex({
+      ir: ctx.ir as MutableOptimizationIr,
+    });
     const externallyCallableInstances = externallyCallableFunctionInstances(
       ctx.ir as MutableOptimizationIr,
     );
-    let exactFacts = new Map<ProgramFunctionInstanceId, Map<SymbolId, TypeId>>();
+    let exactFacts = new Map<
+      ProgramFunctionInstanceId,
+      Map<SymbolId, TypeId>
+    >();
     let changed = true;
 
     while (changed) {
       const candidates = collectExactParameterCandidates({
         ir: ctx.ir as MutableOptimizationIr,
+        callSites,
         seedFacts: exactFacts,
         externallyCallableInstances,
       });
@@ -3097,14 +3039,19 @@ const exactReceiverPropagationPass: ProgramOptimizationPass = {
 
     const validatedExact = validateExactParameterFacts({
       ir: ctx.ir as MutableOptimizationIr,
+      callSites,
       facts: exactFacts,
     });
 
-    let knownFacts = new Map<ProgramFunctionInstanceId, Map<SymbolId, Set<TypeId>>>();
+    let knownFacts = new Map<
+      ProgramFunctionInstanceId,
+      Map<SymbolId, Set<TypeId>>
+    >();
     changed = true;
     while (changed) {
       const candidates = collectKnownParameterCandidates({
         ir: ctx.ir as MutableOptimizationIr,
+        callSites,
         exactParameterTypes: validatedExact,
         seedFacts: knownFacts,
         externallyCallableInstances,
@@ -3118,12 +3065,14 @@ const exactReceiverPropagationPass: ProgramOptimizationPass = {
 
     const validatedKnown = validateKnownParameterFacts({
       ir: ctx.ir as MutableOptimizationIr,
+      callSites,
       exactParameterTypes: validatedExact,
       facts: knownFacts,
     });
     const receiverSpecializationRequests =
       collectReceiverSpecializationRequests({
         ir: ctx.ir as MutableOptimizationIr,
+        callSites,
         exactParameterTypes: validatedExact,
       });
     const previousExact = ctx.ir.facts.exactParameterTypes;
@@ -3139,11 +3088,31 @@ const exactReceiverPropagationPass: ProgramOptimizationPass = {
         previousReceiverSpecializationRequests,
       ) ===
         serializeReceiverSpecializationRequests(receiverSpecializationRequests);
-    (ctx.ir as MutableOptimizationIr).facts.exactParameterTypes = validatedExact;
-    (ctx.ir as MutableOptimizationIr).facts.knownParameterTypes = validatedKnown;
+    (ctx.ir as MutableOptimizationIr).facts.exactParameterTypes =
+      validatedExact;
+    (ctx.ir as MutableOptimizationIr).facts.knownParameterTypes =
+      validatedKnown;
     (ctx.ir as MutableOptimizationIr).facts.receiverSpecializationRequests =
       receiverSpecializationRequests;
-    return { changed: !unchanged };
+    const exactParameterFacts = Array.from(validatedExact.values()).reduce(
+      (count, bySymbol) => count + bySymbol.size,
+      0,
+    );
+    const knownParameterFacts = Array.from(validatedKnown.values()).reduce(
+      (count, bySymbol) => count + bySymbol.size,
+      0,
+    );
+    const specializationRequests = Array.from(
+      receiverSpecializationRequests.values(),
+    ).reduce((count, byContext) => count + byContext.size, 0);
+    return {
+      changed: !unchanged,
+      metrics: {
+        exact_parameter_facts: exactParameterFacts,
+        known_parameter_facts: knownParameterFacts,
+        receiver_specialization_requests: specializationRequests,
+      },
+    };
   },
 };
 
@@ -3152,10 +3121,12 @@ const redundantRuntimeTypeCheckEliminationPass: ProgramOptimizationPass = {
   run(ctx) {
     const ir = ctx.ir as MutableOptimizationIr;
     let changed = false;
+    let elidedChecks = 0;
 
     ir.modules.forEach((moduleView, moduleId) => {
       const candidates =
-        ir.facts.runtimeTypeCheckElisionFieldAccesses.get(moduleId) ?? new Set<HirExprId>();
+        ir.facts.runtimeTypeCheckElisionFieldAccesses.get(moduleId) ??
+        new Set<HirExprId>();
 
       moduleView.hir.expressions.forEach((expr, exprId) => {
         if (expr.exprKind !== "field-access") {
@@ -3175,6 +3146,7 @@ const redundantRuntimeTypeCheckEliminationPass: ProgramOptimizationPass = {
         if (!candidates.has(exprId)) {
           candidates.add(exprId);
           changed = true;
+          elidedChecks += 1;
         }
       });
 
@@ -3183,7 +3155,7 @@ const redundantRuntimeTypeCheckEliminationPass: ProgramOptimizationPass = {
       }
     });
 
-    return { changed };
+    return { changed, metrics: { elided_checks: elidedChecks } };
   },
 };
 
@@ -3192,10 +3164,12 @@ const semanticCopyForwardingPass: ProgramOptimizationPass = {
   run(ctx) {
     const ir = ctx.ir as MutableOptimizationIr;
     let changed = false;
+    let forwardedFields = 0;
 
     ir.modules.forEach((moduleView, moduleId) => {
       const candidates =
-        ir.facts.semanticCopyForwardingFieldAccesses.get(moduleId) ?? new Set<HirExprId>();
+        ir.facts.semanticCopyForwardingFieldAccesses.get(moduleId) ??
+        new Set<HirExprId>();
 
       moduleView.hir.expressions.forEach((expr, exprId) => {
         if (expr.exprKind !== "field-access") {
@@ -3206,7 +3180,9 @@ const semanticCopyForwardingPass: ProgramOptimizationPass = {
         if (
           target?.exprKind !== "object-literal" ||
           target.entries.some((entry) => entry.kind !== "field") ||
-          !target.entries.some((entry) => entry.kind === "field" && entry.name === expr.field)
+          !target.entries.some(
+            (entry) => entry.kind === "field" && entry.name === expr.field,
+          )
         ) {
           return;
         }
@@ -3214,6 +3190,7 @@ const semanticCopyForwardingPass: ProgramOptimizationPass = {
         if (!candidates.has(exprId)) {
           candidates.add(exprId);
           changed = true;
+          forwardedFields += 1;
         }
       });
 
@@ -3222,18 +3199,9 @@ const semanticCopyForwardingPass: ProgramOptimizationPass = {
       }
     });
 
-    return { changed };
+    return { changed, metrics: { forwarded_fields: forwardedFields } };
   },
 };
-
-const moduleLetItems = ({
-  moduleView,
-}: {
-  moduleView: OptimizedModuleView;
-}): readonly HirModuleLet[] =>
-  Array.from(moduleView.hir.items.values()).filter(
-    (item): item is HirModuleLet => item.kind === "module-let",
-  );
 
 const resolveImportedSymbol = ({
   moduleId,
@@ -3244,45 +3212,19 @@ const resolveImportedSymbol = ({
   symbol: SymbolId;
   ir: MutableOptimizationIr;
 }): { moduleId: string; symbol: SymbolId } => {
-  const seen = new Set<string>();
-  let currentModuleId = moduleId;
-  let currentSymbol = symbol;
-
-  while (true) {
-    const key = `${currentModuleId}:${currentSymbol}`;
-    if (seen.has(key)) {
-      return { moduleId: currentModuleId, symbol: currentSymbol };
-    }
-    seen.add(key);
-
-    const currentModule = ir.modules.get(currentModuleId);
-    if (!currentModule) {
-      return { moduleId: currentModuleId, symbol: currentSymbol };
-    }
-    const importMeta = currentModule.meta.imports.find(
-      (entry) => entry.local === currentSymbol,
-    );
-    if (!importMeta) {
-      return { moduleId: currentModuleId, symbol: currentSymbol };
-    }
-    const targetId = ir.baseProgram.imports.getTarget(currentModuleId, currentSymbol);
-    if (typeof targetId !== "number") {
-      return { moduleId: currentModuleId, symbol: currentSymbol };
-    }
-    const targetRef = ir.baseProgram.symbols.refOf(targetId);
-    currentModuleId = targetRef.moduleId;
-    currentSymbol = targetRef.symbol;
-  }
+  return ir.index.resolveImportedSymbol(moduleId, symbol);
 };
 
 const moduleLetBySymbol = ({
+  ir,
   moduleView,
   symbol,
 }: {
+  ir: MutableOptimizationIr;
   moduleView: OptimizedModuleView;
   symbol: SymbolId;
 }): HirModuleLet | undefined =>
-  moduleLetItems({ moduleView }).find((item) => item.symbol === symbol);
+  ir.index.getModuleLet(moduleView.moduleId, symbol)?.item;
 
 const canonicalProgramSymbolIdOf = ({
   moduleId,
@@ -3302,75 +3244,10 @@ const resolveIntrinsicFunction = ({
   ir: MutableOptimizationIr;
   intrinsicName: string;
 }): { moduleId: string; symbol: SymbolId } | undefined => {
-  let matched: { moduleId: string; symbol: SymbolId } | undefined;
-
-  ir.modules.forEach((moduleView, moduleId) => {
-    moduleView.hir.items.forEach((item) => {
-      if (item.kind !== "function") {
-        return;
-      }
-      const symbolId = ir.baseProgram.symbols.canonicalIdOf(
-        moduleId,
-        item.symbol,
-      ) as ProgramSymbolId;
-      if (ir.baseProgram.symbols.getIntrinsicName(symbolId) !== intrinsicName) {
-        return;
-      }
-      if (
-        matched &&
-        (matched.moduleId !== moduleId || matched.symbol !== item.symbol)
-      ) {
-        throw new Error(
-          `ambiguous optimizer function dependency ${intrinsicName}`,
-        );
-      }
-      matched = { moduleId, symbol: item.symbol };
-    });
-  });
-
-  return matched;
-};
-
-const findFunctionSymbolByName = ({
-  ir,
-  moduleId,
-  name,
-  paramCount,
-}: {
-  ir: MutableOptimizationIr;
-  moduleId: string;
-  name: string;
-  paramCount?: number;
-}): SymbolId | undefined => {
-  const moduleView = ir.modules.get(moduleId);
-  if (!moduleView) {
-    return undefined;
-  }
-
-  for (const item of moduleView.hir.items.values()) {
-    if (item.kind !== "function") {
-      continue;
-    }
-    const symbolId = ir.baseProgram.symbols.canonicalIdOf(
-      moduleId,
-      item.symbol,
-    ) as ProgramSymbolId;
-    if (ir.baseProgram.symbols.getName(symbolId) !== name) {
-      continue;
-    }
-    if (typeof paramCount === "number") {
-      const signature = ir.baseProgram.functions.getSignature(
-        moduleId,
-        item.symbol,
-      );
-      if (!signature || signature.parameters.length !== paramCount) {
-        continue;
-      }
-    }
-    return item.symbol;
-  }
-
-  return undefined;
+  const matched = ir.index.resolveIntrinsicFunction(intrinsicName);
+  return matched
+    ? { moduleId: matched.moduleId, symbol: matched.symbol }
+    : undefined;
 };
 
 const serializerForType = ({
@@ -3457,7 +3334,10 @@ const shouldConsiderBoundaryExportForOptimization = ({
   if (boundaryExports.mode === "off") {
     return false;
   }
-  if (boundaryExports.include && !boundaryExports.include.includes(exportName)) {
+  if (
+    boundaryExports.include &&
+    !boundaryExports.include.includes(exportName)
+  ) {
     return false;
   }
   if (boundaryExports.mode === "only") {
@@ -3466,44 +3346,9 @@ const shouldConsiderBoundaryExportForOptimization = ({
   return true;
 };
 
-const MSGPACK_FUNCTIONS: readonly {
-  moduleId: string;
-  name: string;
-  paramCount: number;
-}[] = [
-  { moduleId: "std::msgpack::fns", name: "encode_value", paramCount: 3 },
-  { moduleId: "std::msgpack::fns", name: "decode_value", paramCount: 2 },
-  { moduleId: "std::msgpack", name: "make_null", paramCount: 0 },
-  { moduleId: "std::msgpack", name: "make_bool", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "msgpack_make_string", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "make_array", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "make_i32", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "make_i64", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "make_f32", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "make_f64", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "make_map", paramCount: 1 },
-  { moduleId: "std::msgpack::fns", name: "unpack_bool", paramCount: 1 },
-  { moduleId: "std::msgpack::fns", name: "unpack_string", paramCount: 1 },
-  { moduleId: "std::msgpack::fns", name: "unpack_array", paramCount: 1 },
-  { moduleId: "std::msgpack::fns", name: "unpack_i32", paramCount: 1 },
-  { moduleId: "std::msgpack::fns", name: "unpack_i64", paramCount: 1 },
-  { moduleId: "std::msgpack::fns", name: "unpack_f32", paramCount: 1 },
-  { moduleId: "std::msgpack::fns", name: "unpack_f64", paramCount: 1 },
-  { moduleId: "std::msgpack::fns", name: "unpack_map", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "msgpack_array_with_capacity", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "msgpack_array_push", paramCount: 2 },
-  { moduleId: "std::msgpack", name: "msgpack_array_length", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "msgpack_array_raw_storage", paramCount: 1 },
-  { moduleId: "std::msgpack", name: "msgpack_map_new", paramCount: 0 },
-  { moduleId: "std::msgpack", name: "msgpack_map_set", paramCount: 3 },
-  { moduleId: "std::msgpack", name: "msgpack_map_get", paramCount: 2 },
-  { moduleId: "std::msgpack", name: "msgpack_map_has", paramCount: 2 },
-  { moduleId: "std::msgpack", name: "msgpack_map_tag_is", paramCount: 2 },
-  { moduleId: "std::string", name: "new_string", paramCount: 1 },
-];
-
 const setEquals = <T>(left: ReadonlySet<T>, right: ReadonlySet<T>): boolean =>
-  left.size === right.size && Array.from(left).every((value) => right.has(value));
+  left.size === right.size &&
+  Array.from(left).every((value) => right.has(value));
 
 const mapOfSetEquals = <K, V>(
   left: ReadonlyMap<K, ReadonlySet<V>>,
@@ -3522,8 +3367,6 @@ const traitDispatchSignatureKey = ({
   traitSymbol: ProgramSymbolId;
   traitMethodSymbol: ProgramSymbolId;
 }): string => `${traitSymbol}:${traitMethodSymbol}`;
-
-const MAX_DIRECT_TRAIT_SWITCH_IMPLS = 4;
 
 const isPrimitiveDirectSwitchType = ({
   typeId,
@@ -3592,7 +3435,10 @@ const directSwitchOmittedMethodTableImpls = ({
     targetRef.moduleId,
     targetRef.symbol,
   );
-  if (!traitSignature || !isPureSignature({ effectRow: traitSignature.effectRow, ir })) {
+  if (
+    !traitSignature ||
+    !isPureSignature({ effectRow: traitSignature.effectRow, ir })
+  ) {
     return undefined;
   }
   if (!isPrimitiveDirectSwitchType({ typeId: traitSignature.returnType, ir })) {
@@ -3601,7 +3447,10 @@ const directSwitchOmittedMethodTableImpls = ({
   if (
     traitSignature.parameters
       .slice(1)
-      .some((parameter) => !isPrimitiveDirectSwitchType({ typeId: parameter.typeId, ir }))
+      .some(
+        (parameter) =>
+          !isPrimitiveDirectSwitchType({ typeId: parameter.typeId, ir }),
+      )
   ) {
     return undefined;
   }
@@ -3622,14 +3471,16 @@ const directSwitchOmittedMethodTableImpls = ({
   if (
     !knownReceiverTypes ||
     knownReceiverTypes.size === 0 ||
-    knownReceiverTypes.size > MAX_DIRECT_TRAIT_SWITCH_IMPLS
+    knownReceiverTypes.size >
+      ir.facts.codegenPlan.specializationPolicy.directTraitSwitchImplementations
   ) {
     return undefined;
   }
   if (
     Array.from(knownReceiverTypes).some(
       (receiverType) =>
-        ir.baseProgram.types.getTypeDesc(receiverType).kind !== "nominal-object",
+        ir.baseProgram.types.getTypeDesc(receiverType).kind !==
+        "nominal-object",
     )
   ) {
     return undefined;
@@ -3648,7 +3499,11 @@ const directSwitchOmittedMethodTableImpls = ({
         return true;
       }),
   );
-  if (impls.length === 0 || impls.length > MAX_DIRECT_TRAIT_SWITCH_IMPLS) {
+  if (
+    impls.length === 0 ||
+    impls.length >
+      ir.facts.codegenPlan.specializationPolicy.directTraitSwitchImplementations
+  ) {
     return undefined;
   }
 
@@ -3678,15 +3533,16 @@ const directSwitchOmittedMethodTableImpls = ({
     );
     const supported = Boolean(
       implSignature &&
-        isPureSignature({ effectRow: implSignature.effectRow, ir }) &&
-        isPrimitiveDirectSwitchType({ typeId: implSignature.returnType, ir }) &&
-        implSignature.parameters.length === traitSignature.parameters.length &&
-        implSignature.parameters
-          .slice(1)
-          .every((parameter, index) =>
+      isPureSignature({ effectRow: implSignature.effectRow, ir }) &&
+      isPrimitiveDirectSwitchType({ typeId: implSignature.returnType, ir }) &&
+      implSignature.parameters.length === traitSignature.parameters.length &&
+      implSignature.parameters
+        .slice(1)
+        .every(
+          (parameter, index) =>
             isPrimitiveDirectSwitchType({ typeId: parameter.typeId, ir }) &&
             parameter.typeId === traitSignature.parameters[index + 1]?.typeId,
-          ),
+        ),
     );
     return supported ? resolvedImpl : undefined;
   });
@@ -3737,12 +3593,17 @@ const resolveTargetsForCaller = ({
   exprId: HirExprId;
   callerInstanceId?: ProgramFunctionInstanceId;
   ir: MutableOptimizationIr;
-}): readonly { functionId: ProgramFunctionId; instanceId?: ProgramFunctionInstanceId }[] => {
+}): readonly {
+  functionId: ProgramFunctionId;
+  instanceId?: ProgramFunctionInstanceId;
+}[] => {
   const callInfo = ir.calls.get(moduleId)?.get(exprId);
   if (!callInfo) {
     return [];
   }
-  const resolveTypeArgsForCaller = (typeArgs: readonly TypeId[]): readonly TypeId[] => {
+  const resolveTypeArgsForCaller = (
+    typeArgs: readonly TypeId[],
+  ): readonly TypeId[] => {
     if (typeof callerInstanceId !== "number" || typeArgs.length === 0) {
       return typeArgs;
     }
@@ -3760,29 +3621,44 @@ const resolveTargetsForCaller = ({
       program: ir.baseProgram,
     });
     return substitution
-      ? typeArgs.map((typeArg) => ir.baseProgram.types.substitute(typeArg, substitution))
+      ? typeArgs.map((typeArg) =>
+          ir.baseProgram.types.substitute(typeArg, substitution),
+        )
       : typeArgs;
   };
   const exactTarget =
-    typeof callerInstanceId === "number" ? callInfo.targets?.get(callerInstanceId) : undefined;
+    typeof callerInstanceId === "number"
+      ? callInfo.targets?.get(callerInstanceId)
+      : undefined;
   const exactTypeArgs =
-    typeof callerInstanceId === "number" ? callInfo.typeArgs?.get(callerInstanceId) : undefined;
+    typeof callerInstanceId === "number"
+      ? callInfo.typeArgs?.get(callerInstanceId)
+      : undefined;
   const candidateEntries =
     typeof exactTarget === "number"
-      ? [{ functionId: exactTarget, typeArgs: resolveTypeArgsForCaller(exactTypeArgs ?? []) }]
+      ? [
+          {
+            functionId: exactTarget,
+            typeArgs: resolveTypeArgsForCaller(exactTypeArgs ?? []),
+          },
+        ]
       : callInfo.targets
-        ? Array.from(callInfo.targets.entries()).map(([targetCallerInstanceId, functionId]) => ({
-            functionId,
-            typeArgs: resolveTypeArgsForCaller(
-              callInfo.typeArgs?.get(targetCallerInstanceId) ?? [],
-            ),
-          }))
+        ? Array.from(callInfo.targets.entries()).map(
+            ([targetCallerInstanceId, functionId]) => ({
+              functionId,
+              typeArgs: resolveTypeArgsForCaller(
+                callInfo.typeArgs?.get(targetCallerInstanceId) ?? [],
+              ),
+            }),
+          )
         : [];
 
   return Array.from(
     new Map(
       candidateEntries.map((entry) => {
-        const ref = ir.baseProgram.symbols.refOf(entry.functionId as ProgramSymbolId);
+        const ref = ir.baseProgram.symbols.refOf(
+          entry.functionId as ProgramSymbolId,
+        );
         const instanceId = ir.baseProgram.functions.getInstanceId(
           ref.moduleId,
           ref.symbol,
@@ -3808,17 +3684,61 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
     const reachableModuleLets = new Map<string, Set<SymbolId>>();
     const usedTraitDispatchSignatures = new Set<string>();
     const queuedInstances: ProgramFunctionInstanceId[] = [];
+    const queuedInstanceIds = new Set<ProgramFunctionInstanceId>();
     const queuedModuleLets: { moduleId: string; symbol: SymbolId }[] = [];
+    const queuedModuleLetKeys = new Set<string>();
+    const traitInstancesByDispatchSignature = new Map<
+      string,
+      ProgramFunctionInstanceId[]
+    >();
+    let enqueuedInstances = 0;
+    let processedInstances = 0;
+    let enqueuedModuleLets = 0;
 
-    const enqueueInstance = (instanceId: ProgramFunctionInstanceId | undefined): void => {
+    ctx.ir.functionInstantiations.forEach((bySymbol) => {
+      bySymbol.forEach((instantiations) => {
+        instantiations.forEach((_typeArgs, instanceId) => {
+          const info = ctx.ir.baseProgram.functions.getInstance(instanceId);
+          const traitMethodImpl = ctx.ir.baseProgram.traits.getTraitMethodImpl(
+            info.functionId as ProgramSymbolId,
+          );
+          if (!traitMethodImpl) {
+            return;
+          }
+          const key = traitDispatchSignatureKey({
+            traitSymbol: traitMethodImpl.traitSymbol,
+            traitMethodSymbol: traitMethodImpl.traitMethodSymbol,
+          });
+          const instances = traitInstancesByDispatchSignature.get(key) ?? [];
+          instances.push(instanceId);
+          traitInstancesByDispatchSignature.set(key, instances);
+        });
+      });
+    });
+
+    const enqueueInstance = (
+      instanceId: ProgramFunctionInstanceId | undefined,
+    ): void => {
       if (
         typeof instanceId !== "number" ||
         reachableInstances.has(instanceId) ||
-        queuedInstances.includes(instanceId)
+        queuedInstanceIds.has(instanceId)
       ) {
         return;
       }
       queuedInstances.push(instanceId);
+      queuedInstanceIds.add(instanceId);
+      enqueuedInstances += 1;
+    };
+
+    const recordUsedTraitDispatchSignature = (key: string): void => {
+      if (usedTraitDispatchSignatures.has(key)) {
+        return;
+      }
+      usedTraitDispatchSignatures.add(key);
+      traitInstancesByDispatchSignature
+        .get(key)
+        ?.forEach((instanceId) => enqueueInstance(instanceId));
     };
 
     const enqueueModuleLet = ({
@@ -3832,14 +3752,13 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       if (known?.has(symbol)) {
         return;
       }
-      if (
-        queuedModuleLets.some(
-          (entry) => entry.moduleId === moduleId && entry.symbol === symbol,
-        )
-      ) {
+      const key = `${moduleId}:${symbol}`;
+      if (queuedModuleLetKeys.has(key)) {
         return;
       }
       queuedModuleLets.push({ moduleId, symbol });
+      queuedModuleLetKeys.add(key);
+      enqueuedModuleLets += 1;
     };
 
     const enqueueKnownFunctionInstances = ({
@@ -3868,29 +3787,24 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       );
     };
 
-    const enqueueFunctionByName = ({
-      moduleId,
-      name,
-      paramCount,
-    }: {
-      moduleId: string;
-      name: string;
-      paramCount: number;
-    }): void => {
-      const symbol = findFunctionSymbolByName({
-        ir: ctx.ir as MutableOptimizationIr,
-        moduleId,
-        name,
-        paramCount,
-      });
-      if (typeof symbol !== "number") {
+    const enqueueCompilerFunctionContract = (
+      contractId: CompilerFunctionContractId,
+    ): void => {
+      const symbolId =
+        ctx.ir.baseProgram.symbols.resolveCompilerFunctionContract(contractId);
+      if (typeof symbolId !== "number") {
+        // Boundary auto mode is allowed to fall back to a direct export when
+        // the typed wrapper is unavailable. Actual MsgPack use performs a
+        // strict contract lookup and reports the missing role from codegen.
         return;
       }
-      enqueueKnownFunctionInstances({ moduleId, symbol });
+      enqueueKnownFunctionInstances(ctx.ir.baseProgram.symbols.refOf(symbolId));
     };
 
     const enqueueMsgPackFunctions = (): void => {
-      MSGPACK_FUNCTIONS.forEach((entry) => enqueueFunctionByName(entry));
+      Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS).forEach(
+        enqueueCompilerFunctionContract,
+      );
     };
 
     const enqueueSerializersForTypes = (typeIds: readonly TypeId[]): void => {
@@ -3927,8 +3841,9 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
         return [];
       }
       const scheme = ctx.ir.baseProgram.types.getScheme(signature.scheme);
-      const instantiations =
-        ctx.ir.functionInstantiations.get(resolved.moduleId)?.get(resolved.symbol);
+      const instantiations = ctx.ir.functionInstantiations
+        .get(resolved.moduleId)
+        ?.get(resolved.symbol);
       const typeArgLists =
         instantiations && instantiations.size > 0
           ? Array.from(instantiations.values())
@@ -3945,10 +3860,9 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
         if (desc.kind !== "function") {
           return [];
         }
-        return [[
-          ...desc.parameters.map((param) => param.type),
-          desc.returnType,
-        ]];
+        return [
+          [...desc.parameters.map((param) => param.type), desc.returnType],
+        ];
       });
     };
 
@@ -3967,8 +3881,10 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
         if (!serializer) {
           return;
         }
-        enqueueMsgPackFunctions();
         enqueueSerializersForTypes(typeIds);
+        if (serializer.formatId === "msgpack") {
+          enqueueMsgPackFunctions();
+        }
       });
     };
 
@@ -3983,6 +3899,31 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       exportedFunctionTypeLists({ moduleId, symbol }).forEach((typeIds) => {
         enqueueSerializersForTypes(typeIds);
       });
+    };
+
+    const exportedFunctionUsesEffectsHostBoundary = ({
+      moduleId,
+      symbol,
+    }: {
+      moduleId: string;
+      symbol: SymbolId;
+    }): boolean => {
+      const resolved = resolveImportedSymbol({
+        moduleId,
+        symbol,
+        ir: ctx.ir as MutableOptimizationIr,
+      });
+      const signature = ctx.ir.baseProgram.functions.getSignature(
+        resolved.moduleId,
+        resolved.symbol,
+      );
+      return Boolean(
+        signature &&
+        !isPureSignature({
+          effectRow: signature.effectRow,
+          ir: ctx.ir as MutableOptimizationIr,
+        }),
+      );
     };
 
     const recordResolvedSymbolReachability = ({
@@ -4001,11 +3942,23 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       if (!resolvedModule) {
         return;
       }
-      if (moduleLetBySymbol({ moduleView: resolvedModule, symbol: resolved.symbol })) {
+      if (
+        moduleLetBySymbol({
+          ir: ctx.ir as MutableOptimizationIr,
+          moduleView: resolvedModule,
+          symbol: resolved.symbol,
+        })
+      ) {
         enqueueModuleLet(resolved);
         return;
       }
-      if (functionItemBySymbol({ moduleView: resolvedModule, symbol: resolved.symbol })) {
+      if (
+        functionItemBySymbol({
+          ir: ctx.ir as MutableOptimizationIr,
+          moduleView: resolvedModule,
+          symbol: resolved.symbol,
+        })
+      ) {
         enqueueKnownFunctionInstances(resolved);
       }
     };
@@ -4024,92 +3977,109 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
         return;
       }
 
-      collectPostOrderExprIds({ rootExprId, moduleView }).forEach((exprId) => {
-        const expr = moduleView.hir.expressions.get(exprId);
-        if (!expr) {
-          return;
-        }
+      (ctx.ir as MutableOptimizationIr).index
+        .getBodyTopology({ moduleId, rootExprId })
+        .postOrderExprIds.forEach((exprId) => {
+          const expr = moduleView.hir.expressions.get(exprId);
+          if (!expr) {
+            return;
+          }
 
-        if (expr.exprKind === "call" || expr.exprKind === "method-call") {
-          const resolvedTargets = resolveTargetsForCaller({
-            moduleId,
-            exprId,
-            callerInstanceId,
-            ir: ctx.ir as MutableOptimizationIr,
-          });
-          resolvedTargets.forEach(({ functionId, instanceId }) => {
-            const targetRef = ctx.ir.baseProgram.symbols.refOf(
-              functionId as ProgramSymbolId,
-            );
-            reachableSymbols.add(
-              canonicalProgramSymbolIdOf({
-                moduleId: targetRef.moduleId,
-                symbol: targetRef.symbol,
-                ir: ctx.ir as MutableOptimizationIr,
-              }),
-            );
-            enqueueInstance(instanceId);
-
-            const callInfo = ctx.ir.calls.get(moduleId)?.get(exprId);
-            if (!callInfo?.traitDispatch) {
-              return;
-            }
-            const traitMethodImpl = ctx.ir.baseProgram.traits.getTraitMethodImpl(
-              functionId as ProgramSymbolId,
-            );
-            if (!traitMethodImpl) {
-              return;
-            }
-            const omittedMethodTableImpls = traitDispatchOmittedMethodTableImpls({
-              moduleView,
-              expr,
+          if (expr.exprKind === "call" || expr.exprKind === "method-call") {
+            const resolvedTargets = resolveTargetsForCaller({
+              moduleId,
+              exprId,
               callerInstanceId,
-              functionId,
-              traitMethodImpl,
               ir: ctx.ir as MutableOptimizationIr,
             });
-            if (omittedMethodTableImpls) {
-              omittedMethodTableImpls.forEach((impl) =>
-                enqueueKnownFunctionInstances(impl)
+            resolvedTargets.forEach(({ functionId, instanceId }) => {
+              const targetRef = ctx.ir.baseProgram.symbols.refOf(
+                functionId as ProgramSymbolId,
               );
-              return;
-            }
-            usedTraitDispatchSignatures.add(
-              traitDispatchSignatureKey({
-                traitSymbol: traitMethodImpl.traitSymbol,
-                traitMethodSymbol: traitMethodImpl.traitMethodSymbol,
-              }),
-            );
-          });
+              reachableSymbols.add(
+                canonicalProgramSymbolIdOf({
+                  moduleId: targetRef.moduleId,
+                  symbol: targetRef.symbol,
+                  ir: ctx.ir as MutableOptimizationIr,
+                }),
+              );
+              enqueueInstance(instanceId);
 
-          if (expr.exprKind === "call") {
-            const callee = moduleView.hir.expressions.get(expr.callee);
-            if (callee?.exprKind === "identifier") {
-              recordResolvedSymbolReachability({
-                moduleId,
-                symbol: callee.symbol,
-              });
+              const callInfo = ctx.ir.calls.get(moduleId)?.get(exprId);
+              if (!callInfo?.traitDispatch) {
+                return;
+              }
+              const traitMethodImpl =
+                ctx.ir.baseProgram.traits.getTraitMethodImpl(
+                  functionId as ProgramSymbolId,
+                );
+              if (!traitMethodImpl) {
+                return;
+              }
+              const omittedMethodTableImpls =
+                traitDispatchOmittedMethodTableImpls({
+                  moduleView,
+                  expr,
+                  callerInstanceId,
+                  functionId,
+                  traitMethodImpl,
+                  ir: ctx.ir as MutableOptimizationIr,
+                });
+              if (omittedMethodTableImpls) {
+                omittedMethodTableImpls.forEach((impl) =>
+                  enqueueKnownFunctionInstances(impl),
+                );
+                return;
+              }
+              recordUsedTraitDispatchSignature(
+                traitDispatchSignatureKey({
+                  traitSymbol: traitMethodImpl.traitSymbol,
+                  traitMethodSymbol: traitMethodImpl.traitMethodSymbol,
+                }),
+              );
+            });
+
+            if (expr.exprKind === "call") {
+              const callee = moduleView.hir.expressions.get(expr.callee);
+              if (callee?.exprKind === "identifier") {
+                const calleeId = canonicalProgramSymbolIdOf({
+                  moduleId,
+                  symbol: callee.symbol,
+                  ir: ctx.ir as MutableOptimizationIr,
+                });
+                const intrinsicName =
+                  ctx.ir.baseProgram.symbols.getIntrinsicName(calleeId);
+                if (
+                  intrinsicName &&
+                  BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS.has(intrinsicName)
+                ) {
+                  enqueueMsgPackFunctions();
+                }
+                recordResolvedSymbolReachability({
+                  moduleId,
+                  symbol: callee.symbol,
+                });
+              }
             }
           }
-        }
 
-        if (expr.exprKind === "identifier") {
-          recordResolvedSymbolReachability({
-            moduleId,
-            symbol: expr.symbol,
-          });
-        }
-
-        if (expr.exprKind === "literal" && expr.literalKind === "string") {
-          const dependency = resolveIntrinsicFunction({
-            ir: ctx.ir as MutableOptimizationIr,
-            intrinsicName: "__string_new",
-          });
-          if (dependency) {
-            enqueueKnownFunctionInstances(dependency);
+          if (expr.exprKind === "identifier") {
+            recordResolvedSymbolReachability({
+              moduleId,
+              symbol: expr.symbol,
+            });
           }
-        }
-      });
+
+          if (expr.exprKind === "literal" && expr.literalKind === "string") {
+            const dependency = resolveIntrinsicFunction({
+              ir: ctx.ir as MutableOptimizationIr,
+              intrinsicName: "__string_new",
+            });
+            if (dependency) {
+              enqueueKnownFunctionInstances(dependency);
+            }
+          }
+        });
     };
 
     const rootModules =
@@ -4139,6 +4109,16 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
             }),
           ) ??
           `${entry.symbol}`;
+        if (
+          !ctx.ir.options.testMode &&
+          ctx.ir.options.effectsHostBoundary !== "off" &&
+          exportedFunctionUsesEffectsHostBoundary({
+            moduleId: rootModule.moduleId,
+            symbol: entry.symbol,
+          })
+        ) {
+          enqueueMsgPackFunctions();
+        }
         if (
           !ctx.ir.options.testMode &&
           shouldConsiderBoundaryExportForOptimization({
@@ -4177,106 +4157,84 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       });
     }
 
-    const enqueueUsedTraitDispatchInstances = (): boolean => {
-      let enqueued = false;
-      ctx.ir.functionInstantiations.forEach((bySymbol) => {
-        bySymbol.forEach((instantiations) => {
-          instantiations.forEach((_, instanceId) => {
-            const info = ctx.ir.baseProgram.functions.getInstance(instanceId);
-            const traitMethodImpl = ctx.ir.baseProgram.traits.getTraitMethodImpl(
-              info.functionId as ProgramSymbolId,
-            );
-            if (!traitMethodImpl) {
-              return;
-            }
-            const key = traitDispatchSignatureKey({
-              traitSymbol: traitMethodImpl.traitSymbol,
-              traitMethodSymbol: traitMethodImpl.traitMethodSymbol,
-            });
-            if (!usedTraitDispatchSignatures.has(key)) {
-              return;
-            }
-            const before = queuedInstances.length;
-            enqueueInstance(instanceId);
-            enqueued = enqueued || queuedInstances.length > before;
-          });
-        });
-      });
-      return enqueued;
-    };
-
-    while (true) {
-      while (queuedInstances.length > 0 || queuedModuleLets.length > 0) {
-        const instanceId = queuedInstances.pop();
-        if (typeof instanceId === "number") {
-          if (reachableInstances.has(instanceId)) {
-            continue;
-          }
-          reachableInstances.add(instanceId);
-          const instance = ctx.ir.baseProgram.functions.getInstance(instanceId);
-          reachableSymbols.add(
-            canonicalProgramSymbolIdOf({
-              moduleId: instance.symbolRef.moduleId,
-              symbol: instance.symbolRef.symbol,
-              ir: ctx.ir as MutableOptimizationIr,
-            }),
-          );
-          const moduleView = ctx.ir.modules.get(instance.symbolRef.moduleId);
-          if (!moduleView) {
-            continue;
-          }
-          const item = functionItemBySymbol({
-            moduleView,
+    while (queuedInstances.length > 0 || queuedModuleLets.length > 0) {
+      const instanceId = queuedInstances.pop();
+      if (typeof instanceId === "number") {
+        queuedInstanceIds.delete(instanceId);
+        if (reachableInstances.has(instanceId)) {
+          continue;
+        }
+        reachableInstances.add(instanceId);
+        processedInstances += 1;
+        const instance = ctx.ir.baseProgram.functions.getInstance(instanceId);
+        reachableSymbols.add(
+          canonicalProgramSymbolIdOf({
+            moduleId: instance.symbolRef.moduleId,
             symbol: instance.symbolRef.symbol,
-          });
-          if (!item) {
-            continue;
-          }
-
-          const walkRoots = [item.body, ...item.parameters.flatMap((parameter) =>
-            typeof parameter.defaultValue === "number" ? [parameter.defaultValue] : [],
-          )];
-          walkRoots.forEach((rootExprId) =>
-            walkReachabilityRoot({
-              moduleId: moduleView.moduleId,
-              rootExprId,
-              callerInstanceId: instanceId,
-            }),
-          );
+            ir: ctx.ir as MutableOptimizationIr,
+          }),
+        );
+        const moduleView = ctx.ir.modules.get(instance.symbolRef.moduleId);
+        if (!moduleView) {
           continue;
         }
-
-        const nextModuleLet = queuedModuleLets.pop();
-        if (!nextModuleLet) {
-          continue;
-        }
-        const knownModuleLets =
-          reachableModuleLets.get(nextModuleLet.moduleId) ?? new Set<SymbolId>();
-        if (knownModuleLets.has(nextModuleLet.symbol)) {
-          continue;
-        }
-        knownModuleLets.add(nextModuleLet.symbol);
-        reachableModuleLets.set(nextModuleLet.moduleId, knownModuleLets);
-
-        const moduleView = ctx.ir.modules.get(nextModuleLet.moduleId);
-        const moduleLet = moduleView
-          ? moduleLetBySymbol({
-              moduleView,
-              symbol: nextModuleLet.symbol,
-            })
-          : undefined;
-        if (!moduleView || !moduleLet) {
-          continue;
-        }
-        walkReachabilityRoot({
-          moduleId: nextModuleLet.moduleId,
-          rootExprId: moduleLet.initializer,
+        const item = functionItemBySymbol({
+          ir: ctx.ir as MutableOptimizationIr,
+          moduleView,
+          symbol: instance.symbolRef.symbol,
         });
+        if (!item) {
+          continue;
+        }
+
+        const walkRoots = [
+          item.body,
+          ...item.parameters.flatMap((parameter) =>
+            typeof parameter.defaultValue === "number"
+              ? [parameter.defaultValue]
+              : [],
+          ),
+        ];
+        walkRoots.forEach((rootExprId) =>
+          walkReachabilityRoot({
+            moduleId: moduleView.moduleId,
+            rootExprId,
+            callerInstanceId: instanceId,
+          }),
+        );
+        continue;
       }
 
-      if (!enqueueUsedTraitDispatchInstances()) {
-        break;
+      const nextModuleLet = queuedModuleLets.pop();
+      if (!nextModuleLet) {
+        continue;
       }
+      queuedModuleLetKeys.delete(
+        `${nextModuleLet.moduleId}:${nextModuleLet.symbol}`,
+      );
+      const knownModuleLets =
+        reachableModuleLets.get(nextModuleLet.moduleId) ?? new Set<SymbolId>();
+      if (knownModuleLets.has(nextModuleLet.symbol)) {
+        continue;
+      }
+      knownModuleLets.add(nextModuleLet.symbol);
+      reachableModuleLets.set(nextModuleLet.moduleId, knownModuleLets);
+
+      const moduleView = ctx.ir.modules.get(nextModuleLet.moduleId);
+      const moduleLet = moduleView
+        ? moduleLetBySymbol({
+            ir: ctx.ir as MutableOptimizationIr,
+            moduleView,
+            symbol: nextModuleLet.symbol,
+          })
+        : undefined;
+      if (!moduleView || !moduleLet) {
+        continue;
+      }
+      walkReachabilityRoot({
+        moduleId: nextModuleLet.moduleId,
+        rootExprId: moduleLet.initializer,
+      });
     }
 
     const survivingInstances = ctx.ir.baseProgram.instances
@@ -4287,38 +4245,90 @@ const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       string,
       Map<SymbolId, Map<ProgramFunctionInstanceId, readonly TypeId[]>>
     >();
-    normalizeFunctionInstantiations({ program: ctx.ir.baseProgram }).forEach((bySymbol, moduleId) => {
-      const nextBySymbol = new Map<SymbolId, Map<ProgramFunctionInstanceId, readonly TypeId[]>>();
-      bySymbol.forEach((instantiations, symbol) => {
-        const nextInstances = new Map<ProgramFunctionInstanceId, readonly TypeId[]>();
-        instantiations.forEach((typeArgs, instanceId) => {
-          if (reachableInstances.has(instanceId)) {
-            nextInstances.set(instanceId, typeArgs);
-          }
+    normalizeFunctionInstantiations({ program: ctx.ir.baseProgram }).forEach(
+      (bySymbol, moduleId) => {
+        const nextBySymbol = new Map<
+          SymbolId,
+          Map<ProgramFunctionInstanceId, readonly TypeId[]>
+        >();
+        bySymbol.forEach((instantiations, symbol) => {
+          const nextInstances = new Map<
+            ProgramFunctionInstanceId,
+            readonly TypeId[]
+          >();
+          instantiations.forEach((typeArgs, instanceId) => {
+            if (reachableInstances.has(instanceId)) {
+              nextInstances.set(instanceId, typeArgs);
+            }
+          });
+          nextBySymbol.set(symbol, nextInstances);
         });
-        nextBySymbol.set(symbol, nextInstances);
-      });
-      nextInstantiations.set(moduleId, nextBySymbol);
-    });
+        nextInstantiations.set(moduleId, nextBySymbol);
+      },
+    );
 
-    const changed =
+    const previousInstanceIds = new Set(
+      ctx.ir.survivingInstances.map((instance) => instance.instanceId),
+    );
+    const nextSurvivingInstanceIds = new Set(
+      survivingInstances.map((instance) => instance.instanceId),
+    );
+    const survivingInstancesChanged =
       survivingInstances.length !== ctx.ir.survivingInstances.length ||
-      Array.from(reachableInstances).some(
-        (instanceId) =>
-          !ctx.ir.survivingInstances.some((instance) => instance.instanceId === instanceId),
-      ) ||
-      !setEquals(reachableInstances, ctx.ir.facts.reachableFunctionInstances) ||
-      !setEquals(reachableSymbols, ctx.ir.facts.reachableFunctionSymbols) ||
-      !mapOfSetEquals(reachableModuleLets, ctx.ir.facts.reachableModuleLets);
+      Array.from(nextSurvivingInstanceIds).some(
+        (instanceId) => !previousInstanceIds.has(instanceId),
+      );
+    const reachableInstancesChanged = !setEquals(
+      reachableInstances,
+      ctx.ir.facts.reachableFunctionInstances,
+    );
+    const reachableSymbolsChanged = !setEquals(
+      reachableSymbols,
+      ctx.ir.facts.reachableFunctionSymbols,
+    );
+    const reachableModuleLetsChanged = !mapOfSetEquals(
+      reachableModuleLets,
+      ctx.ir.facts.reachableModuleLets,
+    );
+    const traitDispatchSignaturesChanged = !setEquals(
+      usedTraitDispatchSignatures,
+      ctx.ir.facts.usedTraitDispatchSignatures,
+    );
+    const changed =
+      survivingInstancesChanged ||
+      reachableInstancesChanged ||
+      reachableSymbolsChanged ||
+      reachableModuleLetsChanged ||
+      traitDispatchSignaturesChanged;
+    const prunedInstances = Math.max(
+      0,
+      ctx.ir.survivingInstances.length - survivingInstances.length,
+    );
 
     (ctx.ir as MutableOptimizationIr).survivingInstances = survivingInstances;
-    (ctx.ir as MutableOptimizationIr).functionInstantiations = nextInstantiations;
+    (ctx.ir as MutableOptimizationIr).functionInstantiations =
+      nextInstantiations;
     ctx.ir.facts.reachableFunctionInstances = reachableInstances;
     ctx.ir.facts.reachableFunctionSymbols = reachableSymbols;
     ctx.ir.facts.reachableModuleLets = reachableModuleLets;
     ctx.ir.facts.usedTraitDispatchSignatures = usedTraitDispatchSignatures;
 
-    return { changed };
+    return {
+      changed,
+      metrics: {
+        pruned_instances: prunedInstances,
+        worklist_instance_enqueues: enqueuedInstances,
+        worklist_instance_pops: processedInstances,
+        worklist_module_let_enqueues: enqueuedModuleLets,
+        changed_surviving_instances: Number(survivingInstancesChanged),
+        changed_reachable_instances: Number(reachableInstancesChanged),
+        changed_reachable_symbols: Number(reachableSymbolsChanged),
+        changed_reachable_module_lets: Number(reachableModuleLetsChanged),
+        changed_trait_dispatch_signatures: Number(
+          traitDispatchSignaturesChanged,
+        ),
+      },
+    };
   },
 };
 
@@ -4365,28 +4375,6 @@ type EscapeAnalysisState = {
 
 const emptyEscapeUseContext: EscapeUseContext = {};
 
-const cloneMutableParameterFacts = (
-  facts: ReadonlyMap<
-    ProgramFunctionInstanceId,
-    ReadonlyMap<SymbolId, MutableEscapeParameterFact>
-  >,
-): Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>> =>
-  new Map(
-    Array.from(facts.entries()).map(([instanceId, bySymbol]) => [
-      instanceId,
-      new Map(
-        Array.from(bySymbol.entries()).map(([symbol, fact]) => [
-          symbol,
-          {
-            escapes: fact.escapes,
-            escapeReasons: new Set(fact.escapeReasons),
-            useExprIds: new Set(fact.useExprIds),
-          },
-        ]),
-      ),
-    ]),
-  );
-
 const serializeMutableParameterFacts = (
   facts: ReadonlyMap<
     ProgramFunctionInstanceId,
@@ -4424,7 +4412,9 @@ const toImmutableParameterFacts = (
           {
             escapes: fact.escapes,
             escapeReasons: Array.from(fact.escapeReasons).sort(),
-            useExprIds: Array.from(fact.useExprIds).sort((left, right) => left - right),
+            useExprIds: Array.from(fact.useExprIds).sort(
+              (left, right) => left - right,
+            ),
           },
         ]),
       ),
@@ -4448,7 +4438,9 @@ const toImmutableOriginFacts = (
             directLocalSymbols: Array.from(fact.directLocalSymbols).sort(
               (left, right) => left - right,
             ),
-            useExprIds: Array.from(fact.useExprIds).sort((left, right) => left - right),
+            useExprIds: Array.from(fact.useExprIds).sort(
+              (left, right) => left - right,
+            ),
           },
         ]),
       ),
@@ -4460,17 +4452,20 @@ const mutableParameterFactFor = ({
   instanceId,
   symbol,
 }: {
-  facts: Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>>;
+  facts: Map<
+    ProgramFunctionInstanceId,
+    Map<SymbolId, MutableEscapeParameterFact>
+  >;
   instanceId: ProgramFunctionInstanceId;
   symbol: SymbolId;
 }): MutableEscapeParameterFact => {
-  const bySymbol = facts.get(instanceId) ?? new Map<SymbolId, MutableEscapeParameterFact>();
-  const fact =
-    bySymbol.get(symbol) ?? {
-      escapes: false,
-      escapeReasons: new Set<EscapeAnalysisEscapeReason>(),
-      useExprIds: new Set<HirExprId>(),
-    };
+  const bySymbol =
+    facts.get(instanceId) ?? new Map<SymbolId, MutableEscapeParameterFact>();
+  const fact = bySymbol.get(symbol) ?? {
+    escapes: false,
+    escapeReasons: new Set<EscapeAnalysisEscapeReason>(),
+    useExprIds: new Set<HirExprId>(),
+  };
   bySymbol.set(symbol, fact);
   facts.set(instanceId, bySymbol);
   return fact;
@@ -4509,7 +4504,8 @@ const markOriginUse = ({
     fact.originKind = "trait-object";
   }
   const effectiveReason =
-    fact.originKind === "effect-environment" && reason !== "handler-resumption-escape"
+    fact.originKind === "effect-environment" &&
+    reason !== "handler-resumption-escape"
       ? undefined
       : reason;
   if (!effectiveReason) {
@@ -4619,9 +4615,13 @@ const localParameterAliasesForSymbol = ({
 }: {
   state: EscapeAnalysisState;
   symbol: SymbolId;
-}): ReadonlySet<SymbolId> | undefined => state.localParameterAliases.get(symbol);
+}): ReadonlySet<SymbolId> | undefined =>
+  state.localParameterAliases.get(symbol);
 
-const unionInto = <T>(target: Set<T>, values: Iterable<T> | undefined): void => {
+const unionInto = <T>(
+  target: Set<T>,
+  values: Iterable<T> | undefined,
+): void => {
   if (!values) {
     return;
   }
@@ -4677,7 +4677,10 @@ const parameterAliasesForInitializer = ({
     return aliases;
   }
   if (expr.exprKind === "effect-handler") {
-    const aliases = parameterAliasesForInitializer({ state, exprId: expr.body });
+    const aliases = parameterAliasesForInitializer({
+      state,
+      exprId: expr.body,
+    });
     expr.handlers.forEach((handler) => {
       unionInto(
         aliases,
@@ -4707,7 +4710,8 @@ const bindLocalParameterAliases = ({
   if (parameterSymbols.size === 0) {
     return;
   }
-  const aliases = state.localParameterAliases.get(symbol) ?? new Set<SymbolId>();
+  const aliases =
+    state.localParameterAliases.get(symbol) ?? new Set<SymbolId>();
   parameterSymbols.forEach((parameterSymbol) => aliases.add(parameterSymbol));
   state.localParameterAliases.set(symbol, aliases);
 };
@@ -4771,7 +4775,7 @@ const markSymbolSetUse = ({
       symbol,
       exprId,
       context: { reason },
-    })
+    }),
   );
 };
 
@@ -4788,7 +4792,10 @@ const originExprIdsForInitializer = ({
   }
   if (expr.exprKind === "effect-handler") {
     const origins = new Set<HirExprId>([exprId]);
-    unionInto(origins, originExprIdsForInitializer({ state, exprId: expr.body }));
+    unionInto(
+      origins,
+      originExprIdsForInitializer({ state, exprId: expr.body }),
+    );
     expr.handlers.forEach((handler) => {
       unionInto(
         origins,
@@ -4803,7 +4810,9 @@ const originExprIdsForInitializer = ({
     }
     return origins;
   }
-  if (originKindForExpr({ moduleView: state.moduleView, exprId, ir: state.ir })) {
+  if (
+    originKindForExpr({ moduleView: state.moduleView, exprId, ir: state.ir })
+  ) {
     return new Set([exprId]);
   }
   if (expr.exprKind === "identifier") {
@@ -4833,7 +4842,10 @@ const originExprIdsForInitializer = ({
   if (expr.exprKind === "match") {
     const origins = new Set<HirExprId>();
     expr.arms.forEach((arm) => {
-      unionInto(origins, originExprIdsForInitializer({ state, exprId: arm.value }));
+      unionInto(
+        origins,
+        originExprIdsForInitializer({ state, exprId: arm.value }),
+      );
     });
     return origins;
   }
@@ -4851,8 +4863,10 @@ const isTraitType = ({
     return false;
   }
   const desc = ir.baseProgram.types.getTypeDesc(typeId);
-  return desc.kind === "trait" ||
-    (desc.kind === "intersection" && (desc.traits?.length ?? 0) > 0);
+  return (
+    desc.kind === "trait" ||
+    (desc.kind === "intersection" && (desc.traits?.length ?? 0) > 0)
+  );
 };
 
 const targetParameterIsMutable = ({
@@ -4873,7 +4887,7 @@ const targetParameterIsMutable = ({
   }
   const moduleView = state.ir.modules.get(moduleId);
   const item = moduleView
-    ? functionItemBySymbol({ moduleView, symbol })
+    ? functionItemBySymbol({ ir: state.ir, moduleView, symbol })
     : undefined;
   return item?.parameters[parameterIndex]?.mutable === true;
 };
@@ -4947,7 +4961,8 @@ const callLabelsCompatible = ({
 }: {
   parameter: CodegenFunctionSignature["parameters"][number];
   argLabel: string | undefined;
-}): boolean => (parameter.label ? argLabel === parameter.label : argLabel === undefined);
+}): boolean =>
+  parameter.label ? argLabel === parameter.label : argLabel === undefined;
 
 const fallbackContainerFieldParameterIndexesForCallArgument = ({
   expr,
@@ -4986,7 +5001,9 @@ const fallbackContainerFieldParameterIndexesForCallArgument = ({
   if (!targetFields) {
     return undefined;
   }
-  const fieldsByName = new Map(targetFields.map((field) => [field.name, field]));
+  const fieldsByName = new Map(
+    targetFields.map((field) => [field.name, field]),
+  );
 
   const parameterIndexes: number[] = [];
   let cursorArgIndex = 0;
@@ -5013,7 +5030,10 @@ const fallbackContainerFieldParameterIndexesForCallArgument = ({
         return undefined;
       }
 
-      const fields = structuralEscapeFieldsForType({ typeId: argTypeId, state });
+      const fields = structuralEscapeFieldsForType({
+        typeId: argTypeId,
+        state,
+      });
       const fieldMap = fields
         ? new Map(fields.map((field) => [field.name, field]))
         : undefined;
@@ -5082,7 +5102,9 @@ const fallbackContainerFieldParameterIndexesForCallArgument = ({
   }
 
   return parameterIndexes.length > 0 &&
-      parameterIndexes.every((index) => fieldsByName.has(signature.parameters[index]!.label!))
+    parameterIndexes.every((index) =>
+      fieldsByName.has(signature.parameters[index]!.label!),
+    )
     ? parameterIndexes
     : undefined;
 };
@@ -5156,7 +5178,8 @@ const contextForCallArgument = ({
     containerFieldEntries.length > 0 &&
     argPlan?.every((entry) =>
       entry.kind === "container-field"
-        ? entry.containerArgIndex === argIndex || entry.containerArgIndex !== argIndex
+        ? entry.containerArgIndex === argIndex ||
+          entry.containerArgIndex !== argIndex
         : entry.kind !== "direct" || entry.argIndex !== argIndex,
     ) === true;
   if (argIsOnlyContainerFields) {
@@ -5304,7 +5327,8 @@ const contextForCallArgument = ({
       unsafeReason = "unknown";
       return;
     }
-    traitBoundary = traitBoundary || isTraitType({ typeId: parameter.typeId, ir: state.ir });
+    traitBoundary =
+      traitBoundary || isTraitType({ typeId: parameter.typeId, ir: state.ir });
     if (
       targetParameterIsMutable({
         state,
@@ -5317,13 +5341,17 @@ const contextForCallArgument = ({
       unsafeReason = "mutable-call-argument";
       return;
     }
-    const targetFact = state.parameterFacts.get(instanceId)?.get(parameter.symbol);
+    const targetFact = state.parameterFacts
+      .get(instanceId)
+      ?.get(parameter.symbol);
     if (!targetFact || targetFact.escapes) {
       unsafeReason = "call-boundary";
     }
   });
 
-  return unsafeReason ? { reason: unsafeReason, traitBoundary } : { traitBoundary };
+  return unsafeReason
+    ? { reason: unsafeReason, traitBoundary }
+    : { traitBoundary };
 };
 
 const analyzeEscapeExpression = ({
@@ -5360,7 +5388,7 @@ const analyzeEscapeExpression = ({
       return;
     case "block": {
       expr.statements.forEach((statementId) =>
-        analyzeEscapeStatement({ statementId, state })
+        analyzeEscapeStatement({ statementId, state }),
       );
       if (typeof expr.value === "number") {
         analyzeEscapeExpression({ exprId: expr.value, context, state });
@@ -5373,7 +5401,7 @@ const analyzeEscapeExpression = ({
           exprId: element,
           context: { reason: "stored-in-aggregate" },
           state,
-        })
+        }),
       );
       return;
     case "object-literal":
@@ -5382,7 +5410,7 @@ const analyzeEscapeExpression = ({
           exprId: entry.value,
           context: { reason: "stored-in-aggregate" },
           state,
-        })
+        }),
       );
       return;
     case "field-access":
@@ -5437,7 +5465,7 @@ const analyzeEscapeExpression = ({
             state,
           }),
           state,
-        })
+        }),
       );
       return;
     }
@@ -5451,14 +5479,16 @@ const analyzeEscapeExpression = ({
       return;
     case "effect-handler": {
       analyzeEscapeExpression({ exprId: expr.body, context, state });
-      const captures = collectHandlerCaptures({ moduleView: state.moduleView }).get(expr.id);
+      const captures = collectHandlerCaptures({
+        moduleView: state.moduleView,
+      }).get(expr.id);
       captures?.forEach((symbols) =>
         markSymbolSetUse({
           state,
           symbols,
           exprId: expr.id,
           reason: "effect-handler-capture",
-        })
+        }),
       );
       expr.handlers.forEach((handler) => {
         if (handler.tailResumption?.escapes) {
@@ -5624,8 +5654,14 @@ const seedParameterFacts = ({
 }: {
   ir: MutableOptimizationIr;
   externalInstances: ReadonlySet<ProgramFunctionInstanceId>;
-}): Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>> => {
-  const facts = new Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>>();
+}): Map<
+  ProgramFunctionInstanceId,
+  Map<SymbolId, MutableEscapeParameterFact>
+> => {
+  const facts = new Map<
+    ProgramFunctionInstanceId,
+    Map<SymbolId, MutableEscapeParameterFact>
+  >();
   ir.facts.reachableFunctionInstances.forEach((instanceId) => {
     const instance = ir.baseProgram.functions.getInstance(instanceId);
     const signature = ir.baseProgram.functions.getSignature(
@@ -5636,7 +5672,11 @@ const seedParameterFacts = ({
       if (typeof parameter.symbol !== "number") {
         return;
       }
-      const fact = mutableParameterFactFor({ facts, instanceId, symbol: parameter.symbol });
+      const fact = mutableParameterFactFor({
+        facts,
+        instanceId,
+        symbol: parameter.symbol,
+      });
       if (externalInstances.has(instanceId)) {
         fact.escapes = true;
         fact.escapeReasons.add("public-boundary");
@@ -5648,68 +5688,137 @@ const seedParameterFacts = ({
 
 const analyzeParameterEscapes = ({
   ir,
-  seedFacts,
+  instanceId,
+  facts,
 }: {
   ir: MutableOptimizationIr;
-  seedFacts: ReadonlyMap<
+  instanceId: ProgramFunctionInstanceId;
+  facts: Map<
     ProgramFunctionInstanceId,
-    ReadonlyMap<SymbolId, MutableEscapeParameterFact>
+    Map<SymbolId, MutableEscapeParameterFact>
   >;
-}): Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>> => {
-  const facts = cloneMutableParameterFacts(seedFacts);
-  ir.facts.reachableFunctionInstances.forEach((instanceId) => {
-    const instance = ir.baseProgram.functions.getInstance(instanceId);
-    const moduleView = ir.modules.get(instance.symbolRef.moduleId);
-    const item = moduleView
-      ? functionItemBySymbol({
-          moduleView,
-          symbol: instance.symbolRef.symbol,
-        })
-      : undefined;
-    if (!moduleView || !item) {
-      return;
-    }
-    const mutableParameterFacts = facts.get(instanceId);
-    if (!mutableParameterFacts) {
-      return;
-    }
-    analyzeEscapeExpression({
-      exprId: item.body,
-      context: { reason: "return" },
-      state: {
+}): void => {
+  const instance = ir.baseProgram.functions.getInstance(instanceId);
+  const moduleView = ir.modules.get(instance.symbolRef.moduleId);
+  const item = moduleView
+    ? functionItemBySymbol({
         ir,
         moduleView,
-        callerInstanceId: instanceId,
-        parameterSymbols: parameterSymbolsForFunction(item),
-        parameterFacts: seedFacts,
-        mutableParameterFacts,
-        localOrigins: new Map(),
-        localParameterAliases: new Map(),
-      },
+        symbol: instance.symbolRef.symbol,
+      })
+    : undefined;
+  const mutableParameterFacts = facts.get(instanceId);
+  if (!moduleView || !item || !mutableParameterFacts) {
+    return;
+  }
+  analyzeEscapeExpression({
+    exprId: item.body,
+    context: { reason: "return" },
+    state: {
+      ir,
+      moduleView,
+      callerInstanceId: instanceId,
+      parameterSymbols: parameterSymbolsForFunction(item),
+      parameterFacts: facts,
+      mutableParameterFacts,
+      localOrigins: new Map(),
+      localParameterAliases: new Map(),
+    },
+  });
+};
+
+const serializeMutableParameterFactsForInstance = (
+  instanceId: ProgramFunctionInstanceId,
+  bySymbol: ReadonlyMap<SymbolId, MutableEscapeParameterFact> | undefined,
+): string =>
+  serializeMutableParameterFacts(
+    bySymbol ? new Map([[instanceId, bySymbol]]) : new Map(),
+  );
+
+const buildParameterEscapeCallers = ({
+  ir,
+  callSites,
+}: {
+  ir: MutableOptimizationIr;
+  callSites: InstanceCallSiteIndex;
+}): Map<ProgramFunctionInstanceId, Set<ProgramFunctionInstanceId>> => {
+  const callersByTarget = new Map<
+    ProgramFunctionInstanceId,
+    Set<ProgramFunctionInstanceId>
+  >();
+  callSites.forEach((sites, callerInstanceId) => {
+    sites.forEach(({ moduleView, exprId, expr }) => {
+      resolveTargetsForExactPropagation({
+        moduleView,
+        exprId,
+        expr,
+        callerInstanceId,
+        ir,
+      }).forEach(({ instanceId: targetInstanceId }) => {
+        if (typeof targetInstanceId !== "number") {
+          return;
+        }
+        const callers = callersByTarget.get(targetInstanceId) ?? new Set();
+        callers.add(callerInstanceId);
+        callersByTarget.set(targetInstanceId, callers);
+      });
     });
   });
-  return facts;
+  return callersByTarget;
 };
 
 const computeParameterEscapeFacts = ({
   ir,
 }: {
   ir: MutableOptimizationIr;
-}): Map<ProgramFunctionInstanceId, Map<SymbolId, MutableEscapeParameterFact>> => {
+}): {
+  facts: Map<
+    ProgramFunctionInstanceId,
+    Map<SymbolId, MutableEscapeParameterFact>
+  >;
+  worklistPops: number;
+  worklistRequeues: number;
+} => {
   const externalInstances = externallyCallableFunctionInstances(ir);
-  const seedFacts = seedParameterFacts({ ir, externalInstances });
-  let facts = seedFacts;
-  let changed = true;
+  const facts = seedParameterFacts({ ir, externalInstances });
+  const callSites = buildInstanceCallSiteIndex({ ir });
+  const callersByTarget = buildParameterEscapeCallers({ ir, callSites });
+  const queued = Array.from(ir.facts.reachableFunctionInstances);
+  const queuedInstances = new Set(queued);
+  let worklistPops = 0;
+  let worklistRequeues = 0;
 
-  while (changed) {
-    const next = analyzeParameterEscapes({ ir, seedFacts: facts });
-    changed =
-      serializeMutableParameterFacts(next) !==
-      serializeMutableParameterFacts(facts);
-    facts = next;
+  const enqueue = (instanceId: ProgramFunctionInstanceId): void => {
+    if (queuedInstances.has(instanceId)) {
+      return;
+    }
+    queued.push(instanceId);
+    queuedInstances.add(instanceId);
+    worklistRequeues += 1;
+  };
+
+  while (queued.length > 0) {
+    const instanceId = queued.pop()!;
+    queuedInstances.delete(instanceId);
+    worklistPops += 1;
+    const before = serializeMutableParameterFactsForInstance(
+      instanceId,
+      facts.get(instanceId),
+    );
+    analyzeParameterEscapes({ ir, instanceId, facts });
+    const after = serializeMutableParameterFactsForInstance(
+      instanceId,
+      facts.get(instanceId),
+    );
+    if (before === after) {
+      continue;
+    }
+    callersByTarget
+      .get(instanceId)
+      ?.forEach((callerInstanceId) => enqueue(callerInstanceId));
   }
 
-  return facts;
+  return { facts, worklistPops, worklistRequeues };
 };
 
 const computeOriginEscapeFacts = ({
@@ -5722,13 +5831,17 @@ const computeOriginEscapeFacts = ({
     ReadonlyMap<SymbolId, MutableEscapeParameterFact>
   >;
 }): Map<string, Map<HirExprId, MutableEscapeOriginFact>> => {
-  const originFacts = new Map<string, Map<HirExprId, MutableEscapeOriginFact>>();
+  const originFacts = new Map<
+    string,
+    Map<HirExprId, MutableEscapeOriginFact>
+  >();
 
   ir.facts.reachableFunctionInstances.forEach((instanceId) => {
     const instance = ir.baseProgram.functions.getInstance(instanceId);
     const moduleView = ir.modules.get(instance.symbolRef.moduleId);
     const item = moduleView
       ? functionItemBySymbol({
+          ir,
           moduleView,
           symbol: instance.symbolRef.symbol,
         })
@@ -5758,7 +5871,7 @@ const computeOriginEscapeFacts = ({
       return;
     }
     symbols.forEach((symbol) => {
-      const moduleLet = moduleLetBySymbol({ moduleView, symbol });
+      const moduleLet = moduleLetBySymbol({ ir, moduleView, symbol });
       if (!moduleLet) {
         return;
       }
@@ -5807,7 +5920,11 @@ const escapeAnalysisPass: ProgramOptimizationPass = {
   name: "whole-program-escape-analysis",
   run(ctx) {
     const ir = ctx.ir as MutableOptimizationIr;
-    const parameterFacts = computeParameterEscapeFacts({ ir });
+    const {
+      facts: parameterFacts,
+      worklistPops,
+      worklistRequeues,
+    } = computeParameterEscapeFacts({ ir });
     const originFacts = computeOriginEscapeFacts({ ir, parameterFacts });
     const immutableParameters = toImmutableParameterFacts(parameterFacts);
     const immutableOrigins = toImmutableOriginFacts(originFacts);
@@ -5829,208 +5946,293 @@ const escapeAnalysisPass: ProgramOptimizationPass = {
                 ]),
             ]),
         ) ||
-      serializeOriginFacts(immutableOrigins) !== serializeOriginFacts(previous.origins);
+      serializeOriginFacts(immutableOrigins) !==
+        serializeOriginFacts(previous.origins);
 
     ir.facts.escapeAnalysis = {
       origins: immutableOrigins,
       parameters: immutableParameters,
     };
 
-    return { changed };
+    const originValues = Array.from(immutableOrigins.values()).flatMap(
+      (byExpr) => Array.from(byExpr.values()),
+    );
+    const parameterValues = Array.from(immutableParameters.values()).flatMap(
+      (bySymbol) => Array.from(bySymbol.values()),
+    );
+    const metrics: Record<string, number> = {
+      escaping_origins: originValues.filter((fact) => fact.escapes).length,
+      non_escaping_origins: originValues.filter((fact) => !fact.escapes).length,
+      escaping_parameters: parameterValues.filter((fact) => fact.escapes)
+        .length,
+      non_escaping_parameters: parameterValues.filter((fact) => !fact.escapes)
+        .length,
+      parameter_worklist_pops: worklistPops,
+      parameter_worklist_requeues: worklistRequeues,
+    };
+    [...originValues, ...parameterValues].forEach((fact) => {
+      fact.escapeReasons.forEach((reason) => {
+        const metric = `escape_reason.${reason}`;
+        metrics[metric] = (metrics[metric] ?? 0) + 1;
+      });
+    });
+
+    return { changed, metrics };
   },
 };
 
-const rebuildEffectsInfo = ({
-  moduleView,
-}: {
-  moduleView: OptimizedModuleView;
-}): void => {
-  const effectsInfo = buildEffectsLoweringInfo({
-    binding: moduleView.semantics.binding,
-    symbolTable: getSymbolTable(moduleView.semantics),
-    hir: moduleView.hir,
-    typing: moduleView.semantics.typing,
-  });
-  moduleView.effectsInfo = effectsInfo;
-  moduleView.effectsIr = buildEffectsIr({
-    hir: moduleView.hir,
-    info: effectsInfo,
-  });
+type CallShapeCandidate = {
+  callSiteKey: string;
+  callerInstanceId: ProgramFunctionInstanceId;
+  request: CallShapeSpecializationRequest;
 };
 
-class OptimizationContextImpl implements ProgramOptimizationContext {
-  readonly analyses = new Map<OptimizationAnalysisKey, unknown>();
+const callShapeParameterState = (
+  entry: NonNullable<ReturnType<typeof resolveCallArgPlan>>[number],
+): CallShapeParameterState =>
+  entry.kind === "missing"
+    ? "omitted"
+    : entry.kind === "stable-callsite-id"
+      ? "stable-callsite-id"
+      : "provided";
 
-  constructor(readonly ir: MutableOptimizationIr) {}
+const serializeCallShapeSpecializationRequests = (
+  requests: ReadonlyMap<
+    string,
+    ReadonlyMap<ProgramFunctionInstanceId, CallShapeSpecializationRequest>
+  >,
+): string =>
+  JSON.stringify(
+    Array.from(requests.entries())
+      .sort(([left], [right]) => left.localeCompare(right))
+      .map(([callSiteKey, byCaller]) => [
+        callSiteKey,
+        Array.from(byCaller.entries())
+          .sort(([left], [right]) => left - right)
+          .map(([callerInstanceId, request]) => [
+            callerInstanceId,
+            request.calleeInstanceId,
+            request.keyTokens,
+          ]),
+      ]),
+  );
 
-  getAnalysis<T>(key: OptimizationAnalysisKey, build: () => T): T {
-    if (this.analyses.has(key)) {
-      return this.analyses.get(key) as T;
-    }
-    const analysis = build();
-    this.analyses.set(key, analysis);
-    return analysis;
-  }
-
-  invalidateAnalyses(keys: readonly OptimizationAnalysisKey[]): void {
-    keys.forEach((key) => this.analyses.delete(key));
-  }
-}
-
-const finalizeOptimization = ({
+const collectCallShapeCandidates = ({
   ir,
 }: {
   ir: MutableOptimizationIr;
-}): ProgramOptimizationResult => {
-  ir.modules.forEach((moduleView) => rebuildEffectsInfo({ moduleView }));
-
-  const optimizedProgram: ProgramCodegenView = {
-    ...ir.baseProgram,
-    calls: {
-      getCallInfo: (moduleId, exprId) =>
-        ir.calls.get(moduleId)?.get(exprId) ??
-        ir.baseProgram.calls.getCallInfo(moduleId, exprId),
-    },
-    functions: {
-      ...ir.baseProgram.functions,
-      getInstantiationInfo: (moduleId, symbol) =>
-        ir.functionInstantiations.get(moduleId)?.get(symbol) ??
-        ir.baseProgram.functions.getInstantiationInfo(moduleId, symbol),
-    },
-    instances: {
-      getAll: () => ir.survivingInstances,
-      getById: (instanceId) =>
-        ir.survivingInstances.find((instance) => instance.instanceId === instanceId),
-    },
-    modules: new Map(
-      Array.from(ir.modules.entries()).map(([moduleId, moduleView]) => {
-        const { semantics, ...rest } = moduleView;
-        void semantics;
-        return [moduleId, rest];
-      }),
-    ),
+}): {
+  candidates: CallShapeCandidate[];
+  skipped: Readonly<Record<string, number>>;
+} => {
+  const candidates: CallShapeCandidate[] = [];
+  const skipped: Record<string, number> = {};
+  const skip = (reason: string): void => {
+    skipped[reason] = (skipped[reason] ?? 0) + 1;
   };
 
-  const codegenPlan: ProgramCodegenOptimizationPlan = {
-    representations: {},
-  };
+  buildInstanceCallSiteIndex({ ir }).forEach((sites, callerInstanceId) => {
+    sites.forEach(({ moduleView, exprId, expr }) => {
+      const callInfo = ir.calls.get(moduleView.moduleId)?.get(exprId);
+      if (!callInfo || callInfo.traitDispatch) {
+        skip("dynamic_or_unresolved");
+        return;
+      }
+      const plan = resolveCallArgPlan({ callInfo, callerInstanceId });
+      if (!plan) {
+        skip("missing_typed_plan");
+        return;
+      }
+      const targets = resolveTargetsForExactPropagation({
+        moduleView,
+        exprId,
+        expr,
+        callerInstanceId,
+        ir,
+      }).filter(
+        (
+          target,
+        ): target is typeof target & {
+          instanceId: ProgramFunctionInstanceId;
+        } => typeof target.instanceId === "number",
+      );
+      if (targets.length !== 1) {
+        skip("non_unique_target");
+        return;
+      }
+      const target = targets[0]!;
+      const targetInstance = ir.baseProgram.functions.getInstance(
+        target.instanceId,
+      );
+      const targetItem = ir.index.getFunction(
+        targetInstance.symbolRef.moduleId,
+        targetInstance.symbolRef.symbol,
+      )?.item;
+      const signature = ir.baseProgram.functions.getSignature(
+        targetInstance.symbolRef.moduleId,
+        targetInstance.symbolRef.symbol,
+      );
+      if (
+        !targetItem ||
+        !signature ||
+        plan.length !== targetItem.parameters.length
+      ) {
+        skip("unsupported_target");
+        return;
+      }
+      if (
+        ir.baseProgram.symbols.getIntrinsicFunctionFlags(
+          target.functionId as ProgramSymbolId,
+        ).intrinsic
+      ) {
+        skip("intrinsic");
+        return;
+      }
 
-  return {
-    program: optimizedProgram,
-    facts: {
-      handlerClauseCaptures: new Map(
-        Array.from(ir.facts.handlerClauseCaptures.entries()).map(([moduleId, byHandler]) => [
-          moduleId,
-          new Map(
-            Array.from(byHandler.entries()).map(([handlerExprId, byClause]) => [
-              handlerExprId,
-              new Map(byClause),
-            ]),
-          ),
-        ]),
-      ),
-      reachableFunctionInstances: new Set(ir.facts.reachableFunctionInstances),
-      reachableFunctionSymbols: new Set(ir.facts.reachableFunctionSymbols),
-      reachableModuleLets: new Map(
-        Array.from(ir.facts.reachableModuleLets.entries()).map(([moduleId, symbols]) => [
-          moduleId,
-          new Set(symbols),
-        ]),
-      ),
-      usedTraitDispatchSignatures: new Set(ir.facts.usedTraitDispatchSignatures),
-      receiverSpecializationRequests: cloneReceiverSpecializationRequests(
-        ir.facts.receiverSpecializationRequests,
-      ),
-      exactParameterTypes: new Map(
-        Array.from(ir.facts.exactParameterTypes.entries()).map(
-          ([instanceId, bySymbol]) => [instanceId, new Map(bySymbol)],
-        ),
-      ),
-      knownParameterTypes: new Map(
-        Array.from(ir.facts.knownParameterTypes.entries()).map(
-          ([instanceId, bySymbol]) => [
-            instanceId,
-            new Map(
-              Array.from(bySymbol.entries()).map(([symbol, types]) => [
-                symbol,
-                new Set(types),
-              ]),
-            ),
-          ],
-        ),
-      ),
-      escapeAnalysis: {
-        origins: new Map(
-          Array.from(ir.facts.escapeAnalysis.origins.entries()).map(
-            ([moduleId, byExpr]) => [
-              moduleId,
-              new Map(
-                Array.from(byExpr.entries()).map(([exprId, fact]) => [
-                  exprId,
-                  {
-                    ...fact,
-                    escapeReasons: [...fact.escapeReasons],
-                    directLocalSymbols: [...fact.directLocalSymbols],
-                    useExprIds: [...fact.useExprIds],
-                  },
-                ]),
-              ),
-            ],
-          ),
-        ),
-        parameters: new Map(
-          Array.from(ir.facts.escapeAnalysis.parameters.entries()).map(
-            ([instanceId, bySymbol]) => [
-              instanceId,
-              new Map(
-                Array.from(bySymbol.entries()).map(([symbol, fact]) => [
-                  symbol,
-                  {
-                    ...fact,
-                    escapeReasons: [...fact.escapeReasons],
-                    useExprIds: [...fact.useExprIds],
-                  },
-                ]),
-              ),
-            ],
-          ),
-        ),
-      },
-      runtimeTypeCheckElisionFieldAccesses: new Map(
-        Array.from(ir.facts.runtimeTypeCheckElisionFieldAccesses.entries()).map(
-          ([moduleId, exprIds]) => [moduleId, new Set(exprIds)],
-        ),
-      ),
-      semanticCopyForwardingFieldAccesses: new Map(
-        Array.from(ir.facts.semanticCopyForwardingFieldAccesses.entries()).map(
-          ([moduleId, exprIds]) => [moduleId, new Set(exprIds)],
-        ),
-      ),
-      codegenPlan,
-    },
-  };
+      const states = plan.map(callShapeParameterState);
+      const valid = states.every((state, index) => {
+        const parameter = targetItem.parameters[index];
+        const signatureParameter = signature.parameters[index];
+        if (!parameter || !signatureParameter) {
+          return false;
+        }
+        if (
+          typeof parameter.defaultValue === "number" &&
+          signatureParameter.bindingKind !== undefined &&
+          signatureParameter.bindingKind !== "value"
+        ) {
+          return false;
+        }
+        if (state === "provided") {
+          return true;
+        }
+        if (state === "stable-callsite-id") {
+          return (
+            typeof parameter.defaultValue === "number" &&
+            signatureParameter.synthetic === "stable-callsite-id"
+          );
+        }
+        return (
+          typeof parameter.defaultValue === "number" ||
+          signatureParameter.optional === true
+        );
+      });
+      if (!valid) {
+        skip("invalid_plan");
+        return;
+      }
+      const beneficial = states.some(
+        (state, index) =>
+          state !== "provided" ||
+          typeof targetItem.parameters[index]?.defaultValue === "number",
+      );
+      if (!beneficial) {
+        skip("identity_shape");
+        return;
+      }
+
+      const keyTokens = Object.freeze(["v1", ...states]);
+      candidates.push({
+        callSiteKey: receiverSpecializationCallSiteKey({
+          moduleId: moduleView.moduleId,
+          exprId,
+        }),
+        callerInstanceId,
+        request: Object.freeze({
+          calleeInstanceId: target.instanceId,
+          keyTokens,
+        }),
+      });
+    });
+  });
+
+  return { candidates, skipped };
 };
 
-const OPTIMIZATION_PASSES: readonly ProgramOptimizationPass[] = [
-  pureCompileTimeEvaluationPass,
-  simplifyBooleanBranchPass,
-  constructorKnownSimplificationPass,
-  effectFastPathEliminationPass,
-  closureEnvironmentShrinkingPass,
-  continuationAndHandlerEnvironmentShrinkingPass,
-  wholeProgramSpecializationPruningPass,
-  exactReceiverPropagationPass,
-  constructorKnownSimplificationPass,
-  traitDispatchDevirtualizationPass,
-  wholeProgramSpecializationPruningPass,
-  exactReceiverPropagationPass,
-  constructorKnownSimplificationPass,
-  traitDispatchDevirtualizationPass,
-  wholeProgramSpecializationPruningPass,
-  redundantRuntimeTypeCheckEliminationPass,
-  semanticCopyForwardingPass,
-  escapeAnalysisPass,
-];
+const callShapeSpecializationPlanningPass: ProgramOptimizationPass = {
+  name: "call-shape-specialization-planning",
+  run(ctx) {
+    const ir = ctx.ir as MutableOptimizationIr;
+    const { candidates, skipped } = collectCallShapeCandidates({ ir });
+    const candidatesByCallee = new Map<
+      ProgramFunctionInstanceId,
+      Map<string, CallShapeCandidate[]>
+    >();
+    candidates.forEach((candidate) => {
+      const byShape =
+        candidatesByCallee.get(candidate.request.calleeInstanceId) ?? new Map();
+      const shapeKey = candidate.request.keyTokens.join("|");
+      byShape.set(shapeKey, [...(byShape.get(shapeKey) ?? []), candidate]);
+      candidatesByCallee.set(candidate.request.calleeInstanceId, byShape);
+    });
+
+    const selected = new Map<
+      string,
+      Map<ProgramFunctionInstanceId, CallShapeSpecializationRequest>
+    >();
+    let uniqueShapes = 0;
+    let rejectedByPlannerBudget = 0;
+    candidatesByCallee.forEach((byShape) => {
+      const ranked = Array.from(byShape.entries()).sort(
+        ([leftKey, left], [rightKey, right]) =>
+          right.length - left.length || leftKey.localeCompare(rightKey),
+      );
+      const admitted = ranked.slice(
+        0,
+        ir.facts.codegenPlan.specializationPolicy.callShapeContextsPerFunction,
+      );
+      uniqueShapes += admitted.length;
+      rejectedByPlannerBudget += ranked.length - admitted.length;
+      admitted.forEach(([, shapeCandidates]) => {
+        shapeCandidates.forEach((candidate) => {
+          const byCaller = selected.get(candidate.callSiteKey) ?? new Map();
+          byCaller.set(candidate.callerInstanceId, candidate.request);
+          selected.set(candidate.callSiteKey, byCaller);
+        });
+      });
+    });
+
+    const changed =
+      serializeCallShapeSpecializationRequests(
+        ir.facts.callShapeSpecializationRequests,
+      ) !== serializeCallShapeSpecializationRequests(selected);
+    ir.facts.callShapeSpecializationRequests = selected;
+    return {
+      changed,
+      metrics: {
+        candidate_calls: candidates.length,
+        selected_calls: Array.from(selected.values()).reduce(
+          (count, byCaller) => count + byCaller.size,
+          0,
+        ),
+        unique_shapes: uniqueShapes,
+        rejected_by_planner_budget: rejectedByPlannerBudget,
+        ...Object.fromEntries(
+          Object.entries(skipped).map(([reason, count]) => [
+            `skipped.${reason}`,
+            count,
+          ]),
+        ),
+      },
+    };
+  },
+};
+
+const OPTIMIZATION_SCHEDULE = createOptimizationSchedule({
+  pureCompileTimeEvaluation: pureCompileTimeEvaluationPass,
+  booleanBranchSimplification: simplifyBooleanBranchPass,
+  constructorKnownSimplification: constructorKnownSimplificationPass,
+  effectFastPathElimination: effectFastPathEliminationPass,
+  reachabilityPruning: wholeProgramSpecializationPruningPass,
+  exactReceiverPropagation: exactReceiverPropagationPass,
+  traitDispatchDevirtualization: traitDispatchDevirtualizationPass,
+  closureEnvironmentShrinking: closureEnvironmentShrinkingPass,
+  handlerEnvironmentShrinking: continuationAndHandlerEnvironmentShrinkingPass,
+  runtimeTypeCheckElimination: redundantRuntimeTypeCheckEliminationPass,
+  semanticCopyForwarding: semanticCopyForwardingPass,
+  escapeAnalysis: escapeAnalysisPass,
+  callShapeSpecialization: callShapeSpecializationPlanningPass,
+});
 
 export const optimizeProgram = ({
   program,
@@ -6044,36 +6246,29 @@ export const optimizeProgram = ({
   options?: CodegenOptions;
 }): ProgramOptimizationResult => {
   const ir = buildOptimizationIr({ program, modules, entryModuleId, options });
-  const context = new OptimizationContextImpl(ir);
+  const context = new MutableOptimizationContext(ir);
   void entryModuleId;
   void options;
 
-  OPTIMIZATION_PASSES.forEach((pass, index) => {
-    const passStartedAt = startCompilerPerfPhase();
-    const result = pass.run(context);
-    markCompilerPerfPhaseDuration(
-      `optimize.pass.${pass.name}`,
-      passStartedAt,
-    );
-    recordCompilerPerfDuration({
-      name: `optimize.pass.${pass.name}.ms`,
-      startedAt: passStartedAt,
-    });
-    recordCompilerPerfDuration({
-      name: `optimize.pass.${index}.${pass.name}.ms`,
-      startedAt: passStartedAt,
-    });
-    if (result.changed) {
-      incrementCompilerPerfCounter(`optimize.pass.${pass.name}.changed`);
-    }
-    if (result.invalidates?.length) {
-      incrementCompilerPerfCounter(
-        `optimize.pass.${pass.name}.invalidates`,
-        result.invalidates.length,
-      );
-      context.invalidateAnalyses(result.invalidates);
-    }
+  const initial = runOptimizationPassSequence({
+    context,
+    passes: OPTIMIZATION_SCHEDULE.initial,
   });
+  const fixedPoint = runOptimizationPassesToFixedPoint({
+    context,
+    passes: OPTIMIZATION_SCHEDULE.fixedPoint,
+    maxIterations: optimizationFixedPointIterationBudget({
+      ir,
+      minimumIterations: OPTIMIZATION_SCHEDULE.minimumFixedPointIterations,
+    }),
+    startOrdinal: initial.nextOrdinal,
+  });
+  runOptimizationPassSequence({
+    context,
+    passes: OPTIMIZATION_SCHEDULE.final,
+    startOrdinal: fixedPoint.nextOrdinal,
+  });
+  recordOptimizationBodyIndexCounters(ir.index.getBodyIndexCounters());
 
   return finalizeOptimization({ ir });
 };

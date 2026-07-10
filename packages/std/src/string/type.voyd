@@ -16,12 +16,14 @@ use std::range::{ Range }
 pub use std::string::index::StringIndex
 
 /// Owned UTF-8 string value.
+@intrinsic_type(type: "voyd.std.string")
 pub obj String {
   bytes: Array<i32>,
   byte_count: i32
 }
 
 /// Non-owning view into a `String` byte range.
+@intrinsic_type(type: "voyd.std.string-slice")
 pub obj StringSlice {
   source: String,
   start: i32,

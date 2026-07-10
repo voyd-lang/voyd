@@ -38,11 +38,13 @@ import {
   startCompilerPerfPhase,
   startCompilerPerfSession,
 } from "./perf.js";
+import { isOptimizationEnabled } from "./optimization-policy.js";
 
 export {
   createCompilerDependencySnapshotCache,
   type CompilerDependencySnapshotCache,
 };
+export type { OptimizationLevel } from "./optimization-policy.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -483,7 +485,8 @@ export const emitProgram = async ({
     startedAt: viewStartedAt,
   });
 
-  const optimized = codegenOptions?.optimize
+  const optimizationEnabled = isOptimizationEnabled(codegenOptions);
+  const optimized = optimizationEnabled
     ? optimizeProgram({
         program,
         modules,
@@ -492,7 +495,7 @@ export const emitProgram = async ({
       })
     : undefined;
   markCompilerPerfPhaseDuration("optimizeProgram", optimizeStartedAt);
-  if (codegenOptions?.optimize) {
+  if (optimizationEnabled) {
     recordCompilerPerfDuration({
       name: "emit.optimize_program.ms",
       startedAt: optimizeStartedAt,
@@ -570,7 +573,8 @@ export const emitProgramWithContinuationFallback = async ({
   });
 
   const optimizeStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
-  const optimized = codegenOptions?.optimize
+  const optimizationEnabled = isOptimizationEnabled(codegenOptions);
+  const optimized = optimizationEnabled
     ? optimizeProgram({
         program,
         modules,
@@ -578,7 +582,7 @@ export const emitProgramWithContinuationFallback = async ({
         options: codegenOptions,
       })
     : undefined;
-  if (codegenOptions?.optimize) {
+  if (optimizationEnabled) {
     recordCompilerPerfDuration({
       name: "emit_fallback.optimize_program.ms",
       startedAt: optimizeStartedAt,

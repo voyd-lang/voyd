@@ -1,5 +1,13 @@
-import type { CodegenContext, StructuralFieldInfo, TypeId } from "../context.js";
+import type {
+  CodegenContext,
+  StructuralFieldInfo,
+  TypeId,
+} from "../context.js";
 import { getFixedArrayWasmTypes, getStructuralTypeInfo } from "../types.js";
+import {
+  isStdIntrinsicNominalType,
+  STD_INTRINSIC_TYPE,
+} from "../../compiler-contracts/types.js";
 
 export type BoundaryPrimitiveSchema =
   | { kind: "bool"; typeId: TypeId }
@@ -155,7 +163,9 @@ export const formatBoundaryType = ({
           .join(", ")} }`;
       case "function":
         return `fn(${desc.parameters
-          .map((param) => formatBoundaryType({ typeId: param.type, ctx, active }))
+          .map((param) =>
+            formatBoundaryType({ typeId: param.type, ctx, active }),
+          )
           .join(", ")}) -> ${formatBoundaryType({
           typeId: desc.returnType,
           ctx,
@@ -166,11 +176,7 @@ export const formatBoundaryType = ({
           .map((member) => formatBoundaryType({ typeId: member, ctx, active }))
           .join(" | ");
       case "intersection": {
-        const parts = [
-          desc.nominal,
-          desc.structural,
-          ...(desc.traits ?? []),
-        ]
+        const parts = [desc.nominal, desc.structural, ...(desc.traits ?? [])]
           .filter((part): part is TypeId => typeof part === "number")
           .map((part) => formatBoundaryType({ typeId: part, ctx, active }));
         return parts.length > 0 ? parts.join(" & ") : "intersection";
@@ -549,7 +555,11 @@ const arrayInfo = ({
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (
     (desc.kind === "nominal-object" || desc.kind === "value-object") &&
-    desc.name === "Array" &&
+    isStdIntrinsicNominalType({
+      program: ctx.program,
+      typeId,
+      intrinsicType: STD_INTRINSIC_TYPE.array,
+    }) &&
     desc.typeArgs.length === 1
   ) {
     return { arrayTypeId: typeId, elementTypeId: desc.typeArgs[0]! };
@@ -566,20 +576,12 @@ const isStringType = ({
 }: {
   typeId: TypeId;
   ctx: CodegenContext;
-}): boolean => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  if (
-    (desc.kind === "nominal-object" || desc.kind === "value-object") &&
-    desc.name === "String"
-  ) {
-    return true;
-  }
-  return (
-    desc.kind === "intersection" &&
-    typeof desc.nominal === "number" &&
-    isStringType({ typeId: desc.nominal, ctx })
-  );
-};
+}): boolean =>
+  isStdIntrinsicNominalType({
+    program: ctx.program,
+    typeId,
+    intrinsicType: STD_INTRINSIC_TYPE.string,
+  });
 
 const recordFieldFor = ({
   ownerTypeId,
@@ -660,9 +662,11 @@ const unsupported = ({
   reason: string;
 }): never => {
   throw new BoundarySchemaError(
-    `boundary DTO incompatibility at ${path}: ${reason}. Unsupported type: ${formatBoundaryType({
-      typeId,
-      ctx,
-    })}. ${DTO_SUMMARY}.`,
+    `boundary DTO incompatibility at ${path}: ${reason}. Unsupported type: ${formatBoundaryType(
+      {
+        typeId,
+        ctx,
+      },
+    )}. ${DTO_SUMMARY}.`,
   );
 };

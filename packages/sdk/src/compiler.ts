@@ -14,7 +14,11 @@ export type {
   SourceSpan,
 } from "@voyd-lang/compiler/diagnostics/index.js";
 export { DiagnosticError } from "@voyd-lang/compiler/diagnostics/index.js";
-export { EFFECTS_HOST_BOUNDARY_STD_DEPS } from "@voyd-lang/compiler/codegen/effects/host-boundary/constants.js";
+export {
+  BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES,
+  /** @deprecated Use BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES. */
+  BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES as EFFECTS_HOST_BOUNDARY_STD_DEPS,
+} from "@voyd-lang/compiler/compiler-contracts/index.js";
 export {
   modulePathFromFile,
   modulePathToString,
@@ -25,4 +29,5 @@ export type {
   ModuleRoots,
 } from "@voyd-lang/compiler/modules/types.js";
 export type { HirGraph } from "@voyd-lang/compiler/semantics/hir/index.js";
+export type { OptimizationLevel } from "@voyd-lang/compiler/optimization-policy.js";
 export { BENCH_FILE } from "@voyd-lang/compiler/parser/benchmark.js";

@@ -1,6 +1,7 @@
 import type { Diagnostic } from "@voyd-lang/compiler/diagnostics/index.js";
 import type { BoundaryExportsOption } from "@voyd-lang/compiler/codegen/context.js";
 import type { ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
+import type { OptimizationLevel } from "@voyd-lang/compiler/optimization-policy.js";
 import type { TestCase as CompilerTestCase } from "@voyd-lang/compiler/pipeline-shared.js";
 import type {
   DefaultAdapterOptions,
@@ -23,6 +24,7 @@ export type {
   ExportAbiEntry,
   HostProtocolTable,
   ModuleRoots,
+  OptimizationLevel,
   SignatureHash,
   VoydRuntimeDiagnostics,
   VoydRuntimeError,
@@ -45,6 +47,12 @@ export type CompileOptions = {
   testsOnly?: boolean;
   /** Control which modules contribute test cases. */
   testScope?: "all" | "entry";
+  /**
+   * Select the compiler optimization tier. Defaults to `none`.
+   * When both this option and `optimize` are provided, this option wins.
+   */
+  optimizationLevel?: OptimizationLevel;
+  /** @deprecated Use `optimizationLevel`. true maps to `release`; false maps to `none`. */
   optimize?: boolean;
   boundaryExports?: BoundaryExportsOption;
   /**

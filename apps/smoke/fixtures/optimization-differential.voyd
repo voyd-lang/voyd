@@ -1,0 +1,61 @@
+trait Score
+  fn score(self) -> i32
+
+obj ScoreBox {
+  value: i32
+}
+
+impl Score for ScoreBox
+  fn score(self) -> i32
+    self.value
+
+fn add_one(value: i32) -> i32
+  value + 1
+
+fn score_value(value: Score) -> i32
+  value.score()
+
+pub fn folded_branch() -> i32
+  if add_one(40) == 41 then: 42 else: 0
+
+pub fn trait_dispatch() -> i32
+  score_value(ScoreBox { value: 9 })
+
+obj Pair {
+  x: i32,
+  y: i32
+}
+
+pub fn heap_alias_identity() -> i32
+  let ~pair = Pair { x: 1, y: 2 }
+  let alias = pair
+  pair.x = 8
+  alias.x + pair.y
+
+eff Probe
+  touch(resume) -> void
+
+val WideValue {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+fn wide_value(): Probe -> WideValue
+  Probe::touch()
+  WideValue { a: 1, b: 2, c: 3, d: 4, e: 5 }
+
+pub fn handled_effect_wide_return(): () -> i32
+  try
+    let value = wide_value()
+    value.a + value.e
+  Probe::touch(resume):
+    resume()
+
+fn zero() -> i32
+  0
+
+pub fn deliberate_trap() -> i32
+  10 / zero()

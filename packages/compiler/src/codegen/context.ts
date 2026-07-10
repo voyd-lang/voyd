@@ -48,9 +48,18 @@ import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 import type { ProgramHelperRegistry } from "./program-helpers.js";
 import type { ProgramOptimizationFacts } from "../optimize/ir.js";
 import type { ProgramSymbolId } from "../semantics/ids.js";
+import type {
+  OptimizationLevel,
+  SpecializationPolicy,
+} from "../optimization-policy.js";
+import type { FunctionSpecializationDimensions } from "./specialization-policy.js";
+import type { CallShapeParameterState } from "../optimize/ir.js";
 
 export interface CodegenOptions {
+  optimizationLevel?: OptimizationLevel;
+  /** @deprecated Use optimizationLevel. true maps to release. */
   optimize?: boolean;
+  /** @internal Legacy compiler-only profile override. */
   optimizationProfile?: "aggressive" | "standard";
   validate?: boolean;
   runtimeDiagnostics?: boolean;
@@ -113,8 +122,13 @@ export interface FunctionMetadata {
   effectful: boolean;
   effectRow?: EffectRowId;
   exactParameterTypes?: ReadonlyMap<SymbolId, TypeId>;
+  specialization?: FunctionSpecializationDimensions;
   scalarAggregateParamIndexes?: readonly number[];
   scalarAggregateResult?: boolean;
+  callShape?: Readonly<{
+    keyTokens: readonly string[];
+    parameterStates: readonly CallShapeParameterState[];
+  }>;
 }
 
 export interface StaticEffectHandlerCapture {
@@ -265,6 +279,7 @@ export interface CodegenContext {
   effectLowering: EffectLoweringResult;
   outcomeValueTypes: Map<string, OutcomeValueBox>;
   optimization?: ProgramOptimizationFacts;
+  specializationPolicy: SpecializationPolicy;
 }
 
 export interface LocalBindingBase {
@@ -403,7 +418,7 @@ export interface ExpressionCompilerParams {
 }
 
 export type ExpressionCompiler = (
-  params: ExpressionCompilerParams
+  params: ExpressionCompilerParams,
 ) => CompiledExpression;
 
 export type {

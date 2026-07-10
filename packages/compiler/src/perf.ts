@@ -172,6 +172,7 @@ export const logCompilerPerfSummary = ({
   }
 
   const summary = {
+    schemaVersion: 1,
     entryPath,
     success,
     diagnostics,

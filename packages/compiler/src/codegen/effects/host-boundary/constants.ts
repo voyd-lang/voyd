@@ -5,12 +5,6 @@ export const EFFECTS_MEMORY_EXPORT = "effects_memory";
 // effects_memory is an alias of linear memory for host ABI stability.
 export const EFFECTS_MEMORY_INTERNAL = LINEAR_MEMORY_INTERNAL;
 
-export const EFFECTS_HOST_BOUNDARY_STD_DEPS = [
-  "std::msgpack",
-  "std::msgpack::fns",
-  "std::string",
-] as const;
-
 export const EFFECT_RESULT_STATUS = {
   value: 0,
   effect: 1,

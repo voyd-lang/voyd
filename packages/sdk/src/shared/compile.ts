@@ -23,6 +23,7 @@ import {
   startCompilerPerfSession,
 } from "@voyd-lang/compiler/perf.js";
 import type { BoundaryExportsOption } from "@voyd-lang/compiler/codegen/context.js";
+import type { OptimizationLevel } from "@voyd-lang/compiler/optimization-policy.js";
 import type { TestCase } from "./types.js";
 import { diagnosticsFromUnknownError } from "./diagnostics.js";
 
@@ -55,6 +56,7 @@ export const compileWithLoader = async ({
   includeTests,
   testsOnly,
   runtimeDiagnostics,
+  optimizationLevel,
   optimize,
   loadModuleGraph,
   testScope,
@@ -69,6 +71,7 @@ export const compileWithLoader = async ({
   includeTests?: boolean;
   testsOnly?: boolean;
   runtimeDiagnostics?: boolean;
+  optimizationLevel?: OptimizationLevel;
   optimize?: boolean;
   loadModuleGraph: LoadModuleGraphFn;
   testScope?: TestScope;
@@ -125,8 +128,10 @@ export const compileWithLoader = async ({
       typeof runtimeDiagnostics === "boolean"
         ? { runtimeDiagnostics, emitEffectHelpers: true }
         : { emitEffectHelpers: true };
-    const optimizationCodegenOption =
-      typeof optimize === "boolean" ? { optimize } : {};
+    const optimizationCodegenOption = {
+      ...(optimizationLevel ? { optimizationLevel } : {}),
+      ...(typeof optimize === "boolean" ? { optimize } : {}),
+    };
     const codegenOption = {
       ...optimizationCodegenOption,
       ...runtimeDiagnosticsCodegenOption,

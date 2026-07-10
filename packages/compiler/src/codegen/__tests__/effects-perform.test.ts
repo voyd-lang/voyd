@@ -22,36 +22,37 @@ import { codegenProgram } from "../codegen.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../program-helpers.js";
 import type { ProgramSymbolId, TypeId } from "../../semantics/ids.js";
+import { specializationPolicyForOptimizationLevel } from "../../optimization-policy.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
-  "effects-perform.voyd"
+  "effects-perform.voyd",
 );
 const guardFixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
-  "effects-perform-guard.voyd"
+  "effects-perform-guard.voyd",
 );
 const localFastPathFixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
-  "effects-local-fast-path.voyd"
+  "effects-local-fast-path.voyd",
 );
 const localTailControlFlowFixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
-  "effects-local-tail-control-flow.voyd"
+  "effects-local-tail-control-flow.voyd",
 );
 const localTailStdlibRngFixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
-  "effects-local-tail-stdlib-rng.voyd"
+  "effects-local-tail-stdlib-rng.voyd",
 );
 const tailResumeArgEffectfulFixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
-  "effects-tail-resume-arg-effectful.voyd"
+  "effects-tail-resume-arg-effectful.voyd",
 );
 
 const compileEffectFixtureWithCompilerOptimization = async (
@@ -82,12 +83,17 @@ const compileEffectFixtureWithCompilerOptimization = async (
       reachableModuleLets: new Map(),
       usedTraitDispatchSignatures: usedTraitDispatchSignaturesFor(program),
       receiverSpecializationRequests: new Map(),
+      callShapeSpecializationRequests: new Map(),
       exactParameterTypes: new Map(),
       knownParameterTypes: new Map(),
       escapeAnalysis: { origins: new Map(), parameters: new Map() },
       runtimeTypeCheckElisionFieldAccesses: new Map(),
       semanticCopyForwardingFieldAccesses: new Map(),
-      codegenPlan: { representations: {} },
+      codegenPlan: {
+        representations: {},
+        specializationPolicy:
+          specializationPolicyForOptimizationLevel("release"),
+      },
     },
   });
   if (!result.wasm) {
@@ -110,7 +116,9 @@ const usedTraitDispatchSignaturesFor = (
         return;
       }
       callInfo.targets?.forEach((target) => {
-        const mapping = program.traits.getTraitMethodImpl(target as ProgramSymbolId);
+        const mapping = program.traits.getTraitMethodImpl(
+          target as ProgramSymbolId,
+        );
         if (!mapping) {
           return;
         }
@@ -122,7 +130,9 @@ const usedTraitDispatchSignaturesFor = (
 };
 
 const loadSemantics = () =>
-  semanticsPipeline(parse(readFileSync(fixturePath, "utf8"), "/proj/src/effects-perform.voyd"));
+  semanticsPipeline(
+    parse(readFileSync(fixturePath, "utf8"), "/proj/src/effects-perform.voyd"),
+  );
 
 const sanitize = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
@@ -156,6 +166,7 @@ const buildLoweringSnapshot = () => {
     moduleContexts,
     diagnostics,
     options: {
+      optimizationLevel: "none",
       optimize: false,
       optimizationProfile: "aggressive",
       validate: true,
@@ -199,6 +210,7 @@ const buildLoweringSnapshot = () => {
       tempTypeIds: new Map(),
     },
     outcomeValueTypes: new Map(),
+    specializationPolicy: specializationPolicyForOptimizationLevel("none"),
   };
   moduleContexts.set(ctx.moduleId, ctx);
   ctx.effectsBackend = selectEffectsBackend(ctx);
@@ -212,19 +224,19 @@ const buildLoweringSnapshot = () => {
       siteOrder: site.siteOrder,
       function:
         site.owner.kind === "function"
-          ? ctx.program.symbols.getName(
+          ? (ctx.program.symbols.getName(
               ctx.program.symbols.idOf({
                 moduleId: ctx.moduleId,
                 symbol: site.owner.symbol,
-              })
-            ) ?? `${site.owner.symbol}`
+              }),
+            ) ?? `${site.owner.symbol}`)
           : "__lambda__",
       effect:
         ctx.program.symbols.getName(
           ctx.program.symbols.idOf({
             moduleId: ctx.moduleId,
             symbol: site.effectSymbol,
-          })
+          }),
         ) ?? `${site.effectSymbol}`,
       envFields: site.envFields.map((field) => ({
         name: field.name,
@@ -238,29 +250,27 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
     const sites = buildLoweringSnapshot();
     expect(sites.length).toBeGreaterThan(0);
     expect(sites.map((site) => site.effect)).toContain("await");
-    expect(sites.every((site) => site.envFields[0]?.name === "site")).toBe(true);
+    expect(sites.every((site) => site.envFields[0]?.name === "site")).toBe(
+      true,
+    );
     expect(
       sites.some((site) =>
-        site.envFields.some((field) => field.sourceKind === "handler")
-      )
+        site.envFields.some((field) => field.sourceKind === "handler"),
+      ),
     ).toBe(true);
   });
 
-  it(
-    "emits continuation env captures and effect requests in Wasm",
-    async () => {
-      const { module } = await compileEffectFixture({
-        entryPath: fixturePath,
-        codegenOptions: { emitEffectHelpers: true },
-      });
-      const text = module.emitText();
-      expect(text).toContain("voydEffectRequest");
-      expect(text).toContain("voydContEnvBase");
-      expect(text).toContain("voydContEnv_");
-      expect(text).toContain("__cont_");
-    },
-    60_000,
-  );
+  it("emits continuation env captures and effect requests in Wasm", async () => {
+    const { module } = await compileEffectFixture({
+      entryPath: fixturePath,
+      codegenOptions: { emitEffectHelpers: true },
+    });
+    const text = module.emitText();
+    expect(text).toContain("voydEffectRequest");
+    expect(text).toContain("voydContEnvBase");
+    expect(text).toContain("voydContEnv_");
+    expect(text).toContain("__cont_");
+  }, 60_000);
 
   it("specializes simple locally handled tail effects in optimized builds", async () => {
     const unoptimized = await compileEffectFixture({
@@ -306,7 +316,9 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
     expect(text).toMatch(/loop_sum_\d+__handled/);
     expect(text).toMatch(/match_value_\d+__handled/);
     expect(text).toMatch(/open_sum_\d+__handled/);
-    expect(text).toMatch(/local_then_dynamic_\d+(?:__receiver_[^\s)]*)?__handled/);
+    expect(text).toMatch(
+      /local_then_dynamic_\d+(?:__receiver_[^\s)]*)?__handled/,
+    );
 
     const host = await createVoydHost({ wasm: specialized.wasm });
     await expect(host.run<number>("triple_sum")).resolves.toBe(6);
@@ -367,17 +379,20 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
     });
     const host = await createVoydHost({ wasm });
 
-    await expect(host.run<number>("tail_resume_arg_effectful_internal")).resolves.toBe(41);
-    await expect(host.run<number>("effectful_resume_arg_internal")).resolves.toBe(41);
+    await expect(
+      host.run<number>("tail_resume_arg_effectful_internal"),
+    ).resolves.toBe(41);
+    await expect(
+      host.run<number>("effectful_resume_arg_internal"),
+    ).resolves.toBe(41);
   });
 
   it("does not re-evaluate guards when resuming after a perform", async () => {
-    const { module } = await compileEffectFixture({ entryPath: guardFixturePath });
+    const { module } = await compileEffectFixture({
+      entryPath: guardFixturePath,
+    });
     if (process.env.DEBUG_EFFECTS_WAT === "1") {
-      writeFileSync(
-        "debug-effects-perform-guard.wat",
-        module.emitText()
-      );
+      writeFileSync("debug-effects-perform-guard.wat", module.emitText());
     }
     const parsed = parseEffectTable(module);
     const hitOp = parsed.ops.find((op) => op.label.endsWith("Log.hit"));

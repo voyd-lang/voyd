@@ -58,12 +58,25 @@ export type EscapeAnalysisParameterFact = {
 };
 
 export type ProgramEscapeAnalysisFacts = {
-  origins: ReadonlyMap<string, ReadonlyMap<HirExprId, EscapeAnalysisOriginFact>>;
+  origins: ReadonlyMap<
+    string,
+    ReadonlyMap<HirExprId, EscapeAnalysisOriginFact>
+  >;
   parameters: ReadonlyMap<
     ProgramFunctionInstanceId,
     ReadonlyMap<SymbolId, EscapeAnalysisParameterFact>
   >;
 };
+
+export type CallShapeParameterState =
+  | "provided"
+  | "omitted"
+  | "stable-callsite-id";
+
+export type CallShapeSpecializationRequest = Readonly<{
+  calleeInstanceId: ProgramFunctionInstanceId;
+  keyTokens: readonly string[];
+}>;
 
 export type ProgramOptimizationFacts = {
   handlerClauseCaptures: ReadonlyMap<
@@ -78,6 +91,10 @@ export type ProgramOptimizationFacts = {
     string,
     ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>
   >;
+  callShapeSpecializationRequests: ReadonlyMap<
+    string,
+    ReadonlyMap<ProgramFunctionInstanceId, CallShapeSpecializationRequest>
+  >;
   exactParameterTypes: ReadonlyMap<
     ProgramFunctionInstanceId,
     ReadonlyMap<SymbolId, TypeId>
@@ -87,8 +104,14 @@ export type ProgramOptimizationFacts = {
     ReadonlyMap<SymbolId, ReadonlySet<TypeId>>
   >;
   escapeAnalysis: ProgramEscapeAnalysisFacts;
-  runtimeTypeCheckElisionFieldAccesses: ReadonlyMap<string, ReadonlySet<HirExprId>>;
-  semanticCopyForwardingFieldAccesses: ReadonlyMap<string, ReadonlySet<HirExprId>>;
+  runtimeTypeCheckElisionFieldAccesses: ReadonlyMap<
+    string,
+    ReadonlySet<HirExprId>
+  >;
+  semanticCopyForwardingFieldAccesses: ReadonlyMap<
+    string,
+    ReadonlySet<HirExprId>
+  >;
   codegenPlan: ProgramCodegenOptimizationPlan;
 };
 
@@ -99,12 +122,16 @@ export type ProgramOptimizationIR = {
     testMode: boolean;
     testScope: "all" | "entry";
     boundaryExports?: CodegenOptions["boundaryExports"];
+    effectsHostBoundary?: CodegenOptions["effectsHostBoundary"];
   };
   modules: ReadonlyMap<string, OptimizedModuleView>;
   calls: ReadonlyMap<string, ReadonlyMap<HirExprId, OptimizedCallInfo>>;
   functionInstantiations: ReadonlyMap<
     string,
-    ReadonlyMap<SymbolId, ReadonlyMap<ProgramFunctionInstanceId, readonly number[]>>
+    ReadonlyMap<
+      SymbolId,
+      ReadonlyMap<ProgramFunctionInstanceId, readonly number[]>
+    >
   >;
   survivingInstances: readonly MonomorphizedInstanceInfo[];
   facts: ProgramOptimizationFacts;

@@ -33,6 +33,34 @@ const compileMain = (source: string): (() => number) => {
 };
 
 describe("borrowed array element views", () => {
+  it("does not bypass methods on array-shaped user containers", () => {
+    const main = compileMain(`
+pub val WideVec5 {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+pub obj ArrayLookalike {
+  storage: FixedArray<WideVec5>,
+  count: i32
+}
+
+impl ArrayLookalike
+  fn get(self, index: i32) -> WideVec5
+    WideVec5 { a: 99, b: index, c: 0, d: 0, e: 0 }
+
+pub fn main() -> i32
+  let storage = __array_new<WideVec5>(1)
+  __array_set(storage, 0, WideVec5 { a: 1, b: 2, c: 3, d: 4, e: 5 })
+  let values = ArrayLookalike { storage: storage, count: 1 }
+  values.get(0).a
+`);
+    expect(main()).toBe(99);
+  });
+
   it("reads wide fields from direct fixed-array element projections", () => {
     const main = compileMain(`
 pub val WideVec5 {
