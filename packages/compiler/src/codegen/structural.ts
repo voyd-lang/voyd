@@ -2607,9 +2607,11 @@ export const emitStructuralConversion = ({
               fieldIndex: sourceField.runtimeIndex,
               exprRef: casted,
             });
-            return sourceField.wasmType === sourceField.heapWasmType
-              ? loaded
-              : ctx.mod.block(null, [loaded], sourceField.wasmType);
+            return liftHeapValueToInline({
+              value: loaded,
+              typeId: sourceField.typeId,
+              ctx,
+            });
           })()
         : loadStructuralField({
             structInfo: actual,

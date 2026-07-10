@@ -128,12 +128,17 @@ describe("smoke: wasm validation", { timeout: 120_000 }, () => {
     expect((exports.main as () => number)()).toBe(42);
   });
 
-  it("compiles MsgPack recursive unions used by vx.voyd", async () => {
-    const module = await compileToBinaryenModule(fixturePath("vx.voyd"));
-    const wasm = assertRunnableWasm(module);
-    expect(WebAssembly.validate(wasm as BufferSource)).toBe(true);
+  it("compiles valid VX wasm and preserves complete event options", async () => {
+    const modules = await Promise.all(
+      [false, true].map((optimize) =>
+        compileToBinaryenModule(fixturePath("vx.voyd"), { optimize }),
+      ),
+    );
+    const [unoptimizedWasm, optimizedWasm] = modules.map(assertRunnableWasm);
+    expect(WebAssembly.validate(unoptimizedWasm as BufferSource)).toBe(true);
+    expect(WebAssembly.validate(optimizedWasm as BufferSource)).toBe(true);
 
-    const host = await createVoydHost({ wasm });
+    const host = await createVoydHost({ wasm: unoptimizedWasm });
     const result = await host.runPure("main");
 
     const normalized = normalize(result) as Record<string, unknown>;
@@ -142,6 +147,18 @@ describe("smoke: wasm validation", { timeout: 120_000 }, () => {
     );
     expect(normalized.attrs).toBeTypeOf("object");
     expect(normalized.children).toBeInstanceOf(Array);
+
+    const descriptor = normalize(
+      await host.runPure("full_event_options_descriptor"),
+    ) as {
+      options: Record<string, boolean>;
+    };
+    expect(descriptor.options).toEqual({
+      preventDefault: true,
+      stopPropagation: false,
+      capture: false,
+      passive: false,
+    });
   });
 
   it("supports generic enum macro expansion across modules", async () => {
