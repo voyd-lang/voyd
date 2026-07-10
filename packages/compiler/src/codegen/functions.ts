@@ -1,5 +1,8 @@
 import binaryen from "binaryen";
-import { refCast, structGetFieldValue } from "@voyd-lang/lib/binaryen-gc/index.js";
+import {
+  refCast,
+  structGetFieldValue,
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   FunctionContext,
@@ -72,7 +75,10 @@ import type { SerializerMetadata } from "../semantics/symbol-index.js";
 import type { EffectfulExportTarget } from "./effects/codegen-backend.js";
 import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
-import { boxSignatureSpillValue, unboxSignatureSpillValue } from "./signature-spill.js";
+import {
+  boxSignatureSpillValue,
+  unboxSignatureSpillValue,
+} from "./signature-spill.js";
 import { createSerializedExportSpecialCaseResolver } from "./serialized-export-special-cases.js";
 import {
   markStaticEffectSpecializationCompiled,
@@ -96,6 +102,12 @@ import {
   takePendingScalarAggregateCallSpecializations,
   type ScalarAggregateCallSpecialization,
 } from "./optimization/scalar-aggregate-calls.js";
+import { compileOptionalNoneValue } from "./optionals.js";
+import {
+  markCallShapeSpecializationCompiled,
+  takePendingCallShapeSpecializations,
+  type CallShapeSpecialization,
+} from "./call-shape-specialization.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -117,29 +129,39 @@ const resolveExportSerializers = ({
   meta: FunctionMetadata;
   ctx: CodegenContext;
 }): readonly SerializerMetadata[] => {
-  const signature = ctx.program.functions.getSignature(meta.moduleId, meta.symbol);
+  const signature = ctx.program.functions.getSignature(
+    meta.moduleId,
+    meta.symbol,
+  );
   const typeIds = [...meta.paramTypeIds, meta.resultTypeId];
   const overrides = [
     ...(signature?.parameters.map((param) => param.declaredSerializer) ?? []),
     signature?.declaredReturnSerializer,
   ];
   const serializers = typeIds
-    .map((typeId, index) =>
-      overrides[index] ?? findUnambiguousSerializerForType(typeId, ctx),
+    .map(
+      (typeId, index) =>
+        overrides[index] ?? findUnambiguousSerializerForType(typeId, ctx),
     )
-    .filter((serializer): serializer is SerializerMetadata => Boolean(serializer));
+    .filter((serializer): serializer is SerializerMetadata =>
+      Boolean(serializer),
+    );
 
   if (serializers.length === 0) {
     return [];
   }
-  const unsupported = serializers.find((serializer) => serializer.formatId !== "msgpack");
+  const unsupported = serializers.find(
+    (serializer) => serializer.formatId !== "msgpack",
+  );
   if (unsupported) {
     throw new Error(
       `unsupported export serializer format for ${meta.wasmName}: ${unsupported.formatId}`,
     );
   }
   const byKey = new Map<string, SerializerMetadata>();
-  serializers.forEach((serializer) => byKey.set(serializerKeyFor(serializer), serializer));
+  serializers.forEach((serializer) =>
+    byKey.set(serializerKeyFor(serializer), serializer),
+  );
   return Array.from(byKey.values());
 };
 
@@ -150,7 +172,10 @@ const resolveExportReturnSerializer = ({
   meta: FunctionMetadata;
   ctx: CodegenContext;
 }): SerializerMetadata | undefined => {
-  const signature = ctx.program.functions.getSignature(meta.moduleId, meta.symbol);
+  const signature = ctx.program.functions.getSignature(
+    meta.moduleId,
+    meta.symbol,
+  );
   return (
     signature?.declaredReturnSerializer ??
     findUnambiguousSerializerForType(meta.resultTypeId, ctx)
@@ -167,7 +192,10 @@ const serializerOverridesForExport = ({
   paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
   returnSerializerOverride?: SerializerMetadata;
 } => {
-  const signature = ctx.program.functions.getSignature(meta.moduleId, meta.symbol);
+  const signature = ctx.program.functions.getSignature(
+    meta.moduleId,
+    meta.symbol,
+  );
   return {
     paramSerializerOverrides: signature?.parameters.map(
       (param) => param.declaredSerializer,
@@ -230,7 +258,8 @@ const pushFunctionMeta = (
   }
 };
 
-const userParamOffsetFor = (meta: FunctionMetadata): number => meta.userParamOffset;
+const userParamOffsetFor = (meta: FunctionMetadata): number =>
+  meta.userParamOffset;
 const firstUserParamIndexFor = (meta: FunctionMetadata): number =>
   meta.firstUserParamIndex;
 
@@ -373,6 +402,9 @@ const bindRawFunctionParameters = ({
 
   fn.parameters.forEach((param, index) => {
     const abiTypes = meta.paramAbiTypes[index] ?? [];
+    if (meta.callShape?.parameterStates[index] === "omitted") {
+      return;
+    }
     const abiValues = abiTypes.map((abiType, abiOffset) =>
       ctx.mod.local.get(abiIndex + abiOffset, abiType),
     );
@@ -382,15 +414,38 @@ const bindRawFunctionParameters = ({
       typeof typeId === "number" &&
       (abiKind === "readonly_ref" || abiKind === "mutable_ref")
     ) {
-      fnCtx.bindings.set(
-        param.symbol,
-        createStorageRefBinding({
-          index: abiIndex,
+      const source = createStorageRefBinding({
+        index: abiIndex,
+        typeId,
+        mutable: abiKind === "mutable_ref",
+        ctx,
+      });
+      if (
+        meta.callShape &&
+        typeof param.defaultValue === "number"
+      ) {
+        const owned = allocateTempLocal(
+          wasmTypeFor(typeId, ctx),
+          fnCtx,
           typeId,
-          mutable: abiKind === "mutable_ref",
           ctx,
-        }),
-      );
+        );
+        fnCtx.bindings.set(param.symbol, {
+          ...owned,
+          kind: "local",
+          typeId,
+        });
+        ops.push(
+          storeLocalValue({
+            binding: owned,
+            value: loadBindingValue(source, ctx, fnCtx),
+            ctx,
+            fnCtx,
+          }),
+        );
+      } else {
+        fnCtx.bindings.set(param.symbol, source);
+      }
     } else {
       if (typeof typeId === "number") {
         const scalarized = tryBindScalarAggregateParameter({
@@ -411,12 +466,7 @@ const bindRawFunctionParameters = ({
       }
 
       const localType = wasmTypeFor(typeId!, ctx);
-      const binding = allocateTempLocal(
-        localType,
-        fnCtx,
-        typeId,
-        ctx,
-      );
+      const binding = allocateTempLocal(localType, fnCtx, typeId, ctx);
       fnCtx.bindings.set(param.symbol, {
         ...binding,
         kind: "local",
@@ -448,6 +498,75 @@ const bindRawFunctionParameters = ({
   return ops;
 };
 
+const compileCallShapeOmittedParameterInitialization = ({
+  fn,
+  meta,
+  ctx,
+  fnCtx,
+}: {
+  fn: HirFunction;
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef[] => {
+  const ops: binaryen.ExpressionRef[] = [];
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+
+  fn.parameters.forEach((parameter, index) => {
+    if (meta.callShape?.parameterStates[index] !== "omitted") {
+      return;
+    }
+    const targetTypeId = meta.paramTypeIds[index];
+    if (typeof targetTypeId !== "number") {
+      throw new Error(
+        `codegen missing call-shape parameter type for symbol ${parameter.symbol}`,
+      );
+    }
+    const value =
+      typeof parameter.defaultValue === "number"
+        ? (() => {
+            const compiled = compileExpression({
+              exprId: parameter.defaultValue,
+              ctx,
+              fnCtx,
+              tailPosition: false,
+              expectedResultTypeId: targetTypeId,
+            }).expr;
+            const actualTypeId = getRequiredExprType(
+              parameter.defaultValue,
+              ctx,
+              typeInstanceId,
+            );
+            return coerceValueToType({
+              value: compiled,
+              actualType: actualTypeId,
+              targetType: targetTypeId,
+              ctx,
+              fnCtx,
+            });
+          })()
+        : compileOptionalNoneValue({
+            targetTypeId,
+            ctx,
+            fnCtx,
+          });
+    const binding = allocateTempLocal(
+      wasmTypeFor(targetTypeId, ctx),
+      fnCtx,
+      targetTypeId,
+      ctx,
+    );
+    fnCtx.bindings.set(parameter.symbol, {
+      ...binding,
+      kind: "local",
+      typeId: targetTypeId,
+    });
+    ops.push(storeLocalValue({ binding, value, ctx, fnCtx }));
+  });
+
+  return ops;
+};
+
 const compileDefaultParameterInitialization = ({
   fn,
   meta,
@@ -459,6 +578,14 @@ const compileDefaultParameterInitialization = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef[] => {
+  if (meta.callShape) {
+    return compileCallShapeOmittedParameterInitialization({
+      fn,
+      meta,
+      ctx,
+      fnCtx,
+    });
+  }
   const ops: binaryen.ExpressionRef[] = [];
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
 
@@ -581,7 +708,8 @@ const compileDefaultParameterInitialization = ({
               value: loadStructuralField({
                 structInfo: someInfo,
                 field: someField,
-                pointer: () => refCast(ctx.mod, rawParamExpr(), someInfo.runtimeType),
+                pointer: () =>
+                  refCast(ctx.mod, rawParamExpr(), someInfo.runtimeType),
                 ctx,
               }),
               actualType: someField.typeId,
@@ -601,11 +729,7 @@ const compileDefaultParameterInitialization = ({
     ops.push(
       storeLocalValue({
         binding: resolved,
-        value: ctx.mod.if(
-          isSome,
-          extractedSomeValue,
-          defaultValueExpr,
-        ),
+        value: ctx.mod.if(isSome, extractedSomeValue, defaultValueExpr),
         ctx,
         fnCtx,
       }),
@@ -615,7 +739,9 @@ const compileDefaultParameterInitialization = ({
   return ops;
 };
 
-const getModuleExportEntries = (ctx: CodegenContext): readonly HirExportEntry[] => {
+const getModuleExportEntries = (
+  ctx: CodegenContext,
+): readonly HirExportEntry[] => {
   const publicExports = ctx.module.hir.module.exports.filter((entry) =>
     isPublicVisibility(entry.visibility),
   );
@@ -643,7 +769,9 @@ const collectReachableFunctionSymbols = ({
   contexts: readonly CodegenContext[];
   entryModuleId: string;
 }): Set<ProgramSymbolId> => {
-  const byModuleId = new Map(contexts.map((candidate) => [candidate.moduleId, candidate]));
+  const byModuleId = new Map(
+    contexts.map((candidate) => [candidate.moduleId, candidate]),
+  );
   const entryCtx = byModuleId.get(entryModuleId) ?? ctx;
   const functionItemsByModule = new Map<string, Map<number, HirFunction>>();
   contexts.forEach((candidate) => {
@@ -670,9 +798,10 @@ const collectReachableFunctionSymbols = ({
     entryCtx.options.testMode && testScope === "all" ? contexts : [entryCtx];
   exportContexts.forEach((exportCtx) => {
     getModuleExportEntries(exportCtx).forEach((entry) => {
-      const intrinsicMetadata = entryCtx.program.symbols.getIntrinsicFunctionFlags(
-        programSymbolIdOf(exportCtx, exportCtx.moduleId, entry.symbol),
-      );
+      const intrinsicMetadata =
+        entryCtx.program.symbols.getIntrinsicFunctionFlags(
+          programSymbolIdOf(exportCtx, exportCtx.moduleId, entry.symbol),
+        );
       if (
         intrinsicMetadata.intrinsic &&
         intrinsicMetadata.intrinsicUsesSignature !== true
@@ -706,9 +835,10 @@ const collectReachableFunctionSymbols = ({
       if (item.kind !== "function") {
         return;
       }
-      const intrinsicMetadata = entryCtx.program.symbols.getIntrinsicFunctionFlags(
-        programSymbolIdOf(entryCtx, entryCtx.moduleId, item.symbol),
-      );
+      const intrinsicMetadata =
+        entryCtx.program.symbols.getIntrinsicFunctionFlags(
+          programSymbolIdOf(entryCtx, entryCtx.moduleId, item.symbol),
+        );
       if (
         intrinsicMetadata.intrinsic &&
         intrinsicMetadata.intrinsicUsesSignature !== true
@@ -759,7 +889,10 @@ const collectReachableFunctionSymbols = ({
       ctx: ownerCtx,
       onExpr: (exprId, expr) => {
         if (expr.exprKind === "call") {
-          const callInfo = ownerCtx.program.calls.getCallInfo(ownerCtx.moduleId, exprId);
+          const callInfo = ownerCtx.program.calls.getCallInfo(
+            ownerCtx.moduleId,
+            exprId,
+          );
           callInfo.targets?.forEach((targetId) =>
             enqueue(targetId as ProgramSymbolId),
           );
@@ -785,7 +918,10 @@ const collectReachableFunctionSymbols = ({
         if (expr.exprKind !== "method-call") {
           return;
         }
-        const callInfo = ownerCtx.program.calls.getCallInfo(ownerCtx.moduleId, exprId);
+        const callInfo = ownerCtx.program.calls.getCallInfo(
+          ownerCtx.moduleId,
+          exprId,
+        );
         callInfo.targets?.forEach((targetId) =>
           enqueue(targetId as ProgramSymbolId),
         );
@@ -882,10 +1018,7 @@ const enqueueReferencedFunctionIdentifier = ({
     return true;
   }
   enqueue(
-    ctx.program.symbols.canonicalIdOf(
-      ctx.moduleId,
-      symbol,
-    ) as ProgramSymbolId,
+    ctx.program.symbols.canonicalIdOf(ctx.moduleId, symbol) as ProgramSymbolId,
   );
   return true;
 };
@@ -934,7 +1067,11 @@ const getReachableFunctionSymbols = ({
     state.symbols = symbols;
     return symbols;
   }
-  const symbols = collectReachableFunctionSymbols({ ctx, contexts, entryModuleId });
+  const symbols = collectReachableFunctionSymbols({
+    ctx,
+    contexts,
+    entryModuleId,
+  });
   state.symbols = symbols;
   return symbols;
 };
@@ -1021,7 +1158,8 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
       instantiations.forEach(([instanceId, typeArgs]) => {
         if (typeArgs.some((arg) => arg === unknown)) {
           const name = symbolName(ctx, ctx.moduleId, item.symbol);
-          const instanceLabel = ctx.program.functions.formatInstance(instanceId);
+          const instanceLabel =
+            ctx.program.functions.formatInstance(instanceId);
           throw new Error(
             `codegen cannot emit ${name} without resolved type arguments (instance ${instanceLabel})`,
           );
@@ -1030,7 +1168,10 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           return;
         }
 
-        const typeId = ctx.program.types.instantiate(signature.scheme, typeArgs);
+        const typeId = ctx.program.types.instantiate(
+          signature.scheme,
+          typeArgs,
+        );
         const descriptor = ctx.program.types.getTypeDesc(typeId);
         if (descriptor.kind !== "function") {
           throw new Error(
@@ -1077,13 +1218,12 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           }),
         );
         const userParamTypes = paramAbiTypes.flat();
-        const resultAbiKind =
-          effectful
-            ? "direct"
-            : getOptimizedResultAbiKind({
-                typeId: descriptor.returnType,
-                ctx,
-              });
+        const resultAbiKind = effectful
+          ? "direct"
+          : getOptimizedResultAbiKind({
+              typeId: descriptor.returnType,
+              ctx,
+            });
         const outParamType =
           resultAbiKind === "out_ref"
             ? getOptimizedAbiTypeForResult({
@@ -1098,7 +1238,9 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
         const widened = ctx.effectsBackend.abi.widenSignature({
           ctx,
           effectful,
-          userParamTypes: outParamType ? [outParamType, ...userParamTypes] : userParamTypes,
+          userParamTypes: outParamType
+            ? [outParamType, ...userParamTypes]
+            : userParamTypes,
           userResultType:
             resultAbiKind === "out_ref"
               ? binaryen.none
@@ -1112,8 +1254,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           paramTypes: widened.paramTypes,
           paramAbiTypes,
           userParamOffset: widened.userParamOffset,
-          firstUserParamIndex:
-            widened.userParamOffset + (outParamType ? 1 : 0),
+          firstUserParamIndex: widened.userParamOffset + (outParamType ? 1 : 0),
           resultType: widened.resultType,
           resultAbiTypes,
           paramTypeIds: descriptor.parameters.map((param) => param.type),
@@ -1187,7 +1328,9 @@ export const compileFunctions = ({
     if (!reachableFunctions.has(canonicalId)) {
       continue;
     }
-    const hasPendingMeta = metas.some((meta) => ctx.mod.getFunction(meta.wasmName) === 0);
+    const hasPendingMeta = metas.some(
+      (meta) => ctx.mod.getFunction(meta.wasmName) === 0,
+    );
     if (!hasPendingMeta) {
       continue;
     }
@@ -1220,7 +1363,10 @@ export const compileFunctions = ({
           return;
         }
         if (expr.exprKind === "literal" && expr.literalKind === "string") {
-          markStringLiteralCtorReachable({ ctx, reachable: reachableFunctions });
+          markStringLiteralCtorReachable({
+            ctx,
+            reachable: reachableFunctions,
+          });
           return;
         }
         if (expr.exprKind !== "method-call") {
@@ -1243,6 +1389,7 @@ export const compileFunctions = ({
   compiledCount += compilePendingStaticEffectSpecializations(ctx);
   compiledCount += compilePendingReceiverSpecializations(ctx);
   compiledCount += compilePendingScalarAggregateCallSpecializations(ctx);
+  compiledCount += compilePendingCallShapeSpecializations(ctx);
   return compiledCount;
 };
 
@@ -1317,28 +1464,29 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         );
       }
 
-      const paramAbiKinds = instantiatedTypeDesc.parameters.map((param, index) =>
-        getOptimizedParamAbiKind({
-          typeId: param.type,
-          bindingKind: signature.parameters[index]?.bindingKind,
-          ctx,
-        }),
+      const paramAbiKinds = instantiatedTypeDesc.parameters.map(
+        (param, index) =>
+          getOptimizedParamAbiKind({
+            typeId: param.type,
+            bindingKind: signature.parameters[index]?.bindingKind,
+            ctx,
+          }),
       );
-      const paramAbiTypes = instantiatedTypeDesc.parameters.map((param, index) =>
-        getOptimizedAbiTypesForParam({
-          typeId: param.type,
-          bindingKind: signature.parameters[index]?.bindingKind,
-          ctx,
-        }),
+      const paramAbiTypes = instantiatedTypeDesc.parameters.map(
+        (param, index) =>
+          getOptimizedAbiTypesForParam({
+            typeId: param.type,
+            bindingKind: signature.parameters[index]?.bindingKind,
+            ctx,
+          }),
       );
       const userParamTypes = paramAbiTypes.flat();
-      const resultAbiKind =
-        effectful
-          ? "direct"
-          : getOptimizedResultAbiKind({
-              typeId: instantiatedTypeDesc.returnType,
-              ctx,
-            });
+      const resultAbiKind = effectful
+        ? "direct"
+        : getOptimizedResultAbiKind({
+            typeId: instantiatedTypeDesc.returnType,
+            ctx,
+          });
       const outParamType =
         resultAbiKind === "out_ref"
           ? getOptimizedAbiTypeForResult({
@@ -1353,7 +1501,9 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
       const widened = ctx.effectsBackend.abi.widenSignature({
         ctx,
         effectful,
-        userParamTypes: outParamType ? [outParamType, ...userParamTypes] : userParamTypes,
+        userParamTypes: outParamType
+          ? [outParamType, ...userParamTypes]
+          : userParamTypes,
         userResultType:
           resultAbiKind === "out_ref"
             ? binaryen.none
@@ -1366,8 +1516,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
         paramTypes: widened.paramTypes,
         paramAbiTypes,
         userParamOffset: widened.userParamOffset,
-        firstUserParamIndex:
-          widened.userParamOffset + (outParamType ? 1 : 0),
+        firstUserParamIndex: widened.userParamOffset + (outParamType ? 1 : 0),
         resultType: widened.resultType,
         resultAbiTypes,
         paramTypeIds: instantiatedTypeDesc.parameters.map(
@@ -1419,7 +1568,9 @@ export const emitModuleExports = (
     meta: FunctionMetadata;
     exportName: string;
   }): void => {
-    const userParamTypes = meta.paramTypes.slice(firstUserParamIndexFor(meta)) as number[];
+    const userParamTypes = meta.paramTypes.slice(
+      firstUserParamIndexFor(meta),
+    ) as number[];
     const wrapperName = `${meta.wasmName}__wasm_export_${sanitizeIdentifier(exportName)}`;
 
     emitPureSurfaceWrapper({
@@ -1457,21 +1608,28 @@ export const emitModuleExports = (
           : baseExportName,
       );
     });
-    const metaForEntry = (entry: HirExportEntry): FunctionMetadata | undefined => {
+    const metaForEntry = (
+      entry: HirExportEntry,
+    ): FunctionMetadata | undefined => {
       const metas = getFunctionMetas(
         exportCtx,
         exportCtx.moduleId,
         entry.symbol,
       );
-      return metas?.find((candidate) => candidate.typeArgs.length === 0) ?? metas?.[0];
+      return (
+        metas?.find((candidate) => candidate.typeArgs.length === 0) ??
+        metas?.[0]
+      );
     };
-    const resolveSpecialSerializedExport = createSerializedExportSpecialCaseResolver({
-      entries: exportEntries,
-      exportNameForEntry: (entry) =>
-        entry.alias ?? symbolName(exportCtx, exportCtx.moduleId, entry.symbol),
-      metaForEntry,
-      ctx: exportCtx,
-    });
+    const resolveSpecialSerializedExport =
+      createSerializedExportSpecialCaseResolver({
+        entries: exportEntries,
+        exportNameForEntry: (entry) =>
+          entry.alias ??
+          symbolName(exportCtx, exportCtx.moduleId, entry.symbol),
+        metaForEntry,
+        ctx: exportCtx,
+      });
 
     exportEntries.forEach((entry) => {
       const intrinsicMetadata =
@@ -1500,13 +1658,13 @@ export const emitModuleExports = (
       if (!exportCtx.programHelpers.registerExportName(exportName)) {
         return;
       }
-        if (meta.effectful) {
-          emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
+      if (meta.effectful) {
+        emitEffectfulWasmExportWrapper({ ctx: exportCtx, meta, exportName });
 
         if (meta.paramTypes.length > firstUserParamIndexFor(meta)) {
           return;
         }
-          const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
+        const valueType = wasmTypeFor(meta.resultTypeId, exportCtx);
         const serializer = resolveExportReturnSerializer({
           meta,
           ctx: exportCtx,
@@ -1770,7 +1928,9 @@ const compileFunctionItem = (
       typeInstanceId: meta.instanceId,
       effectful: true,
       currentHandler: { index: 0, type: handlerParamType },
-      exactParameterTypes: ctx.optimization?.exactParameterTypes.get(meta.instanceId),
+      exactParameterTypes:
+        meta.exactParameterTypes ??
+        ctx.optimization?.exactParameterTypes.get(meta.instanceId),
     };
     if (meta.resultAbiKind === "out_ref") {
       implCtx.returnOutPointer = createStorageRefBinding({
@@ -1818,42 +1978,45 @@ const compileFunctionItem = (
             binaryen.getExpressionType(implBody.expr),
           )
         : paramInitOps.length > 0
-          ? ctx.mod.block(null, [...paramInitOps, implBody.expr], binaryen.getExpressionType(implBody.expr))
+          ? ctx.mod.block(
+              null,
+              [...paramInitOps, implBody.expr],
+              binaryen.getExpressionType(implBody.expr),
+            )
           : implBody.expr;
 
     const implFunctionBody =
       meta.resultAbiKind === "out_ref" && implCtx.returnOutPointer
-        ? (binaryen.getExpressionType(implBodyExpr) === binaryen.none ||
-            binaryen.getExpressionType(implBodyExpr) === binaryen.unreachable
-            ? implBodyExpr
-            : ctx.mod.block(
-                null,
-                [
-                  storeValueIntoStorageRef({
-                    pointer: () =>
-                      ctx.mod.local.get(
-                        implCtx.returnOutPointer!.index,
-                        implCtx.returnOutPointer!.storageType,
-                      ),
-                    value: implBodyExpr,
-                    typeId: meta.resultTypeId,
-                    ctx,
-                    fnCtx: implCtx,
-                  }),
-                ],
-                binaryen.none,
-              ))
+        ? binaryen.getExpressionType(implBodyExpr) === binaryen.none ||
+          binaryen.getExpressionType(implBodyExpr) === binaryen.unreachable
+          ? implBodyExpr
+          : ctx.mod.block(
+              null,
+              [
+                storeValueIntoStorageRef({
+                  pointer: () =>
+                    ctx.mod.local.get(
+                      implCtx.returnOutPointer!.index,
+                      implCtx.returnOutPointer!.storageType,
+                    ),
+                  value: implBodyExpr,
+                  typeId: meta.resultTypeId,
+                  ctx,
+                  fnCtx: implCtx,
+                }),
+              ],
+              binaryen.none,
+            )
         : implBodyExpr;
     const wrappedValueType =
       meta.resultAbiKind === "out_ref"
         ? binaryen.none
         : wasmTypeFor(meta.resultTypeId, ctx);
     const implExprType = binaryen.getExpressionType(implFunctionBody);
-    const shouldWrapOutcome =
-      !isOutcomeCarrierType({
-        wasmType: implExprType,
-        ctx,
-      });
+    const shouldWrapOutcome = !isOutcomeCarrierType({
+      wasmType: implExprType,
+      ctx,
+    });
     const functionBody = shouldWrapOutcome
       ? wrapValueInOutcome({
           valueExpr: implFunctionBody,
@@ -1903,7 +2066,9 @@ const compileFunctionItem = (
     instanceId: meta.instanceId,
     typeInstanceId: meta.instanceId,
     effectful: meta.effectful,
-    exactParameterTypes: ctx.optimization?.exactParameterTypes.get(meta.instanceId),
+    exactParameterTypes:
+      meta.exactParameterTypes ??
+      ctx.optimization?.exactParameterTypes.get(meta.instanceId),
   };
   if (meta.effectful) {
     fnCtx.currentHandler = {
@@ -1974,36 +2139,38 @@ const compileFunctionItem = (
           binaryen.getExpressionType(body.expr),
         )
       : paramInitOps.length > 0
-        ? ctx.mod.block(null, [...paramInitOps, body.expr], binaryen.getExpressionType(body.expr))
+        ? ctx.mod.block(
+            null,
+            [...paramInitOps, body.expr],
+            binaryen.getExpressionType(body.expr),
+          )
         : body.expr;
   const returnValueType = wasmTypeFor(meta.resultTypeId, ctx);
   const functionBodyBeforeWrap =
     meta.resultAbiKind === "out_ref" && fnCtx.returnOutPointer
-      ? (binaryen.getExpressionType(bodyExpr) === binaryen.none ||
-          binaryen.getExpressionType(bodyExpr) === binaryen.unreachable
-          ? bodyExpr
-          : ctx.mod.block(
-              null,
-              [
-                storeValueIntoStorageRef({
-                  pointer: () =>
-                    ctx.mod.local.get(
-                      fnCtx.returnOutPointer!.index,
-                      fnCtx.returnOutPointer!.storageType,
-                    ),
-                  value: bodyExpr,
-                  typeId: meta.resultTypeId,
-                  ctx,
-                  fnCtx,
-                }),
-              ],
-              binaryen.none,
-            ))
+      ? binaryen.getExpressionType(bodyExpr) === binaryen.none ||
+        binaryen.getExpressionType(bodyExpr) === binaryen.unreachable
+        ? bodyExpr
+        : ctx.mod.block(
+            null,
+            [
+              storeValueIntoStorageRef({
+                pointer: () =>
+                  ctx.mod.local.get(
+                    fnCtx.returnOutPointer!.index,
+                    fnCtx.returnOutPointer!.storageType,
+                  ),
+                value: bodyExpr,
+                typeId: meta.resultTypeId,
+                ctx,
+                fnCtx,
+              }),
+            ],
+            binaryen.none,
+          )
       : bodyExpr;
   const wrappedValueType =
-    meta.resultAbiKind === "out_ref"
-      ? binaryen.none
-      : returnValueType;
+    meta.resultAbiKind === "out_ref" ? binaryen.none : returnValueType;
   const bodyExprType = binaryen.getExpressionType(functionBodyBeforeWrap);
   const shouldWrapOutcome =
     meta.effectful &&
@@ -2022,16 +2189,17 @@ const compileFunctionItem = (
       })
     : functionBodyBeforeWrap;
   const functionBody =
-    !meta.effectful && meta.resultTypeId !== ctx.program.primitives.void
-          && binaryen.getExpressionType(rawFunctionBody) !== binaryen.none
-          && binaryen.getExpressionType(rawFunctionBody) !== binaryen.unreachable
-        ? boxSignatureSpillValue({
-            value: rawFunctionBody,
-            typeId: meta.resultTypeId,
-            ctx,
-            fnCtx,
-          })
-        : rawFunctionBody;
+    !meta.effectful &&
+    meta.resultTypeId !== ctx.program.primitives.void &&
+    binaryen.getExpressionType(rawFunctionBody) !== binaryen.none &&
+    binaryen.getExpressionType(rawFunctionBody) !== binaryen.unreachable
+      ? boxSignatureSpillValue({
+          value: rawFunctionBody,
+          typeId: meta.resultTypeId,
+          ctx,
+          fnCtx,
+        })
+      : rawFunctionBody;
 
   ctx.mod.addFunction(
     meta.wasmName,
@@ -2236,7 +2404,7 @@ const compilePendingStaticEffectSpecializations = (
 ): number => {
   const pending = takePendingStaticEffectSpecializations(ctx);
   pending.forEach((specialization) =>
-    compileStaticEffectSpecialization(specialization, ctx)
+    compileStaticEffectSpecialization(specialization, ctx),
   );
   return pending.length;
 };
@@ -2335,26 +2503,26 @@ const compileReceiverSpecialization = (
           : implBody.expr;
     const implFunctionBody =
       meta.resultAbiKind === "out_ref" && implCtx.returnOutPointer
-        ? (binaryen.getExpressionType(implBodyExpr) === binaryen.none ||
-            binaryen.getExpressionType(implBodyExpr) === binaryen.unreachable
-            ? implBodyExpr
-            : ctx.mod.block(
-                null,
-                [
-                  storeValueIntoStorageRef({
-                    pointer: () =>
-                      ctx.mod.local.get(
-                        implCtx.returnOutPointer!.index,
-                        implCtx.returnOutPointer!.storageType,
-                      ),
-                    value: implBodyExpr,
-                    typeId: meta.resultTypeId,
-                    ctx,
-                    fnCtx: implCtx,
-                  }),
-                ],
-                binaryen.none,
-              ))
+        ? binaryen.getExpressionType(implBodyExpr) === binaryen.none ||
+          binaryen.getExpressionType(implBodyExpr) === binaryen.unreachable
+          ? implBodyExpr
+          : ctx.mod.block(
+              null,
+              [
+                storeValueIntoStorageRef({
+                  pointer: () =>
+                    ctx.mod.local.get(
+                      implCtx.returnOutPointer!.index,
+                      implCtx.returnOutPointer!.storageType,
+                    ),
+                  value: implBodyExpr,
+                  typeId: meta.resultTypeId,
+                  ctx,
+                  fnCtx: implCtx,
+                }),
+              ],
+              binaryen.none,
+            )
         : implBodyExpr;
     const wrappedValueType =
       meta.resultAbiKind === "out_ref"
@@ -2473,26 +2641,26 @@ const compileReceiverSpecialization = (
         : body.expr;
   const functionBodyBeforeWrap =
     meta.resultAbiKind === "out_ref" && fnCtx.returnOutPointer
-      ? (binaryen.getExpressionType(bodyExpr) === binaryen.none ||
-          binaryen.getExpressionType(bodyExpr) === binaryen.unreachable
-          ? bodyExpr
-          : ctx.mod.block(
-              null,
-              [
-                storeValueIntoStorageRef({
-                  pointer: () =>
-                    ctx.mod.local.get(
-                      fnCtx.returnOutPointer!.index,
-                      fnCtx.returnOutPointer!.storageType,
-                    ),
-                  value: bodyExpr,
-                  typeId: meta.resultTypeId,
-                  ctx,
-                  fnCtx,
-                }),
-              ],
-              binaryen.none,
-            ))
+      ? binaryen.getExpressionType(bodyExpr) === binaryen.none ||
+        binaryen.getExpressionType(bodyExpr) === binaryen.unreachable
+        ? bodyExpr
+        : ctx.mod.block(
+            null,
+            [
+              storeValueIntoStorageRef({
+                pointer: () =>
+                  ctx.mod.local.get(
+                    fnCtx.returnOutPointer!.index,
+                    fnCtx.returnOutPointer!.storageType,
+                  ),
+                value: bodyExpr,
+                typeId: meta.resultTypeId,
+                ctx,
+                fnCtx,
+              }),
+            ],
+            binaryen.none,
+          )
       : bodyExpr;
   const bodyExprType = binaryen.getExpressionType(functionBodyBeforeWrap);
   const wrappedValueType =
@@ -2538,12 +2706,10 @@ const compileReceiverSpecialization = (
   markReceiverSpecializationCompiled({ ctx, wasmName: meta.wasmName });
 };
 
-const compilePendingReceiverSpecializations = (
-  ctx: CodegenContext,
-): number => {
+const compilePendingReceiverSpecializations = (ctx: CodegenContext): number => {
   const pending = takePendingReceiverSpecializations(ctx);
   pending.forEach((specialization) =>
-    compileReceiverSpecialization(specialization, ctx)
+    compileReceiverSpecialization(specialization, ctx),
   );
   return pending.length;
 };
@@ -2568,6 +2734,30 @@ const compilePendingScalarAggregateCallSpecializations = (
   const pending = takePendingScalarAggregateCallSpecializations(ctx);
   pending.forEach((specialization) =>
     compileScalarAggregateCallSpecialization(specialization, ctx),
+  );
+  return pending.length;
+};
+
+const compileCallShapeSpecialization = (
+  specialization: CallShapeSpecialization,
+  ctx: CodegenContext,
+): void => {
+  const { item, meta } = specialization;
+  if (ctx.mod.getFunction(meta.wasmName) === 0) {
+    compileFunctionItem(item, meta, ctx);
+  }
+  markCallShapeSpecializationCompiled({
+    ctx,
+    wasmName: meta.wasmName,
+  });
+};
+
+const compilePendingCallShapeSpecializations = (
+  ctx: CodegenContext,
+): number => {
+  const pending = takePendingCallShapeSpecializations(ctx);
+  pending.forEach((specialization) =>
+    compileCallShapeSpecialization(specialization, ctx),
   );
   return pending.length;
 };

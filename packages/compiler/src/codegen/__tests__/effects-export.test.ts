@@ -1,4 +1,4 @@
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
@@ -6,6 +6,8 @@ import {
   runEffectfulExport,
   parseEffectTable,
 } from "./support/effects-harness.js";
+import { compileProgram } from "../../pipeline.js";
+import { createFsModuleHost } from "../../modules/fs-host.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -35,6 +37,28 @@ const buildModule = () => compileFixture(fixturePath);
 const buildMsgpackModule = () => compileFixture(msgpackFixturePath);
 
 describe("effectful exports & host boundary", () => {
+  it("retains MsgPack host-boundary contracts in optimized builds without typed boundary exports", async () => {
+    const result = await compileProgram({
+      entryPath: fixturePath,
+      roots: {
+        src: dirname(fixturePath),
+        std: resolve(import.meta.dirname, "../../../../std/src"),
+      },
+      host: createFsModuleHost(),
+      codegenOptions: {
+        optimizationLevel: "release",
+        boundaryExports: false,
+        effectsHostBoundary: "msgpack",
+        validate: true,
+      },
+    });
+
+    if (!result.success) {
+      throw new Error(JSON.stringify(result.diagnostics, null, 2));
+    }
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+  });
+
   it("runs effectful main through the msgpack host loop", async () => {
     const { module } = await buildModule();
     const parsed = parseEffectTable(module);

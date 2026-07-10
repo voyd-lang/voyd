@@ -21,12 +21,13 @@ import type {
   SymbolId,
   TypeId,
 } from "../context.js";
-import {
-  allocateLoopLabels,
-  withLoopScope,
-} from "../control-flow-stack.js";
+import { allocateLoopLabels, withLoopScope } from "../control-flow-stack.js";
 import { walkHirExpression } from "../hir-walk.js";
-import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../locals.js";
+import {
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "../locals.js";
 import {
   coerceValueToType,
   fixedArrayStorageElementType,
@@ -40,6 +41,10 @@ import {
   wasmTypeFor,
 } from "../types.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
+import {
+  isStdIntrinsicNominalType,
+  STD_INTRINSIC_TYPE,
+} from "../../compiler-contracts/types.js";
 
 type ArrayMethodInfo = {
   targetTypeId: TypeId;
@@ -68,22 +73,12 @@ const isStdArrayType = ({
 }: {
   typeId: TypeId;
   ctx: CodegenContext;
-}): boolean => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  const nominal =
-    desc.kind === "nominal-object"
-      ? desc
-      : desc.kind === "intersection" && typeof desc.nominal === "number"
-        ? ctx.program.types.getTypeDesc(desc.nominal)
-        : undefined;
-  if (nominal?.kind !== "nominal-object") {
-    return false;
-  }
-  return (
-    nominal.name === "Array" &&
-    ctx.program.symbols.getPackageId(nominal.owner) === "std"
-  );
-};
+}): boolean =>
+  isStdIntrinsicNominalType({
+    program: ctx.program,
+    typeId,
+    intrinsicType: STD_INTRINSIC_TYPE.array,
+  });
 
 const arrayMethodInfo = ({
   expr,
@@ -204,20 +199,25 @@ const callHasName = ({
   expr,
   name,
   ctx,
+  allowSourceName = false,
 }: {
   expr: HirCallExpr;
   name: string;
   ctx: CodegenContext;
+  allowSourceName?: boolean;
 }): boolean => {
   const intrinsicName = callIntrinsicName({ expr, ctx });
   const callee = ctx.module.hir.expressions.get(expr.callee);
   if (callee?.exprKind !== "identifier") {
     return false;
   }
-  const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+  const calleeId = ctx.program.symbols.canonicalIdOf(
+    ctx.moduleId,
+    callee.symbol,
+  );
   return (
-    ctx.program.symbols.getName(calleeId) === name ||
-    intrinsicName === name
+    intrinsicName === name ||
+    (allowSourceName && ctx.program.symbols.getName(calleeId) === name)
   );
 };
 
@@ -232,12 +232,16 @@ const callIntrinsicName = ({
   if (callee?.exprKind !== "identifier") {
     return undefined;
   }
-  const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+  const calleeId = ctx.program.symbols.canonicalIdOf(
+    ctx.moduleId,
+    callee.symbol,
+  );
   const intrinsicName = ctx.program.symbols.getIntrinsicName(calleeId);
   if (typeof intrinsicName === "string") {
     return intrinsicName;
   }
-  const intrinsicFlags = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+  const intrinsicFlags =
+    ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
   return intrinsicFlags.intrinsic
     ? ctx.program.symbols.getName(calleeId)
     : undefined;
@@ -247,12 +251,14 @@ const isCallNamed = ({
   expr,
   name,
   ctx,
+  allowSourceName,
 }: {
   expr: HirExpression;
   name: string;
   ctx: CodegenContext;
+  allowSourceName?: boolean;
 }): boolean =>
-  expr.exprKind === "call" && callHasName({ expr, name, ctx });
+  expr.exprKind === "call" && callHasName({ expr, name, ctx, allowSourceName });
 
 const parseArrayLenExpr = ({
   exprId,
@@ -306,14 +312,18 @@ const exprIsIndexIncrement = ({
   }
 
   const [left, right] = expr.args;
-  const leftSymbol = left ? expressionSymbol({ exprId: left.expr, ctx }) : undefined;
+  const leftSymbol = left
+    ? expressionSymbol({ exprId: left.expr, ctx })
+    : undefined;
   const rightSymbol = right
     ? expressionSymbol({ exprId: right.expr, ctx })
     : undefined;
 
   return (
     (leftSymbol === indexSymbol &&
-      Boolean(right && isLiteralI32({ exprId: right.expr, value: "1", ctx }))) ||
+      Boolean(
+        right && isLiteralI32({ exprId: right.expr, value: "1", ctx }),
+      )) ||
     (rightSymbol === indexSymbol &&
       Boolean(left && isLiteralI32({ exprId: left.expr, value: "1", ctx })))
   );
@@ -377,7 +387,10 @@ const isSafeLoopIntrinsicCall = ({
   if (callee?.exprKind !== "identifier") {
     return false;
   }
-  const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+  const calleeId = ctx.program.symbols.canonicalIdOf(
+    ctx.moduleId,
+    callee.symbol,
+  );
   const callName =
     ctx.program.symbols.getIntrinsicName(calleeId) ??
     ctx.program.symbols.getName(calleeId);
@@ -456,9 +469,10 @@ const bodyHasFinalIndexIncrement = ({
     });
   }
   const lastStatementId = body.statements.at(-1);
-  const lastStatement = typeof lastStatementId === "number"
-    ? ctx.module.hir.statements.get(lastStatementId)
-    : undefined;
+  const lastStatement =
+    typeof lastStatementId === "number"
+      ? ctx.module.hir.statements.get(lastStatementId)
+      : undefined;
   return (
     lastStatement?.kind === "expr-stmt" &&
     isIndexIncrementAssignment({
@@ -496,7 +510,10 @@ const bodyPreservesArrayLoopProof = ({
         if (!valid) {
           return "stop";
         }
-        if (exprId !== bodyExprId && (expr.exprKind === "while" || expr.exprKind === "loop")) {
+        if (
+          exprId !== bodyExprId &&
+          (expr.exprKind === "while" || expr.exprKind === "loop")
+        ) {
           valid = false;
           return "stop";
         }
@@ -509,12 +526,17 @@ const bodyPreservesArrayLoopProof = ({
             exprId: expr.target,
             ctx,
           });
-          if (typeof targetSymbol === "number" && arrayAliases.has(targetSymbol)) {
+          if (
+            typeof targetSymbol === "number" &&
+            arrayAliases.has(targetSymbol)
+          ) {
             valid = false;
             return "stop";
           }
           if (targetSymbol === indexSymbol) {
-            if (!exprIsIndexIncrement({ exprId: expr.value, indexSymbol, ctx })) {
+            if (
+              !exprIsIndexIncrement({ exprId: expr.value, indexSymbol, ctx })
+            ) {
               valid = false;
               return "stop";
             }
@@ -542,7 +564,9 @@ const bodyPreservesArrayLoopProof = ({
           if (
             expr.args.some((arg) => {
               const argSymbol = expressionSymbol({ exprId: arg.expr, ctx });
-              return typeof argSymbol === "number" && arrayAliases.has(argSymbol);
+              return (
+                typeof argSymbol === "number" && arrayAliases.has(argSymbol)
+              );
             })
           ) {
             valid = false;
@@ -661,11 +685,13 @@ const analyzeWhileCondition = ({
   statementIndex: number;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): {
-  indexSymbol: SymbolId;
-  arraySymbol: SymbolId;
-  cachedLengthExpr?: HirExprId;
-} | undefined => {
+}):
+  | {
+      indexSymbol: SymbolId;
+      arraySymbol: SymbolId;
+      cachedLengthExpr?: HirExprId;
+    }
+  | undefined => {
   const condition = ctx.module.hir.expressions.get(expr.condition);
   if (
     !condition ||
@@ -718,7 +744,7 @@ const analyzeWhileCondition = ({
           indexSymbol,
           arraySymbol: scopedArraySymbol,
         }
-    : undefined;
+      : undefined;
 };
 
 const tryAnalyzeSafeArrayWhileLoop = ({
@@ -962,7 +988,7 @@ const somePayloadExpr = ({
   if (
     !expr ||
     expr.exprKind !== "call" ||
-    !isCallNamed({ expr, name: "some", ctx }) ||
+    !isCallNamed({ expr, name: "some", ctx, allowSourceName: true }) ||
     expr.args.length !== 1
   ) {
     return undefined;
@@ -991,8 +1017,23 @@ const parseRangeForIterator = ({
   if (range?.exprKind !== "object-literal" || range.literalKind !== "nominal") {
     return undefined;
   }
-  const start = range.entries.find((entry) => entry.kind === "field" && entry.name === "start");
-  const end = range.entries.find((entry) => entry.kind === "field" && entry.name === "end");
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const rangeTypeId = getRequiredExprType(iterCall.target, ctx, typeInstanceId);
+  if (
+    !isStdIntrinsicNominalType({
+      program: ctx.program,
+      typeId: rangeTypeId,
+      intrinsicType: STD_INTRINSIC_TYPE.range,
+    })
+  ) {
+    return undefined;
+  }
+  const start = range.entries.find(
+    (entry) => entry.kind === "field" && entry.name === "start",
+  );
+  const end = range.entries.find(
+    (entry) => entry.kind === "field" && entry.name === "end",
+  );
   const includeEnd = range.entries.find(
     (entry) => entry.kind === "field" && entry.name === "include_end",
   );
@@ -1059,7 +1100,9 @@ const isBreakBlock = ({
   if (expr?.exprKind !== "block" || expr.statements.length !== 0) {
     return false;
   }
-  return typeof expr.value === "number" && isBreakBlock({ exprId: expr.value, ctx });
+  return (
+    typeof expr.value === "number" && isBreakBlock({ exprId: expr.value, ctx })
+  );
 };
 
 const parseRangeForBody = ({
@@ -1074,7 +1117,9 @@ const parseRangeForBody = ({
   arraySymbol: SymbolId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): { indexSymbol: SymbolId; userStatements: readonly number[] } | undefined => {
+}):
+  | { indexSymbol: SymbolId; userStatements: readonly number[] }
+  | undefined => {
   if (!isLiteralBoolean({ exprId: whileExpr.condition, value: "true", ctx })) {
     return undefined;
   }
@@ -1099,17 +1144,22 @@ const parseRangeForBody = ({
   ) {
     return undefined;
   }
-  const match = typeof body.value === "number"
-    ? ctx.module.hir.expressions.get(body.value)
-    : undefined;
+  const match =
+    typeof body.value === "number"
+      ? ctx.module.hir.expressions.get(body.value)
+      : undefined;
   if (
     match?.exprKind !== "match" ||
     expressionSymbol({ exprId: match.discriminant, ctx }) !== nextValueSymbol
   ) {
     return undefined;
   }
-  const someArm = match.arms.find((arm) => patternTypeName(arm.pattern) === "Some");
-  const noneArm = match.arms.find((arm) => patternTypeName(arm.pattern) === "None");
+  const someArm = match.arms.find(
+    (arm) => patternTypeName(arm.pattern) === "Some",
+  );
+  const noneArm = match.arms.find(
+    (arm) => patternTypeName(arm.pattern) === "None",
+  );
   if (!someArm || !noneArm || !isBreakBlock({ exprId: noneArm.value, ctx })) {
     return undefined;
   }
@@ -1163,7 +1213,9 @@ const tryAnalyzeSafeArrayForLoop = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): SafeArrayForLoopAnalysis | undefined => {
-  const currentStmt = ctx.module.hir.statements.get(block.statements[statementIndex]!);
+  const currentStmt = ctx.module.hir.statements.get(
+    block.statements[statementIndex]!,
+  );
   if (currentStmt?.kind !== "expr-stmt") {
     return undefined;
   }
@@ -1184,9 +1236,10 @@ const tryAnalyzeSafeArrayForLoop = ({
     ctx,
     fnCtx,
   });
-  const whileExpr = typeof wrapper.value === "number"
-    ? ctx.module.hir.expressions.get(wrapper.value)
-    : undefined;
+  const whileExpr =
+    typeof wrapper.value === "number"
+      ? ctx.module.hir.expressions.get(wrapper.value)
+      : undefined;
   if (!iterator || whileExpr?.exprKind !== "while") {
     return undefined;
   }
@@ -1246,15 +1299,12 @@ const compileSafeArrayForLoop = ({
         scope: analysis.scope,
         fnCtx,
         run: () =>
-          withLoopScope(
-            fnCtx,
-            { breakLabel, continueLabel: loopLabel },
-            () =>
-              ctx.mod.block(
-                null,
-                analysis.userStatements.map((stmtId) => compileStatement(stmtId)),
-                binaryen.none,
-              ),
+          withLoopScope(fnCtx, { breakLabel, continueLabel: loopLabel }, () =>
+            ctx.mod.block(
+              null,
+              analysis.userStatements.map((stmtId) => compileStatement(stmtId)),
+              binaryen.none,
+            ),
           ),
       });
     } finally {

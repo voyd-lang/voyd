@@ -15,7 +15,41 @@ describe("getConfigFromCli", () => {
   it("defaults index to ./src for non-test runs", () => {
     const config = runWithArgv(["node", "voyd"]);
     expect(config.index).toBe("./src");
+    expect(config.optimizationLevel).toBe("none");
     expect(config.test).toBeFalsy();
+  });
+
+  it("preserves bare --opt as the release level without consuming the input path", () => {
+    const config = runWithArgv(["node", "voyd", "--opt", "./src/main.voyd"]);
+    expect(config.optimizationLevel).toBe("release");
+    expect(config.index).toBe("./src/main.voyd");
+  });
+
+  it.each(["none", "balanced", "release"] as const)(
+    "supports the %s optimization level",
+    (level) => {
+      const config = runWithArgv([
+        "node",
+        "voyd",
+        "--opt-level",
+        level,
+        "./src/main.voyd",
+      ]);
+      expect(config.optimizationLevel).toBe(level);
+      expect(config.index).toBe("./src/main.voyd");
+    },
+  );
+
+  it("rejects invalid optimization levels", () => {
+    expect(() => runWithArgv(["node", "voyd", "--opt-level", "fast"])).toThrow(
+      /invalid optimization level/,
+    );
+  });
+
+  it("rejects combining --opt with --opt-level", () => {
+    expect(() =>
+      runWithArgv(["node", "voyd", "--opt", "--opt-level", "balanced"]),
+    ).toThrow(/--opt and --opt-level cannot be used together/);
   });
 
   it("defaults test root to repo for `voyd test`", () => {

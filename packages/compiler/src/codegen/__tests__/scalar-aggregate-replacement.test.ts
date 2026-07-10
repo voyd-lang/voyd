@@ -61,12 +61,47 @@ const compileOptimized = (source: string) => {
   return { optimized, optimizedCodegen, baselineCodegen };
 };
 
-const runMain = (module: ReturnType<typeof compileOptimized>["optimizedCodegen"]["module"]) => {
+const runMain = (
+  module: ReturnType<typeof compileOptimized>["optimizedCodegen"]["module"],
+) => {
   const instance = getWasmInstance(module);
   return instance.exports.main as () => number;
 };
 
 describe("scalar aggregate replacement", () => {
+  it("keeps receiver variants distinct when aggregate arguments are present", () => {
+    const { optimizedCodegen } = compileOptimized(`
+trait Runner
+  fn adjust(self, value: i32) -> i32
+
+obj Box {}
+obj Alt {}
+obj Vec2 { x: i32, y: i32 }
+
+impl Runner for Box
+  fn adjust(self, value: i32) -> i32
+    value
+
+impl Runner for Alt
+  fn adjust(self, value: i32) -> i32
+    value + 100
+
+fn helper(runner: Runner, vec: Vec2) -> i32
+  runner.adjust(vec.x + vec.y)
+
+pub fn main() -> i32
+  helper(Box {}, Vec2 { x: 1, y: 2 }) +
+    helper(Alt {}, Vec2 { x: 3, y: 4 })
+`);
+
+    expect(runMain(optimizedCodegen.module)()).toBe(110);
+    const wasmText = optimizedCodegen.module.emitText();
+    const specializedHelpers = Array.from(
+      wasmText.matchAll(/\(func \$[^\s]*helper[^\s]*__receiver_[^\s(]*/g),
+    );
+    expect(specializedHelpers).toHaveLength(2);
+  });
+
   it("keeps non-escaping object literal fields in scalar locals", () => {
     const { optimized, optimizedCodegen, baselineCodegen } = compileOptimized(`
 obj Vec2 {
@@ -85,7 +120,9 @@ pub fn main() -> i32
     const originFacts = optimized.facts.escapeAnalysis.origins.get(
       "std::scalar_aggregate_replacement",
     );
-    expect([...(originFacts?.values() ?? [])].some((fact) => !fact.escapes)).toBe(true);
+    expect(
+      [...(originFacts?.values() ?? [])].some((fact) => !fact.escapes),
+    ).toBe(true);
     expect(runMain(optimizedCodegen.module)()).toBe(5);
 
     const optimizedText = optimizedCodegen.module.emitText();
@@ -111,7 +148,9 @@ pub fn main() -> i32
 `);
 
     expect(runMain(optimizedCodegen.module)()).toBe(9);
-    expect(optimizedCodegen.module.emitText()).toMatch(/\(struct\.new \$voyd_struct_shape_/);
+    expect(optimizedCodegen.module.emitText()).toMatch(
+      /\(struct\.new \$voyd_struct_shape_/,
+    );
   });
 
   it("keeps return-escaping mutable locals scalar until return materialization", () => {
@@ -346,8 +385,14 @@ pub fn main() -> i32
     const specializedStart = optimizedText.indexOf("__scalar_agg__result");
     expect(runMain(optimizedCodegen.module)()).toBe(9);
     expect(specializedStart).toBeGreaterThanOrEqual(0);
-    const specializedFuncStart = optimizedText.lastIndexOf("(func ", specializedStart);
-    const specializedFuncEnd = optimizedText.indexOf("\n (func ", specializedStart);
+    const specializedFuncStart = optimizedText.lastIndexOf(
+      "(func ",
+      specializedStart,
+    );
+    const specializedFuncEnd = optimizedText.indexOf(
+      "\n (func ",
+      specializedStart,
+    );
     const specializedText = optimizedText.slice(
       specializedFuncStart,
       specializedFuncEnd,
@@ -372,7 +417,9 @@ pub fn main() -> i32
 `);
 
     expect(runMain(optimizedCodegen.module)()).toBe(2);
-    expect(optimizedCodegen.module.emitText()).not.toMatch(/__scalar_agg__result/);
+    expect(optimizedCodegen.module.emitText()).not.toMatch(
+      /__scalar_agg__result/,
+    );
   });
 
   it("materializes scalar heap-object locals before alias initialization", () => {
@@ -407,7 +454,9 @@ pub fn main() -> i32
 `);
 
     expect(runMain(optimizedCodegen.module)()).toBe(4);
-    expect(optimizedCodegen.module.emitText()).not.toMatch(/__scalar_agg__result/);
+    expect(optimizedCodegen.module.emitText()).not.toMatch(
+      /__scalar_agg__result/,
+    );
   });
 
   it("does not scalarize heap-object call returns through aliasing wrappers", () => {
@@ -430,7 +479,9 @@ pub fn main() -> i32
 `);
 
     expect(runMain(optimizedCodegen.module)()).toBe(2);
-    expect(optimizedCodegen.module.emitText()).not.toMatch(/__scalar_agg__result/);
+    expect(optimizedCodegen.module.emitText()).not.toMatch(
+      /__scalar_agg__result/,
+    );
   });
 
   it("does not force scalar call arguments from non-fresh heap-object calls", () => {
@@ -777,7 +828,9 @@ pub fn main(): () -> i32
 `);
 
     expect(runMain(optimizedCodegen.module)()).toBe(7);
-    expect(optimizedCodegen.module.emitText()).not.toMatch(/__scalar_agg__param/);
+    expect(optimizedCodegen.module.emitText()).not.toMatch(
+      /__scalar_agg__param/,
+    );
   });
 
   it("restores bindings after failed scalar heap-result probing", () => {

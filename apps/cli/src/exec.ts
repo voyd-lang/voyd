@@ -2,7 +2,7 @@ import { stdout } from "process";
 import { readFileSync, statSync, existsSync } from "fs";
 import { writeFile } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import type { CompileResult } from "@voyd-lang/sdk";
+import type { CompileResult, OptimizationLevel } from "@voyd-lang/sdk";
 import type {
   Diagnostic,
   HirGraph,
@@ -89,20 +89,12 @@ async function main() {
 
   if (config.emitWasmText) {
     return console.log(
-      await getWasmText(
-        entryPath,
-        await getRoots(),
-        config.runBinaryenOptimizationPass,
-      ),
+      await getWasmText(entryPath, await getRoots(), config.optimizationLevel),
     );
   }
 
   if (config.emitWasm) {
-    return emitWasm(
-      entryPath,
-      await getRoots(),
-      config.runBinaryenOptimizationPass,
-    );
+    return emitWasm(entryPath, await getRoots(), config.optimizationLevel);
   }
 
   if (config.run) {
@@ -110,7 +102,7 @@ async function main() {
       entryPath,
       entryName: config.entry,
       roots: await getRoots(),
-      optimize: config.runBinaryenOptimizationPass,
+      optimizationLevel: config.optimizationLevel,
     });
   }
 
@@ -244,14 +236,14 @@ async function getIrAST(entryPath: string, roots: ModuleRoots) {
 async function getWasmText(
   entryPath: string,
   roots: ModuleRoots,
-  optimize = false,
+  optimizationLevel: OptimizationLevel = "none",
 ) {
   const sdk = await getSdk();
   const result = requireCompileSuccess(
     await sdk.compile({
       entryPath,
       roots,
-      optimize,
+      optimizationLevel,
       emitWasmText: true,
     }),
   );
@@ -266,11 +258,11 @@ async function getWasmText(
 async function emitWasm(
   entryPath: string,
   roots: ModuleRoots,
-  optimize = false,
+  optimizationLevel: OptimizationLevel = "none",
 ) {
   const sdk = await getSdk();
   const result = requireCompileSuccess(
-    await sdk.compile({ entryPath, roots, optimize }),
+    await sdk.compile({ entryPath, roots, optimizationLevel }),
   );
   stdout.write(result.wasm);
 }
@@ -279,16 +271,16 @@ async function runVoyd({
   entryPath,
   entryName = "main",
   roots,
-  optimize = false,
+  optimizationLevel = "none",
 }: {
   entryPath: string;
   entryName?: string;
   roots: ModuleRoots;
-  optimize?: boolean;
+  optimizationLevel?: OptimizationLevel;
 }) {
   const sdk = await getSdk();
   const compiled = requireCompileSuccess(
-    await sdk.compile({ entryPath, roots, optimize }),
+    await sdk.compile({ entryPath, roots, optimizationLevel }),
   );
 
   const result = await sdk.run({ wasm: compiled.wasm, entryName });

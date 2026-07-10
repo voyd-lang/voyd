@@ -1,5 +1,6 @@
 import { Command, InvalidArgumentError } from "commander";
 import { createRequire } from "node:module";
+import type { OptimizationLevel } from "@voyd-lang/sdk";
 import type {
   BootstrapTemplate,
   DocumentationFormat,
@@ -11,7 +12,12 @@ const { version } = require("../../package.json") as { version: string };
 
 const DOC_FORMATS = ["html", "json"] as const;
 const BOOTSTRAP_TEMPLATES = ["vx-spa", "web-ssr"] as const;
-const MAIN_OPTIONS_WITH_VALUES = ["--pkg-dir", "--entry"] as const;
+const OPTIMIZATION_LEVELS = ["none", "balanced", "release"] as const;
+const MAIN_OPTIONS_WITH_VALUES = [
+  "--pkg-dir",
+  "--entry",
+  "--opt-level",
+] as const;
 
 const appendOptionValue = (value: string, previous: string[]): string[] => [
   ...previous,
@@ -35,6 +41,20 @@ const parseBootstrapTemplate = (value: string): BootstrapTemplate => {
   }
   throw new InvalidArgumentError(
     `invalid bootstrap template "${value}" (allowed: ${BOOTSTRAP_TEMPLATES.join(", ")})`,
+  );
+};
+
+const parseOptimizationLevel = (value: string): OptimizationLevel => {
+  const normalized = value.toLowerCase();
+  if (
+    normalized === "none" ||
+    normalized === "balanced" ||
+    normalized === "release"
+  ) {
+    return normalized;
+  }
+  throw new InvalidArgumentError(
+    `invalid optimization level "${value}" (allowed: ${OPTIMIZATION_LEVELS.join(", ")})`,
   );
 };
 
@@ -99,9 +119,10 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
       "--emit-wasm-text",
       "write wasm text format (binaryen flavor) to stdout",
     )
+    .option("--opt", "apply Voyd's release optimization profile")
     .option(
-      "--opt",
-      "apply Voyd's aggressive validated wasm optimization profile",
+      "--opt-level <level>",
+      `optimization level (${OPTIMIZATION_LEVELS.join("|")})`,
     )
     .option("-m, --msg-pack", "decode message pack response")
     .option("-r, --run", "run voyd from src/ or provided path")
@@ -127,6 +148,16 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
 
   program.parse(["node", "voyd", ...argv]);
   const opts = program.opts();
+  if (opts.opt && opts.optLevel !== undefined) {
+    throw new InvalidArgumentError(
+      "--opt and --opt-level cannot be used together",
+    );
+  }
+  const optimizationLevel = opts.optLevel
+    ? parseOptimizationLevel(opts.optLevel)
+    : opts.opt
+      ? "release"
+      : "none";
   const indexArg = findFirstPositionalArg(
     argv,
     new Set(MAIN_OPTIONS_WITH_VALUES),
@@ -139,7 +170,7 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
     emitIrAst: opts.emitIrAst,
     emitWasm: opts.emitWasm,
     emitWasmText: opts.emitWasmText,
-    runBinaryenOptimizationPass: opts.opt,
+    optimizationLevel,
     run: opts.run,
     runWasm: opts.runWasm,
     entry: opts.entry,
@@ -250,7 +281,9 @@ const parseDocConfig = (argv: readonly string[]): VoydConfig => {
 };
 
 const findSubcommandIndex = (args: readonly string[]): number => {
-  const optionsWithValues: ReadonlySet<string> = new Set(MAIN_OPTIONS_WITH_VALUES);
+  const optionsWithValues: ReadonlySet<string> = new Set(
+    MAIN_OPTIONS_WITH_VALUES,
+  );
 
   let index = 0;
   while (index < args.length) {

@@ -41,13 +41,19 @@ import { createSdk } from "@voyd-lang/sdk";
 const sdk = createSdk();
 const result = await sdk.compile({
   entryPath: "./src/main.voyd",
-  optimize: true,
+  optimizationLevel: "balanced",
 });
 ```
 
-In the SDK, `optimize: true` selects Voyd's aggressive validated optimization
-profile.
-Binaryen pass configuration is intentionally not exposed as public SDK API.
+`optimizationLevel` accepts:
+
+- `"none"` (the default): no semantic optimizer or Binaryen optimization
+- `"balanced"`: Voyd semantic optimization plus Binaryen's standard profile
+- `"release"`: semantic optimization plus the aggressive release profile
+
+The older `optimize` boolean remains compatible: `true` maps to `"release"`
+and `false` maps to `"none"`. If both are supplied, `optimizationLevel` wins.
+Raw Binaryen pass configuration is intentionally not public SDK API.
 
 ## Typed JavaScript boundary exports
 
@@ -214,11 +220,12 @@ const result = await sdk.compile({
   source: `pub fn main() -> i32
   7
 `,
+  optimizationLevel: "balanced",
 });
 ```
 
-Browser builds require `source` input and do not support `optimize` or
-`emitWasmText`.
+Browser builds require `source` input. They support the same optimization
+levels and legacy `optimize` switch as Node builds, but not `emitWasmText`.
 
 ## Documentation generation
 

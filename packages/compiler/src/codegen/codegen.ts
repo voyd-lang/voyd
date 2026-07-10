@@ -50,6 +50,8 @@ import type {
   TypeId,
 } from "../semantics/ids.js";
 import {
+  addCompilerPerfPhaseDuration,
+  incrementCompilerPerfCounter,
   markCompilerPerfPhaseDuration,
   startCompilerPerfPhase,
 } from "../perf.js";
@@ -57,8 +59,13 @@ import { DiagnosticEmitter } from "../diagnostics/index.js";
 import { createCodegenModule } from "./wasm-module.js";
 import { createProgramHelperRegistry } from "./program-helpers.js";
 import { applyConfiguredMemoryExports } from "./memory-exports.js";
+import {
+  resolveOptimizationPolicy,
+  specializationPolicyForOptimizationLevel,
+} from "../optimization-policy.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
+  optimizationLevel: "none",
   optimize: false,
   optimizationProfile: "aggressive",
   validate: false,
@@ -172,6 +179,9 @@ export const codegenProgram = ({
     },
     outcomeValueTypes,
     optimization,
+    specializationPolicy:
+      optimization?.codegenPlan.specializationPolicy ??
+      specializationPolicyForOptimizationLevel(mergedOptions.optimizationLevel),
   }));
   contexts.forEach((ctx) => moduleContexts.set(ctx.moduleId, ctx));
 
@@ -231,21 +241,45 @@ export const codegenProgram = ({
   if (mergedOptions.optimize) {
     const prepareStartedAt = startCompilerPerfPhase();
     outputModule = binaryen.readBinary(emitWasmBytes(mod));
-    markCompilerPerfPhaseDuration("binaryen.prepareOptimizeModule", prepareStartedAt);
+    markCompilerPerfPhaseDuration(
+      "binaryen.prepareOptimizeModule",
+      prepareStartedAt,
+    );
     outputModule.setFeatures(VOYD_BINARYEN_FEATURES);
     const optimizeStartedAt = startCompilerPerfPhase();
-    optimizeBinaryenModule({
+    const report = optimizeBinaryenModule({
       module: outputModule,
       profile: mergedOptions.optimizationProfile,
     });
     markCompilerPerfPhaseDuration("binaryen.optimize", optimizeStartedAt);
+    addCompilerPerfPhaseDuration(
+      "binaryen.optimize.initial",
+      report.phasesMs.initialOptimize,
+    );
+    addCompilerPerfPhaseDuration(
+      "binaryen.optimize.extraPasses",
+      report.phasesMs.extraPasses,
+    );
+    addCompilerPerfPhaseDuration(
+      "binaryen.optimize.final",
+      report.phasesMs.finalOptimize,
+    );
+    incrementCompilerPerfCounter(
+      `binaryen.profile.${mergedOptions.optimizationLevel}.runs`,
+    );
+    report.extraPasses.forEach((pass) => {
+      incrementCompilerPerfCounter(`binaryen.extraPass.${pass}.runs`);
+    });
   }
 
   let wasm: Uint8Array | undefined;
   if (mergedOptions.validate) {
     const validateEmitStartedAt = startCompilerPerfPhase();
     wasm = emitWasmBytes(outputModule);
-    markCompilerPerfPhaseDuration("binaryen.emitValidatedWasm", validateEmitStartedAt);
+    markCompilerPerfPhaseDuration(
+      "binaryen.emitValidatedWasm",
+      validateEmitStartedAt,
+    );
   }
   if (wasm) {
     if (!WebAssembly.validate(wasm as BufferSource)) {
@@ -272,11 +306,17 @@ export const codegenProgramWithContinuationFallback = ({
   preferred: CodegenResult;
   fallback?: CodegenResult;
 } => {
-  const stackSwitchRequested = options.continuationBackend?.stackSwitching === true;
+  const stackSwitchRequested =
+    options.continuationBackend?.stackSwitching === true;
   if (!stackSwitchRequested) {
     return {
       preferredKind: "gc-trampoline",
-      preferred: codegenProgram({ program, entryModuleId, options, optimization }),
+      preferred: codegenProgram({
+        program,
+        entryModuleId,
+        options,
+        optimization,
+      }),
     };
   }
 
@@ -317,29 +357,34 @@ const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
 
 const normalizeCodegenOptions = (
-  options: CodegenOptions
-): Required<CodegenOptions> => ({
-  optimize: options.optimize ?? DEFAULT_OPTIONS.optimize,
-  optimizationProfile:
-    options.optimizationProfile ?? DEFAULT_OPTIONS.optimizationProfile,
-  validate: options.validate ?? DEFAULT_OPTIONS.validate,
-  runtimeDiagnostics:
-    options.runtimeDiagnostics ?? DEFAULT_OPTIONS.runtimeDiagnostics,
-  emitEffectHelpers: options.emitEffectHelpers ?? DEFAULT_OPTIONS.emitEffectHelpers,
-  effectsHostBoundary:
-    options.effectsHostBoundary ?? DEFAULT_OPTIONS.effectsHostBoundary,
-  linearMemoryExport:
-    options.linearMemoryExport ?? DEFAULT_OPTIONS.linearMemoryExport,
-  effectsMemoryExport:
-    options.effectsMemoryExport ?? DEFAULT_OPTIONS.effectsMemoryExport,
-  boundaryExports: options.boundaryExports ?? DEFAULT_OPTIONS.boundaryExports,
-  continuationBackend: {
-    ...DEFAULT_OPTIONS.continuationBackend,
-    ...(options.continuationBackend ?? {}),
-  },
-  testMode: options.testMode ?? DEFAULT_OPTIONS.testMode,
-  testScope: options.testScope ?? DEFAULT_OPTIONS.testScope,
-});
+  options: CodegenOptions,
+): Required<CodegenOptions> => {
+  const optimization = resolveOptimizationPolicy(options);
+  return {
+    optimizationLevel: optimization.level,
+    optimize: optimization.enabled,
+    optimizationProfile:
+      optimization.binaryenProfile ?? DEFAULT_OPTIONS.optimizationProfile,
+    validate: options.validate ?? DEFAULT_OPTIONS.validate,
+    runtimeDiagnostics:
+      options.runtimeDiagnostics ?? DEFAULT_OPTIONS.runtimeDiagnostics,
+    emitEffectHelpers:
+      options.emitEffectHelpers ?? DEFAULT_OPTIONS.emitEffectHelpers,
+    effectsHostBoundary:
+      options.effectsHostBoundary ?? DEFAULT_OPTIONS.effectsHostBoundary,
+    linearMemoryExport:
+      options.linearMemoryExport ?? DEFAULT_OPTIONS.linearMemoryExport,
+    effectsMemoryExport:
+      options.effectsMemoryExport ?? DEFAULT_OPTIONS.effectsMemoryExport,
+    boundaryExports: options.boundaryExports ?? DEFAULT_OPTIONS.boundaryExports,
+    continuationBackend: {
+      ...DEFAULT_OPTIONS.continuationBackend,
+      ...(options.continuationBackend ?? {}),
+    },
+    testMode: options.testMode ?? DEFAULT_OPTIONS.testMode,
+    testScope: options.testScope ?? DEFAULT_OPTIONS.testScope,
+  };
+};
 
 const emitWasmBytes = (mod: binaryen.Module): Uint8Array => {
   const emitted = mod.emitBinary();

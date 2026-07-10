@@ -21,9 +21,7 @@ import {
   storeScalarAggregateBindingValue,
   storeLocalValue,
 } from "../locals.js";
-import {
-  coerceValueToType,
-} from "../structural.js";
+import { coerceValueToType } from "../structural.js";
 import { compileOptionalNoneValue } from "../optionals.js";
 import { captureMultivalueLanes } from "../multivalue.js";
 import {
@@ -32,12 +30,18 @@ import {
   wasmTypeFor,
 } from "../types.js";
 import { compileCallArgExpressionsWithTemps } from "../expressions/call/shared.js";
+import { incrementCompilerPerfCounter } from "../../perf.js";
 
-const MAX_SCALAR_AGGREGATE_LANES = 4;
 const SCALAR_AGGREGATE_MATERIALIZATION_BOUNDARY_REASONS = new Set([
   "assignment",
   "return",
 ]);
+
+const recordScalarAggregateDecision = (
+  kind: "initializer" | "parameter",
+  decision: string,
+): void =>
+  incrementCompilerPerfCounter(`codegen.scalar_aggregate.${kind}.${decision}`);
 
 export type ScalarAggregateStatementCompiler = (
   stmtId: number,
@@ -51,9 +55,16 @@ export type ScalarAggregateBlockInitializerCompiler = (
 const aggregateLaneCount = (structInfo: StructuralTypeInfo): number =>
   structInfo.fields.reduce((count, field) => count + field.inlineArity, 0);
 
-const isSmallScalarAggregate = (structInfo: StructuralTypeInfo): boolean =>
+const isSmallScalarAggregate = ({
+  structInfo,
+  ctx,
+}: {
+  structInfo: StructuralTypeInfo;
+  ctx: CodegenContext;
+}): boolean =>
   structInfo.fields.length > 0 &&
-  aggregateLaneCount(structInfo) <= MAX_SCALAR_AGGREGATE_LANES;
+  aggregateLaneCount(structInfo) <=
+    ctx.specializationPolicy.scalarAggregateLanes;
 
 const symbolIsUsedAsMethodReceiver = ({
   symbol,
@@ -116,7 +127,9 @@ const symbolIsUsedAsMutableAliasInitializer = ({
       return false;
     }
     const initializer = ctx.module.hir.expressions.get(stmt.initializer);
-    return initializer?.exprKind === "identifier" && initializer.symbol === symbol;
+    return (
+      initializer?.exprKind === "identifier" && initializer.symbol === symbol
+    );
   });
 
 const fieldAccessRoot = ({
@@ -163,8 +176,7 @@ const heapObjectSymbolNeedsStableIdentity = ({
 }: {
   symbol: SymbolId;
   ctx: CodegenContext;
-}): boolean =>
-  symbolIsUsedAsMutableAliasInitializer({ symbol, ctx });
+}): boolean => symbolIsUsedAsMutableAliasInitializer({ symbol, ctx });
 
 export const scalarAggregateAbiTypesForType = ({
   typeId,
@@ -174,7 +186,7 @@ export const scalarAggregateAbiTypesForType = ({
   ctx: CodegenContext;
 }): readonly binaryen.Type[] | undefined => {
   const structInfo = getStructuralTypeInfo(typeId, ctx);
-  if (!structInfo || !isSmallScalarAggregate(structInfo)) {
+  if (!structInfo || !isSmallScalarAggregate({ structInfo, ctx })) {
     return undefined;
   }
   return structInfo.fields.flatMap((field) => [
@@ -199,15 +211,15 @@ const nonEscapingOriginFactAllowsScalarization = ({
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   return Boolean(
     fact &&
-      fact.originKind === "aggregate" &&
-      fact.typeId === typeId &&
-      (!fact.escapes ||
-        fact.escapeReasons.every((reason) =>
-          reason === "assignment"
-            ? structInfo?.layoutKind === "value-object"
-            : SCALAR_AGGREGATE_MATERIALIZATION_BOUNDARY_REASONS.has(reason),
-        )) &&
-      fact.directLocalSymbols.includes(symbol),
+    fact.originKind === "aggregate" &&
+    fact.typeId === typeId &&
+    (!fact.escapes ||
+      fact.escapeReasons.every((reason) =>
+        reason === "assignment"
+          ? structInfo?.layoutKind === "value-object"
+          : SCALAR_AGGREGATE_MATERIALIZATION_BOUNDARY_REASONS.has(reason),
+      )) &&
+    fact.directLocalSymbols.includes(symbol),
   );
 };
 
@@ -328,12 +340,15 @@ const objectLiteralCanScalarize = (
   }
   const initialized = new Set(
     expr.entries
-      .filter((entry): entry is Extract<typeof entry, { kind: "field" }> =>
-        entry.kind === "field"
+      .filter(
+        (entry): entry is Extract<typeof entry, { kind: "field" }> =>
+          entry.kind === "field",
       )
       .map((entry) => entry.name),
   );
-  return structInfo.fields.every((field) => initialized.has(field.name) || field.optional);
+  return structInfo.fields.every(
+    (field) => initialized.has(field.name) || field.optional,
+  );
 };
 
 const compileObjectLiteralIntoScalarBinding = ({
@@ -370,7 +385,9 @@ const compileObjectLiteralIntoScalarBinding = ({
 
   expr.entries.forEach((entry, index) => {
     if (entry.kind !== "field") {
-      throw new Error("scalar aggregate object literal unexpectedly contains a spread");
+      throw new Error(
+        "scalar aggregate object literal unexpectedly contains a spread",
+      );
     }
     const field = structInfo.fieldMap.get(entry.name);
     if (!field) {
@@ -447,7 +464,11 @@ const compileTupleIntoScalarBinding = ({
       binding,
       field,
       value: values[index]!,
-      actualTypeId: getRequiredExprType(element, ctx, fnCtx.typeInstanceId ?? fnCtx.instanceId),
+      actualTypeId: getRequiredExprType(
+        element,
+        ctx,
+        fnCtx.typeInstanceId ?? fnCtx.instanceId,
+      ),
       ctx,
       fnCtx,
     });
@@ -570,12 +591,14 @@ const scalarAssignmentMayFailAfterBlockStatements = ({
     return structInfo.layoutKind === "heap-object";
   }
   if (expr.exprKind === "block") {
-    return typeof expr.value !== "number" ||
+    return (
+      typeof expr.value !== "number" ||
       scalarAssignmentMayFailAfterBlockStatements({
         exprId: expr.value,
         structInfo,
         ctx,
-      });
+      })
+    );
   }
   if (expr.exprKind === "if" || expr.exprKind === "cond") {
     return (
@@ -601,7 +624,9 @@ const asStatementBlock = (
   ctx: CodegenContext,
   ops: readonly binaryen.ExpressionRef[],
 ): binaryen.ExpressionRef =>
-  ops.length === 0 ? ctx.mod.nop() : ctx.mod.block(null, [...ops], binaryen.none);
+  ops.length === 0
+    ? ctx.mod.nop()
+    : ctx.mod.block(null, [...ops], binaryen.none);
 
 const compileConditionalAssignment = ({
   binding,
@@ -631,16 +656,16 @@ const compileConditionalAssignment = ({
   }
 
   const defaultOps = compileScalarAggregateAssignment({
-      binding,
-      symbol,
-      exprId: expr.defaultBranch,
-      targetTypeId,
-      structInfo,
-      ctx,
-      fnCtx,
-      compileExpr,
-      compileStatement,
-      compileBlockInitializer,
+    binding,
+    symbol,
+    exprId: expr.defaultBranch,
+    targetTypeId,
+    structInfo,
+    ctx,
+    fnCtx,
+    compileExpr,
+    compileStatement,
+    compileBlockInitializer,
   });
   if (!defaultOps) {
     return undefined;
@@ -649,7 +674,11 @@ const compileConditionalAssignment = ({
 
   for (let index = expr.branches.length - 1; index >= 0; index -= 1) {
     const branch = expr.branches[index]!;
-    const condition = compileExpr({ exprId: branch.condition, ctx, fnCtx }).expr;
+    const condition = compileExpr({
+      exprId: branch.condition,
+      ctx,
+      fnCtx,
+    }).expr;
     const thenOps = compileScalarAggregateAssignment({
       binding,
       symbol,
@@ -696,7 +725,9 @@ const compileScalarAggregateAssignment = ({
 }): binaryen.ExpressionRef[] | undefined => {
   const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr) {
-    throw new Error(`missing scalar aggregate initializer expression ${exprId}`);
+    throw new Error(
+      `missing scalar aggregate initializer expression ${exprId}`,
+    );
   }
 
   if (expr.exprKind === "object-literal") {
@@ -840,10 +871,16 @@ export const tryScalarizeAggregateInitializer = ({
   compileBlockInitializer?: ScalarAggregateBlockInitializerCompiler;
 }): binaryen.ExpressionRef[] | undefined => {
   if (fnCtx.effectful) {
+    recordScalarAggregateDecision("initializer", "bailout.effectful");
     return undefined;
   }
   const structInfo = getStructuralTypeInfo(targetTypeId, ctx);
-  if (!structInfo || !isSmallScalarAggregate(structInfo)) {
+  if (!structInfo) {
+    recordScalarAggregateDecision("initializer", "bailout.no_layout");
+    return undefined;
+  }
+  if (!isSmallScalarAggregate({ structInfo, ctx })) {
+    recordScalarAggregateDecision("initializer", "bailout.too_wide");
     return undefined;
   }
   if (
@@ -851,18 +888,22 @@ export const tryScalarizeAggregateInitializer = ({
     (symbolIsUsedAsMethodReceiver({ symbol, ctx }) ||
       symbolIsUsedAsCallArgument({ symbol, ctx }))
   ) {
+    recordScalarAggregateDecision("initializer", "bailout.mutable_dynamic_use");
     return undefined;
   }
   if (
     structInfo.layoutKind === "heap-object" &&
     heapObjectSymbolNeedsStableIdentity({ symbol, ctx })
   ) {
+    recordScalarAggregateDecision("initializer", "bailout.identity_observable");
     return undefined;
   }
   if (symbolIsUsedAsNestedFieldAssignmentRoot({ symbol, ctx })) {
+    recordScalarAggregateDecision("initializer", "bailout.nested_assignment");
     return undefined;
   }
   if (symbolIsCapturedByEffectHandler({ symbol, ctx })) {
+    recordScalarAggregateDecision("initializer", "bailout.handler_capture");
     return undefined;
   }
 
@@ -873,10 +914,13 @@ export const tryScalarizeAggregateInitializer = ({
       exprId: initializer,
       targetTypeId,
       requireOriginFact: true,
-      allowBlockStatements: Boolean(compileStatement && compileBlockInitializer),
+      allowBlockStatements: Boolean(
+        compileStatement && compileBlockInitializer,
+      ),
       ctx,
     })
   ) {
+    recordScalarAggregateDecision("initializer", "bailout.escape_or_shape");
     return undefined;
   }
 
@@ -907,8 +951,10 @@ export const tryScalarizeAggregateInitializer = ({
     } else {
       fnCtx.bindings.delete(symbol);
     }
+    recordScalarAggregateDecision("initializer", "bailout.lowering_fallback");
     return undefined;
   }
+  recordScalarAggregateDecision("initializer", "applied");
   return ops;
 };
 
@@ -961,7 +1007,9 @@ export const tryStoreScalarAggregateExpression = ({
       targetTypeId,
       structInfo,
       requireOriginFact: false,
-      allowBlockStatements: Boolean(compileStatement && compileBlockInitializer),
+      allowBlockStatements: Boolean(
+        compileStatement && compileBlockInitializer,
+      ),
       ctx,
     })
   ) {
@@ -1061,20 +1109,33 @@ export const tryBindScalarAggregateParameter = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef[] | undefined => {
-  if (
-    fnCtx.effectful ||
-    mutable ||
-    !nonEscapingParameterFactAllowsScalarization({ symbol, fnCtx, ctx })
-  ) {
+  if (fnCtx.effectful) {
+    recordScalarAggregateDecision("parameter", "bailout.effectful");
+    return undefined;
+  }
+  if (mutable) {
+    recordScalarAggregateDecision("parameter", "bailout.mutable");
+    return undefined;
+  }
+  if (!nonEscapingParameterFactAllowsScalarization({ symbol, fnCtx, ctx })) {
+    recordScalarAggregateDecision("parameter", "bailout.escapes");
     return undefined;
   }
   const structInfo = getStructuralTypeInfo(typeId, ctx);
-  if (
-    !structInfo ||
-    (structInfo.layoutKind !== "value-object" && scalarAggregateAbi !== true) ||
-    !isSmallScalarAggregate(structInfo) ||
-    abiValues.length !== aggregateLaneCount(structInfo)
-  ) {
+  if (!structInfo) {
+    recordScalarAggregateDecision("parameter", "bailout.no_layout");
+    return undefined;
+  }
+  if (structInfo.layoutKind !== "value-object" && scalarAggregateAbi !== true) {
+    recordScalarAggregateDecision("parameter", "bailout.incompatible_abi");
+    return undefined;
+  }
+  if (!isSmallScalarAggregate({ structInfo, ctx })) {
+    recordScalarAggregateDecision("parameter", "bailout.too_wide");
+    return undefined;
+  }
+  if (abiValues.length !== aggregateLaneCount(structInfo)) {
+    recordScalarAggregateDecision("parameter", "bailout.lane_mismatch");
     return undefined;
   }
 
@@ -1086,6 +1147,7 @@ export const tryBindScalarAggregateParameter = ({
     ctx,
     fnCtx,
   });
+  recordScalarAggregateDecision("parameter", "applied");
   return structInfo.fields.map((field) => {
     const laneValues = abiValues.slice(
       field.inlineStart,

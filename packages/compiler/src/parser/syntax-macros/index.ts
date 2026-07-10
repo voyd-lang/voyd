@@ -1,6 +1,7 @@
 import { Form } from "../ast/form.js";
 import { interpretWhitespace } from "./interpret-whitespace.js";
 import { intrinsicAttributeMacro } from "./intrinsic-attribute.js";
+import { compilerContractAttributeMacro } from "./compiler-contract-attribute.js";
 import { intrinsicTypeAttributeMacro } from "./intrinsic-type-attribute.js";
 import { effectAttributeMacro } from "./effect-attribute.js";
 import { serializerAttributeMacro } from "./serializer-attribute.js";
@@ -22,6 +23,7 @@ export const BASE_SYNTAX_MACROS: SyntaxMacro[] = [
 
 export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
   intrinsicAttributeMacro,
+  compilerContractAttributeMacro,
   intrinsicTypeAttributeMacro,
   boundaryAttributeMacro,
   serializerAttributeMacro,

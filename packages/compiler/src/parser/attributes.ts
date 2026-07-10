@@ -5,6 +5,10 @@ export type IntrinsicAttribute = {
   usesSignature?: boolean;
 };
 
+export type CompilerContractAttribute = {
+  id: string;
+};
+
 export type SerializerAttribute = {
   formatId: string;
   encode: Expr;

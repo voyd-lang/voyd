@@ -51,7 +51,10 @@ voyd --emit-wasm ./custom_src > module.wasm
 voyd --emit-wasm --opt ./src/main.voyd
 ```
 
-`--opt` enables Voyd's aggressive validated optimized build profile.
+`--opt` is shorthand for the release profile. Use `--opt-level balanced` for a
+lower compile-time-cost optimized build, or `--opt-level none` to select the
+default unoptimized build explicitly. `--opt` and `--opt-level` cannot be used
+together.
 
 ## Inspect compiler output
 
@@ -63,7 +66,8 @@ voyd --emit-wasm ./src > module.wasm
 voyd --emit-wasm-text --opt ./src/main.voyd
 ```
 
-`--opt` enables Voyd's aggressive validated optimized build profile.
+The optimization flags apply equally to binary emission, Wasm text emission,
+and `--run`.
 
 ## Run tests
 

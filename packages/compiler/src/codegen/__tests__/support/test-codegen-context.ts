@@ -1,15 +1,24 @@
 import binaryen from "binaryen";
-import type { CodegenContext, HirExpression, HirExprId, TypeId } from "../../context.js";
+import type {
+  CodegenContext,
+  HirExpression,
+  HirExprId,
+  TypeId,
+} from "../../context.js";
 import { createEffectRuntime } from "../../effects/runtime-abi.js";
 import { createEffectsState } from "../../effects/state.js";
 import { selectEffectsBackend } from "../../effects/codegen-backend.js";
 import { DiagnosticEmitter } from "../../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../../program-helpers.js";
+import { specializationPolicyForOptimizationLevel } from "../../../optimization-policy.js";
 
 type TypeDescriptor =
   | { kind: "primitive"; name: string }
   | { kind: "fixed-array"; element: TypeId }
-  | { kind: "structural-object"; fields: { name: string; type: TypeId; optional: boolean }[] };
+  | {
+      kind: "structural-object";
+      fields: { name: string; type: TypeId; optional: boolean }[];
+    };
 
 export const createTestCodegenContext = (): {
   ctx: CodegenContext;
@@ -91,7 +100,10 @@ export const createTestCodegenContext = (): {
         },
         getScheme: () => ({ id: 0, params: [], body: 0 }),
         instantiate: () => 0,
-        unify: () => ({ ok: false, conflict: { left: 0, right: 0, message: "unsupported" } }),
+        unify: () => ({
+          ok: false,
+          conflict: { left: 0, right: 0, message: "unsupported" },
+        }),
         substitute: (typeId: number) => typeId,
         getNominalOwner: () => undefined,
         getNominalAncestry: () => [],
@@ -104,6 +116,8 @@ export const createTestCodegenContext = (): {
         getLocalName: () => undefined,
         getPackageId: () => undefined,
         getIntrinsicType: () => undefined,
+        getStdIntrinsicTypeContract: () => undefined,
+        resolveStdIntrinsicTypeContract: () => undefined,
         getIntrinsicFunctionFlags: () => ({
           intrinsic: false,
           intrinsicUsesSignature: false,
@@ -152,6 +166,7 @@ export const createTestCodegenContext = (): {
     moduleContexts,
     diagnostics,
     options: {
+      optimizationLevel: "none",
       optimize: false,
       optimizationProfile: "aggressive",
       validate: false,
@@ -184,7 +199,10 @@ export const createTestCodegenContext = (): {
     runtimeTypeIds: { byKey: new Map(), nextId: { value: 1 } },
     lambdaEnvs: new Map(),
     lambdaFunctions: new Map(),
-    rtt: { baseType: binaryen.none, extensionHelpers: { i32Array: binaryen.i32 } } as any,
+    rtt: {
+      baseType: binaryen.none,
+      extensionHelpers: { i32Array: binaryen.i32 },
+    } as any,
     effectsRuntime,
     effectsBackend: undefined as any,
     effectsState: createEffectsState(),
@@ -195,6 +213,7 @@ export const createTestCodegenContext = (): {
       tempTypeIds: new Map(),
     },
     outcomeValueTypes: new Map(),
+    specializationPolicy: specializationPolicyForOptimizationLevel("none"),
   };
   moduleContexts.set(ctx.moduleId, ctx);
 

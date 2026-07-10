@@ -54,6 +54,10 @@ import {
   isTraitDispatchMethodEffectful,
   resolveImportedFunctionSymbol,
 } from "./trait-dispatch-abi.js";
+import {
+  isStdIntrinsicNominalType,
+  STD_INTRINSIC_TYPE,
+} from "../compiler-contracts/types.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
@@ -397,22 +401,28 @@ const classifyOptionalMember = ({
   ) {
     return undefined;
   }
-  const ownerRef = ctx.program.symbols.refOf(nominalDesc.owner);
-  if (ownerRef.moduleId !== "std::optional::types") {
-    return undefined;
-  }
-
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {
     return undefined;
   }
 
-  if (nominalDesc.name === "None" && structInfo.fields.length === 0) {
+  if (
+    isStdIntrinsicNominalType({
+      program: ctx.program,
+      typeId: nominalId,
+      intrinsicType: STD_INTRINSIC_TYPE.optionalNone,
+    }) &&
+    structInfo.fields.length === 0
+  ) {
     return { kind: "none", typeId };
   }
 
   if (
-    nominalDesc.name === "Some" &&
+    isStdIntrinsicNominalType({
+      program: ctx.program,
+      typeId: nominalId,
+      intrinsicType: STD_INTRINSIC_TYPE.optionalSome,
+    }) &&
     structInfo.fields.length === 1 &&
     structInfo.fields[0]!.name === "value"
   ) {

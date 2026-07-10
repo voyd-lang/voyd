@@ -1,0 +1,5 @@
+use std::msgpack::{ pack_boundary_value, unpack_boundary_value }
+
+pub fn main() -> i32
+  let packed = pack_boundary_value(41)
+  unpack_boundary_value<i32>(packed) + 1

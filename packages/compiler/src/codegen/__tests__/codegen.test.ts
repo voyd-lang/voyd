@@ -10,6 +10,7 @@ import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../program-helpers.js";
+import { specializationPolicyForOptimizationLevel } from "../../optimization-policy.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -129,6 +130,7 @@ const getNominalPatternDesc = (
 };
 
 const DEFAULT_OPTIONS = {
+  optimizationLevel: "none",
   optimize: false,
   optimizationProfile: "aggressive",
   validate: true,
@@ -218,6 +220,7 @@ const buildCodegenProgram = (
       tempTypeIds: new Map(),
     },
     outcomeValueTypes,
+    specializationPolicy: specializationPolicyForOptimizationLevel("none"),
   }));
   contexts.forEach((ctx) => moduleContexts.set(ctx.moduleId, ctx));
 
@@ -312,6 +315,7 @@ describe("next codegen", () => {
         tempTypeIds: new Map(),
       },
       outcomeValueTypes,
+      specializationPolicy: specializationPolicyForOptimizationLevel("none"),
     };
     moduleContexts.set(ctx.moduleId, ctx);
 

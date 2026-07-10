@@ -1,10 +1,12 @@
 import type { CodegenContext, FunctionMetadata } from "../../context.js";
 import type { ProgramSymbolId, TypeId } from "../../../semantics/ids.js";
-import { requireFunctionMetaByName } from "../../function-lookup.js";
+import {
+  BOUNDARY_MSGPACK_CONTRACT_IDS,
+  validateBoundaryMsgpackFunctionContracts,
+  type CompilerFunctionContractId,
+} from "../../../compiler-contracts/index.js";
+import { requireFunctionMetaByCompilerContract } from "../../function-lookup.js";
 import { stateFor } from "./state.js";
-
-const PUBLIC_MSGPACK_MODULE_ID = "std::msgpack";
-const RAW_MSGPACK_MODULE_ID = "std::msgpack::fns";
 
 export type MsgPackFunctions = {
   msgPackTypeId: TypeId;
@@ -65,236 +67,91 @@ const markReachable = ({
   );
 };
 
+const requireContract = (
+  ctx: CodegenContext,
+  contractId: CompilerFunctionContractId,
+): FunctionMetadata =>
+  requireFunctionMetaByCompilerContract({ ctx, contractId });
+
 export const ensureMsgPackFunctions = (
   ctx: CodegenContext
 ): MsgPackFunctions =>
   stateFor(ctx, MSGPACK_FUNCS_KEY, () => {
-    const encodeValue = requireFunctionMetaByName({
-      ctx,
-      moduleId: RAW_MSGPACK_MODULE_ID,
-      name: "encode_value",
-      paramCount: 3,
-    });
-    const signature = ctx.program.functions.getSignature(
-      RAW_MSGPACK_MODULE_ID,
-      encodeValue.symbol
-    );
-    const msgPackTypeId = signature?.parameters[0]?.typeId;
-    if (typeof msgPackTypeId !== "number") {
-      throw new Error(
-        "std::msgpack::fns::encode_value missing MsgPack parameter"
-      );
-    }
-
-    const msgpack = {
+    const { msgpack: msgPackTypeId } =
+      validateBoundaryMsgpackFunctionContracts(ctx.program);
+    const functions = {
+      encodeValue: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.encodeValue,
+      ),
+      decodeValue: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.decodeValue,
+      ),
+      makeNull: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull),
+      makeBool: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeBool),
+      makeString: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.makeString,
+      ),
+      makeArray: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeArray),
+      makeI32: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeI32),
+      makeI64: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeI64),
+      makeF32: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeF32),
+      makeF64: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeF64),
+      makeMap: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeMap),
+      unpackBool: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.unpackBool,
+      ),
+      unpackString: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.unpackString,
+      ),
+      unpackArray: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.unpackArray,
+      ),
+      unpackI32: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.unpackI32),
+      unpackI64: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.unpackI64),
+      unpackF32: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.unpackF32),
+      unpackF64: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.unpackF64),
+      unpackMap: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.unpackMap),
+      arrayWithCapacity: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.arrayWithCapacity,
+      ),
+      arrayPush: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.arrayPush),
+      arrayLength: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.arrayLength,
+      ),
+      arrayRawStorage: requireContract(
+        ctx,
+        BOUNDARY_MSGPACK_CONTRACT_IDS.arrayRawStorage,
+      ),
+      mapNew: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapNew),
+      mapSet: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapSet),
+      mapGet: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapGet),
+      mapHas: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapHas),
+      mapTagIs: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapTagIs),
+    };
+    const msgpack: MsgPackFunctions = {
       msgPackTypeId,
-      encodeValue,
-      decodeValue: requireFunctionMetaByName({
-        ctx,
-        moduleId: RAW_MSGPACK_MODULE_ID,
-        name: "decode_value",
-        paramCount: 2,
-      }),
-      makeNull: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "make_null",
-        paramCount: 0,
-      }),
-      makeBool: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "make_bool",
-        paramCount: 1,
-      }),
-      makeString: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "msgpack_make_string",
-        paramCount: 1,
-      }),
-      makeArray: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "make_array",
-        paramCount: 1,
-      }),
-      makeI32: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "make_i32",
-        paramCount: 1,
-      }),
-      makeI64: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "make_i64",
-        paramCount: 1,
-      }),
-      makeF32: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "make_f32",
-        paramCount: 1,
-      }),
-      makeF64: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "make_f64",
-        paramCount: 1,
-      }),
-      makeMap: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "make_map",
-        paramCount: 1,
-      }),
-      unpackBool: requireFunctionMetaByName({
-        ctx,
-        moduleId: RAW_MSGPACK_MODULE_ID,
-        name: "unpack_bool",
-        paramCount: 1,
-      }),
-      unpackString: requireFunctionMetaByName({
-        ctx,
-        moduleId: RAW_MSGPACK_MODULE_ID,
-        name: "unpack_string",
-        paramCount: 1,
-      }),
-      unpackArray: requireFunctionMetaByName({
-        ctx,
-        moduleId: RAW_MSGPACK_MODULE_ID,
-        name: "unpack_array",
-        paramCount: 1,
-      }),
-      unpackI32: requireFunctionMetaByName({
-        ctx,
-        moduleId: RAW_MSGPACK_MODULE_ID,
-        name: "unpack_i32",
-        paramCount: 1,
-      }),
-      unpackI64: requireFunctionMetaByName({
-        ctx,
-        moduleId: RAW_MSGPACK_MODULE_ID,
-        name: "unpack_i64",
-        paramCount: 1,
-      }),
-      unpackF32: requireFunctionMetaByName({
-        ctx,
-        moduleId: RAW_MSGPACK_MODULE_ID,
-        name: "unpack_f32",
-        paramCount: 1,
-      }),
-      unpackF64: requireFunctionMetaByName({
-        ctx,
-        moduleId: RAW_MSGPACK_MODULE_ID,
-        name: "unpack_f64",
-        paramCount: 1,
-      }),
-      unpackMap: requireFunctionMetaByName({
-        ctx,
-        moduleId: RAW_MSGPACK_MODULE_ID,
-        name: "unpack_map",
-        paramCount: 1,
-      }),
-      arrayWithCapacity: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "msgpack_array_with_capacity",
-        paramCount: 1,
-      }),
-      arrayPush: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "msgpack_array_push",
-        paramCount: 2,
-      }),
-      arrayLength: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "msgpack_array_length",
-        paramCount: 1,
-      }),
-      arrayRawStorage: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "msgpack_array_raw_storage",
-        paramCount: 1,
-      }),
-      mapNew: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "msgpack_map_new",
-        paramCount: 0,
-      }),
-      mapSet: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "msgpack_map_set",
-        paramCount: 3,
-      }),
-      mapGet: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "msgpack_map_get",
-        paramCount: 2,
-      }),
-      mapHas: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "msgpack_map_has",
-        paramCount: 2,
-      }),
-      mapTagIs: requireFunctionMetaByName({
-        ctx,
-        moduleId: PUBLIC_MSGPACK_MODULE_ID,
-        name: "msgpack_map_tag_is",
-        paramCount: 2,
-      }),
+      ...functions,
     };
 
-    [
-      msgpack.encodeValue,
-      msgpack.decodeValue,
-      msgpack.makeNull,
-      msgpack.makeBool,
-      msgpack.makeString,
-      msgpack.makeArray,
-      msgpack.makeI32,
-      msgpack.makeI64,
-      msgpack.makeF32,
-      msgpack.makeF64,
-      msgpack.makeMap,
-      msgpack.unpackBool,
-      msgpack.unpackString,
-      msgpack.unpackArray,
-      msgpack.unpackI32,
-      msgpack.unpackI64,
-      msgpack.unpackF32,
-      msgpack.unpackF64,
-      msgpack.unpackMap,
-      msgpack.arrayWithCapacity,
-      msgpack.arrayPush,
-      msgpack.arrayLength,
-      msgpack.arrayRawStorage,
-      msgpack.mapNew,
-      msgpack.mapSet,
-      msgpack.mapGet,
-      msgpack.mapHas,
-      msgpack.mapTagIs,
-    ].forEach((meta) =>
+    Object.values(functions).forEach((meta) =>
       markReachable({
         ctx,
         moduleId: meta.moduleId,
         symbol: meta.symbol,
       }),
     );
-    const stringNew = requireFunctionMetaByName({
+    const stringNew = requireContract(
       ctx,
-      moduleId: "std::string",
-      name: "new_string",
-      paramCount: 1,
-    });
+      BOUNDARY_MSGPACK_CONTRACT_IDS.newString,
+    );
     markReachable({
       ctx,
       moduleId: stringNew.moduleId,
