@@ -5,6 +5,9 @@ use std::msgpack::self as msgpack
 use std::string::type::{ String, new_string }
 use std::vx::all
 
+enum VxMessage
+  Save
+
 fn App() -> MsgPack
   let features = feature_list()
   <Card>
@@ -50,3 +53,29 @@ pub fn main()
 
 pub fn event_message_button() -> MsgPack
   <button on_click={msgpack::make_string("save")}>Save</button>
+
+pub fn full_event_options_form() -> MsgPack
+  <form
+    on_submit={on_submit_with(
+      options: EventOptions {
+        prevent_default: true,
+        stop_propagation: false,
+        capture: false,
+        passive: false
+      },
+      message: VxMessage::Save {}
+    )}
+  >
+    Save
+  </form>
+
+pub fn full_event_options_descriptor() -> MsgPack
+  on_submit_with(
+    options: EventOptions {
+      prevent_default: true,
+      stop_propagation: false,
+      capture: false,
+      passive: false
+    },
+    handler_id: 42
+  )
