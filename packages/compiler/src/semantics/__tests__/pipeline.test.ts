@@ -1081,6 +1081,38 @@ describe("semanticsPipeline", () => {
     expect(result.diagnostics).toHaveLength(0);
   });
 
+  it("requires explicit constructor return types to match the impl target", () => {
+    const ast = loadAst("constructor_init_explicit_return_mismatch.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0027: type mismatch: expected 'object Widget.*received 'i32'/,
+    );
+  });
+
+  it("requires inferred constructor return types to match the impl target", () => {
+    const ast = loadAst("constructor_init_inferred_return_mismatch.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /TY0027: type mismatch: expected 'object Widget.*received 'i32'/,
+    );
+  });
+
+  it("derives generic constructor return types from the impl target", () => {
+    const result = semanticsPipeline(
+      loadAst("constructor_init_generic_inferred_return.voyd"),
+    );
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("checks generic constructor bodies before exporting their signatures", () => {
+    expect(() =>
+      runMainWithSingleFixtureDependency({
+        depFixture: "constructor_init_generic_cross_module/dep.voyd",
+        mainFixture: "constructor_init_generic_cross_module/main.voyd",
+      }),
+    ).toThrow(
+      /TY0027: type mismatch: expected 'object Box.*received 'i32'/,
+    );
+  });
+
   it("resolves operator calls to impl overloads", () => {
     const ast = loadAst("operator_overload_eq.voyd");
     const result = semanticsPipeline(ast);
@@ -1535,6 +1567,27 @@ describe("semanticsPipeline", () => {
         diag.message.includes("must declare a type")
       )
     ).toBe(true);
+  });
+
+  it("resolves functions declared below impl methods", () => {
+    const ast = loadAst("function_below_impl_method.voyd");
+    const result = semanticsPipeline(ast);
+
+    expect(result.diagnostics).toHaveLength(0);
+    const symbolTable = getSymbolTable(result);
+    const mainSymbol = symbolTable.resolve("main", symbolTable.rootScope);
+    const forwardProductSymbol = symbolTable.resolve(
+      "intrinsic_forward_product",
+      symbolTable.rootScope,
+    );
+    expect(mainSymbol).toBeDefined();
+    expect(forwardProductSymbol).toBeDefined();
+    expectFunctionReturnPrimitive(result.typing, mainSymbol!, "f64");
+    expectFunctionReturnPrimitive(
+      result.typing,
+      forwardProductSymbol!,
+      "f64",
+    );
   });
 
   it("infers forward-referenced helpers used by overloaded operators across modules", () => {

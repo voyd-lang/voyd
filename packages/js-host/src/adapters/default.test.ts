@@ -413,6 +413,7 @@ describe("registerDefaultHostAdapters", () => {
       writeFile: async () => {},
       writeTextFile: async () => {},
       stat: async () => ({}),
+      remove: async () => {},
       readDir: (path: string) => ({
         async *[Symbol.asyncIterator]() {
           if (path === "/") {
@@ -445,6 +446,52 @@ describe("registerDefaultHostAdapters", () => {
     });
   });
 
+  it("removes paths through the deno fs adapter", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.fs", opName: "remove", opId: 0 },
+    ]);
+    const removedPaths: string[] = [];
+    vi.stubGlobal("Deno", {
+      readFile: async () => new Uint8Array(),
+      readTextFile: async () => "",
+      writeFile: async () => {},
+      writeTextFile: async () => {},
+      stat: async () => ({}),
+      remove: async (path: string) => {
+        if (path === "/tmp/denied.log") {
+          throw Object.assign(new Error("permission denied"), { errno: 13 });
+        }
+        removedPaths.push(path);
+      },
+      readDir: () => ({
+        async *[Symbol.asyncIterator]() {},
+      }),
+    });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "deno" },
+    });
+
+    const result = await getHandler("voyd.std.fs", "remove")(
+      tailContinuation,
+      "/tmp/old.log"
+    );
+
+    expect(result).toEqual({ kind: "tail", value: { ok: true } });
+    expect(removedPaths).toEqual(["/tmp/old.log"]);
+
+    const errorResult = await getHandler("voyd.std.fs", "remove")(
+      tailContinuation,
+      "/tmp/denied.log"
+    );
+    expect(errorResult).toEqual({
+      kind: "tail",
+      value: { ok: false, code: 13, message: "permission denied" },
+    });
+  });
+
   it("returns io errors when fs read/list payloads exceed transport buffer", async () => {
     const table = buildTable([
       { effectId: "voyd.std.fs", opName: "read_bytes", opId: 0 },
@@ -457,6 +504,7 @@ describe("registerDefaultHostAdapters", () => {
       writeFile: async () => {},
       writeTextFile: async () => {},
       stat: async () => ({}),
+      remove: async () => {},
       readDir: () => ({
         async *[Symbol.asyncIterator]() {
           for (let index = 0; index < 16; index += 1) {

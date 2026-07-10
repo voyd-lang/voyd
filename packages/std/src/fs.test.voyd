@@ -70,6 +70,25 @@ test "fs list_dir decodes path arrays":
     Err<IoError>:
       assert(false, eq: true)
 
+test "fs remove encodes path and decodes success":
+  let ~paths = Array<String>::init()
+  let result = remove_with_capture(paths)
+
+  match(result)
+    Ok<Unit>:
+      assert(optional_string_or(paths.get(0), "missing".as_slice()).equals("/tmp/old.log"), eq: true)
+    Err<IoError>:
+      assert(false, eq: true)
+
+test "fs remove decodes host errors":
+  let result = remove_with_payload(host_dto_test::host_error_payload(code: 13, message: "permission denied"))
+  match(result)
+    Ok<Unit>:
+      assert(false, eq: true)
+    Err<IoError> { error }:
+      assert(error.code, eq: 13)
+      assert(error.message.equals("permission denied"), eq: true)
+
 fn read_string_with_payload(payload: MsgPack): () -> Result<String, IoError>
   try
     read_string(Path::new("/tmp/app.log".as_slice().to_string()))
@@ -83,6 +102,8 @@ fn read_string_with_payload(payload: MsgPack): () -> Result<String, IoError>
     tail(host_dto_test::host_default_error_payload())
   Fs::exists(tail, _path):
     tail(false)
+  Fs::remove(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
   Fs::list_dir(tail, _path):
     tail(host_dto_test::host_default_error_payload())
 
@@ -99,6 +120,8 @@ fn read_bytes_with_payload(payload: MsgPack): () -> Result<Bytes, IoError>
     tail(host_dto_test::host_default_error_payload())
   Fs::exists(tail, _path):
     tail(false)
+  Fs::remove(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
   Fs::list_dir(tail, _path):
     tail(host_dto_test::host_default_error_payload())
 
@@ -115,6 +138,8 @@ fn list_dir_with_payload(payload: MsgPack): () -> Result<Array<Path>, IoError>
     tail(host_dto_test::host_default_error_payload())
   Fs::exists(tail, _path):
     tail(false)
+  Fs::remove(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
   Fs::list_dir(tail, _path):
     tail(payload)
 
@@ -134,6 +159,8 @@ fn write_string_with_capture(~paths: Array<String>, ~values: Array<String>): () 
     tail(host_dto_test::host_ok_payload())
   Fs::exists(tail, _path):
     tail(false)
+  Fs::remove(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
   Fs::list_dir(tail, _path):
     tail(host_dto_test::host_default_error_payload())
 
@@ -165,6 +192,45 @@ fn write_bytes_with_capture(~paths: Array<String>, ~values: Array<i32>): () -> R
     tail(host_dto_test::host_default_error_payload())
   Fs::exists(tail, _path):
     tail(false)
+  Fs::remove(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::list_dir(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+
+fn remove_with_capture(~paths: Array<String>): () -> Result<Unit, IoError>
+  try
+    remove(Path::new("/tmp/old.log".as_slice()))
+  Fs::read_bytes(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::read_string(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_bytes(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_string(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::exists(tail, _path):
+    tail(false)
+  Fs::remove(tail, path):
+    paths.push(unpack_msgpack_string(path))
+    tail(host_dto_test::host_ok_payload())
+  Fs::list_dir(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+
+fn remove_with_payload(payload: MsgPack): () -> Result<Unit, IoError>
+  try
+    remove(Path::new("/tmp/old.log".as_slice()))
+  Fs::read_bytes(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::read_string(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_bytes(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_string(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::exists(tail, _path):
+    tail(false)
+  Fs::remove(tail, _path):
+    tail(payload)
   Fs::list_dir(tail, _path):
     tail(host_dto_test::host_default_error_payload())
 
@@ -234,3 +300,11 @@ fn unpack_msgpack_i32(payload: MsgPack): () -> i32
     Err<MsgPackError>:
       panic("invalid msgpack i32".as_slice())
       0
+
+fn unpack_msgpack_string(payload: MsgPack): () -> String
+  match(msgpack::unpack_string(payload))
+    Ok<String> { value }:
+      value
+    Err<MsgPackError>:
+      panic("invalid msgpack string".as_slice())
+      String::init()

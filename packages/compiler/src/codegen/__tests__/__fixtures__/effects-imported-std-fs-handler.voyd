@@ -15,5 +15,7 @@ pub fn handle_imported_std_fs_ops(): () -> i32
     tail(_payload)
   Fs::write_string(tail, _payload: MsgPack):
     tail(_payload)
+  Fs::remove(tail, _path: MsgPack):
+    tail(_path)
   Fs::list_dir(tail, _path: MsgPack):
     tail(_path)

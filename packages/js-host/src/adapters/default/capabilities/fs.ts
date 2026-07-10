@@ -45,6 +45,7 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
       | ((path: string, data: string) => Promise<void>)
       | undefined;
     const denoStat = deno?.stat as ((path: string) => Promise<unknown>) | undefined;
+    const denoRemove = deno?.remove as ((path: string) => Promise<void>) | undefined;
     const denoReadDir = deno?.readDir as
       | ((path: string) => AsyncIterable<{ name: string }>)
       | undefined;
@@ -56,6 +57,7 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
       !!denoWriteFile &&
       !!denoWriteTextFile &&
       !!denoStat &&
+      !!denoRemove &&
       !!denoReadDir;
 
     if (!hasNodeFs && !hasDenoFs) {
@@ -197,6 +199,31 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
       },
     });
     implementedOps.add("exists");
+
+    registered += registerOpHandler({
+      host,
+      effectId: FS_EFFECT_ID,
+      opName: "remove",
+      handler: async ({ tail }, path) => {
+        try {
+          const resolvedPath = toPath(path);
+          if (hasNodeFs) {
+            const metadata = await nodeFs!.lstat(resolvedPath);
+            if (metadata.isDirectory()) {
+              await nodeFs!.rmdir(resolvedPath);
+            } else {
+              await nodeFs!.unlink(resolvedPath);
+            }
+          } else {
+            await denoRemove!(resolvedPath);
+          }
+          return tail({ ok: true });
+        } catch (error) {
+          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+        }
+      },
+    });
+    implementedOps.add("remove");
 
     registered += registerOpHandler({
       host,

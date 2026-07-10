@@ -1,0 +1,21 @@
+use std::env::self as env
+use std::error::IoError
+use std::fs::{ Fs, remove }
+use std::optional::types::all
+use std::path::Path
+use std::result::types::all
+use std::string::type::String
+
+pub fn remove_path_from_env(): (Fs, env::Env) -> i32
+  match(env::get("VOYD_STD_FS_REMOVE_PATH".as_slice()))
+    Some<String> { value: path }:
+      remove_path(path)
+    None:
+      -1
+
+fn remove_path(path: String): Fs -> i32
+  match(remove(Path::new(path)))
+    Ok<Unit>:
+      1
+    Err<IoError> { error }:
+      -error.code
