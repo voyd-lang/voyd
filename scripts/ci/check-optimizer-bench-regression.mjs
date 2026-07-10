@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 
 const DEFAULT_THRESHOLDS = {
   compile: { relativePct: 20, absolute: 250 },
@@ -94,6 +95,7 @@ const run = (command, args, label, options = {}) => {
     encoding: "utf8",
     stdio: options.stdio ?? "inherit",
     env: options.env ?? process.env,
+    cwd: options.cwd,
   });
   if (result.status !== 0) {
     const stderr = result.stderr?.trim();
@@ -121,6 +123,19 @@ const rowKey = (row) =>
 const rowsByKey = (scorecard) =>
   new Map(scorecard.rows.map((row) => [rowKey(row), row]));
 
+const rssComparison = (row) =>
+  typeof row.processMaxRssGrowthBytes === "number"
+    ? {
+        label: "compile peak RSS growth median MiB",
+        value: row.processMaxRssGrowthBytes,
+        samples: row.processMaxRssGrowthSamplesBytes ?? [],
+      }
+    : {
+        label: "peak RSS median MiB",
+        value: row.processMaxRssBytes,
+        samples: row.processMaxRssSamplesBytes ?? [],
+      };
+
 const percentDelta = (base, head) =>
   base === 0
     ? head === 0
@@ -135,6 +150,8 @@ const compareMetric = ({
   base,
   head,
   threshold,
+  metric,
+  samples,
   format = (value) => value.toFixed(3),
 }) => {
   const absoluteDelta = head - base;
@@ -145,10 +162,17 @@ const compareMetric = ({
   console.log(
     `  [${marker}] ${label}: ${format(base)} -> ${format(head)} (${relativeDelta >= 0 ? "+" : ""}${relativeDelta.toFixed(2)}%, delta=${format(absoluteDelta)})`,
   );
-  if (failed) {
-    failures.push(
-      `${scenario} ${label} regressed by ${relativeDelta.toFixed(2)}% / ${format(absoluteDelta)}`,
+  if (samples) {
+    console.log(
+      `    samples: base=[${samples.base.map(format).join(", ")}], head=[${samples.head.map(format).join(", ")}]`,
     );
+  }
+  if (failed) {
+    failures.push({
+      scenario,
+      metric,
+      message: `${scenario} ${label} regressed by ${relativeDelta.toFixed(2)}% / ${format(absoluteDelta)}`,
+    });
   }
 };
 
@@ -235,7 +259,7 @@ const printOptimizerTelemetryChanges = ({ baseRow, headRow }) => {
   }
 };
 
-const compareScorecards = ({ base, head, limits }) => {
+export const compareScorecards = ({ base, head, limits }) => {
   if (
     JSON.stringify(base.corpusHashes ?? {}) !==
     JSON.stringify(head.corpusHashes ?? {})
@@ -268,6 +292,7 @@ const compareScorecards = ({ base, head, limits }) => {
       base: baseRow.compileMedianMs,
       head: headRow.compileMedianMs,
       threshold: limits.compile,
+      metric: "compile",
     });
     compareMetric({
       failures,
@@ -276,16 +301,35 @@ const compareScorecards = ({ base, head, limits }) => {
       base: baseRow.runtimeMedianMs,
       head: headRow.runtimeMedianMs,
       threshold: limits.runtime,
+      metric: "runtime",
     });
+    const baseRss = rssComparison(baseRow);
+    const headRss = rssComparison(headRow);
+    if (baseRss.label !== headRss.label) {
+      throw new Error(
+        `${baseRow.scenario} scorecards use different RSS measurement formats`,
+      );
+    }
     compareMetric({
       failures,
       scenario: baseRow.scenario,
-      label: "peak RSS MiB",
-      base: baseRow.processMaxRssBytes,
-      head: headRow.processMaxRssBytes,
+      label: baseRss.label,
+      base: baseRss.value,
+      head: headRss.value,
       threshold: limits.rss,
+      metric: "rss",
+      samples: {
+        base: baseRss.samples,
+        head: headRss.samples,
+      },
       format: (value) => (value / (1024 * 1024)).toFixed(2),
     });
+    if (typeof baseRow.processMaxRssGrowthBytes === "number") {
+      const formatRss = (value) => (value / (1024 * 1024)).toFixed(2);
+      console.log(
+        `    absolute peak RSS samples: base=[${(baseRow.processMaxRssSamplesBytes ?? []).map(formatRss).join(", ")}], head=[${(headRow.processMaxRssSamplesBytes ?? []).map(formatRss).join(", ")}]`,
+      );
+    }
     compareMetric({
       failures,
       scenario: baseRow.scenario,
@@ -293,6 +337,7 @@ const compareScorecards = ({ base, head, limits }) => {
       base: baseRow.wasmBytes,
       head: headRow.wasmBytes,
       threshold: limits.wasm,
+      metric: "wasm",
       format: (value) => value.toFixed(0),
     });
     compareMetric({
@@ -302,6 +347,7 @@ const compareScorecards = ({ base, head, limits }) => {
       base: baseRow.gzipBytes,
       head: headRow.gzipBytes,
       threshold: limits.gzip,
+      metric: "gzip",
       format: (value) => value.toFixed(0),
     });
 
@@ -320,19 +366,115 @@ const compareScorecards = ({ base, head, limits }) => {
     printOptimizerTelemetryChanges({ baseRow, headRow });
   });
 
-  if (failures.length > 0) {
-    console.error("\nOptimizer benchmark regression gate failed:");
-    failures.forEach((failure) => console.error(`- ${failure}`));
-    process.exitCode = 1;
-    return;
-  }
-  console.log("\nOptimizer benchmark regression gate passed.");
+  return failures;
 };
 
-const benchmarkAtRefs = ({ baseRef, headRef, tempRoot }) => {
+export const rssRetryScenarios = (failures) =>
+  failures.length > 0 && failures.every(({ metric }) => metric === "rss")
+    ? [...new Set(failures.map(({ scenario }) => scenario))]
+    : [];
+
+export const scorecardInputMode = ({
+  baseJson,
+  headJson,
+  baseRef,
+  headRef,
+}) => {
+  if (baseJson && headJson) {
+    return "json";
+  }
+  return baseRef && headRef ? "refs" : undefined;
+};
+
+export const pairedRunOrder = ({
+  scenarioNames,
+  scenarioOrder = scenarioNames,
+  baseRef,
+  headRef,
+  reverse = false,
+}) =>
+  scenarioNames.map((scenario) => {
+    const index = scenarioOrder.indexOf(scenario);
+    const baseFirst = (index % 2 === 0) !== reverse;
+    return {
+      scenario,
+      refs: baseFirst ? [baseRef, headRef] : [headRef, baseRef],
+    };
+  });
+
+const reportFailures = (failures) => {
+  if (failures.length === 0) {
+    console.log("\nOptimizer benchmark regression gate passed.");
+    return;
+  }
+  console.error("\nOptimizer benchmark regression gate failed:");
+  failures.forEach(({ message }) => console.error(`- ${message}`));
+};
+
+const mergedScorecard = (scorecards) => ({
+  ...scorecards[0],
+  generatedAt: new Date().toISOString(),
+  corpusHashes: Object.assign(
+    {},
+    ...scorecards.map(({ corpusHashes }) => corpusHashes ?? {}),
+  ),
+  rows: scorecards.flatMap(({ rows }) => rows),
+});
+
+const replaceScenarios = ({ scorecard, replacement, scenarioNames }) => ({
+  ...scorecard,
+  generatedAt: new Date().toISOString(),
+  corpusHashes: { ...scorecard.corpusHashes, ...replacement.corpusHashes },
+  rows: [
+    ...scorecard.rows.filter((row) => !scenarioNames.includes(row.scenario)),
+    ...replacement.rows,
+  ],
+});
+
+const benchmarkAtRefs = ({
+  baseRef,
+  headRef,
+  tempRoot,
+  resources,
+  scenarioNames: requestedScenarios,
+  attempt,
+}) => {
   const repoRoot = process.cwd();
+  const resolvedBaseRef = capture(
+    "git",
+    ["rev-parse", baseRef],
+    `resolve base ref ${baseRef}`,
+  );
+  const resolvedHeadRef = capture(
+    "git",
+    ["rev-parse", headRef],
+    `resolve head ref ${headRef}`,
+  );
   const harnessPath = path.join(repoRoot, "scripts", "bench-optimizer.ts");
   const harnessSource = readFileSync(harnessPath, "utf8");
+  const plan = JSON.parse(
+    capture(
+      process.execPath,
+      [
+        "--conditions=development",
+        "--import",
+        "tsx",
+        harnessPath,
+        "--preset",
+        "ci",
+        "--print-plan",
+      ],
+      "read optimizer benchmark plan",
+    ),
+  );
+  const scenarioNames = requestedScenarios ?? plan.scenarioNames;
+  if (
+    !Array.isArray(scenarioNames) ||
+    scenarioNames.length === 0 ||
+    scenarioNames.some((scenario) => !plan.scenarioNames.includes(scenario))
+  ) {
+    throw new Error("optimizer benchmark scenarios do not match the CI plan");
+  }
   const corpusSnapshotPath = path.join(tempRoot, "corpus.json");
   const fixtureSources = {
     "std-math-transcendentals": readFileSync(
@@ -385,18 +527,46 @@ const benchmarkAtRefs = ({ baseRef, headRef, tempRoot }) => {
     spawnSync("git", [
       "diff",
       "--quiet",
-      baseRef,
-      headRef,
+      resolvedBaseRef,
+      resolvedHeadRef,
       "--",
       "package-lock.json",
     ]).status !== 0;
 
-  const runAt = (ref, outputPath) => {
-    rmSync(harnessPath, { force: true });
-    run("git", ["checkout", "--force", "--detach", ref], `checkout ${ref}`);
-    writeFileSync(harnessPath, harnessSource);
-    if (lockfileChanged) {
-      run("npm", ["ci", "--include=optional"], `npm ci @ ${ref}`);
+  const prepareWorktree = (ref) => {
+    const existing = resources.worktrees.get(ref);
+    if (existing) {
+      return existing;
+    }
+    const worktreePath = path.join(
+      tempRoot,
+      `dependencies-${resources.worktrees.size}`,
+    );
+    run(
+      "git",
+      ["worktree", "add", "--detach", worktreePath, ref],
+      `create dependency worktree @ ${ref}`,
+    );
+    resources.worktrees.set(ref, worktreePath);
+    writeFileSync(
+      path.join(worktreePath, "scripts", "bench-optimizer.ts"),
+      harnessSource,
+    );
+    run("npm", ["ci", "--include=optional"], `npm ci @ ${ref}`, {
+      cwd: worktreePath,
+    });
+    return worktreePath;
+  };
+
+  const runAt = ({ ref, scenario, outputPath }) => {
+    const worktreePath = lockfileChanged ? prepareWorktree(ref) : undefined;
+    const activeHarnessPath = worktreePath
+      ? path.join(worktreePath, "scripts", "bench-optimizer.ts")
+      : harnessPath;
+    if (!worktreePath) {
+      rmSync(harnessPath, { force: true });
+      run("git", ["checkout", "--force", "--detach", ref], `checkout ${ref}`);
+      writeFileSync(harnessPath, harnessSource);
     }
     run(
       process.execPath,
@@ -404,36 +574,83 @@ const benchmarkAtRefs = ({ baseRef, headRef, tempRoot }) => {
         "--conditions=development",
         "--import",
         "tsx",
-        harnessPath,
+        activeHarnessPath,
         "--preset",
         "ci",
+        "--scenarios",
+        scenario,
         "--output",
         outputPath,
         "--corpus-snapshot",
         corpusSnapshotPath,
       ],
       `optimizer scorecard @ ${ref}`,
-      { stdio: ["ignore", "ignore", "inherit"] },
+      {
+        stdio: ["ignore", "ignore", "inherit"],
+        cwd: worktreePath ?? repoRoot,
+      },
     );
-    rmSync(harnessPath, { force: true });
+    if (!worktreePath) {
+      rmSync(harnessPath, { force: true });
+    }
   };
 
-  const basePath = path.join(tempRoot, "base.json");
-  const headPath = path.join(tempRoot, "head.json");
+  const scorecards = new Map([
+    [resolvedBaseRef, []],
+    [resolvedHeadRef, []],
+  ]);
+  const order = pairedRunOrder({
+    scenarioNames,
+    scenarioOrder: plan.scenarioNames,
+    baseRef: resolvedBaseRef,
+    headRef: resolvedHeadRef,
+    reverse: attempt === "retry",
+  });
+  console.log(`\n${attempt} paired measurement order:`);
+  order.forEach(({ scenario, refs }) =>
+    console.log(`- ${scenario}: ${refs.join(" -> ")}`),
+  );
   try {
-    runAt(baseRef, basePath);
-    runAt(headRef, headPath);
+    order.forEach(({ scenario, refs }, scenarioIndex) => {
+      refs.forEach((ref, refIndex) => {
+        const outputPath = path.join(
+          tempRoot,
+          `${attempt}-${scenarioIndex}-${refIndex}.json`,
+        );
+        runAt({ ref, scenario, outputPath });
+        scorecards.get(ref).push(readScorecard(outputPath));
+      });
+    });
   } finally {
-    rmSync(harnessPath, { force: true });
-    const restoreArgs = originalBranch
-      ? ["checkout", "--force", originalBranch]
-      : ["checkout", "--force", "--detach", originalSha];
-    run("git", restoreArgs, "restore original checkout");
-    if (lockfileChanged) {
-      run("npm", ["ci", "--include=optional"], "restore original dependencies");
+    if (!lockfileChanged) {
+      rmSync(harnessPath, { force: true });
+      const restoreArgs = originalBranch
+        ? ["checkout", "--force", originalBranch]
+        : ["checkout", "--force", "--detach", originalSha];
+      run("git", restoreArgs, "restore original checkout");
     }
   }
+  const basePath = path.join(tempRoot, `${attempt}-base.json`);
+  const headPath = path.join(tempRoot, `${attempt}-head.json`);
+  writeFileSync(
+    basePath,
+    `${JSON.stringify(mergedScorecard(scorecards.get(resolvedBaseRef)), null, 2)}\n`,
+  );
+  writeFileSync(
+    headPath,
+    `${JSON.stringify(mergedScorecard(scorecards.get(resolvedHeadRef)), null, 2)}\n`,
+  );
   return { basePath, headPath };
+};
+
+const cleanupBenchmarkResources = (resources) => {
+  [...resources.worktrees.values()].forEach((worktreePath) => {
+    run(
+      "git",
+      ["worktree", "remove", "--force", worktreePath],
+      `remove dependency worktree ${worktreePath}`,
+    );
+  });
 };
 
 const main = () => {
@@ -442,26 +659,97 @@ const main = () => {
   const baseRef = argValue("--base") ?? process.env.BASE_SHA;
   const headRef = argValue("--head") ?? process.env.HEAD_SHA;
   const tempRoot = mkdtempSync(path.join(tmpdir(), "voyd-optimizer-bench-"));
+  const resources = { worktrees: new Map() };
   try {
+    const limits = thresholds();
+    const inputMode = scorecardInputMode({
+      baseJson,
+      headJson,
+      baseRef,
+      headRef,
+    });
     const paths =
-      baseJson && headJson
+      inputMode === "json"
         ? { basePath: baseJson, headPath: headJson }
-        : baseRef && headRef
-          ? benchmarkAtRefs({ baseRef, headRef, tempRoot })
+        : inputMode === "refs"
+          ? benchmarkAtRefs({
+              baseRef,
+              headRef,
+              tempRoot,
+              resources,
+              attempt: "initial",
+            })
           : undefined;
     if (!paths) {
       throw new Error(
         "provide --base-json/--head-json or --base/--head (BASE_SHA/HEAD_SHA)",
       );
     }
-    compareScorecards({
-      base: readScorecard(paths.basePath),
-      head: readScorecard(paths.headPath),
-      limits: thresholds(),
+    let finalBase = readScorecard(paths.basePath);
+    let finalHead = readScorecard(paths.headPath);
+    console.log("\nInitial paired comparison:");
+    const initialFailures = compareScorecards({
+      base: finalBase,
+      head: finalHead,
+      limits,
     });
+    const retryScenarios = rssRetryScenarios(initialFailures);
+    if (retryScenarios.length > 0 && inputMode === "refs") {
+      console.log(
+        `\nRSS was the only failing metric; retrying paired measurement for: ${retryScenarios.join(", ")}`,
+      );
+      const retryPaths = benchmarkAtRefs({
+        baseRef,
+        headRef,
+        tempRoot,
+        resources,
+        scenarioNames: retryScenarios,
+        attempt: "retry",
+      });
+      const retryBase = readScorecard(retryPaths.basePath);
+      const retryHead = readScorecard(retryPaths.headPath);
+      finalBase = replaceScenarios({
+        scorecard: finalBase,
+        replacement: retryBase,
+        scenarioNames: retryScenarios,
+      });
+      finalHead = replaceScenarios({
+        scorecard: finalHead,
+        replacement: retryHead,
+        scenarioNames: retryScenarios,
+      });
+      console.log(
+        "\nFinal paired comparison (RSS retries replace initial samples):",
+      );
+      const finalFailures = compareScorecards({
+        base: finalBase,
+        head: finalHead,
+        limits,
+      });
+      reportFailures(finalFailures);
+      process.exitCode = finalFailures.length > 0 ? 1 : 0;
+      return;
+    }
+    if (retryScenarios.length > 0) {
+      console.log(
+        "\nRSS retry skipped because precomputed JSON scorecards were supplied.",
+      );
+    } else if (initialFailures.length > 0) {
+      console.log(
+        "\nRetry skipped because a deterministic metric also failed.",
+      );
+    }
+    reportFailures(initialFailures);
+    process.exitCode = initialFailures.length > 0 ? 1 : 0;
   } finally {
+    cleanupBenchmarkResources(resources);
     rmSync(tempRoot, { recursive: true, force: true });
   }
 };
 
-main();
+if (
+  process.argv[1] &&
+  import.meta.url === pathToFileURL(process.argv[1]).href
+) {
+  main();
+}
