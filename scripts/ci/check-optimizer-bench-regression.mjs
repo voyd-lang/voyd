@@ -95,6 +95,7 @@ const run = (command, args, label, options = {}) => {
     encoding: "utf8",
     stdio: options.stdio ?? "inherit",
     env: options.env ?? process.env,
+    cwd: options.cwd,
   });
   if (result.status !== 0) {
     const stderr = result.stderr?.trim();
@@ -434,6 +435,7 @@ const benchmarkAtRefs = ({
   baseRef,
   headRef,
   tempRoot,
+  resources,
   scenarioNames: requestedScenarios,
   attempt,
 }) => {
@@ -531,12 +533,40 @@ const benchmarkAtRefs = ({
       "package-lock.json",
     ]).status !== 0;
 
+  const prepareWorktree = (ref) => {
+    const existing = resources.worktrees.get(ref);
+    if (existing) {
+      return existing;
+    }
+    const worktreePath = path.join(
+      tempRoot,
+      `dependencies-${resources.worktrees.size}`,
+    );
+    run(
+      "git",
+      ["worktree", "add", "--detach", worktreePath, ref],
+      `create dependency worktree @ ${ref}`,
+    );
+    resources.worktrees.set(ref, worktreePath);
+    writeFileSync(
+      path.join(worktreePath, "scripts", "bench-optimizer.ts"),
+      harnessSource,
+    );
+    run("npm", ["ci", "--include=optional"], `npm ci @ ${ref}`, {
+      cwd: worktreePath,
+    });
+    return worktreePath;
+  };
+
   const runAt = ({ ref, scenario, outputPath }) => {
-    rmSync(harnessPath, { force: true });
-    run("git", ["checkout", "--force", "--detach", ref], `checkout ${ref}`);
-    writeFileSync(harnessPath, harnessSource);
-    if (lockfileChanged) {
-      run("npm", ["ci", "--include=optional"], `npm ci @ ${ref}`);
+    const worktreePath = lockfileChanged ? prepareWorktree(ref) : undefined;
+    const activeHarnessPath = worktreePath
+      ? path.join(worktreePath, "scripts", "bench-optimizer.ts")
+      : harnessPath;
+    if (!worktreePath) {
+      rmSync(harnessPath, { force: true });
+      run("git", ["checkout", "--force", "--detach", ref], `checkout ${ref}`);
+      writeFileSync(harnessPath, harnessSource);
     }
     run(
       process.execPath,
@@ -544,7 +574,7 @@ const benchmarkAtRefs = ({
         "--conditions=development",
         "--import",
         "tsx",
-        harnessPath,
+        activeHarnessPath,
         "--preset",
         "ci",
         "--scenarios",
@@ -555,9 +585,14 @@ const benchmarkAtRefs = ({
         corpusSnapshotPath,
       ],
       `optimizer scorecard @ ${ref}`,
-      { stdio: ["ignore", "ignore", "inherit"] },
+      {
+        stdio: ["ignore", "ignore", "inherit"],
+        cwd: worktreePath ?? repoRoot,
+      },
     );
-    rmSync(harnessPath, { force: true });
+    if (!worktreePath) {
+      rmSync(harnessPath, { force: true });
+    }
   };
 
   const scorecards = new Map([
@@ -587,13 +622,12 @@ const benchmarkAtRefs = ({
       });
     });
   } finally {
-    rmSync(harnessPath, { force: true });
-    const restoreArgs = originalBranch
-      ? ["checkout", "--force", originalBranch]
-      : ["checkout", "--force", "--detach", originalSha];
-    run("git", restoreArgs, "restore original checkout");
-    if (lockfileChanged) {
-      run("npm", ["ci", "--include=optional"], "restore original dependencies");
+    if (!lockfileChanged) {
+      rmSync(harnessPath, { force: true });
+      const restoreArgs = originalBranch
+        ? ["checkout", "--force", originalBranch]
+        : ["checkout", "--force", "--detach", originalSha];
+      run("git", restoreArgs, "restore original checkout");
     }
   }
   const basePath = path.join(tempRoot, `${attempt}-base.json`);
@@ -609,12 +643,23 @@ const benchmarkAtRefs = ({
   return { basePath, headPath };
 };
 
+const cleanupBenchmarkResources = (resources) => {
+  [...resources.worktrees.values()].forEach((worktreePath) => {
+    run(
+      "git",
+      ["worktree", "remove", "--force", worktreePath],
+      `remove dependency worktree ${worktreePath}`,
+    );
+  });
+};
+
 const main = () => {
   const baseJson = argValue("--base-json");
   const headJson = argValue("--head-json");
   const baseRef = argValue("--base") ?? process.env.BASE_SHA;
   const headRef = argValue("--head") ?? process.env.HEAD_SHA;
   const tempRoot = mkdtempSync(path.join(tmpdir(), "voyd-optimizer-bench-"));
+  const resources = { worktrees: new Map() };
   try {
     const limits = thresholds();
     const inputMode = scorecardInputMode({
@@ -631,6 +676,7 @@ const main = () => {
               baseRef,
               headRef,
               tempRoot,
+              resources,
               attempt: "initial",
             })
           : undefined;
@@ -656,6 +702,7 @@ const main = () => {
         baseRef,
         headRef,
         tempRoot,
+        resources,
         scenarioNames: retryScenarios,
         attempt: "retry",
       });
@@ -695,6 +742,7 @@ const main = () => {
     reportFailures(initialFailures);
     process.exitCode = initialFailures.length > 0 ? 1 : 0;
   } finally {
+    cleanupBenchmarkResources(resources);
     rmSync(tempRoot, { recursive: true, force: true });
   }
 };
