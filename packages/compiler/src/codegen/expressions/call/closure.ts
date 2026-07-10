@@ -20,6 +20,7 @@ import {
   getExprBinaryenType,
   getRequiredExprType,
   getSignatureSpillBoxType,
+  getOptimizedParamAbiKind,
   wasmTypeFor,
 } from "../../types.js";
 import { buildInstanceSubstitution } from "../../type-substitution.js";
@@ -206,10 +207,15 @@ export const compileClosureCall = ({
   });
   const argSetups: binaryen.ExpressionRef[] = [];
   const userArgs = args.flatMap((arg, index) => {
+    const parameter = resolvedDesc.parameters[index];
+    const defaulted =
+      parameter?.optional === true &&
+      ctx.program.optionals.getOptionalInfo(ctx.moduleId, parameter.type) ===
+        undefined;
     const flattened = flattenAbiArgument(
       arg,
       base.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
-      resolvedDesc.parameters[index]?.type,
+      defaulted ? undefined : parameter?.type,
     );
     argSetups.push(...flattened.setup);
     return flattened.args;
@@ -413,6 +419,11 @@ export const compileCurriedClosureCall = ({
       typeId: param.type,
       label: param.label,
       optional: param.optional,
+      defaulted:
+        param.optional === true &&
+        ctx.program.optionals.getOptionalInfo(ctx.moduleId, param.type) ===
+          undefined,
+      bindingKind: param.bindingKind,
     }));
     const remainingCall: HirCallExpr = {
       ...expr,
@@ -424,6 +435,13 @@ export const compileCurriedClosureCall = ({
         return compileCallArgumentsForParamsWithDetails({
           call: remainingCall,
           params,
+          paramAbiKinds: params.map((param) =>
+            getOptimizedParamAbiKind({
+              typeId: param.typeId,
+              bindingKind: param.bindingKind,
+              ctx,
+            }),
+          ),
           ctx,
           fnCtx,
           compileExpr,
@@ -491,10 +509,15 @@ export const compileCurriedClosureCall = ({
     const returnWasmType = wasmTypeFor(expectedTypeId, ctx);
     const argSetups: binaryen.ExpressionRef[] = [];
     const args = compiledSlice.args.flatMap((arg, index) => {
+      const parameter = currentDesc.parameters[index];
+      const defaulted =
+        parameter?.optional === true &&
+        ctx.program.optionals.getOptionalInfo(ctx.moduleId, parameter.type) ===
+          undefined;
       const flattened = flattenAbiArgument(
         arg,
         base.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
-        currentDesc.parameters[index]?.type,
+        defaulted ? undefined : parameter?.type,
       );
       argSetups.push(...flattened.setup);
       return flattened.args;
@@ -580,7 +603,12 @@ const compileClosureArguments = ({
 }: {
   call: HirCallExpr;
   desc: {
-    parameters: readonly { type: TypeId; label?: string; optional?: boolean }[];
+    parameters: readonly {
+      type: TypeId;
+      label?: string;
+      optional?: boolean;
+      bindingKind?: string;
+    }[];
   };
   ctx: CodegenContext;
   fnCtx: FunctionContext;
@@ -591,11 +619,23 @@ const compileClosureArguments = ({
     typeId: param.type,
     label: param.label,
     optional: param.optional,
+    defaulted:
+      param.optional === true &&
+      ctx.program.optionals.getOptionalInfo(ctx.moduleId, param.type) ===
+        undefined,
+    bindingKind: param.bindingKind,
   }));
 
   return compileCallArgumentsForParams({
     call,
     params,
+    paramAbiKinds: params.map((param) =>
+      getOptimizedParamAbiKind({
+        typeId: param.typeId,
+        bindingKind: param.bindingKind,
+        ctx,
+      }),
+    ),
     ctx,
     fnCtx,
     compileExpr,

@@ -10,10 +10,6 @@ import { bindTypeParams as bindTypeParamsFromType } from "../type-relations.js";
 import { getStructuralFields } from "../type-system.js";
 import { typeExpression } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
-import {
-  getOptionalInfo,
-  optionalResolverContextForTypingContext,
-} from "../optionals.js";
 
 export type CallArgInput = {
   expr: HirExprId;
@@ -145,7 +141,10 @@ export const expectedCallArgType = ({
     if (!runParam.label) {
       break;
     }
-    if (runParam.optional && !explicitFieldNames.has(runParam.label)) {
+    if (
+      (runParam.optional || runParam.defaulted) &&
+      !explicitFieldNames.has(runParam.label)
+    ) {
       cursor += 1;
       continue;
     }
@@ -199,6 +198,7 @@ export const bindCallArgumentTypeParams = ({
     },
   });
 };
+
 
 const forEachCallArgumentMatch = ({
   args,
@@ -271,7 +271,7 @@ const forEachCallArgumentMatch = ({
       continue;
     }
 
-    if (param.optional) {
+    if (param.optional || param.defaulted) {
       paramIndex += 1;
       continue;
     }
@@ -293,11 +293,5 @@ const providedArgumentTypeForParam = ({
   const type = hintSubstitution
     ? ctx.arena.substitute(param.type, hintSubstitution)
     : param.type;
-  if (typeof param.defaultValue !== "number") {
-    return type;
-  }
-  return (
-    getOptionalInfo(type, optionalResolverContextForTypingContext(ctx))
-      ?.innerType ?? type
-  );
+  return type;
 };

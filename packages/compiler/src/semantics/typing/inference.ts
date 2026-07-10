@@ -321,10 +321,11 @@ const refreshFunctionSignatureType = ({
   ctx: TypingContext;
 }): void => {
   const functionType = ctx.arena.internFunction({
-    parameters: signature.parameters.map(({ type, label, optional }) => ({
+    parameters: signature.parameters.map(({ type, label, optional, defaulted, bindingKind }) => ({
       type,
       label,
-      optional: optional ?? false,
+      optional: (optional ?? false) || (defaulted ?? false),
+      bindingKind,
     })),
     returnType: signature.returnType,
     effectRow: signature.effectRow ?? ctx.primitives.defaultEffectRow,

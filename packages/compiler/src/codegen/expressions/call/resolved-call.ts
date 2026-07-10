@@ -186,7 +186,10 @@ export const emitResolvedCall = ({
 
   const allArgs = [...args, ...staticCaptureArgs];
   const userArgs = allArgs.flatMap((arg, index) => {
-    const typeId = resolvedMeta.scalarAggregateParamIndexes?.includes(index)
+    const typeId =
+      resolvedMeta.scalarAggregateParamIndexes?.includes(index) ||
+      (resolvedMeta.parameters[index]?.defaulted === true &&
+        !resolvedMeta.callShape)
       ? undefined
       : resolvedMeta.paramTypeIds[index];
     const flattened = flattenAbiArgument(

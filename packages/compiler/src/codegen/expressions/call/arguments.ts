@@ -17,14 +17,13 @@ import type {
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
 import type { CallArgumentPlanEntry } from "../../../semantics/typing/types.js";
 import type { CallShapeSpecializationRequest } from "../../../optimize/ir.js";
-import {
-  compileOptionalNoneValue,
-  compileOptionalSomeValue,
-} from "../../optionals.js";
+import { compileOptionalNoneValue } from "../../optionals.js";
 import { stableCallsiteIdFor } from "../../../stable-callsite-id.js";
 import { coerceValueToType, loadStructuralField } from "../../structural.js";
 import {
   abiTypeFor,
+  getAbiTypesForSignature,
+  getOptimizedAbiTypesForParam,
   getInlineHeapBoxType,
   getRequiredExprType,
   getStructuralTypeInfo,
@@ -387,6 +386,22 @@ export const compileCallArgumentsForParamsWithDetails = ({
     paramTypeIds:
       activeMeta?.paramTypeIds ?? params.map((param) => param.typeId),
     paramAbiKinds: activeMeta?.paramAbiKinds ?? paramAbiKinds,
+    paramAbiTypes:
+      activeMeta?.paramAbiTypes ??
+      params.map((param) => {
+        const payload = param.bindingKind
+          ? getOptimizedAbiTypesForParam({
+              typeId: param.typeId,
+              bindingKind: param.bindingKind,
+              ctx,
+            })
+          : getAbiTypesForSignature(param.typeId, ctx);
+        return param.defaulted ? [...payload, binaryen.i32] : payload;
+      }),
+    presenceEncodedParams:
+      activeMeta?.parameters.map(
+        (param) => param.defaulted === true && !activeMeta.callShape,
+      ) ?? params.map((param) => param.defaulted === true),
     callShapeParameterStates: activeMeta?.callShape?.parameterStates,
     scalarOverrideArgIndexes,
     typeInstanceId,
@@ -668,10 +683,7 @@ export const sliceTypedCallArgumentPlan = ({
       };
     }
 
-    return {
-      kind: "missing",
-      targetTypeId: entry.targetTypeId,
-    };
+    return { kind: entry.kind, targetTypeId: entry.targetTypeId };
   });
 
 const createCallArgumentFailure = ({
@@ -765,6 +777,7 @@ const planCallArgumentsForParamsFallback = ({
 
   const allowsOmittedArgument = (param: CallParam): boolean =>
     param.optional === true ||
+    param.defaulted === true ||
     ctx.program.optionals.getOptionalInfo(ctx.moduleId, param.typeId) !==
       undefined;
   const omittedArgumentPlanEntry = (
@@ -777,7 +790,9 @@ const planCallArgumentsForParamsFallback = ({
           targetTypeId: param.typeId,
           value: stableCallsiteIdFor(call.span, `${paramIndex}`),
         }
-      : { kind: "missing", targetTypeId: param.typeId };
+      : param.defaulted
+        ? { kind: "omitted-default", targetTypeId: param.typeId }
+        : { kind: "omitted-optional", targetTypeId: param.typeId };
 
   const plan: CallArgumentPlanEntry[] = [];
   const expectedTypeByArgIndex = new Map<number, TypeId>();
@@ -909,9 +924,9 @@ const planCallArgumentsFromTypedPlan = ({
       return;
     }
 
-    if (entry.kind === "missing") {
+    if (entry.kind === "omitted-default" || entry.kind === "omitted-optional") {
       plan.push({
-        kind: "missing",
+        kind: entry.kind,
         targetTypeId: currentParam.typeId,
       });
       return;
@@ -961,6 +976,8 @@ const materializeCallArgumentPlan = ({
   callArgs,
   paramTypeIds,
   paramAbiKinds,
+  paramAbiTypes,
+  presenceEncodedParams,
   callShapeParameterStates,
   scalarOverrideArgIndexes,
   typeInstanceId,
@@ -973,6 +990,8 @@ const materializeCallArgumentPlan = ({
   callArgs: readonly HirCallExpr["args"][number][];
   paramTypeIds: readonly TypeId[];
   paramAbiKinds?: readonly string[];
+  paramAbiTypes: readonly (readonly binaryen.Type[])[];
+  presenceEncodedParams: readonly boolean[];
   callShapeParameterStates?: readonly import("../../../optimize/ir.js").CallShapeParameterState[];
   scalarOverrideArgIndexes?: ReadonlySet<number>;
   typeInstanceId: ProgramFunctionInstanceId | undefined;
@@ -997,8 +1016,25 @@ const materializeCallArgumentPlan = ({
   return plan.map((entry, paramIndex) => {
     const abiKind = paramAbiKinds?.[paramIndex];
     const paramTypeId = paramTypeIds[paramIndex];
+    const presenceEncoded = presenceEncodedParams[paramIndex] === true;
+    const fullAbiTypes = paramAbiTypes[paramIndex] ?? [];
+    const payloadAbiTypes = presenceEncoded
+      ? fullAbiTypes.slice(0, -1)
+      : fullAbiTypes;
+    const encodeProvided = (
+      payload: binaryen.ExpressionRef,
+    ): binaryen.ExpressionRef =>
+      presenceEncoded
+        ? appendArgumentPresence({
+            payload,
+            payloadAbiTypes,
+            present: true,
+            ctx,
+            fnCtx,
+          })
+        : payload;
     if (entry.kind === "direct") {
-      return lowerCallArgumentForAbi({
+      const payload = lowerCallArgumentForAbi({
         argExprId: callArgs[entry.argIndex]?.expr,
         argValue: compiledArgs[entry.argIndex]!,
         paramTypeId,
@@ -1008,9 +1044,20 @@ const materializeCallArgumentPlan = ({
         fnCtx,
         compileExpr,
       });
+      return encodeProvided(payload);
     }
 
-    if (entry.kind === "missing") {
+    if (entry.kind === "omitted-default") {
+      if (callShapeParameterStates?.[paramIndex] === "omitted") {
+        return ctx.mod.nop();
+      }
+      if (!presenceEncoded) {
+        throw new Error("omitted default requires an internal presence lane");
+      }
+      return absentArgumentValue({ payloadAbiTypes, ctx });
+    }
+
+    if (entry.kind === "omitted-optional") {
       if (callShapeParameterStates?.[paramIndex] === "omitted") {
         return ctx.mod.nop();
       }
@@ -1032,20 +1079,15 @@ const materializeCallArgumentPlan = ({
       if (callShapeParameterStates?.[paramIndex] === "stable-callsite-id") {
         return ctx.mod.i32.const(entry.value);
       }
-      return lowerCallArgumentForAbi({
-        argValue: compileOptionalSomeValue({
-          targetTypeId: entry.targetTypeId,
-          value: ctx.mod.i32.const(entry.value),
-          valueTypeId: ctx.program.primitives.i32,
-          ctx,
-          fnCtx,
-        }),
+      const payload = lowerCallArgumentForAbi({
+        argValue: ctx.mod.i32.const(entry.value),
         paramTypeId,
         abiKind,
         ctx,
         fnCtx,
         compileExpr,
       });
+      return encodeProvided(payload);
     }
 
     const containerArg = callArgs[entry.containerArgIndex]!;
@@ -1081,7 +1123,7 @@ const materializeCallArgumentPlan = ({
             fnCtx,
           });
     if (typeof scalarFieldValue === "number") {
-      return lowerCallArgumentForAbi({
+      return encodeProvided(lowerCallArgumentForAbi({
         argValue: coerceValueToType({
           value: scalarFieldValue,
           actualType: field.typeId,
@@ -1094,7 +1136,7 @@ const materializeCallArgumentPlan = ({
         ctx,
         fnCtx,
         compileExpr,
-      });
+      }));
     }
 
     const existingTemp = containerTemps.get(entry.containerArgIndex);
@@ -1180,7 +1222,7 @@ const materializeCallArgumentPlan = ({
           `mutable ref labeled argument requires addressable temp storage (type ${paramTypeId})`,
         );
       }
-      return ctx.mod.block(
+      return encodeProvided(ctx.mod.block(
         null,
         [
           ...initOps,
@@ -1193,7 +1235,7 @@ const materializeCallArgumentPlan = ({
           fieldPointer,
         ],
         fieldTemp.storageType,
-      );
+      ));
     }
 
     const result = lowerCallArgumentForAbi({
@@ -1207,14 +1249,69 @@ const materializeCallArgumentPlan = ({
       compileExpr,
     });
     if (initOps.length === 0) {
-      return result;
+      return encodeProvided(result);
     }
-    return ctx.mod.block(
+    return encodeProvided(ctx.mod.block(
       null,
       [...initOps, result],
       binaryen.getExpressionType(result),
-    );
+    ));
   });
+};
+
+const appendArgumentPresence = ({
+  payload,
+  payloadAbiTypes,
+  present,
+  ctx,
+  fnCtx,
+}: {
+  payload: binaryen.ExpressionRef;
+  payloadAbiTypes: readonly binaryen.Type[];
+  present: boolean;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const captured = captureMultivalueLanes({
+    value: payload,
+    abiTypes: payloadAbiTypes,
+    ctx,
+    fnCtx,
+  });
+  const value = ctx.mod.tuple.make([
+    ...captured.lanes,
+    ctx.mod.i32.const(present ? 1 : 0),
+  ]);
+  return captured.setup.length === 0
+    ? value
+    : ctx.mod.block(
+        null,
+        [...captured.setup, value],
+        abiTypeFor([...payloadAbiTypes, binaryen.i32]),
+      );
+};
+
+const absentArgumentValue = ({
+  payloadAbiTypes,
+  ctx,
+}: {
+  payloadAbiTypes: readonly binaryen.Type[];
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef =>
+  ctx.mod.tuple.make([
+    ...payloadAbiTypes.map((type) => defaultValueForAbiType(type, ctx)),
+    ctx.mod.i32.const(0),
+  ]);
+
+const defaultValueForAbiType = (
+  type: binaryen.Type,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  if (type === binaryen.i32) return ctx.mod.i32.const(0);
+  if (type === binaryen.i64) return ctx.mod.i64.const(0, 0);
+  if (type === binaryen.f32) return ctx.mod.f32.const(0);
+  if (type === binaryen.f64) return ctx.mod.f64.const(0);
+  return ctx.mod.ref.null(type);
 };
 
 const loadScalarContainerFieldValue = ({

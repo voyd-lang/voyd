@@ -2867,6 +2867,12 @@ const functionTypeSatisfies = ({
     if (actualParam.optional !== expectedParam.optional) {
       return false;
     }
+    if (
+      (actualParam.bindingKind ?? "value") !==
+      (expectedParam.bindingKind ?? "value")
+    ) {
+      return false;
+    }
     if (!typeSatisfies(expectedParam.type, actualParam.type, ctx, state)) {
       return false;
     }

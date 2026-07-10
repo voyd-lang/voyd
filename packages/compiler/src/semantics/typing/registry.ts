@@ -36,7 +36,6 @@ import {
   getOptionalInfo,
   optionalResolverContextForTypingContext,
 } from "./optionals.js";
-import { resolveOptionalTypeForDefaultParameter } from "./default-parameters.js";
 import {
   assertUniqueMethodSignatures,
   buildImplMethodSignatureInfos,
@@ -439,22 +438,6 @@ export const registerFunctionSignatures = (
       const hasDefaultValue = typeof param.defaultValue === "number";
       if (
         hasDefaultValue &&
-        param.pattern.bindingKind !== undefined &&
-        param.pattern.bindingKind !== "value"
-      ) {
-        return emitDiagnostic({
-          ctx,
-          code: "TY0048",
-          params: {
-            kind: "reference-bound-default-parameter",
-            functionName,
-            parameterName,
-          },
-          span: normalizeSpan(param.span, item.span, ctx.hir.module.span),
-        });
-      }
-      if (
-        hasDefaultValue &&
         !param.type &&
         signatureTypeParams &&
         signatureTypeParams.length > 0
@@ -485,26 +468,12 @@ export const registerFunctionSignatures = (
       }
 
       ctx.valueTypes.set(param.symbol, parameterType);
-      const optional =
-        hasDefaultValue === true
-          ? true
-          : (declParam?.optional ?? param.optional);
-      const callParameterType =
-        hasDefaultValue === true
-          ? parameterType === ctx.primitives.unknown
-            ? parameterType
-            : resolveOptionalTypeForDefaultParameter({
-                innerType: parameterType,
-                scope: fnDecl?.scope ?? ctx.symbolTable.rootScope,
-                functionName,
-                parameterName,
-                ctx,
-                state,
-              })
-          : parameterType;
+      const optional = hasDefaultValue
+        ? false
+        : (declParam?.optional ?? param.optional);
 
       return {
-        type: callParameterType,
+        type: parameterType,
         declaredType: param.type,
         declaredSerializer: serializerForDeclaredType(param.type, ctx),
         label: declParam?.label ?? param.label,
@@ -513,6 +482,7 @@ export const registerFunctionSignatures = (
         name: parameterName,
         symbol: param.symbol,
         optional,
+        defaulted: hasDefaultValue || undefined,
         defaultValue: param.defaultValue,
         ...(defaultValueIsStableCallsiteId({ exprId: param.defaultValue, ctx })
           ? { synthetic: "stable-callsite-id" as const }
@@ -553,11 +523,14 @@ export const registerFunctionSignatures = (
       Boolean(item.returnType) || typeof constructorReturn === "number";
 
     const functionType = ctx.arena.internFunction({
-      parameters: parameters.map(({ type, label, optional }) => ({
+      parameters: parameters.map(
+        ({ type, label, optional, defaulted, bindingKind }) => ({
         type,
         label,
-        optional: optional ?? false,
-      })),
+        optional: (optional ?? false) || (defaulted ?? false),
+        bindingKind,
+      }),
+      ),
       returnType: declaredReturn,
       effectRow: initialEffectRow,
     });

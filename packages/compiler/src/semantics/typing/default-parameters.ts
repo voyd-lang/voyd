@@ -1,14 +1,9 @@
-import type { HirFunction, HirNamedTypeExpr } from "../hir/index.js";
+import type { HirFunction } from "../hir/index.js";
 import type { HirExprId, TypeId, TypeParamId } from "../ids.js";
 import { walkExpression } from "../hir/walk.js";
 import { emitDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
 import { getExprEffectRow } from "./effects.js";
-import { resolveImportedTypeExpr } from "./imports.js";
-import {
-  getOptionalInfo,
-  optionalResolverContextForTypingContext,
-} from "./optionals.js";
-import { ensureTypeMatches, resolveTypeAlias } from "./type-system.js";
+import { ensureTypeMatches } from "./type-system.js";
 import type {
   FunctionSignature,
   ParamSignature,
@@ -22,98 +17,6 @@ type TypeExpressionFn = (
   state: TypingState,
   options?: { expectedType?: TypeId },
 ) => TypeId;
-
-export const resolveOptionalTypeForDefaultParameter = ({
-  innerType,
-  scope,
-  functionName,
-  parameterName,
-  ctx,
-  state,
-}: {
-  innerType: TypeId;
-  scope: number;
-  functionName: string;
-  parameterName: string;
-  ctx: TypingContext;
-  state: TypingState;
-}): TypeId => {
-  const optionalResolverContext = optionalResolverContextForTypingContext(ctx);
-  const attemptedSymbols = new Set<number>();
-
-  const resolveViaSymbol = (symbol: number): TypeId | undefined => {
-    if (attemptedSymbols.has(symbol)) {
-      return undefined;
-    }
-    attemptedSymbols.add(symbol);
-
-    const localTemplate = ctx.typeAliases.getTemplate(symbol);
-    const resolved = localTemplate
-      ? resolveTypeAlias(symbol, ctx, state, [innerType])
-      : resolveImportedTypeExpr({
-          expr: {
-            typeKind: "named",
-            path: [ctx.symbolTable.getSymbol(symbol).name],
-            symbol,
-            ast: ctx.hir.module.ast,
-            span: ctx.hir.module.span,
-          } satisfies HirNamedTypeExpr,
-          typeArgs: [innerType],
-          ctx,
-          state,
-        });
-    if (typeof resolved !== "number") {
-      return undefined;
-    }
-    return getOptionalInfo(resolved, optionalResolverContext)
-      ? resolved
-      : undefined;
-  };
-
-  const resolveByNameAtScope = ({
-    name,
-    scopeId,
-  }: {
-    name: string;
-    scopeId: number;
-  }): TypeId | undefined => {
-    const symbol = ctx.symbolTable.resolve(name, scopeId);
-    return typeof symbol === "number" ? resolveViaSymbol(symbol) : undefined;
-  };
-
-  const resolveAtScope = (scopeId: number): TypeId | undefined =>
-    resolveByNameAtScope({ name: "Optional", scopeId }) ??
-    resolveByNameAtScope({ name: "Option", scopeId });
-
-  const resolveIntrinsicOptionalAlias = (): TypeId | undefined => {
-    for (const template of ctx.typeAliases.templates()) {
-      const metadata = (ctx.symbolTable.getSymbol(template.symbol).metadata ??
-        {}) as {
-        intrinsicType?: unknown;
-      };
-      if (metadata.intrinsicType !== "optional") {
-        continue;
-      }
-      const resolved = resolveViaSymbol(template.symbol);
-      if (typeof resolved === "number") {
-        return resolved;
-      }
-    }
-    return undefined;
-  };
-
-  const resolved =
-    resolveAtScope(scope) ??
-    resolveAtScope(ctx.symbolTable.rootScope) ??
-    resolveIntrinsicOptionalAlias();
-  if (typeof resolved === "number") {
-    return resolved;
-  }
-
-  throw new Error(
-    `default parameter ${parameterName} in function ${functionName} requires an optional type alias (for example Optional) to be in scope`,
-  );
-};
 
 export const typeDefaultParameterValues = ({
   fn,
@@ -139,10 +42,6 @@ export const typeDefaultParameterValues = ({
 
   const effectRows: number[] = [];
   const functionName = ctx.symbolTable.getSymbol(fn.symbol).name;
-  const functionScope =
-    (typeof fn.decl === "number"
-      ? ctx.decls.getFunctionById(fn.decl)?.scope
-      : undefined) ?? ctx.symbolTable.rootScope;
   const parameterIndexBySymbol = new Map(
     fn.parameters.map((param, index) => [param.symbol, index]),
   );
@@ -173,17 +72,7 @@ export const typeDefaultParameterValues = ({
     const checkType = substitution
       ? ctx.arena.substitute(signatureParam.type, substitution)
       : signatureParam.type;
-    const optionalInfo = getOptionalInfo(
-      checkType,
-      optionalResolverContextForTypingContext(ctx),
-    );
-    const hasUnknownOptionalPlaceholder =
-      signatureParam.optional === true &&
-      checkType === ctx.primitives.unknown;
-    if (!optionalInfo && !hasUnknownOptionalPlaceholder) {
-      throw new Error("default parameter type must be Optional");
-    }
-    const expectedInnerType = optionalInfo?.innerType ?? ctx.primitives.unknown;
+    const expectedInnerType = checkType;
     const defaultType = typeExpression(
       param.defaultValue,
       ctx,
@@ -206,20 +95,12 @@ export const typeDefaultParameterValues = ({
         param.span,
       );
     } else if (!substitution || substitution.size === 0) {
-      const updatedOptionalType = resolveOptionalTypeForDefaultParameter({
-        innerType: inferredInnerType,
-        scope: functionScope,
-        functionName,
-        parameterName,
-        ctx,
-        state,
-      });
       const currentParameters = updatedParameters
         ? [...updatedParameters]
         : signature.parameters.map((entry) => ({ ...entry }));
       currentParameters[index] = {
         ...currentParameters[index]!,
-        type: updatedOptionalType,
+        type: inferredInnerType,
       };
       updatedParameters = currentParameters;
       signatureUpdated = true;

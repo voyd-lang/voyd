@@ -5990,7 +5990,7 @@ type CallShapeCandidate = {
 const callShapeParameterState = (
   entry: NonNullable<ReturnType<typeof resolveCallArgPlan>>[number],
 ): CallShapeParameterState =>
-  entry.kind === "missing"
+  entry.kind === "omitted-default" || entry.kind === "omitted-optional"
     ? "omitted"
     : entry.kind === "stable-callsite-id"
       ? "stable-callsite-id"

@@ -1,0 +1,17 @@
+eff Tick
+  next(tail) -> i32
+
+fn resolve(first: i32 = Tick::next(), second: i32 = first + 1): Tick -> i32
+  first + second
+
+pub fn omitted_effectful_default() -> i32
+  try
+    resolve()
+  Tick::next(tail):
+    tail(7)
+
+pub fn supplied_effectful_default() -> i32
+  try
+    resolve(3)
+  Tick::next(tail):
+    tail(99)

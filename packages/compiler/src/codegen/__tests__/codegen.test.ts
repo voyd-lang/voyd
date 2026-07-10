@@ -91,7 +91,10 @@ const loadSemanticsWithTyping = (
 
 const loadWasmInstance = (
   fixtureName: string,
-  options: { asStd?: boolean } = {},
+  options: {
+    asStd?: boolean;
+    optimizationLevel?: "none" | "balanced" | "release";
+  } = {},
 ) => {
   const semantics = loadSemanticsWithTyping(
     fixtureName,
@@ -101,7 +104,10 @@ const loadWasmInstance = (
     },
     { asStd: options.asStd },
   );
-  const { module } = codegen(semantics, { effectsHostBoundary: "off" });
+  const { module } = codegen(semantics, {
+    effectsHostBoundary: "off",
+    optimizationLevel: options.optimizationLevel,
+  });
   return getWasmInstance(module);
 };
 
@@ -674,6 +680,30 @@ describe("next codegen", () => {
     expect((test11_forward_ref_default_missing as () => number)()).toBe(42);
     expect((test12_forward_ref_default_passed as () => number)()).toBe(5);
     expect((main as () => number)()).toBe(122);
+  });
+
+  it("preserves supplied aliases and creates fresh storage for reference defaults", () => {
+    (["none", "release"] as const).forEach((optimizationLevel) => {
+      const instance = loadWasmInstance("reference_default_parameters.voyd", {
+        optimizationLevel,
+      });
+      const exports = instance.exports as Record<string, () => number>;
+
+      expect(exports.supplied_reference_default!()).toBe(55);
+      expect(exports.omitted_reference_default!()).toBe(22);
+      expect(exports.omitted_wide_reference_default!()).toBe(32);
+      expect(exports.supplied_wide_reference_default!()).toBe(138);
+      expect(exports.indirect_default!()).toBe(10);
+      expect(exports.indirect_reference_default!()).toBe(561);
+    });
+  });
+
+  it("resumes effectful defaults into later defaults and the function body", () => {
+    const instance = loadWasmInstance("effectful_default_parameters.voyd");
+    const exports = instance.exports as Record<string, () => number>;
+
+    expect(exports.omitted_effectful_default!()).toBe(15);
+    expect(exports.supplied_effectful_default!()).toBe(7);
   });
 
   it("uses return_call for tail-recursive functions", () => {

@@ -131,14 +131,29 @@ Defaults are supported on positional and labeled parameters. Trait methods,
 effect operation signatures, and lambda parameters do not currently support
 default values.
 
+A defaulted parameter keeps its declared type. For example, `times: i32 = 3`
+binds `times` as an `i32`; it does not bind an `Optional<i32>`. Omitting the
+argument evaluates the default once, while supplying the argument skips the
+default entirely. Multiple omitted defaults are evaluated from left to right.
+
+Reference-bound parameters may also declare defaults:
+
+```voyd
+fn increment(~counter: Counter = Counter { value: 0 }) -> i32
+  counter.value = counter.value + 1
+  counter.value
+```
+
+When the argument is supplied, the parameter aliases the caller's storage and
+mutations remain visible to the caller. When it is omitted, the default is
+placed in fresh mutable storage owned by that invocation. Recursive and
+repeated calls never share that default-created storage.
+
 Current restrictions:
 
 - In generic functions, a defaulted parameter must declare an explicit type.
 - A default expression cannot reference a parameter declared at the same
   position or later in the parameter list.
-- A reference-bound parameter (such as `~value`) cannot declare a default.
-  Defaults create value-bound callee storage, which cannot preserve the
-  caller-aliasing contract of a reference-bound parameter.
 - `?` and `=` cannot be combined on the same parameter.
 
 ## Lambdas
