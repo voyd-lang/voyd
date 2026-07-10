@@ -129,46 +129,48 @@ const captureFieldsForSite = ({
 };
 
 const collectIdentifierSymbolTypes = ({
-  exprId,
+  exprIds,
   ctx,
 }: {
-  exprId: HirExprId;
+  exprIds: readonly HirExprId[];
   ctx: CodegenContext;
 }): Map<SymbolId, TypeId> => {
   const symbolTypes = new Map<SymbolId, TypeId>();
-  walkHirExpression({
-    exprId,
-    ctx,
-    visitLambdaBodies: false,
-    visitor: {
-      onExpr: (id, expr) => {
-        const setType = (symbol: SymbolId, typeId?: TypeId): void => {
-          const resolvedTypeId =
-            ctx.module.types.getValueType(symbol) ?? typeId;
-          if (typeof resolvedTypeId !== "number") return;
-          const existing = symbolTypes.get(symbol);
-          if (
-            typeof existing === "number" &&
-            existing !== ctx.program.primitives.unknown
-          ) {
+  exprIds.forEach((exprId) =>
+    walkHirExpression({
+      exprId,
+      ctx,
+      visitLambdaBodies: false,
+      visitor: {
+        onExpr: (id, expr) => {
+          const setType = (symbol: SymbolId, typeId?: TypeId): void => {
+            const resolvedTypeId =
+              ctx.module.types.getValueType(symbol) ?? typeId;
+            if (typeof resolvedTypeId !== "number") return;
+            const existing = symbolTypes.get(symbol);
+            if (
+              typeof existing === "number" &&
+              existing !== ctx.program.primitives.unknown
+            ) {
+              return;
+            }
+            symbolTypes.set(symbol, resolvedTypeId);
+          };
+
+          if (expr.exprKind === "lambda") {
+            expr.captures.forEach((capture) => setType(capture.symbol));
             return;
           }
-          symbolTypes.set(symbol, resolvedTypeId);
-        };
-
-        if (expr.exprKind === "lambda") {
-          expr.captures.forEach((capture) => setType(capture.symbol));
-          return;
-        }
-        if (expr.exprKind !== "identifier") return;
-        setType(
-          expr.symbol,
-          ctx.module.types.getResolvedExprType(id) ??
-            ctx.module.types.getExprType(id),
-        );
+          if (expr.exprKind !== "identifier") return;
+          setType(
+            expr.symbol,
+            ctx.module.types.getResolvedExprType(id) ??
+              ctx.module.types.getExprType(id),
+          );
+        },
       },
-    },
-  });
+    }),
+  );
   return symbolTypes;
 };
 
@@ -183,8 +185,30 @@ export const buildEffectLoweringEir = ({
     { argIndex: number; tempId: number; typeId: TypeId }[]
   >();
   const tempTypeIds = new Map<number, TypeId>();
+  const defaultParamTemps = new Map<
+    SymbolId,
+    { tempId: number; typeId: TypeId }
+  >();
   const tempIdByKey = new Map<string, number>();
   let tempCounter = 0;
+
+  const allocateTempId = ({
+    key,
+    typeId,
+  }: {
+    key: string;
+    typeId: TypeId;
+  }): number => {
+    const existing = tempIdByKey.get(key);
+    if (typeof existing === "number") {
+      return existing;
+    }
+    const next = tempCounter;
+    tempCounter += 1;
+    tempIdByKey.set(key, next);
+    tempTypeIds.set(next, typeId);
+    return next;
+  };
 
   const ensureTempId = (capture: {
     key: string;
@@ -192,14 +216,7 @@ export const buildEffectLoweringEir = ({
     argIndex: number;
     typeId: TypeId;
   }): number => {
-    const existing = tempIdByKey.get(capture.key);
-    if (typeof existing === "number") {
-      return existing;
-    }
-    const next = tempCounter;
-    tempCounter += 1;
-    tempIdByKey.set(capture.key, next);
-    tempTypeIds.set(next, capture.typeId);
+    const next = allocateTempId(capture);
 
     const list = callArgTemps.get(capture.callExprId) ?? [];
     list.push({
@@ -219,6 +236,7 @@ export const buildEffectLoweringEir = ({
     params,
     handlerAtSite,
     symbolTypes,
+    extraCaptureFieldsBySite = new Map(),
   }: {
     analysisSites: readonly {
       kind: "perform" | "call";
@@ -238,6 +256,10 @@ export const buildEffectLoweringEir = ({
     params: ReadonlySet<SymbolId>;
     handlerAtSite: boolean;
     symbolTypes: ReadonlyMap<SymbolId, TypeId>;
+    extraCaptureFieldsBySite?: ReadonlyMap<
+      HirExprId,
+      readonly ContinuationCaptureField[]
+    >;
   }): void => {
     analysisSites.forEach((site) => {
       const resumeValueTypeId = resumeValueTypeIdForSite({ site, ctx });
@@ -255,6 +277,10 @@ export const buildEffectLoweringEir = ({
         symbolTypes,
         ctx,
       });
+      const allCaptureFields = [
+        ...captureFields,
+        ...(extraCaptureFieldsBySite.get(site.exprId) ?? []),
+      ];
 
       const lowered: ContinuationSiteEir =
         site.kind === "perform"
@@ -272,7 +298,7 @@ export const buildEffectLoweringEir = ({
                 contBaseName,
                 handlerAtSite,
                 resumeValueTypeId,
-                captureFields,
+                captureFields: allCaptureFields,
               };
             })()
           : {
@@ -284,7 +310,7 @@ export const buildEffectLoweringEir = ({
               contBaseName,
               handlerAtSite,
               resumeValueTypeId,
-              captureFields,
+              captureFields: allCaptureFields,
             };
 
       siteCounter.current += 1;
@@ -295,21 +321,83 @@ export const buildEffectLoweringEir = ({
 
   ctx.module.hir.items.forEach((item) => {
     if (item.kind !== "function") return;
+    const signature = ctx.program.functions.getSignature(
+      ctx.moduleId,
+      item.symbol,
+    );
+    const signatureType = signature
+      ? ctx.program.types.getTypeDesc(signature.typeId)
+      : undefined;
+    const defaultParameters = item.parameters.flatMap((parameter, index) => {
+      if (typeof parameter.defaultValue !== "number") return [];
+      const typeId =
+        signatureType?.kind === "function"
+          ? signatureType.parameters[index]?.type
+          : undefined;
+      const temp =
+        typeof typeId === "number"
+          ? (() => {
+              const tempId = allocateTempId({
+                key: `defaultParam:${item.symbol}:${parameter.symbol}`,
+                typeId,
+              });
+              const value = { tempId, typeId };
+              defaultParamTemps.set(parameter.symbol, value);
+              return value;
+            })()
+          : undefined;
+      return [{ parameter, exprId: parameter.defaultValue, temp }];
+    });
     const effectInfo = effectsFacade(ctx).functionAbi(item.symbol);
     if (!effectInfo) return;
     if (!effectInfo.abiEffectful) return;
 
     const ordering = definitionOrderForFunction(item, ctx);
     const params = functionParamSymbols(item);
+    const roots = [...defaultParameters.map(({ exprId }) => exprId), item.body];
     const symbolTypes = collectIdentifierSymbolTypes({
-      exprId: item.body,
+      exprIds: roots,
       ctx,
     });
-    const analysis = analyzeExpr({
+    const bodyAnalysis = analyzeExpr({
       exprId: item.body,
       liveAfter: new Set(),
       ctx,
     });
+    let live = bodyAnalysis.live;
+    let analysisSites = [...bodyAnalysis.sites];
+    const extraCaptureFieldsBySite = new Map<
+      HirExprId,
+      readonly ContinuationCaptureField[]
+    >();
+    for (let index = defaultParameters.length - 1; index >= 0; index -= 1) {
+      const current = defaultParameters[index]!;
+      const defaultLiveAfter = new Set(live);
+      defaultLiveAfter.delete(current.parameter.symbol);
+      const defaultAnalysis = analyzeExpr({
+        exprId: current.exprId,
+        liveAfter: defaultLiveAfter,
+        ctx,
+      });
+      const remainingRawParameters = defaultParameters
+        .slice(index + 1)
+        .flatMap(({ temp }) =>
+          temp
+            ? [
+                {
+                  sourceKind: "temp" as const,
+                  tempId: temp.tempId,
+                  typeId: temp.typeId,
+                },
+              ]
+            : [],
+        );
+      defaultAnalysis.sites.forEach((site) =>
+        extraCaptureFieldsBySite.set(site.exprId, remainingRawParameters),
+      );
+      live = defaultAnalysis.live;
+      analysisSites = [...defaultAnalysis.sites, ...analysisSites];
+    }
     const symbolId = ctx.program.symbols.idOf({
       moduleId: ctx.moduleId,
       symbol: item.symbol,
@@ -320,13 +408,14 @@ export const buildEffectLoweringEir = ({
     const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${item.symbol}`;
 
     emitSitesFor({
-      analysisSites: analysis.sites,
+      analysisSites,
       owner: { kind: "function", symbol: item.symbol },
       contBaseName,
       ordering,
       params,
       handlerAtSite: true,
       symbolTypes,
+      extraCaptureFieldsBySite,
     });
     if (
       typeof process !== "undefined" &&
@@ -337,7 +426,7 @@ export const buildEffectLoweringEir = ({
     ) {
       console.error(
         "[effects] run_timeout sites",
-        analysis.sites.map((site) => ({
+        analysisSites.map((site) => ({
           exprId: site.exprId,
           kind: site.kind,
           liveAfter: [...site.liveAfter],
@@ -355,7 +444,7 @@ export const buildEffectLoweringEir = ({
     const ordering = definitionOrderForLambda(expr, ctx);
     const params = lambdaParamSymbols(expr);
     const symbolTypes = collectIdentifierSymbolTypes({
-      exprId: expr.body,
+      exprIds: [expr.body],
       ctx,
     });
     const fnName = `lambda_${expr.id}`;
@@ -384,7 +473,7 @@ export const buildEffectLoweringEir = ({
       const ordering = definitionOrderForHandlerClause({ clause, ctx });
       const params = handlerClauseParamSymbols(clause);
       const symbolTypes = collectIdentifierSymbolTypes({
-        exprId: clause.body,
+        exprIds: [clause.body],
         ctx,
       });
       const skipCalleeSymbols = clause.parameters[0]
@@ -421,5 +510,11 @@ export const buildEffectLoweringEir = ({
     callArgTemps.set(key, sorted);
   });
 
-  return { sitesByExpr, sites, callArgTemps, tempTypeIds };
+  return {
+    sitesByExpr,
+    sites,
+    callArgTemps,
+    tempTypeIds,
+    defaultParamTemps,
+  };
 };

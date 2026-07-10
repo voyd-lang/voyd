@@ -398,6 +398,11 @@ export const buildGroupContinuationCfg = ({
       visitExpr,
     });
 
+  fn.parameters?.forEach((parameter) => {
+    if (typeof parameter.defaultValue === "number") {
+      visitExpr(parameter.defaultValue);
+    }
+  });
   visitExpr(fn.body);
 
   return { sitesByExpr, sitesByStmt, siteOrderByExpr, siteByExprId };
