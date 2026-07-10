@@ -443,6 +443,17 @@ impl Eq<StringSlice> for StringSlice
       len: self.byte_count
     )
 
+  // Injected trait defaults are package-visible, so public conformances must
+  // expose the forwarding methods explicitly.
+  api fn ne(self, { other: StringSlice }) -> bool
+    not self.eq(other: other)
+
+  api fn '=='(self, other: StringSlice) -> bool
+    self.eq(other: other)
+
+  api fn '!='(self, other: StringSlice) -> bool
+    self.ne(other: other)
+
 impl String
   /// Creates an empty string.
   api fn init() -> String
@@ -1230,6 +1241,17 @@ impl String
 impl Eq<String> for String
   api fn eq(self, { other: String }) -> bool
     self.equals(other)
+
+  // Injected trait defaults are package-visible, so public conformances must
+  // expose the forwarding methods explicitly.
+  api fn ne(self, { other: String }) -> bool
+    not self.eq(other: other)
+
+  api fn '=='(self, other: String) -> bool
+    self.eq(other: other)
+
+  api fn '!='(self, other: String) -> bool
+    self.ne(other: other)
 
 obj Utf8Read {
   /// Unicode scalar value for this grapheme.
