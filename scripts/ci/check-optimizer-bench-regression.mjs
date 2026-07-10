@@ -122,10 +122,18 @@ const rowKey = (row) =>
 const rowsByKey = (scorecard) =>
   new Map(scorecard.rows.map((row) => [rowKey(row), row]));
 
-const rssComparisonBytes = (row) => {
-  const samples = row.processMaxRssSamplesBytes ?? [];
-  return samples.length > 0 ? Math.min(...samples) : row.processMaxRssBytes;
-};
+const rssComparison = (row) =>
+  typeof row.processMaxRssGrowthBytes === "number"
+    ? {
+        label: "compile peak RSS growth median MiB",
+        value: row.processMaxRssGrowthBytes,
+        samples: row.processMaxRssGrowthSamplesBytes ?? [],
+      }
+    : {
+        label: "peak RSS median MiB",
+        value: row.processMaxRssBytes,
+        samples: row.processMaxRssSamplesBytes ?? [],
+      };
 
 const percentDelta = (base, head) =>
   base === 0
@@ -294,20 +302,33 @@ export const compareScorecards = ({ base, head, limits }) => {
       threshold: limits.runtime,
       metric: "runtime",
     });
+    const baseRss = rssComparison(baseRow);
+    const headRss = rssComparison(headRow);
+    if (baseRss.label !== headRss.label) {
+      throw new Error(
+        `${baseRow.scenario} scorecards use different RSS measurement formats`,
+      );
+    }
     compareMetric({
       failures,
       scenario: baseRow.scenario,
-      label: "peak RSS clean sample MiB",
-      base: rssComparisonBytes(baseRow),
-      head: rssComparisonBytes(headRow),
+      label: baseRss.label,
+      base: baseRss.value,
+      head: headRss.value,
       threshold: limits.rss,
       metric: "rss",
       samples: {
-        base: baseRow.processMaxRssSamplesBytes ?? [],
-        head: headRow.processMaxRssSamplesBytes ?? [],
+        base: baseRss.samples,
+        head: headRss.samples,
       },
       format: (value) => (value / (1024 * 1024)).toFixed(2),
     });
+    if (typeof baseRow.processMaxRssGrowthBytes === "number") {
+      const formatRss = (value) => (value / (1024 * 1024)).toFixed(2);
+      console.log(
+        `    absolute peak RSS samples: base=[${(baseRow.processMaxRssSamplesBytes ?? []).map(formatRss).join(", ")}], head=[${(headRow.processMaxRssSamplesBytes ?? []).map(formatRss).join(", ")}]`,
+      );
+    }
     compareMetric({
       failures,
       scenario: baseRow.scenario,

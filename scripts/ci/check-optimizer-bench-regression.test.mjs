@@ -18,6 +18,8 @@ const limits = {
 const scorecard = ({
   rssMib,
   rssSamplesMib = [rssMib - 1, rssMib, rssMib + 1],
+  rssGrowthMib = rssMib,
+  rssGrowthSamplesMib = [rssGrowthMib - 1, rssGrowthMib, rssGrowthMib + 1],
   compileMs = 100,
 }) => ({
   schemaVersion: 2,
@@ -31,6 +33,10 @@ const scorecard = ({
       runtimeMedianMs: 10,
       processMaxRssBytes: rssMib * MIB,
       processMaxRssSamplesBytes: rssSamplesMib.map((value) => value * MIB),
+      processMaxRssGrowthBytes: rssGrowthMib * MIB,
+      processMaxRssGrowthSamplesBytes: rssGrowthSamplesMib.map(
+        (value) => value * MIB,
+      ),
       wasmBytes: 10_000,
       gzipBytes: 5_000,
       optimizerPasses: [],
@@ -65,18 +71,38 @@ describe("optimizer scorecard RSS retry policy", () => {
     expect(retry).toEqual([]);
   });
 
-  it("ignores the runner's bimodal one-sided RSS contamination", () => {
+  it("ignores bimodal absolute RSS when compile-attributable growth is stable", () => {
     const result = failures({
       base: scorecard({
         rssMib: 1_790,
         rssSamplesMib: [1_809, 1_790, 1_789],
+        rssGrowthMib: 100,
+        rssGrowthSamplesMib: [101, 100, 99],
       }),
       head: scorecard({
         rssMib: 2_075,
         rssSamplesMib: [1_805, 2_075, 2_081],
+        rssGrowthMib: 102,
+        rssGrowthSamplesMib: [101, 102, 103],
       }),
     });
     expect(result).toEqual([]);
+  });
+
+  it("fails a majority-sample growth regression despite one low outlier", () => {
+    const result = failures({
+      base: scorecard({
+        rssMib: 100,
+        rssGrowthMib: 100,
+        rssGrowthSamplesMib: [100, 100, 100],
+      }),
+      head: scorecard({
+        rssMib: 150,
+        rssGrowthMib: 150,
+        rssGrowthSamplesMib: [100, 150, 150],
+      }),
+    });
+    expect(result).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
   });
 
   it("still fails a stable synthetic RSS regression after retry", () => {

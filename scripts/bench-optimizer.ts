@@ -46,6 +46,7 @@ type CompileSample = {
   wasmBytes: number;
   wasmSha256: string;
   processMaxRssBytes: number;
+  processMaxRssGrowthBytes: number;
 };
 
 type WorkerResult = {
@@ -67,6 +68,8 @@ type ScorecardRow = {
   peakRssSamplesBytes: number[];
   processMaxRssBytes: number;
   processMaxRssSamplesBytes: number[];
+  processMaxRssGrowthBytes: number;
+  processMaxRssGrowthSamplesBytes: number[];
   wasmBytes: number;
   gzipBytes: number;
   wasmSha256: string;
@@ -324,6 +327,7 @@ const compileOnce = async ({
     originalError(...args);
   };
 
+  const processMaxRssBeforeCompileBytes = process.resourceUsage().maxRSS * 1024;
   let peakHeapUsedBytes = process.memoryUsage().heapUsed;
   let peakRssBytes = process.memoryUsage().rss;
   const memoryPoll = setInterval(() => {
@@ -365,6 +369,7 @@ const compileOnce = async ({
     if (!WebAssembly.validate(result.wasm as BufferSource)) {
       throw new Error(`${scenario.name} emitted invalid WebAssembly`);
     }
+    const processMaxRssBytes = process.resourceUsage().maxRSS * 1024;
     return {
       sample: {
         durationMs,
@@ -374,7 +379,11 @@ const compileOnce = async ({
         counters: perf?.counters ?? {},
         wasmBytes: result.wasm.byteLength,
         wasmSha256: createHash("sha256").update(result.wasm).digest("hex"),
-        processMaxRssBytes: process.resourceUsage().maxRSS * 1024,
+        processMaxRssBytes,
+        processMaxRssGrowthBytes: Math.max(
+          0,
+          processMaxRssBytes - processMaxRssBeforeCompileBytes,
+        ),
       },
       compiled: result,
     };
@@ -689,6 +698,12 @@ const runScorecardCase = ({
     ),
     processMaxRssSamplesBytes: samples.map(
       (sample) => sample.processMaxRssBytes,
+    ),
+    processMaxRssGrowthBytes: median(
+      samples.map((sample) => sample.processMaxRssGrowthBytes),
+    ),
+    processMaxRssGrowthSamplesBytes: samples.map(
+      (sample) => sample.processMaxRssGrowthBytes,
     ),
     wasmBytes: artifact.sample.wasmBytes,
     gzipBytes: artifact.gzipBytes,
