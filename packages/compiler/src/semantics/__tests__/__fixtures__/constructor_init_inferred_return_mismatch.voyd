@@ -1,0 +1,7 @@
+obj Widget {
+  value: i32
+}
+
+impl Widget
+  fn init()
+    1

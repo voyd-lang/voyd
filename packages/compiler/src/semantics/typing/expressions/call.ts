@@ -5239,12 +5239,14 @@ export const typeGenericFunctionBody = ({
   symbol,
   signature,
   substitution,
+  retainInstance = true,
   ctx,
   state,
 }: {
   symbol: SymbolId;
   signature: FunctionSignature;
   substitution: ReadonlyMap<TypeParamId, TypeId>;
+  retainInstance?: boolean;
   ctx: TypingContext;
   state: TypingState;
 }): void => {
@@ -5362,13 +5364,15 @@ export const typeGenericFunctionBody = ({
         );
       }
     }
-    ctx.functions.cacheInstanceValueTypes(key, ctx.valueTypes);
-    ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
-    ctx.functions.recordInstantiation(
-      symbolRefKey(canonicalSymbolRefForTypingContext(symbol, ctx)),
-      key,
-      appliedTypeArgs,
-    );
+    if (retainInstance) {
+      ctx.functions.cacheInstanceValueTypes(key, ctx.valueTypes);
+      ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
+      ctx.functions.recordInstantiation(
+        symbolRefKey(canonicalSymbolRefForTypingContext(symbol, ctx)),
+        key,
+        appliedTypeArgs,
+      );
+    }
   } finally {
     const updatedFunctionType = ctx.valueTypes.get(symbol);
     if (typeof updatedFunctionType === "number") {
@@ -5381,6 +5385,30 @@ export const typeGenericFunctionBody = ({
     ctx.functions.endInstantiation(key);
   }
 };
+
+export const validateGenericFunctionBody = ({
+  symbol,
+  signature,
+  substitution,
+  ctx,
+  state,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  substitution: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+}): void =>
+  withSpeculativeExprTyping(ctx, () =>
+    typeGenericFunctionBody({
+      symbol,
+      signature,
+      substitution,
+      retainInstance: false,
+      ctx,
+      state,
+    }),
+  );
 
 const refreshFunctionSignatureTypeForGenericBody = ({
   symbol,
