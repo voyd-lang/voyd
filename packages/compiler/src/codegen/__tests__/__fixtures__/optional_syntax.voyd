@@ -10,6 +10,13 @@ obj OptionalBox {
   v?: i32
 }
 
+obj BooleanOptions {
+  first?: bool,
+  second?: bool,
+  third?: bool,
+  fourth?: bool
+}
+
 fn default_num(v: Optional<i32>, d: i32) -> i32
   match(v)
     Some<i32>: v.value
@@ -71,6 +78,27 @@ pub fn test10_optional_spread_wraps_some() -> i32
     Some<i32>: v.value
     None: 0
 
+fn option_state(value: Optional<bool>) -> i32
+  match(value)
+    Some<bool>:
+      if value.value then: 2 else: 1
+    None:
+      0
+
+fn encode_boolean_options(options: BooleanOptions) -> i32
+  option_state(options.first) * 1000 +
+  option_state(options.second) * 100 +
+  option_state(options.third) * 10 +
+  option_state(options.fourth)
+
+pub fn test11_full_optional_object_conversion() -> i32
+  encode_boolean_options(BooleanOptions {
+    first: true,
+    second: false,
+    third: false,
+    fourth: false
+  })
+
 pub fn main() -> i32
   test1_optional_obj_field() +
   test2_passed_optional_param() +
@@ -81,4 +109,5 @@ pub fn main() -> i32
   test7_skip_optional_labeled() +
   test8_closure_with_arg() +
   test9_closure_without_arg() +
-  test10_optional_spread_wraps_some()
+  test10_optional_spread_wraps_some() +
+  test11_full_optional_object_conversion()

@@ -172,6 +172,9 @@ export type NodeFsPromises = {
   readTextFile?: never;
   writeFile: (path: string, data: string | Uint8Array) => Promise<void>;
   access: (path: string) => Promise<void>;
+  lstat: (path: string) => Promise<{ isDirectory: () => boolean }>;
+  rmdir: (path: string) => Promise<void>;
+  unlink: (path: string) => Promise<void>;
   readdir: (path: string) => Promise<string[]>;
 };
 
