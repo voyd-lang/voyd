@@ -21,9 +21,9 @@ import {
 import { storeValueIntoStorageRef } from "./structural.js";
 import {
   getAbiTypesForSignature,
+  getCallableParamAbiKind,
+  getCallableParamAbiTypes,
   getOptimizedAbiTypeForResult,
-  getOptimizedAbiTypesForParam,
-  getOptimizedParamAbiKind,
   getOptimizedResultAbiKind,
   getSignatureSpillBoxType,
   getSignatureWasmType,
@@ -989,16 +989,18 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           item.parameters[index]?.pattern.bindingKind ??
           (item.parameters[index]?.mutable ? "mutable-ref" : undefined);
         const paramAbiKinds = descriptor.parameters.map((param, index) =>
-          getOptimizedParamAbiKind({
+          getCallableParamAbiKind({
             typeId: param.type,
             bindingKind: parameterBindingKind(index),
+            defaulted: signature.parameters[index]?.defaulted,
             ctx,
           }),
         );
         const paramAbiTypes = descriptor.parameters.map((param, index) => {
-          const payload = getOptimizedAbiTypesForParam({
+          const payload = getCallableParamAbiTypes({
             typeId: param.type,
             bindingKind: parameterBindingKind(index),
+            defaulted: signature.parameters[index]?.defaulted,
             ctx,
           });
           return signature.parameters[index]?.defaulted
@@ -1255,17 +1257,19 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
 
       const paramAbiKinds = instantiatedTypeDesc.parameters.map(
         (param, index) =>
-          getOptimizedParamAbiKind({
+          getCallableParamAbiKind({
             typeId: param.type,
             bindingKind: signature.parameters[index]?.bindingKind,
+            defaulted: signature.parameters[index]?.defaulted,
             ctx,
           }),
       );
       const paramAbiTypes = instantiatedTypeDesc.parameters.map(
         (param, index) => {
-          const payload = getOptimizedAbiTypesForParam({
+          const payload = getCallableParamAbiTypes({
             typeId: param.type,
             bindingKind: signature.parameters[index]?.bindingKind,
+            defaulted: signature.parameters[index]?.defaulted,
             ctx,
           });
           return signature.parameters[index]?.defaulted

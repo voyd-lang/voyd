@@ -80,6 +80,25 @@ export const emitResolvedCall = ({
     setup: readonly binaryen.ExpressionRef[];
     args: readonly binaryen.ExpressionRef[];
   } => {
+    const preserveEvaluationOrder = ({
+      setup,
+      args,
+    }: {
+      setup: readonly binaryen.ExpressionRef[];
+      args: readonly binaryen.ExpressionRef[];
+    }): {
+      setup: readonly binaryen.ExpressionRef[];
+      args: readonly binaryen.ExpressionRef[];
+    } => {
+      if (setup.length === 0 || args.length === 0) return { setup, args };
+      return {
+        setup: [],
+        args: [
+          ctx.mod.block(null, [...setup, args[0]!], abiTypes[0]),
+          ...args.slice(1),
+        ],
+      };
+    };
     const valueAbiTypes = binaryen.getExpressionType(value) === binaryen.none
       ? []
       : [...binaryen.expandType(binaryen.getExpressionType(value))];
@@ -114,12 +133,12 @@ export const emitResolvedCall = ({
     if (typeof typeId === "number") {
       const tempType = abiTypeFor(valueAbiTypes);
       const temp = allocateTempLocal(tempType, fnCtx, typeId, ctx);
-      return {
+      return preserveEvaluationOrder({
         setup: [storeLocalValue({ binding: temp, value, ctx, fnCtx })],
         args: abiTypes.map((_, index) =>
           ctx.mod.tuple.extract(loadLocalValue(temp, ctx), index),
         ),
-      };
+      });
     }
     const captured = captureMultivalueLanes({
       value,
@@ -127,10 +146,10 @@ export const emitResolvedCall = ({
       ctx,
       fnCtx,
     });
-    return {
+    return preserveEvaluationOrder({
       setup: captured.setup,
       args: captured.lanes,
-    };
+    });
   };
 
   const {

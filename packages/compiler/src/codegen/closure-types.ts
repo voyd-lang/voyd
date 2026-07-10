@@ -4,7 +4,7 @@ import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import type { ClosureTypeInfo, CodegenContext, TypeId } from "./context.js";
 import {
   getAbiTypesForSignature,
-  getOptimizedAbiTypesForParam,
+  getCallableParamAbiTypes,
   getSignatureWasmType,
 } from "./types.js";
 
@@ -144,14 +144,14 @@ export const ensureClosureTypeInfo = ({
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
   const paramAbiTypes = desc.parameters.map((param) => {
-    const payload = param.bindingKind
-      ? getOptimizedAbiTypesForParam({
-          typeId: param.type,
-          bindingKind: param.bindingKind,
-          ctx,
-        })
-      : mode === "signature"
-        ? getAbiTypesForSignature(param.type, ctx)
+    const payload =
+      mode === "signature" || param.bindingKind !== undefined
+        ? getCallableParamAbiTypes({
+            typeId: param.type,
+            bindingKind: param.bindingKind,
+            defaulted: param.defaulted,
+            ctx,
+          })
         : expandAbiTypes(lowerType(param.type, ctx, seen, mode));
     const defaulted = param.defaulted === true;
     return defaulted ? [...payload, binaryen.i32] : payload;

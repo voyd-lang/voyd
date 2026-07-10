@@ -1,6 +1,7 @@
 import type { HirExprId, TypeId, CodegenContext } from "../context.js";
 import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
 import { getRequiredExprType } from "../types.js";
+import { buildInstanceSubstitution } from "../type-substitution.js";
 
 type TempOrigin = {
   argExprId?: HirExprId;
@@ -103,10 +104,15 @@ export const resolveTempCaptureTypeId = ({
   if (!origin) {
     throw new Error(`missing continuation temp origin ${tempId}`);
   }
-  const typeId =
-    typeof origin.argExprId === "number"
-      ? getRequiredExprType(origin.argExprId, ctx, typeInstanceId)
+  const typeId = (() => {
+    if (typeof origin.argExprId === "number") {
+      return getRequiredExprType(origin.argExprId, ctx, typeInstanceId);
+    }
+    const substitution = buildInstanceSubstitution({ ctx, typeInstanceId });
+    return substitution
+      ? ctx.program.types.substitute(origin.fallbackTypeId, substitution)
       : origin.fallbackTypeId;
+  })();
   byKey.set(key, typeId);
   return typeId;
 };

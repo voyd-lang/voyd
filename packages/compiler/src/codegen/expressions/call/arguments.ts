@@ -22,10 +22,10 @@ import { stableCallsiteIdFor } from "../../../stable-callsite-id.js";
 import { coerceValueToType, loadStructuralField } from "../../structural.js";
 import {
   abiTypeFor,
-  getAbiTypesForSignature,
-  getOptimizedAbiTypesForParam,
+  getCallableParamAbiTypes,
   getInlineHeapBoxType,
   getRequiredExprType,
+  getSignatureSpillBoxType,
   getStructuralTypeInfo,
   wasmTypeFor,
 } from "../../types.js";
@@ -41,6 +41,7 @@ import {
   loadScalarAggregateBindingField,
   storeScalarAggregateBindingValue,
 } from "../../locals.js";
+import { boxSignatureSpillValue } from "../../signature-spill.js";
 import {
   materializeProjectedElementBinding,
   tryCompileProjectedElementStorageRefExpr,
@@ -389,13 +390,12 @@ export const compileCallArgumentsForParamsWithDetails = ({
     paramAbiTypes:
       activeMeta?.paramAbiTypes ??
       params.map((param) => {
-        const payload = param.bindingKind
-          ? getOptimizedAbiTypesForParam({
-              typeId: param.typeId,
-              bindingKind: param.bindingKind,
-              ctx,
-            })
-          : getAbiTypesForSignature(param.typeId, ctx);
+        const payload = getCallableParamAbiTypes({
+          typeId: param.typeId,
+          bindingKind: param.bindingKind,
+          defaulted: param.defaulted,
+          ctx,
+        });
         return param.defaulted ? [...payload, binaryen.i32] : payload;
       }),
     presenceEncodedParams:
@@ -1028,6 +1028,7 @@ const materializeCallArgumentPlan = ({
         ? appendArgumentPresence({
             payload,
             payloadAbiTypes,
+            typeId: paramTypeId,
             present: true,
             ctx,
             fnCtx,
@@ -1262,18 +1263,27 @@ const materializeCallArgumentPlan = ({
 const appendArgumentPresence = ({
   payload,
   payloadAbiTypes,
+  typeId,
   present,
   ctx,
   fnCtx,
 }: {
   payload: binaryen.ExpressionRef;
   payloadAbiTypes: readonly binaryen.Type[];
+  typeId?: TypeId;
   present: boolean;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
+  const normalizedPayload =
+    typeof typeId === "number" &&
+    payloadAbiTypes.length === 1 &&
+    getSignatureSpillBoxType({ typeId, ctx }) === payloadAbiTypes[0] &&
+    binaryen.getExpressionType(payload) !== payloadAbiTypes[0]
+      ? boxSignatureSpillValue({ value: payload, typeId, ctx, fnCtx })
+      : payload;
   const captured = captureMultivalueLanes({
-    value: payload,
+    value: normalizedPayload,
     abiTypes: payloadAbiTypes,
     ctx,
     fnCtx,
