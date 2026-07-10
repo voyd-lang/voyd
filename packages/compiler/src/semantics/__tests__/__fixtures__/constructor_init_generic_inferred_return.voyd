@@ -1,0 +1,10 @@
+obj Box<T> {
+  value: T
+}
+
+impl Box<T>
+  fn init(value: T)
+    Box { value }
+
+pub fn main() -> i32
+  Box(1).value

@@ -1,0 +1,4 @@
+use src::dep::Box
+
+pub fn main() -> i32
+  Box(1).value
