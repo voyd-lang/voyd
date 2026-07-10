@@ -136,6 +136,9 @@ Current restrictions:
 - In generic functions, a defaulted parameter must declare an explicit type.
 - A default expression cannot reference a parameter declared at the same
   position or later in the parameter list.
+- A reference-bound parameter (such as `~value`) cannot declare a default.
+  Defaults create value-bound callee storage, which cannot preserve the
+  caller-aliasing contract of a reference-bound parameter.
 - `?` and `=` cannot be combined on the same parameter.
 
 ## Lambdas

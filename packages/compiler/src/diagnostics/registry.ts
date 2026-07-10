@@ -326,6 +326,11 @@ type DiagnosticParamsMap = {
         subsumedSignature: string;
       }
     | { kind: "subsumed-labeled-overload" };
+  TY0048: {
+    kind: "reference-bound-default-parameter";
+    functionName: string;
+    parameterName: string;
+  };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -1010,6 +1015,19 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0047"]>,
+  TY0048: {
+    code: "TY0048",
+    message: (params) =>
+      `reference-bound parameter ${params.parameterName} in function ${params.functionName} cannot declare a default value`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Remove the default value or make the parameter value-bound. To provide a default while preserving reference semantics, use an overload that creates mutable local storage before calling the reference-bound function.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0048"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
