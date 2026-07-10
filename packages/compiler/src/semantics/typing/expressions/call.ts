@@ -3822,7 +3822,12 @@ const resolveOperatorOverloadCandidates = ({
       methodName: operatorName,
       ctx,
     });
-    return traitResolution.candidates.length > 0 ? traitResolution : undefined;
+    if (traitResolution.candidates.length > 0) {
+      return {
+        ...traitResolution,
+        includesMethodCandidates: true,
+      };
+    }
   }
 
   const nominalResolution = resolveNominalMethodCandidates({
@@ -3830,8 +3835,19 @@ const resolveOperatorOverloadCandidates = ({
     methodName: operatorName,
     ctx,
   });
-  return nominalResolution && nominalResolution.candidates.length > 0
-    ? nominalResolution
+  if (nominalResolution && nominalResolution.candidates.length > 0) {
+    return {
+      ...nominalResolution,
+      includesMethodCandidates: true,
+    };
+  }
+
+  const freeFunctionCandidates = resolveFreeFunctionCandidates({
+    methodName: operatorName,
+    ctx,
+  });
+  return freeFunctionCandidates.length > 0
+    ? { candidates: freeFunctionCandidates, includesMethodCandidates: false }
     : undefined;
 };
 
@@ -3877,10 +3893,22 @@ const typeOperatorOverloadCall = ({
     return undefined;
   }
 
-  const candidates = filterCandidatesByExplicitTypeArguments({
+  const hasUnresolvedOperand = args.some(
+    (arg) => arg.type === ctx.primitives.unknown,
+  );
+  if (
+    hasUnresolvedOperand &&
+    resolution.includesMethodCandidates !== true
+  ) {
+    return undefined;
+  }
+
+  const methodCandidates = filterCandidatesByExplicitTypeArguments({
     candidates: resolution.candidates,
     typeArguments,
   });
+  let candidates = methodCandidates;
+  let noOverloadDiagnosticCandidates = methodCandidates;
   enforceOverloadCandidateBudget({
     name: operatorName,
     candidateCount: candidates.length,
@@ -3888,7 +3916,7 @@ const typeOperatorOverloadCall = ({
     span: call.span,
   });
 
-  const matches = findMatchingOverloadCandidates({
+  let matches = findMatchingOverloadCandidates({
     name: operatorName,
     candidates,
     args,
@@ -3915,13 +3943,79 @@ const typeOperatorOverloadCall = ({
           state,
         })
       : undefined;
+
+  if (
+    !traitDispatch &&
+    matches.length === 0 &&
+    !hasUnresolvedOperand &&
+    resolution.includesMethodCandidates === true
+  ) {
+    const fallbackCandidates = resolveFreeFunctionFallbackCandidates({
+      methodName: operatorName,
+      existing: resolution.candidates,
+      ctx,
+    });
+    if (fallbackCandidates.length > 0) {
+      const filteredFallbackCandidates =
+        filterCandidatesByExplicitTypeArguments({
+          candidates: fallbackCandidates,
+          typeArguments,
+        });
+      candidates = filteredFallbackCandidates;
+      noOverloadDiagnosticCandidates =
+        mergeCandidatesForMethodNoOverloadDiagnostic({
+          methodCandidates,
+          fallbackCandidates: filteredFallbackCandidates,
+          ctx,
+        });
+      enforceOverloadCandidateBudget({
+        name: operatorName,
+        candidateCount: candidates.length,
+        ctx,
+        span: call.span,
+      });
+      matches = findMatchingOverloadCandidates({
+        name: operatorName,
+        candidates,
+        args,
+        span: call.span,
+        ctx,
+        state,
+        typeArguments,
+        scoreMatches: (rawMatches) =>
+          scoreOverloadMatchesByLambdaCompatibility({
+            matches: rawMatches,
+            args,
+            callArgs: call.args,
+            typeArguments,
+            ctx,
+            state,
+          }),
+      });
+    }
+  }
+
   let selected: MethodCallCandidate | undefined = traitDispatch;
 
   if (!selected) {
     if (matches.length === 0) {
+      const intrinsicFallback = typeIntrinsicFallbackCall({
+        name: operatorName,
+        args,
+        typeArguments,
+        callId: call.id,
+        callSpan: call.span,
+        calleeExprId: callee.id,
+        ctx,
+        state,
+      });
+      if (intrinsicFallback) {
+        return intrinsicFallback;
+      }
+
       if (
         emitConsensusCallArgumentShapeDiagnostic({
-          candidates,
+          candidates: noOverloadDiagnosticCandidates,
           args,
           ctx,
           state,
@@ -3939,7 +4033,7 @@ const typeOperatorOverloadCall = ({
         code: "TY0008",
         params: noOverloadDiagnosticParams({
           name: operatorName,
-          candidates,
+          candidates: noOverloadDiagnosticCandidates,
           args,
           ctx,
           state,
