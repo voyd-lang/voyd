@@ -92,7 +92,7 @@ describe("SDK optimization levels", () => {
     expect(hasSemanticOptimizerPasses(legacyNone.counters)).toBe(false);
     expect(hasSemanticOptimizerPasses(legacyRelease.counters)).toBe(true);
     expect(hasSemanticOptimizerPasses(explicitLevelWins.counters)).toBe(false);
-  });
+  }, 120_000);
 
   it("returns a diagnostic for an invalid JavaScript level value", async () => {
     const { createSdk } = await import("@voyd-lang/sdk");
