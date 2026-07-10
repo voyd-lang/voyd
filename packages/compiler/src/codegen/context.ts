@@ -108,6 +108,7 @@ export interface FunctionMetadata {
     symbol?: SymbolId;
     label?: string;
     optional?: boolean;
+    defaulted?: boolean;
     name?: string;
     bindingKind?: HirBindingKind;
     synthetic?: "stable-callsite-id";

@@ -417,7 +417,8 @@ the original ABI for exports, closures, indirect calls, dynamic trait
 dispatch, and fallback calls:
 
 - supplied ordinary parameters retain their existing ABI
-- supplied defaulted parameters pass the Optional inner value directly
+- supplied defaulted parameters pass their declared type directly, including
+  ordinary mutable- and immutable-reference ABI lowering
 - omitted defaulted parameters have no ABI lanes and evaluate their HIR
   default in declaration order inside the clone
 - omitted plain optional parameters have no ABI lanes and construct `None`
@@ -428,7 +429,7 @@ dispatch, and fallback calls:
 Labeled argument reordering and structural-container field extraction stay in
 the caller. This preserves source evaluation order, exactly-once container
 evaluation, and mutable/addressable field behavior. The clone only removes
-Optional transport and the corresponding callee tag/default branch. Generic
+the stable presence lane and corresponding callee presence/default branch. Generic
 instances, imports, methods after devirtualization, wide values, receiver
 variants, scalar aggregate variants, and static-effect variants use the same
 compositional specialization metadata.
@@ -439,6 +440,22 @@ with a deterministic key tie-break, then applies
 shared per-function, per-program, and duplicated-body-node ledger. Body-size
 accounting includes default-expression roots. Rejection at either stage uses
 the original call path.
+
+Default omission is first-class in the semantic call plan. `omitted-default`
+is distinct from `omitted-optional`: the former evaluates declaration metadata
+to produce the declared parameter type, while the latter constructs the
+source-level `None` value for an `Optional<T>` parameter. This distinction is
+preserved through `ProgramCodegenView`; codegen does not inspect typing
+internals.
+
+Stable-signature paths encode each defaulted parameter as its ordinary payload
+or storage-reference lanes plus an internal `i32` presence lane. The lane is
+not part of the source type. A supplied reference transports the caller's
+storage reference. For an omitted reference, the payload is ignored and the
+callee's default prologue evaluates the expression into fresh addressable
+storage, then binds the parameter to that storage for the invocation. Value
+defaults use the same presence protocol and prologue, so optimized and
+fallback paths share evaluation order and exactly-once behavior.
 
 ### Addressable Wide-Local Scratch Lowering
 
@@ -620,13 +637,6 @@ or the shared Binaryen optimization profile should own it.
 
 ## Known Open Work
 
-- `V-413`: effectful parameter-default expressions must be desugared into the
-  function continuation CFG. Typing records their effect rows, but the current
-  GC-trampoline CFG starts at the function body and cannot resume the remaining
-  default prologue after a perform.
-- `V-414`: reference-bound default parameters need a defined aliasing contract
-  and matching Optional ABI lowering. Call-shape specialization conservatively
-  excludes them until supplied and omitted calls have coherent semantics.
 - `V-325`: reusable whole-program escape facts are present. Downstream
   representation changes must consume those facts through
   `ProgramOptimizationFacts.escapeAnalysis` rather than rediscovering typing

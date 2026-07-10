@@ -2,7 +2,11 @@ import binaryen from "binaryen";
 import { defineStructType } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import type { ClosureTypeInfo, CodegenContext, TypeId } from "./context.js";
-import { getAbiTypesForSignature, getSignatureWasmType } from "./types.js";
+import {
+  getAbiTypesForSignature,
+  getCallableParamAbiTypes,
+  getSignatureWasmType,
+} from "./types.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -58,6 +62,8 @@ const closureSignatureKey = ({
     type: TypeId;
     label?: string;
     optional?: boolean;
+    defaulted?: boolean;
+    bindingKind?: string;
   }>;
   returnType: TypeId;
   effectRow: unknown;
@@ -67,7 +73,9 @@ const closureSignatureKey = ({
     .map((param) => {
       const label = param.label ?? "_";
       const optional = param.optional ? "?" : "";
-      return `${label}:${param.type}${optional}`;
+      const defaulted = param.defaulted ? "=" : "";
+      const binding = param.bindingKind ?? "value";
+      return `${label}:${param.type}${optional}${defaulted}:${binding}`;
     })
     .join("|");
   return `${mode}::(${params})->${returnType}|${effectRow}`;
@@ -105,6 +113,8 @@ export const ensureClosureTypeInfo = ({
       type: TypeId;
       label?: string;
       optional?: boolean;
+      defaulted?: boolean;
+      bindingKind?: string;
     }>;
     returnType: TypeId;
     effectRow: unknown;
@@ -133,11 +143,19 @@ export const ensureClosureTypeInfo = ({
   const effectful =
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
-  const paramAbiTypes = desc.parameters.map((param) =>
-    mode === "signature"
-      ? getAbiTypesForSignature(param.type, ctx)
-      : expandAbiTypes(lowerType(param.type, ctx, seen, mode)),
-  );
+  const paramAbiTypes = desc.parameters.map((param) => {
+    const payload =
+      mode === "signature" || param.bindingKind !== undefined
+        ? getCallableParamAbiTypes({
+            typeId: param.type,
+            bindingKind: param.bindingKind,
+            defaulted: param.defaulted,
+            ctx,
+          })
+        : expandAbiTypes(lowerType(param.type, ctx, seen, mode));
+    const defaulted = param.defaulted === true;
+    return defaulted ? [...payload, binaryen.i32] : payload;
+  });
   const userParamTypes = paramAbiTypes.flat();
   const resultAbiTypes =
     mode === "signature"

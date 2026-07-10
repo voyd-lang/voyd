@@ -11,6 +11,7 @@ import type {
   ContinuationSiteEir,
   EffectLoweringEirResult,
 } from "./types.js";
+import { getOptimizedParamAbiKind } from "../../types.js";
 import { analyzeExpr } from "./liveness.js";
 import { walkHirExpression } from "../../hir-walk.js";
 import {
@@ -187,7 +188,13 @@ export const buildEffectLoweringEir = ({
   const tempTypeIds = new Map<number, TypeId>();
   const defaultParamTemps = new Map<
     SymbolId,
-    { tempId: number; typeId: TypeId }
+    {
+      tempId: number;
+      presenceTempId: number;
+      typeId: TypeId;
+      storageRef: boolean;
+      bindingKind?: import("../../../semantics/hir/index.js").HirBindingKind;
+    }
   >();
   const tempIdByKey = new Map<string, number>();
   let tempCounter = 0;
@@ -341,7 +348,23 @@ export const buildEffectLoweringEir = ({
                 key: `defaultParam:${item.symbol}:${parameter.symbol}`,
                 typeId,
               });
-              const value = { tempId, typeId };
+              const presenceTempId = allocateTempId({
+                key: `defaultParamPresence:${item.symbol}:${parameter.symbol}`,
+                typeId: ctx.program.primitives.i32,
+              });
+              const bindingKind = signature?.parameters[index]?.bindingKind;
+              const value = {
+                tempId,
+                presenceTempId,
+                typeId,
+                storageRef:
+                  getOptimizedParamAbiKind({
+                    typeId,
+                    bindingKind,
+                    ctx,
+                  }) !== "direct",
+                bindingKind,
+              };
               defaultParamTemps.set(parameter.symbol, value);
               return value;
             })()
@@ -388,6 +411,13 @@ export const buildEffectLoweringEir = ({
                   sourceKind: "temp" as const,
                   tempId: temp.tempId,
                   typeId: temp.typeId,
+                  storageRef: temp.storageRef,
+                  bindingKind: temp.bindingKind,
+                },
+                {
+                  sourceKind: "temp" as const,
+                  tempId: temp.presenceTempId,
+                  typeId: ctx.program.primitives.i32,
                 },
               ]
             : [],

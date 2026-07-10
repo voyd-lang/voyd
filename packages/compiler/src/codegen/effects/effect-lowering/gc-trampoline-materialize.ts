@@ -17,6 +17,7 @@ import type {
   EffectLoweringEirResult,
   EffectLoweringResult,
 } from "./types.js";
+import { getInlineHeapBoxType } from "../../types.js";
 
 const baseEnvFields = (ctx: CodegenContext): ContinuationEnvField[] => [
   {
@@ -82,18 +83,23 @@ const captureFields = ({
       if (typeof tempId !== "number") {
         throw new Error("missing temp id for continuation capture");
       }
+      const storageRefType = field.storageRef
+        ? getInlineHeapBoxType({ typeId: field.typeId, ctx })
+        : undefined;
+      if (field.storageRef && typeof storageRefType !== "number") {
+        throw new Error("default reference temp requires storage-ref ABI");
+      }
       return {
         name: `tmp_${tempId}`,
-        wasmType: wasmTypeFor(field.typeId, ctx),
-        storageType: wasmHeapFieldTypeFor(
-          field.typeId,
-          ctx,
-          new Set(),
-          "runtime",
-        ),
+        wasmType: storageRefType ?? wasmTypeFor(field.typeId, ctx),
+        storageType:
+          storageRefType ??
+          wasmHeapFieldTypeFor(field.typeId, ctx, new Set(), "runtime"),
         typeId: field.typeId,
         sourceKind: "local",
         tempId,
+        storageRef: field.storageRef,
+        bindingKind: field.bindingKind,
       };
     }
 

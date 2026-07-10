@@ -14,16 +14,16 @@ import { compileExpression } from "./expressions/index.js";
 import {
   allocateTempLocal,
   createStorageRefBinding,
-  loadBindingValue,
+  loadBindingStorageRef,
   storeScalarAggregateBindingValue,
   storeLocalValue,
 } from "./locals.js";
 import { storeValueIntoStorageRef } from "./structural.js";
 import {
   getAbiTypesForSignature,
+  getCallableParamAbiKind,
+  getCallableParamAbiTypes,
   getOptimizedAbiTypeForResult,
-  getOptimizedAbiTypesForParam,
-  getOptimizedParamAbiKind,
   getOptimizedResultAbiKind,
   getSignatureSpillBoxType,
   getSignatureWasmType,
@@ -390,9 +390,11 @@ const bindRawFunctionParameters = ({
   const preserveRawDefaultParameter = ({
     param,
     typeId,
+    presenceIndex,
   }: {
     param: HirFunction["parameters"][number];
     typeId?: TypeId;
+    presenceIndex: number;
   }): void => {
     if (
       meta.callShape ||
@@ -409,26 +411,31 @@ const bindRawFunctionParameters = ({
       );
     }
     if (!temp) return;
+    fnCtx.tempLocals.set(temp.presenceTempId, {
+      kind: "local",
+      index: presenceIndex,
+      type: binaryen.i32,
+      storageType: binaryen.i32,
+      typeId: ctx.program.primitives.i32,
+    });
     if (binding.kind === "local") {
       fnCtx.tempLocals.set(temp.tempId, binding);
       return;
     }
-    const owned = allocateTempLocal(
-      wasmTypeFor(typeId, ctx),
-      fnCtx,
-      typeId,
-      ctx,
-    );
+    const storageRef = loadBindingStorageRef(binding, ctx);
+    if (!storageRef) {
+      throw new Error("raw reference default requires storage-ref ABI");
+    }
+    const owned = allocateTempLocal(binding.storageType, fnCtx);
     ops.push(
       storeLocalValue({
         binding: owned,
-        value: loadBindingValue(binding, ctx, fnCtx),
+        value: storageRef,
         ctx,
         fnCtx,
       }),
     );
     fnCtx.tempLocals.set(temp.tempId, owned);
-    fnCtx.bindings.set(param.symbol, owned);
   };
 
   fn.parameters.forEach((param, index) => {
@@ -436,7 +443,10 @@ const bindRawFunctionParameters = ({
     if (meta.callShape?.parameterStates[index] === "omitted") {
       return;
     }
-    const abiValues = abiTypes.map((abiType, abiOffset) =>
+    const hasPresenceLane =
+      meta.parameters[index]?.defaulted === true && !meta.callShape;
+    const payloadAbiTypes = hasPresenceLane ? abiTypes.slice(0, -1) : abiTypes;
+    const abiValues = payloadAbiTypes.map((abiType, abiOffset) =>
       ctx.mod.local.get(abiIndex + abiOffset, abiType),
     );
     const typeId = meta.paramTypeIds[index];
@@ -451,29 +461,7 @@ const bindRawFunctionParameters = ({
         mutable: abiKind === "mutable_ref",
         ctx,
       });
-      if (meta.callShape && typeof param.defaultValue === "number") {
-        const owned = allocateTempLocal(
-          wasmTypeFor(typeId, ctx),
-          fnCtx,
-          typeId,
-          ctx,
-        );
-        fnCtx.bindings.set(param.symbol, {
-          ...owned,
-          kind: "local",
-          typeId,
-        });
-        ops.push(
-          storeLocalValue({
-            binding: owned,
-            value: loadBindingValue(source, ctx, fnCtx),
-            ctx,
-            fnCtx,
-          }),
-        );
-      } else {
-        fnCtx.bindings.set(param.symbol, source);
-      }
+      fnCtx.bindings.set(param.symbol, source);
     } else {
       if (typeof typeId === "number") {
         const scalarized = tryBindScalarAggregateParameter({
@@ -488,7 +476,11 @@ const bindRawFunctionParameters = ({
         });
         if (scalarized) {
           ops.push(...scalarized);
-          preserveRawDefaultParameter({ param, typeId });
+          preserveRawDefaultParameter({
+            param,
+            typeId,
+            presenceIndex: abiIndex + payloadAbiTypes.length,
+          });
           abiIndex += abiTypes.length;
           return;
         }
@@ -522,7 +514,11 @@ const bindRawFunctionParameters = ({
         }),
       );
     }
-    preserveRawDefaultParameter({ param, typeId });
+    preserveRawDefaultParameter({
+      param,
+      typeId,
+      presenceIndex: abiIndex + payloadAbiTypes.length,
+    });
     abiIndex += abiTypes.length;
   });
   return ops;
@@ -993,19 +989,24 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
           item.parameters[index]?.pattern.bindingKind ??
           (item.parameters[index]?.mutable ? "mutable-ref" : undefined);
         const paramAbiKinds = descriptor.parameters.map((param, index) =>
-          getOptimizedParamAbiKind({
+          getCallableParamAbiKind({
             typeId: param.type,
             bindingKind: parameterBindingKind(index),
+            defaulted: signature.parameters[index]?.defaulted,
             ctx,
           }),
         );
-        const paramAbiTypes = descriptor.parameters.map((param, index) =>
-          getOptimizedAbiTypesForParam({
+        const paramAbiTypes = descriptor.parameters.map((param, index) => {
+          const payload = getCallableParamAbiTypes({
             typeId: param.type,
             bindingKind: parameterBindingKind(index),
+            defaulted: signature.parameters[index]?.defaulted,
             ctx,
-          }),
-        );
+          });
+          return signature.parameters[index]?.defaulted
+            ? [...payload, binaryen.i32]
+            : payload;
+        });
         const userParamTypes = paramAbiTypes.flat();
         const resultAbiKind = effectful
           ? "direct"
@@ -1053,6 +1054,7 @@ export const registerFunctionMetadata = (ctx: CodegenContext): void => {
             symbol: item.parameters[index]?.symbol,
             label: param.label,
             optional: param.optional,
+            defaulted: signature.parameters[index]?.defaulted,
             name:
               typeof item.parameters[index]?.symbol === "number"
                 ? symbolName(ctx, ctx.moduleId, item.parameters[index]!.symbol)
@@ -1255,19 +1257,25 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
 
       const paramAbiKinds = instantiatedTypeDesc.parameters.map(
         (param, index) =>
-          getOptimizedParamAbiKind({
+          getCallableParamAbiKind({
             typeId: param.type,
             bindingKind: signature.parameters[index]?.bindingKind,
+            defaulted: signature.parameters[index]?.defaulted,
             ctx,
           }),
       );
       const paramAbiTypes = instantiatedTypeDesc.parameters.map(
-        (param, index) =>
-          getOptimizedAbiTypesForParam({
+        (param, index) => {
+          const payload = getCallableParamAbiTypes({
             typeId: param.type,
             bindingKind: signature.parameters[index]?.bindingKind,
+            defaulted: signature.parameters[index]?.defaulted,
             ctx,
-          }),
+          });
+          return signature.parameters[index]?.defaulted
+            ? [...payload, binaryen.i32]
+            : payload;
+        },
       );
       const userParamTypes = paramAbiTypes.flat();
       const resultAbiKind = effectful
@@ -1317,6 +1325,7 @@ export const registerImportMetadata = (ctx: CodegenContext): void => {
           symbol: signature.parameters[index]?.symbol,
           label: param.label,
           optional: param.optional,
+          defaulted: signature.parameters[index]?.defaulted,
           name: signature.parameters[index]?.name,
           bindingKind: signature.parameters[index]?.bindingKind,
           synthetic: signature.parameters[index]?.synthetic,

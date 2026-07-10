@@ -12,6 +12,8 @@ export type CallParam = {
   typeId: TypeId;
   label?: string;
   optional?: boolean;
+  defaulted?: boolean;
+  bindingKind?: string;
   name?: string;
   synthetic?: "stable-callsite-id";
 };

@@ -556,6 +556,38 @@ export const getAbiTypesForSignature = (
     : getDirectAbiTypesForSignature(typeId, ctx);
 };
 
+export const getCallableParamAbiKind = ({
+  typeId,
+  bindingKind,
+  defaulted,
+  ctx,
+}: {
+  typeId: TypeId;
+  bindingKind?: string;
+  defaulted?: boolean;
+  ctx: CodegenContext;
+}): OptimizedValueAbiKind =>
+  defaulted === true ||
+  (bindingKind !== undefined && bindingKind !== "value")
+    ? getOptimizedParamAbiKind({ typeId, bindingKind, ctx })
+    : "direct";
+
+export const getCallableParamAbiTypes = ({
+  typeId,
+  bindingKind,
+  defaulted,
+  ctx,
+}: {
+  typeId: TypeId;
+  bindingKind?: string;
+  defaulted?: boolean;
+  ctx: CodegenContext;
+}): readonly binaryen.Type[] =>
+  defaulted === true ||
+  (bindingKind !== undefined && bindingKind !== "value")
+    ? getOptimizedAbiTypesForParam({ typeId, bindingKind, ctx })
+    : getAbiTypesForSignature(typeId, ctx);
+
 export const getSignatureWasmType = (
   typeId: TypeId,
   ctx: CodegenContext,
@@ -2336,19 +2368,25 @@ const synthesizeConcreteFunctionMeta = ({
       (functionItem.parameters[index]?.mutable ? "mutable-ref" : undefined);
 
     const paramAbiKinds = instantiatedTypeDesc.parameters.map((param, index) =>
-      getOptimizedParamAbiKind({
+      getCallableParamAbiKind({
         typeId: param.type,
         bindingKind: parameterBindingKind(index),
+        defaulted:
+          signature.parameters[index]?.defaulted ?? param.defaulted,
         ctx,
       }),
     );
-    const paramAbiTypes = instantiatedTypeDesc.parameters.map((param, index) =>
-      getOptimizedAbiTypesForParam({
+    const paramAbiTypes = instantiatedTypeDesc.parameters.map((param, index) => {
+      const defaulted =
+        signature.parameters[index]?.defaulted ?? param.defaulted;
+      const payload = getCallableParamAbiTypes({
         typeId: param.type,
         bindingKind: parameterBindingKind(index),
+        defaulted,
         ctx,
-      }),
-    );
+      });
+      return defaulted ? [...payload, binaryen.i32] : payload;
+    });
     const userParamTypes = paramAbiTypes.flat();
     const resultAbiKind =
       effectful
@@ -2401,6 +2439,8 @@ const synthesizeConcreteFunctionMeta = ({
         typeId: param.type,
         label: param.label,
         optional: param.optional,
+        defaulted:
+          signature.parameters[index]?.defaulted ?? param.defaulted,
         name:
           typeof functionItem.parameters[index]?.symbol === "number"
             ? symbolNameForModuleSymbol({

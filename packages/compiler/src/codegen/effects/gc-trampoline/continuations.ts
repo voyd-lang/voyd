@@ -28,7 +28,9 @@ import {
   storeLocalValue,
 } from "../../locals.js";
 import {
+  getOptimizedParamAbiKind,
   getRequiredExprType,
+  getInlineHeapBoxType,
   getSymbolTypeId,
   wasmTypeFor,
 } from "../../types.js";
@@ -552,7 +554,7 @@ export const ensureContinuationFunction = ({
 
   const tempFields = new Map<
     number,
-    { wasmType: binaryen.Type; typeId: TypeId }
+    { wasmType: binaryen.Type; typeId: TypeId; storageRef: boolean }
   >();
   groupSites.forEach((groupSite) => {
     groupSite.envFields.forEach((field) => {
@@ -561,13 +563,16 @@ export const ensureContinuationFunction = ({
       tempFields.set(field.tempId, {
         wasmType: field.wasmType,
         typeId: field.typeId,
+        storageRef: field.storageRef === true,
       });
     });
   });
   tempFields.forEach((spec, tempId) => {
     fnCtx.tempLocals.set(
       tempId,
-      allocateTempLocal(spec.wasmType, fnCtx, spec.typeId, ctx),
+      spec.storageRef
+        ? allocateTempLocal(spec.wasmType, fnCtx)
+        : allocateTempLocal(spec.wasmType, fnCtx, spec.typeId, ctx),
     );
   });
   fn?.parameters.forEach((parameter) => {
@@ -576,10 +581,32 @@ export const ensureContinuationFunction = ({
     const typeId = substitution
       ? ctx.program.types.substitute(temp.typeId, substitution)
       : temp.typeId;
+    const storageRef =
+      temp.bindingKind !== undefined && temp.bindingKind !== "value"
+        ? getOptimizedParamAbiKind({
+            typeId,
+            bindingKind: temp.bindingKind,
+            ctx,
+          }) !== "direct"
+        : temp.storageRef;
+    const storageType = storageRef
+      ? getInlineHeapBoxType({ typeId, ctx })
+      : undefined;
+    if (storageRef && typeof storageType !== "number") {
+      throw new Error("default reference temp requires storage-ref ABI");
+    }
     fnCtx.tempLocals.set(
       temp.tempId,
-      allocateTempLocal(wasmTypeFor(typeId, ctx), fnCtx, typeId, ctx),
+      storageType
+        ? allocateTempLocal(storageType, fnCtx)
+        : allocateTempLocal(wasmTypeFor(typeId, ctx), fnCtx, typeId, ctx),
     );
+    if (!fnCtx.tempLocals.has(temp.presenceTempId)) {
+      fnCtx.tempLocals.set(
+        temp.presenceTempId,
+        allocateTempLocal(binaryen.i32, fnCtx, ctx.program.primitives.i32, ctx),
+      );
+    }
   });
 
   const envParamIndex = 0;

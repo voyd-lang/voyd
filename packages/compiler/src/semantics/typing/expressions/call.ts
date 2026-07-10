@@ -1409,7 +1409,7 @@ const walkAllLabeledCallArguments = ({
       continue;
     }
 
-    if (param.optional) {
+    if (param.optional || param.defaulted) {
       if (
         !onSkipOptionalParam({
           param,
@@ -1531,7 +1531,7 @@ const walkCallArguments = ({
     const arg = args[argIndex];
 
     if (!arg) {
-      if (param.optional) {
+      if (param.optional || param.defaulted) {
         if (
           !onSkipOptionalParam({
             param,
@@ -1616,7 +1616,7 @@ const walkCallArguments = ({
             cursor += 1;
             continue;
           }
-          if (runParam.optional) {
+          if (runParam.optional || runParam.defaulted) {
             if (
               !onSkipOptionalParam({
                 param: runParam,
@@ -1672,7 +1672,7 @@ const walkCallArguments = ({
       continue;
     }
 
-    if (param.optional) {
+    if (param.optional || param.defaulted) {
       if (
         !onSkipOptionalParam({
           param,
@@ -1860,6 +1860,9 @@ const ensureOptionalParameterIsSkippable = ({
   callSpan?: SourceSpan;
   fallbackSpan: SourceSpan;
 }): void => {
+  if (param.defaulted) {
+    return;
+  }
   const optionalInfo = getOptionalInfo(
     param.type,
     optionalResolverContextForTypingContext(ctx),
@@ -1885,16 +1888,8 @@ const isStableCallsiteIdParam = (param: ParamSignature): boolean =>
 
 const providedArgumentTypeForParam = (
   param: ParamSignature,
-  ctx: TypingContext,
-): TypeId => {
-  if (typeof param.defaultValue !== "number") {
-    return param.type;
-  }
-  return (
-    getOptionalInfo(param.type, optionalResolverContextForTypingContext(ctx))
-      ?.innerType ?? param.type
-  );
-};
+  _ctx: TypingContext,
+): TypeId => param.type;
 
 const argumentTargetsSyntheticParam = (
   arg: Arg,
@@ -2012,7 +2007,9 @@ const validateCallArgs = (
               targetTypeId: param.type,
               value: stableCallsiteIdFor(callSpan ?? span, `${paramIndex}`),
             }
-          : { kind: "missing", targetTypeId: param.type },
+          : param.defaulted
+            ? { kind: "omitted-default", targetTypeId: param.type }
+            : { kind: "omitted-optional", targetTypeId: param.type },
       );
       return true;
     },
@@ -3035,7 +3032,9 @@ const signatureWithAdjustedTraitDispatchParameters = ({
     parameters: params.map((param) => ({
       type: param.type,
       label: param.label,
-      optional: param.optional ?? false,
+      optional: (param.optional ?? false) || (param.defaulted ?? false),
+      defaulted: param.defaulted ?? false,
+      bindingKind: param.bindingKind,
     })),
     returnType: signature.returnType,
     effectRow,
@@ -4497,7 +4496,15 @@ const resolveCurriedCallReturnType = ({
       return reportNonFunctionCallee({ callSpan, calleeSpan, ctx });
     }
 
-    const { parameters, returnType } = desc;
+    const { returnType } = desc;
+    const parameters = desc.parameters.map((param) => {
+      const defaulted = param.defaulted === true;
+      return {
+        ...param,
+        optional: defaulted ? false : param.optional,
+        defaulted,
+      };
+    });
     if (parameters.length === 0) {
       if (remainingArgs.length > 0) {
         throw new Error("call argument count mismatch");
@@ -5001,7 +5008,9 @@ const typeFunctionCall = ({
     const calleeType = ctx.arena.internFunction({
       parameters: adjustedParameters.map((param) => ({
         ...param,
-        optional: param.optional ?? false,
+        optional: (param.optional ?? false) || (param.defaulted ?? false),
+        defaulted: param.defaulted ?? false,
+        bindingKind: param.bindingKind,
       })),
       returnType: instantiation.returnType,
       effectRow: ctx.primitives.defaultEffectRow,
@@ -5420,10 +5429,12 @@ const refreshFunctionSignatureTypeForGenericBody = ({
   ctx: TypingContext;
 }): void => {
   const functionType = ctx.arena.internFunction({
-    parameters: signature.parameters.map(({ type, label, optional }) => ({
+    parameters: signature.parameters.map(({ type, label, optional, defaulted, bindingKind }) => ({
       type,
       label,
-      optional: optional ?? false,
+      optional: (optional ?? false) || (defaulted ?? false),
+      defaulted: defaulted ?? false,
+      bindingKind,
     })),
     returnType: signature.returnType,
     effectRow: signature.effectRow ?? ctx.primitives.defaultEffectRow,

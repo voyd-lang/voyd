@@ -1,29 +1,26 @@
 import binaryen from "binaryen";
-import {
-  refCast,
-  structGetFieldValue,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   ExpressionCompiler,
   FunctionContext,
   FunctionMetadata,
   HirFunction,
+  LocalBinding,
   LocalBindingLocal,
 } from "./context.js";
 import { compileExpression } from "./expressions/index.js";
 import {
+  allocateAddressableLocal,
   allocateTempLocal,
+  createStorageRefBinding,
+  loadBindingStorageRef,
   loadBindingValue,
   storeLocalValue,
 } from "./locals.js";
-import { coerceValueToType, loadStructuralField } from "./structural.js";
-import { RTT_METADATA_SLOTS } from "./rtt/index.js";
+import { coerceValueToType } from "./structural.js";
 import {
-  getInlineUnionLayout,
+  getOptimizedParamAbiKind,
   getRequiredExprType,
-  getStructuralTypeInfo,
-  shouldInlineUnionLayout,
   wasmTypeFor,
 } from "./types.js";
 import { compileOptionalNoneValue } from "./optionals.js";
@@ -62,53 +59,37 @@ export const compileDefaultParameterInitialization = ({
       fnCtx,
     });
   }
+
   const ops: binaryen.ExpressionRef[] = [];
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
 
   fn.parameters.forEach((param, index) => {
     if (typeof param.defaultValue !== "number") return;
 
-    const rawTypeId = meta.paramTypeIds[index];
-    if (typeof rawTypeId !== "number") {
+    const typeId = meta.paramTypeIds[index];
+    if (typeof typeId !== "number") {
       throw new Error(
         `codegen missing default parameter metadata for symbol ${param.symbol}`,
       );
     }
-    const optionalInfo = ctx.program.optionals.getOptionalInfo(
-      ctx.moduleId,
-      rawTypeId,
-    );
-    if (!optionalInfo) {
-      throw new Error("default parameter must use an Optional wrapper type");
-    }
-    const someInfo = getStructuralTypeInfo(optionalInfo.someType, ctx);
-    if (!someInfo || someInfo.fields.length !== 1) {
-      throw new Error(
-        "default parameter Optional Some member must contain one value field",
-      );
-    }
-    const someField = someInfo.fields[0]!;
-    const rawTemp = ctx.effectLowering.defaultParamTemps.get(param.symbol);
-    const rawBinding =
-      typeof rawTemp?.tempId === "number"
-        ? fnCtx.tempLocals.get(rawTemp.tempId)
-        : fnCtx.bindings.get(param.symbol);
-    if (!rawBinding) {
-      throw new Error(
-        `codegen missing bound parameter for optional default symbol ${param.symbol}`,
-      );
-    }
 
-    const resolved = allocateTempLocal(
-      wasmTypeFor(optionalInfo.innerType, ctx),
-      fnCtx,
-      optionalInfo.innerType,
+    const bindingKind = meta.parameters[index]?.bindingKind;
+    const referenceBound = bindingKind !== undefined && bindingKind !== "value";
+    const rawBinding = rawDefaultBinding({
+      symbol: param.symbol,
+      typeId,
+      bindingKind,
+      continuation: continuation !== undefined,
       ctx,
-    );
-    fnCtx.bindings.set(param.symbol, {
-      ...resolved,
-      kind: "local",
-      typeId: optionalInfo.innerType,
+      fnCtx,
+    });
+    const present = defaultPresenceValue({
+      parameterIndex: index,
+      symbol: param.symbol,
+      meta,
+      continuation: continuation !== undefined,
+      ctx,
+      fnCtx,
     });
 
     const compileDefaultValue = (): binaryen.ExpressionRef => {
@@ -117,7 +98,7 @@ export const compileDefaultParameterInitialization = ({
         ctx,
         fnCtx,
         tailPosition: false,
-        expectedResultTypeId: optionalInfo.innerType,
+        expectedResultTypeId: typeId,
       }).expr;
       const actualTypeId = getRequiredExprType(
         param.defaultValue!,
@@ -127,97 +108,37 @@ export const compileDefaultParameterInitialization = ({
       return coerceValueToType({
         value: compiled,
         actualType: actualTypeId,
-        targetType: optionalInfo.innerType,
+        targetType: typeId,
         ctx,
         fnCtx,
       });
     };
 
-    const compileNormalStore = (): binaryen.ExpressionRef => {
-      const rawParamExpr = () => loadBindingValue(rawBinding, ctx, fnCtx);
-      const rawAbiTypes = binaryen.expandType(rawBinding.type);
-      const [isSome, extractedSomeValue] = shouldInlineUnionLayout(
-        rawTypeId,
-        ctx,
-      )
-        ? (() => {
-            const layout = getInlineUnionLayout(rawTypeId, ctx);
-            const someLayout = layout.members.find(
-              (member) => member.typeId === optionalInfo.someType,
-            );
-            if (!someLayout) {
-              throw new Error(
-                "default parameter inline optional layout is missing Some member",
-              );
-            }
-            const tagValue =
-              rawAbiTypes.length === 1
-                ? rawParamExpr()
-                : ctx.mod.tuple.extract(rawParamExpr(), 0);
-            const payloadValues = someLayout.abiTypes.map((_, fieldIndex) =>
-              rawAbiTypes.length === 1
-                ? rawParamExpr()
-                : ctx.mod.tuple.extract(
-                    rawParamExpr(),
-                    someLayout.abiStart + fieldIndex,
-                  ),
-            );
-            const payload =
-              payloadValues.length === 0
-                ? ctx.mod.nop()
-                : payloadValues.length === 1
-                  ? payloadValues[0]!
-                  : ctx.mod.tuple.make(payloadValues);
-            return [
-              ctx.mod.i32.eq(tagValue, ctx.mod.i32.const(someLayout.tag)),
-              coerceValueToType({
-                value: payload,
-                actualType: optionalInfo.innerType,
-                targetType: optionalInfo.innerType,
-                ctx,
-                fnCtx,
-              }),
-            ] as const;
-          })()
-        : (() => {
-            const ancestorsExpr = () =>
-              structGetFieldValue({
-                mod: ctx.mod,
-                fieldType: ctx.rtt.extensionHelpers.i32Array,
-                fieldIndex: RTT_METADATA_SLOTS.ANCESTORS,
-                exprRef: rawParamExpr(),
-              });
-            return [
-              ctx.mod.call(
-                "__extends",
-                [ctx.mod.i32.const(someInfo.runtimeTypeId), ancestorsExpr()],
-                binaryen.i32,
-              ),
-              coerceValueToType({
-                value: loadStructuralField({
-                  structInfo: someInfo,
-                  field: someField,
-                  pointer: () =>
-                    refCast(ctx.mod, rawParamExpr(), someInfo.runtimeType),
-                  ctx,
-                }),
-                actualType: someField.typeId,
-                targetType: optionalInfo.innerType,
-                ctx,
-                fnCtx,
-              }),
-            ] as const;
-          })();
-      return storeLocalValue({
-        binding: resolved,
-        value: ctx.mod.if(isSome, extractedSomeValue, compileDefaultValue()),
-        ctx,
-        fnCtx,
-      });
-    };
+    const usesStorageReference =
+      referenceBound && loadBindingStorageRef(rawBinding, ctx) !== undefined;
+    const { normalStore, resumedStore } = usesStorageReference
+      ? compileReferenceDefaultStores({
+          symbol: param.symbol,
+          typeId,
+          mutable: bindingKind === "mutable-ref",
+          rawBinding,
+          present,
+          compileDefaultValue,
+          ctx,
+          fnCtx,
+        })
+      : compileValueDefaultStores({
+          symbol: param.symbol,
+          typeId,
+          rawBinding,
+          present,
+          compileDefaultValue,
+          ctx,
+          fnCtx,
+        });
 
     if (!continuation) {
-      ops.push(compileNormalStore());
+      ops.push(normalStore);
       return;
     }
 
@@ -245,22 +166,209 @@ export const compileDefaultParameterInitialization = ({
       ctx.mod.i32.eqz(started()),
       activeInDefault,
     );
-    const directStore = storeLocalValue({
-      binding: resolved,
-      value: compileDefaultValue(),
-      ctx,
-      fnCtx,
-    });
     ops.push(
       ctx.mod.if(
         resumeCurrent,
-        directStore,
-        ctx.mod.if(started(), compileNormalStore(), ctx.mod.nop()),
+        resumedStore,
+        ctx.mod.if(started(), normalStore, ctx.mod.nop()),
       ),
     );
   });
 
   return ops;
+};
+
+const rawDefaultBinding = ({
+  symbol,
+  typeId,
+  bindingKind,
+  continuation,
+  ctx,
+  fnCtx,
+}: {
+  symbol: number;
+  typeId: number;
+  bindingKind: string | undefined;
+  continuation: boolean;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): LocalBinding => {
+  const temp = continuation
+    ? ctx.effectLowering.defaultParamTemps.get(symbol)
+    : undefined;
+  const tempBinding = temp ? fnCtx.tempLocals.get(temp.tempId) : undefined;
+  if (temp && tempBinding) {
+    const storageRef =
+      bindingKind !== undefined && bindingKind !== "value"
+        ? getOptimizedParamAbiKind({ typeId, bindingKind, ctx }) !== "direct"
+        : temp.storageRef;
+    return storageRef
+      ? createStorageRefBinding({
+          index: tempBinding.index,
+          typeId,
+          mutable: bindingKind === "mutable-ref",
+          ctx,
+        })
+      : tempBinding;
+  }
+  const binding = fnCtx.bindings.get(symbol);
+  if (!binding) {
+    throw new Error(`codegen missing raw default parameter ${symbol}`);
+  }
+  return binding;
+};
+
+const defaultPresenceValue = ({
+  parameterIndex,
+  symbol,
+  meta,
+  continuation,
+  ctx,
+  fnCtx,
+}: {
+  parameterIndex: number;
+  symbol: number;
+  meta: FunctionMetadata;
+  continuation: boolean;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  if (continuation) {
+    const temp = ctx.effectLowering.defaultParamTemps.get(symbol);
+    const binding = temp
+      ? fnCtx.tempLocals.get(temp.presenceTempId)
+      : undefined;
+    if (!binding) {
+      throw new Error(`codegen missing default presence temp for ${symbol}`);
+    }
+    return loadBindingValue(binding, ctx, fnCtx);
+  }
+  const index =
+    meta.firstUserParamIndex +
+    meta.paramAbiTypes
+      .slice(0, parameterIndex)
+      .reduce((sum, types) => sum + types.length, 0) +
+    (meta.paramAbiTypes[parameterIndex]?.length ?? 0) -
+    1;
+  return ctx.mod.local.get(index, binaryen.i32);
+};
+
+const compileValueDefaultStores = ({
+  symbol,
+  typeId,
+  rawBinding,
+  present,
+  compileDefaultValue,
+  ctx,
+  fnCtx,
+}: {
+  symbol: number;
+  typeId: number;
+  rawBinding: LocalBinding;
+  present: binaryen.ExpressionRef;
+  compileDefaultValue: () => binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): {
+  normalStore: binaryen.ExpressionRef;
+  resumedStore: binaryen.ExpressionRef;
+} => {
+  const resolved = allocateTempLocal(
+    wasmTypeFor(typeId, ctx),
+    fnCtx,
+    typeId,
+    ctx,
+  );
+  fnCtx.bindings.set(symbol, resolved);
+  return {
+    normalStore: storeLocalValue({
+      binding: resolved,
+      value: ctx.mod.if(
+        present,
+        loadBindingValue(rawBinding, ctx, fnCtx),
+        compileDefaultValue(),
+      ),
+      ctx,
+      fnCtx,
+    }),
+    resumedStore: storeLocalValue({
+      binding: resolved,
+      value: compileDefaultValue(),
+      ctx,
+      fnCtx,
+    }),
+  };
+};
+
+const compileReferenceDefaultStores = ({
+  symbol,
+  typeId,
+  mutable,
+  rawBinding,
+  present,
+  compileDefaultValue,
+  ctx,
+  fnCtx,
+}: {
+  symbol: number;
+  typeId: number;
+  mutable: boolean;
+  rawBinding: LocalBinding;
+  present: binaryen.ExpressionRef;
+  compileDefaultValue: () => binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): {
+  normalStore: binaryen.ExpressionRef;
+  resumedStore: binaryen.ExpressionRef;
+} => {
+  const suppliedStorage = loadBindingStorageRef(rawBinding, ctx);
+  if (!suppliedStorage) {
+    throw new Error("reference default payload requires a storage reference");
+  }
+  const defaultStorage = allocateAddressableLocal({ typeId, ctx, fnCtx });
+  const defaultStorageRef = loadBindingStorageRef(defaultStorage, ctx);
+  if (!defaultStorageRef) {
+    throw new Error("reference default requires addressable local storage");
+  }
+  const selectedStorage = allocateTempLocal(rawBinding.storageType, fnCtx);
+  fnCtx.bindings.set(
+    symbol,
+    createStorageRefBinding({
+      index: selectedStorage.index,
+      typeId,
+      mutable,
+      ctx,
+    }),
+  );
+  const initializeDefault = (): binaryen.ExpressionRef =>
+    ctx.mod.block(
+      null,
+      [
+        storeLocalValue({
+          binding: defaultStorage,
+          value: compileDefaultValue(),
+          ctx,
+          fnCtx,
+        }),
+        defaultStorageRef,
+      ],
+      defaultStorage.storageType,
+    );
+  return {
+    normalStore: storeLocalValue({
+      binding: selectedStorage,
+      value: ctx.mod.if(present, suppliedStorage, initializeDefault()),
+      ctx,
+      fnCtx,
+    }),
+    resumedStore: storeLocalValue({
+      binding: selectedStorage,
+      value: initializeDefault(),
+      ctx,
+      fnCtx,
+    }),
+  };
 };
 
 const compileCallShapeOmittedParameterInitialization = ({
@@ -309,17 +417,17 @@ const compileCallShapeOmittedParameterInitialization = ({
             });
           })()
         : compileOptionalNoneValue({ targetTypeId, ctx, fnCtx });
-    const binding = allocateTempLocal(
-      wasmTypeFor(targetTypeId, ctx),
-      fnCtx,
-      targetTypeId,
-      ctx,
-    );
-    fnCtx.bindings.set(parameter.symbol, {
-      ...binding,
-      kind: "local",
-      typeId: targetTypeId,
-    });
+    const bindingKind = meta.parameters[index]?.bindingKind;
+    const referenceBound = bindingKind !== undefined && bindingKind !== "value";
+    const binding = referenceBound
+      ? allocateAddressableLocal({ typeId: targetTypeId, ctx, fnCtx })
+      : allocateTempLocal(
+          wasmTypeFor(targetTypeId, ctx),
+          fnCtx,
+          targetTypeId,
+          ctx,
+        );
+    fnCtx.bindings.set(parameter.symbol, binding);
     ops.push(storeLocalValue({ binding, value, ctx, fnCtx }));
   });
 

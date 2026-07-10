@@ -104,7 +104,7 @@ export const callShapeStatesForPlan = (
   plan: readonly CallArgumentPlanEntry[],
 ): readonly CallShapeParameterState[] =>
   plan.map((entry) =>
-    entry.kind === "missing"
+    entry.kind === "omitted-default" || entry.kind === "omitted-optional"
       ? "omitted"
       : entry.kind === "stable-callsite-id"
         ? "stable-callsite-id"
@@ -148,9 +148,6 @@ const specializedParameterFor = ({
   }
   const hasDefault = typeof parameter.defaultValue === "number";
   const bindingKind = meta.parameters[index]?.bindingKind;
-  if (hasDefault && bindingKind !== undefined && bindingKind !== "value") {
-    return undefined;
-  }
 
   if (!hasDefault) {
     if (state === "stable-callsite-id") {
@@ -172,25 +169,20 @@ const specializedParameterFor = ({
     };
   }
 
-  const optional = ctx.program.optionals.getOptionalInfo(
-    meta.moduleId,
-    originalTypeId,
-  );
-  if (!optional) {
-    return undefined;
-  }
   if (state === "omitted") {
-    return { typeId: optional.innerType, abiKind: "direct", abiTypes: [] };
+    return { typeId: originalTypeId, abiKind: "direct", abiTypes: [] };
   }
   const abiKind = getOptimizedParamAbiKind({
-    typeId: optional.innerType,
+    typeId: originalTypeId,
+    bindingKind,
     ctx,
   });
   return {
-    typeId: optional.innerType,
+    typeId: originalTypeId,
     abiKind,
     abiTypes: getOptimizedAbiTypesForParam({
-      typeId: optional.innerType,
+      typeId: originalTypeId,
+      bindingKind,
       ctx,
     }),
   };

@@ -13,9 +13,14 @@ import {
   refCast,
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
-import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../../locals.js";
+import {
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "../../locals.js";
 import {
   abiTypeFor,
+  getCallableParamAbiKind,
   getClosureTypeInfo,
   getExprBinaryenType,
   getRequiredExprType,
@@ -55,7 +60,13 @@ export const compileClosureCall = ({
   calleeTypeId: TypeId;
   calleeDesc: {
     kind: "function";
-    parameters: readonly { type: TypeId; label?: string; optional?: boolean }[];
+    parameters: readonly {
+      type: TypeId;
+      label?: string;
+      optional?: boolean;
+      defaulted?: boolean;
+      bindingKind?: string;
+    }[];
     returnType: TypeId;
     effectRow: EffectRowId;
   };
@@ -78,11 +89,17 @@ export const compileClosureCall = ({
       ctx,
       fnCtx,
     });
-    const tuple = ctx.mod.tuple.make(captured.lanes as binaryen.ExpressionRef[]);
+    const tuple = ctx.mod.tuple.make(
+      captured.lanes as binaryen.ExpressionRef[],
+    );
     if (captured.setup.length === 0) {
       return tuple;
     }
-    return ctx.mod.block(null, [...captured.setup, tuple], abiTypeFor(abiTypes));
+    return ctx.mod.block(
+      null,
+      [...captured.setup, tuple],
+      abiTypeFor(abiTypes),
+    );
   };
 
   const flattenAbiArgument = (
@@ -93,9 +110,29 @@ export const compileClosureCall = ({
     setup: readonly binaryen.ExpressionRef[];
     args: readonly binaryen.ExpressionRef[];
   } => {
-    const valueAbiTypes = binaryen.getExpressionType(value) === binaryen.none
-      ? []
-      : [...binaryen.expandType(binaryen.getExpressionType(value))];
+    const preserveEvaluationOrder = ({
+      setup,
+      args,
+    }: {
+      setup: readonly binaryen.ExpressionRef[];
+      args: readonly binaryen.ExpressionRef[];
+    }): {
+      setup: readonly binaryen.ExpressionRef[];
+      args: readonly binaryen.ExpressionRef[];
+    } => {
+      if (setup.length === 0 || args.length === 0) return { setup, args };
+      return {
+        setup: [],
+        args: [
+          ctx.mod.block(null, [...setup, args[0]!], abiTypes[0]),
+          ...args.slice(1),
+        ],
+      };
+    };
+    const valueAbiTypes =
+      binaryen.getExpressionType(value) === binaryen.none
+        ? []
+        : [...binaryen.expandType(binaryen.getExpressionType(value))];
     if (
       typeof typeId === "number" &&
       abiTypes.length === 1 &&
@@ -127,12 +164,12 @@ export const compileClosureCall = ({
     if (typeof typeId === "number") {
       const tempType = abiTypeFor(valueAbiTypes);
       const temp = allocateTempLocal(tempType, fnCtx, typeId, ctx);
-      return {
+      return preserveEvaluationOrder({
         setup: [storeLocalValue({ binding: temp, value, ctx, fnCtx })],
         args: abiTypes.map((_, index) =>
           ctx.mod.tuple.extract(loadLocalValue(temp, ctx), index),
         ),
-      };
+      });
     }
     const captured = captureMultivalueLanes({
       value,
@@ -140,10 +177,10 @@ export const compileClosureCall = ({
       ctx,
       fnCtx,
     });
-    return {
+    return preserveEvaluationOrder({
       setup: captured.setup,
       args: captured.lanes,
-    };
+    });
   };
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
@@ -206,10 +243,12 @@ export const compileClosureCall = ({
   });
   const argSetups: binaryen.ExpressionRef[] = [];
   const userArgs = args.flatMap((arg, index) => {
+    const parameter = resolvedDesc.parameters[index];
+    const defaulted = parameter?.defaulted === true;
     const flattened = flattenAbiArgument(
       arg,
       base.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
-      resolvedDesc.parameters[index]?.type,
+      defaulted ? undefined : parameter?.type,
     );
     argSetups.push(...flattened.setup);
     return flattened.args;
@@ -222,11 +261,19 @@ export const compileClosureCall = ({
         ...userArgs,
       ]
     : [ctx.mod.local.get(closureTemp.index, base.interfaceType), ...userArgs];
-  const rawCall = callRef(ctx.mod, targetFn, callArgs as number[], base.resultType);
+  const rawCall = callRef(
+    ctx.mod,
+    targetFn,
+    callArgs as number[],
+    base.resultType,
+  );
   const directCallResult = effectful
     ? rawCall
     : (() => {
-        const stabilizedCall = stabilizeMultivalueResult(rawCall, base.resultAbiTypes);
+        const stabilizedCall = stabilizeMultivalueResult(
+          rawCall,
+          base.resultAbiTypes,
+        );
         return getSignatureSpillBoxType({
           typeId: resolvedDesc.returnType,
           ctx,
@@ -284,7 +331,7 @@ export const compileClosureCall = ({
         : ctx.mod.block(
             null,
             ops,
-            getExprBinaryenType(expr.id, ctx, typeInstanceId)
+            getExprBinaryenType(expr.id, ctx, typeInstanceId),
           ),
     usedReturnCall: lowered.usedReturnCall,
   };
@@ -320,11 +367,17 @@ export const compileCurriedClosureCall = ({
       ctx,
       fnCtx,
     });
-    const tuple = ctx.mod.tuple.make(captured.lanes as binaryen.ExpressionRef[]);
+    const tuple = ctx.mod.tuple.make(
+      captured.lanes as binaryen.ExpressionRef[],
+    );
     if (captured.setup.length === 0) {
       return tuple;
     }
-    return ctx.mod.block(null, [...captured.setup, tuple], abiTypeFor(abiTypes));
+    return ctx.mod.block(
+      null,
+      [...captured.setup, tuple],
+      abiTypeFor(abiTypes),
+    );
   };
 
   const flattenAbiArgument = (
@@ -335,9 +388,29 @@ export const compileCurriedClosureCall = ({
     setup: readonly binaryen.ExpressionRef[];
     args: readonly binaryen.ExpressionRef[];
   } => {
-    const valueAbiTypes = binaryen.getExpressionType(value) === binaryen.none
-      ? []
-      : [...binaryen.expandType(binaryen.getExpressionType(value))];
+    const preserveEvaluationOrder = ({
+      setup,
+      args,
+    }: {
+      setup: readonly binaryen.ExpressionRef[];
+      args: readonly binaryen.ExpressionRef[];
+    }): {
+      setup: readonly binaryen.ExpressionRef[];
+      args: readonly binaryen.ExpressionRef[];
+    } => {
+      if (setup.length === 0 || args.length === 0) return { setup, args };
+      return {
+        setup: [],
+        args: [
+          ctx.mod.block(null, [...setup, args[0]!], abiTypes[0]),
+          ...args.slice(1),
+        ],
+      };
+    };
+    const valueAbiTypes =
+      binaryen.getExpressionType(value) === binaryen.none
+        ? []
+        : [...binaryen.expandType(binaryen.getExpressionType(value))];
     if (
       typeof typeId === "number" &&
       abiTypes.length === 1 &&
@@ -369,12 +442,12 @@ export const compileCurriedClosureCall = ({
     if (typeof typeId === "number") {
       const tempType = abiTypeFor(valueAbiTypes);
       const temp = allocateTempLocal(tempType, fnCtx, typeId, ctx);
-      return {
+      return preserveEvaluationOrder({
         setup: [storeLocalValue({ binding: temp, value, ctx, fnCtx })],
         args: abiTypes.map((_, index) =>
           ctx.mod.tuple.extract(loadLocalValue(temp, ctx), index),
         ),
-      };
+      });
     }
     const captured = captureMultivalueLanes({
       value,
@@ -382,10 +455,10 @@ export const compileCurriedClosureCall = ({
       ctx,
       fnCtx,
     });
-    return {
+    return preserveEvaluationOrder({
       setup: captured.setup,
       args: captured.lanes,
-    };
+    });
   };
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
@@ -413,6 +486,8 @@ export const compileCurriedClosureCall = ({
       typeId: param.type,
       label: param.label,
       optional: param.optional,
+      defaulted: param.defaulted === true,
+      bindingKind: param.bindingKind,
     }));
     const remainingCall: HirCallExpr = {
       ...expr,
@@ -424,6 +499,9 @@ export const compileCurriedClosureCall = ({
         return compileCallArgumentsForParamsWithDetails({
           call: remainingCall,
           params,
+          paramAbiKinds: params.map((param) =>
+            closureParamAbiKind({ param, ctx }),
+          ),
           ctx,
           fnCtx,
           compileExpr,
@@ -438,11 +516,11 @@ export const compileCurriedClosureCall = ({
         const signature = currentDesc.parameters
           .map(
             (param) =>
-              `${param.label ?? "_"}${param.optional ? "?" : ""}:${param.type}`
+              `${param.label ?? "_"}${param.optional ? "?" : ""}:${param.type}`,
           )
           .join(", ");
         throw new Error(
-          `curried closure call argument mismatch (call ${expr.id} in ${ctx.moduleId}; stage offset=${argIndex}; signature=(${signature}) -> ${currentDesc.returnType}): ${(error as Error).message}`
+          `curried closure call argument mismatch (call ${expr.id} in ${ctx.moduleId}; stage offset=${argIndex}; signature=(${signature}) -> ${currentDesc.returnType}): ${(error as Error).message}`,
         );
       }
     };
@@ -450,11 +528,12 @@ export const compileCurriedClosureCall = ({
     const compiledSlice = compileArgsForSlice();
     if (compiledSlice.consumedArgCount === 0) {
       throw new Error(
-        `curried closure call made no argument progress (call ${expr.id} in ${ctx.moduleId}; stage offset=${argIndex})`
+        `curried closure call made no argument progress (call ${expr.id} in ${ctx.moduleId}; stage offset=${argIndex})`,
       );
     }
 
-    const isFinalSlice = argIndex + compiledSlice.consumedArgCount >= expr.args.length;
+    const isFinalSlice =
+      argIndex + compiledSlice.consumedArgCount >= expr.args.length;
 
     const base = getClosureTypeInfo(resolvedCurrentTypeId, ctx);
     const closureTemp = allocateTempLocal(base.interfaceType, fnCtx);
@@ -491,10 +570,12 @@ export const compileCurriedClosureCall = ({
     const returnWasmType = wasmTypeFor(expectedTypeId, ctx);
     const argSetups: binaryen.ExpressionRef[] = [];
     const args = compiledSlice.args.flatMap((arg, index) => {
+      const parameter = currentDesc.parameters[index];
+      const defaulted = parameter?.defaulted === true;
       const flattened = flattenAbiArgument(
         arg,
         base.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
-        currentDesc.parameters[index]?.type,
+        defaulted ? undefined : parameter?.type,
       );
       argSetups.push(...flattened.setup);
       return flattened.args;
@@ -507,12 +588,21 @@ export const compileCurriedClosureCall = ({
           ...args,
         ]
       : [ctx.mod.local.get(closureTemp.index, base.interfaceType), ...args];
-    const rawCall = callRef(ctx.mod, targetFn, callArgs as number[], base.resultType);
+    const rawCall = callRef(
+      ctx.mod,
+      targetFn,
+      callArgs as number[],
+      base.resultType,
+    );
     const directCallResult = effectful
       ? rawCall
       : (() => {
-          const stabilizedCall = stabilizeMultivalueResult(rawCall, base.resultAbiTypes);
-          return getSignatureSpillBoxType({ typeId: returnTypeId, ctx }) === base.resultType
+          const stabilizedCall = stabilizeMultivalueResult(
+            rawCall,
+            base.resultAbiTypes,
+          );
+          return getSignatureSpillBoxType({ typeId: returnTypeId, ctx }) ===
+            base.resultType
             ? unboxSignatureSpillValue({
                 value: stabilizedCall,
                 typeId: returnTypeId,
@@ -580,7 +670,13 @@ const compileClosureArguments = ({
 }: {
   call: HirCallExpr;
   desc: {
-    parameters: readonly { type: TypeId; label?: string; optional?: boolean }[];
+    parameters: readonly {
+      type: TypeId;
+      label?: string;
+      optional?: boolean;
+      defaulted?: boolean;
+      bindingKind?: string;
+    }[];
   };
   ctx: CodegenContext;
   fnCtx: FunctionContext;
@@ -591,14 +687,31 @@ const compileClosureArguments = ({
     typeId: param.type,
     label: param.label,
     optional: param.optional,
+    defaulted: param.defaulted === true,
+    bindingKind: param.bindingKind,
   }));
 
   return compileCallArgumentsForParams({
     call,
     params,
+    paramAbiKinds: params.map((param) => closureParamAbiKind({ param, ctx })),
     ctx,
     fnCtx,
     compileExpr,
     options: { typeInstanceId },
   });
 };
+
+const closureParamAbiKind = ({
+  param,
+  ctx,
+}: {
+  param: CallParam;
+  ctx: CodegenContext;
+}): ReturnType<typeof getCallableParamAbiKind> =>
+  getCallableParamAbiKind({
+    typeId: param.typeId,
+    bindingKind: param.bindingKind,
+    defaulted: param.defaulted,
+    ctx,
+  });

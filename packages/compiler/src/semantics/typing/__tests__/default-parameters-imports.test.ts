@@ -11,10 +11,6 @@ import { isForm } from "../../../parser/index.js";
 import type { Form } from "../../../parser/index.js";
 import { toSourceSpan } from "../../utils.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
-import {
-  getOptionalInfo,
-  optionalResolverContextForTypingResultWithSymbolTable,
-} from "../optionals.js";
 
 const DEP_FIXTURE = "default_param_optional_import/dep.voyd";
 const MAIN_FIXTURE = "default_param_optional_import/main.voyd";
@@ -54,8 +50,8 @@ const buildModule = ({
   return { module, graph, ast: parsedAst };
 };
 
-describe("default parameter optional wrapper resolution", () => {
-  it("resolves Optional imported from another module", () => {
+describe("default parameter import metadata", () => {
+  it("preserves the declared type without requiring Optional in scope", () => {
     const dep = buildModule({
       fixture: DEP_FIXTURE,
       segments: ["dep"],
@@ -101,18 +97,22 @@ describe("default parameter optional wrapper resolution", () => {
     }
 
     const parameter = signature.parameters[0];
-    expect(parameter?.optional).toBe(true);
+    expect(parameter?.optional).toBe(false);
+    expect(parameter?.defaulted).toBe(true);
     if (!parameter) {
       return;
     }
 
-    const optionalInfo = getOptionalInfo(
-      parameter.type,
-      optionalResolverContextForTypingResultWithSymbolTable(
-        mainSemantics.typing,
-        symbolTable,
+    expect(parameter.type).toBe(mainSemantics.typing.primitives.i32);
+
+    const planKinds = Array.from(
+      mainSemantics.typing.callArgumentPlans.values(),
+    ).flatMap((byInstance) =>
+      Array.from(byInstance.values()).flatMap((plan) =>
+        plan.map((entry) => entry.kind),
       ),
     );
-    expect(optionalInfo).toBeDefined();
+    expect(planKinds).toContain("omitted-default");
+    expect(planKinds).toContain("direct");
   });
 });

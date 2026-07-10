@@ -135,6 +135,8 @@ export interface ParamSignature {
   name?: string;
   symbol?: SymbolId;
   optional?: boolean;
+  /** True when omission evaluates a declaration default; distinct from Optional<T>. */
+  defaulted?: boolean;
   defaultValue?: HirExprId;
   synthetic?: "stable-callsite-id";
 }
@@ -154,7 +156,8 @@ export interface Arg {
 
 export type CallArgumentPlanEntry =
   | { kind: "direct"; argIndex: number }
-  | { kind: "missing"; targetTypeId: TypeId }
+  | { kind: "omitted-default"; targetTypeId: TypeId }
+  | { kind: "omitted-optional"; targetTypeId: TypeId }
   | { kind: "stable-callsite-id"; targetTypeId: TypeId; value: number }
   | {
       kind: "container-field";

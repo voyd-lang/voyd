@@ -271,7 +271,7 @@ const positionalCallShapeCouldMatch = (
       return undefined;
     }
     total += 1;
-    if (!param.optional) {
+    if (!param.optional && !param.defaulted) {
       required += 1;
     }
   }
@@ -308,7 +308,7 @@ const callShapeCouldMatch = ({
 
     if (!arg) {
       for (let index = paramIndex; index < params.length; index += 1) {
-        if (!params[index]!.optional) {
+        if (!params[index]!.optional && !params[index]!.defaulted) {
           return false;
         }
       }
@@ -328,7 +328,7 @@ const callShapeCouldMatch = ({
           break;
         }
         const hasField = structuralFields.some((field) => field.name === runParam.label);
-        if (hasField || runParam.optional) {
+        if (hasField || runParam.optional || runParam.defaulted) {
           cursor += 1;
           continue;
         }
@@ -350,7 +350,7 @@ const callShapeCouldMatch = ({
       continue;
     }
 
-    if (param.optional) {
+    if (param.optional || param.defaulted) {
       paramIndex += 1;
       continue;
     }
@@ -384,7 +384,9 @@ const allLabeledCallShapeCouldMatch = ({
     return false;
   }
 
-  return params.every((param) => param.optional || argLabels.has(param.label!));
+  return params.every(
+    (param) => param.optional || param.defaulted || argLabels.has(param.label!),
+  );
 };
 
 const labelsCompatibleForShape = (
