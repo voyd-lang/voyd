@@ -122,6 +122,11 @@ const rowKey = (row) =>
 const rowsByKey = (scorecard) =>
   new Map(scorecard.rows.map((row) => [rowKey(row), row]));
 
+const rssComparisonBytes = (row) => {
+  const samples = row.processMaxRssSamplesBytes ?? [];
+  return samples.length > 0 ? Math.min(...samples) : row.processMaxRssBytes;
+};
+
 const percentDelta = (base, head) =>
   base === 0
     ? head === 0
@@ -292,9 +297,9 @@ export const compareScorecards = ({ base, head, limits }) => {
     compareMetric({
       failures,
       scenario: baseRow.scenario,
-      label: "peak RSS MiB",
-      base: baseRow.processMaxRssBytes,
-      head: headRow.processMaxRssBytes,
+      label: "peak RSS clean sample MiB",
+      base: rssComparisonBytes(baseRow),
+      head: rssComparisonBytes(headRow),
       threshold: limits.rss,
       metric: "rss",
       samples: {
@@ -346,6 +351,18 @@ export const rssRetryScenarios = (failures) =>
   failures.length > 0 && failures.every(({ metric }) => metric === "rss")
     ? [...new Set(failures.map(({ scenario }) => scenario))]
     : [];
+
+export const scorecardInputMode = ({
+  baseJson,
+  headJson,
+  baseRef,
+  headRef,
+}) => {
+  if (baseJson && headJson) {
+    return "json";
+  }
+  return baseRef && headRef ? "refs" : undefined;
+};
 
 export const pairedRunOrder = ({
   scenarioNames,
@@ -579,10 +596,16 @@ const main = () => {
   const tempRoot = mkdtempSync(path.join(tmpdir(), "voyd-optimizer-bench-"));
   try {
     const limits = thresholds();
+    const inputMode = scorecardInputMode({
+      baseJson,
+      headJson,
+      baseRef,
+      headRef,
+    });
     const paths =
-      baseJson && headJson
+      inputMode === "json"
         ? { basePath: baseJson, headPath: headJson }
-        : baseRef && headRef
+        : inputMode === "refs"
           ? benchmarkAtRefs({
               baseRef,
               headRef,
@@ -604,7 +627,7 @@ const main = () => {
       limits,
     });
     const retryScenarios = rssRetryScenarios(initialFailures);
-    if (retryScenarios.length > 0 && baseRef && headRef) {
+    if (retryScenarios.length > 0 && inputMode === "refs") {
       console.log(
         `\nRSS was the only failing metric; retrying paired measurement for: ${retryScenarios.join(", ")}`,
       );

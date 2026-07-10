@@ -3,6 +3,7 @@ import {
   compareScorecards,
   pairedRunOrder,
   rssRetryScenarios,
+  scorecardInputMode,
 } from "./check-optimizer-bench-regression.mjs";
 
 const MIB = 1024 * 1024;
@@ -14,7 +15,11 @@ const limits = {
   gzip: { relativePct: 5, absolute: 512 },
 };
 
-const scorecard = ({ rssMib, compileMs = 100 }) => ({
+const scorecard = ({
+  rssMib,
+  rssSamplesMib = [rssMib - 1, rssMib, rssMib + 1],
+  compileMs = 100,
+}) => ({
   schemaVersion: 2,
   corpusHashes: { scenario: "same-source" },
   rows: [
@@ -25,9 +30,7 @@ const scorecard = ({ rssMib, compileMs = 100 }) => ({
       compileMedianMs: compileMs,
       runtimeMedianMs: 10,
       processMaxRssBytes: rssMib * MIB,
-      processMaxRssSamplesBytes: [rssMib - 1, rssMib, rssMib + 1].map(
-        (value) => value * MIB,
-      ),
+      processMaxRssSamplesBytes: rssSamplesMib.map((value) => value * MIB),
       wasmBytes: 10_000,
       gzipBytes: 5_000,
       optimizerPasses: [],
@@ -62,6 +65,20 @@ describe("optimizer scorecard RSS retry policy", () => {
     expect(retry).toEqual([]);
   });
 
+  it("ignores the runner's bimodal one-sided RSS contamination", () => {
+    const result = failures({
+      base: scorecard({
+        rssMib: 1_790,
+        rssSamplesMib: [1_809, 1_790, 1_789],
+      }),
+      head: scorecard({
+        rssMib: 2_075,
+        rssSamplesMib: [1_805, 2_075, 2_081],
+      }),
+    });
+    expect(result).toEqual([]);
+  });
+
   it("still fails a stable synthetic RSS regression after retry", () => {
     const retry = failures({
       base: scorecard({ rssMib: 100 }),
@@ -78,6 +95,17 @@ describe("optimizer scorecard RSS retry policy", () => {
     expect(result.map(({ metric }) => metric)).toEqual(["compile", "rss"]);
     expect(rssRetryScenarios(result)).toEqual([]);
   });
+});
+
+it("prefers JSON scorecards over ambient ref environment inputs", () => {
+  expect(
+    scorecardInputMode({
+      baseJson: "base.json",
+      headJson: "head.json",
+      baseRef: "ambient-base",
+      headRef: "ambient-head",
+    }),
+  ).toBe("json");
 });
 
 it("alternates the first revision across paired scenarios", () => {
