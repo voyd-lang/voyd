@@ -13,6 +13,9 @@
     ],
     "skipLibCheck": true,
     "moduleResolution": "bundler",
+    "customConditions": [
+      "development"
+    ],
     "allowImportingTsExtensions": true,
     "isolatedModules": true,
     "moduleDetection": "force",

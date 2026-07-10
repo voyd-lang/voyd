@@ -8,7 +8,7 @@ const targetSelector = hydration?.dataset.voydHydration;
 const target = targetSelector ? document.querySelector(targetSelector) : undefined;
 
 if (!hydration || !target) {
-  throw new Error("Mini Voydpedia hydration target was not found.");
+  throw new Error("The Small Knowledge hydration target was not found.");
 }
 
 const initialModel = JSON.parse(hydration.textContent ?? "null") as unknown;
