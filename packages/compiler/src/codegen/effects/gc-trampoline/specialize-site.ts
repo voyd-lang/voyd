@@ -17,6 +17,8 @@ import type {
 } from "../effect-lowering.js";
 import { sanitizeIdentifier } from "../effect-lowering/layout.js";
 import {
+  getInlineHeapBoxType,
+  getOptimizedParamAbiKind,
   getRequiredExprType,
   wasmHeapFieldTypeFor,
   wasmTypeFor,
@@ -272,8 +274,7 @@ const specializeEnvField = ({
         ctx.effectLowering.defaultParamTemps.values(),
       ).some(
         (temp) =>
-          temp.tempId === field.tempId ||
-          temp.presenceTempId === field.tempId,
+          temp.tempId === field.tempId || temp.presenceTempId === field.tempId,
       );
       if (isDefaultParameterTemp) {
         return field.typeId;
@@ -292,16 +293,28 @@ const specializeEnvField = ({
   const specializedTypeId = substitution
     ? ctx.program.types.substitute(baseTypeId, substitution)
     : baseTypeId;
+  const storageRef =
+    field.bindingKind !== undefined && field.bindingKind !== "value"
+      ? getOptimizedParamAbiKind({
+          typeId: specializedTypeId,
+          bindingKind: field.bindingKind,
+          ctx,
+        }) !== "direct"
+      : field.storageRef === true;
+  const storageRefType = storageRef
+    ? getInlineHeapBoxType({ typeId: specializedTypeId, ctx })
+    : undefined;
+  if (storageRef && typeof storageRefType !== "number") {
+    throw new Error("default reference temp requires storage-ref ABI");
+  }
   return {
     ...field,
     typeId: specializedTypeId,
-    wasmType: wasmTypeFor(specializedTypeId, ctx),
-    storageType: wasmHeapFieldTypeFor(
-      specializedTypeId,
-      ctx,
-      new Set(),
-      "runtime",
-    ),
+    wasmType: storageRefType ?? wasmTypeFor(specializedTypeId, ctx),
+    storageType:
+      storageRefType ??
+      wasmHeapFieldTypeFor(specializedTypeId, ctx, new Set(), "runtime"),
+    storageRef,
   };
 };
 

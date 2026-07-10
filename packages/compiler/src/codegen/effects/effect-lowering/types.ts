@@ -6,6 +6,7 @@ import type {
   TypeId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
+import type { HirBindingKind } from "../../../semantics/hir/index.js";
 
 export type ContinuationFieldSource = "param" | "local" | "handler" | "site";
 
@@ -17,6 +18,7 @@ export interface ContinuationCaptureField {
   symbol?: SymbolId;
   tempId?: number;
   storageRef?: boolean;
+  bindingKind?: HirBindingKind;
 }
 
 export interface ContinuationEnvField {
@@ -27,6 +29,8 @@ export interface ContinuationEnvField {
   storageType: binaryen.Type;
   sourceKind: ContinuationFieldSource;
   tempId?: number;
+  storageRef?: boolean;
+  bindingKind?: HirBindingKind;
 }
 
 export interface ContinuationSiteBase {
@@ -94,6 +98,7 @@ export interface EffectLoweringResult {
       presenceTempId: number;
       typeId: TypeId;
       storageRef: boolean;
+      bindingKind?: HirBindingKind;
     }
   >;
 }
@@ -113,6 +118,7 @@ export interface EffectLoweringEirResult {
       presenceTempId: number;
       typeId: TypeId;
       storageRef: boolean;
+      bindingKind?: HirBindingKind;
     }
   >;
 }

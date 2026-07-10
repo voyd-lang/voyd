@@ -6096,13 +6096,6 @@ const collectCallShapeCandidates = ({
         if (!parameter || !signatureParameter) {
           return false;
         }
-        if (
-          typeof parameter.defaultValue === "number" &&
-          signatureParameter.bindingKind !== undefined &&
-          signatureParameter.bindingKind !== "value"
-        ) {
-          return false;
-        }
         if (state === "provided") {
           return true;
         }

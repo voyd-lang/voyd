@@ -98,6 +98,8 @@ const captureFields = ({
         typeId: field.typeId,
         sourceKind: "local",
         tempId,
+        storageRef: field.storageRef,
+        bindingKind: field.bindingKind,
       };
     }
 

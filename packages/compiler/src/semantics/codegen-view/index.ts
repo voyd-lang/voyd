@@ -70,6 +70,7 @@ export type CodegenFunctionParameter = {
   type: TypeId;
   label?: string;
   optional?: boolean;
+  defaulted?: boolean;
   bindingKind?: HirBindingKind;
 };
 
@@ -937,6 +938,7 @@ export const buildProgramCodegenView = (
             type: param.type,
             label: param.label,
             optional: param.optional === true,
+            defaulted: param.defaulted === true,
             bindingKind: param.bindingKind,
           })),
           returnType: desc.returnType,

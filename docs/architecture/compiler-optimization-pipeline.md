@@ -637,10 +637,6 @@ or the shared Binaryen optimization profile should own it.
 
 ## Known Open Work
 
-- `V-413`: effectful parameter-default expressions must be desugared into the
-  function continuation CFG. Typing records their effect rows, but the current
-  GC-trampoline CFG starts at the function body and cannot resume the remaining
-  default prologue after a perform.
 - `V-325`: reusable whole-program escape facts are present. Downstream
   representation changes must consume those facts through
   `ProgramOptimizationFacts.escapeAnalysis` rather than rediscovering typing

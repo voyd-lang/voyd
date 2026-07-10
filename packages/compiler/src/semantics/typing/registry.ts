@@ -22,20 +22,13 @@ import type {
   HirTraitMethod,
   HirTypeExpr,
 } from "../hir/index.js";
-import {
-  effectOpName,
-  resolveEffectAnnotation,
-} from "./effects.js";
+import { effectOpName, resolveEffectAnnotation } from "./effects.js";
 import {
   diagnosticFromCode,
   emitDiagnostic,
   normalizeSpan,
 } from "../../diagnostics/index.js";
 import { isStdOnlyIntrinsicName } from "../intrinsics.js";
-import {
-  getOptionalInfo,
-  optionalResolverContextForTypingContext,
-} from "./optionals.js";
 import {
   assertUniqueMethodSignatures,
   buildImplMethodSignatureInfos,
@@ -65,11 +58,15 @@ const defaultValueIsStableCallsiteId = ({
   if (callee?.exprKind !== "identifier") {
     return false;
   }
-  const metadata = (ctx.symbolTable.getSymbol(callee.symbol).metadata ?? {}) as {
+  const metadata = (ctx.symbolTable.getSymbol(callee.symbol).metadata ??
+    {}) as {
     intrinsic?: unknown;
     intrinsicName?: unknown;
   };
-  return metadata.intrinsic === true && metadata.intrinsicName === "__stable_callsite_id";
+  return (
+    metadata.intrinsic === true &&
+    metadata.intrinsicName === "__stable_callsite_id"
+  );
 };
 
 const serializerForDeclaredType = (
@@ -122,7 +119,10 @@ const resolveConstraintTypeParameters = ({
   params: readonly ConstraintTypeParameterDecl[];
   ctx: TypingContext;
   state: TypingState;
-}): { typeParams: ResolvedTypeParameter[]; typeParamMap: Map<SymbolId, TypeId> } => {
+}): {
+  typeParams: ResolvedTypeParameter[];
+  typeParamMap: Map<SymbolId, TypeId>;
+} => {
   const typeParamMap = new Map<SymbolId, TypeId>();
   const typeParams = params.map((param) => {
     const typeParam = ctx.arena.freshTypeParam();
@@ -146,7 +146,7 @@ const resolveConstraintTypeParameters = ({
       ctx,
       state,
       ctx.primitives.unknown,
-      typeParamMap
+      typeParamMap,
     );
   });
 
@@ -154,7 +154,7 @@ const resolveConstraintTypeParameters = ({
 };
 
 const toTypeParamSymbolMap = (
-  typeParams: readonly ResolvedTypeParameter[]
+  typeParams: readonly ResolvedTypeParameter[],
 ): ReadonlyMap<SymbolId, TypeId> | undefined =>
   typeParams.length > 0
     ? new Map(typeParams.map((param) => [param.symbol, param.typeRef] as const))
@@ -223,7 +223,7 @@ export const seedBaseObjectType = (ctx: TypingContext): void => {
 
 export const registerTypeAliases = (
   ctx: TypingContext,
-  _state: TypingState
+  _state: TypingState,
 ): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "type-alias") continue;
@@ -236,7 +236,7 @@ export const registerTypeAliases = (
       (!decl || decl.symbol !== item.symbol)
     ) {
       throw new Error(
-        `missing or mismatched decl for type alias symbol ${item.symbol}`
+        `missing or mismatched decl for type alias symbol ${item.symbol}`,
       );
     }
     const params = normalizeConstraintTypeParameters({
@@ -295,7 +295,7 @@ export const registerTraits = (ctx: TypingContext): void => {
 
 export const registerFunctionSignatures = (
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "function") continue;
@@ -335,13 +335,13 @@ export const registerFunctionSignatures = (
       (!fnDecl || fnDecl.symbol !== item.symbol)
     ) {
       throw new Error(
-        `missing or mismatched decl for function symbol ${item.symbol}`
+        `missing or mismatched decl for function symbol ${item.symbol}`,
       );
     }
 
     if (fnDecl && fnDecl.params.length !== item.parameters.length) {
       throw new Error(
-        `function parameter count mismatch for symbol ${item.symbol}: decl defines ${fnDecl.params.length}, HIR has ${item.parameters.length}`
+        `function parameter count mismatch for symbol ${item.symbol}: decl defines ${fnDecl.params.length}, HIR has ${item.parameters.length}`,
       );
     }
 
@@ -352,7 +352,7 @@ export const registerFunctionSignatures = (
     const implItem = implDecl
       ? Array.from(ctx.hir.items.values()).find(
           (entry): entry is HirImplDecl =>
-            entry.kind === "impl" && entry.symbol === implDecl.symbol
+            entry.kind === "impl" && entry.symbol === implDecl.symbol,
         )
       : undefined;
     const typeParameterDecls = [
@@ -373,9 +373,7 @@ export const registerFunctionSignatures = (
       });
     const signatureTypeParams = typeParams.length > 0 ? typeParams : undefined;
     const constructorReturn =
-      symbolRecord.name === "init" &&
-      symbolMetadata.static === true &&
-      implItem
+      symbolRecord.name === "init" && symbolMetadata.static === true && implItem
         ? resolveTypeExpr(
             implItem.target,
             ctx,
@@ -398,7 +396,7 @@ export const registerFunctionSignatures = (
             functionName: getSymbolName(item.symbol, ctx),
           },
           span: normalizeSpan(item.span, ctx.hir.module.span),
-        })
+        }),
       );
     }
 
@@ -453,19 +451,7 @@ export const registerFunctionSignatures = (
           span: normalizeSpan(param.span, item.span, ctx.hir.module.span),
         });
       }
-      let parameterType = resolvedFromAnnotation;
-
-      if (hasDefaultValue) {
-        const annotationOptionalInfo =
-          resolvedFromAnnotation === ctx.primitives.unknown
-            ? undefined
-            : getOptionalInfo(
-                resolvedFromAnnotation,
-                optionalResolverContextForTypingContext(ctx),
-              );
-        parameterType =
-          annotationOptionalInfo?.innerType ?? resolvedFromAnnotation;
-      }
+      const parameterType = resolvedFromAnnotation;
 
       ctx.valueTypes.set(param.symbol, parameterType);
       const optional = hasDefaultValue
@@ -493,9 +479,10 @@ export const registerFunctionSignatures = (
     const effectAnnotation = resolveEffectAnnotation(
       item.effectType,
       ctx,
-      state
+      state,
     );
-    const initialEffectRow = effectAnnotation ?? ctx.primitives.defaultEffectRow;
+    const initialEffectRow =
+      effectAnnotation ?? ctx.primitives.defaultEffectRow;
     const annotatedEffects = effectAnnotation !== undefined;
 
     const annotatedReturn =
@@ -504,7 +491,7 @@ export const registerFunctionSignatures = (
         ctx,
         state,
         ctx.primitives.unknown,
-        paramMap
+        paramMap,
       ) ?? ctx.primitives.unknown;
 
     if (typeof constructorReturn === "number" && item.returnType) {
@@ -525,11 +512,12 @@ export const registerFunctionSignatures = (
     const functionType = ctx.arena.internFunction({
       parameters: parameters.map(
         ({ type, label, optional, defaulted, bindingKind }) => ({
-        type,
-        label,
-        optional: (optional ?? false) || (defaulted ?? false),
-        bindingKind,
-      }),
+          type,
+          label,
+          optional: (optional ?? false) || (defaulted ?? false),
+          defaulted: defaulted ?? false,
+          bindingKind,
+        }),
       ),
       returnType: declaredReturn,
       effectRow: initialEffectRow,
@@ -537,7 +525,7 @@ export const registerFunctionSignatures = (
 
     const scheme = ctx.arena.newScheme(
       signatureTypeParams?.map((param) => param.typeParam) ?? [],
-      functionType
+      functionType,
     );
 
     ctx.functions.setSignature(item.symbol, {
@@ -562,7 +550,7 @@ export const registerFunctionSignatures = (
 
 export const registerEffectOperations = (
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): void => {
   for (const item of ctx.hir.items.values()) {
     if (item.kind !== "effect") continue;
@@ -588,7 +576,7 @@ export const registerEffectOperations = (
             ctx,
             state,
             ctx.primitives.unknown,
-            typeParamMapRef
+            typeParamMapRef,
           ) ?? ctx.primitives.unknown,
         declaredType: param.type,
         declaredSerializer: serializerForDeclaredType(param.type, ctx),
@@ -606,7 +594,7 @@ export const registerEffectOperations = (
           ctx,
           state,
           ctx.primitives.unknown,
-          typeParamMapRef
+          typeParamMapRef,
         ) ?? ctx.primitives.void;
 
       const effectRow = ctx.effects.internRow({
@@ -629,7 +617,7 @@ export const registerEffectOperations = (
 
       const scheme = ctx.arena.newScheme(
         signatureTypeParams?.map((param) => param.typeParam) ?? [],
-        functionType
+        functionType,
       );
       ctx.functions.setSignature(op.symbol, {
         typeId: functionType,
@@ -675,7 +663,7 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
       ctx,
       state,
       ctx.primitives.unknown,
-      typeParamMapRef
+      typeParamMapRef,
     );
     const targetType = item.target.typeId as TypeId | undefined;
     if (typeof targetType !== "number") {
@@ -696,7 +684,7 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
       ctx,
       state,
       ctx.primitives.unknown,
-      typeParamMapRef
+      typeParamMapRef,
     );
     validateImplTraitMethods({
       impl: item,
@@ -715,8 +703,7 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
             ctx,
           })
         : undefined;
-    const implTarget =
-      (item.target.typeId as TypeId | undefined) ?? targetType;
+    const implTarget = (item.target.typeId as TypeId | undefined) ?? targetType;
     const traitType = item.trait?.typeId as TypeId | undefined;
     if (
       methodMap &&
@@ -763,7 +750,7 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
           ctx,
           state,
           ctx.primitives.unknown,
-          typeParamMapRef
+          typeParamMapRef,
         );
         return;
       }
@@ -772,14 +759,14 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
         ctx,
         state,
         ctx.primitives.unknown,
-        typeParamMapRef
+        typeParamMapRef,
       );
       resolveTypeExpr(
         entry.trait,
         ctx,
         state,
         ctx.primitives.unknown,
-        typeParamMapRef
+        typeParamMapRef,
       );
     });
   }
@@ -838,10 +825,11 @@ const registerTraitImplTemplate = ({
 
 const findImplBySymbol = (
   symbol: SymbolId,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): HirImplDecl | undefined =>
   Array.from(ctx.hir.items.values()).find(
-    (item): item is HirImplDecl => item.kind === "impl" && item.symbol === symbol
+    (item): item is HirImplDecl =>
+      item.kind === "impl" && item.symbol === symbol,
   );
 
 const traitImplTemplatesOverlap = ({
@@ -869,7 +857,10 @@ const traitImplTemplatesOverlap = ({
   }
 
   const leftTrait = ctx.arena.substitute(left.trait, targetMatch.substitution);
-  const rightTrait = ctx.arena.substitute(right.trait, targetMatch.substitution);
+  const rightTrait = ctx.arena.substitute(
+    right.trait,
+    targetMatch.substitution,
+  );
   const traitMatch = unifyWithBudget({
     actual: leftTrait,
     expected: rightTrait,
@@ -1121,7 +1112,7 @@ const compareMethodSignatures = ({
 
   if (traitMethod.params.length !== implMethod.params.length) {
     return new Error(
-      `impl ${traitName} for ${targetName} method ${methodName} has ${implMethod.params.length} parameter(s) but trait declares ${traitMethod.params.length}`
+      `impl ${traitName} for ${targetName} method ${methodName} has ${implMethod.params.length} parameter(s) but trait declares ${traitMethod.params.length}`,
     );
   }
 
@@ -1129,7 +1120,7 @@ const compareMethodSignatures = ({
   const implParamCount = implMethod.typeParameters?.length ?? 0;
   if (traitParamCount !== implParamCount) {
     return new Error(
-      `impl ${traitName} for ${targetName} method ${methodName} must declare ${traitParamCount} type parameter(s)`
+      `impl ${traitName} for ${targetName} method ${methodName} must declare ${traitParamCount} type parameter(s)`,
     );
   }
 
@@ -1140,33 +1131,33 @@ const compareMethodSignatures = ({
       return new Error(
         `impl ${traitName} for ${targetName} method ${methodName} parameter ${
           index + 1
-        } label mismatch`
+        } label mismatch`,
       );
     }
     const traitTypeKey = typeExprKey(
       traitMethodHir?.parameters[index]?.type,
       traitTypeSubstitutions,
       undefined,
-      impl.target
+      impl.target,
     );
     const implTypeKey = typeExprKey(
       implFunction?.parameters[index]?.type,
       traitTypeSubstitutions,
       undefined,
-      impl.target
+      impl.target,
     );
     if (traitTypeKey && !implTypeKey) {
       return new Error(
         `impl ${traitName} for ${targetName} method ${methodName} parameter ${
           index + 1
-        } is missing type annotation`
+        } is missing type annotation`,
       );
     }
     if (traitTypeKey && implTypeKey && traitTypeKey !== implTypeKey) {
       return new Error(
         `impl ${traitName} for ${targetName} method ${methodName} parameter ${
           index + 1
-        } type mismatch: expected ${traitTypeKey}, got ${implTypeKey}`
+        } type mismatch: expected ${traitTypeKey}, got ${implTypeKey}`,
       );
     }
   }
@@ -1175,22 +1166,22 @@ const compareMethodSignatures = ({
     traitMethodHir?.returnType,
     traitTypeSubstitutions,
     undefined,
-    impl.target
+    impl.target,
   );
   const implReturnKey = typeExprKey(
     implFunction?.returnType,
     traitTypeSubstitutions,
     undefined,
-    impl.target
+    impl.target,
   );
   if (traitReturnKey && !implReturnKey) {
     return new Error(
-      `impl ${traitName} for ${targetName} method ${methodName} is missing return type annotation`
+      `impl ${traitName} for ${targetName} method ${methodName} is missing return type annotation`,
     );
   }
   if (traitReturnKey && implReturnKey && traitReturnKey !== implReturnKey) {
     return new Error(
-      `impl ${traitName} for ${targetName} method ${methodName} return type mismatch: expected ${traitReturnKey}, got ${implReturnKey}`
+      `impl ${traitName} for ${targetName} method ${methodName} return type mismatch: expected ${traitReturnKey}, got ${implReturnKey}`,
     );
   }
 

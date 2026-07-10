@@ -1,8 +1,23 @@
 eff Tick
   next(tail) -> i32
 
+val Wide {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
 fn resolve(first: i32 = Tick::next(), second: i32 = first + 1): Tick -> i32
   first + second
+
+fn resolve_generic<T>(
+  fallback: T,
+  trigger: i32 = Tick::next(),
+  ~value: T = fallback
+): Tick -> T
+  value
 
 pub fn omitted_effectful_default() -> i32
   try
@@ -15,3 +30,10 @@ pub fn supplied_effectful_default() -> i32
     resolve(3)
   Tick::next(tail):
     tail(99)
+
+pub fn generic_reference_after_effectful_default() -> i32
+  try
+    let result = resolve_generic(Wide { a: 1, b: 2, c: 3, d: 4, e: 5 })
+    result.a + result.e
+  Tick::next(tail):
+    tail(7)

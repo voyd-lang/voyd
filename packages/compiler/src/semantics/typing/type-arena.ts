@@ -75,6 +75,7 @@ export interface FunctionParameter {
   type: TypeId;
   label?: string;
   optional?: boolean;
+  defaulted?: boolean;
   bindingKind?: HirBindingKind;
 }
 
@@ -212,7 +213,8 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     snapshot?.descriptors.map(cloneTypeDescriptor) ?? [];
   const descriptorCache = new Map<string, TypeId>();
   const schemes = new Map<TypeSchemeId, TypeScheme>(
-    snapshot?.schemes.map((scheme) => [scheme.id, cloneTypeScheme(scheme)]) ?? [],
+    snapshot?.schemes.map((scheme) => [scheme.id, cloneTypeScheme(scheme)]) ??
+      [],
   );
   const recursiveUnfoldCache = new Map<TypeId, TypeId>(
     snapshot?.recursiveUnfoldCache ?? [],
@@ -265,7 +267,9 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
       case "union":
         return `union:[${desc.members.join(",")}]`;
       case "intersection":
-        return `intersection:${desc.nominal ?? "u"}:${desc.structural ?? "u"}:[${(desc.traits ?? [])
+        return `intersection:${desc.nominal ?? "u"}:${desc.structural ?? "u"}:[${(
+          desc.traits ?? []
+        )
           .slice()
           .sort((a, b) => a - b)
           .join(",")}]`;
@@ -287,8 +291,9 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
             const labelKey =
               param.label === undefined ? "u" : jsonStringKey(param.label);
             const optionalKey = param.optional ? "1" : "0";
+            const defaultedKey = param.defaulted ? "1" : "0";
             const bindingKey = param.bindingKind ?? "value";
-            return `${param.type}:${labelKey}:${optionalKey}:${bindingKey}`;
+            return `${param.type}:${labelKey}:${optionalKey}:${defaultedKey}:${bindingKey}`;
           })
           .join("|");
         return `function:(${paramsKey})->${desc.returnType}@${desc.effectRow}`;
@@ -548,6 +553,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
                 type: cloneReplacingSelf(param.type),
                 label: param.label,
                 optional: param.optional,
+                defaulted: param.defaulted,
                 bindingKind: param.bindingKind,
               })),
               returnType: cloneReplacingSelf(currentDesc.returnType),
@@ -672,6 +678,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
         type: param.type,
         label: param.label,
         optional: param.optional ?? false,
+        defaulted: param.defaulted ?? false,
         bindingKind: param.bindingKind,
       })),
       returnType: desc.returnType,
@@ -1463,6 +1470,15 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
               );
             }
             if (
+              (leftParam.defaulted ?? false) !== (rightParam.defaulted ?? false)
+            ) {
+              return conflict(
+                resolvedLeft,
+                resolvedRight,
+                `parameter default presence mismatch (${ctx.reason})`,
+              );
+            }
+            if (
               (leftParam.bindingKind ?? "value") !==
               (rightParam.bindingKind ?? "value")
             ) {
@@ -1900,6 +1916,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
                       type: substituted,
                       label: param.label,
                       optional: param.optional,
+                      defaulted: param.defaulted,
                       bindingKind: param.bindingKind,
                     };
               });
@@ -2056,6 +2073,7 @@ const cloneTypeDescriptor = (desc: TypeDescriptor): TypeDescriptor => {
           type: param.type,
           label: param.label,
           optional: param.optional,
+          defaulted: param.defaulted,
           bindingKind: param.bindingKind,
         })),
         returnType: desc.returnType,

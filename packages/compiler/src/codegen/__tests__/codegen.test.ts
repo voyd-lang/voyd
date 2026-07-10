@@ -693,10 +693,12 @@ describe("next codegen", () => {
 
       expect(exports.supplied_reference_default!()).toBe(55);
       expect(exports.omitted_reference_default!()).toBe(22);
+      expect(exports.primitive_reference_default!()).toBe(14);
       expect(exports.omitted_wide_reference_default!()).toBe(32);
       expect(exports.supplied_wide_reference_default!()).toBe(138);
       expect(exports.indirect_default!()).toBe(10);
       expect(exports.indirect_reference_default!()).toBe(561);
+      expect(exports.indirect_optional_typed_default!()).toBe(8);
     });
   });
 
@@ -706,6 +708,7 @@ describe("next codegen", () => {
 
     expect(exports.omitted_effectful_default!()).toBe(15);
     expect(exports.supplied_effectful_default!()).toBe(7);
+    expect(exports.generic_reference_after_effectful_default!()).toBe(6);
   });
 
   it("uses return_call for tail-recursive functions", () => {

@@ -11,6 +11,7 @@ import type {
   ContinuationSiteEir,
   EffectLoweringEirResult,
 } from "./types.js";
+import { getOptimizedParamAbiKind } from "../../types.js";
 import { analyzeExpr } from "./liveness.js";
 import { walkHirExpression } from "../../hir-walk.js";
 import {
@@ -192,6 +193,7 @@ export const buildEffectLoweringEir = ({
       presenceTempId: number;
       typeId: TypeId;
       storageRef: boolean;
+      bindingKind?: import("../../../semantics/hir/index.js").HirBindingKind;
     }
   >();
   const tempIdByKey = new Map<string, number>();
@@ -356,7 +358,12 @@ export const buildEffectLoweringEir = ({
                 presenceTempId,
                 typeId,
                 storageRef:
-                  bindingKind !== undefined && bindingKind !== "value",
+                  getOptimizedParamAbiKind({
+                    typeId,
+                    bindingKind,
+                    ctx,
+                  }) !== "direct",
+                bindingKind,
               };
               defaultParamTemps.set(parameter.symbol, value);
               return value;
@@ -405,6 +412,7 @@ export const buildEffectLoweringEir = ({
                   tempId: temp.tempId,
                   typeId: temp.typeId,
                   storageRef: temp.storageRef,
+                  bindingKind: temp.bindingKind,
                 },
                 {
                   sourceKind: "temp" as const,

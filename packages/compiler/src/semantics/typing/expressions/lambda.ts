@@ -323,6 +323,7 @@ export const typeLambdaExpr = (
       type,
       label,
       optional: optional || defaulted,
+      defaulted,
       bindingKind,
     })),
     returnType: finalReturn,

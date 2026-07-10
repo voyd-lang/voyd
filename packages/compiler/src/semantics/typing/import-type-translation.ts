@@ -256,6 +256,7 @@ export const createTranslation = ({
           type: translate(param.type),
           label: param.label,
           optional: param.optional,
+          defaulted: param.defaulted,
           bindingKind: param.bindingKind,
         }));
         result = targetArena.internFunction({

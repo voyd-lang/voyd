@@ -62,6 +62,7 @@ const closureSignatureKey = ({
     type: TypeId;
     label?: string;
     optional?: boolean;
+    defaulted?: boolean;
     bindingKind?: string;
   }>;
   returnType: TypeId;
@@ -72,8 +73,9 @@ const closureSignatureKey = ({
     .map((param) => {
       const label = param.label ?? "_";
       const optional = param.optional ? "?" : "";
+      const defaulted = param.defaulted ? "=" : "";
       const binding = param.bindingKind ?? "value";
-      return `${label}:${param.type}${optional}:${binding}`;
+      return `${label}:${param.type}${optional}${defaulted}:${binding}`;
     })
     .join("|");
   return `${mode}::(${params})->${returnType}|${effectRow}`;
@@ -111,6 +113,7 @@ export const ensureClosureTypeInfo = ({
       type: TypeId;
       label?: string;
       optional?: boolean;
+      defaulted?: boolean;
       bindingKind?: string;
     }>;
     returnType: TypeId;
@@ -150,10 +153,7 @@ export const ensureClosureTypeInfo = ({
       : mode === "signature"
         ? getAbiTypesForSignature(param.type, ctx)
         : expandAbiTypes(lowerType(param.type, ctx, seen, mode));
-    const defaulted =
-      param.optional === true &&
-      ctx.program.optionals.getOptionalInfo(ctx.moduleId, param.type) ===
-        undefined;
+    const defaulted = param.defaulted === true;
     return defaulted ? [...payload, binaryen.i32] : payload;
   });
   const userParamTypes = paramAbiTypes.flat();

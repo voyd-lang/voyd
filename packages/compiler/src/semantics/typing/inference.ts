@@ -325,6 +325,7 @@ const refreshFunctionSignatureType = ({
       type,
       label,
       optional: (optional ?? false) || (defaulted ?? false),
+      defaulted: defaulted ?? false,
       bindingKind,
     })),
     returnType: signature.returnType,

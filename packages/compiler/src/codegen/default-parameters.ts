@@ -18,7 +18,11 @@ import {
   storeLocalValue,
 } from "./locals.js";
 import { coerceValueToType } from "./structural.js";
-import { getRequiredExprType, wasmTypeFor } from "./types.js";
+import {
+  getOptimizedParamAbiKind,
+  getRequiredExprType,
+  wasmTypeFor,
+} from "./types.js";
 import { compileOptionalNoneValue } from "./optionals.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 
@@ -48,7 +52,12 @@ export const compileDefaultParameterInitialization = ({
         "effectful default parameters do not support call-shape continuations",
       );
     }
-    return compileCallShapeOmittedParameterInitialization({ fn, meta, ctx, fnCtx });
+    return compileCallShapeOmittedParameterInitialization({
+      fn,
+      meta,
+      ctx,
+      fnCtx,
+    });
   }
 
   const ops: binaryen.ExpressionRef[] = [];
@@ -65,8 +74,7 @@ export const compileDefaultParameterInitialization = ({
     }
 
     const bindingKind = meta.parameters[index]?.bindingKind;
-    const referenceBound =
-      bindingKind !== undefined && bindingKind !== "value";
+    const referenceBound = bindingKind !== undefined && bindingKind !== "value";
     const rawBinding = rawDefaultBinding({
       symbol: param.symbol,
       typeId,
@@ -106,7 +114,9 @@ export const compileDefaultParameterInitialization = ({
       });
     };
 
-    const { normalStore, resumedStore } = referenceBound
+    const usesStorageReference =
+      referenceBound && loadBindingStorageRef(rawBinding, ctx) !== undefined;
+    const { normalStore, resumedStore } = usesStorageReference
       ? compileReferenceDefaultStores({
           symbol: param.symbol,
           typeId,
@@ -188,7 +198,11 @@ const rawDefaultBinding = ({
     : undefined;
   const tempBinding = temp ? fnCtx.tempLocals.get(temp.tempId) : undefined;
   if (temp && tempBinding) {
-    return temp.storageRef
+    const storageRef =
+      bindingKind !== undefined && bindingKind !== "value"
+        ? getOptimizedParamAbiKind({ typeId, bindingKind, ctx }) !== "direct"
+        : temp.storageRef;
+    return storageRef
       ? createStorageRefBinding({
           index: tempBinding.index,
           typeId,
@@ -255,8 +269,16 @@ const compileValueDefaultStores = ({
   compileDefaultValue: () => binaryen.ExpressionRef;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): { normalStore: binaryen.ExpressionRef; resumedStore: binaryen.ExpressionRef } => {
-  const resolved = allocateTempLocal(wasmTypeFor(typeId, ctx), fnCtx, typeId, ctx);
+}): {
+  normalStore: binaryen.ExpressionRef;
+  resumedStore: binaryen.ExpressionRef;
+} => {
+  const resolved = allocateTempLocal(
+    wasmTypeFor(typeId, ctx),
+    fnCtx,
+    typeId,
+    ctx,
+  );
   fnCtx.bindings.set(symbol, resolved);
   return {
     normalStore: storeLocalValue({
@@ -296,7 +318,10 @@ const compileReferenceDefaultStores = ({
   compileDefaultValue: () => binaryen.ExpressionRef;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): { normalStore: binaryen.ExpressionRef; resumedStore: binaryen.ExpressionRef } => {
+}): {
+  normalStore: binaryen.ExpressionRef;
+  resumedStore: binaryen.ExpressionRef;
+} => {
   const suppliedStorage = loadBindingStorageRef(rawBinding, ctx);
   if (!suppliedStorage) {
     throw new Error("reference default payload requires a storage reference");
@@ -393,8 +418,7 @@ const compileCallShapeOmittedParameterInitialization = ({
           })()
         : compileOptionalNoneValue({ targetTypeId, ctx, fnCtx });
     const bindingKind = meta.parameters[index]?.bindingKind;
-    const referenceBound =
-      bindingKind !== undefined && bindingKind !== "value";
+    const referenceBound = bindingKind !== undefined && bindingKind !== "value";
     const binding = referenceBound
       ? allocateAddressableLocal({ typeId: targetTypeId, ctx, fnCtx })
       : allocateTempLocal(

@@ -76,7 +76,8 @@ export const unifyWithBudget = ({
     },
   });
   const exhaustedBudget =
-    ctx.typeCheckBudget.unifyStepsUsed.value > ctx.typeCheckBudget.maxUnifySteps;
+    ctx.typeCheckBudget.unifyStepsUsed.value >
+    ctx.typeCheckBudget.maxUnifySteps;
   if (!compatibility.ok && exhaustedBudget) {
     emitDiagnostic({
       ctx,
@@ -362,7 +363,9 @@ const containsAnyTypeParam = (
         ) || containsAnyTypeParam(desc.returnType, ctx, seen)
       );
     case "union":
-      return desc.members.some((member) => containsAnyTypeParam(member, ctx, seen));
+      return desc.members.some((member) =>
+        containsAnyTypeParam(member, ctx, seen),
+      );
     case "intersection":
       return (
         (typeof desc.nominal === "number" &&
@@ -696,7 +699,10 @@ const enforceExprTypeParameterConstraints = ({
 }): ReadonlyMap<SymbolId, TypeId> => {
   const typeParamMap = new Map<SymbolId, TypeId>();
   params.forEach((param, index) =>
-    typeParamMap.set(param.symbol, appliedArgs[index] ?? ctx.primitives.unknown),
+    typeParamMap.set(
+      param.symbol,
+      appliedArgs[index] ?? ctx.primitives.unknown,
+    ),
   );
 
   params.forEach((param, index) => {
@@ -796,10 +802,8 @@ export const getPrimitiveType = (ctx: TypingContext, name: string): TypeId => {
   return registerPrimitive(ctx, name);
 };
 
-export const unfoldRecursiveType = (
-  type: TypeId,
-  ctx: TypingContext,
-): TypeId => ctx.arena.unfoldRecursive(type);
+export const unfoldRecursiveType = (type: TypeId, ctx: TypingContext): TypeId =>
+  ctx.arena.unfoldRecursive(type);
 
 export const resolveTypeExpr = (
   expr: HirTypeExpr | undefined,
@@ -1064,7 +1068,10 @@ export const resolveTypeAlias = (
         const desc = ctx.arena.get(type);
         if (desc.kind === "intersection" && typeof desc.nominal === "number") {
           const nominal = ctx.arena.get(desc.nominal);
-          if (nominal.kind === "nominal-object" || nominal.kind === "value-object") {
+          if (
+            nominal.kind === "nominal-object" ||
+            nominal.kind === "value-object"
+          ) {
             const args = nominal.typeArgs.map(formatType).join(", ");
             return `${nominal.name}${args.length > 0 ? `<${args}>` : ""}`;
           }
@@ -1795,7 +1802,10 @@ const validateValueDeclRecursion = ({
         return;
       }
 
-      if (typeExpr.symbol === rootSymbol || visitedValueDecls.has(typeExpr.symbol)) {
+      if (
+        typeExpr.symbol === rootSymbol ||
+        visitedValueDecls.has(typeExpr.symbol)
+      ) {
         emitDiagnostic({
           ctx,
           code: "TY0045",
@@ -1956,9 +1966,10 @@ const validateValueFieldType = ({
       );
       return;
     case "intersection": {
-      const nominal = typeof desc.nominal === "number"
-        ? getNominalComponent(desc.nominal, ctx)
-        : undefined;
+      const nominal =
+        typeof desc.nominal === "number"
+          ? getNominalComponent(desc.nominal, ctx)
+          : undefined;
       if (typeof nominal === "number") {
         validateValueFieldType({
           type: nominal,
@@ -1991,13 +2002,16 @@ const validateValueFieldType = ({
       seenInlineValues.add(type);
       const owner = localSymbolForSymbolRef(desc.owner, ctx);
       const template =
-        typeof owner === "number" ? getObjectTemplate(owner, ctx, state) : undefined;
+        typeof owner === "number"
+          ? getObjectTemplate(owner, ctx, state)
+          : undefined;
       if (template) {
         const substitution =
           template.params.length === desc.typeArgs.length
             ? new Map(
                 template.params.map(
-                  (param, index) => [param.typeParam, desc.typeArgs[index]!] as const,
+                  (param, index) =>
+                    [param.typeParam, desc.typeArgs[index]!] as const,
                 ),
               )
             : undefined;
@@ -2351,11 +2365,7 @@ export const ensureObjectType = (
     owner: field.owner,
     packageId: field.packageId ?? ctx.packageId,
   }));
-  ensureFieldsSubstituted(
-    fields,
-    ctx,
-    `object ${objectName} instantiation`,
-  );
+  ensureFieldsSubstituted(fields, ctx, `object ${objectName} instantiation`);
   const baseNominal = template.baseNominal
     ? ctx.arena.substitute(template.baseNominal, subst)
     : undefined;
@@ -2564,9 +2574,7 @@ export const refreshTraitImplInstances = (
 
   Array.from(ctx.objects.instanceEntries()).forEach(([key, info]) => {
     const known =
-      ctx.traitImplsByNominal.get(info.nominal) ??
-      info.traitImpls ??
-      [];
+      ctx.traitImplsByNominal.get(info.nominal) ?? info.traitImpls ?? [];
     known.forEach((impl) => dropImplFromTraitBuckets(impl));
     ctx.traitImplsByNominal.delete(info.nominal);
 
@@ -2577,7 +2585,9 @@ export const refreshTraitImplInstances = (
     });
     const { traitImpls: _ignored, ...baseInfo } = info;
     const nextInfo =
-      instantiated.length > 0 ? { ...baseInfo, traitImpls: instantiated } : baseInfo;
+      instantiated.length > 0
+        ? { ...baseInfo, traitImpls: instantiated }
+        : baseInfo;
     ctx.objects.addInstance(key, nextInfo);
   });
 };
@@ -2631,7 +2641,8 @@ export const nominalSatisfies = (
   const actualDesc = ctx.arena.get(actual);
   const expectedDesc = ctx.arena.get(expected);
   if (
-    (actualDesc.kind === "nominal-object" || actualDesc.kind === "value-object") &&
+    (actualDesc.kind === "nominal-object" ||
+      actualDesc.kind === "value-object") &&
     actualDesc.kind === expectedDesc.kind &&
     symbolRefEquals(actualDesc.owner, expectedDesc.owner)
   ) {
@@ -2868,6 +2879,11 @@ const functionTypeSatisfies = ({
       return false;
     }
     if (
+      (actualParam.defaulted ?? false) !== (expectedParam.defaulted ?? false)
+    ) {
+      return false;
+    }
+    if (
       (actualParam.bindingKind ?? "value") !==
       (expectedParam.bindingKind ?? "value")
     ) {
@@ -2878,7 +2894,9 @@ const functionTypeSatisfies = ({
     }
   }
 
-  if (!typeSatisfies(actualDesc.returnType, expectedDesc.returnType, ctx, state)) {
+  if (
+    !typeSatisfies(actualDesc.returnType, expectedDesc.returnType, ctx, state)
+  ) {
     return false;
   }
 
@@ -3130,7 +3148,8 @@ const traitSatisfies = (
   }
 
   const info = getObjectInfoForNominal(actualNominal, ctx, state);
-  const impls = ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls ?? [];
+  const impls =
+    ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls ?? [];
   return impls.some((impl) => {
     const traitMatches =
       typeof traitSymbol === "number"
@@ -3238,7 +3257,11 @@ const typeIdToDiagnosticString = (
             return `${label}${typeIdToDiagnosticString(param.type, ctx, active)}${optionalSuffix}`;
           })
           .join(", ");
-        const returnType = typeIdToDiagnosticString(desc.returnType, ctx, active);
+        const returnType = typeIdToDiagnosticString(
+          desc.returnType,
+          ctx,
+          active,
+        );
         const effects = formatEffectRow(desc.effectRow, ctx.effects);
         return effects === "()"
           ? `(${params}) -> ${returnType}`
@@ -3248,7 +3271,7 @@ const typeIdToDiagnosticString = (
         return `{ ${desc.fields
           .map(
             (field) =>
-              `${field.name}: ${typeIdToDiagnosticString(field.type, ctx, active)}`
+              `${field.name}: ${typeIdToDiagnosticString(field.type, ctx, active)}`,
           )
           .join(", ")} }`;
       case "union":
@@ -3262,7 +3285,7 @@ const typeIdToDiagnosticString = (
         }
         if (desc.traits && desc.traits.length > 0) {
           desc.traits.forEach((trait) =>
-            parts.push(typeIdToDiagnosticString(trait, ctx, active))
+            parts.push(typeIdToDiagnosticString(trait, ctx, active)),
           );
         }
         if (typeof desc.structural === "number") {
@@ -3560,7 +3583,9 @@ const bindUnion = ({
   if (expectedDesc.kind !== "union") {
     return;
   }
-  if (!expectedDesc.members.some((member) => containsAnyTypeParam(member, ctx))) {
+  if (
+    !expectedDesc.members.some((member) => containsAnyTypeParam(member, ctx))
+  ) {
     return;
   }
 
@@ -3592,7 +3617,13 @@ const bindIntersection = ({
     bindTypeParamsFromType(expectedDesc.nominal, actual, bindings, ctx, state);
   }
   if (typeof expectedDesc.structural === "number") {
-    bindTypeParamsFromType(expectedDesc.structural, actual, bindings, ctx, state);
+    bindTypeParamsFromType(
+      expectedDesc.structural,
+      actual,
+      bindings,
+      ctx,
+      state,
+    );
   }
 };
 
@@ -3682,18 +3713,23 @@ const bindTypeParamsFromUnion = ({
     return undefined;
   }
   const maxCoverage = candidates.reduce((max, candidate) => {
-    const coverage = actualDesc.members.length - candidate.remainingActualMembers.length;
+    const coverage =
+      actualDesc.members.length - candidate.remainingActualMembers.length;
     return coverage > max ? coverage : max;
   }, 0);
   const filteredCandidates = candidates.filter(
     (candidate) =>
-      actualDesc.members.length - candidate.remainingActualMembers.length === maxCoverage,
+      actualDesc.members.length - candidate.remainingActualMembers.length ===
+      maxCoverage,
   );
 
   const solutionsByKey = new Map<string, Map<TypeParamId, TypeId>>();
   filteredCandidates.forEach((candidate) => {
     const nextBindings = new Map(candidate.bindings);
-    if (typeof remainderTarget === "number" && typeof remainderParam === "number") {
+    if (
+      typeof remainderTarget === "number" &&
+      typeof remainderParam === "number"
+    ) {
       const remainder = candidate.remainingActualMembers;
       if (remainder.length === 0) {
         return;
@@ -3718,7 +3754,10 @@ const bindTypeParamsFromUnion = ({
           ctx,
           state,
         );
-        const substitutedTarget = ctx.arena.substitute(remainderTarget, nextBindings);
+        const substitutedTarget = ctx.arena.substitute(
+          remainderTarget,
+          nextBindings,
+        );
         if (
           !typeSatisfies(remainderType, substitutedTarget, ctx, state) &&
           !typeSatisfies(substitutedTarget, remainderType, ctx, state)
@@ -3787,9 +3826,15 @@ const collectUnionBindingMatchesForExpectedMember = ({
 }): UnionBindingMatch[] => {
   const matches: UnionBindingMatch[] = [];
 
-  for (let actualIndex = 0; actualIndex < actualMembers.length; actualIndex += 1) {
+  for (
+    let actualIndex = 0;
+    actualIndex < actualMembers.length;
+    actualIndex += 1
+  ) {
     if (usedActualIndices.has(actualIndex)) {
-      maybeIncrementUnionSearchCounter("typing.union_search.actual_index_revisited");
+      maybeIncrementUnionSearchCounter(
+        "typing.union_search.actual_index_revisited",
+      );
     }
 
     const actualMember = actualMembers[actualIndex];
@@ -3832,7 +3877,11 @@ const pickNextUnionSearchOption = ({
 }): UnionSearchDecision => {
   let next: UnionSearchNextOption | undefined;
 
-  for (let expectedIndex = 0; expectedIndex < expected.length; expectedIndex += 1) {
+  for (
+    let expectedIndex = 0;
+    expectedIndex < expected.length;
+    expectedIndex += 1
+  ) {
     const expectedMember = expected[expectedIndex];
     if (typeof expectedMember !== "number") {
       continue;
@@ -3925,7 +3974,9 @@ const findUnionBindingCandidates = ({
     maybeIncrementUnionSearchCounter("typing.union_search.state_visited");
     if (visitedStates.size > MAX_UNION_BINDING_SEARCH_STATES) {
       abortedForComplexity = true;
-      maybeIncrementUnionSearchCounter("typing.union_search.state_budget_abort");
+      maybeIncrementUnionSearchCounter(
+        "typing.union_search.state_budget_abort",
+      );
       return;
     }
 
@@ -3952,7 +4003,9 @@ const findUnionBindingCandidates = ({
     }
 
     const next = decision.option;
-    const nextExpected = expected.filter((_, index) => index !== next.expectedIndex);
+    const nextExpected = expected.filter(
+      (_, index) => index !== next.expectedIndex,
+    );
 
     next.matches.forEach((match) => {
       const nextUsedActualIndices = new Set(usedActualIndices);
@@ -4046,7 +4099,10 @@ const tryBindExpectedMember = ({
     ctx,
     state,
   );
-  const substitutedExpected = ctx.arena.substitute(expectedMember, candidateBindings);
+  const substitutedExpected = ctx.arena.substitute(
+    expectedMember,
+    candidateBindings,
+  );
   if (
     !typeSatisfies(actualMember, substitutedExpected, ctx, state) &&
     !typeSatisfies(substitutedExpected, actualMember, ctx, state)

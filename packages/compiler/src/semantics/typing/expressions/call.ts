@@ -3033,6 +3033,7 @@ const signatureWithAdjustedTraitDispatchParameters = ({
       type: param.type,
       label: param.label,
       optional: (param.optional ?? false) || (param.defaulted ?? false),
+      defaulted: param.defaulted ?? false,
       bindingKind: param.bindingKind,
     })),
     returnType: signature.returnType,
@@ -4497,12 +4498,7 @@ const resolveCurriedCallReturnType = ({
 
     const { returnType } = desc;
     const parameters = desc.parameters.map((param) => {
-      const defaulted =
-        param.optional === true &&
-        !getOptionalInfo(
-          param.type,
-          optionalResolverContextForTypingContext(ctx),
-        );
+      const defaulted = param.defaulted === true;
       return {
         ...param,
         optional: defaulted ? false : param.optional,
@@ -5013,6 +5009,7 @@ const typeFunctionCall = ({
       parameters: adjustedParameters.map((param) => ({
         ...param,
         optional: (param.optional ?? false) || (param.defaulted ?? false),
+        defaulted: param.defaulted ?? false,
         bindingKind: param.bindingKind,
       })),
       returnType: instantiation.returnType,
@@ -5436,6 +5433,7 @@ const refreshFunctionSignatureTypeForGenericBody = ({
       type,
       label,
       optional: (optional ?? false) || (defaulted ?? false),
+      defaulted: defaulted ?? false,
       bindingKind,
     })),
     returnType: signature.returnType,
