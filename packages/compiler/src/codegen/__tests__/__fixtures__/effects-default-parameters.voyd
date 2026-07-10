@@ -1,0 +1,43 @@
+obj Some<T> { value: T }
+obj None {}
+type Optional<T> = Some<T> | None
+
+eff Tick
+  next(tail) -> i32
+
+fn use({ first: i32 = Tick::next(), second: i32 = first + 1 }): Tick -> i32
+  first * 10 + second
+
+fn use_two({ first: i32 = Tick::next(), second: i32 = Tick::next() }): Tick -> i32
+  first * 10 + second
+
+fn use_local_capture({
+  value: i32 = match(Some<i32> { value: 40 })
+    Some<i32> { value: prefix }:
+      prefix + Tick::next()
+}): Tick -> i32
+  value
+
+pub fn main() -> i32
+  try
+    use()
+  Tick::next(tail):
+    tail(7)
+
+pub fn provided_later_default() -> i32
+  try
+    use(second: 9)
+  Tick::next(tail):
+    tail(7)
+
+pub fn two_effectful_defaults() -> i32
+  try
+    use_two()
+  Tick::next(tail):
+    tail(7)
+
+pub fn default_local_capture() -> i32
+  try
+    use_local_capture()
+  Tick::next(tail):
+    tail(2)

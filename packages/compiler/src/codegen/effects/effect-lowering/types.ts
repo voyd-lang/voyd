@@ -7,22 +7,16 @@ import type {
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
 
-export type ContinuationFieldSource =
-  | "param"
-  | "local"
-  | "handler"
-  | "site";
+export type ContinuationFieldSource = "param" | "local" | "handler" | "site";
 
-export type ContinuationCaptureSource =
-  | "param"
-  | "local"
-  | "temp";
+export type ContinuationCaptureSource = "param" | "local" | "temp";
 
 export interface ContinuationCaptureField {
   sourceKind: ContinuationCaptureSource;
   typeId: TypeId;
   symbol?: SymbolId;
   tempId?: number;
+  storageRef?: boolean;
 }
 
 export interface ContinuationEnvField {
@@ -81,7 +75,9 @@ export interface ContinuationCallSiteEir extends ContinuationSiteEirBase {
   kind: "call";
 }
 
-export type ContinuationSiteEir = ContinuationPerformSiteEir | ContinuationCallSiteEir;
+export type ContinuationSiteEir =
+  | ContinuationPerformSiteEir
+  | ContinuationCallSiteEir;
 
 export interface EffectLoweringResult {
   sitesByExpr: Map<HirExprId, ContinuationSite>;
@@ -91,6 +87,15 @@ export interface EffectLoweringResult {
     readonly { argIndex: number; tempId: number; typeId: TypeId }[]
   >;
   tempTypeIds: Map<number, TypeId>;
+  defaultParamTemps: Map<
+    SymbolId,
+    {
+      tempId: number;
+      presenceTempId: number;
+      typeId: TypeId;
+      storageRef: boolean;
+    }
+  >;
 }
 
 export interface EffectLoweringEirResult {
@@ -101,6 +106,15 @@ export interface EffectLoweringEirResult {
     readonly { argIndex: number; tempId: number; typeId: TypeId }[]
   >;
   tempTypeIds: Map<number, TypeId>;
+  defaultParamTemps: Map<
+    SymbolId,
+    {
+      tempId: number;
+      presenceTempId: number;
+      typeId: TypeId;
+      storageRef: boolean;
+    }
+  >;
 }
 
 export type ContinuationSiteOwner =

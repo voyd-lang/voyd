@@ -54,6 +54,11 @@ const tailResumeArgEffectfulFixturePath = resolve(
   "__fixtures__",
   "effects-tail-resume-arg-effectful.voyd",
 );
+const defaultParameterFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-default-parameters.voyd",
+);
 
 const compileEffectFixtureWithCompilerOptimization = async (
   entryPath: string,
@@ -208,6 +213,7 @@ const buildLoweringSnapshot = () => {
       sites: [],
       callArgTemps: new Map(),
       tempTypeIds: new Map(),
+      defaultParamTemps: new Map(),
     },
     outcomeValueTypes: new Map(),
     specializationPolicy: specializationPolicyForOptimizationLevel("none"),
@@ -385,6 +391,19 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
     await expect(
       host.run<number>("effectful_resume_arg_internal"),
     ).resolves.toBe(41);
+  });
+
+  it("resumes effectful default parameter initialization before the function body", async () => {
+    const { wasm } = await compileEffectFixture({
+      entryPath: defaultParameterFixturePath,
+      codegenOptions: { effectsHostBoundary: "off" },
+    });
+    const host = await createVoydHost({ wasm });
+
+    await expect(host.run<number>("main")).resolves.toBe(78);
+    await expect(host.run<number>("provided_later_default")).resolves.toBe(79);
+    await expect(host.run<number>("two_effectful_defaults")).resolves.toBe(77);
+    await expect(host.run<number>("default_local_capture")).resolves.toBe(42);
   });
 
   it("does not re-evaluate guards when resuming after a perform", async () => {

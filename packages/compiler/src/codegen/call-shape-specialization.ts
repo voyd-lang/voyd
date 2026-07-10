@@ -21,6 +21,7 @@ import {
   tryAdmitFunctionSpecialization,
 } from "./specialization-policy.js";
 import { incrementCompilerPerfCounter } from "../perf.js";
+import { walkHirExpression } from "./hir-walk.js";
 
 export interface CallShapeSpecialization {
   base: FunctionMetadata;
@@ -67,6 +68,36 @@ const functionItemFor = ({
     (item): item is HirFunction =>
       item.kind === "function" && item.symbol === meta.symbol,
   );
+};
+
+const hasEffectfulDefaultParameter = ({
+  item,
+  meta,
+  ctx,
+}: {
+  item: HirFunction;
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+}): boolean => {
+  const targetCtx = ctx.moduleContexts.get(meta.moduleId);
+  if (!targetCtx) return false;
+  return item.parameters.some((parameter) => {
+    if (typeof parameter.defaultValue !== "number") return false;
+    let found = false;
+    walkHirExpression({
+      exprId: parameter.defaultValue,
+      ctx: targetCtx,
+      visitLambdaBodies: false,
+      visitor: {
+        onExpr: (exprId) => {
+          if (targetCtx.effectLowering.sitesByExpr.has(exprId)) {
+            found = true;
+          }
+        },
+      },
+    });
+    return found;
+  });
 };
 
 export const callShapeStatesForPlan = (
@@ -177,6 +208,9 @@ export const getOrCreateCallShapeSpecialization = ({
   }
   const item = functionItemFor({ ctx, meta });
   if (!item || typedPlan.length !== item.parameters.length) {
+    return undefined;
+  }
+  if (hasEffectfulDefaultParameter({ item, meta, ctx })) {
     return undefined;
   }
   const parameterStates = callShapeStatesForPlan(typedPlan);
