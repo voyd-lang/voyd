@@ -176,6 +176,7 @@ export const codegenProgram = ({
       sites: [],
       callArgTemps: new Map(),
       tempTypeIds: new Map(),
+      defaultParamTemps: new Map(),
     },
     outcomeValueTypes,
     optimization,

@@ -1,7 +1,5 @@
 import binaryen from "binaryen";
-import {
-  defineStructType,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
+import { defineStructType } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   HirFunction,
@@ -21,22 +19,29 @@ export const sanitizeIdentifier = (value: string): string =>
 
 export const shouldLowerLambda = (
   expr: HirLambdaExpr,
-  ctx: CodegenContext
-): boolean => (effectsFacade(ctx).lambdaAbi(expr.id)?.shouldLower ?? false);
+  ctx: CodegenContext,
+): boolean => effectsFacade(ctx).lambdaAbi(expr.id)?.shouldLower ?? false;
 
-const collectPatternSymbols = (pattern: HirPattern, into: Set<SymbolId>): void => {
+const collectPatternSymbols = (
+  pattern: HirPattern,
+  into: Set<SymbolId>,
+): void => {
   switch (pattern.kind) {
     case "identifier":
       into.add(pattern.symbol);
       return;
     case "destructure":
-      pattern.fields.forEach((field) => collectPatternSymbols(field.pattern, into));
+      pattern.fields.forEach((field) =>
+        collectPatternSymbols(field.pattern, into),
+      );
       if (pattern.spread) {
         collectPatternSymbols(pattern.spread, into);
       }
       return;
     case "tuple":
-      pattern.elements.forEach((element) => collectPatternSymbols(element, into));
+      pattern.elements.forEach((element) =>
+        collectPatternSymbols(element, into),
+      );
       return;
     case "type":
       if (pattern.binding) {
@@ -50,20 +55,25 @@ const collectPatternSymbols = (pattern: HirPattern, into: Set<SymbolId>): void =
 
 export const functionParamSymbols = (fn: HirFunction): Set<SymbolId> => {
   const symbols = new Set<SymbolId>();
-  fn.parameters.forEach((param) => collectPatternSymbols(param.pattern, symbols));
+  fn.parameters.forEach((param) =>
+    collectPatternSymbols(param.pattern, symbols),
+  );
   return symbols;
 };
 
-export const lambdaParamSymbols = (expr: HirLambdaExpr): ReadonlySet<SymbolId> =>
+export const lambdaParamSymbols = (
+  expr: HirLambdaExpr,
+): ReadonlySet<SymbolId> =>
   new Set(expr.parameters.map((param) => param.symbol));
 
 export const handlerClauseParamSymbols = (
-  clause: HirEffectHandlerExpr["handlers"][number]
-): ReadonlySet<SymbolId> => new Set(clause.parameters.map((param) => param.symbol));
+  clause: HirEffectHandlerExpr["handlers"][number],
+): ReadonlySet<SymbolId> =>
+  new Set(clause.parameters.map((param) => param.symbol));
 
 export const definitionOrderForFunction = (
   fn: HirFunction,
-  ctx: CodegenContext
+  ctx: CodegenContext,
 ): Map<SymbolId, number> => {
   const order = new Map<SymbolId, number>();
   let index = 0;
@@ -84,13 +94,27 @@ export const definitionOrderForFunction = (
   fn.parameters.forEach((param) => {
     walkHirPattern({ pattern: param.pattern, visitor });
   });
-  walkHirExpression({ exprId: fn.body, ctx, visitLambdaBodies: false, visitor });
+  fn.parameters.forEach((param) => {
+    if (typeof param.defaultValue !== "number") return;
+    walkHirExpression({
+      exprId: param.defaultValue,
+      ctx,
+      visitLambdaBodies: false,
+      visitor,
+    });
+  });
+  walkHirExpression({
+    exprId: fn.body,
+    ctx,
+    visitLambdaBodies: false,
+    visitor,
+  });
   return order;
 };
 
 export const definitionOrderForLambda = (
   expr: HirLambdaExpr,
-  ctx: CodegenContext
+  ctx: CodegenContext,
 ): Map<SymbolId, number> => {
   const order = new Map<SymbolId, number>();
   let index = 0;
@@ -118,9 +142,12 @@ export const definitionOrderForLambda = (
   return order;
 };
 
-const shouldCaptureIdentifierSymbol = (symbol: SymbolId, ctx: CodegenContext): boolean =>
+const shouldCaptureIdentifierSymbol = (
+  symbol: SymbolId,
+  ctx: CodegenContext,
+): boolean =>
   !ctx.program.symbols.isModuleScoped(
-    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
+    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol }),
   );
 
 export const definitionOrderForHandlerClause = ({
@@ -176,8 +203,12 @@ export const envFieldsFor = ({
     .filter((symbol) => params.has(symbol) || ordering.has(symbol))
     .sort((a, b) => (ordering.get(a) ?? 0) - (ordering.get(b) ?? 0))
     .map((symbol) => {
-      const typeId = ctx.module.types.getValueType(symbol) ?? ctx.program.primitives.unknown;
-      const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol });
+      const typeId =
+        ctx.module.types.getValueType(symbol) ?? ctx.program.primitives.unknown;
+      const symbolId = ctx.program.symbols.idOf({
+        moduleId: ctx.moduleId,
+        symbol,
+      });
       return {
         name: ctx.program.symbols.getName(symbolId) ?? `${symbol}`,
         symbol,
@@ -209,7 +240,10 @@ export const ensureArgsType = ({
     type: wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime"),
     mutable: false,
   }));
-  const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol: opSymbol });
+  const symbolId = ctx.program.symbols.idOf({
+    moduleId: ctx.moduleId,
+    symbol: opSymbol,
+  });
   const type = defineStructType(ctx.mod, {
     name: `voydEffectArgs_${sanitizeIdentifier(ctx.program.symbols.getName(symbolId) ?? `${opSymbol}`)}`,
     fields,

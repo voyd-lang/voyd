@@ -46,6 +46,7 @@ import {
 import { effectsFacade } from "../facade.js";
 import { specializeContinuationSite } from "./specialize-site.js";
 import { liftHeapValueToInline } from "../../structural.js";
+import { compileDefaultParameterInitialization } from "../../default-parameters.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 
@@ -86,47 +87,47 @@ const findLambdaByExprId = (
 };
 
 const collectIdentifierExprTypes = ({
-  exprId,
+  exprIds,
   ctx,
   typeInstanceId,
 }: {
-  exprId: HirExprId;
+  exprIds: readonly HirExprId[];
   ctx: CodegenContext;
   typeInstanceId?: ProgramFunctionInstanceId;
 }): Map<SymbolId, TypeId> => {
   const types = new Map<SymbolId, TypeId>();
-  walkHirExpression({
-    exprId,
-    ctx,
-    visitor: {
-      onExpr: (id, expr) => {
-        const setType = (symbol: SymbolId, typeId?: TypeId): void => {
-          if (!shouldCaptureIdentifierSymbol(symbol, ctx)) return;
-          if (types.has(symbol)) return;
-          let symbolTypeId: TypeId | undefined;
-          try {
-            symbolTypeId = getSymbolTypeId(symbol, ctx, typeInstanceId);
-          } catch {
-            symbolTypeId = undefined;
-          }
-          types.set(
-            symbol,
-            symbolTypeId ??
-              typeId ??
-              ctx.program.primitives.unknown,
-          );
-        };
+  exprIds.forEach((exprId) =>
+    walkHirExpression({
+      exprId,
+      ctx,
+      visitor: {
+        onExpr: (id, expr) => {
+          const setType = (symbol: SymbolId, typeId?: TypeId): void => {
+            if (!shouldCaptureIdentifierSymbol(symbol, ctx)) return;
+            if (types.has(symbol)) return;
+            let symbolTypeId: TypeId | undefined;
+            try {
+              symbolTypeId = getSymbolTypeId(symbol, ctx, typeInstanceId);
+            } catch {
+              symbolTypeId = undefined;
+            }
+            types.set(
+              symbol,
+              symbolTypeId ?? typeId ?? ctx.program.primitives.unknown,
+            );
+          };
 
-        if (expr.exprKind === "lambda") {
-          expr.captures.forEach((capture) => setType(capture.symbol));
-          return;
-        }
-        if (expr.exprKind !== "identifier") return;
-        setType(expr.symbol, getRequiredExprType(id, ctx, typeInstanceId));
+          if (expr.exprKind === "lambda") {
+            expr.captures.forEach((capture) => setType(capture.symbol));
+            return;
+          }
+          if (expr.exprKind !== "identifier") return;
+          setType(expr.symbol, getRequiredExprType(id, ctx, typeInstanceId));
+        },
       },
-    },
-    visitLambdaBodies: false,
-  });
+      visitLambdaBodies: false,
+    }),
+  );
   return types;
 };
 
@@ -145,6 +146,15 @@ const collectFunctionLocalSymbols = (
   fn.parameters.forEach((param) =>
     walkHirPattern({ pattern: param.pattern, visitor }),
   );
+  fn.parameters.forEach((param) => {
+    if (typeof param.defaultValue !== "number") return;
+    walkHirExpression({
+      exprId: param.defaultValue,
+      ctx,
+      visitor,
+      visitLambdaBodies: false,
+    });
+  });
   walkHirExpression({
     exprId: fn.body,
     ctx,
@@ -368,10 +378,24 @@ export const ensureContinuationFunction = ({
       return {
         bodyExprId: fn.body,
         cfgFn: fn,
+        fn,
         localsToSeed: collectFunctionLocalSymbols(fn, ctx),
         returnTypeId,
         resumeSymbol: undefined,
         resumeKind: undefined,
+        functionMeta:
+          ctx.functions
+            .get(ctx.moduleId)
+            ?.get(fn.symbol)
+            ?.find(
+              (meta) =>
+                !meta.callShape &&
+                (typeof typeInstanceId !== "number" ||
+                  meta.instanceId === typeInstanceId),
+            ) ??
+          (typeof typeInstanceId === "number"
+            ? ctx.functionInstances.get(typeInstanceId)
+            : undefined),
       };
     }
     if (specializedSite.owner.kind === "handler-clause") {
@@ -384,6 +408,7 @@ export const ensureContinuationFunction = ({
       return {
         bodyExprId,
         cfgFn: { body: bodyExprId } as HirFunction,
+        fn: undefined,
         localsToSeed: collectHandlerClauseLocalSymbols({
           handlerExprId: specializedSite.owner.handlerExprId,
           clauseIndex: specializedSite.owner.clauseIndex,
@@ -392,6 +417,7 @@ export const ensureContinuationFunction = ({
         returnTypeId,
         resumeSymbol,
         resumeKind,
+        functionMeta: undefined,
       };
     }
     const { expr, returnTypeId } = findLambdaByExprId(
@@ -402,10 +428,12 @@ export const ensureContinuationFunction = ({
     return {
       bodyExprId: expr.body,
       cfgFn: { body: expr.body } as HirFunction,
+      fn: undefined,
       localsToSeed: collectLambdaLocalSymbols(expr, ctx),
       returnTypeId,
       resumeSymbol: undefined,
       resumeKind: undefined,
+      functionMeta: undefined,
     };
   })();
 
@@ -416,6 +444,8 @@ export const ensureContinuationFunction = ({
     bodyExprId,
     resumeSymbol,
     resumeKind,
+    fn,
+    functionMeta,
   } = continuationBody;
   const resolvedReturnTypeId = substitution
     ? ctx.program.types.substitute(returnTypeId, substitution)
@@ -477,7 +507,14 @@ export const ensureContinuationFunction = ({
   };
 
   const identifierTypes = collectIdentifierExprTypes({
-    exprId: bodyExprId,
+    exprIds: [
+      ...(fn?.parameters.flatMap((parameter) =>
+        typeof parameter.defaultValue === "number"
+          ? [parameter.defaultValue]
+          : [],
+      ) ?? []),
+      bodyExprId,
+    ],
     ctx,
     typeInstanceId,
   });
@@ -531,6 +568,17 @@ export const ensureContinuationFunction = ({
     fnCtx.tempLocals.set(
       tempId,
       allocateTempLocal(spec.wasmType, fnCtx, spec.typeId, ctx),
+    );
+  });
+  fn?.parameters.forEach((parameter) => {
+    const temp = ctx.effectLowering.defaultParamTemps.get(parameter.symbol);
+    if (!temp || fnCtx.tempLocals.has(temp.tempId)) return;
+    const typeId = substitution
+      ? ctx.program.types.substitute(temp.typeId, substitution)
+      : temp.typeId;
+    fnCtx.tempLocals.set(
+      temp.tempId,
+      allocateTempLocal(wasmTypeFor(typeId, ctx), fnCtx, typeId, ctx),
     );
   });
 
@@ -631,13 +679,39 @@ export const ensureContinuationFunction = ({
     resumeLocal,
   });
 
-  const bodyExpr = continuationCompiler({
+  const defaultInitOps =
+    fn && functionMeta
+      ? compileDefaultParameterInitialization({
+          fn,
+          meta: functionMeta,
+          ctx,
+          fnCtx,
+          continuation: {
+            cfg,
+            compileExpr: continuationCompiler,
+            startedLocal,
+            activeSiteLocal,
+          },
+        })
+      : [];
+  const compiledBody = continuationCompiler({
     exprId: bodyExprId,
     ctx,
     fnCtx,
     tailPosition: true,
     expectedResultTypeId: resolvedReturnTypeId,
   });
+  const bodyExpr = {
+    ...compiledBody,
+    expr:
+      defaultInitOps.length === 0
+        ? compiledBody.expr
+        : ctx.mod.block(
+            null,
+            [...defaultInitOps, compiledBody.expr],
+            binaryen.getExpressionType(compiledBody.expr),
+          ),
+  };
   const bodyExprType = binaryen.getExpressionType(bodyExpr.expr);
   const needsWrap = bodyExprType === returnWasmType;
   const rawBodyOutcomeExpr = needsWrap
