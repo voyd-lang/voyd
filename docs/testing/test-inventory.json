@@ -2456,6 +2456,12 @@
     "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
   },
   {
+    "file": "tests/performance/src/recursive-effect-evaluator.test.ts",
+    "owner": "performance",
+    "disposition": "opt-in-performance",
+    "rationale": "Keep opt-in: measures recursive static-effect runtime and stack-depth behavior outside default correctness CI."
+  },
+  {
     "file": "tests/performance/src/vtrace-compute-benchmark.test.ts",
     "owner": "performance",
     "disposition": "opt-in-performance",
