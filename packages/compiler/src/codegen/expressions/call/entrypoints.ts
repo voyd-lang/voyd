@@ -165,25 +165,46 @@ export const compileCallExpr = (
       shouldCompileIntrinsicCall({
         intrinsicName,
         usesSignature: intrinsicMetadata.intrinsicUsesSignature,
+        external: intrinsicMetadata.external !== undefined,
       });
 
     if (shouldCompileIntrinsic) {
-      const args = compileCallArgExpressionsWithTemps({
-        callId: expr.id,
-        args: expr.args,
-        expectedTypeIdAt: () => undefined,
-        ctx,
-        fnCtx,
-        compileExpr,
-      });
+      const externalMeta = intrinsicMetadata.external
+        ? getFunctionMetadataForCall({
+            symbol: callee.symbol,
+            callId: expr.id,
+            ctx,
+            typeInstanceId,
+          })
+        : undefined;
+      if (externalMeta?.parameters.some((parameter) => parameter.defaulted)) {
+        throw new Error(`external function ${intrinsicName} cannot declare default parameters`);
+      }
+      const planned = externalMeta
+        ? compileCallArgumentsWithMetadata({ call: expr, meta: externalMeta, ctx, fnCtx, compileExpr })
+        : undefined;
+      const args = planned?.args ?? compileCallArgExpressionsWithTemps({
+          callId: expr.id,
+          args: expr.args,
+          expectedTypeIdAt: () => undefined,
+          ctx,
+          fnCtx,
+          compileExpr,
+        });
       return {
         expr: compileIntrinsicCall({
           name: intrinsicName,
+          externalIdentity: intrinsicMetadata.external,
           call: expr,
           args,
           ctx,
           fnCtx,
           instanceId: typeInstanceId,
+          paramTypeIds: planned
+            ? ctx.program.functions
+                .getSignature(ctx.moduleId, callee.symbol)
+                ?.parameters.map((parameter) => parameter.typeId)
+            : undefined,
         }),
         usedReturnCall: false,
       };
@@ -479,24 +500,46 @@ const compileResolvedSymbolCall = ({
     shouldCompileIntrinsicCall({
       intrinsicName,
       usesSignature: intrinsicMetadata.intrinsicUsesSignature,
+      external: intrinsicMetadata.external !== undefined,
     });
   if (shouldCompileIntrinsic) {
-    const args = compileCallArgExpressionsWithTemps({
-      callId: expr.id,
-      args: expr.args,
-      expectedTypeIdAt: () => undefined,
-      ctx,
-      fnCtx,
-      compileExpr,
-    });
+    const externalMeta = intrinsicMetadata.external
+      ? getFunctionMetadataForCall({
+          symbol,
+          callId: expr.id,
+          ctx,
+          moduleId,
+          typeInstanceId,
+        })
+      : undefined;
+    if (externalMeta?.parameters.some((parameter) => parameter.defaulted)) {
+      throw new Error(`external function ${intrinsicName} cannot declare default parameters`);
+    }
+    const planned = externalMeta
+      ? compileCallArgumentsWithMetadata({ call: expr, meta: externalMeta, ctx, fnCtx, compileExpr })
+      : undefined;
+    const args = planned?.args ?? compileCallArgExpressionsWithTemps({
+        callId: expr.id,
+        args: expr.args,
+        expectedTypeIdAt: () => undefined,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
     return {
       expr: compileIntrinsicCall({
         name: intrinsicName,
+        externalIdentity: intrinsicMetadata.external,
         call: expr,
       args,
       ctx,
       fnCtx,
       instanceId: typeInstanceId,
+      paramTypeIds: planned
+        ? ctx.program.functions
+            .getSignature(moduleId, symbol)
+            ?.parameters.map((parameter) => parameter.typeId)
+        : undefined,
     }),
     usedReturnCall: false,
   };
@@ -591,11 +634,14 @@ const getCalleeTypeId = ({
 const shouldCompileIntrinsicCall = ({
   intrinsicName,
   usesSignature,
+  external,
 }: {
   intrinsicName: string;
   usesSignature: boolean;
+  external: boolean;
 }): boolean =>
   usesSignature !== true ||
+  external ||
   intrinsicName === "__retain_callback" ||
   intrinsicName === "__boundary_retain_callback";
 

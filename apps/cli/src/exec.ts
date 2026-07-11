@@ -1,7 +1,7 @@
 import { stdout } from "process";
 import { readFileSync, statSync, existsSync } from "fs";
 import { writeFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import type { CompileResult, OptimizationLevel } from "@voyd-lang/sdk";
 import type {
   Diagnostic,
@@ -27,6 +27,22 @@ type TestFailurePhase = "discovery" | "typing" | "execution";
 
 async function main() {
   const config = getConfig();
+  if (config.generateAdapter) {
+    const { generatePackageAdapter } = await import("./generate-adapter.js");
+    return generatePackageAdapter({
+      index: config.index,
+      outDir: config.generateOut,
+      pkgDirs: config.pkgDirs,
+    });
+  }
+  if (config.generateAdapterRegistry) {
+    const { generateAdapterRegistry } = await import("./generate-adapter.js");
+    return generateAdapterRegistry({
+      index: config.index,
+      outPath: config.generateOut,
+      pkgDirs: config.pkgDirs,
+    });
+  }
   if (config.bootstrap) {
     const { printBootstrapResult, runBootstrap } =
       await import("./bootstrap/index.js");
@@ -282,8 +298,16 @@ async function runVoyd({
   const compiled = requireCompileSuccess(
     await sdk.compile({ entryPath, roots, optimizationLevel }),
   );
-
-  const result = await sdk.run({ wasm: compiled.wasm, entryName });
+  const { loadVoydPackageAdapters } = await import("@voyd-lang/sdk");
+  const adapters = await loadVoydPackageAdapters({
+    wasm: compiled.wasm,
+    startDir: dirname(entryPath),
+  });
+  const result = await sdk.run({
+    wasm: compiled.wasm,
+    entryName,
+    adapters,
+  });
   printRunResult(result);
 }
 

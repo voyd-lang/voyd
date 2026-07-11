@@ -2014,3 +2014,29 @@ The same structure scales beyond todos. Add features by giving each feature its
 own model, messages, view, commands, and subscriptions. Let parents compose those
 pieces with the VX mapping helpers. Keep outside work behind commands and
 subscriptions, and keep durable behavior visible in `step`.
+
+## Markdown
+
+The optional `@voyd-lang/markdown` package demonstrates the intended external
+package integration:
+
+```bash
+npm install @voyd-lang/markdown
+```
+
+```voyd
+use pkg::markdown::Markdown
+use std::vx::all
+
+fn Article({ source: String }) -> Html<AppMsg>
+  <article class="wiki-article">
+    <Markdown source={source} />
+  </article>
+```
+
+`Markdown` is an ordinary Voyd component function. Its underlying
+`render_static` function is implemented by a generic package adapter; neither
+the adapter contract nor `defineVoydPackageAdapter` depends on VX. The adapter
+returns a restricted static-node DTO, turns raw HTML into text, and blocks active
+link and image schemes. The Voyd wrapper converts that DTO into ordinary VX
+nodes, which are validated, rendered, and diffed like any other component tree.

@@ -58,6 +58,9 @@ import {
   isBoundaryMsgPackValue,
 } from "./boundary-metadata.js";
 import { currentHandlerValue } from "./expressions/call/shared.js";
+import {
+  compileExternalCall,
+} from "./external/imports.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
@@ -78,6 +81,8 @@ interface CompileIntrinsicCallParams {
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   instanceId?: ProgramFunctionInstanceId;
+  paramTypeIds?: readonly TypeId[];
+  externalIdentity?: { interfaceId: string; functionName: string };
 }
 
 interface EmitNumericIntrinsicParams {
@@ -638,7 +643,12 @@ export const compileIntrinsicCall = ({
   ctx,
   fnCtx,
   instanceId,
+  paramTypeIds,
+  externalIdentity,
 }: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
+  if (externalIdentity) {
+    return compileExternalCall({ identity: externalIdentity, call, args, ctx, fnCtx, instanceId, paramTypeIds });
+  }
   switch (name) {
     case "~": {
       assertArgCount(name, args, 1);

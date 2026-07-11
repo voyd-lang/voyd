@@ -11,6 +11,7 @@
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
+    "@voyd-lang/markdown": "^0.2.0",
     "@voyd-lang/sdk": "^0.2.0",
     "@voyd-lang/vx-dom": "^0.2.0",
     "voyd_semver": "0.1.0"

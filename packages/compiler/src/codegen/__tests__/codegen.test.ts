@@ -149,6 +149,7 @@ const DEFAULT_OPTIONS = {
   linearMemoryExport: "always",
   effectsMemoryExport: "auto",
   boundaryExports: false,
+  externalDeclarations: false,
   testScope: "all",
 } as const;
 

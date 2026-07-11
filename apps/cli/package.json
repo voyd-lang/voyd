@@ -30,6 +30,7 @@
   "dependencies": {
     "@voyd-lang/sdk": "^0.2.0",
     "@voyd-lang/lib": "^0.2.0",
+    "@voyd-lang/package-adapter": "^0.2.0",
     "@voyd-lang/std": "^0.2.0",
     "binaryen": "^125.0.0",
     "commander": "^14.0.0"

@@ -54,6 +54,12 @@ import {
   createRetainedEventHandlerRegistry,
   type RetainedEventHandlerRegistry,
 } from "./retained-callbacks.js";
+import type { VoydPackageAdapter } from "@voyd-lang/package-adapter";
+import {
+  buildExternalImportModule,
+  parseExternalRequirements,
+  registerExternalAdapterHandlers,
+} from "./protocol/external.js";
 
 export type HostInitOptions = {
   wasm: Uint8Array | WebAssembly.Module;
@@ -62,6 +68,7 @@ export type HostInitOptions = {
   scheduler?: RuntimeSchedulerOptions;
   defaultAdapters?: boolean | DefaultAdapterOptions;
   retainedCallbacks?: RetainedEventHandlerRegistry;
+  adapters?: readonly VoydPackageAdapter[];
 };
 
 export type VoydHost = {
@@ -698,6 +705,7 @@ export const createVoydHost = async ({
   scheduler,
   defaultAdapters = true,
   retainedCallbacks,
+  adapters = [],
 }: HostInitOptions): Promise<VoydHost> => {
   const module = toModule(wasm);
   const trapDiagnostics = createVoydTrapDiagnostics({ module });
@@ -722,6 +730,7 @@ export const createVoydHost = async ({
   const parsedTable = parseEffectTable(module, EFFECT_TABLE_EXPORT);
   const table = toHostProtocolTable(parsedTable);
   const exportAbi = parseExportAbi(module);
+  const externalRequirements = parseExternalRequirements(module);
   const exportAbiByName = new Map(
     exportAbi.exports.map((entry) => [entry.name, entry] as const)
   );
@@ -776,6 +785,17 @@ export const createVoydHost = async ({
     runEffectfulRetainedCallback: (params) => runEffectfulRetainedCallback(params),
     decorateResult: (value) => attachTaskObserver(value, observeStandaloneTask),
   });
+  const externalImports = buildExternalImportModule({
+    requirements: externalRequirements,
+    adapters,
+    bufferSize,
+    getInstance: () => {
+      if (!instanceRef) {
+        throw new Error("external import called before host instance initialization");
+      }
+      return instanceRef;
+    },
+  });
   instanceRef = new WebAssembly.Instance(
     module,
     mergeDefaultImports(
@@ -783,11 +803,19 @@ export const createVoydHost = async ({
         ...defaultImports(),
         ...(taskRuntimeImports as Record<string, unknown>),
         ...(retainedCallbackImports as Record<string, unknown>),
+        ...(externalImports as Record<string, unknown>),
       } as WebAssembly.Imports,
       imports
     )
   );
   const instance = instanceRef;
+  if (externalRequirements.functions.length > 0) {
+    ensureMemoryCapacity({
+      memory: requireExportedMemory({ instance, name: LINEAR_MEMORY_EXPORT }),
+      requiredBytes: bufferSize * 2,
+      label: LINEAR_MEMORY_EXPORT,
+    });
+  }
 
   const handlersByKey = new Map<string, EffectHandler>();
   const opByKey = buildParsedEffectOpMap({ ops: parsedTable.ops });
@@ -840,6 +868,13 @@ export const createVoydHost = async ({
       handlersByOpIndex[opEntry.opIndex] = handler;
     }
   };
+
+  registerExternalAdapterHandlers({
+    requirements: externalRequirements,
+    adapters,
+    table,
+    registerHandler,
+  });
 
   const initEffects = (): void => {
     if (initialized) {

@@ -1,0 +1,7 @@
+//! JS-backed Markdown rendering and optional VX integration.
+
+pub self::external
+pub self::markdown
+
+pub use self::external::{ StaticHtml, StaticHtmlAttr, StaticHtmlNode, render_static }
+pub use self::markdown::{ Markdown, to_static }

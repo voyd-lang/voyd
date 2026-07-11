@@ -2,6 +2,8 @@ import binaryen from "binaryen";
 import { refCast, structGetFieldValue } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { emitStringLiteral } from "../../expressions/primitives.js";
 import type { CodegenContext } from "../../context.js";
+import type { FunctionContext } from "../../context.js";
+import { packBoundaryValueAsMsgPack } from "../../boundary/msgpack-codec.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { EFFECT_REQUEST_MSGPACK_KEYS } from "./constants.js";
 import { ensureMsgPackFunctions } from "./msgpack.js";
@@ -16,6 +18,7 @@ const buildArgsArray = ({
   arrayLocal,
   ctx,
   runtime,
+  fnCtx,
 }: {
   sig: EffectOpSignature;
   request: () => binaryen.ExpressionRef;
@@ -24,6 +27,7 @@ const buildArgsArray = ({
   arrayLocal: number;
   ctx: CodegenContext;
   runtime: EffectRuntime;
+  fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   const arrayType = msgpack.arrayWithCapacity.resultType;
   const argsCount = sig.paramTypeIds.length;
@@ -45,7 +49,10 @@ const buildArgsArray = ({
       fieldType: sig.params[index]!,
       exprRef: typedArgs,
     });
-    const msgpackValue = packMsgPackValueForType({
+    const boundarySchema = sig.externalBoundary?.params[index];
+    const msgpackValue = boundarySchema
+      ? packBoundaryValueAsMsgPack({ value: argValue, schema: boundarySchema, ctx, fnCtx })
+      : packMsgPackValueForType({
       value: argValue,
       typeId: paramTypeId,
       msgPackType,
@@ -54,7 +61,7 @@ const buildArgsArray = ({
       label: `${sig.label} arg${index}`,
       serializerOverride: sig.paramSerializerOverrides?.[index],
       onUnsupported: "trap",
-    });
+        });
     ops.push(
       ctx.mod.local.set(
         arrayLocal,
@@ -206,6 +213,7 @@ export const buildEffectRequestMsgPack = ({
   mapLocal,
   ctx,
   runtime,
+  fnCtx,
 }: {
   sig: EffectOpSignature;
   request: () => binaryen.ExpressionRef;
@@ -215,6 +223,7 @@ export const buildEffectRequestMsgPack = ({
   mapLocal: number;
   ctx: CodegenContext;
   runtime: EffectRuntime;
+  fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   const argsArray = buildArgsArray({
     sig,
@@ -224,6 +233,7 @@ export const buildEffectRequestMsgPack = ({
     arrayLocal,
     ctx,
     runtime,
+    fnCtx,
   });
   return buildEffectRequestMap({
     request,

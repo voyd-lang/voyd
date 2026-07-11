@@ -199,6 +199,39 @@ if (result.success) {
 }
 ```
 
+## External package adapters
+
+Pass adapters explicitly when embedding a mixed Voyd/host-language package:
+
+```ts
+import markdownAdapter from "@voyd-lang/markdown/adapter";
+
+if (result.success) {
+  const html = await result.run({
+    entryName: "main",
+    adapters: [markdownAdapter],
+  });
+}
+```
+
+Node applications can discover the providers declared by installed packages:
+
+```ts
+import { loadVoydPackageAdapters } from "@voyd-lang/sdk";
+
+const adapters = await loadVoydPackageAdapters({
+  wasm: result.wasm,
+  startDir: process.cwd(),
+});
+```
+
+The Node SDK does this automatically when `result.run(...)` is called without
+an `adapters` option. Pass an explicit list to control linking yourself.
+
+`createVoydHost({ wasm, adapters })` accepts the same descriptors. Browser
+bundlers should use `voyd generate registry` so adapter imports remain static
+and tree-shakeable. See [External Packages](./external-packages.md).
+
 ## Discovering and running tests
 
 Set `includeTests: true` to collect tests.

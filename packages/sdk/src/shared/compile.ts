@@ -61,6 +61,7 @@ export const compileWithLoader = async ({
   loadModuleGraph,
   testScope,
   boundaryExports,
+  externalDeclarations,
   cache,
   setupPhasesMs,
   finalizeSuccess,
@@ -76,6 +77,7 @@ export const compileWithLoader = async ({
   loadModuleGraph: LoadModuleGraphFn;
   testScope?: TestScope;
   boundaryExports?: BoundaryExportsOption;
+  externalDeclarations?: boolean;
   cache?: CompilerReuseCache;
   setupPhasesMs?: Readonly<Record<string, number>>;
   finalizeSuccess?: (
@@ -136,11 +138,13 @@ export const compileWithLoader = async ({
       ...optimizationCodegenOption,
       ...runtimeDiagnosticsCodegenOption,
       boundaryExports: boundaryExports ?? "auto",
+      externalDeclarations: externalDeclarations ?? false,
     } as const;
     const testCodegenOption = {
       ...optimizationCodegenOption,
       ...runtimeDiagnosticsCodegenOption,
       boundaryExports: false,
+      externalDeclarations: false,
     } as const;
 
     const dependencySnapshotReuse = prepareDependencySnapshotReuse({

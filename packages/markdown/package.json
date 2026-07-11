@@ -1,0 +1,53 @@
+{
+  "name": "@voyd-lang/markdown",
+  "version": "0.2.0",
+  "description": "JS-backed Markdown rendering for Voyd and VX",
+  "type": "module",
+  "main": "./dist/host/adapter.js",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/voyd-lang/voyd"
+  },
+  "files": [
+    "src",
+    "dist",
+    "generated"
+  ],
+  "exports": {
+    "./adapter": {
+      "types": "./dist/host/adapter.d.ts",
+      "development": "./host/adapter.ts",
+      "import": "./dist/host/adapter.js",
+      "default": "./dist/host/adapter.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "voyd": {
+    "source": "./src/pkg.voyd",
+    "adapter": {
+      "abi": 1,
+      "interfaces": [
+        "voyd:markdown/renderer@1"
+      ],
+      "browser": "./adapter",
+      "node": "./adapter",
+      "default": "./adapter"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "clean": "rm -rf dist",
+    "generate": "voyd generate adapter ./src --out ./generated",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config ../../vitest.config.ts host --passWithNoTests",
+    "lint": "echo 'no lint configured'",
+    "prepack": "npm run generate && npm run clean && npm run build",
+    "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
+  },
+  "dependencies": {
+    "@voyd-lang/package-adapter": "^0.2.0",
+    "@voyd-lang/std": "^0.2.0",
+    "entities": "^4.5.0",
+    "marked": "^14.0.0"
+  }
+}

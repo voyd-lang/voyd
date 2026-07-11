@@ -32,3 +32,7 @@ export type TestAttribute = {
 export type EffectAttribute = {
   id?: string;
 };
+
+export type ExternalAttribute = {
+  id: string;
+};

@@ -48,6 +48,12 @@
     "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
   },
   {
+    "file": "apps/cli/src/__tests__/generate-adapter.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects adapter and registry generation command output without duplicating compiler or runtime semantics."
+  },
+  {
     "file": "apps/cli/src/__tests__/output.test.ts",
     "owner": "cli-contract",
     "disposition": "cli-local",
@@ -1868,6 +1874,12 @@
     "rationale": "Asserts internal continuation-use min/max/escape analysis; portable rejection behavior should be extracted from effects-inference.test.ts."
   },
   {
+    "file": "packages/js-host/src/__tests__/boundary-values.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects JS-host conversion between the fallback wire schema and the stable adapter DTO contract at the cheapest precise boundary."
+  },
+  {
     "file": "packages/js-host/src/__tests__/effect-op.test.ts",
     "owner": "package-unit",
     "disposition": "package-local",
@@ -2010,6 +2022,18 @@
     "owner": "package-unit",
     "disposition": "package-local",
     "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/markdown/host/adapter.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects Markdown rendering and sanitization owned by the adapter package."
+  },
+  {
+    "file": "packages/package-adapter/src/index.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects package-adapter descriptor validation at its cheapest boundary."
   },
   {
     "file": "packages/sdk/src/__tests__/browser-exports.test.ts",

@@ -1,6 +1,7 @@
 import {
   buildHandlerKey,
   parseEffectTable,
+  parseExternalRequirements,
   resolveEffectOp,
   resolveSignatureHashForOp,
   toHostProtocolTable,
@@ -10,6 +11,7 @@ import type { CompileArtifactsSuccess } from "./compile.js";
 import { createHost, registerHandlers, registerHandlersByLabelSuffix } from "./host.js";
 import { createTestCollection } from "./tests.js";
 import type { CompileSuccessResult, RunOptions } from "./types.js";
+import type { VoydPackageAdapter } from "@voyd-lang/js-host";
 
 const DEFAULT_EFFECT_TABLE_VERSION = 2;
 
@@ -72,8 +74,10 @@ const createEffectsInfo = ({
 
 const createRun = ({
   wasm,
+  resolveAdapters,
 }: {
   wasm: Uint8Array;
+  resolveAdapters?: (wasm: Uint8Array) => Promise<readonly VoydPackageAdapter[]>;
 }): CompileSuccessResult["run"] => {
   return async <T = unknown>({
     entryName,
@@ -82,13 +86,16 @@ const createRun = ({
     imports,
     bufferSize,
     defaultAdapters,
+    adapters,
     args,
   }: Omit<RunOptions, "wasm">): Promise<T> => {
+    const resolvedAdapters = adapters ?? (resolveAdapters ? await resolveAdapters(wasm) : undefined);
     const host = await createHost({
       wasm,
       imports,
       bufferSize,
       defaultAdapters,
+      adapters: resolvedAdapters,
     });
     if (handlersByLabelSuffix) {
       registerHandlersByLabelSuffix({ host, handlersByLabelSuffix });
@@ -102,16 +109,23 @@ const createRun = ({
 
 export const createCompileResult = async (
   artifacts: CompileArtifactsSuccess,
+  options: {
+    resolveAdapters?: (wasm: Uint8Array) => Promise<readonly VoydPackageAdapter[]>;
+  } = {},
 ): Promise<CompileSuccessResult> => {
-  const run = createRun({ wasm: artifacts.wasm });
+  const run = createRun({ wasm: artifacts.wasm, resolveAdapters: options.resolveAdapters });
   const effects = createEffectsInfo({
     table: buildEffectsTable(artifacts.wasm),
   });
+  const external = parseExternalRequirements(
+    new WebAssembly.Module(artifacts.wasm as Uint8Array<ArrayBuffer>),
+  );
   const testsWasm = artifacts.testsWasm ?? artifacts.wasm;
   const tests = artifacts.tests
     ? createTestCollection({
         cases: artifacts.tests,
         wasm: testsWasm,
+        resolveAdapters: options.resolveAdapters,
       })
     : undefined;
 
@@ -120,6 +134,7 @@ export const createCompileResult = async (
     wasm: artifacts.wasm,
     wasmText: artifacts.wasmText,
     effects,
+    external,
     run,
     tests,
   };

@@ -1,7 +1,7 @@
 import {
   type Expr,
   Form,
-  type IdentifierAtom,
+  IdentifierAtom,
   type Syntax,
   formCallsInternal,
   isForm,
@@ -188,15 +188,27 @@ export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
     throw new ParserSyntaxError("fn missing signature", form.location);
   }
 
-  if (!bodyExpr) {
-    throw new ParserSyntaxError("fn missing body expression", form.location);
-  }
-
   const signatureForm = ensureForm(
     signatureExpr,
     "fn signature must be a form",
   );
   const signature = parseFunctionSignature(signatureForm);
+  if (!bodyExpr && form.attributes?.external) {
+    const args = signature.params.map((param) => {
+      const value = new IdentifierAtom(param.name);
+      return param.label
+        ? new Form([
+            new IdentifierAtom(":"),
+            new IdentifierAtom(param.label),
+            value,
+          ]).toCall()
+        : value;
+    });
+    bodyExpr = new Form([new IdentifierAtom(signature.name.value), ...args]).toCall();
+  }
+  if (!bodyExpr) {
+    throw new ParserSyntaxError("fn missing body expression", form.location);
+  }
 
   return {
     form,

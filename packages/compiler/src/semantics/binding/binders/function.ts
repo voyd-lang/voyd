@@ -62,6 +62,13 @@ export const bindFunctionDecl = (
     symbolMetadata.intrinsicUsesSignature =
       intrinsicMetadata.usesSignature ?? false;
   }
+  const external = decl.form.attributes?.external as { id: string } | undefined;
+  if (external) {
+    symbolMetadata.externalFunction = {
+      interfaceId: external.id,
+      functionName: decl.signature.name.value,
+    };
+  }
 
   const fnSymbol = ctx.symbolTable.declare(
     {

@@ -143,6 +143,7 @@ const parseMainConfig = (argv: readonly string[]): VoydConfig => {
         "  doc [index]          generate API documentation",
         "  docs [index]         alias for `doc`",
         "  bootstrap [dir]      scaffold a new Voyd project",
+        "  generate adapter     generate host adapter bindings",
       ].join("\n"),
     );
 
@@ -280,6 +281,45 @@ const parseDocConfig = (argv: readonly string[]): VoydConfig => {
   };
 };
 
+const parseGenerateConfig = (argv: readonly string[]): VoydConfig => {
+  const program = createBaseCommand({
+    name: "voyd generate adapter",
+    description: "Generate package adapter bindings or an application registry",
+  });
+
+  program
+    .argument("<kind>", "artifact kind (adapter|registry)")
+    .argument("[index]", "package entry (default: ./src)")
+    .option(
+      "--out <path>",
+      "output path (adapter default: ./generated/voyd-adapter; registry default: ./generated/voyd-adapters.ts)",
+    )
+    .option(
+      "--pkg-dir <path>",
+      "additional package directory (repeatable)",
+      appendOptionValue,
+      [],
+    );
+
+  program.parse(["node", "voyd generate", ...argv]);
+  const opts = program.opts();
+  const [kind, indexArg] = program.args as [string, string?];
+  if (kind !== "adapter" && kind !== "registry") {
+    throw new InvalidArgumentError(
+      `invalid generation kind "${kind}" (allowed: adapter, registry)`,
+    );
+  }
+  return {
+    index: indexArg ?? "./src",
+    pkgDirs: opts.pkgDir,
+    generateAdapter: kind === "adapter",
+    generateAdapterRegistry: kind === "registry",
+    generateOut: opts.out,
+    doc: false,
+    docFormat: "html",
+  };
+};
+
 const findSubcommandIndex = (args: readonly string[]): number => {
   const optionsWithValues: ReadonlySet<string> = new Set(
     MAIN_OPTIONS_WITH_VALUES,
@@ -292,7 +332,8 @@ const findSubcommandIndex = (args: readonly string[]): number => {
       arg === "test" ||
       arg === "doc" ||
       arg === "docs" ||
-      arg === "bootstrap"
+      arg === "bootstrap" ||
+      arg === "generate"
     ) {
       return index;
     }
@@ -338,6 +379,9 @@ export const getConfigFromCli = (): VoydConfig => {
   }
   if (command === "bootstrap") {
     return parseBootstrapConfig(rest);
+  }
+  if (command === "generate") {
+    return parseGenerateConfig(rest);
   }
   return parseMainConfig(args);
 };

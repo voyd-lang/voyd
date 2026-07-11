@@ -132,6 +132,30 @@ describe("getConfigFromCli", () => {
     expect(config.bootstrapForce).toBe(true);
   });
 
+  it("parses package adapter and application registry generation", () => {
+    const adapter = runWithArgv([
+      "node",
+      "voyd",
+      "generate",
+      "adapter",
+      "./src",
+      "--out",
+      "./generated/adapter",
+    ]);
+    expect(adapter.generateAdapter).toBe(true);
+    expect(adapter.index).toBe("./src");
+    expect(adapter.generateOut).toBe("./generated/adapter");
+
+    const registry = runWithArgv([
+      "node",
+      "voyd",
+      "generate",
+      "registry",
+      "./src/main.voyd",
+    ]);
+    expect(registry.generateAdapterRegistry).toBe(true);
+  });
+
   it("parses `voyd test` when global options come first", () => {
     const config = runWithArgv([
       "node",

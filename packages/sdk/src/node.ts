@@ -20,6 +20,7 @@ import {
   runWithHandlers,
 } from "./shared/host.js";
 import { createCompileResult } from "./shared/result.js";
+import { loadVoydPackageAdapters } from "./package-adapters.js";
 import type { CompileArtifactsSuccess } from "./shared/compile.js";
 import {
   createUnexpectedDiagnostic,
@@ -36,6 +37,10 @@ import type {
 } from "./shared/types.js";
 
 export { detectSrcRootForPath } from "./shared/source-root.js";
+export {
+  findVoydPackageAdapterSpecifiers,
+  loadVoydPackageAdapters,
+} from "./package-adapters.js";
 
 const DEFAULT_ENTRY = "index.voyd";
 const DEFAULT_VIRTUAL_ROOT = ".voyd";
@@ -74,6 +79,15 @@ export const serveWebApp = async (
     imports: run.imports,
     bufferSize: run.bufferSize,
     defaultAdapters: webAppDefaultAdapters(run.defaultAdapters),
+    adapters:
+      run.adapters ??
+      (await loadVoydPackageAdapters({
+        wasm: result.wasm,
+        startDir:
+          options.entryPath && options.source === undefined
+            ? path.dirname(path.resolve(options.entryPath))
+            : process.cwd(),
+      })),
   });
   if (run.handlersByLabelSuffix) {
     registerHandlersByLabelSuffix({
@@ -298,6 +312,7 @@ const compileSdk = async (
       runtimeDiagnostics,
       loadModuleGraph,
       boundaryExports: options.boundaryExports,
+      externalDeclarations: options.externalDeclarations,
       cache: compilerCache,
       setupPhasesMs,
       finalizeSuccess: (result) => finalizeCompile({ options, result }),
@@ -307,7 +322,22 @@ const compileSdk = async (
       return result;
     }
 
-    return createCompileResult(result);
+    const discoveredAdapters = new Map<
+      Uint8Array,
+      ReturnType<typeof loadVoydPackageAdapters>
+    >();
+    return createCompileResult(result, {
+      resolveAdapters: (wasm) => {
+        const existing = discoveredAdapters.get(wasm);
+        if (existing) return existing;
+        const loading = loadVoydPackageAdapters({
+          wasm,
+          startDir: path.dirname(entryPath),
+        });
+        discoveredAdapters.set(wasm, loading);
+        return loading;
+      },
+    });
   } catch (error) {
     return {
       success: false,

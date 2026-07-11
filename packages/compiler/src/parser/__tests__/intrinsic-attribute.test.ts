@@ -56,3 +56,33 @@ fn bad() -> i32
   0`)
   ).toThrow(/must be labeled with ':'/);
 });
+
+test("@external attaches a signature-aware external intrinsic", (t) => {
+  const fn = parseFunction(`@external(id: "example:math/ops@1")
+fn double(value: i32) -> i32
+  double(value)`);
+
+  t.expect(fn.attributes?.external).toEqual({ id: "example:math/ops@1" });
+  t.expect(fn.attributes?.intrinsic as IntrinsicAttribute | undefined).toEqual({
+    name: "voyd_external",
+    usesSignature: true,
+  });
+});
+
+test("@external requires a stable id", (t) => {
+  t.expect(() =>
+    parse(`@external
+fn missing(value: i32) -> i32
+  missing(value)`),
+  ).toThrow(/requires an 'id:' argument/);
+});
+
+test("@external turns an effect declaration into an async adapter interface", (t) => {
+  const ast = parse(`@external(id: "example:remote/data@1")
+eff Remote
+  load(tail, id: i32) -> i32`);
+  const effect = ast.rest[0];
+  if (!isForm(effect)) throw new Error("expected an effect declaration");
+  t.expect(effect.attributes?.external).toEqual({ id: "example:remote/data@1" });
+  t.expect(effect.attributes?.effect).toEqual({ id: "example:remote/data@1" });
+});

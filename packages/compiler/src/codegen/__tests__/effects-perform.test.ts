@@ -207,6 +207,7 @@ const buildLoweringSnapshot = () => {
       linearMemoryExport: "always",
       effectsMemoryExport: "auto",
       boundaryExports: false,
+      externalDeclarations: false,
       testScope: "all",
     },
     programHelpers,

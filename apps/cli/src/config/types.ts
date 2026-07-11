@@ -48,4 +48,10 @@ export type VoydConfig = {
   bootstrapDryRun?: boolean;
   /** Allow bootstrap to write into a non-empty directory */
   bootstrapForce?: boolean;
+  /** Generate package-adapter bindings. */
+  generateAdapter?: boolean;
+  /** Generate an application adapter registry. */
+  generateAdapterRegistry?: boolean;
+  /** Generated adapter output directory. */
+  generateOut?: string;
 };

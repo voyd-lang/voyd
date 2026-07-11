@@ -54,7 +54,7 @@
     "build": "tsc -p tsconfig.build.json && vite build -c ../../vite.config.ts",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config ../../vitest.config.ts --testTimeout 30000 src",
+    "test": "vitest run --config ../../vitest.config.ts --testTimeout 30000 src --testNamePattern='^(?!.*\\[external-[ab]\\])' && vitest run --config ../../vitest.config.ts --testTimeout 30000 src/__tests__/sdk-node.test.ts --testNamePattern='\\[external-a\\]' && vitest run --config ../../vitest.config.ts --testTimeout 30000 src/__tests__/sdk-node.test.ts --testNamePattern='\\[external-b\\]'",
     "test:w": "vitest --config ../../vitest.config.ts src",
     "lint": "echo 'no lint configured'",
     "prepack": "npm run clean && npm run build",
@@ -63,6 +63,7 @@
   "dependencies": {
     "@voyd-lang/compiler": "^0.2.0",
     "@voyd-lang/js-host": "^0.2.0",
+    "@voyd-lang/package-adapter": "^0.2.0",
     "@voyd-lang/std": "^0.2.0",
     "@voyd-lang/lib": "^0.2.0",
     "binaryen": "^125.0.0"
