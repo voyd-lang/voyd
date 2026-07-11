@@ -29,6 +29,51 @@ const expectCompileSuccess = (
 };
 
 describe("call shape diagnostics", () => {
+  it("reports a missing comma between object literal fields", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [entryPath]: `pub fn main() -> i32
+  let value = { first: 1 second: 2 }
+  value.first`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]?.code).toBe("MD0002");
+    expect(result.diagnostics[0]?.message).toContain(
+      "Expected ',' before 'second' in braces",
+    );
+  });
+
+  it("allows labeled calls as object literal field values", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [entryPath]: `fn make({ value: i32 }) -> i32
+  value
+
+pub fn main() -> i32
+  let result = { value: make(value: 2) }
+  result.value`,
+    });
+
+    expectCompileSuccess(
+      await compileProgram({
+        entryPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+  });
+
   it("reports label mismatch argument index using the failing argument position", async () => {
     const root = resolve("/proj/src");
     const entryPath = `${root}${sep}pkg.voyd`;
