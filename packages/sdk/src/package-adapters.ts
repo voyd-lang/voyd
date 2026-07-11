@@ -104,13 +104,16 @@ const findAdapterProviders = async ({
       shadowedPackageNames.add(parsed.name);
       const metadata = parsed?.voyd?.adapter;
       if (!metadata?.interfaces) continue;
+      const matchingInterfaces = metadata.interfaces.filter((interfaceId) =>
+        requiredInterfaces.has(interfaceId),
+      );
+      if (matchingInterfaces.length === 0) continue;
       if (metadata.abi !== VOYD_PACKAGE_ADAPTER_ABI) {
         throw new Error(
           `Voyd package adapter ${parsed.name} declares unsupported ABI ${String(metadata.abi)}; expected ${VOYD_PACKAGE_ADAPTER_ABI}`,
         );
       }
-      metadata.interfaces.forEach((interfaceId) => {
-        if (!requiredInterfaces.has(interfaceId)) return;
+      matchingInterfaces.forEach((interfaceId) => {
         const existing = providers.get(interfaceId);
         if (existing && existing.packageName !== parsed.name) {
           throw new Error(

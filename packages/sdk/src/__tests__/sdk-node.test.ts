@@ -1495,6 +1495,34 @@ pub fn main() -> i32
     }
   });
 
+  it("[external-a] ignores unsupported adapter ABIs unless their interface is required", async () => {
+    const projectRoot = await fs.mkdtemp(path.join(repoRoot, ".tmp-adapter-abi-"));
+    const packageRoot = path.join(projectRoot, "node_modules", "future-provider");
+    await fs.mkdir(packageRoot, { recursive: true });
+    await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
+      name: "future-provider",
+      voyd: {
+        adapter: {
+          abi: 2,
+          interfaces: ["example:future/service@1"],
+          browser: "./adapter.js",
+        },
+      },
+    }));
+    try {
+      await expect(findVoydPackageAdapterSpecifiers({
+        interfaceIds: [],
+        startDir: projectRoot,
+      })).resolves.toEqual([]);
+      await expect(findVoydPackageAdapterSpecifiers({
+        interfaceIds: ["example:future/service@1"],
+        startDir: projectRoot,
+      })).rejects.toThrow(/unsupported ABI 2/);
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+  });
+
   it("[external-a] does not mix metadata from a shadowed outer package version", async () => {
     const projectRoot = await fs.mkdtemp(path.join(repoRoot, ".tmp-adapter-shadow-"));
     const nested = path.join(projectRoot, "packages", "app");
