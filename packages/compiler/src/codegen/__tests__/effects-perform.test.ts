@@ -50,6 +50,11 @@ const localTailStdlibRngFixturePath = resolve(
   "__fixtures__",
   "effects-local-tail-stdlib-rng.voyd",
 );
+const localRecursiveFastPathFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "effects-local-recursive-fast-path.voyd",
+);
 const tailResumeArgEffectfulFixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
@@ -145,6 +150,21 @@ const loadSemantics = () =>
 
 const sanitize = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const extractWatFunction = (wat: string, namePattern: RegExp): string => {
+  const header = wat.match(namePattern)?.[0];
+  if (!header) {
+    throw new Error(`missing Wasm function matching ${namePattern}`);
+  }
+  const start = wat.indexOf(header);
+  let depth = 0;
+  for (let index = start; index < wat.length; index += 1) {
+    if (wat[index] === "(") depth += 1;
+    if (wat[index] === ")") depth -= 1;
+    if (depth === 0) return wat.slice(start, index + 1);
+  }
+  throw new Error(`unterminated Wasm function matching ${namePattern}`);
+};
 
 const buildLoweringSnapshot = () => {
   const semantics = loadSemantics();
@@ -305,6 +325,71 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
     await expect(host.run<number>("direct_local")).resolves.toBe(7);
     await expect(host.run<number>("helper_local")).resolves.toBe(10);
     await expect(host.run<number>("big_local")).resolves.toBe(45);
+  });
+
+  it("removes the residual effect ABI from fully handled recursive call graphs", async () => {
+    const unoptimized = await compileEffectFixture({
+      entryPath: localRecursiveFastPathFixturePath,
+      codegenOptions: { effectsHostBoundary: "off" },
+    });
+    const specialized = await compileEffectFixtureWithCompilerOptimization(
+      localRecursiveFastPathFixturePath,
+    );
+    const text = specialized.module.emitText();
+
+    const selfWorker = extractWatFunction(
+      text,
+      /\(func \$[^\s]*self_worker_\d+__handled[^\s]*/,
+    );
+    const mutualEven = extractWatFunction(
+      text,
+      /\(func \$[^\s]*mutual_even_\d+__handled[^\s]*/,
+    );
+    const mutualOdd = extractWatFunction(
+      text,
+      /\(func \$[^\s]*mutual_odd_\d+__handled[^\s]*/,
+    );
+    const residualEven = extractWatFunction(
+      text,
+      /\(func \$[^\s]*residual_even_\d+__handled[^\s]*/,
+    );
+    for (const pureSpecialization of [selfWorker, mutualEven, mutualOdd]) {
+      expect(pureSpecialization).not.toContain("$voydHandlerFrame");
+      expect(pureSpecialization).not.toContain("$voydOutcome");
+      expect(pureSpecialization).toContain("return_call");
+    }
+    expect(selfWorker).toMatch(/return_call \$[^\s]*self_worker_/);
+    expect(mutualEven).toMatch(/return_call \$[^\s]*mutual_odd_/);
+    expect(mutualOdd).toMatch(/return_call \$[^\s]*mutual_even_/);
+    expect(residualEven).toContain("$voydHandlerFrame");
+    expect(residualEven).toContain("$voydOutcome");
+
+    const unoptimizedHost = await createVoydHost({ wasm: unoptimized.wasm });
+    const specializedHost = await createVoydHost({ wasm: specialized.wasm });
+    for (const [entry, expected] of [
+      ["self_recursive", 10001],
+      ["mutually_recursive", 10001],
+    ] as const) {
+      await expect(unoptimizedHost.run<number>(entry)).resolves.toBe(expected);
+      await expect(specializedHost.run<number>(entry)).resolves.toBe(expected);
+    }
+    const [unoptimizedBoundary, specializedBoundary] = await Promise.all([
+      compileEffectFixture({ entryPath: localRecursiveFastPathFixturePath }),
+      compileEffectFixtureWithCompilerOptimization(
+        localRecursiveFastPathFixturePath,
+        {},
+      ),
+    ]);
+    for (const wasm of [unoptimizedBoundary.wasm, specializedBoundary.wasm]) {
+      const result = await runEffectfulExport<number>({
+        wasm,
+        entryName: "residual_recursive",
+        handlersByLabelSuffix: {
+          "Residual::read": () => 40,
+        },
+      });
+      expect(result.value).toBe(41);
+    }
   });
 
   it("preserves local tail continuations through value construction and control flow", async () => {

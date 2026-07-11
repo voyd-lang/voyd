@@ -149,7 +149,9 @@ const analyzeSpecializationSupport = ({
 }): SpecializationSupport => {
   const canonical = canonicalEffectOperation(ctx, item.symbol);
   if (seen.has(canonical)) {
-    return { supported: true, residualEffectful: true };
+    // A recursive edge adds no effect of its own. Residual seeds discovered
+    // while scanning the SCC still propagate through mergeSupport.
+    return { supported: true, residualEffectful: false };
   }
   seen.add(canonical);
 
