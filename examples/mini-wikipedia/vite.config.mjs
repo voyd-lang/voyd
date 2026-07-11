@@ -1,4 +1,3 @@
-import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import { compileClientVoyd } from "./scripts/compile-client-voyd.mjs";
 
@@ -20,8 +19,11 @@ const voydClient = () => ({
 });
 
 export default defineConfig({
-  plugins: [voydClient(), tailwindcss()],
+  plugins: [voydClient()],
   publicDir: false,
+  resolve: {
+    conditions: ["development"],
+  },
   build: {
     outDir: "public",
     emptyOutDir: false,

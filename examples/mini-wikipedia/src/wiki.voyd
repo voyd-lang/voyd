@@ -1,0 +1,287 @@
+//! Shared article data, persistence encoding, and collection helpers.
+
+use std::array::Array
+use std::dict::Dict
+use std::json::{
+  JsonArray,
+  JsonError,
+  JsonObject,
+  JsonString,
+  JsonValue,
+  parse as parse_json,
+  stringify as stringify_json,
+  stringify_pretty as stringify_json_pretty
+}
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+
+pub type Article = {
+  slug: String,
+  title: String,
+  overview: String,
+  body: String,
+  related: Array<String>
+}
+
+pub type Editor = {
+  slug: String,
+  title: String,
+  overview: String,
+  body: String,
+  related: String
+}
+
+pub type Model = {
+  articles: Array<Article>,
+  current_slug: String,
+  search: String,
+  mode: String,
+  editor: Editor,
+  status: String,
+  status_kind: String,
+  delete_pending: bool
+}
+
+pub fn initial_model(articles: Array<Article>, current_slug: String) -> Model
+  let selected = selected_slug(articles, current_slug)
+  {
+    articles: articles,
+    current_slug: selected,
+    search: String::init(),
+    mode: "view",
+    editor: editor_for_slug(articles, selected),
+    status: "Ready",
+    status_kind: "neutral",
+    delete_pending: false
+  }
+
+pub fn empty_editor() -> Editor
+  {
+    slug: String::init(),
+    title: String::init(),
+    overview: String::init(),
+    body: String::init(),
+    related: String::init()
+  }
+
+pub fn article_from_editor(editor: Editor) -> Article
+  {
+    slug: editor.slug.trimmed().lowered(),
+    title: editor.title.trimmed().to_string(),
+    overview: editor.overview.trimmed().to_string(),
+    body: editor.body.trimmed().to_string(),
+    related: parse_related(editor.related)
+  }
+
+pub fn editor_from_article(article: Article) -> Editor
+  {
+    slug: article.slug,
+    title: article.title,
+    overview: article.overview,
+    body: article.body,
+    related: related_text(article.related)
+  }
+
+pub fn find_article(articles: Array<Article>, slug: String) -> Option<Article>
+  articles.find(where: (article: Article) -> bool => article.slug == slug)
+
+pub fn has_article(articles: Array<Article>, slug: String) -> bool
+  match(find_article(articles, slug))
+    Some<Article>:
+      true
+    None:
+      false
+
+pub fn selected_slug(articles: Array<Article>, requested: String) -> String
+  if has_article(articles, requested):
+    return requested
+  if has_article(articles, "home"):
+    return "home"
+  match(articles.get(0))
+    Some<Article> { value }:
+      value.slug
+    None:
+      String::init()
+
+pub fn editor_for_slug(articles: Array<Article>, slug: String) -> Editor
+  match(find_article(articles, slug))
+    Some<Article> { value }:
+      editor_from_article(value)
+    None:
+      empty_editor()
+
+pub fn upsert_article(articles: Array<Article>, article: Article) -> Array<Article>
+  if has_article(articles, article.slug):
+    return articles.map((candidate: Article) -> Article =>
+      if candidate.slug == article.slug then: article else: candidate
+    )
+  articles.pushed(article)
+
+pub fn remove_article(articles: Array<Article>, slug: String) -> Array<Article>
+  articles.filter(where: (article: Article) -> bool => not (article.slug == slug))
+
+pub fn filtered_articles(articles: Array<Article>, query: String) -> Array<Article>
+  let normalized = query.trimmed().lowered()
+  if normalized.is_empty():
+    return articles
+  articles.filter(where: (article: Article) -> bool => article_matches(article, normalized))
+
+pub fn article_matches(article: Article, query: String) -> bool
+  article.slug.lowered().contains(query) or
+    article.title.lowered().contains(query) or
+    article.overview.lowered().contains(query) or
+    article.body.lowered().contains(query)
+
+pub fn is_valid_article(article: Article) -> bool
+  is_valid_slug(article.slug) and
+    not article.title.trimmed().is_empty() and
+    not article.overview.trimmed().is_empty() and
+    not article.body.trimmed().is_empty()
+
+pub fn related_count(article: Article) -> i32
+  article.related.len()
+
+pub fn is_valid_slug(value: String) -> bool
+  let slug = value.trimmed().lowered()
+  if slug.is_empty():
+    return false
+  not slug.contains(where: (rune: i32) -> bool => not is_slug_rune(rune))
+
+pub fn articles_from_json(source: String) -> Result<Array<Article>, JsonError>
+  match(parse_json(source))
+    Ok<JsonValue> { value }:
+      value.match(decoded)
+        JsonArray:
+          decode_articles(decoded.value)
+        else:
+          Err<JsonError> { error: JsonError { code: 1, message: "article data must be a JSON array" } }
+    Err<JsonError> { error }:
+      Err<JsonError> { error: error }
+
+pub fn articles_json(articles: Array<Article>) -> Result<String, JsonError>
+  stringify_json_pretty(articles_json_value(articles))
+
+pub fn article_json(article: Article) -> Result<String, JsonError>
+  stringify_json(article_json_value(article))
+
+pub fn default_articles() -> Array<Article>
+  [
+    {
+      slug: "home",
+      title: "The Small Knowledge",
+      overview: "A deliberately tiny encyclopedia about Voyd, VX, and the ideas behind them.",
+      body: "Welcome to The Small Knowledge. This miniature wiki is rendered on the server, hydrated in the browser, and backed by one JSON file.\n\nUse the article index to explore. Search looks across titles, overviews, and article text. Every edit, create, and delete operation travels through Voyd on both sides of the network.",
+      related: ["voyd", "vx"]
+    },
+    {
+      slug: "voyd",
+      title: "Voyd",
+      overview: "A programming language that pairs a high-level type system with WebAssembly as its native destination.",
+      body: "Voyd sits between Rust and TypeScript in abstraction. It is designed for expressive application code while retaining explicit effects and a compact WebAssembly runtime.\n\nPrograms describe capabilities in their types. The same language can power a server process, browser state machine, command-line tool, or reusable library.",
+      related: ["vx", "webassembly"]
+    },
+    {
+      slug: "vx",
+      title: "VX",
+      overview: "Voyd's typed framework for server-rendered and interactive web applications.",
+      body: "VX follows an Elm-like model, message, step, and view architecture. State changes stay explicit, commands describe one-off work, and subscriptions represent ongoing input.\n\nThe virtual tree can render on the server and hydrate in the browser. In this example, the same Voyd view function owns both paths.",
+      related: ["voyd", "webassembly"]
+    },
+    {
+      slug: "webassembly",
+      title: "WebAssembly",
+      overview: "A portable binary instruction format used here as the execution target for Voyd applications.",
+      body: "WebAssembly provides a compact, sandboxed runtime format with broad browser support and capable server hosts. Voyd compiles application modules to Wasm and supplies host adapters for effects such as HTTP and filesystem access.\n\nFor this wiki, separate Wasm modules run the server and hydrated client while sharing the same domain model.",
+      related: ["voyd", "vx"]
+    }
+  ]
+
+fn decode_articles(values: Array<JsonValue>) -> Result<Array<Article>, JsonError>
+  let ~articles = Array<Article>::with_capacity(values.len())
+  var index = 0
+  while index < values.len():
+    match(values.get(index))
+      Some<JsonValue> { value }:
+        match(decode_article(value))
+          Ok<Article> { value }:
+            articles.push(value)
+          Err<JsonError> { error }:
+            return Err<JsonError> { error: error }
+      None:
+        void
+    index = index + 1
+  Ok<Array<Article>> { value: articles }
+
+fn decode_article(value: JsonValue) -> Result<Article, JsonError>
+  value.match(decoded)
+    JsonObject:
+      Ok<Article> {
+        value: {
+          slug: json_string(decoded.value, "slug"),
+          title: json_string(decoded.value, "title"),
+          overview: json_string(decoded.value, "overview"),
+          body: json_string(decoded.value, "body"),
+          related: json_strings(decoded.value, "related")
+        }
+      }
+    else:
+      Err<JsonError> { error: JsonError { code: 1, message: "article entries must be JSON objects" } }
+
+fn json_string(fields: Dict<String, JsonValue>, key: String) -> String
+  match(fields.get(key))
+    Some<JsonValue> { value }:
+      value.match(decoded)
+        JsonString:
+          decoded.value
+        else:
+          String::init()
+    None:
+      String::init()
+
+fn json_strings(fields: Dict<String, JsonValue>, key: String) -> Array<String>
+  match(fields.get(key))
+    Some<JsonValue> { value }:
+      value.match(decoded)
+        JsonArray:
+          decoded.value.flat_map((item: JsonValue) -> Array<String> => json_string_array(item))
+        else:
+          Array<String>::init()
+    None:
+      Array<String>::init()
+
+fn json_string_array(value: JsonValue) -> Array<String>
+  value.match(decoded)
+    JsonString:
+      [decoded.value]
+    else:
+      Array<String>::init()
+
+fn articles_json_value(articles: Array<Article>) -> JsonValue
+  JsonArray { value: articles.map((article: Article) -> JsonValue => article_json_value(article)) }
+
+fn article_json_value(article: Article) -> JsonValue
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set("slug", JsonString { value: article.slug })
+  fields.set("title", JsonString { value: article.title })
+  fields.set("overview", JsonString { value: article.overview })
+  fields.set("body", JsonString { value: article.body })
+  fields.set(
+    "related",
+    JsonArray { value: article.related.map((slug: String) -> JsonValue => JsonString { value: slug }) }
+  )
+  JsonObject { value: fields }
+
+fn parse_related(value: String) -> Array<String>
+  value
+    .split(on: ",", keep_empty: false)
+    .map((part) -> String => part.trimmed().lowered())
+    .filter(where: (slug: String) -> bool => is_valid_slug(slug))
+
+fn related_text(values: Array<String>) -> String
+  values.reduce(String::init(), step: (out: String, value: String) -> String =>
+    if out.is_empty() then: value else: out.concat(", ").concat(value)
+  )
+
+fn is_slug_rune(rune: i32) -> bool
+  (rune >= 97 and rune <= 122) or (rune >= 48 and rune <= 57) or rune == 45
