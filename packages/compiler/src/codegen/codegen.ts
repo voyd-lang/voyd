@@ -63,6 +63,7 @@ import {
   resolveOptimizationPolicy,
   specializationPolicyForOptimizationLevel,
 } from "../optimization-policy.js";
+import { createSpecializationReservations } from "../optimize/codegen-plan.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimizationLevel: "none",
@@ -183,6 +184,13 @@ export const codegenProgram = ({
     specializationPolicy:
       optimization?.codegenPlan.specializationPolicy ??
       specializationPolicyForOptimizationLevel(mergedOptions.optimizationLevel),
+    specializationReservations:
+      optimization?.codegenPlan.specializationReservations ??
+      createSpecializationReservations(
+        specializationPolicyForOptimizationLevel(
+          mergedOptions.optimizationLevel,
+        ),
+      ),
   }));
   contexts.forEach((ctx) => moduleContexts.set(ctx.moduleId, ctx));
 

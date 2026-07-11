@@ -175,6 +175,40 @@ const buildModuleStructureIndex = ({
   };
 };
 
+const structureFingerprint = ({
+  program,
+  moduleView,
+}: {
+  program: ProgramCodegenView;
+  moduleView: OptimizedModuleView;
+}): string =>
+  JSON.stringify({
+    items: Array.from(moduleView.hir.items.entries()),
+    signatures: Array.from(moduleView.hir.items.values())
+      .filter((item): item is HirFunction => item.kind === "function")
+      .map((item) => [
+        item.symbol,
+        program.functions.getSignature(moduleView.moduleId, item.symbol),
+      ]),
+    symbols: Array.from(moduleView.hir.items.values())
+      .filter((item): item is HirFunction => item.kind === "function")
+      .map((item) => {
+        const id = program.symbols.canonicalIdOf(
+          moduleView.moduleId,
+          item.symbol,
+        );
+        return [
+          item.symbol,
+          program.symbols.getName(id),
+          program.symbols.getIntrinsicName(id),
+        ];
+      }),
+    imports: moduleView.meta.imports.map(({ local }) => [
+      local,
+      program.imports.getTarget(moduleView.moduleId, local),
+    ]),
+  });
+
 /**
  * Optimizer-private indexes over the ProgramCodegenView boundary.
  *
@@ -191,6 +225,7 @@ const buildModuleStructureIndex = ({
  */
 export class ProgramOptimizationIndex {
   private readonly structureByModule: ReadonlyMap<string, ModuleStructureIndex>;
+  private readonly structureFingerprints: ReadonlyMap<string, string>;
   private readonly resolvedImportsByModule = new Map<
     string,
     Map<SymbolId, SymbolRef>
@@ -220,9 +255,33 @@ export class ProgramOptimizationIndex {
         buildModuleStructureIndex({ program, moduleView }),
       ]),
     );
+    this.structureFingerprints = new Map(
+      Array.from(modules, ([moduleId, moduleView]) => [
+        moduleId,
+        structureFingerprint({ program, moduleView }),
+      ]),
+    );
     modules.forEach((_module, moduleId) =>
       this.moduleRevisions.set(moduleId, 0),
     );
+  }
+
+  /**
+   * Optimizer passes are expression/body transforms. Module items, signatures,
+   * imports, and symbol metadata belong to semantics and are structurally
+   * immutable for the lifetime of this index.
+   */
+  assertStructureUnchanged(): void {
+    this.modules.forEach((moduleView, moduleId) => {
+      if (
+        this.structureFingerprints.get(moduleId) !==
+        structureFingerprint({ program: this.program, moduleView })
+      ) {
+        throw new Error(
+          `optimizer pass changed immutable program structure in ${moduleId}`,
+        );
+      }
+    });
   }
 
   getFunction(

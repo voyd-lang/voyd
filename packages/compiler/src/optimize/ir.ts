@@ -5,6 +5,11 @@ import type {
   ProgramCodegenView,
 } from "../semantics/codegen-view/index.js";
 import type {
+  HirExpression,
+  HirItem,
+  HirStatement,
+} from "../semantics/hir/index.js";
+import type {
   HirExprId,
   ProgramFunctionInstanceId,
   ProgramSymbolId,
@@ -14,11 +19,35 @@ import type {
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { ProgramCodegenOptimizationPlan } from "./codegen-plan.js";
 import type { CodegenOptions } from "../codegen/context.js";
+import type { ProgramOptimizationIndex } from "./program-index.js";
 
 export type OptimizedCallInfo = CallLoweringInfo;
 
 export type OptimizedModuleView = ModuleCodegenView & {
   semantics: SemanticsPipelineResult;
+};
+
+export type DeepReadonly<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends ReadonlyMap<infer K, infer V>
+    ? ReadonlyMap<DeepReadonly<K>, DeepReadonly<V>>
+    : T extends ReadonlySet<infer V>
+      ? ReadonlySet<DeepReadonly<V>>
+      : T extends readonly (infer V)[]
+        ? readonly DeepReadonly<V>[]
+        : T extends object
+          ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+          : T;
+
+export type ReadonlyOptimizedModuleView = Omit<OptimizedModuleView, "hir"> & {
+  readonly hir: Omit<
+    OptimizedModuleView["hir"],
+    "items" | "statements" | "expressions"
+  > & {
+    readonly items: ReadonlyMap<number, DeepReadonly<HirItem>>;
+    readonly statements: ReadonlyMap<number, DeepReadonly<HirStatement>>;
+    readonly expressions: ReadonlyMap<number, DeepReadonly<HirExpression>>;
+  };
 };
 
 export type EscapeAnalysisOriginKind =
@@ -74,6 +103,8 @@ export type CallShapeParameterState =
   | "stable-callsite-id";
 
 export type CallShapeSpecializationRequest = Readonly<{
+  stage: "planned";
+  identity: string;
   calleeInstanceId: ProgramFunctionInstanceId;
   keyTokens: readonly string[];
 }>;
@@ -124,7 +155,7 @@ export type ProgramOptimizationIR = {
     boundaryExports?: CodegenOptions["boundaryExports"];
     effectsHostBoundary?: CodegenOptions["effectsHostBoundary"];
   };
-  modules: ReadonlyMap<string, OptimizedModuleView>;
+  modules: ReadonlyMap<string, ReadonlyOptimizedModuleView>;
   calls: ReadonlyMap<string, ReadonlyMap<HirExprId, OptimizedCallInfo>>;
   functionInstantiations: ReadonlyMap<
     string,
@@ -134,6 +165,8 @@ export type ProgramOptimizationIR = {
     >
   >;
   survivingInstances: readonly MonomorphizedInstanceInfo[];
+  /** Read-only index access; its structure invariant is checked after every pass. */
+  index: ProgramOptimizationIndex;
   facts: ProgramOptimizationFacts;
 };
 

@@ -7,6 +7,8 @@ import type { ProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import type { ProgramSymbolId, SymbolId } from "../../semantics/ids.js";
 import type { OptimizedModuleView } from "../ir.js";
 import { ProgramOptimizationIndex } from "../program-index.js";
+import { MutableOptimizationContext } from "../context.js";
+import type { MutableOptimizationIr } from "../state.js";
 
 const span = { file: "program-index.test.voyd", start: 0, end: 1 };
 
@@ -368,22 +370,21 @@ describe("ProgramOptimizationIndex", () => {
       walks: 4,
     });
 
-    const expressions = fixture.a.view.hir.expressions as Map<
-      number,
-      typeof fixture.a.view.hir.expressions extends ReadonlyMap<number, infer T>
-        ? T
-        : never
-    >;
-    expressions.set(fixture.a.bodyRoot, {
-      kind: "expr",
-      exprKind: "literal",
-      id: fixture.a.bodyRoot,
-      ast: 9,
-      span,
-      literalKind: "i32",
-      value: "4",
-    });
-    index.invalidateModuleTopology("a");
+    const context = new MutableOptimizationContext({
+      index,
+      modules: fixture.modules,
+    } as MutableOptimizationIr);
+    context.mutateHirTopology(["a"], (mutation) =>
+      mutation.setExpression("a", fixture.a.bodyRoot, {
+        kind: "expr",
+        exprKind: "literal",
+        id: fixture.a.bodyRoot,
+        ast: 9,
+        span,
+        literalKind: "i32",
+        value: "4",
+      }),
+    );
 
     expect(
       index.getBodyTopology({
@@ -404,5 +405,69 @@ describe("ProgramOptimizationIndex", () => {
       hits: 2,
       walks: 5,
     });
+  });
+
+  it("rejects structural module mutations instead of retaining stale indexes", () => {
+    const fixture = createFixture();
+    const index = new ProgramOptimizationIndex(
+      createProgram(fixture),
+      fixture.modules,
+    );
+    const items = fixture.a.view.hir.items as Map<
+      number,
+      typeof fixture.a.view.hir.items extends ReadonlyMap<number, infer T>
+        ? T
+        : never
+    >;
+    const functionItemId = Array.from(items.entries()).find(
+      ([, item]) =>
+        item.kind === "function" && item.symbol === fixture.a.functionSymbol,
+    )?.[0];
+    expect(functionItemId).toBeDefined();
+    items.delete(functionItemId!);
+
+    expect(() => index.assertStructureUnchanged()).toThrow(
+      "optimizer pass changed immutable program structure in a",
+    );
+  });
+
+  it("protects signatures, symbol metadata, and resolved import wiring", () => {
+    const signatureFixture = createFixture();
+    const signatureProgram = createProgram(signatureFixture);
+    const signatureIndex = new ProgramOptimizationIndex(
+      signatureProgram,
+      signatureFixture.modules,
+    );
+    signatureProgram.functions.getSignature = () =>
+      ({
+        parameters: [{ optional: true }],
+      }) as unknown as ReturnType<
+        typeof signatureProgram.functions.getSignature
+      >;
+    expect(() => signatureIndex.assertStructureUnchanged()).toThrow(
+      "optimizer pass changed immutable program structure",
+    );
+
+    const symbolFixture = createFixture();
+    const symbolProgram = createProgram(symbolFixture);
+    const symbolIndex = new ProgramOptimizationIndex(
+      symbolProgram,
+      symbolFixture.modules,
+    );
+    symbolProgram.symbols.getName = () => "changed";
+    expect(() => symbolIndex.assertStructureUnchanged()).toThrow(
+      "optimizer pass changed immutable program structure",
+    );
+
+    const importFixture = createFixture();
+    const importProgram = createProgram(importFixture);
+    const importIndex = new ProgramOptimizationIndex(
+      importProgram,
+      importFixture.modules,
+    );
+    importProgram.imports.getTarget = () => undefined;
+    expect(() => importIndex.assertStructureUnchanged()).toThrow(
+      "optimizer pass changed immutable program structure",
+    );
   });
 });

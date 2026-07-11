@@ -11,6 +11,7 @@ import { createEffectsState } from "../effects/state.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../program-helpers.js";
 import { specializationPolicyForOptimizationLevel } from "../../optimization-policy.js";
+import { createSpecializationReservations } from "../../optimize/codegen-plan.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -228,6 +229,9 @@ const buildCodegenProgram = (
     },
     outcomeValueTypes,
     specializationPolicy: specializationPolicyForOptimizationLevel("none"),
+    specializationReservations: createSpecializationReservations(
+      specializationPolicyForOptimizationLevel("none"),
+    ),
   }));
   contexts.forEach((ctx) => moduleContexts.set(ctx.moduleId, ctx));
 
@@ -324,6 +328,9 @@ describe("next codegen", () => {
       },
       outcomeValueTypes,
       specializationPolicy: specializationPolicyForOptimizationLevel("none"),
+      specializationReservations: createSpecializationReservations(
+        specializationPolicyForOptimizationLevel("none"),
+      ),
     };
     moduleContexts.set(ctx.moduleId, ctx);
 

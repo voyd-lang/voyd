@@ -22,8 +22,11 @@ The optimized whole-program path is:
 
 1. Load and analyze modules.
 2. Lower analyzed modules into ordered semantic modules.
-3. `monomorphizeProgram(...)` builds callable instance metadata.
-4. `buildProgramCodegenView(...)` builds the stable codegen-facing semantic
+3. `prepareProgramForCodegen(...)` is the shared normal/fallback preparation
+   boundary. It orders lowering inputs and runs the remaining preparation
+   phases with common instrumentation.
+4. `monomorphizeProgram(...)` builds callable instance metadata, then
+   `buildProgramCodegenView(...)` builds the stable codegen-facing semantic
    view.
 5. `optimizeProgram(...)` runs for the `balanced` and `release` optimization
    levels.
@@ -37,9 +40,8 @@ The optimization layer is invoked from both public emission paths in
 - `emitProgram(...)`
 - `emitProgramWithContinuationFallback(...)`
 
-Both paths build the same `ProgramCodegenView`, optionally call
-`optimizeProgram(...)`, and pass `optimized?.program` plus `optimized?.facts`
-into codegen.
+Both paths call the same `prepareProgramForCodegen(...)` function and pass its
+program and optional published facts into their path-specific codegen entrypoint.
 
 ## Ownership Boundary
 
@@ -129,7 +131,8 @@ provided its metadata and semantics remain valid.
   - defines `ProgramOptimizationIR`, `ProgramOptimizationFacts`, and
     `ProgramOptimizationResult`
 - `packages/compiler/src/optimize/pass.ts`
-  - defines the pass interface and cached analysis API
+  - defines the pass interface, key-to-result analysis map, and explicit
+    mutation categories
 - `packages/compiler/src/optimize/state.ts`
   - constructs and owns the optimizer-private mutable IR
 - `packages/compiler/src/optimize/program-index.ts`
@@ -140,11 +143,18 @@ provided its metadata and semantics remain valid.
 - `packages/compiler/src/optimize/schedule.ts`
   - defines the ordered initial, fixed-point, and final-analysis phases
 - `packages/compiler/src/optimize/context.ts`
-  - owns analysis caching and connects HIR invalidation to the body index
+  - owns typed analysis caching and automatically connects categorized
+    mutations to analysis and body-index revision invalidation
 - `packages/compiler/src/optimize/finalize.ts`
-  - rebuilds derived effect data and publishes immutable optimization results
+  - rebuilds derived effect data and assembles the optimized program
+- `packages/compiler/src/optimize/publish-facts.ts`
+  - owns the isolated mutable-to-immutable fact publication snapshot
 - `packages/compiler/src/optimize/pipeline.ts`
-  - contains semantic pass implementations and composes the optimizer modules
+  - registers pass modules, executes the schedule, and finalizes the result
+- `packages/compiler/src/optimize/passes/*`
+  - focused owners for constant/control simplification, reachability, receiver
+    and trait propagation, capture shrinking, escape analysis, runtime facts,
+    and call-shape planning
 - `packages/compiler/src/optimize/codegen-plan.ts`
   - contains longer-lived codegen planning data
 - `packages/compiler/src/compiler-contracts/*`
@@ -371,11 +381,39 @@ There is a hard separation between semantic safety and tuning:
   body nodes.
 
 Every body-duplicating codegen specialization is admitted through one
-program-scoped ledger. It first applies the specialization-kind cap, then the
-shared per-function, per-program, and estimated-body-node budgets. Rejected
-requests use the existing unspecialized lowering; they do not change program
-semantics. The body-node estimate is cached per base function so admission cost
-does not require repeated HIR walks.
+program-scoped ledger. Before codegen, the program plan freezes deterministic
+per-kind reservations that partition the shared per-function, per-program, and
+estimated-body-node totals. Admission first applies the specialization-kind
+cap, then that kind's reservation. Receiver, scalar-aggregate, static-effect,
+and call-shape requests therefore cannot consume one another's capacity based
+on codegen encounter order. Within each kind, owning planners/traversals provide
+stable candidate order and identities. Rejected requests use the existing
+unspecialized lowering; they do not change program semantics. The body-node
+estimate is cached per base function so admission cost does not require
+repeated HIR walks.
+
+The deterministic external ray comparison for the original optimizer rollout
+showed byte-identical output and effectively flat runtime with approximately
+1.2% optimized-Wasm growth. That growth is an accepted current policy tradeoff:
+specializations remain bounded by the program-wide context and
+estimated-body-node limits, and the planned/admitted/rejected counters below
+make future size tuning attributable instead of implicit.
+
+The rollout evidence attributes the growth to duplicated specialization bodies,
+with call-shape specialization the primary newly introduced source rather than
+a runtime/data-layout change. Normalizing the external result, optimized Wasm
+moved from `100.0` to approximately `101.2` while output bytes stayed identical.
+The focused call-shape scorecard selected 5 calls across 4 shapes, emitted 4
+reusable clones, removed 3 parameters, and eliminated 2 default branches. Those
+extra function bodies explain the direction of the size delta; the flat runtime
+shows that this workload did not recover the bytes as a measured speedup. The
+raw external-ray byte counts were not retained in this repository, so the 1.2%
+figure is the authoritative recorded delta rather than reconstructed numbers.
+The policy currently accepts it because fallback semantics are unchanged and
+the clone cost is now explicitly bounded and visible. Frozen per-kind
+reservations prevent unrelated specializations from amplifying that cost based
+on encounter order, and the emitted-function/admission counters are the gate for
+future reductions.
 
 A specialization identity is compositional rather than a suffix owned by one
 feature. Its dimensions include exact receiver parameter types,
@@ -411,6 +449,37 @@ per-parameter state: `provided`, `omitted`, or `stable-callsite-id`. Labels,
 source argument indexes, structural field names, and stable-ID values remain in
 the authoritative call-lowering metadata; they are deliberately not copied
 into the shape identity.
+
+Planning and admission are intentionally separate typed stages. The optimizer
+publishes deterministic `stage: "planned"` requests with stable identities and
+owns the per-callee call-shape planning cap. The frozen program plan owns budget
+reservations; codegen owns admission within each reservation. Planner telemetry
+reports `planned_calls`; codegen reports requested, admitted, reused, and
+rejected outcomes. This split makes the size tradeoff explicit without allowing
+codegen encounter order to move capacity between specialization kinds or change
+which call shapes the optimizer selects.
+
+## Mutation And Structure Contracts
+
+Passes publish mutations through five category-specific
+`ProgramOptimizationContext` methods: HIR topology, call resolution,
+reachability/instances, captures, and produced facts. Each callback receives a
+narrow facade that exposes only its category's operations; mutable optimizer IR
+is not available to passes. The query view is deeply readonly, and optimizer-
+owned HIR nodes are recursively frozen at runtime; even an unsafe consumer cast
+cannot mutate nested topology behind the facade. A topology callback must name its affected modules,
+which advances body-index revisions and invalidates all analyses derived from
+traversal. Analysis keys are statically mapped to result types; callers cannot
+retrieve one key as an unrelated result type.
+
+Module items, function signatures, imports, and symbol metadata are immutable
+during optimization. Module items, metadata, and function signatures are frozen
+when optimizer state is built. `ProgramOptimizationIndex` fingerprints every
+indexed structural input at construction and verifies the snapshot before
+finalization. Structural transforms must therefore introduce an explicit
+index-rebuild contract before they can be added; a cast cannot silently leave
+stale roots or symbol/import indexes. Keeping the invariant structural avoids a
+full-program fingerprint scan after every ordinary expression pass.
 
 Codegen turns an admitted request into a private callee clone while preserving
 the original ABI for exports, closures, indirect calls, dynamic trait
