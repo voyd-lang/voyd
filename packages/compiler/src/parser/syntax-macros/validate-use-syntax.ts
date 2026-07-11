@@ -7,11 +7,14 @@ import {
 import { ParserSyntaxError } from "../errors.js";
 
 export const validateUseSyntax = (ast: Form): Form => {
-  visit(ast);
+  validateModuleEntries(ast.rest);
   return ast;
 };
 
-const visit = (expr: Expr): void => {
+const validateModuleEntries = (entries: readonly Expr[]): void =>
+  entries.forEach(validateModuleEntry);
+
+const validateModuleEntry = (expr: Expr): void => {
   if (!isForm(expr)) return;
 
   const path = modulePathExpression(expr);
@@ -25,8 +28,19 @@ const visit = (expr: Expr): void => {
     }
   }
 
-  expr.toArray().forEach(visit);
+  if (!isInlineModuleDeclaration(expr)) return;
+  const body = expr
+    .toArray()
+    .find(
+      (entry): entry is Form => isForm(entry) && entry.calls("block"),
+    );
+  if (body) validateModuleEntries(body.rest);
 };
+
+const isInlineModuleDeclaration = (form: Form): boolean =>
+  isIdentifierWithValue(form.at(0), "mod") ||
+  (isIdentifierWithValue(form.at(0), "pub") &&
+    isIdentifierWithValue(form.at(1), "mod"));
 
 const findInvalidModuleSeparator = (
   expr: Expr | undefined,

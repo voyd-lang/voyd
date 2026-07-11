@@ -44,6 +44,7 @@ describe("parser syntax errors", () => {
     "obj Value {\n  first: i32\n  second: i32\n}",
     "let value = { result: if true then: 1 else: 2 }",
     "let value = { result: match(source) Some: 1 }",
+    "fn use({ first: i32, second: i32 }) -> i32\n  first + second",
   ])("preserves valid brace and module syntax: %s", (source) => {
     expect(() => parse(source, "/proj/src/valid.voyd")).not.toThrow();
   });
