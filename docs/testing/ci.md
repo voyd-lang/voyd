@@ -33,6 +33,13 @@ Dedicated conformance and integration jobs each use two Vitest workers, so the
 unit lane's three-package concurrency cannot multiply into unbounded nested
 worker pools.
 
+The first live hosted-runner integration baseline completed all 128 assertions
+in about 201 seconds, with the slowest file at about 132 seconds. Its initial
+budget is therefore 300 seconds for the lane and 180 seconds per file. This
+preserves meaningful regression detection while leaving headroom for ordinary
+hosted-runner variance; tighten it after enough successful runs exist to
+estimate p95 reliably.
+
 ## Runtime Selection
 
 `scripts/voyd` selects the CLI runtime in this order:

@@ -8,7 +8,7 @@
     "maxFileMs": 60000
   },
   "integration": {
-    "maxWallMs": 180000,
-    "maxFileMs": 90000
+    "maxWallMs": 300000,
+    "maxFileMs": 180000
   }
 }

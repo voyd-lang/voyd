@@ -1,7 +1,6 @@
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { ConformanceCompilerAdapter } from "./compiler-adapter.js";
-import { createCurrentCompilerAdapter } from "./current-compiler-adapter.js";
 
 type AdapterModule = {
   createConformanceCompilerAdapter?: () => ConformanceCompilerAdapter;
@@ -16,6 +15,8 @@ export const loadCompilerAdapter =
   async (): Promise<ConformanceCompilerAdapter> => {
     const modulePath = process.env.VOYD_CONFORMANCE_ADAPTER;
     if (!modulePath) {
+      const { createCurrentCompilerAdapter } =
+        await import("./current-compiler-adapter.js");
       return createCurrentCompilerAdapter();
     }
 
