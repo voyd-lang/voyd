@@ -42,6 +42,7 @@ import type { EffectsBackend } from "./effects/codegen-backend.js";
 import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
+import type { ProgramSpecializationReservations } from "../optimize/codegen-plan.js";
 import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 import type { SerializerMetadata } from "../semantics/symbol-index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
@@ -281,6 +282,7 @@ export interface CodegenContext {
   outcomeValueTypes: Map<string, OutcomeValueBox>;
   optimization?: ProgramOptimizationFacts;
   specializationPolicy: SpecializationPolicy;
+  specializationReservations: ProgramSpecializationReservations;
 }
 
 export interface LocalBindingBase {

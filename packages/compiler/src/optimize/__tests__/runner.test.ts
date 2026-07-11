@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   OptimizationAnalysisKey,
+  OptimizationAnalysisResultMap,
   ProgramOptimizationContext,
   ProgramOptimizationPass,
 } from "../pass.js";
@@ -24,14 +25,34 @@ const createContext = ({
 }: {
   events?: string[];
 } = {}): ProgramOptimizationContext => {
-  const analyses = new Map<OptimizationAnalysisKey, unknown>();
+  const analyses = new Map<
+    OptimizationAnalysisKey,
+    OptimizationAnalysisResultMap[OptimizationAnalysisKey]
+  >();
   return {
-    ir: {} as ProgramOptimizationContext["ir"],
-    getAnalysis<T>(key: OptimizationAnalysisKey, build: () => T): T {
+    ir: {
+      index: { assertStructureUnchanged: () => undefined },
+    } as ProgramOptimizationContext["ir"],
+    getAnalysis(key, build) {
       if (!analyses.has(key)) {
         analyses.set(key, build());
       }
-      return analyses.get(key) as T;
+      return analyses.get(key) as ReturnType<typeof build>;
+    },
+    mutateHirTopology(_moduleIds, mutate) {
+      return mutate({} as never);
+    },
+    mutateCallResolution(mutate) {
+      return mutate({} as never);
+    },
+    mutateReachability(mutate) {
+      return mutate({} as never);
+    },
+    mutateCaptures(mutate) {
+      return mutate({} as never);
+    },
+    mutateProducedFacts(mutate) {
+      return mutate({} as never);
     },
     invalidateAnalyses(keys) {
       events.push(`invalidate:${keys.join(",")}`);

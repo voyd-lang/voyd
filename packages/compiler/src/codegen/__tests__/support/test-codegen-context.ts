@@ -11,6 +11,7 @@ import { selectEffectsBackend } from "../../effects/codegen-backend.js";
 import { DiagnosticEmitter } from "../../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../../program-helpers.js";
 import { specializationPolicyForOptimizationLevel } from "../../../optimization-policy.js";
+import { createSpecializationReservations } from "../../../optimize/codegen-plan.js";
 
 type TypeDescriptor =
   | { kind: "primitive"; name: string }
@@ -215,6 +216,9 @@ export const createTestCodegenContext = (): {
     },
     outcomeValueTypes: new Map(),
     specializationPolicy: specializationPolicyForOptimizationLevel("none"),
+    specializationReservations: createSpecializationReservations(
+      specializationPolicyForOptimizationLevel("none"),
+    ),
   };
   moduleContexts.set(ctx.moduleId, ctx);
 

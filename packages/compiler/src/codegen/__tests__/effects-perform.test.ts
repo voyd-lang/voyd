@@ -23,6 +23,7 @@ import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../program-helpers.js";
 import type { ProgramSymbolId, TypeId } from "../../semantics/ids.js";
 import { specializationPolicyForOptimizationLevel } from "../../optimization-policy.js";
+import { createSpecializationReservations } from "../../optimize/codegen-plan.js";
 
 const fixturePath = resolve(
   import.meta.dirname,
@@ -98,6 +99,9 @@ const compileEffectFixtureWithCompilerOptimization = async (
         representations: {},
         specializationPolicy:
           specializationPolicyForOptimizationLevel("release"),
+        specializationReservations: createSpecializationReservations(
+          specializationPolicyForOptimizationLevel("release"),
+        ),
       },
     },
   });
@@ -217,6 +221,9 @@ const buildLoweringSnapshot = () => {
     },
     outcomeValueTypes: new Map(),
     specializationPolicy: specializationPolicyForOptimizationLevel("none"),
+    specializationReservations: createSpecializationReservations(
+      specializationPolicyForOptimizationLevel("none"),
+    ),
   };
   moduleContexts.set(ctx.moduleId, ctx);
   ctx.effectsBackend = selectEffectsBackend(ctx);

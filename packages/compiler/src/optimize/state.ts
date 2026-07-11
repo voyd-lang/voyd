@@ -1,4 +1,3 @@
-import type { HirExpression } from "../semantics/hir/index.js";
 import type {
   CallLoweringInfo,
   MonomorphizedInstanceInfo,
@@ -14,6 +13,7 @@ import type {
 } from "../semantics/ids.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { CodegenOptions } from "../codegen/context.js";
+import type { HirGraph } from "../semantics/hir/index.js";
 import type {
   EscapeAnalysisOriginFact,
   EscapeAnalysisParameterFact,
@@ -21,7 +21,10 @@ import type {
   OptimizedCallInfo,
   OptimizedModuleView,
 } from "./ir.js";
-import type { ProgramCodegenOptimizationPlan } from "./codegen-plan.js";
+import {
+  createSpecializationReservations,
+  type ProgramCodegenOptimizationPlan,
+} from "./codegen-plan.js";
 import { ProgramOptimizationIndex } from "./program-index.js";
 import {
   resolveOptimizationPolicy,
@@ -79,35 +82,6 @@ export type MutableOptimizationIr = {
     codegenPlan: ProgramCodegenOptimizationPlan;
   };
 };
-
-export const mutableExpressions = ({
-  moduleView,
-}: {
-  moduleView: OptimizedModuleView;
-}): Map<HirExprId, HirExpression> =>
-  moduleView.hir.expressions as Map<HirExprId, HirExpression>;
-
-export const mutableStatements = ({
-  moduleView,
-}: {
-  moduleView: OptimizedModuleView;
-}) =>
-  moduleView.hir.statements as Map<
-    number,
-    typeof moduleView.hir.statements extends ReadonlyMap<number, infer T>
-      ? T
-      : never
-  >;
-
-export const mutableHandlerClauseCaptures = ({
-  ir,
-}: {
-  ir: MutableOptimizationIr;
-}): Map<string, Map<HirExprId, Map<number, readonly SymbolId[]>>> =>
-  ir.facts.handlerClauseCaptures as Map<
-    string,
-    Map<HirExprId, Map<number, readonly SymbolId[]>>
-  >;
 
 export const normalizeFunctionInstantiations = ({
   program,
@@ -172,13 +146,26 @@ export const buildOptimizationIr = ({
     }
     optimizedModules.set(moduleId, {
       ...moduleView,
+      meta: freezeOptimizationValue(structuredClone(moduleView.meta)),
       semantics,
-      hir: cloneHir(moduleView.hir),
+      hir: cloneOptimizerHir(moduleView.hir),
       effectsInfo: cloneHir(moduleView.effectsInfo),
       effectsIr: buildEffectsIr({
         hir: moduleView.hir,
         info: moduleView.effectsInfo,
       }),
+    });
+  });
+
+  optimizedModules.forEach((moduleView, moduleId) => {
+    moduleView.hir.items.forEach((item) => {
+      if (item.kind !== "function") {
+        return;
+      }
+      const signature = program.functions.getSignature(moduleId, item.symbol);
+      if (signature) {
+        freezeOptimizationValue(signature);
+      }
     });
   });
 
@@ -212,12 +199,43 @@ export const buildOptimizationIr = ({
       },
       runtimeTypeCheckElisionFieldAccesses: new Map(),
       semanticCopyForwardingFieldAccesses: new Map(),
-      codegenPlan: { representations: {}, specializationPolicy },
+      codegenPlan: {
+        representations: {},
+        specializationPolicy,
+        specializationReservations:
+          createSpecializationReservations(specializationPolicy),
+      },
     },
   };
 };
 
 const cloneHir = <T>(value: T): T => structuredClone(value);
+
+export const freezeOptimizationValue = <T>(value: T): T => {
+  if (value === null || typeof value !== "object" || Object.isFrozen(value)) {
+    return value;
+  }
+  if (value instanceof Map) {
+    value.forEach((entry) => freezeOptimizationValue(entry));
+    return value;
+  }
+  if (value instanceof Set) {
+    value.forEach((entry) => freezeOptimizationValue(entry));
+    return value;
+  }
+  Object.values(value).forEach((entry) => freezeOptimizationValue(entry));
+  return Object.freeze(value);
+};
+
+const cloneOptimizerHir = (hir: HirGraph): HirGraph => {
+  const cloned = cloneHir(hir);
+  cloned.items.forEach((item) => freezeOptimizationValue(item));
+  cloned.statements.forEach((statement) => freezeOptimizationValue(statement));
+  cloned.expressions.forEach((expression) =>
+    freezeOptimizationValue(expression),
+  );
+  return cloned;
+};
 
 const cloneCallInfo = (callInfo: CallLoweringInfo): OptimizedCallInfo => ({
   targets: callInfo.targets ? new Map(callInfo.targets) : undefined,

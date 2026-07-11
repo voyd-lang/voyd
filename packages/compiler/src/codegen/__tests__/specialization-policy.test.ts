@@ -9,6 +9,7 @@ import {
 } from "../specialization-policy.js";
 import { createTestCodegenContext } from "./support/test-codegen-context.js";
 import { getOrCreateReceiverSpecialization } from "../receiver-specialization.js";
+import { createSpecializationReservations } from "../../optimize/codegen-plan.js";
 
 const baseMeta = {
   moduleId: "src::main",
@@ -154,6 +155,41 @@ describe("codegen specialization admission", () => {
     ).toBe(false);
   });
 
+  it("reserves shared budgets deterministically across kind encounter order", () => {
+    const run = (order: readonly ("receiver" | "scalar_aggregate")[]) => {
+      const { ctx, item } = createAdmissionFixture({
+        totalContextsPerFunction: 2,
+        totalContextsPerProgram: 2,
+        totalEstimatedBodyNodes: 2,
+      });
+      return new Set(
+        order.filter((kind) =>
+          tryAdmitFunctionSpecialization({
+            ctx,
+            meta: baseMeta,
+            item,
+            kind,
+            dimensions:
+              kind === "receiver"
+                ? { receiver: [[10, 100]] }
+                : {
+                    scalarAggregate: {
+                      parameterIndexes: [1],
+                      result: false,
+                    },
+                  },
+            existingKindVariants: 0,
+            maxKindVariants: 10,
+          }),
+        ),
+      );
+    };
+
+    expect(run(["receiver", "scalar_aggregate"])).toEqual(
+      run(["scalar_aggregate", "receiver"]),
+    );
+  });
+
   it("enforces the program budget without rejecting reuse", () => {
     const { ctx, item } = createAdmissionFixture({
       totalContextsPerProgram: 1,
@@ -236,6 +272,9 @@ describe("codegen specialization admission", () => {
       ...ctx.specializationPolicy,
       totalEstimatedBodyNodes: 1,
     };
+    ctx.specializationReservations = createSpecializationReservations(
+      ctx.specializationPolicy,
+    );
     const item = {
       kind: "function",
       body: 1,
@@ -280,6 +319,9 @@ const createAdmissionFixture = (
     ...ctx.specializationPolicy,
     ...overrides,
   };
+  ctx.specializationReservations = createSpecializationReservations(
+    ctx.specializationPolicy,
+  );
   expressions.set(1, {
     kind: "expr",
     exprKind: "literal",
