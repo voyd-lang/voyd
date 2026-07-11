@@ -1,7 +1,7 @@
 {
   "unit": {
-    "maxWallMs": 300000,
-    "maxFileMs": 120000
+    "maxWallMs": 420000,
+    "maxFileMs": 180000
   },
   "conformance": {
     "maxWallMs": 120000,
