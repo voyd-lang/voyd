@@ -101,14 +101,14 @@ benchmarkDescribe("performance: vtrace compute-only benchmark", () => {
     async () => {
       const host = await createVoydHost({ wasm: compiled.wasm });
 
-      await expect(host.run<number>("benchmark")).resolves.toBe(
+      await expect(host.runPure<number>("benchmark")).resolves.toBe(
         benchmarkChecksum,
       );
 
       const durationsMs: number[] = [];
       for (let iteration = 0; iteration < perfIterations; iteration += 1) {
         const startedAt = performance.now();
-        await expect(host.run<number>("benchmark")).resolves.toBe(
+        await expect(host.runPure<number>("benchmark")).resolves.toBe(
           benchmarkChecksum,
         );
         durationsMs.push(performance.now() - startedAt);
