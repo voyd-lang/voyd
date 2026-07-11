@@ -1,0 +1,16 @@
+val Left {
+  value: i32
+}
+
+obj Right {
+  value: i32
+}
+
+type Mixed = Left | Right
+
+pub fn accept(value: Mixed) -> i32
+  match(value)
+    Left:
+      value.value
+    Right:
+      value.value

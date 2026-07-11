@@ -1,0 +1,2 @@
+pub macro inc(value)
+  syntax_template (+ $value 1.0)

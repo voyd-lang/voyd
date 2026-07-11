@@ -45,6 +45,7 @@ voyd --run ./src/main.voyd
 ```
 
 Compile a program:
+
 ```bash
 voyd --emit-wasm ./src
 ```
@@ -97,7 +98,6 @@ See [packages/reference/docs/sdk.md](./packages/reference/docs/sdk.md) for more.
 ## Monorepo layout
 
 - `apps/cli`: `voyd` / `vt` command line entrypoints
-- `apps/smoke`: end-to-end smoke tests
 - `apps/site`: `voyd.dev` docs and playground
 - `apps/vscode`: VSCode extension
 - `packages/compiler`: parser, semantics, and Wasm codegen
@@ -107,6 +107,9 @@ See [packages/reference/docs/sdk.md](./packages/reference/docs/sdk.md) for more.
 - `packages/js-host`: JS host runtime for executing compiled modules
 - `packages/std`: standard library source bundle
 - `packages/reference`: language reference source and generated nav bundle
+- `tests/conformance`: implementation-independent Voyd language conformance
+- `tests/integration`: cross-package SDK, std, host, web, and VX coverage
+- `tests/performance`: opt-in benchmarks and large regression programs
 
 ## Develop locally
 

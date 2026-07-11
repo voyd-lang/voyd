@@ -1,0 +1,49 @@
+use std::fixed_array::fns::all
+use std::optional::types::{ Some, None }
+
+obj Item {
+  value: i32
+}
+
+fn build_values() -> FixedArray<Item>
+  var arr = new_fixed_array<Item>(3)
+  arr = arr.set<Item>(0, Item { value: 1 })
+  arr = arr.set<Item>(1, Item { value: 2 })
+  arr = arr.set<Item>(2, Item { value: 3 })
+  arr
+
+fn item_or(arr: FixedArray<Item>, index: i32, fallback: i32) -> i32
+  let item = arr.get<Item>(index)
+  match(item)
+    Some<Item> { value }:
+      value.value
+    None:
+      fallback
+
+pub fn len_and_head() -> i32
+  let arr = build_values()
+  arr.length<Item>() + item_or(arr, 0, -100)
+
+pub fn copy_tail() -> i32
+  let src = build_values()
+  var dest = new_fixed_array<Item>(3)
+  dest = dest.set<Item>(0, Item { value: 9 })
+  dest = dest.set<Item>(1, Item { value: 8 })
+  dest = dest.set<Item>(2, Item { value: 7 })
+  dest = dest.copy<Item>({
+    from: src,
+    to_index: 1,
+    from_index: 0,
+    count: 2
+  })
+  item_or(dest, 2, -100)
+
+pub fn iterate_sum() -> i32
+  let arr = build_values()
+  let len = arr.length<Item>()
+  var index = 0
+  var acc = 0
+  while index < len:
+    acc = acc + item_or(arr, index, 0)
+    index = index + 1
+  acc

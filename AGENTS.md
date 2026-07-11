@@ -7,7 +7,6 @@ compiles to webassembly.
 # Directory Index
 
 - `apps/cli`: `voyd` / `vt` command line entrypoints.
-- `apps/smoke`: End-to-end smoke tests (prefer adding public API tests here).
 - `apps/site`: `voyd.dev` docs/playground site.
 - `apps/vscode`: VSCode extension and language client wiring.
 - `packages/compiler`: Parser, semantics, and Wasm codegen pipeline.
@@ -18,6 +17,9 @@ compiles to webassembly.
 - `packages/js-host`: JS host runtime used for executing compiled modules.
 - `packages/std`: Standard library source bundle (Voyd source).
 - `packages/reference`: Language reference source/build scripts.
+- `tests/conformance`: Portable language behavior for every compiler implementation.
+- `tests/integration`: Cross-package SDK/std/host/product behavior.
+- `tests/performance`: Opt-in benchmarks and large external regressions.
 - `docs/architecture`: Design constraints and cross-module contracts.
 
 # Architecture Overview
@@ -33,56 +35,62 @@ compiles to webassembly.
 
 - Always build with long term maintainability in mind. Avoid short term hacks.
 - If you encounter code or an architecture that could benefit from a refactor,
-report on it and suggest direction in your final response.
+  report on it and suggest direction in your final response.
 - When diagnosing bugs, prefer implementation-level root-cause fixes over
-call-site/type-annotation workarounds unless a workaround is explicitly requested.
+  call-site/type-annotation workarounds unless a workaround is explicitly requested.
 - Always be mindful about clear code boundaries and contracts. Avoid introducing any unnecessary coupling.
 - When you encounter a bug or important missing feature that is likely to have a real impact on users and is unrelated to your current task, file a ticket in linear tagged with codex.
 
 # Required Pre-Reads
 
 - Before contributing to `packages/compiler` or `packages/std`, read
-[`docs/agent-voyd-quick-reference.md`](docs/agent-voyd-quick-reference.md).
-This is required for compiler/std work because those areas often need precise,
-idiomatic Voyd syntax in std sources, fixtures, smoke tests, and reference
-examples.
+  [`docs/agent-voyd-quick-reference.md`](docs/agent-voyd-quick-reference.md).
+  This is required for compiler/std work because those areas often need precise,
+  idiomatic Voyd syntax in std sources, fixtures, conformance tests, and reference
+  examples.
 
 # Debugging
 
 A cli is available after `npm link`
 
 Helpful commands:
+
 - `vt --emit-parser-ast <path-to-voyd-file>`
 - `vt --run <path-to-voyd-file>` // runs the pub fn main of the file
 - `vt --emit-wasm-text --opt <path-to-voyd-file>` // Careful, this can be large
 
-
 # Testing
+
+Before adding, moving, or substantially expanding tests, read
+[`docs/testing/README.md`](docs/testing/README.md). It is the canonical guide
+for ownership, portable conformance, CI lanes, and test-cost expectations.
 
 - `npm test` (runs vitest suite). Always confirm this passes before finishing.
 - `npm run typecheck`.
+- `npm run test:audit`.
 - `npx vitest <path-to-test>`
 
 You should generally add unit tests when they protect new behavior or a regression.
 Do not add tests just to mirror coverage that already exists at another layer.
 
-E2E Unit tests should go in apps/smoke (unless strictly scoped to the compiler). Always prefer the public API
-
 ## Test Placement Guidance
 
-Before adding tests, read [`docs/testing/test-layer-ownership.md`](docs/testing/test-layer-ownership.md).
+Before adding tests, read [`docs/testing/ownership.md`](docs/testing/ownership.md).
 
 - `packages/compiler`: parser/typing/lowering/codegen internals and compiler-only contracts.
+- `tests/conformance`: observable language behavior that another compiler must pass unchanged.
+- `tests/integration`: cross-package user-visible flows through public APIs.
 - `packages/sdk`: public compile/run/test APIs and runtime adapter contracts.
 - `apps/cli`: argument parsing, command wiring, process UX, and exit/reporting behavior.
-- `apps/smoke`: end-to-end user-visible flows via public APIs (cross-package integration).
-- Avoid duplicating semantic assertions across CLI/SDK/smoke unless it protects a boundary; if duplicated, document the boundary and keep exactly one canonical layer.
+- `tests/performance`: opt-in benchmarks, large sweeps, and external regression programs.
+- Avoid duplicating semantic assertions across layers unless each test protects a distinct boundary; keep semantic depth in exactly one canonical layer.
+- After adding or removing a test file, run `npm run test:audit:update` and explicitly resolve any `needs-review` inventory entry by contract; directory placement is not an ownership decision.
 
 ## Test Hygiene
 
 - Prefer batching expensive compile/run setup: one Voyd fixture with several focused entrypoints is usually better than several tiny fixtures that each compile the std/runtime stack.
-- Keep compile-heavy smoke tests at the highest useful boundary only. If compiler or std unit tests already own the semantics, smoke should assert a narrow public integration signal.
-- Before adding a new `.test.ts` smoke file or `.test.voyd` module, check whether an existing fixture can host the scenario without mixing unrelated ownership.
+- Keep compile-heavy integration tests at the highest useful boundary only. If compiler, conformance, or std tests already own the semantics, integration should assert a narrow public signal.
+- Before adding a new compile-heavy `.test.ts` file or Voyd fixture, check whether an existing subsystem fixture can host the scenario without mixing unrelated ownership.
 - Avoid brute-force sweeps in the default suite. Use representative edge cases in normal tests, and put benchmark/perf loops behind an explicit perf script or keep them intentionally small.
 - When adding or expanding a slow test, note the boundary it protects and the expected runtime cost in the PR or final handoff.
 

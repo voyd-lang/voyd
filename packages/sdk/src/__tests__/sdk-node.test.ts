@@ -412,7 +412,9 @@ pub fn value() -> i32
     await expect(second.run<number>({ entryName: "main" })).resolves.toBe(2);
 
     const repeatedSecond = expectCompileSuccess(await compile(2));
-    await expect(repeatedSecond.run<number>({ entryName: "main" })).resolves.toBe(2);
+    await expect(
+      repeatedSecond.run<number>({ entryName: "main" }),
+    ).resolves.toBe(2);
   });
 
   it("re-emits across codegen option changes", async () => {
@@ -429,8 +431,12 @@ pub fn main() -> i32
       await sdk.compile({ source, runtimeDiagnostics: true }),
     );
 
-    expect(hasRuntimeDiagnosticsSection(withoutRuntimeDiagnostics.wasm)).toBe(false);
-    expect(hasRuntimeDiagnosticsSection(withRuntimeDiagnostics.wasm)).toBe(true);
+    expect(hasRuntimeDiagnosticsSection(withoutRuntimeDiagnostics.wasm)).toBe(
+      false,
+    );
+    expect(hasRuntimeDiagnosticsSection(withRuntimeDiagnostics.wasm)).toBe(
+      true,
+    );
   });
 
   it("reuses dependency snapshots for app edits and invalidates std/pkg edits", async () => {
@@ -509,16 +515,14 @@ pub fn main() -> i32
     const sdk = createSdk();
     const entryPath = path.join(
       repoRoot,
-      "apps",
-      "smoke",
+      "tests",
+      "performance",
       "fixtures",
       "vtrace-compute-benchmark.voyd",
     );
     const source = await fs.readFile(entryPath, "utf8");
 
-    const cold = expectCompileSuccess(
-      await sdk.compile({ entryPath, source }),
-    );
+    const cold = expectCompileSuccess(await sdk.compile({ entryPath, source }));
     expect(cold.wasm.byteLength).toBeGreaterThan(0);
 
     const warm = expectCompileSuccess(
@@ -536,8 +540,8 @@ pub fn main() -> i32
     const sdk = createSdk();
     const entryPath = path.join(
       repoRoot,
-      "apps",
-      "smoke",
+      "tests",
+      "integration",
       "fixtures",
       "std-math-transcendentals.voyd",
     );
@@ -948,95 +952,6 @@ pub fn main() -> i32
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }
-  });
-
-  it("emits runnable optimized wasm for package-based projects", async () => {
-    const sdk = createSdk();
-    const projectRoot = await fs.mkdtemp(
-      path.join(repoRoot, ".tmp-voyd-sdk-opt-node-modules-"),
-    );
-    const srcDir = path.join(projectRoot, "src");
-    const entryPath = path.join(srcDir, "main.voyd");
-    const packageRoot = path.join(projectRoot, "node_modules", "voyd_semver");
-
-    await fs.mkdir(srcDir, { recursive: true });
-    await fs.copyFile(
-      path.join(
-        repoRoot,
-        "apps",
-        "smoke",
-        "fixtures",
-        "node-modules-voyd-semver",
-        "main.voyd",
-      ),
-      entryPath,
-    );
-    await fs.cp(path.join(repoRoot, "packages", "voyd_semver"), packageRoot, {
-      recursive: true,
-    });
-
-    try {
-      const result = expectCompileSuccess(
-        await sdk.compile({ entryPath, optimize: true }),
-      );
-      expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(false);
-      const output = await result.run<number>({ entryName: "main" });
-      expect(output).toBe(42);
-    } finally {
-      await fs.rm(projectRoot, { recursive: true, force: true });
-    }
-  });
-
-  it("runs optimized serialized exports after scalar aggregate lowering", async () => {
-    const sdk = createSdk();
-    const result = expectCompileSuccess(
-      await sdk.compile({
-        optimize: true,
-        source: `
-obj Pair {
-  x: i32,
-  y: i32
-}
-
-pub fn main() -> i32
-  var i = 0
-  var total = 0
-  while i < 20:
-    let pair = Pair { x: i, y: i + 1 }
-    total = total + pair.x + pair.y
-    i = i + 1
-  total
-`,
-      }),
-    );
-    const host = await createVoydHost({ wasm: result.wasm });
-
-    await expect(host.run<number>("main")).resolves.toBe(400);
-  });
-
-  it("omits runtime diagnostics by default", async () => {
-    const sdk = createSdk();
-    const result = expectCompileSuccess(
-      await sdk.compile({
-        source: `pub fn main() -> i32
-  42
-`,
-      }),
-    );
-    expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(false);
-  });
-
-  it("emits runtime diagnostics metadata when requested", async () => {
-    const sdk = createSdk();
-    const result = expectCompileSuccess(
-      await sdk.compile({
-        source: `pub fn main() -> i32
-  42
-`,
-        runtimeDiagnostics: true,
-      }),
-    );
-    expect(hasRuntimeDiagnosticsSection(result.wasm)).toBe(true);
   });
 
   it("supports handlersByLabelSuffix using :: separators", async () => {

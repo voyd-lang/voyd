@@ -11,26 +11,18 @@ const repoRoot = resolve(testDir, "../../../../");
 const tsxPath = resolve(repoRoot, "node_modules/.bin/tsx");
 const distCliPath = resolve(repoRoot, "apps/cli/dist/cli-dev.js");
 const CLI_E2E_TIMEOUT_MS = 60_000;
-const cliE2eRuntime = process.env.VOYD_CLI_E2E_RUNTIME === "dist"
-  ? "dist"
-  : "source";
+const cliE2eRuntime =
+  process.env.VOYD_CLI_E2E_RUNTIME === "dist" ? "dist" : "source";
 
 const writePackageFixture = async (packageSrcRoot: string): Promise<void> => {
   await mkdir(packageSrcRoot, { recursive: true });
   await writeFile(
     resolve(packageSrcRoot, "pkg.voyd"),
-    [
-      "pub use src::math::plus_one",
-      "",
-    ].join("\n"),
+    ["pub use src::math::plus_one", ""].join("\n"),
   );
   await writeFile(
     resolve(packageSrcRoot, "math.voyd"),
-    [
-      "pub fn plus_one(value: i32) -> i32",
-      "  value + 1",
-      "",
-    ].join("\n"),
+    ["pub fn plus_one(value: i32) -> i32", "  value + 1", ""].join("\n"),
   );
 };
 
@@ -43,10 +35,10 @@ const createFixture = async (): Promise<string> => {
     [
       "use std::test::assertions::all",
       "",
-      "test \"default test root\":",
+      'test "default test root":',
       "  assert(true)",
       "",
-    ].join("\n")
+    ].join("\n"),
   );
   return root;
 };
@@ -86,7 +78,9 @@ const createPkgDirRelativeTestFixture = async (): Promise<{
   cwd: string;
   testRoot: string;
 }> => {
-  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-test-pkg-dir-relative-"));
+  const root = await mkdtemp(
+    resolve(tmpdir(), "voyd-cli-test-pkg-dir-relative-"),
+  );
   const testRoot = resolve(root, "workspace", "apps", "consumer", "test");
   const packageSrcRoot = resolve(
     root,
@@ -105,49 +99,12 @@ const createPkgDirRelativeTestFixture = async (): Promise<{
       "use std::test::assertions::all",
       "use pkg::my_pkg::all",
       "",
-      "test \"imports package from relative pkg-dir in voyd test\":",
+      'test "imports package from relative pkg-dir in voyd test":',
       "  assert(plus_one(1) == 2)",
       "",
     ].join("\n"),
   );
   return { cwd: root, testRoot };
-};
-
-const createDefaultNodeModulesFixture = async (): Promise<{
-  cwd: string;
-  entryPath: string;
-  testRoot: string;
-}> => {
-  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-node-modules-default-"));
-  const srcRoot = resolve(root, "workspace", "apps", "consumer", "src");
-  const testRoot = resolve(root, "workspace", "apps", "consumer", "test");
-  const packageSrcRoot = resolve(root, "workspace", "node_modules", "my_pkg", "src");
-  const entryPath = resolve(srcRoot, "main.voyd");
-  await mkdir(srcRoot, { recursive: true });
-  await mkdir(testRoot, { recursive: true });
-  await writePackageFixture(packageSrcRoot);
-  await writeFile(
-    entryPath,
-    [
-      "use pkg::my_pkg::all",
-      "",
-      "pub fn main() -> i32",
-      "  plus_one(41)",
-      "",
-    ].join("\n"),
-  );
-  await writeFile(
-    resolve(testRoot, "uses_pkg.voyd"),
-    [
-      "use std::test::assertions::all",
-      "use pkg::my_pkg::all",
-      "",
-      "test \"imports package through default node_modules lookup\":",
-      "  assert(plus_one(1) == 2)",
-      "",
-    ].join("\n"),
-  );
-  return { cwd: root, entryPath, testRoot };
 };
 
 const createNonTestTargetFixture = async (): Promise<{
@@ -160,11 +117,7 @@ const createNonTestTargetFixture = async (): Promise<{
   await mkdir(srcRoot, { recursive: true });
   await writeFile(
     targetFile,
-    [
-      "pub fn broken() -> i32",
-      "  \"oops\"",
-      "",
-    ].join("\n"),
+    ["pub fn broken() -> i32", '  "oops"', ""].join("\n"),
   );
   return { root, targetFile };
 };
@@ -181,53 +134,13 @@ const createCompanionTypingErrorFixture = async (): Promise<{
   await mkdir(srcRoot, { recursive: true });
   await writeFile(
     sourceFile,
-    [
-      "pub fn add_one(value: i32) -> i32",
-      "  value + 1",
-      "",
-    ].join("\n"),
+    ["pub fn add_one(value: i32) -> i32", "  value + 1", ""].join("\n"),
   );
   await writeFile(
     testFile,
-    [
-      "test \"preserves error location\":",
-      "  add_one(\"x\")",
-      "",
-    ].join("\n"),
+    ['test "preserves error location":', '  add_one("x")', ""].join("\n"),
   );
   return { root, sourceFile, testFile };
-};
-
-const createCompanionPrivateAccessFixture = async (): Promise<{
-  root: string;
-  testFile: string;
-}> => {
-  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-companion-private-"));
-  const srcRoot = resolve(root, "src");
-  const sourceFile = resolve(srcRoot, "subject.voyd");
-  const testFile = resolve(srcRoot, "subject.test.voyd");
-  await mkdir(srcRoot, { recursive: true });
-  await writeFile(
-    sourceFile,
-    [
-      "fn hidden() -> i32",
-      "  7",
-      "",
-      "pub fn value() -> i32",
-      "  hidden()",
-      "",
-    ].join("\n"),
-  );
-  await writeFile(
-    testFile,
-    [
-      "test \"companion can access private symbols\":",
-      "  hidden()",
-      "",
-    ].join("\n"),
-  );
-
-  return { root, testFile };
 };
 
 const createCompanionTargetIncludesPrimaryFixture = async (): Promise<{
@@ -242,18 +155,14 @@ const createCompanionTargetIncludesPrimaryFixture = async (): Promise<{
   await mkdir(srcRoot, { recursive: true });
   await writeFile(
     sourceFile,
-    [
-      "pub fn broken() -> i32",
-      "  \"nope\"",
-      "",
-    ].join("\n"),
+    ["pub fn broken() -> i32", '  "nope"', ""].join("\n"),
   );
   await writeFile(
     testFile,
     [
       "use std::test::assertions::all",
       "",
-      "test \"companion target includes primary module\":",
+      'test "companion target includes primary module":',
       "  assert(true)",
       "",
     ].join("\n"),
@@ -272,11 +181,7 @@ const createNestedSrcFileTargetFixture = async (): Promise<{
   await mkdir(nestedRoot, { recursive: true });
   await writeFile(
     resolve(srcRoot, "shared.voyd"),
-    [
-      "pub fn value() -> i32",
-      "  42",
-      "",
-    ].join("\n"),
+    ["pub fn value() -> i32", "  42", ""].join("\n"),
   );
   await writeFile(
     targetFile,
@@ -284,7 +189,7 @@ const createNestedSrcFileTargetFixture = async (): Promise<{
       "use std::test::assertions::all",
       "use src::shared::all",
       "",
-      "test \"nested target keeps src root\":",
+      'test "nested target keeps src root":',
       "  assert(value(), eq: 42)",
       "",
     ].join("\n"),
@@ -304,21 +209,13 @@ const createNestedEntryFixture = async (): Promise<{
   await mkdir(nestedRoot, { recursive: true });
   await writeFile(
     resolve(srcRoot, "shared.voyd"),
-    [
-      "pub fn value() -> i32",
-      "  42",
-      "",
-    ].join("\n"),
+    ["pub fn value() -> i32", "  42", ""].join("\n"),
   );
   await writeFile(
     entryPath,
-    [
-      "use src::shared::all",
-      "",
-      "pub fn main() -> i32",
-      "  value()",
-      "",
-    ].join("\n"),
+    ["use src::shared::all", "", "pub fn main() -> i32", "  value()", ""].join(
+      "\n",
+    ),
   );
   return { root, entryPath };
 };
@@ -335,18 +232,14 @@ const createMixedDirectoryFixture = async (): Promise<{
     [
       "use std::test::assertions::all",
       "",
-      "test \"runs despite unrelated invalid file\":",
+      'test "runs despite unrelated invalid file":',
       "  assert(true)",
       "",
     ].join("\n"),
   );
   await writeFile(
     resolve(testRoot, "broken.voyd"),
-    [
-      "pub fn not_a_test() -> i32",
-      "  \"broken\"",
-      "",
-    ].join("\n"),
+    ["pub fn not_a_test() -> i32", '  "broken"', ""].join("\n"),
   );
   return { root, testRoot };
 };
@@ -359,14 +252,7 @@ const createMalformedTestDeclarationFixture = async (): Promise<{
   const srcRoot = resolve(root, "src");
   const targetFile = resolve(srcRoot, "bad_test.voyd");
   await mkdir(srcRoot, { recursive: true });
-  await writeFile(
-    targetFile,
-    [
-      "test:",
-      "  1",
-      "",
-    ].join("\n"),
-  );
+  await writeFile(targetFile, ["test:", "  1", ""].join("\n"));
   return { root, targetFile };
 };
 
@@ -414,13 +300,7 @@ const createDanglingDocFixture = async (): Promise<string> => {
   await mkdir(srcRoot, { recursive: true });
   await writeFile(
     resolve(srcRoot, "main.voyd"),
-    [
-      "/// I am lost.",
-      "",
-      "fn main() -> i32",
-      "  1",
-      "",
-    ].join("\n"),
+    ["/// I am lost.", "", "fn main() -> i32", "  1", ""].join("\n"),
   );
   return root;
 };
@@ -437,13 +317,7 @@ const createDiagnosticCompactionFixture = async (): Promise<{
 
   await writeFile(
     resolve(srcRoot, "main.voyd"),
-    [
-      "use std::all",
-      "",
-      "pub fn main() -> i32",
-      "  1",
-      "",
-    ].join("\n"),
+    ["use std::all", "", "pub fn main() -> i32", "  1", ""].join("\n"),
   );
 
   const arrayPath = resolve(stdRoot, "array.voyd");
@@ -471,17 +345,21 @@ const assertCliRunnerAvailable = (): void => {
 };
 
 const runCli = (root: string, args: string[], env?: Record<string, string>) =>
-  spawnSync(cliE2eRuntime === "source" ? tsxPath : process.execPath, [
-    ...(cliE2eRuntime === "source"
-      ? ["--conditions=development", sourceCliPath]
-      : [distCliPath]),
-    ...args,
-  ], {
-    cwd: root,
-    encoding: "utf8",
-    env: { ...process.env, ...env },
-    timeout: CLI_E2E_TIMEOUT_MS,
-  });
+  spawnSync(
+    cliE2eRuntime === "source" ? tsxPath : process.execPath,
+    [
+      ...(cliE2eRuntime === "source"
+        ? ["--conditions=development", sourceCliPath]
+        : [distCliPath]),
+      ...args,
+    ],
+    {
+      cwd: root,
+      encoding: "utf8",
+      env: { ...process.env, ...env },
+      timeout: CLI_E2E_TIMEOUT_MS,
+    },
+  );
 
 describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   it("reports discovery failures for non-test file targets", async () => {
@@ -517,25 +395,6 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       expect(output).toContain("[typing] voyd test failed for target:");
       expect(output).toContain(`${fixture.testFile}:2:11`);
       expect(output).not.toContain(`${fixture.sourceFile}:1:1`);
-    } finally {
-      await rm(fixture.root, { recursive: true, force: true });
-    }
-  });
-
-  it("treats companion test files as part of their primary module", async () => {
-    assertCliRunnerAvailable();
-
-    const fixture = await createCompanionPrivateAccessFixture();
-    try {
-      const result = runCli(fixture.root, ["test", fixture.testFile]);
-      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-      if (result.status !== 0) {
-        throw new Error(`voyd test failed: ${output}`);
-      }
-
-      expect(output).toContain("passed 1, failed 0, skipped 0");
-      expect(output).not.toContain("TY0006");
     } finally {
       await rm(fixture.root, { recursive: true, force: true });
     }
@@ -616,25 +475,7 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 });
 
 describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
-  // SDK + smoke own deep package-resolution semantics. CLI e2e keeps wiring checks.
-  it("keeps src-root imports when compiling nested entry files", async () => {
-    assertCliRunnerAvailable();
-
-    const fixture = await createNestedEntryFixture();
-    try {
-      const result = runCli(fixture.root, ["--emit-ir-ast", fixture.entryPath]);
-      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-      if (result.status !== 0) {
-        throw new Error(`voyd compile failed: ${output}`);
-      }
-
-      expect(output).not.toContain("Unable to resolve module");
-    } finally {
-      await rm(fixture.root, { recursive: true, force: true });
-    }
-  });
-
+  // SDK + integration own deep package-resolution semantics. CLI e2e keeps wiring checks.
   it("keeps src-root imports when running nested entry files", async () => {
     assertCliRunnerAvailable();
 
@@ -654,89 +495,56 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
     }
   });
 
-  it(
-    "uses default node_modules lookup for compile and test, including ancestor walking",
-    async () => {
-      assertCliRunnerAvailable();
+  it("resolves --pkg-dir relative to the target source root", async () => {
+    assertCliRunnerAvailable();
 
-      const fixture = await createDefaultNodeModulesFixture();
-      try {
-        const compileResult = runCli(fixture.cwd, ["--emit-ir-ast", fixture.entryPath]);
-        const compileOutput = `${compileResult.stdout ?? ""}${compileResult.stderr ?? ""}`;
-        if (compileResult.status !== 0) {
-          throw new Error(`voyd compile failed: ${compileOutput}`);
-        }
-        expect(compileOutput).not.toContain("Unable to resolve module");
+    const fixture = await createPkgDirRelativeFixture();
+    try {
+      const result = runCli(fixture.cwd, [
+        "--emit-ir-ast",
+        fixture.entryPath,
+        "--pkg-dir",
+        "../pkgs",
+      ]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 
-        const testResult = runCli(fixture.cwd, ["test", fixture.testRoot]);
-        const testOutput = `${testResult.stdout ?? ""}${testResult.stderr ?? ""}`;
-        if (testResult.status !== 0) {
-          throw new Error(`voyd test failed: ${testOutput}`);
-        }
-        expect(testOutput).toContain("passed 1, failed 0, skipped 0");
-        expect(testOutput).not.toContain("Unable to resolve module");
-      } finally {
-        await rm(fixture.cwd, { recursive: true, force: true });
+      if (result.status !== 0) {
+        throw new Error(`voyd compile failed: ${output}`);
       }
-    },
-  );
 
-  it(
-    "resolves --pkg-dir relative to the target source root",
-    async () => {
-      assertCliRunnerAvailable();
+      expect(output).not.toContain("Unable to resolve module");
+    } finally {
+      await rm(fixture.cwd, { recursive: true, force: true });
+    }
+  });
 
-      const fixture = await createPkgDirRelativeFixture();
-      try {
-        const result = runCli(fixture.cwd, [
-          "--emit-ir-ast",
-          fixture.entryPath,
-          "--pkg-dir",
-          "../pkgs",
-        ]);
-        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+  it("resolves --pkg-dir relative to the test root", async () => {
+    assertCliRunnerAvailable();
 
-        if (result.status !== 0) {
-          throw new Error(`voyd compile failed: ${output}`);
-        }
+    const fixture = await createPkgDirRelativeTestFixture();
+    try {
+      const result = runCli(fixture.cwd, [
+        "test",
+        fixture.testRoot,
+        "--pkg-dir",
+        "../pkgs",
+      ]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 
-        expect(output).not.toContain("Unable to resolve module");
-      } finally {
-        await rm(fixture.cwd, { recursive: true, force: true });
+      if (result.status !== 0) {
+        throw new Error(`voyd test failed: ${output}`);
       }
-    },
-  );
 
-  it(
-    "resolves --pkg-dir relative to the test root",
-    async () => {
-      assertCliRunnerAvailable();
-
-      const fixture = await createPkgDirRelativeTestFixture();
-      try {
-        const result = runCli(fixture.cwd, [
-          "test",
-          fixture.testRoot,
-          "--pkg-dir",
-          "../pkgs",
-        ]);
-        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-        if (result.status !== 0) {
-          throw new Error(`voyd test failed: ${output}`);
-        }
-
-        expect(output).toContain("passed 1, failed 0, skipped 0");
-        expect(output).not.toContain("Unable to resolve module");
-      } finally {
-        await rm(fixture.cwd, { recursive: true, force: true });
-      }
-    },
-  );
+      expect(output).toContain("passed 1, failed 0, skipped 0");
+      expect(output).not.toContain("Unable to resolve module");
+    } finally {
+      await rm(fixture.cwd, { recursive: true, force: true });
+    }
+  });
 });
 
 describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
-  // SDK + smoke own documentation rendering semantics. CLI e2e validates command wiring and exit/reporting.
+  // SDK + integration own documentation rendering semantics. CLI e2e validates command wiring and exit/reporting.
   it("writes JSON docs to a custom output path", async () => {
     assertCliRunnerAvailable();
 
@@ -758,7 +566,9 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       const json = JSON.parse(await readFile(docsPath, "utf8")) as {
         modules: Array<{ id: string }>;
       };
-      expect(json.modules.some((module) => module.id === "src::main")).toBe(true);
+      expect(json.modules.some((module) => module.id === "src::main")).toBe(
+        true,
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -834,11 +644,9 @@ describe("voyd cli diagnostics output", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 
     const fixture = await createDiagnosticCompactionFixture();
     try {
-      const result = runCli(
-        fixture.root,
-        ["--emit-ir-ast"],
-        { VOYD_STD_ROOT: fixture.stdRoot },
-      );
+      const result = runCli(fixture.root, ["--emit-ir-ast"], {
+        VOYD_STD_ROOT: fixture.stdRoot,
+      });
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 
       expect(result.status).not.toBe(0);

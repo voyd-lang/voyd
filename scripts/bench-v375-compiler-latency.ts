@@ -45,7 +45,7 @@ const optimizeModes = (process.env.VOYD_BENCH_OPTIMIZE_MODES ?? "true")
   .map((value) => {
     if (value === "true" || value === "1") return true;
     if (value === "false" || value === "0") return false;
-      throw new Error(`invalid VOYD_BENCH_OPTIMIZE_MODES entry ${value}`);
+    throw new Error(`invalid VOYD_BENCH_OPTIMIZE_MODES entry ${value}`);
   });
 const scenarioFilter = new Set(
   (process.env.VOYD_COMPILER_LATENCY_SCENARIOS ?? "")
@@ -57,28 +57,36 @@ const scenarioFilter = new Set(
 const scenarios: Scenario[] = [
   {
     name: "smoke/std-math-transcendentals",
-    entryPath: path.resolve("apps/smoke/fixtures/std-math-transcendentals.voyd"),
+    entryPath: path.resolve(
+      "tests/integration/fixtures/std-math-transcendentals.voyd",
+    ),
     entryName: "main",
     expected: 1,
     runtimeSamples: 3,
   },
   {
     name: "smoke/scalar-aggregate-representative",
-    entryPath: path.resolve("apps/smoke/fixtures/scalar-aggregate-representative.voyd"),
+    entryPath: path.resolve(
+      "tests/performance/fixtures/scalar-aggregate-representative.voyd",
+    ),
     entryName: "main",
     expected: 1_100_340_000,
     runtimeSamples: 3,
   },
   {
     name: "smoke/vtrace-compute-main",
-    entryPath: path.resolve("apps/smoke/fixtures/vtrace-compute-benchmark.voyd"),
+    entryPath: path.resolve(
+      "tests/performance/fixtures/vtrace-compute-benchmark.voyd",
+    ),
     entryName: "main",
     expected: 3_825_271,
     runtimeSamples: 1,
   },
   {
     name: "smoke/vtrace-compute-benchmark",
-    entryPath: path.resolve("apps/smoke/fixtures/vtrace-compute-benchmark.voyd"),
+    entryPath: path.resolve(
+      "tests/performance/fixtures/vtrace-compute-benchmark.voyd",
+    ),
     entryName: "benchmark",
     expected: 57_372_071,
     runtimeSamples: Number.parseInt(
@@ -88,12 +96,14 @@ const scenarios: Scenario[] = [
   },
   {
     name: "voyd_examples/ray-vtrace-tuned",
-    entryPath: "/Users/drew/projects/voyd_examples/benchmarks/ray/voyd/vtrace_tuned.voyd",
+    entryPath:
+      "/Users/drew/projects/voyd_examples/benchmarks/ray/voyd/vtrace_tuned.voyd",
     allowMissing: true,
   },
   {
     name: "voyd_examples/suite-compile",
-    entryPath: "/Users/drew/projects/voyd_examples/benchmarks/suite/voyd/benchmarks.voyd",
+    entryPath:
+      "/Users/drew/projects/voyd_examples/benchmarks/suite/voyd/benchmarks.voyd",
     allowMissing: true,
     allowFailure: true,
   },
@@ -278,7 +288,9 @@ const main = async (): Promise<void> => {
           throw error;
         }
         const message = error instanceof Error ? error.message : String(error);
-        console.error(`[bench-v375] skipping optional ${scenario.name}: ${message}`);
+        console.error(
+          `[bench-v375] skipping optional ${scenario.name}: ${message}`,
+        );
       }
     }
   }

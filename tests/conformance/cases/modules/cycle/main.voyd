@@ -1,0 +1,5 @@
+use src::a::all
+use src::b::all
+
+pub fn main() -> i32
+  takes_b(B {}) + takes_a(A {})

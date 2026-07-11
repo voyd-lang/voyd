@@ -1,0 +1,54 @@
+import path from "node:path";
+import { describe, expect, it } from "vitest";
+import { createSdk, type CompileResult } from "@voyd-lang/sdk";
+
+const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
+
+const expectCompileSuccess = (
+  result: CompileResult,
+): Extract<CompileResult, { success: true }> => {
+  expect(result.success).toBe(true);
+  if (!result.success) {
+    throw new Error(
+      result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    );
+  }
+  return result;
+};
+
+describe("integration: html.voyd", () => {
+  it("returns the expected MsgPack object", async () => {
+    const sdk = createSdk();
+    const entryPath = path.join(fixtureRoot, "html.voyd");
+    const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+
+    const output = await result.run<Record<string, unknown>>({
+      entryName: "main",
+    });
+
+    expect(output).toEqual({
+      attrs: {
+        class: "greeting",
+        visible: true,
+      },
+      kind: "element",
+      tag: "div",
+      children: [
+        "Hi there ",
+        {
+          attrs: {
+            class: "big",
+          },
+          kind: "element",
+          tag: "span",
+          children: ["hi"],
+        },
+        {
+          kind: "element",
+          tag: "i",
+          children: ["This is italic"],
+        },
+      ],
+    });
+  });
+});

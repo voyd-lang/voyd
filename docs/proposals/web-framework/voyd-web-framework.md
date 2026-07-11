@@ -1022,13 +1022,13 @@ Phase 2 implementation notes:
 
 ## Testing Direction
 
-Follow `docs/testing/test-layer-ownership.md`.
+Follow `docs/testing/ownership.md`.
 
 - `packages/web`: route matching, middleware ordering, extractor behavior,
   `IntoResponse`, error/rejection mapping
 - `packages/std`: HTTP values, client wrappers, server wrappers
 - `packages/js-host`: HTTP server capability lifecycle
-- `apps/smoke`: end-to-end public app serving
+- `tests/integration`: end-to-end public app serving
 
 Use a small number of compile-heavy smoke fixtures. Put focused router and
 extractor tests in `packages/web`.

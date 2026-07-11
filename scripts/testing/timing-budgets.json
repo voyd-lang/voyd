@@ -1,0 +1,14 @@
+{
+  "unit": {
+    "maxWallMs": 300000,
+    "maxFileMs": 120000
+  },
+  "conformance": {
+    "maxWallMs": 120000,
+    "maxFileMs": 60000
+  },
+  "integration": {
+    "maxWallMs": 300000,
+    "maxFileMs": 180000
+  }
+}

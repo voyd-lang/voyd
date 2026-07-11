@@ -26,14 +26,20 @@ export const releaseTargets = {
     cwd: "packages/std",
     description: "Voyd standard library source bundle",
     packRequiredFiles: ["package.json", "src/pkg.voyd", "dist/.placeholder"],
-    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
+    relatedTests: [
+      "own",
+      "compiler-codegen",
+      "conformance",
+      "integration",
+      "cli-dist",
+    ],
   }),
   "@voyd-lang/web": npmTarget({
     workspace: "@voyd-lang/web",
     cwd: "packages/web",
     description: "Voyd web framework source bundle",
     packRequiredFiles: ["package.json", "src/pkg.voyd", "dist/.placeholder"],
-    relatedTests: ["own", "smoke"],
+    relatedTests: ["own", "conformance", "integration"],
   }),
   "@voyd-lang/lib": npmTarget({
     workspace: "@voyd-lang/lib",
@@ -47,20 +53,36 @@ export const releaseTargets = {
       "assets/voyd-markdown-injection.json",
     ],
     packForbiddenPatterns: [/^src\//, /^dist\/__tests__\//, /^dist\/.*\/src\//],
-    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
+    relatedTests: [
+      "own",
+      "compiler-codegen",
+      "conformance",
+      "integration",
+      "cli-dist",
+    ],
   }),
   "@voyd-lang/compiler": npmTarget({
     workspace: "@voyd-lang/compiler",
     cwd: "packages/compiler",
     description: "Voyd compiler pipeline",
-    packRequiredFiles: ["package.json", "dist/pipeline.js", "dist/pipeline.d.ts"],
+    packRequiredFiles: [
+      "package.json",
+      "dist/pipeline.js",
+      "dist/pipeline.d.ts",
+    ],
     packForbiddenPatterns: [
       /^src\//,
       /^dist\/__tests__\//,
       /^dist\/.*\/__tests__\//,
       /\.test\.(d\.ts|d\.ts\.map|js|js\.map)$/,
     ],
-    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
+    relatedTests: [
+      "own",
+      "compiler-codegen",
+      "conformance",
+      "integration",
+      "cli-dist",
+    ],
   }),
   "@voyd-lang/js-host": npmTarget({
     workspace: "@voyd-lang/js-host",
@@ -72,7 +94,13 @@ export const releaseTargets = {
       /^dist\/__tests__\//,
       /\.test\.(d\.ts|d\.ts\.map|js|js\.map)$/,
     ],
-    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
+    relatedTests: [
+      "own",
+      "compiler-codegen",
+      "conformance",
+      "integration",
+      "cli-dist",
+    ],
   }),
   "@voyd-lang/sdk": npmTarget({
     workspace: "@voyd-lang/sdk",
@@ -92,7 +120,13 @@ export const releaseTargets = {
       /^dist\/.*\/src\//,
       /\.test\.(d\.ts|d\.ts\.map|js|js\.map)$/,
     ],
-    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
+    relatedTests: [
+      "own",
+      "compiler-codegen",
+      "conformance",
+      "integration",
+      "cli-dist",
+    ],
   }),
   "@voyd-lang/language-server": npmTarget({
     workspace: "@voyd-lang/language-server",
@@ -133,7 +167,13 @@ export const releaseTargets = {
       "dist/test-runner.js",
     ],
     packForbiddenPatterns: [/^src\//, /^dist\/__tests__\//],
-    relatedTests: ["own", "compiler-codegen", "smoke", "cli-dist"],
+    relatedTests: [
+      "own",
+      "compiler-codegen",
+      "conformance",
+      "integration",
+      "cli-dist",
+    ],
   }),
   "voyd-vscode": {
     kind: "vscode",
@@ -168,7 +208,7 @@ export const readTargetPackageJson = (targetName) =>
   readJson(path.join(resolveTargetCwd(targetName), "package.json"));
 
 export const listWorkspacePackageJsonPaths = () =>
-  ["apps", "packages"].flatMap((segment) => {
+  ["apps", "packages", "tests"].flatMap((segment) => {
     const directory = path.join(repoRoot, segment);
     return fs
       .readdirSync(directory, { withFileTypes: true })
@@ -193,14 +233,24 @@ export const parseTargetSelection = (argv) => {
       if (!value) {
         throw new Error(`Missing value for ${arg}`);
       }
-      targets.push(...value.split(",").map((item) => item.trim()).filter(Boolean));
+      targets.push(
+        ...value
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      );
       index += 1;
       continue;
     }
 
     if (arg.startsWith("--target=") || arg.startsWith("--targets=")) {
       const value = arg.split("=")[1] ?? "";
-      targets.push(...value.split(",").map((item) => item.trim()).filter(Boolean));
+      targets.push(
+        ...value
+          .split(",")
+          .map((item) => item.trim())
+          .filter(Boolean),
+      );
     }
   }
 
@@ -209,7 +259,9 @@ export const parseTargetSelection = (argv) => {
   deduped.forEach(getTarget);
 
   if (deduped.length === 0) {
-    throw new Error("Select at least one release target with --target or use --all.");
+    throw new Error(
+      "Select at least one release target with --target or use --all.",
+    );
   }
 
   return deduped;

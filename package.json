@@ -5,7 +5,8 @@
   "description": "Voyd monorepo",
   "workspaces": [
     "apps/*",
-    "packages/*"
+    "packages/*",
+    "tests/*"
   ],
   "type": "module",
   "packageManager": "npm@11.5.2",
@@ -13,10 +14,13 @@
     "build": "turbo run build --affected",
     "test": "turbo run test --output-logs=errors-only",
     "test:affected": "turbo run test --affected --output-logs=errors-only",
-    "test:affected:ci": "turbo run test --affected --output-logs=errors-only --concurrency=50%",
+    "test:affected:ci": "turbo run test --affected --output-logs=errors-only --concurrency=3",
+    "test:unit:affected:ci": "turbo run test --affected --filter=!@voyd-lang/conformance-tests --filter=!@voyd-lang/integration-tests --filter=!@voyd-lang/performance-tests --output-logs=errors-only --concurrency=3",
     "test:codegen": "npm run --workspace @voyd-lang/compiler test:codegen --",
     "test:full": "npm run test -- --force && npm run test:codegen && npm run --workspace @voyd-lang/cli test:e2e",
-    "test:perf:smoke": "npm --workspace @voyd-lang/smoke run test:perf",
+    "test:perf": "npm --workspace @voyd-lang/performance-tests run test:perf",
+    "test:audit": "node scripts/testing/audit-tests.mjs --check",
+    "test:audit:update": "node scripts/testing/audit-tests.mjs --write-inventory",
     "bench:optimizer": "node --conditions=development --import tsx scripts/bench-optimizer.ts",
     "bench:optimizer:ci": "node --conditions=development --import tsx scripts/bench-optimizer.ts --preset ci",
     "bench:optimizer:ablate": "node --conditions=development --import tsx scripts/bench-optimizer.ts --preset full --modes release --binaryen-ablation-matrix",

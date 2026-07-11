@@ -3,7 +3,11 @@ import { createHash } from "node:crypto";
 import path from "node:path";
 import { performance } from "node:perf_hooks";
 import { gzipSync } from "node:zlib";
-import { createSdk, type CompileResult, type ModuleRoots } from "@voyd-lang/sdk";
+import {
+  createSdk,
+  type CompileResult,
+  type ModuleRoots,
+} from "@voyd-lang/sdk";
 import { createVoydHost } from "@voyd-lang/sdk/js-host";
 
 type Scenario = {
@@ -124,7 +128,10 @@ pub fn escape_boundary_rematerialization() -> i32
   total
 `;
 
-const defaultIterations = Number.parseInt(process.env.VOYD_BENCH_ITERATIONS ?? "7", 10);
+const defaultIterations = Number.parseInt(
+  process.env.VOYD_BENCH_ITERATIONS ?? "7",
+  10,
+);
 const representativeIterations = Number.parseInt(
   process.env.VOYD_BENCH_REPRESENTATIVE_ITERATIONS ?? "3",
   10,
@@ -144,7 +151,18 @@ const optimizeModes = (process.env.VOYD_BENCH_OPTIMIZE_MODES ?? "false,true")
   });
 const revisionLabel = process.env.VOYD_BENCH_REVISION ?? "worktree";
 const repoRoot = path.join(import.meta.dirname, "..");
-const smokeFixtureRoot = path.join(repoRoot, "apps", "smoke", "fixtures");
+const integrationFixtureRoot = path.join(
+  repoRoot,
+  "tests",
+  "integration",
+  "fixtures",
+);
+const performanceFixtureRoot = path.join(
+  repoRoot,
+  "tests",
+  "performance",
+  "fixtures",
+);
 
 const maybeFileScenario = (scenario: Scenario): Scenario[] =>
   scenario.entryPath && !fs.existsSync(scenario.entryPath) ? [] : [scenario];
@@ -208,7 +226,10 @@ const scenarios: Scenario[] = [
   },
   {
     name: "representative/vtrace-compute-main",
-    entryPath: path.join(smokeFixtureRoot, "vtrace-compute-benchmark.voyd"),
+    entryPath: path.join(
+      performanceFixtureRoot,
+      "vtrace-compute-benchmark.voyd",
+    ),
     entryName: "main",
     expected: 3_825_271,
     iterations: representativeIterations,
@@ -216,9 +237,9 @@ const scenarios: Scenario[] = [
   },
   {
     name: "representative/web-framework-route-probe",
-    entryPath: path.join(smokeFixtureRoot, "web-framework.voyd"),
+    entryPath: path.join(integrationFixtureRoot, "web-framework.voyd"),
     roots: {
-      src: smokeFixtureRoot,
+      src: integrationFixtureRoot,
       pkgDirs: [path.join(repoRoot, "packages")],
     },
     entryName: "route_probe",
@@ -228,7 +249,7 @@ const scenarios: Scenario[] = [
   },
   {
     name: "representative/vx-main",
-    entryPath: path.join(smokeFixtureRoot, "vx.voyd"),
+    entryPath: path.join(integrationFixtureRoot, "vx.voyd"),
     entryName: "main",
     expectedJsonSha256:
       "29db61d8716594c93e18f6ebe7f72eb2ebc9c3fdef0e8e554066e11011c6507b",
@@ -237,7 +258,10 @@ const scenarios: Scenario[] = [
   },
   {
     name: "representative/scalar-aggregate-particle-step",
-    entryPath: path.join(smokeFixtureRoot, "scalar-aggregate-representative.voyd"),
+    entryPath: path.join(
+      performanceFixtureRoot,
+      "scalar-aggregate-representative.voyd",
+    ),
     entryName: "main",
     expected: 1_100_340_000,
     iterations: representativeIterations,
@@ -245,7 +269,8 @@ const scenarios: Scenario[] = [
   },
   ...maybeFileScenario({
     name: "voyd-examples/suite-compile",
-    entryPath: "/Users/drew/projects/voyd_examples/benchmarks/suite/voyd/benchmarks.voyd",
+    entryPath:
+      "/Users/drew/projects/voyd_examples/benchmarks/suite/voyd/benchmarks.voyd",
     optional: true,
     iterations: 0,
     warmups: 0,
@@ -442,7 +467,9 @@ const parseResultsCsv = (filePath: string): ScenarioResult[] => {
     const columns = line.split(",");
     return {
       revision:
-        typeof revisionIndex === "number" ? columns[revisionIndex] ?? "" : "unknown",
+        typeof revisionIndex === "number"
+          ? (columns[revisionIndex] ?? "")
+          : "unknown",
       name: columns[nameIndex] ?? "",
       optimize: columns[optimizeIndex] === "true",
       compileMs: Number.parseFloat(columns[compileMsIndex] ?? "0"),
@@ -463,12 +490,11 @@ const parseResultsCsv = (filePath: string): ScenarioResult[] => {
         columns[medianMsIndex] && columns[medianMsIndex]!.length > 0
           ? Number.parseFloat(columns[medianMsIndex]!)
           : undefined,
-      samplesMs:
-        columns[samplesMsIndex]?.length
-          ? columns[samplesMsIndex]!.split("|").map((sample) =>
-              Number.parseFloat(sample),
-            )
-          : [],
+      samplesMs: columns[samplesMsIndex]?.length
+        ? columns[samplesMsIndex]!.split("|").map((sample) =>
+            Number.parseFloat(sample),
+          )
+        : [],
     };
   });
 };
@@ -489,7 +515,9 @@ const printComparison = ({
   baseResults: readonly ScenarioResult[];
   headResults: readonly ScenarioResult[];
 }): void => {
-  const baseByKey = new Map(baseResults.map((result) => [resultKey(result), result]));
+  const baseByKey = new Map(
+    baseResults.map((result) => [resultKey(result), result]),
+  );
   const matched = headResults
     .map((head) => ({ head, base: baseByKey.get(resultKey(head)) }))
     .filter(

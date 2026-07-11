@@ -1,0 +1,102 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn sum_to(n: i32, step: i32 = 1) -> i32
+  if n <= 0 then: 0 else: n + sum_to(n - step, step)
+
+fn combine_defaults({ left: i32 = 4, right: i32 }) -> i32
+  left + right
+
+fn optional_state(value?: i32) -> i32
+  match(value)
+    Some<i32>:
+      2
+    None:
+      1
+
+obj Counter {
+  value: i32
+}
+
+fn bump(~counter: Counter) -> i32
+  counter.value = counter.value + 1
+  counter.value
+
+fn resolve(~counter: Counter, value: i32 = bump(counter)) -> i32
+  value
+
+val WideDefault {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+fn wide_sum(value: WideDefault = WideDefault { a: 1, b: 2, c: 3, d: 4, e: 5 }) -> i32
+  value.a + value.b + value.c + value.d + value.e
+
+eff Tick
+  next(tail) -> i32
+
+fn effect_with_default(value: i32 = 3): Tick -> i32
+  Tick::next() + value
+
+fn run_effect_with_default() -> i32
+  try
+    effect_with_default()
+  Tick::next(tail):
+    tail(7)
+
+pub fn default_argument_call_shapes() -> i32
+  let ~counter = Counter { value: 0 }
+  let options = { left: 6, right: 7 }
+  let default_result = resolve(counter)
+  let provided_result = resolve(counter, 9)
+  sum_to(5) + sum_to(5, 2) +
+    combine_defaults({ right: 3 }) + combine_defaults({ left: 5, right: 3 }) + combine_defaults(options) +
+    optional_state() + optional_state(9) +
+    default_result * 100 + counter.value * 10 + provided_result +
+    wide_sum() + wide_sum(WideDefault { a: 2, b: 2, c: 2, d: 2, e: 2 }) +
+    run_effect_with_default()
+
+obj AliasBox {
+  value: i32
+}
+
+fn alias_identity(box: AliasBox) -> AliasBox
+  box
+
+pub fn heap_alias_mutation() -> i32
+  let ~a = AliasBox { value: 1 }
+  let ~b = alias_identity(a)
+  b.value = 2
+  a.value
+
+obj OrderingBox {
+  value: i32
+}
+
+obj OrderingVec2 {
+  x: i32,
+  y: i32
+}
+
+fn mutate_and_read(~box: OrderingBox) -> i32
+  box.value = 10
+  box.value
+
+fn combine_ordered(value: i32, vec: OrderingVec2) -> i32
+  value + vec.x + vec.y
+
+pub fn argument_evaluation_order() -> i32
+  let ~box = OrderingBox { value: 1 }
+  combine_ordered(mutate_and_read(box), OrderingVec2 { x: box.value, y: 0 })
+
+pub fn signed_division_overflow() -> i32
+  -2147483648i32 / -1i32

@@ -1,0 +1,129 @@
+trait Foo
+  fn baz(self) -> i32
+
+trait BarTrait
+  fn baz(self) -> i32
+
+obj QualifiedX { x: i32 }
+
+impl Foo for QualifiedX
+  fn baz(self) -> i32
+    self.x + 10
+
+impl BarTrait for QualifiedX
+  fn baz(self) -> i32
+    self.x + 20
+
+pub fn qualified_trait_dispatch() -> i32
+  let x = QualifiedX { x: 10 }
+  Foo::baz(x) + x.BarTrait::baz()
+
+obj RecursiveBox<T> {
+  v: T
+}
+
+obj RecursiveNone<T> {}
+
+type RecursiveList<T> = RecursiveBox<RecursiveList<T>> | RecursiveNone<T>
+
+fn depth(list: RecursiveList<i32>) -> i32
+  match(list)
+    RecursiveBox<RecursiveList<i32>>:
+      1 + depth(list.v)
+    RecursiveNone<i32>:
+      0
+
+pub fn recursive_generic_union() -> i32
+  let list = RecursiveBox<RecursiveList<i32>> {
+    v: RecursiveBox<RecursiveList<i32>> { v: RecursiveNone<i32> {} }
+  }
+  depth(list)
+
+type A = { x: i32 }
+type B = { x: i32, y: i32 }
+type AOrB = A | B
+
+fn pick_y(value: AOrB) -> i32
+  match(value)
+    B:
+      value.y
+    A:
+      -1
+
+pub fn exact_union_coercion() -> i32
+  let b: B = { x: 1, y: 41 }
+  pick_y(b)
+
+fn identity<T>(value: T) -> T
+  value
+
+pub fn generic_tuple_projection() -> i32
+  let pair = identity((1, 2))
+  pair.0
+
+pub fn clause_style_if() -> i32
+  let x = 7
+  let first = if x < 5: 1, x < 10: 2, else: 3
+  let second = if x < 5: 1 x < 10: 2 else: 3
+  first + second
+
+obj GenericBox<T> {
+  value: T
+}
+
+fn hold<T>(value: T) -> T
+  value
+
+fn wrap<T>(value: T) -> GenericBox<T>
+  GenericBox<T> { value: hold(value) }
+
+pub fn generic_object_literal() -> bool
+  wrap(true).value
+
+obj Cat {
+  lives: i32
+}
+
+obj Dog {
+  noses: i32
+}
+
+obj Frog {
+  feet: i32
+}
+
+type NarrowAnimal = Cat | Dog
+type WideAnimal = Cat | Dog | Frog
+
+fn accept_wide(_pet: WideAnimal) -> i32
+  1
+
+pub fn union_widening() -> i32
+  let pet: NarrowAnimal = Dog { noses: 1 }
+  accept_wide(pet)
+
+pub fn '..'() -> i32
+  1
+
+pub fn quoted_range_identifier() -> i32
+  '..'()
+
+pub fn 'is'({ left: i32, right: i32 }) -> bool
+  left == right
+
+pub fn quoted_is_identifier() -> bool
+  'is'(left: 1, right: 2)
+
+fn apply_twice(transform: fn(i32) -> i32, value: i32) -> i32
+  transform(transform(value))
+
+fn make_incrementer(delta: i32) -> (fn(i32) -> i32)
+  (value) => value + delta
+
+pub fn contextual_lambda_typing() -> i32
+  let doubled = apply_twice((value) => value * 2, 3)
+  let increment = make_incrementer(1)
+  doubled + increment(4)
+
+pub fn integer_modulo() -> i32
+  10 % 3

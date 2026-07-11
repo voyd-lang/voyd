@@ -1,0 +1,5 @@
+fn labeled({ x: i32 }) -> i32
+  x
+
+pub fn main() -> i32
+  labeled(z: 7)

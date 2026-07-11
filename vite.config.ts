@@ -12,10 +12,6 @@ export default defineConfig({
       projects: [resolve(projectRoot, "tsconfig.typecheck.base.json")],
     }),
   ],
-  test: {
-    reporters: ["dot"],
-    silent: "passed-only",
-  },
   build: {
     lib: {
       entry: resolve(projectRoot, "packages/sdk/src/browser.ts"),

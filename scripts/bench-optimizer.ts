@@ -186,7 +186,7 @@ const SCENARIOS: readonly Scenario[] = [
   {
     name: "std-math-transcendentals",
     entryPath: path.resolve(
-      "apps/smoke/fixtures/std-math-transcendentals.voyd",
+      "tests/integration/fixtures/std-math-transcendentals.voyd",
     ),
     entryName: "main",
     expected: 1,
@@ -195,7 +195,7 @@ const SCENARIOS: readonly Scenario[] = [
   {
     name: "vtrace-main",
     entryPath: path.resolve(
-      "apps/smoke/fixtures/vtrace-compute-benchmark.voyd",
+      "tests/performance/fixtures/vtrace-compute-benchmark.voyd",
     ),
     entryName: "main",
     expected: 3_825_271,
@@ -204,7 +204,7 @@ const SCENARIOS: readonly Scenario[] = [
   {
     name: "effects-wide-return",
     entryPath: path.resolve(
-      "apps/smoke/fixtures/optimized-wide-value-return.voyd",
+      "tests/conformance/cases/runtime/optimized-wide-value-return.voyd",
     ),
     entryName: "trait_dispatch_effectful_wide_value_return",
     expected: 11,
