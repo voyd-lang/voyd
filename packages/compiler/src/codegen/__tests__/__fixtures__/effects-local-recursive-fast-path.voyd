@@ -1,0 +1,59 @@
+eff Local
+  step(tail, value: i32) -> i32
+
+eff Residual
+  read(resume) -> i32
+
+fn self_worker(remaining: i32): Local -> i32
+  Local::step(remaining)
+
+fn self_worker(remaining: i32, total: i32): Local -> i32
+  if remaining == 0 then:
+    Local::step(total)
+  else:
+    self_worker(remaining - 1, total + 1)
+
+fn mutual_even(remaining: i32): Local -> i32
+  Local::step(remaining)
+
+fn mutual_even(remaining: i32, total: i32): Local -> i32
+  if remaining == 0 then:
+    Local::step(total)
+  else:
+    mutual_odd(remaining - 1, total + 1)
+
+fn mutual_odd(remaining: i32): Local -> i32
+  Local::step(remaining)
+
+fn mutual_odd(remaining: i32, total: i32): Local -> i32
+  if remaining == 0 then:
+    Local::step(total)
+  else:
+    mutual_even(remaining - 1, total + 1)
+
+fn residual_even(remaining: i32): (Local, Residual) -> i32
+  if remaining == 0 then:
+    Local::step(Residual::read())
+  else:
+    residual_odd(remaining - 1)
+
+fn residual_odd(remaining: i32): (Local, Residual) -> i32
+  residual_even(remaining)
+
+pub fn self_recursive(): () -> i32
+  try
+    self_worker(10000, 0)
+  Local::step(tail, value):
+    tail(value + 1)
+
+pub fn mutually_recursive(): () -> i32
+  try
+    mutual_even(10000, 0)
+  Local::step(tail, value):
+    tail(value + 1)
+
+pub fn residual_recursive(): Residual -> i32
+  try open
+    residual_even(10)
+  Local::step(tail, value):
+    tail(value + 1)

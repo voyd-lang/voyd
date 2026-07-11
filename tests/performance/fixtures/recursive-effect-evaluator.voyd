@@ -1,0 +1,78 @@
+eff Environment
+  load(tail, slot: i32) -> i32
+
+eff Residual
+  tick(resume) -> i32
+
+fn evaluate_expression(depth: i32): Environment -> i32
+  Environment::load(depth)
+
+fn evaluate_expression(depth: i32, slot: i32): Environment -> i32
+  if depth == 0 then:
+    Environment::load(slot)
+  else:
+    evaluate_term(depth - 1, slot + 1)
+
+fn evaluate_term(depth: i32): Environment -> i32
+  Environment::load(depth)
+
+fn evaluate_term(depth: i32, slot: i32): Environment -> i32
+  if depth == 0 then:
+    Environment::load(slot)
+  else:
+    evaluate_expression(depth - 1, slot + 1)
+
+fn residual_expression(depth: i32, slot: i32): (Environment, Residual) -> i32
+  if
+    depth == -1: Residual::tick()
+    depth == 0: Environment::load(slot)
+    else: residual_term(depth - 1, slot + 1)
+
+fn residual_term(depth: i32, slot: i32): (Environment, Residual) -> i32
+  if
+    depth == -1: Residual::tick()
+    depth == 0: Environment::load(slot)
+    else: residual_expression(depth - 1, slot + 1)
+
+fn specialized_workload(): Environment -> i32
+  var iteration = 0
+  var total = 0
+  while iteration < 1000:
+    total = total + evaluate_expression(1000, iteration)
+    iteration = iteration + 1
+  total
+
+fn residual_workload(): (Environment, Residual) -> i32
+  var iteration = 0
+  var total = 0
+  while iteration < 1000:
+    total = total + residual_expression(1000, iteration)
+    iteration = iteration + 1
+  total
+
+pub fn benchmark(): () -> i32
+  try
+    evaluate_expression(250000, 0)
+  Environment::load(tail, slot):
+    tail((slot * 3) + 1)
+
+pub fn residual_benchmark(): () -> i32
+  try
+    try open
+      residual_workload()
+    Environment::load(tail, slot):
+      tail((slot * 3) + 1)
+  Residual::tick(resume):
+    resume(0)
+
+pub fn specialized_benchmark(): () -> i32
+  try
+    specialized_workload()
+  Environment::load(tail, slot):
+    tail((slot * 3) + 1)
+
+pub fn main(): () -> i32
+  try
+    evaluate_expression(10000, 0)
+  Environment::load(tail, slot):
+    tail((slot * 3) + 1)
