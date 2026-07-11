@@ -60,6 +60,9 @@ Raw Binaryen pass configuration is intentionally not public SDK API.
 SDK builds automatically expose boundary-compatible public Voyd functions
 through the existing host and compiled-result run APIs. JavaScript callers pass
 plain JS values; the host validates and encodes them at the Wasm boundary.
+Primitive-only signatures use a validated direct Wasm call and do not pull in
+the serialized boundary runtime. Strings, arrays, records, and unions continue
+to use the serialized boundary ABI.
 
 ```ts
 const result = await sdk.compile({
@@ -135,7 +138,8 @@ pub fn call_callback(callback: fn() -> i32) -> i32
 });
 ```
 
-Disable automatic wrappers when Wasm size or compile-time overhead matters.
+Disable automatic boundary generation when raw Wasm calling conventions are
+preferred over JavaScript validation and DTO conversion.
 
 ```ts
 const result = await sdk.compile({

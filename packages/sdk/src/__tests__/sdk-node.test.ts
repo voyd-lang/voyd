@@ -52,6 +52,15 @@ enum NestedResult
 pub fn primitive() -> i32
   42
 
+pub fn echo_bool(value: bool) -> bool
+  value
+
+pub fn echo_i64(value: i64) -> i64
+  value
+
+pub fn echo_f32(value: f32) -> f32
+  value
+
 pub fn translate(point: Point, dx: i32, dy: i32) -> Point
   Point {
     x: point.x + dx,
@@ -573,8 +582,32 @@ pub fn main() -> i32
       await sdk.compile({ source: BOUNDARY_EXPORTS_SOURCE }),
     );
     const host = await createVoydHost({ wasm: result.wasm });
+    const module = new WebAssembly.Module(wasmBufferSource(result.wasm));
+    const abi = parseExportAbi(module);
+    const exports = WebAssembly.Module.exports(module).map(
+      (entry) => entry.name,
+    );
 
     await expect(host.run("primitive")).resolves.toBe(42);
+    await expect(host.run("echo_bool", [true])).resolves.toBe(true);
+    await expect(host.run("echo_i64", [42])).resolves.toBe(42n);
+    await expect(host.run("echo_f32", [1.5])).resolves.toBe(1.5);
+    await expect(host.run("echo_bool", [1])).rejects.toThrow(
+      "typed export echo_bool arg0 expected bool, got number",
+    );
+    await expect(host.run("primitive", [1])).rejects.toThrow(
+      "typed export primitive expected 0 args, got 1",
+    );
+    await expect(
+      host.run("echo_i64", [Number.MAX_SAFE_INTEGER + 1]),
+    ).rejects.toThrow("typed export echo_i64 arg0 expected i64, got number");
+    expect(exports).not.toContain("__voyd_serialized_export_primitive");
+    expect(abi.exports).toContainEqual({
+      name: "primitive",
+      abi: "direct",
+      params: [],
+      result: expect.objectContaining({ kind: "i32" }),
+    });
     await expect(
       host.run("translate", [{ x: 1, y: 2 }, 10, 20]),
     ).resolves.toEqual({ x: 11, y: 22 });
@@ -671,6 +704,37 @@ pub fn main() -> i32
     ).rejects.toThrow("increase createVoydHost({ bufferSize })");
     await expect(tinyBufferHost.run("long_text")).rejects.toThrow(
       "increase createVoydHost({ bufferSize })",
+    );
+  });
+
+  it("keeps scalar-only typed release exports independent of serialization", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: `pub fn increment(value: i32) -> i32
+  value + 1
+`,
+        optimizationLevel: "release",
+      }),
+    );
+    const module = new WebAssembly.Module(wasmBufferSource(result.wasm));
+    const exports = WebAssembly.Module.exports(module).map(
+      (entry) => entry.name,
+    );
+    const abi = parseExportAbi(module);
+    const host = await createVoydHost({ wasm: result.wasm });
+
+    expect(result.wasm.byteLength).toBeLessThan(2_000);
+    expect(exports).not.toContain("__voyd_serialized_export_increment");
+    expect(abi.exports).toContainEqual({
+      name: "increment",
+      abi: "direct",
+      params: [expect.objectContaining({ kind: "i32" })],
+      result: expect.objectContaining({ kind: "i32" }),
+    });
+    await expect(host.run("increment", [41])).resolves.toBe(42);
+    await expect(host.run("increment", ["41"])).rejects.toThrow(
+      "typed export increment arg0 expected i32, got string",
     );
   });
 

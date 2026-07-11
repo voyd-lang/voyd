@@ -28,7 +28,9 @@ import { registerHandlersByLabelSuffix } from "./handlers.js";
 import { parseExportAbi } from "./protocol/export-abi.js";
 import {
   decodeBoundaryResult,
+  decodeDirectBoundaryResult,
   encodeBoundaryArgs,
+  encodeDirectBoundaryArgs,
 } from "./boundary-values.js";
 import type { ExportAbiEntry } from "./protocol/export-abi.js";
 import {
@@ -938,8 +940,16 @@ export const createVoydHost = async ({
       return runSerialized<T>(entryName, args, abi);
     }
     const entry = requireExportedFunction({ instance, name: entryName });
+    const directArgs = abi?.params
+      ? encodeDirectBoundaryArgs({
+          exportName: entryName,
+          schemas: abi.params,
+          args,
+        })
+      : args;
+    let result: unknown;
     try {
-      return (entry as (...params: unknown[]) => T)(...args);
+      result = (entry as (...params: unknown[]) => unknown)(...directArgs);
     } catch (error) {
       throw annotateTrap(error, {
         transition: {
@@ -949,6 +959,13 @@ export const createVoydHost = async ({
         fallbackFunctionName: entryName,
       });
     }
+    return (abi?.result
+      ? decodeDirectBoundaryResult({
+          exportName: entryName,
+          schema: abi.result,
+          value: result,
+        })
+      : result) as T;
   };
 
   const runEffectfulManaged = <T = unknown>(
