@@ -6,23 +6,19 @@ import type {
   TypeId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
+import type { HirBindingKind } from "../../../semantics/hir/index.js";
 
-export type ContinuationFieldSource =
-  | "param"
-  | "local"
-  | "handler"
-  | "site";
+export type ContinuationFieldSource = "param" | "local" | "handler" | "site";
 
-export type ContinuationCaptureSource =
-  | "param"
-  | "local"
-  | "temp";
+export type ContinuationCaptureSource = "param" | "local" | "temp";
 
 export interface ContinuationCaptureField {
   sourceKind: ContinuationCaptureSource;
   typeId: TypeId;
   symbol?: SymbolId;
   tempId?: number;
+  storageRef?: boolean;
+  bindingKind?: HirBindingKind;
 }
 
 export interface ContinuationEnvField {
@@ -33,6 +29,8 @@ export interface ContinuationEnvField {
   storageType: binaryen.Type;
   sourceKind: ContinuationFieldSource;
   tempId?: number;
+  storageRef?: boolean;
+  bindingKind?: HirBindingKind;
 }
 
 export interface ContinuationSiteBase {
@@ -81,7 +79,9 @@ export interface ContinuationCallSiteEir extends ContinuationSiteEirBase {
   kind: "call";
 }
 
-export type ContinuationSiteEir = ContinuationPerformSiteEir | ContinuationCallSiteEir;
+export type ContinuationSiteEir =
+  | ContinuationPerformSiteEir
+  | ContinuationCallSiteEir;
 
 export interface EffectLoweringResult {
   sitesByExpr: Map<HirExprId, ContinuationSite>;
@@ -91,6 +91,16 @@ export interface EffectLoweringResult {
     readonly { argIndex: number; tempId: number; typeId: TypeId }[]
   >;
   tempTypeIds: Map<number, TypeId>;
+  defaultParamTemps: Map<
+    SymbolId,
+    {
+      tempId: number;
+      presenceTempId: number;
+      typeId: TypeId;
+      storageRef: boolean;
+      bindingKind?: HirBindingKind;
+    }
+  >;
 }
 
 export interface EffectLoweringEirResult {
@@ -101,6 +111,16 @@ export interface EffectLoweringEirResult {
     readonly { argIndex: number; tempId: number; typeId: TypeId }[]
   >;
   tempTypeIds: Map<number, TypeId>;
+  defaultParamTemps: Map<
+    SymbolId,
+    {
+      tempId: number;
+      presenceTempId: number;
+      typeId: TypeId;
+      storageRef: boolean;
+      bindingKind?: HirBindingKind;
+    }
+  >;
 }
 
 export type ContinuationSiteOwner =

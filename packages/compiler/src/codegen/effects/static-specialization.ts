@@ -5,13 +5,16 @@ import type {
 } from "../context.js";
 import type { HirFunction } from "../../semantics/hir/index.js";
 import type { ProgramSymbolId } from "../../semantics/ids.js";
+import type { CallShapeParameterState } from "../../optimize/ir.js";
 import { effectsFacade } from "./facade.js";
-import {
-  getAbiTypesForSignature,
-  getSignatureWasmType,
-} from "../types.js";
+import { getAbiTypesForSignature, getSignatureWasmType } from "../types.js";
 import { walkHirExpression } from "../hir-walk.js";
 import { isTraitDispatchMethodEffectful } from "../trait-dispatch-abi.js";
+import {
+  composeSpecializationDimensions,
+  functionSpecializationIdentity,
+  tryAdmitFunctionSpecialization,
+} from "../specialization-policy.js";
 
 export interface StaticEffectSpecialization {
   base: FunctionMetadata;
@@ -78,7 +81,9 @@ const targetRequiresSpecialization = ({
 }): boolean => {
   const targetRef = ctx.program.symbols.refOf(target);
   const targetModule = ctx.program.modules.get(targetRef.moduleId);
-  const targetInfo = targetModule?.effectsIr.info.functions.get(targetRef.symbol);
+  const targetInfo = targetModule?.effectsIr.info.functions.get(
+    targetRef.symbol,
+  );
   return targetInfo?.abiEffectful === true || targetInfo?.pure === false;
 };
 
@@ -97,7 +102,9 @@ const unresolvedCallRequiresSpecialization = ({
     return true;
   }
   const calleeInfo = effectsFacade(ctx).functionAbi(callee.symbol);
-  return calleeInfo?.abiEffectful === true || calleeInfo?.typeEffectful === true;
+  return (
+    calleeInfo?.abiEffectful === true || calleeInfo?.typeEffectful === true
+  );
 };
 
 const mergeSupport = (
@@ -132,11 +139,13 @@ const analyzeSpecializationSupport = ({
   item,
   context,
   seen,
+  callShapeParameterStates,
 }: {
   ctx: CodegenContext;
   item: HirFunction;
   context: StaticEffectHandlerContext;
   seen: Set<ProgramSymbolId>;
+  callShapeParameterStates?: readonly CallShapeParameterState[];
 }): SpecializationSupport => {
   const canonical = canonicalEffectOperation(ctx, item.symbol);
   if (seen.has(canonical)) {
@@ -148,102 +157,124 @@ const analyzeSpecializationSupport = ({
     supported: true,
     residualEffectful: false,
   };
-  walkHirExpression({
-    exprId: item.body,
-    ctx,
-    visitLambdaBodies: false,
-    visitHandlerBodies: false,
-    visitor: {
-      onExpr: (exprId, expr) => {
-        if (!support.supported) {
-          return "stop";
-        }
-        if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
-          return;
-        }
-        const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
-        if (effectsFacade(ctx).callKind(exprId) === "perform") {
-          const site = ctx.effectLowering.sitesByExpr.get(exprId);
-          const operation =
-            site?.kind === "perform"
-              ? canonicalEffectOperation(ctx, site.effectSymbol)
-              : undefined;
-          const handler =
-            typeof operation === "number"
-              ? context.handlers.get(operation)
-              : undefined;
-          if (handler) {
-            support = {
-              ...support,
-              residualEffectful:
-                support.residualEffectful || handler.residualEffectful,
-            };
-            return;
-          }
-          support = { ...support, residualEffectful: true };
-          return;
-        }
-        const targets = callInfo.targets
-          ? Array.from(callInfo.targets.values()).map((target) => target as ProgramSymbolId)
-          : [];
-        if (
-          callInfo.traitDispatch &&
-          (targets.length === 0 ||
-            dynamicTraitDispatchRequiresEffectfulAbi({
-              ctx,
-              targets,
-            }))
-        ) {
-          support = { ...support, residualEffectful: true };
-        }
-        if (effectsFacade(ctx).callKind(exprId) !== "effectful-call") {
-          return;
-        }
-        if (targets.length === 0) {
-          if (
-            !unresolvedCallRequiresSpecialization({
-              ctx,
-              expr,
-            })
-          ) {
-            return;
-          }
-          support = { ...support, residualEffectful: true };
-          return;
-        }
-        const effectfulTargets = targets.filter((target) =>
-          targetRequiresSpecialization({
-            ctx,
-            target,
-          })
-        );
-        if (effectfulTargets.length === 0) {
-          return;
-        }
-        for (const target of effectfulTargets) {
-          const targetRef = ctx.program.symbols.refOf(target as ProgramSymbolId);
-          if (targetRef.moduleId !== ctx.moduleId) {
-            support = { ...support, residualEffectful: true };
-            continue;
-          }
-          const targetItem = functionItemFor({ ctx, symbol: targetRef.symbol });
-          if (!targetItem) {
-            support = { ...support, residualEffectful: true };
-            continue;
-          }
-          const nested = analyzeSpecializationSupport({
-            ctx,
-            item: targetItem,
-            context,
-            seen,
-          });
-          support = mergeSupport(support, nested);
+  const roots = [
+    item.body,
+    ...item.parameters.flatMap((parameter, index) =>
+      typeof parameter.defaultValue === "number" &&
+      (!callShapeParameterStates ||
+        callShapeParameterStates[index] === "omitted")
+        ? [parameter.defaultValue]
+        : [],
+    ),
+  ];
+  roots.forEach((rootExprId) => {
+    if (!support.supported) {
+      return;
+    }
+    walkHirExpression({
+      exprId: rootExprId,
+      ctx,
+      visitLambdaBodies: false,
+      visitHandlerBodies: false,
+      visitor: {
+        onExpr: (exprId, expr) => {
           if (!support.supported) {
             return "stop";
           }
-        }
+          if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
+            return;
+          }
+          const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, exprId);
+          if (effectsFacade(ctx).callKind(exprId) === "perform") {
+            const site = ctx.effectLowering.sitesByExpr.get(exprId);
+            const operation =
+              site?.kind === "perform"
+                ? canonicalEffectOperation(ctx, site.effectSymbol)
+                : undefined;
+            const handler =
+              typeof operation === "number"
+                ? context.handlers.get(operation)
+                : undefined;
+            if (handler) {
+              support = {
+                ...support,
+                residualEffectful:
+                  support.residualEffectful || handler.residualEffectful,
+              };
+              return;
+            }
+            support = { ...support, residualEffectful: true };
+            return;
+          }
+          const targets = callInfo.targets
+            ? Array.from(callInfo.targets.values()).map(
+                (target) => target as ProgramSymbolId,
+              )
+            : [];
+          if (
+            callInfo.traitDispatch &&
+            (targets.length === 0 ||
+              dynamicTraitDispatchRequiresEffectfulAbi({
+                ctx,
+                targets,
+              }))
+          ) {
+            support = { ...support, residualEffectful: true };
+          }
+          if (effectsFacade(ctx).callKind(exprId) !== "effectful-call") {
+            return;
+          }
+          if (targets.length === 0) {
+            if (
+              !unresolvedCallRequiresSpecialization({
+                ctx,
+                expr,
+              })
+            ) {
+              return;
+            }
+            support = { ...support, residualEffectful: true };
+            return;
+          }
+          const effectfulTargets = targets.filter((target) =>
+            targetRequiresSpecialization({
+              ctx,
+              target,
+            }),
+          );
+          if (effectfulTargets.length === 0) {
+            return;
+          }
+          for (const target of effectfulTargets) {
+            const targetRef = ctx.program.symbols.refOf(
+              target as ProgramSymbolId,
+            );
+            if (targetRef.moduleId !== ctx.moduleId) {
+              support = { ...support, residualEffectful: true };
+              continue;
+            }
+            const targetItem = functionItemFor({
+              ctx,
+              symbol: targetRef.symbol,
+            });
+            if (!targetItem) {
+              support = { ...support, residualEffectful: true };
+              continue;
+            }
+            const nested = analyzeSpecializationSupport({
+              ctx,
+              item: targetItem,
+              context,
+              seen,
+            });
+            support = mergeSupport(support, nested);
+            if (!support.supported) {
+              return "stop";
+            }
+          }
+        },
       },
-    },
+    });
   });
   return support;
 };
@@ -271,24 +302,49 @@ export const getOrCreateStaticEffectSpecialization = ({
     item,
     context,
     seen: new Set(),
+    callShapeParameterStates: meta.callShape?.parameterStates,
   });
   if (!support.supported) {
     return undefined;
   }
 
   const state = stateOf(ctx);
-  const key = `${meta.moduleId}:${meta.instanceId}:${meta.wasmName}:${context.key}`;
+  const specializationDimensions = composeSpecializationDimensions({
+    meta,
+    next: { staticEffect: context.key },
+  });
+  const key = functionSpecializationIdentity({
+    meta,
+    dimensions: specializationDimensions,
+  });
   const existing = state.byKey.get(key);
   if (existing) {
     return existing.meta;
   }
+  const existingForFunction = Array.from(state.byKey.values()).filter(
+    (specialization) =>
+      specialization.base.moduleId === meta.moduleId &&
+      specialization.base.instanceId === meta.instanceId,
+  );
+  if (
+    !tryAdmitFunctionSpecialization({
+      ctx,
+      meta,
+      item,
+      kind: "static_effect",
+      dimensions: specializationDimensions,
+      existingKindVariants: existingForFunction.length,
+      maxKindVariants: ctx.specializationPolicy.staticEffectContextsPerFunction,
+    })
+  ) {
+    return undefined;
+  }
 
-  const captureParamTypes = context.captures.map((capture) => capture.paramType);
+  const captureParamTypes = context.captures.map(
+    (capture) => capture.paramType,
+  );
   const captureTypeIds = context.captures.map((capture) => capture.typeId);
-  const userParamTypes = [
-    ...meta.paramAbiTypes.flat(),
-    ...captureParamTypes,
-  ];
+  const userParamTypes = [...meta.paramAbiTypes.flat(), ...captureParamTypes];
   const resultAbiTypes = getAbiTypesForSignature(meta.resultTypeId, ctx);
   const widened = ctx.effectsBackend.abi.widenSignature({
     ctx,
@@ -324,6 +380,7 @@ export const getOrCreateStaticEffectSpecialization = ({
     outParamType: undefined,
     effectful: support.residualEffectful,
     effectRow: support.residualEffectful ? meta.effectRow : undefined,
+    specialization: specializationDimensions,
   };
   const specialization: StaticEffectSpecialization = {
     base: meta,

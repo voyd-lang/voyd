@@ -54,6 +54,10 @@ import {
   isTraitDispatchMethodEffectful,
   resolveImportedFunctionSymbol,
 } from "./trait-dispatch-abi.js";
+import {
+  isStdIntrinsicNominalType,
+  STD_INTRINSIC_TYPE,
+} from "../compiler-contracts/types.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
@@ -397,22 +401,28 @@ const classifyOptionalMember = ({
   ) {
     return undefined;
   }
-  const ownerRef = ctx.program.symbols.refOf(nominalDesc.owner);
-  if (ownerRef.moduleId !== "std::optional::types") {
-    return undefined;
-  }
-
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo) {
     return undefined;
   }
 
-  if (nominalDesc.name === "None" && structInfo.fields.length === 0) {
+  if (
+    isStdIntrinsicNominalType({
+      program: ctx.program,
+      typeId: nominalId,
+      intrinsicType: STD_INTRINSIC_TYPE.optionalNone,
+    }) &&
+    structInfo.fields.length === 0
+  ) {
     return { kind: "none", typeId };
   }
 
   if (
-    nominalDesc.name === "Some" &&
+    isStdIntrinsicNominalType({
+      program: ctx.program,
+      typeId: nominalId,
+      intrinsicType: STD_INTRINSIC_TYPE.optionalSome,
+    }) &&
     structInfo.fields.length === 1 &&
     structInfo.fields[0]!.name === "value"
   ) {
@@ -545,6 +555,38 @@ export const getAbiTypesForSignature = (
     ? [spillBoxType]
     : getDirectAbiTypesForSignature(typeId, ctx);
 };
+
+export const getCallableParamAbiKind = ({
+  typeId,
+  bindingKind,
+  defaulted,
+  ctx,
+}: {
+  typeId: TypeId;
+  bindingKind?: string;
+  defaulted?: boolean;
+  ctx: CodegenContext;
+}): OptimizedValueAbiKind =>
+  defaulted === true ||
+  (bindingKind !== undefined && bindingKind !== "value")
+    ? getOptimizedParamAbiKind({ typeId, bindingKind, ctx })
+    : "direct";
+
+export const getCallableParamAbiTypes = ({
+  typeId,
+  bindingKind,
+  defaulted,
+  ctx,
+}: {
+  typeId: TypeId;
+  bindingKind?: string;
+  defaulted?: boolean;
+  ctx: CodegenContext;
+}): readonly binaryen.Type[] =>
+  defaulted === true ||
+  (bindingKind !== undefined && bindingKind !== "value")
+    ? getOptimizedAbiTypesForParam({ typeId, bindingKind, ctx })
+    : getAbiTypesForSignature(typeId, ctx);
 
 export const getSignatureWasmType = (
   typeId: TypeId,
@@ -2326,19 +2368,25 @@ const synthesizeConcreteFunctionMeta = ({
       (functionItem.parameters[index]?.mutable ? "mutable-ref" : undefined);
 
     const paramAbiKinds = instantiatedTypeDesc.parameters.map((param, index) =>
-      getOptimizedParamAbiKind({
+      getCallableParamAbiKind({
         typeId: param.type,
         bindingKind: parameterBindingKind(index),
+        defaulted:
+          signature.parameters[index]?.defaulted ?? param.defaulted,
         ctx,
       }),
     );
-    const paramAbiTypes = instantiatedTypeDesc.parameters.map((param, index) =>
-      getOptimizedAbiTypesForParam({
+    const paramAbiTypes = instantiatedTypeDesc.parameters.map((param, index) => {
+      const defaulted =
+        signature.parameters[index]?.defaulted ?? param.defaulted;
+      const payload = getCallableParamAbiTypes({
         typeId: param.type,
         bindingKind: parameterBindingKind(index),
+        defaulted,
         ctx,
-      }),
-    );
+      });
+      return defaulted ? [...payload, binaryen.i32] : payload;
+    });
     const userParamTypes = paramAbiTypes.flat();
     const resultAbiKind =
       effectful
@@ -2391,6 +2439,8 @@ const synthesizeConcreteFunctionMeta = ({
         typeId: param.type,
         label: param.label,
         optional: param.optional,
+        defaulted:
+          signature.parameters[index]?.defaulted ?? param.defaulted,
         name:
           typeof functionItem.parameters[index]?.symbol === "number"
             ? symbolNameForModuleSymbol({

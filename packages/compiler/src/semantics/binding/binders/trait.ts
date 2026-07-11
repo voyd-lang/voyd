@@ -36,12 +36,19 @@ import { declareValueOrParameter } from "../redefinitions.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 import { bindTypeExpr } from "./expressions.js";
+import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contracts.js";
 
 export const bindTraitDecl = (
   decl: ParsedTraitDecl,
   ctx: BindingContext,
   tracker: BinderScopeTracker
 ): void => {
+  resolveStdIntrinsicTypeContractProvider({
+    id: decl.form.attributes?.intrinsicType,
+    declarationName: decl.name.value,
+    declarationKind: "trait",
+    ctx,
+  });
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
   rememberSyntax(decl.body, ctx);

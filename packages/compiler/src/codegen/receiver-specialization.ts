@@ -1,9 +1,11 @@
-import type {
-  CodegenContext,
-  FunctionMetadata,
-} from "./context.js";
+import type { CodegenContext, FunctionMetadata } from "./context.js";
 import type { HirFunction } from "../semantics/hir/index.js";
 import type { SymbolId, TypeId } from "../semantics/ids.js";
+import {
+  composeSpecializationDimensions,
+  functionSpecializationIdentity,
+  tryAdmitFunctionSpecialization,
+} from "./specialization-policy.js";
 
 export interface ReceiverSpecialization {
   base: FunctionMetadata;
@@ -21,9 +23,6 @@ type ReceiverSpecializationState = {
 const RECEIVER_SPECIALIZATION_STATE = Symbol(
   "voyd.codegen.receiverSpecializationState",
 );
-
-const MAX_RECEIVER_SPECIALIZATIONS_PER_FUNCTION = 4;
-const MAX_EXACT_PARAMETERS_PER_RECEIVER_SPECIALIZATION = 2;
 
 const stateOf = (ctx: CodegenContext): ReceiverSpecializationState =>
   ctx.programHelpers.getHelperState<ReceiverSpecializationState>(
@@ -46,7 +45,8 @@ const functionItemFor = ({
   meta: FunctionMetadata;
 }): HirFunction | undefined => {
   const targetCtx = ctx.moduleContexts.get(meta.moduleId);
-  const targetModule = targetCtx?.module ?? ctx.program.modules.get(meta.moduleId);
+  const targetModule =
+    targetCtx?.module ?? ctx.program.modules.get(meta.moduleId);
   return Array.from(targetModule?.hir.items.values() ?? []).find(
     (item): item is HirFunction =>
       item.kind === "function" && item.symbol === meta.symbol,
@@ -65,7 +65,8 @@ export const getOrCreateReceiverSpecialization = ({
   if (
     !ctx.optimization ||
     exactParameterTypes.size === 0 ||
-    exactParameterTypes.size > MAX_EXACT_PARAMETERS_PER_RECEIVER_SPECIALIZATION
+    exactParameterTypes.size >
+      ctx.specializationPolicy.receiverExactParametersPerContext
   ) {
     return undefined;
   }
@@ -75,15 +76,28 @@ export const getOrCreateReceiverSpecialization = ({
   }
 
   const combinedFacts = new Map<SymbolId, TypeId>([
-    ...(ctx.optimization?.exactParameterTypes.get(meta.instanceId)?.entries() ?? []),
+    ...(ctx.optimization?.exactParameterTypes.get(meta.instanceId)?.entries() ??
+      []),
     ...(meta.exactParameterTypes?.entries() ?? []),
     ...exactParameterTypes.entries(),
   ]);
-  const sortedFacts = Array.from(combinedFacts.entries())
-    .sort(([left], [right]) => left - right);
-  const key = `${meta.moduleId}:${meta.instanceId}:${sortedFacts
-    .map(([symbol, type]) => `${symbol}=${type}`)
-    .join(",")}`;
+  const sortedFacts = Array.from(combinedFacts.entries()).sort(
+    ([left], [right]) => left - right,
+  );
+  if (
+    sortedFacts.length >
+    ctx.specializationPolicy.receiverExactParametersPerContext
+  ) {
+    return undefined;
+  }
+  const specializationDimensions = composeSpecializationDimensions({
+    meta,
+    next: { receiver: sortedFacts },
+  });
+  const key = functionSpecializationIdentity({
+    meta,
+    dimensions: specializationDimensions,
+  });
   const state = stateOf(ctx);
   const existing = state.byKey.get(key);
   if (existing) {
@@ -94,7 +108,17 @@ export const getOrCreateReceiverSpecialization = ({
       specialization.base.moduleId === meta.moduleId &&
       specialization.base.instanceId === meta.instanceId,
   );
-  if (existingForFunction.length >= MAX_RECEIVER_SPECIALIZATIONS_PER_FUNCTION) {
+  if (
+    !tryAdmitFunctionSpecialization({
+      ctx,
+      meta,
+      item,
+      kind: "receiver",
+      dimensions: specializationDimensions,
+      existingKindVariants: existingForFunction.length,
+      maxKindVariants: ctx.specializationPolicy.receiverContextsPerFunction,
+    })
+  ) {
     return undefined;
   }
 
@@ -104,6 +128,7 @@ export const getOrCreateReceiverSpecialization = ({
       sortedFacts.map(([symbol, type]) => `${symbol}_${type}`).join("_"),
     )}`,
     exactParameterTypes: new Map(sortedFacts),
+    specialization: specializationDimensions,
   };
   const specialization: ReceiverSpecialization = {
     base: meta,

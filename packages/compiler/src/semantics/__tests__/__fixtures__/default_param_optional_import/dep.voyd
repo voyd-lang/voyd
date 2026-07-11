@@ -1,10 +1,2 @@
-@intrinsic_type(type: "optional-some")
-pub obj Some<T> {
-  api value: T
-}
-
-@intrinsic_type(type: "optional-none")
-pub obj None {}
-
-@intrinsic_type(type: "optional")
-pub type Optional<T> = Some<T> | None
+pub fn init(max_depth: i32 = 6) -> i32
+  max_depth

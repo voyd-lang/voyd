@@ -6,6 +6,12 @@ import type {
 } from "./symbol-index.js";
 import type { SemanticsPipelineResult } from "./pipeline.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
+import type {
+  CompilerFunctionContractId,
+  CompilerFunctionContractSpec,
+  StdIntrinsicTypeContractId,
+  StdIntrinsicTypeContractProvider,
+} from "../compiler-contracts/index.js";
 
 export type SymbolRef = {
   moduleId: string;
@@ -19,8 +25,20 @@ export type ProgramSymbolArena = {
   getName(id: ProgramSymbolId): string | undefined;
   getPackageId(id: ProgramSymbolId): string;
   getIntrinsicType(id: ProgramSymbolId): string | undefined;
+  getStdIntrinsicTypeContract(
+    id: ProgramSymbolId,
+  ): StdIntrinsicTypeContractProvider | undefined;
+  resolveStdIntrinsicTypeContract(
+    id: StdIntrinsicTypeContractId,
+  ): ProgramSymbolId | undefined;
   getIntrinsicName(id: ProgramSymbolId): string | undefined;
   getIntrinsicFunctionFlags(id: ProgramSymbolId): IntrinsicFunctionFlags;
+  getCompilerFunctionContract(
+    id: ProgramSymbolId,
+  ): CompilerFunctionContractSpec | undefined;
+  resolveCompilerFunctionContract(
+    id: CompilerFunctionContractId,
+  ): ProgramSymbolId | undefined;
   getSerializer(id: ProgramSymbolId): SerializerMetadata | undefined;
   getBoundary(id: ProgramSymbolId): BoundaryMetadata | undefined;
   isModuleScoped(id: ProgramSymbolId): boolean;
@@ -48,8 +66,24 @@ export const buildProgramSymbolArena = (
   const namesById: (string | undefined)[] = [];
   const packageIdsById: string[] = [];
   const intrinsicTypesById: (string | undefined)[] = [];
+  const stdIntrinsicTypeContractsById: (
+    | StdIntrinsicTypeContractProvider
+    | undefined
+  )[] = [];
+  const idsByStdIntrinsicTypeContract = new Map<
+    StdIntrinsicTypeContractId,
+    ProgramSymbolId
+  >();
   const intrinsicNamesById: (string | undefined)[] = [];
   const intrinsicFlagsById: IntrinsicFunctionFlags[] = [];
+  const compilerFunctionContractsById: (
+    | CompilerFunctionContractSpec
+    | undefined
+  )[] = [];
+  const idsByCompilerFunctionContract = new Map<
+    CompilerFunctionContractId,
+    ProgramSymbolId
+  >();
   const serializerById: (SerializerMetadata | undefined)[] = [];
   const boundaryById: (BoundaryMetadata | undefined)[] = [];
   const moduleScopedById: boolean[] = [];
@@ -75,8 +109,38 @@ export const buildProgramSymbolArena = (
       namesById[id] = mod.symbols.getName(symbol);
       packageIdsById[id] = mod.binding.packageId;
       intrinsicTypesById[id] = mod.symbols.getIntrinsicType(symbol);
+      const stdIntrinsicTypeContract =
+        mod.symbols.getStdIntrinsicTypeContract(symbol);
+      stdIntrinsicTypeContractsById[id] = stdIntrinsicTypeContract;
+      if (stdIntrinsicTypeContract) {
+        const existing = idsByStdIntrinsicTypeContract.get(
+          stdIntrinsicTypeContract.id,
+        );
+        if (existing !== undefined) {
+          const first = refsById[existing]!;
+          throw new Error(
+            `duplicate reserved std intrinsic type contract '${stdIntrinsicTypeContract.id}': ${first.moduleId}::${first.symbol} and ${mod.moduleId}::${symbol}`,
+          );
+        }
+        idsByStdIntrinsicTypeContract.set(stdIntrinsicTypeContract.id, id);
+      }
       intrinsicNamesById[id] = mod.symbols.getIntrinsicName(symbol);
       intrinsicFlagsById[id] = mod.symbols.getIntrinsicFunctionFlags(symbol);
+      const compilerFunctionContract =
+        mod.symbols.getCompilerFunctionContract(symbol);
+      compilerFunctionContractsById[id] = compilerFunctionContract;
+      if (compilerFunctionContract) {
+        const existing = idsByCompilerFunctionContract.get(
+          compilerFunctionContract.id,
+        );
+        if (existing !== undefined) {
+          const first = refsById[existing]!;
+          throw new Error(
+            `duplicate compiler function contract '${compilerFunctionContract.id}': ${first.moduleId}::${first.symbol} and ${mod.moduleId}::${symbol}`,
+          );
+        }
+        idsByCompilerFunctionContract.set(compilerFunctionContract.id, id);
+      }
       serializerById[id] = mod.symbols.getSerializer(symbol);
       boundaryById[id] = mod.symbols.getBoundary(symbol);
       moduleScopedById[id] = mod.symbols.isModuleScoped(symbol);
@@ -119,12 +183,18 @@ export const buildProgramSymbolArena = (
     getName,
     getPackageId,
     getIntrinsicType: (id) => intrinsicTypesById[id],
+    getStdIntrinsicTypeContract: (id) => stdIntrinsicTypeContractsById[id],
+    resolveStdIntrinsicTypeContract: (id) =>
+      idsByStdIntrinsicTypeContract.get(id),
     getIntrinsicName: (id) => intrinsicNamesById[id],
     getIntrinsicFunctionFlags: (id) =>
       intrinsicFlagsById[id] ?? {
         intrinsic: false,
         intrinsicUsesSignature: false,
       },
+    getCompilerFunctionContract: (id) => compilerFunctionContractsById[id],
+    resolveCompilerFunctionContract: (id) =>
+      idsByCompilerFunctionContract.get(id),
     getSerializer: (id) => serializerById[id],
     getBoundary: (id) => boundaryById[id],
     isModuleScoped: (id) => moduleScopedById[id] === true,

@@ -11,9 +11,14 @@ import type {
   TypeId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
-import type { ContinuationEnvField, ContinuationSite } from "../effect-lowering.js";
+import type {
+  ContinuationEnvField,
+  ContinuationSite,
+} from "../effect-lowering.js";
 import { sanitizeIdentifier } from "../effect-lowering/layout.js";
 import {
+  getInlineHeapBoxType,
+  getOptimizedParamAbiKind,
   getRequiredExprType,
   wasmHeapFieldTypeFor,
   wasmTypeFor,
@@ -28,7 +33,8 @@ const specializationKey = ({
 }: {
   site: ContinuationSite;
   typeInstanceId?: ProgramFunctionInstanceId;
-}): string => `${site.siteId}:${typeof typeInstanceId === "number" ? typeInstanceId : "base"}`;
+}): string =>
+  `${site.siteId}:${typeof typeInstanceId === "number" ? typeInstanceId : "base"}`;
 
 const OWNER_SYMBOL_TYPES_KEY = Symbol("effects.ownerSymbolTypes");
 
@@ -129,21 +135,27 @@ const ownerReturnTypeIdFor = ({
             throw new Error("missing lambda owner for continuation site");
           }
           const lambdaType = ctx.program.types.getTypeDesc(
-            getRequiredExprType(site.owner.exprId, ctx, typeInstanceId)
+            getRequiredExprType(site.owner.exprId, ctx, typeInstanceId),
           );
           if (lambdaType.kind !== "function") {
-            throw new Error("lambda continuation owner must have a function type");
+            throw new Error(
+              "lambda continuation owner must have a function type",
+            );
           }
           return lambdaType.returnType;
         })()
       : (() => {
-          const handlerExpr = ctx.module.hir.expressions.get(site.owner.handlerExprId);
+          const handlerExpr = ctx.module.hir.expressions.get(
+            site.owner.handlerExprId,
+          );
           if (!handlerExpr || handlerExpr.exprKind !== "effect-handler") {
             throw new Error("missing handler owner for continuation site");
           }
           const clause = handlerExpr.handlers[site.owner.clauseIndex];
           if (!clause) {
-            throw new Error("missing handler clause owner for continuation site");
+            throw new Error(
+              "missing handler clause owner for continuation site",
+            );
           }
           return getRequiredExprType(clause.body, ctx, typeInstanceId);
         })();
@@ -258,6 +270,15 @@ const specializeEnvField = ({
 
   const baseTypeId = (() => {
     if (typeof field.tempId === "number") {
+      const isDefaultParameterTemp = Array.from(
+        ctx.effectLowering.defaultParamTemps.values(),
+      ).some(
+        (temp) =>
+          temp.tempId === field.tempId || temp.presenceTempId === field.tempId,
+      );
+      if (isDefaultParameterTemp) {
+        return field.typeId;
+      }
       return resolveTempCaptureTypeId({
         tempId: field.tempId,
         ctx,
@@ -272,11 +293,28 @@ const specializeEnvField = ({
   const specializedTypeId = substitution
     ? ctx.program.types.substitute(baseTypeId, substitution)
     : baseTypeId;
+  const storageRef =
+    field.bindingKind !== undefined && field.bindingKind !== "value"
+      ? getOptimizedParamAbiKind({
+          typeId: specializedTypeId,
+          bindingKind: field.bindingKind,
+          ctx,
+        }) !== "direct"
+      : field.storageRef === true;
+  const storageRefType = storageRef
+    ? getInlineHeapBoxType({ typeId: specializedTypeId, ctx })
+    : undefined;
+  if (storageRef && typeof storageRefType !== "number") {
+    throw new Error("default reference temp requires storage-ref ABI");
+  }
   return {
     ...field,
     typeId: specializedTypeId,
-    wasmType: wasmTypeFor(specializedTypeId, ctx),
-    storageType: wasmHeapFieldTypeFor(specializedTypeId, ctx, new Set(), "runtime"),
+    wasmType: storageRefType ?? wasmTypeFor(specializedTypeId, ctx),
+    storageType:
+      storageRefType ??
+      wasmHeapFieldTypeFor(specializedTypeId, ctx, new Set(), "runtime"),
+    storageRef,
   };
 };
 
@@ -317,11 +355,11 @@ export const specializeContinuationSite = ({
       typeInstanceId,
       substitution,
       ownerSymbolTypes,
-    })
+    }),
   );
   const envType = defineStructType(ctx.mod, {
     name: `voydContEnv_${sanitizeIdentifier(ctx.moduleLabel)}_${sanitizeIdentifier(
-      site.contBaseName
+      site.contBaseName,
     )}_${site.siteId}__inst${typeInstanceId}`,
     fields: envFields.map((field) => ({
       name: field.name,

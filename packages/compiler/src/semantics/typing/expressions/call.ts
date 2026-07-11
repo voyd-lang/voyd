@@ -1409,7 +1409,7 @@ const walkAllLabeledCallArguments = ({
       continue;
     }
 
-    if (param.optional) {
+    if (param.optional || param.defaulted) {
       if (
         !onSkipOptionalParam({
           param,
@@ -1531,7 +1531,7 @@ const walkCallArguments = ({
     const arg = args[argIndex];
 
     if (!arg) {
-      if (param.optional) {
+      if (param.optional || param.defaulted) {
         if (
           !onSkipOptionalParam({
             param,
@@ -1616,7 +1616,7 @@ const walkCallArguments = ({
             cursor += 1;
             continue;
           }
-          if (runParam.optional) {
+          if (runParam.optional || runParam.defaulted) {
             if (
               !onSkipOptionalParam({
                 param: runParam,
@@ -1672,7 +1672,7 @@ const walkCallArguments = ({
       continue;
     }
 
-    if (param.optional) {
+    if (param.optional || param.defaulted) {
       if (
         !onSkipOptionalParam({
           param,
@@ -1860,6 +1860,9 @@ const ensureOptionalParameterIsSkippable = ({
   callSpan?: SourceSpan;
   fallbackSpan: SourceSpan;
 }): void => {
+  if (param.defaulted) {
+    return;
+  }
   const optionalInfo = getOptionalInfo(
     param.type,
     optionalResolverContextForTypingContext(ctx),
@@ -1885,16 +1888,8 @@ const isStableCallsiteIdParam = (param: ParamSignature): boolean =>
 
 const providedArgumentTypeForParam = (
   param: ParamSignature,
-  ctx: TypingContext,
-): TypeId => {
-  if (typeof param.defaultValue !== "number") {
-    return param.type;
-  }
-  return (
-    getOptionalInfo(param.type, optionalResolverContextForTypingContext(ctx))
-      ?.innerType ?? param.type
-  );
-};
+  _ctx: TypingContext,
+): TypeId => param.type;
 
 const argumentTargetsSyntheticParam = (
   arg: Arg,
@@ -2012,7 +2007,9 @@ const validateCallArgs = (
               targetTypeId: param.type,
               value: stableCallsiteIdFor(callSpan ?? span, `${paramIndex}`),
             }
-          : { kind: "missing", targetTypeId: param.type },
+          : param.defaulted
+            ? { kind: "omitted-default", targetTypeId: param.type }
+            : { kind: "omitted-optional", targetTypeId: param.type },
       );
       return true;
     },
@@ -3035,7 +3032,9 @@ const signatureWithAdjustedTraitDispatchParameters = ({
     parameters: params.map((param) => ({
       type: param.type,
       label: param.label,
-      optional: param.optional ?? false,
+      optional: (param.optional ?? false) || (param.defaulted ?? false),
+      defaulted: param.defaulted ?? false,
+      bindingKind: param.bindingKind,
     })),
     returnType: signature.returnType,
     effectRow,
@@ -3822,7 +3821,12 @@ const resolveOperatorOverloadCandidates = ({
       methodName: operatorName,
       ctx,
     });
-    return traitResolution.candidates.length > 0 ? traitResolution : undefined;
+    if (traitResolution.candidates.length > 0) {
+      return {
+        ...traitResolution,
+        includesMethodCandidates: true,
+      };
+    }
   }
 
   const nominalResolution = resolveNominalMethodCandidates({
@@ -3830,8 +3834,19 @@ const resolveOperatorOverloadCandidates = ({
     methodName: operatorName,
     ctx,
   });
-  return nominalResolution && nominalResolution.candidates.length > 0
-    ? nominalResolution
+  if (nominalResolution && nominalResolution.candidates.length > 0) {
+    return {
+      ...nominalResolution,
+      includesMethodCandidates: true,
+    };
+  }
+
+  const freeFunctionCandidates = resolveFreeFunctionCandidates({
+    methodName: operatorName,
+    ctx,
+  });
+  return freeFunctionCandidates.length > 0
+    ? { candidates: freeFunctionCandidates, includesMethodCandidates: false }
     : undefined;
 };
 
@@ -3877,10 +3892,22 @@ const typeOperatorOverloadCall = ({
     return undefined;
   }
 
-  const candidates = filterCandidatesByExplicitTypeArguments({
+  const hasUnresolvedOperand = args.some(
+    (arg) => arg.type === ctx.primitives.unknown,
+  );
+  if (
+    hasUnresolvedOperand &&
+    resolution.includesMethodCandidates !== true
+  ) {
+    return undefined;
+  }
+
+  const methodCandidates = filterCandidatesByExplicitTypeArguments({
     candidates: resolution.candidates,
     typeArguments,
   });
+  let candidates = methodCandidates;
+  let noOverloadDiagnosticCandidates = methodCandidates;
   enforceOverloadCandidateBudget({
     name: operatorName,
     candidateCount: candidates.length,
@@ -3888,7 +3915,7 @@ const typeOperatorOverloadCall = ({
     span: call.span,
   });
 
-  const matches = findMatchingOverloadCandidates({
+  let matches = findMatchingOverloadCandidates({
     name: operatorName,
     candidates,
     args,
@@ -3915,13 +3942,79 @@ const typeOperatorOverloadCall = ({
           state,
         })
       : undefined;
+
+  if (
+    !traitDispatch &&
+    matches.length === 0 &&
+    !hasUnresolvedOperand &&
+    resolution.includesMethodCandidates === true
+  ) {
+    const fallbackCandidates = resolveFreeFunctionFallbackCandidates({
+      methodName: operatorName,
+      existing: resolution.candidates,
+      ctx,
+    });
+    if (fallbackCandidates.length > 0) {
+      const filteredFallbackCandidates =
+        filterCandidatesByExplicitTypeArguments({
+          candidates: fallbackCandidates,
+          typeArguments,
+        });
+      candidates = filteredFallbackCandidates;
+      noOverloadDiagnosticCandidates =
+        mergeCandidatesForMethodNoOverloadDiagnostic({
+          methodCandidates,
+          fallbackCandidates: filteredFallbackCandidates,
+          ctx,
+        });
+      enforceOverloadCandidateBudget({
+        name: operatorName,
+        candidateCount: candidates.length,
+        ctx,
+        span: call.span,
+      });
+      matches = findMatchingOverloadCandidates({
+        name: operatorName,
+        candidates,
+        args,
+        span: call.span,
+        ctx,
+        state,
+        typeArguments,
+        scoreMatches: (rawMatches) =>
+          scoreOverloadMatchesByLambdaCompatibility({
+            matches: rawMatches,
+            args,
+            callArgs: call.args,
+            typeArguments,
+            ctx,
+            state,
+          }),
+      });
+    }
+  }
+
   let selected: MethodCallCandidate | undefined = traitDispatch;
 
   if (!selected) {
     if (matches.length === 0) {
+      const intrinsicFallback = typeIntrinsicFallbackCall({
+        name: operatorName,
+        args,
+        typeArguments,
+        callId: call.id,
+        callSpan: call.span,
+        calleeExprId: callee.id,
+        ctx,
+        state,
+      });
+      if (intrinsicFallback) {
+        return intrinsicFallback;
+      }
+
       if (
         emitConsensusCallArgumentShapeDiagnostic({
-          candidates,
+          candidates: noOverloadDiagnosticCandidates,
           args,
           ctx,
           state,
@@ -3939,7 +4032,7 @@ const typeOperatorOverloadCall = ({
         code: "TY0008",
         params: noOverloadDiagnosticParams({
           name: operatorName,
-          candidates,
+          candidates: noOverloadDiagnosticCandidates,
           args,
           ctx,
           state,
@@ -4403,7 +4496,15 @@ const resolveCurriedCallReturnType = ({
       return reportNonFunctionCallee({ callSpan, calleeSpan, ctx });
     }
 
-    const { parameters, returnType } = desc;
+    const { returnType } = desc;
+    const parameters = desc.parameters.map((param) => {
+      const defaulted = param.defaulted === true;
+      return {
+        ...param,
+        optional: defaulted ? false : param.optional,
+        defaulted,
+      };
+    });
     if (parameters.length === 0) {
       if (remainingArgs.length > 0) {
         throw new Error("call argument count mismatch");
@@ -4907,7 +5008,9 @@ const typeFunctionCall = ({
     const calleeType = ctx.arena.internFunction({
       parameters: adjustedParameters.map((param) => ({
         ...param,
-        optional: param.optional ?? false,
+        optional: (param.optional ?? false) || (param.defaulted ?? false),
+        defaulted: param.defaulted ?? false,
+        bindingKind: param.bindingKind,
       })),
       returnType: instantiation.returnType,
       effectRow: ctx.primitives.defaultEffectRow,
@@ -5145,12 +5248,14 @@ export const typeGenericFunctionBody = ({
   symbol,
   signature,
   substitution,
+  retainInstance = true,
   ctx,
   state,
 }: {
   symbol: SymbolId;
   signature: FunctionSignature;
   substitution: ReadonlyMap<TypeParamId, TypeId>;
+  retainInstance?: boolean;
   ctx: TypingContext;
   state: TypingState;
 }): void => {
@@ -5268,13 +5373,15 @@ export const typeGenericFunctionBody = ({
         );
       }
     }
-    ctx.functions.cacheInstanceValueTypes(key, ctx.valueTypes);
-    ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
-    ctx.functions.recordInstantiation(
-      symbolRefKey(canonicalSymbolRefForTypingContext(symbol, ctx)),
-      key,
-      appliedTypeArgs,
-    );
+    if (retainInstance) {
+      ctx.functions.cacheInstanceValueTypes(key, ctx.valueTypes);
+      ctx.functions.cacheInstance(key, expectedReturn, ctx.resolvedExprTypes);
+      ctx.functions.recordInstantiation(
+        symbolRefKey(canonicalSymbolRefForTypingContext(symbol, ctx)),
+        key,
+        appliedTypeArgs,
+      );
+    }
   } finally {
     const updatedFunctionType = ctx.valueTypes.get(symbol);
     if (typeof updatedFunctionType === "number") {
@@ -5288,6 +5395,30 @@ export const typeGenericFunctionBody = ({
   }
 };
 
+export const validateGenericFunctionBody = ({
+  symbol,
+  signature,
+  substitution,
+  ctx,
+  state,
+}: {
+  symbol: SymbolId;
+  signature: FunctionSignature;
+  substitution: ReadonlyMap<TypeParamId, TypeId>;
+  ctx: TypingContext;
+  state: TypingState;
+}): void =>
+  withSpeculativeExprTyping(ctx, () =>
+    typeGenericFunctionBody({
+      symbol,
+      signature,
+      substitution,
+      retainInstance: false,
+      ctx,
+      state,
+    }),
+  );
+
 const refreshFunctionSignatureTypeForGenericBody = ({
   symbol,
   signature,
@@ -5298,10 +5429,12 @@ const refreshFunctionSignatureTypeForGenericBody = ({
   ctx: TypingContext;
 }): void => {
   const functionType = ctx.arena.internFunction({
-    parameters: signature.parameters.map(({ type, label, optional }) => ({
+    parameters: signature.parameters.map(({ type, label, optional, defaulted, bindingKind }) => ({
       type,
       label,
-      optional: optional ?? false,
+      optional: (optional ?? false) || (defaulted ?? false),
+      defaulted: defaulted ?? false,
+      bindingKind,
     })),
     returnType: signature.returnType,
     effectRow: signature.effectRow ?? ctx.primitives.defaultEffectRow,

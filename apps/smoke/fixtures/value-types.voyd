@@ -575,6 +575,16 @@ pub fn value_five_lane_closure_round_trip() -> i32
   })
   wide.a + wide.b + wide.c + wide.d + wide.e
 
+pub fn value_five_lane_named_function_closure() -> i32
+  let sum = wide_tail_sum
+  sum(WideVec5 {
+    a: 1,
+    b: 2,
+    c: 3,
+    d: 4,
+    e: 5
+  })
+
 pub fn value_five_lane_closure_capture() -> i32
   let wide = WideVec5 {
     a: 1,

@@ -24,6 +24,7 @@ describe("program helper registry", () => {
         sites: [],
         callArgTemps: new Map(),
         tempTypeIds: new Map(),
+        defaultParamTemps: new Map(),
       },
     };
 
@@ -75,7 +76,10 @@ test "beta":
       roots: { src: root },
       host,
     });
-    const { diagnostics, semantics } = analyzeModules({ graph, includeTests: true });
+    const { diagnostics, semantics } = analyzeModules({
+      graph,
+      includeTests: true,
+    });
     const errors = diagnostics.filter((diag) => diag.severity === "error");
     expect(errors).toHaveLength(0);
 
@@ -134,7 +138,10 @@ test "beta":
       roots: { src: root },
       host,
     });
-    const { diagnostics, semantics } = analyzeModules({ graph, includeTests: true });
+    const { diagnostics, semantics } = analyzeModules({
+      graph,
+      includeTests: true,
+    });
     const errors = diagnostics.filter((diag) => diag.severity === "error");
     expect(errors).toHaveLength(0);
 

@@ -61,6 +61,7 @@ pub fn encode_value_result(value: MsgPack, ptr: i32, len: i32): () -> Result<i32
     )
   }
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.encode-value")
 pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
   encode_value_raw(value, ptr, len)
 
@@ -96,6 +97,7 @@ pub fn decode_value_result(ptr: i32, len: i32): () -> Result<MsgPack, MsgPackErr
     }
   Ok<MsgPack> { value: value }
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.decode-value")
 pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
   decode_value_raw(ptr, len)
 
@@ -152,6 +154,7 @@ pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
   MsgPackMap { entries: value.entries() }
 
 /// Extracts a 32-bit integer from a MessagePack value.
+@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-i32")
 pub fn unpack_i32(value: MsgPack): () -> i32
   value.match(decoded)
     I32:
@@ -162,6 +165,7 @@ pub fn unpack_i32(value: MsgPack): () -> i32
       0
 
 /// Extracts a 64-bit integer from a MessagePack value.
+@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-i64")
 pub fn unpack_i64(value: MsgPack): () -> i64
   value.match(decoded)
     I64:
@@ -172,6 +176,7 @@ pub fn unpack_i64(value: MsgPack): () -> i64
       cast::to_i64(0)
 
 /// Extracts a 32-bit float from a MessagePack value.
+@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-f32")
 pub fn unpack_f32(value: MsgPack): () -> f32
   value.match(decoded)
     F32:
@@ -186,6 +191,7 @@ pub fn unpack_f32(value: MsgPack): () -> f32
       cast::reinterpret_f32(0)
 
 /// Extracts a 64-bit float from a MessagePack value.
+@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-f64")
 pub fn unpack_f64(value: MsgPack): () -> f64
   value.match(decoded)
     F64:
@@ -200,6 +206,7 @@ pub fn unpack_f64(value: MsgPack): () -> f64
       0.0
 
 /// Extracts a boolean from a MessagePack value.
+@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-bool")
 pub fn unpack_bool(value: MsgPack): () -> bool
   value.match(decoded)
     Bool:
@@ -208,6 +215,7 @@ pub fn unpack_bool(value: MsgPack): () -> bool
       false
 
 /// Extracts a string from a MessagePack value.
+@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-string")
 pub fn unpack_string(value: MsgPack): () -> String
   value.match(decoded)
     Bool:
@@ -237,6 +245,7 @@ pub fn unpack_binary(value: MsgPack): () -> Binary
       empty_binary()
 
 /// Extracts an array from a MessagePack value.
+@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-array")
 pub fn unpack_array(value: MsgPack): () -> Array<MsgPack>
   value.match(boxed)
     Array<MsgPack>:
@@ -245,6 +254,7 @@ pub fn unpack_array(value: MsgPack): () -> Array<MsgPack>
       empty_array()
 
 /// Extracts a string-keyed map from a MessagePack value.
+@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-map")
 pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
   value.match(boxed)
     MsgPackMap:

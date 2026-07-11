@@ -70,6 +70,8 @@ export type CodegenFunctionParameter = {
   type: TypeId;
   label?: string;
   optional?: boolean;
+  defaulted?: boolean;
+  bindingKind?: HirBindingKind;
 };
 
 export type CodegenTypeDesc =
@@ -180,6 +182,7 @@ export type CodegenFunctionSignature = {
     declaredSerializer?: SerializerMetadata;
     label?: string;
     optional: boolean;
+    defaulted?: boolean;
     name?: string;
     symbol?: SymbolId;
     bindingKind?: HirBindingKind;
@@ -935,6 +938,8 @@ export const buildProgramCodegenView = (
             type: param.type,
             label: param.label,
             optional: param.optional === true,
+            defaulted: param.defaulted === true,
+            bindingKind: param.bindingKind,
           })),
           returnType: desc.returnType,
           effectRow: desc.effectRow,
@@ -2133,6 +2138,7 @@ export const buildProgramCodegenView = (
           declaredSerializer: param.declaredSerializer,
           label: param.label,
           optional: param.optional === true,
+          defaulted: param.defaulted === true,
           name: param.name,
           symbol: param.symbol,
           bindingKind: param.bindingKind,

@@ -15,7 +15,11 @@ import {
   packageVisibility,
 } from "../hir/index.js";
 import { isIdentifierWithValue } from "../utils.js";
-import type { EffectAttribute, IntrinsicAttribute } from "../../parser/attributes.js";
+import type {
+  CompilerContractAttribute,
+  EffectAttribute,
+  IntrinsicAttribute,
+} from "../../parser/attributes.js";
 import type { HirBindingKind } from "../hir/index.js";
 import { ensureForm } from "./binders/utils.js";
 import { normalizeNestedFunctionTypeAnnotation } from "../function-type-annotations.js";
@@ -27,6 +31,7 @@ export interface ParsedFunctionDecl {
   signature: ParsedFunctionSignature;
   body: Expr;
   intrinsic?: IntrinsicAttribute;
+  compilerContract?: CompilerContractAttribute;
 }
 
 export interface ParsedModuleLetDecl {
@@ -184,10 +189,18 @@ export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
       form.attributes?.intrinsic as IntrinsicAttribute | undefined,
       signature.name.value
     ),
+    compilerContract: form.attributes?.compilerContract as
+      | CompilerContractAttribute
+      | undefined,
   };
 };
 
 const parseTraitMethod = (form: Form): ParsedTraitMethod => {
+  if (form.attributes?.compilerContract) {
+    throw new Error(
+      "@compiler_contract can only annotate ordinary top-level functions",
+    );
+  }
   const keyword = form.at(0);
   if (!isIdentifierWithValue(keyword, "fn")) {
     throw new Error("trait methods must start with 'fn'");

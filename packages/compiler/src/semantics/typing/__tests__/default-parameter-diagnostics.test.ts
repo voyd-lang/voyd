@@ -57,4 +57,5 @@ describe("default parameter diagnostics", () => {
     expect(caught.diagnostic.message).toMatch(/default parameter a/i);
     expect(caught.diagnostic.message).toMatch(/parameter b/i);
   });
+
 });

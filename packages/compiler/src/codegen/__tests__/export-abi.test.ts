@@ -165,6 +165,19 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     expect(result).toEqual(["a", "b", "c"]);
   });
 
+  it("keeps helpers for reachable internal boundary intrinsics under optimization", async () => {
+    const wasm = await buildModule({
+      entryFile: "internal-boundary-intrinsics.voyd",
+      codegenOptions: {
+        optimizationLevel: "release",
+        boundaryExports: false,
+      },
+    });
+    const host = await createVoydHost({ wasm });
+
+    await expect(host.runPure("main", [])).resolves.toBe(42);
+  });
+
   it("exports memory for serialized wrappers under linearMemoryExport: auto", async () => {
     const wasm = await buildModule({
       codegenOptions: { linearMemoryExport: "auto" },

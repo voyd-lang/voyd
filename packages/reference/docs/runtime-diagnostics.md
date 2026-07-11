@@ -29,19 +29,20 @@ panic message was unavailable instead of silently dropping it.
 `@voyd-lang/sdk` supports:
 
 - `optimize?: boolean`
+- `optimizationLevel?: "none" | "balanced" | "release"`
 - `runtimeDiagnostics?: boolean`
 
 Default behavior:
 
 - builds do not include runtime diagnostics unless `runtimeDiagnostics: true`
   is requested
-- optimized builds enable Voyd's aggressive optimization profile and still leave
-  runtime diagnostics disabled unless you opt back in
+- optimization levels do not change the diagnostics default; balanced and
+  release builds still leave runtime diagnostics disabled unless you opt in
 
 ## CLI behavior
 
-`voyd --opt` follows the same SDK default and therefore leaves runtime
-diagnostics disabled unless the compile call is overridden elsewhere.
+`voyd --opt` (release) and `voyd --opt-level balanced` follow the same SDK
+default and therefore leave runtime diagnostics disabled.
 
 ## Usage advice
 

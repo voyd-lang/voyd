@@ -1,6 +1,6 @@
 //! File system APIs backed by host runtime operations.
 //!
-//! `std::fs` provides read/write/existence/listing helpers that operate on
+//! `std::fs` provides read/write/existence/removal/listing helpers that operate on
 //! `std::path::Path` and return typed `Result` values where host I/O can fail.
 //! All effect payloads are MessagePack-encoded DTOs.
 
@@ -38,6 +38,8 @@ pub eff Fs
   exists(tail, path: MsgPack) -> bool
   /// Lists child paths in the directory at `path`, or returns an I/O error DTO.
   list_dir(tail, path: MsgPack) -> MsgPack
+  /// Removes the file or empty directory at `path`, or returns an I/O error DTO.
+  remove(tail, path: MsgPack) -> MsgPack
 
 /// Reads a file as raw bytes.
 ///
@@ -58,7 +60,7 @@ pub fn read_string(path: Path): Fs -> Result<String, IoError>
 /// `let write_result = fs::write_bytes(file_path, payload)`
 pub fn write_bytes(path: Path, bytes: Bytes): Fs -> Result<Unit, IoError>
   let payload = encode_write_bytes_payload(path, bytes)
-  decode_write_result(Fs::write_bytes(payload))
+  decode_unit_result(Fs::write_bytes(payload))
 
 /// Writes text to a file.
 ///
@@ -66,16 +68,20 @@ pub fn write_bytes(path: Path, bytes: Bytes): Fs -> Result<Unit, IoError>
 /// `let write_result = fs::write_string(file_path, "hello".as_slice())`
 pub fn write_string(path: Path, value: String): Fs -> Result<Unit, IoError>
   let payload = encode_write_string_payload(path, value)
-  decode_write_result(Fs::write_string(payload))
+  decode_unit_result(Fs::write_string(payload))
 
 /// Writes text to a file.
 pub fn write_string(path: Path, value: StringSlice): Fs -> Result<Unit, IoError>
   let payload = encode_write_string_payload(path, value.to_string())
-  decode_write_result(Fs::write_string(payload))
+  decode_unit_result(Fs::write_string(payload))
 
 /// Returns true when the path exists in the file system.
 pub fn exists(path: Path): Fs -> bool
   Fs::exists(encode_path(path))
+
+/// Removes a file or empty directory.
+pub fn remove(path: Path): Fs -> Result<Unit, IoError>
+  decode_unit_result(Fs::remove(encode_path(path)))
 
 /// Lists child paths in a directory.
 ///
@@ -147,7 +153,7 @@ fn decode_read_string_result(payload: MsgPack): () -> Result<String, IoError>
               Ok<String> { value }:
                 Ok<String> { value: value }
 
-fn decode_write_result(payload: MsgPack): () -> Result<Unit, IoError>
+fn decode_unit_result(payload: MsgPack): () -> Result<Unit, IoError>
   match(HostDto::unpack(payload))
     Err<HostError> { error }:
       Err<IoError> { error: host_error_to_io_error(error) }

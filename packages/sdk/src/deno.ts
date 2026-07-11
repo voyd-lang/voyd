@@ -28,6 +28,7 @@ export type {
   EffectHandler,
   HostProtocolTable,
   ModuleRoots,
+  OptimizationLevel,
   RunOptions,
   ServeWebAppOptions,
   ServeWebAppResult,

@@ -5,6 +5,11 @@ import type {
   ProgramCodegenView,
 } from "../semantics/codegen-view/index.js";
 import type {
+  HirExpression,
+  HirItem,
+  HirStatement,
+} from "../semantics/hir/index.js";
+import type {
   HirExprId,
   ProgramFunctionInstanceId,
   ProgramSymbolId,
@@ -14,11 +19,35 @@ import type {
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { ProgramCodegenOptimizationPlan } from "./codegen-plan.js";
 import type { CodegenOptions } from "../codegen/context.js";
+import type { ProgramOptimizationIndex } from "./program-index.js";
 
 export type OptimizedCallInfo = CallLoweringInfo;
 
 export type OptimizedModuleView = ModuleCodegenView & {
   semantics: SemanticsPipelineResult;
+};
+
+export type DeepReadonly<T> = T extends (...args: never[]) => unknown
+  ? T
+  : T extends ReadonlyMap<infer K, infer V>
+    ? ReadonlyMap<DeepReadonly<K>, DeepReadonly<V>>
+    : T extends ReadonlySet<infer V>
+      ? ReadonlySet<DeepReadonly<V>>
+      : T extends readonly (infer V)[]
+        ? readonly DeepReadonly<V>[]
+        : T extends object
+          ? { readonly [K in keyof T]: DeepReadonly<T[K]> }
+          : T;
+
+export type ReadonlyOptimizedModuleView = Omit<OptimizedModuleView, "hir"> & {
+  readonly hir: Omit<
+    OptimizedModuleView["hir"],
+    "items" | "statements" | "expressions"
+  > & {
+    readonly items: ReadonlyMap<number, DeepReadonly<HirItem>>;
+    readonly statements: ReadonlyMap<number, DeepReadonly<HirStatement>>;
+    readonly expressions: ReadonlyMap<number, DeepReadonly<HirExpression>>;
+  };
 };
 
 export type EscapeAnalysisOriginKind =
@@ -58,12 +87,27 @@ export type EscapeAnalysisParameterFact = {
 };
 
 export type ProgramEscapeAnalysisFacts = {
-  origins: ReadonlyMap<string, ReadonlyMap<HirExprId, EscapeAnalysisOriginFact>>;
+  origins: ReadonlyMap<
+    string,
+    ReadonlyMap<HirExprId, EscapeAnalysisOriginFact>
+  >;
   parameters: ReadonlyMap<
     ProgramFunctionInstanceId,
     ReadonlyMap<SymbolId, EscapeAnalysisParameterFact>
   >;
 };
+
+export type CallShapeParameterState =
+  | "provided"
+  | "omitted"
+  | "stable-callsite-id";
+
+export type CallShapeSpecializationRequest = Readonly<{
+  stage: "planned";
+  identity: string;
+  calleeInstanceId: ProgramFunctionInstanceId;
+  keyTokens: readonly string[];
+}>;
 
 export type ProgramOptimizationFacts = {
   handlerClauseCaptures: ReadonlyMap<
@@ -78,6 +122,10 @@ export type ProgramOptimizationFacts = {
     string,
     ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>
   >;
+  callShapeSpecializationRequests: ReadonlyMap<
+    string,
+    ReadonlyMap<ProgramFunctionInstanceId, CallShapeSpecializationRequest>
+  >;
   exactParameterTypes: ReadonlyMap<
     ProgramFunctionInstanceId,
     ReadonlyMap<SymbolId, TypeId>
@@ -87,8 +135,14 @@ export type ProgramOptimizationFacts = {
     ReadonlyMap<SymbolId, ReadonlySet<TypeId>>
   >;
   escapeAnalysis: ProgramEscapeAnalysisFacts;
-  runtimeTypeCheckElisionFieldAccesses: ReadonlyMap<string, ReadonlySet<HirExprId>>;
-  semanticCopyForwardingFieldAccesses: ReadonlyMap<string, ReadonlySet<HirExprId>>;
+  runtimeTypeCheckElisionFieldAccesses: ReadonlyMap<
+    string,
+    ReadonlySet<HirExprId>
+  >;
+  semanticCopyForwardingFieldAccesses: ReadonlyMap<
+    string,
+    ReadonlySet<HirExprId>
+  >;
   codegenPlan: ProgramCodegenOptimizationPlan;
 };
 
@@ -99,14 +153,20 @@ export type ProgramOptimizationIR = {
     testMode: boolean;
     testScope: "all" | "entry";
     boundaryExports?: CodegenOptions["boundaryExports"];
+    effectsHostBoundary?: CodegenOptions["effectsHostBoundary"];
   };
-  modules: ReadonlyMap<string, OptimizedModuleView>;
+  modules: ReadonlyMap<string, ReadonlyOptimizedModuleView>;
   calls: ReadonlyMap<string, ReadonlyMap<HirExprId, OptimizedCallInfo>>;
   functionInstantiations: ReadonlyMap<
     string,
-    ReadonlyMap<SymbolId, ReadonlyMap<ProgramFunctionInstanceId, readonly number[]>>
+    ReadonlyMap<
+      SymbolId,
+      ReadonlyMap<ProgramFunctionInstanceId, readonly number[]>
+    >
   >;
   survivingInstances: readonly MonomorphizedInstanceInfo[];
+  /** Read-only index access; its structure invariant is checked after every pass. */
+  index: ProgramOptimizationIndex;
   facts: ProgramOptimizationFacts;
 };
 

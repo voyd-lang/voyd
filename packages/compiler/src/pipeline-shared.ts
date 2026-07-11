@@ -38,11 +38,13 @@ import {
   startCompilerPerfPhase,
   startCompilerPerfSession,
 } from "./perf.js";
+import { isOptimizationEnabled } from "./optimization-policy.js";
 
 export {
   createCompilerDependencySnapshotCache,
   type CompilerDependencySnapshotCache,
 };
+export type { OptimizationLevel } from "./optimization-policy.js";
 
 export type LoadModulesOptions = {
   entryPath: string;
@@ -141,21 +143,17 @@ export const analyzeModules = ({
   typingState,
   isCancelled,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
-  const {
-    semantics,
-    diagnostics,
-    recomputedModuleIds,
-    dependencySnapshot,
-  } = analyzeModuleSemantics({
-    graph,
-    includeTests,
-    recoverFromTypingErrors,
-    captureDependencySnapshot,
-    previousSemantics,
-    changedModuleIds,
-    typingState,
-    isCancelled,
-  });
+  const { semantics, diagnostics, recomputedModuleIds, dependencySnapshot } =
+    analyzeModuleSemantics({
+      graph,
+      includeTests,
+      recoverFromTypingErrors,
+      captureDependencySnapshot,
+      previousSemantics,
+      changedModuleIds,
+      typingState,
+      isCancelled,
+    });
 
   diagnostics.push(...enforcePublicApiMethodEffectAnnotations({ semantics }));
 
@@ -212,7 +210,8 @@ const enforcePublicApiMethodEffectAnnotations = ({
 
     while (true) {
       const key = `${currentModuleId}:${currentSymbol}`;
-      if (seen.has(key)) return { moduleId: currentModuleId, symbol: currentSymbol };
+      if (seen.has(key))
+        return { moduleId: currentModuleId, symbol: currentSymbol };
       seen.add(key);
 
       const next = importTargetsFor(currentModuleId).get(currentSymbol);
@@ -290,14 +289,20 @@ const enforcePublicApiMethodEffectAnnotations = ({
           moduleId,
           symbol: metadata.owner,
         });
-        if (!exportedObjectTargets.has(`${resolvedOwner.moduleId}:${resolvedOwner.symbol}`)) {
+        if (
+          !exportedObjectTargets.has(
+            `${resolvedOwner.moduleId}:${resolvedOwner.symbol}`,
+          )
+        ) {
           return;
         }
 
         const signature = mod.typing.functions.getSignature(symbol);
         if (!signature) return;
 
-        const { isPure, isPolymorphic, effectsText } = effectInfoFor(signature.effectRow);
+        const { isPure, isPolymorphic, effectsText } = effectInfoFor(
+          signature.effectRow,
+        );
         if (signature.annotatedEffects || isPure || isPolymorphic) return;
 
         const seenKey = `${moduleId}:${symbol}`;
@@ -385,7 +390,7 @@ const collectTests = ({
 };
 
 const normalizeTestModifiers = (
-  modifiers?: TestAttribute["modifiers"]
+  modifiers?: TestAttribute["modifiers"],
 ): { skip?: boolean; only?: boolean } => {
   if (!modifiers) {
     return {};
@@ -426,6 +431,78 @@ export const lowerProgram = ({
   return { orderedModules: filteredOrder, entry: entryId };
 };
 
+type PreparedProgramForCodegen = {
+  entryModuleId: string;
+  program: ReturnType<typeof buildProgramCodegenView>;
+  optimization?: ReturnType<typeof optimizeProgram>;
+};
+
+const prepareProgramForCodegen = ({
+  graph,
+  semantics,
+  codegenOptions,
+  entryModuleId,
+  linkSemantics,
+  metricPrefix,
+}: EmitProgramOptions & {
+  metricPrefix: "emit" | "emit_fallback";
+}): PreparedProgramForCodegen => {
+  const lowerStartedAt = startCompilerPerfPhase();
+  const { orderedModules, entry } = lowerProgram({ graph, semantics });
+  markCompilerPerfPhaseDuration("lowerProgram", lowerStartedAt);
+  recordCompilerPerfDuration({
+    name: `${metricPrefix}.lower_program.ms`,
+    startedAt: lowerStartedAt,
+  });
+  const targetModuleId = entryModuleId ?? entry;
+  const modules = orderedModules
+    .map((id) => semantics.get(id))
+    .filter((value): value is SemanticsPipelineResult => Boolean(value));
+  if (modules.length === 0) {
+    throw new Error("No semantics available for codegen");
+  }
+
+  const linkStartedAt = startCompilerPerfPhase();
+  const monomorphized =
+    linkSemantics !== false
+      ? monomorphizeProgram({ modules, semantics })
+      : { instances: [], moduleTyping: new Map() };
+  markCompilerPerfPhaseDuration("monomorphizeProgram", linkStartedAt);
+  recordCompilerPerfDuration({
+    name: `${metricPrefix}.link_semantics.ms`,
+    startedAt: linkStartedAt,
+  });
+
+  const viewStartedAt = startCompilerPerfPhase();
+  const program = buildProgramCodegenView(modules, {
+    instances: monomorphized.instances,
+    moduleTyping: monomorphized.moduleTyping,
+  });
+  markCompilerPerfPhaseDuration("buildProgramCodegenView", viewStartedAt);
+  recordCompilerPerfDuration({
+    name: `${metricPrefix}.build_codegen_view.ms`,
+    startedAt: viewStartedAt,
+  });
+
+  if (!isOptimizationEnabled(codegenOptions)) {
+    return { entryModuleId: targetModuleId, program };
+  }
+
+  const optimizeStartedAt = startCompilerPerfPhase();
+  const optimization = optimizeProgram({
+    program,
+    modules,
+    entryModuleId: targetModuleId,
+    options: codegenOptions,
+  });
+  markCompilerPerfPhaseDuration("optimizeProgram", optimizeStartedAt);
+  recordCompilerPerfDuration({
+    name: `${metricPrefix}.optimize_program.ms`,
+    startedAt: optimizeStartedAt,
+  });
+  return { entryModuleId: targetModuleId, program, optimization };
+};
+
 export const emitProgram = async ({
   graph,
   semantics,
@@ -437,74 +514,29 @@ export const emitProgram = async ({
   module: binaryen.Module;
   diagnostics: Diagnostic[];
 }> => {
-  const lowerStartedAt = startCompilerPerfPhase();
-  const { orderedModules, entry } = lowerProgram({ graph, semantics });
-  markCompilerPerfPhaseDuration("lowerProgram", lowerStartedAt);
-  recordCompilerPerfDuration({
-    name: "emit.lower_program.ms",
-    startedAt: lowerStartedAt,
+  const prepared = prepareProgramForCodegen({
+    graph,
+    semantics,
+    codegenOptions,
+    entryModuleId,
+    linkSemantics,
+    metricPrefix: "emit",
   });
-  const targetModuleId = entryModuleId ?? entry;
-  const modules = orderedModules
-    .map((id) => semantics.get(id))
-    .filter((value): value is SemanticsPipelineResult => Boolean(value));
-  if (modules.length === 0) {
-    throw new Error("No semantics available for codegen");
-  }
 
   const codegenLoadStartedAt = startCompilerPerfPhase();
   const codegen = await lazyCodegen();
   markCompilerPerfPhaseDuration("loadCodegen", codegenLoadStartedAt);
-  const monomorphizeStartedAt = startCompilerPerfPhase();
   recordCompilerPerfDuration({
     name: "emit.load_codegen.ms",
     startedAt: codegenLoadStartedAt,
   });
 
-  const monomorphized =
-    linkSemantics !== false
-      ? monomorphizeProgram({ modules, semantics })
-      : { instances: [], moduleTyping: new Map() };
-  markCompilerPerfPhaseDuration("monomorphizeProgram", monomorphizeStartedAt);
-  const viewStartedAt = startCompilerPerfPhase();
-  recordCompilerPerfDuration({
-    name: "emit.link_semantics.ms",
-    startedAt: monomorphizeStartedAt,
-  });
-
-  const program = buildProgramCodegenView(modules, {
-    instances: monomorphized.instances,
-    moduleTyping: monomorphized.moduleTyping,
-  });
-  markCompilerPerfPhaseDuration("buildProgramCodegenView", viewStartedAt);
-  const optimizeStartedAt = startCompilerPerfPhase();
-  recordCompilerPerfDuration({
-    name: "emit.build_codegen_view.ms",
-    startedAt: viewStartedAt,
-  });
-
-  const optimized = codegenOptions?.optimize
-    ? optimizeProgram({
-        program,
-        modules,
-        entryModuleId: targetModuleId,
-        options: codegenOptions,
-      })
-    : undefined;
-  markCompilerPerfPhaseDuration("optimizeProgram", optimizeStartedAt);
-  if (codegenOptions?.optimize) {
-    recordCompilerPerfDuration({
-      name: "emit.optimize_program.ms",
-      startedAt: optimizeStartedAt,
-    });
-  }
-
   const codegenStartedAt = startCompilerPerfPhase();
   const result = codegen.codegenProgram({
-    program: optimized?.program ?? program,
-    entryModuleId: targetModuleId,
+    program: prepared.optimization?.program ?? prepared.program,
+    entryModuleId: prepared.entryModuleId,
     options: codegenOptions,
-    optimization: optimized?.facts,
+    optimization: prepared.optimization?.facts,
   });
   markCompilerPerfPhaseDuration("codegenProgram", codegenStartedAt);
   const emitStartedAt = startCompilerPerfPhase();
@@ -535,55 +567,14 @@ export const emitProgramWithContinuationFallback = async ({
   entryModuleId,
   linkSemantics,
 }: EmitProgramOptions): Promise<ContinuationFallbackBundle> => {
-  const lowerStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
-  const { orderedModules, entry } = lowerProgram({ graph, semantics });
-  recordCompilerPerfDuration({
-    name: "emit_fallback.lower_program.ms",
-    startedAt: lowerStartedAt,
+  const prepared = prepareProgramForCodegen({
+    graph,
+    semantics,
+    codegenOptions,
+    entryModuleId,
+    linkSemantics,
+    metricPrefix: "emit_fallback",
   });
-  const targetModuleId = entryModuleId ?? entry;
-  const modules = orderedModules
-    .map((id) => semantics.get(id))
-    .filter((value): value is SemanticsPipelineResult => Boolean(value));
-  if (modules.length === 0) {
-    throw new Error("No semantics available for codegen");
-  }
-
-  const linkStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
-  const monomorphized =
-    linkSemantics !== false
-      ? monomorphizeProgram({ modules, semantics })
-      : { instances: [], moduleTyping: new Map() };
-  recordCompilerPerfDuration({
-    name: "emit_fallback.link_semantics.ms",
-    startedAt: linkStartedAt,
-  });
-
-  const codegenViewStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
-  const program = buildProgramCodegenView(modules, {
-    instances: monomorphized.instances,
-    moduleTyping: monomorphized.moduleTyping,
-  });
-  recordCompilerPerfDuration({
-    name: "emit_fallback.build_codegen_view.ms",
-    startedAt: codegenViewStartedAt,
-  });
-
-  const optimizeStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
-  const optimized = codegenOptions?.optimize
-    ? optimizeProgram({
-        program,
-        modules,
-        entryModuleId: targetModuleId,
-        options: codegenOptions,
-      })
-    : undefined;
-  if (codegenOptions?.optimize) {
-    recordCompilerPerfDuration({
-      name: "emit_fallback.optimize_program.ms",
-      startedAt: optimizeStartedAt,
-    });
-  }
 
   const loadCodegenStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const codegenImpl = await lazyCodegen();
@@ -594,10 +585,10 @@ export const emitProgramWithContinuationFallback = async ({
   const codegenStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
   const { preferredKind, preferred, fallback } =
     codegenImpl.codegenProgramWithContinuationFallback({
-      program: optimized?.program ?? program,
-      entryModuleId: targetModuleId,
+      program: prepared.optimization?.program ?? prepared.program,
+      entryModuleId: prepared.entryModuleId,
       options: codegenOptions,
-      optimization: optimized?.facts,
+      optimization: prepared.optimization?.facts,
     });
   recordCompilerPerfDuration({
     name: "emit_fallback.codegen_program.ms",
@@ -606,9 +597,10 @@ export const emitProgramWithContinuationFallback = async ({
 
   const toWasmBytes = (result: { module: binaryen.Module }): Uint8Array => {
     const emitBinaryStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
-    const wasm = "wasm" in result && result.wasm instanceof Uint8Array
-      ? result.wasm
-      : emitBinary(result.module);
+    const wasm =
+      "wasm" in result && result.wasm instanceof Uint8Array
+        ? result.wasm
+        : emitBinary(result.module);
     recordCompilerPerfDuration({
       name: "emit_fallback.emit_binary.ms",
       startedAt: emitBinaryStartedAt,
@@ -624,7 +616,7 @@ export const emitProgramWithContinuationFallback = async ({
 };
 
 export type LoadModuleGraphFn = (
-  options: LoadModulesOptions
+  options: LoadModulesOptions,
 ) => Promise<ModuleGraph>;
 
 let codegenModulePromise:
@@ -642,14 +634,14 @@ const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === "error");
 
 const compileProgramFailure = (
-  diagnostics: readonly Diagnostic[]
+  diagnostics: readonly Diagnostic[],
 ): CompileProgramFailureResult => ({
   success: false,
   diagnostics: [...diagnostics],
 });
 
 const compileProgramSuccess = (
-  result: Omit<CompileProgramSuccessResult, "success">
+  result: Omit<CompileProgramSuccessResult, "success">,
 ): CompileProgramSuccessResult => ({
   success: true,
   ...result,
@@ -680,7 +672,7 @@ const diagnosticsFromUnexpectedError = ({
 
 export const compileProgramWithLoader = async (
   options: CompileProgramOptions,
-  loadModuleGraph: LoadModuleGraphFn
+  loadModuleGraph: LoadModuleGraphFn,
 ): Promise<CompileProgramResult> => {
   const codegenLoadPromise = options.skipSemantics
     ? undefined
@@ -689,9 +681,7 @@ export const compileProgramWithLoader = async (
   const perfSession = startCompilerPerfSession({
     entryPath: options.entryPath,
   });
-  const complete = (
-    result: CompileProgramResult,
-  ): CompileProgramResult => {
+  const complete = (result: CompileProgramResult): CompileProgramResult => {
     completeCompilerPerfSession({
       session: perfSession,
       success: result.success,
@@ -707,19 +697,23 @@ export const compileProgramWithLoader = async (
     markCompilerPerfPhaseDuration("loadModuleGraph", loadStartedAt);
   } catch (error) {
     markCompilerPerfPhaseDuration("loadModuleGraph", loadStartedAt);
-    return complete(compileProgramFailure(
-      diagnosticsFromUnexpectedError({
-        error,
-        moduleId: options.entryPath,
-      }),
-    ));
+    return complete(
+      compileProgramFailure(
+        diagnosticsFromUnexpectedError({
+          error,
+          moduleId: options.entryPath,
+        }),
+      ),
+    );
   }
 
   if (options.skipSemantics) {
     const diagnostics = [...graph.diagnostics];
-    return complete(hasErrorDiagnostics(diagnostics)
-      ? compileProgramFailure(diagnostics)
-      : compileProgramSuccess({ graph }));
+    return complete(
+      hasErrorDiagnostics(diagnostics)
+        ? compileProgramFailure(diagnostics)
+        : compileProgramSuccess({ graph }),
+    );
   }
 
   const analyzeStartedAt = startCompilerPerfPhase();
@@ -771,32 +765,35 @@ export const compileProgramWithLoader = async (
       return complete(compileProgramFailure(diagnostics));
     }
 
-    return complete(compileProgramSuccess({
-      graph,
-      semantics,
-      wasm: wasmResult.wasm,
-    }));
+    return complete(
+      compileProgramSuccess({
+        graph,
+        semantics,
+        wasm: wasmResult.wasm,
+      }),
+    );
   } catch (error) {
     markCompilerPerfPhaseDuration("emitProgram", emitStartedAt);
-    return complete(compileProgramFailure([
-      ...diagnostics,
-      codegenErrorToDiagnostic(error, {
-        moduleId: options.entryModuleId ?? graph.entry,
-      }),
-    ]));
+    return complete(
+      compileProgramFailure([
+        ...diagnostics,
+        codegenErrorToDiagnostic(error, {
+          moduleId: options.entryModuleId ?? graph.entry,
+        }),
+      ]),
+    );
   }
 };
 
 const moduleIdForPath = (path: ModulePath): string => modulePathToString(path);
 
-const lazyCodegen = async () =>
-  preloadCodegen();
+const lazyCodegen = async () => preloadCodegen();
 
 const emitBinary = (module: binaryen.Module): Uint8Array => {
   const binary = module.emitBinary();
   return binary instanceof Uint8Array
     ? binary
-    : (binary as { binary?: Uint8Array; output?: Uint8Array }).output ??
+    : ((binary as { binary?: Uint8Array; output?: Uint8Array }).output ??
         (binary as { binary?: Uint8Array }).binary ??
-        new Uint8Array();
+        new Uint8Array());
 };

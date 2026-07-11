@@ -191,3 +191,54 @@ jobs:
       - name: Run CLI dist e2e
         if: steps.changes.outputs.cli == 'true'
         run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd-lang/cli test:e2e
+
+  optimizer-scorecard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect optimizer-sensitive changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            optimizer:
+              - "packages/compiler/src/optimize/**"
+              - "packages/compiler/src/codegen/**"
+              - "packages/compiler/src/optimization-policy.ts"
+              - "packages/compiler/src/pipeline-shared.ts"
+              - "packages/compiler/src/perf.ts"
+              - "packages/lib/src/lib/binaryen-optimize.ts"
+              - "packages/std/**"
+              - "packages/sdk/**"
+              - "scripts/bench-optimizer.ts"
+              - "scripts/ci/check-optimizer-bench-regression.mjs"
+              - "scripts/ci/check-optimizer-bench-regression.test.mjs"
+              - "package.json"
+              - "package-lock.json"
+      - name: Use Node.js
+        if: steps.changes.outputs.optimizer == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        if: steps.changes.outputs.optimizer == 'true'
+        run: npm ci --include=optional
+      - name: Test optimizer scorecard gate
+        if: steps.changes.outputs.optimizer == 'true'
+        run: npx vitest run scripts/ci/check-optimizer-bench-regression.test.mjs
+      - name: Compare optimizer scorecards
+        if: steps.changes.outputs.optimizer == 'true'
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.sha }}
+          OPTIMIZER_BENCH_COMPILE_MAX_PCT: "20"
+          OPTIMIZER_BENCH_RUNTIME_MAX_PCT: "20"
+          OPTIMIZER_BENCH_RSS_MAX_PCT: "15"
+          OPTIMIZER_BENCH_WASM_MAX_PCT: "5"
+          OPTIMIZER_BENCH_GZIP_MAX_PCT: "5"
+        run: npm run bench:optimizer:compare

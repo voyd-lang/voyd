@@ -10,6 +10,8 @@ import { selectEffectsBackend } from "../effects/codegen-backend.js";
 import { createEffectsState } from "../effects/state.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { createProgramHelperRegistry } from "../program-helpers.js";
+import { specializationPolicyForOptimizationLevel } from "../../optimization-policy.js";
+import { createSpecializationReservations } from "../../optimize/codegen-plan.js";
 import {
   compileFunctions,
   emitModuleExports,
@@ -90,7 +92,10 @@ const loadSemanticsWithTyping = (
 
 const loadWasmInstance = (
   fixtureName: string,
-  options: { asStd?: boolean } = {},
+  options: {
+    asStd?: boolean;
+    optimizationLevel?: "none" | "balanced" | "release";
+  } = {},
 ) => {
   const semantics = loadSemanticsWithTyping(
     fixtureName,
@@ -100,7 +105,10 @@ const loadWasmInstance = (
     },
     { asStd: options.asStd },
   );
-  const { module } = codegen(semantics, { effectsHostBoundary: "off" });
+  const { module } = codegen(semantics, {
+    effectsHostBoundary: "off",
+    optimizationLevel: options.optimizationLevel,
+  });
   return getWasmInstance(module);
 };
 
@@ -129,6 +137,7 @@ const getNominalPatternDesc = (
 };
 
 const DEFAULT_OPTIONS = {
+  optimizationLevel: "none",
   optimize: false,
   optimizationProfile: "aggressive",
   validate: true,
@@ -216,8 +225,13 @@ const buildCodegenProgram = (
       sites: [],
       callArgTemps: new Map(),
       tempTypeIds: new Map(),
+      defaultParamTemps: new Map(),
     },
     outcomeValueTypes,
+    specializationPolicy: specializationPolicyForOptimizationLevel("none"),
+    specializationReservations: createSpecializationReservations(
+      specializationPolicyForOptimizationLevel("none"),
+    ),
   }));
   contexts.forEach((ctx) => moduleContexts.set(ctx.moduleId, ctx));
 
@@ -310,8 +324,13 @@ describe("next codegen", () => {
         sites: [],
         callArgTemps: new Map(),
         tempTypeIds: new Map(),
+        defaultParamTemps: new Map(),
       },
       outcomeValueTypes,
+      specializationPolicy: specializationPolicyForOptimizationLevel("none"),
+      specializationReservations: createSpecializationReservations(
+        specializationPolicyForOptimizationLevel("none"),
+      ),
     };
     moduleContexts.set(ctx.moduleId, ctx);
 
@@ -608,6 +627,7 @@ describe("next codegen", () => {
       test8_closure_with_arg,
       test9_closure_without_arg,
       test10_optional_spread_wraps_some,
+      test11_full_optional_object_conversion,
       main,
     } = instance.exports as Record<string, unknown>;
 
@@ -621,7 +641,10 @@ describe("next codegen", () => {
     expect((test8_closure_with_arg as () => number)()).toBe(2);
     expect((test9_closure_without_arg as () => number)()).toBe(1);
     expect((test10_optional_spread_wraps_some as () => number)()).toBe(5);
-    expect((main as () => number)()).toBe(25);
+    expect((test11_full_optional_object_conversion as () => number)()).toBe(
+      2111,
+    );
+    expect((main as () => number)()).toBe(2136);
   });
 
   it("infers generic labeled params from function-valued structural objects", () => {
@@ -666,6 +689,33 @@ describe("next codegen", () => {
     expect((test11_forward_ref_default_missing as () => number)()).toBe(42);
     expect((test12_forward_ref_default_passed as () => number)()).toBe(5);
     expect((main as () => number)()).toBe(122);
+  });
+
+  it("preserves supplied aliases and creates fresh storage for reference defaults", () => {
+    (["none", "release"] as const).forEach((optimizationLevel) => {
+      const instance = loadWasmInstance("reference_default_parameters.voyd", {
+        optimizationLevel,
+      });
+      const exports = instance.exports as Record<string, () => number>;
+
+      expect(exports.supplied_reference_default!()).toBe(55);
+      expect(exports.omitted_reference_default!()).toBe(22);
+      expect(exports.primitive_reference_default!()).toBe(14);
+      expect(exports.omitted_wide_reference_default!()).toBe(32);
+      expect(exports.supplied_wide_reference_default!()).toBe(138);
+      expect(exports.indirect_default!()).toBe(10);
+      expect(exports.indirect_reference_default!()).toBe(561);
+      expect(exports.indirect_optional_typed_default!()).toBe(8);
+    });
+  });
+
+  it("resumes effectful defaults into later defaults and the function body", () => {
+    const instance = loadWasmInstance("effectful_default_parameters.voyd");
+    const exports = instance.exports as Record<string, () => number>;
+
+    expect(exports.omitted_effectful_default!()).toBe(15);
+    expect(exports.supplied_effectful_default!()).toBe(7);
+    expect(exports.generic_reference_after_effectful_default!()).toBe(6);
   });
 
   it("uses return_call for tail-recursive functions", () => {

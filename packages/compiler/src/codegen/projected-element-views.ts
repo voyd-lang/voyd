@@ -35,6 +35,10 @@ import {
   isWideValueType,
   wasmTypeFor,
 } from "./types.js";
+import {
+  isStdIntrinsicNominalType,
+  STD_INTRINSIC_TYPE,
+} from "../compiler-contracts/types.js";
 
 type ProjectedElementView = {
   elementTypeId: TypeId;
@@ -109,7 +113,11 @@ export const tryCompileProjectedFieldAccess = ({
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const expectedFieldTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
-  const expectedFieldWasmType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const expectedFieldWasmType = getExprBinaryenType(
+    expr.id,
+    ctx,
+    typeInstanceId,
+  );
   const structInfo = getStructuralTypeInfo(projected.elementTypeId, ctx);
   const field = structInfo?.fieldMap.get(expr.field);
   if (!structInfo || !field) {
@@ -163,7 +171,10 @@ export const tryCompileProjectedElementValueExpr = ({
     fnCtx,
     compileExpr,
   });
-  if (!projected || !isWideValueType({ typeId: projected.elementTypeId, ctx })) {
+  if (
+    !projected ||
+    !isWideValueType({ typeId: projected.elementTypeId, ctx })
+  ) {
     return undefined;
   }
 
@@ -329,7 +340,8 @@ export const tryCompileProjectedOptionalPayloadBinding = ({
   });
   const rootAliases =
     typeof rootSymbol === "number"
-      ? (fnCtx.simpleIdentifierAliases?.get(rootSymbol) ?? new Set([rootSymbol]))
+      ? (fnCtx.simpleIdentifierAliases?.get(rootSymbol) ??
+        new Set([rootSymbol]))
       : undefined;
   if (
     rootAliases &&
@@ -344,7 +356,11 @@ export const tryCompileProjectedOptionalPayloadBinding = ({
   }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const targetTypeId = getDeclaredSymbolTypeId(bindingSymbol, ctx, typeInstanceId);
+  const targetTypeId = getDeclaredSymbolTypeId(
+    bindingSymbol,
+    ctx,
+    typeInstanceId,
+  );
   if (!isWideValueType({ typeId: targetTypeId, ctx })) {
     return undefined;
   }
@@ -504,7 +520,11 @@ const tryBuildProjectedElementViewFromOptionalExpr = ({
     if (expr.args.length !== 2 || !isFixedArrayGetCall({ expr, ctx, fnCtx })) {
       return undefined;
     }
-    const arrayTypeId = getRequiredExprType(expr.args[0]!.expr, ctx, typeInstanceId);
+    const arrayTypeId = getRequiredExprType(
+      expr.args[0]!.expr,
+      ctx,
+      typeInstanceId,
+    );
     const desc = ctx.program.types.getTypeDesc(arrayTypeId);
     if (
       desc.kind !== "fixed-array" ||
@@ -544,7 +564,11 @@ const tryBuildIntrinsicArrayGetView = ({
   }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const arrayTypeId = getRequiredExprType(expr.args[0]!.expr, ctx, typeInstanceId);
+  const arrayTypeId = getRequiredExprType(
+    expr.args[0]!.expr,
+    ctx,
+    typeInstanceId,
+  );
   return stabilizeProjectedArrayAccess({
     arrayExprId: expr.args[0]!.expr,
     indexExprId: expr.args[1]!.expr,
@@ -673,7 +697,8 @@ const tryBuildArrayStorageView = ({
     targetTypeId,
     ctx,
   );
-  const targetPointer = () => ctx.mod.local.get(targetTemp.index, targetTemp.type);
+  const targetPointer = () =>
+    ctx.mod.local.get(targetTemp.index, targetTemp.type);
   const stableCount = () => ctx.mod.local.get(countTemp.index, binaryen.i32);
   const stableIndex = () => ctx.mod.local.get(indexTemp.index, binaryen.i32);
   const stableComputedIndex = () =>
@@ -890,7 +915,9 @@ const loadProjectedField = ({
 }: {
   projected: ProjectedElementView;
   structInfo: NonNullable<ReturnType<typeof getStructuralTypeInfo>>;
-  field: NonNullable<ReturnType<typeof getStructuralTypeInfo>>["fields"][number];
+  field: NonNullable<
+    ReturnType<typeof getStructuralTypeInfo>
+  >["fields"][number];
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
@@ -932,16 +959,22 @@ const resolveCallTarget = ({
   const callInstanceId = fnCtx.instanceId ?? fnCtx.typeInstanceId;
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const callInstanceTarget =
-    typeof callInstanceId === "number" ? callInfo.targets?.get(callInstanceId) : undefined;
+    typeof callInstanceId === "number"
+      ? callInfo.targets?.get(callInstanceId)
+      : undefined;
   if (typeof callInstanceTarget === "number") {
     return callInstanceTarget;
   }
   const typeInstanceTarget =
-    typeof typeInstanceId === "number" ? callInfo.targets?.get(typeInstanceId) : undefined;
+    typeof typeInstanceId === "number"
+      ? callInfo.targets?.get(typeInstanceId)
+      : undefined;
   if (typeof typeInstanceTarget === "number") {
     return typeInstanceTarget;
   }
-  return callInfo.targets?.size === 1 ? callInfo.targets.values().next().value : undefined;
+  return callInfo.targets?.size === 1
+    ? callInfo.targets.values().next().value
+    : undefined;
 };
 
 const resolveIdentifierExprSymbol = ({
@@ -966,7 +999,10 @@ const isIntrinsicArrayGetCall = ({
   if (callee?.exprKind !== "identifier") {
     return false;
   }
-  const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+  const calleeId = ctx.program.symbols.canonicalIdOf(
+    ctx.moduleId,
+    callee.symbol,
+  );
   return ctx.program.symbols.getIntrinsicName(calleeId) === "__array_get";
 };
 
@@ -981,7 +1017,10 @@ const isIntrinsicArrayLenCall = ({
   if (callee?.exprKind !== "identifier") {
     return false;
   }
-  const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+  const calleeId = ctx.program.symbols.canonicalIdOf(
+    ctx.moduleId,
+    callee.symbol,
+  );
   return ctx.program.symbols.getIntrinsicName(calleeId) === "__array_len";
 };
 
@@ -1007,7 +1046,11 @@ const isFixedArrayGetCall = ({
   }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const arrayTypeId = getRequiredExprType(expr.args[0]!.expr, ctx, typeInstanceId);
+  const arrayTypeId = getRequiredExprType(
+    expr.args[0]!.expr,
+    ctx,
+    typeInstanceId,
+  );
   return ctx.program.types.getTypeDesc(arrayTypeId).kind === "fixed-array";
 };
 
@@ -1033,7 +1076,11 @@ const isFixedArrayLenCall = ({
   }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const arrayTypeId = getRequiredExprType(expr.args[0]!.expr, ctx, typeInstanceId);
+  const arrayTypeId = getRequiredExprType(
+    expr.args[0]!.expr,
+    ctx,
+    typeInstanceId,
+  );
   return ctx.program.types.getTypeDesc(arrayTypeId).kind === "fixed-array";
 };
 
@@ -1051,15 +1098,27 @@ const isArrayMethodAccess = ({
   const targetFunctionId = resolveCallTarget({ exprId: expr.id, ctx, fnCtx });
   if (
     typeof targetFunctionId !== "number" ||
-    ctx.program.symbols.getName(targetFunctionId as ProgramSymbolId) !== methodName
+    ctx.program.symbols.getName(targetFunctionId as ProgramSymbolId) !==
+      methodName
   ) {
     return false;
   }
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const targetTypeId = getRequiredExprType(expr.target, ctx, typeInstanceId);
+  if (
+    !isStdIntrinsicNominalType({
+      program: ctx.program,
+      typeId: targetTypeId,
+      intrinsicType: STD_INTRINSIC_TYPE.array,
+    })
+  ) {
+    return false;
+  }
   const targetInfo = getStructuralTypeInfo(targetTypeId, ctx);
-  return Boolean(targetInfo?.fieldMap.get("storage") && targetInfo.fieldMap.get("count"));
+  return Boolean(
+    targetInfo?.fieldMap.get("storage") && targetInfo.fieldMap.get("count"),
+  );
 };
 
 const resolveOptionalPayloadBindingSymbol = (
@@ -1302,5 +1361,7 @@ const isSafeProjectedRootAliasAssignment = ({
   }
 
   const targetExpr = ctx.module.hir.expressions.get(expr.target);
-  return targetExpr?.exprKind === "identifier" && !symbols.has(targetExpr.symbol);
+  return (
+    targetExpr?.exprKind === "identifier" && !symbols.has(targetExpr.symbol)
+  );
 };

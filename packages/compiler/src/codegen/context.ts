@@ -42,15 +42,25 @@ import type { EffectsBackend } from "./effects/codegen-backend.js";
 import type { EffectsState } from "./effects/state.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
 import type { ProgramCodegenView } from "../semantics/codegen-view/index.js";
+import type { ProgramSpecializationReservations } from "../optimize/codegen-plan.js";
 import type { ModuleCodegenView } from "../semantics/codegen-view/index.js";
 import type { SerializerMetadata } from "../semantics/symbol-index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 import type { ProgramHelperRegistry } from "./program-helpers.js";
 import type { ProgramOptimizationFacts } from "../optimize/ir.js";
 import type { ProgramSymbolId } from "../semantics/ids.js";
+import type {
+  OptimizationLevel,
+  SpecializationPolicy,
+} from "../optimization-policy.js";
+import type { FunctionSpecializationDimensions } from "./specialization-policy.js";
+import type { CallShapeParameterState } from "../optimize/ir.js";
 
 export interface CodegenOptions {
+  optimizationLevel?: OptimizationLevel;
+  /** @deprecated Use optimizationLevel. true maps to release. */
   optimize?: boolean;
+  /** @internal Legacy compiler-only profile override. */
   optimizationProfile?: "aggressive" | "standard";
   validate?: boolean;
   runtimeDiagnostics?: boolean;
@@ -99,6 +109,7 @@ export interface FunctionMetadata {
     symbol?: SymbolId;
     label?: string;
     optional?: boolean;
+    defaulted?: boolean;
     name?: string;
     bindingKind?: HirBindingKind;
     synthetic?: "stable-callsite-id";
@@ -113,8 +124,13 @@ export interface FunctionMetadata {
   effectful: boolean;
   effectRow?: EffectRowId;
   exactParameterTypes?: ReadonlyMap<SymbolId, TypeId>;
+  specialization?: FunctionSpecializationDimensions;
   scalarAggregateParamIndexes?: readonly number[];
   scalarAggregateResult?: boolean;
+  callShape?: Readonly<{
+    keyTokens: readonly string[];
+    parameterStates: readonly CallShapeParameterState[];
+  }>;
 }
 
 export interface StaticEffectHandlerCapture {
@@ -265,6 +281,8 @@ export interface CodegenContext {
   effectLowering: EffectLoweringResult;
   outcomeValueTypes: Map<string, OutcomeValueBox>;
   optimization?: ProgramOptimizationFacts;
+  specializationPolicy: SpecializationPolicy;
+  specializationReservations: ProgramSpecializationReservations;
 }
 
 export interface LocalBindingBase {
@@ -403,7 +421,7 @@ export interface ExpressionCompilerParams {
 }
 
 export type ExpressionCompiler = (
-  params: ExpressionCompilerParams
+  params: ExpressionCompilerParams,
 ) => CompiledExpression;
 
 export type {

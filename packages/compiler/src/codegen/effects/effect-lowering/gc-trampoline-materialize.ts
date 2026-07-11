@@ -17,6 +17,7 @@ import type {
   EffectLoweringEirResult,
   EffectLoweringResult,
 } from "./types.js";
+import { getInlineHeapBoxType } from "../../types.js";
 
 const baseEnvFields = (ctx: CodegenContext): ContinuationEnvField[] => [
   {
@@ -82,13 +83,23 @@ const captureFields = ({
       if (typeof tempId !== "number") {
         throw new Error("missing temp id for continuation capture");
       }
+      const storageRefType = field.storageRef
+        ? getInlineHeapBoxType({ typeId: field.typeId, ctx })
+        : undefined;
+      if (field.storageRef && typeof storageRefType !== "number") {
+        throw new Error("default reference temp requires storage-ref ABI");
+      }
       return {
         name: `tmp_${tempId}`,
-        wasmType: wasmTypeFor(field.typeId, ctx),
-        storageType: wasmHeapFieldTypeFor(field.typeId, ctx, new Set(), "runtime"),
+        wasmType: storageRefType ?? wasmTypeFor(field.typeId, ctx),
+        storageType:
+          storageRefType ??
+          wasmHeapFieldTypeFor(field.typeId, ctx, new Set(), "runtime"),
         typeId: field.typeId,
         sourceKind: "local",
         tempId,
+        storageRef: field.storageRef,
+        bindingKind: field.bindingKind,
       };
     }
 
@@ -96,13 +107,21 @@ const captureFields = ({
     if (typeof symbol !== "number") {
       throw new Error("missing symbol for continuation capture");
     }
-    const symbolId = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol });
+    const symbolId = ctx.program.symbols.idOf({
+      moduleId: ctx.moduleId,
+      symbol,
+    });
     return {
       name: ctx.program.symbols.getName(symbolId) ?? `${symbol}`,
       symbol,
       typeId: field.typeId,
       wasmType: wasmTypeFor(field.typeId, ctx),
-      storageType: wasmHeapFieldTypeFor(field.typeId, ctx, new Set(), "runtime"),
+      storageType: wasmHeapFieldTypeFor(
+        field.typeId,
+        ctx,
+        new Set(),
+        "runtime",
+      ),
       sourceKind: field.sourceKind,
     };
   });
@@ -127,7 +146,7 @@ export const materializeGcTrampolineEffectLowering = ({
     ];
     const envType = defineStructType(ctx.mod, {
       name: `voydContEnv_${sanitizeIdentifier(ctx.moduleLabel)}_${sanitizeIdentifier(
-        eirSite.contBaseName
+        eirSite.contBaseName,
       )}_${eirSite.siteId}`,
       fields: envFields.map((field) => ({
         name: field.name,
@@ -177,5 +196,6 @@ export const materializeGcTrampolineEffectLowering = ({
     sites,
     callArgTemps: eir.callArgTemps,
     tempTypeIds: eir.tempTypeIds,
+    defaultParamTemps: eir.defaultParamTemps,
   };
 };

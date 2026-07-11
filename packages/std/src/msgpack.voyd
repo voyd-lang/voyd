@@ -28,9 +28,11 @@ pub use self::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 pub type MsgPack = RawMsgPack
 
 /// Constructs the MessagePack `null` value.
+@compiler_contract(id: "voyd.std.boundary.msgpack.make-null")
 pub fn make_null(): () -> MsgPack
   msgpack_fns::make_null()
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.make-bool")
 pub fn make_bool(value: bool): () -> MsgPack
   msgpack_fns::make_bool(value)
 
@@ -46,22 +48,28 @@ pub fn make_binary(value: Binary): () -> MsgPack
   msgpack_fns::make_binary(value)
 
 /// Constructs a MessagePack array from an existing sequence of values.
+@compiler_contract(id: "voyd.std.boundary.msgpack.make-array")
 pub fn make_array(value: Array<MsgPack>): () -> MsgPack
   msgpack_fns::make_array(value)
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.make-f32")
 pub fn make_f32(value: f32): () -> MsgPack
   msgpack_fns::make_f32(value)
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.make-f64")
 pub fn make_f64(value: f64): () -> MsgPack
   F64 { value }
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.make-i32")
 pub fn make_i32(value: i32): () -> MsgPack
   msgpack_fns::make_i32(value)
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.make-i64")
 pub fn make_i64(value: i64): () -> MsgPack
   msgpack_fns::make_i64(value)
 
 /// Constructs a MessagePack map from string keys to values.
+@compiler_contract(id: "voyd.std.boundary.msgpack.make-map")
 pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
   msgpack_fns::make_map(value)
 
@@ -153,26 +161,33 @@ pub fn unpack_i64(value: MsgPack): () -> Result<i64, MsgPackError>
 pub fn unpack_map(value: MsgPack): () -> Result<Dict<String, MsgPack>, MsgPackError>
   msgpack_fns::unpack_map_result(value)
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.array-with-capacity")
 fn msgpack_array_with_capacity(size: i32): () -> Array<MsgPack>
   Array<MsgPack>::with_capacity(size)
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.array-push")
 fn msgpack_array_push(array: Array<MsgPack>, value: MsgPack): () -> Array<MsgPack>
   array.pushed(value)
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.array-length")
 fn msgpack_array_length(array: Array<MsgPack>): () -> i32
   array.len()
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.array-raw-storage")
 fn msgpack_array_raw_storage(array: Array<MsgPack>): () -> FixedArray<MsgPack>
   array.raw_storage()
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.map-new")
 fn msgpack_map_new(): () -> Dict<String, MsgPack>
   Dict<String, MsgPack>::init()
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.map-set")
 fn msgpack_map_set(map: Dict<String, MsgPack>, key: String, value: MsgPack): () -> Dict<String, MsgPack>
   let ~next = map
   next.set(key, value)
   next
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.map-get")
 fn msgpack_map_get(map: Dict<String, MsgPack>, key: String): () -> MsgPack
   match(map.get(key))
     Some<MsgPack> { value }:
@@ -180,9 +195,11 @@ fn msgpack_map_get(map: Dict<String, MsgPack>, key: String): () -> MsgPack
     None:
       make_null()
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.map-has")
 fn msgpack_map_has(map: Dict<String, MsgPack>, key: String): () -> bool
   map.contains(key)
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.map-tag-is")
 fn msgpack_map_tag_is(map: Dict<String, MsgPack>, expected: String): () -> bool
   match(map.get("$variant"))
     Some<MsgPack> { value }:
@@ -194,6 +211,7 @@ fn msgpack_map_tag_is(map: Dict<String, MsgPack>, expected: String): () -> bool
     None:
       false
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.make-string")
 fn msgpack_make_string(value: String): () -> MsgPack
   msgpack_fns::make_string(value)
 

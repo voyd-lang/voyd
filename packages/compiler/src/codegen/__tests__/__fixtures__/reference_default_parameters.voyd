@@ -1,0 +1,76 @@
+val Wide {
+  a: i32,
+  b: i32,
+  c: i32,
+  d: i32,
+  e: i32
+}
+
+val Scalar {
+  value: i32
+}
+
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+fn read_primitive(~value: i32 = 10) -> i32
+  value
+
+fn bump(~value: Scalar = Scalar { value: 10 }) -> i32
+  value.value = value.value + 1
+  value.value
+
+fn bump_wide(~value: Wide = Wide { a: 1, b: 2, c: 3, d: 4, e: 5 }) -> i32
+  value.a = value.a + 10
+  value.a + value.e
+
+fn indirect_value(value: i32 = 7) -> i32
+  value
+
+fn optional_default(
+  value: Optional<i32> = Some<i32> { value: 8 }
+) -> i32
+  match(value)
+    Some<i32> { value }:
+      value
+    None:
+      0
+
+pub fn supplied_reference_default() -> i32
+  let ~value = Scalar { value: 4 }
+  let returned = bump(value)
+  value.value * 10 + returned
+
+pub fn omitted_reference_default() -> i32
+  bump() + bump()
+
+pub fn primitive_reference_default() -> i32
+  let ~value = 4
+  read_primitive() + read_primitive(value)
+
+pub fn omitted_wide_reference_default() -> i32
+  bump_wide() + bump_wide()
+
+pub fn supplied_wide_reference_default() -> i32
+  let ~value = Wide { a: 2, b: 3, c: 4, d: 5, e: 6 }
+  let returned = bump_wide(value)
+  value.a * 10 + returned
+
+pub fn indirect_default() -> i32
+  let callback = indirect_value
+  callback() + callback(3)
+
+pub fn indirect_reference_default() -> i32
+  let callback = bump
+  let ~value = Scalar { value: 4 }
+  let returned = callback(value)
+  value.value * 100 + returned * 10 + callback()
+
+pub fn indirect_optional_typed_default() -> i32
+  let callback = optional_default
+  callback() + callback(None {})

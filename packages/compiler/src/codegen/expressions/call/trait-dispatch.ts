@@ -36,14 +36,9 @@ import {
   resolveTypedCallArgumentPlan,
   sliceTypedCallArgumentPlan,
 } from "./arguments.js";
-import {
-  currentHandlerValue,
-  handlerType,
-} from "./shared.js";
+import { currentHandlerValue, handlerType } from "./shared.js";
 import { coerceValueToType } from "../../structural.js";
-import {
-  liftHeapValueToInline,
-} from "../../structural.js";
+import { liftHeapValueToInline } from "../../structural.js";
 import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
 import { typeContainsUnresolvedParam } from "../../../semantics/type-utils.js";
 import type { CodegenTraitImplInstance } from "../../../semantics/codegen-view/index.js";
@@ -55,8 +50,6 @@ import {
   unboxSignatureSpillValue,
 } from "../../signature-spill.js";
 import { wrapValueInOutcome } from "../../effects/outcome-values.js";
-
-const MAX_DIRECT_TRAIT_SWITCH_IMPLS = 4;
 
 const stabilizeMultivalueResult = ({
   value,
@@ -148,7 +141,9 @@ const resolveDirectTraitDispatchCandidate = ({
   ctx,
 }: {
   impl: CodegenTraitImplInstance;
-  mapping: NonNullable<ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>>;
+  mapping: NonNullable<
+    ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>
+  >;
   ctx: CodegenContext;
 }): DirectTraitDispatchCandidate | undefined => {
   if (
@@ -184,7 +179,9 @@ const resolveDirectTraitDispatchCandidate = ({
     return undefined;
   }
 
-  const implRef = ctx.program.symbols.refOf(method.implMethod as ProgramSymbolId);
+  const implRef = ctx.program.symbols.refOf(
+    method.implMethod as ProgramSymbolId,
+  );
   const resolvedImplRef = resolveImportedFunctionSymbol({
     ctx,
     moduleId: implRef.moduleId,
@@ -280,7 +277,9 @@ const directSwitchImpls = ({
   fnCtx,
 }: {
   expr: HirCallExpr;
-  mapping: NonNullable<ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>>;
+  mapping: NonNullable<
+    ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>
+  >;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): readonly CodegenTraitImplInstance[] => {
@@ -321,7 +320,9 @@ const compileDirectTraitDispatchSwitch = ({
 }: {
   expr: HirCallExpr;
   meta: FunctionMetadata;
-  mapping: NonNullable<ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>>;
+  mapping: NonNullable<
+    ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>
+  >;
   resolvedModuleId: string;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
@@ -350,13 +351,20 @@ const compileDirectTraitDispatchSwitch = ({
     ctx,
     fnCtx,
   });
-  if (impls.length === 0 || impls.length > MAX_DIRECT_TRAIT_SWITCH_IMPLS) {
+  if (
+    impls.length === 0 ||
+    impls.length > ctx.specializationPolicy.directTraitSwitchImplementations
+  ) {
     return undefined;
   }
 
   let exhaustive = true;
   const candidates = impls.flatMap((impl) => {
-    const candidate = resolveDirectTraitDispatchCandidate({ impl, mapping, ctx });
+    const candidate = resolveDirectTraitDispatchCandidate({
+      impl,
+      mapping,
+      ctx,
+    });
     if (!candidate) {
       exhaustive = false;
       return [];
@@ -366,7 +374,9 @@ const compileDirectTraitDispatchSwitch = ({
   if (candidates.length === 0) {
     return undefined;
   }
-  if (candidates.some((candidate) => candidate.meta.resultAbiKind === "out_ref")) {
+  if (
+    candidates.some((candidate) => candidate.meta.resultAbiKind === "out_ref")
+  ) {
     return undefined;
   }
   if (dispatchEffectful && !exhaustive) {
@@ -388,7 +398,9 @@ const compileDirectTraitDispatchSwitch = ({
   if (baselineUserParamAbiTypes.some((types) => types.length !== 1)) {
     return undefined;
   }
-  const baselineUserParamTypes = baselineUserParamAbiTypes.map((types) => types[0]!);
+  const baselineUserParamTypes = baselineUserParamAbiTypes.map(
+    (types) => types[0]!,
+  );
   const consistentUserParams = candidates.every((candidate) => {
     const candidateUserParamAbiTypes = candidate.meta.paramAbiTypes.slice(1);
     return (
@@ -410,8 +422,9 @@ const compileDirectTraitDispatchSwitch = ({
   });
   let userTypedPlan: ReturnType<typeof resolveTypedCallArgumentPlan>;
   if (typedPlan !== undefined) {
-    const resolvedTypedPlan =
-      typedPlan as NonNullable<ReturnType<typeof resolveTypedCallArgumentPlan>>;
+    const resolvedTypedPlan = typedPlan as NonNullable<
+      ReturnType<typeof resolveTypedCallArgumentPlan>
+    >;
     userTypedPlan = sliceTypedCallArgumentPlan({
       typedPlan: resolvedTypedPlan,
       paramOffset: 1,
@@ -441,7 +454,8 @@ const compileDirectTraitDispatchSwitch = ({
     allocateTempLocal(type, fnCtx),
   );
 
-  const makeReceiver = () => ctx.mod.local.get(receiverTemp.index, receiverTemp.type);
+  const makeReceiver = () =>
+    ctx.mod.local.get(receiverTemp.index, receiverTemp.type);
   const makeAncestors = () =>
     structGetFieldValue({
       mod: ctx.mod,
@@ -585,7 +599,7 @@ export const compileTraitDispatchCall = ({
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const resolvedModuleId = calleeModuleId ?? ctx.moduleId;
   const mapping = ctx.program.traits.getTraitMethodImpl(
-    ctx.program.symbols.canonicalIdOf(resolvedModuleId, calleeSymbol)
+    ctx.program.symbols.canonicalIdOf(resolvedModuleId, calleeSymbol),
   );
   if (!mapping) {
     return undefined;
@@ -594,13 +608,16 @@ export const compileTraitDispatchCall = ({
   const receiverTypeId = getRequiredExprType(
     expr.args[0].expr,
     ctx,
-    typeInstanceId
+    typeInstanceId,
   );
   const receiverDesc = ctx.program.types.getTypeDesc(receiverTypeId);
   const receiverTraitSymbol =
     receiverDesc.kind === "trait" ? receiverDesc.owner : undefined;
 
-  if (receiverDesc.kind !== "trait" || receiverTraitSymbol !== mapping.traitSymbol) {
+  if (
+    receiverDesc.kind !== "trait" ||
+    receiverTraitSymbol !== mapping.traitSymbol
+  ) {
     return undefined;
   }
 
@@ -658,7 +675,9 @@ const compileIndirectTraitDispatchCall = ({
 }: {
   expr: HirCallExpr;
   meta: FunctionMetadata;
-  mapping: NonNullable<ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>>;
+  mapping: NonNullable<
+    ReturnType<CodegenContext["program"]["traits"]["getTraitMethodImpl"]>
+  >;
   receiverTemp?: { index: number; type: binaryen.Type };
   userArgTemps?: readonly { index: number; type: binaryen.Type }[];
   ctx: CodegenContext;
@@ -676,7 +695,8 @@ const compileIndirectTraitDispatchCall = ({
         ctx,
         fnCtx,
       });
-  const resolvedReceiverTemp = receiverTemp ?? allocateTempLocal(ctx.rtt.baseType, fnCtx);
+  const resolvedReceiverTemp =
+    receiverTemp ?? allocateTempLocal(ctx.rtt.baseType, fnCtx);
   const ops: binaryen.ExpressionRef[] = receiverValue
     ? [ctx.mod.local.set(resolvedReceiverTemp.index, receiverValue.expr)]
     : [];
@@ -724,11 +744,11 @@ const compileIndirectTraitDispatchCall = ({
         traitDispatchHash({
           traitSymbol: mapping.traitSymbol,
           traitMethodSymbol: mapping.traitMethodSymbol,
-        })
+        }),
       ),
       methodTable,
     ],
-    binaryen.funcref
+    binaryen.funcref,
   );
 
   const target = refCast(ctx.mod, accessor, fnRefType);
@@ -764,7 +784,9 @@ const compileIndirectTraitDispatchCall = ({
   const flattenedUserArgs = compiledUserArgs.flatMap((arg, index) => {
     const flattened = flattenTraitDispatchArgument({
       value: arg,
-      abiTypes: meta.paramAbiTypes[index + 1] ?? [binaryen.getExpressionType(arg)],
+      abiTypes: meta.paramAbiTypes[index + 1] ?? [
+        binaryen.getExpressionType(arg),
+      ],
       typeId: meta.paramTypeIds[index + 1]!,
       ctx,
       fnCtx,
@@ -783,7 +805,9 @@ const compileIndirectTraitDispatchCall = ({
             return undefined;
           }
           if (typeof meta.outParamType !== "number") {
-            throw new Error("trait dispatch out_ref result is missing storage metadata");
+            throw new Error(
+              "trait dispatch out_ref result is missing storage metadata",
+            );
           }
           return allocateTempLocal(meta.outParamType, fnCtx);
         })()
@@ -800,8 +824,15 @@ const compileIndirectTraitDispatchCall = ({
   const args = [loadReceiver(), ...flattenedUserArgs];
 
   const callArgs = dispatchEffectful
-    ? [currentHandlerValue(ctx, fnCtx), ...(initializedWideResultStorage ? [initializedWideResultStorage] : []), ...args]
-    : [...(initializedWideResultStorage ? [initializedWideResultStorage] : []), ...args];
+    ? [
+        currentHandlerValue(ctx, fnCtx),
+        ...(initializedWideResultStorage ? [initializedWideResultStorage] : []),
+        ...args,
+      ]
+    : [
+        ...(initializedWideResultStorage ? [initializedWideResultStorage] : []),
+        ...args,
+      ];
   const rawCall = callRef(
     ctx.mod,
     target,
@@ -810,7 +841,7 @@ const compileIndirectTraitDispatchCall = ({
       ? ctx.effectsBackend.abi.effectfulResultType(ctx)
       : meta.resultAbiKind === "out_ref"
         ? binaryen.none
-        : meta.resultType
+        : meta.resultType,
   );
   const stabilizedCall = dispatchEffectful
     ? rawCall
@@ -822,7 +853,8 @@ const compileIndirectTraitDispatchCall = ({
       });
   const decodedCall =
     !dispatchEffectful &&
-    getSignatureSpillBoxType({ typeId: meta.resultTypeId, ctx }) === meta.resultType
+    getSignatureSpillBoxType({ typeId: meta.resultTypeId, ctx }) ===
+      meta.resultType
       ? unboxSignatureSpillValue({
           value: stabilizedCall,
           typeId: meta.resultTypeId,
@@ -861,60 +893,60 @@ const compileIndirectTraitDispatchCall = ({
           usedReturnCall: false,
           usedOutResultStorageRef: true,
         }
-    : meta.resultAbiKind === "out_ref" && wideResultStorage
-      ? (() => {
-          const reloaded = liftHeapValueToInline({
-            value: ctx.mod.local.get(
-              wideResultStorage.index,
-              wideResultStorage.type,
-            ),
-            typeId: meta.resultTypeId,
-            ctx,
-          });
-          const coerced =
-            meta.resultTypeId === expectedTypeId
-              ? reloaded
-              : coerceValueToType({
-                  value: reloaded,
-                  actualType: meta.resultTypeId,
-                  targetType: expectedTypeId,
-                  ctx,
-                  fnCtx,
-                });
-          const resultExpr = coerceExprToWasmType({
-            expr: coerced,
-            targetType: resultWasmType,
-            ctx,
-          });
-          return {
-            expr:
-              argSetups.length === 0
-                ? ctx.mod.block(null, [rawCall, resultExpr], resultWasmType)
-                : ctx.mod.block(
-                    null,
-                    [...argSetups, rawCall, resultExpr],
-                    resultWasmType,
-                  ),
+      : meta.resultAbiKind === "out_ref" && wideResultStorage
+        ? (() => {
+            const reloaded = liftHeapValueToInline({
+              value: ctx.mod.local.get(
+                wideResultStorage.index,
+                wideResultStorage.type,
+              ),
+              typeId: meta.resultTypeId,
+              ctx,
+            });
+            const coerced =
+              meta.resultTypeId === expectedTypeId
+                ? reloaded
+                : coerceValueToType({
+                    value: reloaded,
+                    actualType: meta.resultTypeId,
+                    targetType: expectedTypeId,
+                    ctx,
+                    fnCtx,
+                  });
+            const resultExpr = coerceExprToWasmType({
+              expr: coerced,
+              targetType: resultWasmType,
+              ctx,
+            });
+            return {
+              expr:
+                argSetups.length === 0
+                  ? ctx.mod.block(null, [rawCall, resultExpr], resultWasmType)
+                  : ctx.mod.block(
+                      null,
+                      [...argSetups, rawCall, resultExpr],
+                      resultWasmType,
+                    ),
+              usedReturnCall: false,
+            };
+          })()
+        : {
+            expr: coerceExprToWasmType({
+              expr:
+                meta.resultTypeId === expectedTypeId
+                  ? callExpr
+                  : coerceValueToType({
+                      value: callExpr,
+                      actualType: meta.resultTypeId,
+                      targetType: expectedTypeId,
+                      ctx,
+                      fnCtx,
+                    }),
+              targetType: resultWasmType,
+              ctx,
+            }),
             usedReturnCall: false,
           };
-        })()
-    : {
-        expr: coerceExprToWasmType({
-          expr:
-            meta.resultTypeId === expectedTypeId
-              ? callExpr
-              : coerceValueToType({
-                  value: callExpr,
-                  actualType: meta.resultTypeId,
-                  targetType: expectedTypeId,
-                  ctx,
-                  fnCtx,
-                }),
-          targetType: resultWasmType,
-          ctx,
-        }),
-        usedReturnCall: false,
-      };
 
   ops.push(lowered.expr);
   const binaryenResult = getExprBinaryenType(expr.id, ctx, typeInstanceId);

@@ -10,6 +10,7 @@ use self::type::self as string_type
 pub use self::index::StringIndex
 pub use self::type::{ CharSet, ParseFloatError, ParseIntError, String, StringSlice, Utf8Error }
 
+@compiler_contract(id: "voyd.std.boundary.msgpack.string-new")
 @intrinsic(name: "__string_new", uses_signature: true)
 /// Builds a string from owned UTF-8 byte storage without re-validating it.
 ///

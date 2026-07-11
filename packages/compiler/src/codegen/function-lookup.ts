@@ -2,25 +2,33 @@ import type binaryen from "binaryen";
 import type { CodegenContext, FunctionMetadata } from "./context.js";
 import type { SymbolId, TypeId } from "../semantics/ids.js";
 import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
+import type { CompilerFunctionContractId } from "../compiler-contracts/index.js";
 
-export const requireFunctionMetaByName = ({
+export const requireFunctionMetaByCompilerContract = ({
   ctx,
-  moduleId,
-  name,
+  contractId,
   typeArgs,
-  paramCount,
 }: {
   ctx: CodegenContext;
-  moduleId: string;
-  name: string;
+  contractId: CompilerFunctionContractId;
   typeArgs?: readonly TypeId[];
-  paramCount?: number;
 }): FunctionMetadata => {
-  const symbol = findFunctionSymbolByName({ ctx, moduleId, name, paramCount });
-  if (typeof symbol !== "number") {
-    throw new Error(`missing function ${moduleId}::${name}`);
+  const programSymbol =
+    ctx.program.symbols.resolveCompilerFunctionContract(contractId);
+  if (typeof programSymbol !== "number") {
+    throw new Error(`missing compiler function contract '${contractId}'`);
   }
-  return requireFunctionMeta({ ctx, moduleId, symbol, typeArgs });
+
+  const { moduleId, symbol } = ctx.program.symbols.refOf(programSymbol);
+  try {
+    return requireFunctionMeta({ ctx, moduleId, symbol, typeArgs });
+  } catch (error) {
+    const detail = error instanceof Error ? `: ${error.message}` : "";
+    throw new Error(
+      `missing codegen metadata for compiler function contract '${contractId}'${detail}`,
+      { cause: error },
+    );
+  }
 };
 
 export const requireFunctionMeta = ({
@@ -88,39 +96,6 @@ export const pickTraitImplMethodMeta = ({
     return receiverType === runtimeType;
   });
   return selectPreferredMethodMetadata(matchingReceiver);
-};
-
-const findFunctionSymbolByName = ({
-  ctx,
-  moduleId,
-  name,
-  paramCount,
-}: {
-  ctx: CodegenContext;
-  moduleId: string;
-  name: string;
-  paramCount?: number;
-}): SymbolId | undefined => {
-  const moduleView = ctx.program.modules.get(moduleId);
-  if (!moduleView) {
-    return undefined;
-  }
-  for (const item of moduleView.hir.items.values()) {
-    if (item.kind !== "function") continue;
-    const symbolName =
-      ctx.program.symbols.getName(
-        ctx.program.symbols.idOf({ moduleId, symbol: item.symbol })
-      ) ?? "";
-    if (symbolName !== name) continue;
-    if (typeof paramCount === "number") {
-      const signature = ctx.program.functions.getSignature(moduleId, item.symbol);
-      if (!signature || signature.parameters.length !== paramCount) {
-        continue;
-      }
-    }
-    return item.symbol;
-  }
-  return undefined;
 };
 
 const selectPreferredMethodMetadata = (

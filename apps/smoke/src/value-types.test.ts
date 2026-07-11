@@ -272,6 +272,13 @@ describe("smoke: value types", () => {
     expect(output).toBe(15);
   });
 
+  it("marshals wide values through named function closures", async () => {
+    const output = await compiled.run<number>({
+      entryName: "value_five_lane_named_function_closure",
+    });
+    expect(output).toBe(7);
+  });
+
   it("stores wide captured values in lambda environments safely", async () => {
     const output = await compiled.run<number>({
       entryName: "value_five_lane_closure_capture",

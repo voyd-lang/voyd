@@ -7,6 +7,7 @@
 use std::array::{ Array, new_array_unchecked }
 use std::fixed_array::fns::{ new_fixed_array }
 use std::string::index::{ make_string_index }
+use std::traits::eq::Eq
 use std::traits::sequence::all
 use std::optional::all
 use std::result::types::all
@@ -15,12 +16,14 @@ use std::range::{ Range }
 pub use std::string::index::StringIndex
 
 /// Owned UTF-8 string value.
+@intrinsic_type(type: "voyd.std.string")
 pub obj String {
   bytes: Array<i32>,
   byte_count: i32
 }
 
 /// Non-owning view into a `String` byte range.
+@intrinsic_type(type: "voyd.std.string-slice")
 pub obj StringSlice {
   source: String,
   start: i32,
@@ -430,6 +433,29 @@ impl StringSlice
   api fn parse_i64(self, { radix?: i32 }): () -> Result<i64, ParseIntError>
     parse_i64_from_slice(self, radix: radix)
 
+impl Eq<StringSlice> for StringSlice
+  api fn eq(self, { other: StringSlice }) -> bool
+    if self.byte_count != other.byte_count:
+      return false
+    string_ranges_equal(
+      self.source,
+      from: self.start,
+      to: other.source,
+      at: other.start,
+      len: self.byte_count
+    )
+
+  // Injected trait defaults are package-visible, so public conformances must
+  // expose the forwarding methods explicitly.
+  api fn ne(self, { other: StringSlice }) -> bool
+    not self.eq(other: other)
+
+  api fn '=='(self, other: StringSlice) -> bool
+    self.eq(other: other)
+
+  api fn '!='(self, other: StringSlice) -> bool
+    self.ne(other: other)
+
 impl String
   /// Creates an empty string.
   api fn init() -> String
@@ -604,21 +630,7 @@ impl String
   api fn equals(self, other: String): () -> bool
     if self.byte_count != other.byte_count:
       return false
-    if self.byte_count == 0:
-      return true
-
-    let self_source = self.bytes.raw_storage()
-    let other_source = other.bytes.raw_storage()
-    var index = 0
-    while index < self.byte_count:
-      if __array_get(self_source, index) != __array_get(other_source, index):
-        return false
-      index = index + 1
-    true
-
-  /// Compares two values for equality.
-  api fn '=='(self, other: String) -> bool
-    self.equals(other)
+    string_ranges_equal(self, from: 0, to: other, at: 0, len: self.byte_count)
 
   /// Returns a 32-bit hash of the string contents.
   api fn hash_i32(self): () -> i32
@@ -1227,6 +1239,21 @@ impl String
   /// Returns a source-like escaped string representation.
   api fn to_repr(self) -> String
     build_escaped(self, true)
+
+impl Eq<String> for String
+  api fn eq(self, { other: String }) -> bool
+    self.equals(other)
+
+  // Injected trait defaults are package-visible, so public conformances must
+  // expose the forwarding methods explicitly.
+  api fn ne(self, { other: String }) -> bool
+    not self.eq(other: other)
+
+  api fn '=='(self, other: String) -> bool
+    self.eq(other: other)
+
+  api fn '!='(self, other: String) -> bool
+    self.ne(other: other)
 
 obj Utf8Read {
   /// Unicode scalar value for this grapheme.
@@ -1930,6 +1957,19 @@ fn bytes_match_slice_at(
     if __array_get(source, index + cursor) != __array_get(target_source, target_start + cursor):
       return false
     cursor = cursor + 1
+  true
+
+fn string_ranges_equal(
+  left: String,
+  { from left_start: i32, to right: String, at right_start: i32, len: i32 }
+) -> bool
+  let left_source = left.raw_bytes()
+  let right_source = right.raw_bytes()
+  var index = 0
+  while index < len:
+    if __array_get(left_source, left_start + index) != __array_get(right_source, right_start + index):
+      return false
+    index = index + 1
   true
 
 fn append_bytes(~out: Array<i32>, source: FixedArray<i32>, count: i32) -> void

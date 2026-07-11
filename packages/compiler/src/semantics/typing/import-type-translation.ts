@@ -138,6 +138,7 @@ export const translateFunctionSignature = ({
     span: param.span,
     name: param.name,
     optional: param.optional,
+    defaulted: param.defaulted,
     synthetic: param.synthetic,
   }));
 
@@ -255,6 +256,8 @@ export const createTranslation = ({
           type: translate(param.type),
           label: param.label,
           optional: param.optional,
+          defaulted: param.defaulted,
+          bindingKind: param.bindingKind,
         }));
         result = targetArena.internFunction({
           parameters,
