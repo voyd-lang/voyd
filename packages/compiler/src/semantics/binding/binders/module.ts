@@ -1,14 +1,9 @@
-import { type Form, isForm } from "../../../parser/index.js";
-import { toSourceSpan } from "../../utils.js";
-import {
-  parseFunctionDecl,
-  parseModuleLetDecl,
-  parseObjectDecl,
-  parseTypeAliasDecl,
-  parseImplDecl,
-  parseTraitDecl,
-  parseEffectDecl,
-} from "../parsing.js";
+import { type Form } from "../../../parser/index.js";
+import type {
+  SurfaceModuleItem,
+  SurfaceModuleView,
+} from "../../../parser/surface/index.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { bindFunctionDecl } from "./function.js";
 import { bindModuleLetDecl } from "./module-let.js";
 import { bindObjectDecl } from "./object.js";
@@ -24,14 +19,7 @@ import {
 } from "../../../diagnostics/index.js";
 import { modulePathToString } from "../../../modules/path.js";
 import type { ModulePath } from "../../../modules/types.js";
-import {
-  classifyTopLevelDecl,
-  type TopLevelDeclClassification,
-} from "../../../modules/use-decl.js";
-import {
-  parseUsePaths,
-  type NormalizedUseEntry,
-} from "../../../modules/use-path.js";
+import type { NormalizedUseEntry } from "../../../parser/surface/index.js";
 import { matchesDependencyPath } from "../../../modules/resolve.js";
 import {
   type HirVisibility,
@@ -62,32 +50,43 @@ import {
   importedSymbolTargetFromMetadata,
 } from "../../enum-namespace.js";
 import { isPackageRootModule } from "../../packages.js";
+import { requireModuleSurface } from "../../../modules/views.js";
 
-export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
+export const bindModule = (
+  surface: SurfaceModuleView,
+  ctx: BindingContext,
+): void => {
   const tracker = new BinderScopeTracker(ctx.symbolTable);
-  const entries = moduleForm.rest;
-
-  for (const entry of entries) {
-    if (!isForm(entry)) continue;
+  for (const item of surface.items) {
+    const entry = surfaceItemForm(item);
     if (!ctx.includeTests && isTestEntry(entry)) {
       continue;
     }
-    const topLevelDecl = classifyTopLevelDecl(entry);
-    const useDecl = parseUseDecl(entry, topLevelDecl);
-    if (useDecl) {
-      bindUseDecl(useDecl, ctx);
+
+    if (item.kind === "use") {
+      bindUseDecl(
+        {
+          form: item.form,
+          visibility:
+            item.visibility === "pub"
+              ? packageVisibility()
+              : moduleVisibility(),
+          entries: item.entries,
+        },
+        ctx,
+      );
       continue;
     }
 
-    if (topLevelDecl.kind === "macro-decl") {
+    if (item.kind === "macro") {
       continue;
     }
 
-    if (topLevelDecl.kind === "inline-module-decl") {
+    if (item.kind === "inline-module") {
       continue;
     }
 
-    if (topLevelDecl.kind === "unsupported-mod-decl") {
+    if (item.kind === "unsupported-module") {
       ctx.diagnostics.push(
         diagnosticFromCode({
           code: "BD0005",
@@ -97,51 +96,40 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
       );
       continue;
     }
-    const parsed = parseFunctionDecl(entry);
-    if (parsed) {
-      bindFunctionDecl(parsed, ctx, tracker);
+    if (item.kind === "function") {
+      bindFunctionDecl(item.declaration, ctx, tracker);
       continue;
     }
 
-    const moduleLetDecl = parseModuleLetDecl(entry);
-    if (moduleLetDecl) {
-      bindModuleLetDecl(moduleLetDecl, ctx, tracker);
+    if (item.kind === "module-let") {
+      bindModuleLetDecl(item.declaration, ctx, tracker);
       continue;
     }
 
-    const objectDecl = parseObjectDecl(entry);
-    if (objectDecl) {
-      bindObjectDecl(objectDecl, ctx, tracker);
+    if (item.kind === "object") {
+      bindObjectDecl(item.declaration, ctx, tracker);
       continue;
     }
 
-    const typeDecl = parseTypeAliasDecl(entry);
-    if (typeDecl) {
-      bindTypeAlias(typeDecl, ctx, tracker);
+    if (item.kind === "type-alias") {
+      bindTypeAlias(item.declaration, ctx, tracker);
       continue;
     }
 
-    const traitDecl = parseTraitDecl(entry);
-    if (traitDecl) {
-      bindTraitDecl(traitDecl, ctx, tracker);
+    if (item.kind === "trait") {
+      bindTraitDecl(item.declaration, ctx, tracker);
       continue;
     }
 
-    const implDecl = parseImplDecl(entry);
-    if (implDecl) {
-      bindImplDecl(implDecl, ctx, tracker);
+    if (item.kind === "impl") {
+      bindImplDecl(item.declaration, ctx, tracker);
       continue;
     }
 
-    const effectDecl = parseEffectDecl(entry);
-    if (effectDecl) {
-      bindEffectDecl(effectDecl, ctx, tracker);
+    if (item.kind === "effect") {
+      bindEffectDecl(item.declaration, ctx, tracker);
       continue;
     }
-
-    throw new Error(
-      "unsupported top-level form; expected a declaration",
-    );
   }
 
   flushPendingStaticMethods(ctx);
@@ -152,6 +140,9 @@ export const bindModule = (moduleForm: Form, ctx: BindingContext): void => {
   }
 };
 
+const surfaceItemForm = (item: SurfaceModuleItem): Form =>
+  "form" in item ? item.form : item.declaration.form;
+
 let implicitEnumNamespaceImportId = 0;
 
 type ParsedUseEntry = NormalizedUseEntry;
@@ -160,19 +151,6 @@ type ParsedUseDecl = {
   form: Form;
   visibility: HirVisibility;
   entries: readonly ParsedUseEntry[];
-};
-
-const parseUseDecl = (
-  form: Form,
-  classified: TopLevelDeclClassification,
-): ParsedUseDecl | null => {
-  if (classified.kind !== "use-decl") {
-    return null;
-  }
-  const visibility: HirVisibility =
-    classified.visibility === "pub" ? packageVisibility() : moduleVisibility();
-  const entries = parseUsePaths(classified.pathExpr, toSourceSpan(form));
-  return { form, visibility, entries };
 };
 
 const isTestEntry = (form: Form): boolean => {
@@ -506,15 +484,13 @@ const isExplicitStdSubmoduleEntry = (entry: ParsedUseEntry): boolean =>
 const isStdSubmoduleModuleId = (moduleId: string): boolean =>
   moduleId.startsWith("std::") && moduleId !== "std::pkg";
 
-const inlineModuleNamesFor = (moduleForm: Form): Set<string> =>
+const inlineModuleNamesFor = (ctx: BindingContext): Set<string> =>
   new Set(
-    moduleForm.rest.flatMap((entry) => {
-      if (!isForm(entry)) {
-        return [];
-      }
-      const decl = classifyTopLevelDecl(entry);
-      return decl.kind === "inline-module-decl" ? [decl.name] : [];
-    }),
+    (
+      ctx.module.header?.items ?? requireModuleSurface(ctx.module).items
+    ).flatMap((item) =>
+      item.kind === "inline-module" ? [item.declaration.name] : [],
+    ),
   );
 
 const shouldPreserveInlinePkgScope = ({
@@ -533,7 +509,7 @@ const shouldPreserveInlinePkgScope = ({
   const firstSegment = entry.moduleSegments[0];
   return (
     typeof firstSegment === "string" &&
-    inlineModuleNamesFor(ctx.module.ast).has(firstSegment)
+    inlineModuleNamesFor(ctx).has(firstSegment)
   );
 };
 
@@ -650,9 +626,10 @@ const bindImportsFromModule = ({
     explicitStdSubmoduleOverride ?? isExplicitStdSubmoduleEntry(entry);
   const isStdImport =
     isStdSubmoduleModuleId(moduleId) && ctx.module.path.namespace !== "std";
-  const stdPkgExports = isStdImport && !explicitlyTargetsStdSubmodule
-    ? stdPkgExportsFor({ moduleId, ctx })
-    : undefined;
+  const stdPkgExports =
+    isStdImport && !explicitlyTargetsStdSubmodule
+      ? stdPkgExportsFor({ moduleId, ctx })
+      : undefined;
   if (isStdImport && !explicitlyTargetsStdSubmodule) {
     exports = stdPkgExports;
     exportSurface = undefined;
@@ -1034,12 +1011,14 @@ const declareImportedSymbol = ({
           exported.kind === "module"
             ? {
                 moduleId: importedModuleId,
-                explicitlyTargetsStdSubmodule: importedModuleExplicitStdSubmodule,
+                explicitlyTargetsStdSubmodule:
+                  importedModuleExplicitStdSubmodule,
               }
             : {
                 moduleId: importedModuleId,
                 symbol: importedSymbolId,
-                explicitlyTargetsStdSubmodule: importedModuleExplicitStdSubmodule,
+                explicitlyTargetsStdSubmodule:
+                  importedModuleExplicitStdSubmodule,
               },
         ...(importableMetadata ?? {}),
       },

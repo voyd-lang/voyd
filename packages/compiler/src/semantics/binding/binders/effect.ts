@@ -1,7 +1,10 @@
 import { declarationDocForSyntax, rememberSyntax } from "../context.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import type { BindingContext } from "../types.js";
-import type { ParsedEffectDecl, ParsedEffectOperation } from "../parsing.js";
+import type {
+  ParsedEffectDecl,
+  ParsedEffectOperation,
+} from "../../../parser/surface/declarations.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import type { TypeParameterDecl } from "../../decls.js";
 import { declareValueOrParameter } from "../redefinitions.js";
@@ -21,7 +24,9 @@ const declareEffectOperationParams = ({
 }) =>
   op.params.map((param) => {
     if (param.defaultValue) {
-      throw new Error("effect operation parameters do not support default values");
+      throw new Error(
+        "effect operation parameters do not support default values",
+      );
     }
     rememberSyntax(param.ast, ctx);
     if (param.labelAst) {
@@ -54,7 +59,7 @@ const declareEffectOperationParams = ({
 export const bindEffectDecl = (
   decl: ParsedEffectDecl,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
@@ -76,7 +81,7 @@ export const bindEffectDecl = (
       declaredAt: decl.form.syntaxId,
       metadata: { entity: "effect" },
     },
-    tracker.current()
+    tracker.current(),
   );
 
   const effectScope = ctx.symbolTable.createScope({
@@ -110,7 +115,7 @@ export const bindEffectDecl = (
         declaredAt: op.form.syntaxId,
         metadata: { ownerEffect: effectSymbol, intrinsic: true },
       },
-      tracker.current()
+      tracker.current(),
     );
 
     let params: ReturnType<typeof declareEffectOperationParams> = [];
@@ -121,8 +126,7 @@ export const bindEffectDecl = (
     });
 
     const moduleMembers =
-      ctx.moduleMembers.get(effectSymbol) ??
-      new Map<string, Set<number>>();
+      ctx.moduleMembers.get(effectSymbol) ?? new Map<string, Set<number>>();
     const bucket = moduleMembers.get(op.name.value) ?? new Set<number>();
     bucket.add(opSymbol);
     moduleMembers.set(op.name.value, bucket);

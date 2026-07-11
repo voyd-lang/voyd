@@ -1,7 +1,7 @@
 import type { ModuleGraph } from "../modules/types.js";
-import { classifyTopLevelDecl } from "../modules/use-decl.js";
-import type { UsePathSelectionKind } from "../modules/use-path.js";
+import type { UsePathSelectionKind } from "../parser/surface/use-path.js";
 import { isForm, isIdentifierAtom } from "../parser/index.js";
+import { requireModuleHeader } from "../modules/views.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 
 export type DocumentationVisibilityView = {
@@ -145,8 +145,7 @@ export type DocumentationProgramView = {
 
 const isDocumentedVisibility = (
   visibility: DocumentationVisibilityView | undefined,
-): boolean =>
-  visibility?.level === "public" || visibility?.level === "package";
+): boolean => visibility?.level === "public" || visibility?.level === "package";
 
 type ExportedModuleRef = {
   moduleId: string;
@@ -207,32 +206,22 @@ const collectPublicChildModuleIds = ({
     return [];
   }
 
-  const entries = module.ast.callsInternal("ast")
-    ? module.ast.rest
-    : module.ast.toArray();
+  return requireModuleHeader(module).items.flatMap((item) => {
+    if (
+      item.kind === "inline-module" &&
+      item.declaration.visibility === "pub"
+    ) {
+      return [`${moduleId}::${item.declaration.name}`];
+    }
 
-  return entries.flatMap((entry) => {
-    if (!isForm(entry)) {
+    if (
+      item.kind !== "unsupported-module" ||
+      item.declaration.visibility !== "pub"
+    ) {
       return [];
     }
 
-    const classified = classifyTopLevelDecl(entry);
-    if (classified.kind === "inline-module-decl" && classified.visibility === "pub") {
-      return [`${moduleId}::${classified.name}`];
-    }
-
-    if (classified.kind !== "unsupported-mod-decl" || classified.visibility !== "pub") {
-      return [];
-    }
-
-    const first = entry.at(0);
-    const visibilityOffset =
-      isIdentifierAtom(first) && first.value === "pub" ? 1 : 0;
-    const nameExpr = entry.at(visibilityOffset + 1);
-    if (!isIdentifierAtom(nameExpr)) {
-      return [];
-    }
-    return [`${moduleId}::${nameExpr.value}`];
+    return [`${moduleId}::${item.declaration.name}`];
   });
 };
 
@@ -305,10 +294,12 @@ const collectExportedModuleIds = ({
 
     const directExportedModules = [
       ...collectDirectExportedModuleIds(moduleSemantics),
-      ...collectPublicChildModuleIds({ moduleId, graph }).map((childModuleId) => ({
-        moduleId: childModuleId,
-        traversable: true,
-      })),
+      ...collectPublicChildModuleIds({ moduleId, graph }).map(
+        (childModuleId) => ({
+          moduleId: childModuleId,
+          traversable: true,
+        }),
+      ),
     ];
 
     directExportedModules.forEach(includeModule);
@@ -357,7 +348,8 @@ const extractTypeName = (expr: unknown): string | undefined => {
   return extractTypeName(first);
 };
 
-const moduleDepth = (moduleId: string): number => moduleId.split("::").length - 1;
+const moduleDepth = (moduleId: string): number =>
+  moduleId.split("::").length - 1;
 
 const normalizeTypeParameters = (
   typeParameters: ReadonlyArray<{ name: string }> | undefined,
@@ -370,16 +362,14 @@ const normalizeVisibility = (
   level: visibility?.level,
 });
 
-const normalizeParameter = (
-  parameter: {
-    name: string;
-    label?: string;
-    bindingKind?: string;
-    optional?: boolean;
-    typeExpr?: unknown;
-    documentation?: string;
-  },
-): DocumentationParameterView => ({
+const normalizeParameter = (parameter: {
+  name: string;
+  label?: string;
+  bindingKind?: string;
+  optional?: boolean;
+  typeExpr?: unknown;
+  documentation?: string;
+}): DocumentationParameterView => ({
   name: parameter.name,
   label: parameter.label,
   mutable: parameter.bindingKind === "mutable-ref",
@@ -445,23 +435,21 @@ const publicParamsForFunction = (
   );
 };
 
-const normalizeMethod = (
-  method: {
+const normalizeMethod = (method: {
+  name: string;
+  typeParameters?: ReadonlyArray<{ name: string }>;
+  params: ReadonlyArray<{
     name: string;
-    typeParameters?: ReadonlyArray<{ name: string }>;
-    params: ReadonlyArray<{
-      name: string;
-      label?: string;
-      bindingKind?: string;
-      optional?: boolean;
-      typeExpr?: unknown;
-      documentation?: string;
-    }>;
-    returnTypeExpr?: unknown;
-    effectTypeExpr?: unknown;
+    label?: string;
+    bindingKind?: string;
+    optional?: boolean;
+    typeExpr?: unknown;
     documentation?: string;
-  },
-): DocumentationMethodView => ({
+  }>;
+  returnTypeExpr?: unknown;
+  effectTypeExpr?: unknown;
+  documentation?: string;
+}): DocumentationMethodView => ({
   name: method.name,
   typeParameters: normalizeTypeParameters(method.typeParameters),
   params: method.params.map(normalizeParameter),
@@ -535,7 +523,9 @@ const normalizeModules = ({
               name: objectDecl.name,
               objectKind: objectDecl.objectKind,
               visibility: normalizeVisibility(objectDecl.visibility),
-              typeParameters: normalizeTypeParameters(objectDecl.typeParameters),
+              typeParameters: normalizeTypeParameters(
+                objectDecl.typeParameters,
+              ),
               baseTypeExpr: objectDecl.baseTypeExpr,
               fields: objectDecl.fields
                 .filter((field) => field.visibility.api === true)
@@ -560,7 +550,9 @@ const normalizeModules = ({
             .map((effectDecl) => ({
               name: effectDecl.name,
               visibility: normalizeVisibility(effectDecl.visibility),
-              typeParameters: normalizeTypeParameters(effectDecl.typeParameters),
+              typeParameters: normalizeTypeParameters(
+                effectDecl.typeParameters,
+              ),
               operations: effectDecl.operations.map((operation) => ({
                 name: operation.name,
                 params: operation.parameters.map(normalizeParameter),
@@ -586,28 +578,28 @@ const normalizeModules = ({
                 .map((method) => normalizeFunction(method, semantic)),
               documentation: implDecl.documentation,
             })),
-          reexports: semantic.binding.uses.flatMap((useDecl) =>
-            useDecl.entries.map((entry) => ({
-              visibility: normalizeVisibility(useDecl.visibility),
-              path: entry.path,
-              moduleId: entry.moduleId,
-              selectionKind: entry.selectionKind,
-              targetName: entry.targetName,
-              alias: entry.alias,
-            })),
-          ).filter((reexport) => {
-            if (!allowedNames) {
-              return true;
-            }
-            if (reexport.selectionKind !== "name") {
-              return false;
-            }
-            const exportedName =
-              reexport.alias ??
-              reexport.targetName ??
-              reexport.path.at(-1);
-            return Boolean(exportedName && allowedNames.has(exportedName));
-          }),
+          reexports: semantic.binding.uses
+            .flatMap((useDecl) =>
+              useDecl.entries.map((entry) => ({
+                visibility: normalizeVisibility(useDecl.visibility),
+                path: entry.path,
+                moduleId: entry.moduleId,
+                selectionKind: entry.selectionKind,
+                targetName: entry.targetName,
+                alias: entry.alias,
+              })),
+            )
+            .filter((reexport) => {
+              if (!allowedNames) {
+                return true;
+              }
+              if (reexport.selectionKind !== "name") {
+                return false;
+              }
+              const exportedName =
+                reexport.alias ?? reexport.targetName ?? reexport.path.at(-1);
+              return Boolean(exportedName && allowedNames.has(exportedName));
+            }),
         },
       ];
     })

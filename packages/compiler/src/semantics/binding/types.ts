@@ -24,22 +24,16 @@ import type {
   ModuleNode,
   ModulePath,
 } from "../../modules/types.js";
-import type { UsePathSelectionKind } from "../../modules/use-path.js";
+import type { UsePathSelectionKind } from "../../parser/surface/use-path.js";
 import type {
   ModuleExportSurfaceTable,
   ModuleExportTable,
 } from "../modules.js";
 import type { SourceSpan } from "../ids.js";
 
-export type StaticMethodTable = Map<
-  SymbolId,
-  Map<string, Set<SymbolId>>
->;
+export type StaticMethodTable = Map<SymbolId, Map<string, Set<SymbolId>>>;
 
-export type ModuleMemberTable = Map<
-  SymbolId,
-  Map<string, Set<SymbolId>>
->;
+export type ModuleMemberTable = Map<SymbolId, Map<string, Set<SymbolId>>>;
 
 export interface BindingInputs {
   moduleForm: Form;

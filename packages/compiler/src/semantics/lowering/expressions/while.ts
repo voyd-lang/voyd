@@ -1,4 +1,4 @@
-import { parseWhileConditionAndBody, toSourceSpan } from "../../utils.js";
+import { parseWhileConditionAndBody, toSourceSpan } from "../../../parser/surface/utils.js";
 import type { HirExprId } from "../../ids.js";
 import type { LoweringFormParams } from "./types.js";
 

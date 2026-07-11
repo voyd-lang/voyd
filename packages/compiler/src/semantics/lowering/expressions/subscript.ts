@@ -3,7 +3,7 @@ import {
   Form,
 } from "../../../parser/index.js";
 import type { HirExprId } from "../../ids.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
 
 export const isSubscriptForm = (form: Form): boolean =>

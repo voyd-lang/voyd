@@ -3,7 +3,7 @@ import {
   isIdentifierAtom,
   isIntAtom,
 } from "../../../parser/index.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import type { HirExprId } from "../../ids.js";
 import type { LoweringFormParams } from "./types.js";
 

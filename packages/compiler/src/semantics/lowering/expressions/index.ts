@@ -11,7 +11,7 @@ import {
   isIntAtom,
   isStringAtom,
 } from "../../../parser/index.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveIdentifierValue } from "../resolution.js";
 import type { HirExprId } from "../../ids.js";
 import type { LowerContext, LowerScopeStack } from "../types.js";

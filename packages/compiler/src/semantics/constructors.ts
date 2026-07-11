@@ -8,9 +8,10 @@ import {
   isIdentifierAtom,
   isInternalIdentifierAtom,
 } from "../parser/index.js";
+import { parseValueBraceEntries } from "../parser/surface/index.js";
 
 export const extractConstructorTargetIdentifier = (
-  expr: Expr | undefined
+  expr: Expr | undefined,
 ): IdentifierAtom | InternalIdentifierAtom | undefined => {
   if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
     return expr;
@@ -50,7 +51,7 @@ export const extractConstructorTargetIdentifier = (
 
 export const literalShouldLowerAsObjectLiteral = (
   literal: Form,
-  fields: readonly { name: string }[]
+  fields: readonly { name: string }[],
 ): boolean => {
   const info = gatherLiteralFieldInfo(literal);
   if (info.hasSpread) {
@@ -63,25 +64,16 @@ export const literalShouldLowerAsObjectLiteral = (
 };
 
 const gatherLiteralFieldInfo = (
-  literal: Form
+  literal: Form,
 ): { fields: Set<string>; hasSpread: boolean } => {
   const fields = new Set<string>();
   let hasSpread = false;
-  literal.rest.forEach((entry) => {
-    if (isForm(entry) && entry.calls("...")) {
+  parseValueBraceEntries(literal).forEach((entry) => {
+    if (entry.kind === "spread") {
       hasSpread = true;
       return;
     }
-    if (isForm(entry) && entry.calls(":")) {
-      const nameExpr = entry.at(1);
-      if (isIdentifierAtom(nameExpr)) {
-        fields.add(nameExpr.value);
-      }
-      return;
-    }
-    if (isIdentifierAtom(entry)) {
-      fields.add(entry.value);
-    }
+    fields.add(entry.name.value);
   });
   return { fields, hasSpread };
 };

@@ -13,29 +13,36 @@ import {
   parseIfBranches,
   parseWhileConditionAndBody,
   toSourceSpan,
-} from "../../utils.js";
+} from "../../../parser/surface/utils.js";
 import { diagnosticFromCode } from "../../../diagnostics/index.js";
 import { rememberSyntax } from "../context.js";
 import { declareValueOrParameter } from "../redefinitions.js";
 import type { BindingContext, BindingResult } from "../types.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
-import { parseLambdaSignature } from "../../lambda.js";
-import { normalizeNestedFunctionTypeAnnotation } from "../../function-type-annotations.js";
-import { ensureForm } from "./utils.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
-import {
-  type HirBindingKind,
-  moduleVisibility,
-} from "../../hir/index.js";
+import { moduleVisibility } from "../../hir/index.js";
 import type { ModuleExportEntry } from "../../modules.js";
 import type { ModuleMemberTable } from "../types.js";
 import { extractConstructorTargetIdentifier } from "../../constructors.js";
+import {
+  parseSurfaceBindingStatement,
+  parseSurfaceHandlerClause,
+  parseSurfaceLambdaExpression,
+  parseSurfaceMatchExpression,
+  parseSurfaceTryExpression,
+  type SurfaceHandlerHead,
+  type SurfaceMatchPattern,
+  type SurfacePattern,
+} from "../../../parser/surface/index.js";
 import {
   importableMetadataFrom,
   importedModuleExplicitStdSubmoduleFrom,
   importedModuleIdFrom,
 } from "../../imports/metadata.js";
-import { canAccessExport, canAccessSymbolVisibility } from "../export-visibility.js";
+import {
+  canAccessExport,
+  canAccessSymbolVisibility,
+} from "../export-visibility.js";
 import {
   enumVariantTypeNamesFromAliasTarget,
   importedSymbolTargetFromMetadata,
@@ -148,11 +155,7 @@ const bindTry = (
   tracker: BinderScopeTracker,
 ): void => {
   const handlerEntries: Form[] = [];
-  const markerExpr = form.at(1);
-  const hasOpenUnhandled =
-    isIdentifierAtom(markerExpr) && markerExpr.value === "open";
-  const bodyIndex = hasOpenUnhandled ? 2 : 1;
-  const body = form.at(bodyIndex);
+  const { body, bodyIndex } = parseSurfaceTryExpression(form);
   if (isForm(body) && body.calls("block")) {
     body.rest.forEach((entry) => {
       if (
@@ -160,7 +163,9 @@ const bindTry = (
           expr: entry,
           scope: tracker.current(),
           resolveBareHandlerHead: ({ name, scope }) =>
-            typeof ctx.symbolTable.resolveByKinds(name, scope, ["effect-op"]) === "number",
+            typeof ctx.symbolTable.resolveByKinds(name, scope, [
+              "effect-op",
+            ]) === "number",
         }) &&
         isForm(entry)
       ) {
@@ -168,19 +173,16 @@ const bindTry = (
       }
     });
   }
-  if (body) {
-    handlerEntries.push(
-      ...collectTryHandlerClauses({
-        expr: body,
-        scope: tracker.current(),
-        resolveBareHandlerHead: ({ name, scope }) =>
-          typeof ctx.symbolTable.resolveByKinds(name, scope, ["effect-op"]) === "number",
-      }),
-    );
-  }
-  if (body) {
-    bindExpr(body, ctx, tracker);
-  }
+  handlerEntries.push(
+    ...collectTryHandlerClauses({
+      expr: body,
+      scope: tracker.current(),
+      resolveBareHandlerHead: ({ name, scope }) =>
+        typeof ctx.symbolTable.resolveByKinds(name, scope, ["effect-op"]) ===
+        "number",
+    }),
+  );
+  bindExpr(body, ctx, tracker);
 
   handlerEntries.push(
     ...form.rest
@@ -199,14 +201,13 @@ const bindTry = (
     });
     ctx.scopeByNode.set(entry.syntaxId, clauseScope);
 
-    const head = entry.at(1);
-    const handlerBody = entry.at(2);
+    const { head, body: handlerBody } = parseSurfaceHandlerClause(entry);
 
     tracker.enterScope(clauseScope, () => {
       // Handler heads can reference imported operations (for example `Fx::op`).
       // Bind the head itself so namespace member imports are materialized before
       // lowering resolves handler operation symbols.
-      bindExpr(head, ctx, tracker);
+      bindExpr(head.syntax, ctx, tracker);
       declareHandlerParams(head, ctx, clauseScope);
       bindExpr(handlerBody, ctx, tracker);
     });
@@ -214,32 +215,11 @@ const bindTry = (
 };
 
 const declareHandlerParams = (
-  head: Expr | undefined,
+  head: SurfaceHandlerHead,
   ctx: BindingContext,
   scope: number,
 ): void => {
-  if (!head || (!isForm(head) && !isIdentifierAtom(head))) {
-    return;
-  }
-  const params = extractHandlerParams(head);
-  params.forEach((param) => {
-    const nameExpr = (() => {
-      if (!param) {
-        return undefined;
-      }
-      if (isIdentifierAtom(param) || isInternalIdentifierAtom(param)) {
-        return param;
-      }
-      if (isForm(param) && param.calls(":")) {
-        const candidate = param.at(1);
-        return isIdentifierAtom(candidate) ||
-          isInternalIdentifierAtom(candidate)
-          ? candidate
-          : undefined;
-      }
-      return undefined;
-    })();
-    if (!nameExpr) return;
+  head.parameters.forEach(({ syntax: nameExpr }) => {
     rememberSyntax(nameExpr, ctx);
     declareValueOrParameter({
       name: nameExpr.value,
@@ -252,19 +232,6 @@ const declareHandlerParams = (
     });
     ctx.scopeByNode.set(nameExpr.syntaxId, scope);
   });
-};
-
-const extractHandlerParams = (
-  head: Expr,
-): readonly (IdentifierAtom | InternalIdentifierAtom | Expr)[] => {
-  if (isForm(head) && head.calls("::")) {
-    const opCall = head.at(2);
-    return isForm(opCall) ? opCall.rest : [];
-  }
-  if (isForm(head)) {
-    return head.rest;
-  }
-  return [];
 };
 
 const bindBlock = (
@@ -310,10 +277,7 @@ const bindMatch = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
-  const operandExpr = form.at(1);
-  const potentialBinder = form.at(2);
-  const hasBinder = isIdentifierAtom(potentialBinder);
-  const caseStartIndex = hasBinder ? 3 : 2;
+  const match = parseSurfaceMatchExpression(form);
 
   const matchScope = ctx.symbolTable.createScope({
     parent: tracker.current(),
@@ -323,43 +287,36 @@ const bindMatch = (
   ctx.scopeByNode.set(form.syntaxId, matchScope);
 
   tracker.enterScope(matchScope, () => {
-    bindExpr(operandExpr, ctx, tracker);
+    bindExpr(match.operand, ctx, tracker);
 
-    if (hasBinder) {
-      rememberSyntax(potentialBinder as Syntax, ctx);
+    if (match.binder) {
+      rememberSyntax(match.binder, ctx);
       declareValueOrParameter({
-        name: potentialBinder.value,
+        name: match.binder.value,
         kind: "value",
-        declaredAt: potentialBinder.syntaxId,
+        declaredAt: match.binder.syntaxId,
         metadata: {
-          declarationSpan: toSourceSpan(potentialBinder),
+          declarationSpan: toSourceSpan(match.binder),
         },
         scope: matchScope,
-        syntax: potentialBinder,
+        syntax: match.binder,
         ctx,
       });
     }
 
-    for (let index = caseStartIndex; index < form.length; index += 1) {
-      const arm = form.at(index);
-      if (!isForm(arm) || !arm.calls(":")) {
-        throw new Error("match cases must be labeled with ':'");
-      }
-
+    match.arms.forEach((arm) => {
       const caseScope = ctx.symbolTable.createScope({
         parent: matchScope,
         kind: "block",
-        owner: arm.syntaxId,
+        owner: arm.form.syntaxId,
       });
-      ctx.scopeByNode.set(arm.syntaxId, caseScope);
+      ctx.scopeByNode.set(arm.form.syntaxId, caseScope);
 
       tracker.enterScope(caseScope, () => {
-        const patternExpr = arm.at(1);
-        declareMatchPatternBindings(patternExpr, ctx, caseScope);
-        const valueExpr = arm.at(2);
-        bindExpr(valueExpr, ctx, tracker);
+        declareMatchPatternBindings(arm.pattern, ctx, caseScope);
+        bindExpr(arm.value, ctx, tracker);
       });
-    }
+    });
   });
 };
 
@@ -379,20 +336,12 @@ const bindVar = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
-  const assignment = ensureForm(form.at(1), "var statement expects an assignment");
-  if (!assignment.calls("=")) {
-    throw new Error("var statement must be an assignment form");
-  }
-
-  const isVar = form.calls("var");
-  const isLet = form.calls("let");
-  const patternExpr = assignment.at(1);
-  const initializer = assignment.at(2);
-  declarePatternBindings(patternExpr, ctx, tracker.current(), {
-    mutable: isVar && !isLet,
-    declarationSpan: toSourceSpan(patternExpr as Syntax),
+  const binding = parseSurfaceBindingStatement(form);
+  declareSurfacePatternBindings(binding.pattern, ctx, tracker.current(), {
+    mutable: binding.kind === "var",
+    declarationSpan: toSourceSpan(binding.patternExpr as Syntax),
   });
-  bindExpr(initializer, ctx, tracker);
+  bindExpr(binding.initializer, ctx, tracker);
 };
 
 const bindLambda = (
@@ -400,17 +349,16 @@ const bindLambda = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
-  const signatureExpr = form.at(1);
-  const bodyExpr = form.at(2);
-  if (!signatureExpr || !bodyExpr) {
-    throw new Error("lambda expression missing signature or body");
-  }
+  const {
+    signatureExpr,
+    signature,
+    body: bodyExpr,
+  } = parseSurfaceLambdaExpression(form);
 
   rememberSyntax(form, ctx);
   rememberSyntax(signatureExpr as Syntax, ctx);
   rememberSyntax(bodyExpr as Syntax, ctx);
 
-  const signature = parseLambdaSignature(signatureExpr);
   const scope = ctx.symbolTable.createScope({
     parent: tracker.current(),
     kind: "lambda",
@@ -428,19 +376,12 @@ const bindLambda = (
       });
     });
 
-    signature.parameters.forEach((param) =>
+    signature.normalizedParameters.forEach((param) =>
       declareLambdaParam(param, scope, ctx),
     );
-    signature.parameters.forEach((param) => {
-      if (!isForm(param)) {
-        return;
-      }
-      bindTypeExpr(
-        normalizeNestedFunctionTypeAnnotation(param).typeExpr,
-        ctx,
-        tracker
-      );
-    });
+    signature.normalizedParameters.forEach((param) =>
+      bindTypeExpr(param.typeExpr, ctx, tracker),
+    );
     bindTypeExpr(signature.returnType, ctx, tracker);
     bindTypeExpr(signature.effectType, ctx, tracker);
     bindExpr(bodyExpr, ctx, tracker);
@@ -448,72 +389,23 @@ const bindLambda = (
 };
 
 const declareLambdaParam = (
-  param: Expr,
+  param: import("../../../parser/surface/index.js").SurfaceLambdaParameter,
   scope: ScopeId,
   ctx: BindingContext,
 ): void => {
-  const declarationSpan = toSourceSpan(param as Syntax);
-
-  if (isIdentifierAtom(param)) {
-    rememberSyntax(param, ctx);
-    declareValueOrParameter({
-      name: param.value,
-      kind: "parameter",
-      declaredAt: param.syntaxId,
-      metadata: { declarationSpan },
-      scope,
-      syntax: param,
-      ctx,
-    });
-    return;
-  }
-
-  if (isForm(param) && param.calls("~")) {
-    rememberSyntax(param, ctx);
-    const target = param.at(1);
-    if (!isIdentifierAtom(target)) {
-      throw new Error("lambda parameter name must be an identifier");
-    }
-    rememberSyntax(target, ctx);
-    declareValueOrParameter({
-      name: target.value,
-      kind: "parameter",
-      declaredAt: param.syntaxId,
-      metadata: { bindingKind: "mutable-ref", declarationSpan },
-      scope,
-      syntax: param,
-      ctx,
-    });
-    return;
-  }
-
-  if (isForm(param) && (param.calls(":") || param.calls("?:"))) {
-    rememberSyntax(param, ctx);
-    const { nameExpr, typeExpr } = normalizeNestedFunctionTypeAnnotation(param);
-    const { target, bindingKind } = unwrapMutablePattern(nameExpr);
-    if (!isIdentifierAtom(target)) {
-      throw new Error("lambda parameter name must be an identifier");
-    }
-    rememberSyntax(target, ctx);
-    rememberSyntax(typeExpr as Syntax, ctx);
-    declareValueOrParameter({
-      name: target.value,
-      kind: "parameter",
-      declaredAt: param.syntaxId,
-      metadata: { bindingKind, declarationSpan },
-      scope,
-      syntax: param,
-      ctx,
-    });
-    return;
-  }
-
-  if (isForm(param)) {
-    param.toArray().forEach((entry) => declareLambdaParam(entry, scope, ctx));
-    return;
-  }
-
-  throw new Error("unsupported lambda parameter form");
+  const declarationSpan = toSourceSpan(param.syntax);
+  rememberSyntax(param.syntax, ctx);
+  rememberSyntax(param.name, ctx);
+  rememberSyntax(param.typeExpr as Syntax, ctx);
+  declareValueOrParameter({
+    name: param.name.value,
+    kind: "parameter",
+    declaredAt: param.syntax.syntaxId,
+    metadata: { bindingKind: param.bindingKind, declarationSpan },
+    scope,
+    syntax: param.syntax,
+    ctx,
+  });
 };
 
 const maybeBindConstructorCall = (
@@ -801,7 +693,8 @@ const ensureStaticMethodImport = ({
       dependency,
       explicitlyTargetsStdSubmodule,
       allowSyntheticAliasConstructorFallback:
-        memberName === "init" && typeof syntheticAliasConstructorTarget === "number",
+        memberName === "init" &&
+        typeof syntheticAliasConstructorTarget === "number",
       ctx,
     });
     if (!visibilityAllowed) {
@@ -861,7 +754,8 @@ const ensureStaticMethodImport = ({
       .map((entry) => entry.overloadId)
       .filter((entry): entry is number => typeof entry === "number"),
   );
-  const needsImportedSet = staticLocals.length > 1 || importedOverloadIds.size === 1;
+  const needsImportedSet =
+    staticLocals.length > 1 || importedOverloadIds.size === 1;
   if (needsImportedSet) {
     const nextId =
       Math.max(
@@ -896,7 +790,9 @@ const canImportStaticMethodSymbol = ({
   allowSyntheticAliasConstructorFallback: boolean;
   ctx: BindingContext;
 }): boolean => {
-  const fn = dependency.functions.find((entry) => entry.symbol === importTargetSymbol);
+  const fn = dependency.functions.find(
+    (entry) => entry.symbol === importTargetSymbol,
+  );
   if (fn) {
     return canAccessSymbolVisibility({
       visibility: fn.visibility,
@@ -947,7 +843,8 @@ const findExportedSymbolInModule = ({
   }
   return Array.from(exportTable.values()).find(
     (entry) =>
-      entry.symbol === symbol || entry.symbols?.some((candidate) => candidate === symbol),
+      entry.symbol === symbol ||
+      entry.symbols?.some((candidate) => candidate === symbol),
   );
 };
 
@@ -1270,11 +1167,16 @@ const ensureGeneratedStringLiteralImport = ({
   scope: ScopeId;
   ctx: BindingContext;
 }): void => {
-  if (typeof ctx.symbolTable.resolve(GENERATED_STRING_LITERAL_HELPER, scope) === "number") {
+  if (
+    typeof ctx.symbolTable.resolve(GENERATED_STRING_LITERAL_HELPER, scope) ===
+    "number"
+  ) {
     return;
   }
 
-  const exportTable = ctx.moduleExports.get(STRING_LITERAL_CONSTRUCTOR_MODULE_ID);
+  const exportTable = ctx.moduleExports.get(
+    STRING_LITERAL_CONSTRUCTOR_MODULE_ID,
+  );
   const exported = exportTable?.get(STRING_LITERAL_CONSTRUCTOR_EXPORT);
   if (!exported || exported.kind === "module") {
     return;
@@ -1285,7 +1187,9 @@ const ensureGeneratedStringLiteralImport = ({
     return;
   }
 
-  const sourceMetadata = dependency.symbolTable.getSymbol(exported.symbol).metadata;
+  const sourceMetadata = dependency.symbolTable.getSymbol(
+    exported.symbol,
+  ).metadata;
   const importableMetadata = importableMetadataFrom(
     sourceMetadata as Record<string, unknown> | undefined,
   );
@@ -1330,11 +1234,16 @@ const ensureGeneratedArrayLiteralImport = ({
   scope: ScopeId;
   ctx: BindingContext;
 }): void => {
-  if (typeof ctx.symbolTable.resolve(GENERATED_ARRAY_LITERAL_HELPER, scope) === "number") {
+  if (
+    typeof ctx.symbolTable.resolve(GENERATED_ARRAY_LITERAL_HELPER, scope) ===
+    "number"
+  ) {
     return;
   }
 
-  const exportTable = ctx.moduleExports.get(ARRAY_LITERAL_CONSTRUCTOR_MODULE_ID);
+  const exportTable = ctx.moduleExports.get(
+    ARRAY_LITERAL_CONSTRUCTOR_MODULE_ID,
+  );
   const exported = exportTable?.get(ARRAY_LITERAL_CONSTRUCTOR_EXPORT);
   if (!exported || exported.kind === "module") {
     return;
@@ -1345,7 +1254,9 @@ const ensureGeneratedArrayLiteralImport = ({
     return;
   }
 
-  const sourceMetadata = dependency.symbolTable.getSymbol(exported.symbol).metadata;
+  const sourceMetadata = dependency.symbolTable.getSymbol(
+    exported.symbol,
+  ).metadata;
   const importableMetadata = importableMetadataFrom(
     sourceMetadata as Record<string, unknown> | undefined,
   );
@@ -1457,193 +1368,97 @@ const declareModuleMemberImport = ({
   return locals;
 };
 
-const declarePatternBindings = (
-  pattern: Expr | undefined,
+const declareSurfacePatternBindings = (
+  pattern: SurfacePattern,
   ctx: BindingContext,
   scope: ScopeId,
   options: {
     mutable?: boolean;
     declarationSpan?: ReturnType<typeof toSourceSpan>;
-  } = {},
+    declarationSyntax?: Syntax;
+  },
 ): void => {
-  if (!pattern) {
-    throw new Error("missing pattern");
-  }
-
-  const { target: basePattern, bindingKind } = unwrapMutablePattern(pattern);
-
-  if (isIdentifierAtom(basePattern)) {
-    if (basePattern.value === "_") {
+  if (pattern.kind === "identifier") {
+    if (pattern.name.value === "_") {
       return;
     }
     const declarationSpan =
-      options.declarationSpan ?? toSourceSpan(basePattern);
-    rememberSyntax(basePattern, ctx);
+      options.declarationSpan ?? toSourceSpan(pattern.syntax);
+    rememberSyntax(pattern.syntax, ctx);
+    rememberSyntax(pattern.name, ctx);
     declareValueOrParameter({
-      name: basePattern.value,
+      name: pattern.name.value,
       kind: "value",
-      declaredAt: basePattern.syntaxId,
+      declaredAt:
+        options.declarationSyntax?.syntaxId ?? pattern.syntax.syntaxId,
       metadata: {
         mutable: options.mutable ?? false,
         declarationSpan,
-        bindingKind,
+        bindingKind: pattern.bindingKind,
       },
       scope,
-      syntax: basePattern,
+      syntax: options.declarationSyntax ?? pattern.syntax,
       ctx,
     });
     return;
   }
-
-  if (
-    isForm(basePattern) &&
-    (basePattern.calls("tuple") || basePattern.callsInternal("tuple"))
-  ) {
-    if (bindingKind && bindingKind !== "value") {
-      throw new Error("mutable reference patterns must bind identifiers");
-    }
-    basePattern.rest.forEach((entry) =>
-      declarePatternBindings(entry, ctx, scope, {
+  if (pattern.kind === "tuple") {
+    pattern.elements.forEach((entry) =>
+      declareSurfacePatternBindings(entry, ctx, scope, {
         mutable: options.mutable,
-        declarationSpan: toSourceSpan(entry as Syntax),
+        declarationSpan: toSourceSpan(entry.syntax),
       }),
     );
     return;
   }
-
-  if (isForm(basePattern) && basePattern.callsInternal("object_literal")) {
-    if (bindingKind && bindingKind !== "value") {
-      throw new Error("mutable reference patterns must bind identifiers");
-    }
-
-    let seenSpread = false;
-    basePattern.rest.forEach((entry) => {
-      if (isIdentifierAtom(entry)) {
-        declarePatternBindings(entry, ctx, scope, {
-          mutable: options.mutable,
-          declarationSpan: toSourceSpan(entry as Syntax),
-        });
-        return;
-      }
-
-      if (!isForm(entry)) {
-        throw new Error("unsupported destructure entry in declaration");
-      }
-
-      if (entry.calls("...")) {
-        if (seenSpread) {
-          throw new Error("destructure pattern supports at most one spread");
-        }
-        seenSpread = true;
-        declarePatternBindings(entry.at(1), ctx, scope, {
-          mutable: options.mutable,
-          declarationSpan: toSourceSpan(entry as Syntax),
-        });
-        return;
-      }
-
-      if (!entry.calls(":")) {
-        throw new Error("unsupported destructure entry in declaration");
-      }
-
-      const valueExpr = entry.at(2);
-      declarePatternBindings(valueExpr, ctx, scope, {
+  if (pattern.kind === "destructure") {
+    pattern.fields.forEach((field) =>
+      declareSurfacePatternBindings(field.pattern, ctx, scope, {
         mutable: options.mutable,
-        declarationSpan: toSourceSpan(entry as Syntax),
+        declarationSpan: toSourceSpan(field.pattern.syntax),
+      }),
+    );
+    if (pattern.spread) {
+      declareSurfacePatternBindings(pattern.spread, ctx, scope, {
+        mutable: options.mutable,
+        declarationSpan: toSourceSpan(pattern.spread.syntax),
       });
-    });
-    return;
-  }
-
-  if (isForm(basePattern) && basePattern.calls(":")) {
-    const nameExpr = basePattern.at(1);
-    const typeExpr = basePattern.at(2);
-    const { target, bindingKind: nameBinding } = unwrapMutablePattern(nameExpr);
-    rememberSyntax(typeExpr as Syntax, ctx);
-    if (isIdentifierAtom(target)) {
-      rememberSyntax(target as Syntax, ctx);
-      declareValueOrParameter({
-        name: target.value,
-        kind: "value",
-        declaredAt: basePattern.syntaxId,
-        metadata: {
-          mutable: options.mutable ?? false,
-          declarationSpan: options.declarationSpan ?? toSourceSpan(basePattern),
-          bindingKind: nameBinding ?? bindingKind,
-        },
-        scope,
-        syntax: basePattern,
-        ctx,
-      });
-      return;
     }
-    declarePatternBindings(target, ctx, scope, {
-      mutable: options.mutable,
-      declarationSpan: options.declarationSpan ?? toSourceSpan(basePattern),
-    });
     return;
   }
-
-  throw new Error("unsupported pattern form in declaration");
+  if (pattern.kind === "typed") {
+    rememberSyntax(pattern.typeExpr as Syntax, ctx);
+    declareSurfacePatternBindings(pattern.pattern, ctx, scope, {
+      mutable: options.mutable,
+      declarationSpan: options.declarationSpan ?? toSourceSpan(pattern.syntax),
+      declarationSyntax: pattern.syntax,
+    });
+  }
 };
 
 const declareMatchPatternBindings = (
-  pattern: Expr | undefined,
+  pattern: SurfaceMatchPattern,
   ctx: BindingContext,
   scope: ScopeId,
 ): void => {
-  if (!pattern) {
-    throw new Error("match case missing pattern");
-  }
-
-  if (isIdentifierAtom(pattern)) {
-    return;
-  }
-
-  if (!isForm(pattern)) {
-    return;
-  }
-
-  if (pattern.calls("as")) {
-    const bindingPattern = pattern.at(2);
-    declarePatternBindings(bindingPattern, ctx, scope, {
+  if (pattern.kind === "type-binding") {
+    declareSurfacePatternBindings(pattern.binding, ctx, scope, {
       mutable: false,
-      declarationSpan: toSourceSpan(pattern as unknown as Syntax),
+      declarationSpan: toSourceSpan(pattern.syntax),
     });
     return;
   }
-
-  if (pattern.calls("tuple") || pattern.callsInternal("tuple")) {
-    declarePatternBindings(pattern, ctx, scope, {
+  if (pattern.kind === "tuple") {
+    declareSurfacePatternBindings(pattern.binding, ctx, scope, {
       mutable: false,
-      declarationSpan: toSourceSpan(pattern as unknown as Syntax),
+      declarationSpan: toSourceSpan(pattern.syntax),
     });
     return;
   }
-
-  const last = pattern.at(-1);
-  if (isForm(last) && last.callsInternal("object_literal")) {
-    declarePatternBindings(last, ctx, scope, {
+  if (pattern.kind === "destructure") {
+    declareSurfacePatternBindings(pattern.binding, ctx, scope, {
       mutable: false,
-      declarationSpan: toSourceSpan(last as unknown as Syntax),
+      declarationSpan: toSourceSpan(pattern.binding.syntax),
     });
   }
-};
-
-const unwrapMutablePattern = (
-  pattern: Expr | undefined,
-): { target: Expr; bindingKind?: HirBindingKind } => {
-  if (!pattern) {
-    throw new Error("missing pattern");
-  }
-
-  if (isForm(pattern) && pattern.calls("~")) {
-    const target = pattern.at(1);
-    if (!target) {
-      throw new Error("mutable pattern is missing a target");
-    }
-    return { target, bindingKind: "mutable-ref" };
-  }
-
-  return { target: pattern, bindingKind: undefined };
 };

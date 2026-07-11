@@ -5,7 +5,7 @@ import {
   isForm,
   isIdentifierAtom,
 } from "../../parser/index.js";
-import { toSourceSpan } from "../utils.js";
+import { toSourceSpan } from "../../parser/surface/utils.js";
 import type {
   HirRecordTypeField,
   HirTypeExpr,
@@ -16,8 +16,11 @@ import { resolveTypeSymbol } from "./resolution.js";
 import { resolveNamedTypeTarget } from "./named-type-resolution.js";
 import type { LowerContext } from "./types.js";
 import type { ScopeId, SymbolId } from "../ids.js";
-import { parseLambdaSignature } from "../lambda.js";
-import { normalizeNestedFunctionTypeAnnotation } from "../function-type-annotations.js";
+import {
+  parseSurfaceFunctionType,
+  parseRecordFields,
+  type SurfaceRecordField,
+} from "../../parser/surface/index.js";
 
 export const wrapInOptionalTypeExpr = ({
   inner,
@@ -39,7 +42,7 @@ export const wrapInOptionalTypeExpr = ({
 export const lowerTypeExpr = (
   expr: Expr | undefined,
   ctx: LowerContext,
-  scope?: ScopeId
+  scope?: ScopeId,
 ): HirTypeExpr | undefined => {
   if (!expr) return undefined;
 
@@ -94,7 +97,7 @@ export const lowerTypeExpr = (
 const lowerNamedType = (
   atom: Syntax & { value: string },
   ctx: LowerContext,
-  scope: ScopeId
+  scope: ScopeId,
 ): HirTypeExpr => ({
   typeKind: "named",
   ast: atom.syntaxId,
@@ -106,7 +109,7 @@ const lowerNamedType = (
 const lowerNamedTypeForm = (
   form: Form,
   ctx: LowerContext,
-  scope: ScopeId
+  scope: ScopeId,
 ): HirTypeExpr | undefined => {
   const target = resolveNamedTypeTarget({
     expr: form,
@@ -139,10 +142,10 @@ const isObjectTypeForm = (form: Form): boolean =>
 const lowerObjectTypeExpr = (
   form: Form,
   ctx: LowerContext,
-  scope: ScopeId
+  scope: ScopeId,
 ): HirTypeExpr => {
-  const fields = form.rest.map((entry) =>
-    lowerObjectTypeField(entry, ctx, scope)
+  const fields = parseRecordFields(form).map((entry) =>
+    lowerObjectTypeField(entry, ctx, scope),
   );
   return {
     typeKind: "object",
@@ -153,31 +156,20 @@ const lowerObjectTypeExpr = (
 };
 
 const lowerObjectTypeField = (
-  entry: Expr | undefined,
+  entry: SurfaceRecordField,
   ctx: LowerContext,
-  scope: ScopeId
+  scope: ScopeId,
 ): HirRecordTypeField => {
-  if (!isForm(entry) || (!entry.calls(":") && !entry.calls("?:"))) {
-    throw new Error("object type fields must be labeled");
-  }
-  const nameExpr = entry.at(1);
-  if (!isIdentifierAtom(nameExpr)) {
-    throw new Error("object type field name must be an identifier");
-  }
-  const typeExpr = entry.at(2);
-  if (!typeExpr) {
-    throw new Error("object type field missing type expression");
-  }
-  const type = lowerTypeExpr(typeExpr, ctx, scope);
+  const type = lowerTypeExpr(entry.value, ctx, scope);
   if (!type) {
     throw new Error("object type field missing resolved type expression");
   }
-  const optional = entry.calls("?:");
+  const optional = entry.optional;
   return {
-    name: nameExpr.value,
+    name: entry.name.value,
     type: optional ? wrapInOptionalTypeExpr({ inner: type, ctx, scope }) : type,
     ...(optional ? { optional: true } : {}),
-    span: toSourceSpan(entry),
+    span: toSourceSpan(entry.form),
   };
 };
 
@@ -200,7 +192,7 @@ const lowerIntersectionTypeExpr = (
 const lowerTupleTypeExpr = (
   form: Form,
   ctx: LowerContext,
-  scope: ScopeId
+  scope: ScopeId,
 ): HirTypeExpr => {
   const elements = form.rest.map((entry) => {
     const lowered = lowerTypeExpr(entry, ctx, scope);
@@ -220,7 +212,7 @@ const lowerTupleTypeExpr = (
 const lowerUnionTypeExpr = (
   form: Form,
   ctx: LowerContext,
-  scope: ScopeId
+  scope: ScopeId,
 ): HirTypeExpr => {
   const members = form.rest.map((entry) => {
     const lowered = lowerTypeExpr(entry, ctx, scope);
@@ -240,50 +232,42 @@ const lowerUnionTypeExpr = (
 const lowerFunctionTypeExpr = (
   form: Form,
   ctx: LowerContext,
-  scope: ScopeId
+  scope: ScopeId,
 ): HirFunctionTypeExpr => {
-  const signature = parseLambdaSignature(form);
-  if (!signature.returnType) {
-    throw new Error("function type missing return type");
-  }
+  const functionType = parseSurfaceFunctionType(form);
+  const { signature } = functionType;
 
-  const typeParameters = lowerTypeParameters(
-    {
-      params: signature.typeParameters?.map((param) => {
-        const symbol = resolveTypeSymbol(param.value, scope, ctx);
-        if (!symbol) {
-          throw new Error(`unknown type parameter ${param.value} in function type`);
-        }
-        return { symbol, ast: param };
-      }),
-      ctx,
-      scope,
-    }
-  );
+  const typeParameters = lowerTypeParameters({
+    params: signature.typeParameters?.map((param) => {
+      const symbol = resolveTypeSymbol(param.value, scope, ctx);
+      if (!symbol) {
+        throw new Error(
+          `unknown type parameter ${param.value} in function type`,
+        );
+      }
+      return { symbol, ast: param };
+    }),
+    ctx,
+    scope,
+  });
 
-  const parameters = signature.parameters.map((param) => {
-    const normalized =
-      isForm(param) && (param.calls(":") || param.calls("?:"))
-        ? normalizeNestedFunctionTypeAnnotation(param)
-        : undefined;
-    const isOptional = normalized?.optional === true;
-    const paramTypeExpr = normalized?.typeExpr ?? param;
-    const lowered = lowerTypeExpr(paramTypeExpr, ctx, scope);
+  const parameters = functionType.parameters.map((param) => {
+    const lowered = lowerTypeExpr(param.typeExpr, ctx, scope);
     if (!lowered) {
       throw new Error("function type parameter missing type");
     }
-    const type = isOptional
+    const type = param.optional
       ? wrapInOptionalTypeExpr({ inner: lowered, ctx, scope })
       : lowered;
-    return { type, optional: isOptional ? true : undefined };
+    return { type, optional: param.optional ? true : undefined };
   });
 
-  const returnType = lowerTypeExpr(signature.returnType, ctx, scope);
+  const returnType = lowerTypeExpr(functionType.returnType, ctx, scope);
   if (!returnType) {
     throw new Error("function type missing resolved return type");
   }
 
-  const effectType = lowerTypeExpr(signature.effectType, ctx, scope);
+  const effectType = lowerTypeExpr(functionType.effectType, ctx, scope);
 
   return {
     typeKind: "function",
@@ -296,19 +280,17 @@ const lowerFunctionTypeExpr = (
   };
 };
 
-export const lowerTypeParameters = (
-  {
-    params,
-    ctx,
-    scope,
-  }: {
-    params:
-      | readonly { symbol: SymbolId; ast?: Syntax; constraint?: Expr }[]
-      | undefined;
-    ctx: LowerContext;
-    scope: ScopeId;
-  }
-): HirTypeParameter[] | undefined => {
+export const lowerTypeParameters = ({
+  params,
+  ctx,
+  scope,
+}: {
+  params:
+    | readonly { symbol: SymbolId; ast?: Syntax; constraint?: Expr }[]
+    | undefined;
+  ctx: LowerContext;
+  scope: ScopeId;
+}): HirTypeParameter[] | undefined => {
   if (!params || params.length === 0) {
     return undefined;
   }

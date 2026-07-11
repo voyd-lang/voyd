@@ -9,7 +9,7 @@ import {
 } from "../../../parser/index.js";
 import type { HirExprId, SymbolId } from "../../ids.js";
 import type { HirNamedTypeExpr, HirObjectLiteralEntry } from "../../hir/index.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveTypeSymbol } from "../resolution.js";
 import type {
   LowerExprFn,

@@ -1,20 +1,12 @@
 import { diagnosticFromCode, type Diagnostic } from "../diagnostics/index.js";
-import { classifyTopLevelDecl } from "../modules/use-decl.js";
 import {
+  createSurfaceModuleView,
   type Form,
   type Syntax,
   isForm,
   isIdentifierAtom,
 } from "../parser/index.js";
-import {
-  parseEffectDecl,
-  parseFunctionDecl,
-  parseImplDecl,
-  parseModuleLetDecl,
-  parseObjectDecl,
-  parseTraitDecl,
-  parseTypeAliasDecl,
-} from "../semantics/binding/parsing.js";
+import type { SurfaceModuleView } from "../parser/surface/index.js";
 
 type LineKind =
   | "blank"
@@ -95,7 +87,8 @@ const splitSourceLines = (source: string): SourceLine[] => {
     const normalized = raw.endsWith("\r") ? raw.slice(0, -1) : raw;
     const trimmedStart = normalized.trimStart();
     const firstNonWhitespaceIndex = normalized.search(/\S/u);
-    const startColumn = firstNonWhitespaceIndex >= 0 ? firstNonWhitespaceIndex : 0;
+    const startColumn =
+      firstNonWhitespaceIndex >= 0 ? firstNonWhitespaceIndex : 0;
 
     const line = {
       lineNumber,
@@ -164,27 +157,21 @@ const addTarget = (
 };
 
 const collectNestedModuleRanges = ({
-  ast,
+  surface,
   moduleFilePath,
 }: {
-  ast: Form;
+  surface: SurfaceModuleView;
   moduleFilePath: string;
 }): ExcludedLineRange[] => {
-  const entries = ast.callsInternal("ast") ? ast.rest : ast.toArray();
-
-  return entries.flatMap((entry) => {
-    if (!isForm(entry)) {
+  return surface.items.flatMap((item) => {
+    if (item.kind !== "inline-module") {
       return [];
     }
-    const classified = classifyTopLevelDecl(entry);
-    if (classified.kind !== "inline-module-decl") {
-      return [];
-    }
-    const location = classified.body.location;
+    const location = item.declaration.body.location;
     if (!location || location.filePath !== moduleFilePath) {
       return [];
     }
-    const entryLocation = entry.location;
+    const entryLocation = item.form.location;
     if (!entryLocation) {
       return [];
     }
@@ -258,45 +245,15 @@ const firstTargetForLine = (
   lineNumber: number,
 ): DocTarget | undefined => map.get(lineNumber)?.[0];
 
-const parseMacroDeclarationName = (
-  form: Form,
-): { name: string; syntax: Syntax } | undefined => {
-  let index = 0;
-  const first = form.at(0);
-  if (isIdentifierAtom(first) && first.value === "pub") {
-    index = 1;
-  }
-
-  const keyword = form.at(index);
-  if (!isIdentifierAtom(keyword) || keyword.value !== "macro") {
-    return undefined;
-  }
-
-  const signature = form.at(index + 1);
-  if (!isForm(signature)) {
-    return undefined;
-  }
-
-  const name = signature.at(0);
-  if (!isIdentifierAtom(name)) {
-    return undefined;
-  }
-
-  return {
-    name: name.value,
-    syntax: name,
-  };
-};
-
 const collectDocTargets = ({
-  ast,
+  surface,
   declarationTargets,
   parameterTargets,
   moduleFilePath,
   moduleRange,
   isExcluded,
 }: {
-  ast: Form;
+  surface: SurfaceModuleView;
   declarationTargets: Map<number, DocTarget[]>;
   parameterTargets: Map<number, DocTarget[]>;
   moduleFilePath: string;
@@ -316,148 +273,91 @@ const collectDocTargets = ({
       isExcluded,
     });
 
-  const entries = ast.callsInternal("ast") ? ast.rest : ast.toArray();
-  entries.forEach((entry) => {
-    if (!isForm(entry)) {
+  surface.items.forEach((item) => {
+    if (item.kind === "macro") {
+      addDeclaration(item.declaration.nameSyntax);
       return;
     }
-
-    const classified = classifyTopLevelDecl(entry);
-    if (classified.kind === "macro-decl") {
-      addDeclaration(parseMacroDeclarationName(entry)?.syntax);
-      return;
-    }
-
-    if (
-      classified.kind === "inline-module-decl" ||
-      classified.kind === "unsupported-mod-decl"
-    ) {
-      const first = entry.at(0);
+    if (item.kind === "inline-module" || item.kind === "unsupported-module") {
+      const first = item.form.at(0);
       const visibilityOffset =
         isIdentifierAtom(first) && first.value === "pub" ? 1 : 0;
-      addDeclaration((entry.at(visibilityOffset + 1) as Syntax | undefined) ?? entry);
+      addDeclaration(
+        (item.form.at(visibilityOffset + 1) as Syntax | undefined) ?? item.form,
+      );
+      return;
     }
+    if (item.kind === "use") return;
 
-    try {
-      const parsed = parseFunctionDecl(entry);
-      if (parsed) {
-        addDeclaration(parsed.signature.name);
-        parsed.signature.params.forEach((param) => addParameter(param.ast));
-        return;
-      }
-    } catch {
-      // Parser diagnostics for malformed declarations are handled elsewhere.
+    if (item.kind === "function") {
+      const parsed = item.declaration;
+      addDeclaration(parsed.signature.name);
+      parsed.signature.params.forEach((param) => addParameter(param.ast));
+      return;
     }
-
-    try {
-      const parsed = parseModuleLetDecl(entry);
-      if (parsed) {
-        addDeclaration(parsed.name);
-        return;
-      }
-    } catch {
-      // Parser diagnostics for malformed declarations are handled elsewhere.
+    if (item.kind === "module-let" || item.kind === "type-alias") {
+      addDeclaration(item.declaration.name);
+      return;
     }
-
-    try {
-      const parsed = parseTypeAliasDecl(entry);
-      if (parsed) {
-        addDeclaration(parsed.name);
-        return;
-      }
-    } catch {
-      // Parser diagnostics for malformed declarations are handled elsewhere.
+    if (item.kind === "object") {
+      const parsed = item.declaration;
+      addDeclaration(parsed.name);
+      parsed.fields.forEach((field) => addDeclaration(field.name));
+      return;
     }
-
-    try {
-      const parsed = parseObjectDecl(entry);
-      if (parsed) {
-        addDeclaration(parsed.name);
-        parsed.fields.forEach((field) => addDeclaration(field.name));
-        return;
-      }
-    } catch {
-      // Parser diagnostics for malformed declarations are handled elsewhere.
+    if (item.kind === "trait") {
+      const parsed = item.declaration;
+      addDeclaration(parsed.name);
+      parsed.methods.forEach((method) => {
+        addDeclaration(method.signature.name);
+        method.signature.params.forEach((param) => addParameter(param.ast));
+      });
+      return;
     }
-
-    try {
-      const parsed = parseTraitDecl(entry);
-      if (parsed) {
-        addDeclaration(parsed.name);
-        parsed.methods.forEach((method) => {
-          addDeclaration(method.signature.name);
-          method.signature.params.forEach((param) => addParameter(param.ast));
-        });
-        return;
-      }
-    } catch {
-      // Parser diagnostics for malformed declarations are handled elsewhere.
+    if (item.kind === "effect") {
+      const parsed = item.declaration;
+      addDeclaration(parsed.name);
+      parsed.operations.forEach((operation) => {
+        addDeclaration(operation.name);
+        operation.params.forEach((param) => addParameter(param.ast));
+      });
+      return;
     }
-
-    try {
-      const parsed = parseEffectDecl(entry);
-      if (parsed) {
-        addDeclaration(parsed.name);
-        parsed.operations.forEach((operation) => {
-          addDeclaration(operation.name);
-          operation.params.forEach((param) => addParameter(param.ast));
-        });
-        return;
-      }
-    } catch {
-      // Parser diagnostics for malformed declarations are handled elsewhere.
-    }
-
-    try {
-      const parsed = parseImplDecl(entry);
-      if (parsed) {
-        addDeclaration(parsed.target as Syntax);
-        parsed.body.rest.forEach((candidate) => {
-          if (!isForm(candidate)) {
-            return;
-          }
-          try {
-            const method = parseFunctionDecl(candidate);
-            if (!method) {
-              return;
-            }
-            addDeclaration(method.signature.name);
-            method.signature.params.forEach((param) => addParameter(param.ast));
-          } catch {
-            // Parser diagnostics for malformed declarations are handled elsewhere.
-          }
-        });
-      }
-    } catch {
-      // Parser diagnostics for malformed declarations are handled elsewhere.
+    if (item.kind === "impl") {
+      const parsed = item.declaration;
+      addDeclaration(parsed.target as Syntax);
+      parsed.methods.forEach((method) => {
+        addDeclaration(method.signature.name);
+        method.signature.params.forEach((param) => addParameter(param.ast));
+      });
     }
   });
 };
 
 const collectMacroDeclarationDocsByName = ({
-  ast,
+  surface,
   declarationsBySyntaxId,
 }: {
-  ast: Form;
+  surface: SurfaceModuleView;
   declarationsBySyntaxId: ReadonlyMap<number, string>;
 }): ReadonlyMap<string, string> => {
-  const entries = ast.callsInternal("ast") ? ast.rest : ast.toArray();
-  return entries.reduce<Map<string, string>>((docsByName, entry) => {
-    if (!isForm(entry)) {
+  return surface.items.reduce<Map<string, string>>((docsByName, item) => {
+    if (
+      item.kind !== "macro" ||
+      !item.declaration.name ||
+      !item.declaration.nameSyntax
+    ) {
       return docsByName;
     }
 
-    const macroDecl = parseMacroDeclarationName(entry);
-    if (!macroDecl) {
-      return docsByName;
-    }
-
-    const documentation = declarationsBySyntaxId.get(macroDecl.syntax.syntaxId);
+    const documentation = declarationsBySyntaxId.get(
+      item.declaration.nameSyntax.syntaxId,
+    );
     if (!documentation) {
       return docsByName;
     }
 
-    docsByName.set(macroDecl.name, documentation);
+    docsByName.set(item.declaration.name, documentation);
     return docsByName;
   }, new Map<string, string>());
 };
@@ -523,8 +423,9 @@ export const collectModuleDocumentation = ({
     start: moduleRange?.start ?? ast.location?.startIndex ?? 0,
     end: moduleRange?.end ?? ast.location?.endIndex ?? source.length,
   };
+  const surface = createSurfaceModuleView(ast);
   const excludedRanges = collectNestedModuleRanges({
-    ast,
+    surface,
     moduleFilePath,
   });
   const isExcluded = (lineNumber: number): boolean =>
@@ -537,7 +438,7 @@ export const collectModuleDocumentation = ({
   const declarationTargets = new Map<number, DocTarget[]>();
   const parameterTargets = new Map<number, DocTarget[]>();
   collectDocTargets({
-    ast,
+    surface,
     declarationTargets,
     parameterTargets,
     moduleFilePath,
@@ -579,7 +480,11 @@ export const collectModuleDocumentation = ({
     let sawBlankLine = false;
     let significant: SourceLine | undefined;
 
-    for (let lineNumber = block.endLine + 1; lineNumber <= lines.length; lineNumber += 1) {
+    for (
+      let lineNumber = block.endLine + 1;
+      lineNumber <= lines.length;
+      lineNumber += 1
+    ) {
       const line = lines[lineNumber - 1];
       if (!line) {
         break;
@@ -653,7 +558,7 @@ export const collectModuleDocumentation = ({
       ? innerLines.map((line) => line.docText ?? "").join("\n")
       : undefined;
   const macroDeclarationsByName = collectMacroDeclarationDocsByName({
-    ast,
+    surface,
     declarationsBySyntaxId: declarationDocsBySyntaxId,
   });
 

@@ -1,5 +1,5 @@
 import type { Syntax } from "../../../parser/index.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveConstructorResolution } from "../resolution.js";
 import type { IdentifierResolution, LowerContext } from "../types.js";
 import type { HirExprId, SourceSpan, SymbolId } from "../../ids.js";

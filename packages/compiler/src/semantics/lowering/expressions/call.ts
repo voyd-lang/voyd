@@ -8,20 +8,22 @@ import {
   isIdentifierAtom,
   isInternalIdentifierAtom,
 } from "../../../parser/index.js";
+import {
+  parseSurfaceCallArguments,
+  parseValueBraceEntries,
+} from "../../../parser/surface/index.js";
 import { literalShouldLowerAsObjectLiteral } from "../../constructors.js";
 import type { HirExprId } from "../../ids.js";
 import type { HirTypeExpr } from "../../hir/index.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import { resolveNamedTypeTarget } from "../named-type-resolution.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import {
   isObjectLiteralForm,
   lowerObjectLiteralExpr,
 } from "./object-literal.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
-import {
-  lowerConstructorLiteralCall,
-} from "./constructor-call.js";
+import { lowerConstructorLiteralCall } from "./constructor-call.js";
 import { createBoolLiteralExpr } from "./literal-helpers.js";
 import { resolveTypeSymbol } from "../resolution.js";
 import { lowerNominalTargetTypeArgumentsFromMetadata } from "../../nominal-type-target.js";
@@ -65,9 +67,10 @@ export const lowerCallFromElements = ({
     ctx,
     scope: scopes.current(),
   });
-  const callTypeArguments = aliasTargetTypeArguments.consumeNamespaceTypeArguments
-    ? aliasTargetTypeArguments.typeArguments
-    : typeArguments;
+  const callTypeArguments =
+    aliasTargetTypeArguments.consumeNamespaceTypeArguments
+      ? aliasTargetTypeArguments.typeArguments
+      : typeArguments;
   const isTypeCheck = tryLowerIsTypeCheckCall({
     calleeExpr,
     argsExprs: callArgsExprs,
@@ -81,21 +84,10 @@ export const lowerCallFromElements = ({
   }
 
   const calleeId = lowerExpr(calleeExpr, ctx, scopes);
-  const args = callArgsExprs.map((arg) => {
-    if (isForm(arg) && arg.calls(":")) {
-      const labelExpr = arg.at(1);
-      const valueExpr = arg.at(2);
-      if (!isIdentifierAtom(labelExpr) || !valueExpr) {
-        throw new Error("Invalid labeled argument");
-      }
-      return {
-        label: labelExpr.value,
-        expr: lowerExpr(valueExpr, ctx, scopes),
-      };
-    }
-    const expr = lowerExpr(arg, ctx, scopes);
-    return { expr };
-  });
+  const args = parseSurfaceCallArguments(callArgsExprs).map((argument) => ({
+    ...(argument.label ? { label: argument.label.value } : {}),
+    expr: lowerExpr(argument.value, ctx, scopes),
+  }));
 
   return ctx.builder.addExpression({
     kind: "expr",
@@ -222,15 +214,20 @@ export const lowerNominalObjectLiteral = ({
         .filter(Boolean) as NonNullable<ReturnType<typeof lowerTypeExpr>>[])
     : undefined;
   const mergedTypeArguments =
-    parsedTypeArguments && fallbackTypeArguments && fallbackTypeArguments.length > 0
+    parsedTypeArguments &&
+    fallbackTypeArguments &&
+    fallbackTypeArguments.length > 0
       ? [...parsedTypeArguments, ...fallbackTypeArguments]
-      : parsedTypeArguments ?? fallbackTypeArguments;
+      : (parsedTypeArguments ?? fallbackTypeArguments);
   const typeArguments = calleeResolution.typeArguments ?? mergedTypeArguments;
 
-  const metadata = (ctx.symbolTable.getSymbol(calleeResolution.symbol).metadata ?? {}) as {
+  const metadata = (ctx.symbolTable.getSymbol(calleeResolution.symbol)
+    .metadata ?? {}) as {
     entity?: string;
   };
-  const constructors = ctx.staticMethods.get(calleeResolution.symbol)?.get("init");
+  const constructors = ctx.staticMethods
+    .get(calleeResolution.symbol)
+    ?.get("init");
   const decl = ctx.decls.getObject(calleeResolution.symbol);
   const lowerAsObjectLiteral =
     decl && literalShouldLowerAsObjectLiteral(literalForm, decl.fields);
@@ -252,8 +249,7 @@ export const lowerNominalObjectLiteral = ({
     if (!enclosingFunctionDecl) {
       return undefined;
     }
-    return ctx.symbolTable.getSymbol(enclosingFunctionDecl.symbol)
-      .metadata as
+    return ctx.symbolTable.getSymbol(enclosingFunctionDecl.symbol).metadata as
       | {
           implTarget?: unknown;
         }
@@ -270,7 +266,10 @@ export const lowerNominalObjectLiteral = ({
       literal: literalForm,
       constructors: constructorDecls,
     });
-  if (metadata.entity !== "object" && !(constructors && constructors.size > 0)) {
+  if (
+    metadata.entity !== "object" &&
+    !(constructors && constructors.size > 0)
+  ) {
     return undefined;
   }
   if (
@@ -344,7 +343,9 @@ const constructorLiteralCanMatchAnySignature = ({
   constructors,
 }: {
   literal: Form;
-  constructors: readonly { params: readonly { label?: string; optional?: boolean }[] }[];
+  constructors: readonly {
+    params: readonly { label?: string; optional?: boolean }[];
+  }[];
 }): boolean => {
   if (constructors.length === 0) {
     return false;
@@ -361,19 +362,9 @@ const constructorLiteralCanMatchAnySignature = ({
 const constructorLiteralArgumentsFromLiteral = (
   literal: Form,
 ): ConstructorLiteralArgumentShape[] =>
-  literal.rest.map((entry) => {
-    if (isForm(entry) && entry.calls(":")) {
-      const nameExpr = entry.at(1);
-      if (isIdentifierAtom(nameExpr) || isInternalIdentifierAtom(nameExpr)) {
-        return { label: nameExpr.value };
-      }
-      return {};
-    }
-    if (isIdentifierAtom(entry) || isInternalIdentifierAtom(entry)) {
-      return { label: entry.value };
-    }
-    return {};
-  });
+  parseValueBraceEntries(literal).map((entry) =>
+    entry.kind === "spread" ? {} : { label: entry.name.value },
+  );
 
 const constructorLiteralArgumentsMatchParams = ({
   args,
@@ -396,7 +387,11 @@ const constructorLiteralArgumentsMatchParams = ({
     });
     const seenLabels = new Set<string>();
     for (const arg of args) {
-      if (!arg.label || !paramsByLabel.has(arg.label) || seenLabels.has(arg.label)) {
+      if (
+        !arg.label ||
+        !paramsByLabel.has(arg.label) ||
+        seenLabels.has(arg.label)
+      ) {
         return false;
       }
       seenLabels.add(arg.label);

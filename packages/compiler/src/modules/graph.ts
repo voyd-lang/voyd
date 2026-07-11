@@ -6,6 +6,7 @@ import {
   isForm,
   parserErrorLocation,
   parseBase,
+  createModuleHeaderView,
 } from "../parser/index.js";
 import { diagnosticFromCode, type Diagnostic } from "../diagnostics/index.js";
 import {
@@ -13,15 +14,14 @@ import {
   combineDocumentation,
   type ModuleDocumentation,
 } from "../docs/doc-comments.js";
-import { toSourceSpan } from "../semantics/utils.js";
+import { toSourceSpan } from "../parser/surface/utils.js";
 import {
   modulePathFromFile,
   modulePathToString,
   resolveModuleFile,
 } from "./path.js";
 import { resolveModuleRequest } from "./resolve.js";
-import { classifyTopLevelDecl } from "./use-decl.js";
-import { parseUsePaths } from "./use-path.js";
+import type { TopLevelDeclClassification } from "../parser/surface/use-decl.js";
 import { moduleDiagnosticToDiagnostic } from "./diagnostics.js";
 import type {
   ModuleDependency,
@@ -53,7 +53,8 @@ type PendingDependency = {
   importerFilePath?: string;
 };
 
-const NO_PRELUDE_DIRECTIVE = /(^|[\r\n])([^\S\r\n]*#!no_prelude[^\r\n]*)(?=$|[\r\n])/g;
+const NO_PRELUDE_DIRECTIVE =
+  /(^|[\r\n])([^\S\r\n]*#!no_prelude[^\r\n]*)(?=$|[\r\n])/g;
 const PRELUDE_MODULE_SEGMENTS = ["std", "prelude"] as const;
 const IMPLICIT_PRELUDE_USE_DECL = (() => {
   const ast = parseBase("use std::prelude::all", "<implicit-prelude>");
@@ -72,9 +73,8 @@ const formatErrorMessage = (error: unknown): string =>
 
 const RESERVED_MODULE_SEGMENT = "all";
 
-const findReservedModuleSegment = (
-  path: ModulePath,
-): string | undefined => path.segments.find((segment) => segment === RESERVED_MODULE_SEGMENT);
+const findReservedModuleSegment = (path: ModulePath): string | undefined =>
+  path.segments.find((segment) => segment === RESERVED_MODULE_SEGMENT);
 
 const COMPILER_PERF_ENABLED = isCompilerPerfEnabled();
 
@@ -455,7 +455,9 @@ const loadFileModule = async ({
   hasStdPreludeModule: boolean;
 }): Promise<LoadedModule> => {
   const moduleStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
-  incrementCompilerPerfCounter(`graph.load_module.${modulePath.namespace}.count`);
+  incrementCompilerPerfCounter(
+    `graph.load_module.${modulePath.namespace}.count`,
+  );
 
   const readStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const source = await host.readFile(filePath);
@@ -555,6 +557,7 @@ const loadFileModule = async ({
     sourcePackageRoot,
     origin: { kind: "file", filePath },
     ast,
+    header: createModuleHeaderView(ast),
     source,
     sourceFiles: sourceFilesFrom(sourceByFile),
     docs: info.docs,
@@ -606,15 +609,11 @@ const collectModuleInfo = ({
   const inlineModules: ModuleNode[] = [];
   const diagnostics: Diagnostic[] = [];
   let needsStdPkg = false;
-  const entries = formCallsInternal(ast, "ast") ? ast.rest : [];
+  const header = createModuleHeaderView(ast);
   const inlineModuleNames = new Set(
-    entries.flatMap((entry) => {
-      if (!isForm(entry)) {
-        return [];
-      }
-      const topLevelDecl = classifyTopLevelDecl(entry);
-      return topLevelDecl.kind === "inline-module-decl" ? [topLevelDecl.name] : [];
-    }),
+    header.items.flatMap((item) =>
+      item.kind === "inline-module" ? [item.declaration.name] : [],
+    ),
   );
   const sourceForDocs = sourceForModuleAst({ ast, sourceByFile });
   const collectedDocs = collectModuleDocumentation({
@@ -624,14 +623,12 @@ const collectModuleInfo = ({
   });
   diagnostics.push(...collectedDocs.diagnostics);
 
-  entries.forEach((entry) => {
-    if (!isForm(entry)) return;
+  header.items.forEach((item) => {
+    const entry = item.form;
     const span = toSourceSpan(entry);
-    const topLevelDecl = classifyTopLevelDecl(entry);
 
-    if (topLevelDecl.kind === "use-decl") {
-      const useEntries = parseUsePaths(topLevelDecl.pathExpr, span);
-      const resolvedEntries = useEntries
+    if (item.kind === "use") {
+      const resolvedEntries = item.entries
         .filter((entryPath) => entryPath.hasExplicitPrefix)
         .map((entryPath) => {
           const firstSegment = entryPath.moduleSegments[0];
@@ -672,9 +669,10 @@ const collectModuleInfo = ({
       return;
     }
 
-    if (topLevelDecl.kind !== "inline-module-decl") {
+    if (item.kind !== "inline-module") {
       return;
     }
+    const topLevelDecl = item.declaration;
 
     if (topLevelDecl.name === RESERVED_MODULE_SEGMENT) {
       const inlineModulePath = modulePathToString({
@@ -760,10 +758,7 @@ const parseInlineModuleDecl = ({
   noPrelude,
   outerModuleDoc,
 }: {
-  decl: Extract<
-    ReturnType<typeof classifyTopLevelDecl>,
-    { kind: "inline-module-decl" }
-  >;
+  decl: Extract<TopLevelDeclClassification, { kind: "inline-module-decl" }>;
   form: Form;
   parentPath: ModulePath;
   sourceByFile: ReadonlyMap<string, string>;
@@ -780,9 +775,7 @@ const parseInlineModuleDecl = ({
 
   const span = toSourceSpan(form);
   const sourceForModule =
-    sourceByFile.get(span.file) ??
-    sourceByFile.values().next().value ??
-    "";
+    sourceByFile.get(span.file) ?? sourceByFile.values().next().value ?? "";
   const ast = injectImplicitPreludeUse({
     ast: toModuleAst(decl.body),
     modulePath,
@@ -818,6 +811,7 @@ const parseInlineModuleDecl = ({
       span,
     },
     ast,
+    header: createModuleHeaderView(ast),
     source: sliceSource(sourceForModule, span),
     sourceFiles: sourceFilesFrom(sourceByFile),
     docs: {
@@ -938,18 +932,9 @@ const hasExplicitPreludeUse = ({ ast }: { ast: Form }): boolean => {
       (segment, index) => segments[index] === segment,
     );
 
-  const entries = formCallsInternal(ast, "ast") ? ast.rest : [];
-  return entries.some((entry) => {
-    if (!isForm(entry)) {
-      return false;
-    }
-
-    const topLevelDecl = classifyTopLevelDecl(entry);
-    if (topLevelDecl.kind !== "use-decl") {
-      return false;
-    }
-
-    return parseUsePaths(topLevelDecl.pathExpr, toSourceSpan(entry)).some(
+  return createModuleHeaderView(ast).items.some((item) => {
+    if (item.kind !== "use") return false;
+    return item.entries.some(
       (useEntry) =>
         hasPreludePrefix(useEntry.moduleSegments) ||
         hasPreludePrefix(useEntry.path),

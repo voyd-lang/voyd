@@ -3,7 +3,7 @@ import {
   isIdentifierAtom,
   type Syntax,
 } from "../../../parser/index.js";
-import { parseIfBranches, toSourceSpan } from "../../utils.js";
+import { parseIfBranches, toSourceSpan } from "../../../parser/surface/utils.js";
 import type { HirCondBranch, HirMatchArm, HirPattern } from "../../hir/index.js";
 import type { HirExprId } from "../../ids.js";
 import { lowerTypeExpr } from "../type-expressions.js";

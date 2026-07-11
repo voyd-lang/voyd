@@ -1,6 +1,10 @@
 import type { Form } from "../parser/index.js";
 import type { Diagnostic, SourceSpan } from "../diagnostics/index.js";
 import type { ModuleDocumentation } from "../docs/doc-comments.js";
+import type {
+  ModuleHeaderView,
+  SurfaceModuleView,
+} from "../parser/surface/index.js";
 
 export type ModuleNamespace = "src" | "std" | "pkg";
 
@@ -24,7 +28,9 @@ export interface ModuleRoots {
    * (`.../<packageName>`) or directly to the package source directory
    * (`.../<packageName>/src`).
    */
-  resolvePackageRoot?: (packageName: string) => string | undefined | Promise<string | undefined>;
+  resolvePackageRoot?: (
+    packageName: string,
+  ) => string | undefined | Promise<string | undefined>;
 }
 
 export interface ModulePath {
@@ -69,6 +75,10 @@ export interface ModuleNode {
   sourcePackageRoot?: readonly string[];
   origin: ModuleOrigin;
   ast: Form;
+  /** Parser-owned structural view of the base-expanded module. */
+  header?: ModuleHeaderView;
+  /** Parser-owned structural view after functional and post syntax expansion. */
+  surface?: SurfaceModuleView;
   source: string;
   /**
    * Source files that contributed to this module's AST. This includes merged

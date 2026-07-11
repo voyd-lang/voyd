@@ -2,8 +2,10 @@ import { type Expr, isIdentifierAtom, isForm } from "../../../parser/index.js";
 import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import type { TypeParameterDecl, TraitDecl } from "../../decls.js";
 import type { BindingContext, BindingResult } from "../types.js";
-import type { ParsedFunctionDecl, ParsedImplDecl } from "../parsing.js";
-import { parseFunctionDecl } from "../parsing.js";
+import type {
+  ParsedFunctionDecl,
+  ParsedImplDecl,
+} from "../../../parser/surface/declarations.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
 import { bindFunctionDecl } from "./function.js";
 import {
@@ -15,8 +17,11 @@ import { bindTypeParameters } from "./type-parameters.js";
 import { resolveObjectDecl } from "./object.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { inheritMemberVisibility, moduleVisibility } from "../../hir/index.js";
-import { formatTypeAnnotation } from "../../utils.js";
-import { importableMetadataFrom, importedModuleIdFrom } from "../../imports/metadata.js";
+import { formatTypeAnnotation } from "../../../parser/surface/utils.js";
+import {
+  importableMetadataFrom,
+  importedModuleIdFrom,
+} from "../../imports/metadata.js";
 import {
   methodSignatureKey,
   methodSignatureParamTypeKey,
@@ -24,8 +29,7 @@ import {
 import { bindTypeExpr } from "./expressions.js";
 
 const isStaticMethod = (fn: ParsedFunctionDecl): boolean =>
-  fn.signature.params.length === 0 ||
-  fn.signature.params[0]?.name !== "self";
+  fn.signature.params.length === 0 || fn.signature.params[0]?.name !== "self";
 
 const recordStaticMethod = ({
   target,
@@ -47,7 +51,7 @@ const recordStaticMethod = ({
 export const bindImplDecl = (
   decl: ParsedImplDecl,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.target, ctx);
@@ -65,7 +69,7 @@ export const bindImplDecl = (
       declaredAt: decl.form.syntaxId,
       metadata: { entity: "impl" },
     },
-    tracker.current()
+    tracker.current(),
   );
 
   const implScope = ctx.symbolTable.createScope({
@@ -132,7 +136,8 @@ export const bindImplDecl = (
     }
 
     const byTrait =
-      ctx.memberDeclarationScopesByOwnerAndTrait.get(implTargetSymbol) ?? new Map();
+      ctx.memberDeclarationScopesByOwnerAndTrait.get(implTargetSymbol) ??
+      new Map();
     const existing = byTrait.get(traitSymbolForMemberScope);
     if (typeof existing === "number") {
       return existing;
@@ -148,7 +153,7 @@ export const bindImplDecl = (
   })();
 
   const methodDeclarationScope = decl.trait
-    ? traitMemberDeclarationScope ?? memberDeclarationScope
+    ? (traitMemberDeclarationScope ?? memberDeclarationScope)
     : memberDeclarationScope;
 
   tracker.enterScope(implScope, () => {
@@ -195,7 +200,7 @@ export const bindImplDecl = (
       const method = bindFunctionDecl(parsedFn, ctx, tracker, {
         declarationScope: staticMethod
           ? implScope
-          : methodDeclarationScope ?? ctx.symbolTable.rootScope,
+          : (methodDeclarationScope ?? ctx.symbolTable.rootScope),
         scopeParent: options?.scopeParent ?? implScope,
         metadata,
         selfTypeExpr: staticMethod ? undefined : decl.target,
@@ -222,23 +227,14 @@ export const bindImplDecl = (
       return method;
     };
 
-    decl.body.rest.forEach((entry) => {
-      if (!isForm(entry)) {
-        return;
-      }
-      const parsedFn = parseFunctionDecl(entry);
-      if (!parsedFn) {
-        throw new Error("impl body supports only function declarations");
-      }
-      methods.push(bindMethod(parsedFn));
-    });
+    decl.methods.forEach((method) => methods.push(bindMethod(method)));
 
     if (decl.trait) {
       const traitDecl = traitResolution?.decl;
       if (traitDecl) {
         const traitTypeParamMap = buildTraitTypeParamMap(traitDecl, decl.trait);
         const methodSignatures = new Set(
-          methods.map((method) => methodSignatureKeyForBoundFunction(method))
+          methods.map((method) => methodSignatureKeyForBoundFunction(method)),
         );
         traitDecl.methods.forEach((traitMethod) => {
           if (!traitMethod.defaultBody) {
@@ -314,7 +310,9 @@ const inferImplTypeParameters = ({
     }
   }
 
-  const traitDecl = trait ? resolveTraitDecl(trait, ctx, scope)?.decl : undefined;
+  const traitDecl = trait
+    ? resolveTraitDecl(trait, ctx, scope)?.decl
+    : undefined;
   if (traitDecl?.typeParameters?.length) {
     const args = trait ? extractTraitTypeArguments(trait) : [];
     if (args.length === traitDecl.typeParameters.length) {
@@ -332,7 +330,7 @@ const inferImplTypeParameters = ({
 
 const buildTraitTypeParamMap = (
   traitDecl: TraitDecl,
-  traitExpr: Expr
+  traitExpr: Expr,
 ): Map<string, Expr> | undefined => {
   const params = traitDecl.typeParameters ?? [];
   if (params.length === 0) {
@@ -344,7 +342,7 @@ const buildTraitTypeParamMap = (
   }
 
   const substitutions = new Map<string, Expr>();
-    params.forEach((param: TypeParameterDecl, index: number) => {
+  params.forEach((param: TypeParameterDecl, index: number) => {
     const arg = args[index];
     if (arg) {
       substitutions.set(param.name, arg);
@@ -403,8 +401,9 @@ const createImportedTraitDefaultScope = ({
         import?: { moduleId?: unknown; symbol?: unknown };
       };
       const importedModuleId =
-        importedModuleIdFrom(record.metadata as Record<string, unknown> | undefined) ??
-        sourceModuleId;
+        importedModuleIdFrom(
+          record.metadata as Record<string, unknown> | undefined,
+        ) ?? sourceModuleId;
       const importedSymbol =
         typeof sourceMetadata.import?.symbol === "number"
           ? sourceMetadata.import.symbol
@@ -434,8 +433,11 @@ const createImportedTraitDefaultScope = ({
       return;
     }
     const nextOverloadSetId =
-      Math.max(-1, ...ctx.importedOverloadOptions.keys(), ...ctx.overloads.keys()) +
-      1;
+      Math.max(
+        -1,
+        ...ctx.importedOverloadOptions.keys(),
+        ...ctx.overloads.keys(),
+      ) + 1;
     ctx.importedOverloadOptions.set(nextOverloadSetId, importedLocals);
     importedLocals.forEach((local) => {
       ctx.overloadBySymbol.set(local, nextOverloadSetId);
@@ -459,7 +461,10 @@ const collectImportCandidatesForReferencedNames = ({
   sourceOverloadOptions?: ReadonlyMap<number, readonly SymbolId[]>;
 }): {
   name: string;
-  candidates: { symbol: SymbolId; record: ReturnType<typeof symbolTable.getSymbol> }[];
+  candidates: {
+    symbol: SymbolId;
+    record: ReturnType<typeof symbolTable.getSymbol>;
+  }[];
 }[] => {
   const candidatesByName = new Map<
     string,
@@ -580,8 +585,14 @@ const collectReferencedIdentifierNames = ({
   parsedDefaultMethod.signature.params.forEach((param) => {
     collectIdentifierNamesFromExpr(param.typeExpr, names);
   });
-  collectIdentifierNamesFromExpr(parsedDefaultMethod.signature.returnType, names);
-  collectIdentifierNamesFromExpr(parsedDefaultMethod.signature.effectType, names);
+  collectIdentifierNamesFromExpr(
+    parsedDefaultMethod.signature.returnType,
+    names,
+  );
+  collectIdentifierNamesFromExpr(
+    parsedDefaultMethod.signature.effectType,
+    names,
+  );
   parsedDefaultMethod.signature.typeParameters.forEach((typeParam) => {
     collectIdentifierNamesFromExpr(typeParam.constraint, names);
   });
@@ -647,7 +658,9 @@ const methodSignatureKeyForBoundFunction = (
   });
 };
 
-const methodSignatureKeyForParsedFunction = (fn: ParsedFunctionDecl): string => {
+const methodSignatureKeyForParsedFunction = (
+  fn: ParsedFunctionDecl,
+): string => {
   const params = fn.signature.params.map((param, index) => ({
     label: param.label,
     name: param.name,

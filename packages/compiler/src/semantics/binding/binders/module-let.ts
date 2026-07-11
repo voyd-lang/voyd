@@ -1,7 +1,7 @@
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import { bindExpr, bindTypeExpr } from "./expressions.js";
-import type { ParsedModuleLetDecl } from "../parsing.js";
+import type { ParsedModuleLetDecl } from "../../../parser/surface/declarations.js";
 import type { BindingContext } from "../types.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { declareValueOrParameter } from "../redefinitions.js";
