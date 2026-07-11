@@ -60,6 +60,9 @@ Raw Binaryen pass configuration is intentionally not public SDK API.
 SDK builds automatically expose boundary-compatible public Voyd functions
 through the existing host and compiled-result run APIs. JavaScript callers pass
 plain JS values; the host validates and encodes them at the Wasm boundary.
+Primitive-only signatures use a validated direct Wasm call and do not pull in
+the serialized boundary runtime. Strings, arrays, records, and unions continue
+to use the serialized boundary ABI.
 
 ```ts
 const result = await sdk.compile({
@@ -135,7 +138,8 @@ pub fn call_callback(callback: fn() -> i32) -> i32
 });
 ```
 
-Disable automatic wrappers when Wasm size or compile-time overhead matters.
+Disable automatic boundary generation when raw Wasm calling conventions are
+preferred over JavaScript validation and DTO conversion.
 
 ```ts
 const result = await sdk.compile({
@@ -147,6 +151,11 @@ const result = await sdk.compile({
 Raw Wasm exports remain available through `host.instance.exports`. Existing
 raw MsgPack interop still works; MsgPack is an internal codec detail for typed
 boundary exports, not a stable WIT/component-model replacement.
+
+Raw Wasm GC objects and closures are opaque boundary handles. A host may retain
+them and pass the same reference back to Voyd exports, but inspecting their
+fields, invoking embedded function references, constructing compatible GC
+values, or reflecting on their runtime types is outside the supported ABI.
 
 ## Module roots and package resolution
 

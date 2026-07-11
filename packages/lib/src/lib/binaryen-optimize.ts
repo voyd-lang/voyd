@@ -41,6 +41,7 @@ export const optimizeBinaryenModule = ({
 }): BinaryenOptimizationReport => {
   const previousOptimizeLevel = binaryen.getOptimizeLevel();
   const previousShrinkLevel = binaryen.getShrinkLevel();
+  const previousClosedWorld = binaryen.getClosedWorld();
   const optimizeLevel = profile === "aggressive" ? 3 : 2;
   const shrinkLevel = profile === "aggressive" ? 2 : 1;
 
@@ -68,6 +69,12 @@ export const optimizeBinaryenModule = ({
 
   binaryen.setOptimizeLevel(optimizeLevel);
   binaryen.setShrinkLevel(shrinkLevel);
+  // Voyd's exported GC and function references are opaque host handles: they
+  // may be retained and passed back, but their contents are not host-inspected.
+  // That contract lets release builds unlock Binaryen's closed-world GC passes.
+  if (profile === "aggressive") {
+    binaryen.setClosedWorld(true);
+  }
 
   try {
     let startedAt = performance.now();
@@ -88,6 +95,7 @@ export const optimizeBinaryenModule = ({
   } finally {
     binaryen.setOptimizeLevel(previousOptimizeLevel);
     binaryen.setShrinkLevel(previousShrinkLevel);
+    binaryen.setClosedWorld(previousClosedWorld);
   }
   return { profile, extraPasses, phasesMs };
 };

@@ -56,6 +56,62 @@ export const decodeBoundaryResult = ({
     registry: buildSchemaRegistry([schema]),
   });
 
+export const encodeDirectBoundaryArgs = ({
+  exportName,
+  schemas,
+  args,
+}: {
+  exportName: string;
+  schemas: readonly BoundarySchema[];
+  args: readonly unknown[];
+}): unknown[] =>
+  encodeBoundaryArgs({ exportName, schemas, args }).map((value, index) => {
+    const schema = schemas[index]!;
+    switch (schema.kind) {
+      case "bool":
+        return value ? 1 : 0;
+      case "i64":
+        return typeof value === "number" ? BigInt(value) : value;
+      case "i32":
+      case "f32":
+      case "f64":
+        return value;
+      default:
+        throw new Error(
+          `typed export ${exportName} has unsupported direct parameter schema ${schema.kind}`,
+        );
+    }
+  });
+
+export const decodeDirectBoundaryResult = ({
+  exportName,
+  schema,
+  value,
+}: {
+  exportName: string;
+  schema: BoundarySchema;
+  value: unknown;
+}): unknown => {
+  switch (schema.kind) {
+    case "bool":
+      return decodeBoundaryResult({
+        exportName,
+        schema,
+        value: value !== 0,
+      });
+    case "i32":
+    case "i64":
+    case "f32":
+    case "f64":
+    case "void":
+      return decodeBoundaryResult({ exportName, schema, value });
+    default:
+      throw new Error(
+        `typed export ${exportName} has unsupported direct result schema ${schema.kind}`,
+      );
+  }
+};
+
 const encodeBoundaryValue = ({
   exportName,
   schema,

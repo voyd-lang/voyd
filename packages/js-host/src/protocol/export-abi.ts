@@ -61,6 +61,8 @@ export type ExportAbiEntry =
   | {
       name: string;
       abi: "direct";
+      params?: readonly BoundarySchema[];
+      result?: BoundarySchema;
     }
   | {
       name: string;

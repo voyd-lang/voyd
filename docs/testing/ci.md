@@ -33,6 +33,14 @@ Dedicated conformance and integration jobs each use two Vitest workers, so the
 unit lane's three-package concurrency cannot multiply into unbounded nested
 worker pools.
 
+The first broad upstream unit runs after the lane split varied from about 224
+to 342 seconds on hosted runners. The slowest unchanged file varied from about
+119 to 147 seconds, and the file exceeding the limit changed between attempts
+even though every test passed. The initial unit guardrail is therefore 420
+seconds for the lane and 180 seconds per file. This retains regression
+detection without making ordinary hosted-runner variance a required-check
+failure; tighten it once retained artifacts provide a credible p95 baseline.
+
 The first live hosted-runner integration baseline completed all 128 assertions
 in about 201 seconds, with the slowest file at about 132 seconds. Its initial
 budget is therefore 300 seconds for the lane and 180 seconds per file. This

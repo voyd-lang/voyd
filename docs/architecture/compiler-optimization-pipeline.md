@@ -662,6 +662,7 @@ The compiler supports two profiles:
 - `aggressive`
   - Binaryen optimize level 3
   - Binaryen shrink level 2
+  - closed-world GC and function-reference optimization
   - `module.optimize()`
   - extra validated passes
   - a second `module.optimize()`
@@ -683,6 +684,15 @@ the aggressive profile; `none` skips both the semantic optimizer and Binaryen.
 The legacy `optimize: true` switch maps to `release`, while direct compiler
 clients using `optimize: true` with `optimizationProfile: "standard"` continue
 to map to `balanced`. Explicit `optimizationLevel` takes precedence.
+
+Release enables Binaryen's closed-world reference analysis because Voyd's host
+boundary treats exported GC objects and closures as opaque handles. The host may
+retain those references and pass them back to Wasm, but it does not inspect GC
+fields, call embedded function references, construct compatible values, or
+reflect on their runtime types. Import and export signatures remain stable.
+The shared helper restores Binaryen's process-global closed-world setting after
+every run, including failed optimization, so balanced and unrelated modules do
+not inherit the release assumption.
 
 Raw pass selection is not public API. The scorecard can run guarded internal
 ablation workers that omit one aggressive pass or the final optimization cycle;

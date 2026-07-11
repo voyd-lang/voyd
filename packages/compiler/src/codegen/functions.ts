@@ -309,6 +309,59 @@ const boundarySchemasForExport = ({
   }),
 });
 
+const scalarBoundaryWasmType = (
+  schema: BoundarySchema,
+): binaryen.Type | undefined => {
+  switch (schema.kind) {
+    case "bool":
+    case "i32":
+      return binaryen.i32;
+    case "i64":
+      return binaryen.i64;
+    case "f32":
+      return binaryen.f32;
+    case "f64":
+      return binaryen.f64;
+    default:
+      return undefined;
+  }
+};
+
+const supportsDirectScalarBoundary = ({
+  meta,
+  schemas,
+}: {
+  meta: FunctionMetadata;
+  schemas: { params: readonly BoundarySchema[]; result: BoundarySchema };
+}): boolean => {
+  if (meta.userParamOffset !== 0 || meta.resultAbiKind !== "direct") {
+    return false;
+  }
+  const paramsSupported = schemas.params.every((schema, index) => {
+    const wasmType = scalarBoundaryWasmType(schema);
+    const abiTypes = meta.paramAbiTypes[index] ?? [];
+    return (
+      wasmType !== undefined &&
+      meta.paramAbiKinds[index] === "direct" &&
+      meta.parameters[index]?.defaulted !== true &&
+      abiTypes.length === 1 &&
+      abiTypes[0] === wasmType
+    );
+  });
+  if (!paramsSupported || schemas.params.length !== meta.paramAbiTypes.length) {
+    return false;
+  }
+  if (schemas.result.kind === "void") {
+    return meta.resultAbiTypes.length === 0;
+  }
+  const resultType = scalarBoundaryWasmType(schemas.result);
+  return (
+    resultType !== undefined &&
+    meta.resultAbiTypes.length === 1 &&
+    meta.resultAbiTypes[0] === resultType
+  );
+};
+
 const reportBoundaryExportUnsupported = ({
   ctx,
   entry,
@@ -1571,6 +1624,16 @@ export const emitModuleExports = (
             meta,
             exportName,
           });
+          if (supportsDirectScalarBoundary({ meta, schemas })) {
+            exportAbiEntries.push({
+              name: exportName,
+              abi: "direct",
+              params: schemas.params,
+              result: schemas.result,
+            });
+            emittedBoundaryExports.add(exportName);
+            return;
+          }
           const wrapperExportName = allocateBoundaryWrapperExportName({
             ctx: exportCtx,
             exportName,

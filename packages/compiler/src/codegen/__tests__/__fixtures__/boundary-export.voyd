@@ -11,6 +11,18 @@ enum LookupResult
   Found { value: String }
   Missing
 
+pub fn primitive() -> i32
+  42
+
+pub fn echo_bool(value: bool) -> bool
+  value
+
+pub fn echo_i64(value: i64) -> i64
+  value
+
+pub fn echo_f32(value: f32) -> f32
+  value
+
 pub fn translate(point: Point, dx: i32, dy: i32) -> Point
   Point {
     x: point.x + dx,

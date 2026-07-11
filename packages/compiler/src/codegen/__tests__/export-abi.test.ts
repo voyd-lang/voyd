@@ -254,10 +254,32 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
 
     expect(exports).toContain("translate");
     expect(exports).toContain("__voyd_serialized_export_translate");
+    expect(exports).not.toContain("__voyd_serialized_export_primitive");
+    expect(exports).not.toContain("__voyd_serialized_export_echo_bool");
+    expect(exports).not.toContain("__voyd_serialized_export_echo_i64");
+    expect(exports).not.toContain("__voyd_serialized_export_echo_f32");
     expect(abi.exports).not.toContainEqual(
       expect.objectContaining({ name: "call_callback", abi: "serialized" }),
     );
     expect(abi.exports).toEqual([
+      {
+        name: "echo_bool",
+        abi: "direct",
+        params: [expect.objectContaining({ kind: "bool" })],
+        result: expect.objectContaining({ kind: "bool" }),
+      },
+      {
+        name: "echo_f32",
+        abi: "direct",
+        params: [expect.objectContaining({ kind: "f32" })],
+        result: expect.objectContaining({ kind: "f32" }),
+      },
+      {
+        name: "echo_i64",
+        abi: "direct",
+        params: [expect.objectContaining({ kind: "i64" })],
+        result: expect.objectContaining({ kind: "i64" }),
+      },
       expect.objectContaining({
         name: "get_point",
         abi: "serialized",
@@ -272,6 +294,12 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
         params: [expect.objectContaining({ kind: "string" })],
         result: expect.objectContaining({ kind: "union" }),
       }),
+      {
+        name: "primitive",
+        abi: "direct",
+        params: [],
+        result: expect.objectContaining({ kind: "i32" }),
+      },
       expect.objectContaining({
         name: "sum_values",
         abi: "serialized",
