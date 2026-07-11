@@ -1,0 +1,7 @@
+#!no_prelude
+
+fn zero() -> i32
+  0
+
+pub fn deliberate_trap() -> i32
+  10 / zero()

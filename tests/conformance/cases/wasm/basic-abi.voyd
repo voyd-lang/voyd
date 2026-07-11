@@ -1,0 +1,4 @@
+#!no_prelude
+
+pub fn main() -> i32
+  42

@@ -1,0 +1,59 @@
+@effect(id: "voyd.conformance.loop-probe")
+eff LoopProbe
+  await(resume, value: i32) -> i32
+
+pub fn continuation_while(): LoopProbe -> i32
+  var i = 0
+  var sum = 0
+  while i < 5:
+    i = i + 1
+    sum = sum + LoopProbe::await(i)
+  sum
+
+eff InternalAsync
+  await(tail) -> i32
+  log(resume, msg: i32) -> i32
+
+pub fn perform_in_try() -> i32
+  try
+    let value = InternalAsync::await()
+    InternalAsync::log(value)
+    value + 10
+  InternalAsync::await(tail):
+    tail(5)
+  InternalAsync::log(resume, msg):
+    resume(msg)
+
+pub fn lambda_perform() -> i32
+  try
+    let f = () -> i32 =>
+      let value = InternalAsync::await()
+      value + 4
+    f() + 1
+  InternalAsync::await(tail):
+    tail(20)
+  InternalAsync::log(resume, msg):
+    resume(msg)
+
+type Count = i32
+
+obj Sum {
+  value: i32
+}
+
+eff Logger
+  info(tail, value: i32) -> void
+  info(tail, value: f64) -> void
+
+pub fn overloaded_handler_alias() -> i32
+  let ~sum = Sum { value: 0 }
+  try
+    Logger::info(10)
+    Logger::info(2.2)
+  Logger::info(tail, value: Count):
+    sum.value = sum.value + value
+    tail()
+  Logger::info(tail, value: f64):
+    sum.value = sum.value + 2
+    tail()
+  sum.value

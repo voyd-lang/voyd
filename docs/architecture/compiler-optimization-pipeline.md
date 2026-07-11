@@ -726,7 +726,7 @@ Use the narrowest layer that owns the behavior:
 - `packages/compiler/src/codegen/__tests__`
   - local lowering behavior such as out-result storage and addressable scratch
     paths
-- `apps/smoke`
+- `tests/conformance` and `tests/integration`
   - end-to-end public behavior and realistic integration checks
 - benchmark scripts
   - performance/code-size decisions for optimizations whose value is uncertain
@@ -739,7 +739,7 @@ cases. Ticket-specific benchmark scripts are historical reproduction tools, not
 the ongoing regression gate.
 
 Selected public smoke behavior is compiled and executed at `none`, `balanced`,
-and `release` by `apps/smoke/src/optimization-differential.test.ts`. Keep that
+and `release` by `tests/integration/src/optimization-differential.test.ts`. Keep that
 fixture batched so end-to-end protection does not multiply the std/compiler
 setup cost.
 

@@ -32,7 +32,7 @@
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config ../../vitest.config.ts --maxWorkers=50% --minWorkers=1 src",
+    "test": "vitest run --config ../../vitest.config.ts src",
     "test:w": "vitest --config ../../vitest.config.ts src",
     "lint": "echo 'no lint configured'",
     "prepack": "npm run clean && npm run build",

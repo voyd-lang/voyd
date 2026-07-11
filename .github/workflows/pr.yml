@@ -2,6 +2,10 @@ name: Node.js CI
 
 on: [pull_request]
 
+concurrency:
+  group: pr-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
 jobs:
   typecheck:
     runs-on: ubuntu-latest
@@ -69,14 +73,27 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
-      # Main PR tests run in source mode for speed and broad coverage.
-      # CI caps package-level Turbo concurrency to avoid oversubscribing hosted runners.
-      - run: VOYD_USE_SRC=1 npm run test:affected:ci
+      - run: npm run test:audit
+      - run: mkdir -p test-timings
+      # Package-local units run separately from portable conformance and integration.
+      - name: Run affected package units
+        env:
+          VOYD_USE_SRC: "1"
+          VITEST_MAX_WORKERS: "1"
+          VOYD_TEST_TIMINGS_DIR: ${{ github.workspace }}/test-timings
+        run: node scripts/testing/run-timed-command.mjs --lane unit --output test-timings/unit-wall.json -- npm run test:unit:affected:ci
+      - name: Enforce unit timing budget
+        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane unit --output test-timings/unit-summary.json
+      - name: Upload unit timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-timings
+          path: test-timings
+          retention-days: 30
       # Build-only checks for non-CLI artifacts that are not exercised by package tests.
       - name: Build non-CLI artifacts
         if: steps.changes.outputs.non_cli_build == 'true'
-        # Turbo (2.6.x) rejects combining --affected with --filter, so scope by this step guard
-        # and keep affected package selection inside turbo.
         run: npx turbo run build --affected --output-logs=errors-only
       - name: Run typing benchmark regression gate
         if: steps.changes.outputs.compiler_semantics == 'true'
@@ -85,6 +102,121 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TYPING_BENCH_MAX_REGRESSION_PCT: "15"
         run: node scripts/ci/check-typing-bench-regression.mjs
+
+  conformance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect conformance-sensitive changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            conformance:
+              - "tests/conformance/**"
+              - "packages/compiler/**"
+              - "packages/sdk/**"
+              - "packages/js-host/**"
+              - "packages/lib/**"
+              - "packages/std/**"
+              - "scripts/testing/**"
+              - "package.json"
+              - "package-lock.json"
+              - "vite.config.ts"
+              - "vitest.config.ts"
+              - "tsconfig*.json"
+      - name: Use Node.js
+        if: steps.changes.outputs.conformance == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        if: steps.changes.outputs.conformance == 'true'
+        run: npm ci --include=optional
+      - name: Prepare timing output
+        if: steps.changes.outputs.conformance == 'true'
+        run: mkdir -p test-timings
+      - name: Run language conformance
+        if: steps.changes.outputs.conformance == 'true'
+        env:
+          VOYD_USE_SRC: "1"
+          VITEST_MAX_WORKERS: "2"
+          VOYD_TEST_TIMINGS_DIR: ${{ github.workspace }}/test-timings
+        run: node scripts/testing/run-timed-command.mjs --lane conformance --output test-timings/conformance-wall.json -- npm run --workspace @voyd-lang/conformance-tests test
+      - name: Enforce conformance timing budget
+        if: steps.changes.outputs.conformance == 'true'
+        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane conformance --output test-timings/conformance-summary.json
+      - name: Upload conformance timings
+        if: always() && steps.changes.outputs.conformance == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: conformance-test-timings
+          path: test-timings
+          retention-days: 30
+
+  integration:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect integration-sensitive changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            integration:
+              - "tests/integration/**"
+              - "packages/compiler/**"
+              - "packages/sdk/**"
+              - "packages/js-host/**"
+              - "packages/lib/**"
+              - "packages/std/**"
+              - "packages/vx-dom/**"
+              - "packages/web/**"
+              - "packages/voyd_semver/**"
+              - "scripts/testing/**"
+              - "package.json"
+              - "package-lock.json"
+              - "vite.config.ts"
+              - "vitest.config.ts"
+              - "tsconfig*.json"
+      - name: Use Node.js
+        if: steps.changes.outputs.integration == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        if: steps.changes.outputs.integration == 'true'
+        run: npm ci --include=optional
+      - name: Prepare timing output
+        if: steps.changes.outputs.integration == 'true'
+        run: mkdir -p test-timings
+      - name: Run cross-package integration
+        if: steps.changes.outputs.integration == 'true'
+        env:
+          VOYD_USE_SRC: "1"
+          VITEST_MAX_WORKERS: "2"
+          VOYD_TEST_TIMINGS_DIR: ${{ github.workspace }}/test-timings
+        run: node scripts/testing/run-timed-command.mjs --lane integration --output test-timings/integration-wall.json -- npm run --workspace @voyd-lang/integration-tests test
+      - name: Enforce integration timing budget
+        if: steps.changes.outputs.integration == 'true'
+        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane integration --output test-timings/integration-summary.json
+      - name: Upload integration timings
+        if: always() && steps.changes.outputs.integration == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-test-timings
+          path: test-timings
+          retention-days: 30
 
   compiler-codegen:
     runs-on: ubuntu-latest
@@ -100,15 +232,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Restore Turbo cache
-        uses: actions/cache@v4
-        with:
-          path: .turbo
-          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ matrix.shard }}-of-4-${{ github.event.pull_request.head.sha }}
-          restore-keys: |
-            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ matrix.shard }}-of-4-
-            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-
-            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
       - name: Detect changed areas
         id: changes
         uses: dorny/paths-filter@v3
@@ -161,7 +284,10 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
-            cli:
+            cli_direct:
+              - "apps/cli/**"
+              - "scripts/voyd"
+            cli_runtime:
               - "apps/cli/**"
               - "packages/sdk/**"
               - "packages/lib/**"
@@ -175,22 +301,25 @@ jobs:
               - "vitest.config.ts"
               - "tsconfig*.json"
       - name: Use Node.js
-        if: steps.changes.outputs.cli == 'true'
+        if: steps.changes.outputs.cli_runtime == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        if: steps.changes.outputs.cli == 'true'
+        if: steps.changes.outputs.cli_runtime == 'true'
         run: npm ci --include=optional
       # Dist mode is validated separately via targeted CLI e2e when CLI/runtime areas change.
       - name: Build CLI dist for dist e2e
-        if: steps.changes.outputs.cli == 'true'
+        if: steps.changes.outputs.cli_runtime == 'true'
         run: npx turbo run build --filter=@voyd-lang/cli... --output-logs=errors-only
-      - name: Run CLI dist e2e
-        if: steps.changes.outputs.cli == 'true'
+      - name: Run full CLI dist e2e
+        if: steps.changes.outputs.cli_direct == 'true'
         run: VOYD_USE_DIST=1 VOYD_CLI_E2E_RUNTIME=dist npm run --workspace @voyd-lang/cli test:e2e
+      - name: Run CLI dist smoke
+        if: steps.changes.outputs.cli_runtime == 'true' && steps.changes.outputs.cli_direct != 'true'
+        run: VOYD_USE_DIST=1 npm run --workspace @voyd-lang/cli test:dist-smoke
 
   optimizer-scorecard:
     runs-on: ubuntu-latest
@@ -216,6 +345,7 @@ jobs:
               - "scripts/bench-optimizer.ts"
               - "scripts/ci/check-optimizer-bench-regression.mjs"
               - "scripts/ci/check-optimizer-bench-regression.test.mjs"
+              - "tests/performance/fixtures/vtrace-compute-benchmark.voyd"
               - "package.json"
               - "package-lock.json"
       - name: Use Node.js

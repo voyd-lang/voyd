@@ -870,16 +870,16 @@ MessagePack to return HTML.
 
 ## Testing Direction
 
-Follow `docs/testing/test-layer-ownership.md`.
+Follow `docs/testing/ownership.md`.
 
 - `packages/std`: pure HTTP values, builders, header behavior, codecs
 - `packages/std`: HTTP client request builders and body behavior
 - `packages/js-host`: adapter registration, Node server lifecycle, unsupported
   runtime behavior
 - `packages/sdk` or helper package: server wiring
-- `apps/smoke`: public end-to-end server request/response behavior
+- `tests/integration`: public end-to-end server request/response behavior
 
-Canonical end-to-end serving behavior should live in `apps/smoke`.
+Canonical end-to-end serving behavior should live in `tests/integration`.
 
 ## Recommendation
 

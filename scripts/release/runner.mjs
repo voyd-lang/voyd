@@ -82,7 +82,9 @@ const bumpSemver = ({ currentVersion, bump }) => {
     return `${parsed.major + 1}.0.0`;
   }
 
-  throw new Error(`Unsupported bump "${bump}". Use patch, minor, major, or --version.`);
+  throw new Error(
+    `Unsupported bump "${bump}". Use patch, minor, major, or --version.`,
+  );
 };
 
 const internalDependencyFields = [
@@ -97,8 +99,13 @@ const validateExactVersion = (version) => {
   return version;
 };
 
-const stdVersionSourcePath = path.join(repoRoot, "packages/std/src/version.voyd");
-const releaseNpmCache = process.env.NPM_CONFIG_CACHE ?? path.join(os.tmpdir(), "voyd-release-npm-cache");
+const stdVersionSourcePath = path.join(
+  repoRoot,
+  "packages/std/src/version.voyd",
+);
+const releaseNpmCache =
+  process.env.NPM_CONFIG_CACHE ??
+  path.join(os.tmpdir(), "voyd-release-npm-cache");
 const provenanceRepositoryUrl = "https://github.com/voyd-lang/voyd";
 
 const resolveVersionPlan = ({ targetNames, bump, version }) => {
@@ -225,7 +232,9 @@ export const versionSelectedTargets = ({ targetNames, bump, version }) => {
 };
 
 const needsRelatedTest = (targetNames, relatedTest) =>
-  targetNames.some((targetName) => getTarget(targetName).relatedTests.includes(relatedTest));
+  targetNames.some((targetName) =>
+    getTarget(targetName).relatedTests.includes(relatedTest),
+  );
 
 const runTurboBuild = (targetNames) => {
   const filters = targetNames
@@ -298,7 +307,9 @@ const validatePackContents = (targetName) => {
   const [packResult] = JSON.parse(raw);
   const filePaths = new Set(packResult.files.map((file) => file.path));
 
-  const missingFiles = target.packRequiredFiles.filter((requiredPath) => !filePaths.has(requiredPath));
+  const missingFiles = target.packRequiredFiles.filter(
+    (requiredPath) => !filePaths.has(requiredPath),
+  );
   if (missingFiles.length > 0) {
     throw new Error(
       `${targetName} is missing expected pack files: ${missingFiles.join(", ")}`,
@@ -307,7 +318,9 @@ const validatePackContents = (targetName) => {
 
   const forbiddenFiles = packResult.files
     .map((file) => file.path)
-    .filter((filePath) => target.packForbiddenPatterns.some((pattern) => pattern.test(filePath)));
+    .filter((filePath) =>
+      target.packForbiddenPatterns.some((pattern) => pattern.test(filePath)),
+    );
   if (forbiddenFiles.length > 0) {
     throw new Error(
       `${targetName} pack output still includes repo-only files: ${forbiddenFiles.join(", ")}`,
@@ -351,12 +364,26 @@ const runOwnChecks = (targetNames) => {
   });
 };
 
-const runSmokeChecks = (targetNames) => {
-  if (!needsRelatedTest(targetNames, "smoke")) {
+const runConformanceChecks = (targetNames) => {
+  if (!needsRelatedTest(targetNames, "conformance")) {
     return;
   }
 
-  npmRunWorkspaceScript({ workspace: "@voyd-lang/smoke", script: "test" });
+  npmRunWorkspaceScript({
+    workspace: "@voyd-lang/conformance-tests",
+    script: "test",
+  });
+};
+
+const runIntegrationChecks = (targetNames) => {
+  if (!needsRelatedTest(targetNames, "integration")) {
+    return;
+  }
+
+  npmRunWorkspaceScript({
+    workspace: "@voyd-lang/integration-tests",
+    script: "test",
+  });
 };
 
 const runCompilerCodegenChecks = (targetNames) => {
@@ -364,7 +391,10 @@ const runCompilerCodegenChecks = (targetNames) => {
     return;
   }
 
-  npmRunWorkspaceScript({ workspace: "@voyd-lang/compiler", script: "test:codegen" });
+  npmRunWorkspaceScript({
+    workspace: "@voyd-lang/compiler",
+    script: "test:codegen",
+  });
 };
 
 const runCliDistChecks = (targetNames) => {
@@ -389,8 +419,7 @@ const runCliDistChecks = (targetNames) => {
 
   npmRunWorkspaceScript({
     workspace: "@voyd-lang/cli",
-    script: "test",
-    args: ["--", "src/__tests__/cli-e2e.test.ts"],
+    script: "test:e2e",
     env: {
       VOYD_USE_DIST: "1",
       VOYD_CLI_E2E_RUNTIME: "dist",
@@ -412,7 +441,8 @@ export const runReleaseCheck = ({ targetNames }) => {
   runTurboBuild(targetNames);
   runOwnChecks(targetNames);
   runCompilerCodegenChecks(targetNames);
-  runSmokeChecks(targetNames);
+  runConformanceChecks(targetNames);
+  runIntegrationChecks(targetNames);
   runCliDistChecks(targetNames);
   runVscodePackageCheck(targetNames);
   targetNames.forEach(validatePackContents);
@@ -513,12 +543,16 @@ export const assertCleanWorktree = ({ purpose = "release publish" } = {}) => {
   }).trim();
 
   if (status.length > 0) {
-    throw new Error(`${purpose} requires a clean git worktree. Commit or stash changes first.`);
+    throw new Error(
+      `${purpose} requires a clean git worktree. Commit or stash changes first.`,
+    );
   }
 };
 
 export const sortNpmTargetsForPublish = (targetNames) => {
-  const npmTargetNames = targetNames.filter((targetName) => getTarget(targetName).kind === "npm");
+  const npmTargetNames = targetNames.filter(
+    (targetName) => getTarget(targetName).kind === "npm",
+  );
   const selected = new Set(npmTargetNames);
   const visited = new Set();
   const visiting = new Set();
@@ -573,7 +607,8 @@ export const assertNpmTargetsAlreadyPublished = ({
   });
 
   const hasTokenBootstrap =
-    allowTokenBootstrap && Boolean(process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN);
+    allowTokenBootstrap &&
+    Boolean(process.env.NPM_TOKEN || process.env.NODE_AUTH_TOKEN);
   if (missingTargets.length === 0 || hasTokenBootstrap) {
     return;
   }
@@ -614,19 +649,30 @@ export const publishNpmTargets = ({ targetNames, dryRun, tag, otp }) => {
   });
 };
 
-export const runVscodePublish = ({ dryRun, release, useExistingVersion = false }) => {
+export const runVscodePublish = ({
+  dryRun,
+  release,
+  useExistingVersion = false,
+}) => {
   if (dryRun) {
     npmRunWorkspaceScript({ workspace: "voyd-vscode", script: "package" });
     return;
   }
 
   if (!release && !useExistingVersion) {
-    throw new Error("Publishing voyd-vscode requires --release patch|minor|major|<version>.");
+    throw new Error(
+      "Publishing voyd-vscode requires --release patch|minor|major|<version>.",
+    );
   }
 
   runCommand({
     command: "npx",
-    args: ["vsce", "publish", ...(release ? [release] : []), "--no-dependencies"],
+    args: [
+      "vsce",
+      "publish",
+      ...(release ? [release] : []),
+      "--no-dependencies",
+    ],
     cwd: resolveTargetCwd("voyd-vscode"),
     env: {
       VOYD_RELEASE_SKIP_PUBLISH_CHECK: "1",
@@ -637,7 +683,9 @@ export const runVscodePublish = ({ dryRun, release, useExistingVersion = false }
 export const resolveWorkspaceNameFromEnv = () => {
   const workspace = process.env.npm_package_name;
   if (!workspace) {
-    throw new Error("npm_package_name is not set for this workspace publish hook.");
+    throw new Error(
+      "npm_package_name is not set for this workspace publish hook.",
+    );
   }
 
   getTarget(workspace);

@@ -129,8 +129,14 @@ pub fn std_array_value_for_len_at_loop() -> i32
   total
 `;
 
-const defaultIterations = Number.parseInt(process.env.VOYD_BENCH_ITERATIONS ?? "9", 10);
-const vtraceIterations = Number.parseInt(process.env.VOYD_BENCH_VTRACE_ITERATIONS ?? "3", 10);
+const defaultIterations = Number.parseInt(
+  process.env.VOYD_BENCH_ITERATIONS ?? "9",
+  10,
+);
+const vtraceIterations = Number.parseInt(
+  process.env.VOYD_BENCH_VTRACE_ITERATIONS ?? "3",
+  10,
+);
 
 const scenarios: Scenario[] = [
   {
@@ -186,10 +192,10 @@ const scenarios: Scenario[] = [
     entryPath: path.join(
       import.meta.dirname,
       "..",
-      "apps",
-      "smoke",
+      "tests",
+      "performance",
       "fixtures",
-      "vtrace-compute-benchmark.voyd"
+      "vtrace-compute-benchmark.voyd",
     ),
     entryName: "main",
     iterations: vtraceIterations,
@@ -200,7 +206,7 @@ const scenarios: Scenario[] = [
 
 const expectCompileSuccess = (
   result: CompileResult,
-  name: string
+  name: string,
 ): Extract<CompileResult, { success: true }> => {
   if (result.success) {
     return result;
@@ -209,7 +215,7 @@ const expectCompileSuccess = (
   throw new Error(
     `${name} failed to compile:\n${result.diagnostics
       .map((diagnostic) => diagnostic.message)
-      .join("\n")}`
+      .join("\n")}`,
   );
 };
 
@@ -230,7 +236,7 @@ const runScenario = async (scenario: Scenario): Promise<ScenarioResult> => {
       source: scenario.source,
       optimize: true,
     }),
-    scenario.name
+    scenario.name,
   );
   const compileMs = performance.now() - compileStartedAt;
   const host = await createVoydHost({ wasm: compiled.wasm });
@@ -239,7 +245,7 @@ const runScenario = async (scenario: Scenario): Promise<ScenarioResult> => {
     const result = await host.run<number>(scenario.entryName);
     if (result !== scenario.expected) {
       throw new Error(
-        `${scenario.name} returned ${result} during warmup, expected ${scenario.expected}`
+        `${scenario.name} returned ${result} during warmup, expected ${scenario.expected}`,
       );
     }
   }
@@ -251,7 +257,7 @@ const runScenario = async (scenario: Scenario): Promise<ScenarioResult> => {
     const durationMs = performance.now() - startedAt;
     if (result !== scenario.expected) {
       throw new Error(
-        `${scenario.name} returned ${result}, expected ${scenario.expected}`
+        `${scenario.name} returned ${result}, expected ${scenario.expected}`,
       );
     }
     samplesMs.push(durationMs);
@@ -278,7 +284,7 @@ const printResults = (results: readonly ScenarioResult[]): void => {
         result.gzipBytes.toString(),
         result.medianMs.toFixed(3),
         result.samplesMs.map((sample) => sample.toFixed(3)).join("|"),
-      ].join(",")
+      ].join(","),
     );
   }
 };

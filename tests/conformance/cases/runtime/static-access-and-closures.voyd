@@ -1,0 +1,81 @@
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+pub obj GenericContainer<T> {}
+
+impl<T> GenericContainer<T>
+  pub fn new() -> i32
+    11
+
+pub fn static_generic_target() -> i32
+  GenericContainer<i32>::new()
+
+pub obj InferenceBox<Owner> {}
+
+impl<Owner> InferenceBox<Owner>
+  pub fn map<T>({ value: T, mapper: fn(T) -> Owner }) -> Owner
+    mapper(value)
+
+pub fn static_generic_method_inference() -> i32
+  InferenceBox<i32>::map(
+    value: true,
+    mapper: (flag: bool) -> i32 => if flag then: 17 else: 0
+  )
+
+pub obj OverloadBox<Owner> {}
+
+impl<Owner> OverloadBox<Owner>
+  fn pick(value: Owner) -> i32
+    11
+
+  fn pick<T>(value: T) -> i32
+    3
+
+pub fn static_target_overload_ranking() -> i32
+  OverloadBox<i32>::pick(1) + OverloadBox<i32>::pick(true)
+
+pub fn curried_optional_call() -> i32
+  let lift = (base: i32) => (delta?: i32) =>
+    match(delta)
+      Some<i32>:
+        base + delta.value
+      None:
+        base
+  lift(10, 5)
+
+obj CaptureBox {
+  value: i32
+}
+
+impl CaptureBox
+  api fn set(~self, { value: i32 }) -> void
+    self.value = value
+
+fn sum_pair({ left: i32, right: i32 }) -> i32
+  left + right
+
+fn each({ visit f: (value: i32) -> void }) -> void
+  f(1)
+  f(2)
+  f(3)
+
+pub fn closure_capture_labeled_calls() -> i32
+  let ~out = CaptureBox { value: 0 }
+  each visit(value):
+    out.set(value: sum_pair(left: out.value, right: value))
+  out.value
+
+eff One
+  next(tail) -> i32
+
+pub fn curried_effect_resume() -> i32
+  try
+    let f = (a: i32) => (b: i32) => a + b
+    f(One::next(), One::next())
+  One::next(tail):
+    tail(10)

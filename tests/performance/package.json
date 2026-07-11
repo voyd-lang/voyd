@@ -1,0 +1,17 @@
+{
+  "name": "@voyd-lang/performance-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Opt-in performance and large external regression tests for Voyd",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'no build for performance tests'",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "echo 'performance tests are opt-in'",
+    "test:perf": "VOYD_RUN_PERF_SMOKE=1 vitest run --config ../../vitest.config.ts --testTimeout 300000 --hookTimeout 120000 src",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@voyd-lang/sdk": "^0.2.0"
+  }
+}

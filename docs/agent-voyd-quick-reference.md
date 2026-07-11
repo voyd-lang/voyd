@@ -223,15 +223,16 @@ pub std::result::types::{ Result, Ok, Err }
 ## Std And Compiler Contributor Habits
 
 - Before inventing syntax, find a nearby example in `packages/std/src`,
-  `apps/smoke/fixtures`, or
+  `tests/conformance/cases`, `tests/integration/fixtures`, or
   `packages/compiler/src/semantics/__tests__/__fixtures__`.
 - Prefer std wrappers over raw `__*` intrinsics. Raw intrinsic declarations are
   std/compiler surface only.
 - Keep low-level intrinsic wrappers small and typed, with the `@intrinsic`
   declaration next to the wrapper.
 - Keep public std APIs documented with `///`; use `//!` for module docs.
-- Put behavior tests near the owning layer. For end-to-end public behavior,
-  prefer `apps/smoke`; for std module behavior, prefer existing
+- Put behavior tests near the owning layer. For portable language behavior,
+  prefer `tests/conformance`; for cross-package behavior, prefer
+  `tests/integration`; for std module behavior, prefer existing
   `packages/std/src/*.test.voyd` files when ownership is local.
 - Do not paper over compiler bugs by adding odd annotations to fixtures unless
   the test is specifically about such an annotation. Fix the root compiler path

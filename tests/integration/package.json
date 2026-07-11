@@ -1,0 +1,18 @@
+{
+  "name": "@voyd-lang/integration-tests",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Cross-package integration tests for Voyd",
+  "type": "module",
+  "scripts": {
+    "build": "echo 'no build for integration tests'",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run --config ../../vitest.config.ts --testTimeout 60000 --hookTimeout 60000 src",
+    "lint": "echo 'no lint configured'"
+  },
+  "dependencies": {
+    "@voyd-lang/sdk": "^0.2.0",
+    "@voyd-lang/vx-dom": "^0.2.0",
+    "voyd_semver": "0.1.0"
+  }
+}

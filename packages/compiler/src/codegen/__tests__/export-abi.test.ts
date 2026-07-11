@@ -7,10 +7,6 @@ import { wasmBufferSource } from "./support/wasm-utils.js";
 import type { CodegenOptions } from "../context.js";
 
 const fixtureRoot = resolve(import.meta.dirname, "__fixtures__");
-const smokeFixtureRoot = resolve(
-  import.meta.dirname,
-  "../../../../../apps/smoke/fixtures",
-);
 const stdRoot = resolve(import.meta.dirname, "../../../../std/src");
 const buildModuleCache = new Map<string, Promise<Uint8Array>>();
 
@@ -31,7 +27,10 @@ const buildModule = async ({
   entryFile?: string;
   codegenOptions?: CodegenOptions;
 } = {}): Promise<Uint8Array> => {
-  const cacheKey = JSON.stringify({ entryFile, codegenOptions: codegenOptions ?? {} });
+  const cacheKey = JSON.stringify({
+    entryFile,
+    codegenOptions: codegenOptions ?? {},
+  });
   const cached = buildModuleCache.get(cacheKey);
   if (cached) return cached;
 
@@ -62,12 +61,19 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     expect(abi.exports).toEqual([
       { name: "add", abi: "direct" },
       { name: "echo", abi: "serialized", formatId: "msgpack" },
-      { name: "fetch_items", abi: "serialized", formatId: "msgpack", params: [] },
+      {
+        name: "fetch_items",
+        abi: "serialized",
+        formatId: "msgpack",
+        params: [],
+      },
     ]);
   });
 
   it("does not serialize unrelated DTO-compatible exports in boundary modules", async () => {
-    const wasm = await buildModule({ entryFile: "boundary-export-contract.voyd" });
+    const wasm = await buildModule({
+      entryFile: "boundary-export-contract.voyd",
+    });
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
     const abi = parseExportAbi(module);
 
@@ -89,7 +95,9 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
   });
 
   it("decodes boundary payload envelopes in serialized params", async () => {
-    const wasm = await buildModule({ entryFile: "boundary-export-contract.voyd" });
+    const wasm = await buildModule({
+      entryFile: "boundary-export-contract.voyd",
+    });
     const host = await createVoydHost({ wasm });
     const payload = {
       type: "cmd",
@@ -136,9 +144,9 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
 
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n")).toContain(
-      "boundary DTO incompatibility",
-    );
+    expect(
+      result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    ).toContain("boundary DTO incompatibility");
   });
 
   it("round-trips msgpack values for serialized exports", async () => {
@@ -183,7 +191,9 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
       codegenOptions: { linearMemoryExport: "auto" },
     });
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
-    const exports = WebAssembly.Module.exports(module).map((entry) => entry.name);
+    const exports = WebAssembly.Module.exports(module).map(
+      (entry) => entry.name,
+    );
     expect(exports).toContain("memory");
   });
 
@@ -238,7 +248,9 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     });
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
     const abi = parseExportAbi(module);
-    const exports = WebAssembly.Module.exports(module).map((entry) => entry.name);
+    const exports = WebAssembly.Module.exports(module).map(
+      (entry) => entry.name,
+    );
 
     expect(exports).toContain("translate");
     expect(exports).toContain("__voyd_serialized_export_translate");
@@ -288,7 +300,9 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     });
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
     const abi = parseExportAbi(module);
-    const exports = WebAssembly.Module.exports(module).map((entry) => entry.name);
+    const exports = WebAssembly.Module.exports(module).map(
+      (entry) => entry.name,
+    );
 
     expect(exports).toContain("__voyd_serialized_export_translate");
     expect(abi.exports).toEqual(
@@ -311,7 +325,9 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
       });
       const module = new WebAssembly.Module(wasmBufferSource(wasm));
       const abi = parseExportAbi(module);
-      const exports = WebAssembly.Module.exports(module).map((entry) => entry.name);
+      const exports = WebAssembly.Module.exports(module).map(
+        (entry) => entry.name,
+      );
 
       expect(exports).toContain("translate");
       expect(exports).not.toContain("__voyd_serialized_export_translate");
@@ -391,8 +407,8 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
 
   it("does not count private VX lifecycle callbacks as explicit boundary includes", async () => {
     const result = await compileProgram({
-      entryPath: resolve(smokeFixtureRoot, "vx-typed-counter.voyd"),
-      roots: { src: smokeFixtureRoot, std: stdRoot },
+      entryPath: resolve(fixtureRoot, "boundary-export-contract.voyd"),
+      roots: { src: fixtureRoot, std: stdRoot },
       host: createFsModuleHost(),
       codegenOptions: {
         boundaryExports: { include: ["view"] },
@@ -417,7 +433,9 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     });
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
     const abi = parseExportAbi(module);
-    const exports = WebAssembly.Module.exports(module).map((entry) => entry.name);
+    const exports = WebAssembly.Module.exports(module).map(
+      (entry) => entry.name,
+    );
     const translate = abi.exports.find((entry) => entry.name === "translate");
 
     expect(exports).toContain("translate");

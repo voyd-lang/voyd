@@ -85,7 +85,10 @@ pub fn call_boundary_escape() -> i32
   total
 `;
 
-const defaultIterations = Number.parseInt(process.env.VOYD_BENCH_ITERATIONS ?? "5", 10);
+const defaultIterations = Number.parseInt(
+  process.env.VOYD_BENCH_ITERATIONS ?? "5",
+  10,
+);
 const representativeIterations = Number.parseInt(
   process.env.VOYD_BENCH_REPRESENTATIVE_ITERATIONS ?? "1",
   10,
@@ -145,8 +148,8 @@ const scenarios: Scenario[] = [
     entryPath: path.join(
       import.meta.dirname,
       "..",
-      "apps",
-      "smoke",
+      "tests",
+      "performance",
       "fixtures",
       "vtrace-compute-benchmark.voyd",
     ),
@@ -244,7 +247,9 @@ const runScenario = async ({
 };
 
 const printResults = (results: readonly ScenarioResult[]): void => {
-  console.log("name,optimize,compileMs,wasmBytes,gzipBytes,wasmSha256,medianMs,samplesMs");
+  console.log(
+    "name,optimize,compileMs,wasmBytes,gzipBytes,wasmSha256,medianMs,samplesMs",
+  );
   results.forEach((result) => {
     console.log(
       [

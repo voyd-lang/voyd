@@ -1,0 +1,23 @@
+@effect(id: "com.example.async")
+eff Async
+  fn await(tail, value: i32) -> i32
+
+@effect(id: "com.example.log")
+eff Log
+  fn write(tail, value: i32) -> void
+
+fn call<T>(cb: fn() : (Async, open) -> T) : (open) -> T
+  try open
+    cb()
+  Async::await(tail, value):
+    tail(value + 1)
+
+pub fn main() -> i32
+  try
+    call(() =>
+      let value = Async::await(10)
+      Log::write(value)
+      value
+    )
+  Log::write(tail, value):
+    tail()

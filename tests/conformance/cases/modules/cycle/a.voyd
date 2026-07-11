@@ -1,0 +1,6 @@
+use src::b::B
+
+pub obj A {}
+
+pub fn takes_b(_value: B) -> i32
+  1

@@ -1,0 +1,4 @@
+use src::dep::init
+
+pub fn main() -> i32
+  init() + init(2)

@@ -1,0 +1,4 @@
+use src::macros::all
+
+pub fn main() -> f64
+  inc(2.0)

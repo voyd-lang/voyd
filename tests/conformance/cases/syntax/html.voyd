@@ -1,0 +1,5 @@
+use std::string::type::new_string
+use std::vx::all
+
+pub fn main()
+  <button class="primary" disabled on_click={7}>Save</button>

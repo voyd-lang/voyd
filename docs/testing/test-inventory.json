@@ -1,0 +1,2456 @@
+[
+  {
+    "file": "apps/cli/src/__tests__/arg-parser.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
+  },
+  {
+    "file": "apps/cli/src/__tests__/bin-wrapper.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
+  },
+  {
+    "file": "apps/cli/src/__tests__/bootstrap.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
+  },
+  {
+    "file": "apps/cli/src/__tests__/cli-dist-smoke.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
+  },
+  {
+    "file": "apps/cli/src/__tests__/cli-e2e.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
+  },
+  {
+    "file": "apps/cli/src/__tests__/diagnostic-compaction.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
+  },
+  {
+    "file": "apps/cli/src/__tests__/diagnostics.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
+  },
+  {
+    "file": "apps/cli/src/__tests__/exec.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
+  },
+  {
+    "file": "apps/cli/src/__tests__/output.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
+  },
+  {
+    "file": "apps/cli/src/__tests__/voyd-tests.test.ts",
+    "owner": "cli-contract",
+    "disposition": "cli-local",
+    "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/call-shape-diagnostics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "typing.diagnostics.label-mismatch"
+    ],
+    "portableGap": "TY0021 label-order/mismatch behavior is user-visible; add one positive reordered-label case and one stable diagnostic case."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/dependency-snapshot-cache.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts semantic snapshot capture, reuse, identity, and invalidation internals; another compiler may cache differently."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/diagnostic-spans.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: TY0027 source-span precision is observable and absent from the portable adapter/cases; retain local phase assertions and extract a literal/initializer span case.",
+    "portableCaseIds": [
+      "typing.diagnostics.initializer-span"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/__tests__/effects-pkg-root.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "effects.exports.pure.omitted-row, effects.exports.annotated.accepted, effects.exports.missing-annotation.diagnostic; local export metadata/collision and host harness checks remain implementation-specific.",
+    "portableCaseIds": [
+      "effects.exports.pure.omitted-row",
+      "effects.exports.annotated.accepted",
+      "effects.exports.missing-annotation.diagnostic"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/__tests__/intersections.e2e.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.intersections.nominal, runtime.intersections.structural, runtime.intersections.traits, runtime.intersections.structural-trait, runtime.intersections.nominal-structural-trait.",
+    "portableCaseIds": [
+      "runtime.intersections.nominal",
+      "runtime.intersections.structural",
+      "runtime.intersections.traits",
+      "runtime.intersections.structural-trait",
+      "runtime.intersections.nominal-structural-trait"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/__tests__/macro-expansion.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "modules.macros.sibling-expansion"
+    ],
+    "portableGap": "Cross-module public macro import/re-export executes observable code, but no portable macro suite exists; extract sibling-import expansion returning 3."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/memory-exports.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "wasm.basic-abi.exports covers default exported memory; keep explicit std/effects-memory dependency-shape checks local.",
+    "portableCaseIds": [
+      "wasm.basic-abi.exports"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/__tests__/module-codegen.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Observable cross-module linking, generic instantiation, re-exports, and module-let initialization are not represented by the source-pkg visibility cases."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/module-imports.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "modules.cycles.declaration-surfaces"
+    ],
+    "portableGap": "Cyclic declaration surfaces, relative imports, and enum namespace imports compile observably; portable coverage currently has only source-pkg visibility."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/module-typing.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Imported generic/trait/enum typing and prelude/no-prelude behavior are observable and largely absent from conformance; retain interner identity checks locally."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/optimization-policy.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.optimized-wide-values.direct, runtime.optimized-wide-values.trait, runtime.optimized-wide-values.effectful-trait; Binaryen profile mapping and specialization limits remain local policy.",
+    "portableCaseIds": [
+      "runtime.optimized-wide-values.direct",
+      "runtime.optimized-wide-values.trait",
+      "runtime.optimized-wide-values.effectful-trait"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/__tests__/pipeline-api.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "modules.source-pkg.exports.nested, modules.source-pkg.internal-import.rejected, modules.source-pkg.non-api-member.rejected, wasm.basic-abi.exports; pipeline recovery/semantic-map/topological-order assertions stay local.",
+    "portableCaseIds": [
+      "wasm.basic-abi.exports",
+      "modules.source-pkg.exports.nested",
+      "modules.source-pkg.internal-import.rejected",
+      "modules.source-pkg.non-api-member.rejected"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/__tests__/program-codegen-view-imports.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts canonical symbol ids inside ProgramCodegenView, the current compiler/codegen boundary rather than source-observable behavior."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/program-symbol-arena.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Deterministic internal symbol numbering and validated provider indexing are implementation data-structure contracts."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/qualified-trait-methods-codegen.e2e.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Qualified `.Trait::method()` dispatch resolves observable ambiguity and intersection receivers; no current conformance case exercises it.",
+    "portableCaseIds": [
+      "runtime.traits.qualified-dispatch"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/__tests__/static-access.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.static-access.generic-target, runtime.static-access.method-inference, runtime.static-access.overload-ranking, runtime.closures.curried-optional, runtime.closures.mutable-capture-labeled-calls, runtime.closures.curried-effect-resume.",
+    "portableCaseIds": [
+      "runtime.static-access.generic-target",
+      "runtime.static-access.method-inference",
+      "runtime.static-access.overload-ranking",
+      "runtime.closures.curried-optional",
+      "runtime.closures.mutable-capture-labeled-calls",
+      "runtime.closures.curried-effect-resume"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/__tests__/test-companions.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts current graph merging and test metadata for `.test.voyd` companion builds; public test-command behavior belongs at the SDK/CLI boundary."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/test-id-uniqueness.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Module-hash-prefixed generated test ids are a current compiler/runner identity scheme, not language semantics."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/trait-dispatch-diagnostics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Stable TY0008/TY0021/TY0042 trait-call and missing-impl diagnostics are observable; conformance only covers successful labeled trait dispatch."
+  },
+  {
+    "file": "packages/compiler/src/__tests__/tuple-codegen.e2e.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Tuple return/value projection after generic `unwrap_or` executes observably and no portable tuple case exists.",
+    "portableCaseIds": [
+      "runtime.tuples.generic-return-projection"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/__tests__/type-lowering-regression.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Recursive generic union data types returning depth 2 are absent from conformance; keep RTT side-effect, HIR-capture, and ordering assertions local while existing value cases cover mutation.",
+    "portableCaseIds": [
+      "runtime.types.recursive-generic-union"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/borrowed-array-element-views.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "Borrow/materialization and alias-shape regression detail stays backend-local; representative observable cases already exist as runtime.value-types.wide-array-field, runtime.value-types.wide-array-local-view, runtime.value-types.wide-array-mut-param, runtime.value-types.wide-array-root-mutation, runtime.value-types.wide-array-alias-mutation, runtime.value-types.wide-array-return, and runtime.value-types.wide-array-*-method.",
+    "portableCaseIds": [
+      "runtime.value-types.wide-array-field",
+      "runtime.value-types.wide-array-local-view",
+      "runtime.value-types.wide-array-mut-param",
+      "runtime.value-types.wide-array-root-mutation",
+      "runtime.value-types.wide-array-alias-mutation",
+      "runtime.value-types.wide-array-return"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/codegen.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.generics.object-literal",
+      "runtime.control-flow.clause-style-if",
+      "runtime.traits.qualified-dispatch"
+    ],
+    "portableGap": "Mixed RTT/WAT internals and a large observable language matrix; defaults, short-circuiting, matches, nominal/trait dispatch, aliases, lambdas, inheritance, overloads, and diagnostics are mostly absent from conformance, so extract representative source/result cases while retaining RTT/cache/return_call assertions locally."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/continuation-compiler.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "effects.continuations.while-no-replay"
+    ],
+    "portableGap": "Observable effect continuation behavior is absent: block/while/nested break-continue resumption must not replay prefix control flow (results 6, 15, 180 with exact effect traces), plus a perform inside a handler clause returns 2."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-backend-selection.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Selects the TypeScript compiler's gc-trampoline fallback, requestedKind bookkeeping, artifact shape, and voydContinuation WAT; another compiler need not use this backend."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-call-boundary.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Observable repeated/nested calls across an effectful callee boundary return 8, 5, and 18 after host resumption; current effects.host-interactions.resume covers only one direct perform."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-call-convention-lowering.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Mutates semantic effect rows and asserts the gc-trampoline-specific handler parameter, $Outcome return, ref.null threading, and WAT dispatch form."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-call-imported-callee.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Cross-module imported effect operations and handlers are portable; the imported handler path returns 15 and no conformance case currently covers an effect declaration/callee imported from another module."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-callback-after-perform.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Portable continuation behavior through callback-owning functions, captured lambdas, and nested generic callback helpers returns 7 in each case; basic host resume coverage does not exercise callbacks."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-continuation-instances.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts compiler-generated __cont_*__instN symbol multiplicity for generic instantiations, an implementation naming/keying mechanism rather than observable behavior."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-explicit-id.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "The stable @effect(id: \"com.example.log\") contract must survive renaming Log.info to Logger.write, but conformance cannot yet observe effect IDs/hashes; extend the normalized adapter and add this API-contract case."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-export-generic-effect-decl.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "A generic effect declaration with an unused operation must compile and the used await/log host interaction must return 3 with log [2]; no generic host-effect conformance case exists."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-export-generic-op-arg.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Concrete serialization and resumption of a generic effect operation argument is externally visible (Box.take receives 41 and returns 42) and absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-export-multi-return.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Host effects returning i32, void, i64, f64, and f32 produce 3, null, 40n, 2.5, and 1.25; current host conformance only normalizes an i32 resume and needs scalar-return normalization coverage."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-export-object-arg-trap.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Unsupported host-boundary object arguments produce stable CG0001 diagnostics naming HostOnly.poke arg1 and supported payload categories; this portable rejection contract is absent."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-export.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Contains missing public host-boundary behavior: optimized compilation, multi-operation traces, open-row exports with no perform returning 7, undersized-buffer trap normalization, and MsgPack array/string round-trip; keep effect-table/WAT metadata checks local."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-generic-callback-sites.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Generic callback continuations across two host effects return 10 and emit Async [6,6,6,5] plus Trace [4,4,4,4]; no representative generic callback/effect trace exists."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-generic-escaped-closure-result.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "An escaped generic closure whose callback performs must resume through its wrapper and return 2; this portable closure/effect interaction is absent."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-generic-wasm-e2e.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Two instantiations of a generic in-Wasm effect return 20 and 4.4; generic effect typing/runtime dispatch is not represented in conformance."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-handler-inferred-type-args.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Inferred generic effect-call types must select the matching handler clause and return 12; current effects conformance has no generic handler inference case."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-harness.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "Custom-section layout, sidecar equality, runtime-diagnostics metadata, helper structs, and harness errors remain compiler/host-ABI local; the portable perform/resume signal is already effects.host-interactions.resume.",
+    "portableCaseIds": [
+      "effects.host-interactions.resume"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-hof-bubble.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Effect-polymorphic higher-order calls must bubble a captured lambda effect (host resume 12 gives 19) and an internally handled captured lambda returns 15; neither signal exists in conformance."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-host-boundary-payload-compat.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Portable public-boundary cases are absent: DTO shim argument returns 42, unsupported object return emits CG0001, a same-name wrapper resolves as a function and returns 42, and fully internal effects require no host DTO/id validation."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-imported-std-fs-handler.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "A source program importing and internally handling std::fs::Fs operations returns 28 through the public host; no conformance case covers imported standard-library effects."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-multi-module-ids.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Cross-module effects Alpha.ping and Beta.pong return 4 and 8 with stable public effect identity/table behavior; current conformance has neither multi-module effects nor normalized effect-id observation."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-perform.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "effects.internal.perform-in-try",
+      "effects.continuations.while-no-replay"
+    ],
+    "portableGap": "Retain lowering-site/WAT/specialization assertions locally, but extract missing observable cases for optimized local-tail handlers (7/10/45), tail effects through construction/control flow (6/10/14 and host 26/27), effectful resume arguments (41), effectful defaults (78/79/77/42), and guard evaluation exactly once."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-runtime-abi.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Direct Binaryen construction asserts private voydOutcome/voydEffectRequest/voydContinuation struct fields and numeric tags; a replacement compiler can implement the normalized host contract differently."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-serializer-signature.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts the present host wire protocol's signature-hash differentiation and imported alias serializer metadata, not source-level behavior exposed by the conformance adapter."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-signature-mismatch.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Deliberately fabricates an invalid host registration key from internal effectId/opId/signatureHash fields to test this harness/wire-protocol guard."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-wasm-e2e.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "effects.internal.perform-in-try",
+      "effects.internal.lambda-perform",
+      "effects.diagnostics.escaped-resume",
+      "effects.diagnostics.missing-tail"
+    ],
+    "portableGap": "High-value portable effect semantics are absent: TY0035 escaped-resume and TY0015 missing-tail diagnostics; perform-in-try=15; lambda perform=25; host end vs resume=2/10; local mutation=5/15/7; explicit-return perform=42; and tail misuse traps."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-wasm-object-arg.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "An in-Wasm effect handler receiving an object argument must return 42; current effects conformance only covers a scalar host argument."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-wasm-overloads-alias.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Effect handler overload selection through semantic type aliases returns 12 and has no portable representative.",
+    "portableCaseIds": [
+      "effects.overloads.semantic-alias"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/effects-wasm-overloads.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Overloaded effect operations must route to the matching handler clause and return 12; no conformance case covers effect overload dispatch.",
+    "portableCaseIds": [
+      "effects.overloads.semantic-alias"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/export-abi.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Exact wrapper names/schema/helper reachability remain local, but public boundary behavior is missing: automatic/explicit DTO diagnostics, serialized MsgPack round-trips, recursive aliases/callbacks, memory export, tag-collision diagnostics, and collision-free user exports need representative conformance ABI cases."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/fixed-array-runtime.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.fixed-arrays.length-and-get",
+      "runtime.fixed-arrays.copy",
+      "runtime.fixed-arrays.iteration"
+    ],
+    "portableGap": "Observable FixedArray semantics are absent: negative index tail=2 and empty/OOB no-op=0, copy clamp=11 and overlap=211, iteration=12, default value elements=0, value copy=13, and mixed value/heap union storage=18."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/fixed-array-smoke.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Public fixed-array helper wiring returns len/head=4, copied tail=2, and iteration sum=6; fold one representative into the missing FixedArray conformance suite rather than preserving this as a portable compiler-package smoke.",
+    "portableCaseIds": [
+      "runtime.fixed-arrays.length-and-get",
+      "runtime.fixed-arrays.copy",
+      "runtime.fixed-arrays.iteration"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/fixed-array-structural-coercion.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "FixedArray<A> to FixedArray<B> structural element conversion returns 7, and FixedArray<Vec2> to FixedArray<Optional<Vec2>> returns 18; neither portable coercion rule is covered."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/fixed-array-structural-signature.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Passing FixedArray<Point> through a typed function and reading its element returns 7; consolidate this observable generic/signature case into the FixedArray conformance suite while leaving heap-type layout checks local if added."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/function-contract-lookup.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Exercises compiler function-contract metadata lookup independent of symbol names plus pre-emission missing-contract failures; these are internal registry guarantees."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/function-dependencies.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Builds synthetic codegen views to resolve, reject missing, and reject ambiguous string-literal constructor intrinsic metadata; this is internal dependency wiring."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/graph-scc.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Unit-tests the backend's SCC helper on synthetic numeric graphs, with no Voyd source or observable compiler contract."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/intrinsics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "Direct Binaryen expression opcode/arity/signedness/cache assertions stay local; externally observable prefix-minus behavior is already runtime.prefix-minus.intrinsic and runtime.prefix-minus.overload (and non-math import absence is wasm.basic-abi.exports).",
+    "portableCaseIds": [
+      "runtime.prefix-minus.intrinsic",
+      "runtime.prefix-minus.overload",
+      "wasm.basic-abi.exports"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/memory-exports.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "Option-specific linear/effects memory aliasing and helper export policy remain compiler ABI units; default memory export plus absence of voyd_math imports is already wasm.basic-abi.exports.",
+    "portableCaseIds": [
+      "wasm.basic-abi.exports"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/program-helper-registry.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts one-time/deduplicated dispatcher and runtime helper emission across module contexts and test builds, an implementation registry property."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/scalar-aggregate-replacement.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.optimization.heap-alias-mutation",
+      "runtime.optimization.argument-order"
+    ],
+    "portableGap": "Keep escape facts, specialization names, and struct.new absence locally; extract representative optimized parity cases missing from conformance, especially heap alias mutation (2/77), nested mutation (15/11), branch aliasing (1/9), side-effect argument order (20/40), and block/reassignment statements (8/12)."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/specialization-policy.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Tests internal specialization identities, reservation ordering, per-kind/program/body-node budgets, and context caps; another compiler may use no such policy."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/std-array-smoke.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.collections.array-read",
+      "runtime.collections.array-write",
+      "runtime.collections.array-write-oob"
+    ],
+    "portableGap": "Runtime Array behavior is absent: optimized len/at and loop sums (43/20/10/etc.) plus OOB traps should be representative conformance cases; retain array.get/unreachable/call_ref WAT optimization checks locally."
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/subscript-smoke.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Portable index assignment, exclusive/inclusive/unbounded slices, Dict subscript round-trip, and OOB assignment trap are absent; expected exports return 20, 99, 5, 5, 3, 3, 7, 4, 7 and write_oob traps.",
+    "portableCaseIds": [
+      "runtime.collections.array-read",
+      "runtime.collections.array-write",
+      "runtime.collections.slice-exclusive",
+      "runtime.collections.slice-inclusive",
+      "runtime.collections.slice-unbounded",
+      "runtime.collections.dict-subscript",
+      "runtime.collections.array-write-oob"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/union-coercion-target.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Exact union member B must win over structural supertype A when both match; the source returns y=41 and current value-union conformance does not cover this ambiguity.",
+    "portableCaseIds": [
+      "runtime.unions.exact-coercion"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/__tests__/wide-value-abi.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "Out-ref allocation, struct.new_default avoidance, storage-ref WAT, and mixed-effect wrapper ABI remain local; observable wide returns/defaults are represented by runtime.optimized-wide-values.* and runtime.value-types.wide-*.",
+    "portableCaseIds": [
+      "runtime.optimized-wide-values.direct",
+      "runtime.value-types.wide-round-trip"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/codegen/runtime/__tests__/resumptions.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Directly unit-tests the JavaScript tail-resumption guard's call counter/finalize exceptions; portable tail semantics should be observed through source programs, not this helper."
+  },
+  {
+    "file": "packages/compiler/src/compiler-contracts/__tests__/function-contracts.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Catalog cardinality, provider bootstrap modules, and signature table consistency define this compiler's std boundary ABI implementation."
+  },
+  {
+    "file": "packages/compiler/src/compiler-contracts/__tests__/types.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Uses synthetic TypeIds/symbol providers to validate trusted intrinsic-type recognition, an internal safety contract."
+  },
+  {
+    "file": "packages/compiler/src/compiler-contracts/__tests__/validate-boundary-msgpack.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Validates mocked relational msgpack compiler-contract signatures and rejection paths inside the current codegen boundary."
+  },
+  {
+    "file": "packages/compiler/src/diagnostics/__tests__/diagnostics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Tests diagnostic registry construction, fallback-span selection, phase inference, hints, and formatter text utilities rather than compiling Voyd source."
+  },
+  {
+    "file": "packages/compiler/src/docs/__tests__/documentation-view.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts the current typed documentation-view object model, ids, ordering, and package filtering; rendered public docs behavior is integration-owned."
+  },
+  {
+    "file": "packages/compiler/src/modules/__tests__/doc-comments.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts documentation strings attached to current semantic symbols/module metadata and MD0004 collection mechanics."
+  },
+  {
+    "file": "packages/compiler/src/modules/__tests__/graph.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "`#!no_prelude`, relative/self/super package resolution, reserved `all`, and missing-module diagnostics are observable; current conformance covers only a subset of source-pkg visibility."
+  },
+  {
+    "file": "packages/compiler/src/modules/__tests__/macro-expansion-errors.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Functional macro panic/signature/serializer failures surface as diagnostics, but portable macro success and failure coverage is absent."
+  },
+  {
+    "file": "packages/compiler/src/modules/__tests__/scc.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Directly asserts Tarjan/SCC grouping shape and dependency order; cyclic source acceptance should be covered separately in conformance."
+  },
+  {
+    "file": "packages/compiler/src/modules/__tests__/semantic-analysis.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts incremental recomputation identity, changed-module invalidation, and cancellation error classes."
+  },
+  {
+    "file": "packages/compiler/src/modules/__tests__/use-decl.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Tests the compiler's top-level declaration classifier output for use/pub/mod/macro forms, not externally visible semantics."
+  },
+  {
+    "file": "packages/compiler/src/modules/__tests__/use-path.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Tests internal parseUsePaths selectionKind/path decomposition rather than compiled module behavior."
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/mutation-contract.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Checks Object.freeze protection on optimizer-owned HIR nodes and arrays, an internal mutation discipline."
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/pipeline-call-shape-planning.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Keep specialization request keys/function names/signature arity local, but optimized and fallback execution both yielding 209 covers absent recursive/labeled/optional/wide/effectful default-argument semantics that should get one batched conformance fixture.",
+    "portableCaseIds": [
+      "runtime.optimization.default-arguments"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/pipeline-capture-shrinking.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts handler elimination and exact capture-symbol set sizes in optimized HIR after fixed-point simplification; no externally executed expectation is present."
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/pipeline-constant-control.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Most folded HIR shape checks stay local, but optimized i32/i64 MIN / -1 must trap rather than fold; runtime.traps.integer-division-by-zero is unoptimized and does not cover signed-overflow parity.",
+    "portableCaseIds": [
+      "runtime.optimization.signed-overflow-trap"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/pipeline-escape-analysis.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Inspects internal escape origin/parameter facts across aliases, calls, exports, trait temporaries, closures, and handlers without executing a public result."
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/pipeline-integration.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "External-call conservatism, convergence budgets, escape facts, and direct type-switch WAT are optimizer-specific; representative observable trait dispatch already exists as runtime.trait-dispatch.labeled-container.call.",
+    "portableCaseIds": [
+      "runtime.trait-dispatch.labeled-container.call"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/pipeline-reachability.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts optimizer reachability sets, pruned instantiations, and testMode all-module export emission; this is compiler build-mode machinery, not normal portable semantics."
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/pipeline-receiver-trait.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "Exact receiver fact propagation, clone names, target sets, and absence of lookup helpers remain optimizer-local; runtime.trait-dispatch.labeled-container.call provides the portable dispatch signal.",
+    "portableCaseIds": [
+      "runtime.trait-dispatch.labeled-container.call"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/pipeline-runtime-facts.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "Candidate sets and optimized WAT removal of __has_type/__lookup_field_accessor are implementation detail; observable object/value field access is represented by runtime.value-types.object-field and runtime.value-types.wide-array-field.",
+    "portableCaseIds": [
+      "runtime.value-types.object-field",
+      "runtime.value-types.wide-array-field"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/program-index.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Unit-tests optimizer indexes, lazy caches, invalidation revisions, intrinsic ambiguity, and structural mutation guards on synthetic HIR."
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/runner.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Checks pass ordering, analysis invalidation, telemetry calls, fixed-point counters/caps, and metric-name validation in the optimizer runner."
+  },
+  {
+    "file": "packages/compiler/src/optimize/__tests__/schedule.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts the current optimizer pass schedule and minimum fixed-point iteration policy, which a replacement compiler need not share."
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/array-whitespace.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Exact expanded AST regression for nested-array whitespace and synthetic constructor calls; a different parser need not share this tree shape."
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/boundary-attribute.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "`@boundary` metadata placement and parser-thrown validation strings are compiler/std boundary implementation contracts."
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/compiler-contract-attribute.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "`@compiler_contract` AST metadata composition and parser validation are internal std/compiler ABI plumbing."
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/constructor-object-literal.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.value-types.optional-some and runtime.static-access.generic-target exercise generic constructor/object-literal syntax; exact AST grouping and module-path nesting stay local.",
+    "portableCaseIds": [
+      "runtime.value-types.optional-some",
+      "runtime.static-access.generic-target"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/effect-attribute.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "effects.host-interactions.resume uses a stable `@effect(id: ...)`; AST metadata and malformed-attribute parser strings stay local.",
+    "portableCaseIds": [
+      "effects.host-interactions.resume"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/effects-whitespace.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "effects.open-callback-row.forward-tail and runtime.range-for.tail-effects exercise qualified/inline handler clause attachment; exact expanded AST stays local.",
+    "portableCaseIds": [
+      "runtime.range-for.tail-effects",
+      "effects.open-callback-row.forward-tail"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/function-syntax.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "effects.open-callback-row.forward-tail exercises explicit open callback/function rows; declaration AST forms remain local.",
+    "portableCaseIds": [
+      "effects.open-callback-row.forward-tail"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/html-errors.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Malformed HTML is a language syntax error with an observable source location; no portable HTML diagnostic case exists."
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/html-inline-lambda.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "syntax.html.attributes-and-events"
+    ],
+    "portableGap": "HTML interpolation, keyed elements/components, and event closure syntax are user-visible language behavior, while no conformance suite currently compiles HTML."
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/intrinsic-attribute.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "`@intrinsic` metadata defaults and validation drive the current compiler/std implementation rather than portable user programs."
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/intrinsic-type-attribute.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Trusted intrinsic nominal-type metadata is compiler/std bootstrapping; the AST attribute representation is implementation-specific."
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/lexer.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.value-types.static-trait contains adjacent nested generic closers; raw token splitting and lexer state remain local.",
+    "portableCaseIds": [
+      "runtime.value-types.static-trait"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/parser.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Snapshot-compares the current fully expanded AST for broad fixtures, which a replacement parser should not reproduce byte-for-byte."
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/qualified-trait-methods.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: AST-only coverage parses `x.Trait::method()`, and the corresponding observable dispatch is absent from conformance.",
+    "portableCaseIds": [
+      "runtime.traits.qualified-dispatch"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/reader.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.value-types.static-trait exercises nested generic closers; raw reader tree shape and 150k-form stack/variadic stress remain local.",
+    "portableCaseIds": [
+      "runtime.value-types.static-trait"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/string-macro.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "syntax.string-interpolation.basic, syntax.string-interpolation.escape, syntax.string-interpolation.chain; UTF-8 lowering bytes and concat AST remain local.",
+    "portableCaseIds": [
+      "syntax.string-interpolation.basic",
+      "syntax.string-interpolation.escape",
+      "syntax.string-interpolation.chain"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/subscript.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Adjacent subscript read/write and bounded/unbounded range-index syntax are observable and no portable subscript case exists.",
+    "portableCaseIds": [
+      "runtime.collections.array-read",
+      "runtime.collections.array-write",
+      "runtime.collections.slice-exclusive",
+      "runtime.collections.slice-inclusive",
+      "runtime.collections.slice-unbounded"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/ast/__tests__/form.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Tests Form helper cloning/slicing and derived Location object identity/spans, an AST data-structure contract."
+  },
+  {
+    "file": "packages/compiler/src/parser/syntax-macros/__tests__/colon-clauses.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.closures.mutable-capture-labeled-calls exercises labeled trailing-callback clause rewriting; exact macro-expanded forms stay local.",
+    "portableCaseIds": [
+      "runtime.closures.mutable-capture-labeled-calls"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/syntax-macros/__tests__/functional-macros.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "modules.macros.sibling-expansion"
+    ],
+    "portableGap": "Nested invocations, emit_many, public generated declarations, and macro panic behavior lack any portable macro case."
+  },
+  {
+    "file": "packages/compiler/src/parser/syntax-macros/__tests__/interpret-whitespace.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.range-for.nested and runtime.closures.mutable-capture-labeled-calls exercise indented suites/trailing blocks; normalization snapshots stay local.",
+    "portableCaseIds": [
+      "runtime.range-for.nested",
+      "runtime.closures.mutable-capture-labeled-calls"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/parser/syntax-macros/__tests__/locations.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts cloned versus shared Location object identity during syntax-macro normalization."
+  },
+  {
+    "file": "packages/compiler/src/parser/syntax-macros/__tests__/primary-macro.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.intersections.structural-trait proves multiplication/addition precedence, runtime.prefix-minus.intrinsic proves unary binding, and runtime.closures.mutable-capture-labeled-calls proves trailing callback parsing.",
+    "portableCaseIds": [
+      "runtime.prefix-minus.intrinsic",
+      "runtime.intersections.structural",
+      "runtime.intersections.structural-trait",
+      "runtime.closures.mutable-capture-labeled-calls"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/binding.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Binder tables stay local, but parsed-source cases define observable self/super/grouped import resolution plus BD0006/BD0007 declaration rules absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/canonical-symbol-ref.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Directly exercises the compiler's canonical import-symbol resolver, numeric SymbolIds, and cycle guard."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/captures-imports.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.value-types.wide-capture",
+    "portableCaseIds": [
+      "runtime.value-types.wide-capture"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/compiler-function-contracts.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts reserved std @compiler_contract metadata, registry lookup, intrinsic flags, and HIR annotations specific to this compiler/std ABI."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/effects-lowering.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "effects.open-callback-row.forward-tail",
+    "portableCaseIds": [
+      "effects.open-callback-row.forward-tail"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/hir-builder.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Constructs HirBuilder nodes directly and asserts item/export storage and visibility records."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/if-clause-style.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.control-flow.clause-style-if"
+    ],
+    "portableGap": "The HIR assertions should remain local, but all four user-visible clause-style if spellings are accepted without any portable syntax/runtime case."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/intrinsics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Checks reserved @intrinsic metadata propagation, current HIR flags, and expected-type threading for compiler-only std wrappers."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/lambda.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.value-types.wide-capture and runtime.value-types.wide-closure",
+    "portableCaseIds": [
+      "runtime.value-types.wide-closure",
+      "runtime.value-types.wide-capture"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/lowering.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Most assertions are HIR-specific, but quoted user functions named 'is' and '..' must remain ordinary calls; that observable behavior has no conformance case.",
+    "portableCaseIds": [
+      "runtime.operators.quoted-range-identifier",
+      "runtime.operators.quoted-is-identifier"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/nominal-constructors-e2e.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Cross-module labeled/unlabeled constructor overload acceptance is asserted through binder/type tables but has no portable runtime case."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/nominal-object-literal-monomorphization.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: The codegen-view cache assertion is local, while the generic Box<T> literal/hold(value) regression is observable and absent from conformance.",
+    "portableCaseIds": [
+      "runtime.generics.object-literal"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/pipeline.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Large parsed-source matrix includes observable generic constraints, constructor aliases, overload choice, diagnostics, and operator behavior beyond the current portable corpus."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/program-function-instance-ids.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts deterministic numeric ProgramCodegenView function-instance IDs across module ordering, an implementation detail."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/std-intrinsic-type-contracts.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Exercises reserved @intrinsic_type provider metadata and registry restrictions that define the current compiler/std implementation seam."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/subscript-lowering.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts the current HIR rewrite of bracket/range syntax into method calls and nominal Range literals; portable behavior is better extracted from typing/subscript.test.ts."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/symbol-table.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Direct SymbolTable scope, snapshot, resolution-domain, and predicate behavior."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/try-handler-clauses.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "effects.open-callback-row.forward-tail",
+    "portableCaseIds": [
+      "effects.open-callback-row.forward-tail"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/type-display.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts this compiler/tooling's type-summary formatting, inferred-symbol lookup, label overrides, and compact/full display policy."
+  },
+  {
+    "file": "packages/compiler/src/semantics/__tests__/while-clause-style.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Directly tests parseWhileConditionAndBody AST decomposition and its legacy-syntax error; portable while acceptance is represented by the branch-types extraction candidate."
+  },
+  {
+    "file": "packages/compiler/src/semantics/effects/__tests__/effect-table.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Direct effect-row interning, substitutions, idempotent table writes, and tail-variable identities."
+  },
+  {
+    "file": "packages/compiler/src/semantics/effects/__tests__/effects-ir.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "effects.host-interactions.resume",
+    "portableCaseIds": [
+      "effects.host-interactions.resume"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/effects/__tests__/lowering-info.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "effects.open-callback-row.forward-tail",
+    "portableCaseIds": [
+      "effects.open-callback-row.forward-tail"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/hir/__tests__/walk.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Builds synthetic HIR and verifies walker event order and traversal control flags."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/array-intrinsics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Tests raw __array_* std-only intrinsic namespace, arity, and compiler validation rules rather than the public Array surface."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/array-literals.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.collections.array-read"
+    ],
+    "portableGap": "Observable literal inference for primitive/nominal/structural elements and empty/mixed-literal rejection is absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/base-object.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Nominal and structural values satisfying the language-level Object type is observable but currently only asserted through arena descriptors."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/boolean-intrinsics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "User-visible and/not operand acceptance and rejection has no portable representative."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/branch-condition-diagnostics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "TY0027 codes and precise if/while condition spans are externally reported diagnostics supported by the conformance adapter but not covered."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/branch-types.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.control-flow.clause-style-if"
+    ],
+    "portableGap": "Observable branch-result compatibility, statement-value discard, and case-style while acceptance are absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/call-diagnostics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "typing.diagnostics.non-callable"
+    ],
+    "portableGap": "Core TY0005/TY0006/TY0022/TY0027 call diagnostics and constructor-label/type-argument rules lack portable cases."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/constraint-trait-owners.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Constructs TypeArena descriptors directly to test recursive trait-owner collection used by the current constraint implementation."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/default-parameter-diagnostics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "TY0043 for untyped generic defaults and TY0044 for forward parameter references are public diagnostics absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/default-parameters-imports.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Cross-module omission of a defaulted i32 parameter is observable (main evaluates to 8) and has no portable case.",
+    "portableCaseIds": [
+      "modules.defaults.imported-call"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/effect-handler-overloads.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Ambiguous overloaded effect handlers must produce TY0019, a user-facing rule absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/effects-function-types.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "effects.open-callback-row.forward-tail",
+    "portableCaseIds": [
+      "effects.open-callback-row.forward-tail"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/effects-inference.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "effects.diagnostics.escaped-resume",
+      "effects.diagnostics.missing-tail"
+    ],
+    "portableGap": "Beyond the existing open-row case, public TY0013/TY0015/TY0035 handler/continuation diagnostics and control-flow rules are not portable yet."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/fixed-array.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.fixed-arrays.length-and-get"
+    ],
+    "portableGap": "FixedArray<T> annotation acceptance and exact type-argument arity are observable compiler contracts needed by std but absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/float-intrinsics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Calls raw __sqrt in a synthetic std namespace and checks compiler-only intrinsic validation."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/function-generics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Observable generic inference from lambdas and union return context, including conflict rejection, has no portable representative."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/generic-nesting.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "The nested generic id/wrap/combine program exposes instance-isolation correctness at runtime and is absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/immutability.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Reassigning let must report TY0001 with the binding span and declaration note; no portable diagnostic case exists.",
+    "portableCaseIds": [
+      "typing.diagnostics.immutable-reassignment"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/impl-method-generics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Explicit method type-argument order and receiver-driven impl-generic inference are language behavior absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/imports.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts copied intrinsic/entity/import metadata on local SymbolTable records rather than source-visible module behavior."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/inheritance-fields.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "The language rule requiring derived nominal objects to redeclare inherited fields has no portable rejection case."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/instantiation.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Builds typing contexts, templates, recursive descriptors, and alias caches directly; assertions target arena/registry recursion and substitution mechanics."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/intrinsic-attributes.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Tests reserved std-only @intrinsic wrappers and raw intrinsic enforcement inside current typing phases."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/lambda-typing.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Contextual parameter/return inference for inline and returned lambdas is observable and not directly covered by the closure runtime cases.",
+    "portableCaseIds": [
+      "runtime.lambdas.contextual-typing"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/match-diagnostics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "TY0002 mismatch spans/notes and TY0039 redundant-arm warnings are externally visible and absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/match.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Generic nominal/alias pattern type-argument inference and ambiguous repeated-member rejection go beyond runtime.value-types.union-match."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/method-call-lambda-context.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Method-signature-driven generic lambda inference is observable and has no portable runtime case."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/method-call-resolution.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "The language-level fallback from a nonmatching method overload to a same-named free function is absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/modulo-intrinsics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.operators.integer-modulo"
+    ],
+    "portableGap": "Integer % acceptance and non-integer rejection are user-visible operator semantics absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/nominal-objects.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Nominal identity plus structural projection is asserted only through arena shapes; no portable representative proves both sides."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/object-assignability.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Nominal-to-structural acceptance and structural-to-nominal TY0027 rejection are public rules absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/object-generics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.generics.object-literal"
+    ],
+    "portableGap": "Generic nominal object literals, aliases, inference, and union dispatch form a runtime program (expected 7) not in conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/object-mutability.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "TY0004 rules for immutable field writes and mutable arguments, plus mutable success, lack portable cases."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/operator-overloads-external.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Cross-module generic operators, imported trait defaults, intrinsic fallback, and explicit-type-argument rejection are observable and uncovered."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/optional-args-diagnostics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "TY0021 extra/missing argument behavior around optional parameters has no portable diagnostic case."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/optional-function-type-expr.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Optional flags in function-type parameter syntax are only compile-checked locally and lack a portable acceptance case."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/overload-lambda-context.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Retyping lambda arguments after overload probing is observable through the fixture result but absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/overload-lambda-return-hint.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Expected-return and callback-shape overload disambiguation across functions/methods has no portable representative."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/overload-resolution.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Uses synthetic signatures/HIR to assert the current staged scoring algorithm, dominance ordering, and candidate bookkeeping."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/return-tracking.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Although built as synthetic HIR, value/empty return acceptance and missing-value rejection are core source-language rules with no portable case."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/return-types.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Inference of a nominal union across multiple returns is observable and absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/shared-interners.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Directly asserts TypeArena/effect-interner identity and recursive type translation shortcuts."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/structural-objects.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Constructs HIR manually and asserts arena field sets/type IDs; public structural compatibility is better represented by object-assignability extraction."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/subscript.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.collections.array-read",
+      "runtime.collections.array-write",
+      "runtime.collections.slice-unbounded"
+    ],
+    "portableGap": "Bracket read/write/range dispatch should evaluate to 35 and a missing implementation should reject; neither is portable today."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/trait-impls.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Required/default/overloaded trait method validation, duplicate impl TY0036, and blanket impl acceptance are largely absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/trait-objects.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.traits.qualified-dispatch",
+      "runtime.trait-dispatch.labeled-container.call"
+    ],
+    "portableGap": "Trait-typed parameter dispatch, generic method inference, and qualified overloaded dispatch are not covered by the static labeled-trait conformance case."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/transitive-import-canonicalization.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Builds synthetic dependency SymbolTables and asserts local/canonical SymbolId mappings across re-export hops."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/tuples.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "runtime.tuples.generic-return-projection"
+    ],
+    "portableGap": "Tuple construction, destructuring, indexing, and structural parameter use have no portable runtime representative."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/type-alias-generics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.value-types.optional-some and runtime.value-types.optional-none",
+    "portableCaseIds": [
+      "runtime.value-types.optional-some",
+      "runtime.value-types.optional-none"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/type-arena.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Direct arena normalization, interning keys, visibility metadata, snapshots, and descriptor IDs."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/type-satisfaction-side-effects.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts that an internal typeSatisfies probe does not mutate import/trait registries."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/type-satisfaction.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Direct TypeArena/typeSatisfies unit matrix for nominal, structural, union, intersection, and unknown mechanics; source-level signals are owned by extraction candidates above."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/typecheck-budget.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Synthetic HIR and configurable candidate/unification budgets are performance safeguards specific to this compiler, not portable language semantics."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/unary-minus-intrinsics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "runtime.prefix-minus.intrinsic and runtime.prefix-minus.overload",
+    "portableCaseIds": [
+      "runtime.prefix-minus.intrinsic",
+      "runtime.prefix-minus.overload"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/unification-options.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Directly tests arena.unify structuralResolver and allowUnknown options."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/unions.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Passing a narrower nominal union to a wider union parameter is observable (main returns 1) and absent from conformance.",
+    "portableCaseIds": [
+      "runtime.unions.widening"
+    ]
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/validation.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Builds malformed HIR directly to assert strict-typing invariant failures for unknowns and missing alias arguments."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/value-position-diagnostics.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "TY0041 for a type alias in value position and TY0033 for primitive field access are stable user diagnostics absent from conformance."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/value-types.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Representative behavior is portable; detailed implementation assertions remain co-located. Additional observable variants remain explicit backlog.",
+    "portableCaseIds": [
+      "typing.diagnostics.mixed-value-reference-union",
+      "runtime.value-types.copy"
+    ],
+    "portableGap": "Positive value behavior is portable already, but TY0045/TY0046 layout, temporary-mutation, trait-widening, recursion, and mixed-union rejections are not."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/__tests__/visibility.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Current module cases cover one non-api field, but object-private access, method visibility, hidden-field construction TY0010, and std re-export behavior remain uncovered."
+  },
+  {
+    "file": "packages/compiler/src/semantics/typing/expressions/__tests__/continuation-usage.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local",
+    "rationale": "Asserts internal continuation-use min/max/escape analysis; portable rejection behavior should be extracted from effects-inference.test.ts."
+  },
+  {
+    "file": "packages/js-host/src/__tests__/effect-op.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/__tests__/handlers.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/__tests__/keyed-handlers.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/__tests__/retained-callbacks.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/__tests__/table.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/adapters/conformance.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/adapters/default.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/runtime/deterministic-runtime.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/runtime/dispatch.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/runtime/environment.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/runtime/scheduler.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/runtime/scheduling-policy.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/js-host/src/runtime/trap-diagnostics.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/language-server/src/__tests__/analysis-coordinator.perf.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/language-server/src/__tests__/analysis-coordinator.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/language-server/src/__tests__/diagnostics-scheduler.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/language-server/src/__tests__/exports-index.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/language-server/src/__tests__/project.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/lib/src/lib/__tests__/binaryen-optimize.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/lib/src/lib/__tests__/fast-shift-array.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/lib/src/lib/__tests__/murmur-hash.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/lib/src/lib/__tests__/resolve-src.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/lib/src/lib/__tests__/type-builder.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/lib/src/lib/__tests__/wasm-fallback.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/sdk/src/__tests__/browser-exports.test.ts",
+    "owner": "sdk-contract",
+    "disposition": "sdk-local",
+    "rationale": "Keep co-located: protects the public SDK API or an SDK adapter, lifecycle, cache, or reporting contract."
+  },
+  {
+    "file": "packages/sdk/src/__tests__/compiler-browser-bundle-smoke.test.ts",
+    "owner": "sdk-contract",
+    "disposition": "sdk-local",
+    "rationale": "Keep co-located: protects the public SDK API or an SDK adapter, lifecycle, cache, or reporting contract."
+  },
+  {
+    "file": "packages/sdk/src/__tests__/compiler-browser-diagnostics.test.ts",
+    "owner": "sdk-contract",
+    "disposition": "sdk-local",
+    "rationale": "Keep co-located: protects the public SDK API or an SDK adapter, lifecycle, cache, or reporting contract."
+  },
+  {
+    "file": "packages/sdk/src/__tests__/sdk-node.test.ts",
+    "owner": "sdk-contract",
+    "disposition": "sdk-local",
+    "rationale": "Keep co-located: protects the public SDK API or an SDK adapter, lifecycle, cache, or reporting contract."
+  },
+  {
+    "file": "packages/sdk/src/__tests__/sdk-optimization-levels.test.ts",
+    "owner": "sdk-contract",
+    "disposition": "sdk-local",
+    "rationale": "Keep co-located: protects the public SDK API or an SDK adapter, lifecycle, cache, or reporting contract."
+  },
+  {
+    "file": "packages/sdk/src/__tests__/sdk-perf.test.ts",
+    "owner": "sdk-contract",
+    "disposition": "sdk-local",
+    "rationale": "Keep co-located: protects the public SDK API or an SDK adapter, lifecycle, cache, or reporting contract."
+  },
+  {
+    "file": "packages/sdk/src/__tests__/sdk-tests.test.ts",
+    "owner": "sdk-contract",
+    "disposition": "sdk-local",
+    "rationale": "Keep co-located: protects the public SDK API or an SDK adapter, lifecycle, cache, or reporting contract."
+  },
+  {
+    "file": "packages/sdk/src/doc-generation/model.test.ts",
+    "owner": "sdk-contract",
+    "disposition": "sdk-local",
+    "rationale": "Keep co-located: protects the public SDK API or an SDK adapter, lifecycle, cache, or reporting contract."
+  },
+  {
+    "file": "packages/std/src/array.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/async.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/bytes.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/deque.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/dict.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/encoding/base64.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/encoding/hex.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/env.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/fixed_array/fns.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/fs.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/http.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/input.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/json.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/log.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/math/constants.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/math/float.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/math/int.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/math/interpolate.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/msgpack.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/msgpack/fns.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/number/cast.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/optional/fns.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/output.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/path.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/random.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/result/fns.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/set.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/string/type.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/string_bytes_iterator.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/time.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/traits/contracts.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/vx.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/voyd_semver/src/parse.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/voyd_semver/src/version.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/vx-dom/src/__tests__/app-runtime.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/vx-dom/src/__tests__/browser.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/vx-dom/src/__tests__/memory.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/vx-dom/src/__tests__/normalize.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/vx-dom/src/__tests__/server.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
+  },
+  {
+    "file": "packages/web/src/phase2.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/web/src/web.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "scripts/ci/check-optimizer-bench-regression.test.mjs",
+    "owner": "ci-tooling",
+    "disposition": "tooling-local",
+    "rationale": "Keep co-located: protects CI, release, or repository tooling behavior."
+  },
+  {
+    "file": "tests/conformance/src/effects.test.ts",
+    "owner": "language-conformance",
+    "disposition": "portable-conformance",
+    "rationale": "Keep in the portable suite: asserts implementation-independent language behavior through the conformance adapter."
+  },
+  {
+    "file": "tests/conformance/src/manifest-coverage.test.ts",
+    "owner": "language-conformance",
+    "disposition": "portable-conformance",
+    "rationale": "Keep in the portable suite: asserts implementation-independent language behavior through the conformance adapter."
+  },
+  {
+    "file": "tests/conformance/src/modules.test.ts",
+    "owner": "language-conformance",
+    "disposition": "portable-conformance",
+    "rationale": "Keep in the portable suite: asserts implementation-independent language behavior through the conformance adapter."
+  },
+  {
+    "file": "tests/conformance/src/runtime.test.ts",
+    "owner": "language-conformance",
+    "disposition": "portable-conformance",
+    "rationale": "Keep in the portable suite: asserts implementation-independent language behavior through the conformance adapter."
+  },
+  {
+    "file": "tests/conformance/src/syntax.test.ts",
+    "owner": "language-conformance",
+    "disposition": "portable-conformance",
+    "rationale": "Keep in the portable suite: asserts implementation-independent language behavior through the conformance adapter."
+  },
+  {
+    "file": "tests/conformance/src/typing.test.ts",
+    "owner": "language-conformance",
+    "disposition": "portable-conformance",
+    "rationale": "Keep in the portable suite: asserts implementation-independent language behavior through the conformance adapter."
+  },
+  {
+    "file": "tests/conformance/src/wasm.test.ts",
+    "owner": "language-conformance",
+    "disposition": "portable-conformance",
+    "rationale": "Keep in the portable suite: asserts implementation-independent language behavior through the conformance adapter."
+  },
+  {
+    "file": "tests/integration/fixtures/sink.test.voyd",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/doc-generation.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/effect-buffer-size.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/effects-e2e.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/html.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/node-modules-voyd-semver.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/optimization-differential.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/runtime-trap-diagnostics.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/std-fs.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/std-http.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/std-input-output.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/std-math-constants.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/string-slice-apis.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/task-runtime.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/vx-dom.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/wasm-validation.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/integration/src/web-framework.test.ts",
+    "owner": "cross-package-integration",
+    "disposition": "cross-package-integration",
+    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/performance/src/vtrace-compute-benchmark.test.ts",
+    "owner": "performance",
+    "disposition": "opt-in-performance",
+    "rationale": "Keep opt-in: measures performance or a performance regression budget and is excluded from default correctness CI."
+  },
+  {
+    "file": "tests/performance/src/vtrace-fast-regression.test.ts",
+    "owner": "performance",
+    "disposition": "opt-in-performance",
+    "rationale": "Keep opt-in: measures performance or a performance regression budget and is excluded from default correctness CI."
+  }
+]

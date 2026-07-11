@@ -1,0 +1,6 @@
+@effect(id: "voyd.conformance.host-probe")
+eff HostProbe
+  read(resume, seed: i32) -> i32
+
+pub fn main(): HostProbe -> i32
+  HostProbe::read(1) + 1

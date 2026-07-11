@@ -480,8 +480,8 @@ const benchmarkAtRefs = ({
     "std-math-transcendentals": readFileSync(
       path.join(
         repoRoot,
-        "apps",
-        "smoke",
+        "tests",
+        "integration",
         "fixtures",
         "std-math-transcendentals.voyd",
       ),
@@ -490,8 +490,8 @@ const benchmarkAtRefs = ({
     "vtrace-main": readFileSync(
       path.join(
         repoRoot,
-        "apps",
-        "smoke",
+        "tests",
+        "performance",
         "fixtures",
         "vtrace-compute-benchmark.voyd",
       ),
@@ -500,9 +500,10 @@ const benchmarkAtRefs = ({
     "effects-wide-return": readFileSync(
       path.join(
         repoRoot,
-        "apps",
-        "smoke",
-        "fixtures",
+        "tests",
+        "conformance",
+        "cases",
+        "runtime",
         "optimized-wide-value-return.voyd",
       ),
       "utf8",

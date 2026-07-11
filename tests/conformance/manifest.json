@@ -1,0 +1,1048 @@
+{
+  "version": 1,
+  "suites": [
+    {
+      "id": "syntax.string-interpolation",
+      "title": "String interpolation",
+      "entry": "cases/syntax/string-interpolation.voyd",
+      "tags": ["syntax", "runtime", "fast"],
+      "cases": [
+        {
+          "id": "syntax.string-interpolation.basic",
+          "title": "evaluates placeholders",
+          "entryName": "interpolation_basic",
+          "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "syntax.string-interpolation.escape",
+          "title": "preserves escaped markers",
+          "entryName": "interpolation_escape",
+          "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "syntax.string-interpolation.chain",
+          "title": "supports multiple placeholders",
+          "entryName": "interpolation_chain",
+          "expect": { "kind": "equals", "value": 1 }
+        }
+      ]
+    },
+    {
+      "id": "syntax.html",
+      "title": "HTML surface syntax",
+      "entry": "cases/syntax/html.voyd",
+      "tags": ["syntax", "html", "compile"],
+      "cases": [
+        {
+          "id": "syntax.html.attributes-and-events",
+          "title": "accepts built-in elements, attributes, and event values",
+          "expect": { "kind": "compile-success" }
+        }
+      ]
+    },
+    {
+      "id": "typing.range-inference",
+      "title": "Generic range inference",
+      "entry": "cases/typing/range-generic-inference.voyd",
+      "tags": ["typing", "generics", "runtime"],
+      "cases": [
+        {
+          "id": "typing.range-inference.f64",
+          "title": "infers f64 from mixed bounds",
+          "entryName": "infer_range_f64_from_bounds",
+          "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "typing.range-inference.i64",
+          "title": "infers i64 from suffixed bounds",
+          "entryName": "infer_range_i64_from_suffix_literals",
+          "expect": { "kind": "equals", "value": 1 }
+        }
+      ]
+    },
+    {
+      "id": "typing.call-non-function",
+      "title": "Non-callable diagnostics",
+      "entry": "cases/typing/call-non-function.voyd",
+      "tags": ["typing", "calls", "diagnostics"],
+      "cases": [
+        {
+          "id": "typing.diagnostics.non-callable",
+          "title": "rejects calls to non-function values",
+          "expect": { "kind": "diagnostics", "codes": ["TY0005"] }
+        }
+      ]
+    },
+    {
+      "id": "typing.label-mismatch",
+      "title": "Call label diagnostics",
+      "entry": "cases/typing/label-mismatch.voyd",
+      "tags": ["typing", "labels", "diagnostics"],
+      "cases": [
+        {
+          "id": "typing.diagnostics.label-mismatch",
+          "title": "reports unexpected argument labels",
+          "expect": {
+            "kind": "diagnostics",
+            "codes": ["TY0021"],
+            "messageIncludes": ["expected x", "got z"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "typing.initializer-span",
+      "title": "Diagnostic span precision",
+      "entry": "cases/typing/initializer-span.voyd",
+      "tags": ["typing", "diagnostics", "spans"],
+      "cases": [
+        {
+          "id": "typing.diagnostics.initializer-span",
+          "title": "highlights the mismatched initializer",
+          "expect": {
+            "kind": "diagnostics",
+            "codes": ["TY0027"],
+            "spans": [{ "code": "TY0027", "text": "5.0" }]
+          }
+        }
+      ]
+    },
+    {
+      "id": "typing.value-layout",
+      "title": "Value layout diagnostics",
+      "entry": "cases/typing/value-layout.voyd",
+      "tags": ["typing", "values", "unions", "diagnostics"],
+      "cases": [
+        {
+          "id": "typing.diagnostics.mixed-value-reference-union",
+          "title": "rejects mixed value and reference union layouts",
+          "expect": { "kind": "diagnostics", "codes": ["TY0046"] }
+        }
+      ]
+    },
+    {
+      "id": "typing.immutability",
+      "title": "Immutable binding diagnostics",
+      "entry": "cases/typing/immutability.voyd",
+      "tags": ["typing", "mutability", "diagnostics"],
+      "cases": [
+        {
+          "id": "typing.diagnostics.immutable-reassignment",
+          "title": "rejects reassignment of let bindings",
+          "expect": { "kind": "diagnostics", "codes": ["TY0001"] }
+        }
+      ]
+    },
+    {
+      "id": "runtime.prefix-minus",
+      "title": "Prefix minus",
+      "entry": "cases/runtime/prefix-minus.voyd",
+      "tags": ["operators", "runtime", "fast"],
+      "cases": [
+        {
+          "id": "runtime.prefix-minus.intrinsic",
+          "title": "supports intrinsic calls",
+          "entryName": "prefix_minus_intrinsic",
+          "expect": { "kind": "equals", "value": -5 }
+        },
+        {
+          "id": "runtime.prefix-minus.overload",
+          "title": "supports operator overloads",
+          "entryName": "prefix_minus_overload",
+          "expect": { "kind": "equals", "value": 4 }
+        }
+      ]
+    },
+    {
+      "id": "runtime.range-for",
+      "title": "Range for loops",
+      "entry": "cases/runtime/range-for.voyd",
+      "tags": ["control-flow", "effects", "runtime"],
+      "cases": [
+        {
+          "id": "runtime.range-for.half-open",
+          "title": "iterates half-open ranges",
+          "entryName": "range_for_half_open",
+          "expect": { "kind": "equals", "value": 10 }
+        },
+        {
+          "id": "runtime.range-for.inclusive",
+          "title": "iterates inclusive ranges",
+          "entryName": "range_for_inclusive",
+          "expect": { "kind": "equals", "value": 15 }
+        },
+        {
+          "id": "runtime.range-for.nested",
+          "title": "supports nested iteration",
+          "entryName": "range_for_nested",
+          "expect": { "kind": "equals", "value": 18 }
+        },
+        {
+          "id": "runtime.range-for.i32-max",
+          "title": "stops inclusive iteration at i32 max",
+          "entryName": "range_iterator_inclusive_i32_max_stops",
+          "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "runtime.range-for.tail-effects",
+          "title": "preserves handled tail effects",
+          "entryName": "range_for_handles_tail_effects_after_host_seed",
+          "expect": {
+            "kind": "number-range",
+            "minInclusive": 0,
+            "maxExclusive": 32
+          }
+        }
+      ]
+    },
+    {
+      "id": "runtime.trait-dispatch.labeled-container",
+      "title": "Trait dispatch with labeled argument containers",
+      "entry": "cases/runtime/trait-dispatch-labeled-container.voyd",
+      "tags": ["traits", "labels", "runtime"],
+      "cases": [
+        {
+          "id": "runtime.trait-dispatch.labeled-container.call",
+          "title": "unpacks labeled argument containers",
+          "entryName": "trait_dispatch_labeled_container",
+          "expect": { "kind": "equals", "value": 1 }
+        }
+      ]
+    },
+    {
+      "id": "runtime.optimized-wide-values",
+      "title": "Optimized wide value returns",
+      "entry": "cases/runtime/optimized-wide-value-return.voyd",
+      "optimize": true,
+      "tags": ["values", "effects", "optimization", "runtime"],
+      "cases": [
+        {
+          "id": "runtime.optimized-wide-values.direct",
+          "title": "preserves direct effectful returns",
+          "entryName": "direct_effectful_wide_value_return",
+          "expect": { "kind": "equals", "value": 11 }
+        },
+        {
+          "id": "runtime.optimized-wide-values.trait",
+          "title": "preserves trait-dispatched returns",
+          "entryName": "trait_dispatch_wide_value_return",
+          "expect": { "kind": "equals", "value": 11 }
+        },
+        {
+          "id": "runtime.optimized-wide-values.effectful-trait",
+          "title": "preserves effectful trait-dispatched returns",
+          "entryName": "trait_dispatch_effectful_wide_value_return",
+          "expect": { "kind": "equals", "value": 11 }
+        }
+      ]
+    },
+    {
+      "id": "runtime.value-types",
+      "title": "Value type runtime semantics",
+      "entry": "cases/runtime/value-types.voyd",
+      "tags": ["values", "abi", "arrays", "closures", "runtime"],
+      "cases": [
+        {
+          "id": "runtime.value-types.copy",
+          "title": "copies values on assignment",
+          "entryName": "value_copy_semantics",
+          "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "runtime.value-types.narrow-mut-param",
+          "title": "passes narrow mutable parameters",
+          "entryName": "value_narrow_mutable_param",
+          "expect": { "kind": "equals", "value": 99 }
+        },
+        {
+          "id": "runtime.value-types.static-trait",
+          "title": "supports static trait dispatch",
+          "entryName": "value_static_trait_dispatch",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.value-types.union-match",
+          "title": "matches unions",
+          "entryName": "value_match",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.value-types.union-alias",
+          "title": "matches aliased unions",
+          "entryName": "value_union_alias_match",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.value-types.union-field",
+          "title": "stores direct unions in fields",
+          "entryName": "value_union_field_round_trip",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.value-types.object-field",
+          "title": "stores values in objects",
+          "entryName": "value_inside_object",
+          "expect": { "kind": "equals", "value": 8 }
+        },
+        {
+          "id": "runtime.value-types.optional-once",
+          "title": "evaluates optional bindings once",
+          "entryName": "optional_binding_evaluates_once",
+          "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "runtime.value-types.array",
+          "title": "stores values in arrays",
+          "entryName": "value_array_storage",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.value-types.array-resize",
+          "title": "copies array values when growing",
+          "entryName": "value_array_resize_copy",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.value-types.single-lane-array",
+          "title": "stores single-lane values inline",
+          "entryName": "value_single_lane_array_storage",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.value-types.single-lane-mut-param",
+          "title": "passes single-lane mutable parameters",
+          "entryName": "value_single_lane_mutable_param",
+          "expect": { "kind": "equals", "value": 4 }
+        },
+        {
+          "id": "runtime.value-types.single-lane-mut-receiver",
+          "title": "passes single-lane mutable receivers",
+          "entryName": "value_single_lane_mutable_receiver",
+          "expect": { "kind": "equals", "value": 4 }
+        },
+        {
+          "id": "runtime.value-types.single-lane-labeled-mut",
+          "title": "passes labeled mutable parameters",
+          "entryName": "value_single_lane_labeled_mutable_param",
+          "expect": { "kind": "equals", "value": 10 }
+        },
+        {
+          "id": "runtime.value-types.optional-field",
+          "title": "supports optional fields",
+          "entryName": "value_optional_field",
+          "expect": { "kind": "equals", "value": 5 }
+        },
+        {
+          "id": "runtime.value-types.optional-some",
+          "title": "reads Some fields",
+          "entryName": "value_optional_field_some_match",
+          "expect": { "kind": "equals", "value": 5 }
+        },
+        {
+          "id": "runtime.value-types.optional-none",
+          "title": "reads None fields",
+          "entryName": "value_optional_field_none_match",
+          "expect": { "kind": "equals", "value": 0 }
+        },
+        {
+          "id": "runtime.value-types.heap-reference",
+          "title": "contains heap references",
+          "entryName": "value_contains_heap_reference",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.value-types.wide-round-trip",
+          "title": "round-trips five-lane values",
+          "entryName": "value_five_lane_round_trip",
+          "expect": { "kind": "equals", "value": 15 }
+        },
+        {
+          "id": "runtime.value-types.wide-mut-param",
+          "title": "passes wide mutable parameters",
+          "entryName": "value_five_lane_mutable_param",
+          "expect": { "kind": "equals", "value": 11 }
+        },
+        {
+          "id": "runtime.value-types.wide-copy-alias",
+          "title": "preserves immutable aliases",
+          "entryName": "value_five_lane_alias_then_mutate_copy",
+          "expect": { "kind": "equals", "value": 10 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-field",
+          "title": "reads wide array fields",
+          "entryName": "value_wide_array_field_access",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-local-view",
+          "title": "borrows wide array locals",
+          "entryName": "value_wide_array_local_view_access",
+          "expect": { "kind": "equals", "value": 17 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-readonly-alias",
+          "title": "preserves readonly aliases",
+          "entryName": "value_wide_array_local_view_survives_readonly_alias_access",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-assignment-alias",
+          "title": "preserves assignment aliases",
+          "entryName": "value_wide_array_local_view_survives_readonly_assignment_alias",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-nested-alias",
+          "title": "preserves nested aliases",
+          "entryName": "value_wide_array_local_view_survives_nested_assignment_alias",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-mut-param",
+          "title": "materializes before mutable calls",
+          "entryName": "value_wide_array_local_materializes_for_mut_param",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-root-mutation",
+          "title": "materializes before root mutation",
+          "entryName": "value_wide_array_local_materializes_before_root_mutation",
+          "expect": { "kind": "equals", "value": 10 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-alias-mutation",
+          "title": "materializes before alias mutation",
+          "entryName": "value_wide_array_local_materializes_before_alias_mutation",
+          "expect": { "kind": "equals", "value": 10 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-nested-mutation",
+          "title": "materializes before nested mutation",
+          "entryName": "value_wide_array_local_materializes_before_nested_alias_mutation",
+          "expect": { "kind": "equals", "value": 10 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-return",
+          "title": "materializes before return",
+          "entryName": "value_wide_array_local_materializes_for_return",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-readonly-call",
+          "title": "passes projected elements to readonly parameters",
+          "entryName": "value_wide_array_non_mut_call",
+          "expect": { "kind": "equals", "value": 17 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-readonly-method",
+          "title": "passes projected elements to readonly methods",
+          "entryName": "value_wide_array_non_mut_method_call",
+          "expect": { "kind": "equals", "value": 17 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-direct-method",
+          "title": "passes direct projected receivers",
+          "entryName": "value_wide_array_direct_non_mut_method_call",
+          "expect": { "kind": "equals", "value": 17 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-get",
+          "title": "projects immediate Array.get payloads",
+          "entryName": "value_wide_array_get_immediate_payload",
+          "expect": { "kind": "equals", "value": 17 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-get-alias",
+          "title": "preserves Array.get aliases",
+          "entryName": "value_wide_array_get_immediate_payload_survives_readonly_alias_access",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.value-types.wide-array-get-mutation",
+          "title": "materializes Array.get payloads",
+          "entryName": "value_wide_array_get_immediate_payload_materializes_before_alias_mutation",
+          "expect": { "kind": "equals", "value": 10 }
+        },
+        {
+          "id": "runtime.value-types.wide-closure",
+          "title": "marshals wide closure values",
+          "entryName": "value_five_lane_closure_round_trip",
+          "expect": { "kind": "equals", "value": 15 }
+        },
+        {
+          "id": "runtime.value-types.wide-named-closure",
+          "title": "marshals named function closures",
+          "entryName": "value_five_lane_named_function_closure",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.value-types.wide-capture",
+          "title": "stores wide captures",
+          "entryName": "value_five_lane_closure_capture",
+          "expect": { "kind": "equals", "value": 15 }
+        }
+      ]
+    },
+    {
+      "id": "runtime.intersections",
+      "title": "Intersection types",
+      "entry": "cases/runtime/intersections.voyd",
+      "tags": ["types", "traits", "objects", "runtime"],
+      "cases": [
+        {
+          "id": "runtime.intersections.nominal",
+          "title": "combines nominal and structural requirements",
+          "entryName": "nominal_intersections",
+          "expect": { "kind": "equals", "value": 25 }
+        },
+        {
+          "id": "runtime.intersections.structural",
+          "title": "combines structural object requirements",
+          "entryName": "structural_intersections",
+          "expect": { "kind": "equals", "value": 6 }
+        },
+        {
+          "id": "runtime.intersections.traits",
+          "title": "dispatches through intersected traits",
+          "entryName": "trait_intersections",
+          "expect": { "kind": "equals", "value": 475 }
+        },
+        {
+          "id": "runtime.intersections.structural-trait",
+          "title": "combines structural fields and trait requirements",
+          "entryName": "structural_trait_intersection",
+          "expect": { "kind": "equals", "value": 608 }
+        },
+        {
+          "id": "runtime.intersections.nominal-structural-trait",
+          "title": "combines nominal, structural, and trait requirements",
+          "entryName": "nominal_structural_trait_intersection",
+          "expect": { "kind": "equals", "value": 20 }
+        }
+      ]
+    },
+    {
+      "id": "runtime.static-access-and-closures",
+      "title": "Static access and closure calls",
+      "entry": "cases/runtime/static-access-and-closures.voyd",
+      "tags": ["generics", "overloads", "closures", "effects", "runtime"],
+      "cases": [
+        {
+          "id": "runtime.static-access.generic-target",
+          "title": "uses target type arguments for static methods",
+          "entryName": "static_generic_target",
+          "expect": { "kind": "equals", "value": 11 }
+        },
+        {
+          "id": "runtime.static-access.method-inference",
+          "title": "infers method type arguments separately from target arguments",
+          "entryName": "static_generic_method_inference",
+          "expect": { "kind": "equals", "value": 17 }
+        },
+        {
+          "id": "runtime.static-access.overload-ranking",
+          "title": "uses target arguments to rank static overloads",
+          "entryName": "static_target_overload_ranking",
+          "expect": { "kind": "equals", "value": 14 }
+        },
+        {
+          "id": "runtime.closures.curried-optional",
+          "title": "runs curried closure calls with optional arguments",
+          "entryName": "curried_optional_call",
+          "expect": { "kind": "equals", "value": 15 }
+        },
+        {
+          "id": "runtime.closures.mutable-capture-labeled-calls",
+          "title": "captures mutable state across labeled callback calls",
+          "entryName": "closure_capture_labeled_calls",
+          "expect": { "kind": "equals", "value": 6 }
+        },
+        {
+          "id": "runtime.closures.curried-effect-resume",
+          "title": "resumes curried calls after effectful arguments",
+          "entryName": "curried_effect_resume",
+          "expect": { "kind": "equals", "value": 20 }
+        }
+      ]
+    },
+    {
+      "id": "runtime.core-language",
+      "title": "Core portable language behavior",
+      "entry": "cases/runtime/core-language.voyd",
+      "tags": ["traits", "generics", "unions", "tuples", "runtime"],
+      "cases": [
+        {
+          "id": "runtime.traits.qualified-dispatch",
+          "title": "disambiguates qualified trait methods",
+          "entryName": "qualified_trait_dispatch",
+          "expect": { "kind": "equals", "value": 50 }
+        },
+        {
+          "id": "runtime.types.recursive-generic-union",
+          "title": "constructs and matches recursive generic unions",
+          "entryName": "recursive_generic_union",
+          "expect": { "kind": "equals", "value": 2 }
+        },
+        {
+          "id": "runtime.unions.exact-coercion",
+          "title": "prefers an exact union member over a structural supertype",
+          "entryName": "exact_union_coercion",
+          "expect": { "kind": "equals", "value": 41 }
+        },
+        {
+          "id": "runtime.tuples.generic-return-projection",
+          "title": "projects tuples returned through generics",
+          "entryName": "generic_tuple_projection",
+          "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "runtime.control-flow.clause-style-if",
+          "title": "evaluates clause-style if variants",
+          "entryName": "clause_style_if",
+          "expect": { "kind": "equals", "value": 4 }
+        },
+        {
+          "id": "runtime.generics.object-literal",
+          "title": "specializes generic object literal fields",
+          "entryName": "generic_object_literal",
+          "expect": { "kind": "equals", "value": true }
+        },
+        {
+          "id": "runtime.unions.widening",
+          "title": "passes narrower unions to wider parameters",
+          "entryName": "union_widening",
+          "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "runtime.operators.quoted-range-identifier",
+          "title": "keeps quoted range operators as ordinary functions",
+          "entryName": "quoted_range_identifier",
+          "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "runtime.operators.quoted-is-identifier",
+          "title": "keeps quoted is operators as ordinary functions",
+          "entryName": "quoted_is_identifier",
+          "expect": { "kind": "equals", "value": false }
+        },
+        {
+          "id": "runtime.lambdas.contextual-typing",
+          "title": "infers lambda parameters from function contexts",
+          "entryName": "contextual_lambda_typing",
+          "expect": { "kind": "equals", "value": 17 }
+        },
+        {
+          "id": "runtime.operators.integer-modulo",
+          "title": "evaluates integer modulo",
+          "entryName": "integer_modulo",
+          "expect": { "kind": "equals", "value": 1 }
+        }
+      ]
+    },
+    {
+      "id": "runtime.collections",
+      "title": "Collection and subscript behavior",
+      "entry": "cases/runtime/collections.voyd",
+      "tags": ["arrays", "fixed-arrays", "subscripts", "dict", "runtime"],
+      "cases": [
+        {
+          "id": "runtime.collections.array-read",
+          "title": "reads array subscripts",
+          "entryName": "read_index",
+          "expect": { "kind": "equals", "value": 20 }
+        },
+        {
+          "id": "runtime.collections.array-write",
+          "title": "writes array subscripts",
+          "entryName": "write_index",
+          "expect": { "kind": "equals", "value": 99 }
+        },
+        {
+          "id": "runtime.collections.slice-exclusive",
+          "title": "creates exclusive slices",
+          "entryName": "slice_exclusive",
+          "expect": { "kind": "equals", "value": 5 }
+        },
+        {
+          "id": "runtime.collections.slice-inclusive",
+          "title": "creates inclusive slices",
+          "entryName": "slice_inclusive",
+          "expect": { "kind": "equals", "value": 5 }
+        },
+        {
+          "id": "runtime.collections.slice-unbounded",
+          "title": "creates left- and right-unbounded slices",
+          "entryName": "slice_unbounded",
+          "expect": { "kind": "equals", "value": 22 }
+        },
+        {
+          "id": "runtime.collections.dict-subscript",
+          "title": "round-trips dictionary subscripts",
+          "entryName": "map_roundtrip",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.collections.array-write-oob",
+          "title": "traps on out-of-bounds array writes",
+          "entryName": "write_oob",
+          "expect": { "kind": "trap" }
+        }
+      ]
+    },
+    {
+      "id": "runtime.fixed-arrays",
+      "title": "Fixed-array intrinsics",
+      "entry": "cases/runtime/fixed-arrays.voyd",
+      "tags": ["fixed-arrays", "generics", "runtime", "no-prelude"],
+      "cases": [
+        {
+          "id": "runtime.fixed-arrays.length-and-get",
+          "title": "allocates and reads fixed arrays",
+          "entryName": "len_and_head",
+          "expect": { "kind": "equals", "value": 4 }
+        },
+        {
+          "id": "runtime.fixed-arrays.copy",
+          "title": "copies fixed-array ranges",
+          "entryName": "copy_tail",
+          "expect": { "kind": "equals", "value": 2 }
+        },
+        {
+          "id": "runtime.fixed-arrays.iteration",
+          "title": "iterates fixed-array elements",
+          "entryName": "iterate_sum",
+          "expect": { "kind": "equals", "value": 6 }
+        }
+      ]
+    },
+    {
+      "id": "runtime.optimization-parity",
+      "title": "Optimized observable semantics",
+      "entry": "cases/runtime/optimization-parity.voyd",
+      "optimize": true,
+      "tags": [
+        "optimization",
+        "defaults",
+        "aliasing",
+        "evaluation-order",
+        "traps"
+      ],
+      "cases": [
+        {
+          "id": "runtime.optimization.default-arguments",
+          "title": "preserves recursive, labeled, wide, and effectful defaults",
+          "entryName": "default_argument_call_shapes",
+          "expect": { "kind": "equals", "value": 209 }
+        },
+        {
+          "id": "runtime.optimization.heap-alias-mutation",
+          "title": "preserves heap aliases across optimized calls",
+          "entryName": "heap_alias_mutation",
+          "expect": { "kind": "equals", "value": 2 }
+        },
+        {
+          "id": "runtime.optimization.argument-order",
+          "title": "preserves left-to-right argument effects",
+          "entryName": "argument_evaluation_order",
+          "expect": { "kind": "equals", "value": 20 }
+        },
+        {
+          "id": "runtime.optimization.signed-overflow-trap",
+          "title": "preserves signed division overflow traps",
+          "entryName": "signed_division_overflow",
+          "expect": { "kind": "trap" }
+        }
+      ]
+    },
+    {
+      "id": "runtime.traps",
+      "title": "Runtime traps",
+      "entry": "cases/runtime/traps.voyd",
+      "tags": ["runtime", "traps", "no-prelude"],
+      "cases": [
+        {
+          "id": "runtime.traps.integer-division-by-zero",
+          "title": "normalizes runtime traps",
+          "entryName": "deliberate_trap",
+          "expect": { "kind": "trap" }
+        }
+      ]
+    },
+    {
+      "id": "effects.open-callback-row",
+      "title": "Open callback effect rows",
+      "entry": "cases/effects/open-callback-effect-rows.voyd",
+      "tags": ["effects", "typing", "runtime"],
+      "cases": [
+        {
+          "id": "effects.open-callback-row.forward-tail",
+          "title": "handles a required effect and forwards the tail",
+          "entryName": "main",
+          "expect": { "kind": "equals", "value": 11 }
+        }
+      ]
+    },
+    {
+      "id": "effects.host-interactions",
+      "title": "Host effect interactions",
+      "entry": "cases/effects/host-interactions.voyd",
+      "tags": ["effects", "host", "runtime"],
+      "cases": [
+        {
+          "id": "effects.host-interactions.resume",
+          "title": "records and resumes a host effect",
+          "entryName": "main",
+          "host": {
+            "effects": {
+              "HostProbe::read": { "action": "resume", "value": 41 }
+            }
+          },
+          "interactions": [
+            {
+              "kind": "effect",
+              "label": "HostProbe::read",
+              "args": [1]
+            }
+          ],
+          "expect": { "kind": "equals", "value": 42 }
+        }
+      ]
+    },
+    {
+      "id": "effects.advanced",
+      "title": "Continuation and overload behavior",
+      "entry": "cases/effects/advanced.voyd",
+      "tags": ["effects", "continuations", "overloads", "runtime"],
+      "cases": [
+        {
+          "id": "effects.continuations.while-no-replay",
+          "title": "resumes loop continuations without replaying prior iterations",
+          "entryName": "continuation_while",
+          "host": {
+            "effects": {
+              "LoopProbe::await": { "action": "resume", "value": 1 }
+            }
+          },
+          "interactions": [
+            { "kind": "effect", "label": "LoopProbe::await", "args": [1] },
+            { "kind": "effect", "label": "LoopProbe::await", "args": [2] },
+            { "kind": "effect", "label": "LoopProbe::await", "args": [3] },
+            { "kind": "effect", "label": "LoopProbe::await", "args": [4] },
+            { "kind": "effect", "label": "LoopProbe::await", "args": [5] }
+          ],
+          "expect": { "kind": "equals", "value": 5 }
+        },
+        {
+          "id": "effects.internal.perform-in-try",
+          "title": "performs directly inside a try body",
+          "entryName": "perform_in_try",
+          "expect": { "kind": "equals", "value": 15 }
+        },
+        {
+          "id": "effects.internal.lambda-perform",
+          "title": "resumes effects inside lambdas",
+          "entryName": "lambda_perform",
+          "expect": { "kind": "equals", "value": 25 }
+        },
+        {
+          "id": "effects.overloads.semantic-alias",
+          "title": "selects overloaded handler clauses through aliases",
+          "entryName": "overloaded_handler_alias",
+          "expect": { "kind": "equals", "value": 12 }
+        }
+      ]
+    },
+    {
+      "id": "effects.invalid-resume",
+      "title": "Escaped resume diagnostics",
+      "entry": "cases/effects/invalid-resume.voyd",
+      "tags": ["effects", "diagnostics"],
+      "cases": [
+        {
+          "id": "effects.diagnostics.escaped-resume",
+          "title": "rejects escaped resume callbacks",
+          "expect": { "kind": "diagnostics", "codes": ["TY0035"] }
+        }
+      ]
+    },
+    {
+      "id": "effects.invalid-tail",
+      "title": "Missing tail diagnostics",
+      "entry": "cases/effects/invalid-tail.voyd",
+      "tags": ["effects", "diagnostics"],
+      "cases": [
+        {
+          "id": "effects.diagnostics.missing-tail",
+          "title": "rejects conditionally missing tail calls",
+          "expect": { "kind": "diagnostics", "codes": ["TY0015"] }
+        }
+      ]
+    },
+    {
+      "id": "effects.exports.pure",
+      "title": "Pure exported effect annotations",
+      "entry": "cases/effects/effects-exports-pure/pkg.voyd",
+      "tags": ["effects", "modules", "runtime"],
+      "cases": [
+        {
+          "id": "effects.exports.pure.omitted-row",
+          "title": "allows omitted annotations for pure APIs",
+          "entryName": "main",
+          "expect": { "kind": "equals", "value": 7 }
+        }
+      ]
+    },
+    {
+      "id": "effects.exports.annotated",
+      "title": "Annotated effectful exports",
+      "entry": "cases/effects/effects-exports-annotated/pkg.voyd",
+      "tags": ["effects", "modules", "typing"],
+      "cases": [
+        {
+          "id": "effects.exports.annotated.accepted",
+          "title": "accepts explicit effect rows",
+          "expect": { "kind": "compile-success" }
+        }
+      ]
+    },
+    {
+      "id": "effects.exports.missing-annotation",
+      "title": "Missing effectful export annotations",
+      "entry": "cases/effects/effects-exports-missing-annotation/pkg.voyd",
+      "tags": ["effects", "diagnostics", "modules"],
+      "cases": [
+        {
+          "id": "effects.exports.missing-annotation.diagnostic",
+          "title": "reports the exported operation",
+          "expect": {
+            "kind": "diagnostics",
+            "codes": ["TY0016"],
+            "messageIncludes": ["Async", "await"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "wasm.basic-abi",
+      "title": "Basic WebAssembly ABI",
+      "entry": "cases/wasm/basic-abi.voyd",
+      "tags": ["wasm", "abi", "no-prelude"],
+      "cases": [
+        {
+          "id": "wasm.basic-abi.exports",
+          "title": "exports memory and public functions without host imports",
+          "expect": {
+            "kind": "wasm",
+            "exports": ["memory", "main"],
+            "absentImports": ["voyd_math::sin", "voyd_math::cos"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "modules.source-pkg.inline",
+      "title": "Inline modules named pkg",
+      "entry": "cases/modules/source-level-pkg/src/inline_pkg_module.voyd",
+      "tags": ["modules", "runtime"],
+      "cases": [
+        {
+          "id": "modules.source-pkg.inline.scope",
+          "title": "keeps inline module scope",
+          "entryName": "main",
+          "expect": { "kind": "equals", "value": 42 }
+        }
+      ]
+    },
+    {
+      "id": "modules.macros.sibling",
+      "title": "Cross-module functional macros",
+      "entry": "cases/modules/macro/main.voyd",
+      "tags": ["modules", "macros", "runtime"],
+      "cases": [
+        {
+          "id": "modules.macros.sibling-expansion",
+          "title": "expands public macros imported from sibling modules",
+          "entryName": "main",
+          "expect": { "kind": "equals", "value": 3 }
+        }
+      ]
+    },
+    {
+      "id": "modules.cyclic-declarations",
+      "title": "Cyclic declaration surfaces",
+      "entry": "cases/modules/cycle/main.voyd",
+      "tags": ["modules", "cycles", "runtime"],
+      "cases": [
+        {
+          "id": "modules.cycles.declaration-surfaces",
+          "title": "links mutually imported declaration surfaces",
+          "entryName": "main",
+          "expect": { "kind": "equals", "value": 3 }
+        }
+      ]
+    },
+    {
+      "id": "modules.imported-defaults",
+      "title": "Imported default arguments",
+      "entry": "cases/modules/default-import/main.voyd",
+      "tags": ["modules", "defaults", "runtime"],
+      "cases": [
+        {
+          "id": "modules.defaults.imported-call",
+          "title": "applies defaults declared in imported modules",
+          "entryName": "main",
+          "expect": { "kind": "equals", "value": 8 }
+        }
+      ]
+    },
+    {
+      "id": "modules.source-pkg.exports",
+      "title": "Source subpackage exports",
+      "entry": "cases/modules/source-level-pkg/src/main.voyd",
+      "tags": ["modules", "visibility", "runtime"],
+      "cases": [
+        {
+          "id": "modules.source-pkg.exports.nested",
+          "title": "consumes nested pkg exports",
+          "entryName": "main",
+          "expect": { "kind": "equals", "value": 41 }
+        }
+      ]
+    },
+    {
+      "id": "modules.source-pkg.internal-import",
+      "title": "Source subpackage internal imports",
+      "entry": "cases/modules/source-level-pkg/src/fails_non_export.voyd",
+      "tags": ["modules", "visibility", "diagnostics"],
+      "cases": [
+        {
+          "id": "modules.source-pkg.internal-import.rejected",
+          "title": "rejects direct internal imports",
+          "expect": {
+            "kind": "diagnostics",
+            "codes": ["BD0001"],
+            "messageIncludes": ["visibility: package", "internal_only"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "modules.source-pkg.non-api-member",
+      "title": "Source subpackage member visibility",
+      "entry": "cases/modules/source-level-pkg/src/fails_non_api_member.voyd",
+      "tags": ["modules", "visibility", "diagnostics"],
+      "cases": [
+        {
+          "id": "modules.source-pkg.non-api-member.rejected",
+          "title": "rejects non-api member access",
+          "expect": {
+            "kind": "diagnostics",
+            "codes": ["TY0009"],
+            "messageIncludes": ["hidden"]
+          }
+        }
+      ]
+    }
+  ]
+}
