@@ -1,21 +1,13 @@
-import {
-  type Expr,
-  isForm,
-  isIdentifierAtom,
-  isInternalIdentifierAtom,
-} from "../../../parser/index.js";
-import { parseLambdaSignature } from "../../lambda.js";
-import { toSourceSpan } from "../../utils.js";
+import { parseSurfaceLambdaExpression } from "../../../parser/surface/index.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveSymbol, resolveTypeSymbol } from "../resolution.js";
 import {
   lowerTypeExpr,
   lowerTypeParameters,
   wrapInOptionalTypeExpr,
 } from "../type-expressions.js";
-import { normalizeNestedFunctionTypeAnnotation } from "../../function-type-annotations.js";
 import type { HirExprId } from "../../ids.js";
 import type { HirParameter } from "../../hir/index.js";
-import { unwrapMutablePattern } from "./patterns.js";
 import type { LoweringFormParams } from "./types.js";
 
 export const lowerLambda = ({
@@ -24,20 +16,15 @@ export const lowerLambda = ({
   scopes,
   lowerExpr,
 }: LoweringFormParams): HirExprId => {
-  const signatureExpr = form.at(1);
-  const bodyExpr = form.at(2);
-  if (!signatureExpr || !bodyExpr) {
-    throw new Error("lambda expression missing signature or body");
-  }
+  const { signature, body: bodyExpr } = parseSurfaceLambdaExpression(form);
 
   const lambdaScope = ctx.scopeByNode.get(form.syntaxId);
   if (lambdaScope !== undefined) {
     scopes.push(lambdaScope);
   }
 
-  const signature = parseLambdaSignature(signatureExpr);
-  const parameters = signature.parameters.map((param) =>
-    lowerLambdaParameter(param, ctx, scopes)
+  const parameters = signature.normalizedParameters.map((param) =>
+    lowerLambdaParameter(param, ctx, scopes),
   );
 
   const typeParameters = lowerTypeParameters({
@@ -75,71 +62,27 @@ export const lowerLambda = ({
 };
 
 const lowerLambdaParameter = (
-  param: Expr,
+  param: import("../../../parser/surface/index.js").SurfaceLambdaParameter,
   ctx: LoweringFormParams["ctx"],
-  scopes: LoweringFormParams["scopes"]
+  scopes: LoweringFormParams["scopes"],
 ): HirParameter => {
-  const { target, bindingKind } = unwrapMutablePattern(param);
-
-  if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
-    const symbol = resolveSymbol(target.value, scopes.current(), ctx);
-    return {
+  const symbol = resolveSymbol(param.name.value, scopes.current(), ctx);
+  const lowered = lowerTypeExpr(param.typeExpr, ctx, scopes.current());
+  const type =
+    lowered && param.optional
+      ? wrapInOptionalTypeExpr({ inner: lowered, ctx, scope: scopes.current() })
+      : lowered;
+  return {
+    symbol,
+    pattern: {
+      kind: "identifier",
       symbol,
-      pattern: {
-        kind: "identifier",
-        symbol,
-        span: toSourceSpan(param),
-        bindingKind,
-      },
-      mutable: false,
-      span: toSourceSpan(param),
-    };
-  }
-
-  if (isForm(target) && (target.calls(":") || target.calls("?:"))) {
-    const { nameExpr, typeExpr, optional } =
-      normalizeNestedFunctionTypeAnnotation(target);
-    const { target: nameTarget, bindingKind: nameBinding } =
-      unwrapMutablePattern(nameExpr);
-    if (
-      !isIdentifierAtom(nameTarget) &&
-      !isInternalIdentifierAtom(nameTarget)
-    ) {
-      throw new Error("lambda parameter name must be an identifier");
-    }
-    const symbol = resolveSymbol(nameTarget.value, scopes.current(), ctx);
-    const lowered = lowerTypeExpr(typeExpr, ctx, scopes.current());
-    if (optional && !lowered) {
-      throw new Error("optional lambda parameter missing type");
-    }
-    const type =
-      lowered && optional
-        ? wrapInOptionalTypeExpr({ inner: lowered, ctx, scope: scopes.current() })
-        : lowered;
-    return {
-      symbol,
-      pattern: {
-        kind: "identifier",
-        symbol,
-        span: toSourceSpan(param),
-        bindingKind: nameBinding ?? bindingKind,
-      },
-      mutable: false,
-      span: toSourceSpan(param),
-      optional,
-      type,
-    };
-  }
-
-  if (isForm(target)) {
-    const nestedParams: HirParameter[] = target
-      .toArray()
-      .map((entry) => lowerLambdaParameter(entry, ctx, scopes));
-    if (nestedParams.length !== 1) {
-      throw new Error("unexpected nested lambda parameter structure");
-    }
-    return nestedParams[0]!;
-  }
-
-  throw new Error("unsupported lambda parameter form");
+      span: toSourceSpan(param.syntax),
+      bindingKind: param.bindingKind,
+    },
+    mutable: false,
+    span: toSourceSpan(param.syntax),
+    optional: param.optional,
+    type,
+  };
 };

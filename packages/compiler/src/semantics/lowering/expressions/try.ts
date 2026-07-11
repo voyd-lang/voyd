@@ -6,16 +6,21 @@ import {
   isInternalIdentifierAtom,
 } from "../../../parser/index.js";
 import {
+  parseSurfaceHandlerClause,
+  parseSurfaceTryExpression,
+  type SurfaceHandlerHead,
+} from "../../../parser/surface/index.js";
+import {
   isTryHandlerClause,
   stripTryHandlerClauses,
 } from "../../try-handler-clauses.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import type { LoweringFormParams } from "./types.js";
 
 const collectNamespaceSegments = (
-  expr: Expr | undefined
+  expr: Expr | undefined,
 ): readonly string[] | undefined => {
   if (!expr) return undefined;
   if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
@@ -65,20 +70,18 @@ export const lowerTry = ({
   scopes,
   lowerExpr,
 }: LoweringFormParams): number => {
-  const markerExpr = form.at(1);
-  const hasOpenUnhandled =
-    isIdentifierAtom(markerExpr) && markerExpr.value === "open";
-  const bodyIndex = hasOpenUnhandled ? 2 : 1;
-  const bodyExpr = form.at(bodyIndex);
-  if (!bodyExpr) {
-    throw new Error("try expression missing body");
-  }
+  const {
+    openUnhandled: hasOpenUnhandled,
+    bodyIndex,
+    body: bodyExpr,
+  } = parseSurfaceTryExpression(form);
   const { expr: strippedBody, handlers: embeddedHandlers } =
     stripTryHandlerClauses({
       expr: bodyExpr,
       scope: scopes.current(),
       resolveBareHandlerHead: ({ name, scope }) =>
-        typeof ctx.symbolTable.resolveByKinds(name, scope, ["effect-op"]) === "number",
+        typeof ctx.symbolTable.resolveByKinds(name, scope, ["effect-op"]) ===
+        "number",
       getNestedScope: ({ expr, parentScope }) =>
         ctx.scopeByNode.get(expr.syntaxId) ?? parentScope,
     });
@@ -93,16 +96,12 @@ export const lowerTry = ({
     if (clauseScope !== undefined) {
       scopes.push(clauseScope);
     }
-    const head = entry.at(1);
-    const clauseBody = entry.at(2);
+    const { head, body: clauseBody } = parseSurfaceHandlerClause(entry);
     const { operation, effect, parameters, resumable } = lowerHandlerHead(
       head,
       ctx,
-      clauseScope ?? scopes.current()
+      clauseScope ?? scopes.current(),
     );
-    if (!clauseBody) {
-      throw new Error("effect handler clause missing body");
-    }
     const bodyId = lowerExpr(clauseBody, ctx, scopes);
     if (clauseScope !== undefined) {
       scopes.pop();
@@ -154,7 +153,9 @@ const collectHandlerForms = ({
           expr: entry,
           scope,
           resolveBareHandlerHead: ({ name, scope: headScope }) =>
-            typeof ctx.symbolTable.resolveByKinds(name, headScope, ["effect-op"]) === "number",
+            typeof ctx.symbolTable.resolveByKinds(name, headScope, [
+              "effect-op",
+            ]) === "number",
         }) &&
         isForm(entry)
       ) {
@@ -168,7 +169,9 @@ const collectHandlerForms = ({
         expr: entry,
         scope,
         resolveBareHandlerHead: ({ name, scope: headScope }) =>
-          typeof ctx.symbolTable.resolveByKinds(name, headScope, ["effect-op"]) === "number",
+          typeof ctx.symbolTable.resolveByKinds(name, headScope, [
+            "effect-op",
+          ]) === "number",
       }) &&
       isForm(entry)
     ) {
@@ -179,167 +182,36 @@ const collectHandlerForms = ({
 };
 
 const lowerHandlerHead = (
-  head: Expr | undefined,
+  head: SurfaceHandlerHead,
   ctx: LoweringFormParams["ctx"],
-  scope: number
+  scope: number,
 ): {
   operation: number;
   effect?: number;
   parameters: { symbol: number; span: ReturnType<typeof toSourceSpan> }[];
   resumable: "ctl" | "fn";
 } => {
-  if (!head) {
-    throw new Error("effect handler missing head");
-  }
-
-  if (isForm(head) && head.calls("::")) {
-    const effectExpr = head.at(1);
-    const opExpr = head.at(2);
-    const effectSymbol =
-      effectExpr && isIdentifierAtom(effectExpr)
-        ? resolveSymbol(effectExpr.value, scope, ctx)
-        : resolveQualifiedSymbol({
-            segments: collectNamespaceSegments(effectExpr),
-            scope,
-            ctx,
-          });
-    const { operation, parameters, resumable } = lowerHandlerCall(
-      opExpr,
-      ctx,
-      scope,
-      effectSymbol
-    );
-    return { operation, effect: effectSymbol, parameters, resumable };
-  }
-
-  const { operation, parameters, resumable } = lowerHandlerCall(
-    head,
-    ctx,
-    scope
-  );
-  return { operation, parameters, resumable };
-};
-
-const lowerHandlerCall = (
-  head: Expr | undefined,
-  ctx: LoweringFormParams["ctx"],
-  scope: number,
-  effectSymbol?: number
-): {
-  operation: number;
-  parameters: { symbol: number; span: ReturnType<typeof toSourceSpan> }[];
-  resumable: "ctl" | "fn";
-} => {
-  if (!head) {
-    throw new Error("handler head missing operation");
-  }
-
-  const parseParam = (
-    expr: Expr
-  ): { name: string; span: ReturnType<typeof toSourceSpan>; typeExpr?: Expr } | undefined => {
-    if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
-      return { name: expr.value, span: toSourceSpan(expr) };
-    }
-    if (isForm(expr) && expr.calls(":")) {
-      const nameExpr = expr.at(1);
-      const typeExpr = expr.at(2);
-      if (
-        (isIdentifierAtom(nameExpr) || isInternalIdentifierAtom(nameExpr)) &&
-        typeExpr
-      ) {
-        return {
-          name: nameExpr.value,
-          span: toSourceSpan(nameExpr),
-          typeExpr,
-        };
-      }
-    }
-    return undefined;
-  };
-
-  const namespaced = collectNamespaceSegments(head);
-  if (namespaced && namespaced.length > 1) {
-    const opName = namespaced.at(-1)!;
-    const effectPath = namespaced.slice(0, -1);
-    const effectSymbolFromPath =
-      effectSymbol ??
-      resolveQualifiedSymbol({
-        segments: effectPath,
-        scope,
-        ctx,
-      });
-    const resolvedOperation =
-      effectSymbolFromPath !== undefined
-        ? ctx.moduleMembers
-            .get(effectSymbolFromPath)
-            ?.get(opName)
-            ?.values()
-            .next().value
-        : undefined;
-    const operation =
-      resolvedOperation ??
-      resolveEffectOperationSymbol({
-        opName,
-        scope,
-        ctx,
-      });
-    const callArgs = isForm(head) ? head.rest : [];
-    const parsedParams = callArgs.map((entry) =>
-      entry ? parseParam(entry) : undefined
-    );
-    const params = parsedParams
-      .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
-      .map((param) => ({
-        symbol: resolveSymbol(param.name, scope, ctx),
-        span: param.span,
-        type: param.typeExpr ? lowerTypeExpr(param.typeExpr, ctx, scope) : undefined,
-      }));
-    const opDecl = ctx.decls.getEffectOperation(operation);
-    const resumable = opDecl?.operation.resumable === "tail" ? "fn" : "ctl";
-    return { operation, parameters: params, resumable };
-  }
-
-  if (isIdentifierAtom(head) || isInternalIdentifierAtom(head)) {
-    const operation =
-      effectSymbol !== undefined
-        ? ctx.moduleMembers.get(effectSymbol)?.get(head.value)?.values().next()
-            .value ??
-          resolveEffectOperationSymbol({
-            opName: head.value,
-            scope,
-            ctx,
-          })
-        : resolveEffectOperationSymbol({
-            opName: head.value,
-            scope,
-            ctx,
-          });
-    const opDecl = ctx.decls.getEffectOperation(operation);
-    const resumable = opDecl?.operation.resumable === "tail" ? "fn" : "ctl";
-    return { operation, parameters: [], resumable };
-  }
-
-  if (!isForm(head)) {
-    throw new Error("invalid handler head");
-  }
-
-  const opName = head.at(0);
-  if (!isIdentifierAtom(opName) && !isInternalIdentifierAtom(opName)) {
-    throw new Error("handler operation must be an identifier");
-  }
+  const effectSymbol = head.effectExpr
+    ? isIdentifierAtom(head.effectExpr)
+      ? resolveSymbol(head.effectExpr.value, scope, ctx)
+      : resolveQualifiedSymbol({
+          segments: collectNamespaceSegments(head.effectExpr),
+          scope,
+          ctx,
+        })
+    : undefined;
+  const opName = head.operation.value;
   const candidates =
     effectSymbol !== undefined
-      ? ctx.moduleMembers.get(effectSymbol)?.get(opName.value)
+      ? ctx.moduleMembers.get(effectSymbol)?.get(opName)
       : undefined;
-
-  const parsedParams = head.rest.map((entry) => (entry ? parseParam(entry) : undefined));
-  const params = parsedParams
-    .filter((entry): entry is NonNullable<typeof entry> => Boolean(entry))
-    .map((param) => ({
-      symbol: resolveSymbol(param.name, scope, ctx),
-      span: param.span,
-      type: param.typeExpr ? lowerTypeExpr(param.typeExpr, ctx, scope) : undefined,
-    }));
+  const parameters = head.parameters.map((param) => ({
+    symbol: resolveSymbol(param.name, scope, ctx),
+    span: toSourceSpan(param.syntax),
+    type: param.typeExpr
+      ? lowerTypeExpr(param.typeExpr, ctx, scope)
+      : undefined,
+  }));
 
   const resolvedOperation =
     candidates && candidates.size > 0
@@ -349,13 +221,18 @@ const lowerHandlerCall = (
   const operation =
     resolvedOperation ??
     resolveEffectOperationSymbol({
-      opName: opName.value,
+      opName,
       scope,
       ctx,
     });
   const opDecl = ctx.decls.getEffectOperation(operation);
   const resumable = opDecl?.operation.resumable === "tail" ? "fn" : "ctl";
-  return { operation, parameters: params, resumable };
+  return {
+    operation,
+    ...(effectSymbol !== undefined ? { effect: effectSymbol } : {}),
+    parameters,
+    resumable,
+  };
 };
 
 const resolveEffectOperationSymbol = ({

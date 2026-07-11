@@ -7,8 +7,9 @@ import {
   isIdentifierAtom,
   isInternalIdentifierAtom,
 } from "../../../parser/index.js";
+import { parseSurfaceCallArguments } from "../../../parser/surface/index.js";
 import { extractConstructorTargetIdentifier } from "../../constructors.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import type { HirExprId, ScopeId, SymbolId } from "../../ids.js";
 import type { HirTypeExpr } from "../../hir/index.js";
 import {
@@ -18,7 +19,10 @@ import {
 } from "./resolution-helpers.js";
 import { lowerNominalObjectLiteral } from "./call.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
-import { resolveConstructorResolution, resolveTypeSymbol } from "../resolution.js";
+import {
+  resolveConstructorResolution,
+  resolveTypeSymbol,
+} from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import { resolveModulePathSymbol } from "./namespace-resolution.js";
 import { lowerQualifiedTraitMethodCall } from "./qualified-trait-call.js";
@@ -47,7 +51,7 @@ export const lowerStaticAccessExpr = ({
   const targetSymbol = resolveStaticTargetSymbol(
     targetExpr,
     scopes.current(),
-    ctx
+    ctx,
   );
   if (typeof targetSymbol === "number") {
     const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
@@ -114,7 +118,7 @@ export const lowerStaticAccessExpr = ({
           resolution.kind === "symbol" &&
           typeof resolutionMetadata?.aliasConstructorAlias === "number"
             ? targetTypeArguments
-          : undefined,
+            : undefined,
         ctx,
       });
     }
@@ -177,7 +181,7 @@ const lowerModuleAccess = ({
   const moduleSymbol = resolveModulePathSymbol(
     targetExpr,
     scopes.current(),
-    ctx
+    ctx,
   );
   if (typeof moduleSymbol !== "number") {
     return undefined;
@@ -221,7 +225,9 @@ const lowerModuleAccess = ({
   });
 };
 
-const extractModuleMemberName = (expr: Expr | undefined): string | undefined => {
+const extractModuleMemberName = (
+  expr: Expr | undefined,
+): string | undefined => {
   if (!expr) return undefined;
   if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
     return expr.value;
@@ -258,10 +264,7 @@ const lowerStaticMethodCall = ({
   }
 
   const calleeExpr = elements[0]!;
-  if (
-    !isIdentifierAtom(calleeExpr) &&
-    !isInternalIdentifierAtom(calleeExpr)
-  ) {
+  if (!isIdentifierAtom(calleeExpr) && !isInternalIdentifierAtom(calleeExpr)) {
     throw new Error("static method name must be an identifier");
   }
 
@@ -292,21 +295,12 @@ const lowerStaticMethodCall = ({
     ...namespaceTypeArguments,
   ];
 
-  const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
-    if (isForm(arg) && arg.calls(":")) {
-      const labelExpr = arg.at(1);
-      const valueExpr = arg.at(2);
-      if (!isIdentifierAtom(labelExpr) || !valueExpr) {
-        throw new Error("Invalid labeled argument");
-      }
-      return {
-        label: labelExpr.value,
-        expr: lowerExpr(valueExpr, ctx, scopes),
-      };
-    }
-    const expr = lowerExpr(arg, ctx, scopes);
-    return { expr };
-  });
+  const args = parseSurfaceCallArguments(
+    elements.slice(hasTypeArguments ? 2 : 1),
+  ).map((argument) => ({
+    ...(argument.label ? { label: argument.label.value } : {}),
+    expr: lowerExpr(argument.value, ctx, scopes),
+  }));
   const namespaceMemberSymbols =
     methodTable.get(calleeExpr.value) ?? new Set<SymbolId>();
 
@@ -449,7 +443,9 @@ const unwrapAliasConstructorResolution = ({
     return resolution;
   }
   const record = ctx.symbolTable.getSymbol(resolution.symbol);
-  const metadata = record.metadata as { aliasConstructorTarget?: unknown } | undefined;
+  const metadata = record.metadata as
+    | { aliasConstructorTarget?: unknown }
+    | undefined;
   if (typeof metadata?.aliasConstructorTarget !== "number") {
     return resolution;
   }
@@ -481,10 +477,7 @@ const lowerModuleQualifiedCall = ({
   }
 
   const calleeExpr = elements[0]!;
-  if (
-    !isIdentifierAtom(calleeExpr) &&
-    !isInternalIdentifierAtom(calleeExpr)
-  ) {
+  if (!isIdentifierAtom(calleeExpr) && !isInternalIdentifierAtom(calleeExpr)) {
     throw new Error("module-qualified callee must be an identifier");
   }
 
@@ -508,21 +501,12 @@ const lowerModuleQualifiedCall = ({
       ? [...(typeArguments ?? []), ...targetCallTypeArguments]
       : typeArguments;
 
-  const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
-    if (isForm(arg) && arg.calls(":")) {
-      const labelExpr = arg.at(1);
-      const valueExpr = arg.at(2);
-      if (!isIdentifierAtom(labelExpr) || !valueExpr) {
-        throw new Error("Invalid labeled argument");
-      }
-      return {
-        label: labelExpr.value,
-        expr: lowerExpr(valueExpr, ctx, scopes),
-      };
-    }
-    const expr = lowerExpr(arg, ctx, scopes);
-    return { expr };
-  });
+  const args = parseSurfaceCallArguments(
+    elements.slice(hasTypeArguments ? 2 : 1),
+  ).map((argument) => ({
+    ...(argument.label ? { label: argument.label.value } : {}),
+    expr: lowerExpr(argument.value, ctx, scopes),
+  }));
 
   const nominal = lowerNominalObjectLiteral({
     callee: calleeExpr,
@@ -544,9 +528,7 @@ const lowerModuleQualifiedCall = ({
   });
   if (!baseResolution) {
     const moduleName = ctx.symbolTable.getSymbol(moduleSymbol).name;
-    throw new Error(
-      `module ${moduleName} does not export ${calleeExpr.value}`
-    );
+    throw new Error(`module ${moduleName} does not export ${calleeExpr.value}`);
   }
   const aliasConstructorTypeArguments =
     baseResolution.kind === "symbol" &&
@@ -602,7 +584,7 @@ const lowerModuleQualifiedCall = ({
 const resolveStaticTargetSymbol = (
   expr: Expr,
   scope: ScopeId,
-  ctx: LoweringParams["ctx"]
+  ctx: LoweringParams["ctx"],
 ): SymbolId | undefined => {
   const identifier = extractConstructorTargetIdentifier(expr);
   if (!identifier) {
@@ -639,14 +621,9 @@ const extractNamespaceTailExpr = (expr: Expr): Expr => {
   return member ? extractNamespaceTailExpr(member) : expr;
 };
 
-const extractTypeArgumentForms = (
-  expr: Expr
-): readonly Expr[] | undefined => {
+const extractTypeArgumentForms = (expr: Expr): readonly Expr[] | undefined => {
   if (isForm(expr) && isIdentifierAtom(expr.first)) {
-    if (
-      isForm(expr.second) &&
-      formCallsInternal(expr.second, "generics")
-    ) {
+    if (isForm(expr.second) && formCallsInternal(expr.second, "generics")) {
       return expr.second.rest;
     }
     return undefined;

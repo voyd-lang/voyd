@@ -1,18 +1,11 @@
-import { isForm } from "../parser/index.js";
+import { type SurfaceModuleItem } from "../parser/surface/index.js";
+import { requireModuleSurface } from "./views.js";
 import type { ModuleGraph, ModuleNode } from "./types.js";
 import type { SymbolKind } from "../semantics/binder/types.js";
 import type { HirVisibility } from "../semantics/hir/index.js";
 import { maxVisibility } from "../semantics/hir/index.js";
 import type { ModuleExportSurfaceTable } from "../semantics/modules.js";
 import { packageIdFromPath } from "../semantics/packages.js";
-import {
-  parseEffectDecl,
-  parseFunctionDecl,
-  parseModuleLetDecl,
-  parseObjectDecl,
-  parseTraitDecl,
-  parseTypeAliasDecl,
-} from "../semantics/binding/parsing.js";
 
 export const collectCyclicModuleExportSurfaces = ({
   graph,
@@ -59,108 +52,109 @@ const collectModuleExportSurface = ({
     sourcePackageRoot: module.sourcePackageRoot,
   });
 
-  module.ast.rest.forEach((entry) => {
-    if (!isForm(entry)) {
-      return;
-    }
+  const surface = requireModuleSurface(module);
+  surface.issues.forEach((issue) =>
+    onSurfaceError?.({ module, error: new Error(issue.message) }),
+  );
+  surface.items.forEach((item) => {
+    const entry = surfaceItemForm(item);
     if (!includeTests && isTestEntry(entry)) {
       return;
     }
 
-    try {
-      const functionDecl = parseFunctionDecl(entry);
-      if (functionDecl) {
-        upsertSurfaceExport({
-          table,
-          name: functionDecl.signature.name.value,
-          kind: "value",
-          visibility: functionDecl.visibility,
-          module,
-          packageId,
-        });
-        return;
-      }
+    if (item.kind === "function") {
+      const functionDecl = item.declaration;
+      upsertSurfaceExport({
+        table,
+        name: functionDecl.signature.name.value,
+        kind: "value",
+        visibility: functionDecl.visibility,
+        module,
+        packageId,
+      });
+      return;
+    }
 
-      const moduleLetDecl = parseModuleLetDecl(entry);
-      if (moduleLetDecl) {
-        upsertSurfaceExport({
-          table,
-          name: moduleLetDecl.name.value,
-          kind: "value",
-          visibility: moduleLetDecl.visibility,
-          module,
-          packageId,
-        });
-        return;
-      }
+    if (item.kind === "module-let") {
+      const moduleLetDecl = item.declaration;
+      upsertSurfaceExport({
+        table,
+        name: moduleLetDecl.name.value,
+        kind: "value",
+        visibility: moduleLetDecl.visibility,
+        module,
+        packageId,
+      });
+      return;
+    }
 
-      const objectDecl = parseObjectDecl(entry);
-      if (objectDecl) {
-        upsertSurfaceExport({
-          table,
-          name: objectDecl.name.value,
-          kind: "type",
-          visibility: objectDecl.visibility,
-          module,
-          packageId,
-        });
-        return;
-      }
+    if (item.kind === "object") {
+      const objectDecl = item.declaration;
+      upsertSurfaceExport({
+        table,
+        name: objectDecl.name.value,
+        kind: "type",
+        visibility: objectDecl.visibility,
+        module,
+        packageId,
+      });
+      return;
+    }
 
-      const typeAliasDecl = parseTypeAliasDecl(entry);
-      if (typeAliasDecl) {
-        upsertSurfaceExport({
-          table,
-          name: typeAliasDecl.name.value,
-          kind: "type",
-          visibility: typeAliasDecl.visibility,
-          module,
-          packageId,
-        });
-        return;
-      }
+    if (item.kind === "type-alias") {
+      const typeAliasDecl = item.declaration;
+      upsertSurfaceExport({
+        table,
+        name: typeAliasDecl.name.value,
+        kind: "type",
+        visibility: typeAliasDecl.visibility,
+        module,
+        packageId,
+      });
+      return;
+    }
 
-      const traitDecl = parseTraitDecl(entry);
-      if (traitDecl) {
-        upsertSurfaceExport({
-          table,
-          name: traitDecl.name.value,
-          kind: "trait",
-          visibility: traitDecl.visibility,
-          module,
-          packageId,
-        });
-        return;
-      }
+    if (item.kind === "trait") {
+      const traitDecl = item.declaration;
+      upsertSurfaceExport({
+        table,
+        name: traitDecl.name.value,
+        kind: "trait",
+        visibility: traitDecl.visibility,
+        module,
+        packageId,
+      });
+      return;
+    }
 
-      const effectDecl = parseEffectDecl(entry);
-      if (effectDecl) {
+    if (item.kind === "effect") {
+      const effectDecl = item.declaration;
+      upsertSurfaceExport({
+        table,
+        name: effectDecl.name.value,
+        kind: "effect",
+        visibility: effectDecl.visibility,
+        module,
+        packageId,
+      });
+      effectDecl.operations.forEach((operation) => {
         upsertSurfaceExport({
           table,
-          name: effectDecl.name.value,
-          kind: "effect",
+          name: operation.name.value,
+          kind: "effect-op",
           visibility: effectDecl.visibility,
           module,
           packageId,
         });
-        effectDecl.operations.forEach((operation) => {
-          upsertSurfaceExport({
-            table,
-            name: operation.name.value,
-            kind: "effect-op",
-            visibility: effectDecl.visibility,
-            module,
-            packageId,
-          });
-        });
-      }
-    } catch (error) {
-      onSurfaceError?.({ module, error });
+      });
     }
   });
 
   return table;
 };
+
+const surfaceItemForm = (item: SurfaceModuleItem) =>
+  "form" in item ? item.form : item.declaration.form;
 
 const isTestEntry = (form: { attributes?: Record<string, unknown> }): boolean =>
   Boolean(form.attributes?.test);

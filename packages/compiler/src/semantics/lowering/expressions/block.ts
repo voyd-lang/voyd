@@ -1,12 +1,9 @@
-import {
-  Form,
-  type Syntax,
-  isForm,
-} from "../../../parser/index.js";
-import { toSourceSpan } from "../../utils.js";
+import { Form, type Syntax, isForm } from "../../../parser/index.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import type { HirExprId, HirStmtId } from "../../ids.js";
 import { lowerPattern } from "./patterns.js";
 import type { LoweringFormParams } from "./types.js";
+import { parseSurfaceBindingStatement } from "../../../parser/surface/index.js";
 
 export const lowerBlock = ({
   form,
@@ -34,7 +31,7 @@ export const lowerBlock = ({
           ctx,
           scopes,
           lowerExpr,
-        })
+        }),
       );
       return;
     }
@@ -46,7 +43,7 @@ export const lowerBlock = ({
           ctx,
           scopes,
           lowerExpr,
-        })
+        }),
       );
       return;
     }
@@ -61,7 +58,7 @@ export const lowerBlock = ({
           ast: entrySyntax?.syntaxId ?? form.syntaxId,
           span: toSourceSpan(entrySyntax),
           expr: exprId,
-        })
+        }),
       );
       return;
     }
@@ -88,27 +85,15 @@ const lowerLetStatement = ({
   scopes,
   lowerExpr,
 }: LoweringFormParams): HirStmtId => {
-  const isVar = form.calls("var");
-  const isLet = form.calls("let");
-  const assignment = form.at(1);
-  if (!isForm(assignment) || !assignment.calls("=")) {
-    throw new Error("let/var statement expects an assignment");
-  }
-
-  const patternExpr = assignment.at(1);
-  const initializerExpr = assignment.at(2);
-  if (!initializerExpr) {
-    throw new Error("let/var statement missing initializer");
-  }
-
-  const pattern = lowerPattern(patternExpr, ctx, scopes);
-  const initializer = lowerExpr(initializerExpr, ctx, scopes);
+  const binding = parseSurfaceBindingStatement(form);
+  const pattern = lowerPattern(binding.patternExpr, ctx, scopes);
+  const initializer = lowerExpr(binding.initializer, ctx, scopes);
 
   return ctx.builder.addStatement({
     kind: "let",
     ast: form.syntaxId,
     span: toSourceSpan(form),
-    mutable: isVar && !isLet,
+    mutable: binding.kind === "var",
     pattern,
     initializer,
   });

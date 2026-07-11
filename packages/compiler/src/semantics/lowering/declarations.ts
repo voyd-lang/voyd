@@ -1,4 +1,4 @@
-import { toSourceSpan } from "../utils.js";
+import { toSourceSpan } from "../../parser/surface/utils.js";
 import { createLowerScopeStack } from "./context.js";
 import { lowerExpr } from "./expressions/index.js";
 import {

@@ -4,7 +4,7 @@ import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import type { ObjectFieldDecl, TypeParameterDecl } from "../../decls.js";
 import type { ScopeId } from "../../ids.js";
 import type { BindingContext } from "../types.js";
-import type { ParsedObjectDecl } from "../parsing.js";
+import type { ParsedObjectDecl } from "../../../parser/surface/declarations.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { inheritMemberVisibility } from "../../hir/index.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
@@ -16,7 +16,7 @@ import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contr
 export const bindObjectDecl = (
   decl: ParsedObjectDecl,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
@@ -31,15 +31,16 @@ export const bindObjectDecl = (
   const intrinsicType = decl.form.attributes?.intrinsicType;
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
-  const stdIntrinsicTypeContract =
-    resolveStdIntrinsicTypeContractProvider({
-      id: intrinsicType,
-      declarationName: decl.name.value,
-      declarationKind:
-        decl.objectKind === "obj" ? "nominal-object" : "value-object",
-      ctx,
-    });
-  const boundaryMetadata = boundaryMetadataFromAttribute(decl.form.attributes?.boundary);
+  const stdIntrinsicTypeContract = resolveStdIntrinsicTypeContractProvider({
+    id: intrinsicType,
+    declarationName: decl.name.value,
+    declarationKind:
+      decl.objectKind === "obj" ? "nominal-object" : "value-object",
+    ctx,
+  });
+  const boundaryMetadata = boundaryMetadataFromAttribute(
+    decl.form.attributes?.boundary,
+  );
   reportOverloadNameCollision({
     name: decl.name.value,
     scope: tracker.current(),
@@ -135,7 +136,7 @@ const boundaryMetadataFromAttribute = (value: unknown): unknown | undefined => {
 export const resolveObjectDecl = (
   targetExpr: Expr,
   ctx: BindingContext,
-  scope: ScopeId
+  scope: ScopeId,
 ) => {
   const identifier = (() => {
     if (isIdentifierAtom(targetExpr)) {

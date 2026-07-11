@@ -1,6 +1,6 @@
 import type { IdentifierAtom } from "../../parser/index.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
-import { toSourceSpan } from "../utils.js";
+import { toSourceSpan } from "../../parser/surface/utils.js";
 import type { BindingContext } from "./types.js";
 
 const upperCamelNamePattern = /^[A-Z][A-Za-z0-9]*$/;

@@ -1,147 +1,73 @@
-import {
-  type Expr,
-  isForm,
-  isIdentifierAtom,
-} from "../../../parser/index.js";
-import { normalizeNestedFunctionTypeAnnotation } from "../../function-type-annotations.js";
-import { toSourceSpan } from "../../utils.js";
-import type { HirBindingKind, HirPattern } from "../../hir/index.js";
+import { type Expr } from "../../../parser/index.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
+import type { HirPattern } from "../../hir/index.js";
 import type { LowerContext, LowerScopeStack } from "../types.js";
 import { resolveSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
+import {
+  parseSurfacePattern,
+  type SurfacePattern,
+} from "../../../parser/surface/index.js";
 
 export const lowerPattern = (
   pattern: Expr | undefined,
   ctx: LowerContext,
-  scopes: LowerScopeStack
+  scopes: LowerScopeStack,
 ): HirPattern => {
-  if (!pattern) {
-    throw new Error("missing pattern");
-  }
+  return lowerSurfacePattern(parseSurfacePattern(pattern), ctx, scopes);
+};
 
-  const { target, bindingKind } = unwrapMutablePattern(pattern);
-
-  if (isIdentifierAtom(target)) {
-    if (target.value === "_") {
-      return { kind: "wildcard", span: toSourceSpan(pattern) };
+export const lowerSurfacePattern = (
+  pattern: SurfacePattern,
+  ctx: LowerContext,
+  scopes: LowerScopeStack,
+): HirPattern => {
+  if (pattern.kind === "identifier") {
+    if (pattern.name.value === "_") {
+      return { kind: "wildcard", span: toSourceSpan(pattern.syntax) };
     }
-    const symbol = resolveSymbol(target.value, scopes.current(), ctx);
+    const symbol = resolveSymbol(pattern.name.value, scopes.current(), ctx);
     return {
       kind: "identifier",
       symbol,
-      span: toSourceSpan(pattern),
-      bindingKind,
+      span: toSourceSpan(pattern.syntax),
+      bindingKind: pattern.bindingKind,
     };
   }
-
-  if (isForm(target) && target.callsInternal("object_literal")) {
-    if (bindingKind && bindingKind !== "value") {
-      throw new Error("mutable reference patterns must bind identifiers");
-    }
-
-    let spread: HirPattern | undefined;
-    const fields = target.rest.flatMap((entry) => {
-      if (isIdentifierAtom(entry)) {
-        return [
-          {
-            name: entry.value,
-            pattern: lowerPattern(entry, ctx, scopes),
-          },
-        ];
-      }
-
-      if (!isForm(entry)) {
-        throw new Error("unsupported destructure entry in pattern");
-      }
-
-      if (entry.calls("...")) {
-        if (spread) {
-          throw new Error("destructure pattern supports at most one spread");
-        }
-        spread = lowerPattern(entry.at(1), ctx, scopes);
-        return [];
-      }
-
-      if (!entry.calls(":")) {
-        throw new Error("unsupported destructure entry in pattern");
-      }
-
-      const nameExpr = entry.at(1);
-      if (!isIdentifierAtom(nameExpr)) {
-        throw new Error("destructure field name must be an identifier");
-      }
-
-      const valueExpr = entry.at(2);
-      if (!valueExpr) {
-        throw new Error("destructure field pattern is missing a value");
-      }
-
-      return [
-        {
-          name: nameExpr.value,
-          pattern: lowerPattern(valueExpr, ctx, scopes),
-        },
-      ];
-    });
-
+  if (pattern.kind === "destructure") {
     return {
       kind: "destructure",
-      fields,
-      spread,
-      span: toSourceSpan(pattern),
+      fields: pattern.fields.map((field) => ({
+        name: field.name.value,
+        pattern: lowerSurfacePattern(field.pattern, ctx, scopes),
+      })),
+      spread: pattern.spread
+        ? lowerSurfacePattern(pattern.spread, ctx, scopes)
+        : undefined,
+      span: toSourceSpan(pattern.syntax),
     };
   }
-
-  if (
-    isForm(target) &&
-    (target.calls("tuple") || target.callsInternal("tuple"))
-  ) {
-    if (bindingKind && bindingKind !== "value") {
-      throw new Error("mutable reference patterns must bind identifiers");
-    }
-    const elements = target.rest.map((entry) =>
-      lowerPattern(entry, ctx, scopes)
-    );
-    return { kind: "tuple", elements, span: toSourceSpan(pattern) };
+  if (pattern.kind === "tuple") {
+    return {
+      kind: "tuple",
+      elements: pattern.elements.map((entry) =>
+        lowerSurfacePattern(entry, ctx, scopes),
+      ),
+      span: toSourceSpan(pattern.syntax),
+    };
   }
-
-  if (isForm(target) && target.calls(":")) {
-    const {
-      nameExpr,
-      typeExpr,
-    } = normalizeNestedFunctionTypeAnnotation(target);
-    if (!typeExpr) {
-      throw new Error("typed pattern is missing a type annotation");
-    }
-    const { target: nameTarget, bindingKind: nameBinding } =
-      unwrapMutablePattern(nameExpr);
-    const lowered = lowerPattern(nameTarget, ctx, scopes);
-    const typeAnnotation = lowerTypeExpr(typeExpr, ctx, scopes.current());
+  if (pattern.kind === "typed") {
+    const lowered = lowerSurfacePattern(pattern.pattern, ctx, scopes);
+    const typeAnnotation = lowerTypeExpr(
+      pattern.typeExpr,
+      ctx,
+      scopes.current(),
+    );
     return {
       ...lowered,
       typeAnnotation,
-      bindingKind: nameBinding ?? lowered.bindingKind ?? bindingKind,
-      span: lowered.span ?? toSourceSpan(pattern),
+      span: lowered.span ?? toSourceSpan(pattern.syntax),
     };
   }
-
-  throw new Error("unsupported pattern form");
-};
-
-export const unwrapMutablePattern = (
-  pattern?: Expr
-): { target: Expr; bindingKind?: HirBindingKind } => {
-  if (!pattern) {
-    throw new Error("missing pattern");
-  }
-
-  if (isForm(pattern) && pattern.calls("~")) {
-    const target = pattern.at(1);
-    if (!target) {
-      throw new Error("mutable pattern missing target");
-    }
-    return { target, bindingKind: "mutable-ref" };
-  }
-
-  return { target: pattern };
+  throw new Error("unsupported normalized surface pattern");
 };

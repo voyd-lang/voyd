@@ -1,6 +1,6 @@
 import type { ScopeId } from "../ids.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
-import { formatTypeAnnotation, toSourceSpan } from "../utils.js";
+import { formatTypeAnnotation, toSourceSpan } from "../../parser/surface/utils.js";
 import type {
   BindingContext,
   BoundFunction,

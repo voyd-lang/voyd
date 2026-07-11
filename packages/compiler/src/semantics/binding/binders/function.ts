@@ -7,13 +7,13 @@ import {
 import { recordFunctionOverload } from "../overloads.js";
 import type { TypeParameterDecl, ParameterDeclInput } from "../../decls.js";
 import type { BindingContext } from "../types.js";
-import type { ParsedFunctionDecl } from "../parsing.js";
+import type { ParsedFunctionDecl } from "../../../parser/surface/declarations.js";
 import type { HirVisibility } from "../../hir/index.js";
 import type { ScopeId } from "../../ids.js";
 import { bindExpr, bindTypeExpr } from "./expressions.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindTypeParameters } from "./type-parameters.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { declareValueOrParameter } from "../redefinitions.js";
 import { getCompilerFunctionContractSpec } from "../../../compiler-contracts/index.js";
 
@@ -31,7 +31,7 @@ export const bindFunctionDecl = (
   decl: ParsedFunctionDecl,
   ctx: BindingContext,
   tracker: BinderScopeTracker,
-  options: BindFunctionOptions = {}
+  options: BindFunctionOptions = {},
 ) => {
   const declarationScope = options.declarationScope ?? tracker.current();
   rememberSyntax(decl.form, ctx);
@@ -43,7 +43,9 @@ export const bindFunctionDecl = (
     declarationScope,
     ctx,
   });
-  const boundaryMetadata = boundaryMetadataFromAttribute(decl.form.attributes?.boundary);
+  const boundaryMetadata = boundaryMetadataFromAttribute(
+    decl.form.attributes?.boundary,
+  );
   const symbolMetadata: Record<string, unknown> = {
     entity: "function",
     ...options.metadata,
@@ -57,7 +59,8 @@ export const bindFunctionDecl = (
   if (intrinsicMetadata) {
     symbolMetadata.intrinsic = true;
     symbolMetadata.intrinsicName = intrinsicMetadata.name;
-    symbolMetadata.intrinsicUsesSignature = intrinsicMetadata.usesSignature ?? false;
+    symbolMetadata.intrinsicUsesSignature =
+      intrinsicMetadata.usesSignature ?? false;
   }
 
   const fnSymbol = ctx.symbolTable.declare(
@@ -67,7 +70,7 @@ export const bindFunctionDecl = (
       declaredAt: decl.form.syntaxId,
       metadata: symbolMetadata,
     },
-    declarationScope
+    declarationScope,
   );
 
   const fnScope = ctx.symbolTable.createScope({
@@ -149,13 +152,15 @@ const resolveCompilerFunctionContract = ({
   return { ...spec };
 };
 
-const boundaryMetadataFromAttribute = (_value: unknown): unknown | undefined => {
+const boundaryMetadataFromAttribute = (
+  _value: unknown,
+): unknown | undefined => {
   return undefined;
 };
 
 const bindFunctionTypeParameters = (
   decl: ParsedFunctionDecl,
-  ctx: BindingContext
+  ctx: BindingContext,
 ): TypeParameterDecl[] =>
   bindTypeParameters(decl.signature.typeParameters, ctx);
 
@@ -163,7 +168,7 @@ const bindFunctionParameters = (
   decl: ParsedFunctionDecl,
   ctx: BindingContext,
   tracker: BinderScopeTracker,
-  options: BindFunctionOptions = {}
+  options: BindFunctionOptions = {},
 ) => {
   const boundParams: ParameterDeclInput[] = [];
   decl.signature.params.forEach((param, index) => {
@@ -202,7 +207,7 @@ const bindFunctionParameters = (
   });
 
   decl.signature.params.forEach((param) =>
-    bindExpr(param.defaultValue, ctx, tracker)
+    bindExpr(param.defaultValue, ctx, tracker),
   );
   bindExpr(decl.body, ctx, tracker);
 

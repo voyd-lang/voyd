@@ -6,10 +6,11 @@ import {
   isIdentifierAtom,
   isInternalIdentifierAtom,
 } from "../../../parser/index.js";
+import { parseSurfaceCallArguments } from "../../../parser/surface/index.js";
 import type { HirExprId } from "../../ids.js";
 import type { HirTypeExpr } from "../../hir/index.js";
 import { extractConstructorTargetIdentifier } from "../../constructors.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { lowerCallFromElements } from "./call.js";
 import { resolveTypeSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
@@ -101,7 +102,11 @@ const lowerQualifiedTraitMethodCallExpr = ({
   if (!traitIdentifier) {
     throw new Error("qualified trait method requires trait identifier");
   }
-  const traitSymbol = resolveTypeSymbol(traitIdentifier.value, scopes.current(), ctx);
+  const traitSymbol = resolveTypeSymbol(
+    traitIdentifier.value,
+    scopes.current(),
+    ctx,
+  );
   if (typeof traitSymbol !== "number") {
     throw new Error(`unknown trait ${traitIdentifier.value}`);
   }
@@ -151,20 +156,12 @@ const lowerMethodCallExpr = ({
         .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
         .filter(Boolean) as HirTypeExpr[])
     : undefined;
-  const args = elements.slice(hasTypeArguments ? 2 : 1).map((arg) => {
-    if (isForm(arg) && arg.calls(":")) {
-      const labelExpr = arg.at(1);
-      const valueExpr = arg.at(2);
-      if (!isIdentifierAtom(labelExpr) || !valueExpr) {
-        throw new Error("Invalid labeled argument");
-      }
-      return {
-        label: labelExpr.value,
-        expr: lowerExpr(valueExpr, ctx, scopes),
-      };
-    }
-    return { expr: lowerExpr(arg, ctx, scopes) };
-  });
+  const args = parseSurfaceCallArguments(
+    elements.slice(hasTypeArguments ? 2 : 1),
+  ).map((argument) => ({
+    ...(argument.label ? { label: argument.label.value } : {}),
+    expr: lowerExpr(argument.value, ctx, scopes),
+  }));
 
   return ctx.builder.addExpression({
     kind: "expr",

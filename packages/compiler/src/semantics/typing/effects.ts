@@ -13,7 +13,7 @@ import type {
   HirNamedTypeExpr,
 } from "../hir/index.js";
 import type { Expr } from "../../parser/index.js";
-import { formatTypeAnnotation } from "../utils.js";
+import { formatTypeAnnotation } from "../../parser/surface/utils.js";
 import type { UnificationContext, UnificationResult } from "../effects/effect-table.js";
 
 const pureEffectRow = (effects: EffectTable): EffectRowId => effects.emptyRow;

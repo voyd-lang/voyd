@@ -1,14 +1,11 @@
-import { Form, IdentifierAtom, formCallsInternal, isForm } from "../parser/index.js";
-import { toSourceSpan } from "../semantics/utils.js";
-import { classifyTopLevelDecl } from "./use-decl.js";
-import { parseUsePaths, type NormalizedUseEntry } from "./use-path.js";
+import { Form, IdentifierAtom } from "../parser/index.js";
+import { toSourceSpan } from "../parser/surface/utils.js";
+import type { NormalizedUseEntry } from "../parser/surface/use-path.js";
 import { resolveModuleRequest } from "./resolve.js";
 import { modulePathToString } from "./path.js";
 import type { ModuleGraph, ModuleNode } from "./types.js";
 import { POST_SYNTAX_MACROS } from "../parser/syntax-macros/index.js";
-import {
-  expandFunctionalMacros,
-} from "../parser/syntax-macros/functional-macro-expander/index.js";
+import { expandFunctionalMacros } from "../parser/syntax-macros/functional-macro-expander/index.js";
 import type { MacroDefinition } from "../parser/syntax-macros/functional-macro-expander/types.js";
 import { MacroScope } from "../parser/syntax-macros/functional-macro-expander/scope.js";
 import { cloneExpr } from "../parser/syntax-macros/functional-macro-expander/helpers.js";
@@ -19,6 +16,8 @@ import {
   serializerAttributeMacro,
   stripSerializerAttributeForms,
 } from "../parser/syntax-macros/serializer-attribute.js";
+import { createSurfaceModuleView } from "../parser/surface/index.js";
+import { requireModuleHeader } from "./views.js";
 
 export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] => {
   const order = sortModules(graph);
@@ -31,7 +30,7 @@ export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] => {
       return;
     }
 
-    const useEntries = collectUseEntries(module.ast);
+    const useEntries = collectUseEntries(module);
     const importedMacros = collectMacroImports({
       module,
       entries: useEntries,
@@ -52,6 +51,20 @@ export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] => {
         }),
     });
     module.ast = applyPostSyntaxMacros(functionalResult.form, diagnostics);
+    module.surface = createSurfaceModuleView(module.ast);
+    module.surface.issues.forEach((issue) => {
+      diagnostics.push(
+        diagnosticFromCode({
+          code: "MD0002",
+          params: {
+            kind: "load-failed",
+            requested: module.id,
+            errorMessage: issue.message,
+          },
+          span: issue.span,
+        }),
+      );
+    });
     const { exports } = functionalResult;
     const localExports = indexExports(exports);
     const exportedMacros = collectMacroReexports({
@@ -108,7 +121,9 @@ const reportMacroExpansionError = ({
 }): void => {
   const message = error instanceof Error ? error.message : String(error);
   const syntax =
-    error instanceof SyntaxMacroError ? error.syntax ?? fallbackSyntax : fallbackSyntax;
+    error instanceof SyntaxMacroError
+      ? (error.syntax ?? fallbackSyntax)
+      : fallbackSyntax;
 
   diagnostics.push(
     diagnosticFromCode({
@@ -119,7 +134,7 @@ const reportMacroExpansionError = ({
         errorMessage: message,
       },
       span: toSourceSpan(syntax),
-    })
+    }),
   );
 };
 
@@ -132,15 +147,10 @@ const indexExports = (exports: MacroDefinition[]): MacroExportTable => {
 };
 
 const inlineModuleNamesFor = (module: ModuleNode): Set<string> => {
-  const entries = formCallsInternal(module.ast, "ast") ? module.ast.rest : [];
   return new Set(
-    entries.flatMap((entry) => {
-      if (!isForm(entry)) {
-        return [];
-      }
-      const decl = classifyTopLevelDecl(entry);
-      return decl.kind === "inline-module-decl" ? [decl.name] : [];
-    }),
+    requireModuleHeader(module).items.flatMap((item) =>
+      item.kind === "inline-module" ? [item.declaration.name] : [],
+    ),
   );
 };
 
@@ -179,7 +189,7 @@ const collectMacroImports = ({
         anchorToSelf: entry.anchorToSelf,
         parentHops: entry.parentHops ?? 0,
         importerIsPackageRoot: moduleIsPackageRoot && !preservesInlinePkgScope,
-      }
+      },
     );
     const moduleId = modulePathToString(resolvedPath);
     const exportedMacros = exportsByModule.get(moduleId);
@@ -252,8 +262,9 @@ const collectMacroReexports = ({
         {
           anchorToSelf: entry.anchorToSelf,
           parentHops: entry.parentHops ?? 0,
-          importerIsPackageRoot: moduleIsPackageRoot && !preservesInlinePkgScope,
-        }
+          importerIsPackageRoot:
+            moduleIsPackageRoot && !preservesInlinePkgScope,
+        },
       );
       const moduleId = modulePathToString(resolvedPath);
       const exportedMacros = exportsByModule.get(moduleId);
@@ -284,7 +295,9 @@ const collectMacroReexports = ({
       if (!exports.has(alias)) {
         exports.set(
           alias,
-          alias === macro.name.value ? macro : cloneMacroWithAlias(macro, alias)
+          alias === macro.name.value
+            ? macro
+            : cloneMacroWithAlias(macro, alias),
         );
       }
     });
@@ -292,44 +305,19 @@ const collectMacroReexports = ({
   return exports;
 };
 
-const collectUseEntries = (form: Form): UseEntryWithVisibility[] => {
-  const entries: UseEntryWithVisibility[] = [];
-  const body = form.callsInternal("ast") ? form.rest : form.toArray();
-
-  body.forEach((entry) => {
-    if (!isForm(entry)) {
-      return;
-    }
-
-    const useDecl = parseUseDecl(entry);
-    if (!useDecl) {
-      return;
-    }
-
-    useDecl.entries.forEach((useEntry) => {
-      entries.push({ ...useEntry, visibility: useDecl.visibility });
-    });
-  });
-
-  return entries;
-};
-
-const parseUseDecl = (
-  form: Form
-): { entries: NormalizedUseEntry[]; visibility: "module" | "pub" } | null => {
-  const classified = classifyTopLevelDecl(form);
-  if (classified.kind !== "use-decl") {
-    return null;
-  }
-  return {
-    entries: parseUsePaths(classified.pathExpr, toSourceSpan(form)),
-    visibility: classified.visibility,
-  };
-};
+const collectUseEntries = (module: ModuleNode): UseEntryWithVisibility[] =>
+  requireModuleHeader(module).items.flatMap((item) =>
+    item.kind === "use"
+      ? item.entries.map((entry) => ({
+          ...entry,
+          visibility: item.visibility,
+        }))
+      : [],
+  );
 
 const cloneMacroWithAlias = (
   macro: MacroDefinition,
-  alias: string
+  alias: string,
 ): MacroDefinition => ({
   name: new IdentifierAtom(alias),
   parameters: macro.parameters.map((param) => param.clone()),

@@ -1,11 +1,11 @@
 import { rememberSyntax } from "../context.js";
 import type { TypeParameterDecl } from "../../decls.js";
 import type { BindingContext } from "../types.js";
-import type { ParsedTypeParameter } from "../parsing.js";
+import type { ParsedTypeParameter } from "../../../parser/surface/declarations.js";
 
 export const bindTypeParameters = (
   params: readonly ParsedTypeParameter[],
-  ctx: BindingContext
+  ctx: BindingContext,
 ): TypeParameterDecl[] =>
   params.map((param) => {
     rememberSyntax(param.name, ctx);

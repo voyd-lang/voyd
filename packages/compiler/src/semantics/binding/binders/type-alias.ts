@@ -1,4 +1,4 @@
-import type { ParsedTypeAliasDecl } from "../parsing.js";
+import type { ParsedTypeAliasDecl } from "../../../parser/surface/declarations.js";
 import { diagnosticFromCode } from "../../../diagnostics/index.js";
 import type { BindingContext } from "../types.js";
 import type { TypeAliasDecl, TypeParameterDecl } from "../../decls.js";
@@ -6,7 +6,10 @@ import type { ScopeId } from "../../ids.js";
 import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
-import { reportOverloadNameCollision, spanForDeclaredSymbol } from "../name-collisions.js";
+import {
+  reportOverloadNameCollision,
+  spanForDeclaredSymbol,
+} from "../name-collisions.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 import {
   bindTypeExpr,
@@ -23,13 +26,13 @@ import {
   resolveNominalTypeSymbol,
 } from "../../nominal-type-target.js";
 import { importedModuleIdFrom } from "../../imports/metadata.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contracts.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
@@ -49,7 +52,9 @@ export const bindTypeAlias = (
   });
   const intrinsicTypeMetadata =
     typeof intrinsicType === "string" ? { intrinsicType } : undefined;
-  const boundaryMetadata = boundaryMetadataFromAttribute(decl.form.attributes?.boundary);
+  const boundaryMetadata = boundaryMetadataFromAttribute(
+    decl.form.attributes?.boundary,
+  );
   const enumNamespaceMetadata = enumNamespaceMetadataFromAliasTarget({
     target: decl.target,
     typeParameterNames: decl.typeParameters.map((entry) => entry.name.value),
@@ -323,7 +328,8 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
         Array.isArray(targetMetadata?.nominalTargetTypeArguments);
       if (canCopyTargetNominalMetadata) {
         ctx.symbolTable.setSymbolMetadata(alias.symbol, {
-          nominalTargetTypeArguments: targetMetadata?.nominalTargetTypeArguments,
+          nominalTargetTypeArguments:
+            targetMetadata?.nominalTargetTypeArguments,
           nominalTargetTypeParameterNames:
             targetMetadata?.nominalTargetTypeParameterNames,
         });

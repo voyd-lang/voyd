@@ -12,8 +12,7 @@ import { constructorObjectLiteral } from "./constructor-object-literal.js";
 import { SyntaxMacro } from "./types.js";
 import { functionalMacroExpander } from "./functional-macro-expander/index.js";
 import { testBlockMacro } from "./test-block.js";
-import { validateBraceEntrySyntax } from "./validate-brace-entry-syntax.js";
-import { validateUseSyntax } from "./validate-use-syntax.js";
+import { validateSurfaceSyntax } from "./validate-surface-syntax.js";
 
 /** Caution: Order matters */
 export const BASE_SYNTAX_MACROS: SyntaxMacro[] = [
@@ -21,8 +20,7 @@ export const BASE_SYNTAX_MACROS: SyntaxMacro[] = [
   primary,
   attachColonClauses,
   constructorObjectLiteral,
-  validateBraceEntrySyntax,
-  validateUseSyntax,
+  validateSurfaceSyntax,
 ];
 
 export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
@@ -44,7 +42,7 @@ const SYNTAX_MACROS: SyntaxMacro[] = [
 
 export const expandSyntaxMacros = (
   expr: Form,
-  syntaxMacros = SYNTAX_MACROS
+  syntaxMacros = SYNTAX_MACROS,
 ): Form => syntaxMacros.reduce((ast, macro) => macro(ast), expr);
 
 export const expandBaseSyntaxMacros = (expr: Form): Form =>

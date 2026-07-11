@@ -1,5 +1,5 @@
 import { isForm, type Form } from "../../../parser/index.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import type { HirExprId } from "../../ids.js";
 import { resolveSymbol } from "../resolution.js";
 import type { LoweringFormParams } from "./types.js";

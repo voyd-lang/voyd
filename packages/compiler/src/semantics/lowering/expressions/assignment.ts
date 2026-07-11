@@ -1,5 +1,5 @@
 import { isForm } from "../../../parser/index.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import type { HirExprId } from "../../ids.js";
 import type { HirPattern } from "../../hir/index.js";
 import { lowerPattern } from "./patterns.js";

@@ -26,11 +26,11 @@ import {
   type ParsedTraitDecl,
   type ParsedTraitMethod,
   type ParsedFunctionDecl,
-} from "../parsing.js";
+} from "../../../parser/surface/declarations.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { bindExpr } from "./expressions.js";
 import { bindTypeParameters } from "./type-parameters.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { moduleVisibility } from "../../hir/index.js";
 import { declareValueOrParameter } from "../redefinitions.js";
 import { reportOverloadNameCollision } from "../name-collisions.js";
@@ -41,7 +41,7 @@ import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contr
 export const bindTraitDecl = (
   decl: ParsedTraitDecl,
   ctx: BindingContext,
-  tracker: BinderScopeTracker
+  tracker: BinderScopeTracker,
 ): void => {
   resolveStdIntrinsicTypeContractProvider({
     id: decl.form.attributes?.intrinsicType,
@@ -93,7 +93,7 @@ export const bindTraitDecl = (
           tracker,
           traitScope,
           traitSymbol: symbol,
-        })
+        }),
       );
     });
   });
@@ -147,7 +147,7 @@ const bindTraitMethod = ({
       declaredAt: decl.form.syntaxId,
       metadata: methodMetadata,
     },
-    traitScope
+    traitScope,
   );
 
   const methodScope = ctx.symbolTable.createScope({
@@ -190,12 +190,9 @@ const bindTraitMethod = ({
 const bindTraitMethodParameters = (
   decl: ParsedTraitMethod,
   ctx: BindingContext,
-  scope: ScopeId
+  scope: ScopeId,
 ): ParameterDeclInput[] =>
   decl.signature.params.map((param) => {
-    if (param.defaultValue) {
-      throw new Error("trait methods do not support default parameters");
-    }
     rememberSyntax(param.ast, ctx);
     if (param.labelAst) {
       rememberSyntax(param.labelAst, ctx);
@@ -229,7 +226,7 @@ const bindTraitMethodParameters = (
 export const resolveTraitDecl = (
   traitExpr: Expr,
   ctx: BindingContext,
-  scope: ScopeId
+  scope: ScopeId,
 ): ResolvedTraitDecl | undefined => {
   const traitIdentifier = (() => {
     if (isIdentifierAtom(traitExpr)) {
@@ -355,7 +352,7 @@ const resolveTraitDeclBySymbol = ({
 
 export const makeParsedFunctionFromTraitMethod = (
   method: TraitMethodDecl,
-  options?: { typeParamSubstitutions?: Map<string, Expr> }
+  options?: { typeParamSubstitutions?: Map<string, Expr> },
 ): ParsedFunctionDecl => {
   const nameAst = method.nameAst?.clone();
   if (!nameAst) {
@@ -381,7 +378,7 @@ export const makeParsedFunctionFromTraitMethod = (
         : param.labelAst?.clone();
     const typeExpr = substituteTypeParamExpr(
       param.typeExpr?.clone(),
-      options?.typeParamSubstitutions
+      options?.typeParamSubstitutions,
     );
     return {
       name: param.name,
@@ -395,7 +392,7 @@ export const makeParsedFunctionFromTraitMethod = (
 
   const returnType = substituteTypeParamExpr(
     method.returnTypeExpr?.clone(),
-    options?.typeParamSubstitutions
+    options?.typeParamSubstitutions,
   );
 
   return {
@@ -414,7 +411,7 @@ export const makeParsedFunctionFromTraitMethod = (
               name: ast,
               constraint: substituteTypeParamExpr(
                 param.constraint?.clone(),
-                options?.typeParamSubstitutions
+                options?.typeParamSubstitutions,
               ),
             },
           ];
@@ -426,14 +423,14 @@ export const makeParsedFunctionFromTraitMethod = (
     intrinsic: normalizeIntrinsicAttribute(
       (form.attributes?.intrinsic as IntrinsicAttribute | undefined) ??
         method.intrinsic,
-      nameAst.value
+      nameAst.value,
     ),
   };
 };
 
 const substituteTypeParamExpr = (
   expr: Expr | undefined,
-  substitutions?: Map<string, Expr>
+  substitutions?: Map<string, Expr>,
 ): Expr | undefined => {
   if (!expr || !substitutions || substitutions.size === 0) {
     return expr;

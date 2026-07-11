@@ -14,7 +14,7 @@ import { runLoweringPipeline } from "./lowering/lowering.js";
 import { analyzeLambdaCaptures } from "./lowering/captures.js";
 import { runTypingPipeline, type TypingResult } from "./typing/typing.js";
 import { specializeOverloadCallees } from "./typing/specialize-overloads.js";
-import { toSourceSpan } from "./utils.js";
+import { toSourceSpan } from "../parser/surface/utils.js";
 import type { OverloadSetId, SourceSpan, SymbolId } from "./ids.js";
 import type {
   ModuleExportEffect,

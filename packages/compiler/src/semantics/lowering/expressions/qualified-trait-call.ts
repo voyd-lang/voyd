@@ -6,9 +6,10 @@ import {
   isIdentifierAtom,
   isInternalIdentifierAtom,
 } from "../../../parser/index.js";
+import { parseSurfaceCallArguments } from "../../../parser/surface/index.js";
 import type { HirExprId, SymbolId } from "../../ids.js";
 import type { HirTypeExpr } from "../../hir/index.js";
-import { toSourceSpan } from "../../utils.js";
+import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import { traitMethodHasSelfReceiver } from "./trait-method-utils.js";
 import type { LoweringParams } from "./types.js";
@@ -68,7 +69,8 @@ export const lowerQualifiedTraitMethodCall = ({
 
   const potentialGenerics = elements[1];
   const hasTypeArguments =
-    isForm(potentialGenerics) && formCallsInternal(potentialGenerics, "generics");
+    isForm(potentialGenerics) &&
+    formCallsInternal(potentialGenerics, "generics");
   const typeArguments = hasTypeArguments
     ? ((potentialGenerics as Form).rest
         .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
@@ -88,20 +90,12 @@ export const lowerQualifiedTraitMethodCall = ({
 
   const argsStartIndex =
     receiverSource.kind === "target" ? firstArgIndex : firstArgIndex + 1;
-  const args = elements.slice(argsStartIndex).map((arg) => {
-    if (isForm(arg) && arg.calls(":")) {
-      const labelExpr = arg.at(1);
-      const valueExpr = arg.at(2);
-      if (!isIdentifierAtom(labelExpr) || !valueExpr) {
-        throw new Error("Invalid labeled argument");
-      }
-      return {
-        label: labelExpr.value,
-        expr: lowerExpr(valueExpr, ctx, scopes),
-      };
-    }
-    return { expr: lowerExpr(arg, ctx, scopes) };
-  });
+  const args = parseSurfaceCallArguments(elements.slice(argsStartIndex)).map(
+    (argument) => ({
+      ...(argument.label ? { label: argument.label.value } : {}),
+      expr: lowerExpr(argument.value, ctx, scopes),
+    }),
+  );
 
   return ctx.builder.addExpression({
     kind: "expr",

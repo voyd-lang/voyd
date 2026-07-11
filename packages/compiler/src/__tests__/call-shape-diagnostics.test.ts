@@ -29,6 +29,85 @@ const expectCompileSuccess = (
 };
 
 describe("call shape diagnostics", () => {
+  it("reports malformed declaration shapes before binding", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({ [entryPath]: "pub fn main()" });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]?.code).toBe("MD0002");
+    expect(result.diagnostics[0]?.message).toBe("fn missing body expression");
+  });
+
+  it("reports malformed record types as surface syntax diagnostics", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({ [entryPath]: "pub type Foo = { bar }" });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]?.code).toBe("MD0002");
+    expect(result.diagnostics[0]?.message).toBe(
+      "object type fields must be labeled",
+    );
+    expect(result.diagnostics[0]?.span.start).toBeGreaterThan(0);
+  });
+
+  it("reports function types without return types as surface syntax", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [entryPath]: "pub type Callback = fn(i32)",
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({ entryPath, roots: { src: root }, host }),
+    );
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]?.code).toBe("MD0002");
+    expect(result.diagnostics[0]?.message).toBe(
+      "function type missing return type",
+    );
+  });
+
+  it("reports malformed labeled call arguments as surface syntax", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [entryPath]: `fn use({ value: i32 }) -> i32
+  value
+
+pub fn main() -> i32
+  use(1: 2)`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({ entryPath, roots: { src: root }, host }),
+    );
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]?.code).toBe("MD0002");
+    expect(result.diagnostics[0]?.message).toBe(
+      "labeled call argument requires an identifier label and one value",
+    );
+  });
+
   it("reports a missing comma between object literal fields", async () => {
     const root = resolve("/proj/src");
     const entryPath = `${root}${sep}pkg.voyd`;
@@ -51,6 +130,110 @@ describe("call shape diagnostics", () => {
     expect(result.diagnostics[0]?.message).toContain(
       "Expected ',' before 'second' in braces",
     );
+  });
+
+  it("rejects optional markers on runtime object fields at the surface", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [entryPath]: `pub fn main() -> i32
+  let value = { count?: 1 }
+  value.count`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({ entryPath, roots: { src: root }, host }),
+    );
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]?.code).toBe("MD0002");
+    expect(result.diagnostics[0]?.message).toBe(
+      "unsupported object literal entry",
+    );
+  });
+
+  it("reports malformed effect handler parameters as surface syntax", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [entryPath]: `eff Async
+  fn await(value: i32) -> i32
+
+pub fn main(): Async -> i32
+  try
+    Async::await(1)
+  Async::await(1 + 2):
+    0`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]?.code).toBe("MD0002");
+    expect(result.diagnostics[0]?.message).toBe(
+      "handler parameter must be an identifier or typed identifier",
+    );
+    expect(result.diagnostics[0]?.span.start).toBeGreaterThan(0);
+  });
+
+  it("reports malformed embedded effect handlers as surface syntax", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [entryPath]: `eff Async
+  fn await(value: i32) -> i32
+
+pub fn main(): Async -> i32
+  try
+    Async::await(1)
+    Async::await(1 + 2):
+      0`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]?.code).toBe("MD0002");
+    expect(result.diagnostics[0]?.message).toBe(
+      "handler parameter must be an identifier or typed identifier",
+    );
+  });
+
+  it("reports malformed match binding patterns as surface syntax", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [entryPath]: `obj Dog { noses: i32 }
+
+pub fn main() -> i32
+  let dog = Dog { noses: 1 }
+  match(dog)
+    Dog as 1: 0`,
+    });
+
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    expect(result.diagnostics).toHaveLength(1);
+    expect(result.diagnostics[0]?.code).toBe("MD0002");
+    expect(result.diagnostics[0]?.message).toBe("unsupported pattern form");
   });
 
   it("allows labeled calls as object literal field values", async () => {
@@ -102,8 +285,12 @@ pub fn main() -> i32
       }),
     );
 
-    expect(result.diagnostics.some((entry) => entry.code === "TY9999")).toBe(false);
-    const diagnostic = result.diagnostics.find((entry) => entry.code === "TY0021");
+    expect(result.diagnostics.some((entry) => entry.code === "TY9999")).toBe(
+      false,
+    );
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.code === "TY0021",
+    );
     expect(diagnostic).toBeDefined();
     if (!diagnostic) {
       return;
@@ -164,7 +351,9 @@ pub fn main() -> i32
       }),
     );
 
-    const diagnostic = result.diagnostics.find((entry) => entry.code === "TY0021");
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.code === "TY0021",
+    );
     expect(diagnostic).toBeDefined();
     if (!diagnostic) {
       return;
@@ -197,7 +386,9 @@ pub fn main() -> i32
       }),
     );
 
-    const diagnostic = result.diagnostics.find((entry) => entry.code === "TY0021");
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.code === "TY0021",
+    );
     expect(diagnostic).toBeDefined();
     if (!diagnostic) {
       return;
@@ -232,7 +423,9 @@ pub fn main() -> i32
       }),
     );
 
-    const diagnostic = result.diagnostics.find((entry) => entry.code === "TY0021");
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.code === "TY0021",
+    );
     expect(diagnostic).toBeDefined();
     if (!diagnostic) {
       return;
@@ -267,7 +460,9 @@ pub fn main() -> i32
       }),
     );
 
-    const diagnostic = result.diagnostics.find((entry) => entry.code === "TY0021");
+    const diagnostic = result.diagnostics.find(
+      (entry) => entry.code === "TY0021",
+    );
     expect(diagnostic).toBeDefined();
     if (!diagnostic) {
       return;
