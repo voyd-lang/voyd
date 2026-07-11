@@ -22,6 +22,7 @@ describe("program helper registry", () => {
       effectLowering: {
         sitesByExpr: new Map(),
         sites: [],
+        symbolsLiveAcrossSuspension: new Set<number>(),
         callArgTemps: new Map(),
         tempTypeIds: new Map(),
         defaultParamTemps: new Map(),

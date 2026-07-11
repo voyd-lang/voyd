@@ -235,6 +235,7 @@ const buildLoweringSnapshot = () => {
     effectLowering: {
       sitesByExpr: new Map(),
       sites: [],
+      symbolsLiveAcrossSuspension: new Set(),
       callArgTemps: new Map(),
       tempTypeIds: new Map(),
       defaultParamTemps: new Map(),

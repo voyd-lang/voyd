@@ -833,6 +833,179 @@ pub fn main(): () -> i32
     );
   });
 
+  it("scalarizes effectful aggregate locals that are not live across suspension", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Vec2 {
+  x: i32,
+  y: i32
+}
+
+eff Local
+  next(tail) -> i32
+
+fn compute(): Local -> i32
+  let before = Vec2 { x: 1, y: 2 }
+  let subtotal = before.x + before.y
+  let value = Local::next()
+  let after = Vec2 { x: value, y: 4 }
+  subtotal + after.x + after.y
+
+pub fn main(): () -> i32
+  try
+    compute()
+  Local::next(tail):
+    tail(10)
+`);
+
+    expect(runMain(optimizedCodegen.module)()).toBe(17);
+    const aggregateAllocations = (text: string): number =>
+      text.match(/\(struct\.new \$voyd_struct_shape_/g)?.length ?? 0;
+    expect(
+      aggregateAllocations(baselineCodegen.module.emitText()),
+    ).toBeGreaterThan(aggregateAllocations(optimizedCodegen.module.emitText()));
+  });
+
+  it("materializes effectful aggregate locals that are live across suspension", () => {
+    const { optimizedCodegen } = compileOptimized(`
+obj Vec2 {
+  x: i32,
+  y: i32
+}
+
+eff Local
+  next(tail) -> i32
+
+fn compute(): Local -> i32
+  let vec = Vec2 { x: 3, y: 4 }
+  let value = Local::next()
+  vec.x + vec.y + value
+
+pub fn main(): () -> i32
+  try
+    compute()
+  Local::next(tail):
+    tail(5)
+`);
+
+    expect(runMain(optimizedCodegen.module)()).toBe(12);
+    expect(optimizedCodegen.module.emitText()).toMatch(
+      /\(struct\.new \$voyd_struct_shape_/,
+    );
+  });
+
+  it("materializes aggregate initializers whose evaluation suspends", () => {
+    const { optimizedCodegen } = compileOptimized(`
+obj Vec2 {
+  x: i32,
+  y: i32
+}
+
+eff Local
+  next(tail) -> i32
+
+fn compute(): Local -> i32
+  let vec = Vec2 { x: Local::next(), y: 2 }
+  vec.x + vec.y
+
+pub fn main(): () -> i32
+  try
+    compute()
+  Local::next(tail):
+    tail(5)
+`);
+
+    expect(runMain(optimizedCodegen.module)()).toBe(7);
+    expect(optimizedCodegen.module.emitText()).toMatch(
+      /\(struct\.new \$voyd_struct_shape_/,
+    );
+  });
+
+  it("scalarizes effectful value parameters dead before suspension", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+val Vec2 {
+  x: i32,
+  y: i32
+}
+
+eff Local
+  next(tail) -> i32
+
+fn compute(vec: Vec2): Local -> i32
+  let subtotal = vec.x + vec.y
+  subtotal + Local::next()
+
+pub fn main(): () -> i32
+  try
+    compute(Vec2 { x: 3, y: 4 })
+  Local::next(tail):
+    tail(5)
+`);
+
+    expect(runMain(optimizedCodegen.module)()).toBe(12);
+    const aggregateAllocations = (text: string): number =>
+      text.match(
+        /\(struct\.new \$std__scalar_aggregate_replacement__struct_nominal_/g,
+      )?.length ?? 0;
+    expect(
+      aggregateAllocations(baselineCodegen.module.emitText()),
+    ).toBeGreaterThan(aggregateAllocations(optimizedCodegen.module.emitText()));
+  });
+
+  it("keeps live effectful value parameters materialized across suspension", () => {
+    const { optimizedCodegen } = compileOptimized(`
+val Vec2 {
+  x: i32,
+  y: i32
+}
+
+eff Local
+  next(tail) -> i32
+
+fn compute(vec: Vec2): Local -> i32
+  let value = Local::next()
+  vec.x + vec.y + value
+
+pub fn main(): () -> i32
+  try
+    compute(Vec2 { x: 3, y: 4 })
+  Local::next(tail):
+    tail(5)
+`);
+
+    expect(runMain(optimizedCodegen.module)()).toBe(12);
+    expect(optimizedCodegen.module.emitText()).toMatch(
+      /\(struct\.new \$std__scalar_aggregate_replacement__struct_nominal_/,
+    );
+  });
+
+  it("preserves identity and mutation guards in effectful functions", () => {
+    const { optimizedCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+eff Local
+  next(tail) -> i32
+
+fn compute(): Local -> i32
+  let ~box = Box { value: 1 }
+  let ~alias = box
+  alias.value = 7
+  box.value + Local::next()
+
+pub fn main(): () -> i32
+  try
+    compute()
+  Local::next(tail):
+    tail(5)
+`);
+
+    expect(runMain(optimizedCodegen.module)()).toBe(12);
+    expect(optimizedCodegen.module.emitText()).toMatch(
+      /\(struct\.set \$voyd_struct_shape_/,
+    );
+  });
+
   it("restores bindings after failed scalar heap-result probing", () => {
     const { optimizedCodegen } = compileOptimized(`
 obj Box {

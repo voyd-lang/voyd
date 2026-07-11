@@ -86,6 +86,7 @@ export type ContinuationSiteEir =
 export interface EffectLoweringResult {
   sitesByExpr: Map<HirExprId, ContinuationSite>;
   sites: readonly ContinuationSite[];
+  symbolsLiveAcrossSuspension: ReadonlySet<SymbolId>;
   callArgTemps: Map<
     HirExprId,
     readonly { argIndex: number; tempId: number; typeId: TypeId }[]
@@ -106,6 +107,7 @@ export interface EffectLoweringResult {
 export interface EffectLoweringEirResult {
   sitesByExpr: Map<HirExprId, ContinuationSiteEir>;
   sites: readonly ContinuationSiteEir[];
+  symbolsLiveAcrossSuspension: ReadonlySet<SymbolId>;
   callArgTemps: Map<
     HirExprId,
     readonly { argIndex: number; tempId: number; typeId: TypeId }[]

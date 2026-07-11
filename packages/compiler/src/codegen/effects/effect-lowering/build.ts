@@ -540,9 +540,19 @@ export const buildEffectLoweringEir = ({
     callArgTemps.set(key, sorted);
   });
 
+  const symbolsLiveAcrossSuspension = new Set<SymbolId>();
+  sites.forEach((site) =>
+    site.captureFields.forEach((field) => {
+      if (typeof field.symbol === "number") {
+        symbolsLiveAcrossSuspension.add(field.symbol);
+      }
+    }),
+  );
+
   return {
     sitesByExpr,
     sites,
+    symbolsLiveAcrossSuspension,
     callArgTemps,
     tempTypeIds,
     defaultParamTemps,

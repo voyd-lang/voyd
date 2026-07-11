@@ -194,6 +194,7 @@ export const materializeGcTrampolineEffectLowering = ({
   return {
     sitesByExpr,
     sites,
+    symbolsLiveAcrossSuspension: eir.symbolsLiveAcrossSuspension,
     callArgTemps: eir.callArgTemps,
     tempTypeIds: eir.tempTypeIds,
     defaultParamTemps: eir.defaultParamTemps,

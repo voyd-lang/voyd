@@ -22,6 +22,9 @@ export const createGcTrampolineBackend = ({
   requestedKind,
   stackSwitchRequested,
   stackSwitchUnavailableReason,
+  scalarAggregates: {
+    keepLanesAcrossSuspension: false,
+  },
   abi: gcTrampolineAbiStrategy,
   buildLowering: ({ ctx, siteCounter }) =>
     materializeGcTrampolineEffectLowering({
@@ -45,6 +48,6 @@ export const createGcTrampolineBackend = ({
       fnCtx,
       compileExpr,
       tailPosition,
-      expectedResultTypeId
+      expectedResultTypeId,
     ),
 });

@@ -43,6 +43,38 @@ const recordScalarAggregateDecision = (
 ): void =>
   incrementCompilerPerfCounter(`codegen.scalar_aggregate.${kind}.${decision}`);
 
+type ScalarAggregateSuspensionBailout =
+  | "initializer_suspends"
+  | "live_across_suspension";
+
+const scalarAggregateSuspensionBailout = ({
+  symbol,
+  initializer,
+  ctx,
+  fnCtx,
+}: {
+  symbol: SymbolId;
+  initializer?: HirExprId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): ScalarAggregateSuspensionBailout | undefined => {
+  if (
+    !fnCtx.effectful ||
+    ctx.effectsBackend.scalarAggregates.keepLanesAcrossSuspension
+  ) {
+    return undefined;
+  }
+  if (
+    typeof initializer === "number" &&
+    (fnCtx.continuation?.cfg.sitesByExpr.get(initializer)?.size ?? 0) > 0
+  ) {
+    return "initializer_suspends";
+  }
+  return ctx.effectLowering.symbolsLiveAcrossSuspension.has(symbol)
+    ? "live_across_suspension"
+    : undefined;
+};
+
 export type ScalarAggregateStatementCompiler = (
   stmtId: number,
 ) => binaryen.ExpressionRef;
@@ -870,10 +902,6 @@ export const tryScalarizeAggregateInitializer = ({
   compileStatement?: ScalarAggregateStatementCompiler;
   compileBlockInitializer?: ScalarAggregateBlockInitializerCompiler;
 }): binaryen.ExpressionRef[] | undefined => {
-  if (fnCtx.effectful) {
-    recordScalarAggregateDecision("initializer", "bailout.effectful");
-    return undefined;
-  }
   const structInfo = getStructuralTypeInfo(targetTypeId, ctx);
   if (!structInfo) {
     recordScalarAggregateDecision("initializer", "bailout.no_layout");
@@ -921,6 +949,20 @@ export const tryScalarizeAggregateInitializer = ({
     })
   ) {
     recordScalarAggregateDecision("initializer", "bailout.escape_or_shape");
+    return undefined;
+  }
+
+  const suspensionBailout = scalarAggregateSuspensionBailout({
+    symbol,
+    initializer,
+    ctx,
+    fnCtx,
+  });
+  if (suspensionBailout) {
+    recordScalarAggregateDecision(
+      "initializer",
+      `bailout.${suspensionBailout}`,
+    );
     return undefined;
   }
 
@@ -1109,10 +1151,6 @@ export const tryBindScalarAggregateParameter = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef[] | undefined => {
-  if (fnCtx.effectful) {
-    recordScalarAggregateDecision("parameter", "bailout.effectful");
-    return undefined;
-  }
   if (mutable) {
     recordScalarAggregateDecision("parameter", "bailout.mutable");
     return undefined;
@@ -1136,6 +1174,16 @@ export const tryBindScalarAggregateParameter = ({
   }
   if (abiValues.length !== aggregateLaneCount(structInfo)) {
     recordScalarAggregateDecision("parameter", "bailout.lane_mismatch");
+    return undefined;
+  }
+
+  const suspensionBailout = scalarAggregateSuspensionBailout({
+    symbol,
+    ctx,
+    fnCtx,
+  });
+  if (suspensionBailout) {
+    recordScalarAggregateDecision("parameter", `bailout.${suspensionBailout}`);
     return undefined;
   }
 

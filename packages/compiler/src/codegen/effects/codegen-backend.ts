@@ -52,6 +52,14 @@ export interface EffectsBackend {
   requestedKind: EffectsBackendKind;
   stackSwitchRequested: boolean;
   stackSwitchUnavailableReason?: string;
+  scalarAggregates: {
+    /**
+     * Stack switching preserves Wasm locals while a frame is suspended. The
+     * GC trampoline does not: live source bindings must be captured in a
+     * materialized continuation environment.
+     */
+    keepLanesAcrossSuspension: boolean;
+  };
   abi: EffectsAbiStrategy;
   buildLowering: (params: {
     ctx: CodegenContext;

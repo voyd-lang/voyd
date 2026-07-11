@@ -223,6 +223,7 @@ const buildCodegenProgram = (
     effectLowering: {
       sitesByExpr: new Map(),
       sites: [],
+      symbolsLiveAcrossSuspension: new Set(),
       callArgTemps: new Map(),
       tempTypeIds: new Map(),
       defaultParamTemps: new Map(),
@@ -322,6 +323,7 @@ describe("next codegen", () => {
       effectLowering: {
         sitesByExpr: new Map(),
         sites: [],
+        symbolsLiveAcrossSuspension: new Set(),
         callArgTemps: new Map(),
         tempTypeIds: new Map(),
         defaultParamTemps: new Map(),

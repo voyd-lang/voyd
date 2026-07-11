@@ -588,7 +588,7 @@ The complexity added by this path is:
 - localized field load/store/rematerialization helpers
 - a private direct-call specialization path for selected small heap-object
   parameters and fresh heap-object results
-- additional local rechecks for mutable method receivers, effectful functions,
+- additional local rechecks for mutable method receivers, suspension liveness,
   effect-handler captures, aliasing, and storage-ref capture boundaries
 
 It avoids a separate optimizer rewrite pass and keeps the public function ABI
@@ -598,8 +598,54 @@ mutation/capture boundaries and accidentally specializing alias-returning heap
 objects. The implementation pays a compile-time cost in the affected scenarios
 for extra fact checks and specialization metadata, but the hot aggregate cases
 below show runtime and code-size wins where Binaryen alone did not remove the
-semantic allocation pattern. Effectful functions deliberately fall back to
-materialized values until storage/capture semantics can be proven more tightly.
+semantic allocation pattern.
+
+Effectful functions use the continuation lowering's backend-neutral
+`symbolsLiveAcrossSuspension` fact set. The GC-trampoline backend allows scalar
+lanes only when the initializer itself does not suspend and the binding is not
+live across a later suspension. A future stack-switching backend can set its
+scalar-aggregate policy to preserve lanes across suspension because suspended
+Wasm frames retain their locals. Escape, identity, aliasing, and mutation checks
+remain independent of that backend choice.
+
+This policy assumes Voyd's existing one-shot continuation contract. One-shot
+semantics prevent multiple resumed frames from observing divergent copies of a
+mutable scalar lane. They do not relax object identity or aliasing rules: any
+candidate requiring stable identity still materializes before scalarization is
+considered.
+
+### Effectful scalar replacement measurement (V-419)
+
+The original trace reported 293 categorical effectful initializer bailouts and
+47 categorical effectful parameter bailouts, with 26 initializer and 8
+parameter applications. Re-running the representative
+`vtrace-compute-benchmark.voyd` workload after classifying candidates with the
+ordinary safety checks first produced:
+
+| Decision                                                         | Count |
+| ---------------------------------------------------------------- | ----: |
+| initializer applied                                              |    38 |
+| initializer evaluation suspends                                  |    45 |
+| initializer value live across suspension                         |    11 |
+| parameter applied                                                |     8 |
+| parameter live across suspension after independent safety checks |     0 |
+
+The current GC-safe slice therefore adds 12 initializer applications (a 46%
+increase) in the effect-heavy representative workload. The old parameter
+bailouts were all rejected by independent escape, layout, or ABI checks, so the
+workload gains no parameter applications yet.
+
+The focused effectful codegen regression removes aggregate `struct.new` and
+field traffic for values consumed between suspension points, while paired tests
+confirm materialization for live-across-suspension and suspending-initializer
+cases. On the fully optimized representative vtrace module, Binaryen already
+eliminates the newly scalarized allocation shapes: base and head both emit
+61,474 Wasm bytes, 890,130 WAT bytes, and 771 `struct.new` operations. Median
+fresh-instance runtime was 170.47 ms at base and 170.73 ms at head (+0.2%,
+noise). This is a verified pre-Binaryen structural improvement rather than a
+measurable end-to-end win on that workload; the explicit contract remains
+valuable for shapes Binaryen cannot recover and for the future stack-switching
+backend.
 
 Rejected simpler alternatives:
 
