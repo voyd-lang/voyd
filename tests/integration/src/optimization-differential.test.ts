@@ -72,6 +72,26 @@ describe("integration: optimization-level differential behavior", () => {
     });
   });
 
+  it("preserves opaque raw closure references across the host boundary", async () => {
+    await Promise.all(
+      LEVELS.map(async (level) => {
+        const module = new WebAssembly.Module(
+          compiledByLevel.get(level)!.wasm as BufferSource,
+        );
+        expect(WebAssembly.Module.imports(module)).toEqual([]);
+        const instance = await WebAssembly.instantiate(module, {});
+        const exports = instance.exports as {
+          make_incrementer_export(delta: number): unknown;
+          apply_incrementer(transform: unknown, value: number): number;
+        };
+        const incrementer = exports.make_incrementer_export(5);
+
+        expect(typeof incrementer).toBe("object");
+        expect(exports.apply_incrementer(incrementer, 7)).toBe(12);
+      }),
+    );
+  });
+
   it.each([
     ["folded_branch", 42],
     ["trait_dispatch", 9],

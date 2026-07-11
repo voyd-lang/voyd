@@ -9,6 +9,7 @@ describe("binaryen aggressive optimization profile", () => {
   afterEach(() => {
     delete process.env.VOYD_INTERNAL_BINARYEN_ABLATION;
     delete process.env.VOYD_BINARYEN_EXPERIMENT;
+    vi.restoreAllMocks();
   });
 
   it("includes the heap allocation passes", () => {
@@ -69,31 +70,73 @@ describe("binaryen aggressive optimization profile", () => {
     mod.setFeatures(binaryen.Features.All);
     mod.addFunction("main", binaryen.none, binaryen.i32, [], mod.i32.const(42));
     mod.addFunctionExport("main", "main");
-
-    const report = optimizeBinaryenModule({
-      module: mod,
-      profile: "aggressive",
+    const previousClosedWorld = binaryen.getClosedWorld();
+    const observedClosedWorld: boolean[] = [];
+    const optimize = mod.optimize.bind(mod);
+    vi.spyOn(mod, "optimize").mockImplementation(() => {
+      observedClosedWorld.push(binaryen.getClosedWorld());
+      optimize();
     });
+    binaryen.setClosedWorld(false);
 
-    expect(Boolean(mod.validate())).toBe(true);
-    expect(report.profile).toBe("aggressive");
-    expect(report.extraPasses).toEqual(AGGRESSIVE_BINARYEN_EXTRA_PASSES);
-    expect(report.phasesMs.initialOptimize).toBeGreaterThanOrEqual(0);
-    expect(report.phasesMs.extraPasses).toBeGreaterThanOrEqual(0);
-    expect(report.phasesMs.finalOptimize).toBeGreaterThanOrEqual(0);
+    try {
+      const report = optimizeBinaryenModule({
+        module: mod,
+        profile: "aggressive",
+      });
+
+      expect(Boolean(mod.validate())).toBe(true);
+      expect(report.profile).toBe("aggressive");
+      expect(report.extraPasses).toEqual(AGGRESSIVE_BINARYEN_EXTRA_PASSES);
+      expect(report.phasesMs.initialOptimize).toBeGreaterThanOrEqual(0);
+      expect(report.phasesMs.extraPasses).toBeGreaterThanOrEqual(0);
+      expect(report.phasesMs.finalOptimize).toBeGreaterThanOrEqual(0);
+      expect(observedClosedWorld).toEqual([true, true]);
+      expect(binaryen.getClosedWorld()).toBe(false);
+    } finally {
+      binaryen.setClosedWorld(previousClosedWorld);
+    }
   });
 
   it("uses one optimize call and no extra passes for the standard profile", () => {
     const mod = createMinimalModule();
     const optimize = vi.spyOn(mod, "optimize");
     const runPasses = vi.spyOn(mod, "runPasses");
+    const previousClosedWorld = binaryen.getClosedWorld();
+    binaryen.setClosedWorld(true);
 
-    const report = optimizeBinaryenModule({ module: mod, profile: "standard" });
+    try {
+      const report = optimizeBinaryenModule({
+        module: mod,
+        profile: "standard",
+      });
 
-    expect(optimize).toHaveBeenCalledTimes(1);
-    expect(runPasses).not.toHaveBeenCalled();
-    expect(report.extraPasses).toEqual([]);
-    expect(Boolean(mod.validate())).toBe(true);
+      expect(optimize).toHaveBeenCalledTimes(1);
+      expect(runPasses).not.toHaveBeenCalled();
+      expect(report.extraPasses).toEqual([]);
+      expect(Boolean(mod.validate())).toBe(true);
+      expect(binaryen.getClosedWorld()).toBe(true);
+    } finally {
+      binaryen.setClosedWorld(previousClosedWorld);
+    }
+  });
+
+  it("restores Binaryen globals when aggressive optimization throws", () => {
+    const mod = createMinimalModule();
+    const previousOptimizeLevel = binaryen.getOptimizeLevel();
+    const previousShrinkLevel = binaryen.getShrinkLevel();
+    const previousClosedWorld = binaryen.getClosedWorld();
+    vi.spyOn(mod, "optimize").mockImplementation(() => {
+      expect(binaryen.getClosedWorld()).toBe(true);
+      throw new Error("optimization failed");
+    });
+
+    expect(() =>
+      optimizeBinaryenModule({ module: mod, profile: "aggressive" }),
+    ).toThrow("optimization failed");
+    expect(binaryen.getOptimizeLevel()).toBe(previousOptimizeLevel);
+    expect(binaryen.getShrinkLevel()).toBe(previousShrinkLevel);
+    expect(binaryen.getClosedWorld()).toBe(previousClosedWorld);
   });
 
   it("can ablate an aggressive extra pass and the final optimize call", () => {

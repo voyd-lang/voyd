@@ -59,3 +59,12 @@ fn zero() -> i32
 
 pub fn deliberate_trap() -> i32
   10 / zero()
+
+fn make_incrementer(delta: i32) -> (fn(i32) -> i32)
+  (value) => value + delta
+
+pub fn make_incrementer_export(delta: i32) -> (fn(i32) -> i32)
+  make_incrementer(delta)
+
+pub fn apply_incrementer(transform: fn(i32) -> i32, value: i32) -> i32
+  transform(value)

@@ -148,6 +148,11 @@ Raw Wasm exports remain available through `host.instance.exports`. Existing
 raw MsgPack interop still works; MsgPack is an internal codec detail for typed
 boundary exports, not a stable WIT/component-model replacement.
 
+Raw Wasm GC objects and closures are opaque boundary handles. A host may retain
+them and pass the same reference back to Voyd exports, but inspecting their
+fields, invoking embedded function references, constructing compatible GC
+values, or reflecting on their runtime types is outside the supported ABI.
+
 ## Module roots and package resolution
 
 `createSdk().compile(...)` accepts `roots` when you need to override module
