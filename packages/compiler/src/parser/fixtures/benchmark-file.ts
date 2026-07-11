@@ -1,6 +1,6 @@
 const benchmarkBaseFile = `
 use std::macros::all
-use std::io::{ read, write: io_write }
+use std::io::{ read, write as io_write }
 
 fn fib(n: i32) -> i32
   if n <= 1 then:
