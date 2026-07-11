@@ -60,6 +60,12 @@
     "rationale": "Keep co-located: protects CLI parsing, command wiring, packaged behavior, or process UX."
   },
   {
+    "file": "examples/mini-wikipedia/src/wiki.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects the mini-wikipedia example's Voyd-owned article model and behavior through the native test runner."
+  },
+  {
     "file": "packages/compiler/src/__tests__/call-shape-diagnostics.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
@@ -68,7 +74,7 @@
     "portableCaseIds": [
       "typing.diagnostics.label-mismatch"
     ],
-    "portableGap": "TY0021 label-order/mismatch behavior is user-visible; add one positive reordered-label case and one stable diagnostic case."
+    "portableGap": "TY0021 label-order/mismatch behavior is user-visible; a positive reordered-label case remains to extract. MD0002 missing-comma diagnostics added on main also remain portable backlog."
   },
   {
     "file": "packages/compiler/src/__tests__/dependency-snapshot-cache.test.ts",
@@ -1067,6 +1073,14 @@
       "runtime.collections.slice-inclusive",
       "runtime.collections.slice-unbounded"
     ]
+  },
+  {
+    "file": "packages/compiler/src/parser/__tests__/syntax-errors.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Keep exact parser error construction and location assertions co-located while recording the user-visible syntax contract as portable backlog.",
+    "portableGap": "MD0002 missing-comma diagnostics and invalid single-colon module-access diagnostics do not yet have portable conformance cases."
   },
   {
     "file": "packages/compiler/src/parser/ast/__tests__/form.test.ts",

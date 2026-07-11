@@ -1,5 +1,8 @@
 import type { Expr } from "./ast/index.js";
 
+export const POSSIBLE_MISSING_BRACE_ENTRY_COMMA_ATTRIBUTE =
+  "possibleMissingBraceEntryComma";
+
 export type IntrinsicAttribute = {
   name?: string;
   usesSignature?: boolean;

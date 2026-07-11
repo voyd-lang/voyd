@@ -716,6 +716,10 @@ export const compileProgramWithLoader = async (
     );
   }
 
+  if (hasErrorDiagnostics(graph.diagnostics)) {
+    return complete(compileProgramFailure([...graph.diagnostics]));
+  }
+
   const analyzeStartedAt = startCompilerPerfPhase();
   const dependencySnapshotReuse = prepareDependencySnapshotReuse({
     cache: options.dependencySnapshotCache,

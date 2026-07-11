@@ -284,12 +284,13 @@ describe("integration: compiled VX DOM rendering", () => {
       .spyOn(globalThis, "fetch")
       .mockImplementation(async (input, init) => {
         const request = normalizeFetchRequest(input, init);
-        if (
-          request.method === "POST" &&
-          request.url.endsWith("/wiki/home/body")
-        ) {
+        if (request.method === "PUT" && request.url.endsWith("/api/articles")) {
           if (saveStatus >= 200 && saveStatus < 300) {
-            savedBodies.set("home", request.body);
+            const article = JSON.parse(request.body) as {
+              slug: string;
+              body: string;
+            };
+            savedBodies.set(article.slug, article.body);
           }
           return new Response(
             saveStatus >= 200 && saveStatus < 300 ? "saved" : "failed",
@@ -317,8 +318,9 @@ describe("integration: compiled VX DOM rendering", () => {
       });
 
       const editedBody = "# Mini Voydpedia\n\nOne two three";
-      const textarea =
-        firstContainer.querySelector<HTMLTextAreaElement>("textarea")!;
+      const textarea = firstContainer.querySelector<HTMLTextAreaElement>(
+        "textarea.body-input",
+      )!;
       textarea.value = editedBody;
       textarea.dispatchEvent(
         new InputEvent("input", { bubbles: true, inputType: "insertText" }),
@@ -326,39 +328,46 @@ describe("integration: compiled VX DOM rendering", () => {
       await nextTurn();
 
       expect(firstContainer.textContent).toContain("Unsaved changes");
-      expect(firstContainer.textContent).toContain("Words6");
-      expect(firstContainer.querySelector("pre")?.textContent).toBe(editedBody);
 
       firstContainer
-        .querySelector<HTMLButtonElement>('button[type="button"]:last-of-type')
+        .querySelector<HTMLButtonElement>('button[data-testid="save-article"]')
         ?.click();
 
-      await waitForTextContaining(firstContainer, "form", "Saving...");
+      await waitForTextContaining(firstContainer, "main", "Saving…");
       expect(
         firstContainer.querySelector<HTMLButtonElement>(
-          'button[type="button"]:last-of-type',
+          'button[data-testid="save-article"]',
         )?.disabled,
       ).toBe(true);
 
-      await waitForTextContaining(firstContainer, "form", "Client saves1");
+      await waitForTextContaining(firstContainer, "main", "Article saved");
       expect(savedBodies.get("home")).toBe(editedBody);
-      expect(firstContainer.textContent).toContain("Client saves1");
 
       saveStatus = 500;
+      firstContainer
+        .querySelector<HTMLButtonElement>('button[data-testid="edit-article"]')
+        ?.click();
+      await nextTurn();
+      const failedTextarea = firstContainer.querySelector<HTMLTextAreaElement>(
+        "textarea.body-input",
+      )!;
       const failedBody = "# Mini Voydpedia\n\nThis will not save";
-      textarea.value = failedBody;
-      textarea.dispatchEvent(
+      failedTextarea.value = failedBody;
+      failedTextarea.dispatchEvent(
         new InputEvent("input", { bubbles: true, inputType: "insertText" }),
       );
-      await waitForTextContaining(firstContainer, "form", "Unsaved changes");
+      await waitForTextContaining(firstContainer, "main", "Unsaved changes");
 
       firstContainer
-        .querySelector<HTMLButtonElement>('button[type="button"]:last-of-type')
+        .querySelector<HTMLButtonElement>('button[data-testid="save-article"]')
         ?.click();
-      await waitForTextContaining(firstContainer, "form", "Save failed");
+      await waitForTextContaining(
+        firstContainer,
+        "main",
+        "Could not save the article",
+      );
 
       expect(savedBodies.get("home")).toBe(editedBody);
-      expect(firstContainer.textContent).toContain("Save failed");
 
       firstMounted.dispose();
 
@@ -372,9 +381,11 @@ describe("integration: compiled VX DOM rendering", () => {
       });
 
       expect(
-        reloadedContainer.querySelector<HTMLTextAreaElement>("textarea")?.value,
+        reloadedContainer.querySelector<HTMLTextAreaElement>(
+          "textarea.body-input",
+        )?.value,
       ).toBe(editedBody);
-      expect(reloadedContainer.textContent).toContain("Saved");
+      expect(reloadedContainer.textContent).toContain("Editing");
 
       reloadedMounted.dispose();
       expect(firstContainer.innerHTML).toBe("");
@@ -837,26 +848,45 @@ function nextTurn(): Promise<void> {
 }
 
 type MiniWikipediaModel = {
-  slug: string;
-  title: string;
-  body: string;
-  saved_body: string;
-  state_kind: string;
-  state_message: string;
-  preview_open: boolean;
-  save_count: number;
+  articles: Array<{
+    slug: string;
+    title: string;
+    overview: string;
+    body: string;
+    related: string[];
+  }>;
+  current_slug: string;
+  search: string;
+  mode: string;
+  editor: {
+    slug: string;
+    title: string;
+    overview: string;
+    body: string;
+    related: string;
+  };
+  status: string;
+  status_kind: string;
+  delete_pending: boolean;
 };
 
 function miniWikipediaModel(body: string): MiniWikipediaModel {
-  return {
+  const article = {
     slug: "home",
     title: "Mini Voydpedia",
+    overview: "A tiny editable knowledge base.",
     body,
-    saved_body: body,
-    state_kind: "saved",
-    state_message: "Saved",
-    preview_open: true,
-    save_count: 0,
+    related: [],
+  };
+  return {
+    articles: [article],
+    current_slug: "home",
+    search: "",
+    mode: "edit",
+    editor: { ...article, related: "" },
+    status: "Editing",
+    status_kind: "neutral",
+    delete_pending: false,
   };
 }
 

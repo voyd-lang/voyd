@@ -1,0 +1,62 @@
+use super::wiki::{
+  Article,
+  articles_from_json,
+  articles_json,
+  default_articles,
+  filtered_articles,
+  is_valid_slug,
+  remove_article,
+  upsert_article
+}
+use std::array::Array
+use std::json::JsonError
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+test "article JSON round trips the file-backed collection":
+  let source = default_articles()
+  match(articles_json(source))
+    Ok<String> { value }:
+      match(articles_from_json(value))
+        Ok<Array<Article>> { value: decoded }:
+          assert(decoded.len(), eq: source.len())
+          match(decoded.get(1))
+            Some<Article> { value }:
+              assert(value.title.equals("Voyd"), eq: true)
+            None:
+              assert(false, eq: true)
+          match(decoded.get(2))
+            Some<Article> { value }:
+              assert(value.related.len(), eq: 2)
+            None:
+              assert(false, eq: true)
+        Err<JsonError>:
+          assert(false, eq: true)
+    Err<JsonError>:
+      assert(false, eq: true)
+
+test "search spans article titles, overviews, and body text":
+  let articles = default_articles()
+  assert(filtered_articles(articles, "elm-like").len(), eq: 1)
+  assert(filtered_articles(articles, "portable binary").len(), eq: 1)
+  assert(filtered_articles(articles, "VOYD").len(), eq: 4)
+  assert(filtered_articles(articles, "missing phrase").is_empty(), eq: true)
+
+test "upsert and remove preserve collection semantics":
+  let source = default_articles()
+  let added = {
+    slug: "effects",
+    title: "Effects",
+    overview: "Explicit capabilities in Voyd.",
+    body: "Effect rows make host capabilities visible.",
+    related: ["voyd"]
+  }
+  let with_added = upsert_article(source, added)
+  assert(with_added.len(), eq: source.len() + 1)
+  assert(remove_article(with_added, "effects").len(), eq: source.len())
+
+test "linkable slugs reject unsafe paths":
+  assert(is_valid_slug("typed-effects"), eq: true)
+  assert(is_valid_slug("voyd_unsafe"), eq: false)
+  assert(is_valid_slug("../secrets"), eq: false)

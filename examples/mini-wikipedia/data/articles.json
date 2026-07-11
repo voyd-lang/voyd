@@ -1,0 +1,49 @@
+[
+  {
+    "body": "Welcome to The Small Knowledge. This miniature wiki is rendered on the server, hydrated in the browser, and backed by one JSON file.\n\nUse the article index to explore. Search looks across titles, overviews, and article text. Every edit, create, and delete operation travels through Voyd on both sides of the network.",
+    "title": "The Small Knowledge",
+    "overview": "A deliberately tiny encyclopedia about Voyd, VX, and the ideas behind them.",
+    "slug": "home",
+    "related": [
+      "voyd",
+      "vx"
+    ]
+  },
+  {
+    "body": "Voyd sits between Rust and TypeScript in abstraction. It is designed for expressive application code while retaining explicit effects and a compact WebAssembly runtime.\n\nPrograms describe capabilities in their types. The same language can power a server process, browser state machine, command-line tool, or reusable library.",
+    "title": "Voyd",
+    "overview": "A programming language that pairs a high-level type system with WebAssembly as its native destination.",
+    "slug": "voyd",
+    "related": [
+      "vx",
+      "webassembly"
+    ]
+  },
+  {
+    "body": "VX follows an Elm-like model, message, step, and view architecture. State changes stay explicit, commands describe one-off work, and subscriptions represent ongoing input.\n\nThe virtual tree can render on the server and hydrate in the browser. In this example, the same Voyd view function owns both paths.",
+    "title": "VX",
+    "overview": "Voyd's typed framework for server-rendered and interactive web applications.",
+    "slug": "vx",
+    "related": [
+      "voyd",
+      "webassembly"
+    ]
+  },
+  {
+    "body": "WebAssembly provides a compact, sandboxed runtime format with broad browser support and capable server hosts. Voyd compiles application modules to Wasm and supplies host adapters for effects such as HTTP and filesystem access.\n\nFor this wiki, separate Wasm modules run the server and hydrated client while sharing the same domain model.",
+    "title": "WebAssembly",
+    "overview": "A portable binary instruction format used here as the execution target for Voyd applications.",
+    "slug": "webassembly",
+    "related": [
+      "voyd",
+      "vx"
+    ]
+  },
+  {
+    "body": "They really do love eating human flesh.",
+    "title": "Frogs",
+    "overview": "Frogs are a type of animal that eat humans",
+    "slug": "frogs",
+    "related": []
+  }
+]
