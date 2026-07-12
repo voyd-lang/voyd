@@ -6,39 +6,40 @@ order: 5
 
 ## Voyd v0.3.0 - Gaia BH1
 
-Voyd `0.3.0` is the full-stack web release. The work since `0.2.0` connects
-Voyd's type system, effects, tasks, WebAssembly compiler, and host runtime into
-one application model: typed VX apps in the browser, HTTP services and server
-rendering on Node, and external packages that still look like ordinary Voyd
-APIs.
+Voyd `0.3.0` is the release where you can build a complete interactive web
+application in Voyd. You can define the browser state machine, render its UI,
+serve HTTP routes, render the first page on the server, hydrate it in the
+browser, call APIs, persist data, and package host-language libraries behind
+typed Voyd APIs.
 
-This release spans 68 merged changes. The visible theme is web development, but
-the compiler underneath it also changed substantially: typed host boundaries,
-stronger whole-program optimization, faster incremental app edits, better
-diagnostics, and clearer compiler and test architecture.
+To exercise the whole stack, I rebuilt the mini-wikipedia example as a real
+Voyd application. It supports article creation, editing, deletion, search,
+direct links, server rendering, browser hydration, and JSON-file persistence.
+The server, API routes, validation, shared article model, and interactive VX
+app are all written in Voyd.
 
-### Highlights
+That is the heart of Gaia BH1: Voyd now has an end-to-end story for building a
+web product.
 
-- VX now has a typed `Program<Model, Msg>` architecture with commands,
-  subscriptions, async task commands, browser events, DOM patching, server
-  rendering, and hydration.
-- `std::http` provides HTTP client and server primitives. The new
-  `@voyd-lang/web` package adds routing, typed extraction, middleware, response
-  conversion, static files, cookies, limits, timeouts, and VX-backed HTML.
-- `voyd bootstrap` can scaffold either a VX single-page app or a full-stack SSR
-  app.
-- `@external` functions and effects let Voyd packages use host-language
-  implementations through generated contracts and adapters. The new
-  `@voyd-lang/markdown` package is the first complete example.
-- Typed SDK exports validate DTOs automatically and use direct Wasm calls for
-  compatible scalar signatures.
-- Release builds gain whole-program analysis, effect and call-shape
-  specialization, array and dispatch fast paths, and Binaryen closed-world GC
-  optimization.
+### Start a new app
 
-### VX becomes an application runtime
+The CLI ships with two project templates:
 
-The VX API is now organized around a small, typed state machine:
+```bash
+voyd bootstrap my-app --template vx-spa
+voyd bootstrap my-app --template web-ssr
+```
+
+`vx-spa` creates a browser application with Vite, Tailwind, Voyd compilation,
+and a typed VX starter. `web-ssr` creates a server-rendered application with an
+HTTP server, shared VX views, browser hydration, static assets, and a development
+workflow.
+
+### Build an interactive UI with VX
+
+A VX app is a typed state machine. `Model` holds the current application state,
+`Msg` describes every event, `step` calculates the next state, and `view`
+renders it:
 
 ```voyd
 use std::number::cast::to_string
@@ -74,27 +75,42 @@ fn view(model: Model) -> Html<Msg>
 ```
 
 `Model` is durable application state. `Msg` is the closed set of events that
-can change it. `step` returns the next model plus optional command work, while
-`subscriptions` describes ongoing outside input. The runtime owns DOM patches,
-listener and subscription lifetimes, async command execution, and hydration.
+can change it. A button click produces a `Msg`, `step` produces a new `Model`,
+and VX patches the DOM from the next `view` result. The signatures connect each
+part of the loop, so a view can only emit messages that the app knows how to
+handle.
 
-Commands now cover tasks, HTTP, clipboard access, document titles, navigation,
+Real applications also need work that completes later. `Cmd::task` runs Voyd
+task code and maps the result back into a message:
+
+```voyd
+fn save_command(article: Article): (HttpClient, TaskRuntime) -> Cmd<Msg>
+  Cmd::task(
+    work: () -> bool => save_article(article),
+    handler: (ok: bool) -> Msg => Msg::SaveFinished { ok: ok }
+  )
+```
+
+This gives `step` a clean shape: accept a message, update the model, and return
+the work to start. VX runs the task and dispatches `SaveFinished` when it
+completes.
+
+VX includes commands for tasks, clipboard access, document titles, navigation,
 history, scrolling, selection, opening URLs, and browser storage. Subscriptions
 cover keyboard input, connectivity, window size and focus, visibility,
 animation frames, media queries, location changes, storage events,
 `BroadcastChannel`, and custom host input.
 
-The same typed virtual tree renders in the browser or on the server. VX's
-boundary schema validates models, messages, commands, subscriptions, and event
-payloads while keeping the serialized transport behind the runtime contract.
-
 Read the full [VX reference](./vx.md).
 
-### HTTP and a Voyd web framework
+### Serve the application from Voyd
 
-`std::http` replaces the earlier `std::fetch` API with client and server
-primitives. On top of that, `pkg::web` lets handlers receive typed values and
-return ordinary Voyd values:
+`std::http` provides HTTP client and server capabilities. `pkg::web` adds the
+application layer: routes, typed request data, middleware, responses, cookies,
+static files, limits, timeouts, and server-rendered VX HTML.
+
+A route handler can ask for the values it needs in its parameter list and
+return an ordinary Voyd value:
 
 ```voyd
 use pkg::web::all
@@ -116,157 +132,199 @@ pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError
       params.id
 ```
 
-The framework includes static and parameterized routes, nested route groups,
-middleware, params/query/header/cookie/body extraction, response conversion,
-JSON DTO helpers, static files, body and request limits, cooperative handler
-timeouts, server backpressure controls, VX server rendering, and hydration
-helpers. The Node SDK also exposes `serveWebApp` for host lifecycle management.
+Path parameters, query values, headers, cookies, and JSON bodies can all be
+decoded into typed records. Return values such as `String`, `JsonValue`,
+`Response`, `Option<T>`, and `Result<T, E>` become HTTP responses through the
+same handler model.
 
-The `web-ssr` bootstrap connects these pieces into a runnable project. The
-mini-wikipedia example now exercises the complete stack: Voyd owns the server,
-API routes, JSON persistence, search, validation, SSR view, hydration state,
-and client-side VX state machine.
+The mini-wikipedia API saves a decoded `Article` directly:
+
+```voyd
+serve(port: 3000) routes():
+  put("/api/articles", body: json_body()) do(article: Article):
+    save_article(article)
+
+  delete("/api/articles/:slug") do(ctx: Context):
+    delete_article(ctx.param("slug") ?? "")
+```
+
+The page route renders the VX tree on the server and includes the model needed
+for hydration:
+
+```voyd
+fn article_page(model: Model) -> Response
+  Response::ok()
+    .with(header: "content-type", value: "text/html; charset=utf-8")
+    .text(document<Msg, Model>(
+      view: page_view(model),
+      hydrate: hydrate<Model>(
+        target: "#wiki-app",
+        entry: "/assets/client.js",
+        model: model
+      )
+    ))
+```
+
+The browser starts from that model, attaches the VX runtime to the rendered
+tree, and continues through the same `Msg` and `step` loop. The shared view
+function owns the server page and the interactive browser updates.
 
 Read the full [Web reference](./web.md).
 
-### External packages without framework coupling
+### Use packages backed by JavaScript
 
-Voyd packages can now declare bodyless functions and asynchronous effects whose
-implementations come from JavaScript or another host language:
+Voyd packages can now expose a typed Voyd API implemented by JavaScript or
+another host language. The application imports the package through the normal
+`pkg::` namespace.
 
-```voyd
-@external(id: "example:markdown/renderer@1")
-pub fn render(source: String) -> StaticHtml
+The first package built this way is `@voyd-lang/markdown`:
+
+```bash
+npm install @voyd-lang/markdown
 ```
 
-Package authors can run `voyd generate adapter` to emit a portable contract,
-typed TypeScript bindings, an adapter helper, and a WIT interface. Node runs
-discover installed adapters automatically. Browser applications generate a
-static registry so bundlers can see every required import.
+```voyd
+use pkg::markdown::Markdown
+use std::vx::all
 
-The API is independent of VX. Renderers, parsers, database clients, and crypto
-libraries all use the same boundary. Synchronous functions use the direct host
-adapter path, while host work that may suspend is represented as an external
-Voyd effect.
+fn Article({ source: String }) -> Html<AppMsg>
+  <article class="wiki-article">
+    <Markdown source={source} />
+  </article>
+```
 
-`@voyd-lang/markdown` is the first reference package. It uses Marked in its host
-adapter, but exposes ordinary Voyd functions and a VX component. Markdown is
-converted to a bounded, inert node DTO: raw HTML is text, active URL schemes
-are rejected, and the VX renderer never receives an `innerHTML` escape hatch.
+The component calls a JavaScript adapter powered by Marked. The adapter returns
+a restricted tree of text, elements, and attributes. Voyd turns that tree into
+ordinary VX nodes, so Markdown content participates in normal validation,
+rendering, and DOM updates. Raw HTML becomes text, and active link and image
+schemes are rejected.
+
+Package authors declare host-backed functions with `@external` and generate the
+adapter contract from the CLI:
+
+```voyd
+@external(id: "example:search/index@1")
+pub fn search(query: String) -> Array<SearchResult>
+```
+
+```bash
+voyd generate adapter ./src --out ./generated
+```
+
+The generated output includes typed TypeScript bindings, runtime contract
+metadata, and a WIT interface. Node discovers installed adapters during a run.
+Browser builds use a generated static registry for their adapter imports.
 
 Read [External packages](./external-packages.md) for the package format and
 runtime contracts.
 
-### Typed boundaries for ordinary exports
+### Call Voyd from JavaScript with typed values
 
-Typed boundary exports are no longer VX-specific. Public functions that accept
-or return boundary-compatible values can be called through the SDK with normal
-JavaScript values. The compiler emits a schema, the host validates and converts
-arguments and results, and recursive optional DTOs are represented through
-schema references while rejecting actual cyclic runtime values.
+Public Voyd functions can now cross the SDK boundary with booleans, numbers,
+strings, arrays, records, optional values, results, and enum variants. JavaScript
+passes plain values, and the generated boundary schema validates every argument
+and result.
 
-Scalar signatures take a faster path. When `bool`, `i32`, `i64`, `f32`, `f64`,
-or `void` maps directly to the physical Wasm ABI, the release build avoids the
-serialized wrapper and most supporting runtime reachability. For the minimal
-`pub fn main() -> i32` case, the typed artifact shrank from 17,111 bytes to 783
-bytes and warm `runPure` dispatch improved from 0.901 µs to 0.146 µs per call.
+Here is a Voyd function that accepts and returns a record:
 
-### A stronger release optimizer
+```voyd
+obj Point {
+  x: i32,
+  y: i32
+}
 
-The SDK and compiler now expose explicit `none`, `balanced`, and `release`
-optimization levels. The release pipeline combines compiler-owned semantic
-facts with Binaryen's aggressive and closed-world GC passes.
+pub fn translate(point: Point, dx: i32, dy: i32) -> Point
+  Point { x: point.x + dx, y: point.y + dy }
+```
 
-Compiler work in this release includes:
+The SDK call uses a normal JavaScript object:
 
-- local tail-effect specialization and static-effect specialization across
-  recursive call graphs;
-- receiver and trait-dispatch specialization;
-- safe `Array.len` and `Array.at` fast paths, including proven-safe loops;
-- whole-program escape analysis and scalar aggregate replacement;
-- redundant runtime type-check elimination and semantic copy forwarding;
-- compact call shapes for default arguments;
-- indexed worklists, dependency-aware scheduling, bounded fixed points, and
-  explicit specialization budgets;
-- cached dependency semantic snapshots for faster application edits.
+```ts
+const point = await result.run({
+  entryName: "translate",
+  args: [{ x: 1, y: 2 }, 10, 20],
+});
 
-Across the six-scenario optimizer scorecard, closed-world release optimization
-reduced raw Wasm from 162,288 to 151,474 bytes (`-6.66%`) and gzip size from
-56,469 to 54,824 bytes (`-2.91%`). The vtrace workload improved by 6.71% in the
-same comparison. Static-effect specialization also removes the residual effect
-ABI from eligible recursive functions, restoring tail calls and allowing the
-representative evaluator to complete at depth 250,000 instead of overflowing.
+// { x: 11, y: 22 }
+```
 
-Optimization is now measured in CI through differential correctness checks,
-corpus hashes, size and runtime scorecards, compile-phase telemetry, and
-regression budgets.
+Enum values arrive as tagged objects, arrays arrive as JavaScript arrays, and
+recursive optional DTOs support data such as trees. Scalar signatures map
+directly to Wasm with JavaScript-side type validation.
 
-### Language and standard-library polish
+Read the [SDK reference](./sdk.md) for supported boundary shapes and embedding
+APIs.
 
-Several smaller changes add up to a smoother language:
+### Ship smaller, faster Wasm
 
-- `enum` is now in the standard prelude.
-- `String` and `StringSlice` implement `Eq`.
+Use the release optimization profile when building an application for
+deployment:
+
+```bash
+voyd --emit-wasm --opt ./src > app.wasm
+```
+
+Across the release benchmark suite, Gaia BH1 reduced raw Wasm size by 6.66% and
+gzip size by 2.91%. The representative vtrace application ran 6.71% faster.
+
+Small exported functions see an especially large improvement. A minimal typed
+`pub fn main() -> i32` release build dropped from 17,111 bytes to 783 bytes, and
+warm SDK calls improved from 0.901 µs to 0.146 µs per call.
+
+Release optimization now recognizes common array loops, known method targets,
+handled effects, recursive tail calls, short default-argument call shapes, and
+non-escaping values. Warm application edits also reuse analyzed dependency
+state, which shortens recompilation during development.
+
+### Everyday language improvements
+
+Gaia BH1 also smooths out several parts of day-to-day Voyd code:
+
+- `enum` is available from the standard prelude.
+- `String` and `StringSlice` implement `Eq`, so they work naturally with APIs
+  that accept equality-constrained values.
 - `std::fs::remove` removes files, symlinks, and empty directories.
-- Object literals can satisfy optional structural fields.
-- Overload scoring and generic inference handle labeled structural arguments,
-  static generic methods, and return-only type parameters more reliably.
-- Effectful default expressions now suspend and resume through the full
-  parameter-initialization sequence.
-- Imported effect metadata, generic escaped closures, free operators in impls,
-  mutable aggregates, `EventOptions`, and UTF-8 export isolation received
-  correctness fixes.
-- Missing commas and invalid single-colon module access now produce focused
-  parser diagnostics instead of cascaded module or typing errors.
+- Object literals can fill structural types that contain optional fields.
+- Generic inference understands more labeled arguments, static generic methods,
+  and return-driven type arguments.
+- Default expressions can perform effects and resume through the remaining
+  parameter initialization.
+- Missing commas and invalid module access produce focused parser diagnostics
+  at the source location.
+- Fixes cover imported effects, escaped generic closures, operators in impls,
+  mutable values, browser event options, and UTF-8 exports.
 
-### Conformance and compiler architecture
+### Upgrade an existing project
 
-The former mixed smoke suite has been split into three explicit contracts:
-compiler-neutral conformance, public cross-package integration, and opt-in
-performance tests. The initial conformance manifest contains 118 portable cases
-and can load another compiler through `VOYD_CONFORMANCE_ADAPTER`.
-
-CI now separates unit, conformance, integration, codegen, packaged CLI, and
-conditional optimizer lanes, records timings, enforces checked-in budgets, and
-cancels superseded runs.
-
-Inside the compiler, parser-owned surface views now normalize context-free
-syntax once for the module graph, macro expansion, documentation, binding, and
-lowering. The optimizer has likewise moved from a monolithic pipeline to
-explicit indexes, passes, scheduling, mutation contracts, and telemetry. These
-boundaries do not change the language by themselves, but they make future
-compiler work considerably safer.
-
-### Breaking changes
-
-- `std::fetch` has been removed. Use `std::http::client` for outbound HTTP.
-- VX applications now expose `app() -> Program<Model, Msg>`, construct the app
-  with `program`, and return transitions with `next`. Component state IDs are
-  generated from stable call sites; remove explicit `state(id:)` arguments.
-- Runtime diagnostics and Binaryen validation are disabled by default for
-  unoptimized builds. Set `runtimeDiagnostics: true` when investigating runtime
-  traps or validating generated Wasm.
-- Reference-bound (`~`) parameters cannot have defaults. Use an overload or
-  callee-owned local storage.
-
-### Upgrade notes
-
-Install the new CLI with:
+Install the new CLI and update directly consumed Voyd packages together:
 
 ```bash
 npm i -g @voyd-lang/cli@0.3.0
 ```
 
-Update all directly consumed Voyd packages together. For existing applications,
-the two source migrations to check first are `std::fetch` imports and the VX
-`Program<Model, Msg>` app shape.
+Outbound HTTP now lives in `std::http::client`. Update `std::fetch` imports and
+calls to the client API:
 
-New projects can start from either template:
+```voyd
+use std::http::client::self as http_client
 
-```bash
-voyd bootstrap my-app --template vx-spa
-voyd bootstrap my-app --template web-ssr
+let response = http_client::get("https://example.com/api")
 ```
+
+VX applications expose `app() -> Program<Model, Msg>`, construct the app with
+`program({ init, step, view, subscriptions })`, and return transitions through
+`next(...)`. Component state IDs now come from stable call sites, so explicit
+`state(id:)` arguments should be removed.
+
+Runtime diagnostics and Binaryen validation are opt-in for unoptimized builds.
+Set `runtimeDiagnostics: true` when investigating a runtime trap or validating
+generated Wasm. Reference-bound (`~`) parameters cannot declare defaults; an
+overload or callee-owned local value expresses that API shape.
+
+If you want to see the release working as one application, explore
+[The Small Knowledge](https://github.com/voyd-lang/voyd/tree/main/examples/mini-wikipedia),
+the file-backed wiki built with Voyd, VX, `pkg::web`, SSR, hydration, HTTP, and
+filesystem effects.
 
 ## Voyd v0.2.0 - M87*
 
