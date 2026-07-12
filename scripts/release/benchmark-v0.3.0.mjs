@@ -8,7 +8,7 @@ import path from "node:path";
 const NODE_VERSION = "22.23.1";
 const NPM_VERSION = "10.9.4";
 const RECORDED_RUNTIME_SAMPLES = 5;
-const EXTRA_RUNTIME_WARMUPS = 3;
+const EXTRA_RUNTIME_WARMUPS = 10;
 const CORE_SCENARIOS = [
   "scalar-aggregate",
   "call-shape-defaults",
@@ -22,20 +22,11 @@ const option = (name, fallback) => {
   return index < 0 ? fallback : process.argv[index + 1];
 };
 
-const positiveIntegerOption = (name, fallback) => {
-  const value = Number(option(name, fallback));
-  if (!Number.isInteger(value) || value <= 0) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-  return value;
-};
-
 const baseRef = option("--base", "v0.2.0");
 const headRef = option("--head", "HEAD");
 const outputPath = path.resolve(
   option("--output", "voyd-v0.3.0-release-benchmark.json"),
 );
-const vtraceTimeoutMs = positiveIntegerOption("--vtrace-timeout-ms", 60_000);
 const repoRoot = process.cwd();
 const tempRoot = mkdtempSync(path.join(tmpdir(), "voyd-release-bench-"));
 const worktrees = [];
@@ -142,35 +133,6 @@ const runScorecard = ({ directory, scenarios, corpusPath, output }) => {
   return scorecard;
 };
 
-const runWorker = ({ directory, config, timeout }) => {
-  const result = spawnSync(
-    "npx",
-    nodeArgs([
-      "--conditions=development",
-      "--import",
-      "tsx",
-      "scripts/bench-optimizer.ts",
-      "--worker-config",
-      Buffer.from(JSON.stringify(config)).toString("base64url"),
-    ]),
-    {
-      cwd: directory,
-      encoding: "utf8",
-      maxBuffer: 50 * 1024 * 1024,
-      timeout,
-    },
-  );
-  if (result.status === 0) {
-    return { status: "completed", result: JSON.parse(result.stdout) };
-  }
-  if (result.error?.code === "ETIMEDOUT" || result.signal === "SIGTERM") {
-    return { status: "timed_out", timeoutMs: timeout };
-  }
-  throw new Error(
-    `${baseRef} vtrace worker failed: ${result.stderr?.trim() || result.error?.message}`,
-  );
-};
-
 const rowsByScenario = (scorecard) =>
   Object.fromEntries(scorecard.rows.map((row) => [row.scenario, row]));
 
@@ -275,28 +237,6 @@ try {
     output: path.join(tempRoot, "head-vtrace.json"),
   }).rows[0];
 
-  console.log(`Running bounded ${baseRef} vtrace checks...`);
-  const baseVtraceArtifact = runWorker({
-    directory: baseDirectory,
-    config: {
-      scenarioName: VTRACE_SCENARIO,
-      mode: "release",
-      runtimeSamples: 0,
-      collectArtifactDetails: true,
-      sourceOverride: corpus[VTRACE_SCENARIO],
-    },
-  });
-  const baseVtraceRuntime = runWorker({
-    directory: baseDirectory,
-    config: {
-      scenarioName: VTRACE_SCENARIO,
-      mode: "release",
-      runtimeSamples: 1,
-      collectArtifactDetails: false,
-      sourceOverride: corpus[VTRACE_SCENARIO],
-    },
-    timeout: vtraceTimeoutMs,
-  });
   const baseRows = rowsByScenario(baseScorecard);
   const headRows = rowsByScenario(headScorecard);
   const scenarios = Object.fromEntries(
@@ -305,7 +245,6 @@ try {
       compareRows({ base: baseRows[name], head: headRows[name] }),
     ]),
   );
-  const baseArtifact = baseVtraceArtifact.result;
   const result = {
     schemaVersion: 1,
     generatedAt: new Date().toISOString(),
@@ -325,12 +264,6 @@ try {
     corpusHashes: headScorecard.corpusHashes,
     scenarios,
     vtrace: {
-      base: {
-        compileMs: baseArtifact.sample.durationMs,
-        wasmBytes: baseArtifact.sample.wasmBytes,
-        gzipBytes: baseArtifact.gzipBytes,
-        runtime: baseVtraceRuntime,
-      },
       head: {
         compileMedianMs: headVtrace.compileMedianMs,
         compileSamplesMs: headVtrace.compileSamplesMs,
@@ -339,14 +272,6 @@ try {
         wasmBytes: headVtrace.wasmBytes,
         gzipBytes: headVtrace.gzipBytes,
       },
-      wasmPercentChange: percentChange(
-        baseArtifact.sample.wasmBytes,
-        headVtrace.wasmBytes,
-      ),
-      gzipPercentChange: percentChange(
-        baseArtifact.gzipBytes,
-        headVtrace.gzipBytes,
-      ),
     },
   };
 
@@ -359,7 +284,7 @@ try {
     );
   });
   console.log(
-    `vtrace: ${baseVtraceRuntime.status} on ${baseRef}; ${headVtrace.runtimeMedianMs.toFixed(1)} ms on ${headRef}`,
+    `vtrace: ${headVtrace.runtimeMedianMs.toFixed(1)} ms on ${headRef}`,
   );
 } finally {
   worktrees.reverse().forEach((directory) => {
