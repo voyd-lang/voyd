@@ -136,6 +136,29 @@ pub fn read_some(value: Some<i32>) -> Some<i32>
     expect(wit).toMatch(/record type-[0-9a-f]{16} \{\n\s+tag: string,/);
   });
 
+  it("rejects variant payload fields named tag", async () => {
+    const sourceDir = await temporaryDirectory();
+    const outDir = path.join(sourceDir, "generated");
+    await writeFile(path.join(sourceDir, "tag-collision.voyd"), `use std::enums::{ enum }
+use std::string::type::String
+
+enum TaggedResult
+  Tagged { tag: String }
+  Other {}
+
+@external(id: "example:variants/tagged@1")
+pub fn read(value: TaggedResult) -> TaggedResult
+  read(value)
+`, "utf8");
+
+    await expect(generatePackageAdapter({ index: sourceDir, outDir }))
+      .rejects.toMatchObject({
+        diagnostics: [expect.objectContaining({
+          message: expect.stringMatching(/payload fields named "tag".*discriminator/i),
+        })],
+      });
+  });
+
   it("escapes WIT reserved field identifiers", async () => {
     const sourceDir = await temporaryDirectory();
     const outDir = path.join(sourceDir, "generated");

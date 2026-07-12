@@ -166,7 +166,7 @@ const resolveAdapterImport = (specifier: string, parentUrl: URL): string => {
   return moduleResolve(
     specifier,
     parentUrl,
-    new Set(["node", "import", "development"]),
+    new Set(["node", "development"]),
   ).href;
 };
 

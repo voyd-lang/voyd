@@ -74,32 +74,48 @@ export const serveWebApp = async (
   const previousHost = process.env.VOYD_WEB_HOST;
   process.env.VOYD_WEB_PORT = String(port);
   process.env.VOYD_WEB_HOST = host;
-  const hostRuntime = await createHost({
-    wasm: result.wasm,
-    imports: run.imports,
-    bufferSize: run.bufferSize,
-    defaultAdapters: webAppDefaultAdapters(run.defaultAdapters),
-    adapters:
-      run.adapters ??
-      (await loadVoydPackageAdapters({
-        wasm: result.wasm,
-        startDir:
-          options.entryPath && options.source === undefined
-            ? path.dirname(path.resolve(options.entryPath))
-            : process.cwd(),
-      })),
-  });
-  if (run.handlersByLabelSuffix) {
-    registerHandlersByLabelSuffix({
-      host: hostRuntime,
-      handlersByLabelSuffix: run.handlersByLabelSuffix,
+  const restoreWebEnvironment = (): void => {
+    restoreEnv("VOYD_WEB_PORT", previousPort);
+    restoreEnv("VOYD_WEB_HOST", previousHost);
+  };
+  let hostRuntime: Awaited<ReturnType<typeof createHost>>;
+  try {
+    hostRuntime = await createHost({
+      wasm: result.wasm,
+      imports: run.imports,
+      bufferSize: run.bufferSize,
+      defaultAdapters: webAppDefaultAdapters(run.defaultAdapters),
+      adapters:
+        run.adapters ??
+        (await loadVoydPackageAdapters({
+          wasm: result.wasm,
+          startDir:
+            options.entryPath && options.source === undefined
+              ? path.dirname(path.resolve(options.entryPath))
+              : process.cwd(),
+        })),
     });
-  }
-  if (run.handlers) {
-    registerHandlers({ host: hostRuntime, handlers: run.handlers });
+    if (run.handlersByLabelSuffix) {
+      registerHandlersByLabelSuffix({
+        host: hostRuntime,
+        handlersByLabelSuffix: run.handlersByLabelSuffix,
+      });
+    }
+    if (run.handlers) {
+      registerHandlers({ host: hostRuntime, handlers: run.handlers });
+    }
+  } catch (error) {
+    restoreWebEnvironment();
+    throw error;
   }
 
-  const started = hostRuntime.runManaged(entryName, run.args);
+  let started: ReturnType<typeof hostRuntime.runManaged>;
+  try {
+    started = hostRuntime.runManaged(entryName, run.args);
+  } catch (error) {
+    restoreWebEnvironment();
+    throw error;
+  }
   const closed = started.outcome
     .then((outcome) => {
       if (outcome.kind === "value") {
@@ -110,10 +126,7 @@ export const serveWebApp = async (
       }
       return undefined;
     })
-    .finally(() => {
-      restoreEnv("VOYD_WEB_PORT", previousPort);
-      restoreEnv("VOYD_WEB_HOST", previousHost);
-    });
+    .finally(restoreWebEnvironment);
   const ready = waitForTcpPort({ host, port, timeoutMs: readinessTimeoutMs });
   const close = (reason: unknown = "serveWebApp closed"): Promise<unknown> => {
     started.cancel(reason);

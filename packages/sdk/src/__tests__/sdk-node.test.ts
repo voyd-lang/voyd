@@ -258,7 +258,37 @@ const httpGet = (
     });
   });
 
+const restoreTestEnv = (key: string, value: string | undefined): void => {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+  process.env[key] = value;
+};
+
 describe("node sdk", () => {
+  it("restores web environment variables when adapter discovery fails", async () => {
+    const previousPort = process.env.VOYD_WEB_PORT;
+    const previousHost = process.env.VOYD_WEB_HOST;
+    process.env.VOYD_WEB_PORT = "previous-port";
+    process.env.VOYD_WEB_HOST = "previous-host";
+
+    try {
+      await expect(createSdk().serveWebApp({
+        port: await findFreePort(),
+        host: "127.0.0.2",
+        source: EXTERNAL_SOURCE,
+      })).rejects.toThrow(
+        /Missing installed Voyd package adapters.*example:math\/ops@1/,
+      );
+      expect(process.env.VOYD_WEB_PORT).toBe("previous-port");
+      expect(process.env.VOYD_WEB_HOST).toBe("previous-host");
+    } finally {
+      restoreTestEnv("VOYD_WEB_PORT", previousPort);
+      restoreTestEnv("VOYD_WEB_HOST", previousHost);
+    }
+  }, 120_000);
+
   it("closes a long-running web app entry through the SDK helper", async () => {
     const sdk = createSdk();
     const port = await findFreePort();
@@ -1428,8 +1458,8 @@ pub fn second(): Async -> i32
       type: "module",
       exports: {
         "./adapter": {
-          development: "./adapter.js",
           import: "./dist/adapter.js",
+          development: "./adapter.js",
         },
       },
       voyd: {

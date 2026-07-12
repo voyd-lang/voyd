@@ -55,6 +55,10 @@ export const generatePackageAdapter = async ({
   const portableFunctions = dedupeRequirements(
     compiledRequirements.flatMap(toPortableRequirements),
   );
+  portableFunctions.forEach((fn) => {
+    fn.params.forEach(assertNoTagDiscriminatorCollision);
+    assertNoTagDiscriminatorCollision(fn.result);
+  });
   const contract = {
     abiVersion: 1 as const,
     packageName,
@@ -189,6 +193,32 @@ const dedupeRequirements = (
 const canonicalRequirement = (
   requirement: PortableRequirement,
 ): string => JSON.stringify(requirement);
+
+const assertNoTagDiscriminatorCollision = (schema: VoydDtoSchema): void => {
+  if (schema.kind === "array") {
+    assertNoTagDiscriminatorCollision(schema.element);
+    return;
+  }
+  if (schema.kind === "record") {
+    if (schema.tag && schema.fields.some((field) => field.name === "tag")) {
+      throw new Error(
+        'Variant payload fields named "tag" conflict with the adapter discriminator',
+      );
+    }
+    schema.fields.forEach((field) => assertNoTagDiscriminatorCollision(field.schema));
+    return;
+  }
+  if (schema.kind === "union") {
+    schema.variants.forEach((variant) => {
+      if (variant.fields.some((field) => field.name === "tag")) {
+        throw new Error(
+          `Variant ${JSON.stringify(variant.name)} payload field "tag" conflicts with the adapter discriminator`,
+        );
+      }
+      variant.fields.forEach((field) => assertNoTagDiscriminatorCollision(field.schema));
+    });
+  }
+};
 
 const toPortableRequirements = (
   functions: readonly ExternalFunctionRequirement[],
