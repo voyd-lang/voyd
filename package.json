@@ -25,6 +25,7 @@
     "bench:optimizer:ci": "node --conditions=development --import tsx scripts/bench-optimizer.ts --preset ci",
     "bench:optimizer:ablate": "node --conditions=development --import tsx scripts/bench-optimizer.ts --preset full --modes release --binaryen-ablation-matrix",
     "bench:optimizer:compare": "node scripts/ci/check-optimizer-bench-regression.mjs",
+    "bench:release:v0.3.0": "node scripts/release/benchmark-v0.3.0.mjs",
     "bench:compiler-latency": "tsx --conditions=development scripts/bench-v375-compiler-latency.ts && npm run --workspace @voyd-lang/compiler bench:typing",
     "typecheck": "turbo run typecheck --affected",
     "lint": "turbo run lint --affected --parallel",

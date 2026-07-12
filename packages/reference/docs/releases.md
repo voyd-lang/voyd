@@ -269,20 +269,21 @@ voyd --emit-wasm --opt ./src > app.wasm
 
 I compared Gaia BH1 with the `v0.2.0` tag using identical source files, Node
 22.23.1 on Apple silicon, three fresh-process compile samples, and five runtime
-samples per workload.
+samples per workload after four warmups. The complete setup is checked in as the
+`docs/release/v0.3.0-benchmark.md` release benchmark.
 
-| Workload | v0.2.0 runtime | Gaia BH1 runtime | Runtime change | Raw Wasm | gzip |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Mutable scalar aggregates in a hot loop | 1.199 ms | 0.378 ms | **3.17x faster** | **21.6% smaller** | **11.7% smaller** |
-| Recursive calls with default arguments | 0.392 ms | 0.278 ms | **29.0% faster** | **2.2% smaller** | 1.9% larger |
-| Standard-library transcendental math | under 0.02 ms | under 0.02 ms | below useful timing resolution | **4.0% smaller** | **2.1% smaller** |
-| vtrace ray tracer | did not complete | 146.8 ms | **minutes to milliseconds** | **30.5% smaller** | **12.4% smaller** |
+| Workload                                |   v0.2.0 runtime | Gaia BH1 runtime |                 Runtime change |          Raw Wasm |              gzip |
+| --------------------------------------- | ---------------: | ---------------: | -----------------------------: | ----------------: | ----------------: |
+| Mutable scalar aggregates in a hot loop |         1.174 ms |         0.326 ms |               **3.60x faster** | **21.6% smaller** | **11.7% smaller** |
+| Recursive calls with default arguments  |         0.390 ms |         0.268 ms |               **31.3% faster** |  **2.2% smaller** |       1.9% larger |
+| Standard-library transcendental math    |    under 0.02 ms |    under 0.02 ms | below useful timing resolution |  **4.0% smaller** |  **2.1% smaller** |
+| vtrace ray tracer                       | did not complete |         145.8 ms |    **minutes to milliseconds** | **30.5% smaller** | **12.4% smaller** |
 
-The `v0.2.0` vtrace scorecard stayed at full CPU for more than 12 minutes during
-its warmup and five-sample batch, so I stopped it and left the exact multiplier
-unstated. Gaia BH1 completed five runs between 146.1 and 147.7 ms and produced
-the same checksum. This workload exercises effects, trait dispatch, mutable
-vectors, recursive ray bounces, arrays, and a large object graph.
+The bounded `v0.2.0` vtrace worker did not finish its warmup and first measured
+run within 60 seconds, so I left the exact multiplier unstated. Gaia BH1
+completed five runs between 145.5 and 148.0 ms and produced the same checksum.
+This workload exercises effects, trait dispatch, mutable vectors, recursive ray
+bounces, arrays, and a large object graph.
 
 Release optimization now recognizes common array loops, known method targets,
 locally handled effects, recursive tail calls, short default-argument call
@@ -290,9 +291,9 @@ shapes, and non-escaping values. These improvements account for the runtime and
 size reductions in the larger workloads.
 
 The stronger release optimizer performs more compile-time analysis. The scalar
-and default-argument fixtures took 41–51% longer to compile, the math fixture
-took 44% longer, and the tiny trait fixture took 95% longer. Vtrace compilation
-was roughly flat at 3.1–3.25 seconds. Development builds default to the
+and default-argument fixtures took 50% longer to compile, the math fixture took
+46% longer, and the tiny trait fixture took 96% longer. Vtrace compilation was
+roughly flat at 3.12–3.25 seconds. Development builds default to the
 unoptimized profile.
 
 Typed SDK boundaries also add a fixed runtime surface to tiny modules that
