@@ -267,17 +267,38 @@ deployment:
 voyd --emit-wasm --opt ./src > app.wasm
 ```
 
-Across the release benchmark suite, Gaia BH1 reduced raw Wasm size by 6.66% and
-gzip size by 2.91%. The representative vtrace application ran 6.71% faster.
+I compared Gaia BH1 with the `v0.2.0` tag using identical source files, Node
+22.23.1 on Apple silicon, three fresh-process compile samples, and five runtime
+samples per workload.
 
-Small exported functions see an especially large improvement. A minimal typed
-`pub fn main() -> i32` release build dropped from 17,111 bytes to 783 bytes, and
-warm SDK calls improved from 0.901 µs to 0.146 µs per call.
+| Workload | v0.2.0 runtime | Gaia BH1 runtime | Runtime change | Raw Wasm | gzip |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Mutable scalar aggregates in a hot loop | 1.199 ms | 0.378 ms | **3.17x faster** | **21.6% smaller** | **11.7% smaller** |
+| Recursive calls with default arguments | 0.392 ms | 0.278 ms | **29.0% faster** | **2.2% smaller** | 1.9% larger |
+| Standard-library transcendental math | under 0.02 ms | under 0.02 ms | below useful timing resolution | **4.0% smaller** | **2.1% smaller** |
+| vtrace ray tracer | did not complete | 146.8 ms | **minutes to milliseconds** | **30.5% smaller** | **12.4% smaller** |
+
+The `v0.2.0` vtrace scorecard stayed at full CPU for more than 12 minutes during
+its warmup and five-sample batch, so I stopped it and left the exact multiplier
+unstated. Gaia BH1 completed five runs between 146.1 and 147.7 ms and produced
+the same checksum. This workload exercises effects, trait dispatch, mutable
+vectors, recursive ray bounces, arrays, and a large object graph.
 
 Release optimization now recognizes common array loops, known method targets,
-handled effects, recursive tail calls, short default-argument call shapes, and
-non-escaping values. Warm application edits also reuse analyzed dependency
-state, which shortens recompilation during development.
+locally handled effects, recursive tail calls, short default-argument call
+shapes, and non-escaping values. These improvements account for the runtime and
+size reductions in the larger workloads.
+
+The stronger release optimizer performs more compile-time analysis. The scalar
+and default-argument fixtures took 41–51% longer to compile, the math fixture
+took 44% longer, and the tiny trait fixture took 95% longer. Vtrace compilation
+was roughly flat at 3.1–3.25 seconds. Development builds default to the
+unoptimized profile.
+
+Typed SDK boundaries also add a fixed runtime surface to tiny modules that
+expose generic public functions. The trait-only fixture stayed below 0.01 ms at
+runtime and grew from 1.1 KB to 20.0 KB. Scalar-only exports use the direct Wasm
+boundary path described in [Typed SDK Boundary Exports](#typed-sdk-boundary-exports).
 
 ### Language and Standard Library Improvements
 
