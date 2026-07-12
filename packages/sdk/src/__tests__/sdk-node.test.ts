@@ -1426,7 +1426,12 @@ pub fn second(): Async -> i32
     await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
       name: "esm-only-math",
       type: "module",
-      exports: { "./adapter": { import: "./adapter.js" } },
+      exports: {
+        "./adapter": {
+          development: "./adapter.js",
+          import: "./dist/adapter.js",
+        },
+      },
       voyd: {
         adapter: {
           abi: 1,

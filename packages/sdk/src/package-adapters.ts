@@ -1,8 +1,8 @@
 import { readdir, readFile } from "node:fs/promises";
-import type { Dirent } from "node:fs";
+import { existsSync, type Dirent } from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
-import { resolve as resolveImport } from "import-meta-resolve";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { moduleResolve } from "import-meta-resolve";
 import {
   isVoydPackageAdapter,
   VOYD_PACKAGE_ADAPTER_ABI,
@@ -138,8 +138,8 @@ const loadAdapter = async (
   const specifier = adapterSpecifier(provider, "node");
   const parentUrl = pathToFileURL(
     path.join(path.resolve(startDir), "__voyd_adapter_resolver.mjs"),
-  ).href;
-  const resolved = resolveImport(specifier, parentUrl);
+  );
+  const resolved = resolveAdapterImport(specifier, parentUrl);
   const loaded = (await import(resolved)) as {
     default?: unknown;
   };
@@ -149,6 +149,25 @@ const loadAdapter = async (
     );
   }
   return loaded.default;
+};
+
+const resolveAdapterImport = (specifier: string, parentUrl: URL): string => {
+  try {
+    const resolved = moduleResolve(specifier, parentUrl);
+    if (resolved.protocol !== "file:" || existsSync(fileURLToPath(resolved))) {
+      return resolved.href;
+    }
+  } catch {
+    // Retry below with the workspace development condition.
+  }
+
+  // Workspace packages can expose TypeScript through a development condition
+  // while their published import target is created only during build.
+  return moduleResolve(
+    specifier,
+    parentUrl,
+    new Set(["node", "import", "development"]),
+  ).href;
 };
 
 const adapterSpecifier = (
