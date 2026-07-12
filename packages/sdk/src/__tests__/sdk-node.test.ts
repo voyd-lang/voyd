@@ -9,6 +9,7 @@ import {
   createSdk,
   detectSrcRootForPath,
   findVoydPackageAdapterSpecifiers,
+  loadVoydPackageAdapters,
   type CompileResult,
   type EffectContinuation,
   type EffectHandler,
@@ -1418,6 +1419,53 @@ pub fn second(): Async -> i32
       entryName: "main",
       adapters: [adapter],
     })).resolves.toBe(42);
+
+    const projectRoot = await fs.mkdtemp(path.join(repoRoot, ".tmp-esm-adapter-"));
+    const packageRoot = path.join(projectRoot, "node_modules", "esm-only-math");
+    await fs.mkdir(packageRoot, { recursive: true });
+    await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
+      name: "esm-only-math",
+      type: "module",
+      exports: { "./adapter": { import: "./adapter.js" } },
+      voyd: {
+        adapter: {
+          abi: 1,
+          interfaces: ["example:math/ops@1"],
+          node: "./adapter",
+        },
+      },
+    }));
+    await fs.writeFile(path.join(packageRoot, "adapter.js"), `export default {
+  kind: "voyd-package-adapter",
+  contract: {
+    abiVersion: 1,
+    packageName: "esm-only-math",
+    functions: [{
+      kind: "sync",
+      interfaceId: "example:math/ops@1",
+      functionName: "double",
+      params: [{ kind: "i32" }],
+      result: { kind: "i32" }
+    }]
+  },
+  implementation: {
+    "example:math/ops@1": { double: (value) => value * 2 }
+  }
+};
+`);
+    try {
+      const discovered = await loadVoydPackageAdapters({
+        wasm: result.wasm,
+        startDir: projectRoot,
+      });
+      await expect(result.run<number>({
+        entryName: "main",
+        adapters: discovered,
+      })).resolves.toBe(42);
+    } finally {
+      await fs.rm(projectRoot, { recursive: true, force: true });
+    }
+
     await expect(result.run<number>({ entryName: "main" })).rejects.toThrow(
       /Missing installed Voyd package adapters.*example:math\/ops@1/,
     );

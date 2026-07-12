@@ -1,8 +1,8 @@
-import { createRequire } from "node:module";
 import { readdir, readFile } from "node:fs/promises";
 import type { Dirent } from "node:fs";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
+import { resolve as resolveImport } from "import-meta-resolve";
 import {
   isVoydPackageAdapter,
   VOYD_PACKAGE_ADAPTER_ABI,
@@ -135,10 +135,12 @@ const loadAdapter = async (
   provider: AdapterProvider,
   startDir: string,
 ): Promise<VoydPackageAdapter> => {
-  const require = createRequire(path.join(path.resolve(startDir), "package.json"));
   const specifier = adapterSpecifier(provider, "node");
-  const resolved = require.resolve(specifier);
-  const loaded = (await import(pathToFileURL(resolved).href)) as {
+  const parentUrl = pathToFileURL(
+    path.join(path.resolve(startDir), "__voyd_adapter_resolver.mjs"),
+  ).href;
+  const resolved = resolveImport(specifier, parentUrl);
+  const loaded = (await import(resolved)) as {
     default?: unknown;
   };
   if (!isVoydPackageAdapter(loaded.default)) {
