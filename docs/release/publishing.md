@@ -17,11 +17,12 @@ Before a full `--all` release can publish successfully:
 - add the `VSCE_PAT` GitHub Actions secret for the VS Code Marketplace
 - make sure the release workflow can create GitHub tags and releases
 
-For `0.2.0`, the known blockers are:
+For `0.3.0`, bootstrap and configure trusted publishing for these new targets
+before dispatching the release:
 
-- `VSCE_PAT` is not configured in GitHub Actions secrets
-- `@voyd-lang/language-server` does not exist on npm yet
-- `@voyd-lang/reference` does not exist on npm yet
+- `@voyd-lang/vx-dom`
+- `@voyd-lang/package-adapter`
+- `@voyd-lang/markdown`
 
 See [GitHub and Token Setup](#github-and-token-setup) for the exact setup
 steps.
@@ -31,9 +32,9 @@ steps.
 Prepare the release commit from a clean release branch:
 
 ```sh
-git switch -c release/v0.2.0
-npm run release:prepare -- --all --version 0.2.0
-git push -u origin release/v0.2.0
+git switch -c release/v0.3.0
+npm run release:prepare -- --all --version 0.3.0
+git push -u origin release/v0.3.0
 ```
 
 Open and merge a pull request into `main`. This keeps branch protection and the
@@ -62,7 +63,7 @@ npm run release:publish -- --all --dry-run
 Publish a subset:
 
 ```sh
-npm run release:prepare -- --targets @voyd-lang/std,@voyd-lang/lib --version 0.2.0
+npm run release:prepare -- --targets @voyd-lang/std,@voyd-lang/lib --version 0.3.0
 npm run release:publish -- --targets @voyd-lang/std,@voyd-lang/lib
 ```
 
@@ -75,7 +76,7 @@ npm run release:publish -- --all --skip-github-release
 Use an explicit notes file:
 
 ```sh
-npm run release:publish -- --all --notes-file docs/release/v0.2.0-notes.md
+npm run release:publish -- --all --notes-file docs/release/v0.3.0-notes.md
 ```
 
 ## What The Commands Do
@@ -93,7 +94,7 @@ npm run release:publish -- --all --notes-file docs/release/v0.2.0-notes.md
 Pass `--no-commit` to leave the release changes staged:
 
 ```sh
-npm run release:prepare -- --all --version 0.2.0 --no-commit
+npm run release:prepare -- --all --version 0.3.0 --no-commit
 ```
 
 `release:publish`:
@@ -117,6 +118,10 @@ The GitHub workflow then:
 ## Supported Targets
 
 - `@voyd-lang/std`
+- `@voyd-lang/web`
+- `@voyd-lang/package-adapter`
+- `@voyd-lang/markdown`
+- `@voyd-lang/vx-dom`
 - `@voyd-lang/lib`
 - `@voyd-lang/compiler`
 - `@voyd-lang/js-host`
@@ -175,34 +180,37 @@ fails.
 
 ### npm Bootstrap For New Packages
 
-Trusted publishing needs the package to exist on npm first. For `0.2.0`,
-bootstrap these missing packages from the current `0.1.0` `main` before merging
-the `0.2.0` release PR:
+Trusted publishing needs the package to exist on npm first. For `0.3.0`,
+bootstrap these missing packages at `0.2.0` from a clean, current `main` after
+their release targets land and before preparing the `0.3.0` version bump:
 
-- `@voyd-lang/language-server`
-- `@voyd-lang/reference`
+- `@voyd-lang/vx-dom`
+- `@voyd-lang/package-adapter`
+- `@voyd-lang/markdown`
 
 Bootstrap from a clean, current `main` checkout:
 
 ```sh
 git switch main
 git pull --ff-only origin main
-npm publish --workspace @voyd-lang/language-server --access public
-npm publish --workspace @voyd-lang/reference --access public
+npm publish --workspace @voyd-lang/package-adapter --access public
+npm publish --workspace @voyd-lang/markdown --access public
+npm publish --workspace @voyd-lang/vx-dom --access public
 ```
 
 Use your normal npm interactive login or a one-time npm automation token for
-that bootstrap. After these packages exist at `0.1.0`, configure trusted
-publishing for them, then let the release workflow publish `0.2.0`.
+that bootstrap. After these packages exist at `0.2.0`, configure trusted
+publishing for them, then let the release workflow publish `0.3.0`.
 
-Do not bootstrap the missing packages at `0.2.0` before the release workflow.
-If `0.2.0` already exists, the workflow cannot publish that same version.
+Do not bootstrap the missing packages at `0.3.0` before the release workflow.
+If `0.3.0` already exists, the workflow cannot publish that same version.
 
 Verify package existence:
 
 ```sh
-npm view @voyd-lang/language-server version
-npm view @voyd-lang/reference version
+npm view @voyd-lang/package-adapter version
+npm view @voyd-lang/markdown version
+npm view @voyd-lang/vx-dom version
 ```
 
 ### npm Trusted Publishing
@@ -240,8 +248,11 @@ a GitHub Actions environment, so the npm environment field should stay blank.
 
 Configure these packages:
 
-
 - `@voyd-lang/std`
+- `@voyd-lang/web`
+- `@voyd-lang/package-adapter`
+- `@voyd-lang/markdown`
+- `@voyd-lang/vx-dom`
 - `@voyd-lang/lib`
 - `@voyd-lang/compiler`
 - `@voyd-lang/js-host`

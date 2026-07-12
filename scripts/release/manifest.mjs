@@ -41,6 +41,55 @@ export const releaseTargets = {
     packRequiredFiles: ["package.json", "src/pkg.voyd", "dist/.placeholder"],
     relatedTests: ["own", "conformance", "integration"],
   }),
+  "@voyd-lang/package-adapter": npmTarget({
+    workspace: "@voyd-lang/package-adapter",
+    cwd: "packages/package-adapter",
+    description: "Host-language adapter contracts for Voyd packages",
+    packRequiredFiles: ["package.json", "dist/index.js", "dist/index.d.ts"],
+    packForbiddenPatterns: [
+      /^src\//,
+      /^dist\/.*\.test\./,
+      /^dist\/.*\/src\//,
+    ],
+    relatedTests: ["own", "integration"],
+  }),
+  "@voyd-lang/markdown": npmTarget({
+    workspace: "@voyd-lang/markdown",
+    cwd: "packages/markdown",
+    description: "JS-backed Markdown rendering for Voyd and VX",
+    packRequiredFiles: [
+      "package.json",
+      "src/pkg.voyd",
+      "dist/host/adapter.js",
+      "dist/host/adapter.d.ts",
+      "generated/contract.json",
+      "generated/contract.ts",
+      "generated/interface.wit",
+      "generated/voyd-adapter.ts",
+    ],
+    packForbiddenPatterns: [/^host\//, /^dist\/.*\.test\./],
+    relatedTests: ["own", "integration"],
+  }),
+  "@voyd-lang/vx-dom": npmTarget({
+    workspace: "@voyd-lang/vx-dom",
+    cwd: "packages/vx-dom",
+    description: "Voyd VX browser and server DOM renderer",
+    packRequiredFiles: [
+      "package.json",
+      "dist/index.js",
+      "dist/index.d.ts",
+      "dist/browser.js",
+      "dist/browser.d.ts",
+      "dist/server.js",
+      "dist/server.d.ts",
+    ],
+    packForbiddenPatterns: [
+      /^src\//,
+      /^dist\/.*\.test\./,
+      /^dist\/.*\/src\//,
+    ],
+    relatedTests: ["own", "integration"],
+  }),
   "@voyd-lang/lib": npmTarget({
     workspace: "@voyd-lang/lib",
     cwd: "packages/lib",
@@ -217,7 +266,32 @@ export const listWorkspacePackageJsonPaths = () =>
       .filter((packageJsonPath) => fs.existsSync(packageJsonPath));
   });
 
+export const assertReleaseTargetCoverage = () => {
+  const releaseTargetNames = new Set(
+    Object.values(releaseTargets).map((target) => target.workspace),
+  );
+  const missingTargets = listWorkspacePackageJsonPaths()
+    .map(readJson)
+    .filter(
+      (packageJson) =>
+        packageJson.scripts?.prepublishOnly ===
+        "node ../../scripts/release/enforce-workspace-release.mjs",
+    )
+    .map((packageJson) => packageJson.name)
+    .filter((workspaceName) => !releaseTargetNames.has(workspaceName));
+
+  if (missingTargets.length === 0) {
+    return;
+  }
+
+  throw new Error(
+    `Publishable workspaces are missing release targets: ${missingTargets.join(", ")}`,
+  );
+};
+
 export const parseTargetSelection = (argv) => {
+  assertReleaseTargetCoverage();
+
   const targets = [];
   let all = false;
 
