@@ -6,11 +6,14 @@ order: 5
 
 ## Voyd v0.3.0 - Gaia BH1
 
-Voyd `0.3.0` is the release where you can build a complete interactive web
-application in Voyd. You can define the browser state machine, render its UI,
-serve HTTP routes, render the first page on the server, hydrate it in the
-browser, call APIs, persist data, and package host-language libraries behind
-typed Voyd APIs.
+This release is centered around Voyd's full-stack web development experience.
+Gaia BH1 brings together typed browser applications, HTTP services, server-side
+rendering, hydration, host-language package adapters, and the tooling needed to
+start and ship a project.
+
+You can define a browser state machine, render its UI, serve HTTP routes, render
+the first page on the server, hydrate it in the browser, call APIs, persist
+data, and package host-language libraries behind typed Voyd APIs.
 
 To exercise the whole stack, I rebuilt the mini-wikipedia example as a real
 Voyd application. It supports article creation, editing, deletion, search,
@@ -21,7 +24,7 @@ app are all written in Voyd.
 That is the heart of Gaia BH1: Voyd now has an end-to-end story for building a
 web product.
 
-### Start a new app
+### New `voyd bootstrap` Command
 
 The CLI ships with two project templates:
 
@@ -35,7 +38,7 @@ and a typed VX starter. `web-ssr` creates a server-rendered application with an
 HTTP server, shared VX views, browser hydration, static assets, and a development
 workflow.
 
-### Build an interactive UI with VX
+### Typed VX Application Runtime
 
 A VX app is a typed state machine. `Model` holds the current application state,
 `Msg` describes every event, `step` calculates the next state, and `view`
@@ -103,7 +106,7 @@ animation frames, media queries, location changes, storage events,
 
 Read the full [VX reference](./vx.md).
 
-### Serve the application from Voyd
+### `std::http` and the New `pkg::web` Framework
 
 `std::http` provides HTTP client and server capabilities. `pkg::web` adds the
 application layer: routes, typed request data, middleware, responses, cookies,
@@ -171,7 +174,7 @@ function owns the server page and the interactive browser updates.
 
 Read the full [Web reference](./web.md).
 
-### Use packages backed by JavaScript
+### External Package Adapters
 
 Voyd packages can now expose a typed Voyd API implemented by JavaScript or
 another host language. The application imports the package through the normal
@@ -218,7 +221,7 @@ Browser builds use a generated static registry for their adapter imports.
 Read [External packages](./external-packages.md) for the package format and
 runtime contracts.
 
-### Call Voyd from JavaScript with typed values
+### Typed SDK Boundary Exports
 
 Public Voyd functions can now cross the SDK boundary with booleans, numbers,
 strings, arrays, records, optional values, results, and enum variants. JavaScript
@@ -255,7 +258,7 @@ directly to Wasm with JavaScript-side type validation.
 Read the [SDK reference](./sdk.md) for supported boundary shapes and embedding
 APIs.
 
-### Ship smaller, faster Wasm
+### Faster Release Builds
 
 Use the release optimization profile when building an application for
 deployment:
@@ -276,7 +279,7 @@ handled effects, recursive tail calls, short default-argument call shapes, and
 non-escaping values. Warm application edits also reuse analyzed dependency
 state, which shortens recompilation during development.
 
-### Everyday language improvements
+### Language and Standard Library Improvements
 
 Gaia BH1 also smooths out several parts of day-to-day Voyd code:
 
@@ -294,7 +297,7 @@ Gaia BH1 also smooths out several parts of day-to-day Voyd code:
 - Fixes cover imported effects, escaped generic closures, operators in impls,
   mutable values, browser event options, and UTF-8 exports.
 
-### Upgrade an existing project
+### Upgrading from 0.2.0
 
 Install the new CLI and update directly consumed Voyd packages together:
 
