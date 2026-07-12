@@ -1,0 +1,6 @@
+@external(id: "example:unused/generic@1")
+eff GenericExternal<T>
+  load(tail, value: T) -> T
+
+pub fn main() -> i32
+  42

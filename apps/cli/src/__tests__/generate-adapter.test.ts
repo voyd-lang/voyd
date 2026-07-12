@@ -174,6 +174,26 @@ pub fn read(value: Keyword) -> i32
     expect(wit).toContain("%type: s32");
   });
 
+  it("uses unescaped keyword fragments in generated WIT payload names", async () => {
+    const sourceDir = await temporaryDirectory();
+    const outDir = path.join(sourceDir, "generated");
+    await writeFile(path.join(sourceDir, "keyword-variant.voyd"), `use std::enums::{ enum }
+
+enum KeywordVariant
+  Type { value: i32 }
+  Other {}
+
+@external(id: "example:keywords/variants@1")
+pub fn read(value: KeywordVariant) -> KeywordVariant
+  read(value)
+`, "utf8");
+
+    await generatePackageAdapter({ index: sourceDir, outDir });
+    const wit = await readFile(path.join(outDir, "interface.wit"), "utf8");
+    expect(wit).toMatch(/record type-[0-9a-f]{16}-type-payload/);
+    expect(wit).not.toContain("-%type-payload");
+  });
+
   it("rejects distinct API names that normalize to the same WIT name", async () => {
     const sourceDir = await temporaryDirectory();
     const outDir = path.join(sourceDir, "generated");

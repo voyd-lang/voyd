@@ -516,7 +516,9 @@ const createWitRenderer = (functions: readonly PortableRequirement[]) => {
         const payloadRecords: string[] = [];
         const variants = schema.variants.map((variant) => {
           if (variant.fields.length === 0) return `    ${witIdentifier(variant.name)},`;
-          const payloadName = `${name}-${witIdentifier(variant.name)}-payload`;
+          const payloadName = witIdentifier(
+            `${name}-${normalizeWitIdentifier(variant.name)}-payload`,
+          );
           assertUniqueWitNames(
             variant.fields.map((field) => ({
               source: field.name,
@@ -550,9 +552,10 @@ const stableHash = (value: string): string => {
 };
 
 const witIdentifier = (value: string): string =>
-  escapeWitKeyword(
-    value.replace(/_/g, "-").replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase(),
-  );
+  escapeWitKeyword(normalizeWitIdentifier(value));
+
+const normalizeWitIdentifier = (value: string): string =>
+  value.replace(/_/g, "-").replace(/[^a-zA-Z0-9-]/g, "-").toLowerCase();
 
 const assertUniqueWitNames = (
   names: readonly { source: string; normalized: string }[],

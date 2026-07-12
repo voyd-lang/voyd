@@ -211,7 +211,11 @@ export const codegenProgram = ({
     ctx.effectLowering = ctx.effectsBackend.buildLowering({ ctx, siteCounter });
   });
   contexts.forEach(registerFunctionMetadata);
-  const effectRegistry = buildEffectRegistry(contexts, reachableFunctionSymbols);
+  const effectRegistry = buildEffectRegistry(
+    contexts,
+    reachableFunctionSymbols,
+    mergedOptions.externalDeclarations,
+  );
   contexts.forEach((ctx) => {
     ctx.effectsState.effectRegistry = effectRegistry;
   });
