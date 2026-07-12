@@ -2,11 +2,12 @@ import binaryen from "binaryen";
 import { callRef, refCast } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { getFunctionRefType, getRequiredExprType, wasmTypeFor } from "../../types.js";
 import { boxOutcomeValue } from "../outcome-values.js";
-import type { CodegenContext } from "../../context.js";
+import type { CodegenContext, FunctionContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
 import { ensureMsgPackFunctions } from "./msgpack.js";
 import { unpackMsgPackValueForType } from "./msgpack-values.js";
+import { unpackBoundaryValueFromMsgPack } from "../../boundary/msgpack-codec.js";
 import { hostBoundaryPayloadSupportForType } from "./payload-compatibility.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
@@ -100,9 +101,13 @@ export const createResumeContinuation = ({
       runtime.continuationType,
       msgPackType,
     ];
-    const scratch = {
+    const scratch: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
       locals,
       nextLocalIndex: binaryen.expandType(params).length + locals.length,
+      returnTypeId: ctx.program.primitives.void,
+      effectful: false,
     };
     const requestLocal = 0;
     const bufPtrLocal = 1;
@@ -152,6 +157,13 @@ export const createResumeContinuation = ({
       const resumeValue =
         sig.returnType === binaryen.none
           ? ctx.mod.nop()
+          : sig.externalBoundary
+          ? unpackBoundaryValueFromMsgPack({
+              value: ctx.mod.local.get(decodedLocal, msgPackType),
+              schema: sig.externalBoundary.result,
+              ctx,
+              fnCtx: scratch,
+            })
           : unpackMsgPackValueForType({
               value: ctx.mod.local.get(decodedLocal, msgPackType),
               typeId: sig.returnTypeId,
@@ -376,9 +388,13 @@ export const createEndRequestRaw = ({
       binaryen.i32,
     ]);
     const locals: binaryen.Type[] = [msgPackType];
-    const scratch = {
+    const scratch: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
       locals,
       nextLocalIndex: binaryen.expandType(params).length + locals.length,
+      returnTypeId: ctx.program.primitives.void,
+      effectful: false,
     };
     const requestLocal = 0;
     const bufPtrLocal = 1;
@@ -436,14 +452,21 @@ export const createEndRequestRaw = ({
         sig.returnType === binaryen.none
           ? ctx.mod.ref.null(binaryen.eqref)
           : boxOutcomeValue({
-              value: unpackMsgPackValueForType({
-                value: decodedValue(),
-                typeId: sig.returnTypeId,
-                msgpack,
-                ctx,
-                label: sig.label,
-                serializerOverride: sig.returnSerializerOverride,
-              }),
+              value: sig.externalBoundary
+                ? unpackBoundaryValueFromMsgPack({
+                    value: decodedValue(),
+                    schema: sig.externalBoundary.result,
+                    ctx,
+                    fnCtx: scratch,
+                  })
+                : unpackMsgPackValueForType({
+                    value: decodedValue(),
+                    typeId: sig.returnTypeId,
+                    msgpack,
+                    ctx,
+                    label: sig.label,
+                    serializerOverride: sig.returnSerializerOverride,
+                  }),
               valueType: sig.returnType,
               typeId: sig.returnTypeId,
               serializer: sig.returnSerializerOverride,

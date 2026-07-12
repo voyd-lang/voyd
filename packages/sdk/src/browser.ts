@@ -147,6 +147,7 @@ const compileSdk = async (
       optimize: options.optimize,
       loadModuleGraph,
       boundaryExports: options.boundaryExports,
+      externalDeclarations: options.externalDeclarations,
       cache: compilerCache,
       setupPhasesMs,
     });

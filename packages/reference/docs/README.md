@@ -46,6 +46,7 @@ The installed command is `voyd`.
 - [VX](./vx.md)
 - [Web](./web.md)
 - [Modules](./modules.md)
+- [External Packages](./external-packages.md)
 - [Types Overview](./types/overview.md)
 
 ## Feature map

@@ -3,6 +3,7 @@ import type { CodegenContext } from "../context.js";
 import type {
   HirExprId,
   ProgramFunctionInstanceId,
+  ProgramSymbolId,
   SymbolId,
   TypeId,
   TypeParamId,
@@ -19,6 +20,7 @@ import {
   findSerializerForType,
   serializerKeyFor,
 } from "../serializer.js";
+import { deriveBoundarySchema, type BoundarySchema } from "../boundary/schema.js";
 
 const encoder = new TextEncoder();
 const FNV_OFFSET = 14695981039346656037n;
@@ -45,6 +47,11 @@ export type EffectOpEntry = {
   label: string;
   effectName: string;
   opName: string;
+  external?: {
+    params: readonly BoundarySchema[];
+    result: BoundarySchema;
+    declaredOnly?: boolean;
+  };
 };
 
 export type EffectRegistry = {
@@ -456,6 +463,8 @@ const fallbackEffectAndOpNames = (
 
 export const buildEffectRegistry = (
   contexts: readonly CodegenContext[],
+  reachableFunctionSymbols?: ReadonlySet<ProgramSymbolId>,
+  includeExternalDeclarations = false,
 ): EffectRegistry => {
   const entriesByKey = new Map<EffectOpKey, EffectOpEntry>();
   const effectIdsByModule = new Map<string, EffectIdInfo[]>();
@@ -476,6 +485,13 @@ export const buildEffectRegistry = (
 
     ctx.effectLowering.sites.forEach((site) => {
       if (site.kind !== "perform") return;
+      const owner = ownerByExpr.get(site.exprId);
+      const siteReachable =
+        owner === undefined ||
+        !reachableFunctionSymbols ||
+        reachableFunctionSymbols.has(
+          ctx.program.symbols.canonicalIdOf(ctx.moduleId, owner) as ProgramSymbolId,
+        );
       const info = ctx.module.effectsInfo.operations.get(site.effectSymbol);
       if (!info) {
         throw new Error(`missing effect info for op ${site.effectSymbol}`);
@@ -503,8 +519,7 @@ export const buildEffectRegistry = (
       const label = `${sourceModuleId}::${effectName}.${opName}`;
       const resumeKind =
         info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
-      const owners = ownerByExpr.get(site.exprId);
-      const instances = owners ? (instancesBySymbol.get(owners) ?? []) : [];
+      const instances = owner !== undefined ? (instancesBySymbol.get(owner) ?? []) : [];
       const instanceList = instances.length > 0 ? instances : [undefined];
 
       instanceList.forEach((instanceId) => {
@@ -521,21 +536,108 @@ export const buildEffectRegistry = (
           returnSerializerOverride: signature.returnSerializerOverride,
         });
         const key = toEffectOpKey(effectId.hash, info.opIndex, signatureHash);
-        if (!entriesByKey.has(key)) {
-          entriesByKey.set(key, {
-            opIndex: -1,
-            effectId,
-            opId: info.opIndex,
-            resumeKind,
-            signatureHash,
-            label,
-            effectName,
-            opName,
-          });
+        const external = effectMeta?.external && siteReachable
+            ? {
+                params: signature.params.map((typeId, index) =>
+                  deriveBoundarySchema({
+                    typeId,
+                    ctx,
+                    label: `${effectId.id}::${opName} arg${index}`,
+                    options: { tagStandaloneVariants: true },
+                  }),
+                ),
+                result: deriveBoundarySchema({
+                  typeId: signature.returnType,
+                  ctx,
+                  label: `${effectId.id}::${opName} result`,
+                  options: { tagStandaloneVariants: true },
+                }),
+              }
+            : undefined;
+        const existing = entriesByKey.get(key);
+        if (existing) {
+          if (external) existing.external = external;
+          return;
         }
+        entriesByKey.set(key, {
+          opIndex: -1,
+          effectId,
+          opId: info.opIndex,
+          resumeKind,
+          signatureHash,
+          label,
+          effectName,
+          opName,
+          ...(external ? { external } : {}),
+        });
       });
     });
   });
+
+  // External effect declarations are interface definitions, so adapter binding
+  // generation must see their operations even when the declaring package does
+  // not perform them itself.
+  if (includeExternalDeclarations) {
+    contexts.forEach((ctx) => {
+      const effectIds = effectIdsByModule.get(ctx.moduleId) ?? [];
+      ctx.module.meta.effects.forEach((effect, localEffectIndex) => {
+        if (!effect.external) return;
+        const effectId = effectIds[localEffectIndex];
+        if (!effectId) throw new Error(`missing external effect id for ${effect.name}`);
+        effect.operations.forEach((op, opId) => {
+          const signature = ctx.program.functions.getSignature(ctx.moduleId, op.symbol);
+          if (!signature) throw new Error(`missing external effect signature for ${effect.name}.${op.name}`);
+          if (signature.typeParams.length > 0) {
+            throw new Error(`generic external effect operations are not supported: ${effect.name}.${op.name}`);
+          }
+          const params = signature.parameters.map((param) => param.typeId);
+          const signatureHash = signatureHashFor({
+            params,
+            returnType: signature.returnType,
+            ctx,
+            paramSerializerOverrides: signature.parameters.map((param) =>
+              param.declaredSerializer ?? findSerializerForDeclaredType(param.declaredType, ctx),
+            ),
+            returnSerializerOverride:
+              signature.declaredReturnSerializer ??
+              findSerializerForDeclaredType(signature.declaredReturnType, ctx),
+          });
+          const key = toEffectOpKey(effectId.hash, opId, signatureHash);
+          const external = {
+            params: params.map((typeId, index) => deriveBoundarySchema({
+              typeId,
+              ctx,
+              label: `${effectId.id}::${op.name} arg${index}`,
+              options: { tagStandaloneVariants: true },
+            })),
+            result: deriveBoundarySchema({
+              typeId: signature.returnType,
+              ctx,
+              label: `${effectId.id}::${op.name} result`,
+              options: { tagStandaloneVariants: true },
+            }),
+            declaredOnly: true,
+          };
+          const existing = entriesByKey.get(key);
+          if (existing) {
+            existing.external ??= external;
+            return;
+          }
+          entriesByKey.set(key, {
+            opIndex: -1,
+            effectId,
+            opId,
+            resumeKind: op.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume,
+            signatureHash,
+            label: `${ctx.moduleId}::${effect.name}.${op.name}`,
+            effectName: effect.name,
+            opName: op.name,
+            external,
+          });
+        });
+      });
+    });
+  }
 
   const entries = Array.from(entriesByKey.values()).sort((a, b) => {
     if (a.effectId.hash.high !== b.effectId.hash.high) {

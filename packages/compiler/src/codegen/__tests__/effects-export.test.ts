@@ -24,6 +24,11 @@ const openRowNoPerformFixturePath = resolve(
   "__fixtures__",
   "effects-export-open-row-no-perform.voyd"
 );
+const unusedGenericExternalFixturePath = resolve(
+  import.meta.dirname,
+  "__fixtures__",
+  "external-generic-effect-unused.voyd",
+);
 
 const compileFixture = async (fixture: string) => {
   const result = await compileEffectFixture({ entryPath: fixture });
@@ -37,6 +42,22 @@ const buildModule = () => compileFixture(fixturePath);
 const buildMsgpackModule = () => compileFixture(msgpackFixturePath);
 
 describe("effectful exports & host boundary", () => {
+  it("allows unused generic external effect declarations in ordinary builds", async () => {
+    const result = await compileProgram({
+      entryPath: unusedGenericExternalFixturePath,
+      roots: {
+        src: dirname(unusedGenericExternalFixturePath),
+        std: resolve(import.meta.dirname, "../../../../std/src"),
+      },
+      host: createFsModuleHost(),
+    });
+
+    if (!result.success) {
+      throw new Error(JSON.stringify(result.diagnostics, null, 2));
+    }
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+  });
+
   it("retains MsgPack host-boundary contracts in optimized builds without typed boundary exports", async () => {
     const result = await compileProgram({
       entryPath: fixturePath,

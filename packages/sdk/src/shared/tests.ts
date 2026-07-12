@@ -11,6 +11,7 @@ import type {
 } from "./types.js";
 import { createHost, registerHandlers } from "./host.js";
 import type { VoydHost } from "@voyd-lang/js-host";
+import type { VoydPackageAdapter } from "@voyd-lang/js-host";
 
 class TestFailure extends Error {
   constructor(message?: string) {
@@ -204,6 +205,7 @@ const createTestHost = async ({
     imports: options.imports,
     bufferSize: options.bufferSize,
     defaultAdapters: options.defaultAdapters,
+    adapters: options.adapters,
   });
   registerTestHandlers({ host, handlers: options.handlers, onLog });
   return host;
@@ -333,14 +335,26 @@ const runTests = async ({
 export const createTestCollection = ({
   cases,
   wasm,
+  resolveAdapters,
 }: {
   cases: readonly TestCase[];
   wasm: Uint8Array;
+  resolveAdapters?: (wasm: Uint8Array) => Promise<readonly VoydPackageAdapter[]>;
 }): TestCollection => {
   const hasOnly = cases.some((test) => test.modifiers.only);
   return {
     cases,
     hasOnly,
-    run: (runOptions) => runTests({ cases, wasm, options: runOptions }),
+    run: async (runOptions) =>
+      runTests({
+        cases,
+        wasm,
+        options: {
+          ...runOptions,
+          adapters:
+            runOptions.adapters ??
+            (resolveAdapters ? await resolveAdapters(wasm) : undefined),
+        },
+      }),
   };
 };

@@ -4,6 +4,7 @@ import { intrinsicAttributeMacro } from "./intrinsic-attribute.js";
 import { compilerContractAttributeMacro } from "./compiler-contract-attribute.js";
 import { intrinsicTypeAttributeMacro } from "./intrinsic-type-attribute.js";
 import { effectAttributeMacro } from "./effect-attribute.js";
+import { externalAttributeMacro } from "./external-attribute.js";
 import { serializerAttributeMacro } from "./serializer-attribute.js";
 import { boundaryAttributeMacro } from "./boundary-attribute.js";
 import { primary } from "./primary.js";
@@ -29,6 +30,7 @@ export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
   intrinsicTypeAttributeMacro,
   boundaryAttributeMacro,
   serializerAttributeMacro,
+  externalAttributeMacro,
   effectAttributeMacro,
   testBlockMacro,
 ];

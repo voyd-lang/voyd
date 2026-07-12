@@ -315,6 +315,7 @@ export type ModuleCodegenMetadata = {
   effects: readonly {
     name: string;
     effectId?: string;
+    external: boolean;
     visibility: HirVisibility;
     symbol: SymbolId;
     operations: readonly {
@@ -1150,6 +1151,9 @@ export const buildProgramCodegenView = (
       effects: mod.binding.effects.map((effect) => ({
         name: effect.name,
         effectId: effect.effectId,
+        external: Boolean(
+          (effect.form?.attributes as { external?: unknown } | undefined)?.external,
+        ),
         visibility: effect.visibility,
         symbol: effect.symbol,
         operations: effect.operations.map((op) => ({

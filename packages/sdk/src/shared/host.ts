@@ -38,9 +38,16 @@ export const runWithHandlers = async <T = unknown>({
   imports,
   bufferSize,
   defaultAdapters,
+  adapters,
   args,
 }: RunOptions): Promise<T> => {
-  const host = await createHost({ wasm, imports, bufferSize, defaultAdapters });
+  const host = await createHost({
+    wasm,
+    imports,
+    bufferSize,
+    defaultAdapters,
+    adapters,
+  });
   if (handlersByLabelSuffix) {
     registerHandlersByLabelSuffix({ host, handlersByLabelSuffix });
   }

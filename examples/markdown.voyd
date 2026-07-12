@@ -1,0 +1,7 @@
+use pkg::markdown::Markdown
+use std::vx::all
+
+pub fn main() -> Html<i32>
+  <article class="markdown-example">
+    <Markdown source="# Voyd Markdown\n\nRendered by an installed JavaScript package." />
+  </article>

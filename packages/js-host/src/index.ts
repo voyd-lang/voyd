@@ -48,6 +48,11 @@ export {
   resumeKindName,
 } from "./effect-op.js";
 export { EXPORT_ABI_SECTION, parseExportAbi } from "./protocol/export-abi.js";
+export {
+  EXTERNAL_IMPORT_MODULE,
+  EXTERNAL_REQUIREMENTS_SECTION,
+  parseExternalRequirements,
+} from "./protocol/external.js";
 export type {
   EffectOpKey,
   EffectOpKeyInput,
@@ -59,6 +64,11 @@ export type {
   ResumeKindCode,
 } from "./protocol/table.js";
 export type { ExportAbiEntry, ParsedExportAbi } from "./protocol/export-abi.js";
+export type {
+  ExternalFunctionRequirement,
+  ParsedExternalRequirements,
+} from "./protocol/external.js";
+export type { VoydPackageAdapter } from "@voyd-lang/package-adapter";
 export type {
   EffectContinuation,
   EffectContinuationCall,

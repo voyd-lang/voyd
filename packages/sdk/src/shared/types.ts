@@ -13,6 +13,8 @@ import type {
   SignatureHash,
   VoydRuntimeDiagnostics,
   VoydRuntimeError,
+  VoydPackageAdapter,
+  ParsedExternalRequirements,
 } from "@voyd-lang/js-host";
 
 export type {
@@ -25,6 +27,7 @@ export type {
   HostProtocolTable,
   ModuleRoots,
   OptimizationLevel,
+  ParsedExternalRequirements,
   SignatureHash,
   VoydRuntimeDiagnostics,
   VoydRuntimeError,
@@ -55,6 +58,8 @@ export type CompileOptions = {
   /** @deprecated Use `optimizationLevel`. true maps to `release`; false maps to `none`. */
   optimize?: boolean;
   boundaryExports?: BoundaryExportsOption;
+  /** @internal Include external declarations for adapter binding generation. */
+  externalDeclarations?: boolean;
   /**
    * Emit runtime trap-to-source metadata.
    * Defaults to false; pass true to include trap metadata.
@@ -68,6 +73,7 @@ export type CompileSuccessResult = {
   wasm: Uint8Array;
   wasmText?: string;
   effects: EffectsInfo;
+  external: ParsedExternalRequirements;
   tests?: TestCollection;
   run: <T = unknown>(opts: Omit<RunOptions, "wasm">) => Promise<T>;
 };
@@ -128,6 +134,7 @@ export type RunOptions = {
   imports?: WebAssembly.Imports;
   bufferSize?: number;
   defaultAdapters?: boolean | DefaultAdapterOptions;
+  adapters?: readonly VoydPackageAdapter[];
 };
 
 export type TestCollection = {
@@ -172,6 +179,7 @@ export type TestRunOptions = {
   imports?: WebAssembly.Imports;
   bufferSize?: number;
   defaultAdapters?: boolean | DefaultAdapterOptions;
+  adapters?: readonly VoydPackageAdapter[];
   filter?: (info: TestInfo) => boolean;
   isolation?: "per-test" | "shared";
 };

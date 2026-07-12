@@ -251,6 +251,7 @@ export const collectHostBoundaryPayloadViolations = ({
 }): HostBoundaryPayloadViolation[] => {
   const violations: HostBoundaryPayloadViolation[] = [];
   signatures.forEach((signature) => {
+    if (signature.externalBoundary) return;
     signature.paramTypeIds.forEach((typeId, index) => {
       collectViolation({
         signature,

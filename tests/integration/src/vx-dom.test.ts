@@ -53,6 +53,10 @@ const wideValueModelEntryPath = path.join(
   fixtureRoot,
   "vx-wide-value-model.voyd",
 );
+const markdownEntryPath = path.resolve(
+  import.meta.dirname,
+  "../../../examples/markdown.voyd",
+);
 
 const expectCompileSuccess = (
   result: CompileResult,
@@ -67,6 +71,21 @@ const expectCompileSuccess = (
 };
 
 describe("integration: compiled VX DOM rendering", () => {
+  it("renders a JS-backed Markdown package as an ordinary VX component", async () => {
+    const result = expectCompileSuccess(
+      await createSdk().compile({ entryPath: markdownEntryPath }),
+    );
+    const tree = await result.run<unknown>({
+      entryName: "main",
+    });
+    const container = document.createElement("div");
+    const renderer = renderMsgPackNode(tree, container);
+
+    expect(container.querySelector("h1")?.textContent).toContain("Voyd Markdown");
+    expect(container.querySelector("article")?.className).toBe("markdown-example");
+    renderer.dispose();
+  });
+
   it("rejects explicit component state ids", async () => {
     const sdk = createSdk();
     const result = await sdk.compile({ entryPath: explicitStateIdEntryPath });

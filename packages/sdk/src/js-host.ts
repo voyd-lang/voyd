@@ -1,4 +1,10 @@
 export { createVoydHost } from "@voyd-lang/js-host";
+export { defineVoydPackageAdapter } from "@voyd-lang/package-adapter";
+export { parseExternalRequirements } from "@voyd-lang/js-host";
+export type {
+  ExternalFunctionRequirement,
+  ParsedExternalRequirements,
+} from "@voyd-lang/js-host";
 export { CancelledRunError } from "@voyd-lang/js-host";
 export { detectHostRuntime, registerDefaultHostAdapters, scheduleTaskForRuntime } from "@voyd-lang/js-host";
 export { createDeterministicRuntime } from "@voyd-lang/js-host";

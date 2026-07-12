@@ -64,6 +64,7 @@ import {
   specializationPolicyForOptimizationLevel,
 } from "../optimization-policy.js";
 import { createSpecializationReservations } from "../optimize/codegen-plan.js";
+import { emitExternalRequirementsSection } from "./external/imports.js";
 
 const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   optimizationLevel: "none",
@@ -76,6 +77,7 @@ const DEFAULT_OPTIONS: Required<CodegenOptions> = {
   linearMemoryExport: "always",
   effectsMemoryExport: "auto",
   boundaryExports: false,
+  externalDeclarations: false,
   continuationBackend: {},
   testMode: false,
   testScope: "all",
@@ -197,7 +199,10 @@ export const codegenProgram = ({
   const siteCounter = { current: 0 };
   const entryCtx =
     contexts.find((ctx) => ctx.moduleId === entryModuleId) ?? contexts[0];
-  prepareReachableFunctionSymbols({ contexts, entryModuleId });
+  const reachableFunctionSymbols = prepareReachableFunctionSymbols({
+    contexts,
+    entryModuleId,
+  });
   applyConfiguredMemoryExports(entryCtx);
   contexts.forEach((ctx) => {
     ctx.effectsBackend = selectEffectsBackend(ctx);
@@ -206,7 +211,11 @@ export const codegenProgram = ({
     ctx.effectLowering = ctx.effectsBackend.buildLowering({ ctx, siteCounter });
   });
   contexts.forEach(registerFunctionMetadata);
-  const effectRegistry = buildEffectRegistry(contexts);
+  const effectRegistry = buildEffectRegistry(
+    contexts,
+    reachableFunctionSymbols,
+    mergedOptions.externalDeclarations,
+  );
   contexts.forEach((ctx) => {
     ctx.effectsState.effectRegistry = effectRegistry;
   });
@@ -233,6 +242,12 @@ export const codegenProgram = ({
     entryModuleId,
     mod,
     exportName: EFFECT_TABLE_EXPORT,
+  });
+  emitExternalRequirementsSection({
+    mod,
+    programHelpers,
+    effectRegistry,
+    includeDeclarations: mergedOptions.externalDeclarations,
   });
   if (mergedOptions.runtimeDiagnostics) {
     emitRuntimeDiagnosticsSection({
@@ -386,6 +401,8 @@ const normalizeCodegenOptions = (
     effectsMemoryExport:
       options.effectsMemoryExport ?? DEFAULT_OPTIONS.effectsMemoryExport,
     boundaryExports: options.boundaryExports ?? DEFAULT_OPTIONS.boundaryExports,
+    externalDeclarations:
+      options.externalDeclarations ?? DEFAULT_OPTIONS.externalDeclarations,
     continuationBackend: {
       ...DEFAULT_OPTIONS.continuationBackend,
       ...(options.continuationBackend ?? {}),

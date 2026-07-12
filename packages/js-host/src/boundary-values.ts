@@ -56,6 +56,32 @@ export const decodeBoundaryResult = ({
     registry: buildSchemaRegistry([schema]),
   });
 
+export const decodeBoundaryArgs = ({
+  exportName,
+  schemas,
+  args,
+}: {
+  exportName: string;
+  schemas: readonly BoundarySchema[];
+  args: readonly unknown[];
+}): unknown[] => {
+  if (args.length !== schemas.length) {
+    throw new Error(
+      `typed export ${exportName} expected ${schemas.length} args, got ${args.length}`,
+    );
+  }
+  const registry = buildSchemaRegistry(schemas);
+  return schemas.map((schema, index) =>
+    decodeBoundaryValue({
+      exportName,
+      schema,
+      value: args[index],
+      path: `arg${index}`,
+      registry,
+    }),
+  );
+};
+
 export const encodeDirectBoundaryArgs = ({
   exportName,
   schemas,

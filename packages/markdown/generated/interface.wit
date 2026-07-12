@@ -1,0 +1,24 @@
+package voyd:markdown@1.0.0;
+
+interface renderer {
+  record type-205dd88c1c3a4170 {
+    attrs: type-f6707c0e97695e72,
+    children: type-3761ea7248d03056,
+    kind: string,
+    tag: string,
+    value: string,
+  }
+  type type-3761ea7248d03056 = list<s32>;
+  record type-4a5ccd431996f5e7 {
+    name: string,
+    value: string,
+  }
+  record type-880476ac6a208990 {
+    nodes: type-cdce12171121a6f3,
+    root: s32,
+  }
+  type type-cdce12171121a6f3 = list<type-205dd88c1c3a4170>;
+  type type-f6707c0e97695e72 = list<type-4a5ccd431996f5e7>;
+
+  render-static: func(arg0: string) -> type-880476ac6a208990;
+}

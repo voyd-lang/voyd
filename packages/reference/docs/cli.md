@@ -94,11 +94,37 @@ voyd docs ./demo --out docs.html
 - `docs` is an alias for `doc`.
 - The default output file is `docs.html` for HTML and `docs.json` for JSON.
 
+## Generate package adapters
+
+Generate the TypeScript contract and WIT interface for a package containing
+`@external` functions and effects:
+
+```bash
+voyd generate adapter ./src --out ./generated
+```
+
+Generate the static adapter imports needed by a browser application:
+
+```bash
+voyd generate registry ./src/main.voyd \
+  --out ./src/generated/voyd-adapters.ts
+```
+
+The adapter generator compiles the package's canonical `pkg.voyd` graph and
+emits every re-exported `@external` declaration. Legacy source folders without
+a package root fall back to individual declaration files. The registry
+generator compiles the application, selects only reachable external
+interfaces, and resolves their installed npm providers.
+
+See [External Packages](./external-packages.md) for the package format and
+authoring workflow.
+
 ## Help and version
 
 ```bash
 voyd --help
 voyd doc --help
+voyd generate adapter --help
 voyd --version
 ```
 

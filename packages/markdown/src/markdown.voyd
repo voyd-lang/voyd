@@ -1,0 +1,47 @@
+use std::string::type::{ String, StringSlice }
+use std::array::Array
+use std::vx::{ HtmlNode, attr, element, fragment, text }
+use super::external::{ StaticHtml, StaticHtmlNode, render_static }
+
+/// Renders Markdown as a VX component.
+pub fn Markdown({ source: String }) -> HtmlNode
+  from_static(render_static(source))
+
+/// Renders Markdown from a string slice as a VX component.
+pub fn Markdown({ source: StringSlice }) -> HtmlNode
+  Markdown(source: source.to_string())
+
+/// Parses Markdown without coupling the caller to VX.
+pub fn to_static(source: String) -> StaticHtml
+  render_static(source)
+
+/// Renders a Markdown string slice to sanitized HTML.
+pub fn to_static(source: StringSlice) -> StaticHtml
+  to_static(source.to_string())
+
+fn from_static(value: StaticHtml): () -> HtmlNode
+  render_node(value.nodes, value.root)
+
+fn render_node(nodes: Array<StaticHtmlNode>, index: i32): () -> HtmlNode
+  if index < 0 || index >= nodes.len():
+    return text("")
+  let node = nodes.at(index)
+  if node.kind == "text":
+    return text(node.value)
+
+  let ~children = Array<HtmlNode>::with_capacity(node.children.len())
+  var child_index = 0
+  while child_index < node.children.len():
+    children.push(render_node(nodes, node.children.at(child_index)))
+    child_index = child_index + 1
+
+  if node.kind == "fragment":
+    return fragment(children)
+
+  let ~attrs = Array<HtmlNode>::with_capacity(node.attrs.len())
+  var attr_index = 0
+  while attr_index < node.attrs.len():
+    let item = node.attrs.at(attr_index)
+    attrs.push(attr(name: item.name, value: item.value))
+    attr_index = attr_index + 1
+  element(tag: node.tag, attrs: attrs, children: children)

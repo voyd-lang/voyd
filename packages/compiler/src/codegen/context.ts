@@ -69,6 +69,8 @@ export interface CodegenOptions {
   linearMemoryExport?: "always" | "auto" | "off";
   effectsMemoryExport?: "auto" | "always" | "off";
   boundaryExports?: BoundaryExportsOption;
+  /** Include external interface declarations even when they have no reachable call. */
+  externalDeclarations?: boolean;
   continuationBackend?: ContinuationBackendOptions;
   testMode?: boolean;
   testScope?: "all" | "entry";

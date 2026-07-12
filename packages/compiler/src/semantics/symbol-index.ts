@@ -12,6 +12,7 @@ import {
 export type IntrinsicFunctionFlags = {
   intrinsic: boolean;
   intrinsicUsesSignature: boolean;
+  external?: { interfaceId: string; functionName: string };
 };
 
 export type SerializerMetadata = {
@@ -102,6 +103,7 @@ export const buildModuleSymbolIndex = ({
       intrinsicName?: unknown;
       intrinsic?: unknown;
       intrinsicUsesSignature?: unknown;
+      externalFunction?: unknown;
       compilerFunctionContract?: unknown;
       import?: unknown;
       serializer?: unknown;
@@ -132,6 +134,9 @@ export const buildModuleSymbolIndex = ({
       intrinsicFlagsBySymbol.set(symbol, {
         intrinsic: metadata.intrinsic === true,
         intrinsicUsesSignature: metadata.intrinsicUsesSignature === true,
+        ...(isExternalFunctionMetadata(metadata.externalFunction)
+          ? { external: metadata.externalFunction }
+          : {}),
       });
     }
     const compilerFunctionContract = metadata.import
@@ -199,6 +204,14 @@ export const buildModuleSymbolIndex = ({
     getBoundary: (symbol) => boundaryBySymbol.get(symbol),
   };
 };
+
+const isExternalFunctionMetadata = (
+  value: unknown,
+): value is { interfaceId: string; functionName: string } =>
+  typeof value === "object" &&
+  value !== null &&
+  typeof (value as { interfaceId?: unknown }).interfaceId === "string" &&
+  typeof (value as { functionName?: unknown }).functionName === "string";
 
 const readStdIntrinsicTypeContract = ({
   metadata,

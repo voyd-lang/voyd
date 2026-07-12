@@ -103,6 +103,13 @@ export const collectEffectOperationSignatures = (
             opIndex: opInfo.opIndex,
             paramTypes: signature.params,
           });
+          const external = registry.getEntry(
+            registry.keyFor(
+              opInfo.effectId.hash,
+              opInfo.opId,
+              opInfo.signatureHash,
+            ),
+          )?.external;
 
           const existing = signaturesByIndex.get(opInfo.opIndex);
           if (!existing) {
@@ -123,6 +130,14 @@ export const collectEffectOperationSignatures = (
               span:
                 siteCtx.module.hir.expressions.get(site.exprId)?.span ??
                 siteCtx.module.hir.module.span,
+              ...(external
+                ? {
+                    externalBoundary: {
+                      params: external.params,
+                      result: external.result,
+                    },
+                  }
+                : {}),
             });
             return;
           }

@@ -1,0 +1,94 @@
+{
+  "abiVersion": 1,
+  "packageName": "@voyd-lang/markdown",
+  "interfaces": [
+    {
+      "interfaceId": "voyd:markdown/renderer@1",
+      "fingerprint": "b2e5a88fd08cff73"
+    }
+  ],
+  "functions": [
+    {
+      "kind": "sync",
+      "interfaceId": "voyd:markdown/renderer@1",
+      "functionName": "render_static",
+      "params": [
+        {
+          "kind": "string"
+        }
+      ],
+      "result": {
+        "kind": "record",
+        "fields": [
+          {
+            "name": "nodes",
+            "schema": {
+              "kind": "array",
+              "element": {
+                "kind": "record",
+                "fields": [
+                  {
+                    "name": "attrs",
+                    "schema": {
+                      "kind": "array",
+                      "element": {
+                        "kind": "record",
+                        "fields": [
+                          {
+                            "name": "name",
+                            "schema": {
+                              "kind": "string"
+                            }
+                          },
+                          {
+                            "name": "value",
+                            "schema": {
+                              "kind": "string"
+                            }
+                          }
+                        ]
+                      }
+                    }
+                  },
+                  {
+                    "name": "children",
+                    "schema": {
+                      "kind": "array",
+                      "element": {
+                        "kind": "i32"
+                      }
+                    }
+                  },
+                  {
+                    "name": "kind",
+                    "schema": {
+                      "kind": "string"
+                    }
+                  },
+                  {
+                    "name": "tag",
+                    "schema": {
+                      "kind": "string"
+                    }
+                  },
+                  {
+                    "name": "value",
+                    "schema": {
+                      "kind": "string"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          {
+            "name": "root",
+            "schema": {
+              "kind": "i32"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

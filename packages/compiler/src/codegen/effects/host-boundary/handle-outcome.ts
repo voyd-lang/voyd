@@ -355,6 +355,7 @@ export const createHandleOutcomeDynamic = ({
         mapLocal,
         ctx,
         runtime,
+        fnCtx,
       });
 
       const effectOps = ctx.mod.block(null, [

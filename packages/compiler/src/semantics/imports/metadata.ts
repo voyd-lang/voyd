@@ -6,6 +6,7 @@ const IMPORTABLE_KEYS = [
   "intrinsic",
   "intrinsicName",
   "intrinsicUsesSignature",
+  "externalFunction",
   "intrinsicType",
   "serializer",
   "boundary",

@@ -146,11 +146,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const entryPath = resolve(rootDir, "src/main.voyd");
 const outPath = resolve(rootDir, "src/generated/main.wasm");
+const adaptersPath = resolve(rootDir, "src/generated/voyd-adapters.ts");
 
 export async function compileVoyd({ verbose = true } = {}) {
   await mkdir(dirname(outPath), { recursive: true });
   const wasm = await runVoyd(["--emit-wasm", "--opt", entryPath]);
   await writeFile(outPath, wasm);
+  await runVoyd(["generate", "registry", entryPath, "--out", adaptersPath]);
   if (verbose) {
     console.log(\`compiled \${entryPath} -> \${outPath}\`);
   }
@@ -196,6 +198,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 const mainTs = `import { createVoydHost } from "@voyd-lang/sdk/js-host";
 import { createVoydVxAppRuntime, mountVxApp } from "@voyd-lang/vx-dom/browser";
 import wasmUrl from "./generated/main.wasm?url";
+import { adapters } from "./generated/voyd-adapters";
 import "./style.css";
 
 const root = document.getElementById("root");
@@ -208,6 +211,7 @@ const start = async () => {
   const host = await createVoydHost({
     wasm,
     bufferSize: 256 * 1024,
+    adapters,
   });
   const app = createVoydVxAppRuntime({ host });
   const mounted = await mountVxApp({ container: root, app });
