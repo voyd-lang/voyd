@@ -41,58 +41,65 @@ A VX app is a typed state machine. `Model` holds the current application state,
 renders it:
 
 ```voyd
-use std::number::cast::to_string
+use std::string::type::String
+use std::time::{ Duration }
+use std::time
 use std::vx::all
 
 obj Model {
-  count: i32
+  status: String
 }
 
 enum Msg
-  Increment
-  Decrement
+  StartTimer
+  TimerFinished
 
 pub fn app() -> Program<Model, Msg>
   program({ init, step, view })
 
 fn init() -> Model
-  Model { count: 0 }
+  Model { status: "Ready" }
 
 fn step(model: Model, msg: Msg) -> Program<Model, Msg>
   match(msg)
-    Msg::Increment:
-      next(Model { count: model.count + 1 })
-    Msg::Decrement:
-      next(Model { count: model.count - 1 })
+    Msg::StartTimer:
+      next(
+        model: Model { status: "Steeping..." },
+        cmd: start_timer()
+      )
+    Msg::TimerFinished:
+      next(Model { status: "Tea is ready!" })
 
 fn view(model: Model) -> Html<Msg>
   <main>
-    <button on_click={Msg::Decrement {}}>-</button>
-    <span>{to_string(model.count)}</span>
-    <button on_click={Msg::Increment {}}>+</button>
+    <p>{model.status}</p>
+    <button on_click={Msg::StartTimer {}}>Start tea timer</button>
   </main>
+
+fn start_timer() -> Cmd<Msg>
+  Cmd::task
+    work():
+      time::sleep(Duration::from_secs(180i64))
+    handler(_result):
+      Msg::TimerFinished {}
 ```
 
 `Model` is durable application state. `Msg` is the closed set of events that
-can change it. A button click produces a `Msg`, `step` produces a new `Model`,
-and VX patches the DOM from the next `view` result. The signatures connect each
-part of the loop, so a view can only emit messages that the app knows how to
+can change it. A button click produces a `Msg`, and `step` returns the next
+`Model` plus any command to run. VX patches the DOM from the next `view` result,
+then sends command results back through the same message loop. The signatures
+connect each part, so a view can only emit messages that the app knows how to
 handle.
 
-Real applications also need work that completes later. `Cmd::task` runs Voyd
-task code and maps the result back into a message:
+`StartTimer` shows how asynchronous work fits into the loop. Its `step` branch
+immediately changes the status to `Steeping...` and returns a command created by
+`start_timer`. `Cmd::task` runs the wait as a Voyd task and maps its result to
+`TimerFinished`; VX dispatches that message when the delay ends, and `step`
+changes the status to `Tea is ready!`.
 
-```voyd
-fn save_command(article: Article): (HttpClient, TaskRuntime) -> Cmd<Msg>
-  Cmd::task(
-    work: () -> bool => save_article(article),
-    handler: (ok: bool) -> Msg => Msg::SaveFinished { ok: ok }
-  )
-```
-
-This gives `step` a clean shape: accept a message, update the model, and return
-the work to start. VX runs the task and dispatches `SaveFinished` when it
-completes.
+This keeps `step` focused on transitions: accept a message, choose the next
+model, and describe any work to start. HTTP requests, database writes, and other
+asynchronous operations follow the same command-to-message pattern.
 
 VX includes commands for tasks, clipboard access, document titles, navigation,
 history, scrolling, selection, opening URLs, and browser storage. Subscriptions
@@ -284,19 +291,19 @@ I compared Gaia BH1 with the `v0.2.0` tag using identical source files, Node
 samples per workload after eleven warmups. The complete setup is checked in as
 the `docs/release/v0.3.0-benchmark.md` release benchmark.
 
-| Workload                                |   v0.2.0 runtime | Gaia BH1 runtime |                 Runtime change |          Raw Wasm |              gzip |
-| --------------------------------------- | ---------------: | ---------------: | -----------------------------: | ----------------: | ----------------: |
-| One million mutable particle steps      |        11.264 ms |         4.334 ms |               **2.60x faster** | **21.6% smaller** | **11.7% smaller** |
+| Workload                                  | v0.2.0 runtime | Gaia BH1 runtime |                 Runtime change |          Raw Wasm |              gzip |
+| ----------------------------------------- | -------------: | ---------------: | -----------------------------: | ----------------: | ----------------: |
+| One million mutable particle steps        |      11.264 ms |         4.334 ms |               **2.60x faster** | **21.6% smaller** | **11.7% smaller** |
 | Five million calls with default arguments |      37.459 ms |        25.549 ms |               **31.8% faster** |  **2.2% smaller** |       1.9% larger |
-| Standard-library transcendental math    |    under 0.02 ms |    under 0.02 ms | below useful timing resolution |  **4.0% smaller** |  **2.1% smaller** |
+| Standard-library transcendental math      |  under 0.02 ms |    under 0.02 ms | below useful timing resolution |  **4.0% smaller** |  **2.1% smaller** |
 
 Within Gaia BH1, the release profile also makes the two scaled workloads faster
 and much smaller than the development profile:
 
-| Workload | Unoptimized | Release | Runtime change | Raw Wasm change |
-| --- | ---: | ---: | ---: | ---: |
-| One million mutable particle steps | 15.515 ms | 4.334 ms | **3.58x faster** | **97.2% smaller** |
-| Five million calls with default arguments | 47.278 ms | 25.549 ms | **1.85x faster** | **97.8% smaller** |
+| Workload                                  | Unoptimized |   Release |   Runtime change |   Raw Wasm change |
+| ----------------------------------------- | ----------: | --------: | ---------------: | ----------------: |
+| One million mutable particle steps        |   15.515 ms |  4.334 ms | **3.58x faster** | **97.2% smaller** |
+| Five million calls with default arguments |   47.278 ms | 25.549 ms | **1.85x faster** | **97.8% smaller** |
 
 Gaia BH1 also renders the vtrace ray tracer in a median of 143.5 ms, with five
 runs between 143.0 and 144.8 ms producing the same checksum. Its release build
