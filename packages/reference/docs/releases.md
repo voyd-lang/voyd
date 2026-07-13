@@ -7,9 +7,10 @@ order: 5
 ## Voyd v0.3.0 - Gaia BH1
 
 This release is centered around Voyd's full-stack web development experience.
-Gaia BH1 brings VX (an elm inspired application framework), a fresh http client
-and server API to std, a server side web pkg, powerful release optimizations,
-a new bootstrap command and more.
+Gaia BH1 fills in both sides of Voyd's web stack. VX brings an Elm-inspired
+architecture to interactive UIs, while new HTTP client and server APIs in `std`
+and the `pkg::web` framework support server-side applications. Stronger release
+optimizations, a new bootstrap command, and more round out the release.
 
 All these features should come together to make developing real production
 full stack web applications both practical and pleasant.
@@ -28,13 +29,14 @@ and a typed VX starter. `web-ssr` creates a server-rendered application with an
 HTTP server, shared VX views, browser hydration, static assets, and a development
 workflow.
 
-### The VX Application Framework
+### The VX UI Framework
 
-Gaia BH1 introduces `vx`, an elm inspired web application framework that takes
-full advantage of idiomatic voyd. The goal of `vx` is to make it easy and enjoyable
-to build highly maintainable web applications.
+Gaia BH1 introduces VX, an Elm-inspired framework for building interactive
+UIs with idiomatic Voyd. VX gives an application a typed architecture for state,
+events, effects, and rendering, with views that can render in the browser or on
+the server.
 
-A `vx` app is a typed state machine. `Model` holds the current application state,
+A VX app is a typed state machine. `Model` holds the current application state,
 `Msg` describes every event, `step` calculates the next state, and `view`
 renders it:
 
@@ -100,11 +102,27 @@ animation frames, media queries, location changes, storage events,
 
 Read the full [VX reference](./vx.md).
 
-### `std::http` and the New `pkg::web` Framework
+### HTTP in the Standard Library
 
-`std::http` provides HTTP client and server capabilities. `pkg::web` adds the
-application layer: routes, typed request data, middleware, responses, cookies,
-static files, limits, timeouts, and server-rendered VX HTML.
+`std::http` provides the shared protocol types and low-level capabilities for
+both sides of HTTP. Applications can send outbound requests through
+`std::http::client`, or listen, accept requests, and respond through
+`std::http::server`.
+
+These APIs are useful directly when an application needs control over the HTTP
+lifecycle. They also provide the foundation for higher-level server frameworks.
+
+### The New `pkg::web` Server Framework
+
+`pkg::web` is a server-side HTTP application framework built on `std::http`. It
+adds routes, typed request extraction, middleware, response conversion, cookies,
+static files, limits, and timeouts while leaving the underlying HTTP types and
+capabilities in the standard library.
+
+VX and `pkg::web` meet at server rendering: `pkg::web` can return a rendered VX
+view, embed its hydration state, and serve its browser assets. Once the page
+loads, VX owns the interactive UI. Each framework can also be used without the
+other.
 
 A route handler can ask for the values it needs in its parameter list and
 return an ordinary Voyd value:
