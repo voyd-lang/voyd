@@ -8,7 +8,10 @@ Voyd has two public release commands:
 Everything else in `scripts/release/` is an internal maintenance helper. The
 documented release flow should go through the two root commands above.
 
-## One-Time Setup
+Keep this guide release-agnostic. Put version-specific package lists, bootstrap
+checklists, and coordination notes in the materials for that release.
+
+## One-Time Repository Setup
 
 Before a full `--all` release can publish successfully:
 
@@ -16,13 +19,6 @@ Before a full `--all` release can publish successfully:
 - bootstrap any npm package that does not exist yet
 - add the `VSCE_PAT` GitHub Actions secret for the VS Code Marketplace
 - make sure the release workflow can create GitHub tags and releases
-
-For `0.3.0`, bootstrap and configure trusted publishing for these new targets
-before dispatching the release:
-
-- `@voyd-lang/vx-dom`
-- `@voyd-lang/package-adapter`
-- `@voyd-lang/markdown`
 
 See [GitHub and Token Setup](#github-and-token-setup) for the exact setup
 steps.
@@ -32,10 +28,14 @@ steps.
 Prepare the release commit from a clean release branch:
 
 ```sh
-git switch -c release/v0.3.0
-npm run release:prepare -- --all --version 0.3.0
-git push -u origin release/v0.3.0
+VERSION=X.Y.Z
+BRANCH="release/v${VERSION}"
+git switch -c "$BRANCH"
+npm run release:prepare -- --all --version "$VERSION"
+git push -u origin "$BRANCH"
 ```
+
+Replace `X.Y.Z` with the version being published.
 
 Open and merge a pull request into `main`. This keeps branch protection and the
 required `test` status check in front of the release commit.
@@ -63,7 +63,8 @@ npm run release:publish -- --all --dry-run
 Publish a subset:
 
 ```sh
-npm run release:prepare -- --targets @voyd-lang/std,@voyd-lang/lib --version 0.3.0
+VERSION=X.Y.Z
+npm run release:prepare -- --targets @voyd-lang/std,@voyd-lang/lib --version "$VERSION"
 npm run release:publish -- --targets @voyd-lang/std,@voyd-lang/lib
 ```
 
@@ -76,7 +77,8 @@ npm run release:publish -- --all --skip-github-release
 Use an explicit notes file:
 
 ```sh
-npm run release:publish -- --all --notes-file docs/release/v0.3.0-notes.md
+VERSION=X.Y.Z
+npm run release:publish -- --all --notes-file "docs/release/v${VERSION}-notes.md"
 ```
 
 ## What The Commands Do
@@ -94,7 +96,8 @@ npm run release:publish -- --all --notes-file docs/release/v0.3.0-notes.md
 Pass `--no-commit` to leave the release changes staged:
 
 ```sh
-npm run release:prepare -- --all --version 0.3.0 --no-commit
+VERSION=X.Y.Z
+npm run release:prepare -- --all --version "$VERSION" --no-commit
 ```
 
 `release:publish`:
@@ -180,38 +183,76 @@ fails.
 
 ### npm Bootstrap For New Packages
 
-Trusted publishing needs the package to exist on npm first. For `0.3.0`,
-bootstrap these missing packages at `0.2.0` from a clean, current `main` after
-their release targets land and before preparing the `0.3.0` version bump:
+Trusted publishing needs a package to exist on npm before GitHub Actions can
+publish it through OIDC. Bootstrap each new npm package once before including it
+in a normal release.
 
-- `@voyd-lang/vx-dom`
-- `@voyd-lang/package-adapter`
-- `@voyd-lang/markdown`
+Before bootstrapping a package:
 
-Bootstrap from a clean, current `main` checkout:
+1. Make sure it is an npm workspace with a unique `name` and the version to use
+   for the initial publish in its `package.json`.
+2. Add an `npmTarget` entry to `scripts/release/manifest.mjs`. The entry must
+   identify the workspace and directory, describe the package contents that
+   must or must not be published, and select the relevant release tests. For
+   example:
+
+   ```js
+   "@voyd-lang/example": npmTarget({
+     workspace: "@voyd-lang/example",
+     cwd: "packages/example",
+     description: "Example package",
+     packRequiredFiles: ["package.json", "dist/index.js", "dist/index.d.ts"],
+     packForbiddenPatterns: [/^src\//],
+     relatedTests: ["own", "integration"],
+   }),
+   ```
+
+   Choose the package-content rules and tests for the package rather than
+   copying this example unchanged. The manifest is the authoritative allowlist
+   used by `release:prepare`, `release:publish`, and direct publish validation.
+3. Set `repository.url` in the workspace `package.json` to
+   `https://github.com/voyd-lang/voyd` and add the publish guard:
+
+   ```json
+   {
+     "scripts": {
+       "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
+     }
+   }
+   ```
+
+   Preserve the workspace's other scripts. The guard runs the manifest-backed
+   release check during `npm publish`; without the release target, it fails with
+   `Unknown release target`.
+4. Merge the workspace, manifest entry, package metadata, and tests into `main`.
+
+Start from a clean, current `main` checkout and set `PACKAGE` to the workspace
+name:
 
 ```sh
 git switch main
 git pull --ff-only origin main
-npm publish --workspace @voyd-lang/package-adapter --access public
-npm publish --workspace @voyd-lang/markdown --access public
-npm publish --workspace @voyd-lang/vx-dom --access public
+PACKAGE=@voyd-lang/example
+npm view "$PACKAGE" version
+```
+
+If `npm view` reports that the package does not exist, validate and publish the
+workspace at the version already recorded in its `package.json`:
+
+```sh
+node scripts/release/check.mjs --targets "$PACKAGE"
+npm publish --workspace "$PACKAGE" --access public
+npm view "$PACKAGE" version
 ```
 
 Use your normal npm interactive login or a one-time npm automation token for
-that bootstrap. After these packages exist at `0.2.0`, configure trusted
-publishing for them, then let the release workflow publish `0.3.0`.
+this bootstrap. Then configure the package's trusted publisher before using the
+normal release workflow.
 
-Do not bootstrap the missing packages at `0.3.0` before the release workflow.
-If `0.3.0` already exists, the workflow cannot publish that same version.
-
-Verify package existence:
-
-```sh
-npm view @voyd-lang/package-adapter version
-npm view @voyd-lang/markdown version
-npm view @voyd-lang/vx-dom version
-```
+Do not bootstrap a package at the version that the next release workflow is
+supposed to publish. npm will reject a second publish of the same package
+version. The bootstrap should publish the package's current manifest version;
+`release:prepare` will assign the upcoming version later.
 
 ### npm Trusted Publishing
 

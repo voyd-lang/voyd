@@ -291,11 +291,10 @@ I compared Gaia BH1 with the `v0.2.0` tag using identical source files, Node
 samples per workload after eleven warmups. The complete setup is checked in as
 the `docs/release/v0.3.0-benchmark.md` release benchmark.
 
-| Workload                                  | v0.2.0 runtime | Gaia BH1 runtime |                 Runtime change |          Raw Wasm |              gzip |
-| ----------------------------------------- | -------------: | ---------------: | -----------------------------: | ----------------: | ----------------: |
-| One million mutable particle steps        |      11.264 ms |         4.334 ms |               **2.60x faster** | **21.6% smaller** | **11.7% smaller** |
-| Five million calls with default arguments |      37.459 ms |        25.549 ms |               **31.8% faster** |  **2.2% smaller** |       1.9% larger |
-| Standard-library transcendental math      |  under 0.02 ms |    under 0.02 ms | below useful timing resolution |  **4.0% smaller** |  **2.1% smaller** |
+| Workload                                  | v0.2.0 runtime | Gaia BH1 runtime |   Runtime change |          Raw Wasm |              gzip |
+| ----------------------------------------- | -------------: | ---------------: | ---------------: | ----------------: | ----------------: |
+| One million mutable particle steps        |      11.264 ms |         4.334 ms | **2.60x faster** | **21.6% smaller** | **11.7% smaller** |
+| Five million calls with default arguments |      37.459 ms |        25.549 ms | **31.8% faster** |  **2.2% smaller** |       1.9% larger |
 
 Within Gaia BH1, the release profile also makes the two scaled workloads faster
 and much smaller than the development profile:
@@ -305,11 +304,6 @@ and much smaller than the development profile:
 | One million mutable particle steps        |   15.515 ms |  4.334 ms | **3.58x faster** | **97.2% smaller** |
 | Five million calls with default arguments |   47.278 ms | 25.549 ms | **1.85x faster** | **97.8% smaller** |
 
-Gaia BH1 also renders the vtrace ray tracer in a median of 143.5 ms, with five
-runs between 143.0 and 144.8 ms producing the same checksum. Its release build
-is 35.6 KB, or 13.0 KB compressed. This workload exercises effects, trait
-dispatch, mutable vectors, recursive ray bounces, arrays, and a large object
-graph.
 
 Release optimization now recognizes common array loops, known method targets,
 locally handled effects, recursive tail calls, short default-argument call
