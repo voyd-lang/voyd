@@ -6,35 +6,20 @@ order: 5
 
 ## Voyd v0.3.0 - Gaia BH1
 
-This release is centered around Voyd's full-stack web development experience.
-Gaia BH1 fills in both sides of Voyd's web stack. VX brings an Elm-inspired
-architecture to interactive UIs, while new HTTP client and server APIs in `std`
-and the `pkg::web` framework support server-side applications. Stronger release
-optimizations, a new bootstrap command, and more round out the release.
+This release is centered around Voyd's full-stack web development experience. Gaia BH1
+introduces the VX UI framework, HTTP client and server APIs, the
+`pkg::web` framework, server rendering and hydration, external package adapters,
+and substantially stronger release optimization.
 
-All these features should come together to make developing real production
-full stack web applications both practical and pleasant.
-
-### New `voyd bootstrap` Command
-
-The CLI ships with two project templates:
-
-```bash
-voyd bootstrap my-app --template vx-spa
-voyd bootstrap my-app --template web-ssr
-```
-
-`vx-spa` creates a browser application with Vite, Tailwind, Voyd compilation,
-and a typed VX starter. `web-ssr` creates a server-rendered application with an
-HTTP server, shared VX views, browser hydration, static assets, and a development
-workflow.
+Together, these additions let one Voyd project share typed models and views
+across the server and browser, integrate host-language packages without exposing
+host details to application code, and produce smaller, faster deployments.
 
 ### The VX UI Framework
 
-Gaia BH1 introduces VX, an Elm-inspired framework for building interactive
-UIs with idiomatic Voyd. VX gives an application a typed architecture for state,
-events, effects, and rendering, with views that can render in the browser or on
-the server.
+VX is an Elm-inspired framework for building interactive UIs with idiomatic
+Voyd. It provides a typed architecture for state, events, effects, and rendering,
+with views that can run in the browser or on the server.
 
 A VX app is a typed state machine. `Model` holds the current application state,
 `Msg` describes every event, `step` calculates the next state, and `view`
@@ -84,22 +69,16 @@ fn start_timer() -> Cmd<Msg>
       Msg::TimerFinished {}
 ```
 
-`Model` is durable application state. `Msg` is the closed set of events that
-can change it. A button click produces a `Msg`, and `step` returns the next
-`Model` plus any command to run. VX patches the DOM from the next `view` result,
-then sends command results back through the same message loop. The signatures
-connect each part, so a view can only emit messages that the app knows how to
-handle.
+`Model` stores durable application state, while `Msg` defines every event that
+can change it. `step` returns the next model and any work to start; `view`
+renders that model. In this example, `Cmd::task` performs the wait and maps its
+result to `TimerFinished`, which returns through the same typed message loop.
+HTTP requests, database writes, and other asynchronous operations follow the
+same command-to-message pattern.
 
-`StartTimer` shows how asynchronous work fits into the loop. Its `step` branch
-immediately changes the status to `Steeping...` and returns a command created by
-`start_timer`. `Cmd::task` runs the wait as a Voyd task and maps its result to
-`TimerFinished`; VX dispatches that message when the delay ends, and `step`
-changes the status to `Tea is ready!`.
-
-This keeps `step` focused on transitions: accept a message, choose the next
-model, and describe any work to start. HTTP requests, database writes, and other
-asynchronous operations follow the same command-to-message pattern.
+The signatures connect every part of the application, so a view can emit only
+messages the app knows how to handle. VX patches the DOM after each transition
+and runs commands without moving that work into `step`.
 
 VX includes commands for tasks, clipboard access, document titles, navigation,
 history, scrolling, selection, opening URLs, and browser storage. Subscriptions
@@ -119,7 +98,7 @@ both sides of HTTP. Applications can send outbound requests through
 These APIs are useful directly when an application needs control over the HTTP
 lifecycle. They also provide the foundation for higher-level server frameworks.
 
-### The New `pkg::web` Server Framework
+### The `pkg::web` Server Framework
 
 `pkg::web` is a server-side HTTP application framework built on `std::http`. It
 adds routes, typed request extraction, middleware, response conversion, cookies,
@@ -159,17 +138,6 @@ decoded into typed records. Return values such as `String`, `JsonValue`,
 `Response`, `Option<T>`, and `Result<T, E>` become HTTP responses through the
 same handler model.
 
-The mini-wikipedia API saves a decoded `Article` directly:
-
-```voyd
-serve(port: 3000) routes():
-  put("/api/articles", body: json_body()) do(article: Article):
-    save_article(article)
-
-  delete("/api/articles/:slug") do(ctx: Context):
-    delete_article(ctx.param("slug") ?? "")
-```
-
 The page route renders the VX tree on the server and includes the model needed
 for hydration:
 
@@ -177,9 +145,9 @@ for hydration:
 fn article_page(model: Model) -> Response
   Response::ok()
     .with(header: "content-type", value: "text/html; charset=utf-8")
-    .text(document<Msg, Model>(
+    .text(document(
       view: page_view(model),
-      hydrate: hydrate<Model>(
+      hydrate: hydrate(
         target: "#wiki-app",
         entry: "/assets/client.js",
         model: model
@@ -187,11 +155,24 @@ fn article_page(model: Model) -> Response
     ))
 ```
 
-The browser starts from that model, attaches the VX runtime to the rendered
-tree, and continues through the same `Msg` and `step` loop. The shared view
-function owns the server page and the interactive browser updates.
+The browser starts from that model, attaches VX to the rendered tree, and
+continues through the same `Msg` and `step` loop. One shared view function owns
+both the server-rendered page and its interactive updates.
 
 Read the full [Web reference](./web.md).
+
+### New `voyd bootstrap` Command
+
+The CLI ships with templates for both sides of the web stack:
+
+```bash
+voyd bootstrap my-app --template vx-spa
+voyd bootstrap my-app --template web-ssr
+```
+
+`vx-spa` creates a browser application with Vite, Tailwind, Voyd compilation,
+and a typed VX starter. `web-ssr` adds an HTTP server, shared VX views, browser
+hydration, static assets, and a development workflow.
 
 ### External Package Adapters
 
@@ -221,21 +202,10 @@ ordinary VX nodes, so Markdown content participates in normal validation,
 rendering, and DOM updates. Raw HTML becomes text, and active link and image
 schemes are rejected.
 
-Package authors declare host-backed functions with `@external` and generate the
-adapter contract from the CLI:
-
-```voyd
-@external(id: "example:search/index@1")
-pub fn search(query: String) -> Array<SearchResult>
-```
-
-```bash
-voyd generate adapter ./src --out ./generated
-```
-
-The generated output includes typed TypeScript bindings, runtime contract
-metadata, and a WIT interface. Node discovers installed adapters during a run.
-Browser builds use a generated static registry for their adapter imports.
+Package authors declare host-backed functions with `@external`, then use the
+CLI to generate typed TypeScript bindings, runtime contract metadata, and a WIT
+interface. Node discovers installed adapters during a run, while browser builds
+use a generated static registry for their adapter imports.
 
 Read [External packages](./external-packages.md) for the package format and
 runtime contracts.
@@ -277,7 +247,7 @@ directly to Wasm with JavaScript-side type validation.
 Read the [SDK reference](./sdk.md) for supported boundary shapes and embedding
 APIs.
 
-### Faster Release Builds
+### Stronger Release Optimization
 
 Use the release optimization profile when building an application for
 deployment:
@@ -286,10 +256,10 @@ deployment:
 voyd --emit-wasm --opt ./src > app.wasm
 ```
 
-I compared Gaia BH1 with the `v0.2.0` tag using identical source files, Node
-22.23.1 on Apple silicon, three fresh-process compile samples, and five runtime
-samples per workload after eleven warmups. The complete setup is checked in as
-the `docs/release/v0.3.0-benchmark.md` release benchmark.
+The Gaia BH1 benchmark compares the release with the `v0.2.0` tag using
+identical source files, Node 22.23.1 on Apple silicon, three fresh-process
+compile samples, and five runtime samples per workload after eleven warmups.
+The complete setup is checked in at `docs/release/v0.3.0-benchmark.md`.
 
 | Workload                                  | v0.2.0 runtime | Gaia BH1 runtime |   Runtime change |          Raw Wasm |              gzip |
 | ----------------------------------------- | -------------: | ---------------: | ---------------: | ----------------: | ----------------: |
@@ -303,7 +273,6 @@ and much smaller than the development profile:
 | ----------------------------------------- | ----------: | --------: | ---------------: | ----------------: |
 | One million mutable particle steps        |   15.515 ms |  4.334 ms | **3.58x faster** | **97.2% smaller** |
 | Five million calls with default arguments |   47.278 ms | 25.549 ms | **1.85x faster** | **97.8% smaller** |
-
 
 Release optimization now recognizes common array loops, known method targets,
 locally handled effects, recursive tail calls, short default-argument call
@@ -365,10 +334,9 @@ Set `runtimeDiagnostics: true` when investigating a runtime trap or validating
 generated Wasm. Reference-bound (`~`) parameters cannot declare defaults; an
 overload or callee-owned local value expresses that API shape.
 
-If you want to see the release working as one application, explore
-[The Small Knowledge](https://github.com/voyd-lang/voyd/tree/main/examples/mini-wikipedia),
-the file-backed wiki built with Voyd, VX, `pkg::web`, SSR, hydration, HTTP, and
-filesystem effects.
+[The Small Knowledge](https://github.com/voyd-lang/voyd/tree/main/examples/mini-wikipedia)
+shows the release working as one application: a file-backed wiki built with
+Voyd, VX, `pkg::web`, SSR, hydration, HTTP, and filesystem effects.
 
 ## Voyd v0.2.0 - M87*
 
