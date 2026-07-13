@@ -1,89 +1,163 @@
 import type { Route } from "./+types/home";
 
-import type { CSSProperties, ReactNode } from "react";
+import type { ReactNode } from "react";
 import { Link } from "react-router";
 import CodeBlock from "~/components/CodeBlock";
-import logo from "../../assets/logo.svg";
 
 export const prerender = true;
 
 export function meta({}: Route.MetaArgs) {
+  const title = "Voyd — One language for the whole web";
+  const description =
+    "Voyd is a statically typed, WebAssembly-first language for full-stack web applications, with practical effects and a first-party web stack.";
+
   return [
-    { title: "Voyd Programming Language" },
-    {
-      name: "description",
-      content:
-        "Voyd is a high performance WebAssembly language for full stack web development.",
-    },
+    { title },
+    { name: "description", content: description },
+    { property: "og:title", content: title },
+    { property: "og:description", content: description },
+    { property: "og:type", content: "website" },
+    { property: "og:image", content: "https://voyd.dev/og.png" },
+    { property: "og:image:width", content: "1200" },
+    { property: "og:image:height", content: "630" },
+    { name: "twitter:card", content: "summary_large_image" },
+    { name: "twitter:title", content: title },
+    { name: "twitter:description", content: description },
+    { name: "twitter:image", content: "https://voyd.dev/og.png" },
   ];
 }
 
 type Feature = {
   id: string;
+  number: string;
+  label: string;
   title: string;
-  description: string;
-  points: string[];
+  description: ReactNode;
+  points: { title: string; detail: string }[];
   code: string;
+  codeLabel: string;
   lang?: string;
+  featured?: boolean;
 };
 
-type Capability = {
-  title: string;
-  detail: string;
-  points?: string[];
-  linkHref?: string;
-  linkLabel?: string;
-};
-
-type HeroStar = {
-  originX: number;
-  originY: number;
-  angle: number;
-  start: number;
-  end: number;
-  size: number;
-  delay: number;
-  duration: number;
-  opacity: number;
-};
-
-const CORE_FEATURES: Feature[] = [
+const FEATURES: Feature[] = [
   {
-    id: "full-stack",
-    title: "Designed for full stack web",
-    description:
-      "Ship backend handlers, shared domain logic, and frontend views with one language model and one type system.",
+    id: "web-stack",
+    number: "01",
+    label: "The web stack",
+    title: "From route to interface, it’s all Voyd.",
+    description: (
+      <>
+        <code>pkg::web</code> gives you typed routes, request extraction,
+        middleware, static files, and server-rendered HTML. In the browser, VX
+        brings typed state, messages, and efficient DOM updates. Share models
+        and logic without changing languages at every boundary.
+      </>
+    ),
     points: [
-      "Compile to WebAssembly for browser, server, edge, and worker runtimes.",
-      "Keep API contracts and UI model types aligned across the stack.",
-      "Compose by modules and package exports, not framework magic.",
+      {
+        title: "On the server",
+        detail: "Value-returning handlers and typed request data.",
+      },
+      {
+        title: "In the browser",
+        detail: "Elm-inspired UI with JSX-like markup.",
+      },
+      {
+        title: "Between them",
+        detail: "One type system for shared application logic.",
+      },
     ],
-    code: `use src::web::routes::all
-use src::web::ui::all
+    codeLabel: "app.voyd",
+    code: `use pkg::web::all
+use std::error::HostError
+use std::http::server
+use std::result::types::all
+use std::task
+use std::vx::all
 
-pub fn main() -> void
-  let app = WebApp::new()
-  app.route("GET", "/", handler: render_home)
-  app.route("GET", "/api/projects", handler: list_projects)
-  app.listen(port: 8080)
+pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
+  serve(port: 3000) routes():
+    get("/") do:
+      html_response(
+        Response::ok(),
+        <main>
+          <h1>Built with Voyd.</h1>
+          <p>One language, front to back.</p>
+        </main>
+      )`,
+  },
+  {
+    id: "effects",
+    number: "02",
+    label: "Practical effects",
+    title: "Know what your code can do. Skip the ceremony.",
+    description: (
+      <>
+        Think of an effect as a typed capability: permission to call the
+        network, read a file, ask the clock, or use an application service. Voyd
+        makes those capabilities visible to the compiler, so APIs stay honest
+        and tests stay focused. Effects are inferred, and reusable helpers stay
+        polymorphic over callback effects—so they don’t force annotation noise
+        through the rest of your code. It’s a practical control surface for real
+        I/O, not an academic detour.
+      </>
+    ),
+    points: [
+      {
+        title: "Inferred locally",
+        detail: "Ordinary code stays clean and direct.",
+      },
+      {
+        title: "Polymorphic by default",
+        detail: "Helpers adopt the effects of their callbacks.",
+      },
+      {
+        title: "Handled at the edge",
+        detail: "Production and test hosts provide the capabilities.",
+      },
+    ],
+    codeLabel: "orders.voyd",
+    featured: true,
+    code: `@effect(id: "app.orders")
+eff Orders
+  save(tail, order: Order) -> OrderId
 
-fn Home() -> Html
-  // Built in html support
-  <div>
-    <h1>Hello, World></h1>
-    <p>Welcome to voyd.</p>
-  </div>`,
+fn checkout(order: Order): Orders -> Receipt
+  let id = Orders::save(order)
+  Receipt { order_id: id }
+
+// The callback's effects are inferred and preserved.
+fn run_twice<T>(work: fn() -> T) -> Array<T>
+  [work(), work()]`,
   },
   {
     id: "types",
-    title: "Strong type system",
-    description:
-      "Nominal and structural constraints, generics, and compile-time effect checking keep large systems predictable.",
+    number: "03",
+    label: "A capable type system",
+    title: "Types that describe the problem, not the compiler.",
+    description: (
+      <>
+        Combine inference with traits, constrained generics, structural data,
+        objects, and precise function types. Voyd is strict where correctness
+        matters and expressive where real application code needs room to move.
+      </>
+    ),
     points: [
-      "Use constrained generics to codify invariants early.",
-      "Model precise APIs with traits, objects, and type aliases.",
-      "Catch mismatch errors before runtime.",
+      {
+        title: "Model invariants",
+        detail: "Put domain rules into reusable constraints.",
+      },
+      {
+        title: "Shape exact APIs",
+        detail: "Use nominal or structural types as the boundary needs.",
+      },
+      {
+        title: "Refactor with confidence",
+        detail: "Catch incompatible changes before runtime.",
+      },
     ],
+    codeLabel: "repo.voyd",
     code: `trait Persistable
   fn id(self) -> String
 
@@ -93,19 +167,38 @@ obj Repo<T: Persistable> {
 
 impl<T: Persistable> Repo<T>
   fn upsert(~self, value: T) -> void
-    self.items = self.items.filter(item => item.id() != value.id())
+    self.items = self.items.filter(
+      item => item.id() != value.id()
+    )
     self.items.push(value)`,
   },
   {
     id: "syntax",
-    title: "Elegant syntax",
-    description:
-      "Readable defaults, labeled parameters, UFCS, and overloads help code stay expressive without losing precision.",
+    number: "04",
+    label: "Designed to be read",
+    title: "Code that reads like the idea.",
+    description: (
+      <>
+        Voyd pairs concise expressions with labeled parameters, overloads,
+        trailing closures, and uniform function-call syntax. APIs can feel
+        natural without hiding control flow or giving up precision.
+      </>
+    ),
     points: [
-      "Write APIs that read like intent, not plumbing.",
-      "Overload where semantics match; keep names stable.",
-      "Use UFCS for composable data transforms.",
+      {
+        title: "Clear at the call site",
+        detail: "Labels explain roles when names alone cannot.",
+      },
+      {
+        title: "Easy to compose",
+        detail: "Functions and methods share one consistent model.",
+      },
+      {
+        title: "Low on punctuation",
+        detail: "The important parts of the program stand out.",
+      },
     ],
+    codeLabel: "geometry.voyd",
     code: `fn add(a: i32, b: i32) = a + b
 fn add(a: f64, b: f64) = a + b
 
@@ -114,293 +207,126 @@ fn move({ from: Vec, to destination: Vec })
 
 let point = Vec { x: 1, y: 2 }
 let moved = point.add(Vec { x: 3, y: 5 })
+
 move(from: point, to: moved)`,
   },
   {
-    id: "effects",
-    title: "Effects",
-    description:
-      "Effects make required capabilities explicit, so domain logic can stay portable while hosts provide concrete behavior.",
+    id: "embedding",
+    number: "05",
+    label: "Made to embed",
+    title: "Put a real language inside your product.",
+    description: (
+      <>
+        Compile Voyd in Node, the browser, or Deno for product extensions,
+        sandboxed plugins, and generated programs. WebAssembly provides the
+        runtime boundary; your host decides which capabilities the program can
+        use.
+      </>
+    ),
     points: [
-      "Effect rows make required capabilities visible in signatures.",
-      "Handle capabilities at the boundary with `try` clauses.",
-      "Keep domain logic decoupled from the host.",
+      {
+        title: "Compile in process",
+        detail: "Use the public SDK without a separate toolchain.",
+      },
+      {
+        title: "Bring your own modules",
+        detail: "Inject package source for extension systems.",
+      },
+      {
+        title: "Control the boundary",
+        detail: "Expose only the host operations your product allows.",
+      },
     ],
-    code: `eff Confirm
-  ask(tail, message: String) -> bool
-
-fn delete_project(name: String): Confirm -> String
-  if Confirm::ask("Delete \${name}?"):
-    "Deleted \${name}"
-  else:
-    "Kept \${name}"
-
-fn main(): () -> String
-  try
-    delete_project("staging-dashboard")
-  ask(tail, message):
-    tail(true)`,
-  },
-  {
-    id: "embeddable",
-    title: "Embeddable",
-    description:
-      "Use Voyd as a runtime for product extensions, sandboxed plugins, or AI-generated routines while keeping host control.",
-    points: [
-      "Compile in-process with the SDK.",
-      "Inject module files at runtime for plugin scenarios.",
-      "Execute safely through host-boundary handlers.",
-    ],
+    codeLabel: "host.ts",
     lang: "typescript",
-    code: `
-// This is a JS file.
-import { compile } from "@voyd-lang/sdk/browser";
+    code: `import { compile } from "@voyd-lang/sdk/browser";
 
-const source = \
-\`use src::plugin::all
-
-pub fn main() -> i32
-  plugin_score()\`;
-
-const files = {
-  "plugin.voyd": "pub fn plugin_score() -> i32\\n  99\\n",
-};
-
-const result = await compile(source, { files });
-if (!result.success) throw new Error("Plugin compile failed");
-
-const bytes = result.module.emitBinary();
-console.log("Plugin wasm size", bytes.length);`,
+const result = await compile(source, {
+  files: {
+    "plugin.voyd": pluginSource,
   },
-];
-
-const TOOLING_FEATURES: Feature[] = [
-  {
-    id: "reporter",
-    title: "Built-in test reporter",
-    description:
-      "Test discovery, execution, events, and summaries are first-class in the SDK and CLI.",
-    points: [
-      "Emit structured events for CI dashboards.",
-      "Support skip/only and per-test diagnostics.",
-      "Run isolated tests or shared-runtime suites.",
-    ],
-    lang: "bash",
-    code: `❯ voyd test
-
-PASS src::set::set insert contains remove clear
-PASS src::set::set values returns iterable keys
-PASS src::string_bytes_iterator.test::string to_utf8 iterates utf8 bytes
-PASS src::time::system_time unix_millis is pure
-PASS src::time::sleep decodes host errors
-PASS src::traits::contracts.test::trait contracts work for baseline std traits
-
-passed 206, failed 0, skipped 0 (206 total)
-`,
-  },
-  {
-    id: "docs",
-    title: "Built-in doc generator",
-    description:
-      "Generate HTML or JSON API docs directly from source declarations. This powers std docs generation.",
-    points: [
-      "Derive docs from real declarations and signatures.",
-      "Produce HTML for websites or JSON for custom pipelines.",
-      "Reuse in CI to keep docs and code in lockstep.",
-    ],
-    lang: "bash",
-    code: `❯ voyd doc --out project_docs.html`,
-  },
-];
-
-const MORE_CAPABILITIES: Capability[] = [
-  {
-    title: "Wasm-first pipeline",
-    detail:
-      "Parser, semantics, and codegen are designed around a stable codegen-view boundary.",
-  },
-  {
-    title: "VSCode extension",
-    detail:
-      "Edit Voyd with focused IDE tooling for day-to-day language workflows. Supports refactoring, auto imports, error highlighting and more.",
-    linkHref:
-      "https://marketplace.visualstudio.com/items?itemName=voyd-lang.voyd-vscode",
-    linkLabel: "Open extension",
-  },
-  {
-    title: "Public SDK targets",
-    detail:
-      "Use one SDK across Node, browser, and Deno with aligned compile/run/test flows.",
-  },
-  {
-    title: "Host boundary protocol",
-    detail:
-      "Typed effect/continuation boundaries make embedding safe and deterministic.",
-  },
-  {
-    title: "Companion test modules",
-    detail:
-      "Include tests in selected module scopes without polluting production bundles.",
-  },
-  {
-    title: "Maintainable architecture",
-    detail:
-      "Monorepo packages separate compiler internals, runtime, SDK, and product surfaces.",
-  },
-];
-
-const HERO_STARS: HeroStar[] = Array.from({ length: 1280 }, (_, index) => {
-  const layer = index % 5;
-  const angle = ((index * 137.507764 + layer * 29) % 360) - 180;
-  const bandStart = [182, 220, 270, 330, 395][layer];
-  const bandTravel = [220, 265, 315, 370, 450][layer];
-  const start = bandStart + ((index * 31) % 78);
-  const end = start + bandTravel + ((index * 17) % 140);
-  const delay = ((index * 7) % 180) * 0.22;
-  const duration = 28 + layer * 4 + ((index * 13) % 30) * 0.38;
-  const isLarge = index % 41 === 0;
-  const isMedium = !isLarge && index % 9 === 0;
-  const size = isLarge
-    ? 2.5 + ((index * 11) % 3) * 0.38
-    : isMedium
-      ? 1.45 + ((index * 19) % 3) * 0.24
-      : 0.68 + ((index * 17) % 4) * 0.16;
-  const opacity = isLarge
-    ? 0.94
-    : isMedium
-      ? 0.76
-      : 0.38 + ((index * 23) % 28) / 100;
-  const originX = 50 + Math.cos(index * 0.73) * (2.4 + (layer % 2) * 1.2);
-  const originY = 47 + Math.sin(index * 0.51) * (1.9 + ((layer + 1) % 2) * 0.9);
-
-  return {
-    originX,
-    originY,
-    angle,
-    start,
-    end,
-    size,
-    delay,
-    duration,
-    opacity,
-  };
 });
+
+if (!result.success) {
+  throw new Error("Plugin compile failed");
+}
+
+const wasm = result.module.emitBinary();`,
+  },
+];
+
+const TOOLING = [
+  {
+    title: "Test runner",
+    detail:
+      "Discovery, isolation, structured events, and useful CLI summaries are built in.",
+  },
+  {
+    title: "Documentation",
+    detail:
+      "Generate HTML or JSON API docs directly from the declarations in your source.",
+  },
+  {
+    title: "Editor tooling",
+    detail:
+      "Refactors, auto-imports, diagnostics, and more are available in the VS Code extension.",
+    href: "https://marketplace.visualstudio.com/items?itemName=voyd-lang.voyd-vscode",
+  },
+  {
+    title: "One public SDK",
+    detail:
+      "Compile, run, and test through aligned APIs for Node, browsers, and Deno.",
+  },
+];
 
 export default function Home() {
   return (
-    <main className="mx-auto w-full max-w-6xl space-y-6 overflow-x-clip px-4 pb-16 pt-6">
+    <main className="home-page">
       <Hero />
-      <SurfaceSection className="space-y-5" aria-label="Core features">
-        {CORE_FEATURES.map((feature, index) => (
+
+      <section className="home-features" aria-label="Why Voyd">
+        {FEATURES.map((feature, index) => (
           <FeatureSection
             key={feature.id}
             feature={feature}
             reverse={index % 2 === 1}
           />
         ))}
-      </SurfaceSection>
-      <SurfaceSection className="space-y-8">
-        <header className="flex max-w-3xl ml-3 flex-col gap-2">
-          <h2 className="mt-3 text-3xl leading-tight font-bold sm:text-4xl">
-            Batteries Included
-          </h2>
-          <MutedParagraph className="text-base leading-7">
-            Voyd includes native support for tests, docs, and runtime
-            integration, so full stack projects can standardize on one language
-            and one toolchain.
-          </MutedParagraph>
-        </header>
+      </section>
 
-        <div className="grid gap-4 lg:grid-cols-2 lg:auto-rows-fr">
-          {TOOLING_FEATURES.map((feature) => (
-            <ToolingFeature key={feature.id} feature={feature} />
-          ))}
-        </div>
-
-        <div className="grid gap-3 sm:grid-cols-2 sm:auto-rows-fr lg:grid-cols-3 p-3">
-          {MORE_CAPABILITIES.map((capability) => (
-            <div key={capability.title} className="flex h-full flex-col p-4">
-              <h3 className="m-0 text-base font-bold">{capability.title}</h3>
-              <MutedParagraph className="mt-2 text-sm leading-6">
-                {capability.detail}
-              </MutedParagraph>
-              {capability.points && capability.points.length > 0 ? (
-                <ul className="mt-2 grid gap-1.5 pl-5 text-sm leading-6 text-[var(--site-text-muted)]">
-                  {capability.points.map((point) => (
-                    <li key={point}>{point}</li>
-                  ))}
-                </ul>
-              ) : null}
-              {capability.linkHref ? (
-                <a
-                  href={capability.linkHref}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="mt-3 inline-flex w-fit rounded-md border border-[var(--site-button-ghost-border)] bg-[var(--site-surface)] px-3 py-1.5 text-sm font-bold transition hover:bg-[var(--site-surface-soft)]"
-                >
-                  {capability.linkLabel ?? "Learn more"}
-                </a>
-              ) : null}
-            </div>
-          ))}
-        </div>
-      </SurfaceSection>
+      <ToolingSection />
+      <FinalCallToAction />
     </main>
   );
 }
 
 const Hero = () => {
   return (
-    <SurfaceSection
-      className="relative isolate mb-12 overflow-hidden px-4 py-10 sm:px-6 sm:py-14 lg:px-8"
-      style={{
-        background: "color-mix(in srgb, var(--site-surface) 90%, transparent)",
-      }}
-    >
-      <HeroStars />
-      <div className="relative z-10 mx-auto flex w-full max-w-3xl flex-col items-center gap-5 text-center">
-        <div className="flex flex-row gap-2 items-center justify-center">
-          <img src={logo} alt="Voyd logo" className="aspect-square w-20" />
-          <h1 className="m-0 text-[clamp(3rem,9vw,5.4rem)] leading-[0.92] font-bold tracking-[0.02em] lowercase">
-            voyd
-          </h1>
+    <section className="home-hero">
+      <div className="home-hero-glow" aria-hidden="true" />
+      <div className="home-hero-inner">
+        <p className="home-kicker">A full-stack language for the web</p>
+        <h1>Build the whole web without splitting your stack.</h1>
+        <p className="home-hero-lede">
+          Voyd is a statically typed language that compiles to WebAssembly.
+          Write servers, browser apps, and shared logic in one expressive
+          language—with practical effects and a first-party web stack.
+        </p>
+        <div className="home-actions">
+          <Link to="/docs" className="home-button home-button-primary">
+            Start with Voyd
+          </Link>
+          <Link to="/playground" className="home-button home-button-secondary">
+            Try the playground
+          </Link>
         </div>
-        <MutedParagraph className="w-full max-w-[40rem] text-[clamp(1.05rem,2.15vw,1.45rem)] leading-relaxed">
-          A programming language for full stack web development with a strong
-          type system, typed effects, and first-class runtime embedding.
-        </MutedParagraph>
-        <Links />
+        <p className="home-proof">
+          <span>Open source</span>
+          <span>WebAssembly-first</span>
+          <span>Type-safe by design</span>
+        </p>
       </div>
-    </SurfaceSection>
-  );
-};
-
-const HeroStars = () => {
-  return (
-    <div
-      aria-hidden="true"
-      className="pointer-events-none absolute inset-0 z-0 overflow-hidden"
-    >
-      {HERO_STARS.map((star, index) => (
-        <span
-          key={`${star.angle}-${index}`}
-          className="hero-star"
-          style={
-            {
-              "--hero-star-origin-x": `${star.originX}%`,
-              "--hero-star-origin-y": `${star.originY}%`,
-              "--hero-star-angle": `${star.angle}deg`,
-              "--hero-star-start": `${star.start}px`,
-              "--hero-star-end": `${star.end}px`,
-              "--hero-star-size": `${star.size}px`,
-              "--hero-star-delay": `${star.delay}s`,
-              "--hero-star-duration": `${star.duration}s`,
-              "--hero-star-opacity": `${star.opacity}`,
-            } as CSSProperties
-          }
-        />
-      ))}
-    </div>
+    </section>
   );
 };
 
@@ -411,148 +337,126 @@ const FeatureSection = ({
   feature: Feature;
   reverse: boolean;
 }) => {
-  const contentOrderClass = reverse ? "lg:order-2" : "lg:order-1";
-  const codeOrderClass = reverse ? "lg:order-1" : "lg:order-2";
-
   return (
-    <div className="flex min-w-0 flex-col gap-4 p-3 md:flex-row">
-      <div
-        className={`m-1 flex min-w-0 flex-col gap-3 p-1 ${contentOrderClass} md:w-1/2`}
-      >
-        <h2 className="m-0 mt text-3xl leading-tight font-bold sm:text-[2rem]">
-          {feature.title}
-        </h2>
-        <MutedParagraph className="text-base leading-7">
-          {feature.description}
-        </MutedParagraph>
-        <FeaturePoints points={feature.points} />
+    <article
+      id={feature.id}
+      className={`home-feature ${feature.featured ? "home-feature-featured" : ""}`}
+      data-reverse={reverse || undefined}
+    >
+      <div className="home-feature-copy">
+        <p className="home-feature-label">
+          <span>{feature.number}</span>
+          {feature.label}
+        </p>
+        <h2>{feature.title}</h2>
+        <div className="home-feature-description">{feature.description}</div>
+        <dl className="home-feature-points">
+          {feature.points.map((point) => (
+            <div key={point.title}>
+              <dt>{point.title}</dt>
+              <dd>{point.detail}</dd>
+            </div>
+          ))}
+        </dl>
       </div>
+
       <CodePanel
         code={feature.code}
         lang={feature.lang ?? "voyd"}
-        className={`min-w-0 ${codeOrderClass} md:w-1/2`}
+        label={feature.codeLabel}
       />
-    </div>
-  );
-};
-
-const ToolingFeature = ({ feature }: { feature: Feature }) => {
-  return (
-    <div className="flex h-full flex-col gap-10 p-3 max-w-full min-w-0">
-      <div className="gap-3">
-        <h3 className="m-0 mb-1.5 text-2xl font-bold">{feature.title}</h3>
-        <MutedParagraph className="text-base leading-6">
-          {feature.description}
-        </MutedParagraph>
-        <FeaturePoints points={feature.points} />
-      </div>
-      <CodePanel code={feature.code} lang={feature.lang ?? "voyd"} />
-    </div>
-  );
-};
-
-const SurfaceSection = ({
-  children,
-  className = "",
-  style,
-}: {
-  children: ReactNode;
-  className?: string;
-  style?: CSSProperties;
-}) => {
-  return (
-    <section
-      className={`min-w-0 rounded-xl shadow-xl bg-[var(--site-surface)] p-3 ${className}`}
-      style={style}
-    >
-      {children}
-    </section>
-  );
-};
-
-const SurfaceArticle = ({
-  children,
-  className = "",
-}: {
-  children: ReactNode;
-  className?: string;
-}) => {
-  return (
-    <article
-      className={`rounded-xl shadow-xl bg-[var(--site-surface)] ${className}`}
-    >
-      {children}
     </article>
-  );
-};
-
-const MutedParagraph = ({
-  children,
-  className = "",
-}: {
-  children: ReactNode;
-  className?: string;
-}) => {
-  return (
-    <p className={`m-0 text-[var(--site-text-muted)] ${className}`}>
-      {children}
-    </p>
-  );
-};
-
-const FeaturePoints = ({ points }: { points: string[] }) => {
-  return (
-    <ul className="mt-1.5 grid gap-2 pl-5 leading-5 text-[var(--site-text-muted)]">
-      {points.map((point) => (
-        <li key={point}>{point}</li>
-      ))}
-    </ul>
   );
 };
 
 const CodePanel = ({
   code,
   lang,
-  className = "",
+  label,
 }: {
   code: string;
   lang: string;
-  className?: string;
+  label: string;
 }) => {
   return (
-    <div
-      className={`max-w-full min-w-0 overflow-hidden rounded-xl border border-[var(--site-border)] bg-[#0d1117] ${className}`}
-    >
+    <div className="home-code-panel">
+      <div className="home-code-header">
+        <span aria-hidden="true" className="home-code-dots">
+          <i />
+          <i />
+          <i />
+        </span>
+        <span>{label}</span>
+      </div>
       <CodeBlock code={code} lang={lang} />
     </div>
   );
 };
 
-const Links = () => {
+const ToolingSection = () => {
   return (
-    <div className="flex w-full flex-wrap items-center justify-center gap-3">
-      <Link
-        to="/docs"
-        className="rounded-md border border-transparent bg-[var(--site-button-solid-bg)] px-4 py-2 font-bold text-[var(--site-button-solid-fg)] transition hover:opacity-90"
-      >
-        Docs
-      </Link>
-      <a
-        href="https://github.com/voyd-lang/voyd"
-        className="rounded-md border border-[var(--site-button-ghost-border)] bg-[var(--site-surface)] px-4 py-2 font-bold transition hover:bg-[var(--site-surface-soft)]"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        GitHub
-      </a>
-      <a
-        href="https://marketplace.visualstudio.com/items?itemName=voyd-lang.voyd-vscode"
-        className="rounded-md border border-[var(--site-button-ghost-border)] bg-[var(--site-surface)] px-4 py-2 font-bold transition hover:bg-[var(--site-surface-soft)]"
-        target="_blank"
-        rel="noopener noreferrer"
-      >
-        VSCode
-      </a>
-    </div>
+    <section className="home-tooling">
+      <div className="home-tooling-heading">
+        <p className="home-kicker">The rest of the job matters, too</p>
+        <h2>A language you can use, not just admire.</h2>
+        <p>
+          Voyd comes with the everyday tools that turn a language into a
+          productive workflow.
+        </p>
+      </div>
+      <div className="home-tooling-grid">
+        {TOOLING.map((item) => {
+          const content = (
+            <>
+              <h3>{item.title}</h3>
+              <p>{item.detail}</p>
+              {item.href ? <span>Open extension ↗</span> : null}
+            </>
+          );
+
+          return item.href ? (
+            <a
+              key={item.title}
+              href={item.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="home-tooling-card home-tooling-link"
+            >
+              {content}
+            </a>
+          ) : (
+            <div key={item.title} className="home-tooling-card">
+              {content}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+};
+
+const FinalCallToAction = () => {
+  return (
+    <section className="home-final-cta">
+      <p className="home-kicker">See what Voyd feels like</p>
+      <h2>One language. Fewer boundaries. Better web software.</h2>
+      <p>
+        Read the language guide, or open the playground and write your first
+        Voyd program now.
+      </p>
+      <div className="home-actions">
+        <Link to="/docs" className="home-button home-button-primary">
+          Read the docs
+        </Link>
+        <a
+          href="https://github.com/voyd-lang/voyd"
+          target="_blank"
+          rel="noopener noreferrer"
+          className="home-button home-button-secondary"
+        >
+          View on GitHub
+        </a>
+      </div>
+    </section>
   );
 };
