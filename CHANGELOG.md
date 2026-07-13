@@ -1,5 +1,93 @@
 # Changelog
 
+## Voyd v0.3.0 - Gaia BH1 (2026-07-12)
+
+Voyd `0.3.0` is the full-stack web release. VX grew into a typed application
+runtime, the new web package brings HTTP routing and server rendering to Voyd,
+and external package adapters open a path to the JavaScript ecosystem without
+making host details part of application code.
+
+### Highlights
+
+- Added the typed VX application architecture: `Program<Model, Msg>`,
+  `program`, `next`, commands, subscriptions, async task commands, component
+  state, browser event handling, DOM patching, hydration, and server rendering.
+- Added `voyd bootstrap` templates for a client-side VX application and a
+  full-stack server-rendered application.
+- Added `std::http` client and server APIs and the new `@voyd-lang/web` package,
+  with typed routing, extractors, middleware, response conversion, static files,
+  cookies, request limits, cooperative timeouts, and VX-backed HTML responses.
+- Added first-class external package functions and effects through `@external`,
+  host package adapters, Node discovery, browser registries, generated
+  TypeScript contracts, and generated WIT interfaces.
+- Added `@voyd-lang/markdown`, the first external-package reference
+  implementation. It converts Markdown into inert structured VX nodes without
+  an `innerHTML` escape hatch.
+- Added automatic typed SDK boundary exports for scalar and DTO values,
+  including recursive optional DTOs, boundary validation, callback retention,
+  and a direct scalar ABI fast path.
+- Added `enum` to the standard prelude, `Eq` for `String` and `StringSlice`,
+  `std::fs::remove`, optional structural fields, and fixes across overload
+  resolution, generic inference, default parameters, closures, and effect
+  lowering.
+- Expanded release optimization with tiered `none`, `balanced`, and `release`
+  policies, whole-program analysis, array and dispatch fast paths, effect
+  specialization, call-shape specialization, and Binaryen closed-world GC
+  optimization.
+- Reduced aggregate raw Wasm by 6.66% and gzip size by 2.91% across the release
+  optimizer scorecard. A minimal typed `i32` export dropped from 17,111 bytes to
+  783 bytes and became 6.17x faster to dispatch through `runPure`.
+- Reorganized validation into compiler-neutral conformance, public integration,
+  and opt-in performance suites, with split CI lanes and regression budgets.
+
+### Breaking Changes
+
+- `std::fetch` has been removed. Use `std::http::client` for outbound HTTP.
+- VX applications now use `app() -> Program<Model, Msg>` with `program({ init,
+  step, view, subscriptions })` and return transitions through `next(...)`.
+  Component state IDs are generated from stable call sites; the previous
+  user-supplied `state(id:)` form has been removed.
+- Runtime diagnostics and Binaryen validation are disabled by default for
+  unoptimized compilation. Pass `runtimeDiagnostics: true` when those checks
+  are required.
+- Reference-bound (`~`) parameters cannot declare default values. Use an
+  overload or callee-owned local storage instead.
+
+### New Packages
+
+- `@voyd-lang/web@0.3.0`
+- `@voyd-lang/vx-dom@0.3.0`
+- `@voyd-lang/package-adapter@0.3.0`
+- `@voyd-lang/markdown@0.3.0`
+
+### Package Versions
+
+- `@voyd-lang/cli@0.3.0`
+- `@voyd-lang/compiler@0.3.0`
+- `@voyd-lang/js-host@0.3.0`
+- `@voyd-lang/language-server@0.3.0`
+- `@voyd-lang/lib@0.3.0`
+- `@voyd-lang/markdown@0.3.0`
+- `@voyd-lang/package-adapter@0.3.0`
+- `@voyd-lang/reference@0.3.0`
+- `@voyd-lang/sdk@0.3.0`
+- `@voyd-lang/std@0.3.0`
+- `@voyd-lang/vx-dom@0.3.0`
+- `@voyd-lang/web@0.3.0`
+- `voyd-vscode@0.3.0`
+
+### Upgrade Notes
+
+Install or update the CLI:
+
+```sh
+npm i -g @voyd-lang/cli@0.3.0
+```
+
+Update all directly consumed Voyd packages together. Existing VX applications
+should migrate to the `Program<Model, Msg>` app contract, and code using
+`std::fetch` should move to `std::http::client` before upgrading.
+
 ## Voyd v0.2.0 - M87* (2026-06-03)
 
 Voyd `0.2.0` is a runtime and compiler release. The big theme is making

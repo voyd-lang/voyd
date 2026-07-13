@@ -1,5 +1,10 @@
-import { orderedTargetNames } from "./manifest.mjs";
+import {
+  assertReleaseTargetCoverage,
+  orderedTargetNames,
+} from "./manifest.mjs";
 import { describeTargets } from "./runner.mjs";
+
+assertReleaseTargetCoverage();
 
 const targets = describeTargets(orderedTargetNames);
 

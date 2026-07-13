@@ -4,6 +4,340 @@ order: 5
 
 # Releases
 
+## Voyd v0.3.0 - Gaia BH1
+
+This release is centered around Voyd's full-stack web development experience. Gaia BH1
+introduces the VX UI framework, HTTP client and server APIs, the
+`pkg::web` framework, server rendering and hydration, external package adapters,
+and substantially stronger release optimization.
+
+Together, these additions let one Voyd project share typed models and views
+across the server and browser, integrate host-language packages without exposing
+host details to application code, and produce smaller, faster deployments.
+
+### The VX UI Framework
+
+VX is an Elm-inspired framework for building interactive UIs with idiomatic
+Voyd. It provides a typed architecture for state, events, effects, and rendering,
+with views that can run in the browser or on the server.
+
+A VX app is a typed state machine. `Model` holds the current application state,
+`Msg` describes every event, `step` calculates the next state, and `view`
+renders it:
+
+```voyd
+use std::string::type::String
+use std::time::{ Duration }
+use std::time
+use std::vx::all
+
+obj Model {
+  status: String
+}
+
+enum Msg
+  StartTimer
+  TimerFinished
+
+pub fn app() -> Program<Model, Msg>
+  program({ init, step, view })
+
+fn init() -> Model
+  Model { status: "Ready" }
+
+fn step(model: Model, msg: Msg) -> Program<Model, Msg>
+  match(msg)
+    Msg::StartTimer:
+      next(
+        model: Model { status: "Steeping..." },
+        cmd: start_timer()
+      )
+    Msg::TimerFinished:
+      next(Model { status: "Tea is ready!" })
+
+fn view(model: Model) -> Html<Msg>
+  <main>
+    <p>{model.status}</p>
+    <button on_click={Msg::StartTimer {}}>Start tea timer</button>
+  </main>
+
+fn start_timer() -> Cmd<Msg>
+  Cmd::task
+    work():
+      time::sleep(Duration::from_secs(180i64))
+    handler(_result):
+      Msg::TimerFinished {}
+```
+
+`Model` stores durable application state, while `Msg` defines every event that
+can change it. `step` returns the next model and any work to start; `view`
+renders that model. In this example, `Cmd::task` performs the wait and maps its
+result to `TimerFinished`, which returns through the same typed message loop.
+HTTP requests, database writes, and other asynchronous operations follow the
+same command-to-message pattern.
+
+The signatures connect every part of the application, so a view can emit only
+messages the app knows how to handle. VX patches the DOM after each transition
+and runs commands without moving that work into `step`.
+
+VX includes commands for tasks, clipboard access, document titles, navigation,
+history, scrolling, selection, opening URLs, and browser storage. Subscriptions
+cover keyboard input, connectivity, window size and focus, visibility,
+animation frames, media queries, location changes, storage events,
+`BroadcastChannel`, and custom host input.
+
+Read the full [VX reference](./vx.md).
+
+### HTTP in the Standard Library
+
+`std::http` provides the shared protocol types and low-level capabilities for
+both sides of HTTP. Applications can send outbound requests through
+`std::http::client`, or listen, accept requests, and respond through
+`std::http::server`.
+
+These APIs are useful directly when an application needs control over the HTTP
+lifecycle. They also provide the foundation for higher-level server frameworks.
+
+### The `pkg::web` Server Framework
+
+`pkg::web` is a server-side HTTP application framework built on `std::http`. It
+adds routes, typed request extraction, middleware, response conversion, cookies,
+static files, limits, and timeouts while leaving the underlying HTTP types and
+capabilities in the standard library.
+
+VX and `pkg::web` meet at server rendering: `pkg::web` can return a rendered VX
+view, embed its hydration state, and serve its browser assets. Once the page
+loads, VX owns the interactive UI. Each framework can also be used without the
+other.
+
+A route handler can ask for the values it needs in its parameter list and
+return an ordinary Voyd value:
+
+```voyd
+use pkg::web::all
+use std::error::HostError
+use std::http::server
+use std::result::types::all
+use std::task
+
+type UserParams = {
+  id: String
+}
+
+pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
+  serve(port: 3000) routes():
+    get("/health") do:
+      "ok"
+
+    get("/users/:id") do(params: UserParams):
+      params.id
+```
+
+Path parameters, query values, headers, cookies, and JSON bodies can all be
+decoded into typed records. Return values such as `String`, `JsonValue`,
+`Response`, `Option<T>`, and `Result<T, E>` become HTTP responses through the
+same handler model.
+
+The page route renders the VX tree on the server and includes the model needed
+for hydration:
+
+```voyd
+fn article_page(model: Model) -> Response
+  Response::ok()
+    .with(header: "content-type", value: "text/html; charset=utf-8")
+    .text(document(
+      view: page_view(model),
+      hydrate: hydrate(
+        target: "#wiki-app",
+        entry: "/assets/client.js",
+        model: model
+      )
+    ))
+```
+
+The browser starts from that model, attaches VX to the rendered tree, and
+continues through the same `Msg` and `step` loop. One shared view function owns
+both the server-rendered page and its interactive updates.
+
+Read the full [Web reference](./web.md).
+
+### New `voyd bootstrap` Command
+
+The CLI ships with templates for both sides of the web stack:
+
+```bash
+voyd bootstrap my-app --template vx-spa
+voyd bootstrap my-app --template web-ssr
+```
+
+`vx-spa` creates a browser application with Vite, Tailwind, Voyd compilation,
+and a typed VX starter. `web-ssr` adds an HTTP server, shared VX views, browser
+hydration, static assets, and a development workflow.
+
+### External Package Adapters
+
+Voyd packages can now expose a typed Voyd API implemented by JavaScript or
+another host language. The application imports the package through the normal
+`pkg::` namespace.
+
+The first package built this way is `@voyd-lang/markdown`:
+
+```bash
+npm install @voyd-lang/markdown
+```
+
+```voyd
+use pkg::markdown::Markdown
+use std::vx::all
+
+fn Article({ source: String }) -> Html<AppMsg>
+  <article class="wiki-article">
+    <Markdown source={source} />
+  </article>
+```
+
+The component calls a JavaScript adapter powered by Marked. The adapter returns
+a restricted tree of text, elements, and attributes. Voyd turns that tree into
+ordinary VX nodes, so Markdown content participates in normal validation,
+rendering, and DOM updates. Raw HTML becomes text, and active link and image
+schemes are rejected.
+
+Package authors declare host-backed functions with `@external`, then use the
+CLI to generate typed TypeScript bindings, runtime contract metadata, and a WIT
+interface. Node discovers installed adapters during a run, while browser builds
+use a generated static registry for their adapter imports.
+
+Read [External packages](./external-packages.md) for the package format and
+runtime contracts.
+
+### Typed SDK Boundary Exports
+
+Public Voyd functions can now cross the SDK boundary with booleans, numbers,
+strings, arrays, records, optional values, results, and enum variants. JavaScript
+passes plain values, and the generated boundary schema validates every argument
+and result.
+
+Here is a Voyd function that accepts and returns a record:
+
+```voyd
+obj Point {
+  x: i32,
+  y: i32
+}
+
+pub fn translate(point: Point, dx: i32, dy: i32) -> Point
+  Point { x: point.x + dx, y: point.y + dy }
+```
+
+The SDK call uses a normal JavaScript object:
+
+```ts
+const point = await result.run({
+  entryName: "translate",
+  args: [{ x: 1, y: 2 }, 10, 20],
+});
+
+// { x: 11, y: 22 }
+```
+
+Enum values arrive as tagged objects, arrays arrive as JavaScript arrays, and
+recursive optional DTOs support data such as trees. Scalar signatures map
+directly to Wasm with JavaScript-side type validation.
+
+Read the [SDK reference](./sdk.md) for supported boundary shapes and embedding
+APIs.
+
+### Stronger Release Optimization
+
+Use the release optimization profile when building an application for
+deployment:
+
+```bash
+voyd --emit-wasm --opt ./src > app.wasm
+```
+
+The Gaia BH1 benchmark compares the release with the `v0.2.0` tag using
+identical source files, Node 22.23.1 on Apple silicon, three fresh-process
+compile samples, and five runtime samples per workload after eleven warmups.
+The complete setup is checked in at `docs/release/v0.3.0-benchmark.md`.
+
+| Workload                                  | v0.2.0 runtime | Gaia BH1 runtime |   Runtime change |          Raw Wasm |              gzip |
+| ----------------------------------------- | -------------: | ---------------: | ---------------: | ----------------: | ----------------: |
+| One million mutable particle steps        |      11.264 ms |         4.334 ms | **2.60x faster** | **21.6% smaller** | **11.7% smaller** |
+| Five million calls with default arguments |      37.459 ms |        25.549 ms | **31.8% faster** |  **2.2% smaller** |       1.9% larger |
+
+Within Gaia BH1, the release profile also makes the two scaled workloads faster
+and much smaller than the development profile:
+
+| Workload                                  | Unoptimized |   Release |   Runtime change |   Raw Wasm change |
+| ----------------------------------------- | ----------: | --------: | ---------------: | ----------------: |
+| One million mutable particle steps        |   15.515 ms |  4.334 ms | **3.58x faster** | **97.2% smaller** |
+| Five million calls with default arguments |   47.278 ms | 25.549 ms | **1.85x faster** | **97.8% smaller** |
+
+Release optimization now recognizes common array loops, known method targets,
+locally handled effects, recursive tail calls, short default-argument call
+shapes, and non-escaping values. These improvements account for the runtime and
+size reductions in the larger workloads.
+
+The stronger release optimizer performs more compile-time analysis. The scalar
+and default-argument fixtures took 52% longer to compile, the math fixture took
+48% longer, and the tiny trait fixture took 97% longer. Vtrace compiled in 3.17
+seconds. Development builds default to the unoptimized profile.
+
+Typed SDK boundaries also add a fixed runtime surface to tiny modules that
+expose generic public functions. The trait-only fixture stayed below 0.01 ms at
+runtime and grew from 1.1 KB to 20.0 KB. Scalar-only exports use the direct Wasm
+boundary path described in [Typed SDK Boundary Exports](#typed-sdk-boundary-exports).
+
+### Language and Standard Library Improvements
+
+Gaia BH1 also smooths out several parts of day-to-day Voyd code:
+
+- `enum` is available from the standard prelude.
+- `String` and `StringSlice` implement `Eq`, so they work naturally with APIs
+  that accept equality-constrained values.
+- `std::fs::remove` removes files, symlinks, and empty directories.
+- Object literals can fill structural types that contain optional fields.
+- Generic inference understands more labeled arguments, static generic methods,
+  and return-driven type arguments.
+- Default expressions can perform effects and resume through the remaining
+  parameter initialization.
+- Missing commas and invalid module access produce focused parser diagnostics
+  at the source location.
+- Fixes cover imported effects, escaped generic closures, operators in impls,
+  mutable values, browser event options, and UTF-8 exports.
+
+### Upgrading from 0.2.0
+
+Install the new CLI and update directly consumed Voyd packages together:
+
+```bash
+npm i -g @voyd-lang/cli@0.3.0
+```
+
+Outbound HTTP now lives in `std::http::client`. Update `std::fetch` imports and
+calls to the client API:
+
+```voyd
+use std::http::client::self as http_client
+
+let response = http_client::get("https://example.com/api")
+```
+
+VX applications expose `app() -> Program<Model, Msg>`, construct the app with
+`program({ init, step, view, subscriptions })`, and return transitions through
+`next(...)`. Component state IDs now come from stable call sites, so explicit
+`state(id:)` arguments should be removed.
+
+Runtime diagnostics and Binaryen validation are opt-in for unoptimized builds.
+Set `runtimeDiagnostics: true` when investigating a runtime trap or validating
+generated Wasm. Reference-bound (`~`) parameters cannot declare defaults; an
+overload or callee-owned local value expresses that API shape.
+
+[The Small Knowledge](https://github.com/voyd-lang/voyd/tree/main/examples/mini-wikipedia)
+shows the release working as one application: a file-backed wiki built with
+Voyd, VX, `pkg::web`, SSR, hydration, HTTP, and filesystem effects.
+
 ## Voyd v0.2.0 - M87*
 
 This first minor release since launch brings a few new features and a whole ton

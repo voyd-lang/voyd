@@ -134,7 +134,7 @@ fn step_particle(seed: i32) -> i32
 pub fn main() -> i32
   var i = 0
   var total = 0
-  while i < 10000:
+  while i < 1000000:
     total = total + step_particle(i)
     i = i + 1
   total
@@ -158,7 +158,7 @@ fn sum_default(n: i32, { step: i32 = 1 }) -> i32
 pub fn main() -> i32
   var i = 0
   var total = 0
-  while i < 50000:
+  while i < 5000000:
     total = total + sum_default(10) + sum_default(10, step: 2)
     i = i + 1
   total
@@ -175,13 +175,13 @@ const SCENARIOS: readonly Scenario[] = [
     name: "scalar-aggregate",
     source: SCALAR_AGGREGATE_SOURCE,
     entryName: "main",
-    expected: 1_100_340_000,
+    expected: 622_754_944,
   },
   {
     name: "call-shape-defaults",
     source: CALL_SHAPE_SOURCE,
     entryName: "main",
-    expected: 4_250_000,
+    expected: 425_000_000,
   },
   {
     name: "std-math-transcendentals",
