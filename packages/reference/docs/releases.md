@@ -274,12 +274,20 @@ the `docs/release/v0.3.0-benchmark.md` release benchmark.
 
 | Workload                                |   v0.2.0 runtime | Gaia BH1 runtime |                 Runtime change |          Raw Wasm |              gzip |
 | --------------------------------------- | ---------------: | ---------------: | -----------------------------: | ----------------: | ----------------: |
-| Mutable scalar aggregates in a hot loop |         1.158 ms |         0.045 ms |              **25.97x faster** | **21.6% smaller** | **11.7% smaller** |
-| Recursive calls with default arguments  |         0.378 ms |         0.259 ms |               **31.6% faster** |  **2.2% smaller** |       1.9% larger |
+| One million mutable particle steps      |        11.264 ms |         4.334 ms |               **2.60x faster** | **21.6% smaller** | **11.7% smaller** |
+| Five million calls with default arguments |      37.459 ms |        25.549 ms |               **31.8% faster** |  **2.2% smaller** |       1.9% larger |
 | Standard-library transcendental math    |    under 0.02 ms |    under 0.02 ms | below useful timing resolution |  **4.0% smaller** |  **2.1% smaller** |
 
-Gaia BH1 also renders the vtrace ray tracer in a median of 146.2 ms, with five
-runs between 145.2 and 146.5 ms producing the same checksum. Its release build
+Within Gaia BH1, the release profile also makes the two scaled workloads faster
+and much smaller than the development profile:
+
+| Workload | Unoptimized | Release | Runtime change | Raw Wasm change |
+| --- | ---: | ---: | ---: | ---: |
+| One million mutable particle steps | 15.515 ms | 4.334 ms | **3.58x faster** | **97.2% smaller** |
+| Five million calls with default arguments | 47.278 ms | 25.549 ms | **1.85x faster** | **97.8% smaller** |
+
+Gaia BH1 also renders the vtrace ray tracer in a median of 143.5 ms, with five
+runs between 143.0 and 144.8 ms producing the same checksum. Its release build
 is 35.6 KB, or 13.0 KB compressed. This workload exercises effects, trait
 dispatch, mutable vectors, recursive ray bounces, arrays, and a large object
 graph.
@@ -290,8 +298,8 @@ shapes, and non-escaping values. These improvements account for the runtime and
 size reductions in the larger workloads.
 
 The stronger release optimizer performs more compile-time analysis. The scalar
-and default-argument fixtures took 51% longer to compile, the math fixture took
-46% longer, and the tiny trait fixture took 94% longer. Vtrace compiled in 3.23
+and default-argument fixtures took 52% longer to compile, the math fixture took
+48% longer, and the tiny trait fixture took 97% longer. Vtrace compiled in 3.17
 seconds. Development builds default to the unoptimized profile.
 
 Typed SDK boundaries also add a fixed runtime surface to tiny modules that

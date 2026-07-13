@@ -92,7 +92,13 @@ const install = (directory, name) => {
   );
 };
 
-const runScorecard = ({ directory, scenarios, corpusPath, output }) => {
+const runScorecard = ({
+  directory,
+  scenarios,
+  corpusPath,
+  output,
+  modes = ["release"],
+}) => {
   run(
     "npx",
     nodeArgs([
@@ -103,7 +109,7 @@ const runScorecard = ({ directory, scenarios, corpusPath, output }) => {
       "--preset",
       "full",
       "--modes",
-      "release",
+      modes.join(","),
       "--scenarios",
       scenarios.join(","),
       "--compile-warmups",
@@ -134,7 +140,9 @@ const runScorecard = ({ directory, scenarios, corpusPath, output }) => {
 };
 
 const rowsByScenario = (scorecard) =>
-  Object.fromEntries(scorecard.rows.map((row) => [row.scenario, row]));
+  Object.fromEntries(
+    scorecard.rows.map((row) => [`${row.scenario}:${row.mode}`, row]),
+  );
 
 const percentChange = (base, head) => ((head - base) / base) * 100;
 
@@ -171,6 +179,46 @@ const compareRows = ({ base, head }) => ({
     head: {
       compileMs: head.compileSamplesMs,
       runtimeMs: head.runtimeSamplesMs,
+    },
+  },
+});
+
+const compareOptimizationRows = ({ unoptimized, release }) => ({
+  compileMs: {
+    unoptimized: unoptimized.compileMedianMs,
+    release: release.compileMedianMs,
+    percentChange: percentChange(
+      unoptimized.compileMedianMs,
+      release.compileMedianMs,
+    ),
+  },
+  runtimeMs: {
+    unoptimized: unoptimized.runtimeMedianMs,
+    release: release.runtimeMedianMs,
+    speedup: unoptimized.runtimeMedianMs / release.runtimeMedianMs,
+    percentChange: percentChange(
+      unoptimized.runtimeMedianMs,
+      release.runtimeMedianMs,
+    ),
+  },
+  wasmBytes: {
+    unoptimized: unoptimized.wasmBytes,
+    release: release.wasmBytes,
+    percentChange: percentChange(unoptimized.wasmBytes, release.wasmBytes),
+  },
+  gzipBytes: {
+    unoptimized: unoptimized.gzipBytes,
+    release: release.gzipBytes,
+    percentChange: percentChange(unoptimized.gzipBytes, release.gzipBytes),
+  },
+  samples: {
+    unoptimized: {
+      compileMs: unoptimized.compileSamplesMs,
+      runtimeMs: unoptimized.runtimeSamplesMs,
+    },
+    release: {
+      compileMs: release.compileSamplesMs,
+      runtimeMs: release.runtimeSamplesMs,
     },
   },
 });
@@ -227,6 +275,7 @@ try {
     scenarios: CORE_SCENARIOS,
     corpusPath,
     output: path.join(tempRoot, "head-core.json"),
+    modes: ["unoptimized", "release"],
   });
 
   console.log("Running Gaia BH1 vtrace scorecard...");
@@ -242,11 +291,23 @@ try {
   const scenarios = Object.fromEntries(
     CORE_SCENARIOS.map((name) => [
       name,
-      compareRows({ base: baseRows[name], head: headRows[name] }),
+      compareRows({
+        base: baseRows[`${name}:release`],
+        head: headRows[`${name}:release`],
+      }),
+    ]),
+  );
+  const gaiaOptimization = Object.fromEntries(
+    CORE_SCENARIOS.map((name) => [
+      name,
+      compareOptimizationRows({
+        unoptimized: headRows[`${name}:unoptimized`],
+        release: headRows[`${name}:release`],
+      }),
     ]),
   );
   const result = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     generatedAt: new Date().toISOString(),
     environment: {
       platform: `${process.platform}-${process.arch}`,
@@ -263,6 +324,7 @@ try {
     },
     corpusHashes: headScorecard.corpusHashes,
     scenarios,
+    gaiaOptimization,
     vtrace: {
       head: {
         compileMedianMs: headVtrace.compileMedianMs,
@@ -281,6 +343,12 @@ try {
     const speedup = metrics.runtimeMs.base / metrics.runtimeMs.head;
     console.log(
       `${name}: ${speedup.toFixed(2)}x runtime, ${metrics.wasmBytes.percentChange.toFixed(1)}% Wasm`,
+    );
+  });
+  ["scalar-aggregate", "call-shape-defaults"].forEach((name) => {
+    const metrics = gaiaOptimization[name];
+    console.log(
+      `${name} release profile: ${metrics.runtimeMs.speedup.toFixed(2)}x runtime, ${metrics.wasmBytes.percentChange.toFixed(1)}% Wasm`,
     );
   });
   console.log(
