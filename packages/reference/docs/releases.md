@@ -7,22 +7,12 @@ order: 5
 ## Voyd v0.3.0 - Gaia BH1
 
 This release is centered around Voyd's full-stack web development experience.
-Gaia BH1 brings together typed browser applications, HTTP services, server-side
-rendering, hydration, host-language package adapters, and the tooling needed to
-start and ship a project.
+Gaia BH1 brings VX (an elm inspired application framework), a fresh http client
+and server API to std, a server side web pkg, powerful release optimizations,
+a new bootstrap command and more.
 
-You can define a browser state machine, render its UI, serve HTTP routes, render
-the first page on the server, hydrate it in the browser, call APIs, persist
-data, and package host-language libraries behind typed Voyd APIs.
-
-To exercise the whole stack, I rebuilt the mini-wikipedia example as a real
-Voyd application. It supports article creation, editing, deletion, search,
-direct links, server rendering, browser hydration, and JSON-file persistence.
-The server, API routes, validation, shared article model, and interactive VX
-app are all written in Voyd.
-
-That is the heart of Gaia BH1: Voyd now has an end-to-end story for building a
-web product.
+All these features should come together to make developing real production
+full stack web applications both practical and pleasant.
 
 ### New `voyd bootstrap` Command
 
@@ -38,9 +28,13 @@ and a typed VX starter. `web-ssr` creates a server-rendered application with an
 HTTP server, shared VX views, browser hydration, static assets, and a development
 workflow.
 
-### Typed VX Application Runtime
+### The VX Application Framework
 
-A VX app is a typed state machine. `Model` holds the current application state,
+Gaia BH1 introduces `vx`, an elm inspired web application framework that takes
+full advantage of idiomatic voyd. The goal of `vx` is to make it easy and enjoyable
+to build highly maintainable web applications.
+
+A `vx` app is a typed state machine. `Model` holds the current application state,
 `Msg` describes every event, `step` calculates the next state, and `view`
 renders it:
 
