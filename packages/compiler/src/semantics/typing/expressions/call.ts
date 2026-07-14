@@ -6058,7 +6058,7 @@ const scoreOverloadMatchesByLambdaCompatibility = <
     ctx,
     state,
   });
-  const exactArityCompatible = narrowOverloadMatchesByExactInlineLambdaArity({
+  const arityCompatible = narrowOverloadMatchesByInlineLambdaArity({
     matches: lambdaReturnCompatible,
     args,
     argsForCandidate,
@@ -6069,11 +6069,11 @@ const scoreOverloadMatchesByLambdaCompatibility = <
   const compatibilityNarrowed = lambdaCompatible.length < matches.length;
   const returnNarrowed =
     lambdaReturnCompatible.length < lambdaCompatible.length;
-  const exactArityNarrowed =
-    exactArityCompatible.length < lambdaReturnCompatible.length;
+  const arityNarrowed =
+    arityCompatible.length < lambdaReturnCompatible.length;
   const compatibleSet = new Set(lambdaCompatible);
   const returnCompatibleSet = new Set(lambdaReturnCompatible);
-  const exactAritySet = new Set(exactArityCompatible);
+  const arityCompatibleSet = new Set(arityCompatible);
 
   return new Map(
     matches.map((candidate) => {
@@ -6081,13 +6081,13 @@ const scoreOverloadMatchesByLambdaCompatibility = <
         !compatibilityNarrowed || compatibleSet.has(candidate) ? 1 : 0;
       const returnScore =
         returnNarrowed && returnCompatibleSet.has(candidate) ? 1 : 0;
-      const exactArityScore =
-        exactArityNarrowed && exactAritySet.has(candidate) ? 1 : 0;
+      const arityScore =
+        arityNarrowed && arityCompatibleSet.has(candidate) ? 1 : 0;
       return [
         candidate,
         {
           lambdaCompatibility:
-            compatibilityScore + returnScore + exactArityScore,
+            compatibilityScore + returnScore + arityScore,
         },
       ];
     }),
@@ -6287,7 +6287,7 @@ const narrowOverloadMatchesByLambdaCompatibility = <
     : matches;
 };
 
-const narrowOverloadMatchesByExactInlineLambdaArity = <
+const narrowOverloadMatchesByInlineLambdaArity = <
   T extends { symbol: SymbolId; signature: FunctionSignature },
 >({
   matches,
@@ -6304,19 +6304,36 @@ const narrowOverloadMatchesByExactInlineLambdaArity = <
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
 }): readonly T[] => {
-  const exactArityMatches = matches.filter((candidate) =>
-    candidateHasExactInlineLambdaArity({
+  const scored = matches.flatMap((candidate) => {
+    const score = inlineLambdaArityScoreForCandidate({
       candidate,
       args: argsForCandidate ? argsForCandidate(candidate) : args,
       typeArguments,
       targetTypeArguments,
       ctx,
-    }),
+    });
+    return score ? [{ candidate, score }] : [];
+  });
+  if (scored.length === 0) {
+    return matches;
+  }
+
+  const mostExactCount = Math.max(
+    ...scored.map(({ score }) => score.exactMatches),
   );
-  return exactArityMatches.length > 0 ? exactArityMatches : matches;
+  const mostExact = scored.filter(
+    ({ score }) => score.exactMatches === mostExactCount,
+  );
+  const fewestOmittedCount = Math.min(
+    ...mostExact.map(({ score }) => score.omittedParameters),
+  );
+  const preferred = mostExact
+    .filter(({ score }) => score.omittedParameters === fewestOmittedCount)
+    .map(({ candidate }) => candidate);
+  return preferred.length < matches.length ? preferred : matches;
 };
 
-const candidateHasExactInlineLambdaArity = <
+const inlineLambdaArityScoreForCandidate = <
   T extends { symbol: SymbolId; signature: FunctionSignature },
 >({
   candidate,
@@ -6330,7 +6347,7 @@ const candidateHasExactInlineLambdaArity = <
   typeArguments: readonly TypeId[] | undefined;
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
-}): boolean => {
+}): { exactMatches: number; omittedParameters: number } | undefined => {
   const params = specializeOverloadParametersWithTargetTypeArguments({
     symbol: candidate.symbol,
     signature: candidate.signature,
@@ -6340,14 +6357,19 @@ const candidateHasExactInlineLambdaArity = <
   }).filter((param) => !isStableCallsiteIdParam(param));
   const callArgs = callArgInputsFromArgs(args);
 
-  return args.every((arg, index) => {
+  let lambdaCount = 0;
+  let exactMatches = 0;
+  let omittedParameters = 0;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
     if (typeof arg.exprId !== "number") {
-      return true;
+      continue;
     }
     const lambdaExpr = ctx.hir.expressions.get(arg.exprId);
     if (!lambdaExpr || lambdaExpr.exprKind !== "lambda") {
-      return true;
+      continue;
     }
+    lambdaCount += 1;
     const expected = expectedCallArgType({
       args: callArgs,
       index,
@@ -6357,14 +6379,23 @@ const candidateHasExactInlineLambdaArity = <
       ctx,
     });
     if (typeof expected !== "number") {
-      return false;
+      return undefined;
     }
     const expectedDesc = ctx.arena.get(unfoldRecursiveTypeId(expected, ctx));
-    return (
-      expectedDesc.kind === "function" &&
-      lambdaExpr.parameters.length === expectedDesc.parameters.length
-    );
-  });
+    if (expectedDesc.kind !== "function") {
+      return undefined;
+    }
+    const omitted = expectedDesc.parameters.length - lambdaExpr.parameters.length;
+    if (omitted < 0) {
+      return undefined;
+    }
+    if (omitted === 0) {
+      exactMatches += 1;
+    }
+    omittedParameters += omitted;
+  }
+
+  return lambdaCount > 0 ? { exactMatches, omittedParameters } : undefined;
 };
 
 const candidateAcceptsInlineLambdas = <

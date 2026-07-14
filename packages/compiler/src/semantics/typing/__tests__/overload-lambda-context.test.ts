@@ -75,4 +75,22 @@ describe("overload lambda context", () => {
     if (!call) return;
     expect(typing.table.getExprType(call.id)).toBe(typing.primitives.i32);
   });
+
+  it("scores exact arity across multiple inline lambdas", () => {
+    const semantics = semanticsPipeline(
+      loadAst("overload_lambda_partial_exact_arity_preference.voyd"),
+    );
+    const { hir, typing } = semantics;
+
+    const call = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr =>
+        expr.exprKind === "call" &&
+        expr.args.filter(
+          (arg) => hir.expressions.get(arg.expr)?.exprKind === "lambda",
+        ).length === 2,
+    );
+    expect(call).toBeDefined();
+    if (!call) return;
+    expect(typing.table.getExprType(call.id)).toBe(typing.primitives.bool);
+  });
 });
