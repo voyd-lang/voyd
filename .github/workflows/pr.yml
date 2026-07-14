@@ -74,6 +74,8 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
       - run: npm run test:audit
+      - name: Run release tooling tests
+        run: npm run test:release
       - run: mkdir -p test-timings
       # Package-local units run separately from portable conformance and integration.
       - name: Run affected package units
