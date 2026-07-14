@@ -12,6 +12,7 @@ obj Model {
 
 enum Msg
   Save
+  SaveIgnored
   Saved { value: i32 }
 
 pub fn app() -> Program<Model, Msg>
@@ -30,15 +31,31 @@ fn step(model: Model, msg: Msg): tasks::TaskRuntime -> Program<Model, Msg>
           handler: (value: MsgPack) -> Msg => Msg::Saved { value: saved_value(value) }
         )
       )
+    Msg::SaveIgnored:
+      next(
+        model: Model { status: "Ignoring..." },
+        cmd: ignored_task()
+      )
     Msg::Saved { value }:
       next(Model { status: saved_label(value) })
 
 fn view(model: Model) -> Html<Msg>
-  <button type="button" on_click={Msg::Save {}}>{model.status}</button>
+  <div>
+    <button type="button" data-testid="typed-result" on_click={Msg::Save {}}>{model.status}</button>
+    <button type="button" data-testid="ignored-result" on_click={Msg::SaveIgnored {}}>Ignore result</button>
+  </div>
+
+fn ignored_task(): tasks::TaskRuntime -> Cmd<Msg>
+  Cmd<Msg>::task
+    work():
+      msgpack::make_i32(99)
+    handler():
+      Msg::Saved { value: 42 }
 
 fn saved_label(value: i32) -> String
   if
     value == 41: "Saved: 41"
+    value == 42: "Saved: 42"
     else: "Saved"
 
 fn saved_value(value: MsgPack) -> i32

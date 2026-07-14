@@ -4,9 +4,35 @@ import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { DiagnosticError } from "../../../diagnostics/index.js";
+import { parse } from "../../../parser/parser.js";
 import { getSymbolTable } from "../../_internal/symbol-table.js";
 
 describe("call diagnostics", () => {
+  it("does not infer omitted lambda parameters from its own call arguments", () => {
+    const ast = parse(
+      `
+pub fn main() -> i32
+  (() => 1)(42)
+`,
+      "/proj/src/immediate-lambda.voyd"
+    );
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0005");
+    expect(caught.diagnostic.message).toMatch(/cannot call a non-function/i);
+  });
+
   it("reports diagnostics for calling non-function values", () => {
     const ast = loadAst("non_function_call.voyd");
 
