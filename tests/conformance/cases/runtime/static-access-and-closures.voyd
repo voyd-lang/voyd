@@ -44,6 +44,21 @@ pub fn static_target_overload_ranking() -> i32
 pub fn static_alias_target_overload_ranking() -> i32
   I32OverloadBox::pick(1) + I32OverloadBox::pick(true)
 
+pub obj PairOverloadBox<Left, Right> {}
+
+impl<Left, Right> PairOverloadBox<Left, Right>
+  fn pick(value: Left) -> i32
+    11
+
+  fn pick<T>(value: T) -> i32
+    3
+
+type I32PairOverloadBox<Right> = PairOverloadBox<i32, Right>
+type I32BoolPairOverloadBox = I32PairOverloadBox<bool>
+
+pub fn static_transitive_alias_target_overload_ranking() -> i32
+  I32BoolPairOverloadBox::pick(1) + I32BoolPairOverloadBox::pick(true)
+
 pub fn curried_optional_call() -> i32
   let lift = (base: i32) => (delta?: i32) =>
     match(delta)

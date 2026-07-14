@@ -24,7 +24,9 @@ import {
 } from "../../enum-namespace.js";
 import type { SymbolId } from "../../ids.js";
 import {
+  composeNominalTypeTargetMetadata,
   nominalTypeTargetMetadataFromAliasTarget,
+  nominalTypeTargetMetadataFromSource,
   resolveNominalTypeSymbol,
 } from "../../nominal-type-target.js";
 import { importedModuleIdFrom } from "../../imports/metadata.js";
@@ -311,30 +313,18 @@ const seedNominalAliasStaticMethodNamespaces = (ctx: BindingContext): void => {
       if (targetRecord.kind !== "type") {
         return;
       }
-      const aliasRecord = ctx.symbolTable.getSymbol(alias.symbol);
-      const aliasMetadata = aliasRecord.metadata as
-        | {
-            nominalTargetTypeArguments?: unknown;
-            nominalTargetTypeParameterNames?: unknown;
-          }
-        | undefined;
-      const targetMetadata = targetRecord.metadata as
-        | {
-            nominalTargetTypeArguments?: unknown;
-            nominalTargetTypeParameterNames?: unknown;
-          }
-        | undefined;
-      const canCopyTargetNominalMetadata =
-        (alias.typeParameters?.length ?? 0) === 0 &&
-        !Array.isArray(aliasMetadata?.nominalTargetTypeArguments) &&
-        Array.isArray(targetMetadata?.nominalTargetTypeArguments);
-      if (canCopyTargetNominalMetadata) {
-        ctx.symbolTable.setSymbolMetadata(alias.symbol, {
-          nominalTargetTypeArguments:
-            targetMetadata?.nominalTargetTypeArguments,
-          nominalTargetTypeParameterNames:
-            targetMetadata?.nominalTargetTypeParameterNames,
-        });
+      const nominalTargetMetadata = composeNominalTypeTargetMetadata({
+        alias: nominalTypeTargetMetadataFromAliasTarget({
+          target: alias.target,
+          typeParameterNames:
+            alias.typeParameters?.map((parameter) => parameter.name) ?? [],
+        }),
+        target: nominalTypeTargetMetadataFromSource({
+          source: targetRecord.metadata as Record<string, unknown> | undefined,
+        }),
+      });
+      if (nominalTargetMetadata) {
+        ctx.symbolTable.setSymbolMetadata(alias.symbol, nominalTargetMetadata);
       }
       ensureConstructorImport({
         targetSymbol,

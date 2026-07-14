@@ -553,6 +553,12 @@
           "expect": { "kind": "equals", "value": 14 }
         },
         {
+          "id": "runtime.static-access.transitive-alias-overload-ranking",
+          "title": "composes target arguments through transitive aliases",
+          "entryName": "static_transitive_alias_target_overload_ranking",
+          "expect": { "kind": "equals", "value": 14 }
+        },
+        {
           "id": "runtime.closures.curried-optional",
           "title": "runs curried closure calls with optional arguments",
           "entryName": "curried_optional_call",
