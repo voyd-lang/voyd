@@ -5758,6 +5758,9 @@ const typeOverloadedCall = (
       ctx,
       state,
     });
+  // Scoring speculatively infers lambda returns for each candidate. Preserve
+  // those immutable results for the selected-call typing that follows.
+  const lambdaReturnInferenceCache: LambdaReturnInferenceCache = new Map();
 
   const matches = findOverloadMatches({
     name: callee.name,
@@ -5790,6 +5793,7 @@ const typeOverloadedCall = (
         targetTypeArguments,
         ctx,
         state,
+        lambdaReturnInferenceCache,
       }),
   });
 
@@ -5896,14 +5900,16 @@ const typeOverloadedCall = (
     ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolRef>();
   targets.set(instanceKey, selectedRef);
   ctx.callResolution.targets.set(call.id, targets);
-  const lambdaReturnSubstitution = inferLambdaReturnSubstitutionForCandidate({
-    candidate: selected,
-    callArgs: call.args,
-    typeArguments,
-    targetTypeArguments,
-    ctx,
-    state,
-  })?.substitution;
+  const lambdaReturnSubstitution =
+    inferLambdaReturnSubstitutionForCandidateCached({
+      candidate: selected,
+      callArgs: call.args,
+      typeArguments,
+      targetTypeArguments,
+      ctx,
+      state,
+      cache: lambdaReturnInferenceCache,
+    }).substitution;
   const hintSubstitution = buildCallArgumentHintSubstitution({
     signature: selected.signature,
     probeArgs,
@@ -5967,6 +5973,7 @@ const narrowOverloadMatchesByLambdaReturn = <
   targetTypeArguments,
   ctx,
   state,
+  lambdaReturnInferenceCache,
 }: {
   matches: readonly T[];
   callArgs: readonly { expr: HirExprId; label?: string }[];
@@ -5974,6 +5981,7 @@ const narrowOverloadMatchesByLambdaReturn = <
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
+  lambdaReturnInferenceCache: LambdaReturnInferenceCache;
 }): readonly T[] => {
   if (matches.length <= 1) {
     return matches;
@@ -5990,13 +5998,14 @@ const narrowOverloadMatchesByLambdaReturn = <
   const checkedMatches = matches
     .map((candidate) => ({
       candidate,
-      result: inferLambdaReturnSubstitutionForCandidate({
+      result: inferLambdaReturnSubstitutionForCandidateCached({
         candidate,
         callArgs,
         typeArguments,
         targetTypeArguments,
         ctx,
         state,
+        cache: lambdaReturnInferenceCache,
       }),
     }))
     .filter(({ result }) => result?.checked === true && result.ok);
@@ -6018,6 +6027,7 @@ const scoreOverloadMatchesByLambdaCompatibility = <
   targetTypeArguments,
   ctx,
   state,
+  lambdaReturnInferenceCache,
 }: {
   matches: readonly T[];
   args: readonly Arg[];
@@ -6027,6 +6037,7 @@ const scoreOverloadMatchesByLambdaCompatibility = <
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
+  lambdaReturnInferenceCache?: LambdaReturnInferenceCache;
 }): ReadonlyMap<T, OverloadMatchScoreOverrides> => {
   if (matches.length <= 1) {
     return new Map(matches.map((candidate) => [candidate, { lambdaCompatibility: 0 }]));
@@ -6048,6 +6059,8 @@ const scoreOverloadMatchesByLambdaCompatibility = <
     targetTypeArguments,
     ctx,
     state,
+    lambdaReturnInferenceCache:
+      lambdaReturnInferenceCache ?? new Map(),
   });
   const arityCompatible = narrowOverloadMatchesByInlineLambdaArity({
     matches: lambdaReturnCompatible,
@@ -6099,6 +6112,42 @@ const scoreOverloadMatchesByLambdaCompatibility = <
   );
 };
 
+type LambdaReturnInferenceResult =
+  | {
+      checked: true;
+      ok: boolean;
+      substitution: ReadonlyMap<TypeParamId, TypeId>;
+    }
+  | { checked: false; ok: true; substitution: undefined };
+type LambdaReturnInferenceCache = Map<SymbolId, LambdaReturnInferenceResult>;
+
+const inferLambdaReturnSubstitutionForCandidateCached = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  candidate,
+  cache,
+  ...inputs
+}: {
+  candidate: T;
+  callArgs: readonly { expr: HirExprId; label?: string }[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+  cache: LambdaReturnInferenceCache;
+}): LambdaReturnInferenceResult => {
+  const cached = cache.get(candidate.symbol);
+  if (cached) {
+    return cached;
+  }
+  const result = inferLambdaReturnSubstitutionForCandidate({
+    candidate,
+    ...inputs,
+  });
+  cache.set(candidate.symbol, result);
+  return result;
+};
+
 const inferLambdaReturnSubstitutionForCandidate = <
   T extends { symbol: SymbolId; signature: FunctionSignature },
 >({
@@ -6115,13 +6164,7 @@ const inferLambdaReturnSubstitutionForCandidate = <
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
-}):
-  | {
-      checked: true;
-      ok: boolean;
-      substitution: ReadonlyMap<TypeParamId, TypeId>;
-    }
-  | { checked: false; ok: true; substitution: undefined } => {
+}): LambdaReturnInferenceResult => {
   const substitution = new Map<TypeParamId, TypeId>(
     applyExplicitTypeArguments({
       signature: candidate.signature,
