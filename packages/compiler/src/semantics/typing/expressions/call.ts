@@ -6061,8 +6061,26 @@ const scoreOverloadMatchesByLambdaCompatibility = <
   const compatibilityNarrowed = lambdaCompatible.length < matches.length;
   const returnNarrowed =
     lambdaReturnCompatible.length < lambdaCompatible.length;
+  const arityPreferenceCandidates = returnNarrowed
+    ? lambdaReturnCompatible
+    : lambdaCompatible;
+  const exactArityCandidates = arityPreferenceCandidates.filter(
+    (candidate) =>
+      inlineLambdaCompatibility({
+        candidate,
+        args: argsForCandidate ? argsForCandidate(candidate) : args,
+        typeArguments,
+        targetTypeArguments,
+        ctx,
+        state,
+      }) === "exact",
+  );
+  const arityNarrowed =
+    exactArityCandidates.length > 0 &&
+    exactArityCandidates.length < arityPreferenceCandidates.length;
   const compatibleSet = new Set(lambdaCompatible);
   const returnCompatibleSet = new Set(lambdaReturnCompatible);
+  const exactAritySet = new Set(exactArityCandidates);
 
   return new Map(
     matches.map((candidate) => {
@@ -6070,9 +6088,14 @@ const scoreOverloadMatchesByLambdaCompatibility = <
         !compatibilityNarrowed || compatibleSet.has(candidate) ? 1 : 0;
       const returnScore =
         returnNarrowed && returnCompatibleSet.has(candidate) ? 1 : 0;
+      const arityScore =
+        arityNarrowed && exactAritySet.has(candidate) ? 1 : 0;
       return [
         candidate,
-        { lambdaCompatibility: compatibilityScore + returnScore },
+        {
+          lambdaCompatibility:
+            compatibilityScore + returnScore + arityScore,
+        },
       ];
     }),
   );
@@ -6245,11 +6268,8 @@ const narrowOverloadMatchesByLambdaCompatibility = <
   const compatible = matches.filter(
     (candidate) => compatibility.get(candidate) !== "incompatible",
   );
-  const exact = compatible.filter(
-    (candidate) => compatibility.get(candidate) === "exact",
-  );
   const candidatesForScoring =
-    exact.length > 0 ? exact : compatible.length > 0 ? compatible : matches;
+    compatible.length > 0 ? compatible : matches;
   if (candidatesForScoring.length === 1) {
     return candidatesForScoring;
   }
