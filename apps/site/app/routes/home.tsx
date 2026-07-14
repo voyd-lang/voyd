@@ -81,22 +81,26 @@ const FEATURES: Feature[] = [
       },
     ],
     codeLabel: "app.voyd",
-    code: `use std::error::HostError
+    code: `use pkg::web::all
+use std::error::HostError
 use std::http::server
 use std::result::types::all
-use std::task
+use std::task::self as tasks
 use std::vx::all
 
-pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
+fn home() -> Response
+  html_response<Unit>(
+    Response::ok(),
+    <main>
+      <h1>Built with Voyd.</h1>
+      <p>One language, front to back.</p>
+    </main>
+  )
+
+pub fn main(): (server::HttpServer, tasks::TaskRuntime) -> Result<Unit, HostError>
   serve(port: 3000) routes():
     get("/") do:
-      html_response(
-        Response::ok(),
-        <main>
-          <h1>Built with Voyd.</h1>
-          <p>One language, front to back.</p>
-        </main>
-      )`,
+      home()`,
   },
   {
     id: "effects",
