@@ -1,0 +1,5 @@
+fn apply(callback: fn(i32) -> i32) -> i32
+  callback(1)
+
+pub fn main() -> i32
+  apply((first, second) => first + second)

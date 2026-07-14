@@ -242,8 +242,8 @@ const emitLambdaFunction = ({
   if (desc.kind !== "function") {
     throw new Error("lambda missing function type");
   }
-  if (desc.parameters.length !== expr.parameters.length) {
-    throw new Error("lambda parameter count mismatch");
+  if (expr.parameters.length > desc.parameters.length) {
+    throw new Error("lambda declares more parameters than its function type");
   }
 
   const params = [env.base.interfaceType, ...env.base.paramTypes];

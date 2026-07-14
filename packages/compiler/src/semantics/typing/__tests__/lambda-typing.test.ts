@@ -64,4 +64,46 @@ describe("lambda typing", () => {
     expect(trimmedType.parameters.map((param) => param.type)).toEqual([i32]);
     expect(trimmedType.returnType).toBe(i32);
   });
+
+  it("uses the full contextual signature when trailing parameters are omitted", () => {
+    const semantics = semanticsPipeline(loadAst("lambda_typing.voyd"));
+    const { hir, typing } = semantics;
+    const symbolTable = getSymbolTable(semantics);
+    const i32 = typing.arena.internPrimitive("i32");
+
+    const noParameter = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirLambdaExpr =>
+        expr.exprKind === "lambda" && expr.parameters.length === 0,
+    );
+    expect(noParameter).toBeDefined();
+    if (!noParameter) return;
+    const noParameterTypeId = typing.table.getExprType(noParameter.id);
+    expect(noParameterTypeId).toBeDefined();
+    if (noParameterTypeId === undefined) return;
+    const noParameterType = typing.arena.get(noParameterTypeId);
+    expect(noParameterType.kind).toBe("function");
+    if (noParameterType.kind !== "function") return;
+    expect(noParameterType.parameters.map((param) => param.type)).toEqual([i32]);
+
+    const leadingParameter = lambdaByParam(hir, symbolTable, "first");
+    expect(leadingParameter).toBeDefined();
+    if (!leadingParameter) return;
+    const leadingParameterTypeId = typing.table.getExprType(leadingParameter.id);
+    expect(leadingParameterTypeId).toBeDefined();
+    if (leadingParameterTypeId === undefined) return;
+    const leadingParameterType = typing.arena.get(leadingParameterTypeId);
+    expect(leadingParameterType.kind).toBe("function");
+    if (leadingParameterType.kind !== "function") return;
+    expect(leadingParameterType.parameters.map((param) => param.type)).toEqual([
+      i32,
+      i32,
+      i32,
+    ]);
+  });
+
+  it("rejects lambdas with more parameters than their context", () => {
+    expect(() =>
+      semanticsPipeline(loadAst("lambda_excess_contextual_parameters.voyd")),
+    ).toThrow(/TY0027: type mismatch/i);
+  });
 });

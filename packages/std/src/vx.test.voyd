@@ -416,10 +416,11 @@ test "vx typed command constructors encode messages through the boundary":
   assert_array_payload_len(performed.payload, "__vxOwnedMapHandlerIds", 1)
 
   try open
-    let spawned = Cmd<TypedVxTestMsg>::task(
-      work: () -> String => "done".to_string(),
-      handler: (value: String) -> TypedVxTestMsg => TypedVxTestMsg::Rename { value: value }
-    )
+    let spawned = Cmd<TypedVxTestMsg>::task
+      work():
+        "done".to_string()
+      handler():
+        TypedVxTestMsg::Saved {}
     assert_string_payload_field(spawned.payload, "type", "cmd")
     assert_string_payload_field(spawned.payload, "kind", "task")
     assert_payload_has_field(spawned.payload, "taskId")

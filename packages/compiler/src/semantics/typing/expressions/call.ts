@@ -6321,7 +6321,7 @@ const candidateAcceptsInlineLambdas = <
     if (expectedDesc.kind !== "function") {
       continue;
     }
-    if (expectedDesc.parameters.length !== lambdaExpr.parameters.length) {
+    if (lambdaExpr.parameters.length > expectedDesc.parameters.length) {
       return false;
     }
     for (let paramIndex = 0; paramIndex < lambdaExpr.parameters.length; paramIndex += 1) {
