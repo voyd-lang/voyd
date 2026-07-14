@@ -172,7 +172,17 @@ fn run_twice<T>(work: fn() -> T) -> Array<T>
       },
     ],
     codeLabel: "models.voyd",
-    code: `fn ids(items: Array<{ id: String }>) -> Array<String>
+    code: `obj User {
+  id: String,
+  name: String
+}
+
+obj Project {
+  id: String,
+  title: String
+}
+
+fn ids(items: Array<{ id: String }>) -> Array<String>
   items.map(item => item.id)`,
   },
   {
