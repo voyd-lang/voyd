@@ -244,9 +244,15 @@ move(from: point, to: moved)`,
     lang: "typescript",
     code: `import { compile } from "@voyd-lang/sdk/browser";
 
+const source = \`use src::plugin::all
+
+pub fn main() -> i32
+  answer()\`;
+
 const result = await compile(source, {
   files: {
-    "plugin.voyd": pluginSource,
+    "plugin.voyd": \`pub fn answer() -> i32
+  42\`,
   },
 });
 
