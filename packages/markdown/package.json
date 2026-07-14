@@ -1,6 +1,6 @@
 {
   "name": "@voyd-lang/markdown",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "JS-backed Markdown rendering for Voyd and VX",
   "type": "module",
   "main": "./dist/host/adapter.js",
@@ -45,8 +45,8 @@
     "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   },
   "dependencies": {
-    "@voyd-lang/package-adapter": "^0.2.0",
-    "@voyd-lang/std": "^0.2.0",
+    "@voyd-lang/package-adapter": "^0.3.0",
+    "@voyd-lang/std": "^0.3.0",
     "entities": "^4.5.0",
     "marked": "^14.0.0"
   }
