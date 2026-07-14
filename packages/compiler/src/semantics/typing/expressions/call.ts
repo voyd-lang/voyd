@@ -6229,17 +6229,27 @@ const narrowOverloadMatchesByLambdaCompatibility = <
     return matches;
   }
 
-  const compatible = matches.filter((candidate) =>
-    candidateAcceptsInlineLambdas({
+  const compatibility = new Map(
+    matches.map((candidate) => [
       candidate,
-      args: argsForCandidate ? argsForCandidate(candidate) : args,
-      typeArguments,
-      targetTypeArguments,
-      ctx,
-      state,
-    }),
+      inlineLambdaCompatibility({
+        candidate,
+        args: argsForCandidate ? argsForCandidate(candidate) : args,
+        typeArguments,
+        targetTypeArguments,
+        ctx,
+        state,
+      }),
+    ]),
   );
-  const candidatesForScoring = compatible.length > 0 ? compatible : matches;
+  const compatible = matches.filter(
+    (candidate) => compatibility.get(candidate) !== "incompatible",
+  );
+  const exact = compatible.filter(
+    (candidate) => compatibility.get(candidate) === "exact",
+  );
+  const candidatesForScoring =
+    exact.length > 0 ? exact : compatible.length > 0 ? compatible : matches;
   if (candidatesForScoring.length === 1) {
     return candidatesForScoring;
   }
@@ -6271,7 +6281,9 @@ const narrowOverloadMatchesByLambdaCompatibility = <
     : matches;
 };
 
-const candidateAcceptsInlineLambdas = <
+type InlineLambdaCompatibility = "exact" | "omitted-trailing" | "incompatible";
+
+const inlineLambdaCompatibility = <
   T extends { symbol: SymbolId; signature: FunctionSignature },
 >({
   candidate,
@@ -6287,7 +6299,7 @@ const candidateAcceptsInlineLambdas = <
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
-}): boolean => {
+}): InlineLambdaCompatibility => {
   const params = specializeOverloadParametersWithTargetTypeArguments({
     symbol: candidate.symbol,
     signature: candidate.signature,
@@ -6296,6 +6308,7 @@ const candidateAcceptsInlineLambdas = <
     ctx,
   }).filter((param) => !isStableCallsiteIdParam(param));
   const callArgs = callArgInputsFromArgs(args);
+  let omittedTrailing = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
@@ -6322,7 +6335,10 @@ const candidateAcceptsInlineLambdas = <
       continue;
     }
     if (expectedDesc.parameters.length < lambdaExpr.parameters.length) {
-      return false;
+      return "incompatible";
+    }
+    if (expectedDesc.parameters.length > lambdaExpr.parameters.length) {
+      omittedTrailing = true;
     }
     for (let paramIndex = 0; paramIndex < lambdaExpr.parameters.length; paramIndex += 1) {
       const actualParam = lambdaExpr.parameters[paramIndex]!;
@@ -6349,11 +6365,11 @@ const candidateAcceptsInlineLambdas = <
         !typeSatisfies(actualType, expectedParam.type, ctx, state) &&
         !typeSatisfies(expectedParam.type, actualType, ctx, state)
       ) {
-        return false;
+        return "incompatible";
       }
     }
   }
-  return true;
+  return omittedTrailing ? "omitted-trailing" : "exact";
 };
 
 const inlineLambdaExpectedTypeParamPenalty = <

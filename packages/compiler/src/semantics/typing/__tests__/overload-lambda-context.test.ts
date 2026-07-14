@@ -38,5 +38,19 @@ describe("overload lambda context", () => {
     expect(call).toBeDefined();
     if (!call) return;
     expect(typing.table.getExprType(call.id)).toBe(i32);
+
+    const exactArityLambda = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirLambdaExpr =>
+        expr.exprKind === "lambda" && expr.parameters.length === 0,
+    );
+    expect(exactArityLambda).toBeDefined();
+    if (!exactArityLambda) return;
+    const exactArityTypeId = typing.table.getExprType(exactArityLambda.id);
+    expect(exactArityTypeId).toBeDefined();
+    if (exactArityTypeId === undefined) return;
+    const exactArityType = typing.arena.get(exactArityTypeId);
+    expect(exactArityType.kind).toBe("function");
+    if (exactArityType.kind !== "function") return;
+    expect(exactArityType.parameters).toHaveLength(0);
   });
 });
