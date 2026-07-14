@@ -3,6 +3,7 @@ import {
   parseTargetSelection,
   repoRoot,
 } from "./manifest.mjs";
+import { changedPaths } from "./changed-paths.mjs";
 import {
   assertCleanWorktree,
   runCommand,
@@ -58,17 +59,6 @@ const assertOnBranch = () => {
     throw new Error("release:prepare should run from a release branch. Use `git switch -c release/vX.Y.Z` first.");
   }
 };
-
-const changedPaths = () =>
-  readStdout({
-    command: "git",
-    args: ["status", "--porcelain=v1"],
-  })
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .map((line) => line.slice(3).trim())
-    .map((path) => path.replace(/^"|"$/g, ""));
 
 const argv = process.argv.slice(2);
 const targetNames = parseTargetSelection(argv);
