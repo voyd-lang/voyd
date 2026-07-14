@@ -120,10 +120,25 @@ fn apply_twice(transform: fn(i32) -> i32, value: i32) -> i32
 fn make_incrementer(delta: i32) -> (fn(i32) -> i32)
   (value) => value + delta
 
+fn call_three(callback: fn(i32, i32, i32) -> i32) -> i32
+  callback(2, 5, 9)
+
+fn call_three_labeled({ handler: fn(i32, i32, i32) -> i32 }) -> i32
+  handler(3, 7, 11)
+
 pub fn contextual_lambda_typing() -> i32
   let doubled = apply_twice((value) => value * 2, 3)
   let increment = make_incrementer(1)
   doubled + increment(4)
+
+pub fn contextual_lambda_omitted_trailing() -> i32
+  let ignored = call_three(() => 1)
+  let leading = call_three((first) => first)
+  let later = call_three((_first, second) => second)
+  let clause = call_three_labeled
+    handler():
+      4
+  ignored + leading + later + clause
 
 pub fn integer_modulo() -> i32
   10 % 3

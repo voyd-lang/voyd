@@ -63,5 +63,55 @@ describe("lambda typing", () => {
     if (trimmedType.kind !== "function") return;
     expect(trimmedType.parameters.map((param) => param.type)).toEqual([i32]);
     expect(trimmedType.returnType).toBe(i32);
+
+    const ignored = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirLambdaExpr =>
+        expr.exprKind === "lambda" && expr.parameters.length === 0,
+    );
+    expect(ignored).toBeDefined();
+    if (!ignored) return;
+    const ignoredTypeId = typing.table.getExprType(ignored.id);
+    expect(ignoredTypeId).toBeDefined();
+    if (ignoredTypeId === undefined) return;
+    const ignoredType = typing.arena.get(ignoredTypeId);
+    expect(ignoredType.kind).toBe("function");
+    if (ignoredType.kind !== "function") return;
+    expect(ignoredType.parameters.map((param) => param.type)).toEqual([
+      i32,
+      i32,
+      i32,
+    ]);
+
+    const leading = lambdaByParam(hir, symbolTable, "first");
+    expect(leading).toBeDefined();
+    if (!leading) return;
+    const leadingTypeId = typing.table.getExprType(leading.id);
+    expect(leadingTypeId).toBeDefined();
+    if (leadingTypeId === undefined) return;
+    const leadingType = typing.arena.get(leadingTypeId);
+    expect(leadingType.kind).toBe("function");
+    if (leadingType.kind !== "function") return;
+    expect(leading.parameters).toHaveLength(1);
+    expect(leadingType.parameters.map((param) => param.type)).toEqual([
+      i32,
+      i32,
+      i32,
+    ]);
+
+    const later = lambdaByParam(hir, symbolTable, "second");
+    expect(later).toBeDefined();
+    if (!later) return;
+    const laterTypeId = typing.table.getExprType(later.id);
+    expect(laterTypeId).toBeDefined();
+    if (laterTypeId === undefined) return;
+    const laterType = typing.arena.get(laterTypeId);
+    expect(laterType.kind).toBe("function");
+    if (laterType.kind !== "function") return;
+    expect(later.parameters).toHaveLength(2);
+    expect(laterType.parameters.map((param) => param.type)).toEqual([
+      i32,
+      i32,
+      i32,
+    ]);
   });
 });

@@ -250,13 +250,19 @@ export const typeLambdaExpr = (
     ctx
   );
 
-  const finalParams = appliedParams.map((param) => ({
-    label: param.label,
-    type: ctx.arena.substitute(param.resolvedType, finalSubstitution),
-    optional: param.optional ?? false,
-    defaulted: typeof param.defaultValue === "number",
-    bindingKind: param.pattern.bindingKind,
-  }));
+  const finalParams = [
+    ...appliedParams.map((param) => ({
+      label: param.label,
+      type: ctx.arena.substitute(param.resolvedType, finalSubstitution),
+      optional: param.optional ?? false,
+      defaulted: typeof param.defaultValue === "number",
+      bindingKind: param.pattern.bindingKind,
+    })),
+    ...(expectedFn?.parameters.slice(expr.parameters.length).map((param) => ({
+      ...param,
+      type: ctx.arena.substitute(param.type, finalSubstitution),
+    })) ?? []),
+  ];
   const substitutedBodyType = ctx.arena.substitute(bodyType, finalSubstitution);
   const annotatedReturnApplied =
     typeof annotatedReturn === "number"
