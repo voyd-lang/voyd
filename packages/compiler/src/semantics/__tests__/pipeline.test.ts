@@ -690,6 +690,13 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("rejects constrained object instantiations with mismatched bounds", () => {
+    const ast = loadAst("generic_constraints_parameter_mismatch.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /does not satisfy.*constraint/i
+    );
+  });
+
   it("accepts trait instantiations when trait type arguments satisfy constraints", () => {
     const ast = loadAst("generic_constraints_trait_instantiation_success.voyd");
     const result = semanticsPipeline(ast);
@@ -711,6 +718,12 @@ describe("semanticsPipeline", () => {
 
   it("accepts constrained generic re-instantiation inside constrained impl methods", () => {
     const ast = loadAst("generic_constraints_reinstantiation_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("propagates declaration bounds into constrained object instantiations", () => {
+    const ast = loadAst("generic_constraints_parameter_propagation.voyd");
     const result = semanticsPipeline(ast);
     expect(result.diagnostics).toHaveLength(0);
   });
@@ -770,6 +783,20 @@ describe("semanticsPipeline", () => {
     });
 
     expect(mainSemantics.diagnostics).toHaveLength(0);
+
+    const invalidMain = buildModule({
+      fixture: "generic_constraints_cross_module/invalid_alias_main.voyd",
+      segments: ["invalid_alias_main"],
+      dependencies: [dependency],
+    });
+    expect(() =>
+      semanticsPipeline({
+        module: invalidMain.module,
+        graph: invalidMain.graph,
+        exports: new Map([[dep.module.id, depSemantics.exports]]),
+        dependencies: new Map([[dep.module.id, depSemantics]]),
+      }),
+    ).toThrow(/does not satisfy.*constraint for type alias/i);
   });
 
   it("accepts constrained generic object methods with transitive key-type dependencies", () => {

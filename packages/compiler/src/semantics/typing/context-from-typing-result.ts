@@ -67,6 +67,7 @@ export const createTypingContextFromTypingResult = ({
   functions: typing.functions,
   objects: typing.objects,
   traits: typing.traits,
+  typeParameterConstraints: new Map(typing.typeParameterConstraints),
   typeAliases: typing.typeAliases,
   primitives: typing.primitives,
   intrinsicTypes: typing.intrinsicTypes,

@@ -750,13 +750,11 @@ const enforceResolvedTypeParameterConstraints = ({
   state: TypingState;
   context: string;
 }): ReadonlyMap<TypeParamId, TypeId> => {
-  const substitution = new Map<TypeParamId, TypeId>();
-  params.forEach((param, index) =>
-    substitution.set(
-      param.typeParam,
-      appliedArgs[index] ?? ctx.primitives.unknown,
-    ),
-  );
+  const substitution = resolvedTypeParameterSubstitution({
+    params,
+    appliedArgs,
+    unknown: ctx.primitives.unknown,
+  });
 
   params.forEach((param, index) => {
     if (!param.constraint) {
@@ -779,6 +777,22 @@ const enforceResolvedTypeParameterConstraints = ({
 
   return substitution;
 };
+
+const resolvedTypeParameterSubstitution = ({
+  params,
+  appliedArgs,
+  unknown,
+}: {
+  params: readonly { typeParam: TypeParamId }[];
+  appliedArgs: readonly TypeId[];
+  unknown: TypeId;
+}): ReadonlyMap<TypeParamId, TypeId> =>
+  new Map(
+    params.map((param, index) => [
+      param.typeParam,
+      appliedArgs[index] ?? unknown,
+    ]),
+  );
 
 export const registerPrimitive = (
   ctx: TypingContext,
@@ -2114,13 +2128,15 @@ export const getObjectTemplate = (
       paramMap.set(symbol, ref);
       const constraintExpr = decl.typeParameters?.[index]?.constraint;
       if (constraintExpr) {
-        params[index]!.constraint = resolveTypeExpr(
+        const constraint = resolveTypeExpr(
           constraintExpr,
           ctx,
           state,
           ctx.primitives.unknown,
           paramMap,
         );
+        params[index]!.constraint = constraint;
+        ctx.typeParameterConstraints.set(params[index]!.typeParam, constraint);
       }
     });
 
@@ -2302,6 +2318,7 @@ export const ensureObjectType = (
   ctx: TypingContext,
   state: TypingState,
   typeArgs: readonly TypeId[] = [],
+  options: { constraintsAlreadyValidated?: boolean } = {},
 ): ObjectTypeInfo | undefined => {
   if (ctx.objects.isResolving(symbol)) {
     return ctx.objects.getActiveResolution(
@@ -2335,13 +2352,19 @@ export const ensureObjectType = (
     }
   }
 
-  const subst = enforceResolvedTypeParameterConstraints({
-    params: template.params,
-    appliedArgs: normalized.applied,
-    ctx,
-    state,
-    context: `object ${objectName}`,
-  });
+  const subst = options.constraintsAlreadyValidated
+    ? resolvedTypeParameterSubstitution({
+        params: template.params,
+        appliedArgs: normalized.applied,
+        unknown: ctx.primitives.unknown,
+      })
+    : enforceResolvedTypeParameterConstraints({
+        params: template.params,
+        appliedArgs: normalized.applied,
+        ctx,
+        state,
+        context: `object ${objectName}`,
+      });
 
   const nominal = ctx.arena.substitute(template.nominal, subst);
   const structural = ctx.arena.substitute(template.structural, subst);
@@ -2404,6 +2427,35 @@ export const ensureObjectType = (
     ctx.valueTypes.set(symbol, type);
   }
   return info;
+};
+
+export const validateObjectTypeArgumentConstraints = (
+  symbol: SymbolId,
+  ctx: TypingContext,
+  state: TypingState,
+  typeArgs: readonly TypeId[],
+): boolean => {
+  const template = getObjectTemplate(symbol, ctx, state);
+  if (!template) {
+    return false;
+  }
+
+  const objectName = getSymbolName(symbol, ctx);
+  const normalized = normalizeDeclarationTypeArgs({
+    typeArgs,
+    paramCount: template.params.length,
+    ctx,
+    state,
+    context: `object ${objectName}`,
+  });
+  enforceResolvedTypeParameterConstraints({
+    params: template.params,
+    appliedArgs: normalized.applied,
+    ctx,
+    state,
+    context: `object ${objectName}`,
+  });
+  return true;
 };
 
 export const ensureTraitType = (
@@ -2938,6 +2990,20 @@ export const typeSatisfies = (
     return false;
   }
 
+  const actualDesc = ctx.arena.get(actual);
+  if (actualDesc.kind === "type-param-ref") {
+    const constraint = resolveTypeParameterConstraint({
+      typeParam: actualDesc.param,
+      activeConstraints,
+      ctx,
+    });
+    if (typeof constraint === "number") {
+      if (typeSatisfies(constraint, expected, ctx, state)) {
+        return true;
+      }
+    }
+  }
+
   const expectedDesc = ctx.arena.get(expected);
   if (expectedDesc.kind === "function") {
     return functionTypeSatisfies({ actual, expected, ctx, state });
@@ -3036,6 +3102,37 @@ export const typeSatisfies = (
     ctx,
   });
   return compatibility.ok;
+};
+
+const resolveTypeParameterConstraint = ({
+  typeParam,
+  activeConstraints,
+  ctx,
+}: {
+  typeParam: TypeParamId;
+  activeConstraints: ReadonlyMap<TypeParamId, TypeId> | undefined;
+  ctx: TypingContext;
+}): TypeId | undefined => {
+  const visited = new Set<TypeParamId>();
+  let current = typeParam;
+
+  while (!visited.has(current)) {
+    visited.add(current);
+    const constraint =
+      activeConstraints?.get(current) ??
+      ctx.typeParameterConstraints.get(current);
+    if (typeof constraint !== "number") {
+      return undefined;
+    }
+
+    const constraintDesc = ctx.arena.get(constraint);
+    if (constraintDesc.kind !== "type-param-ref") {
+      return constraint;
+    }
+    current = constraintDesc.param;
+  }
+
+  return undefined;
 };
 
 const currentFunctionConstraintMap = (
