@@ -633,10 +633,10 @@
           "expect": { "kind": "equals", "value": 17 }
         },
         {
-          "id": "runtime.lambdas.contextual-trailing-parameter-omission",
-          "title": "allows contextual lambdas to omit trailing parameters",
-          "entryName": "contextual_lambda_trailing_parameter_omission",
-          "expect": { "kind": "equals", "value": 132 }
+          "id": "runtime.lambdas.omitted-trailing-parameters",
+          "title": "allows contextually typed lambdas to omit trailing parameters",
+          "entryName": "contextual_lambda_omitted_trailing",
+          "expect": { "kind": "equals", "value": 12 }
         },
         {
           "id": "runtime.operators.integer-modulo",

@@ -242,7 +242,7 @@ const emitLambdaFunction = ({
   if (desc.kind !== "function") {
     throw new Error("lambda missing function type");
   }
-  if (expr.parameters.length > desc.parameters.length) {
+  if (desc.parameters.length < expr.parameters.length) {
     throw new Error("lambda declares more parameters than its function type");
   }
 

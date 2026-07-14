@@ -120,32 +120,25 @@ fn apply_twice(transform: fn(i32) -> i32, value: i32) -> i32
 fn make_incrementer(delta: i32) -> (fn(i32) -> i32)
   (value) => value + delta
 
+fn call_three(callback: fn(i32, i32, i32) -> i32) -> i32
+  callback(2, 5, 9)
+
+fn call_three_labeled({ handler: fn(i32, i32, i32) -> i32 }) -> i32
+  handler(3, 7, 11)
+
 pub fn contextual_lambda_typing() -> i32
   let doubled = apply_twice((value) => value * 2, 3)
   let increment = make_incrementer(1)
   doubled + increment(4)
 
-fn run_contextual_callbacks({
-  first_handler: fn(i32, i32, i32) -> i32,
-  second_handler: fn(i32) -> i32
-}) -> i32
-  first_handler(4, 20, 30) + second_handler(99)
-
-fn apply_pair(callback: fn(i32, i32) -> i32) -> i32
-  callback(4, 9)
-
-pub fn contextual_lambda_trailing_parameter_omission() -> i32
-  let inline_result = run_contextual_callbacks(
-    first_handler: (first) => first + 1,
-    second_handler: () => 6
-  )
-  let clause_result = run_contextual_callbacks
-    first_handler(first):
-      first + 2
-    second_handler():
-      7
-  let later_parameter = apply_pair((_first, second) => second)
-  inline_result * 10 + clause_result + later_parameter
+pub fn contextual_lambda_omitted_trailing() -> i32
+  let ignored = call_three(() => 1)
+  let leading = call_three((first) => first)
+  let later = call_three((_first, second) => second)
+  let clause = call_three_labeled
+    handler():
+      4
+  ignored + leading + later + clause
 
 pub fn integer_modulo() -> i32
   10 % 3

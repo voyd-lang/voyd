@@ -63,38 +63,52 @@ describe("lambda typing", () => {
     if (trimmedType.kind !== "function") return;
     expect(trimmedType.parameters.map((param) => param.type)).toEqual([i32]);
     expect(trimmedType.returnType).toBe(i32);
-  });
 
-  it("uses the full contextual signature when trailing parameters are omitted", () => {
-    const semantics = semanticsPipeline(loadAst("lambda_typing.voyd"));
-    const { hir, typing } = semantics;
-    const symbolTable = getSymbolTable(semantics);
-    const i32 = typing.arena.internPrimitive("i32");
-
-    const noParameter = Array.from(hir.expressions.values()).find(
+    const ignored = Array.from(hir.expressions.values()).find(
       (expr): expr is HirLambdaExpr =>
         expr.exprKind === "lambda" && expr.parameters.length === 0,
     );
-    expect(noParameter).toBeDefined();
-    if (!noParameter) return;
-    const noParameterTypeId = typing.table.getExprType(noParameter.id);
-    expect(noParameterTypeId).toBeDefined();
-    if (noParameterTypeId === undefined) return;
-    const noParameterType = typing.arena.get(noParameterTypeId);
-    expect(noParameterType.kind).toBe("function");
-    if (noParameterType.kind !== "function") return;
-    expect(noParameterType.parameters.map((param) => param.type)).toEqual([i32]);
+    expect(ignored).toBeDefined();
+    if (!ignored) return;
+    const ignoredTypeId = typing.table.getExprType(ignored.id);
+    expect(ignoredTypeId).toBeDefined();
+    if (ignoredTypeId === undefined) return;
+    const ignoredType = typing.arena.get(ignoredTypeId);
+    expect(ignoredType.kind).toBe("function");
+    if (ignoredType.kind !== "function") return;
+    expect(ignoredType.parameters.map((param) => param.type)).toEqual([
+      i32,
+      i32,
+      i32,
+    ]);
 
-    const leadingParameter = lambdaByParam(hir, symbolTable, "first");
-    expect(leadingParameter).toBeDefined();
-    if (!leadingParameter) return;
-    const leadingParameterTypeId = typing.table.getExprType(leadingParameter.id);
-    expect(leadingParameterTypeId).toBeDefined();
-    if (leadingParameterTypeId === undefined) return;
-    const leadingParameterType = typing.arena.get(leadingParameterTypeId);
-    expect(leadingParameterType.kind).toBe("function");
-    if (leadingParameterType.kind !== "function") return;
-    expect(leadingParameterType.parameters.map((param) => param.type)).toEqual([
+    const leading = lambdaByParam(hir, symbolTable, "first");
+    expect(leading).toBeDefined();
+    if (!leading) return;
+    const leadingTypeId = typing.table.getExprType(leading.id);
+    expect(leadingTypeId).toBeDefined();
+    if (leadingTypeId === undefined) return;
+    const leadingType = typing.arena.get(leadingTypeId);
+    expect(leadingType.kind).toBe("function");
+    if (leadingType.kind !== "function") return;
+    expect(leading.parameters).toHaveLength(1);
+    expect(leadingType.parameters.map((param) => param.type)).toEqual([
+      i32,
+      i32,
+      i32,
+    ]);
+
+    const later = lambdaByParam(hir, symbolTable, "second");
+    expect(later).toBeDefined();
+    if (!later) return;
+    const laterTypeId = typing.table.getExprType(later.id);
+    expect(laterTypeId).toBeDefined();
+    if (laterTypeId === undefined) return;
+    const laterType = typing.arena.get(laterTypeId);
+    expect(laterType.kind).toBe("function");
+    if (laterType.kind !== "function") return;
+    expect(later.parameters).toHaveLength(2);
+    expect(laterType.parameters.map((param) => param.type)).toEqual([
       i32,
       i32,
       i32,

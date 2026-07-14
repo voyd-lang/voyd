@@ -35,7 +35,8 @@ export const typeLambdaExpr = (
   expr: HirLambdaExpr,
   ctx: TypingContext,
   state: TypingState,
-  expectedType?: TypeId
+  expectedType?: TypeId,
+  allowOmittedParameters = true
 ): TypeId => {
   const appliedExpected =
     typeof expectedType === "number"
@@ -250,19 +251,21 @@ export const typeLambdaExpr = (
     ctx
   );
 
-  const declaredParams = appliedParams.map((param) => ({
-    label: param.label,
-    type: ctx.arena.substitute(param.resolvedType, finalSubstitution),
-    optional: param.optional ?? false,
-    defaulted: typeof param.defaultValue === "number",
-    bindingKind: param.pattern.bindingKind,
-  }));
-  const omittedParams =
-    expectedFn?.parameters.slice(declaredParams.length).map((param) => ({
-      ...param,
-      type: ctx.arena.substitute(param.type, finalSubstitution),
-    })) ?? [];
-  const finalParams = [...declaredParams, ...omittedParams];
+  const finalParams = [
+    ...appliedParams.map((param) => ({
+      label: param.label,
+      type: ctx.arena.substitute(param.resolvedType, finalSubstitution),
+      optional: param.optional ?? false,
+      defaulted: typeof param.defaultValue === "number",
+      bindingKind: param.pattern.bindingKind,
+    })),
+    ...(allowOmittedParameters
+      ? expectedFn?.parameters.slice(expr.parameters.length).map((param) => ({
+          ...param,
+          type: ctx.arena.substitute(param.type, finalSubstitution),
+        })) ?? []
+      : []),
+  ];
   const substitutedBodyType = ctx.arena.substitute(bodyType, finalSubstitution);
   const annotatedReturnApplied =
     typeof annotatedReturn === "number"

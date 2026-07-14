@@ -36,6 +36,8 @@ export { formatFunctionInstanceKey, validateGenericFunctionBody };
 
 export type TypeExpressionOptions = {
   expectedType?: TypeId;
+  /** Whether a contextual function type may supply omitted trailing lambda parameters. */
+  allowOmittedLambdaParameters?: boolean;
   /** When true, the expression's resulting value is not used (statement context). */
   discardValue?: boolean;
 };
@@ -212,7 +214,13 @@ const resolveExpressionType = (
     case "continue":
       return typeContinueExpr(expr, ctx);
     case "lambda":
-      return typeLambdaExpr(expr, ctx, state, expectedType);
+      return typeLambdaExpr(
+        expr,
+        ctx,
+        state,
+        expectedType,
+        options.allowOmittedLambdaParameters !== false
+      );
     default:
       throw new Error(`unsupported expression kind: ${expr.exprKind}`);
   }

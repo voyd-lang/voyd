@@ -282,6 +282,16 @@ describe("integration: compiled VX DOM rendering", () => {
 
     expect(container.querySelector("button")?.textContent).toBe("Saved: 41");
 
+    container
+      .querySelector<HTMLButtonElement>('[data-testid="ignored-result"]')
+      ?.click();
+    await waitForTextContaining(container, "button", "Saved: 42");
+
+    expect(
+      container.querySelector<HTMLButtonElement>('[data-testid="typed-result"]')
+        ?.textContent,
+    ).toBe("Saved: 42");
+
     mounted.dispose();
     expect(container.innerHTML).toBe("");
   });

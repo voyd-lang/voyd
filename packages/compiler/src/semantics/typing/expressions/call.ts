@@ -648,6 +648,7 @@ export const typeCallExpr = (
 
   const calleeType = typeExpression(expr.callee, ctx, state, {
     expectedType: expectedCalleeType(args, ctx),
+    allowOmittedLambdaParameters: false,
   });
 
   if (
@@ -6000,17 +6001,7 @@ const narrowOverloadMatchesByLambdaReturn = <
     }))
     .filter(({ result }) => result?.checked === true && result.ok);
 
-  const concreteCheckedMatches = checkedMatches.filter(
-    ({ candidate }) => (candidate.signature.typeParams?.length ?? 0) === 0,
-  );
-  if (concreteCheckedMatches.length > 0) {
-    return concreteCheckedMatches.map(({ candidate }) => candidate);
-  }
-
-  if (
-    checkedMatches.length > 0 &&
-    checkedMatches.length < matches.length
-  ) {
+  if (checkedMatches.length > 0 && checkedMatches.length < matches.length) {
     return checkedMatches.map(({ candidate }) => candidate);
   }
   return matches;
@@ -6066,14 +6057,26 @@ const scoreOverloadMatchesByLambdaCompatibility = <
     targetTypeArguments,
     ctx,
   });
+  const expectedTypeSpecific =
+    narrowOverloadMatchesByInlineLambdaExpectedTypeSpecificity({
+      matches: arityCompatible,
+      args,
+      argsForCandidate,
+      typeArguments,
+      targetTypeArguments,
+      ctx,
+      state,
+    });
   const compatibilityNarrowed = lambdaCompatible.length < matches.length;
   const returnNarrowed =
     lambdaReturnCompatible.length < lambdaCompatible.length;
-  const arityNarrowed =
-    arityCompatible.length < lambdaReturnCompatible.length;
+  const arityNarrowed = arityCompatible.length < lambdaReturnCompatible.length;
+  const expectedTypeNarrowed =
+    expectedTypeSpecific.length < arityCompatible.length;
   const compatibleSet = new Set(lambdaCompatible);
   const returnCompatibleSet = new Set(lambdaReturnCompatible);
   const arityCompatibleSet = new Set(arityCompatible);
+  const expectedTypeSpecificSet = new Set(expectedTypeSpecific);
 
   return new Map(
     matches.map((candidate) => {
@@ -6083,11 +6086,13 @@ const scoreOverloadMatchesByLambdaCompatibility = <
         returnNarrowed && returnCompatibleSet.has(candidate) ? 1 : 0;
       const arityScore =
         arityNarrowed && arityCompatibleSet.has(candidate) ? 1 : 0;
+      const expectedTypeScore =
+        expectedTypeNarrowed && expectedTypeSpecificSet.has(candidate) ? 1 : 0;
       return [
         candidate,
         {
           lambdaCompatibility:
-            compatibilityScore + returnScore + arityScore,
+            compatibilityScore + returnScore + arityScore + expectedTypeScore,
         },
       ];
     }),
@@ -6245,24 +6250,10 @@ const narrowOverloadMatchesByLambdaCompatibility = <
     return matches;
   }
 
-  const compatible = matches.filter((candidate) =>
-    candidateAcceptsInlineLambdas({
+  const compatibility = new Map(
+    matches.map((candidate) => [
       candidate,
-      args: argsForCandidate ? argsForCandidate(candidate) : args,
-      typeArguments,
-      targetTypeArguments,
-      ctx,
-      state,
-    }),
-  );
-  const candidatesForScoring = compatible.length > 0 ? compatible : matches;
-  if (candidatesForScoring.length === 1) {
-    return candidatesForScoring;
-  }
-  if (candidatesForScoring.length > 1) {
-    const scored = candidatesForScoring.map((candidate) => ({
-      candidate,
-      penalty: inlineLambdaExpectedTypeParamPenalty({
+      inlineLambdaCompatibility({
         candidate,
         args: argsForCandidate ? argsForCandidate(candidate) : args,
         typeArguments,
@@ -6270,21 +6261,55 @@ const narrowOverloadMatchesByLambdaCompatibility = <
         ctx,
         state,
       }),
-    }));
-    const minPenalty = Math.min(...scored.map(({ penalty }) => penalty));
-    const leastGeneric = scored
-      .filter(({ penalty }) => penalty === minPenalty)
-      .map(({ candidate }) => candidate);
-    if (
-      leastGeneric.length > 0 &&
-      leastGeneric.length < candidatesForScoring.length
-    ) {
-      return leastGeneric;
-    }
-  }
-  return candidatesForScoring.length < matches.length
-    ? candidatesForScoring
+    ]),
+  );
+  const compatible = matches.filter(
+    (candidate) => compatibility.get(candidate) !== "incompatible",
+  );
+  return compatible.length > 0 && compatible.length < matches.length
+    ? compatible
     : matches;
+};
+
+const narrowOverloadMatchesByInlineLambdaExpectedTypeSpecificity = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  matches,
+  args,
+  argsForCandidate,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+  state,
+}: {
+  matches: readonly T[];
+  args: readonly Arg[];
+  argsForCandidate?: (candidate: T) => readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): readonly T[] => {
+  if (matches.length <= 1) {
+    return matches;
+  }
+
+  const scored = matches.map((candidate) => ({
+    candidate,
+    penalty: inlineLambdaExpectedTypeParamPenalty({
+      candidate,
+      args: argsForCandidate ? argsForCandidate(candidate) : args,
+      typeArguments,
+      targetTypeArguments,
+      ctx,
+      state,
+    }),
+  }));
+  const minPenalty = Math.min(...scored.map(({ penalty }) => penalty));
+  const leastGeneric = scored
+    .filter(({ penalty }) => penalty === minPenalty)
+    .map(({ candidate }) => candidate);
+  return leastGeneric.length < matches.length ? leastGeneric : matches;
 };
 
 const narrowOverloadMatchesByInlineLambdaArity = <
@@ -6385,7 +6410,8 @@ const inlineLambdaArityScoreForCandidate = <
     if (expectedDesc.kind !== "function") {
       return undefined;
     }
-    const omitted = expectedDesc.parameters.length - lambdaExpr.parameters.length;
+    const omitted =
+      expectedDesc.parameters.length - lambdaExpr.parameters.length;
     if (omitted < 0) {
       return undefined;
     }
@@ -6398,7 +6424,9 @@ const inlineLambdaArityScoreForCandidate = <
   return lambdaCount > 0 ? { exactMatches, omittedParameters } : undefined;
 };
 
-const candidateAcceptsInlineLambdas = <
+type InlineLambdaCompatibility = "exact" | "omitted-trailing" | "incompatible";
+
+const inlineLambdaCompatibility = <
   T extends { symbol: SymbolId; signature: FunctionSignature },
 >({
   candidate,
@@ -6414,7 +6442,7 @@ const candidateAcceptsInlineLambdas = <
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
-}): boolean => {
+}): InlineLambdaCompatibility => {
   const params = specializeOverloadParametersWithTargetTypeArguments({
     symbol: candidate.symbol,
     signature: candidate.signature,
@@ -6423,6 +6451,7 @@ const candidateAcceptsInlineLambdas = <
     ctx,
   }).filter((param) => !isStableCallsiteIdParam(param));
   const callArgs = callArgInputsFromArgs(args);
+  let omittedTrailing = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
@@ -6448,8 +6477,11 @@ const candidateAcceptsInlineLambdas = <
     if (expectedDesc.kind !== "function") {
       continue;
     }
-    if (lambdaExpr.parameters.length > expectedDesc.parameters.length) {
-      return false;
+    if (expectedDesc.parameters.length < lambdaExpr.parameters.length) {
+      return "incompatible";
+    }
+    if (expectedDesc.parameters.length > lambdaExpr.parameters.length) {
+      omittedTrailing = true;
     }
     for (let paramIndex = 0; paramIndex < lambdaExpr.parameters.length; paramIndex += 1) {
       const actualParam = lambdaExpr.parameters[paramIndex]!;
@@ -6476,11 +6508,11 @@ const candidateAcceptsInlineLambdas = <
         !typeSatisfies(actualType, expectedParam.type, ctx, state) &&
         !typeSatisfies(expectedParam.type, actualType, ctx, state)
       ) {
-        return false;
+        return "incompatible";
       }
     }
   }
-  return true;
+  return omittedTrailing ? "omitted-trailing" : "exact";
 };
 
 const inlineLambdaExpectedTypeParamPenalty = <

@@ -38,6 +38,19 @@ describe("overload lambda context", () => {
     expect(call).toBeDefined();
     if (!call) return;
     expect(typing.table.getExprType(call.id)).toBe(i32);
+
+    const zeroParameterLambdas = Array.from(hir.expressions.values()).filter(
+      (expr): expr is HirLambdaExpr =>
+        expr.exprKind === "lambda" && expr.parameters.length === 0,
+    );
+    const contextualParameterCounts = zeroParameterLambdas
+      .map((lambda) => typing.table.getExprType(lambda.id))
+      .filter((typeId): typeId is number => typeId !== undefined)
+      .map((typeId) => typing.arena.get(typeId))
+      .filter((type) => type.kind === "function")
+      .map((type) => type.parameters.length)
+      .sort();
+    expect(contextualParameterCounts).toEqual([0, 1]);
   });
 
   it("prefers an exact lambda arity over contextual parameter omission", () => {
@@ -88,6 +101,28 @@ describe("overload lambda context", () => {
         expr.args.filter(
           (arg) => hir.expressions.get(arg.expr)?.exprKind === "lambda",
         ).length === 2,
+    );
+    expect(call).toBeDefined();
+    if (!call) return;
+    expect(typing.table.getExprType(call.id)).toBe(typing.primitives.bool);
+  });
+
+  it("preserves an exact generic lambda overload", () => {
+    const semantics = semanticsPipeline(
+      loadAst("overload_lambda_probe_retyping.voyd"),
+    );
+    const { hir, typing } = semantics;
+
+    const call = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr =>
+        expr.exprKind === "call" &&
+        expr.args.some((arg) => {
+          const lambda = hir.expressions.get(arg.expr);
+          return (
+            lambda?.exprKind === "lambda" &&
+            lambda.parameters.some((parameter) => parameter.type !== undefined)
+          );
+        }),
     );
     expect(call).toBeDefined();
     if (!call) return;
