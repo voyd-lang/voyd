@@ -7,7 +7,7 @@ import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { bindFunctionDecl } from "./function.js";
 import { bindModuleLetDecl } from "./module-let.js";
 import { bindObjectDecl } from "./object.js";
-import { bindTypeAlias, seedEnumAliasNamespaces } from "./type-alias.js";
+import { bindTypeAlias, seedTypeAliasNamespaces } from "./type-alias.js";
 import { bindTraitDecl } from "./trait.js";
 import { bindImplDecl, flushPendingStaticMethods } from "./impl.js";
 import { bindEffectDecl } from "./effect.js";
@@ -133,7 +133,7 @@ export const bindModule = (
   }
 
   flushPendingStaticMethods(ctx);
-  seedEnumAliasNamespaces(ctx);
+  seedTypeAliasNamespaces(ctx);
 
   if (tracker.depth() !== 1) {
     throw new Error("binder scope stack imbalance after traversal");

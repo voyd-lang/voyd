@@ -36,8 +36,13 @@ impl<Owner> OverloadBox<Owner>
   fn pick<T>(value: T) -> i32
     3
 
+type I32OverloadBox = OverloadBox<i32>
+
 pub fn static_target_overload_ranking() -> i32
   OverloadBox<i32>::pick(1) + OverloadBox<i32>::pick(true)
+
+pub fn static_alias_target_overload_ranking() -> i32
+  I32OverloadBox::pick(1) + I32OverloadBox::pick(true)
 
 pub fn curried_optional_call() -> i32
   let lift = (base: i32) => (delta?: i32) =>
