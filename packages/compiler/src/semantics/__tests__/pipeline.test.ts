@@ -783,6 +783,20 @@ describe("semanticsPipeline", () => {
     });
 
     expect(mainSemantics.diagnostics).toHaveLength(0);
+
+    const invalidMain = buildModule({
+      fixture: "generic_constraints_cross_module/invalid_alias_main.voyd",
+      segments: ["invalid_alias_main"],
+      dependencies: [dependency],
+    });
+    expect(() =>
+      semanticsPipeline({
+        module: invalidMain.module,
+        graph: invalidMain.graph,
+        exports: new Map([[dep.module.id, depSemantics.exports]]),
+        dependencies: new Map([[dep.module.id, depSemantics]]),
+      }),
+    ).toThrow(/does not satisfy.*constraint for type alias/i);
   });
 
   it("accepts constrained generic object methods with transitive key-type dependencies", () => {

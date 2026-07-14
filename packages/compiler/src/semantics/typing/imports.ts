@@ -2,7 +2,10 @@ import { createTypingState } from "./context.js";
 import {
   ensureObjectType,
   ensureTraitType,
+  getSymbolName,
+  resolveTypeExpr,
   resolveTypeAlias,
+  typeSatisfies,
   validateObjectTypeArgumentConstraints,
 } from "./type-system.js";
 import { applyImportableMetadata } from "../imports/metadata.js";
@@ -307,6 +310,7 @@ export const resolveImportedTypeExpr = ({
 
   const depCtx = makeDependencyContext(dependency, ctx);
   const depState = createTypingState(state.mode);
+  const localValidationState = createTypingState(state.mode);
 
   if (
     typingContextsShareInterners({
@@ -316,6 +320,16 @@ export const resolveImportedTypeExpr = ({
       targetEffects: ctx.effects,
     })
   ) {
+    validateImportedAliasConstraints({
+      symbol: target.symbol,
+      dependencyArgs: typeArgs,
+      localArgs: typeArgs,
+      dependencyCtx: depCtx,
+      dependencyState: depState,
+      localCtx: ctx,
+      localState: localValidationState,
+      translateToLocal: (type) => type,
+    });
     const aliasResolved = resolveImportedAlias(
       target.symbol,
       typeArgs,
@@ -371,6 +385,16 @@ export const resolveImportedTypeExpr = ({
   forwardParamMap.forEach((targetParam, sourceParam) => {
     reverseParamMap.set(targetParam, sourceParam);
   });
+  validateImportedAliasConstraints({
+    symbol: target.symbol,
+    dependencyArgs: depArgs,
+    localArgs: typeArgs,
+    dependencyCtx: depCtx,
+    dependencyState: depState,
+    localCtx: ctx,
+    localState: localValidationState,
+    translateToLocal: back,
+  });
   const aliasResolved = resolveImportedAlias(
     target.symbol,
     depArgs,
@@ -411,6 +435,81 @@ const resolveImportedAlias = (
     return undefined;
   }
   return resolveTypeAlias(symbol, ctx, state, args);
+};
+
+const validateImportedAliasConstraints = ({
+  symbol,
+  dependencyArgs,
+  localArgs,
+  dependencyCtx,
+  dependencyState,
+  localCtx,
+  localState,
+  translateToLocal,
+}: {
+  symbol: SymbolId;
+  dependencyArgs: readonly TypeId[];
+  localArgs: readonly TypeId[];
+  dependencyCtx: TypingContext;
+  dependencyState: ReturnType<typeof createTypingState>;
+  localCtx: TypingContext;
+  localState: ReturnType<typeof createTypingState>;
+  translateToLocal: (type: TypeId) => TypeId;
+}): void => {
+  const template = dependencyCtx.typeAliases.getTemplate(symbol);
+  if (!template || template.params.length !== dependencyArgs.length) {
+    return;
+  }
+
+  const typeParamMap = new Map(
+    template.params.map((param, index) => [
+      param.symbol,
+      dependencyArgs[index]!,
+    ]),
+  );
+  template.params.forEach((param, index) => {
+    if (!param.constraint) {
+      return;
+    }
+    const localArg = localArgs[index] ?? localCtx.primitives.unknown;
+    if (localArg === localCtx.primitives.unknown) {
+      return;
+    }
+    const dependencyConstraint = resolveTypeExpr(
+      param.constraint,
+      dependencyCtx,
+      dependencyState,
+      dependencyCtx.primitives.unknown,
+      typeParamMap,
+    );
+    const localConstraint = translateToLocal(dependencyConstraint);
+    ensureImportedOwnerTemplatesAvailable({
+      types: [localConstraint],
+      ctx: localCtx,
+    });
+    if (!typeSatisfies(localArg, localConstraint, localCtx, localState)) {
+      throw new Error(
+        `type argument for ${getSymbolName(
+          param.symbol,
+          dependencyCtx,
+        )} does not satisfy constraint for type alias ${getSymbolName(
+          symbol,
+          dependencyCtx,
+        )}`,
+      );
+    }
+
+    const dependencyArg = dependencyArgs[index]!;
+    const dependencyArgDesc = dependencyCtx.arena.get(dependencyArg);
+    if (dependencyArgDesc.kind === "type-param-ref") {
+      // Caller-side validation makes this bound safe to assume while the
+      // dependency resolves nested constrained types in the alias target.
+      dependencyCtx.typeParameterConstraints.set(
+        dependencyArgDesc.param,
+        dependencyConstraint,
+      );
+    }
+  });
 };
 
 const resolveImportedObject = (

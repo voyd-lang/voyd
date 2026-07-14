@@ -28,6 +28,10 @@ pub obj Repo<T: Persistable> {
   value: T
 }
 
+pub type RepoAlias<T: Persistable> = Repo<T>
+
 pub obj StructuralRepo<T: { id: i32 }> {
   value: T
 }
+
+pub type StructuralRepoAlias<T: { id: i32 }> = StructuralRepo<T>

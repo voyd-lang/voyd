@@ -1,4 +1,4 @@
-use src::dep::{ DictLike, IntKey, Persistable, Repo, StructuralRepo }
+use src::dep::{ DictLike, IntKey, Persistable, Repo, RepoAlias, StructuralRepo, StructuralRepoAlias }
 
 obj User {
   id: i32
@@ -7,7 +7,13 @@ obj User {
 fn repo<T: Persistable>(value: T) -> Repo<T>
   Repo<T> { value: value }
 
+fn repo_alias<T: Persistable>(value: T) -> RepoAlias<T>
+  Repo<T> { value: value }
+
 fn structural_repo<T: User>(value: T) -> StructuralRepo<T>
+  StructuralRepo<T> { value: value }
+
+fn structural_repo_alias<T: User>(value: T) -> StructuralRepoAlias<T>
   StructuralRepo<T> { value: value }
 
 pub fn main() -> i32

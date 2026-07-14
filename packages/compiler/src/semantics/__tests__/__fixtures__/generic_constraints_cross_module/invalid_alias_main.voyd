@@ -1,0 +1,4 @@
+use src::dep::{ RepoAlias }
+
+fn invalid_alias<T>(value: T) -> RepoAlias<T>
+  value
