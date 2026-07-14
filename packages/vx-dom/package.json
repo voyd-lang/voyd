@@ -1,6 +1,6 @@
 {
   "name": "@voyd-lang/vx-dom",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Voyd VX browser and server DOM renderer",
   "type": "module",
   "main": "./dist/index.js",

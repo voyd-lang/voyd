@@ -1,6 +1,6 @@
 {
   "name": "@voyd-lang/cli",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "description": "Voyd CLI",
   "type": "module",
@@ -28,10 +28,10 @@
     "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   },
   "dependencies": {
-    "@voyd-lang/sdk": "^0.2.0",
-    "@voyd-lang/lib": "^0.2.0",
-    "@voyd-lang/package-adapter": "^0.2.0",
-    "@voyd-lang/std": "^0.2.0",
+    "@voyd-lang/sdk": "^0.3.0",
+    "@voyd-lang/lib": "^0.3.0",
+    "@voyd-lang/package-adapter": "^0.3.0",
+    "@voyd-lang/std": "^0.3.0",
     "binaryen": "^125.0.0",
     "commander": "^14.0.0"
   }

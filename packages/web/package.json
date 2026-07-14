@@ -1,6 +1,6 @@
 {
   "name": "@voyd-lang/web",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "private": false,
   "description": "Voyd web framework source package",
   "repository": {
@@ -21,6 +21,6 @@
     "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   },
   "dependencies": {
-    "@voyd-lang/std": "^0.2.0"
+    "@voyd-lang/std": "^0.3.0"
   }
 }

@@ -1,6 +1,6 @@
 {
   "name": "@voyd-lang/js-host",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Voyd JS host runtime",
   "type": "module",
   "main": "./dist/index.js",
@@ -42,6 +42,6 @@
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.2",
-    "@voyd-lang/package-adapter": "^0.2.0"
+    "@voyd-lang/package-adapter": "^0.3.0"
   }
 }

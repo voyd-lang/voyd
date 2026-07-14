@@ -1,6 +1,6 @@
 {
   "name": "@voyd-lang/language-server",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Voyd language server",
   "type": "module",
   "main": "./dist/index.js",
@@ -39,8 +39,8 @@
     "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   },
   "dependencies": {
-    "@voyd-lang/compiler": "^0.2.0",
-    "@voyd-lang/std": "^0.2.0",
+    "@voyd-lang/compiler": "^0.3.0",
+    "@voyd-lang/std": "^0.3.0",
     "vscode-languageserver": "^9.0.1",
     "vscode-languageserver-textdocument": "^1.0.12",
     "vscode-uri": "^3.0.8"

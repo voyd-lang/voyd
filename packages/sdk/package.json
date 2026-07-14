@@ -1,6 +1,6 @@
 {
   "name": "@voyd-lang/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Voyd SDK",
   "type": "module",
   "main": "./dist/node.js",
@@ -61,11 +61,11 @@
     "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   },
   "dependencies": {
-    "@voyd-lang/compiler": "^0.2.0",
-    "@voyd-lang/js-host": "^0.2.0",
-    "@voyd-lang/lib": "^0.2.0",
-    "@voyd-lang/package-adapter": "^0.2.0",
-    "@voyd-lang/std": "^0.2.0",
+    "@voyd-lang/compiler": "^0.3.0",
+    "@voyd-lang/js-host": "^0.3.0",
+    "@voyd-lang/lib": "^0.3.0",
+    "@voyd-lang/package-adapter": "^0.3.0",
+    "@voyd-lang/std": "^0.3.0",
     "binaryen": "^125.0.0",
     "import-meta-resolve": "^4.2.0"
   }
