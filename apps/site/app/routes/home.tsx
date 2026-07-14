@@ -167,20 +167,19 @@ fn run_twice<T>(work: fn() -> T) -> Array<T>
         detail: "Catch incompatible changes before runtime.",
       },
     ],
-    codeLabel: "repo.voyd",
-    code: `trait Persistable
-  fn id(self) -> String
-
-obj Repo<T> {
-  items: Array<T>
+    codeLabel: "models.voyd",
+    code: `obj User {
+  id: String,
+  name: String
 }
 
-impl<T: Persistable> Repo<T>
-  fn upsert(~self, value: T) -> void
-    self.items = self.items.filter(
-      item => item.id() != value.id()
-    )
-    self.items.push(value)`,
+obj Project {
+  id: String,
+  title: String
+}
+
+fn ids<T: { id: String }>(items: Array<T>) -> Array<String>
+  items.map<String>(item => item.id)`,
   },
   {
     id: "syntax",
