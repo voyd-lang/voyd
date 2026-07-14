@@ -1,15 +1,15 @@
 import type { Route } from "./+types/home";
 
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { Link } from "react-router";
 import CodeBlock from "~/components/CodeBlock";
 
 export const prerender = true;
 
 export function meta({}: Route.MetaArgs) {
-  const title = "Voyd — One language for the whole web";
+  const title = "Voyd Programming Language";
   const description =
-    "Voyd is a statically typed, WebAssembly-first language for full-stack web applications, with practical effects and a first-party web stack.";
+    "Voyd is a statically typed language that compiles to WebAssembly, with typed effects and a full-stack web framework.";
 
   return [
     { title },
@@ -37,7 +37,19 @@ type Feature = {
   code: string;
   codeLabel: string;
   lang?: string;
-  featured?: boolean;
+};
+
+type HeroStar = {
+  left: number;
+  top: number;
+  thickness: number;
+  length: number;
+  opacity: number;
+  delay: number;
+  duration: number;
+  angle: number;
+  travelX: number;
+  travelY: number;
 };
 
 const FEATURES: Feature[] = [
@@ -45,13 +57,13 @@ const FEATURES: Feature[] = [
     id: "web-stack",
     number: "01",
     label: "The web stack",
-    title: "From route to interface, it’s all Voyd.",
+    title: "Designed for full-stack web",
     description: (
       <>
-        <code>pkg::web</code> gives you typed routes, request extraction,
-        middleware, static files, and server-rendered HTML. In the browser, VX
-        brings typed state, messages, and efficient DOM updates. Share models
-        and logic without changing languages at every boundary.
+        Voyd includes typed routes, request extraction, middleware, static
+        files, and server-rendered HTML. VX uses a typed model, message, and
+        update loop for browser interfaces, and renders the same virtual tree on
+        the server. Application models and logic can be shared across both.
       </>
     ),
     points: [
@@ -69,8 +81,7 @@ const FEATURES: Feature[] = [
       },
     ],
     codeLabel: "app.voyd",
-    code: `use pkg::web::all
-use std::error::HostError
+    code: `use std::error::HostError
 use std::http::server
 use std::result::types::all
 use std::task
@@ -90,35 +101,33 @@ pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError
   {
     id: "effects",
     number: "02",
-    label: "Practical effects",
-    title: "Know what your code can do. Skip the ceremony.",
+    label: "Effects",
+    title: "Type-check side effects, too",
     description: (
       <>
-        Think of an effect as a typed capability: permission to call the
-        network, read a file, ask the clock, or use an application service. Voyd
-        makes those capabilities visible to the compiler, so APIs stay honest
-        and tests stay focused. Effects are inferred, and reusable helpers stay
-        polymorphic over callback effects—so they don’t force annotation noise
-        through the rest of your code. It’s a practical control surface for real
-        I/O, not an academic detour.
+        A strong data type system catches mistakes in values and interfaces.
+        Voyd’s effect system also tracks what functions can do, such as reading
+        a file, calling a service, or using the clock, and checks that those
+        effects are handled. Effect rows are inferred and polymorphic, so
+        higher-order code remains reusable without passing annotations through
+        every layer.
       </>
     ),
     points: [
       {
-        title: "Inferred locally",
-        detail: "Ordinary code stays clean and direct.",
+        title: "Catch more at compile time",
+        detail: "Required capabilities stay visible in public APIs.",
       },
       {
-        title: "Polymorphic by default",
-        detail: "Helpers adopt the effects of their callbacks.",
+        title: "Inferred, not threaded",
+        detail: "Most local code does not need effect annotations.",
       },
       {
-        title: "Handled at the edge",
-        detail: "Production and test hosts provide the capabilities.",
+        title: "Test with handlers",
+        detail: "Replace I/O at the boundary without reshaping domain code.",
       },
     ],
     codeLabel: "orders.voyd",
-    featured: true,
     code: `@effect(id: "app.orders")
 eff Orders
   save(tail, order: Order) -> OrderId
@@ -134,13 +143,14 @@ fn run_twice<T>(work: fn() -> T) -> Array<T>
   {
     id: "types",
     number: "03",
-    label: "A capable type system",
-    title: "Types that describe the problem, not the compiler.",
+    label: "Types",
+    title: "A strong, expressive type system",
     description: (
       <>
-        Combine inference with traits, constrained generics, structural data,
-        objects, and precise function types. Voyd is strict where correctness
-        matters and expressive where real application code needs room to move.
+        Voyd combines local inference with traits, constrained generics,
+        structural data, objects, and precise function types. These tools make
+        it possible to describe application invariants without adding type
+        annotations to every expression.
       </>
     ),
     points: [
@@ -161,7 +171,7 @@ fn run_twice<T>(work: fn() -> T) -> Array<T>
     code: `trait Persistable
   fn id(self) -> String
 
-obj Repo<T: Persistable> {
+obj Repo<T> {
   items: Array<T>
 }
 
@@ -175,13 +185,13 @@ impl<T: Persistable> Repo<T>
   {
     id: "syntax",
     number: "04",
-    label: "Designed to be read",
-    title: "Code that reads like the idea.",
+    label: "Syntax",
+    title: "Clear, modern syntax",
     description: (
       <>
         Voyd pairs concise expressions with labeled parameters, overloads,
-        trailing closures, and uniform function-call syntax. APIs can feel
-        natural without hiding control flow or giving up precision.
+        trailing closures, and uniform function-call syntax. The goal is to make
+        APIs readable while keeping control flow explicit.
       </>
     ),
     points: [
@@ -213,14 +223,14 @@ move(from: point, to: moved)`,
   {
     id: "embedding",
     number: "05",
-    label: "Made to embed",
-    title: "Put a real language inside your product.",
+    label: "Embedding",
+    title: "Embeddable by design",
     description: (
       <>
-        Compile Voyd in Node, the browser, or Deno for product extensions,
+        Voyd can be compiled from Node, the browser, or Deno for extensions,
         sandboxed plugins, and generated programs. WebAssembly provides the
-        runtime boundary; your host decides which capabilities the program can
-        use.
+        runtime boundary, while the host decides which capabilities are
+        available.
       </>
     ),
     points: [
@@ -254,6 +264,31 @@ if (!result.success) {
 const wasm = result.module.emitBinary();`,
   },
 ];
+
+const HERO_STARS: HeroStar[] = Array.from({ length: 220 }, (_, index) => {
+  const left = (index * 37.71 + 3) % 100;
+  const top = (index * 61.37 + 7) % 100;
+  const offsetX = left - 50;
+  const offsetY = top - 50;
+  const screenOffsetX = offsetX * 1.9;
+  const distance = Math.hypot(screenOffsetX, offsetY) || 1;
+  const travel = 110 + (index % 7) * 28;
+  const large = index % 19 === 0;
+  const medium = !large && index % 7 === 0;
+
+  return {
+    left,
+    top,
+    thickness: large ? 1.8 : medium ? 1.2 : 0.8,
+    length: large ? 25 : medium ? 17 : 10 + (index % 3) * 2,
+    opacity: large ? 0.9 : medium ? 0.72 : 0.42 + (index % 4) * 0.08,
+    delay: -((index * 1.43) % 19),
+    duration: 10 + (index % 8) * 1.6,
+    angle: (Math.atan2(offsetY, screenOffsetX) * 180) / Math.PI,
+    travelX: (screenOffsetX / distance) * travel,
+    travelY: (offsetY / distance) * travel,
+  };
+});
 
 const TOOLING = [
   {
@@ -303,10 +338,12 @@ export default function Home() {
 const Hero = () => {
   return (
     <section className="home-hero">
-      <div className="home-hero-glow" aria-hidden="true" />
+      <div className="home-black-hole" aria-hidden="true">
+        <HeroStars />
+        <div className="home-hero-backdrop" />
+      </div>
       <div className="home-hero-inner">
-        <p className="home-kicker">A full-stack language for the web</p>
-        <h1>Build the whole web without splitting your stack.</h1>
+        <h1>Voyd</h1>
         <p className="home-hero-lede">
           Voyd is a statically typed language that compiles to WebAssembly.
           Write servers, browser apps, and shared logic in one expressive
@@ -314,19 +351,40 @@ const Hero = () => {
         </p>
         <div className="home-actions">
           <Link to="/docs" className="home-button home-button-primary">
-            Start with Voyd
+            Getting Started
           </Link>
           <Link to="/playground" className="home-button home-button-secondary">
             Try the playground
           </Link>
         </div>
-        <p className="home-proof">
-          <span>Open source</span>
-          <span>WebAssembly-first</span>
-          <span>Type-safe by design</span>
-        </p>
       </div>
     </section>
+  );
+};
+
+const HeroStars = () => {
+  return (
+    <div className="home-stars">
+      {HERO_STARS.map((star, index) => (
+        <span
+          key={index}
+          style={
+            {
+              "--home-star-left": `${star.left}%`,
+              "--home-star-top": `${star.top}%`,
+              "--home-star-thickness": `${star.thickness}px`,
+              "--home-star-length": `${star.length}px`,
+              "--home-star-opacity": star.opacity,
+              "--home-star-delay": `${star.delay}s`,
+              "--home-star-duration": `${star.duration}s`,
+              "--home-star-angle": `${star.angle}deg`,
+              "--home-star-travel-x": `${star.travelX}px`,
+              "--home-star-travel-y": `${star.travelY}px`,
+            } as CSSProperties
+          }
+        />
+      ))}
+    </div>
   );
 };
 
@@ -340,7 +398,7 @@ const FeatureSection = ({
   return (
     <article
       id={feature.id}
-      className={`home-feature ${feature.featured ? "home-feature-featured" : ""}`}
+      className="home-feature"
       data-reverse={reverse || undefined}
     >
       <div className="home-feature-copy">
@@ -397,11 +455,11 @@ const ToolingSection = () => {
   return (
     <section className="home-tooling">
       <div className="home-tooling-heading">
-        <p className="home-kicker">The rest of the job matters, too</p>
-        <h2>A language you can use, not just admire.</h2>
+        <p className="home-kicker">Tooling</p>
+        <h2>Batteries included</h2>
         <p>
-          Voyd comes with the everyday tools that turn a language into a
-          productive workflow.
+          Voyd includes the everyday tools needed to build, test, document, and
+          maintain a project.
         </p>
       </div>
       <div className="home-tooling-grid">
@@ -438,11 +496,10 @@ const ToolingSection = () => {
 const FinalCallToAction = () => {
   return (
     <section className="home-final-cta">
-      <p className="home-kicker">See what Voyd feels like</p>
-      <h2>One language. Fewer boundaries. Better web software.</h2>
+      <h2>Explore Voyd</h2>
       <p>
-        Read the language guide, or open the playground and write your first
-        Voyd program now.
+        Read the language guide, try the playground, or explore the compiler and
+        standard library on GitHub.
       </p>
       <div className="home-actions">
         <Link to="/docs" className="home-button home-button-primary">
