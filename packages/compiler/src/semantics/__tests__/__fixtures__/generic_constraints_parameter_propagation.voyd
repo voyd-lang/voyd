@@ -22,6 +22,9 @@ fn trait_repo<T: Persistable>(value: T) -> TraitRepo<T>
 fn trait_repo_value<T: Persistable>(repo: TraitRepo<T>) -> T
   repo.value
 
+fn later_parameter_bound<R: TraitRepo<T>, T: Persistable>(repo: R) -> R
+  repo
+
 obj NominalRepo<T: Entity> {
   value: T
 }
