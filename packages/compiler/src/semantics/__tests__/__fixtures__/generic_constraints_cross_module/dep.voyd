@@ -30,6 +30,16 @@ pub obj Repo<T: Persistable> {
 
 pub type RepoAlias<T: Persistable> = Repo<T>
 
+pub trait Named
+  fn name(self) -> String
+
+pub obj Pair<A: Persistable, B: Named> {
+  first: A,
+  second: B
+}
+
+pub type PairAlias<A: Persistable, B: Named> = Pair<A, B>
+
 pub obj StructuralRepo<T: { id: i32 }> {
   value: T
 }

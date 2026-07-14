@@ -15,7 +15,7 @@ import type {
   FunctionSignature,
   TypingContext,
 } from "./types.js";
-import type { HirNamedTypeExpr } from "../hir/index.js";
+import type { HirNamedTypeExpr, HirTypeExpr } from "../hir/index.js";
 import type {
   SymbolId,
   TypeId,
@@ -467,6 +467,10 @@ const validateImportedAliasConstraints = ({
       dependencyArgs[index]!,
     ]),
   );
+  const assumptionsByTypeParam = new Map<
+    TypeParamId,
+    { expression: HirTypeExpr; resolved: TypeId }[]
+  >();
   template.params.forEach((param, index) => {
     if (!param.constraint) {
       return;
@@ -502,13 +506,43 @@ const validateImportedAliasConstraints = ({
     const dependencyArg = dependencyArgs[index]!;
     const dependencyArgDesc = dependencyCtx.arena.get(dependencyArg);
     if (dependencyArgDesc.kind === "type-param-ref") {
-      // Caller-side validation makes this bound safe to assume while the
-      // dependency resolves nested constrained types in the alias target.
-      dependencyCtx.typeParameterConstraints.set(
-        dependencyArgDesc.param,
-        dependencyConstraint,
-      );
+      const assumptions = assumptionsByTypeParam.get(dependencyArgDesc.param);
+      if (assumptions) {
+        assumptions.push({
+          expression: param.constraint,
+          resolved: dependencyConstraint,
+        });
+        return;
+      }
+      assumptionsByTypeParam.set(dependencyArgDesc.param, [
+        { expression: param.constraint, resolved: dependencyConstraint },
+      ]);
     }
+  });
+
+  assumptionsByTypeParam.forEach((assumptions, typeParam) => {
+    // Caller-side validation makes these bounds safe to assume while the
+    // dependency resolves nested constrained types in the alias target.
+    const unique = assumptions.filter(
+      ({ resolved }, index) =>
+        assumptions.findIndex((entry) => entry.resolved === resolved) === index,
+    );
+    const constraint =
+      unique.length === 1
+        ? unique[0]!.resolved
+        : resolveTypeExpr(
+            {
+              typeKind: "intersection",
+              ast: unique[0]!.expression.ast,
+              span: unique[0]!.expression.span,
+              members: unique.map(({ expression }) => expression),
+            },
+            dependencyCtx,
+            dependencyState,
+            dependencyCtx.primitives.unknown,
+            typeParamMap,
+          );
+    dependencyCtx.typeParameterConstraints.set(typeParam, constraint);
   });
 };
 
