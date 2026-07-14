@@ -633,6 +633,12 @@
           "expect": { "kind": "equals", "value": 17 }
         },
         {
+          "id": "runtime.lambdas.omitted-trailing-parameters",
+          "title": "allows contextually typed lambdas to omit trailing parameters",
+          "entryName": "contextual_lambda_omitted_trailing",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
           "id": "runtime.operators.integer-modulo",
           "title": "evaluates integer modulo",
           "entryName": "integer_modulo",

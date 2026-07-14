@@ -648,6 +648,7 @@ export const typeCallExpr = (
 
   const calleeType = typeExpression(expr.callee, ctx, state, {
     expectedType: expectedCalleeType(args, ctx),
+    allowOmittedLambdaParameters: false,
   });
 
   if (
@@ -6061,8 +6062,26 @@ const scoreOverloadMatchesByLambdaCompatibility = <
   const compatibilityNarrowed = lambdaCompatible.length < matches.length;
   const returnNarrowed =
     lambdaReturnCompatible.length < lambdaCompatible.length;
+  const arityPreferenceCandidates = returnNarrowed
+    ? lambdaReturnCompatible
+    : lambdaCompatible;
+  const exactArityCandidates = arityPreferenceCandidates.filter(
+    (candidate) =>
+      inlineLambdaCompatibility({
+        candidate,
+        args: argsForCandidate ? argsForCandidate(candidate) : args,
+        typeArguments,
+        targetTypeArguments,
+        ctx,
+        state,
+      }) === "exact",
+  );
+  const arityNarrowed =
+    exactArityCandidates.length > 0 &&
+    exactArityCandidates.length < arityPreferenceCandidates.length;
   const compatibleSet = new Set(lambdaCompatible);
   const returnCompatibleSet = new Set(lambdaReturnCompatible);
+  const exactAritySet = new Set(exactArityCandidates);
 
   return new Map(
     matches.map((candidate) => {
@@ -6070,9 +6089,14 @@ const scoreOverloadMatchesByLambdaCompatibility = <
         !compatibilityNarrowed || compatibleSet.has(candidate) ? 1 : 0;
       const returnScore =
         returnNarrowed && returnCompatibleSet.has(candidate) ? 1 : 0;
+      const arityScore =
+        arityNarrowed && exactAritySet.has(candidate) ? 1 : 0;
       return [
         candidate,
-        { lambdaCompatibility: compatibilityScore + returnScore },
+        {
+          lambdaCompatibility:
+            compatibilityScore + returnScore + arityScore,
+        },
       ];
     }),
   );
@@ -6229,17 +6253,24 @@ const narrowOverloadMatchesByLambdaCompatibility = <
     return matches;
   }
 
-  const compatible = matches.filter((candidate) =>
-    candidateAcceptsInlineLambdas({
+  const compatibility = new Map(
+    matches.map((candidate) => [
       candidate,
-      args: argsForCandidate ? argsForCandidate(candidate) : args,
-      typeArguments,
-      targetTypeArguments,
-      ctx,
-      state,
-    }),
+      inlineLambdaCompatibility({
+        candidate,
+        args: argsForCandidate ? argsForCandidate(candidate) : args,
+        typeArguments,
+        targetTypeArguments,
+        ctx,
+        state,
+      }),
+    ]),
   );
-  const candidatesForScoring = compatible.length > 0 ? compatible : matches;
+  const compatible = matches.filter(
+    (candidate) => compatibility.get(candidate) !== "incompatible",
+  );
+  const candidatesForScoring =
+    compatible.length > 0 ? compatible : matches;
   if (candidatesForScoring.length === 1) {
     return candidatesForScoring;
   }
@@ -6271,7 +6302,9 @@ const narrowOverloadMatchesByLambdaCompatibility = <
     : matches;
 };
 
-const candidateAcceptsInlineLambdas = <
+type InlineLambdaCompatibility = "exact" | "omitted-trailing" | "incompatible";
+
+const inlineLambdaCompatibility = <
   T extends { symbol: SymbolId; signature: FunctionSignature },
 >({
   candidate,
@@ -6287,7 +6320,7 @@ const candidateAcceptsInlineLambdas = <
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
   state: TypingState;
-}): boolean => {
+}): InlineLambdaCompatibility => {
   const params = specializeOverloadParametersWithTargetTypeArguments({
     symbol: candidate.symbol,
     signature: candidate.signature,
@@ -6296,6 +6329,7 @@ const candidateAcceptsInlineLambdas = <
     ctx,
   }).filter((param) => !isStableCallsiteIdParam(param));
   const callArgs = callArgInputsFromArgs(args);
+  let omittedTrailing = false;
 
   for (let index = 0; index < args.length; index += 1) {
     const arg = args[index]!;
@@ -6321,8 +6355,11 @@ const candidateAcceptsInlineLambdas = <
     if (expectedDesc.kind !== "function") {
       continue;
     }
-    if (expectedDesc.parameters.length !== lambdaExpr.parameters.length) {
-      return false;
+    if (expectedDesc.parameters.length < lambdaExpr.parameters.length) {
+      return "incompatible";
+    }
+    if (expectedDesc.parameters.length > lambdaExpr.parameters.length) {
+      omittedTrailing = true;
     }
     for (let paramIndex = 0; paramIndex < lambdaExpr.parameters.length; paramIndex += 1) {
       const actualParam = lambdaExpr.parameters[paramIndex]!;
@@ -6349,11 +6386,11 @@ const candidateAcceptsInlineLambdas = <
         !typeSatisfies(actualType, expectedParam.type, ctx, state) &&
         !typeSatisfies(expectedParam.type, actualType, ctx, state)
       ) {
-        return false;
+        return "incompatible";
       }
     }
   }
-  return true;
+  return omittedTrailing ? "omitted-trailing" : "exact";
 };
 
 const inlineLambdaExpectedTypeParamPenalty = <

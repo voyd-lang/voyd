@@ -4,5 +4,23 @@ fn pick(flag: bool, mapper: fn(i32) -> i32) -> i32
 fn pick(flag: i32, mapper: fn(bool) -> i32) -> i32
   mapper(false)
 
+fn invoke(mapper: fn() -> i32) -> i32
+  mapper()
+
+fn invoke(mapper: fn(i32) -> i32) -> i32
+  mapper(1)
+
+fn choose(mapper: fn() -> bool) -> i32
+  if mapper() then: 1 else: 0
+
+fn choose(mapper: fn(i32) -> i32) -> i32
+  mapper(2)
+
 pub fn main() -> i32
   pick(true, x => x + 1)
+
+pub fn exact_lambda_arity() -> i32
+  invoke(() => 4)
+
+pub fn omitted_lambda_return_compatibility() -> i32
+  choose(() => 5)
