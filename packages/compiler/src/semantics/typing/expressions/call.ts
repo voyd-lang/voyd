@@ -648,6 +648,7 @@ export const typeCallExpr = (
 
   const calleeType = typeExpression(expr.callee, ctx, state, {
     expectedType: expectedCalleeType(args, ctx),
+    allowOmittedLambdaParameters: false,
   });
 
   if (

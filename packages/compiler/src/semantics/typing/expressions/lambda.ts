@@ -35,7 +35,8 @@ export const typeLambdaExpr = (
   expr: HirLambdaExpr,
   ctx: TypingContext,
   state: TypingState,
-  expectedType?: TypeId
+  expectedType?: TypeId,
+  allowOmittedParameters = true
 ): TypeId => {
   const appliedExpected =
     typeof expectedType === "number"
@@ -258,10 +259,12 @@ export const typeLambdaExpr = (
       defaulted: typeof param.defaultValue === "number",
       bindingKind: param.pattern.bindingKind,
     })),
-    ...(expectedFn?.parameters.slice(expr.parameters.length).map((param) => ({
-      ...param,
-      type: ctx.arena.substitute(param.type, finalSubstitution),
-    })) ?? []),
+    ...(allowOmittedParameters
+      ? expectedFn?.parameters.slice(expr.parameters.length).map((param) => ({
+          ...param,
+          type: ctx.arena.substitute(param.type, finalSubstitution),
+        })) ?? []
+      : []),
   ];
   const substitutedBodyType = ctx.arena.substitute(bodyType, finalSubstitution);
   const annotatedReturnApplied =
