@@ -76,7 +76,7 @@ fn view(model: Model) -> Html<Msg>
     <input
       id="name"
       value={model.name}
-      on_input={(event: InputEvent) -> Msg =>
+      on_input={(event) =>
         Msg::NameChanged { value: event.value }
       }
     />
@@ -278,18 +278,19 @@ Use a closure when the message depends on local data:
 ```voyd
 <button
   type="button"
-  on_click={() -> Msg => Msg::Select { id: todo.id }}
+  on_click={() => Msg::Select { id: todo.id }}
 >
   Select
 </button>
 ```
 
-Use a typed event when you need browser data:
+Use an event handler when the message depends on browser data. VX infers the
+event type from the attribute:
 
 ```voyd
 <input
   value={model.search}
-  on_input={(event: InputEvent) -> Msg =>
+  on_input={(event) =>
     Msg::SearchChanged { value: event.value }
   }
 />
@@ -315,7 +316,7 @@ Prevent a form's browser submission with `EventOptions`:
   <input
     name="title"
     value={model.draft}
-    on_input={(event: InputEvent) -> Msg =>
+    on_input={(event) =>
       Msg::DraftChanged { value: event.value }
     }
   />
@@ -343,8 +344,8 @@ use std::task::TaskRuntime
 
 fn load_todos(): TaskRuntime -> Cmd<Msg>
   Cmd::task(
-    work: () -> Result<Array<Todo>, String> => fetch_todos(),
-    handler: (result: Result<Array<Todo>, String>) -> Msg =>
+    work: () => fetch_todos(),
+    handler: (result) =>
       Msg::TodosLoaded { result: result }
   )
 ```
@@ -386,8 +387,8 @@ fn fetch_message(): http_client::HttpClient -> Result<String, String>
 
 fn load_message(): (http_client::HttpClient, TaskRuntime) -> Cmd<Msg>
   Cmd::task(
-    work: () -> Result<String, String> => fetch_message(),
-    handler: (result: Result<String, String>) -> Msg =>
+    work: () => fetch_message(),
+    handler: (result) =>
       Msg::MessageLoaded { result: result }
   )
 ```
@@ -462,7 +463,7 @@ a typed payload:
 ```voyd
 window_on_resize(
   key: "viewport",
-  handler: (size: WindowSize) -> Msg =>
+  handler: (size) =>
     Msg::ViewportChanged { width: size.width, height: size.height }
 )
 ```
@@ -496,7 +497,7 @@ fn step(model: Model, msg: Msg) -> Program<Model, Msg>
 fn subscriptions(_model: Model) -> Sub<Msg>
   location_on_change(
     key: "location",
-    handler: (location: Location) -> Msg =>
+    handler: (location) =>
       Msg::LocationChanged { path: location.pathname }
   )
 
@@ -590,12 +591,12 @@ fn step(model: AppModel, msg: AppMsg): TaskRuntime -> Program<AppModel, AppMsg>
       let child = todos::step(model.todos, value)
       let with_parent_model = map_model(
         child,
-        (next_todos: todos::Model) -> AppModel =>
+        (next_todos) =>
           AppModel { todos: next_todos, signed_in: model.signed_in }
       )
       map_message(
         with_parent_model,
-        (child_msg: todos::Msg) -> AppMsg =>
+        (child_msg) =>
           AppMsg::Todos { value: child_msg }
       )
     AppMsg::SignedOut:
@@ -606,7 +607,7 @@ The parent view uses `map_html` so child events become `AppMsg::Todos`:
 
 ```voyd
 fn view(model: AppModel) -> Html<AppMsg>
-  let to_app = (msg: todos::Msg) -> AppMsg => AppMsg::Todos { value: msg }
+  let to_app = (msg: todos::Msg) => AppMsg::Todos { value: msg }
   <main>
     {map_html(
       html: todos::view(model.todos),
@@ -616,7 +617,7 @@ fn view(model: AppModel) -> Html<AppMsg>
 
 fn subscriptions(model: AppModel) -> Sub<AppMsg>
   todos::subscriptions(model.todos).map(
-    (msg: todos::Msg) -> AppMsg => AppMsg::Todos { value: msg }
+    (msg) => AppMsg::Todos { value: msg }
   )
 ```
 
@@ -730,7 +731,7 @@ Sub::runtime_configured(
   kind: "websocket",
   key: "project:".concat(model.project_id),
   value: msgpack::make_string(model.socket_url),
-  handler: (message: String) -> Msg =>
+  handler: (message) =>
     Msg::SocketMessage { value: message }
 )
 ```

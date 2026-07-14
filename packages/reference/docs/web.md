@@ -140,7 +140,7 @@ same path, configure an app with `ignore_trailing_slash()`:
 ```voyd
 let web_app = app()
   .with(trailing_slash: ignore_trailing_slash())
-  .get("/about", handler: () -> String => "About")
+  .get("/about", handler: () => "About")
 ```
 
 ## Handler Results
@@ -656,7 +656,7 @@ fn health() -> String
 
 let web_app = app()
   .get("/health", handler: health)
-  .get("/debug", handler: (ctx: Context) -> Response =>
+  .get_context("/debug", handler: (ctx) =>
     Response::ok().text(ctx.path())
   )
 ```
@@ -667,12 +667,12 @@ Explicit method names make extracted handler shapes clear:
 let api = app()
   .get_params(
     "/articles/:slug",
-    handler: (params: ArticleParams) -> Response =>
+    handler: (params: ArticleParams) =>
       Response::ok().text(params.slug)
   )
   .get_params_query(
     "/articles/:slug/revisions",
-    handler: (params: ArticleParams, query: SearchQuery) -> Response =>
+    handler: (params: ArticleParams, query: SearchQuery) =>
       revisions(params.slug, query.page)
   )
 ```
@@ -683,7 +683,7 @@ For a reusable subrouter, create `router::Router` and mount it:
 use pkg::web::router
 
 let api = router::Router::init()
-  .get("/health", handler: () -> String => "ok")
+  .get("/health", handler: () => "ok")
 
 let web_app = app().mount("/api", api)
 ```
@@ -693,14 +693,14 @@ through free helpers:
 
 ```voyd
 let web_app = build_app do(base):
-  let with_health = get_context(base, "/health") do(_ctx: Context):
+  let with_health = get_context(base, "/health") do(_ctx):
     "ok"
 
   post(
     with_health,
     "/echo",
     body: text_body(),
-    handler: (input: String) -> Response => Response::ok().text(input)
+    handler: (input: String) => Response::ok().text(input)
   )
 ```
 
@@ -722,7 +722,7 @@ use std::string::type::String
 use std::test::assertions::all
 
 fn test_app() -> App
-  app().get("/health", handler: () -> String => "ok")
+  app().get("/health", handler: () => "ok")
 
 fn request(path: String) -> IncomingRequest
   IncomingRequest {
