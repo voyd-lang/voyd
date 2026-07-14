@@ -4,10 +4,10 @@ order: 8
 
 # VX
 
-VX is Voyd's framework for interactive user interfaces. You describe the UI as
-typed HTML, keep application state in a model, and handle every change through a
-message. VX renders the result in a browser and can render the same views on a
-server.
+VX is Voyd's framework for interactive user interfaces. Its model-view-update
+architecture is inspired by Elm. You describe the UI as typed HTML, keep
+application state in a model, and handle every change through a message. VX
+renders the result in a browser and can render the same views on a server.
 
 This guide starts with a working browser app and then covers the patterns and
 APIs you need as the app grows.
@@ -88,8 +88,8 @@ The browser runtime calls `init`, renders `view(model)`, and waits for a message
 When the input or button produces one, VX calls `step(model, msg)`, stores the
 returned model, and renders again.
 
-The exported `app` function is the standard entrypoint. Import the full public
-surface with:
+The exported `app` function is the standard VX entrypoint. Most application
+files import VX's public types and helpers with:
 
 ```voyd
 use std::vx::all
@@ -173,7 +173,7 @@ fn step(model: Model, msg: Msg): TaskRuntime -> Program<Model, Msg>
 ```
 
 Extract model-building helpers when a branch becomes noisy. This keeps the
-important decision—message in, next state and work out—visible in one place.
+important decision visible in one place: message in, next state and work out.
 
 Expected failures should normally travel through a `Result` in a result message.
 Unexpected task or runtime failures are reported by the browser runtime's error
