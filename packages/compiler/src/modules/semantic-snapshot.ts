@@ -30,6 +30,7 @@ export const cloneSemanticsForTypingState = ({
       typeAliases: typing.typeAliases.clone(),
       objects: typing.objects.clone(),
       traits: typing.traits.clone(),
+      typeParameterConstraints: new Map(typing.typeParameterConstraints),
       primitives: {
         cache: new Map(typing.primitives.cache),
         bool: typing.primitives.bool,

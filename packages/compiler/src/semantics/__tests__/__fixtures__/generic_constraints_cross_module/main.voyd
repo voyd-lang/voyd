@@ -1,4 +1,14 @@
-use src::dep::{ DictLike, IntKey }
+use src::dep::{ DictLike, IntKey, Persistable, Repo, StructuralRepo }
+
+obj User {
+  id: i32
+}
+
+fn repo<T: Persistable>(value: T) -> Repo<T>
+  Repo<T> { value: value }
+
+fn structural_repo<T: User>(value: T) -> StructuralRepo<T>
+  StructuralRepo<T> { value: value }
 
 pub fn main() -> i32
   let dict = DictLike<IntKey, i32>::init(IntKey { value: 7 }, 1)

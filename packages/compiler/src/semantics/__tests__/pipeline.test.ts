@@ -690,6 +690,13 @@ describe("semanticsPipeline", () => {
     );
   });
 
+  it("rejects constrained object instantiations with mismatched bounds", () => {
+    const ast = loadAst("generic_constraints_parameter_mismatch.voyd");
+    expect(() => semanticsPipeline(ast)).toThrow(
+      /does not satisfy.*constraint/i
+    );
+  });
+
   it("accepts trait instantiations when trait type arguments satisfy constraints", () => {
     const ast = loadAst("generic_constraints_trait_instantiation_success.voyd");
     const result = semanticsPipeline(ast);
@@ -711,6 +718,12 @@ describe("semanticsPipeline", () => {
 
   it("accepts constrained generic re-instantiation inside constrained impl methods", () => {
     const ast = loadAst("generic_constraints_reinstantiation_success.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("propagates declaration bounds into constrained object instantiations", () => {
+    const ast = loadAst("generic_constraints_parameter_propagation.voyd");
     const result = semanticsPipeline(ast);
     expect(result.diagnostics).toHaveLength(0);
   });

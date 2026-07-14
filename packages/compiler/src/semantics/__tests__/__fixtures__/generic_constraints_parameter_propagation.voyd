@@ -1,0 +1,58 @@
+trait Persistable
+  fn id(self) -> String
+
+trait Named
+  fn name(self) -> String
+
+obj Entity {
+  id: String
+}
+
+obj TraitRepo<T: Persistable> {
+  value: T
+}
+
+impl<T: Persistable> TraitRepo<T>
+  fn replace(~self, value: T) -> void
+    self.value = value
+
+fn trait_repo<T: Persistable>(value: T) -> TraitRepo<T>
+  TraitRepo<T> { value: value }
+
+fn trait_repo_value<T: Persistable>(repo: TraitRepo<T>) -> T
+  repo.value
+
+obj NominalRepo<T: Entity> {
+  value: T
+}
+
+impl<T: Entity> NominalRepo<T>
+  fn replace(~self, value: T) -> void
+    self.value = value
+
+fn nominal_repo<T: Entity>(value: T) -> NominalRepo<T>
+  NominalRepo<T> { value: value }
+
+obj StructuralRepo<T: { id: String }> {
+  value: T
+}
+
+impl<T: { id: String }> StructuralRepo<T>
+  fn replace(~self, value: T) -> void
+    self.value = value
+
+fn structural_repo<T: { id: String }>(value: T) -> StructuralRepo<T>
+  StructuralRepo<T> { value: value }
+
+obj IntersectionRepo<T: Persistable & Named> {
+  value: T
+}
+
+impl<T: Persistable & Named> IntersectionRepo<T>
+  fn replace(~self, value: T) -> void
+    self.value = value
+
+fn intersection_repo<T: Persistable & Named>(
+  value: T
+) -> IntersectionRepo<T>
+  IntersectionRepo<T> { value: value }

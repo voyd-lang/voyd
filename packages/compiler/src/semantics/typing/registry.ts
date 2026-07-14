@@ -141,13 +141,15 @@ const resolveConstraintTypeParameters = ({
     if (!constraintExpr) {
       return;
     }
-    param.constraint = resolveTypeExpr(
+    const constraint = resolveTypeExpr(
       constraintExpr,
       ctx,
       state,
       ctx.primitives.unknown,
       typeParamMap,
     );
+    param.constraint = constraint;
+    ctx.typeParameterConstraints.set(param.typeParam, constraint);
   });
 
   return { typeParams, typeParamMap };

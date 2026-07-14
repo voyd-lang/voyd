@@ -3,6 +3,7 @@ import {
   ensureObjectType,
   ensureTraitType,
   resolveTypeAlias,
+  validateObjectTypeArgumentConstraints,
 } from "./type-system.js";
 import { applyImportableMetadata } from "../imports/metadata.js";
 import type {
@@ -295,6 +296,15 @@ export const resolveImportedTypeExpr = ({
     );
   }
 
+  const objectConstraintsValidated = ctx.objects.getTemplate(symbol)
+    ? validateObjectTypeArgumentConstraints(
+        symbol,
+        ctx,
+        createTypingState(state.mode),
+        typeArgs,
+      )
+    : false;
+
   const depCtx = makeDependencyContext(dependency, ctx);
   const depState = createTypingState(state.mode);
 
@@ -306,10 +316,21 @@ export const resolveImportedTypeExpr = ({
       targetEffects: ctx.effects,
     })
   ) {
-    const aliasResolved = resolveImportedAlias(target.symbol, typeArgs, depCtx, depState);
+    const aliasResolved = resolveImportedAlias(
+      target.symbol,
+      typeArgs,
+      depCtx,
+      depState,
+    );
     const resolved =
       aliasResolved ??
-      resolveImportedObject(target.symbol, typeArgs, depCtx, depState) ??
+      resolveImportedObject(
+        target.symbol,
+        typeArgs,
+        depCtx,
+        depState,
+        objectConstraintsValidated,
+      ) ??
       resolveImportedTrait(target.symbol, typeArgs, depCtx, depState);
     if (typeof resolved === "number") {
       ensureImportedOwnerTemplatesAvailable({
@@ -350,10 +371,21 @@ export const resolveImportedTypeExpr = ({
   forwardParamMap.forEach((targetParam, sourceParam) => {
     reverseParamMap.set(targetParam, sourceParam);
   });
-  const aliasResolved = resolveImportedAlias(target.symbol, depArgs, depCtx, depState);
+  const aliasResolved = resolveImportedAlias(
+    target.symbol,
+    depArgs,
+    depCtx,
+    depState,
+  );
   const resolved =
     aliasResolved ??
-    resolveImportedObject(target.symbol, depArgs, depCtx, depState) ??
+    resolveImportedObject(
+      target.symbol,
+      depArgs,
+      depCtx,
+      depState,
+      objectConstraintsValidated,
+    ) ??
     resolveImportedTrait(target.symbol, depArgs, depCtx, depState);
 
   const localType = typeof resolved === "number" ? back(resolved) : undefined;
@@ -386,12 +418,15 @@ const resolveImportedObject = (
   args: readonly TypeId[],
   ctx: TypingContext,
   state: ReturnType<typeof createTypingState>,
+  constraintsAlreadyValidated: boolean,
 ): TypeId | undefined => {
   const template = ctx.objects.getTemplate(symbol);
   if (!template) {
     return undefined;
   }
-  return ensureObjectType(symbol, ctx, state, args)?.type;
+  return ensureObjectType(symbol, ctx, state, args, {
+    constraintsAlreadyValidated,
+  })?.type;
 };
 
 const resolveImportedTrait = (
