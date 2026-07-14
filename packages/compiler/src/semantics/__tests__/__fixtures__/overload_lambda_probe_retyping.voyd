@@ -16,6 +16,12 @@ fn choose(mapper: fn() -> bool) -> i32
 fn choose(mapper: fn(i32) -> i32) -> i32
   mapper(2)
 
+fn select<T>(mapper: fn(T) -> T) -> bool
+  true
+
+fn select(mapper: fn(i32, i32) -> i32) -> i32
+  mapper(1, 2)
+
 pub fn main() -> i32
   pick(true, x => x + 1)
 
@@ -24,3 +30,6 @@ pub fn exact_lambda_arity() -> i32
 
 pub fn omitted_lambda_return_compatibility() -> i32
   choose(() => 5)
+
+pub fn generic_exact_lambda_arity()
+  select((x: i32) => x)

@@ -1,0 +1,8 @@
+fn choose(first: fn() -> i32, second: fn(i32) -> i32) -> bool
+  first() + second(1) == 3
+
+fn choose(first: fn(i32) -> i32, second: fn(i32) -> i32) -> i32
+  first(1) + second(1)
+
+pub fn main()
+  choose(() => 1, () => 2)

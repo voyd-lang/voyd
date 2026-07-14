@@ -114,4 +114,10 @@ describe("lambda typing", () => {
       i32,
     ]);
   });
+
+  it("rejects lambdas with more parameters than their context", () => {
+    expect(() =>
+      semanticsPipeline(loadAst("lambda_excess_contextual_parameters.voyd")),
+    ).toThrow(/TY0027: type mismatch/i);
+  });
 });

@@ -6001,17 +6001,7 @@ const narrowOverloadMatchesByLambdaReturn = <
     }))
     .filter(({ result }) => result?.checked === true && result.ok);
 
-  const concreteCheckedMatches = checkedMatches.filter(
-    ({ candidate }) => (candidate.signature.typeParams?.length ?? 0) === 0,
-  );
-  if (concreteCheckedMatches.length > 0) {
-    return concreteCheckedMatches.map(({ candidate }) => candidate);
-  }
-
-  if (
-    checkedMatches.length > 0 &&
-    checkedMatches.length < matches.length
-  ) {
+  if (checkedMatches.length > 0 && checkedMatches.length < matches.length) {
     return checkedMatches.map(({ candidate }) => candidate);
   }
   return matches;
@@ -6059,29 +6049,34 @@ const scoreOverloadMatchesByLambdaCompatibility = <
     ctx,
     state,
   });
+  const arityCompatible = narrowOverloadMatchesByInlineLambdaArity({
+    matches: lambdaReturnCompatible,
+    args,
+    argsForCandidate,
+    typeArguments,
+    targetTypeArguments,
+    ctx,
+  });
+  const expectedTypeSpecific =
+    narrowOverloadMatchesByInlineLambdaExpectedTypeSpecificity({
+      matches: arityCompatible,
+      args,
+      argsForCandidate,
+      typeArguments,
+      targetTypeArguments,
+      ctx,
+      state,
+    });
   const compatibilityNarrowed = lambdaCompatible.length < matches.length;
   const returnNarrowed =
     lambdaReturnCompatible.length < lambdaCompatible.length;
-  const arityPreferenceCandidates = returnNarrowed
-    ? lambdaReturnCompatible
-    : lambdaCompatible;
-  const exactArityCandidates = arityPreferenceCandidates.filter(
-    (candidate) =>
-      inlineLambdaCompatibility({
-        candidate,
-        args: argsForCandidate ? argsForCandidate(candidate) : args,
-        typeArguments,
-        targetTypeArguments,
-        ctx,
-        state,
-      }) === "exact",
-  );
-  const arityNarrowed =
-    exactArityCandidates.length > 0 &&
-    exactArityCandidates.length < arityPreferenceCandidates.length;
+  const arityNarrowed = arityCompatible.length < lambdaReturnCompatible.length;
+  const expectedTypeNarrowed =
+    expectedTypeSpecific.length < arityCompatible.length;
   const compatibleSet = new Set(lambdaCompatible);
   const returnCompatibleSet = new Set(lambdaReturnCompatible);
-  const exactAritySet = new Set(exactArityCandidates);
+  const arityCompatibleSet = new Set(arityCompatible);
+  const expectedTypeSpecificSet = new Set(expectedTypeSpecific);
 
   return new Map(
     matches.map((candidate) => {
@@ -6090,12 +6085,14 @@ const scoreOverloadMatchesByLambdaCompatibility = <
       const returnScore =
         returnNarrowed && returnCompatibleSet.has(candidate) ? 1 : 0;
       const arityScore =
-        arityNarrowed && exactAritySet.has(candidate) ? 1 : 0;
+        arityNarrowed && arityCompatibleSet.has(candidate) ? 1 : 0;
+      const expectedTypeScore =
+        expectedTypeNarrowed && expectedTypeSpecificSet.has(candidate) ? 1 : 0;
       return [
         candidate,
         {
           lambdaCompatibility:
-            compatibilityScore + returnScore + arityScore,
+            compatibilityScore + returnScore + arityScore + expectedTypeScore,
         },
       ];
     }),
@@ -6269,37 +6266,162 @@ const narrowOverloadMatchesByLambdaCompatibility = <
   const compatible = matches.filter(
     (candidate) => compatibility.get(candidate) !== "incompatible",
   );
-  const candidatesForScoring =
-    compatible.length > 0 ? compatible : matches;
-  if (candidatesForScoring.length === 1) {
-    return candidatesForScoring;
-  }
-  if (candidatesForScoring.length > 1) {
-    const scored = candidatesForScoring.map((candidate) => ({
-      candidate,
-      penalty: inlineLambdaExpectedTypeParamPenalty({
-        candidate,
-        args: argsForCandidate ? argsForCandidate(candidate) : args,
-        typeArguments,
-        targetTypeArguments,
-        ctx,
-        state,
-      }),
-    }));
-    const minPenalty = Math.min(...scored.map(({ penalty }) => penalty));
-    const leastGeneric = scored
-      .filter(({ penalty }) => penalty === minPenalty)
-      .map(({ candidate }) => candidate);
-    if (
-      leastGeneric.length > 0 &&
-      leastGeneric.length < candidatesForScoring.length
-    ) {
-      return leastGeneric;
-    }
-  }
-  return candidatesForScoring.length < matches.length
-    ? candidatesForScoring
+  return compatible.length > 0 && compatible.length < matches.length
+    ? compatible
     : matches;
+};
+
+const narrowOverloadMatchesByInlineLambdaExpectedTypeSpecificity = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  matches,
+  args,
+  argsForCandidate,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+  state,
+}: {
+  matches: readonly T[];
+  args: readonly Arg[];
+  argsForCandidate?: (candidate: T) => readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+  state: TypingState;
+}): readonly T[] => {
+  if (matches.length <= 1) {
+    return matches;
+  }
+
+  const scored = matches.map((candidate) => ({
+    candidate,
+    penalty: inlineLambdaExpectedTypeParamPenalty({
+      candidate,
+      args: argsForCandidate ? argsForCandidate(candidate) : args,
+      typeArguments,
+      targetTypeArguments,
+      ctx,
+      state,
+    }),
+  }));
+  const minPenalty = Math.min(...scored.map(({ penalty }) => penalty));
+  const leastGeneric = scored
+    .filter(({ penalty }) => penalty === minPenalty)
+    .map(({ candidate }) => candidate);
+  return leastGeneric.length < matches.length ? leastGeneric : matches;
+};
+
+const narrowOverloadMatchesByInlineLambdaArity = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  matches,
+  args,
+  argsForCandidate,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+}: {
+  matches: readonly T[];
+  args: readonly Arg[];
+  argsForCandidate?: (candidate: T) => readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+}): readonly T[] => {
+  const scored = matches.flatMap((candidate) => {
+    const score = inlineLambdaArityScoreForCandidate({
+      candidate,
+      args: argsForCandidate ? argsForCandidate(candidate) : args,
+      typeArguments,
+      targetTypeArguments,
+      ctx,
+    });
+    return score ? [{ candidate, score }] : [];
+  });
+  if (scored.length === 0) {
+    return matches;
+  }
+
+  const mostExactCount = Math.max(
+    ...scored.map(({ score }) => score.exactMatches),
+  );
+  const mostExact = scored.filter(
+    ({ score }) => score.exactMatches === mostExactCount,
+  );
+  const fewestOmittedCount = Math.min(
+    ...mostExact.map(({ score }) => score.omittedParameters),
+  );
+  const preferred = mostExact
+    .filter(({ score }) => score.omittedParameters === fewestOmittedCount)
+    .map(({ candidate }) => candidate);
+  return preferred.length < matches.length ? preferred : matches;
+};
+
+const inlineLambdaArityScoreForCandidate = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  candidate,
+  args,
+  typeArguments,
+  targetTypeArguments,
+  ctx,
+}: {
+  candidate: T;
+  args: readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments?: readonly TypeId[] | undefined;
+  ctx: TypingContext;
+}): { exactMatches: number; omittedParameters: number } | undefined => {
+  const params = specializeOverloadParametersWithTargetTypeArguments({
+    symbol: candidate.symbol,
+    signature: candidate.signature,
+    typeArguments,
+    targetTypeArguments,
+    ctx,
+  }).filter((param) => !isStableCallsiteIdParam(param));
+  const callArgs = callArgInputsFromArgs(args);
+
+  let lambdaCount = 0;
+  let exactMatches = 0;
+  let omittedParameters = 0;
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index]!;
+    if (typeof arg.exprId !== "number") {
+      continue;
+    }
+    const lambdaExpr = ctx.hir.expressions.get(arg.exprId);
+    if (!lambdaExpr || lambdaExpr.exprKind !== "lambda") {
+      continue;
+    }
+    lambdaCount += 1;
+    const expected = expectedCallArgType({
+      args: callArgs,
+      index,
+      argIndex: index,
+      params,
+      hintSubstitution: undefined,
+      ctx,
+    });
+    if (typeof expected !== "number") {
+      return undefined;
+    }
+    const expectedDesc = ctx.arena.get(unfoldRecursiveTypeId(expected, ctx));
+    if (expectedDesc.kind !== "function") {
+      return undefined;
+    }
+    const omitted =
+      expectedDesc.parameters.length - lambdaExpr.parameters.length;
+    if (omitted < 0) {
+      return undefined;
+    }
+    if (omitted === 0) {
+      exactMatches += 1;
+    }
+    omittedParameters += omitted;
+  }
+
+  return lambdaCount > 0 ? { exactMatches, omittedParameters } : undefined;
 };
 
 type InlineLambdaCompatibility = "exact" | "omitted-trailing" | "incompatible";

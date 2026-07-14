@@ -52,4 +52,80 @@ describe("overload lambda context", () => {
       .sort();
     expect(contextualParameterCounts).toEqual([0, 1]);
   });
+
+  it("prefers an exact lambda arity over contextual parameter omission", () => {
+    const semantics = semanticsPipeline(
+      loadAst("overload_lambda_exact_arity_preference.voyd"),
+    );
+    const { hir, typing } = semantics;
+
+    const call = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr =>
+        expr.exprKind === "call" &&
+        expr.args.some(
+          (arg) => hir.expressions.get(arg.expr)?.exprKind === "lambda",
+        ),
+    );
+    expect(call).toBeDefined();
+    if (!call) return;
+    expect(typing.table.getExprType(call.id)).toBe(typing.primitives.bool);
+  });
+
+  it("prefers a return-compatible omitted-parameter candidate", () => {
+    const semantics = semanticsPipeline(
+      loadAst("overload_lambda_exact_arity_return_compatibility.voyd"),
+    );
+    const { hir, typing } = semantics;
+
+    const call = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr =>
+        expr.exprKind === "call" &&
+        expr.args.some(
+          (arg) => hir.expressions.get(arg.expr)?.exprKind === "lambda",
+        ),
+    );
+    expect(call).toBeDefined();
+    if (!call) return;
+    expect(typing.table.getExprType(call.id)).toBe(typing.primitives.i32);
+  });
+
+  it("scores exact arity across multiple inline lambdas", () => {
+    const semantics = semanticsPipeline(
+      loadAst("overload_lambda_partial_exact_arity_preference.voyd"),
+    );
+    const { hir, typing } = semantics;
+
+    const call = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr =>
+        expr.exprKind === "call" &&
+        expr.args.filter(
+          (arg) => hir.expressions.get(arg.expr)?.exprKind === "lambda",
+        ).length === 2,
+    );
+    expect(call).toBeDefined();
+    if (!call) return;
+    expect(typing.table.getExprType(call.id)).toBe(typing.primitives.bool);
+  });
+
+  it("preserves an exact generic lambda overload", () => {
+    const semantics = semanticsPipeline(
+      loadAst("overload_lambda_probe_retyping.voyd"),
+    );
+    const { hir, typing } = semantics;
+
+    const call = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr =>
+        expr.exprKind === "call" &&
+        expr.args.some((arg) => {
+          const lambda = hir.expressions.get(arg.expr);
+          return (
+            lambda?.exprKind === "lambda" &&
+            lambda.parameters.some((parameter) => parameter.type !== undefined)
+          );
+        }),
+    );
+    expect(call).toBeDefined();
+    if (!call) return;
+    expect(typing.table.getExprType(call.id)).toBe(typing.primitives.bool);
+  });
 });
