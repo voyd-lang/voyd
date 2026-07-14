@@ -632,7 +632,7 @@ type ImportMeta = {
   };
 };
 
-const ensureStaticMethodImport = ({
+export const ensureStaticMethodImport = ({
   targetSymbol,
   memberName,
   syntax,

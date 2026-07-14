@@ -1,6 +1,8 @@
 import {
+  Form,
   type Expr,
   formCallsInternal,
+  isCallForm,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -17,6 +19,34 @@ export type NominalTypeTarget = {
 export type NominalTypeTargetMetadata = {
   nominalTargetTypeArguments: readonly Expr[];
   nominalTargetTypeParameterNames: readonly string[];
+};
+
+export const composeNominalTypeTargetMetadata = ({
+  alias,
+  target,
+}: {
+  alias?: NominalTypeTargetMetadata;
+  target?: NominalTypeTargetMetadata;
+}): NominalTypeTargetMetadata | undefined => {
+  if (!alias) {
+    return target;
+  }
+  if (!target) {
+    return alias;
+  }
+
+  const substitutions = new Map(
+    target.nominalTargetTypeParameterNames.map((name, index) => [
+      name,
+      alias.nominalTargetTypeArguments[index],
+    ]),
+  );
+  return {
+    nominalTargetTypeArguments: target.nominalTargetTypeArguments.map((entry) =>
+      substituteTypeParameterExpr(entry, substitutions),
+    ),
+    nominalTargetTypeParameterNames: alias.nominalTargetTypeParameterNames,
+  };
 };
 
 export const extractNominalTypeTarget = (
@@ -100,6 +130,21 @@ export const nominalTypeTargetTypeArgumentsFromMetadata = ({
       typeParameterNames: readonly string[];
     }
   | undefined => {
+  const metadata = nominalTypeTargetMetadataFromSource({ source });
+  if (!metadata) {
+    return undefined;
+  }
+  return {
+    typeArguments: metadata.nominalTargetTypeArguments,
+    typeParameterNames: metadata.nominalTargetTypeParameterNames,
+  };
+};
+
+export const nominalTypeTargetMetadataFromSource = ({
+  source,
+}: {
+  source?: Record<string, unknown>;
+}): NominalTypeTargetMetadata | undefined => {
   const meta = source as
     | {
         nominalTargetTypeArguments?: unknown;
@@ -109,16 +154,40 @@ export const nominalTypeTargetTypeArgumentsFromMetadata = ({
   if (!Array.isArray(meta?.nominalTargetTypeArguments)) {
     return undefined;
   }
-  const typeArguments = meta.nominalTargetTypeArguments as readonly Expr[];
-  const typeParameterNames = Array.isArray(meta?.nominalTargetTypeParameterNames)
-    ? meta.nominalTargetTypeParameterNames.filter(
-        (entry): entry is string => typeof entry === "string",
-      )
-    : [];
   return {
-    typeArguments,
-    typeParameterNames,
+    nominalTargetTypeArguments:
+      meta.nominalTargetTypeArguments as readonly Expr[],
+    nominalTargetTypeParameterNames: Array.isArray(
+      meta.nominalTargetTypeParameterNames,
+    )
+      ? meta.nominalTargetTypeParameterNames.filter(
+          (entry): entry is string => typeof entry === "string",
+        )
+      : [],
   };
+};
+
+const substituteTypeParameterExpr = (
+  expr: Expr,
+  substitutions: ReadonlyMap<string, Expr | undefined>,
+): Expr => {
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    return substitutions.get(expr.value) ?? expr;
+  }
+  if (!isForm(expr)) {
+    return expr;
+  }
+
+  const elements = expr
+    .toArray()
+    .map((entry) => substituteTypeParameterExpr(entry, substitutions));
+  const rebuilt = new Form({
+    location: expr.location?.clone(),
+    elements,
+  });
+  const result = isCallForm(expr) ? rebuilt.toCall() : rebuilt;
+  result.attributes = expr.attributes ? { ...expr.attributes } : undefined;
+  return result;
 };
 
 export const lowerNominalTargetTypeArgumentsFromMetadata = <TypeExpr>({

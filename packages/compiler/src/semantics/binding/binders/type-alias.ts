@@ -15,14 +15,18 @@ import {
   bindTypeExpr,
   ensureConstructorImport,
   ensureModuleMemberImport,
+  ensureStaticMethodImport,
 } from "./expressions.js";
 import {
   enumNamespaceMetadataFromAliasTarget,
   enumVariantTypeNamesFromAliasTarget,
+  importedSymbolTargetFromMetadata,
 } from "../../enum-namespace.js";
 import type { SymbolId } from "../../ids.js";
 import {
+  composeNominalTypeTargetMetadata,
   nominalTypeTargetMetadataFromAliasTarget,
+  nominalTypeTargetMetadataFromSource,
   resolveNominalTypeSymbol,
 } from "../../nominal-type-target.js";
 import { importedModuleIdFrom } from "../../imports/metadata.js";
@@ -192,7 +196,7 @@ const duplicateTypeAliasInScope = ({
   return undefined;
 };
 
-export const seedEnumAliasNamespaces = (ctx: BindingContext): void => {
+export const seedTypeAliasNamespaces = (ctx: BindingContext): void => {
   ctx.decls.typeAliases.forEach((alias) => {
     seedEnumVariantNamespace({
       aliasSymbol: alias.symbol,
@@ -202,7 +206,7 @@ export const seedEnumAliasNamespaces = (ctx: BindingContext): void => {
     });
   });
 
-  seedObjectAliasConstructorNamespaces(ctx);
+  seedNominalAliasStaticMethodNamespaces(ctx);
 };
 
 const seedEnumVariantNamespace = ({
@@ -269,7 +273,7 @@ const resolveObjectTypeSymbol = ({
   return symbol;
 };
 
-const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
+const seedNominalAliasStaticMethodNamespaces = (ctx: BindingContext): void => {
   const aliasConstructorSymbols = new Map<string, SymbolId>();
   let changed = true;
   while (changed) {
@@ -309,30 +313,18 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
       if (targetRecord.kind !== "type") {
         return;
       }
-      const aliasRecord = ctx.symbolTable.getSymbol(alias.symbol);
-      const aliasMetadata = aliasRecord.metadata as
-        | {
-            nominalTargetTypeArguments?: unknown;
-            nominalTargetTypeParameterNames?: unknown;
-          }
-        | undefined;
-      const targetMetadata = targetRecord.metadata as
-        | {
-            nominalTargetTypeArguments?: unknown;
-            nominalTargetTypeParameterNames?: unknown;
-          }
-        | undefined;
-      const canCopyTargetNominalMetadata =
-        (alias.typeParameters?.length ?? 0) === 0 &&
-        !Array.isArray(aliasMetadata?.nominalTargetTypeArguments) &&
-        Array.isArray(targetMetadata?.nominalTargetTypeArguments);
-      if (canCopyTargetNominalMetadata) {
-        ctx.symbolTable.setSymbolMetadata(alias.symbol, {
-          nominalTargetTypeArguments:
-            targetMetadata?.nominalTargetTypeArguments,
-          nominalTargetTypeParameterNames:
-            targetMetadata?.nominalTargetTypeParameterNames,
-        });
+      const nominalTargetMetadata = composeNominalTypeTargetMetadata({
+        alias: nominalTypeTargetMetadataFromAliasTarget({
+          target: alias.target,
+          typeParameterNames:
+            alias.typeParameters?.map((parameter) => parameter.name) ?? [],
+        }),
+        target: nominalTypeTargetMetadataFromSource({
+          source: targetRecord.metadata as Record<string, unknown> | undefined,
+        }),
+      });
+      if (nominalTargetMetadata) {
+        ctx.symbolTable.setSymbolMetadata(alias.symbol, nominalTargetMetadata);
       }
       ensureConstructorImport({
         targetSymbol,
@@ -340,31 +332,83 @@ const seedObjectAliasConstructorNamespaces = (ctx: BindingContext): void => {
         scope: aliasScope,
         ctx,
       });
-      const constructors = ctx.staticMethods.get(targetSymbol)?.get("init");
-      if (!constructors || constructors.size === 0) {
+      ensureImportedStaticMethods({
+        targetSymbol,
+        syntax: alias.target,
+        scope: aliasScope,
+        ctx,
+      });
+      const targetMethods = ctx.staticMethods.get(targetSymbol);
+      if (!targetMethods) {
         return;
       }
       const bucket = ctx.staticMethods.get(alias.symbol) ?? new Map();
-      const aliasConstructors = bucket.get("init") ?? new Set<SymbolId>();
-      const sizeBefore = aliasConstructors.size;
-      constructors.forEach((constructorSymbol) => {
-        const aliasConstructor = ensureAliasConstructorSymbol({
-          alias,
-          aliasScope,
-          constructorSymbol,
-          aliasConstructorSymbols,
-          ctx,
+      let aliasChanged = false;
+      targetMethods.forEach((methodSymbols, name) => {
+        const aliasMethods = bucket.get(name) ?? new Set<SymbolId>();
+        const sizeBefore = aliasMethods.size;
+        methodSymbols.forEach((methodSymbol) => {
+          const aliasMethod =
+            name === "init"
+              ? ensureAliasConstructorSymbol({
+                  alias,
+                  aliasScope,
+                  constructorSymbol: methodSymbol,
+                  aliasConstructorSymbols,
+                  ctx,
+                })
+              : methodSymbol;
+          aliasMethods.add(aliasMethod);
         });
-        aliasConstructors.add(aliasConstructor);
+        if (aliasMethods.size === sizeBefore) {
+          return;
+        }
+        bucket.set(name, aliasMethods);
+        aliasChanged = true;
+        changed = true;
       });
-      if (aliasConstructors.size === sizeBefore) {
+      if (!aliasChanged) {
         return;
       }
-      bucket.set("init", aliasConstructors);
       ctx.staticMethods.set(alias.symbol, bucket);
-      changed = true;
     });
   }
+};
+
+const ensureImportedStaticMethods = ({
+  targetSymbol,
+  syntax,
+  scope,
+  ctx,
+}: {
+  targetSymbol: SymbolId;
+  syntax: ParsedTypeAliasDecl["target"];
+  scope: ScopeId;
+  ctx: BindingContext;
+}): void => {
+  const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
+  const importedTarget = importedSymbolTargetFromMetadata(
+    targetRecord.metadata as Record<string, unknown> | undefined,
+  );
+  if (!importedTarget) {
+    return;
+  }
+  const dependency = ctx.dependencies.get(importedTarget.moduleId);
+  const methodNames = dependency?.staticMethods
+    .get(importedTarget.symbol)
+    ?.keys();
+  if (!methodNames) {
+    return;
+  }
+  Array.from(methodNames).forEach((memberName) =>
+    ensureStaticMethodImport({
+      targetSymbol,
+      memberName,
+      syntax,
+      scope,
+      ctx,
+    }),
+  );
 };
 
 const ensureAliasConstructorSymbol = ({

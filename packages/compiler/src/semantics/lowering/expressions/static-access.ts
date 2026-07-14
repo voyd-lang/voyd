@@ -328,15 +328,15 @@ const lowerStaticMethodCall = ({
     resolution,
     ctx,
   });
-  const aliasConstructorTypeArguments =
-    calleeExpr.value === "init"
-      ? lowerAliasConstructorTypeArgumentsForSymbol({
-          symbol: targetSymbol,
-          namespaceTypeArguments: combinedTypeArguments,
-          scope: scopes.current(),
-          ctx,
-        })
-      : { consumeNamespaceTypeArguments: false as const };
+  const aliasTargetTypeArguments = lowerAliasTargetTypeArgumentsForSymbol({
+    symbol: targetSymbol,
+    namespaceTypeArguments:
+      calleeExpr.value === "init"
+        ? combinedTypeArguments
+        : namespaceTypeArguments,
+    scope: scopes.current(),
+    ctx,
+  });
   const constructorResolution =
     callResolution.kind === "symbol" &&
     ctx.symbolTable.getSymbol(callResolution.symbol).kind === "type"
@@ -352,9 +352,18 @@ const lowerStaticMethodCall = ({
     ctx,
   });
   const callTypeArguments =
-    aliasConstructorTypeArguments.consumeNamespaceTypeArguments
-      ? aliasConstructorTypeArguments.typeArguments
+    calleeExpr.value === "init" &&
+    aliasTargetTypeArguments.consumeNamespaceTypeArguments
+      ? aliasTargetTypeArguments.typeArguments
       : typeArguments;
+  const callTargetTypeArguments =
+    calleeExpr.value === "init"
+      ? aliasTargetTypeArguments.consumeNamespaceTypeArguments
+        ? undefined
+        : namespaceTypeArguments
+      : aliasTargetTypeArguments.consumeNamespaceTypeArguments
+        ? aliasTargetTypeArguments.typeArguments
+        : namespaceTypeArguments;
 
   return ctx.builder.addExpression({
     kind: "expr",
@@ -368,9 +377,8 @@ const lowerStaticMethodCall = ({
         ? callTypeArguments
         : undefined,
     targetTypeArguments:
-      !aliasConstructorTypeArguments.consumeNamespaceTypeArguments &&
-      namespaceTypeArguments.length > 0
-        ? namespaceTypeArguments
+      callTargetTypeArguments && callTargetTypeArguments.length > 0
+        ? callTargetTypeArguments
         : undefined,
   });
 };
@@ -405,7 +413,7 @@ const lowerEnumNamespaceMemberTypeArguments = ({
   });
 };
 
-const lowerAliasConstructorTypeArgumentsForSymbol = ({
+const lowerAliasTargetTypeArgumentsForSymbol = ({
   symbol,
   namespaceTypeArguments,
   scope,
@@ -530,10 +538,10 @@ const lowerModuleQualifiedCall = ({
     const moduleName = ctx.symbolTable.getSymbol(moduleSymbol).name;
     throw new Error(`module ${moduleName} does not export ${calleeExpr.value}`);
   }
-  const aliasConstructorTypeArguments =
+  const aliasTargetTypeArguments =
     baseResolution.kind === "symbol" &&
     ctx.symbolTable.getSymbol(baseResolution.symbol).kind === "type"
-      ? lowerAliasConstructorTypeArgumentsForSymbol({
+      ? lowerAliasTargetTypeArgumentsForSymbol({
           symbol: baseResolution.symbol,
           namespaceTypeArguments: combinedTypeArguments,
           scope: scopes.current(),
@@ -557,8 +565,8 @@ const lowerModuleQualifiedCall = ({
     ctx,
   });
   const callTypeArguments =
-    aliasConstructorTypeArguments.consumeNamespaceTypeArguments
-      ? aliasConstructorTypeArguments.typeArguments
+    aliasTargetTypeArguments.consumeNamespaceTypeArguments
+      ? aliasTargetTypeArguments.typeArguments
       : typeArguments;
 
   return ctx.builder.addExpression({
@@ -573,7 +581,7 @@ const lowerModuleQualifiedCall = ({
         ? callTypeArguments
         : undefined,
     targetTypeArguments:
-      !aliasConstructorTypeArguments.consumeNamespaceTypeArguments &&
+      !aliasTargetTypeArguments.consumeNamespaceTypeArguments &&
       targetCallTypeArguments &&
       targetCallTypeArguments.length > 0
         ? targetCallTypeArguments
