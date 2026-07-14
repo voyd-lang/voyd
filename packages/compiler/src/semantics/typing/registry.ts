@@ -111,6 +111,107 @@ const normalizeConstraintTypeParameters = ({
   declParams?.map((param) => ({ symbol: param.symbol })) ??
   [];
 
+const childTypeExpressions = (expr: HirTypeExpr): readonly HirTypeExpr[] => {
+  switch (expr.typeKind) {
+    case "named":
+      return expr.typeArguments ?? [];
+    case "object":
+      return expr.fields.map((field) => field.type);
+    case "tuple":
+      return expr.elements;
+    case "union":
+    case "intersection":
+      return expr.members;
+    case "function":
+      return [
+        ...(expr.typeParameters?.flatMap((param) => [
+          param.constraint,
+          param.defaultType,
+        ]) ?? []),
+        ...expr.parameters.map((parameter) => parameter.type),
+        expr.returnType,
+        expr.effectType,
+      ].filter((child): child is HirTypeExpr => child !== undefined);
+    case "self":
+      return [];
+  }
+};
+
+const referencedTypeParameterSymbols = ({
+  expr,
+  parameterSymbols,
+  out = new Set<SymbolId>(),
+}: {
+  expr: HirTypeExpr | undefined;
+  parameterSymbols: ReadonlySet<SymbolId>;
+  out?: Set<SymbolId>;
+}): ReadonlySet<SymbolId> => {
+  if (!expr) {
+    return out;
+  }
+
+  switch (expr.typeKind) {
+    case "named":
+      if (
+        typeof expr.symbol === "number" &&
+        parameterSymbols.has(expr.symbol)
+      ) {
+        out.add(expr.symbol);
+      }
+      break;
+    default:
+      break;
+  }
+
+  childTypeExpressions(expr).forEach((child) =>
+    referencedTypeParameterSymbols({ expr: child, parameterSymbols, out }),
+  );
+  return out;
+};
+
+const orderConstraintTypeParametersByDependency = (
+  params: readonly ConstraintTypeParameterDecl[],
+): readonly ConstraintTypeParameterDecl[] => {
+  const parameterSymbols = new Set(params.map((param) => param.symbol));
+  const paramsBySymbol = new Map(
+    params.map((param) => [param.symbol, param] as const),
+  );
+  const dependencies = new Map(
+    params.map((param) => [
+      param.symbol,
+      referencedTypeParameterSymbols({
+        expr: param.constraint,
+        parameterSymbols,
+      }),
+    ]),
+  );
+  const ordered: ConstraintTypeParameterDecl[] = [];
+  const visiting = new Set<SymbolId>();
+  const visited = new Set<SymbolId>();
+
+  const visit = (param: ConstraintTypeParameterDecl): void => {
+    if (visited.has(param.symbol) || visiting.has(param.symbol)) {
+      return;
+    }
+    visiting.add(param.symbol);
+    dependencies.get(param.symbol)?.forEach((dependencySymbol) => {
+      if (dependencySymbol === param.symbol) {
+        return;
+      }
+      const dependency = paramsBySymbol.get(dependencySymbol);
+      if (dependency) {
+        visit(dependency);
+      }
+    });
+    visiting.delete(param.symbol);
+    visited.add(param.symbol);
+    ordered.push(param);
+  };
+
+  params.forEach(visit);
+  return ordered;
+};
+
 const resolveConstraintTypeParameters = ({
   params,
   ctx,
@@ -136,18 +237,24 @@ const resolveConstraintTypeParameters = ({
     };
   });
 
-  typeParams.forEach((param, index) => {
-    const constraintExpr = params[index]?.constraint;
+  const typeParamsBySymbol = new Map(
+    typeParams.map((param) => [param.symbol, param] as const),
+  );
+  orderConstraintTypeParametersByDependency(params).forEach((declaration) => {
+    const param = typeParamsBySymbol.get(declaration.symbol)!;
+    const constraintExpr = declaration.constraint;
     if (!constraintExpr) {
       return;
     }
-    param.constraint = resolveTypeExpr(
+    const constraint = resolveTypeExpr(
       constraintExpr,
       ctx,
       state,
       ctx.primitives.unknown,
       typeParamMap,
     );
+    param.constraint = constraint;
+    ctx.typeParameterConstraints.set(param.typeParam, constraint);
   });
 
   return { typeParams, typeParamMap };

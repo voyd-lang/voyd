@@ -445,6 +445,11 @@ export const registerImportedObjectTemplate = ({
     typeParam: mapTypeParam(param.typeParam, typeParamMap, ctx),
     constraint: param.constraint ? translation(param.constraint) : undefined,
   }));
+  params.forEach((param) => {
+    if (typeof param.constraint === "number") {
+      ctx.typeParameterConstraints.set(param.typeParam, param.constraint);
+    }
+  });
 
   const dependencyTraitSymbols = new Set<SymbolId>();
   const addDependencyTraitSymbols = (

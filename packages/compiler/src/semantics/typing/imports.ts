@@ -2,7 +2,11 @@ import { createTypingState } from "./context.js";
 import {
   ensureObjectType,
   ensureTraitType,
+  getSymbolName,
+  resolveTypeExpr,
   resolveTypeAlias,
+  typeSatisfies,
+  validateObjectTypeArgumentConstraints,
 } from "./type-system.js";
 import { applyImportableMetadata } from "../imports/metadata.js";
 import type {
@@ -11,7 +15,7 @@ import type {
   FunctionSignature,
   TypingContext,
 } from "./types.js";
-import type { HirNamedTypeExpr } from "../hir/index.js";
+import type { HirNamedTypeExpr, HirTypeExpr } from "../hir/index.js";
 import type {
   SymbolId,
   TypeId,
@@ -295,8 +299,18 @@ export const resolveImportedTypeExpr = ({
     );
   }
 
+  const objectConstraintsValidated = ctx.objects.getTemplate(symbol)
+    ? validateObjectTypeArgumentConstraints(
+        symbol,
+        ctx,
+        createTypingState(state.mode),
+        typeArgs,
+      )
+    : false;
+
   const depCtx = makeDependencyContext(dependency, ctx);
   const depState = createTypingState(state.mode);
+  const localValidationState = createTypingState(state.mode);
 
   if (
     typingContextsShareInterners({
@@ -306,10 +320,31 @@ export const resolveImportedTypeExpr = ({
       targetEffects: ctx.effects,
     })
   ) {
-    const aliasResolved = resolveImportedAlias(target.symbol, typeArgs, depCtx, depState);
+    validateImportedAliasConstraints({
+      symbol: target.symbol,
+      dependencyArgs: typeArgs,
+      localArgs: typeArgs,
+      dependencyCtx: depCtx,
+      dependencyState: depState,
+      localCtx: ctx,
+      localState: localValidationState,
+      translateToLocal: (type) => type,
+    });
+    const aliasResolved = resolveImportedAlias(
+      target.symbol,
+      typeArgs,
+      depCtx,
+      depState,
+    );
     const resolved =
       aliasResolved ??
-      resolveImportedObject(target.symbol, typeArgs, depCtx, depState) ??
+      resolveImportedObject(
+        target.symbol,
+        typeArgs,
+        depCtx,
+        depState,
+        objectConstraintsValidated,
+      ) ??
       resolveImportedTrait(target.symbol, typeArgs, depCtx, depState);
     if (typeof resolved === "number") {
       ensureImportedOwnerTemplatesAvailable({
@@ -350,10 +385,31 @@ export const resolveImportedTypeExpr = ({
   forwardParamMap.forEach((targetParam, sourceParam) => {
     reverseParamMap.set(targetParam, sourceParam);
   });
-  const aliasResolved = resolveImportedAlias(target.symbol, depArgs, depCtx, depState);
+  validateImportedAliasConstraints({
+    symbol: target.symbol,
+    dependencyArgs: depArgs,
+    localArgs: typeArgs,
+    dependencyCtx: depCtx,
+    dependencyState: depState,
+    localCtx: ctx,
+    localState: localValidationState,
+    translateToLocal: back,
+  });
+  const aliasResolved = resolveImportedAlias(
+    target.symbol,
+    depArgs,
+    depCtx,
+    depState,
+  );
   const resolved =
     aliasResolved ??
-    resolveImportedObject(target.symbol, depArgs, depCtx, depState) ??
+    resolveImportedObject(
+      target.symbol,
+      depArgs,
+      depCtx,
+      depState,
+      objectConstraintsValidated,
+    ) ??
     resolveImportedTrait(target.symbol, depArgs, depCtx, depState);
 
   const localType = typeof resolved === "number" ? back(resolved) : undefined;
@@ -381,17 +437,129 @@ const resolveImportedAlias = (
   return resolveTypeAlias(symbol, ctx, state, args);
 };
 
+const validateImportedAliasConstraints = ({
+  symbol,
+  dependencyArgs,
+  localArgs,
+  dependencyCtx,
+  dependencyState,
+  localCtx,
+  localState,
+  translateToLocal,
+}: {
+  symbol: SymbolId;
+  dependencyArgs: readonly TypeId[];
+  localArgs: readonly TypeId[];
+  dependencyCtx: TypingContext;
+  dependencyState: ReturnType<typeof createTypingState>;
+  localCtx: TypingContext;
+  localState: ReturnType<typeof createTypingState>;
+  translateToLocal: (type: TypeId) => TypeId;
+}): void => {
+  const template = dependencyCtx.typeAliases.getTemplate(symbol);
+  if (!template || template.params.length !== dependencyArgs.length) {
+    return;
+  }
+
+  const typeParamMap = new Map(
+    template.params.map((param, index) => [
+      param.symbol,
+      dependencyArgs[index]!,
+    ]),
+  );
+  const assumptionsByTypeParam = new Map<
+    TypeParamId,
+    { expression: HirTypeExpr; resolved: TypeId }[]
+  >();
+  template.params.forEach((param, index) => {
+    if (!param.constraint) {
+      return;
+    }
+    const localArg = localArgs[index] ?? localCtx.primitives.unknown;
+    if (localArg === localCtx.primitives.unknown) {
+      return;
+    }
+    const dependencyConstraint = resolveTypeExpr(
+      param.constraint,
+      dependencyCtx,
+      dependencyState,
+      dependencyCtx.primitives.unknown,
+      typeParamMap,
+    );
+    const localConstraint = translateToLocal(dependencyConstraint);
+    ensureImportedOwnerTemplatesAvailable({
+      types: [localConstraint],
+      ctx: localCtx,
+    });
+    if (!typeSatisfies(localArg, localConstraint, localCtx, localState)) {
+      throw new Error(
+        `type argument for ${getSymbolName(
+          param.symbol,
+          dependencyCtx,
+        )} does not satisfy constraint for type alias ${getSymbolName(
+          symbol,
+          dependencyCtx,
+        )}`,
+      );
+    }
+
+    const dependencyArg = dependencyArgs[index]!;
+    const dependencyArgDesc = dependencyCtx.arena.get(dependencyArg);
+    if (dependencyArgDesc.kind === "type-param-ref") {
+      const assumptions = assumptionsByTypeParam.get(dependencyArgDesc.param);
+      if (assumptions) {
+        assumptions.push({
+          expression: param.constraint,
+          resolved: dependencyConstraint,
+        });
+        return;
+      }
+      assumptionsByTypeParam.set(dependencyArgDesc.param, [
+        { expression: param.constraint, resolved: dependencyConstraint },
+      ]);
+    }
+  });
+
+  assumptionsByTypeParam.forEach((assumptions, typeParam) => {
+    // Caller-side validation makes these bounds safe to assume while the
+    // dependency resolves nested constrained types in the alias target.
+    const unique = assumptions.filter(
+      ({ resolved }, index) =>
+        assumptions.findIndex((entry) => entry.resolved === resolved) === index,
+    );
+    const constraint =
+      unique.length === 1
+        ? unique[0]!.resolved
+        : resolveTypeExpr(
+            {
+              typeKind: "intersection",
+              ast: unique[0]!.expression.ast,
+              span: unique[0]!.expression.span,
+              members: unique.map(({ expression }) => expression),
+            },
+            dependencyCtx,
+            dependencyState,
+            dependencyCtx.primitives.unknown,
+            typeParamMap,
+          );
+    dependencyCtx.typeParameterConstraints.set(typeParam, constraint);
+  });
+};
+
 const resolveImportedObject = (
   symbol: SymbolId,
   args: readonly TypeId[],
   ctx: TypingContext,
   state: ReturnType<typeof createTypingState>,
+  constraintsAlreadyValidated: boolean,
 ): TypeId | undefined => {
   const template = ctx.objects.getTemplate(symbol);
   if (!template) {
     return undefined;
   }
-  return ensureObjectType(symbol, ctx, state, args)?.type;
+  return ensureObjectType(symbol, ctx, state, args, {
+    constraintsAlreadyValidated,
+  })?.type;
 };
 
 const resolveImportedTrait = (

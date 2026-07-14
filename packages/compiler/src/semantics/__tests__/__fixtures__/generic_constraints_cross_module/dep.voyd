@@ -20,3 +20,28 @@ impl<K: Key<K>, V> DictLike<K, V>
 
   pub fn key_matches(self, key: K) -> bool
     self.key.matches(key)
+
+pub trait Persistable
+  fn id(self) -> i32
+
+pub obj Repo<T: Persistable> {
+  value: T
+}
+
+pub type RepoAlias<T: Persistable> = Repo<T>
+
+pub trait Named
+  fn name(self) -> String
+
+pub obj Pair<A: Persistable, B: Named> {
+  first: A,
+  second: B
+}
+
+pub type PairAlias<A: Persistable, B: Named> = Pair<A, B>
+
+pub obj StructuralRepo<T: { id: i32 }> {
+  value: T
+}
+
+pub type StructuralRepoAlias<T: { id: i32 }> = StructuralRepo<T>

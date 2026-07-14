@@ -2,9 +2,13 @@ obj Animal {
   id: i32
 }
 
+obj Named {
+  name: String
+}
+
 obj Box<T: Animal> {
   value: T
 }
 
-fn weaker_bound<T>(value: T) -> Box<T>
+fn mismatched_bound<T: Named>(value: T) -> Box<T>
   Box<T> { value: value }

@@ -69,6 +69,7 @@ export interface TypingResult {
   typeAliases: TypeAliasStore;
   objects: ObjectStore;
   traits: TraitStore;
+  typeParameterConstraints: ReadonlyMap<TypeParamId, TypeId>;
   memberMetadata: ReadonlyMap<SymbolId, MemberMetadata>;
   primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;
@@ -722,6 +723,8 @@ export interface TypingContext {
   functions: FunctionStore;
   objects: ObjectStore;
   traits: TraitStore;
+  /** Declared bounds keyed by the arena-local type parameter they constrain. */
+  typeParameterConstraints: Map<TypeParamId, TypeId>;
   typeAliases: TypeAliasStore;
   primitives: PrimitiveTypes;
   intrinsicTypes: Map<string, TypeId>;

@@ -93,6 +93,7 @@ const snapshotTypingResult = ({
     typeAliases: ctx.typeAliases,
     objects: ctx.objects,
     traits: ctx.traits,
+    typeParameterConstraints: new Map(ctx.typeParameterConstraints),
     primitives: ctx.primitives,
     effects: ctx.effects,
     intrinsicTypes: ctx.intrinsicTypes,

@@ -109,6 +109,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     functions,
     objects,
     traits,
+    typeParameterConstraints: new Map(),
     typeAliases,
     primitives: {
       cache: new Map(),
