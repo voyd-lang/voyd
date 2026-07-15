@@ -54,6 +54,11 @@ type DiagnosticParamsMap = {
     | { kind: "missing-export"; moduleId: string; target: string }
     | { kind: "missing-module-identifier" }
     | {
+        kind: "ambiguous-namespace-member";
+        namespace: string;
+        member: string;
+      }
+    | {
         kind: "out-of-scope-export";
         moduleId: string;
         target: string;
@@ -352,6 +357,8 @@ export const diagnosticsRegistry: {
           return `Module ${params.moduleId} does not export ${params.target}`;
         case "missing-module-identifier":
           return "missing module identifier for import";
+        case "ambiguous-namespace-member":
+          return `Cannot import ${params.namespace}::${params.member}; the namespace contains multiple distinct members named ${params.member}`;
         case "out-of-scope-export":
           return `Module ${params.moduleId} export ${params.target} is not visible here (visibility: ${params.visibility})`;
         case "instance-member-import": {
@@ -903,7 +910,7 @@ export const diagnosticsRegistry: {
     hints: [
       {
         message:
-          "Type aliases cannot be constructed as values; for structural aliases use '{ ... }', and for nominal construction use an object type value.",
+          "Types are not values; construct nominal types with 'Type(...)' or 'Type { ... }', and construct structural values with '{ ... }'.",
       },
       {
         message:

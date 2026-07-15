@@ -784,14 +784,14 @@ pub obj Water {}
 pub type Drink<T> = Coffee<T> | Tea<T> | Water
 
 pub fn make<T>(size: T) -> Drink<T>
-  Drink::Coffee<T> { size }
+  Drink::Coffee<T>(size: size)
 `,
       [`${root}${sep}main.voyd`]: `
 use src::drinks::{ Drink, make }
 
 pub fn main() -> i32
   let brewed: Drink<i32> = make(12)
-  let poured: Drink<i32> = Drink::Coffee<i32> { size: 8 }
+  let poured: Drink<i32> = Drink::Coffee<i32>(size: 8)
   match(brewed)
     Drink::Coffee { size }:
       match(poured)
@@ -814,11 +814,25 @@ pub fn main() -> i32
       host,
     });
 
-    const { diagnostics } = analyzeModules({ graph });
+    const { semantics, diagnostics } = analyzeModules({ graph });
     expect(diagnostics).toHaveLength(0);
     expect(diagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(
       false,
     );
+    const fieldwiseLiterals = Array.from(semantics.values()).flatMap((result) =>
+      Array.from(result.hir.expressions.values()).flatMap((expr) =>
+        expr.exprKind === "object-literal" && expr.literalKind === "nominal"
+          ? [expr]
+          : [],
+      ),
+    );
+    expect(fieldwiseLiterals).toHaveLength(2);
+    fieldwiseLiterals.forEach((literal) => {
+      expect(literal.target?.typeKind).toBe("named");
+      if (literal.target?.typeKind === "named") {
+        expect(literal.target.typeArguments).toHaveLength(1);
+      }
+    });
   });
 
   it("preserves outer generic args for namespaced type members", async () => {

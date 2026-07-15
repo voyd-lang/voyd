@@ -49,6 +49,19 @@ use src::math::all
 
 Bare paths are not valid in `use` declarations.
 
+The exception is a nominal union or enum alias already in scope. Its member
+namespace can be imported directly, whether the alias is local or imported.
+
+```voyd
+use src::drinks::{ Drink }
+use Drink::{ Coffee, Tea }
+use Drink::all
+```
+
+For a locally declared enum, its variant names are already in the declaring
+module's scope; importing them again is accepted as an idempotent namespace
+selection and is mainly useful for consistency or re-export declarations.
+
 ## Re-exports
 
 Use `pub use` to re-export names.

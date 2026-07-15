@@ -29,14 +29,11 @@ const symbolsNamedInScope = ({
   skipSymbol?: SymbolId;
 }): ScopeSymbol[] => {
   const symbols: ScopeSymbol[] = [];
-  for (const symbolId of ctx.symbolTable.symbolsInScope(scope)) {
+  for (const symbolId of ctx.symbolTable.symbolsNamedInScope(name, scope)) {
     if (symbolId === skipSymbol) {
       continue;
     }
     const record = ctx.symbolTable.getSymbol(symbolId);
-    if (record.name !== name) {
-      continue;
-    }
     symbols.push({
       symbolId,
       record,

@@ -92,6 +92,7 @@ export const createTypingContext = (inputs: TypingInputs): TypingContext => {
     dependencies,
     importsByLocal,
     importAliasesByModule,
+    sourceImportLocals: new Set(inputs.sourceImportLocals ?? []),
     arena,
     table,
     effects,

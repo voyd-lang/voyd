@@ -425,6 +425,110 @@ export const resolveImportedTypeExpr = ({
   return localType;
 };
 
+export const resolveImportedAliasInferenceTarget = ({
+  expr,
+  typeArgs,
+  ctx,
+  state,
+}: {
+  expr: HirNamedTypeExpr;
+  typeArgs: readonly TypeId[];
+  ctx: TypingContext;
+  state: { mode: TypeCheckMode };
+}): TypeId | undefined => {
+  const symbol = expr.symbol;
+  if (typeof symbol !== "number") {
+    return undefined;
+  }
+  const target = importTargetFor(symbol, ctx);
+  const dependency = target ? ctx.dependencies.get(target.moduleId) : undefined;
+  if (!target || !dependency) {
+    return undefined;
+  }
+
+  const depCtx = makeDependencyContext(dependency, ctx);
+  const template = depCtx.typeAliases.getTemplate(target.symbol);
+  if (!template || template.params.length !== typeArgs.length) {
+    return undefined;
+  }
+  const depState = createTypingState(state.mode);
+  const resolveInferenceTarget = (args: readonly TypeId[]): TypeId => {
+    const typeParamMap = new Map(
+      template.params.map((param, index) => [param.symbol, args[index]!]),
+    );
+    template.params.forEach((param, index) => {
+      if (!param.constraint) {
+        return;
+      }
+      const argument = args[index];
+      if (typeof argument !== "number") {
+        return;
+      }
+      const argumentDesc = depCtx.arena.get(argument);
+      if (argumentDesc.kind !== "type-param-ref") {
+        return;
+      }
+      const constraint = resolveTypeExpr(
+        param.constraint,
+        depCtx,
+        depState,
+        depCtx.primitives.unknown,
+        typeParamMap,
+      );
+      depCtx.typeParameterConstraints.set(argumentDesc.param, constraint);
+    });
+    return resolveTypeExpr(
+      template.target,
+      depCtx,
+      depState,
+      depCtx.primitives.unknown,
+      typeParamMap,
+    );
+  };
+
+  if (
+    typingContextsShareInterners({
+      sourceArena: depCtx.arena,
+      targetArena: ctx.arena,
+      sourceEffects: depCtx.effects,
+      targetEffects: ctx.effects,
+    })
+  ) {
+    return resolveInferenceTarget(typeArgs);
+  }
+
+  const forwardParamMap = new Map<TypeParamId, TypeParamId>();
+  const forward = createTranslation({
+    sourceArena: ctx.arena,
+    targetArena: depCtx.arena,
+    sourceEffects: ctx.effects,
+    targetEffects: depCtx.effects,
+    paramMap: forwardParamMap,
+    cache: new Map(),
+    mapSymbol: (owner) =>
+      mapLocalSymbolToDependency({ owner, dependency, ctx }),
+  });
+  const reverseParamMap = new Map<TypeParamId, TypeParamId>();
+  const back = createTranslation({
+    sourceArena: depCtx.arena,
+    targetArena: ctx.arena,
+    sourceEffects: depCtx.effects,
+    targetEffects: ctx.effects,
+    paramMap: reverseParamMap,
+    cache: new Map(),
+    mapSymbol: (owner) =>
+      mapDependencySymbolToLocal({ owner, dependency, ctx }),
+  });
+  const dependencyArgs = typeArgs.map((arg) => forward(arg));
+  forwardParamMap.forEach((targetParam, sourceParam) => {
+    reverseParamMap.set(targetParam, sourceParam);
+  });
+  const dependencyTarget = resolveInferenceTarget(dependencyArgs);
+  const localTarget = back(dependencyTarget);
+  ensureImportedOwnerTemplatesAvailable({ types: [localTarget], ctx });
+  return localTarget;
+};
+
 const resolveImportedAlias = (
   symbol: SymbolId,
   args: readonly TypeId[],

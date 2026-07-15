@@ -55,6 +55,7 @@ export interface TypingInputs {
     local: SymbolId;
     target?: { moduleId: string; symbol: SymbolId };
   }[];
+  sourceImportLocals?: readonly SymbolId[];
   moduleId?: string;
   packageId?: string;
   moduleExports?: Map<string, ModuleExportTable>;
@@ -87,6 +88,7 @@ export interface TypingResult {
   callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
   callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
   callTraitDispatches: ReadonlySet<HirExprId>;
+  sourceImportLocals: ReadonlySet<SymbolId>;
   functionInstantiationInfo: ReadonlyMap<
     SymbolRefKey,
     ReadonlyMap<string, readonly TypeId[]>
@@ -711,6 +713,7 @@ export interface TypingContext {
   dependencies: Map<string, DependencySemantics>;
   importsByLocal: Map<SymbolId, { moduleId: string; symbol: SymbolId }>;
   importAliasesByModule: Map<string, Map<SymbolId, SymbolId>>;
+  sourceImportLocals: ReadonlySet<SymbolId>;
   arena: TypeArena;
   table: TypeTable;
   effects: EffectTable;

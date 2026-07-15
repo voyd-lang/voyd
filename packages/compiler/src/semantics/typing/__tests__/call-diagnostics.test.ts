@@ -203,23 +203,167 @@ pub fn main() -> i32
     expect(caught.diagnostic.message).toMatch(/expected major, got no label/i);
   });
 
-  it("diagnoses constructor calls on types without value constructors", () => {
+  it("constructs nominal fields when a type has no explicit init", () => {
     const ast = loadAst("constructor_call_without_init.voyd");
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
 
-    let caught: unknown;
-    try {
-      semanticsPipeline(ast);
-    } catch (error) {
-      caught = error;
-    }
+  it("supports fieldwise calls for empty, optional, value, generic, and alias targets", () => {
+    const ast = parse(
+      `
+obj Empty {}
+obj Some<T> { value: T }
+obj None {}
+type Optional<T> = Some<T> | None
+obj OptionalBox { value?: i32 }
+val Point { x: i32, y: i32 }
+obj Box<T> { value: T }
+type BoxAlias<T> = Box<T>
+obj Animal { id: i32 }
+obj Dog: Animal { id: i32 }
+obj AnimalBox<T: Animal> { value: T }
+type AnimalBoxAlias<T: Animal> = AnimalBox<T>
 
-    expect(caught instanceof DiagnosticError).toBe(true);
-    if (!(caught instanceof DiagnosticError)) {
-      return;
-    }
+pub fn main() -> i32
+  let _empty = Empty()
+  let _optional = OptionalBox()
+  let point = Point(y: 2, x: 1)
+  let box = Box(value: 3)
+  let alias = BoxAlias(value: 4)
+  let constrained = AnimalBoxAlias(value: Dog(id: 5))
+  point.x + point.y + box.value + alias.value + constrained.value.id
+`,
+      "/proj/src/fieldwise-calls.voyd",
+    );
 
-    expect(caught.diagnostic.code).toBe("TY0041");
-    expect(caught.diagnostic.message).toMatch(/is a type, not a value/i);
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+    expect(
+      Array.from(result.hir.expressions.values()).filter(
+        (expr) => expr.exprKind === "object-literal" && expr.literalKind === "nominal",
+      ),
+    ).toHaveLength(7);
+  });
+
+  it("rejects conflicting inferred arguments for fieldwise aliases", () => {
+    const ast = parse(
+      `
+obj Pair<A, B> { first: A, second: B }
+type Same<T> = Pair<T, T>
+
+pub fn main() -> i32
+  let _pair = Same(first: 1, second: true)
+  0
+`,
+      "/proj/src/fieldwise-alias-conflicting-inference.voyd",
+    );
+
+    expect(() => semanticsPipeline(ast)).toThrow(
+      expect.objectContaining({
+        diagnostic: expect.objectContaining({ code: "TY0027" }),
+      }),
+    );
+  });
+
+  it("reports missing fields for fieldwise calls", () => {
+    const ast = parse(
+      `
+obj Person { age: i32 }
+
+pub fn main() -> i32
+  let _person = Person()
+  0
+`,
+      "/proj/src/fieldwise-call-missing-field.voyd",
+    );
+
+    expect(() => semanticsPipeline(ast)).toThrow(
+      expect.objectContaining({ diagnostic: expect.objectContaining({ code: "TY0037" }) }),
+    );
+  });
+
+  it("rejects excess explicit type arguments on fieldwise aliases", () => {
+    const ast = parse(
+      `
+obj Box<T> { value: T }
+type BoxAlias<T> = Box<T>
+
+pub fn main() -> i32
+  let _box = BoxAlias<i32, bool>(value: 1)
+  0
+`,
+      "/proj/src/fieldwise-alias-extra-type-argument.voyd",
+    );
+
+    expect(() => semanticsPipeline(ast)).toThrow(/argument count mismatch/i);
+  });
+
+  it("rejects excess explicit type arguments on direct fieldwise calls", () => {
+    const ast = parse(
+      `
+obj Box<T> { value: T }
+
+pub fn main() -> i32
+  let _box = Box<i32, bool>(value: 1)
+  0
+`,
+      "/proj/src/fieldwise-extra-type-argument.voyd",
+    );
+
+    expect(() => semanticsPipeline(ast)).toThrow(/argument count mismatch/i);
+  });
+
+  it("keeps brace construction compatible with union member type arguments", () => {
+    const ast = parse(
+      `
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+pub fn main() -> i32
+  let _value: Option<i32> = None<i32> {}
+  0
+`,
+      "/proj/src/brace-union-member-type-argument.voyd",
+    );
+
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects uninferable generic alias arguments in fieldwise calls", () => {
+    const ast = parse(
+      `
+obj Box<T> { value: T }
+type Alias<T, U> = Box<T>
+
+pub fn main() -> i32
+  let box = Alias(value: 1)
+  box.value
+`,
+      "/proj/src/fieldwise-alias-unresolved-type-argument.voyd",
+    );
+
+    expect(() => semanticsPipeline(ast)).toThrow(/missing 1 type argument/i);
+  });
+
+  it("infers zero-field generic construction from the expected union type", () => {
+    const ast = parse(
+      `
+obj Ready<T> {}
+obj Other {}
+type Signal<T> = Ready<T> | Other
+
+pub fn main() -> i32
+  let _signal: Signal<i32> = Ready()
+  0
+`,
+      "/proj/src/fieldwise-call-expected-type.voyd",
+    );
+
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
   });
 
   it("infers generic constructor type arguments for zero-arg calls from expected types", () => {

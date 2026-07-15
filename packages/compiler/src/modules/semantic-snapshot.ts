@@ -57,6 +57,7 @@ export const cloneSemanticsForTypingState = ({
       callTypeArguments: cloneNestedMap(typing.callTypeArguments),
       callInstanceKeys: cloneNestedMap(typing.callInstanceKeys),
       callTraitDispatches: new Set(typing.callTraitDispatches),
+      sourceImportLocals: new Set(typing.sourceImportLocals),
       functionInstantiationInfo: cloneNestedMap(typing.functionInstantiationInfo),
       functionInstanceExprTypes: cloneNestedMap(typing.functionInstanceExprTypes),
       functionInstanceValueTypes: cloneNestedMap(typing.functionInstanceValueTypes),

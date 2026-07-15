@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 import { semanticsPipeline } from "../../pipeline.js";
 import { loadAst } from "../../__tests__/load-ast.js";
 import { DiagnosticError } from "../../../diagnostics/index.js";
+import { parse } from "../../../parser/index.js";
 
 describe("value position diagnostics", () => {
   it("reports type aliases used as values with a direct typing diagnostic", () => {
@@ -68,5 +69,35 @@ describe("value position diagnostics", () => {
     const source = readFileSync(fixturePath, "utf8");
     const { start, end } = caught.diagnostic.span;
     expect(source.slice(start, end)).toContain("scalar.x");
+  });
+
+  it("rejects a qualified union member type used as a value", () => {
+    const ast = parse(
+      `
+obj Apple {}
+obj Banana {}
+type Fruit = Apple | Banana
+
+pub fn main() -> i32
+  let _fruit: Fruit = Fruit::Apple
+  0
+`,
+      "/proj/src/qualified-type-as-value.voyd",
+    );
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.code).toBe("TY0041");
+    expect(caught.diagnostic.message).toMatch(/Apple.*type.*not a value/i);
   });
 });

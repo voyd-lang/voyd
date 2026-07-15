@@ -137,6 +137,9 @@ export const semanticsPipeline = (
       arena: typingState?.arena,
       effects: typingState?.effects,
       imports: binding.imports,
+      sourceImportLocals: binding.uses.flatMap((use) =>
+        use.entries.flatMap((entry) => entry.imports.map((entry) => entry.local)),
+      ),
       moduleId: module.id,
       packageId: binding.packageId,
       moduleExports: exports ?? new Map(),

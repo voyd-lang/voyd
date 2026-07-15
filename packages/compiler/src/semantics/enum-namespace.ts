@@ -185,6 +185,16 @@ export const enumVariantTypeNamesFromAliasTarget = (
   return dedupeEnumNamespaceMembers(collected).map((entry) => entry.name);
 };
 
+export const enumVariantTypeTargetsFromAliasTarget = (
+  target: Expr | undefined,
+): readonly { name: string; target: Expr }[] | undefined => {
+  const collected = collectUnionNominalTargets(target);
+  if (!collected || collected.length === 0) {
+    return undefined;
+  }
+  return collected;
+};
+
 export const enumNamespaceMemberNamesFromMetadata = (
   source?: Record<string, unknown>,
 ): string[] | undefined => {
@@ -213,6 +223,26 @@ const collectUnionNominalMembers = (
   return nominal
     ? [{ name: nominal.name, typeArguments: nominal.typeArguments }]
     : undefined;
+};
+
+const collectUnionNominalTargets = (
+  expr: Expr | undefined,
+): { name: string; target: Expr }[] | undefined => {
+  if (!expr) {
+    return undefined;
+  }
+
+  if (isForm(expr) && expr.calls("|") && expr.length === 3) {
+    const left = collectUnionNominalTargets(expr.at(1));
+    const right = collectUnionNominalTargets(expr.at(2));
+    if (!left || !right) {
+      return undefined;
+    }
+    return [...left, ...right];
+  }
+
+  const nominal = extractNominalTypeTarget(expr);
+  return nominal ? [{ name: nominal.name, target: expr }] : undefined;
 };
 
 const dedupeEnumNamespaceMembers = (

@@ -1,6 +1,7 @@
 import type { ScopeId, SymbolId } from "../ids.js";
 import type {
   ScopeInfo,
+  SymbolAliasBinding,
   SymbolKind,
   SymbolRecord,
   SymbolTableInit,
@@ -46,6 +47,7 @@ export class SymbolTable {
   private readonly scopeBuckets: ScopeBucket[] = [];
   private readonly symbolRecords: SymbolRecord[] = [];
   private readonly scopeStack: ScopeId[] = [];
+  private readonly aliasBindings: SymbolAliasBinding[] = [];
   readonly rootScope: ScopeId;
 
   constructor(init: SymbolTableInit) {
@@ -124,6 +126,26 @@ export class SymbolTable {
     return id;
   }
 
+  bindAlias(
+    { name, symbol }: Pick<SymbolAliasBinding, "name" | "symbol">,
+    scope: ScopeId = this.currentScope()
+  ): void {
+    if (RESERVED_SYMBOL_NAMES.has(name)) {
+      throw new Error(`cannot declare reserved identifier ${name}`);
+    }
+    if (!this.symbolRecords[symbol]) {
+      throw new Error(`symbol ${symbol} does not exist`);
+    }
+    const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
+    const hits = bucket.nameIndex.get(name);
+    if (hits) {
+      hits.push(symbol);
+    } else {
+      bucket.nameIndex.set(name, [symbol]);
+    }
+    this.aliasBindings.push({ name, symbol, scope });
+  }
+
   getScope(id: ScopeId): Readonly<ScopeInfo> {
     return cloneScopeInfo(
       ensureScopeExists(this.scopeBuckets[id], id).info
@@ -145,6 +167,11 @@ export class SymbolTable {
 
   resolveAll(name: string, fromScope: ScopeId): readonly SymbolId[] {
     return this.resolveAllInternal(name, fromScope);
+  }
+
+  symbolsNamedInScope(name: string, scope: ScopeId): readonly SymbolId[] {
+    const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
+    return [...(bucket.nameIndex.get(name) ?? [])];
   }
 
   resolveWhere(
@@ -283,6 +310,9 @@ export class SymbolTable {
       nextSymbol: this.nextSymbol,
       scopes: this.scopeBuckets.map((bucket) => cloneScopeInfo(bucket.info)),
       symbols: this.symbolRecords.map(cloneSymbolRecord),
+      ...(this.aliasBindings.length > 0
+        ? { aliases: this.aliasBindings.map((alias) => ({ ...alias })) }
+        : {}),
       payload,
     };
   }
@@ -316,6 +346,21 @@ export class SymbolTable {
       } else {
         bucket.nameIndex.set(record.name, [record.id]);
       }
+    });
+
+    this.aliasBindings.length = 0;
+    (snap.aliases ?? []).forEach((alias) => {
+      const bucket = ensureScopeExists(
+        this.scopeBuckets[alias.scope],
+        alias.scope
+      );
+      const hits = bucket.nameIndex.get(alias.name);
+      if (hits) {
+        hits.push(alias.symbol);
+      } else {
+        bucket.nameIndex.set(alias.name, [alias.symbol]);
+      }
+      this.aliasBindings.push({ ...alias });
     });
 
     this.scopeStack.length = 0;

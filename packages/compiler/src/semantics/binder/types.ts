@@ -56,5 +56,12 @@ export interface SymbolTableSnapshot {
   nextSymbol: SymbolId;
   scopes: readonly ScopeInfo[];
   symbols: readonly SymbolRecord[];
+  aliases?: readonly SymbolAliasBinding[];
   payload?: Record<string, unknown>;
+}
+
+export interface SymbolAliasBinding {
+  name: string;
+  symbol: SymbolId;
+  scope: ScopeId;
 }
