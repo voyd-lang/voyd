@@ -4,14 +4,61 @@ order: 9
 
 # Web
 
-The `pkg::web` package is Voyd's HTTP application framework. It builds on
-`std::http` and gives you routing, middleware, typed request extraction,
-response conversion, static-file middleware, and server-side HTML helpers.
+`pkg::web` is Voyd's HTTP application framework. It provides routing,
+middleware, typed request data, response conversion, static files, and
+server-rendered VX pages.
 
-Use the web framework when you want to write HTTP handlers as ordinary Voyd
-functions that return ordinary values. The framework owns the route table and
-request pipeline; `std::http` still owns the underlying request and response
-types.
+Use it for JSON APIs, server-rendered sites, or applications that combine an
+HTTP server with an interactive VX client.
+
+## Start A Web Project
+
+Install the Voyd CLI and scaffold the Web starter:
+
+```bash
+npm install -g @voyd-lang/cli
+voyd bootstrap my-site --template web-ssr
+cd my-site
+npm install
+npm run dev
+```
+
+This is the recommended starting point for both APIs and server-rendered sites
+because it includes the Node host and development workflow. For an API, keep
+`src/main.voyd` and remove the client and hydration code you do not need. For an
+interactive site, use the complete starter.
+
+The generated project includes the Web package, VX server rendering and
+hydration, Vite, Tailwind CSS, and static assets. Its main files are:
+
+- `src/main.voyd`: the HTTP server, routes, server data, and rendered pages.
+- `src/client.voyd`: the VX application that runs after hydration.
+- `src/client.ts`: loads the client Wasm module and hydrates the page.
+- `public/`: files served directly by the application.
+- `scripts/dev.mjs`: rebuilds the client and restarts the server in development.
+- `scripts/serve.mjs`: compiles and runs the server.
+
+Useful commands are:
+
+```bash
+npm run dev          # rebuild and restart while editing
+npm run voyd:check   # compile-check the Voyd server and client
+npm run build        # build production client assets and check Voyd
+npm start            # run the server
+```
+
+The generated host reads `PORT` or `VOYD_WEB_PORT` and `HOST` or
+`VOYD_WEB_HOST`. Production platforms usually require binding all interfaces:
+
+```bash
+npm run build
+HOST=0.0.0.0 PORT=8080 npm start
+```
+
+## A Minimal Server
+
+Replace the generated `src/main.voyd` with a small server while learning the
+framework:
 
 ```voyd
 use pkg::web::all
@@ -21,84 +68,60 @@ use std::result::types::all
 use std::task
 
 pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
-  serve(port: 3000) routes():
+  serve(port: 3000, host: "127.0.0.1") routes():
+    get("/") do:
+      "Hello from Voyd"
+
     get("/health") do:
-      "ok"
+      Response::ok().text("ok")
 ```
 
-Most applications should import `pkg::web::all`. Larger packages can import
-from the narrower modules:
+`serve` uses `std::http::server`, so the entrypoint lists the server and task
+runtime effects. Any effects used by your handlers also remain visible in the
+entrypoint's effect row.
 
-- `pkg::web::router` for `App`, `Router`, `Context`, middleware, and serving.
-- `pkg::web::routes` for builder-style route helper functions.
-- `pkg::web::extract` for body, auth, params, query, headers, and rejections.
-- `pkg::web::response` for `IntoResponse`, `to_response`, and response helpers.
-- `pkg::web::html` for VX server rendering.
-- `pkg::web::static_files` for `serve_dir`.
+Most applications should import `pkg::web::all`. For tighter imports, the public
+modules are `router`, `routes`, `extract`, `response`, `html`, `middleware`, and
+`static_files`.
 
 ## Routes
 
-Routes are declared inside `serve(...) routes():` or inside `build_app do(...)`.
-Use HTTP verb helpers for common routes and `route(..., method:)` when the
-method is dynamic or uncommon.
+Use `get`, `post`, `put`, `patch`, and `delete` for common methods. Use `route`
+when the method is dynamic or less common:
 
 ```voyd
 use pkg::web::all
 use std::http::Method
-use std::error::HostError
-use std::http::server
-use std::result::types::all
-use std::task
 
-pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
-  serve(port: 3000, host: "127.0.0.1", shutdown_timeout: 250) routes():
-    get("/health") do:
-      "ok"
+serve(port: 3000) routes():
+  get("/articles") do:
+    list_articles()
 
-    post("/events") do(ctx: Context):
-      ctx
-      status(code: 202, reason: "Accepted").empty()
+  post("/articles") do(ctx: Context):
+    create_article(ctx)
 
-    route("/resource", method: Method::Delete {}) do:
-      Response::ok().text("deleted")
+  route("/events", method: Method::Delete {}) do:
+    Response::ok().text("deleted")
 ```
 
-Path segments that begin with `:` are path parameters.
+Path segments beginning with `:` are parameters:
 
 ```voyd
-use pkg::web::all
-use std::error::HostError
-use std::http::server
-use std::result::types::all
 use std::string::type::String
-use std::task
 
-type UserParams = {
-  id: String
+type ArticleParams = {
+  slug: String
 }
 
-pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
-  serve(port: 3000) routes():
-    get("/users/:id") do(params: UserParams):
-      params.id
-```
-
-Static routes are preferred over parameterized routes when both match. For
-example, `/users/new` wins over `/users/:id` even if the parameterized route was
-registered first.
-
-```voyd
 serve(port: 3000) routes():
-  get("/users/:id") do(params: UserParams):
-    Response::ok().text(params.id)
-
-  get("/users/new") do:
-    Response::ok().text("new")
+  get("/articles/:slug") do(params: ArticleParams):
+    find_article(params.slug)
 ```
 
-Group related routes with a prefix. Middleware adopted before a group applies
-inside the group; middleware adopted inside the group stays scoped to that
-group.
+Static routes take precedence over parameter routes, so `/articles/new` wins
+over `/articles/:slug` regardless of registration order.
+
+Group routes under a shared prefix:
 
 ```voyd
 serve(port: 3000) routes():
@@ -106,28 +129,42 @@ serve(port: 3000) routes():
     get("/health") do:
       "ok"
 
-    group("/users") routes():
-      get("/:id") do(params: UserParams):
-        params.id
+    group("/articles") routes():
+      get("/:slug") do(params: ArticleParams):
+        find_article(params.slug)
 ```
 
-## Handlers
+Trailing slashes are strict by default. To treat `/about` and `/about/` as the
+same path, configure an app with `ignore_trailing_slash()`:
 
-Handlers return values. They do not receive a mutable response writer. The
-framework converts supported values with `IntoResponse`.
+```voyd
+let web_app = app()
+  .with(trailing_slash: ignore_trailing_slash())
+  .get("/about", handler: () => "About")
+```
+
+## Handler Results
+
+Handlers return values; they do not write to a mutable response object. Web
+converts supported values through `IntoResponse`:
 
 ```voyd
 get("/text") do:
   "hello"
 
-get("/raw") do:
-  Response::ok().text("already a response")
-
 get("/created") do:
   (Status::created(), "created")
+
+get("/custom") do:
+  Response::created()
+    .with(headers: Headers::empty().append(
+      header: "location",
+      value: "/articles/first"
+    ))
+    .text("created")
 ```
 
-Useful return shapes include:
+Supported result shapes include:
 
 - `Response`, returned unchanged.
 - `String` and `StringSlice`, returned as `200 OK` text.
@@ -135,93 +172,63 @@ Useful return shapes include:
 - `JsonValue`, returned as `200 OK` JSON.
 - `(Status, String)`, `(Status, StringSlice)`, `(Status, Bytes)`, and
   `(Status, JsonValue)`.
-- `Result<T, E>` when both `T` and `E` can become a response.
+- `Result<T, E>` when both branches can become a response.
 - `Option<T>`, where `None` becomes `404 Not Found`.
 
+Return a typed DTO as JSON with `json_dto`:
+
 ```voyd
-use pkg::web::all
-use std::json::{ JsonBool, JsonValue }
-use std::optional::types::all
-use std::result::types::all
-use std::string::type::String
+type ArticleSummary = {
+  slug: String,
+  title: String
+}
 
-fn feature_flag() -> JsonValue
-  JsonBool { value: true }
-
-fn find_name(id: String) -> Option<String>
-  if id.equals("1") then:
-    Some<String> { value: "Ada" }
-  else:
-    None {}
-
-fn create_name(name: String) -> Result<(Status, String), Rejection>
-  if name.is_empty() then:
-    Err<Rejection> { error: Rejection::bad_request("missing name") }
-  else:
-    Ok<(Status, String)> { value: (Status::created(), name) }
-
-serve(port: 3000) routes():
-  get("/flag") do:
-    feature_flag()
-
-  get("/users/:id") do(params: UserParams):
-    find_name(params.id)
-
-  post("/users", body: text_body()) do(input: String):
-    create_name(input)
+get("/api/articles/:slug") do(params: ArticleParams):
+  json_dto<ArticleSummary>({
+    slug: params.slug,
+    title: "A Voyd article"
+  })
 ```
 
-Use `response_json(...)` when you want to create a JSON response explicitly.
-The shorter `json()` name is reserved in `pkg::web::all` for the JSON body
-policy, so `response_json(...)` is the clearest root-level response helper.
+Use `response_dto_json(Response::created(), value:)` to choose the status,
+`result_dto_json` for a `Result`, and `option_dto_json` when absence should be a
+404. Use `response_json(value)` for an existing `JsonValue`; the root-level
+`json()` name is reserved for the JSON request-body policy.
+
+## Typed Request Data
+
+The route DSL chooses extractors from handler parameter names:
+
+- `params: T` decodes path parameters.
+- `query: T` decodes query parameters.
+- `headers: T` decodes request headers.
+- `cookies: T` decodes cookies.
+- `ctx: Context` provides the complete request context.
+
+Extractor parameters must use a supported order. You can request `params`,
+`headers`, or `cookies` alone; `params` plus `query`; `params` plus `headers`;
+`query` plus `headers`; or `params`, `query`, and `headers`. Any of these shapes
+can add a final `ctx`. A query-only handler must include that final context:
 
 ```voyd
-let value: JsonValue = JsonBool { value: true }
-let response = response_json(value)
+type SearchFilter = {
+  exact: bool
+}
+
+get("/search") do(query: SearchFilter, ctx: Context):
+  ctx
+  if query.exact then: "exact" else: "fuzzy"
 ```
 
-## Context
+For another combination, accept `ctx` and read the value dynamically, or use an
+explicit builder helper from [Composing Applications](#composing-applications).
 
-Request handlers can ask for `ctx: Context` when they need the raw request,
-headers, path values, query values, or explicit rejection handling.
-
-```voyd
-get("/inspect/:id") do(ctx: Context):
-  let id = ctx.param("id") ?? "missing"
-  let mode = ctx.query_value("mode") ?? "default"
-  Response::ok().text(id.concat(":").concat(mode))
-```
-
-Common `Context` methods:
-
-- `ctx.method()` returns the request `Method`.
-- `ctx.path()` returns the request path.
-- `ctx.header(name)` returns an optional header value.
-- `ctx.param(name)` returns an optional path parameter.
-- `ctx.query()` returns all parsed query parameters.
-- `ctx.query_value(name)` returns one query value.
-- `ctx.body_bytes()` returns the raw request body bytes.
-- `ctx.text()` reads the request body as text.
-- `ctx.json()` reads the request body as `JsonValue`.
-- `ctx.reject(rejection)` runs the current rejection handler.
-
-## Params, Query, And Headers
-
-The DSL uses handler parameter names to decide which extractor to use:
-
-- `params: T` decodes path parameters into `T`.
-- `query: T` decodes the query string into `T`.
-- `headers: T` decodes request headers into `T`.
-- `ctx: Context` passes the full request context.
-
-Use structural types for request-shaped data.
+Use structural records for request-shaped data. Start with the common case of
+path and query parameters:
 
 ```voyd
-use pkg::web::all
-use std::string::type::String
-
 type SearchParams = {
-  org: String
+  organization: String
 }
 
 type SearchQuery = {
@@ -230,66 +237,84 @@ type SearchQuery = {
   exact: bool
 }
 
+serve(port: 3000) routes():
+  get("/orgs/:organization/search") do(
+    params: SearchParams,
+    query: SearchQuery
+  ):
+    Response::ok().text(
+      params.organization
+        .concat(":")
+        .concat(query.q)
+    )
+```
+
+Ask for typed headers or cookies only on routes that need them:
+
+```voyd
 type RequestHeaders = {
   authorization: String
 }
 
-serve(port: 3000) routes():
-  get("/orgs/:org/search") do(
-    params: SearchParams,
-    query: SearchQuery,
-    headers: RequestHeaders,
-    ctx: Context
-  ):
-    let request_id = ctx.header("x-request-id") ?? "missing"
-    Response::ok().text(
-      params.org
-        .concat(":")
-        .concat(query.q)
-        .concat(":")
-        .concat(headers.authorization)
-        .concat(":")
-        .concat(request_id)
-    )
+get("/account") do(headers: RequestHeaders):
+  Response::ok().text(headers.authorization)
 ```
-
-Path params and headers decode as strings. Query values decode booleans from
-`true` and `false`, integers from canonical integer strings, and all other
-values as strings.
-
-Use the explicit `route_*` helpers in builder-style code when the parameter
-shape cannot be inferred from a free route helper name.
 
 ```voyd
-let app = build_app do(base):
-  route_query_context(base, "/search", method: Method::Get {}) do(
-    query: SearchQuery,
-    _ctx: Context
-  ):
-    if query.exact then:
-      Response::ok().text("exact")
-    else:
-      Response::ok().text("fuzzy")
+type SessionCookies = {
+  session: String
+}
+
+get("/session") do(cookies: SessionCookies):
+  Response::ok().text(cookies.session)
 ```
+
+Path parameters, headers, and cookies decode as strings. Query values decode
+`true` and `false` as booleans, canonical integer strings as integers, and other
+values as strings. Missing required fields or incompatible field types produce a
+`400 Bad Request`. Make a field optional when the request may omit it.
+
+### Request Context
+
+Use `Context` when you need dynamic access or the raw request:
+
+```voyd
+get("/inspect/:id") do(ctx: Context):
+  let id = ctx.param("id") ?? "missing"
+  let mode = ctx.query_value("mode") ?? "default"
+  let session = ctx.cookie("session") ?? "anonymous"
+  Response::ok().text(id.concat(":").concat(mode).concat(":").concat(session))
+```
+
+The most useful methods are:
+
+- `method()` and `path()`.
+- `header(name)`, `param(name)`, `query_value(name)`, and `cookie(name)`.
+- `query()` and `cookies()` for all parsed values.
+- `body_bytes()`, `text()`, and `json()` for direct body access.
+- `reject(rejection)` to send a value through the current rejection handler.
+
+Prefer typed parameters when the request shape is fixed. Use `Context` for
+dynamic data or framework-level code.
 
 ## Request Bodies
 
-Body policies are explicit route labels. Use `json_body()` for typed JSON,
-`text_body()` for text, and `bytes()` for raw bytes.
+Declare a body policy on the route:
 
 ```voyd
-use pkg::web::all
 use std::bytes::Bytes
-use std::string::type::String
 
-type CreateUser = {
-  name: String,
-  active: bool
+type CreateArticle = {
+  title: String,
+  published: bool
 }
 
 serve(port: 3000) routes():
-  post("/users", body: json_body()) do(input: CreateUser):
-    Response::created().text(input.name)
+  post("/api/articles", body: json_body()) do(input: CreateArticle):
+    response_dto_json(
+      Response::created(),
+      value: { title: input.title, published: input.published }
+    )
 
   post("/echo", body: text_body()) do(input: String):
     Response::ok().text(input)
@@ -299,399 +324,442 @@ serve(port: 3000) routes():
 ```
 
 `json_body()` accepts `application/json` and media types ending in `+json`.
-When the content type is not JSON, the route rejects with `415 Unsupported
-Media Type`. Invalid body text or invalid JSON rejects with `400 Bad Request`.
+Invalid JSON or text produces `400 Bad Request`; an unsupported JSON content
+type produces `415 Unsupported Media Type`.
 
-The concise aliases `json()` and `text()` are also available for body policies,
-but `json_body()` and `text_body()` read better in route declarations because
-`json` and `text` are common response concepts too.
-
-## Auth
-
-Auth is also an explicit route label. The default `required_session()` and
-`optional_session()` policies read the `authorization` header.
+Limit a route body independently of the server-wide limit:
 
 ```voyd
-use pkg::web::all
-use std::optional::types::all
-use std::string::type::String
-
-serve(port: 3000) routes():
-  get("/me", auth: required_session()) do(session: String):
-    Response::ok().text(session)
-
-  get("/maybe-me", auth: optional_session()) do(session: Option<String>):
-    match(session)
-      Some<String> { value }:
-        Response::ok().text(value)
-      None:
-        Response::unauthorized().empty()
+post(
+  "/api/articles",
+  body: json_body(),
+  limit: body_limit(64 * 1024)
+) do(input: CreateArticle):
+  json_dto<CreateArticle>(input)
 ```
 
-Use a custom `AuthPolicy<T>` when your application has a typed session value.
-The extractor can perform effects because `AuthExtractor<T>` has an open effect
-row.
+The `json()` and `text()` aliases also create body policies. The longer names
+are usually clearer in a route declaration.
+
+### HTML Forms
+
+A normal `POST` form sends an `application/x-www-form-urlencoded` body. Read it
+as text and use `parse_query` to decode field names, percent escapes, and `+`
+spaces:
 
 ```voyd
-use pkg::web::all
+use std::msgpack::MsgPack
+use std::optional::types::all
+use std::string::type::String
+use std::vx::all
+
+fn NewArticleForm() -> Html<MsgPack>
+  <form method="post" action="/articles">
+    <label for="title">Title</label>
+    <input id="title" name="title" required />
+    <button type="submit">Create article</button>
+  </form>
+
+post("/articles", body: text_body()) do(input: String):
+  match(parse_query(input).get("title"))
+    Some<String> { value }:
+      Response::created().text(value)
+    None:
+      Response::bad_request().text("title is required")
+```
+
+For a form with `method="get"`, use the normal typed `query: T` extractor.
+Validate required fields and application rules in the handler even when the HTML
+form also uses browser validation.
+
+## Authentication
+
+The built-in session policies read the `authorization` header:
+
+```voyd
+use std::optional::types::all
+
+serve(port: 3000) routes():
+  get("/account", auth: required_session()) do(session: String):
+    Response::ok().text(session)
+
+  get("/welcome", auth: optional_session()) do(session: Option<String>):
+    match(session)
+      Some<String> { value }:
+        Response::ok().text("Welcome, ".concat(value))
+      None:
+        Response::ok().text("Welcome")
+```
+
+For a real application, create an `AuthPolicy<T>` that validates a token or
+loads a typed session:
+
+```voyd
 use std::http::IncomingRequest
 use std::result::types::all
-use std::string::type::String
 
 obj Session {
   api user_id: String,
   api role: String
 }
 
-fn extract_session(request: IncomingRequest) -> Result<Session, Rejection>
+fn authenticate(request: IncomingRequest) -> Result<Session, Rejection>
   match(request.header("authorization"))
     Some<String> { value }:
-      Ok<Session> {
-        value: Session { user_id: value, role: "member" }
-      }
+      lookup_session(value)
     None:
-      Err<Rejection> { error: Rejection::unauthorized("missing auth") }
+      Err<Rejection> {
+        error: Rejection::unauthorized("missing authorization")
+      }
 
 serve(port: 3000) routes():
   get(
     "/account",
-    auth: required_session<Session>(extract: extract_session)
+    auth: required_session<Session>(extract: authenticate)
   ) do(session: Session):
     Response::ok().text(session.user_id)
 ```
 
+An auth extractor can perform effects, so it may call a database or another
+service. Return `Rejection::unauthorized` for missing or invalid credentials and
+`Rejection::forbidden` when the caller is authenticated but lacks permission.
+
 ## Middleware
 
-Middleware receives a `Context` and `next`. It returns a `Response`. Call
-`next(ctx)` to continue to the next middleware or the matched route handler, or
-return a response early.
+Middleware receives `Context` and `Next`. Call `next(ctx)` to continue, or
+return a response early:
 
 ```voyd
-use pkg::web::all
-use std::http::Response
 use std::optional::types::all
-use std::string::type::String
 
 fn require_request_id(ctx: Context, next: Next) -> Response
   match(ctx.header("x-request-id"))
     Some<String>:
       next(ctx)
     None:
-      Response::bad_request().text("missing request id")
+      Response::bad_request().text("missing x-request-id")
 
 serve(port: 3000) routes():
   adopt(require_request_id)
 
+  get("/work") do:
+    "accepted"
+```
+
+Middleware is applied in registration order. An `adopt` affects routes declared
+after it, including routes inside later groups. Middleware adopted inside a
+group stays in that group.
+
+The package includes `request_id_required`, which rejects requests without an
+`x-request-id` header.
+
+## Errors And Rejections
+
+Web distinguishes route failures from request-data failures:
+
+- An unknown path uses the not-found handler.
+- A known path with the wrong method uses the method-not-allowed handler.
+- Invalid params, query, headers, cookies, bodies, or auth produce `Rejection`.
+- A timed-out route returns `504 Gateway Timeout`.
+
+Customize those responses at the application boundary:
+
+```voyd
+serve(port: 3000) routes():
+  not_found() do(_ctx: Context):
+    Response::not_found().text("Page not found")
+
+  method_not_allowed() do(_ctx: Context):
+    Response::method_not_allowed().text("Method not allowed")
+
+  on_rejection() do(rejection: Rejection, _ctx: Context):
+    response_dto_json(
+      Response::new(status: rejection.status),
+      value: { error: rejection.message }
+    )
+```
+
+Returning `Result<T, Rejection>` directly converts the rejection to its default
+status and text response. To pass application validation through a customized
+`on_rejection` handler, accept `Context` and call `ctx.reject(error)`:
+
+```voyd
+fn validate(input: CreateArticle) -> Result<CreateArticle, Rejection>
+  if input.title.is_empty() then:
+    Err<Rejection> {
+      error: Rejection::bad_request("title is required")
+    }
+  else:
+    Ok<CreateArticle> { value: input }
+
+post("/articles", body: json_body()) do(input: CreateArticle, ctx: Context):
+  match(validate(input))
+    Ok<CreateArticle> { value }:
+      response_dto_json(Response::created(), value: value)
+    Err<Rejection> { error }:
+      ctx.reject(error)
+```
+
+Available rejection constructors include `bad_request`, `not_found`,
+`payload_too_large`, `unsupported_media_type`, `unauthorized`, and `forbidden`.
+
+## Timeouts And Server Limits
+
+Set a route timeout for handlers that perform external work:
+
+```voyd
+get("/reports/daily", timeout: timeout_millis(2000)) do:
+  build_daily_report()
+```
+
+You can combine `timeout:`, `body:`, `limit:`, and `auth:` on the same route.
+
+Server options protect the entire process:
+
+```voyd
+serve(
+  port: 3000,
+  host: "0.0.0.0",
+  shutdown_timeout: 30000,
+  max_body_bytes: 1024 * 1024,
+  max_pending_requests: 128
+) routes():
   get("/health") do:
     "ok"
 ```
 
-Middleware is ordered by registration. Middleware adopted before a route applies
-to that route. Middleware adopted later does not affect earlier routes.
+- `max_body_bytes` caps request bodies before route handling.
+- `max_pending_requests` limits queued detached request tasks.
+- `shutdown_timeout` sets how many milliseconds the host waits for a request
+  handler to produce a response. A host timeout becomes a `500` response.
 
-```voyd
-serve(port: 3000) routes():
-  get("/public") do:
-    "public"
-
-  adopt(require_request_id)
-
-  get("/private") do:
-    "private"
-```
-
-The package includes `request_id_required`, which rejects requests that do not
-include `x-request-id`.
-
-```voyd
-serve(port: 3000) routes():
-  adopt(request_id_required)
-  get("/work") do:
-    Response::ok().empty()
-```
-
-## Errors And Rejections
-
-Route matching failures and extractor failures are handled separately.
-
-- No matching path returns the not-found handler.
-- A matching path with the wrong method returns the method-not-allowed handler.
-- Body, auth, params, query, and header extraction failures produce a
-  `Rejection`.
-- `on_error` and `on_rejection` both install an `ErrorHandler`.
-
-```voyd
-serve(port: 3000) routes():
-  not_found() do(ctx: Context):
-    ctx
-    Response::not_found().text("custom 404")
-
-  method_not_allowed() do(ctx: Context):
-    ctx
-    Response::method_not_allowed().text("custom method")
-
-  on_rejection() do(rejection: Rejection, ctx: Context):
-    ctx
-    Response::new(status: rejection.status).text(rejection.message)
-
-  post("/json", body: json_body()) do(input: CreateUser):
-    Response::ok().text(input.name)
-```
-
-Return `Result<T, Rejection>` from handlers when normal application validation
-should use the same response shape as extraction failures.
-
-```voyd
-fn validate_name(input: CreateUser) -> Result<CreateUser, Rejection>
-  if input.name.is_empty() then:
-    Err<Rejection> { error: Rejection::bad_request("name is required") }
-  else:
-    Ok<CreateUser> { value: input }
-
-post("/users", body: json_body()) do(input: CreateUser):
-  match(validate_name(input))
-    Ok<CreateUser> { value }:
-      Response::created().text(value.name)
-    Err<Rejection> { error }:
-      error
-```
+Choose limits for the largest legitimate request your application accepts, then
+use smaller route body limits where possible.
 
 ## Static Files
 
-Use `serve_dir(root)` as middleware. It serves `GET` and `HEAD`, prevents
-`..` path traversal, serves `index.html` for `/`, and falls through to `next`
-when the file is missing or cannot be read.
+Mount a directory as middleware:
 
 ```voyd
-use pkg::web::all
-
 serve(port: 3000) routes():
-  adopt(serve_dir("./public"))
-
   get("/api/health") do:
     "ok"
+
+  adopt(serve_dir("./public"))
 ```
 
-Static files infer common content types for `.html`, `.css`, `.js`, `.json`,
-`.png`, `.jpg`, `.jpeg`, and `.svg`. Other files use
+`serve_dir` handles `GET` and `HEAD`, blocks `..` traversal, serves `index.html`
+for `/`, and calls the next handler when a file is absent. It recognizes common
+HTML, CSS, JavaScript, JSON, PNG, JPEG, and SVG content types; other files use
 `application/octet-stream`.
 
-Place static middleware before dynamic fallback routes when files should win.
-Place it after API routes when the API should win.
+Registration order determines precedence. Put API routes before static
+middleware when API paths should win. Put a final parameterized page route after
+static middleware so existing assets win over the fallback.
+
+## Server-Rendered VX
+
+`pkg::web::html` converts `Html<Msg>` into an HTML response:
 
 ```voyd
-serve(port: 3000) routes():
-  get("/api/health") do:
-    "ok"
-
-  adopt(serve_dir("./public"))
-
-  get("/:slug") do(params: PageParams):
-    render_page(params.slug)
-```
-
-## HTML Responses
-
-`pkg::web::html` renders `std::vx` HTML values to strings for server-side
-responses. Use `html_response` or the `html` alias to attach
-`text/html; charset=utf-8`.
-
-```voyd
-use pkg::web::all
 use std::vx::all
 
 fn home() -> Response
   html_response(
     Response::ok(),
     <main>
-      <h1>Voyd</h1>
-      <p>Hello from the server.</p>
+      <h1>Voyd Journal</h1>
+      <p>Rendered on the server.</p>
     </main>
   )
-
-serve(port: 3000) routes():
-  get("/") do:
-    home()
 ```
 
-Use `render(...)` when you need the HTML string and `document(...)` when you
-want a complete document string with `<!doctype html>`.
+Use `render(view)` when you need an HTML fragment as a string. Use
+`document(view)` for a full string beginning with `<!doctype html>`.
+
+### Hydrate An Interactive Page
+
+Render the initial model, target selector, and client entry together:
 
 ```voyd
-let body = render(<span>Saved</span>)
-let full = document(
-  <html>
-    <body>
-      <h1>Saved</h1>
-    </body>
-  </html>
-)
+fn article_page(model: Model) -> Response
+  html_response(
+    Response::ok(),
+    view: <html lang="en">
+      <head>
+        <meta charset="utf-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1" />
+        <title>Voyd Journal</title>
+        <link rel="stylesheet" href="/assets/client.css" />
+      </head>
+      <body>
+        <div id="app">{view(model)}</div>
+      </body>
+    </html>,
+    hydrate: hydrate(
+      target: "#app",
+      entry: "/assets/client.js",
+      model: model
+    )
+  )
 ```
 
-## Builder API
+The helper safely serializes the model into an `application/json` script and
+adds the module entry. The hydration model must be boundary-safe and must match
+the model expected by the client VX app.
 
-The route DSL is the default surface for applications. The builder API is useful
-for generated routes, package-level composition, and tests.
+In the client entry, read that model and hydrate instead of mounting a new tree:
+
+```ts
+import { createVoydHost } from "@voyd-lang/sdk/js-host";
+import { createVoydVxAppRuntime, hydrateVxApp } from "@voyd-lang/vx-dom/browser";
+import wasmUrl from "./generated/client.wasm?url";
+
+const data = document.querySelector<HTMLScriptElement>("[data-voyd-hydration]");
+const selector = data?.dataset.voydHydration;
+const container = selector ? document.querySelector(selector) : null;
+
+if (!data || !container) throw new Error("Missing hydration data");
+
+const wasm = new Uint8Array(await (await fetch(wasmUrl)).arrayBuffer());
+const host = await createVoydHost({
+  wasm,
+  bufferSize: 1024 * 1024,
+  defaultAdapters: { runtime: "browser" },
+});
+const app = createVoydVxAppRuntime({
+  host,
+  initialModel: JSON.parse(data.textContent ?? "null"),
+});
+const mounted = await hydrateVxApp({ container, app });
+```
+
+The server view and client `view` must produce the same initial tree. Browser
+commands and subscriptions begin after hydration. The `web-ssr` starter contains
+the complete build and host wiring, so it is the best starting point for this
+architecture.
+
+## Composing Applications
+
+Choose the smallest composition API that fits:
+
+- Use the route DSL shown throughout this guide for normal application routes.
+- Use `App` methods when routes are generated or assembled conditionally.
+- Use `Router` for a reusable group that will be mounted under a prefix.
+- Use free builder helpers only when a callback must thread an `AppBuild` value.
+
+The `App` method API is also convenient in direct handler tests:
 
 ```voyd
-use pkg::web::all
-use std::http::Response
-
-fn health() -> Response
-  Response::ok().text("ok")
+fn health() -> String
+  "ok"
 
 let web_app = app()
   .get("/health", handler: health)
-  .get("/debug", handler: (ctx: Context) -> Response =>
+  .get_context("/debug", handler: (ctx) =>
     Response::ok().text(ctx.path())
   )
 ```
 
-Use explicit builder method names for extracted handler shapes. The names make
-the extracted data visible and avoid ambiguous same-name overloads for inline
-lambdas.
+Explicit method names make extracted handler shapes clear:
 
 ```voyd
-let web_app = app()
-  .get_params("/users/:id", handler: (params: UserParams) -> Response =>
-    Response::ok().text(params.id)
+let api = app()
+  .get_params(
+    "/articles/:slug",
+    handler: (params: ArticleParams) =>
+      Response::ok().text(params.slug)
   )
   .get_params_query(
-    "/users/:id/activity",
-    handler: (params: UserParams, query: UserQuery) -> Response =>
-      let verbose = if query.verbose then: "true" else: "false"
-      Response::ok().text(params.id.concat(":").concat(verbose))
+    "/articles/:slug/revisions",
+    handler: (params: ArticleParams, query: SearchQuery) =>
+      revisions(params.slug, query.page)
   )
 ```
 
-`build_app` gives builder helpers a threaded `AppBuild` value.
+For a reusable subrouter, create `router::Router` and mount it:
 
 ```voyd
-let web_app = build_app do(base):
-  let with_health = get_context(base, "/health") do(_ctx: Context):
-    Response::ok().text("ok")
-
-  let with_item = get(with_health, "/items/:id") do(params: UserParams):
-    Response::ok().text(params.id)
-
-  post(
-    with_item,
-    "/echo",
-    body: text_body(),
-    handler: (input: String) -> Response => Response::ok().text(input)
-  )
-```
-
-`Router` wraps an `App` for reusable subrouters. Import the module when you need
-the constructor, then call `router::Router::init()`.
-
-```voyd
-use pkg::web::all
 use pkg::web::router
 
 let api = router::Router::init()
-  .get("/health", handler: () -> Response =>
-    Response::ok().text("router")
-  )
+  .get("/health", handler: () => "ok")
 
 let web_app = app().mount("/api", api)
 ```
 
-The package root reserves `pkg::web::router` for the module path, so there is no
-root-level `web::router()` constructor. This keeps imports predictable when a
-module and function would otherwise share the same package-boundary name.
-
-## Serving
-
-Use `serve(...) routes():` for the shortest application entrypoint.
+For advanced callback-based composition, `build_app` threads an `AppBuild`
+through free helpers:
 
 ```voyd
-use pkg::web::all
-use std::error::HostError
-use std::http::server
-use std::result::types::all
-use std::task
+let web_app = build_app do(base):
+  let with_health = get_context(base, "/health") do(_ctx):
+    "ok"
 
-pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
-  serve(port: 3000) routes():
-    get("/health") do:
-      "ok"
-```
-
-Use `serve(app, port:)` or `serve_app(...)` when you already have an `App`.
-
-```voyd
-use pkg::web::all
-use std::error::HostError
-use std::http::server
-use std::result::types::all
-use std::task
-
-fn make_app() -> App
-  app().get("/health", handler: () -> Response =>
-    Response::ok().text("ok")
+  post(
+    with_health,
+    "/echo",
+    body: text_body(),
+    handler: (input: String) => Response::ok().text(input)
   )
-
-pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
-  serve(make_app(), port: 3000)
 ```
 
-Use `serve_build(...)` when you want build-style composition and server options
-in one call.
+Serve an existing `App` with `serve(web_app, port: 3000)` or
+`serve_app(web_app, port: 3000)`. Use `serve_build` when you want builder-style
+composition and server options in one call.
+
+## Testing A Web App
+
+Build an `App` without opening a socket, then call `app.handle(request)` with an
+`IncomingRequest`. This is the fastest way to test routing, extraction,
+middleware, authentication policies, and response conversion.
 
 ```voyd
 use pkg::web::all
-use std::error::HostError
-use std::http::server
-use std::result::types::all
-use std::task
+use std::http::{ Body, Headers, IncomingRequest, Method }
+use std::optional::types::all
+use std::string::type::String
+use std::test::assertions::all
 
-pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
-  serve_build(port: 3000, host: "127.0.0.1") do(base):
-    get_context(base, "/health") do(_ctx: Context):
-      "ok"
+fn test_app() -> App
+  app().get("/health", handler: () => "ok")
+
+fn request(path: String) -> IncomingRequest
+  IncomingRequest {
+    method: Method::Get {},
+    path: path,
+    query: None {},
+    headers: Headers::empty(),
+    body: Body::empty()
+  }
+
+test "health route succeeds":
+  let response = test_app().handle(request("/health"))
+  assert(response.status.code(), eq: 200)
 ```
 
-`serve` is backed by `std::http::server`, so the surrounding function must
-provide the server and task-runtime effects required by that package.
-Application-specific effects used by handlers also remain visible in the
-entrypoint effect row.
+Run project tests with:
 
-## Developer Notes
+```bash
+npx voyd test ./src
+```
 
-The web package intentionally keeps a split between data and behavior:
+Add integration tests around the running host for behavior that depends on
+network adapters, filesystem-backed static files, shutdown, or the combined SSR
+and hydration flow. Keep application validation and data transformation in
+ordinary functions so they can be tested directly.
 
-- Structural records model request data such as params, query, headers, and JSON
-  DTO bodies.
-- Nominal objects model behavior and policies such as `App`, `Router`,
-  `Context`, `JsonBody`, `TextBody`, `RequiredSession`, and `AuthPolicy<T>`.
-- Traits are implemented for nominal policy and response types. Do not rely on
-  applying traits to structural DTOs.
+## Production Checklist
 
-Route registration stores erased `Handler`, `Middleware`, and `ErrorHandler`
-function values internally, but the public route helpers keep typed handler
-parameters long enough to derive extraction before wrapping the handler.
+Before deploying:
 
-When adding a new extractor family:
-
-- Add a nominal policy type when extraction carries behavior.
-- Keep route labels explicit for behavior-changing policy, such as `body:` and
-  `auth:`.
-- Prefer structural input records for decoded request data.
-- Add both DSL helpers and builder/helper mirrors when the shape is useful in
-  generated or composed code.
-- Keep route helper names explicit when inline lambda overload resolution would
-  otherwise be ambiguous.
-
-When adding a new response type:
-
-- Implement or reuse `IntoResponse<T>`.
-- Add `to_response(...)` overloads for common tuple, result, or option shapes
-  only when they improve call-site clarity.
-- Keep response helpers in `pkg::web::response`, and re-export root-level names
-  from `pkg::web` only when they do not conflict with common policy names.
-
-The framework should not hide effects in ambient state. Handler, middleware,
-auth, and body extraction callbacks use open effect rows where appropriate, and
-serving exposes the effects required by `std::http::server` and the application
-code it runs.
+- Bind to the host and port provided by your environment.
+- Set global and route-specific body limits.
+- Add timeouts around slow external work.
+- Validate authentication server-side; never trust hydrated client state for
+  authorization.
+- Return generic client errors while logging actionable server details.
+- Serve immutable assets with cache-friendly names and HTTPS.
+- Keep the generated `SIGINT` and `SIGTERM` handling, and design request work to
+  tolerate interruption during shutdown.
+- Monitor rejection rates, handler failures, latency, and pending requests.
