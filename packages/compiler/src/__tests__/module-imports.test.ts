@@ -1113,6 +1113,44 @@ pub fn main() -> i32
     ).toBe(true);
   });
 
+  it("supports aliases for local union namespace member imports and re-exports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}fruit.voyd`]: `
+pub obj Apple {}
+pub obj Banana {}
+pub type Fruit = Apple | Banana
+
+use Fruit::Banana as B
+pub use Fruit::Apple as A
+
+pub fn local_alias() -> Fruit
+  B()
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::fruit::{ A, Fruit, local_alias }
+
+pub fn main() -> i32
+  let _apple: Fruit = A()
+  let _banana: Fruit = local_alias()
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
   it("deduplicates the same namespace member across re-export paths", async () => {
     const srcRoot = resolve("/proj/src");
     const host = createMemoryHost({

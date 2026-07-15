@@ -554,12 +554,32 @@ const resolveLocalTypeNamespaceUseEntry = ({
       return undefined;
     }
     const importedName = entry.alias ?? name;
-    if (importedName !== name) {
-      return undefined;
-    }
     if (record.scope === ctx.symbolTable.rootScope && record.name === name) {
+      if (importedName !== name) {
+        const importNameCollision = findModuleNamespaceNameCollision({
+          name: importedName,
+          scope: ctx.symbolTable.rootScope,
+          incomingKind: record.kind,
+          ctx,
+        });
+        if (importNameCollision) {
+          recordImportNameConflict({
+            name: importedName,
+            incomingKind: record.kind,
+            existingKind: importNameCollision.kind,
+            span: entry.span,
+            previousSpan: importNameCollision.span,
+            ctx,
+          });
+          return undefined;
+        }
+        ctx.symbolTable.bindAlias(
+          { name: importedName, symbol },
+          ctx.symbolTable.rootScope,
+        );
+      }
       return {
-        name,
+        name: importedName,
         local: symbol,
         visibility: decl.visibility,
         span: entry.span,
@@ -574,7 +594,7 @@ const resolveLocalTypeNamespaceUseEntry = ({
     }
     const existing = ctx.imports.find(
       (candidate) =>
-        candidate.name === name &&
+        candidate.name === importedName &&
         candidate.target?.moduleId === importedTarget.moduleId &&
         candidate.target.symbol === importedTarget.symbol &&
         ctx.symbolTable.getSymbol(candidate.local).scope ===
@@ -612,7 +632,7 @@ const resolveLocalTypeNamespaceUseEntry = ({
     }
     return declareImportedSymbol({
       exported,
-      alias: name,
+      alias: importedName,
       explicitlyTargetsStdSubmodule,
       ctx,
       declaredAt: decl.form,
