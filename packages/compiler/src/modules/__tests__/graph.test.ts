@@ -174,6 +174,46 @@ pub macro gen()
     expect(functionNames).not.toContain("from_b");
   });
 
+  it("prunes transient file modules and removed import diagnostics", async () => {
+    const root = resolve("/proj/src");
+    const badPath = `${root}${sep}bad.voyd`;
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::b::all
+
+macro import_c()
+  syntax_template (use src::c::all)
+
+import_c()
+gen()
+`,
+      [`${root}${sep}b.voyd`]: `
+pub macro gen()
+  emit_many(
+    \`(use src::bad::all),
+    \`(use src::missing::all)
+  )
+`,
+      [`${root}${sep}c.voyd`]: `
+pub macro gen()
+  syntax_template (fn replacement() -> f64
+    2.0)
+`,
+      [badPath]: `fn broken() -> i32
+  <div class="open"
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.modules.has("src::bad")).toBe(false);
+    expect(graph.diagnostics).toHaveLength(0);
+  });
+
   it("loads dependencies via use statements and auto-discovers submodules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
