@@ -860,22 +860,24 @@ pub fn main() -> i32
     ).toHaveLength(0);
   });
 
-  it("imports qualified members from a locally declared union alias", async () => {
+  it("imports and constructs qualified members from a local union", async () => {
     const srcRoot = resolve("/proj/src");
     const host = createMemoryHost({
       [`${srcRoot}${sep}fruit.voyd`]: `
 pub obj Apple {}
+pub obj Pear {}
 `,
       [`${srcRoot}${sep}main.voyd`]: `
 use src::fruit
 
 obj Banana {}
-type Fruit = fruit::Apple | Banana
+type Fruit = fruit::Apple | fruit::Pear | Banana
 
 use Fruit::Apple
 
 pub fn main() -> i32
   let _fruit: Fruit = Apple()
+  let _qualified: Fruit = Fruit::Pear()
   0
 `,
     });
