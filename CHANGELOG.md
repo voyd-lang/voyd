@@ -24,6 +24,16 @@
   `</body>`, include root metadata, and hydration-model serialization errors now
   stop the response instead of silently emitting `null`.
 
+### Improvements
+
+- `render`, `document`, and `html_response` now release temporary event
+  handlers after server rendering succeeds, fails, or is cancelled. Server and
+  browser rendering can safely call the same `view(model)`; a separate
+  event-free `static_view` is no longer needed.
+- `map_html` now accepts a `handler:` function directly, so lifting child
+  messages no longer requires manually retaining and passing a `handler_id`.
+  The `handler_id:` overload remains available for explicitly managed lifetimes.
+
 ## Voyd v0.3.0 - Gaia BH1 (2026-07-12)
 
 Voyd `0.3.0` is the full-stack web release. VX grew into a typed application
