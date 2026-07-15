@@ -168,6 +168,16 @@ export const buildModuleGraph = async ({
   const pendingNestedPrefixCounts = new Map<string, number>();
   const noPreludeByModule = new Map<string, boolean>();
   const shadowedModuleFiles = new Set<string>();
+  const collectedUseDependencies = new Map<string, Set<string>>();
+
+  const useDependencyKeys = (
+    dependencies: readonly ModuleDependency[],
+  ): Set<string> =>
+    new Set(
+      dependencies
+        .filter((dependency) => dependency.kind === "use")
+        .map((dependency) => modulePathToString(dependency.path)),
+    );
 
   const addDocDiagnostics = (diagnostics: readonly Diagnostic[]): void => {
     diagnostics.forEach((diagnostic) => {
@@ -196,6 +206,7 @@ export const buildModuleGraph = async ({
       modules.delete(descendant.id);
       modulesByPath.delete(modulePathToString(descendant.path));
       noPreludeByModule.delete(descendant.id);
+      collectedUseDependencies.delete(descendant.id);
       updateNestedPrefixCounts({
         counts: moduleNestedPrefixCounts,
         pathKey: modulePathToString(descendant.path),
@@ -248,6 +259,10 @@ export const buildModuleGraph = async ({
 
   addModuleTree(entryModule, modules, modulesByPath, (module) => {
     noPreludeByModule.set(module.id, entryModule.noPrelude);
+    collectedUseDependencies.set(
+      module.id,
+      useDependencyKeys(module.dependencies),
+    );
     updateNestedPrefixCounts({
       counts: moduleNestedPrefixCounts,
       pathKey: modulePathToString(module.path),
@@ -282,7 +297,7 @@ export const buildModuleGraph = async ({
   };
 
   const macroExpander = createModuleMacroExpander();
-  const macroDiagnostics: Diagnostic[] = [];
+  const macroDiagnosticsByModule = new Map<string, Diagnostic[]>();
   let pendingIndex = 0;
   while (true) {
     if (pendingIndex >= pending.length) {
@@ -291,7 +306,9 @@ export const buildModuleGraph = async ({
         modules,
         diagnostics: [],
       });
-      macroDiagnostics.push(...expansion.diagnostics);
+      expansion.diagnosticsByModule.forEach((diagnostics, moduleId) =>
+        macroDiagnosticsByModule.set(moduleId, diagnostics),
+      );
       if (!expansion.expandedModuleIds.length) {
         break;
       }
@@ -308,6 +325,15 @@ export const buildModuleGraph = async ({
           hasStdPreludeModule,
           noPrelude: noPreludeByModule.get(module.id) ?? false,
         });
+        const previousUseDependencies =
+          collectedUseDependencies.get(module.id) ?? new Set<string>();
+        const refreshedUseDependencies = useDependencyKeys(
+          refreshed.dependencies,
+        );
+        const introducedUseDependency = Array.from(
+          refreshedUseDependencies,
+        ).some((dependency) => !previousUseDependencies.has(dependency));
+        collectedUseDependencies.set(module.id, refreshedUseDependencies);
         addDocDiagnostics(
           refreshed.diagnostics.filter(
             (diagnostic) => diagnostic.code === "MD0005",
@@ -320,6 +346,9 @@ export const buildModuleGraph = async ({
           ...refreshed.dependencies,
           ...discoveredSubmodules,
         ];
+        if (introducedUseDependency) {
+          macroExpander.invalidate(module.id);
+        }
 
         refreshed.inlineModules.forEach((inlineModule) => {
           const existing = modules.get(inlineModule.id);
@@ -336,6 +365,7 @@ export const buildModuleGraph = async ({
         newInlineModules.forEach((inlineModule) => {
           const existing = modules.get(inlineModule.id);
           if (existing?.origin.kind === "file") {
+            macroExpander.reset(existing.id);
             (existing.sourceFiles ?? [
               { filePath: existing.origin.filePath, source: existing.source },
             ]).forEach(({ filePath }) => shadowedModuleFiles.add(filePath));
@@ -348,6 +378,10 @@ export const buildModuleGraph = async ({
           noPreludeByModule.set(
             inlineModule.id,
             noPreludeByModule.get(module.id) ?? false,
+          );
+          collectedUseDependencies.set(
+            inlineModule.id,
+            useDependencyKeys(inlineModule.dependencies),
           );
           if (!existing) {
             updateNestedPrefixCounts({
@@ -497,6 +531,10 @@ export const buildModuleGraph = async ({
     }
     addModuleTree(nextModule, modules, modulesByPath, (module) => {
       noPreludeByModule.set(module.id, nextModule.noPrelude);
+      collectedUseDependencies.set(
+        module.id,
+        useDependencyKeys(module.dependencies),
+      );
       updateNestedPrefixCounts({
         counts: moduleNestedPrefixCounts,
         pathKey: modulePathToString(module.path),
@@ -542,6 +580,7 @@ export const buildModuleGraph = async ({
       modules.delete(moduleId);
       modulesByPath.delete(modulePathToString(module.path));
       noPreludeByModule.delete(moduleId);
+      collectedUseDependencies.delete(moduleId);
       updateNestedPrefixCounts({
         counts: moduleNestedPrefixCounts,
         pathKey: modulePathToString(module.path),
@@ -566,6 +605,9 @@ export const buildModuleGraph = async ({
   const baseDiagnostics = unresolvedModuleDiagnostics.map(
     moduleDiagnosticToDiagnostic,
   );
+  const macroDiagnostics = Array.from(
+    macroDiagnosticsByModule.values(),
+  ).flat();
   return {
     entry: entryModule.node.id,
     modules,

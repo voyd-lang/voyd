@@ -172,6 +172,39 @@ pub use self::macros::all
     expect((instance.exports.main as () => number)()).toBe(42);
   });
 
+  it("re-expands modules after generated imports load macros", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const macrosPath = `${root}${sep}generated_macros.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+macro import_generated_macros()
+  syntax_template (use src::generated_macros::all)
+
+import_generated_macros()
+declare_helper()
+
+pub fn main() -> f64
+  helper()
+`,
+      [macrosPath]: `
+pub macro declare_helper()
+  syntax_template (fn helper() -> f64
+    42.0)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("preserves literal numeric types when splicing macro arguments", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;

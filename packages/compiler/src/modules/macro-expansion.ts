@@ -23,25 +23,38 @@ export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] =>
   createModuleMacroExpander().expand(graph).diagnostics;
 
 export type ModuleMacroExpander = {
+  invalidate(moduleId: string): void;
+  reset(moduleId: string): void;
   expand(graph: ModuleGraph): {
     diagnostics: Diagnostic[];
+    diagnosticsByModule: ReadonlyMap<string, Diagnostic[]>;
     expandedModuleIds: string[];
   };
 };
 
 export const createModuleMacroExpander = (): ModuleMacroExpander => {
   const exportsByModule = new Map<string, MacroExportTable>();
+  const invalidatedModules = new Set<string>();
 
   return {
+    invalidate: (moduleId) => invalidatedModules.add(moduleId),
+    reset: (moduleId) => {
+      invalidatedModules.delete(moduleId);
+      exportsByModule.delete(moduleId);
+    },
     expand: (graph) => {
       const diagnostics: Diagnostic[] = [];
+      const diagnosticsByModule = new Map<string, Diagnostic[]>();
       const expandedModuleIds: string[] = [];
 
       sortModules(graph).forEach((id) => {
         const module = graph.modules.get(id);
-        if (!module || module.surface) {
+        const isInvalidated = invalidatedModules.has(id);
+        if (!module || (module.surface && !isInvalidated)) {
           return;
         }
+        invalidatedModules.delete(id);
+        const moduleDiagnostics: Diagnostic[] = [];
 
         const useEntries = collectUseEntries(module);
         const importedMacros = collectMacroImports({
@@ -57,16 +70,19 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
           strictMacroSignatures: true,
           onError: (error) =>
             reportMacroExpansionError({
-              diagnostics,
+              diagnostics: moduleDiagnostics,
               macroName: "functionalMacroExpander",
               error,
               fallbackSyntax: module.ast,
             }),
         });
-        module.ast = applyPostSyntaxMacros(functionalResult.form, diagnostics);
+        module.ast = applyPostSyntaxMacros(
+          functionalResult.form,
+          moduleDiagnostics,
+        );
         module.surface = createSurfaceModuleView(module.ast);
         module.surface.issues.forEach((issue) => {
-          diagnostics.push(
+          moduleDiagnostics.push(
             diagnosticFromCode({
               code: "MD0002",
               params: {
@@ -79,6 +95,13 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
           );
         });
         const localExports = indexExports(functionalResult.exports);
+        if (isInvalidated) {
+          exportsByModule.get(id)?.forEach((macro, name) => {
+            if (!localExports.has(name)) {
+              localExports.set(name, macro);
+            }
+          });
+        }
         const exportedMacros = collectMacroReexports({
           module,
           entries: useEntries,
@@ -87,10 +110,12 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
         });
         module.macroExports = Array.from(exportedMacros.keys());
         exportsByModule.set(id, exportedMacros);
+        diagnostics.push(...moduleDiagnostics);
+        diagnosticsByModule.set(id, moduleDiagnostics);
         expandedModuleIds.push(id);
       });
 
-      return { diagnostics, expandedModuleIds };
+      return { diagnostics, diagnosticsByModule, expandedModuleIds };
     },
   };
 };
@@ -320,8 +345,9 @@ const collectMacroReexports = ({
   return exports;
 };
 
-const collectUseEntries = (module: ModuleNode): UseEntryWithVisibility[] =>
-  requireModuleHeader(module).items.flatMap((item) =>
+const collectUseEntries = (module: ModuleNode): UseEntryWithVisibility[] => {
+  const items = module.surface?.items ?? requireModuleHeader(module).items;
+  return items.flatMap((item) =>
     item.kind === "use"
       ? item.entries.map((entry) => ({
           ...entry,
@@ -329,6 +355,7 @@ const collectUseEntries = (module: ModuleNode): UseEntryWithVisibility[] =>
         }))
       : [],
   );
+};
 
 const cloneMacroWithAlias = (
   macro: MacroDefinition,
