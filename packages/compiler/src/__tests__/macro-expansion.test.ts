@@ -205,6 +205,44 @@ pub macro declare_helper()
     expect((instance.exports.main as () => number)()).toBe(42);
   });
 
+  it("re-expands importers when generated re-exports add macros", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const brokerPath = `${root}${sep}broker.voyd`;
+    const macrosPath = `${root}${sep}generated_macros.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use src::broker::all
+
+declare_helper()
+
+pub fn main() -> f64
+  helper()
+`,
+      [brokerPath]: `
+macro import_generated_macros()
+  syntax_template (pub use src::generated_macros::all)
+
+import_generated_macros()
+`,
+      [macrosPath]: `
+pub macro declare_helper()
+  syntax_template (fn helper() -> f64
+    42.0)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("preserves literal numeric types when splicing macro arguments", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;

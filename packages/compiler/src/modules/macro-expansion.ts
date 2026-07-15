@@ -108,8 +108,16 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
           exportsByModule,
           localExports,
         });
+        const previousExports = exportsByModule.get(id);
         module.macroExports = Array.from(exportedMacros.keys());
         exportsByModule.set(id, exportedMacros);
+        if (!haveSameMacroExportNames(previousExports, exportedMacros)) {
+          invalidateMacroImporters({
+            graph,
+            exportedModuleId: id,
+            invalidatedModules,
+          });
+        }
         diagnostics.push(...moduleDiagnostics);
         diagnosticsByModule.set(id, moduleDiagnostics);
         expandedModuleIds.push(id);
@@ -123,6 +131,38 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
 type MacroExportTable = Map<string, MacroDefinition>;
 type UseEntryWithVisibility = NormalizedUseEntry & {
   visibility: "module" | "pub";
+};
+
+const haveSameMacroExportNames = (
+  previous: MacroExportTable | undefined,
+  current: MacroExportTable,
+): boolean =>
+  (previous?.size ?? 0) === current.size &&
+  Array.from(current.keys()).every((name) => previous?.has(name));
+
+const invalidateMacroImporters = ({
+  graph,
+  exportedModuleId,
+  invalidatedModules,
+}: {
+  graph: ModuleGraph;
+  exportedModuleId: string;
+  invalidatedModules: Set<string>;
+}): void => {
+  graph.modules.forEach((module) => {
+    if (!module.surface) {
+      return;
+    }
+
+    const importsChangedModule = module.dependencies.some(
+      (dependency) =>
+        dependency.kind === "use" &&
+        modulePathToString(dependency.path) === exportedModuleId,
+    );
+    if (importsChangedModule) {
+      invalidatedModules.add(module.id);
+    }
+  });
 };
 
 const applyPostSyntaxMacros = (form: Form, diagnostics: Diagnostic[]): Form => {
