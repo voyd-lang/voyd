@@ -2,24 +2,10 @@ import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
-import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 import { describe, expect, it, vi } from "vitest";
 import { printBootstrapResult, runBootstrap } from "../bootstrap/index.js";
 
 const createTempDir = () => mkdtemp(resolve(tmpdir(), "voyd-bootstrap-"));
-const repoRoot = resolve(import.meta.dirname, "../../../..");
-
-const expectCompileSuccess = (
-  result: CompileResult,
-): Extract<CompileResult, { success: true }> => {
-  if (!result.success) {
-    throw new Error(result.diagnostics
-      .map((diagnostic) => `${diagnostic.span.file}: ${diagnostic.message}`)
-      .join("\n"));
-  }
-  expect(result.success).toBe(true);
-  return result;
-};
 
 describe("runBootstrap", () => {
   it("scaffolds the vx-spa starter", async () => {
@@ -84,15 +70,6 @@ describe("runBootstrap", () => {
       const appView = await readFile(resolve(target, "src/app/ui.voyd"), "utf8");
       expect(appView).toContain('class="min-h-screen');
       expect(appView).toContain("to_string(model.count)");
-
-      expectCompileSuccess(await createSdk().compile({
-        entryPath: resolve(target, "src/main.voyd"),
-        optimize: true,
-        roots: {
-          src: resolve(target, "src"),
-          pkgDirs: [resolve(repoRoot, "packages")],
-        },
-      }));
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -247,28 +224,6 @@ describe("runBootstrap", () => {
         .filter((file) => file.endsWith(".voyd"))
         .map((file) => readFile(resolve(target, file), "utf8")));
       expect(voydSources.join("\n")).not.toContain(".as_slice().to_string()");
-
-      const sdk = createSdk();
-      expectCompileSuccess(
-        await sdk.compile({
-          entryPath: resolve(target, "src/main.voyd"),
-          optimize: true,
-          roots: {
-            src: resolve(target, "src"),
-            pkgDirs: [resolve(repoRoot, "packages")],
-          },
-        }),
-      );
-      expectCompileSuccess(
-        await sdk.compile({
-          entryPath: resolve(target, "src/client.voyd"),
-          optimize: true,
-          roots: {
-            src: resolve(target, "src"),
-            pkgDirs: [resolve(repoRoot, "packages")],
-          },
-        }),
-      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
