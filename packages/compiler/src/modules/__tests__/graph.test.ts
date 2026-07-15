@@ -214,6 +214,46 @@ pub macro gen()
     expect(graph.diagnostics).toHaveLength(0);
   });
 
+  it("stabilizes generated macro imports and replaces surface diagnostics", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::b::all
+
+gen()
+`,
+      [`${root}${sep}b.voyd`]: `
+pub macro gen()
+  emit_many(
+    \`(use src::c::all),
+    \`(mod all (block))
+  )
+`,
+      [`${root}${sep}c.voyd`]: `
+pub macro gen()
+  syntax_template (fn replacement() -> f64
+    2.0)
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(graph.modules.has("src::main::all")).toBe(false);
+    const functionNames = graph.modules
+      .get("src::main")
+      ?.surface?.items.flatMap((item) =>
+        item.kind === "function"
+          ? [item.declaration.signature.name.value]
+          : [],
+      );
+    expect(functionNames).toContain("replacement");
+  });
+
   it("loads dependencies via use statements and auto-discovers submodules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

@@ -16,7 +16,10 @@ import {
   serializerAttributeMacro,
   stripSerializerAttributeForms,
 } from "../parser/syntax-macros/serializer-attribute.js";
-import { createSurfaceModuleView } from "../parser/surface/index.js";
+import {
+  createSurfaceModuleView,
+  type SurfaceModuleItem,
+} from "../parser/surface/index.js";
 import { requireModuleHeader } from "./views.js";
 
 export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] =>
@@ -35,6 +38,11 @@ export type ModuleMacroExpander = {
 export const createModuleMacroExpander = (): ModuleMacroExpander => {
   const exportsByModule = new Map<string, MacroExportTable>();
   const sourceAstByModule = new Map<string, Form>();
+  const scopeUseEntriesByModule = new Map<
+    string,
+    Map<string, UseEntryWithVisibility>
+  >();
+  const scopeInlineModuleNamesByModule = new Map<string, Set<string>>();
   const invalidatedModules = new Map<string, number>();
   const processedInvalidationByModule = new Map<string, number>();
   let nextInvalidationGeneration = 0;
@@ -49,6 +57,8 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
       processedInvalidationByModule.delete(moduleId);
       exportsByModule.delete(moduleId);
       sourceAstByModule.delete(moduleId);
+      scopeUseEntriesByModule.delete(moduleId);
+      scopeInlineModuleNamesByModule.delete(moduleId);
     },
     expand: (graph) => {
       const diagnostics: Diagnostic[] = [];
@@ -74,10 +84,24 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
           sourceAstByModule.set(id, module.ast.clone());
         }
 
-        const useEntries = collectUseEntries(module);
+        // Imports exposed by expansion are discovery inputs on later passes.
+        // Keep that discovery monotonic, while the surface below remains the
+        // replaceable output of only the latest expansion.
+        const headerItems = requireModuleHeader(module).items;
+        const scopeUseEntries = mergeScopeUseEntries({
+          moduleId: id,
+          entries: collectUseEntries(headerItems),
+          scopeUseEntriesByModule,
+        });
+        const scopeInlineModuleNames = mergeScopeInlineModuleNames({
+          moduleId: id,
+          names: collectInlineModuleNames(headerItems),
+          scopeInlineModuleNamesByModule,
+        });
         const importedMacros = collectMacroImports({
           module,
-          entries: useEntries,
+          entries: scopeUseEntries,
+          inlineModuleNames: scopeInlineModuleNames,
           exportsByModule,
         });
         const scope = new MacroScope();
@@ -112,10 +136,25 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
             }),
           );
         });
+        const surfaceUseEntries = collectUseEntries(module.surface.items);
+        const surfaceInlineModuleNames = collectInlineModuleNames(
+          module.surface.items,
+        );
+        mergeScopeUseEntries({
+          moduleId: id,
+          entries: surfaceUseEntries,
+          scopeUseEntriesByModule,
+        });
+        mergeScopeInlineModuleNames({
+          moduleId: id,
+          names: surfaceInlineModuleNames,
+          scopeInlineModuleNamesByModule,
+        });
         const localExports = indexExports(functionalResult.exports);
         const exportedMacros = collectMacroReexports({
           module,
-          entries: useEntries,
+          entries: surfaceUseEntries,
+          inlineModuleNames: surfaceInlineModuleNames,
           exportsByModule,
           localExports,
         });
@@ -264,8 +303,9 @@ const indexExports = (exports: MacroDefinition[]): MacroExportTable => {
   return table;
 };
 
-const inlineModuleNamesFor = (module: ModuleNode): Set<string> => {
-  const items = module.surface?.items ?? requireModuleHeader(module).items;
+const collectInlineModuleNames = (
+  items: readonly SurfaceModuleItem[],
+): Set<string> => {
   return new Set(
     items.flatMap((item) =>
       item.kind === "inline-module" ? [item.declaration.name] : [],
@@ -276,16 +316,17 @@ const inlineModuleNamesFor = (module: ModuleNode): Set<string> => {
 const collectMacroImports = ({
   module,
   entries,
+  inlineModuleNames,
   exportsByModule,
 }: {
   module: ModuleNode;
   entries: UseEntryWithVisibility[];
+  inlineModuleNames: ReadonlySet<string>;
   exportsByModule: Map<string, MacroExportTable>;
 }): Map<string, MacroDefinition> => {
   const imports = new Map<string, MacroDefinition>();
   const moduleIsPackageRoot =
     module.origin.kind === "file" && module.path.segments.at(-1) === "pkg";
-  const inlineModuleNames = inlineModuleNamesFor(module);
   entries.forEach((entry) => {
     if (!entry.hasExplicitPrefix) {
       return;
@@ -345,19 +386,19 @@ const collectMacroImports = ({
 const collectMacroReexports = ({
   module,
   entries,
+  inlineModuleNames,
   exportsByModule,
   localExports,
 }: {
   module: ModuleNode;
   entries: UseEntryWithVisibility[];
+  inlineModuleNames: ReadonlySet<string>;
   exportsByModule: Map<string, MacroExportTable>;
   localExports: MacroExportTable;
 }): MacroExportTable => {
   const exports = new Map(localExports);
   const moduleIsPackageRoot =
     module.origin.kind === "file" && module.path.segments.at(-1) === "pkg";
-  const inlineModuleNames = inlineModuleNamesFor(module);
-
   entries
     .filter((entry) => entry.visibility === "pub")
     .forEach((entry) => {
@@ -424,8 +465,9 @@ const collectMacroReexports = ({
   return exports;
 };
 
-const collectUseEntries = (module: ModuleNode): UseEntryWithVisibility[] => {
-  const items = module.surface?.items ?? requireModuleHeader(module).items;
+const collectUseEntries = (
+  items: readonly SurfaceModuleItem[],
+): UseEntryWithVisibility[] => {
   return items.flatMap((item) =>
     item.kind === "use"
       ? item.entries.map((entry) => ({
@@ -435,6 +477,55 @@ const collectUseEntries = (module: ModuleNode): UseEntryWithVisibility[] => {
       : [],
   );
 };
+
+const mergeScopeUseEntries = ({
+  moduleId,
+  entries,
+  scopeUseEntriesByModule,
+}: {
+  moduleId: string;
+  entries: readonly UseEntryWithVisibility[];
+  scopeUseEntriesByModule: Map<
+    string,
+    Map<string, UseEntryWithVisibility>
+  >;
+}): UseEntryWithVisibility[] => {
+  const scopeEntries =
+    scopeUseEntriesByModule.get(moduleId) ??
+    new Map<string, UseEntryWithVisibility>();
+  entries.forEach((entry) => scopeEntries.set(useEntryKey(entry), entry));
+  scopeUseEntriesByModule.set(moduleId, scopeEntries);
+  return Array.from(scopeEntries.values());
+};
+
+const mergeScopeInlineModuleNames = ({
+  moduleId,
+  names,
+  scopeInlineModuleNamesByModule,
+}: {
+  moduleId: string;
+  names: ReadonlySet<string>;
+  scopeInlineModuleNamesByModule: Map<string, Set<string>>;
+}): ReadonlySet<string> => {
+  const scopeNames =
+    scopeInlineModuleNamesByModule.get(moduleId) ?? new Set<string>();
+  names.forEach((name) => scopeNames.add(name));
+  scopeInlineModuleNamesByModule.set(moduleId, scopeNames);
+  return scopeNames;
+};
+
+const useEntryKey = (entry: UseEntryWithVisibility): string =>
+  JSON.stringify([
+    entry.visibility,
+    entry.moduleSegments,
+    entry.path,
+    entry.targetName ?? null,
+    entry.alias ?? null,
+    entry.selectionKind,
+    entry.anchorToSelf ?? false,
+    entry.parentHops ?? 0,
+    entry.hasExplicitPrefix,
+  ]);
 
 const cloneMacroWithAlias = (
   macro: MacroDefinition,

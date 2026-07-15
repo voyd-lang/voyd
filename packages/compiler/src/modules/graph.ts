@@ -172,6 +172,9 @@ export const buildModuleGraph = async ({
   const inlineModuleAstKeys = new Map<string, string>();
   const macroExpander = createModuleMacroExpander();
   const macroDiagnosticsByModule = new Map<string, Diagnostic[]>();
+  const surfaceDiagnosticsByModule = new Map<string, Diagnostic[]>();
+  const isReplaceableSurfaceDiagnostic = (diagnostic: Diagnostic): boolean =>
+    diagnostic.code === "MD0005";
 
   const useEntryKeys = (module: ModuleNode): Set<string> => {
     const items =
@@ -207,6 +210,9 @@ export const buildModuleGraph = async ({
 
   const addDocDiagnostics = (diagnostics: readonly Diagnostic[]): void => {
     diagnostics.forEach((diagnostic) => {
+      if (isReplaceableSurfaceDiagnostic(diagnostic)) {
+        return;
+      }
       const key = [
         diagnostic.code,
         diagnostic.message,
@@ -239,6 +245,7 @@ export const buildModuleGraph = async ({
     );
     macroExpander.reset(moduleId);
     macroDiagnosticsByModule.delete(moduleId);
+    surfaceDiagnosticsByModule.delete(moduleId);
     missingModules.delete(moduleId);
     modules.delete(moduleId);
     modulesByPath.delete(modulePathToString(module.path));
@@ -403,10 +410,9 @@ export const buildModuleGraph = async ({
           refreshedUseEntries,
         );
         collectedUseEntries.set(module.id, refreshedUseEntries);
-        addDocDiagnostics(
-          refreshed.diagnostics.filter(
-            (diagnostic) => diagnostic.code === "MD0005",
-          ),
+        surfaceDiagnosticsByModule.set(
+          module.id,
+          refreshed.diagnostics.filter(isReplaceableSurfaceDiagnostic),
         );
         const discoveredSubmodules = module.dependencies.filter(
           (dependency) => dependency.kind === "export",
@@ -447,6 +453,7 @@ export const buildModuleGraph = async ({
           if (existing) {
             macroExpander.reset(existing.id);
             macroDiagnosticsByModule.delete(existing.id);
+            surfaceDiagnosticsByModule.delete(existing.id);
             missingModules.delete(existing.id);
           }
           if (existing?.origin.kind === "file") {
@@ -666,6 +673,7 @@ export const buildModuleGraph = async ({
     );
     macroExpander.reset(moduleId);
     macroDiagnosticsByModule.delete(moduleId);
+    surfaceDiagnosticsByModule.delete(moduleId);
     missingModules.delete(moduleId);
     modules.delete(moduleId);
     modulesByPath.delete(modulePathToString(module.path));
@@ -715,12 +723,18 @@ export const buildModuleGraph = async ({
   const macroDiagnostics = Array.from(
     macroDiagnosticsByModule.values(),
   ).flat();
+  const surfaceDiagnostics = Array.from(
+    surfaceDiagnosticsByModule.values(),
+  ).flat();
   return {
     entry: entryModule.node.id,
     modules,
     diagnostics: [
       ...baseDiagnostics,
       ...docDiagnostics.filter(
+        (diagnostic) => !inactiveModuleFiles.has(diagnostic.span.file),
+      ),
+      ...surfaceDiagnostics.filter(
         (diagnostic) => !inactiveModuleFiles.has(diagnostic.span.file),
       ),
       ...macroDiagnostics.filter(
