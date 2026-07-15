@@ -51,8 +51,12 @@ import {
   type VoydRuntimePanicContext,
 } from "./runtime/trap-diagnostics.js";
 import {
+  createRetainedCallbackScopeManager,
   createRetainedEventHandlerRegistry,
+  type RetainedCallbackScopeManager,
+  type RetainedCallbackScopeOwner,
   type RetainedEventHandlerRegistry,
+  type WasmEventHandlerRef,
 } from "./retained-callbacks.js";
 import type { VoydPackageAdapter } from "@voyd-lang/package-adapter";
 import {
@@ -103,7 +107,9 @@ const MSGPACK_OPTS = { useBigInt64: true } as const;
 const TASK_RUNTIME_IMPORT_MODULE = "voyd.task";
 const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const BOUNDARY_CALLBACK_IMPORT_MODULE = "voyd.boundary.callback";
+const RENDER_CALLBACK_IMPORT_MODULE = "voyd.render.callback";
 const LEGACY_VX_CALLBACK_IMPORT_MODULE = "voyd.vx.callback";
+const CALLBACK_SCOPE_IMPORT_MODULE = "voyd.callback.scope";
 const TASK_RUNTIME_EFFECT_ID = "voyd.std.task.runtime";
 const TASK_RUNTIME_WAIT_OP_ID = 0;
 const TASK_RUNTIME_YIELD_OP_ID = 1;
@@ -127,6 +133,7 @@ type ActiveTaskImportContext = {
 
 type ActiveTaskContext = ActiveTaskImportContext & {
   activeTaskId: number;
+  callbackScopeOwner: RetainedCallbackScopeOwner;
 };
 
 type RetainedEffectfulCallbackRunner = (params: {
@@ -283,6 +290,8 @@ const buildRetainedCallbackImportModules = ({
   annotateTrap,
   runEffectfulRetainedCallback,
   decorateResult,
+  scopeManager,
+  getActiveScopeOwner,
 }: {
   importDescriptors: WebAssembly.ModuleImportDescriptor[];
   getInstance: () => WebAssembly.Instance;
@@ -291,6 +300,8 @@ const buildRetainedCallbackImportModules = ({
   annotateTrap: (error: unknown, opts?: VoydTrapAnnotation) => Error;
   runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner;
   decorateResult?: (value: unknown) => unknown;
+  scopeManager: RetainedCallbackScopeManager;
+  getActiveScopeOwner: () => RetainedCallbackScopeOwner | undefined;
 }): WebAssembly.Imports => {
   const callbackImportsByModule = new Map<string, Record<string, CallableFunction>>();
 
@@ -299,6 +310,7 @@ const buildRetainedCallbackImportModules = ({
       (descriptor) =>
         (descriptor.module === CALLBACK_IMPORT_MODULE ||
           descriptor.module === BOUNDARY_CALLBACK_IMPORT_MODULE ||
+          descriptor.module === RENDER_CALLBACK_IMPORT_MODULE ||
           descriptor.module === LEGACY_VX_CALLBACK_IMPORT_MODULE) &&
         descriptor.kind === "function",
     )
@@ -309,8 +321,13 @@ const buildRetainedCallbackImportModules = ({
       }
       const callbackImports = callbackImportsByModule.get(descriptor.module) ?? {};
       callbackImportsByModule.set(descriptor.module, callbackImports);
-      callbackImports[descriptor.name] = ((handlerRef: unknown): number =>
-        registry.retain((payload) => {
+      callbackImports[descriptor.name] = ((handlerRef: unknown): number => {
+        const retain =
+          descriptor.module === RENDER_CALLBACK_IMPORT_MODULE
+            ? (handler: WasmEventHandlerRef) =>
+                scopeManager.retain(getActiveScopeOwner(), handler)
+            : (handler: WasmEventHandlerRef) => registry.retain(handler);
+        return retain((payload) => {
           const instance = getInstance();
           const rawCallbackExportName = `${callbackExportName}_effectful_raw`;
           const returnsVoid = hasExportedFunction({
@@ -393,10 +410,52 @@ const buildRetainedCallbackImportModules = ({
           const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
           const result = decode(bytes, MSGPACK_OPTS);
           return decorateResult?.(result) ?? result;
-        })) as CallableFunction;
+        });
+      }) as CallableFunction;
     });
 
   return Object.fromEntries(callbackImportsByModule.entries()) as WebAssembly.Imports;
+};
+
+const buildRetainedCallbackScopeImportModule = ({
+  importDescriptors,
+  getActiveScopeOwner,
+  scopeManager,
+}: {
+  importDescriptors: WebAssembly.ModuleImportDescriptor[];
+  getActiveScopeOwner: () => RetainedCallbackScopeOwner | undefined;
+  scopeManager: RetainedCallbackScopeManager;
+}): WebAssembly.Imports => {
+  const importedNames = new Set(
+    importDescriptors
+      .filter(
+        (descriptor) =>
+          descriptor.module === CALLBACK_SCOPE_IMPORT_MODULE &&
+          descriptor.kind === "function",
+      )
+      .map((descriptor) => descriptor.name),
+  );
+  if (importedNames.size === 0) {
+    return {};
+  }
+
+  const requireActiveScopeOwner = (): RetainedCallbackScopeOwner => {
+    const owner = getActiveScopeOwner();
+    if (owner === undefined) {
+      throw new Error("retained callback scopes require an active Voyd task");
+    }
+    return owner;
+  };
+  const imports: Record<string, CallableFunction> = {};
+  if (importedNames.has("begin")) {
+    imports.begin = (() =>
+      scopeManager.beginScope(requireActiveScopeOwner())) as CallableFunction;
+  }
+  if (importedNames.has("end")) {
+    imports.end = ((scopeId: number) =>
+      scopeManager.endScope(requireActiveScopeOwner(), scopeId)) as CallableFunction;
+  }
+  return { [CALLBACK_SCOPE_IMPORT_MODULE]: imports };
 };
 
 const retainedCallbackExportNameFrom = (
@@ -405,6 +464,12 @@ const retainedCallbackExportNameFrom = (
   const importName = descriptor.name;
   if (descriptor.module === CALLBACK_IMPORT_MODULE && importName.startsWith("retain__")) {
     return importName.slice("retain__".length);
+  }
+  if (
+    descriptor.module === RENDER_CALLBACK_IMPORT_MODULE &&
+    importName.startsWith("retain_render_callback__")
+  ) {
+    return importName.slice("retain_render_callback__".length);
   }
   if (importName.startsWith("retain_callback__")) {
     return importName.slice("retain_callback__".length);
@@ -711,6 +776,7 @@ export const createVoydHost = async ({
   const trapDiagnostics = createVoydTrapDiagnostics({ module });
   let instanceRef: WebAssembly.Instance | undefined;
   let activeTaskImportContext: ActiveTaskImportContext | undefined;
+  let activeCallbackScopeOwner: RetainedCallbackScopeOwner | undefined;
   let spawnDetachedOutsideContext:
     | ((params: {
         starterExportName: string;
@@ -746,6 +812,7 @@ export const createVoydHost = async ({
   });
   const callbackRegistry =
     retainedCallbacks ?? createRetainedEventHandlerRegistry();
+  const callbackScopeManager = createRetainedCallbackScopeManager(callbackRegistry);
   type StandaloneTaskEntry = {
     outcome: Promise<RunOutcome<unknown>>;
     cleanupTimer?: ReturnType<typeof setTimeout>;
@@ -784,6 +851,13 @@ export const createVoydHost = async ({
     annotateTrap,
     runEffectfulRetainedCallback: (params) => runEffectfulRetainedCallback(params),
     decorateResult: (value) => attachTaskObserver(value, observeStandaloneTask),
+    scopeManager: callbackScopeManager,
+    getActiveScopeOwner: () => activeCallbackScopeOwner,
+  });
+  const retainedCallbackScopeImports = buildRetainedCallbackScopeImportModule({
+    importDescriptors: WebAssembly.Module.imports(module),
+    scopeManager: callbackScopeManager,
+    getActiveScopeOwner: () => activeCallbackScopeOwner,
   });
   const externalImports = buildExternalImportModule({
     requirements: externalRequirements,
@@ -803,6 +877,7 @@ export const createVoydHost = async ({
         ...defaultImports(),
         ...(taskRuntimeImports as Record<string, unknown>),
         ...(retainedCallbackImports as Record<string, unknown>),
+        ...(retainedCallbackScopeImports as Record<string, unknown>),
         ...(externalImports as Record<string, unknown>),
       } as WebAssembly.Imports,
       imports
@@ -890,11 +965,11 @@ export const createVoydHost = async ({
     initialized = true;
   };
 
-  const runSerialized = async <T = unknown>(
+  const runSerialized = <T = unknown>(
     entryName: string,
     args: unknown[] = [],
     abi?: Extract<ExportAbiEntry, { abi: "serialized" }>
-  ): Promise<T> => {
+  ): T => {
     const wrapperName = abi?.wrapperName ?? entryName;
     const entry = requireExportedFunction({ instance, name: wrapperName });
     const msgpackMemory = requireExportedMemory({
@@ -967,40 +1042,61 @@ export const createVoydHost = async ({
     entryName: string,
     args: unknown[] = []
   ): Promise<T> => {
-    const abi = exportAbiByName.get(entryName);
-    if (abi?.abi === "serialized") {
-      if (abi.formatId !== "msgpack") {
-        throw new Error(`unsupported serializer format ${abi.formatId}`);
-      }
-      return runSerialized<T>(entryName, args, abi);
-    }
-    const entry = requireExportedFunction({ instance, name: entryName });
-    const directArgs = abi?.params
-      ? encodeDirectBoundaryArgs({
-          exportName: entryName,
-          schemas: abi.params,
-          args,
-        })
-      : args;
-    let result: unknown;
+    const callbackScopeOwner = `pure:${detachedRunCounter++}`;
+    const previousCallbackScopeOwner = activeCallbackScopeOwner;
+    activeCallbackScopeOwner = callbackScopeOwner;
+    let didFail = false;
     try {
-      result = (entry as (...params: unknown[]) => unknown)(...directArgs);
+      const abi = exportAbiByName.get(entryName);
+      if (abi?.abi === "serialized") {
+        if (abi.formatId !== "msgpack") {
+          throw new Error(`unsupported serializer format ${abi.formatId}`);
+        }
+        return runSerialized<T>(entryName, args, abi);
+      }
+      const entry = requireExportedFunction({ instance, name: entryName });
+      const directArgs = abi?.params
+        ? encodeDirectBoundaryArgs({
+            exportName: entryName,
+            schemas: abi.params,
+            args,
+          })
+        : args;
+      let result: unknown;
+      try {
+        result = (entry as (...params: unknown[]) => unknown)(...directArgs);
+      } catch (error) {
+        throw annotateTrap(error, {
+          transition: {
+            point: "run_pure_entry",
+            direction: "host->vm",
+          },
+          fallbackFunctionName: entryName,
+        });
+      }
+      return (abi?.result
+        ? decodeDirectBoundaryResult({
+            exportName: entryName,
+            schema: abi.result,
+            value: result,
+          })
+        : result) as T;
     } catch (error) {
-      throw annotateTrap(error, {
-        transition: {
-          point: "run_pure_entry",
-          direction: "host->vm",
-        },
-        fallbackFunctionName: entryName,
-      });
+      didFail = true;
+      throw error;
+    } finally {
+      activeCallbackScopeOwner = previousCallbackScopeOwner;
+      try {
+        callbackScopeManager.finishOwner(callbackScopeOwner);
+      } catch (cleanupError) {
+        if (!didFail) {
+          throw cleanupError;
+        }
+        console.error(
+          `[voyd] retained callback scope cleanup failed for ${callbackScopeOwner}: ${toError(cleanupError).message}`,
+        );
+      }
     }
-    return (abi?.result
-      ? decodeDirectBoundaryResult({
-          exportName: entryName,
-          schema: abi.result,
-          value: result,
-        })
-      : result) as T;
   };
 
   const runEffectfulManaged = <T = unknown>(
@@ -1008,6 +1104,9 @@ export const createVoydHost = async ({
     args: unknown[] = [],
     startRaw?: RawEffectfulStarter
   ): VoydRunHandle<T> => {
+    const callbackScopeRunId = detachedRunCounter++;
+    const callbackScopeOwnerForTask = (taskId: number): string =>
+      `${callbackScopeRunId}:${taskId}`;
     if (args.length > 0 && !startRaw) {
       throw new Error("effectful exports do not accept arguments yet");
     }
@@ -1031,6 +1130,16 @@ export const createVoydHost = async ({
     const reportResourceCleanupFailure = (reason: unknown): void => {
       const error = toError(reason);
       console.error(`[voyd] run resource cleanup failed: ${error.message}`);
+    };
+    const finishRetainedCallbackScopesForTask = (taskId: number): void => {
+      try {
+        callbackScopeManager.finishOwner(callbackScopeOwnerForTask(taskId));
+      } catch (reason) {
+        const error = toError(reason);
+        console.error(
+          `[voyd] retained callback scope cleanup failed for task ${taskId}: ${error.message}`,
+        );
+      }
     };
     const registerRunResourceCleanup = (cleanup: EffectResourceCleanup): void => {
       if (runResourceScopeClosed) {
@@ -1295,11 +1404,14 @@ export const createVoydHost = async ({
       fn: () => R
     ): R => {
       const previous = activeTaskImportContext;
+      const previousCallbackScopeOwner = activeCallbackScopeOwner;
       activeTaskImportContext = context;
+      activeCallbackScopeOwner = context.callbackScopeOwner;
       try {
         return fn();
       } finally {
         activeTaskImportContext = previous;
+        activeCallbackScopeOwner = previousCallbackScopeOwner;
       }
     };
 
@@ -1317,6 +1429,7 @@ export const createVoydHost = async ({
       cancelTask: state.cancelTask,
       takeTaskValue: state.takeTaskValue,
       activeTaskId,
+      callbackScopeOwner: callbackScopeOwnerForTask(activeTaskId),
     });
 
     const resumeTask = ({
@@ -1498,6 +1611,7 @@ export const createVoydHost = async ({
                 kind: "cancelled",
                 observed: false,
               };
+              finishRetainedCallbackScopesForTask(taskId);
               task.waiters.forEach(({ taskId: waiterTaskId, request }) => {
                 try {
                   const resumed = resumeTask({
@@ -1695,6 +1809,7 @@ export const createVoydHost = async ({
                 observed: false,
               };
             }
+            finishRetainedCallbackScopesForTask(owner.id);
             owner.waiters.forEach(({ taskId: waiterTaskId, request }) => {
               try {
                 owner.terminal!.observed = true;
@@ -1783,6 +1898,7 @@ export const createVoydHost = async ({
                     ...completion,
                     observed: false,
                   };
+            finishRetainedCallbackScopesForTask(current.id);
             current.waiters.forEach(({ taskId: waiterTaskId, request }) => {
               try {
                 current.terminal!.observed = true;

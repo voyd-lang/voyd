@@ -654,15 +654,17 @@ voyd bootstrap my-site --template web-ssr
 ```
 
 The shared `src/app` code owns the model, transitions, and exact markup. Its
-`static_view` omits retained browser callback descriptors while calling the same
-internal view implementation as the interactive `view`; this prevents
-server-request callback leaks without duplicating UI. The server wraps that
-markup in the document shell and sends its initial model plus a structured
-hydration root. The browser creates the same VX
-application with that model and calls `hydrateVxApp`, preserving matching DOM
-and reporting mismatches in development. Server-only routes and persistence stay
-under `src/server`; Wasm loading stays in the TypeScript bridge. See
-[Web](./web.md) for the complete server and hydration workflow.
+`view(model)` is called by both the server document shell and the browser
+program. During server rendering, the host records closure-backed handler ids as
+they are retained and releases them after the render call, including failure paths.
+Static-message events retain no callback, and explicit caller-owned handler ids
+are not part of the render scope. Browser callbacks keep their normal mounted
+renderer lifetime. The server sends the initial model plus a structured
+hydration root; the browser creates the same VX application with that model and
+calls `hydrateVxApp`, preserving matching DOM and reporting mismatches in
+development. Server-only routes and persistence stay under `src/server`; Wasm
+loading stays in the TypeScript bridge. See [Web](./web.md) for the complete
+server and hydration workflow and cleanup contract.
 
 ## Browser Runtime Integration
 

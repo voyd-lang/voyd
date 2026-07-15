@@ -111,6 +111,7 @@ type MethodCallCandidate = {
   symbol: SymbolId;
   signature: FunctionSignature;
   symbolRef: SymbolRef;
+  methodAlias?: string;
   nameForSymbol?: SymbolNameResolver;
   exported?: ModuleExportEntry;
   receiverTypeOverride?: TypeId;
@@ -1052,7 +1053,10 @@ const getExpectedCallParameters = ({
   return {
     params: publicCallParametersFor({ signature }).map((param) =>
       combinedSubstitution
-        ? { ...param, type: ctx.arena.substitute(param.type, combinedSubstitution) }
+        ? {
+            ...param,
+            type: ctx.arena.substitute(param.type, combinedSubstitution),
+          }
         : param,
     ),
   };
@@ -1221,7 +1225,7 @@ const findMatchingOverloadCandidates = <
         state,
         typeArguments,
         targetTypeArguments,
-    ),
+      ),
     argsForCandidate,
     scoreMatches,
   });
@@ -2195,7 +2199,9 @@ const functionReturnSatisfiesParameterReturn = ({
     ctx.arena.substitute(expectedReturn, returnBindings),
     ctx,
   );
-  if (containsTypeParamRefFrom(boundExpectedReturn, signatureTypeParamIds, ctx)) {
+  if (
+    containsTypeParamRefFrom(boundExpectedReturn, signatureTypeParamIds, ctx)
+  ) {
     return false;
   }
 
@@ -3475,9 +3481,14 @@ const selectMethodCallCandidate = ({
       ctx,
     });
 
-  const methodCandidates = filterCandidatesByExplicitTypeArguments({
+  const explicitMethodCandidates = filterCandidatesByExplicitTypeArguments({
     candidates: resolution.candidates,
     typeArguments,
+  });
+  const methodCandidates = preferLeastGenericMethodAliases({
+    candidates: explicitMethodCandidates,
+    methodName: expr.method,
+    hasExplicitTypeArguments: (typeArguments?.length ?? 0) > 0,
   });
   let candidates = methodCandidates;
   let noOverloadDiagnosticCandidates = methodCandidates;
@@ -3634,6 +3645,42 @@ const selectMethodCallCandidate = ({
 
   return { selected: matches[0], usedTraitDispatch: false };
 };
+
+const preferLeastGenericMethodAliases = ({
+  candidates,
+  methodName,
+  hasExplicitTypeArguments,
+}: {
+  candidates: readonly MethodCallCandidate[];
+  methodName: string;
+  hasExplicitTypeArguments: boolean;
+}): MethodCallCandidate[] => {
+  if (hasExplicitTypeArguments) return [...candidates];
+  const isMethodAlias = (candidate: MethodCallCandidate): boolean =>
+    candidate.methodAlias === methodName;
+  return candidates.filter((candidate) => {
+    if (!isMethodAlias(candidate)) {
+      return true;
+    }
+    const shape = overloadCallShape(candidate.signature);
+    const typeParameterCount = candidate.signature.typeParams?.length ?? 0;
+    return !candidates.some(
+      (other) => {
+        if (!isMethodAlias(other)) return false;
+        if (overloadCallShape(other.signature) !== shape) return false;
+        return (other.signature.typeParams?.length ?? 0) < typeParameterCount;
+      },
+    );
+  });
+};
+
+const overloadCallShape = (signature: FunctionSignature): string =>
+  publicCallParametersFor({ signature })
+    .map(
+      ({ label, optional, defaulted }) =>
+        `${label ?? ""}:${optional === true || defaulted === true ? "?" : "!"}`,
+    )
+    .join("|");
 
 const resolveMethodCallCandidates = ({
   receiverType,
@@ -3896,10 +3943,7 @@ const typeOperatorOverloadCall = ({
   const hasUnresolvedOperand = args.some(
     (arg) => arg.type === ctx.primitives.unknown,
   );
-  if (
-    hasUnresolvedOperand &&
-    resolution.includesMethodCandidates !== true
-  ) {
+  if (hasUnresolvedOperand && resolution.includesMethodCandidates !== true) {
     return undefined;
   }
 
@@ -4338,19 +4382,28 @@ const resolveFreeFunctionCandidates = ({
   methodName: string;
   ctx: TypingContext;
 }): MethodCallCandidate[] => {
-  const symbols = ctx.symbolTable.resolveAllByKinds(
-    methodName,
-    ctx.symbolTable.rootScope,
-    ["value"],
-  );
-  if (!symbols || symbols.length === 0) {
+  const namedSymbols =
+    ctx.symbolTable.resolveAllByKinds(methodName, ctx.symbolTable.rootScope, [
+      "value",
+    ]) ?? [];
+  const aliasedSymbols = Array.from(
+    ctx.symbolTable.symbolsInScope(ctx.symbolTable.rootScope),
+  ).filter((symbol) => {
+    const record = ctx.symbolTable.getSymbol(symbol);
+    const metadata = (record.metadata ?? {}) as { methodAlias?: unknown };
+    return record.kind === "value" && metadata.methodAlias === methodName;
+  });
+  const symbols = Array.from(new Set([...namedSymbols, ...aliasedSymbols]));
+  if (symbols.length === 0) {
     return [];
   }
 
+  const seen = new Set<string>();
   return symbols
     .map((symbol) => {
       const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
         entity?: unknown;
+        methodAlias?: unknown;
       };
       if (metadata.entity === "trait-method") {
         return undefined;
@@ -4359,10 +4412,19 @@ const resolveFreeFunctionCandidates = ({
       if (!signature) {
         return undefined;
       }
+      const symbolRef = canonicalSymbolRefForTypingContext(symbol, ctx);
+      const key = symbolRefKey(symbolRef);
+      if (seen.has(key)) {
+        return undefined;
+      }
+      seen.add(key);
       return {
         symbol,
         signature,
-        symbolRef: canonicalSymbolRefForTypingContext(symbol, ctx),
+        symbolRef,
+        ...(metadata.methodAlias === methodName
+          ? { methodAlias: methodName }
+          : {}),
       };
     })
     .filter((entry): entry is MethodCallCandidate => Boolean(entry));
@@ -5430,13 +5492,15 @@ const refreshFunctionSignatureTypeForGenericBody = ({
   ctx: TypingContext;
 }): void => {
   const functionType = ctx.arena.internFunction({
-    parameters: signature.parameters.map(({ type, label, optional, defaulted, bindingKind }) => ({
-      type,
-      label,
-      optional: (optional ?? false) || (defaulted ?? false),
-      defaulted: defaulted ?? false,
-      bindingKind,
-    })),
+    parameters: signature.parameters.map(
+      ({ type, label, optional, defaulted, bindingKind }) => ({
+        type,
+        label,
+        optional: (optional ?? false) || (defaulted ?? false),
+        defaulted: defaulted ?? false,
+        bindingKind,
+      }),
+    ),
     returnType: signature.returnType,
     effectRow: signature.effectRow ?? ctx.primitives.defaultEffectRow,
   });
@@ -5736,7 +5800,7 @@ const typeOverloadedCall = (
     );
   }
 
-  const candidates = options.map((symbol) => {
+  const rawCandidates = options.map((symbol) => {
     const signature = ctx.functions.getSignature(symbol);
     if (!signature) {
       throw new Error(
@@ -5748,16 +5812,23 @@ const typeOverloadedCall = (
     }
     return { symbol, signature };
   });
-  const { candidates: candidatesForResolution, expectedReturnCompatibleSymbols } =
-    selectHintedOverloadCandidates({
-      candidates,
-      typeArguments,
-      targetTypeArguments,
-      expectedReturnType,
-      expectedReturnCandidates,
-      ctx,
-      state,
-    });
+  const candidates = preferLeastGenericContractOverloads({
+    candidates: rawCandidates,
+    hasExplicitTypeArguments: (typeArguments?.length ?? 0) > 0,
+    ctx,
+  });
+  const {
+    candidates: candidatesForResolution,
+    expectedReturnCompatibleSymbols,
+  } = selectHintedOverloadCandidates({
+    candidates,
+    typeArguments,
+    targetTypeArguments,
+    expectedReturnType,
+    expectedReturnCandidates,
+    ctx,
+    state,
+  });
   // Scoring speculatively infers lambda returns for each candidate. Preserve
   // those immutable results for the selected-call typing that follows.
   const lambdaReturnInferenceCache: LambdaReturnInferenceCache = new Map();
@@ -5950,11 +6021,44 @@ const typeOverloadedCall = (
   });
 };
 
+const preferLeastGenericContractOverloads = <
+  T extends { symbol: SymbolId; signature: FunctionSignature },
+>({
+  candidates,
+  hasExplicitTypeArguments,
+  ctx,
+}: {
+  candidates: readonly T[];
+  hasExplicitTypeArguments: boolean;
+  ctx: TypingContext;
+}): T[] => {
+  if (hasExplicitTypeArguments) return [...candidates];
+  const prefersLeastGeneric = (candidate: T): boolean => {
+    const metadata = (ctx.symbolTable.getSymbol(candidate.symbol).metadata ??
+      {}) as { overloadPreference?: unknown };
+    return metadata.overloadPreference === "least-generic";
+  };
+  return candidates.filter((candidate) => {
+    if (!prefersLeastGeneric(candidate)) return true;
+    const shape = overloadCallShape(candidate.signature);
+    const typeParameterCount = candidate.signature.typeParams?.length ?? 0;
+    return !candidates.some(
+      (other) =>
+        prefersLeastGeneric(other) &&
+        overloadCallShape(other.signature) === shape &&
+        (other.signature.typeParams?.length ?? 0) < typeParameterCount,
+    );
+  });
+};
+
 const mergeInitialCallSubstitutions = (
   seed: ReadonlyMap<TypeParamId, TypeId> | undefined,
   traitBindings: ReadonlyMap<TypeParamId, TypeId> | undefined,
 ): ReadonlyMap<TypeParamId, TypeId> | undefined => {
-  if ((!seed || seed.size === 0) && (!traitBindings || traitBindings.size === 0)) {
+  if (
+    (!seed || seed.size === 0) &&
+    (!traitBindings || traitBindings.size === 0)
+  ) {
     return undefined;
   }
 
@@ -5989,7 +6093,9 @@ const narrowOverloadMatchesByLambdaReturn = <
 
   const lambdaArgIndexes = callArgs
     .map((arg, index) => ({ arg, index }))
-    .filter(({ arg }) => ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda")
+    .filter(
+      ({ arg }) => ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda",
+    )
     .map(({ index }) => index);
   if (lambdaArgIndexes.length === 0) {
     return matches;
@@ -6040,7 +6146,9 @@ const scoreOverloadMatchesByLambdaCompatibility = <
   lambdaReturnInferenceCache?: LambdaReturnInferenceCache;
 }): ReadonlyMap<T, OverloadMatchScoreOverrides> => {
   if (matches.length <= 1) {
-    return new Map(matches.map((candidate) => [candidate, { lambdaCompatibility: 0 }]));
+    return new Map(
+      matches.map((candidate) => [candidate, { lambdaCompatibility: 0 }]),
+    );
   }
 
   const lambdaCompatible = narrowOverloadMatchesByLambdaCompatibility({
@@ -6059,8 +6167,7 @@ const scoreOverloadMatchesByLambdaCompatibility = <
     targetTypeArguments,
     ctx,
     state,
-    lambdaReturnInferenceCache:
-      lambdaReturnInferenceCache ?? new Map(),
+    lambdaReturnInferenceCache: lambdaReturnInferenceCache ?? new Map(),
   });
   const arityCompatible = narrowOverloadMatchesByInlineLambdaArity({
     matches: lambdaReturnCompatible,
@@ -6182,7 +6289,9 @@ const inferLambdaReturnSubstitutionForCandidate = <
   })?.forEach((value, key) => substitution.set(key, value));
   const lambdaArgIndexes = callArgs
     .map((arg, index) => ({ arg, index }))
-    .filter(({ arg }) => ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda")
+    .filter(
+      ({ arg }) => ctx.hir.expressions.get(arg.expr)?.exprKind === "lambda",
+    )
     .map(({ index }) => index);
 
   let checked = false;
@@ -6191,12 +6300,12 @@ const inferLambdaReturnSubstitutionForCandidate = <
     if (!arg) {
       continue;
     }
-    const params = publicCallParametersFor({ signature: candidate.signature }).map(
-      (param) => ({
-        ...param,
-        type: ctx.arena.substitute(param.type, substitution),
-      }),
-    );
+    const params = publicCallParametersFor({
+      signature: candidate.signature,
+    }).map((param) => ({
+      ...param,
+      type: ctx.arena.substitute(param.type, substitution),
+    }));
     const expected = expectedCallArgType({
       args: callArgs,
       index,
@@ -6213,7 +6322,10 @@ const inferLambdaReturnSubstitutionForCandidate = <
     if (expectedDesc.kind !== "function") {
       continue;
     }
-    const expectedReturnType = unfoldRecursiveTypeId(expectedDesc.returnType, ctx);
+    const expectedReturnType = unfoldRecursiveTypeId(
+      expectedDesc.returnType,
+      ctx,
+    );
     if (expectedReturnType === ctx.primitives.unknown) {
       continue;
     }
@@ -6526,7 +6638,11 @@ const inlineLambdaCompatibility = <
     if (expectedDesc.parameters.length > lambdaExpr.parameters.length) {
       omittedTrailing = true;
     }
-    for (let paramIndex = 0; paramIndex < lambdaExpr.parameters.length; paramIndex += 1) {
+    for (
+      let paramIndex = 0;
+      paramIndex < lambdaExpr.parameters.length;
+      paramIndex += 1
+    ) {
       const actualParam = lambdaExpr.parameters[paramIndex]!;
       if (!actualParam.type) {
         continue;
@@ -6704,7 +6820,9 @@ const inferLambdaReturnType = ({
   });
   try {
     const actualFunction = withSpeculativeExprTyping(ctx, () =>
-      typeExpression(lambdaExpr, ctx, state, { expectedType: parameterContext }),
+      typeExpression(lambdaExpr, ctx, state, {
+        expectedType: parameterContext,
+      }),
     );
     const actualDesc = ctx.arena.get(actualFunction);
     const actualReturnType =
@@ -6738,25 +6856,31 @@ const containsTypeParamRef = (
     case "fixed-array":
       return containsTypeParamRef(desc.element, ctx, seen);
     case "union":
-      return desc.members.some((member) => containsTypeParamRef(member, ctx, seen));
+      return desc.members.some((member) =>
+        containsTypeParamRef(member, ctx, seen),
+      );
     case "intersection":
       return (
         (typeof desc.nominal === "number" &&
           containsTypeParamRef(desc.nominal, ctx, seen)) ||
         (typeof desc.structural === "number" &&
           containsTypeParamRef(desc.structural, ctx, seen)) ||
-        (desc.traits?.some((trait) => containsTypeParamRef(trait, ctx, seen)) ?? false)
+        (desc.traits?.some((trait) => containsTypeParamRef(trait, ctx, seen)) ??
+          false)
       );
     case "trait":
     case "nominal-object":
     case "value-object":
       return desc.typeArgs.some((arg) => containsTypeParamRef(arg, ctx, seen));
     case "structural-object":
-      return desc.fields.some((field) => containsTypeParamRef(field.type, ctx, seen));
+      return desc.fields.some((field) =>
+        containsTypeParamRef(field.type, ctx, seen),
+      );
     case "function":
       return (
-        desc.parameters.some((param) => containsTypeParamRef(param.type, ctx, seen)) ||
-        containsTypeParamRef(desc.returnType, ctx, seen)
+        desc.parameters.some((param) =>
+          containsTypeParamRef(param.type, ctx, seen),
+        ) || containsTypeParamRef(desc.returnType, ctx, seen)
       );
     case "primitive":
       return false;
@@ -6793,7 +6917,8 @@ const containsTypeParamRefFrom = (
           containsTypeParamRefFrom(desc.structural, targetParams, ctx, seen)) ||
         (desc.traits?.some((trait) =>
           containsTypeParamRefFrom(trait, targetParams, ctx, seen),
-        ) ?? false)
+        ) ??
+          false)
       );
     case "trait":
     case "nominal-object":
@@ -7228,6 +7353,7 @@ const typeIntrinsicCall = (
       });
     case "__retain_callback":
     case "__boundary_retain_callback":
+    case "__render_retain_callback":
       return typeBoundaryRetainCallbackIntrinsic({
         name,
         args,

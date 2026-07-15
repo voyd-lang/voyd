@@ -1,10 +1,20 @@
 use pkg::web::all
+use pkg::web::{ render as render_html }
+use pkg::web::html::self as server_html
 use pkg::web::router
 use std::http::{ Body, Headers, HttpError, IncomingRequest, Method, QueryString, Response }
+use std::http::{ Response as HttpResponse }
 use std::json::{ JsonBool, JsonValue }
+use std::msgpack::MsgPack
+use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::String
+use std::http::server::self as server
+use std::http::server::{ HttpServer, ServeTaskPolicy, ServerConfig }
+use std::error::panic
+use std::task::self as tasks
+use std::vx::all
 
 type UserParams = {
   id: String
@@ -22,6 +32,13 @@ type CreateUser = {
 type CookieProbe = {
   session: String
 }
+
+type InvalidHydrationModel = {
+  value: f64
+}
+
+enum SsrMsg
+  Edit { value: String }
 
 fn dsl_middleware(ctx: Context, next: Next) -> Response
   next(ctx)
@@ -320,3 +337,138 @@ pub fn router_export_probe() -> i32
     return -8
 
   response.status.code()
+
+pub fn serve_ssr_callback_scope_probe(): (HttpServer, tasks::TaskRuntime) -> i32
+  let result = server::serve_each(
+    config: ServerConfig::init(port: 41234),
+    policy: ServeTaskPolicy::detached(),
+    handle: render_scoped_response
+  )
+  match(result)
+    Ok<Unit>:
+      0
+    Err:
+      -1
+
+pub fn direct_ssr_callback_scope_probe() -> String
+  document<MsgPack>(retained_ssr_view(false))
+
+pub fn direct_typed_ssr_callback_scope_probe() -> String
+  document(typed_retained_ssr_view())
+
+pub fn aliased_ssr_callback_scope_probe() -> String
+  render_html(retained_ssr_view(false))
+
+pub fn qualified_ssr_callback_scope_probe() -> String
+  server_html::render(retained_ssr_view(false))
+
+pub fn html_response_callback_scope_probe() -> String
+  response_text(html_response(Response::ok(), retained_ssr_view(false)))
+
+pub fn explicit_generic_html_response_callback_scope_probe() -> String
+  response_text(server_html::html_response<MsgPack>(Response::ok(), retained_ssr_view(false)))
+
+pub fn qualified_html_function_callback_scope_probe() -> String
+  response_text(server_html::html(Response::ok(), retained_ssr_view(false)))
+
+pub fn legacy_response_html_callback_scope_probe() -> String
+  response_text(Response::ok().html(retained_ssr_view(false)))
+
+pub fn response_value_html_callback_scope_probe() -> String
+  let response: Response = Response::ok()
+  response_text(response.html(retained_ssr_view(false)))
+
+pub fn aliased_response_html_callback_scope_probe() -> String
+  response_text(HttpResponse::ok().html(retained_ssr_view(false)))
+
+pub fn explicit_generic_response_html_callback_scope_probe() -> String
+  response_text(Response::ok().html<MsgPack>(retained_ssr_view(false)))
+
+pub fn hydrated_response_html_callback_scope_probe() -> String
+  response_text(
+    Response::ok().html(
+      view: retained_ssr_view(false),
+      hydrate: hydrate_named<InvalidHydrationModel>(
+        id: "probe",
+        target: "#probe",
+        entry: "/probe.js",
+        model: { value: 1.0 }
+      )
+    )
+  )
+
+pub fn hydrated_html_response_callback_scope_probe() -> String
+  response_text(
+    hydrated_html_response(
+      Response::ok(),
+      view: retained_ssr_view(false),
+      hydrate: hydrate_named<InvalidHydrationModel>(
+        id: "named-probe",
+        target: "#probe",
+        entry: "/probe.js",
+        model: { value: 1.0 }
+      )
+    )
+  )
+
+pub fn direct_ssr_render_failure_probe() -> String
+  document(retained_ssr_view(true))
+
+pub fn direct_ssr_view_failure_probe() -> String
+  document(failing_ssr_view())
+
+pub fn direct_hydration_failure_probe() -> String
+  document(
+    view: retained_ssr_view(false),
+    hydrate: hydrate_named<InvalidHydrationModel>(
+      id: "probe",
+      target: "#probe",
+      entry: "/probe.js",
+      model: { value: 0.0 / 0.0 }
+    )
+  )
+
+pub fn browser_callback_lifetime_probe() -> Html<MsgPack>
+  retained_ssr_view(false)
+
+pub fn durable_message_mapper_probe() -> i32
+  let mapper_id = retain_typed_message_mapper<i32, i32>((value: i32) -> i32 => value + 1)
+  let _ = document(retained_ssr_view(false))
+  mapper_id
+
+pub fn explicit_event_id_survives_ssr_probe() -> i32
+  let handler_id = retain_typed_event_handler<i32>(() -> i32 => 42)
+  let explicit_view: Html<i32> = element(
+    tag: "button",
+    attrs: [event(name: "click", handler_id: handler_id)],
+    children: [text("Explicit")]
+  )
+  let _ = document(explicit_view)
+  handler_id
+
+fn render_scoped_response(request: IncomingRequest) -> Response
+  if request.path.equals("/hydrate-fail"):
+    return Response::ok().text(direct_hydration_failure_probe())
+  if request.path.equals("/static"):
+    let static_view: Html<MsgPack> = <button on_click={msgpack::make_string("clicked")}>Static</button>
+    return Response::ok().text(document(static_view))
+
+  Response::ok().text(document(retained_ssr_view(request.path.equals("/fail"))))
+
+fn retained_ssr_view(invalid: bool) -> Html<MsgPack>
+  let attrs = [
+    event_payload_handler<InputEvent, MsgPack>(
+      name: "input",
+      handler: (event: InputEvent) -> MsgPack => msgpack::make_string(event.value)
+    )
+  ]
+  let tag = if invalid then: "input" else: "button"
+  element(tag: tag, attrs: attrs, children: [text("Rendered")])
+
+fn typed_retained_ssr_view() -> Html<SsrMsg>
+  <textarea on_input={(event: InputEvent) -> SsrMsg => SsrMsg::Edit { value: event.value }}>Typed</textarea>
+
+fn failing_ssr_view() -> Html<MsgPack>
+  let retained = retained_ssr_view(false)
+  panic("view evaluation failed")
+  retained

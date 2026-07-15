@@ -1,6 +1,12 @@
 import path from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { createSdk, type CompileResult } from "@voyd-lang/sdk";
+import { createVoydHost } from "@voyd-lang/sdk/js-host";
+import {
+  createRetainedEventHandlerRegistry,
+  type DefaultAdapterRuntimeHooks,
+  type RetainedEventHandlerRegistry,
+} from "@voyd-lang/js-host";
 
 const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
@@ -17,7 +23,253 @@ const expectCompileSuccess = (
   return result;
 };
 
+const waitFor = async (
+  predicate: () => boolean,
+  label: string,
+): Promise<void> => {
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    if (predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+};
+
+type HookRequest = {
+  requestId: number;
+  method: string;
+  path: string;
+  headers: Array<{ name: string; value: string }>;
+  body: Uint8Array;
+};
+
+type HookResponse = {
+  requestId: number;
+  status: number;
+  body: Uint8Array;
+};
+
+const createHttpServerHarness = (): {
+  enqueueRequest: (requestId: number, requestPath: string) => void;
+  responses: HookResponse[];
+  runtimeHooks: DefaultAdapterRuntimeHooks;
+} => {
+  const queuedRequests: HookRequest[] = [];
+  const acceptWaiters: Array<(request: HookRequest) => void> = [];
+  const responses: HookResponse[] = [];
+  const enqueueRequest = (requestId: number, requestPath: string): void => {
+    const request = {
+      requestId,
+      method: "GET",
+      path: requestPath,
+      headers: [],
+      body: new Uint8Array(),
+    };
+    const waiter = acceptWaiters.shift();
+    if (waiter) {
+      waiter(request);
+      return;
+    }
+    queuedRequests.push(request);
+  };
+
+  return {
+    enqueueRequest,
+    responses,
+    runtimeHooks: {
+      httpServerListen: async () => 1,
+      httpServerAccept: async () => {
+        const queued = queuedRequests.shift();
+        if (queued) {
+          return queued;
+        }
+        return await new Promise<HookRequest>((resolve) =>
+          acceptWaiters.push(resolve),
+        );
+      },
+      httpServerRespond: async (response) => {
+        responses.push(response);
+      },
+      httpServerClose: async () => undefined,
+    },
+  };
+};
+
 describe("integration: pkg::web", () => {
+  it("releases server-rendered callbacks after success and failure", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        entryPath: path.join(fixtureRoot, "web-framework.voyd"),
+        roots: {
+          src: fixtureRoot,
+          pkgDirs: [path.join(repoRoot, "packages")],
+        },
+      }),
+    );
+    const server = createHttpServerHarness();
+    const failures: Error[] = [];
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      scheduler: {
+        onUnhandledTaskFailed: (error) => failures.push(error),
+      },
+      defaultAdapters: {
+        runtime: "node",
+        runtimeHooks: server.runtimeHooks,
+      },
+    });
+
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expect(
+        host.run<string>("direct_ssr_callback_scope_probe"),
+      ).resolves.toContain("<button>Rendered</button>");
+      expect(host.retainedCallbacks.size()).toBe(0);
+    }
+    await expect(
+      host.run<string>("direct_typed_ssr_callback_scope_probe"),
+    ).resolves.toContain("<textarea>Typed</textarea>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("aliased_ssr_callback_scope_probe"),
+    ).resolves.toContain("<button>Rendered</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("qualified_ssr_callback_scope_probe"),
+    ).resolves.toContain("<button>Rendered</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("html_response_callback_scope_probe"),
+    ).resolves.toContain("<button>Rendered</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("explicit_generic_html_response_callback_scope_probe"),
+    ).resolves.toContain("<button>Rendered</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("qualified_html_function_callback_scope_probe"),
+    ).resolves.toContain("<button>Rendered</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("legacy_response_html_callback_scope_probe"),
+    ).resolves.toContain("<button>Rendered</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("response_value_html_callback_scope_probe"),
+    ).resolves.toContain("<button>Rendered</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("aliased_response_html_callback_scope_probe"),
+    ).resolves.toContain("<button>Rendered</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("explicit_generic_response_html_callback_scope_probe"),
+    ).resolves.toContain("<button>Rendered</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("hydrated_response_html_callback_scope_probe"),
+    ).resolves.toContain("data-voyd-hydration-id=\"probe\"");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("hydrated_html_response_callback_scope_probe"),
+    ).resolves.toContain("data-voyd-hydration-id=\"named-probe\"");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(host.run("direct_ssr_render_failure_probe")).rejects.toThrow();
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(host.run("direct_ssr_view_failure_probe")).rejects.toThrow();
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(host.run("direct_hydration_failure_probe")).rejects.toThrow();
+    expect(host.retainedCallbacks.size()).toBe(0);
+
+    const mapperId = await host.run<number>("durable_message_mapper_probe");
+    expect(host.retainedCallbacks.size()).toBe(1);
+    await expect(host.retainedCallbacks.dispatch(mapperId, 41)).resolves.toBe(42);
+    host.retainedCallbacks.release(mapperId);
+
+    const explicitHandlerId = await host.run<number>(
+      "explicit_event_id_survives_ssr_probe",
+    );
+    expect(host.retainedCallbacks.size()).toBe(1);
+    await expect(
+      host.retainedCallbacks.dispatch(explicitHandlerId, undefined),
+    ).resolves.toBe(42);
+    host.retainedCallbacks.release(explicitHandlerId);
+
+    await host.run("browser_callback_lifetime_probe");
+    expect(host.retainedCallbacks.size()).toBe(1);
+    host.retainedCallbacks.clear();
+
+    const run = host.runManaged<number>("serve_ssr_callback_scope_probe");
+
+    for (const [requestId, requestPath] of [
+      [1, "/ok"],
+      [2, "/static"],
+      [3, "/ok"],
+    ] as const) {
+      server.enqueueRequest(requestId, requestPath);
+      await waitFor(
+        () => server.responses.length === requestId,
+        `response ${requestId}`,
+      );
+      expect(host.retainedCallbacks.size()).toBe(0);
+    }
+    expect(new TextDecoder().decode(server.responses[0]!.body)).toContain(
+      "<button>Rendered</button>",
+    );
+
+    server.enqueueRequest(4, "/fail");
+    await waitFor(() => failures.length === 1, "failed render cleanup");
+    expect(failures[0]!.message).toContain(
+      "void VX HTML element cannot have children: input",
+    );
+    expect(host.retainedCallbacks.size()).toBe(0);
+
+    expect(run.cancel("test complete")).toBe(true);
+    await expect(run.outcome).resolves.toMatchObject({ kind: "cancelled" });
+
+    const baseRegistry = createRetainedEventHandlerRegistry();
+    const throwingRegistry: RetainedEventHandlerRegistry = {
+      ...baseRegistry,
+      releaseMany: (ids) => {
+        baseRegistry.releaseMany(ids);
+        throw new Error("injected cleanup failure");
+      },
+    };
+    const cleanupFailures: Error[] = [];
+    const cleanupLogs = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const cleanupServer = createHttpServerHarness();
+    cleanupServer.enqueueRequest(5, "/fail");
+    const cleanupHost = await createVoydHost({
+      wasm: result.wasm,
+      retainedCallbacks: throwingRegistry,
+      scheduler: {
+        onUnhandledTaskFailed: (error) => cleanupFailures.push(error),
+      },
+      defaultAdapters: {
+        runtime: "node",
+        runtimeHooks: cleanupServer.runtimeHooks,
+      },
+    });
+    const cleanupRun = cleanupHost.runManaged<number>(
+      "serve_ssr_callback_scope_probe",
+    );
+    try {
+      await waitFor(() => cleanupFailures.length === 1, "cleanup failure report");
+      expect(cleanupFailures[0]!.message).toContain(
+        "void VX HTML element cannot have children: input",
+      );
+      expect(cleanupLogs).toHaveBeenCalledWith(
+        expect.stringContaining("injected cleanup failure"),
+      );
+      expect(cleanupHost.retainedCallbacks.size()).toBe(0);
+    } finally {
+      cleanupLogs.mockRestore();
+      cleanupRun.cancel("test complete");
+      await cleanupRun.outcome;
+    }
+  });
+
   it("routes requests and builds apps through the public package API", async () => {
     const sdk = createSdk();
     const entryPath = path.join(fixtureRoot, "web-framework.voyd");

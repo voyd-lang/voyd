@@ -26,14 +26,16 @@ const owners = {
 const typeIdFor = (spec: CompilerContractTypeSpec): TypeId => {
   if (spec.kind === "primitive") return ids[spec.name] as TypeId;
   if (spec.kind === "shared") {
-    return ({
+    return {
       msgpack: shared.msgpack,
       string: shared.string,
       "msgpack-array": shared.array,
       "msgpack-map": shared.map,
-    })[spec.name] as TypeId;
+    }[spec.name] as TypeId;
   }
-  return (spec.element.kind === "primitive" ? fixed.i32 : fixed.msgpack) as TypeId;
+  return (
+    spec.element.kind === "primitive" ? fixed.i32 : fixed.msgpack
+  ) as TypeId;
 };
 
 const makeProgram = (
@@ -42,7 +44,10 @@ const makeProgram = (
   ) => void,
 ): ProgramCodegenView => {
   const contractIds = Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS);
-  const signatures = new Map<CompilerFunctionContractId, CodegenFunctionSignature>();
+  const signatures = new Map<
+    CompilerFunctionContractId,
+    CodegenFunctionSignature
+  >();
   contractIds.forEach((contractId, index) => {
     const spec = COMPILER_FUNCTION_CONTRACTS.get(contractId)!;
     signatures.set(contractId, {
@@ -66,14 +71,42 @@ const makeProgram = (
     [ids.f32, { kind: "primitive", name: "f32" }],
     [ids.f64, { kind: "primitive", name: "f64" }],
     [shared.msgpack, { kind: "union", members: [] }],
-    [shared.string, { kind: "nominal-object", owner: owners.string, name: "String", typeArgs: [] }],
-    [shared.array, { kind: "nominal-object", owner: owners.array, name: "Array", typeArgs: [shared.msgpack] }],
-    [shared.map, { kind: "nominal-object", owner: owners.map, name: "Dict", typeArgs: [shared.string, shared.msgpack] }],
+    [
+      shared.string,
+      {
+        kind: "nominal-object",
+        owner: owners.string,
+        name: "String",
+        typeArgs: [],
+      },
+    ],
+    [
+      shared.array,
+      {
+        kind: "nominal-object",
+        owner: owners.array,
+        name: "Array",
+        typeArgs: [shared.msgpack],
+      },
+    ],
+    [
+      shared.map,
+      {
+        kind: "nominal-object",
+        owner: owners.map,
+        name: "Dict",
+        typeArgs: [shared.string, shared.msgpack],
+      },
+    ],
     [fixed.msgpack, { kind: "fixed-array", element: shared.msgpack }],
     [fixed.i32, { kind: "fixed-array", element: ids.i32 }],
   ]);
-  const contractBySymbol = new Map(contractIds.map((contractId, index) => [index, contractId]));
-  const symbolByContract = new Map(contractIds.map((contractId, index) => [contractId, index]));
+  const contractBySymbol = new Map(
+    contractIds.map((contractId, index) => [index, contractId]),
+  );
+  const symbolByContract = new Map<CompilerFunctionContractId, number>(
+    contractIds.map((contractId, index) => [contractId, index]),
+  );
 
   return {
     primitives: { ...ids, void: 6, unknown: 7, defaultEffectRow: 0 },
@@ -86,10 +119,16 @@ const makeProgram = (
           : { ok: false, conflict: { left, right, message: "different" } },
     },
     symbols: {
-      resolveCompilerFunctionContract: (id: CompilerFunctionContractId) => symbolByContract.get(id),
+      resolveCompilerFunctionContract: (id: CompilerFunctionContractId) =>
+        symbolByContract.get(id),
       refOf: (symbol: number) => ({ moduleId: "std::contracts", symbol }),
       getPackageId: () => "std",
-      getName: (owner: number) => owner === owners.string ? "String" : owner === owners.array ? "Array" : "Dict",
+      getName: (owner: number) =>
+        owner === owners.string
+          ? "String"
+          : owner === owners.array
+            ? "Array"
+            : "Dict",
       getStdIntrinsicTypeContract: (owner: number) =>
         owner === owners.string
           ? { id: STD_INTRINSIC_TYPE.string, providerKind: "nominal-object" }
@@ -114,7 +153,9 @@ const replace = (
 
 describe("boundary-msgpack compiler contract signature validation", () => {
   it("accepts the complete relational ABI", () => {
-    expect(validateBoundaryMsgpackFunctionContracts(makeProgram())).toEqual(shared);
+    expect(validateBoundaryMsgpackFunctionContracts(makeProgram())).toEqual(
+      shared,
+    );
   });
 
   it("rejects wrong parameter and result types with the contract and signatures", () => {
@@ -123,10 +164,13 @@ describe("boundary-msgpack compiler contract signature validation", () => {
       const signature = signatures.get(id)!;
       replace(signatures, id, {
         parameters: signature.parameters.map((parameter, index) =>
-          index === 1 ? { ...parameter, typeId: ids.bool } : parameter),
+          index === 1 ? { ...parameter, typeId: ids.bool } : parameter,
+        ),
       });
     });
-    expect(() => validateBoundaryMsgpackFunctionContracts(wrongParameter)).toThrow(
+    expect(() =>
+      validateBoundaryMsgpackFunctionContracts(wrongParameter),
+    ).toThrow(
       /encode-value.*expected \(MsgPack, i32, i32\).*parameter 2 expected i32, got bool/,
     );
 
@@ -162,7 +206,9 @@ describe("boundary-msgpack compiler contract signature validation", () => {
     );
 
     const effectful = makeProgram((signatures) =>
-      replace(signatures, BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull, { effectRow: 1 }),
+      replace(signatures, BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull, {
+        effectRow: 1,
+      }),
     );
     expect(() => validateBoundaryMsgpackFunctionContracts(effectful)).toThrow(
       /make-null.*expected a pure effect row/,

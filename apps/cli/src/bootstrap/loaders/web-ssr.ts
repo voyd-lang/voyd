@@ -777,33 +777,33 @@ use std::string::type::String
 use std::vx::all
 
 pub fn view(model: Model) -> Html<Msg>
-  editor(model, interactive: true)
-
-pub fn static_view(model: Model) -> Html<Msg>
-  editor(model, interactive: false)
-
-fn editor(model: Model, { interactive: bool }) -> Html<Msg>
-  <form
-    class="mx-auto flex w-full max-w-5xl flex-col px-5 py-8 lg:px-10"
-    action={"/wiki/".concat(model.slug)}
-    method="post"
-    on_submit={on_submit_with(
-      options: EventOptions {
-        prevent_default: true,
-        stop_propagation: false,
-        capture: false,
-        passive: false
-      },
-      message: Msg::Save {}
-    )}
-  >
-    <EditorHeader model={model} />
-    <EditorStats model={model} />
-    <div class={editor_grid_class(model)}>
-      <BodyEditor model={model} interactive={interactive} />
-      <Preview model={model} />
-    </div>
-  </form>
+  let ~attrs = [
+    class("mx-auto flex w-full max-w-5xl flex-col px-5 py-8 lg:px-10"),
+    attr(name: "action", value: "/wiki/".concat(model.slug)),
+    attr(name: "method", value: "post")
+  ]
+  attrs.push(html_event_handler<Msg>(
+    name: "submit",
+    handler: () -> Msg => Msg::Save {},
+    options: EventOptions {
+      prevent_default: true,
+      stop_propagation: false,
+      capture: false,
+      passive: false
+    }
+  ))
+  html_element(
+    tag: "form",
+    attrs: attrs,
+    children: [
+      EditorHeader(model: model),
+      EditorStats(model: model),
+      <div class={editor_grid_class(model)}>
+        <BodyEditor model={model} />
+        <Preview model={model} />
+      </div>
+    ]
+  )
 
 fn EditorHeader({ model: Model }) -> Html<Msg>
   <header class="flex flex-col gap-4 border-b border-zinc-200 pb-6 md:flex-row md:items-end md:justify-between">
@@ -814,8 +814,8 @@ fn EditorHeader({ model: Model }) -> Html<Msg>
     </div>
     <div class="flex flex-wrap items-center gap-3">
       <span class={status_class(model)}>{status_label(model)}</span>
-      <button class="rounded-md border border-zinc-300 bg-white px-4 py-2 font-semibold" type="button" disabled={not can_save(model)} on_click={Msg::Reset {}}>Reset</button>
-      <button class="rounded-md border border-emerald-700 bg-white px-4 py-2 font-semibold text-emerald-800" type="button" disabled={model.saving} on_click={Msg::TogglePreview {}}>{preview_label(model)}</button>
+      <button class="rounded-md border border-zinc-300 bg-white px-4 py-2 font-semibold" type="button" disabled={not can_save(model)} on_click={() -> Msg => Msg::Reset {}}>Reset</button>
+      <button class="rounded-md border border-emerald-700 bg-white px-4 py-2 font-semibold text-emerald-800" type="button" disabled={model.saving} on_click={() -> Msg => Msg::TogglePreview {}}>{preview_label(model)}</button>
       <button class="rounded-md bg-emerald-700 px-4 py-2 font-semibold text-white disabled:bg-zinc-400" type="submit" disabled={model.saving}>{save_label(model)}</button>
     </div>
   </header>
@@ -833,26 +833,21 @@ fn Stat({ label: String, value: String }) -> Html<Msg>
     <div class="mt-1 font-semibold text-zinc-950">{value}</div>
   </div>
 
-fn BodyEditor({ model: Model, interactive: bool }) -> Html<Msg>
+fn BodyEditor({ model: Model }) -> Html<Msg>
   <label class="mt-8 flex min-h-[32rem] flex-1 flex-col">
     <span class="mb-3 text-sm font-medium text-zinc-700">Article body</span>
-    {BodyTextarea(model: model, interactive: interactive)}
+    {BodyTextarea(model: model)}
   </label>
 
-fn BodyTextarea({ model: Model, interactive: bool }) -> Html<Msg>
-  let ~attrs = [
-    class("min-h-[32rem] flex-1 resize-y rounded-md border border-zinc-300 bg-white p-5 font-mono text-sm leading-7 outline-none focus:border-emerald-600"),
-    attr(name: "name", value: "body"),
-    attr(name: "spellcheck", value: "true"),
-    value(model.body),
-    disabled(model.saving)
-  ]
-  if interactive:
-    attrs.push(event_payload_handler<InputEvent, Msg>(
-      name: "input",
-      handler: (event: InputEvent) -> Msg => Msg::Edit { value: event.value }
-    ))
-  element(tag: "textarea", attrs: attrs, children: [text(model.body)])
+fn BodyTextarea({ model: Model }) -> Html<Msg>
+  <textarea
+    class="min-h-[32rem] flex-1 resize-y rounded-md border border-zinc-300 bg-white p-5 font-mono text-sm leading-7 outline-none focus:border-emerald-600"
+    name="body"
+    spellcheck="true"
+    value={model.body}
+    disabled={model.saving}
+    on_input={(event: InputEvent) -> Msg => Msg::Edit { value: event.value }}
+  >{model.body}</textarea>
 
 fn Preview({ model: Model }) -> Html<Msg>
   if model.preview_open:
@@ -971,8 +966,8 @@ fn title_for(slug: String) -> String
 const pageVoyd = `use super::articles::Article
 use src::app::model::{ Model, initial_model }
 use src::app::update::Msg
-use src::app::ui::static_view
-use pkg::web::{ Response, document, hydrate_named }
+use src::app::ui::view
+use pkg::web::all
 use std::string::type::String
 use std::vx::all
 
@@ -980,7 +975,7 @@ pub fn article_page(article: Article) -> Response
   let model = initial_model(slug: article.slug, title: article.title, body: article.body)
   Response::ok()
     .with(header: "content-type", value: "text/html; charset=utf-8")
-    .text(document<Msg, Model>(
+    .text(document(
       view: page_view(model),
       hydrate: hydrate_named<Model>(
         id: "article-editor",
@@ -1001,7 +996,7 @@ fn page_view(model: Model) -> Html<Msg>
     <body class="min-h-screen bg-stone-50 text-zinc-950 antialiased">
       <main class="grid min-h-screen grid-cols-1 lg:grid-cols-[18rem_minmax(0,1fr)]">
         <Sidebar active_slug={model.slug} />
-        <div id="article-editor">{static_view(model)}</div>
+        <div id="article-editor">{view(model)}</div>
       </main>
     </body>
   </html>
@@ -1091,14 +1086,15 @@ This is a server-rendered Voyd application with a hydrated VX editor.
 
 - \`src/main.voyd\` owns HTTP routes and server startup.
 - \`src/server\` owns persistence and the server-rendered document shell.
-- \`src/app\` owns the shared model, update logic, and exact markup. Its
-  \`static_view\` omits retained browser handlers while sharing the same editor
-  implementation as the interactive \`view\`.
+- \`src/app\` owns the shared model, update logic, and exact markup. The server
+  and browser both call the same \`view\`.
 - \`src/client.voyd\` is the browser Program entrypoint.
 - \`src/client.ts\` is the generic Wasm hydration bridge.
 
 Code inside \`#article-editor\` must render identically on the server and client.
-The development bridge reports hydration differences without preventing recovery.
+Server rendering automatically releases closure-backed event handlers after it
+builds the HTML. The development bridge reports hydration differences without
+preventing recovery.
 
 ## Commands
 

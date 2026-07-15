@@ -32,7 +32,11 @@ use src::extract::{
   required_session,
   text as text_body_policy
 }
-use src::html::{ html, render }
+use src::html::{
+  html,
+  html_response,
+  render
+}
 use src::response::{ json as json_response, response_json, to_response }
 use src::static_files::serve_dir
 use std::array::Array
@@ -49,9 +53,37 @@ use std::test::assertions::all
 use std::test::host_dto::self as host_dto_test
 use std::vx::all
 
+mod html_canvas
+  pub obj HtmlCanvas {}
+
+  impl HtmlCanvas
+    api fn html(self, value: i32) -> i32
+      self
+      value + 1
+
+use self::html_canvas::HtmlCanvas
+
+mod unrelated_response
+  pub obj Response {}
+
+  impl Response
+    api fn html(self, value: i32) -> i32
+      self
+      value + 2
+
+use self::unrelated_response::{ Response as UnrelatedResponse }
+
 @effect(id: "voyd.web.test.log")
 eff WebTestLog
   info(resume, value: i32) -> void
+
+test "unrelated html methods are not rewritten by web rendering helpers":
+  assert(HtmlCanvas {}.html(41), eq: 42)
+  assert(UnrelatedResponse {}.html(40), eq: 42)
+
+test "local functions named like rendering helpers remain ordinary calls":
+  let call_render = (render: fn(i32) -> i32) -> i32 => render(41)
+  assert(call_render((value: i32) -> i32 => value + 1), eq: 42)
 
 fn request(method: Method, path: String) -> IncomingRequest
   IncomingRequest {
@@ -1114,7 +1146,7 @@ test "html rendering includes props and styles and respects void elements":
     children: Array<MsgPack>::init()
   )
 
-  let rendered = render<MsgPack>(input)
+  let rendered = render(input)
   assert(rendered.contains("<input".as_slice()), eq: true)
   assert(rendered.contains(" value=\"Draft\"".as_slice()), eq: true)
   assert(rendered.contains(" disabled".as_slice()), eq: true)
@@ -1124,13 +1156,13 @@ test "html rendering includes props and styles and respects void elements":
 test "html rendering unwraps mapped child views":
   let child: MsgPack = <p class="child">Mapped child</p>
   let mapped = map_html<MsgPack, MsgPack>(html: child, handler_id: 7)
-  let rendered = render<MsgPack>(mapped)
+  let rendered = render(mapped)
 
   assert(rendered.contains("<p class=\"child\">Mapped child</p>".as_slice()), eq: true)
 
 test "html rendering preserves carriage returns through parsing":
   let paragraph: MsgPack = <p title={"A\r\nB"}>{"A\r\nB"}</p>
-  let rendered = render<MsgPack>(paragraph)
+  let rendered = render(paragraph)
 
   assert(rendered.contains("title=\"A&#13;\nB\"".as_slice()), eq: true)
   assert(rendered.contains(">A&#13;\nB</p>".as_slice()), eq: true)
@@ -1146,8 +1178,8 @@ test "html rendering preserves leading newlines in parser-sensitive elements":
     children: [text("\nDraft")]
   )
 
-  assert(render<MsgPack>(pre).contains("<pre>\n\nLeading</pre>".as_slice()), eq: true)
-  let rendered_textarea = render<MsgPack>(textarea)
+  assert(render(pre).contains("<pre>\n\nLeading</pre>".as_slice()), eq: true)
+  let rendered_textarea = render(textarea)
   assert(rendered_textarea.contains(">\n\nDraft</textarea>".as_slice()), eq: true)
   assert(rendered_textarea.contains(" value=".as_slice()), eq: false)
 
@@ -1161,5 +1193,5 @@ test "html rendering preserves raw style and script text":
     children: [text("if (a < b) value = '&'")]
   )
 
-  assert(render<MsgPack>(style_node).equals("<style>a > b { color: red }</style>"), eq: true)
-  assert(render<MsgPack>(script_node).equals("<script>if (a < b) value = '&'</script>"), eq: true)
+  assert(render(style_node).equals("<style>a > b { color: red }</style>"), eq: true)
+  assert(render(script_node).equals("<script>if (a < b) value = '&'</script>"), eq: true)

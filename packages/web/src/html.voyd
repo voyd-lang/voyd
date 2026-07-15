@@ -20,33 +20,99 @@ pub obj Hydration<Model> {
   api model: Model
 }
 
+@compiler_contract(id: "voyd.web.render-generic")
 pub fn render<Msg>(value: vx::Html<Msg>) -> String
+  render_impl(value)
+
+@compiler_contract(id: "voyd.web.render")
+pub fn render(value: MsgPack) -> String
+  render_impl(value)
+
+@compiler_contract(id: "voyd.web.document-generic")
+pub fn document<Msg>(value: vx::Html<Msg>) -> String
+  document_impl(value)
+
+@compiler_contract(id: "voyd.web.document")
+pub fn document(value: MsgPack) -> String
+  document_impl(value)
+
+@compiler_contract(id: "voyd.web.document-hydrated-generic")
+pub fn document<Msg, Model>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
+  hydrated_document_impl<Model>(view: view, hydrate: hydrate)
+
+@compiler_contract(id: "voyd.web.document-hydrated")
+pub fn document<Model>({ view: MsgPack, hydrate: Hydration<Model> }) -> String
+  hydrated_document_impl<Model>(view: view, hydrate: hydrate)
+
+@compiler_contract(id: "voyd.web.hydrated-document-generic")
+pub fn hydrated_document<Msg, Model>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
+  hydrated_document_impl<Model>(view: view, hydrate: hydrate)
+
+@compiler_contract(id: "voyd.web.hydrated-document")
+pub fn hydrated_document<Model>({ view: MsgPack, hydrate: Hydration<Model> }) -> String
+  hydrated_document_impl<Model>(view: view, hydrate: hydrate)
+
+@compiler_contract(id: "voyd.web.html-response-generic")
+pub fn html_response<Msg>(response: Response, value: vx::Html<Msg>) -> Response
+  html_response_impl(response, value)
+
+@compiler_contract(id: "voyd.web.html-response")
+pub fn html_response(response: Response, value: MsgPack) -> Response
+  html_response_impl(response, value)
+
+@compiler_contract(id: "voyd.web.html-response-hydrated-generic")
+pub fn html_response<Msg, Model>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+
+@compiler_contract(id: "voyd.web.html-response-hydrated")
+pub fn html_response<Model>(response: Response, { view: MsgPack, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+
+@compiler_contract(id: "voyd.web.hydrated-html-response-generic")
+pub fn hydrated_html_response<Msg, Model>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+
+@compiler_contract(id: "voyd.web.hydrated-html-response")
+pub fn hydrated_html_response<Model>(response: Response, { view: MsgPack, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+
+@compiler_contract(id: "voyd.web.response-html-generic")
+pub fn html<Msg>(response: Response, value: vx::Html<Msg>) -> Response
+  html_response_impl(response, value)
+
+@compiler_contract(id: "voyd.web.hydrated-response-html-generic")
+pub fn html<Msg, Model>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+
+@compiler_contract(id: "voyd.web.response-html")
+pub fn html(response: Response, value: MsgPack) -> Response
+  html_response_impl(response, value)
+
+@compiler_contract(id: "voyd.web.hydrated-response-html")
+pub fn html<Model>(response: Response, { view: MsgPack, hydrate: Hydration<Model> }) -> Response
+  hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
+
+fn render_impl(value: MsgPack) -> String
   render_node(value)
 
-pub fn document<Msg>(value: vx::Html<Msg>) -> String
-  "<!doctype html>".as_slice().to_string().concat(render<Msg>(value))
+fn document_impl(value: MsgPack) -> String
+  "<!doctype html>".as_slice().to_string().concat(render_impl(value))
 
-pub fn document<Msg, Model>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
-  insert_hydration(document<Msg>(view), render_hydration<Model>(hydrate))
+fn hydrated_document_impl<Model>({ view: MsgPack, hydrate: Hydration<Model> }) -> String
+  insert_hydration(document_impl(view), render_hydration<Model>(hydrate))
 
 pub fn append_hydration<Model>(document: String, hydrate: Hydration<Model>) -> String
   insert_hydration(document, render_hydration<Model>(hydrate))
 
-pub fn html_response<Msg>(response: Response, value: vx::Html<Msg>) -> Response
+fn html_response_impl(response: Response, value: MsgPack) -> Response
   response
     .with(headers: response.headers.set(header: "content-type".as_slice(), value: "text/html; charset=utf-8".as_slice()))
-    .text(render<Msg>(value))
+    .text(render_impl(value))
 
-pub fn html_response<Msg, Model>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
+fn hydrated_html_response_impl<Model>(response: Response, { view: MsgPack, hydrate: Hydration<Model> }) -> Response
   response
     .with(headers: response.headers.set(header: "content-type".as_slice(), value: "text/html; charset=utf-8".as_slice()))
-    .text(document<Msg, Model>(view: view, hydrate: hydrate))
-
-pub fn html<Msg>(response: Response, value: vx::Html<Msg>) -> Response
-  html_response<Msg>(response, value)
-
-pub fn html<Msg, Model>(response: Response, { view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> Response
-  html_response<Msg, Model>(response, view: view, hydrate: hydrate)
+    .text(hydrated_document_impl<Model>(view: view, hydrate: hydrate))
 
 pub fn hydrate<Model>({ target: StringSlice, entry: StringSlice, model: Model }) -> Hydration<Model>
   Hydration<Model> {
@@ -406,12 +472,7 @@ fn read_string_or(map: Dict<String, MsgPack>, key: StringSlice, fallback: String
       fallback.to_string()
 
 fn render_hydration<Model>(hydrate: Hydration<Model>): () -> String
-  let model_json = match(stringify_json(dto_json<Model>(hydrate.model)))
-    Ok<String> { value }:
-      escape_script_json(value)
-    Err<JsonError> { error }:
-      panic("unable to serialize Voyd hydration model: ".concat(error.message))
-      String::init()
+  let model_json = escape_script_json(serialize_hydration_model<Model>(hydrate.model))
   "<script type=\"application/json\" data-voyd-hydration-id=\"".as_slice()
     .to_string()
     .concat(escape_attr((hydrate.id ?? hydrate.target).as_slice()))
@@ -424,6 +485,17 @@ fn render_hydration<Model>(hydrate: Hydration<Model>): () -> String
     .concat("</script><script type=\"module\" src=\"".as_slice())
     .concat(escape_attr(hydrate.entry.as_slice()))
     .concat("\"></script>".as_slice())
+
+fn serialize_hydration_model<Model>(model: Model) -> String
+  match(stringify_json(dto_json<Model>(model)))
+    Ok<String> { value }:
+      value
+    Err<JsonError> { error }:
+      panic_hydration_serialization(error.message)
+      String::init()
+
+fn panic_hydration_serialization(message: String) -> void
+  panic("unable to serialize Voyd hydration model: ".concat(message))
 
 fn insert_hydration(document: String, scripts: String) -> String
   match(document.reverse_find("</body>".as_slice()))

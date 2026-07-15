@@ -31,6 +31,7 @@ import {
 export const BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS = new Set([
   "__retain_callback",
   "__boundary_retain_callback",
+  "__render_retain_callback",
   "__boundary_value_to_msgpack",
   "__boundary_msgpack_to_value",
 ]);

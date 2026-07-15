@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { createRetainedEventHandlerRegistry } from "../retained-callbacks.js";
+import {
+  createRetainedCallbackScopeManager,
+  createRetainedEventHandlerRegistry,
+  type RetainedEventHandlerRegistry,
+} from "../retained-callbacks.js";
 
 describe("retained event handler registry", () => {
   it("dispatches retained handlers and returns user messages", async () => {
@@ -31,5 +35,106 @@ describe("retained event handler registry", () => {
     await registry.dispatch(secondId, "again");
     expect(second).toHaveBeenCalledTimes(1);
     expect(registry.size()).toBe(0);
+  });
+
+  it("releases only callbacks retained by the completed scope", async () => {
+    const registry = createRetainedEventHandlerRegistry<string>();
+    const scopes = createRetainedCallbackScopeManager(registry);
+    const stableHandler = vi.fn();
+    const outerHandler = vi.fn();
+    const innerHandler = vi.fn();
+    const stableId = registry.retain(stableHandler);
+    const outerScope = scopes.beginScope(1);
+    const outerId = scopes.retain(1, outerHandler);
+    const innerScope = scopes.beginScope(1);
+    const innerId = scopes.retain(1, innerHandler);
+
+    scopes.endScope(1, innerScope);
+
+    expect(registry.size()).toBe(2);
+    await registry.dispatch(innerId, "inner");
+    await registry.dispatch(outerId, "outer");
+    expect(innerHandler).not.toHaveBeenCalled();
+    expect(outerHandler).toHaveBeenCalledWith("outer");
+
+    scopes.endScope(1, outerScope);
+
+    expect(registry.size()).toBe(1);
+    await registry.dispatch(stableId, "stable");
+    expect(stableHandler).toHaveBeenCalledWith("stable");
+    registry.release(stableId);
+  });
+
+  it("isolates interleaved owners and releases failed-owner scopes", () => {
+    const registry = createRetainedEventHandlerRegistry();
+    const scopes = createRetainedCallbackScopeManager(registry);
+    const firstScope = scopes.beginScope(10);
+    scopes.retain(10, vi.fn());
+    const secondScope = scopes.beginScope(20);
+    scopes.retain(20, vi.fn());
+
+    scopes.endScope(20, secondScope);
+    expect(registry.size()).toBe(1);
+
+    scopes.finishOwner(10);
+    expect(registry.size()).toBe(0);
+    expect(() => scopes.endScope(10, firstScope)).toThrow(
+      "is not active for owner 10",
+    );
+  });
+
+  it("releases callbacks retained while a render scope is active", () => {
+    const registry = createRetainedEventHandlerRegistry();
+    const scopes = createRetainedCallbackScopeManager(registry);
+    const scope = scopes.beginScope("render");
+    const retainedId = scopes.retain("render", vi.fn());
+
+    expect(registry.size()).toBe(1);
+    scopes.endScope("render", scope);
+
+    expect(registry.size()).toBe(0);
+    expect(() => registry.dispatch(retainedId, undefined)).not.toThrow();
+  });
+
+  it("does not claim callbacks retained before a render scope begins", () => {
+    const registry = createRetainedEventHandlerRegistry();
+    const scopes = createRetainedCallbackScopeManager(registry);
+    const pendingId = scopes.retain("browser", vi.fn());
+
+    const scope = scopes.beginScope("browser");
+    scopes.endScope("browser", scope);
+    scopes.finishOwner("browser");
+
+    expect(registry.size()).toBe(1);
+    registry.release(pendingId);
+  });
+
+  it("does not track browser callbacks retained outside a scope", () => {
+    const registry = createRetainedEventHandlerRegistry();
+    const scopes = createRetainedCallbackScopeManager(registry);
+    const id = scopes.retain("browser", vi.fn());
+
+    scopes.finishOwner("browser");
+
+    expect(registry.size()).toBe(1);
+    registry.release(id);
+  });
+
+  it("forgets a scope even when registry cleanup fails", () => {
+    const base = createRetainedEventHandlerRegistry();
+    const registry: RetainedEventHandlerRegistry = {
+      ...base,
+      releaseMany: () => {
+        throw new Error("cleanup failed");
+      },
+    };
+    const scopes = createRetainedCallbackScopeManager(registry);
+    const scope = scopes.beginScope(1);
+    scopes.retain(1, vi.fn());
+
+    expect(() => scopes.endScope(1, scope)).toThrow("cleanup failed");
+    expect(() => scopes.endScope(1, scope)).toThrow(
+      "is not active for owner 1",
+    );
   });
 });
