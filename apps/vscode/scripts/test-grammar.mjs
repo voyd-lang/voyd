@@ -81,6 +81,11 @@ assert(
   clausePattern.patterns?.some((pattern) => pattern.include === "#keywords"),
   "Clause-style calls should parse keywords between argument lists and the final colon",
 );
+const clauseIncludes = clausePattern.patterns?.map((pattern) => pattern.include) ?? [];
+assert(
+  clauseIncludes.indexOf("#type-arguments") < clauseIncludes.indexOf("#keywords"),
+  "Clause-style calls should parse type arguments before keyword operators",
+);
 
 const clauseRegex = new RegExp(clausePattern.begin, "g");
 const regexMatches = (line) => [...line.matchAll(clauseRegex)].map((match) => match[0]);

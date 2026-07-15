@@ -121,8 +121,8 @@
           },
           "end": "(?=\\s*:)",
           "patterns": [
-            { "include": "#keywords" },
             { "include": "#type-arguments" },
+            { "include": "#keywords" },
             {
               "begin": "\\(",
               "beginCaptures": {
