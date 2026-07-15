@@ -46,11 +46,12 @@ import {
   stdPkgExportsFor,
 } from "../export-visibility.js";
 import {
-  enumVariantTypeNamesFromAliasTarget,
+  enumVariantTypeTargetsFromAliasTarget,
   importedSymbolTargetFromMetadata,
 } from "../../enum-namespace.js";
 import { isPackageRootModule } from "../../packages.js";
 import { requireModuleSurface } from "../../../modules/views.js";
+import { resolveNominalTypeSymbol } from "../../nominal-type-target.js";
 
 export const bindModule = (
   surface: SurfaceModuleView,
@@ -340,34 +341,79 @@ const resolveImplicitNamespaceUseEntry = ({
     namespaceRecord.metadata as Record<string, unknown> | undefined,
   );
   if (!importedTarget) {
-    return undefined;
+    return resolveLocalTypeNamespaceUseEntry({
+      namespaceSymbol,
+      entry,
+      decl,
+      ctx,
+    });
   }
 
   const dependency = ctx.dependencies.get(importedTarget.moduleId);
-  const aliasDecl = dependency?.decls.getTypeAlias(importedTarget.symbol);
-  const variantNames = aliasDecl
-    ? enumVariantTypeNamesFromAliasTarget(aliasDecl.target)
-    : undefined;
-  if (!dependency || !variantNames || variantNames.length === 0) {
+  const variantMembers = new Map(
+    Array.from(ctx.staticMethods.get(namespaceSymbol)?.entries() ?? [])
+      .map(([name, symbols]) => [
+        name,
+        new Set(
+          Array.from(symbols).filter((symbol) => {
+            const record = ctx.symbolTable.getSymbol(symbol);
+            const entity = (
+              record.metadata as { entity?: unknown } | undefined
+            )?.entity;
+            return record.kind === "type" && entity === "object";
+          }),
+        ),
+      ] as const)
+      .filter(([, symbols]) => symbols.size > 0),
+  );
+  if (!dependency || variantMembers.size === 0) {
     return undefined;
   }
 
-  const exports = ctx.moduleExports.get(importedTarget.moduleId);
-  if (!exports) {
-    return undefined;
-  }
-
+  let ambiguityReported = false;
   const visibleObjectExportFor = (
     variantName: string,
   ): ModuleExportEntry | undefined => {
-    if (!variantNames.includes(variantName)) {
+    const symbols = variantMembers.get(variantName);
+    if (!symbols) {
       return undefined;
     }
-    const exported = exports.get(variantName);
+    const canonicalCandidates = new Map(
+      Array.from(symbols).map((symbol) => {
+        const canonical = canonicalBindingSymbol({
+          moduleId: ctx.module.id,
+          symbol,
+          binding: ctx,
+        });
+        return [`${canonical.moduleId}:${canonical.symbol}`, canonical] as const;
+      }),
+    );
+    if (canonicalCandidates.size > 1) {
+      ambiguityReported = true;
+      recordImportDiagnostic({
+        params: {
+          kind: "ambiguous-namespace-member",
+          namespace: namespaceRecord.name,
+          member: variantName,
+        },
+        span: entry.span,
+        ctx,
+      });
+      return undefined;
+    }
+    const canonical = Array.from(canonicalCandidates.values())[0];
+    if (!canonical) {
+      return undefined;
+    }
+    const exported = Array.from(
+      ctx.moduleExports.get(canonical.moduleId)?.values() ?? [],
+    ).find((candidate) => candidate.symbol === canonical.symbol);
     if (!exported) {
       return undefined;
     }
-    const exportedRecord = dependency.symbolTable.getSymbol(exported.symbol);
+    const exportedRecord = canonical.binding.symbolTable.getSymbol(
+      canonical.symbol,
+    );
     const metadata = exportedRecord.metadata as { entity?: string } | undefined;
     if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
       return undefined;
@@ -375,7 +421,7 @@ const resolveImplicitNamespaceUseEntry = ({
     if (
       !canAccessExport({
         exported,
-        moduleId: importedTarget.moduleId,
+        moduleId: canonical.moduleId,
         ctx,
         explicitlyTargetsStdSubmodule,
       })
@@ -387,7 +433,7 @@ const resolveImplicitNamespaceUseEntry = ({
 
   const imports = (() => {
     if (entry.selectionKind === "all") {
-      return variantNames.flatMap((variantName) => {
+      return Array.from(variantMembers.keys()).flatMap((variantName) => {
         const exported = visibleObjectExportFor(variantName);
         if (!exported) {
           return [];
@@ -395,6 +441,7 @@ const resolveImplicitNamespaceUseEntry = ({
         return declareImportedSymbol({
           exported,
           alias: variantName,
+          explicitlyTargetsStdSubmodule,
           ctx,
           declaredAt: decl.form,
           span: entry.span,
@@ -415,6 +462,9 @@ const resolveImplicitNamespaceUseEntry = ({
 
     const exported = visibleObjectExportFor(targetName);
     if (!exported) {
+      if (ambiguityReported) {
+        return [];
+      }
       recordImportDiagnostic({
         params: {
           kind: "missing-export",
@@ -447,6 +497,298 @@ const resolveImplicitNamespaceUseEntry = ({
     alias: entry.alias,
     imports,
   };
+};
+
+const resolveLocalTypeNamespaceUseEntry = ({
+  namespaceSymbol,
+  entry,
+  decl,
+  ctx,
+}: {
+  namespaceSymbol: SymbolId;
+  entry: ParsedUseEntry;
+  decl: ParsedUseDecl;
+  ctx: BindingContext;
+}): BoundUseEntry | undefined => {
+  const namespaceMembers = collectLocalTypeNamespaceMembers({
+    namespaceSymbol,
+    ctx,
+  });
+  if (namespaceMembers.length === 0) {
+    return undefined;
+  }
+
+  let ambiguityReported = false;
+  const localVariant = (name: string): BoundImport | undefined => {
+    const candidates = new Map<string, SymbolId>();
+    namespaceMembers
+      .filter((member) => member.name === name)
+      .forEach((member) => {
+        const key = canonicalBindingSymbolKey({
+          moduleId: ctx.module.id,
+          symbol: member.symbol,
+          binding: ctx,
+        });
+        candidates.set(key, member.symbol);
+      });
+    if (candidates.size === 0) {
+      return undefined;
+    }
+    if (candidates.size > 1) {
+      ambiguityReported = true;
+      recordImportDiagnostic({
+        params: {
+          kind: "ambiguous-namespace-member",
+          namespace: ctx.symbolTable.getSymbol(namespaceSymbol).name,
+          member: name,
+        },
+        span: entry.span,
+        ctx,
+      });
+      return undefined;
+    }
+    const symbol = Array.from(candidates.values())[0]!;
+    const record = ctx.symbolTable.getSymbol(symbol);
+    const metadata = record.metadata as { entity?: unknown } | undefined;
+    if (record.kind !== "type" || metadata?.entity !== "object") {
+      return undefined;
+    }
+    const importedName = entry.alias ?? name;
+    if (importedName !== name) {
+      return undefined;
+    }
+    if (record.scope === ctx.symbolTable.rootScope && record.name === name) {
+      return {
+        name,
+        local: symbol,
+        visibility: decl.visibility,
+        span: entry.span,
+      };
+    }
+
+    const importedTarget = importedSymbolTargetFromMetadata(
+      record.metadata as Record<string, unknown> | undefined,
+    );
+    if (!importedTarget) {
+      return undefined;
+    }
+    const existing = ctx.imports.find(
+      (candidate) =>
+        candidate.name === name &&
+        candidate.target?.moduleId === importedTarget.moduleId &&
+        candidate.target.symbol === importedTarget.symbol &&
+        ctx.symbolTable.getSymbol(candidate.local).scope ===
+          ctx.symbolTable.rootScope,
+    );
+    if (existing) {
+      return {
+        ...existing,
+        visibility: decl.visibility,
+        span: entry.span,
+      };
+    }
+
+    const exported = Array.from(
+      ctx.moduleExports.get(importedTarget.moduleId)?.values() ?? [],
+    ).find(
+      (candidate) =>
+        candidate.symbol === importedTarget.symbol ||
+        candidate.symbols?.includes(importedTarget.symbol),
+    );
+    const explicitlyTargetsStdSubmodule =
+      importedModuleExplicitStdSubmoduleFrom(
+        record.metadata as Record<string, unknown> | undefined,
+      ) ?? false;
+    if (
+      !exported ||
+      !canAccessExport({
+        exported,
+        moduleId: importedTarget.moduleId,
+        ctx,
+        explicitlyTargetsStdSubmodule,
+      })
+    ) {
+      return undefined;
+    }
+    return declareImportedSymbol({
+      exported,
+      alias: name,
+      explicitlyTargetsStdSubmodule,
+      ctx,
+      declaredAt: decl.form,
+      span: entry.span,
+      visibility: decl.visibility,
+    })[0];
+  };
+
+  const imports = (() => {
+    if (entry.selectionKind === "all") {
+      return Array.from(new Set(namespaceMembers.map(({ name }) => name))).flatMap(
+        (name) => {
+          const imported = localVariant(name);
+          return imported ? [imported] : [];
+        },
+      );
+    }
+
+    const targetName = entry.targetName ?? entry.alias;
+    if (!targetName) {
+      return [];
+    }
+    const imported = localVariant(targetName);
+    return imported ? [imported] : [];
+  })();
+
+  if (imports.length === 0) {
+    if (ambiguityReported) {
+      return {
+        path: entry.path,
+        moduleId: ctx.module.id,
+        span: entry.span,
+        selectionKind: entry.selectionKind,
+        targetName: entry.targetName,
+        alias: entry.alias,
+        imports: [],
+      };
+    }
+    return undefined;
+  }
+
+  return {
+    path: entry.path,
+    moduleId: ctx.module.id,
+    span: entry.span,
+    selectionKind: entry.selectionKind,
+    targetName: entry.targetName,
+    alias: entry.alias,
+    imports,
+  };
+};
+
+const collectLocalTypeNamespaceMembers = ({
+  namespaceSymbol,
+  ctx,
+  seen = new Set<SymbolId>(),
+}: {
+  namespaceSymbol: SymbolId;
+  ctx: Pick<
+    BindingContext,
+    "decls" | "symbolTable" | "moduleMembers" | "staticMethods"
+  >;
+  seen?: Set<SymbolId>;
+}): { name: string; symbol: SymbolId }[] => {
+  if (seen.has(namespaceSymbol)) {
+    return [];
+  }
+  const nextSeen = new Set(seen);
+  nextSeen.add(namespaceSymbol);
+
+  const aliasDecl = ctx.decls.getTypeAlias(namespaceSymbol);
+  const targets = aliasDecl
+    ? enumVariantTypeTargetsFromAliasTarget(aliasDecl.target)
+    : undefined;
+  if (targets) {
+    return targets.flatMap((target) => {
+      const symbol = resolveNominalTypeSymbol({
+        target: target.target,
+        scope: ctx.symbolTable.rootScope,
+        symbolTable: ctx.symbolTable,
+        moduleMembers: ctx.moduleMembers,
+      });
+      if (typeof symbol !== "number") {
+        return [];
+      }
+      const record = ctx.symbolTable.getSymbol(symbol);
+      const entity = (record.metadata as { entity?: unknown } | undefined)
+        ?.entity;
+      if (record.kind !== "type") {
+        return [];
+      }
+      if (entity === "object") {
+        return [{ name: target.name, symbol }];
+      }
+      if (entity === "type-alias") {
+        return collectLocalTypeNamespaceMembers({
+          namespaceSymbol: symbol,
+          ctx,
+          seen: nextSeen,
+        });
+      }
+      return [];
+    });
+  }
+
+  const methods = ctx.staticMethods.get(namespaceSymbol);
+  if (!methods) {
+    return [];
+  }
+  return Array.from(methods.entries()).flatMap(([name, symbols]) =>
+    Array.from(symbols).flatMap((symbol) => {
+      const record = ctx.symbolTable.getSymbol(symbol);
+      const entity = (record.metadata as { entity?: unknown } | undefined)
+        ?.entity;
+      return record.kind === "type" && entity === "object"
+        ? [{ name, symbol }]
+        : [];
+    }),
+  );
+};
+
+const canonicalBindingSymbolKey = ({
+  moduleId,
+  symbol,
+  binding,
+}: {
+  moduleId: string;
+  symbol: SymbolId;
+  binding: Pick<BindingContext, "symbolTable" | "dependencies">;
+}): string => {
+  const canonical = canonicalBindingSymbol({ moduleId, symbol, binding });
+  return `${canonical.moduleId}:${canonical.symbol}`;
+};
+
+const canonicalBindingSymbol = ({
+  moduleId,
+  symbol,
+  binding,
+}: {
+  moduleId: string;
+  symbol: SymbolId;
+  binding: Pick<BindingContext, "symbolTable" | "dependencies">;
+}): {
+  moduleId: string;
+  symbol: SymbolId;
+  binding: Pick<BindingContext, "symbolTable" | "dependencies">;
+} => {
+  let currentModuleId = moduleId;
+  let currentSymbol = symbol;
+  let current = binding;
+  const visited = new Set<string>();
+
+  while (true) {
+    const key = `${currentModuleId}:${currentSymbol}`;
+    if (visited.has(key)) {
+      return { moduleId: currentModuleId, symbol: currentSymbol, binding: current };
+    }
+    visited.add(key);
+    const imported = importedSymbolTargetFromMetadata(
+      current.symbolTable.getSymbol(currentSymbol).metadata,
+    );
+    if (!imported) {
+      return { moduleId: currentModuleId, symbol: currentSymbol, binding: current };
+    }
+    const dependency = current.dependencies.get(imported.moduleId);
+    if (!dependency) {
+      return {
+        moduleId: imported.moduleId,
+        symbol: imported.symbol,
+        binding: current,
+      };
+    }
+    currentModuleId = imported.moduleId;
+    currentSymbol = imported.symbol;
+    current = dependency;
+  }
 };
 
 const isStdImportBlocked = ({
@@ -1145,35 +1487,33 @@ const hydrateImportedEnumAliasNamespace = ({
     return;
   }
 
-  const aliasDecl = dependency.decls.getTypeAlias(importedSymbolId);
-  const variantNames = aliasDecl
-    ? enumVariantTypeNamesFromAliasTarget(aliasDecl.target)
-    : undefined;
-  if (!variantNames || variantNames.length === 0) {
-    return;
-  }
-
-  const exports = ctx.moduleExports.get(importedModuleId);
-  if (!exports) {
+  const variantMembers = collectLocalTypeNamespaceMembers({
+    namespaceSymbol: importedSymbolId,
+    ctx: dependency,
+  });
+  if (variantMembers.length === 0) {
     return;
   }
 
   const bucket = ctx.staticMethods.get(namespaceSymbol) ?? new Map();
   let changed = false;
 
-  variantNames.forEach((variantName) => {
-    if (bucket.get(variantName)?.size) {
-      return;
-    }
-
-    const exported = exports.get(variantName);
+  variantMembers.forEach(({ name: variantName, symbol: variantSymbol }) => {
+    const canonical = canonicalBindingSymbol({
+      moduleId: importedModuleId,
+      symbol: variantSymbol,
+      binding: dependency,
+    });
+    const exported = Array.from(
+      ctx.moduleExports.get(canonical.moduleId)?.values() ?? [],
+    ).find((entry) => entry.symbol === canonical.symbol);
     if (!exported) {
       return;
     }
     if (
       !canAccessExport({
         exported,
-        moduleId: importedModuleId,
+        moduleId: canonical.moduleId,
         ctx,
         explicitlyTargetsStdSubmodule,
       })
@@ -1181,7 +1521,9 @@ const hydrateImportedEnumAliasNamespace = ({
       return;
     }
 
-    const exportedRecord = dependency.symbolTable.getSymbol(exported.symbol);
+    const exportedRecord = canonical.binding.symbolTable.getSymbol(
+      canonical.symbol,
+    );
     const metadata = exportedRecord.metadata as { entity?: string } | undefined;
     if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
       return;
@@ -1189,8 +1531,8 @@ const hydrateImportedEnumAliasNamespace = ({
 
     const existing = ctx.imports.find(
       (entry) =>
-        entry.target?.moduleId === importedModuleId &&
-        entry.target.symbol === exported.symbol,
+        entry.target?.moduleId === canonical.moduleId &&
+        entry.target.symbol === canonical.symbol,
     )?.local;
     const hiddenImportName = `__enum_ns_${implicitEnumNamespaceImportId++}_${variantName}`;
     const local =
@@ -1202,8 +1544,8 @@ const hydrateImportedEnumAliasNamespace = ({
             declaredAt: declaredAt.syntaxId,
             metadata: {
               import: {
-                moduleId: importedModuleId,
-                symbol: exported.symbol,
+                moduleId: canonical.moduleId,
+                symbol: canonical.symbol,
                 explicitlyTargetsStdSubmodule,
               },
               ...(importableMetadataFrom(
@@ -1215,14 +1557,17 @@ const hydrateImportedEnumAliasNamespace = ({
       ctx.imports.push({
         name: hiddenImportName,
         local,
-        target: { moduleId: importedModuleId, symbol: exported.symbol },
+        target: { moduleId: canonical.moduleId, symbol: canonical.symbol },
         visibility: moduleVisibility(),
         span: toSourceSpan(declaredAt),
       });
     }
 
-    bucket.set(variantName, new Set([local]));
-    changed = true;
+    const variants = bucket.get(variantName) ?? new Set<SymbolId>();
+    const sizeBefore = variants.size;
+    variants.add(local);
+    bucket.set(variantName, variants);
+    changed ||= variants.size !== sizeBefore;
   });
 
   if (!changed) {

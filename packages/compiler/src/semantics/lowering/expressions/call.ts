@@ -13,21 +13,26 @@ import {
   parseValueBraceEntries,
 } from "../../../parser/surface/index.js";
 import { literalShouldLowerAsObjectLiteral } from "../../constructors.js";
-import type { HirExprId } from "../../ids.js";
+import type { HirExprId, SymbolId } from "../../ids.js";
 import type { HirTypeExpr } from "../../hir/index.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import { resolveNamedTypeTarget } from "../named-type-resolution.js";
 import { toSourceSpan } from "../../../parser/surface/utils.js";
 import {
   isObjectLiteralForm,
+  lowerNominalObjectLiteralCall,
   lowerObjectLiteralExpr,
 } from "./object-literal.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
 import { lowerConstructorLiteralCall } from "./constructor-call.js";
 import { createBoolLiteralExpr } from "./literal-helpers.js";
 import { resolveTypeSymbol } from "../resolution.js";
-import { lowerNominalTargetTypeArgumentsFromMetadata } from "../../nominal-type-target.js";
+import {
+  lowerNominalTargetTypeArgumentsFromMetadata,
+  resolveNominalTypeSymbol,
+} from "../../nominal-type-target.js";
 import { substituteTypeParametersInTypeExpr } from "../../hir/type-expr-substitution.js";
+import { importedSymbolTargetFromMetadata } from "../../enum-namespace.js";
 
 type LowerCallFromElementsParams = LoweringParams & {
   calleeExpr: Expr;
@@ -36,6 +41,14 @@ type LowerCallFromElementsParams = LoweringParams & {
 };
 
 type LowerNominalObjectLiteralParams = LoweringParams & {
+  callee: Expr;
+  args: readonly Expr[];
+  ast: Expr;
+  fallbackTypeArguments?: HirTypeExpr[];
+  allowedTargetSymbols?: ReadonlySet<number>;
+};
+
+type LowerImplicitFieldwiseCallParams = LoweringParams & {
   callee: Expr;
   args: readonly Expr[];
   ast: Expr;
@@ -181,8 +194,9 @@ export const lowerNominalObjectLiteral = ({
 }: LowerNominalObjectLiteralParams): HirExprId | undefined => {
   if (args.length === 0) return undefined;
 
-  const calleeResolution = resolveNominalTarget({
+  const calleeResolution = resolveAllowedNominalTarget({
     callee,
+    allowedTargetSymbols,
     ctx,
     scope: scopes.current(),
   });
@@ -310,6 +324,167 @@ export const lowerNominalObjectLiteral = ({
       targetSymbol: calleeResolution.symbol,
     },
   });
+};
+
+export const lowerImplicitFieldwiseCall = ({
+  callee,
+  args,
+  ast,
+  fallbackTypeArguments,
+  allowedTargetSymbols,
+  ctx,
+  scopes,
+  lowerExpr,
+}: LowerImplicitFieldwiseCallParams): HirExprId | undefined => {
+  const genericsForm = args[0];
+  const hasGenerics =
+    isForm(genericsForm) && formCallsInternal(genericsForm, "generics");
+  const valueArgs = args.slice(hasGenerics ? 1 : 0);
+  const parsedTypeArguments = hasGenerics
+    ? ((genericsForm as Form).rest
+        .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
+        .filter(Boolean) as HirTypeExpr[])
+    : undefined;
+  const calleeResolution = resolveAllowedNominalTarget({
+    callee,
+    allowedTargetSymbols,
+    ctx,
+    scope: scopes.current(),
+  });
+  if (!calleeResolution) {
+    return undefined;
+  }
+  if (
+    allowedTargetSymbols &&
+    !allowedTargetSymbols.has(calleeResolution.symbol)
+  ) {
+    return undefined;
+  }
+
+  const record = ctx.symbolTable.getSymbol(calleeResolution.symbol);
+  const metadata = record.metadata as { entity?: unknown } | undefined;
+  const isNominalOrAlias =
+    record.kind === "type" &&
+    (metadata?.entity === "object" || metadata?.entity === "type-alias");
+  if (!isNominalOrAlias) {
+    return undefined;
+  }
+
+  if (nominalTypeDeclaresInit(calleeResolution.symbol, ctx)) {
+    return undefined;
+  }
+
+  const typeArguments =
+    calleeResolution.typeArguments ??
+    (parsedTypeArguments && fallbackTypeArguments
+      ? [...parsedTypeArguments, ...fallbackTypeArguments]
+      : (parsedTypeArguments ?? fallbackTypeArguments));
+  const target: HirTypeExpr = {
+    typeKind: "named",
+    path: calleeResolution.path,
+    symbol: calleeResolution.symbol,
+    ast: ast.syntaxId,
+    span: toSourceSpan(ast),
+    typeArguments:
+      typeArguments && typeArguments.length > 0 ? typeArguments : undefined,
+  };
+
+  return lowerNominalObjectLiteralCall({
+    arguments: valueArgs,
+    target,
+    targetSymbol: calleeResolution.symbol,
+    ast,
+    ctx,
+    scopes,
+    lowerExpr,
+  });
+};
+
+const resolveAllowedNominalTarget = ({
+  callee,
+  allowedTargetSymbols,
+  ctx,
+  scope,
+}: {
+  callee: Expr;
+  allowedTargetSymbols?: ReadonlySet<number>;
+  ctx: LoweringParams["ctx"];
+  scope: number;
+}): NominalTargetResolution | undefined => {
+  const lexical = resolveNominalTarget({ callee, ctx, scope });
+  if (
+    !allowedTargetSymbols ||
+    (lexical && allowedTargetSymbols.has(lexical.symbol))
+  ) {
+    return lexical;
+  }
+  if (allowedTargetSymbols.size !== 1 || !isIdentifierAtom(callee)) {
+    return undefined;
+  }
+  return {
+    symbol: Array.from(allowedTargetSymbols)[0]!,
+    path: [callee.value],
+    calleeSyntax: callee,
+    typeArguments: undefined,
+  };
+};
+
+const nominalTypeDeclaresInit = (
+  symbol: SymbolId,
+  ctx: LoweringParams["ctx"],
+): boolean => {
+  let currentSymbol = symbol;
+  let current: Pick<
+    LoweringParams["ctx"],
+    | "symbolTable"
+    | "staticMethods"
+    | "dependencies"
+    | "decls"
+    | "scopeByNode"
+    | "moduleMembers"
+  > = ctx;
+  let currentModuleId = ctx.moduleId;
+  const visited = new Set<string>();
+
+  while (true) {
+    const key = `${currentModuleId}:${currentSymbol}`;
+    if (visited.has(key)) {
+      return false;
+    }
+    visited.add(key);
+    if (current.staticMethods.get(currentSymbol)?.get("init")?.size) {
+      return true;
+    }
+    const alias = current.decls.getTypeAlias(currentSymbol);
+    if (alias) {
+      const aliasScope = alias.form
+        ? current.scopeByNode.get(alias.form.syntaxId)
+        : undefined;
+      const targetSymbol = resolveNominalTypeSymbol({
+        target: alias.target,
+        scope: aliasScope ?? current.symbolTable.rootScope,
+        symbolTable: current.symbolTable,
+        moduleMembers: current.moduleMembers,
+      });
+      if (typeof targetSymbol === "number") {
+        currentSymbol = targetSymbol;
+        continue;
+      }
+    }
+    const imported = importedSymbolTargetFromMetadata(
+      current.symbolTable.getSymbol(currentSymbol).metadata,
+    );
+    if (!imported) {
+      return false;
+    }
+    const dependency = current.dependencies.get(imported.moduleId);
+    if (!dependency) {
+      return false;
+    }
+    current = dependency;
+    currentModuleId = imported.moduleId;
+    currentSymbol = imported.symbol;
+  }
 };
 
 const resolveEnclosingFunctionDecl = ({
@@ -605,6 +780,18 @@ export const lowerCall = ({
   });
   if (typeof nominalLiteral === "number") {
     return nominalLiteral;
+  }
+
+  const fieldwiseCall = lowerImplicitFieldwiseCall({
+    callee,
+    args: form.rest,
+    ast: form,
+    ctx,
+    scopes,
+    lowerExpr,
+  });
+  if (typeof fieldwiseCall === "number") {
+    return fieldwiseCall;
   }
 
   return lowerCallFromElements({

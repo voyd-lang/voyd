@@ -50,6 +50,7 @@ export const createTypingContextFromTypingResult = ({
   dependencies,
   importsByLocal,
   importAliasesByModule,
+  sourceImportLocals: typing.sourceImportLocals,
   arena: typing.arena,
   table: typing.table,
   effects: typing.effects,

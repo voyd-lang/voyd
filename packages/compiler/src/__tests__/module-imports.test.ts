@@ -820,6 +820,658 @@ pub fn main() -> i32
     expect(importNames.has("Water")).toBe(true);
   });
 
+  it("allows redundant namespace imports for locally declared union members", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: `
+obj Apple {}
+obj Banana { age: i32 }
+type Fruit = Apple | Banana
+type Produce = Fruit
+
+use Fruit::{ Apple, Banana }
+use Fruit::Apple
+use Fruit::all
+use Produce::{ Apple, Banana }
+use Produce::Apple
+use Produce::all
+
+pub fn main() -> i32
+  let fruit: Fruit = Banana(age: 7)
+  match(fruit)
+    Apple:
+      0
+    Banana { age }:
+      age
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
+  it("imports qualified members from a locally declared union alias", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}fruit.voyd`]: `
+pub obj Apple {}
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::fruit
+
+obj Banana {}
+type Fruit = fruit::Apple | Banana
+
+use Fruit::Apple
+
+pub fn main() -> i32
+  let _fruit: Fruit = Apple()
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
+  it("fieldwise-constructs module-qualified nominal types and aliases", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}models.voyd`]: `
+pub obj Person { age: i32 }
+pub obj Empty {}
+pub type PersonAlias = Person
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::models
+
+pub fn main() -> i32
+  let person = models::Person(age: 5)
+  let alias = models::PersonAlias(age: 6)
+  let _empty = models::Empty()
+  person.age + alias.age
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
+  it("imports members through imported union alias chains", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}fruit.voyd`]: `
+pub obj Apple {}
+pub obj Banana {}
+pub type Fruit = Apple | Banana
+pub type Produce = Fruit
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::fruit::{ Produce }
+use Produce::{ Apple, Banana }
+
+pub fn main() -> i32
+  let _first: Produce = Apple()
+  let _second: Produce = Banana()
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
+  it("preserves enum namespaces through alias-only re-exports", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}fruit.voyd`]: `
+pub obj Apple {}
+pub obj Banana {}
+pub type Fruit = Apple | Banana
+`,
+      [`${srcRoot}${sep}api.voyd`]: `
+pub use src::fruit::{ Fruit }
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::api::{ Fruit }
+use Fruit::Apple
+
+pub fn main() -> i32
+  let _apple: Fruit = Apple()
+  let _banana: Fruit = Fruit::Banana()
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
+  it("preserves imported namespaces for qualified external union members", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}a.voyd`]: `
+pub obj Apple {}
+`,
+      [`${srcRoot}${sep}b.voyd`]: `
+pub obj Banana {}
+`,
+      [`${srcRoot}${sep}fruit.voyd`]: `
+use src::{ a, b }
+pub type Fruit = a::Apple | b::Banana
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::fruit::{ Fruit }
+use Fruit::Apple
+
+pub fn main() -> i32
+  let _apple: Fruit = Apple()
+  let _banana: Fruit = Fruit::Banana()
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
+  it("diagnoses ambiguous imported union namespace members", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}a.voyd`]: `
+pub obj Item { a: i32 }
+`,
+      [`${srcRoot}${sep}b.voyd`]: `
+pub obj Item { b: i32 }
+`,
+      [`${srcRoot}${sep}items.voyd`]: `
+use src::{ a, b }
+pub type Both = a::Item | b::Item
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::items::{ Both }
+use Both::Item
+
+pub fn main() -> i32
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics.some(
+        (entry) =>
+          entry.code === "BD0001" &&
+          entry.message.includes("multiple distinct members named Item"),
+      ),
+      JSON.stringify(combinedDiagnostics),
+    ).toBe(true);
+  });
+
+  it("diagnoses ambiguous same-named local union namespace members", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}a.voyd`]: `
+pub obj Item { a: i32 }
+`,
+      [`${srcRoot}${sep}b.voyd`]: `
+pub obj Item { b: i32 }
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::{ a, b }
+
+type Both = a::Item | b::Item
+use Both::Item
+
+pub fn main() -> i32
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics.some(
+        (entry) =>
+          entry.code === "BD0001" &&
+          entry.message.includes("multiple distinct members named Item"),
+      ),
+      JSON.stringify(combinedDiagnostics),
+    ).toBe(true);
+  });
+
+  it("deduplicates the same namespace member across re-export paths", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}origin.voyd`]: `
+pub obj Item {}
+`,
+      [`${srcRoot}${sep}a.voyd`]: `
+pub use src::origin::{ Item }
+`,
+      [`${srcRoot}${sep}b.voyd`]: `
+pub use src::origin::{ Item }
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::{ a, b }
+
+type Both = a::Item | b::Item
+use Both::Item
+
+pub fn main() -> i32
+  let _item: Both = Item()
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
+  it("infers fieldwise type arguments for imported nominal aliases", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}boxes.voyd`]: `
+pub obj Box<T> { value: T }
+pub type BoxAlias<T> = Box<T>
+pub type BoxAliasChain<T> = BoxAlias<T>
+pub obj Animal { id: i32 }
+pub obj Dog: Animal { id: i32 }
+pub obj AnimalBox<T: Animal> { value: T }
+pub type AnimalBoxAlias<T: Animal> = AnimalBox<T>
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::boxes::{ AnimalBoxAlias, BoxAlias, BoxAliasChain, Dog }
+
+pub fn main() -> i32
+  let box = BoxAlias(value: 3)
+  let chained = BoxAliasChain(value: 2)
+  let constrained = AnimalBoxAlias(value: Dog(id: 4))
+  box.value + chained.value + constrained.value.id
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
+  it("prefers qualified union members over same-named lexical types", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}fruit.voyd`]: `
+pub obj Apple {}
+pub type Fruit = Apple
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::fruit::{ Fruit }
+
+obj Apple { value: i32 }
+
+pub fn main() -> i32
+  let first: Fruit = Fruit::Apple()
+  let second: Fruit = Fruit::Apple {}
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
+  it("does not fieldwise-construct imported types with inaccessible init", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}guarded.voyd`]: `
+pub obj Guarded { value: i32 }
+
+impl Guarded
+  pri fn init({ value: i32 }) -> Guarded
+    Guarded { value: value + 1 }
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::guarded::{ Guarded }
+
+type GuardedAlias = Guarded
+
+pub fn main() -> i32
+  let guarded = Guarded(value: 1)
+  let aliased = GuardedAlias(value: 2)
+  guarded.value + aliased.value
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(combinedDiagnostics.some((entry) => entry.code === "TY0041")).toBe(
+      true,
+    );
+    expect(
+      Array.from(semantics.get("src::main")?.hir.expressions.values() ?? []).some(
+        (expr) => expr.exprKind === "object-literal" && expr.literalKind === "nominal",
+      ),
+    ).toBe(false);
+  });
+
+  it("infers unqualified imported union members in match patterns", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}fruit.voyd`]: `
+pub obj Apple {}
+pub obj Banana { age: i32 }
+pub type Fruit = Apple | Banana
+pub type BananaAlias = Banana
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::fruit::{ BananaAlias, Fruit }
+
+fn score(fruit: Fruit) -> i32
+  match(fruit)
+    Apple:
+      0
+    Banana { age }:
+      age
+
+pub fn main() -> i32
+  score(BananaAlias(age: 7))
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(combinedDiagnostics, JSON.stringify(combinedDiagnostics)).toHaveLength(0);
+  });
+
+  it("does not infer inaccessible imported union members in match patterns", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}choice.voyd`]: `
+obj Hidden {}
+pub obj Visible {}
+pub type Choice = Hidden | Visible
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::choice::{ Choice }
+
+pub fn score(choice: Choice) -> i32
+  match(choice)
+    Hidden:
+      0
+    Visible:
+      1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const allDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      allDiagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "TY0026" && diagnostic.message.includes("Hidden"),
+      ),
+      JSON.stringify(allDiagnostics),
+    ).toBe(true);
+  });
+
+  it("prefers explicitly imported lexical types over contextual match members", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}fruit.voyd`]: `
+pub obj Apple { local: i32 }
+pub type Fruit = Apple
+`,
+      [`${srcRoot}${sep}foreign.voyd`]: `
+pub obj Apple { foreign: i32 }
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::fruit::{ Fruit }
+use src::foreign::{ Apple }
+
+pub fn score(fruit: Fruit) -> i32
+  match(fruit)
+    Apple:
+      1
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const allDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      allDiagnostics.some(
+        (diagnostic) =>
+          diagnostic.code === "TY0002" &&
+          diagnostic.message.includes("does not match discriminant"),
+      ),
+      JSON.stringify(allDiagnostics),
+    ).toBe(true);
+  });
+
+  it("does not override lexical traits during contextual match lookup", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}fruit.voyd`]: `
+pub obj Apple {}
+pub obj Banana {}
+pub type Fruit = Apple | Banana
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::fruit::{ Fruit }
+
+trait Apple
+  fn id(self) -> i32
+
+pub fn score(fruit: Fruit) -> i32
+  match(fruit)
+    Apple:
+      1
+    Banana:
+      2
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const allDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      allDiagnostics.some((diagnostic) => diagnostic.code === "TY0002"),
+      JSON.stringify(allDiagnostics),
+    ).toBe(true);
+  });
+
+  it("resolves explicitly imported aliases before contextual match lookup", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}choice.voyd`]: `
+pub obj Some<T> { value: T }
+pub type Renamed<T> = Some<T>
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::choice::{ Renamed }
+
+pub fn score(choice: Renamed<i32>) -> i32
+  match(choice)
+    Renamed<i32> { value }:
+      value
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
+  });
+
+  it("uses explicit type arguments for contextual same-head match patterns", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}choice.voyd`]: `
+pub obj Some<T> { value: T }
+pub type Choice = Some<i32> | Some<bool>
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+use src::choice::{ Choice }
+
+pub fn score(choice: Choice) -> i32
+  match(choice)
+    Some<i32> { value }:
+      value
+    Some<bool>:
+      0
+
+pub fn main() -> i32
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+  });
+
   it("supports generic enum namespace all imports via use Drink::all", async () => {
     const srcRoot = resolve("/proj/src");
     const host = createMemoryHost({
@@ -962,7 +1614,7 @@ pub fn main() -> Drink
     ).toBe(true);
   });
 
-  it("reports missing exports for unresolved enum namespace members", async () => {
+  it("resolves public external members through imported union namespaces", async () => {
     const srcRoot = resolve("/proj/src");
     const host = createMemoryHost({
       [`${srcRoot}${sep}variants.voyd`]: `
@@ -992,13 +1644,9 @@ pub fn main() -> Drink
     const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
 
     expect(
-      combinedDiagnostics.some(
-        (diag) =>
-          diag.code === "BD0001" &&
-          diag.message.includes("src::drinks") &&
-          diag.message.includes("Tea"),
-      ),
-    ).toBe(true);
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
   });
 
   it("deduplicates repeated grouped-import diagnostics with the same source span", async () => {

@@ -107,6 +107,7 @@ const snapshotTypingResult = ({
     callTypeArguments: cloneNestedMap(ctx.callResolution.typeArguments),
     callInstanceKeys: cloneNestedMap(ctx.callResolution.instanceKeys),
     callTraitDispatches: new Set(ctx.callResolution.traitDispatches),
+    sourceImportLocals: new Set(ctx.sourceImportLocals),
     functionInstantiationInfo: ctx.functions.snapshotInstantiationInfo(),
     functionInstanceExprTypes: ctx.functions.snapshotInstanceExprTypes(),
     functionInstanceValueTypes: ctx.functions.snapshotInstanceValueTypes(),

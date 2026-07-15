@@ -25,9 +25,12 @@ import type { TypingContext, TypingState } from "../types.js";
 import {
   canonicalSymbolRefInTypingContext,
   canonicalSymbolRefForTypingContext,
+  localSymbolForSymbolRef,
   symbolRefKey as symbolRefKeyForTyping,
 } from "../symbol-ref-utils.js";
 import { bindPatternFromType, recordPatternType } from "./patterns.js";
+import { isPackageVisible, isPublicVisibility } from "../../hir/index.js";
+import { importedSymbolTargetFromMetadata } from "../../enum-namespace.js";
 
 export const typeMatchExpr = (
   expr: HirMatchExpr,
@@ -149,7 +152,7 @@ const createMatchCoverageTracker = ({
   const discriminantDesc = ctx.arena.get(discriminantType);
   if (discriminantDesc.kind !== "union") {
     return {
-      patternNominalHints: undefined,
+      patternNominalHints: collectNominalPatternHints(discriminantType, ctx),
       trackArm: () => undefined,
       ensureExhaustive: () => undefined,
     };
@@ -477,6 +480,7 @@ const collectTupleCandidates = (
 type NominalPatternHint = {
   nominal: TypeId;
   memberType: TypeId;
+  name: string;
 };
 
 type NominalPatternOwnerKey = string;
@@ -484,6 +488,7 @@ type NominalPatternOwnerKey = string;
 type NominalPatternHints = {
   unique: Map<NominalPatternOwnerKey, NominalPatternHint>;
   ambiguous: Set<NominalPatternOwnerKey>;
+  byName: Map<string, readonly NominalPatternHint[]>;
 };
 
 const collectNominalPatternHints = (
@@ -491,15 +496,14 @@ const collectNominalPatternHints = (
   ctx: TypingContext
 ): NominalPatternHints | undefined => {
   const desc = ctx.arena.get(discriminantType);
-  if (desc.kind !== "union") {
-    return undefined;
-  }
+  const members = desc.kind === "union" ? desc.members : [discriminantType];
 
   const counts = new Map<NominalPatternOwnerKey, number>();
   const unique = new Map<NominalPatternOwnerKey, NominalPatternHint>();
   const ambiguous = new Set<NominalPatternOwnerKey>();
+  const byName = new Map<string, NominalPatternHint[]>();
 
-  desc.members.forEach((member) => {
+  members.forEach((member) => {
     const nominal = getNominalComponent(member, ctx);
     if (typeof nominal !== "number") {
       return;
@@ -511,20 +515,67 @@ const collectNominalPatternHints = (
     ) {
       return;
     }
+    const localOwner = localSymbolForSymbolRef(nominalDesc.owner, ctx);
+    const isContextuallyReachable = !(
+      nominalDesc.owner.moduleId !== ctx.moduleId &&
+      (typeof localOwner !== "number" ||
+        !isReachableNominalPatternOwner(nominalDesc.owner, ctx))
+    );
     const ownerKey = symbolRefKeyForTyping(
       canonicalSymbolRefInTypingContext(nominalDesc.owner, ctx),
     );
+    const name = nominalDesc.name;
+    if (!name) {
+      return;
+    }
+    const hint = { nominal, memberType: member, name };
+    if (isContextuallyReachable) {
+      const named = byName.get(name) ?? [];
+      named.push(hint);
+      byName.set(name, named);
+    }
     const count = (counts.get(ownerKey) ?? 0) + 1;
     counts.set(ownerKey, count);
     if (count === 1) {
-      unique.set(ownerKey, { nominal, memberType: member });
+      unique.set(ownerKey, hint);
     } else {
       unique.delete(ownerKey);
       ambiguous.add(ownerKey);
     }
   });
 
-  return unique.size > 0 || ambiguous.size > 0 ? { unique, ambiguous } : undefined;
+  return unique.size > 0 || ambiguous.size > 0
+    ? { unique, ambiguous, byName }
+    : undefined;
+};
+
+const isReachableNominalPatternOwner = (
+  owner: { moduleId: string; symbol: number },
+  ctx: TypingContext,
+): boolean => {
+  const canonicalOwner = canonicalSymbolRefInTypingContext(owner, ctx);
+  for (const dependency of ctx.dependencies.values()) {
+    for (const exported of dependency.exports.values()) {
+      const accessible =
+        dependency.packageId === ctx.packageId
+          ? isPackageVisible(exported.visibility)
+          : isPublicVisibility(exported.visibility);
+      if (!accessible) {
+        continue;
+      }
+      const candidate = canonicalSymbolRefInTypingContext(
+        { moduleId: dependency.moduleId, symbol: exported.symbol },
+        ctx,
+      );
+      const reachesOwner =
+        candidate.moduleId === canonicalOwner.moduleId &&
+        candidate.symbol === canonicalOwner.symbol;
+      if (reachesOwner) {
+        return true;
+      }
+    }
+  }
+  return false;
 };
 
 const reportRedundantMatchArm = ({
@@ -576,7 +627,10 @@ const resolveNominalPatternSymbol = (
 
   if (typeof typeExpr.symbol === "number") {
     const symbol = typeExpr.symbol;
-    if (ctx.objects.getTemplate(symbol)) {
+    if (
+      isSourceLexicalTypeSymbol({ typeExpr, symbol, ctx }) &&
+      ctx.objects.getTemplate(symbol)
+    ) {
       return symbol;
     }
   }
@@ -585,7 +639,16 @@ const resolveNominalPatternSymbol = (
   if (!name) {
     return undefined;
   }
-  return ctx.objects.resolveName(name);
+  const candidates = new Set([
+    ctx.symbolTable.resolve(name, ctx.symbolTable.rootScope),
+    ctx.objects.resolveName(name),
+  ]);
+  return Array.from(candidates).find(
+    (candidate): candidate is SymbolId =>
+      typeof candidate === "number" &&
+      isSourceLexicalTypeSymbol({ typeExpr, symbol: candidate, ctx }) &&
+      Boolean(ctx.objects.getTemplate(candidate)),
+  );
 };
 
 const resolveMatchPatternType = ({
@@ -617,6 +680,74 @@ const resolveMatchPatternType = ({
       : undefined;
   const isGenericAlias = (aliasTemplate?.params.length ?? 0) > 0;
   const hasTypeArguments = (namedType?.typeArguments?.length ?? 0) > 0;
+  const unresolvedContextualName =
+    namedType &&
+    typeof nominalSymbol !== "number" &&
+    typeof aliasSymbol !== "number" &&
+    !hasSourceLexicalTypeBinding(namedType, ctx) &&
+    namedType.path.length === 1
+      ? namedType.path[0]
+      : undefined;
+
+  if (unresolvedContextualName && hints) {
+    const candidates = hints.byName.get(unresolvedContextualName) ?? [];
+    if (hasTypeArguments && candidates.length > 0 && namedType) {
+      const ownerSymbols = new Set(
+        candidates.flatMap((candidate) => {
+          const candidateDesc = ctx.arena.get(candidate.nominal);
+          if (
+            candidateDesc.kind !== "nominal-object" &&
+            candidateDesc.kind !== "value-object"
+          ) {
+            return [];
+          }
+          const owner = localSymbolForSymbolRef(candidateDesc.owner, ctx);
+          return typeof owner === "number" ? [owner] : [];
+        }),
+      );
+      if (ownerSymbols.size === 1) {
+        return resolveTypeExpr(
+          { ...namedType, symbol: Array.from(ownerSymbols)[0] },
+          ctx,
+          state,
+          ctx.primitives.unknown,
+        );
+      }
+    }
+    if (candidates.length === 1) {
+      return candidates[0]!.memberType;
+    }
+    if (candidates.length > 1) {
+      const related = discriminantSpan
+        ? [
+            diagnosticFromCode({
+              code: "TY0002",
+              params: { kind: "discriminant-note" },
+              severity: "note",
+              span: discriminantSpan,
+            }),
+          ]
+        : undefined;
+      emitDiagnostic({
+        ctx,
+        code: "TY0020",
+        params: {
+          kind: "ambiguous-nominal-match-pattern",
+          typeName: unresolvedContextualName,
+        },
+        span: patternSpan,
+        related,
+      });
+      return ctx.primitives.unknown;
+    }
+    emitDiagnostic({
+      ctx,
+      code: "TY0026",
+      params: { kind: "undefined-type", name: unresolvedContextualName },
+      span: patternSpan,
+    });
+    return ctx.primitives.unknown;
+  }
 
   if (aliasSymbol && isGenericAlias && !hasTypeArguments) {
     const inferred = inferAliasPatternType({
@@ -706,7 +837,10 @@ const resolveAliasPatternSymbol = (
 
   if (typeof typeExpr.symbol === "number") {
     const symbol = typeExpr.symbol;
-    if (ctx.typeAliases.hasTemplate(symbol)) {
+    if (
+      isSourceLexicalTypeSymbol({ typeExpr, symbol, ctx }) &&
+      isTypeAliasSymbol(symbol, ctx)
+    ) {
       return symbol;
     }
   }
@@ -715,7 +849,74 @@ const resolveAliasPatternSymbol = (
   if (!name) {
     return undefined;
   }
-  return ctx.typeAliases.resolveName(name);
+  const candidates = new Set([
+    ctx.symbolTable.resolve(name, ctx.symbolTable.rootScope),
+    ctx.typeAliases.resolveName(name),
+  ]);
+  return Array.from(candidates).find(
+    (candidate): candidate is SymbolId =>
+      typeof candidate === "number" &&
+      isSourceLexicalTypeSymbol({ typeExpr, symbol: candidate, ctx }) &&
+      isTypeAliasSymbol(candidate, ctx),
+  );
+};
+
+const isTypeAliasSymbol = (symbol: SymbolId, ctx: TypingContext): boolean => {
+  if (ctx.typeAliases.hasTemplate(symbol)) {
+    return true;
+  }
+  const record = ctx.symbolTable.getSymbol(symbol);
+  return (
+    record.kind === "type" &&
+    (record.metadata as { entity?: unknown } | undefined)?.entity ===
+      "type-alias"
+  );
+};
+
+const isSourceLexicalTypeSymbol = ({
+  typeExpr,
+  symbol,
+  ctx,
+}: {
+  typeExpr: HirTypeExpr & { typeKind: "named" };
+  symbol: SymbolId;
+  ctx: TypingContext;
+}): boolean => {
+  if (typeExpr.path.length > 1) {
+    return true;
+  }
+  const record = ctx.symbolTable.getSymbol(symbol);
+  return (
+    !importedSymbolTargetFromMetadata(record.metadata) ||
+    ctx.sourceImportLocals.has(symbol)
+  );
+};
+
+const hasSourceLexicalTypeBinding = (
+  typeExpr: HirTypeExpr & { typeKind: "named" },
+  ctx: TypingContext,
+): boolean => {
+  const name = typeExpr.path.at(-1);
+  const candidates = new Set([
+    typeExpr.symbol,
+    name
+      ? ctx.symbolTable.resolve(name, ctx.symbolTable.rootScope)
+      : undefined,
+  ]);
+  return Array.from(candidates).some((candidate) => {
+    if (typeof candidate !== "number") {
+      return false;
+    }
+    const record = ctx.symbolTable.getSymbol(candidate);
+    const isTypeLike =
+      record.kind === "type" ||
+      record.kind === "trait" ||
+      record.kind === "type-parameter";
+    return (
+      isTypeLike &&
+      isSourceLexicalTypeSymbol({ typeExpr, symbol: candidate, ctx })
+    );
+  });
 };
 
 type AliasPatternInference =

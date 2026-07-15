@@ -47,6 +47,23 @@ export const getValueType = (
 ): TypeId => {
   const hasExplicitAliasConstructorTypeArguments =
     (options.aliasConstructorTypeArguments?.length ?? 0) > 0;
+  const record = ctx.symbolTable.getSymbol(symbol);
+  if (
+    record.kind !== "value" &&
+    record.kind !== "parameter" &&
+    record.kind !== "effect-op"
+  ) {
+    return emitDiagnostic({
+      ctx,
+      code: "TY0041",
+      params: {
+        kind: "symbol-not-a-value",
+        name: record.name,
+        symbolKind: record.kind,
+      },
+      span: normalizeSpan(options.span),
+    });
+  }
   if (!hasExplicitAliasConstructorTypeArguments) {
     const cached = ctx.valueTypes.get(symbol);
     if (typeof cached === "number") {
@@ -54,7 +71,6 @@ export const getValueType = (
     }
   }
 
-  const record = ctx.symbolTable.getSymbol(symbol);
   const metadata = (record.metadata ?? {}) as {
     intrinsic?: boolean;
     intrinsicName?: string;

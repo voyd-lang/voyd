@@ -17,7 +17,10 @@ import {
   resolveModuleMemberResolution,
   resolveStaticMethodResolution,
 } from "./resolution-helpers.js";
-import { lowerNominalObjectLiteral } from "./call.js";
+import {
+  lowerImplicitFieldwiseCall,
+  lowerNominalObjectLiteral,
+} from "./call.js";
 import type { LoweringFormParams, LoweringParams } from "./types.js";
 import {
   resolveConstructorResolution,
@@ -295,12 +298,6 @@ const lowerStaticMethodCall = ({
     ...namespaceTypeArguments,
   ];
 
-  const args = parseSurfaceCallArguments(
-    elements.slice(hasTypeArguments ? 2 : 1),
-  ).map((argument) => ({
-    ...(argument.label ? { label: argument.label.value } : {}),
-    expr: lowerExpr(argument.value, ctx, scopes),
-  }));
   const namespaceMemberSymbols =
     methodTable.get(calleeExpr.value) ?? new Set<SymbolId>();
 
@@ -308,7 +305,7 @@ const lowerStaticMethodCall = ({
     callee: calleeExpr,
     args: memberForm.rest,
     ast: accessForm,
-    fallbackTypeArguments: combinedTypeArguments,
+    fallbackTypeArguments: namespaceTypeArguments,
     allowedTargetSymbols: namespaceMemberSymbols,
     ctx,
     scopes,
@@ -317,6 +314,27 @@ const lowerStaticMethodCall = ({
   if (typeof nominal === "number") {
     return nominal;
   }
+
+  const fieldwise = lowerImplicitFieldwiseCall({
+    callee: calleeExpr,
+    args: memberForm.rest,
+    ast: accessForm,
+    fallbackTypeArguments: namespaceTypeArguments,
+    allowedTargetSymbols: namespaceMemberSymbols,
+    ctx,
+    scopes,
+    lowerExpr,
+  });
+  if (typeof fieldwise === "number") {
+    return fieldwise;
+  }
+
+  const args = parseSurfaceCallArguments(
+    elements.slice(hasTypeArguments ? 2 : 1),
+  ).map((argument) => ({
+    ...(argument.label ? { label: argument.label.value } : {}),
+    expr: lowerExpr(argument.value, ctx, scopes),
+  }));
 
   const resolution = resolveStaticMethodResolution({
     name: calleeExpr.value,
@@ -509,25 +527,6 @@ const lowerModuleQualifiedCall = ({
       ? [...(typeArguments ?? []), ...targetCallTypeArguments]
       : typeArguments;
 
-  const args = parseSurfaceCallArguments(
-    elements.slice(hasTypeArguments ? 2 : 1),
-  ).map((argument) => ({
-    ...(argument.label ? { label: argument.label.value } : {}),
-    expr: lowerExpr(argument.value, ctx, scopes),
-  }));
-
-  const nominal = lowerNominalObjectLiteral({
-    callee: calleeExpr,
-    args: memberForm.rest,
-    ast: accessForm,
-    ctx,
-    scopes,
-    lowerExpr,
-  });
-  if (typeof nominal === "number") {
-    return nominal;
-  }
-
   const baseResolution = resolveModuleMemberResolution({
     name: calleeExpr.value,
     moduleSymbol,
@@ -538,6 +537,42 @@ const lowerModuleQualifiedCall = ({
     const moduleName = ctx.symbolTable.getSymbol(moduleSymbol).name;
     throw new Error(`module ${moduleName} does not export ${calleeExpr.value}`);
   }
+  const memberSymbols = memberTable.get(calleeExpr.value) ?? new Set<SymbolId>();
+
+  const nominal = lowerNominalObjectLiteral({
+    callee: calleeExpr,
+    args: memberForm.rest,
+    ast: accessForm,
+    fallbackTypeArguments: combinedTypeArguments,
+    allowedTargetSymbols: memberSymbols,
+    ctx,
+    scopes,
+    lowerExpr,
+  });
+  if (typeof nominal === "number") {
+    return nominal;
+  }
+
+  const fieldwise = lowerImplicitFieldwiseCall({
+    callee: calleeExpr,
+    args: memberForm.rest,
+    ast: accessForm,
+    fallbackTypeArguments: combinedTypeArguments,
+    allowedTargetSymbols: memberSymbols,
+    ctx,
+    scopes,
+    lowerExpr,
+  });
+  if (typeof fieldwise === "number") {
+    return fieldwise;
+  }
+
+  const args = parseSurfaceCallArguments(
+    elements.slice(hasTypeArguments ? 2 : 1),
+  ).map((argument) => ({
+    ...(argument.label ? { label: argument.label.value } : {}),
+    expr: lowerExpr(argument.value, ctx, scopes),
+  }));
   const aliasTargetTypeArguments =
     baseResolution.kind === "symbol" &&
     ctx.symbolTable.getSymbol(baseResolution.symbol).kind === "type"

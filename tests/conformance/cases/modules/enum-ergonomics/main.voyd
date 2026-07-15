@@ -1,0 +1,51 @@
+use src::fruit::{ Fruit }
+
+obj Empty {}
+obj Person { age: i32 }
+val Count { value: i32 }
+obj Box<T> { value: T }
+type BoxAlias<T> = Box<T>
+
+obj Guarded { value: i32 }
+
+impl Guarded
+  fn init({ value: i32 }) -> Guarded
+    Guarded { value: value + 1 }
+
+type GuardedAlias = Guarded
+
+enum Signal
+  Idle
+  Ready
+
+use Signal::{ Idle, Ready }
+
+fn fruit_age(fruit: Fruit) -> i32
+  match(fruit)
+    Apple:
+      0
+    Banana { age }:
+      age
+    Orange { age }:
+      age
+
+pub fn fieldwise_construction() -> i32
+  let _empty = Empty()
+  let person = Person(age: 5)
+  let count = Count(value: 7)
+  let box = BoxAlias<i32>(value: 9)
+  let guarded = Guarded(value: 1)
+  let guarded_alias = GuardedAlias(value: 1)
+  let orange = Fruit::Orange(age: 2)
+  person.age + count.value + box.value + guarded.value + guarded_alias.value + fruit_age(orange)
+
+pub fn contextual_enum_match() -> i32
+  fruit_age(Fruit::Banana(age: 5))
+
+pub fn local_namespace_use() -> i32
+  let signal: Signal = Ready()
+  match(signal)
+    Idle:
+      0
+    Ready:
+      1
