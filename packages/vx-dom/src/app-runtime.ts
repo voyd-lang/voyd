@@ -49,12 +49,14 @@ type RuntimeResult = Record<string, unknown> & {
 type ProgramDescriptor = {
   kind: "program";
   initHandlerId: number;
+  hydrateHandlerId?: number;
   stepHandlerId: number;
   viewHandlerId: number;
   subscriptionsHandlerId?: number;
 } | {
   kind: "program_map_model";
   handlerId: number;
+  hydrateHandlerId?: number;
   child: ProgramDescriptor;
 } | {
   kind: "program_map_message";
@@ -66,7 +68,7 @@ type TaskObserver = (taskId: number) => Promise<unknown>;
 type RetainedDispatch = (handlerId: number, payload: unknown) => Promise<unknown>;
 
 type ProgramDescriptorRunner = {
-  hydrate(model: unknown): boolean;
+  hydrate(model: unknown): Promise<RuntimeResult>;
   init(): Promise<RuntimeResult>;
   step(message: VxRuntimeMessage): Promise<RuntimeResult>;
   view(): Promise<unknown>;
@@ -203,8 +205,8 @@ export function createVoydVxAppRuntime(
     retainedCallbacks: options.host.retainedCallbacks,
     init: async () => {
       const descriptor = await readProgramRunner();
-      if (initialized && descriptor?.hydrate(model)) {
-        const result = runtimeResult({ model });
+      if (initialized && descriptor) {
+        const result = await descriptor.hydrate(model);
         return toRuntimeStep(result, true);
       }
       const result = initialized
@@ -336,7 +338,15 @@ function createProgramDescriptorRunner({
       return copyTaskObserver(result, { ...result, model: mappedModel }) as RuntimeResult;
     };
     return {
-      hydrate: () => false,
+      hydrate: async (model) => {
+        if (descriptor.hydrateHandlerId === undefined) {
+          throw new Error(
+            "vx-dom: mapped-model programs require a hydrate mapper to adopt an SSR model",
+          );
+        }
+        const childModel = await dispatch(descriptor.hydrateHandlerId, model);
+        return mapModel(await child.hydrate(childModel));
+      },
       init: async () => mapModel(await child.init()),
       step: async (message) => mapModel(await child.step(message)),
       view: () => child.view(),
@@ -370,7 +380,9 @@ function createProgramDescriptorRunner({
           : {}),
       }) as RuntimeResult;
     return {
-      hydrate: (model) => child.hydrate(model),
+      hydrate: async (model) => {
+        return mapMessages(await child.hydrate(model));
+      },
       init: async () => mapMessages(await child.init()),
       step: async (message) => {
         const childMessage =
@@ -422,10 +434,16 @@ function createProgramDescriptorRunner({
     adoptResult(await resolveProgramResultMaps(result, dispatch), adoptPlainModel);
 
   return {
-    hydrate: (nextModel) => {
+    hydrate: async (nextModel) => {
       model = nextModel;
       initialized = true;
-      return true;
+      if (descriptor.hydrateHandlerId === undefined) {
+        return runtimeResult({ model: nextModel });
+      }
+      return adoptLifecycleResult(
+        await dispatch(descriptor.hydrateHandlerId, nextModel),
+        true,
+      );
     },
     init: async () =>
       adoptLifecycleResult(await dispatch(descriptor.initHandlerId, undefined), true),
@@ -625,9 +643,13 @@ function isRecord(input: unknown): input is Record<PropertyKey, unknown> {
 function parseProgramDescriptor(input: unknown): ProgramDescriptor {
   const kind = readField(input, "kind");
   if (kind === "program_map_model" || kind === "program_map_message") {
+    const hydrateHandlerId = kind === "program_map_model"
+      ? readOptionalNumberField(input, "hydrateHandlerId")
+      : undefined;
     return {
       kind,
       handlerId: readNumberField(input, "handlerId"),
+      ...(hydrateHandlerId !== undefined ? { hydrateHandlerId } : {}),
       child: parseProgramDescriptor(readField(input, "child")),
     };
   }
@@ -636,6 +658,7 @@ function parseProgramDescriptor(input: unknown): ProgramDescriptor {
     throw new Error("vx-dom: app export did not return a VX program descriptor");
   }
   const initHandlerId = readNumberField(input, "initHandlerId");
+  const hydrateHandlerId = readOptionalNumberField(input, "hydrateHandlerId");
   const stepHandlerId = readNumberField(input, "stepHandlerId");
   const viewHandlerId = readNumberField(input, "viewHandlerId");
   const subscriptionsHandlerId = readOptionalNumberField(
@@ -645,6 +668,7 @@ function parseProgramDescriptor(input: unknown): ProgramDescriptor {
   return {
     kind: "program",
     initHandlerId,
+    ...(hydrateHandlerId !== undefined ? { hydrateHandlerId } : {}),
     stepHandlerId,
     viewHandlerId,
     ...(subscriptionsHandlerId !== undefined ? { subscriptionsHandlerId } : {}),

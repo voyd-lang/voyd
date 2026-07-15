@@ -48,7 +48,7 @@ pub use src::extract::{
   text,
   text_body
 }
-pub use src::html::{ Hydration, document, html_response, hydrate, render }
+pub use src::html::{ Hydration, append_hydration, document, html_response, hydrate, hydrate_named, render }
 pub use src::middleware::request_id_required
 pub use src::response::{
   Body,

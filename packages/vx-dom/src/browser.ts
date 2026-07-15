@@ -8,6 +8,7 @@ import {
 import type {
   CallOptions,
   EventDescriptor,
+  NormalizedEventPayload,
   RetainedEventHandlerRegistry,
   VNode,
   VxAppRuntime,
@@ -60,9 +61,28 @@ export type RenderOptions = {
   handlers?: RetainedEventHandlerRegistry;
 };
 
+export type HydrationMismatch = {
+  path: string;
+  reason: "node-kind" | "tag" | "text" | "attributes" | "children";
+  expected: unknown;
+  actual: unknown;
+};
+
+export type HydrationMismatchHandler = (mismatch: HydrationMismatch) => void;
+
+export type VoydHydrationRoot = {
+  id: string;
+  selector: string;
+  entry: string;
+  model: unknown;
+  container: Element;
+  script: HTMLScriptElement;
+};
+
 export type VxDomRenderer = {
   render(input: unknown): void;
   hydrate(input: unknown): void;
+  detach(): void;
   dispose(): void;
   getSnapshot(): VxRenderFrame | undefined;
 };
@@ -87,8 +107,71 @@ export type MountVxAppOptions = {
   app?: VxAppRuntime;
   runtimeHost?: VxRuntimeHostOptions;
   onError?: VxRuntimeErrorHandler;
+  onHydrationMismatch?: HydrationMismatchHandler;
   dispatch?: (message: VxMessage) => Promise<void> | void;
 };
+
+export function readVoydHydrationRoots(
+  scope: ParentNode = document,
+): VoydHydrationRoot[] {
+  return Array.from(
+    scope.querySelectorAll<HTMLScriptElement>(
+      'script[type="application/json"][data-voyd-hydration]',
+    ),
+  ).map((script) => hydrationRootFrom(script, scope));
+}
+
+export function readVoydHydrationRoot(
+  id: string,
+  scope: ParentNode = document,
+): VoydHydrationRoot {
+  const script = Array.from(
+    scope.querySelectorAll<HTMLScriptElement>(
+      'script[type="application/json"][data-voyd-hydration]',
+    ),
+  ).find((candidate) =>
+    (candidate.dataset.voydHydrationId ?? candidate.dataset.voydHydration) === id
+  );
+  if (!script) throw new Error(`vx-dom: missing Voyd hydration root ${JSON.stringify(id)}`);
+  return hydrationRootFrom(script, scope);
+}
+
+function hydrationRootFrom(
+  script: HTMLScriptElement,
+  scope: ParentNode,
+): VoydHydrationRoot {
+  const selector = script.dataset.voydHydration;
+  if (!selector) throw new Error("vx-dom: hydration metadata is missing its target selector");
+  const id = script.dataset.voydHydrationId ?? selector;
+  const container = scope.querySelector(selector);
+  if (!container) {
+    throw new Error(
+      `vx-dom: hydration root ${JSON.stringify(id)} cannot find target ${JSON.stringify(selector)}`,
+    );
+  }
+  const entry = script.dataset.voydEntry ?? readAdjacentHydrationEntry(script);
+  try {
+    return {
+      id,
+      selector,
+      entry,
+      model: JSON.parse(script.textContent ?? "null") as unknown,
+      container,
+      script,
+    };
+  } catch (error) {
+    throw new Error(`vx-dom: invalid hydration model for ${JSON.stringify(id)}`, {
+      cause: error,
+    });
+  }
+}
+
+function readAdjacentHydrationEntry(script: HTMLScriptElement): string {
+  const sibling = script.nextElementSibling;
+  return sibling instanceof HTMLScriptElement && sibling.type === "module"
+    ? sibling.src
+    : "";
+}
 
 type ListenerRecord = {
   key: string;
@@ -114,6 +197,7 @@ const mapHandlerIdentityProperty = "__vxMapHandlerIdentity";
 const taskObserverProperty = Symbol.for("voyd.taskObserver");
 const locationChangeEvent = "vxlocationchange";
 const listenerState = new WeakMap<Element, Map<string, ListenerRecord>>();
+const pendingDirtyReconciliations = new WeakMap<Element, { cancelled: boolean }>();
 
 type TaskRunOutcome =
   | { kind: "value"; value: unknown }
@@ -191,10 +275,23 @@ export function renderMsgPackNode(
 
 export function createVxDomRenderer(
   container: Element,
-  options: { handlers?: RetainedEventHandlerRegistry } = {},
+  options: {
+    handlers?: RetainedEventHandlerRegistry;
+    onHydrationMismatch?: HydrationMismatchHandler;
+    deferHydrationReconciliation?: (callback: () => void) => void;
+  } = {},
 ): VxDomRenderer {
   let currentFrame: VxRenderFrame | undefined;
   let retainedHandlers = new Set<number>();
+
+  const releaseHandlers = (handlers: ReadonlySet<number> | number[]) => {
+    if (Array.isArray(handlers) ? handlers.length === 0 : handlers.size === 0) return;
+    if (options.handlers?.releaseMany) {
+      options.handlers.releaseMany(handlers);
+    } else {
+      handlers.forEach((id) => options.handlers?.release?.(id));
+    }
+  };
 
   const releaseRemovedHandlers = (next: Set<number>) => {
     const removed = Array.from(retainedHandlers).filter((id) => !next.has(id));
@@ -202,39 +299,56 @@ export function createVxDomRenderer(
       retainedHandlers = next;
       return;
     }
-    if (options.handlers?.releaseMany) {
-      options.handlers.releaseMany(removed);
-    } else {
-      removed.forEach((id) => options.handlers?.release?.(id));
-    }
+    releaseHandlers(removed);
     retainedHandlers = next;
+  };
+
+  const applyFrame = (
+    nextFrame: VxRenderFrame,
+    updateDom: () => void,
+  ) => {
+    const nextHandlers = collectHandlerIds(nextFrame.root);
+    const introduced = Array.from(nextHandlers).filter((id) => !retainedHandlers.has(id));
+    try {
+      updateDom();
+    } catch (error) {
+      releaseHandlers(introduced);
+      throw error;
+    }
+    releaseRemovedHandlers(nextHandlers);
+    currentFrame = nextFrame;
+  };
+
+  const detach = () => {
+    removeContainerListeners(container);
+    releaseHandlers(retainedHandlers);
+    retainedHandlers = new Set();
+    currentFrame = undefined;
   };
 
   return {
     render(input: unknown) {
       const nextFrame = flattenRenderFrame(normalizeRenderFrame(input));
-      const nextHandlers = collectHandlerIds(nextFrame.root);
-      patchContainer(container, currentFrame?.root, nextFrame.root, options.handlers);
-      releaseRemovedHandlers(nextHandlers);
-      currentFrame = nextFrame;
+      applyFrame(nextFrame, () => {
+        patchContainer(container, currentFrame?.root, nextFrame.root, options.handlers);
+      });
     },
     hydrate(input: unknown) {
       const nextFrame = flattenRenderFrame(normalizeRenderFrame(input));
-      const nextHandlers = collectHandlerIds(nextFrame.root);
-      hydrateContainer(container, nextFrame.root, options.handlers);
-      releaseRemovedHandlers(nextHandlers);
-      currentFrame = nextFrame;
+      applyFrame(nextFrame, () => {
+        hydrateContainer(
+          container,
+          nextFrame.root,
+          options.handlers,
+          options.onHydrationMismatch,
+          options.deferHydrationReconciliation,
+        );
+      });
     },
+    detach,
     dispose() {
-      removeContainerListeners(container);
+      detach();
       container.textContent = "";
-      if (options.handlers?.releaseMany) {
-        options.handlers.releaseMany(retainedHandlers);
-      } else {
-        retainedHandlers.forEach((id) => options.handlers?.release?.(id));
-      }
-      retainedHandlers = new Set();
-      currentFrame = undefined;
     },
     getSnapshot() {
       return currentFrame;
@@ -279,7 +393,11 @@ export async function hydrateVxApp(
 
   const instance = await resolveInstanceForMount(options);
   const exportName = options.exportName ?? "main";
-  const renderer = createVxDomRenderer(options.container, { handlers: options.handlers });
+  const renderer = createVxDomRenderer(options.container, {
+    handlers: options.handlers,
+    onHydrationMismatch: options.onHydrationMismatch,
+  });
+  const domSnapshot = captureContainerSnapshot(options.container);
 
   const readFrame = () => {
     if (options.frame !== undefined) return options.frame;
@@ -292,7 +410,13 @@ export async function hydrateVxApp(
     return callComponentFn(componentFn, callOptions);
   };
 
-  renderer.hydrate(readFrame());
+  try {
+    renderer.hydrate(readFrame());
+  } catch (error) {
+    renderer.detach();
+    restoreContainerSnapshot(options.container, domSnapshot);
+    throw error;
+  }
 
   return {
     dispatch: async (message) => {
@@ -310,6 +434,9 @@ async function mountRuntimeApp(
   mode: "hydrate" | "render",
 ): Promise<MountedVxApp> {
   const app = options.app!;
+  const domSnapshot = mode === "hydrate"
+    ? captureContainerSnapshot(options.container)
+    : undefined;
   let disposed = false;
   let previousSubscriptions: unknown;
   const abortController = new AbortController();
@@ -387,22 +514,25 @@ async function mountRuntimeApp(
   };
   const renderer = createVxDomRenderer(options.container, {
     handlers: runtimeHandlers,
+    onHydrationMismatch: options.onHydrationMismatch,
+    deferHydrationReconciliation: executionContext.deferAfterCommands,
   });
 
   const applyRuntimeStep = async (result: unknown, renderMode: "hydrate" | "render" = "render") => {
     if (disposed) return;
     const step = normalizeRuntimeStep(result);
+    const deferredCallbacks: Array<() => void> = [];
+    afterCommandCallbacks.push(deferredCallbacks);
     try {
       const frame = step.frame ?? (await app.render());
       if (renderMode === "hydrate") renderer.hydrate(frame);
       else renderer.render(frame);
     } catch (error) {
+      afterCommandCallbacks.pop();
       reportError(error, { phase: "render" });
       throw error;
     }
 
-    const deferredCallbacks: Array<() => void> = [];
-    afterCommandCallbacks.push(deferredCallbacks);
     let commandPhaseStarted = false;
     try {
       if (step.subscriptions !== undefined && app.syncSubscriptions) {
@@ -449,6 +579,20 @@ async function mountRuntimeApp(
       : initialHydrationFrame(options) ?? await app.render();
     await applyRuntimeStep(initial, mode);
   } catch (error) {
+    disposed = true;
+    abortController.abort();
+    try {
+      await disposeSubscriptions(activeSubscriptions, retainedHandlerReleaser);
+    } catch (disposeError) {
+      reportError(disposeError, { phase: "dispose" });
+    }
+    renderer.detach();
+    if (domSnapshot) restoreContainerSnapshot(options.container, domSnapshot);
+    try {
+      await app.dispose?.();
+    } catch (disposeError) {
+      reportError(disposeError, { phase: "dispose" });
+    }
     reportError(error, { phase: "init" });
     throw error;
   }
@@ -644,11 +788,66 @@ function applyElementProps(
   oldNode: VxElementNode | undefined,
   newNode: VxElementNode,
   handlers: RetainedEventHandlerRegistry | undefined,
+  preservedProps: ReadonlySet<string> = new Set(),
 ): void {
-  patchAttrs(element, oldNode?.attrs ?? {}, newNode.attrs ?? {});
-  patchStyles(element as HTMLElement, oldNode?.styles ?? {}, newNode.styles ?? {});
-  patchProps(element, oldNode?.props ?? {}, newNode.props ?? {});
+  patchAttrs(element, effectiveAttrs(oldNode), effectiveAttrs(newNode));
+  patchProps(element, effectiveProps(oldNode), effectiveProps(newNode), preservedProps);
+  restoreAttrsOverriddenByRemovedProps(element, oldNode, newNode);
+  if (!usesUnstructuredStyle(newNode)) {
+    patchStyles(element as HTMLElement, oldNode?.styles ?? {}, newNode.styles ?? {});
+  }
   patchEvents(element, oldNode?.events ?? [], newNode.events ?? [], handlers);
+}
+
+function restoreAttrsOverriddenByRemovedProps(
+  element: Element,
+  oldNode: VxElementNode | undefined,
+  newNode: VxElementNode,
+): void {
+  const oldProps = oldNode?.props ?? {};
+  const newProps = newNode.props ?? {};
+  const newAttrs = effectiveAttrs(newNode);
+  Object.keys(oldProps).forEach((key) => {
+    if (key in newProps) return;
+    const attrName = key === "className" ? "class" : key;
+    if (!(attrName in newAttrs)) return;
+    setDomProperty(element, key, newAttrs[attrName]);
+  });
+}
+
+function effectiveAttrs(node: VxElementNode | undefined): Record<string, unknown> {
+  const attrs = { ...(node?.attrs ?? {}) };
+  Object.entries(node?.props ?? {}).forEach(([key, value]) => {
+    const attrName = key === "className" ? "class" : key;
+    if (!node || !serializesPropertyAsAttribute(node.tag, key)) {
+      delete attrs[attrName];
+      return;
+    }
+    if (value == null || value === false) {
+      delete attrs[attrName];
+      return;
+    }
+    attrs[attrName] = value;
+  });
+  if (Object.keys(node?.styles ?? {}).length > 0) delete attrs.style;
+  return attrs;
+}
+
+function serializesPropertyAsAttribute(tag: string, property: string): boolean {
+  if (property === "value") return tag === "input";
+  if (property === "checked") return tag === "input";
+  return property === "disabled";
+}
+
+function effectiveProps(node: VxElementNode | undefined): Record<string, unknown> {
+  const props = { ...(node?.props ?? {}) };
+  if (Object.keys(node?.styles ?? {}).length > 0) delete props.style;
+  return props;
+}
+
+function usesUnstructuredStyle(node: VxElementNode): boolean {
+  const attrs = { ...(node.attrs ?? {}), ...(node.props ?? {}) };
+  return Object.hasOwn(attrs, "style") && Object.keys(node.styles ?? {}).length === 0;
 }
 
 function patchAttrs(
@@ -677,11 +876,13 @@ function patchProps(
   element: Element,
   oldProps: Record<string, unknown>,
   newProps: Record<string, unknown>,
+  preservedProps: ReadonlySet<string> = new Set(),
 ): void {
   Object.keys(oldProps).forEach((key) => {
-    if (!(key in newProps)) setDomProperty(element, key, undefined);
+    if (!(key in newProps) && !preservedProps.has(key)) setDomProperty(element, key, undefined);
   });
   Object.entries(newProps).forEach(([key, value]) => {
+    if (preservedProps.has(key)) return;
     setDomProperty(element, key, value);
   });
 }
@@ -723,45 +924,14 @@ function patchEvents(
     const key = listenerKey(event);
     if (current.has(key)) return;
     const listener: EventListener = (browserEvent) => {
+      const pendingReconciliation = pendingDirtyReconciliations.get(element);
+      if (pendingReconciliation) {
+        pendingReconciliation.cancelled = true;
+        pendingDirtyReconciliations.delete(element);
+      }
       if (event.options?.preventDefault) browserEvent.preventDefault();
       if (event.options?.stopPropagation) browserEvent.stopPropagation();
-      if (typeof event.handlerId === "number") {
-        if (event.mapHandlerIds?.length) {
-          const payload = normalizeBrowserEvent(browserEvent);
-          if (handlers?.dispatchMapped) {
-            settleAsyncDispatch(handlers.dispatchMapped(event.handlerId, payload, event.mapHandlerIds));
-            return;
-          }
-          settleAsyncDispatch(handlers?.dispatchMessage?.(
-            mapDomEventMessage({
-              kind: "event",
-              handlerId: event.handlerId,
-              payload,
-            }, event.mapHandlerIds),
-          ));
-          return;
-        }
-        void Promise.resolve(
-          handlers?.dispatch(event.handlerId, normalizeBrowserEvent(browserEvent)),
-        ).then((message) => {
-          if (message !== undefined) {
-            return handlers?.dispatchMessage?.(
-              event.mapHandlerIds?.length
-                ? mapDomEventMessage(toVxMessage(message), event.mapHandlerIds)
-                : message,
-            );
-          }
-        }).catch(() => undefined);
-        return;
-      }
-      if (Object.hasOwn(event, "message")) {
-        const message = toVxMessage(event.message);
-        settleAsyncDispatch(handlers?.dispatchMessage?.(
-          event.mapHandlerIds?.length
-            ? mapDomEventMessage(message, event.mapHandlerIds)
-            : event.message,
-        ));
-      }
+      dispatchEventDescriptor(event, normalizeBrowserEvent(browserEvent), handlers);
     };
     const options = toListenerOptions(event.options);
     element.addEventListener(event.event, listener, options);
@@ -775,57 +945,307 @@ function patchEvents(
   }
 }
 
+function dispatchEventDescriptor(
+  event: EventDescriptor,
+  payload: NormalizedEventPayload,
+  handlers: RetainedEventHandlerRegistry | undefined,
+): void {
+  if (typeof event.handlerId === "number") {
+    if (event.mapHandlerIds?.length) {
+      if (handlers?.dispatchMapped) {
+        settleAsyncDispatch(handlers.dispatchMapped(event.handlerId, payload, event.mapHandlerIds));
+        return;
+      }
+      settleAsyncDispatch(handlers?.dispatchMessage?.(
+        mapDomEventMessage({ kind: "event", handlerId: event.handlerId, payload }, event.mapHandlerIds),
+      ));
+      return;
+    }
+    void Promise.resolve(handlers?.dispatch(event.handlerId, payload))
+      .then((message) => message === undefined
+        ? undefined
+        : handlers?.dispatchMessage?.(message))
+      .catch(() => undefined);
+    return;
+  }
+  if (!Object.hasOwn(event, "message")) return;
+  const message = toVxMessage(event.message);
+  settleAsyncDispatch(handlers?.dispatchMessage?.(
+    event.mapHandlerIds?.length
+      ? mapDomEventMessage(message, event.mapHandlerIds)
+      : event.message,
+  ));
+}
+
 function hydrateContainer(
   container: Element,
   vnode: VNode,
   handlers: RetainedEventHandlerRegistry | undefined,
+  onMismatch: HydrationMismatchHandler | undefined,
+  deferReconciliation: ((callback: () => void) => void) | undefined,
 ): void {
   if (vnode.kind === "fragment") {
     vnode.children.forEach((child, index) => {
       const domChild = container.childNodes.item(index);
-      if (domChild) hydrateNode(domChild, child, handlers);
-      else container.appendChild(createDom(child, handlers));
+      if (domChild) {
+        hydrateNode(domChild, child, handlers, onMismatch, `root[${index}]`, deferReconciliation);
+        return;
+      }
+      reportHydrationMismatch(onMismatch, {
+        path: `root[${index}]`,
+        reason: "children",
+        expected: describeVNode(child),
+        actual: undefined,
+      });
+      container.appendChild(createDom(child, handlers));
     });
+    reportExtraHydrationChildren(container, vnode.children.length, "root", onMismatch);
     removeExtraChildren(container, vnode.children.length);
     return;
   }
 
   const current = container.firstChild;
   if (!current) {
+    reportHydrationMismatch(onMismatch, {
+      path: "root",
+      reason: "children",
+      expected: describeVNode(vnode),
+      actual: undefined,
+    });
     container.appendChild(createDom(vnode, handlers));
     return;
   }
-  hydrateNode(current, vnode, handlers);
+  hydrateNode(current, vnode, handlers, onMismatch, "root", deferReconciliation);
+  reportExtraHydrationChildren(container, 1, "root", onMismatch);
+  removeExtraChildren(container, 1);
 }
 
 function hydrateNode(
   dom: Node,
   vnode: VNode,
   handlers: RetainedEventHandlerRegistry | undefined,
+  onMismatch: HydrationMismatchHandler | undefined,
+  path: string,
+  deferReconciliation: ((callback: () => void) => void) | undefined,
 ): void {
   if (vnode.kind === "text") {
-    if (dom.textContent !== vnode.value) dom.textContent = vnode.value;
+    if (dom.nodeType !== Node.TEXT_NODE) {
+      reportHydrationMismatch(onMismatch, {
+        path,
+        reason: "node-kind",
+        expected: "text",
+        actual: describeDomNode(dom),
+      });
+      dom.parentNode?.replaceChild(createDom(vnode, handlers), dom);
+      return;
+    }
+    if (dom.textContent !== vnode.value) {
+      reportHydrationMismatch(onMismatch, {
+        path,
+        reason: "text",
+        expected: vnode.value,
+        actual: dom.textContent,
+      });
+      dom.textContent = vnode.value;
+    }
     return;
   }
   if (vnode.kind === "fragment") {
     vnode.children.forEach((child, index) => {
       const domChild = dom.childNodes.item(index);
-      if (domChild) hydrateNode(domChild, child, handlers);
+      if (domChild) {
+        hydrateNode(domChild, child, handlers, onMismatch, `${path}[${index}]`, deferReconciliation);
+      }
     });
+    reportExtraHydrationChildren(dom, vnode.children.length, path, onMismatch);
     removeExtraChildren(dom, vnode.children.length);
     return;
   }
-  if (!(dom instanceof Element) || dom.tagName.toLowerCase() !== vnode.tag) {
+  if (!(dom instanceof Element)) {
+    reportHydrationMismatch(onMismatch, {
+      path,
+      reason: "node-kind",
+      expected: `element:${vnode.tag}`,
+      actual: describeDomNode(dom),
+    });
     dom.parentNode?.replaceChild(createDom(vnode, handlers), dom);
     return;
   }
-  applyElementProps(dom, domElementSnapshot(dom), vnode, handlers);
+  if (dom.tagName.toLowerCase() !== vnode.tag) {
+    reportHydrationMismatch(onMismatch, {
+      path,
+      reason: "tag",
+      expected: vnode.tag,
+      actual: dom.tagName.toLowerCase(),
+    });
+    dom.parentNode?.replaceChild(createDom(vnode, handlers), dom);
+    return;
+  }
+  const dirtyProps = dirtyFormProperties(dom, vnode);
+  reportElementHydrationMismatch(dom, vnode, path, onMismatch);
+  applyElementProps(dom, domElementSnapshot(dom), vnode, handlers, dirtyProps);
   (vnode.children ?? []).forEach((child, index) => {
     const domChild = dom.childNodes.item(index);
-    if (domChild) hydrateNode(domChild, child, handlers);
-    else dom.appendChild(createDom(child, handlers));
+    if (domChild) {
+      hydrateNode(domChild, child, handlers, onMismatch, `${path}.${vnode.tag}[${index}]`, deferReconciliation);
+      return;
+    }
+    reportHydrationMismatch(onMismatch, {
+      path: `${path}.${vnode.tag}[${index}]`,
+      reason: "children",
+      expected: describeVNode(child),
+      actual: undefined,
+    });
+    dom.appendChild(createDom(child, handlers));
   });
+  reportExtraHydrationChildren(dom, vnode.children?.length ?? 0, path, onMismatch);
   removeExtraChildren(dom, vnode.children?.length ?? 0);
+  reconcileDirtyFormControl(dom, vnode, dirtyProps, handlers, deferReconciliation);
+}
+
+function dirtyFormProperties(element: Element, vnode: VxElementNode): Set<string> {
+  const dirty = new Set<string>();
+  const control = element as Element & {
+    value?: unknown;
+    defaultValue?: unknown;
+    checked?: unknown;
+    defaultChecked?: unknown;
+  };
+  if (
+    Object.hasOwn(vnode.props ?? {}, "value") &&
+    "value" in control && "defaultValue" in control &&
+    control.value !== control.defaultValue
+  ) {
+    dirty.add("value");
+  }
+  if (
+    Object.hasOwn(vnode.props ?? {}, "checked") &&
+    "checked" in control && "defaultChecked" in control &&
+    control.checked !== control.defaultChecked
+  ) {
+    dirty.add("checked");
+  }
+  return dirty;
+}
+
+function reconcileDirtyFormControl(
+  element: Element,
+  vnode: VxElementNode,
+  dirtyProps: ReadonlySet<string>,
+  handlers: RetainedEventHandlerRegistry | undefined,
+  deferReconciliation: ((callback: () => void) => void) | undefined,
+): void {
+  if (dirtyProps.size === 0) return;
+  const preferredEvent = dirtyProps.has("checked") ? "change" : "input";
+  const events = vnode.events ?? [];
+  const eventName = events.some((event) => event.event === preferredEvent)
+    ? preferredEvent
+    : preferredEvent === "input" ? "change" : "input";
+  const control = element as Element & { value?: unknown; checked?: unknown };
+  const payload: NormalizedEventPayload = {
+    kind: "input",
+    value: typeof control.value === "string" ? control.value : "",
+    checked: control.checked === true,
+    input_type: "",
+  };
+  const reconcile = () => {
+    events
+      .filter((event) => event.event === eventName)
+      .forEach((event) => dispatchEventDescriptor(event, payload, handlers));
+  };
+  if (!deferReconciliation) {
+    reconcile();
+    return;
+  }
+  const pending = { cancelled: false };
+  pendingDirtyReconciliations.set(element, pending);
+  deferReconciliation(() => {
+    if (pending.cancelled) return;
+    pendingDirtyReconciliations.delete(element);
+    reconcile();
+  });
+}
+
+function reportElementHydrationMismatch(
+  element: Element,
+  vnode: VxElementNode,
+  path: string,
+  onMismatch: HydrationMismatchHandler | undefined,
+): void {
+  if (!onMismatch) return;
+  const actual = {
+    attrs: currentAttrs(element),
+    styles: currentStyles(element),
+  };
+  const expected = {
+    attrs: expectedHydrationAttrs(vnode),
+    styles: expectedStyleText(element, vnode),
+  };
+  if (
+    recordsEqual(actual.attrs, expected.attrs) &&
+    inlineStyleText(element) === expected.styles
+  ) return;
+  reportHydrationMismatch(onMismatch, {
+    path,
+    reason: "attributes",
+    expected,
+    actual,
+  });
+}
+
+function expectedHydrationAttrs(vnode: VxElementNode): Record<string, unknown> {
+  const combined = effectiveAttrs(vnode);
+  return Object.fromEntries(Object.entries(combined).flatMap(([key, value]) => {
+    const name = key === "className" ? "class" : key;
+    if (name === "key" || name === "style" || value == null || value === false) return [];
+    return [[name, value === true ? "" : String(value)]];
+  }));
+}
+
+function recordsEqual(
+  left: Record<string, unknown>,
+  right: Record<string, unknown>,
+): boolean {
+  const leftKeys = Object.keys(left).sort();
+  const rightKeys = Object.keys(right).sort();
+  return leftKeys.length === rightKeys.length &&
+    leftKeys.every((key, index) =>
+      key === rightKeys[index] && String(left[key]) === String(right[key])
+    );
+}
+
+function reportExtraHydrationChildren(
+  parent: Node,
+  expectedLength: number,
+  path: string,
+  onMismatch: HydrationMismatchHandler | undefined,
+): void {
+  if (parent.childNodes.length <= expectedLength) return;
+  reportHydrationMismatch(onMismatch, {
+    path,
+    reason: "children",
+    expected: expectedLength,
+    actual: parent.childNodes.length,
+  });
+}
+
+function reportHydrationMismatch(
+  onMismatch: HydrationMismatchHandler | undefined,
+  mismatch: HydrationMismatch,
+): void {
+  onMismatch?.(mismatch);
+}
+
+function describeVNode(vnode: VNode): string {
+  return vnode.kind === "element" ? `element:${vnode.tag}` : vnode.kind;
+}
+
+function describeDomNode(node: Node): string {
+  return node instanceof Element
+    ? `element:${node.tagName.toLowerCase()}`
+    : node.nodeType === Node.TEXT_NODE
+      ? "text"
+      : `node:${node.nodeType}`;
 }
 
 function domElementSnapshot(element: Element): VxElementNode {
@@ -850,12 +1270,39 @@ function currentAttrs(element: Element): Record<string, unknown> {
 }
 
 function currentStyles(element: Element): Record<string, string> {
-  if (!(element instanceof HTMLElement)) return {};
+  if (!("style" in element)) return {};
+  const declaration = element.style as CSSStyleDeclaration;
   const styles: Record<string, string> = {};
-  Array.from(element.style).forEach((name) => {
-    styles[name] = element.style.getPropertyValue(name);
+  Array.from(declaration).forEach((name) => {
+    styles[name] = declaration.getPropertyValue(name);
   });
   return styles;
+}
+
+function inlineStyleText(element: Element): string {
+  return "style" in element
+    ? (element.style as CSSStyleDeclaration).cssText
+    : "";
+}
+
+function expectedStyleText(
+  element: Element,
+  vnode: VxElementNode,
+): string {
+  const scratch = element.ownerDocument.createElement("div");
+  const attrs = { ...(vnode.attrs ?? {}), ...(vnode.props ?? {}) };
+  const inlineStyle = attrs.style;
+  if (
+    Object.keys(vnode.styles ?? {}).length === 0 &&
+    inlineStyle != null &&
+    inlineStyle !== false
+  ) {
+    scratch.setAttribute("style", String(inlineStyle));
+  }
+  Object.entries(vnode.styles ?? {}).forEach(([name, value]) => {
+    scratch.style.setProperty(name, String(value));
+  });
+  return scratch.style.cssText;
 }
 
 function removeExtraChildren(parent: Node, expectedLength: number): void {
@@ -867,6 +1314,91 @@ function removeExtraChildren(parent: Node, expectedLength: number): void {
 function removeContainerListeners(container: Element): void {
   Array.from(container.querySelectorAll("*")).forEach(removeElementListeners);
   removeElementListeners(container);
+}
+
+function captureContainerSnapshot(container: Element): Element {
+  const snapshot = container.cloneNode(true) as Element;
+  copyLiveFormState(container, snapshot);
+  return snapshot;
+}
+
+function restoreContainerSnapshot(container: Element, snapshot: Element): void {
+  restoreElementSnapshot(container, snapshot);
+}
+
+function copyLiveFormState(source: Element, target: Element): void {
+  copyOwnFormState(source, target);
+  Array.from(source.children).forEach((child, index) => {
+    const targetChild = target.children.item(index);
+    if (targetChild) copyLiveFormState(child, targetChild);
+  });
+}
+
+function copyOwnFormState(source: Element, target: Element): void {
+  const sourceControl = source as Element & {
+    value?: unknown;
+    checked?: unknown;
+    selected?: unknown;
+  };
+  const targetControl = target as Element & {
+    value?: unknown;
+    checked?: unknown;
+    selected?: unknown;
+  };
+  if ("value" in sourceControl && "value" in targetControl) {
+    targetControl.value = sourceControl.value;
+  }
+  if ("checked" in sourceControl && "checked" in targetControl) {
+    targetControl.checked = sourceControl.checked;
+  }
+  if ("selected" in sourceControl && "selected" in targetControl) {
+    targetControl.selected = sourceControl.selected;
+  }
+}
+
+function restoreElementSnapshot(element: Element, snapshot: Element): void {
+  Array.from(element.attributes).forEach((attr) => {
+    if (!snapshot.hasAttribute(attr.name)) element.removeAttribute(attr.name);
+  });
+  Array.from(snapshot.attributes).forEach((attr) => {
+    if (element.getAttribute(attr.name) !== attr.value) element.setAttribute(attr.name, attr.value);
+  });
+  Array.from(snapshot.childNodes).forEach((snapshotChild, index) => {
+    const child = element.childNodes.item(index);
+    if (!child) {
+      element.appendChild(cloneSnapshotNode(snapshotChild));
+      return;
+    }
+    if (!sameDomSnapshotKind(child, snapshotChild)) {
+      element.replaceChild(cloneSnapshotNode(snapshotChild), child);
+      return;
+    }
+    if (child instanceof Element && snapshotChild instanceof Element) {
+      restoreElementSnapshot(child, snapshotChild);
+      return;
+    }
+    if (child.nodeValue !== snapshotChild.nodeValue) child.nodeValue = snapshotChild.nodeValue;
+  });
+  while (element.childNodes.length > snapshot.childNodes.length) {
+    if (element.lastChild) element.removeChild(element.lastChild);
+  }
+  copyOwnFormState(snapshot, element);
+}
+
+function cloneSnapshotNode(node: Node): Node {
+  const clone = node.cloneNode(true);
+  if (node instanceof Element && clone instanceof Element) {
+    copyLiveFormState(node, clone);
+  }
+  return clone;
+}
+
+function sameDomSnapshotKind(left: Node, right: Node): boolean {
+  if (left.nodeType !== right.nodeType) return false;
+  if (left instanceof Element && right instanceof Element) {
+    return left.tagName === right.tagName;
+  }
+  return true;
 }
 
 function removeElementListeners(element: Element): void {

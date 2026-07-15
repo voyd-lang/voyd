@@ -1,5 +1,5 @@
 use src::extract::{ body_limit, extract_query, limit_body, parse_query, required_session, text as text_body_policy }
-use src::html::{ document, hydrate }
+use src::html::{ document, hydrate_named }
 use src::response::{ json_dto, response_dto_json }
 use src::router::{ Context, app }
 use src::routes::{
@@ -758,13 +758,23 @@ test "dto route helpers compose with timeout policies":
 
 test "html document can include hydration model and client entry":
   let page: MsgPack =
-    <main id="app">
-      <h1>Hydrate</h1>
-    </main>
-  let model: TestProfile = { name: "Ada".as_slice().to_string(), active: true }
+    <html>
+      <body>
+        <main id="app">
+          <h1>Hydrate</h1>
+        </main>
+        <aside id="status">Ready</aside>
+        <style>{"body::after { content: '</body>'; }"}</style>
+      </body>
+    </html>
+  let model: TestProfile = {
+    name: "</SCRIPT><script>alert(1)</script>".as_slice().to_string(),
+    active: true
+  }
   let rendered = document<MsgPack, TestProfile>(
     view: page,
-    hydrate: hydrate<TestProfile>(
+    hydrate: hydrate_named<TestProfile>(
+      id: "primary".as_slice(),
       target: "#app".as_slice(),
       entry: "/assets/app.js".as_slice(),
       model: model
@@ -772,6 +782,11 @@ test "html document can include hydration model and client entry":
   )
 
   assert(rendered.contains("<!doctype html>".as_slice()), eq: true)
+  assert(rendered.contains("data-voyd-hydration-id=\"primary\"".as_slice()), eq: true)
   assert(rendered.contains("data-voyd-hydration=\"#app\"".as_slice()), eq: true)
-  assert(rendered.contains("\"name\":\"Ada\"".as_slice()), eq: true)
+  assert(rendered.contains("data-voyd-entry=\"/assets/app.js\"".as_slice()), eq: true)
+  assert(rendered.contains("\\u003c/SCRIPT>".as_slice()), eq: true)
+  assert(rendered.contains("</SCRIPT>".as_slice()), eq: false)
   assert(rendered.contains("src=\"/assets/app.js\"".as_slice()), eq: true)
+  assert(rendered.contains("<style>body::after { content: '</body>'; }</style>".as_slice()), eq: true)
+  assert(rendered.contains("</script></body>".as_slice()), eq: true)

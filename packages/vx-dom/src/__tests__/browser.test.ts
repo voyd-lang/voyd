@@ -1,7 +1,13 @@
 // @vitest-environment happy-dom
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { createVxDomRenderer, hydrateVxApp, mountVxApp } from "../browser.js";
+import {
+  createVxDomRenderer,
+  hydrateVxApp,
+  mountVxApp,
+  readVoydHydrationRoot,
+  readVoydHydrationRoots,
+} from "../browser.js";
 import type {
   NormalizedEventPayload,
   VNode,
@@ -136,11 +142,12 @@ describe("vx-dom browser renderer", () => {
     expect(dispatch).toHaveBeenLastCalledWith(2, expect.objectContaining({ kind: "mouse" }));
   });
 
-  it("does not release outer mapped event handler ids when mapped views are removed", () => {
+  it("does not release caller-owned mapped event handler ids when views are removed", () => {
     const dispatch = vi.fn<RetainedDispatch>();
+    const dispatchMapped = vi.fn(async () => undefined);
     const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
     const renderer = createVxDomRenderer(container, {
-      handlers: { dispatch, releaseMany },
+      handlers: { dispatch, dispatchMapped, releaseMany },
     });
 
     renderer.render({
@@ -155,8 +162,24 @@ describe("vx-dom browser renderer", () => {
 
     expect(releaseMany).toHaveBeenCalledWith([1]);
 
+    renderer.render({
+      version: 1,
+      root: {
+        kind: "map",
+        handlerId: 9,
+        child: buttonNode(3),
+      },
+    });
+    container.querySelector("button")!.click();
+    expect(dispatchMapped).toHaveBeenCalledWith(
+      3,
+      expect.objectContaining({ kind: "mouse" }),
+      [9],
+    );
+    expect(releaseMany.mock.calls.flatMap(([ids]) => Array.from(ids))).not.toContain(9);
+
     renderer.dispose();
-    expect(releaseMany).toHaveBeenLastCalledWith(new Set([2]));
+    expect(releaseMany).toHaveBeenLastCalledWith(new Set([3]));
   });
 
   it("hydrates matching DOM, attaches listeners, and disposes cleanly", () => {
@@ -191,6 +214,278 @@ describe("vx-dom browser renderer", () => {
     renderer.dispose();
     expect(container.innerHTML).toBe("");
     expect(releaseMany).toHaveBeenLastCalledWith(new Set([7]));
+  });
+
+  it("preserves exactly matching server DOM without reporting a mismatch", () => {
+    const onHydrationMismatch = vi.fn();
+    container.innerHTML = `<button class="live" style="background: blue">Save</button>`;
+    const serverButton = container.querySelector("button");
+    const renderer = createVxDomRenderer(container, { onHydrationMismatch });
+
+    renderer.hydrate(frame({
+      ...buttonNode(7),
+      attrs: { class: "live" },
+      styles: { background: "blue" },
+    }));
+
+    expect(container.querySelector("button")).toBe(serverButton);
+    expect(onHydrationMismatch).not.toHaveBeenCalled();
+  });
+
+  it("preserves matching inline style attributes during hydration", () => {
+    const onHydrationMismatch = vi.fn();
+    container.innerHTML = `<button style="color: red">Save</button>`;
+    const renderer = createVxDomRenderer(container, { onHydrationMismatch });
+
+    renderer.hydrate(frame({
+      ...buttonNode(7),
+      attrs: { style: "color: red" },
+    }));
+
+    expect(container.querySelector("button")?.style.color).toBe("red");
+    expect(onHydrationMismatch).not.toHaveBeenCalled();
+  });
+
+  it("preserves serialized form property attributes and reset defaults", () => {
+    const onHydrationMismatch = vi.fn();
+    container.innerHTML = `<form><input checked type="checkbox" value="Draft"></form>`;
+    const renderer = createVxDomRenderer(container, { onHydrationMismatch });
+
+    renderer.hydrate(frame({
+      kind: "element",
+      tag: "form",
+      children: [{
+        kind: "element",
+        tag: "input",
+        attrs: { type: "checkbox" },
+        props: { checked: true, value: "Draft" },
+      }],
+    }));
+
+    const input = container.querySelector("input")!;
+    expect(input.getAttribute("value")).toBe("Draft");
+    expect(input.hasAttribute("checked")).toBe(true);
+    expect(input.defaultValue).toBe("Draft");
+    expect(input.defaultChecked).toBe(true);
+    expect(onHydrationMismatch).not.toHaveBeenCalled();
+  });
+
+  it("preserves and reconciles textarea edits made before hydration", async () => {
+    container.innerHTML = `<textarea>Server draft</textarea>`;
+    const textarea = container.querySelector("textarea")!;
+    textarea.value = "User draft";
+    const dispatch = vi.fn(async () => undefined);
+    const bubbledInput = vi.fn();
+    container.addEventListener("input", bubbledInput);
+    const renderer = createVxDomRenderer(container, { handlers: { dispatch } });
+
+    renderer.hydrate(frame({
+      kind: "element",
+      tag: "textarea",
+      props: { value: "Server draft" },
+      events: [{ kind: "event", event: "input", handlerId: 7 }],
+      children: [{ kind: "text", value: "Server draft" }],
+    }));
+
+    expect(textarea.value).toBe("User draft");
+    expect(bubbledInput).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(dispatch).toHaveBeenCalledWith(
+        7,
+        expect.objectContaining({ kind: "input", value: "User draft" }),
+      );
+    });
+  });
+
+  it("defers dirty-control reconciliation until hydration commands finish", async () => {
+    container.innerHTML = `<textarea>Server draft</textarea>`;
+    container.querySelector("textarea")!.value = "User draft";
+    let finishCommand: (() => void) | undefined;
+    const command = new Promise<void>((resolve) => {
+      finishCommand = resolve;
+    });
+    const dispatch = vi.fn(async () => frame({ kind: "fragment", children: [] }));
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: frame({
+          kind: "element",
+          tag: "textarea",
+          props: { value: "Server draft" },
+          events: [{ kind: "event", event: "input", handlerId: 7 }],
+          children: [{ kind: "text", value: "Server draft" }],
+        }),
+        commands: { type: "cmd", kind: "wait" },
+      }),
+      render: () => frame({ kind: "fragment", children: [] }),
+      dispatch,
+    };
+
+    const mounting = hydrateVxApp({
+      container,
+      app,
+      runtimeHost: {
+        commands: {
+          wait: async () => {
+            await command;
+            container.querySelector("textarea")!.value = "Command draft";
+          },
+        },
+      },
+    });
+    await nextTurn();
+    expect(dispatch).not.toHaveBeenCalled();
+
+    finishCommand?.();
+    await mounting;
+    await vi.waitFor(() => expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({
+        kind: "event",
+        handlerId: 7,
+        payload: expect.objectContaining({ value: "User draft" }),
+      }),
+    ));
+  });
+
+  it("releases newly retained handlers when hydration throws", () => {
+    container.innerHTML = `<button class="server">Save</button>`;
+    const releaseMany = vi.fn();
+    const renderer = createVxDomRenderer(container, {
+      handlers: { dispatch: vi.fn(async () => undefined), releaseMany },
+      onHydrationMismatch: () => {
+        throw new Error("mismatch callback failed");
+      },
+    });
+
+    expect(() => renderer.hydrate({
+      version: 1,
+      root: {
+        kind: "map",
+        handlerId: 9,
+        child: { ...buttonNode(7), attrs: { class: "client" } },
+      },
+    })).toThrow("mismatch callback failed");
+    expect(releaseMany).toHaveBeenCalledWith([7]);
+  });
+
+  it("uses structured styles consistently across hydration and updates", () => {
+    const onHydrationMismatch = vi.fn();
+    container.innerHTML = `<button style="display: grid">Save</button>`;
+    const renderer = createVxDomRenderer(container, { onHydrationMismatch });
+
+    renderer.hydrate(frame({
+      ...buttonNode(7),
+      attrs: { style: "color: red" },
+      styles: { display: "grid" },
+    }));
+
+    const button = container.querySelector("button")!;
+    expect(button.style.display).toBe("grid");
+    expect(button.style.color).toBe("");
+    expect(onHydrationMismatch).not.toHaveBeenCalled();
+
+    renderer.render(frame({
+      ...buttonNode(7),
+      attrs: { style: "color: red" },
+    }));
+
+    expect(button.style.display).toBe("");
+    expect(button.style.color).toBe("red");
+
+  });
+
+  it("restores live form state after overriding properties are removed", () => {
+    const renderer = createVxDomRenderer(container);
+
+    renderer.render(frame({
+      kind: "element",
+      tag: "input",
+      attrs: { checked: true, type: "checkbox", value: "fallback" },
+      props: { checked: false, value: "controlled" },
+    }));
+    const input = container.querySelector("input")!;
+    expect(input.checked).toBe(false);
+    expect(input.value).toBe("controlled");
+
+    renderer.render(frame({
+      kind: "element",
+      tag: "input",
+      attrs: { checked: true, type: "checkbox", value: "fallback" },
+    }));
+
+    expect(input.checked).toBe(true);
+    expect(input.value).toBe("fallback");
+  });
+
+  it("preserves carriage returns encoded by the server renderer", () => {
+    const onHydrationMismatch = vi.fn();
+    container.innerHTML = "<p>A&#13;\nB</p>";
+    const paragraph = container.querySelector("p");
+    const renderer = createVxDomRenderer(container, { onHydrationMismatch });
+
+    renderer.hydrate(frame({
+      kind: "element",
+      tag: "p",
+      children: [{ kind: "text", value: "A\r\nB" }],
+    }));
+
+    expect(container.querySelector("p")).toBe(paragraph);
+    expect(paragraph?.textContent).toBe("A\r\nB");
+    expect(onHydrationMismatch).not.toHaveBeenCalled();
+  });
+
+  it("reports hydration drift while recovering the DOM", () => {
+    const onHydrationMismatch = vi.fn();
+    container.innerHTML = `<section class="stale"><span>Server</span></section>`;
+    const renderer = createVxDomRenderer(container, { onHydrationMismatch });
+
+    renderer.hydrate(frame({
+      kind: "element",
+      tag: "main",
+      attrs: { class: "live" },
+      children: [{ kind: "text", value: "Client" }],
+    }));
+
+    expect(container.innerHTML).toBe(`<main class="live">Client</main>`);
+    expect(onHydrationMismatch).toHaveBeenCalledWith(expect.objectContaining({
+      path: "root",
+      reason: "tag",
+      expected: "main",
+      actual: "section",
+    }));
+  });
+
+  it("reads multiple structured hydration roots by stable id", () => {
+    container.innerHTML = `
+      <main id="first"></main>
+      <aside id="second"></aside>
+      <script type="application/json" data-voyd-hydration-id="primary" data-voyd-hydration="#first" data-voyd-entry="/first.js">{"count":1}</script>
+      <script type="application/json" data-voyd-hydration-id="secondary" data-voyd-hydration="#second" data-voyd-entry="/second.js">{"count":2}</script>
+    `;
+
+    const roots = readVoydHydrationRoots(container);
+
+    expect(roots.map(({ id, selector, entry, model }) => ({
+      id,
+      selector,
+      entry,
+      model,
+    }))).toEqual([
+      { id: "primary", selector: "#first", entry: "/first.js", model: { count: 1 } },
+      { id: "secondary", selector: "#second", entry: "/second.js", model: { count: 2 } },
+    ]);
+    expect(readVoydHydrationRoot("secondary", container).container).toBe(
+      container.querySelector("#second"),
+    );
+  });
+
+  it("reads one hydration root without parsing unrelated islands", () => {
+    container.innerHTML = `
+      <main id="valid"></main>
+      <script type="application/json" data-voyd-hydration-id="valid" data-voyd-hydration="#valid">{"count":1}</script>
+      <script type="application/json" data-voyd-hydration-id="broken" data-voyd-hydration="#missing">not-json</script>
+    `;
+
+    expect(readVoydHydrationRoot("valid", container).model).toEqual({ count: 1 });
   });
 
   it("hydrates mapped event handler ids from serialized frames", () => {
@@ -622,6 +917,69 @@ describe("vx-dom browser renderer", () => {
       expect.any(Error),
       expect.objectContaining({ phase: "commands" }),
     );
+  });
+
+  it("leaves server DOM progressive when hydration initialization fails", async () => {
+    container.innerHTML = `<form><button type="submit">Save</button></form>`;
+    const serverForm = container.querySelector("form")!;
+    const releaseMany = vi.fn<(ids: Iterable<number>) => void>();
+    const disposeApp = vi.fn();
+    const disposeSubscription = vi.fn();
+    let commandSignal: AbortSignal | undefined;
+    const app: VxAppRuntime = {
+      retainedCallbacks: { releaseMany },
+      init: () => ({
+        frame: frame({
+          kind: "element",
+          tag: "form",
+          events: [{
+            kind: "event",
+            event: "submit",
+            handlerId: 30,
+            options: { preventDefault: true },
+          }],
+          attrs: { class: "hydrating" },
+          children: [{
+            kind: "element",
+            tag: "button",
+            attrs: { type: "submit", disabled: true },
+            children: [{ kind: "text", value: "Starting" }],
+          }],
+        }),
+        subscriptions: { type: "sub", kind: "timer", key: "main" },
+        commands: { type: "cmd", kind: "fail" },
+      }),
+      render: () => frame({ kind: "fragment", children: [] }),
+      dispatch: () => frame({ kind: "fragment", children: [] }),
+      dispose: disposeApp,
+    };
+
+    await expect(hydrateVxApp({
+      container,
+      app,
+      runtimeHost: {
+        commands: {
+          fail: (_command, context) => {
+            commandSignal = context.signal;
+            throw new Error("initial command failed");
+          },
+        },
+        subscriptions: { timer: () => disposeSubscription },
+      },
+    })).rejects.toThrow("initial command failed");
+    await nextTurn();
+
+    const submit = new SubmitEvent("submit", { bubbles: true, cancelable: true });
+    expect(container.querySelector("form")).toBe(serverForm);
+    expect(serverForm.className).toBe("");
+    expect(serverForm.querySelector("button")?.disabled).toBe(false);
+    expect(serverForm.querySelector("button")?.textContent).toBe("Save");
+    expect(serverForm.dispatchEvent(submit)).toBe(true);
+    expect(submit.defaultPrevented).toBe(false);
+    expect(commandSignal?.aborted).toBe(true);
+    expect(disposeSubscription).toHaveBeenCalledOnce();
+    expect(disposeApp).toHaveBeenCalledOnce();
+    expect(releaseMany).toHaveBeenCalledWith([30]);
   });
 
   it("reports command diagnostics for malformed map and delay envelopes", async () => {

@@ -39,10 +39,137 @@ describe("vx-dom server renderer", () => {
     expect(result.html).toBe(`<main role="main"><h1>Wiki</h1></main>`);
   });
 
+  it("encodes carriage returns so HTML parsing preserves exact text and attributes", async () => {
+    const result = await renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "p",
+          attrs: { title: "A\r\nB" },
+          children: [{ kind: "text", value: "A\r\nB" }],
+        },
+      },
+    });
+
+    expect(result.html).toBe(`<p title="A&#13;\nB">A&#13;\nB</p>`);
+  });
+
+  it("preserves leading newlines in parser-sensitive elements", async () => {
+    const result = await renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "pre",
+          children: [{ kind: "text", value: "\nLeading" }],
+        },
+      },
+    });
+
+    expect(result.html).toBe("<pre>\n\nLeading</pre>");
+  });
+
+  it("serializes controlled textarea values as matching text content", async () => {
+    const result = await renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "textarea",
+          props: { value: "Draft" },
+          children: [{ kind: "text", value: "Draft" }],
+        },
+      },
+    });
+
+    expect(result.html).toBe("<textarea>Draft</textarea>");
+  });
+
+  it("rejects form properties without a stable SSR representation", async () => {
+    await expect(renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "select",
+          props: { value: "draft" },
+        },
+      },
+    })).rejects.toThrow("property value has no stable SSR representation on <select>");
+
+    await expect(renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "textarea",
+          props: { value: "Draft" },
+          children: [{ kind: "text", value: "Other" }],
+        },
+      },
+    })).rejects.toThrow("textarea value must match its text children");
+  });
+
+  it("renders raw-text element children without entity decoding drift", async () => {
+    const result = await renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "fragment",
+          children: [
+            {
+              kind: "element",
+              tag: "style",
+              children: [{ kind: "text", value: "a > b { color: red }" }],
+            },
+            {
+              kind: "element",
+              tag: "script",
+              children: [{ kind: "text", value: "if (a < b) value = '&'" }],
+            },
+          ],
+        },
+      },
+    });
+
+    expect(result.html).toBe(
+      "<style>a > b { color: red }</style><script>if (a < b) value = '&'</script>",
+    );
+  });
+
+  it("rejects raw text that can terminate its containing element", async () => {
+    await expect(renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "script",
+          children: [{ kind: "text", value: "</SCRIPT><p>unsafe</p>" }],
+        },
+      },
+    })).rejects.toThrow("script text contains its closing delimiter");
+  });
+
   it("rejects invalid SSR tag, attribute, and style names", async () => {
     await expect(renderVxToString({
       frame: { version: 1, root: { kind: "element", tag: "script>alert(1)</script" } },
     })).rejects.toThrow("invalid HTML tag name");
+
+    await expect(renderVxToString({
+      frame: { version: 1, root: { kind: "element", tag: "INPUT" } },
+    })).rejects.toThrow("invalid HTML tag name");
+
+    await expect(renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "input",
+          children: [{ kind: "text", value: "not allowed" }],
+        },
+      },
+    })).rejects.toThrow("void element at root cannot have children");
 
     await expect(renderVxToString({
       frame: {
@@ -65,6 +192,28 @@ describe("vx-dom server renderer", () => {
         },
       },
     })).rejects.toThrow("invalid CSS property name");
+
+    await expect(renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "div",
+          props: { innerHTML: "<img src=x onerror=alert(1)>" },
+        },
+      },
+    })).rejects.toThrow("unsupported DOM property");
+
+    await expect(renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "div",
+          styles: { color: "red; display: none" },
+        },
+      },
+    })).rejects.toThrow("invalid CSS property value");
   });
 
   it("allows vendor-prefixed and custom CSS property names", async () => {

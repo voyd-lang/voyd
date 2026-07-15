@@ -39,7 +39,7 @@ pub use super::extract::{
   parse_query,
   percent_decode
 }
-pub use super::html::{ Hydration, document, html, html_response, hydrate, render }
+pub use super::html::{ Hydration, append_hydration, document, html, html_response, hydrate, hydrate_named, render }
 pub use super::middleware::request_id_required
 pub use super::response::{
   Body,

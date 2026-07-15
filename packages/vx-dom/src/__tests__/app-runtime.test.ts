@@ -299,6 +299,43 @@ describe("createVoydVxAppRuntime", () => {
     });
   });
 
+  it("runs the program hydration lifecycle with the server model", async () => {
+    const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
+      if (id === 1) throw new Error("init must not run during hydration");
+      if (id === 2) return payload;
+      if (id === 3) return textFrame(`View: ${String(payload)}`);
+      if (id === 4) {
+        return {
+          $vx: "runtime_result",
+          model: Number(payload) + 1,
+          commands: { type: "cmd", kind: "message", value: "hydrated" },
+        };
+      }
+      throw new Error(`unexpected retained handler ${id}`);
+    });
+    const host = fakeHost({
+      app: async () => ({
+        kind: "program",
+        initHandlerId: 1,
+        hydrateHandlerId: 4,
+        stepHandlerId: 2,
+        viewHandlerId: 3,
+      }),
+    });
+    host.hasExport = (entryName) => entryName === "app";
+    host.retainedCallbacks = { dispatch: retainedDispatch };
+    const app = createVoydVxAppRuntime({ host, initialModel: 5 });
+
+    await expect(app.init?.()).resolves.toEqual({
+      frame: textFrame("View: 6"),
+      commands: { type: "cmd", kind: "message", value: "hydrated" },
+      subscriptions: undefined,
+      snapshot: 6,
+    });
+    expect(retainedDispatch).toHaveBeenCalledWith(4, 5);
+    expect(retainedDispatch).not.toHaveBeenCalledWith(1, expect.anything());
+  });
+
   it("maps program descriptors for model snapshots and outward messages", async () => {
     const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
       if (id === 1) return { count: 1 };
@@ -406,9 +443,9 @@ describe("createVoydVxAppRuntime", () => {
     expect(retainedDispatch).toHaveBeenCalledWith(31, { count: 2 });
   });
 
-  it("does not hydrate mapped-model descriptors with parent-shaped snapshots", async () => {
+  it("hydrates mapped-model descriptors through an explicit reverse mapper", async () => {
     const retainedDispatch = vi.fn(async (id: number, payload: unknown) => {
-      if (id === 1) return { count: 1 };
+      if (id === 1) throw new Error("init must not run during hydration");
       if (id === 2) {
         const [current] = payload as unknown[];
         return {
@@ -418,12 +455,14 @@ describe("createVoydVxAppRuntime", () => {
       }
       if (id === 3) return textFrame(`Child: ${String((payload as { count: number }).count)}`);
       if (id === 31) return { parent: payload };
+      if (id === 32) return (payload as { parent: unknown }).parent;
       throw new Error(`unexpected retained handler ${id}`);
     });
     const host = fakeHost({
       app: async () => ({
         kind: "program_map_model",
         handlerId: 31,
+        hydrateHandlerId: 32,
         child: {
           kind: "program",
           initHandlerId: 1,
@@ -440,15 +479,40 @@ describe("createVoydVxAppRuntime", () => {
     });
 
     await expect(app.init?.()).resolves.toMatchObject({
-      frame: textFrame("Child: 1"),
-      snapshot: { parent: { count: 1 } },
+      frame: textFrame("Child: 99"),
+      snapshot: { parent: { count: 99 } },
     });
     await expect(app.dispatch({ kind: "msgpack", value: "tick" })).resolves.toMatchObject({
-      frame: textFrame("Child: 2"),
-      snapshot: { parent: { count: 2 } },
+      frame: textFrame("Child: 100"),
+      snapshot: { parent: { count: 100 } },
     });
-    expect(retainedDispatch).toHaveBeenCalledWith(3, { count: 1 });
-    expect(retainedDispatch).toHaveBeenCalledWith(2, [{ count: 1 }, "tick"]);
+    expect(retainedDispatch).toHaveBeenCalledWith(32, { parent: { count: 99 } });
+    expect(retainedDispatch).toHaveBeenCalledWith(2, [{ count: 99 }, "tick"]);
+  });
+
+  it("rejects SSR hydration for mapped models without a reverse mapper", async () => {
+    const host = fakeHost({
+      app: async () => ({
+        kind: "program_map_model",
+        handlerId: 31,
+        child: {
+          kind: "program",
+          initHandlerId: 1,
+          stepHandlerId: 2,
+          viewHandlerId: 3,
+        },
+      }),
+    });
+    host.hasExport = (entryName) => entryName === "app";
+    host.retainedCallbacks = { dispatch: vi.fn(async () => undefined) };
+    const app = createVoydVxAppRuntime({
+      host,
+      initialModel: { parent: { count: 99 } },
+    });
+
+    await expect(app.init?.()).rejects.toThrow(
+      "mapped-model programs require a hydrate mapper",
+    );
   });
 
   it("keeps repeated component state call-site occurrences in distinct slots", async () => {

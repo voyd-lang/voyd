@@ -2,6 +2,9 @@ import { callComponentFn } from "./memory.js";
 import {
   normalizeRenderFrame,
   validateCssPropertyName,
+  validateCssPropertyValue,
+  validateDomPropertyName,
+  validateDomPropertyValue,
   validateHtmlAttributeName,
   validateHtmlTagName,
 } from "./normalize.js";
@@ -44,6 +47,11 @@ const voidTags = new Set([
   "track",
   "wbr",
 ]);
+const newlineStrippingTags = new Set(["listing", "pre", "textarea"]);
+const rawTextTags = new Set(["script", "style"]);
+const disableableTags = new Set([
+  "button", "fieldset", "input", "optgroup", "option", "select", "textarea",
+]);
 
 export async function renderVxToString(
   options: RenderVxToStringOptions,
@@ -73,25 +81,57 @@ export async function renderVxToString(
 }
 
 export function renderNodeToString(vnode: VNode): string {
-  if (vnode.kind === "text") return escapeText(vnode.value);
-  if (vnode.kind === "fragment") return vnode.children.map(renderNodeToString).join("");
+  return renderNode(vnode);
+}
+
+function renderNode(vnode: VNode, rawTextTag?: string): string {
+  if (vnode.kind === "text") {
+    return rawTextTag ? renderRawText(vnode.value, rawTextTag) : escapeText(vnode.value);
+  }
+  if (vnode.kind === "fragment") {
+    return vnode.children.map((child) => renderNode(child, rawTextTag)).join("");
+  }
+  if (rawTextTag) {
+    throw new Error(`vx-dom/server: ${rawTextTag} elements may only contain text`);
+  }
 
   validateHtmlTagName(vnode.tag, "server.tag");
+  validateTextareaValue(vnode);
   const attrs = renderAttrs(vnode);
   if (voidTags.has(vnode.tag)) return `<${vnode.tag}${attrs}>`;
-  const children = (vnode.children ?? []).map(renderNodeToString).join("");
-  return `<${vnode.tag}${attrs}>${children}</${vnode.tag}>`;
+  const childRawTextTag = rawTextTags.has(vnode.tag) ? vnode.tag : undefined;
+  const children = (vnode.children ?? [])
+    .map((child) => renderNode(child, childRawTextTag))
+    .join("");
+  const leadingNewline = newlineStrippingTags.has(vnode.tag) && children.startsWith("\n")
+    ? "\n"
+    : "";
+  return `<${vnode.tag}${attrs}>${leadingNewline}${children}</${vnode.tag}>`;
+}
+
+function renderRawText(value: string, tag: string): string {
+  if (value.includes("\0") || value.includes("\r")) {
+    throw new Error(`vx-dom/server: ${tag} text contains a character HTML cannot preserve`);
+  }
+  if (value.toLowerCase().includes(`</${tag}`)) {
+    throw new Error(`vx-dom/server: ${tag} text contains its closing delimiter`);
+  }
+  return value;
 }
 
 function renderAttrs(vnode: Extract<VNode, { kind: "element" }>): string {
   const attrs = { ...(vnode.attrs ?? {}) };
   Object.entries(vnode.props ?? {}).forEach(([key, value]) => {
-    if (key === "className") attrs.class = value;
-    else attrs[key] = value;
+    validateDomPropertyName(key, `server.props.${key}`);
+    validateDomPropertyValue(key, value, `server.props.${key}`);
+    validateSsrProperty(vnode.tag, key, value);
+    if (vnode.tag === "textarea" && key === "value") return;
+    attrs[key] = value;
   });
   const style = Object.entries(vnode.styles ?? {})
     .map(([key, value]) => {
       validateCssPropertyName(key, `server.styles.${key}`);
+      validateCssPropertyValue(value, `server.styles.${key}`);
       return `${key}: ${value}`;
     })
     .join("; ");
@@ -107,9 +147,37 @@ function renderAttrs(vnode: Extract<VNode, { kind: "element" }>): string {
     .join("");
 }
 
+function validateSsrProperty(tag: string, property: string, value: unknown): void {
+  if (property === "value" && (tag === "input" || (tag === "textarea" && typeof value === "string"))) {
+    return;
+  }
+  if (property === "checked" && tag === "input") return;
+  if (property === "disabled" && disableableTags.has(tag)) {
+    return;
+  }
+  throw new Error(`vx-dom/server: property ${property} has no stable SSR representation on <${tag}>`);
+}
+
+function validateTextareaValue(vnode: Extract<VNode, { kind: "element" }>): void {
+  if (vnode.tag !== "textarea" || !Object.hasOwn(vnode.props ?? {}, "value")) return;
+  const value = vnode.props?.value;
+  if (typeof value !== "string" || textareaText(vnode.children ?? []) !== value) {
+    throw new Error("vx-dom/server: textarea value must match its text children for hydration");
+  }
+}
+
+function textareaText(children: VNode[]): string {
+  return children.map((child) => {
+    if (child.kind === "text") return child.value;
+    if (child.kind === "fragment") return textareaText(child.children);
+    throw new Error("vx-dom/server: textarea elements may only contain text");
+  }).join("");
+}
+
 function escapeText(value: string): string {
   return value
     .replace(/&/g, "&amp;")
+    .replace(/\r/g, "&#13;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;");
 }

@@ -1102,3 +1102,64 @@ test "html rendering turns vx nodes into a text html response":
       assert(value.equals("text/html; charset=utf-8"), eq: true)
     None:
       assert(false, eq: true)
+
+test "html rendering includes props and styles and respects void elements":
+  let input = element(
+    tag: "input",
+    attrs: [
+      value("Draft"),
+      disabled(true),
+      style(name: "display", value: "grid")
+    ],
+    children: Array<MsgPack>::init()
+  )
+
+  let rendered = render<MsgPack>(input)
+  assert(rendered.contains("<input".as_slice()), eq: true)
+  assert(rendered.contains(" value=\"Draft\"".as_slice()), eq: true)
+  assert(rendered.contains(" disabled".as_slice()), eq: true)
+  assert(rendered.contains(" style=\"display: grid\"".as_slice()), eq: true)
+  assert(rendered.contains("</input>".as_slice()), eq: false)
+
+test "html rendering unwraps mapped child views":
+  let child: MsgPack = <p class="child">Mapped child</p>
+  let mapped = map_html<MsgPack, MsgPack>(html: child, handler_id: 7)
+  let rendered = render<MsgPack>(mapped)
+
+  assert(rendered.contains("<p class=\"child\">Mapped child</p>".as_slice()), eq: true)
+
+test "html rendering preserves carriage returns through parsing":
+  let paragraph: MsgPack = <p title={"A\r\nB"}>{"A\r\nB"}</p>
+  let rendered = render<MsgPack>(paragraph)
+
+  assert(rendered.contains("title=\"A&#13;\nB\"".as_slice()), eq: true)
+  assert(rendered.contains(">A&#13;\nB</p>".as_slice()), eq: true)
+
+test "html rendering preserves leading newlines in parser-sensitive elements":
+  let pre = element(
+    tag: "pre",
+    children: [text("\nLeading")]
+  )
+  let textarea = element(
+    tag: "textarea",
+    attrs: [value("\nDraft")],
+    children: [text("\nDraft")]
+  )
+
+  assert(render<MsgPack>(pre).contains("<pre>\n\nLeading</pre>".as_slice()), eq: true)
+  let rendered_textarea = render<MsgPack>(textarea)
+  assert(rendered_textarea.contains(">\n\nDraft</textarea>".as_slice()), eq: true)
+  assert(rendered_textarea.contains(" value=".as_slice()), eq: false)
+
+test "html rendering preserves raw style and script text":
+  let style_node = element(
+    tag: "style",
+    children: [text("a > b { color: red }")]
+  )
+  let script_node = element(
+    tag: "script",
+    children: [text("if (a < b) value = '&'")]
+  )
+
+  assert(render<MsgPack>(style_node).equals("<style>a > b { color: red }</style>"), eq: true)
+  assert(render<MsgPack>(script_node).equals("<script>if (a < b) value = '&'</script>"), eq: true)

@@ -635,6 +635,20 @@ test "vx program map helpers encode retained mappers":
     Err:
       assert(false, eq: true)
 
+  let hydratable_model = map_model(
+    program: step,
+    map: (model: TypedVxTestModel) -> ParentVxTestModel =>
+      ParentVxTestModel { child: model },
+    hydrate: (model: ParentVxTestModel) -> TypedVxTestModel => model.child
+  )
+  match(msgpack::unpack_map(hydratable_model.payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_string_field(value, "kind", "program_map_model")
+      assert_payload_has_field(hydratable_model.payload, "handlerId")
+      assert_payload_has_field(hydratable_model.payload, "hydrateHandlerId")
+    Err:
+      assert(false, eq: true)
+
   let typed_message = map_message(
     step,
     (message: TypedVxTestMsg) -> MsgPack => msgpack::make_string("parent")

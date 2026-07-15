@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 import { createVoydHost } from "@voyd-lang/sdk/js-host";
 import {
+  createVxDomRenderer,
   createVoydVxAppRuntime,
   mountVxApp,
   renderMsgPackNode,
@@ -71,6 +72,112 @@ const expectCompileSuccess = (
 };
 
 describe("integration: compiled VX DOM rendering", () => {
+  it("hydrates pkg::web output from the same compiled VX tree without replacing DOM", async () => {
+    const result = expectCompileSuccess(await createSdk().compile({
+      source: `
+use pkg::web::{ append_hydration, document, hydrate_named, render }
+use std::array::Array
+use std::msgpack::MsgPack
+use std::vx::all
+
+pub fn tree() -> MsgPack
+  element(
+    tag: "section",
+    attrs: [class("card"), style(name: "display", value: "grid")],
+    children: [
+      element(
+        tag: "input",
+        attrs: [value("Draft"), disabled(true)],
+        children: Array<MsgPack>::init()
+      ),
+      fragment([text("Ready")]),
+      element(
+        tag: "style",
+        children: [text("a > b { color: red }")]
+      )
+    ]
+  )
+
+pub fn html() -> String
+  render<MsgPack>(tree())
+
+pub fn static_event_tree() -> MsgPack
+  let ~attrs = Array<MsgPack>::init()
+  let interactive = false
+  if interactive:
+    attrs.push(event_payload_handler<InputEvent, MsgPack>(
+      name: "input",
+      handler: (event: InputEvent) -> MsgPack => text(event.value)
+    ))
+  element(tag: "textarea", attrs: attrs, children: [text("Draft")])
+
+pub fn invalid_void_html() -> String
+  render<MsgPack>(element(tag: "input", children: [text("not allowed")]))
+
+pub fn uppercase_tag_html() -> String
+  render<MsgPack>(element(tag: "INPUT", children: Array<MsgPack>::init()))
+
+pub fn uppercase_attribute_html() -> String
+  render<MsgPack>(element(
+    tag: "div",
+    attrs: [attr(name: "CLASS", value: "card")],
+    children: Array<MsgPack>::init()
+  ))
+
+pub fn multi_document() -> String
+  let view: MsgPack = <html><body><main id="one">One</main><aside id="two">Two</aside></body></html>
+  let first = append_hydration<i32>(
+    document<MsgPack>(view),
+    hydrate_named<i32>(
+      id: "one".as_slice(),
+      target: "#one".as_slice(),
+      entry: "/one.js".as_slice(),
+      model: 1
+    )
+  )
+  append_hydration<bool>(
+    first,
+    hydrate_named<bool>(
+      id: "two".as_slice(),
+      target: "#two".as_slice(),
+      entry: "/two.js".as_slice(),
+      model: true
+    )
+  )
+`,
+    }));
+    const [tree, html, multiDocument] = await Promise.all([
+      result.run<unknown>({ entryName: "tree" }),
+      result.run<string>({ entryName: "html" }),
+      result.run<string>({ entryName: "multi_document" }),
+    ]);
+    const container = document.createElement("div");
+    container.innerHTML = html;
+    const section = container.querySelector("section");
+    const input = container.querySelector("input");
+    const style = container.querySelector("style");
+    const text = section?.lastChild;
+    const onHydrationMismatch = vi.fn();
+
+    createVxDomRenderer(container, { onHydrationMismatch }).hydrate(tree);
+
+    expect(container.querySelector("section")).toBe(section);
+    expect(container.querySelector("input")).toBe(input);
+    expect(container.querySelector("style")).toBe(style);
+    expect(container.querySelector("section")?.lastChild).toBe(text);
+    expect(style?.textContent).toBe("a > b { color: red }");
+    expect(onHydrationMismatch).not.toHaveBeenCalled();
+    expect(multiDocument).toContain('data-voyd-hydration-id="one"');
+    expect(multiDocument).toContain('data-voyd-hydration-id="two"');
+    await expect(result.run<string>({ entryName: "invalid_void_html" })).rejects.toThrow();
+    await expect(result.run<string>({ entryName: "uppercase_tag_html" })).rejects.toThrow();
+    await expect(result.run<string>({ entryName: "uppercase_attribute_html" })).rejects.toThrow();
+
+    const host = await createVoydHost({ wasm: result.wasm, bufferSize: 256 * 1024 });
+    await host.run("static_event_tree");
+    expect(host.retainedCallbacks.size()).toBe(0);
+  });
+
   it("renders a JS-backed Markdown package as an ordinary VX component", async () => {
     const result = expectCompileSuccess(
       await createSdk().compile({ entryPath: markdownEntryPath }),

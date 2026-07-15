@@ -15,13 +15,18 @@ export {
   createVxDomRenderer,
   hydrateVxApp,
   mountVxApp,
+  readVoydHydrationRoot,
+  readVoydHydrationRoots,
   render,
   renderMsgPackNode,
 } from "./browser.js";
 export type {
+  HydrationMismatch,
+  HydrationMismatchHandler,
   MountedVxApp,
   MountVxAppOptions,
   RenderOptions,
+  VoydHydrationRoot,
   VxDomRenderer,
 } from "./browser.js";
 export {
