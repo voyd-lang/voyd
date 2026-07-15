@@ -91,6 +91,44 @@ declare_reserved_module()
     );
   });
 
+  it("drops generated inline modules that disappear after re-expansion", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::b::all
+
+macro import_c()
+  syntax_template (use src::c::all)
+
+import_c()
+gen()
+use self::old::all
+`,
+      [`${root}${sep}b.voyd`]: `
+pub macro gen()
+  syntax_template (mod old
+    pub fn answer() -> f64
+      1.0)
+`,
+      [`${root}${sep}c.voyd`]: `
+pub macro gen()
+  syntax_template (fn replacement() -> f64
+    2.0)
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.modules.has("src::main::old")).toBe(false);
+    expect(graph.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "MD0001" })]),
+    );
+  });
+
   it("loads dependencies via use statements and auto-discovers submodules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

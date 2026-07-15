@@ -169,6 +169,8 @@ export const buildModuleGraph = async ({
   const noPreludeByModule = new Map<string, boolean>();
   const shadowedModuleFiles = new Set<string>();
   const collectedUseDependencies = new Map<string, Set<string>>();
+  const macroExpander = createModuleMacroExpander();
+  const macroDiagnosticsByModule = new Map<string, Diagnostic[]>();
 
   const useDependencyKeys = (
     dependencies: readonly ModuleDependency[],
@@ -196,21 +198,55 @@ export const buildModuleGraph = async ({
     });
   };
 
-  const removeInlineDescendants = (parentId: string): void => {
-    const descendants = Array.from(modules.values()).filter(
+  const inlineChildrenFor = (parentId: string): ModuleNode[] =>
+    Array.from(modules.values()).filter(
       (module) =>
         module.origin.kind === "inline" && module.origin.parentId === parentId,
     );
-    descendants.forEach((descendant) => {
-      removeInlineDescendants(descendant.id);
-      modules.delete(descendant.id);
-      modulesByPath.delete(modulePathToString(descendant.path));
-      noPreludeByModule.delete(descendant.id);
-      collectedUseDependencies.delete(descendant.id);
-      updateNestedPrefixCounts({
-        counts: moduleNestedPrefixCounts,
-        pathKey: modulePathToString(descendant.path),
-        delta: -1,
+
+  const removeInlineModuleTree = (moduleId: string): void => {
+    const module = modules.get(moduleId);
+    if (!module || module.origin.kind !== "inline") {
+      return;
+    }
+
+    inlineChildrenFor(moduleId).forEach((child) =>
+      removeInlineModuleTree(child.id),
+    );
+    macroExpander.reset(moduleId);
+    macroDiagnosticsByModule.delete(moduleId);
+    missingModules.delete(moduleId);
+    modules.delete(moduleId);
+    modulesByPath.delete(modulePathToString(module.path));
+    noPreludeByModule.delete(moduleId);
+    collectedUseDependencies.delete(moduleId);
+    updateNestedPrefixCounts({
+      counts: moduleNestedPrefixCounts,
+      pathKey: modulePathToString(module.path),
+      delta: -1,
+    });
+  };
+
+  const removeInlineDescendants = (parentId: string): void =>
+    inlineChildrenFor(parentId).forEach((child) =>
+      removeInlineModuleTree(child.id),
+    );
+
+  const removeMissingInlineDescendants = ({
+    parentId,
+    retainedModuleIds,
+  }: {
+    parentId: string;
+    retainedModuleIds: ReadonlySet<string>;
+  }): void => {
+    inlineChildrenFor(parentId).forEach((child) => {
+      if (!retainedModuleIds.has(child.id)) {
+        removeInlineModuleTree(child.id);
+        return;
+      }
+      removeMissingInlineDescendants({
+        parentId: child.id,
+        retainedModuleIds,
       });
     });
   };
@@ -296,8 +332,6 @@ export const buildModuleGraph = async ({
     return hasNested;
   };
 
-  const macroExpander = createModuleMacroExpander();
-  const macroDiagnosticsByModule = new Map<string, Diagnostic[]>();
   let pendingIndex = 0;
   while (true) {
     if (pendingIndex >= pending.length) {
@@ -350,6 +384,12 @@ export const buildModuleGraph = async ({
           macroExpander.invalidate(module.id);
         }
 
+        removeMissingInlineDescendants({
+          parentId: module.id,
+          retainedModuleIds: new Set(
+            refreshed.inlineModules.map((inlineModule) => inlineModule.id),
+          ),
+        });
         refreshed.inlineModules.forEach((inlineModule) => {
           const existing = modules.get(inlineModule.id);
           if (existing?.origin.kind === "file") {
