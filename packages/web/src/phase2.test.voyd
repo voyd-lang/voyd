@@ -1,5 +1,8 @@
 use src::extract::{ body_limit, extract_query, limit_body, parse_query, required_session, text as text_body_policy }
-use src::html::{ document, hydrate_named }
+use src::html::{
+  document,
+  hydrate_named
+}
 use src::response::{ json_dto, response_dto_json }
 use src::router::{ Context, app }
 use src::routes::{
@@ -771,7 +774,7 @@ test "html document can include hydration model and client entry":
     name: "</SCRIPT><script>alert(1)</script>".as_slice().to_string(),
     active: true
   }
-  let rendered = document<MsgPack, TestProfile>(
+  let rendered = document(
     view: page,
     hydrate: hydrate_named<TestProfile>(
       id: "primary".as_slice(),

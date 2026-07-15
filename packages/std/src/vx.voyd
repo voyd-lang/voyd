@@ -149,24 +149,60 @@ pub eff Component
 
   task_started(tail, key: MsgPack, task_id: i32) -> void
 
-@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+@intrinsic(name: "__render_retain_callback", uses_signature: true)
 fn retain_event_handler_id(handler: fn() -> MsgPack): () -> i32
   0
 
-@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+@intrinsic(name: "__render_retain_callback", uses_signature: true)
 fn retain_event_handler_void_id(handler: fn() -> void): () -> i32
   0
 
-@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+@intrinsic(name: "__render_retain_callback", uses_signature: true)
 fn retain_event_handler_with_payload_id(handler: fn(MsgPack) -> MsgPack): () -> i32
   0
 
-@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+@intrinsic(name: "__render_retain_callback", uses_signature: true)
 fn retain_typed_event_handler_id<Msg>(handler: fn() -> Msg): () -> i32
+  __render_retain_callback(handler)
+
+@intrinsic(name: "__render_retain_callback", uses_signature: true)
+fn retain_typed_event_handler_with_payload_id<Event, Msg>(handler: fn(Event) -> Msg): () -> i32
+  __render_retain_callback(handler)
+
+@intrinsic(name: "__render_retain_callback", uses_signature: true)
+fn retain_typed_html_message_mapper_id<From, To>(handler: fn(From) -> To): () -> i32
+  __render_retain_callback(handler)
+
+@intrinsic(name: "__render_claim_callback", uses_signature: true)
+fn claim_render_callback_id(handler_id: i32): () -> void
+  void
+
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+fn retain_message_mapper_id(handler: fn(MsgPack) -> MsgPack): () -> i32
+  0
+
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+fn retain_typed_message_mapper_id<From, To>(handler: fn(From) -> To): () -> i32
   __boundary_retain_callback(handler)
 
 @intrinsic(name: "__boundary_retain_callback", uses_signature: true)
-fn retain_typed_event_handler_with_payload_id<Event, Msg>(handler: fn(Event) -> Msg): () -> i32
+fn retain_explicit_event_handler_id(handler: fn() -> MsgPack): () -> i32
+  0
+
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+fn retain_explicit_event_handler_void_id(handler: fn() -> void): () -> i32
+  0
+
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+fn retain_explicit_event_handler_with_payload_id(handler: fn(MsgPack) -> MsgPack): () -> i32
+  0
+
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+fn retain_explicit_typed_event_handler_id<Msg>(handler: fn() -> Msg): () -> i32
+  __boundary_retain_callback(handler)
+
+@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
+fn retain_explicit_typed_event_handler_with_payload_id<Event, Msg>(handler: fn(Event) -> Msg): () -> i32
   __boundary_retain_callback(handler)
 
 @intrinsic(name: "__retain_callback", uses_signature: true)
@@ -935,31 +971,100 @@ pub fn task<T>({ key: MsgPack, task: Task<T> }): Component -> Unit
 
 /// Retains a pure Voyd event callback in the host and returns its DOM handler id.
 pub fn retain_event_handler(handler: fn() -> MsgPack): () -> i32
-  retain_event_handler_id(handler)
+  retain_explicit_event_handler_id(handler)
 
 /// Retains a component-local effect callback that does not dispatch an app message.
 pub fn retain_event_handler(handler: fn() -> void): () -> i32
-  retain_event_handler_void_id(handler)
+  retain_explicit_event_handler_void_id(handler)
 
 /// Retains a pure Voyd event callback that receives the normalized event payload.
 pub fn retain_event_payload_handler(handler: fn(MsgPack) -> MsgPack): () -> i32
-  retain_event_handler_with_payload_id(handler)
+  retain_explicit_event_handler_with_payload_id(handler)
 
 /// Retains a pure Voyd message mapper for commands, subscriptions, or events.
 pub fn retain_message_mapper(handler: fn(MsgPack) -> MsgPack): () -> i32
-  retain_event_handler_with_payload_id(handler)
+  retain_message_mapper_id(handler)
 
 /// Retains a pure typed Voyd event callback in the host and returns its DOM handler id.
 pub fn retain_typed_event_handler<Msg>(handler: fn() -> Msg): () -> i32
-  retain_typed_event_handler_id(handler)
+  retain_explicit_typed_event_handler_id(handler)
 
 /// Retains a pure typed Voyd event callback that receives the normalized event payload.
 pub fn retain_typed_event_payload_handler<Event, Msg>(handler: fn(Event) -> Msg): () -> i32
-  retain_typed_event_handler_with_payload_id(handler)
+  retain_explicit_typed_event_handler_with_payload_id(handler)
 
 /// Retains a pure typed Voyd message mapper for commands, subscriptions, or events.
 pub fn retain_typed_message_mapper<From, To>(handler: fn(From) -> To): () -> i32
-  retain_typed_event_handler_with_payload_id(handler)
+  retain_typed_message_mapper_id(handler)
+
+/// Associates closure-backed handlers in a prebuilt view with the active server render.
+pub fn claim_server_render_callbacks(value: MsgPack): () -> void
+  match(msgpack::unpack_array(value))
+    Ok<Array<MsgPack>> { value }:
+      claim_server_render_callback_array(value)
+      return void
+    Err:
+      void
+
+  match(msgpack::unpack_map(value))
+    Ok<Dict<String, MsgPack>> { value }:
+      claim_server_render_callback_map(value)
+    Err:
+      void
+
+fn claim_server_render_callback_array(values: Array<MsgPack>): () -> void
+  var index = 0
+  while index < values.len():
+    match(values.get(index))
+      Some<MsgPack> { value }:
+        claim_server_render_callbacks(value)
+      None:
+        void
+    index = index + 1
+
+fn claim_server_render_callback_map(value: Dict<String, MsgPack>): () -> void
+  match(value.get("kind"))
+    Some<MsgPack> { value: kind_value }:
+      match(msgpack::unpack_string(kind_value))
+        Ok<String> { value: kind }:
+          if kind == "event":
+            claim_server_render_callback_id(value)
+            return void
+          if kind == "map":
+            claim_server_render_callback_id(value)
+            claim_server_render_callback_field(value, "child")
+            return void
+          if kind == "element":
+            claim_server_render_callback_field(value, "events")
+            claim_server_render_callback_field(value, "children")
+            return void
+          if kind == "fragment":
+            claim_server_render_callback_field(value, "children")
+            return void
+        Err:
+          void
+    None:
+      void
+
+  claim_server_render_callback_field(value, "root")
+
+fn claim_server_render_callback_id(value: Dict<String, MsgPack>): () -> void
+  match(value.get("handlerId"))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_i32(value))
+        Ok<i32> { value: handler_id }:
+          claim_render_callback_id(handler_id)
+        Err:
+          void
+    None:
+      void
+
+fn claim_server_render_callback_field(value: Dict<String, MsgPack>, name: String): () -> void
+  match(value.get(name))
+    Some<MsgPack> { value }:
+      claim_server_render_callbacks(value)
+    None:
+      void
 
 /// Creates a versioned VX render frame.
 pub fn frame(root: MsgPack): () -> MsgPack
@@ -1167,7 +1272,14 @@ pub fn keyed({ key: String, body: fn() -> MsgPack }): Component -> MsgPack
 pub fn keyed({ key: StringSlice, body: fn() -> MsgPack }): Component -> MsgPack
   keyed(key: key.to_string(), body: body)
 
-/// Lifts child HTML through a retained message mapper.
+/// Lifts child HTML through a message mapper owned by the current render.
+pub fn map_html<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler: fn(ChildMsg) -> ParentMsg }) -> Html<ParentMsg>
+  map_html<ChildMsg, ParentMsg>(
+    html: html,
+    handler_id: retain_typed_html_message_mapper_id(handler)
+  )
+
+/// Lifts child HTML through a caller-owned retained message mapper.
 pub fn map_html<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler_id: i32 }) -> Html<ParentMsg>
   let ~out = Dict<String, MsgPack>::init()
   out.set("kind", "map")
@@ -1190,31 +1302,31 @@ pub fn event({ name: String, handler_id: i32, options?: EventOptions }): () -> M
   msgpack::make_map(out)
 
 pub fn event_handler<Msg>({ name: String, handler: fn() -> Msg, options?: EventOptions }): () -> MsgPack
-  event(name: name, handler_id: retain_typed_event_handler(handler), options: options)
+  event(name: name, handler_id: retain_typed_event_handler_id(handler), options: options)
 
 pub fn event_handler<Msg>({ name: StringSlice, handler: fn() -> Msg, options?: EventOptions }): () -> MsgPack
   event_handler<Msg>(name: name.to_string(), handler: handler, options: options)
 
 pub fn event({ name: String, handler: fn() -> MsgPack, options?: EventOptions }): () -> MsgPack
-  event(name: name, handler_id: retain_event_handler(handler), options: options)
+  event(name: name, handler_id: retain_event_handler_id(handler), options: options)
 
 pub fn event({ name: StringSlice, handler: fn() -> MsgPack, options?: EventOptions }): () -> MsgPack
   event(name: name.to_string(), handler: handler, options: options)
 
 pub fn event({ name: String, handler: fn() -> void, options?: EventOptions }): () -> MsgPack
-  event(name: name, handler_id: retain_event_handler(handler), options: options)
+  event(name: name, handler_id: retain_event_handler_void_id(handler), options: options)
 
 pub fn event({ name: StringSlice, handler: fn() -> void, options?: EventOptions }): () -> MsgPack
   event(name: name.to_string(), handler: handler, options: options)
 
 pub fn event_payload({ name: String, handler: fn(MsgPack) -> MsgPack, options?: EventOptions }): () -> MsgPack
-  event(name: name, handler_id: retain_event_payload_handler(handler), options: options)
+  event(name: name, handler_id: retain_event_handler_with_payload_id(handler), options: options)
 
 pub fn event_payload({ name: StringSlice, handler: fn(MsgPack) -> MsgPack, options?: EventOptions }): () -> MsgPack
   event_payload(name: name.to_string(), handler: handler, options: options)
 
 pub fn event_payload_handler<Event, Msg>({ name: String, handler: fn(Event) -> Msg, options?: EventOptions }): () -> MsgPack
-  event(name: name, handler_id: retain_typed_event_payload_handler(handler), options: options)
+  event(name: name, handler_id: retain_typed_event_handler_with_payload_id(handler), options: options)
 
 pub fn event_payload_handler<Event, Msg>({ name: StringSlice, handler: fn(Event) -> Msg, options?: EventOptions }): () -> MsgPack
   event_payload_handler<Event, Msg>(name: name.to_string(), handler: handler, options: options)

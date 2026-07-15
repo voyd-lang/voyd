@@ -51,6 +51,12 @@ export const bindFunctionDecl = (
     ...options.metadata,
     ...(boundaryMetadata ? { boundary: boundaryMetadata } : {}),
     ...(compilerFunctionContract ? { compilerFunctionContract } : {}),
+    ...(compilerFunctionContract?.methodAlias
+      ? { methodAlias: compilerFunctionContract.methodAlias }
+      : {}),
+    ...(compilerFunctionContract?.overloadPreference
+      ? { overloadPreference: compilerFunctionContract.overloadPreference }
+      : {}),
   };
   if (decl.signature.name.isQuoted) {
     symbolMetadata.quotedName = true;
@@ -136,11 +142,6 @@ const resolveCompilerFunctionContract = ({
   if (!id) {
     return undefined;
   }
-  if (ctx.module.path.namespace !== "std") {
-    throw new Error(
-      `@compiler_contract '${id}' on ${functionName} is restricted to the std namespace`,
-    );
-  }
   if (declarationScope !== ctx.symbolTable.rootScope) {
     throw new Error(
       `@compiler_contract '${id}' on ${functionName} can only annotate an ordinary top-level function`,
@@ -151,12 +152,41 @@ const resolveCompilerFunctionContract = ({
   if (!spec) {
     throw new Error(`unknown @compiler_contract id '${id}' on ${functionName}`);
   }
+  if (!isAllowedContractProvider({ spec, ctx })) {
+    const provider =
+      spec.provider.namespace === "std"
+        ? "the std namespace"
+        : `package '${spec.provider.packageName}'`;
+    throw new Error(
+      `@compiler_contract '${id}' on ${functionName} is restricted to ${provider}`,
+    );
+  }
   if (arity !== spec.expectedArity) {
     throw new Error(
       `@compiler_contract '${id}' on ${functionName} expects ${spec.expectedArity} parameter(s), but the function declares ${arity}`,
     );
   }
   return { ...spec };
+};
+
+const isAllowedContractProvider = ({
+  spec,
+  ctx,
+}: {
+  spec: NonNullable<ReturnType<typeof getCompilerFunctionContractSpec>>;
+  ctx: BindingContext;
+}): boolean => {
+  if (spec.provider.namespace === "std") {
+    return ctx.module.path.namespace === "std";
+  }
+  if (ctx.module.path.namespace === "pkg") {
+    return ctx.module.path.packageName === spec.provider.packageName;
+  }
+  return (
+    ctx.module.path.namespace === "src" &&
+    ctx.module.path.segments.length === 1 &&
+    ctx.module.path.segments[0] === "html"
+  );
 };
 
 const boundaryMetadataFromAttribute = (

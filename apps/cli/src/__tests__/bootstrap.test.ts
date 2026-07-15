@@ -1,11 +1,28 @@
+// @vitest-environment happy-dom
+
 import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { createSdk, type CompileResult } from "@voyd-lang/sdk";
+import { createVoydHost } from "@voyd-lang/sdk/js-host";
+import { createVxDomRenderer } from "@voyd-lang/vx-dom";
 import { printBootstrapResult, runBootstrap } from "../bootstrap/index.js";
 
 const createTempDir = () => mkdtemp(resolve(tmpdir(), "voyd-bootstrap-"));
+const repoRoot = resolve(import.meta.dirname, "../../../..");
+
+const expectCompileSuccess = (
+  result: CompileResult,
+): Extract<CompileResult, { success: true }> => {
+  if (!result.success) {
+    throw new Error(
+      result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    );
+  }
+  return result;
+};
 
 describe("runBootstrap", () => {
   it("scaffolds the vx-spa starter", async () => {
@@ -184,15 +201,16 @@ describe("runBootstrap", () => {
       expect(clientVoyd).not.toContain("obj Model");
 
       const sharedView = await readFile(resolve(target, "src/app/ui.voyd"), "utf8");
-      expect(sharedView).toContain("on_submit={on_submit_with(");
-      expect(sharedView).toContain("attrs.push(event_payload_handler<InputEvent, Msg>(");
-      expect(sharedView).toContain("pub fn static_view(model: Model)");
-      expect(sharedView).toContain("editor(model, interactive: false)");
+      expect(sharedView).toContain("attrs.push(html_event_handler<Msg>(");
+      expect(sharedView).toContain("on_input={(event: InputEvent) -> Msg =>");
+      expect(sharedView).not.toContain("static_view");
+      expect(sharedView).not.toContain("interactive");
       expect(sharedView).toContain('type="submit" disabled={model.saving}');
 
       const pageVoyd = await readFile(resolve(target, "src/server/page.voyd"), "utf8");
-      expect(pageVoyd).toContain("src::app::ui::static_view");
-      expect(pageVoyd).toContain('<div id="article-editor">{static_view(model)}</div>');
+      expect(pageVoyd).toContain("src::app::ui::view");
+      expect(pageVoyd).toContain('<div id="article-editor">{view(model)}</div>');
+      expect(pageVoyd).not.toContain("static_view");
       expect(pageVoyd).toContain('id: "article-editor"');
 
       const css = await readFile(resolve(target, "src/style.css"), "utf8");
@@ -224,6 +242,55 @@ describe("runBootstrap", () => {
         .filter((file) => file.endsWith(".voyd"))
         .map((file) => readFile(resolve(target, file), "utf8")));
       expect(voydSources.join("\n")).not.toContain(".as_slice().to_string()");
+
+      const parityProbe = resolve(target, "src/parity-probe.voyd");
+      await writeFile(parityProbe, `use src::app::model::{ Model, initial_model }
+use src::app::update::Msg
+use src::app::ui::view
+use pkg::web::all
+use std::vx::all
+
+fn model() -> Model
+  initial_model(slug: "home", title: "Mini Voydpedia", body: "Shared view")
+
+pub fn server_html() -> String
+  render(view(model()))
+
+pub fn client_tree() -> Html<Msg>
+  view(model())
+`);
+      const sdk = createSdk();
+      const roots = {
+        src: resolve(target, "src"),
+        pkgDirs: [resolve(repoRoot, "packages")],
+      };
+      const compiled = expectCompileSuccess(await sdk.compile({
+        entryPath: parityProbe,
+        roots,
+        optimizationLevel: "release",
+      }));
+      const host = await createVoydHost({
+        wasm: compiled.wasm,
+        bufferSize: 1024 * 1024,
+      });
+      const serverHtml = await host.run<string>("server_html");
+      expect(host.retainedCallbacks.size()).toBe(0);
+      const clientTree = await host.run("client_tree");
+
+      const container = document.createElement("div");
+      container.innerHTML = serverHtml;
+      const serverForm = container.querySelector("form");
+      const onHydrationMismatch = vi.fn();
+      const renderer = createVxDomRenderer(container, {
+        handlers: host.retainedCallbacks,
+        onHydrationMismatch,
+      });
+      renderer.hydrate(clientTree);
+
+      expect(onHydrationMismatch).not.toHaveBeenCalled();
+      expect(container.querySelector("form")).toBe(serverForm);
+      renderer.dispose();
+      expect(host.retainedCallbacks.size()).toBe(0);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

@@ -58,7 +58,7 @@ fn article_page(requested_slug: String): fs::Fs -> Response
   let model = initial_model(load_articles(), requested_slug)
   Response::ok()
     .with(header: "content-type", value: "text/html; charset=utf-8")
-    .text(document<Msg, Model>(
+    .text(document(
       view: page_view(model),
       hydrate: hydrate<Model>(target: "#wiki-app", entry: "/assets/client.js", model: model)
     ))

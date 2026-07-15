@@ -1,3 +1,4 @@
+import binaryen from "binaryen";
 import type {
   CodegenContext,
   CompiledExpression,
@@ -15,12 +16,14 @@ import type {
   ProgramSymbolId,
   SymbolId,
 } from "../../../semantics/ids.js";
-import { compileIntrinsicCall } from "../../intrinsics.js";
+import {
+  compileBeginRetainedCallbackScope,
+  compileEndRetainedCallbackScope,
+  compileIntrinsicCall,
+} from "../../intrinsics.js";
 import { effectsFacade } from "../../effects/facade.js";
 import { getRequiredExprType } from "../../types.js";
-import {
-  compileCallArgumentsWithMetadata,
-} from "./arguments.js";
+import { compileCallArgumentsWithMetadata } from "./arguments.js";
 import { compileClosureCall, compileCurriedClosureCall } from "./closure.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
 import { emitResolvedCall } from "./resolved-call.js";
@@ -28,13 +31,15 @@ import { compileTraitDispatchCall } from "./trait-dispatch.js";
 import { compileCallArgExpressionsWithTemps } from "./shared.js";
 import { getOrCreateReceiverSpecialization } from "../../receiver-specialization.js";
 import { getOrCreateScalarAggregateCallSpecialization } from "../../optimization/scalar-aggregate-calls.js";
+import { allocateTempLocal } from "../../locals.js";
+import { captureMultivalueLanes } from "../../multivalue.js";
 
 export const compileCallExpr = (
   expr: HirCallExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler,
-  options: CompileCallOptions = {}
+  options: CompileCallOptions = {},
 ): CompiledExpression => {
   const {
     tailPosition = false,
@@ -77,13 +82,16 @@ export const compileCallExpr = (
       throw new Error("codegen missing overload resolution for indirect call");
     }
 
-    const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
+    const targetRef = ctx.program.symbols.refOf(
+      targetFunctionId as ProgramSymbolId,
+    );
     return compileResolvedSymbolCall({
       expr,
       symbol: targetRef.symbol,
       moduleId: targetRef.moduleId,
       traitDispatchEnabled: expectTraitDispatch,
-      missingTraitDispatchMessage: "codegen missing trait dispatch target for indirect call",
+      missingTraitDispatchMessage:
+        "codegen missing trait dispatch target for indirect call",
       ctx,
       fnCtx,
       compileExpr,
@@ -117,13 +125,16 @@ export const compileCallExpr = (
     });
 
     if (typeof targetFunctionId === "number") {
-      const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
+      const targetRef = ctx.program.symbols.refOf(
+        targetFunctionId as ProgramSymbolId,
+      );
       return compileResolvedSymbolCall({
         expr,
         symbol: targetRef.symbol,
         moduleId: targetRef.moduleId,
         traitDispatchEnabled: expectTraitDispatch,
-        missingTraitDispatchMessage: "codegen missing trait dispatch target for call",
+        missingTraitDispatchMessage:
+          "codegen missing trait dispatch target for call",
         ctx,
         fnCtx,
         compileExpr,
@@ -135,7 +146,10 @@ export const compileCallExpr = (
       });
     }
 
-    const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+    const calleeId = ctx.program.symbols.canonicalIdOf(
+      ctx.moduleId,
+      callee.symbol,
+    );
     const traitDispatch = expectTraitDispatch
       ? compileTraitDispatchCall({
           expr,
@@ -155,7 +169,8 @@ export const compileCallExpr = (
       throw new Error("codegen missing trait dispatch target for call");
     }
 
-    const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+    const intrinsicMetadata =
+      ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
     const intrinsicName =
       ctx.program.symbols.getIntrinsicName(calleeId) ??
       ctx.program.symbols.getName(calleeId) ??
@@ -178,12 +193,22 @@ export const compileCallExpr = (
           })
         : undefined;
       if (externalMeta?.parameters.some((parameter) => parameter.defaulted)) {
-        throw new Error(`external function ${intrinsicName} cannot declare default parameters`);
+        throw new Error(
+          `external function ${intrinsicName} cannot declare default parameters`,
+        );
       }
       const planned = externalMeta
-        ? compileCallArgumentsWithMetadata({ call: expr, meta: externalMeta, ctx, fnCtx, compileExpr })
+        ? compileCallArgumentsWithMetadata({
+            call: expr,
+            meta: externalMeta,
+            ctx,
+            fnCtx,
+            compileExpr,
+          })
         : undefined;
-      const args = planned?.args ?? compileCallArgExpressionsWithTemps({
+      const args =
+        planned?.args ??
+        compileCallArgExpressionsWithTemps({
           callId: expr.id,
           args: expr.args,
           expectedTypeIdAt: () => undefined,
@@ -235,18 +260,25 @@ export const compileCallExpr = (
         scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
         ctx,
       });
-      return emitResolvedCall({
-        meta: callMeta,
-        args: compiledArgs.args,
-        callId: expr.id,
+      return compileWithContractCallScope({
+        calleeId,
+        tailPosition,
         ctx,
         fnCtx,
-        options: {
-          tailPosition,
-          expectedResultTypeId,
-          typeInstanceId,
-          outResultStorageRef,
-        },
+        compile: (scopedTailPosition) =>
+          emitResolvedCall({
+            meta: callMeta,
+            args: compiledArgs.args,
+            callId: expr.id,
+            ctx,
+            fnCtx,
+            options: {
+              tailPosition: scopedTailPosition,
+              expectedResultTypeId,
+              typeInstanceId,
+              outResultStorageRef,
+            },
+          }),
       });
     }
   }
@@ -284,7 +316,7 @@ export const compileMethodCallExpr = (
   ctx: CodegenContext,
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler,
-  options: CompileCallOptions = {}
+  options: CompileCallOptions = {},
 ): CompiledExpression => {
   const {
     tailPosition = false,
@@ -304,7 +336,9 @@ export const compileMethodCallExpr = (
     throw new Error("codegen missing method call target");
   }
 
-  const targetRef = ctx.program.symbols.refOf(targetFunctionId as ProgramSymbolId);
+  const targetRef = ctx.program.symbols.refOf(
+    targetFunctionId as ProgramSymbolId,
+  );
   const callView = toMethodCallView(expr);
   const traitDispatch = callInfo.traitDispatch
     ? compileTraitDispatchCall({
@@ -334,7 +368,9 @@ export const compileMethodCallExpr = (
     typeInstanceId,
   });
   if (!meta) {
-    throw new Error(`codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`);
+    throw new Error(
+      `codegen cannot call symbol ${targetRef.moduleId}::${targetRef.symbol}`,
+    );
   }
   const resolvedMeta = receiverSpecializedMetaForCall({
     expr: callView,
@@ -355,18 +391,28 @@ export const compileMethodCallExpr = (
     scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
     ctx,
   });
-  return emitResolvedCall({
-    meta: callMeta,
-    args: compiledArgs.args,
-    callId: expr.id,
+  return compileWithContractCallScope({
+    calleeId: ctx.program.symbols.canonicalIdOf(
+      targetRef.moduleId,
+      targetRef.symbol,
+    ),
+    tailPosition,
     ctx,
     fnCtx,
-    options: {
-      tailPosition,
-      expectedResultTypeId,
-      typeInstanceId,
-      outResultStorageRef,
-    },
+    compile: (scopedTailPosition) =>
+      emitResolvedCall({
+        meta: callMeta,
+        args: compiledArgs.args,
+        callId: expr.id,
+        ctx,
+        fnCtx,
+        options: {
+          tailPosition: scopedTailPosition,
+          expectedResultTypeId,
+          typeInstanceId,
+          outResultStorageRef,
+        },
+      }),
   });
 };
 
@@ -433,11 +479,13 @@ const receiverSpecializedMetaForCall = ({
     return meta;
   }
 
-  return getOrCreateReceiverSpecialization({
-    ctx,
-    meta,
-    exactParameterTypes,
-  }) ?? meta;
+  return (
+    getOrCreateReceiverSpecialization({
+      ctx,
+      meta,
+      exactParameterTypes,
+    }) ?? meta
+  );
 };
 
 const compileResolvedSymbolCall = ({
@@ -490,7 +538,8 @@ const compileResolvedSymbolCall = ({
   }
 
   const calleeId = ctx.program.symbols.canonicalIdOf(moduleId, symbol);
-  const intrinsicMetadata = ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
+  const intrinsicMetadata =
+    ctx.program.symbols.getIntrinsicFunctionFlags(calleeId);
   const intrinsicName =
     ctx.program.symbols.getIntrinsicName(calleeId) ??
     ctx.program.symbols.getName(calleeId) ??
@@ -513,12 +562,22 @@ const compileResolvedSymbolCall = ({
         })
       : undefined;
     if (externalMeta?.parameters.some((parameter) => parameter.defaulted)) {
-      throw new Error(`external function ${intrinsicName} cannot declare default parameters`);
+      throw new Error(
+        `external function ${intrinsicName} cannot declare default parameters`,
+      );
     }
     const planned = externalMeta
-      ? compileCallArgumentsWithMetadata({ call: expr, meta: externalMeta, ctx, fnCtx, compileExpr })
+      ? compileCallArgumentsWithMetadata({
+          call: expr,
+          meta: externalMeta,
+          ctx,
+          fnCtx,
+          compileExpr,
+        })
       : undefined;
-    const args = planned?.args ?? compileCallArgExpressionsWithTemps({
+    const args =
+      planned?.args ??
+      compileCallArgExpressionsWithTemps({
         callId: expr.id,
         args: expr.args,
         expectedTypeIdAt: () => undefined,
@@ -531,18 +590,18 @@ const compileResolvedSymbolCall = ({
         name: intrinsicName,
         externalIdentity: intrinsicMetadata.external,
         call: expr,
-      args,
-      ctx,
-      fnCtx,
-      instanceId: typeInstanceId,
-      paramTypeIds: planned
-        ? ctx.program.functions
-            .getSignature(moduleId, symbol)
-            ?.parameters.map((parameter) => parameter.typeId)
-        : undefined,
-    }),
-    usedReturnCall: false,
-  };
+        args,
+        ctx,
+        fnCtx,
+        instanceId: typeInstanceId,
+        paramTypeIds: planned
+          ? ctx.program.functions
+              .getSignature(moduleId, symbol)
+              ?.parameters.map((parameter) => parameter.typeId)
+          : undefined,
+      }),
+      usedReturnCall: false,
+    };
   }
 
   const targetMeta = getFunctionMetadataForCall({
@@ -574,19 +633,119 @@ const compileResolvedSymbolCall = ({
     scalarAggregateResultTypeId,
     ctx,
   });
-  return emitResolvedCall({
-    meta: callMeta,
-    args: compiledArgs.args,
-    callId: expr.id,
+  return compileWithContractCallScope({
+    calleeId,
+    tailPosition,
     ctx,
     fnCtx,
-    options: {
-      tailPosition,
-      expectedResultTypeId,
-      typeInstanceId,
-      outResultStorageRef,
-    },
+    compile: (scopedTailPosition) =>
+      emitResolvedCall({
+        meta: callMeta,
+        args: compiledArgs.args,
+        callId: expr.id,
+        ctx,
+        fnCtx,
+        options: {
+          tailPosition: scopedTailPosition,
+          expectedResultTypeId,
+          typeInstanceId,
+          outResultStorageRef,
+        },
+      }),
   });
+};
+
+const compileWithContractCallScope = ({
+  calleeId,
+  tailPosition,
+  ctx,
+  fnCtx,
+  compile,
+}: {
+  calleeId: ProgramSymbolId;
+  tailPosition: boolean;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compile: (tailPosition: boolean) => CompiledExpression;
+}): CompiledExpression => {
+  const contract = ctx.program.symbols.getCompilerFunctionContract(calleeId);
+  if (contract?.feature !== "retained-callback-call-scope") {
+    return compile(tailPosition);
+  }
+  return wrapRetainedCallbackCallScope({
+    compiled: compile(false),
+    ctx,
+    fnCtx,
+  });
+};
+
+const wrapRetainedCallbackCallScope = ({
+  compiled,
+  ctx,
+  fnCtx,
+}: {
+  compiled: CompiledExpression;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): CompiledExpression => {
+  const scopeLocal = allocateTempLocal(binaryen.i32, fnCtx);
+  const begin = ctx.mod.local.set(
+    scopeLocal.index,
+    compileBeginRetainedCallbackScope(ctx),
+  );
+  const end = () =>
+    compileEndRetainedCallbackScope({
+      scopeId: ctx.mod.local.get(scopeLocal.index, binaryen.i32),
+      ctx,
+    });
+  const resultType = binaryen.getExpressionType(compiled.expr);
+  if (resultType === binaryen.none) {
+    return {
+      ...compiled,
+      expr: ctx.mod.block(null, [begin, compiled.expr, end()], binaryen.none),
+      usedReturnCall: false,
+    };
+  }
+
+  const abiTypes = [...binaryen.expandType(resultType)];
+  if (abiTypes.length === 1) {
+    const resultLocal = allocateTempLocal(resultType, fnCtx);
+    return {
+      ...compiled,
+      expr: ctx.mod.block(
+        null,
+        [
+          begin,
+          ctx.mod.local.set(resultLocal.index, compiled.expr),
+          end(),
+          ctx.mod.local.get(resultLocal.index, resultType),
+        ],
+        resultType,
+      ),
+      usedReturnCall: false,
+    };
+  }
+
+  const captured = captureMultivalueLanes({
+    value: compiled.expr,
+    abiTypes,
+    ctx,
+    fnCtx,
+  });
+  return {
+    ...compiled,
+    expr: ctx.mod.block(
+      null,
+      [
+        begin,
+        ...captured.setup,
+        end(),
+        ctx.mod.tuple.make(captured.lanes as binaryen.ExpressionRef[]),
+      ],
+      resultType,
+    ),
+    usedReturnCall: false,
+  };
 };
 
 const scalarResultSpecializedMetaForCall = ({
@@ -601,12 +760,14 @@ const scalarResultSpecializedMetaForCall = ({
   if (typeof scalarAggregateResultTypeId !== "number") {
     return meta;
   }
-  return getOrCreateScalarAggregateCallSpecialization({
-    ctx,
-    meta,
-    paramIndexes: new Set(meta.scalarAggregateParamIndexes ?? []),
-    scalarResultTypeId: scalarAggregateResultTypeId,
-  }) ?? meta;
+  return (
+    getOrCreateScalarAggregateCallSpecialization({
+      ctx,
+      meta,
+      paramIndexes: new Set(meta.scalarAggregateParamIndexes ?? []),
+      scalarResultTypeId: scalarAggregateResultTypeId,
+    }) ?? meta
+  );
 };
 
 const getCalleeTypeId = ({
@@ -643,7 +804,9 @@ const shouldCompileIntrinsicCall = ({
   usesSignature !== true ||
   external ||
   intrinsicName === "__retain_callback" ||
-  intrinsicName === "__boundary_retain_callback";
+  intrinsicName === "__boundary_retain_callback" ||
+  intrinsicName === "__render_retain_callback" ||
+  intrinsicName === "__render_claim_callback";
 
 const resolveTargetFunctionId = ({
   targets,
@@ -655,16 +818,22 @@ const resolveTargetFunctionId = ({
   typeInstanceId: ProgramFunctionInstanceId | undefined;
 }): number | undefined => {
   const callInstanceTarget =
-    typeof callInstanceId === "number" ? targets?.get(callInstanceId) : undefined;
+    typeof callInstanceId === "number"
+      ? targets?.get(callInstanceId)
+      : undefined;
   if (typeof callInstanceTarget === "number") {
     return callInstanceTarget;
   }
 
   const typeInstanceTarget =
-    typeof typeInstanceId === "number" ? targets?.get(typeInstanceId) : undefined;
+    typeof typeInstanceId === "number"
+      ? targets?.get(typeInstanceId)
+      : undefined;
   if (typeof typeInstanceTarget === "number") {
     return typeInstanceTarget;
   }
 
-  return targets && targets.size === 1 ? targets.values().next().value : undefined;
+  return targets && targets.size === 1
+    ? targets.values().next().value
+    : undefined;
 };

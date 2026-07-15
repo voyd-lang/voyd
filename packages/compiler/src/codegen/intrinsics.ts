@@ -40,7 +40,10 @@ import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 import { ensureDispatcher } from "./effects/dispatcher.js";
 import { ensureMsgPackFunctions } from "./effects/host-boundary/msgpack.js";
-import { unboxOutcomeValue, wrapValueInOutcome } from "./effects/outcome-values.js";
+import {
+  unboxOutcomeValue,
+  wrapValueInOutcome,
+} from "./effects/outcome-values.js";
 import {
   lowerSerializedAbiArg,
   stabilizeSerializedAbiResult,
@@ -58,9 +61,7 @@ import {
   isBoundaryMsgPackValue,
 } from "./boundary-metadata.js";
 import { currentHandlerValue } from "./expressions/call/shared.js";
-import {
-  compileExternalCall,
-} from "./external/imports.js";
+import { compileExternalCall } from "./external/imports.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
@@ -116,10 +117,14 @@ const CALLBACK_IMPORT_MODULE = "voyd.callback";
 const CALLBACK_IMPORTS_KEY = Symbol("voyd.callback.imports");
 const CALLBACK_HELPERS_KEY = Symbol("voyd.callback.helpers");
 export const EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY = Symbol(
-  "voyd.effectfulRetainedCallbackTargets"
+  "voyd.effectfulRetainedCallbackTargets",
 );
 const BOUNDARY_CALLBACK_IMPORT_MODULE = "voyd.boundary.callback";
 const BOUNDARY_CALLBACK_IMPORTS_KEY = Symbol("voyd.boundary.callback.imports");
+const RENDER_CALLBACK_IMPORT_MODULE = "voyd.render.callback";
+const RENDER_CALLBACK_IMPORTS_KEY = Symbol("voyd.render.callback.imports");
+const CALLBACK_SCOPE_IMPORT_MODULE = "voyd.callback.scope";
+const CALLBACK_SCOPE_IMPORTS_KEY = Symbol("voyd.callback.scope.imports");
 
 const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
   if (ctx.mod.getGlobal(PANIC_TRAP_PTR_GLOBAL) === 0) {
@@ -127,7 +132,7 @@ const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
       PANIC_TRAP_PTR_GLOBAL,
       binaryen.i32,
       true,
-      ctx.mod.i32.const(-1)
+      ctx.mod.i32.const(-1),
     );
     ctx.mod.addGlobalExport(PANIC_TRAP_PTR_GLOBAL, PANIC_TRAP_PTR_GLOBAL);
   }
@@ -136,7 +141,7 @@ const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
       PANIC_TRAP_LEN_GLOBAL,
       binaryen.i32,
       true,
-      ctx.mod.i32.const(0)
+      ctx.mod.i32.const(0),
     );
     ctx.mod.addGlobalExport(PANIC_TRAP_LEN_GLOBAL, PANIC_TRAP_LEN_GLOBAL);
   }
@@ -145,7 +150,7 @@ const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
       PANIC_SCRATCH_PTR_GLOBAL,
       binaryen.i32,
       true,
-      ctx.mod.i32.const(-1)
+      ctx.mod.i32.const(-1),
     );
   }
   if (ctx.mod.getGlobal(PANIC_SCRATCH_CAPACITY_GLOBAL) === 0) {
@@ -153,7 +158,7 @@ const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
       PANIC_SCRATCH_CAPACITY_GLOBAL,
       binaryen.i32,
       true,
-      ctx.mod.i32.const(0)
+      ctx.mod.i32.const(0),
     );
   }
 };
@@ -176,7 +181,7 @@ const ensureTaskImport = ({
 }): string => {
   const imports = ctx.programHelpers.getHelperState(
     TASK_IMPORTS_KEY,
-    () => new Set<string>()
+    () => new Set<string>(),
   );
   if (imports.has(name)) {
     return name;
@@ -186,7 +191,7 @@ const ensureTaskImport = ({
     TASK_IMPORT_MODULE,
     base,
     binaryen.createType(params as number[]),
-    result
+    result,
   );
   imports.add(name);
   return name;
@@ -207,7 +212,7 @@ const ensureCallbackImport = ({
 }): string => {
   const imports = ctx.programHelpers.getHelperState(
     CALLBACK_IMPORTS_KEY,
-    () => new Set<string>()
+    () => new Set<string>(),
   );
   if (imports.has(name)) {
     return name;
@@ -217,7 +222,7 @@ const ensureCallbackImport = ({
     CALLBACK_IMPORT_MODULE,
     base,
     binaryen.createType(params as number[]),
-    result
+    result,
   );
   imports.add(name);
   return name;
@@ -238,7 +243,7 @@ const ensureBoundaryCallbackImport = ({
 }): string => {
   const imports = ctx.programHelpers.getHelperState(
     BOUNDARY_CALLBACK_IMPORTS_KEY,
-    () => new Set<string>()
+    () => new Set<string>(),
   );
   if (imports.has(name)) {
     return name;
@@ -248,10 +253,102 @@ const ensureBoundaryCallbackImport = ({
     BOUNDARY_CALLBACK_IMPORT_MODULE,
     base,
     binaryen.createType(params as number[]),
-    result
+    result,
   );
   imports.add(name);
   return name;
+};
+
+const ensureRenderCallbackImport = ({
+  name,
+  base,
+  params,
+  result,
+  ctx,
+}: {
+  name: string;
+  base: string;
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+}): string => {
+  const imports = ctx.programHelpers.getHelperState(
+    RENDER_CALLBACK_IMPORTS_KEY,
+    () => new Set<string>(),
+  );
+  if (imports.has(name)) {
+    return name;
+  }
+  ctx.mod.addFunctionImport(
+    name,
+    RENDER_CALLBACK_IMPORT_MODULE,
+    base,
+    binaryen.createType(params as number[]),
+    result,
+  );
+  imports.add(name);
+  return name;
+};
+
+const ensureCallbackScopeImport = ({
+  name,
+  base,
+  params,
+  result,
+  ctx,
+}: {
+  name: string;
+  base: string;
+  params: readonly binaryen.Type[];
+  result: binaryen.Type;
+  ctx: CodegenContext;
+}): string => {
+  const imports = ctx.programHelpers.getHelperState(
+    CALLBACK_SCOPE_IMPORTS_KEY,
+    () => new Set<string>(),
+  );
+  if (imports.has(name)) {
+    return name;
+  }
+  ctx.mod.addFunctionImport(
+    name,
+    CALLBACK_SCOPE_IMPORT_MODULE,
+    base,
+    binaryen.createType(params as number[]),
+    result,
+  );
+  imports.add(name);
+  return name;
+};
+
+export const compileBeginRetainedCallbackScope = (
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
+  const importFn = ensureCallbackScopeImport({
+    name: "__voyd_begin_retained_callback_scope",
+    base: "begin",
+    params: [],
+    result: binaryen.i32,
+    ctx,
+  });
+  return ctx.mod.call(importFn, [], binaryen.i32);
+};
+
+export const compileEndRetainedCallbackScope = ({
+  scopeId,
+  ctx,
+}: {
+  scopeId: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  const importFn = ensureCallbackScopeImport({
+    name: "__voyd_end_retained_callback_scope",
+    base: "end",
+    params: [binaryen.i32],
+    result: binaryen.none,
+    ctx,
+  });
+  return ctx.mod.call(importFn, [scopeId], binaryen.none);
 };
 
 const ensureTaskStarterHelper = ({
@@ -263,7 +360,7 @@ const ensureTaskStarterHelper = ({
 }): string => {
   const starters = ctx.programHelpers.getHelperState(
     TASK_STARTERS_KEY,
-    () => new Map<number, string>()
+    () => new Map<number, string>(),
   );
   const cached = starters.get(closureTypeId);
   if (cached) {
@@ -302,19 +399,21 @@ const ensureTaskStarterHelper = ({
       : refCast(ctx.mod, fnField, base.fnRefType);
   const callArgs = [
     closureRef,
-    ...hiddenParamTypes.map((type, index) => ctx.mod.local.get(index + 1, type)),
+    ...hiddenParamTypes.map((type, index) =>
+      ctx.mod.local.get(index + 1, type),
+    ),
   ];
   const callExpr = callRef(
     ctx.mod,
     targetFn,
     callArgs as number[],
-    base.resultType
+    base.resultType,
   );
   const body = effectful
     ? ctx.mod.call(
         ensureDispatcher(ctx),
         [callExpr],
-        ctx.effectsRuntime.outcomeType
+        ctx.effectsRuntime.outcomeType,
       )
     : wrapValueInOutcome({
         valueExpr: callExpr,
@@ -329,7 +428,7 @@ const ensureTaskStarterHelper = ({
     params,
     ctx.effectsRuntime.outcomeType,
     helperFnCtx.locals,
-    body
+    body,
   );
   if (ctx.programHelpers.registerExportName(exportName)) {
     ctx.mod.addFunctionExport(exportName, exportName);
@@ -347,7 +446,7 @@ const ensureRetainedCallbackHelper = ({
 }): string => {
   const helpers = ctx.programHelpers.getHelperState(
     CALLBACK_HELPERS_KEY,
-    () => new Map<number, string>()
+    () => new Map<number, string>(),
   );
   const cached = helpers.get(closureTypeId);
   if (cached) {
@@ -364,7 +463,7 @@ const ensureRetainedCallbackHelper = ({
     const serializer = findSerializerForType(parameter.type, ctx);
     if (serializer && serializer.formatId !== "msgpack") {
       throw new Error(
-        `callback parameter serializer format ${serializer.formatId} is not supported`
+        `callback parameter serializer format ${serializer.formatId} is not supported`,
       );
     }
     return {
@@ -386,19 +485,20 @@ const ensureRetainedCallbackHelper = ({
     : findSerializerForType(desc.returnType, ctx);
   if (returnSerializer && returnSerializer.formatId !== "msgpack") {
     throw new Error(
-      `callback return serializer format ${returnSerializer.formatId} is not supported`
+      `callback return serializer format ${returnSerializer.formatId} is not supported`,
     );
   }
   const returnUsesBoundary =
     isBoundaryMsgPackValue(desc.returnType, ctx) ||
     Boolean(boundaryMsgPackPayloadField(desc.returnType, ctx));
-  const returnSchema = returnSerializer || returnsVoid || returnUsesBoundary
-    ? undefined
-    : deriveBoundarySchema({
-        typeId: desc.returnType,
-        ctx,
-        label: "callback return",
-      });
+  const returnSchema =
+    returnSerializer || returnsVoid || returnUsesBoundary
+      ? undefined
+      : deriveBoundarySchema({
+          typeId: desc.returnType,
+          ctx,
+          label: "callback return",
+        });
   const effectful =
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
@@ -482,7 +582,9 @@ const ensureRetainedCallbackHelper = ({
     lowerSerializedAbiArg({
       wasmName: exportName,
       abiKind: "direct",
-      abiTypes: base.paramAbiTypes[index] ?? [binaryen.getExpressionType(payloadValue)],
+      abiTypes: base.paramAbiTypes[index] ?? [
+        binaryen.getExpressionType(payloadValue),
+      ],
       typeId: parameterCodecs[index]!.typeId,
       value: payloadValue,
       ctx,
@@ -499,14 +601,18 @@ const ensureRetainedCallbackHelper = ({
         .map(() => ctx.effectsBackend.abi.hiddenHandlerValue(ctx)),
       ...loweredPayloads.flatMap((payload) => payload.args),
     ] as number[],
-    base.resultType
+    base.resultType,
   );
   const setup = loweredPayloads.flatMap((payload) => payload.setup);
   if (effectful) {
     const rawExportName = `${exportName}_effectful_raw`;
     const retainedTargets = ctx.programHelpers.getHelperState(
       EFFECTFUL_RETAINED_CALLBACK_TARGETS_KEY,
-      () => new Map<string, { meta: { effectRow?: number }; exportName: string; emitEntry: false }>(),
+      () =>
+        new Map<
+          string,
+          { meta: { effectRow?: number }; exportName: string; emitEntry: false }
+        >(),
     );
     retainedTargets.set(exportName, {
       meta: { effectRow: desc.effectRow },
@@ -525,7 +631,11 @@ const ensureRetainedCallbackHelper = ({
       locals,
       setup.length === 0
         ? dispatched
-        : ctx.mod.block(null, [...setup, dispatched], ctx.effectsRuntime.outcomeType),
+        : ctx.mod.block(
+            null,
+            [...setup, dispatched],
+            ctx.effectsRuntime.outcomeType,
+          ),
     );
     if (ctx.programHelpers.registerExportName(rawExportName)) {
       ctx.mod.addFunctionExport(rawExportName, rawExportName);
@@ -567,27 +677,27 @@ const ensureRetainedCallbackHelper = ({
             })
           : isBoundaryMsgPackValue(desc.returnType, ctx)
             ? resultValue
-          : payloadField
-            ? (() => {
-                const info = getStructuralTypeInfo(desc.returnType, ctx);
-                if (!info) {
-                  throw new Error(
-                    `boundary payload callback return ${desc.returnType} is missing structural info`,
-                  );
-                }
-                return loadStructuralField({
-                  structInfo: info,
-                  field: payloadField,
-                  pointer: () => resultValue,
+            : payloadField
+              ? (() => {
+                  const info = getStructuralTypeInfo(desc.returnType, ctx);
+                  if (!info) {
+                    throw new Error(
+                      `boundary payload callback return ${desc.returnType} is missing structural info`,
+                    );
+                  }
+                  return loadStructuralField({
+                    structInfo: info,
+                    field: payloadField,
+                    pointer: () => resultValue,
+                    ctx,
+                  });
+                })()
+              : packBoundaryValueAsMsgPack({
+                  value: resultValue,
+                  schema: returnSchema!,
                   ctx,
+                  fnCtx: helperFnCtx,
                 });
-              })()
-          : packBoundaryValueAsMsgPack({
-              value: resultValue,
-              schema: returnSchema!,
-              ctx,
-              fnCtx: helperFnCtx,
-            });
         return ctx.mod.call(
           msgpack.encodeValue.wasmName,
           [
@@ -595,7 +705,7 @@ const ensureRetainedCallbackHelper = ({
             ctx.mod.local.get(3, binaryen.i32),
             ctx.mod.local.get(4, binaryen.i32),
           ],
-          binaryen.i32
+          binaryen.i32,
         );
       })();
 
@@ -647,7 +757,15 @@ export const compileIntrinsicCall = ({
   externalIdentity,
 }: CompileIntrinsicCallParams): binaryen.ExpressionRef => {
   if (externalIdentity) {
-    return compileExternalCall({ identity: externalIdentity, call, args, ctx, fnCtx, instanceId, paramTypeIds });
+    return compileExternalCall({
+      identity: externalIdentity,
+      call,
+      args,
+      ctx,
+      fnCtx,
+      instanceId,
+      paramTypeIds,
+    });
   }
   switch (name) {
     case "~": {
@@ -673,7 +791,11 @@ export const compileIntrinsicCall = ({
         lowerFixedArrayElementValue({
           value: coerceValueToType({
             value: value!,
-            actualType: getRequiredExprType(call.args[index]!.expr, ctx, instanceId),
+            actualType: getRequiredExprType(
+              call.args[index]!.expr,
+              ctx,
+              instanceId,
+            ),
             targetType: desc.element,
             ctx,
             fnCtx,
@@ -687,7 +809,11 @@ export const compileIntrinsicCall = ({
     }
     case "__array_get": {
       if (args.length === 2) {
-        const arrayTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+        const arrayTypeId = getRequiredExprType(
+          call.args[0]!.expr,
+          ctx,
+          instanceId,
+        );
         const arrayDesc = getFixedArrayDescriptor(arrayTypeId, ctx);
         return liftFixedArrayElementValue({
           value: arrayGet(
@@ -717,7 +843,7 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 1);
       const valueType = wasmTypeFor(
         getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
-        ctx
+        ctx,
       );
       if (
         valueType === binaryen.i32 ||
@@ -728,7 +854,7 @@ export const compileIntrinsicCall = ({
         return ctx.mod.block(
           null,
           [ctx.mod.drop(args[0]!), ctx.mod.i32.const(0)],
-          binaryen.i32
+          binaryen.i32,
         );
       }
       return ctx.mod.ref.is_null(args[0]!);
@@ -738,7 +864,7 @@ export const compileIntrinsicCall = ({
       const arrayType = getExprBinaryenType(
         call.args[0]!.expr,
         ctx,
-        instanceId
+        instanceId,
       );
       const arrayTypeId = getRequiredExprType(call.id, ctx, instanceId);
       const desc = getFixedArrayDescriptor(arrayTypeId, ctx);
@@ -757,7 +883,7 @@ export const compileIntrinsicCall = ({
           arraySet(ctx.mod, target, args[1]!, value),
           ctx.mod.local.get(temp.index, arrayType),
         ],
-        getExprBinaryenType(call.id, ctx, instanceId)
+        getExprBinaryenType(call.id, ctx, instanceId),
       );
     }
     case "__array_len": {
@@ -781,7 +907,7 @@ export const compileIntrinsicCall = ({
       const arrayType = getExprBinaryenType(
         call.args[0]!.expr,
         ctx,
-        instanceId
+        instanceId,
       );
       const temp = allocateTempLocal(arrayType, fnCtx);
       const target = ctx.mod.local.get(temp.index, arrayType);
@@ -792,7 +918,7 @@ export const compileIntrinsicCall = ({
           arrayCopy(ctx.mod, target, args[1]!, args[2]!, args[3]!, args[4]!),
           ctx.mod.local.get(temp.index, arrayType),
         ],
-        getExprBinaryenType(call.id, ctx, instanceId)
+        getExprBinaryenType(call.id, ctx, instanceId),
       );
     }
     case "__type_to_heap_type": {
@@ -813,7 +939,13 @@ export const compileIntrinsicCall = ({
     }
     case "__memory_store_u8": {
       assertArgCount(name, args, 2);
-      return ctx.mod.i32.store8(0, 1, args[0]!, args[1]!, LINEAR_MEMORY_INTERNAL);
+      return ctx.mod.i32.store8(
+        0,
+        1,
+        args[0]!,
+        args[1]!,
+        LINEAR_MEMORY_INTERNAL,
+      );
     }
     case "__memory_load_u16": {
       assertArgCount(name, args, 1);
@@ -821,7 +953,13 @@ export const compileIntrinsicCall = ({
     }
     case "__memory_store_u16": {
       assertArgCount(name, args, 2);
-      return ctx.mod.i32.store16(0, 2, args[0]!, args[1]!, LINEAR_MEMORY_INTERNAL);
+      return ctx.mod.i32.store16(
+        0,
+        2,
+        args[0]!,
+        args[1]!,
+        LINEAR_MEMORY_INTERNAL,
+      );
     }
     case "__memory_load_u32": {
       assertArgCount(name, args, 1);
@@ -829,7 +967,13 @@ export const compileIntrinsicCall = ({
     }
     case "__memory_store_u32": {
       assertArgCount(name, args, 2);
-      return ctx.mod.i32.store(0, 4, args[0]!, args[1]!, LINEAR_MEMORY_INTERNAL);
+      return ctx.mod.i32.store(
+        0,
+        4,
+        args[0]!,
+        args[1]!,
+        LINEAR_MEMORY_INTERNAL,
+      );
     }
     case "__memory_copy": {
       assertArgCount(name, args, 3);
@@ -838,7 +982,7 @@ export const compileIntrinsicCall = ({
         args[1]!,
         args[2]!,
         LINEAR_MEMORY_INTERNAL,
-        LINEAR_MEMORY_INTERNAL
+        LINEAR_MEMORY_INTERNAL,
       );
     }
     case "__panic_scratch_ptr": {
@@ -871,7 +1015,11 @@ export const compileIntrinsicCall = ({
     case "__task_spawn":
     case "__task_detach": {
       assertArgCount(name, args, 1);
-      const workTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      const workTypeId = getRequiredExprType(
+        call.args[0]!.expr,
+        ctx,
+        instanceId,
+      );
       const workType = ctx.program.types.getTypeDesc(workTypeId);
       if (workType.kind !== "function") {
         throw new Error(`${name} requires a function-typed work value`);
@@ -883,7 +1031,7 @@ export const compileIntrinsicCall = ({
       const closureInfo = getClosureTypeInfo(workTypeId, ctx);
       const hiddenParamTypes = closureInfo.paramTypes.slice(
         0,
-        closureInfo.userParamOffset
+        closureInfo.userParamOffset,
       );
       const importName = `__voyd_${name}_${sanitizeTaskKey(starterExport)}`;
       const importFn = ensureTaskImport({
@@ -899,7 +1047,7 @@ export const compileIntrinsicCall = ({
           args[0]!,
           ...hiddenParamTypes.map(() => currentHandlerValue(ctx, fnCtx)),
         ],
-        binaryen.i32
+        binaryen.i32,
       );
     }
     case "__task_cancel": {
@@ -937,9 +1085,14 @@ export const compileIntrinsicCall = ({
       });
     }
     case "__retain_callback":
-    case "__boundary_retain_callback": {
+    case "__boundary_retain_callback":
+    case "__render_retain_callback": {
       assertArgCount(name, args, 1);
-      const handlerTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      const handlerTypeId = getRequiredExprType(
+        call.args[0]!.expr,
+        ctx,
+        instanceId,
+      );
       const handlerType = ctx.program.types.getTypeDesc(handlerTypeId);
       if (handlerType.kind !== "function") {
         throw new Error(`${name} requires a function-typed value`);
@@ -949,26 +1102,48 @@ export const compileIntrinsicCall = ({
         ctx,
       });
       const closureInfo = getClosureTypeInfo(handlerTypeId, ctx);
+      const render = name === "__render_retain_callback";
       const boundary = name === "__boundary_retain_callback";
-      const importName = boundary
-        ? `__voyd_boundary_retain_callback_${sanitizeTaskKey(helperExport)}`
-        : `__voyd_retain_callback_${sanitizeTaskKey(helperExport)}`;
-      const importFn = boundary
-        ? ensureBoundaryCallbackImport({
+      const importName = render
+        ? `__voyd_render_retain_callback_${sanitizeTaskKey(helperExport)}`
+        : boundary
+          ? `__voyd_boundary_retain_callback_${sanitizeTaskKey(helperExport)}`
+          : `__voyd_retain_callback_${sanitizeTaskKey(helperExport)}`;
+      const importFn = render
+        ? ensureRenderCallbackImport({
             name: importName,
-            base: `retain_callback__${helperExport}`,
+            base: `retain_render_callback__${helperExport}`,
             params: [closureInfo.interfaceType],
             result: binaryen.i32,
             ctx,
           })
-        : ensureCallbackImport({
-            name: importName,
-            base: `retain__${helperExport}`,
-            params: [closureInfo.interfaceType],
-            result: binaryen.i32,
-            ctx,
-          });
+        : boundary
+          ? ensureBoundaryCallbackImport({
+              name: importName,
+              base: `retain_callback__${helperExport}`,
+              params: [closureInfo.interfaceType],
+              result: binaryen.i32,
+              ctx,
+            })
+          : ensureCallbackImport({
+              name: importName,
+              base: `retain__${helperExport}`,
+              params: [closureInfo.interfaceType],
+              result: binaryen.i32,
+              ctx,
+            });
       return ctx.mod.call(importFn, [args[0]!], binaryen.i32);
+    }
+    case "__render_claim_callback": {
+      assertArgCount(name, args, 1);
+      const importFn = ensureCallbackScopeImport({
+        name: "__voyd_claim_retained_callback",
+        base: "claim",
+        params: [binaryen.i32],
+        result: binaryen.none,
+        ctx,
+      });
+      return ctx.mod.call(importFn, [args[0]!], binaryen.none);
     }
     case "__stable_callsite_id": {
       assertArgCount(name, args, 0);
@@ -976,12 +1151,16 @@ export const compileIntrinsicCall = ({
     }
     case "__boundary_value_to_msgpack": {
       assertArgCount(name, args, 1);
-      const valueTypeId = getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      const valueTypeId = getRequiredExprType(
+        call.args[0]!.expr,
+        ctx,
+        instanceId,
+      );
       const serializer = findSerializerForType(valueTypeId, ctx);
       if (serializer) {
         if (serializer.formatId !== "msgpack") {
           throw new Error(
-            `boundary value serializer format ${serializer.formatId} is not supported`
+            `boundary value serializer format ${serializer.formatId} is not supported`,
           );
         }
         const msgpack = ensureMsgPackFunctions(ctx);
@@ -1012,7 +1191,7 @@ export const compileIntrinsicCall = ({
       if (serializer) {
         if (serializer.formatId !== "msgpack") {
           throw new Error(
-            `boundary value deserializer format ${serializer.formatId} is not supported`
+            `boundary value deserializer format ${serializer.formatId} is not supported`,
           );
         }
         const msgpack = ensureMsgPackFunctions(ctx);
@@ -1041,14 +1220,18 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 2);
       const valueKind = requireIntegerKind(
         getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
-        ctx
+        ctx,
       );
       if (valueKind === "i32") {
         return name === "__shift_l"
           ? ctx.mod.i32.shl(args[0]!, args[1]!)
           : ctx.mod.i32.shr_u(args[0]!, args[1]!);
       }
-      const shiftType = getRequiredExprType(call.args[1]!.expr, ctx, instanceId);
+      const shiftType = getRequiredExprType(
+        call.args[1]!.expr,
+        ctx,
+        instanceId,
+      );
       const shiftExpr =
         shiftType === ctx.program.primitives.i32
           ? ctx.mod.i64.extend_u(args[1]!)
@@ -1063,7 +1246,7 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 2);
       const valueKind = requireIntegerKind(
         getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
-        ctx
+        ctx,
       );
       if (valueKind === "i32") {
         switch (name) {
@@ -1161,7 +1344,7 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 1);
       const kind = requireFloatKind(
         getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
-        ctx
+        ctx,
       );
       return emitFloatUnaryIntrinsic({
         op: name,
@@ -1177,7 +1360,7 @@ export const compileIntrinsicCall = ({
       const operandKind = requireHomogeneousNumericKind(
         call.args.map((a) => a.expr),
         ctx,
-        instanceId
+        instanceId,
       );
       return emitArithmeticIntrinsic({
         op: name,
@@ -1190,7 +1373,7 @@ export const compileIntrinsicCall = ({
       const operandKind = requireHomogeneousNumericKind(
         call.args.map((a) => a.expr),
         ctx,
-        instanceId
+        instanceId,
       );
       if (args.length === 1) {
         return emitUnaryNegationIntrinsic({
@@ -1224,7 +1407,7 @@ export const compileIntrinsicCall = ({
       const operandKind = requireHomogeneousNumericKind(
         call.args.map((a) => a.expr),
         ctx,
-        instanceId
+        instanceId,
       );
       return emitComparisonIntrinsic({
         op: name,
@@ -1538,19 +1721,19 @@ const emitBooleanNotIntrinsic = ({
 const requireHomogeneousNumericKind = (
   argExprIds: readonly HirExprId[],
   ctx: CodegenContext,
-  instanceId?: ProgramFunctionInstanceId
+  instanceId?: ProgramFunctionInstanceId,
 ): NumericKind => {
   if (argExprIds.length === 0) {
     throw new Error("intrinsic requires at least one operand");
   }
   const firstKind = getNumericKind(
     getRequiredExprType(argExprIds[0]!, ctx, instanceId),
-    ctx
+    ctx,
   );
   for (let i = 1; i < argExprIds.length; i += 1) {
     const nextKind = getNumericKind(
       getRequiredExprType(argExprIds[i]!, ctx, instanceId),
-      ctx
+      ctx,
     );
     if (nextKind !== firstKind) {
       throw new Error("intrinsic operands must share the same numeric type");
@@ -1573,12 +1756,12 @@ const requireHomogeneousEqualityKind = ({
   }
   const firstKind = getEqualityKind(
     getRequiredExprType(argExprIds[0]!, ctx, instanceId),
-    ctx
+    ctx,
   );
   for (let i = 1; i < argExprIds.length; i += 1) {
     const nextKind = getEqualityKind(
       getRequiredExprType(argExprIds[i]!, ctx, instanceId),
-      ctx
+      ctx,
     );
     if (nextKind !== firstKind) {
       throw new Error("intrinsic operands must share the same primitive type");
@@ -1601,12 +1784,12 @@ const requireHomogeneousIntegerKind = ({
   }
   const firstKind = requireIntegerKind(
     getRequiredExprType(argExprIds[0]!, ctx, instanceId),
-    ctx
+    ctx,
   );
   for (let i = 1; i < argExprIds.length; i += 1) {
     const nextKind = requireIntegerKind(
       getRequiredExprType(argExprIds[i]!, ctx, instanceId),
-      ctx
+      ctx,
     );
     if (nextKind !== firstKind) {
       throw new Error("intrinsic operands must share the same integer type");
@@ -1629,12 +1812,12 @@ const requireBooleanKind = ({
   }
   const firstKind = getBooleanKind(
     getRequiredExprType(argExprIds[0]!, ctx, instanceId),
-    ctx
+    ctx,
   );
   for (let i = 1; i < argExprIds.length; i += 1) {
     const nextKind = getBooleanKind(
       getRequiredExprType(argExprIds[i]!, ctx, instanceId),
-      ctx
+      ctx,
     );
     if (nextKind !== firstKind) {
       throw new Error("intrinsic operands must be boolean types");
@@ -1643,7 +1826,10 @@ const requireBooleanKind = ({
   return firstKind;
 };
 
-const requireIntegerKind = (typeId: TypeId, ctx: CodegenContext): IntegerKind => {
+const requireIntegerKind = (
+  typeId: TypeId,
+  ctx: CodegenContext,
+): IntegerKind => {
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind === "primitive") {
     switch (desc.name) {
@@ -1704,14 +1890,11 @@ const getEqualityKind = (typeId: TypeId, ctx: CodegenContext): EqualityKind => {
     }
   }
   throw new Error(
-    "intrinsic arguments must be primitive numeric or boolean types"
+    "intrinsic arguments must be primitive numeric or boolean types",
   );
 };
 
-const getBooleanKind = (
-  typeId: TypeId,
-  ctx: CodegenContext
-): BooleanKind => {
+const getBooleanKind = (typeId: TypeId, ctx: CodegenContext): BooleanKind => {
   const descriptor = ctx.program.types.getTypeDesc(typeId);
   if (
     descriptor.kind === "primitive" &&
@@ -1725,11 +1908,11 @@ const getBooleanKind = (
 const assertArgCount = (
   name: string,
   args: readonly unknown[],
-  expected: number
+  expected: number,
 ): void => {
   if (args.length !== expected) {
     throw new Error(
-      `intrinsic ${name} expected ${expected} args, received ${args.length}`
+      `intrinsic ${name} expected ${expected} args, received ${args.length}`,
     );
   }
 };
@@ -1774,7 +1957,7 @@ const getHeapTypeArg = ({
 
 const getFixedArrayDescriptor = (
   typeId: TypeId,
-  ctx: CodegenContext
+  ctx: CodegenContext,
 ): { kind: "fixed-array"; element: TypeId } => {
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind !== "fixed-array") {
@@ -1833,7 +2016,7 @@ const emitArrayCopyFromOptions = ({
     loadField(fields[0]!),
     loadField(fields[1]!),
     loadField(fields[2]!),
-    loadField(fields[3]!)
+    loadField(fields[3]!),
   );
 
   return ctx.mod.block(
@@ -1844,7 +2027,7 @@ const emitArrayCopyFromOptions = ({
       copyExpr,
       ctx.mod.local.get(destTemp.index, arrayType),
     ],
-    getExprBinaryenType(call.id, ctx, instanceId)
+    getExprBinaryenType(call.id, ctx, instanceId),
   );
 };
 
@@ -1866,7 +2049,7 @@ const getBooleanLiteralArg = ({
   const expr = ctx.module.hir.expressions.get(exprId);
   if (!expr || expr.exprKind !== "literal" || expr.literalKind !== "boolean") {
     throw new Error(
-      `intrinsic ${name} argument ${index + 1} must be a boolean literal`
+      `intrinsic ${name} argument ${index + 1} must be a boolean literal`,
     );
   }
   return expr.value === "true";

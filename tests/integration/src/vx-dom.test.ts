@@ -75,7 +75,12 @@ describe("integration: compiled VX DOM rendering", () => {
   it("hydrates pkg::web output from the same compiled VX tree without replacing DOM", async () => {
     const result = expectCompileSuccess(await createSdk().compile({
       source: `
-use pkg::web::{ append_hydration, document, hydrate_named, render }
+use pkg::web::{
+  append_hydration,
+  document,
+  hydrate_named,
+  render
+}
 use std::array::Array
 use std::msgpack::MsgPack
 use std::vx::all
@@ -99,7 +104,7 @@ pub fn tree() -> MsgPack
   )
 
 pub fn html() -> String
-  render<MsgPack>(tree())
+  render(tree())
 
 pub fn static_event_tree() -> MsgPack
   let ~attrs = Array<MsgPack>::init()
@@ -112,13 +117,13 @@ pub fn static_event_tree() -> MsgPack
   element(tag: "textarea", attrs: attrs, children: [text("Draft")])
 
 pub fn invalid_void_html() -> String
-  render<MsgPack>(element(tag: "input", children: [text("not allowed")]))
+  render(element(tag: "input", children: [text("not allowed")]))
 
 pub fn uppercase_tag_html() -> String
-  render<MsgPack>(element(tag: "INPUT", children: Array<MsgPack>::init()))
+  render(element(tag: "INPUT", children: Array<MsgPack>::init()))
 
 pub fn uppercase_attribute_html() -> String
-  render<MsgPack>(element(
+  render(element(
     tag: "div",
     attrs: [attr(name: "CLASS", value: "card")],
     children: Array<MsgPack>::init()
@@ -127,7 +132,7 @@ pub fn uppercase_attribute_html() -> String
 pub fn multi_document() -> String
   let view: MsgPack = <html><body><main id="one">One</main><aside id="two">Two</aside></body></html>
   let first = append_hydration<i32>(
-    document<MsgPack>(view),
+    document(view),
     hydrate_named<i32>(
       id: "one".as_slice(),
       target: "#one".as_slice(),
