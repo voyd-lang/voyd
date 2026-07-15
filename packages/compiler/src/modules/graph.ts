@@ -168,7 +168,7 @@ export const buildModuleGraph = async ({
   const pendingNestedPrefixCounts = new Map<string, number>();
   const noPreludeByModule = new Map<string, boolean>();
   const inactiveModuleFiles = new Set<string>();
-  const collectedUseEntries = new Map<string, Set<string>>();
+  const collectedMacroScopeKeys = new Map<string, Set<string>>();
   const inlineModuleAstKeys = new Map<string, string>();
   const macroExpander = createModuleMacroExpander();
   const macroDiagnosticsByModule = new Map<string, Diagnostic[]>();
@@ -176,14 +176,17 @@ export const buildModuleGraph = async ({
   const isReplaceableSurfaceDiagnostic = (diagnostic: Diagnostic): boolean =>
     diagnostic.code === "MD0005";
 
-  const useEntryKeys = (module: ModuleNode): Set<string> => {
+  const macroScopeKeys = (module: ModuleNode): Set<string> => {
     const items =
       module.surface?.items ??
       module.header?.items ??
       createModuleHeaderView(module.ast).items;
     return new Set(
-      items.flatMap((item) =>
-        item.kind === "use"
+      items.flatMap((item) => {
+        if (item.kind === "inline-module") {
+          return [`inline-module:${item.declaration.name}`];
+        }
+        return item.kind === "use"
           ? item.entries.map((entry) =>
               JSON.stringify([
                 item.visibility,
@@ -197,8 +200,8 @@ export const buildModuleGraph = async ({
                 entry.hasExplicitPrefix,
               ]),
             )
-          : [],
-      ),
+          : [];
+      }),
     );
   };
 
@@ -250,7 +253,7 @@ export const buildModuleGraph = async ({
     modules.delete(moduleId);
     modulesByPath.delete(modulePathToString(module.path));
     noPreludeByModule.delete(moduleId);
-    collectedUseEntries.delete(moduleId);
+    collectedMacroScopeKeys.delete(moduleId);
     inlineModuleAstKeys.delete(moduleId);
     updateNestedPrefixCounts({
       counts: moduleNestedPrefixCounts,
@@ -327,7 +330,7 @@ export const buildModuleGraph = async ({
 
   addModuleTree(entryModule, modules, modulesByPath, (module) => {
     noPreludeByModule.set(module.id, entryModule.noPrelude);
-    collectedUseEntries.set(module.id, useEntryKeys(module));
+    collectedMacroScopeKeys.set(module.id, macroScopeKeys(module));
     if (module.origin.kind === "inline") {
       inlineModuleAstKeys.set(module.id, moduleAstKey(module));
     }
@@ -402,14 +405,14 @@ export const buildModuleGraph = async ({
         if (modules.get(module.id) !== module) {
           return;
         }
-        const previousUseEntries =
-          collectedUseEntries.get(module.id) ?? new Set<string>();
-        const refreshedUseEntries = useEntryKeys(module);
-        const useEntriesChanged = !setsEqual(
-          previousUseEntries,
-          refreshedUseEntries,
+        const previousMacroScopeKeys =
+          collectedMacroScopeKeys.get(module.id) ?? new Set<string>();
+        const refreshedMacroScopeKeys = macroScopeKeys(module);
+        const macroScopeChanged = !setsEqual(
+          previousMacroScopeKeys,
+          refreshedMacroScopeKeys,
         );
-        collectedUseEntries.set(module.id, refreshedUseEntries);
+        collectedMacroScopeKeys.set(module.id, refreshedMacroScopeKeys);
         surfaceDiagnosticsByModule.set(
           module.id,
           refreshed.diagnostics.filter(isReplaceableSurfaceDiagnostic),
@@ -421,7 +424,7 @@ export const buildModuleGraph = async ({
           ...refreshed.dependencies,
           ...discoveredSubmodules,
         ];
-        if (useEntriesChanged) {
+        if (macroScopeChanged) {
           macroExpander.invalidate(module.id);
         }
 
@@ -470,7 +473,10 @@ export const buildModuleGraph = async ({
             inlineModule.id,
             noPreludeByModule.get(module.id) ?? false,
           );
-          collectedUseEntries.set(inlineModule.id, useEntryKeys(inlineModule));
+          collectedMacroScopeKeys.set(
+            inlineModule.id,
+            macroScopeKeys(inlineModule),
+          );
           inlineModuleAstKeys.set(inlineModule.id, moduleAstKey(inlineModule));
           if (!existing) {
             updateNestedPrefixCounts({
@@ -625,7 +631,7 @@ export const buildModuleGraph = async ({
     }
     addModuleTree(nextModule, modules, modulesByPath, (module) => {
       noPreludeByModule.set(module.id, nextModule.noPrelude);
-      collectedUseEntries.set(module.id, useEntryKeys(module));
+      collectedMacroScopeKeys.set(module.id, macroScopeKeys(module));
       if (module.origin.kind === "inline") {
         inlineModuleAstKeys.set(module.id, moduleAstKey(module));
       }
@@ -678,7 +684,7 @@ export const buildModuleGraph = async ({
     modules.delete(moduleId);
     modulesByPath.delete(modulePathToString(module.path));
     noPreludeByModule.delete(moduleId);
-    collectedUseEntries.delete(moduleId);
+    collectedMacroScopeKeys.delete(moduleId);
     inlineModuleAstKeys.delete(moduleId);
     updateNestedPrefixCounts({
       counts: moduleNestedPrefixCounts,

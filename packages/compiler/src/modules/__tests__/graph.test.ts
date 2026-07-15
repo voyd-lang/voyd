@@ -254,6 +254,56 @@ pub macro gen()
     expect(functionNames).toContain("replacement");
   });
 
+  it("re-resolves package-root imports after generated inline modules disappear", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}pkg.voyd`]: `
+use src::b::all
+use self::macros::all
+
+macro import_c()
+  syntax_template (use src::c::all)
+
+import_c()
+gen()
+declare_helper()
+`,
+      [`${root}${sep}b.voyd`]: `
+pub macro gen()
+  syntax_template (mod macros
+    fn placeholder() -> f64
+      1.0)
+`,
+      [`${root}${sep}c.voyd`]: `
+pub macro gen()
+  syntax_template (fn replacement() -> f64
+    2.0)
+`,
+      [`${root}${sep}macros.voyd`]: `
+pub macro declare_helper()
+  syntax_template (fn helper() -> f64
+    3.0)
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}pkg.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(graph.modules.has("src::pkg::macros")).toBe(false);
+    const functionNames = graph.modules
+      .get("src::pkg")
+      ?.surface?.items.flatMap((item) =>
+        item.kind === "function" ? [item.declaration.signature.name.value] : [],
+      );
+    expect(functionNames).toEqual(
+      expect.arrayContaining(["replacement", "helper"]),
+    );
+  });
+
   it("loads dependencies via use statements and auto-discovers submodules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
