@@ -129,6 +129,51 @@ pub macro gen()
     );
   });
 
+  it("replaces generated inline modules retained after re-expansion", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::b::all
+
+macro import_c()
+  syntax_template (use src::c::all)
+
+import_c()
+gen()
+use self::child::all
+`,
+      [`${root}${sep}b.voyd`]: `
+pub macro gen()
+  syntax_template (mod child
+    pub fn from_b() -> f64
+      1.0)
+`,
+      [`${root}${sep}c.voyd`]: `
+pub macro gen()
+  syntax_template (mod child
+    pub fn from_c() -> f64
+      2.0)
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const functionNames = graph.modules
+      .get("src::main::child")
+      ?.surface?.items.flatMap((item) =>
+        item.kind === "function"
+          ? [item.declaration.signature.name.value]
+          : [],
+      );
+    expect(functionNames).toContain("from_c");
+    expect(functionNames).not.toContain("from_b");
+  });
+
   it("loads dependencies via use statements and auto-discovers submodules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
