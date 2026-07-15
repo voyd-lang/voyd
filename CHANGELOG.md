@@ -1,5 +1,39 @@
 # Changelog
 
+## Unreleased
+
+### Breaking Changes
+
+- Custom `VxDomRenderer` implementations must provide `detach(): void` in
+  addition to `dispose()`. `detach()` releases listeners, render state, and
+  retained handlers without clearing the container; `dispose()` also removes
+  the rendered DOM.
+- A program produced by `map_model(program, map)` cannot adopt an SSR hydration
+  model because that mapping only describes the child-to-parent direction.
+  Hydrated applications must use the labeled overload and provide the reverse
+  mapping: `map_model(program: child, map: to_parent, hydrate: to_child)`.
+- VX rendering now rejects trees that cannot have equivalent browser and server
+  semantics. Dynamic tag and attribute names must be lowercase, void elements
+  cannot have children, structured CSS values cannot contain `;`, `!`, or
+  control characters, and server-rendered DOM properties are limited to the
+  documented form-control combinations. Use `attr` for ordinary HTML
+  attributes and classes for complex styling.
+- Server-rendered HTML is now standards-correct for void elements, raw-text
+  elements, textareas, carriage returns, and leading newlines. Exact-output
+  snapshots may need updating. Hydration scripts are inserted before
+  `</body>`, include root metadata, and hydration-model serialization errors now
+  stop the response instead of silently emitting `null`.
+
+### Improvements
+
+- `render`, `document`, and `html_response` now release temporary event
+  handlers after server rendering succeeds, fails, or is cancelled. Server and
+  browser rendering can safely call the same `view(model)`; a separate
+  event-free `static_view` is no longer needed.
+- `map_html` now accepts a `handler:` function directly, so lifting child
+  messages no longer requires manually retaining and passing a `handler_id`.
+  The `handler_id:` overload remains available for explicitly managed lifetimes.
+
 ## Voyd v0.3.0 - Gaia BH1 (2026-07-12)
 
 Voyd `0.3.0` is the full-stack web release. VX grew into a typed application
