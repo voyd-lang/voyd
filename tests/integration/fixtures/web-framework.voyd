@@ -428,6 +428,15 @@ pub fn direct_hydration_failure_probe() -> String
     )
   )
 
+pub fn mapped_ssr_callback_scope_probe() -> String
+  let child: Html<MsgPack> = <button>Mapped</button>
+  document(
+    map_html<MsgPack, MsgPack>(
+      html: child,
+      handler: (message: MsgPack) -> MsgPack => message
+    )
+  )
+
 pub fn browser_callback_lifetime_probe() -> Html<MsgPack>
   retained_ssr_view(false)
 

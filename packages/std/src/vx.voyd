@@ -169,6 +169,10 @@ fn retain_typed_event_handler_id<Msg>(handler: fn() -> Msg): () -> i32
 fn retain_typed_event_handler_with_payload_id<Event, Msg>(handler: fn(Event) -> Msg): () -> i32
   __render_retain_callback(handler)
 
+@intrinsic(name: "__render_retain_callback", uses_signature: true)
+fn retain_typed_html_message_mapper_id<From, To>(handler: fn(From) -> To): () -> i32
+  __render_retain_callback(handler)
+
 @intrinsic(name: "__boundary_retain_callback", uses_signature: true)
 fn retain_message_mapper_id(handler: fn(MsgPack) -> MsgPack): () -> i32
   0
@@ -1195,7 +1199,14 @@ pub fn keyed({ key: String, body: fn() -> MsgPack }): Component -> MsgPack
 pub fn keyed({ key: StringSlice, body: fn() -> MsgPack }): Component -> MsgPack
   keyed(key: key.to_string(), body: body)
 
-/// Lifts child HTML through a retained message mapper.
+/// Lifts child HTML through a message mapper owned by the current render.
+pub fn map_html<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler: fn(ChildMsg) -> ParentMsg }) -> Html<ParentMsg>
+  map_html<ChildMsg, ParentMsg>(
+    html: html,
+    handler_id: retain_typed_html_message_mapper_id(handler)
+  )
+
+/// Lifts child HTML through a caller-owned retained message mapper.
 pub fn map_html<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler_id: i32 }) -> Html<ParentMsg>
   let ~out = Dict<String, MsgPack>::init()
   out.set("kind", "map")

@@ -186,6 +186,10 @@ describe("integration: pkg::web", () => {
     expect(host.retainedCallbacks.size()).toBe(0);
     await expect(host.run("direct_hydration_failure_probe")).rejects.toThrow();
     expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
+      host.run<string>("mapped_ssr_callback_scope_probe"),
+    ).resolves.toContain("<button>Mapped</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
 
     const mapperId = await host.run<number>("durable_message_mapper_probe");
     expect(host.retainedCallbacks.size()).toBe(1);

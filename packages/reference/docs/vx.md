@@ -629,7 +629,7 @@ fn view(model: AppModel) -> Html<AppMsg>
   <main>
     {map_html(
       html: todos::view(model.todos),
-      handler_id: retain_typed_message_mapper(to_app)
+      handler: to_app
     )}
   </main>
 
