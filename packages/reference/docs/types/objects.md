@@ -75,15 +75,32 @@ load_id(user)
 
 ## Constructors
 
-Nominal objects support constructor-literal syntax and `init` overloads.
+Nominal objects support fieldwise construction with braces or labeled call
+arguments.
 
 ```voyd
+obj Empty {}
+
 obj Color {
   x: i32,
   y: i32,
   z: i32
 }
 
+Empty()
+Color(x: 1, y: 2, z: 3)
+Color { x: 1, y: 2, z: 3 }
+```
+
+Fieldwise calls require labels and follow the same field completeness,
+visibility, and type rules as nominal object literals. Optional fields may be
+omitted.
+
+Declaring an `init` opts the type out of implicit fieldwise calls. Parenthesized
+construction then resolves exclusively through the declared `init` overloads,
+while braces remain direct field construction where field visibility permits.
+
+```voyd
 impl Color
   fn init(x: i32, y: i32, z: i32) -> Color
     Color { x, y, z }
@@ -92,7 +109,8 @@ Color { x: 1, y: 2, z: 3 }
 Color(1, 2, 3)
 ```
 
-Constructors also resolve through aliases that target nominal objects.
+Both fieldwise calls and declared constructors resolve through aliases that
+target nominal objects.
 
 ```voyd
 pub type Vec3Alias = Color

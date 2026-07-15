@@ -593,6 +593,7 @@ export interface HirEffectHandlerExpr extends HirExpressionBase {
 export interface HirObjectLiteralExpr extends HirExpressionBase {
   exprKind: "object-literal";
   literalKind: "structural" | "nominal";
+  nominalConstruction?: "fieldwise-call";
   target?: HirTypeExpr;
   targetSymbol?: SymbolId;
   entries: readonly HirObjectLiteralEntry[];

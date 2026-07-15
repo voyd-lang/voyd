@@ -1,0 +1,8 @@
+pub enum Fruit
+  Apple
+  Banana { age: i32 }
+  Orange { age: i32 }
+
+impl Banana
+  pub fn init({ age: i32 }) -> Banana
+    Banana { age: age + 1 }

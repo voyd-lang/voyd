@@ -19,7 +19,7 @@ import {
 } from "./expressions.js";
 import {
   enumNamespaceMetadataFromAliasTarget,
-  enumVariantTypeNamesFromAliasTarget,
+  enumVariantTypeTargetsFromAliasTarget,
   importedSymbolTargetFromMetadata,
 } from "../../enum-namespace.js";
 import type { SymbolId } from "../../ids.js";
@@ -220,17 +220,17 @@ const seedEnumVariantNamespace = ({
   scope: number;
   ctx: BindingContext;
 }): void => {
-  const variantNames = enumVariantTypeNamesFromAliasTarget(target);
-  if (!variantNames) {
+  const variants = enumVariantTypeTargetsFromAliasTarget(target);
+  if (!variants) {
     return;
   }
 
   const bucket = ctx.staticMethods.get(aliasSymbol) ?? new Map();
   let seeded = false;
 
-  variantNames.forEach((variantName) => {
+  variants.forEach((variant) => {
     const variantSymbol = resolveObjectTypeSymbol({
-      name: variantName,
+      target: variant.target,
       scope,
       ctx,
     });
@@ -238,9 +238,9 @@ const seedEnumVariantNamespace = ({
       return;
     }
 
-    const symbols = bucket.get(variantName) ?? new Set<SymbolId>();
+    const symbols = bucket.get(variant.name) ?? new Set<SymbolId>();
     symbols.add(variantSymbol);
-    bucket.set(variantName, symbols);
+    bucket.set(variant.name, symbols);
     seeded = true;
   });
 
@@ -251,15 +251,20 @@ const seedEnumVariantNamespace = ({
 };
 
 const resolveObjectTypeSymbol = ({
-  name,
+  target,
   scope,
   ctx,
 }: {
-  name: string;
+  target: ParsedTypeAliasDecl["target"];
   scope: number;
   ctx: BindingContext;
 }): SymbolId | undefined => {
-  const symbol = ctx.symbolTable.resolve(name, scope);
+  const symbol = resolveNominalTypeSymbol({
+    target,
+    scope,
+    symbolTable: ctx.symbolTable,
+    moduleMembers: ctx.moduleMembers,
+  });
   if (typeof symbol !== "number") {
     return undefined;
   }

@@ -959,6 +959,32 @@
       ]
     },
     {
+      "id": "modules.enum-ergonomics",
+      "title": "Enum construction and matching ergonomics",
+      "entry": "cases/modules/enum-ergonomics/main.voyd",
+      "tags": ["modules", "enums", "unions", "runtime"],
+      "cases": [
+        {
+          "id": "modules.enum-ergonomics.fieldwise-construction",
+          "title": "constructs nominal values from labeled fields",
+          "entryName": "fieldwise_construction",
+          "expect": { "kind": "equals", "value": 27 }
+        },
+        {
+          "id": "modules.enum-ergonomics.contextual-match",
+          "title": "resolves imported variants from the match discriminant",
+          "entryName": "contextual_enum_match",
+          "expect": { "kind": "equals", "value": 6 }
+        },
+        {
+          "id": "modules.enum-ergonomics.local-namespace-use",
+          "title": "accepts local enum namespace imports",
+          "entryName": "local_namespace_use",
+          "expect": { "kind": "equals", "value": 1 }
+        }
+      ]
+    },
+    {
       "id": "modules.source-pkg.inline",
       "title": "Inline modules named pkg",
       "entry": "cases/modules/source-level-pkg/src/inline_pkg_module.voyd",

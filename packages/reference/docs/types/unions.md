@@ -58,6 +58,23 @@ match(value)
     0
 ```
 
+An imported union alias also supplies contextual member lookup inside a match,
+so its nominal members do not need separate imports when their names are
+unambiguous and visible.
+
+```voyd
+use src::optional::{ Optional }
+
+match(value)
+  Some { value }:
+    value
+  None:
+    0
+```
+
+Outside a match, import the member or continue to qualify it through the union
+namespace.
+
 ## Same-head variants
 
 Voyd also supports unions whose members share the same nominal head, as long as
