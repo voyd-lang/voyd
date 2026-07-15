@@ -19,65 +19,80 @@ import {
 import { createSurfaceModuleView } from "../parser/surface/index.js";
 import { requireModuleHeader } from "./views.js";
 
-export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] => {
-  const order = sortModules(graph);
+export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] =>
+  createModuleMacroExpander().expand(graph).diagnostics;
+
+export type ModuleMacroExpander = {
+  expand(graph: ModuleGraph): {
+    diagnostics: Diagnostic[];
+    expandedModuleIds: string[];
+  };
+};
+
+export const createModuleMacroExpander = (): ModuleMacroExpander => {
   const exportsByModule = new Map<string, MacroExportTable>();
-  const diagnostics: Diagnostic[] = [];
 
-  order.forEach((id) => {
-    const module = graph.modules.get(id);
-    if (!module) {
-      return;
-    }
+  return {
+    expand: (graph) => {
+      const diagnostics: Diagnostic[] = [];
+      const expandedModuleIds: string[] = [];
 
-    const useEntries = collectUseEntries(module);
-    const importedMacros = collectMacroImports({
-      module,
-      entries: useEntries,
-      exportsByModule,
-    });
-    const scope = new MacroScope();
-    importedMacros.forEach((macro) => scope.defineMacro(macro));
+      sortModules(graph).forEach((id) => {
+        const module = graph.modules.get(id);
+        if (!module || module.surface) {
+          return;
+        }
 
-    const functionalResult = expandFunctionalMacros(module.ast, {
-      scope,
-      strictMacroSignatures: true,
-      onError: (error) =>
-        reportMacroExpansionError({
-          diagnostics,
-          macroName: "functionalMacroExpander",
-          error,
-          fallbackSyntax: module.ast,
-        }),
-    });
-    module.ast = applyPostSyntaxMacros(functionalResult.form, diagnostics);
-    module.surface = createSurfaceModuleView(module.ast);
-    module.surface.issues.forEach((issue) => {
-      diagnostics.push(
-        diagnosticFromCode({
-          code: "MD0002",
-          params: {
-            kind: "load-failed",
-            requested: module.id,
-            errorMessage: issue.message,
-          },
-          span: issue.span,
-        }),
-      );
-    });
-    const { exports } = functionalResult;
-    const localExports = indexExports(exports);
-    const exportedMacros = collectMacroReexports({
-      module,
-      entries: useEntries,
-      exportsByModule,
-      localExports,
-    });
-    module.macroExports = Array.from(exportedMacros.keys());
-    exportsByModule.set(id, exportedMacros);
-  });
+        const useEntries = collectUseEntries(module);
+        const importedMacros = collectMacroImports({
+          module,
+          entries: useEntries,
+          exportsByModule,
+        });
+        const scope = new MacroScope();
+        importedMacros.forEach((macro) => scope.defineMacro(macro));
 
-  return diagnostics;
+        const functionalResult = expandFunctionalMacros(module.ast, {
+          scope,
+          strictMacroSignatures: true,
+          onError: (error) =>
+            reportMacroExpansionError({
+              diagnostics,
+              macroName: "functionalMacroExpander",
+              error,
+              fallbackSyntax: module.ast,
+            }),
+        });
+        module.ast = applyPostSyntaxMacros(functionalResult.form, diagnostics);
+        module.surface = createSurfaceModuleView(module.ast);
+        module.surface.issues.forEach((issue) => {
+          diagnostics.push(
+            diagnosticFromCode({
+              code: "MD0002",
+              params: {
+                kind: "load-failed",
+                requested: module.id,
+                errorMessage: issue.message,
+              },
+              span: issue.span,
+            }),
+          );
+        });
+        const localExports = indexExports(functionalResult.exports);
+        const exportedMacros = collectMacroReexports({
+          module,
+          entries: useEntries,
+          exportsByModule,
+          localExports,
+        });
+        module.macroExports = Array.from(exportedMacros.keys());
+        exportsByModule.set(id, exportedMacros);
+        expandedModuleIds.push(id);
+      });
+
+      return { diagnostics, expandedModuleIds };
+    },
+  };
 };
 
 type MacroExportTable = Map<string, MacroDefinition>;

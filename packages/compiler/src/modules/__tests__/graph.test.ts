@@ -9,6 +9,88 @@ const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
 
 describe("buildModuleGraph", () => {
+  it("loads dependencies introduced by functional macro expansion", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::main::generated::all
+
+macro import_helper()
+  syntax_template (use src::helper::all)
+
+macro declare_generated()
+  syntax_template (mod generated
+    use src::nested::all)
+
+import_helper()
+declare_generated()
+`,
+      [`${root}${sep}helper.voyd`]: `
+macro import_deep()
+  syntax_template (use src::deep::all)
+
+import_deep()
+pub fn helper()
+  1
+`,
+      [`${root}${sep}nested.voyd`]: "pub fn nested()\n  2",
+      [`${root}${sep}deep.voyd`]: "pub fn deep()\n  3",
+      [`${root}${sep}main${sep}generated.voyd`]: `
+use src::orphan::all
+mod stale
+  pub fn from_file()
+    4
+`,
+      [`${root}${sep}orphan.voyd`]: "pub fn orphan()\n  5",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "src::helper",
+        "src::main::generated",
+        "src::nested",
+        "src::deep",
+      ]),
+    );
+    expect(graph.modules.get("src::main::generated")?.origin.kind).toBe(
+      "inline",
+    );
+    expect(graph.modules.has("src::main::generated::stale")).toBe(false);
+    expect(graph.modules.has("src::orphan")).toBe(false);
+  });
+
+  it("validates inline modules introduced by functional macros", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+macro declare_reserved_module()
+  syntax_template (mod all
+    fn value()
+      1)
+
+declare_reserved_module()
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics.some((entry) => entry.code === "MD0005")).toBe(
+      true,
+    );
+  });
+
   it("loads dependencies via use statements and auto-discovers submodules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

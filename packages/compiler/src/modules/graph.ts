@@ -32,7 +32,7 @@ import type {
   ModulePath,
   ModuleRoots,
 } from "./types.js";
-import { expandModuleMacros } from "./macro-expansion.js";
+import { createModuleMacroExpander } from "./macro-expansion.js";
 import type { SourceSpan } from "../semantics/ids.js";
 import {
   incrementCompilerPerfCounter,
@@ -99,6 +99,59 @@ const updateNestedPrefixCounts = ({
   }
 };
 
+const hasAvailableModulePath = ({
+  path,
+  modulesByPath,
+  moduleNestedPrefixCounts,
+}: {
+  path: ModulePath;
+  modulesByPath: ReadonlyMap<string, ModuleNode>;
+  moduleNestedPrefixCounts: ReadonlyMap<string, number>;
+}): boolean => {
+  const pathKey = modulePathToString(path);
+  return (
+    modulesByPath.has(pathKey) ||
+    (moduleNestedPrefixCounts.get(pathKey) ?? 0) > 0
+  );
+};
+
+const reachableModuleIds = ({
+  entry,
+  modules,
+}: {
+  entry: string;
+  modules: ReadonlyMap<string, ModuleNode>;
+}): Set<string> => {
+  const inlineChildren = new Map<string, string[]>();
+  modules.forEach((module) => {
+    if (module.origin.kind !== "inline") {
+      return;
+    }
+    const children = inlineChildren.get(module.origin.parentId) ?? [];
+    children.push(module.id);
+    inlineChildren.set(module.origin.parentId, children);
+  });
+
+  const reachable = new Set<string>();
+  const visit = (moduleId: string): void => {
+    if (reachable.has(moduleId)) {
+      return;
+    }
+    const module = modules.get(moduleId);
+    if (!module) {
+      return;
+    }
+    reachable.add(moduleId);
+    module.dependencies.forEach((dependency) =>
+      visit(modulePathToString(dependency.path)),
+    );
+    inlineChildren.get(moduleId)?.forEach(visit);
+  };
+
+  visit(entry);
+  return reachable;
+};
+
 export const buildModuleGraph = async ({
   entryPath,
   host,
@@ -109,9 +162,47 @@ export const buildModuleGraph = async ({
   const modulesByPath = new Map<string, ModuleNode>();
   const moduleDiagnostics: ModuleDiagnostic[] = [];
   const docDiagnostics: Diagnostic[] = [];
+  const docDiagnosticKeys = new Set<string>();
   const missingModules = new Map<string, Set<string>>();
   const moduleNestedPrefixCounts = new Map<string, number>();
   const pendingNestedPrefixCounts = new Map<string, number>();
+  const noPreludeByModule = new Map<string, boolean>();
+  const shadowedModuleFiles = new Set<string>();
+
+  const addDocDiagnostics = (diagnostics: readonly Diagnostic[]): void => {
+    diagnostics.forEach((diagnostic) => {
+      const key = [
+        diagnostic.code,
+        diagnostic.message,
+        diagnostic.span.file,
+        diagnostic.span.start,
+        diagnostic.span.end,
+      ].join(":");
+      if (docDiagnosticKeys.has(key)) {
+        return;
+      }
+      docDiagnosticKeys.add(key);
+      docDiagnostics.push(diagnostic);
+    });
+  };
+
+  const removeInlineDescendants = (parentId: string): void => {
+    const descendants = Array.from(modules.values()).filter(
+      (module) =>
+        module.origin.kind === "inline" && module.origin.parentId === parentId,
+    );
+    descendants.forEach((descendant) => {
+      removeInlineDescendants(descendant.id);
+      modules.delete(descendant.id);
+      modulesByPath.delete(modulePathToString(descendant.path));
+      noPreludeByModule.delete(descendant.id);
+      updateNestedPrefixCounts({
+        counts: moduleNestedPrefixCounts,
+        pathKey: modulePathToString(descendant.path),
+        delta: -1,
+      });
+    });
+  };
 
   const hasMissingModule = (importer: string, pathKey: string): boolean =>
     missingModules.get(importer)?.has(pathKey) ?? false;
@@ -155,14 +246,15 @@ export const buildModuleGraph = async ({
     hasStdPreludeModule,
   });
 
-  addModuleTree(entryModule, modules, modulesByPath, (module) =>
+  addModuleTree(entryModule, modules, modulesByPath, (module) => {
+    noPreludeByModule.set(module.id, entryModule.noPrelude);
     updateNestedPrefixCounts({
       counts: moduleNestedPrefixCounts,
       pathKey: modulePathToString(module.path),
       delta: 1,
-    }),
-  );
-  docDiagnostics.push(...entryModule.diagnostics);
+    });
+  });
+  addDocDiagnostics(entryModule.diagnostics);
 
   const pending: PendingDependency[] = [];
   enqueueDependencies(entryModule, pending, (queued) => {
@@ -189,8 +281,104 @@ export const buildModuleGraph = async ({
     return hasNested;
   };
 
+  const macroExpander = createModuleMacroExpander();
+  const macroDiagnostics: Diagnostic[] = [];
   let pendingIndex = 0;
-  while (pendingIndex < pending.length) {
+  while (true) {
+    if (pendingIndex >= pending.length) {
+      const expansion = macroExpander.expand({
+        entry: entryModule.node.id,
+        modules,
+        diagnostics: [],
+      });
+      macroDiagnostics.push(...expansion.diagnostics);
+      if (!expansion.expandedModuleIds.length) {
+        break;
+      }
+
+      expansion.expandedModuleIds.forEach((moduleId) => {
+        const module = modules.get(moduleId);
+        if (!module) {
+          return;
+        }
+
+        const refreshed = collectExpandedModuleInfo({
+          module,
+          host,
+          hasStdPreludeModule,
+          noPrelude: noPreludeByModule.get(module.id) ?? false,
+        });
+        addDocDiagnostics(
+          refreshed.diagnostics.filter(
+            (diagnostic) => diagnostic.code === "MD0005",
+          ),
+        );
+        const discoveredSubmodules = module.dependencies.filter(
+          (dependency) => dependency.kind === "export",
+        );
+        module.dependencies = [
+          ...refreshed.dependencies,
+          ...discoveredSubmodules,
+        ];
+
+        refreshed.inlineModules.forEach((inlineModule) => {
+          const existing = modules.get(inlineModule.id);
+          if (existing?.origin.kind === "file") {
+            removeInlineDescendants(existing.id);
+          }
+        });
+        const newInlineModules = refreshed.inlineModules.filter(
+          (inlineModule) => {
+            const existing = modules.get(inlineModule.id);
+            return !existing || existing.origin.kind === "file";
+          },
+        );
+        newInlineModules.forEach((inlineModule) => {
+          const existing = modules.get(inlineModule.id);
+          if (existing?.origin.kind === "file") {
+            (existing.sourceFiles ?? [
+              { filePath: existing.origin.filePath, source: existing.source },
+            ]).forEach(({ filePath }) => shadowedModuleFiles.add(filePath));
+          }
+          modules.set(inlineModule.id, inlineModule);
+          modulesByPath.set(
+            modulePathToString(inlineModule.path),
+            inlineModule,
+          );
+          noPreludeByModule.set(
+            inlineModule.id,
+            noPreludeByModule.get(module.id) ?? false,
+          );
+          if (!existing) {
+            updateNestedPrefixCounts({
+              counts: moduleNestedPrefixCounts,
+              pathKey: modulePathToString(inlineModule.path),
+              delta: 1,
+            });
+          }
+        });
+
+        enqueueDependencies(
+          {
+            node: module,
+            inlineModules: newInlineModules,
+          },
+          pending,
+          (queued) => {
+            if (COMPILER_PERF_ENABLED) {
+              incrementCompilerPerfCounter("graph.pending.enqueued");
+            }
+            updateNestedPrefixCounts({
+              counts: pendingNestedPrefixCounts,
+              pathKey: modulePathToString(queued.dependency.path),
+              delta: 1,
+            });
+          },
+        );
+      });
+      continue;
+    }
+
     const nextPending = pending[pendingIndex];
     pendingIndex += 1;
     if (!nextPending) {
@@ -210,10 +398,10 @@ export const buildModuleGraph = async ({
     const importerLabel = importerFilePath ?? importerId;
     const requestedPath = dependency.path;
     const requestedKey = modulePathToString(requestedPath);
-    if (hasMissingModule(importerId, requestedKey)) {
+    if (modulesByPath.has(requestedKey)) {
       continue;
     }
-    if (modulesByPath.has(requestedKey)) {
+    if (hasMissingModule(importerId, requestedKey)) {
       continue;
     }
 
@@ -307,14 +495,15 @@ export const buildModuleGraph = async ({
       addMissingModule(importerId, requestedKey);
       continue;
     }
-    addModuleTree(nextModule, modules, modulesByPath, (module) =>
+    addModuleTree(nextModule, modules, modulesByPath, (module) => {
+      noPreludeByModule.set(module.id, nextModule.noPrelude);
       updateNestedPrefixCounts({
         counts: moduleNestedPrefixCounts,
         pathKey: modulePathToString(module.path),
         delta: 1,
-      }),
-    );
-    docDiagnostics.push(...nextModule.diagnostics);
+      });
+    });
+    addDocDiagnostics(nextModule.diagnostics);
     enqueueDependencies(nextModule, pending, (queued) => {
       if (COMPILER_PERF_ENABLED) {
         incrementCompilerPerfCounter("graph.pending.enqueued");
@@ -338,16 +527,57 @@ export const buildModuleGraph = async ({
     }
   }
 
-  const baseDiagnostics = moduleDiagnostics.map(moduleDiagnosticToDiagnostic);
-  const graph = {
+  if (shadowedModuleFiles.size) {
+    const reachable = reachableModuleIds({
+      entry: entryModule.node.id,
+      modules,
+    });
+    modules.forEach((module, moduleId) => {
+      if (reachable.has(moduleId)) {
+        return;
+      }
+      module.sourceFiles?.forEach(({ filePath }) =>
+        shadowedModuleFiles.add(filePath),
+      );
+      modules.delete(moduleId);
+      modulesByPath.delete(modulePathToString(module.path));
+      noPreludeByModule.delete(moduleId);
+      updateNestedPrefixCounts({
+        counts: moduleNestedPrefixCounts,
+        pathKey: modulePathToString(module.path),
+        delta: -1,
+      });
+    });
+  }
+
+  const unresolvedModuleDiagnostics = moduleDiagnostics.filter(
+    (diagnostic) =>
+      !(
+        diagnostic.importerFilePath &&
+        shadowedModuleFiles.has(diagnostic.importerFilePath)
+      ) &&
+      (diagnostic.kind !== "missing-module" ||
+        !hasAvailableModulePath({
+          path: diagnostic.requested,
+          modulesByPath,
+          moduleNestedPrefixCounts,
+        })),
+  );
+  const baseDiagnostics = unresolvedModuleDiagnostics.map(
+    moduleDiagnosticToDiagnostic,
+  );
+  return {
     entry: entryModule.node.id,
     modules,
-    diagnostics: [...baseDiagnostics, ...docDiagnostics],
-  };
-  const macroDiagnostics = expandModuleMacros(graph);
-  return {
-    ...graph,
-    diagnostics: [...baseDiagnostics, ...docDiagnostics, ...macroDiagnostics],
+    diagnostics: [
+      ...baseDiagnostics,
+      ...docDiagnostics.filter(
+        (diagnostic) => !shadowedModuleFiles.has(diagnostic.span.file),
+      ),
+      ...macroDiagnostics.filter(
+        (diagnostic) => !shadowedModuleFiles.has(diagnostic.span.file),
+      ),
+    ],
   };
 };
 
@@ -366,7 +596,7 @@ const addModuleTree = (
 };
 
 const enqueueDependencies = (
-  loaded: LoadedModule,
+  loaded: Pick<LoadedModule, "node" | "inlineModules">,
   queue: PendingDependency[],
   onQueued?: (queued: PendingDependency) => void,
 ) => {
@@ -377,6 +607,9 @@ const enqueueDependencies = (
       : module.origin.span?.file;
   modules.forEach((module) =>
     module.dependencies.forEach((dependency) => {
+      if (dependency.kind === "export" && !module.surface) {
+        return;
+      }
       const queued: PendingDependency = {
         dependency,
         importerId: module.id,
@@ -392,6 +625,7 @@ type LoadedModule = {
   node: ModuleNode;
   inlineModules: ModuleNode[];
   diagnostics: readonly Diagnostic[];
+  noPrelude: boolean;
 };
 
 const parseModuleAst = ({
@@ -573,6 +807,7 @@ const loadFileModule = async ({
     node,
     inlineModules: info.inlineModules,
     diagnostics: [...parseDiagnostics, ...info.diagnostics],
+    noPrelude,
   };
 };
 
@@ -739,6 +974,44 @@ const collectModuleInfo = ({
     docs: collectedDocs.documentation,
     diagnostics,
   };
+};
+
+const collectExpandedModuleInfo = ({
+  module,
+  host,
+  hasStdPreludeModule,
+  noPrelude,
+}: {
+  module: ModuleNode;
+  host: ModuleHost;
+  hasStdPreludeModule: boolean;
+  noPrelude: boolean;
+}): ModuleInfo => {
+  const sourceFiles = module.sourceFiles ?? [
+    {
+      filePath:
+        module.origin.kind === "file"
+          ? module.origin.filePath
+          : (module.origin.span?.file ?? module.id),
+      source: module.source,
+    },
+  ];
+  const sourceByFile = new Map(
+    sourceFiles.map(({ filePath, source }) => [filePath, source]),
+  );
+
+  return collectModuleInfo({
+    modulePath: module.path,
+    ast: module.ast,
+    sourceByFile,
+    sourcePackageRoot: module.sourcePackageRoot,
+    moduleIsPackageRoot:
+      module.origin.kind === "file" &&
+      host.path.basename(module.origin.filePath, VOYD_EXTENSION) === "pkg",
+    moduleRange: { start: 0, end: module.source.length },
+    hasStdPreludeModule,
+    noPrelude,
+  });
 };
 
 type InlineModuleTree = {
