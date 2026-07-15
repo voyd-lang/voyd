@@ -828,9 +828,7 @@ const isStdSubmoduleModuleId = (moduleId: string): boolean =>
 
 const inlineModuleNamesFor = (ctx: BindingContext): Set<string> =>
   new Set(
-    (
-      ctx.module.header?.items ?? requireModuleSurface(ctx.module).items
-    ).flatMap((item) =>
+    requireModuleSurface(ctx.module).items.flatMap((item) =>
       item.kind === "inline-module" ? [item.declaration.name] : [],
     ),
   );

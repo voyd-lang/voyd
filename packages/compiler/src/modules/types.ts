@@ -94,30 +94,30 @@ export interface ModuleNode {
   macroExports?: readonly string[];
 }
 
-export type ModuleDiagnostic =
-  | {
-      kind: "missing-module";
-      requested: ModulePath;
-      importer?: string;
-      importerFilePath?: string;
-      span?: SourceSpan;
-    }
-  | {
-      kind: "io-error";
-      message: string;
-      requested: ModulePath;
-      importer?: string;
-      importerFilePath?: string;
-      span?: SourceSpan;
-    }
-  | {
-      kind: "reserved-module-segment";
-      segment: string;
-      requested: ModulePath;
-      importer?: string;
-      importerFilePath?: string;
-      span?: SourceSpan;
-    };
+type ModuleDiagnosticContext = {
+  importerId?: string;
+  importer?: string;
+  importerFilePath?: string;
+  span?: SourceSpan;
+};
+
+export type ModuleDiagnostic = ModuleDiagnosticContext &
+  (
+    | {
+        kind: "missing-module";
+        requested: ModulePath;
+      }
+    | {
+        kind: "io-error";
+        message: string;
+        requested: ModulePath;
+      }
+    | {
+        kind: "reserved-module-segment";
+        segment: string;
+        requested: ModulePath;
+      }
+  );
 
 export interface ModuleGraph {
   entry: string;
