@@ -34,13 +34,21 @@ export type ModuleMacroExpander = {
 
 export const createModuleMacroExpander = (): ModuleMacroExpander => {
   const exportsByModule = new Map<string, MacroExportTable>();
-  const invalidatedModules = new Set<string>();
+  const sourceAstByModule = new Map<string, Form>();
+  const invalidatedModules = new Map<string, number>();
+  const processedInvalidationByModule = new Map<string, number>();
+  let nextInvalidationGeneration = 0;
 
   return {
-    invalidate: (moduleId) => invalidatedModules.add(moduleId),
+    invalidate: (moduleId) => {
+      nextInvalidationGeneration += 1;
+      invalidatedModules.set(moduleId, nextInvalidationGeneration);
+    },
     reset: (moduleId) => {
       invalidatedModules.delete(moduleId);
+      processedInvalidationByModule.delete(moduleId);
       exportsByModule.delete(moduleId);
+      sourceAstByModule.delete(moduleId);
     },
     expand: (graph) => {
       const diagnostics: Diagnostic[] = [];
@@ -49,12 +57,22 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
 
       sortModules(graph).forEach((id) => {
         const module = graph.modules.get(id);
-        const isInvalidated = invalidatedModules.has(id);
+        const invalidationGeneration = invalidatedModules.get(id);
+        const isInvalidated = invalidationGeneration !== undefined;
         if (!module || (module.surface && !isInvalidated)) {
           return;
         }
         invalidatedModules.delete(id);
+        if (isInvalidated) {
+          processedInvalidationByModule.set(id, invalidationGeneration);
+        }
         const moduleDiagnostics: Diagnostic[] = [];
+        const sourceAst = sourceAstByModule.get(id);
+        if (sourceAst && isInvalidated) {
+          module.ast = sourceAst.clone();
+        } else if (!sourceAst) {
+          sourceAstByModule.set(id, module.ast.clone());
+        }
 
         const useEntries = collectUseEntries(module);
         const importedMacros = collectMacroImports({
@@ -95,13 +113,6 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
           );
         });
         const localExports = indexExports(functionalResult.exports);
-        if (isInvalidated) {
-          exportsByModule.get(id)?.forEach((macro, name) => {
-            if (!localExports.has(name)) {
-              localExports.set(name, macro);
-            }
-          });
-        }
         const exportedMacros = collectMacroReexports({
           module,
           entries: useEntries,
@@ -111,11 +122,26 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
         const previousExports = exportsByModule.get(id);
         module.macroExports = Array.from(exportedMacros.keys());
         exportsByModule.set(id, exportedMacros);
-        if (!haveSameMacroExportNames(previousExports, exportedMacros)) {
+        const exportNamesChanged = !haveSameMacroExportNames(
+          previousExports,
+          exportedMacros,
+        );
+        const rebuiltExportDefinitions =
+          isInvalidated &&
+          ((previousExports?.size ?? 0) > 0 || exportedMacros.size > 0);
+        const propagationGeneration = rebuiltExportDefinitions
+          ? invalidationGeneration
+          : exportNamesChanged
+            ? ++nextInvalidationGeneration
+            : undefined;
+        if (propagationGeneration !== undefined) {
+          processedInvalidationByModule.set(id, propagationGeneration);
           invalidateMacroImporters({
             graph,
             exportedModuleId: id,
             invalidatedModules,
+            processedInvalidationByModule,
+            invalidationGeneration: propagationGeneration,
           });
         }
         diagnostics.push(...moduleDiagnostics);
@@ -144,10 +170,14 @@ const invalidateMacroImporters = ({
   graph,
   exportedModuleId,
   invalidatedModules,
+  processedInvalidationByModule,
+  invalidationGeneration,
 }: {
   graph: ModuleGraph;
   exportedModuleId: string;
-  invalidatedModules: Set<string>;
+  invalidatedModules: Map<string, number>;
+  processedInvalidationByModule: Map<string, number>;
+  invalidationGeneration: number;
 }): void => {
   graph.modules.forEach((module) => {
     if (!module.surface) {
@@ -159,8 +189,16 @@ const invalidateMacroImporters = ({
         dependency.kind === "use" &&
         modulePathToString(dependency.path) === exportedModuleId,
     );
-    if (importsChangedModule) {
-      invalidatedModules.add(module.id);
+    const alreadyProcessed =
+      (processedInvalidationByModule.get(module.id) ?? -1) >=
+      invalidationGeneration;
+    if (!importsChangedModule || alreadyProcessed) {
+      return;
+    }
+
+    const pendingGeneration = invalidatedModules.get(module.id) ?? -1;
+    if (pendingGeneration < invalidationGeneration) {
+      invalidatedModules.set(module.id, invalidationGeneration);
     }
   });
 };
@@ -227,8 +265,9 @@ const indexExports = (exports: MacroDefinition[]): MacroExportTable => {
 };
 
 const inlineModuleNamesFor = (module: ModuleNode): Set<string> => {
+  const items = module.surface?.items ?? requireModuleHeader(module).items;
   return new Set(
-    requireModuleHeader(module).items.flatMap((item) =>
+    items.flatMap((item) =>
       item.kind === "inline-module" ? [item.declaration.name] : [],
     ),
   );
