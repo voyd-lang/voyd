@@ -36,7 +36,7 @@ const compileBootstrapEntry = async ({
 }): Promise<void> => {
   expectCompileSuccess(await sdk.compile({
     entryPath: resolve(target, "src", entry),
-    optimize: false,
+    optimize: true,
     roots: {
       src: resolve(target, "src"),
       pkgDirs: [resolve(repoRoot, "packages")],
