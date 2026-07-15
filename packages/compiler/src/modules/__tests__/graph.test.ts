@@ -9,6 +9,301 @@ const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
 
 describe("buildModuleGraph", () => {
+  it("loads dependencies introduced by functional macro expansion", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::main::generated::all
+
+macro import_helper()
+  syntax_template (use src::helper::all)
+
+macro declare_generated()
+  syntax_template (mod generated
+    use src::nested::all)
+
+import_helper()
+declare_generated()
+`,
+      [`${root}${sep}helper.voyd`]: `
+macro import_deep()
+  syntax_template (use src::deep::all)
+
+import_deep()
+pub fn helper()
+  1
+`,
+      [`${root}${sep}nested.voyd`]: "pub fn nested()\n  2",
+      [`${root}${sep}deep.voyd`]: "pub fn deep()\n  3",
+      [`${root}${sep}main${sep}generated.voyd`]: `
+use src::orphan::all
+mod stale
+  pub fn from_file()
+    4
+`,
+      [`${root}${sep}orphan.voyd`]: "pub fn orphan()\n  5",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(Array.from(graph.modules.keys())).toEqual(
+      expect.arrayContaining([
+        "src::main",
+        "src::helper",
+        "src::main::generated",
+        "src::nested",
+        "src::deep",
+      ]),
+    );
+    expect(graph.modules.get("src::main::generated")?.origin.kind).toBe(
+      "inline",
+    );
+    expect(graph.modules.has("src::main::generated::stale")).toBe(false);
+    expect(graph.modules.has("src::orphan")).toBe(false);
+  });
+
+  it("validates inline modules introduced by functional macros", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+macro declare_reserved_module()
+  syntax_template (mod all
+    fn value()
+      1)
+
+declare_reserved_module()
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics.some((entry) => entry.code === "MD0005")).toBe(
+      true,
+    );
+  });
+
+  it("drops generated inline modules that disappear after re-expansion", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::b::all
+
+macro import_c()
+  syntax_template (use src::c::all)
+
+import_c()
+gen()
+use self::old::all
+`,
+      [`${root}${sep}b.voyd`]: `
+pub macro gen()
+  syntax_template (mod old
+    pub fn answer() -> f64
+      1.0)
+`,
+      [`${root}${sep}c.voyd`]: `
+pub macro gen()
+  syntax_template (fn replacement() -> f64
+    2.0)
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.modules.has("src::main::old")).toBe(false);
+    expect(graph.diagnostics).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "MD0001" })]),
+    );
+  });
+
+  it("replaces generated inline modules retained after re-expansion", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::b::all
+
+macro import_c()
+  syntax_template (use src::c::all)
+
+import_c()
+gen()
+use self::child::all
+`,
+      [`${root}${sep}b.voyd`]: `
+pub macro gen()
+  syntax_template (mod child
+    pub fn from_b() -> f64
+      1.0)
+`,
+      [`${root}${sep}c.voyd`]: `
+pub macro gen()
+  syntax_template (mod child
+    pub fn from_c() -> f64
+      2.0)
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const functionNames = graph.modules
+      .get("src::main::child")
+      ?.surface?.items.flatMap((item) =>
+        item.kind === "function"
+          ? [item.declaration.signature.name.value]
+          : [],
+      );
+    expect(functionNames).toContain("from_c");
+    expect(functionNames).not.toContain("from_b");
+  });
+
+  it("prunes transient file modules and removed import diagnostics", async () => {
+    const root = resolve("/proj/src");
+    const badPath = `${root}${sep}bad.voyd`;
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::b::all
+
+macro import_c()
+  syntax_template (use src::c::all)
+
+import_c()
+gen()
+`,
+      [`${root}${sep}b.voyd`]: `
+pub macro gen()
+  emit_many(
+    \`(use src::bad::all),
+    \`(use src::missing::all)
+  )
+`,
+      [`${root}${sep}c.voyd`]: `
+pub macro gen()
+  syntax_template (fn replacement() -> f64
+    2.0)
+`,
+      [badPath]: `fn broken() -> i32
+  <div class="open"
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.modules.has("src::bad")).toBe(false);
+    expect(graph.diagnostics).toHaveLength(0);
+  });
+
+  it("stabilizes generated macro imports and replaces surface diagnostics", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::b::all
+
+gen()
+`,
+      [`${root}${sep}b.voyd`]: `
+pub macro gen()
+  emit_many(
+    \`(use src::c::all),
+    \`(mod all (block))
+  )
+`,
+      [`${root}${sep}c.voyd`]: `
+pub macro gen()
+  syntax_template (fn replacement() -> f64
+    2.0)
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(graph.modules.has("src::main::all")).toBe(false);
+    const functionNames = graph.modules
+      .get("src::main")
+      ?.surface?.items.flatMap((item) =>
+        item.kind === "function"
+          ? [item.declaration.signature.name.value]
+          : [],
+      );
+    expect(functionNames).toContain("replacement");
+  });
+
+  it("re-resolves package-root imports after generated inline modules disappear", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}pkg.voyd`]: `
+use src::b::all
+use self::macros::all
+
+macro import_c()
+  syntax_template (use src::c::all)
+
+import_c()
+gen()
+declare_helper()
+`,
+      [`${root}${sep}b.voyd`]: `
+pub macro gen()
+  syntax_template (mod macros
+    fn placeholder() -> f64
+      1.0)
+`,
+      [`${root}${sep}c.voyd`]: `
+pub macro gen()
+  syntax_template (fn replacement() -> f64
+    2.0)
+`,
+      [`${root}${sep}macros.voyd`]: `
+pub macro declare_helper()
+  syntax_template (fn helper() -> f64
+    3.0)
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}pkg.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(graph.modules.has("src::pkg::macros")).toBe(false);
+    const functionNames = graph.modules
+      .get("src::pkg")
+      ?.surface?.items.flatMap((item) =>
+        item.kind === "function" ? [item.declaration.signature.name.value] : [],
+      );
+    expect(functionNames).toEqual(
+      expect.arrayContaining(["replacement", "helper"]),
+    );
+  });
+
   it("loads dependencies via use statements and auto-discovers submodules", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
