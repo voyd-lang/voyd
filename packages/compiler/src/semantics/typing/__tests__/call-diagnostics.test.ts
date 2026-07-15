@@ -246,6 +246,26 @@ pub fn main() -> i32
     ).toHaveLength(7);
   });
 
+  it("rejects conflicting inferred arguments for fieldwise aliases", () => {
+    const ast = parse(
+      `
+obj Pair<A, B> { first: A, second: B }
+type Same<T> = Pair<T, T>
+
+pub fn main() -> i32
+  let _pair = Same(first: 1, second: true)
+  0
+`,
+      "/proj/src/fieldwise-alias-conflicting-inference.voyd",
+    );
+
+    expect(() => semanticsPipeline(ast)).toThrow(
+      expect.objectContaining({
+        diagnostic: expect.objectContaining({ code: "TY0027" }),
+      }),
+    );
+  });
+
   it("reports missing fields for fieldwise calls", () => {
     const ast = parse(
       `

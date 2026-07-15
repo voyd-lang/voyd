@@ -505,7 +505,22 @@ const typeNominalObjectLiteral = (
     span: normalizeSpan(expr.span),
   });
   if (!unified.ok) {
-    return objectInfo.type;
+    return emitDiagnostic({
+      ctx,
+      code: "TY0027",
+      params: {
+        kind: "type-mismatch",
+        actual: typeDescriptorToUserString(
+          ctx.arena.get(objectInfo.type),
+          ctx.arena,
+        ),
+        expected: typeDescriptorToUserString(
+          ctx.arena.get(resolvedTarget!),
+          ctx.arena,
+        ),
+      },
+      span: normalizeSpan(expr.span),
+    });
   }
 
   const inferredAliasArgs = aliasResolution.appliedArgs.map((arg) =>
