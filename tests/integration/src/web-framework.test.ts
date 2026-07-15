@@ -23,6 +23,20 @@ const expectCompileSuccess = (
   return result;
 };
 
+let webFrameworkFixtureCompile: Promise<CompileResult> | undefined;
+const compileWebFrameworkFixture = async (): Promise<
+  Extract<CompileResult, { success: true }>
+> => {
+  webFrameworkFixtureCompile ??= createSdk().compile({
+    entryPath: path.join(fixtureRoot, "web-framework.voyd"),
+    roots: {
+      src: fixtureRoot,
+      pkgDirs: [path.join(repoRoot, "packages")],
+    },
+  });
+  return expectCompileSuccess(await webFrameworkFixtureCompile);
+};
+
 const waitFor = async (
   predicate: () => boolean,
   label: string,
@@ -98,16 +112,7 @@ const createHttpServerHarness = (): {
 
 describe("integration: pkg::web", () => {
   it("releases server-rendered callbacks after success and failure", async () => {
-    const sdk = createSdk();
-    const result = expectCompileSuccess(
-      await sdk.compile({
-        entryPath: path.join(fixtureRoot, "web-framework.voyd"),
-        roots: {
-          src: fixtureRoot,
-          pkgDirs: [path.join(repoRoot, "packages")],
-        },
-      }),
-    );
+    const result = await compileWebFrameworkFixture();
     const server = createHttpServerHarness();
     const failures: Error[] = [];
     const host = await createVoydHost({
@@ -169,11 +174,11 @@ describe("integration: pkg::web", () => {
     expect(host.retainedCallbacks.size()).toBe(0);
     await expect(
       host.run<string>("hydrated_response_html_callback_scope_probe"),
-    ).resolves.toContain("data-voyd-hydration-id=\"probe\"");
+    ).resolves.toContain('data-voyd-hydration-id="probe"');
     expect(host.retainedCallbacks.size()).toBe(0);
     await expect(
       host.run<string>("hydrated_html_response_callback_scope_probe"),
-    ).resolves.toContain("data-voyd-hydration-id=\"named-probe\"");
+    ).resolves.toContain('data-voyd-hydration-id="named-probe"');
     expect(host.retainedCallbacks.size()).toBe(0);
     await expect(host.run("direct_ssr_render_failure_probe")).rejects.toThrow();
     expect(host.retainedCallbacks.size()).toBe(0);
@@ -184,7 +189,9 @@ describe("integration: pkg::web", () => {
 
     const mapperId = await host.run<number>("durable_message_mapper_probe");
     expect(host.retainedCallbacks.size()).toBe(1);
-    await expect(host.retainedCallbacks.dispatch(mapperId, 41)).resolves.toBe(42);
+    await expect(host.retainedCallbacks.dispatch(mapperId, 41)).resolves.toBe(
+      42,
+    );
     host.retainedCallbacks.release(mapperId);
 
     const explicitHandlerId = await host.run<number>(
@@ -237,7 +244,9 @@ describe("integration: pkg::web", () => {
       },
     };
     const cleanupFailures: Error[] = [];
-    const cleanupLogs = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const cleanupLogs = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
     const cleanupServer = createHttpServerHarness();
     cleanupServer.enqueueRequest(5, "/fail");
     const cleanupHost = await createVoydHost({
@@ -255,7 +264,10 @@ describe("integration: pkg::web", () => {
       "serve_ssr_callback_scope_probe",
     );
     try {
-      await waitFor(() => cleanupFailures.length === 1, "cleanup failure report");
+      await waitFor(
+        () => cleanupFailures.length === 1,
+        "cleanup failure report",
+      );
       expect(cleanupFailures[0]!.message).toContain(
         "void VX HTML element cannot have children: input",
       );
@@ -271,17 +283,7 @@ describe("integration: pkg::web", () => {
   });
 
   it("routes requests and builds apps through the public package API", async () => {
-    const sdk = createSdk();
-    const entryPath = path.join(fixtureRoot, "web-framework.voyd");
-    const result = expectCompileSuccess(
-      await sdk.compile({
-        entryPath,
-        roots: {
-          src: fixtureRoot,
-          pkgDirs: [path.join(repoRoot, "packages")],
-        },
-      }),
-    );
+    const result = await compileWebFrameworkFixture();
 
     await expect(
       result.run<number>({ entryName: "route_probe" }),
