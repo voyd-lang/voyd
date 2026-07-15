@@ -16,73 +16,226 @@ import {
   serializerAttributeMacro,
   stripSerializerAttributeForms,
 } from "../parser/syntax-macros/serializer-attribute.js";
-import { createSurfaceModuleView } from "../parser/surface/index.js";
+import {
+  createSurfaceModuleView,
+  type SurfaceModuleItem,
+} from "../parser/surface/index.js";
 import { requireModuleHeader } from "./views.js";
 
-export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] => {
-  const order = sortModules(graph);
+export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] =>
+  createModuleMacroExpander().expand(graph).diagnostics;
+
+export type ModuleMacroExpander = {
+  invalidate(moduleId: string): void;
+  reset(moduleId: string): void;
+  expand(graph: ModuleGraph): {
+    diagnostics: Diagnostic[];
+    diagnosticsByModule: ReadonlyMap<string, Diagnostic[]>;
+    expandedModuleIds: string[];
+  };
+};
+
+export const createModuleMacroExpander = (): ModuleMacroExpander => {
   const exportsByModule = new Map<string, MacroExportTable>();
-  const diagnostics: Diagnostic[] = [];
+  const sourceAstByModule = new Map<string, Form>();
+  const scopeUseEntriesByModule = new Map<
+    string,
+    Map<string, MacroScopeUseEntry>
+  >();
+  const invalidatedModules = new Map<string, number>();
+  const processedInvalidationByModule = new Map<string, number>();
+  let nextInvalidationGeneration = 0;
 
-  order.forEach((id) => {
-    const module = graph.modules.get(id);
-    if (!module) {
-      return;
-    }
+  return {
+    invalidate: (moduleId) => {
+      nextInvalidationGeneration += 1;
+      invalidatedModules.set(moduleId, nextInvalidationGeneration);
+    },
+    reset: (moduleId) => {
+      invalidatedModules.delete(moduleId);
+      processedInvalidationByModule.delete(moduleId);
+      exportsByModule.delete(moduleId);
+      sourceAstByModule.delete(moduleId);
+      scopeUseEntriesByModule.delete(moduleId);
+    },
+    expand: (graph) => {
+      const diagnostics: Diagnostic[] = [];
+      const diagnosticsByModule = new Map<string, Diagnostic[]>();
+      const expandedModuleIds: string[] = [];
 
-    const useEntries = collectUseEntries(module);
-    const importedMacros = collectMacroImports({
-      module,
-      entries: useEntries,
-      exportsByModule,
-    });
-    const scope = new MacroScope();
-    importedMacros.forEach((macro) => scope.defineMacro(macro));
+      sortModules(graph).forEach((id) => {
+        const module = graph.modules.get(id);
+        const invalidationGeneration = invalidatedModules.get(id);
+        const isInvalidated = invalidationGeneration !== undefined;
+        if (!module || (module.surface && !isInvalidated)) {
+          return;
+        }
+        invalidatedModules.delete(id);
+        if (isInvalidated) {
+          processedInvalidationByModule.set(id, invalidationGeneration);
+        }
+        const moduleDiagnostics: Diagnostic[] = [];
+        const sourceAst = sourceAstByModule.get(id);
+        if (sourceAst && isInvalidated) {
+          module.ast = sourceAst.clone();
+        } else if (!sourceAst) {
+          sourceAstByModule.set(id, module.ast.clone());
+        }
 
-    const functionalResult = expandFunctionalMacros(module.ast, {
-      scope,
-      strictMacroSignatures: true,
-      onError: (error) =>
-        reportMacroExpansionError({
-          diagnostics,
-          macroName: "functionalMacroExpander",
-          error,
-          fallbackSyntax: module.ast,
-        }),
-    });
-    module.ast = applyPostSyntaxMacros(functionalResult.form, diagnostics);
-    module.surface = createSurfaceModuleView(module.ast);
-    module.surface.issues.forEach((issue) => {
-      diagnostics.push(
-        diagnosticFromCode({
-          code: "MD0002",
-          params: {
-            kind: "load-failed",
-            requested: module.id,
-            errorMessage: issue.message,
-          },
-          span: issue.span,
-        }),
-      );
-    });
-    const { exports } = functionalResult;
-    const localExports = indexExports(exports);
-    const exportedMacros = collectMacroReexports({
-      module,
-      entries: useEntries,
-      exportsByModule,
-      localExports,
-    });
-    module.macroExports = Array.from(exportedMacros.keys());
-    exportsByModule.set(id, exportedMacros);
-  });
+        // Imports exposed by expansion are discovery inputs on later passes.
+        // Keep that discovery monotonic, while the surface below remains the
+        // replaceable output of only the latest expansion.
+        const headerItems = requireModuleHeader(module).items;
+        const currentInlineModuleNames = collectInlineModuleNames(
+          module.surface?.items ?? headerItems,
+        );
+        const scopeUseEntries = mergeScopeUseEntries({
+          moduleId: id,
+          entries: collectUseEntries(headerItems),
+          inlineModuleNames: currentInlineModuleNames,
+          scopeUseEntriesByModule,
+        });
+        const importedMacros = collectMacroImports({
+          module,
+          entries: scopeUseEntries,
+          exportsByModule,
+        });
+        const scope = new MacroScope();
+        importedMacros.forEach((macro) => scope.defineMacro(macro));
 
-  return diagnostics;
+        const functionalResult = expandFunctionalMacros(module.ast, {
+          scope,
+          strictMacroSignatures: true,
+          onError: (error) =>
+            reportMacroExpansionError({
+              diagnostics: moduleDiagnostics,
+              macroName: "functionalMacroExpander",
+              error,
+              fallbackSyntax: module.ast,
+            }),
+        });
+        module.ast = applyPostSyntaxMacros(
+          functionalResult.form,
+          moduleDiagnostics,
+        );
+        module.surface = createSurfaceModuleView(module.ast);
+        module.surface.issues.forEach((issue) => {
+          moduleDiagnostics.push(
+            diagnosticFromCode({
+              code: "MD0002",
+              params: {
+                kind: "load-failed",
+                requested: module.id,
+                errorMessage: issue.message,
+              },
+              span: issue.span,
+            }),
+          );
+        });
+        const surfaceUseEntries = collectUseEntries(module.surface.items);
+        const surfaceInlineModuleNames = collectInlineModuleNames(
+          module.surface.items,
+        );
+        mergeScopeUseEntries({
+          moduleId: id,
+          entries: surfaceUseEntries,
+          inlineModuleNames: surfaceInlineModuleNames,
+          scopeUseEntriesByModule,
+        });
+        const localExports = indexExports(functionalResult.exports);
+        const exportedMacros = collectMacroReexports({
+          module,
+          entries: surfaceUseEntries,
+          inlineModuleNames: surfaceInlineModuleNames,
+          exportsByModule,
+          localExports,
+        });
+        const previousExports = exportsByModule.get(id);
+        module.macroExports = Array.from(exportedMacros.keys());
+        exportsByModule.set(id, exportedMacros);
+        const exportNamesChanged = !haveSameMacroExportNames(
+          previousExports,
+          exportedMacros,
+        );
+        const rebuiltExportDefinitions =
+          isInvalidated &&
+          ((previousExports?.size ?? 0) > 0 || exportedMacros.size > 0);
+        const propagationGeneration = rebuiltExportDefinitions
+          ? invalidationGeneration
+          : exportNamesChanged
+            ? ++nextInvalidationGeneration
+            : undefined;
+        if (propagationGeneration !== undefined) {
+          processedInvalidationByModule.set(id, propagationGeneration);
+          invalidateMacroImporters({
+            graph,
+            exportedModuleId: id,
+            invalidatedModules,
+            processedInvalidationByModule,
+            invalidationGeneration: propagationGeneration,
+          });
+        }
+        diagnostics.push(...moduleDiagnostics);
+        diagnosticsByModule.set(id, moduleDiagnostics);
+        expandedModuleIds.push(id);
+      });
+
+      return { diagnostics, diagnosticsByModule, expandedModuleIds };
+    },
+  };
 };
 
 type MacroExportTable = Map<string, MacroDefinition>;
 type UseEntryWithVisibility = NormalizedUseEntry & {
   visibility: "module" | "pub";
+};
+type MacroScopeUseEntry = {
+  entry: UseEntryWithVisibility;
+  inlineModuleNames: ReadonlySet<string>;
+};
+
+const haveSameMacroExportNames = (
+  previous: MacroExportTable | undefined,
+  current: MacroExportTable,
+): boolean =>
+  (previous?.size ?? 0) === current.size &&
+  Array.from(current.keys()).every((name) => previous?.has(name));
+
+const invalidateMacroImporters = ({
+  graph,
+  exportedModuleId,
+  invalidatedModules,
+  processedInvalidationByModule,
+  invalidationGeneration,
+}: {
+  graph: ModuleGraph;
+  exportedModuleId: string;
+  invalidatedModules: Map<string, number>;
+  processedInvalidationByModule: Map<string, number>;
+  invalidationGeneration: number;
+}): void => {
+  graph.modules.forEach((module) => {
+    if (!module.surface) {
+      return;
+    }
+
+    const importsChangedModule = module.dependencies.some(
+      (dependency) =>
+        dependency.kind === "use" &&
+        modulePathToString(dependency.path) === exportedModuleId,
+    );
+    const alreadyProcessed =
+      (processedInvalidationByModule.get(module.id) ?? -1) >=
+      invalidationGeneration;
+    if (!importsChangedModule || alreadyProcessed) {
+      return;
+    }
+
+    const pendingGeneration = invalidatedModules.get(module.id) ?? -1;
+    if (pendingGeneration < invalidationGeneration) {
+      invalidatedModules.set(module.id, invalidationGeneration);
+    }
+  });
 };
 
 const applyPostSyntaxMacros = (form: Form, diagnostics: Diagnostic[]): Form => {
@@ -146,9 +299,11 @@ const indexExports = (exports: MacroDefinition[]): MacroExportTable => {
   return table;
 };
 
-const inlineModuleNamesFor = (module: ModuleNode): Set<string> => {
+const collectInlineModuleNames = (
+  items: readonly SurfaceModuleItem[],
+): Set<string> => {
   return new Set(
-    requireModuleHeader(module).items.flatMap((item) =>
+    items.flatMap((item) =>
       item.kind === "inline-module" ? [item.declaration.name] : [],
     ),
   );
@@ -160,14 +315,13 @@ const collectMacroImports = ({
   exportsByModule,
 }: {
   module: ModuleNode;
-  entries: UseEntryWithVisibility[];
+  entries: MacroScopeUseEntry[];
   exportsByModule: Map<string, MacroExportTable>;
 }): Map<string, MacroDefinition> => {
   const imports = new Map<string, MacroDefinition>();
   const moduleIsPackageRoot =
     module.origin.kind === "file" && module.path.segments.at(-1) === "pkg";
-  const inlineModuleNames = inlineModuleNamesFor(module);
-  entries.forEach((entry) => {
+  entries.forEach(({ entry, inlineModuleNames }) => {
     if (!entry.hasExplicitPrefix) {
       return;
     }
@@ -226,19 +380,19 @@ const collectMacroImports = ({
 const collectMacroReexports = ({
   module,
   entries,
+  inlineModuleNames,
   exportsByModule,
   localExports,
 }: {
   module: ModuleNode;
   entries: UseEntryWithVisibility[];
+  inlineModuleNames: ReadonlySet<string>;
   exportsByModule: Map<string, MacroExportTable>;
   localExports: MacroExportTable;
 }): MacroExportTable => {
   const exports = new Map(localExports);
   const moduleIsPackageRoot =
     module.origin.kind === "file" && module.path.segments.at(-1) === "pkg";
-  const inlineModuleNames = inlineModuleNamesFor(module);
-
   entries
     .filter((entry) => entry.visibility === "pub")
     .forEach((entry) => {
@@ -305,8 +459,10 @@ const collectMacroReexports = ({
   return exports;
 };
 
-const collectUseEntries = (module: ModuleNode): UseEntryWithVisibility[] =>
-  requireModuleHeader(module).items.flatMap((item) =>
+const collectUseEntries = (
+  items: readonly SurfaceModuleItem[],
+): UseEntryWithVisibility[] => {
+  return items.flatMap((item) =>
     item.kind === "use"
       ? item.entries.map((entry) => ({
           ...entry,
@@ -314,6 +470,41 @@ const collectUseEntries = (module: ModuleNode): UseEntryWithVisibility[] =>
         }))
       : [],
   );
+};
+
+const mergeScopeUseEntries = ({
+  moduleId,
+  entries,
+  inlineModuleNames,
+  scopeUseEntriesByModule,
+}: {
+  moduleId: string;
+  entries: readonly UseEntryWithVisibility[];
+  inlineModuleNames: ReadonlySet<string>;
+  scopeUseEntriesByModule: Map<string, Map<string, MacroScopeUseEntry>>;
+}): MacroScopeUseEntry[] => {
+  const scopeEntries =
+    scopeUseEntriesByModule.get(moduleId) ??
+    new Map<string, MacroScopeUseEntry>();
+  entries.forEach((entry) =>
+    scopeEntries.set(useEntryKey(entry), { entry, inlineModuleNames }),
+  );
+  scopeUseEntriesByModule.set(moduleId, scopeEntries);
+  return Array.from(scopeEntries.values());
+};
+
+const useEntryKey = (entry: UseEntryWithVisibility): string =>
+  JSON.stringify([
+    entry.visibility,
+    entry.moduleSegments,
+    entry.path,
+    entry.targetName ?? null,
+    entry.alias ?? null,
+    entry.selectionKind,
+    entry.anchorToSelf ?? false,
+    entry.parentHops ?? 0,
+    entry.hasExplicitPrefix,
+  ]);
 
 const cloneMacroWithAlias = (
   macro: MacroDefinition,

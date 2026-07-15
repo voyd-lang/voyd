@@ -172,6 +172,199 @@ pub use self::macros::all
     expect((instance.exports.main as () => number)()).toBe(42);
   });
 
+  it("re-expands modules after generated imports load macros", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const macrosPath = `${root}${sep}generated_macros.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+macro import_generated_macros()
+  syntax_template (use src::generated_macros::all)
+
+import_generated_macros()
+declare_helper()
+
+pub fn main() -> f64
+  helper()
+`,
+      [macrosPath]: `
+pub macro declare_helper()
+  syntax_template (fn helper() -> f64
+    42.0)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("re-expands importers when generated re-exports add macros", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const brokerPath = `${root}${sep}broker.voyd`;
+    const macrosPath = `${root}${sep}generated_macros.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use src::broker::all
+
+declare_helper()
+
+pub fn main() -> f64
+  helper()
+`,
+      [brokerPath]: `
+macro import_generated_macros()
+  syntax_template (pub use src::generated_macros::all)
+
+import_generated_macros()
+`,
+      [macrosPath]: `
+pub macro declare_helper()
+  syntax_template (fn helper() -> f64
+    42.0)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("rebuilds exported macro scopes after generated imports load", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const brokerPath = `${root}${sep}broker.voyd`;
+    const macrosPath = `${root}${sep}generated_macros.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use src::broker::all
+
+declare_helper()
+
+pub fn main() -> f64
+  helper()
+`,
+      [brokerPath]: `
+macro import_generated_macros()
+  syntax_template (use src::generated_macros::all)
+
+import_generated_macros()
+
+pub macro declare_helper()
+  answer()
+`,
+      [macrosPath]: `
+pub macro answer()
+  syntax_template (fn helper() -> f64
+    42.0)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("resolves generated pkg self uses against generated inline modules", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const pkgPath = `${root}${sep}pkgs${sep}arith${sep}pkg.voyd`;
+    const macrosPath = `${root}${sep}generated_macros.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use src::pkgs::arith::pkg::all
+
+declare_helper()
+
+pub fn main() -> f64
+  helper()
+`,
+      [pkgPath]: `
+macro declare_macros_module()
+  emit_many(
+    \`(mod macros (block (pub use src::generated_macros::all))),
+    \`(pub use self::macros::all)
+  )
+
+declare_macros_module()
+`,
+      [macrosPath]: `
+pub macro declare_helper()
+  syntax_template (fn helper() -> f64
+    42.0)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("re-expands when a generated use changes visibility", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const brokerPath = `${root}${sep}broker.voyd`;
+    const macrosPath = `${root}${sep}generated_macros.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use src::broker::all
+
+declare_helper()
+
+pub fn main() -> f64
+  helper()
+`,
+      [brokerPath]: `
+use src::generated_macros::all
+
+macro export_generated_macros()
+  syntax_template (pub use src::generated_macros::all)
+
+export_generated_macros()
+`,
+      [macrosPath]: `
+pub macro declare_helper()
+  syntax_template (fn helper() -> f64
+    42.0)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("preserves literal numeric types when splicing macro arguments", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;
