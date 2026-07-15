@@ -335,15 +335,20 @@ export function createVxDomRenderer(
     },
     hydrate(input: unknown) {
       const nextFrame = flattenRenderFrame(normalizeRenderFrame(input));
-      applyFrame(nextFrame, () => {
-        hydrateContainer(
-          container,
-          nextFrame.root,
-          options.handlers,
-          options.onHydrationMismatch,
-          options.deferHydrationReconciliation,
-        );
-      });
+      try {
+        applyFrame(nextFrame, () => {
+          hydrateContainer(
+            container,
+            nextFrame.root,
+            options.handlers,
+            options.onHydrationMismatch,
+            options.deferHydrationReconciliation,
+          );
+        });
+      } catch (error) {
+        detach();
+        throw error;
+      }
     },
     detach,
     dispose() {

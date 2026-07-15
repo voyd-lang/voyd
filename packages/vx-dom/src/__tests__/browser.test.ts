@@ -346,11 +346,12 @@ describe("vx-dom browser renderer", () => {
     ));
   });
 
-  it("releases newly retained handlers when hydration throws", () => {
-    container.innerHTML = `<button class="server">Save</button>`;
+  it("detaches partial listeners and releases handlers when hydration throws", () => {
+    container.innerHTML = `<button><span>Save</span></button>`;
+    const dispatch = vi.fn(async () => undefined);
     const releaseMany = vi.fn();
     const renderer = createVxDomRenderer(container, {
-      handlers: { dispatch: vi.fn(async () => undefined), releaseMany },
+      handlers: { dispatch, releaseMany },
       onHydrationMismatch: () => {
         throw new Error("mismatch callback failed");
       },
@@ -361,10 +362,13 @@ describe("vx-dom browser renderer", () => {
       root: {
         kind: "map",
         handlerId: 9,
-        child: { ...buttonNode(7), attrs: { class: "client" } },
+        child: buttonNode(7),
       },
     })).toThrow("mismatch callback failed");
     expect(releaseMany).toHaveBeenCalledWith([7]);
+    container.querySelector("button")!.click();
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(renderer.getSnapshot()).toBeUndefined();
   });
 
   it("uses structured styles consistently across hydration and updates", () => {
