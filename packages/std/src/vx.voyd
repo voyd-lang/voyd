@@ -2048,12 +2048,15 @@ pub fn next<Model, Msg>({ model: Model, cmd: Cmd<Msg> }) -> Program<Model, Msg>
 /// Lifts a child program result through a retained model mapper.
 pub fn map_model<Model, NextModel, Msg>({
   program: Program<Model, Msg>,
-  handler_id: i32
+  handler_id: i32,
+  hydrate_handler_id?: i32
 }) -> Program<NextModel, Msg>
   let ~out = Dict<String, MsgPack>::init()
   out.set("kind", "program_map_model")
   out.set("child", program.payload)
   out.set("handlerId", msgpack::make_i32(handler_id))
+  if hydrate_handler_id is Some:
+    out.set("hydrateHandlerId", msgpack::make_i32(hydrate_handler_id.value))
   Program<NextModel, Msg> { payload: msgpack::make_map(out) }
 
 /// Lifts a child program result through a typed model mapper.
@@ -2064,6 +2067,19 @@ pub fn map_model<Model, NextModel, Msg>(
   map_model<Model, NextModel, Msg>(
     program: program,
     handler_id: retain_program_callback_id(handler)
+  )
+
+/// Lifts a child program through model mappers in both runtime directions.
+/// The hydrate mapper is required when the mapped program adopts an SSR model.
+pub fn map_model<Model, NextModel, Msg>({
+  program: Program<Model, Msg>,
+  map: fn(Model) -> NextModel,
+  hydrate: fn(NextModel) -> Model
+}) -> Program<NextModel, Msg>
+  map_model<Model, NextModel, Msg>(
+    program: program,
+    handler_id: retain_program_callback_id(map),
+    hydrate_handler_id: retain_program_callback_id(hydrate)
   )
 
 /// Lifts a child program result through a retained message mapper.
@@ -2089,12 +2105,14 @@ pub fn map_message<Model, ChildMsg, ParentMsg>(
 
 pub fn program<Model, Msg>({
   init: fn() : (open) -> Model,
+  hydrate: fn(Model) : (open) -> Program<Model, Msg> = ((model: Model) : (open) -> Program<Model, Msg>) => next(model),
   step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>,
   subscriptions: fn(Model) : (open) -> Sub<Msg> = ((_model: Model) : (open) -> Sub<Msg>) => Sub<Msg>::none()
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
+    hydrate_id: retain_program_callback_id(hydrate),
     step_id: retain_program_callback_id(step),
     view_id: retain_program_callback_id(view),
     subscriptions_id: retain_program_callback_id(subscriptions)
@@ -2102,12 +2120,14 @@ pub fn program<Model, Msg>({
 
 pub fn program<Model, Msg>({
   init: fn() : (open) -> Program<Model, Msg>,
+  hydrate: fn(Model) : (open) -> Program<Model, Msg> = ((model: Model) : (open) -> Program<Model, Msg>) => next(model),
   step: fn(Model, Msg) : (open) -> Program<Model, Msg>,
   view: fn(Model) : (open) -> Html<Msg>,
   subscriptions: fn(Model) : (open) -> Sub<Msg> = ((_model: Model) : (open) -> Sub<Msg>) => Sub<Msg>::none()
 }) -> Program<Model, Msg>
   program_handlers<Model, Msg>(
     init_id: retain_program_callback_id(init),
+    hydrate_id: retain_program_callback_id(hydrate),
     step_id: retain_program_callback_id(step),
     view_id: retain_program_callback_id(view),
     subscriptions_id: retain_program_callback_id(subscriptions)
@@ -2115,6 +2135,7 @@ pub fn program<Model, Msg>({
 
 fn program_handlers<Model, Msg>({
   init_id: i32,
+  hydrate_id: i32,
   step_id: i32,
   view_id: i32,
   subscriptions_id?: i32
@@ -2122,6 +2143,7 @@ fn program_handlers<Model, Msg>({
   let ~out = Dict<String, MsgPack>::init()
   out.set("kind", "program")
   out.set("initHandlerId", msgpack::make_i32(init_id))
+  out.set("hydrateHandlerId", msgpack::make_i32(hydrate_id))
   out.set("stepHandlerId", msgpack::make_i32(step_id))
   out.set("viewHandlerId", msgpack::make_i32(view_id))
   if subscriptions_id is Some:

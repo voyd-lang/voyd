@@ -27,7 +27,10 @@ npm run dev
 The starter includes Vite, Tailwind CSS, Voyd compilation, the JavaScript host,
 and the VX browser runtime. Its main files are:
 
-- `src/main.voyd`: your model, messages, application logic, and views.
+- `src/app/model.voyd`: model definitions and initial state.
+- `src/app/update.voyd`: messages and transitions.
+- `src/app/ui.voyd`: views and components.
+- `src/main.voyd`: the small `Program` composition entrypoint.
 - `src/main.ts`: loads the compiled Wasm module and mounts the app.
 - `src/style.css`: global styles and Tailwind configuration.
 - `scripts/compile-voyd.mjs`: compiles Voyd and generates host adapters.
@@ -262,8 +265,23 @@ style(name: "display", value: "grid")
 styles([("display", "grid"), ("gap", "0.5rem")])
 ```
 
+These form properties have stable server representations on the elements where
+HTML defines matching behavior: `value` on `input` and `textarea`, `checked` on
+`input`, and `disabled` on disableable form controls. A controlled `textarea`
+must render the same value as its text child. In particular, `value` on `select`
+is browser-only because HTML derives its initial selection from `selected`
+options. Other `prop` names remain available for browser-only views, but the SSR
+renderers reject combinations that would emit different server semantics. Use
+`attr` for ordinary HTML attributes. Structured style values are single
+declaration values and reject semicolons, exclamation marks, and control
+characters; use classes for more complex styling.
+
 HTML syntax is preferred. `text`, `fragment`, `html_element`, and `element` are
-available for helpers that build trees dynamically.
+available for helpers that build trees dynamically. Dynamic HTML tag names must
+be lowercase, as must names passed to `attr`; use the canonical `class` name
+rather than DOM spellings such as `className`. Void elements such as `input`, `img`, and `br` cannot have
+children; VX rejects those trees before rendering so browser and server output
+cannot diverge.
 
 ## Events And Forms
 
@@ -635,10 +653,16 @@ browser:
 voyd bootstrap my-site --template web-ssr
 ```
 
-The server sends a complete document, the initial model, and a client entry URL.
-The browser creates the same VX application with that model and calls
-`hydrateVxApp`, preserving the server-rendered DOM. See [Web](./web.md) for the
-complete server and hydration workflow.
+The shared `src/app` code owns the model, transitions, and exact markup. Its
+`static_view` omits retained browser callback descriptors while calling the same
+internal view implementation as the interactive `view`; this prevents
+server-request callback leaks without duplicating UI. The server wraps that
+markup in the document shell and sends its initial model plus a structured
+hydration root. The browser creates the same VX
+application with that model and calls `hydrateVxApp`, preserving matching DOM
+and reporting mismatches in development. Server-only routes and persistence stay
+under `src/server`; Wasm loading stays in the TypeScript bridge. See
+[Web](./web.md) for the complete server and hydration workflow.
 
 ## Browser Runtime Integration
 

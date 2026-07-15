@@ -5,14 +5,44 @@ import { spawnSync } from "node:child_process";
 import { resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
+import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 
 const testDir = fileURLToPath(new URL(".", import.meta.url));
 const repoRoot = resolve(testDir, "../../../../");
 const tsxPath = resolve(repoRoot, "node_modules/.bin/tsx");
 const distCliPath = resolve(repoRoot, "apps/cli/dist/cli-dev.js");
 const CLI_E2E_TIMEOUT_MS = 60_000;
+const BOOTSTRAP_E2E_TIMEOUT_MS = 300_000;
 const cliE2eRuntime =
   process.env.VOYD_CLI_E2E_RUNTIME === "dist" ? "dist" : "source";
+const sdk = createSdk();
+
+const expectCompileSuccess = (result: CompileResult): void => {
+  if (result.success) {
+    return;
+  }
+
+  throw new Error(result.diagnostics
+    .map((diagnostic) => `${diagnostic.span.file}: ${diagnostic.message}`)
+    .join("\n"));
+};
+
+const compileBootstrapEntry = async ({
+  target,
+  entry,
+}: {
+  target: string;
+  entry: string;
+}): Promise<void> => {
+  expectCompileSuccess(await sdk.compile({
+    entryPath: resolve(target, "src", entry),
+    optimize: true,
+    roots: {
+      src: resolve(target, "src"),
+      pkgDirs: [resolve(repoRoot, "packages")],
+    },
+  }));
+};
 
 const writePackageFixture = async (packageSrcRoot: string): Promise<void> => {
   await mkdir(packageSrcRoot, { recursive: true });
@@ -613,8 +643,8 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   });
 });
 
-describe("voyd cli bootstrap command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
-  // Bootstrap file contents are covered by bootstrap unit tests. CLI e2e validates command wiring and exit/reporting.
+describe("voyd cli bootstrap command", () => {
+  // Unit tests own scaffold contents. E2E proves CLI wiring and that each generated Voyd entry compiles.
   it("scaffolds a vx-spa project", async () => {
     assertCliRunnerAvailable();
 
@@ -631,11 +661,40 @@ describe("voyd cli bootstrap command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
       const packageJson = JSON.parse(
         await readFile(resolve(root, "demo-app", "package.json"), "utf8"),
       ) as { scripts: Record<string, string> };
-      expect(packageJson.scripts.build).toBe("vite build");
+      expect(packageJson.scripts.build).toBe("npm run typecheck && vite build");
+      await compileBootstrapEntry({
+        target: resolve(root, "demo-app"),
+        entry: "main.voyd",
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, BOOTSTRAP_E2E_TIMEOUT_MS);
+
+  it("scaffolds a compilable web-ssr project", async () => {
+    assertCliRunnerAvailable();
+
+    const root = await createFixture();
+    const target = resolve(root, "demo-app");
+    try {
+      const result = runCli(root, [
+        "bootstrap",
+        "demo-app",
+        "--template",
+        "web-ssr",
+      ]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      if (result.status !== 0) {
+        throw new Error(`voyd bootstrap failed: ${output}`);
+      }
+
+      expect(output).toContain("Created web-ssr project");
+      await compileBootstrapEntry({ target, entry: "main.voyd" });
+      await compileBootstrapEntry({ target, entry: "client.voyd" });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  }, BOOTSTRAP_E2E_TIMEOUT_MS);
 });
 
 describe("voyd cli diagnostics output", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
