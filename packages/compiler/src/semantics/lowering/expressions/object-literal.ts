@@ -60,6 +60,7 @@ export const lowerNominalObjectLiteralCall = ({
     ast: ast.syntaxId,
     span: toSourceSpan(ast),
     literalKind: "nominal",
+    nominalConstruction: "fieldwise-call",
     target,
     targetSymbol,
     entries: arguments_.map((argument) => ({

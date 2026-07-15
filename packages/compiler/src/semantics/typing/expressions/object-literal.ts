@@ -410,8 +410,12 @@ const typeNominalObjectLiteral = (
     });
   }
 
+  const typeArgumentCount =
+    expr.nominalConstruction === "fieldwise-call"
+      ? Math.max(template.params.length, explicitTypeArgs.length)
+      : template.params.length;
   const typeArgs = Array.from(
-    { length: Math.max(template.params.length, explicitTypeArgs.length) },
+    { length: typeArgumentCount },
     (_, index) => {
       const param = template.params[index];
       const explicit = explicitTypeArgs[index];

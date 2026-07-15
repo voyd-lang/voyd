@@ -294,6 +294,24 @@ pub fn main() -> i32
     expect(() => semanticsPipeline(ast)).toThrow(/argument count mismatch/i);
   });
 
+  it("keeps brace construction compatible with union member type arguments", () => {
+    const ast = parse(
+      `
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+pub fn main() -> i32
+  let _value: Option<i32> = None<i32> {}
+  0
+`,
+      "/proj/src/brace-union-member-type-argument.voyd",
+    );
+
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toHaveLength(0);
+  });
+
   it("rejects uninferable generic alias arguments in fieldwise calls", () => {
     const ast = parse(
       `
