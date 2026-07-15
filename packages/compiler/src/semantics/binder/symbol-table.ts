@@ -169,6 +169,11 @@ export class SymbolTable {
     return this.resolveAllInternal(name, fromScope);
   }
 
+  symbolsNamedInScope(name: string, scope: ScopeId): readonly SymbolId[] {
+    const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
+    return [...(bucket.nameIndex.get(name) ?? [])];
+  }
+
   resolveWhere(
     name: string,
     fromScope: ScopeId,

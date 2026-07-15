@@ -1151,6 +1151,45 @@ pub fn main() -> i32
     ).toHaveLength(0);
   });
 
+  it("reports module import collisions with local union member aliases", async () => {
+    const srcRoot = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}a.voyd`]: `
+pub fn foo() -> i32
+  1
+`,
+      [`${srcRoot}${sep}main.voyd`]: `
+obj Apple {}
+obj Banana {}
+type Fruit = Apple | Banana
+
+use Fruit::Apple as A
+use src::a as A
+
+pub fn main() -> i32
+  0
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(
+      combinedDiagnostics.some(
+        (entry) =>
+          entry.code === "BD0001" &&
+          entry.message.includes("Cannot import A as module") &&
+          entry.message.includes("already bound as type"),
+      ),
+      JSON.stringify(combinedDiagnostics),
+    ).toBe(true);
+  });
+
   it("deduplicates the same namespace member across re-export paths", async () => {
     const srcRoot = resolve("/proj/src");
     const host = createMemoryHost({

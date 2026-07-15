@@ -45,6 +45,7 @@ describe("SymbolTable", () => {
     expect(table.resolve("temp", table.rootScope)).toBeUndefined();
     expect(table.resolve("root", table.rootScope)).toBeDefined();
     expect(table.resolve("alias", table.rootScope)).toBe(root);
+    expect(table.symbolsNamedInScope("alias", table.rootScope)).toEqual([root]);
   });
 
   it("supports kind-aware resolution domains", () => {
