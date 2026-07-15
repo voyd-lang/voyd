@@ -196,8 +196,7 @@ get("/api/articles/:slug") do(params: ArticleParams):
 ```
 
 Use `response_dto_json(Response::created(), value:)` to choose the status,
-`result_dto_json` for a `Result`, and `option_dto_json` when absence should be a
-404. Use `response_json(value)` for an existing `JsonValue`; the root-level
+`result_dto_json` for a `Result`, and `option_dto_json` when absence should be a 404. Use `response_json(value)` for an existing `JsonValue`; the root-level
 `json()` name is reserved for the JSON request-body policy.
 
 ## Typed Request Data
@@ -588,6 +587,20 @@ Render the initial model, stable root id, target selector, and client entry
 together:
 
 ```voyd
+use pkg::web::all
+use std::string::type::String
+use std::vx::all
+
+type Model = { body: String }
+
+enum Msg
+  Edit { value: String }
+
+fn view(model: Model) -> Html<Msg>
+  <textarea on_input={(event: InputEvent) -> Msg => Msg::Edit { value: event.value }}>
+    {model.body}
+  </textarea>
+
 fn article_page(model: Model) -> Response
   html_response(
     Response::ok(),
@@ -599,10 +612,10 @@ fn article_page(model: Model) -> Response
         <link rel="stylesheet" href="/assets/client.css" />
       </head>
       <body>
-        <div id="app">{static_view(model)}</div>
+        <div id="app">{view(model)}</div>
       </body>
     </html>,
-    hydrate: hydrate_named(
+    hydrate: hydrate_named<Model>(
       id: "article-editor",
       target: "#app",
       entry: "/assets/client.js",
@@ -666,21 +679,25 @@ const app = createVoydVxAppRuntime({
 const mounted = await hydrateVxApp({
   container: hydration.container,
   app,
-  onHydrationMismatch: import.meta.env.MODE === "development"
-    ? (mismatch) => console.warn("Voyd hydration mismatch", mismatch)
-    : undefined,
+  onHydrationMismatch:
+    import.meta.env.MODE === "development"
+      ? (mismatch) => console.warn("Voyd hydration mismatch", mismatch)
+      : undefined,
 });
 ```
 
 The element selected by `target` is the render container. Its server-rendered
-children and the client `view` must produce the same initial markup; share an
-internal view function rather than maintaining server and client copies. The
-server variant should omit retained callback event descriptors, which are not
-part of HTML and would otherwise remain in a long-running server host. The
-starter's `static_view` and `view` call the same internal editor with server or
-browser event wiring. Hydration preserves
-matching DOM, reports drift through `onHydrationMismatch`, and repairs mismatches
-so the application can continue.
+children and the client `view` must produce the same initial markup. Call the
+same `view(model)` on the server and browser rather than maintaining two view
+variants. Hydration preserves matching DOM, reports drift through
+`onHydrationMismatch`, and repairs mismatches so the application can continue.
+
+`render`, `document`, and `html_response` automatically clean up temporary event
+handlers created during server rendering, whether rendering succeeds or fails.
+This lets server and browser code safely share the same `view(model)`. Browser
+event handlers remain active until the mounted application is disposed. If you
+use a low-level API that accepts an explicit `handler_id`, you remain responsible
+for that handler's lifetime.
 
 By default a `Program` adopts the server model without rerunning `init`. Provide
 a `hydrate` lifecycle callback when the browser must start a command from that

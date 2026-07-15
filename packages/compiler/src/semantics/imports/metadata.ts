@@ -10,6 +10,8 @@ const IMPORTABLE_KEYS = [
   "intrinsicType",
   "serializer",
   "boundary",
+  "methodAlias",
+  "overloadPreference",
   "enumNamespaceMembers",
   "enumNamespaceTypeParameterNames",
   "nominalTargetTypeArguments",
@@ -21,7 +23,7 @@ type ImportableMetadata = Partial<
 >;
 
 export const importableMetadataFrom = (
-  source?: Record<string, unknown>
+  source?: Record<string, unknown>,
 ): ImportableMetadata | undefined => {
   if (!source) {
     return undefined;
@@ -51,7 +53,7 @@ export const applyImportableMetadata = ({
 };
 
 export const importedModuleIdFrom = (
-  source?: Record<string, unknown>
+  source?: Record<string, unknown>,
 ): string | undefined => {
   const meta = source as
     | { import?: { moduleId?: unknown } | undefined }

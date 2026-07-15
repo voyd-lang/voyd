@@ -629,7 +629,7 @@ fn view(model: AppModel) -> Html<AppMsg>
   <main>
     {map_html(
       html: todos::view(model.todos),
-      handler_id: retain_typed_message_mapper(to_app)
+      handler: to_app
     )}
   </main>
 
@@ -654,15 +654,16 @@ voyd bootstrap my-site --template web-ssr
 ```
 
 The shared `src/app` code owns the model, transitions, and exact markup. Its
-`static_view` omits retained browser callback descriptors while calling the same
-internal view implementation as the interactive `view`; this prevents
-server-request callback leaks without duplicating UI. The server wraps that
-markup in the document shell and sends its initial model plus a structured
-hydration root. The browser creates the same VX
-application with that model and calls `hydrateVxApp`, preserving matching DOM
-and reporting mismatches in development. Server-only routes and persistence stay
-under `src/server`; Wasm loading stays in the TypeScript bridge. See
-[Web](./web.md) for the complete server and hydration workflow.
+`view(model)` is called by both the server document shell and the browser
+program, so you do not need a separate event-free view for server rendering.
+VX automatically cleans up temporary server-rendering event handlers, including
+when rendering fails. Browser event handlers remain active for the lifetime of
+the mounted application. The server sends the initial model plus a structured
+hydration root; the browser creates the same VX application with that model and
+calls `hydrateVxApp`, preserving matching DOM and reporting mismatches in
+development. Server-only routes and persistence stay under `src/server`; Wasm
+loading stays in the TypeScript bridge. See [Web](./web.md) for the complete
+server and hydration workflow.
 
 ## Browser Runtime Integration
 

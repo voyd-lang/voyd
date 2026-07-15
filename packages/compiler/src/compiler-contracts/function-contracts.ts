@@ -30,8 +30,30 @@ export const BOUNDARY_MSGPACK_CONTRACT_IDS = {
   newString: "voyd.std.boundary.msgpack.string-new",
 } as const;
 
+export const WEB_RENDER_CONTRACT_IDS = {
+  render: "voyd.web.render",
+  typedRender: "voyd.web.render-generic",
+  document: "voyd.web.document",
+  typedDocument: "voyd.web.document-generic",
+  hydratedDocument: "voyd.web.document-hydrated",
+  typedHydratedDocument: "voyd.web.document-hydrated-generic",
+  namedHydratedDocument: "voyd.web.hydrated-document",
+  typedNamedHydratedDocument: "voyd.web.hydrated-document-generic",
+  htmlResponse: "voyd.web.html-response",
+  typedHtmlResponse: "voyd.web.html-response-generic",
+  hydratedHtmlResponse: "voyd.web.html-response-hydrated",
+  typedHydratedHtmlResponse: "voyd.web.html-response-hydrated-generic",
+  namedHydratedHtmlResponse: "voyd.web.hydrated-html-response",
+  typedNamedHydratedHtmlResponse: "voyd.web.hydrated-html-response-generic",
+  responseHtml: "voyd.web.response-html-generic",
+  hydratedResponseHtml: "voyd.web.hydrated-response-html-generic",
+  legacyResponseHtml: "voyd.web.response-html",
+  legacyHydratedResponseHtml: "voyd.web.hydrated-response-html",
+} as const;
+
 export type CompilerFunctionContractId =
-  (typeof BOUNDARY_MSGPACK_CONTRACT_IDS)[keyof typeof BOUNDARY_MSGPACK_CONTRACT_IDS];
+  | (typeof BOUNDARY_MSGPACK_CONTRACT_IDS)[keyof typeof BOUNDARY_MSGPACK_CONTRACT_IDS]
+  | (typeof WEB_RENDER_CONTRACT_IDS)[keyof typeof WEB_RENDER_CONTRACT_IDS];
 
 /**
  * Loader bootstrap for synthetic entry modules that need every provider in the
@@ -44,7 +66,9 @@ export const BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES = [
   "std::string",
 ] as const;
 
-export type CompilerContractFeature = "boundary-msgpack";
+export type CompilerContractFeature =
+  | "boundary-msgpack"
+  | "retained-callback-call-scope";
 
 export type CompilerContractPrimitiveType =
   | "bool"
@@ -63,7 +87,10 @@ export type CompilerContractSharedType =
 export type CompilerContractTypeSpec =
   | { readonly kind: "primitive"; readonly name: CompilerContractPrimitiveType }
   | { readonly kind: "shared"; readonly name: CompilerContractSharedType }
-  | { readonly kind: "fixed-array"; readonly element: CompilerContractTypeSpec };
+  | {
+      readonly kind: "fixed-array";
+      readonly element: CompilerContractTypeSpec;
+    };
 
 export type CompilerFunctionContractSignatureSpec = {
   readonly typeParameters: 0;
@@ -80,20 +107,33 @@ export type CompilerFunctionContractSpec = {
   readonly feature: CompilerContractFeature;
   readonly expectedArity: number;
   readonly signature: CompilerFunctionContractSignatureSpec;
+  readonly provider:
+    | { readonly namespace: "std" }
+    | { readonly namespace: "pkg"; readonly packageName: string };
+  readonly methodAlias?: string;
+  readonly overloadPreference?: "least-generic";
 };
 
-const primitive = (name: CompilerContractPrimitiveType): CompilerContractTypeSpec =>
-  ({ kind: "primitive", name });
-const shared = (name: CompilerContractSharedType): CompilerContractTypeSpec =>
-  ({ kind: "shared", name });
-const fixedArray = (element: CompilerContractTypeSpec): CompilerContractTypeSpec =>
-  ({ kind: "fixed-array", element });
+const primitive = (
+  name: CompilerContractPrimitiveType,
+): CompilerContractTypeSpec => ({ kind: "primitive", name });
+const shared = (
+  name: CompilerContractSharedType,
+): CompilerContractTypeSpec => ({ kind: "shared", name });
+const fixedArray = (
+  element: CompilerContractTypeSpec,
+): CompilerContractTypeSpec => ({ kind: "fixed-array", element });
 
 const type = {
-  bool: primitive("bool"), i32: primitive("i32"), i64: primitive("i64"),
-  f32: primitive("f32"), f64: primitive("f64"),
-  msgpack: shared("msgpack"), string: shared("string"),
-  array: shared("msgpack-array"), map: shared("msgpack-map"),
+  bool: primitive("bool"),
+  i32: primitive("i32"),
+  i64: primitive("i64"),
+  f32: primitive("f32"),
+  f64: primitive("f64"),
+  msgpack: shared("msgpack"),
+  string: shared("string"),
+  array: shared("msgpack-array"),
+  map: shared("msgpack-map"),
 } as const;
 
 const contract = (
@@ -104,6 +144,7 @@ const contract = (
   id,
   feature: "boundary-msgpack",
   expectedArity: parameters.length,
+  provider: { namespace: "std" },
   signature: {
     typeParameters: 0,
     parameters: parameters.map((parameterType) => ({
@@ -116,11 +157,23 @@ const contract = (
 });
 
 const boundaryMsgpackContractSpecs: readonly CompilerFunctionContractSpec[] = [
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.encodeValue, [type.msgpack, type.i32, type.i32], type.i32),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.decodeValue, [type.i32, type.i32], type.msgpack),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.encodeValue,
+    [type.msgpack, type.i32, type.i32],
+    type.i32,
+  ),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.decodeValue,
+    [type.i32, type.i32],
+    type.msgpack,
+  ),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull, [], type.msgpack),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeBool, [type.bool], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeString, [type.string], type.msgpack),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.makeString,
+    [type.string],
+    type.msgpack,
+  ),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeArray, [type.array], type.msgpack),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeI32, [type.i32], type.msgpack),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeI64, [type.i64], type.msgpack),
@@ -128,30 +181,172 @@ const boundaryMsgpackContractSpecs: readonly CompilerFunctionContractSpec[] = [
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeF64, [type.f64], type.msgpack),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeMap, [type.map], type.msgpack),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackBool, [type.msgpack], type.bool),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackString, [type.msgpack], type.string),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackArray, [type.msgpack], type.array),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.unpackString,
+    [type.msgpack],
+    type.string,
+  ),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.unpackArray,
+    [type.msgpack],
+    type.array,
+  ),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackI32, [type.msgpack], type.i32),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackI64, [type.msgpack], type.i64),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackF32, [type.msgpack], type.f32),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackF64, [type.msgpack], type.f64),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackMap, [type.msgpack], type.map),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.arrayWithCapacity, [type.i32], type.array),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.arrayPush, [type.array, type.msgpack], type.array),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.arrayWithCapacity,
+    [type.i32],
+    type.array,
+  ),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.arrayPush,
+    [type.array, type.msgpack],
+    type.array,
+  ),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.arrayLength, [type.array], type.i32),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.arrayRawStorage, [type.array], fixedArray(type.msgpack)),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.arrayRawStorage,
+    [type.array],
+    fixedArray(type.msgpack),
+  ),
   contract(BOUNDARY_MSGPACK_CONTRACT_IDS.mapNew, [], type.map),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.mapSet, [type.map, type.string, type.msgpack], type.map),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.mapGet, [type.map, type.string], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.mapHas, [type.map, type.string], type.bool),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.mapTagIs, [type.map, type.string], type.bool),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.newString, [fixedArray(type.i32)], type.string),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.mapSet,
+    [type.map, type.string, type.msgpack],
+    type.map,
+  ),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.mapGet,
+    [type.map, type.string],
+    type.msgpack,
+  ),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.mapHas,
+    [type.map, type.string],
+    type.bool,
+  ),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.mapTagIs,
+    [type.map, type.string],
+    type.bool,
+  ),
+  contract(
+    BOUNDARY_MSGPACK_CONTRACT_IDS.newString,
+    [fixedArray(type.i32)],
+    type.string,
+  ),
+];
+
+const webRenderContract = ({
+  id,
+  expectedArity,
+  methodAlias,
+}: {
+  id: CompilerFunctionContractId;
+  expectedArity: number;
+  methodAlias?: string;
+}): CompilerFunctionContractSpec => ({
+  id,
+  feature: "retained-callback-call-scope",
+  expectedArity,
+  provider: { namespace: "pkg", packageName: "web" },
+  overloadPreference: "least-generic",
+  ...(methodAlias ? { methodAlias } : {}),
+  signature: {
+    typeParameters: 0,
+    parameters: Array.from({ length: expectedArity }, () => ({
+      type: type.i32,
+      optional: false as const,
+    })),
+    result: type.i32,
+    effect: "pure",
+  },
+});
+
+const webRenderContractSpecs: readonly CompilerFunctionContractSpec[] = [
+  webRenderContract({ id: WEB_RENDER_CONTRACT_IDS.render, expectedArity: 1 }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.typedRender,
+    expectedArity: 1,
+  }),
+  webRenderContract({ id: WEB_RENDER_CONTRACT_IDS.document, expectedArity: 1 }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.typedDocument,
+    expectedArity: 1,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.hydratedDocument,
+    expectedArity: 2,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.typedHydratedDocument,
+    expectedArity: 2,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.namedHydratedDocument,
+    expectedArity: 2,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.typedNamedHydratedDocument,
+    expectedArity: 2,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.htmlResponse,
+    expectedArity: 2,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.typedHtmlResponse,
+    expectedArity: 2,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.hydratedHtmlResponse,
+    expectedArity: 3,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.typedHydratedHtmlResponse,
+    expectedArity: 3,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.namedHydratedHtmlResponse,
+    expectedArity: 3,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.typedNamedHydratedHtmlResponse,
+    expectedArity: 3,
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.responseHtml,
+    expectedArity: 2,
+    methodAlias: "html",
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.hydratedResponseHtml,
+    expectedArity: 3,
+    methodAlias: "html",
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.legacyResponseHtml,
+    expectedArity: 2,
+    methodAlias: "html",
+  }),
+  webRenderContract({
+    id: WEB_RENDER_CONTRACT_IDS.legacyHydratedResponseHtml,
+    expectedArity: 3,
+    methodAlias: "html",
+  }),
 ];
 
 export const COMPILER_FUNCTION_CONTRACTS: ReadonlyMap<
   CompilerFunctionContractId,
   CompilerFunctionContractSpec
 > = new Map(
-  boundaryMsgpackContractSpecs.map((spec) => [spec.id, spec]),
+  [...boundaryMsgpackContractSpecs, ...webRenderContractSpecs].map((spec) => [
+    spec.id,
+    spec,
+  ]),
 );
 
 export const getCompilerFunctionContractSpec = (
