@@ -93,6 +93,7 @@ pub fn html<Model>(response: Response, { view: MsgPack, hydrate: Hydration<Model
   hydrated_html_response_impl<Model>(response, view: view, hydrate: hydrate)
 
 fn render_impl(value: MsgPack) -> String
+  vx::claim_server_render_callbacks(value)
   render_node(value)
 
 fn document_impl(value: MsgPack) -> String

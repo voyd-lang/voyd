@@ -1134,6 +1134,17 @@ export const compileIntrinsicCall = ({
             });
       return ctx.mod.call(importFn, [args[0]!], binaryen.i32);
     }
+    case "__render_claim_callback": {
+      assertArgCount(name, args, 1);
+      const importFn = ensureCallbackScopeImport({
+        name: "__voyd_claim_retained_callback",
+        base: "claim",
+        params: [binaryen.i32],
+        result: binaryen.none,
+        ctx,
+      });
+      return ctx.mod.call(importFn, [args[0]!], binaryen.none);
+    }
     case "__stable_callsite_id": {
       assertArgCount(name, args, 0);
       return ctx.mod.i32.const(stableCallsiteIdFor(call.span));

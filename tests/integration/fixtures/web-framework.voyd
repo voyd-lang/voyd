@@ -428,6 +428,15 @@ pub fn direct_hydration_failure_probe() -> String
     )
   )
 
+pub fn prebuilt_ssr_callback_scope_probe() -> String
+  let page = retained_ssr_view(false)
+  document(page)
+
+pub fn effectful_ssr_callback_scope_probe(): tasks::TaskRuntime -> i32
+  let _ = tasks::yield_now()
+  let _ = document(retained_ssr_view(false))
+  1
+
 pub fn mapped_ssr_callback_scope_probe() -> String
   let child: Html<MsgPack> = <button>Mapped</button>
   document(

@@ -187,6 +187,10 @@ describe("integration: pkg::web", () => {
     await expect(host.run("direct_hydration_failure_probe")).rejects.toThrow();
     expect(host.retainedCallbacks.size()).toBe(0);
     await expect(
+      host.run<string>("prebuilt_ssr_callback_scope_probe"),
+    ).resolves.toContain("<button>Rendered</button>");
+    expect(host.retainedCallbacks.size()).toBe(0);
+    await expect(
       host.run<string>("mapped_ssr_callback_scope_probe"),
     ).resolves.toContain("<button>Mapped</button>");
     expect(host.retainedCallbacks.size()).toBe(0);
@@ -278,6 +282,21 @@ describe("integration: pkg::web", () => {
       expect(cleanupLogs).toHaveBeenCalledWith(
         expect.stringContaining("injected cleanup failure"),
       );
+      expect(cleanupHost.retainedCallbacks.size()).toBe(0);
+      expect(cleanupRun.cancel("failure case complete")).toBe(true);
+      await expect(cleanupRun.outcome).resolves.toMatchObject({
+        kind: "cancelled",
+      });
+
+      const successfulCleanupRun = cleanupHost.runManaged<number>(
+        "effectful_ssr_callback_scope_probe",
+      );
+      await expect(successfulCleanupRun.outcome).resolves.toMatchObject({
+        kind: "failed",
+        error: expect.objectContaining({
+          message: "injected cleanup failure",
+        }),
+      });
       expect(cleanupHost.retainedCallbacks.size()).toBe(0);
     } finally {
       cleanupLogs.mockRestore();

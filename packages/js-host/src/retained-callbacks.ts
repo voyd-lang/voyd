@@ -17,6 +17,7 @@ export type RetainedCallbackScopeManager<Payload = unknown> = {
     ownerId: RetainedCallbackScopeOwner | undefined,
     handlerRef: WasmEventHandlerRef<Payload>,
   ): number;
+  claim(ownerId: RetainedCallbackScopeOwner, handlerId: number): void;
   endScope(ownerId: RetainedCallbackScopeOwner, scopeId: number): void;
   finishOwner(ownerId: RetainedCallbackScopeOwner): void;
 };
@@ -63,6 +64,7 @@ export function createRetainedCallbackScopeManager<Payload = unknown>(
   };
 
   const scopesByOwner = new Map<RetainedCallbackScopeOwner, Scope[]>();
+  const unscopedIdsByOwner = new Map<RetainedCallbackScopeOwner, Set<number>>();
   let nextScopeId = 1;
 
   const releaseScopes = (scopes: readonly Scope[]): void => {
@@ -94,7 +96,27 @@ export function createRetainedCallbackScopeManager<Payload = unknown>(
         activeScope.retainedIds.add(id);
         return id;
       }
+      const unscopedIds = unscopedIdsByOwner.get(ownerId) ?? new Set<number>();
+      unscopedIds.add(id);
+      unscopedIdsByOwner.set(ownerId, unscopedIds);
       return id;
+    },
+    claim(ownerId, handlerId) {
+      const unscopedIds = unscopedIdsByOwner.get(ownerId);
+      if (!unscopedIds?.has(handlerId)) {
+        return;
+      }
+      const activeScope = scopesByOwner.get(ownerId)?.at(-1);
+      if (!activeScope) {
+        throw new Error(
+          `cannot claim retained callback ${handlerId} without an active scope for owner ${String(ownerId)}`,
+        );
+      }
+      unscopedIds.delete(handlerId);
+      if (unscopedIds.size === 0) {
+        unscopedIdsByOwner.delete(ownerId);
+      }
+      activeScope.retainedIds.add(handlerId);
     },
     endScope(ownerId, scopeId) {
       const ownerScopes = scopesByOwner.get(ownerId);
@@ -113,6 +135,7 @@ export function createRetainedCallbackScopeManager<Payload = unknown>(
     finishOwner(ownerId) {
       const ownerScopes = scopesByOwner.get(ownerId) ?? [];
       scopesByOwner.delete(ownerId);
+      unscopedIdsByOwner.delete(ownerId);
       const retainedIds = ownerScopes.flatMap((scope) =>
         Array.from(scope.retainedIds),
       );

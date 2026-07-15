@@ -96,17 +96,30 @@ describe("retained event handler registry", () => {
     expect(() => registry.dispatch(retainedId, undefined)).not.toThrow();
   });
 
-  it("does not claim callbacks retained before a render scope begins", () => {
+  it("claims prebuilt render callbacks into the active scope", () => {
     const registry = createRetainedEventHandlerRegistry();
     const scopes = createRetainedCallbackScopeManager(registry);
-    const pendingId = scopes.retain("browser", vi.fn());
+    const pendingId = scopes.retain("render", vi.fn());
 
-    const scope = scopes.beginScope("browser");
-    scopes.endScope("browser", scope);
-    scopes.finishOwner("browser");
+    const scope = scopes.beginScope("render");
+    scopes.claim("render", pendingId);
+    scopes.endScope("render", scope);
+    scopes.finishOwner("render");
+
+    expect(registry.size()).toBe(0);
+  });
+
+  it("does not claim explicit caller-owned callbacks", () => {
+    const registry = createRetainedEventHandlerRegistry();
+    const scopes = createRetainedCallbackScopeManager(registry);
+    const explicitId = registry.retain(vi.fn());
+
+    const scope = scopes.beginScope("render");
+    scopes.claim("render", explicitId);
+    scopes.endScope("render", scope);
 
     expect(registry.size()).toBe(1);
-    registry.release(pendingId);
+    registry.release(explicitId);
   });
 
   it("does not track browser callbacks retained outside a scope", () => {

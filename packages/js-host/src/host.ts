@@ -455,6 +455,10 @@ const buildRetainedCallbackScopeImportModule = ({
     imports.end = ((scopeId: number) =>
       scopeManager.endScope(requireActiveScopeOwner(), scopeId)) as CallableFunction;
   }
+  if (importedNames.has("claim")) {
+    imports.claim = ((handlerId: number) =>
+      scopeManager.claim(requireActiveScopeOwner(), handlerId)) as CallableFunction;
+  }
   return { [CALLBACK_SCOPE_IMPORT_MODULE]: imports };
 };
 
@@ -1131,14 +1135,22 @@ export const createVoydHost = async ({
       const error = toError(reason);
       console.error(`[voyd] run resource cleanup failed: ${error.message}`);
     };
-    const finishRetainedCallbackScopesForTask = (taskId: number): void => {
+    const reportRetainedCallbackScopeCleanupFailure = (
+      taskId: number,
+      error: Error,
+    ): void => {
+      console.error(
+        `[voyd] retained callback scope cleanup failed for task ${taskId}: ${error.message}`,
+      );
+    };
+    const finishRetainedCallbackScopesForTask = (
+      taskId: number,
+    ): Error | undefined => {
       try {
         callbackScopeManager.finishOwner(callbackScopeOwnerForTask(taskId));
+        return undefined;
       } catch (reason) {
-        const error = toError(reason);
-        console.error(
-          `[voyd] retained callback scope cleanup failed for task ${taskId}: ${error.message}`,
-        );
+        return toError(reason);
       }
     };
     const registerRunResourceCleanup = (cleanup: EffectResourceCleanup): void => {
@@ -1776,6 +1788,44 @@ export const createVoydHost = async ({
               .map((childId) => state.tasks.get(childId))
               .filter((entry): entry is TaskRecord => !!entry && entry.state !== "terminal");
 
+          const terminalForCompletion = ({
+            taskId,
+            completion,
+            unobservedFailure,
+          }: {
+            taskId: number;
+            completion: TaskCompletion;
+            unobservedFailure?: FailedTaskTerminal;
+          }): TaskTerminal => {
+            const cleanupFailure = finishRetainedCallbackScopesForTask(taskId);
+            if (
+              completion.kind === "value" &&
+              !unobservedFailure &&
+              cleanupFailure
+            ) {
+              return {
+                kind: "failed",
+                error: cleanupFailure,
+                message: cleanupFailure.message,
+                observed: false,
+              };
+            }
+            if (cleanupFailure) {
+              reportRetainedCallbackScopeCleanupFailure(taskId, cleanupFailure);
+            }
+            if (completion.kind === "value" && unobservedFailure) {
+              return {
+                kind: "failed",
+                error: new Error(
+                  `unobserved child task failure: ${unobservedFailure.message}`,
+                ),
+                message: unobservedFailure.message,
+                observed: false,
+              };
+            }
+            return { ...completion, observed: false };
+          };
+
           const maybeCompleteOwner = (taskId: number): void => {
             const owner = state.tasks.get(taskId);
             if (!owner || owner.state !== "completing" || !owner.pendingCompletion) {
@@ -1792,24 +1842,12 @@ export const createVoydHost = async ({
             const pending = owner.pendingCompletion;
             owner.pendingCompletion = undefined;
             owner.pendingResume = undefined;
-            if (pending.kind === "value" && unobservedFailure) {
-              owner.state = "terminal";
-              owner.terminal = {
-                kind: "failed",
-                error: new Error(
-                  `unobserved child task failure: ${unobservedFailure.message}`
-                ),
-                message: unobservedFailure.message,
-                observed: false,
-              };
-            } else {
-              owner.state = "terminal";
-              owner.terminal = {
-                ...pending,
-                observed: false,
-              };
-            }
-            finishRetainedCallbackScopesForTask(owner.id);
+            owner.state = "terminal";
+            owner.terminal = terminalForCompletion({
+              taskId: owner.id,
+              completion: pending,
+              unobservedFailure,
+            });
             owner.waiters.forEach(({ taskId: waiterTaskId, request }) => {
               try {
                 owner.terminal!.observed = true;
@@ -1884,21 +1922,11 @@ export const createVoydHost = async ({
             current.state = "terminal";
             current.pendingCompletion = undefined;
             current.pendingResume = undefined;
-            current.terminal =
-              completion.kind === "value" && unobservedFailure
-                ? {
-                    kind: "failed",
-                    error: new Error(
-                      `unobserved child task failure: ${unobservedFailure.message}`
-                    ),
-                    message: unobservedFailure.message,
-                    observed: false,
-                  }
-                : {
-                    ...completion,
-                    observed: false,
-                  };
-            finishRetainedCallbackScopesForTask(current.id);
+            current.terminal = terminalForCompletion({
+              taskId: current.id,
+              completion,
+              unobservedFailure,
+            });
             current.waiters.forEach(({ taskId: waiterTaskId, request }) => {
               try {
                 current.terminal!.observed = true;

@@ -7360,6 +7360,18 @@ const typeIntrinsicCall = (
         ctx,
         typeArguments,
       });
+    case "__render_claim_callback":
+      assertIntrinsicArgCount({ name, args, expected: 1 });
+      assertNoIntrinsicTypeArgs(name, typeArguments);
+      ensureTypeMatches(
+        args[0]!.type,
+        getPrimitiveType(ctx, "i32"),
+        ctx,
+        state,
+        `${name} handler id`,
+        spanForArg(args[0]!, ctx),
+      );
+      return getPrimitiveType(ctx, "void");
     case "__stable_callsite_id":
       assertIntrinsicArgCount({
         name: "__stable_callsite_id",

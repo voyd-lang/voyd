@@ -805,7 +805,8 @@ const shouldCompileIntrinsicCall = ({
   external ||
   intrinsicName === "__retain_callback" ||
   intrinsicName === "__boundary_retain_callback" ||
-  intrinsicName === "__render_retain_callback";
+  intrinsicName === "__render_retain_callback" ||
+  intrinsicName === "__render_claim_callback";
 
 const resolveTargetFunctionId = ({
   targets,

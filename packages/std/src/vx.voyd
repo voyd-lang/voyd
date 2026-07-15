@@ -173,6 +173,10 @@ fn retain_typed_event_handler_with_payload_id<Event, Msg>(handler: fn(Event) -> 
 fn retain_typed_html_message_mapper_id<From, To>(handler: fn(From) -> To): () -> i32
   __render_retain_callback(handler)
 
+@intrinsic(name: "__render_claim_callback", uses_signature: true)
+fn claim_render_callback_id(handler_id: i32): () -> void
+  void
+
 @intrinsic(name: "__boundary_retain_callback", uses_signature: true)
 fn retain_message_mapper_id(handler: fn(MsgPack) -> MsgPack): () -> i32
   0
@@ -992,6 +996,75 @@ pub fn retain_typed_event_payload_handler<Event, Msg>(handler: fn(Event) -> Msg)
 /// Retains a pure typed Voyd message mapper for commands, subscriptions, or events.
 pub fn retain_typed_message_mapper<From, To>(handler: fn(From) -> To): () -> i32
   retain_typed_message_mapper_id(handler)
+
+/// Associates closure-backed handlers in a prebuilt view with the active server render.
+pub fn claim_server_render_callbacks(value: MsgPack): () -> void
+  match(msgpack::unpack_array(value))
+    Ok<Array<MsgPack>> { value }:
+      claim_server_render_callback_array(value)
+      return void
+    Err:
+      void
+
+  match(msgpack::unpack_map(value))
+    Ok<Dict<String, MsgPack>> { value }:
+      claim_server_render_callback_map(value)
+    Err:
+      void
+
+fn claim_server_render_callback_array(values: Array<MsgPack>): () -> void
+  var index = 0
+  while index < values.len():
+    match(values.get(index))
+      Some<MsgPack> { value }:
+        claim_server_render_callbacks(value)
+      None:
+        void
+    index = index + 1
+
+fn claim_server_render_callback_map(value: Dict<String, MsgPack>): () -> void
+  match(value.get("kind"))
+    Some<MsgPack> { value: kind_value }:
+      match(msgpack::unpack_string(kind_value))
+        Ok<String> { value: kind }:
+          if kind == "event":
+            claim_server_render_callback_id(value)
+            return void
+          if kind == "map":
+            claim_server_render_callback_id(value)
+            claim_server_render_callback_field(value, "child")
+            return void
+          if kind == "element":
+            claim_server_render_callback_field(value, "events")
+            claim_server_render_callback_field(value, "children")
+            return void
+          if kind == "fragment":
+            claim_server_render_callback_field(value, "children")
+            return void
+        Err:
+          void
+    None:
+      void
+
+  claim_server_render_callback_field(value, "root")
+
+fn claim_server_render_callback_id(value: Dict<String, MsgPack>): () -> void
+  match(value.get("handlerId"))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_i32(value))
+        Ok<i32> { value: handler_id }:
+          claim_render_callback_id(handler_id)
+        Err:
+          void
+    None:
+      void
+
+fn claim_server_render_callback_field(value: Dict<String, MsgPack>, name: String): () -> void
+  match(value.get(name))
+    Some<MsgPack> { value }:
+      claim_server_render_callbacks(value)
+    None:
+      void
 
 /// Creates a versioned VX render frame.
 pub fn frame(root: MsgPack): () -> MsgPack
