@@ -11,6 +11,11 @@ type LegacyElement = {
   children?: unknown[];
 };
 
+const voidTags = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
+  "param", "source", "track", "wbr",
+]);
+
 export function normalizeRenderFrame(input: unknown): VxRenderFrame {
   const record = toRecord(input);
   if (record && "version" in record) {
@@ -24,13 +29,13 @@ export function normalizeRenderFrame(input: unknown): VxRenderFrame {
 }
 
 export function validateHtmlTagName(value: string, path = "tag"): void {
-  if (!/^[a-zA-Z][a-zA-Z0-9:-]*$/.test(value)) {
+  if (!/^[a-z][a-z0-9:-]*$/.test(value)) {
     throw new Error(`vx-dom: invalid HTML tag name at ${path}: ${JSON.stringify(value)}`);
   }
 }
 
 export function validateHtmlAttributeName(value: string, path = "attribute"): void {
-  if (!/^[^\s"'/>=\u0000-\u001f\u007f]+$/.test(value)) {
+  if (/[A-Z]/.test(value) || !/^[^\s"'/>=\u0000-\u001f\u007f]+$/.test(value)) {
     throw new Error(`vx-dom: invalid HTML attribute name at ${path}: ${JSON.stringify(value)}`);
   }
 }
@@ -38,6 +43,31 @@ export function validateHtmlAttributeName(value: string, path = "attribute"): vo
 export function validateCssPropertyName(value: string, path = "style"): void {
   if (!/^(--[a-zA-Z0-9_-]+|-[a-zA-Z][a-zA-Z0-9-]*|[a-zA-Z][a-zA-Z0-9-]*)$/.test(value)) {
     throw new Error(`vx-dom: invalid CSS property name at ${path}: ${JSON.stringify(value)}`);
+  }
+}
+
+export function validateCssPropertyValue(value: string, path = "style"): void {
+  if (/[;!\u0000-\u001f\u007f]/.test(value)) {
+    throw new Error(`vx-dom: invalid CSS property value at ${path}: ${JSON.stringify(value)}`);
+  }
+}
+
+export function validateDomPropertyName(value: string, path = "property"): void {
+  if (value !== "value" && value !== "checked" && value !== "disabled") {
+    throw new Error(`vx-dom: unsupported DOM property at ${path}: ${JSON.stringify(value)}`);
+  }
+}
+
+export function validateDomPropertyValue(
+  name: string,
+  value: unknown,
+  path = "property",
+): void {
+  const valid = name === "value"
+    ? typeof value === "string" || typeof value === "number"
+    : typeof value === "boolean";
+  if (!valid) {
+    throw new Error(`vx-dom: invalid DOM property value at ${path}: ${JSON.stringify(value)}`);
   }
 }
 
@@ -86,15 +116,18 @@ export function normalizeVNode(input: unknown): VNode {
 
 function normalizeElement(input: Record<string, unknown>): VxElementNode {
   const tag = typeof input.tag === "string" && input.tag ? input.tag : "div";
+  validateHtmlTagName(tag);
+  const children = normalizeChildren(input.children);
+  validateVoidElementChildren(tag, children, "element");
   return {
     kind: "element",
     tag,
     key: optionalString(input.key),
-    attrs: normalizeRecord(input.attrs),
-    props: normalizeRecord(input.props),
-    styles: normalizeStringRecord(input.styles),
+    attrs: normalizeValidatedRecord(input.attrs, "element.attrs", validateHtmlAttributeName),
+    props: normalizeValidatedProps(input.props, "element.props"),
+    styles: normalizeValidatedStyles(input.styles, "element.styles"),
     events: normalizeEvents(input.events),
-    children: normalizeChildren(input.children),
+    children,
   };
 }
 
@@ -103,12 +136,14 @@ function normalizeLegacyElement(input: LegacyElement): VxElementNode {
   const tag = input.name || "div";
   validateHtmlTagName(tag, "legacy.name");
   Object.keys(attributes ?? {}).forEach((key) => validateHtmlAttributeName(key, `legacy.attributes.${key}`));
+  const children = normalizeChildren(input.children);
+  validateVoidElementChildren(tag, children, "legacy element");
   return {
     kind: "element",
     tag,
     key: optionalString(attributes?.key),
     attrs: attributes,
-    children: normalizeChildren(input.children),
+    children,
   };
 }
 
@@ -134,15 +169,6 @@ function normalizeRecord(input: unknown): Record<string, unknown> | undefined {
   const record = toRecord(input);
   if (!record) return undefined;
   const entries = Object.entries(record).filter(([, value]) => value !== undefined);
-  return entries.length > 0 ? Object.fromEntries(entries) : undefined;
-}
-
-function normalizeStringRecord(input: unknown): Record<string, string> | undefined {
-  const record = toRecord(input);
-  if (!record) return undefined;
-  const entries = Object.entries(record)
-    .filter(([, value]) => value != null)
-    .map(([key, value]) => [key, String(value)]);
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
@@ -216,16 +242,32 @@ function normalizeVersionedElement(input: Record<string, unknown>, path: string)
     throw new Error(`vx-dom: invalid VX frame at ${path}.tag: expected non-empty string`);
   }
   validateHtmlTagName(input.tag, `${path}.tag`);
+  const children = normalizeVersionedChildren(input.children, `${path}.children`);
+  validateVoidElementChildren(input.tag, children, path);
   return {
     kind: "element",
     tag: input.tag,
     key: strictOptionalString(input.key, `${path}.key`),
-    attrs: normalizeVersionedRecord(input.attrs, `${path}.attrs`, validateHtmlAttributeName),
-    props: normalizeVersionedRecord(input.props, `${path}.props`),
-    styles: normalizeVersionedStyles(input.styles, `${path}.styles`),
+    attrs: normalizeValidatedRecord(input.attrs, `${path}.attrs`, validateHtmlAttributeName),
+    props: normalizeValidatedProps(input.props, `${path}.props`),
+    styles: normalizeValidatedStyles(input.styles, `${path}.styles`),
     events: normalizeVersionedEvents(input.events, `${path}.events`),
-    children: normalizeVersionedChildren(input.children, `${path}.children`),
+    children,
   };
+}
+
+function normalizeValidatedProps(
+  input: unknown,
+  path: string,
+): Record<string, unknown> | undefined {
+  const props = normalizeValidatedRecord(input, path);
+  if (!props) return undefined;
+  Object.entries(props).forEach(([name, value]) => {
+    if (name === "value" || name === "checked" || name === "disabled") {
+      validateDomPropertyValue(name, value, `${path}.${name}`);
+    }
+  });
+  return props;
 }
 
 function normalizeVersionedChildren(input: unknown, path: string): VNode[] {
@@ -236,7 +278,13 @@ function normalizeVersionedChildren(input: unknown, path: string): VNode[] {
   return input.map((child, index) => normalizeVersionedVNode(child, `${path}[${index}]`));
 }
 
-function normalizeVersionedRecord(
+function validateVoidElementChildren(tag: string, children: VNode[], path: string): void {
+  if (voidTags.has(tag) && children.length > 0) {
+    throw new Error(`vx-dom: void element at ${path} cannot have children`);
+  }
+}
+
+function normalizeValidatedRecord(
   input: unknown,
   path: string,
   validateName?: (name: string, path: string) => void,
@@ -251,13 +299,17 @@ function normalizeVersionedRecord(
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 
-function normalizeVersionedStyles(input: unknown, path: string): Record<string, string> | undefined {
+function normalizeValidatedStyles(input: unknown, path: string): Record<string, string> | undefined {
   if (input === undefined) return undefined;
-  const record = normalizeVersionedRecord(input, path, validateCssPropertyName);
+  const record = normalizeValidatedRecord(input, path, validateCssPropertyName);
   if (!record) return undefined;
   const entries = Object.entries(record)
     .filter(([, value]) => value != null)
-    .map(([key, value]) => [key, String(value)]);
+    .map(([key, value]) => {
+      const stringValue = String(value);
+      validateCssPropertyValue(stringValue, `${path}.${key}`);
+      return [key, stringValue];
+    });
   return entries.length > 0 ? Object.fromEntries(entries) : undefined;
 }
 

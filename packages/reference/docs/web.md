@@ -29,13 +29,18 @@ because it includes the Node host and development workflow. For an API, keep
 interactive site, use the complete starter.
 
 The generated project includes the Web package, VX server rendering and
-hydration, Vite, Tailwind CSS, and static assets. Its main files are:
+hydration, Vite, Tailwind CSS, and static assets. It separates code by runtime
+boundary:
 
-- `src/main.voyd`: the HTTP server, routes, server data, and rendered pages.
-- `src/client.voyd`: the VX application that runs after hydration.
-- `src/client.ts`: loads the client Wasm module and hydrates the page.
+- `src/app/`: the shared model, update logic, and exact interactive view used
+  by both server rendering and browser hydration.
+- `src/server/`: persistence and the server-only document shell.
+- `src/main.voyd`: the small HTTP routing and server-startup entrypoint.
+- `src/client.voyd`: the small browser `Program` entrypoint.
+- `src/client.ts`: the generic Wasm and hydration bridge.
 - `public/`: files served directly by the application.
-- `scripts/dev.mjs`: rebuilds the client and restarts the server in development.
+- `scripts/dev.mjs`: rebuilds both entrypoints and restarts the server when
+  shared source changes.
 - `scripts/serve.mjs`: compiles and runs the server.
 
 Useful commands are:
@@ -579,7 +584,8 @@ Use `render(view)` when you need an HTML fragment as a string. Use
 
 ### Hydrate An Interactive Page
 
-Render the initial model, target selector, and client entry together:
+Render the initial model, stable root id, target selector, and client entry
+together:
 
 ```voyd
 fn article_page(model: Model) -> Response
@@ -593,10 +599,11 @@ fn article_page(model: Model) -> Response
         <link rel="stylesheet" href="/assets/client.css" />
       </head>
       <body>
-        <div id="app">{view(model)}</div>
+        <div id="app">{static_view(model)}</div>
       </body>
     </html>,
-    hydrate: hydrate(
+    hydrate: hydrate_named(
+      id: "article-editor",
       target: "#app",
       entry: "/assets/client.js",
       model: model
@@ -604,22 +611,47 @@ fn article_page(model: Model) -> Response
   )
 ```
 
-The helper safely serializes the model into an `application/json` script and
-adds the module entry. The hydration model must be boundary-safe and must match
-the model expected by the client VX app.
+The helper safely serializes the model into an `application/json` script inside
+the document body and adds the module entry. Serialization failure stops the
+response instead of silently replacing the model. The hydration model must be
+boundary-safe and must match the model expected by the client VX app. Use a
+unique `id` for each interactive root; one document may contain several roots.
+Call `append_hydration` for each additional model when a page has more than one
+interactive region:
+
+```voyd
+let with_editor = append_hydration(
+  document(page),
+  hydrate_named(
+    id: "editor",
+    target: "#editor",
+    entry: "/assets/editor.js",
+    model: editor_model
+  )
+)
+let complete = append_hydration(
+  with_editor,
+  hydrate_named(
+    id: "presence",
+    target: "#presence",
+    entry: "/assets/presence.js",
+    model: presence_model
+  )
+)
+```
 
 In the client entry, read that model and hydrate instead of mounting a new tree:
 
 ```ts
 import { createVoydHost } from "@voyd-lang/sdk/js-host";
-import { createVoydVxAppRuntime, hydrateVxApp } from "@voyd-lang/vx-dom/browser";
+import {
+  createVoydVxAppRuntime,
+  hydrateVxApp,
+  readVoydHydrationRoot,
+} from "@voyd-lang/vx-dom/browser";
 import wasmUrl from "./generated/client.wasm?url";
 
-const data = document.querySelector<HTMLScriptElement>("[data-voyd-hydration]");
-const selector = data?.dataset.voydHydration;
-const container = selector ? document.querySelector(selector) : null;
-
-if (!data || !container) throw new Error("Missing hydration data");
+const hydration = readVoydHydrationRoot("article-editor");
 
 const wasm = new Uint8Array(await (await fetch(wasmUrl)).arrayBuffer());
 const host = await createVoydHost({
@@ -629,15 +661,51 @@ const host = await createVoydHost({
 });
 const app = createVoydVxAppRuntime({
   host,
-  initialModel: JSON.parse(data.textContent ?? "null"),
+  initialModel: hydration.model,
 });
-const mounted = await hydrateVxApp({ container, app });
+const mounted = await hydrateVxApp({
+  container: hydration.container,
+  app,
+  onHydrationMismatch: import.meta.env.MODE === "development"
+    ? (mismatch) => console.warn("Voyd hydration mismatch", mismatch)
+    : undefined,
+});
 ```
 
-The server view and client `view` must produce the same initial tree. Browser
-commands and subscriptions begin after hydration. The `web-ssr` starter contains
-the complete build and host wiring, so it is the best starting point for this
-architecture.
+The element selected by `target` is the render container. Its server-rendered
+children and the client `view` must produce the same initial markup; share an
+internal view function rather than maintaining server and client copies. The
+server variant should omit retained callback event descriptors, which are not
+part of HTML and would otherwise remain in a long-running server host. The
+starter's `static_view` and `view` call the same internal editor with server or
+browser event wiring. Hydration preserves
+matching DOM, reports drift through `onHydrationMismatch`, and repairs mismatches
+so the application can continue.
+
+By default a `Program` adopts the server model without rerunning `init`. Provide
+a `hydrate` lifecycle callback when the browser must start a command from that
+model. Subscriptions are synchronized after hydration:
+
+```voyd
+pub fn app() -> Program<Model, Msg>
+  program({ init, hydrate, step, view, subscriptions })
+
+fn hydrate(model: Model) -> Program<Model, Msg>
+  next(model: model, cmd: reconnect(model))
+```
+
+A `map_model` program needs mappings in both directions to hydrate a parent
+snapshot. Use the labeled overload so the runtime can recover the child model:
+
+```voyd
+map_model(
+  program: child_program,
+  map: (child) => AppModel { child: child },
+  hydrate: (parent) => parent.child
+)
+```
+
+The `web-ssr` starter contains the complete shared-view, build, and host wiring.
 
 ## Composing Applications
 

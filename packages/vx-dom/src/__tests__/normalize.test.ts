@@ -40,6 +40,18 @@ describe("vx-dom VNode normalization", () => {
     })).toThrow("invalid VX frame at root.tag");
     expect(() => normalizeRenderFrame({
       version: 1,
+      root: { kind: "element", tag: "SCRIPT" },
+    })).toThrow("invalid HTML tag name at root.tag");
+    expect(() => normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "input",
+        children: [{ kind: "text", value: "not allowed" }],
+      },
+    })).toThrow("void element at root cannot have children");
+    expect(() => normalizeRenderFrame({
+      version: 1,
       root: {
         kind: "element",
         tag: "button",
@@ -51,9 +63,59 @@ describe("vx-dom VNode normalization", () => {
       root: {
         kind: "element",
         tag: "button",
+        attrs: { className: "primary" },
+      },
+    })).toThrow("invalid HTML attribute name at root.attrs.className");
+    expect(normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "div",
+        props: { textContent: "unsafe" },
+      },
+    }).root).toMatchObject({ props: { textContent: "unsafe" } });
+    expect(() => normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "input",
+        props: { checked: 1 },
+      },
+    })).toThrow("invalid DOM property value at root.props.checked");
+    expect(() => normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "div",
+        styles: { color: "red; display: none" },
+      },
+    })).toThrow("invalid CSS property value at root.styles.color");
+    expect(() => normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "button",
         events: [{ kind: "event", event: "click" }],
       },
     })).toThrow("expected handlerId or message");
+  });
+
+  it("validates ordinary unversioned VX elements with the shared SSR rules", () => {
+    expect(() => normalizeRenderFrame({
+      kind: "element",
+      tag: "div",
+      attrs: { "bad attr": "x" },
+    })).toThrow("invalid HTML attribute name at element.attrs.bad attr");
+    expect(() => normalizeRenderFrame({
+      kind: "element",
+      tag: "input",
+      props: { checked: 1 },
+    })).toThrow("invalid DOM property value at element.props.checked");
+    expect(() => normalizeRenderFrame({
+      kind: "element",
+      tag: "div",
+      styles: { color: "red; display: none" },
+    })).toThrow("invalid CSS property value at element.styles.color");
   });
 
   it("unwraps mapped HTML nodes for DOM rendering", () => {

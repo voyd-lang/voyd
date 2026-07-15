@@ -2,17 +2,19 @@
 
 use std::array::Array
 use std::dict::Dict
+use std::error::panic
 use std::http::Response
 use std::json::{ JsonError, stringify as stringify_json }
 use std::msgpack::{ MsgPack, MsgPackError }
 use std::msgpack::self as msgpack
 use std::number::cast::to_string
 use std::optional::types::all
-use std::string::type::{ String, StringSlice }
+use std::string::type::{ String, StringIndex, StringSlice }
 use std::vx
 use super::response::dto_json
 
 pub obj Hydration<Model> {
+  api id?: String,
   api target: String,
   api entry: String,
   api model: Model
@@ -25,7 +27,10 @@ pub fn document<Msg>(value: vx::Html<Msg>) -> String
   "<!doctype html>".as_slice().to_string().concat(render<Msg>(value))
 
 pub fn document<Msg, Model>({ view: vx::Html<Msg>, hydrate: Hydration<Model> }) -> String
-  document<Msg>(view).concat(render_hydration<Model>(hydrate))
+  insert_hydration(document<Msg>(view), render_hydration<Model>(hydrate))
+
+pub fn append_hydration<Model>(document: String, hydrate: Hydration<Model>) -> String
+  insert_hydration(document, render_hydration<Model>(hydrate))
 
 pub fn html_response<Msg>(response: Response, value: vx::Html<Msg>) -> Response
   response
@@ -57,6 +62,17 @@ pub fn hydrate<Model>({ target: String, entry: String, model: Model }) -> Hydrat
     model: model
   }
 
+pub fn hydrate_named<Model>({ id: StringSlice, target: StringSlice, entry: StringSlice, model: Model }) -> Hydration<Model>
+  Hydration<Model> {
+    id: id.to_string(),
+    target: target.to_string(),
+    entry: entry.to_string(),
+    model: model
+  }
+
+pub fn hydrate_named<Model>({ id: String, target: String, entry: String, model: Model }) -> Hydration<Model>
+  Hydration<Model> { id: id, target: target, entry: entry, model: model }
+
 fn render_node(value: MsgPack): () -> String
   match(msgpack::unpack_string(value))
     Ok<String> { value }:
@@ -78,6 +94,8 @@ fn render_node(value: MsgPack): () -> String
             return render_element(map)
           if kind.equals("fragment"):
             return render_node_children(map)
+          if kind.equals("map"):
+            return render_mapped_node(map)
           if kind.equals("text"):
             match(read_string(map, "value".as_slice()))
               Some<String> { value }:
@@ -90,15 +108,32 @@ fn render_node(value: MsgPack): () -> String
     Err<MsgPackError>:
       String::init()
 
+fn render_mapped_node(map: Dict<String, MsgPack>) -> String
+  match(map.get("child"))
+    Some<MsgPack> { value }:
+      render_node(value)
+    None:
+      String::init()
+
 fn render_element(map: Dict<String, MsgPack>): () -> String
   let tag = read_string_or(map, "tag".as_slice(), "div".as_slice())
-  let attrs = render_attrs(map)
-  let children = render_node_children(map)
-  "<".as_slice()
+  if not is_valid_tag_name(tag):
+    panic("invalid VX HTML tag: ".concat(tag))
+    return String::init()
+  if is_void_tag(tag) and has_element_children(map):
+    panic("void VX HTML element cannot have children: ".concat(tag))
+    return String::init()
+  let attrs = render_element_attrs(map, tag)
+  let opening = "<".as_slice()
     .to_string()
     .concat(tag)
     .concat(attrs)
     .concat(">".as_slice())
+  if is_void_tag(tag):
+    return opening
+  let children = if is_raw_text_tag(tag.as_slice()) then: render_raw_text_children(map, tag.as_slice()) else: preserve_leading_newline(tag, render_node_children(map))
+  validate_textarea_value(map, tag: tag, children: children)
+  opening
     .concat(children)
     .concat("</".as_slice())
     .concat(tag)
@@ -115,6 +150,17 @@ fn render_node_children(map: Dict<String, MsgPack>): () -> String
     None:
       String::init()
 
+fn has_element_children(map: Dict<String, MsgPack>) -> bool
+  match(map.get("children".as_slice().to_string()))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_array(value))
+        Ok<Array<MsgPack>> { value }:
+          not value.is_empty()
+        Err<MsgPackError>:
+          false
+    None:
+      false
+
 fn render_children(children: Array<MsgPack>): () -> String
   var out = String::init()
   var index = 0
@@ -127,18 +173,108 @@ fn render_children(children: Array<MsgPack>): () -> String
     index = index + 1
   out
 
-fn render_attrs(map: Dict<String, MsgPack>): () -> String
+fn render_raw_text_children(map: Dict<String, MsgPack>, tag: StringSlice) -> String
+  match(map.get("children"))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_array(value))
+        Ok<Array<MsgPack>> { value }:
+          render_raw_text_array(value, tag)
+        Err<MsgPackError>:
+          String::init()
+    None:
+      String::init()
+
+fn render_raw_text_array(children: Array<MsgPack>, tag: StringSlice) -> String
   var out = String::init()
-  match(map.get("attrs".as_slice().to_string()))
+  var index = 0
+  while index < children.len():
+    match(children.get(index))
+      Some<MsgPack> { value }:
+        out = out.concat(render_raw_text_node(value, tag))
+      None:
+        void
+    index = index + 1
+  out
+
+fn render_raw_text_node(value: MsgPack, tag: StringSlice): () -> String
+  match(msgpack::unpack_string(value))
+    Ok<String> { value }:
+      return validate_raw_text(value, tag)
+    Err<MsgPackError>:
+      void
+
+  match(msgpack::unpack_array(value))
+    Ok<Array<MsgPack>> { value }:
+      return render_raw_text_array(value, tag)
+    Err<MsgPackError>:
+      void
+
+  match(msgpack::unpack_map(value))
+    Ok<Dict<String, MsgPack>> { value: map }:
+      match(read_string(map, "kind".as_slice()))
+        Some<String> { value: kind }:
+          if kind == "text":
+            return validate_raw_text(
+              read_string_or(map, "value".as_slice(), "".as_slice()),
+              tag
+            )
+          if kind == "fragment":
+            return render_raw_text_children(map, tag)
+          if kind == "map":
+            match(map.get("child"))
+              Some<MsgPack> { value }:
+                return render_raw_text_node(value, tag)
+              None:
+                return String::init()
+          panic("VX raw-text elements may only contain text")
+          String::init()
+        None:
+          String::init()
+    Err<MsgPackError>:
+      String::init()
+
+fn validate_raw_text(value: String, tag: StringSlice) -> String
+  var index = 0
+  while index < value.byte_len():
+    let byte = value.get_byte(index) ?? 0
+    if byte == 0 or byte == 13:
+      panic("VX raw text contains a character HTML cannot preserve")
+    index = index + 1
+  let closing = "</".as_slice().to_string().concat(tag)
+  if value.lowered().contains(closing.as_slice()):
+    panic("VX raw text contains its closing delimiter")
+  value
+
+fn render_element_attrs(map: Dict<String, MsgPack>, tag: String): () -> String
+  let ~attrs = Dict<String, MsgPack>::init()
+  copy_named_values(map, field: "attrs", into: attrs)
+  copy_properties(map, tag: tag, into: attrs)
+  let styles = read_styles(map)
+  if not styles.is_empty():
+    attrs.set("style", styles)
+  render_named_values(attrs)
+
+fn copy_properties(
+  map: Dict<String, MsgPack>,
+  { tag: String, into ~attrs: Dict<String, MsgPack> }
+) -> void
+  match(map.get("props"))
     Some<MsgPack> { value }:
       match(msgpack::unpack_map(value))
-        Ok<Dict<String, MsgPack>> { value: attrs }:
-          let entries = attrs.entries()
+        Ok<Dict<String, MsgPack>> { value: props }:
+          let entries = props.entries()
           var index = 0
           while index < entries.len():
             match(entries.get(index))
               Some<(String, MsgPack)> { value }:
-                out = out.concat(render_attr(value.0, value.1))
+                if not is_supported_property(value.0):
+                  panic("unsupported VX DOM property: ".concat(value.0))
+                if not is_valid_property_value(name: value.0, value: value.1):
+                  panic("invalid VX DOM property value for: ".concat(value.0))
+                if not is_supported_property_for_tag(name: value.0, tag: tag):
+                  panic("VX DOM property has no stable SSR representation on <".concat(tag).concat(">: ").concat(value.0))
+                if not (tag == "textarea" and value.0 == "value"):
+                  attrs.set(value.0, value.1)
               None:
                 void
             index = index + 1
@@ -146,9 +282,46 @@ fn render_attrs(map: Dict<String, MsgPack>): () -> String
           void
     None:
       void
+
+fn copy_named_values(
+  map: Dict<String, MsgPack>,
+  { field: String, into ~attrs: Dict<String, MsgPack> }
+): () -> void
+  match(map.get(field))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_map(value))
+        Ok<Dict<String, MsgPack>> { value: values }:
+          let entries = values.entries()
+          var index = 0
+          while index < entries.len():
+            match(entries.get(index))
+              Some<(String, MsgPack)> { value }:
+                attrs.set(value.0, value.1)
+              None:
+                void
+            index = index + 1
+        Err<MsgPackError>:
+          void
+    None:
+      void
+
+fn render_named_values(attrs: Dict<String, MsgPack>): () -> String
+  var out = String::init()
+  let entries = attrs.entries()
+  var index = 0
+  while index < entries.len():
+    match(entries.get(index))
+      Some<(String, MsgPack)> { value }:
+        out = out.concat(render_attr(value.0, value.1))
+      None:
+        void
+    index = index + 1
   out
 
 fn render_attr(name: String, value: MsgPack): () -> String
+  if not is_valid_attr_name(name):
+    panic("invalid VX HTML attribute: ".concat(name))
+    return String::init()
   match(msgpack::unpack_bool(value))
     Ok<bool> { value }:
       if value:
@@ -179,6 +352,41 @@ fn render_attr(name: String, value: MsgPack): () -> String
     Err<MsgPackError>:
       String::init()
 
+fn read_styles(map: Dict<String, MsgPack>): () -> String
+  match(map.get("styles"))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_map(value))
+        Ok<Dict<String, MsgPack>> { value: styles }:
+          render_style_entries(styles)
+        Err<MsgPackError>:
+          String::init()
+    None:
+      String::init()
+
+fn render_style_entries(styles: Dict<String, MsgPack>): () -> String
+  var out = String::init()
+  let entries = styles.entries()
+  var index = 0
+  while index < entries.len():
+    match(entries.get(index))
+      Some<(String, MsgPack)> { value }:
+        let name = value.0
+        if not is_valid_style_name(name):
+          panic("invalid VX CSS property: ".concat(name))
+        match(msgpack::unpack_string(value.1))
+          Ok<String> { value: style_value }:
+            if not is_valid_style_value(style_value):
+              panic("invalid VX CSS property value: ".concat(style_value))
+            if not out.is_empty():
+              out = out.concat("; ")
+            out = out.concat(name).concat(": ").concat(style_value)
+          Err<MsgPackError>:
+            void
+      None:
+        void
+    index = index + 1
+  out
+
 fn read_string(map: Dict<String, MsgPack>, key: StringSlice): () -> Option<String>
   match(map.get(key.to_string()))
     Some<MsgPack> { value }:
@@ -201,21 +409,173 @@ fn render_hydration<Model>(hydrate: Hydration<Model>): () -> String
   let model_json = match(stringify_json(dto_json<Model>(hydrate.model)))
     Ok<String> { value }:
       escape_script_json(value)
-    Err<JsonError>:
-      "null".as_slice().to_string()
-  "<script type=\"application/json\" data-voyd-hydration=\"".as_slice()
+    Err<JsonError> { error }:
+      panic("unable to serialize Voyd hydration model: ".concat(error.message))
+      String::init()
+  "<script type=\"application/json\" data-voyd-hydration-id=\"".as_slice()
     .to_string()
+    .concat(escape_attr((hydrate.id ?? hydrate.target).as_slice()))
+    .concat("\" data-voyd-hydration=\"".as_slice())
     .concat(escape_attr(hydrate.target.as_slice()))
+    .concat("\" data-voyd-entry=\"".as_slice())
+    .concat(escape_attr(hydrate.entry.as_slice()))
     .concat("\">".as_slice())
     .concat(model_json)
     .concat("</script><script type=\"module\" src=\"".as_slice())
     .concat(escape_attr(hydrate.entry.as_slice()))
     .concat("\"></script>".as_slice())
 
+fn insert_hydration(document: String, scripts: String) -> String
+  match(document.reverse_find("</body>".as_slice()))
+    Some<StringIndex> { value }:
+      let offset = value.to_i32()
+      document.slice(bytes: 0, len: offset)
+        .to_string()
+        .concat(scripts)
+        .concat(document.slice(bytes: offset, len: document.byte_len() - offset))
+    None:
+      document.concat(scripts)
+
+fn is_void_tag(tag: String) -> bool
+  tag == "area" or tag == "base" or tag == "br" or tag == "col" or
+    tag == "embed" or tag == "hr" or tag == "img" or tag == "input" or
+    tag == "link" or tag == "meta" or tag == "param" or tag == "source" or
+    tag == "track" or tag == "wbr"
+
+fn is_raw_text_tag(tag: StringSlice) -> bool
+  tag == "script".as_slice() or tag == "style".as_slice()
+
+fn preserve_leading_newline(tag: String, children: String) -> String
+  if (tag == "listing" or tag == "pre" or tag == "textarea") and children.starts_with("\n"):
+    return "\n".as_slice().to_string().concat(children)
+  children
+
+fn is_supported_property(name: String) -> bool
+  name == "value" or name == "checked" or name == "disabled"
+
+fn is_supported_property_for_tag({ name: String, tag: String }) -> bool
+  if name == "value":
+    return tag == "input" or tag == "textarea"
+  if name == "checked":
+    return tag == "input"
+  tag == "button" or tag == "fieldset" or tag == "input" or
+    tag == "optgroup" or tag == "option" or tag == "select" or
+    tag == "textarea"
+
+fn validate_textarea_value(map: Dict<String, MsgPack>, { tag: String, children: String }) -> void
+  if tag == "textarea":
+    match(map.get("props"))
+      Some<MsgPack> { value }:
+        match(msgpack::unpack_map(value))
+          Ok<Dict<String, MsgPack>> { value: props }:
+            match(props.get("value"))
+              Some<MsgPack> { value }:
+                match(msgpack::unpack_string(value))
+                  Ok<String> { value }:
+                    let expected = preserve_leading_newline(tag, escape_text(value.as_slice()))
+                    if children != expected:
+                      panic("textarea value must match its text children for hydration")
+                  Err<MsgPackError>:
+                    panic("textarea value must be a string for server rendering")
+              None:
+                void
+          Err<MsgPackError>:
+            void
+      None:
+        void
+
+fn is_valid_property_value({ name: String, value: MsgPack }) -> bool
+  if name == "value":
+    match(msgpack::unpack_string(value))
+      Ok<String>:
+        return true
+      Err<MsgPackError>:
+        match(msgpack::unpack_i32(value))
+          Ok<i32>:
+            return true
+          Err<MsgPackError>:
+            return false
+  match(msgpack::unpack_bool(value))
+    Ok<bool>:
+      true
+    Err<MsgPackError>:
+      false
+
+fn is_valid_tag_name(name: String) -> bool
+  if name.is_empty() or not is_ascii_lowercase(name.get_byte(0) ?? 0):
+    return false
+  name_bytes_match(name, where: (byte: i32) -> bool =>
+    is_ascii_lowercase(byte) or is_ascii_digit(byte) or byte == 45 or byte == 58
+  )
+
+fn is_valid_attr_name(name: String) -> bool
+  not name.is_empty() and name_bytes_match(name, where: (byte: i32) -> bool =>
+    byte > 31 and byte != 127 and byte != 32 and byte != 34 and byte != 39 and
+      byte != 47 and byte != 61 and byte != 62 and not is_ascii_uppercase(byte)
+  )
+
+fn is_valid_style_name(name: String) -> bool
+  if name.is_empty():
+    return false
+  let first = name.get_byte(0) ?? 0
+  var index = 1
+  var custom = false
+  if first == 45:
+    if name.byte_len() < 2:
+      return false
+    let second = name.get_byte(1) ?? 0
+    if second == 45:
+      if name.byte_len() == 2:
+        return false
+      custom = true
+      index = 2
+    else:
+      if not is_ascii_letter(second):
+        return false
+      index = 2
+  else:
+    if not is_ascii_letter(first):
+      return false
+  while index < name.byte_len():
+    let byte = name.get_byte(index) ?? 0
+    if not (
+      is_ascii_letter(byte) or is_ascii_digit(byte) or byte == 45 or
+        (custom and byte == 95)
+    ):
+      return false
+    index = index + 1
+  true
+
+fn is_valid_style_value(value: String) -> bool
+  name_bytes_match(value, where: (byte: i32) -> bool =>
+    byte > 31 and byte != 33 and byte != 59 and byte != 127
+  )
+
+fn name_bytes_match(name: String, { where predicate: fn(i32) -> bool }) -> bool
+  var index = 0
+  while index < name.byte_len():
+    if not predicate(name.get_byte(index) ?? 0):
+      return false
+    index = index + 1
+  true
+
+fn is_ascii_letter(byte: i32) -> bool
+  (byte >= 65 and byte <= 90) or (byte >= 97 and byte <= 122)
+
+fn is_ascii_lowercase(byte: i32) -> bool
+  byte >= 97 and byte <= 122
+
+fn is_ascii_uppercase(byte: i32) -> bool
+  byte >= 65 and byte <= 90
+
+fn is_ascii_digit(byte: i32) -> bool
+  byte >= 48 and byte <= 57
+
 fn escape_script_json(value: String): () -> String
-  value
-    .replaced(old: "</".as_slice().to_string(), with: "<\\/".as_slice().to_string())
-    .replaced(old: "<!--".as_slice().to_string(), with: "\\u003c!--".as_slice().to_string())
+  value.replaced(
+    old: "<".as_slice().to_string(),
+    with: "\\u003c".as_slice().to_string()
+  )
 
 fn escape_text(value: StringSlice): () -> String
   escape(value, true)
@@ -232,16 +592,19 @@ fn escape(value: StringSlice, text: bool): () -> String
         if byte == 38:
           out = out.concat("&amp;".as_slice())
         else:
-          if byte == 60:
-            out = out.concat("&lt;".as_slice())
+          if byte == 13:
+            out = out.concat("&#13;".as_slice())
           else:
-            if byte == 62:
-              out = out.concat("&gt;".as_slice())
+            if byte == 60:
+              out = out.concat("&lt;".as_slice())
             else:
-              if not text and byte == 34:
-                out = out.concat("&quot;".as_slice())
+              if byte == 62:
+                out = out.concat("&gt;".as_slice())
               else:
-                out = out.concat(value.slice(bytes: index, len: 1))
+                if not text and byte == 34:
+                  out = out.concat("&quot;".as_slice())
+                else:
+                  out = out.concat(value.slice(bytes: index, len: 1))
       None:
         void
     index = index + 1
