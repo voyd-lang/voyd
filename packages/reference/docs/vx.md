@@ -655,16 +655,15 @@ voyd bootstrap my-site --template web-ssr
 
 The shared `src/app` code owns the model, transitions, and exact markup. Its
 `view(model)` is called by both the server document shell and the browser
-program. During server rendering, the host records closure-backed handler ids as
-they are retained and releases them after the render call, including failure paths.
-Static-message events retain no callback, and explicit caller-owned handler ids
-are not part of the render scope. Browser callbacks keep their normal mounted
-renderer lifetime. The server sends the initial model plus a structured
+program, so you do not need a separate event-free view for server rendering.
+VX automatically cleans up temporary server-rendering event handlers, including
+when rendering fails. Browser event handlers remain active for the lifetime of
+the mounted application. The server sends the initial model plus a structured
 hydration root; the browser creates the same VX application with that model and
 calls `hydrateVxApp`, preserving matching DOM and reporting mismatches in
 development. Server-only routes and persistence stay under `src/server`; Wasm
 loading stays in the TypeScript bridge. See [Web](./web.md) for the complete
-server and hydration workflow and cleanup contract.
+server and hydration workflow.
 
 ## Browser Runtime Integration
 

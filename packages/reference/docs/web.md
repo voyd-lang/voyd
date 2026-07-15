@@ -692,22 +692,12 @@ same `view(model)` on the server and browser rather than maintaining two view
 variants. Hydration preserves matching DOM, reports drift through
 `onHydrationMismatch`, and repairs mismatches so the application can continue.
 
-Server rendering automatically owns closure-backed handlers retained while the
-render call's view argument is evaluated. The host records each new handler id
-at retention time, and `render`, `document`, and `html_response` release those
-ids after producing HTML. They are also released if view evaluation, VX
-normalization, HTML rendering, or hydration-model serialization fails.
-Interleaved tasks and nested renders are isolated. If cleanup itself fails while
-another error is already in flight, the original render error remains primary
-and the host reports the cleanup failure separately.
-
-This ownership applies only to ids created by closure-backed helpers such as
-`event_payload_handler`. A static message event serializes its message directly
-and does not retain a callback. An explicit `handler_id` supplied through a
-low-level event or mapping API remains caller-owned and is never collected by
-server rendering. Browser mount and hydration do not call the server renderer,
-so their callbacks remain retained until the mounted renderer detaches or is
-disposed.
+`render`, `document`, and `html_response` automatically clean up temporary event
+handlers created during server rendering, whether rendering succeeds or fails.
+This lets server and browser code safely share the same `view(model)`. Browser
+event handlers remain active until the mounted application is disposed. If you
+use a low-level API that accepts an explicit `handler_id`, you remain responsible
+for that handler's lifetime.
 
 By default a `Program` adopts the server model without rerunning `init`. Provide
 a `hydrate` lifecycle callback when the browser must start a command from that
