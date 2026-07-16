@@ -196,6 +196,10 @@ const parseBootstrapConfig = (argv: readonly string[]): VoydConfig => {
       "vx-spa",
     )
     .option("--dry-run", "print files that would be created without writing")
+    .option(
+      "--published",
+      "use published Voyd packages instead of a detected local checkout",
+    )
     .option("-f, --force", "allow writing into a non-empty directory");
 
   program.parse(["node", "voyd bootstrap", ...argv]);
@@ -209,6 +213,7 @@ const parseBootstrapConfig = (argv: readonly string[]): VoydConfig => {
     bootstrapTemplate: opts.template,
     bootstrapDryRun: opts.dryRun,
     bootstrapForce: opts.force,
+    bootstrapUsePublished: opts.published,
     doc: false,
     docFormat: "html",
   };

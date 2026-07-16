@@ -51,6 +51,7 @@ async function main() {
       template: config.bootstrapTemplate ?? "vx-spa",
       dryRun: config.bootstrapDryRun,
       force: config.bootstrapForce,
+      usePublished: config.bootstrapUsePublished,
     });
     return printBootstrapResult(result);
   }

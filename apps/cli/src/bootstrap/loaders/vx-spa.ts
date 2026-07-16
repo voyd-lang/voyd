@@ -1,18 +1,22 @@
-import type { BootstrapLoader, BootstrapPlan } from "../types.js";
+import type {
+  BootstrapContext,
+  BootstrapLoader,
+  BootstrapPlan,
+} from "../types.js";
 
 export const vxSpaLoader: BootstrapLoader = {
   id: "vx-spa",
   description: "Vite + VX single-page app",
-  plan: ({ packageName, voydVersion }): BootstrapPlan => ({
+  plan: (context): BootstrapPlan => ({
     template: "vx-spa",
     files: [
       { path: "index.html", content: indexHtml },
-      { path: "package.json", content: packageJson(packageName, voydVersion) },
-      { path: "vite.config.mjs", content: viteConfig },
+      { path: "package.json", content: packageJson(context) },
+      { path: "vite.config.mjs", content: viteConfig(!!context.localVoydRoot) },
       { path: "tsconfig.json", content: tsConfig },
       { path: ".gitignore", content: gitIgnore },
       { path: "scripts/compile-voyd.mjs", content: compileVoydScript },
-      { path: "scripts/run-voyd.mjs", content: runVoydScript },
+      { path: "scripts/run-voyd.mjs", content: runVoydScript(!!context.localVoydRoot) },
       { path: "src/main.ts", content: mainTs },
       { path: "src/main.voyd", content: mainVoyd },
       { path: "src/app.voyd", content: appModuleVoyd },
@@ -25,9 +29,17 @@ export const vxSpaLoader: BootstrapLoader = {
   }),
 };
 
-const packageJson = (packageName: string, voydVersion: string): string =>
-  `${JSON.stringify({
-    name: packageName,
+const packageJson = (context: BootstrapContext): string => {
+  const localDependencies = context.localVoydRoot ? {
+    "@voyd-lang/compiler": context.voydPackageSpec("@voyd-lang/compiler"),
+    "@voyd-lang/js-host": context.voydPackageSpec("@voyd-lang/js-host"),
+    "@voyd-lang/lib": context.voydPackageSpec("@voyd-lang/lib"),
+    "@voyd-lang/package-adapter": context.voydPackageSpec("@voyd-lang/package-adapter"),
+    "@voyd-lang/std": context.voydPackageSpec("@voyd-lang/std"),
+  } : {};
+  const localDevDependencies = context.localVoydRoot ? { tsx: "^4.20.4" } : {};
+  return `${JSON.stringify({
+    name: context.packageName,
     private: true,
     type: "module",
     scripts: {
@@ -38,17 +50,20 @@ const packageJson = (packageName: string, voydVersion: string): string =>
       typecheck: "npm run voyd:build && tsc --noEmit",
     },
     dependencies: {
-      "@voyd-lang/sdk": `^${voydVersion}`,
-      "@voyd-lang/vx-dom": `^${voydVersion}`,
+      "@voyd-lang/sdk": context.voydPackageSpec("@voyd-lang/sdk"),
+      "@voyd-lang/vx-dom": context.voydPackageSpec("@voyd-lang/vx-dom"),
+      ...localDependencies,
     },
     devDependencies: {
       "@tailwindcss/vite": "^4.3.0",
-      "@voyd-lang/cli": `^${voydVersion}`,
+      "@voyd-lang/cli": context.voydPackageSpec("@voyd-lang/cli"),
       tailwindcss: "^4.3.0",
+      ...localDevDependencies,
       typescript: "^5.8.3",
       vite: "^8.0.0",
     },
   }, null, 2)}\n`;
+};
 
 const tsConfig = `${JSON.stringify({
   compilerOptions: {
@@ -84,7 +99,8 @@ const indexHtml = `<!doctype html>
 </html>
 `;
 
-const viteConfig = `import tailwindcss from "@tailwindcss/vite";
+const viteConfig = (useVoydSources: boolean): string =>
+  `import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import { compileVoyd } from "./scripts/compile-voyd.mjs";
 
@@ -123,16 +139,20 @@ const voyd = () => ({
 
 export default defineConfig({
   plugins: [voyd(), tailwindcss()],
-});
+${useVoydSources ? '  resolve: { conditions: ["development"] },\n' : ""}});
 `;
 
-const runVoydScript = `import { spawn } from "node:child_process";
+const runVoydScript = (useVoydSources: boolean): string =>
+  `import { spawn } from "node:child_process";
+
+const useVoydSources = ${useVoydSources};
 
 export function runVoyd(args, { cwd }) {
   const command = process.platform === "win32" ? "voyd.cmd" : "voyd";
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
+      env: useVoydSources ? { ...process.env, VOYD_DEV: "1" } : process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     const stdout = [];

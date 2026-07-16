@@ -5,12 +5,26 @@ export type BootstrapConfig = {
   template: BootstrapTemplate;
   dryRun?: boolean;
   force?: boolean;
+  usePublished?: boolean;
 };
+
+export type BootstrapVoydPackage =
+  | "@voyd-lang/cli"
+  | "@voyd-lang/compiler"
+  | "@voyd-lang/js-host"
+  | "@voyd-lang/lib"
+  | "@voyd-lang/package-adapter"
+  | "@voyd-lang/sdk"
+  | "@voyd-lang/std"
+  | "@voyd-lang/vx-dom"
+  | "@voyd-lang/web";
 
 export type BootstrapContext = {
   targetDir: string;
   packageName: string;
   voydVersion: string;
+  localVoydRoot?: string;
+  voydPackageSpec(name: BootstrapVoydPackage): string;
 };
 
 export type BootstrapFile = {
@@ -34,6 +48,7 @@ export type BootstrapResult = {
   targetDir: string;
   template: BootstrapTemplate;
   dryRun: boolean;
+  localVoydRoot?: string;
   files: string[];
   nextSteps: string[];
 };

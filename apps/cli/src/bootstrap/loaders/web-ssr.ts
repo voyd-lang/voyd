@@ -1,17 +1,22 @@
-import type { BootstrapLoader, BootstrapPlan } from "../types.js";
+import type {
+  BootstrapContext,
+  BootstrapLoader,
+  BootstrapPlan,
+} from "../types.js";
 
 export const webSsrLoader: BootstrapLoader = {
   id: "web-ssr",
   description: "SSR web app with Tailwind",
-  plan: ({ packageName, voydVersion }): BootstrapPlan => ({
+  plan: (context): BootstrapPlan => ({
     template: "web-ssr",
     files: [
-      { path: "package.json", content: packageJson(packageName, voydVersion) },
-      { path: "vite.config.mjs", content: viteConfig },
+      { path: "package.json", content: packageJson(context) },
+      { path: "vite.config.mjs", content: viteConfig(!!context.localVoydRoot) },
       { path: "tsconfig.json", content: tsConfig },
       { path: ".gitignore", content: gitIgnore },
-      { path: "README.md", content: readme(packageName) },
-      { path: "scripts/run-voyd.mjs", content: runVoydScript },
+      { path: "README.md", content: readme(context) },
+      { path: "scripts/run-voyd.mjs", content: runVoydScript(!!context.localVoydRoot) },
+      { path: "scripts/diagnostics.mjs", content: diagnosticsScript },
       { path: "scripts/compile-client.mjs", content: compileClientScript },
       { path: "scripts/check-voyd.mjs", content: checkVoydScript },
       { path: "scripts/serve.mjs", content: serveScript },
@@ -37,32 +42,46 @@ export const webSsrLoader: BootstrapLoader = {
   }),
 };
 
-const packageJson = (packageName: string, voydVersion: string): string =>
-  `${JSON.stringify({
-    name: packageName,
+const packageJson = (context: BootstrapContext): string => {
+  const node = context.localVoydRoot
+    ? "node --conditions=development --import tsx"
+    : "node";
+  const localDependencies = context.localVoydRoot ? {
+    "@voyd-lang/compiler": context.voydPackageSpec("@voyd-lang/compiler"),
+    "@voyd-lang/js-host": context.voydPackageSpec("@voyd-lang/js-host"),
+    "@voyd-lang/lib": context.voydPackageSpec("@voyd-lang/lib"),
+    "@voyd-lang/package-adapter": context.voydPackageSpec("@voyd-lang/package-adapter"),
+    "@voyd-lang/std": context.voydPackageSpec("@voyd-lang/std"),
+  } : {};
+  const localDevDependencies = context.localVoydRoot ? { tsx: "^4.20.4" } : {};
+  return `${JSON.stringify({
+    name: context.packageName,
     private: true,
     type: "module",
     scripts: {
-      dev: "node scripts/dev.mjs",
-      build: "npm run typecheck && vite build && node scripts/check-voyd.mjs",
-      start: "node scripts/serve.mjs",
-      "voyd:check": "node scripts/check-voyd.mjs",
+      dev: `${node} scripts/dev.mjs`,
+      build: `npm run typecheck && vite build && ${node} scripts/check-voyd.mjs`,
+      start: `${node} scripts/serve.mjs`,
+      "voyd:check": `${node} scripts/check-voyd.mjs`,
       typecheck: "tsc --noEmit",
     },
     dependencies: {
-      "@voyd-lang/sdk": `^${voydVersion}`,
-      "@voyd-lang/vx-dom": `^${voydVersion}`,
-      "@voyd-lang/web": `^${voydVersion}`,
+      "@voyd-lang/sdk": context.voydPackageSpec("@voyd-lang/sdk"),
+      "@voyd-lang/vx-dom": context.voydPackageSpec("@voyd-lang/vx-dom"),
+      "@voyd-lang/web": context.voydPackageSpec("@voyd-lang/web"),
+      ...localDependencies,
     },
     devDependencies: {
       "@tailwindcss/vite": "^4.3.0",
       "@types/node": "^22.5.1",
-      "@voyd-lang/cli": `^${voydVersion}`,
+      "@voyd-lang/cli": context.voydPackageSpec("@voyd-lang/cli"),
       tailwindcss: "^4.3.0",
+      ...localDevDependencies,
       typescript: "^5.8.3",
       vite: "^8.0.0",
     },
   }, null, 2)}\n`;
+};
 
 const tsConfig = `${JSON.stringify({
   compilerOptions: {
@@ -82,7 +101,8 @@ const tsConfig = `${JSON.stringify({
   include: ["src"],
 }, null, 2)}\n`;
 
-const viteConfig = `import tailwindcss from "@tailwindcss/vite";
+const viteConfig = (useVoydSources: boolean): string =>
+  `import tailwindcss from "@tailwindcss/vite";
 import { defineConfig } from "vite";
 import { compileClient } from "./scripts/compile-client.mjs";
 
@@ -104,7 +124,7 @@ const voydClient = () => ({
 
 export default defineConfig({
   plugins: [voydClient(), tailwindcss()],
-  publicDir: false,
+${useVoydSources ? '  resolve: { conditions: ["development"] },\n' : ""}  publicDir: false,
   build: {
     outDir: "public",
     emptyOutDir: false,
@@ -119,13 +139,17 @@ export default defineConfig({
 });
 `;
 
-const runVoydScript = `import { spawn } from "node:child_process";
+const runVoydScript = (useVoydSources: boolean): string =>
+  `import { spawn } from "node:child_process";
+
+const useVoydSources = ${useVoydSources};
 
 export function runVoyd(args, { cwd }) {
   const command = process.platform === "win32" ? "voyd.cmd" : "voyd";
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd,
+      env: useVoydSources ? { ...process.env, VOYD_DEV: "1" } : process.env,
       stdio: ["ignore", "pipe", "pipe"],
     });
     const stdout = [];
@@ -172,10 +196,81 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
 }
 `;
 
+const diagnosticsScript = `import { readFileSync } from "node:fs";
+import { isAbsolute, resolve } from "node:path";
+
+class VoydCompilationError extends Error {}
+
+export function compilationError(diagnostics) {
+  return new VoydCompilationError(diagnostics.map(formatDiagnostic).join("\\n"));
+}
+
+export function errorMessage(error) {
+  if (error instanceof VoydCompilationError) return error.message;
+  return error instanceof Error ? error.stack ?? error.message : String(error);
+}
+
+export function formatDiagnostic(diagnostic) {
+  const context = sourceContext(diagnostic.span);
+  const location = context
+    ? context.path + ":" + context.line + ":" + context.column
+    : fallbackLocation(diagnostic.span);
+  const phase = diagnostic.phase ? " [" + diagnostic.phase + "]" : "";
+  const header = location + " " + diagnostic.severity.toUpperCase() + phase +
+    " " + diagnostic.code + ": " + diagnostic.message;
+  if (!context) return header;
+
+  const gutter = String(context.line);
+  const padding = " ".repeat(gutter.length);
+  const marker = " ".repeat(context.column - 1) + "^".repeat(context.length);
+  return [
+    header,
+    padding + " |",
+    gutter + " | " + context.text,
+    padding + " | " + marker,
+  ].join("\\n");
+}
+
+function sourceContext(span) {
+  if (!span) return;
+  const path = isAbsolute(span.file) ? span.file : resolve(span.file);
+  let source;
+  try {
+    source = readFileSync(path, "utf8");
+  } catch {
+    return;
+  }
+
+  const start = clamp(span.start, source.length);
+  const end = clamp(Math.max(span.end, start + 1), source.length);
+  const lineStart = source.lastIndexOf("\\n", Math.max(0, start - 1)) + 1;
+  const nextLine = source.indexOf("\\n", start);
+  const lineEnd = nextLine < 0 ? source.length : nextLine;
+  return {
+    path,
+    line: source.slice(0, lineStart).split("\\n").length,
+    column: start - lineStart + 1,
+    length: Math.max(1, Math.min(end, lineEnd) - start),
+    text: source.slice(lineStart, lineEnd),
+  };
+}
+
+function fallbackLocation(span) {
+  if (!span) return "voyd";
+  const path = isAbsolute(span.file) ? span.file : resolve(span.file);
+  return path + ":" + span.start + "-" + span.end;
+}
+
+function clamp(value, max) {
+  return Math.max(0, Math.min(value, max));
+}
+`;
+
 const checkVoydScript = `import { createSdk } from "@voyd-lang/sdk";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compileClient } from "./compile-client.mjs";
+import { formatDiagnostic } from "./diagnostics.mjs";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const result = await createSdk().compile({
@@ -191,18 +286,12 @@ if (!result.success) {
 
 await compileClient();
 console.log("Voyd server and client compiled successfully.");
-
-function formatDiagnostic(diagnostic) {
-  const location = diagnostic.location
-    ? diagnostic.location.filePath + ":" + diagnostic.location.start.line + ":" + diagnostic.location.start.column
-    : diagnostic.file ?? "voyd";
-  return location + " " + diagnostic.severity + ": " + diagnostic.message;
-}
 `;
 
 const serveScript = `import { createSdk } from "@voyd-lang/sdk";
 import { resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { compilationError, errorMessage } from "./diagnostics.mjs";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const entryPath = resolve(rootDir, "src/main.voyd");
@@ -225,7 +314,7 @@ export async function serve({
     },
   });
   if (!result.success) {
-    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\\n"));
+    throw compilationError(result.diagnostics);
   }
   return result;
 }
@@ -237,7 +326,7 @@ export async function checkServer({ optimize = false } = {}) {
     runtimeDiagnostics: true,
   });
   if (!result.success) {
-    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\\n"));
+    throw compilationError(result.diagnostics);
   }
 }
 
@@ -247,6 +336,13 @@ function readPort() {
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  await runServer().catch((error) => {
+    console.error(errorMessage(error));
+    process.exitCode = 1;
+  });
+}
+
+async function runServer() {
   const app = await serve();
   console.log("Voyd app ready at " + app.url);
   let closing = false;
@@ -378,6 +474,7 @@ const devScript = `import { rename, rm } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { errorMessage } from "./diagnostics.mjs";
 import { checkServer, serve } from "./serve.mjs";
 import { watchSource } from "./watch-source.mjs";
 
@@ -394,7 +491,13 @@ const stopWatching = watchSource(sourceDir, (file) => {
   if (file && !/\\.(voyd|ts|css)$/.test(file)) return;
   void queueRebuild();
 });
-await queueRebuild({ failFast: true });
+try {
+  await queueRebuild({ failFast: true });
+} catch (error) {
+  stopWatching();
+  console.error(errorMessage(error));
+  process.exitCode = 1;
+}
 
 async function queueRebuild({ failFast = false } = {}) {
   rebuildRequested = true;
@@ -407,7 +510,7 @@ async function queueRebuild({ failFast = false } = {}) {
         await rebuild();
       } catch (error) {
         if (failFast) throw error;
-        console.error(error);
+        console.error(errorMessage(error));
       }
     }
   } finally {
@@ -1078,20 +1181,28 @@ data/articles/*.md
 !data/articles/webassembly.md
 `;
 
-const readme = (packageName: string) => `# ${packageName}
+const readme = (context: BootstrapContext) => `# ${context.packageName}
 
 This is a server-rendered Voyd application with a hydrated VX editor.
+${context.localVoydRoot ? `
+This project uses Voyd source packages from \`${context.localVoydRoot}\`. Running
+\`npm install\` links the complete local Voyd dependency set automatically.
+` : ""}
 
 ## Architecture
 
 - \`src/main.voyd\` owns HTTP routes and server startup.
-- \`src/server\` owns persistence and the server-rendered document shell.
-- \`src/app\` owns the shared model, update logic, and exact markup. The server
-  and browser both call the same \`view\`.
+- \`src/server\` owns persistence, HTTP responses, and the server-only document
+  shell (including the page chrome outside the hydrated editor).
+- \`src/app\` owns the shared model, update logic, and hydrated markup. The
+  server and browser both call the same \`view\` for that interactive region.
 - \`src/client.voyd\` is the browser Program entrypoint.
 - \`src/client.ts\` is the generic Wasm hydration bridge.
 
 Code inside \`#article-editor\` must render identically on the server and client.
+The outer document, metadata, navigation, and hydration bootstrap are only
+rendered by the server because the browser does not update them. Move markup
+into \`src/app/ui.voyd\` and inside the hydration root if it must be interactive.
 Server rendering automatically releases closure-backed event handlers after it
 builds the HTML. The development bridge reports hydration differences without
 preventing recovery.
