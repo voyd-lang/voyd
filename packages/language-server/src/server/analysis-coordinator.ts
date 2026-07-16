@@ -238,7 +238,9 @@ const mergeSymbolLookupByUri = ({
 
 export class AnalysisCoordinator {
   readonly openDocuments = new Map<string, string>();
-  readonly #fileSystemHost = createFsModuleHost();
+  readonly #fileSystemHost = createFsModuleHost({
+    cacheFileSystemQueries: false,
+  });
   readonly #moduleHost = createOverlayModuleHost({
     openDocuments: this.openDocuments,
     fallbackHost: this.#fileSystemHost,

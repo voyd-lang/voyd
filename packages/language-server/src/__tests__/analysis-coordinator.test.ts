@@ -2,6 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
+import { FileChangeType } from "vscode-languageserver/lib/node/main.js";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { toFileUri } from "../project/files.js";
 import { AnalysisCoordinator } from "../server/analysis-coordinator.js";
@@ -116,6 +117,41 @@ describe("analysis coordinator", () => {
       await rm(project.rootDir, { recursive: true, force: true });
       await rm(missingStd.rootDir, { recursive: true, force: true });
       await rm(completeStd.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("discovers imported modules created after the initial analysis", async () => {
+    const project = await createProject({
+      "src/main.voyd":
+        `use src::generated::value\n\nfn main() -> i32\n  value()\n`,
+    });
+    const std = await createProject({
+      "pkg.voyd": "",
+    });
+
+    try {
+      await withStdRoot(std.rootDir, async () => {
+        const mainPath = project.filePathFor("src/main.voyd");
+        const mainUri = toFileUri(mainPath);
+        const generatedPath = project.filePathFor("src/generated.voyd");
+        const generatedUri = toFileUri(generatedPath);
+        const coordinator = new AnalysisCoordinator();
+
+        const initial = await coordinator.getCoreForUri(mainUri);
+        const initialDiagnostics = initial.analysis.diagnosticsByUri.get(mainUri) ?? [];
+        expect(initialDiagnostics.some(({ code }) => code === "BD0001")).toBe(true);
+
+        await writeFile(generatedPath, `pub fn value() -> i32\n  42\n`, "utf8");
+        await coordinator.handleWatchedFileChanges([
+          { uri: generatedUri, type: FileChangeType.Created },
+        ]);
+
+        const updated = await coordinator.getCoreForUri(mainUri);
+        expect(updated.analysis.diagnosticsByUri.get(mainUri) ?? []).toHaveLength(0);
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+      await rm(std.rootDir, { recursive: true, force: true });
     }
   });
 
