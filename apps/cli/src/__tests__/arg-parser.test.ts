@@ -118,18 +118,20 @@ describe("getConfigFromCli", () => {
     expect(config.bootstrapTemplate).toBe("web-ssr");
   });
 
-  it("supports bootstrap dry-run and force flags", () => {
+  it("supports bootstrap dry-run, force, and published-package flags", () => {
     const config = runWithArgv([
       "node",
       "voyd",
       "bootstrap",
       "--dry-run",
       "--force",
+      "--published",
     ]);
     expect(config.bootstrap).toBe(true);
     expect(config.bootstrapDir).toBe(".");
     expect(config.bootstrapDryRun).toBe(true);
     expect(config.bootstrapForce).toBe(true);
+    expect(config.bootstrapUsePublished).toBe(true);
   });
 
   it("parses package adapter and application registry generation", () => {
