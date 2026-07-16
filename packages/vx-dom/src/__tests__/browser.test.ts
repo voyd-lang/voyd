@@ -975,7 +975,7 @@ describe("vx-dom browser renderer", () => {
     expect(subscriptionApp.syncSubscriptions).not.toHaveBeenCalled();
   });
 
-  it("treats inherited runtime host maps and handlers as missing", async () => {
+  it("ignores inherited runtime host capabilities", async () => {
     const app: VxAppRuntime = {
       init: () => ({
         frame: counterNode(0),
@@ -1041,6 +1041,22 @@ describe("vx-dom browser renderer", () => {
       'no runtime subscription handler registered for "inherited_sub"',
     );
     expect(runSubscription).not.toHaveBeenCalled();
+
+    const onError = vi.fn();
+    app.init = () => ({
+      frame: counterNode(0),
+      commands: { type: "cmd", kind: "missing_handler" },
+    });
+
+    await expect(mountVxApp({
+      container,
+      app,
+      runtimeHostMode: "explicit",
+      runtimeHost: Object.create({ onError }),
+    })).rejects.toThrow(
+      'no runtime command handler registered for "missing_handler"',
+    );
+    expect(onError).not.toHaveBeenCalled();
   });
 
   it("keeps structural commands available in explicit runtime host mode", async () => {

@@ -452,7 +452,10 @@ async function mountRuntimeApp(
   const runtimeHost = options.runtimeHostMode === "explicit"
     ? options.runtimeHost ?? {}
     : createBrowserVxRuntimeHost(options.runtimeHost);
-  const reportError = createRuntimeErrorReporter(options.onError ?? runtimeHost.onError);
+  const runtimeHostOnError = Object.hasOwn(runtimeHost, "onError")
+    ? runtimeHost.onError
+    : undefined;
+  const reportError = createRuntimeErrorReporter(options.onError ?? runtimeHostOnError);
   const retainedHandlerReleaser = retainedHandlerReleaserFor(app, options.handlers);
   const afterCommandCallbacks: Array<Array<() => void>> = [];
   let queue = Promise.resolve();
