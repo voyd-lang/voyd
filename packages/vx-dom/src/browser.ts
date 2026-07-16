@@ -1515,8 +1515,11 @@ async function runCommands(
   const command = nextTaskObserver
     ? attachTaskObserver(commandEnvelope, nextTaskObserver)
     : commandEnvelope;
-  const executor = host?.commands && Object.hasOwn(host.commands, commandEnvelope.kind)
-    ? host.commands[commandEnvelope.kind]
+  const commands = host && Object.hasOwn(host, "commands")
+    ? host.commands
+    : undefined;
+  const executor = commands && Object.hasOwn(commands, commandEnvelope.kind)
+    ? commands[commandEnvelope.kind]
     : undefined;
   if (!executor) throw new Error(`vx-dom: no runtime command handler registered for "${commandEnvelope.kind}"`);
   await executor(command, context);
@@ -1992,8 +1995,11 @@ async function syncRuntimeSubscriptions(
       active.delete(key);
       await disposeActiveSubscription(previous, releaser, active);
     }
-    const runner = host?.subscriptions && Object.hasOwn(host.subscriptions, subscription.kind)
-      ? host.subscriptions[subscription.kind]
+    const subscriptions = host && Object.hasOwn(host, "subscriptions")
+      ? host.subscriptions
+      : undefined;
+    const runner = subscriptions && Object.hasOwn(subscriptions, subscription.kind)
+      ? subscriptions[subscription.kind]
       : undefined;
     if (!runner) throw new Error(`vx-dom: no runtime subscription handler registered for "${subscription.kind}"`);
     const mappedContext = mutableMappedSubscriptionContext(subscription, context);

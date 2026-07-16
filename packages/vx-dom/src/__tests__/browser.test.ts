@@ -975,7 +975,7 @@ describe("vx-dom browser renderer", () => {
     expect(subscriptionApp.syncSubscriptions).not.toHaveBeenCalled();
   });
 
-  it("treats inherited runtime host properties as missing handlers", async () => {
+  it("treats inherited runtime host maps and handlers as missing", async () => {
     const app: VxAppRuntime = {
       init: () => ({
         frame: counterNode(0),
@@ -1005,6 +1005,42 @@ describe("vx-dom browser renderer", () => {
     })).rejects.toThrow(
       'no runtime subscription handler registered for "toString"',
     );
+
+    const runCommand = vi.fn();
+    app.init = () => ({
+      frame: counterNode(0),
+      commands: { type: "cmd", kind: "inherited_command" },
+    });
+
+    await expect(mountVxApp({
+      container,
+      app,
+      runtimeHostMode: "explicit",
+      runtimeHost: Object.create({
+        commands: { inherited_command: runCommand },
+      }),
+    })).rejects.toThrow(
+      'no runtime command handler registered for "inherited_command"',
+    );
+    expect(runCommand).not.toHaveBeenCalled();
+
+    const runSubscription = vi.fn();
+    app.init = () => ({
+      frame: counterNode(0),
+      subscriptions: { type: "sub", kind: "inherited_sub", key: "main" },
+    });
+
+    await expect(mountVxApp({
+      container,
+      app,
+      runtimeHostMode: "explicit",
+      runtimeHost: Object.create({
+        subscriptions: { inherited_sub: runSubscription },
+      }),
+    })).rejects.toThrow(
+      'no runtime subscription handler registered for "inherited_sub"',
+    );
+    expect(runSubscription).not.toHaveBeenCalled();
   });
 
   it("keeps structural commands available in explicit runtime host mode", async () => {
