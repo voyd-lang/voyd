@@ -24,6 +24,7 @@ export type BootstrapContext = {
   packageName: string;
   voydVersion: string;
   localVoydRoot?: string;
+  localVoydExternalDependencies: Record<string, string>;
   voydPackageSpec(name: BootstrapVoydPackage): string;
 };
 

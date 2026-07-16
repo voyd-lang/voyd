@@ -87,6 +87,10 @@ describe("runBootstrap", () => {
       expect(packageJson.dependencies["@voyd-lang/sdk"]).toContain("packages/sdk");
       expect(packageJson.dependencies["@voyd-lang/vx-dom"]).toContain("packages/vx-dom");
       expect(packageJson.dependencies["@voyd-lang/compiler"]).toContain("packages/compiler");
+      expect(packageJson.dependencies["@msgpack/msgpack"]).toBe("^3.1.2");
+      expect(packageJson.dependencies.binaryen).toBe("^125.0.0");
+      expect(packageJson.dependencies.commander).toBe("^14.0.0");
+      expect(packageJson.dependencies["import-meta-resolve"]).toBe("^4.2.0");
       expect(packageJson.devDependencies["@voyd-lang/cli"]).toContain("apps/cli");
       expect(packageJson.devDependencies.tsx).toBe("^4.20.4");
       expect(packageJson.devDependencies.tailwindcss).toBe("^4.3.0");
@@ -94,6 +98,7 @@ describe("runBootstrap", () => {
 
       const tsConfig = await readFile(resolve(target, "tsconfig.json"), "utf8");
       expect(tsConfig).not.toContain('"node"');
+      expect(tsConfig).toContain('"preserveSymlinks": true');
 
       const viteConfig = await readFile(resolve(target, "vite.config.mjs"), "utf8");
       expect(viteConfig).toContain("compileVoyd");
@@ -101,7 +106,9 @@ describe("runBootstrap", () => {
       expect(viteConfig).toContain("while (completedCompilation < requestedCompilation)");
       expect(viteConfig).toContain("if (await compileLatest())");
       expect(viteConfig).toContain('includes("/src/generated/")');
-      expect(viteConfig).toContain('resolve: { conditions: ["development"] }');
+      expect(viteConfig).toContain(
+        'resolve: { conditions: ["development"], preserveSymlinks: true }',
+      );
 
       const compileScript = await readFile(resolve(target, "scripts/compile-voyd.mjs"), "utf8");
       expect(compileScript).toContain('resolve(rootDir, "src/generated/.staging")');
@@ -110,6 +117,13 @@ describe("runBootstrap", () => {
       const runVoyd = await readFile(resolve(target, "scripts/run-voyd.mjs"), "utf8");
       expect(runVoyd).toContain("const useVoydSources = true");
       expect(runVoyd).toContain('VOYD_DEV: "1"');
+      expect(runVoyd).toContain(
+        '"--preserve-symlinks --preserve-symlinks-main"',
+      );
+      expect(runVoyd).toContain("NODE_OPTIONS: nodeOptions");
+      expect(runVoyd).toContain(
+        'resolve(cwd, "node_modules/@voyd-lang/cli/bin/voyd.js")',
+      );
 
       const css = await readFile(resolve(target, "src/style.css"), "utf8");
       expect(css).toContain('@import "tailwindcss";');
@@ -160,15 +174,19 @@ describe("runBootstrap", () => {
       };
       expect(packageJson.name).toBe("mini-wiki");
       expect(packageJson.scripts.dev).toBe(
-        "node --conditions=development --import tsx scripts/dev.mjs",
+        "node --preserve-symlinks --preserve-symlinks-main --conditions=development --import tsx scripts/dev.mjs",
       );
       expect(packageJson.scripts.build).toBe(
-        "npm run typecheck && vite build && node --conditions=development --import tsx scripts/check-voyd.mjs",
+        "npm run typecheck && vite build && node --preserve-symlinks --preserve-symlinks-main --conditions=development --import tsx scripts/check-voyd.mjs",
       );
       expect(packageJson.dependencies["@voyd-lang/web"]).toContain("packages/web");
       expect(packageJson.dependencies["@voyd-lang/vx-dom"]).toContain("packages/vx-dom");
       expect(packageJson.dependencies["@voyd-lang/compiler"]).toContain("packages/compiler");
       expect(packageJson.dependencies["@voyd-lang/std"]).toContain("packages/std");
+      expect(packageJson.dependencies["@msgpack/msgpack"]).toBe("^3.1.2");
+      expect(packageJson.dependencies.binaryen).toBe("^125.0.0");
+      expect(packageJson.dependencies.commander).toBe("^14.0.0");
+      expect(packageJson.dependencies["import-meta-resolve"]).toBe("^4.2.0");
       expect(packageJson.devDependencies["@voyd-lang/cli"]).toContain("apps/cli");
       expect(packageJson.devDependencies.tsx).toBe("^4.20.4");
       expect(packageJson.devDependencies.tailwindcss).toBe("^4.3.0");
@@ -275,7 +293,21 @@ describe("runBootstrap", () => {
       expect(viteConfig).toContain("compileClient");
       expect(viteConfig).toContain('entryFileNames: "assets/client.js"');
       expect(viteConfig).toContain('assetFileNames: "assets/[name][extname]"');
-      expect(viteConfig).toContain('resolve: { conditions: ["development"] }');
+      expect(viteConfig).toContain(
+        'resolve: { conditions: ["development"], preserveSymlinks: true }',
+      );
+
+      const tsConfig = await readFile(resolve(target, "tsconfig.json"), "utf8");
+      expect(tsConfig).toContain('"preserveSymlinks": true');
+
+      const runVoyd = await readFile(resolve(target, "scripts/run-voyd.mjs"), "utf8");
+      expect(runVoyd).toContain(
+        '"--preserve-symlinks --preserve-symlinks-main"',
+      );
+      expect(runVoyd).toContain("NODE_OPTIONS: nodeOptions");
+      expect(runVoyd).toContain(
+        'resolve(cwd, "node_modules/@voyd-lang/cli/bin/voyd.js")',
+      );
 
       const clientTs = await readFile(resolve(target, "src/client.ts"), "utf8");
       expect(clientTs).toContain("createVoydHost");
@@ -412,13 +444,19 @@ pub fn client_tree() -> Html<Msg>
       expect(packageJson.dependencies["@voyd-lang/sdk"]).toMatch(/^\^/);
       expect(packageJson.dependencies["@voyd-lang/web"]).toMatch(/^\^/);
       expect(packageJson.dependencies["@voyd-lang/compiler"]).toBeUndefined();
+      expect(packageJson.dependencies["@msgpack/msgpack"]).toBeUndefined();
+      expect(packageJson.dependencies.binaryen).toBeUndefined();
       expect(packageJson.devDependencies["@voyd-lang/cli"]).toMatch(/^\^/);
       expect(packageJson.devDependencies.tsx).toBeUndefined();
 
       const runVoyd = await readFile(resolve(target, "scripts/run-voyd.mjs"), "utf8");
       expect(runVoyd).toContain("const useVoydSources = false");
+      expect(runVoyd).toContain("if (!useVoydSources) return process.env");
       const viteConfig = await readFile(resolve(target, "vite.config.mjs"), "utf8");
       expect(viteConfig).not.toContain('conditions: ["development"]');
+      expect(viteConfig).not.toContain("preserveSymlinks");
+      const tsConfig = await readFile(resolve(target, "tsconfig.json"), "utf8");
+      expect(tsConfig).not.toContain("preserveSymlinks");
     } finally {
       await rm(root, { recursive: true, force: true });
     }

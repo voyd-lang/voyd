@@ -12,7 +12,7 @@ export const webSsrLoader: BootstrapLoader = {
     files: [
       { path: "package.json", content: packageJson(context) },
       { path: "vite.config.mjs", content: viteConfig(!!context.localVoydRoot) },
-      { path: "tsconfig.json", content: tsConfig },
+      { path: "tsconfig.json", content: tsConfig(!!context.localVoydRoot) },
       { path: ".gitignore", content: gitIgnore },
       { path: "README.md", content: readme(context) },
       { path: "scripts/run-voyd.mjs", content: runVoydScript(!!context.localVoydRoot) },
@@ -44,7 +44,7 @@ export const webSsrLoader: BootstrapLoader = {
 
 const packageJson = (context: BootstrapContext): string => {
   const node = context.localVoydRoot
-    ? "node --conditions=development --import tsx"
+    ? "node --preserve-symlinks --preserve-symlinks-main --conditions=development --import tsx"
     : "node";
   const localDependencies = context.localVoydRoot ? {
     "@voyd-lang/compiler": context.voydPackageSpec("@voyd-lang/compiler"),
@@ -66,6 +66,7 @@ const packageJson = (context: BootstrapContext): string => {
       typecheck: "tsc --noEmit",
     },
     dependencies: {
+      ...context.localVoydExternalDependencies,
       "@voyd-lang/sdk": context.voydPackageSpec("@voyd-lang/sdk"),
       "@voyd-lang/vx-dom": context.voydPackageSpec("@voyd-lang/vx-dom"),
       "@voyd-lang/web": context.voydPackageSpec("@voyd-lang/web"),
@@ -83,23 +84,25 @@ const packageJson = (context: BootstrapContext): string => {
   }, null, 2)}\n`;
 };
 
-const tsConfig = `${JSON.stringify({
-  compilerOptions: {
-    target: "ES2022",
-    module: "ESNext",
-    lib: ["ES2022", "DOM", "DOM.Iterable"],
-    types: ["node", "vite/client"],
-    skipLibCheck: true,
-    moduleResolution: "bundler",
-    customConditions: ["development"],
-    allowImportingTsExtensions: true,
-    isolatedModules: true,
-    moduleDetection: "force",
-    noEmit: true,
-    strict: true,
-  },
-  include: ["src"],
-}, null, 2)}\n`;
+const tsConfig = (useVoydSources: boolean): string =>
+  `${JSON.stringify({
+    compilerOptions: {
+      target: "ES2022",
+      module: "ESNext",
+      lib: ["ES2022", "DOM", "DOM.Iterable"],
+      types: ["node", "vite/client"],
+      skipLibCheck: true,
+      moduleResolution: "bundler",
+      customConditions: ["development"],
+      allowImportingTsExtensions: true,
+      isolatedModules: true,
+      moduleDetection: "force",
+      noEmit: true,
+      strict: true,
+      ...(useVoydSources ? { preserveSymlinks: true } : {}),
+    },
+    include: ["src"],
+  }, null, 2)}\n`;
 
 const viteConfig = (useVoydSources: boolean): string =>
   `import tailwindcss from "@tailwindcss/vite";
@@ -124,7 +127,7 @@ const voydClient = () => ({
 
 export default defineConfig({
   plugins: [voydClient(), tailwindcss()],
-${useVoydSources ? '  resolve: { conditions: ["development"] },\n' : ""}  publicDir: false,
+${useVoydSources ? '  resolve: { conditions: ["development"], preserveSymlinks: true },\n' : ""}  publicDir: false,
   build: {
     outDir: "public",
     emptyOutDir: false,
@@ -141,15 +144,22 @@ ${useVoydSources ? '  resolve: { conditions: ["development"] },\n' : ""}  public
 
 const runVoydScript = (useVoydSources: boolean): string =>
   `import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 
 const useVoydSources = ${useVoydSources};
+const voydSourceNodeOptions = "--preserve-symlinks --preserve-symlinks-main";
 
 export function runVoyd(args, { cwd }) {
-  const command = process.platform === "win32" ? "voyd.cmd" : "voyd";
+  const command = useVoydSources
+    ? process.execPath
+    : process.platform === "win32" ? "voyd.cmd" : "voyd";
+  const commandArgs = useVoydSources
+    ? [resolve(cwd, "node_modules/@voyd-lang/cli/bin/voyd.js"), ...args]
+    : args;
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(command, commandArgs, {
       cwd,
-      env: useVoydSources ? { ...process.env, VOYD_DEV: "1" } : process.env,
+      env: voydEnvironment(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const stdout = [];
@@ -167,6 +177,14 @@ export function runVoyd(args, { cwd }) {
         "voyd exited with status " + code));
     });
   });
+}
+
+function voydEnvironment() {
+  if (!useVoydSources) return process.env;
+  const nodeOptions = [process.env.NODE_OPTIONS, voydSourceNodeOptions]
+    .filter(Boolean)
+    .join(" ");
+  return { ...process.env, NODE_OPTIONS: nodeOptions, VOYD_DEV: "1" };
 }
 
 function missingCliError(error) {

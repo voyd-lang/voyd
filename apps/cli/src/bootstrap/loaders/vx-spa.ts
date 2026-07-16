@@ -13,7 +13,7 @@ export const vxSpaLoader: BootstrapLoader = {
       { path: "index.html", content: indexHtml },
       { path: "package.json", content: packageJson(context) },
       { path: "vite.config.mjs", content: viteConfig(!!context.localVoydRoot) },
-      { path: "tsconfig.json", content: tsConfig },
+      { path: "tsconfig.json", content: tsConfig(!!context.localVoydRoot) },
       { path: ".gitignore", content: gitIgnore },
       { path: "scripts/compile-voyd.mjs", content: compileVoydScript },
       { path: "scripts/run-voyd.mjs", content: runVoydScript(!!context.localVoydRoot) },
@@ -50,6 +50,7 @@ const packageJson = (context: BootstrapContext): string => {
       typecheck: "npm run voyd:build && tsc --noEmit",
     },
     dependencies: {
+      ...context.localVoydExternalDependencies,
       "@voyd-lang/sdk": context.voydPackageSpec("@voyd-lang/sdk"),
       "@voyd-lang/vx-dom": context.voydPackageSpec("@voyd-lang/vx-dom"),
       ...localDependencies,
@@ -65,24 +66,26 @@ const packageJson = (context: BootstrapContext): string => {
   }, null, 2)}\n`;
 };
 
-const tsConfig = `${JSON.stringify({
-  compilerOptions: {
-    target: "ES2022",
-    useDefineForClassFields: true,
-    module: "ESNext",
-    lib: ["ES2022", "DOM", "DOM.Iterable"],
-    types: ["vite/client"],
-    skipLibCheck: true,
-    moduleResolution: "bundler",
-    customConditions: ["development"],
-    allowImportingTsExtensions: true,
-    isolatedModules: true,
-    moduleDetection: "force",
-    noEmit: true,
-    strict: true,
-  },
-  include: ["src"],
-}, null, 2)}\n`;
+const tsConfig = (useVoydSources: boolean): string =>
+  `${JSON.stringify({
+    compilerOptions: {
+      target: "ES2022",
+      useDefineForClassFields: true,
+      module: "ESNext",
+      lib: ["ES2022", "DOM", "DOM.Iterable"],
+      types: ["vite/client"],
+      skipLibCheck: true,
+      moduleResolution: "bundler",
+      customConditions: ["development"],
+      allowImportingTsExtensions: true,
+      isolatedModules: true,
+      moduleDetection: "force",
+      noEmit: true,
+      strict: true,
+      ...(useVoydSources ? { preserveSymlinks: true } : {}),
+    },
+    include: ["src"],
+  }, null, 2)}\n`;
 
 const indexHtml = `<!doctype html>
 <html lang="en">
@@ -139,20 +142,27 @@ const voyd = () => ({
 
 export default defineConfig({
   plugins: [voyd(), tailwindcss()],
-${useVoydSources ? '  resolve: { conditions: ["development"] },\n' : ""}});
+${useVoydSources ? '  resolve: { conditions: ["development"], preserveSymlinks: true },\n' : ""}});
 `;
 
 const runVoydScript = (useVoydSources: boolean): string =>
   `import { spawn } from "node:child_process";
+import { resolve } from "node:path";
 
 const useVoydSources = ${useVoydSources};
+const voydSourceNodeOptions = "--preserve-symlinks --preserve-symlinks-main";
 
 export function runVoyd(args, { cwd }) {
-  const command = process.platform === "win32" ? "voyd.cmd" : "voyd";
+  const command = useVoydSources
+    ? process.execPath
+    : process.platform === "win32" ? "voyd.cmd" : "voyd";
+  const commandArgs = useVoydSources
+    ? [resolve(cwd, "node_modules/@voyd-lang/cli/bin/voyd.js"), ...args]
+    : args;
   return new Promise((resolve, reject) => {
-    const child = spawn(command, args, {
+    const child = spawn(command, commandArgs, {
       cwd,
-      env: useVoydSources ? { ...process.env, VOYD_DEV: "1" } : process.env,
+      env: voydEnvironment(),
       stdio: ["ignore", "pipe", "pipe"],
     });
     const stdout = [];
@@ -170,6 +180,14 @@ export function runVoyd(args, { cwd }) {
         "voyd exited with status " + code));
     });
   });
+}
+
+function voydEnvironment() {
+  if (!useVoydSources) return process.env;
+  const nodeOptions = [process.env.NODE_OPTIONS, voydSourceNodeOptions]
+    .filter(Boolean)
+    .join(" ");
+  return { ...process.env, NODE_OPTIONS: nodeOptions, VOYD_DEV: "1" };
 }
 
 function missingCliError(error) {

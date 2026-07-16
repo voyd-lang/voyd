@@ -94,16 +94,57 @@ const createContext = ({
   targetDir: string;
   usePublished: boolean;
 }): BootstrapContext => {
-  const localVoydRoot = usePublished ? undefined : detectLocalVoydRoot();
+  const detectedLocalVoydRoot = usePublished ? undefined : detectLocalVoydRoot();
+  const localVoydExternalDependencies = detectedLocalVoydRoot
+    ? tryReadLocalVoydExternalDependencies(detectedLocalVoydRoot)
+    : undefined;
+  const localVoydRoot = localVoydExternalDependencies
+    ? detectedLocalVoydRoot
+    : undefined;
   return {
     targetDir,
     packageName: toPackageName(basename(targetDir)),
     voydVersion: version,
     localVoydRoot,
+    localVoydExternalDependencies: localVoydExternalDependencies ?? {},
     voydPackageSpec: (name) => localVoydRoot
       ? pathToFileURL(resolve(localVoydRoot, voydWorkspacePaths[name])).href
       : `^${version}`,
   };
+};
+
+const tryReadLocalVoydExternalDependencies = (
+  localVoydRoot: string,
+): Record<string, string> | undefined => {
+  try {
+    return readLocalVoydExternalDependencies(localVoydRoot);
+  } catch {
+    return undefined;
+  }
+};
+
+const readLocalVoydExternalDependencies = (
+  localVoydRoot: string,
+): Record<string, string> => {
+  const voydPackageNames = new Set(Object.keys(voydWorkspacePaths));
+  return Object.values(voydWorkspacePaths)
+    .flatMap((workspacePath) => {
+      const packageJson = JSON.parse(
+        readFileSync(resolve(localVoydRoot, workspacePath, "package.json"), "utf8"),
+      ) as { dependencies?: Record<string, string> };
+      return Object.entries(packageJson.dependencies ?? {})
+        .filter(([name]) => !voydPackageNames.has(name));
+    })
+    .reduce<Record<string, string>>((dependencies, [name, spec]) => {
+      const previousSpec = dependencies[name];
+      if (previousSpec && previousSpec !== spec) {
+        throw new Error(
+          `Local Voyd packages require conflicting versions of ${name}: ${previousSpec} and ${spec}`,
+        );
+      }
+      dependencies[name] = spec;
+      return dependencies;
+    }, {});
 };
 
 export const detectLocalVoydRoot = (
