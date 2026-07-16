@@ -1,6 +1,6 @@
 {
   "name": "@voyd-lang/compiler",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Voyd compiler",
   "type": "module",
   "main": "./dist/pipeline.js",
@@ -39,9 +39,9 @@
   },
   "dependencies": {
     "@msgpack/msgpack": "^3.1.2",
-    "@voyd-lang/lib": "^0.3.0"
+    "@voyd-lang/lib": "^0.3.1"
   },
   "devDependencies": {
-    "@voyd-lang/js-host": "^0.3.0"
+    "@voyd-lang/js-host": "^0.3.1"
   }
 }
