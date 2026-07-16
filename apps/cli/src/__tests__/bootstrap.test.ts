@@ -2,7 +2,7 @@
 
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -121,9 +121,7 @@ describe("runBootstrap", () => {
         '"--preserve-symlinks --preserve-symlinks-main"',
       );
       expect(runVoyd).toContain("NODE_OPTIONS: nodeOptions");
-      expect(runVoyd).toContain(
-        'resolve(cwd, "node_modules/@voyd-lang/cli/bin/voyd.js")',
-      );
+      expect(runVoyd).toContain("resolveVoydCliEntry(cwd)");
 
       const css = await readFile(resolve(target, "src/style.css"), "utf8");
       expect(css).toContain('@import "tailwindcss";');
@@ -305,9 +303,29 @@ describe("runBootstrap", () => {
         '"--preserve-symlinks --preserve-symlinks-main"',
       );
       expect(runVoyd).toContain("NODE_OPTIONS: nodeOptions");
-      expect(runVoyd).toContain(
-        'resolve(cwd, "node_modules/@voyd-lang/cli/bin/voyd.js")',
+      expect(runVoyd).toContain("resolveVoydCliEntry(cwd)");
+
+      const hoistedCliEntry = resolve(
+        root,
+        "node_modules/@voyd-lang/cli/bin/voyd.js",
       );
+      await mkdir(resolve(root, "node_modules/@voyd-lang/cli/bin"), {
+        recursive: true,
+      });
+      await writeFile(hoistedCliEntry, "");
+      const resolverProbe = [
+        `const { resolveVoydCliEntry } = await import(${JSON.stringify(
+          pathToFileURL(resolve(target, "scripts/run-voyd.mjs")).href,
+        )});`,
+        `console.log(resolveVoydCliEntry(${JSON.stringify(
+          resolve(target, "apps/web"),
+        )}));`,
+      ].join("\n");
+      expect(execFileSync(
+        process.execPath,
+        ["--input-type=module", "--eval", resolverProbe],
+        { encoding: "utf8" },
+      ).trim()).toBe(hoistedCliEntry);
 
       const clientTs = await readFile(resolve(target, "src/client.ts"), "utf8");
       expect(clientTs).toContain("createVoydHost");
