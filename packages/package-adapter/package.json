@@ -1,6 +1,6 @@
 {
   "name": "@voyd-lang/package-adapter",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Host-language adapter contracts for Voyd packages",
   "type": "module",
   "main": "./dist/index.js",

@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+## Voyd v0.3.1 (2026-07-15)
+
+Voyd `0.3.1` improves enum ergonomics, full-stack rendering correctness, local
+project bootstrapping, compiler dependency discovery, and editor highlighting.
+
+### Highlights
+
+- Nominal objects, values, enum and union members, aliases, and qualified names
+  can now use fieldwise parenthesized construction. Match patterns can resolve
+  unqualified enum and union members from context.
+- Server rendering now owns and releases retained callback lifetimes, including
+  success, failure, and cancellation paths. Browser and server rendering can
+  safely share the same event-producing view.
+- SSR output and hydration now agree on HTML normalization, form properties,
+  raw-text elements, void elements, and hydration metadata.
+- Locally linked CLI builds now generate a complete `file:`-linked Voyd package
+  graph, while `--published` keeps registry-based scaffolding available.
+- Macro-expanded imports now participate in dependency discovery, and static
+  methods remain accessible through type aliases.
+- Voyd syntax highlighting now covers the current language surface, including
+  trailing callback `do` clauses, without leaking function scopes.
+
 ### Breaking Changes
 
 - Custom `VxDomRenderer` implementations must provide `detach(): void` in
@@ -33,6 +55,42 @@
 - `map_html` now accepts a `handler:` function directly, so lifting child
   messages no longer requires manually retaining and passing a `handler_id`.
   The `handler_id:` overload remains available for explicitly managed lifetimes.
+
+### Fixes
+
+- Fixed local bootstrap installs mixing current templates with previously
+  published runtime packages, including hoisted CLI dependency resolution.
+- Fixed dependency graph construction when syntax macros introduce imports.
+- Fixed static method access through type aliases and re-export chains.
+- Fixed stale and incomplete TextMate scopes for current Voyd syntax.
+
+### Package Versions
+
+- `@voyd-lang/cli@0.3.1`
+- `@voyd-lang/compiler@0.3.1`
+- `@voyd-lang/js-host@0.3.1`
+- `@voyd-lang/language-server@0.3.1`
+- `@voyd-lang/lib@0.3.1`
+- `@voyd-lang/markdown@0.3.1`
+- `@voyd-lang/package-adapter@0.3.1`
+- `@voyd-lang/reference@0.3.1`
+- `@voyd-lang/sdk@0.3.1`
+- `@voyd-lang/std@0.3.1`
+- `@voyd-lang/vx-dom@0.3.1`
+- `@voyd-lang/web@0.3.1`
+- `voyd-vscode@0.3.1`
+
+### Upgrade Notes
+
+Install or update the CLI:
+
+```sh
+npm i -g @voyd-lang/cli@0.3.1
+```
+
+Update all directly consumed Voyd packages together. Review the SSR and VX
+breaking changes above before upgrading an application that renders on the
+server or implements `VxDomRenderer` directly.
 
 ## Voyd v0.3.0 - Gaia BH1 (2026-07-12)
 
