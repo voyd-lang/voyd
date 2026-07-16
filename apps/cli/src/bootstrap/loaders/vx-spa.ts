@@ -147,7 +147,8 @@ ${useVoydSources ? '  resolve: { conditions: ["development"], preserveSymlinks: 
 
 const runVoydScript = (useVoydSources: boolean): string =>
   `import { spawn } from "node:child_process";
-import { resolve } from "node:path";
+import { existsSync } from "node:fs";
+import { dirname, resolve } from "node:path";
 
 const useVoydSources = ${useVoydSources};
 const voydSourceNodeOptions = "--preserve-symlinks --preserve-symlinks-main";
@@ -157,7 +158,7 @@ export function runVoyd(args, { cwd }) {
     ? process.execPath
     : process.platform === "win32" ? "voyd.cmd" : "voyd";
   const commandArgs = useVoydSources
-    ? [resolve(cwd, "node_modules/@voyd-lang/cli/bin/voyd.js"), ...args]
+    ? [resolveVoydCliEntry(cwd), ...args]
     : args;
   return new Promise((resolve, reject) => {
     const child = spawn(command, commandArgs, {
@@ -180,6 +181,20 @@ export function runVoyd(args, { cwd }) {
         "voyd exited with status " + code));
     });
   });
+}
+
+export function resolveVoydCliEntry(cwd) {
+  let directory = resolve(cwd);
+  while (true) {
+    const candidate = resolve(
+      directory,
+      "node_modules/@voyd-lang/cli/bin/voyd.js",
+    );
+    if (existsSync(candidate)) return candidate;
+    const parent = dirname(directory);
+    if (parent === directory) throw missingCliError({ code: "ENOENT" });
+    directory = parent;
+  }
 }
 
 function voydEnvironment() {
