@@ -86,6 +86,41 @@ describe("language server project analysis", () => {
     }
   });
 
+  it("resolves local packages from an ancestor voyd directory", async () => {
+    const project = await createProject({
+      "packages/native/examples/chart/main.voyd":
+        `use pkg::native_sdk::all\n\nfn main() -> i32\n  answer()\n`,
+      "packages/native/voyd/native_sdk/src/pkg.voyd":
+        `pub fn answer() -> i32\n  42\n`,
+    });
+
+    try {
+      const entryPath = project.filePathFor(
+        "packages/native/examples/chart/main.voyd",
+      );
+      const roots = resolveModuleRoots(entryPath);
+      expect(roots.pkgDirs).toContain(
+        project.filePathFor("packages/native/voyd"),
+      );
+
+      const analysis = await analyzeProject({
+        entryPath,
+        roots,
+        openDocuments: new Map(),
+      });
+      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+
+      expect(
+        diagnostics.some((diagnostic) =>
+          diagnostic.message.includes("pkg:native_sdk::pkg"),
+        ),
+      ).toBe(false);
+      expect(analysis.graph.modules.has("pkg:native_sdk::pkg")).toBe(true);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("resolves go-to-definition for imported functions", async () => {
     const project = await createProject({
       "src/main.voyd": `use src::util::helper\n\nfn main() -> i32\n  helper(1)\n`,

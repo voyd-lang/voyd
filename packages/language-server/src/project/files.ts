@@ -30,6 +30,20 @@ const collectNodeModulesDirs = (startDir: string): string[] => {
   }
 };
 
+const collectLocalVoydPackageDirs = (startDir: string): string[] => {
+  const dirs: string[] = [];
+  let current = path.resolve(startDir);
+
+  while (true) {
+    dirs.push(path.join(current, "voyd"));
+    const parent = path.dirname(current);
+    if (parent === current) {
+      return dirs;
+    }
+    current = parent;
+  }
+};
+
 const hasStdSourceLayout = (rootPath: string): boolean =>
   existsSync(path.join(rootPath, "pkg.voyd"));
 
@@ -189,7 +203,10 @@ export const resolveModuleRoots = (entryPath: string): ModuleRoots => {
   return {
     src,
     std: resolveStdRoot(),
-    pkgDirs: dedupe(collectNodeModulesDirs(src)),
+    pkgDirs: dedupe([
+      ...collectLocalVoydPackageDirs(src),
+      ...collectNodeModulesDirs(src),
+    ]),
   };
 };
 
