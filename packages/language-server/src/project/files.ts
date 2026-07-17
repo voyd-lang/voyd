@@ -3,6 +3,10 @@ import { createRequire } from "node:module";
 import { access, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { URI } from "vscode-uri";
+import {
+  inspectVoydPackageDirectories,
+  type VoydPackageDirectoryIssue,
+} from "@voyd-lang/lib/package-directories.js";
 import { createFsModuleHost } from "@voyd-lang/compiler/modules/fs-host.js";
 import { createNodePathAdapter } from "@voyd-lang/compiler/modules/node-path-adapter.js";
 import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
@@ -15,20 +19,6 @@ const fsExists = async (targetPath: string): Promise<boolean> =>
   access(targetPath)
     .then(() => true)
     .catch(() => false);
-
-const collectNodeModulesDirs = (startDir: string): string[] => {
-  const dirs: string[] = [];
-  let current = path.resolve(startDir);
-
-  while (true) {
-    dirs.push(path.join(current, "node_modules"));
-    const parent = path.dirname(current);
-    if (parent === current) {
-      return dirs;
-    }
-    current = parent;
-  }
-};
 
 const hasStdSourceLayout = (rootPath: string): boolean =>
   existsSync(path.join(rootPath, "pkg.voyd"));
@@ -184,14 +174,54 @@ const resolveSrcRootFromEntry = (entryPath: string): string => {
   }
 };
 
-export const resolveModuleRoots = (entryPath: string): ModuleRoots => {
+export type ModuleRootContext = {
+  roots: ModuleRoots;
+  manifestPaths: readonly string[];
+  issues: readonly VoydPackageDirectoryIssue[];
+};
+
+export type ModulePackageContext = {
+  src: string;
+  pkgDirs: readonly string[];
+  manifestPaths: readonly string[];
+  issues: readonly VoydPackageDirectoryIssue[];
+};
+
+export const resolveModulePackageContext = (
+  entryPath: string,
+): ModulePackageContext => {
   const src = resolveSrcRootFromEntry(entryPath);
+  const inspection = inspectVoydPackageDirectories({ sourceRoot: src });
   return {
     src,
-    std: resolveStdRoot(),
-    pkgDirs: dedupe(collectNodeModulesDirs(src)),
+    pkgDirs: inspection.packageDirectories,
+    manifestPaths: inspection.manifestPaths,
+    issues: inspection.issues,
   };
 };
+
+export const moduleRootContextFromPackageContext = ({
+  src,
+  pkgDirs,
+  manifestPaths,
+  issues,
+}: ModulePackageContext): ModuleRootContext => ({
+  roots: {
+    src,
+    std: resolveStdRoot(),
+    pkgDirs,
+  },
+  manifestPaths,
+  issues,
+});
+
+export const resolveModuleRootContext = (
+  entryPath: string,
+): ModuleRootContext =>
+  moduleRootContextFromPackageContext(resolveModulePackageContext(entryPath));
+
+export const resolveModuleRoots = (entryPath: string): ModuleRoots =>
+  resolveModuleRootContext(entryPath).roots;
 
 export const createOverlayModuleHost = ({
   openDocuments,

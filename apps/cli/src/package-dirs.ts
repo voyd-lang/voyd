@@ -1,5 +1,4 @@
-import { resolve } from "node:path";
-import { collectNodeModulesDirs } from "@voyd-lang/sdk";
+import { resolveVoydPackageDirectories } from "@voyd-lang/lib/package-directories.js";
 
 export const resolvePackageDirs = ({
   srcRoot,
@@ -8,7 +7,8 @@ export const resolvePackageDirs = ({
   srcRoot: string;
   additionalPkgDirs: readonly string[];
 }): string[] => {
-  const configured = additionalPkgDirs.map((dir) => resolve(srcRoot, dir));
-  const nodeModules = collectNodeModulesDirs(srcRoot);
-  return Array.from(new Set([...configured, ...nodeModules]));
+  return resolveVoydPackageDirectories({
+    sourceRoot: srcRoot,
+    additionalPackageDirectories: additionalPkgDirs,
+  });
 };

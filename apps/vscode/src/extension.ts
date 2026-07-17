@@ -38,7 +38,10 @@ export const activate = (context: vscode.ExtensionContext): void => {
   const clientOptions: LanguageClientOptions = {
     documentSelector: [{ scheme: "file", language: "voyd" }],
     synchronize: {
-      fileEvents: vscode.workspace.createFileSystemWatcher("**/*.{voyd,vd}"),
+      fileEvents: [
+        vscode.workspace.createFileSystemWatcher("**/*.{voyd,vd}"),
+        vscode.workspace.createFileSystemWatcher("**/package.json"),
+      ],
     },
   };
 

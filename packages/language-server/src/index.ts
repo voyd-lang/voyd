@@ -8,6 +8,7 @@ export {
   prepareRenameAtPosition,
   renameAtPosition,
   resolveEntryPath,
+  resolveModuleRootContext,
   resolveModuleRoots,
   toFileUri,
   type ProjectAnalysis,

@@ -82,6 +82,22 @@ voyd test ./workspace/apps/consumer/test --pkg-dir ../pkgs
 to the target source root. For `voyd test`, it is resolved relative to the test
 root.
 
+Package directories shared by the CLI and editor can be declared in
+`package.json`:
+
+```json
+{
+  "voyd": {
+    "packageDirectories": ["./voyd-packages"]
+  }
+}
+```
+
+Configured paths are resolved relative to the `package.json` that declares
+them. Configuration is inherited from ancestor manifests, with nearer
+manifests searched first. Explicit `--pkg-dir` values are searched before
+configured directories, followed by ancestor `node_modules` directories.
+
 ## Generate API documentation
 
 ```bash

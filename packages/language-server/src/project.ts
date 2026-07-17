@@ -9,6 +9,7 @@ import {
   createOverlayModuleHost,
   normalizeFilePath,
   resolveEntryPath,
+  resolveModuleRootContext,
   resolveModuleRoots,
   toFileUri,
 } from "./project/files.js";
@@ -40,6 +41,7 @@ export {
   prepareRenameAtPosition,
   renameAtPosition,
   resolveEntryPath,
+  resolveModuleRootContext,
   resolveModuleRoots,
   toFileUri,
 };

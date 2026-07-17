@@ -2006,6 +2006,12 @@
     "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
   },
   {
+    "file": "packages/lib/src/lib/__tests__/package-directories.test.ts",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects shared Node tooling semantics for package.json directory inheritance, path precedence, defaults, and validation."
+  },
+  {
     "file": "packages/lib/src/lib/__tests__/resolve-src.test.ts",
     "owner": "package-unit",
     "disposition": "package-local",
