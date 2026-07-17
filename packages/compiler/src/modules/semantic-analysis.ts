@@ -25,6 +25,11 @@ import { getModuleSccGroups } from "./scc.js";
 import { collectCyclicModuleExportSurfaces } from "./cyclic-export-surfaces.js";
 import { cloneSemanticsMapForTypingState } from "./semantic-snapshot.js";
 
+export type SemanticsTypingState = {
+  arena: TypeArena;
+  effectInterner: EffectInterner;
+};
+
 export type AnalyzeModuleSemanticsOptions = {
   graph: ModuleGraph;
   includeTests?: boolean;
@@ -32,10 +37,7 @@ export type AnalyzeModuleSemanticsOptions = {
   captureDependencySnapshot?: boolean;
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
-  typingState?: {
-    arena: TypeArena;
-    effectInterner: EffectInterner;
-  };
+  typingState?: SemanticsTypingState;
   isCancelled?: () => boolean;
 };
 
@@ -50,6 +52,7 @@ export type AnalyzeModuleSemanticsResult = {
   semantics: Map<string, SemanticsPipelineResult>;
   diagnostics: Diagnostic[];
   recomputedModuleIds: readonly string[];
+  typingState: SemanticsTypingState;
   dependencySnapshot?: ReusableDependencySemanticsSnapshot;
 };
 
@@ -90,25 +93,28 @@ export const analyzeModuleSemantics = ({
   typingState,
   isCancelled,
 }: AnalyzeModuleSemanticsOptions): AnalyzeModuleSemanticsResult => {
+  if (previousSemantics && !typingState) {
+    throw new Error("previousSemantics requires its matching typingState");
+  }
+
+  const mismatchedTypingStateModuleId = typingState
+    ? Array.from(previousSemantics?.entries() ?? []).find(
+        ([, entry]) =>
+          entry.typing.arena !== typingState.arena ||
+          entry.typing.effects.internRow !== typingState.effectInterner.internRow,
+      )?.[0]
+    : undefined;
+  if (mismatchedTypingStateModuleId) {
+    throw new Error(
+      `previousSemantics for ${mismatchedTypingStateModuleId} does not match typingState`,
+    );
+  }
+
   const sccGroups = getModuleSccGroups({ graph });
   const semantics = new Map<string, SemanticsPipelineResult>();
   const exports = new Map<string, ModuleExportTable>();
   const diagnostics: Diagnostic[] = [];
   const recomputedModuleIds: string[] = [];
-  const arena = typingState?.arena ?? createTypeArena();
-  const effectInterner = typingState?.effectInterner ?? createEffectInterner();
-  let dependencySnapshot: ReusableDependencySemanticsSnapshot | undefined;
-  const shouldCaptureDependencySnapshot = captureDependencySnapshot === true;
-  const isReusableDependencyScc = createReusableDependencySccPredicate({
-    graph,
-    groups: sccGroups,
-  });
-  const reusableDependencyModuleIds = new Set(
-    sccGroups
-      .filter(isReusableDependencyScc)
-      .flatMap((group) => group.moduleIds),
-  );
-
   const cycleModuleIdsByModuleId = new Map<string, readonly string[]>();
   sccGroups.forEach((group) => {
     if (!group.cyclic) return;
@@ -123,6 +129,24 @@ export const analyzeModuleSemantics = ({
     changedModuleIds,
   });
   const isIncremental = incrementalModuleIds !== undefined;
+  const activeTypingState = isIncremental
+    ? typingState!
+    : {
+        arena: createTypeArena(),
+        effectInterner: createEffectInterner(),
+      };
+  const { arena, effectInterner } = activeTypingState;
+  let dependencySnapshot: ReusableDependencySemanticsSnapshot | undefined;
+  const shouldCaptureDependencySnapshot = captureDependencySnapshot === true;
+  const isReusableDependencyScc = createReusableDependencySccPredicate({
+    graph,
+    groups: sccGroups,
+  });
+  const reusableDependencyModuleIds = new Set(
+    sccGroups
+      .filter(isReusableDependencyScc)
+      .flatMap((group) => group.moduleIds),
+  );
   const recomputeSet = new Set(incrementalModuleIds ?? graph.modules.keys());
 
   if (isIncremental && previousSemantics) {
@@ -233,6 +257,7 @@ export const analyzeModuleSemantics = ({
     semantics,
     diagnostics,
     recomputedModuleIds,
+    typingState: activeTypingState,
     dependencySnapshot,
   };
 };

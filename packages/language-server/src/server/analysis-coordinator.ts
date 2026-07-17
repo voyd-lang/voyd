@@ -2,7 +2,10 @@ import path from "node:path";
 import type { VoydPackageDirectoryIssue } from "@voyd-lang/lib/package-directories.js";
 import { createFsModuleHost } from "@voyd-lang/compiler/modules/fs-host.js";
 import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
-import { isSemanticsAnalysisCancelledError } from "@voyd-lang/compiler/modules/semantic-analysis.js";
+import {
+  isSemanticsAnalysisCancelledError,
+  type SemanticsTypingState,
+} from "@voyd-lang/compiler/modules/semantic-analysis.js";
 import {
   DiagnosticSeverity,
   type DidChangeWatchedFilesParams,
@@ -51,6 +54,8 @@ type CoreCacheEntry = {
   revision: number;
   analysis: ProjectCoreAnalysis;
   recomputedModuleIds: readonly string[];
+  typingState: SemanticsTypingState;
+  incrementalRuns: number;
 };
 
 type NavigationCacheEntry = {
@@ -287,6 +292,7 @@ export class AnalysisCoordinator {
     fallbackHost: this.#fileSystemHost,
   });
   readonly #exportIndex: ExportIndexService;
+  readonly #maxIncrementalAnalysisRuns: number;
   #revision = 0;
   readonly #changedFilesByRevision = new Map<number, ReadonlySet<string>>();
   readonly #coreCache = new Map<string, CoreCacheEntry>();
@@ -302,10 +308,13 @@ export class AnalysisCoordinator {
 
   constructor({
     exportIndex = new ExportIndexService(),
+    maxIncrementalAnalysisRuns = 100,
   }: {
     exportIndex?: ExportIndexService;
+    maxIncrementalAnalysisRuns?: number;
   } = {}) {
     this.#exportIndex = exportIndex;
+    this.#maxIncrementalAnalysisRuns = maxIncrementalAnalysisRuns;
   }
 
   updateDocument(document: TextDocument): void {
@@ -768,12 +777,18 @@ export class AnalysisCoordinator {
         openDocuments: this.openDocuments,
       });
 
+      const refreshTypingState =
+        cached !== undefined &&
+        cached.incrementalRuns >= this.#maxIncrementalAnalysisRuns;
       const incremental = await analyzeProjectCoreIncremental({
         entryPath: context.entryPath,
         roots: context.roots,
         openDocuments: this.openDocuments,
         host: this.#createCancellableModuleHost(runRevision),
         previousAnalysis: cached?.analysis,
+        previousTypingState: refreshTypingState
+          ? undefined
+          : cached?.typingState,
         changedFilePaths: this.#changedFilesSince(cached?.revision ?? -1),
         isCancelled: () => this.#isRunStale(runRevision),
       });
@@ -781,6 +796,10 @@ export class AnalysisCoordinator {
         revision: runRevision,
         analysis: incremental.analysis,
         recomputedModuleIds: incremental.recomputedModuleIds,
+        typingState: incremental.typingState,
+        incrementalRuns: incremental.incremental
+          ? (cached?.incrementalRuns ?? 0) + 1
+          : 0,
       };
 
       if (this.#revision === runRevision) {

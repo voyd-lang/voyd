@@ -60,6 +60,7 @@ describe("analyzeModuleSemantics", () => {
       graph: updatedGraph,
       previousSemantics: initial.semantics,
       changedModuleIds: new Set(["src::util"]),
+      typingState: initial.typingState,
       recoverFromTypingErrors: true,
     });
 
@@ -70,6 +71,7 @@ describe("analyzeModuleSemantics", () => {
     expect(updated.semantics.get("src::helper")).toBe(initial.semantics.get("src::helper"));
     expect(updated.semantics.get("src::main")).not.toBe(initial.semantics.get("src::main"));
     expect(updated.semantics.get("src::util")).not.toBe(initial.semantics.get("src::util"));
+    expect(updated.typingState).toBe(initial.typingState);
   });
 
   it("falls back to full recompute for unknown changed module ids", async () => {
@@ -90,10 +92,46 @@ describe("analyzeModuleSemantics", () => {
       graph,
       previousSemantics: initial.semantics,
       changedModuleIds: new Set(["src::does_not_exist"]),
+      typingState: initial.typingState,
       recoverFromTypingErrors: true,
     });
 
     expect(updated.recomputedModuleIds.length).toBe(graph.modules.size);
+    expect(updated.typingState).not.toBe(initial.typingState);
+  });
+
+  it("rejects semantics paired with a different typing state", async () => {
+    const root = resolve("/proj/src");
+    const entryPath = `${root}${sep}main.voyd`;
+    const graph = await createGraph({
+      entryPath,
+      files: {
+        [entryPath]: `fn main() -> i32\n  1\n`,
+      },
+    });
+    const initial = analyzeModuleSemantics({ graph });
+    const unrelated = analyzeModuleSemantics({ graph });
+
+    expect(() =>
+      analyzeModuleSemantics({
+        graph,
+        previousSemantics: initial.semantics,
+        changedModuleIds: new Set(["src::main"]),
+        typingState: unrelated.typingState,
+      }),
+    ).toThrow(/does not match typingState/);
+
+    expect(() =>
+      analyzeModuleSemantics({
+        graph,
+        previousSemantics: initial.semantics,
+        changedModuleIds: new Set(["src::main"]),
+        typingState: {
+          arena: initial.typingState.arena,
+          effectInterner: unrelated.typingState.effectInterner,
+        },
+      }),
+    ).toThrow(/does not match typingState/);
   });
 
   it("supports cancellation before semantics work begins", async () => {
