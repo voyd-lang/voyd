@@ -104,6 +104,41 @@ const createPkgDirRelativeFixture = async (): Promise<{
   return { cwd: root, entryPath };
 };
 
+const createConfiguredPkgDirFixture = async (): Promise<{
+  cwd: string;
+  entryPath: string;
+}> => {
+  const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-pkg-dir-config-"));
+  const packageRoot = resolve(root, "workspace", "apps", "consumer");
+  const srcRoot = resolve(packageRoot, "src");
+  const packageSrcRoot = resolve(
+    packageRoot,
+    "voyd-packages",
+    "my_pkg",
+    "src",
+  );
+  const entryPath = resolve(srcRoot, "main.voyd");
+  await mkdir(srcRoot, { recursive: true });
+  await writePackageFixture(packageSrcRoot);
+  await writeFile(
+    resolve(packageRoot, "package.json"),
+    JSON.stringify({
+      voyd: { packageDirectories: ["./voyd-packages"] },
+    }),
+  );
+  await writeFile(
+    entryPath,
+    [
+      "use pkg::my_pkg::all",
+      "",
+      "pub fn main() -> i32",
+      "  plus_one(41)",
+      "",
+    ].join("\n"),
+  );
+  return { cwd: root, entryPath };
+};
+
 const createPkgDirRelativeTestFixture = async (): Promise<{
   cwd: string;
   testRoot: string;
@@ -535,6 +570,27 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
         fixture.entryPath,
         "--pkg-dir",
         "../pkgs",
+      ]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      if (result.status !== 0) {
+        throw new Error(`voyd compile failed: ${output}`);
+      }
+
+      expect(output).not.toContain("Unable to resolve module");
+    } finally {
+      await rm(fixture.cwd, { recursive: true, force: true });
+    }
+  });
+
+  it("loads package directories from package.json", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createConfiguredPkgDirFixture();
+    try {
+      const result = runCli(fixture.cwd, [
+        "--emit-ir-ast",
+        fixture.entryPath,
       ]);
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 

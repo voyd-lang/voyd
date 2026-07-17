@@ -1,8 +1,12 @@
 import path from "node:path";
+import type { VoydPackageDirectoryIssue } from "@voyd-lang/lib/package-directories.js";
 import { createFsModuleHost } from "@voyd-lang/compiler/modules/fs-host.js";
 import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
 import { isSemanticsAnalysisCancelledError } from "@voyd-lang/compiler/modules/semantic-analysis.js";
-import { type DidChangeWatchedFilesParams } from "vscode-languageserver/lib/node/main.js";
+import {
+  DiagnosticSeverity,
+  type DidChangeWatchedFilesParams,
+} from "vscode-languageserver/lib/node/main.js";
 import { TextDocument } from "vscode-languageserver-textdocument";
 import { URI } from "vscode-uri";
 import {
@@ -11,8 +15,11 @@ import {
   buildProjectNavigationIndexForModules,
   isProjectAnalysisCancelledError,
   resolveEntryPath,
-  resolveModuleRoots,
 } from "../project.js";
+import {
+  moduleRootContextFromPackageContext,
+  resolveModulePackageContext,
+} from "../project/files.js";
 import {
   buildCompletionExportEntriesByFirstCharacter,
   buildCompletionIndex,
@@ -35,6 +42,8 @@ type UriContext = {
   filePath: string;
   entryPath: string;
   roots: ModuleRoots;
+  manifestPaths: readonly string[];
+  packageConfigIssues: readonly VoydPackageDirectoryIssue[];
   cacheKey: string;
 };
 
@@ -82,6 +91,38 @@ const isCancelledError = (error: unknown): boolean =>
 const toImpactedModuleSet = (
   moduleIds: readonly string[],
 ): Set<string> => new Set(moduleIds);
+
+const withPackageConfigDiagnostics = ({
+  analysis,
+  uri,
+  issues,
+}: {
+  analysis: ProjectCoreAnalysis;
+  uri: string;
+  issues: readonly VoydPackageDirectoryIssue[];
+}): ProjectCoreAnalysis => {
+  if (issues.length === 0) {
+    return analysis;
+  }
+
+  const diagnosticsByUri = new Map(analysis.diagnosticsByUri);
+  const existing = diagnosticsByUri.get(uri) ?? [];
+  diagnosticsByUri.set(uri, [
+    ...issues.map(({ message }) => ({
+      range: {
+        start: { line: 0, character: 0 },
+        end: { line: 0, character: 0 },
+      },
+      severity: DiagnosticSeverity.Error,
+      code: "VOYD_CONFIG",
+      source: "voyd",
+      message,
+    })),
+    ...existing,
+  ]);
+
+  return { ...analysis, diagnosticsByUri };
+};
 
 const mergeOccurrencesByUri = ({
   base,
@@ -254,6 +295,10 @@ export class AnalysisCoordinator {
   readonly #navigationInFlight = new Map<string, Promise<ProjectNavigationIndex>>();
   readonly #completionCache = new Map<string, CompletionCacheEntry>();
   readonly #completionInFlight = new Map<string, Promise<CompletionAnalysis>>();
+  readonly #modulePackageContextsByEntryPath = new Map<
+    string,
+    ReturnType<typeof resolveModulePackageContext>
+  >();
 
   constructor({
     exportIndex = new ExportIndexService(),
@@ -284,11 +329,22 @@ export class AnalysisCoordinator {
   async handleWatchedFileChanges(
     changes: DidChangeWatchedFilesParams["changes"],
   ): Promise<boolean> {
-    const voydFilePaths = changes
-      .map((change) => normalizeFilePathFromUri(change.uri))
+    const changedFilePaths = changes.map((change) =>
+      normalizeFilePathFromUri(change.uri),
+    );
+    const packageConfigPaths = changedFilePaths.filter(
+      (filePath) => path.basename(filePath) === "package.json",
+    );
+    const packageConfigChanged = this.#invalidateModuleRootContexts(
+      packageConfigPaths,
+    );
+    const voydFilePaths = changedFilePaths
       .filter((filePath) => filePath.endsWith(".voyd"));
     if (voydFilePaths.length === 0) {
-      return false;
+      if (packageConfigChanged) {
+        this.#revision += 1;
+      }
+      return packageConfigChanged;
     }
 
     const updated = await this.#exportIndex.applyWatchedFileChanges({
@@ -300,7 +356,7 @@ export class AnalysisCoordinator {
     }
 
     this.#registerFileChanges(voydFilePaths);
-    return true;
+    return updated || packageConfigChanged;
   }
 
   async getCoreForUri(
@@ -309,7 +365,11 @@ export class AnalysisCoordinator {
     const { context, entry } = await this.#getCoreEntryForUri(uri);
     return {
       context,
-      analysis: entry.analysis,
+      analysis: withPackageConfigDiagnostics({
+        analysis: entry.analysis,
+        uri,
+        issues: context.packageConfigIssues,
+      }),
     };
   }
 
@@ -501,8 +561,7 @@ export class AnalysisCoordinator {
     const std = roots.std ? path.resolve(roots.std) : "";
     const pkg = roots.pkg ? path.resolve(roots.pkg) : "";
     const pkgDirs = [...(roots.pkgDirs ?? [])]
-      .map((pkgDir) => path.resolve(pkgDir))
-      .sort();
+      .map((pkgDir) => path.resolve(pkgDir));
     const hasResolvePackageRoot = roots.resolvePackageRoot ? "custom-pkg-resolver" : "";
     return [
       path.resolve(entryPath),
@@ -527,9 +586,8 @@ export class AnalysisCoordinator {
     }
 
     const fallbackContext: UriContext = {
-      filePath: context.filePath,
+      ...context,
       entryPath: context.filePath,
-      roots: context.roots,
       cacheKey: AnalysisCoordinator.#contextCacheKey({
         entryPath: context.filePath,
         roots: context.roots,
@@ -545,17 +603,50 @@ export class AnalysisCoordinator {
   async #resolveUriContext(uri: string): Promise<UriContext> {
     const filePath = normalizeFilePathFromUri(uri);
     const projectEntryPath = await resolveEntryPath(filePath);
-    const roots = resolveModuleRoots(projectEntryPath);
+    const normalizedEntryPath = path.resolve(projectEntryPath);
+    let modulePackageContext = this.#modulePackageContextsByEntryPath.get(
+      normalizedEntryPath,
+    );
+    if (!modulePackageContext) {
+      modulePackageContext = resolveModulePackageContext(normalizedEntryPath);
+      this.#modulePackageContextsByEntryPath.set(
+        normalizedEntryPath,
+        modulePackageContext,
+      );
+    }
+    const moduleRootContext = moduleRootContextFromPackageContext(
+      modulePackageContext,
+    );
+    const { roots, manifestPaths, issues } = moduleRootContext;
     const cacheKey = AnalysisCoordinator.#contextCacheKey({
-      entryPath: projectEntryPath,
+      entryPath: normalizedEntryPath,
       roots,
     });
     return {
       filePath,
-      entryPath: projectEntryPath,
+      entryPath: normalizedEntryPath,
       roots,
+      manifestPaths,
+      packageConfigIssues: issues,
       cacheKey,
     };
+  }
+
+  #invalidateModuleRootContexts(manifestPaths: readonly string[]): boolean {
+    if (manifestPaths.length === 0) {
+      return false;
+    }
+
+    const changed = new Set(manifestPaths.map((manifestPath) => path.resolve(manifestPath)));
+    let invalidated = false;
+    this.#modulePackageContextsByEntryPath.forEach((context, entryPath) => {
+      if (!context.manifestPaths.some((manifestPath) => changed.has(manifestPath))) {
+        return;
+      }
+      this.#modulePackageContextsByEntryPath.delete(entryPath);
+      invalidated = true;
+    });
+    return invalidated;
   }
 
   #isRunStale(revision: number): boolean {

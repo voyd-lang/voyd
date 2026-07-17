@@ -86,11 +86,14 @@ describe("language server project analysis", () => {
     }
   });
 
-  it("resolves local packages from an ancestor voyd directory", async () => {
+  it("resolves package directories configured in package.json", async () => {
     const project = await createProject({
+      "packages/native/package.json": JSON.stringify({
+        voyd: { packageDirectories: ["./local-packages"] },
+      }),
       "packages/native/examples/chart/main.voyd":
         `use pkg::native_sdk::all\n\nfn main() -> i32\n  answer()\n`,
-      "packages/native/voyd/native_sdk/src/pkg.voyd":
+      "packages/native/local-packages/native_sdk/src/pkg.voyd":
         `pub fn answer() -> i32\n  42\n`,
     });
 
@@ -100,7 +103,7 @@ describe("language server project analysis", () => {
       );
       const roots = resolveModuleRoots(entryPath);
       expect(roots.pkgDirs).toContain(
-        project.filePathFor("packages/native/voyd"),
+        project.filePathFor("packages/native/local-packages"),
       );
 
       const analysis = await analyzeProject({

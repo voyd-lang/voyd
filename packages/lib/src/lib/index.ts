@@ -1,6 +1,7 @@
 export * from "./fast-shift-array.js";
 export * from "./helpers.js";
 export * from "./murmur-hash.js";
+export * from "./package-directories.js";
 export * from "./read-string.js";
 export * from "./resolve-src.js";
 export * from "./resolve-std.js";

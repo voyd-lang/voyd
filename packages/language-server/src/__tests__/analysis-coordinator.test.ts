@@ -155,6 +155,92 @@ describe("analysis coordinator", () => {
     }
   });
 
+  it("reloads package directory configuration when package.json changes", async () => {
+    const project = await createProject({
+      "src/main.voyd":
+        `use pkg::my_pkg::all\n\nfn main() -> i32\n  value()\n`,
+      "voyd-packages/my_pkg/src/pkg.voyd":
+        `pub fn value() -> i32\n  42\n`,
+    });
+    const std = await createProject({
+      "pkg.voyd": "",
+    });
+
+    try {
+      await withStdRoot(std.rootDir, async () => {
+        const mainPath = project.filePathFor("src/main.voyd");
+        const mainUri = toFileUri(mainPath);
+        const manifestPath = project.filePathFor("package.json");
+        const coordinator = new AnalysisCoordinator();
+
+        const initial = await coordinator.getCoreForUri(mainUri);
+        expect(initial.analysis.graph.modules.has("pkg:my_pkg::pkg")).toBe(false);
+
+        const unrelatedManifestPath = project.filePathFor(
+          "unrelated/package.json",
+        );
+        await mkdir(path.dirname(unrelatedManifestPath), { recursive: true });
+        await writeFile(unrelatedManifestPath, "{}", "utf8");
+        const unrelatedChanged = await coordinator.handleWatchedFileChanges([
+          {
+            uri: toFileUri(unrelatedManifestPath),
+            type: FileChangeType.Created,
+          },
+        ]);
+        expect(unrelatedChanged).toBe(false);
+
+        await writeFile(
+          manifestPath,
+          JSON.stringify({
+            voyd: { packageDirectories: ["./voyd-packages"] },
+          }),
+          "utf8",
+        );
+        const changed = await coordinator.handleWatchedFileChanges([
+          { uri: toFileUri(manifestPath), type: FileChangeType.Created },
+        ]);
+
+        expect(changed).toBe(true);
+        const updated = await coordinator.getCoreForUri(mainUri);
+        expect(updated.analysis.graph.modules.has("pkg:my_pkg::pkg")).toBe(true);
+        expect(updated.analysis.diagnosticsByUri.get(mainUri) ?? []).toHaveLength(0);
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+      await rm(std.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reports invalid package configuration without rejecting analysis", async () => {
+    const project = await createProject({
+      "package.json": JSON.stringify({
+        voyd: { packageDirectories: "./voyd-packages" },
+      }),
+      "src/main.voyd": `fn main() -> i32\n  42\n`,
+    });
+    const std = await createProject({
+      "pkg.voyd": "",
+    });
+
+    try {
+      await withStdRoot(std.rootDir, async () => {
+        const mainUri = toFileUri(project.filePathFor("src/main.voyd"));
+        const coordinator = new AnalysisCoordinator();
+
+        const { analysis } = await coordinator.getCoreForUri(mainUri);
+        expect(analysis.diagnosticsByUri.get(mainUri)).toEqual([
+          expect.objectContaining({
+            code: "VOYD_CONFIG",
+            message: expect.stringMatching(/voyd\.packageDirectories/),
+          }),
+        ]);
+      });
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+      await rm(std.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("reuses unaffected module semantics after an edit", async () => {
     const project = await createProject({
       "src/main.voyd":
