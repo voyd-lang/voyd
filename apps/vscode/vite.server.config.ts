@@ -2,11 +2,11 @@ import path from "node:path";
 import { defineConfig } from "vite";
 
 export default defineConfig({
-  resolve: {
-    conditions: ["development"],
-  },
   ssr: {
     noExternal: true,
+    resolve: {
+      conditions: ["development"],
+    },
   },
   build: {
     ssr: path.resolve(__dirname, "../../packages/language-server/src/server.ts"),
