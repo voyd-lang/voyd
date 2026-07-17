@@ -28,6 +28,7 @@ export type {
   RenderOptions,
   VoydHydrationRoot,
   VxDomRenderer,
+  VxRuntimeHostMode,
 } from "./browser.js";
 export {
   renderNodeToString,

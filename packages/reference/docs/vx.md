@@ -747,6 +747,31 @@ const mounted = await mountVxApp({
 });
 ```
 
+By default, `mountVxApp` installs the standard browser commands and
+subscriptions, then applies `runtimeHost` as overrides. Set
+`runtimeHostMode: "explicit"` when an embedder needs an exact capability set:
+
+```ts
+const mounted = await mountVxApp({
+  container,
+  app,
+  runtimeHostMode: "explicit",
+  runtimeHost: {
+    commands: {
+      analytics_track: async (command) => {
+        await analytics.track(command.value);
+      },
+    },
+  },
+});
+```
+
+Explicit mode installs only the supplied commands, subscriptions, and error
+handler. Omitting `runtimeHost` in explicit mode provides no external
+capabilities. Structural VX commands such as `none`, `message`, `batch`, and
+`map` remain available, while any unknown external capability fails with the
+normal missing-handler error.
+
 For an ongoing host listener, use a configured runtime subscription:
 
 ```voyd

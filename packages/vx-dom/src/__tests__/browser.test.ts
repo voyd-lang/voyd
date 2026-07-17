@@ -903,6 +903,197 @@ describe("vx-dom browser renderer", () => {
     expect(container.textContent).toBe("Count: 1");
   });
 
+  it("uses only supplied runtime host capabilities in explicit mode", async () => {
+    const runCommand = vi.fn();
+    const runSubscription = vi.fn(() => undefined);
+    const syncSubscriptions = vi.fn();
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: { type: "sub", kind: "custom_sub", key: "main" },
+        commands: { type: "cmd", kind: "custom_command" },
+      }),
+      render: () => counterNode(0),
+      dispatch: () => counterNode(0),
+      syncSubscriptions,
+    };
+
+    await mountVxApp({
+      container,
+      app,
+      runtimeHostMode: "explicit",
+      runtimeHost: {
+        commands: { custom_command: runCommand },
+        subscriptions: { custom_sub: runSubscription },
+      },
+    });
+
+    expect(runCommand).toHaveBeenCalledOnce();
+    expect(runSubscription).toHaveBeenCalledOnce();
+    expect(syncSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it("does not install browser defaults in explicit runtime host mode", async () => {
+    const onError = vi.fn();
+    const commandApp: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        commands: { type: "cmd", kind: "delay", value: 0 },
+      }),
+      render: () => counterNode(0),
+      dispatch: () => counterNode(0),
+    };
+
+    await expect(mountVxApp({
+      container,
+      app: commandApp,
+      runtimeHostMode: "explicit",
+      runtimeHost: { onError },
+    })).rejects.toThrow('no runtime command handler registered for "delay"');
+    expect(onError).toHaveBeenCalledWith(
+      expect.any(Error),
+      expect.objectContaining({ phase: "commands" }),
+    );
+
+    const subscriptionApp: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        subscriptions: { type: "sub", kind: "location_change", key: "main" },
+      }),
+      render: () => counterNode(0),
+      dispatch: () => counterNode(0),
+      syncSubscriptions: vi.fn(),
+    };
+
+    await expect(mountVxApp({
+      container,
+      app: subscriptionApp,
+      runtimeHostMode: "explicit",
+    })).rejects.toThrow(
+      'no runtime subscription handler registered for "location_change"',
+    );
+    expect(subscriptionApp.syncSubscriptions).not.toHaveBeenCalled();
+  });
+
+  it("ignores inherited runtime host capabilities", async () => {
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        commands: { type: "cmd", kind: "constructor" },
+      }),
+      render: () => counterNode(0),
+      dispatch: () => counterNode(0),
+    };
+
+    await expect(mountVxApp({
+      container,
+      app,
+      runtimeHostMode: "explicit",
+      runtimeHost: { commands: {} },
+    })).rejects.toThrow('no runtime command handler registered for "constructor"');
+
+    app.init = () => ({
+      frame: counterNode(0),
+      subscriptions: { type: "sub", kind: "toString", key: "main" },
+    });
+
+    await expect(mountVxApp({
+      container,
+      app,
+      runtimeHostMode: "explicit",
+      runtimeHost: { subscriptions: {} },
+    })).rejects.toThrow(
+      'no runtime subscription handler registered for "toString"',
+    );
+
+    const runCommand = vi.fn();
+    app.init = () => ({
+      frame: counterNode(0),
+      commands: { type: "cmd", kind: "inherited_command" },
+    });
+
+    await expect(mountVxApp({
+      container,
+      app,
+      runtimeHostMode: "explicit",
+      runtimeHost: Object.create({
+        commands: { inherited_command: runCommand },
+      }),
+    })).rejects.toThrow(
+      'no runtime command handler registered for "inherited_command"',
+    );
+    expect(runCommand).not.toHaveBeenCalled();
+
+    const runSubscription = vi.fn();
+    app.init = () => ({
+      frame: counterNode(0),
+      subscriptions: { type: "sub", kind: "inherited_sub", key: "main" },
+    });
+
+    await expect(mountVxApp({
+      container,
+      app,
+      runtimeHostMode: "explicit",
+      runtimeHost: Object.create({
+        subscriptions: { inherited_sub: runSubscription },
+      }),
+    })).rejects.toThrow(
+      'no runtime subscription handler registered for "inherited_sub"',
+    );
+    expect(runSubscription).not.toHaveBeenCalled();
+
+    const onError = vi.fn();
+    app.init = () => ({
+      frame: counterNode(0),
+      commands: { type: "cmd", kind: "missing_handler" },
+    });
+
+    await expect(mountVxApp({
+      container,
+      app,
+      runtimeHostMode: "explicit",
+      runtimeHost: Object.create({ onError }),
+    })).rejects.toThrow(
+      'no runtime command handler registered for "missing_handler"',
+    );
+    expect(onError).not.toHaveBeenCalled();
+  });
+
+  it("keeps structural commands available in explicit runtime host mode", async () => {
+    const seenMessages: VxRuntimeMessage[] = [];
+    const app: VxAppRuntime = {
+      init: () => ({
+        frame: counterNode(0),
+        commands: {
+          type: "cmd",
+          kind: "batch",
+          children: [
+            { type: "cmd", kind: "none" },
+            {
+              type: "cmd",
+              kind: "map",
+              handlerId: 12,
+              child: { type: "cmd", kind: "message", value: "ready" },
+            },
+          ],
+        },
+      }),
+      render: () => counterNode(seenMessages.length),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        return counterNode(seenMessages.length);
+      },
+    };
+
+    await mountVxApp({ container, app, runtimeHostMode: "explicit" });
+
+    expect(seenMessages).toEqual([{
+      kind: "map",
+      handlerId: 12,
+      message: { kind: "msgpack", value: "ready" },
+    }]);
+  });
+
   it("reports command diagnostics for unknown runtime command kinds", async () => {
     const onError = vi.fn();
     const app: VxAppRuntime = {

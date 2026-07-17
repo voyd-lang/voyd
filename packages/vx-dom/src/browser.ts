@@ -94,6 +94,8 @@ export type MountedVxApp = {
   getSnapshot(): unknown;
 };
 
+export type VxRuntimeHostMode = "browser" | "explicit";
+
 export type MountVxAppOptions = {
   container: Element;
   componentFn?: VoydComponentFn;
@@ -106,6 +108,7 @@ export type MountVxAppOptions = {
   handlers?: RetainedEventHandlerRegistry;
   app?: VxAppRuntime;
   runtimeHost?: VxRuntimeHostOptions;
+  runtimeHostMode?: VxRuntimeHostMode;
   onError?: VxRuntimeErrorHandler;
   onHydrationMismatch?: HydrationMismatchHandler;
   dispatch?: (message: VxMessage) => Promise<void> | void;
@@ -446,8 +449,13 @@ async function mountRuntimeApp(
   let previousSubscriptions: unknown;
   const abortController = new AbortController();
   const activeSubscriptions = new Map<string, ActiveSubscription>();
-  const runtimeHost = createBrowserVxRuntimeHost(options.runtimeHost);
-  const reportError = createRuntimeErrorReporter(options.onError ?? runtimeHost.onError);
+  const runtimeHost = options.runtimeHostMode === "explicit"
+    ? options.runtimeHost ?? {}
+    : createBrowserVxRuntimeHost(options.runtimeHost);
+  const runtimeHostOnError = Object.hasOwn(runtimeHost, "onError")
+    ? runtimeHost.onError
+    : undefined;
+  const reportError = createRuntimeErrorReporter(options.onError ?? runtimeHostOnError);
   const retainedHandlerReleaser = retainedHandlerReleaserFor(app, options.handlers);
   const afterCommandCallbacks: Array<Array<() => void>> = [];
   let queue = Promise.resolve();
@@ -540,7 +548,11 @@ async function mountRuntimeApp(
 
     let commandPhaseStarted = false;
     try {
-      if (step.subscriptions !== undefined && app.syncSubscriptions) {
+      if (
+        step.subscriptions !== undefined &&
+        options.runtimeHostMode !== "explicit" &&
+        app.syncSubscriptions
+      ) {
         const previous = previousSubscriptions;
         previousSubscriptions = step.subscriptions;
         try {
@@ -1506,7 +1518,12 @@ async function runCommands(
   const command = nextTaskObserver
     ? attachTaskObserver(commandEnvelope, nextTaskObserver)
     : commandEnvelope;
-  const executor = host?.commands?.[commandEnvelope.kind];
+  const commands = host && Object.hasOwn(host, "commands")
+    ? host.commands
+    : undefined;
+  const executor = commands && Object.hasOwn(commands, commandEnvelope.kind)
+    ? commands[commandEnvelope.kind]
+    : undefined;
   if (!executor) throw new Error(`vx-dom: no runtime command handler registered for "${commandEnvelope.kind}"`);
   await executor(command, context);
 }
@@ -1981,7 +1998,12 @@ async function syncRuntimeSubscriptions(
       active.delete(key);
       await disposeActiveSubscription(previous, releaser, active);
     }
-    const runner = host?.subscriptions?.[subscription.kind];
+    const subscriptions = host && Object.hasOwn(host, "subscriptions")
+      ? host.subscriptions
+      : undefined;
+    const runner = subscriptions && Object.hasOwn(subscriptions, subscription.kind)
+      ? subscriptions[subscription.kind]
+      : undefined;
     if (!runner) throw new Error(`vx-dom: no runtime subscription handler registered for "${subscription.kind}"`);
     const mappedContext = mutableMappedSubscriptionContext(subscription, context);
     const dispose = await runner(subscription, mappedContext.context);
