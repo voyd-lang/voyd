@@ -4,6 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { describe, expect, it } from "vitest";
 import { FileChangeType } from "vscode-languageserver/lib/node/main.js";
 import { TextDocument } from "vscode-languageserver-textdocument";
+import { definitionsAtPosition } from "../project.js";
 import { toFileUri } from "../project/files.js";
 import { AnalysisCoordinator } from "../server/analysis-coordinator.js";
 
@@ -241,6 +242,73 @@ describe("analysis coordinator", () => {
     }
   });
 
+  it("keeps package semantics valid after opening an imported definition", async () => {
+    const mainSource =
+      `use pkg::demo::all\n\nfn passthrough<Model, Msg>(value: Tessera<Model, Msg>) -> Tessera<Model, Msg>\n  value\n`;
+    const apiSource =
+      `use std::vx::Program\n\npub type Tessera<Model, Msg> = Program<Model, Msg>\n`;
+    const project = await createProject({
+      "package.json": JSON.stringify({
+        voyd: { packageDirectories: ["./voyd-packages"] },
+      }),
+      "examples/main.voyd": mainSource,
+      "voyd-packages/demo/package.json": JSON.stringify({
+        name: "demo",
+        version: "0.0.0",
+      }),
+      "voyd-packages/demo/src/pkg.voyd":
+        `pub src::api\npub use src::api::{ Tessera }\n`,
+      "voyd-packages/demo/src/api.voyd": apiSource,
+    });
+
+    try {
+      const mainPath = project.filePathFor("examples/main.voyd");
+      const mainUri = toFileUri(mainPath);
+      const apiPath = project.filePathFor("voyd-packages/demo/src/api.voyd");
+      const apiUri = toFileUri(apiPath);
+      const coordinator = new AnalysisCoordinator();
+      coordinator.updateDocument(
+        TextDocument.create(mainUri, "voyd", 1, mainSource),
+      );
+
+      const initial = await coordinator.getCoreForUri(mainUri);
+      expect(initial.analysis.diagnosticsByUri.get(mainUri) ?? []).toHaveLength(0);
+
+      const initialNavigation = await coordinator.getNavigationForUri(mainUri);
+      expect(
+        definitionsAtPosition({
+          analysis: initialNavigation,
+          uri: mainUri,
+          position: { line: 2, character: 36 },
+        }),
+      ).toEqual([
+        expect.objectContaining({ uri: apiUri }),
+      ]);
+
+      coordinator.updateDocument(
+        TextDocument.create(apiUri, "voyd", 1, apiSource),
+      );
+
+      const updated = await coordinator.getCoreForUri(mainUri);
+      expect(updated.analysis.diagnosticsByUri.get(mainUri) ?? []).toHaveLength(0);
+      expect(updated.analysis.diagnosticsByUri.get(apiUri) ?? []).toHaveLength(0);
+      expect(updated.analysis.graph.modules.has("pkg:demo::pkg")).toBe(true);
+
+      const updatedNavigation = await coordinator.getNavigationForUri(mainUri);
+      expect(
+        definitionsAtPosition({
+          analysis: updatedNavigation,
+          uri: mainUri,
+          position: { line: 2, character: 36 },
+        }),
+      ).toEqual([
+        expect.objectContaining({ uri: apiUri }),
+      ]);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   it("reuses unaffected module semantics after an edit", async () => {
     const project = await createProject({
       "src/main.voyd":
@@ -288,6 +356,61 @@ describe("analysis coordinator", () => {
       expect(updated.analysis.semantics.get("src::main")).not.toBe(initialMainSemantics);
       expect(updated.analysis.semantics.get("src::util")).not.toBe(initialUtilSemantics);
       expect(updated.analysis.semantics.get("src::helper")).toBe(initialHelperSemantics);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
+  it("refreshes incremental typing state after a bounded number of edits", async () => {
+    const project = await createProject({
+      "src/main.voyd": `use src::helper::helper\n\nfn main() -> i32\n  helper()\n`,
+      "src/helper.voyd": `pub fn helper() -> i32\n  1\n`,
+    });
+
+    try {
+      const mainUri = toFileUri(project.filePathFor("src/main.voyd"));
+      const coordinator = new AnalysisCoordinator({
+        maxIncrementalAnalysisRuns: 1,
+      });
+      coordinator.updateDocument(
+        TextDocument.create(
+          mainUri,
+          "voyd",
+          1,
+          `use src::helper::helper\n\nfn main() -> i32\n  helper()\n`,
+        ),
+      );
+
+      const initial = await coordinator.getCoreForUri(mainUri);
+      const initialHelper = initial.analysis.semantics.get("src::helper");
+      expect(initialHelper).toBeDefined();
+
+      coordinator.updateDocument(
+        TextDocument.create(
+          mainUri,
+          "voyd",
+          2,
+          `use src::helper::helper\n\nfn main() -> i32\n  helper() + 1\n`,
+        ),
+      );
+      const incremental = await coordinator.getCoreForUri(mainUri);
+      expect(incremental.analysis.semantics.get("src::helper")).toBe(
+        initialHelper,
+      );
+
+      coordinator.updateDocument(
+        TextDocument.create(
+          mainUri,
+          "voyd",
+          3,
+          `use src::helper::helper\n\nfn main() -> i32\n  helper() + 2\n`,
+        ),
+      );
+      const refreshed = await coordinator.getCoreForUri(mainUri);
+      expect(refreshed.analysis.semantics.get("src::helper")).not.toBe(
+        initialHelper,
+      );
+      expect(refreshed.analysis.diagnosticsByUri.get(mainUri) ?? []).toHaveLength(0);
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }

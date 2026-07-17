@@ -16,7 +16,10 @@ import type { CodegenOptions } from "./codegen/context.js";
 import type { ContinuationBackendKind } from "./codegen/codegen.js";
 import { buildProgramCodegenView } from "./semantics/codegen-view/index.js";
 import { optimizeProgram } from "./optimize/pipeline.js";
-import { analyzeModuleSemantics } from "./modules/semantic-analysis.js";
+import {
+  analyzeModuleSemantics,
+  type SemanticsTypingState,
+} from "./modules/semantic-analysis.js";
 import type { ReusableDependencySemanticsSnapshot } from "./modules/semantic-analysis.js";
 import {
   commitDependencySnapshot,
@@ -24,8 +27,6 @@ import {
   prepareDependencySnapshotReuse,
   type CompilerDependencySnapshotCache,
 } from "./modules/dependency-snapshot-cache.js";
-import type { EffectInterner } from "./semantics/effects/effect-table.js";
-import type { TypeArena } from "./semantics/typing/type-arena.js";
 import { formatTestExportName } from "./tests/exports.js";
 import type { SourceSpan, SymbolId } from "./semantics/ids.js";
 import { getSymbolTable } from "./semantics/_internal/symbol-table.js";
@@ -61,10 +62,7 @@ export type AnalyzeModulesOptions = {
   captureDependencySnapshot?: boolean;
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
-  typingState?: {
-    arena: TypeArena;
-    effectInterner: EffectInterner;
-  };
+  typingState?: SemanticsTypingState;
   isCancelled?: () => boolean;
 };
 
@@ -73,6 +71,7 @@ export type AnalyzeModulesResult = {
   diagnostics: Diagnostic[];
   tests: readonly TestCase[];
   recomputedModuleIds: readonly string[];
+  typingState: SemanticsTypingState;
   dependencySnapshot?: ReusableDependencySemanticsSnapshot;
 };
 
@@ -143,8 +142,13 @@ export const analyzeModules = ({
   typingState,
   isCancelled,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
-  const { semantics, diagnostics, recomputedModuleIds, dependencySnapshot } =
-    analyzeModuleSemantics({
+  const {
+    semantics,
+    diagnostics,
+    recomputedModuleIds,
+    typingState: nextTypingState,
+    dependencySnapshot,
+  } = analyzeModuleSemantics({
       graph,
       includeTests,
       recoverFromTypingErrors,
@@ -165,6 +169,7 @@ export const analyzeModules = ({
     diagnostics,
     tests,
     recomputedModuleIds,
+    typingState: nextTypingState,
     dependencySnapshot,
   };
 };

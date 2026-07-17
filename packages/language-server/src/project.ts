@@ -2,6 +2,7 @@ import path from "node:path";
 import type { Diagnostic as CompilerDiagnostic } from "@voyd-lang/compiler/diagnostics/index.js";
 import { modulePathToString } from "@voyd-lang/compiler/modules/path.js";
 import type { ModuleGraph, ModuleNode } from "@voyd-lang/compiler/modules/types.js";
+import type { SemanticsTypingState } from "@voyd-lang/compiler/modules/semantic-analysis.js";
 import { loadModuleGraph } from "@voyd-lang/compiler/pipeline.js";
 import { analyzeModules } from "@voyd-lang/compiler/pipeline-shared.js";
 import { buildDiagnosticsByUri } from "./project/diagnostics.js";
@@ -58,6 +59,7 @@ export type IncrementalProjectCoreResult = {
   analysis: ProjectCoreAnalysis;
   recomputedModuleIds: readonly string[];
   changedModuleIds: readonly string[];
+  typingState: SemanticsTypingState;
   incremental: boolean;
 };
 
@@ -355,10 +357,12 @@ export const analyzeProjectCoreIncremental = async ({
   openDocuments,
   host,
   previousAnalysis,
+  previousTypingState,
   changedFilePaths,
   isCancelled,
 }: AnalysisInputs & {
   previousAnalysis?: ProjectCoreAnalysis;
+  previousTypingState?: SemanticsTypingState;
   changedFilePaths?: ReadonlySet<string>;
   isCancelled?: () => boolean;
 }): Promise<IncrementalProjectCoreResult> => {
@@ -390,16 +394,22 @@ export const analyzeProjectCoreIncremental = async ({
     previousAnalysis,
     nextModuleIdByFilePath,
   });
+  const canReuseSemantics =
+    previousAnalysis !== undefined && previousTypingState !== undefined;
 
   const {
     semantics,
     diagnostics: semanticDiagnostics,
     recomputedModuleIds,
+    typingState,
   } = analyzeModules({
     graph,
     recoverFromTypingErrors: true,
-    previousSemantics: previousAnalysis?.semantics,
-    changedModuleIds,
+    previousSemantics: canReuseSemantics
+      ? previousAnalysis.semantics
+      : undefined,
+    changedModuleIds: canReuseSemantics ? changedModuleIds : undefined,
+    typingState: canReuseSemantics ? previousTypingState : undefined,
     isCancelled,
   });
   throwIfProjectAnalysisCancelled(isCancelled);
@@ -413,7 +423,8 @@ export const analyzeProjectCoreIncremental = async ({
     }),
     recomputedModuleIds,
     changedModuleIds: Array.from(changedModuleIds ?? []),
-    incremental: changedModuleIds !== undefined,
+    typingState,
+    incremental: canReuseSemantics && typingState === previousTypingState,
   };
 };
 
