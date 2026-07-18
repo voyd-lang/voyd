@@ -325,6 +325,7 @@ const remapExpandedDocumentation = ({
     const parameter = documentationByLocation.parameters.get(key);
     if (parameter !== undefined) {
       parameters.set(syntax.syntaxId, parameter);
+      declarations.set(syntax.syntaxId, parameter);
     }
   });
   module.docs = {
@@ -348,7 +349,6 @@ const documentationLocationKey = (syntax: Syntax): string | undefined => {
   const location = syntax.location;
   return location
     ? [
-        syntax.syntaxType,
         location.filePath,
         location.startIndex,
         location.endIndex,

@@ -128,6 +128,40 @@ has_generics(Box<T>)
     expect(plain.at(-1)).toEqual("1");
   });
 
+  test("with_location transfers source provenance to generated syntax", () => {
+    const code = `\
+macro relabel(generated, source)
+  with_location(generated, source)
+relabel(output, original)
+`;
+    const ast = parse(code);
+    const output = ast.last;
+    expect(output?.toJSON()).toBe("output");
+    expect(output?.location?.startIndex).toBe(code.lastIndexOf("original"));
+    expect(output?.location?.endIndex).toBe(
+      code.lastIndexOf("original") + "original".length,
+    );
+    expect(output?.attributes).toBeUndefined();
+  });
+
+  test("with_location preserves source provenance through helper macros", () => {
+    const code = `\
+macro locate(generated, source)
+  with_location(generated, source)
+macro relabel(generated, source)
+  locate(generated, source)
+relabel(output, original)
+`;
+    const ast = parse(code);
+    const output = ast.last;
+    expect(output?.toJSON()).toBe("output");
+    expect(output?.location?.startIndex).toBe(code.lastIndexOf("original"));
+    expect(output?.location?.endIndex).toBe(
+      code.lastIndexOf("original") + "original".length,
+    );
+    expect(output?.attributes).toBeUndefined();
+  });
+
   test("supports clause-style if expressions in functional macros", () => {
     const code = `\
 macro choose(n)

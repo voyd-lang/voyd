@@ -46,6 +46,7 @@ import {
   serializerKeyFor,
 } from "./serializer.js";
 import { captureMultivalueLanes } from "./multivalue.js";
+import { buildInstanceSubstitution } from "./type-substitution.js";
 
 const NON_REF_TYPES = new Set<number>([
   binaryen.none,
@@ -1000,6 +1001,50 @@ const shouldUseNominalFieldFastPath = (
 ): boolean =>
   Boolean(ctx.optimization && typeof structInfo.nominalId === "number");
 
+const typeRequiresClosureCoercion = (
+  actualType: TypeId,
+  targetType: TypeId,
+  ctx: CodegenContext,
+  seen = new Set<string>(),
+): boolean => {
+  if (actualType === targetType) return false;
+  const key = `${actualType}:${targetType}`;
+  if (seen.has(key)) return false;
+  seen.add(key);
+
+  const actualDesc = ctx.program.types.getTypeDesc(actualType);
+  const targetDesc = ctx.program.types.getTypeDesc(targetType);
+  if (actualDesc.kind === "function" && targetDesc.kind === "function") {
+    return true;
+  }
+  if (
+    actualDesc.kind === "fixed-array" &&
+    targetDesc.kind === "fixed-array"
+  ) {
+    return typeRequiresClosureCoercion(
+      actualDesc.element,
+      targetDesc.element,
+      ctx,
+      seen,
+    );
+  }
+  if (actualDesc.kind === "recursive") {
+    const unfolded = ctx.program.types.substitute(
+      actualDesc.body,
+      new Map([[actualDesc.binder, actualType]]),
+    );
+    return typeRequiresClosureCoercion(unfolded, targetType, ctx, seen);
+  }
+  if (targetDesc.kind === "recursive") {
+    const unfolded = ctx.program.types.substitute(
+      targetDesc.body,
+      new Map([[targetDesc.binder, targetType]]),
+    );
+    return typeRequiresClosureCoercion(actualType, unfolded, ctx, seen);
+  }
+  return false;
+};
+
 const fieldTypesMatchExactly = (
   actualType: TypeId,
   targetType: TypeId,
@@ -1007,6 +1052,9 @@ const fieldTypesMatchExactly = (
 ): boolean => {
   if (actualType === targetType) {
     return true;
+  }
+  if (typeRequiresClosureCoercion(actualType, targetType, ctx)) {
+    return false;
   }
 
   const cache = structuralMatchCache(ctx).fieldTypes;
@@ -1264,6 +1312,33 @@ export const coerceValueToType = ({
       fnCtx,
     });
   }
+
+  const substitution = buildInstanceSubstitution({
+    ctx,
+    typeInstanceId: fnCtx.typeInstanceId ?? fnCtx.instanceId,
+  });
+  if (substitution) {
+    const specializedActual = ctx.program.types.substitute(
+      actualType,
+      substitution,
+    );
+    const specializedTarget = ctx.program.types.substitute(
+      targetType,
+      substitution,
+    );
+    if (
+      specializedActual !== actualType ||
+      specializedTarget !== targetType
+    ) {
+      return coerceValueToType({
+        value,
+        actualType: specializedActual,
+        targetType: specializedTarget,
+        ctx,
+        fnCtx,
+      });
+    }
+  }
   if (actualType === targetType) {
     if (shouldInlineUnionLayout(actualType, ctx)) {
       return normalizeValueToInlineAbi({
@@ -1283,6 +1358,20 @@ export const coerceValueToType = ({
 
   const targetDesc = ctx.program.types.getTypeDesc(targetType);
   const actualDesc = ctx.program.types.getTypeDesc(actualType);
+  if (
+    actualDesc.kind === "type-param-ref" &&
+    binaryen.getExpressionType(value) === wasmTypeFor(targetType, ctx)
+  ) {
+    if (shouldInlineUnionLayout(targetType, ctx)) {
+      return normalizeValueToInlineAbi({
+        value,
+        typeId: targetType,
+        ctx,
+        fnCtx,
+      });
+    }
+    return cloneTransferredValue({ value, typeId: targetType, ctx, fnCtx });
+  }
   const actualSerializer = findUnambiguousSerializerForType(actualType, ctx);
   const targetSerializer = findUnambiguousSerializerForType(targetType, ctx);
   if (
@@ -2020,7 +2109,12 @@ export const coerceValueToType = ({
     const actualElementType = actualDesc.element;
     const actualArrayType = wasmTypeFor(actualType, ctx);
     const targetArrayType = wasmTypeFor(targetType, ctx);
-    if (actualArrayType === targetArrayType) {
+    const elementNeedsClosureCoercion = typeRequiresClosureCoercion(
+      actualElementType,
+      targetElementType,
+      ctx,
+    );
+    if (actualArrayType === targetArrayType && !elementNeedsClosureCoercion) {
       return value;
     }
     const valueType = binaryen.getExpressionType(value);
@@ -2180,6 +2274,7 @@ export const coerceValueToType = ({
       `cannot coerce non-structural value to structural type (actual=${actualType}:${actualDesc.kind}, target=${targetType}:${targetDesc.kind})`,
     );
   }
+
   if (structuralLayoutsMatchExactly(actualInfo, targetInfo, ctx)) {
     return value;
   }

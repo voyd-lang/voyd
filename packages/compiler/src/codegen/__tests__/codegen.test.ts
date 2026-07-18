@@ -1151,6 +1151,21 @@ describe("next codegen", () => {
     expect(main()).toBe(2);
   });
 
+  it("coerces array literal function elements to the declared function type", () => {
+    const main = loadMain("array_function_element_coercion.voyd", { asStd: true });
+    expect(main()).toBe(42);
+  });
+
+  it("coerces specialized generic function values to open closures", () => {
+    const main = loadMain("generic_function_closure_coercion.voyd");
+    expect(main()).toBe(42);
+  });
+
+  it("injects specialized generic values into optional results", () => {
+    const main = loadMain("generic_optional_injection.voyd");
+    expect(main()).toBe(42);
+  });
+
   it("resumes correctly when multiple suspending call arguments exist", () => {
     const main = loadMain("effects-multi-arg-resume.voyd");
     expect(main()).toBe(30);

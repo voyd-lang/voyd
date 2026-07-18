@@ -96,7 +96,9 @@ export const bindObjectDecl = (
         ast: field.ast,
         typeExpr: field.typeExpr,
         optional: field.optional,
-        documentation: declarationDocForSyntax(field.name, ctx),
+        documentation:
+          declarationDocForSyntax(field.name, ctx) ??
+          declarationDocForSyntax(field.ast, ctx),
         visibility: inheritMemberVisibility({
           ownerVisibility: decl.visibility,
           modifier: field.memberModifier,

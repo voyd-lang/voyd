@@ -182,6 +182,40 @@ pub fn main() -> i32
     expect(instantiations?.size ?? 0).toBeGreaterThan(0);
   });
 
+  it("uses the instantiated representation for imported generic match payloads", async () => {
+    const root = resolve("/proj/src");
+    const std = resolve("/proj/std");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use std::util::all
+
+obj Arguments { left: i32, right: i32 }
+
+pub fn main() -> i32
+  match(wrap<Arguments>(Arguments { left: 20, right: 22 }))
+    Wrapped<Arguments> { value }:
+      value.left + value.right
+    Empty:
+      0`,
+      [`${std}${sep}pkg.voyd`]: "pub use std::util::all",
+      [`${std}${sep}util.voyd`]: `pub obj Wrapped<T> { api value: T }
+pub obj Empty {}
+pub type GenericResult<T> = Wrapped<T> | Empty
+
+pub fn wrap<T>(value: T) -> GenericResult<T>
+  Wrapped<T> { value }`,
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root, std },
+      host,
+    }));
+
+    expect(result.wasm).toBeInstanceOf(Uint8Array);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("links multiple imported generic instantiations across modules", async () => {
     const root = resolve("/proj/src");
     const std = resolve("/proj/std");

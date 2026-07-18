@@ -23,11 +23,22 @@ import type {
 } from "./types.js";
 import { isMacroLambdaValue } from "./types.js";
 
+type ExpandMacroCallOptions = {
+  preserveExplicitLocationMarkers?: boolean;
+  resolveArgumentBindings?: boolean;
+};
+
 export function evalMacroExpr(
   expr: Expr,
   scope: MacroScope,
   opts: EvalOpts = {}
 ): MacroEvalResult {
+  // `with_location` returns syntax as an opaque macro value. Nested expansion
+  // must not evaluate that syntax before the outer expansion consumes it.
+  if (expr.attributes?.__macroExplicitLocation === true) {
+    return cloneExpr(expr);
+  }
+
   if (isIdentifierAtom(expr)) {
     const value = scope.getVariable(expr.value)?.value;
     return value ? cloneMacroEvalResult(value) : expr;
@@ -76,7 +87,10 @@ function evalCall(
   const id = head.value;
   const macro = scope.getMacro(id);
   if (macro) {
-    const expanded = expandMacroCall(form, macro, scope);
+    const expanded = expandMacroCall(form, macro, scope, {
+      preserveExplicitLocationMarkers: true,
+      resolveArgumentBindings: true,
+    });
     return evalMacroExpr(expanded, scope, opts);
   }
 
@@ -110,10 +124,19 @@ function evalCall(
 export function expandMacroCall(
   call: Form,
   macro: MacroDefinition,
-  _scope: MacroScope
+  scope: MacroScope,
+  options: ExpandMacroCallOptions = {},
 ): Expr {
   const invocationScope = new MacroScope(macro.scope);
-  const args = call.toArray().slice(1).map(cloneExpr);
+  const args = call.rest.map((argument) => {
+    if (options.resolveArgumentBindings && isIdentifierAtom(argument)) {
+      const binding = scope.getVariable(argument.value)?.value;
+      if (binding instanceof Syntax) {
+        return cloneExpr(binding);
+      }
+    }
+    return cloneExpr(argument);
+  });
   const preservedLocations = collectSyntaxLocationKeys(args);
   const bodyArguments = new Form({
     location: call.location?.clone(),
@@ -151,6 +174,8 @@ export function expandMacroCall(
       syntax: normalized,
       invocationLocation: call.location,
       preservedLocations,
+      preserveExplicitLocationMarkers:
+        options.preserveExplicitLocationMarkers === true,
     });
   }
   return normalized;
@@ -160,13 +185,27 @@ const rebaseGeneratedSyntax = ({
   syntax,
   invocationLocation,
   preservedLocations,
+  preserveExplicitLocationMarkers,
 }: {
   syntax: Syntax;
   invocationLocation: NonNullable<Syntax["location"]>;
   preservedLocations: ReadonlySet<string>;
+  preserveExplicitLocationMarkers: boolean;
 }): void => {
   const key = syntaxLocationKey(syntax);
-  if (!key || !preservedLocations.has(key)) {
+  const hasExplicitLocation =
+    syntax.attributes?.__macroExplicitLocation === true;
+  if (
+    hasExplicitLocation &&
+    syntax.attributes &&
+    !preserveExplicitLocationMarkers
+  ) {
+    delete syntax.attributes.__macroExplicitLocation;
+    if (Object.keys(syntax.attributes).length === 0) {
+      syntax.attributes = undefined;
+    }
+  }
+  if (!hasExplicitLocation && (!key || !preservedLocations.has(key))) {
     syntax.setLocation(invocationLocation.clone());
   }
   if (isForm(syntax)) {
@@ -175,6 +214,7 @@ const rebaseGeneratedSyntax = ({
         syntax: entry,
         invocationLocation,
         preservedLocations,
+        preserveExplicitLocationMarkers,
       }),
     );
   }

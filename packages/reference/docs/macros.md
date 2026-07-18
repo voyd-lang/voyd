@@ -35,6 +35,11 @@ Macro bodies commonly build syntax with:
 The standard library uses this model to implement surface features such as
 `enum`, `for`, `??`, and `?.`.
 
+When a macro replaces syntax while preserving its source-level role, use
+`with_location(generated, source)` to transfer the source syntax location to
+the generated form. This also preserves documentation provenance when, for
+example, a function parameter becomes an object field.
+
 ## Exporting and importing macros
 
 `pub macro` exports a macro from a module. Macros can also be re-exported with

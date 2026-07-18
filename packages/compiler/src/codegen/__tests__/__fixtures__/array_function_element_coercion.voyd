@@ -1,0 +1,32 @@
+obj ArrayOwners { value: i32 }
+obj Array<T> {
+  storage: FixedArray<T>,
+  count: i32,
+  owners: ArrayOwners
+}
+
+pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
+  Array<T> { storage: source, count: __array_len(source), owners: ArrayOwners { value: 1 } }
+
+impl<T> Array<T>
+  fn len(self) -> i32
+    self.count
+
+  fn at(self, index: i32) -> T
+    __array_get(self.storage, index)
+
+type Handler = fn(i32) -> i32
+
+fn add_one(value: i32) -> i32
+  value + 1
+
+fn add_two(value: i32) -> i32
+  value + 2
+
+fn invoke_all(handlers: Array<Handler>) -> i32
+  let first = handlers.at(0)
+  let second = handlers.at(1)
+  first(20) + second(19)
+
+pub fn main() -> i32
+  invoke_all([add_one, add_two])
