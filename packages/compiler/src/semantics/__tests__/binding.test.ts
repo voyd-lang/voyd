@@ -2330,10 +2330,11 @@ eff async_effect
     );
   });
 
-  it("validates hygienic generated type names using their source prefix", () => {
+  it("validates repeatedly hygienic generated type names using their source prefix", () => {
     const source = `
 attribute macro generate_type(arguments, declaration)
-  let generated = identifier(GeneratedType)
+  let first = identifier(GeneratedType)
+  let generated = identifier(first)
   emit_many(declaration, \`(type $generated = i32))
 
 @generate_type

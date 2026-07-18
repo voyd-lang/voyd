@@ -4,7 +4,7 @@ import { toSourceSpan } from "../../parser/surface/utils.js";
 import type { BindingContext } from "./types.js";
 
 const upperCamelNamePattern = /^[A-Z][A-Za-z0-9]*$/;
-const macroHygieneSuffixPattern = /\$macro_id\$\d+$/;
+const macroHygieneSuffixPattern = /(?:\$macro_id\$\d+)+$/;
 
 const isUpperCamelTypeName = (name: string): boolean =>
   upperCamelNamePattern.test(name.replace(macroHygieneSuffixPattern, ""));
