@@ -847,13 +847,16 @@ body {
 .home-tooling-grid {
   display: grid;
   margin-top: 3.5rem;
-  border-top: 1px solid var(--home-rule);
 }
 
 .home-tooling-card {
   display: block;
   min-width: 0;
   padding: 1.5rem 0;
+  /* border-bottom: 1px solid var(--home-rule); */
+}
+
+.home-tooling-card:not(:nth-last-child(-n + 2)) {
   border-bottom: 1px solid var(--home-rule);
 }
 
@@ -890,6 +893,7 @@ body {
 .home-final-cta {
   margin-bottom: clamp(2rem, 5vw, 5rem);
   padding-block: clamp(3rem, 7vw, 5rem);
+  border-top: 1px solid var(--home-rule);
   text-align: center;
 }
 
