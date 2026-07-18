@@ -166,7 +166,15 @@ const rebaseGeneratedSyntax = ({
   preservedLocations: ReadonlySet<string>;
 }): void => {
   const key = syntaxLocationKey(syntax);
-  if (!key || !preservedLocations.has(key)) {
+  const hasExplicitLocation =
+    syntax.attributes?.__macroExplicitLocation === true;
+  if (hasExplicitLocation && syntax.attributes) {
+    delete syntax.attributes.__macroExplicitLocation;
+    if (Object.keys(syntax.attributes).length === 0) {
+      syntax.attributes = undefined;
+    }
+  }
+  if (!hasExplicitLocation && (!key || !preservedLocations.has(key))) {
     syntax.setLocation(invocationLocation.clone());
   }
   if (isForm(syntax)) {

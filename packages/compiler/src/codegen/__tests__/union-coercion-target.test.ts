@@ -29,4 +29,32 @@ pub fn main() -> i32
     const instance = getWasmInstance(module);
     expect((instance.exports.main as () => number)()).toBe(41);
   });
+
+  it("specializes generic payload fields before structural conversion", () => {
+    const source = `
+obj Wrapped<T> { value: T }
+obj Empty {}
+type GenericResult<T> = Wrapped<T> | Empty
+
+obj Arguments { left: i32, right: i32 }
+
+fn wrap<T>(value: T) -> GenericResult<T>
+  Wrapped<T> { value }
+
+pub fn main() -> i32
+  match(wrap<Arguments>(Arguments { left: 20, right: 22 }))
+    Wrapped<Arguments> { value }:
+      value.left + value.right
+    Empty:
+      0
+`;
+    const ast = parse(source, "generic_structural_coercion.voyd");
+    const semantics = semanticsPipeline(ast);
+    const { module, diagnostics } = codegen(semantics);
+    if (diagnostics.length > 0) {
+      throw new Error(JSON.stringify(diagnostics, null, 2));
+    }
+    const instance = getWasmInstance(module);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
 });

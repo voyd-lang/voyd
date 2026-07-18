@@ -600,6 +600,16 @@ export const createBuiltins = (
       return new Form([...list.toArray(), ...values].map(cloneExpr));
     },
     is_list: ({ args }) => bool(isForm(expectExpr(args.at(0)))),
+    with_location: ({ args }) => {
+      const value = cloneExpr(expectExpr(args.at(0)));
+      const source = expectExpr(args.at(1));
+      value.setLocation(source.location?.clone());
+      value.attributes = {
+        ...value.attributes,
+        __macroExplicitLocation: true,
+      };
+      return value;
+    },
     log: ({ args, scope }) => {
       const value = getMacroTimeValue(args.at(0), scope);
       console.error(JSON.stringify(value));

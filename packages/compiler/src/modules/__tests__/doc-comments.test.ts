@@ -89,7 +89,7 @@ pub mod math
     1
 `);
 
-    expect(diagnostics.filter((entry) => entry.code === "MD0004")).toHaveLength(0);
+    expect(diagnostics).toEqual([]);
 
     const mainModule = graph.modules.get("src::main");
     expect(mainModule?.docs?.module).toBe(" Module docs.\n More module docs.");
@@ -239,5 +239,37 @@ pub fn documented(
       ?.binding.functions.find((fn) => fn.name === "documented");
     expect(documented?.documentation).toBe(" Documented function.");
     expect(documented?.params[0]?.documentation).toBe(" Documented parameter.");
+  });
+
+  it("preserves parameter docs when an attribute macro emits an object field", async () => {
+    const { diagnostics, semantics } = await compileSingleModule(`
+attribute macro arguments_object(args, declaration)
+  let signature = declaration.get(1)
+  let head = signature.get(1)
+  let labeled_group = head.get(1)
+  let labeled = labeled_group.get(1)
+  let parameter = labeled.get(1)
+  let field_name = labeled.get(0)
+  let field_type = parameter.get(2)
+  let field = \`(: $field_name $field_type)
+  let located_field = with_location(field, parameter.get(1))
+  \`(obj GeneratedArguments { $located_field })
+
+@arguments_object
+fn source(
+  /// Value passed to the generated declaration.
+  { external value: i32 }
+) -> i32
+  value
+`);
+
+    expect(diagnostics).toEqual([]);
+    const generated = semantics
+      .get("src::main")
+      ?.binding.objects.find((object) => object.name === "GeneratedArguments");
+    expect(generated?.fields[0]?.name).toBe("external");
+    expect(generated?.fields[0]?.documentation).toBe(
+      " Value passed to the generated declaration.",
+    );
   });
 });

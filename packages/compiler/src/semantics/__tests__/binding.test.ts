@@ -2330,6 +2330,24 @@ eff async_effect
     );
   });
 
+  it("validates hygienic generated type names using their source prefix", () => {
+    const source = `
+attribute macro generate_type(arguments, declaration)
+  let generated = identifier(GeneratedType)
+  emit_many(declaration, \`(type $generated = i32))
+
+@generate_type
+fn value() -> i32
+  1
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({ name: "main.voyd", kind: "module", declaredAt: ast.syntaxId });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+    expect(binding.diagnostics.filter((entry) => entry.code === "BD0007")).toHaveLength(0);
+  });
+
   it("reports unsupported mod declarations", () => {
     const source = "pub mod util";
     const ast = parse(source, "main.voyd");
