@@ -689,6 +689,22 @@ export const compileFieldAccessExpr = (
   if (!actualField) {
     throw new Error(`object does not contain field ${expr.field}`);
   }
+  const actualFieldDesc = ctx.program.types.getTypeDesc(actualField.typeId);
+  const semanticFieldTypeId = getUnresolvedExprType(
+    expr.id,
+    ctx,
+    typeInstanceId,
+  );
+  const semanticFieldDesc = ctx.program.types.getTypeDesc(semanticFieldTypeId);
+  // Recursive object templates retain their binder placeholder in the stored
+  // layout. The expression's unresolved semantic type is the declared field
+  // type; unlike expectedFieldTypeId, it is not narrowed by the consumer.
+  const actualFieldTypeId =
+    actualFieldDesc.kind === "type-param-ref"
+      ? semanticFieldDesc.kind === "type-param-ref"
+        ? actualField.typeId
+        : semanticFieldTypeId
+      : actualField.typeId;
   const targetBinding =
     targetExpr?.exprKind === "identifier"
       ? getRequiredBinding(targetExpr.symbol, ctx, fnCtx)
@@ -839,7 +855,7 @@ export const compileFieldAccessExpr = (
       });
       const coerced = coerceValueToType({
         value: raw,
-        actualType: actualField.typeId,
+        actualType: actualFieldTypeId,
         targetType: expectedFieldTypeId,
         ctx,
         fnCtx,
@@ -898,7 +914,7 @@ export const compileFieldAccessExpr = (
     });
     const coerced = coerceValueToType({
       value: raw,
-      actualType: actualField.typeId,
+      actualType: actualFieldTypeId,
       targetType: expectedFieldTypeId,
       ctx,
       fnCtx,
@@ -977,7 +993,7 @@ export const compileFieldAccessExpr = (
 
   const coerced = coerceValueToType({
     value: raw,
-    actualType: actualField.typeId,
+    actualType: actualFieldTypeId,
     targetType: expectedFieldTypeId,
     ctx,
     fnCtx,

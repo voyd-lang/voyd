@@ -1,0 +1,460 @@
+//! Neutral dynamic values and checked structural decoding.
+//!
+//! Wire-format packages translate their own values to `DataValue`; the
+//! compiler-generated boundary codec performs the final typed conversion only
+//! after this module validates the matching provider-neutral `Shape`.
+
+use std::array::Array
+use std::dict::{ Dict, DictKey }
+use std::meta::{
+  ArrayShape,
+  BoolShape,
+  F32Shape,
+  F64Shape,
+  I32Shape,
+  I64Shape,
+  RecordShape,
+  RefShape,
+  Shape,
+  ShapeDefinition,
+  ShapeField,
+  ShapeNode,
+  ShapeVariant,
+  StringShape,
+  UnionShape,
+  UnitShape,
+  shape_of
+}
+use std::msgpack::{ MsgPack }
+use std::msgpack::self as msgpack
+use std::number::cast::self as cast
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+
+/// Neutral null/unit value.
+pub obj DataNull {}
+
+/// Neutral boolean value.
+pub obj DataBool { api value: bool }
+
+/// Neutral signed 32-bit integer value.
+pub obj DataI32 { api value: i32 }
+
+/// Neutral signed 64-bit integer value.
+pub obj DataI64 { api value: i64 }
+
+/// Neutral 32-bit floating-point value.
+pub obj DataF32 { api value: f32 }
+
+/// Neutral 64-bit floating-point value.
+pub obj DataF64 { api value: f64 }
+
+/// Neutral owned string value.
+pub obj DataString { api value: String }
+
+/// Named field in a neutral object or variant payload.
+pub obj DataField {
+  api name: String,
+  api value: DataValue
+}
+
+/// Neutral ordered array value.
+pub obj DataArray { api values: Array<DataValue> }
+
+/// Neutral string-keyed object value.
+pub obj DataObject { api fields: Array<DataField> }
+
+/// Neutral named variant value.
+pub obj DataVariant {
+  api name: String,
+  api fields: Array<DataField>
+}
+
+/// Provider-neutral dynamic value accepted by structural codecs.
+pub type DataValue = DataNull
+  | DataBool
+  | DataI32
+  | DataI64
+  | DataF32
+  | DataF64
+  | DataString
+  | DataArray
+  | DataObject
+  | DataVariant
+
+/// Ignore object fields absent from the target Voyd type.
+pub obj IgnoreUnknownFields {}
+
+/// Reject object fields absent from the target Voyd type.
+pub obj RejectUnknownFields {}
+
+/// Policy for fields not present in a target record or variant.
+pub type UnknownFieldPolicy = IgnoreUnknownFields | RejectUnknownFields
+
+/// Structural decoder configuration.
+pub obj DecodeOptions {
+  api unknown_fields: UnknownFieldPolicy
+}
+
+/// A required field was absent.
+pub obj MissingField {}
+
+/// A field was not declared by the target shape.
+pub obj UnknownField {}
+
+/// A dynamic value had the wrong kind.
+pub obj TypeMismatch {}
+
+/// An object or variant payload repeated a field name.
+pub obj DuplicateField {}
+
+/// A union value named an unsupported variant.
+pub obj InvalidVariant {}
+
+/// A shape reference could not be resolved.
+pub obj InvalidShapeReference {}
+
+/// Stable categories of structural decode failures.
+pub type DecodeErrorKind = MissingField
+  | UnknownField
+  | TypeMismatch
+  | DuplicateField
+  | InvalidVariant
+  | InvalidShapeReference
+
+/// Precise, recoverable structural decode failure.
+pub obj DecodeError {
+  /// Failure category.
+  api kind: DecodeErrorKind,
+  /// Rooted value path such as `$.profile.age` or `$.items[2]`.
+  api path: String,
+  /// Expected shape/value kind.
+  api expected: String,
+  /// Observed dynamic value kind or name.
+  api actual: String
+}
+
+/// Returns decoder options that ignore unknown fields.
+pub fn default_decode_options() -> DecodeOptions
+  DecodeOptions { unknown_fields: IgnoreUnknownFields {} }
+
+/// Fallibly decodes a neutral value into a boundary-compatible Voyd type.
+pub fn decode<T>(value: DataValue): () -> Result<T, DecodeError>
+  decode<T>(value, options: default_decode_options())
+
+/// Fallibly decodes with an explicit unknown-field policy.
+pub fn decode<T>(value: DataValue, { options: DecodeOptions }): () -> Result<T, DecodeError>
+  let shape = shape_of<T>()
+  match(validate(value, shape.root, shape, options, "$".to_string()))
+    Ok<Unit>:
+      Ok<T> { value: boundary_data_to_value<T>(value) }
+    Err<DecodeError> { error }:
+      Err<DecodeError> { error }
+
+/// Constructs a neutral string value from owned text.
+pub fn string_value(value: String) -> DataValue
+  DataString { value }
+
+/// Constructs a neutral string value from a slice.
+pub fn string_value(value: StringSlice) -> DataValue
+  DataString { value: value.to_string() }
+
+fn validate(
+  value: DataValue,
+  shape: ShapeNode,
+  graph: Shape,
+  options: DecodeOptions,
+  path: String
+): () -> Result<Unit, DecodeError>
+  shape.match(active)
+    BoolShape:
+      value.match(decoded)
+        DataBool: valid()
+        else: mismatch(path, "bool", data_kind_name(value))
+    I32Shape:
+      value.match(decoded)
+        DataI32: valid()
+        else: mismatch(path, "i32", data_kind_name(value))
+    I64Shape:
+      value.match(decoded)
+        DataI64: valid()
+        else: mismatch(path, "i64", data_kind_name(value))
+    F32Shape:
+      value.match(decoded)
+        DataF32: valid()
+        else: mismatch(path, "f32", data_kind_name(value))
+    F64Shape:
+      value.match(decoded)
+        DataF64: valid()
+        else: mismatch(path, "f64", data_kind_name(value))
+    StringShape:
+      value.match(decoded)
+        DataString: valid()
+        else: mismatch(path, "string", data_kind_name(value))
+    UnitShape:
+      value.match(decoded)
+        DataNull: valid()
+        else: mismatch(path, "unit", data_kind_name(value))
+    ArrayShape:
+      value.match(decoded)
+        DataArray:
+          validate_array(decoded, active.element, graph, options, path)
+        else:
+          mismatch(path, "array", data_kind_name(value))
+    RecordShape:
+      value.match(decoded)
+        DataObject:
+          validate_fields(decoded.fields, active.fields, graph, options, path)
+        else:
+          mismatch(path, active.name, data_kind_name(value))
+    UnionShape:
+      value.match(decoded)
+        DataVariant:
+          validate_variant(decoded, active, graph, options, path)
+        else:
+          mismatch(path, active.name, data_kind_name(value))
+    RefShape:
+      match(find_definition(graph.definitions, active.key))
+        Some<ShapeNode> { value: target }:
+          validate(value, target, graph, options, path)
+        None:
+          Err<DecodeError> {
+            error: DecodeError {
+              kind: InvalidShapeReference {},
+              path,
+              expected: active.key,
+              actual: "unresolved shape reference".to_string()
+            }
+          }
+
+fn validate_array(
+  value: DataArray,
+  element: ShapeNode,
+  graph: Shape,
+  options: DecodeOptions,
+  path: String
+): () -> Result<Unit, DecodeError>
+  var index = 0
+  while index < value.values.len():
+    match(validate(value.values.at(index), element, graph, options, index_path(path, index)))
+      Ok<Unit>:
+        void
+      Err<DecodeError> { error }:
+        return Err<DecodeError> { error }
+    index = index + 1
+  valid()
+
+fn validate_variant(
+  value: DataVariant,
+  shape: UnionShape,
+  graph: Shape,
+  options: DecodeOptions,
+  path: String
+): () -> Result<Unit, DecodeError>
+  match(find_variant(shape.variants, value.name))
+    Some<ShapeVariant> { value: variant }:
+      validate_fields(value.fields, variant.fields, graph, options, path)
+    None:
+      Err<DecodeError> {
+        error: DecodeError {
+          kind: InvalidVariant {},
+          path,
+          expected: shape.name,
+          actual: value.name
+        }
+      }
+
+fn validate_fields(
+  values: Array<DataField>,
+  fields: Array<ShapeField>,
+  graph: Shape,
+  options: DecodeOptions,
+  path: String
+): () -> Result<Unit, DecodeError>
+  match(find_duplicate_field(values))
+    Some<String> { value: name }:
+      return Err<DecodeError> {
+        error: DecodeError {
+          kind: DuplicateField {},
+          path: field_path(path, name),
+          expected: "unique field".to_string(),
+          actual: name
+        }
+      }
+    None:
+      void
+
+  var shape_index = 0
+  while shape_index < fields.len():
+    let field = fields.at(shape_index)
+    let nested_path = field_path(path, field.name)
+    var found = false
+    var value_index = 0
+    while value_index < values.len():
+      let value_field = values.at(value_index)
+      if value_field.name == field.name:
+        found = true
+        match(validate(value_field.value, field.shape, graph, options, nested_path))
+          Ok<Unit>:
+            void
+          Err<DecodeError> { error }:
+            return Err<DecodeError> { error }
+      value_index = value_index + 1
+    if found == false and field.optional == false:
+      return Err<DecodeError> {
+        error: DecodeError {
+          kind: MissingField {},
+          path: nested_path,
+          expected: shape_kind_name(field.shape),
+          actual: "missing".to_string()
+        }
+      }
+    shape_index = shape_index + 1
+
+  if rejects_unknown_fields(options):
+    var value_index = 0
+    while value_index < values.len():
+      let field = values.at(value_index)
+      if contains_shape_field(fields, field.name) == false:
+        return Err<DecodeError> {
+          error: DecodeError {
+            kind: UnknownField {},
+            path: field_path(path, field.name),
+            expected: "declared field".to_string(),
+            actual: field.name
+          }
+        }
+      value_index = value_index + 1
+  valid()
+
+fn find_duplicate_field(fields: Array<DataField>) -> Optional<String>
+  var index = 0
+  while index < fields.len():
+    let name = fields.at(index).name
+    var candidate = index + 1
+    while candidate < fields.len():
+      if fields.at(candidate).name == name:
+        return Some<String> { value: name }
+      candidate = candidate + 1
+    index = index + 1
+  None {}
+
+fn contains_shape_field(fields: Array<ShapeField>, name: String) -> bool
+  var index = 0
+  while index < fields.len():
+    if fields.at(index).name == name:
+      return true
+    index = index + 1
+  false
+
+fn find_variant(variants: Array<ShapeVariant>, name: String) -> Optional<ShapeVariant>
+  var index = 0
+  while index < variants.len():
+    let variant = variants.at(index)
+    if variant.name == name:
+      return Some<ShapeVariant> { value: variant }
+    index = index + 1
+  None {}
+
+fn find_definition(definitions: Array<ShapeDefinition>, key: String) -> Optional<ShapeNode>
+  var index = 0
+  while index < definitions.len():
+    let definition = definitions.at(index)
+    if definition.key == key:
+      return Some<ShapeNode> { value: definition.shape }
+    index = index + 1
+  None {}
+
+fn rejects_unknown_fields(options: DecodeOptions) -> bool
+  match(options.unknown_fields)
+    RejectUnknownFields: true
+    IgnoreUnknownFields: false
+
+fn valid() -> Result<Unit, DecodeError>
+  Ok<Unit> { value: Unit {} }
+
+fn mismatch<T>(path: String, expected: String, actual: String): () -> Result<T, DecodeError>
+  Err<DecodeError> {
+    error: DecodeError {
+      kind: TypeMismatch {},
+      path,
+      expected,
+      actual
+    }
+  }
+
+fn field_path(path: String, name: String) -> String
+  path.concat(".").concat(name)
+
+fn index_path(path: String, index: i32) -> String
+  path.concat("[").concat(cast::to_string(index)).concat("]")
+
+fn shape_kind_name(shape: ShapeNode) -> String
+  shape.match(active)
+    BoolShape: "bool".to_string()
+    I32Shape: "i32".to_string()
+    I64Shape: "i64".to_string()
+    F32Shape: "f32".to_string()
+    F64Shape: "f64".to_string()
+    StringShape: "string".to_string()
+    UnitShape: "unit".to_string()
+    ArrayShape: "array".to_string()
+    RecordShape: active.name
+    UnionShape: active.name
+    RefShape: active.key
+
+fn data_kind_name(value: DataValue) -> String
+  value.match(active)
+    DataNull: "null".to_string()
+    DataBool: "bool".to_string()
+    DataI32: "i32".to_string()
+    DataI64: "i64".to_string()
+    DataF32: "f32".to_string()
+    DataF64: "f64".to_string()
+    DataString: "string".to_string()
+    DataArray: "array".to_string()
+    DataObject: "object".to_string()
+    DataVariant: active.name
+
+fn data_value_to_msgpack(value: DataValue): () -> MsgPack
+  value.match(active)
+    DataNull:
+      msgpack::make_null()
+    DataBool:
+      msgpack::make_bool(active.value)
+    DataI32:
+      msgpack::make_i32(active.value)
+    DataI64:
+      msgpack::make_i64(active.value)
+    DataF32:
+      msgpack::make_f32(active.value)
+    DataF64:
+      msgpack::make_f64(active.value)
+    DataString:
+      msgpack::make_string(active.value)
+    DataArray:
+      let ~values = Array<MsgPack>::with_capacity(active.values.len())
+      var index = 0
+      while index < active.values.len():
+        values.push(data_value_to_msgpack(active.values.at(index)))
+        index = index + 1
+      msgpack::make_array(values)
+    DataObject:
+      msgpack::make_map(data_fields_to_msgpack(active.fields))
+    DataVariant:
+      let ~fields = data_fields_to_msgpack(active.fields)
+      fields.set("$variant", msgpack::make_string(active.name))
+      msgpack::make_map(fields)
+
+fn data_fields_to_msgpack(fields: Array<DataField>): () -> Dict<String, MsgPack>
+  let ~out = Dict<String, MsgPack>::init()
+  var index = 0
+  while index < fields.len():
+    let field = fields.at(index)
+    out.set(field.name, data_value_to_msgpack(field.value))
+    index = index + 1
+  out
+
+fn boundary_data_to_value<T>(value: DataValue): () -> T
+  msgpack::unpack_boundary_value<T>(data_value_to_msgpack(value))

@@ -697,6 +697,7 @@ export interface ObjectFieldAccessMetadata {
   owner?: SymbolId;
   visibility?: HirVisibility;
   packageId?: string;
+  documentation?: string;
 }
 
 export type ObjectField = StructuralField & ObjectFieldAccessMetadata;
@@ -834,6 +835,7 @@ const cloneObjectField = (field: ObjectField): ObjectField => ({
   visibility: field.visibility ? { ...field.visibility } : undefined,
   owner: field.owner,
   packageId: field.packageId,
+  documentation: field.documentation,
 });
 
 const cloneObjectTypeInfo = (info: ObjectTypeInfo): ObjectTypeInfo => ({

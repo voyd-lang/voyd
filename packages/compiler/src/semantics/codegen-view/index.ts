@@ -64,6 +64,7 @@ export type CodegenStructuralField = {
   visibility?: HirVisibility;
   owner?: SymbolId;
   packageId?: string;
+  documentation?: string;
 };
 
 export type CodegenFunctionParameter = {
@@ -882,6 +883,7 @@ export const buildProgramCodegenView = (
     visibility: "visibility" in field ? field.visibility : undefined,
     owner: "owner" in field ? field.owner : undefined,
     packageId: "packageId" in field ? field.packageId : undefined,
+    documentation: "documentation" in field ? field.documentation : undefined,
   });
 
   const toCodegenTypeDesc = (

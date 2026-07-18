@@ -38,3 +38,4 @@ primitives and runtime-provided reference types.
 - [Traits](./traits.md)
 - [Effects](./effects.md)
 - [Value Types](./value-types.md)
+- [Type Shapes and Structural Codecs](../type-shapes-and-codecs.md)

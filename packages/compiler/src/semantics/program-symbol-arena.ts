@@ -23,6 +23,7 @@ export type ProgramSymbolArena = {
   tryIdOf(ref: SymbolRef): ProgramSymbolId | undefined;
   refOf(id: ProgramSymbolId): SymbolRef;
   getName(id: ProgramSymbolId): string | undefined;
+  getDocumentation(id: ProgramSymbolId): string | undefined;
   getPackageId(id: ProgramSymbolId): string;
   getIntrinsicType(id: ProgramSymbolId): string | undefined;
   getStdIntrinsicTypeContract(
@@ -64,6 +65,7 @@ export const buildProgramSymbolArena = (
   const idsByModuleAndSymbol = new Map<string, Map<SymbolId, ProgramSymbolId>>();
   const refsById: SymbolRef[] = [];
   const namesById: (string | undefined)[] = [];
+  const documentationById: (string | undefined)[] = [];
   const packageIdsById: string[] = [];
   const intrinsicTypesById: (string | undefined)[] = [];
   const stdIntrinsicTypeContractsById: (
@@ -107,6 +109,9 @@ export const buildProgramSymbolArena = (
 
       refsById[id] = { moduleId: mod.moduleId, symbol };
       namesById[id] = mod.symbols.getName(symbol);
+      documentationById[id] =
+        mod.binding.decls.getObject(symbol)?.documentation ??
+        mod.binding.decls.getTypeAlias(symbol)?.documentation;
       packageIdsById[id] = mod.binding.packageId;
       intrinsicTypesById[id] = mod.symbols.getIntrinsicType(symbol);
       const stdIntrinsicTypeContract =
@@ -181,6 +186,7 @@ export const buildProgramSymbolArena = (
     tryIdOf,
     refOf,
     getName,
+    getDocumentation: (id) => documentationById[id],
     getPackageId,
     getIntrinsicType: (id) => intrinsicTypesById[id],
     getStdIntrinsicTypeContract: (id) => stdIntrinsicTypeContractsById[id],

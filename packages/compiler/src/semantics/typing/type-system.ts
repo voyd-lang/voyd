@@ -2221,6 +2221,11 @@ export const getObjectTemplate = (
             ? undefined
             : getNominalComponent(baseType, ctx);
 
+        const sourceFields = new Map(
+          ctx.decls
+            .getObject(symbol)
+            ?.fields.map((field) => [field.name, field]) ?? [],
+        );
         const ownFields = decl.fields.map((field) => {
           const type = resolveTypeExpr(
             field.type,
@@ -2237,6 +2242,7 @@ export const getObjectTemplate = (
             visibility: field.visibility,
             owner: decl.symbol,
             packageId: ctx.packageId,
+            documentation: sourceFields.get(field.name)?.documentation,
           };
         });
 
@@ -2387,6 +2393,7 @@ export const ensureObjectType = (
     visibility: field.visibility,
     owner: field.owner,
     packageId: field.packageId ?? ctx.packageId,
+    documentation: field.documentation,
   }));
   ensureFieldsSubstituted(fields, ctx, `object ${objectName} instantiation`);
   const baseNominal = template.baseNominal

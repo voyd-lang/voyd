@@ -49,7 +49,10 @@ import {
   stabilizeSerializedAbiResult,
 } from "./exports/serialized-abi.js";
 import { ensureLinearMemoryExport } from "./memory-exports.js";
-import { deriveBoundarySchema } from "./boundary/schema.js";
+import {
+  BoundarySchemaError,
+  deriveBoundarySchema,
+} from "./boundary/schema.js";
 import {
   packBoundaryValueAsMsgPack,
   unpackBoundaryValueFromMsgPack,
@@ -62,6 +65,12 @@ import {
 } from "./boundary-metadata.js";
 import { currentHandlerValue } from "./expressions/call/shared.js";
 import { compileExternalCall } from "./external/imports.js";
+import { emitBoundaryShape } from "./boundary/shape.js";
+import { buildInstanceSubstitution } from "./type-substitution.js";
+import {
+  DiagnosticError,
+  diagnosticFromCode,
+} from "../diagnostics/index.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
@@ -1215,6 +1224,39 @@ export const compileIntrinsicCall = ({
         fnCtx,
       });
     }
+    case "__boundary_shape_of": {
+      assertArgCount(name, args, 0);
+      const [targetTypeId] = intrinsicCallTypeArgs({ call, ctx, instanceId });
+      if (targetTypeId === undefined) {
+        throw shapeReificationDiagnostic({
+          call,
+          message: "shape_of<T>() requires one resolved type argument",
+        });
+      }
+      if (ctx.program.types.getTypeDesc(targetTypeId).kind === "type-param-ref") {
+        throw shapeReificationDiagnostic({
+          call,
+          message:
+            "shape_of<T>() requires a closed, resolved type argument; unresolved type parameters cannot be reified",
+        });
+      }
+      try {
+        return emitBoundaryShape({
+          typeId: targetTypeId,
+          resultTypeId: getRequiredExprType(call.id, ctx, instanceId),
+          ctx,
+          fnCtx,
+        });
+      } catch (error) {
+        if (error instanceof DiagnosticError) {
+          throw error;
+        }
+        if (error instanceof BoundarySchemaError) {
+          throw shapeReificationDiagnostic({ call, message: error.message });
+        }
+        throw error;
+      }
+    }
     case "__shift_l":
     case "__shift_ru": {
       assertArgCount(name, args, 2);
@@ -1453,6 +1495,48 @@ export const compileIntrinsicCall = ({
     default:
       throw new Error(`unsupported intrinsic ${name}`);
   }
+};
+
+const shapeReificationDiagnostic = ({
+  call,
+  message,
+}: {
+  call: HirCallExpr;
+  message: string;
+}): DiagnosticError =>
+  new DiagnosticError(
+    diagnosticFromCode({
+      code: "CG0001",
+      params: { kind: "codegen-error", message },
+      span: call.span,
+    }),
+  );
+
+const intrinsicCallTypeArgs = ({
+  call,
+  ctx,
+  instanceId,
+}: {
+  call: HirCallExpr;
+  ctx: CodegenContext;
+  instanceId?: ProgramFunctionInstanceId;
+}): readonly TypeId[] => {
+  const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, call.id);
+  const raw =
+    (typeof instanceId === "number"
+      ? callInfo.typeArgs?.get(instanceId)
+      : undefined) ??
+    (callInfo.typeArgs?.size === 1
+      ? callInfo.typeArgs.values().next().value
+      : undefined) ??
+    [];
+  const substitution = buildInstanceSubstitution({
+    ctx,
+    typeInstanceId: instanceId,
+  });
+  return substitution
+    ? raw.map((typeId) => ctx.program.types.substitute(typeId, substitution))
+    : raw;
 };
 
 const emitArithmeticIntrinsic = ({

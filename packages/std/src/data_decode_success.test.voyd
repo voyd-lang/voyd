@@ -1,0 +1,87 @@
+use std::array::Array
+use std::data::{
+  DataArray,
+  DataField,
+  DataI32,
+  DataI64,
+  DataObject,
+  DataString,
+  DataValue,
+  DataVariant,
+  DecodeError,
+  decode
+}
+use std::optional::all
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+obj DataSuccessProfile {
+  age: i32,
+  nickname?: String
+}
+
+obj DataSuccessRequest {
+  profile: DataSuccessProfile,
+  tags: Array<String>
+}
+
+obj DataSuccessCreated { id: i32 }
+obj DataSuccessDeleted { reason: String }
+type DataSuccessEvent = DataSuccessCreated | DataSuccessDeleted
+type DataSuccessId = i64
+
+test "decode converts valid nested values and permits missing optional fields":
+  let ~profile_fields = Array<DataField>::init()
+  profile_fields.push(DataField { name: "age", value: DataI32 { value: 42 } })
+  let ~tag_values = Array<DataValue>::init()
+  tag_values.push(DataString { value: "voyd" })
+  let ~request_fields = Array<DataField>::init()
+  request_fields.push(DataField {
+    name: "profile",
+    value: DataObject { fields: profile_fields }
+  })
+  request_fields.push(DataField {
+    name: "tags",
+    value: DataArray { values: tag_values }
+  })
+
+  match(decode<DataSuccessRequest>(DataObject { fields: request_fields }))
+    Ok<DataSuccessRequest> { value }:
+      assert(value.profile.age, eq: 42)
+      assert(value.tags.at(0), eq: "voyd")
+    Err<DecodeError>:
+      Test::fail()
+
+test "decode handles named variants":
+  let ~fields = Array<DataField>::init()
+  fields.push(DataField { name: "id", value: DataI32 { value: 7 } })
+  let source = DataVariant { name: "DataSuccessCreated", fields }
+  match(decode<DataSuccessEvent>(source))
+    Ok<DataSuccessEvent> { value }:
+      value.match(event)
+        DataSuccessCreated:
+          assert(event.id, eq: 7)
+        else:
+          Test::fail()
+    Err<DecodeError>:
+      Test::fail()
+
+test "decode handles primitive aliases and options":
+  match(decode<DataSuccessId>(DataI64 { value: 91i64 }))
+    Ok<DataSuccessId> { value }:
+      assert(value, eq: 91i64)
+    Err<DecodeError>:
+      Test::fail()
+
+  let ~fields = Array<DataField>::init()
+  fields.push(DataField { name: "value", value: DataString { value: "ready" } })
+  match(decode<Optional<String>>(DataVariant { name: "Some", fields }))
+    Ok<Optional<String>> { value }:
+      match(value)
+        Some<String> { value: decoded }:
+          assert(decoded, eq: "ready")
+        None:
+          Test::fail()
+    Err<DecodeError>:
+      Test::fail()

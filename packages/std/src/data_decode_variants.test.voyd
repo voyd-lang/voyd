@@ -1,0 +1,68 @@
+use std::array::Array
+use std::data::{
+  DataArray,
+  DataField,
+  DataI32,
+  DataObject,
+  DataString,
+  DataValue,
+  DataVariant,
+  DecodeError,
+  InvalidVariant,
+  TypeMismatch,
+  decode
+}
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+obj DataPathProfile { age: i32 }
+obj DataPathRequest {
+  profile: DataPathProfile,
+  tags: Array<String>
+}
+
+obj DataPathStarted { id: i32 }
+obj DataPathStopped { reason: String }
+type DataPathEvent = DataPathStarted | DataPathStopped
+
+test "decode reports array indexes":
+  let ~profile_fields = Array<DataField>::init()
+  profile_fields.push(DataField { name: "age", value: DataI32 { value: 1 } })
+  let ~tag_values = Array<DataValue>::init()
+  tag_values.push(DataString { value: "valid" })
+  tag_values.push(DataI32 { value: 2 })
+  let ~request_fields = Array<DataField>::init()
+  request_fields.push(DataField {
+    name: "profile",
+    value: DataObject { fields: profile_fields }
+  })
+  request_fields.push(DataField {
+    name: "tags",
+    value: DataArray { values: tag_values }
+  })
+
+  match(decode<DataPathRequest>(DataObject { fields: request_fields }))
+    Ok<DataPathRequest>:
+      Test::fail()
+    Err<DecodeError> { error }:
+      assert(error.path, eq: "$.tags[1]")
+      error.kind.match(kind)
+        TypeMismatch:
+          void
+        else:
+          Test::fail()
+
+test "decode reports invalid variants":
+  match(decode<DataPathEvent>(DataVariant {
+    name: "DataPathPaused",
+    fields: Array<DataField>::init()
+  }))
+    Ok<DataPathEvent>:
+      Test::fail()
+    Err<DecodeError> { error }:
+      error.kind.match(kind)
+        InvalidVariant:
+          void
+        else:
+          Test::fail()

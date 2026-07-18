@@ -1,0 +1,7 @@
+use std::dict::Dict
+use std::meta::shape_of
+use std::string::type::String
+
+pub fn main() -> i32
+  shape_of<Dict<String, i32>>()
+  0

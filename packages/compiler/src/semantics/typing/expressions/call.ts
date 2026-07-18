@@ -508,6 +508,28 @@ export const typeCallExpr = (
         calleeExpr.id,
         applyCurrentSubstitution(calleeType, ctx, state),
       );
+      if (
+        intrinsicName === "__boundary_shape_of" &&
+        signature &&
+        instantiation &&
+        (signature.typeParams?.length ?? 0) > 0
+      ) {
+        const codegenTypeArgs = getAppliedTypeArguments({
+          signature,
+          substitution: instantiation.substitution,
+          symbol: calleeExpr.symbol,
+          ctx,
+          nameForSymbol: (symbol) => ctx.symbolTable.getSymbol(symbol).name,
+        });
+        const existingTypeArgs =
+          ctx.callResolution.typeArguments.get(expr.id) ?? new Map();
+        const callerInstanceKey = state.currentFunction?.instanceKey;
+        if (!callerInstanceKey) {
+          throw new Error(`missing function instance key for call ${expr.id}`);
+        }
+        existingTypeArgs.set(callerInstanceKey, codegenTypeArgs);
+        ctx.callResolution.typeArguments.set(expr.id, existingTypeArgs);
+      }
       return finalizeCall({
         returnType,
         latentEffectRow:
@@ -7392,6 +7414,18 @@ const typeIntrinsicCall = (
         args,
         typeArguments,
       });
+    case "__boundary_shape_of":
+      assertIntrinsicArgCount({
+        name: "__boundary_shape_of",
+        args,
+        expected: 0,
+      });
+      requireSingleTypeArgument({
+        name: "__boundary_shape_of",
+        typeArguments,
+        detail: "reified type",
+      });
+      return expectedReturnType ?? ctx.primitives.unknown;
     case "__shift_l":
     case "__shift_ru":
       return typeShiftIntrinsic({ name, args, ctx, state, typeArguments });
