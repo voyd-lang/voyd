@@ -697,7 +697,7 @@ body {
 }
 
 .home-features {
-  padding-block: clamp(2rem, 5vw, 4rem);
+  padding-top: clamp(1rem, 3vw, 2rem);
 }
 
 .home-feature {
@@ -890,8 +890,6 @@ body {
 .home-final-cta {
   margin-bottom: clamp(2rem, 5vw, 5rem);
   padding-block: clamp(3rem, 7vw, 5rem);
-  border-top: 1px solid var(--home-rule);
-  border-bottom: 1px solid var(--home-rule);
   text-align: center;
 }
 
