@@ -1,9 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { isForm, parse } from "../../parser/index.js";
+import { isForm, parse, parseBase } from "../../parser/index.js";
 import { classifyTopLevelDecl } from "../use-decl.js";
 
 const classifyFirst = (source: string) => {
   const ast = parse(source, "use-decl-test.voyd");
+  const first = ast.rest[0];
+  if (!isForm(first)) {
+    throw new Error("expected first top-level entry to be a form");
+  }
+  return classifyTopLevelDecl(first);
+};
+
+const classifyFirstBase = (source: string) => {
+  const ast = parseBase(source, "use-decl-test.voyd");
   const first = ast.rest[0];
   if (!isForm(first)) {
     throw new Error("expected first top-level entry to be a form");
@@ -53,6 +62,19 @@ describe("classifyTopLevelDecl", () => {
       classifyFirst("pub macro inc(value)\n  syntax_template (+ $value 1.0)"),
     ).toMatchObject({
       kind: "macro-decl",
+    });
+  });
+
+  it("classifies attribute macro declarations", () => {
+    expect(
+      classifyFirstBase(
+        "pub attribute macro preserve(args, declaration)\n  declaration",
+      ),
+    ).toMatchObject({
+      kind: "macro-decl",
+      macroKind: "attribute",
+      name: "preserve",
+      visibility: "pub",
     });
   });
 

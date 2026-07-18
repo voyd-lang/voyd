@@ -91,6 +91,46 @@ declare_reserved_module()
     );
   });
 
+  it("stabilizes imports needed by declaration attribute expansion", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+macro import_attributes()
+  syntax_template (use src::attributes::decorate)
+
+import_attributes()
+
+@decorate
+fn original() -> i32
+  1
+`,
+      [`${root}${sep}attributes.voyd`]: `
+pub attribute macro decorate(args, declaration)
+  emit_many(
+    declaration,
+    \`(fn generated() -> i32
+      42)
+  )
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const functionNames = graph.modules
+      .get("src::main")
+      ?.surface?.items.flatMap((item) =>
+        item.kind === "function"
+          ? [item.declaration.signature.name.value]
+          : [],
+      );
+    expect(functionNames).toEqual(["original", "generated"]);
+  });
+
   it("drops generated inline modules that disappear after re-expansion", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
@@ -1088,6 +1128,49 @@ pub use self::outer::all
           },
         }),
       ]),
+    );
+  });
+
+  it("imports attribute macros with aliases and emits companion declarations", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `
+use src::macros::companion as generate_companion
+
+@generate_companion(description: "generated")
+fn original() -> i32
+  1
+`,
+      [`${root}${sep}macros.voyd`]: `
+pub attribute macro companion(args, declaration)
+  if args.length() == 1 then:
+    emit_many(
+      declaration,
+      \`(fn generated() -> i32
+        42)
+    )
+  else:
+    panic("expected one argument")
+`,
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toHaveLength(0);
+    const functionNames = graph.modules
+      .get("src::main")
+      ?.surface?.items.flatMap((item) =>
+        item.kind === "function"
+          ? [item.declaration.signature.name.value]
+          : [],
+      );
+    expect(functionNames).toEqual(["original", "generated"]);
+    expect(graph.modules.get("src::macros")?.macroExports).toContain(
+      "companion",
     );
   });
 });

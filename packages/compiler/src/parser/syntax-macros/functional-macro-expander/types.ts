@@ -19,11 +19,14 @@ export type MacroVariableBinding = {
 };
 
 export type MacroDefinition = {
+  kind: "function" | "attribute";
   name: IdentifierAtom;
+  declarationName: IdentifierAtom;
   parameters: IdentifierAtom[];
   body: Expr[];
   scope: MacroScope;
   id: IdentifierAtom;
+  moduleId?: string;
 };
 
 export type EvalOpts = {

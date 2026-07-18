@@ -271,4 +271,205 @@ pub declare_value NumberLike
       ["object_literal", [":", "answer", "i32"]],
     ]);
   });
+
+  test("expands declaration attribute macros with structured arguments", () => {
+    const code = `\
+attribute macro companion(args, declaration)
+  if args.length() == 1 then:
+    emit_many(
+      declaration,
+      \`(fn generated() -> i32
+        42)
+    )
+  else:
+    panic("expected one attribute argument")
+
+@companion(description: "generated helper")
+fn original() -> i32
+  1
+`;
+
+    const plain = toPlain(parse(code));
+    expect(plain).toContainEqual([
+      "fn",
+      ["->", ["original"], "i32"],
+      ["block", "1"],
+    ]);
+    expect(plain).toContainEqual([
+      "fn",
+      ["->", ["generated"], "i32"],
+      ["block", "42"],
+    ]);
+  });
+
+  test("applies stacked attribute macros from top to bottom", () => {
+    const code = `\
+attribute macro add_first(args, declaration)
+  emit_many(
+    declaration,
+    \`(fn first_companion() -> i32
+      1)
+  )
+
+attribute macro add_second(args, declaration)
+  emit_many(
+    declaration,
+    \`(fn second_companion() -> i32
+      2)
+  )
+
+@add_first
+@add_second
+fn original() -> i32
+  0
+`;
+
+    const declarationNames = toPlain(parse(code)).flatMap((entry) =>
+      Array.isArray(entry) && entry[0] === "fn"
+        ? [((entry[1] as Plain)[1] as Plain)[0]]
+        : [],
+    );
+    expect(declarationNames).toEqual([
+      "original",
+      "first_companion",
+      "second_companion",
+    ]);
+  });
+
+  test("bounds recursive attribute expansion", () => {
+    const ast = parseBase(`\
+attribute macro recurse(args, declaration)
+  emit_many(\`(@ recurse), declaration)
+
+@recurse
+fn original() -> i32
+  0
+`);
+
+    expect(() =>
+      expandFunctionalMacros(ast, {
+        strictMacroSignatures: true,
+        maxAttributeExpansionDepth: 3,
+      }),
+    ).toThrow(/attribute macro expansion exceeded the depth limit of 3/i);
+  });
+
+  test("dispatches reserved compiler attributes after user expansion", () => {
+    const ast = parse(`\
+attribute macro preserve(args, declaration)
+  declaration
+
+@preserve
+@effect(id: "voyd.example.time")
+eff Time
+  now
+`);
+    const effect = ast.rest.find(
+      (entry) => entry instanceof Form && entry.calls("eff"),
+    );
+
+    expect(effect?.attributes?.effect).toEqual({ id: "voyd.example.time" });
+  });
+
+  test("rejects duplicate user-defined attributes", () => {
+    expect(() =>
+      parse(`\
+attribute macro preserve(args, declaration)
+  declaration
+
+@preserve
+@preserve
+fn value() -> i32
+  1
+`),
+    ).toThrow(/duplicate user-defined attribute '@preserve'/i);
+  });
+
+  test("rejects functional macros used as attributes", () => {
+    expect(() =>
+      parse(`\
+macro ordinary(value)
+  value
+
+@ordinary
+fn value() -> i32
+  1
+`),
+    ).toThrow(/functional macro, not an attribute macro/i);
+  });
+
+  test("preserves unresolved attributes in context-free parser output", () => {
+    const plain = toPlain(parse(`\
+@imported_attribute
+fn value() -> i32
+  1
+`));
+
+    expect(plain).toContainEqual(["@", "imported_attribute"]);
+  });
+
+  test("applies attribute macros to visibility-modified methods", () => {
+    const plain = toPlain(
+      parse(`\
+attribute macro preserve(args, declaration)
+  declaration
+
+obj Box {}
+
+impl Box
+  @preserve
+  api fn answer(self) -> i32
+    42
+`),
+    );
+
+    expect(
+      containsDeep(plain, [
+        "api",
+        "fn",
+        ["->", ["answer", "self"], "i32"],
+        ["block", "42"],
+      ]),
+    ).toBe(true);
+  });
+
+  test("applies attribute macros to enum declarations", () => {
+    const plain = toPlain(
+      parse(`\
+attribute macro preserve(args, declaration)
+  declaration
+
+@preserve
+enum Status
+  Ready
+`),
+    );
+
+    expect(plain).toContainEqual(["enum", "Status", ["block", "Ready"]]);
+  });
+
+  test("expands attributes emitted by ordinary functional macros", () => {
+    const plain = toPlain(
+      parse(`\
+attribute macro preserve(args, declaration)
+  declaration
+
+macro declare_attributed()
+  emit_many(
+    \`(@ preserve),
+    \`(fn generated() -> i32
+      42)
+  )
+
+declare_attributed()
+`),
+    );
+
+    expect(plain).toContainEqual([
+      "fn",
+      ["->", ["generated"], "i32"],
+      ["block", "42"],
+    ]);
+    expect(plain).not.toContainEqual(["@", "preserve"]);
+  });
 });

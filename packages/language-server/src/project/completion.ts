@@ -20,6 +20,15 @@ import type { CompletionAnalysis } from "./types.js";
 const MAX_COMPLETION_ITEMS = 200;
 const MAX_AUTO_IMPORT_ITEMS = 40;
 const AUTO_IMPORT_MIN_PREFIX_LENGTH = 2;
+const COMPILER_ATTRIBUTE_NAMES = [
+  "boundary",
+  "compiler_contract",
+  "effect",
+  "external",
+  "intrinsic",
+  "intrinsic_type",
+  "serializer",
+] as const;
 
 const isIdentifierCharacter = (value: string | undefined): boolean =>
   Boolean(value && /[A-Za-z0-9_]/.test(value));
@@ -436,6 +445,52 @@ export const completionsAtPosition = ({
     source,
     cursorOffset,
   });
+  const lineStart = source.lastIndexOf("\n", replacement.start - 1) + 1;
+  const beforeAttributeName = source
+    .slice(lineStart, replacement.start)
+    .trim();
+  if (beforeAttributeName === "@") {
+    const module = analysis.graph.modules.get(moduleId);
+    const localAttributeNames =
+      module?.header?.items.flatMap((item) =>
+        item.kind === "macro" &&
+        item.declaration.macroKind === "attribute" &&
+        item.declaration.name
+          ? [item.declaration.name]
+          : [],
+      ) ?? [];
+    const importedAttributeNames =
+      module?.macroImports?.flatMap((macro) =>
+        macro.kind === "attribute" ? [macro.name] : [],
+      ) ?? [];
+    const names = Array.from(
+      new Set([
+        ...COMPILER_ATTRIBUTE_NAMES,
+        ...localAttributeNames,
+        ...importedAttributeNames,
+      ]),
+    )
+      .filter((name) =>
+        startsWithPrefix({ name, prefix: replacement.prefix }),
+      )
+      .sort();
+    return {
+      isIncomplete: false,
+      items: names.map((name) => ({
+        label: name,
+        kind: CompletionItemKind.Function,
+        detail: COMPILER_ATTRIBUTE_NAMES.includes(
+          name as (typeof COMPILER_ATTRIBUTE_NAMES)[number],
+        )
+          ? "compiler attribute"
+          : "attribute macro",
+        textEdit: {
+          range: lineIndex.range(replacement.start, replacement.end),
+          newText: name,
+        },
+      })),
+    };
+  }
   const activeScope = findActiveScope({
     analysis,
     moduleId,

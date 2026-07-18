@@ -218,4 +218,26 @@ pub eff Time
     const sleepOp = effectDecl?.operations.find((op) => op.name === "sleep");
     expect(sleepOp?.documentation).toBe(" Sleep docs.");
   });
+
+  it("preserves declaration and parameter docs through attribute expansion", async () => {
+    const { diagnostics, semantics } = await compileSingleModule(`
+attribute macro preserve(args, declaration)
+  declaration
+
+/// Documented function.
+@preserve
+pub fn documented(
+  /// Documented parameter.
+  value: i32
+) -> i32
+  value
+`);
+
+    expect(diagnostics.filter((entry) => entry.code === "MD0004")).toHaveLength(0);
+    const documented = semantics
+      .get("src::main")
+      ?.binding.functions.find((fn) => fn.name === "documented");
+    expect(documented?.documentation).toBe(" Documented function.");
+    expect(documented?.params[0]?.documentation).toBe(" Documented parameter.");
+  });
 });

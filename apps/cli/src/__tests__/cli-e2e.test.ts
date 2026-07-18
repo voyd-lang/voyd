@@ -560,6 +560,58 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
     }
   });
 
+  it("shows imported attribute macro expansion in the parser AST", async () => {
+    assertCliRunnerAvailable();
+
+    const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-attribute-ast-"));
+    const srcRoot = resolve(root, "src");
+    const entryPath = resolve(srcRoot, "main.voyd");
+    await mkdir(srcRoot, { recursive: true });
+    await writeFile(
+      resolve(srcRoot, "macros.voyd"),
+      [
+        "pub attribute macro replace(args, declaration)",
+        "  `(fn expanded() -> i32",
+        "    42)",
+        "",
+      ].join("\n"),
+    );
+    await writeFile(
+      entryPath,
+      [
+        "use src::macros::all",
+        "",
+        "@replace",
+        "fn original() -> i32",
+        "  1",
+        "",
+      ].join("\n"),
+    );
+
+    try {
+      const result = runCli(root, ["--emit-parser-ast", entryPath]);
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+      if (result.status !== 0) {
+        throw new Error(`voyd parser AST failed: ${output}`);
+      }
+
+      expect(JSON.parse(result.stdout)).toEqual(
+        expect.arrayContaining([
+          expect.arrayContaining([
+            "fn",
+            expect.arrayContaining([
+              "->",
+              expect.arrayContaining(["expanded"]),
+            ]),
+          ]),
+        ]),
+      );
+      expect(output).not.toContain("original");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("resolves --pkg-dir relative to the target source root", async () => {
     assertCliRunnerAvailable();
 
