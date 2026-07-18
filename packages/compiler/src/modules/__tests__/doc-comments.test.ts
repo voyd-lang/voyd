@@ -243,6 +243,9 @@ pub fn documented(
 
   it("preserves parameter docs when an attribute macro emits an object field", async () => {
     const { diagnostics, semantics } = await compileSingleModule(`
+macro locate(value, source)
+  with_location(value, source)
+
 attribute macro arguments_object(args, declaration)
   let signature = declaration.get(1)
   let head = signature.get(1)
@@ -252,7 +255,8 @@ attribute macro arguments_object(args, declaration)
   let field_name = labeled.get(0)
   let field_type = parameter.get(2)
   let field = \`(: $field_name $field_type)
-  let located_field = with_location(field, parameter.get(1))
+  let field_source = parameter.get(1)
+  let located_field = locate(field, field_source)
   \`(obj GeneratedArguments { $located_field })
 
 @arguments_object
