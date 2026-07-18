@@ -1009,6 +1009,12 @@
           "title": "expands public macros imported from sibling modules",
           "entryName": "main",
           "expect": { "kind": "equals", "value": 3 }
+        },
+        {
+          "id": "modules.macros.declaration-attribute",
+          "title": "expands imported declaration attribute macros with companions",
+          "entryName": "attribute_main",
+          "expect": { "kind": "equals", "value": 42 }
         }
       ]
     },

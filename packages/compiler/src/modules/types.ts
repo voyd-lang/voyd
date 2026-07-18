@@ -92,6 +92,20 @@ export interface ModuleNode {
    * Includes local `pub macro` exports and `pub use` re-exports.
    */
   macroExports?: readonly string[];
+  /** Macro names imported into this module after alias resolution. */
+  macroImports?: readonly {
+    name: string;
+    kind: "function" | "attribute";
+  }[];
+  /** Source links retained for language tooling after attribute expansion. */
+  attributeMacroReferences?: readonly {
+    name: string;
+    macroId: string;
+    definitionName: string;
+    definitionModuleId: string;
+    invocationSpan: SourceSpan;
+    definitionSpan: SourceSpan;
+  }[];
 }
 
 type ModuleDiagnosticContext = {

@@ -79,6 +79,13 @@ const throwIfCancelled = (isCancelled: (() => boolean) | undefined): void => {
 };
 
 const keyForSymbol = ({ moduleId, symbol }: SymbolRef): string => `${moduleId}::${symbol}`;
+const keyForMacro = ({
+  moduleId,
+  macroId,
+}: {
+  moduleId: string;
+  macroId: string;
+}): string => `macro::${moduleId}::${macroId}`;
 const keyForExternalParameterLabel = ({
   moduleId,
   symbol,
@@ -425,6 +432,8 @@ export const buildSymbolIndex = async ({
   const occurrencesByUri = new Map<string, SymbolOccurrence[]>();
   const occurrencesByKey = new Map<string, SymbolOccurrence[]>();
   const dedupeKeys = new Set<string>();
+  const macroDocumentationByCanonicalKey = new Map<string, string>();
+  const macroTypeInfoByCanonicalKey = new Map<string, string>();
 
   const addOccurrenceFromLocation = ({
     symbolRef,
@@ -745,6 +754,64 @@ export const buildSymbolIndex = async ({
         (moduleNode.origin.kind === "file" ? moduleNode.origin.filePath : moduleId),
     );
     moduleIdByFilePath.set(filePath, moduleId);
+
+    moduleNode.attributeMacroReferences?.forEach((reference) => {
+      const canonicalKey = keyForMacro({
+        moduleId: reference.definitionModuleId,
+        macroId: reference.macroId,
+      });
+      const addMacroOccurrence = ({
+        span,
+        occurrenceModuleId,
+        name,
+        kind,
+      }: {
+        span: SourceSpan;
+        occurrenceModuleId: string;
+        name: string;
+        kind: SymbolOccurrence["kind"];
+      }): void => {
+        const occurrenceFile = path.resolve(span.file);
+        const lineIndex = lineIndexByFile.get(occurrenceFile);
+        const range = spanRange({ span, lineIndex });
+        if (!range) {
+          return;
+        }
+        addCustomOccurrenceFromRange({
+          canonicalKey,
+          moduleId: occurrenceModuleId,
+          symbol: MODULE_SYMBOL_SENTINEL,
+          uri: toFileUri(occurrenceFile),
+          range,
+          kind,
+          name,
+        });
+      };
+
+      addMacroOccurrence({
+        span: reference.definitionSpan,
+        occurrenceModuleId: reference.definitionModuleId,
+        name: reference.definitionName,
+        kind: "declaration",
+      });
+      addMacroOccurrence({
+        span: reference.invocationSpan,
+        occurrenceModuleId: moduleId,
+        name: reference.name,
+        kind: "reference",
+      });
+
+      const documentation = graph.modules
+        .get(reference.definitionModuleId)
+        ?.docs?.macroDeclarationsByName.get(reference.definitionName);
+      if (documentation !== undefined) {
+        macroDocumentationByCanonicalKey.set(canonicalKey, documentation);
+      }
+      macroTypeInfoByCanonicalKey.set(
+        canonicalKey,
+        `attribute macro ${reference.definitionName}(arguments, declaration)`,
+      );
+    });
   });
 
   semantics.forEach((entry, moduleId) => {
@@ -1200,12 +1267,20 @@ export const buildSymbolIndex = async ({
   const documentationByCanonicalKey = new Map<string, string>();
   const typeInfoByCanonicalKey = new Map<string, string>();
   sortedDeclarations.forEach((entries, canonicalKey) => {
-    const documentation = entries
-      .map((entry) => symbolDocumentationByModule.get(entry.moduleId)?.get(entry.symbol))
-      .find((doc): doc is string => doc !== undefined);
+    const documentation =
+      macroDocumentationByCanonicalKey.get(canonicalKey) ??
+      entries
+        .map((entry) => symbolDocumentationByModule.get(entry.moduleId)?.get(entry.symbol))
+        .find((doc): doc is string => doc !== undefined);
 
     if (documentation !== undefined) {
       documentationByCanonicalKey.set(canonicalKey, documentation);
+    }
+
+    const macroTypeInfo = macroTypeInfoByCanonicalKey.get(canonicalKey);
+    if (macroTypeInfo !== undefined) {
+      typeInfoByCanonicalKey.set(canonicalKey, macroTypeInfo);
+      return;
     }
 
     const typeInfo = entries

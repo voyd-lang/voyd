@@ -2,3 +2,10 @@ use src::macros::all
 
 pub fn main() -> f64
   inc(2.0)
+
+@with_companion(description: "portable attribute macro")
+pub fn attribute_original() -> i32
+  3
+
+pub fn attribute_main() -> i32
+  attribute_original() + attribute_bonus()

@@ -7,6 +7,7 @@ import type {
 export class MacroScope {
   #parent?: MacroScope;
   #macros = new Map<string, MacroDefinition>();
+  #ambiguousMacros = new Set<string>();
   #variables = new Map<string, MacroVariableBinding>();
 
   constructor(parent?: MacroScope) {
@@ -17,11 +18,38 @@ export class MacroScope {
     return new MacroScope(this);
   }
 
+  checkpoint(): () => void {
+    const macros = new Map(this.#macros);
+    const ambiguousMacros = new Set(this.#ambiguousMacros);
+    const variables = new Map(
+      Array.from(this.#variables, ([name, binding]) => [
+        name,
+        { ...binding },
+      ]),
+    );
+    return () => {
+      this.#macros = macros;
+      this.#ambiguousMacros = ambiguousMacros;
+      this.#variables = variables;
+    };
+  }
+
   defineMacro(definition: MacroDefinition) {
+    this.#ambiguousMacros.delete(definition.name.value);
     this.#macros.set(definition.name.value, definition);
   }
 
+  defineAmbiguousMacro(name: string) {
+    this.#macros.delete(name);
+    this.#ambiguousMacros.add(name);
+  }
+
   getMacro(name: string): MacroDefinition | undefined {
+    if (this.#ambiguousMacros.has(name)) {
+      throw new Error(
+        `Macro '${name}' is ambiguous; import it with an explicit alias`,
+      );
+    }
     return this.#macros.get(name) ?? this.#parent?.getMacro(name);
   }
 

@@ -10,8 +10,9 @@ between those layers.
 
 `ModuleHeaderView` is built from base-expanded syntax. It contains only the
 module items needed before functional macro expansion: uses and exports, inline
-modules, external module declarations, and macro declarations. Module discovery
-and macro import ordering consume this view.
+modules, external module declarations, functional macro declarations, and
+declaration attribute macro declarations. Module discovery and macro import
+ordering consume this view.
 
 `SurfaceModuleView` is built after functional and post-syntax macro expansion.
 It contains normalized declarations and their signatures, parameters, fields,
@@ -26,6 +27,14 @@ view from mutable `module.ast`. A missing header after graph construction or a
 missing surface after expansion is an invariant failure. The standalone
 semantics entry point is the sole initializer allowed to materialize and attach
 an expanded surface for a caller-supplied module.
+
+Declaration attribute macros share the functional macro namespace, evaluator,
+import graph, hygiene model, and invalidation path. Expansion associates a run
+of generic `@name(...)` forms with the following declaration before surface
+normalization. Reserved compiler attributes are retained for specialized
+post-syntax handlers; imported user attributes expand first and may emit a
+declaration sequence. The expanded `module.ast` remains the compiler's macro
+inspection surface.
 
 Expression-level normalizers are parser-owned, syntax-identity-cached accessors.
 Binding and lowering may request the same normalized lambda, binding, match,

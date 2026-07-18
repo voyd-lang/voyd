@@ -5,7 +5,9 @@ import { cloneExpr } from "./helpers.js";
 
 export const renderFunctionalMacro = (macro: MacroDefinition): Form =>
   new Form([
-    new IdentifierAtom("functional-macro"),
+    new IdentifierAtom(
+      macro.kind === "attribute" ? "attribute-macro" : "functional-macro",
+    ),
     macro.id.clone(),
     new Form([
       new IdentifierAtom("parameters"),

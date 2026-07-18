@@ -1,2 +1,12 @@
 pub macro inc(value)
   syntax_template (+ $value 1.0)
+
+pub attribute macro with_companion(args, declaration)
+  if args.length() == 1 then:
+    emit_many(
+      declaration,
+      `(fn attribute_bonus() -> i32
+        39)
+    )
+  else:
+    panic("with_companion expects one argument")
