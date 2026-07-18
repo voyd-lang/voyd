@@ -1,4 +1,4 @@
-import { Form, IdentifierAtom } from "../parser/index.js";
+import { Form, IdentifierAtom, isForm, type Syntax } from "../parser/index.js";
 import { toSourceSpan } from "../parser/surface/utils.js";
 import type { NormalizedUseEntry } from "../parser/surface/use-path.js";
 import { resolveModuleRequest } from "./resolve.js";
@@ -42,6 +42,10 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
     string,
     Map<string, MacroScopeUseEntry>
   >();
+  const documentationByLocationByModule = new Map<
+    string,
+    DocumentationByLocation
+  >();
   const invalidatedModules = new Map<string, number>();
   const processedInvalidationByModule = new Map<string, number>();
   let nextInvalidationGeneration = 0;
@@ -57,6 +61,7 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
       exportsByModule.delete(moduleId);
       sourceAstByModule.delete(moduleId);
       scopeUseEntriesByModule.delete(moduleId);
+      documentationByLocationByModule.delete(moduleId);
     },
     expand: (graph) => {
       const diagnostics: Diagnostic[] = [];
@@ -76,6 +81,10 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
         }
         const moduleDiagnostics: Diagnostic[] = [];
         const sourceAst = sourceAstByModule.get(id);
+        const documentationByLocation =
+          documentationByLocationByModule.get(id) ??
+          indexDocumentationByLocation(module);
+        documentationByLocationByModule.set(id, documentationByLocation);
         if (sourceAst && isInvalidated) {
           module.ast = sourceAst.clone();
         } else if (!sourceAst) {
@@ -99,13 +108,61 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
           module,
           entries: scopeUseEntries,
           exportsByModule,
+          sourceEntryKeys: new Set(
+            collectUseEntries(headerItems).map(useEntryKey),
+          ),
         });
         const scope = new MacroScope();
-        importedMacros.forEach((macro) => scope.defineMacro(macro));
+        importedMacros.macros.forEach((macro) => scope.defineMacro(macro));
+        importedMacros.ambiguousNames.forEach((name) =>
+          scope.defineAmbiguousMacro(name),
+        );
+        module.macroImports = Array.from(importedMacros.macros.entries()).map(
+          ([name, macro]) => ({ name, kind: macro.kind }),
+        );
+        const attributeMacroReferences: NonNullable<
+          ModuleNode["attributeMacroReferences"]
+        >[number][] = [];
+        const unknownAttributeSpans: ReturnType<typeof toSourceSpan>[] = [];
+        const unknownAttributeKeys = new Set<string>();
 
         const functionalResult = expandFunctionalMacros(module.ast, {
           scope,
+          moduleId: id,
           strictMacroSignatures: true,
+          onAttributeExpansion: ({ invocationName, macro }) => {
+            if (!macro.moduleId || !macro.declarationName.location) {
+              return;
+            }
+            attributeMacroReferences.push({
+              name: invocationName.value,
+              macroId: macro.id.value,
+              definitionName: macro.declarationName.value,
+              definitionModuleId: macro.moduleId,
+              invocationSpan: toSourceSpan(invocationName),
+              definitionSpan: toSourceSpan(macro.declarationName),
+            });
+          },
+          onUnknownAttribute: (invocationName) => {
+            const span = toSourceSpan(invocationName);
+            const key = `${invocationName.value}:${span.file}:${span.start}:${span.end}`;
+            if (unknownAttributeKeys.has(key)) {
+              return;
+            }
+            unknownAttributeKeys.add(key);
+            unknownAttributeSpans.push(span);
+            moduleDiagnostics.push(
+              diagnosticFromCode({
+                code: "MD0003",
+                params: {
+                  kind: "macro-expansion-failed",
+                  macro: "attributeDispatcher",
+                  errorMessage: `unknown attribute '@${invocationName.value}'`,
+                },
+                span,
+              }),
+            );
+          },
           onError: (error) =>
             reportMacroExpansionError({
               diagnostics: moduleDiagnostics,
@@ -114,12 +171,26 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
               fallbackSyntax: module.ast,
             }),
         });
+        module.attributeMacroReferences = attributeMacroReferences;
         module.ast = applyPostSyntaxMacros(
           functionalResult.form,
           moduleDiagnostics,
         );
         module.surface = createSurfaceModuleView(module.ast);
+        remapExpandedDocumentation({ module, documentationByLocation });
         module.surface.issues.forEach((issue) => {
+          const isUnknownAttributeIssue =
+            issue.message ===
+              "unsupported top-level form; expected a declaration" &&
+            unknownAttributeSpans.some(
+              (span) =>
+                span.file === issue.span.file &&
+                span.start >= issue.span.start &&
+                span.start <= issue.span.end,
+            );
+          if (isUnknownAttributeIssue) {
+            return;
+          }
           moduleDiagnostics.push(
             diagnosticFromCode({
               code: "MD0002",
@@ -151,7 +222,7 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
           localExports,
         });
         const previousExports = exportsByModule.get(id);
-        module.macroExports = Array.from(exportedMacros.keys());
+        module.macroExports = Array.from(exportedMacros.macros.keys());
         exportsByModule.set(id, exportedMacros);
         const exportNamesChanged = !haveSameMacroExportNames(
           previousExports,
@@ -159,7 +230,8 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
         );
         const rebuiltExportDefinitions =
           isInvalidated &&
-          ((previousExports?.size ?? 0) > 0 || exportedMacros.size > 0);
+          (macroExportNameCount(previousExports) > 0 ||
+            macroExportNameCount(exportedMacros) > 0);
         const propagationGeneration = rebuiltExportDefinitions
           ? invalidationGeneration
           : exportNamesChanged
@@ -185,7 +257,10 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
   };
 };
 
-type MacroExportTable = Map<string, MacroDefinition>;
+type MacroExportTable = {
+  macros: Map<string, MacroDefinition>;
+  ambiguousNames: Set<string>;
+};
 type UseEntryWithVisibility = NormalizedUseEntry & {
   visibility: "module" | "pub";
 };
@@ -193,13 +268,108 @@ type MacroScopeUseEntry = {
   entry: UseEntryWithVisibility;
   inlineModuleNames: ReadonlySet<string>;
 };
+type DocumentationByLocation = {
+  declarations: ReadonlyMap<string, string>;
+  parameters: ReadonlyMap<string, string>;
+};
+
+const indexDocumentationByLocation = (
+  module: ModuleNode,
+): DocumentationByLocation => {
+  const declarations = new Map<string, string>();
+  const parameters = new Map<string, string>();
+  const docs = module.docs;
+  if (!docs) {
+    return { declarations, parameters };
+  }
+
+  visitSyntax(module.ast, (syntax) => {
+    const key = documentationLocationKey(syntax);
+    if (!key) {
+      return;
+    }
+    const declaration = docs.declarationsBySyntaxId.get(syntax.syntaxId);
+    if (declaration !== undefined) {
+      declarations.set(key, declaration);
+    }
+    const parameter = docs.parametersBySyntaxId.get(syntax.syntaxId);
+    if (parameter !== undefined) {
+      parameters.set(key, parameter);
+    }
+  });
+  return { declarations, parameters };
+};
+
+const remapExpandedDocumentation = ({
+  module,
+  documentationByLocation,
+}: {
+  module: ModuleNode;
+  documentationByLocation: DocumentationByLocation;
+}): void => {
+  const docs = module.docs;
+  if (!docs) {
+    return;
+  }
+  const declarations = new Map(docs.declarationsBySyntaxId);
+  const parameters = new Map(docs.parametersBySyntaxId);
+  visitSyntax(module.ast, (syntax) => {
+    const key = documentationLocationKey(syntax);
+    if (!key) {
+      return;
+    }
+    const declaration = documentationByLocation.declarations.get(key);
+    if (declaration !== undefined) {
+      declarations.set(syntax.syntaxId, declaration);
+    }
+    const parameter = documentationByLocation.parameters.get(key);
+    if (parameter !== undefined) {
+      parameters.set(syntax.syntaxId, parameter);
+    }
+  });
+  module.docs = {
+    ...docs,
+    declarationsBySyntaxId: declarations,
+    parametersBySyntaxId: parameters,
+  };
+};
+
+const visitSyntax = (
+  syntax: Syntax,
+  visit: (entry: Syntax) => void,
+): void => {
+  visit(syntax);
+  if (isForm(syntax)) {
+    syntax.toArray().forEach((entry) => visitSyntax(entry, visit));
+  }
+};
+
+const documentationLocationKey = (syntax: Syntax): string | undefined => {
+  const location = syntax.location;
+  return location
+    ? [
+        syntax.syntaxType,
+        location.filePath,
+        location.startIndex,
+        location.endIndex,
+      ].join(":")
+    : undefined;
+};
 
 const haveSameMacroExportNames = (
   previous: MacroExportTable | undefined,
   current: MacroExportTable,
 ): boolean =>
-  (previous?.size ?? 0) === current.size &&
-  Array.from(current.keys()).every((name) => previous?.has(name));
+  macroExportNameCount(previous) === macroExportNameCount(current) &&
+  Array.from(current.macros.keys()).every((name) =>
+    previous?.macros.has(name),
+  ) &&
+  Array.from(current.ambiguousNames).every((name) =>
+    previous?.ambiguousNames.has(name),
+  );
+
+const macroExportNameCount = (table: MacroExportTable | undefined): number =>
+  (table?.macros.size ?? 0) + (table?.ambiguousNames.size ?? 0);
 
 const invalidateMacroImporters = ({
   graph,
@@ -296,7 +466,7 @@ const indexExports = (exports: MacroDefinition[]): MacroExportTable => {
   exports.forEach((macro) => {
     table.set(macro.name.value, macro);
   });
-  return table;
+  return { macros: table, ambiguousNames: new Set() };
 };
 
 const collectInlineModuleNames = (
@@ -313,15 +483,52 @@ const collectMacroImports = ({
   module,
   entries,
   exportsByModule,
+  sourceEntryKeys,
 }: {
   module: ModuleNode;
   entries: MacroScopeUseEntry[];
   exportsByModule: Map<string, MacroExportTable>;
-}): Map<string, MacroDefinition> => {
+  sourceEntryKeys: ReadonlySet<string>;
+}): {
+  macros: Map<string, MacroDefinition>;
+  ambiguousNames: Set<string>;
+} => {
   const imports = new Map<string, MacroDefinition>();
+  const importedFromSource = new Map<string, boolean>();
+  const ambiguousNames = new Set<string>();
+  const addImport = ({
+    name,
+    macro,
+    fromSource,
+  }: {
+    name: string;
+    macro: MacroDefinition;
+    fromSource: boolean;
+  }): void => {
+    if (ambiguousNames.has(name)) {
+      return;
+    }
+    const existing = imports.get(name);
+    const hasAttributeMacro =
+      existing?.kind === "attribute" || macro.kind === "attribute";
+    if (
+      existing &&
+      existing.id.value !== macro.id.value &&
+      (hasAttributeMacro ||
+        (importedFromSource.get(name) === true && fromSource))
+    ) {
+      imports.delete(name);
+      ambiguousNames.add(name);
+      return;
+    }
+    ambiguousNames.delete(name);
+    imports.set(name, macro);
+    importedFromSource.set(name, fromSource);
+  };
   const moduleIsPackageRoot =
     module.origin.kind === "file" && module.path.segments.at(-1) === "pkg";
   entries.forEach(({ entry, inlineModuleNames }) => {
+    const fromSource = sourceEntryKeys.has(useEntryKey(entry));
     if (!entry.hasExplicitPrefix) {
       return;
     }
@@ -352,8 +559,12 @@ const collectMacroImports = ({
     }
 
     if (entry.selectionKind === "all") {
-      exportedMacros.forEach((macro, name) => {
-        imports.set(name, macro);
+      exportedMacros.macros.forEach((macro, name) => {
+        addImport({ name, macro, fromSource });
+      });
+      exportedMacros.ambiguousNames.forEach((name) => {
+        imports.delete(name);
+        ambiguousNames.add(name);
       });
       return;
     }
@@ -363,18 +574,24 @@ const collectMacroImports = ({
       return;
     }
 
-    const macro = exportedMacros.get(targetName);
+    const alias = entry.alias ?? targetName;
+    if (exportedMacros.ambiguousNames.has(targetName)) {
+      imports.delete(alias);
+      ambiguousNames.add(alias);
+      return;
+    }
+
+    const macro = exportedMacros.macros.get(targetName);
     if (!macro) {
       return;
     }
 
-    const alias = entry.alias ?? targetName;
     const definition =
       alias === macro.name.value ? macro : cloneMacroWithAlias(macro, alias);
-    imports.set(alias, definition);
+    addImport({ name: alias, macro: definition, fromSource });
   });
 
-  return imports;
+  return { macros: imports, ambiguousNames };
 };
 
 const collectMacroReexports = ({
@@ -390,7 +607,33 @@ const collectMacroReexports = ({
   exportsByModule: Map<string, MacroExportTable>;
   localExports: MacroExportTable;
 }): MacroExportTable => {
-  const exports = new Map(localExports);
+  const exports = new Map(localExports.macros);
+  const ambiguousNames = new Set(localExports.ambiguousNames);
+  const addReexport = (name: string, macro: MacroDefinition): void => {
+    if (localExports.macros.has(name) || ambiguousNames.has(name)) {
+      return;
+    }
+    const existing = exports.get(name);
+    if (
+      existing &&
+      existing.id.value !== macro.id.value &&
+      (existing.kind === "attribute" || macro.kind === "attribute")
+    ) {
+      exports.delete(name);
+      ambiguousNames.add(name);
+      return;
+    }
+    if (!existing) {
+      exports.set(name, macro);
+    }
+  };
+  const addAmbiguousReexport = (name: string): void => {
+    if (localExports.macros.has(name)) {
+      return;
+    }
+    exports.delete(name);
+    ambiguousNames.add(name);
+  };
   const moduleIsPackageRoot =
     module.origin.kind === "file" && module.path.segments.at(-1) === "pkg";
   entries
@@ -427,11 +670,10 @@ const collectMacroReexports = ({
       }
 
       if (entry.selectionKind === "all") {
-        exportedMacros.forEach((macro, name) => {
-          if (!exports.has(name)) {
-            exports.set(name, macro);
-          }
-        });
+        exportedMacros.macros.forEach((macro, name) =>
+          addReexport(name, macro),
+        );
+        exportedMacros.ambiguousNames.forEach(addAmbiguousReexport);
         return;
       }
 
@@ -440,23 +682,26 @@ const collectMacroReexports = ({
         return;
       }
 
-      const macro = exportedMacros.get(targetName);
+      const alias = entry.alias ?? targetName;
+      if (exportedMacros.ambiguousNames.has(targetName)) {
+        addAmbiguousReexport(alias);
+        return;
+      }
+
+      const macro = exportedMacros.macros.get(targetName);
       if (!macro) {
         return;
       }
 
-      const alias = entry.alias ?? targetName;
-      if (!exports.has(alias)) {
-        exports.set(
-          alias,
-          alias === macro.name.value
-            ? macro
-            : cloneMacroWithAlias(macro, alias),
-        );
-      }
+      addReexport(
+        alias,
+        alias === macro.name.value
+          ? macro
+          : cloneMacroWithAlias(macro, alias),
+      );
     });
 
-  return exports;
+  return { macros: exports, ambiguousNames };
 };
 
 const collectUseEntries = (
@@ -510,11 +755,14 @@ const cloneMacroWithAlias = (
   macro: MacroDefinition,
   alias: string,
 ): MacroDefinition => ({
+  kind: macro.kind,
   name: new IdentifierAtom(alias),
+  declarationName: macro.declarationName.clone(),
   parameters: macro.parameters.map((param) => param.clone()),
   body: macro.body.map((expr) => cloneExpr(expr)),
   scope: macro.scope,
   id: macro.id.clone(),
+  moduleId: macro.moduleId,
 });
 
 const sortModules = (graph: ModuleGraph): string[] => {

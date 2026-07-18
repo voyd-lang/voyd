@@ -114,6 +114,7 @@ export function expandMacroCall(
 ): Expr {
   const invocationScope = new MacroScope(macro.scope);
   const args = call.toArray().slice(1).map(cloneExpr);
+  const preservedLocations = collectSyntaxLocationKeys(args);
   const bodyArguments = new Form({
     location: call.location?.clone(),
     elements: args.map(cloneExpr),
@@ -145,9 +146,68 @@ export function expandMacroCall(
   });
 
   const normalized = expectExpr(result, "macro expansion result");
-  if (call.location) normalized.setLocation(call.location.clone());
+  if (call.location) {
+    rebaseGeneratedSyntax({
+      syntax: normalized,
+      invocationLocation: call.location,
+      preservedLocations,
+    });
+  }
   return normalized;
 }
+
+const rebaseGeneratedSyntax = ({
+  syntax,
+  invocationLocation,
+  preservedLocations,
+}: {
+  syntax: Syntax;
+  invocationLocation: NonNullable<Syntax["location"]>;
+  preservedLocations: ReadonlySet<string>;
+}): void => {
+  const key = syntaxLocationKey(syntax);
+  if (!key || !preservedLocations.has(key)) {
+    syntax.setLocation(invocationLocation.clone());
+  }
+  if (isForm(syntax)) {
+    syntax.toArray().forEach((entry) =>
+      rebaseGeneratedSyntax({
+        syntax: entry,
+        invocationLocation,
+        preservedLocations,
+      }),
+    );
+  }
+};
+
+const collectSyntaxLocationKeys = (
+  roots: readonly Syntax[],
+): Set<string> => {
+  const keys = new Set<string>();
+  const visit = (syntax: Syntax): void => {
+    const key = syntaxLocationKey(syntax);
+    if (key) {
+      keys.add(key);
+    }
+    if (isForm(syntax)) {
+      syntax.toArray().forEach(visit);
+    }
+  };
+  roots.forEach(visit);
+  return keys;
+};
+
+const syntaxLocationKey = (syntax: Syntax): string | undefined => {
+  const location = syntax.location;
+  return location
+    ? [
+        syntax.syntaxType,
+        location.filePath,
+        location.startIndex,
+        location.endIndex,
+      ].join(":")
+    : undefined;
+};
 
 function callLambda(lambda: MacroLambdaValue, args: Expr[]): MacroEvalResult {
   const lambdaScope = new MacroScope(lambda.scope);

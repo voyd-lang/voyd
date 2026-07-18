@@ -151,6 +151,91 @@ describe("language server project analysis", () => {
     }
   }, 15_000);
 
+  it("supports navigation and hover for imported attribute macros", async () => {
+    const project = await createProject({
+      "src/main.voyd": `use src::macros::decorate as tagged
+
+@tagged
+fn value() -> i32
+  1
+`,
+      "src/macros.voyd": `/// Adds generated declarations.
+pub attribute macro decorate(args, declaration)
+  declaration
+`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+      const uri = toFileUri(entryPath);
+
+      const definitions = definitionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 2, character: 3 },
+      });
+      expect(definitions).toHaveLength(1);
+      expect(definitions[0]?.uri).toBe(
+        toFileUri(project.filePathFor("src/macros.voyd")),
+      );
+      expect(definitions[0]?.range.start.line).toBe(1);
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: 2, character: 3 },
+      });
+      expect(hover?.contents).toMatchObject({
+        kind: "markdown",
+      });
+      expect(JSON.stringify(hover?.contents)).toContain(
+        "attribute macro decorate(arguments, declaration)",
+      );
+      expect(JSON.stringify(hover?.contents)).toContain(
+        "Adds generated declarations.",
+      );
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("completes imported attribute macro aliases after '@'", async () => {
+    const project = await createProject({
+      "src/main.voyd": `use src::macros::decorate as tagged
+
+@ta
+fn value() -> i32
+  1
+`,
+      "src/macros.voyd": `pub attribute macro decorate(args, declaration)
+  declaration
+`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+      const completions = completionsAtPosition({
+        analysis,
+        uri: toFileUri(entryPath),
+        position: { line: 2, character: 3 },
+      });
+
+      expect(completions.items.map((item) => item.label)).toContain("tagged");
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   it("resolves go-to-definition for imported module-level lets", async () => {
     const project = await createProject({
       "src/main.voyd": `use src::constants::answer\n\nfn main() -> i32\n  answer\n`,

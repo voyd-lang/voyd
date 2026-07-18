@@ -174,6 +174,7 @@ assertMatchesAny(
     "trait",
     "let",
     "var",
+    "attribute",
     "macro",
     "macro_let",
     "eff",
@@ -264,13 +265,17 @@ assertMatchesAny(
   ),
 );
 
-assert(attributePattern, "Expected compiler attribute grammar pattern to exist");
-["boundary", "compiler_contract", "effect", "external", "intrinsic", "intrinsic_type", "serializer"].forEach(
+assert(attributePattern, "Expected attribute grammar pattern to exist");
+["boundary", "compiler_contract", "effect", "external", "instrument", "intrinsic", "intrinsic_type", "serializer"].forEach(
   (attribute) =>
     assert(
       matchesEntirePattern(attributePattern, `@${attribute}`),
       `Expected @${attribute} to be highlighted as an attribute`,
     ),
+);
+assert(
+  !matchesEntirePattern(attributePattern, "@"),
+  "Expected an attribute to require an identifier name",
 );
 
 assert(namespacePattern, "Expected module namespace grammar pattern to exist");

@@ -74,10 +74,6 @@ async function main() {
     return runWasm(entryPath, config.entry);
   }
 
-  if (config.emitParserAst) {
-    return printJson(await getParserAst(entryPath));
-  }
-
   let rootsPromise: Promise<ModuleRoots> | undefined;
   const getRoots = () => {
     rootsPromise ??= getModuleRoots({
@@ -86,6 +82,10 @@ async function main() {
     });
     return rootsPromise;
   };
+
+  if (config.emitParserAst) {
+    return printJson(await getParserAst(entryPath, await getRoots()));
+  }
 
   if (config.doc) {
     return emitDocumentation({
@@ -221,14 +221,21 @@ const serializeHir = (hir: HirGraph) => ({
   expressions: Array.from(hir.expressions.entries()),
 });
 
-async function getParserAst(entryPath: string) {
-  const { parse } = await import("@voyd-lang/sdk/compiler");
-  const file = readFileSync(entryPath, { encoding: "utf8" });
-  return parse(file, entryPath).toJSON();
+async function getParserAst(entryPath: string, roots: ModuleRoots) {
+  const { loadModuleGraph } = await import("@voyd-lang/sdk/compiler");
+  const graph = await loadModuleGraph({ entryPath, roots });
+  assertNoDiagnostics(graph.diagnostics);
+  const entryModule = graph.modules.get(graph.entry);
+  if (!entryModule) {
+    throw new Error("No expanded parser AST available for entry module");
+  }
+  return entryModule.ast.toJSON();
 }
 
 async function getCoreAst(entryPath: string) {
-  return await getParserAst(entryPath);
+  const { parse } = await import("@voyd-lang/sdk/compiler");
+  const file = readFileSync(entryPath, { encoding: "utf8" });
+  return parse(file, entryPath).toJSON();
 }
 
 async function getIrAST(entryPath: string, roots: ModuleRoots) {

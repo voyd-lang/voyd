@@ -44,7 +44,7 @@
     },
     "attributes": {
       "name": "meta.annotation.voyd",
-      "match": "(@)\\s*(boundary|compiler_contract|effect|external|intrinsic|intrinsic_type|serializer)\\b",
+      "match": "(@)\\s*([A-Za-z_][\\w]*)\\b",
       "captures": {
         "1": { "name": "punctuation.definition.annotation.voyd" },
         "2": { "name": "entity.name.function.attribute.voyd" }
@@ -198,7 +198,7 @@
         },
         {
           "name": "storage.type.voyd",
-          "match": "\\b(fn|type|obj|val|trait|let|var|macro|macro_let|eff|test|enum)\\b"
+          "match": "\\b(fn|type|obj|val|trait|let|var|attribute|macro|macro_let|eff|test|enum)\\b"
         },
         {
           "name": "entity.name.type.voyd",

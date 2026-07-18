@@ -37,6 +37,7 @@ export type TopLevelDeclClassification =
       name?: string;
       nameSyntax?: IdentifierAtom;
       visibility: TopLevelUseDeclVisibility;
+      macroKind: "function" | "attribute";
     }
   | { kind: "other" };
 
@@ -54,11 +55,13 @@ const PUB_DECL_KEYWORDS = new Set([
   "macro",
   "macro_let",
   "functional-macro",
+  "attribute-macro",
   "define-macro-variable",
 ]);
 
 const MACRO_DECL_KEYWORDS = new Set([
   "functional-macro",
+  "attribute-macro",
   "define-macro-variable",
   "macro",
   "macro_let",
@@ -141,6 +144,27 @@ export const classifyTopLevelDecl = (
   const { visibility, keywordExpr, offset } = visibilityAndKeywordFor(form);
   const keyword = isIdentifierAtom(keywordExpr) ? keywordExpr.value : undefined;
 
+  if (keyword === "attribute") {
+    const macroKeyword = form.at(offset + 1);
+    const signature = form.at(offset + 2);
+    if (
+      isIdentifierAtom(macroKeyword) &&
+      macroKeyword.value === "macro" &&
+      isForm(signature)
+    ) {
+      const potentialName = signature.at(0);
+      const nameSyntax = isIdentifierAtom(potentialName)
+        ? potentialName
+        : undefined;
+      return {
+        kind: "macro-decl",
+        visibility,
+        macroKind: "attribute",
+        ...(nameSyntax ? { name: nameSyntax.value, nameSyntax } : {}),
+      };
+    }
+  }
+
   if (keyword === "use") {
     const pathExpr = form.at(offset + 1);
     if (!pathExpr) {
@@ -162,6 +186,7 @@ export const classifyTopLevelDecl = (
     return {
       kind: "macro-decl",
       visibility,
+      macroKind: keyword === "attribute-macro" ? "attribute" : "function",
       ...(nameSyntax ? { name: nameSyntax.value, nameSyntax } : {}),
     };
   }

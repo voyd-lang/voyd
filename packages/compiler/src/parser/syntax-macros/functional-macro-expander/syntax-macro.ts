@@ -2,6 +2,7 @@ import { Form } from "../../ast/form.js";
 import {
   Expr,
   IdentifierAtom,
+  InternalIdentifierAtom,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -23,6 +24,7 @@ import type { MacroDefinition, MacroVariableBinding } from "./types.js";
 import { nextMacroId } from "./macro-id.js";
 
 type MacroDefinitionInput = {
+  kind: MacroDefinition["kind"];
   signature: Form;
   bodyExpressions: Expr[];
   visibility: "pub" | "module";
@@ -32,7 +34,26 @@ type ExpandFunctionalMacroOptions = {
   scope?: MacroScope;
   strictMacroSignatures?: boolean;
   onError?: (error: SyntaxMacroError) => void;
+  maxAttributeExpansionDepth?: number;
+  attributeExpansionDepth?: number;
+  moduleId?: string;
+  onAttributeExpansion?: (event: {
+    invocationName: IdentifierAtom;
+    macro: MacroDefinition;
+  }) => void;
+  onUnknownAttribute?: (invocationName: IdentifierAtom) => void;
 };
+
+const DEFAULT_MAX_ATTRIBUTE_EXPANSION_DEPTH = 64;
+const RESERVED_ATTRIBUTE_NAMES = new Set([
+  "boundary",
+  "compiler_contract",
+  "effect",
+  "external",
+  "intrinsic",
+  "intrinsic_type",
+  "serializer",
+]);
 
 export const functionalMacroExpander: SyntaxMacro = (form: Form): Form =>
   expandFunctionalMacros(form).form;
@@ -71,16 +92,31 @@ const expandExpr = (
       strictMacroSignatures: options.strictMacroSignatures === true,
     });
     if (macroDefinition) {
-      return expandMacroDefinition(macroDefinition, scope, exports);
+      return expandMacroDefinition(
+        macroDefinition,
+        scope,
+        exports,
+        options.moduleId,
+      );
     }
 
     if (expr.calls("macro_let")) {
       return expandMacroLet(expr, scope);
     }
 
+    if (isAttributeForm(expr)) {
+      return expr;
+    }
+
     const head = expr.at(0);
     const macro = isIdentifierAtom(head) ? scope.getMacro(head.value) : undefined;
     if (macro) {
+      if (macro.kind === "attribute") {
+        throw new SyntaxMacroError(
+          `Attribute macro '${macro.name.value}' must be invoked with '@' before a declaration`,
+          expr,
+        );
+      }
       const expanded = expandMacroCall(expr, macro, scope);
       return expandExpr(expanded, scope, exports, options);
     }
@@ -111,23 +147,319 @@ const expandForm = (
   const bodyScope = createsScopeFor(head) ? scope.child() : scope;
   const elements = form.toArray();
   const result: Expr[] = [];
+  const allowsAttributes = isTopLevelAst(form) || form.calls("block");
 
-  elements.forEach((child, index) => {
+  for (let index = 0; index < elements.length; index += 1) {
+    const child = elements[index]!;
     if (isModuleName(head, index)) {
       result.push(child);
-      return;
+      continue;
+    }
+
+    if (allowsAttributes && isForm(child) && isAttributeForm(child)) {
+      const { attributes, targetIndex } = collectConsecutiveAttributes({
+        elements,
+        startIndex: index,
+      });
+      const target = elements[targetIndex];
+      if (!target) {
+        throw new SyntaxMacroError(
+          "attribute is missing a following declaration",
+          child,
+        );
+      }
+      const exportedMacroCount = exports.length;
+      const rollbackScope = bodyScope.checkpoint();
+      const pendingErrors: SyntaxMacroError[] = [];
+      const pendingUnknownAttributes: IdentifierAtom[] = [];
+      const pendingAttributeExpansions: Array<{
+        invocationName: IdentifierAtom;
+        macro: MacroDefinition;
+      }> = [];
+      const transactionOptions: ExpandFunctionalMacroOptions = {
+        ...options,
+        onError: options.onError
+          ? (error) => pendingErrors.push(error)
+          : undefined,
+        onUnknownAttribute: options.onUnknownAttribute
+          ? (name) => pendingUnknownAttributes.push(name)
+          : undefined,
+        onAttributeExpansion: options.onAttributeExpansion
+          ? (event) => pendingAttributeExpansions.push(event)
+          : undefined,
+      };
+      try {
+        result.push(
+          ...expandAttributedDeclaration({
+            attributes,
+            target,
+            scope: bodyScope,
+            exports,
+            options: transactionOptions,
+          }),
+        );
+        pendingErrors.forEach((error) => options.onError?.(error));
+        pendingUnknownAttributes.forEach((name) =>
+          options.onUnknownAttribute?.(name),
+        );
+        pendingAttributeExpansions.forEach((event) =>
+          options.onAttributeExpansion?.(event),
+        );
+      } catch (error) {
+        exports.length = exportedMacroCount;
+        rollbackScope();
+        const macroError = toSyntaxMacroError(error, child);
+        if (!options.onError) {
+          throw macroError;
+        }
+        options.onError(macroError);
+        result.push(
+          ...expandTargetWithoutUserAttributes({
+            attributes,
+            target,
+            scope: bodyScope,
+            exports,
+            options,
+          }),
+        );
+      }
+      index = targetIndex;
+      continue;
     }
 
     const expanded = expandExpr(child, bodyScope, exports, options);
-    if (isTopLevelAst(form) && isForm(expanded) && isEmitManyForm(expanded)) {
-      result.push(...expanded.rest);
-      return;
+    if (allowsAttributes && isForm(expanded) && isEmitManyForm(expanded)) {
+      const emittedSequence = new Form({
+        location: expanded.location?.clone(),
+        elements: [
+          new InternalIdentifierAtom("ast"),
+          ...expanded.rest.map(cloneExpr),
+        ],
+      });
+      result.push(
+        ...expandForm(emittedSequence, bodyScope, exports, options).rest,
+      );
+      continue;
     }
     result.push(expanded);
-  });
+  }
 
   return recreateForm(form, result);
 };
+
+type ParsedAttribute = {
+  form: Form;
+  name: IdentifierAtom;
+  args: readonly Expr[];
+};
+
+const isAttributeForm = (expr: Expr): boolean =>
+  isForm(expr) && expr.calls("@");
+
+const parseAttribute = (form: Form): ParsedAttribute => {
+  const target = form.at(1);
+  if (isIdentifierAtom(target)) {
+    return { form, name: target, args: [] };
+  }
+  if (isForm(target)) {
+    const name = target.at(0);
+    if (isIdentifierAtom(name)) {
+      return { form, name, args: target.rest };
+    }
+  }
+  throw new SyntaxMacroError("attribute name must be an identifier", form);
+};
+
+const collectConsecutiveAttributes = ({
+  elements,
+  startIndex,
+}: {
+  elements: readonly Expr[];
+  startIndex: number;
+}): { attributes: ParsedAttribute[]; targetIndex: number } => {
+  const attributes: ParsedAttribute[] = [];
+  let targetIndex = startIndex;
+  while (targetIndex < elements.length) {
+    const candidate = elements[targetIndex];
+    if (!candidate || !isForm(candidate) || !isAttributeForm(candidate)) {
+      break;
+    }
+    attributes.push(parseAttribute(candidate));
+    targetIndex += 1;
+  }
+  return { attributes, targetIndex };
+};
+
+const expandAttributedDeclaration = ({
+  attributes,
+  target,
+  scope,
+  exports,
+  options,
+}: {
+  attributes: readonly ParsedAttribute[];
+  target: Expr;
+  scope: MacroScope;
+  exports: MacroDefinition[];
+  options: ExpandFunctionalMacroOptions;
+}): Expr[] => {
+  if (!isSupportedAttributeTarget(target)) {
+    throw new SyntaxMacroError(
+      "attributes must precede a supported declaration",
+      target,
+    );
+  }
+
+  const reserved: Form[] = [];
+  const userAttributes: Array<ParsedAttribute & { macro: MacroDefinition }> = [];
+  const seenUserAttributes = new Set<string>();
+
+  for (const attribute of attributes) {
+    const name = attribute.name.value;
+    if (RESERVED_ATTRIBUTE_NAMES.has(name)) {
+      reserved.push(attribute.form.clone());
+      continue;
+    }
+
+    let macro: MacroDefinition | undefined;
+    try {
+      macro = scope.getMacro(name);
+    } catch (error) {
+      throw new SyntaxMacroError(
+        error instanceof Error ? error.message : String(error),
+        attribute.form,
+      );
+    }
+    if (!macro) {
+      if (!options.onUnknownAttribute) {
+        return [
+          ...attributes.map((entry) => entry.form.clone()),
+          expandExpr(target, scope, exports, options),
+        ];
+      }
+      options.onUnknownAttribute(attribute.name);
+      return expandTargetWithoutUserAttributes({
+        attributes,
+        target,
+        scope,
+        exports,
+        options,
+      });
+    }
+    if (macro.kind !== "attribute") {
+      throw new SyntaxMacroError(
+        `'@${name}' resolves to a functional macro, not an attribute macro`,
+        attribute.form,
+      );
+    }
+    if (seenUserAttributes.has(name)) {
+      throw new SyntaxMacroError(
+        `duplicate user-defined attribute '@${name}'`,
+        attribute.form,
+      );
+    }
+    seenUserAttributes.add(name);
+    userAttributes.push({ ...attribute, macro });
+  }
+
+  if (userAttributes.length === 0) {
+    return [...reserved, expandExpr(target, scope, exports, options)];
+  }
+
+  const depth = options.attributeExpansionDepth ?? 0;
+  const maxDepth =
+    options.maxAttributeExpansionDepth ?? DEFAULT_MAX_ATTRIBUTE_EXPANSION_DEPTH;
+  if (depth >= maxDepth) {
+    throw new SyntaxMacroError(
+      `attribute macro expansion exceeded the depth limit of ${maxDepth}`,
+      userAttributes[0]!.form,
+    );
+  }
+
+  let expanded = cloneExpr(target);
+  userAttributes.forEach(({ form, macro, args }) => {
+    options.onAttributeExpansion?.({
+      invocationName: parseAttribute(form).name,
+      macro,
+    });
+    const argumentList = new Form({
+      location: form.location?.clone(),
+      elements: args.map(cloneExpr),
+    });
+    const invocation = new Form({
+      location: form.location?.clone(),
+      elements: [macro.name.clone(), argumentList, expanded],
+    });
+    expanded = expandMacroCall(invocation, macro, scope);
+  });
+
+  const emitted =
+    isForm(expanded) && isEmitManyForm(expanded) ? expanded.rest : [expanded];
+  const expansionAst = new Form({
+    location: expanded.location?.clone(),
+    elements: [
+      new InternalIdentifierAtom("ast"),
+      ...emitted.map(cloneExpr),
+    ],
+  });
+  const recursivelyExpanded = expandExpr(expansionAst, scope, exports, {
+    ...options,
+    attributeExpansionDepth: depth + 1,
+  });
+  return [
+    ...reserved,
+    ...(isForm(recursivelyExpanded) && isTopLevelAst(recursivelyExpanded)
+      ? recursivelyExpanded.rest
+      : [recursivelyExpanded]),
+  ];
+};
+
+const expandTargetWithoutUserAttributes = ({
+  attributes,
+  target,
+  scope,
+  exports,
+  options,
+}: {
+  attributes: readonly ParsedAttribute[];
+  target: Expr;
+  scope: MacroScope;
+  exports: MacroDefinition[];
+  options: ExpandFunctionalMacroOptions;
+}): Expr[] => [
+  ...attributes
+    .filter((entry) => RESERVED_ATTRIBUTE_NAMES.has(entry.name.value))
+    .map((entry) => entry.form.clone()),
+  expandExpr(target, scope, exports, options),
+];
+
+const isSupportedAttributeTarget = (expr: Expr): expr is Form => {
+  if (!isForm(expr)) {
+    return false;
+  }
+  const first = expr.at(0);
+  const keyword =
+    isIdentifierAtom(first) && DECLARATION_MODIFIERS.has(first.value)
+      ? expr.at(1)
+      : first;
+  return isIdentifierAtom(keyword) && ATTRIBUTE_TARGET_HEADS.has(keyword.value);
+};
+
+const DECLARATION_MODIFIERS = new Set(["pub", "api", "pri", "#"]);
+
+const ATTRIBUTE_TARGET_HEADS = new Set([
+  "fn",
+  "let",
+  "type",
+  "obj",
+  "val",
+  "trait",
+  "impl",
+  "eff",
+  "mod",
+  "test",
+  "enum",
+]);
 
 const expandVisibilityWrappedMacroCall = ({
   expr,
@@ -152,6 +484,12 @@ const expandVisibilityWrappedMacroCall = ({
   const macro = scope.getMacro(macroName.value);
   if (!macro) {
     return undefined;
+  }
+  if (macro.kind === "attribute") {
+    throw new SyntaxMacroError(
+      `Attribute macro '${macro.name.value}' must be invoked with '@' before a declaration`,
+      expr,
+    );
   }
 
   const invocation = recreateForm(expr, [macroName, ...expr.toArray().slice(2)]);
@@ -221,7 +559,8 @@ const PUB_ELIGIBLE_TOP_LEVEL_HEADS = new Set([
 const expandMacroDefinition = (
   definition: MacroDefinitionInput,
   scope: MacroScope,
-  exports: MacroDefinition[]
+  exports: MacroDefinition[],
+  moduleId: string | undefined,
 ): Expr => {
   const signature = definition.signature;
   const name = expectIdentifier(signature.at(0), "macro name");
@@ -236,11 +575,14 @@ const expandMacroDefinition = (
     );
 
   const macro: MacroDefinition = {
+    kind: definition.kind,
     name: name.clone(),
+    declarationName: name.clone(),
     parameters,
     body: definition.bodyExpressions,
     scope,
     id: new IdentifierAtom(`${name.value}#${nextMacroId()}`),
+    moduleId,
   };
 
   scope.defineMacro(macro);
@@ -292,6 +634,7 @@ const parseMacroDefinition = ({
 }): MacroDefinitionInput | null => {
   let index = 0;
   let visibility: MacroDefinitionInput["visibility"] = "module";
+  let kind: MacroDefinitionInput["kind"] = "function";
   const first = form.at(0);
 
   if (isIdentifierAtom(first) && first.value === "pub") {
@@ -299,7 +642,12 @@ const parseMacroDefinition = ({
     index = 1;
   }
 
-  const keyword = form.at(index);
+  let keyword = form.at(index);
+  if (isIdentifierAtom(keyword) && keyword.value === "attribute") {
+    kind = "attribute";
+    index += 1;
+    keyword = form.at(index);
+  }
   if (!isIdentifierAtom(keyword) || keyword.value !== "macro") {
     return null;
   }
@@ -324,7 +672,19 @@ const parseMacroDefinition = ({
     .slice(index + 2)
     .map(cloneExpr);
 
-  return { signature, bodyExpressions, visibility };
+  if (kind === "attribute") {
+    const name = signature.at(0);
+    if (isIdentifierAtom(name) && RESERVED_ATTRIBUTE_NAMES.has(name.value)) {
+      throw new Error(`attribute macro name '${name.value}' is reserved`);
+    }
+    if (signature.length !== 3) {
+      throw new Error(
+        "attribute macro signature must accept (arguments, declaration)",
+      );
+    }
+  }
+
+  return { kind, signature, bodyExpressions, visibility };
 };
 
 const toSyntaxMacroError = (error: unknown, syntax: Expr): SyntaxMacroError => {
