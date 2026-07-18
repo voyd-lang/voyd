@@ -672,6 +672,13 @@
     "portableGap": "Keep escape facts, specialization names, and struct.new absence locally; extract representative optimized parity cases missing from conformance, especially heap alias mutation (2/77), nested mutation (15/11), branch aliasing (1/9), side-effect argument order (20/40), and block/reassignment statements (8/12)."
   },
   {
+    "file": "packages/compiler/src/codegen/__tests__/shape-reification.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-18",
+    "disposition": "compiler-local",
+    "rationale": "Keeps the intrinsic's unsupported-type failure in compiler codegen, where the compile-time diagnostic and boundary-schema integration are owned."
+  },
+  {
     "file": "packages/compiler/src/codegen/__tests__/specialization-policy.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
@@ -2108,6 +2115,27 @@
     "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
   },
   {
+    "file": "packages/std/src/data_decode_errors.test.voyd",
+    "owner": "voyd-library",
+    "reviewed": "2026-07-18",
+    "disposition": "library-local",
+    "rationale": "Keeps path-aware structural decoding failures and unknown-field policy with the std::data API that defines them."
+  },
+  {
+    "file": "packages/std/src/data_decode_success.test.voyd",
+    "owner": "voyd-library",
+    "reviewed": "2026-07-18",
+    "disposition": "library-local",
+    "rationale": "Keeps successful provider-neutral decoding behavior with the std::data API and its generated boundary-codec adapter."
+  },
+  {
+    "file": "packages/std/src/data_decode_variants.test.voyd",
+    "owner": "voyd-library",
+    "reviewed": "2026-07-18",
+    "disposition": "library-local",
+    "rationale": "Keeps array-path and named-variant decode failures with the std::data API that defines those errors."
+  },
+  {
     "file": "packages/std/src/deque.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
@@ -2196,6 +2224,13 @@
     "owner": "voyd-library",
     "disposition": "library-local",
     "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/meta_shape.test.voyd",
+    "owner": "voyd-library",
+    "reviewed": "2026-07-18",
+    "disposition": "library-local",
+    "rationale": "Keeps the public std::meta Shape graph, source documentation, and supported type coverage with the library API that exposes it."
   },
   {
     "file": "packages/std/src/msgpack.test.voyd",

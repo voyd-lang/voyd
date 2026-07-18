@@ -1,0 +1,159 @@
+use std::array::Array
+use std::error::HostError
+use std::meta::{
+  ArrayShape,
+  BoolShape,
+  F32Shape,
+  F64Shape,
+  I64Shape,
+  RecordShape,
+  StringShape,
+  UnionShape,
+  UnitShape,
+  shape_of
+}
+use std::optional::all
+use std::string::type::String
+use std::test::assertions::all
+
+/// Profile documentation.
+obj MetaShapeProfile {
+  /// Age documentation.
+  age: i32,
+  nickname?: String
+}
+
+obj MetaShapeRequest {
+  profile: MetaShapeProfile,
+  tags: Array<String>
+}
+
+obj MetaShapeCreated { id: i32 }
+obj MetaShapeDeleted { reason: String }
+type MetaShapeEvent = MetaShapeCreated | MetaShapeDeleted
+type MetaShapeId = i64
+
+obj MetaRecursiveNode<T> {
+  value: T,
+  next?: MetaRecursiveNode<T>
+}
+
+obj MetaRecursivePair {
+  numbers: MetaRecursiveNode<i32>,
+  names: MetaRecursiveNode<String>
+}
+
+/// Canonical record documentation.
+obj MetaCanonicalRecord { value: i32 }
+
+/// Alias documentation is not paired with the canonical record name.
+type MetaCanonicalAlias = MetaCanonicalRecord
+
+test "shape_of reifies nested records arrays optionality and documentation":
+  if request_shape_is_complete() == false:
+    Test::fail()
+
+fn request_shape_is_complete() -> bool
+  let shape = shape_of<MetaShapeRequest>()
+  shape.root.match(root)
+    RecordShape:
+      if root.fields.len() != 2:
+        return false
+      let profile = root.fields.at(0)
+      if profile.name != "profile":
+        return false
+      profile.shape.match(profile_shape)
+        RecordShape:
+          if profile_shape.name != "MetaShapeProfile":
+            return false
+          if profile_shape.fields.len() != 2:
+            return false
+          if profile_shape.fields.at(0).name != "age":
+            return false
+          match(profile_shape.fields.at(0).documentation)
+            Some<String> { value: documentation }:
+              assert(documentation, eq: " Age documentation.")
+            None:
+              return false
+          if profile_shape.fields.at(1).optional == false:
+            return false
+        else:
+          return false
+      let tags = root.fields.at(1)
+      tags.shape.match(tags_shape)
+        ArrayShape:
+          tags_shape.element.match(element)
+            StringShape:
+              true
+            else:
+              false
+        else:
+          false
+    else:
+      false
+
+test "shape_of reifies named unions":
+  let shape = shape_of<MetaShapeEvent>()
+  shape.root.match(root)
+    UnionShape:
+      assert(root.name, eq: "MetaShapeEvent")
+      assert(root.variants.len(), eq: 2)
+      assert(root.variants.at(0).name, eq: "MetaShapeCreated")
+      assert(root.variants.at(1).name, eq: "MetaShapeDeleted")
+    else:
+      Test::fail()
+
+test "shape_of supports primitive aliases options and imported types":
+  shape_of<MetaShapeId>().root.match(alias_shape)
+    I64Shape:
+      void
+    else:
+      Test::fail()
+
+  shape_of<Optional<String>>().root.match(option_shape)
+    UnionShape:
+      assert(option_shape.variants.len(), eq: 2)
+    else:
+      Test::fail()
+
+  shape_of<HostError>().root.match(imported_shape)
+    RecordShape:
+      assert(imported_shape.name, eq: "HostError")
+      match(imported_shape.fields.at(0).documentation)
+        Some<String> { value: documentation }:
+          assert(documentation, eq: " Machine-readable error code.")
+        None:
+          Test::fail()
+    else:
+      Test::fail()
+
+test "shape_of reifies every boundary primitive":
+  shape_of<bool>().root.match(node)
+    BoolShape: void
+    else: Test::fail()
+  shape_of<f32>().root.match(node)
+    F32Shape: void
+    else: Test::fail()
+  shape_of<f64>().root.match(node)
+    F64Shape: void
+    else: Test::fail()
+  shape_of<void>().root.match(node)
+    UnitShape: void
+    else: Test::fail()
+
+test "shape_of assigns unique graph keys to same-named recursive instances":
+  let shape = shape_of<MetaRecursivePair>()
+  assert(shape.definitions.len(), eq: 2)
+  assert(shape.definitions.at(0).key, neq: shape.definitions.at(1).key)
+
+test "shape_of keeps canonical names and documentation from one declaration":
+  shape_of<MetaCanonicalAlias>().root.match(node)
+    RecordShape:
+      assert(node.name, eq: "MetaCanonicalRecord")
+      match(node.documentation)
+        Some<String> { value: documentation }:
+          assert(documentation, eq: " Canonical record documentation.")
+        None:
+          Test::fail()
+    else:
+      Test::fail()

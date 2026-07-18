@@ -1189,12 +1189,20 @@ export const compileFunctions = ({
           );
           const callee = ctx.module.hir.expressions.get(expr.callee);
           if (callee?.exprKind === "identifier") {
-            reachableFunctions.add(
-              ctx.program.symbols.canonicalIdOf(
-                ctx.moduleId,
-                callee.symbol,
-              ) as ProgramSymbolId,
-            );
+            const calleeId = ctx.program.symbols.canonicalIdOf(
+              ctx.moduleId,
+              callee.symbol,
+            ) as ProgramSymbolId;
+            reachableFunctions.add(calleeId);
+            if (
+              ctx.program.symbols.getIntrinsicName(calleeId) ===
+              "__boundary_shape_of"
+            ) {
+              markStringLiteralCtorReachable({
+                ctx,
+                reachable: reachableFunctions,
+              });
+            }
           }
           return;
         }

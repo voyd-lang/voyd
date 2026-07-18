@@ -31,6 +31,7 @@ export type BoundaryFieldSchema = {
   typeId: TypeId;
   schema: BoundarySchema;
   optional?: boolean;
+  documentation?: string;
 };
 
 export type BoundaryRecordSchema = {
@@ -39,12 +40,14 @@ export type BoundaryRecordSchema = {
   aliases?: readonly TypeId[];
   name: string;
   tag?: string;
+  documentation?: string;
   fields: readonly BoundaryFieldSchema[];
 };
 
 export type BoundaryVariantSchema = {
   name: string;
   typeId: TypeId;
+  documentation?: string;
   fields: readonly BoundaryFieldSchema[];
 };
 
@@ -53,12 +56,14 @@ export type BoundaryUnionSchema = {
   typeId: TypeId;
   aliases?: readonly TypeId[];
   name: string;
+  documentation?: string;
   variants: readonly BoundaryVariantSchema[];
 };
 
 export type BoundaryRefSchema = {
   kind: "ref";
   typeId: TypeId;
+  name?: string;
 };
 
 export type BoundarySchema =
@@ -77,6 +82,8 @@ export class BoundarySchemaError extends Error {
 
 export type BoundarySchemaOptions = {
   tagStandaloneVariants?: boolean;
+  includeDocumentation?: boolean;
+  portableNames?: boolean;
 };
 
 export const deriveBoundarySchema = ({
@@ -213,7 +220,13 @@ const deriveBoundarySchemaInternal = ({
   options: BoundarySchemaOptions;
 }): BoundarySchema => {
   if (active.has(typeId)) {
-    return { kind: "ref", typeId };
+    return {
+      kind: "ref",
+      typeId,
+      ...(options.portableNames
+        ? { name: portableBoundaryName({ typeId, ctx }) }
+        : {}),
+    };
   }
 
   const primitive = primitiveSchema({ typeId, ctx });
@@ -376,8 +389,13 @@ const deriveRecordSchema = ({
   return {
     kind: "record",
     typeId,
-    name: formatBoundaryType({ typeId, ctx }),
+    name: options.portableNames
+      ? portableBoundaryName({ typeId, ctx })
+      : formatBoundaryType({ typeId, ctx }),
     tag: standaloneTag,
+    ...(options.includeDocumentation
+      ? { documentation: documentationForType({ typeId, ctx }) }
+      : {}),
     fields,
   };
 };
@@ -419,6 +437,9 @@ const deriveBoundaryFields = ({
       name: field.name,
       typeId: fieldTypeId,
       optional: field.optional ? true : undefined,
+      ...(options.includeDocumentation && sourceField?.documentation
+        ? { documentation: sourceField.documentation }
+        : {}),
       schema: deriveBoundarySchemaInternal({
         typeId: fieldTypeId,
         ctx,
@@ -482,6 +503,9 @@ const deriveUnionSchema = ({
     return {
       name,
       typeId: member,
+      ...(options.includeDocumentation
+        ? { documentation: documentationForType({ typeId: member, ctx }) }
+        : {}),
       fields: deriveBoundaryFields({
         ownerTypeId: member,
         fields: info.fields,
@@ -495,10 +519,81 @@ const deriveUnionSchema = ({
   return {
     kind: "union",
     typeId,
-    name: formatBoundaryType({ typeId, ctx }),
+    name: options.portableNames
+      ? portableBoundaryName({ typeId, ctx })
+      : formatBoundaryType({ typeId, ctx }),
+    ...(options.includeDocumentation
+      ? { documentation: documentationForType({ typeId, ctx }) }
+      : {}),
     variants,
   };
 };
+
+const portableBoundaryName = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): string => portableBoundaryIdentity({ typeId, ctx }).name;
+
+const documentationForType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): string | undefined =>
+  portableBoundaryIdentity({ typeId, ctx }).documentation;
+
+const portableBoundaryIdentity = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): { name: string; documentation?: string } => {
+  const desc = ctx.program.types.getTypeDesc(typeId);
+  const nominal =
+    desc.kind === "nominal-object" || desc.kind === "value-object"
+      ? typeId
+      : desc.kind === "intersection"
+        ? desc.nominal
+        : undefined;
+  const owner =
+    typeof nominal === "number"
+      ? ctx.program.objects.getNominalOwnerRef(nominal)
+      : undefined;
+  if (typeof owner === "number") {
+    return {
+      name:
+        ctx.program.symbols.getName(owner) ??
+        formatBoundaryType({ typeId, ctx }),
+      documentation: ctx.program.symbols.getDocumentation(owner),
+    };
+  }
+  const aliases = ctx.program.types
+    .getAliasSymbols(typeId)
+    .map((symbol) => ({
+      name: ctx.program.symbols.getName(symbol),
+      documentation: ctx.program.symbols.getDocumentation(symbol),
+    }))
+    .filter(
+      (identity): identity is { name: string; documentation: string | undefined } =>
+        typeof identity.name === "string",
+    )
+    .sort((left, right) => {
+      const byName = comparePortableText(left.name, right.name);
+      if (byName !== 0) return byName;
+      if (left.documentation === undefined) return 1;
+      if (right.documentation === undefined) return -1;
+      return comparePortableText(left.documentation, right.documentation);
+    });
+  return aliases[0] ?? { name: formatBoundaryType({ typeId, ctx }) };
+};
+
+const comparePortableText = (left: string, right: string): number =>
+  left === right ? 0 : left < right ? -1 : 1;
 
 const withSchemaAlias = ({
   schema,

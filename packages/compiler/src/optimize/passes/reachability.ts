@@ -36,6 +36,8 @@ export const BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS = new Set([
   "__boundary_msgpack_to_value",
 ]);
 
+const SHAPE_REIFICATION_INTRINSICS = new Set(["__boundary_shape_of"]);
+
 export const resolveIntrinsicFunction = ({
   ir,
   intrinsicName,
@@ -763,6 +765,18 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
                   BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS.has(intrinsicName)
                 ) {
                   enqueueMsgPackFunctions();
+                }
+                if (
+                  intrinsicName &&
+                  SHAPE_REIFICATION_INTRINSICS.has(intrinsicName)
+                ) {
+                  const dependency = resolveIntrinsicFunction({
+                    ir: ctx.ir,
+                    intrinsicName: "__string_new",
+                  });
+                  if (dependency) {
+                    enqueueKnownFunctionInstances(dependency);
+                  }
                 }
                 recordResolvedSymbolReachability({
                   moduleId,

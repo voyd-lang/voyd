@@ -142,12 +142,21 @@ const markInitializerDependenciesReachable = ({
           moduleId: ctx.moduleId,
           symbol: callee.symbol,
         });
-        reachable.add(
-          ctx.program.symbols.canonicalIdOf(
-            resolved.moduleId,
-            resolved.symbol,
-          ) as ProgramSymbolId,
-        );
+        const calleeId = ctx.program.symbols.canonicalIdOf(
+          resolved.moduleId,
+          resolved.symbol,
+        ) as ProgramSymbolId;
+        reachable.add(calleeId);
+        if (
+          ctx.program.symbols.getIntrinsicName(calleeId) ===
+          "__boundary_shape_of"
+        ) {
+          markDependencyFunctionReachable({
+            ctx,
+            dependency: "string-literal-constructor",
+            reachable,
+          });
+        }
       },
     },
   });

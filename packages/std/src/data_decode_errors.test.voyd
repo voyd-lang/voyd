@@ -1,0 +1,104 @@
+use std::array::Array
+use std::data::{
+  DataArray,
+  DataField,
+  DataI32,
+  DataObject,
+  DataString,
+  DataValue,
+  DecodeError,
+  DecodeOptions,
+  DuplicateField,
+  MissingField,
+  RejectUnknownFields,
+  TypeMismatch,
+  UnknownField,
+  decode
+}
+use std::optional::all
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+obj DataErrorProfile {
+  age: i32,
+  nickname?: String
+}
+
+obj DataErrorRequest {
+  profile: DataErrorProfile,
+  tags: Array<String>
+}
+
+test "decode reports nested type mismatch paths":
+  let ~profile_fields = Array<DataField>::init()
+  profile_fields.push(DataField { name: "age", value: DataString { value: "old" } })
+  match(decode<DataErrorRequest>(request_value(profile_fields)))
+    Ok<DataErrorRequest>:
+      Test::fail()
+    Err<DecodeError> { error }:
+      assert(error.path, eq: "$.profile.age")
+      error.kind.match(kind)
+        TypeMismatch:
+          void
+        else:
+          Test::fail()
+
+test "decode rejects duplicate fields before conversion":
+  let ~profile_fields = Array<DataField>::init()
+  profile_fields.push(DataField { name: "age", value: DataI32 { value: 40 } })
+  profile_fields.push(DataField { name: "age", value: DataI32 { value: 41 } })
+  match(decode<DataErrorRequest>(request_value(profile_fields)))
+    Ok<DataErrorRequest>:
+      Test::fail()
+    Err<DecodeError> { error }:
+      assert(error.path, eq: "$.profile.age")
+      error.kind.match(kind)
+        DuplicateField:
+          void
+        else:
+          Test::fail()
+
+test "decode distinguishes missing and rejected unknown fields":
+  let ~missing_fields = Array<DataField>::init()
+  missing_fields.push(DataField {
+    name: "tags",
+    value: DataArray { values: Array<DataValue>::init() }
+  })
+  match(decode<DataErrorRequest>(DataObject { fields: missing_fields }))
+    Ok<DataErrorRequest>:
+      Test::fail()
+    Err<DecodeError> { error }:
+      assert(error.path, eq: "$.profile")
+      error.kind.match(kind)
+        MissingField:
+          void
+        else:
+          Test::fail()
+
+  let ~profile_fields = Array<DataField>::init()
+  profile_fields.push(DataField { name: "age", value: DataI32 { value: 1 } })
+  profile_fields.push(DataField { name: "extra", value: DataI32 { value: 2 } })
+  let options = DecodeOptions { unknown_fields: RejectUnknownFields {} }
+  match(decode<DataErrorRequest>(request_value(profile_fields), options: options))
+    Ok<DataErrorRequest>:
+      Test::fail()
+    Err<DecodeError> { error }:
+      assert(error.path, eq: "$.profile.extra")
+      error.kind.match(kind)
+        UnknownField:
+          void
+        else:
+          Test::fail()
+
+fn request_value(profile_fields: Array<DataField>) -> DataValue
+  let ~request_fields = Array<DataField>::init()
+  request_fields.push(DataField {
+    name: "profile",
+    value: DataObject { fields: profile_fields }
+  })
+  request_fields.push(DataField {
+    name: "tags",
+    value: DataArray { values: Array<DataValue>::init() }
+  })
+  DataObject { fields: request_fields }

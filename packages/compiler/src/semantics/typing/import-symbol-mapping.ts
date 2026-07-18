@@ -510,6 +510,7 @@ export const registerImportedObjectTemplate = ({
     owner:
       typeof field.owner === "number" ? mapOwner(field.owner) : field.owner,
     packageId: field.packageId ?? dependency.packageId ?? ctx.packageId,
+    documentation: field.documentation,
   }));
 
   ctx.objects.registerTemplate({

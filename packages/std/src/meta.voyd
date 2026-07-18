@@ -1,0 +1,123 @@
+//! Provider-neutral reification of boundary-compatible Voyd types.
+//!
+//! `Shape` is a stable runtime graph. It describes Voyd structure without
+//! exposing compiler type ids or a schema dialect such as JSON Schema.
+
+use std::array::Array
+use std::optional::types::all
+use std::string::type::String
+
+/// A complete portable type graph.
+pub obj Shape {
+  /// Root node for the reified type.
+  api root: ShapeNode,
+  /// Named nodes referenced by `RefShape` entries.
+  api definitions: Array<ShapeDefinition>
+}
+
+/// A named node used to close recursive shape graphs.
+pub obj ShapeDefinition {
+  /// Graph-local, deterministic key used by references.
+  api key: String,
+  /// Source-level display name for the defined type.
+  api name: String,
+  /// Reified definition body.
+  api shape: ShapeNode,
+  /// Declaration documentation when available.
+  api documentation?: String
+}
+
+/// Boolean primitive shape.
+pub obj BoolShape {}
+
+/// Signed 32-bit integer primitive shape.
+pub obj I32Shape {}
+
+/// Signed 64-bit integer primitive shape.
+pub obj I64Shape {}
+
+/// 32-bit floating-point primitive shape.
+pub obj F32Shape {}
+
+/// 64-bit floating-point primitive shape.
+pub obj F64Shape {}
+
+/// String primitive shape.
+pub obj StringShape {}
+
+/// Void/unit boundary shape.
+pub obj UnitShape {}
+
+/// Growable-array shape.
+pub obj ArrayShape {
+  /// Shape of every array element.
+  api element: ShapeNode
+}
+
+/// Field in a record or variant payload.
+pub obj ShapeField {
+  /// Source field name.
+  api name: String,
+  /// Resolved field shape.
+  api shape: ShapeNode,
+  /// Whether the field may be omitted.
+  api optional: bool,
+  /// Field documentation when available.
+  api documentation?: String
+}
+
+/// Record or structural-object shape.
+pub obj RecordShape {
+  /// Stable source-level name, or a deterministic structural spelling.
+  api name: String,
+  /// Declaration documentation when available.
+  api documentation?: String,
+  /// Fields in declaration order.
+  api fields: Array<ShapeField>
+}
+
+/// One supported named union variant.
+pub obj ShapeVariant {
+  /// Variant name used by neutral data values.
+  api name: String,
+  /// Variant documentation when available.
+  api documentation?: String,
+  /// Variant payload fields in declaration order.
+  api fields: Array<ShapeField>
+}
+
+/// Named union/variant shape.
+pub obj UnionShape {
+  /// Stable source-level union name.
+  api name: String,
+  /// Union declaration documentation when available.
+  api documentation?: String,
+  /// Supported variants in declaration order.
+  api variants: Array<ShapeVariant>
+}
+
+/// Reference to a named entry in `Shape::definitions`.
+pub obj RefShape {
+  /// Graph-local definition key. Compiler-local ids are never exposed.
+  api key: String
+}
+
+/// One node in a portable shape graph.
+pub type ShapeNode = BoolShape
+  | I32Shape
+  | I64Shape
+  | F32Shape
+  | F64Shape
+  | StringShape
+  | UnitShape
+  | ArrayShape
+  | RecordShape
+  | UnionShape
+  | RefShape
+
+/// Reifies a closed boundary-compatible type as a portable runtime graph.
+///
+/// Unsupported or unresolved type arguments produce a compile-time diagnostic.
+@intrinsic(name: "__boundary_shape_of")
+pub fn shape_of<T>() -> Shape
+  __boundary_shape_of<T>()

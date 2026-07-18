@@ -1,0 +1,8 @@
+use std::meta::{ Shape, shape_of }
+
+obj ModuleLetProfile { age: i32 }
+
+let profile_shape: Shape = shape_of<ModuleLetProfile>()
+
+pub fn main() -> i32
+  1

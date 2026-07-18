@@ -48,6 +48,7 @@ The installed command is `voyd`.
 - [Modules](./modules.md)
 - [External Packages](./external-packages.md)
 - [Types Overview](./types/overview.md)
+- [Type Shapes and Structural Codecs](./type-shapes-and-codecs.md)
 
 ## Feature map
 

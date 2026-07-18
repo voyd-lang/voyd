@@ -41,6 +41,8 @@ pub self::path
 pub self::fs
 pub self::test
 pub self::task
+pub self::meta
+pub self::data
 pub std::output::print
 pub std::optional::types::{ Optional, Option, Some, None }
 pub std::optional::fns::all
