@@ -18,6 +18,20 @@ const voidTags = new Set([
   "param", "source", "track", "wbr",
 ]);
 
+// The HTML parser rewrites these lowercase spellings when they occur in SVG
+// markup. Accepting them would make SSR produce a different tree than a
+// client-only createElementNS render.
+const parserAdjustedSvgTagNames = new Set([
+  "altglyph", "altglyphdef", "altglyphitem", "animatecolor", "animatemotion",
+  "animatetransform", "clippath", "feblend", "fecolormatrix",
+  "fecomponenttransfer", "fecomposite", "feconvolvematrix",
+  "fediffuselighting", "fedisplacementmap", "fedistantlight", "feflood",
+  "fefunca", "fefuncb", "fefuncg", "fefuncr", "fegaussianblur", "feimage",
+  "femerge", "femergenode", "femorphology", "feoffset", "fepointlight",
+  "fespecularlighting", "fespotlight", "fetile", "feturbulence",
+  "foreignobject", "glyphref", "lineargradient", "radialgradient", "textpath",
+]);
+
 export function normalizeRenderFrame(input: unknown): VxRenderFrame {
   const record = toRecord(input);
   if (record && "version" in record) {
@@ -43,7 +57,10 @@ export function validateHtmlAttributeName(value: string, path = "attribute"): vo
 }
 
 export function validateSvgTagName(value: string, path = "tag"): void {
-  if (!/^[A-Za-z][A-Za-z0-9:-]*$/.test(value)) {
+  if (
+    !/^[A-Za-z][A-Za-z0-9:-]*$/.test(value) ||
+    parserAdjustedSvgTagNames.has(value)
+  ) {
     throw new Error(`vx-dom: invalid SVG tag name at ${path}: ${JSON.stringify(value)}`);
   }
 }

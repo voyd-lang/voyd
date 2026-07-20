@@ -71,13 +71,26 @@ const expectCompileSuccess = (
   return result;
 };
 
+const expectBasicSvgTree = (tree: unknown, html: string): void => {
+  expect(html).toBe(
+    '<svg viewBox="0 0 24 24"><path d="M1 1h2"></path></svg>',
+  );
+
+  const container = document.createElement("div");
+  const renderer = renderMsgPackNode(tree, container);
+  const svg = container.querySelector("svg")!;
+  const path = svg.querySelector("path")!;
+  expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
+  expect(svg.getAttribute("viewBox")).toBe("0 0 24 24");
+  expect(path.namespaceURI).toBe("http://www.w3.org/2000/svg");
+  expect(path.getAttribute("d")).toBe("M1 1h2");
+  renderer.dispose();
+};
+
 describe("integration: compiled VX DOM rendering", () => {
-  it.each([
-    { name: "default", optimize: false },
-    { name: "release", optimize: true },
-  ])("renders and mounts a basic SVG tree in $name builds", async ({ optimize }) => {
+  it("renders and mounts a basic SVG tree in release builds", async () => {
     const result = expectCompileSuccess(await createSdk().compile({
-      optimize,
+      optimize: true,
       source: `
 use pkg::web::render
 use std::array::Array
@@ -106,22 +119,10 @@ pub fn html() -> String
       result.run<unknown>({ entryName: "tree" }),
       result.run<string>({ entryName: "html" }),
     ]);
-    expect(html).toBe(
-      '<svg viewBox="0 0 24 24"><path d="M1 1h2"></path></svg>',
-    );
-
-    const container = document.createElement("div");
-    const renderer = renderMsgPackNode(tree, container);
-    const svg = container.querySelector("svg")!;
-    const path = svg.querySelector("path")!;
-    expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
-    expect(svg.getAttribute("viewBox")).toBe("0 0 24 24");
-    expect(path.namespaceURI).toBe("http://www.w3.org/2000/svg");
-    expect(path.getAttribute("d")).toBe("M1 1h2");
-    renderer.dispose();
+    expectBasicSvgTree(tree, html);
   });
 
-  it("hydrates pkg::web output from the same compiled VX tree without replacing DOM", async () => {
+  it("hydrates pkg::web output and renders SVG in default builds", async () => {
     const result = expectCompileSuccess(await createSdk().compile({
       source: `
 use pkg::web::{
@@ -154,6 +155,28 @@ pub fn tree() -> MsgPack
 
 pub fn html() -> String
   render(tree())
+
+pub fn svg_tree() -> MsgPack
+  element(
+    tag: "svg",
+    attrs: [attr(name: "viewBox", value: "0 0 24 24")],
+    children: [
+      element(
+        tag: "path",
+        attrs: [attr(name: "d", value: "M1 1h2")],
+        children: Array<MsgPack>::init()
+      )
+    ]
+  )
+
+pub fn svg_html() -> String
+  render(svg_tree())
+
+pub fn invalid_svg_tag_html(tag: String) -> String
+  render(element(
+    tag: "svg",
+    children: [element(tag: tag, children: Array<MsgPack>::init())]
+  ))
 
 pub fn static_event_tree() -> MsgPack
   let ~attrs = Array<MsgPack>::init()
@@ -200,11 +223,14 @@ pub fn multi_document() -> String
   )
 `,
     }));
-    const [tree, html, multiDocument] = await Promise.all([
+    const [tree, html, svgTree, svgHtml, multiDocument] = await Promise.all([
       result.run<unknown>({ entryName: "tree" }),
       result.run<string>({ entryName: "html" }),
+      result.run<unknown>({ entryName: "svg_tree" }),
+      result.run<string>({ entryName: "svg_html" }),
       result.run<string>({ entryName: "multi_document" }),
     ]);
+    expectBasicSvgTree(svgTree, svgHtml);
     const container = document.createElement("div");
     container.innerHTML = html;
     const section = container.querySelector("section");
@@ -226,6 +252,14 @@ pub fn multi_document() -> String
     await expect(result.run<string>({ entryName: "invalid_void_html" })).rejects.toThrow();
     await expect(result.run<string>({ entryName: "uppercase_tag_html" })).rejects.toThrow();
     await expect(result.run<string>({ entryName: "uppercase_attribute_html" })).rejects.toThrow();
+    await expect(result.run<string>({
+      entryName: "invalid_svg_tag_html",
+      args: ["foreignobject"],
+    })).rejects.toThrow();
+    await expect(result.run<string>({
+      entryName: "invalid_svg_tag_html",
+      args: ["lineargradient"],
+    })).rejects.toThrow();
 
     const host = await createVoydHost({ wasm: result.wasm, bufferSize: 256 * 1024 });
     await host.run("static_event_tree");

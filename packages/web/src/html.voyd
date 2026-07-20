@@ -583,10 +583,28 @@ fn is_valid_property_value({ name: String, value: MsgPack }) -> bool
 fn is_valid_tag_name(name: String, svg_element: bool) -> bool
   if name.is_empty() or (if svg_element then: not is_ascii_letter(name.get_byte(0) ?? 0) else: not is_ascii_lowercase(name.get_byte(0) ?? 0)):
     return false
+  if svg_element and is_parser_adjusted_svg_tag_name(name):
+    return false
   name_bytes_match(name, where: (byte: i32) -> bool =>
     (if svg_element then: is_ascii_letter(byte) else: is_ascii_lowercase(byte)) or
       is_ascii_digit(byte) or byte == 45 or byte == 58
   )
+
+fn is_parser_adjusted_svg_tag_name(name: String) -> bool
+  name == "altglyph" or name == "altglyphdef" or name == "altglyphitem" or
+    name == "animatecolor" or name == "animatemotion" or
+    name == "animatetransform" or name == "clippath" or name == "feblend" or
+    name == "fecolormatrix" or name == "fecomponenttransfer" or
+    name == "fecomposite" or name == "feconvolvematrix" or
+    name == "fediffuselighting" or name == "fedisplacementmap" or
+    name == "fedistantlight" or name == "feflood" or name == "fefunca" or
+    name == "fefuncb" or name == "fefuncg" or name == "fefuncr" or
+    name == "fegaussianblur" or name == "feimage" or name == "femerge" or
+    name == "femergenode" or name == "femorphology" or name == "feoffset" or
+    name == "fepointlight" or name == "fespecularlighting" or
+    name == "fespotlight" or name == "fetile" or name == "feturbulence" or
+    name == "foreignobject" or name == "glyphref" or
+    name == "lineargradient" or name == "radialgradient" or name == "textpath"
 
 fn is_valid_attr_name(name: String, svg_element: bool) -> bool
   not name.is_empty() and name_bytes_match(name, where: (byte: i32) -> bool =>

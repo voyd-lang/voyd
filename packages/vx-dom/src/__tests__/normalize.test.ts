@@ -18,6 +18,19 @@ describe("vx-dom VNode normalization", () => {
     });
   });
 
+  it("rejects lowercase SVG names that the HTML parser adjusts", () => {
+    ["foreignobject", "lineargradient"].forEach((tag) => {
+      expect(() => normalizeRenderFrame({
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "svg",
+          children: [{ kind: "element", tag }],
+        },
+      })).toThrow("invalid SVG tag name");
+    });
+  });
+
   it("normalizes legacy create_element payloads", () => {
     expect(
       normalizeRenderFrame({
