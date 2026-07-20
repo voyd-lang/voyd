@@ -1,7 +1,88 @@
 import { describe, expect, it } from "vitest";
-import { normalizeRenderFrame } from "../normalize.js";
+import { childNamespace, normalizeRenderFrame } from "../normalize.js";
 
 describe("vx-dom VNode normalization", () => {
+  it("accepts case-sensitive names within SVG trees", () => {
+    expect(normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "svg",
+        attrs: { viewBox: "0 0 24 24" },
+        children: [
+          { kind: "element", tag: "linearGradient" },
+          { kind: "element", tag: "feDropShadow" },
+        ],
+      },
+    }).root).toMatchObject({
+      tag: "svg",
+      attrs: { viewBox: "0 0 24 24" },
+      children: [{ tag: "linearGradient" }, { tag: "feDropShadow" }],
+    });
+  });
+
+  it("rejects non-canonical SVG names that the HTML parser adjusts", () => {
+    ["fedropshadow", "foreignobject", "lineargradient", "ForeignObject", "PATH"].forEach((tag) => {
+      expect(() => normalizeRenderFrame({
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "svg",
+          children: [{ kind: "element", tag }],
+        },
+      })).toThrow("invalid SVG tag name");
+    });
+
+    ["viewbox", "attributename", "ViewBox"].forEach((attribute) => {
+      expect(() => normalizeRenderFrame({
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "svg",
+          attrs: { [attribute]: "value" },
+        },
+      })).toThrow("invalid SVG attribute name");
+    });
+  });
+
+  it("rejects prefixed SVG tags that cannot hydrate by local name", () => {
+    expect(() => normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "svg",
+        children: [{ kind: "element", tag: "foo:bar" }],
+      },
+    })).toThrow("invalid SVG tag name");
+  });
+
+  it("uses HTML for children of SVG integration points", () => {
+    ["desc", "foreignObject", "title"].forEach((tag) => {
+      expect(childNamespace(tag, "svg")).toBe("html");
+    });
+    expect(childNamespace("g", "svg")).toBe("svg");
+  });
+
+  it("rejects HTML parser breakout tags within SVG", () => {
+    [
+      "b", "big", "blockquote", "body", "br", "center", "code", "dd",
+      "div", "dl", "dt", "em", "embed", "font", "h1", "h2", "h3",
+      "h4", "h5", "h6", "head", "hr", "i", "img", "li", "listing",
+      "menu", "meta", "nobr", "ol", "p", "pre", "ruby", "s", "small",
+      "span", "strike", "strong", "sub", "sup", "table", "tt", "u",
+      "ul", "var",
+    ].forEach((tag) => {
+      expect(() => normalizeRenderFrame({
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "svg",
+          children: [{ kind: "element", tag }],
+        },
+      })).toThrow("invalid SVG tag name");
+    });
+  });
+
   it("normalizes legacy create_element payloads", () => {
     expect(
       normalizeRenderFrame({

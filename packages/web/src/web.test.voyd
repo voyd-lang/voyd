@@ -51,6 +51,7 @@ use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
 use std::test::host_dto::self as host_dto_test
+use std::vx::self as vx
 use std::vx::all
 
 mod html_canvas
@@ -1153,6 +1154,65 @@ test "html rendering includes props and styles and respects void elements":
   assert(rendered.contains(" style=\"display: grid\"".as_slice()), eq: true)
   assert(rendered.contains("</input>".as_slice()), eq: false)
 
+test "VX renderer accepts a basic SVG tree":
+  let svg = vx::html_element(
+    tag: "svg",
+    attrs: [vx::attr(name: "viewBox", value: "0 0 24 24")],
+    children: [
+      vx::html_element(
+        tag: "path",
+        attrs: [vx::attr(name: "d", value: "M1 1h2")],
+        children: Array<MsgPack>::init()
+      )
+    ]
+  )
+
+  let rendered = render(svg)
+  assert(rendered.contains("<svg".as_slice()), eq: true)
+  assert(rendered.contains(" viewBox=\"0 0 24 24\"".as_slice()), eq: true)
+  assert(rendered.contains("<path".as_slice()), eq: true)
+  assert(rendered.contains(" d=\"M1 1h2\"".as_slice()), eq: true)
+
+test "VX renderer preserves canonical parser-adjusted SVG names":
+  let svg = vx::html_element(
+    tag: "svg",
+    children: [
+      vx::html_element(
+        tag: "linearGradient",
+        attrs: [vx::attr(name: "gradientUnits", value: "userSpaceOnUse")],
+        children: Array<MsgPack>::init()
+      ),
+      vx::html_element(
+        tag: "feDropShadow",
+        children: Array<MsgPack>::init()
+      )
+    ]
+  )
+
+  let rendered = render(svg)
+  assert(rendered.contains("<linearGradient".as_slice()), eq: true)
+  assert(rendered.contains(" gradientUnits=\"userSpaceOnUse\"".as_slice()), eq: true)
+  assert(rendered.contains("<feDropShadow".as_slice()), eq: true)
+
+test "VX renderer uses HTML for children of SVG integration points":
+  let svg = vx::html_element(
+    tag: "svg",
+    children: [
+      vx::html_element(
+        tag: "title",
+        children: [vx::html_element(tag: "div", children: [vx::text("Title")])]
+      ),
+      vx::html_element(
+        tag: "desc",
+        children: [vx::html_element(tag: "span", children: [vx::text("Description")])]
+      )
+    ]
+  )
+
+  let rendered = render(svg)
+  assert(rendered.contains("<title><div>Title</div></title>".as_slice()), eq: true)
+  assert(rendered.contains("<desc><span>Description</span></desc>".as_slice()), eq: true)
+
 test "html rendering unwraps mapped child views":
   let child: MsgPack = <p class="child">Mapped child</p>
   let mapped = map_html<MsgPack, MsgPack>(html: child, handler_id: 7)
@@ -1182,6 +1242,17 @@ test "html rendering preserves leading newlines in parser-sensitive elements":
   let rendered_textarea = render(textarea)
   assert(rendered_textarea.contains(">\n\nDraft</textarea>".as_slice()), eq: true)
   assert(rendered_textarea.contains(" value=".as_slice()), eq: false)
+
+test "SVG textarea rendering does not add HTML parser newline padding":
+  let svg = vx::html_element(
+    tag: "svg",
+    children: [
+      vx::html_element(tag: "textarea", children: [vx::text("\nDescription")])
+    ]
+  )
+
+  let rendered = render(svg)
+  assert(rendered.contains("<textarea>\nDescription</textarea>".as_slice()), eq: true)
 
 test "html rendering preserves raw style and script text":
   let style_node = element(
