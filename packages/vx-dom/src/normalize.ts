@@ -18,18 +18,34 @@ const voidTags = new Set([
   "param", "source", "track", "wbr",
 ]);
 
-// The HTML parser rewrites these lowercase spellings when they occur in SVG
-// markup. Accepting them would make SSR produce a different tree than a
-// client-only createElementNS render.
-const parserAdjustedSvgTagNames = new Set([
-  "altglyph", "altglyphdef", "altglyphitem", "animatecolor", "animatemotion",
-  "animatetransform", "clippath", "feblend", "fecolormatrix",
-  "fecomponenttransfer", "fecomposite", "feconvolvematrix",
-  "fediffuselighting", "fedisplacementmap", "fedistantlight", "feflood",
-  "fefunca", "fefuncb", "fefuncg", "fefuncr", "fegaussianblur", "feimage",
-  "femerge", "femergenode", "femorphology", "feoffset", "fepointlight",
-  "fespecularlighting", "fespotlight", "fetile", "feturbulence",
-  "foreignobject", "glyphref", "lineargradient", "radialgradient", "textpath",
+// HTML parsing lowercases SVG names, then restores this defined canonical set.
+// Requiring the parser's resulting spelling keeps SSR and createElementNS trees
+// identical without silently changing the caller's frame.
+const parserAdjustedSvgTagNames = adjustedSvgNames([
+  "altGlyph", "altGlyphDef", "altGlyphItem", "animateColor", "animateMotion",
+  "animateTransform", "clipPath", "feBlend", "feColorMatrix",
+  "feComponentTransfer", "feComposite", "feConvolveMatrix",
+  "feDiffuseLighting", "feDisplacementMap", "feDistantLight", "feFlood",
+  "feFuncA", "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur", "feImage",
+  "feMerge", "feMergeNode", "feMorphology", "feOffset", "fePointLight",
+  "feSpecularLighting", "feSpotLight", "feTile", "feTurbulence",
+  "foreignObject", "glyphRef", "linearGradient", "radialGradient", "textPath",
+]);
+
+const parserAdjustedSvgAttributeNames = adjustedSvgNames([
+  "attributeName", "attributeType", "baseFrequency", "baseProfile", "calcMode",
+  "clipPathUnits", "diffuseConstant", "edgeMode", "filterUnits", "glyphRef",
+  "gradientTransform", "gradientUnits", "kernelMatrix", "kernelUnitLength",
+  "keyPoints", "keySplines", "keyTimes", "lengthAdjust", "limitingConeAngle",
+  "markerHeight", "markerUnits", "markerWidth", "maskContentUnits", "maskUnits",
+  "numOctaves", "pathLength", "patternContentUnits", "patternTransform",
+  "patternUnits", "pointsAtX", "pointsAtY", "pointsAtZ", "preserveAlpha",
+  "preserveAspectRatio", "primitiveUnits", "refX", "refY", "repeatCount",
+  "repeatDur", "requiredExtensions", "requiredFeatures", "specularConstant",
+  "specularExponent", "spreadMethod", "startOffset", "stdDeviation",
+  "stitchTiles", "surfaceScale", "systemLanguage", "tableValues", "targetX",
+  "targetY", "textLength", "viewBox", "viewTarget", "xChannelSelector",
+  "yChannelSelector", "zoomAndPan",
 ]);
 
 export function normalizeRenderFrame(input: unknown): VxRenderFrame {
@@ -59,16 +75,31 @@ export function validateHtmlAttributeName(value: string, path = "attribute"): vo
 export function validateSvgTagName(value: string, path = "tag"): void {
   if (
     !/^[A-Za-z][A-Za-z0-9:-]*$/.test(value) ||
-    parserAdjustedSvgTagNames.has(value)
+    !isCanonicalSvgName(value, parserAdjustedSvgTagNames)
   ) {
     throw new Error(`vx-dom: invalid SVG tag name at ${path}: ${JSON.stringify(value)}`);
   }
 }
 
 export function validateSvgAttributeName(value: string, path = "attribute"): void {
-  if (!/^[^\s"'/>=\u0000-\u001f\u007f]+$/.test(value)) {
+  if (
+    !/^[^\s"'/>=\u0000-\u001f\u007f]+$/.test(value) ||
+    !isCanonicalSvgName(value, parserAdjustedSvgAttributeNames)
+  ) {
     throw new Error(`vx-dom: invalid SVG attribute name at ${path}: ${JSON.stringify(value)}`);
   }
+}
+
+function adjustedSvgNames(names: string[]): ReadonlyMap<string, string> {
+  return new Map(names.map((name) => [name.toLowerCase(), name]));
+}
+
+function isCanonicalSvgName(
+  value: string,
+  adjustedNames: ReadonlyMap<string, string>,
+): boolean {
+  const lowercase = value.toLowerCase();
+  return value === (adjustedNames.get(lowercase) ?? lowercase);
 }
 
 export function elementNamespace(

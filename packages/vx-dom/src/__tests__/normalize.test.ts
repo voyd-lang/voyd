@@ -18,8 +18,8 @@ describe("vx-dom VNode normalization", () => {
     });
   });
 
-  it("rejects lowercase SVG names that the HTML parser adjusts", () => {
-    ["foreignobject", "lineargradient"].forEach((tag) => {
+  it("rejects non-canonical SVG names that the HTML parser adjusts", () => {
+    ["foreignobject", "lineargradient", "ForeignObject", "PATH"].forEach((tag) => {
       expect(() => normalizeRenderFrame({
         version: 1,
         root: {
@@ -28,6 +28,17 @@ describe("vx-dom VNode normalization", () => {
           children: [{ kind: "element", tag }],
         },
       })).toThrow("invalid SVG tag name");
+    });
+
+    ["viewbox", "attributename", "ViewBox"].forEach((attribute) => {
+      expect(() => normalizeRenderFrame({
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "svg",
+          attrs: { [attribute]: "value" },
+        },
+      })).toThrow("invalid SVG attribute name");
     });
   });
 

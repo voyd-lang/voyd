@@ -1173,6 +1173,22 @@ test "VX renderer accepts a basic SVG tree":
   assert(rendered.contains("<path".as_slice()), eq: true)
   assert(rendered.contains(" d=\"M1 1h2\"".as_slice()), eq: true)
 
+test "VX renderer preserves canonical parser-adjusted SVG names":
+  let svg = vx::html_element(
+    tag: "svg",
+    children: [
+      vx::html_element(
+        tag: "linearGradient",
+        attrs: [vx::attr(name: "gradientUnits", value: "userSpaceOnUse")],
+        children: Array<MsgPack>::init()
+      )
+    ]
+  )
+
+  let rendered = render(svg)
+  assert(rendered.contains("<linearGradient".as_slice()), eq: true)
+  assert(rendered.contains(" gradientUnits=\"userSpaceOnUse\"".as_slice()), eq: true)
+
 test "html rendering unwraps mapped child views":
   let child: MsgPack = <p class="child">Mapped child</p>
   let mapped = map_html<MsgPack, MsgPack>(html: child, handler_id: 7)

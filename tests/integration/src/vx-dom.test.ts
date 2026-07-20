@@ -164,6 +164,13 @@ pub fn invalid_svg_tag_html(tag: String) -> String
     children: [element(tag: tag, children: Array<MsgPack>::init())]
   ))
 
+pub fn invalid_svg_attr_html(name: String) -> String
+  render(element(
+    tag: "svg",
+    attrs: [attr(name: name, value: "value")],
+    children: Array<MsgPack>::init()
+  ))
+
 pub fn static_event_tree() -> MsgPack
   let ~attrs = Array<MsgPack>::init()
   let interactive = false
@@ -238,14 +245,22 @@ pub fn multi_document() -> String
     await expect(result.run<string>({ entryName: "invalid_void_html" })).rejects.toThrow();
     await expect(result.run<string>({ entryName: "uppercase_tag_html" })).rejects.toThrow();
     await expect(result.run<string>({ entryName: "uppercase_attribute_html" })).rejects.toThrow();
-    await expect(result.run<string>({
-      entryName: "invalid_svg_tag_html",
-      args: ["foreignobject"],
-    })).rejects.toThrow();
-    await expect(result.run<string>({
-      entryName: "invalid_svg_tag_html",
-      args: ["lineargradient"],
-    })).rejects.toThrow();
+    await Promise.all(
+      ["foreignobject", "lineargradient", "ForeignObject", "PATH"].map((tag) =>
+        expect(result.run<string>({
+          entryName: "invalid_svg_tag_html",
+          args: [tag],
+        })).rejects.toThrow()
+      ),
+    );
+    await Promise.all(
+      ["viewbox", "attributename", "ViewBox"].map((name) =>
+        expect(result.run<string>({
+          entryName: "invalid_svg_attr_html",
+          args: [name],
+        })).rejects.toThrow()
+      ),
+    );
 
     const host = await createVoydHost({ wasm: result.wasm, bufferSize: 256 * 1024 });
     await host.run("static_event_tree");

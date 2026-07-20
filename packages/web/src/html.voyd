@@ -583,35 +583,125 @@ fn is_valid_property_value({ name: String, value: MsgPack }) -> bool
 fn is_valid_tag_name(name: String, svg_element: bool) -> bool
   if name.is_empty() or (if svg_element then: not is_ascii_letter(name.get_byte(0) ?? 0) else: not is_ascii_lowercase(name.get_byte(0) ?? 0)):
     return false
-  if svg_element and is_parser_adjusted_svg_tag_name(name):
+  if svg_element and name != canonical_svg_tag_name(name):
     return false
   name_bytes_match(name, where: (byte: i32) -> bool =>
     (if svg_element then: is_ascii_letter(byte) else: is_ascii_lowercase(byte)) or
       is_ascii_digit(byte) or byte == 45 or byte == 58
   )
 
-fn is_parser_adjusted_svg_tag_name(name: String) -> bool
-  name == "altglyph" or name == "altglyphdef" or name == "altglyphitem" or
-    name == "animatecolor" or name == "animatemotion" or
-    name == "animatetransform" or name == "clippath" or name == "feblend" or
-    name == "fecolormatrix" or name == "fecomponenttransfer" or
-    name == "fecomposite" or name == "feconvolvematrix" or
-    name == "fediffuselighting" or name == "fedisplacementmap" or
-    name == "fedistantlight" or name == "feflood" or name == "fefunca" or
-    name == "fefuncb" or name == "fefuncg" or name == "fefuncr" or
-    name == "fegaussianblur" or name == "feimage" or name == "femerge" or
-    name == "femergenode" or name == "femorphology" or name == "feoffset" or
-    name == "fepointlight" or name == "fespecularlighting" or
-    name == "fespotlight" or name == "fetile" or name == "feturbulence" or
-    name == "foreignobject" or name == "glyphref" or
-    name == "lineargradient" or name == "radialgradient" or name == "textpath"
+fn canonical_svg_tag_name(name: String) -> String
+  let lowered = name.lowered()
+  if
+    lowered == "altglyph": "altGlyph"
+    lowered == "altglyphdef": "altGlyphDef"
+    lowered == "altglyphitem": "altGlyphItem"
+    lowered == "animatecolor": "animateColor"
+    lowered == "animatemotion": "animateMotion"
+    lowered == "animatetransform": "animateTransform"
+    lowered == "clippath": "clipPath"
+    lowered == "feblend": "feBlend"
+    lowered == "fecolormatrix": "feColorMatrix"
+    lowered == "fecomponenttransfer": "feComponentTransfer"
+    lowered == "fecomposite": "feComposite"
+    lowered == "feconvolvematrix": "feConvolveMatrix"
+    lowered == "fediffuselighting": "feDiffuseLighting"
+    lowered == "fedisplacementmap": "feDisplacementMap"
+    lowered == "fedistantlight": "feDistantLight"
+    lowered == "feflood": "feFlood"
+    lowered == "fefunca": "feFuncA"
+    lowered == "fefuncb": "feFuncB"
+    lowered == "fefuncg": "feFuncG"
+    lowered == "fefuncr": "feFuncR"
+    lowered == "fegaussianblur": "feGaussianBlur"
+    lowered == "feimage": "feImage"
+    lowered == "femerge": "feMerge"
+    lowered == "femergenode": "feMergeNode"
+    lowered == "femorphology": "feMorphology"
+    lowered == "feoffset": "feOffset"
+    lowered == "fepointlight": "fePointLight"
+    lowered == "fespecularlighting": "feSpecularLighting"
+    lowered == "fespotlight": "feSpotLight"
+    lowered == "fetile": "feTile"
+    lowered == "feturbulence": "feTurbulence"
+    lowered == "foreignobject": "foreignObject"
+    lowered == "glyphref": "glyphRef"
+    lowered == "lineargradient": "linearGradient"
+    lowered == "radialgradient": "radialGradient"
+    lowered == "textpath": "textPath"
+    else: lowered
 
 fn is_valid_attr_name(name: String, svg_element: bool) -> bool
-  not name.is_empty() and name_bytes_match(name, where: (byte: i32) -> bool =>
+  if name.is_empty() or (svg_element and name != canonical_svg_attr_name(name)):
+    return false
+  name_bytes_match(name, where: (byte: i32) -> bool =>
     byte > 31 and byte != 127 and byte != 32 and byte != 34 and byte != 39 and
       byte != 47 and byte != 61 and byte != 62 and
       (svg_element or not is_ascii_uppercase(byte))
   )
+
+fn canonical_svg_attr_name(name: String) -> String
+  let lowered = name.lowered()
+  if
+    lowered == "attributename": "attributeName"
+    lowered == "attributetype": "attributeType"
+    lowered == "basefrequency": "baseFrequency"
+    lowered == "baseprofile": "baseProfile"
+    lowered == "calcmode": "calcMode"
+    lowered == "clippathunits": "clipPathUnits"
+    lowered == "diffuseconstant": "diffuseConstant"
+    lowered == "edgemode": "edgeMode"
+    lowered == "filterunits": "filterUnits"
+    lowered == "glyphref": "glyphRef"
+    lowered == "gradienttransform": "gradientTransform"
+    lowered == "gradientunits": "gradientUnits"
+    lowered == "kernelmatrix": "kernelMatrix"
+    lowered == "kernelunitlength": "kernelUnitLength"
+    lowered == "keypoints": "keyPoints"
+    lowered == "keysplines": "keySplines"
+    lowered == "keytimes": "keyTimes"
+    lowered == "lengthadjust": "lengthAdjust"
+    lowered == "limitingconeangle": "limitingConeAngle"
+    lowered == "markerheight": "markerHeight"
+    lowered == "markerunits": "markerUnits"
+    lowered == "markerwidth": "markerWidth"
+    lowered == "maskcontentunits": "maskContentUnits"
+    lowered == "maskunits": "maskUnits"
+    lowered == "numoctaves": "numOctaves"
+    lowered == "pathlength": "pathLength"
+    lowered == "patterncontentunits": "patternContentUnits"
+    lowered == "patterntransform": "patternTransform"
+    lowered == "patternunits": "patternUnits"
+    lowered == "pointsatx": "pointsAtX"
+    lowered == "pointsaty": "pointsAtY"
+    lowered == "pointsatz": "pointsAtZ"
+    lowered == "preservealpha": "preserveAlpha"
+    lowered == "preserveaspectratio": "preserveAspectRatio"
+    lowered == "primitiveunits": "primitiveUnits"
+    lowered == "refx": "refX"
+    lowered == "refy": "refY"
+    lowered == "repeatcount": "repeatCount"
+    lowered == "repeatdur": "repeatDur"
+    lowered == "requiredextensions": "requiredExtensions"
+    lowered == "requiredfeatures": "requiredFeatures"
+    lowered == "specularconstant": "specularConstant"
+    lowered == "specularexponent": "specularExponent"
+    lowered == "spreadmethod": "spreadMethod"
+    lowered == "startoffset": "startOffset"
+    lowered == "stddeviation": "stdDeviation"
+    lowered == "stitchtiles": "stitchTiles"
+    lowered == "surfacescale": "surfaceScale"
+    lowered == "systemlanguage": "systemLanguage"
+    lowered == "tablevalues": "tableValues"
+    lowered == "targetx": "targetX"
+    lowered == "targety": "targetY"
+    lowered == "textlength": "textLength"
+    lowered == "viewbox": "viewBox"
+    lowered == "viewtarget": "viewTarget"
+    lowered == "xchannelselector": "xChannelSelector"
+    lowered == "ychannelselector": "yChannelSelector"
+    lowered == "zoomandpan": "zoomAndPan"
+    else: lowered
 
 fn is_valid_style_name(name: String) -> bool
   if name.is_empty():
