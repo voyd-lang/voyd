@@ -30,7 +30,6 @@ import {
   getRequiredExprType,
   getStructuralTypeInfo,
   getMatchPatternTypeId,
-  getTypeIdFromTypeExpr,
   getUnresolvedExprType,
   shouldInlineUnionLayout,
   wasmTypeFor,
@@ -152,20 +151,7 @@ const getValueSourceTypeId = (
   while (true) {
     const expr = ctx.module.hir.expressions.get(currentExprId);
     if (expr?.exprKind === "object-literal") {
-      if (expr.literalKind === "nominal" && typeof expr.targetSymbol === "number") {
-        const canonicalTarget = ctx.program.symbols.canonicalIdOf(
-          ctx.moduleId,
-          expr.targetSymbol,
-        );
-        const template = ctx.program.objects.getTemplate(canonicalTarget);
-        if (template) {
-          return template.type;
-        }
-      }
-      if (expr.literalKind === "nominal" && expr.target) {
-        return getTypeIdFromTypeExpr(expr.target, ctx);
-      }
-      return getRequiredExprType(currentExprId, ctx, instanceId);
+      return getUnresolvedExprType(currentExprId, ctx, instanceId);
     }
     if (!expr || expr.exprKind !== "block" || typeof expr.value !== "number") {
       return getUnresolvedExprType(currentExprId, ctx, instanceId);
