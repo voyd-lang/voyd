@@ -54,6 +54,10 @@ const wideValueModelEntryPath = path.join(
   fixtureRoot,
   "vx-wide-value-model.voyd",
 );
+const genericConditionalWrapperEntryPath = path.join(
+  fixtureRoot,
+  "vx-generic-conditional-wrapper.voyd",
+);
 const markdownEntryPath = path.resolve(
   import.meta.dirname,
   "../../../examples/markdown.voyd",
@@ -380,6 +384,20 @@ pub fn multi_document() -> String
 
     renderer.dispose();
     expect(container.innerHTML).toBe("");
+  });
+
+  it("renders conditional arguments forwarded through a generic VX wrapper", async () => {
+    const result = expectCompileSuccess(
+      await createSdk().compile({
+        entryPath: genericConditionalWrapperEntryPath,
+      }),
+    );
+
+    await expect(result.run({ entryName: "main" })).resolves.toMatchObject({
+      kind: "element",
+      tag: "button",
+      attrs: { class: "icon-small", "aria-label": "Close" },
+    });
   });
 
   it("dispatches static event messages from compiled Voyd VX nodes", async () => {
