@@ -203,7 +203,8 @@ fn render_element(map: Dict<String, MsgPack>, svg_parent: bool): () -> String
   if not svg_element and is_void_tag(tag):
     return opening
   let svg_children = svg_element and not is_svg_html_integration_point(tag)
-  let children = if not svg_element and is_raw_text_tag(tag.as_slice()) then: render_raw_text_children(map, tag.as_slice()) else: preserve_leading_newline(tag, render_node_children(map, svg_children))
+  let rendered_children = if not svg_element and is_raw_text_tag(tag.as_slice()) then: render_raw_text_children(map, tag.as_slice()) else: render_node_children(map, svg_children)
+  let children = if svg_element then: rendered_children else: preserve_leading_newline(tag, rendered_children)
   if not svg_element:
     validate_textarea_value(map, tag: tag, children: children)
   opening
@@ -611,6 +612,7 @@ fn canonical_svg_tag_name(name: String) -> String
     lowered == "fediffuselighting": "feDiffuseLighting"
     lowered == "fedisplacementmap": "feDisplacementMap"
     lowered == "fedistantlight": "feDistantLight"
+    lowered == "fedropshadow": "feDropShadow"
     lowered == "feflood": "feFlood"
     lowered == "fefunca": "feFuncA"
     lowered == "fefuncb": "feFuncB"

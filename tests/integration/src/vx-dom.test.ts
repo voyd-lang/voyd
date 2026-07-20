@@ -310,7 +310,7 @@ pub fn multi_document() -> String
     await expect(result.run<string>({ entryName: "uppercase_tag_html" })).rejects.toThrow();
     await expect(result.run<string>({ entryName: "uppercase_attribute_html" })).rejects.toThrow();
     await Promise.all(
-      ["foreignobject", "lineargradient", "ForeignObject", "PATH"].map((tag) =>
+      ["fedropshadow", "foreignobject", "lineargradient", "ForeignObject", "PATH"].map((tag) =>
         expect(result.run<string>({
           entryName: "invalid_svg_tag_html",
           args: [tag],

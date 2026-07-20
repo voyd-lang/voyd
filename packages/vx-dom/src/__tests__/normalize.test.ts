@@ -9,17 +9,20 @@ describe("vx-dom VNode normalization", () => {
         kind: "element",
         tag: "svg",
         attrs: { viewBox: "0 0 24 24" },
-        children: [{ kind: "element", tag: "linearGradient" }],
+        children: [
+          { kind: "element", tag: "linearGradient" },
+          { kind: "element", tag: "feDropShadow" },
+        ],
       },
     }).root).toMatchObject({
       tag: "svg",
       attrs: { viewBox: "0 0 24 24" },
-      children: [{ tag: "linearGradient" }],
+      children: [{ tag: "linearGradient" }, { tag: "feDropShadow" }],
     });
   });
 
   it("rejects non-canonical SVG names that the HTML parser adjusts", () => {
-    ["foreignobject", "lineargradient", "ForeignObject", "PATH"].forEach((tag) => {
+    ["fedropshadow", "foreignobject", "lineargradient", "ForeignObject", "PATH"].forEach((tag) => {
       expect(() => normalizeRenderFrame({
         version: 1,
         root: {

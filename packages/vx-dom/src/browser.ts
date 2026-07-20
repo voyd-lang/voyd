@@ -35,6 +35,25 @@ import type {
 } from "./types.js";
 
 const svgNamespaceUri = "http://www.w3.org/2000/svg";
+const xlinkNamespaceUri = "http://www.w3.org/1999/xlink";
+const xmlNamespaceUri = "http://www.w3.org/XML/1998/namespace";
+const xmlnsNamespaceUri = "http://www.w3.org/2000/xmlns/";
+const parserNamespacedSvgAttributes = new Map<
+  string,
+  readonly [string, string]
+>([
+  ["xlink:actuate", [xlinkNamespaceUri, "actuate"]],
+  ["xlink:arcrole", [xlinkNamespaceUri, "arcrole"]],
+  ["xlink:href", [xlinkNamespaceUri, "href"]],
+  ["xlink:role", [xlinkNamespaceUri, "role"]],
+  ["xlink:show", [xlinkNamespaceUri, "show"]],
+  ["xlink:title", [xlinkNamespaceUri, "title"]],
+  ["xlink:type", [xlinkNamespaceUri, "type"]],
+  ["xml:lang", [xmlNamespaceUri, "lang"]],
+  ["xml:space", [xmlNamespaceUri, "space"]],
+  ["xmlns", [xmlnsNamespaceUri, "xmlns"]],
+  ["xmlns:xlink", [xmlnsNamespaceUri, "xlink"]],
+]);
 
 export {
   createVoydVxAppRuntime,
@@ -908,20 +927,56 @@ function patchAttrs(
   newAttrs: Record<string, unknown>,
 ): void {
   Object.keys(oldAttrs).forEach((key) => {
-    if (!(key in newAttrs)) element.removeAttribute(key);
+    if (!(key in newAttrs)) removeElementAttribute(element, key);
   });
   Object.entries(newAttrs).forEach(([key, value]) => {
     if (key === "key" || value == null || value === false) {
-      element.removeAttribute(key);
+      removeElementAttribute(element, key);
       return;
     }
     if (value === true) {
-      element.setAttribute(key, "");
+      setElementAttribute(element, key, "");
       return;
     }
     const next = String(value);
-    if (element.getAttribute(key) !== next) element.setAttribute(key, next);
+    if (getElementAttribute(element, key) !== next) {
+      setElementAttribute(element, key, next);
+    }
   });
+}
+
+function getElementAttribute(element: Element, name: string): string | null {
+  const namespaced = namespacedSvgAttribute(element, name);
+  return namespaced
+    ? element.getAttributeNS(namespaced[0], namespaced[1])
+    : element.getAttribute(name);
+}
+
+function setElementAttribute(element: Element, name: string, value: string): void {
+  const namespaced = namespacedSvgAttribute(element, name);
+  if (namespaced) {
+    element.setAttributeNS(namespaced[0], name, value);
+    return;
+  }
+  element.setAttribute(name, value);
+}
+
+function removeElementAttribute(element: Element, name: string): void {
+  const namespaced = namespacedSvgAttribute(element, name);
+  if (namespaced) {
+    element.removeAttributeNS(namespaced[0], namespaced[1]);
+    return;
+  }
+  element.removeAttribute(name);
+}
+
+function namespacedSvgAttribute(
+  element: Element,
+  name: string,
+): readonly [string, string] | undefined {
+  return element.namespaceURI === svgNamespaceUri
+    ? parserNamespacedSvgAttributes.get(name)
+    : undefined;
 }
 
 function patchProps(
