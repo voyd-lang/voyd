@@ -2,6 +2,22 @@ import { describe, expect, it } from "vitest";
 import { normalizeRenderFrame } from "../normalize.js";
 
 describe("vx-dom VNode normalization", () => {
+  it("accepts case-sensitive names within SVG trees", () => {
+    expect(normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "svg",
+        attrs: { viewBox: "0 0 24 24" },
+        children: [{ kind: "element", tag: "linearGradient" }],
+      },
+    }).root).toMatchObject({
+      tag: "svg",
+      attrs: { viewBox: "0 0 24 24" },
+      children: [{ tag: "linearGradient" }],
+    });
+  });
+
   it("normalizes legacy create_element payloads", () => {
     expect(
       normalizeRenderFrame({

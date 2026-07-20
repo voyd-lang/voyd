@@ -1,12 +1,17 @@
 import { callComponentFn } from "./memory.js";
 import {
+  childNamespace,
+  elementNamespace,
   normalizeRenderFrame,
+  type MarkupNamespace,
   validateCssPropertyName,
   validateCssPropertyValue,
   validateDomPropertyName,
   validateDomPropertyValue,
   validateHtmlAttributeName,
   validateHtmlTagName,
+  validateSvgAttributeName,
+  validateSvgTagName,
 } from "./normalize.js";
 import type { CallOptions, VNode, VxRenderFrame, VoydComponentFn } from "./types.js";
 
@@ -84,26 +89,41 @@ export function renderNodeToString(vnode: VNode): string {
   return renderNode(vnode);
 }
 
-function renderNode(vnode: VNode, rawTextTag?: string): string {
+function renderNode(
+  vnode: VNode,
+  rawTextTag?: string,
+  parentNamespace: MarkupNamespace = "html",
+): string {
   if (vnode.kind === "text") {
     return rawTextTag ? renderRawText(vnode.value, rawTextTag) : escapeText(vnode.value);
   }
   if (vnode.kind === "fragment") {
-    return vnode.children.map((child) => renderNode(child, rawTextTag)).join("");
+    return vnode.children
+      .map((child) => renderNode(child, rawTextTag, parentNamespace))
+      .join("");
   }
   if (rawTextTag) {
     throw new Error(`vx-dom/server: ${rawTextTag} elements may only contain text`);
   }
 
-  validateHtmlTagName(vnode.tag, "server.tag");
-  validateTextareaValue(vnode);
-  const attrs = renderAttrs(vnode);
-  if (voidTags.has(vnode.tag)) return `<${vnode.tag}${attrs}>`;
-  const childRawTextTag = rawTextTags.has(vnode.tag) ? vnode.tag : undefined;
+  const namespace = elementNamespace(vnode.tag, parentNamespace);
+  if (namespace === "svg") {
+    validateSvgTagName(vnode.tag, "server.tag");
+  } else {
+    validateHtmlTagName(vnode.tag, "server.tag");
+    validateTextareaValue(vnode);
+  }
+  const attrs = renderAttrs(vnode, namespace);
+  if (namespace === "html" && voidTags.has(vnode.tag)) return `<${vnode.tag}${attrs}>`;
+  const childRawTextTag = namespace === "html" && rawTextTags.has(vnode.tag)
+    ? vnode.tag
+    : undefined;
+  const childrenNamespace = childNamespace(vnode.tag, namespace);
   const children = (vnode.children ?? [])
-    .map((child) => renderNode(child, childRawTextTag))
+    .map((child) => renderNode(child, childRawTextTag, childrenNamespace))
     .join("");
-  const leadingNewline = newlineStrippingTags.has(vnode.tag) && children.startsWith("\n")
+  const leadingNewline = namespace === "html" &&
+      newlineStrippingTags.has(vnode.tag) && children.startsWith("\n")
     ? "\n"
     : "";
   return `<${vnode.tag}${attrs}>${leadingNewline}${children}</${vnode.tag}>`;
@@ -119,7 +139,10 @@ function renderRawText(value: string, tag: string): string {
   return value;
 }
 
-function renderAttrs(vnode: Extract<VNode, { kind: "element" }>): string {
+function renderAttrs(
+  vnode: Extract<VNode, { kind: "element" }>,
+  namespace: MarkupNamespace,
+): string {
   const attrs = { ...(vnode.attrs ?? {}) };
   Object.entries(vnode.props ?? {}).forEach(([key, value]) => {
     validateDomPropertyName(key, `server.props.${key}`);
@@ -140,7 +163,11 @@ function renderAttrs(vnode: Extract<VNode, { kind: "element" }>): string {
   return Object.entries(attrs)
     .flatMap(([key, value]) => {
       if (key === "key" || value == null || value === false) return [];
-      validateHtmlAttributeName(key, `server.attrs.${key}`);
+      if (namespace === "svg") {
+        validateSvgAttributeName(key, `server.attrs.${key}`);
+      } else {
+        validateHtmlAttributeName(key, `server.attrs.${key}`);
+      }
       if (value === true) return [` ${key}`];
       return [` ${key}="${escapeAttribute(String(value))}"`];
     })

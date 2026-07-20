@@ -3,6 +3,28 @@ import { encode } from "@msgpack/msgpack";
 import { renderVxToString } from "../server.js";
 
 describe("vx-dom server renderer", () => {
+  it("renders SVG trees with case-sensitive names", async () => {
+    const result = await renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "svg",
+          attrs: { viewBox: "0 0 24 24" },
+          children: [{
+            kind: "element",
+            tag: "linearGradient",
+            attrs: { gradientUnits: "userSpaceOnUse" },
+          }],
+        },
+      },
+    });
+
+    expect(result.html).toBe(
+      '<svg viewBox="0 0 24 24"><linearGradient gradientUnits="userSpaceOnUse"></linearGradient></svg>',
+    );
+  });
+
   it("renders escaped HTML and hydration data without a DOM", async () => {
     const result = await renderVxToString({
       frame: {

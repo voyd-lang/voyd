@@ -72,6 +72,55 @@ const expectCompileSuccess = (
 };
 
 describe("integration: compiled VX DOM rendering", () => {
+  it.each([
+    { name: "default", optimize: false },
+    { name: "release", optimize: true },
+  ])("renders and mounts a basic SVG tree in $name builds", async ({ optimize }) => {
+    const result = expectCompileSuccess(await createSdk().compile({
+      optimize,
+      source: `
+use pkg::web::render
+use std::array::Array
+use std::msgpack::MsgPack
+use std::vx::self as vx
+
+pub fn tree() -> MsgPack
+  vx::html_element(
+    tag: "svg",
+    attrs: [vx::attr(name: "viewBox", value: "0 0 24 24")],
+    children: [
+      vx::html_element(
+        tag: "path",
+        attrs: [vx::attr(name: "d", value: "M1 1h2")],
+        children: Array<MsgPack>::init()
+      )
+    ]
+  )
+
+pub fn html() -> String
+  render(tree())
+`,
+    }));
+
+    const [tree, html] = await Promise.all([
+      result.run<unknown>({ entryName: "tree" }),
+      result.run<string>({ entryName: "html" }),
+    ]);
+    expect(html).toBe(
+      '<svg viewBox="0 0 24 24"><path d="M1 1h2"></path></svg>',
+    );
+
+    const container = document.createElement("div");
+    const renderer = renderMsgPackNode(tree, container);
+    const svg = container.querySelector("svg")!;
+    const path = svg.querySelector("path")!;
+    expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(svg.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(path.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(path.getAttribute("d")).toBe("M1 1h2");
+    renderer.dispose();
+  });
+
   it("hydrates pkg::web output from the same compiled VX tree without replacing DOM", async () => {
     const result = expectCompileSuccess(await createSdk().compile({
       source: `

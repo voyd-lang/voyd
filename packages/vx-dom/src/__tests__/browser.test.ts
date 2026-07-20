@@ -33,6 +33,24 @@ describe("vx-dom browser renderer", () => {
     vi.restoreAllMocks();
   });
 
+  it("creates SVG trees in the SVG namespace with case-sensitive attributes", () => {
+    const renderer = createVxDomRenderer(container);
+
+    renderer.render(frame({
+      kind: "element",
+      tag: "svg",
+      attrs: { viewBox: "0 0 24 24" },
+      children: [{ kind: "element", tag: "path", attrs: { d: "M1 1h2" } }],
+    }));
+
+    const svg = container.querySelector("svg")!;
+    const path = svg.querySelector("path")!;
+    expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(svg.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(path.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(path.getAttribute("d")).toBe("M1 1h2");
+  });
+
   it("patches text and props without replacing the element", () => {
     const renderer = createVxDomRenderer(container);
 

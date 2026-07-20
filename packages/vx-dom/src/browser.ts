@@ -1,5 +1,10 @@
 import { callComponentFn } from "./memory.js";
-import { normalizeRenderFrame } from "./normalize.js";
+import {
+  childNamespace,
+  elementNamespace,
+  type MarkupNamespace,
+  normalizeRenderFrame,
+} from "./normalize.js";
 import {
   listenerKey,
   normalizeBrowserEvent,
@@ -28,6 +33,8 @@ import type {
   VxSubscriptionEnvelope,
   VoydComponentFn,
 } from "./types.js";
+
+const svgNamespaceUri = "http://www.w3.org/2000/svg";
 
 export {
   createVoydVxAppRuntime,
@@ -662,7 +669,7 @@ function patchContainer(
   const current = container.firstChild;
   if (!current || !oldNode) {
     container.textContent = "";
-    container.appendChild(createDom(newNode, handlers));
+    container.appendChild(createDom(newNode, handlers, domChildNamespace(container)));
     return;
   }
 
@@ -722,7 +729,7 @@ function patchNode(
   handlers: RetainedEventHandlerRegistry | undefined,
 ): Node {
   if (!sameNodeKind(oldNode, newNode)) {
-    const nextDom = createDom(newNode, handlers);
+    const nextDom = createDom(newNode, handlers, domChildNamespace(parent));
     parent.replaceChild(nextDom, dom);
     removeDom(dom);
     return nextDom;
@@ -748,18 +755,46 @@ function patchNode(
 function createDom(
   vnode: VNode,
   handlers: RetainedEventHandlerRegistry | undefined,
+  parentNamespace: MarkupNamespace,
 ): Node {
   if (vnode.kind === "text") return document.createTextNode(vnode.value);
   if (vnode.kind === "fragment") {
     const fragment = document.createDocumentFragment();
-    vnode.children.forEach((child) => fragment.appendChild(createDom(child, handlers)));
+    vnode.children.forEach((child) =>
+      fragment.appendChild(createDom(child, handlers, parentNamespace))
+    );
     return fragment;
   }
 
-  const element = document.createElement(vnode.tag);
+  const namespace = elementNamespace(vnode.tag, parentNamespace);
+  const element = namespace === "svg"
+    ? document.createElementNS(svgNamespaceUri, vnode.tag)
+    : document.createElement(vnode.tag);
   applyElementProps(element, undefined, vnode, handlers);
-  (vnode.children ?? []).forEach((child) => element.appendChild(createDom(child, handlers)));
+  const childrenNamespace = childNamespace(vnode.tag, namespace);
+  (vnode.children ?? []).forEach((child) =>
+    element.appendChild(createDom(child, handlers, childrenNamespace))
+  );
   return element;
+}
+
+function domChildNamespace(parent: Node | null): MarkupNamespace {
+  if (
+    parent instanceof Element &&
+    parent.namespaceURI === svgNamespaceUri &&
+    parent.localName !== "foreignObject"
+  ) {
+    return "svg";
+  }
+  return "html";
+}
+
+function domElementMatches(dom: Element, vnode: VxElementNode): boolean {
+  const namespace = elementNamespace(vnode.tag, domChildNamespace(dom.parentNode));
+  if (namespace === "svg") {
+    return dom.namespaceURI === svgNamespaceUri && dom.localName === vnode.tag;
+  }
+  return dom.namespaceURI !== svgNamespaceUri && dom.localName === vnode.tag;
 }
 
 function patchChildren(
@@ -783,7 +818,7 @@ function patchChildren(
     const candidateDom = keyed?.dom ?? currentAtIndex;
 
     if (!candidateDom || !oldChild || usedDom.has(candidateDom)) {
-      const nextDom = createDom(newChild, handlers);
+      const nextDom = createDom(newChild, handlers, domChildNamespace(parent));
       parent.insertBefore(nextDom, currentAtIndex ?? null);
       usedDom.add(nextDom);
       return;
@@ -1014,7 +1049,7 @@ function hydrateContainer(
         expected: describeVNode(child),
         actual: undefined,
       });
-      container.appendChild(createDom(child, handlers));
+      container.appendChild(createDom(child, handlers, domChildNamespace(container)));
     });
     reportExtraHydrationChildren(container, vnode.children.length, "root", onMismatch);
     removeExtraChildren(container, vnode.children.length);
@@ -1029,7 +1064,7 @@ function hydrateContainer(
       expected: describeVNode(vnode),
       actual: undefined,
     });
-    container.appendChild(createDom(vnode, handlers));
+    container.appendChild(createDom(vnode, handlers, domChildNamespace(container)));
     return;
   }
   hydrateNode(current, vnode, handlers, onMismatch, "root", deferReconciliation);
@@ -1053,7 +1088,8 @@ function hydrateNode(
         expected: "text",
         actual: describeDomNode(dom),
       });
-      dom.parentNode?.replaceChild(createDom(vnode, handlers), dom);
+      const parent = dom.parentNode;
+      parent?.replaceChild(createDom(vnode, handlers, domChildNamespace(parent)), dom);
       return;
     }
     if (dom.textContent !== vnode.value) {
@@ -1085,17 +1121,19 @@ function hydrateNode(
       expected: `element:${vnode.tag}`,
       actual: describeDomNode(dom),
     });
-    dom.parentNode?.replaceChild(createDom(vnode, handlers), dom);
+    const parent = dom.parentNode;
+    parent?.replaceChild(createDom(vnode, handlers, domChildNamespace(parent)), dom);
     return;
   }
-  if (dom.tagName.toLowerCase() !== vnode.tag) {
+  if (!domElementMatches(dom, vnode)) {
     reportHydrationMismatch(onMismatch, {
       path,
       reason: "tag",
       expected: vnode.tag,
-      actual: dom.tagName.toLowerCase(),
+      actual: dom.localName,
     });
-    dom.parentNode?.replaceChild(createDom(vnode, handlers), dom);
+    const parent = dom.parentNode;
+    parent?.replaceChild(createDom(vnode, handlers, domChildNamespace(parent)), dom);
     return;
   }
   const dirtyProps = dirtyFormProperties(dom, vnode);
@@ -1113,7 +1151,7 @@ function hydrateNode(
       expected: describeVNode(child),
       actual: undefined,
     });
-    dom.appendChild(createDom(child, handlers));
+    dom.appendChild(createDom(child, handlers, domChildNamespace(dom)));
   });
   reportExtraHydrationChildren(dom, vnode.children?.length ?? 0, path, onMismatch);
   removeExtraChildren(dom, vnode.children?.length ?? 0);
@@ -1259,7 +1297,7 @@ function describeVNode(vnode: VNode): string {
 
 function describeDomNode(node: Node): string {
   return node instanceof Element
-    ? `element:${node.tagName.toLowerCase()}`
+    ? `element:${node.localName}`
     : node.nodeType === Node.TEXT_NODE
       ? "text"
       : `node:${node.nodeType}`;
@@ -1268,7 +1306,7 @@ function describeDomNode(node: Node): string {
 function domElementSnapshot(element: Element): VxElementNode {
   return {
     kind: "element",
-    tag: element.tagName.toLowerCase(),
+    tag: element.localName,
     attrs: currentAttrs(element),
     styles: currentStyles(element),
     props: {},

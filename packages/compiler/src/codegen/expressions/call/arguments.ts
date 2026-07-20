@@ -1408,18 +1408,28 @@ const lowerCallArgumentForAbi = ({
           binding?.kind === "scalar-aggregate" &&
           binding.structInfo.layoutKind === "heap-object"
         ) {
+          if (typeof binding.typeId !== "number") {
+            throw new Error("scalar aggregate binding is missing its type id");
+          }
           const materialized = materializeOwnedBinding({
             symbol: argExpr.symbol,
             ctx,
             fnCtx,
           });
           const value = loadBindingValue(materialized.binding, ctx, fnCtx);
+          const coerced = coerceValueToType({
+            value,
+            actualType: binding.typeId,
+            targetType: paramTypeId,
+            ctx,
+            fnCtx,
+          });
           return materialized.setup.length === 0
-            ? value
+            ? coerced
             : ctx.mod.block(
                 null,
-                [...materialized.setup, value],
-                binaryen.getExpressionType(value),
+                [...materialized.setup, coerced],
+                binaryen.getExpressionType(coerced),
               );
         }
       }
