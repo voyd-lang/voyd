@@ -1075,6 +1075,11 @@ describe("next codegen", () => {
     expect(main()).toBe(17);
   });
 
+  it("coerces structural optionals in generic conditional arguments", () => {
+    const main = loadMain("generic_conditional_structural_optional.voyd");
+    expect(main()).toBe(15);
+  });
+
   it("dispatches trait objects with mixed pure/effectful impl ABIs", () => {
     const main = loadMain("trait_object_dispatch_mixed_effects.voyd");
     expect(main()).toBe(18);

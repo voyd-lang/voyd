@@ -1,0 +1,44 @@
+obj Some<T> { value: T }
+obj None {}
+type Optional<T> = Some<T> | None
+
+obj DefaultSize {}
+obj IconSmallSize {}
+type ButtonSize = DefaultSize | IconSmallSize
+
+obj Label { value: i32 }
+
+obj View<Msg> {
+  message: Msg,
+  code: i32
+}
+
+fn button<Msg>({
+  on_press: Msg,
+  size: ButtonSize,
+  aria_label: Optional<Label>
+}) -> View<Msg>
+  let size_code = match(size)
+    DefaultSize: 1
+    IconSmallSize: 10
+  let label_code = match(aria_label)
+    Some<Label> { value }: value.value
+    None: 0
+  View<Msg> { message: on_press, code: size_code + label_code }
+
+fn dialog_close<Msg>({
+  on_close: Msg,
+  size: ButtonSize = DefaultSize {},
+  icon_only: bool = false
+}) -> View<Msg>
+  button<Msg>(
+    on_press: on_close,
+    size: if icon_only then: IconSmallSize {} else: size,
+    aria_label: if icon_only then: Some<Label> { value: Label { value: 5 } } else: None {}
+  )
+
+fn dialog_close_icon<Msg>({ on_close: Msg }) -> View<Msg>
+  dialog_close<Msg>(on_close: on_close, icon_only: true)
+
+pub fn main() -> i32
+  dialog_close_icon<i32>(on_close: 42).code

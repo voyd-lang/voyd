@@ -1,0 +1,61 @@
+use std::array::Array
+use std::msgpack::MsgPack
+use std::optional::types::all
+use std::string::type::String
+use std::vx::self as vx
+
+type View<Msg> = MsgPack
+type Child<Msg> = MsgPack
+
+enum ButtonSize
+  Default
+  IconSmall
+
+enum TestMsg
+  Clicked
+
+fn icon() -> MsgPack
+  vx::html_element(
+    tag: "span",
+    children: Array<MsgPack>::init()
+  )
+
+fn Button<Msg>({
+  children: Array<Child<Msg>>,
+  on_press: Msg,
+  size: ButtonSize = ButtonSize::Default {},
+  aria_label?: String
+}) -> View<Msg>
+  let size_class = match(size)
+    ButtonSize::Default: "default"
+    ButtonSize::IconSmall: "icon-small"
+  let ~attrs = [
+    vx::class(size_class),
+    vx::html_event_message(name: "click", message: on_press)
+  ]
+  if aria_label is Some:
+    attrs.push(vx::attr(name: "aria-label", value: aria_label.value))
+  vx::html_element(tag: "button", attrs: attrs, children: children)
+
+fn DialogClose<Msg>({
+  children: Array<Child<Msg>>,
+  on_close: Msg,
+  size: ButtonSize = ButtonSize::Default {},
+  icon_only: bool = false
+}) -> View<Msg>
+  Button<Msg>(
+    children: children,
+    on_press: on_close,
+    size: if icon_only then: ButtonSize::IconSmall {} else: size,
+    aria_label: if icon_only then: Some<String> { value: "Close" } else: None {}
+  )
+
+fn DialogCloseIcon<Msg>({ on_close: Msg }) -> View<Msg>
+  DialogClose<Msg>(
+    children: [icon()],
+    on_close: on_close,
+    icon_only: true
+  )
+
+pub fn main() -> View<TestMsg>
+  DialogCloseIcon<TestMsg>(on_close: TestMsg::Clicked {})
