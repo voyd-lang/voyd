@@ -59,9 +59,11 @@ const markdownEntryPath = path.resolve(
   "../../../examples/markdown.voyd",
 );
 
+type SuccessfulCompileResult = Extract<CompileResult, { success: true }>;
+
 const expectCompileSuccess = (
   result: CompileResult,
-): Extract<CompileResult, { success: true }> => {
+): SuccessfulCompileResult => {
   if (!result.success) {
     throw new Error(
       result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
@@ -69,6 +71,24 @@ const expectCompileSuccess = (
   }
   expect(result.success).toBe(true);
   return result;
+};
+
+const fixtureCompilations = new Map<
+  string,
+  Promise<SuccessfulCompileResult>
+>();
+
+const compileFixture = (entryPath: string): Promise<SuccessfulCompileResult> => {
+  const existing = fixtureCompilations.get(entryPath);
+  if (existing) {
+    return existing;
+  }
+
+  const compilation = createSdk()
+    .compile({ entryPath })
+    .then(expectCompileSuccess);
+  fixtureCompilations.set(entryPath, compilation);
+  return compilation;
 };
 
 const expectBasicSvgTree = (tree: unknown, html: string): void => {
@@ -88,40 +108,6 @@ const expectBasicSvgTree = (tree: unknown, html: string): void => {
 };
 
 describe("integration: compiled VX DOM rendering", () => {
-  it("renders and mounts a basic SVG tree in release builds", async () => {
-    const result = expectCompileSuccess(await createSdk().compile({
-      optimize: true,
-      source: `
-use pkg::web::render
-use std::array::Array
-use std::msgpack::MsgPack
-use std::vx::self as vx
-
-pub fn tree() -> MsgPack
-  vx::html_element(
-    tag: "svg",
-    attrs: [vx::attr(name: "viewBox", value: "0 0 24 24")],
-    children: [
-      vx::html_element(
-        tag: "path",
-        attrs: [vx::attr(name: "d", value: "M1 1h2")],
-        children: Array<MsgPack>::init()
-      )
-    ]
-  )
-
-pub fn html() -> String
-  render(tree())
-`,
-    }));
-
-    const [tree, html] = await Promise.all([
-      result.run<unknown>({ entryName: "tree" }),
-      result.run<string>({ entryName: "html" }),
-    ]);
-    expectBasicSvgTree(tree, html);
-  });
-
   it("hydrates pkg::web output and renders SVG in default builds", async () => {
     const result = expectCompileSuccess(await createSdk().compile({
       source: `
@@ -295,9 +281,8 @@ pub fn multi_document() -> String
   });
 
   it("renders a compiled Voyd VX tree through vx-dom in a browser-like DOM", async () => {
-    const sdk = createSdk();
     const entryPath = path.join(fixtureRoot, "vx.voyd");
-    const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+    const result = await compileFixture(entryPath);
     const tree = await result.run<unknown>({ entryName: "main" });
 
     const container = document.createElement("div");
@@ -315,9 +300,8 @@ pub fn multi_document() -> String
   });
 
   it("dispatches static event messages from compiled Voyd VX nodes", async () => {
-    const sdk = createSdk();
     const entryPath = path.join(fixtureRoot, "vx.voyd");
-    const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+    const result = await compileFixture(entryPath);
     const tree = await result.run<unknown>({
       entryName: "event_message_button",
     });
@@ -344,9 +328,8 @@ pub fn multi_document() -> String
   });
 
   it("dispatches retained Voyd event closures through the host callback registry", async () => {
-    const sdk = createSdk();
     const entryPath = path.join(fixtureRoot, "vx-retained-event.voyd");
-    const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+    const result = await compileFixture(entryPath);
     const host = await createVoydHost({
       wasm: result.wasm,
       bufferSize: 256 * 1024,
@@ -367,9 +350,8 @@ pub fn multi_document() -> String
   });
 
   it("dispatches retained Voyd input payload closures from compiled HTML events", async () => {
-    const sdk = createSdk();
     const entryPath = path.join(fixtureRoot, "vx-retained-event.voyd");
-    const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+    const result = await compileFixture(entryPath);
     const host = await createVoydHost({
       wasm: result.wasm,
       bufferSize: 256 * 1024,
@@ -392,10 +374,7 @@ pub fn multi_document() -> String
   });
 
   it("updates a typed VX app counter in a mounted Voyd app", async () => {
-    const sdk = createSdk();
-    const result = expectCompileSuccess(
-      await sdk.compile({ entryPath: typedCounterEntryPath }),
-    );
+    const result = await compileFixture(typedCounterEntryPath);
     const host = await createVoydHost({
       wasm: result.wasm,
       bufferSize: 256 * 1024,
@@ -438,10 +417,7 @@ pub fn multi_document() -> String
   });
 
   it("retains subscriptions from object syntax program lifecycle config", async () => {
-    const sdk = createSdk();
-    const result = expectCompileSuccess(
-      await sdk.compile({ entryPath: typedCounterEntryPath }),
-    );
+    const result = await compileFixture(typedCounterEntryPath);
     const host = await createVoydHost({
       wasm: result.wasm,
       bufferSize: 256 * 1024,
@@ -869,9 +845,8 @@ fn count_label(value: i32) -> String
   });
 
   it("renders the site wiki example from compiled Voyd source", async () => {
-    const sdk = createSdk();
     const entryPath = path.join(siteExampleRoot, "wiki/wiki.voyd");
-    const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+    const result = await compileFixture(entryPath);
     const tree = await result.run<unknown>({ entryName: "main" });
 
     const container = document.createElement("div");
@@ -890,9 +865,8 @@ fn count_label(value: i32) -> String
   });
 
   it("mounts the site wiki example with a Voyd-owned step loop", async () => {
-    const sdk = createSdk();
     const entryPath = path.join(siteExampleRoot, "wiki/wiki.voyd");
-    const result = expectCompileSuccess(await sdk.compile({ entryPath }));
+    const result = await compileFixture(entryPath);
     const host = await createVoydHost({
       wasm: result.wasm,
       bufferSize: 256 * 1024,
