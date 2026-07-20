@@ -782,7 +782,7 @@ function domChildNamespace(parent: Node | null): MarkupNamespace {
   if (
     parent instanceof Element &&
     parent.namespaceURI === svgNamespaceUri &&
-    parent.localName !== "foreignObject"
+    childNamespace(parent.localName, "svg") === "svg"
   ) {
     return "svg";
   }

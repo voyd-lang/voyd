@@ -18,6 +18,8 @@ const voidTags = new Set([
   "param", "source", "track", "wbr",
 ]);
 
+const svgHtmlIntegrationPoints = new Set(["desc", "foreignObject", "title"]);
+
 // HTML parsing lowercases SVG names, then restores this defined canonical set.
 // Requiring the parser's resulting spelling keeps SSR and createElementNS trees
 // identical without silently changing the caller's frame.
@@ -113,7 +115,9 @@ export function childNamespace(
   tag: string,
   namespace: MarkupNamespace,
 ): MarkupNamespace {
-  return namespace === "svg" && tag === "foreignObject" ? "html" : namespace;
+  return namespace === "svg" && svgHtmlIntegrationPoints.has(tag)
+    ? "html"
+    : namespace;
 }
 
 export function validateCssPropertyName(value: string, path = "style"): void {

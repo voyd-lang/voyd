@@ -1189,6 +1189,25 @@ test "VX renderer preserves canonical parser-adjusted SVG names":
   assert(rendered.contains("<linearGradient".as_slice()), eq: true)
   assert(rendered.contains(" gradientUnits=\"userSpaceOnUse\"".as_slice()), eq: true)
 
+test "VX renderer uses HTML for children of SVG integration points":
+  let svg = vx::html_element(
+    tag: "svg",
+    children: [
+      vx::html_element(
+        tag: "title",
+        children: [vx::html_element(tag: "div", children: [vx::text("Title")])]
+      ),
+      vx::html_element(
+        tag: "desc",
+        children: [vx::html_element(tag: "span", children: [vx::text("Description")])]
+      )
+    ]
+  )
+
+  let rendered = render(svg)
+  assert(rendered.contains("<title><div>Title</div></title>".as_slice()), eq: true)
+  assert(rendered.contains("<desc><span>Description</span></desc>".as_slice()), eq: true)
+
 test "html rendering unwraps mapped child views":
   let child: MsgPack = <p class="child">Mapped child</p>
   let mapped = map_html<MsgPack, MsgPack>(html: child, handler_id: 7)

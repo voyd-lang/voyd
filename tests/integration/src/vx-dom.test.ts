@@ -158,6 +158,24 @@ pub fn svg_tree() -> MsgPack
 pub fn svg_html() -> String
   render(svg_tree())
 
+pub fn svg_integration_point_tree() -> MsgPack
+  element(
+    tag: "svg",
+    children: [
+      element(
+        tag: "title",
+        children: [element(tag: "div", children: [text("Title")])]
+      ),
+      element(
+        tag: "desc",
+        children: [element(tag: "span", children: [text("Description")])]
+      )
+    ]
+  )
+
+pub fn svg_integration_point_html() -> String
+  render(svg_integration_point_tree())
+
 pub fn invalid_svg_tag_html(tag: String) -> String
   render(element(
     tag: "svg",
@@ -216,14 +234,60 @@ pub fn multi_document() -> String
   )
 `,
     }));
-    const [tree, html, svgTree, svgHtml, multiDocument] = await Promise.all([
+    const [
+      tree,
+      html,
+      svgTree,
+      svgHtml,
+      svgIntegrationPointTree,
+      svgIntegrationPointHtml,
+      multiDocument,
+    ] = await Promise.all([
       result.run<unknown>({ entryName: "tree" }),
       result.run<string>({ entryName: "html" }),
       result.run<unknown>({ entryName: "svg_tree" }),
       result.run<string>({ entryName: "svg_html" }),
+      result.run<unknown>({ entryName: "svg_integration_point_tree" }),
+      result.run<string>({ entryName: "svg_integration_point_html" }),
       result.run<string>({ entryName: "multi_document" }),
     ]);
     expectBasicSvgTree(svgTree, svgHtml);
+    expect(svgIntegrationPointHtml).toBe(
+      "<svg><title><div>Title</div></title><desc><span>Description</span></desc></svg>",
+    );
+    const svgContainer = document.createElement("div");
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    const title = document.createElementNS("http://www.w3.org/2000/svg", "title");
+    const titleDiv = document.createElement("div");
+    titleDiv.textContent = "Title";
+    title.appendChild(titleDiv);
+    const desc = document.createElementNS("http://www.w3.org/2000/svg", "desc");
+    const descSpan = document.createElement("span");
+    descSpan.textContent = "Description";
+    desc.appendChild(descSpan);
+    svg.append(title, desc);
+    svgContainer.appendChild(svg);
+    const onSvgHydrationMismatch = vi.fn();
+    createVxDomRenderer(svgContainer, {
+      onHydrationMismatch: onSvgHydrationMismatch,
+    }).hydrate(svgIntegrationPointTree);
+    expect(titleDiv?.namespaceURI).toBe("http://www.w3.org/1999/xhtml");
+    expect(descSpan?.namespaceURI).toBe("http://www.w3.org/1999/xhtml");
+    expect(svgContainer.querySelector("title > div")).toBe(titleDiv);
+    expect(svgContainer.querySelector("desc > span")).toBe(descSpan);
+    expect(onSvgHydrationMismatch).not.toHaveBeenCalled();
+    const clientSvgContainer = document.createElement("div");
+    const svgRenderer = renderMsgPackNode(
+      svgIntegrationPointTree,
+      clientSvgContainer,
+    );
+    expect(clientSvgContainer.querySelector("title > div")?.namespaceURI).toBe(
+      "http://www.w3.org/1999/xhtml",
+    );
+    expect(clientSvgContainer.querySelector("desc > span")?.namespaceURI).toBe(
+      "http://www.w3.org/1999/xhtml",
+    );
+    svgRenderer.dispose();
     const container = document.createElement("div");
     container.innerHTML = html;
     const section = container.querySelector("section");

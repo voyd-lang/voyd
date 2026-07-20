@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { normalizeRenderFrame } from "../normalize.js";
+import { childNamespace, normalizeRenderFrame } from "../normalize.js";
 
 describe("vx-dom VNode normalization", () => {
   it("accepts case-sensitive names within SVG trees", () => {
@@ -40,6 +40,13 @@ describe("vx-dom VNode normalization", () => {
         },
       })).toThrow("invalid SVG attribute name");
     });
+  });
+
+  it("uses HTML for children of SVG integration points", () => {
+    ["desc", "foreignObject", "title"].forEach((tag) => {
+      expect(childNamespace(tag, "svg")).toBe("html");
+    });
+    expect(childNamespace("g", "svg")).toBe("svg");
   });
 
   it("normalizes legacy create_element payloads", () => {
