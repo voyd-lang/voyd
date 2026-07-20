@@ -52,6 +52,26 @@ describe("vx-dom VNode normalization", () => {
     expect(childNamespace("g", "svg")).toBe("svg");
   });
 
+  it("rejects HTML parser breakout tags within SVG", () => {
+    [
+      "b", "big", "blockquote", "body", "br", "center", "code", "dd",
+      "div", "dl", "dt", "em", "embed", "font", "h1", "h2", "h3",
+      "h4", "h5", "h6", "head", "hr", "i", "img", "li", "listing",
+      "menu", "meta", "nobr", "ol", "p", "pre", "ruby", "s", "small",
+      "span", "strike", "strong", "sub", "sup", "table", "tt", "u",
+      "ul", "var",
+    ].forEach((tag) => {
+      expect(() => normalizeRenderFrame({
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "svg",
+          children: [{ kind: "element", tag }],
+        },
+      })).toThrow("invalid SVG tag name");
+    });
+  });
+
   it("normalizes legacy create_element payloads", () => {
     expect(
       normalizeRenderFrame({

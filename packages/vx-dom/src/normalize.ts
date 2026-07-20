@@ -19,6 +19,13 @@ const voidTags = new Set([
 ]);
 
 const svgHtmlIntegrationPoints = new Set(["desc", "foreignObject", "title"]);
+const svgForeignContentBreakoutTags = new Set([
+  "b", "big", "blockquote", "body", "br", "center", "code", "dd", "div",
+  "dl", "dt", "em", "embed", "font", "h1", "h2", "h3", "h4", "h5",
+  "h6", "head", "hr", "i", "img", "li", "listing", "menu", "meta",
+  "nobr", "ol", "p", "pre", "ruby", "s", "small", "span", "strike",
+  "strong", "sub", "sup", "table", "tt", "u", "ul", "var",
+]);
 
 // HTML parsing lowercases SVG names, then restores this defined canonical set.
 // Requiring the parser's resulting spelling keeps SSR and createElementNS trees
@@ -78,6 +85,7 @@ export function validateHtmlAttributeName(value: string, path = "attribute"): vo
 export function validateSvgTagName(value: string, path = "tag"): void {
   if (
     !/^[A-Za-z][A-Za-z0-9:-]*$/.test(value) ||
+    svgForeignContentBreakoutTags.has(value) ||
     !isCanonicalSvgName(value, parserAdjustedSvgTagNames)
   ) {
     throw new Error(`vx-dom: invalid SVG tag name at ${path}: ${JSON.stringify(value)}`);

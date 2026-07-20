@@ -528,6 +528,20 @@ fn is_raw_text_tag(tag: StringSlice) -> bool
 fn is_svg_html_integration_point(tag: String) -> bool
   tag == "desc" or tag == "foreignObject" or tag == "title"
 
+fn is_svg_foreign_content_breakout_tag(tag: String) -> bool
+  tag == "b" or tag == "big" or tag == "blockquote" or tag == "body" or
+    tag == "br" or tag == "center" or tag == "code" or tag == "dd" or
+    tag == "div" or tag == "dl" or tag == "dt" or tag == "em" or
+    tag == "embed" or tag == "font" or tag == "h1" or tag == "h2" or
+    tag == "h3" or tag == "h4" or tag == "h5" or tag == "h6" or
+    tag == "head" or tag == "hr" or tag == "i" or tag == "img" or
+    tag == "li" or tag == "listing" or tag == "menu" or tag == "meta" or
+    tag == "nobr" or tag == "ol" or tag == "p" or tag == "pre" or
+    tag == "ruby" or tag == "s" or tag == "small" or tag == "span" or
+    tag == "strike" or tag == "strong" or tag == "sub" or tag == "sup" or
+    tag == "table" or tag == "tt" or tag == "u" or tag == "ul" or
+    tag == "var"
+
 fn preserve_leading_newline(tag: String, children: String) -> String
   if (tag == "listing" or tag == "pre" or tag == "textarea") and children.starts_with("\n"):
     return "\n".as_slice().to_string().concat(children)
@@ -587,7 +601,7 @@ fn is_valid_property_value({ name: String, value: MsgPack }) -> bool
 fn is_valid_tag_name(name: String, svg_element: bool) -> bool
   if name.is_empty() or (if svg_element then: not is_ascii_letter(name.get_byte(0) ?? 0) else: not is_ascii_lowercase(name.get_byte(0) ?? 0)):
     return false
-  if svg_element and name != canonical_svg_tag_name(name):
+  if svg_element and (name != canonical_svg_tag_name(name) or is_svg_foreign_content_breakout_tag(name)):
     return false
   name_bytes_match(name, where: (byte: i32) -> bool =>
     (if svg_element then: is_ascii_letter(byte) else: is_ascii_lowercase(byte)) or
