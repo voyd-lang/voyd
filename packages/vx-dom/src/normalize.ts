@@ -84,7 +84,7 @@ export function validateHtmlAttributeName(value: string, path = "attribute"): vo
 
 export function validateSvgTagName(value: string, path = "tag"): void {
   if (
-    !/^[A-Za-z][A-Za-z0-9:-]*$/.test(value) ||
+    !/^[A-Za-z][A-Za-z0-9-]*$/.test(value) ||
     svgForeignContentBreakoutTags.has(value) ||
     !isCanonicalSvgName(value, parserAdjustedSvgTagNames)
   ) {

@@ -605,7 +605,7 @@ fn is_valid_tag_name(name: String, svg_element: bool) -> bool
     return false
   name_bytes_match(name, where: (byte: i32) -> bool =>
     (if svg_element then: is_ascii_letter(byte) else: is_ascii_lowercase(byte)) or
-      is_ascii_digit(byte) or byte == 45 or byte == 58
+      is_ascii_digit(byte) or byte == 45 or (not svg_element and byte == 58)
   )
 
 fn canonical_svg_tag_name(name: String) -> String

@@ -311,9 +311,9 @@ pub fn multi_document() -> String
     await expect(result.run<string>({ entryName: "uppercase_attribute_html" })).rejects.toThrow();
     await Promise.all(
       [
-        "br", "div", "fedropshadow", "font", "foreignobject", "listing",
-        "lineargradient", "p", "pre", "span", "table", "ForeignObject",
-        "PATH",
+        "br", "div", "fedropshadow", "font", "foo:bar", "foreignobject",
+        "listing", "lineargradient", "p", "pre", "span", "table",
+        "ForeignObject", "PATH",
       ].map((tag) =>
         expect(result.run<string>({
           entryName: "invalid_svg_tag_html",

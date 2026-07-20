@@ -45,6 +45,17 @@ describe("vx-dom VNode normalization", () => {
     });
   });
 
+  it("rejects prefixed SVG tags that cannot hydrate by local name", () => {
+    expect(() => normalizeRenderFrame({
+      version: 1,
+      root: {
+        kind: "element",
+        tag: "svg",
+        children: [{ kind: "element", tag: "foo:bar" }],
+      },
+    })).toThrow("invalid SVG tag name");
+  });
+
   it("uses HTML for children of SVG integration points", () => {
     ["desc", "foreignObject", "title"].forEach((tag) => {
       expect(childNamespace(tag, "svg")).toBe("html");
