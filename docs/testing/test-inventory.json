@@ -2359,10 +2359,22 @@
     "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
   },
   {
+    "file": "packages/web/src/openapi.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web OpenAPI document building, type reification, and documentation propagation through the native Voyd test runner."
+  },
+  {
     "file": "packages/web/src/phase2.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
     "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/web/src/phase3.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web SSE formatting, multipart parsing, and content negotiation through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/web.test.voyd",

@@ -1,0 +1,39 @@
+//! Web server entrypoint for lazy request bodies.
+
+use std::error::HostError
+use std::http::{ IncomingRequest, Response }
+use std::http::server::self as server
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+use std::task::self as task
+use super::router::App
+
+/// Serves a Web app with request-body streaming enabled.
+///
+/// Routes marked `.streaming()` can access the one-shot reader with
+/// `ctx.streaming_body()`. Other routes are buffered lazily so ordinary body
+/// extractors can coexist in the same app.
+pub fn serve(
+  app: App,
+  {
+    port: i32,
+    host?: String,
+    shutdown_timeout?: i32,
+    max_body_bytes?: i32,
+    max_pending_requests?: i32
+  }
+): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  server::serve_each_streaming(
+    config: server::ServerConfig::init(
+      port: port,
+      host: host,
+      max_body_bytes: max_body_bytes,
+      max_pending_requests: max_pending_requests,
+      response_timeout_millis: shutdown_timeout,
+      stream_request_bodies: true
+    ),
+    policy: server::ServeTaskPolicy::detached(),
+    handle: (request: IncomingRequest, body: server::RequestBody) -> Response =>
+      app.handle_streaming(request, body)
+  )

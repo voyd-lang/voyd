@@ -1,0 +1,31 @@
+//! General streaming-response helpers.
+
+use std::bytes::Bytes
+use std::error::HostError
+use std::http::{ Body, Response }
+use std::http::server::self as server
+use std::result::types::Result
+use std::string::type::{ String, StringSlice }
+
+/// Opens a response and runs `body` while its body stream remains writable.
+///
+/// Each `write` waits for host backpressure. The server closes the stream when
+/// the callback returns. A producer should stop when a write reports that the
+/// client disconnected.
+pub fn stream(
+  response: Response,
+  { body: fn() : (server::ResponseWriter, open) -> void }
+): (server::ResponseStream, open) -> Response
+  server::stream(response.with(body: Body::empty()), body: body)
+
+/// Writes one byte chunk to the current response stream.
+pub fn write(chunk: Bytes): server::ResponseWriter -> Result<Unit, HostError>
+  server::write(chunk)
+
+/// Writes one UTF-8 chunk to the current response stream.
+pub fn write(chunk: StringSlice): server::ResponseWriter -> Result<Unit, HostError>
+  server::write(Body::text(chunk).as_bytes())
+
+/// Writes one UTF-8 chunk to the current response stream.
+pub fn write(chunk: String): server::ResponseWriter -> Result<Unit, HostError>
+  write(chunk.as_slice())

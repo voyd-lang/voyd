@@ -13,8 +13,16 @@ export type NodeHttpServerResponse = {
   statusCode: number;
   statusMessage: string;
   setHeader: (name: string, value: string | string[]) => void;
-  once: (event: "error", listener: (error: Error) => void) => void;
-  off: (event: "error", listener: (error: Error) => void) => void;
+  once: (
+    event: "error" | "drain" | "close",
+    listener: ((error: Error) => void) | (() => void)
+  ) => void;
+  off: (
+    event: "error" | "drain" | "close",
+    listener: ((error: Error) => void) | (() => void)
+  ) => void;
+  flushHeaders?: () => void;
+  write: (chunk: string | Uint8Array, callback?: () => void) => boolean;
   end: (chunk?: string | Uint8Array, callback?: () => void) => void;
 };
 

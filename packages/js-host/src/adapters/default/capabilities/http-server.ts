@@ -3,6 +3,7 @@ import {
   hostError,
   hostOk,
   httpServerAcceptSuccessPayload,
+  maxTransportSafeHttpServerChunkBytes,
   isRecord,
   readField,
   toNumberOrUndefined,
@@ -25,19 +26,48 @@ import {
   type CapabilityDefinition,
   type DefaultAdapterHttpHeader,
   type DefaultAdapterHttpRequest,
+  type DefaultAdapterHttpRequestChunk,
   type DefaultAdapterHttpResponse,
+  type DefaultAdapterHttpResponseChunk,
+  type DefaultAdapterHttpResponseHead,
   type DefaultAdapterHttpServerConfig,
 } from "../types.js";
+import { MIN_EFFECT_BUFFER_SIZE } from "../../../runtime/constants.js";
 
 const DEFAULT_MAX_BODY_BYTES = 1024 * 1024;
 const DEFAULT_MAX_PENDING_REQUESTS = 100;
 const DEFAULT_RESPONSE_TIMEOUT_MILLIS = 30_000;
 const NULL_BODY_STATUSES = new Set([204, 205, 304]);
+const HTTP_SERVER_PAYLOAD_TOO_LARGE_ERROR_CODE = 3;
+
+class HttpServerPayloadTooLargeError extends Error {
+  readonly code = HTTP_SERVER_PAYLOAD_TOO_LARGE_ERROR_CODE;
+}
+
+const httpServerErrorPayload = (error: unknown): Record<string, unknown> => {
+  const code = toNumberOrUndefined(readField(error, "code"));
+  return hostError(
+    error instanceof Error ? error.message : String(error),
+    code === undefined ? 1 : Math.trunc(code)
+  );
+};
 
 type PendingNodeResponse = {
   response: NodeHttpServerResponse;
   completed: boolean;
+  started: boolean;
   timeoutHandle?: ReturnType<typeof setTimeout>;
+};
+
+type NodeRequestBodySource = {
+  iterator: AsyncIterator<unknown>;
+  bytesRead: number;
+  cancel: () => Promise<void>;
+};
+
+type WebRequestBodySource = {
+  read: () => Promise<DefaultAdapterHttpRequestChunk>;
+  cancel: () => Promise<void>;
 };
 
 type NodeServerState = {
@@ -48,10 +78,12 @@ type NodeServerState = {
     reject: (error: Error) => void;
   }>;
   pendingResponses: Map<number, PendingNodeResponse>;
+  requestBodies: Map<number, NodeRequestBodySource>;
   closed: boolean;
   maxBodyBytes: number;
   maxPendingRequests: number;
   responseTimeoutMillis: number;
+  streamRequestBodies: boolean;
 };
 
 type RequestQueueState = {
@@ -66,15 +98,23 @@ type RequestQueueState = {
 type WebPendingResponse = {
   resolve: (response: unknown) => void;
   completed: boolean;
+  started: boolean;
+  writer?: {
+    write: (chunk: Uint8Array) => Promise<void>;
+    close: () => Promise<void>;
+    abort: (reason?: unknown) => Promise<void>;
+  };
   timeoutHandle?: ReturnType<typeof setTimeout>;
 };
 
 type WebServerState = RequestQueueState & {
   closeRuntime: () => Promise<void>;
   pendingResponses: Map<number, WebPendingResponse>;
+  requestBodies: Map<number, WebRequestBodySource>;
   closed: boolean;
   maxBodyBytes: number;
   responseTimeoutMillis: number;
+  streamRequestBodies: boolean;
 };
 
 type WebServerHandle = {
@@ -88,8 +128,78 @@ type HttpServerSource = {
   unavailableReason: string;
   listen: (config: DefaultAdapterHttpServerConfig) => Promise<number>;
   accept: (serverId: number) => Promise<DefaultAdapterHttpRequest>;
+  readRequest: (requestId: number) => Promise<DefaultAdapterHttpRequestChunk>;
   respond: (response: DefaultAdapterHttpResponse) => Promise<void>;
+  startResponse: (response: DefaultAdapterHttpResponseHead) => Promise<void>;
+  writeResponse: (response: DefaultAdapterHttpResponseChunk) => Promise<void>;
+  finishResponse: (requestId: number) => Promise<void>;
   close: (serverId: number) => Promise<void>;
+};
+
+const transportSafeHttpServerSource = ({
+  source,
+  maxChunkBytes,
+}: {
+  source: HttpServerSource;
+  maxChunkBytes: number;
+}): HttpServerSource => {
+  const remainder = new Map<number, DefaultAdapterHttpRequestChunk>();
+  const serverRequests = new Map<number, Set<number>>();
+  const clearRequest = (requestId: number): void => {
+    remainder.delete(requestId);
+    for (const requests of serverRequests.values()) {
+      requests.delete(requestId);
+    }
+  };
+  const nextChunk = (value: DefaultAdapterHttpRequestChunk): DefaultAdapterHttpRequestChunk => {
+    if (maxChunkBytes <= 0) {
+      throw new Error("http server effect buffer is too small for request streaming");
+    }
+    if (value.chunk.byteLength <= maxChunkBytes) {
+      clearRequest(value.done ? value.requestId : -1);
+      return value;
+    }
+    const head = value.chunk.slice(0, maxChunkBytes);
+    remainder.set(value.requestId, {
+      requestId: value.requestId,
+      chunk: value.chunk.slice(maxChunkBytes),
+      done: value.done,
+    });
+    return { requestId: value.requestId, chunk: head, done: false };
+  };
+  return {
+    ...source,
+    accept: async (serverId) => {
+      const request = await source.accept(serverId);
+      const requests = serverRequests.get(serverId) ?? new Set<number>();
+      requests.add(request.requestId);
+      serverRequests.set(serverId, requests);
+      return request;
+    },
+    readRequest: async (requestId) => {
+      const pending = remainder.get(requestId);
+      if (pending) {
+        remainder.delete(requestId);
+        return nextChunk(pending);
+      }
+      return nextChunk(await source.readRequest(requestId));
+    },
+    respond: async (response) => {
+      clearRequest(response.requestId);
+      await source.respond(response);
+    },
+    finishResponse: async (requestId) => {
+      clearRequest(requestId);
+      await source.finishResponse(requestId);
+    },
+    close: async (serverId) => {
+      for (const requestId of serverRequests.get(serverId) ?? []) {
+        remainder.delete(requestId);
+      }
+      serverRequests.delete(serverId);
+      await source.close(serverId);
+    },
+  };
 };
 
 const toByteArray = (value: unknown): Uint8Array => {
@@ -201,6 +311,9 @@ const decodeConfig = (payload: unknown): DefaultAdapterHttpServerConfig => {
     readField(payload, "response_timeout_millis") ??
       readField(payload, "responseTimeoutMillis")
   );
+  const streamRequestBodies =
+    readField(payload, "stream_request_bodies") === true ||
+    readField(payload, "streamRequestBodies") === true;
   return {
     port: Math.trunc(port),
     host: toStringOrUndefined(readField(payload, "host")) || undefined,
@@ -214,6 +327,7 @@ const decodeConfig = (payload: unknown): DefaultAdapterHttpServerConfig => {
       responseTimeoutMillis === undefined
         ? undefined
         : Math.max(1, Math.trunc(responseTimeoutMillis)),
+    streamRequestBodies,
   };
 };
 
@@ -236,6 +350,29 @@ const decodeResponsePayload = (payload: unknown): DefaultAdapterHttpResponse => 
       "",
     headers: decodeHeaders(readField(response, "headers")),
     body: toByteArray(readField(response, "body")),
+  };
+};
+
+const decodeResponseHeadPayload = (
+  payload: unknown
+): DefaultAdapterHttpResponseHead => {
+  const { body: _body, ...head } = decodeResponsePayload(payload);
+  if (NULL_BODY_STATUSES.has(head.status)) {
+    throw new Error(`status ${head.status} cannot open a response body stream`);
+  }
+  return head;
+};
+
+const decodeResponseChunkPayload = (
+  payload: unknown
+): DefaultAdapterHttpResponseChunk => {
+  const requestId = toNumberOrUndefined(readField(payload, "request_id"));
+  if (requestId === undefined) {
+    throw new Error("http server response chunk must include request_id");
+  }
+  return {
+    requestId: Math.trunc(requestId),
+    chunk: toByteArray(readField(payload, "chunk")),
   };
 };
 
@@ -276,7 +413,9 @@ const readRequestBody = async ({
       typeof chunk === "string" ? new TextEncoder().encode(chunk) : toByteArray(chunk);
     total += bytes.byteLength;
     if (total > maxBodyBytes) {
-      throw new Error(`request body exceeds max_body_bytes (${maxBodyBytes})`);
+      throw new HttpServerPayloadTooLargeError(
+        `request body exceeds max_body_bytes (${maxBodyBytes})`
+      );
     }
     chunks.push(bytes);
   }
@@ -318,11 +457,11 @@ const webResponse = ({
   status: number;
   reason?: string;
   headers?: DefaultAdapterHttpHeader[];
-  body: string | Uint8Array;
+  body: unknown;
 }): unknown => {
   const ResponseCtor = globalRecord.Response as
     | (new (
-        body?: string | Uint8Array,
+        body?: unknown,
         init?: {
           status?: number;
           statusText?: string;
@@ -340,37 +479,154 @@ const webResponse = ({
   });
 };
 
+const applyNodeResponseHead = ({
+  target,
+  response,
+}: {
+  target: NodeHttpServerResponse;
+  response: DefaultAdapterHttpResponseHead;
+}): void => {
+  const headers = new Map<string, string[]>();
+  for (const header of response.headers) {
+    const existing = headers.get(header.name) ?? [];
+    existing.push(header.value);
+    headers.set(header.name, existing);
+  }
+  for (const [name, values] of headers) {
+    target.setHeader(name, values.length === 1 ? values[0] ?? "" : values);
+  }
+
+  target.statusCode = response.status;
+  target.statusMessage = response.reason;
+};
+
 const writeNodeResponse = ({
   target,
   response,
 }: {
   target: NodeHttpServerResponse;
   response: DefaultAdapterHttpResponse;
+}): Promise<void> => {
+  applyNodeResponseHead({ target, response });
+  return endNodeResponse({
+    target,
+    chunk: response.body,
+    disconnectedMessage: "client disconnected before response completed",
+  });
+};
+
+const endNodeResponse = ({
+  target,
+  chunk,
+  disconnectedMessage,
+}: {
+  target: NodeHttpServerResponse;
+  chunk?: string | Uint8Array;
+  disconnectedMessage: string;
 }): Promise<void> =>
   new Promise((resolve, reject) => {
     if (target.destroyed || target.writableEnded) {
-      reject(new Error("client disconnected before response"));
+      reject(new Error(disconnectedMessage));
       return;
     }
 
-    const headers = new Map<string, string[]>();
-    for (const header of response.headers) {
-      const existing = headers.get(header.name) ?? [];
-      existing.push(header.value);
-      headers.set(header.name, existing);
-    }
-    for (const [name, values] of headers) {
-      target.setHeader(name, values.length === 1 ? values[0] ?? "" : values);
-    }
-
-    target.statusCode = response.status;
-    target.statusMessage = response.reason;
-    target.once("error", reject);
-    target.end(response.body, () => {
-      target.off("error", reject);
+    let settled = false;
+    const cleanup = (): void => {
+      target.off("error", onError);
+      target.off("close", onClose);
+    };
+    const onError = (error: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onClose = (): void => onError(new Error(disconnectedMessage));
+    target.once("error", onError);
+    target.once("close", onClose);
+    target.end(chunk, () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
       resolve();
     });
   });
+
+const writeNodeResponseChunk = ({
+  target,
+  chunk,
+}: {
+  target: NodeHttpServerResponse;
+  chunk: Uint8Array;
+}): Promise<void> =>
+  new Promise((resolve, reject) => {
+    if (target.destroyed || target.writableEnded) {
+      reject(new Error("client disconnected during streamed response"));
+      return;
+    }
+
+    let settled = false;
+    const cleanup = (): void => {
+      target.off("error", onError);
+      target.off("close", onClose);
+      target.off("drain", onDrain);
+    };
+    const resolveOnce = (): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const rejectOnce = (error: Error): void => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      cleanup();
+      reject(error);
+    };
+    const onError = (error: Error): void => rejectOnce(error);
+    const onClose = (): void =>
+      rejectOnce(new Error("client disconnected during streamed response"));
+    const onDrain = (): void => resolveOnce();
+
+    target.once("error", onError);
+    target.once("close", onClose);
+    const accepted = target.write(chunk, () => {
+      if (accepted) {
+        resolveOnce();
+      }
+    });
+    if (!accepted) {
+      target.once("drain", onDrain);
+    }
+  });
+
+const cancelRequestBody = <T extends { cancel: () => Promise<void> }>(
+  requestBodies: Map<number, T>,
+  requestId: number
+): void => {
+  const source = requestBodies.get(requestId);
+  if (!source) {
+    return;
+  }
+  requestBodies.delete(requestId);
+  void source.cancel().catch(() => undefined);
+};
+
+const cancelAllRequestBodies = <T extends { cancel: () => Promise<void> }>(
+  requestBodies: Map<number, T>
+): void => {
+  for (const requestId of requestBodies.keys()) {
+    cancelRequestBody(requestBodies, requestId);
+  }
+};
 
 const completePendingNodeResponse = ({
   state,
@@ -392,11 +648,38 @@ const completePendingNodeResponse = ({
     clearTimeout(pending.timeoutHandle);
   }
   state.pendingResponses.delete(requestId);
+  cancelRequestBody(state.requestBodies, requestId);
   state.queue = state.queue.filter((request) => request.requestId !== requestId);
   if (!pending.response.destroyed && !pending.response.writableEnded) {
+    if (pending.started) {
+      pending.response.end();
+      return;
+    }
     pending.response.statusCode = status;
     pending.response.end(body);
   }
+};
+
+const resetPendingNodeResponseTimeout = ({
+  state,
+  requestId,
+  pending,
+}: {
+  state: NodeServerState;
+  requestId: number;
+  pending: PendingNodeResponse;
+}): void => {
+  if (pending.timeoutHandle !== undefined) {
+    clearTimeout(pending.timeoutHandle);
+  }
+  pending.timeoutHandle = setTimeout(() => {
+    completePendingNodeResponse({
+      state,
+      requestId,
+      status: 500,
+      body: "server response timeout",
+    });
+  }, state.responseTimeoutMillis);
 };
 
 const addPendingNodeResponse = ({
@@ -408,16 +691,13 @@ const addPendingNodeResponse = ({
   requestId: number;
   response: NodeHttpServerResponse;
 }): void => {
-  const pending: PendingNodeResponse = { response, completed: false };
-  pending.timeoutHandle = setTimeout(() => {
-    completePendingNodeResponse({
-      state,
-      requestId,
-      status: 500,
-      body: "server response timeout",
-    });
-  }, state.responseTimeoutMillis);
+  const pending: PendingNodeResponse = {
+    response,
+    completed: false,
+    started: false,
+  };
   state.pendingResponses.set(requestId, pending);
+  resetPendingNodeResponseTimeout({ state, requestId, pending });
 };
 
 const releasePendingNodeResponses = ({
@@ -434,17 +714,19 @@ const releasePendingNodeResponses = ({
     if (pending.timeoutHandle !== undefined) {
       clearTimeout(pending.timeoutHandle);
     }
-    if (
-      !pending.completed &&
-      !pending.response.destroyed &&
-      !pending.response.writableEnded
-    ) {
-      pending.completed = true;
+    if (pending.completed || pending.response.destroyed || pending.response.writableEnded) {
+      continue;
+    }
+    pending.completed = true;
+    if (pending.started) {
+      pending.response.end();
+    } else {
       pending.response.statusCode = 500;
       pending.response.end("server closed before response");
     }
   }
   state.pendingResponses.clear();
+  cancelAllRequestBodies(state.requestBodies);
   state.queue = [];
 };
 
@@ -459,7 +741,9 @@ const readWebRequestBody = async ({
   if (typeof arrayBuffer === "function") {
     const body = toByteArray(await (arrayBuffer as () => Promise<unknown>).call(request));
     if (body.byteLength > maxBodyBytes) {
-      throw new Error(`request body exceeds max_body_bytes (${maxBodyBytes})`);
+      throw new HttpServerPayloadTooLargeError(
+        `request body exceeds max_body_bytes (${maxBodyBytes})`
+      );
     }
     return body;
   }
@@ -468,16 +752,71 @@ const readWebRequestBody = async ({
   if (typeof text === "function") {
     const body = toByteArray(await (text as () => Promise<unknown>).call(request));
     if (body.byteLength > maxBodyBytes) {
-      throw new Error(`request body exceeds max_body_bytes (${maxBodyBytes})`);
+      throw new HttpServerPayloadTooLargeError(
+        `request body exceeds max_body_bytes (${maxBodyBytes})`
+      );
     }
     return body;
   }
 
   const body = toByteArray(readField(request, "body"));
   if (body.byteLength > maxBodyBytes) {
-    throw new Error(`request body exceeds max_body_bytes (${maxBodyBytes})`);
+    throw new HttpServerPayloadTooLargeError(
+      `request body exceeds max_body_bytes (${maxBodyBytes})`
+    );
   }
   return body;
+};
+
+const createWebRequestBodySource = ({
+  request,
+  requestId,
+  maxBodyBytes,
+}: {
+  request: unknown;
+  requestId: number;
+  maxBodyBytes: number;
+}): WebRequestBodySource => {
+  const body = readField(request, "body");
+  const getReader = readField(body, "getReader");
+  let bytesRead = 0;
+  if (typeof getReader === "function") {
+    const reader = (
+      getReader as () => {
+        read: () => Promise<{ done?: boolean; value?: unknown }>;
+        cancel?: (reason?: unknown) => Promise<void>;
+      }
+    ).call(body);
+    return {
+      read: async () => {
+        const next = await reader.read();
+        const chunk = next.done ? new Uint8Array() : toByteArray(next.value);
+        bytesRead += chunk.byteLength;
+        if (bytesRead > maxBodyBytes) {
+          throw new HttpServerPayloadTooLargeError(
+            `request body exceeds max_body_bytes (${maxBodyBytes})`
+          );
+        }
+        return { requestId, chunk, done: next.done === true };
+      },
+      cancel: async () => {
+        await reader.cancel?.("HTTP response completed before request body");
+      },
+    };
+  }
+
+  let emitted = false;
+  return {
+    read: async () => {
+      if (emitted) {
+        return { requestId, chunk: new Uint8Array(), done: true };
+      }
+      emitted = true;
+      const chunk = await readWebRequestBody({ request, maxBodyBytes });
+      return { requestId, chunk, done: true };
+    },
+    cancel: async () => undefined,
+  };
 };
 
 const completeWebPendingResponse = ({
@@ -498,8 +837,37 @@ const completeWebPendingResponse = ({
     clearTimeout(pending.timeoutHandle);
   }
   state.pendingResponses.delete(requestId);
+  cancelRequestBody(state.requestBodies, requestId);
   state.queue = state.queue.filter((request) => request.requestId !== requestId);
+  if (pending.started && pending.writer) {
+    void pending.writer.abort(new Error("server response timeout"));
+    return;
+  }
   pending.resolve(response);
+};
+
+const resetPendingWebResponseTimeout = ({
+  state,
+  requestId,
+  pending,
+}: {
+  state: WebServerState;
+  requestId: number;
+  pending: WebPendingResponse;
+}): void => {
+  if (pending.timeoutHandle !== undefined) {
+    clearTimeout(pending.timeoutHandle);
+  }
+  pending.timeoutHandle = setTimeout(() => {
+    completeWebPendingResponse({
+      state,
+      requestId,
+      response: webResponse({
+        status: 500,
+        body: "server response timeout",
+      }),
+    });
+  }, state.responseTimeoutMillis);
 };
 
 const addWebPendingResponse = ({
@@ -511,18 +879,13 @@ const addWebPendingResponse = ({
   requestId: number;
   resolve: (response: unknown) => void;
 }): void => {
-  const pending: WebPendingResponse = { resolve, completed: false };
-  pending.timeoutHandle = setTimeout(() => {
-    completeWebPendingResponse({
-      state,
-      requestId,
-      response: webResponse({
-        status: 500,
-        body: "server response timeout",
-      }),
-    });
-  }, state.responseTimeoutMillis);
+  const pending: WebPendingResponse = {
+    resolve,
+    completed: false,
+    started: false,
+  };
   state.pendingResponses.set(requestId, pending);
+  resetPendingWebResponseTimeout({ state, requestId, pending });
 };
 
 const releasePendingWebResponses = ({
@@ -535,7 +898,12 @@ const releasePendingWebResponses = ({
   for (const waiter of state.waiters.splice(0)) {
     waiter.reject(new Error(`http server ${serverId} closed`));
   }
-  for (const [requestId] of state.pendingResponses) {
+  for (const [requestId, pending] of state.pendingResponses) {
+    if (pending.started && pending.writer) {
+      pending.completed = true;
+      void pending.writer.abort(new Error("server closed during streamed response"));
+      continue;
+    }
     completeWebPendingResponse({
       state,
       requestId,
@@ -546,6 +914,7 @@ const releasePendingWebResponses = ({
     });
   }
   state.pendingResponses.clear();
+  cancelAllRequestBodies(state.requestBodies);
   state.queue = [];
 };
 
@@ -559,6 +928,38 @@ const responseFromDefaultAdapterResponse = (
     body: response.body,
   });
 
+const streamingWebResponse = ({
+  response,
+  pending,
+}: {
+  response: DefaultAdapterHttpResponseHead;
+  pending: WebPendingResponse;
+}): unknown => {
+  const TransformStreamCtor = globalRecord.TransformStream as
+    | (new () => {
+        readable: unknown;
+        writable: {
+          getWriter: () => {
+            write: (chunk: Uint8Array) => Promise<void>;
+            close: () => Promise<void>;
+            abort: (reason?: unknown) => Promise<void>;
+          };
+        };
+      })
+    | undefined;
+  if (typeof TransformStreamCtor !== "function") {
+    throw new Error("streaming HTTP responses require TransformStream support");
+  }
+  const stream = new TransformStreamCtor();
+  pending.writer = stream.writable.getWriter();
+  return webResponse({
+    status: response.status,
+    reason: response.reason,
+    headers: response.headers,
+    body: NULL_BODY_STATUSES.has(response.status) ? undefined : stream.readable,
+  });
+};
+
 const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
   const nodeHttp = await maybeNodeHttp();
   if (!nodeHttp) {
@@ -571,7 +972,19 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
       accept: async () => {
         throw new Error("Node HTTP module is unavailable");
       },
+      readRequest: async () => {
+        throw new Error("Node HTTP module is unavailable");
+      },
       respond: async () => {
+        throw new Error("Node HTTP module is unavailable");
+      },
+      startResponse: async () => {
+        throw new Error("Node HTTP module is unavailable");
+      },
+      writeResponse: async () => {
+        throw new Error("Node HTTP module is unavailable");
+      },
+      finishResponse: async () => {
         throw new Error("Node HTTP module is unavailable");
       },
       close: async () => {
@@ -601,12 +1014,14 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
         queue: [],
         waiters: [],
         pendingResponses: new Map(),
+        requestBodies: new Map(),
         closed: false,
         maxBodyBytes: config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
         maxPendingRequests:
           config.maxPendingRequests ?? DEFAULT_MAX_PENDING_REQUESTS,
         responseTimeoutMillis:
           config.responseTimeoutMillis ?? DEFAULT_RESPONSE_TIMEOUT_MILLIS,
+        streamRequestBodies: config.streamRequestBodies ?? false,
       };
 
       const server = nodeHttp.createServer(async (request, response) => {
@@ -619,12 +1034,24 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
             return;
           }
 
-          const body = await readRequestBody({
-            request,
-            maxBodyBytes: state.maxBodyBytes,
-          });
           const requestId = nextRequestId++;
           const url = new URL(request.url ?? "/", "http://localhost");
+          const body = state.streamRequestBodies
+            ? new Uint8Array()
+            : await readRequestBody({
+                request,
+                maxBodyBytes: state.maxBodyBytes,
+              });
+          if (state.streamRequestBodies) {
+            const iterator = request[Symbol.asyncIterator]();
+            state.requestBodies.set(requestId, {
+              iterator,
+              bytesRead: 0,
+              cancel: async () => {
+                await iterator.return?.();
+              },
+            });
+          }
           addPendingNodeResponse({ state, requestId, response });
           const queued = enqueueRequest({
             state,
@@ -635,6 +1062,7 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
               query: url.search.length > 1 ? url.search.slice(1) : undefined,
               headers: headersFromNodeRequest(request),
               body,
+              bodyStreaming: state.streamRequestBodies,
             },
           });
           if (!queued) {
@@ -683,6 +1111,41 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
         state.waiters.push({ resolve, reject });
       });
     },
+    readRequest: async (requestId) => {
+      for (const state of servers.values()) {
+        const source = state.requestBodies.get(requestId);
+        if (!source) {
+          continue;
+        }
+        try {
+          const next = await source.iterator.next();
+          const pending = state.pendingResponses.get(requestId);
+          if (pending && !pending.completed) {
+            resetPendingNodeResponseTimeout({ state, requestId, pending });
+          }
+          if (next.done) {
+            state.requestBodies.delete(requestId);
+            return { requestId, chunk: new Uint8Array(), done: true };
+          }
+          const chunk =
+            typeof next.value === "string"
+              ? new TextEncoder().encode(next.value)
+              : toByteArray(next.value);
+          source.bytesRead += chunk.byteLength;
+          if (source.bytesRead <= state.maxBodyBytes) {
+            return { requestId, chunk, done: false };
+          }
+          cancelRequestBody(state.requestBodies, requestId);
+          throw new HttpServerPayloadTooLargeError(
+            `request body exceeds max_body_bytes (${state.maxBodyBytes})`
+          );
+        } catch (error) {
+          cancelRequestBody(state.requestBodies, requestId);
+          throw error;
+        }
+      }
+      throw new Error(`request ${requestId} has no open request body stream`);
+    },
     respond: async (response) => {
       for (const state of servers.values()) {
         const pending = state.pendingResponses.get(response.requestId);
@@ -697,10 +1160,70 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
           clearTimeout(pending.timeoutHandle);
         }
         state.pendingResponses.delete(response.requestId);
+        cancelRequestBody(state.requestBodies, response.requestId);
         await writeNodeResponse({ target: pending.response, response });
         return;
       }
       throw new Error(`request ${response.requestId} is closed or unknown`);
+    },
+    startResponse: async (response) => {
+      for (const state of servers.values()) {
+        const pending = state.pendingResponses.get(response.requestId);
+        if (!pending) {
+          continue;
+        }
+        if (pending.completed || pending.started) {
+          throw new Error(`request ${response.requestId} was already responded to`);
+        }
+        pending.started = true;
+        resetPendingNodeResponseTimeout({
+          state,
+          requestId: response.requestId,
+          pending,
+        });
+        applyNodeResponseHead({ target: pending.response, response });
+        pending.response.flushHeaders?.();
+        return;
+      }
+      throw new Error(`request ${response.requestId} is closed or unknown`);
+    },
+    writeResponse: async ({ requestId, chunk }) => {
+      for (const state of servers.values()) {
+        const pending = state.pendingResponses.get(requestId);
+        if (!pending) {
+          continue;
+        }
+        if (!pending.started || pending.completed) {
+          throw new Error(`request ${requestId} has no open response stream`);
+        }
+        await writeNodeResponseChunk({ target: pending.response, chunk });
+        resetPendingNodeResponseTimeout({ state, requestId, pending });
+        return;
+      }
+      throw new Error(`request ${requestId} is closed or unknown`);
+    },
+    finishResponse: async (requestId) => {
+      for (const state of servers.values()) {
+        const pending = state.pendingResponses.get(requestId);
+        if (!pending) {
+          continue;
+        }
+        if (!pending.started || pending.completed) {
+          throw new Error(`request ${requestId} has no open response stream`);
+        }
+        pending.completed = true;
+        if (pending.timeoutHandle !== undefined) {
+          clearTimeout(pending.timeoutHandle);
+        }
+        state.pendingResponses.delete(requestId);
+        cancelRequestBody(state.requestBodies, requestId);
+        await endNodeResponse({
+          target: pending.response,
+          disconnectedMessage: "client disconnected before response stream finished",
+        });
+        return;
+      }
+      throw new Error(`request ${requestId} is closed or unknown`);
     },
     close: async (serverId) => {
       const state = servers.get(serverId);
@@ -742,7 +1265,19 @@ const createWebHttpServerSource = ({
       accept: async () => {
         throw new Error(unavailableReason);
       },
+      readRequest: async () => {
+        throw new Error(unavailableReason);
+      },
       respond: async () => {
+        throw new Error(unavailableReason);
+      },
+      startResponse: async () => {
+        throw new Error(unavailableReason);
+      },
+      writeResponse: async () => {
+        throw new Error(unavailableReason);
+      },
+      finishResponse: async () => {
         throw new Error(unavailableReason);
       },
       close: async () => {
@@ -773,12 +1308,14 @@ const createWebHttpServerSource = ({
         queue: [],
         waiters: [],
         pendingResponses: new Map(),
+        requestBodies: new Map(),
         closed: false,
         maxBodyBytes: config.maxBodyBytes ?? DEFAULT_MAX_BODY_BYTES,
         maxPendingRequests:
           config.maxPendingRequests ?? DEFAULT_MAX_PENDING_REQUESTS,
         responseTimeoutMillis:
           config.responseTimeoutMillis ?? DEFAULT_RESPONSE_TIMEOUT_MILLIS,
+        streamRequestBodies: config.streamRequestBodies ?? false,
       };
 
       const handler: WebServerHandler = async (request) => {
@@ -795,11 +1332,23 @@ const createWebHttpServerSource = ({
             });
           }
 
-          const body = await readWebRequestBody({
-            request,
-            maxBodyBytes: state.maxBodyBytes,
-          });
           const requestId = nextRequestId++;
+          const body = state.streamRequestBodies
+            ? new Uint8Array()
+            : await readWebRequestBody({
+                request,
+                maxBodyBytes: state.maxBodyBytes,
+              });
+          if (state.streamRequestBodies) {
+            state.requestBodies.set(
+              requestId,
+              createWebRequestBodySource({
+                request,
+                requestId,
+                maxBodyBytes: state.maxBodyBytes,
+              })
+            );
+          }
           const rawUrl = toStringOrUndefined(readField(request, "url")) ?? "/";
           const url = new URL(rawUrl, "http://localhost");
           const responsePromise = new Promise<unknown>((resolve) => {
@@ -815,6 +1364,7 @@ const createWebHttpServerSource = ({
               query: url.search.length > 1 ? url.search.slice(1) : undefined,
               headers: headersFromWebHeaders(readField(request, "headers")),
               body,
+              bodyStreaming: state.streamRequestBodies,
             },
           });
           if (!queued) {
@@ -854,6 +1404,29 @@ const createWebHttpServerSource = ({
         state.waiters.push({ resolve, reject });
       });
     },
+    readRequest: async (requestId) => {
+      for (const state of servers.values()) {
+        const source = state.requestBodies.get(requestId);
+        if (!source) {
+          continue;
+        }
+        try {
+          const chunk = await source.read();
+          const pending = state.pendingResponses.get(requestId);
+          if (pending && !pending.completed) {
+            resetPendingWebResponseTimeout({ state, requestId, pending });
+          }
+          if (chunk.done) {
+            state.requestBodies.delete(requestId);
+          }
+          return chunk;
+        } catch (error) {
+          cancelRequestBody(state.requestBodies, requestId);
+          throw error;
+        }
+      }
+      throw new Error(`request ${requestId} has no open request body stream`);
+    },
     respond: async (response) => {
       for (const state of servers.values()) {
         const pending = state.pendingResponses.get(response.requestId);
@@ -871,6 +1444,61 @@ const createWebHttpServerSource = ({
         return;
       }
       throw new Error(`request ${response.requestId} is closed or unknown`);
+    },
+    startResponse: async (response) => {
+      for (const state of servers.values()) {
+        const pending = state.pendingResponses.get(response.requestId);
+        if (!pending) {
+          continue;
+        }
+        if (pending.completed || pending.started) {
+          throw new Error(`request ${response.requestId} was already responded to`);
+        }
+        pending.started = true;
+        resetPendingWebResponseTimeout({
+          state,
+          requestId: response.requestId,
+          pending,
+        });
+        pending.resolve(streamingWebResponse({ response, pending }));
+        return;
+      }
+      throw new Error(`request ${response.requestId} is closed or unknown`);
+    },
+    writeResponse: async ({ requestId, chunk }) => {
+      for (const state of servers.values()) {
+        const pending = state.pendingResponses.get(requestId);
+        if (!pending) {
+          continue;
+        }
+        if (!pending.started || pending.completed || !pending.writer) {
+          throw new Error(`request ${requestId} has no open response stream`);
+        }
+        await pending.writer.write(chunk);
+        resetPendingWebResponseTimeout({ state, requestId, pending });
+        return;
+      }
+      throw new Error(`request ${requestId} is closed or unknown`);
+    },
+    finishResponse: async (requestId) => {
+      for (const state of servers.values()) {
+        const pending = state.pendingResponses.get(requestId);
+        if (!pending) {
+          continue;
+        }
+        if (!pending.started || pending.completed || !pending.writer) {
+          throw new Error(`request ${requestId} has no open response stream`);
+        }
+        pending.completed = true;
+        if (pending.timeoutHandle !== undefined) {
+          clearTimeout(pending.timeoutHandle);
+        }
+        state.pendingResponses.delete(requestId);
+        cancelRequestBody(state.requestBodies, requestId);
+        await pending.writer.close();
+        return;
+      }
+      throw new Error(`request ${requestId} is closed or unknown`);
     },
     close: async (serverId) => {
       const state = servers.get(serverId);
@@ -965,12 +1593,20 @@ const createBunHttpServerSource = (): HttpServerSource => {
 const createHookHttpServerSource = ({
   listen,
   accept,
+  readRequest,
   respond,
+  startResponse,
+  writeResponse,
+  finishResponse,
   close,
 }: {
   listen?: (config: DefaultAdapterHttpServerConfig) => Promise<number>;
   accept?: (serverId: number) => Promise<DefaultAdapterHttpRequest>;
+  readRequest?: (requestId: number) => Promise<DefaultAdapterHttpRequestChunk>;
   respond?: (response: DefaultAdapterHttpResponse) => Promise<void>;
+  startResponse?: (response: DefaultAdapterHttpResponseHead) => Promise<void>;
+  writeResponse?: (response: DefaultAdapterHttpResponseChunk) => Promise<void>;
+  finishResponse?: (requestId: number) => Promise<void>;
   close?: (serverId: number) => Promise<void>;
 }): HttpServerSource | undefined => {
   if (listen && accept && respond && close) {
@@ -979,7 +1615,27 @@ const createHookHttpServerSource = ({
       unavailableReason: "",
       listen,
       accept,
+      readRequest:
+        readRequest ??
+        (async () => {
+          throw new Error("http server request streaming hooks are unavailable");
+        }),
       respond,
+      startResponse:
+        startResponse ??
+        (async () => {
+          throw new Error("http server streaming hooks are unavailable");
+        }),
+      writeResponse:
+        writeResponse ??
+        (async () => {
+          throw new Error("http server streaming hooks are unavailable");
+        }),
+      finishResponse:
+        finishResponse ??
+        (async () => {
+          throw new Error("http server streaming hooks are unavailable");
+        }),
       close,
     };
   }
@@ -994,7 +1650,11 @@ const createHttpServerSource = async ({
   hooks: {
     listen?: (config: DefaultAdapterHttpServerConfig) => Promise<number>;
     accept?: (serverId: number) => Promise<DefaultAdapterHttpRequest>;
+    readRequest?: (requestId: number) => Promise<DefaultAdapterHttpRequestChunk>;
     respond?: (response: DefaultAdapterHttpResponse) => Promise<void>;
+    startResponse?: (response: DefaultAdapterHttpResponseHead) => Promise<void>;
+    writeResponse?: (response: DefaultAdapterHttpResponseChunk) => Promise<void>;
+    finishResponse?: (requestId: number) => Promise<void>;
     close?: (serverId: number) => Promise<void>;
   };
 }): Promise<HttpServerSource> => {
@@ -1026,7 +1686,19 @@ const createHttpServerSource = async ({
     accept: async () => {
       throw new Error(unavailableReason);
     },
+    readRequest: async () => {
+      throw new Error(unavailableReason);
+    },
     respond: async () => {
+      throw new Error(unavailableReason);
+    },
+    startResponse: async () => {
+      throw new Error(unavailableReason);
+    },
+    writeResponse: async () => {
+      throw new Error(unavailableReason);
+    },
+    finishResponse: async () => {
       throw new Error(unavailableReason);
     },
     close: async () => {
@@ -1049,15 +1721,34 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
     if (entries.length === 0) {
       return 0;
     }
+    if (
+      entries.some((entry) => entry.opName === "write_response_raw") &&
+      effectBufferSize < MIN_EFFECT_BUFFER_SIZE
+    ) {
+      throw new Error(
+        `http-server response streaming requires an effect buffer of at least ${MIN_EFFECT_BUFFER_SIZE} bytes`
+      );
+    }
 
-    const httpServerSource = await createHttpServerSource({
+    const rawHttpServerSource = await createHttpServerSource({
       runtime,
       hooks: {
         listen: runtimeHooks.httpServerListen,
         accept: runtimeHooks.httpServerAccept,
+        readRequest: runtimeHooks.httpServerReadRequest,
         respond: runtimeHooks.httpServerRespond,
+        startResponse: runtimeHooks.httpServerStartResponse,
+        writeResponse: runtimeHooks.httpServerWriteResponse,
+        finishResponse: runtimeHooks.httpServerFinishResponse,
         close: runtimeHooks.httpServerClose,
       },
+    });
+    const httpServerSource = transportSafeHttpServerSource({
+      source: rawHttpServerSource,
+      maxChunkBytes: Math.min(
+        16_384,
+        maxTransportSafeHttpServerChunkBytes({ effectBufferSize })
+      ),
     });
     if (!httpServerSource.isAvailable) {
       return registerUnsupportedHandlers({
@@ -1116,13 +1807,37 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
           }
           return resume(payload);
         } catch (error) {
-          return resume(
-            hostError(error instanceof Error ? error.message : String(error))
-          );
+          return resume(httpServerErrorPayload(error));
         }
       },
     });
     implementedOps.add("accept_raw");
+
+    registered += registerOpHandler({
+      host,
+      effectId: HTTP_SERVER_EFFECT_ID,
+      opName: "read_request_raw",
+      handler: async ({ resume }, requestId) => {
+        try {
+          const parsedRequestId = toNumberOrUndefined(requestId);
+          if (parsedRequestId === undefined) {
+            throw new Error("http server request read requires a request id");
+          }
+          const result = await httpServerSource.readRequest(
+            Math.trunc(parsedRequestId)
+          );
+          return resume(
+            hostOk({
+              chunk: Array.from(result.chunk.values()),
+              done: result.done,
+            })
+          );
+        } catch (error) {
+          return resume(httpServerErrorPayload(error));
+        }
+      },
+    });
+    implementedOps.add("read_request_raw");
 
     registered += registerOpHandler({
       host,
@@ -1138,6 +1853,55 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
       },
     });
     implementedOps.add("respond_raw");
+
+    registered += registerOpHandler({
+      host,
+      effectId: HTTP_SERVER_EFFECT_ID,
+      opName: "start_response_raw",
+      handler: async ({ tail }, payload) => {
+        try {
+          await httpServerSource.startResponse(decodeResponseHeadPayload(payload));
+          return tail(hostOk());
+        } catch (error) {
+          return tail(hostError(error instanceof Error ? error.message : String(error)));
+        }
+      },
+    });
+    implementedOps.add("start_response_raw");
+
+    registered += registerOpHandler({
+      host,
+      effectId: HTTP_SERVER_EFFECT_ID,
+      opName: "write_response_raw",
+      handler: async ({ tail }, payload) => {
+        try {
+          await httpServerSource.writeResponse(decodeResponseChunkPayload(payload));
+          return tail(hostOk());
+        } catch (error) {
+          return tail(hostError(error instanceof Error ? error.message : String(error)));
+        }
+      },
+    });
+    implementedOps.add("write_response_raw");
+
+    registered += registerOpHandler({
+      host,
+      effectId: HTTP_SERVER_EFFECT_ID,
+      opName: "finish_response_raw",
+      handler: async ({ tail }, requestId) => {
+        try {
+          const parsedRequestId = toNumberOrUndefined(requestId);
+          if (parsedRequestId === undefined) {
+            throw new Error("http server finish response requires a request id");
+          }
+          await httpServerSource.finishResponse(Math.trunc(parsedRequestId));
+          return tail(hostOk());
+        } catch (error) {
+          return tail(hostError(error instanceof Error ? error.message : String(error)));
+        }
+      },
+    });
+    implementedOps.add("finish_response_raw");
 
     registered += registerOpHandler({
       host,

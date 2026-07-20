@@ -234,7 +234,9 @@ Request payload (`tail` op argument):
 - `host: string | null`
 - `max_body_bytes: i32 | null` (default adapter default: `1048576`)
 - `max_pending_requests: i32 | null` (default adapter default: `100`)
-- `response_timeout_millis: i32 | null` (default adapter default: `30000`)
+- `response_timeout_millis: i32 | null` (default adapter default: `30000`;
+  idle watchdog refreshed by successful response-stream writes)
+- `stream_request_bodies: bool | null` (default adapter default: `false`)
 
 Success response payload:
 
@@ -252,7 +254,7 @@ Request payload (`resume` op argument):
 
 Success response payload:
 
-- `{ ok: true, value: { request_id: i32, method: string, path: string, query: string | null, headers: Array<{ name: string, value: string }>, body: Array<i32> } }`
+- `{ ok: true, value: { request_id: i32, method: string, path: string, query: string | null, headers: Array<{ name: string, value: string }>, body: Array<i32>, body_streaming: bool } }`
 
 Error response payload:
 
@@ -261,14 +263,47 @@ Error response payload:
 Lifecycle semantics:
 
 - `accept_raw` suspends until a request is available or the server closes.
-- Each `request_id` may be answered exactly once through `respond_raw`.
+- Each `request_id` may be answered exactly once through `respond_raw`, or by
+  the ordered `start_response_raw`, zero or more `write_response_raw`, and
+  `finish_response_raw` sequence.
 - Requests whose bodies exceed `max_body_bytes` are rejected with a host response
-  before they are accepted.
+  before they are accepted when `stream_request_bodies` is false. Streaming
+  bodies enforce the same cumulative limit while `read_request_raw` consumes
+  them.
 - Requests beyond `max_pending_requests` are rejected by the default adapter with
   `503`.
-- Accepted requests not completed before `response_timeout_millis` receive a
-  host-managed `500` and are released. A later `respond_raw` for that request
-  returns a host error.
+- Accepted requests not started before `response_timeout_millis` receive a
+  host-managed `500` and are released. Started streams use the timeout as an
+  idle watchdog refreshed after each successful write; timeout closes the body
+  without appending an error payload to already-written bytes. A later response
+  operation for a released request returns a host error.
+- Completing a response cancels an unread streaming request body. Runtime
+  adapters SHOULD propagate that cancellation to their native request reader.
+
+### `std::http::server::HttpServer.read_request_raw`
+
+Request payload (`resume` op argument):
+
+- `request_id: i32`
+
+Success response payload:
+
+- `{ ok: true, value: { chunk: Array<i32>, done: bool } }`
+
+Error response payload:
+
+- `{ ok: false, code: i32, message: string }`
+- Error code `3` identifies a request body that exceeded `max_body_bytes`.
+
+Lifecycle semantics:
+
+- The operation is valid only for an accepted request whose `body_streaming`
+  field is true.
+- Hosts split native input into transport-safe chunks no larger than 16 KiB and
+  await the underlying reader, providing request-body backpressure.
+- Each successful read refreshes the request's response idle watchdog so an
+  active upload is not mistaken for an abandoned handler.
+- `done: true` is terminal; subsequent reads return a host error.
 
 ### `std::http::server::HttpServer.respond_raw`
 
@@ -283,6 +318,56 @@ Success response payload:
 Error response payload:
 
 - `{ ok: false, code: i32, message: string }`
+
+### `std::http::server::HttpServer.start_response_raw`
+
+Request payload (`tail` op argument):
+
+- `{ request_id: i32, response: { status: i32, reason: string, headers: Array<{ name: string, value: string }>, body: Array<i32> } }`
+- `response.body` MUST be empty. Body bytes are sent by `write_response_raw`.
+
+Success response payload: `{ ok: true }`
+
+Error response payload: `{ ok: false, code: i32, message: string }`
+
+### `std::http::server::HttpServer.write_response_raw`
+
+Request payload (`tail` op argument):
+
+- `{ request_id: i32, chunk: Array<i32> }`
+- `chunk` MUST contain no more than 16384 bytes.
+
+Success response payload: `{ ok: true }`
+
+Error response payload: `{ ok: false, code: i32, message: string }`
+
+Lifecycle and transport semantics:
+
+- The operation is valid only after `start_response_raw` and before
+  `finish_response_raw` for the same request.
+- Completion means the host accepted the bytes according to its native
+  backpressure signal; implementations MUST NOT acknowledge before that point.
+- A host exposing this 16 KiB contract MUST allocate an effect transport large
+  enough for its encoded envelope. The default JS host requires at least
+  131072 bytes whenever `write_response_raw` is present and rejects adapter
+  registration otherwise.
+- Native disconnects and write failures return a host error.
+
+### `std::http::server::HttpServer.finish_response_raw`
+
+Request payload (`tail` op argument):
+
+- `request_id: i32`
+
+Success response payload: `{ ok: true }`
+
+Error response payload: `{ ok: false, code: i32, message: string }`
+
+Lifecycle semantics:
+
+- The operation closes a started response body and releases the request.
+- A second finish, a write after finish, or any streaming operation for an
+  unknown/released request returns a host error.
 
 ### `std::http::server::HttpServer.close_raw`
 
@@ -303,7 +388,8 @@ Lifecycle semantics:
 - `close_raw` stops new accepts and releases host resources.
 - Pending accepts resume with a host error.
 - Pending accepted responses receive a host-managed `500` before the adapter
-  waits for the underlying server to close.
+  waits for the underlying server to close. Started streams are ended without
+  injecting an error body.
 
 ### `std::input::Input.read_line`
 

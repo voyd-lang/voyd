@@ -1166,6 +1166,477 @@ describe("registerDefaultHostAdapters", () => {
     });
   });
 
+  it("streams node http-server response chunks before finishing the request", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "start_response_raw",
+        opId: 2,
+      },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "write_response_raw",
+        opId: 3,
+      },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "finish_response_raw",
+        opId: 4,
+      },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 5 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    const port = await findFreePort();
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      { port, host: "127.0.0.1" }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const acceptPromise = getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+
+    let resolveFirstChunk: ((chunk: string) => void) | undefined;
+    const firstChunk = new Promise<string>((resolve) => {
+      resolveFirstChunk = resolve;
+    });
+    const responsePromise = new Promise<{
+      status: number;
+      contentType?: string;
+      body: string;
+    }>((resolve, reject) => {
+      const request = http.get(`http://127.0.0.1:${port}/events`, (response) => {
+        response.setEncoding("utf8");
+        let body = "";
+        response.on("data", (chunk: string) => {
+          body += chunk;
+          resolveFirstChunk?.(chunk);
+          resolveFirstChunk = undefined;
+        });
+        response.on("end", () => {
+          resolve({
+            status: response.statusCode ?? 0,
+            contentType: response.headers["content-type"],
+            body,
+          });
+        });
+      });
+      request.once("error", reject);
+    });
+
+    const acceptResult = await acceptPromise;
+    const requestId = (
+      acceptResult.value as { value: { request_id: number } }
+    ).value.request_id;
+    await expect(
+      getHandler("voyd.std.http.server", "start_response_raw")(
+        tailContinuation,
+        {
+          request_id: requestId,
+          response: {
+            status: 200,
+            reason: "OK",
+            headers: [{ name: "content-type", value: "text/event-stream" }],
+            body: [],
+          },
+        }
+      )
+    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    await expect(
+      getHandler("voyd.std.http.server", "write_response_raw")(
+        tailContinuation,
+        {
+          request_id: requestId,
+          chunk: Array.from(new TextEncoder().encode("data: one\n\n")),
+        }
+      )
+    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    await expect(firstChunk).resolves.toBe("data: one\n\n");
+    await expect(
+      getHandler("voyd.std.http.server", "write_response_raw")(
+        tailContinuation,
+        {
+          request_id: requestId,
+          chunk: Array.from(new TextEncoder().encode("data: two\n\n")),
+        }
+      )
+    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    await expect(
+      getHandler("voyd.std.http.server", "finish_response_raw")(
+        tailContinuation,
+        requestId
+      )
+    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    await expect(responsePromise).resolves.toEqual({
+      status: 200,
+      contentType: "text/event-stream",
+      body: "data: one\n\ndata: two\n\n",
+    });
+    await expect(
+      getHandler("voyd.std.http.server", "close_raw")(
+        tailContinuation,
+        serverId
+      )
+    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+  });
+
+  it("closes an abandoned started response without corrupting streamed bytes", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "start_response_raw",
+        opId: 2,
+      },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "write_response_raw",
+        opId: 3,
+      },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 4 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    const port = await findFreePort();
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      {
+        port,
+        host: "127.0.0.1",
+        response_timeout_millis: 25,
+      }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const acceptPromise = getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const responsePromise = new Promise<{ status: number; body: string }>(
+      (resolve, reject) => {
+        const request = http.get(
+          `http://127.0.0.1:${port}/abandoned-stream`,
+          (response) => {
+            response.setEncoding("utf8");
+            let body = "";
+            response.on("data", (chunk: string) => {
+              body += chunk;
+            });
+            response.on("end", () => {
+              resolve({ status: response.statusCode ?? 0, body });
+            });
+          }
+        );
+        request.once("error", reject);
+      }
+    );
+
+    const acceptResult = await acceptPromise;
+    const requestId = (
+      acceptResult.value as { value: { request_id: number } }
+    ).value.request_id;
+    await getHandler("voyd.std.http.server", "start_response_raw")(
+      tailContinuation,
+      {
+        request_id: requestId,
+        response: {
+          status: 200,
+          reason: "OK",
+          headers: [{ name: "content-type", value: "text/event-stream" }],
+          body: [],
+        },
+      }
+    );
+    await getHandler("voyd.std.http.server", "write_response_raw")(
+      tailContinuation,
+      {
+        request_id: requestId,
+        chunk: Array.from(new TextEncoder().encode("data: before panic\n\n")),
+      }
+    );
+
+    await expect(responsePromise).resolves.toEqual({
+      status: 200,
+      body: "data: before panic\n\n",
+    });
+    await expect(
+      getHandler("voyd.std.http.server", "close_raw")(
+        tailContinuation,
+        serverId
+      )
+    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+  });
+
+  it("accepts node request headers before consuming a streamed request body", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "read_request_raw",
+        opId: 2,
+      },
+      { effectId: "voyd.std.http.server", opName: "respond_raw", opId: 3 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 4 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    const port = await findFreePort();
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      {
+        port,
+        host: "127.0.0.1",
+        stream_request_bodies: true,
+        response_timeout_millis: 75,
+      }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const acceptPromise = getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const responsePromise = new Promise<string>((resolve, reject) => {
+      const request = http.request(
+        `http://127.0.0.1:${port}/stream-upload`,
+        { method: "POST" },
+        (response) => {
+          response.setEncoding("utf8");
+          let body = "";
+          response.on("data", (chunk: string) => {
+            body += chunk;
+          });
+          response.on("end", () => resolve(body));
+        }
+      );
+      request.once("error", reject);
+      request.write("first-");
+      void Promise.resolve(acceptPromise).then(() => {
+        setTimeout(() => request.write("second-"), 50);
+        setTimeout(() => request.end("third"), 100);
+      });
+    });
+
+    const acceptResult = await acceptPromise;
+    expect(acceptResult).toMatchObject({
+      kind: "resume",
+      value: {
+        ok: true,
+        value: {
+          path: "/stream-upload",
+          body: [],
+          body_streaming: true,
+        },
+      },
+    });
+    const requestId = (
+      acceptResult.value as { value: { request_id: number } }
+    ).value.request_id;
+    const chunks: number[] = [];
+    let done = false;
+    while (!done) {
+      const readResult = await getHandler(
+        "voyd.std.http.server",
+        "read_request_raw"
+      )(tailContinuation, requestId);
+      const value = (
+        readResult.value as {
+          value: { chunk: number[]; done: boolean };
+        }
+      ).value;
+      chunks.push(...value.chunk);
+      done = value.done;
+    }
+    expect(new TextDecoder().decode(Uint8Array.from(chunks))).toBe(
+      "first-second-third"
+    );
+    await getHandler("voyd.std.http.server", "respond_raw")(
+      tailContinuation,
+      {
+        request_id: requestId,
+        response: { status: 200, reason: "OK", headers: [], body: [111, 107] },
+      }
+    );
+    await expect(responsePromise).resolves.toBe("ok");
+    await getHandler("voyd.std.http.server", "close_raw")(
+      tailContinuation,
+      serverId
+    );
+  });
+
+  it("cancels an unread web request body when the response completes", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      { effectId: "voyd.std.http.server", opName: "respond_raw", opId: 2 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 3 },
+    ]);
+    let serveHandler: ((request: Request) => Promise<Response>) | undefined;
+    const serve = vi.fn((_options: unknown, handler: typeof serveHandler) => {
+      serveHandler = handler;
+      return { shutdown: vi.fn() };
+    });
+    vi.stubGlobal("Deno", { serve });
+    const { host, getHandler } = createFakeHost(table);
+    const cancelBody = vi.fn();
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "deno" },
+    });
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      {
+        port: 4545,
+        host: "127.0.0.1",
+        stream_request_bodies: true,
+      }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const requestBody = new ReadableStream<Uint8Array>({
+      start: (controller) => {
+        controller.enqueue(new TextEncoder().encode("unused"));
+      },
+      cancel: cancelBody,
+    });
+    const requestPromise = serveHandler!(
+      new Request("http://127.0.0.1:4545/upload", {
+        method: "POST",
+        body: requestBody,
+        duplex: "half",
+      } as RequestInit)
+    );
+    const acceptResult = await getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const requestId = (
+      acceptResult.value as { value: { request_id: number } }
+    ).value.request_id;
+
+    await getHandler("voyd.std.http.server", "respond_raw")(
+      tailContinuation,
+      {
+        request_id: requestId,
+        response: { status: 204, reason: "No Content", headers: [], body: [] },
+      }
+    );
+    await requestPromise;
+    expect(cancelBody).toHaveBeenCalledOnce();
+    await getHandler("voyd.std.http.server", "close_raw")(
+      tailContinuation,
+      serverId
+    );
+  });
+
+  it("splits streamed request chunks to fit the effect transport", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      { effectId: "voyd.std.http.server", opName: "read_request_raw", opId: 2 },
+      { effectId: "voyd.std.http.server", opName: "respond_raw", opId: 3 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 4 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    const readRequest = vi.fn(async () => ({
+      requestId: 7,
+      chunk: Uint8Array.from({ length: 600 }, (_, index) => index % 256),
+      done: true,
+    }));
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "unknown",
+        effectBufferSize: 256,
+        runtimeHooks: {
+          httpServerListen: async () => 1,
+          httpServerAccept: async () => ({
+            requestId: 7,
+            method: "POST",
+            path: "/upload",
+            headers: [],
+            body: new Uint8Array(),
+            bodyStreaming: true,
+          }),
+          httpServerReadRequest: readRequest,
+          httpServerRespond: async () => {},
+          httpServerClose: async () => {},
+        },
+      },
+    });
+
+    await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      { port: 1, stream_request_bodies: true }
+    );
+    await getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      1
+    );
+    const received: number[] = [];
+    let done = false;
+    while (!done) {
+      const result = await getHandler(
+        "voyd.std.http.server",
+        "read_request_raw"
+      )(tailContinuation, 7);
+      const value = (
+        result.value as { value: { chunk: number[]; done: boolean } }
+      ).value;
+      received.push(...value.chunk);
+      done = value.done;
+    }
+
+    expect(received).toEqual(
+      Array.from({ length: 600 }, (_, index) => index % 256)
+    );
+    expect(readRequest).toHaveBeenCalledOnce();
+  });
+
+  it("rejects response streaming when the effect buffer cannot carry a full chunk", async () => {
+    const table = buildTable([
+      {
+        effectId: "voyd.std.http.server",
+        opName: "write_response_raw",
+        opId: 0,
+      },
+    ]);
+    const { host } = createFakeHost(table);
+
+    await expect(
+      registerDefaultHostAdapters({
+        host,
+        options: {
+          runtime: "unknown",
+          effectBufferSize: 256,
+          runtimeHooks: {
+            httpServerWriteResponse: async () => {},
+          },
+        },
+      })
+    ).rejects.toThrow(
+      "http-server response streaming requires an effect buffer of at least 131072 bytes"
+    );
+  });
+
   it("serves requests through Deno.serve when runtime is deno", async () => {
     const table = buildTable([
       { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },

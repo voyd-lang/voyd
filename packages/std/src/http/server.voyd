@@ -5,6 +5,7 @@
 //! request task policy.
 
 use std::error::{ HostError, panic }
+use std::bytes::{ ByteBuffer, Bytes }
 use std::host_dto::HostDto
 use std::http::self as http
 use std::http::wire::self as wire
@@ -28,17 +29,47 @@ pub obj ServerConfig {
   api host?: String,
   api max_body_bytes?: i32,
   api max_pending_requests?: i32,
-  api response_timeout_millis?: i32
+  /// Maximum idle time before an unanswered or stalled response is released.
+  api response_timeout_millis?: i32,
+  api stream_request_bodies?: bool
 }
 
 pub obj PendingRequest {
   api handle: RequestHandle,
-  api request: http::IncomingRequest
+  api request: http::IncomingRequest,
+  body_streaming: bool
+}
+
+/// A request accepted with a lazily read body.
+pub obj StreamingPendingRequest {
+  api handle: RequestHandle,
+  api request: http::IncomingRequest,
+  api body: RequestBody
+}
+
+/// Backpressure-aware request body reader.
+pub obj RequestBody {
+  handle: RequestHandle,
+  buffered: Bytes,
+  emitted_buffer: bool,
+  streaming: bool,
+  done: bool
 }
 
 pub obj ServeTaskPolicy {
   kind: i32
 }
+
+/// Dynamically scoped response-stream request used by `stream`.
+@effect(id: "voyd.std.http.response-stream")
+pub eff ResponseStream
+  begin_stream(resume, response: MsgPack) -> MsgPack
+  finish_stream(resume, payload: MsgPack) -> MsgPack
+
+/// Dynamically scoped writer available while a response stream is open.
+@effect(id: "voyd.std.http.response-writer")
+pub eff ResponseWriter
+  write_chunk(tail, chunk: MsgPack) -> MsgPack
 
 impl Server
   fn raw_id(self) -> i32
@@ -64,32 +95,52 @@ pub eff HttpServer
   listen_raw(tail, payload: MsgPack) -> MsgPack
   /// Suspends until a request is available or the server closes.
   accept_raw(resume, server_id: i32) -> MsgPack
+  /// Reads the next chunk for a streaming request.
+  read_request_raw(resume, request_id: i32) -> MsgPack
   /// Sends one response for a request handle.
   respond_raw(tail, payload: MsgPack) -> MsgPack
+  /// Starts a streaming response for a request handle.
+  start_response_raw(tail, payload: MsgPack) -> MsgPack
+  /// Writes one streaming response chunk.
+  write_response_raw(tail, payload: MsgPack) -> MsgPack
+  /// Finishes a streaming response.
+  finish_response_raw(tail, request_id: i32) -> MsgPack
   /// Closes a server and releases host resources.
   close_raw(tail, server_id: i32) -> MsgPack
 
 impl ServerConfig
   /// Creates a server configuration with common defaults.
+  ///
+  /// `response_timeout_millis` is an idle watchdog. Successful streaming body
+  /// reads and response writes refresh it, and finishing cancels it.
   api fn init({
     port: i32,
     host?: String,
     max_body_bytes?: i32,
     max_pending_requests?: i32,
-    response_timeout_millis?: i32
+    response_timeout_millis?: i32,
+    stream_request_bodies?: bool
   }) -> ServerConfig
     ServerConfig {
       port: port,
       host: host,
       max_body_bytes: rebox_optional_i32(max_body_bytes),
       max_pending_requests: rebox_optional_i32(max_pending_requests),
-      response_timeout_millis: rebox_optional_i32(response_timeout_millis)
+      response_timeout_millis: rebox_optional_i32(response_timeout_millis),
+      stream_request_bodies: rebox_optional_bool(stream_request_bodies)
     }
 
 fn rebox_optional_i32(value: Option<i32>) -> Option<i32>
   match(value)
     Some<i32> { value }:
       Some<i32> { value: value }
+    None:
+      None {}
+
+fn rebox_optional_bool(value: Option<bool>) -> Option<bool>
+  match(value)
+    Some<bool> { value }:
+      Some<bool> { value: value }
     None:
       None {}
 
@@ -104,15 +155,87 @@ pub fn listen(config: ServerConfig): HttpServer -> Result<Server, HostError>
 /// Accepts the next pending request.
 pub fn accept(server: Server): HttpServer -> Result<PendingRequest, HostError>
   match(wire::decode_pending_request_result(HttpServer::accept_raw(server.raw_id())))
-    Ok<(i32, http::IncomingRequest)> { value }:
+    Ok<(i32, http::IncomingRequest, bool)> { value }:
       Ok<PendingRequest> {
         value: PendingRequest {
           handle: RequestHandle { id: value.0 },
-          request: value.1
+          request: value.1,
+          body_streaming: value.2
         }
       }
     Err<HostError> { error }:
       Err<HostError> { error: error }
+
+/// Accepts a request whose body can be consumed incrementally.
+///
+/// Configure the server with `stream_request_bodies: true` to avoid buffering
+/// in the host. Buffered hook implementations remain compatible and are
+/// exposed as the reader's first chunk.
+pub fn accept_streaming(server: Server): HttpServer -> Result<StreamingPendingRequest, HostError>
+  match(accept(server))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<PendingRequest> { value }:
+      let request = value.request
+      Ok<StreamingPendingRequest> {
+        value: StreamingPendingRequest {
+          handle: value.handle,
+          request: http::IncomingRequest {
+            method: request.method,
+            path: request.path,
+            query: request.query,
+            headers: request.headers,
+            body: http::Body::empty()
+          },
+          body: RequestBody {
+            handle: value.handle,
+            buffered: request.body.as_bytes(),
+            emitted_buffer: false,
+            streaming: value.body_streaming,
+            done: false
+          }
+        }
+      }
+
+impl RequestBody
+  /// Reads the next body chunk, or `None` after end-of-stream.
+  api fn next(~self): HttpServer -> Result<Option<Bytes>, HostError>
+    if self.done:
+      return Ok<Option<Bytes>> { value: None {} }
+    if not self.emitted_buffer and not self.buffered.is_empty():
+      self.emitted_buffer = true
+      if not self.streaming:
+        self.done = true
+      return Ok<Option<Bytes>> { value: Some<Bytes> { value: self.buffered } }
+    self.emitted_buffer = true
+    if not self.streaming:
+      self.done = true
+      return Ok<Option<Bytes>> { value: None {} }
+    match(wire::decode_request_chunk_result(HttpServer::read_request_raw(self.handle.raw_id())))
+      Err<HostError> { error }:
+        Err<HostError> { error: error }
+      Ok<(Bytes, bool)> { value }:
+        self.done = value.1
+        if value.0.is_empty() and value.1:
+          Ok<Option<Bytes>> { value: None {} }
+        else:
+          Ok<Option<Bytes>> { value: Some<Bytes> { value: value.0 } }
+
+  /// Buffers all remaining chunks while preserving the host body limit.
+  api fn read_all(~self): HttpServer -> Result<Bytes, HostError>
+    let ~buffer = ByteBuffer::init()
+    var reading = true
+    while reading:
+      match(self.next())
+        Err<HostError> { error }:
+          return Err<HostError> { error: error }
+        Ok<Option<Bytes>> { value }:
+          match(value)
+            None:
+              reading = false
+            Some<Bytes> { value: chunk }:
+              buffer.extend(chunk)
+    Ok<Bytes> { value: buffer.as_bytes() }
 
 /// Responds to one pending request.
 pub fn respond(
@@ -120,6 +243,53 @@ pub fn respond(
   response: http::Response
 ): HttpServer -> Result<Unit, HostError>
   wire::decode_unit_result(HttpServer::respond_raw(encode_respond_payload(handle, response)))
+
+/// Starts a response without ending its body.
+pub fn start_response(
+  handle: RequestHandle,
+  response: http::Response
+): HttpServer -> Result<Unit, HostError>
+  wire::decode_unit_result(HttpServer::start_response_raw(encode_respond_payload(handle, response)))
+
+/// Writes a chunk to an open response stream with host backpressure.
+pub fn write_response(
+  handle: RequestHandle,
+  chunk: Bytes
+): HttpServer -> Result<Unit, HostError>
+  if chunk.len() > 16384:
+    return stream_chunk_too_large()
+  wire::decode_unit_result(HttpServer::write_response_raw(encode_chunk_payload(handle, chunk)))
+
+/// Finishes an open response stream.
+pub fn finish_response(handle: RequestHandle): HttpServer -> Result<Unit, HostError>
+  wire::decode_unit_result(HttpServer::finish_response_raw(handle.raw_id()))
+
+/// Produces a streaming response from an ordinary Web handler.
+///
+/// The enclosing server loop binds the stream to the current request. Calling
+/// this outside `serve_each` leaves `ResponseStream` visible to the caller.
+pub fn stream(
+  response: http::Response,
+  { body: fn() : (ResponseWriter, open) -> void }
+): (ResponseStream, open) -> http::Response
+  let _ = ResponseStream::begin_stream(wire::encode_response(response))
+  body()
+  let _ = ResponseStream::finish_stream(msgpack::make_null())
+  response
+
+/// Writes one byte chunk from a streaming response producer.
+pub fn write(chunk: Bytes): ResponseWriter -> Result<Unit, HostError>
+  if chunk.len() > 16384:
+    return stream_chunk_too_large()
+  wire::decode_unit_result(ResponseWriter::write_chunk(wire::encode_bytes(chunk)))
+
+fn stream_chunk_too_large() -> Result<Unit, HostError>
+  Err<HostError> {
+    error: HostError {
+      code: 1,
+      message: "HTTP stream chunks may not exceed 16384 bytes".as_slice().to_string()
+    }
+  }
 
 /// Closes a server.
 pub fn close(server: Server): HttpServer -> Result<Unit, HostError>
@@ -140,6 +310,20 @@ pub fn serve_each({
     return serve_each_detached(config: config, handle: handle)
   serve_each_sequential(config: config, handle: handle)
 
+/// Listens and handles requests with lazily consumed request bodies.
+///
+/// Set `config.stream_request_bodies` to true so the host accepts requests
+/// after their headers arrive. The handler receives the request head and a
+/// backpressure-aware body reader separately.
+pub fn serve_each_streaming({
+  config: ServerConfig,
+  policy: ServeTaskPolicy,
+  handle: fn(http::IncomingRequest, RequestBody) : (open) -> http::Response
+}): (HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  if policy.kind == 1:
+    return serve_each_streaming_detached(config: config, handle: handle)
+  serve_each_streaming_sequential(config: config, handle: handle)
+
 fn serve_each_sequential({
   config: ServerConfig,
   handle: fn(http::IncomingRequest) : (open) -> http::Response
@@ -154,8 +338,8 @@ fn serve_each_sequential({
             let _ = close(server)
             return Err<HostError> { error: error }
           Ok<PendingRequest> { value: pending }:
-            let response = handle(pending.request)
-            match(respond(pending.handle, response))
+            let request = pending.request
+            match(respond_request(pending.handle, () => handle(request)))
               Err<HostError> { error }:
                 let _ = close(server)
                 return Err<HostError> { error: error }
@@ -180,20 +364,91 @@ fn serve_each_detached({
             let request_handle = pending.handle
             let request = pending.request
             let _ = task::detach do:
-              respond_or_panic(request_handle, handle(request))
+              respond_or_panic(request_handle, () => handle(request))
+            let _ = task::yield_now()
+      Ok<Unit> { value: Unit {} }
+
+fn serve_each_streaming_sequential({
+  config: ServerConfig,
+  handle: fn(http::IncomingRequest, RequestBody) : (open) -> http::Response
+}): (HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  match(listen(config))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<Server> { value: server }:
+      while true:
+        match(accept_streaming(server))
+          Err<HostError> { error }:
+            let _ = close(server)
+            return Err<HostError> { error: error }
+          Ok<StreamingPendingRequest> { value: pending }:
+            let request = pending.request
+            let body = pending.body
+            match(respond_request(pending.handle, () => handle(request, body)))
+              Err<HostError> { error }:
+                let _ = close(server)
+                return Err<HostError> { error: error }
+              Ok<Unit>:
+                let _ = task::yield_now()
+      Ok<Unit> { value: Unit {} }
+
+fn serve_each_streaming_detached({
+  config: ServerConfig,
+  handle: fn(http::IncomingRequest, RequestBody) : (open) -> http::Response
+}): (HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  match(listen(config))
+    Err<HostError> { error }:
+      Err<HostError> { error: error }
+    Ok<Server> { value: server }:
+      while true:
+        match(accept_streaming(server))
+          Err<HostError> { error }:
+            let _ = close(server)
+            return Err<HostError> { error: error }
+          Ok<StreamingPendingRequest> { value: pending }:
+            let request_handle = pending.handle
+            let request = pending.request
+            let body = pending.body
+            let _ = task::detach do:
+              respond_or_panic(request_handle, () => handle(request, body))
             let _ = task::yield_now()
       Ok<Unit> { value: Unit {} }
 
 fn respond_or_panic(
   handle: RequestHandle,
-  response: http::Response
-): HttpServer -> Unit
-  match(respond(handle, response))
+  work: fn() : (ResponseStream, open) -> http::Response
+): (HttpServer, open) -> Unit
+  match(respond_request(handle, work))
     Ok<Unit>:
       Unit {}
     Err<HostError> { error }:
       panic(error.message)
       Unit {}
+
+fn respond_request(
+  handle: RequestHandle,
+  work: fn() : (ResponseStream, open) -> http::Response
+): (HttpServer, open) -> Result<Unit, HostError>
+  try open
+    respond(handle, work())
+  ResponseStream::begin_stream(resume, payload):
+    match(wire::decode_response(payload))
+      Err<HostError> { error }:
+        Err<HostError> { error: error }
+      Ok<http::Response> { value: response }:
+        match(start_response(handle, response))
+          Err<HostError> { error }:
+            Err<HostError> { error: error }
+          Ok<Unit>:
+            resume(msgpack::make_null())
+  ResponseWriter::write_chunk(tail, payload):
+    match(wire::decode_body(payload))
+      Err<HostError> { error }:
+        tail(encode_unit_result(Err<HostError> { error: error }))
+      Ok<http::Body> { value }:
+        tail(encode_unit_result(write_response(handle, value.as_bytes())))
+  ResponseStream::finish_stream(_resume, _payload):
+    finish_response(handle)
 
 fn encode_config(config: ServerConfig): () -> MsgPack
   HostDto::init()
@@ -202,10 +457,38 @@ fn encode_config(config: ServerConfig): () -> MsgPack
     .set("max_body_bytes", wire::encode_optional_i32(config.max_body_bytes))
     .set("max_pending_requests", wire::encode_optional_i32(config.max_pending_requests))
     .set("response_timeout_millis", wire::encode_optional_i32(config.response_timeout_millis))
+    .set("stream_request_bodies", encode_optional_bool(config.stream_request_bodies))
     .pack()
+
+fn encode_optional_bool(value: Option<bool>) -> MsgPack
+  match(value)
+    Some<bool> { value }:
+      msgpack::make_bool(value)
+    None:
+      msgpack::make_null()
+
+fn encode_unit_result(result: Result<Unit, HostError>) -> MsgPack
+  match(result)
+    Ok<Unit>:
+      HostDto::init()
+        .set("ok", msgpack::make_bool(true))
+        .pack()
+    Err<HostError> { error }:
+      HostDto::init()
+        .set("ok", msgpack::make_bool(false))
+        .set("code", msgpack::make_i32(error.code))
+        .set("message", msgpack::make_string(error.message))
+        .pack()
+
 
 fn encode_respond_payload(handle: RequestHandle, response: http::Response): () -> MsgPack
   HostDto::init()
     .set("request_id", msgpack::make_i32(handle.raw_id()))
     .set("response", wire::encode_response(response))
+    .pack()
+
+fn encode_chunk_payload(handle: RequestHandle, chunk: Bytes): () -> MsgPack
+  HostDto::init()
+    .set("request_id", msgpack::make_i32(handle.raw_id()))
+    .set("chunk", wire::encode_bytes(chunk))
     .pack()

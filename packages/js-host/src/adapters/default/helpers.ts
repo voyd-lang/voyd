@@ -251,11 +251,31 @@ export const httpServerAcceptSuccessPayload = ({
       value: header.value,
     })),
     body: Array.from(request.body.values()),
+    body_streaming: request.bodyStreaming ?? false,
   });
   if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
     return payload;
   }
   return httpServerAcceptTransportOverflowError({ effectBufferSize });
+};
+
+export const maxTransportSafeHttpServerChunkBytes = ({
+  effectBufferSize,
+}: {
+  effectBufferSize: number;
+}): number => {
+  let low = 0;
+  let high = effectBufferSize;
+  while (low < high) {
+    const mid = Math.ceil((low + high) / 2);
+    const payload = hostOk({ chunk: Array.from({ length: mid }, () => 255), done: false });
+    if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
+      low = mid;
+      continue;
+    }
+    high = mid - 1;
+  }
+  return low;
 };
 
 export const inputTransportOverflowError = ({

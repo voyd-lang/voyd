@@ -1,0 +1,262 @@
+//! Buffered `multipart/form-data` parsing with binary-safe part bodies.
+
+use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
+use std::http::{ Body, Headers, IncomingRequest }
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use super::extract::{ FromBody, Rejection }
+
+/// One multipart field or uploaded file.
+pub obj Part {
+  api headers: Headers,
+  api name?: String,
+  api filename?: String,
+  api content_type?: String,
+  api body: Bytes
+}
+
+/// Parsed multipart form in source order.
+pub obj Form {
+  api parts: Array<Part>
+}
+
+/// Route body policy for `multipart/form-data`.
+pub obj MultipartBody {}
+
+impl Form
+  /// Returns the first part with `name`.
+  api fn get(self, name: StringSlice) -> Option<Part>
+    var index = 0
+    while index < self.parts.len():
+      let part = self.parts.at(index)
+      match(part.name)
+        Some<String> { value }:
+          if value.equals(name.to_string()):
+            return Some<Part> { value: part }
+        None:
+          void
+      index = index + 1
+    None {}
+
+  /// Returns the first part with `name`.
+  api fn get(self, name: String) -> Option<Part>
+    self.get(name.as_slice())
+
+impl Part
+  /// Decodes this part body as UTF-8.
+  api fn text(self) -> Result<String, Rejection>
+    match(Body::bytes(self.body).as_text())
+      Ok<String> { value }:
+        Ok<String> { value: value }
+      Err:
+        Err<Rejection> { error: Rejection::bad_request("multipart field is not valid UTF-8".as_slice()) }
+
+impl FromBody<Form> for MultipartBody
+  fn extract_body(self, request: IncomingRequest) : (open) -> Result<Form, Rejection>
+    self
+    parse(request)
+
+pub fn multipart() -> MultipartBody
+  MultipartBody {}
+
+/// Parses a `multipart/form-data` request.
+pub fn parse(request: IncomingRequest) -> Result<Form, Rejection>
+  match(request.header("content-type".as_slice()))
+    None:
+      Err<Rejection> { error: Rejection::unsupported_media_type("expected multipart/form-data request body".as_slice()) }
+    Some<String> { value }:
+      match(boundary_from(value.as_slice()))
+        None:
+          Err<Rejection> { error: Rejection::unsupported_media_type("multipart/form-data requires a boundary".as_slice()) }
+        Some<String> { value: boundary }:
+          parse_bytes(request.body_bytes(), boundary.as_slice())
+
+fn parse_bytes(source: Bytes, boundary: StringSlice) -> Result<Form, Rejection>
+  let delimiter = Body::text("--".concat(boundary)).as_bytes()
+  let ~separator_buffer = ByteBuffer::with_capacity(delimiter.len() + 2)
+  separator_buffer.push(13)
+  separator_buffer.push(10)
+  separator_buffer.extend(delimiter)
+  let separator = separator_buffer.as_bytes()
+  if not starts_with_bytes(source, delimiter, at: 0):
+    return malformed("multipart body does not start with its boundary")
+
+  let ~parts = Array<Part>::init()
+  var cursor = delimiter.len()
+  while cursor < source.len():
+    if has_pair(source, cursor, 45, 45):
+      if valid_closing_boundary_suffix(source, cursor + 2):
+        return Ok<Form> { value: Form { parts: parts } }
+      return malformed("multipart closing boundary has an invalid suffix")
+    cursor = skip_transport_padding(source, cursor)
+    if not has_pair(source, cursor, 13, 10):
+      return malformed("multipart boundary must be followed by CRLF")
+    cursor = cursor + 2
+    let headers_end = find_four(source, cursor, 13, 10, 13, 10)
+    if headers_end < 0:
+      return malformed("multipart part is missing its header terminator")
+    match(parse_headers(source.slice(cursor..headers_end)))
+      Err<Rejection> { error }:
+        return Err<Rejection> { error: error }
+      Ok<Headers> { value }:
+        let body_start = headers_end + 4
+        let body_end = find_boundary(source, separator, from: body_start)
+        if body_end < 0:
+          return malformed("multipart part is missing a closing boundary")
+        parts.push(part_from(value, source.slice(body_start..body_end)))
+        cursor = body_end + separator.len()
+  malformed("multipart body is missing its final boundary")
+
+fn parse_headers(source: Bytes) -> Result<Headers, Rejection>
+  match(Body::bytes(source).as_text())
+    Err:
+      malformed_headers("multipart headers are not valid UTF-8")
+    Ok<String> { value }:
+      let lines = value.lines()
+      var headers = Headers::empty()
+      var index = 0
+      while index < lines.len():
+        match(lines.at(index).split_once(on: 58))
+          None:
+            return malformed_headers("multipart header is missing ':'")
+          Some<(StringSlice, StringSlice)> { value: header }:
+            let name = header.0.trimmed()
+            if name.is_empty():
+              return malformed_headers("multipart header name is empty")
+            headers = headers.append(header: name, value: header.1.trimmed())
+        index = index + 1
+      Ok<Headers> { value: headers }
+
+fn part_from(headers: Headers, body: Bytes) -> Part
+  let disposition = headers.get("content-disposition".as_slice())
+  Part {
+    headers: headers,
+    name: disposition_parameter(disposition, "name".as_slice()),
+    filename: disposition_parameter(disposition, "filename".as_slice()),
+    content_type: headers.get("content-type".as_slice()),
+    body: body
+  }
+
+fn disposition_parameter(header: Option<String>, name: StringSlice) -> Option<String>
+  match(header)
+    None:
+      None {}
+    Some<String> { value }:
+      let parts = split_parameters(value.as_slice())
+      var index = 1
+      while index < parts.len():
+        match(parts.at(index).as_slice().trimmed().split_once(on: 61))
+          Some<(StringSlice, StringSlice)> { value: parameter }:
+            if parameter.0.trimmed().lowered().equals(name.to_string()):
+              return Some<String> { value: unquote(parameter.1.trimmed()) }
+          None:
+            void
+        index = index + 1
+      None {}
+
+fn boundary_from(content_type: StringSlice) -> Option<String>
+  let parts = split_parameters(content_type)
+  if parts.is_empty() or not parts.at(0).as_slice().trimmed().lowered().equals("multipart/form-data"):
+    return None {}
+  var index = 1
+  while index < parts.len():
+    match(parts.at(index).as_slice().trimmed().split_once(on: 61))
+      Some<(StringSlice, StringSlice)> { value }:
+        if value.0.trimmed().lowered().equals("boundary"):
+          let boundary = unquote(value.1.trimmed())
+          if not boundary.is_empty():
+            return Some<String> { value: boundary }
+      None:
+        void
+    index = index + 1
+  None {}
+
+fn split_parameters(value: StringSlice) -> Array<String>
+  let ~parts = Array<String>::init()
+  let quote_parts = value.split(on: 34, keep_empty: true)
+  var current = String::init()
+  var index = 0
+  while index < quote_parts.len():
+    let quote_part = quote_parts.at(index)
+    if index - (index / 2) * 2 == 1:
+      current = current.concat("\"".as_slice()).concat(quote_part).concat("\"".as_slice())
+    else:
+      let semicolon_parts = quote_part.split(on: 59, keep_empty: true)
+      if not semicolon_parts.is_empty():
+        current = current.concat(semicolon_parts.at(0))
+      var part_index = 1
+      while part_index < semicolon_parts.len():
+        parts.push(current)
+        current = semicolon_parts.at(part_index).to_string()
+        part_index = part_index + 1
+    index = index + 1
+  parts.push(current)
+  parts
+
+fn unquote(value: StringSlice) -> String
+  if value.byte_len() >= 2 and value.starts_with("\"".as_slice()) and value.ends_with("\"".as_slice()):
+    value.slice(bytes: 1, len: value.byte_len() - 2).to_string()
+  else:
+    value.to_string()
+
+fn find_boundary(source: Bytes, needle: Bytes, { from start: i32 }) -> i32
+  if needle.is_empty():
+    return start
+  var index = start
+  while index + needle.len() <= source.len():
+    if starts_with_bytes(source, needle, at: index):
+      let suffix = index + needle.len()
+      let has_closing_marker = has_pair(source, suffix, 45, 45)
+      let closing = has_closing_marker and valid_closing_boundary_suffix(source, suffix + 2)
+      if closing or valid_regular_boundary_suffix(source, suffix):
+        return index
+    index = index + 1
+  -1
+
+fn valid_closing_boundary_suffix(source: Bytes, start: i32) -> bool
+  let index = skip_transport_padding(source, start)
+  index == source.len() or has_pair(source, index, 13, 10)
+
+fn valid_regular_boundary_suffix(source: Bytes, start: i32) -> bool
+  has_pair(source, skip_transport_padding(source, start), 13, 10)
+
+fn skip_transport_padding(source: Bytes, start: i32) -> i32
+  var index = start
+  while index < source.len() and (source.at(index) == 32 or source.at(index) == 9):
+    index = index + 1
+  index
+
+fn starts_with_bytes(source: Bytes, expected: Bytes, { at start: i32 }) -> bool
+  if start < 0 or start + expected.len() > source.len():
+    return false
+  var index = 0
+  while index < expected.len():
+    if source.at(start + index) != expected.at(index):
+      return false
+    index = index + 1
+  true
+
+fn find_four(source: Bytes, start: i32, a: i32, b: i32, c: i32, d: i32) -> i32
+  var index = start
+  while index + 3 < source.len():
+    if source.at(index) == a and source.at(index + 1) == b and source.at(index + 2) == c and source.at(index + 3) == d:
+      return index
+    index = index + 1
+  -1
+
+fn has_pair(source: Bytes, index: i32, first: i32, second: i32) -> bool
+  index >= 0 and index + 1 < source.len() and source.at(index) == first and source.at(index + 1) == second
+
+fn malformed(message: StringSlice) -> Result<Form, Rejection>
+  Err<Rejection> { error: Rejection::bad_request(message) }
+
+fn malformed(message: String) -> Result<Form, Rejection>
+  malformed(message.as_slice())
+
+fn malformed_headers(message: StringSlice) -> Result<Headers, Rejection>
+  Err<Rejection> { error: Rejection::bad_request(message) }
+
+fn malformed_headers(message: String) -> Result<Headers, Rejection>
+  malformed_headers(message.as_slice())

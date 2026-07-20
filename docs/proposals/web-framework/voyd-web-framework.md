@@ -1016,9 +1016,30 @@ Phase 2 implementation notes:
 
 - streaming request and response bodies
 - multipart forms
-- WebSocket or server-sent events if the effect model supports them cleanly
+- server-sent events
 - richer content negotiation
-- OpenAPI/schema generation from route declarations if DTO reflection supports it
+- OpenAPI/schema generation from reified DTO shapes
+
+Phase 3 implementation notes:
+
+- Response streams use explicit start/write/finish host operations. Writes wait
+  for host backpressure, and the Web SSE layer formats events over that general
+  stream contract. Transport chunks have a 16 KiB contract so MessagePack
+  effect payloads remain bounded. The host response timeout is refreshed by
+  successful writes and cleanly closes abandoned started streams.
+- Request streaming is opt-in through `ServerConfig::stream_request_bodies` and
+  `accept_streaming`; `pkg::web::serve_streaming` exposes the reader through
+  `Context::streaming_body` on routes marked `.streaming()`, while other routes
+  in the same app are buffered lazily for ordinary extractors.
+- Multipart parsing preserves binary part bodies and exposes checked UTF-8 only
+  as an explicit part operation.
+- OpenAPI 3.1 generation consumes `std::meta::Shape`, including declaration and
+  field documentation. Route behavior metadata remains explicit through
+  `OpenApiOperation`; `document_openapi_route` derives method and path from the
+  router entry instead of accepting an independent route identity. Component
+  names include deterministic full-schema fingerprints so same-named types do
+  not collide across modules.
+- WebSockets are intentionally outside this phase.
 
 ## Testing Direction
 

@@ -86,8 +86,8 @@ runtime effects. Any effects used by your handlers also remain visible in the
 entrypoint's effect row.
 
 Most applications should import `pkg::web::all`. For tighter imports, the public
-modules are `router`, `routes`, `extract`, `response`, `html`, `middleware`, and
-`static_files`.
+modules are `router`, `routes`, `extract`, `response`, `html`, `middleware`,
+`static_files`, `streaming`, `sse`, `multipart`, `negotiate`, and `openapi`.
 
 ## Routes
 
@@ -198,6 +198,181 @@ get("/api/articles/:slug") do(params: ArticleParams):
 Use `response_dto_json(Response::created(), value:)` to choose the status,
 `result_dto_json` for a `Result`, and `option_dto_json` when absence should be a 404. Use `response_json(value)` for an existing `JsonValue`; the root-level
 `json()` name is reserved for the JSON request-body policy.
+
+## Streaming Responses And SSE
+
+`stream` opens the response before running its body producer. Each
+`write_stream` waits for host backpressure, and returning from the producer
+closes the body:
+
+```voyd
+use pkg::web::all
+use std::result::types::all
+
+get("/chunks") do:
+  stream(Response::ok().with(
+    header: "content-type".as_slice(),
+    value: "text/plain; charset=utf-8".as_slice()
+  ), body: () =>
+    let _ = write_stream("first\n".as_slice())
+    let _ = write_stream("second\n".as_slice())
+  )
+```
+
+Use `sse_response` for Server-Sent Events. It supplies the required response headers and
+formats data, event names, ids, retry delays, and comments according to the SSE
+wire format:
+
+```voyd
+use std::http::server::ResponseWriter
+
+fn publish_events(sender: SseSender): ResponseWriter -> void
+  let data_event = make_sse_event("ready".as_slice())
+  let status_event = data_event.with(event: "status".as_slice())
+  let identified_event = status_event.with(id: "1".as_slice())
+  let retry_event = identified_event.with(retry_millis: 2000)
+  let _ = sender.send(retry_event)
+  let _ = sender.comment("keepalive".as_slice())
+
+get("/events") do:
+  sse_response(publish_events)
+```
+
+`send` and `comment` return `Result<Unit, HostError>`. Long-lived producers
+should stop after an error because it normally means the client disconnected.
+The server closes the stream automatically when the producer returns. SSE uses
+ordinary HTTP streaming; the framework does not expose a WebSocket API.
+The server response timeout is an idle watchdog: each successful stream write
+refreshes it. Send periodic SSE comments more frequently than that timeout so a
+healthy but otherwise quiet connection stays open; an abandoned producer is
+closed without appending an error payload to bytes already sent.
+
+Streaming transport chunks are capped at 16 KiB so every chunk fits the host
+effect buffer. Request readers apply this cap automatically. Response producers
+should split larger byte values before calling `write`; an oversized write
+returns `HostError` without partially writing the value.
+
+Use `serve_streaming(app, port: ...)` when routes need lazy request bodies. A
+handler on a route marked `.streaming()` can retrieve the one-shot reader with
+`ctx.streaming_body()` and read backpressure-aware chunks with `next()`. Other
+routes are buffered lazily, so ordinary JSON, text, and multipart extractors can
+coexist in the same app:
+
+```voyd
+use std::http::server::{ HttpServer, RequestBody }
+
+fn upload(ctx: Context): HttpServer -> Response
+  match(ctx.streaming_body())
+    None:
+      Response::bad_request().text("missing stream".as_slice())
+    Some<RequestBody> { value }:
+      let ~body = value
+      let first_chunk = body.next()
+      first_chunk
+      Response::ok().text("received".as_slice())
+
+let uploads = app().post("/upload".as_slice(), handler: upload).streaming()
+let _ = serve_streaming(uploads, port: 3000)
+```
+
+The lower-level `std::http::server` equivalents are
+`ServerConfig::init(stream_request_bodies: true)`, `accept_streaming`, and
+`serve_each_streaming`. With streaming disabled, ordinary `accept` and Web body
+extractors retain their buffered behavior. Successful request-chunk reads
+refresh the response idle watchdog, so active uploads can run longer than one
+timeout interval.
+
+## Multipart Forms
+
+Use the `multipart_body()` body policy for `multipart/form-data`. Part bodies remain
+bytes, so uploaded files are not forced through UTF-8:
+
+```voyd
+post("/upload", body: multipart_body()) do(form: MultipartForm):
+  match(form.get("asset".as_slice()))
+    Some<MultipartPart> { value: asset }:
+      asset.body
+      Response::ok().text("uploaded")
+    None:
+      Response::bad_request().text("missing asset")
+```
+
+Each part exposes its headers, form name, optional filename, optional content
+type, and body. `part.text()` provides checked UTF-8 decoding for text fields.
+
+## Content Negotiation
+
+`negotiate_content(ctx, supported)` chooses the best representation from `Accept`,
+including quality values and wildcards. `accepts(ctx, media_type)` handles a
+single candidate, and `best_match` works directly with an Accept header value.
+A missing Accept header selects the first supported representation.
+
+## OpenAPI 3.1
+
+OpenAPI schemas use `std::meta::shape_of<T>()`. Type and field `///` doc comments
+become schema descriptions, including path/query/header parameter descriptions
+and request/response body field descriptions. Operation summaries,
+descriptions, ids, tags, response statuses, and response descriptions are
+explicit so API behavior is documented at its route boundary:
+
+```voyd
+/// Parameters identifying an article.
+obj ArticlePath {
+  /// Stable article identifier.
+  id: i32
+}
+
+/// New article fields.
+obj CreateArticle {
+  /// Reader-visible title.
+  title: String,
+  /// Optional summary shown in lists.
+  summary?: String
+}
+
+/// Stored article.
+obj Article {
+  /// Stable article identifier.
+  id: i32,
+  /// Reader-visible title.
+  title: String
+}
+
+let create_article = openapi_operation(
+  summary: "Create an article".as_slice().to_string(),
+  description: "Creates and returns one article.".as_slice().to_string(),
+  operation_id: "createArticle".as_slice().to_string(),
+  response_status: 201,
+  response_description: "Article created".as_slice().to_string()
+)
+  .with_path_params<ArticlePath>()
+  .with_json_body<CreateArticle>()
+  .responds_json<Article>()
+
+let base_app = app().route(
+    "/articles/:id".as_slice(),
+    method: Method::Post {},
+    handler: create_article_handler
+  )
+let web_app = base_app
+let empty_docs = openapi_document(openapi_info(
+  title: "Articles".as_slice(),
+  version: "1.0.0".as_slice()
+))
+let api_docs = document_openapi_route(web_app, empty_docs, create_article)
+
+let documented_app = expose_openapi(web_app, api_docs, at: "/openapi.json".as_slice())
+```
+
+`document_openapi_route` derives the method and path from the most recently
+added real route, preventing docs for a nonexistent endpoint. Use
+`.with_query<T>()`, `.with_headers<T>()`, and `.tagged(...)` for additional
+operation metadata. `.responds_sse<T>()` documents `text/event-stream` and
+includes the reified event payload under the `x-voyd-event-schema` extension.
+Recursive DTO references are emitted through OpenAPI components. Component
+identities include a deterministic fingerprint of the full reified schema and
+its documentation, so same-named DTOs from separate modules cannot overwrite
+one another.
 
 ## Typed Request Data
 

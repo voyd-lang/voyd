@@ -4,14 +4,15 @@ use pkg::web::html::self as server_html
 use pkg::web::router
 use std::http::{ Body, Headers, HttpError, IncomingRequest, Method, QueryString, Response }
 use std::http::{ Response as HttpResponse }
-use std::json::{ JsonBool, JsonValue }
+use std::json::{ JsonBool, JsonValue, stringify }
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
+use std::number::cast::to_string
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::String
 use std::http::server::self as server
-use std::http::server::{ HttpServer, ServeTaskPolicy, ServerConfig }
+use std::http::server::{ HttpServer, RequestBody, ServeTaskPolicy, ServerConfig }
 use std::error::panic
 use std::task::self as tasks
 use std::vx::all
@@ -35,6 +36,20 @@ type CookieProbe = {
 
 type InvalidHydrationModel = {
   value: f64
+}
+
+/// Request path for the documented article endpoint.
+obj OpenApiArticlePath {
+  /// Stable article identifier.
+  id: i32
+}
+
+/// Body accepted by the documented article endpoint.
+obj OpenApiCreateArticle {
+  /// Reader-visible article title.
+  title: String,
+  /// Optional article summary.
+  summary?: String
 }
 
 enum SsrMsg
@@ -349,6 +364,98 @@ pub fn serve_ssr_callback_scope_probe(): (HttpServer, tasks::TaskRuntime) -> i32
       0
     Err:
       -1
+
+pub fn serve_sse_probe(): (HttpServer, tasks::TaskRuntime) -> i32
+  let events = app().get(
+    "/events".as_slice(),
+    handler: () -> Response => sse_response(write_sse_probe)
+  )
+  let result = server::serve_each(
+    config: ServerConfig::init(port: 41235),
+    policy: ServeTaskPolicy::detached(),
+    handle: (request: IncomingRequest) -> Response => events.handle(request)
+  )
+  match(result)
+    Ok<Unit>:
+      0
+    Err:
+      -1
+
+fn write_sse_probe(sender: SseSender): server::ResponseWriter -> void
+  let event_value = SseEvent {
+    data: "ready".as_slice().to_string(),
+    event: Some<String> { value: "status".as_slice().to_string() },
+    id: Some<String> { value: "1".as_slice().to_string() },
+    retry_millis: None {}
+  }
+  let _ = sender.send(event_value)
+
+pub fn openapi_schema_probe() -> String
+  let base = openapi_operation(
+    summary: "Create article".as_slice().to_string(),
+    description: "Creates one article.".as_slice().to_string()
+  )
+  let with_path = base.with_path_params<OpenApiArticlePath>()
+  let operation = with_path.with_json_body<OpenApiCreateArticle>()
+  let base_app = app().route(
+    "/articles/:id".as_slice(),
+    method: Method::Post {},
+    handler: (_ctx: Context) -> Response => Response::no_content()
+  )
+  let base_document = openapi_document(openapi_info(
+    title: "Article API".as_slice(),
+    version: "1.0.0".as_slice()
+  ))
+  let document = document_openapi_route(base_app, base_document, operation)
+  match(stringify(document.json()))
+    Ok<String> { value }:
+      value
+    Err:
+      "serialization failed".as_slice().to_string()
+
+pub fn serve_streaming_body_probe(): (HttpServer, tasks::TaskRuntime) -> i32
+  let uploads = app().post(
+    "/upload".as_slice(),
+    handler: (ctx: Context) -> Response => streaming_body_response(ctx)
+  ).streaming()
+  let result = serve_streaming(uploads, port: 41236)
+  match(result)
+    Ok<Unit>:
+      0
+    Err:
+      -1
+
+pub fn serve_streaming_buffered_body_probe(): (HttpServer, tasks::TaskRuntime) -> i32
+  let buffered = app().post(
+    "/buffered".as_slice(),
+    handler: (_ctx: Context) -> Response => Response::no_content()
+  )
+  let result = serve_streaming(buffered, port: 41238, max_body_bytes: 4)
+  match(result)
+    Ok<Unit>:
+      0
+    Err:
+      -1
+
+fn streaming_body_response(ctx: Context): HttpServer -> Response
+  match(ctx.streaming_body())
+    None:
+      Response::bad_request().text("missing stream".as_slice())
+    Some<RequestBody> { value }:
+      let ~body = value
+      var length = 0
+      var reading = true
+      while reading:
+        match(body.next())
+          Err:
+            return Response::bad_request().text("stream error".as_slice())
+          Ok { value: chunk }:
+            match(chunk)
+              Some { value }:
+                length = length + value.len()
+              None:
+                reading = false
+      Response::ok().text(to_string(length))
 
 pub fn direct_ssr_callback_scope_probe() -> String
   document<MsgPack>(retained_ssr_view(false))

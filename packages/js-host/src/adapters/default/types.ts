@@ -59,6 +59,7 @@ export type DefaultAdapterHttpServerConfig = {
   maxBodyBytes?: number;
   maxPendingRequests?: number;
   responseTimeoutMillis?: number;
+  streamRequestBodies?: boolean;
 };
 
 export type DefaultAdapterHttpRequest = {
@@ -68,6 +69,13 @@ export type DefaultAdapterHttpRequest = {
   query?: string;
   headers: DefaultAdapterHttpHeader[];
   body: Uint8Array;
+  bodyStreaming?: boolean;
+};
+
+export type DefaultAdapterHttpRequestChunk = {
+  requestId: number;
+  chunk: Uint8Array;
+  done: boolean;
 };
 
 export type DefaultAdapterHttpResponse = {
@@ -76,6 +84,16 @@ export type DefaultAdapterHttpResponse = {
   reason: string;
   headers: DefaultAdapterHttpHeader[];
   body: Uint8Array;
+};
+
+export type DefaultAdapterHttpResponseHead = Omit<
+  DefaultAdapterHttpResponse,
+  "body"
+>;
+
+export type DefaultAdapterHttpResponseChunk = {
+  requestId: number;
+  chunk: Uint8Array;
 };
 
 export type DefaultAdapterOutputTarget = "stdout" | "stderr";
@@ -107,9 +125,19 @@ export type DefaultAdapterRuntimeHooks = {
     config: DefaultAdapterHttpServerConfig
   ) => Promise<number>;
   httpServerAccept?: (serverId: number) => Promise<DefaultAdapterHttpRequest>;
+  httpServerReadRequest?: (
+    requestId: number
+  ) => Promise<DefaultAdapterHttpRequestChunk>;
   httpServerRespond?: (
     response: DefaultAdapterHttpResponse
   ) => Promise<void>;
+  httpServerStartResponse?: (
+    response: DefaultAdapterHttpResponseHead
+  ) => Promise<void>;
+  httpServerWriteResponse?: (
+    response: DefaultAdapterHttpResponseChunk
+  ) => Promise<void>;
+  httpServerFinishResponse?: (requestId: number) => Promise<void>;
   httpServerClose?: (serverId: number) => Promise<void>;
   readLine?: (prompt: string | null) => Promise<string | null>;
   readBytes?: (maxBytes: number) => Promise<Uint8Array | null>;
