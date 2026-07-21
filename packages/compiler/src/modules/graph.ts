@@ -539,6 +539,22 @@ export const buildModuleGraph = async ({
     let resolved: Awaited<ReturnType<typeof resolveModuleFile>>;
     try {
       resolved = await resolveModuleFile(requestedPath, roots, host);
+      if (!resolved) {
+        const fallbackPath = dependency.namespaceFallbackPath;
+        if (fallbackPath) {
+          const fallback = await resolveModuleFile(fallbackPath, roots, host);
+          if (fallback) {
+            dependency.path = fallbackPath;
+            pending.push({ dependency, importerId, importerFilePath });
+            updateNestedPrefixCounts({
+              counts: pendingNestedPrefixCounts,
+              pathKey: modulePathToString(fallbackPath),
+              delta: 1,
+            });
+            continue;
+          }
+        }
+      }
     } catch (error) {
       moduleDiagnostics.push({
         kind: "io-error",
@@ -554,20 +570,6 @@ export const buildModuleGraph = async ({
     }
 
     if (!resolved) {
-      const fallbackPath = dependency.namespaceFallbackPath;
-      if (fallbackPath) {
-        const fallback = await resolveModuleFile(fallbackPath, roots, host);
-        if (fallback) {
-          dependency.path = fallbackPath;
-          pending.push({ dependency, importerId, importerFilePath });
-          updateNestedPrefixCounts({
-            counts: pendingNestedPrefixCounts,
-            pathKey: modulePathToString(fallbackPath),
-            delta: 1,
-          });
-          continue;
-        }
-      }
       moduleDiagnostics.push({
         kind: "missing-module",
         requested: requestedPath,

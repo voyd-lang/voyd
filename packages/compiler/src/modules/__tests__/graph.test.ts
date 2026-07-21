@@ -368,6 +368,42 @@ pub macro declare_helper()
     );
   });
 
+  it("reports fallback module resolution errors as diagnostics", async () => {
+    const root = resolve("/proj/src");
+    const memoryHost = createMemoryHost({
+      [`${root}${sep}main.voyd`]: "use src::foo::Fx::all",
+    });
+    const fallbackCandidate = `${root}${sep}foo.voyd`;
+    let fallbackCandidateChecks = 0;
+    const host: ModuleHost = {
+      ...memoryHost,
+      fileExists: async (path) => {
+        if (path === fallbackCandidate) {
+          fallbackCandidateChecks += 1;
+          if (fallbackCandidateChecks === 2) {
+            throw new Error("fallback lookup failed");
+          }
+        }
+        return memoryHost.fileExists(path);
+      },
+    };
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "MD0002",
+          message: expect.stringContaining("fallback lookup failed"),
+        }),
+      ])
+    );
+  });
+
   it("loads dependencies via bare pub module-expression exports", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

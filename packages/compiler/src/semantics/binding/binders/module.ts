@@ -715,6 +715,23 @@ const bindEffectNamespaceOperations = ({
         (operation) => operation.name === name,
       );
       const importedName = entry.alias ?? name;
+      const moduleConflict = findModuleNamespaceNameCollision({
+        name: importedName,
+        scope: ctx.symbolTable.rootScope,
+        incomingKind: "effect-op",
+        ctx,
+      });
+      if (moduleConflict) {
+        recordImportNameConflict({
+          name: importedName,
+          incomingKind: "effect-op",
+          existingKind: moduleConflict.kind,
+          span: entry.span,
+          previousSpan: moduleConflict.span,
+          ctx,
+        });
+        return [];
+      }
       const conflict = findEffectOperationSelectionConflict({
         name: importedName,
         incomingKind: "effect-op",

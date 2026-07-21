@@ -361,6 +361,34 @@ fn save(value: i32) -> i32
     },
   );
 
+  it("reports conflicts between module aliases and selected local operations", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}util.voyd`]: "pub fn value() -> i32\n  1",
+      [`${root}${sep}main.voyd`]: `use src::util as save
+
+eff Store
+  save(tail, value: i32) -> i32
+
+use Store::{ save }
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { diagnostics } = analyzeModules({ graph });
+    const conflicts = [...graph.diagnostics, ...diagnostics].filter(
+      (diagnostic) =>
+        diagnostic.code === "BD0001" && diagnostic.message.includes("save"),
+    );
+
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]?.message).toContain("module");
+  });
+
   it("reports conflicts between selected operations from local effects", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
