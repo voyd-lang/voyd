@@ -956,7 +956,45 @@ export const constructorKnownSimplificationPass: ProgramOptimizationPass = {
         if (typeof exactType !== "number") {
           return undefined;
         }
-        instanceTypes.add(exactType);
+        const discriminant = moduleView.hir.expressions.get(expr.discriminant);
+        const parameterIndex =
+          discriminant?.exprKind === "identifier"
+            ? functionItem.parameters.findIndex(
+                (parameter) => parameter.symbol === discriminant.symbol,
+              )
+            : -1;
+        const parameterType =
+          parameterIndex >= 0
+            ? ctx.ir.baseProgram.functions
+                .getSignature(moduleView.moduleId, functionItem.symbol)
+                ?.parameters[parameterIndex]?.typeId
+            : undefined;
+        const optionalInfo =
+          typeof parameterType === "number"
+            ? ctx.ir.baseProgram.optionals.getOptionalInfo(
+                moduleView.moduleId,
+                parameterType,
+              )
+            : undefined;
+        const optionalSomeType = optionalInfo
+          ? exactNominalForType({
+              typeId: optionalInfo.someType,
+              program: ctx.ir.baseProgram,
+            })
+          : undefined;
+        const optionalNoneType = optionalInfo
+          ? exactNominalForType({
+              typeId: optionalInfo.noneType,
+              program: ctx.ir.baseProgram,
+            })
+          : undefined;
+        const promotedExactType =
+          optionalInfo &&
+          exactType !== optionalSomeType &&
+          exactType !== optionalNoneType
+            ? (optionalSomeType ?? exactType)
+            : exactType;
+        instanceTypes.add(promotedExactType);
         if (instanceTypes.size > 1) {
           return undefined;
         }

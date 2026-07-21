@@ -141,6 +141,9 @@ pub fn hydrate_named<Model>({ id: String, target: String, entry: String, model: 
   Hydration<Model> { id: id, target: target, entry: entry, model: model }
 
 fn render_node(value: MsgPack): () -> String
+  render_node_in_namespace(value, false)
+
+fn render_node_in_namespace(value: MsgPack, svg_parent: bool): () -> String
   match(msgpack::unpack_string(value))
     Ok<String> { value }:
       return escape_text(value.as_slice())
@@ -149,7 +152,7 @@ fn render_node(value: MsgPack): () -> String
 
   match(msgpack::unpack_array(value))
     Ok<Array<MsgPack>> { value }:
-      return render_children(value)
+      return render_children(value, svg_parent)
     Err<MsgPackError>:
       void
 
@@ -158,11 +161,11 @@ fn render_node(value: MsgPack): () -> String
       match(read_string(map, "kind".as_slice()))
         Some<String> { value: kind }:
           if kind.equals("element"):
-            return render_element(map)
+            return render_element(map, svg_parent)
           if kind.equals("fragment"):
-            return render_node_children(map)
+            return render_node_children(map, svg_parent)
           if kind.equals("map"):
-            return render_mapped_node(map)
+            return render_mapped_node(map, svg_parent)
           if kind.equals("text"):
             match(read_string(map, "value".as_slice()))
               Some<String> { value }:
@@ -175,43 +178,47 @@ fn render_node(value: MsgPack): () -> String
     Err<MsgPackError>:
       String::init()
 
-fn render_mapped_node(map: Dict<String, MsgPack>) -> String
+fn render_mapped_node(map: Dict<String, MsgPack>, svg_parent: bool) -> String
   match(map.get("child"))
     Some<MsgPack> { value }:
-      render_node(value)
+      render_node_in_namespace(value, svg_parent)
     None:
       String::init()
 
-fn render_element(map: Dict<String, MsgPack>): () -> String
+fn render_element(map: Dict<String, MsgPack>, svg_parent: bool): () -> String
   let tag = read_string_or(map, "tag".as_slice(), "div".as_slice())
-  if not is_valid_tag_name(tag):
+  let svg_element = svg_parent or tag == "svg"
+  if not is_valid_tag_name(tag, svg_element):
     panic("invalid VX HTML tag: ".concat(tag))
     return String::init()
-  if is_void_tag(tag) and has_element_children(map):
+  if not svg_element and is_void_tag(tag) and has_element_children(map):
     panic("void VX HTML element cannot have children: ".concat(tag))
     return String::init()
-  let attrs = render_element_attrs(map, tag)
+  let attrs = render_element_attrs(map, tag, svg_element)
   let opening = "<".as_slice()
     .to_string()
     .concat(tag)
     .concat(attrs)
     .concat(">".as_slice())
-  if is_void_tag(tag):
+  if not svg_element and is_void_tag(tag):
     return opening
-  let children = if is_raw_text_tag(tag.as_slice()) then: render_raw_text_children(map, tag.as_slice()) else: preserve_leading_newline(tag, render_node_children(map))
-  validate_textarea_value(map, tag: tag, children: children)
+  let svg_children = svg_element and not is_svg_html_integration_point(tag)
+  let rendered_children = if not svg_element and is_raw_text_tag(tag.as_slice()) then: render_raw_text_children(map, tag.as_slice()) else: render_node_children(map, svg_children)
+  let children = if svg_element then: rendered_children else: preserve_leading_newline(tag, rendered_children)
+  if not svg_element:
+    validate_textarea_value(map, tag: tag, children: children)
   opening
     .concat(children)
     .concat("</".as_slice())
     .concat(tag)
     .concat(">".as_slice())
 
-fn render_node_children(map: Dict<String, MsgPack>): () -> String
+fn render_node_children(map: Dict<String, MsgPack>, svg_parent: bool): () -> String
   match(map.get("children".as_slice().to_string()))
     Some<MsgPack> { value }:
       match(msgpack::unpack_array(value))
         Ok<Array<MsgPack>> { value }:
-          render_children(value)
+          render_children(value, svg_parent)
         Err<MsgPackError>:
           String::init()
     None:
@@ -228,13 +235,13 @@ fn has_element_children(map: Dict<String, MsgPack>) -> bool
     None:
       false
 
-fn render_children(children: Array<MsgPack>): () -> String
+fn render_children(children: Array<MsgPack>, svg_parent: bool): () -> String
   var out = String::init()
   var index = 0
   while index < children.len():
     match(children.get(index))
       Some<MsgPack> { value }:
-        out = out.concat(render_node(value))
+        out = out.concat(render_node_in_namespace(value, svg_parent))
       None:
         void
     index = index + 1
@@ -312,14 +319,14 @@ fn validate_raw_text(value: String, tag: StringSlice) -> String
     panic("VX raw text contains its closing delimiter")
   value
 
-fn render_element_attrs(map: Dict<String, MsgPack>, tag: String): () -> String
+fn render_element_attrs(map: Dict<String, MsgPack>, tag: String, svg_element: bool): () -> String
   let ~attrs = Dict<String, MsgPack>::init()
   copy_named_values(map, field: "attrs", into: attrs)
   copy_properties(map, tag: tag, into: attrs)
   let styles = read_styles(map)
   if not styles.is_empty():
     attrs.set("style", styles)
-  render_named_values(attrs)
+  render_named_values(attrs, svg_element)
 
 fn copy_properties(
   map: Dict<String, MsgPack>,
@@ -372,21 +379,21 @@ fn copy_named_values(
     None:
       void
 
-fn render_named_values(attrs: Dict<String, MsgPack>): () -> String
+fn render_named_values(attrs: Dict<String, MsgPack>, svg_element: bool): () -> String
   var out = String::init()
   let entries = attrs.entries()
   var index = 0
   while index < entries.len():
     match(entries.get(index))
       Some<(String, MsgPack)> { value }:
-        out = out.concat(render_attr(value.0, value.1))
+        out = out.concat(render_attr(value.0, value.1, svg_element))
       None:
         void
     index = index + 1
   out
 
-fn render_attr(name: String, value: MsgPack): () -> String
-  if not is_valid_attr_name(name):
+fn render_attr(name: String, value: MsgPack, svg_element: bool): () -> String
+  if not is_valid_attr_name(name, svg_element):
     panic("invalid VX HTML attribute: ".concat(name))
     return String::init()
   match(msgpack::unpack_bool(value))
@@ -518,6 +525,23 @@ fn is_void_tag(tag: String) -> bool
 fn is_raw_text_tag(tag: StringSlice) -> bool
   tag == "script".as_slice() or tag == "style".as_slice()
 
+fn is_svg_html_integration_point(tag: String) -> bool
+  tag == "desc" or tag == "foreignObject" or tag == "title"
+
+fn is_svg_foreign_content_breakout_tag(tag: String) -> bool
+  tag == "b" or tag == "big" or tag == "blockquote" or tag == "body" or
+    tag == "br" or tag == "center" or tag == "code" or tag == "dd" or
+    tag == "div" or tag == "dl" or tag == "dt" or tag == "em" or
+    tag == "embed" or tag == "font" or tag == "h1" or tag == "h2" or
+    tag == "h3" or tag == "h4" or tag == "h5" or tag == "h6" or
+    tag == "head" or tag == "hr" or tag == "i" or tag == "img" or
+    tag == "li" or tag == "listing" or tag == "menu" or tag == "meta" or
+    tag == "nobr" or tag == "ol" or tag == "p" or tag == "pre" or
+    tag == "ruby" or tag == "s" or tag == "small" or tag == "span" or
+    tag == "strike" or tag == "strong" or tag == "sub" or tag == "sup" or
+    tag == "table" or tag == "tt" or tag == "u" or tag == "ul" or
+    tag == "var"
+
 fn preserve_leading_newline(tag: String, children: String) -> String
   if (tag == "listing" or tag == "pre" or tag == "textarea") and children.starts_with("\n"):
     return "\n".as_slice().to_string().concat(children)
@@ -574,18 +598,129 @@ fn is_valid_property_value({ name: String, value: MsgPack }) -> bool
     Err<MsgPackError>:
       false
 
-fn is_valid_tag_name(name: String) -> bool
-  if name.is_empty() or not is_ascii_lowercase(name.get_byte(0) ?? 0):
+fn is_valid_tag_name(name: String, svg_element: bool) -> bool
+  if name.is_empty() or (if svg_element then: not is_ascii_letter(name.get_byte(0) ?? 0) else: not is_ascii_lowercase(name.get_byte(0) ?? 0)):
+    return false
+  if svg_element and (name != canonical_svg_tag_name(name) or is_svg_foreign_content_breakout_tag(name)):
     return false
   name_bytes_match(name, where: (byte: i32) -> bool =>
-    is_ascii_lowercase(byte) or is_ascii_digit(byte) or byte == 45 or byte == 58
+    (if svg_element then: is_ascii_letter(byte) else: is_ascii_lowercase(byte)) or
+      is_ascii_digit(byte) or byte == 45 or (not svg_element and byte == 58)
   )
 
-fn is_valid_attr_name(name: String) -> bool
-  not name.is_empty() and name_bytes_match(name, where: (byte: i32) -> bool =>
+fn canonical_svg_tag_name(name: String) -> String
+  let lowered = name.lowered()
+  if
+    lowered == "altglyph": "altGlyph"
+    lowered == "altglyphdef": "altGlyphDef"
+    lowered == "altglyphitem": "altGlyphItem"
+    lowered == "animatecolor": "animateColor"
+    lowered == "animatemotion": "animateMotion"
+    lowered == "animatetransform": "animateTransform"
+    lowered == "clippath": "clipPath"
+    lowered == "feblend": "feBlend"
+    lowered == "fecolormatrix": "feColorMatrix"
+    lowered == "fecomponenttransfer": "feComponentTransfer"
+    lowered == "fecomposite": "feComposite"
+    lowered == "feconvolvematrix": "feConvolveMatrix"
+    lowered == "fediffuselighting": "feDiffuseLighting"
+    lowered == "fedisplacementmap": "feDisplacementMap"
+    lowered == "fedistantlight": "feDistantLight"
+    lowered == "fedropshadow": "feDropShadow"
+    lowered == "feflood": "feFlood"
+    lowered == "fefunca": "feFuncA"
+    lowered == "fefuncb": "feFuncB"
+    lowered == "fefuncg": "feFuncG"
+    lowered == "fefuncr": "feFuncR"
+    lowered == "fegaussianblur": "feGaussianBlur"
+    lowered == "feimage": "feImage"
+    lowered == "femerge": "feMerge"
+    lowered == "femergenode": "feMergeNode"
+    lowered == "femorphology": "feMorphology"
+    lowered == "feoffset": "feOffset"
+    lowered == "fepointlight": "fePointLight"
+    lowered == "fespecularlighting": "feSpecularLighting"
+    lowered == "fespotlight": "feSpotLight"
+    lowered == "fetile": "feTile"
+    lowered == "feturbulence": "feTurbulence"
+    lowered == "foreignobject": "foreignObject"
+    lowered == "glyphref": "glyphRef"
+    lowered == "lineargradient": "linearGradient"
+    lowered == "radialgradient": "radialGradient"
+    lowered == "textpath": "textPath"
+    else: lowered
+
+fn is_valid_attr_name(name: String, svg_element: bool) -> bool
+  if name.is_empty() or (svg_element and name != canonical_svg_attr_name(name)):
+    return false
+  name_bytes_match(name, where: (byte: i32) -> bool =>
     byte > 31 and byte != 127 and byte != 32 and byte != 34 and byte != 39 and
-      byte != 47 and byte != 61 and byte != 62 and not is_ascii_uppercase(byte)
+      byte != 47 and byte != 61 and byte != 62 and
+      (svg_element or not is_ascii_uppercase(byte))
   )
+
+fn canonical_svg_attr_name(name: String) -> String
+  let lowered = name.lowered()
+  if
+    lowered == "attributename": "attributeName"
+    lowered == "attributetype": "attributeType"
+    lowered == "basefrequency": "baseFrequency"
+    lowered == "baseprofile": "baseProfile"
+    lowered == "calcmode": "calcMode"
+    lowered == "clippathunits": "clipPathUnits"
+    lowered == "diffuseconstant": "diffuseConstant"
+    lowered == "edgemode": "edgeMode"
+    lowered == "filterunits": "filterUnits"
+    lowered == "glyphref": "glyphRef"
+    lowered == "gradienttransform": "gradientTransform"
+    lowered == "gradientunits": "gradientUnits"
+    lowered == "kernelmatrix": "kernelMatrix"
+    lowered == "kernelunitlength": "kernelUnitLength"
+    lowered == "keypoints": "keyPoints"
+    lowered == "keysplines": "keySplines"
+    lowered == "keytimes": "keyTimes"
+    lowered == "lengthadjust": "lengthAdjust"
+    lowered == "limitingconeangle": "limitingConeAngle"
+    lowered == "markerheight": "markerHeight"
+    lowered == "markerunits": "markerUnits"
+    lowered == "markerwidth": "markerWidth"
+    lowered == "maskcontentunits": "maskContentUnits"
+    lowered == "maskunits": "maskUnits"
+    lowered == "numoctaves": "numOctaves"
+    lowered == "pathlength": "pathLength"
+    lowered == "patterncontentunits": "patternContentUnits"
+    lowered == "patterntransform": "patternTransform"
+    lowered == "patternunits": "patternUnits"
+    lowered == "pointsatx": "pointsAtX"
+    lowered == "pointsaty": "pointsAtY"
+    lowered == "pointsatz": "pointsAtZ"
+    lowered == "preservealpha": "preserveAlpha"
+    lowered == "preserveaspectratio": "preserveAspectRatio"
+    lowered == "primitiveunits": "primitiveUnits"
+    lowered == "refx": "refX"
+    lowered == "refy": "refY"
+    lowered == "repeatcount": "repeatCount"
+    lowered == "repeatdur": "repeatDur"
+    lowered == "requiredextensions": "requiredExtensions"
+    lowered == "requiredfeatures": "requiredFeatures"
+    lowered == "specularconstant": "specularConstant"
+    lowered == "specularexponent": "specularExponent"
+    lowered == "spreadmethod": "spreadMethod"
+    lowered == "startoffset": "startOffset"
+    lowered == "stddeviation": "stdDeviation"
+    lowered == "stitchtiles": "stitchTiles"
+    lowered == "surfacescale": "surfaceScale"
+    lowered == "systemlanguage": "systemLanguage"
+    lowered == "tablevalues": "tableValues"
+    lowered == "targetx": "targetX"
+    lowered == "targety": "targetY"
+    lowered == "textlength": "textLength"
+    lowered == "viewbox": "viewBox"
+    lowered == "viewtarget": "viewTarget"
+    lowered == "xchannelselector": "xChannelSelector"
+    lowered == "ychannelselector": "yChannelSelector"
+    lowered == "zoomandpan": "zoomAndPan"
+    else: lowered
 
 fn is_valid_style_name(name: String) -> bool
   if name.is_empty():

@@ -11,9 +11,51 @@ type LegacyElement = {
   children?: unknown[];
 };
 
+export type MarkupNamespace = "html" | "svg";
+
 const voidTags = new Set([
   "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta",
   "param", "source", "track", "wbr",
+]);
+
+const svgHtmlIntegrationPoints = new Set(["desc", "foreignObject", "title"]);
+const svgForeignContentBreakoutTags = new Set([
+  "b", "big", "blockquote", "body", "br", "center", "code", "dd", "div",
+  "dl", "dt", "em", "embed", "font", "h1", "h2", "h3", "h4", "h5",
+  "h6", "head", "hr", "i", "img", "li", "listing", "menu", "meta",
+  "nobr", "ol", "p", "pre", "ruby", "s", "small", "span", "strike",
+  "strong", "sub", "sup", "table", "tt", "u", "ul", "var",
+]);
+
+// HTML parsing lowercases SVG names, then restores this defined canonical set.
+// Requiring the parser's resulting spelling keeps SSR and createElementNS trees
+// identical without silently changing the caller's frame.
+const parserAdjustedSvgTagNames = adjustedSvgNames([
+  "altGlyph", "altGlyphDef", "altGlyphItem", "animateColor", "animateMotion",
+  "animateTransform", "clipPath", "feBlend", "feColorMatrix",
+  "feComponentTransfer", "feComposite", "feConvolveMatrix",
+  "feDiffuseLighting", "feDisplacementMap", "feDistantLight", "feDropShadow",
+  "feFlood",
+  "feFuncA", "feFuncB", "feFuncG", "feFuncR", "feGaussianBlur", "feImage",
+  "feMerge", "feMergeNode", "feMorphology", "feOffset", "fePointLight",
+  "feSpecularLighting", "feSpotLight", "feTile", "feTurbulence",
+  "foreignObject", "glyphRef", "linearGradient", "radialGradient", "textPath",
+]);
+
+const parserAdjustedSvgAttributeNames = adjustedSvgNames([
+  "attributeName", "attributeType", "baseFrequency", "baseProfile", "calcMode",
+  "clipPathUnits", "diffuseConstant", "edgeMode", "filterUnits", "glyphRef",
+  "gradientTransform", "gradientUnits", "kernelMatrix", "kernelUnitLength",
+  "keyPoints", "keySplines", "keyTimes", "lengthAdjust", "limitingConeAngle",
+  "markerHeight", "markerUnits", "markerWidth", "maskContentUnits", "maskUnits",
+  "numOctaves", "pathLength", "patternContentUnits", "patternTransform",
+  "patternUnits", "pointsAtX", "pointsAtY", "pointsAtZ", "preserveAlpha",
+  "preserveAspectRatio", "primitiveUnits", "refX", "refY", "repeatCount",
+  "repeatDur", "requiredExtensions", "requiredFeatures", "specularConstant",
+  "specularExponent", "spreadMethod", "startOffset", "stdDeviation",
+  "stitchTiles", "surfaceScale", "systemLanguage", "tableValues", "targetX",
+  "targetY", "textLength", "viewBox", "viewTarget", "xChannelSelector",
+  "yChannelSelector", "zoomAndPan",
 ]);
 
 export function normalizeRenderFrame(input: unknown): VxRenderFrame {
@@ -22,7 +64,7 @@ export function normalizeRenderFrame(input: unknown): VxRenderFrame {
     if (record.version !== 1) {
       throw new Error(`vx-dom: unsupported VX render frame version ${String(record.version)}`);
     }
-    return { version: 1, root: normalizeVersionedVNode(record.root, "root") };
+    return { version: 1, root: normalizeVersionedVNode(record.root, "root", "html") };
   }
 
   return { version: 1, root: normalizeVNode(input) };
@@ -38,6 +80,53 @@ export function validateHtmlAttributeName(value: string, path = "attribute"): vo
   if (/[A-Z]/.test(value) || !/^[^\s"'/>=\u0000-\u001f\u007f]+$/.test(value)) {
     throw new Error(`vx-dom: invalid HTML attribute name at ${path}: ${JSON.stringify(value)}`);
   }
+}
+
+export function validateSvgTagName(value: string, path = "tag"): void {
+  if (
+    !/^[A-Za-z][A-Za-z0-9-]*$/.test(value) ||
+    svgForeignContentBreakoutTags.has(value) ||
+    !isCanonicalSvgName(value, parserAdjustedSvgTagNames)
+  ) {
+    throw new Error(`vx-dom: invalid SVG tag name at ${path}: ${JSON.stringify(value)}`);
+  }
+}
+
+export function validateSvgAttributeName(value: string, path = "attribute"): void {
+  if (
+    !/^[^\s"'/>=\u0000-\u001f\u007f]+$/.test(value) ||
+    !isCanonicalSvgName(value, parserAdjustedSvgAttributeNames)
+  ) {
+    throw new Error(`vx-dom: invalid SVG attribute name at ${path}: ${JSON.stringify(value)}`);
+  }
+}
+
+function adjustedSvgNames(names: string[]): ReadonlyMap<string, string> {
+  return new Map(names.map((name) => [name.toLowerCase(), name]));
+}
+
+function isCanonicalSvgName(
+  value: string,
+  adjustedNames: ReadonlyMap<string, string>,
+): boolean {
+  const lowercase = value.toLowerCase();
+  return value === (adjustedNames.get(lowercase) ?? lowercase);
+}
+
+export function elementNamespace(
+  tag: string,
+  parentNamespace: MarkupNamespace,
+): MarkupNamespace {
+  return parentNamespace === "svg" || tag === "svg" ? "svg" : "html";
+}
+
+export function childNamespace(
+  tag: string,
+  namespace: MarkupNamespace,
+): MarkupNamespace {
+  return namespace === "svg" && svgHtmlIntegrationPoints.has(tag)
+    ? "html"
+    : namespace;
 }
 
 export function validateCssPropertyName(value: string, path = "style"): void {
@@ -72,12 +161,22 @@ export function validateDomPropertyValue(
 }
 
 export function normalizeVNode(input: unknown): VNode {
+  return normalizeVNodeInNamespace(input, "html");
+}
+
+function normalizeVNodeInNamespace(
+  input: unknown,
+  namespace: MarkupNamespace,
+): VNode {
   if (input == null) return { kind: "fragment", children: [] };
   if (typeof input === "string" || typeof input === "number" || typeof input === "boolean") {
     return { kind: "text", value: String(input) };
   }
   if (Array.isArray(input)) {
-    return { kind: "fragment", children: input.map(normalizeVNode) };
+    return {
+      kind: "fragment",
+      children: input.map((child) => normalizeVNodeInNamespace(child, namespace)),
+    };
   }
   const record = toRecord(input);
   if (!record) {
@@ -95,35 +194,43 @@ export function normalizeVNode(input: unknown): VNode {
     return {
       kind: "fragment",
       key: optionalString(record.key),
-      children: normalizeChildren(record.children),
+      children: normalizeChildren(record.children, namespace),
     };
   }
   if (record.kind === "element") {
-    return normalizeElement(record);
+    return normalizeElement(record, namespace);
   }
   if (record.kind === "map") {
-    const child = normalizeVNode(record.child);
+    const child = normalizeVNodeInNamespace(record.child, namespace);
     return typeof record.handlerId === "number"
       ? applyVNodeMessageMap(child, record.handlerId)
       : child;
   }
   if (typeof record.name === "string") {
-    return normalizeLegacyElement(record as LegacyElement);
+    return normalizeLegacyElement(record as LegacyElement, namespace);
   }
 
   return { kind: "text", value: String(input) };
 }
 
-function normalizeElement(input: Record<string, unknown>): VxElementNode {
+function normalizeElement(
+  input: Record<string, unknown>,
+  parentNamespace: MarkupNamespace,
+): VxElementNode {
   const tag = typeof input.tag === "string" && input.tag ? input.tag : "div";
-  validateHtmlTagName(tag);
-  const children = normalizeChildren(input.children);
-  validateVoidElementChildren(tag, children, "element");
+  const namespace = elementNamespace(tag, parentNamespace);
+  validateTagName(tag, namespace);
+  const children = normalizeChildren(input.children, childNamespace(tag, namespace));
+  validateVoidElementChildren(tag, children, "element", namespace);
   return {
     kind: "element",
     tag,
     key: optionalString(input.key),
-    attrs: normalizeValidatedRecord(input.attrs, "element.attrs", validateHtmlAttributeName),
+    attrs: normalizeValidatedRecord(
+      input.attrs,
+      "element.attrs",
+      attributeNameValidator(namespace),
+    ),
     props: normalizeValidatedProps(input.props, "element.props"),
     styles: normalizeValidatedStyles(input.styles, "element.styles"),
     events: normalizeEvents(input.events),
@@ -131,13 +238,19 @@ function normalizeElement(input: Record<string, unknown>): VxElementNode {
   };
 }
 
-function normalizeLegacyElement(input: LegacyElement): VxElementNode {
+function normalizeLegacyElement(
+  input: LegacyElement,
+  parentNamespace: MarkupNamespace,
+): VxElementNode {
   const attributes = normalizeLegacyAttributes(input.attributes);
   const tag = input.name || "div";
-  validateHtmlTagName(tag, "legacy.name");
-  Object.keys(attributes ?? {}).forEach((key) => validateHtmlAttributeName(key, `legacy.attributes.${key}`));
-  const children = normalizeChildren(input.children);
-  validateVoidElementChildren(tag, children, "legacy element");
+  const namespace = elementNamespace(tag, parentNamespace);
+  validateTagName(tag, namespace, "legacy.name");
+  Object.keys(attributes ?? {}).forEach((key) =>
+    attributeNameValidator(namespace)(key, `legacy.attributes.${key}`)
+  );
+  const children = normalizeChildren(input.children, childNamespace(tag, namespace));
+  validateVoidElementChildren(tag, children, "legacy element", namespace);
   return {
     kind: "element",
     tag,
@@ -147,8 +260,10 @@ function normalizeLegacyElement(input: LegacyElement): VxElementNode {
   };
 }
 
-function normalizeChildren(input: unknown): VNode[] {
-  return Array.isArray(input) ? input.map(normalizeVNode) : [];
+function normalizeChildren(input: unknown, namespace: MarkupNamespace): VNode[] {
+  return Array.isArray(input)
+    ? input.map((child) => normalizeVNodeInNamespace(child, namespace))
+    : [];
 }
 
 function normalizeLegacyAttributes(
@@ -195,7 +310,11 @@ function normalizeEvents(input: unknown): EventDescriptor[] | undefined {
   return events.length > 0 ? events : undefined;
 }
 
-function normalizeVersionedVNode(input: unknown, path: string): VNode {
+function normalizeVersionedVNode(
+  input: unknown,
+  path: string,
+  namespace: MarkupNamespace,
+): VNode {
   const record = toRecord(input);
   if (!record) {
     throw new Error(`vx-dom: invalid VX frame at ${path}: expected node object`);
@@ -216,12 +335,12 @@ function normalizeVersionedVNode(input: unknown, path: string): VNode {
     return {
       kind: "fragment",
       key: strictOptionalString(record.key, `${path}.key`),
-      children: normalizeVersionedChildren(record.children, `${path}.children`),
+      children: normalizeVersionedChildren(record.children, `${path}.children`, namespace),
     };
   }
 
   if (record.kind === "element") {
-    return normalizeVersionedElement(record, path);
+    return normalizeVersionedElement(record, path, namespace);
   }
 
   if (record.kind === "map") {
@@ -229,7 +348,11 @@ function normalizeVersionedVNode(input: unknown, path: string): VNode {
       throw new Error(`vx-dom: invalid VX frame at ${path}.handlerId: expected number`);
     }
     return applyVNodeMessageMap(
-      normalizeVersionedVNode(readRequiredField(record, "child", path), `${path}.child`),
+      normalizeVersionedVNode(
+        readRequiredField(record, "child", path),
+        `${path}.child`,
+        namespace,
+      ),
       record.handlerId,
     );
   }
@@ -237,18 +360,31 @@ function normalizeVersionedVNode(input: unknown, path: string): VNode {
   throw new Error(`vx-dom: invalid VX frame at ${path}.kind: expected text, fragment, element, or map`);
 }
 
-function normalizeVersionedElement(input: Record<string, unknown>, path: string): VxElementNode {
+function normalizeVersionedElement(
+  input: Record<string, unknown>,
+  path: string,
+  parentNamespace: MarkupNamespace,
+): VxElementNode {
   if (typeof input.tag !== "string" || input.tag.length === 0) {
     throw new Error(`vx-dom: invalid VX frame at ${path}.tag: expected non-empty string`);
   }
-  validateHtmlTagName(input.tag, `${path}.tag`);
-  const children = normalizeVersionedChildren(input.children, `${path}.children`);
-  validateVoidElementChildren(input.tag, children, path);
+  const namespace = elementNamespace(input.tag, parentNamespace);
+  validateTagName(input.tag, namespace, `${path}.tag`);
+  const children = normalizeVersionedChildren(
+    input.children,
+    `${path}.children`,
+    childNamespace(input.tag, namespace),
+  );
+  validateVoidElementChildren(input.tag, children, path, namespace);
   return {
     kind: "element",
     tag: input.tag,
     key: strictOptionalString(input.key, `${path}.key`),
-    attrs: normalizeValidatedRecord(input.attrs, `${path}.attrs`, validateHtmlAttributeName),
+    attrs: normalizeValidatedRecord(
+      input.attrs,
+      `${path}.attrs`,
+      attributeNameValidator(namespace),
+    ),
     props: normalizeValidatedProps(input.props, `${path}.props`),
     styles: normalizeValidatedStyles(input.styles, `${path}.styles`),
     events: normalizeVersionedEvents(input.events, `${path}.events`),
@@ -270,18 +406,44 @@ function normalizeValidatedProps(
   return props;
 }
 
-function normalizeVersionedChildren(input: unknown, path: string): VNode[] {
+function normalizeVersionedChildren(
+  input: unknown,
+  path: string,
+  namespace: MarkupNamespace,
+): VNode[] {
   if (input === undefined) return [];
   if (!Array.isArray(input)) {
     throw new Error(`vx-dom: invalid VX frame at ${path}: expected array`);
   }
-  return input.map((child, index) => normalizeVersionedVNode(child, `${path}[${index}]`));
+  return input.map((child, index) =>
+    normalizeVersionedVNode(child, `${path}[${index}]`, namespace)
+  );
 }
 
-function validateVoidElementChildren(tag: string, children: VNode[], path: string): void {
-  if (voidTags.has(tag) && children.length > 0) {
+function validateVoidElementChildren(
+  tag: string,
+  children: VNode[],
+  path: string,
+  namespace: MarkupNamespace,
+): void {
+  if (namespace === "html" && voidTags.has(tag) && children.length > 0) {
     throw new Error(`vx-dom: void element at ${path} cannot have children`);
   }
+}
+
+function validateTagName(
+  tag: string,
+  namespace: MarkupNamespace,
+  path = "tag",
+): void {
+  const validate = namespace === "svg" ? validateSvgTagName : validateHtmlTagName;
+  validate(tag, path);
+}
+
+function attributeNameValidator(
+  namespace: MarkupNamespace,
+): (name: string, path: string) => void {
+  return namespace === "svg" ? validateSvgAttributeName : validateHtmlAttributeName;
 }
 
 function normalizeValidatedRecord(

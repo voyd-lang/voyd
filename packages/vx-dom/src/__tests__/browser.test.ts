@@ -33,6 +33,46 @@ describe("vx-dom browser renderer", () => {
     vi.restoreAllMocks();
   });
 
+  it("creates SVG trees in the SVG namespace with case-sensitive attributes", () => {
+    const renderer = createVxDomRenderer(container);
+
+    renderer.render(frame({
+      kind: "element",
+      tag: "svg",
+      attrs: { viewBox: "0 0 24 24" },
+      children: [{ kind: "element", tag: "path", attrs: { d: "M1 1h2" } }],
+    }));
+
+    const svg = container.querySelector("svg")!;
+    const path = svg.querySelector("path")!;
+    expect(svg.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(svg.getAttribute("viewBox")).toBe("0 0 24 24");
+    expect(path.namespaceURI).toBe("http://www.w3.org/2000/svg");
+    expect(path.getAttribute("d")).toBe("M1 1h2");
+  });
+
+  it("creates and patches parser-namespaced SVG attributes", () => {
+    const renderer = createVxDomRenderer(container);
+    const useNode = (attrs: Record<string, string>): VxElementNode => ({
+      kind: "element",
+      tag: "svg",
+      children: [{ kind: "element", tag: "use", attrs }],
+    });
+
+    renderer.render(frame(useNode({
+      "xlink:href": "#first",
+      "xml:lang": "en",
+    })));
+    const use = container.querySelector("use")!;
+    expect(use.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe("#first");
+    expect(use.getAttributeNS("http://www.w3.org/XML/1998/namespace", "lang")).toBe("en");
+
+    renderer.render(frame(useNode({ "xlink:href": "#second" })));
+    expect(container.querySelector("use")).toBe(use);
+    expect(use.getAttributeNS("http://www.w3.org/1999/xlink", "href")).toBe("#second");
+    expect(use.hasAttributeNS("http://www.w3.org/XML/1998/namespace", "lang")).toBe(false);
+  });
+
   it("patches text and props without replacing the element", () => {
     const renderer = createVxDomRenderer(container);
 

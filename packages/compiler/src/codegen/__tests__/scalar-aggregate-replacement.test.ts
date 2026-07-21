@@ -69,6 +69,34 @@ const runMain = (
 };
 
 describe("scalar aggregate replacement", () => {
+  it("passes scalarized arrays to optional parameters", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Array<T> { storage: FixedArray<T>, count: i32 }
+obj Some<T> { value: T }
+obj None {}
+type Optional<T> = Some<T> | None
+
+pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
+  Array<T> { storage: source, count: __array_len(source) }
+
+impl<T> Array<T>
+  fn len(self) -> i32
+    self.count
+
+fn count(values?: Array<i32>) -> i32
+  if values is Some:
+    return values.value.len()
+  0
+
+pub fn main() -> i32
+  let values = [7]
+  count(values) * 10 + count()
+`);
+
+    expect(runMain(optimizedCodegen.module)()).toBe(10);
+    expect(runMain(baselineCodegen.module)()).toBe(10);
+  });
+
   it("keeps receiver variants distinct when aggregate arguments are present", () => {
     const { optimizedCodegen } = compileOptimized(`
 trait Runner
