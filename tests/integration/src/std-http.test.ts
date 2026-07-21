@@ -256,6 +256,8 @@ describe("integration: std http", () => {
 
     expect(response.status).toBe(200);
     expect(response.body).toBe("streamed");
+    const status = await retryHttpGet(`http://127.0.0.1:${port}/status`);
+    expect(status.body).toBe("complete");
     expect(run.cancel("test complete")).toBe(true);
     await expect(run.outcome).resolves.toMatchObject({ kind: "cancelled" });
   });

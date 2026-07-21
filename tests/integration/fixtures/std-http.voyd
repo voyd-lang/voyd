@@ -12,6 +12,10 @@ use std::task::self as task
 use std::time::self as time
 use std::time::{ Duration, Time }
 
+obj StreamProbe {
+  complete: bool
+}
+
 fn status_or_error(result: Result<Response, HostError>): () -> i32
   match(result)
     Ok<Response> { value }:
@@ -104,6 +108,7 @@ pub fn serve_streaming_head_from_env(): (HttpServer, task::TaskRuntime, env::Env
   if port <= 0:
     return -10
 
+  let ~probe = StreamProbe { complete: false }
   let result = server::serve_each(
     config: ServerConfig::init(
       port: port,
@@ -111,7 +116,7 @@ pub fn serve_streaming_head_from_env(): (HttpServer, task::TaskRuntime, env::Env
       response_timeout_millis: 2000
     ),
     policy: ServeTaskPolicy::sequential(),
-    handle: stream_head_response
+    handle: (request: IncomingRequest) -> Response => stream_head_response(request, probe)
   )
   match(result)
     Ok<Unit>:
@@ -119,11 +124,16 @@ pub fn serve_streaming_head_from_env(): (HttpServer, task::TaskRuntime, env::Env
     Err<HostError> { error }:
       -error.code
 
-fn stream_head_response(_request: IncomingRequest): (server::ResponseStream, open) -> Response
-  server::stream(
+fn stream_head_response(request: IncomingRequest, ~probe: StreamProbe): (server::ResponseStream, open) -> Response
+  if request.path.equals("/status".as_slice().to_string()):
+    let status = if probe.complete then: "complete".as_slice() else: "pending".as_slice()
+    return Response::ok().text(status)
+  let response = server::stream(
     Response::ok().text("x".as_slice().to_string().repeat(150000)),
     body: write_streaming_body
   )
+  probe.complete = true
+  response
 
 fn write_streaming_body(): server::ResponseWriter -> void
   let _ = server::write(Body::text("streamed".as_slice()).as_bytes())

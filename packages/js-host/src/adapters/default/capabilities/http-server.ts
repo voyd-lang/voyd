@@ -1252,10 +1252,15 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
         state.pendingResponses.delete(requestId);
         state.requestClosed(requestId);
         cancelRequestBody(state.requestBodies, requestId);
-        await endNodeResponse({
-          target: pending.response,
-          disconnectedMessage: "client disconnected before response stream finished",
-        });
+        try {
+          await endNodeResponse({
+            target: pending.response,
+            disconnectedMessage: "client disconnected before response stream finished",
+          });
+        } catch {
+          // The response was already started and all producer writes succeeded.
+          // A socket failure while ending it is a normal client disconnect.
+        }
         return;
       }
       throw new Error(`request ${requestId} is closed or unknown`);
@@ -1944,16 +1949,16 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
       host,
       effectId: HTTP_SERVER_EFFECT_ID,
       opName: "finish_response_raw",
-      handler: async ({ tail }, requestId) => {
+      handler: async ({ resume }, requestId) => {
         try {
           const parsedRequestId = toNumberOrUndefined(requestId);
           if (parsedRequestId === undefined) {
             throw new Error("http server finish response requires a request id");
           }
           await httpServerSource.finishResponse(Math.trunc(parsedRequestId));
-          return tail(hostOk());
+          return resume(hostOk());
         } catch (error) {
-          return tail(hostError(error instanceof Error ? error.message : String(error)));
+          return resume(hostError(error instanceof Error ? error.message : String(error)));
         }
       },
     });
