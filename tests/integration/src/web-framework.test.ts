@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 import { createVoydHost } from "@voyd-lang/sdk/js-host";
 import {
@@ -171,6 +171,10 @@ const createHttpServerHarness = (): {
 };
 
 describe("integration: pkg::web", () => {
+  beforeAll(async () => {
+    await compileWebFrameworkFixture();
+  }, 180_000);
+
   it("streams request bodies through Web Context when opted in", async () => {
     const result = await compileWebFrameworkFixture();
     const server = createHttpServerHarness();
