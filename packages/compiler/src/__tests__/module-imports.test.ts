@@ -9,6 +9,330 @@ const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
 
 describe("module imports", () => {
+  it("imports effect operations through an effect re-export", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}origin.voyd`]: `pub eff ArticleStorage
+  save(tail, value: i32) -> i32
+`,
+      [`${root}${sep}api.voyd`]: "pub use src::origin::{ ArticleStorage }",
+      [`${root}${sep}main.voyd`]: `use src::api::ArticleStorage::all
+
+pub fn main() -> i32
+  try
+    save(1)
+  save(tail, value):
+    tail(value)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const imported = semantics
+      .get("src::main")
+      ?.binding.imports.find((entry) => entry.name === "save");
+
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+    expect(imported?.target?.moduleId).toBe("src::origin");
+    expect(imported).toBeDefined();
+  });
+
+  it("keeps unselected effect operations out of unqualified scope", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}effects.voyd`]: `pub eff Store
+  save(tail, value: i32) -> i32
+  load(tail, value: i32) -> i32
+`,
+      [`${root}${sep}main.voyd`]: `use src::effects::Store::{ save }
+
+pub fn main() -> i32
+  load(1)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { diagnostics } = analyzeModules({ graph });
+
+    expect([...graph.diagnostics, ...diagnostics]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "TY0006" })]),
+    );
+  });
+
+  it("does not make operations unqualified when only the effect is imported", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}effects.voyd`]: `pub eff Store
+  save(tail, value: i32) -> i32
+`,
+      [`${root}${sep}main.voyd`]: `use src::effects::Store
+
+pub fn qualified() -> i32
+  try
+    Store::save(1)
+  Store::save(tail, value):
+    tail(value)
+
+pub fn unqualified() -> i32
+  save(1)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { diagnostics } = analyzeModules({ graph });
+
+    expect([...graph.diagnostics, ...diagnostics]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "TY0006" })]),
+    );
+  });
+
+  it("imports every operation from Effect::all without changing module::all", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}effects.voyd`]: `pub eff Store
+  save(tail, value: i32) -> i32
+  load(tail, value: i32) -> i32
+`,
+      [`${root}${sep}main.voyd`]: "use src::effects::Store::all",
+      [`${root}${sep}module_all.voyd`]: "use src::effects::all",
+    });
+
+    const effectGraph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const effectAnalysis = analyzeModules({ graph: effectGraph });
+    const effectImports = effectAnalysis.semantics
+      .get("src::main")
+      ?.binding.imports.map((entry) => entry.name);
+
+    const moduleGraph = await loadModuleGraph({
+      entryPath: `${root}${sep}module_all.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const moduleAnalysis = analyzeModules({ graph: moduleGraph });
+    const moduleImports = moduleAnalysis.semantics
+      .get("src::module_all")
+      ?.binding.imports.map((entry) => entry.name);
+
+    expect([
+      ...effectGraph.diagnostics,
+      ...effectAnalysis.diagnostics,
+    ]).toHaveLength(0);
+    expect(effectImports).toEqual(expect.arrayContaining(["save", "load"]));
+    expect([
+      ...moduleGraph.diagnostics,
+      ...moduleAnalysis.diagnostics,
+    ]).toHaveLength(0);
+    expect(moduleImports).not.toEqual(expect.arrayContaining(["save", "load"]));
+  });
+
+  it("enforces effect visibility for namespace imports", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}effects.voyd`]: `eff HiddenStore
+  save(tail, value: i32) -> i32
+`,
+      [`${root}${sep}main.voyd`]: "use src::effects::HiddenStore::all",
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { diagnostics } = analyzeModules({ graph });
+
+    expect([...graph.diagnostics, ...diagnostics]).toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "BD0001" })]),
+    );
+  });
+
+  it("imports effect operations across a package boundary", async () => {
+    const srcRoot = resolve("/proj/src");
+    const pkgDir = resolve("/proj/node_modules");
+    const packageRoot = `${pkgDir}${sep}storage${sep}src`;
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use pkg::storage::ArticleStorage::all",
+      [`${packageRoot}${sep}pkg.voyd`]:
+        "pub use self::effects::{ ArticleStorage }",
+      [`${packageRoot}${sep}effects.voyd`]: `pub eff ArticleStorage
+  save(tail, value: i32) -> i32
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, pkgDirs: [pkgDir] },
+      host,
+    });
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const imported = semantics
+      .get("src::main")
+      ?.binding.imports.find((entry) => entry.name === "save");
+
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+    expect(imported?.target?.moduleId).toBe("pkg:storage::effects");
+  });
+
+  it("reports a deterministic conflict between imported values and effect operations", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}effects.voyd`]: `pub eff Store
+  save(tail, value: i32) -> i32
+`,
+      [`${root}${sep}values.voyd`]: "pub fn save(value: i32) -> i32\n  value",
+      [`${root}${sep}main.voyd`]: `use src::values::{ save }
+use src::effects::Store::{ save }
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { diagnostics } = analyzeModules({ graph });
+    const conflicts = [...graph.diagnostics, ...diagnostics].filter(
+      (diagnostic) =>
+        diagnostic.code === "BD0001" && diagnostic.message.includes("save"),
+    );
+
+    expect(conflicts).toHaveLength(1);
+  });
+
+  it("preserves overloaded operations selected from an effect namespace", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}effects.voyd`]: `pub eff Store
+  fetch(tail, value: i32) -> i32
+  fetch(tail, value: bool) -> bool
+`,
+      [`${root}${sep}main.voyd`]: `use src::effects::Store
+use Store::{ fetch }
+
+pub fn fetch_number(): Store -> i32
+  fetch(1)
+
+pub fn fetch_flag(): Store -> bool
+  fetch(true)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { semantics, diagnostics } = analyzeModules({ graph });
+    const fetchImports =
+      semantics
+        .get("src::main")
+        ?.binding.imports.filter((entry) => entry.name === "fetch") ?? [];
+
+    expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
+    expect(fetchImports).toHaveLength(2);
+  });
+
+  it("exposes only the alias for a locally selected effect operation", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `eff Store
+  save(tail, value: i32) -> i32
+
+use Store::save as persist
+
+fn accepted(): Store -> i32
+  persist(1)
+
+fn rejected(): Store -> i32
+  save(1)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { diagnostics } = analyzeModules({ graph });
+    const undefinedFunctions = [...graph.diagnostics, ...diagnostics].filter(
+      (diagnostic) => diagnostic.code === "TY0006",
+    );
+
+    expect(undefinedFunctions).toHaveLength(1);
+    expect(undefinedFunctions[0]?.message).toContain("save");
+  });
+
+  it("reports conflicts between local values and selected local operations", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `fn save(value: i32) -> i32
+  value
+
+eff Store
+  save(tail, value: i32) -> i32
+
+use Store::{ save }
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { diagnostics } = analyzeModules({ graph });
+    const conflicts = [...graph.diagnostics, ...diagnostics].filter(
+      (diagnostic) =>
+        diagnostic.code === "BD0001" && diagnostic.message.includes("save"),
+    );
+
+    expect(conflicts).toHaveLength(1);
+  });
+
+  it("reports conflicts between selected operations from local effects", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `eff FirstStore
+  save(tail, value: i32) -> i32
+
+eff SecondStore
+  save(tail, value: i32) -> i32
+
+use FirstStore::{ save }
+use SecondStore::{ save }
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { diagnostics } = analyzeModules({ graph });
+    const conflicts = [...graph.diagnostics, ...diagnostics].filter(
+      (diagnostic) =>
+        diagnostic.code === "BD0001" && diagnostic.message.includes("save"),
+    );
+
+    expect(conflicts).toHaveLength(1);
+  });
+
   it("binds imports across modules using the module graph exports", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
@@ -27,7 +351,7 @@ describe("module imports", () => {
     const mathSemantics = semantics.get("src::util::math");
 
     expect(mainSemantics?.binding.imports.map((imp) => imp.name)).toContain(
-      "add"
+      "add",
     );
     expect(mathSemantics?.exports.has("add")).toBe(true);
     expect([...graph.diagnostics, ...diagnostics]).toHaveLength(0);
@@ -385,7 +709,9 @@ describe("module imports", () => {
 
     expect(semantics.has("src::a")).toBe(true);
     expect(semantics.has("src::b")).toBe(true);
-    expect(combinedDiagnostics.some((diag) => diag.code === "TY0006")).toBe(true);
+    expect(combinedDiagnostics.some((diag) => diag.code === "TY0006")).toBe(
+      true,
+    );
     expect(
       combinedDiagnostics.some(
         (diag) =>
@@ -614,7 +940,8 @@ pub fn main() -> i32
         "use src::msgpack::fns::marker\npub fn top() -> i32\n  marker()",
       [`${stdRoot}${sep}msgpack${sep}fns.voyd`]:
         "use std::fixed_array::fns::hidden\npub fn marker() -> i32\n  hidden()",
-      [`${stdRoot}${sep}fixed_array${sep}fns.voyd`]: "pub fn hidden() -> i32\n  1",
+      [`${stdRoot}${sep}fixed_array${sep}fns.voyd`]:
+        "pub fn hidden() -> i32\n  1",
     });
 
     const graph = await loadModuleGraph({
@@ -655,7 +982,8 @@ pub fn main() -> i32
     const { semantics, diagnostics } = analyzeModules({ graph });
     const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
     const msgpackSemantics = semantics.get("std::msgpack");
-    const msgpackUses = msgpackSemantics?.binding.uses.flatMap((decl) => decl.entries) ?? [];
+    const msgpackUses =
+      msgpackSemantics?.binding.uses.flatMap((decl) => decl.entries) ?? [];
     const localMarkerImport = msgpackUses.find(
       (entry) => entry.path.join("::") === "src::msgpack::fns::marker",
     );
@@ -734,7 +1062,9 @@ pub fn main() -> i32
     const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
 
     expect(combinedDiagnostics).toHaveLength(0);
-    expect(mainSemantics?.binding.imports.map((entry) => entry.name)).toContain("Coffee");
+    expect(mainSemantics?.binding.imports.map((entry) => entry.name)).toContain(
+      "Coffee",
+    );
   });
 
   it("supports generic enum namespace single-member imports via use Drink::Coffee", async () => {
@@ -773,7 +1103,9 @@ pub fn main() -> i32
     const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
 
     expect(combinedDiagnostics).toHaveLength(0);
-    expect(mainSemantics?.binding.imports.map((entry) => entry.name)).toContain("Coffee");
+    expect(mainSemantics?.binding.imports.map((entry) => entry.name)).toContain(
+      "Coffee",
+    );
   });
 
   it("supports generic enum namespace grouped member imports", async () => {
@@ -1334,8 +1666,11 @@ pub fn main() -> i32
       true,
     );
     expect(
-      Array.from(semantics.get("src::main")?.hir.expressions.values() ?? []).some(
-        (expr) => expr.exprKind === "object-literal" && expr.literalKind === "nominal",
+      Array.from(
+        semantics.get("src::main")?.hir.expressions.values() ?? [],
+      ).some(
+        (expr) =>
+          expr.exprKind === "object-literal" && expr.literalKind === "nominal",
       ),
     ).toBe(false);
   });
@@ -1372,7 +1707,10 @@ pub fn main() -> i32
 
     const { diagnostics } = analyzeModules({ graph });
     const combinedDiagnostics = [...graph.diagnostics, ...diagnostics];
-    expect(combinedDiagnostics, JSON.stringify(combinedDiagnostics)).toHaveLength(0);
+    expect(
+      combinedDiagnostics,
+      JSON.stringify(combinedDiagnostics),
+    ).toHaveLength(0);
   });
 
   it("does not infer inaccessible imported union members in match patterns", async () => {
@@ -1623,8 +1961,7 @@ pub fn main() -> i32
     expect(
       combinedDiagnostics.some(
         (diag) =>
-          diag.code === "BD0001" &&
-          diag.message.includes("not visible here"),
+          diag.code === "BD0001" && diag.message.includes("not visible here"),
       ),
     ).toBe(false);
   });
@@ -1687,8 +2024,7 @@ pub fn main() -> Drink
     expect(
       combinedDiagnostics.some(
         (diag) =>
-          diag.code === "BD0001" &&
-          diag.message.includes("not visible here"),
+          diag.code === "BD0001" && diag.message.includes("not visible here"),
       ),
     ).toBe(true);
   });

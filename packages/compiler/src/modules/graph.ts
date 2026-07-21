@@ -460,9 +460,11 @@ export const buildModuleGraph = async ({
             missingModules.delete(existing.id);
           }
           if (existing?.origin.kind === "file") {
-            (existing.sourceFiles ?? [
-              { filePath: existing.origin.filePath, source: existing.source },
-            ]).forEach(({ filePath }) => inactiveModuleFiles.add(filePath));
+            (
+              existing.sourceFiles ?? [
+                { filePath: existing.origin.filePath, source: existing.source },
+              ]
+            ).forEach(({ filePath }) => inactiveModuleFiles.add(filePath));
           }
           modules.set(inlineModule.id, inlineModule);
           modulesByPath.set(
@@ -552,6 +554,20 @@ export const buildModuleGraph = async ({
     }
 
     if (!resolved) {
+      const fallbackPath = dependency.namespaceFallbackPath;
+      if (fallbackPath) {
+        const fallback = await resolveModuleFile(fallbackPath, roots, host);
+        if (fallback) {
+          dependency.path = fallbackPath;
+          pending.push({ dependency, importerId, importerFilePath });
+          updateNestedPrefixCounts({
+            counts: pendingNestedPrefixCounts,
+            pathKey: modulePathToString(fallbackPath),
+            delta: 1,
+          });
+          continue;
+        }
+      }
       moduleDiagnostics.push({
         kind: "missing-module",
         requested: requestedPath,
@@ -567,6 +583,12 @@ export const buildModuleGraph = async ({
     const resolvedPath = resolved.filePath;
     const resolvedModulePath = resolved.modulePath;
     const resolvedKey = modulePathToString(resolvedModulePath);
+    if (
+      dependency.namespaceFallbackPath &&
+      resolvedKey === modulePathToString(dependency.namespaceFallbackPath)
+    ) {
+      dependency.path = dependency.namespaceFallbackPath;
+    }
     const resolvedExtendsRequested =
       resolvedModulePath.namespace === requestedPath.namespace &&
       resolvedModulePath.packageName === requestedPath.packageName &&
@@ -726,9 +748,7 @@ export const buildModuleGraph = async ({
   const baseDiagnostics = unresolvedModuleDiagnostics.map(
     moduleDiagnosticToDiagnostic,
   );
-  const macroDiagnostics = Array.from(
-    macroDiagnosticsByModule.values(),
-  ).flat();
+  const macroDiagnostics = Array.from(macroDiagnosticsByModule.values()).flat();
   const surfaceDiagnostics = Array.from(
     surfaceDiagnosticsByModule.values(),
   ).flat();
@@ -1043,7 +1063,7 @@ const collectModuleInfo = ({
             typeof firstSegment === "string" &&
             inlineModuleNames.has(firstSegment);
 
-          return resolveModuleRequest(
+          const path = resolveModuleRequest(
             { segments: entryPath.moduleSegments, span: entryPath.span },
             modulePath,
             {
@@ -1053,12 +1073,30 @@ const collectModuleInfo = ({
                 moduleIsPackageRoot && !preservesInlinePkgScope,
             },
           );
+          const namespaceFallbackPath =
+            entryPath.moduleSegments.length > 1
+              ? resolveModuleRequest(
+                  {
+                    segments: entryPath.moduleSegments.slice(0, -1),
+                    span: entryPath.span,
+                  },
+                  modulePath,
+                  {
+                    anchorToSelf: entryPath.anchorToSelf === true,
+                    parentHops: entryPath.parentHops ?? 0,
+                    importerIsPackageRoot:
+                      moduleIsPackageRoot && !preservesInlinePkgScope,
+                  },
+                )
+              : undefined;
+          return { path, namespaceFallbackPath };
         });
-      resolvedEntries.forEach((path) => {
+      resolvedEntries.forEach(({ path, namespaceFallbackPath }) => {
         if (!path.segments.length && !path.packageName) return;
         dependencies.push({
           kind: "use",
           path,
+          namespaceFallbackPath,
           span,
         });
         if (

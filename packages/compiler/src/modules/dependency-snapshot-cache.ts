@@ -9,9 +9,7 @@ import {
   type TypeArenaSnapshot,
 } from "../semantics/typing/type-arena.js";
 import { incrementCompilerPerfCounter } from "../perf.js";
-import {
-  cloneSemanticsMapForTypingState,
-} from "./semantic-snapshot.js";
+import { cloneSemanticsMapForTypingState } from "./semantic-snapshot.js";
 import type {
   ModuleDependency,
   ModuleGraph,
@@ -19,9 +17,7 @@ import type {
   ModulePath,
   ModuleRoots,
 } from "./types.js";
-import type {
-  ReusableDependencySemanticsSnapshot,
-} from "./semantic-analysis.js";
+import type { ReusableDependencySemanticsSnapshot } from "./semantic-analysis.js";
 
 const COMPILER_DEPENDENCY_SNAPSHOT_VERSION =
   "0.2.0:v375-dependency-snapshot-v2";
@@ -137,7 +133,9 @@ export const commitDependencySnapshot = ({
   }
 
   const arena = createTypeArena(dependencySnapshot.arena);
-  const effectInterner = createEffectInterner(dependencySnapshot.effectInterner);
+  const effectInterner = createEffectInterner(
+    dependencySnapshot.effectInterner,
+  );
   const semantics = cloneSemanticsMapForTypingState({
     semantics: dependencySnapshot.semantics,
     arena,
@@ -161,9 +159,11 @@ const dependencyModuleFingerprintsFor = (
   new Map(
     Array.from(graph.modules.entries())
       .filter(([, module]) => module.path.namespace !== "src")
-      .sort(([left], [right]) => left.localeCompare(right, undefined, {
-        numeric: true,
-      }))
+      .sort(([left], [right]) =>
+        left.localeCompare(right, undefined, {
+          numeric: true,
+        }),
+      )
       .map(([moduleId, module]) => [moduleId, moduleFingerprint(module)]),
   );
 
@@ -186,6 +186,9 @@ const moduleFingerprint = (module: ModuleNode): string =>
 const serializableDependency = (dependency: ModuleDependency) => ({
   kind: dependency.kind,
   path: serializableModulePath(dependency.path),
+  namespaceFallbackPath: dependency.namespaceFallbackPath
+    ? serializableModulePath(dependency.namespaceFallbackPath)
+    : undefined,
 });
 
 const serializableModulePath = (modulePath: ModulePath) => ({
@@ -222,4 +225,4 @@ const sortForStableSerialization = (value: unknown): unknown => {
 };
 
 const moduleNamespaceForId = (moduleId: string): string =>
-  moduleId.startsWith("pkg:") ? "pkg" : moduleId.split("::")[0] ?? "unknown";
+  moduleId.startsWith("pkg:") ? "pkg" : (moduleId.split("::")[0] ?? "unknown");
