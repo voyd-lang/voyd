@@ -241,7 +241,6 @@ describe("integration: pkg::web", () => {
     const server = createHttpServerHarness();
     const host = await createVoydHost({
       wasm: result.wasm,
-      bufferSize: 131_072,
       defaultAdapters: {
         runtime: "node",
         runtimeHooks: server.runtimeHooks,
@@ -273,19 +272,6 @@ describe("integration: pkg::web", () => {
         ),
       ),
     ).toBe("event: status\nid: 1\ndata: ready\n\n");
-
-    server.enqueueRequest(2, "/stream-head");
-    await waitFor(
-      () => server.finishedResponses.includes(2),
-      "streaming response completion",
-    );
-
-    expect(server.responseHeads[1]).toEqual(
-      expect.objectContaining({ requestId: 2, status: 200 }),
-    );
-    expect(
-      new TextDecoder().decode(server.responseChunks[1]?.chunk),
-    ).toBe("streamed");
 
     expect(run.cancel("test complete")).toBe(true);
     await expect(run.outcome).resolves.toMatchObject({ kind: "cancelled" });

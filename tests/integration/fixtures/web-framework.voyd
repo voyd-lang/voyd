@@ -366,18 +366,10 @@ pub fn serve_ssr_callback_scope_probe(): (HttpServer, tasks::TaskRuntime) -> i32
       -1
 
 pub fn serve_sse_probe(): (HttpServer, tasks::TaskRuntime) -> i32
-  let events = app()
-    .get(
-      "/events".as_slice(),
-      handler: () -> Response => sse_response(write_sse_probe)
-    )
-    .get(
-      "/stream-head".as_slice(),
-      handler: () -> Response => server::stream(
-        Response::ok().text("x".as_slice().to_string().repeat(150000)),
-        body: write_streaming_head_probe
-      )
-    )
+  let events = app().get(
+    "/events".as_slice(),
+    handler: () -> Response => sse_response(write_sse_probe)
+  )
   let result = server::serve_each(
     config: ServerConfig::init(port: 41235),
     policy: ServeTaskPolicy::detached(),
@@ -388,9 +380,6 @@ pub fn serve_sse_probe(): (HttpServer, tasks::TaskRuntime) -> i32
       0
     Err:
       -1
-
-fn write_streaming_head_probe(): server::ResponseWriter -> void
-  let _ = server::write(Body::text("streamed".as_slice()).as_bytes())
 
 fn write_sse_probe(sender: SseSender): server::ResponseWriter -> void
   let event_value = SseEvent {

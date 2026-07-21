@@ -241,4 +241,22 @@ describe("integration: std http", () => {
     expect(run.cancel("test complete")).toBe(true);
     await expect(run.outcome).resolves.toMatchObject({ kind: "cancelled" });
   });
+
+  it("omits buffered bodies from streaming response heads", async () => {
+    const port = await findFreePort();
+    process.env.VOYD_HTTP_SMOKE_PORT = String(port);
+    const host = await createVoydHost({
+      wasm: compiled.wasm,
+      bufferSize: 131_072,
+      defaultAdapters: { runtime: "node" },
+    });
+
+    const run = host.runManaged<number>("serve_streaming_head_from_env");
+    const response = await retryHttpGet(`http://127.0.0.1:${port}/stream`);
+
+    expect(response.status).toBe(200);
+    expect(response.body).toBe("streamed");
+    expect(run.cancel("test complete")).toBe(true);
+    await expect(run.outcome).resolves.toMatchObject({ kind: "cancelled" });
+  });
 });

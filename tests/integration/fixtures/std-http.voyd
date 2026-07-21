@@ -1,6 +1,6 @@
 use std::env::self as env
 use std::error::HostError
-use std::http::{ IncomingRequest, Response, method_as_string }
+use std::http::{ Body, IncomingRequest, Response, method_as_string }
 use std::http::client::self as client
 use std::http::client::{ ClientRequest, HttpClient }
 use std::http::server::self as server
@@ -98,6 +98,35 @@ pub fn serve_detached_static_from_env(): (HttpServer, task::TaskRuntime, env::En
       0
     Err<HostError> { error }:
       -error.code
+
+pub fn serve_streaming_head_from_env(): (HttpServer, task::TaskRuntime, env::Env) -> i32
+  let port = smoke_port()
+  if port <= 0:
+    return -10
+
+  let result = server::serve_each(
+    config: ServerConfig::init(
+      port: port,
+      host: "127.0.0.1".as_slice().to_string(),
+      response_timeout_millis: 2000
+    ),
+    policy: ServeTaskPolicy::sequential(),
+    handle: stream_head_response
+  )
+  match(result)
+    Ok<Unit>:
+      0
+    Err<HostError> { error }:
+      -error.code
+
+fn stream_head_response(_request: IncomingRequest): (server::ResponseStream, open) -> Response
+  server::stream(
+    Response::ok().text("x".as_slice().to_string().repeat(150000)),
+    body: write_streaming_body
+  )
+
+fn write_streaming_body(): server::ResponseWriter -> void
+  let _ = server::write(Body::text("streamed".as_slice()).as_bytes())
 
 fn handle_detached_request(request: IncomingRequest): Time -> Response
   if request.path.equals("/slow".as_slice().to_string()):
