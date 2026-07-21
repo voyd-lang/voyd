@@ -1,0 +1,70 @@
+use src::openapi::{ document, info, operation }
+use src::phase3_openapi_types::{
+  DocumentedArticle,
+  DocumentedArticlePath,
+  DocumentedArticleQuery,
+  DocumentedCreateArticle,
+  DocumentedEvent,
+  DocumentedRecursivePair
+}
+use std::http::Method
+use std::json::stringify
+use std::error::panic
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+
+test "OpenAPI reflects DTO fields and doc comments":
+  let base_operation = operation(
+    summary: "Create an article".as_slice().to_string(),
+    description: "Creates and returns one article.".as_slice().to_string(),
+    operation_id: "createArticle".as_slice().to_string(),
+    response_status: 201,
+    response_description: "Article created".as_slice().to_string()
+  )
+  let with_path = base_operation.with_path_params<DocumentedArticlePath>()
+  let with_query = with_path.with_query<DocumentedArticleQuery>()
+  let with_body = with_query.with_json_body<DocumentedCreateArticle>()
+  let create_operation = with_body.responds_json<DocumentedArticle>()
+  let events_base = operation(summary: "Watch events".as_slice().to_string())
+  let events_operation = events_base.responds_sse<DocumentedEvent>()
+  let spec_base = document(info(
+    title: "Article API".as_slice(),
+    version: "1.0.0".as_slice(),
+    description: "Example API".as_slice().to_string()
+  ))
+  let article_spec = spec_base.route(
+    "/articles/:id".as_slice(), method: Method::Post {}, operation: create_operation
+  )
+  let events_spec = article_spec.route(
+    "/events".as_slice(), method: Method::Get {}, operation: events_operation
+  )
+  let spec = events_spec.route(
+    "/recursive".as_slice(),
+    method: Method::Get {},
+    operation: operation().responds_json<DocumentedRecursivePair>()
+  )
+
+  match(stringify(spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"openapi\":\"3.1.0\"".as_slice(), "missing version")
+      require_contains(value, "\"/articles/{id}\"".as_slice(), "missing path")
+      require_contains(value, "\"operationId\":\"createArticle\"".as_slice(), "missing operation id")
+      require_contains(value, "Stable article identifier.".as_slice(), "missing path documentation")
+      require_contains(value, "Reader-visible article title.".as_slice(), "missing field documentation")
+      require_contains(value, "\"required\":[\"title\"]".as_slice(), "missing required field")
+      require_contains(value, "\"text/event-stream\"".as_slice(), "missing SSE content")
+      require_contains(value, "\"x-voyd-event-schema\"".as_slice(), "missing SSE event schema")
+      require_contains(value, "%23".as_slice(), "recursive component ref is not URI escaped")
+      require_contains(
+        value,
+        "DocumentedRecursivePair_".as_slice(),
+        "recursive component identity is not type based"
+      )
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

@@ -1,0 +1,46 @@
+//! Documented fixture DTOs used to verify OpenAPI reification.
+
+use std::string::type::String
+
+pub obj DocumentedRecursiveNode<T> {
+  api value: T,
+  api next?: DocumentedRecursiveNode<T>
+}
+
+pub obj DocumentedRecursivePair {
+  api numbers: DocumentedRecursiveNode<i32>,
+  api names: DocumentedRecursiveNode<String>
+}
+
+/// Path parameters for an article.
+pub obj DocumentedArticlePath {
+  /// Stable article identifier.
+  api id: i32
+}
+
+/// Filters accepted by article search.
+pub obj DocumentedArticleQuery {
+  /// Include unpublished articles when true.
+  api drafts?: bool
+}
+
+/// A request to create an article.
+pub obj DocumentedCreateArticle {
+  /// Reader-visible article title.
+  api title: String,
+  /// Optional article summary.
+  api summary?: String
+}
+
+/// Article returned by the API.
+pub obj DocumentedArticle {
+  /// Stable article identifier.
+  api id: i32,
+  /// Reader-visible article title.
+  api title: String
+}
+
+pub obj DocumentedEvent {
+  /// Monotonic event sequence.
+  api sequence: i64
+}

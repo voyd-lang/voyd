@@ -1,0 +1,178 @@
+//! HTTP content negotiation helpers.
+
+use std::array::Array
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+use super::router::Context
+
+obj MatchScore {
+  quality: i32,
+  specificity: i32
+}
+
+/// Selects the best supported media type for an `Accept` header.
+///
+/// Quality values, exact types, subtype wildcards, and `*/*` are supported.
+/// The supported list order breaks otherwise equal matches.
+pub fn best_match(accept: StringSlice, supported: Array<String>) -> Option<String>
+  let ranges = accept.split(on: 44, keep_empty: false)
+  var best_index = -1
+  var best_quality = -1
+  var best_specificity = -1
+  var candidate_index = 0
+  while candidate_index < supported.len():
+    let score = score_candidate(supported.at(candidate_index).as_slice(), ranges)
+    if score.quality > best_quality or (score.quality == best_quality and score.specificity > best_specificity):
+      best_index = candidate_index
+      best_quality = score.quality
+      best_specificity = score.specificity
+    candidate_index = candidate_index + 1
+  if best_index >= 0 and best_quality > 0:
+    Some<String> { value: supported.at(best_index) }
+  else:
+    None {}
+
+/// Selects the best supported media type for an `Accept` header.
+pub fn best_match(accept: String, supported: Array<String>) -> Option<String>
+  best_match(accept.as_slice(), supported)
+
+/// Selects a representation for the current request.
+///
+/// A missing `Accept` header is treated as `*/*`.
+pub fn negotiate(ctx: Context, supported: Array<String>) -> Option<String>
+  match(ctx.header("accept".as_slice()))
+    Some<String> { value }:
+      best_match(value.as_slice(), supported)
+    None:
+      match(supported.get(0))
+        Some<String> { value }:
+          Some<String> { value: value }
+        None:
+          None {}
+
+/// Returns whether the current request accepts `media_type`.
+pub fn accepts(ctx: Context, media_type: StringSlice) -> bool
+  let ~supported = Array<String>::with_capacity(1)
+  supported.push(media_type.to_string())
+  match(negotiate(ctx, supported))
+    Some<String>:
+      true
+    None:
+      false
+
+/// Returns whether the current request accepts `media_type`.
+pub fn accepts(ctx: Context, media_type: String) -> bool
+  accepts(ctx, media_type.as_slice())
+
+fn score_candidate(candidate: StringSlice, ranges: Array<StringSlice>) -> MatchScore
+  var best = MatchScore { quality: 0, specificity: -1 }
+  var index = 0
+  while index < ranges.len():
+    let score = score_range(ranges.at(index), candidate)
+    if score.specificity > best.specificity or (score.specificity == best.specificity and score.quality > best.quality):
+      best = score
+    index = index + 1
+  best
+
+fn score_range(range: StringSlice, candidate: StringSlice) -> MatchScore
+  let parts = split_media_value(range)
+  let candidate_parts = split_media_value(candidate)
+  if parts.is_empty() or candidate_parts.is_empty():
+    return MatchScore { quality: 0, specificity: -1 }
+  let media = parts.at(0).as_slice().trimmed().lowered()
+  let target = candidate_parts.at(0).as_slice().trimmed().lowered()
+  let media_score = media_specificity(media.as_slice(), target.as_slice())
+  if media_score < 0:
+    return MatchScore { quality: 0, specificity: -1 }
+  var quality = 1000
+  var media_parameters = 0
+  var index = 1
+  while index < parts.len():
+    let parameter = parts.at(index).as_slice().trimmed()
+    match(parameter.split_once(on: 61))
+      Some<(StringSlice, StringSlice)> { value }:
+        let name = value.0.trimmed().lowered()
+        if name.equals("q"):
+          quality = parse_quality(value.1.trimmed())
+          index = parts.len()
+        if not name.equals("q"):
+          if not media_parameter_matches(candidate, parameter):
+            return MatchScore { quality: 0, specificity: -1 }
+          media_parameters = media_parameters + 1
+      None:
+        void
+    index = index + 1
+  MatchScore { quality: quality, specificity: media_score * 100 + media_parameters }
+
+fn media_parameter_matches(candidate: StringSlice, parameter: StringSlice) -> bool
+  match(parameter.split_once(on: 61))
+    None:
+      false
+    Some<(StringSlice, StringSlice)> { value: expected }:
+      let expected_name = expected.0.trimmed().lowered()
+      let expected_value = expected.1.trimmed().to_string()
+      let candidate_parts = split_media_value(candidate)
+      var index = 1
+      while index < candidate_parts.len():
+        match(candidate_parts.at(index).as_slice().trimmed().split_once(on: 61))
+          Some<(StringSlice, StringSlice)> { value: actual }:
+            let actual_name = actual.0.trimmed().lowered()
+            let actual_value = actual.1.trimmed().to_string()
+            let name_matches = actual_name.equals(expected_name)
+            let value_matches = actual_value.equals(expected_value)
+            if name_matches and value_matches:
+              return true
+          None:
+            void
+        index = index + 1
+      false
+
+fn split_media_value(value: StringSlice) -> Array<String>
+  let slices = value.split(on: 59, keep_empty: false)
+  let ~parts = Array<String>::with_capacity(slices.len())
+  var index = 0
+  while index < slices.len():
+    parts.push(slices.at(index).to_string())
+    index = index + 1
+  parts
+
+fn media_specificity(range: StringSlice, candidate: StringSlice) -> i32
+  if range.to_string().equals(candidate.to_string()):
+    return 2
+  if range.to_string().equals("*/*"):
+    return 0
+  match(range.split_once(on: 47))
+    Some<(StringSlice, StringSlice)> { value }:
+      if value.1.to_string().equals("*"):
+        match(candidate.split_once(on: 47))
+          Some<(StringSlice, StringSlice)> { value: target }:
+            if value.0.to_string().equals(target.0.to_string()) then: 1 else: -1
+          None:
+            -1
+      else:
+        -1
+    None:
+      -1
+
+fn parse_quality(value: StringSlice) -> i32
+  let text = value.to_string()
+  if text.equals("1") or text.equals("1.0") or text.equals("1.00") or text.equals("1.000"):
+    return 1000
+  if text.equals("0"):
+    return 0
+  if not value.starts_with("0.".as_slice()):
+    return 0
+  var result = 0
+  var place = 100
+  var index = 2
+  while index < value.byte_len() and place > 0:
+    match(value.slice(bytes: index, len: 1).parse_i32())
+      Err:
+        return 0
+      Ok<i32> { value: digit }:
+        if digit < 0 or digit > 9:
+          return 0
+        result = result + digit * place
+    place = place / 10
+    index = index + 1
+  result

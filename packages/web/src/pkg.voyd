@@ -4,10 +4,18 @@ pub src::all
 pub src::extract
 pub src::html
 pub src::middleware
+pub src::multipart
+pub src::negotiate
+pub src::openapi
+pub src::openapi_expose
+pub src::openapi_routes
 pub src::response
+pub src::request_streaming
 pub src::router
 pub src::routes
 pub src::static_files
+pub src::streaming
+pub src::sse
 
 pub use src::extract::{
   AuthExtractor,
@@ -48,6 +56,8 @@ pub use src::extract::{
   text,
   text_body
 }
+pub use src::openapi_expose::expose as expose_openapi
+pub use src::openapi_routes::document_route as document_openapi_route
 pub use src::html::{
   Hydration,
   append_hydration,
@@ -62,6 +72,17 @@ pub use src::html::{
 }
 
 pub use src::middleware::request_id_required
+pub use src::multipart::{ Form as MultipartForm, MultipartBody, Part as MultipartPart, multipart as multipart_body }
+pub use src::negotiate::{ accepts, best_match, negotiate as negotiate_content }
+pub use src::openapi::{
+  Document as OpenApi,
+  Info as OpenApiInfo,
+  Operation as OpenApiOperation,
+  document as openapi_document,
+  info as openapi_info,
+  operation as openapi_operation
+}
+pub use src::request_streaming::serve as serve_streaming
 pub use src::response::{
   Body,
   Header,
@@ -176,3 +197,5 @@ pub use src::routes::{
   timeout_millis
 }
 pub use src::static_files::serve_dir
+pub use src::streaming::{ stream, write as write_stream }
+pub use src::sse::{ Event as SseEvent, Sender as SseSender, response as sse_response, make_sse_event }

@@ -42,11 +42,13 @@ detection without making ordinary hosted-runner variance a required-check
 failure; tighten it once retained artifacts provide a credible p95 baseline.
 
 The first live hosted-runner integration baseline completed all 128 assertions
-in about 201 seconds, with the slowest file at about 132 seconds. Its initial
-budget is therefore 300 seconds for the lane and 180 seconds per file. This
-preserves meaningful regression detection while leaving headroom for ordinary
-hosted-runner variance; tighten it after enough successful runs exist to
-estimate p95 reliably.
+in about 201 seconds, with the slowest file at about 132 seconds. After the
+public web package gained request streaming, SSE, and OpenAPI generation,
+healthy runs completed in about 247 seconds with the expanded web fixture at
+183-193 seconds. The budget is therefore 300 seconds for the lane and 210
+seconds per file. This preserves the lane-wide regression guard while leaving
+headroom for ordinary runner variance; tighten it after enough successful runs
+exist to estimate p95 reliably.
 
 ## Runtime Selection
 

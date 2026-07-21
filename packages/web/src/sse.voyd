@@ -1,0 +1,173 @@
+//! Server-Sent Events over Web response streaming.
+
+use std::array::Array
+use std::error::HostError
+use std::http::{ Body, Headers, Response }
+use std::http::server::self as server
+use std::number::cast::to_string
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use super::streaming
+
+/// One event in an SSE stream.
+pub obj Event {
+  api data: String,
+  api event?: String,
+  api id?: String,
+  api retry_millis?: i32
+}
+
+/// Sender scoped to one open SSE response.
+pub obj Sender {}
+
+impl Event
+  /// Creates a data-only event.
+  api fn data(value: StringSlice) -> Event
+    Event {
+      data: value.to_string(),
+      event: None {},
+      id: None {},
+      retry_millis: None {}
+    }
+
+  /// Creates a data-only event.
+  api fn data(value: String) -> Event
+    Event::data(value.as_slice())
+
+  /// Returns a copy with an event type.
+  api fn with(self, { event: StringSlice }) -> Event
+    Event {
+      data: self.data,
+      event: Some<String> { value: event.to_string() },
+      id: self.id,
+      retry_millis: self.retry_millis
+    }
+
+  /// Returns a copy with an event type.
+  api fn with(self, { event: String }) -> Event
+    self.with(event: event.as_slice())
+
+  /// Returns a copy with an event id.
+  api fn with(self, { id: StringSlice }) -> Event
+    Event {
+      data: self.data,
+      event: self.event,
+      id: Some<String> { value: id.to_string() },
+      retry_millis: self.retry_millis
+    }
+
+  /// Returns a copy with an event id.
+  api fn with(self, { id: String }) -> Event
+    self.with(id: id.as_slice())
+
+  /// Returns a copy with a browser reconnection delay.
+  api fn with(self, { retry_millis: i32 }) -> Event
+    Event {
+      data: self.data,
+      event: self.event,
+      id: self.id,
+      retry_millis: Some<i32> { value: retry_millis }
+    }
+
+impl Sender
+  /// Sends one event and waits for host backpressure.
+  api fn send(self, event: Event): server::ResponseWriter -> Result<Unit, HostError>
+    write_encoded(encode_event(event))
+
+  /// Sends an SSE comment, useful as a connection keepalive.
+  api fn comment(self, value: StringSlice): server::ResponseWriter -> Result<Unit, HostError>
+    write_encoded(": ".concat(sanitize_field(value)).concat("\n\n".as_slice()))
+
+  /// Sends an SSE comment, useful as a connection keepalive.
+  api fn comment(self, value: String): server::ResponseWriter -> Result<Unit, HostError>
+    self.comment(value.as_slice())
+
+/// Creates a data-only SSE event.
+pub fn event(data: StringSlice) -> Event
+  Event::data(data)
+
+/// Creates a data-only SSE event.
+pub fn event(data: String) -> Event
+  Event::data(data)
+
+/// Creates a data-only SSE event.
+pub fn make_sse_event(data: StringSlice) -> Event
+  event(data)
+
+/// Creates a data-only SSE event.
+pub fn make_sse_event(data: String) -> Event
+  event(data)
+
+/// Creates an SSE response. The stream closes when `body` returns.
+pub fn response(
+  body: fn(Sender) : (server::ResponseWriter, open) -> void
+): (server::ResponseStream, open) -> Response
+  var headers = Headers::empty()
+  headers = headers.set(header: "content-type".as_slice(), value: "text/event-stream; charset=utf-8".as_slice())
+  headers = headers.set(header: "cache-control".as_slice(), value: "no-cache".as_slice())
+  headers = headers.set(header: "connection".as_slice(), value: "keep-alive".as_slice())
+  headers = headers.set(header: "x-accel-buffering".as_slice(), value: "no".as_slice())
+  streaming::stream(
+    Response::ok().with(headers: headers),
+    body: () => body(Sender {})
+  )
+
+fn encode_event(event: Event) -> String
+  var encoded = String::init()
+  match(event.event)
+    Some<String> { value }:
+      encoded = encoded.concat("event: ".as_slice()).concat(sanitize_field(value.as_slice())).concat("\n".as_slice())
+    None:
+      void
+  match(event.id)
+    Some<String> { value }:
+      encoded = encoded.concat("id: ".as_slice()).concat(sanitize_field(value.as_slice())).concat("\n".as_slice())
+    None:
+      void
+  match(event.retry_millis)
+    Some<i32> { value }:
+      if value >= 0:
+        encoded = encoded.concat("retry: ".as_slice()).concat(to_string(value).as_slice()).concat("\n".as_slice())
+    None:
+      void
+
+  let lines = sse_lines(event.data.as_slice())
+  var index = 0
+  while index < lines.len():
+    let line = lines.at(index)
+    encoded = encoded.concat("data: ".as_slice()).concat(line.as_slice()).concat("\n".as_slice())
+    index = index + 1
+  encoded.concat("\n".as_slice())
+
+fn write_encoded(value: String): server::ResponseWriter -> Result<Unit, HostError>
+  let bytes = Body::text(value).as_bytes()
+  var start = 0
+  while start < bytes.len():
+    let remaining = bytes.len() - start
+    let length = if remaining > 16384 then: 16384 else: remaining
+    match(streaming::write(bytes.slice(start..start + length)))
+      Err<HostError> { error }:
+        return Err<HostError> { error: error }
+      Ok<Unit>:
+        void
+    start = start + length
+  Ok<Unit> { value: Unit {} }
+
+fn sanitize_field(value: StringSlice) -> String
+  let lines = sse_lines(value)
+  if lines.is_empty():
+    return String::init()
+  lines.at(0)
+
+fn sse_lines(value: StringSlice) -> Array<String>
+  let normalized = value.to_string()
+    .replaced(old: "\r\n".as_slice().to_string(), with: "\n".as_slice().to_string())
+    .replaced(old: "\r".as_slice().to_string(), with: "\n".as_slice().to_string())
+  let source = normalized.as_slice().split(on: 10, keep_empty: true)
+  let ~lines = Array<String>::with_capacity(source.len())
+  var index = 0
+  while index < source.len():
+    lines.push(source.at(index).to_string())
+    index = index + 1
+  lines

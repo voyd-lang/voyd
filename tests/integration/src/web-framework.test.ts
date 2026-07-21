@@ -1,5 +1,5 @@
 import path from "node:path";
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 import { createVoydHost } from "@voyd-lang/sdk/js-host";
 import {
@@ -56,6 +56,7 @@ type HookRequest = {
   path: string;
   headers: Array<{ name: string; value: string }>;
   body: Uint8Array;
+  bodyStreaming?: boolean;
 };
 
 type HookResponse = {
@@ -64,14 +65,30 @@ type HookResponse = {
   body: Uint8Array;
 };
 
+type HookResponseHead = Omit<HookResponse, "body"> & {
+  headers: Array<{ name: string; value: string }>;
+};
+
 const createHttpServerHarness = (): {
   enqueueRequest: (requestId: number, requestPath: string) => void;
+  enqueueStreamingRequest: (
+    requestId: number,
+    requestPath: string,
+    chunks: Uint8Array[],
+  ) => void;
   responses: HookResponse[];
+  responseHeads: HookResponseHead[];
+  responseChunks: Array<{ requestId: number; chunk: Uint8Array }>;
+  finishedResponses: number[];
   runtimeHooks: DefaultAdapterRuntimeHooks;
 } => {
   const queuedRequests: HookRequest[] = [];
   const acceptWaiters: Array<(request: HookRequest) => void> = [];
   const responses: HookResponse[] = [];
+  const responseHeads: HookResponseHead[] = [];
+  const responseChunks: Array<{ requestId: number; chunk: Uint8Array }> = [];
+  const finishedResponses: number[] = [];
+  const requestChunks = new Map<number, Uint8Array[]>();
   const enqueueRequest = (requestId: number, requestPath: string): void => {
     const request = {
       requestId,
@@ -87,10 +104,35 @@ const createHttpServerHarness = (): {
     }
     queuedRequests.push(request);
   };
+  const enqueueStreamingRequest = (
+    requestId: number,
+    requestPath: string,
+    chunks: Uint8Array[],
+  ): void => {
+    requestChunks.set(requestId, [...chunks]);
+    const request: HookRequest = {
+      requestId,
+      method: "POST",
+      path: requestPath,
+      headers: [],
+      body: new Uint8Array(),
+      bodyStreaming: true,
+    };
+    const waiter = acceptWaiters.shift();
+    if (waiter) {
+      waiter(request);
+      return;
+    }
+    queuedRequests.push(request);
+  };
 
   return {
     enqueueRequest,
+    enqueueStreamingRequest,
     responses,
+    responseHeads,
+    responseChunks,
+    finishedResponses,
     runtimeHooks: {
       httpServerListen: async () => 1,
       httpServerAccept: async () => {
@@ -102,8 +144,26 @@ const createHttpServerHarness = (): {
           acceptWaiters.push(resolve),
         );
       },
+      httpServerReadRequest: async (requestId) => {
+        const chunks = requestChunks.get(requestId) ?? [];
+        const chunk = chunks.shift() ?? new Uint8Array();
+        const done = chunks.length === 0;
+        if (done) {
+          requestChunks.delete(requestId);
+        }
+        return { requestId, chunk, done };
+      },
       httpServerRespond: async (response) => {
         responses.push(response);
+      },
+      httpServerStartResponse: async (response) => {
+        responseHeads.push(response);
+      },
+      httpServerWriteResponse: async (response) => {
+        responseChunks.push(response);
+      },
+      httpServerFinishResponse: async (requestId) => {
+        finishedResponses.push(requestId);
       },
       httpServerClose: async () => undefined,
     },
@@ -111,6 +171,116 @@ const createHttpServerHarness = (): {
 };
 
 describe("integration: pkg::web", () => {
+  beforeAll(async () => {
+    await compileWebFrameworkFixture();
+  }, 180_000);
+
+  it("streams request bodies through Web Context when opted in", async () => {
+    const result = await compileWebFrameworkFixture();
+    const server = createHttpServerHarness();
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      defaultAdapters: {
+        runtime: "node",
+        runtimeHooks: server.runtimeHooks,
+      },
+    });
+    const run = host.runManaged<number>("serve_streaming_body_probe");
+    server.enqueueStreamingRequest(2, "/upload", [
+      new TextEncoder().encode("first-"),
+      new TextEncoder().encode("second"),
+    ]);
+    await waitFor(() => server.responses.length === 1, "streaming upload response");
+
+    expect(new TextDecoder().decode(server.responses[0]!.body)).toBe("12");
+
+    expect(run.cancel("test complete")).toBe(true);
+    await expect(run.outcome).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("preserves payload-too-large status while lazily buffering ordinary routes", async () => {
+    const result = await compileWebFrameworkFixture();
+    const server = createHttpServerHarness();
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      defaultAdapters: {
+        runtime: "node",
+        runtimeHooks: {
+          ...server.runtimeHooks,
+          httpServerReadRequest: async () => {
+            throw Object.assign(new Error("request body exceeds max_body_bytes (4)"), {
+              code: 3,
+            });
+          },
+        },
+      },
+    });
+    const run = host.runManaged<number>("serve_streaming_buffered_body_probe");
+    server.enqueueStreamingRequest(3, "/buffered", [
+      new TextEncoder().encode("oversized"),
+    ]);
+    await waitFor(() => server.responses.length === 1, "buffered body rejection");
+
+    expect(server.responses[0]).toMatchObject({
+      requestId: 3,
+      status: 413,
+    });
+
+    expect(run.cancel("test complete")).toBe(true);
+    await expect(run.outcome).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
+  it("generates documented OpenAPI schemas through the public package API", async () => {
+    const result = await compileWebFrameworkFixture();
+    const schema = await result.run<string>({ entryName: "openapi_schema_probe" });
+
+    expect(schema).toContain('"/articles/{id}"');
+    expect(schema).toContain('"required":["title"]');
+    expect(schema).toContain("Stable article identifier.");
+    expect(schema).toContain("Reader-visible article title.");
+  });
+
+  it("serves formatted SSE through the Web router and host stream lifecycle", async () => {
+    const result = await compileWebFrameworkFixture();
+    const server = createHttpServerHarness();
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      defaultAdapters: {
+        runtime: "node",
+        runtimeHooks: server.runtimeHooks,
+      },
+    });
+    const run = host.runManaged<number>("serve_sse_probe");
+    server.enqueueRequest(1, "/events");
+    await waitFor(
+      () => server.finishedResponses.includes(1),
+      "SSE stream completion",
+    );
+
+    expect(server.responseHeads).toEqual([
+      expect.objectContaining({
+        requestId: 1,
+        status: 200,
+        headers: expect.arrayContaining([
+          {
+            name: "content-type",
+            value: "text/event-stream; charset=utf-8",
+          },
+        ]),
+      }),
+    ]);
+    expect(
+      new TextDecoder().decode(
+        Uint8Array.from(
+          server.responseChunks.flatMap((entry) => [...entry.chunk]),
+        ),
+      ),
+    ).toBe("event: status\nid: 1\ndata: ready\n\n");
+
+    expect(run.cancel("test complete")).toBe(true);
+    await expect(run.outcome).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
   it("releases server-rendered callbacks after success and failure", async () => {
     const result = await compileWebFrameworkFixture();
     const server = createHttpServerHarness();

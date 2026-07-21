@@ -4,8 +4,9 @@ use std::array::Array
 use std::bytes::Bytes
 use std::error::HostError
 use std::http::self as http
-use std::http::{ IncomingRequest, Method, Response }
+use std::http::{ Body, IncomingRequest, Method, Response }
 use std::http::server::self as server
+use std::http::server::RequestBody
 use std::json::JsonValue
 use std::optional::types::all
 use std::result::types::all
@@ -69,6 +70,7 @@ pub obj MatchedRoute {
 pub obj Context {
   api request: IncomingRequest,
   api route: MatchedRoute,
+  request_body_stream?: RequestBody,
   error_handler: ErrorHandler
 }
 
@@ -88,7 +90,14 @@ pub obj Route {
   middleware: Array<Middleware>,
   handler: Handler,
   error_handler: ErrorHandler,
+  streaming_request: bool,
   order: i32
+}
+
+/// Method and path of one concrete router entry.
+pub obj RouteIdentity {
+  api method: Method,
+  api path: String
 }
 
 obj RouteMatch {
@@ -157,6 +166,13 @@ impl Context
 
   api fn body_bytes(self) -> Bytes
     self.request.body_bytes()
+
+  /// Returns the lazy request body when the Web server enabled streaming.
+  ///
+  /// Buffered Web servers return `None`. The reader can be consumed once with
+  /// `next()` and requires the `HttpServer` effect.
+  api fn streaming_body(self) -> Option<RequestBody>
+    self.request_body_stream
 
   api fn text(self) -> Result<String, http::HttpError>
     self.request.text()
@@ -858,20 +874,61 @@ impl App
   api fn on_rejection(self, handler: ErrorHandler) -> App
     self.on_error(handler)
 
+  /// Marks the most recently added route as request-streaming.
+  api fn streaming(self) -> App
+    self.mark_last_streaming()
+
+  /// Returns the most recently added concrete route.
+  api fn last_route(self) -> Option<RouteIdentity>
+    if self.routes.is_empty():
+      return None {}
+    let route = self.routes.at(self.routes.len() - 1)
+    Some<RouteIdentity> { value: RouteIdentity { method: route.method, path: route.path } }
+
   api fn handle(self, request: IncomingRequest): (open) -> Response
+    self.handle_request(request, body: None {})
+
+  /// Routes a request whose body is supplied as a lazy stream.
+  api fn handle_streaming(
+    self,
+    request: IncomingRequest,
+    body: RequestBody
+  ): (open) -> Response
+    self.handle_request(request, body: Some<RequestBody> { value: body })
+
+  fn handle_request(
+    self,
+    request: IncomingRequest,
+    { body: Option<RequestBody> }
+  ): (open) -> Response
     let path = normalized_request_path(request.path, self.trailing_slash_policy)
     match(best_match(self.routes, request.method, path.as_slice(), self.trailing_slash_policy))
       Some<RouteMatch> { value }:
-        let ctx = Context {
-          request: request,
-          route: MatchedRoute { path: value.route.path, params: value.params },
-          error_handler: value.route.error_handler
-        }
-        run_middleware(value.route.middleware, 0, ctx, value.route.handler)
+        if value.route.streaming_request:
+          let ctx = Context {
+            request: request,
+            route: MatchedRoute { path: value.route.path, params: value.params },
+            request_body_stream: body,
+            error_handler: value.route.error_handler
+          }
+          run_middleware(value.route.middleware, 0, ctx, value.route.handler)
+        else:
+          match(buffer_streaming_request(request, body))
+            Err<HostError> { error }:
+              streaming_body_read_error(error)
+            Ok<IncomingRequest> { value: buffered_request }:
+              let ctx = Context {
+                request: buffered_request,
+                route: MatchedRoute { path: value.route.path, params: value.params },
+                request_body_stream: None {},
+                error_handler: value.route.error_handler
+              }
+              run_middleware(value.route.middleware, 0, ctx, value.route.handler)
       None:
         let ctx = Context {
           request: request,
           route: MatchedRoute { path: path, params: RouteParams::empty() },
+          request_body_stream: body,
           error_handler: self.error_handler
         }
         if path_matches_different_method(self.routes, path.as_slice(), self.trailing_slash_policy):
@@ -1073,6 +1130,7 @@ impl App
       middleware: self.current_middleware.copied(),
       handler: handler,
       error_handler: self.error_handler,
+      streaming_request: false,
       order: self.next_order
     }
     let ~routes = self.routes.copied(1)
@@ -1118,6 +1176,7 @@ impl App
       middleware: combine_middleware(self.current_middleware, route.middleware),
       handler: route.handler,
       error_handler: route.error_handler,
+      streaming_request: route.streaming_request,
       order: self.next_order
     }
     let ~routes = self.routes.copied(1)
@@ -1127,6 +1186,34 @@ impl App
       current_middleware: self.current_middleware,
       prefix: self.prefix,
       next_order: self.next_order + 1,
+      not_found_handler: self.not_found_handler,
+      method_not_allowed_handler: self.method_not_allowed_handler,
+      error_handler: self.error_handler,
+    trailing_slash_policy: self.trailing_slash_policy
+    }
+
+  fn mark_last_streaming(self) -> App
+    if self.routes.is_empty():
+      return self
+    let ~routes = self.routes.copied()
+    let index = routes.len() - 1
+    let route = routes.at(index)
+    let next = Route {
+      method: route.method,
+      path: route.path,
+      segments: route.segments,
+      middleware: route.middleware,
+      handler: route.handler,
+      error_handler: route.error_handler,
+      streaming_request: true,
+      order: route.order
+    }
+    let _ = routes.replace(index, with: next)
+    App {
+      routes: routes,
+      current_middleware: self.current_middleware,
+      prefix: self.prefix,
+      next_order: self.next_order,
       not_found_handler: self.not_found_handler,
       method_not_allowed_handler: self.method_not_allowed_handler,
       error_handler: self.error_handler,
@@ -1502,8 +1589,21 @@ impl Router
   api fn on_rejection(self, handler: ErrorHandler) -> Router
     Router { app: self.app.on_rejection(handler) }
 
+  api fn streaming(self) -> Router
+    Router { app: self.app.streaming() }
+
+  api fn last_route(self) -> Option<RouteIdentity>
+    self.app.last_route()
+
   api fn handle(self, request: IncomingRequest): (open) -> Response
     self.app.handle(request)
+
+  api fn handle_streaming(
+    self,
+    request: IncomingRequest,
+    body: RequestBody
+  ): (open) -> Response
+    self.app.handle_streaming(request, body)
 
 pub fn app() -> App
   App::init()
@@ -1553,7 +1653,13 @@ pub fn serve_build({
 
 pub fn serve(
   app: App,
-  { port: i32, host?: String, shutdown_timeout?: i32, max_body_bytes?: i32, max_pending_requests?: i32 }
+  {
+    port: i32,
+    host?: String,
+    shutdown_timeout?: i32,
+    max_body_bytes?: i32,
+    max_pending_requests?: i32
+  }
 ): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
   serve_app(
     app,
@@ -1566,16 +1672,23 @@ pub fn serve(
 
 pub fn serve_app(
   app: App,
-  { port: i32, host?: String, shutdown_timeout?: i32, max_body_bytes?: i32, max_pending_requests?: i32 }
+  {
+    port: i32,
+    host?: String,
+    shutdown_timeout?: i32,
+    max_body_bytes?: i32,
+    max_pending_requests?: i32
+  }
 ): (server::HttpServer, task::TaskRuntime, open) -> Result<Unit, HostError>
+  let config = server::ServerConfig::init(
+    port: port,
+    host: host,
+    max_body_bytes: max_body_bytes,
+    max_pending_requests: max_pending_requests,
+    response_timeout_millis: shutdown_timeout
+  )
   server::serve_each(
-    config: server::ServerConfig::init(
-      port: port,
-      host: host,
-      max_body_bytes: max_body_bytes,
-      max_pending_requests: max_pending_requests,
-      response_timeout_millis: shutdown_timeout
-    ),
+    config: config,
     policy: server::ServeTaskPolicy::detached(),
     handle: (request: IncomingRequest) -> Response => app.handle(request)
   )
@@ -1766,8 +1879,41 @@ pub fn make_route(path: StringSlice, method: Method, handler: Handler): () -> Ro
     middleware: Array<Middleware>::init(),
     handler: handler,
     error_handler: (rejection: Rejection, ctx: Context) -> Response => default_rejection(rejection, ctx),
+    streaming_request: false,
     order: 0
   }
+
+fn buffer_streaming_request(
+  request: IncomingRequest,
+  body: Option<RequestBody>
+): server::HttpServer -> Result<IncomingRequest, HostError>
+  match(body)
+    None:
+      Ok<IncomingRequest> { value: request }
+    Some<RequestBody> { value }:
+      let ~reader = value
+      match(reader.read_all())
+        Err<HostError> { error }:
+          Err<HostError> { error: error }
+        Ok<Bytes> { value: bytes }:
+          Ok<IncomingRequest> {
+            value: IncomingRequest {
+              method: request.method,
+              path: request.path,
+              query: request.query,
+              headers: request.headers,
+              body: Body::bytes(bytes)
+            }
+          }
+
+fn streaming_body_read_error(error: HostError) -> Response
+  if error.code == 3:
+    match(http::Status::from(413))
+      Ok<http::Status> { value }:
+        return Response::new(status: value).text(error.message)
+      Err:
+        void
+  Response::internal_server_error().text(error.message)
 
 fn run_middleware(middleware: Array<Middleware>, index: i32, ctx: Context, handler: Handler): (open) -> Response
   if index >= middleware.len():

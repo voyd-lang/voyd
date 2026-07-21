@@ -1,6 +1,6 @@
 use std::env::self as env
 use std::error::HostError
-use std::http::{ IncomingRequest, Response, method_as_string }
+use std::http::{ Body, IncomingRequest, Response, method_as_string }
 use std::http::client::self as client
 use std::http::client::{ ClientRequest, HttpClient }
 use std::http::server::self as server
@@ -11,6 +11,10 @@ use std::result::types::all
 use std::task::self as task
 use std::time::self as time
 use std::time::{ Duration, Time }
+
+obj StreamProbe {
+  complete: bool
+}
 
 fn status_or_error(result: Result<Response, HostError>): () -> i32
   match(result)
@@ -98,6 +102,41 @@ pub fn serve_detached_static_from_env(): (HttpServer, task::TaskRuntime, env::En
       0
     Err<HostError> { error }:
       -error.code
+
+pub fn serve_streaming_head_from_env(): (HttpServer, task::TaskRuntime, env::Env) -> i32
+  let port = smoke_port()
+  if port <= 0:
+    return -10
+
+  let ~probe = StreamProbe { complete: false }
+  let result = server::serve_each(
+    config: ServerConfig::init(
+      port: port,
+      host: "127.0.0.1".as_slice().to_string(),
+      response_timeout_millis: 2000
+    ),
+    policy: ServeTaskPolicy::sequential(),
+    handle: (request: IncomingRequest) -> Response => stream_head_response(request, probe)
+  )
+  match(result)
+    Ok<Unit>:
+      0
+    Err<HostError> { error }:
+      -error.code
+
+fn stream_head_response(request: IncomingRequest, ~probe: StreamProbe): (server::ResponseStream, open) -> Response
+  if request.path.equals("/status".as_slice().to_string()):
+    let status = if probe.complete then: "complete".as_slice() else: "pending".as_slice()
+    return Response::ok().text(status)
+  let response = server::stream(
+    Response::ok().text("x".as_slice().to_string().repeat(150000)),
+    body: write_streaming_body
+  )
+  probe.complete = true
+  response
+
+fn write_streaming_body(): server::ResponseWriter -> void
+  let _ = server::write(Body::text("streamed".as_slice()).as_bytes())
 
 fn handle_detached_request(request: IncomingRequest): Time -> Response
   if request.path.equals("/slow".as_slice().to_string()):

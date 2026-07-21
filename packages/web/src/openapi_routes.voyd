@@ -1,0 +1,14 @@
+//! Router integration for OpenAPI documents.
+
+use std::optional::types::all
+use super::openapi::{ Document, Operation }
+use super::router::App
+
+/// Documents the most recently added real route using its router-owned method
+/// and path, preventing documentation for a nonexistent endpoint.
+pub fn document_route(app: App, spec: Document, operation: Operation) -> Document
+  match(app.last_route())
+    Some { value: route }:
+      spec.route(route.path, method: route.method, operation: operation)
+    None:
+      spec
