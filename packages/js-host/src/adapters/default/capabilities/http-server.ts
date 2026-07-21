@@ -100,6 +100,7 @@ type WebPendingResponse = {
   resolve: (response: unknown) => void;
   completed: boolean;
   started: boolean;
+  streamWriteFailed: boolean;
   writer?: {
     write: (chunk: Uint8Array) => Promise<void>;
     close: () => Promise<void>;
@@ -885,6 +886,7 @@ const addWebPendingResponse = ({
     resolve,
     completed: false,
     started: false,
+    streamWriteFailed: false,
   };
   state.pendingResponses.set(requestId, pending);
   resetPendingWebResponseTimeout({ state, requestId, pending });
@@ -1495,7 +1497,17 @@ const createWebHttpServerSource = ({
         if (!pending.started || pending.completed || !pending.writer) {
           throw new Error(`request ${requestId} has no open response stream`);
         }
-        await pending.writer.write(chunk);
+        try {
+          await pending.writer.write(chunk);
+        } catch (error) {
+          pending.completed = true;
+          pending.streamWriteFailed = true;
+          if (pending.timeoutHandle !== undefined) {
+            clearTimeout(pending.timeoutHandle);
+          }
+          cancelRequestBody(state.requestBodies, requestId);
+          throw error;
+        }
         resetPendingWebResponseTimeout({ state, requestId, pending });
         return;
       }
@@ -1506,6 +1518,10 @@ const createWebHttpServerSource = ({
         const pending = state.pendingResponses.get(requestId);
         if (!pending) {
           continue;
+        }
+        if (pending.streamWriteFailed) {
+          state.pendingResponses.delete(requestId);
+          return;
         }
         if (!pending.started || pending.completed || !pending.writer) {
           throw new Error(`request ${requestId} has no open response stream`);
