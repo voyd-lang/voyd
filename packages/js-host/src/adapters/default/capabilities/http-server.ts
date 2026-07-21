@@ -56,6 +56,7 @@ type PendingNodeResponse = {
   response: NodeHttpServerResponse;
   completed: boolean;
   started: boolean;
+  streamWriteFailed: boolean;
   timeoutHandle?: ReturnType<typeof setTimeout>;
 };
 
@@ -695,6 +696,7 @@ const addPendingNodeResponse = ({
     response,
     completed: false,
     started: false,
+    streamWriteFailed: false,
   };
   state.pendingResponses.set(requestId, pending);
   resetPendingNodeResponseTimeout({ state, requestId, pending });
@@ -1201,7 +1203,17 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
         if (!pending.started || pending.completed) {
           throw new Error(`request ${requestId} has no open response stream`);
         }
-        await writeNodeResponseChunk({ target: pending.response, chunk });
+        try {
+          await writeNodeResponseChunk({ target: pending.response, chunk });
+        } catch (error) {
+          pending.completed = true;
+          pending.streamWriteFailed = true;
+          if (pending.timeoutHandle !== undefined) {
+            clearTimeout(pending.timeoutHandle);
+          }
+          cancelRequestBody(state.requestBodies, requestId);
+          throw error;
+        }
         resetPendingNodeResponseTimeout({ state, requestId, pending });
         return;
       }
@@ -1212,6 +1224,10 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
         const pending = state.pendingResponses.get(requestId);
         if (!pending) {
           continue;
+        }
+        if (pending.streamWriteFailed) {
+          state.pendingResponses.delete(requestId);
+          return;
         }
         if (!pending.started || pending.completed) {
           throw new Error(`request ${requestId} has no open response stream`);

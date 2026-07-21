@@ -1289,6 +1289,98 @@ describe("registerDefaultHostAdapters", () => {
     ).resolves.toEqual({ kind: "tail", value: { ok: true } });
   });
 
+  it("finishes cleanly after a streamed response write detects disconnect", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "start_response_raw",
+        opId: 2,
+      },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "write_response_raw",
+        opId: 3,
+      },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "finish_response_raw",
+        opId: 4,
+      },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 5 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    const port = await findFreePort();
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node" },
+    });
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      { port, host: "127.0.0.1", response_timeout_millis: 60_000 }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const acceptPromise = getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const disconnected = new Promise<void>((resolve) => {
+      const request = http.get(
+        `http://127.0.0.1:${port}/disconnect`,
+        (response) => {
+          response.once("close", resolve);
+          response.destroy();
+        }
+      );
+      request.once("error", () => resolve());
+    });
+    const acceptResult = await acceptPromise;
+    const requestId = (
+      acceptResult.value as { value: { request_id: number } }
+    ).value.request_id;
+    await getHandler("voyd.std.http.server", "start_response_raw")(
+      tailContinuation,
+      {
+        request_id: requestId,
+        response: {
+          status: 200,
+          reason: "OK",
+          headers: [{ name: "content-type", value: "text/event-stream" }],
+          body: [],
+        },
+      }
+    );
+    await disconnected;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    await expect(
+      getHandler("voyd.std.http.server", "write_response_raw")(
+        tailContinuation,
+        {
+          request_id: requestId,
+          chunk: Array.from(new TextEncoder().encode("data: too late\n\n")),
+        }
+      )
+    ).resolves.toMatchObject({
+      kind: "tail",
+      value: { ok: false, message: "client disconnected during streamed response" },
+    });
+    await expect(
+      getHandler("voyd.std.http.server", "finish_response_raw")(
+        tailContinuation,
+        requestId
+      )
+    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    await expect(
+      getHandler("voyd.std.http.server", "close_raw")(
+        tailContinuation,
+        serverId
+      )
+    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+  });
+
   it("closes an abandoned started response without corrupting streamed bytes", async () => {
     const table = buildTable([
       { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
