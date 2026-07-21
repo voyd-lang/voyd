@@ -18,6 +18,7 @@ import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import type { LoweringFormParams } from "./types.js";
+import { resolveUnqualifiedEffectOperation } from "../../effect-operation-resolution.js";
 
 const collectNamespaceSegments = (
   expr: Expr | undefined,
@@ -80,8 +81,11 @@ export const lowerTry = ({
       expr: bodyExpr,
       scope: scopes.current(),
       resolveBareHandlerHead: ({ name, scope }) =>
-        typeof ctx.symbolTable.resolveByKinds(name, scope, ["effect-op"]) ===
-        "number",
+        typeof resolveUnqualifiedEffectOperation({
+          name,
+          scope,
+          symbolTable: ctx.symbolTable,
+        }) === "number",
       getNestedScope: ({ expr, parentScope }) =>
         ctx.scopeByNode.get(expr.syntaxId) ?? parentScope,
     });
@@ -244,5 +248,8 @@ const resolveEffectOperationSymbol = ({
   scope: number;
   ctx: LoweringFormParams["ctx"];
 }): number =>
-  ctx.symbolTable.resolveByKinds(opName, scope, ["effect-op"]) ??
-  resolveSymbol(opName, scope, ctx);
+  resolveUnqualifiedEffectOperation({
+    name: opName,
+    scope,
+    symbolTable: ctx.symbolTable,
+  }) ?? resolveSymbol(opName, scope, ctx);

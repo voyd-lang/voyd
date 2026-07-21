@@ -22,6 +22,100 @@ const expectCompileSuccess = (
 };
 
 describe("module codegen", () => {
+  it.each([
+    ["imported effect then all", "use src::effects::Store\nuse Store::all"],
+    ["qualified all", "use src::effects::Store::all"],
+    ["grouped qualified all", "use src::effects::{ Store::all }"],
+    ["grouped selective operation", "use src::effects::{ Store::{ save } }"],
+    ["qualified selective operation", "use src::effects::Store::{ save }"],
+  ])(
+    "executes an unqualified effect operation through %s",
+    async (_name, useDecl) => {
+      const root = resolve("/proj/src");
+      const host = createMemoryHost({
+        [`${root}${sep}main.voyd`]: `${useDecl}
+
+pub fn main() -> i32
+  try
+    save(41)
+  save(tail, value):
+    tail(value + 1)
+`,
+        [`${root}${sep}effects.voyd`]: `pub eff Store
+  save(tail, value: i32) -> i32
+  load(tail, value: i32) -> i32
+`,
+      });
+
+      const result = expectCompileSuccess(
+        await compileProgram({
+          entryPath: `${root}${sep}main.voyd`,
+          roots: { src: root },
+          host,
+        }),
+      );
+      const instance = getWasmInstance(result.wasm!);
+      expect((instance.exports.main as () => number)()).toBe(42);
+    },
+  );
+
+  it("uses a local effect operation alias in calls and handler heads", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `eff Store
+  save(tail, value: i32) -> i32
+
+use Store::save as persist
+
+pub fn main() -> i32
+  try
+    persist(41)
+  persist(tail, value):
+    tail(value + 1)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("prefers a selected external operation over an unselected local handler operation", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}effects.voyd`]: `pub eff External
+  save(tail, value: i32) -> i32
+`,
+      [`${root}${sep}main.voyd`]: `use src::effects::External::{ save }
+
+eff Local
+  save(tail, value: i32) -> i32
+
+pub fn main() -> i32
+  try
+    save(41)
+  save(tail, value):
+    tail(value + 1)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("links imported functions across modules and exports only entry functions", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
@@ -43,11 +137,13 @@ pub fn sub(a: i32, b: i32) -> i32
   a - b`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -82,11 +178,13 @@ impl Box
 `,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root, std },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root, std },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -126,11 +224,13 @@ impl Sequence for Array
 `,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root, std },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root, std },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -150,11 +250,13 @@ pub fn main() -> i32
   value`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root, std },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root, std },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -205,11 +307,13 @@ pub fn wrap<T>(value: T) -> GenericResult<T>
   Wrapped<T> { value }`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root, std },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root, std },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -230,11 +334,13 @@ pub fn main() -> i32
   value`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root, std },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root, std },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -261,11 +367,13 @@ pub fn assert<T>(value: T, { neq expected: T }) -> i32
   if value != expected then: 1 else: 0`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -281,11 +389,13 @@ pub fn assert<T>(value: T, { neq expected: T }) -> i32
   o.a`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -301,11 +411,13 @@ pub fn assert<T>(value: T, { neq expected: T }) -> i32
   o.a.b`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -338,11 +450,13 @@ impl Animal
     Animal { id: 2, name: value }`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -359,11 +473,13 @@ pub fn main() -> i32
   base + addend`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -380,11 +496,13 @@ pub fn main() -> i32
       [`${root}${sep}constants.voyd`]: `pub let answer = 41`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -406,11 +524,13 @@ pub fn main() -> i32
   a + c`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -435,11 +555,13 @@ pub fn new_string(from_bytes: FixedArray<i32>): () -> String
 `,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root, std },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root, std },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -465,11 +587,13 @@ pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
 `,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root, std },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root, std },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -489,11 +613,13 @@ pub let plus_one = base + 1`,
       [`${root}${sep}zeta.voyd`]: `pub let base = 41`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
@@ -517,11 +643,13 @@ pub fn main() -> i32
   computed`,
     });
 
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    }));
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
 
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);

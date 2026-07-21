@@ -25,8 +25,21 @@ const resolveValueSymbol = ({
   while (currentScope !== null) {
     const matches = Array.from(ctx.symbolTable.symbolsInScope(currentScope))
       .map((symbol) => ({ symbol, record: ctx.symbolTable.getSymbol(symbol) }))
-      .filter(({ record }) => {
-        if (record.name !== identifier.name || record.kind === "effect-op") {
+      .filter(({ symbol, record }) => {
+        const metadata = (record.metadata ?? {}) as {
+          unqualifiedEffectOperationNames?: readonly string[];
+        };
+        const explicitlyImportedEffectOperation =
+          record.kind === "effect-op" &&
+          metadata.unqualifiedEffectOperationNames?.includes(identifier.name) ===
+            true;
+        if (
+          (record.name !== identifier.name &&
+            !explicitlyImportedEffectOperation) ||
+          (record.kind === "effect-op" &&
+            !isImportedSymbol(symbol, ctx) &&
+            !explicitlyImportedEffectOperation)
+        ) {
           return false;
         }
         const meta = (record.metadata ?? {}) as { quotedName?: boolean };
@@ -62,7 +75,7 @@ const resolveValueSymbol = ({
 export const resolveIdentifierValue = (
   identifier: { name: string; isQuoted: boolean },
   scope: ScopeId,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): IdentifierResolution => {
   const name = identifier.name;
   const resolved = resolveValueSymbol({ identifier, scope, ctx });
@@ -102,7 +115,7 @@ export const resolveIdentifierValue = (
 export const resolveSymbol = (
   name: string,
   scope: ScopeId,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): SymbolId => {
   const resolved = ctx.symbolTable.resolve(name, scope);
   if (typeof resolved === "number") {
@@ -120,7 +133,7 @@ export const resolveSymbol = (
 export const resolveTypeSymbol = (
   name: string,
   scope: ScopeId,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): SymbolId | undefined => {
   const resolved = ctx.symbolTable.resolve(name, scope);
   if (typeof resolved === "number") {
@@ -138,7 +151,7 @@ export const resolveTypeSymbol = (
 
 const resolveIntrinsicSymbol = (
   name: string,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): SymbolId | undefined => {
   let intrinsic = ctx.intrinsicSymbols.get(name);
   if (typeof intrinsic === "number") {
@@ -165,7 +178,7 @@ const resolveIntrinsicSymbol = (
 
 const resolveIntrinsicTypeSymbol = (
   name: string,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): SymbolId | undefined => {
   const intrinsic = intrinsicTypeMetadataFor(name);
   if (!intrinsic) {
@@ -186,10 +199,7 @@ const resolveIntrinsicTypeSymbol = (
   return symbol;
 };
 
-const declareUnresolvedSymbol = (
-  name: string,
-  ctx: LowerContext
-): SymbolId =>
+const declareUnresolvedSymbol = (name: string, ctx: LowerContext): SymbolId =>
   ctx.symbolTable.declare({
     name,
     kind: "value",
@@ -224,7 +234,7 @@ export const resolveConstructorResolution = ({
   const overloadIds = new Set(
     symbols
       .map((symbol) => ctx.overloadBySymbol.get(symbol))
-      .filter((entry): entry is number => typeof entry === "number")
+      .filter((entry): entry is number => typeof entry === "number"),
   );
 
   if (symbols.length === 1) {
@@ -258,7 +268,9 @@ const unwrapAliasConstructorTargetSymbol = ({
   ctx: LowerContext;
 }): SymbolId => {
   const record = ctx.symbolTable.getSymbol(symbol);
-  const metadata = record.metadata as { aliasConstructorTarget?: unknown } | undefined;
+  const metadata = record.metadata as
+    | { aliasConstructorTarget?: unknown }
+    | undefined;
   return typeof metadata?.aliasConstructorTarget === "number"
     ? metadata.aliasConstructorTarget
     : symbol;
