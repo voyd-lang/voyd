@@ -1556,7 +1556,12 @@ const createWebHttpServerSource = ({
         state.pendingResponses.delete(requestId);
         state.requestClosed(requestId);
         cancelRequestBody(state.requestBodies, requestId);
-        await pending.writer.close();
+        try {
+          await pending.writer.close();
+        } catch {
+          // The readable side may have been canceled after the final chunk.
+          // Treat that client disconnect as a completed response stream.
+        }
         return;
       }
       throw new Error(`request ${requestId} is closed or unknown`);
