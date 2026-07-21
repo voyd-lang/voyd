@@ -86,6 +86,36 @@ pub fn main() -> i32
     expect((instance.exports.main as () => number)()).toBe(42);
   });
 
+  it("prefers a selected external operation over an unselected local handler operation", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}effects.voyd`]: `pub eff External
+  save(tail, value: i32) -> i32
+`,
+      [`${root}${sep}main.voyd`]: `use src::effects::External::{ save }
+
+eff Local
+  save(tail, value: i32) -> i32
+
+pub fn main() -> i32
+  try
+    save(41)
+  save(tail, value):
+    tail(value + 1)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("links imported functions across modules and exports only entry functions", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

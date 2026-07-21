@@ -10,24 +10,22 @@ export const resolveUnqualifiedEffectOperation = ({
   scope: ScopeId;
   symbolTable: SymbolTable;
 }): SymbolId | undefined => {
-  const candidates = symbolTable
-    .resolveAllByKinds(name, scope, ["effect-op"])
-    .filter((symbol) => {
-      const metadata = (symbolTable.getSymbol(symbol).metadata ?? {}) as {
-        import?: unknown;
-        unqualifiedEffectOperationNames?: readonly string[];
-      };
-      return (
-        metadata.import !== undefined ||
-        metadata.unqualifiedEffectOperationNames === undefined ||
-        metadata.unqualifiedEffectOperationNames?.includes(name) === true
-      );
-    });
-  const local = candidates.findLast((symbol) => {
+  const candidates = symbolTable.resolveAllByKinds(name, scope, ["effect-op"]);
+  const exposedCandidates = candidates.filter((symbol) => {
+    const metadata = (symbolTable.getSymbol(symbol).metadata ?? {}) as {
+      import?: unknown;
+      unqualifiedEffectOperationNames?: readonly string[];
+    };
+    return (
+      metadata.import !== undefined ||
+      metadata.unqualifiedEffectOperationNames?.includes(name) === true
+    );
+  });
+  const local = exposedCandidates.findLast((symbol) => {
     const metadata = symbolTable.getSymbol(symbol).metadata as
       | { import?: unknown }
       | undefined;
     return metadata?.import === undefined;
   });
-  return local ?? candidates[0];
+  return local ?? exposedCandidates[0] ?? candidates.at(-1);
 };
