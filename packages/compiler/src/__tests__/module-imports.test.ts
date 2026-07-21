@@ -189,15 +189,54 @@ pub fn unqualified() -> i32
     expect(imported?.target?.moduleId).toBe("pkg:storage::effects");
   });
 
-  it("reports a deterministic conflict between imported values and effect operations", async () => {
+  it.each([
+    [
+      "value first",
+      `use src::values::{ save }
+use src::effects::Store::{ save }`,
+    ],
+    [
+      "effect operation first",
+      `use src::effects::Store::{ save }
+use src::values::{ save }`,
+    ],
+  ])(
+    "reports a deterministic conflict between imported values and effect operations with the %s",
+    async (_name, imports) => {
+      const root = resolve("/proj/src");
+      const host = createMemoryHost({
+        [`${root}${sep}effects.voyd`]: `pub eff Store
+  save(tail, value: i32) -> i32
+`,
+        [`${root}${sep}values.voyd`]: "pub fn save(value: i32) -> i32\n  value",
+        [`${root}${sep}main.voyd`]: imports,
+      });
+
+      const graph = await loadModuleGraph({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      });
+      const { diagnostics } = analyzeModules({ graph });
+      const conflicts = [...graph.diagnostics, ...diagnostics].filter(
+        (diagnostic) =>
+          diagnostic.code === "BD0001" && diagnostic.message.includes("save"),
+      );
+
+      expect(conflicts).toHaveLength(1);
+    },
+  );
+
+  it("reports a conflict when an external effect operation selection precedes a local value", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
       [`${root}${sep}effects.voyd`]: `pub eff Store
   save(tail, value: i32) -> i32
 `,
-      [`${root}${sep}values.voyd`]: "pub fn save(value: i32) -> i32\n  value",
-      [`${root}${sep}main.voyd`]: `use src::values::{ save }
-use src::effects::Store::{ save }
+      [`${root}${sep}main.voyd`]: `use src::effects::Store::{ save }
+
+fn save(value: i32) -> i32
+  value
 `,
     });
 
@@ -278,32 +317,49 @@ fn rejected(): Store -> i32
     expect(undefinedFunctions[0]?.message).toContain("save");
   });
 
-  it("reports conflicts between local values and selected local operations", async () => {
-    const root = resolve("/proj/src");
-    const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: `fn save(value: i32) -> i32
+  it.each([
+    [
+      "value first",
+      `fn save(value: i32) -> i32
   value
 
 eff Store
   save(tail, value: i32) -> i32
 
+use Store::{ save }`,
+    ],
+    [
+      "effect operation first",
+      `eff Store
+  save(tail, value: i32) -> i32
+
 use Store::{ save }
-`,
-    });
 
-    const graph = await loadModuleGraph({
-      entryPath: `${root}${sep}main.voyd`,
-      roots: { src: root },
-      host,
-    });
-    const { diagnostics } = analyzeModules({ graph });
-    const conflicts = [...graph.diagnostics, ...diagnostics].filter(
-      (diagnostic) =>
-        diagnostic.code === "BD0001" && diagnostic.message.includes("save"),
-    );
+fn save(value: i32) -> i32
+  value`,
+    ],
+  ])(
+    "reports conflicts between local values and selected local operations with the %s",
+    async (_name, source) => {
+      const root = resolve("/proj/src");
+      const host = createMemoryHost({
+        [`${root}${sep}main.voyd`]: source,
+      });
 
-    expect(conflicts).toHaveLength(1);
-  });
+      const graph = await loadModuleGraph({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      });
+      const { diagnostics } = analyzeModules({ graph });
+      const conflicts = [...graph.diagnostics, ...diagnostics].filter(
+        (diagnostic) =>
+          diagnostic.code === "BD0001" && diagnostic.message.includes("save"),
+      );
+
+      expect(conflicts).toHaveLength(1);
+    },
+  );
 
   it("reports conflicts between selected operations from local effects", async () => {
     const root = resolve("/proj/src");

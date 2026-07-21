@@ -59,6 +59,33 @@ pub fn main() -> i32
     },
   );
 
+  it("uses a local effect operation alias in calls and handler heads", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `eff Store
+  save(tail, value: i32) -> i32
+
+use Store::save as persist
+
+pub fn main() -> i32
+  try
+    persist(41)
+  persist(tail, value):
+    tail(value + 1)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("links imported functions across modules and exports only entry functions", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({

@@ -135,6 +135,7 @@ export const bindModule = (
 
   flushPendingStaticMethods(ctx);
   seedTypeAliasNamespaces(ctx);
+  validateEffectOperationSelectionValueConflicts(ctx);
 
   if (tracker.depth() !== 1) {
     throw new Error("binder scope stack imbalance after traversal");
@@ -734,25 +735,31 @@ const bindEffectNamespaceOperations = ({
         return [];
       }
       return operations.map((operation) => {
-          const operationRecord = ctx.symbolTable.getSymbol(operation.symbol);
-          const operationMetadata = (operationRecord.metadata ?? {}) as {
-            unqualifiedEffectOperationNames?: readonly string[];
-          };
-          ctx.symbolTable.setSymbolMetadata(operation.symbol, {
-            unqualifiedEffectOperationNames: Array.from(
-              new Set([
-                ...(operationMetadata.unqualifiedEffectOperationNames ?? []),
-                importedName,
-              ]),
-            ),
-          });
-          return {
-            name: importedName,
-            local: operation.symbol,
-            visibility,
-            span: entry.span,
-          };
+        const operationRecord = ctx.symbolTable.getSymbol(operation.symbol);
+        const operationMetadata = (operationRecord.metadata ?? {}) as {
+          unqualifiedEffectOperationNames?: readonly string[];
+        };
+        ctx.symbolTable.setSymbolMetadata(operation.symbol, {
+          unqualifiedEffectOperationNames: Array.from(
+            new Set([
+              ...(operationMetadata.unqualifiedEffectOperationNames ?? []),
+              importedName,
+            ]),
+          ),
         });
+        if (importedName !== operationRecord.name) {
+          ctx.symbolTable.bindAlias({
+            name: importedName,
+            symbol: operation.symbol,
+          });
+        }
+        return {
+          name: importedName,
+          local: operation.symbol,
+          visibility,
+          span: entry.span,
+        };
+      });
     });
   }
 
@@ -784,6 +791,41 @@ const bindEffectNamespaceOperations = ({
       declaredAt,
       span: entry.span,
       visibility,
+    });
+  });
+};
+
+const validateEffectOperationSelectionValueConflicts = (
+  ctx: BindingContext,
+): void => {
+  ctx.uses.forEach((use) => {
+    use.entries.forEach((entry) => {
+      const effectOperationImports = entry.imports.filter(
+        (imported) =>
+          ctx.symbolTable.getSymbol(imported.local).kind === "effect-op",
+      );
+      const importedNames = new Set(
+        effectOperationImports.map((imported) => imported.name),
+      );
+      importedNames.forEach((name) => {
+        const valueConflict = Array.from(
+          ctx.symbolTable.symbolsInScope(ctx.symbolTable.rootScope),
+        )
+          .map((symbol) => ctx.symbolTable.getSymbol(symbol))
+          .find((record) => record.kind === "value" && record.name === name);
+        if (!valueConflict) {
+          return;
+        }
+        const syntax = ctx.syntaxByNode.get(valueConflict.declaredAt);
+        recordImportNameConflict({
+          name,
+          incomingKind: "effect-op",
+          existingKind: "value",
+          span: entry.span,
+          previousSpan: syntax ? toSourceSpan(syntax) : entry.span,
+          ctx,
+        });
+      });
     });
   });
 };
