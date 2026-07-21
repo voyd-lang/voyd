@@ -89,7 +89,7 @@ fn save_article(article: Article): fs::Fs -> Response
   let articles = upsert_article(load_articles(), article)
   match(persist_articles(articles))
     Ok<Unit>:
-      response_dto_json(Response::ok(), value: article)
+      Response::ok().json(value: article)
     Err<String> { error }:
       Response::internal_server_error().text(error)
 
