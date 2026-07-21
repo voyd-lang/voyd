@@ -1703,6 +1703,83 @@ describe("registerDefaultHostAdapters", () => {
     expect(readRequest).toHaveBeenCalledOnce();
   });
 
+  it("drops buffered request remainders when the source times out", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      { effectId: "voyd.std.http.server", opName: "read_request_raw", opId: 2 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 3 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    const port = await findFreePort();
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "node", effectBufferSize: 256 },
+    });
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      {
+        port,
+        host: "127.0.0.1",
+        stream_request_bodies: true,
+        response_timeout_millis: 25,
+      }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const acceptPromise = getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const responsePromise = new Promise<string>((resolve, reject) => {
+      const request = http.request(
+        `http://127.0.0.1:${port}/timeout`,
+        { method: "POST" },
+        (response) => {
+          response.setEncoding("utf8");
+          let body = "";
+          response.on("data", (chunk: string) => {
+            body += chunk;
+          });
+          response.on("end", () => resolve(body));
+        }
+      );
+      request.once("error", reject);
+      request.end(Buffer.alloc(600, 1));
+    });
+    const acceptResult = await acceptPromise;
+    const requestId = (
+      acceptResult.value as { value: { request_id: number } }
+    ).value.request_id;
+
+    await expect(
+      getHandler("voyd.std.http.server", "read_request_raw")(
+        tailContinuation,
+        requestId
+      )
+    ).resolves.toMatchObject({
+      kind: "resume",
+      value: { ok: true, value: { done: false } },
+    });
+    await expect(responsePromise).resolves.toBe("server response timeout");
+    await expect(
+      getHandler("voyd.std.http.server", "read_request_raw")(
+        tailContinuation,
+        requestId
+      )
+    ).resolves.toMatchObject({
+      kind: "resume",
+      value: {
+        ok: false,
+        message: `request ${requestId} has no open request body stream`,
+      },
+    });
+    await getHandler("voyd.std.http.server", "close_raw")(
+      tailContinuation,
+      serverId
+    );
+  });
+
   it("rejects response streaming when the effect buffer cannot carry a full chunk", async () => {
     const table = buildTable([
       {
@@ -1817,7 +1894,12 @@ describe("registerDefaultHostAdapters", () => {
         opName: "start_response_raw",
         opId: 2,
       },
-      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 3 },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "write_response_raw",
+        opId: 3,
+      },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 4 },
     ]);
     let serveHandler: ((request: Request) => Promise<Response>) | undefined;
     const serve = vi.fn((_options: unknown, handler: typeof serveHandler) => {
@@ -1859,7 +1941,15 @@ describe("registerDefaultHostAdapters", () => {
         },
       }
     );
-    await responsePromise;
+    const response = await responsePromise;
+    const bodyPromise = response.text();
+    await getHandler("voyd.std.http.server", "write_response_raw")(
+      tailContinuation,
+      {
+        request_id: requestId,
+        chunk: Array.from(new TextEncoder().encode("data: partial\n\n")),
+      }
+    );
     const clearedBeforeClose = clearTimeoutSpy.mock.calls.length;
 
     await expect(
@@ -1868,6 +1958,7 @@ describe("registerDefaultHostAdapters", () => {
         serverId
       )
     ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    await expect(bodyPromise).resolves.toBe("data: partial\n\n");
     expect(clearTimeoutSpy).toHaveBeenCalledTimes(clearedBeforeClose + 1);
     clearTimeoutSpy.mockRestore();
   });

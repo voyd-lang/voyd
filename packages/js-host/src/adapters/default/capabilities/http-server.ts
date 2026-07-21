@@ -85,6 +85,7 @@ type NodeServerState = {
   maxPendingRequests: number;
   responseTimeoutMillis: number;
   streamRequestBodies: boolean;
+  requestClosed: (requestId: number) => void;
 };
 
 type RequestQueueState = {
@@ -117,6 +118,7 @@ type WebServerState = RequestQueueState & {
   maxBodyBytes: number;
   responseTimeoutMillis: number;
   streamRequestBodies: boolean;
+  requestClosed: (requestId: number) => void;
 };
 
 type WebServerHandle = {
@@ -136,6 +138,7 @@ type HttpServerSource = {
   writeResponse: (response: DefaultAdapterHttpResponseChunk) => Promise<void>;
   finishResponse: (requestId: number) => Promise<void>;
   close: (serverId: number) => Promise<void>;
+  onRequestClosed?: (listener: (requestId: number) => void) => void;
 };
 
 const transportSafeHttpServerSource = ({
@@ -153,6 +156,7 @@ const transportSafeHttpServerSource = ({
       requests.delete(requestId);
     }
   };
+  source.onRequestClosed?.(clearRequest);
   const nextChunk = (value: DefaultAdapterHttpRequestChunk): DefaultAdapterHttpRequestChunk => {
     if (maxChunkBytes <= 0) {
       throw new Error("http server effect buffer is too small for request streaming");
@@ -650,6 +654,7 @@ const completePendingNodeResponse = ({
     clearTimeout(pending.timeoutHandle);
   }
   state.pendingResponses.delete(requestId);
+  state.requestClosed(requestId);
   cancelRequestBody(state.requestBodies, requestId);
   state.queue = state.queue.filter((request) => request.requestId !== requestId);
   if (!pending.response.destroyed && !pending.response.writableEnded) {
@@ -840,6 +845,7 @@ const completeWebPendingResponse = ({
     clearTimeout(pending.timeoutHandle);
   }
   state.pendingResponses.delete(requestId);
+  state.requestClosed(requestId);
   cancelRequestBody(state.requestBodies, requestId);
   state.queue = state.queue.filter((request) => request.requestId !== requestId);
   if (pending.started && pending.writer) {
@@ -908,9 +914,7 @@ const releasePendingWebResponses = ({
       if (pending.timeoutHandle !== undefined) {
         clearTimeout(pending.timeoutHandle);
       }
-      void pending.writer
-        .abort(new Error("server closed during streamed response"))
-        .catch(() => undefined);
+      void pending.writer.close().catch(() => undefined);
       continue;
     }
     completeWebPendingResponse({
@@ -1004,6 +1008,7 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
   const servers = new Map<number, NodeServerState>();
   let nextServerId = 1;
   let nextRequestId = 1;
+  let requestClosed = (_requestId: number): void => {};
 
   const serverFor = (serverId: number): NodeServerState => {
     const state = servers.get(serverId);
@@ -1016,6 +1021,9 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
   return {
     isAvailable: true,
     unavailableReason: "",
+    onRequestClosed: (listener) => {
+      requestClosed = listener;
+    },
     listen: async (config) => {
       const serverId = nextServerId++;
       const state: NodeServerState = {
@@ -1031,6 +1039,7 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
         responseTimeoutMillis:
           config.responseTimeoutMillis ?? DEFAULT_RESPONSE_TIMEOUT_MILLIS,
         streamRequestBodies: config.streamRequestBodies ?? false,
+        requestClosed: (requestId) => requestClosed(requestId),
       };
 
       const server = nodeHttp.createServer(async (request, response) => {
@@ -1169,6 +1178,7 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
           clearTimeout(pending.timeoutHandle);
         }
         state.pendingResponses.delete(response.requestId);
+        state.requestClosed(response.requestId);
         cancelRequestBody(state.requestBodies, response.requestId);
         await writeNodeResponse({ target: pending.response, response });
         return;
@@ -1229,6 +1239,7 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
         }
         if (pending.streamWriteFailed) {
           state.pendingResponses.delete(requestId);
+          state.requestClosed(requestId);
           return;
         }
         if (!pending.started || pending.completed) {
@@ -1239,6 +1250,7 @@ const createNodeHttpServerSource = async (): Promise<HttpServerSource> => {
           clearTimeout(pending.timeoutHandle);
         }
         state.pendingResponses.delete(requestId);
+        state.requestClosed(requestId);
         cancelRequestBody(state.requestBodies, requestId);
         await endNodeResponse({
           target: pending.response,
@@ -1312,6 +1324,7 @@ const createWebHttpServerSource = ({
   const servers = new Map<number, WebServerState>();
   let nextServerId = 1;
   let nextRequestId = 1;
+  let requestClosed = (_requestId: number): void => {};
 
   const serverFor = (serverId: number): WebServerState => {
     const state = servers.get(serverId);
@@ -1324,6 +1337,9 @@ const createWebHttpServerSource = ({
   return {
     isAvailable: true,
     unavailableReason: "",
+    onRequestClosed: (listener) => {
+      requestClosed = listener;
+    },
     listen: async (config) => {
       const serverId = nextServerId++;
       const state: WebServerState = {
@@ -1339,6 +1355,7 @@ const createWebHttpServerSource = ({
         responseTimeoutMillis:
           config.responseTimeoutMillis ?? DEFAULT_RESPONSE_TIMEOUT_MILLIS,
         streamRequestBodies: config.streamRequestBodies ?? false,
+        requestClosed: (requestId) => requestClosed(requestId),
       };
 
       const handler: WebServerHandler = async (request) => {
@@ -1521,6 +1538,7 @@ const createWebHttpServerSource = ({
         }
         if (pending.streamWriteFailed) {
           state.pendingResponses.delete(requestId);
+          state.requestClosed(requestId);
           return;
         }
         if (!pending.started || pending.completed || !pending.writer) {
@@ -1531,6 +1549,7 @@ const createWebHttpServerSource = ({
           clearTimeout(pending.timeoutHandle);
         }
         state.pendingResponses.delete(requestId);
+        state.requestClosed(requestId);
         cancelRequestBody(state.requestBodies, requestId);
         await pending.writer.close();
         return;
