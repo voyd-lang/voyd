@@ -61,6 +61,11 @@ export type ModuleDependencyKind = "use" | "export";
 export interface ModuleDependency {
   kind: ModuleDependencyKind;
   path: ModulePath;
+  /**
+   * Alternate module path for a use whose final namespace segment may name a
+   * type or effect rather than a child module (for example `Fx::all`).
+   */
+  namespaceFallbackPath?: ModulePath;
   span?: SourceSpan;
 }
 

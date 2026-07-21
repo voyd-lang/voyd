@@ -43,6 +43,36 @@ fn load_with(cb: fn() : Async -> i32) -> i32
   cb()
 ```
 
+## Importing operations
+
+An effect alone keeps its operations qualified. Select operations explicitly
+when unqualified calls make the surrounding code clearer.
+
+```voyd
+use src::articles::ArticleStorage
+use ArticleStorage::{ save_article }
+
+fn save(content: String): ArticleStorage -> Result
+  save_article(content)
+```
+
+`EffectName::all` selects every operation owned by that effect, while a grouped
+selection introduces only the named operations. Fully qualified and nested
+module-group spellings are equivalent:
+
+```voyd
+use src::articles::ArticleStorage::all
+use src::articles::{ ArticleStorage::{ save_article } }
+```
+
+Selecting operations does not implicitly import `ArticleStorage`, and importing
+the effect alone does not make `save_article(...)` an unqualified call target.
+Qualified calls such as `ArticleStorage::save_article(...)` remain available.
+
+Effect names should describe the required capability with a noun such as
+`ArticleStorage` or `ArticleAccess`; a universal `Effect` suffix usually adds no
+meaning.
+
 ## Handling effects
 
 ```voyd

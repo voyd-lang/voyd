@@ -59,6 +59,7 @@ import {
   collectTryHandlerClauses,
   isTryHandlerClause,
 } from "../../try-handler-clauses.js";
+import { resolveUnqualifiedEffectOperation } from "../../effect-operation-resolution.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
@@ -163,9 +164,11 @@ const bindTry = (
           expr: entry,
           scope: tracker.current(),
           resolveBareHandlerHead: ({ name, scope }) =>
-            typeof ctx.symbolTable.resolveByKinds(name, scope, [
-              "effect-op",
-            ]) === "number",
+            typeof resolveUnqualifiedEffectOperation({
+              name,
+              scope,
+              symbolTable: ctx.symbolTable,
+            }) === "number",
         }) &&
         isForm(entry)
       ) {
@@ -178,8 +181,11 @@ const bindTry = (
       expr: body,
       scope: tracker.current(),
       resolveBareHandlerHead: ({ name, scope }) =>
-        typeof ctx.symbolTable.resolveByKinds(name, scope, ["effect-op"]) ===
-        "number",
+        typeof resolveUnqualifiedEffectOperation({
+          name,
+          scope,
+          symbolTable: ctx.symbolTable,
+        }) === "number",
     }),
   );
   bindExpr(body, ctx, tracker);

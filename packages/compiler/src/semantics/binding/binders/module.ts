@@ -135,6 +135,7 @@ export const bindModule = (
 
   flushPendingStaticMethods(ctx);
   seedTypeAliasNamespaces(ctx);
+  validateEffectOperationSelectionValueConflicts(ctx);
 
   if (tracker.depth() !== 1) {
     throw new Error("binder scope stack imbalance after traversal");
@@ -205,6 +206,16 @@ const resolveUseEntry = ({
   }
 
   let dependencyPath = resolveDependencyPath({ entry, ctx });
+  if (!dependencyPath) {
+    const effectNamespaceUse = resolveQualifiedEffectNamespaceUseEntry({
+      entry,
+      decl,
+      ctx,
+    });
+    if (effectNamespaceUse) {
+      return effectNamespaceUse;
+    }
+  }
   let blockedStdImport = false;
 
   if (dependencyPath && isStdImportBlocked({ dependencyPath, entry, ctx })) {
@@ -329,6 +340,15 @@ const resolveImplicitNamespaceUseEntry = ({
     };
   }
 
+  if (namespaceRecord.kind === "effect") {
+    return resolveEffectNamespaceUseEntry({
+      namespaceSymbol,
+      entry,
+      decl,
+      ctx,
+    });
+  }
+
   if (namespaceRecord.kind !== "type") {
     return undefined;
   }
@@ -352,18 +372,21 @@ const resolveImplicitNamespaceUseEntry = ({
   const dependency = ctx.dependencies.get(importedTarget.moduleId);
   const variantMembers = new Map(
     Array.from(ctx.staticMethods.get(namespaceSymbol)?.entries() ?? [])
-      .map(([name, symbols]) => [
-        name,
-        new Set(
-          Array.from(symbols).filter((symbol) => {
-            const record = ctx.symbolTable.getSymbol(symbol);
-            const entity = (
-              record.metadata as { entity?: unknown } | undefined
-            )?.entity;
-            return record.kind === "type" && entity === "object";
-          }),
-        ),
-      ] as const)
+      .map(
+        ([name, symbols]) =>
+          [
+            name,
+            new Set(
+              Array.from(symbols).filter((symbol) => {
+                const record = ctx.symbolTable.getSymbol(symbol);
+                const entity = (
+                  record.metadata as { entity?: unknown } | undefined
+                )?.entity;
+                return record.kind === "type" && entity === "object";
+              }),
+            ),
+          ] as const,
+      )
       .filter(([, symbols]) => symbols.size > 0),
   );
   if (!dependency || variantMembers.size === 0) {
@@ -385,7 +408,10 @@ const resolveImplicitNamespaceUseEntry = ({
           symbol,
           binding: ctx,
         });
-        return [`${canonical.moduleId}:${canonical.symbol}`, canonical] as const;
+        return [
+          `${canonical.moduleId}:${canonical.symbol}`,
+          canonical,
+        ] as const;
       }),
     );
     if (canonicalCandidates.size > 1) {
@@ -497,6 +523,424 @@ const resolveImplicitNamespaceUseEntry = ({
     alias: entry.alias,
     imports,
   };
+};
+
+const resolveQualifiedEffectNamespaceUseEntry = ({
+  entry,
+  decl,
+  ctx,
+}: {
+  entry: ParsedUseEntry;
+  decl: ParsedUseDecl;
+  ctx: BindingContext;
+}): BoundUseEntry | undefined => {
+  if (entry.moduleSegments.length < 2) {
+    return undefined;
+  }
+  const namespaceName = entry.moduleSegments.at(-1);
+  if (!namespaceName) {
+    return undefined;
+  }
+  const parentSegments = entry.moduleSegments.slice(0, -1);
+  const parentEntry = {
+    ...entry,
+    moduleSegments: parentSegments,
+    path: parentSegments,
+    targetName: undefined,
+    alias: parentSegments.at(-1),
+    selectionKind: "module" as const,
+  };
+  const dependencyPath = resolveDependencyPath({ entry: parentEntry, ctx });
+  if (!dependencyPath) {
+    return undefined;
+  }
+  const moduleId = modulePathToString(dependencyPath);
+  const exportedEffect = ctx.moduleExports.get(moduleId)?.get(namespaceName);
+  if (!exportedEffect || exportedEffect.kind !== "effect") {
+    return undefined;
+  }
+  const explicitlyTargetsStdSubmodule =
+    isExplicitStdSubmoduleEntry(parentEntry);
+  if (
+    !canAccessExport({
+      exported: exportedEffect,
+      moduleId,
+      ctx,
+      explicitlyTargetsStdSubmodule,
+    })
+  ) {
+    recordImportDiagnostic({
+      params: {
+        kind: "out-of-scope-export",
+        moduleId,
+        target: namespaceName,
+        visibility: exportedEffect.visibility.level,
+      },
+      span: entry.span,
+      ctx,
+    });
+    return {
+      path: entry.path,
+      moduleId,
+      span: entry.span,
+      selectionKind: entry.selectionKind,
+      targetName: entry.targetName,
+      alias: entry.alias,
+      imports: [],
+    };
+  }
+
+  const importedTarget = canonicalExportTarget({
+    exported: exportedEffect,
+    ctx,
+  });
+  if (!importedTarget) {
+    return undefined;
+  }
+  const imports = bindEffectNamespaceOperations({
+    effectModuleId: importedTarget.moduleId,
+    effectSymbol: importedTarget.symbol,
+    entry,
+    declaredAt: decl.form,
+    visibility: decl.visibility,
+    explicitlyTargetsStdSubmodule,
+    ctx,
+  });
+  return {
+    path: entry.path,
+    moduleId,
+    span: entry.span,
+    selectionKind: entry.selectionKind,
+    targetName: entry.targetName,
+    alias: entry.alias,
+    imports,
+  };
+};
+
+const resolveEffectNamespaceUseEntry = ({
+  namespaceSymbol,
+  entry,
+  decl,
+  ctx,
+}: {
+  namespaceSymbol: SymbolId;
+  entry: ParsedUseEntry;
+  decl: ParsedUseDecl;
+  ctx: BindingContext;
+}): BoundUseEntry | undefined => {
+  const namespaceRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
+  const importedTarget = importedSymbolTargetFromMetadata(
+    namespaceRecord.metadata as Record<string, unknown> | undefined,
+  );
+  const effectModuleId = importedTarget?.moduleId ?? ctx.module.id;
+  const effectSymbol = importedTarget?.symbol ?? namespaceSymbol;
+  const imports = bindEffectNamespaceOperations({
+    effectModuleId,
+    effectSymbol,
+    entry,
+    declaredAt: decl.form,
+    visibility: decl.visibility,
+    explicitlyTargetsStdSubmodule:
+      importedModuleExplicitStdSubmoduleFrom(
+        namespaceRecord.metadata as Record<string, unknown> | undefined,
+      ) ?? false,
+    ctx,
+  });
+  if (
+    imports.length === 0 &&
+    !effectDeclFor({ effectModuleId, effectSymbol, ctx })
+  ) {
+    return undefined;
+  }
+  return {
+    path: entry.path,
+    moduleId: effectModuleId,
+    span: entry.span,
+    selectionKind: entry.selectionKind,
+    targetName: entry.targetName,
+    alias: entry.alias,
+    imports,
+  };
+};
+
+const bindEffectNamespaceOperations = ({
+  effectModuleId,
+  effectSymbol,
+  entry,
+  declaredAt,
+  visibility,
+  explicitlyTargetsStdSubmodule,
+  ctx,
+}: {
+  effectModuleId: string;
+  effectSymbol: SymbolId;
+  entry: ParsedUseEntry;
+  declaredAt: Form;
+  visibility: HirVisibility;
+  explicitlyTargetsStdSubmodule: boolean;
+  ctx: BindingContext;
+}): BoundImport[] => {
+  const effect = effectDeclFor({ effectModuleId, effectSymbol, ctx });
+  if (!effect) {
+    return [];
+  }
+  const selectedNames =
+    entry.selectionKind === "all"
+      ? Array.from(
+          new Set(effect.operations.map((operation) => operation.name)),
+        )
+      : [entry.targetName ?? entry.alias].filter(
+          (name): name is string => typeof name === "string",
+        );
+  const availableNames = new Set(
+    effect.operations.map((operation) => operation.name),
+  );
+  const missingName = selectedNames.find((name) => !availableNames.has(name));
+  if (missingName) {
+    recordImportDiagnostic({
+      params: {
+        kind: "missing-export",
+        moduleId: `${effectModuleId}::${effect.name}`,
+        target: missingName,
+      },
+      span: entry.span,
+      ctx,
+    });
+    return [];
+  }
+
+  if (effectModuleId === ctx.module.id) {
+    return selectedNames.flatMap((name) => {
+      const operations = effect.operations.filter(
+        (operation) => operation.name === name,
+      );
+      const importedName = entry.alias ?? name;
+      const moduleConflict = findModuleNamespaceNameCollision({
+        name: importedName,
+        scope: ctx.symbolTable.rootScope,
+        incomingKind: "effect-op",
+        ctx,
+      });
+      if (moduleConflict) {
+        recordImportNameConflict({
+          name: importedName,
+          incomingKind: "effect-op",
+          existingKind: moduleConflict.kind,
+          span: entry.span,
+          previousSpan: moduleConflict.span,
+          ctx,
+        });
+        return [];
+      }
+      const conflict = findEffectOperationSelectionConflict({
+        name: importedName,
+        incomingKind: "effect-op",
+        incomingModuleId: effectModuleId,
+        incomingSymbols: operations.map((operation) => operation.symbol),
+        fallbackSpan: entry.span,
+        ctx,
+      });
+      if (conflict) {
+        recordImportNameConflict({
+          name: importedName,
+          incomingKind: "effect-op",
+          existingKind: conflict.kind,
+          span: entry.span,
+          previousSpan: conflict.span,
+          ctx,
+        });
+        return [];
+      }
+      return operations.map((operation) => {
+        const operationRecord = ctx.symbolTable.getSymbol(operation.symbol);
+        const operationMetadata = (operationRecord.metadata ?? {}) as {
+          unqualifiedEffectOperationNames?: readonly string[];
+        };
+        ctx.symbolTable.setSymbolMetadata(operation.symbol, {
+          unqualifiedEffectOperationNames: Array.from(
+            new Set([
+              ...(operationMetadata.unqualifiedEffectOperationNames ?? []),
+              importedName,
+            ]),
+          ),
+        });
+        if (importedName !== operationRecord.name) {
+          ctx.symbolTable.bindAlias({
+            name: importedName,
+            symbol: operation.symbol,
+          });
+        }
+        return {
+          name: importedName,
+          local: operation.symbol,
+          visibility,
+          span: entry.span,
+        };
+      });
+    });
+  }
+
+  const exports = ctx.moduleExports.get(effectModuleId);
+  if (!exports) {
+    return [];
+  }
+  return selectedNames.flatMap((name) => {
+    const operationSymbols = new Set(
+      effect.operations
+        .filter((operation) => operation.name === name)
+        .map((operation) => operation.symbol),
+    );
+    const exported = exports.get(name);
+    if (!exported || exported.kind !== "effect-op") {
+      return [];
+    }
+    const symbols = (exported.symbols ?? [exported.symbol]).filter((symbol) =>
+      operationSymbols.has(symbol),
+    );
+    if (symbols.length === 0) {
+      return [];
+    }
+    return declareImportedSymbol({
+      exported: { ...exported, symbol: symbols[0]!, symbols },
+      alias: entry.alias ?? name,
+      explicitlyTargetsStdSubmodule,
+      ctx,
+      declaredAt,
+      span: entry.span,
+      visibility,
+    });
+  });
+};
+
+const validateEffectOperationSelectionValueConflicts = (
+  ctx: BindingContext,
+): void => {
+  ctx.uses.forEach((use) => {
+    use.entries.forEach((entry) => {
+      const effectOperationImports = entry.imports.filter(
+        (imported) =>
+          ctx.symbolTable.getSymbol(imported.local).kind === "effect-op",
+      );
+      const importedNames = new Set(
+        effectOperationImports.map((imported) => imported.name),
+      );
+      importedNames.forEach((name) => {
+        const valueConflict = Array.from(
+          ctx.symbolTable.symbolsInScope(ctx.symbolTable.rootScope),
+        )
+          .map((symbol) => ctx.symbolTable.getSymbol(symbol))
+          .find((record) => record.kind === "value" && record.name === name);
+        if (!valueConflict) {
+          return;
+        }
+        const syntax = ctx.syntaxByNode.get(valueConflict.declaredAt);
+        recordImportNameConflict({
+          name,
+          incomingKind: "effect-op",
+          existingKind: "value",
+          span: entry.span,
+          previousSpan: syntax ? toSourceSpan(syntax) : entry.span,
+          ctx,
+        });
+      });
+    });
+  });
+};
+
+const effectDeclFor = ({
+  effectModuleId,
+  effectSymbol,
+  ctx,
+}: {
+  effectModuleId: string;
+  effectSymbol: SymbolId;
+  ctx: BindingContext;
+}) =>
+  effectModuleId === ctx.module.id
+    ? ctx.decls.getEffect(effectSymbol)
+    : ctx.dependencies.get(effectModuleId)?.decls.getEffect(effectSymbol);
+
+const canonicalExportTarget = ({
+  exported,
+  ctx,
+}: {
+  exported: ModuleExportEntry;
+  ctx: BindingContext;
+}): { moduleId: string; symbol: SymbolId } | undefined => {
+  const dependency = ctx.dependencies.get(exported.moduleId);
+  if (!dependency) {
+    return undefined;
+  }
+  const sourceMetadata = dependency.symbolTable.getSymbol(
+    exported.symbol,
+  ).metadata;
+  return (
+    importedSymbolTargetFromMetadata(
+      sourceMetadata as Record<string, unknown> | undefined,
+    ) ?? { moduleId: exported.moduleId, symbol: exported.symbol }
+  );
+};
+
+const findEffectOperationSelectionConflict = ({
+  name,
+  incomingKind,
+  incomingModuleId,
+  incomingSymbols,
+  fallbackSpan,
+  ctx,
+}: {
+  name: string;
+  incomingKind: SymbolKind;
+  incomingModuleId: string;
+  incomingSymbols: readonly SymbolId[];
+  fallbackSpan: SourceSpan;
+  ctx: BindingContext;
+}): { kind: SymbolKind; span: SourceSpan } | undefined => {
+  const incoming = new Set(incomingSymbols);
+  for (const symbol of ctx.symbolTable.symbolsInScope(
+    ctx.symbolTable.rootScope,
+  )) {
+    if (incoming.has(symbol)) {
+      continue;
+    }
+    const record = ctx.symbolTable.getSymbol(symbol);
+    if (record.kind !== "value" && record.kind !== "effect-op") {
+      continue;
+    }
+    if (incomingKind !== "effect-op" && record.kind !== "effect-op") {
+      continue;
+    }
+    const metadata = (record.metadata ?? {}) as {
+      import?: { moduleId?: unknown; symbol?: unknown };
+      unqualifiedEffectOperationNames?: readonly string[];
+    };
+    const isExposedEffectOperation =
+      record.kind !== "effect-op" ||
+      metadata.import !== undefined ||
+      metadata.unqualifiedEffectOperationNames?.includes(name) === true;
+    if (!isExposedEffectOperation) {
+      continue;
+    }
+    const exposesName =
+      record.name === name ||
+      metadata.unqualifiedEffectOperationNames?.includes(name) === true;
+    if (!exposesName) {
+      continue;
+    }
+    const belongsToIncomingGroup =
+      metadata.import?.moduleId === incomingModuleId &&
+      typeof metadata.import.symbol === "number" &&
+      incoming.has(metadata.import.symbol);
+    if (belongsToIncomingGroup) {
+      continue;
+    }
+    const syntax = ctx.syntaxByNode.get(record.declaredAt);
+    return {
+      kind: record.kind,
+      span: syntax ? toSourceSpan(syntax) : fallbackSpan,
+    };
+  }
+  return undefined;
 };
 
 const resolveLocalTypeNamespaceUseEntry = ({
@@ -643,12 +1087,12 @@ const resolveLocalTypeNamespaceUseEntry = ({
 
   const imports = (() => {
     if (entry.selectionKind === "all") {
-      return Array.from(new Set(namespaceMembers.map(({ name }) => name))).flatMap(
-        (name) => {
-          const imported = localVariant(name);
-          return imported ? [imported] : [];
-        },
-      );
+      return Array.from(
+        new Set(namespaceMembers.map(({ name }) => name)),
+      ).flatMap((name) => {
+        const imported = localVariant(name);
+        return imported ? [imported] : [];
+      });
     }
 
     const targetName = entry.targetName ?? entry.alias;
@@ -788,14 +1232,22 @@ const canonicalBindingSymbol = ({
   while (true) {
     const key = `${currentModuleId}:${currentSymbol}`;
     if (visited.has(key)) {
-      return { moduleId: currentModuleId, symbol: currentSymbol, binding: current };
+      return {
+        moduleId: currentModuleId,
+        symbol: currentSymbol,
+        binding: current,
+      };
     }
     visited.add(key);
     const imported = importedSymbolTargetFromMetadata(
       current.symbolTable.getSymbol(currentSymbol).metadata,
     );
     if (!imported) {
-      return { moduleId: currentModuleId, symbol: currentSymbol, binding: current };
+      return {
+        moduleId: currentModuleId,
+        symbol: currentSymbol,
+        binding: current,
+      };
     }
     const dependency = current.dependencies.get(imported.moduleId);
     if (!dependency) {
@@ -1315,6 +1767,26 @@ const declareImportedSymbol = ({
       ? exported.symbols
       : [exported.symbol];
   const locals: BoundImport[] = [];
+
+  const effectOperationConflict = findEffectOperationSelectionConflict({
+    name: alias,
+    incomingKind: exported.kind,
+    incomingModuleId: exported.moduleId,
+    incomingSymbols: symbols,
+    fallbackSpan: span,
+    ctx,
+  });
+  if (effectOperationConflict) {
+    recordImportNameConflict({
+      name: alias,
+      incomingKind: exported.kind,
+      existingKind: effectOperationConflict.kind,
+      span,
+      previousSpan: effectOperationConflict.span,
+      ctx,
+    });
+    return [];
+  }
 
   symbols.forEach((symbol) => {
     const importNameCollision = findModuleNamespaceNameCollision({

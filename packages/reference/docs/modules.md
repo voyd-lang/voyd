@@ -62,6 +62,20 @@ For a locally declared enum, its variant names are already in the declaring
 module's scope; importing them again is accepted as an idempotent namespace
 selection and is mainly useful for consistency or re-export declarations.
 
+Effect operations can also be selected through an effect namespace. Selecting
+`all` imports every operation owned by that effect; a grouped selection imports
+only the named operations.
+
+```voyd
+use src::articles::ArticleStorage::all
+use src::audit::{ AuditLog::{ record_change } }
+```
+
+These imports make the selected operations available as unqualified calls.
+They do not import the owning effect name, so import that separately when it is
+also needed in an effect row or qualified call. A module-wide `module::all`
+import continues to exclude effect operations.
+
 ## Re-exports
 
 Use `pub use` to re-export names.
