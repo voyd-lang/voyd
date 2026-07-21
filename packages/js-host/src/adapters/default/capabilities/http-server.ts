@@ -901,7 +901,12 @@ const releasePendingWebResponses = ({
   for (const [requestId, pending] of state.pendingResponses) {
     if (pending.started && pending.writer) {
       pending.completed = true;
-      void pending.writer.abort(new Error("server closed during streamed response"));
+      if (pending.timeoutHandle !== undefined) {
+        clearTimeout(pending.timeoutHandle);
+      }
+      void pending.writer
+        .abort(new Error("server closed during streamed response"))
+        .catch(() => undefined);
       continue;
     }
     completeWebPendingResponse({

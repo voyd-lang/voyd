@@ -249,7 +249,7 @@ pub fn start_response(
   handle: RequestHandle,
   response: http::Response
 ): HttpServer -> Result<Unit, HostError>
-  wire::decode_unit_result(HttpServer::start_response_raw(encode_respond_payload(handle, response)))
+  wire::decode_unit_result(HttpServer::start_response_raw(encode_respond_payload(handle, response.empty())))
 
 /// Writes a chunk to an open response stream with host backpressure.
 pub fn write_response(

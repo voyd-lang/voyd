@@ -381,6 +381,24 @@ pub fn serve_sse_probe(): (HttpServer, tasks::TaskRuntime) -> i32
     Err:
       -1
 
+pub fn serve_streaming_head_probe(): (HttpServer, tasks::TaskRuntime) -> i32
+  let result = server::serve_each(
+    config: ServerConfig::init(port: 41236),
+    policy: ServeTaskPolicy::detached(),
+    handle: (_request: IncomingRequest) -> Response => server::stream(
+      Response::ok().text("x".as_slice().to_string().repeat(150000)),
+      body: write_streaming_head_probe
+    )
+  )
+  match(result)
+    Ok<Unit>:
+      0
+    Err:
+      -1
+
+fn write_streaming_head_probe(): server::ResponseWriter -> void
+  let _ = server::write(Body::text("streamed".as_slice()).as_bytes())
+
 fn write_sse_probe(sender: SseSender): server::ResponseWriter -> void
   let event_value = SseEvent {
     data: "ready".as_slice().to_string(),

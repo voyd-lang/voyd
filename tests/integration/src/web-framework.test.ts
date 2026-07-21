@@ -277,6 +277,35 @@ describe("integration: pkg::web", () => {
     await expect(run.outcome).resolves.toMatchObject({ kind: "cancelled" });
   });
 
+  it("omits buffered bodies from streaming response heads", async () => {
+    const result = await compileWebFrameworkFixture();
+    const server = createHttpServerHarness();
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 131_072,
+      defaultAdapters: {
+        runtime: "node",
+        runtimeHooks: server.runtimeHooks,
+      },
+    });
+    const run = host.runManaged<number>("serve_streaming_head_probe");
+    server.enqueueRequest(2, "/stream");
+    await waitFor(
+      () => server.finishedResponses.includes(2),
+      "streaming response completion",
+    );
+
+    expect(server.responseHeads).toEqual([
+      expect.objectContaining({ requestId: 2, status: 200 }),
+    ]);
+    expect(
+      new TextDecoder().decode(server.responseChunks[0]?.chunk),
+    ).toBe("streamed");
+
+    expect(run.cancel("test complete")).toBe(true);
+    await expect(run.outcome).resolves.toMatchObject({ kind: "cancelled" });
+  });
+
   it("releases server-rendered callbacks after success and failure", async () => {
     const result = await compileWebFrameworkFixture();
     const server = createHttpServerHarness();

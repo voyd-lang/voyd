@@ -1716,6 +1716,70 @@ describe("registerDefaultHostAdapters", () => {
     expect(shutdown).toHaveBeenCalledTimes(1);
   });
 
+  it("clears web response stream timeouts when the server closes", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      {
+        effectId: "voyd.std.http.server",
+        opName: "start_response_raw",
+        opId: 2,
+      },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 3 },
+    ]);
+    let serveHandler: ((request: Request) => Promise<Response>) | undefined;
+    const serve = vi.fn((_options: unknown, handler: typeof serveHandler) => {
+      serveHandler = handler;
+      return { shutdown: vi.fn() };
+    });
+    vi.stubGlobal("Deno", { serve });
+    const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout");
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "deno" },
+    });
+    const listenResult = await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      { port: 4548, host: "127.0.0.1", response_timeout_millis: 60_000 }
+    );
+    const serverId = (listenResult.value as { value: number }).value;
+    const responsePromise = serveHandler!(
+      new Request("http://127.0.0.1:4548/events")
+    );
+    const acceptResult = await getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      serverId
+    );
+    const requestId = (
+      acceptResult.value as { value: { request_id: number } }
+    ).value.request_id;
+    await getHandler("voyd.std.http.server", "start_response_raw")(
+      tailContinuation,
+      {
+        request_id: requestId,
+        response: {
+          status: 200,
+          reason: "OK",
+          headers: [{ name: "content-type", value: "text/event-stream" }],
+          body: [],
+        },
+      }
+    );
+    await responsePromise;
+    const clearedBeforeClose = clearTimeoutSpy.mock.calls.length;
+
+    await expect(
+      getHandler("voyd.std.http.server", "close_raw")(
+        tailContinuation,
+        serverId
+      )
+    ).resolves.toEqual({ kind: "tail", value: { ok: true } });
+    expect(clearTimeoutSpy).toHaveBeenCalledTimes(clearedBeforeClose + 1);
+    clearTimeoutSpy.mockRestore();
+  });
+
   it("omits Deno/Bun web response bodies for null-body statuses", async () => {
     const table = buildTable([
       { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
