@@ -100,7 +100,7 @@ test "content negotiation honors quality and wildcard specificity":
   let ~supported = Array<String>::init()
   supported.push("application/json".as_slice().to_string())
   supported.push("text/html".as_slice().to_string())
-  match(best_match("text/*;q=0.5, application/json;q=0.9".as_slice(), supported))
+  match(best_match("text/*;q=0.5, application/json;q=0.9".as_slice().to_string(), supported))
     Some<String> { value }:
       assert(value, eq: "application/json")
     None:

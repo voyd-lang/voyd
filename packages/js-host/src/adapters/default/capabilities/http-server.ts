@@ -105,7 +105,6 @@ type WebPendingResponse = {
   writer?: {
     write: (chunk: Uint8Array) => Promise<void>;
     close: () => Promise<void>;
-    abort: (reason?: unknown) => Promise<void>;
   };
   timeoutHandle?: ReturnType<typeof setTimeout>;
 };
@@ -849,7 +848,7 @@ const completeWebPendingResponse = ({
   cancelRequestBody(state.requestBodies, requestId);
   state.queue = state.queue.filter((request) => request.requestId !== requestId);
   if (pending.started && pending.writer) {
-    void pending.writer.abort(new Error("server response timeout"));
+    void pending.writer.close().catch(() => undefined);
     return;
   }
   pending.resolve(response);
@@ -955,7 +954,6 @@ const streamingWebResponse = ({
           getWriter: () => {
             write: (chunk: Uint8Array) => Promise<void>;
             close: () => Promise<void>;
-            abort: (reason?: unknown) => Promise<void>;
           };
         };
       })
@@ -1647,7 +1645,7 @@ const createBunHttpServerSource = (): HttpServerSource => {
           if (typeof stop === "function") {
             await (stop as (force?: boolean) => Promise<void> | void).call(
               runtimeServer,
-              true
+              false
             );
           }
         },

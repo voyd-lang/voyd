@@ -32,6 +32,10 @@ pub fn best_match(accept: StringSlice, supported: Array<String>) -> Option<Strin
   else:
     None {}
 
+/// Selects the best supported media type for an `Accept` header.
+pub fn best_match(accept: String, supported: Array<String>) -> Option<String>
+  best_match(accept.as_slice(), supported)
+
 /// Selects a representation for the current request.
 ///
 /// A missing `Accept` header is treated as `*/*`.
