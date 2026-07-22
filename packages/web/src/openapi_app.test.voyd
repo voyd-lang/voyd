@@ -462,9 +462,17 @@ test "custom extractors can publish a separate request contract":
   let value = app(openapi: { title: "Custom extractor", version: "1" }).post(
     "/custom-body",
     body: CustomTextBody {},
-    handler: custom_body_reply
+    handler: custom_body_reply,
+    docs: route_docs(responses: [
+      openapi_json_response<AutomaticArticle>(
+        status: 207,
+        description: "Custom extractor override"
+      )
+    ])
   )
-  require_contains(openapi_string(value), "\"text/plain\"".as_slice(), "missing custom extractor contract")
+  let rendered = openapi_string(value)
+  require_contains(rendered, "\"text/plain\"".as_slice(), "missing custom extractor contract")
+  require_contains(rendered, "\"207\"".as_slice(), "custom extractor RouteDocs override was not applied")
 
 test "multipart extractors publish an honest opaque multipart body":
   let value = app(openapi: { title: "Multipart", version: "1" }).post(

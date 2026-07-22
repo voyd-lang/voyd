@@ -41,7 +41,7 @@ use super::extract::{
 use super::response::{ Created, IntoResponse, json, json_value, typed_response }
 use super::response_composites::self as response_composites
 use super::response_dynamic::self as response_dynamic
-use super::automatic_contract::{ documented_fragment, extractor_operation, hidden_fragment, json_request_fragment, opaque_fragment, route_fragment, typed_fragment, typed_json_fragment, typed_json_request_fragment, with_route_docs as apply_route_docs }
+use super::automatic_contract::{ contract_with_docs, documented_fragment, extractor_operation, hidden_fragment, json_request_fragment, opaque_fragment, route_fragment, typed_fragment, typed_json_fragment, typed_json_request_fragment, with_route_docs as apply_route_docs }
 use super::automatic_openapi::render_openapi
 use super::openapi::{ Operation, operation }
 use super::openapi_types::{ RecordedOpenApiRoute, RouteContract }
@@ -974,6 +974,16 @@ impl App
     { method: Method, body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I, Context) : (open) -> R }
   ) -> App
     self.with_body_context_route<I, P, R>(path, method: method, body: body, limit: limit, timeout: timeout, handler: handler)
+
+  api fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+  ) -> App
+    self.with_body_route<I, P, R>(path, method: method, body: body, limit: limit, timeout: timeout, handler: handler, contract: contract_with_docs(
+      extractor_operation(body.openapi_request()).with_responses(inferred_responses<R>()),
+      docs
+    ))
 
   api fn route<I, P: FromBody<I>, R: IntoResponse<R>, D>(
     self,
@@ -3063,6 +3073,34 @@ impl App
     ) -> App
     self.route<I, P, R>(path, method: Method::Delete {}, body: body, limit: limit, timeout: timeout, handler: handler)
 
+  api fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<I, P, R>(path, method: Method::Post {}, body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<I, P, R>(path, method: Method::Put {}, body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<I, P, R>(path, method: Method::Patch {}, body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<I, P, R>(path, method: Method::Delete {}, body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
   api fn post<I, P: FromBody<I>, R: IntoResponse<R>, D>(
       self,
       path: StringSlice,
@@ -3625,6 +3663,34 @@ impl Router
       ) -> Router
     Router { app: self.app.delete<I, P, R>(path, body: body, limit: limit, timeout: timeout, handler: handler) }
 
+  api fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+        self,
+        path: StringSlice,
+        { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    Router { app: self.app.post<I, P, R>(path, body: body, limit: limit, timeout: timeout, handler: handler, docs: docs) }
+
+  api fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+        self,
+        path: StringSlice,
+        { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    Router { app: self.app.put<I, P, R>(path, body: body, limit: limit, timeout: timeout, handler: handler, docs: docs) }
+
+  api fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+        self,
+        path: StringSlice,
+        { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    Router { app: self.app.patch<I, P, R>(path, body: body, limit: limit, timeout: timeout, handler: handler, docs: docs) }
+
+  api fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+        self,
+        path: StringSlice,
+        { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    Router { app: self.app.delete<I, P, R>(path, body: body, limit: limit, timeout: timeout, handler: handler, docs: docs) }
+
   api fn post<I, P: FromBody<I>, R: IntoResponse<R>, D>(
         self,
         path: StringSlice,
@@ -3960,6 +4026,16 @@ impl Router
     ) -> Router
     Router { app: self.app.with_body_context_route<I, P, R>(path, method: method, body: body, limit: limit, timeout: timeout, handler: handler) }
 
+  api fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { method: Method, body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+    ) -> Router
+    Router { app: self.app.with_body_route<I, P, R>(path, method: method, body: body, limit: limit, timeout: timeout, handler: handler, contract: contract_with_docs(
+          extractor_operation(body.openapi_request()).with_responses(inferred_responses<R>()),
+          docs
+        )) }
+
   api fn route<I, P: FromBody<I>, R: IntoResponse<R>, D>(
       self,
       path: StringSlice,
@@ -4192,6 +4268,13 @@ impl App
       { method: Method, body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I, Context) : (open) -> R }
     ) -> App
     self.route<I, P, R>(path.as_slice(), method: method, body: body, limit: limit, timeout: timeout, handler: handler)
+
+  api fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+      self,
+      path: String,
+      { method: Method, body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<I, P, R>(path.as_slice(), method: method, body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
 
   api fn route<I, P: FromBody<I>, R: IntoResponse<R>, D>(
       self,
@@ -4537,6 +4620,34 @@ impl App
         { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I, Context) : (open) -> R }
       ) -> App
     self.delete<I, P, R>(path.as_slice(), body: body, limit: limit, timeout: timeout, handler: handler)
+
+  api fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+        self,
+        path: String,
+        { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+      ) -> App
+    self.post<I, P, R>(path.as_slice(), body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+        self,
+        path: String,
+        { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+      ) -> App
+    self.put<I, P, R>(path.as_slice(), body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+        self,
+        path: String,
+        { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+      ) -> App
+    self.patch<I, P, R>(path.as_slice(), body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+        self,
+        path: String,
+        { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+      ) -> App
+    self.delete<I, P, R>(path.as_slice(), body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
 
   api fn post<I, P: FromBody<I>, R: IntoResponse<R>, D>(
         self,
@@ -5164,6 +5275,34 @@ impl Router
         ) -> Router
     self.delete<I, P, R>(path.as_slice(), body: body, limit: limit, timeout: timeout, handler: handler)
 
+  api fn post<I, P: FromBody<I>, R: IntoResponse<R>>(
+          self,
+          path: String,
+          { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+        ) -> Router
+    self.post<I, P, R>(path.as_slice(), body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<I, P: FromBody<I>, R: IntoResponse<R>>(
+          self,
+          path: String,
+          { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+        ) -> Router
+    self.put<I, P, R>(path.as_slice(), body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<I, P: FromBody<I>, R: IntoResponse<R>>(
+          self,
+          path: String,
+          { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+        ) -> Router
+    self.patch<I, P, R>(path.as_slice(), body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<I, P: FromBody<I>, R: IntoResponse<R>>(
+          self,
+          path: String,
+          { body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+        ) -> Router
+    self.delete<I, P, R>(path.as_slice(), body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
+
   api fn post<I, P: FromBody<I>, R: IntoResponse<R>, D>(
           self,
           path: String,
@@ -5482,6 +5621,13 @@ impl Router
         { method: Method, body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I, Context) : (open) -> R }
       ) -> Router
     self.route<I, P, R>(path.as_slice(), method: method, body: body, limit: limit, timeout: timeout, handler: handler)
+
+  api fn route<I, P: FromBody<I>, R: IntoResponse<R>>(
+        self,
+        path: String,
+        { method: Method, body: P, limit?: BodyLimit, timeout?: TimeoutPolicy, handler: fn(I) : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    self.route<I, P, R>(path.as_slice(), method: method, body: body, limit: limit, timeout: timeout, handler: handler, docs: docs)
 
   api fn route<I, P: FromBody<I>, R: IntoResponse<R>, D>(
         self,
