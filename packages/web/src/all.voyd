@@ -2,15 +2,12 @@
 
 use super::extract::{
   bytes as bytes_policy,
-  json as json_policy,
   optional_session as optional_session_policy,
   required_session as required_session_policy,
   text as text_policy
 }
 pub use super::openapi_expose::expose as expose_openapi
 pub use super::openapi_routes::document_route as document_openapi_route
-use super::response::{ json as response_json_value }
-use std::json::JsonValue
 
 pub use super::extract::{
   AuthExtractor,
@@ -77,11 +74,10 @@ pub use super::response::{
   QueryString,
   Response,
   Status,
-  dto_json,
-  json_dto,
-  response_dto_json,
-  result_dto_json,
-  option_dto_json,
+  json,
+  json_value,
+  result_json,
+  option_json,
   status,
   to_response
 }
@@ -134,43 +130,43 @@ pub use super::routes::{
   delete_unit,
   route,
   route_auth,
-  route_auth_dto,
-  route_auth_result_dto,
-  route_body_auth_dto,
-  route_body_auth_result_dto,
-  route_body_dto,
-  route_body_result_dto,
+  route_auth_json,
+  route_auth_result_json,
+  route_body_auth_json,
+  route_body_auth_result_json,
+  route_body_json,
+  route_body_result_json,
   route_cookies,
-  route_cookies_dto,
-  route_cookies_result_dto,
+  route_cookies_json,
+  route_cookies_result_json,
   route_cookies_context,
-  route_cookies_context_dto,
-  route_cookies_context_result_dto,
+  route_cookies_context_json,
+  route_cookies_context_result_json,
   route_context,
-  route_context_dto,
-  route_context_result_dto,
+  route_context_json,
+  route_context_result_json,
   route_headers,
   route_headers_context,
   route_params,
-  route_params_dto,
-  route_params_result_dto,
+  route_params_json,
+  route_params_result_json,
   route_params_context,
-  route_params_context_dto,
-  route_params_context_result_dto,
+  route_params_context_json,
+  route_params_context_result_json,
   route_params_headers,
   route_params_headers_context,
   route_params_query_headers,
   route_params_query_headers_context,
   route_unit,
   route_params_query,
-  route_params_query_dto,
-  route_params_query_result_dto,
+  route_params_query_json,
+  route_params_query_result_json,
   route_params_query_context,
-  route_params_query_context_dto,
-  route_params_query_context_result_dto,
+  route_params_query_context_json,
+  route_params_query_context_result_json,
   route_query_context,
-  route_query_context_dto,
-  route_query_context_result_dto,
+  route_query_context_json,
+  route_query_context_result_json,
   route_query_headers,
   route_query_headers_context,
   TimeoutPolicy,
@@ -181,17 +177,8 @@ pub use super::static_files::serve_dir
 pub use super::streaming::{ stream, write as write_stream }
 pub use super::sse::{ Event as SseEvent, Sender as SseSender, response as sse_response, make_sse_event }
 
-pub fn json() -> JsonBody
-  json_policy()
-
 pub fn json_body() -> JsonBody
-  json_policy()
-
-pub fn response_json(value: JsonValue) -> Response
-  response_json_value(value)
-
-pub fn response_json(response: Response, value: JsonValue) -> Response
-  response_json_value(response, value)
+  super::extract::json_body()
 
 
 pub fn text() -> TextBody

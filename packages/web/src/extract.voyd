@@ -408,9 +408,7 @@ pub fn json_body_value(request: IncomingRequest) -> Result<JsonValue, Rejection>
         Err<HttpError> { error }:
           Err<Rejection> { error: Rejection::bad_request(error.message.as_slice()) }
 
-pub fn json() -> JsonBody
-  JsonBody {}
-
+/// Parses and decodes a route's request body as JSON.
 pub fn json_body() -> JsonBody
   JsonBody {}
 

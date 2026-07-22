@@ -15,7 +15,7 @@ use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
 
-test "OpenAPI reflects DTO fields and doc comments":
+test "OpenAPI reflects record fields and doc comments":
   let base_operation = operation(
     summary: "Create an article".as_slice().to_string(),
     description: "Creates and returns one article.".as_slice().to_string(),

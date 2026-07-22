@@ -3,7 +3,7 @@ use src::html::{
   document,
   hydrate_named
 }
-use src::response::{ json_dto, response_dto_json }
+use src::response::json
 use src::router::{ Context, app }
 use src::routes::{
   delete,
@@ -12,29 +12,29 @@ use src::routes::{
   post,
   put,
   route,
-  route_body_dto,
-  route_body_auth_dto,
-  route_body_auth_result_dto,
-  route_body_result_dto,
-  route_auth_dto,
-  route_auth_result_dto,
+  route_body_json,
+  route_body_auth_json,
+  route_body_auth_result_json,
+  route_body_result_json,
+  route_auth_json,
+  route_auth_result_json,
   route_context,
-  route_context_dto,
-  route_context_result_dto,
+  route_context_json,
+  route_context_result_json,
   route_cookies,
   route_cookies_context,
-  route_cookies_context_dto,
-  route_cookies_context_result_dto,
-  route_params_context_dto,
-  route_params_context_result_dto,
-  route_params_dto,
-  route_params_result_dto,
-  route_params_query_dto,
-  route_params_query_result_dto,
-  route_params_query_context_dto,
-  route_params_query_context_result_dto,
-  route_query_context_dto,
-  route_query_context_result_dto,
+  route_cookies_context_json,
+  route_cookies_context_result_json,
+  route_params_context_json,
+  route_params_context_result_json,
+  route_params_json,
+  route_params_result_json,
+  route_params_query_json,
+  route_params_query_result_json,
+  route_params_query_context_json,
+  route_params_query_context_result_json,
+  route_query_context_json,
+  route_query_context_result_json,
   timeout_millis
 }
 use std::http::{ Body, Headers, IncomingRequest, Method, QueryString, Response }
@@ -163,10 +163,10 @@ test "structural query extraction rejects missing and invalid fields":
       assert(error.status.code(), eq: 400)
       assert(error.message.contains("page".as_slice()), eq: true)
 
-test "route body dto helper converts handler DTO returns":
-  let web_app = route_body_dto(
+test "route body record helper converts handler record returns":
+  let web_app = route_body_json(
     app(),
-    "/body-dto".as_slice(),
+    "/body-record".as_slice(),
     method: Method::Post {},
     body: text_body_policy()
   ) do(input: String):
@@ -177,15 +177,17 @@ test "route body dto helper converts handler DTO returns":
   let response = web_app.handle(
     request_with_body(
       Method::Post {},
-      "/body-dto".as_slice().to_string(),
+      "/body-record".as_slice().to_string(),
       Body::text("on".as_slice())
     )
   )
   assert(response_text(response).contains("\"active\":true".as_slice()), eq: true)
 
-test "response helpers convert boundary DTOs to json":
-  let profile: TestProfile = { name: "Ada".as_slice().to_string(), active: true }
-  let json_response = json_dto<TestProfile>(profile)
+test "json serializes typed records":
+  let json_response = json({
+    name: "Ada".as_slice().to_string(),
+    active: true
+  })
   assert(json_response.status.code(), eq: 200)
   match(json_response.header("content-type".as_slice()))
     Some<String> { value }:
@@ -196,15 +198,15 @@ test "response helpers convert boundary DTOs to json":
   assert(text.contains("\"name\":\"Ada\"".as_slice()), eq: true)
   assert(text.contains("\"active\":true".as_slice()), eq: true)
 
-  let created = response_dto_json(
-    Response::created(),
-    value: { name: "Grace".as_slice().to_string(), active: false }
-  )
+  let created = Response::created().json(value: {
+    name: "Grace".as_slice().to_string(),
+    active: false
+  })
   assert(created.status.code(), eq: 201)
   assert(response_text(created).contains("\"active\":false".as_slice()), eq: true)
 
-test "route dto helpers convert handler DTO returns to json":
-  let web_app = route_context_dto(
+test "route record helpers convert handler record returns to json":
+  let web_app = route_context_json(
     app(),
     "/profile".as_slice(),
     method: Method::Get {}
@@ -218,8 +220,8 @@ test "route dto helpers convert handler DTO returns to json":
   assert(response.status.code(), eq: 200)
   assert(response_text(response).contains("\"name\":\"Ada\"".as_slice()), eq: true)
 
-test "route result dto helpers convert successful DTO values":
-  let context_app = route_context_result_dto(
+test "route result record helpers convert successful record values":
+  let context_app = route_context_result_json(
     app(),
     "/profile-result".as_slice(),
     method: Method::Get {}
@@ -233,7 +235,7 @@ test "route result dto helpers convert successful DTO values":
   )
   assert(response_text(context_response).contains("\"name\":\"Ada\"".as_slice()), eq: true)
 
-  let query_app = route_query_context_result_dto(
+  let query_app = route_query_context_result_json(
     app(),
     "/query-result".as_slice(),
     method: Method::Get {}
@@ -253,8 +255,8 @@ test "route result dto helpers convert successful DTO values":
   )
   assert(response_text(query_response).contains("\"name\":\"Grace\"".as_slice()), eq: true)
 
-test "params query result dto helpers convert successful DTO values":
-  let web_app = route_params_query_context_result_dto(
+test "params query result record helpers convert successful record values":
+  let web_app = route_params_query_context_result_json(
     app(),
     "/profiles/:id".as_slice(),
     method: Method::Get {}
@@ -275,7 +277,7 @@ test "params query result dto helpers convert successful DTO values":
   )
   assert(response_text(response).contains("\"name\":\"ada:grace\"".as_slice()), eq: true)
 
-test "cookie route helpers decode typed cookie DTOs":
+test "cookie route helpers decode typed cookie records":
   let web_app = route_cookies_context(
     app(),
     "/cookies".as_slice(),
@@ -293,8 +295,8 @@ test "cookie route helpers decode typed cookie DTOs":
   )
   assert(response_text(response).equals("abc:dark:abc"), eq: true)
 
-test "cookie route dto helpers convert handler DTO returns":
-  let web_app = route_cookies_context_dto(
+test "cookie route record helpers convert handler record returns":
+  let web_app = route_cookies_context_json(
     app(),
     "/cookie-profile".as_slice(),
     method: Method::Get {}
@@ -312,8 +314,8 @@ test "cookie route dto helpers convert handler DTO returns":
   assert(response_text(response).contains("\"name\":\"ada\"".as_slice()), eq: true)
   assert(response_text(response).contains("\"active\":true".as_slice()), eq: true)
 
-test "cookie route result dto helpers convert successful DTO values":
-  let web_app = route_cookies_context_result_dto(
+test "cookie route result record helpers convert successful record values":
+  let web_app = route_cookies_context_result_json(
     app(),
     "/cookie-profile-result".as_slice(),
     method: Method::Get {}
@@ -531,8 +533,8 @@ test "cookie routes do not require final context":
   )
   assert(response_text(response).equals("ada:dark"), eq: true)
 
-test "dto helpers cover params auth and body auth routes":
-  let params_app = route_params_dto(
+test "record helpers cover params auth and body auth routes":
+  let params_app = route_params_json(
     app(),
     "/profile/:id".as_slice(),
     method: Method::Get {}
@@ -541,7 +543,7 @@ test "dto helpers cover params auth and body auth routes":
     profile
   params_app
 
-  let params_result_app = route_params_result_dto(
+  let params_result_app = route_params_result_json(
     app(),
     "/profile-result/:id".as_slice(),
     method: Method::Get {}
@@ -551,7 +553,7 @@ test "dto helpers cover params auth and body auth routes":
     value
   params_result_app
 
-  let auth_app = route_auth_dto(
+  let auth_app = route_auth_json(
     app(),
     "/auth-profile".as_slice(),
     method: Method::Get {},
@@ -562,7 +564,7 @@ test "dto helpers cover params auth and body auth routes":
     profile
   auth_app
 
-  let auth_result_app = route_auth_result_dto(
+  let auth_result_app = route_auth_result_json(
     app(),
     "/auth-profile-result".as_slice(),
     method: Method::Get {},
@@ -574,7 +576,7 @@ test "dto helpers cover params auth and body auth routes":
     value
   auth_result_app
 
-  let body_auth_app = route_body_auth_dto(
+  let body_auth_app = route_body_auth_json(
     app(),
     "/body-auth-profile".as_slice(),
     method: Method::Post {},
@@ -587,7 +589,7 @@ test "dto helpers cover params auth and body auth routes":
     profile
   body_auth_app
 
-  let body_auth_result_app = route_body_auth_result_dto(
+  let body_auth_result_app = route_body_auth_result_json(
     app(),
     "/body-auth-profile-result".as_slice(),
     method: Method::Post {},
@@ -603,10 +605,10 @@ test "dto helpers cover params auth and body auth routes":
 
   assert(true, eq: true)
 
-test "dto route helpers compose with timeout policies":
-  let body_app = route_body_dto(
+test "record route helpers compose with timeout policies":
+  let body_app = route_body_json(
     app(),
-    "/body-dto-timeout".as_slice(),
+    "/body-record-timeout".as_slice(),
     method: Method::Post {},
     body: text_body_policy(),
     timeout: timeout_millis(5)
@@ -615,9 +617,9 @@ test "dto route helpers compose with timeout policies":
     profile
   body_app
 
-  let body_result_app = route_body_result_dto(
+  let body_result_app = route_body_result_json(
     app(),
-    "/body-result-dto-timeout".as_slice(),
+    "/body-result-record-timeout".as_slice(),
     method: Method::Post {},
     body: text_body_policy(),
     timeout: timeout_millis(5)
@@ -627,9 +629,9 @@ test "dto route helpers compose with timeout policies":
     value
   body_result_app
 
-  let context_app = route_context_dto(
+  let context_app = route_context_json(
     app(),
-    "/context-dto-timeout".as_slice(),
+    "/context-record-timeout".as_slice(),
     method: Method::Get {},
     timeout: timeout_millis(5)
   ) do(_ctx: Context):
@@ -637,9 +639,9 @@ test "dto route helpers compose with timeout policies":
     profile
   context_app
 
-  let context_result_app = route_context_result_dto(
+  let context_result_app = route_context_result_json(
     app(),
-    "/context-result-dto-timeout".as_slice(),
+    "/context-result-record-timeout".as_slice(),
     method: Method::Get {},
     timeout: timeout_millis(5)
   ) do(_ctx: Context):
@@ -648,9 +650,9 @@ test "dto route helpers compose with timeout policies":
     value
   context_result_app
 
-  let query_app = route_query_context_dto(
+  let query_app = route_query_context_json(
     app(),
-    "/query-dto-timeout".as_slice(),
+    "/query-record-timeout".as_slice(),
     method: Method::Get {},
     timeout: timeout_millis(5)
   ) do(query: SearchQuery, _ctx: Context):
@@ -658,9 +660,9 @@ test "dto route helpers compose with timeout policies":
     profile
   query_app
 
-  let query_result_app = route_query_context_result_dto(
+  let query_result_app = route_query_context_result_json(
     app(),
-    "/query-result-dto-timeout".as_slice(),
+    "/query-result-record-timeout".as_slice(),
     method: Method::Get {},
     timeout: timeout_millis(5)
   ) do(query: SearchQuery, _ctx: Context):
@@ -669,9 +671,9 @@ test "dto route helpers compose with timeout policies":
     value
   query_result_app
 
-  let cookies_app = route_cookies_context_dto(
+  let cookies_app = route_cookies_context_json(
     app(),
-    "/cookies-dto-timeout".as_slice(),
+    "/cookies-record-timeout".as_slice(),
     method: Method::Get {},
     timeout: timeout_millis(5)
   ) do(cookies: TestCookies, _ctx: Context):
@@ -679,9 +681,9 @@ test "dto route helpers compose with timeout policies":
     profile
   cookies_app
 
-  let cookies_result_app = route_cookies_context_result_dto(
+  let cookies_result_app = route_cookies_context_result_json(
     app(),
-    "/cookies-result-dto-timeout".as_slice(),
+    "/cookies-result-record-timeout".as_slice(),
     method: Method::Get {},
     timeout: timeout_millis(5)
   ) do(cookies: TestCookies, _ctx: Context):
@@ -690,7 +692,7 @@ test "dto route helpers compose with timeout policies":
     value
   cookies_result_app
 
-  let params_app = route_params_context_dto(
+  let params_app = route_params_context_json(
     app(),
     "/params/:id".as_slice(),
     method: Method::Get {},
@@ -700,7 +702,7 @@ test "dto route helpers compose with timeout policies":
     profile
   params_app
 
-  let params_result_app = route_params_context_result_dto(
+  let params_result_app = route_params_context_result_json(
     app(),
     "/params-result/:id".as_slice(),
     method: Method::Get {},
@@ -711,7 +713,7 @@ test "dto route helpers compose with timeout policies":
     value
   params_result_app
 
-  let params_query_app = route_params_query_dto(
+  let params_query_app = route_params_query_json(
     app(),
     "/params-query/:id".as_slice(),
     method: Method::Get {},
@@ -722,7 +724,7 @@ test "dto route helpers compose with timeout policies":
     profile
   params_query_app
 
-  let params_query_result_app = route_params_query_result_dto(
+  let params_query_result_app = route_params_query_result_json(
     app(),
     "/params-query-result/:id".as_slice(),
     method: Method::Get {},
@@ -734,7 +736,7 @@ test "dto route helpers compose with timeout policies":
     value
   params_query_result_app
 
-  let params_query_context_app = route_params_query_context_dto(
+  let params_query_context_app = route_params_query_context_json(
     app(),
     "/params-query-context/:id".as_slice(),
     method: Method::Get {},
@@ -745,7 +747,7 @@ test "dto route helpers compose with timeout policies":
     profile
   params_query_context_app
 
-  let params_query_context_result_app = route_params_query_context_result_dto(
+  let params_query_context_result_app = route_params_query_context_result_json(
     app(),
     "/params-query-context-result/:id".as_slice(),
     method: Method::Get {},

@@ -321,8 +321,15 @@ pub fn builder_probe() -> i32
   echo.status.code()
 
 pub fn all_json_response_probe() -> i32
+  let typed = json({
+    slug: "first".as_slice().to_string(),
+    title: "A Voyd article".as_slice().to_string()
+  })
+  if not response_text(typed).contains("\"slug\":\"first\"".as_slice()):
+    return -8
+
   let value: JsonValue = JsonBool { value: true }
-  let response = response_json(value)
+  let response = json_value(value)
   let header = response.header("content-type".as_slice()) ?? "missing".as_slice().to_string()
   if not header.equals("application/json"):
     return -7

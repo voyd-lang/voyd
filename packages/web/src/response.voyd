@@ -116,41 +116,38 @@ pub fn text(value: StringSlice) -> Response
 pub fn text(value: String) -> Response
   Response::ok().text(value)
 
-pub fn json(value: JsonValue) -> Response
-  json_value_response(Response::ok(), value)
+/// Serializes a typed value as a `200 OK` JSON response.
+pub fn json<T>(value: T) -> Response
+  json_value_response(Response::ok(), encode_json_value<T>(value))
 
-pub fn response_json(value: JsonValue) -> Response
-  json_value_response(Response::ok(), value)
-
+/// Returns an already constructed JSON value as a `200 OK` response.
 pub fn json_value(value: JsonValue) -> Response
   json_value_response(Response::ok(), value)
 
-pub fn json(response: Response, value: JsonValue) -> Response
+/// Writes an already constructed JSON value into an existing response.
+pub fn json_value(response: Response, { value: JsonValue }) -> Response
   json_value_response(response, value)
 
-pub fn response_json(response: Response, value: JsonValue) -> Response
-  json_value_response(response, value)
+/// Serializes a typed value into an existing response.
+pub fn json<T>(response: Response, { value: T }) -> Response
+  json_value_response(response, encode_json_value<T>(value))
 
-pub fn dto_json<T>(value: T) -> JsonValue
+pub fn encode_json_value<T>(value: T) -> JsonValue
   msgpack_to_json(msgpack::pack_boundary_value<T>(value))
 
-pub fn json_dto<T>(value: T) -> Response
-  json_value_response(Response::ok(), dto_json<T>(value))
-
-pub fn response_dto_json<T>(response: Response, { value: T }) -> Response
-  json_value_response(response, dto_json<T>(value))
-
-pub fn result_dto_json<T, E: IntoResponse<E>>(value: Result<T, E>) -> Response
+/// Serializes the successful branch as JSON and converts the error branch normally.
+pub fn result_json<T, E: IntoResponse<E>>(value: Result<T, E>) -> Response
   match(value)
     Ok<T> { value }:
-      json_dto<T>(value)
+      json<T>(value)
     Err<E> { error }:
       into_response_value<E>(error)
 
-pub fn option_dto_json<T>(value: Option<T>) -> Response
+/// Serializes a present value as JSON and returns `404 Not Found` for `None`.
+pub fn option_json<T>(value: Option<T>) -> Response
   match(value)
     Some<T> { value }:
-      json_dto<T>(value)
+      json<T>(value)
     None:
       Response::not_found().empty()
 
