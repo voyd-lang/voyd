@@ -30,7 +30,7 @@ use std::number::cast::to_string
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice, Utf8Error, from_utf8 }
-use super::response::response_json
+use super::response::json_value
 
 /// Top-level API information.
 pub obj Info {
@@ -80,7 +80,7 @@ impl Info
     Info::init(title: title.as_slice(), version: version.as_slice(), description: description)
 
 impl Operation
-  /// Creates operation metadata. DTO field comments supply schema descriptions.
+  /// Creates operation metadata. Record field comments supply schema descriptions.
   api fn init({
     summary?: String,
     description?: String,
@@ -172,7 +172,7 @@ impl Document
 
   /// Returns this document as an HTTP JSON response.
   api fn response(self) -> Response
-    response_json(self.json())
+    json_value(self.json())
 
 pub fn info({ title: StringSlice, version: StringSlice, description?: String }) -> Info
   Info::init(title: title, version: version, description: description)

@@ -1,4 +1,4 @@
-//! Documented fixture DTOs used to verify OpenAPI reification.
+//! Documented fixture records used to verify OpenAPI reification.
 
 use std::string::type::String
 

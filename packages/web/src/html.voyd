@@ -11,7 +11,7 @@ use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringIndex, StringSlice }
 use std::vx
-use super::response::dto_json
+use super::response::encode_json_value
 
 pub obj Hydration<Model> {
   api id?: String,
@@ -495,7 +495,7 @@ fn render_hydration<Model>(hydrate: Hydration<Model>): () -> String
     .concat("\"></script>".as_slice())
 
 fn serialize_hydration_model<Model>(model: Model) -> String
-  match(stringify_json(dto_json<Model>(model)))
+  match(stringify_json(encode_json_value<Model>(model)))
     Ok<String> { value }:
       value
     Err<JsonError> { error }:
