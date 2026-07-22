@@ -307,7 +307,7 @@ describe("analysis coordinator", () => {
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
-  }, 15_000);
+  });
 
   it("reuses unaffected module semantics after an edit", async () => {
     const project = await createProject({

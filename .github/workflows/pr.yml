@@ -348,7 +348,8 @@ jobs:
               - "scripts/ci/check-optimizer-bench-regression.mjs"
               - "scripts/ci/check-optimizer-bench-regression.test.mjs"
               - "tests/performance/fixtures/vtrace-compute-benchmark.voyd"
-              - "package.json"
+              # Root dependency changes are represented by the lockfile. Avoid
+              # triggering this noisy, expensive benchmark for unrelated scripts.
               - "package-lock.json"
       - name: Use Node.js
         if: steps.changes.outputs.optimizer == 'true'

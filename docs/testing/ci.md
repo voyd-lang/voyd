@@ -33,6 +33,14 @@ Dedicated conformance and integration jobs each use two Vitest workers, so the
 unit lane's three-package concurrency cannot multiply into unbounded nested
 worker pools.
 
+The shared Vitest configuration defaults to one worker when `CI` is set and
+uses Vitest's unrestricted worker default otherwise. `VITEST_MAX_WORKERS`
+overrides both behaviors. This keeps hosted runners bounded without forcing
+developer machines to run compiler tests serially.
+
+`npm run test:full` also runs its independent compiler-codegen and CLI e2e
+tail phases concurrently after the main workspace sweep completes.
+
 The first broad upstream unit runs after the lane split varied from about 224
 to 342 seconds on hosted runners. The slowest unchanged file varied from about
 119 to 147 seconds, and the file exceeding the limit changed between attempts

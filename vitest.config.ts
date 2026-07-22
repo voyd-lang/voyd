@@ -13,6 +13,7 @@ const configuredMaxWorkers = Number.parseInt(
   process.env.VITEST_MAX_WORKERS ?? "",
   10,
 );
+const defaultMaxWorkers = process.env.CI ? 1 : undefined;
 
 export default mergeConfig(
   viteConfig,
@@ -23,7 +24,7 @@ export default mergeConfig(
       hookTimeout: 30000,
       maxWorkers: Number.isFinite(configuredMaxWorkers)
         ? configuredMaxWorkers
-        : undefined,
+        : defaultMaxWorkers,
       reporters: timingDirectory
         ? [
             "dot",
