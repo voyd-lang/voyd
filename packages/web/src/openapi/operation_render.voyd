@@ -7,11 +7,11 @@ use std::meta::Shape
 use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
-use super::openapi_parameter_render::append_parameters
-use super::openapi_response_render::response_contracts_json
-use super::openapi_schema::{ content_json, content_without_schema, opaque_schema, schema_for }
-use super::openapi_schema_overlay::apply_schema_docs
-use super::openapi_types::Operation
+use super::parameter_render::append_parameters
+use super::response_render::response_contracts_json
+use super::schema::{ content_json, content_without_schema, opaque_schema, schema_for }
+use super::schema_overlay::apply_schema_docs
+use super::types::Operation
 use super::contract::OpenApiParameterContract
 
 pub fn operation_json(

@@ -8,7 +8,7 @@ use super::contract::{
   empty_response_contract,
   response_contract
 }
-use super::response::IntoResponse
+use src::response::IntoResponse
 use super::response_contracts::{ append_response_contract, untyped_responses }
 
 fn typed<T>(

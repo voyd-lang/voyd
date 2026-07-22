@@ -5,11 +5,11 @@ use std::dict::Dict
 use std::json::{ JsonObject, JsonValue }
 use std::string::type::String
 use super::contract::{ OpenApiRequestContract, RouteDocs }
-use super::openapi::{ Operation, operation }
-use super::openapi_types::RouteContract
-use super::response::IntoResponse
-use super::response_json::encode_json_value
-use super::response_docs::{ created_responses, inferred_responses }
+use super::builder::{ Operation, operation }
+use super::types::RouteContract
+use src::response::IntoResponse
+use src::response_json::encode_json_value
+use super::response_inference::{ created_responses, inferred_responses }
 
 pub fn opaque_fragment() -> RouteContract
   RouteContract::init(

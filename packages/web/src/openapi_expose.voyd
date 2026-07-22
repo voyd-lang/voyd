@@ -1,12 +1,3 @@
-//! Serving generated OpenAPI documents through the router.
+//! Explicit OpenAPI document exposure.
 
-use std::http::Response
-use std::string::type::{ String, StringSlice }
-use super::openapi::Document
-use super::router::App
-
-pub fn expose(app: App, spec: Document, { at path: StringSlice }) -> App
-  app.expose_openapi_document(path, handler: () -> Response => spec.response())
-
-pub fn expose(app: App, spec: Document, { at path: String }) -> App
-  expose(app, spec, at: path.as_slice())
+pub use super::openapi::expose::expose

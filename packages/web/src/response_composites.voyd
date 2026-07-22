@@ -6,7 +6,7 @@ use std::optional::types::{ Option, Some, None }
 use std::result::types::{ Result, Ok, Err }
 use super::contract::{ OpenApiResponseContract, empty_response_contract }
 use super::response::{ IntoResponse, typed_response }
-use super::response_contracts::{ append_response_contract, merge_response_contracts }
+use super::openapi::response_contracts::{ append_response_contract, merge_response_contracts }
 
 impl<T: IntoResponse<T>, E: IntoResponse<E>> IntoResponse<Result<T, E>> for Result<T, E>
   fn into_response(self) -> Response

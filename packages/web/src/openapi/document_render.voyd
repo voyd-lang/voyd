@@ -7,8 +7,8 @@ use std::json::{ JsonObject, JsonString, JsonValue }
 use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
-use super::openapi_operation_render::operation_json
-use super::openapi_types::{ Info, RouteDocument }
+use super::operation_render::operation_json
+use super::types::{ Info, RouteDocument }
 
 pub fn document_json(
   info: Info,

@@ -21,9 +21,9 @@ use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
 use src::extract::json_body
 use src::response::{ Accepted, Created, IntoResponse, Json, NoContent, Text, created, text }
-use src::response_docs::{ inferred_responses, option_responses, result_responses }
+use src::openapi::response_inference::{ inferred_responses, option_responses, result_responses }
 use src::router::{ App, Context, app }
-use src::automatic_openapi::all
+use src::openapi::automatic::all
 
 test "OpenAPI reflects record fields and doc comments":
   let base_operation = operation(

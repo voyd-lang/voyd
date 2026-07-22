@@ -14,7 +14,7 @@ use std::vx
 use super::response::encode_json_value
 use super::response::IntoResponse
 use super::contract::OpenApiResponseContract
-use super::response_contracts::typed_responses
+use super::openapi::response_contracts::typed_responses
 
 /// Typed `200 text/html` response for rendered HTML and VX values.
 pub obj HtmlResponse {

@@ -1,0 +1,12 @@
+//! Serving generated OpenAPI documents through the router.
+
+use std::http::Response
+use std::string::type::{ String, StringSlice }
+use super::builder::Document
+use src::router::App
+
+pub fn expose(app: App, spec: Document, { at path: StringSlice }) -> App
+  app.expose_openapi_document(path, handler: () -> Response => spec.response())
+
+pub fn expose(app: App, spec: Document, { at path: String }) -> App
+  expose(app, spec, at: path.as_slice())

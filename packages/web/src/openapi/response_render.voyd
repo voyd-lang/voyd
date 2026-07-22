@@ -8,8 +8,8 @@ use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 use super::contract::{ OpenApiHeader, OpenApiResponseContract, OpenApiResponseSchemaDocs, OpenApiSchemaDocs }
-use super::openapi_schema::{ opaque_schema, schema_for }
-use super::openapi_schema_overlay::apply_schema_docs
+use super::schema::{ opaque_schema, schema_for }
+use super::schema_overlay::apply_schema_docs
 
 pub fn response_contracts_json(
   contracts: Array<OpenApiResponseContract>,

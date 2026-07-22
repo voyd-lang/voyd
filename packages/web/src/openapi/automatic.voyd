@@ -9,8 +9,8 @@ use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 use super::contract::OpenApiConfig
-use super::openapi_operation_render::operation_json
-use super::openapi_types::RecordedOpenApiRoute
+use super::operation_render::operation_json
+use super::types::RecordedOpenApiRoute
 
 /// Renders an OpenAPI 3.1 document from an app's concrete routes.
 pub fn render_openapi(

@@ -33,8 +33,8 @@ use super::response::{ IntoResponse, Json, json_response, json_value, result_jso
 use super::response_composites::self as response_composites
 use super::response_dynamic::self as response_dynamic
 use super::openapi::{ Operation, operation }
-use super::response_docs::{ inferred_responses, json_responses, json_value_responses, option_responses, result_responses }
-use super::automatic_contract::extractor_operation
+use super::openapi::response_inference::{ inferred_responses, json_responses, json_value_responses, option_responses, result_responses }
+use super::openapi::route_contract::extractor_operation
 use super::contract::RouteDocs
 use super::router::{ AppBuild, Context, ErrorHandler, Handler, Middleware, body_limit_rejection }
 use super::policy::run_with_timeout

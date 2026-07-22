@@ -41,11 +41,11 @@ use super::extract::{
 use super::response::{ Created, IntoResponse, json, json_value, typed_response }
 use super::response_composites::self as response_composites
 use super::response_dynamic::self as response_dynamic
-use super::automatic_contract::{ contract_with_docs, documented_fragment, extractor_operation, hidden_fragment, json_request_fragment, opaque_fragment, route_fragment, typed_fragment, typed_json_fragment, typed_json_request_fragment, with_route_docs as apply_route_docs }
-use super::automatic_openapi::render_openapi
+use super::openapi::route_contract::{ contract_with_docs, documented_fragment, extractor_operation, hidden_fragment, json_request_fragment, opaque_fragment, route_fragment, typed_fragment, typed_json_fragment, typed_json_request_fragment, with_route_docs as apply_route_docs }
+use super::openapi::automatic::render_openapi
 use super::openapi::{ Operation, operation }
-use super::openapi_types::{ RecordedOpenApiRoute, RouteContract }
-use super::response_docs::{ created_responses, inferred_responses }
+use super::openapi::types::{ RecordedOpenApiRoute, RouteContract }
+use super::openapi::response_inference::{ created_responses, inferred_responses }
 use super::contract::{
   OpenApiConfig,
   OpenApiInput,

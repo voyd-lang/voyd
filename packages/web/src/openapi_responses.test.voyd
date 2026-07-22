@@ -23,10 +23,10 @@ use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
 use src::extract::json_body
 use src::response::{ Accepted, Created, DocumentedResponse, IntoResponse, Json, NoContent, OpenApiResponse, Text, accepted, bytes, created, documented_response, json, no_content, option_json, result_json, text }
-use src::response_docs::{ inferred_responses, option_responses, result_responses }
+use src::openapi::response_inference::{ inferred_responses, option_responses, result_responses }
 use src::response_composites::self as response_composites
 use src::router::{ App, Context, app }
-use src::automatic_openapi::all
+use src::openapi::automatic::all
 use src::html::{ HtmlResponse, html }
 use src::sse::{ Sender, SseResponse }
 use src::sse::typed_response as sse_response

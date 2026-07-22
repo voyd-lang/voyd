@@ -6,8 +6,8 @@ use std::json::{ JsonBool, JsonObject, JsonString, JsonValue }
 use std::meta::{ RecordShape, Shape }
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
-use super::openapi_identity::schema_identity_prefix
-use super::openapi_schema::{ schema_for, schema_node }
+use super::identity::schema_identity_prefix
+use super::schema::{ schema_for, schema_node }
 
 pub fn append_parameters(
   ~out: Array<JsonValue>,

@@ -17,7 +17,7 @@ use super::contract::{
   opaque_responses
 }
 use super::response_json::encode_json_value as encode_value
-use super::response_contracts::{ binary_responses, typed_responses }
+use super::openapi::response_contracts::{ binary_responses, typed_responses }
 
 pub use std::http::{ Body, Header, HeaderName, Headers, HttpError, IncomingRequest, Method, QueryString, Response, Status }
 

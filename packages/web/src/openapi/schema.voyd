@@ -20,8 +20,8 @@ use std::meta::{
 }
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
-use super::openapi_schema_filter::without_descriptions
-use super::openapi_identity::{ component_name, component_reference, schema_identity_prefix }
+use super::schema_filter::without_descriptions
+use super::identity::{ component_name, component_reference, schema_identity_prefix }
 
 pub fn schema_for(
   shape: Shape,

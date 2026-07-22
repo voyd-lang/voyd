@@ -1,8 +1,6 @@
 //! Voyd web framework package root.
 
 pub src::all
-pub src::automatic_openapi
-pub src::automatic_contract
 pub src::contract
 pub src::extract
 pub src::html
@@ -11,20 +9,10 @@ pub src::multipart
 pub src::negotiate
 pub src::openapi
 pub src::openapi_expose
-pub src::openapi_document_render
-pub src::openapi_identity
-pub src::openapi_operation_render
-pub src::openapi_parameter_render
 pub src::openapi_routes
-pub src::openapi_response_render
-pub src::openapi_schema
-pub src::openapi_schema_filter
-pub src::openapi_types
 pub src::response
 pub src::response_composites
-pub src::response_contracts
 pub src::response_dynamic
-pub src::response_docs
 pub src::response_json
 pub src::request_streaming
 pub src::router

@@ -7,7 +7,7 @@ use std::json::JsonValue
 use std::string::type::{ String, StringSlice }
 use super::contract::OpenApiResponseContract
 use super::response::{ IntoResponse, json_value }
-use super::response_contracts::untyped_responses
+use super::openapi::response_contracts::untyped_responses
 
 impl IntoResponse<JsonValue> for JsonValue
   fn into_response(self) -> Response

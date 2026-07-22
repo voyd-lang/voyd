@@ -25,10 +25,10 @@ use std::test::assertions::all
 use src::extract::{ FromBody, JsonBody, Rejection, body_limit, bytes, json_body, limited, required_session, text_body }
 use src::contract::text_request
 use src::response::{ Accepted, Created, IntoResponse, Json, NoContent, Text, created, json, text }
-use src::response_docs::{ inferred_responses, option_responses, result_responses }
+use src::openapi::response_inference::{ inferred_responses, option_responses, result_responses }
 use src::router::{ App, Context, Router, app, ignore_trailing_slash }
 use src::routes::{ route, route_cookies, route_headers, route_params, route_params_query_headers, route_query_context }
-use src::automatic_openapi::all
+use src::openapi::automatic::all
 use src::multipart::{ Form, multipart }
 use src::policy::timeout_millis
 
