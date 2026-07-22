@@ -32,6 +32,7 @@ type WorkerConfig = {
   scenarioName: string;
   mode: OptimizationMode;
   runtimeSamples: number;
+  runtimeSampleMinMs: number;
   collectArtifactDetails: boolean;
   sourceOverride?: string;
   binaryenAblation?: BinaryenAblation;
@@ -414,14 +415,20 @@ const runWorker = async (config: WorkerConfig): Promise<WorkerResult> => {
       );
     }
     for (let index = 0; index < config.runtimeSamples; index += 1) {
-      const startedAt = performance.now();
-      const result = await host.run<number>(scenario.entryName);
-      runtimeSamplesMs.push(performance.now() - startedAt);
-      if (result !== scenario.expected) {
-        throw new Error(
-          `${scenario.name} returned ${result}, expected ${scenario.expected}`,
-        );
-      }
+      let elapsedMs = 0;
+      let iterations = 0;
+      do {
+        const startedAt = performance.now();
+        const result = await host.run<number>(scenario.entryName);
+        elapsedMs += performance.now() - startedAt;
+        iterations += 1;
+        if (result !== scenario.expected) {
+          throw new Error(
+            `${scenario.name} returned ${result}, expected ${scenario.expected}`,
+          );
+        }
+      } while (elapsedMs < config.runtimeSampleMinMs);
+      runtimeSamplesMs.push(elapsedMs / iterations);
     }
   }
 
@@ -451,6 +458,7 @@ type ControllerOptions = {
   compileWarmups: number;
   compileSamples: number;
   runtimeSamples: number;
+  runtimeSampleMinMs: number;
   outputPath?: string;
   corpusSnapshot: Readonly<Record<string, string>>;
   binaryenAblations: BinaryenAblation[];
@@ -536,8 +544,18 @@ const parseControllerOptions = (): ControllerOptions => {
   }
   const defaults =
     preset === "quick"
-      ? { compileWarmups: 0, compileSamples: 1, runtimeSamples: 3 }
-      : { compileWarmups: 1, compileSamples: 3, runtimeSamples: 5 };
+      ? {
+          compileWarmups: 0,
+          compileSamples: 1,
+          runtimeSamples: 3,
+          runtimeSampleMinMs: 0,
+        }
+      : {
+          compileWarmups: 1,
+          compileSamples: 3,
+          runtimeSamples: 9,
+          runtimeSampleMinMs: 200,
+        };
   const corpusSnapshotPath = argValue("--corpus-snapshot");
   const corpusSnapshot = corpusSnapshotPath
     ? JSON.parse(readFileSync(corpusSnapshotPath, "utf8"))
@@ -572,6 +590,11 @@ const parseControllerOptions = (): ControllerOptions => {
       fallback: defaults.runtimeSamples,
       name: "--runtime-samples",
       positive: true,
+    }),
+    runtimeSampleMinMs: parseNonNegativeInteger({
+      value: argValue("--runtime-sample-min-ms"),
+      fallback: defaults.runtimeSampleMinMs,
+      name: "--runtime-sample-min-ms",
     }),
     outputPath: argValue("--output"),
     corpusSnapshot: corpusSnapshot as Record<string, string>,
@@ -641,6 +664,7 @@ const runScorecardCase = ({
       scenarioName,
       mode,
       runtimeSamples: 0,
+      runtimeSampleMinMs: options.runtimeSampleMinMs,
       collectArtifactDetails: false,
       sourceOverride: options.corpusSnapshot[scenarioName],
       binaryenAblation,
@@ -653,6 +677,7 @@ const runScorecardCase = ({
       mode,
       runtimeSamples:
         index === options.compileSamples - 1 ? options.runtimeSamples : 0,
+      runtimeSampleMinMs: options.runtimeSampleMinMs,
       collectArtifactDetails: index === options.compileSamples - 1,
       sourceOverride: options.corpusSnapshot[scenarioName],
       binaryenAblation,

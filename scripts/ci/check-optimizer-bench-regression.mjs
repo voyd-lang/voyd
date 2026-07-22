@@ -123,6 +123,17 @@ const rowKey = (row) =>
 const rowsByKey = (scorecard) =>
   new Map(scorecard.rows.map((row) => [rowKey(row), row]));
 
+const median = (values) => {
+  if (values.length === 0) {
+    return 0;
+  }
+  const sorted = [...values].sort((left, right) => left - right);
+  const middle = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[middle - 1] + sorted[middle]) / 2
+    : sorted[middle];
+};
+
 const rssComparison = (row) =>
   typeof row.processMaxRssGrowthBytes === "number"
     ? {
@@ -293,6 +304,10 @@ export const compareScorecards = ({ base, head, limits }) => {
       head: headRow.compileMedianMs,
       threshold: limits.compile,
       metric: "compile",
+      samples: {
+        base: baseRow.compileSamplesMs ?? [],
+        head: headRow.compileSamplesMs ?? [],
+      },
     });
     compareMetric({
       failures,
@@ -302,6 +317,10 @@ export const compareScorecards = ({ base, head, limits }) => {
       head: headRow.runtimeMedianMs,
       threshold: limits.runtime,
       metric: "runtime",
+      samples: {
+        base: baseRow.runtimeSamplesMs ?? [],
+        head: headRow.runtimeSamplesMs ?? [],
+      },
     });
     const baseRss = rssComparison(baseRow);
     const headRss = rssComparison(headRow);
@@ -369,8 +388,11 @@ export const compareScorecards = ({ base, head, limits }) => {
   return failures;
 };
 
-export const rssRetryScenarios = (failures) =>
-  failures.length > 0 && failures.every(({ metric }) => metric === "rss")
+const retryableMeasurementMetrics = new Set(["compile", "runtime", "rss"]);
+
+export const measurementRetryScenarios = (failures) =>
+  failures.length > 0 &&
+  failures.every(({ metric }) => retryableMeasurementMetrics.has(metric))
     ? [...new Set(failures.map(({ scenario }) => scenario))]
     : [];
 
@@ -421,15 +443,93 @@ const mergedScorecard = (scorecards) => ({
   rows: scorecards.flatMap(({ rows }) => rows),
 });
 
-const replaceScenarios = ({ scorecard, replacement, scenarioNames }) => ({
-  ...scorecard,
-  generatedAt: new Date().toISOString(),
-  corpusHashes: { ...scorecard.corpusHashes, ...replacement.corpusHashes },
-  rows: [
-    ...scorecard.rows.filter((row) => !scenarioNames.includes(row.scenario)),
-    ...replacement.rows,
-  ],
-});
+const samplesFor = (row, samplesKey, medianKey) => {
+  const samples = row[samplesKey];
+  return Array.isArray(samples) && samples.length > 0
+    ? samples
+    : typeof row[medianKey] === "number"
+      ? [row[medianKey]]
+      : [];
+};
+
+const poolRowMeasurements = (initial, retry) => {
+  ["wasmBytes", "gzipBytes", "wasmSha256"].forEach((field) => {
+    if (
+      initial[field] !== undefined &&
+      retry[field] !== undefined &&
+      initial[field] !== retry[field]
+    ) {
+      throw new Error(
+        `${initial.scenario} emitted different ${field} values across benchmark attempts`,
+      );
+    }
+  });
+
+  const pooled = (samplesKey, medianKey) => {
+    const samples = [
+      ...samplesFor(initial, samplesKey, medianKey),
+      ...samplesFor(retry, samplesKey, medianKey),
+    ];
+    return samples.length > 0
+      ? [{ samplesKey, medianKey, samples, value: median(samples) }]
+      : [];
+  };
+  const measurements = [
+    ["compileSamplesMs", "compileMedianMs"],
+    ["runtimeSamplesMs", "runtimeMedianMs"],
+    ["peakHeapUsedSamplesBytes", "peakHeapUsedMedianBytes"],
+    ["peakRssSamplesBytes", "peakRssMedianBytes"],
+    ["processMaxRssSamplesBytes", "processMaxRssBytes"],
+    ["processMaxRssGrowthSamplesBytes", "processMaxRssGrowthBytes"],
+  ].flatMap(([samplesKey, medianKey]) => pooled(samplesKey, medianKey));
+
+  return measurements.reduce(
+    (row, { samplesKey, medianKey, samples, value }) => ({
+      ...row,
+      [samplesKey]: samples,
+      [medianKey]: value,
+    }),
+    { ...initial },
+  );
+};
+
+export const poolScorecardMeasurements = ({
+  initial,
+  retry,
+  scenarioNames,
+}) => {
+  const selected = new Set(scenarioNames);
+  const retryRows = rowsByKey(retry);
+  const initialRows = rowsByKey(initial);
+
+  scenarioNames.forEach((scenario) => {
+    if (initial.corpusHashes?.[scenario] !== retry.corpusHashes?.[scenario]) {
+      throw new Error(
+        `${scenario} retry used a different optimizer benchmark source`,
+      );
+    }
+  });
+  retryRows.forEach((row, key) => {
+    if (!selected.has(row.scenario) || !initialRows.has(key)) {
+      throw new Error(`optimizer retry produced an unexpected case ${key}`);
+    }
+  });
+
+  return {
+    ...initial,
+    generatedAt: new Date().toISOString(),
+    rows: initial.rows.map((row) => {
+      if (!selected.has(row.scenario)) {
+        return row;
+      }
+      const retryRow = retryRows.get(rowKey(row));
+      if (!retryRow) {
+        throw new Error(`optimizer retry omitted case ${rowKey(row)}`);
+      }
+      return poolRowMeasurements(row, retryRow);
+    }),
+  };
+};
 
 const benchmarkAtRefs = ({
   baseRef,
@@ -694,10 +794,10 @@ const main = () => {
       head: finalHead,
       limits,
     });
-    const retryScenarios = rssRetryScenarios(initialFailures);
+    const retryScenarios = measurementRetryScenarios(initialFailures);
     if (retryScenarios.length > 0 && inputMode === "refs") {
       console.log(
-        `\nRSS was the only failing metric; retrying paired measurement for: ${retryScenarios.join(", ")}`,
+        `\nOnly sampled measurements failed; retrying in reversed order for: ${retryScenarios.join(", ")}`,
       );
       const retryPaths = benchmarkAtRefs({
         baseRef,
@@ -709,18 +809,18 @@ const main = () => {
       });
       const retryBase = readScorecard(retryPaths.basePath);
       const retryHead = readScorecard(retryPaths.headPath);
-      finalBase = replaceScenarios({
-        scorecard: finalBase,
-        replacement: retryBase,
+      finalBase = poolScorecardMeasurements({
+        initial: finalBase,
+        retry: retryBase,
         scenarioNames: retryScenarios,
       });
-      finalHead = replaceScenarios({
-        scorecard: finalHead,
-        replacement: retryHead,
+      finalHead = poolScorecardMeasurements({
+        initial: finalHead,
+        retry: retryHead,
         scenarioNames: retryScenarios,
       });
       console.log(
-        "\nFinal paired comparison (RSS retries replace initial samples):",
+        "\nFinal paired comparison (initial and reversed-order samples pooled):",
       );
       const finalFailures = compareScorecards({
         base: finalBase,
@@ -733,11 +833,11 @@ const main = () => {
     }
     if (retryScenarios.length > 0) {
       console.log(
-        "\nRSS retry skipped because precomputed JSON scorecards were supplied.",
+        "\nMeasurement retry skipped because precomputed JSON scorecards were supplied.",
       );
     } else if (initialFailures.length > 0) {
       console.log(
-        "\nRetry skipped because a deterministic metric also failed.",
+        "\nRetry skipped because a deterministic artifact metric also failed.",
       );
     }
     reportFailures(initialFailures);

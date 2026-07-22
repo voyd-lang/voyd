@@ -1,8 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   compareScorecards,
+  measurementRetryScenarios,
   pairedRunOrder,
-  rssRetryScenarios,
+  poolScorecardMeasurements,
   scorecardInputMode,
 } from "./check-optimizer-bench-regression.mjs";
 
@@ -21,6 +22,11 @@ const scorecard = ({
   rssGrowthMib = rssMib,
   rssGrowthSamplesMib = [rssGrowthMib - 1, rssGrowthMib, rssGrowthMib + 1],
   compileMs = 100,
+  compileSamplesMs = [compileMs - 1, compileMs, compileMs + 1],
+  runtimeMs = 10,
+  runtimeSamplesMs = [runtimeMs - 1, runtimeMs, runtimeMs + 1],
+  wasmBytes = 10_000,
+  gzipBytes = 5_000,
 }) => ({
   schemaVersion: 2,
   corpusHashes: { scenario: "same-source" },
@@ -30,15 +36,18 @@ const scorecard = ({
       mode: "release",
       experiment: "baseline",
       compileMedianMs: compileMs,
-      runtimeMedianMs: 10,
+      compileSamplesMs,
+      runtimeMedianMs: runtimeMs,
+      runtimeSamplesMs,
       processMaxRssBytes: rssMib * MIB,
       processMaxRssSamplesBytes: rssSamplesMib.map((value) => value * MIB),
       processMaxRssGrowthBytes: rssGrowthMib * MIB,
       processMaxRssGrowthSamplesBytes: rssGrowthSamplesMib.map(
         (value) => value * MIB,
       ),
-      wasmBytes: 10_000,
-      gzipBytes: 5_000,
+      wasmBytes,
+      gzipBytes,
+      wasmSha256: "same-artifact",
       optimizerPasses: [],
       codegenMetrics: {},
       wasmStructure: {},
@@ -48,7 +57,7 @@ const scorecard = ({
 
 const failures = ({ base, head }) => compareScorecards({ base, head, limits });
 
-describe("optimizer scorecard RSS retry policy", () => {
+describe("optimizer scorecard measurement retry policy", () => {
   beforeEach(() => {
     vi.spyOn(console, "log").mockImplementation(() => {});
   });
@@ -58,17 +67,25 @@ describe("optimizer scorecard RSS retry policy", () => {
   });
 
   it("clears a one-off RSS regression when the paired retry is healthy", () => {
+    const initialBase = scorecard({ rssMib: 100 });
+    const initialHead = scorecard({ rssMib: 150 });
     const initial = failures({
-      base: scorecard({ rssMib: 100 }),
-      head: scorecard({ rssMib: 150 }),
+      base: initialBase,
+      head: initialHead,
     });
-    expect(rssRetryScenarios(initial)).toEqual(["scenario"]);
+    expect(measurementRetryScenarios(initial)).toEqual(["scenario"]);
 
-    const retry = failures({
-      base: scorecard({ rssMib: 100 }),
-      head: scorecard({ rssMib: 105 }),
+    const base = poolScorecardMeasurements({
+      initial: initialBase,
+      retry: scorecard({ rssMib: 100 }),
+      scenarioNames: ["scenario"],
     });
-    expect(retry).toEqual([]);
+    const head = poolScorecardMeasurements({
+      initial: initialHead,
+      retry: scorecard({ rssMib: 105 }),
+      scenarioNames: ["scenario"],
+    });
+    expect(failures({ base, head })).toEqual([]);
   });
 
   it("ignores bimodal absolute RSS when compile-attributable growth is stable", () => {
@@ -106,20 +123,84 @@ describe("optimizer scorecard RSS retry policy", () => {
   });
 
   it("still fails a stable synthetic RSS regression after retry", () => {
-    const retry = failures({
-      base: scorecard({ rssMib: 100 }),
-      head: scorecard({ rssMib: 150 }),
+    const base = poolScorecardMeasurements({
+      initial: scorecard({ rssMib: 100 }),
+      retry: scorecard({ rssMib: 100 }),
+      scenarioNames: ["scenario"],
     });
-    expect(retry).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
+    const head = poolScorecardMeasurements({
+      initial: scorecard({ rssMib: 150 }),
+      retry: scorecard({ rssMib: 150 }),
+      scenarioNames: ["scenario"],
+    });
+    expect(failures({ base, head })).toMatchObject([
+      { scenario: "scenario", metric: "rss" },
+    ]);
   });
 
-  it("does not retry when a deterministic metric also regresses", () => {
+  it("retries compile and RSS regressions because both are sampled", () => {
     const result = failures({
       base: scorecard({ rssMib: 100 }),
       head: scorecard({ rssMib: 150, compileMs: 500 }),
     });
     expect(result.map(({ metric }) => metric)).toEqual(["compile", "rss"]);
-    expect(rssRetryScenarios(result)).toEqual([]);
+    expect(measurementRetryScenarios(result)).toEqual(["scenario"]);
+  });
+
+  it("retries runtime-only regressions", () => {
+    const result = failures({
+      base: scorecard({ rssMib: 100, runtimeMs: 10 }),
+      head: scorecard({ rssMib: 100, runtimeMs: 18 }),
+    });
+    expect(result).toMatchObject([{ scenario: "scenario", metric: "runtime" }]);
+    expect(measurementRetryScenarios(result)).toEqual(["scenario"]);
+  });
+
+  it("does not retry when a deterministic artifact metric regresses", () => {
+    const result = failures({
+      base: scorecard({ rssMib: 100 }),
+      head: scorecard({ rssMib: 150, wasmBytes: 12_000 }),
+    });
+    expect(result.map(({ metric }) => metric)).toEqual(["rss", "wasm"]);
+    expect(measurementRetryScenarios(result)).toEqual([]);
+  });
+
+  it("pools initial and reversed-order measurements", () => {
+    const initialBase = scorecard({
+      rssMib: 100,
+      runtimeMs: 10,
+      runtimeSamplesMs: [9, 10, 11],
+    });
+    const retryBase = scorecard({
+      rssMib: 102,
+      runtimeMs: 10,
+      runtimeSamplesMs: [9, 10, 11],
+    });
+    const initialHead = scorecard({
+      rssMib: 150,
+      runtimeMs: 18,
+      runtimeSamplesMs: [17, 18, 19],
+    });
+    const retryHead = scorecard({
+      rssMib: 103,
+      runtimeMs: 10,
+      runtimeSamplesMs: [9, 10, 11],
+    });
+
+    const base = poolScorecardMeasurements({
+      initial: initialBase,
+      retry: retryBase,
+      scenarioNames: ["scenario"],
+    });
+    const head = poolScorecardMeasurements({
+      initial: initialHead,
+      retry: retryHead,
+      scenarioNames: ["scenario"],
+    });
+
+    expect(base.rows[0].runtimeSamplesMs).toEqual([9, 10, 11, 9, 10, 11]);
+    expect(head.rows[0].runtimeMedianMs).toBe(14);
+    expect(failures({ base, head })).toEqual([]);
   });
 });
 
