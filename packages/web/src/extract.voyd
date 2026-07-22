@@ -12,6 +12,7 @@ use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice, from_utf8, ParseIntError, Utf8Error }
+use super::contract::{ OpenApiRequestContract, bytes_request, json_request, text_request }
 use super::response::IntoResponse
 
 pub type NameValue = {
@@ -67,6 +68,11 @@ pub obj AuthPolicy<T> {
 pub trait FromBody<T>
   fn extract_body(self, request: IncomingRequest) : (open) -> Result<T, Rejection>
 
+  /// Returns static request documentation when this extractor knows it.
+  fn openapi_request(self) -> Option<OpenApiRequestContract>
+    self
+    None {}
+
 pub trait FromAuth<T>
   fn extract_auth(self, request: IncomingRequest) : (open) -> Result<T, Rejection>
 
@@ -119,8 +125,14 @@ impl Rejection
   api fn bad_request(message: StringSlice) -> Rejection
     Rejection { status: Status::bad_request(), message: message.to_string() }
 
+  api fn bad_request(message: String) -> Rejection
+    Rejection::bad_request(message.as_slice())
+
   api fn not_found(message: StringSlice) -> Rejection
     Rejection { status: Status::not_found(), message: message.to_string() }
+
+  api fn not_found(message: String) -> Rejection
+    Rejection::not_found(message.as_slice())
 
   api fn payload_too_large(message: StringSlice) -> Rejection
     match(Status::from(413))
@@ -129,6 +141,9 @@ impl Rejection
       Err:
         Rejection::bad_request(message)
 
+  api fn payload_too_large(message: String) -> Rejection
+    Rejection::payload_too_large(message.as_slice())
+
   api fn unsupported_media_type(message: StringSlice) -> Rejection
     match(Status::from(415))
       Ok<Status> { value }:
@@ -136,11 +151,20 @@ impl Rejection
       Err:
         Rejection::bad_request(message)
 
+  api fn unsupported_media_type(message: String) -> Rejection
+    Rejection::unsupported_media_type(message.as_slice())
+
   api fn unauthorized(message: StringSlice) -> Rejection
     Rejection { status: Status::unauthorized(), message: message.to_string() }
 
+  api fn unauthorized(message: String) -> Rejection
+    Rejection::unauthorized(message.as_slice())
+
   api fn forbidden(message: StringSlice) -> Rejection
     Rejection { status: Status::forbidden(), message: message.to_string() }
+
+  api fn forbidden(message: String) -> Rejection
+    Rejection::forbidden(message.as_slice())
 
 impl IntoResponse<Rejection> for Rejection
   fn into_response(self) -> Response
@@ -156,15 +180,32 @@ impl FromBody<JsonValue> for JsonBody
     self
     json_body_value(request)
 
+  fn openapi_request(self) -> Option<OpenApiRequestContract>
+    self
+    Some<OpenApiRequestContract> { value: OpenApiRequestContract {
+      description: None {},
+      content_type: "application/json".to_string(),
+      schema: None {},
+      required: true
+    } }
+
 impl FromBody<String> for TextBody
   fn extract_body(self, request: IncomingRequest) : (open) -> Result<String, Rejection>
     self
     text_body(request)
 
+  fn openapi_request(self) -> Option<OpenApiRequestContract>
+    self
+    Some<OpenApiRequestContract> { value: text_request() }
+
 impl FromBody<Bytes> for BytesBody
   fn extract_body(self, request: IncomingRequest) : (open) -> Result<Bytes, Rejection>
     self
     bytes_body(request)
+
+  fn openapi_request(self) -> Option<OpenApiRequestContract>
+    self
+    Some<OpenApiRequestContract> { value: bytes_request() }
 
 impl<T> FromBody<T> for LimitedJsonBody
   fn extract_body(self, request: IncomingRequest) : (open) -> Result<T, Rejection>
@@ -174,6 +215,10 @@ impl<T> FromBody<T> for LimitedJsonBody
       }
     extract_json_body<T>(JsonBody {}, request)
 
+  fn openapi_request(self) -> Option<OpenApiRequestContract>
+    self
+    Some<OpenApiRequestContract> { value: json_request<T>() }
+
 impl FromBody<String> for LimitedTextBody
   fn extract_body(self, request: IncomingRequest) : (open) -> Result<String, Rejection>
     if request.body.len() > self.limit.max_bytes:
@@ -182,6 +227,10 @@ impl FromBody<String> for LimitedTextBody
       }
     text_body(request)
 
+  fn openapi_request(self) -> Option<OpenApiRequestContract>
+    self
+    Some<OpenApiRequestContract> { value: text_request() }
+
 impl FromBody<Bytes> for LimitedBytesBody
   fn extract_body(self, request: IncomingRequest) : (open) -> Result<Bytes, Rejection>
     if request.body.len() > self.limit.max_bytes:
@@ -189,6 +238,10 @@ impl FromBody<Bytes> for LimitedBytesBody
         error: Rejection::payload_too_large("request body exceeds configured limit".as_slice())
       }
     bytes_body(request)
+
+  fn openapi_request(self) -> Option<OpenApiRequestContract>
+    self
+    Some<OpenApiRequestContract> { value: bytes_request() }
 
 pub fn text_body(request: IncomingRequest) -> Result<String, Rejection>
   match(request.text())

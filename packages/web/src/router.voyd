@@ -36,7 +36,19 @@ use super::extract::{
   validate_params,
   validate_query
 }
-use super::response::{ IntoResponse, json_value, to_response }
+use super::response::{ Created, IntoResponse, json, json_value, to_response }
+use super::automatic_contract::{ documented_fragment, extractor_operation, hidden_fragment, json_request_fragment, opaque_fragment, route_fragment, typed_fragment, typed_json_fragment, typed_json_request_fragment }
+use super::automatic_openapi::render_openapi
+use super::openapi::operation
+use super::response_docs::{ created_responses, inferred_responses }
+use super::contract::{
+  OpenApiConfig,
+  OpenApiInput,
+  RecordedOpenApiRoute,
+  RouteDocsInput,
+  route_docs,
+  RouteDocs
+}
 
 pub type Handler = fn(Context) : (open) -> Response
 pub type Next = fn(Context) : (open) -> Response
@@ -91,7 +103,8 @@ pub obj Route {
   handler: Handler,
   error_handler: ErrorHandler,
   streaming_request: bool,
-  order: i32
+  order: i32,
+  contract: JsonValue
 }
 
 /// Method and path of one concrete router entry.
@@ -100,6 +113,7 @@ pub obj RouteIdentity {
   api path: String
 }
 
+/// Method, concrete path, and serialized contract for automatic OpenAPI.
 obj RouteMatch {
   route: Route,
   params: RouteParams,
@@ -114,7 +128,8 @@ pub obj App {
   not_found_handler: Handler,
   method_not_allowed_handler: Handler,
   error_handler: ErrorHandler,
-  trailing_slash_policy: TrailingSlashPolicy
+  trailing_slash_policy: TrailingSlashPolicy,
+  openapi_info?: OpenApiConfig
 }
 
 pub obj Router {
@@ -126,6 +141,9 @@ pub type AppBuild = App
 impl AuthError
   api fn init(message: StringSlice) -> AuthError
     AuthError { message: message.to_string() }
+
+  api fn init(message: String) -> AuthError
+    AuthError { message: message }
 
 impl Context
   api fn method(self) -> Method
@@ -201,8 +219,50 @@ impl App
       not_found_handler: (ctx: Context) -> Response => default_not_found(ctx),
       method_not_allowed_handler: (ctx: Context) -> Response => default_method_not_allowed(ctx),
       error_handler: (rejection: Rejection, ctx: Context) -> Response => default_rejection(rejection, ctx),
-      trailing_slash_policy: TrailingSlashPolicy::strict()
+      trailing_slash_policy: TrailingSlashPolicy::strict(),
+      openapi_info: None {}
     }
+
+  api fn init({ openapi: OpenApiConfig }) -> App
+    let base = App::init()
+    App {
+      routes: base.routes,
+      current_middleware: base.current_middleware,
+      prefix: base.prefix,
+      next_order: base.next_order,
+      not_found_handler: base.not_found_handler,
+      method_not_allowed_handler: base.method_not_allowed_handler,
+      error_handler: base.error_handler,
+      trailing_slash_policy: base.trailing_slash_policy,
+      openapi_info: Some<OpenApiConfig> { value: openapi }
+    }
+
+  /// Renders OpenAPI 3.1 from the contracts owned by this app's routes.
+  api fn openapi(self, { include_doc_comments: bool = true }) -> JsonValue
+    render_openapi(
+      self.openapi_routes(),
+      self.openapi_config(),
+      include_doc_comments: include_doc_comments
+    )
+
+  /// Exposes this app's OpenAPI document without documenting the exposure route.
+  api fn expose_openapi(
+    self,
+    { at path: StringSlice, include_doc_comments: bool = true }
+  ) -> App
+    let spec = self.openapi(include_doc_comments: include_doc_comments)
+    self.with_route_contract(
+      path,
+      Method::Get {},
+      (_ctx: Context) -> Response => json_value(spec),
+      contract: hidden_fragment()
+    )
+
+  api fn expose_openapi(
+    self,
+    { at path: String, include_doc_comments: bool = true }
+  ) -> App
+    self.expose_openapi(at: path.as_slice(), include_doc_comments: include_doc_comments)
 
   api fn adopt(self, middleware: Middleware) -> App
     let ~next_middleware = self.current_middleware.copied(1)
@@ -215,7 +275,8 @@ impl App
       not_found_handler: self.not_found_handler,
       method_not_allowed_handler: self.method_not_allowed_handler,
       error_handler: self.error_handler,
-      trailing_slash_policy: self.trailing_slash_policy
+      trailing_slash_policy: self.trailing_slash_policy,
+      openapi_info: self.openapi_info
     }
 
   api fn with(self, { trailing_slash: TrailingSlashPolicy }) -> App
@@ -227,7 +288,8 @@ impl App
       not_found_handler: self.not_found_handler,
       method_not_allowed_handler: self.method_not_allowed_handler,
       error_handler: self.error_handler,
-      trailing_slash_policy: trailing_slash
+      trailing_slash_policy: trailing_slash,
+      openapi_info: self.openapi_info
     }
 
   api fn get<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> App
@@ -249,10 +311,10 @@ impl App
     self.with_unit_response_route(path, Method::Get {}, handler)
 
   api fn get<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> App
-    self.get<R>(path.as_slice(), handler: handler)
+    self.with_unit_route<R>(path.as_slice(), Method::Get {}, handler)
 
   api fn get(self, path: String, { handler: fn() : (open) -> Response }) -> App
-    self.get(path.as_slice(), handler: handler)
+    self.with_unit_response_route(path.as_slice(), Method::Get {}, handler)
 
   api fn get_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
     self.with_route(path, Method::Get {}, (ctx: Context) -> Response =>
@@ -345,6 +407,9 @@ impl App
   api fn post<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> App
     self.post<R>(path.as_slice(), handler: handler)
 
+  api fn post(self, path: String, { handler: Handler }) -> App
+    self.post(path.as_slice(), handler: handler)
+
   api fn post<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> App
     self.route<R>(path, method: Method::Post {}, handler: handler)
 
@@ -354,11 +419,16 @@ impl App
   api fn post<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> App
     self.post<R>(path.as_slice(), handler: handler)
 
+  api fn post(self, path: String, { handler: fn() : (open) -> Response }) -> App
+    self.post(path.as_slice(), handler: handler)
+
   api fn post_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
-    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+    self.with_route_contract(path, Method::Post {}, (ctx: Context) -> Response =>
       let result = handler(ctx)
       to_response<T>(result)
-    )
+    , contract: route_fragment(
+      extractor_operation(body.openapi_request()).with_responses(inferred_responses<T>())
+    ))
 
   api fn post_unit(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
     self.with_unit_response_route(path, Method::Post {}, handler)
@@ -383,48 +453,57 @@ impl App
     path: StringSlice,
     { body: P, handler: fn(I) : (open) -> Response }
   ) -> App
-    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+    self.with_route_contract(path, Method::Post {}, (ctx: Context) -> Response =>
       match(body.extract_body(ctx.request))
         Ok<I> { value }:
           handler(value)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(extractor_operation(body.openapi_request())))
 
   api fn post<I, P: FromBody<I>, T: IntoResponse<T>>(
     self,
     path: StringSlice,
     { body: P, handler: fn(I) : (open) -> T }
   ) -> App
-    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+    self.with_route_contract(path, Method::Post {}, (ctx: Context) -> Response =>
       match(body.extract_body(ctx.request))
         Ok<I> { value }:
           let result = handler(value)
           to_response<T>(result)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(
+      extractor_operation(body.openapi_request()).with_responses(inferred_responses<T>())
+    ))
 
   api fn post<I>(
     self,
     path: StringSlice,
     { body: JsonBody, handler: fn(I) : (open) -> Response }
   ) -> App
-    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+    self.with_route_contract(path, Method::Post {}, (ctx: Context) -> Response =>
       body
       match(json_body_value(ctx.request))
         Ok<JsonValue> { value }:
           handler(decode_json_value<I>(value))
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: json_request_fragment<I>())
+
+  api fn post<I>(
+    self,
+    path: String,
+    { body: JsonBody, handler: fn(I) : (open) -> Response }
+  ) -> App
+    self.post<I>(path.as_slice(), body: body, handler: handler)
 
   api fn post<I, T: IntoResponse<T>>(
     self,
     path: StringSlice,
     { body: JsonBody, handler: fn(I) : (open) -> T }
   ) -> App
-    self.with_route(path, Method::Post {}, (ctx: Context) -> Response =>
+    self.with_route_contract(path, Method::Post {}, (ctx: Context) -> Response =>
       body
       match(json_body_value(ctx.request))
         Ok<JsonValue> { value }:
@@ -432,7 +511,133 @@ impl App
           to_response<T>(result)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: typed_json_request_fragment<I, T>())
+
+  api fn post<I, T: IntoResponse<T>>(
+    self,
+    path: String,
+    { body: JsonBody, handler: fn(I) : (open) -> T }
+  ) -> App
+    self.with_route_contract(path.as_slice(), Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          to_response<T>(handler(decode_json_value<I>(value)))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    , contract: typed_json_request_fragment<I, T>())
+
+  api fn post<I, R: IntoResponse<R>>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, handler: fn(I) : (open) -> R, docs: RouteDocs }
+  ) -> App
+    self.with_route_contract(path, Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          to_response<R>(handler(decode_json_value<I>(value)))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    , contract: typed_json_fragment<I, R>(docs))
+
+  api fn post<I>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, handler: fn(I) : (open) -> Response, docs: RouteDocs }
+  ) -> App
+    self.with_route_contract(path, Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          handler(decode_json_value<I>(value))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    , contract: route_fragment(operation().with_json_body<I>().with_docs(docs)))
+
+  api fn post<I>(
+    self,
+    path: String,
+    { body: JsonBody, handler: fn(I) : (open) -> Response, docs: RouteDocs }
+  ) -> App
+    self.post<I>(path.as_slice(), body: body, handler: handler, docs: docs)
+
+  api fn post<I, R: IntoResponse<R>>(
+    self,
+    path: String,
+    { body: JsonBody, handler: fn(I) : (open) -> R, docs: RouteDocs }
+  ) -> App
+    self.post<I, R>(path.as_slice(), body: body, handler: handler, docs: docs)
+
+  api fn post<I, R: IntoResponse<R>, D>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, handler: fn(I) : (open) -> R, docs: D }
+  ) -> App
+    self.with_route_contract(path, Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          to_response<R>(handler(decode_json_value<I>(value)))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    , contract: documented_fragment<D>(
+      operation().with_json_body<I>().with_responses(inferred_responses<R>()),
+      docs
+    ))
+
+  api fn post<I, T, D>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, handler: fn(I) : (open) -> Created<T>, docs: D }
+  ) -> App
+    self.with_route_contract(path, Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          let result = handler(decode_json_value<I>(value))
+          json(Response::created(), value: result.value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    , contract: documented_fragment<D>(
+      operation().with_json_body<I>().with_responses(created_responses<T>()),
+      docs
+    ))
+
+  api fn post<I, T, D>(
+    self,
+    path: String,
+    { body: JsonBody, handler: fn(I) : (open) -> Created<T>, docs: D }
+  ) -> App
+    self.with_route_contract(path.as_slice(), Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          let result = handler(decode_json_value<I>(value))
+          json(Response::created(), value: result.value)
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    , contract: documented_fragment<D>(
+      operation().with_json_body<I>().with_responses(created_responses<T>()),
+      docs
+    ))
+
+  api fn post<I, R: IntoResponse<R>, D>(
+    self,
+    path: String,
+    { body: JsonBody, handler: fn(I) : (open) -> R, docs: D }
+  ) -> App
+    self.with_route_contract(path.as_slice(), Method::Post {}, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          to_response<R>(handler(decode_json_value<I>(value)))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    , contract: documented_fragment<D>(
+      operation().with_json_body<I>().with_responses(inferred_responses<R>()),
+      docs
+    ))
 
   api fn post<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
     self,
@@ -508,7 +713,9 @@ impl App
               to_response<T>(result)
             Err<Rejection> { error }:
               ctx.reject(error)
-    )
+    , contract: route_fragment(
+      extractor_operation(body.openapi_request()).with_responses(inferred_responses<T>())
+    ))
 
   api fn put<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn(Context) : (open) -> R }) -> App
     self.route<R>(path, method: Method::Put {}, handler: handler)
@@ -516,11 +723,23 @@ impl App
   api fn put(self, path: StringSlice, { handler: Handler }) -> App
     self.with_route(path, Method::Put {}, handler)
 
+  api fn put<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> App
+    self.put<R>(path.as_slice(), handler: handler)
+
+  api fn put(self, path: String, { handler: Handler }) -> App
+    self.put(path.as_slice(), handler: handler)
+
   api fn put<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> App
     self.route<R>(path, method: Method::Put {}, handler: handler)
 
   api fn put(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
     self.with_unit_response_route(path, Method::Put {}, handler)
+
+  api fn put<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> App
+    self.put<R>(path.as_slice(), handler: handler)
+
+  api fn put(self, path: String, { handler: fn() : (open) -> Response }) -> App
+    self.put(path.as_slice(), handler: handler)
 
   api fn put_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
     self.with_route(path, Method::Put {}, (ctx: Context) -> Response =>
@@ -552,11 +771,23 @@ impl App
   api fn patch(self, path: StringSlice, { handler: Handler }) -> App
     self.with_route(path, Method::Patch {}, handler)
 
+  api fn patch<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> App
+    self.patch<R>(path.as_slice(), handler: handler)
+
+  api fn patch(self, path: String, { handler: Handler }) -> App
+    self.patch(path.as_slice(), handler: handler)
+
   api fn patch<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> App
     self.route<R>(path, method: Method::Patch {}, handler: handler)
 
   api fn patch(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
     self.with_unit_response_route(path, Method::Patch {}, handler)
+
+  api fn patch<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> App
+    self.patch<R>(path.as_slice(), handler: handler)
+
+  api fn patch(self, path: String, { handler: fn() : (open) -> Response }) -> App
+    self.patch(path.as_slice(), handler: handler)
 
   api fn patch_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
     self.with_route(path, Method::Patch {}, (ctx: Context) -> Response =>
@@ -588,11 +819,23 @@ impl App
   api fn delete(self, path: StringSlice, { handler: Handler }) -> App
     self.with_route(path, Method::Delete {}, handler)
 
+  api fn delete<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> App
+    self.delete<R>(path.as_slice(), handler: handler)
+
+  api fn delete(self, path: String, { handler: Handler }) -> App
+    self.delete(path.as_slice(), handler: handler)
+
   api fn delete<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> App
     self.route<R>(path, method: Method::Delete {}, handler: handler)
 
   api fn delete(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> App
     self.with_unit_response_route(path, Method::Delete {}, handler)
+
+  api fn delete<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> App
+    self.delete<R>(path.as_slice(), handler: handler)
+
+  api fn delete(self, path: String, { handler: fn() : (open) -> Response }) -> App
+    self.delete(path.as_slice(), handler: handler)
 
   api fn delete_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> App
     self.with_route(path, Method::Delete {}, (ctx: Context) -> Response =>
@@ -623,10 +866,45 @@ impl App
     path: StringSlice,
     { method: Method, handler: fn(Context) : (open) -> T }
   ) -> App
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       let result = handler(ctx)
       to_response<T>(result)
-    )
+    , contract: route_fragment(operation().with_responses(inferred_responses<T>())))
+
+  api fn route(
+    self,
+    path: StringSlice,
+    { method: Method, handler: Handler }
+  ) -> App
+    self.with_route(path, method, handler)
+
+  api fn route(
+    self,
+    path: String,
+    { method: Method, handler: Handler }
+  ) -> App
+    self.with_route(path.as_slice(), method, handler)
+
+  api fn route<R: IntoResponse<R>>(
+    self,
+    path: StringSlice,
+    { method: Method, handler: fn(Context) : (open) -> R, docs: RouteDocs }
+  ) -> App
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
+      to_response<R>(handler(ctx))
+    , contract: typed_fragment<R>(docs))
+
+  api fn route<R: IntoResponse<R>, D>(
+    self,
+    path: StringSlice,
+    { method: Method, handler: fn(Context) : (open) -> R, docs: D }
+  ) -> App
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
+      to_response<R>(handler(ctx))
+    , contract: documented_fragment<D>(
+      operation().with_responses(inferred_responses<R>()),
+      docs
+    ))
 
   api fn route<T: IntoResponse<T>>(
     self,
@@ -636,26 +914,30 @@ impl App
     self.with_unit_route(path, method, handler)
 
   api fn route<S, A: FromAuth<S>>(self, path: StringSlice, { method: Method, auth: A, handler: fn(S) : (open) -> Response }) -> App
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       match(auth.extract_auth(ctx.request))
         Ok<S> { value }:
           handler(value)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(
+      extractor_operation(body.openapi_request()).with_responses(inferred_responses<T>())
+    ))
 
   api fn route<S, A: FromAuth<S>>(self, path: StringSlice, { method: Method, auth: A, handler: fn(S, Context) : (open) -> Response }) -> App
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       match(auth.extract_auth(ctx.request))
         Ok<S> { value }:
           handler(value, ctx)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(
+      extractor_operation(body.openapi_request()).with_responses(inferred_responses<T>())
+    ))
 
   api fn route<S>(self, path: StringSlice, { method: Method, auth: RequiredSession, handler: fn(S) : (open) -> Response }) -> App
     auth
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       match(default_required_session_as<S>(ctx.request))
         Ok<S> { value }:
           handler(value)
@@ -665,33 +947,39 @@ impl App
 
   api fn route<S>(self, path: StringSlice, { method: Method, auth: RequiredSession, handler: fn(S, Context) : (open) -> Response }) -> App
     auth
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       match(default_required_session_as<S>(ctx.request))
         Ok<S> { value }:
           handler(value, ctx)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(
+      operation().with_json_body<I>().with_responses(inferred_responses<T>())
+    ))
 
   api fn route<S>(self, path: StringSlice, { method: Method, auth: OptionalSession, handler: fn(Option<S>) : (open) -> Response }) -> App
     auth
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       match(default_optional_session_as<S>(ctx.request))
         Ok<Option<S>> { value }:
           handler(value)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(
+      extractor_operation(body.openapi_request()).with_responses(inferred_responses<T>())
+    ))
 
   api fn route<S>(self, path: StringSlice, { method: Method, auth: OptionalSession, handler: fn(Option<S>, Context) : (open) -> Response }) -> App
     auth
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       match(default_optional_session_as<S>(ctx.request))
         Ok<Option<S>> { value }:
           handler(value, ctx)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(
+      extractor_operation(body.openapi_request()).with_responses(inferred_responses<T>())
+    ))
 
   api fn route_context(
     self,
@@ -700,26 +988,35 @@ impl App
   ) -> App
     self.with_route(path, method, handler)
 
+  api fn route_context(
+    self,
+    path: String,
+    { method: Method, handler: Handler }
+  ) -> App
+    self.route_context(path.as_slice(), method: method, handler: handler)
+
   api fn route<I, P: FromBody<I>, T: IntoResponse<T>>(
     self,
     path: StringSlice,
     { method: Method, body: P, handler: fn(I) : (open) -> T }
   ) -> App
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       match(body.extract_body(ctx.request))
         Ok<I> { value }:
           let result = handler(value)
           to_response<T>(result)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(
+      extractor_operation(body.openapi_request()).with_responses(inferred_responses<T>())
+    ))
 
   api fn route<I, T: IntoResponse<T>>(
     self,
     path: StringSlice,
     { method: Method, body: JsonBody, handler: fn(I) : (open) -> T }
   ) -> App
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       body
       match(json_body_value(ctx.request))
         Ok<JsonValue> { value }:
@@ -727,7 +1024,23 @@ impl App
           to_response<T>(result)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(
+      operation().with_json_body<I>().with_responses(inferred_responses<T>())
+    ))
+
+  api fn route<I, R: IntoResponse<R>>(
+    self,
+    path: StringSlice,
+    { method: Method, body: JsonBody, handler: fn(I) : (open) -> R, docs: RouteDocsInput }
+  ) -> App
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
+      body
+      match(json_body_value(ctx.request))
+        Ok<JsonValue> { value }:
+          to_response<R>(handler(decode_json_value<I>(value)))
+        Err<Rejection> { error }:
+          ctx.reject(error)
+    , contract: typed_json_fragment<I, R>(route_docs(docs)))
 
   api fn route<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
     self,
@@ -814,13 +1127,21 @@ impl App
       not_found_handler: self.not_found_handler,
       method_not_allowed_handler: self.method_not_allowed_handler,
       error_handler: self.error_handler,
-      trailing_slash_policy: self.trailing_slash_policy
+      trailing_slash_policy: self.trailing_slash_policy,
+      openapi_info: self.openapi_info
     }
+
     let built = build(child)
     self.merge_routes(built.routes, next_order: built.next_order)
 
+  api fn group(self, prefix: String, { routes build: fn(App) : (open) -> App }) -> App
+    self.group(prefix.as_slice(), routes: build)
+
   api fn mount(self, prefix: StringSlice, router: Router) -> App
     self.mount(prefix, router.app)
+
+  api fn mount(self, prefix: String, router: Router) -> App
+    self.mount(prefix.as_slice(), router)
 
   api fn mount(self, prefix: StringSlice, app: App) -> App
     let routes = app.routes
@@ -844,8 +1165,12 @@ impl App
       not_found_handler: handler,
       method_not_allowed_handler: self.method_not_allowed_handler,
       error_handler: self.error_handler,
-      trailing_slash_policy: self.trailing_slash_policy
+      trailing_slash_policy: self.trailing_slash_policy,
+      openapi_info: self.openapi_info
     }
+
+  api fn mount(self, prefix: String, app: App) -> App
+    self.mount(prefix.as_slice(), app)
 
   api fn method_not_allowed(self, handler: Handler) -> App
     App {
@@ -856,7 +1181,8 @@ impl App
       not_found_handler: self.not_found_handler,
       method_not_allowed_handler: handler,
       error_handler: self.error_handler,
-      trailing_slash_policy: self.trailing_slash_policy
+      trailing_slash_policy: self.trailing_slash_policy,
+      openapi_info: self.openapi_info
     }
 
   api fn on_error(self, handler: ErrorHandler) -> App
@@ -868,7 +1194,8 @@ impl App
       not_found_handler: self.not_found_handler,
       method_not_allowed_handler: self.method_not_allowed_handler,
       error_handler: handler,
-      trailing_slash_policy: self.trailing_slash_policy
+      trailing_slash_policy: self.trailing_slash_policy,
+      openapi_info: self.openapi_info
     }
 
   api fn on_rejection(self, handler: ErrorHandler) -> App
@@ -887,6 +1214,24 @@ impl App
 
   api fn handle(self, request: IncomingRequest): (open) -> Response
     self.handle_request(request, body: None {})
+
+  /// Returns the application OpenAPI configuration, when enabled.
+  api fn openapi_config(self) -> Option<OpenApiConfig>
+    self.openapi_info
+
+  /// Returns the route-owned contracts used by the automatic renderer.
+  api fn openapi_routes(self) -> Array<RecordedOpenApiRoute>
+    let ~out = Array<RecordedOpenApiRoute>::with_capacity(self.routes.len())
+    var index = 0
+    while index < self.routes.len():
+      let route = self.routes.at(index)
+      out.push(RecordedOpenApiRoute {
+        method: route.method,
+        path: route.path,
+        contract: route.contract
+      })
+      index = index + 1
+    out
 
   /// Routes a request whose body is supplied as a lazy stream.
   api fn handle_streaming(
@@ -944,14 +1289,16 @@ impl App
     method: Method,
     handler: fn(P) : (open) -> T
   ) -> App
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       match(extract_params<P>(ctx.route.params))
         Ok<P> { value }:
           let result = handler(value)
           to_response<T>(result)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(
+      operation().with_path_params<P>().with_responses(inferred_responses<T>())
+    ))
 
   fn with_params_response_route<P>(
     self,
@@ -959,13 +1306,13 @@ impl App
     method: Method,
     handler: fn(P) : (open) -> Response
   ) -> App
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       match(extract_params<P>(ctx.route.params))
         Ok<P> { value }:
           handler(value)
         Err<Rejection> { error }:
           ctx.reject(error)
-    )
+    , contract: route_fragment(operation().with_path_params<P>()))
 
   fn with_unit_route<T: IntoResponse<T>>(
     self,
@@ -973,10 +1320,10 @@ impl App
     method: Method,
     handler: fn() : (open) -> T
   ) -> App
-    self.with_route(path, method, (_ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (_ctx: Context) -> Response =>
       let result = handler()
       to_response<T>(result)
-    )
+    , contract: route_fragment(operation().with_responses(inferred_responses<T>())))
 
   fn with_unit_response_route(
     self,
@@ -994,7 +1341,7 @@ impl App
     method: Method,
     handler: fn(P, Q) : (open) -> T
   ) -> App
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       let params_source = ctx.route.params
       let query_source = ctx.query()
       match(validate_params<P>(RouteParams { entries: params_source.entries.copied() }))
@@ -1010,7 +1357,12 @@ impl App
                 decode_query<Q>(query_source)
               )
               to_response<T>(result)
-    )
+    , contract: route_fragment(
+      operation()
+        .with_path_params<P>()
+        .with_query<Q>()
+        .with_responses(inferred_responses<T>())
+    ))
 
   fn with_params_query_response_route<P, Q>(
     self,
@@ -1018,7 +1370,7 @@ impl App
     method: Method,
     handler: fn(P, Q) : (open) -> Response
   ) -> App
-    self.with_route(path, method, (ctx: Context) -> Response =>
+    self.with_route_contract(path, method, (ctx: Context) -> Response =>
       let params_source = ctx.route.params
       let query_source = ctx.query()
       match(validate_params<P>(RouteParams { entries: params_source.entries.copied() }))
@@ -1033,7 +1385,7 @@ impl App
                 decode_params<P>(params_source),
                 decode_query<Q>(query_source)
               )
-    )
+    , contract: route_fragment(operation().with_path_params<P>().with_query<Q>()))
 
   fn with_auth_response_route<S, A: FromAuth<S>>(
     self,
@@ -1122,6 +1474,15 @@ impl App
     )
 
   fn with_route(self, path: StringSlice, method: Method, handler: Handler) -> App
+    self.with_route_contract(path, method, handler, contract: opaque_fragment())
+
+  fn with_route_contract(
+    self,
+    path: StringSlice,
+    method: Method,
+    handler: Handler,
+    { contract: JsonValue }
+  ) -> App
     let full_path = join_route_paths(self.prefix.as_slice(), path)
     let route = Route {
       method: method,
@@ -1131,7 +1492,8 @@ impl App
       handler: handler,
       error_handler: self.error_handler,
       streaming_request: false,
-      order: self.next_order
+      order: self.next_order,
+      contract: contract
     }
     let ~routes = self.routes.copied(1)
     routes.push(route)
@@ -1143,7 +1505,8 @@ impl App
       not_found_handler: self.not_found_handler,
       method_not_allowed_handler: self.method_not_allowed_handler,
       error_handler: self.error_handler,
-      trailing_slash_policy: self.trailing_slash_policy
+      trailing_slash_policy: self.trailing_slash_policy,
+      openapi_info: self.openapi_info
     }
 
   fn merge_routes(self, routes: Array<Route>, { next_order: i32 }) -> App
@@ -1164,7 +1527,8 @@ impl App
       not_found_handler: self.not_found_handler,
       method_not_allowed_handler: self.method_not_allowed_handler,
       error_handler: self.error_handler,
-      trailing_slash_policy: self.trailing_slash_policy
+      trailing_slash_policy: self.trailing_slash_policy,
+      openapi_info: self.openapi_info
     }
 
   fn with_mounted_route(self, prefix: StringSlice, route: Route) -> App
@@ -1177,7 +1541,8 @@ impl App
       handler: route.handler,
       error_handler: route.error_handler,
       streaming_request: route.streaming_request,
-      order: self.next_order
+      order: self.next_order,
+      contract: route.contract
     }
     let ~routes = self.routes.copied(1)
     routes.push(mounted)
@@ -1189,7 +1554,8 @@ impl App
       not_found_handler: self.not_found_handler,
       method_not_allowed_handler: self.method_not_allowed_handler,
       error_handler: self.error_handler,
-    trailing_slash_policy: self.trailing_slash_policy
+      trailing_slash_policy: self.trailing_slash_policy,
+      openapi_info: self.openapi_info
     }
 
   fn mark_last_streaming(self) -> App
@@ -1206,7 +1572,8 @@ impl App
       handler: route.handler,
       error_handler: route.error_handler,
       streaming_request: true,
-      order: route.order
+      order: route.order,
+      contract: route.contract
     }
     let _ = routes.replace(index, with: next)
     App {
@@ -1217,7 +1584,8 @@ impl App
       not_found_handler: self.not_found_handler,
       method_not_allowed_handler: self.method_not_allowed_handler,
       error_handler: self.error_handler,
-      trailing_slash_policy: self.trailing_slash_policy
+      trailing_slash_policy: self.trailing_slash_policy,
+      openapi_info: self.openapi_info
     }
 
 impl Router
@@ -1305,6 +1673,9 @@ impl Router
   api fn post<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> Router
     self.post<R>(path.as_slice(), handler: handler)
 
+  api fn post(self, path: String, { handler: Handler }) -> Router
+    self.post(path.as_slice(), handler: handler)
+
   api fn post<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> Router
     Router { app: self.app.post<R>(path, handler: handler) }
 
@@ -1313,6 +1684,9 @@ impl Router
 
   api fn post<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> Router
     self.post<R>(path.as_slice(), handler: handler)
+
+  api fn post(self, path: String, { handler: fn() : (open) -> Response }) -> Router
+    self.post(path.as_slice(), handler: handler)
 
   api fn post_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
     Router { app: self.app.post_context<T>(path, handler: handler) }
@@ -1363,6 +1737,27 @@ impl Router
   ) -> Router
     Router { app: self.app.post<I, T>(path, body: body, handler: handler) }
 
+  api fn post<I, T: IntoResponse<T>>(
+    self,
+    path: String,
+    { body: JsonBody, handler: fn(I) : (open) -> T }
+  ) -> Router
+    Router { app: self.app.post<I, T>(path, body: body, handler: handler) }
+
+  api fn post<I, R: IntoResponse<R>, D>(
+    self,
+    path: StringSlice,
+    { body: JsonBody, handler: fn(I) : (open) -> R, docs: D }
+  ) -> Router
+    Router { app: self.app.post<I, R, D>(path, body: body, handler: handler, docs: docs) }
+
+  api fn post<I, R: IntoResponse<R>, D>(
+    self,
+    path: String,
+    { body: JsonBody, handler: fn(I) : (open) -> R, docs: D }
+  ) -> Router
+    Router { app: self.app.post<I, R, D>(path, body: body, handler: handler, docs: docs) }
+
   api fn post<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
     self,
     path: StringSlice,
@@ -1397,10 +1792,22 @@ impl Router
   api fn put(self, path: StringSlice, { handler: Handler }) -> Router
     Router { app: self.app.put(path, handler: handler) }
 
+  api fn put<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> Router
+    Router { app: self.app.put<R>(path, handler: handler) }
+
+  api fn put(self, path: String, { handler: Handler }) -> Router
+    Router { app: self.app.put(path, handler: handler) }
+
   api fn put<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> Router
     Router { app: self.app.put<R>(path, handler: handler) }
 
   api fn put(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
+    Router { app: self.app.put(path, handler: handler) }
+
+  api fn put<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> Router
+    Router { app: self.app.put<R>(path, handler: handler) }
+
+  api fn put(self, path: String, { handler: fn() : (open) -> Response }) -> Router
     Router { app: self.app.put(path, handler: handler) }
 
   api fn put_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
@@ -1430,10 +1837,22 @@ impl Router
   api fn patch(self, path: StringSlice, { handler: Handler }) -> Router
     Router { app: self.app.patch(path, handler: handler) }
 
+  api fn patch<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> Router
+    Router { app: self.app.patch<R>(path, handler: handler) }
+
+  api fn patch(self, path: String, { handler: Handler }) -> Router
+    Router { app: self.app.patch(path, handler: handler) }
+
   api fn patch<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> Router
     Router { app: self.app.patch<R>(path, handler: handler) }
 
   api fn patch(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
+    Router { app: self.app.patch(path, handler: handler) }
+
+  api fn patch<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> Router
+    Router { app: self.app.patch<R>(path, handler: handler) }
+
+  api fn patch(self, path: String, { handler: fn() : (open) -> Response }) -> Router
     Router { app: self.app.patch(path, handler: handler) }
 
   api fn patch_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
@@ -1463,10 +1882,22 @@ impl Router
   api fn delete(self, path: StringSlice, { handler: Handler }) -> Router
     Router { app: self.app.delete(path, handler: handler) }
 
+  api fn delete<R: IntoResponse<R>>(self, path: String, { handler: fn(Context) : (open) -> R }) -> Router
+    Router { app: self.app.delete<R>(path, handler: handler) }
+
+  api fn delete(self, path: String, { handler: Handler }) -> Router
+    Router { app: self.app.delete(path, handler: handler) }
+
   api fn delete<R: IntoResponse<R>>(self, path: StringSlice, { handler: fn() : (open) -> R }) -> Router
     Router { app: self.app.delete<R>(path, handler: handler) }
 
   api fn delete(self, path: StringSlice, { handler: fn() : (open) -> Response }) -> Router
+    Router { app: self.app.delete(path, handler: handler) }
+
+  api fn delete<R: IntoResponse<R>>(self, path: String, { handler: fn() : (open) -> R }) -> Router
+    Router { app: self.app.delete<R>(path, handler: handler) }
+
+  api fn delete(self, path: String, { handler: fn() : (open) -> Response }) -> Router
     Router { app: self.app.delete(path, handler: handler) }
 
   api fn delete_context<T: IntoResponse<T>>(self, path: StringSlice, { handler: fn(Context) : (open) -> T }) -> Router
@@ -1571,10 +2002,19 @@ impl Router
       )
     }
 
+  api fn group(self, prefix: String, { routes build: fn(Router) : (open) -> Router }) -> Router
+    self.group(prefix.as_slice(), routes: build)
+
   api fn mount(self, prefix: StringSlice, router: Router) -> Router
     Router { app: self.app.mount(prefix, router) }
 
+  api fn mount(self, prefix: String, router: Router) -> Router
+    Router { app: self.app.mount(prefix, router) }
+
   api fn mount(self, prefix: StringSlice, app: App) -> Router
+    Router { app: self.app.mount(prefix, app) }
+
+  api fn mount(self, prefix: String, app: App) -> Router
     Router { app: self.app.mount(prefix, app) }
 
   api fn not_found(self, handler: Handler) -> Router
@@ -1607,6 +2047,20 @@ impl Router
 
 pub fn app() -> App
   App::init()
+
+pub fn app({ openapi: OpenApiInput }) -> App
+  App::init(openapi: OpenApiConfig {
+    title: openapi.title,
+    version: openapi.version,
+    description: openapi.description
+  })
+
+pub fn app({ openapi: { title: String, version: String } }) -> App
+  App::init(openapi: OpenApiConfig {
+    title: openapi.title,
+    version: openapi.version,
+    description: None {}
+  })
 
 pub fn strict_trailing_slash() -> TrailingSlashPolicy
   TrailingSlashPolicy::strict()
@@ -1880,8 +2334,12 @@ pub fn make_route(path: StringSlice, method: Method, handler: Handler): () -> Ro
     handler: handler,
     error_handler: (rejection: Rejection, ctx: Context) -> Response => default_rejection(rejection, ctx),
     streaming_request: false,
-    order: 0
+    order: 0,
+      contract: opaque_fragment()
   }
+
+pub fn make_route(path: String, method: Method, handler: Handler): () -> Route
+  make_route(path.as_slice(), method, handler)
 
 fn buffer_streaming_request(
   request: IncomingRequest,

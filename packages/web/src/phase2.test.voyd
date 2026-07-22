@@ -3,7 +3,7 @@ use src::html::{
   document,
   hydrate_named
 }
-use src::response::json
+use src::response::{ json, json_response }
 use src::router::{ Context, app }
 use src::routes::{
   delete,
@@ -184,21 +184,21 @@ test "route body record helper converts handler record returns":
   assert(response_text(response).contains("\"active\":true".as_slice()), eq: true)
 
 test "json serializes typed records":
-  let json_response = json({
+  let raw_json_response = json_response({
     name: "Ada".as_slice().to_string(),
     active: true
   })
-  assert(json_response.status.code(), eq: 200)
-  match(json_response.header("content-type".as_slice()))
+  assert(raw_json_response.status.code(), eq: 200)
+  match(raw_json_response.header("content-type".as_slice()))
     Some<String> { value }:
       assert(value.equals("application/json"), eq: true)
     None:
       assert(false, eq: true)
-  let text = response_text(json_response)
+  let text = response_text(raw_json_response)
   assert(text.contains("\"name\":\"Ada\"".as_slice()), eq: true)
   assert(text.contains("\"active\":true".as_slice()), eq: true)
 
-  let created = Response::created().json(value: {
+  let created = json(Response::created(), value: {
     name: "Grace".as_slice().to_string(),
     active: false
   })

@@ -6,6 +6,21 @@ use super::extract::{
   required_session as required_session_policy,
   text as text_policy
 }
+pub use super::contract::{
+  OpenApiConfig,
+  OpenApiHeader,
+  OpenApiRequest,
+  OpenApiRequestContract,
+  OpenApiResponse,
+  OpenApiResponseContract,
+  RouteDocs,
+  bytes_request,
+  json_request,
+  openapi_json_response,
+  openapi_response,
+  route_docs,
+  text_request
+}
 pub use super::openapi_expose::expose as expose_openapi
 pub use super::openapi_routes::document_route as document_openapi_route
 
@@ -63,6 +78,8 @@ pub use super::openapi::{
 }
 pub use super::request_streaming::serve as serve_streaming
 pub use super::response::{
+  Accepted,
+  Binary,
   Body,
   Header,
   HeaderName,
@@ -70,14 +87,24 @@ pub use super::response::{
   HttpError,
   IncomingRequest,
   IntoResponse,
+  Json,
   Method,
   QueryString,
   Response,
   Status,
+  Created,
+  NoContent,
+  Text,
+  accepted,
+  created,
   json,
+  json_response,
   json_value,
   result_json,
   option_json,
+  no_content,
+  text as text_response,
+  bytes as bytes_response,
   status,
   to_response
 }

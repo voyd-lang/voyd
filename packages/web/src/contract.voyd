@@ -1,0 +1,312 @@
+//! Provider-facing request and response contracts used by automatic OpenAPI.
+
+use std::array::Array
+use std::meta::{ Shape, shape_of }
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+use std::http::Method
+use std::json::JsonValue
+
+/// One documented response header.
+pub obj OpenApiHeader {
+  api name: String,
+  api description?: String,
+  api schema?: Shape,
+  api required: bool
+}
+
+/// One static response alternative contributed by a handler return type.
+pub obj OpenApiResponseContract {
+  api status: i32,
+  api description: String,
+  api content_type?: String,
+  api schema?: Shape,
+  api headers: Array<OpenApiHeader>
+}
+
+/// Static request-body information contributed by an extractor.
+pub obj OpenApiRequestContract {
+  api description?: String,
+  api content_type: String,
+  api schema?: Shape,
+  api required: bool
+}
+
+/// Documentation that supplements or overrides inferred route contracts.
+pub obj RouteDocs {
+  api summary?: String,
+  api description?: String,
+  api operation_id?: String,
+  api tags?: Array<String>,
+  api hidden?: bool,
+  api request?: OpenApiRequestContract,
+  api responses?: Array<OpenApiResponseContract>
+}
+
+pub type RouteDocsInput = {
+  summary?: String,
+  description?: String,
+  operation_id?: String,
+  tags?: Array<String>,
+  hidden?: bool,
+  request?: OpenApiRequestContract,
+  responses?: Array<OpenApiResponseContract>
+}
+
+pub type OpenApiInput = {
+  title: String,
+  version: String,
+  description?: String
+}
+
+/// Application-owned OpenAPI metadata.
+pub obj OpenApiConfig {
+  api title: String,
+  api version: String,
+  api description?: String
+}
+
+/// Static documentation carried by one concrete runtime route.
+pub obj RouteContract {
+  api docs: RouteDocs,
+  api path_params?: Shape,
+  api query_params?: Shape,
+  api header_params?: Shape,
+  api cookie_params?: Shape,
+  api request?: OpenApiRequestContract,
+  api responses: Array<OpenApiResponseContract>
+}
+
+/// Public read-only projection used by the automatic renderer.
+pub obj RecordedRouteContract {
+  api method: Method,
+  api path: String,
+  api contract: RouteContract
+}
+
+/// Method, concrete path, and serialized route-owned OpenAPI fragment.
+pub obj RecordedOpenApiRoute {
+  api method: Method,
+  api path: String,
+  api contract: JsonValue
+}
+
+/// Extensible static response-documentation provider for custom response types.
+pub trait OpenApiResponse<T>
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+
+/// Extensible static request-documentation provider for custom extractors.
+pub trait OpenApiRequest<T>
+  fn openapi_request() -> Option<OpenApiRequestContract>
+
+impl RouteDocs
+  api fn empty() -> RouteDocs
+    RouteDocs {
+      summary: None {},
+      description: None {},
+      operation_id: None {},
+      tags: None {},
+      hidden: None {},
+      request: None {},
+      responses: None {}
+    }
+
+pub fn route_docs(value: RouteDocsInput) -> RouteDocs
+  RouteDocs {
+    summary: value.summary,
+    description: value.description,
+    operation_id: value.operation_id,
+    tags: value.tags,
+    hidden: value.hidden,
+    request: value.request,
+    responses: value.responses
+  }
+
+/// Builds the common advanced override that supplies one or more responses.
+pub fn route_docs({ responses: Array<OpenApiResponseContract> }) -> RouteDocs
+  RouteDocs::empty().with_responses(responses)
+
+/// Builds the common advanced override for a request body.
+pub fn route_docs({ request: OpenApiRequestContract }) -> RouteDocs
+  RouteDocs::empty().with_request(request)
+
+impl RouteDocs
+  api fn with_responses(self, responses: Array<OpenApiResponseContract>) -> RouteDocs
+    RouteDocs {
+      summary: self.summary,
+      description: self.description,
+      operation_id: self.operation_id,
+      tags: self.tags,
+      hidden: self.hidden,
+      request: self.request,
+      responses: Some<Array<OpenApiResponseContract>> { value: responses }
+    }
+
+  api fn with_request(self, request: OpenApiRequestContract) -> RouteDocs
+    RouteDocs {
+      summary: self.summary,
+      description: self.description,
+      operation_id: self.operation_id,
+      tags: self.tags,
+      hidden: self.hidden,
+      request: Some<OpenApiRequestContract> { value: request },
+      responses: self.responses
+    }
+
+impl OpenApiConfig
+  api fn init({ title: StringSlice, version: StringSlice, description?: String }) -> OpenApiConfig
+    OpenApiConfig {
+      title: title.to_string(),
+      version: version.to_string(),
+      description: description
+    }
+
+  api fn init({ title: String, version: String, description?: String }) -> OpenApiConfig
+    OpenApiConfig::init(title: title.as_slice(), version: version.as_slice(), description: description)
+
+impl RouteContract
+  api fn empty() -> RouteContract
+    RouteContract {
+      docs: RouteDocs::empty(),
+      path_params: None {},
+      query_params: None {},
+      header_params: None {},
+      cookie_params: None {},
+      request: None {},
+      responses: Array<OpenApiResponseContract>::init()
+    }
+
+  api fn with_docs(self, docs: RouteDocs) -> RouteContract
+    RouteContract {
+      docs: docs,
+      path_params: self.path_params,
+      query_params: self.query_params,
+      header_params: self.header_params,
+      cookie_params: self.cookie_params,
+      request: docs.request ?? self.request,
+      responses: docs.responses ?? self.responses
+    }
+
+  api fn with_json_body<T>(self) -> RouteContract
+    RouteContract {
+      docs: self.docs,
+      path_params: self.path_params,
+      query_params: self.query_params,
+      header_params: self.header_params,
+      cookie_params: self.cookie_params,
+      request: Some<OpenApiRequestContract> { value: json_request<T>() },
+      responses: self.responses
+    }
+
+  api fn with_responses(self, responses: Array<OpenApiResponseContract>) -> RouteContract
+    RouteContract {
+      docs: self.docs,
+      path_params: self.path_params,
+      query_params: self.query_params,
+      header_params: self.header_params,
+      cookie_params: self.cookie_params,
+      request: self.request,
+      responses: responses
+    }
+
+/// Documents a typed JSON response without changing runtime response behavior.
+pub fn openapi_json_response<T>(
+  { status: i32, description: StringSlice }
+) -> OpenApiResponseContract
+  response_contract<T>(
+    status: status,
+    description: description,
+    content_type: "application/json".as_slice()
+  )
+
+pub fn openapi_json_response<T>(
+  { status: i32, description: String }
+) -> OpenApiResponseContract
+  openapi_json_response<T>(status: status, description: description.as_slice())
+
+/// Documents an untyped response, optionally with a known media type.
+pub fn openapi_response(
+  {
+    status: i32,
+    description: StringSlice,
+    content_type?: String,
+    headers?: Array<OpenApiHeader>
+  }
+) -> OpenApiResponseContract
+  OpenApiResponseContract {
+    status: status,
+    description: description.to_string(),
+    content_type: content_type,
+    schema: None {},
+    headers: headers ?? Array<OpenApiHeader>::init()
+  }
+
+pub fn openapi_response(
+  {
+    status: i32,
+    description: String,
+    content_type?: String,
+    headers?: Array<OpenApiHeader>
+  }
+) -> OpenApiResponseContract
+  openapi_response(
+    status: status,
+    description: description.as_slice(),
+    content_type: content_type,
+    headers: headers
+  )
+
+pub fn json_request<T>() -> OpenApiRequestContract
+  request_contract<T>(content_type: "application/json".as_slice())
+
+pub fn text_request() -> OpenApiRequestContract
+  request_contract<String>(content_type: "text/plain".as_slice())
+
+pub fn bytes_request() -> OpenApiRequestContract
+  OpenApiRequestContract {
+    description: None {},
+    content_type: "application/octet-stream".to_string(),
+    schema: None {},
+    required: true
+  }
+
+pub fn multipart_request() -> OpenApiRequestContract
+  OpenApiRequestContract {
+    description: None {},
+    content_type: "multipart/form-data".to_string(),
+    schema: None {},
+    required: true
+  }
+
+pub fn response_contract<T>(
+  { status: i32, description: StringSlice, content_type: StringSlice }
+) -> OpenApiResponseContract
+  OpenApiResponseContract {
+    status: status,
+    description: description.to_string(),
+    content_type: Some<String> { value: content_type.to_string() },
+    schema: Some<Shape> { value: shape_of<T>() },
+    headers: Array<OpenApiHeader>::init()
+  }
+
+pub fn empty_response_contract(
+  { status: i32, description: StringSlice }
+) -> OpenApiResponseContract
+  OpenApiResponseContract {
+    status: status,
+    description: description.to_string(),
+    content_type: None {},
+    schema: None {},
+    headers: Array<OpenApiHeader>::init()
+  }
+
+pub fn opaque_responses() -> Array<OpenApiResponseContract>
+  Array<OpenApiResponseContract>::init()
+
+fn request_contract<T>({ content_type: StringSlice }) -> OpenApiRequestContract
+  OpenApiRequestContract {
+    description: None {},
+    content_type: content_type.to_string(),
+    schema: Some<Shape> { value: shape_of<T>() },
+    required: true
+  }

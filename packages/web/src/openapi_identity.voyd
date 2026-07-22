@@ -1,0 +1,167 @@
+//! Deterministic, collision-safe identities for reified schema components.
+
+use std::meta::{
+  ArrayShape,
+  BoolShape,
+  F32Shape,
+  F64Shape,
+  I32Shape,
+  I64Shape,
+  RecordShape,
+  RefShape,
+  Shape,
+  ShapeNode,
+  StringShape,
+  UnionShape,
+  UnitShape
+}
+use std::number::cast::to_string
+use std::optional::types::all
+use std::array::Array
+use std::result::types::all
+use std::string::type::{ String, StringSlice, Utf8Error, from_utf8 }
+
+pub fn component_name(prefix: String, key: StringSlice) -> String
+  prefix.concat("_".as_slice()).concat(key)
+
+pub fn component_reference(prefix: String, key: StringSlice) -> String
+  let component = component_name(prefix, key)
+  let pointer_segment = component
+    .replaced(old: "~".to_string(), with: "~0".to_string())
+    .replaced(old: "/".to_string(), with: "~1".to_string())
+  "#/components/schemas/".to_string().concat(uri_fragment(pointer_segment.as_slice()).as_slice())
+
+pub fn schema_identity_prefix(shape: Shape, { fallback: String }) -> String
+  schema_prefix(shape.root, fallback: fallback)
+    .concat("_".as_slice())
+    .concat(shape_fingerprint(shape).as_slice())
+
+fn schema_prefix(node: ShapeNode, { fallback: String }) -> String
+  node.match(active)
+    RecordShape:
+      active.name
+    UnionShape:
+      active.name
+    else:
+      fallback
+
+fn shape_fingerprint(shape: Shape) -> String
+  var signature = signature_part(shape_node_signature(shape.root))
+  var index = 0
+  while index < shape.definitions.len():
+    let definition = shape.definitions.at(index)
+    signature = signature
+      .concat("definition".as_slice())
+      .concat(signature_part(definition.key).as_slice())
+      .concat(signature_part(shape_node_signature(definition.shape)).as_slice())
+    index = index + 1
+  signature_hash(signature)
+
+fn shape_node_signature(node: ShapeNode) -> String
+  node.match(active)
+    BoolShape: "bool".to_string()
+    I32Shape: "i32".to_string()
+    I64Shape: "i64".to_string()
+    F32Shape: "f32".to_string()
+    F64Shape: "f64".to_string()
+    StringShape: "string".to_string()
+    UnitShape: "unit".to_string()
+    RefShape: "ref".to_string().concat(signature_part(active.key).as_slice())
+    ArrayShape:
+      "array".to_string().concat(signature_part(shape_node_signature(active.element)).as_slice())
+    RecordShape: record_signature(active)
+    UnionShape: union_signature(active)
+
+fn record_signature(record: RecordShape) -> String
+  var signature = "record".to_string()
+    .concat(signature_part(record.name).as_slice())
+    .concat(signature_part(optional_signature(record.documentation)).as_slice())
+  var index = 0
+  while index < record.fields.len():
+    let field = record.fields.at(index)
+    signature = signature
+      .concat("field".as_slice())
+      .concat(signature_part(field.name).as_slice())
+      .concat(if field.optional: "optional".as_slice() else: "required".as_slice())
+      .concat(signature_part(optional_signature(field.documentation)).as_slice())
+      .concat(signature_part(shape_node_signature(field.shape)).as_slice())
+    index = index + 1
+  signature
+
+fn union_signature(union: UnionShape) -> String
+  var signature = "union".to_string()
+    .concat(signature_part(union.name).as_slice())
+    .concat(signature_part(optional_signature(union.documentation)).as_slice())
+  var variant_index = 0
+  while variant_index < union.variants.len():
+    let variant = union.variants.at(variant_index)
+    signature = signature
+      .concat("variant".as_slice())
+      .concat(signature_part(variant.name).as_slice())
+      .concat(signature_part(optional_signature(variant.documentation)).as_slice())
+    var field_index = 0
+    while field_index < variant.fields.len():
+      let field = variant.fields.at(field_index)
+      signature = signature
+        .concat("field".as_slice())
+        .concat(signature_part(field.name).as_slice())
+        .concat(if field.optional: "optional".as_slice() else: "required".as_slice())
+        .concat(signature_part(optional_signature(field.documentation)).as_slice())
+        .concat(signature_part(shape_node_signature(field.shape)).as_slice())
+      field_index = field_index + 1
+    variant_index = variant_index + 1
+  signature
+
+fn optional_signature(value: Option<String>) -> String
+  match(value)
+    Some<String> { value }: value
+    None: String::init()
+
+fn signature_part(value: String) -> String
+  to_string(value.byte_len()).concat(":".as_slice()).concat(value.as_slice())
+
+fn signature_hash(value: String) -> String
+  let bytes = value.to_utf8()
+  var first = 17
+  var second = 29
+  var index = 0
+  while index < bytes.len():
+    let byte = bytes.at(index)
+    let first_mixed = first * 31 + byte
+    let second_mixed = second * 37 + byte
+    first = first_mixed - (first_mixed / 1000003) * 1000003
+    second = second_mixed - (second_mixed / 1000033) * 1000033
+    index = index + 1
+  to_string(bytes.len())
+    .concat("_".as_slice())
+    .concat(to_string(first).as_slice())
+    .concat("_".as_slice())
+    .concat(to_string(second).as_slice())
+
+fn uri_fragment(value: StringSlice) -> String
+  let source = value.to_string().to_utf8()
+  let ~encoded = Array<i32>::with_capacity(source.len())
+  var index = 0
+  while index < source.len():
+    let byte = source.at(index)
+    if is_uri_unreserved(byte):
+      encoded.push(byte)
+    else:
+      encoded.push(37)
+      encoded.push(hex_digit(byte / 16))
+      encoded.push(hex_digit(byte - (byte / 16) * 16))
+    index = index + 1
+  match(from_utf8(encoded))
+    Ok<String> { value }: value
+    Err<Utf8Error>: String::init()
+
+fn is_uri_unreserved(byte: i32) -> bool
+  (byte >= 65 and byte <= 90) or
+    (byte >= 97 and byte <= 122) or
+    (byte >= 48 and byte <= 57) or
+    byte == 45 or byte == 46 or byte == 95 or byte == 126
+
+fn hex_digit(value: i32) -> i32
+  if value < 10:
+    return 48 + value
+  65 + value - 10

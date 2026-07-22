@@ -52,6 +52,14 @@ obj OpenApiCreateArticle {
   summary?: String
 }
 
+/// Article returned by the documented endpoint.
+obj OpenApiArticle {
+  /// Stable article identifier.
+  id: i32,
+  /// Reader-visible article title.
+  title: String
+}
+
 enum SsrMsg
   Edit { value: String }
 
@@ -321,7 +329,7 @@ pub fn builder_probe() -> i32
   echo.status.code()
 
 pub fn all_json_response_probe() -> i32
-  let typed = json({
+  let typed = json_response({
     slug: "first".as_slice().to_string(),
     title: "A Voyd article".as_slice().to_string()
   })
@@ -419,6 +427,25 @@ pub fn openapi_schema_probe() -> String
       value
     Err:
       "serialization failed".as_slice().to_string()
+
+fn create_openapi_article(input: OpenApiCreateArticle) -> Created<OpenApiArticle>
+  created(OpenApiArticle { id: 1, title: input.title })
+
+pub fn automatic_openapi_schema_probe() -> String
+  let article_app = app(openapi: {
+    title: "Article API",
+    version: "1.0.0"
+  }).post(
+    "/articles",
+    body: json_body(),
+    handler: create_openapi_article,
+    docs: { operation_id: "createArticle" }
+  )
+  match(stringify(article_app.openapi()))
+    Ok<String> { value }:
+      value
+    Err:
+      "serialization failed"
 
 pub fn serve_streaming_body_probe(): (HttpServer, tasks::TaskRuntime) -> i32
   let uploads = app().post(

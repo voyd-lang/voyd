@@ -21,7 +21,9 @@ import {
   createImportTargetResolver,
 } from "./symbol-ref-utils.js";
 
-export const DEFAULT_MAX_UNIFY_STEPS = 50_000;
+// Large framework modules with reified recursive shapes can legitimately
+// exceed the original 50k guard while still converging deterministically.
+export const DEFAULT_MAX_UNIFY_STEPS = 500_000;
 export const DEFAULT_MAX_OVERLOAD_CANDIDATES = 64;
 
 const normalizeBudgetLimit = ({

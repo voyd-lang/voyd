@@ -44,3 +44,17 @@ pub obj DocumentedEvent {
   /// Monotonic event sequence.
   api sequence: i64
 }
+
+/// JSON accepted by POST /automatic/articles.
+pub obj AutomaticCreateArticle {
+  /// Reader-visible article title.
+  api title: String
+}
+
+/// JSON returned after an article is created.
+pub obj AutomaticArticle {
+  /// Stable article identifier.
+  api id: i32,
+  /// Reader-visible article title.
+  api title: String
+}

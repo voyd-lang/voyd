@@ -7,6 +7,7 @@ use std::meta::{
   F64Shape,
   I64Shape,
   RecordShape,
+  Shape,
   StringShape,
   UnionShape,
   UnitShape,
@@ -52,6 +53,25 @@ type MetaCanonicalAlias = MetaCanonicalRecord
 test "shape_of reifies nested records arrays optionality and documentation":
   if request_shape_is_complete() == false:
     Test::fail()
+
+test "shape_of preserves documentation through generic specialization":
+  generic_shape<MetaShapeProfile>().root.match(root)
+    RecordShape:
+      match(root.documentation)
+        Some<String> { value: documentation }:
+          assert(documentation, eq: " Profile documentation.")
+        None:
+          Test::fail()
+      match(root.fields.at(0).documentation)
+        Some<String> { value: documentation }:
+          assert(documentation, eq: " Age documentation.")
+        None:
+          Test::fail()
+    else:
+      Test::fail()
+
+fn generic_shape<T>() -> Shape
+  shape_of<T>()
 
 fn request_shape_is_complete() -> bool
   let shape = shape_of<MetaShapeRequest>()

@@ -240,6 +240,18 @@ describe("integration: pkg::web", () => {
     expect(schema).toContain("Reader-visible article title.");
   });
 
+  it("derives OpenAPI from the public app route API", async () => {
+    const result = await compileWebFrameworkFixture();
+    const schema = await result.run<string>({
+      entryName: "automatic_openapi_schema_probe",
+    });
+
+    expect(schema).toContain('"/articles"');
+    expect(schema).toContain('"201"');
+    expect(schema).toContain('"operationId":"createArticle"');
+    expect(schema).toContain("Reader-visible article title.");
+  });
+
   it("serves formatted SSE through the Web router and host stream lifecycle", async () => {
     const result = await compileWebFrameworkFixture();
     const server = createHttpServerHarness();

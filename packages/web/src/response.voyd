@@ -27,6 +27,34 @@ pub use std::http::{ Body, Header, HeaderName, Headers, HttpError, IncomingReque
 pub trait IntoResponse<T>
   fn into_response(self) -> Response
 
+/// Typed `200 application/json` response.
+pub obj Json<T> {
+  api value: T
+}
+
+/// Typed `201 application/json` response.
+pub obj Created<T> {
+  api value: T
+}
+
+/// Typed `202 application/json` response.
+pub obj Accepted<T> {
+  api value: T
+}
+
+/// Typed `204` response with no body.
+pub obj NoContent {}
+
+/// Typed `200 text/plain` response.
+pub obj Text {
+  api value: String
+}
+
+/// Typed `200 application/octet-stream` response.
+pub obj Binary {
+  api value: Bytes
+}
+
 impl IntoResponse<Response> for Response
   fn into_response(self) -> Response
     self
@@ -42,6 +70,31 @@ impl IntoResponse<StringSlice> for StringSlice
 impl IntoResponse<Bytes> for Bytes
   fn into_response(self) -> Response
     Response::ok().bytes(self)
+
+impl<T> IntoResponse<Json<T>> for Json<T>
+  fn into_response(self) -> Response
+    json_value_response(Response::ok(), encode_json_value<T>(self.value))
+
+impl<T> IntoResponse<Created<T>> for Created<T>
+  fn into_response(self) -> Response
+    json_value_response(Response::created(), encode_json_value<T>(self.value))
+
+impl<T> IntoResponse<Accepted<T>> for Accepted<T>
+  fn into_response(self) -> Response
+    json_value_response(Response::new(status: accepted_status()), encode_json_value<T>(self.value))
+
+impl IntoResponse<NoContent> for NoContent
+  fn into_response(self) -> Response
+    self
+    Response::no_content().empty()
+
+impl IntoResponse<Text> for Text
+  fn into_response(self) -> Response
+    Response::ok().text(self.value)
+
+impl IntoResponse<Binary> for Binary
+  fn into_response(self) -> Response
+    Response::ok().bytes(self.value)
 
 pub fn to_response<T: IntoResponse<T>>(value: T) -> Response
   into_response_value<T>(value)
@@ -110,15 +163,31 @@ pub fn to_response<T: IntoResponse<T>>(value: Option<T>) -> Response
     None:
       Response::not_found().empty()
 
-pub fn text(value: StringSlice) -> Response
-  Response::ok().text(value)
+pub fn text(value: StringSlice) -> Text
+  Text { value: value.to_string() }
 
-pub fn text(value: String) -> Response
-  Response::ok().text(value)
+pub fn text(value: String) -> Text
+  Text { value: value }
 
 /// Serializes a typed value as a `200 OK` JSON response.
-pub fn json<T>(value: T) -> Response
+pub fn json<T>(value: T) -> Json<T>
+  Json<T> { value: value }
+
+/// Immediately materializes a typed JSON value as a raw response.
+pub fn json_response<T>(value: T) -> Response
   json_value_response(Response::ok(), encode_json_value<T>(value))
+
+/// Serializes a typed value as a `201 Created` JSON response.
+pub fn created<T>(value: T) -> Created<T>
+  Created<T> { value: value }
+
+/// Serializes a typed value as a `202 Accepted` JSON response.
+pub fn accepted<T>(value: T) -> Accepted<T>
+  Accepted<T> { value: value }
+
+/// Returns a typed `204 No Content` response.
+pub fn no_content() -> NoContent
+  NoContent {}
 
 /// Returns an already constructed JSON value as a `200 OK` response.
 pub fn json_value(value: JsonValue) -> Response
@@ -139,7 +208,7 @@ pub fn encode_json_value<T>(value: T) -> JsonValue
 pub fn result_json<T, E: IntoResponse<E>>(value: Result<T, E>) -> Response
   match(value)
     Ok<T> { value }:
-      json<T>(value)
+      json_response<T>(value)
     Err<E> { error }:
       into_response_value<E>(error)
 
@@ -147,12 +216,12 @@ pub fn result_json<T, E: IntoResponse<E>>(value: Result<T, E>) -> Response
 pub fn option_json<T>(value: Option<T>) -> Response
   match(value)
     Some<T> { value }:
-      json<T>(value)
+      json_response<T>(value)
     None:
       Response::not_found().empty()
 
-pub fn bytes(value: Bytes) -> Response
-  Response::ok().bytes(value)
+pub fn bytes(value: Bytes) -> Binary
+  Binary { value: value }
 
 pub fn status(status: Status) -> Response
   Response::new(status: status)
@@ -166,6 +235,13 @@ pub fn status({ code: i32, reason: StringSlice }) -> Response
 
 fn into_response_value<T: IntoResponse<T>>(value: T): () -> Response
   value.into_response()
+
+fn accepted_status() -> Status
+  match(Status::from(202))
+    Ok<Status> { value }:
+      value
+    Err:
+      Status::ok()
 
 fn json_value_response(response: Response, value: JsonValue): () -> Response
   match(stringify_json(value))

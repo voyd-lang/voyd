@@ -1857,6 +1857,7 @@ export const getStructuralTypeInfo = (
           ? valueRuntimeIndex
           : index + RTT_METADATA_SLOT_COUNT,
         optional: field.optional,
+        documentation: field.documentation,
         hash: 0,
       };
       inlineStart += inlineWasmTypes.length;

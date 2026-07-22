@@ -1,0 +1,27 @@
+//! Rendering-time suppression of documentation carried by reified shapes.
+
+use std::array::Array
+use std::dict::Dict
+use std::json::{ JsonArray, JsonObject, JsonValue }
+
+pub fn without_descriptions(value: JsonValue) -> JsonValue
+  value.match(active)
+    JsonArray:
+      let ~items = Array<JsonValue>::with_capacity(active.value.len())
+      var index = 0
+      while index < active.value.len():
+        items.push(without_descriptions(active.value.at(index)))
+        index = index + 1
+      JsonArray { value: items }
+    JsonObject:
+      let entries = active.value.entries()
+      let ~fields = Dict<String, JsonValue>::with_capacity(entries.len())
+      var index = 0
+      while index < entries.len():
+        let entry = entries.at(index)
+        if not entry.0.equals("description"):
+          fields.set(entry.0, without_descriptions(entry.1))
+        index = index + 1
+      JsonObject { value: fields }
+    else:
+      value

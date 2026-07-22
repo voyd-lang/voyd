@@ -176,6 +176,7 @@ export interface StructuralFieldInfo {
   heapWasmType: binaryen.Type;
   runtimeIndex: number;
   optional?: boolean;
+  documentation?: string;
   hash: number;
   getterType?: binaryen.Type;
   setterType?: binaryen.Type;

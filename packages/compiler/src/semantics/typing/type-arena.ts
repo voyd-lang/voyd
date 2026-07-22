@@ -64,6 +64,7 @@ export interface StructuralField {
   visibility?: HirVisibility;
   owner?: SymbolId;
   packageId?: string;
+  documentation?: string;
 }
 
 export interface StructuralObjectType {
@@ -635,6 +636,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
         visibility: field.visibility,
         owner: field.owner,
         packageId: field.packageId,
+        documentation: field.documentation,
       }))
       .sort((a, b) => {
         const byName = a.name.localeCompare(b.name, undefined, {
@@ -1899,6 +1901,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
                       visibility: field.visibility,
                       owner: field.owner,
                       packageId: field.packageId,
+                      documentation: field.documentation,
                     };
               });
               return changed
@@ -2064,6 +2067,7 @@ const cloneTypeDescriptor = (desc: TypeDescriptor): TypeDescriptor => {
           visibility: field.visibility ? { ...field.visibility } : undefined,
           owner: field.owner,
           packageId: field.packageId,
+          documentation: field.documentation,
         })),
       };
     case "function":

@@ -1,0 +1,198 @@
+//! Built-in static response contracts for automatic OpenAPI generation.
+
+use std::array::Array
+use std::bytes::Bytes
+use std::http::Response
+use std::optional::types::Option
+use std::result::types::Result
+use std::meta::{ RecordShape, Shape, StringShape, UnionShape, shape_of }
+use std::string::type::{ String, StringSlice }
+use super::contract::{
+  OpenApiResponse,
+  OpenApiResponseContract,
+  empty_response_contract,
+  opaque_responses,
+  response_contract
+}
+use super::response::{ Accepted, Binary, Created, Json, NoContent, Text }
+
+impl<T> OpenApiResponse<Json<T>> for Json<T>
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    json_responses<T>()
+
+impl<T> OpenApiResponse<Created<T>> for Created<T>
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    created_responses<T>()
+
+impl<T> OpenApiResponse<Accepted<T>> for Accepted<T>
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    accepted_responses<T>()
+
+impl OpenApiResponse<NoContent> for NoContent
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    no_content_responses()
+
+impl OpenApiResponse<Text> for Text
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    typed<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
+
+impl OpenApiResponse<String> for String
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    typed<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
+
+impl OpenApiResponse<StringSlice> for StringSlice
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    typed<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
+
+impl OpenApiResponse<Binary> for Binary
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    binary()
+
+impl OpenApiResponse<Bytes> for Bytes
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    binary()
+
+impl OpenApiResponse<Response> for Response
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    opaque_responses()
+
+fn typed<T>(
+  { status: i32, description: StringSlice, content_type: StringSlice }
+) -> Array<OpenApiResponseContract>
+  let ~out = Array<OpenApiResponseContract>::with_capacity(1)
+  out.push(response_contract<T>(status: status, description: description, content_type: content_type))
+  out
+
+/// Infers built-in typed wrapper contracts from the reified return shape.
+pub fn inferred_responses<T>() -> Array<OpenApiResponseContract>
+  responses_for_shape(shape_of<T>())
+
+fn responses_for_shape(shape: Shape) -> Array<OpenApiResponseContract>
+  shape.root.match(root)
+    StringShape:
+      shaped(shape, status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
+    RecordShape:
+      if root.name.equals("NoContent"):
+        return no_content_responses()
+      if root.fields.len() != 1 or not root.fields.at(0).name.equals("value"):
+        return opaque_responses()
+      let payload = Shape {
+        root: root.fields.at(0).shape,
+        definitions: shape.definitions
+      }
+      if root.name.equals("Created"):
+        return shaped(payload, status: 201, description: "Created".as_slice(), content_type: "application/json".as_slice())
+      if root.name.equals("Accepted"):
+        return shaped(payload, status: 202, description: "Accepted".as_slice(), content_type: "application/json".as_slice())
+      if root.name.equals("Json"):
+        return shaped(payload, status: 200, description: "Successful response".as_slice(), content_type: "application/json".as_slice())
+      if root.name.equals("Text"):
+        return shaped(payload, status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
+      if root.name.equals("Binary"):
+        return binary()
+      if root.name.equals("Bytes"):
+        return binary()
+      opaque_responses()
+    UnionShape:
+      if root.name.contains("JsonValue".as_slice()):
+        return untyped(status: 200, description: "Successful response".as_slice(), content_type: "application/json".as_slice())
+      let ~out = Array<OpenApiResponseContract>::init()
+      var index = 0
+      while index < root.variants.len():
+        let variant = root.variants.at(index)
+        if variant.name.equals("None"):
+          append_unique(out, empty_response_contract(status: 404, description: "Not found".as_slice()))
+        else:
+          if not variant.fields.is_empty():
+            let branch = responses_for_shape(Shape {
+              root: variant.fields.at(0).shape,
+              definitions: shape.definitions
+            })
+            var branch_index = 0
+            while branch_index < branch.len():
+              append_unique(out, branch.at(branch_index))
+              branch_index = branch_index + 1
+        index = index + 1
+      if out.is_empty(): opaque_responses() else: out
+    else:
+      opaque_responses()
+
+pub fn json_responses<T>() -> Array<OpenApiResponseContract>
+  typed<T>(status: 200, description: "Successful response".as_slice(), content_type: "application/json".as_slice())
+
+pub fn created_responses<T>() -> Array<OpenApiResponseContract>
+  typed<T>(status: 201, description: "Created".as_slice(), content_type: "application/json".as_slice())
+
+pub fn accepted_responses<T>() -> Array<OpenApiResponseContract>
+  typed<T>(status: 202, description: "Accepted".as_slice(), content_type: "application/json".as_slice())
+
+pub fn no_content_responses() -> Array<OpenApiResponseContract>
+  let ~out = Array<OpenApiResponseContract>::with_capacity(1)
+  out.push(empty_response_contract(status: 204, description: "No content".as_slice()))
+  out
+
+fn shaped(
+  shape: Shape,
+  { status: i32, description: StringSlice, content_type: StringSlice }
+) -> Array<OpenApiResponseContract>
+  let ~out = Array<OpenApiResponseContract>::with_capacity(1)
+  out.push(OpenApiResponseContract {
+    status: status,
+    description: description.to_string(),
+    content_type: Some<String> { value: content_type.to_string() },
+    schema: Some<Shape> { value: shape },
+    headers: Array::init()
+  })
+  out
+
+fn binary() -> Array<OpenApiResponseContract>
+  let ~out = Array<OpenApiResponseContract>::with_capacity(1)
+  out.push(OpenApiResponseContract {
+    status: 200,
+    description: "Successful response".to_string(),
+    content_type: Some<String> { value: "application/octet-stream".to_string() },
+    schema: None {},
+    headers: Array::init()
+  })
+  out
+
+fn untyped(
+  { status: i32, description: StringSlice, content_type: StringSlice }
+) -> Array<OpenApiResponseContract>
+  let ~out = Array<OpenApiResponseContract>::with_capacity(1)
+  out.push(OpenApiResponseContract {
+    status: status,
+    description: description.to_string(),
+    content_type: Some<String> { value: content_type.to_string() },
+    schema: None {},
+    headers: Array::init()
+  })
+  out
+
+fn append_unique(
+  ~responses: Array<OpenApiResponseContract>,
+  candidate: OpenApiResponseContract
+) -> void
+  var index = 0
+  var found = false
+  while index < responses.len() and not found:
+    let current = responses.at(index)
+    if current.status == candidate.status and same_content_type(current.content_type, candidate.content_type):
+      found = true
+    index = index + 1
+  if not found:
+    responses.push(candidate)
+
+fn same_content_type(left: Option<String>, right: Option<String>) -> bool
+  match(left)
+    Some<String> { value: left_value }:
+      match(right)
+        Some<String> { value: right_value }:
+          left_value.equals(right_value)
+        None:
+          false
+    None:
+      match(right)
+        None: true
+        Some<String>:
+          false

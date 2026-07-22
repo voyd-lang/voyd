@@ -6,6 +6,7 @@ use std::http::{ Body, Headers, IncomingRequest }
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
+use super::contract::{ OpenApiRequestContract, multipart_request }
 use super::extract::{ FromBody, Rejection }
 
 /// One multipart field or uploaded file.
@@ -57,6 +58,10 @@ impl FromBody<Form> for MultipartBody
   fn extract_body(self, request: IncomingRequest) : (open) -> Result<Form, Rejection>
     self
     parse(request)
+
+  fn openapi_request(self) -> Option<OpenApiRequestContract>
+    self
+    Some<OpenApiRequestContract> { value: multipart_request() }
 
 pub fn multipart() -> MultipartBody
   MultipartBody {}
