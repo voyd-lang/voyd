@@ -3,7 +3,7 @@ import {
   compareScorecards,
   measurementRetryScenarios,
   pairedRunOrder,
-  confirmedScorecardMeasurements,
+  poolScorecardMeasurements,
   scorecardInputMode,
 } from "./check-optimizer-bench-regression.mjs";
 
@@ -75,12 +75,12 @@ describe("optimizer scorecard measurement retry policy", () => {
     });
     expect(measurementRetryScenarios(initial)).toEqual(["scenario"]);
 
-    const base = confirmedScorecardMeasurements({
+    const base = poolScorecardMeasurements({
       initial: initialBase,
       retry: scorecard({ rssMib: 100 }),
       scenarioNames: ["scenario"],
     });
-    const head = confirmedScorecardMeasurements({
+    const head = poolScorecardMeasurements({
       initial: initialHead,
       retry: scorecard({ rssMib: 105 }),
       scenarioNames: ["scenario"],
@@ -123,12 +123,12 @@ describe("optimizer scorecard measurement retry policy", () => {
   });
 
   it("still fails a stable synthetic RSS regression after retry", () => {
-    const base = confirmedScorecardMeasurements({
+    const base = poolScorecardMeasurements({
       initial: scorecard({ rssMib: 100 }),
       retry: scorecard({ rssMib: 100 }),
       scenarioNames: ["scenario"],
     });
-    const head = confirmedScorecardMeasurements({
+    const head = poolScorecardMeasurements({
       initial: scorecard({ rssMib: 150 }),
       retry: scorecard({ rssMib: 150 }),
       scenarioNames: ["scenario"],
@@ -165,7 +165,7 @@ describe("optimizer scorecard measurement retry policy", () => {
     expect(measurementRetryScenarios(result)).toEqual([]);
   });
 
-  it("uses the reversed-order retry as independent confirmation", () => {
+  it("pools initial and reversed-order measurements", () => {
     const initialBase = scorecard({
       rssMib: 100,
       runtimeMs: 10,
@@ -187,19 +187,19 @@ describe("optimizer scorecard measurement retry policy", () => {
       runtimeSamplesMs: [9, 10, 11],
     });
 
-    const base = confirmedScorecardMeasurements({
+    const base = poolScorecardMeasurements({
       initial: initialBase,
       retry: retryBase,
       scenarioNames: ["scenario"],
     });
-    const head = confirmedScorecardMeasurements({
+    const head = poolScorecardMeasurements({
       initial: initialHead,
       retry: retryHead,
       scenarioNames: ["scenario"],
     });
 
-    expect(base.rows[0].runtimeSamplesMs).toEqual([9, 10, 11]);
-    expect(head.rows[0].runtimeMedianMs).toBe(10);
+    expect(base.rows[0].runtimeSamplesMs).toEqual([9, 10, 11, 9, 10, 11]);
+    expect(head.rows[0].runtimeMedianMs).toBe(14);
     expect(failures({ base, head })).toEqual([]);
   });
 });

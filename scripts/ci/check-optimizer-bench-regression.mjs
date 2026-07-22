@@ -134,16 +134,36 @@ const median = (values) => {
     : sorted[middle];
 };
 
+const lowerQuartile = (values) => {
+  const sorted = [...values].sort((left, right) => left - right);
+  return median(sorted.slice(0, Math.floor(sorted.length / 2)));
+};
+
+const rssSampleValue = (samples, fallback) =>
+  samples.length >= 6 ? lowerQuartile(samples) : fallback;
+
 const rssComparison = (row) =>
   typeof row.processMaxRssGrowthBytes === "number"
     ? {
-        label: "compile peak RSS growth median MiB",
-        value: row.processMaxRssGrowthBytes,
+        label:
+          (row.processMaxRssGrowthSamplesBytes?.length ?? 0) >= 6
+            ? "compile peak RSS growth lower-quartile MiB"
+            : "compile peak RSS growth median MiB",
+        value: rssSampleValue(
+          row.processMaxRssGrowthSamplesBytes ?? [],
+          row.processMaxRssGrowthBytes,
+        ),
         samples: row.processMaxRssGrowthSamplesBytes ?? [],
       }
     : {
-        label: "peak RSS median MiB",
-        value: row.processMaxRssBytes,
+        label:
+          (row.processMaxRssSamplesBytes?.length ?? 0) >= 6
+            ? "peak RSS lower-quartile MiB"
+            : "peak RSS median MiB",
+        value: rssSampleValue(
+          row.processMaxRssSamplesBytes ?? [],
+          row.processMaxRssBytes,
+        ),
         samples: row.processMaxRssSamplesBytes ?? [],
       };
 
@@ -443,7 +463,16 @@ const mergedScorecard = (scorecards) => ({
   rows: scorecards.flatMap(({ rows }) => rows),
 });
 
-const confirmedRetryRow = (initial, retry) => {
+const samplesFor = (row, samplesKey, medianKey) => {
+  const samples = row[samplesKey];
+  return Array.isArray(samples) && samples.length > 0
+    ? samples
+    : typeof row[medianKey] === "number"
+      ? [row[medianKey]]
+      : [];
+};
+
+const poolRowMeasurements = (initial, retry) => {
   ["wasmBytes", "gzipBytes", "wasmSha256"].forEach((field) => {
     if (
       initial[field] !== undefined &&
@@ -455,10 +484,36 @@ const confirmedRetryRow = (initial, retry) => {
       );
     }
   });
-  return retry;
+
+  const pooled = (samplesKey, medianKey) => {
+    const samples = [
+      ...samplesFor(initial, samplesKey, medianKey),
+      ...samplesFor(retry, samplesKey, medianKey),
+    ];
+    return samples.length > 0
+      ? [{ samplesKey, medianKey, samples, value: median(samples) }]
+      : [];
+  };
+  const measurements = [
+    ["compileSamplesMs", "compileMedianMs"],
+    ["runtimeSamplesMs", "runtimeMedianMs"],
+    ["peakHeapUsedSamplesBytes", "peakHeapUsedMedianBytes"],
+    ["peakRssSamplesBytes", "peakRssMedianBytes"],
+    ["processMaxRssSamplesBytes", "processMaxRssBytes"],
+    ["processMaxRssGrowthSamplesBytes", "processMaxRssGrowthBytes"],
+  ].flatMap(([samplesKey, medianKey]) => pooled(samplesKey, medianKey));
+
+  return measurements.reduce(
+    (row, { samplesKey, medianKey, samples, value }) => ({
+      ...row,
+      [samplesKey]: samples,
+      [medianKey]: value,
+    }),
+    { ...initial },
+  );
 };
 
-export const confirmedScorecardMeasurements = ({
+export const poolScorecardMeasurements = ({
   initial,
   retry,
   scenarioNames,
@@ -491,7 +546,7 @@ export const confirmedScorecardMeasurements = ({
       if (!retryRow) {
         throw new Error(`optimizer retry omitted case ${rowKey(row)}`);
       }
-      return confirmedRetryRow(row, retryRow);
+      return poolRowMeasurements(row, retryRow);
     }),
   };
 };
@@ -774,18 +829,18 @@ const main = () => {
       });
       const retryBase = readScorecard(retryPaths.basePath);
       const retryHead = readScorecard(retryPaths.headPath);
-      finalBase = confirmedScorecardMeasurements({
+      finalBase = poolScorecardMeasurements({
         initial: finalBase,
         retry: retryBase,
         scenarioNames: retryScenarios,
       });
-      finalHead = confirmedScorecardMeasurements({
+      finalHead = poolScorecardMeasurements({
         initial: finalHead,
         retry: retryHead,
         scenarioNames: retryScenarios,
       });
       console.log(
-        "\nFinal reversed-order confirmation:",
+        "\nFinal paired comparison (initial and reversed-order samples pooled):",
       );
       const finalFailures = compareScorecards({
         base: finalBase,
