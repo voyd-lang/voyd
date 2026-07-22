@@ -593,14 +593,46 @@ const overloadDominates = ({
 const isBareTypeParamRef = (type: TypeId, ctx: TypingContext): boolean =>
   ctx.arena.get(type).kind === "type-param-ref";
 
+const unresolvedTypeParamPenaltyCache = new WeakMap<
+  TypingContext,
+  Map<TypeId, number>
+>();
+
+// Cache only complete root traversals. A nested result can depend on which
+// recursive ancestors are already in `visiting`, so it is not reusable.
 const unresolvedTypeParamPenalty = ({
   type,
   ctx,
-  visiting = new Set<TypeId>(),
 }: {
   type: TypeId;
   ctx: TypingContext;
-  visiting?: Set<TypeId>;
+}): number => {
+  let cache = unresolvedTypeParamPenaltyCache.get(ctx);
+  if (!cache) {
+    cache = new Map();
+    unresolvedTypeParamPenaltyCache.set(ctx, cache);
+  }
+  const cached = cache.get(type);
+  if (typeof cached === "number") {
+    return cached;
+  }
+  const penalty = calculateUnresolvedTypeParamPenalty({
+    type,
+    ctx,
+    visiting: new Set(),
+  });
+  cache.set(type, penalty);
+  return penalty;
+};
+
+const calculateUnresolvedTypeParamPenalty = ({
+  type,
+  ctx,
+  visiting,
+}: {
+  type: TypeId;
+  ctx: TypingContext;
+  visiting: Set<TypeId>;
 }): number => {
   if (visiting.has(type)) {
     return 0;
@@ -614,9 +646,13 @@ const unresolvedTypeParamPenalty = ({
       case "primitive":
         return 0;
       case "recursive":
-        return unresolvedTypeParamPenalty({ type: desc.body, ctx, visiting });
+        return calculateUnresolvedTypeParamPenalty({
+          type: desc.body,
+          ctx,
+          visiting,
+        });
       case "fixed-array":
-        return unresolvedTypeParamPenalty({
+        return calculateUnresolvedTypeParamPenalty({
           type: desc.element,
           ctx,
           visiting,
@@ -624,16 +660,25 @@ const unresolvedTypeParamPenalty = ({
       case "union":
         return desc.members.reduce(
           (sum, member) =>
-            sum + unresolvedTypeParamPenalty({ type: member, ctx, visiting }),
+            sum +
+            calculateUnresolvedTypeParamPenalty({
+              type: member,
+              ctx,
+              visiting,
+            }),
           0,
         );
       case "intersection":
         return (
           (typeof desc.nominal === "number"
-            ? unresolvedTypeParamPenalty({ type: desc.nominal, ctx, visiting })
+            ? calculateUnresolvedTypeParamPenalty({
+                type: desc.nominal,
+                ctx,
+                visiting,
+              })
             : 0) +
           (typeof desc.structural === "number"
-            ? unresolvedTypeParamPenalty({
+            ? calculateUnresolvedTypeParamPenalty({
                 type: desc.structural,
                 ctx,
                 visiting,
@@ -641,7 +686,12 @@ const unresolvedTypeParamPenalty = ({
             : 0) +
           (desc.traits?.reduce(
             (sum, trait) =>
-              sum + unresolvedTypeParamPenalty({ type: trait, ctx, visiting }),
+              sum +
+              calculateUnresolvedTypeParamPenalty({
+                type: trait,
+                ctx,
+                visiting,
+              }),
             0,
           ) ?? 0)
         );
@@ -650,14 +700,19 @@ const unresolvedTypeParamPenalty = ({
       case "value-object":
         return desc.typeArgs.reduce(
           (sum, arg) =>
-            sum + unresolvedTypeParamPenalty({ type: arg, ctx, visiting }),
+            sum +
+            calculateUnresolvedTypeParamPenalty({ type: arg, ctx, visiting }),
           0,
         );
       case "structural-object":
         return desc.fields.reduce(
           (sum, field) =>
             sum +
-            unresolvedTypeParamPenalty({ type: field.type, ctx, visiting }),
+            calculateUnresolvedTypeParamPenalty({
+              type: field.type,
+              ctx,
+              visiting,
+            }),
           0,
         );
       case "function":
@@ -665,10 +720,18 @@ const unresolvedTypeParamPenalty = ({
           desc.parameters.reduce(
             (sum, param) =>
               sum +
-              unresolvedTypeParamPenalty({ type: param.type, ctx, visiting }),
+              calculateUnresolvedTypeParamPenalty({
+                type: param.type,
+                ctx,
+                visiting,
+              }),
             0,
           ) +
-          unresolvedTypeParamPenalty({ type: desc.returnType, ctx, visiting })
+          calculateUnresolvedTypeParamPenalty({
+            type: desc.returnType,
+            ctx,
+            visiting,
+          })
         );
     }
   })();

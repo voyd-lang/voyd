@@ -248,21 +248,29 @@ pub fn json<T>(response: Response, { value: T }) -> Response
 pub fn encode_json_value<T>(value: T) -> JsonValue
   encode_value<T>(value)
 
-/// Serializes the successful branch as JSON and converts the error branch normally.
-pub fn result_json<T, E: IntoResponse<E>>(value: Result<T, E>) -> Response
+/// Wraps the successful branch as typed JSON while preserving the error type.
+pub fn result_json<T, E: IntoResponse<E>>(value: Result<T, E>) -> Result<Json<T>, E>
   match(value)
     Ok<T> { value }:
-      json_response<T>(value)
+      Ok<Json<T>> { value: json<T>(value) }
     Err<E> { error }:
-      into_response_value<E>(error)
+      Err<E> { error: error }
 
-/// Serializes a present value as JSON and returns `404 Not Found` for `None`.
-pub fn option_json<T>(value: Option<T>) -> Response
+/// Wraps a present value as typed JSON while preserving `None` for the typed 404 contract.
+pub fn option_json<T>(value: Option<T>) -> Option<Json<T>>
   match(value)
     Some<T> { value }:
-      json_response<T>(value)
+      Some<Json<T>> { value: json<T>(value) }
     None:
-      Response::not_found().empty()
+      None {}
+
+/// Immediately materializes a JSON-mapped `Result` as a raw response.
+pub fn result_json_response<T, E: IntoResponse<E>>(value: Result<T, E>) -> Response
+  typed_response<Result<Json<T>, E>>(result_json<T, E>(value))
+
+/// Immediately materializes a JSON-mapped `Option` as a raw response.
+pub fn option_json_response<T>(value: Option<T>) -> Response
+  typed_response<Option<Json<T>>>(option_json<T>(value))
 
 pub fn bytes(value: Bytes) -> Binary
   Binary { value: value }

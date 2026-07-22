@@ -15,8 +15,8 @@ use src::openapi_collision_a::{ Duplicate as DuplicateA }
 use src::openapi_collision_b::{ Duplicate as DuplicateB }
 use std::array::Array
 use std::bytes::Bytes
-use std::http::{ IncomingRequest, Method, Response }
-use std::json::stringify
+use std::http::{ Body, Headers, IncomingRequest, Method, Response }
+use std::json::{ JsonValue, stringify }
 use std::error::panic
 use std::optional::types::all
 use std::result::types::all
@@ -91,6 +91,18 @@ fn custom_body_reply(_input: String) -> Text
 
 fn multipart_reply(_input: Form) -> Text
   text("multipart")
+
+fn raw_json_input_reply(_input: JsonValue) -> Response
+  Response::ok().empty()
+
+fn raw_path_reply(_params: DocumentedArticlePath) -> Response
+  Response::ok().empty()
+
+fn raw_path_query_reply(
+  _params: DocumentedArticlePath,
+  _query: DocumentedArticleQuery
+) -> Response
+  Response::ok().empty()
 
 fn recursive_reply(_input: DocumentedRecursivePair) -> Response
   Response::no_content().empty()
@@ -488,8 +500,42 @@ test "automatic request contracts cover parameters and limited body extractors":
       require_contains(value, "\"application/octet-stream\"".as_slice(), "missing limited bytes contract")
       require_contains(value, "JSON accepted by POST /automatic/articles.".as_slice(), "limited JSON lost its DTO schema")
 
+test "raw JSON inputs remain opaque":
+  let raw_json_app = app(openapi: { title: "Raw JSON", version: "1" })
+    .post("/raw-json", body: json_body(), handler: raw_json_input_reply)
+  let raw_json = openapi_string(raw_json_app)
+  require_contains(raw_json, "\"application/json\"".as_slice(), "raw JSON media type was omitted")
+  require_contains(raw_json, "\"default\"".as_slice(), "raw JSON response was fabricated")
+  require_not_contains(raw_json, "\"schema\":".as_slice(), "raw JSON fabricated a schema")
+  let response = raw_json_app.handle(IncomingRequest {
+    method: Method::Post {},
+    path: "/raw-json",
+    query: None {},
+    headers: Headers::empty().set(
+      header: "content-type",
+      value: "application/json"
+    ),
+    body: Body::text("{\"ok\":true}")
+  })
+  assert(response.status.code(), eq: 200)
+
+test "raw typed-parameter responses remain opaque":
+  let raw_params_app = app(openapi: { title: "Raw parameters", version: "1" })
+    .get_params<DocumentedArticlePath>("/articles/:id", handler: raw_path_reply)
+    .get_params_query<DocumentedArticlePath, DocumentedArticleQuery>(
+      "/search/:id",
+      handler: raw_path_query_reply
+    )
+  let raw_params = openapi_string(raw_params_app)
+  require_contains(raw_params, "\"default\"".as_slice(), "raw parameter response was fabricated")
+  require_not_contains(raw_params, "\"200\"".as_slice(), "raw parameter response fabricated status 200")
+
 fn require_contains(value: String, needle: StringSlice, message: String) -> void
   if not value.contains(needle):
+    panic(message)
+
+fn require_not_contains(value: String, needle: StringSlice, message: String) -> void
+  if value.contains(needle):
     panic(message)
 
 fn openapi_string(value: App) -> String

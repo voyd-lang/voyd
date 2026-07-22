@@ -9,7 +9,7 @@ use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 use super::openapi_parameter_render::append_parameters
 use super::openapi_response_render::response_contracts_json
-use super::openapi_schema::{ content_json, opaque_schema, schema_for }
+use super::openapi_schema::{ content_json, content_without_schema, opaque_schema, schema_for }
 use super::openapi_schema_overlay::apply_schema_docs
 use super::openapi_types::Operation
 use super::contract::OpenApiParameterContract
@@ -43,17 +43,29 @@ pub fn operation_json(
     let ~body = Dict<String, JsonValue>::init()
     body.set("required", JsonBool { value: operation.request_required })
     set_optional_string(body, "description", operation.request_description)
-    let inferred_request_schema = match(operation.request_body)
+    let request_content = match(operation.request_body)
       Some<Shape> { value }:
-        schema_for(value, prefix: prefix.concat("Request".as_slice()), components: components, include_doc_comments: include_doc_comments)
+        content_json(
+          operation.request_content_type,
+          apply_schema_docs(
+            schema_for(value, prefix: prefix.concat("Request".as_slice()), components: components, include_doc_comments: include_doc_comments),
+            operation.request_schema_docs,
+            components: components
+          )
+        )
       None:
-        opaque_schema(operation.request_content_type)
-    let request_schema = apply_schema_docs(
-      inferred_request_schema,
-      operation.request_schema_docs,
-      components: components
-    )
-    body.set("content", content_json(operation.request_content_type, request_schema))
+        if operation.request_content_type.starts_with("text/plain") or operation.request_content_type.equals("application/octet-stream"):
+          content_json(
+            operation.request_content_type,
+            apply_schema_docs(
+              opaque_schema(operation.request_content_type),
+              operation.request_schema_docs,
+              components: components
+            )
+          )
+        else:
+          content_without_schema(operation.request_content_type)
+    body.set("content", request_content)
     out.set("requestBody", JsonObject { value: body })
 
   if not operation.responses.is_empty():

@@ -535,7 +535,8 @@ export const typeCallExpr = (
         applyCurrentSubstitution(calleeType, ctx, state),
       );
       if (
-        intrinsicName === "__boundary_shape_of" &&
+        (intrinsicName === "__boundary_shape_of" ||
+          intrinsicName === "__boundary_try_shape_of") &&
         signature &&
         instantiation &&
         (signature.typeParams?.length ?? 0) > 0
@@ -805,9 +806,8 @@ const typeStaticTraitCall = ({
     if (match && !match.ok) {
       return [];
     }
-    const inferredSubstitution = match?.ok === true
-      ? match.substitution
-      : new Map<TypeParamId, TypeId>();
+    const inferredSubstitution =
+      match?.ok === true ? match.substitution : new Map<TypeParamId, TypeId>();
     return Array.from(template.staticMethods.entries()).flatMap(
       ([traitMethod, implMethod]) => {
         if (ctx.symbolTable.getSymbol(traitMethod).name !== methodName) {
@@ -860,10 +860,7 @@ const typeStaticTraitCall = ({
           ...signature,
           parameters: signature.parameters.map((parameter) => ({
             ...parameter,
-            type: ctx.arena.substitute(
-              parameter.type,
-              signatureSubstitution,
-            ),
+            type: ctx.arena.substitute(parameter.type, signatureSubstitution),
           })),
           returnType: ctx.arena.substitute(
             signature.returnType,
@@ -871,24 +868,28 @@ const typeStaticTraitCall = ({
           ),
           typeParams: signature.typeParams?.slice(0, methodTypeParamCount),
         };
-        return [{
-          template,
-          traitMethod,
-          implMethod,
-          substitution: inferredSubstitution,
-          symbol: symbolRef.symbol,
-          symbolRef,
-          signature: specializedSignature,
-          originalSignature: signature,
-          inferredTypeArguments,
-        }];
+        return [
+          {
+            template,
+            traitMethod,
+            implMethod,
+            substitution: inferredSubstitution,
+            symbol: symbolRef.symbol,
+            symbolRef,
+            signature: specializedSignature,
+            originalSignature: signature,
+            inferredTypeArguments,
+          },
+        ];
       },
     );
   });
   const seenCandidates = new Set<string>();
   const candidates = rawCandidates.filter((candidate) => {
     const key = targetIsTypeParameter
-      ? symbolRefKey(canonicalSymbolRefForTypingContext(candidate.traitMethod, ctx))
+      ? symbolRefKey(
+          canonicalSymbolRefForTypingContext(candidate.traitMethod, ctx),
+        )
       : symbolRefKey(candidate.symbolRef);
     if (seenCandidates.has(key)) {
       return false;
@@ -906,9 +907,7 @@ const typeStaticTraitCall = ({
     typeArguments,
   });
   if (matches.length > 1) {
-    throw new Error(
-      `ambiguous static trait method ${methodName}`,
-    );
+    throw new Error(`ambiguous static trait method ${methodName}`);
   }
   const selected = matches[0];
   if (selected) {
@@ -945,7 +944,9 @@ const typeStaticTraitCall = ({
       ctx.symbolTable.getSymbol(method.symbol).name === methodName,
   );
   if (!traitDecl || !traitMethod) {
-    throw new Error(`missing declaration for static trait method ${methodName}`);
+    throw new Error(
+      `missing declaration for static trait method ${methodName}`,
+    );
   }
   const traitTypeArguments = resolveTypeArguments(
     expr.targetTypeArguments,
@@ -1017,7 +1018,10 @@ const typeStaticTraitCall = ({
   });
   ctx.table.setExprType(calleeExpr.id, calleeType);
   ctx.resolvedExprTypes.set(calleeExpr.id, calleeType);
-  const selectedRef = canonicalSymbolRefForTypingContext(calleeExpr.symbol, ctx);
+  const selectedRef = canonicalSymbolRefForTypingContext(
+    calleeExpr.symbol,
+    ctx,
+  );
   const callerInstanceKey = state.currentFunction?.instanceKey;
   if (!callerInstanceKey) {
     throw new Error(`missing function instance key for call ${expr.id}`);
@@ -1163,12 +1167,13 @@ export const typeMethodCallExpr = (
           methodName: expr.method,
           ctx,
         })
-      : constrainedResolution ?? resolveMethodCallCandidates({
+      : (constrainedResolution ??
+        resolveMethodCallCandidates({
           receiverType: targetType,
           methodName: expr.method,
           ctx,
           state,
-        });
+        }));
   const resolvedSelection =
     typeof expr.traitSymbol === "number" ||
     !concreteConstrainedResolution ||
@@ -1184,7 +1189,6 @@ export const typeMethodCallExpr = (
     state,
   });
   const selected = selection.selected;
-
 
   if (!selected) {
     return finalizeCall({ returnType: ctx.primitives.unknown });
@@ -3929,9 +3933,7 @@ const selectMethodCallCandidate = ({
     span: expr.span,
   });
   const receiverDesc =
-    probeArgs[0] === undefined
-      ? undefined
-      : ctx.arena.get(probeArgs[0].type);
+    probeArgs[0] === undefined ? undefined : ctx.arena.get(probeArgs[0].type);
   const receiverIsTrait =
     receiverDesc?.kind === "trait" ||
     (receiverDesc?.kind === "intersection" &&
@@ -4112,13 +4114,11 @@ const preferLeastGenericMethodAliases = ({
     }
     const shape = overloadCallShape(candidate.signature);
     const typeParameterCount = candidate.signature.typeParams?.length ?? 0;
-    return !candidates.some(
-      (other) => {
-        if (!isMethodAlias(other)) return false;
-        if (overloadCallShape(other.signature) !== shape) return false;
-        return (other.signature.typeParams?.length ?? 0) < typeParameterCount;
-      },
-    );
+    return !candidates.some((other) => {
+      if (!isMethodAlias(other)) return false;
+      if (overloadCallShape(other.signature) !== shape) return false;
+      return (other.signature.typeParams?.length ?? 0) < typeParameterCount;
+    });
   });
 };
 
@@ -4291,7 +4291,10 @@ const resolveStructuralTraitMethodCandidates = ({
       },
       ctx,
     });
-    if (!match.ok && !typeSatisfies(receiverType, template.target, ctx, state)) {
+    if (
+      !match.ok &&
+      !typeSatisfies(receiverType, template.target, ctx, state)
+    ) {
       return [];
     }
     const constraintMatch =
@@ -4315,7 +4318,8 @@ const resolveStructuralTraitMethodCandidates = ({
       return [];
     }
     const implMethod = Array.from(template.methods.entries()).find(
-      ([traitMethod]) => ctx.symbolTable.getSymbol(traitMethod).name === methodName,
+      ([traitMethod]) =>
+        ctx.symbolTable.getSymbol(traitMethod).name === methodName,
     )?.[1];
     if (typeof implMethod !== "number") {
       return [];
@@ -4379,16 +4383,18 @@ const resolveStructuralTraitMethodCandidates = ({
       returnType: ctx.arena.substitute(signature.returnType, substitution),
       typeParams: signature.typeParams?.slice(0, methodTypeParamCount),
     };
-    return [{
-      symbol: symbolRef.symbol,
-      symbolRef,
-      signature: specializedSignature,
-      originalSignature: signature,
-      inferredTypeArguments,
-      trustedTypeArguments: true,
-      receiverTypeOverride:
-        typeof constraintType === "number" ? receiverType : undefined,
-    }];
+    return [
+      {
+        symbol: symbolRef.symbol,
+        symbolRef,
+        signature: specializedSignature,
+        originalSignature: signature,
+        inferredTypeArguments,
+        trustedTypeArguments: true,
+        receiverTypeOverride:
+          typeof constraintType === "number" ? receiverType : undefined,
+      },
+    ];
   });
 
   return { candidates };
@@ -4431,7 +4437,8 @@ const structuralImplTargetCouldMatch = (
       const actualOwner = nominalOwner(actualMember);
       return expectedOwner && actualOwner
         ? symbolRefEquals(expectedOwner, actualOwner)
-        : ctx.arena.get(expectedMember).kind === ctx.arena.get(actualMember).kind;
+        : ctx.arena.get(expectedMember).kind ===
+            ctx.arena.get(actualMember).kind;
     });
     if (index < 0) {
       return false;
@@ -7442,9 +7449,8 @@ const inlineLambdaExpectedTypeParamPenalty = <
       continue;
     }
     if (
-      ctx.arena.get(
-        unfoldRecursiveTypeId(expectedDesc.returnType, ctx),
-      ).kind === "type-param-ref"
+      ctx.arena.get(unfoldRecursiveTypeId(expectedDesc.returnType, ctx))
+        .kind === "type-param-ref"
     ) {
       penalty += 1;
     }
@@ -7713,136 +7719,138 @@ const resolveTraitDispatchOverload = <
         (right.signature.typeParams?.length ?? 0),
     )
     .find((candidate) => {
-    const { symbol, signature } = candidate;
-    if (signature.parameters.length === 0) {
-      return false;
-    }
-    const candidateModuleId = candidate.symbolRef?.moduleId ?? ctx.moduleId;
-    const methodMetadata = traitMethodImplMetadataFor({
-      symbol,
-      moduleId: candidateModuleId,
-      ctx,
-    });
-    if (!methodMetadata) {
-      return false;
-    }
+      const { symbol, signature } = candidate;
+      if (signature.parameters.length === 0) {
+        return false;
+      }
+      const candidateModuleId = candidate.symbolRef?.moduleId ?? ctx.moduleId;
+      const methodMetadata = traitMethodImplMetadataFor({
+        symbol,
+        moduleId: candidateModuleId,
+        ctx,
+      });
+      if (!methodMetadata) {
+        return false;
+      }
 
-    const methodTraitRef = traitSymbolRefFor({
-      traitSymbol: methodMetadata.metadata.traitSymbol,
-      moduleId: methodMetadata.moduleId,
-      ctx,
-    });
-    if (!symbolRefEquals(methodTraitRef, receiverDesc.owner)) {
-      return false;
-    }
+      const methodTraitRef = traitSymbolRefFor({
+        traitSymbol: methodMetadata.metadata.traitSymbol,
+        moduleId: methodMetadata.moduleId,
+        ctx,
+      });
+      if (!symbolRefEquals(methodTraitRef, receiverDesc.owner)) {
+        return false;
+      }
 
-    const impls =
-      methodMetadata.moduleId === ctx.moduleId
-        ? ctx.traitImplsByTrait.get(methodMetadata.metadata.traitSymbol)
-        : ctx.dependencies
-            .get(methodMetadata.moduleId)
-            ?.typing.traitImplsByTrait.get(methodMetadata.metadata.traitSymbol);
-    const templates =
-      methodMetadata.moduleId === ctx.moduleId
-        ? ctx.traits.getImplTemplatesForTrait(
-            methodMetadata.metadata.traitSymbol,
-          )
-        : ctx.dependencies
-            .get(methodMetadata.moduleId)
-            ?.typing.traits.getImplTemplatesForTrait(
+      const impls =
+        methodMetadata.moduleId === ctx.moduleId
+          ? ctx.traitImplsByTrait.get(methodMetadata.metadata.traitSymbol)
+          : ctx.dependencies
+              .get(methodMetadata.moduleId)
+              ?.typing.traitImplsByTrait.get(
+                methodMetadata.metadata.traitSymbol,
+              );
+      const templates =
+        methodMetadata.moduleId === ctx.moduleId
+          ? ctx.traits.getImplTemplatesForTrait(
               methodMetadata.metadata.traitSymbol,
-            );
-    const dependency =
-      methodMetadata.moduleId === ctx.moduleId
-        ? undefined
-        : ctx.dependencies.get(methodMetadata.moduleId);
-    const translateDependencyType =
-      dependency &&
-      !typingContextsShareInterners({
-        sourceArena: dependency.typing.arena,
-        targetArena: ctx.arena,
-        sourceEffects: dependency.typing.effects,
-        targetEffects: ctx.effects,
-      })
-        ? createTranslation({
-            sourceArena: dependency.typing.arena,
-            targetArena: ctx.arena,
-            sourceEffects: dependency.typing.effects,
-            targetEffects: ctx.effects,
-            paramMap: new Map<TypeParamId, TypeParamId>(),
-            cache: new Map(),
-            mapSymbol: (owner) =>
-              mapDependencySymbolToLocal({
-                owner,
-                dependency,
-                ctx,
-                allowUnexported: true,
-              }),
-          })
-        : undefined;
-    const toLocalType = (type: TypeId): TypeId =>
-      translateDependencyType ? translateDependencyType(type) : type;
+            )
+          : ctx.dependencies
+              .get(methodMetadata.moduleId)
+              ?.typing.traits.getImplTemplatesForTrait(
+                methodMetadata.metadata.traitSymbol,
+              );
+      const dependency =
+        methodMetadata.moduleId === ctx.moduleId
+          ? undefined
+          : ctx.dependencies.get(methodMetadata.moduleId);
+      const translateDependencyType =
+        dependency &&
+        !typingContextsShareInterners({
+          sourceArena: dependency.typing.arena,
+          targetArena: ctx.arena,
+          sourceEffects: dependency.typing.effects,
+          targetEffects: ctx.effects,
+        })
+          ? createTranslation({
+              sourceArena: dependency.typing.arena,
+              targetArena: ctx.arena,
+              sourceEffects: dependency.typing.effects,
+              targetEffects: ctx.effects,
+              paramMap: new Map<TypeParamId, TypeParamId>(),
+              cache: new Map(),
+              mapSymbol: (owner) =>
+                mapDependencySymbolToLocal({
+                  owner,
+                  dependency,
+                  ctx,
+                  allowUnexported: true,
+                }),
+            })
+          : undefined;
+      const toLocalType = (type: TypeId): TypeId =>
+        translateDependencyType ? translateDependencyType(type) : type;
 
-    if (
-      (!impls || impls.length === 0) &&
-      (!templates || templates.length === 0)
-    ) {
-      return false;
-    }
+      if (
+        (!impls || impls.length === 0) &&
+        (!templates || templates.length === 0)
+      ) {
+        return false;
+      }
 
-    const hasMatchingImpl =
-      impls?.some(
-        (entry) =>
-          entry.methods.get(methodMetadata.metadata.traitMethodSymbol) ===
-            symbol &&
-          traitTemplateCouldMatch(
-            receiver.type,
-            toLocalType(entry.trait),
+      const hasMatchingImpl =
+        impls?.some(
+          (entry) =>
+            entry.methods.get(methodMetadata.metadata.traitMethodSymbol) ===
+              symbol &&
+            traitTemplateCouldMatch(
+              receiver.type,
+              toLocalType(entry.trait),
+              ctx,
+            ) &&
+            typeSatisfies(receiver.type, toLocalType(entry.trait), ctx, state),
+        ) === true;
+      const hasCompatibleTemplate =
+        templates?.some((template) => {
+          const implMethod = template.methods.get(
+            methodMetadata.metadata.traitMethodSymbol,
+          );
+          if (implMethod !== symbol) {
+            return false;
+          }
+          const templateTrait = toLocalType(template.trait);
+          if (!traitTemplateCouldMatch(receiver.type, templateTrait, ctx)) {
+            return false;
+          }
+          const comparison = unifyWithBudget({
+            actual: receiver.type,
+            expected: templateTrait,
+            options: {
+              location: ctx.hir.module.ast,
+              reason: "trait object dispatch",
+              variance: "covariant",
+              allowUnknown,
+            },
             ctx,
-          ) &&
-          typeSatisfies(receiver.type, toLocalType(entry.trait), ctx, state),
-      ) === true;
-    const hasCompatibleTemplate =
-      templates?.some((template) => {
-        const implMethod = template.methods.get(
-          methodMetadata.metadata.traitMethodSymbol,
-        );
-        if (implMethod !== symbol) {
-          return false;
-        }
-        const templateTrait = toLocalType(template.trait);
-        if (!traitTemplateCouldMatch(receiver.type, templateTrait, ctx)) {
-          return false;
-        }
-        const comparison = unifyWithBudget({
-          actual: receiver.type,
-          expected: templateTrait,
-          options: {
-            location: ctx.hir.module.ast,
-            reason: "trait object dispatch",
-            variance: "covariant",
-            allowUnknown,
-          },
-          ctx,
-        });
-        return comparison.ok;
-      }) === true;
-    if (!hasMatchingImpl && !hasCompatibleTemplate) {
-      return false;
-    }
-    const adjustedSignature = signatureWithAdjustedTraitDispatchParameters({
-      args,
-      signature,
-      calleeSymbol: symbol,
-      calleeModuleId: candidateModuleId,
-      ctx,
-    });
-    return callArgumentsSatisfyParams({
-      args,
-      params: adjustedSignature.parameters,
-      ctx,
-      state,
-    });
+          });
+          return comparison.ok;
+        }) === true;
+      if (!hasMatchingImpl && !hasCompatibleTemplate) {
+        return false;
+      }
+      const adjustedSignature = signatureWithAdjustedTraitDispatchParameters({
+        args,
+        signature,
+        calleeSymbol: symbol,
+        calleeModuleId: candidateModuleId,
+        ctx,
+      });
+      return callArgumentsSatisfyParams({
+        args,
+        params: adjustedSignature.parameters,
+        ctx,
+        state,
+      });
     });
 
   if (!candidate) {
@@ -8157,6 +8165,18 @@ const typeIntrinsicCall = (
         args,
         typeArguments,
       });
+    case "__boundary_msgpack_to_value_or_identity":
+      assertIntrinsicArgCount({
+        name: "__boundary_msgpack_to_value_or_identity",
+        args,
+        expected: 2,
+      });
+      if ((typeArguments?.length ?? 0) !== 2) {
+        throw new Error(
+          "intrinsic __boundary_msgpack_to_value_or_identity requires exactly 2 type arguments",
+        );
+      }
+      return typeArguments![0]!;
     case "__boundary_shape_of":
       assertIntrinsicArgCount({
         name: "__boundary_shape_of",
@@ -8167,6 +8187,18 @@ const typeIntrinsicCall = (
         name: "__boundary_shape_of",
         typeArguments,
         detail: "reified type",
+      });
+      return expectedReturnType ?? ctx.primitives.unknown;
+    case "__boundary_try_shape_of":
+      assertIntrinsicArgCount({
+        name: "__boundary_try_shape_of",
+        args,
+        expected: 0,
+      });
+      requireSingleTypeArgument({
+        name: "__boundary_try_shape_of",
+        typeArguments,
+        detail: "optionally reified type",
       });
       return expectedReturnType ?? ctx.primitives.unknown;
     case "__shift_l":

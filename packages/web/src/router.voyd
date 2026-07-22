@@ -519,13 +519,7 @@ impl App
     path: String,
     { body: P, handler: fn(I) : (open) -> Response }
   ) -> App
-    self.with_route_contract(path.as_slice(), Method::Post {}, (ctx: Context) -> Response =>
-      match(body.extract_body(ctx.request))
-        Ok<I> { value }:
-          handler(value)
-        Err<Rejection> { error }:
-          ctx.reject(error)
-    , contract: route_fragment(extractor_operation(body.openapi_request())))
+    self.post<I, P>(path.as_slice(), body: body, handler: handler)
 
   api fn post<I, P: FromBody<I>, T: IntoResponse<T>>(
     self,
@@ -548,15 +542,7 @@ impl App
     path: String,
     { body: P, handler: fn(I) : (open) -> T }
   ) -> App
-    self.with_route_contract(path.as_slice(), Method::Post {}, (ctx: Context) -> Response =>
-      match(body.extract_body(ctx.request))
-        Ok<I> { value }:
-          typed_response<T>(handler(value))
-        Err<Rejection> { error }:
-          ctx.reject(error)
-    , contract: route_fragment(
-      extractor_operation(body.openapi_request()).with_responses(inferred_responses<T>())
-    ))
+    self.post<I, P, T>(path.as_slice(), body: body, handler: handler)
 
   api fn post<I>(
     self,
@@ -577,14 +563,7 @@ impl App
     path: String,
     { body: JsonBody, handler: fn(I) : (open) -> Response }
   ) -> App
-    self.with_route_contract(path.as_slice(), Method::Post {}, (ctx: Context) -> Response =>
-      body
-      match(json_body_value(ctx.request))
-        Ok<JsonValue> { value }:
-          handler(decode_json_value<I>(value))
-        Err<Rejection> { error }:
-          ctx.reject(error)
-    , contract: json_request_fragment<I>())
+    self.post<I>(path.as_slice(), body: body, handler: handler)
 
   api fn post<I, T: IntoResponse<T>>(
     self,
@@ -606,14 +585,7 @@ impl App
     path: String,
     { body: JsonBody, handler: fn(I) : (open) -> T }
   ) -> App
-    self.with_route_contract(path.as_slice(), Method::Post {}, (ctx: Context) -> Response =>
-      body
-      match(json_body_value(ctx.request))
-        Ok<JsonValue> { value }:
-          typed_response<T>(handler(decode_json_value<I>(value)))
-        Err<Rejection> { error }:
-          ctx.reject(error)
-    , contract: typed_json_request_fragment<I, T>())
+    self.post<I, T>(path.as_slice(), body: body, handler: handler)
 
   api fn post<I, R: IntoResponse<R>>(
     self,
@@ -641,7 +613,9 @@ impl App
           handler(decode_json_value<I>(value))
         Err<Rejection> { error }:
           ctx.reject(error)
-    , contract: route_fragment(operation().with_json_body<I>().with_docs(docs)))
+    , contract: route_fragment(
+      operation().with_json_body<I>().with_docs(docs).with_opaque_response()
+    ))
 
   api fn post<I>(
     self,
@@ -655,14 +629,7 @@ impl App
     path: String,
     { body: JsonBody, handler: fn(I) : (open) -> R, docs: RouteDocs }
   ) -> App
-    self.with_route_contract(path.as_slice(), Method::Post {}, (ctx: Context) -> Response =>
-      body
-      match(json_body_value(ctx.request))
-        Ok<JsonValue> { value }:
-          typed_response<R>(handler(decode_json_value<I>(value)))
-        Err<Rejection> { error }:
-          ctx.reject(error)
-    , contract: typed_json_fragment<I, R>(docs))
+    self.post<I, R>(path.as_slice(), body: body, handler: handler, docs: docs)
 
   api fn post<I, R: IntoResponse<R>, D>(
     self,
@@ -686,17 +653,7 @@ impl App
     path: String,
     { body: JsonBody, handler: fn(I) : (open) -> R, docs: D }
   ) -> App
-    self.with_route_contract(path.as_slice(), Method::Post {}, (ctx: Context) -> Response =>
-      body
-      match(json_body_value(ctx.request))
-        Ok<JsonValue> { value }:
-          typed_response<R>(handler(decode_json_value<I>(value)))
-        Err<Rejection> { error }:
-          ctx.reject(error)
-    , contract: documented_fragment(
-      operation().with_json_body<I>().with_responses(inferred_responses<R>()),
-      docs
-    ))
+    self.post<I, R, D>(path.as_slice(), body: body, handler: handler, docs: docs)
 
   api fn post<I, P: FromBody<I>, S, A: FromAuth<S>, T: IntoResponse<T>>(
     self,
@@ -1062,15 +1019,7 @@ impl App
     path: String,
     { method: Method, body: P, handler: fn(I) : (open) -> T }
   ) -> App
-    self.with_route_contract(path.as_slice(), method, (ctx: Context) -> Response =>
-      match(body.extract_body(ctx.request))
-        Ok<I> { value }:
-          typed_response<T>(handler(value))
-        Err<Rejection> { error }:
-          ctx.reject(error)
-    , contract: route_fragment(
-      extractor_operation(body.openapi_request()).with_responses(inferred_responses<T>())
-    ))
+    self.route<I, P, T>(path.as_slice(), method: method, body: body, handler: handler)
 
   api fn route<I, T: IntoResponse<T>>(
     self,
@@ -1094,17 +1043,7 @@ impl App
     path: String,
     { method: Method, body: JsonBody, handler: fn(I) : (open) -> T }
   ) -> App
-    self.with_route_contract(path.as_slice(), method, (ctx: Context) -> Response =>
-      body
-      match(json_body_value(ctx.request))
-        Ok<JsonValue> { value }:
-          let result = handler(decode_json_value<I>(value))
-          typed_response<T>(result)
-        Err<Rejection> { error }:
-          ctx.reject(error)
-    , contract: route_fragment(
-      operation().with_json_body<I>().with_responses(inferred_responses<T>())
-    ))
+    self.route<I, T>(path.as_slice(), method: method, body: body, handler: handler)
 
   api fn route<I, R: IntoResponse<R>, D>(
     self,
@@ -1407,7 +1346,9 @@ impl App
           handler(value)
         Err<Rejection> { error }:
           ctx.reject(error)
-    , contract: route_fragment(operation().with_path_params<P>()))
+    , contract: route_fragment(
+      operation().with_path_params<P>().with_opaque_response()
+    ))
 
   fn with_unit_route<T: IntoResponse<T>>(
     self,
@@ -1480,7 +1421,9 @@ impl App
                 decode_params<P>(params_source),
                 decode_query<Q>(query_source)
               )
-    , contract: route_fragment(operation().with_path_params<P>().with_query<Q>()))
+    , contract: route_fragment(
+      operation().with_path_params<P>().with_query<Q>().with_opaque_response()
+    ))
 
   fn with_auth_response_route<S, A: FromAuth<S>>(
     self,

@@ -68,9 +68,10 @@ import { compileExternalCall } from "./external/imports.js";
 import { emitBoundaryShape } from "./boundary/shape.js";
 import { buildInstanceSubstitution } from "./type-substitution.js";
 import {
-  DiagnosticError,
-  diagnosticFromCode,
-} from "../diagnostics/index.js";
+  compileOptionalNoneValue,
+  compileOptionalSomeValue,
+} from "./optionals.js";
+import { DiagnosticError, diagnosticFromCode } from "../diagnostics/index.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
@@ -1196,30 +1197,33 @@ export const compileIntrinsicCall = ({
     case "__boundary_msgpack_to_value": {
       assertArgCount(name, args, 1);
       const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
-      const serializer = findSerializerForType(returnTypeId, ctx);
-      if (serializer) {
-        if (serializer.formatId !== "msgpack") {
-          throw new Error(
-            `boundary value deserializer format ${serializer.formatId} is not supported`,
-          );
-        }
-        const msgpack = ensureMsgPackFunctions(ctx);
+      return emitBoundaryMsgPackToValue({
+        value: args[0]!,
+        returnTypeId,
+        ctx,
+        fnCtx,
+      });
+    }
+    case "__boundary_msgpack_to_value_or_identity": {
+      assertArgCount(name, args, 2);
+      const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      const sourceTypeId = getRequiredExprType(
+        call.args[0]!.expr,
+        ctx,
+        instanceId,
+      );
+      if (sourceTypeId === returnTypeId) {
         return coerceValueToType({
           value: args[0]!,
-          actualType: msgpack.msgPackTypeId,
+          actualType: sourceTypeId,
           targetType: returnTypeId,
           ctx,
           fnCtx,
         });
       }
-      return unpackBoundaryValueFromMsgPack({
-        value: args[0]!,
-        schema: deriveBoundarySchema({
-          typeId: returnTypeId,
-          ctx,
-          label: "__boundary_msgpack_to_value target",
-          options: { tagStandaloneVariants: true },
-        }),
+      return emitBoundaryMsgPackToValue({
+        value: args[1]!,
+        returnTypeId,
         ctx,
         fnCtx,
       });
@@ -1233,7 +1237,9 @@ export const compileIntrinsicCall = ({
           message: "shape_of<T>() requires one resolved type argument",
         });
       }
-      if (ctx.program.types.getTypeDesc(targetTypeId).kind === "type-param-ref") {
+      if (
+        ctx.program.types.getTypeDesc(targetTypeId).kind === "type-param-ref"
+      ) {
         throw shapeReificationDiagnostic({
           call,
           message:
@@ -1253,6 +1259,47 @@ export const compileIntrinsicCall = ({
         }
         if (error instanceof BoundarySchemaError) {
           throw shapeReificationDiagnostic({ call, message: error.message });
+        }
+        throw error;
+      }
+    }
+    case "__boundary_try_shape_of": {
+      assertArgCount(name, args, 0);
+      const [targetTypeId] = intrinsicCallTypeArgs({ call, ctx, instanceId });
+      if (targetTypeId === undefined) {
+        throw new Error(
+          "try_shape_of<T>() requires one resolved type argument",
+        );
+      }
+      const optionalTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      const optional = ctx.program.optionals.getOptionalInfo(
+        ctx.moduleId,
+        optionalTypeId,
+      );
+      if (!optional) {
+        throw new Error("try_shape_of<T>() must return Option<Shape>");
+      }
+      try {
+        const value = emitBoundaryShape({
+          typeId: targetTypeId,
+          resultTypeId: optional.innerType,
+          ctx,
+          fnCtx,
+        });
+        return compileOptionalSomeValue({
+          targetTypeId: optionalTypeId,
+          value,
+          valueTypeId: optional.innerType,
+          ctx,
+          fnCtx,
+        });
+      } catch (error) {
+        if (error instanceof BoundarySchemaError) {
+          return compileOptionalNoneValue({
+            targetTypeId: optionalTypeId,
+            ctx,
+            fnCtx,
+          });
         }
         throw error;
       }
@@ -1511,6 +1558,46 @@ const shapeReificationDiagnostic = ({
       span: call.span,
     }),
   );
+
+const emitBoundaryMsgPackToValue = ({
+  value,
+  returnTypeId,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  returnTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const serializer = findSerializerForType(returnTypeId, ctx);
+  if (serializer) {
+    if (serializer.formatId !== "msgpack") {
+      throw new Error(
+        `boundary value deserializer format ${serializer.formatId} is not supported`,
+      );
+    }
+    const msgpack = ensureMsgPackFunctions(ctx);
+    return coerceValueToType({
+      value,
+      actualType: msgpack.msgPackTypeId,
+      targetType: returnTypeId,
+      ctx,
+      fnCtx,
+    });
+  }
+  return unpackBoundaryValueFromMsgPack({
+    value,
+    schema: deriveBoundarySchema({
+      typeId: returnTypeId,
+      ctx,
+      label: "__boundary_msgpack_to_value target",
+      options: { tagStandaloneVariants: true },
+    }),
+    ctx,
+    fnCtx,
+  });
+};
 
 const intrinsicCallTypeArgs = ({
   call,

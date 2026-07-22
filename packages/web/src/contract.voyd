@@ -1,7 +1,7 @@
 //! Provider-facing request and response contracts used by automatic OpenAPI.
 
 use std::array::Array
-use std::meta::{ Shape, shape_of }
+use std::meta::{ Shape, shape_of, try_shape_of }
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 
@@ -427,7 +427,7 @@ pub fn openapi_request<T>(
   OpenApiRequestContract {
     description: description,
     content_type: content_type.to_string(),
-    schema: Some<Shape> { value: shape_of<T>() },
+    schema: try_shape_of<T>(),
     required: required ?? true
   }
 
@@ -482,7 +482,7 @@ pub fn response_contract<T>(
     is_default: false,
     description: description.to_string(),
     content_type: Some<String> { value: content_type.to_string() },
-    schema: Some<Shape> { value: shape_of<T>() },
+    schema: try_shape_of<T>(),
     event_schema: None {},
     headers: headers ?? Array<OpenApiHeader>::init()
   }

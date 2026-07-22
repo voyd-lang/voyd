@@ -1,5 +1,6 @@
 use std::array::Array
 use std::error::HostError
+use std::json::JsonValue
 use std::meta::{
   ArrayShape,
   BoolShape,
@@ -11,7 +12,8 @@ use std::meta::{
   StringShape,
   UnionShape,
   UnitShape,
-  shape_of
+  shape_of,
+  try_shape_of
 }
 use std::optional::all
 use std::string::type::String
@@ -177,3 +179,11 @@ test "shape_of keeps canonical names and documentation from one declaration":
           Test::fail()
     else:
       Test::fail()
+
+test "try_shape_of returns only honest supported shapes":
+  match(try_shape_of<MetaShapeRequest>())
+    Some<Shape>: void
+    None: Test::fail()
+  match(try_shape_of<JsonValue>())
+    None: void
+    Some<Shape>: Test::fail()

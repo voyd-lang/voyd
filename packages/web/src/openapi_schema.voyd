@@ -54,6 +54,11 @@ pub fn content_json(content_type: String, schema: JsonValue) -> JsonValue
   content.set(content_type, JsonObject { value: media })
   JsonObject { value: content }
 
+pub fn content_without_schema(content_type: String) -> JsonValue
+  let ~content = Dict<String, JsonValue>::init()
+  content.set(content_type, JsonObject { value: Dict<String, JsonValue>::init() })
+  JsonObject { value: content }
+
 pub fn schema_node(
   node: ShapeNode,
   { prefix: String, ~components: Dict<String, JsonValue> }

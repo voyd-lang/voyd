@@ -26,7 +26,7 @@ pub fn hidden_fragment() -> RouteContract
   )
 
 pub fn json_request_fragment<I>() -> RouteContract
-  route_fragment(operation().with_json_body<I>())
+  route_fragment(operation().with_json_body<I>().with_opaque_response())
 
 pub fn typed_json_request_fragment<I, R: IntoResponse<R>>() -> RouteContract
   route_fragment(

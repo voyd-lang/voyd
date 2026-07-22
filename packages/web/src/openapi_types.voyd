@@ -6,7 +6,7 @@ use std::meta::{ Shape, shape_of }
 use std::json::JsonValue
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
-use super::contract::{ OpenApiParameterContract, OpenApiRequestContract, OpenApiResponseContract, OpenApiResponseSchemaDocs, OpenApiSchemaDocs, RouteDocs }
+use super::contract::{ OpenApiParameterContract, OpenApiRequestContract, OpenApiResponseContract, OpenApiResponseSchemaDocs, OpenApiSchemaDocs, RouteDocs, json_request }
 
 /// Top-level API information.
 pub obj Info {
@@ -161,7 +161,7 @@ impl Operation
     copy_operation(self, cookie_params: shape)
 
   api fn with_json_body<T>(self) -> Operation
-    copy_operation(self, request_body: shape_of<T>(), request_content_type: "application/json")
+    self.with_request(json_request<T>())
 
   api fn responds_json<T>(self) -> Operation
     copy_operation(self, response_body: shape_of<T>(), response_content_type: "application/json")

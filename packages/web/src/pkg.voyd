@@ -153,6 +153,8 @@ pub use src::response::{
   json_value,
   result_json,
   option_json,
+  result_json_response,
+  option_json_response,
   no_content,
   text as text_response,
   bytes as bytes_response,

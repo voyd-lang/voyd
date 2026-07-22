@@ -22,7 +22,7 @@ use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
 use src::extract::json_body
-use src::response::{ Accepted, Created, DocumentedResponse, IntoResponse, Json, NoContent, OpenApiResponse, Text, accepted, bytes, created, documented_response, json, no_content, text }
+use src::response::{ Accepted, Created, DocumentedResponse, IntoResponse, Json, NoContent, OpenApiResponse, Text, accepted, bytes, created, documented_response, json, no_content, option_json, result_json, text }
 use src::response_docs::{ inferred_responses, option_responses, result_responses }
 use src::response_composites::self as response_composites
 use src::router::{ App, Context, app }
@@ -88,6 +88,17 @@ fn option_reply() -> Option<Json<AutomaticArticle>>
   Some<Json<AutomaticArticle>> {
     value: json(AutomaticArticle { id: 4, title: "found".to_string() })
   }
+
+fn mapped_result_reply() -> Result<Json<AutomaticArticle>, Accepted<AutomaticArticle>>
+  let value: Result<AutomaticArticle, Accepted<AutomaticArticle>> = Ok<AutomaticArticle> {
+    value: AutomaticArticle { id: 5, title: "mapped" }
+  }
+  result_json<AutomaticArticle, Accepted<AutomaticArticle>>(value)
+
+fn mapped_option_reply() -> Option<Json<AutomaticArticle>>
+  option_json<AutomaticArticle>(Some<AutomaticArticle> {
+    value: AutomaticArticle { id: 6, title: "optional" }
+  })
 
 fn html_reply() -> HtmlResponse
   html("<main>ready</main>")
@@ -238,6 +249,26 @@ test "automatic routes cover typed custom text binary result option and opaque r
       require_contains(value, "\"text/event-stream; charset=utf-8\"".as_slice(), "SSE media type omitted its charset")
       require_contains(value, "\"x-voyd-event-schema\"".as_slice(), "SSE event schema metadata was omitted")
       require_contains(value, "Opaque response".as_slice(), "raw response was not kept opaque")
+
+test "JSON result and option helpers preserve automatic response contracts":
+  let web_app = app(openapi: { title: "Mapped responses", version: "1" })
+    .get<Result<Json<AutomaticArticle>, Accepted<AutomaticArticle>>>(
+      "/result-json",
+      handler: mapped_result_reply
+    )
+    .get<Option<Json<AutomaticArticle>>>(
+      "/option-json",
+      handler: mapped_option_reply
+    )
+  match(stringify(web_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"200\"".as_slice(), "mapped JSON success was erased")
+      require_contains(value, "\"202\"".as_slice(), "mapped result error was erased")
+      require_contains(value, "\"404\"".as_slice(), "mapped option fallback was erased")
+      require_contains(value, "\"id\"".as_slice(), "mapped JSON DTO schema was erased")
+      require_contains(value, "\"title\"".as_slice(), "mapped JSON DTO fields were erased")
 
 fn require_contains(value: String, needle: StringSlice, message: String) -> void
   if not value.contains(needle):

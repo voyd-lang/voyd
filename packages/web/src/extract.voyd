@@ -309,7 +309,10 @@ pub fn decode_cookies<T>(cookies: CookieJar) -> T
   msgpack::unpack_boundary_value<T>(name_values_to_msgpack(cookies.entries))
 
 pub fn decode_json_value<T>(value: JsonValue) -> T
-  msgpack::unpack_boundary_value<T>(json_to_msgpack(value))
+  msgpack::unpack_boundary_value_or_identity<T, JsonValue>(
+    value,
+    json_to_msgpack(value)
+  )
 
 fn extract_boundary_struct<T>(payload: MsgPack, { label: StringSlice }) -> Result<T, Rejection>
   let decoded = msgpack::unpack_boundary_value<T>(payload)

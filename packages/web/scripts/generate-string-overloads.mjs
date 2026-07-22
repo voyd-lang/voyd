@@ -13,6 +13,14 @@ const routesEndMarker = "// END GENERATED STRING FUNCTION OVERLOADS";
 const source = readFileSync(routerPath, "utf8");
 const base = stripGeneratedRegion(source, startMarker, endMarker);
 const methods = readMethods(base);
+validateExplicitOverloads(
+  methods.filter(
+    ({ signature }) =>
+      signature.includes("path: StringSlice") &&
+      signature.endsWith("-> App"),
+  ),
+  renderOverload,
+);
 const signatures = new Set(methods.map(({ signature }) => signature));
 const missing = methods.filter(({ signature }) => {
   const stringSignature = replaceDirectStringSlices(signature);
@@ -36,6 +44,7 @@ const routesBase = stripGeneratedRegion(
   routesEndMarker,
 );
 const functions = readDeclarations(routesBase, "pub fn ");
+validateExplicitOverloads(functions, renderFunctionOverload);
 const functionSignatures = new Set(functions.map(({ signature }) => signature));
 const missingFunctions = functions.filter(({ signature }) => {
   const stringSignature = replaceDirectStringSlices(signature);
@@ -70,11 +79,56 @@ function readDeclarations(value, marker) {
     const close = matchingDelimiter(value, open, "(", ")") + 1;
     const end = value.indexOf("\n", close);
     const raw = value.slice(cursor, end);
-    methods.push({ raw, signature: raw.replace(/\s+/g, " ") });
+    const separator = value.indexOf("\n\n", end + 1);
+    const bodyEnd = separator < 0 ? value.length : separator;
+    const body = value.slice(end + 1, bodyEnd);
+    methods.push({ raw, body, signature: raw.replace(/\s+/g, " ") });
     cursor = end;
   }
 
   return methods;
+}
+
+function validateExplicitOverloads(declarations, render) {
+  const bySignature = new Map(
+    declarations.map((declaration) => [declaration.signature, declaration]),
+  );
+
+  declarations.forEach((declaration) => {
+    const stringSignature = replaceDirectStringSlices(declaration.signature);
+    if (stringSignature === declaration.signature) return;
+    const explicit = bySignature.get(stringSignature);
+    if (!explicit) return;
+
+    const rendered = render(declaration);
+    const expected = normalizeForwardingCall(
+      rendered.slice(rendered.lastIndexOf("\n") + 1),
+    );
+    const actual = normalizeForwardingCall(explicit.body);
+    if (actual !== expected) {
+      throw new Error(
+        `Explicit String overload must forward to its StringSlice twin: ${stringSignature}\nExpected: ${expected}\nActual: ${actual}`,
+      );
+    }
+  });
+}
+
+function normalizeWhitespace(value) {
+  return value
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/\(\s+/g, "(")
+    .replace(/\s+\)/g, ")");
+}
+
+function normalizeForwardingCall(value) {
+  const normalized = normalizeWhitespace(value);
+  const openParen = normalized.indexOf("(");
+  const openAngle = normalized.indexOf("<");
+  if (openAngle < 0 || openAngle > openParen) return normalized;
+
+  const closeAngle = matchingDelimiter(normalized, openAngle, "<", ">");
+  return normalized.slice(0, openAngle) + normalized.slice(closeAngle + 1);
 }
 
 function renderImpl(owner, methods) {

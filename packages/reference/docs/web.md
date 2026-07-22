@@ -580,8 +580,12 @@ post("/api/articles", body: json_body()) do(input: CreateArticle):
 ```
 
 Use `json_value(value)` only when code already has a `JsonValue`. Use
-`result_json(result)` to serialize the successful branch of a `Result`, or
-`option_json(option)` to serialize `Some` and return 404 for `None`.
+`result_json(result)` to turn `Result<T, E>` into `Result<Json<T>, E>`, or
+`option_json(option)` to turn `Option<T>` into `Option<Json<T>>`. These typed
+values preserve automatic OpenAPI schemas and statuses. If an API explicitly
+needs a raw `Response`, call `to_response(result_json(result))` or use
+`result_json_response(result)`; `option_json_response(option)` is the matching
+raw option helper.
 
 ### Content negotiation
 
@@ -829,7 +833,8 @@ returns a new `App`; the exposure route does not describe itself.
 | `text_body()` and limited text | Text body and string schema |
 | `bytes()` and limited bytes | Binary body |
 | Multipart | `multipart/form-data`, opaque when typed parts are unavailable |
-| Raw `Context`, `JsonValue`, or undocumented custom extractor | Honest opaque contract |
+| Raw `JsonValue` body | `application/json` without a fabricated DTO schema |
+| Raw `Context` or undocumented custom extractor | Honest opaque contract |
 
 Raw `Response` has erased its payload type and runtime statuses cannot be
 guessed. Use a typed response or an explicit override for those routes.
