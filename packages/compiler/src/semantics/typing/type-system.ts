@@ -28,6 +28,7 @@ import {
   type ObjectTemplate,
   type ObjectTypeInfo,
   type ObjectField,
+  type FunctionScope,
   type TypingState,
   type TraitImplInstance,
 } from "./types.js";
@@ -3963,6 +3964,14 @@ type UnionBindingCandidate = {
   remainingActualMembers: readonly TypeId[];
 };
 
+type UnionBindingCache = {
+  unscoped: Map<string, readonly UnionBindingCandidate[]>;
+  byFunction: WeakMap<FunctionScope, Map<string, readonly UnionBindingCandidate[]>>;
+};
+
+const unionBindingCaches = new WeakMap<TypingContext, UnionBindingCache>();
+const MAX_UNION_BINDING_CACHE_ENTRIES = 4_096;
+
 type UnionBindingMatch = {
   actualIndex: number;
   bindings: Map<TypeParamId, TypeId>;
@@ -4120,6 +4129,19 @@ const findUnionBindingCandidates = ({
   ctx: TypingContext;
   state: TypingState;
 }): UnionBindingCandidate[] => {
+  const cache = unionBindingCacheFor(ctx, state.currentFunction);
+  const cacheKey = [
+    state.mode,
+    expectedMembers.join(","),
+    actualMembers.join(","),
+    serializeTypeParamBindings(bindings),
+  ].join("|");
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    maybeIncrementUnionSearchCounter("typing.union_search.cache_hit");
+    return cloneUnionBindingCandidates(cached);
+  }
+  maybeIncrementUnionSearchCounter("typing.union_search.cache_miss");
   maybeIncrementUnionSearchCounter("typing.union_search.invocations");
   const solutions: UnionBindingCandidate[] = [];
   const visitedStates = new Set<string>();
@@ -4205,8 +4227,43 @@ const findUnionBindingCandidates = ({
     return [];
   }
 
+  if (cache.size < MAX_UNION_BINDING_CACHE_ENTRIES) {
+    cache.set(cacheKey, cloneUnionBindingCandidates(solutions));
+  }
   return solutions;
 };
+
+const unionBindingCacheFor = (
+  ctx: TypingContext,
+  currentFunction: FunctionScope | undefined,
+): Map<string, readonly UnionBindingCandidate[]> => {
+  const cache = unionBindingCaches.get(ctx) ?? {
+    unscoped: new Map<string, readonly UnionBindingCandidate[]>(),
+    byFunction: new WeakMap<
+      FunctionScope,
+      Map<string, readonly UnionBindingCandidate[]>
+    >(),
+  };
+  if (!unionBindingCaches.has(ctx)) {
+    unionBindingCaches.set(ctx, cache);
+  }
+  if (!currentFunction) {
+    return cache.unscoped;
+  }
+  const scoped = cache.byFunction.get(currentFunction) ?? new Map();
+  if (!cache.byFunction.has(currentFunction)) {
+    cache.byFunction.set(currentFunction, scoped);
+  }
+  return scoped;
+};
+
+const cloneUnionBindingCandidates = (
+  candidates: readonly UnionBindingCandidate[],
+): UnionBindingCandidate[] =>
+  candidates.map((candidate) => ({
+    bindings: new Map(candidate.bindings),
+    remainingActualMembers: candidate.remainingActualMembers,
+  }));
 
 const serializeUnionBindingSearchState = ({
   expected,
