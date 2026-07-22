@@ -1,0 +1,93 @@
+//! Shared constructors and deterministic merging for response documentation.
+
+use std::array::Array
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+use super::contract::{ OpenApiResponseContract, openapi_response, response_contract }
+
+pub fn typed_responses<T>(
+  { status: i32, description: StringSlice, content_type: StringSlice }
+) -> Array<OpenApiResponseContract>
+  let ~out = Array<OpenApiResponseContract>::with_capacity(1)
+  out.push(response_contract<T>(
+    status: status,
+    description: description,
+    content_type: content_type
+  ))
+  out
+
+pub fn typed_responses<T>(
+  { status: i32, description: String, content_type: String }
+) -> Array<OpenApiResponseContract>
+  typed_responses<T>(
+    status: status,
+    description: description.as_slice(),
+    content_type: content_type.as_slice()
+  )
+
+pub fn untyped_responses(
+  { status: i32, description: StringSlice, content_type: StringSlice }
+) -> Array<OpenApiResponseContract>
+  let ~out = Array<OpenApiResponseContract>::with_capacity(1)
+  out.push(openapi_response(
+    status: status,
+    description: description,
+    content_type: Some<String> { value: content_type.to_string() }
+  ))
+  out
+
+pub fn untyped_responses(
+  { status: i32, description: String, content_type: String }
+) -> Array<OpenApiResponseContract>
+  untyped_responses(
+    status: status,
+    description: description.as_slice(),
+    content_type: content_type.as_slice()
+  )
+
+pub fn binary_responses() -> Array<OpenApiResponseContract>
+  untyped_responses(
+    status: 200,
+    description: "Successful response",
+    content_type: "application/octet-stream"
+  )
+
+pub fn merge_response_contracts(
+  left: Array<OpenApiResponseContract>,
+  right: Array<OpenApiResponseContract>
+) -> Array<OpenApiResponseContract>
+  let ~out = left.copied()
+  var index = 0
+  while index < right.len():
+    append_response_contract(out, right.at(index))
+    index = index + 1
+  out
+
+pub fn append_response_contract(
+  ~responses: Array<OpenApiResponseContract>,
+  candidate: OpenApiResponseContract
+) -> void
+  var index = 0
+  var found = false
+  while index < responses.len() and not found:
+    let current = responses.at(index)
+    if current.status == candidate.status and current.is_default == candidate.is_default and same_content_type(current.content_type, candidate.content_type):
+      found = true
+    index = index + 1
+  if not found:
+    responses.push(candidate)
+
+fn same_content_type(left: Option<String>, right: Option<String>) -> bool
+  match(left)
+    Some<String> { value: left_value }:
+      match(right)
+        Some<String> { value: right_value }:
+          left_value.equals(right_value)
+        None:
+          false
+    None:
+      match(right)
+        Some<String>:
+          false
+        None:
+          true

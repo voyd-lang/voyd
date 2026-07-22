@@ -1,0 +1,5 @@
+use src::provider::read_value
+use src::types::{ Maybe, Some, Number }
+
+pub fn main() -> i32
+  read_value<Maybe<Number>>(Some<Number> { value: Number { value: 42 } })

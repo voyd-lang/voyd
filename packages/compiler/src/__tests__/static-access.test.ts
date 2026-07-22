@@ -26,6 +26,70 @@ const expectCompileSuccess = (
 };
 
 describe("static access e2e", () => {
+  it("substitutes caller type arguments in generic overload forwarders", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("generic_overload_forwarding.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("supports instance and static trait methods on tuple targets", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("trait_tuple_impl.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("supports trait implementations for structural union aliases", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("trait_union_impl.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("specializes trait methods from generic structural union implementations", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("trait_generic_union_impl.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("instantiates static methods using target type arguments", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;
@@ -78,6 +142,128 @@ describe("static access e2e", () => {
 
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(14);
+  });
+
+  it("dispatches static trait methods through constrained type parameters", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("static_trait_method_type_parameter.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(52);
+  });
+
+  it("selects static trait method overloads from the call arguments", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("static_trait_method_overloads.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(44);
+  });
+
+  it("specializes static trait methods from generic implementations", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("static_trait_method_generic_impl.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("dispatches static trait methods to downstream implementations", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const providerPath = `${root}${sep}provider.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("static_trait_method_import_main.voyd"),
+      [providerPath]: loadFixture("static_trait_method_provider.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(73);
+  });
+
+  it("dispatches instance trait methods to downstream implementations", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const providerPath = `${root}${sep}provider.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("instance_trait_method_import_main.voyd"),
+      [providerPath]: loadFixture("instance_trait_method_provider.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(73);
+  });
+
+  it("dispatches generic instance trait methods to downstream implementations", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const providerPath = `${root}${sep}provider.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("instance_trait_generic_method_import_main.voyd"),
+      [providerPath]: loadFixture("instance_trait_generic_method_provider.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(164);
+  });
+
+  it("imports structural trait implementations for generic constraints", async () => {
+    const root = resolve("/proj/src");
+    const mainPath = `${root}${sep}main.voyd`;
+    const providerPath = `${root}${sep}provider.voyd`;
+    const typesPath = `${root}${sep}types.voyd`;
+    const host = createFixtureHost({
+      [mainPath]: loadFixture("structural_trait_method_import_main.voyd"),
+      [providerPath]: loadFixture("structural_trait_method_provider.voyd"),
+      [typesPath]: loadFixture("structural_trait_method_types.voyd"),
+    });
+
+    const result = expectCompileSuccess(await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    }));
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
   });
 
   it("calls module-qualified functions without importing into scope", async () => {

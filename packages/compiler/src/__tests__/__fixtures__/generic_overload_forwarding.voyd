@@ -1,0 +1,14 @@
+obj BorrowedPath {}
+obj OwnedPath {}
+
+fn apply<I, T>(path: BorrowedPath, value: I, handler: fn(I) -> T) -> T
+  handler(value)
+
+fn apply<I, T>(path: OwnedPath, value: I, handler: fn(I) -> T) -> T
+  handler(value)
+
+fn forward<I, T>(path: OwnedPath, value: I, handler: fn(I) -> T) -> T
+  apply<I, T>(path, value, handler)
+
+pub fn main() -> i32
+  forward<i32, i32>(OwnedPath {}, 41, (value: i32) -> i32 => value + 1)

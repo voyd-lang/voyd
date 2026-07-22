@@ -611,13 +611,20 @@ export const compileTraitDispatchCall = ({
     typeInstanceId,
   );
   const receiverDesc = ctx.program.types.getTypeDesc(receiverTypeId);
-  const receiverTraitSymbol =
-    receiverDesc.kind === "trait" ? receiverDesc.owner : undefined;
+  const receiverTraitSymbols = (() => {
+    if (receiverDesc.kind === "trait") {
+      return [receiverDesc.owner];
+    }
+    if (receiverDesc.kind !== "intersection") {
+      return [];
+    }
+    return (receiverDesc.traits ?? []).flatMap((traitType) => {
+      const trait = ctx.program.types.getTypeDesc(traitType);
+      return trait.kind === "trait" ? [trait.owner] : [];
+    });
+  })();
 
-  if (
-    receiverDesc.kind !== "trait" ||
-    receiverTraitSymbol !== mapping.traitSymbol
-  ) {
+  if (!receiverTraitSymbols.includes(mapping.traitSymbol)) {
     return undefined;
   }
 

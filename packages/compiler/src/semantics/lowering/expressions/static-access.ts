@@ -24,6 +24,7 @@ import {
 import type { LoweringFormParams, LoweringParams } from "./types.js";
 import {
   resolveConstructorResolution,
+  resolveSymbol,
   resolveTypeSymbol,
 } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
@@ -58,6 +59,63 @@ export const lowerStaticAccessExpr = ({
   );
   if (typeof targetSymbol === "number") {
     const targetRecord = ctx.symbolTable.getSymbol(targetSymbol);
+    if (targetRecord.kind === "type-parameter") {
+      const parameter = ctx.decls.getTypeParameter(targetSymbol);
+      const targetType = lowerTypeExpr(targetExpr, ctx, scopes.current());
+      const constraint = lowerTypeExpr(
+        parameter?.constraint,
+        ctx,
+        scopes.current(),
+      );
+      if (
+        !targetType ||
+        !constraint ||
+        constraint.typeKind !== "named" ||
+        typeof constraint.symbol !== "number"
+      ) {
+        throw new Error(
+          `type parameter ${targetRecord.name} does not have a static trait constraint`,
+        );
+      }
+      const traitRecord = ctx.symbolTable.getSymbol(constraint.symbol);
+      if (traitRecord.kind !== "trait") {
+        throw new Error(
+          `type parameter ${targetRecord.name} constraint does not declare static methods`,
+        );
+      }
+      const constraintMetadata = ctx.symbolTable.getSymbol(constraint.symbol)
+        .metadata as
+        | { import?: { moduleId?: unknown; symbol?: unknown } }
+        | undefined;
+      const importedModuleId = constraintMetadata?.import?.moduleId;
+      const importedSymbol = constraintMetadata?.import?.symbol;
+      const importedTraitDecl =
+        typeof importedModuleId === "string" &&
+        typeof importedSymbol === "number"
+          ? ctx.dependencies
+              .get(importedModuleId)
+              ?.decls.getTrait(importedSymbol)
+          : undefined;
+      const traitDecl = ctx.decls.getTrait(constraint.symbol) ?? importedTraitDecl;
+      if (!traitDecl || !isForm(memberExpr)) {
+        throw new Error(
+          `trait ${traitRecord.name} does not expose static methods in this module`,
+        );
+      }
+      return lowerStaticTraitMethodCall({
+        accessForm: form,
+        memberForm: memberExpr,
+        methodNames: new Set(traitDecl.methods.map((method) => method.name)),
+        staticTraitTarget: targetType,
+        staticTraitSymbol: constraint.symbol,
+        targetTypeArguments: constraint.typeArguments
+          ? [...constraint.typeArguments]
+          : undefined,
+        ctx,
+        scopes,
+        lowerExpr,
+      });
+    }
     if (targetRecord.kind === "trait") {
       if (!isForm(memberExpr)) {
         throw new Error("qualified trait access must be a call expression");
@@ -142,6 +200,75 @@ export const lowerStaticAccessExpr = ({
   }
 
   throw new Error("static access target must be a type or module");
+};
+
+const lowerStaticTraitMethodCall = ({
+  accessForm,
+  memberForm,
+  methodNames,
+  staticTraitTarget,
+  staticTraitSymbol,
+  targetTypeArguments,
+  ctx,
+  scopes,
+  lowerExpr,
+}: {
+  accessForm: Form;
+  memberForm: Form;
+  methodNames: ReadonlySet<string>;
+  staticTraitTarget: HirTypeExpr;
+  staticTraitSymbol: SymbolId;
+  targetTypeArguments?: HirTypeExpr[];
+} & LoweringParams): HirExprId => {
+  const elements = memberForm.toArray();
+  const calleeExpr = elements[0];
+  if (
+    !calleeExpr ||
+    (!isIdentifierAtom(calleeExpr) && !isInternalIdentifierAtom(calleeExpr))
+  ) {
+    throw new Error("static trait method name must be an identifier");
+  }
+  if (!methodNames.has(calleeExpr.value)) {
+    throw new Error(`trait does not declare static method ${calleeExpr.value}`);
+  }
+  const potentialGenerics = elements[1];
+  const hasTypeArguments =
+    isForm(potentialGenerics) &&
+    formCallsInternal(potentialGenerics, "generics");
+  const typeArguments = hasTypeArguments
+    ? ((potentialGenerics as Form).rest
+        .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
+        .filter(Boolean) as HirTypeExpr[])
+    : undefined;
+  const args = parseSurfaceCallArguments(
+    elements.slice(hasTypeArguments ? 2 : 1),
+  ).map((argument) => ({
+    ...(argument.label ? { label: argument.label.value } : {}),
+    expr: lowerExpr(argument.value, ctx, scopes),
+  }));
+  const calleeSymbol = resolveSymbol(calleeExpr.value, scopes.current(), ctx);
+  const callee = lowerResolvedCallee({
+    resolution: {
+      kind: "symbol",
+      symbol: calleeSymbol,
+      name: calleeExpr.value,
+    },
+    syntax: calleeExpr,
+    ctx,
+  });
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    ast: accessForm.syntaxId,
+    span: toSourceSpan(accessForm),
+    callee,
+    args,
+    typeArguments,
+    targetTypeArguments,
+    staticTraitTarget,
+    staticTraitSymbol,
+    staticTraitMethod: calleeExpr.value,
+  });
 };
 
 const lowerQualifiedTraitCall = ({
@@ -251,6 +378,8 @@ const lowerStaticMethodCall = ({
   methodTable,
   targetSymbol,
   targetTypeArguments,
+  staticTraitTarget,
+  staticTraitSymbol,
   ctx,
   scopes,
   lowerExpr,
@@ -260,6 +389,8 @@ const lowerStaticMethodCall = ({
   methodTable: ReadonlyMap<string, Set<SymbolId>>;
   targetSymbol: SymbolId;
   targetTypeArguments?: HirTypeExpr[];
+  staticTraitTarget?: HirTypeExpr;
+  staticTraitSymbol?: SymbolId;
 } & LoweringParams): HirExprId => {
   const elements = memberForm.toArray();
   if (elements.length === 0) {
@@ -398,6 +529,8 @@ const lowerStaticMethodCall = ({
       callTargetTypeArguments && callTargetTypeArguments.length > 0
         ? callTargetTypeArguments
         : undefined,
+    staticTraitTarget,
+    staticTraitSymbol,
   });
 };
 

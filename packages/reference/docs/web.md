@@ -33,6 +33,7 @@ HTML rendering. Import a narrower module when writing reusable framework code:
 | `pkg::web::router` | `App`, `Router`, `Context`, and app builders |
 | `pkg::web::extract` | Body, auth, parameter, query, header, and cookie extractors |
 | `pkg::web::response` | `IntoResponse`, typed responses, and raw conversion |
+| `pkg::web::contract` | Request, response, parameter, and schema documentation contracts |
 | `pkg::web::openapi` | Low-level manual OpenAPI document builder |
 | `pkg::web::middleware` | Built-in middleware |
 | `pkg::web::html` | VX server-rendering responses |
@@ -855,12 +856,57 @@ fn delete_article() -> NoContent
 `200`, `201`, and `202`. `NoContent` documents an empty `204`.
 `text_response(value)` and `bytes_response(value)` retain their media types.
 `Result<T, E>` combines both
-branches, and `Option<T>` adds the framework's empty `404` response.
+branches, and `Option<T>` adds the framework's empty `404` response. An
+undocumented branch remains an honest `default` response instead of being
+invented as `200` or dropped. SSE is documented as its encoded
+`text/event-stream; charset=utf-8` wire format, with the statically known event
+shape retained as `x-voyd-event-schema` metadata.
+
+For example, this handler contributes both `201` and `202`:
+
+```voyd
+use pkg::web::all
+use std::result::types::all
+
+fn create_or_queue(input: CreateArticleInput, create_now: bool) -> Result<Created<Article>, Accepted<Article>>
+  let article = Article { id: 1, title: input.title }
+  if create_now:
+    Ok<Created<Article>> { value: created(article) }
+  else:
+    Err<Accepted<Article>> { error: accepted(article) }
+```
 
 Call `to_response(value)` when a boundary specifically needs raw `Response`.
 Existing custom `IntoResponse` implementations continue to work when OpenAPI
-is unused. A custom type can additionally implement `OpenApiResponse` to
-publish one or more statuses, bodies, descriptions, and headers.
+is unused. To document one, also implement `OpenApiResponse`, return
+`DocumentedResponse<YourType>`, and wrap the value with
+`documented_response(value)`. This keeps runtime conversion independent from
+the optional static contract.
+
+```voyd
+use pkg::web::all
+use std::array::Array
+use std::string::type::String
+
+obj PlainReply {
+  api value: String
+}
+
+impl IntoResponse<PlainReply> for PlainReply
+  fn into_response(self) -> Response
+    Response::ok().text(self.value)
+
+impl OpenApiResponse<PlainReply> for PlainReply
+  fn documented_responses() -> Array<OpenApiResponseContract>
+    [openapi_typed_response<String>(
+      status: 200,
+      description: "Successful response",
+      content_type: "text/plain"
+    )]
+
+fn plain_reply() -> DocumentedResponse<PlainReply>
+  documented_response(PlainReply { value: "ready" })
+```
 
 ### Overrides, hidden routes, and comments
 
@@ -883,10 +929,71 @@ app.post(
 )
 ```
 
-Use `docs: { hidden: true }` to omit a runtime route. Dynamic routes can supply
-request, parameter, and response overrides. `openapi_json_response<T>(...)`
+Use `docs: { hidden: true }` to omit a runtime route. Inline `docs: {...}`
+literals are for summary, description, operation ID, tags, and hidden state.
+Build typed request, parameter, response, and schema overrides with
+`route_docs(...)`; this keeps their `Shape` values intact. Dynamic routes can
+supply those advanced overrides. `openapi_json_response<T>(...)`
 and `openapi_response(...)` support multiple responses, media types, and
 headers without requiring overrides on ordinary typed routes.
+
+```voyd
+use pkg::web::all
+use std::string::type::String
+
+obj ApiError {
+  api message: String
+}
+
+fn dynamic_article_response(_ctx: Context) -> Response
+  Response::not_found().empty()
+
+app.route(
+  "/articles/:id",
+  method: Method::Get {},
+  handler: dynamic_article_response,
+  docs: route_docs(responses: [
+    openapi_json_response<Article>(
+      status: 200,
+      description: "Article found"
+    ),
+    openapi_json_response<ApiError>(
+      status: 404,
+      description: "Article not found"
+    )
+  ])
+)
+```
+
+Use `openapi_schema_docs`, `openapi_field_docs`, and
+`openapi_response_schema_docs` to replace prose on an inferred request or
+response schema without restating its DTO type.
+
+Specialized auth, timeout, context, body-limit, and combined-extractor helpers
+can receive the same metadata after insertion with `with_route_docs`:
+
+```voyd
+use pkg::web::all
+
+let routed = route_query_context<SearchQuery, Json<SearchResults>>(
+  app,
+  "/search",
+  method: Method::Get {},
+  search
+)
+
+let documented = routed
+  .with_route_docs(
+    "/search",
+    method: Method::Get {},
+    docs: RouteDocs::empty()
+      .with_description("Search published articles")
+      .with_operation_id("searchArticles")
+  )
+```
+
+The method and concrete path identify the route, so grouping and mounting do
+not depend on whichever route happened to be added most recently.
 
 DTO and field `///` comments become descriptions. Setting
 `include_doc_comments: false` removes only comment-derived prose; explicit
@@ -897,8 +1004,10 @@ DTO and field `///` comments become descriptions. Setting
 Groups and mounts prefix both runtime and documented paths. Hidden state and
 overrides travel with each concrete route. Multiple methods and response
 statuses are preserved. Output and component identities are deterministic,
-including recursive and distinct same-named DTOs. Duplicate operation IDs and
-conflicting normalized method/path contracts are validation errors.
+including recursive and distinct same-named DTOs. When runtime routes conflict
+after normalization, the first reachable route is documented. The first use of
+an operation ID keeps it; later duplicates remain documented without the
+optional ID.
 
 ### Low-level builder
 

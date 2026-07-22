@@ -1,108 +1,95 @@
-//! Compact serialized route contracts kept beside runtime route data.
+//! Render-time contracts kept beside runtime route data.
 
-use std::dict::Dict
-use std::json::{ JsonBool, JsonObject, JsonString, JsonValue }
 use std::optional::types::all
+use std::json::JsonValue
 use super::contract::{ OpenApiRequestContract, RouteDocs }
-use super::openapi::{ Operation, operation, operation_fragment }
-use super::response::encode_json_value
+use super::openapi::{ Operation, operation }
+use super::openapi_types::RouteContract
+use super::response::IntoResponse
+use super::response_json::encode_json_value
 use super::response_docs::{ created_responses, inferred_responses }
 
-pub fn opaque_fragment() -> JsonValue
-  opaque_pair(hidden: false)
+pub fn opaque_fragment() -> RouteContract
+  RouteContract::init(
+    hidden: false,
+    operation: operation().with_opaque_response(),
+    literal_docs: None {}
+  )
 
-pub fn hidden_fragment() -> JsonValue
-  opaque_pair(hidden: true)
+pub fn hidden_fragment() -> RouteContract
+  RouteContract::init(
+    hidden: true,
+    operation: operation().with_opaque_response(),
+    literal_docs: None {}
+  )
 
-pub fn json_request_fragment<I>() -> JsonValue
-  pair(operation().with_json_body<I>(), hidden: false)
+pub fn json_request_fragment<I>() -> RouteContract
+  route_fragment(operation().with_json_body<I>())
 
-pub fn typed_json_request_fragment<I, R>() -> JsonValue
-  pair(
+pub fn typed_json_request_fragment<I, R: IntoResponse<R>>() -> RouteContract
+  route_fragment(
+    operation().with_json_body<I>().with_responses(inferred_responses<R>())
+  )
+
+pub fn created_json_fragment<I, T>(docs: RouteDocs) -> RouteContract
+  contract_with_docs(
+    operation().with_json_body<I>().with_responses(created_responses<T>()),
+    docs
+  )
+
+pub fn typed_json_fragment<I, R: IntoResponse<R>>(docs: RouteDocs) -> RouteContract
+  contract_with_docs(
     operation().with_json_body<I>().with_responses(inferred_responses<R>()),
-    hidden: false
+    docs
   )
 
-pub fn created_json_fragment<I, T>(docs: RouteDocs) -> JsonValue
-  pair(
-    operation()
-      .with_json_body<I>()
-      .with_responses(created_responses<T>())
-      .with_docs(docs),
-    hidden: docs.hidden ?? false
-  )
-
-pub fn typed_json_fragment<I, R>(docs: RouteDocs) -> JsonValue
-  pair(
-    operation()
-      .with_json_body<I>()
-      .with_responses(inferred_responses<R>())
-      .with_docs(docs),
-    hidden: docs.hidden ?? false
-  )
-
-/// Records a partial route-docs literal without requiring callers to spell
-/// absent optional fields. The renderer applies these explicit values after
-/// inferred contracts have been rendered.
-pub fn typed_json_fragment<I, R, D>(docs: D) -> JsonValue
-  pair_with_docs(
+/// Records a partial route-docs literal while retaining typed overrides.
+pub fn typed_json_fragment<I, R: IntoResponse<R>, D>(docs: D) -> RouteContract
+  documented_fragment(
     operation().with_json_body<I>().with_responses(inferred_responses<R>()),
-    encode_json_value<D>(docs)
+    docs
   )
 
-pub fn documented_fragment<D>(value: Operation, docs: D) -> JsonValue
-  pair_with_docs(value, encode_json_value<D>(docs))
+pub fn documented_fragment<D>(value: Operation, docs: D) -> RouteContract
+  RouteContract::init(
+    hidden: false,
+    operation: value,
+    literal_docs: Some<JsonValue> { value: encode_json_value<D>(docs) }
+  )
 
-pub fn route_fragment(value: Operation) -> JsonValue
-  pair(value, hidden: false)
+pub fn route_fragment(value: Operation) -> RouteContract
+  RouteContract::init(
+    hidden: false,
+    operation: value,
+    literal_docs: None {}
+  )
 
 pub fn extractor_operation(request: Option<OpenApiRequestContract>) -> Operation
   match(request)
     Some<OpenApiRequestContract> { value }:
-      operation().with_request(value)
+      operation().with_request(value).with_opaque_response()
     None:
-      operation()
+      operation().with_opaque_response()
 
-pub fn typed_fragment<R>(docs: RouteDocs) -> JsonValue
-  pair(
-    operation().with_responses(inferred_responses<R>()).with_docs(docs),
-    hidden: docs.hidden ?? false
+pub fn typed_fragment<R: IntoResponse<R>>(docs: RouteDocs) -> RouteContract
+  contract_with_docs(operation().with_responses(inferred_responses<R>()), docs)
+
+pub fn created_fragment<T>(docs: RouteDocs) -> RouteContract
+  contract_with_docs(operation().with_responses(created_responses<T>()), docs)
+
+pub fn contract_with_docs(value: Operation, docs: RouteDocs) -> RouteContract
+  let documented = value.with_docs(docs)
+  RouteContract::init(
+    hidden: docs.hidden ?? false,
+    operation: documented,
+    literal_docs: None {}
   )
 
-pub fn created_fragment<T>(docs: RouteDocs) -> JsonValue
-  pair(
-    operation().with_responses(created_responses<T>()).with_docs(docs),
-    hidden: docs.hidden ?? false
+/// Applies typed documentation to an existing concrete route contract.
+pub fn with_route_docs(contract: RouteContract, docs: RouteDocs) -> RouteContract
+  let documented = contract_with_docs(contract.operation, docs)
+  RouteContract::init(
+    hidden: docs.hidden ?? contract.hidden,
+    operation: documented.operation,
+    literal_docs: None {}
   )
-
-fn pair(value: Operation, { hidden: bool }) -> JsonValue
-  let ~out = Dict<String, JsonValue>::init()
-  out.set("included", operation_fragment(value, include_doc_comments: true))
-  out.set("excluded", operation_fragment(value, include_doc_comments: false))
-  out.set("hidden", JsonBool { value: hidden })
-  JsonObject { value: out }
-
-fn pair_with_docs(value: Operation, docs: JsonValue) -> JsonValue
-  let ~out = Dict<String, JsonValue>::init()
-  out.set("excluded", operation_fragment(value, include_doc_comments: false))
-  out.set("included", operation_fragment(value, include_doc_comments: true))
-  out.set("hidden", JsonBool { value: false })
-  out.set("docs", docs)
-  JsonObject { value: out }
-
-fn opaque_pair({ hidden: bool }) -> JsonValue
-  let ~response = Dict<String, JsonValue>::init()
-  response.set("description", JsonString { value: "Opaque response".to_string() })
-  let ~responses = Dict<String, JsonValue>::init()
-  responses.set("default", JsonObject { value: response })
-  let ~operation_value = Dict<String, JsonValue>::init()
-  operation_value.set("responses", JsonObject { value: responses })
-  let ~fragment = Dict<String, JsonValue>::init()
-  fragment.set("operation", JsonObject { value: operation_value })
-  fragment.set("components", JsonObject { value: Dict<String, JsonValue>::init() })
-  let rendered = JsonObject { value: fragment }
-  let ~out = Dict<String, JsonValue>::init()
-  out.set("included", rendered)
-  out.set("excluded", rendered)
-  out.set("hidden", JsonBool { value: hidden })
-  JsonObject { value: out }

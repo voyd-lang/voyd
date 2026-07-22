@@ -34,13 +34,15 @@ export type SymbolRefKey = string;
 
 export interface TypeCheckBudgetConfig {
   maxUnifySteps?: number;
+  maxTotalUnifySteps?: number;
   maxOverloadCandidates?: number;
 }
 
 export interface TypeCheckBudgetState {
   maxUnifySteps: number;
+  maxTotalUnifySteps: number;
   maxOverloadCandidates: number;
-  unifyStepsUsed: { value: number };
+  totalUnifyStepsUsed: number;
 }
 
 export interface TypingInputs {
@@ -794,6 +796,7 @@ export interface TraitImplTemplate {
   target: TypeId;
   typeParams: readonly FunctionTypeParam[];
   methods: ReadonlyMap<SymbolId, SymbolId>;
+  staticMethods: ReadonlyMap<SymbolId, SymbolId>;
   implSymbol: SymbolId;
 }
 
@@ -802,6 +805,7 @@ export interface TraitImplInstance {
   traitSymbol: SymbolId;
   target: TypeId;
   methods: ReadonlyMap<SymbolId, SymbolId>;
+  staticMethods: ReadonlyMap<SymbolId, SymbolId>;
   implSymbol: SymbolId;
 }
 
@@ -869,6 +873,7 @@ const cloneTraitImplTemplate = (
   target: template.target,
   typeParams: template.typeParams.map((param) => ({ ...param })),
   methods: new Map(template.methods),
+  staticMethods: new Map(template.staticMethods),
   implSymbol: template.implSymbol,
 });
 
@@ -879,5 +884,6 @@ const cloneTraitImplInstance = (
   traitSymbol: impl.traitSymbol,
   target: impl.target,
   methods: new Map(impl.methods),
+  staticMethods: new Map(impl.staticMethods),
   implSymbol: impl.implSymbol,
 });

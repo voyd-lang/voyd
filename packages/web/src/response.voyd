@@ -2,30 +2,43 @@
 
 use std::bytes::Bytes
 use std::array::Array
-use std::dict::Dict
 use std::http::{ Body, Response, Status }
 use std::json::{
-  JsonArray,
-  JsonBool,
   JsonError,
-  JsonNull,
-  JsonNumber,
-  JsonObject,
-  JsonString,
   JsonValue,
   stringify as stringify_json
 }
-use std::msgpack::{ Bool, F32, F64, I32, I64, MsgPack, MsgPackError, Null }
-use std::msgpack::self as msgpack
-use std::number::cast::self as cast
 use std::optional::types::{ Option, Some, None }
 use std::result::types::{ Result, Ok, Err }
 use std::string::type::{ String, StringSlice }
+use super::contract::{
+  OpenApiResponseContract,
+  empty_response_contract,
+  opaque_responses
+}
+use super::response_json::encode_json_value as encode_value
+use super::response_contracts::{ binary_responses, typed_responses }
 
 pub use std::http::{ Body, Header, HeaderName, Headers, HttpError, IncomingRequest, Method, QueryString, Response, Status }
 
+/// Converts a handler result at runtime and describes its static OpenAPI responses.
+///
+/// Existing implementations may omit `openapi_responses`; the default is an
+/// honest opaque contract.
 pub trait IntoResponse<T>
   fn into_response(self) -> Response
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    opaque_responses()
+
+/// Supplies static OpenAPI response contracts independently of runtime
+/// response conversion.
+pub trait OpenApiResponse<T>
+  fn documented_responses() -> Array<OpenApiResponseContract>
+
+/// Preserves a custom response type's separately implemented OpenAPI contract.
+pub obj DocumentedResponse<T> {
+  response: Response
+}
 
 /// Typed `200 application/json` response.
 pub obj Json<T> {
@@ -62,41 +75,72 @@ impl IntoResponse<Response> for Response
 impl IntoResponse<String> for String
   fn into_response(self) -> Response
     Response::ok().text(self)
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    typed_responses<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
 
 impl IntoResponse<StringSlice> for StringSlice
   fn into_response(self) -> Response
     Response::ok().text(self)
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    typed_responses<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
 
 impl IntoResponse<Bytes> for Bytes
   fn into_response(self) -> Response
     Response::ok().bytes(self)
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    binary_responses()
 
 impl<T> IntoResponse<Json<T>> for Json<T>
   fn into_response(self) -> Response
     json_value_response(Response::ok(), encode_json_value<T>(self.value))
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    typed_responses<T>(status: 200, description: "Successful response".as_slice(), content_type: "application/json".as_slice())
 
 impl<T> IntoResponse<Created<T>> for Created<T>
   fn into_response(self) -> Response
     json_value_response(Response::created(), encode_json_value<T>(self.value))
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    typed_responses<T>(status: 201, description: "Created".as_slice(), content_type: "application/json".as_slice())
 
 impl<T> IntoResponse<Accepted<T>> for Accepted<T>
   fn into_response(self) -> Response
     json_value_response(Response::new(status: accepted_status()), encode_json_value<T>(self.value))
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    typed_responses<T>(status: 202, description: "Accepted".as_slice(), content_type: "application/json".as_slice())
 
 impl IntoResponse<NoContent> for NoContent
   fn into_response(self) -> Response
     self
     Response::no_content().empty()
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    let ~out = Array<OpenApiResponseContract>::with_capacity(1)
+    out.push(empty_response_contract(status: 204, description: "No content".as_slice()))
+    out
 
 impl IntoResponse<Text> for Text
   fn into_response(self) -> Response
     Response::ok().text(self.value)
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    typed_responses<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
 
 impl IntoResponse<Binary> for Binary
   fn into_response(self) -> Response
     Response::ok().bytes(self.value)
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    binary_responses()
+
+impl<T: OpenApiResponse<T>> IntoResponse<DocumentedResponse<T>> for DocumentedResponse<T>
+  fn into_response(self) -> Response
+    self.response
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    custom_openapi_responses<T>()
 
 pub fn to_response<T: IntoResponse<T>>(value: T) -> Response
+  into_response_value<T>(value)
+
+/// Converts a statically `IntoResponse`-constrained value without entering the
+/// dynamic tuple/result overload family.
+pub fn typed_response<T: IntoResponse<T>>(value: T) -> Response
   into_response_value<T>(value)
 
 pub fn to_response(value: JsonValue) -> Response
@@ -202,7 +246,7 @@ pub fn json<T>(response: Response, { value: T }) -> Response
   json_value_response(response, encode_json_value<T>(value))
 
 pub fn encode_json_value<T>(value: T) -> JsonValue
-  msgpack_to_json(msgpack::pack_boundary_value<T>(value))
+  encode_value<T>(value)
 
 /// Serializes the successful branch as JSON and converts the error branch normally.
 pub fn result_json<T, E: IntoResponse<E>>(value: Result<T, E>) -> Response
@@ -223,6 +267,11 @@ pub fn option_json<T>(value: Option<T>) -> Response
 pub fn bytes(value: Bytes) -> Binary
   Binary { value: value }
 
+/// Wraps a custom runtime response so its separate `OpenApiResponse`
+/// implementation participates in automatic route documentation.
+pub fn documented_response<T: IntoResponse<T>>(value: T) -> DocumentedResponse<T>
+  DocumentedResponse<T> { response: custom_into_response<T>(value) }
+
 pub fn status(status: Status) -> Response
   Response::new(status: status)
 
@@ -233,8 +282,17 @@ pub fn status({ code: i32, reason: StringSlice }) -> Response
     Err:
       Response::internal_server_error()
 
+pub fn status({ code: i32, reason: String }) -> Response
+  status(code: code, reason: reason.as_slice())
+
 fn into_response_value<T: IntoResponse<T>>(value: T): () -> Response
   value.into_response()
+
+fn custom_into_response<T: IntoResponse<T>>(value: T) -> Response
+  value.into_response()
+
+fn custom_openapi_responses<T: OpenApiResponse<T>>() -> Array<OpenApiResponseContract>
+  T::documented_responses()
 
 fn accepted_status() -> Status
   match(Status::from(202))
@@ -251,53 +309,3 @@ fn json_value_response(response: Response, value: JsonValue): () -> Response
         .with(body: Body::text(value))
     Err<JsonError> { error }:
       Response::internal_server_error().text(error.message)
-
-fn msgpack_to_json(value: MsgPack): () -> JsonValue
-  value.match(decoded)
-    Null:
-      JsonNull {}
-    Bool:
-      JsonBool { value: decoded.value }
-    I32:
-      JsonNumber { value: cast::to_f64(decoded.value) }
-    I64:
-      JsonNumber { value: cast::to_f64(decoded.value) }
-    F32:
-      JsonNumber { value: cast::to_f64(decoded.value) }
-    F64:
-      JsonNumber { value: decoded.value }
-    String:
-      JsonString { value: decoded }
-    Array<MsgPack>:
-      JsonArray { value: msgpack_array_to_json(decoded) }
-    else:
-      match(msgpack::unpack_map(value))
-        Ok<Dict<String, MsgPack>> { value }:
-          JsonObject { value: msgpack_map_to_json(value) }
-        Err<MsgPackError>:
-          JsonNull {}
-
-fn msgpack_array_to_json(values: Array<MsgPack>): () -> Array<JsonValue>
-  let ~out = Array<JsonValue>::with_capacity(values.len())
-  var index = 0
-  while index < values.len():
-    match(values.get(index))
-      Some<MsgPack> { value }:
-        out.push(msgpack_to_json(value))
-      None:
-        void
-    index = index + 1
-  out
-
-fn msgpack_map_to_json(values: Dict<String, MsgPack>): () -> Dict<String, JsonValue>
-  let entries = values.entries()
-  let ~out = Dict<String, JsonValue>::with_capacity(entries.len())
-  var index = 0
-  while index < entries.len():
-    match(entries.get(index))
-      Some<(String, MsgPack)> { value }:
-        out.set(value.0, msgpack_to_json(value.1))
-      None:
-        void
-    index = index + 1
-  out

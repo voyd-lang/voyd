@@ -1617,7 +1617,7 @@ const getInstanceExprType = (
   return typeof instanceType === "number" ? instanceType : undefined;
 };
 
-function substituteTypeForInstance({
+export function substituteTypeForInstance({
   typeId,
   ctx,
   instanceId,
@@ -2236,6 +2236,10 @@ const instantiateTraitImplsForNominal = ({
         traitSymbol: template.traitSymbol,
         target,
         methods: template.methods.map(({ traitMethod, implMethod }) => ({
+          traitMethod,
+          implMethod,
+        })),
+        staticMethods: template.staticMethods.map(({ traitMethod, implMethod }) => ({
           traitMethod,
           implMethod,
         })),

@@ -21,9 +21,8 @@ import {
   createImportTargetResolver,
 } from "./symbol-ref-utils.js";
 
-// Large framework modules with reified recursive shapes can legitimately
-// exceed the original 50k guard while still converging deterministically.
-export const DEFAULT_MAX_UNIFY_STEPS = 500_000;
+export const DEFAULT_MAX_UNIFY_STEPS = 50_000;
+export const DEFAULT_MAX_TOTAL_UNIFY_STEPS = 20_000_000;
 export const DEFAULT_MAX_OVERLOAD_CANDIDATES = 64;
 
 const normalizeBudgetLimit = ({
@@ -46,11 +45,15 @@ export const createTypeCheckBudgetState = (
     value: config?.maxUnifySteps,
     fallback: DEFAULT_MAX_UNIFY_STEPS,
   }),
+  maxTotalUnifySteps: normalizeBudgetLimit({
+    value: config?.maxTotalUnifySteps,
+    fallback: DEFAULT_MAX_TOTAL_UNIFY_STEPS,
+  }),
   maxOverloadCandidates: normalizeBudgetLimit({
     value: config?.maxOverloadCandidates,
     fallback: DEFAULT_MAX_OVERLOAD_CANDIDATES,
   }),
-  unifyStepsUsed: { value: 0 },
+  totalUnifyStepsUsed: 0,
 });
 
 export const createTypingContext = (inputs: TypingInputs): TypingContext => {

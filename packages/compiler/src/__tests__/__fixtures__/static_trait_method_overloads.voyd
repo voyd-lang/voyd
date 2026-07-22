@@ -1,0 +1,21 @@
+trait Factory<T>
+  fn make(value: i32) -> i32
+  fn make(value: bool) -> i32
+
+obj Value {}
+
+impl Factory<Value> for Value
+  fn make(value: i32) -> i32
+    value + 1
+
+  fn make(value: bool) -> i32
+    if value then: 2 else: 0
+
+fn make_number<T: Factory<T>>() -> i32
+  T::make(41)
+
+fn make_flag<T: Factory<T>>() -> i32
+  T::make(true)
+
+pub fn main() -> i32
+  make_number<Value>() + make_flag<Value>()

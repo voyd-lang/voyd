@@ -1,0 +1,198 @@
+//! OpenAPI 3.1 schema rendering from provider-neutral `Shape` values.
+
+use std::array::Array
+use std::dict::Dict
+use std::json::{ JsonArray, JsonBool, JsonObject, JsonString, JsonValue }
+use std::meta::{
+  ArrayShape,
+  BoolShape,
+  F32Shape,
+  F64Shape,
+  I32Shape,
+  I64Shape,
+  RecordShape,
+  RefShape,
+  Shape,
+  ShapeNode,
+  StringShape,
+  UnionShape,
+  UnitShape
+}
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+use super::openapi_schema_filter::without_descriptions
+use super::openapi_identity::{ component_name, component_reference, schema_identity_prefix }
+
+pub fn schema_for(
+  shape: Shape,
+  { prefix: String, ~components: Dict<String, JsonValue>, include_doc_comments: bool }
+) -> JsonValue
+  let stable_prefix = schema_identity_prefix(shape, fallback: prefix)
+  var index = 0
+  while index < shape.definitions.len():
+    let definition = shape.definitions.at(index)
+    let rendered_definition = schema_node(definition.shape, prefix: stable_prefix, components: components)
+    components.set(
+      component_name(stable_prefix, definition.key.as_slice()),
+      if include_doc_comments: rendered_definition else: without_descriptions(rendered_definition)
+    )
+    index = index + 1
+  let rendered = schema_node(shape.root, prefix: stable_prefix, components: components)
+  if include_doc_comments: rendered else: without_descriptions(rendered)
+
+pub fn opaque_schema(content_type: String) -> JsonValue
+  if content_type.starts_with("text/plain") or content_type.starts_with("text/html") or content_type.starts_with("text/event-stream"):
+    return typed_schema("string")
+  if content_type.equals("application/octet-stream"):
+    return formatted_schema("string", "binary")
+  JsonObject { value: Dict<String, JsonValue>::init() }
+
+pub fn content_json(content_type: String, schema: JsonValue) -> JsonValue
+  let ~media = Dict<String, JsonValue>::init()
+  media.set("schema", schema)
+  let ~content = Dict<String, JsonValue>::init()
+  content.set(content_type, JsonObject { value: media })
+  JsonObject { value: content }
+
+pub fn schema_node(
+  node: ShapeNode,
+  { prefix: String, ~components: Dict<String, JsonValue> }
+) -> JsonValue
+  node.match(active)
+    BoolShape:
+      typed_schema("boolean")
+    I32Shape:
+      formatted_schema("integer", "int32")
+    I64Shape:
+      formatted_schema("integer", "int64")
+    F32Shape:
+      formatted_schema("number", "float")
+    F64Shape:
+      formatted_schema("number", "double")
+    StringShape:
+      typed_schema("string")
+    UnitShape:
+      typed_schema("null")
+    RefShape:
+      let ~out = Dict<String, JsonValue>::init()
+      out.set("$ref", JsonString { value: component_reference(prefix, active.key.as_slice()) })
+      JsonObject { value: out }
+    ArrayShape:
+      let ~out = Dict<String, JsonValue>::init()
+      out.set("type", json_string("array"))
+      out.set("items", schema_node(active.element, prefix: prefix, components: components))
+      JsonObject { value: out }
+    RecordShape:
+      record_schema(active, prefix: prefix, components: components)
+    UnionShape:
+      union_schema(active, prefix: prefix, components: components)
+
+fn record_schema(
+  record: RecordShape,
+  { prefix: String, ~components: Dict<String, JsonValue> }
+) -> JsonValue
+  let ~out = Dict<String, JsonValue>::init()
+  out.set("type", json_string("object"))
+  set_optional_string(out, "description", record.documentation)
+  let ~properties = Dict<String, JsonValue>::init()
+  let ~required = Array<JsonValue>::init()
+  var index = 0
+  while index < record.fields.len():
+    let field = record.fields.at(index)
+    let property = schema_node(field.shape, prefix: prefix, components: components)
+    properties.set(field.name, with_description(property, field.documentation))
+    if not field.optional:
+      required.push(JsonString { value: field.name })
+    index = index + 1
+  out.set("properties", JsonObject { value: properties })
+  if not required.is_empty():
+    out.set("required", JsonArray { value: required })
+  out.set("additionalProperties", JsonBool { value: false })
+  JsonObject { value: out }
+
+fn union_schema(
+  union: UnionShape,
+  { prefix: String, ~components: Dict<String, JsonValue> }
+) -> JsonValue
+  let ~out = Dict<String, JsonValue>::init()
+  set_optional_string(out, "description", union.documentation)
+  let ~variants = Array<JsonValue>::with_capacity(union.variants.len())
+  var variant_index = 0
+  while variant_index < union.variants.len():
+    let variant = union.variants.at(variant_index)
+    let ~variant_schema = Dict<String, JsonValue>::init()
+    variant_schema.set("type", json_string("object"))
+    set_optional_string(variant_schema, "description", variant.documentation)
+    let ~properties = Dict<String, JsonValue>::init()
+    let ~tag = Dict<String, JsonValue>::init()
+    tag.set("const", JsonString { value: variant.name })
+    properties.set("$variant", JsonObject { value: tag })
+    let ~required = Array<JsonValue>::init()
+    required.push(json_string("$variant"))
+    var field_index = 0
+    while field_index < variant.fields.len():
+      let field = variant.fields.at(field_index)
+      let property = schema_node(field.shape, prefix: prefix, components: components)
+      properties.set(field.name, with_description(property, field.documentation))
+      if not field.optional:
+        required.push(JsonString { value: field.name })
+      field_index = field_index + 1
+    variant_schema.set("properties", JsonObject { value: properties })
+    variant_schema.set("required", JsonArray { value: required })
+    variant_schema.set("additionalProperties", JsonBool { value: false })
+    variants.push(JsonObject { value: variant_schema })
+    variant_index = variant_index + 1
+  out.set("oneOf", JsonArray { value: variants })
+  JsonObject { value: out }
+
+fn typed_schema(kind: StringSlice) -> JsonValue
+  let ~out = Dict<String, JsonValue>::init()
+  out.set("type", json_string(kind))
+  JsonObject { value: out }
+
+fn typed_schema(kind: String) -> JsonValue
+  typed_schema(kind.as_slice())
+
+fn formatted_schema(kind: StringSlice, format: StringSlice) -> JsonValue
+  let ~out = Dict<String, JsonValue>::init()
+  out.set("type", json_string(kind))
+  out.set("format", json_string(format))
+  JsonObject { value: out }
+
+fn formatted_schema(kind: String, format: String) -> JsonValue
+  formatted_schema(kind.as_slice(), format.as_slice())
+
+fn with_description(value: JsonValue, description: Option<String>) -> JsonValue
+  match(description)
+    None:
+      value
+    Some<String> { value: documentation }:
+      value.match(active)
+        JsonObject:
+          let entries = active.value.entries()
+          let ~fields = Dict<String, JsonValue>::with_capacity(entries.len() + 1)
+          var index = 0
+          while index < entries.len():
+            let entry = entries.at(index)
+            fields.set(entry.0, entry.1)
+            index = index + 1
+          fields.set("description", JsonString { value: documentation })
+          JsonObject { value: fields }
+        else:
+          value
+
+fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void
+  match(value)
+    Some<String> { value: text }:
+      target.set(key.to_string(), JsonString { value: text })
+    None:
+      void
+
+fn set_optional_string(~target: Dict<String, JsonValue>, key: String, value: Option<String>) -> void
+  set_optional_string(target, key.as_slice(), value)
+
+fn json_string(value: StringSlice) -> JsonValue
+  JsonString { value: value.to_string() }
+
+fn json_string(value: String) -> JsonValue
+  JsonString { value: value }

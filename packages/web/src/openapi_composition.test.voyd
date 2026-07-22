@@ -1,0 +1,101 @@
+use src::openapi::{ document, info, operation, operation_with_request }
+use src::contract::{ OpenApiRequestContract, OpenApiResponseContract, openapi_json_response, route_docs }
+use src::contract::openapi_response as response_override
+use src::phase3_openapi_types::{
+  DocumentedArticle,
+  DocumentedArticlePath,
+  DocumentedArticleQuery,
+  DocumentedCreateArticle,
+  DocumentedEvent,
+  DocumentedRecursivePair,
+  AutomaticArticle,
+  AutomaticCreateArticle
+}
+use std::array::Array
+use std::http::{ Body, Headers, IncomingRequest, Method, Response }
+use std::json::stringify
+use std::error::panic
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::extract::json_body
+use src::response::{ Accepted, Created, IntoResponse, Json, NoContent, Text, created, text }
+use src::response_docs::{ inferred_responses, option_responses, result_responses }
+use src::router::{ App, Context, app }
+use src::automatic_openapi::all
+
+
+fn create_automatic_article(input: AutomaticCreateArticle) -> Created<AutomaticArticle>
+  created(AutomaticArticle { id: 1, title: input.title })
+
+fn method_reply() -> Text
+  text("ok")
+
+test "grouping mounting and exposure preserve route-owned contracts":
+  let grouped = app(openapi: { title: "Composition", version: "1" })
+    .group("/v1", routes: (child: App) -> App =>
+      child.get("/health", handler: () -> Text => text("ok"))
+    )
+  let mounted = app(openapi: { title: "Mounted", version: "1" })
+    .mount("/api", grouped)
+    .expose_openapi(at: "/openapi.json")
+  match(stringify(mounted.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"/api/v1/health\"".as_slice(), "missing mounted grouped path")
+
+      assert(value.contains("\"/openapi.json\"".as_slice()), eq: false)
+
+test "mounting inside a group preserves both prefixes":
+  let mounted_child = app().get("/health", handler: method_reply)
+  let grouped = app(openapi: { title: "Nested composition", version: "1" })
+    .group("/v1", routes: (child: App) -> App =>
+      child.mount("/service", mounted_child)
+    )
+  match(stringify(grouped.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"/v1/service/health\"".as_slice(), "group prefix was dropped while mounting")
+
+test "exposure reflects routes added after the exposure call":
+  let exposed = app(openapi: { title: "Late routes", version: "1" })
+    .expose_openapi(at: "/openapi.json")
+    .get("/late", handler: method_reply)
+  let response = exposed.handle(IncomingRequest {
+    method: Method::Get {},
+    path: "/openapi.json".to_string(),
+    query: None {},
+    headers: Headers::empty(),
+    body: Body::empty()
+  })
+  match(response.text())
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"/late\"".as_slice(), "exposure captured a stale route table")
+      assert(value.contains("\"/openapi.json\"".as_slice()), eq: false)
+
+test "every named HTTP method records the same typed response contract":
+  let value = app(openapi: { title: "Methods", version: "1" })
+    .get("/get", handler: method_reply)
+    .post("/post", handler: method_reply)
+    .put("/put", handler: method_reply)
+    .patch("/patch", handler: method_reply)
+    .delete("/delete", handler: method_reply)
+  match(stringify(value.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"get\"".as_slice(), "GET contract missing")
+      require_contains(value, "\"post\"".as_slice(), "POST contract missing")
+      require_contains(value, "\"put\"".as_slice(), "PUT contract missing")
+      require_contains(value, "\"patch\"".as_slice(), "PATCH contract missing")
+      require_contains(value, "\"delete\"".as_slice(), "DELETE contract missing")
+      require_contains(value, "\"text/plain\"".as_slice(), "typed method response missing")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

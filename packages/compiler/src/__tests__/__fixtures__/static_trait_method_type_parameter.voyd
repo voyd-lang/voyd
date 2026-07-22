@@ -1,0 +1,19 @@
+trait Factory<T>
+  fn make() -> i32
+
+obj Value {}
+obj Other {}
+
+impl Factory<Value> for Value
+  fn make() -> i32
+    42
+
+impl Factory<Other> for Other
+  fn make() -> i32
+    10
+
+fn make_value<T: Factory<T>>() -> i32
+  T::make()
+
+pub fn main() -> i32
+  make_value<Value>() + make_value<Other>()

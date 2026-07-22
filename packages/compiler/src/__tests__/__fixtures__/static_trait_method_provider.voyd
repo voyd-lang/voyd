@@ -1,0 +1,5 @@
+pub trait Factory<T>
+  fn make() -> i32
+
+pub fn make_value<T: Factory<T>>() -> i32
+  T::make()

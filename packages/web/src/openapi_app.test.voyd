@@ -1,0 +1,455 @@
+use src::openapi::{ Operation, document, info, operation, operation_with_request }
+use src::contract::{ OpenApiRequestContract, OpenApiResponseContract, OpenApiResponseSchemaDocs, OpenApiSchemaDocs, RouteDocs, openapi_field_docs, openapi_json_response, openapi_parameter, openapi_response_schema_docs, openapi_schema_docs, route_docs }
+use src::contract::openapi_response as response_override
+use src::phase3_openapi_types::{
+  DocumentedArticle,
+  DocumentedArticlePath,
+  DocumentedArticleQuery,
+  DocumentedCreateArticle,
+  DocumentedEvent,
+  DocumentedRecursivePair,
+  AutomaticArticle,
+  AutomaticCreateArticle
+}
+use src::openapi_collision_a::{ Duplicate as DuplicateA }
+use src::openapi_collision_b::{ Duplicate as DuplicateB }
+use std::array::Array
+use std::bytes::Bytes
+use std::http::{ IncomingRequest, Method, Response }
+use std::json::stringify
+use std::error::panic
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::extract::{ FromBody, JsonBody, Rejection, body_limit, bytes, json_body, limited, text_body }
+use src::contract::text_request
+use src::response::{ Accepted, Created, IntoResponse, Json, NoContent, Text, created, json, text }
+use src::response_docs::{ inferred_responses, option_responses, result_responses }
+use src::router::{ App, Context, Router, app }
+use src::routes::{ route, route_cookies, route_headers, route_params, route_params_query_headers, route_query_context }
+use src::automatic_openapi::all
+use src::multipart::{ Form, multipart }
+
+
+fn create_automatic_article(input: AutomaticCreateArticle) -> Created<AutomaticArticle>
+  created(AutomaticArticle { id: 1, title: input.title })
+
+obj HeaderInput {
+  api authorization: String,
+  api trace_id?: String
+}
+
+obj CookieInput {
+  api session: String
+}
+
+fn path_reply(_params: DocumentedArticlePath) -> Text
+  text("path")
+
+fn query_reply(_query: DocumentedArticleQuery, _ctx: Context) -> Text
+  text("query")
+
+fn header_reply(_headers: HeaderInput) -> Text
+  text("header")
+
+fn cookie_reply(_cookies: CookieInput) -> Text
+  text("cookie")
+
+fn combined_reply(
+  _params: DocumentedArticlePath,
+  _query: DocumentedArticleQuery,
+  _headers: HeaderInput
+) -> Text
+  text("combined")
+
+fn limited_json_reply(input: AutomaticCreateArticle) -> Created<AutomaticArticle>
+  create_automatic_article(input)
+
+fn text_body_reply(_input: String) -> Text
+  text("text")
+
+fn bytes_body_reply(_input: Bytes) -> Text
+  text("bytes")
+
+obj CustomTextBody {}
+
+impl FromBody<String> for CustomTextBody
+  fn extract_body(self, _request: IncomingRequest) : (open) -> Result<String, Rejection>
+    self
+    Ok<String> { value: "custom" }
+
+  fn openapi_request(self) -> Option<OpenApiRequestContract>
+    self
+    Some<OpenApiRequestContract> { value: text_request() }
+
+fn custom_body_reply(_input: String) -> Text
+  text("custom")
+
+fn multipart_reply(_input: Form) -> Text
+  text("multipart")
+
+fn recursive_reply(_input: DocumentedRecursivePair) -> Response
+  Response::no_content().empty()
+
+fn duplicate_a_reply() -> Json<DuplicateA>
+  json(DuplicateA { left: 1 })
+
+fn duplicate_b_reply() -> Json<DuplicateB>
+  json(DuplicateB { right: "two" })
+
+fn generic_path_operation<P>() -> Operation
+  operation().with_path_params<P>()
+
+test "app-owned OpenAPI derives JSON request and created response contracts":
+  let article_app = app(openapi: {
+    title: "Articles API",
+    version: "1.0.0",
+    description: "Automatic API"
+  }).post(
+    "/automatic/articles",
+    body: json_body(),
+    handler: create_automatic_article,
+    docs: {
+      description: "Create an article",
+      operation_id: "createArticle",
+      tags: ["articles"]
+    }
+  ).expose_openapi(
+    at: "/openapi.json",
+    include_doc_comments: true
+  )
+  match(stringify(article_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"/automatic/articles\"".as_slice(), "missing automatic path")
+      require_contains(value, "\"201\"".as_slice(), "missing created status")
+      require_contains(value, "\"application/json\"".as_slice(), "missing JSON media type")
+      require_contains(value, "Reader-visible article title.".as_slice(), "missing doc comments")
+
+  match(stringify(article_app.openapi(include_doc_comments: false)))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      assert(value.contains("Reader-visible article title.".as_slice()), eq: false)
+      require_contains(value, "Create an article".as_slice(), "explicit docs were removed")
+
+test "typed JSON routes infer responses without route metadata":
+  let article_app = app(openapi: { title: "Articles API", version: "1.0.0" })
+    .post("/articles", body: json_body(), handler: create_automatic_article)
+  match(stringify(article_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"201\"".as_slice(), "missing inferred created status")
+      require_contains(value, "\"application/json\"".as_slice(), "missing inferred JSON response")
+
+test "explicit schema prose overlays inferred request and response types":
+  let article_app = app(openapi: { title: "Articles API", version: "1.0.0" })
+    .post(
+      "/articles",
+      body: json_body(),
+      handler: create_automatic_article,
+      docs: route_docs({
+        request_schema: openapi_schema_docs(
+          description: "Explicit request schema",
+          fields: [openapi_field_docs(name: "title", description: "Explicit request title")]
+        ),
+        response_schemas: [openapi_response_schema_docs(
+          status: 201,
+          schema: openapi_schema_docs(
+            description: "Explicit response schema",
+            fields: [openapi_field_docs(name: "id", description: "Explicit response id")]
+          )
+        )]
+      })
+    )
+  let rendered = openapi_string(article_app, include_doc_comments: false)
+  assert(rendered.contains("Explicit request schema".as_slice()), eq: true)
+  require_contains(rendered, "Explicit request title".as_slice(), "request field overlay was omitted")
+  require_contains(rendered, "Explicit response schema".as_slice(), "response schema overlay was omitted")
+  require_contains(rendered, "Explicit response id".as_slice(), "response field overlay was omitted")
+
+test "schema prose overlays do not mutate shared inferred components":
+  let article_app = app(openapi: { title: "Articles API", version: "1.0.0" })
+    .post(
+      "/overlaid",
+      body: json_body(),
+      handler: create_automatic_article,
+      docs: route_docs({
+        request_schema: openapi_schema_docs(description: "Route-only request prose"),
+        response_schemas: [openapi_response_schema_docs(
+          status: 201,
+          schema: openapi_schema_docs(description: "Route-only response prose")
+        )]
+      })
+    )
+    .post("/plain", body: json_body(), handler: create_automatic_article)
+  let rendered = openapi_string(article_app)
+  require_contains(rendered, "Route-only request prose".as_slice(), "request overlay was omitted")
+  require_contains(rendered, "Route-only response prose".as_slice(), "response overlay was omitted")
+  require_contains(rendered, "JSON accepted by POST /automatic/articles.".as_slice(), "request overlay mutated the shared component")
+  require_contains(rendered, "JSON returned after an article is created.".as_slice(), "response overlay mutated the shared component")
+
+test "automatic OpenAPI hides routes and is deterministic":
+  let hidden_app = app(openapi: { title: "Hidden", version: "1" })
+    .post(
+      "/visible",
+      body: json_body(),
+      handler: create_automatic_article,
+      docs: { operation_id: "visible", hidden: false }
+    )
+    .post(
+      "/hidden",
+      body: json_body(),
+      handler: create_automatic_article,
+      docs: { hidden: true }
+    )
+  match(stringify(hidden_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value: first }:
+      assert(first.contains("\"/hidden\"".as_slice()), eq: false)
+      match(stringify(hidden_app.openapi()))
+        Ok<String> { value: second }:
+          assert(first, eq: second)
+        Err:
+          Test::fail()
+
+test "explicit path parameters remain required":
+  let documented = app(openapi: { title: "Paths", version: "1" })
+    .route<Text>(
+      "/articles/:id",
+      method: Method::Get {},
+      handler: (_ctx: Context) -> Text => text("ok"),
+      docs: route_docs(parameters: [
+        openapi_parameter<String>(
+          name: "id",
+          location: "path",
+          required: false
+        )
+      ])
+    )
+  let rendered = openapi_string(documented)
+  require_contains(rendered, "\"/articles/{id}\"".as_slice(), "path override removed its route")
+  require_contains(rendered, "\"required\":true".as_slice(), "path override was not required")
+
+test "raw context routes document placeholders as required opaque path parameters":
+  let documented = app(openapi: { title: "Paths", version: "1" })
+    .get("/raw/:id", handler: (_ctx: Context) -> Response => Response::ok().empty())
+  let rendered = openapi_string(documented)
+  require_contains(rendered, "\"/raw/{id}\"".as_slice(), "raw path was not normalized")
+  require_contains(rendered, "\"name\":\"id\"".as_slice(), "raw placeholder name was omitted")
+  require_contains(rendered, "\"in\":\"path\"".as_slice(), "raw placeholder location was omitted")
+  require_contains(rendered, "\"required\":true".as_slice(), "raw placeholder was not required")
+
+test "generic operation helpers preserve reified shapes":
+  let generic_spec = document(info(title: "Generic", version: "1"))
+    .route("/generic/:id", method: Method::Get {}, operation: generic_path_operation<DocumentedArticlePath>())
+  match(stringify(generic_spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"/generic/{id}\"".as_slice(), "generic shape was not preserved")
+
+test "free query routes preserve contracts":
+  let value = route_query_context<DocumentedArticleQuery, Text>(
+    app(openapi: { title: "Query", version: "1" }),
+    "/query",
+    method: Method::Get {},
+    query_reply
+  )
+  require_contains(openapi_string(value), "\"in\":\"query\"".as_slice(), "missing standalone query contract")
+
+test "route-local docs can be attached to specialized route surfaces":
+  let value = route_query_context<DocumentedArticleQuery, Text>(
+    app(openapi: { title: "Query", version: "1" }),
+    "/query",
+    method: Method::Get {},
+    query_reply
+  ).with_route_docs(
+    "/query",
+    method: Method::Get {},
+    docs: RouteDocs::empty().with_description("Specialized query route")
+  )
+  require_contains(openapi_string(value), "Specialized query route".as_slice(), "specialized route docs were omitted")
+
+test "free header routes preserve contracts":
+  let value = route_headers<HeaderInput, Text>(
+    app(openapi: { title: "Headers", version: "1" }),
+    "/headers",
+    method: Method::Get {},
+    header_reply
+  )
+  require_contains(openapi_string(value), "\"in\":\"header\"".as_slice(), "missing standalone header contract")
+
+test "free cookie routes preserve contracts":
+  let value = route_cookies<CookieInput, Text>(
+    app(openapi: { title: "Cookies", version: "1" }),
+    "/cookies",
+    method: Method::Get {},
+    cookie_reply
+  )
+  require_contains(openapi_string(value), "\"in\":\"cookie\"".as_slice(), "missing standalone cookie contract")
+
+test "combined free extractors retain every parameter contract":
+  let value = route_params_query_headers<DocumentedArticlePath, DocumentedArticleQuery, HeaderInput, Text>(
+    app(openapi: { title: "Combined", version: "1" }),
+    "/articles/:id",
+    method: Method::Get {},
+    combined_reply
+  )
+  let rendered = openapi_string(value)
+  require_contains(rendered, "\"in\":\"path\"".as_slice(), "combined route lost path parameters")
+  require_contains(rendered, "\"in\":\"query\"".as_slice(), "combined route lost query parameters")
+  require_contains(rendered, "\"in\":\"header\"".as_slice(), "combined route lost header parameters")
+
+test "app router and free route entry surfaces retain equivalent typed contracts":
+  let direct = app(openapi: { title: "Surfaces", version: "1" }).post(
+    "/app",
+    body: json_body(),
+    handler: create_automatic_article
+  )
+  let free = route(
+    direct,
+    "/free",
+    method: Method::Post {},
+    body: json_body(),
+    create_automatic_article
+  )
+  let routed = Router::init().post(
+    "/router",
+    body: json_body(),
+    handler: create_automatic_article
+  )
+  let rendered = openapi_string(free.mount("/mounted", routed))
+  require_contains(rendered, "\"/app\"".as_slice(), "App route contract was omitted")
+  require_contains(rendered, "\"/free\"".as_slice(), "free route contract was omitted")
+  require_contains(rendered, "\"/mounted/router\"".as_slice(), "Router route contract was omitted")
+  require_contains(rendered, "\"201\"".as_slice(), "typed response contract differed by route surface")
+
+test "limited JSON bodies preserve their request contract":
+  let value = app(openapi: { title: "Bodies", version: "1" }).post(
+    "/limited-json",
+    body: limited(json_body(), limit: body_limit(1024)),
+    handler: limited_json_reply
+  )
+  let rendered = openapi_string(value)
+  require_contains(rendered, "\"application/json\"".as_slice(), "missing standalone limited JSON contract")
+  require_contains(rendered, "JSON accepted by POST /automatic/articles.".as_slice(), "standalone limited JSON lost its DTO schema")
+
+test "limited text bodies preserve their request contract":
+  let value = app(openapi: { title: "Bodies", version: "1" }).post(
+    "/limited-text",
+    body: limited(text_body(), limit: body_limit(1024)),
+    handler: text_body_reply
+  )
+  require_contains(openapi_string(value), "\"text/plain\"".as_slice(), "missing standalone limited text contract")
+
+test "limited byte bodies preserve their request contract":
+  let value = app(openapi: { title: "Bodies", version: "1" }).post(
+    "/limited-bytes",
+    body: limited(bytes(), limit: body_limit(1024)),
+    handler: bytes_body_reply
+  )
+  require_contains(openapi_string(value), "\"application/octet-stream\"".as_slice(), "missing standalone limited bytes contract")
+
+test "custom extractors can publish a separate request contract":
+  let value = app(openapi: { title: "Custom extractor", version: "1" }).post(
+    "/custom-body",
+    body: CustomTextBody {},
+    handler: custom_body_reply
+  )
+  require_contains(openapi_string(value), "\"text/plain\"".as_slice(), "missing custom extractor contract")
+
+test "multipart extractors publish an honest opaque multipart body":
+  let value = app(openapi: { title: "Multipart", version: "1" }).post(
+    "/upload",
+    body: multipart(),
+    handler: multipart_reply
+  )
+  require_contains(openapi_string(value), "\"multipart/form-data\"".as_slice(), "missing multipart contract")
+
+test "automatic schemas preserve recursion and distinct same-named DTOs":
+  let value = app(openapi: { title: "Schema identity", version: "1" })
+    .post<DocumentedRecursivePair>("/recursive", body: json_body(), handler: recursive_reply)
+    .get("/duplicate-a", handler: duplicate_a_reply)
+    .get("/duplicate-b", handler: duplicate_b_reply)
+  let rendered = openapi_string(value)
+  require_contains(rendered, "DocumentedRecursivePair_".as_slice(), "missing recursive component")
+  require_contains(rendered, "\"left\"".as_slice(), "first same-named DTO was overwritten")
+  require_contains(rendered, "\"right\"".as_slice(), "second same-named DTO was overwritten")
+
+test "automatic request contracts cover parameters and limited body extractors":
+  let base = app(openapi: { title: "Requests", version: "1" })
+  let with_path = route_params<DocumentedArticlePath, Text>(
+    base,
+    "/articles/:id".as_slice(),
+    method: Method::Get {},
+    path_reply
+  )
+  let with_query = route_query_context<DocumentedArticleQuery, Text>(
+    with_path,
+    "/articles",
+    method: Method::Get {},
+    query_reply
+  )
+  let with_headers = route_headers<HeaderInput, Text>(
+    with_query,
+    "/headers",
+    method: Method::Get {},
+    header_reply
+  )
+  let with_cookies = route_cookies<CookieInput, Text>(
+    with_headers,
+    "/cookies",
+    method: Method::Get {},
+    cookie_reply
+  )
+  let with_json = with_cookies.post(
+    "/limited-json",
+    body: limited(json_body(), limit: body_limit(1024)),
+    handler: limited_json_reply
+  )
+  let with_text = with_json.post(
+    "/limited-text",
+    body: limited(text_body(), limit: body_limit(1024)),
+    handler: text_body_reply
+  )
+  let documented = with_text.post(
+    "/limited-bytes",
+    body: limited(bytes(), limit: body_limit(1024)),
+    handler: bytes_body_reply
+  )
+  match(stringify(documented.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"/articles/{id}\"".as_slice(), "path was not normalized")
+      require_contains(value, "\"in\":\"path\"".as_slice(), "missing path parameter")
+      require_contains(value, "\"in\":\"query\"".as_slice(), "missing query parameter")
+      require_contains(value, "\"in\":\"header\"".as_slice(), "missing header parameter")
+      require_contains(value, "\"in\":\"cookie\"".as_slice(), "missing cookie parameter")
+      require_contains(value, "\"application/json\"".as_slice(), "missing limited JSON contract")
+      require_contains(value, "\"text/plain\"".as_slice(), "missing limited text contract")
+      require_contains(value, "\"application/octet-stream\"".as_slice(), "missing limited bytes contract")
+      require_contains(value, "JSON accepted by POST /automatic/articles.".as_slice(), "limited JSON lost its DTO schema")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)
+
+fn openapi_string(value: App) -> String
+  match(stringify(value.openapi()))
+    Ok<String> { value }:
+      value
+    Err:
+      "".to_string()
+
+fn openapi_string(value: App, { include_doc_comments: bool }) -> String
+  match(stringify(value.openapi(include_doc_comments: include_doc_comments)))
+    Ok<String> { value }:
+      value
+    Err:
+      "".to_string()

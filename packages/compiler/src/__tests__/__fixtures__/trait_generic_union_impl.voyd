@@ -1,0 +1,27 @@
+obj Some<T> { value: T }
+obj None {}
+type Maybe<T> = Some<T> | None
+
+obj Number { value: i32 }
+
+trait Read<T>
+  fn read(self) -> i32
+
+impl Read<Number> for Number
+  fn read(self) -> i32
+    self.value
+
+impl<T: Read<T>> Read<Maybe<T>> for Maybe<T>
+  fn read(self) -> i32
+    self.match(active)
+      Some<T>: read_inner<T>(active.value)
+      None: 0
+
+fn read_inner<T: Read<T>>(value: T) -> i32
+  value.read()
+
+fn read_value<T: Read<T>>(value: T) -> i32
+  value.read()
+
+pub fn main() -> i32
+  read_value<Maybe<Number>>(Some<Number> { value: Number { value: 42 } })

@@ -1,0 +1,6 @@
+use std::string::type::String
+
+/// First declaration named `Duplicate`.
+pub obj Duplicate {
+  api left: i32
+}

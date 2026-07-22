@@ -1,0 +1,11 @@
+use src::provider::{ Describe, describe_default, describe_value }
+
+obj Downstream {}
+
+impl Describe<Downstream> for Downstream
+  fn describe<U>(self) -> i32
+    self
+    73
+
+pub fn main() -> i32
+  describe_value<Downstream, Downstream>(Downstream {}) + describe_default<Downstream, Downstream>(Downstream {})

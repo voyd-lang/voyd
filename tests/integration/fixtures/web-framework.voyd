@@ -357,8 +357,8 @@ pub fn option_response_probe() -> i32
   none_response.status.code()
 
 pub fn router_export_probe() -> i32
-  let api = router::Router::init()
-    .get("/health".as_slice().to_string(), handler: () -> Response =>
+  let api = router::app()
+    .get("/health", handler: (_ctx: router::Context) -> Response =>
       Response::ok().text("router".as_slice())
     )
   let built = app().mount("/api".as_slice(), api)
@@ -442,6 +442,49 @@ pub fn automatic_openapi_schema_probe() -> String
     docs: { operation_id: "createArticle" }
   )
   match(stringify(article_app.openapi()))
+    Ok<String> { value }:
+      value
+    Err:
+      "serialization failed"
+
+fn openapi_validation_reply(_ctx: Context) -> String
+  "ok"
+
+pub fn duplicate_openapi_operation_id_probe() -> String
+  let invalid = app(openapi: { title: "Validation", version: "1" })
+    .route(
+      "/one",
+      method: Method::Get {},
+      handler: openapi_validation_reply,
+      docs: { operation_id: "duplicate" }
+    )
+    .route(
+      "/two",
+      method: Method::Get {},
+      handler: openapi_validation_reply,
+      docs: { operation_id: "duplicate" }
+    )
+  match(stringify(invalid.openapi()))
+    Ok<String> { value }:
+      value
+    Err:
+      "serialization failed"
+
+pub fn conflicting_openapi_route_probe() -> String
+  let invalid = app(openapi: { title: "Validation", version: "1" })
+    .route(
+      "/same",
+      method: Method::Get {},
+      handler: openapi_validation_reply,
+      docs: { operation_id: "first" }
+    )
+    .route(
+      "/same",
+      method: Method::Get {},
+      handler: openapi_validation_reply,
+      docs: { operation_id: "second" }
+    )
+  match(stringify(invalid.openapi()))
     Ok<String> { value }:
       value
     Err:

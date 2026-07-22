@@ -1,0 +1,64 @@
+//! Typed value encoding shared by response and documentation helpers.
+
+use std::array::Array
+use std::dict::Dict
+use std::json::{ JsonArray, JsonBool, JsonNull, JsonNumber, JsonObject, JsonString, JsonValue }
+use std::msgpack::{ Bool, F32, F64, I32, I64, MsgPack, MsgPackError, Null }
+use std::msgpack::self as msgpack
+use std::number::cast::self as cast
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+
+pub fn encode_json_value<T>(value: T) -> JsonValue
+  msgpack_to_json(msgpack::pack_boundary_value<T>(value))
+
+fn msgpack_to_json(value: MsgPack): () -> JsonValue
+  value.match(decoded)
+    Null:
+      JsonNull {}
+    Bool:
+      JsonBool { value: decoded.value }
+    I32:
+      JsonNumber { value: cast::to_f64(decoded.value) }
+    I64:
+      JsonNumber { value: cast::to_f64(decoded.value) }
+    F32:
+      JsonNumber { value: cast::to_f64(decoded.value) }
+    F64:
+      JsonNumber { value: decoded.value }
+    String:
+      JsonString { value: decoded }
+    Array<MsgPack>:
+      JsonArray { value: msgpack_array_to_json(decoded) }
+    else:
+      match(msgpack::unpack_map(value))
+        Ok<Dict<String, MsgPack>> { value }:
+          JsonObject { value: msgpack_map_to_json(value) }
+        Err<MsgPackError>:
+          JsonNull {}
+
+fn msgpack_array_to_json(values: Array<MsgPack>): () -> Array<JsonValue>
+  let ~out = Array<JsonValue>::with_capacity(values.len())
+  var index = 0
+  while index < values.len():
+    match(values.get(index))
+      Some<MsgPack> { value }:
+        out.push(msgpack_to_json(value))
+      None:
+        void
+    index = index + 1
+  out
+
+fn msgpack_map_to_json(values: Dict<String, MsgPack>): () -> Dict<String, JsonValue>
+  let entries = values.entries()
+  let ~out = Dict<String, JsonValue>::with_capacity(entries.len())
+  var index = 0
+  while index < entries.len():
+    match(entries.get(index))
+      Some<(String, MsgPack)> { value }:
+        out.set(value.0, msgpack_to_json(value.1))
+      None:
+        void
+    index = index + 1
+  out

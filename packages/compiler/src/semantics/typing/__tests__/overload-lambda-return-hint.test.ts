@@ -89,6 +89,38 @@ describe("overload lambda return hint", () => {
     ).not.toThrow();
   });
 
+  it("prefers a structured callback return over a bare return type parameter", () => {
+    const semantics = semanticsPipeline(
+      loadAst("overload_lambda_structured_return_preference.voyd"),
+    );
+    const call = Array.from(semantics.hir.expressions.values()).find(
+      (expr): expr is HirCallExpr =>
+        expr.exprKind === "call" &&
+        expr.args.some(
+          (arg) =>
+            semantics.hir.expressions.get(arg.expr)?.exprKind === "lambda",
+        ),
+    );
+    expect(call).toBeDefined();
+    if (!call) return;
+    const target = semantics.typing.callTargets
+      .get(call.id)
+      ?.values()
+      .next().value;
+    expect(target).toBeDefined();
+    if (!target) return;
+    const signature = semantics.typing.functions.getSignature(target.symbol);
+    expect(signature).toBeDefined();
+    const handlerType = signature
+      ? semantics.typing.arena.get(signature.parameters[0]!.type)
+      : undefined;
+    expect(handlerType?.kind).toBe("function");
+    if (handlerType?.kind !== "function") return;
+    expect(semantics.typing.arena.get(handlerType.returnType).kind).toBe(
+      "union",
+    );
+  });
+
   it("uses named callback return types to reject incompatible generic overloads", () => {
     expect(() =>
       semanticsPipeline(

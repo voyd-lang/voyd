@@ -12,6 +12,7 @@ import type {
   TypeId,
 } from "../../context.js";
 import type {
+  HirExprId,
   ProgramFunctionInstanceId,
   ProgramSymbolId,
   SymbolId,
@@ -22,7 +23,10 @@ import {
   compileIntrinsicCall,
 } from "../../intrinsics.js";
 import { effectsFacade } from "../../effects/facade.js";
-import { getRequiredExprType } from "../../types.js";
+import {
+  getRequiredExprType,
+  substituteTypeForInstance,
+} from "../../types.js";
 import { compileCallArgumentsWithMetadata } from "./arguments.js";
 import { compileClosureCall, compileCurriedClosureCall } from "./closure.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
@@ -57,6 +61,20 @@ export const compileCallExpr = (
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
   const expectTraitDispatch = callInfo.traitDispatch;
 
+  if (expr.staticTraitTarget && typeof expr.staticTraitSymbol === "number") {
+    return compileStaticTraitCall({
+      expr,
+      ctx,
+      fnCtx,
+      compileExpr,
+      tailPosition,
+      expectedResultTypeId,
+      typeInstanceId,
+      outResultStorageRef,
+      scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
+    });
+  }
+
   if (callee.exprKind === "identifier") {
     const continuation = fnCtx.continuations?.get(callee.symbol);
     if (continuation) {
@@ -85,6 +103,12 @@ export const compileCallExpr = (
     const targetRef = ctx.program.symbols.refOf(
       targetFunctionId as ProgramSymbolId,
     );
+    const traitImplTypeArgs = inferTraitImplTypeArgs({
+      expr,
+      implMethod: targetFunctionId as ProgramSymbolId,
+      ctx,
+      typeInstanceId,
+    });
     return compileResolvedSymbolCall({
       expr,
       symbol: targetRef.symbol,
@@ -100,6 +124,7 @@ export const compileCallExpr = (
       typeInstanceId,
       outResultStorageRef,
       scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
+      typeArgsOverride: traitImplTypeArgs,
     });
   }
 
@@ -128,6 +153,12 @@ export const compileCallExpr = (
       const targetRef = ctx.program.symbols.refOf(
         targetFunctionId as ProgramSymbolId,
       );
+      const traitImplTypeArgs = inferTraitImplTypeArgs({
+        expr,
+        implMethod: targetFunctionId as ProgramSymbolId,
+        ctx,
+        typeInstanceId,
+      });
       return compileResolvedSymbolCall({
         expr,
         symbol: targetRef.symbol,
@@ -143,6 +174,7 @@ export const compileCallExpr = (
         typeInstanceId,
         outResultStorageRef,
         scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
+        typeArgsOverride: traitImplTypeArgs,
       });
     }
 
@@ -311,6 +343,84 @@ export const compileCallExpr = (
   throw new Error("codegen only supports function and closure calls today");
 };
 
+const inferTraitImplTypeArgs = ({
+  expr,
+  implMethod,
+  ctx,
+  typeInstanceId,
+}: {
+  expr: HirCallExpr;
+  implMethod: ProgramSymbolId;
+  ctx: CodegenContext;
+  typeInstanceId: ProgramFunctionInstanceId | undefined;
+}): readonly TypeId[] | undefined => {
+  const receiver = expr.args[0];
+  if (!receiver) {
+    return undefined;
+  }
+  const receiverType = concreteReceiverTypeForTraitCall({
+    receiverExprId: receiver.expr,
+    ctx,
+    typeInstanceId,
+  });
+  const matches = ctx.program.traits.getImplTemplates().flatMap((template) => {
+    if (!template.methods.some((method) => method.implMethod === implMethod)) {
+      return [];
+    }
+    const match = ctx.program.types.unify(receiverType, template.target, {
+      location: expr.ast,
+      reason: "trait implementation call",
+      variance: "invariant",
+    });
+    return match.ok ? [{ template, substitution: match.substitution }] : [];
+  });
+  if (matches.length !== 1) {
+    return undefined;
+  }
+  const selected = matches[0]!;
+  return selected.template.typeParams.map(
+    (parameter) =>
+      selected.substitution.get(parameter) ?? ctx.program.primitives.unknown,
+  );
+};
+
+const concreteReceiverTypeForTraitCall = ({
+  receiverExprId,
+  ctx,
+  typeInstanceId,
+}: {
+  receiverExprId: HirExprId;
+  ctx: CodegenContext;
+  typeInstanceId: ProgramFunctionInstanceId | undefined;
+}): TypeId => {
+  const receiverExpr = ctx.module.hir.expressions.get(receiverExprId);
+  if (typeof typeInstanceId === "number" && receiverExpr?.exprKind === "identifier") {
+    const instance = ctx.program.functions.getInstance(typeInstanceId);
+    const signature = ctx.program.functions.getSignature(
+      instance.symbolRef.moduleId,
+      instance.symbolRef.symbol,
+    );
+    const parameterType = signature?.parameters.find(
+      (parameter) => parameter.symbol === receiverExpr.symbol,
+    )?.typeId;
+    if (typeof parameterType === "number") {
+      return substituteTypeForInstance({
+        typeId: parameterType,
+        ctx,
+        instanceId: typeInstanceId,
+      });
+    }
+    const instanceValueType = ctx.program.functions.getInstanceValueType(
+      typeInstanceId,
+      receiverExpr.symbol,
+    );
+    if (typeof instanceValueType === "number") {
+      return instanceValueType;
+    }
+  }
+  return getRequiredExprType(receiverExprId, ctx, typeInstanceId);
+};
+
 export const compileMethodCallExpr = (
   expr: HirMethodCallExpr,
   ctx: CodegenContext,
@@ -340,6 +450,31 @@ export const compileMethodCallExpr = (
     targetFunctionId as ProgramSymbolId,
   );
   const callView = toMethodCallView(expr);
+  const concreteTraitTarget = callInfo.traitDispatch
+    ? resolveConcreteTraitMethodTarget({
+        expr: callView,
+        selectedMethod: targetFunctionId as ProgramSymbolId,
+        ctx,
+        typeInstanceId,
+      })
+    : undefined;
+  if (concreteTraitTarget) {
+    return compileResolvedSymbolCall({
+      expr: callView,
+      symbol: concreteTraitTarget.symbol,
+      moduleId: concreteTraitTarget.moduleId,
+      traitDispatchEnabled: false,
+      missingTraitDispatchMessage: "",
+      ctx,
+      fnCtx,
+      compileExpr,
+      tailPosition,
+      expectedResultTypeId,
+      typeInstanceId,
+      outResultStorageRef,
+      scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
+    });
+  }
   const traitDispatch = callInfo.traitDispatch
     ? compileTraitDispatchCall({
         expr: callView,
@@ -357,7 +492,21 @@ export const compileMethodCallExpr = (
     return traitDispatch;
   }
   if (callInfo.traitDispatch) {
-    throw new Error("codegen missing trait dispatch target for method call");
+    const receiver = callView.args[0];
+    const receiverType = receiver
+      ? concreteReceiverTypeForTraitCall({
+          receiverExprId: receiver.expr,
+          ctx,
+          typeInstanceId,
+        })
+      : undefined;
+    const receiverKind =
+      typeof receiverType === "number"
+        ? ctx.program.types.getTypeDesc(receiverType).kind
+        : "missing";
+    throw new Error(
+      `codegen missing trait dispatch target for method call (target=${targetFunctionId}, receiver=${receiverType ?? "missing"}:${receiverKind}, instance=${typeInstanceId ?? "missing"})`,
+    );
   }
 
   const meta = getFunctionMetadataForCall({
@@ -414,6 +563,82 @@ export const compileMethodCallExpr = (
         },
       }),
   });
+};
+
+const resolveConcreteTraitMethodTarget = ({
+  expr,
+  selectedMethod,
+  ctx,
+  typeInstanceId,
+}: {
+  expr: HirCallExpr;
+  selectedMethod: ProgramSymbolId;
+  ctx: CodegenContext;
+  typeInstanceId: ProgramFunctionInstanceId | undefined;
+}): { moduleId: string; symbol: SymbolId } | undefined => {
+  const receiver = expr.args[0];
+  if (!receiver) {
+    return undefined;
+  }
+  const receiverType = concreteReceiverTypeForTraitCall({
+    receiverExprId: receiver.expr,
+    ctx,
+    typeInstanceId,
+  });
+  const receiverDesc = ctx.program.types.getTypeDesc(receiverType);
+  if (
+    receiverDesc.kind === "trait" ||
+    (receiverDesc.kind === "intersection" &&
+      typeof receiverDesc.nominal !== "number")
+  ) {
+    return undefined;
+  }
+  const dispatchReceiverType =
+    receiverDesc.kind === "intersection" &&
+    typeof receiverDesc.nominal === "number"
+      ? receiverDesc.nominal
+      : receiverType;
+  const mapping =
+    ctx.program.traits.getTraitMethodImpl(selectedMethod) ??
+    ctx.program.traits
+      .getImplTemplates()
+      .flatMap((template) =>
+        template.methods.some(
+          (method) => method.traitMethod === selectedMethod,
+        )
+          ? [
+              {
+                traitSymbol: template.traitSymbol,
+                traitMethodSymbol: selectedMethod,
+              },
+            ]
+          : [],
+      )[0];
+  if (!mapping) {
+    return undefined;
+  }
+  const matches = ctx.program.traits.getImplTemplates().flatMap((template) => {
+    if (template.traitSymbol !== mapping.traitSymbol) {
+      return [];
+    }
+    const method = template.methods.find(
+      (entry) => entry.traitMethod === mapping.traitMethodSymbol,
+    );
+    if (!method) {
+      return [];
+    }
+    const match = ctx.program.types.unify(dispatchReceiverType, template.target, {
+      location: expr.ast,
+      reason: "concrete trait method dispatch",
+      variance: "invariant",
+    });
+    return match.ok ? [method.implMethod] : [];
+  });
+  const uniqueMatches = Array.from(new Set(matches));
+  if (uniqueMatches.length !== 1) {
+    return undefined;
+  }
+  return ctx.program.symbols.refOf(uniqueMatches[0]!);
 };
 
 const toMethodCallView = (expr: HirMethodCallExpr): HirCallExpr => ({
@@ -488,6 +713,59 @@ const receiverSpecializedMetaForCall = ({
   );
 };
 
+const compileStaticTraitCall = ({
+  expr,
+  ctx,
+  fnCtx,
+  compileExpr,
+  tailPosition,
+  expectedResultTypeId,
+  typeInstanceId,
+  outResultStorageRef,
+  scalarAggregateResultTypeId,
+}: {
+  expr: HirCallExpr;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  tailPosition: boolean;
+  expectedResultTypeId?: TypeId;
+  typeInstanceId?: ProgramFunctionInstanceId;
+  outResultStorageRef?: CompileCallOptions["outResultStorageRef"];
+  scalarAggregateResultTypeId?: TypeId;
+}): CompiledExpression => {
+  if (!expr.staticTraitTarget || typeof expr.staticTraitSymbol !== "number") {
+    throw new Error("codegen expected static trait dispatch metadata");
+  }
+  const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
+  const targetFunctionId = resolveTargetFunctionId({
+    targets: callInfo.targets,
+    callInstanceId: fnCtx.instanceId ?? typeInstanceId,
+    typeInstanceId,
+  });
+  if (typeof targetFunctionId !== "number") {
+    throw new Error("codegen missing resolved static trait method target");
+  }
+  const targetRef = ctx.program.symbols.refOf(
+    targetFunctionId as ProgramSymbolId,
+  );
+  return compileResolvedSymbolCall({
+    expr,
+    symbol: targetRef.symbol,
+    moduleId: targetRef.moduleId,
+    traitDispatchEnabled: false,
+    missingTraitDispatchMessage: "",
+    ctx,
+    fnCtx,
+    compileExpr,
+    tailPosition,
+    expectedResultTypeId,
+    typeInstanceId,
+    outResultStorageRef,
+    scalarAggregateResultTypeId,
+  });
+};
+
 const compileResolvedSymbolCall = ({
   expr,
   symbol,
@@ -502,6 +780,7 @@ const compileResolvedSymbolCall = ({
   typeInstanceId,
   outResultStorageRef,
   scalarAggregateResultTypeId,
+  typeArgsOverride,
 }: {
   expr: HirCallExpr;
   symbol: number;
@@ -516,6 +795,7 @@ const compileResolvedSymbolCall = ({
   typeInstanceId: ProgramFunctionInstanceId | undefined;
   outResultStorageRef?: CompileCallOptions["outResultStorageRef"];
   scalarAggregateResultTypeId?: TypeId;
+  typeArgsOverride?: readonly TypeId[];
 }): CompiledExpression => {
   const traitDispatch = traitDispatchEnabled
     ? compileTraitDispatchCall({
@@ -610,9 +890,14 @@ const compileResolvedSymbolCall = ({
     ctx,
     moduleId,
     typeInstanceId,
+    typeArgsOverride,
   });
   if (!targetMeta) {
-    throw new Error(`codegen cannot call symbol ${moduleId}::${symbol}`);
+    const targetId = ctx.program.symbols.canonicalIdOf(moduleId, symbol);
+    const targetName = ctx.program.symbols.getName(targetId) ?? "<anonymous>";
+    throw new Error(
+      `codegen cannot call symbol ${moduleId}::${symbol} (${targetName}); call ${expr.id}; static trait target: ${Boolean(expr.staticTraitTarget)}; type args: ${typeArgsOverride?.join(",") ?? "inferred"}`,
+    );
   }
   const resolvedMeta = receiverSpecializedMetaForCall({
     expr,

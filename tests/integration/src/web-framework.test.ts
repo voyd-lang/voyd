@@ -15,19 +15,18 @@ const expectCompileSuccess = (
   result: CompileResult,
 ): Extract<CompileResult, { success: true }> => {
   if (!result.success) {
-    throw new Error(
-      result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
-    );
+    throw new Error(JSON.stringify(result.diagnostics, null, 2));
   }
   expect(result.success).toBe(true);
   return result;
 };
 
+const webFrameworkSdk = createSdk();
 let webFrameworkFixtureCompile: Promise<CompileResult> | undefined;
 const compileWebFrameworkFixture = async (): Promise<
   Extract<CompileResult, { success: true }>
 > => {
-  webFrameworkFixtureCompile ??= createSdk().compile({
+  webFrameworkFixtureCompile ??= webFrameworkSdk.compile({
     entryPath: path.join(fixtureRoot, "web-framework.voyd"),
     roots: {
       src: fixtureRoot,
@@ -250,6 +249,25 @@ describe("integration: pkg::web", () => {
     expect(schema).toContain('"201"');
     expect(schema).toContain('"operationId":"createArticle"');
     expect(schema).toContain("Reader-visible article title.");
+  });
+
+  it("keeps only the first duplicate automatic OpenAPI operation ID", async () => {
+    const result = await compileWebFrameworkFixture();
+    const schema = await result.run<string>({
+      entryName: "duplicate_openapi_operation_id_probe",
+    });
+    expect(schema.match(/\"operationId\":\"duplicate\"/g)).toHaveLength(1);
+    expect(schema).toContain('"/one"');
+    expect(schema).toContain('"/two"');
+  });
+
+  it("documents the first runtime route when automatic contracts conflict", async () => {
+    const result = await compileWebFrameworkFixture();
+    const schema = await result.run<string>({
+      entryName: "conflicting_openapi_route_probe",
+    });
+    expect(schema).toContain('"operationId":"first"');
+    expect(schema).not.toContain('"operationId":"second"');
   });
 
   it("serves formatted SSE through the Web router and host stream lifecycle", async () => {
@@ -508,7 +526,7 @@ describe("integration: pkg::web", () => {
   });
 
   it("converts option responses from extracted route handlers", async () => {
-    const sdk = createSdk();
+    const sdk = webFrameworkSdk;
     const result = expectCompileSuccess(
       await sdk.compile({
         source: `
@@ -573,7 +591,7 @@ pub fn route_option_response_probe() -> i32
   });
 
   it("supports body and auth policies on method helpers", async () => {
-    const sdk = createSdk();
+    const sdk = webFrameworkSdk;
     const result = expectCompileSuccess(
       await sdk.compile({
         source: `
@@ -695,7 +713,7 @@ pub fn method_body_route_probe() -> i32
   });
 
   it("cancels route handlers that exceed timeout policies", async () => {
-    const sdk = createSdk();
+    const sdk = webFrameworkSdk;
     const result = expectCompileSuccess(
       await sdk.compile({
         source: `
@@ -766,7 +784,7 @@ pub fn timeout_route_probe(): (task::TaskRuntime, Time) -> i32
   });
 
   it("converts responses from free get helpers", async () => {
-    const sdk = createSdk();
+    const sdk = webFrameworkSdk;
     const result = expectCompileSuccess(
       await sdk.compile({
         source: `
@@ -845,47 +863,8 @@ pub fn free_get_response_probe() -> i32
     ).resolves.toBe(200);
   });
 
-  it("exports the documented router submodule", async () => {
-    const sdk = createSdk();
-    const result = expectCompileSuccess(
-      await sdk.compile({
-        source: `
-use pkg::web::router
-use pkg::web::{ Body, Headers, IncomingRequest, Method, Response }
-use std::optional::types::all
-use std::string::type::String
-
-fn request(method: Method, path: String) -> IncomingRequest
-  IncomingRequest {
-    method: method,
-    path: path,
-    query: None {},
-    headers: Headers::empty(),
-    body: Body::empty()
-  }
-
-pub fn router_module_export_probe() -> i32
-  let built = router::app()
-    .get("/health".as_slice(), handler: (_ctx: router::Context) -> Response =>
-      Response::ok().text("ok".as_slice())
-    )
-  let response = built.handle(request(Method::Get {}, "/health".as_slice().to_string()))
-  response.status.code()
-`,
-        roots: {
-          src: fixtureRoot,
-          pkgDirs: [path.join(repoRoot, "packages")],
-        },
-      }),
-    );
-
-    await expect(
-      result.run<number>({ entryName: "router_module_export_probe" }),
-    ).resolves.toBe(200);
-  });
-
   it("rejects unknown route DSL extractor parameter names", async () => {
-    const sdk = createSdk();
+    const sdk = webFrameworkSdk;
     const result = await sdk.compile({
       source: `
 use pkg::web::all

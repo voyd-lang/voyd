@@ -1,0 +1,164 @@
+//! Rendering of one OpenAPI operation.
+
+use std::array::Array
+use std::dict::Dict
+use std::json::{ JsonArray, JsonBool, JsonObject, JsonString, JsonValue }
+use std::meta::Shape
+use std::number::cast::to_string
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+use super::openapi_parameter_render::append_parameters
+use super::openapi_response_render::response_contracts_json
+use super::openapi_schema::{ content_json, opaque_schema, schema_for }
+use super::openapi_schema_overlay::apply_schema_docs
+use super::openapi_types::Operation
+use super::contract::OpenApiParameterContract
+
+pub fn operation_json(
+  operation: Operation,
+  { prefix: String, ~components: Dict<String, JsonValue>, include_doc_comments: bool }
+) -> JsonValue
+  let ~out = Dict<String, JsonValue>::init()
+  set_optional_string(out, "summary", operation.summary)
+  set_optional_string(out, "description", operation.description)
+  set_optional_string(out, "operationId", operation.operation_id)
+  if not operation.tags.is_empty():
+    let ~tags = Array<JsonValue>::with_capacity(operation.tags.len())
+    var tag_index = 0
+    while tag_index < operation.tags.len():
+      tags.push(JsonString { value: operation.tags.at(tag_index) })
+      tag_index = tag_index + 1
+    out.set("tags", JsonArray { value: tags })
+
+  let ~parameters = Array<JsonValue>::init()
+  append_parameters(parameters, operation.path_params, location: "path".as_slice(), required: true, prefix: prefix.concat("Path".as_slice()), components: components, include_doc_comments: include_doc_comments)
+  append_parameters(parameters, operation.query_params, location: "query".as_slice(), required: false, prefix: prefix.concat("Query".as_slice()), components: components, include_doc_comments: include_doc_comments)
+  append_parameters(parameters, operation.header_params, location: "header".as_slice(), required: false, prefix: prefix.concat("Header".as_slice()), components: components, include_doc_comments: include_doc_comments)
+  append_parameters(parameters, operation.cookie_params, location: "cookie".as_slice(), required: false, prefix: prefix.concat("Cookie".as_slice()), components: components, include_doc_comments: include_doc_comments)
+  apply_parameter_overrides(parameters, operation.parameter_overrides, prefix: prefix, components: components, include_doc_comments: include_doc_comments)
+  if not parameters.is_empty():
+    out.set("parameters", JsonArray { value: parameters })
+
+  if operation.has_request_body:
+    let ~body = Dict<String, JsonValue>::init()
+    body.set("required", JsonBool { value: operation.request_required })
+    set_optional_string(body, "description", operation.request_description)
+    let inferred_request_schema = match(operation.request_body)
+      Some<Shape> { value }:
+        schema_for(value, prefix: prefix.concat("Request".as_slice()), components: components, include_doc_comments: include_doc_comments)
+      None:
+        opaque_schema(operation.request_content_type)
+    let request_schema = apply_schema_docs(
+      inferred_request_schema,
+      operation.request_schema_docs,
+      components: components
+    )
+    body.set("content", content_json(operation.request_content_type, request_schema))
+    out.set("requestBody", JsonObject { value: body })
+
+  if not operation.responses.is_empty():
+    out.set("responses", response_contracts_json(operation.responses, schema_docs: operation.response_schema_docs, prefix: prefix, components: components, include_doc_comments: include_doc_comments))
+    return JsonObject { value: out }
+
+  if operation.opaque_response:
+    let ~opaque_responses = Dict<String, JsonValue>::init()
+    let ~opaque_response = Dict<String, JsonValue>::init()
+    opaque_response.set("description", JsonString { value: "Opaque response".to_string() })
+    opaque_responses.set("default", JsonObject { value: opaque_response })
+    out.set("responses", JsonObject { value: opaque_responses })
+    return JsonObject { value: out }
+
+  let ~responses = Dict<String, JsonValue>::init()
+  let ~response = Dict<String, JsonValue>::init()
+  response.set("description", JsonString { value: operation.response_description })
+  match(operation.response_body)
+    Some<Shape> { value }:
+      let schema = schema_for(value, prefix: prefix.concat("Response".as_slice()), components: components, include_doc_comments: include_doc_comments)
+      if operation.response_content_type.equals("text/event-stream"):
+        let ~stream_schema = Dict<String, JsonValue>::init()
+        stream_schema.set("type", json_string("string"))
+        stream_schema.set("x-voyd-event-schema", schema)
+        response.set("content", content_json(operation.response_content_type, JsonObject { value: stream_schema }))
+      else:
+        response.set("content", content_json(operation.response_content_type, schema))
+    None:
+      void
+  responses.set(to_string(operation.response_status), JsonObject { value: response })
+  out.set("responses", JsonObject { value: responses })
+  JsonObject { value: out }
+
+fn apply_parameter_overrides(
+  ~parameters: Array<JsonValue>,
+  overrides: Array<OpenApiParameterContract>,
+  { prefix: String, ~components: Dict<String, JsonValue>, include_doc_comments: bool }
+) -> void
+  var override_index = 0
+  while override_index < overrides.len():
+    let override = overrides.at(override_index)
+    let rendered = render_parameter_override(
+      override,
+      prefix: prefix.concat("Parameter".as_slice()),
+      components: components,
+      include_doc_comments: include_doc_comments
+    )
+    var parameter_index = 0
+    var replaced = false
+    while parameter_index < parameters.len():
+      let fields = object_fields(parameters.at(parameter_index))
+      if string_value(fields, "name").equals(override.name) and string_value(fields, "in").equals(override.location):
+        let _ = parameters.replace(parameter_index, with: rendered)
+        replaced = true
+      parameter_index = parameter_index + 1
+    if not replaced:
+      parameters.push(rendered)
+    override_index = override_index + 1
+
+fn render_parameter_override(
+  parameter: OpenApiParameterContract,
+  { prefix: String, ~components: Dict<String, JsonValue>, include_doc_comments: bool }
+) -> JsonValue
+  let ~out = Dict<String, JsonValue>::init()
+  out.set("name", JsonString { value: parameter.name })
+  out.set("in", JsonString { value: parameter.location })
+  let required = parameter.required or parameter.location.equals("path")
+  out.set("required", JsonBool { value: required })
+  set_optional_string(out, "description", parameter.description)
+  match(parameter.schema)
+    Some<Shape> { value }:
+      out.set("schema", schema_for(value, prefix: prefix, components: components, include_doc_comments: include_doc_comments))
+    None:
+      void
+  JsonObject { value: out }
+
+fn object_fields(value: JsonValue) -> Dict<String, JsonValue>
+  value.match(active)
+    JsonObject: active.value
+    else: Dict<String, JsonValue>::init()
+
+fn string_value(fields: Dict<String, JsonValue>, key: StringSlice) -> String
+  match(fields.get(key.to_string()))
+    Some<JsonValue> { value }:
+      value.match(active)
+        JsonString: active.value
+        else: String::init()
+    None:
+      String::init()
+
+fn string_value(fields: Dict<String, JsonValue>, key: String) -> String
+  string_value(fields, key.as_slice())
+
+fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void
+  match(value)
+    Some<String> { value }:
+      target.set(key.to_string(), JsonString { value: value })
+    None:
+      void
+
+fn set_optional_string(~target: Dict<String, JsonValue>, key: String, value: Option<String>) -> void
+  set_optional_string(target, key.as_slice(), value)
+
+fn json_string(value: StringSlice) -> JsonValue
+  JsonString { value: value.to_string() }
+
+fn json_string(value: String) -> JsonValue
+  JsonString { value: value }

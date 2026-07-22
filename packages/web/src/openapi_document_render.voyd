@@ -1,0 +1,63 @@
+//! Rendering of deterministic OpenAPI 3.1 documents.
+
+use std::array::Array
+use std::dict::Dict
+use std::http::method_as_string
+use std::json::{ JsonObject, JsonString, JsonValue }
+use std::number::cast::to_string
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+use super::openapi_operation_render::operation_json
+use super::openapi_types::{ Info, RouteDocument }
+
+pub fn document_json(
+  info: Info,
+  routes: Array<RouteDocument>,
+  { include_doc_comments: bool }
+) -> JsonValue
+  let ~root = Dict<String, JsonValue>::init()
+  root.set("openapi", JsonString { value: "3.1.0".to_string() })
+  root.set("info", info_json(info))
+  let ~paths = Dict<String, JsonValue>::init()
+  let ~components = Dict<String, JsonValue>::init()
+  var index = 0
+  while index < routes.len():
+    let route = routes.at(index)
+    if route.operation.hidden:
+      index = index + 1
+      continue
+    let ~existing = match(paths.get(route.path))
+      Some<JsonValue> { value }:
+        value.match(active)
+          JsonObject: active.value
+          else: Dict<String, JsonValue>::init()
+      None: Dict<String, JsonValue>::init()
+    existing.set(
+      method_as_string(route.method).lowered(),
+      operation_json(route.operation, prefix: "Operation".concat(to_string(index).as_slice()), components: components, include_doc_comments: include_doc_comments)
+    )
+    paths.set(route.path, JsonObject { value: existing })
+    index = index + 1
+  root.set("paths", JsonObject { value: paths })
+  if not components.is_empty():
+    let ~component_root = Dict<String, JsonValue>::init()
+    component_root.set("schemas", JsonObject { value: components })
+    root.set("components", JsonObject { value: component_root })
+  JsonObject { value: root }
+
+fn info_json(value: Info) -> JsonValue
+  let ~out = Dict<String, JsonValue>::init()
+  out.set("title", JsonString { value: value.title })
+  out.set("version", JsonString { value: value.version })
+  set_optional_string(out, "description", value.description)
+  JsonObject { value: out }
+
+fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void
+  match(value)
+    Some<String> { value }:
+      target.set(key.to_string(), JsonString { value: value })
+    None:
+      void
+
+fn set_optional_string(~target: Dict<String, JsonValue>, key: String, value: Option<String>) -> void
+  set_optional_string(target, key.as_slice(), value)

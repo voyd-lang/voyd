@@ -1,0 +1,76 @@
+//! OpenAPI parameter rendering from typed record shapes.
+
+use std::array::Array
+use std::dict::Dict
+use std::json::{ JsonBool, JsonObject, JsonString, JsonValue }
+use std::meta::{ RecordShape, Shape }
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+use super::openapi_identity::schema_identity_prefix
+use super::openapi_schema::{ schema_for, schema_node }
+
+pub fn append_parameters(
+  ~out: Array<JsonValue>,
+  shape: Option<Shape>,
+  {
+    location: StringSlice,
+    required: bool,
+    prefix: String,
+    ~components: Dict<String, JsonValue>,
+    include_doc_comments: bool
+  }
+) -> void
+  match(shape)
+    None:
+      void
+    Some<Shape> { value }:
+      let _ = schema_for(value, prefix: prefix, components: components, include_doc_comments: include_doc_comments)
+      let stable_prefix = schema_identity_prefix(value, fallback: prefix)
+      value.root.match(root)
+        RecordShape:
+          var index = 0
+          while index < root.fields.len():
+            let field = root.fields.at(index)
+            let ~parameter = Dict<String, JsonValue>::init()
+            parameter.set("name", JsonString { value: field.name })
+            parameter.set("in", JsonString { value: location.to_string() })
+            let parameter_required = required or not field.optional
+            parameter.set("required", JsonBool { value: parameter_required })
+            if include_doc_comments:
+              set_optional_string(parameter, "description", field.documentation)
+            parameter.set("schema", schema_node(field.shape, prefix: stable_prefix, components: components))
+            out.push(JsonObject { value: parameter })
+            index = index + 1
+        else:
+          void
+
+pub fn append_parameters(
+  ~out: Array<JsonValue>,
+  shape: Option<Shape>,
+  {
+    location: String,
+    required: bool,
+    prefix: String,
+    ~components: Dict<String, JsonValue>,
+    include_doc_comments: bool
+  }
+) -> void
+  append_parameters(
+    out,
+    shape,
+    location: location.as_slice(),
+    required: required,
+    prefix: prefix,
+    components: components,
+    include_doc_comments: include_doc_comments
+  )
+
+fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void
+  match(value)
+    Some<String> { value }:
+      target.set(key.to_string(), JsonString { value: value })
+    None:
+      void
+
+fn set_optional_string(~target: Dict<String, JsonValue>, key: String, value: Option<String>) -> void
+  set_optional_string(target, key.as_slice(), value)

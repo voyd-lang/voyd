@@ -585,6 +585,9 @@ pub fn percent_decode(value: StringSlice, { plus_as_space?: bool }) -> String
     Err<Utf8Error>:
       value.to_string()
 
+pub fn percent_decode(value: String, { plus_as_space?: bool }) -> String
+  percent_decode(value.as_slice(), plus_as_space: plus_as_space)
+
 fn append_query_part(params: QueryParams, part: StringSlice): () -> QueryParams
   match(part.split_once(on: 61))
     Some<(StringSlice, StringSlice)> { value }:

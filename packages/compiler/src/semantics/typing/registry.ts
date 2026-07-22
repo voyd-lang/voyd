@@ -779,8 +779,24 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
     const targetDesc = ctx.arena.get(targetType);
     const nominalTarget = getNominalComponent(targetType, ctx);
     const isTypeParamTarget = targetDesc.kind === "type-param-ref";
-    if (!isTypeParamTarget && typeof nominalTarget !== "number") {
-      throw new Error("impl target must be a nominal object type");
+    const isUnionTarget = targetDesc.kind === "union";
+    const isRecursiveUnionTarget =
+      targetDesc.kind === "recursive" &&
+      ctx.arena.get(targetDesc.body).kind === "union";
+    const isTupleTarget =
+      targetDesc.kind === "structural-object" &&
+      targetDesc.fields.length > 0 &&
+      targetDesc.fields.every((field, index) => field.name === `${index}`);
+    if (
+      !isTypeParamTarget &&
+      !isUnionTarget &&
+      !isRecursiveUnionTarget &&
+      !isTupleTarget &&
+      typeof nominalTarget !== "number"
+    ) {
+      throw new Error(
+        `impl target must be a nominal object type, tuple, or union alias (received ${targetDesc.kind})`,
+      );
     }
     if (typeof nominalTarget === "number") {
       item.target.typeId = nominalTarget;
@@ -807,14 +823,26 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
             impl: item,
             implDecl: decl,
             traitSymbol,
+            methodKind: "instance",
             ctx,
           })
         : undefined;
+    const staticMethodMap =
+      typeof traitSymbol === "number"
+        ? buildTraitMethodMap({
+            impl: item,
+            implDecl: decl,
+            traitSymbol,
+            methodKind: "static",
+            ctx,
+          })
+        : undefined;
+    const instanceMethods = methodMap ?? new Map<SymbolId, SymbolId>();
+    const staticMethods = staticMethodMap ?? new Map<SymbolId, SymbolId>();
     const implTarget = (item.target.typeId as TypeId | undefined) ?? targetType;
     const traitType = item.trait?.typeId as TypeId | undefined;
     if (
-      methodMap &&
-      methodMap.size > 0 &&
+      (instanceMethods.size > 0 || staticMethods.size > 0) &&
       typeof traitSymbol === "number" &&
       typeof implTarget === "number" &&
       typeof traitType === "number"
@@ -824,7 +852,8 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
         traitSymbol,
         target: implTarget,
         typeParams,
-        methods: methodMap,
+        methods: instanceMethods,
+        staticMethods,
         implSymbol: item.symbol,
       };
       registerTraitImplTemplate({
@@ -833,7 +862,7 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
         ctx,
       });
       refreshTraitImplInstances(ctx, state);
-      methodMap.forEach((implMethodSymbol, traitMethodSymbol) => {
+      new Map([...instanceMethods, ...staticMethods]).forEach((implMethodSymbol, traitMethodSymbol) => {
         registerTraitMethodImplMapping({
           traitMethodImpls: ctx.traitMethodImpls,
           implMethodSymbol,
@@ -1088,11 +1117,13 @@ const buildTraitMethodMap = ({
   impl,
   implDecl,
   traitSymbol,
+  methodKind,
   ctx,
 }: {
   impl: HirImplDecl;
   implDecl?: ReturnType<TypingContext["decls"]["getImpl"]>;
   traitSymbol: SymbolId;
+  methodKind: "instance" | "static";
   ctx: TypingContext;
 }): ReadonlyMap<SymbolId, SymbolId> | undefined => {
   if (!implDecl) {
@@ -1139,14 +1170,14 @@ const buildTraitMethodMap = ({
       traitTypeSubstitutions,
       selfType: impl.target,
     });
-    const dispatchTraitMethodSignatures = traitMethodSignatures.filter(
-      (method) => method.hasSelfReceiver,
+    const selectedTraitMethods = traitMethodSignatures.filter((method) =>
+      methodKind === "instance" ? method.hasSelfReceiver : !method.hasSelfReceiver
     );
-    if (dispatchTraitMethodSignatures.length === 0) {
+    if (selectedTraitMethods.length === 0) {
       return undefined;
     }
     const methodMap = buildTraitMethodMapByExactSignature({
-      traitMethods: dispatchTraitMethodSignatures,
+      traitMethods: selectedTraitMethods,
       implMethods: implMethodSignatures,
       ambiguousMessage: (method) =>
         `trait method mapping is ambiguous for ${method.display}`,
@@ -1172,14 +1203,14 @@ const buildTraitMethodMap = ({
     traitTypeSubstitutions,
     selfType: impl.target,
   });
-  const dispatchTraitMethodSignatures = traitMethodSignatures.filter(
-    (method) => method.hasSelfReceiver,
+  const selectedTraitMethods = traitMethodSignatures.filter((method) =>
+    methodKind === "instance" ? method.hasSelfReceiver : !method.hasSelfReceiver
   );
-  if (dispatchTraitMethodSignatures.length === 0) {
+  if (selectedTraitMethods.length === 0) {
     return undefined;
   }
   const methodMap = buildTraitMethodMapByExactSignature({
-    traitMethods: dispatchTraitMethodSignatures,
+    traitMethods: selectedTraitMethods,
     implMethods: implMethodSignatures,
     ambiguousMessage: (method) =>
       `trait method mapping is ambiguous for ${method.display}`,

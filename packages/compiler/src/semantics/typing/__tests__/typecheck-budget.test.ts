@@ -1473,7 +1473,7 @@ describe("type-check budgets", () => {
     });
     const typing = runTypingPipeline({
       ...fanout.inputs,
-      typeCheckBudget: { maxUnifySteps: 2_400 },
+      typeCheckBudget: { maxTotalUnifySteps: 2_400 },
     });
 
     const callType = typing.table.getExprType(fanout.callExpr);
@@ -1574,5 +1574,37 @@ describe("type-check budgets", () => {
     });
 
     expect(typeSatisfies(actual, expected, ctx, state)).toBe(true);
+  });
+
+  it("enforces the cumulative unify budget across individually bounded comparisons", () => {
+    const { ctx, state } = createTypeSatisfactionContext({
+      maxUnifySteps: 100,
+      maxTotalUnifySteps: 10_000,
+    });
+    const bool = getPrimitiveType(ctx, "bool");
+    const expected = ctx.arena.internStructuralObject({
+      fields: [{ name: "value", type: bool }],
+    });
+    const compare = (suffix: string): boolean =>
+      typeSatisfies(
+        ctx.arena.internStructuralObject({
+          fields: [
+            { name: "value", type: bool },
+            { name: `extra_${suffix}`, type: bool },
+          ],
+        }),
+        expected,
+        ctx,
+        state,
+      );
+
+    expect(compare("first")).toBe(true);
+    const stepsPerComparison = ctx.typeCheckBudget.totalUnifyStepsUsed;
+    expect(stepsPerComparison).toBeGreaterThan(0);
+    ctx.typeCheckBudget.maxTotalUnifySteps = stepsPerComparison * 2;
+
+    expect(compare("second")).toBe(true);
+    const error = expectDiagnosticError(() => compare("third"));
+    expect(error.diagnostic.code).toBe("TY0040");
   });
 });

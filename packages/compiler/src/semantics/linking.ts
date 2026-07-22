@@ -371,7 +371,7 @@ export const monomorphizeProgram = ({
     >();
     callerCtx.traits.getImplTemplates().forEach((template) => {
       const bucket = templateMethodsByImplSymbol.get(template.implSymbol) ?? [];
-      template.methods.forEach((implMethod, traitMethod) => {
+      new Map([...template.methods, ...template.staticMethods]).forEach((implMethod, traitMethod) => {
         const exists = bucket.some(
           (method) =>
             method.traitMethod === traitMethod &&
@@ -434,6 +434,60 @@ export const monomorphizeProgram = ({
     });
   };
 
+  const requestTraitDispatchMethodInstantiations = ({
+    callerModuleId,
+    targetRef,
+    typeArgs,
+  }: {
+    callerModuleId: string;
+    targetRef: TypingSymbolRef;
+    typeArgs: readonly TypeId[];
+  }): void => {
+    const canonicalTarget = canonicalSymbolRef(targetRef);
+    const targetModule = semantics.get(canonicalTarget.moduleId);
+    const targetMethod = targetModule?.typing.traitMethodImpls.get(
+      canonicalTarget.symbol,
+    );
+    if (!targetModule || !targetMethod) {
+      return;
+    }
+    const traitRef = canonicalSymbolRef({
+      moduleId: canonicalTarget.moduleId,
+      symbol: targetMethod.traitSymbol,
+    });
+    const traitMethodRef = canonicalSymbolRef({
+      moduleId: canonicalTarget.moduleId,
+      symbol: targetMethod.traitMethodSymbol,
+    });
+
+    stableModules.forEach((module) => {
+      module.typing.traitMethodImpls.forEach((method, implMethod) => {
+        const candidateTraitRef = canonicalSymbolRef({
+          moduleId: module.moduleId,
+          symbol: method.traitSymbol,
+        });
+        const candidateTraitMethodRef = canonicalSymbolRef({
+          moduleId: module.moduleId,
+          symbol: method.traitMethodSymbol,
+        });
+        if (
+          candidateTraitRef.moduleId !== traitRef.moduleId ||
+          candidateTraitRef.symbol !== traitRef.symbol ||
+          candidateTraitMethodRef.moduleId !== traitMethodRef.moduleId ||
+          candidateTraitMethodRef.symbol !== traitMethodRef.symbol
+        ) {
+          return;
+        }
+        requestInstantiation({
+          callerModuleId,
+          calleeRef: { moduleId: module.moduleId, symbol: implMethod },
+          typeArgs,
+          allowSameModule: true,
+        });
+      });
+    });
+  };
+
   const processModuleQueue = (): void => {
     while (moduleQueue.length > 0) {
       const callerModuleId = moduleQueue.shift();
@@ -459,6 +513,13 @@ export const monomorphizeProgram = ({
             callerInstanceKey,
             typeArgs: rawTypeArgs,
           });
+          if (callerCtx.callResolution.traitDispatches.has(callId)) {
+            requestTraitDispatchMethodInstantiations({
+              callerModuleId,
+              targetRef,
+              typeArgs,
+            });
+          }
           requestInstantiation({ callerModuleId, calleeRef: targetRef, typeArgs });
         });
       });

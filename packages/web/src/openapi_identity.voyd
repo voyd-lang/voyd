@@ -24,12 +24,18 @@ use std::string::type::{ String, StringSlice, Utf8Error, from_utf8 }
 pub fn component_name(prefix: String, key: StringSlice) -> String
   prefix.concat("_".as_slice()).concat(key)
 
+pub fn component_name(prefix: String, key: String) -> String
+  component_name(prefix, key.as_slice())
+
 pub fn component_reference(prefix: String, key: StringSlice) -> String
   let component = component_name(prefix, key)
   let pointer_segment = component
     .replaced(old: "~".to_string(), with: "~0".to_string())
     .replaced(old: "/".to_string(), with: "~1".to_string())
   "#/components/schemas/".to_string().concat(uri_fragment(pointer_segment.as_slice()).as_slice())
+
+pub fn component_reference(prefix: String, key: String) -> String
+  component_reference(prefix, key.as_slice())
 
 pub fn schema_identity_prefix(shape: Shape, { fallback: String }) -> String
   schema_prefix(shape.root, fallback: fallback)

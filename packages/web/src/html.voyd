@@ -12,6 +12,34 @@ use std::optional::types::all
 use std::string::type::{ String, StringIndex, StringSlice }
 use std::vx
 use super::response::encode_json_value
+use super::response::IntoResponse
+use super::contract::OpenApiResponseContract
+use super::response_contracts::typed_responses
+
+/// Typed `200 text/html` response for rendered HTML and VX values.
+pub obj HtmlResponse {
+  api value: String
+}
+
+impl IntoResponse<HtmlResponse> for HtmlResponse
+  fn into_response(self) -> Response
+    Response::ok()
+      .with(headers: Response::ok().headers.set(header: "content-type", value: "text/html; charset=utf-8"))
+      .text(self.value)
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    typed_responses<String>(status: 200, description: "HTML response", content_type: "text/html; charset=utf-8")
+
+/// Renders a VX value as a typed HTML response.
+pub fn html<Msg>(value: vx::Html<Msg>) -> HtmlResponse
+  HtmlResponse { value: render(value) }
+
+/// Wraps already-rendered HTML as a typed response.
+pub fn html(value: String) -> HtmlResponse
+  HtmlResponse { value: value }
+
+/// Wraps already-rendered HTML as a typed response.
+pub fn html(value: StringSlice) -> HtmlResponse
+  html(value.to_string())
 
 pub obj Hydration<Model> {
   api id?: String,

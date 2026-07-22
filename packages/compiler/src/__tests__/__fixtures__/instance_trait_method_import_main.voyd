@@ -1,0 +1,11 @@
+use src::provider::{ Convert, convert_value }
+
+obj Downstream {}
+
+impl Convert<Downstream> for Downstream
+  fn convert(self) -> i32
+    self
+    73
+
+pub fn main() -> i32
+  convert_value<Downstream>(Downstream {})
