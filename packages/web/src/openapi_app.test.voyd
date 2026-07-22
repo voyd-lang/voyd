@@ -22,14 +22,15 @@ use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
-use src::extract::{ FromBody, JsonBody, Rejection, body_limit, bytes, json_body, limited, text_body }
+use src::extract::{ FromBody, JsonBody, Rejection, body_limit, bytes, json_body, limited, required_session, text_body }
 use src::contract::text_request
 use src::response::{ Accepted, Created, IntoResponse, Json, NoContent, Text, created, json, text }
 use src::response_docs::{ inferred_responses, option_responses, result_responses }
-use src::router::{ App, Context, Router, app }
+use src::router::{ App, Context, Router, app, ignore_trailing_slash }
 use src::routes::{ route, route_cookies, route_headers, route_params, route_params_query_headers, route_query_context }
 use src::automatic_openapi::all
 use src::multipart::{ Form, multipart }
+use src::policy::timeout_millis
 
 
 fn create_automatic_article(input: AutomaticCreateArticle) -> Created<AutomaticArticle>
@@ -74,6 +75,9 @@ fn text_body_reply(_input: String) -> Text
 
 fn bytes_body_reply(_input: Bytes) -> Text
   text("bytes")
+
+fn session_reply(_session: String) -> Text
+  text("authenticated")
 
 obj CustomTextBody {}
 
@@ -258,6 +262,7 @@ test "raw context routes document placeholders as required opaque path parameter
   require_contains(rendered, "\"name\":\"id\"".as_slice(), "raw placeholder name was omitted")
   require_contains(rendered, "\"in\":\"path\"".as_slice(), "raw placeholder location was omitted")
   require_contains(rendered, "\"required\":true".as_slice(), "raw placeholder was not required")
+  require_contains(rendered, "\"schema\":{\"type\":\"string\"}".as_slice(), "raw placeholder omitted its honest string schema")
 
 test "generic operation helpers preserve reified shapes":
   let generic_spec = document(info(title: "Generic", version: "1"))
@@ -370,11 +375,18 @@ test "combined free extractors retain every parameter contract":
   require_contains(rendered, "\"in\":\"header\"".as_slice(), "combined route lost header parameters")
 
 test "app router and free route entry surfaces retain equivalent typed contracts":
-  let direct = app(openapi: { title: "Surfaces", version: "1" }).post(
-    "/app",
-    body: json_body(),
-    handler: create_automatic_article
-  )
+  let direct = app(openapi: { title: "Surfaces", version: "1" })
+    .post("/app", body: json_body(), handler: create_automatic_article)
+    .put("/app-put", body: json_body(), handler: create_automatic_article)
+    .patch(
+      "/app-patch",
+      body: limited(json_body(), limit: body_limit(2048)),
+      limit: body_limit(4096),
+      timeout: timeout_millis(50),
+      handler: create_automatic_article
+    )
+    .get_params<DocumentedArticlePath, Text>("/app-path/:id", handler: path_reply)
+    .get<String, Text>("/app-auth", auth: required_session(), handler: session_reply)
   let free = route(
     direct,
     "/free",
@@ -382,15 +394,42 @@ test "app router and free route entry surfaces retain equivalent typed contracts
     body: json_body(),
     create_automatic_article
   )
-  let routed = Router::init().post(
-    "/router",
-    body: json_body(),
-    handler: create_automatic_article
-  )
+  let routed = Router::init()
+    .post("/router", body: json_body(), handler: create_automatic_article)
+    .delete("/router-delete", body: json_body(), handler: create_automatic_article)
+    .get_params<DocumentedArticlePath, Text>("/router-path/:id", handler: path_reply)
+    .get<String, Text>("/router-auth", auth: required_session(), handler: session_reply)
+    .route<AutomaticCreateArticle, Created<AutomaticArticle>>(
+      "/router-direct",
+      method: Method::Post {},
+      body: json_body(),
+      limit: body_limit(4096),
+      timeout: timeout_millis(50),
+      handler: create_automatic_article,
+      docs: { description: "Direct Router.route contract" }
+    )
+    .route<Text>(
+      "/router-context",
+      method: Method::Get {},
+      timeout: timeout_millis(50),
+      handler: context_text_reply
+    )
   let rendered = openapi_string(free.mount("/mounted", routed))
   require_contains(rendered, "\"/app\"".as_slice(), "App route contract was omitted")
   require_contains(rendered, "\"/free\"".as_slice(), "free route contract was omitted")
   require_contains(rendered, "\"/mounted/router\"".as_slice(), "Router route contract was omitted")
+  require_contains(rendered, "\"/app-path/{id}\"".as_slice(), "App typed path contract was omitted")
+  require_contains(rendered, "\"/mounted/router-path/{id}\"".as_slice(), "Router typed path contract was omitted")
+  require_contains(rendered, "\"/app-auth\"".as_slice(), "App auth route contract was omitted")
+  require_contains(rendered, "\"/mounted/router-auth\"".as_slice(), "Router auth route contract was omitted")
+  require_contains(rendered, "\"/app-put\"".as_slice(), "App PUT body contract was omitted")
+  require_contains(rendered, "\"/app-patch\"".as_slice(), "App policy body contract was omitted")
+  require_contains(rendered, "\"/mounted/router-delete\"".as_slice(), "Router DELETE body contract was omitted")
+  require_contains(rendered, "\"/mounted/router-direct\"".as_slice(), "direct Router.route body contract was omitted")
+  require_contains(rendered, "\"/mounted/router-context\"".as_slice(), "direct Router.route context contract was omitted")
+  require_contains(rendered, "Direct Router.route contract".as_slice(), "direct Router.route metadata was omitted")
+  require_contains(rendered, "\"in\":\"path\"".as_slice(), "typed path parameters differed by route surface")
+  require_contains(rendered, "JSON accepted by POST /automatic/articles.".as_slice(), "JSON body schemas differed by route surface")
   require_contains(rendered, "\"201\"".as_slice(), "typed response contract differed by route surface")
 
 test "limited JSON bodies preserve their request contract":
@@ -444,6 +483,70 @@ test "automatic schemas preserve recursion and distinct same-named DTOs":
   require_contains(rendered, "DocumentedRecursivePair_".as_slice(), "missing recursive component")
   require_contains(rendered, "\"left\"".as_slice(), "first same-named DTO was overwritten")
   require_contains(rendered, "\"right\"".as_slice(), "second same-named DTO was overwritten")
+  require_contains(rendered, "Next recursive node when present.".as_slice(), "recursive field documentation was omitted")
+  let without_comments = openapi_string(value, include_doc_comments: false)
+  require_not_contains(without_comments, "Next recursive node when present.".as_slice(), "recursive field documentation ignored include_doc_comments")
+
+test "runtime-equivalent routes follow first-reachable conflict policy":
+  let parameter_conflict = app(openapi: { title: "Conflicts", version: "1" })
+    .get("/items/:id", handler: duplicate_a_reply)
+    .get("/items/:slug", handler: duplicate_b_reply)
+  let parameter_rendered = openapi_string(parameter_conflict)
+  require_contains(parameter_rendered, "\"/items/{id}\"".as_slice(), "first reachable parameter route was omitted")
+  require_not_contains(parameter_rendered, "\"/items/{slug}\"".as_slice(), "unreachable parameter route was documented")
+  require_not_contains(parameter_rendered, "\"right\"".as_slice(), "unreachable route leaked a schema component")
+
+  let documented_conflict = parameter_conflict.with_route_docs(
+    "/items/:slug",
+    method: Method::Get {},
+    docs: RouteDocs::empty().with_description("First runtime route documentation")
+  )
+  require_contains(
+    openapi_string(documented_conflict),
+    "First runtime route documentation".as_slice(),
+    "route docs did not target the first runtime-equivalent route"
+  )
+
+  let slash_conflict = app(openapi: { title: "Slashes", version: "1" })
+    .with(trailing_slash: ignore_trailing_slash())
+    .get("/slash", handler: duplicate_a_reply)
+    .get("/slash/", handler: duplicate_b_reply)
+  let slash_rendered = openapi_string(slash_conflict)
+  require_contains(slash_rendered, "\"/slash\"".as_slice(), "first slash route was omitted")
+  require_not_contains(slash_rendered, "\"/slash/\"".as_slice(), "runtime-equivalent slash route was documented")
+  require_not_contains(slash_rendered, "\"right\"".as_slice(), "slash conflict leaked a schema component")
+
+  let documented_slash = slash_conflict.with_route_docs(
+    "/slash/",
+    method: Method::Get {},
+    docs: RouteDocs::empty().with_description("Normalized slash documentation")
+  )
+  require_contains(
+    openapi_string(documented_slash),
+    "Normalized slash documentation".as_slice(),
+    "route docs ignored normalized trailing-slash ownership"
+  )
+
+  let hidden_conflict = app(openapi: { title: "Hidden conflicts", version: "1" })
+    .route<Json<DuplicateA>>(
+      "/private/:id",
+      method: Method::Get {},
+      handler: (_ctx: Context) -> Json<DuplicateA> => duplicate_a_reply(),
+      docs: { hidden: true }
+    )
+    .get("/private/:slug", handler: duplicate_b_reply)
+  require_not_contains(
+    openapi_string(hidden_conflict),
+    "\"/private/".as_slice(),
+    "visible metadata exposed a runtime route hidden by the first match"
+  )
+
+test "literal braces remain literal path text":
+  let value = app(openapi: { title: "Literal paths", version: "1" })
+    .get("/literal/{id}", handler: duplicate_a_reply)
+  let rendered = openapi_string(value)
+  require_contains(rendered, "\"/literal/%7Bid%7D\"".as_slice(), "literal braces were interpreted as a path parameter")
+  require_not_contains(rendered, "\"name\":\"id\"".as_slice(), "literal braces fabricated a path parameter")
 
 test "automatic request contracts cover parameters and limited body extractors":
   let base = app(openapi: { title: "Requests", version: "1" })

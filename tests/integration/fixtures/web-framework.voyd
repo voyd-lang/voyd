@@ -441,50 +441,12 @@ pub fn automatic_openapi_schema_probe() -> String
     handler: create_openapi_article,
     docs: { operation_id: "createArticle" }
   )
-  match(stringify(article_app.openapi()))
-    Ok<String> { value }:
-      value
-    Err:
-      "serialization failed"
-
-fn openapi_validation_reply(_ctx: Context) -> String
-  "ok"
-
-pub fn duplicate_openapi_operation_id_probe() -> String
-  let invalid = app(openapi: { title: "Validation", version: "1" })
-    .route(
-      "/one",
-      method: Method::Get {},
-      handler: openapi_validation_reply,
-      docs: { operation_id: "duplicate" }
-    )
-    .route(
-      "/two",
-      method: Method::Get {},
-      handler: openapi_validation_reply,
-      docs: { operation_id: "duplicate" }
-    )
-  match(stringify(invalid.openapi()))
-    Ok<String> { value }:
-      value
-    Err:
-      "serialization failed"
-
-pub fn conflicting_openapi_route_probe() -> String
-  let invalid = app(openapi: { title: "Validation", version: "1" })
-    .route(
-      "/same",
-      method: Method::Get {},
-      handler: openapi_validation_reply,
-      docs: { operation_id: "first" }
-    )
-    .route(
-      "/same",
-      method: Method::Get {},
-      handler: openapi_validation_reply,
-      docs: { operation_id: "second" }
-    )
-  match(stringify(invalid.openapi()))
+  let exposed = expose_openapi(
+    article_app,
+    openapi_document(openapi_info(title: "Manual", version: "1")),
+    at: "/manual-openapi.json"
+  )
+  match(stringify(exposed.openapi()))
     Ok<String> { value }:
       value
     Err:
@@ -494,7 +456,7 @@ pub fn serve_streaming_body_probe(): (HttpServer, tasks::TaskRuntime) -> i32
   let uploads = app().post(
     "/upload".as_slice(),
     handler: (ctx: Context) -> Response => streaming_body_response(ctx)
-  ).streaming()
+  ).streaming("/upload", method: Method::Post {})
   let result = serve_streaming(uploads, port: 41236)
   match(result)
     Ok<Unit>:

@@ -107,7 +107,11 @@ export const expectedCallArgType = ({
   hintSubstitution: ReadonlyMap<TypeParamId, TypeId> | undefined;
   ctx: TypingContext;
 }): TypeId | undefined => {
-  const param = params[index];
+  const arg = args[argIndex];
+  const param =
+    arg?.label === undefined
+      ? params[index]
+      : params.find((candidate) => candidate.label === arg.label);
   if (!param) {
     return undefined;
   }
@@ -116,7 +120,6 @@ export const expectedCallArgType = ({
     hintSubstitution,
     ctx,
   });
-  const arg = args[argIndex];
   if (!arg || !param.label || arg.label !== undefined) {
     return directType;
   }

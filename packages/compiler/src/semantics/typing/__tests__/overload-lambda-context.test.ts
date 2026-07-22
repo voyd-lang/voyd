@@ -107,6 +107,24 @@ describe("overload lambda context", () => {
     expect(typing.table.getExprType(call.id)).toBe(typing.primitives.bool);
   });
 
+  it("maps labeled lambdas past omitted optional parameters", () => {
+    const semantics = semanticsPipeline(
+      loadAst("overload_lambda_labeled_optional_arity.voyd"),
+    );
+    const { hir, typing } = semantics;
+
+    const call = Array.from(hir.expressions.values()).find(
+      (expr): expr is HirCallExpr =>
+        expr.exprKind === "call" &&
+        expr.args.some(
+          (arg) => hir.expressions.get(arg.expr)?.exprKind === "lambda",
+        ),
+    );
+    expect(call).toBeDefined();
+    if (!call) return;
+    expect(typing.table.getExprType(call.id)).toBe(typing.primitives.bool);
+  });
+
   it("preserves an exact generic lambda overload", () => {
     const semantics = semanticsPipeline(
       loadAst("overload_lambda_probe_retyping.voyd"),

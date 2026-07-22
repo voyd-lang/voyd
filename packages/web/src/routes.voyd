@@ -1,17 +1,12 @@
 //! Builder helper functions for apps assembled with `build_app`.
 
-use std::async::types::{ Cancelled }
 use std::bytes::Bytes
 use std::error::{ panic }
 use std::http::{ Method, Response, Status }
 use std::json::JsonValue
-use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
-use std::task::self as task
-use std::time::self as time
-use std::time::{ Duration, Time }
 use super::extract::{
   BodyLimit,
   FromAuth,
@@ -41,20 +36,9 @@ use super::openapi::{ Operation, operation }
 use super::response_docs::{ inferred_responses, json_responses, json_value_responses, option_responses, result_responses }
 use super::automatic_contract::extractor_operation
 use super::contract::RouteDocs
-use super::router::{ AppBuild, Context, ErrorHandler, Handler, Middleware }
-
-pub obj TimeoutPolicy {
-  api duration: Duration
-}
-
-pub fn timeout(duration: Duration) -> TimeoutPolicy
-  TimeoutPolicy { duration: duration }
-
-pub fn timeout_millis(millis: i64) -> TimeoutPolicy
-  timeout(Duration::from_millis(millis))
-
-pub fn timeout_millis(millis: i32) -> TimeoutPolicy
-  timeout(Duration::from_millis(cast::to_i64(millis)))
+use super::router::{ AppBuild, Context, ErrorHandler, Handler, Middleware, body_limit_rejection }
+use super::policy::run_with_timeout
+pub use super::policy::{ TimeoutPolicy, timeout, timeout_millis }
 
 /// Applies documentation to a concrete route built through any free helper.
 pub fn with_route_docs(
@@ -63,40 +47,6 @@ pub fn with_route_docs(
   { method: Method, docs: RouteDocs }
 ) -> AppBuild
   app.with_route_docs(path, method: method, docs: docs)
-
-fn gateway_timeout() -> Response
-  match(Status::from(504))
-    Ok<Status> { value }:
-      Response::new(status: value).text("route timed out".as_slice())
-    Err:
-      Response::internal_server_error().text("route timed out".as_slice())
-
-fn run_with_timeout(
-  timeout: TimeoutPolicy,
-  work: fn() : (open) -> Response
-): (task::TaskRuntime, Time, open) -> Response
-  let worker = task::spawn do:
-    work()
-  let timer = time::set_timeout(timeout.duration) do:
-    task::cancel<Response>(worker)
-  match(task::join(worker))
-    Ok<Response> { value }:
-      let _ = task::cancel<bool>(timer)
-      value
-    Err { error }:
-      let _ = task::cancel<bool>(timer)
-      panic(error.message)
-      Response::internal_server_error()
-    Cancelled:
-      gateway_timeout()
-
-fn body_limit_rejection(ctx: Context, limit: BodyLimit): () -> Option<Response>
-  if ctx.request.body.len() > limit.max_bytes:
-    Some<Response> {
-      value: ctx.reject(Rejection::payload_too_large("request body exceeds configured limit".as_slice()))
-    }
-  else:
-    None {}
 
 fn with_params_query<P, Q>(
   ctx: Context,

@@ -9,6 +9,7 @@ import type {
 } from "../types.js";
 import { getStructuralFields, getSymbolName } from "../type-system.js";
 import { satisfies as typeSatisfies } from "../type-relations.js";
+import { symbolRefEquals } from "../symbol-ref.js";
 import {
   filterCandidatesByExpectedReturnType,
   filterCandidatesByExplicitTypeArguments,
@@ -239,15 +240,88 @@ export const signatureCallShapeCouldMatch = ({
 }): boolean => {
   const positional = positionalCallShapeCouldMatch(args, signature.parameters);
   if (typeof positional === "boolean") {
-    return positional;
+    return (
+      positional &&
+      positionalArgumentTypesCouldMatch({
+        args,
+        params: publicCallParametersForShape(signature),
+        ctx,
+        state,
+      })
+    );
   }
 
+  const params = publicCallParametersForShape(signature);
   return callShapeCouldMatch({
     args,
-    params: publicCallParametersForShape(signature),
+    params,
     ctx,
     state,
-  });
+  }) && positionalArgumentTypesCouldMatch({ args, params, ctx, state });
+};
+
+// Reject only direct argument/parameter pairs whose fully concrete types are
+// already incompatible. This keeps the overload budget focused on candidates
+// that may require inference while leaving lambdas, generic parameters, and
+// label/default reshaping to normal overload resolution.
+const positionalArgumentTypesCouldMatch = ({
+  args,
+  params,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  params: readonly ParamSignature[];
+  ctx: TypingContext;
+  state: TypingState;
+}): boolean => {
+  const count = Math.min(args.length, params.length);
+  for (let index = 0; index < count; index += 1) {
+    const arg = args[index]!;
+    const param = params[index]!;
+    if (arg.label !== param.label) {
+      continue;
+    }
+    const actual = ctx.arena.get(arg.type);
+    const expected = ctx.arena.get(param.type);
+    if (actual.kind === "function" && expected.kind === "function") {
+      if (actual.parameters.length > expected.parameters.length) {
+        return false;
+      }
+      continue;
+    }
+    if (
+      ctx.arena.containsTypeParams(arg.type) ||
+      ctx.arena.containsTypeParams(param.type) ||
+      ctx.arena.isUnknownPrimitive(arg.type) ||
+      ctx.arena.isUnknownPrimitive(param.type)
+    ) {
+      continue;
+    }
+    const actualNominal = ctx.arena.nominalComponent(arg.type);
+    const expectedNominal = ctx.arena.nominalComponent(param.type);
+    if (
+      typeof actualNominal === "number" &&
+      typeof expectedNominal === "number"
+    ) {
+      const actualOwner = ctx.arena.get(actualNominal);
+      const expectedOwner = ctx.arena.get(expectedNominal);
+      if (
+        (actualOwner.kind === "nominal-object" ||
+          actualOwner.kind === "value-object") &&
+        (expectedOwner.kind === "nominal-object" ||
+          expectedOwner.kind === "value-object")
+      ) {
+        if (!symbolRefEquals(actualOwner.owner, expectedOwner.owner)) {
+          return false;
+        }
+      }
+    }
+    if (!typeSatisfies(arg.type, param.type, ctx, state)) {
+      return false;
+    }
+  }
+  return true;
 };
 
 const publicCallParametersForShape = (

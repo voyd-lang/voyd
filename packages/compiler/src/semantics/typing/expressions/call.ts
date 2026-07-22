@@ -3926,12 +3926,6 @@ const selectMethodCallCandidate = ({
   });
   let candidates = methodCandidates;
   let noOverloadDiagnosticCandidates = methodCandidates;
-  enforceOverloadCandidateBudget({
-    name: expr.method,
-    candidateCount: candidates.length,
-    ctx,
-    span: expr.span,
-  });
   const receiverDesc =
     probeArgs[0] === undefined ? undefined : ctx.arena.get(probeArgs[0].type);
   const receiverIsTrait =
@@ -3949,6 +3943,14 @@ const selectMethodCallCandidate = ({
         (desc.kind === "intersection" && (desc.traits?.length ?? 0) > 0)
       );
     });
+  if (receiverIsTrait) {
+    enforceOverloadCandidateBudget({
+      name: expr.method,
+      candidateCount: candidates.length,
+      ctx,
+      span: expr.span,
+    });
+  }
   let matches = receiverIsTrait
     ? []
     : findMatchingOverloadCandidates({
@@ -4006,12 +4008,6 @@ const selectMethodCallCandidate = ({
           fallbackCandidates: filteredFallbackCandidates,
           ctx,
         });
-      enforceOverloadCandidateBudget({
-        name: expr.method,
-        candidateCount: candidates.length,
-        ctx,
-        span: expr.span,
-      });
       matches = findMatchingOverloadCandidates({
         name: expr.method,
         candidates,
@@ -4634,12 +4630,6 @@ const typeOperatorOverloadCall = ({
   });
   let candidates = methodCandidates;
   let noOverloadDiagnosticCandidates = methodCandidates;
-  enforceOverloadCandidateBudget({
-    name: operatorName,
-    candidateCount: candidates.length,
-    ctx,
-    span: call.span,
-  });
 
   let matches = findMatchingOverloadCandidates({
     name: operatorName,
@@ -4693,12 +4683,6 @@ const typeOperatorOverloadCall = ({
           fallbackCandidates: filteredFallbackCandidates,
           ctx,
         });
-      enforceOverloadCandidateBudget({
-        name: operatorName,
-        candidateCount: candidates.length,
-        ctx,
-        span: call.span,
-      });
       matches = findMatchingOverloadCandidates({
         name: operatorName,
         candidates,

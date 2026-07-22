@@ -517,6 +517,16 @@ impl<T> FromAuth<T> for AuthPolicy<T>
   fn extract_auth(self, request: IncomingRequest) : (open) -> Result<T, Rejection>
     self.extract(request)
 
+impl<T> FromAuth<T> for RequiredSession
+  fn extract_auth(self, request: IncomingRequest) : (open) -> Result<T, Rejection>
+    self
+    default_required_session_as<T>(request)
+
+impl<T> FromAuth<Option<T>> for OptionalSession
+  fn extract_auth(self, request: IncomingRequest) : (open) -> Result<Option<T>, Rejection>
+    self
+    default_optional_session_as<T>(request)
+
 pub fn query_from(request: IncomingRequest) -> QueryParams
   match(request.query)
     Some<QueryString> { value }:

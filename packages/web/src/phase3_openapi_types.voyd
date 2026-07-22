@@ -2,8 +2,11 @@
 
 use std::string::type::String
 
+/// One node in a recursive documented structure.
 pub obj DocumentedRecursiveNode<T> {
+  /// Value stored in this node.
   api value: T,
+  /// Next recursive node when present.
   api next?: DocumentedRecursiveNode<T>
 }
 

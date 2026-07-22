@@ -67,27 +67,4 @@ pub fn append_response_contract(
   ~responses: Array<OpenApiResponseContract>,
   candidate: OpenApiResponseContract
 ) -> void
-  var index = 0
-  var found = false
-  while index < responses.len() and not found:
-    let current = responses.at(index)
-    if current.status == candidate.status and current.is_default == candidate.is_default and same_content_type(current.content_type, candidate.content_type):
-      found = true
-    index = index + 1
-  if not found:
-    responses.push(candidate)
-
-fn same_content_type(left: Option<String>, right: Option<String>) -> bool
-  match(left)
-    Some<String> { value: left_value }:
-      match(right)
-        Some<String> { value: right_value }:
-          left_value.equals(right_value)
-        None:
-          false
-    None:
-      match(right)
-        Some<String>:
-          false
-        None:
-          true
+  responses.push(candidate)

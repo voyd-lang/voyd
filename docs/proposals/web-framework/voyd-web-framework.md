@@ -287,11 +287,11 @@ eff AppBuild
 DSL helpers are thin wrappers:
 
 ```voyd
-pub fn get(path: StringSlice, handler: Handler): AppBuild -> void
+pub fn get(path: String, handler: Handler): AppBuild -> void
   AppBuild::add_route(RouteDefinition::get(path, handler))
 
 pub fn group(
-  prefix: StringSlice,
+  prefix: String,
   { routes build: fn() : (AppBuild, open) -> void }
 ): (AppBuild, open) -> void
   AppBuild::group(prefix: prefix, routes: build)
@@ -1029,7 +1029,8 @@ Phase 3 implementation notes:
   successful writes and cleanly closes abandoned started streams.
 - Request streaming is opt-in through `ServerConfig::stream_request_bodies` and
   `accept_streaming`; `pkg::web::serve_streaming` exposes the reader through
-  `Context::streaming_body` on routes marked `.streaming()`, while other routes
+  `Context::streaming_body` on routes marked with
+  `.streaming("/upload", method: Method::Post {})`, while other routes
   in the same app are buffered lazily for ordinary extractors.
 - Multipart parsing preserves binary part bodies and exposes checked UTF-8 only
   as an explicit part operation.

@@ -139,7 +139,7 @@ fn render_parameter_override(
     Some<Shape> { value }:
       out.set("schema", schema_for(value, prefix: prefix, components: components, include_doc_comments: include_doc_comments))
     None:
-      void
+      out.set("schema", JsonObject { value: Dict<String, JsonValue>::init() })
   JsonObject { value: out }
 
 fn object_fields(value: JsonValue) -> Dict<String, JsonValue>

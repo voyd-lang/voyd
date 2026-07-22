@@ -1,0 +1,12 @@
+obj Some<T> { value: T }
+obj None {}
+type Optional<T> = Some<T> | None
+
+fn choose({ value: i32, timeout?: i32, handler: fn(i32) -> i32 }) -> i32
+  handler(value)
+
+fn choose({ value: i32, timeout?: i32, handler: fn(i32, bool) -> bool }) -> bool
+  handler(value, true)
+
+pub fn main() -> bool
+  choose(value: 1, handler: (_value: i32, flag: bool) -> bool => flag)

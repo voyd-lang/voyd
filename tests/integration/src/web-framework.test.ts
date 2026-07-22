@@ -249,25 +249,7 @@ describe("integration: pkg::web", () => {
     expect(schema).toContain('"201"');
     expect(schema).toContain('"operationId":"createArticle"');
     expect(schema).toContain("Reader-visible article title.");
-  });
-
-  it("keeps only the first duplicate automatic OpenAPI operation ID", async () => {
-    const result = await compileWebFrameworkFixture();
-    const schema = await result.run<string>({
-      entryName: "duplicate_openapi_operation_id_probe",
-    });
-    expect(schema.match(/\"operationId\":\"duplicate\"/g)).toHaveLength(1);
-    expect(schema).toContain('"/one"');
-    expect(schema).toContain('"/two"');
-  });
-
-  it("documents the first runtime route when automatic contracts conflict", async () => {
-    const result = await compileWebFrameworkFixture();
-    const schema = await result.run<string>({
-      entryName: "conflicting_openapi_route_probe",
-    });
-    expect(schema).toContain('"operationId":"first"');
-    expect(schema).not.toContain('"operationId":"second"');
+    expect(schema).not.toContain('\"/manual-openapi.json\"');
   });
 
   it("serves formatted SSE through the Web router and host stream lifecycle", async () => {

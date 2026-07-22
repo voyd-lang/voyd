@@ -31,13 +31,16 @@ HTML rendering. Import a narrower module when writing reusable framework code:
 | Module | Main exports |
 | --- | --- |
 | `pkg::web::router` | `App`, `Router`, `Context`, and app builders |
+| `pkg::web::routes` | Free route functions, composition helpers, and timeout policies |
 | `pkg::web::extract` | Body, auth, parameter, query, header, and cookie extractors |
 | `pkg::web::response` | `IntoResponse`, typed responses, and raw conversion |
 | `pkg::web::contract` | Request, response, parameter, and schema documentation contracts |
 | `pkg::web::openapi` | Low-level manual OpenAPI document builder |
 | `pkg::web::middleware` | Built-in middleware |
 | `pkg::web::html` | VX server-rendering responses |
-| `pkg::web::streaming` / `pkg::web::sse` | Streaming and server-sent events |
+| `pkg::web::multipart` / `pkg::web::negotiate` | Multipart forms and content negotiation |
+| `pkg::web::static_files` | Static-directory middleware |
+| `pkg::web::request_streaming` / `pkg::web::streaming` / `pkg::web::sse` | Request streams, response streams, and server-sent events |
 
 Examples use `use pkg::web::all` unless they show a narrower import explicitly.
 They import standard-library types where those names appear in annotations.
@@ -860,10 +863,15 @@ fn delete_article() -> NoContent
 `Json<T>`, `Created<T>`, and `Accepted<T>` document JSON responses with status
 `200`, `201`, and `202`. `NoContent` documents an empty `204`.
 `text_response(value)` and `bytes_response(value)` retain their media types.
+The response names stay distinct from the zero-argument `text()` and `bytes()`
+request extractors exported by `pkg::web::all`. Direct imports from
+`pkg::web::response` use the shorter `text(value)` and `bytes(value)` names.
 `Result<T, E>` combines both
 branches, and `Option<T>` adds the framework's empty `404` response. An
 undocumented branch remains an honest `default` response instead of being
-invented as `200` or dropped. SSE is documented as its encoded
+invented as `200` or dropped. Return `typed_sse_response(...)` when an SSE
+handler should contribute its contract; the raw `sse_response(...)` helper is
+opaque. Typed SSE is documented as its encoded
 `text/event-stream; charset=utf-8` wire format, with the statically known event
 shape retained as `x-voyd-event-schema` metadata.
 
@@ -940,7 +948,9 @@ Build typed request, parameter, response, and schema overrides with
 `route_docs(...)`; this keeps their `Shape` values intact. Dynamic routes can
 supply those advanced overrides. `openapi_json_response<T>(...)`
 and `openapi_response(...)` support multiple responses, media types, and
-headers without requiring overrides on ordinary typed routes.
+headers without requiring overrides on ordinary typed routes. Use
+`openapi_header<T>(...)` for a typed response header or
+`openapi_untyped_header(...)` when only its wire-level string value is known.
 
 ```voyd
 use pkg::web::all
@@ -1141,7 +1151,8 @@ Use smaller route-specific body limits whenever practical.
 ## Streaming request bodies
 
 Ordinary routes buffer bodies. Use `serve_streaming(app, port: ...)` when an
-upload should be consumed incrementally. Mark that route with `.streaming()`,
+upload should be consumed incrementally. Mark that route by method and path,
+such as `.streaming("/upload", method: Method::Post {})`,
 then retrieve its one-shot reader from `ctx.streaming_body()`.
 
 Request reads are backpressure-aware and capped at 16 KiB per chunk. Successful
@@ -1199,6 +1210,4 @@ Before deploying:
 - retain graceful `SIGINT` and `SIGTERM` handling;
 - monitor rejection rates, handler failures, latency, and pending requests.
 
-For tighter imports, the public modules are `router`, `routes`, `extract`,
-`response`, `html`, `middleware`, `static_files`, `streaming`, `sse`,
-`multipart`, `negotiate`, and `openapi`.
+For tighter imports, use the module table at the beginning of this guide.

@@ -53,6 +53,7 @@ pub obj RouteContract {
 pub obj RecordedOpenApiRoute {
   api method: Method,
   api path: String,
+  api runtime_key: String,
   api contract: RouteContract
 }
 
@@ -78,10 +79,11 @@ impl RouteContract
     }
 
 impl RecordedOpenApiRoute
-  api fn init({ method: Method, path: String, contract: RouteContract }) -> RecordedOpenApiRoute
+  api fn init({ method: Method, path: String, runtime_key: String, contract: RouteContract }) -> RecordedOpenApiRoute
     RecordedOpenApiRoute {
       method: method,
       path: path,
+      runtime_key: runtime_key,
       contract: contract
     }
 

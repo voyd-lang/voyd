@@ -9,7 +9,7 @@ use std::string::type::{ String, StringSlice }
 pub obj OpenApiHeader {
   api name: String,
   api description?: String,
-  api schema?: Shape,
+  api schema: Shape,
   api required: bool
 }
 
@@ -377,7 +377,7 @@ pub fn openapi_header<T>(
   OpenApiHeader {
     name: name.to_string(),
     description: description,
-    schema: Some<Shape> { value: shape_of<T>() },
+    schema: shape_of<T>(),
     required: required ?? false
   }
 
@@ -385,6 +385,23 @@ pub fn openapi_header<T>(
   { name: String, description?: String, required?: bool }
 ) -> OpenApiHeader
   openapi_header<T>(name: name.as_slice(), description: description, required: required)
+
+/// Documents a response header whose value schema is not statically known.
+pub fn openapi_untyped_header(
+  { name: StringSlice, description?: String, required?: bool }
+) -> OpenApiHeader
+  OpenApiHeader {
+    name: name.to_string(),
+    description: description,
+    // HTTP response header values are textual on the wire.
+    schema: shape_of<String>(),
+    required: required ?? false
+  }
+
+pub fn openapi_untyped_header(
+  { name: String, description?: String, required?: bool }
+) -> OpenApiHeader
+  openapi_untyped_header(name: name.as_slice(), description: description, required: required)
 
 /// Documents an untyped response, optionally with a known media type.
 pub fn openapi_response(

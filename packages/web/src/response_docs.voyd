@@ -9,7 +9,7 @@ use super::contract::{
   response_contract
 }
 use super::response::IntoResponse
-use super::response_contracts::untyped_responses
+use super::response_contracts::{ append_response_contract, untyped_responses }
 
 fn typed<T>(
   { status: i32, description: StringSlice, content_type: StringSlice }
@@ -23,21 +23,20 @@ pub fn inferred_responses<T: IntoResponse<T>>() -> Array<OpenApiResponseContract
   T::openapi_responses()
 
 /// Merges the statically documented success and error branches of `Result`.
-/// When both branches claim the same status and media type, the first branch
-/// wins deterministically.
+/// Alternatives sharing a status and media type are preserved as `anyOf`.
 pub fn result_responses<T: IntoResponse<T>, E: IntoResponse<E>>() -> Array<OpenApiResponseContract>
   let ~out = T::openapi_responses()
   let errors = E::openapi_responses()
   var index = 0
   while index < errors.len():
-    append_unique(out, errors.at(index))
+    append_response_contract(out, errors.at(index))
     index = index + 1
   out
 
 /// Documents the value branch of `Option` plus its runtime `404` response.
 pub fn option_responses<T: IntoResponse<T>>() -> Array<OpenApiResponseContract>
   let ~out = T::openapi_responses()
-  append_unique(
+  append_response_contract(
     out,
     empty_response_contract(status: 404, description: "Not found")
   )
@@ -63,31 +62,3 @@ pub fn no_content_responses() -> Array<OpenApiResponseContract>
   let ~out = Array<OpenApiResponseContract>::with_capacity(1)
   out.push(empty_response_contract(status: 204, description: "No content".as_slice()))
   out
-
-fn append_unique(
-  ~responses: Array<OpenApiResponseContract>,
-  candidate: OpenApiResponseContract
-) -> void
-  var index = 0
-  var found = false
-  while index < responses.len() and not found:
-    let current = responses.at(index)
-    if current.status == candidate.status and current.is_default == candidate.is_default and same_content_type(current.content_type, candidate.content_type):
-      found = true
-    index = index + 1
-  if not found:
-    responses.push(candidate)
-
-fn same_content_type(left: Option<String>, right: Option<String>) -> bool
-  match(left)
-    Some<String> { value: left_value }:
-      match(right)
-        Some<String> { value: right_value }:
-          left_value.equals(right_value)
-        None:
-          false
-    None:
-      match(right)
-        None: true
-        Some<String>:
-          false

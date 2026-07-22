@@ -1,6 +1,5 @@
 //! Convenient web framework imports.
 
-
 use super::extract::{
   bytes as bytes_policy,
   optional_session as optional_session_policy,
@@ -31,6 +30,7 @@ pub use super::contract::{
   openapi_response_schema_docs,
   openapi_schema_docs,
   openapi_typed_response,
+  openapi_untyped_header,
   route_docs,
   text_request
 }

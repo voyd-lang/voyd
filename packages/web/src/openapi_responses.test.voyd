@@ -1,5 +1,5 @@
 use src::openapi::{ document, info, operation, operation_with_request }
-use src::contract::{ OpenApiResponseContract, openapi_header, openapi_json_response, openapi_opaque_request, route_docs }
+use src::contract::{ OpenApiHeader, OpenApiParameterContract, OpenApiResponseContract, RouteDocs, openapi_header, openapi_json_response, openapi_opaque_request, openapi_untyped_header, route_docs }
 use src::contract::openapi_response as response_override
 use src::phase3_openapi_types::{
   DocumentedArticle,
@@ -193,6 +193,38 @@ test "request overrides and same-status response media types are preserved":
       require_contains(value, "x-rate-limit".as_slice(), "missing response header")
       require_contains(value, "\"required\":true".as_slice(), "required response header became optional")
 
+test "untyped parameter and response header overrides emit honest schemas":
+  let parameter = OpenApiParameterContract {
+    name: "trace".to_string(),
+    location: "query".to_string(),
+    description: None {},
+    schema: None {},
+    required: false
+  }
+  let header = openapi_untyped_header(name: "x-dynamic")
+  let response = openapi_json_response<AutomaticArticle>(
+    status: 200,
+    description: "Dynamic response",
+    headers: [header]
+  )
+  let parameter_docs = RouteDocs::empty().with_parameters([parameter])
+  let docs = parameter_docs.with_responses([response])
+  let documented = app(openapi: { title: "Opaque overrides", version: "1" })
+    .route<Response>(
+      "/opaque-overrides",
+      method: Method::Get {},
+      handler: (_ctx: Context) -> Response => Response::ok().empty(),
+      docs: docs
+    )
+  match(stringify(documented.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"name\":\"trace\"".as_slice(), "untyped parameter was omitted")
+      require_contains(value, "\"x-dynamic\"".as_slice(), "untyped response header was omitted")
+      require_contains(value, "\"schema\":{}".as_slice(), "untyped parameter omitted its honest empty schema")
+      require_contains(value, "\"type\":\"string\"".as_slice(), "untyped response header omitted its wire string schema")
+
 test "raw and custom responses use explicit response documentation":
   let custom_spec = document(info(title: "Custom", version: "1"))
     .route("/custom", method: Method::Get {}, operation: operation().with_responses(CustomReply::documented_responses()))
@@ -269,6 +301,23 @@ test "JSON result and option helpers preserve automatic response contracts":
       require_contains(value, "\"404\"".as_slice(), "mapped option fallback was erased")
       require_contains(value, "\"id\"".as_slice(), "mapped JSON DTO schema was erased")
       require_contains(value, "\"title\"".as_slice(), "mapped JSON DTO fields were erased")
+
+test "same-status response branches preserve both schemas":
+  let spec = document(info(title: "Alternatives", version: "1"))
+    .route(
+      "/alternative",
+      method: Method::Get {},
+      operation: operation().with_responses(
+        result_responses<Json<AutomaticArticle>, Json<DocumentedArticle>>()
+      )
+    )
+  match(stringify(spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"anyOf\"".as_slice(), "same-status response schemas were not preserved as alternatives")
+      require_contains(value, "JSON returned after an article is created.".as_slice(), "first response schema was erased")
+      require_contains(value, "Article returned by the API.".as_slice(), "second response schema was erased")
 
 fn require_contains(value: String, needle: StringSlice, message: String) -> void
   if not value.contains(needle):

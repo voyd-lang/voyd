@@ -95,6 +95,7 @@ pub use src::contract::{
   openapi_response_schema_docs,
   openapi_schema_docs,
   openapi_typed_response,
+  openapi_untyped_header,
   route_docs,
   text_request
 }

@@ -28,25 +28,29 @@ pub fn render_openapi(
   let ~paths = Dict<String, JsonValue>::init()
   let ~components = Dict<String, JsonValue>::init()
   let ~operation_ids = Dict<String, bool>::init()
+  let ~runtime_routes = Dict<String, bool>::init()
   var index = 0
   while index < routes.len():
     let route = routes.at(index)
     let contract = route.contract
-    if not contract.hidden and not contract.operation.hidden and not literal_hidden(contract.literal_docs):
-      let inferred = operation_json(
-        contract.operation,
-        prefix: "Route".to_string().concat(to_string(index).as_slice()),
-        components: components,
-        include_doc_comments: include_doc_comments
-      )
-      let rendered = apply_literal_docs(inferred, contract.literal_docs)
-      append_route(
-        paths,
-        operation_ids,
-        route.path,
-        method_as_string(route.method).lowered(),
-        rendered
-      )
+    let method = method_as_string(route.method).lowered()
+    let runtime_key = route.runtime_key.concat("#".as_slice()).concat(method.as_slice())
+    match(runtime_routes.get(runtime_key))
+      Some<bool>:
+        void
+      None:
+        runtime_routes.set(runtime_key, true)
+        if not contract.hidden and not contract.operation.hidden and not literal_hidden(contract.literal_docs):
+          let ~route_components = Dict<String, JsonValue>::init()
+          let inferred = operation_json(
+            contract.operation,
+            prefix: "Route".to_string().concat(to_string(index).as_slice()),
+            components: route_components,
+            include_doc_comments: include_doc_comments
+          )
+          let rendered = apply_literal_docs(inferred, contract.literal_docs)
+          if append_route(paths, operation_ids, route.path, method, rendered):
+            merge_components(components, route_components)
     index = index + 1
   root.set("paths", JsonObject { value: paths })
   if not components.is_empty():
@@ -104,7 +108,7 @@ fn append_route(
   path: String,
   method: String,
   operation: JsonValue
-) -> void
+) -> bool
   let normalized = openapi_path(path.as_slice())
   let complete_operation = with_opaque_path_parameters(normalized, operation)
   if valid_path_parameters(normalized, complete_operation):
@@ -113,11 +117,21 @@ fn append_route(
       None: Dict<String, JsonValue>::init()
     match(path_item.get(method))
       Some<JsonValue>:
-        void
+        return false
       None:
         let unique_operation = unique_operation_id(operation_ids, complete_operation)
         path_item.set(method, unique_operation)
         paths.set(normalized, JsonObject { value: path_item })
+        return true
+  false
+
+fn merge_components(~target: Dict<String, JsonValue>, source: Dict<String, JsonValue>) -> void
+  let entries = source.entries()
+  var index = 0
+  while index < entries.len():
+    let entry = entries.at(index)
+    target.set(entry.0, entry.1)
+    index = index + 1
 
 fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
   let ~fields = object_entries(operation)
@@ -150,6 +164,9 @@ fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
           parameter.set("name", JsonString { value: name })
           parameter.set("in", JsonString { value: "path".to_string() })
           parameter.set("required", JsonBool { value: true })
+          let ~schema = Dict<String, JsonValue>::init()
+          schema.set("type", JsonString { value: "string".to_string() })
+          parameter.set("schema", JsonObject { value: schema })
           parameters.push(JsonObject { value: parameter })
     segment_index = segment_index + 1
   if not parameters.is_empty():
@@ -260,6 +277,9 @@ fn openapi_path(path: StringSlice) -> String
     if segment.byte_len() > 1 and segment.starts_with(":".as_slice()):
       out = out.concat("{".as_slice()).concat(segment.slice(bytes: 1, len: segment.byte_len() - 1)).concat("}".as_slice())
     else:
-      out = out.concat(segment)
+      let escaped = segment.to_string()
+        .replaced(old: "{".to_string(), with: "%7B".to_string())
+        .replaced(old: "}".to_string(), with: "%7D".to_string())
+      out = out.concat(escaped.as_slice())
     index = index + 1
   out
