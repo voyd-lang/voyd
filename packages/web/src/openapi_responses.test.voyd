@@ -117,7 +117,7 @@ test "typed response contracts cover statuses text result and option":
       require_contains(value, "\"202\"".as_slice(), "missing accepted response")
       require_contains(value, "\"204\"".as_slice(), "missing no-content response")
       require_contains(value, "\"404\"".as_slice(), "missing option not-found response")
-      require_contains(value, "\"text/plain\"".as_slice(), "missing text response")
+      require_contains(value, "\"text/plain; charset=utf-8\"".as_slice(), "missing text response")
 
 test "opaque branches remain visible in result and option contracts":
   let spec = document(info(title: "Opaque composites", version: "1"))
@@ -232,7 +232,7 @@ test "automatic routes cover typed custom text binary result option and opaque r
       require_contains(value, "\"204\"".as_slice(), "missing no-content automatic response")
       require_contains(value, "\"201\"".as_slice(), "missing result success response")
       require_contains(value, "\"404\"".as_slice(), "missing option not-found response")
-      require_contains(value, "\"text/plain\"".as_slice(), "missing automatic text response")
+      require_contains(value, "\"text/plain; charset=utf-8\"".as_slice(), "missing automatic text response")
       require_contains(value, "\"application/octet-stream\"".as_slice(), "missing automatic binary response")
       require_contains(value, "\"text/html; charset=utf-8\"".as_slice(), "missing automatic HTML response")
       require_contains(value, "\"text/event-stream; charset=utf-8\"".as_slice(), "SSE media type omitted its charset")

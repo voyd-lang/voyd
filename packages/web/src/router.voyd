@@ -301,7 +301,7 @@ impl App
         let _ = routes.replace(index, with: updated)
         documented = true
       index = index + 1
-    refresh_openapi_exposures(App {
+    App {
       routes: routes,
       current_middleware: self.current_middleware,
       prefix: self.prefix,
@@ -311,7 +311,7 @@ impl App
       error_handler: self.error_handler,
       trailing_slash_policy: self.trailing_slash_policy,
       openapi_info: self.openapi_info
-    })
+    }
 
   api fn with_route_docs(
     self,
@@ -1327,6 +1327,14 @@ impl App
   ): (open) -> Response
     self.handle_request(request, body: Some<RequestBody> { value: body })
 
+  fn handler_for_route(self, route: Route) -> Handler
+    match(route.openapi_exposure_include_doc_comments)
+      Some<bool> { value: include_doc_comments }:
+        let document = self.openapi(include_doc_comments: include_doc_comments)
+        (_ctx: Context) -> Response => json_value(document)
+      None:
+        route.handler
+
   fn handle_request(
     self,
     request: IncomingRequest,
@@ -1335,6 +1343,7 @@ impl App
     let path = normalized_request_path(request.path, self.trailing_slash_policy)
     match(best_match(self.routes, request.method, path.as_slice(), self.trailing_slash_policy))
       Some<RouteMatch> { value }:
+        let handler = self.handler_for_route(value.route)
         if value.route.streaming_request:
           let ctx = Context {
             request: request,
@@ -1342,7 +1351,7 @@ impl App
             request_body_stream: body,
             error_handler: value.route.error_handler
           }
-          run_middleware(value.route.middleware, 0, ctx, value.route.handler)
+          run_middleware(value.route.middleware, 0, ctx, handler)
         else:
           match(buffer_streaming_request(request, body))
             Err<HostError> { error }:
@@ -1354,7 +1363,7 @@ impl App
                 request_body_stream: None {},
                 error_handler: value.route.error_handler
               }
-              run_middleware(value.route.middleware, 0, ctx, value.route.handler)
+              run_middleware(value.route.middleware, 0, ctx, handler)
       None:
         let ctx = Context {
           request: request,
@@ -1618,11 +1627,10 @@ impl App
     path: StringSlice,
     { include_doc_comments: bool }
   ) -> App
-    let initial_document = self.openapi(include_doc_comments: include_doc_comments)
     self.with_route_entry(
       path,
       Method::Get {},
-      (_ctx: Context) -> Response => json_value(initial_document),
+      (_ctx: Context) -> Response => Response::ok().empty(),
       contract: hidden_fragment(),
       openapi_exposure_include_doc_comments: Some<bool> { value: include_doc_comments }
     )
@@ -1652,7 +1660,7 @@ impl App
     }
     let ~routes = self.routes.copied(1)
     routes.push(route)
-    refresh_openapi_exposures(App {
+    App {
       routes: routes,
       current_middleware: self.current_middleware,
       prefix: self.prefix,
@@ -1662,7 +1670,7 @@ impl App
       error_handler: self.error_handler,
       trailing_slash_policy: self.trailing_slash_policy,
       openapi_info: self.openapi_info
-    })
+    }
 
   fn merge_routes(self, routes: Array<Route>, { next_order: i32 }) -> App
     let ~merged = self.routes.copied(routes.len())
@@ -1674,7 +1682,7 @@ impl App
         None:
           void
       index = index + 1
-    refresh_openapi_exposures(App {
+    App {
       routes: merged,
       current_middleware: self.current_middleware,
       prefix: self.prefix,
@@ -1684,7 +1692,7 @@ impl App
       error_handler: self.error_handler,
       trailing_slash_policy: self.trailing_slash_policy,
       openapi_info: self.openapi_info
-    })
+    }
 
   fn with_mounted_route(self, prefix: StringSlice, route: Route) -> App
     let mount_prefix = join_route_paths(self.prefix.as_slice(), prefix)
@@ -1703,7 +1711,7 @@ impl App
     }
     let ~routes = self.routes.copied(1)
     routes.push(mounted)
-    refresh_openapi_exposures(App {
+    App {
       routes: routes,
       current_middleware: self.current_middleware,
       prefix: self.prefix,
@@ -1713,7 +1721,7 @@ impl App
       error_handler: self.error_handler,
       trailing_slash_policy: self.trailing_slash_policy,
       openapi_info: self.openapi_info
-    })
+    }
 
   fn mark_last_streaming(self) -> App
     if self.routes.is_empty():
@@ -1745,62 +1753,6 @@ impl App
       trailing_slash_policy: self.trailing_slash_policy,
       openapi_info: self.openapi_info
     }
-
-fn refresh_openapi_exposures(app: App) -> App
-  var has_exposure = false
-  var scan_index = 0
-  while scan_index < app.routes.len() and not has_exposure:
-    match(app.routes.at(scan_index).openapi_exposure_include_doc_comments)
-      Some<bool>:
-        has_exposure = true
-      None:
-        void
-    scan_index = scan_index + 1
-  if not has_exposure:
-    return app
-
-  let recorded_routes = app.openapi_routes()
-  let config = app.openapi_config()
-  let ~routes = app.routes.copied()
-  var index = 0
-  while index < routes.len():
-    let route = routes.at(index)
-    match(route.openapi_exposure_include_doc_comments)
-      Some<bool> { value: include_doc_comments }:
-        let document = render_openapi(
-          recorded_routes,
-          config,
-          include_doc_comments: include_doc_comments
-        )
-        let refreshed = Route {
-          method: route.method,
-          path: route.path,
-          segments: route.segments,
-          middleware: route.middleware,
-          handler: (_ctx: Context) -> Response => json_value(document),
-          error_handler: route.error_handler,
-          streaming_request: route.streaming_request,
-          openapi_exposure_include_doc_comments: route.openapi_exposure_include_doc_comments,
-          order: route.order,
-          contract: route.contract
-        }
-        let _ = routes.replace(index, with: refreshed)
-      None:
-        void
-    index = index + 1
-
-  App {
-    routes: routes,
-    current_middleware: app.current_middleware,
-    prefix: app.prefix,
-    next_order: app.next_order,
-    not_found_handler: app.not_found_handler,
-    method_not_allowed_handler: app.method_not_allowed_handler,
-    error_handler: app.error_handler,
-    trailing_slash_policy: app.trailing_slash_policy,
-    openapi_info: app.openapi_info
-  }
-
 
 pub fn app() -> App
   App::init()

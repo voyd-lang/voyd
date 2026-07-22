@@ -66,7 +66,9 @@ export const enforceOverloadCandidateBudget = ({
   });
 };
 
-export const selectHintedOverloadCandidates = <T extends OverloadResolutionCandidate>({
+export const selectHintedOverloadCandidates = <
+  T extends OverloadResolutionCandidate,
+>({
   candidates,
   typeArguments,
   targetTypeArguments,
@@ -183,7 +185,10 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
 
   const candidatesForInitialMatch = candidatesForBudget;
   const initialMatches = candidatesForInitialMatch.filter((candidate) =>
-    matchesCandidate(candidate, argsForCandidate ? argsForCandidate(candidate) : args),
+    matchesCandidate(
+      candidate,
+      argsForCandidate ? argsForCandidate(candidate) : args,
+    ),
   );
   const shouldCheckFallback =
     expectedReturnShapeCompatibleCandidates.length > 0 &&
@@ -248,7 +253,9 @@ export const signatureCallShapeCouldMatch = ({
 const publicCallParametersForShape = (
   signature: FunctionSignature,
 ): readonly ParamSignature[] =>
-  signature.parameters.filter((param) => param.synthetic !== "stable-callsite-id");
+  signature.parameters.filter(
+    (param) => param.synthetic !== "stable-callsite-id",
+  );
 
 const positionalCallShapeCouldMatch = (
   args: readonly Arg[],
@@ -327,7 +334,9 @@ const callShapeCouldMatch = ({
         if (!runParam.label) {
           break;
         }
-        const hasField = structuralFields.some((field) => field.name === runParam.label);
+        const hasField = structuralFields.some(
+          (field) => field.name === runParam.label,
+        );
         if (hasField || runParam.optional || runParam.defaulted) {
           cursor += 1;
           continue;
@@ -379,7 +388,9 @@ const allLabeledCallShapeCouldMatch = ({
       .filter((label): label is string => typeof label === "string"),
   );
 
-  const hasUnknownArgLabel = [...argLabels].some((label) => !paramLabels.has(label));
+  const hasUnknownArgLabel = [...argLabels].some(
+    (label) => !paramLabels.has(label),
+  );
   if (hasUnknownArgLabel) {
     return false;
   }
@@ -535,34 +546,16 @@ export const specializeOverloadParameters = ({
 };
 
 const overloadDominates = ({
-  candidate,
-  other,
-  typeArguments,
-  targetTypeArguments,
+  candidateParams,
+  otherParams,
   ctx,
-  state,
+  satisfies,
 }: {
-  candidate: OverloadResolutionCandidate;
-  other: OverloadResolutionCandidate;
-  typeArguments: readonly TypeId[] | undefined;
-  targetTypeArguments: readonly TypeId[] | undefined;
+  candidateParams: readonly ParamSignature[];
+  otherParams: readonly ParamSignature[];
   ctx: TypingContext;
-  state: TypingState;
+  satisfies: (actual: TypeId, expected: TypeId) => boolean;
 }): boolean => {
-  const candidateParams = specializeOverloadParameters({
-    symbol: candidate.symbol,
-    signature: candidate.signature,
-    typeArguments,
-    targetTypeArguments,
-    ctx,
-  });
-  const otherParams = specializeOverloadParameters({
-    symbol: other.symbol,
-    signature: other.signature,
-    typeArguments,
-    targetTypeArguments,
-    ctx,
-  });
   if (candidateParams.length !== otherParams.length) {
     return false;
   }
@@ -586,10 +579,10 @@ const overloadDominates = ({
     if (candidateBareTypeParam && !otherBareTypeParam) {
       return false;
     }
-    if (!typeSatisfies(candidateParam.type, otherParam.type, ctx, state)) {
+    if (!satisfies(candidateParam.type, otherParam.type)) {
       return false;
     }
-    if (!typeSatisfies(otherParam.type, candidateParam.type, ctx, state)) {
+    if (!satisfies(otherParam.type, candidateParam.type)) {
       strictlyMoreSpecific = true;
     }
   }
@@ -623,7 +616,11 @@ const unresolvedTypeParamPenalty = ({
       case "recursive":
         return unresolvedTypeParamPenalty({ type: desc.body, ctx, visiting });
       case "fixed-array":
-        return unresolvedTypeParamPenalty({ type: desc.element, ctx, visiting });
+        return unresolvedTypeParamPenalty({
+          type: desc.element,
+          ctx,
+          visiting,
+        });
       case "union":
         return desc.members.reduce(
           (sum, member) =>
@@ -659,16 +656,19 @@ const unresolvedTypeParamPenalty = ({
       case "structural-object":
         return desc.fields.reduce(
           (sum, field) =>
-            sum + unresolvedTypeParamPenalty({ type: field.type, ctx, visiting }),
+            sum +
+            unresolvedTypeParamPenalty({ type: field.type, ctx, visiting }),
           0,
         );
       case "function":
         return (
           desc.parameters.reduce(
             (sum, param) =>
-              sum + unresolvedTypeParamPenalty({ type: param.type, ctx, visiting }),
+              sum +
+              unresolvedTypeParamPenalty({ type: param.type, ctx, visiting }),
             0,
-          ) + unresolvedTypeParamPenalty({ type: desc.returnType, ctx, visiting })
+          ) +
+          unresolvedTypeParamPenalty({ type: desc.returnType, ctx, visiting })
         );
     }
   })();
@@ -677,23 +677,13 @@ const unresolvedTypeParamPenalty = ({
 };
 
 const overloadGenericityPenalty = ({
-  candidate,
-  typeArguments,
-  targetTypeArguments,
+  parameters,
   ctx,
 }: {
-  candidate: OverloadResolutionCandidate;
-  typeArguments: readonly TypeId[] | undefined;
-  targetTypeArguments: readonly TypeId[] | undefined;
+  parameters: readonly ParamSignature[];
   ctx: TypingContext;
 }): number =>
-  specializeOverloadParameters({
-    symbol: candidate.symbol,
-    signature: candidate.signature,
-    typeArguments,
-    targetTypeArguments,
-    ctx,
-  }).reduce(
+  parameters.reduce(
     (sum, param) =>
       sum +
       unresolvedTypeParamPenalty({ type: param.type, ctx }) +
@@ -701,17 +691,22 @@ const overloadGenericityPenalty = ({
     0,
   );
 
-const bareFunctionReturnTypeParamPenalty = (type: TypeId, ctx: TypingContext): number => {
+const bareFunctionReturnTypeParamPenalty = (
+  type: TypeId,
+  ctx: TypingContext,
+): number => {
   const desc = ctx.arena.get(type);
-  return desc.kind === "function" && isBareTypeParamRef(desc.returnType, ctx) ? 2 : 0;
+  return desc.kind === "function" && isBareTypeParamRef(desc.returnType, ctx)
+    ? 2
+    : 0;
 };
 
 const overloadConstraintSpecificity = (
-  candidate: OverloadResolutionCandidate
+  candidate: OverloadResolutionCandidate,
 ): number =>
   (candidate.signature.typeParams ?? []).reduce(
     (sum, param) => sum + (param.constraint ? 1 : 0),
-    0
+    0,
   );
 
 const scoreOverloadMatches = <T extends OverloadResolutionCandidate>({
@@ -727,35 +722,58 @@ const scoreOverloadMatches = <T extends OverloadResolutionCandidate>({
   ctx: TypingContext;
   state: TypingState;
 }): readonly OverloadCandidateScore<T>[] =>
-  matches.map((candidate) => {
-    const isDominated = matches.some(
-      (other) =>
-        candidate !== other &&
-        overloadDominates({
-          candidate: other,
-          other: candidate,
+  (() => {
+    const parametersByCandidate = new Map(
+      matches.map((candidate) => [
+        candidate,
+        specializeOverloadParameters({
+          symbol: candidate.symbol,
+          signature: candidate.signature,
           typeArguments,
           targetTypeArguments,
           ctx,
-          state,
         }),
+      ]),
     );
-    return {
-      candidate,
-      shapeMatch: true,
-      argumentMatch: true,
-      dominance: isDominated ? 0 : 1,
-      genericityPenalty: overloadGenericityPenalty({
-        candidate,
-        typeArguments,
-        targetTypeArguments,
-        ctx,
-      }),
-      constraintSpecificity: overloadConstraintSpecificity(candidate),
-      lambdaCompatibility: 0,
-      expectedReturnCompatibility: true,
+    const satisfiesCache = new Map<string, boolean>();
+    const satisfies = (actual: TypeId, expected: TypeId): boolean => {
+      const key = `${actual}:${expected}`;
+      const cached = satisfiesCache.get(key);
+      if (typeof cached === "boolean") {
+        return cached;
+      }
+      const result = typeSatisfies(actual, expected, ctx, state);
+      satisfiesCache.set(key, result);
+      return result;
     };
-  });
+
+    return matches.map((candidate) => {
+      const candidateParams = parametersByCandidate.get(candidate)!;
+      const isDominated = matches.some(
+        (other) =>
+          candidate !== other &&
+          overloadDominates({
+            candidateParams: parametersByCandidate.get(other)!,
+            otherParams: candidateParams,
+            ctx,
+            satisfies,
+          }),
+      );
+      return {
+        candidate,
+        shapeMatch: true,
+        argumentMatch: true,
+        dominance: isDominated ? 0 : 1,
+        genericityPenalty: overloadGenericityPenalty({
+          parameters: candidateParams,
+          ctx,
+        }),
+        constraintSpecificity: overloadConstraintSpecificity(candidate),
+        lambdaCompatibility: 0,
+        expectedReturnCompatibility: true,
+      };
+    });
+  })();
 
 const completeOverloadScores = <T extends OverloadResolutionCandidate>({
   scores,
@@ -800,7 +818,9 @@ const completeOverloadScores = <T extends OverloadResolutionCandidate>({
   });
 };
 
-const selectOverloadMatchesFromScores = <T extends OverloadResolutionCandidate>({
+const selectOverloadMatchesFromScores = <
+  T extends OverloadResolutionCandidate,
+>({
   scores,
   typeArguments,
   targetTypeArguments,
@@ -813,6 +833,13 @@ const selectOverloadMatchesFromScores = <T extends OverloadResolutionCandidate>(
   ctx: TypingContext;
   state: TypingState;
 }): readonly T[] => {
+  const compatibleInputs = scores.filter(
+    (score) => score.shapeMatch && score.argumentMatch,
+  );
+  if (compatibleInputs.length <= 1) {
+    return compatibleInputs.map(({ candidate }) => candidate);
+  }
+
   const completedScores = completeOverloadScores({
     scores,
     typeArguments,
@@ -821,15 +848,10 @@ const selectOverloadMatchesFromScores = <T extends OverloadResolutionCandidate>(
     state,
   });
   const compatibleScores = completedScores.filter(
-    (score) =>
-      score.shapeMatch &&
-      score.argumentMatch,
+    (score) => score.shapeMatch && score.argumentMatch,
   );
-  if (compatibleScores.length <= 1) {
-    return compatibleScores.map(({ candidate }) => candidate);
-  }
-
-  const expectedReturnScores = selectExpectedReturnCompatibleScores(compatibleScores);
+  const expectedReturnScores =
+    selectExpectedReturnCompatibleScores(compatibleScores);
   if (expectedReturnScores.length === 1) {
     return expectedReturnScores.map(({ candidate }) => candidate);
   }
@@ -866,10 +888,14 @@ const selectOverloadMatchesFromScores = <T extends OverloadResolutionCandidate>(
   return mostConstrainedScores.map(({ candidate }) => candidate);
 };
 
-const selectExpectedReturnCompatibleScores = <T extends OverloadResolutionCandidate>(
+const selectExpectedReturnCompatibleScores = <
+  T extends OverloadResolutionCandidate,
+>(
   scores: readonly OverloadCandidateScore<T>[],
 ): readonly OverloadCandidateScore<T>[] => {
-  const compatible = scores.filter((score) => score.expectedReturnCompatibility);
+  const compatible = scores.filter(
+    (score) => score.expectedReturnCompatibility,
+  );
   return compatible.length > 0 ? compatible : scores;
 };
 

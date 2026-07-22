@@ -1,7 +1,9 @@
 //! Render-time contracts kept beside runtime route data.
 
 use std::optional::types::all
-use std::json::JsonValue
+use std::dict::Dict
+use std::json::{ JsonObject, JsonValue }
+use std::string::type::String
 use super::contract::{ OpenApiRequestContract, RouteDocs }
 use super::openapi::{ Operation, operation }
 use super::openapi_types::RouteContract
@@ -91,5 +93,36 @@ pub fn with_route_docs(contract: RouteContract, docs: RouteDocs) -> RouteContrac
   RouteContract::init(
     hidden: docs.hidden ?? contract.hidden,
     operation: documented.operation,
-    literal_docs: None {}
+    literal_docs: literal_docs_without_overrides(contract.literal_docs, docs)
   )
+
+fn literal_docs_without_overrides(
+  literal_docs: Option<JsonValue>,
+  docs: RouteDocs
+) -> Option<JsonValue>
+  match(literal_docs)
+    None:
+      None {}
+    Some<JsonValue> { value }:
+      value.match(active)
+        JsonObject:
+          let ~fields = active.value
+          remove_literal_override(fields, "summary", docs.summary)
+          remove_literal_override(fields, "description", docs.description)
+          remove_literal_override(fields, "operation_id", docs.operation_id)
+          remove_literal_override(fields, "tags", docs.tags)
+          remove_literal_override(fields, "hidden", docs.hidden)
+          Some<JsonValue> { value: JsonObject { value: fields } }
+        else:
+          Some<JsonValue> { value: value }
+
+fn remove_literal_override<T>(
+  ~fields: Dict<String, JsonValue>,
+  name: String,
+  value: Option<T>
+) -> void
+  match(value)
+    Some<T>:
+      let _ = fields.remove(name)
+    None:
+      void

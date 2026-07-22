@@ -58,7 +58,7 @@ pub obj Accepted<T> {
 /// Typed `204` response with no body.
 pub obj NoContent {}
 
-/// Typed `200 text/plain` response.
+/// Typed `200 text/plain; charset=utf-8` response.
 pub obj Text {
   api value: String
 }
@@ -76,13 +76,13 @@ impl IntoResponse<String> for String
   fn into_response(self) -> Response
     Response::ok().text(self)
   fn openapi_responses() -> Array<OpenApiResponseContract>
-    typed_responses<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
+    typed_responses<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain; charset=utf-8".as_slice())
 
 impl IntoResponse<StringSlice> for StringSlice
   fn into_response(self) -> Response
     Response::ok().text(self)
   fn openapi_responses() -> Array<OpenApiResponseContract>
-    typed_responses<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
+    typed_responses<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain; charset=utf-8".as_slice())
 
 impl IntoResponse<Bytes> for Bytes
   fn into_response(self) -> Response
@@ -121,7 +121,7 @@ impl IntoResponse<Text> for Text
   fn into_response(self) -> Response
     Response::ok().text(self.value)
   fn openapi_responses() -> Array<OpenApiResponseContract>
-    typed_responses<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain".as_slice())
+    typed_responses<String>(status: 200, description: "Successful response".as_slice(), content_type: "text/plain; charset=utf-8".as_slice())
 
 impl IntoResponse<Binary> for Binary
   fn into_response(self) -> Response

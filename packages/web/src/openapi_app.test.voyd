@@ -47,6 +47,9 @@ obj CookieInput {
 fn path_reply(_params: DocumentedArticlePath) -> Text
   text("path")
 
+fn context_text_reply(_ctx: Context) -> Text
+  text("ok")
+
 fn query_reply(_query: DocumentedArticleQuery, _ctx: Context) -> Text
   text("query")
 
@@ -274,6 +277,55 @@ test "route-local docs can be attached to specialized route surfaces":
     docs: RouteDocs::empty().with_description("Specialized query route")
   )
   require_contains(openapi_string(value), "Specialized query route".as_slice(), "specialized route docs were omitted")
+
+test "advanced route docs preserve existing inline metadata":
+  let value = app(openapi: { title: "Layered docs", version: "1" })
+    .route<Text>(
+      "/layered",
+      method: Method::Get {},
+      handler: context_text_reply,
+      docs: {
+        summary: "Inline summary",
+        description: "Inline description",
+        operation_id: "layeredOperation",
+        tags: ["layered"]
+      }
+    )
+    .with_route_docs(
+      "/layered",
+      method: Method::Get {},
+      docs: route_docs(responses: [
+        openapi_json_response<AutomaticArticle>(status: 200, description: "Layered response")
+      ])
+    )
+  let rendered = openapi_string(value)
+  require_contains(rendered, "Inline summary".as_slice(), "advanced docs removed an inline summary")
+  require_contains(rendered, "Inline description".as_slice(), "advanced docs removed an inline description")
+  require_contains(rendered, "layeredOperation".as_slice(), "advanced docs removed an inline operation ID")
+  require_contains(rendered, "\"layered\"".as_slice(), "advanced docs removed inline tags")
+  require_contains(rendered, "Layered response".as_slice(), "advanced response docs were omitted")
+
+test "rejected routes do not reserve operation IDs":
+  let value = app(openapi: { title: "Operation IDs", version: "1" })
+    .route<Text>(
+      "/invalid",
+      method: Method::Get {},
+      handler: (_ctx: Context) -> Text => text("invalid"),
+      docs: route_docs({
+        operation_id: "sharedOperation",
+        parameters: [openapi_parameter<String>(name: "id", location: "path")]
+      })
+    )
+    .route<Text>(
+      "/valid",
+      method: Method::Get {},
+      handler: context_text_reply,
+      docs: { operation_id: "sharedOperation" }
+    )
+  let rendered = openapi_string(value)
+  assert(rendered.contains("\"/invalid\"".as_slice()), eq: false)
+  require_contains(rendered, "\"/valid\"".as_slice(), "valid route was omitted")
+  require_contains(rendered, "\"operationId\":\"sharedOperation\"".as_slice(), "rejected route consumed a valid operation ID")
 
 test "free header routes preserve contracts":
   let value = route_headers<HeaderInput, Text>(

@@ -3323,8 +3323,7 @@ const traitSatisfies = (
       : undefined) ??
     info?.traitImpls ??
     instantiateTraitImplsFor({
-      nominal:
-        typeof actualNominal === "number" ? actualNominal : actual,
+      nominal: typeof actualNominal === "number" ? actualNominal : actual,
       ctx,
       state,
     });
@@ -3966,7 +3965,10 @@ type UnionBindingCandidate = {
 
 type UnionBindingCache = {
   unscoped: Map<string, readonly UnionBindingCandidate[]>;
-  byFunction: WeakMap<FunctionScope, Map<string, readonly UnionBindingCandidate[]>>;
+  byFunction: WeakMap<
+    FunctionScope,
+    Map<string, readonly UnionBindingCandidate[]>
+  >;
 };
 
 const unionBindingCaches = new WeakMap<TypingContext, UnionBindingCache>();
@@ -4128,7 +4130,7 @@ const findUnionBindingCandidates = ({
   bindings: ReadonlyMap<TypeParamId, TypeId>;
   ctx: TypingContext;
   state: TypingState;
-}): UnionBindingCandidate[] => {
+}): readonly UnionBindingCandidate[] => {
   const cache = unionBindingCacheFor(ctx, state.currentFunction);
   const cacheKey = [
     state.mode,
@@ -4139,7 +4141,7 @@ const findUnionBindingCandidates = ({
   const cached = cache.get(cacheKey);
   if (cached) {
     maybeIncrementUnionSearchCounter("typing.union_search.cache_hit");
-    return cloneUnionBindingCandidates(cached);
+    return cached;
   }
   maybeIncrementUnionSearchCounter("typing.union_search.cache_miss");
   maybeIncrementUnionSearchCounter("typing.union_search.invocations");
@@ -4228,7 +4230,7 @@ const findUnionBindingCandidates = ({
   }
 
   if (cache.size < MAX_UNION_BINDING_CACHE_ENTRIES) {
-    cache.set(cacheKey, cloneUnionBindingCandidates(solutions));
+    cache.set(cacheKey, solutions);
   }
   return solutions;
 };
@@ -4256,14 +4258,6 @@ const unionBindingCacheFor = (
   }
   return scoped;
 };
-
-const cloneUnionBindingCandidates = (
-  candidates: readonly UnionBindingCandidate[],
-): UnionBindingCandidate[] =>
-  candidates.map((candidate) => ({
-    bindings: new Map(candidate.bindings),
-    remainingActualMembers: candidate.remainingActualMembers,
-  }));
 
 const serializeUnionBindingSearchState = ({
   expected,

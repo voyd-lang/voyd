@@ -107,8 +107,7 @@ fn append_route(
 ) -> void
   let normalized = openapi_path(path.as_slice())
   let complete_operation = with_opaque_path_parameters(normalized, operation)
-  let unique_operation = unique_operation_id(operation_ids, complete_operation)
-  if valid_path_parameters(normalized, unique_operation):
+  if valid_path_parameters(normalized, complete_operation):
     let ~path_item = match(paths.get(normalized))
       Some<JsonValue> { value }: object_entries(value)
       None: Dict<String, JsonValue>::init()
@@ -116,6 +115,7 @@ fn append_route(
       Some<JsonValue>:
         void
       None:
+        let unique_operation = unique_operation_id(operation_ids, complete_operation)
         path_item.set(method, unique_operation)
         paths.set(normalized, JsonObject { value: path_item })
 

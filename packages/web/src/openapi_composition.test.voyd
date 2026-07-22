@@ -94,7 +94,7 @@ test "every named HTTP method records the same typed response contract":
       require_contains(value, "\"put\"".as_slice(), "PUT contract missing")
       require_contains(value, "\"patch\"".as_slice(), "PATCH contract missing")
       require_contains(value, "\"delete\"".as_slice(), "DELETE contract missing")
-      require_contains(value, "\"text/plain\"".as_slice(), "typed method response missing")
+      require_contains(value, "\"text/plain; charset=utf-8\"".as_slice(), "typed method response missing")
 
 fn require_contains(value: String, needle: StringSlice, message: String) -> void
   if not value.contains(needle):
