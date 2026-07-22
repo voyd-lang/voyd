@@ -443,16 +443,7 @@ const mergedScorecard = (scorecards) => ({
   rows: scorecards.flatMap(({ rows }) => rows),
 });
 
-const samplesFor = (row, samplesKey, medianKey) => {
-  const samples = row[samplesKey];
-  return Array.isArray(samples) && samples.length > 0
-    ? samples
-    : typeof row[medianKey] === "number"
-      ? [row[medianKey]]
-      : [];
-};
-
-const poolRowMeasurements = (initial, retry) => {
+const confirmedRetryRow = (initial, retry) => {
   ["wasmBytes", "gzipBytes", "wasmSha256"].forEach((field) => {
     if (
       initial[field] !== undefined &&
@@ -464,36 +455,10 @@ const poolRowMeasurements = (initial, retry) => {
       );
     }
   });
-
-  const pooled = (samplesKey, medianKey) => {
-    const samples = [
-      ...samplesFor(initial, samplesKey, medianKey),
-      ...samplesFor(retry, samplesKey, medianKey),
-    ];
-    return samples.length > 0
-      ? [{ samplesKey, medianKey, samples, value: median(samples) }]
-      : [];
-  };
-  const measurements = [
-    ["compileSamplesMs", "compileMedianMs"],
-    ["runtimeSamplesMs", "runtimeMedianMs"],
-    ["peakHeapUsedSamplesBytes", "peakHeapUsedMedianBytes"],
-    ["peakRssSamplesBytes", "peakRssMedianBytes"],
-    ["processMaxRssSamplesBytes", "processMaxRssBytes"],
-    ["processMaxRssGrowthSamplesBytes", "processMaxRssGrowthBytes"],
-  ].flatMap(([samplesKey, medianKey]) => pooled(samplesKey, medianKey));
-
-  return measurements.reduce(
-    (row, { samplesKey, medianKey, samples, value }) => ({
-      ...row,
-      [samplesKey]: samples,
-      [medianKey]: value,
-    }),
-    { ...initial },
-  );
+  return retry;
 };
 
-export const poolScorecardMeasurements = ({
+export const confirmedScorecardMeasurements = ({
   initial,
   retry,
   scenarioNames,
@@ -526,7 +491,7 @@ export const poolScorecardMeasurements = ({
       if (!retryRow) {
         throw new Error(`optimizer retry omitted case ${rowKey(row)}`);
       }
-      return poolRowMeasurements(row, retryRow);
+      return confirmedRetryRow(row, retryRow);
     }),
   };
 };
@@ -809,18 +774,18 @@ const main = () => {
       });
       const retryBase = readScorecard(retryPaths.basePath);
       const retryHead = readScorecard(retryPaths.headPath);
-      finalBase = poolScorecardMeasurements({
+      finalBase = confirmedScorecardMeasurements({
         initial: finalBase,
         retry: retryBase,
         scenarioNames: retryScenarios,
       });
-      finalHead = poolScorecardMeasurements({
+      finalHead = confirmedScorecardMeasurements({
         initial: finalHead,
         retry: retryHead,
         scenarioNames: retryScenarios,
       });
       console.log(
-        "\nFinal paired comparison (initial and reversed-order samples pooled):",
+        "\nFinal reversed-order confirmation:",
       );
       const finalFailures = compareScorecards({
         base: finalBase,
