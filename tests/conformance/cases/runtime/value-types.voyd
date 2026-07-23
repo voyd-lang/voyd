@@ -237,7 +237,7 @@ pub fn value_five_lane_mutable_param() -> i32
   wide.a
 
 pub fn value_five_lane_alias_then_mutate_copy() -> i32
-  let wide = WideVec5 {
+  let ~wide = WideVec5 {
     a: 1,
     b: 2,
     c: 3,

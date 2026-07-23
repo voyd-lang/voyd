@@ -40,13 +40,10 @@ impl<T: DictKey<T>> Set<T>
 
   /// Removes `value`, returning true only when it existed.
   api fn remove(~self, value: T) -> bool
-    let result = self.storage.entry(value).remove()
-    self.storage = result.dict
-    match(result.value)
-      Some<bool>:
-        true
-      None:
-        false
+    if not self.storage.contains(value):
+      return false
+    self.storage = self.storage.removing(value)
+    true
 
   /// Removes all values.
   api fn clear(~self) -> void

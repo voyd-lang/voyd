@@ -6,7 +6,10 @@ import { createNodePathAdapter } from "../../../modules/node-path-adapter.js";
 import { analyzeModules, loadModuleGraph } from "../../../pipeline.js";
 import { parse } from "../../../parser/index.js";
 import { semanticsPipeline } from "../../pipeline.js";
-import { mergeCallableBorrowContracts } from "../model.js";
+import {
+  mergeCallableBorrowContracts,
+  normalizeCallableBorrowTransfers,
+} from "../model.js";
 import { normalizeReturnedSharedOrigins } from "../summaries.js";
 
 const analyze = (source: string) => {
@@ -15,7 +18,8 @@ const analyze = (source: string) => {
   if (
     !source.includes('@intrinsic_type(type: "voyd.std.shared-cell")') &&
     !source.includes("__array_set(") &&
-    !source.includes("__array_copy(")
+    !source.includes("__array_copy(") &&
+    !source.includes("__array_get(")
   ) {
     return semanticsPipeline(ast);
   }
@@ -102,6 +106,29 @@ fn mutate_both(~left: Box, ~right: Box) -> void
 `;
 
 describe("borrow checking", () => {
+  it("preserves borrowed-source taint when transfers widen", () => {
+    const transfers = Array.from({ length: 33 }, (_entry, index) => ({
+      sourceParameter: 1,
+      destinationParameter: 0,
+      sourcePath: [
+        { kind: "field" as const, name: `source_${index}` },
+      ],
+      destinationPath: [
+        { kind: "field" as const, name: `destination_${index}` },
+      ],
+      ...(index === 32 ? { borrowsSource: true as const } : {}),
+    }));
+
+    expect(normalizeCallableBorrowTransfers(transfers)).toEqual([
+      expect.objectContaining({
+        sourceParameter: 1,
+        destinationParameter: 0,
+        conservative: true,
+        borrowsSource: true,
+      }),
+    ]);
+  });
+
   it("keeps shared return provenance only when every target agrees", () => {
     const origin = { source: [], result: [] };
     const merged = mergeCallableBorrowContracts([
@@ -579,6 +606,23 @@ fn invalid(~value: Box) -> void
     ).toContain("TY0048");
   });
 
+  it("keeps fresh mutable aggregate identity separate from its contents", () => {
+    expect(() =>
+      analyze(`${prelude}
+obj Pair { left: Box }
+obj Holder { value: Box }
+
+fn replace_locally(first: Box, second: Box) -> void
+  let ~holder = Holder { value: first }
+  holder.value = second
+
+fn valid(~first: Pair, ~second: Pair) -> void
+  replace_locally(first.left, second.left)
+  mutate(~second.left)
+`),
+    ).not.toThrow();
+  });
+
   it("propagates retained origins through fixed-array storage intrinsics", () => {
     expect(
       diagnosticCodes(`${prelude}
@@ -591,6 +635,116 @@ fn invalid(
   __array_get(storage, 0).value
 `),
     ).toContain("TY0051");
+  });
+
+  it("rejects mutation after a helper retains an array-element borrow", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn retain_first(
+  values: FixedArray<Box>,
+  retain: fn(Box) : () -> void
+) -> void
+  retain(__array_get(values, 0))
+
+fn mutate_array(~values: FixedArray<Box>) -> void
+  __array_set(values, 0, Box { value: 1 })
+  void
+
+fn invalid(
+  ~values: FixedArray<Box>,
+  retain: fn(Box) : () -> void
+) -> void
+  retain_first(values, retain)
+  mutate_array(~values)
+`),
+    ).toContain("TY0049");
+  });
+
+  it("preserves external retention when a helper also returns the source", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn retain_and_return(
+  values: FixedArray<Box>,
+  retain: fn(Box) : () -> void
+) -> FixedArray<Box>
+  retain(__array_get(values, 0))
+  values
+
+fn mutate_array(~values: FixedArray<Box>) -> void
+  __array_set(values, 0, Box { value: 1 })
+  void
+
+fn invalid(
+  ~values: FixedArray<Box>,
+  retain: fn(Box) : () -> void
+) -> void
+  let returned = retain_and_return(values, retain)
+  let length = __array_len(returned)
+  mutate_array(~values)
+`),
+    ).toContain("TY0049");
+  });
+
+  it("preserves array-element retention through caller-owned storage", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Holder { value: Box }
+
+fn store_first(values: FixedArray<Box>, ~holder: Holder) -> void
+  holder.value = __array_get(values, 0)
+
+fn mutate_array(~values: FixedArray<Box>) -> void
+  __array_set(values, 0, Box { value: 1 })
+  void
+
+fn invalid(
+  ~values: FixedArray<Box>,
+  ~holder: Holder
+) -> void
+  store_first(values, ~holder)
+  mutate_array(~values)
+`),
+    ).toContain("TY0049");
+  });
+
+  it("materializes scalar values stored through array intrinsics", () => {
+    expect(() =>
+      analyze(`
+fn store(~value: i32, values: FixedArray<i32>) -> void
+  __array_set(values, 0, value)
+  void
+`),
+    ).not.toThrow();
+  });
+
+  it("materializes scalar values copied between arrays", () => {
+    expect(() =>
+      analyze(`
+fn copy(values: FixedArray<i32>) -> FixedArray<i32>
+  let destination = __array_new<i32>(1)
+  __array_copy(destination, {
+    from: values,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  destination
+
+fn mutate_array(~values: FixedArray<i32>) -> void
+  __array_set(values, 0, 1)
+  void
+
+fn valid(~values: FixedArray<i32>) -> i32
+  let copied = copy(values)
+  mutate_array(~values)
+  __array_get(copied, 0)
+`),
+    ).not.toThrow();
   });
 
   it("preserves reference provenance through value-object storage", () => {
@@ -1585,6 +1739,21 @@ fn replace_storage(~values: BoxArray, storage: FixedArray<Box>) -> void
     ).not.toThrow();
   });
 
+  it("preserves mutable capability through nested aggregate reborrows", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box>, count: i32 }
+
+fn valid(~values: BoxArray) -> void
+  let ~alias = values
+  if true:
+    let ~nested = alias
+    nested.count = 0
+`),
+    ).not.toThrow();
+  });
+
   it("preserves same-root provenance written through helpers", () => {
     expect(
       diagnosticCodes(`${prelude}
@@ -1741,6 +1910,123 @@ impl SharedCell<T>
 
 fn invalid(cell: SharedCell<BoxArray>) -> FixedArray<Box>
   cell.with((values) => copied(values))
+`),
+    ).toContain("TY0053");
+  });
+
+  it("rejects array elements returned from SharedCell callback values", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn invalid(cell: SharedCell<BoxArray>) -> Box
+  cell.with((values) => __array_get(values.storage, 0))
+`),
+    ).toContain("TY0053");
+  });
+
+  it("allows scalar values returned from SharedCell callbacks", () => {
+    expect(() =>
+      analyze(`
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn valid(cell: SharedCell<i32>) -> i32
+  cell.with((value) => value)
+`),
+    ).not.toThrow();
+  });
+
+  it("allows scalar values captured by callbacks returned from SharedCell", () => {
+    expect(() =>
+      analyze(`
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn valid(cell: SharedCell<i32>) -> (fn() : () -> i32)
+  cell.with((value) => () => value)
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects mutable upgrades from shared array elements", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn invalid(values: FixedArray<Box>) -> void
+  let ~value = __array_get(values, 0)
+  value.value = 1
+`),
+    ).toContain("TY0050");
+  });
+
+  it("rejects array elements retained from SharedCell callback values", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn invalid(
+  cell: SharedCell<BoxArray>,
+  retain: fn(Box) : () -> void
+) -> void
+  cell.with((values) => retain(__array_get(values.storage, 0)))
+`),
+    ).toContain("TY0053");
+  });
+
+  it("preserves array-copy loans through recursive helpers", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+fn copied(self: BoxArray, depth: i32) -> BoxArray
+  let destination = __array_new<Box>(1)
+  __array_copy(destination, {
+    from: self.storage,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  let result = BoxArray { storage: destination }
+  if depth <= 0:
+    return result
+  copied(result, depth - 1)
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn invalid(cell: SharedCell<BoxArray>) -> BoxArray
+  cell.with((values) => copied(values, 12))
 `),
     ).toContain("TY0053");
   });

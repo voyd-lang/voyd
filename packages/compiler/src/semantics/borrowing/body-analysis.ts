@@ -19,6 +19,7 @@ import type {
   BorrowPlace,
   CallableBorrowContract,
   PlaceProjection,
+  ReturnedBorrowOrigin,
 } from "./model.js";
 import { mergeCallableBorrowContracts } from "./model.js";
 import type { BorrowingDependency } from "./dependency.js";
@@ -536,13 +537,7 @@ const returnedPlacesForCall = (
       if (typeof actual !== "number") {
         return [];
       }
-      const origins =
-        parameter.returnedOrigins && parameter.returnedOrigins.length > 0
-          ? parameter.returnedOrigins
-          : (parameter.returnedPaths && parameter.returnedPaths.length > 0
-              ? parameter.returnedPaths
-              : [[]]
-            ).map((source) => ({ source, result: [] }));
+      const origins = returnedOrigins(parameter);
       return origins.flatMap((origin) => {
         const translated = translateResultProjection({
           result: origin.result,
@@ -556,6 +551,16 @@ const returnedPlacesForCall = (
       });
     }) ?? [],
   );
+
+const returnedOrigins = (
+  parameter: CallableBorrowContract["parameters"][number],
+): readonly ReturnedBorrowOrigin[] =>
+  parameter.returnedOrigins && parameter.returnedOrigins.length > 0
+    ? parameter.returnedOrigins
+    : (parameter.returnedPaths && parameter.returnedPaths.length > 0
+        ? parameter.returnedPaths
+        : [[]]
+      ).map((source) => ({ source, result: [] }));
 
 const expressionReturnsDetachedSharedValue = (
   exprId: HirExprId,
@@ -573,15 +578,10 @@ const expressionReturnsDetachedSharedValue = (
     return (
       returnedParameters.length > 0 &&
       returnedParameters.every((parameter) => {
-        const returnedOrigins =
-          parameter.returnedOrigins ??
-          (parameter.returnedPaths ?? [[]]).map((source) => ({
-            source,
-            result: [],
-          }));
+        const resultOrigins = returnedOrigins(parameter);
         return (
-          returnedOrigins.length > 0 &&
-          returnedOrigins.every(
+          resultOrigins.length > 0 &&
+          resultOrigins.every(
             (origin) =>
               parameter.returnedSharedOrigins?.some(
                 (shared) =>
@@ -1666,17 +1666,23 @@ const scanExpression = (
               statement.initializer,
               ctx,
             );
+          const createsMutableBinding =
+            statement.mutable ||
+            statement.pattern.bindingKind === "mutable-ref";
+          const initializerHasAddressableRoot =
+            baseSymbolOf(statement.initializer, ctx) !== undefined;
           const sources = returnsDetachedSharedValue
             ? []
-            : placesStoredByExpression(statement.initializer, ctx);
+            : createsMutableBinding && initializerHasAddressableRoot
+              ? placesOfExpression(statement.initializer, ctx)
+              : placesStoredByExpression(statement.initializer, ctx);
           const bind = (source?: BorrowPlace): void =>
             bindPatternPlaces({
               pattern: statement.pattern,
               source,
               mutable:
                 !returnsDetachedSharedValue &&
-                (statement.mutable ||
-                  statement.pattern.bindingKind === "mutable-ref"),
+                createsMutableBinding,
               span: statement.span,
               event,
               ctx,
@@ -1692,8 +1698,7 @@ const scanExpression = (
           }
           if (
             returnsDetachedSharedValue &&
-            (statement.mutable ||
-              statement.pattern.bindingKind === "mutable-ref")
+            createsMutableBinding
           ) {
             patternSymbols(statement.pattern).forEach((symbol) =>
               ctx.aliases.set(symbol, {
@@ -1709,15 +1714,14 @@ const scanExpression = (
           const initializer = ctx.hir.expressions.get(statement.initializer);
           if (
             !returnsDetachedSharedValue &&
+            !(createsMutableBinding && initializerHasAddressableRoot) &&
             (isAggregateExpression(statement.initializer, ctx) ||
               aggregateContentsPlaces(statement.initializer, ctx).length > 0)
           ) {
             bindAggregatePatternOrigins({
               pattern: statement.pattern,
               value: statement.initializer,
-              mutable:
-                statement.mutable ||
-                statement.pattern.bindingKind === "mutable-ref",
+              mutable: createsMutableBinding,
               span: statement.span,
               event,
               ctx,
@@ -2030,6 +2034,9 @@ const parameterReturnsOnlyNonEscapingPlaces = (
     }));
   return returnedOrigins.every(
     (origin) =>
+      parameter.returnedBorrowedOrigins?.some(
+        (borrowed) => JSON.stringify(borrowed) === JSON.stringify(origin),
+      ) === true ||
       parameter.returnedSharedOrigins?.some(
         (shared) => JSON.stringify(shared) === JSON.stringify(origin),
       ) === true ||
@@ -2479,13 +2486,7 @@ const escapedPlacesIn = (
         if (typeof actual !== "number") {
           return;
         }
-        const origins =
-          parameter.returnedOrigins && parameter.returnedOrigins.length > 0
-            ? parameter.returnedOrigins
-            : (parameter.returnedPaths && parameter.returnedPaths.length > 0
-                ? parameter.returnedPaths
-                : [[]]
-              ).map((source) => ({ source, result: [] }));
+        const origins = returnedOrigins(parameter);
         origins.forEach((origin) => {
           const translated = translateResultProjection({
             result: origin.result,
@@ -2593,13 +2594,7 @@ const escapedPlacesIn = (
           if (typeof actual !== "number") {
             return;
           }
-          const origins =
-            parameter.returnedOrigins && parameter.returnedOrigins.length > 0
-              ? parameter.returnedOrigins
-              : (parameter.returnedPaths && parameter.returnedPaths.length > 0
-                  ? parameter.returnedPaths
-                  : [[]]
-                ).map((source) => ({ source, result: [] }));
+          const origins = returnedOrigins(parameter);
           origins.forEach((origin) => visitAtProjection(actual, origin.source));
         });
         return;
@@ -2879,7 +2874,8 @@ const validateCall = (
   });
 
   effectiveActuals.forEach(({ actual, index }) => {
-    if (info.contract?.parameters[index]?.retained !== true) {
+    const parameter = info.contract?.parameters[index];
+    if (parameter?.retained !== true) {
       return;
     }
     if (intrinsicName === "__array_set" && index === 2) {
@@ -2903,9 +2899,8 @@ const validateCall = (
       span: event.span,
       through: "a retaining call",
       projectionPaths:
-        info.contract.parameters[index]?.retainedPaths &&
-        info.contract.parameters[index]!.retainedPaths!.length > 0
-          ? info.contract.parameters[index]!.retainedPaths
+        parameter.retainedPaths && parameter.retainedPaths.length > 0
+          ? parameter.retainedPaths
           : undefined,
       ctx,
     });
@@ -3218,7 +3213,12 @@ const validateBorrowedCallbacks = (
         ? resolution.contract.parameters[scoped.callbackValueParameter]
         : undefined;
     const unknown = resolution.kind === "unknown";
-    if (!unknown && !borrowed?.retained && !borrowed?.returned) {
+    if (
+      !unknown &&
+      !borrowed?.retained &&
+      !borrowed?.returned &&
+      !borrowed?.borrowedRetainedPaths
+    ) {
       return;
     }
     const callback = ctx.hir.expressions.get(callbackExpr);

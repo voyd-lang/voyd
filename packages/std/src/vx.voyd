@@ -302,10 +302,14 @@ impl<Msg> Cmd<Msg>
 
   /// Creates a host/runtime command envelope for a registered VX command executor.
   api fn runtime({ kind: String, value?: MsgPack }) -> Cmd<Msg>
-    let ~out = command_map(kind)
-    if value is Some:
-      out.set("value", value.value)
-    Cmd<Msg> { payload: msgpack::make_map(out) }
+    let out = command_map(kind)
+    let complete =
+      match(value)
+        Some<MsgPack> { value: payload }:
+          out.setting("value", payload)
+        None:
+          out
+    Cmd<Msg> { payload: msgpack::make_map(complete) }
 
   api fn runtime({ kind: StringSlice, value?: MsgPack }) -> Cmd<Msg>
     Cmd<Msg>::runtime(kind: kind.to_string(), value: value)
@@ -544,11 +548,14 @@ impl<Msg> Sub<Msg>
 
   /// Creates a host/runtime subscription envelope for a registered VX subscription runner.
   api fn runtime({ kind: String, key: String, value?: MsgPack }) -> Sub<Msg>
-    let ~out = subscription_map(kind)
-    out.set("key", key)
-    if value is Some:
-      out.set("value", value.value)
-    Sub<Msg> { payload: msgpack::make_map(out) }
+    let out = subscription_map(kind).setting("key", key)
+    let complete =
+      match(value)
+        Some<MsgPack> { value: payload }:
+          out.setting("value", payload)
+        None:
+          out
+    Sub<Msg> { payload: msgpack::make_map(complete) }
 
   api fn runtime({ kind: StringSlice, key: StringSlice, value?: MsgPack }) -> Sub<Msg>
     Sub<Msg>::runtime(kind: kind.to_string(), key: key.to_string(), value: value)
@@ -579,10 +586,10 @@ impl<Msg> Sub<Msg>
     value: MsgPack,
     handler: fn(Payload) -> Msg
   }) -> Sub<Msg>
-    let ~out = subscription_map(kind)
-    out.set("key", key)
-    out.set("value", value)
-    out.set("valueRole", "config")
+    let out = subscription_map(kind)
+      .setting("key", key)
+      .setting("value", value)
+      .setting("valueRole", "config")
     Sub<Payload> { payload: msgpack::make_map(out) }.map<Msg>(handler)
 
   api fn runtime_configured<Payload>({
@@ -2472,10 +2479,10 @@ fn window_event_subscription<Msg>({
   key: String,
   value: MsgPack
 }) -> Sub<Msg>
-  let ~out = subscription_map(kind)
-  out.set("key", key)
-  out.set("event", event)
-  out.set("value", value)
+  let out = subscription_map(kind)
+    .setting("key", key)
+    .setting("event", event)
+    .setting("value", value)
   Sub<Msg> { payload: msgpack::make_map(out) }
 
 fn window_event_payload_subscription({
@@ -2483,9 +2490,9 @@ fn window_event_payload_subscription({
   event: String,
   key: String
 }) -> Sub<GenericEvent>
-  let ~out = subscription_map(kind)
-  out.set("key", key)
-  out.set("event", event)
+  let out = subscription_map(kind)
+    .setting("key", key)
+    .setting("event", event)
   Sub<GenericEvent> { payload: msgpack::make_map(out) }
 
 fn media_query_subscription<Msg>({ query: String, value: MsgPack }) -> Sub<Msg>

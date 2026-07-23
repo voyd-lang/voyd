@@ -284,7 +284,6 @@ impl Interval
     self.min < x and x < self.max
 
 val ScatterResult {
-  did_scatter: bool,
   attenuation: Color,
   scattered: Ray
 }
@@ -306,7 +305,6 @@ impl Material for Lambertian
       scatter_direction = rec.normal
 
     ScatterResult {
-      did_scatter: true,
       attenuation: self.albedo,
       scattered: Ray { origin: rec.p, direction: scatter_direction }
     }
@@ -324,7 +322,6 @@ impl Material for Metal
     var reflected = r_in.direction.reflect(rec.normal)
     reflected = reflected.unit_vector() + (Vec3::random_unit_vector() * self.fuzz)
     ScatterResult {
-      did_scatter: true,
       attenuation: self.albedo,
       scattered: Ray { origin: rec.p, direction: reflected }
     }
@@ -350,7 +347,6 @@ impl Material for Dielectric
       then: unit_direction.reflect(rec.normal)
       else: unit_direction.refract(rec.normal, ri)
     ScatterResult {
-      did_scatter: true,
       attenuation: Vec3(1.0, 1.0, 1.0),
       scattered: Ray { origin: rec.p, direction }
     }
@@ -409,8 +405,10 @@ impl Hittable for HittableList
     var ~temp_rec = HitRecord()
     var hit_anything = false
     var closest_so_far = ray_t.max
+    var index = 0
 
-    for object in self.objects:
+    while index < self.objects.len():
+      let object = self.objects.at(index)
       if object.hit({
         ray,
         ray_t: Interval(ray_t.min, closest_so_far),
@@ -419,6 +417,7 @@ impl Hittable for HittableList
         hit_anything = true
         closest_so_far = temp_rec.t
         rec.apply(temp_rec)
+      index = index + 1
 
     hit_anything
 
@@ -599,9 +598,7 @@ fn ray_color(ray: Ray, depth: i32, world: Hittable) -> Color
 
   if world.hit({ rec, ray_t: Interval(0.001, INFINITY), ray }):
     let scatter = rec.mat.scatter({ r_in: ray, rec })
-    if scatter.did_scatter:
-      return scatter.attenuation * ray_color(scatter.scattered, depth - 1, world)
-    return Color(0.0, 0.0, 0.0)
+    return scatter.attenuation * ray_color(scatter.scattered, depth - 1, world)
 
   let unit_direction = ray.direction.unit_vector()
   let a = 0.5 * (unit_direction.y + 1.0)

@@ -132,7 +132,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
   /// Inserts a value at the target location.
   api fn insert(~self, key: K, value: V) -> Optional<V>
     let previous = self.get(key)
-    self.set(key, value)
+    self = self.with_set(key, value)
     previous
 
   /// Inserts or replaces the value for a key.
@@ -143,9 +143,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     /// Value to store at `key`.
     value: V
   ) -> void
-    let next = self.with_set(key, value)
-    self.buckets = next.buckets
-    self.count = next.count
+    self = self.with_set(key, value)
 
   /// Returns a dictionary with `key` inserted or updated.
   api fn setting(self, key: K, value: V) -> Dict<K, V>
@@ -165,9 +163,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
   /// Removes and returns a value when present.
   api fn remove(~self, key: K) -> Optional<V>
     let previous = self.get(key)
-    let next = self.with_deleted(key)
-    self.buckets = next.buckets
-    self.count = next.count
+    self = self.with_deleted(key)
     previous
 
   /// Removes all stored values.
@@ -310,39 +306,6 @@ impl<K: DictKey<K>, V> Dict<K, V>
       bucket_index = bucket_index + 1
     out
 
-  /// Merges entries from another dictionary into this dictionary.
-  api fn merge(~self, other: Dict<K, V>) -> void
-    self.merge(
-      other,
-      (_key: K, _left: V, right: V) -> V => right
-    )
-
-  /// Merges entries from another dictionary into this dictionary.
-  api fn merge(
-    ~self,
-    other: Dict<K, V>,
-    resolve: (key: K, left: V, right: V) : () -> V
-  ) -> void
-    if other.count == 0:
-      return void
-
-    let bucket_count = __array_len(other.buckets)
-    var bucket_index = 0
-    while bucket_index < bucket_count:
-      let bucket = __array_get(other.buckets, bucket_index)
-      let storage = bucket.raw_storage()
-      let len = bucket.len()
-      var index = 0
-      while index < len:
-        let entry = __array_get(storage, index)
-        match(self.get(entry.key))
-          Some<V> { value: left }:
-            self.set(entry.key, resolve(entry.key, left, entry.value))
-          None:
-            self.set(entry.key, entry.value)
-        index = index + 1
-      bucket_index = bucket_index + 1
-
   /// Transforms each value and keeps the original keys.
   api fn map<U>(self, f: (key: K, value: V) -> U) -> Dict<K, U>
     if self.count == 0:
@@ -464,13 +427,11 @@ impl<T> Array<T>
           let group_key = f(value)
           match(out.get(group_key))
             Some<Array<T>> { value: existing }:
-              let ~next = existing.copied()
-              next.push(value)
-              out.set(group_key, next)
+              let next = existing.pushed(value)
+              out = out.with_set(group_key, next)
             None:
-              let ~next = Array<T>::with_capacity(1)
-              next.push(value)
-              out.set(group_key, next)
+              let next = Array<T>::with_capacity(1).pushed(value)
+              out = out.with_set(group_key, next)
         None:
           void
       index = index + 1
