@@ -460,10 +460,12 @@ fn copy_buckets<K, V>(
 ) -> FixedArray<Array<DictPair<K, V>>>
   let length = __array_len(source)
   let copy = new_fixed_array<Array<DictPair<K, V>>>(length)
-  var index = 0
-  while index < length:
-    __array_set(copy, index, __array_get(source, index).copied())
-    index = index + 1
+  __array_copy(copy, {
+    from: source,
+    to_index: 0,
+    from_index: 0,
+    count: length
+  })
   copy
 
 fn maybe_grow<K: DictKey<K>, V>(dict: Dict<K, V>) -> Dict<K, V>

@@ -9,6 +9,7 @@ use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 use super::contract::OpenApiConfig
+use super::json_copy::{ copy_json_array, copy_json_object }
 use super::operation_render::operation_json
 use super::types::RecordedOpenApiRoute
 
@@ -113,7 +114,7 @@ fn append_route(
   let complete_operation = with_opaque_path_parameters(normalized, operation)
   if valid_path_parameters(normalized, complete_operation):
     let ~path_item = match(paths.get(normalized))
-      Some<JsonValue> { value }: object_entries(value).copied()
+      Some<JsonValue> { value }: copy_json_object(object_entries(value))
       None: Dict<String, JsonValue>::init()
     match(path_item.get(method))
       Some<JsonValue>:
@@ -138,7 +139,7 @@ fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
   let ~parameters = match(fields.get("parameters"))
     Some<JsonValue> { value }:
       value.match(active)
-        JsonArray: active.value.copied()
+        JsonArray: copy_json_array(active.value)
         else: Array<JsonValue>::init()
     None:
       Array<JsonValue>::init()
@@ -147,7 +148,8 @@ fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
   while parameter_index < parameters.len():
     let parameter = object_entries(parameters.at(parameter_index))
     if string_field(parameter, "in").equals("path"):
-      documented.set(string_field(parameter, "name"), true)
+      let parameter_name = string_field(parameter, "name").as_slice().to_string()
+      documented.set(parameter_name, true)
     parameter_index = parameter_index + 1
 
   let segments = path.as_slice().split(on: 47, keep_empty: false)

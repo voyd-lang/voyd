@@ -1,0 +1,38 @@
+//! Independent copies of mutable JSON container graphs.
+
+use std::array::Array
+use std::dict::Dict
+use std::json::{ JsonArray, JsonBool, JsonNull, JsonNumber, JsonObject, JsonString, JsonValue }
+
+pub fn copy_json_value(value: JsonValue) -> JsonValue
+  value.match(active)
+    JsonNull:
+      JsonNull {}
+    JsonBool:
+      JsonBool { value: active.value }
+    JsonNumber:
+      JsonNumber { value: active.value }
+    JsonString:
+      JsonString { value: active.value.as_slice().to_string() }
+    JsonArray:
+      JsonArray { value: copy_json_array(active.value) }
+    JsonObject:
+      JsonObject { value: copy_json_object(active.value) }
+
+pub fn copy_json_array(source: Array<JsonValue>) -> Array<JsonValue>
+  let ~out = Array<JsonValue>::with_capacity(source.len())
+  var index = 0
+  while index < source.len():
+    out.push(copy_json_value(source.at(index)))
+    index = index + 1
+  out
+
+pub fn copy_json_object(source: Dict<String, JsonValue>) -> Dict<String, JsonValue>
+  let entries = source.entries()
+  let ~out = Dict<String, JsonValue>::with_capacity(entries.len())
+  var index = 0
+  while index < entries.len():
+    let entry = entries.at(index)
+    out.set(entry.0.as_slice().to_string(), copy_json_value(entry.1))
+    index = index + 1
+  out
