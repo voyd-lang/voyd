@@ -5,7 +5,7 @@ use std::result::types::all
 use std::string::type::String
 
 fn request(namespace: String): () -> WireRecord
-  { namespace, values: [20, 21] }
+  WireRecord { namespace, values: [20, 21] }
 
 pub fn direct(): Document -> i32
   let input = request("direct")

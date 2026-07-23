@@ -3,13 +3,13 @@ use std::optional::all
 use std::result::types::all
 use std::string::type::String
 
-pub type WireRecord = {
-  namespace: String,
-  values: Array<i32>
+pub obj WireRecord {
+  api namespace: String,
+  api values: Array<i32>
 }
 
-pub type WireError = {
-  message: String
+pub obj WireError {
+  api message: String
 }
 
 @external(id: "example:storage/document@1")
@@ -20,3 +20,4 @@ pub eff Document
     record: WireRecord,
     current: Optional<WireRecord>
   ) -> Result<Array<WireRecord>, WireError>
+  inspect(tail, namespace: String) -> Result<WireRecord, WireError>

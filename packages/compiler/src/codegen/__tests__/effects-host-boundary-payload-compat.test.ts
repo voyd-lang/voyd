@@ -142,12 +142,18 @@ describe("host boundary payload compatibility", () => {
       (entry) => entry.effectId === "example:storage/document@1",
     );
 
-    expect(operations).toHaveLength(1);
-    expect(operations[0]?.label).toMatch(/Document\.roundtrip$/);
+    expect(operations).toHaveLength(2);
+    expect(operations.map((entry) => entry.label)).toEqual(
+      expect.arrayContaining([
+        expect.stringMatching(/Document\.roundtrip$/),
+        expect.stringMatching(/Document\.inspect$/),
+      ]),
+    );
 
     const requirements = parseExternalRequirements(
       toWebAssemblyModule(module.emitBinary()),
     );
+    expect(requirements.functions).toHaveLength(1);
     expect(requirements.functions).toMatchObject([
       {
         kind: "async",
@@ -341,7 +347,7 @@ describe("host boundary payload compatibility", () => {
     const directOperations = parseEffectTable(direct.module).ops.filter(
       (entry) => entry.effectId === "example:storage/document@1",
     );
-    expect(directOperations).toHaveLength(1);
+    expect(directOperations).toHaveLength(2);
 
     const directResult = await runEffectfulExport<number>({
       wasm: direct.module,

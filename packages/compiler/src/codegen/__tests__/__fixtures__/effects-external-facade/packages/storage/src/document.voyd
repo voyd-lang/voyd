@@ -35,3 +35,8 @@ pub fn roundtrip_count(
       Ok<i32> { value: value.len() }
     Err<WireError> { error }:
       Err<WireError> { error }
+
+pub fn inspect(
+  namespace: String
+): Document -> Result<WireRecord, WireError>
+  Document::inspect(namespace)

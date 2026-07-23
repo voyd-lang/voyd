@@ -536,7 +536,7 @@ export const buildEffectRegistry = (
           returnSerializerOverride: signature.returnSerializerOverride,
         });
         const key = toEffectOpKey(effectId.hash, info.opIndex, signatureHash);
-        const external = effectMeta?.external && siteReachable
+        const external = effectMeta?.external
             ? {
                 params: signature.params.map((typeId, index) =>
                   deriveBoundarySchema({
@@ -552,11 +552,18 @@ export const buildEffectRegistry = (
                   label: `${effectId.id}::${opName} result`,
                   options: { tagStandaloneVariants: true },
                 }),
+                ...(!siteReachable ? { declaredOnly: true } : {}),
               }
             : undefined;
         const existing = entriesByKey.get(key);
         if (existing) {
-          if (external) existing.external = external;
+          if (
+            external &&
+            (!existing.external ||
+              (existing.external.declaredOnly && !external.declaredOnly))
+          ) {
+            existing.external = external;
+          }
           return;
         }
         entriesByKey.set(key, {

@@ -12,7 +12,7 @@ use std::result::types::all
 use std::string::type::String
 
 fn request(namespace: String): () -> WireRecord
-  { namespace, values: [20, 21] }
+  WireRecord { namespace, values: [20, 21] }
 
 fn result_value(result: Result<Optional<Stored<i32>>, WireError>): () -> i32
   match(result)
