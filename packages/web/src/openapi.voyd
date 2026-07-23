@@ -1,4 +1,4 @@
-//! OpenAPI integration and low-level document building.
+//! OpenAPI integration, contracts, and low-level document building.
 
 pub use self::builder::{
   Document,
@@ -10,3 +10,38 @@ pub use self::builder::{
   operation_fragment,
   operation_with_request
 }
+pub use self::contract::{
+  OpenApiConfig,
+  OpenApiFieldDocs,
+  OpenApiHeader,
+  OpenApiInput,
+  OpenApiParameterContract,
+  OpenApiRequestContract,
+  OpenApiResponseContract,
+  OpenApiResponseSchemaDocs,
+  OpenApiSchemaDocs,
+  RouteDocs,
+  RouteDocsInput,
+  bytes_request,
+  empty_response_contract,
+  json_request,
+  multipart_request,
+  opaque_responses,
+  openapi_event_stream_response,
+  openapi_field_docs,
+  openapi_header,
+  openapi_json_response,
+  openapi_opaque_request,
+  openapi_parameter,
+  openapi_request,
+  openapi_response,
+  openapi_response_schema_docs,
+  openapi_schema_docs,
+  openapi_typed_response,
+  openapi_untyped_header,
+  response_contract,
+  route_docs,
+  text_request
+}
+pub use self::expose::expose
+pub use self::routes::document_route

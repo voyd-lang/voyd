@@ -34,8 +34,7 @@ HTML rendering. Import a narrower module when writing reusable framework code:
 | `pkg::web::routes` | Free route functions, composition helpers, and timeout policies |
 | `pkg::web::extract` | Body, auth, parameter, query, header, and cookie extractors |
 | `pkg::web::response` | `IntoResponse`, typed responses, and raw conversion |
-| `pkg::web::contract` | Request, response, parameter, and schema documentation contracts |
-| `pkg::web::openapi` | Low-level manual OpenAPI document builder |
+| `pkg::web::openapi` | OpenAPI contracts and the low-level manual document builder |
 | `pkg::web::middleware` | Built-in middleware |
 | `pkg::web::html` | VX server-rendering responses |
 | `pkg::web::multipart` / `pkg::web::negotiate` | Multipart forms and content negotiation |

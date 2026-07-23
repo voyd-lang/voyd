@@ -1,3 +1,0 @@
-//! Low-level route documentation helper.
-
-pub use super::openapi::routes::document_route

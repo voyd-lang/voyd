@@ -6,7 +6,7 @@ use super::extract::{
   required_session as required_session_policy,
   text as text_policy
 }
-pub use super::contract::{
+pub use super::openapi::{
   OpenApiConfig,
   OpenApiFieldDocs,
   OpenApiHeader,
@@ -34,8 +34,6 @@ pub use super::contract::{
   route_docs,
   text_request
 }
-pub use super::openapi_expose::expose as expose_openapi
-pub use super::openapi_routes::document_route as document_openapi_route
 
 pub use super::extract::{
   AuthExtractor,
@@ -86,7 +84,9 @@ pub use super::openapi::{
   Document as OpenApi,
   Info as OpenApiInfo,
   Operation as OpenApiOperation,
+  document_route as document_openapi_route,
   document as openapi_document,
+  expose as expose_openapi,
   info as openapi_info,
   operation as openapi_operation
 }

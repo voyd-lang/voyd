@@ -9,7 +9,7 @@ use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use super::streaming
-use super::contract::{ OpenApiResponseContract, openapi_event_stream_response }
+use super::openapi::contract::{ OpenApiResponseContract, openapi_event_stream_response }
 use super::response::IntoResponse
 
 /// One event in an SSE stream.

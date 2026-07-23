@@ -1,7 +1,7 @@
 use src::openapi::{ document, info, operation, operation_with_request }
-use src::contract::{ OpenApiRequestContract, OpenApiResponseContract, openapi_json_response, route_docs }
-use src::contract::openapi_response as response_override
-use src::phase3_openapi_types::{
+use src::openapi::{ OpenApiRequestContract, OpenApiResponseContract, openapi_json_response, route_docs }
+use src::openapi::openapi_response as response_override
+use src::openapi::test_types::{
   DocumentedArticle,
   DocumentedArticlePath,
   DocumentedArticleQuery,

@@ -1,3 +1,0 @@
-//! Explicit OpenAPI document exposure.
-
-pub use super::openapi::expose::expose

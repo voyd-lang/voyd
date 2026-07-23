@@ -46,7 +46,7 @@ use super::openapi::automatic::render_openapi
 use super::openapi::{ Operation, operation }
 use super::openapi::types::{ RecordedOpenApiRoute, RouteContract }
 use super::openapi::response_inference::{ created_responses, inferred_responses }
-use super::contract::{
+use super::openapi::contract::{
   OpenApiConfig,
   OpenApiInput,
   route_docs,

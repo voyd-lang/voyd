@@ -12,7 +12,7 @@ use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice, from_utf8, ParseIntError, Utf8Error }
-use super::contract::{ OpenApiRequestContract, bytes_request, json_request, text_request }
+use super::openapi::contract::{ OpenApiRequestContract, bytes_request, json_request, text_request }
 use super::response::IntoResponse
 
 pub type NameValue = {

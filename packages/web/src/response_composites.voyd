@@ -4,7 +4,7 @@ use std::array::Array
 use std::http::Response
 use std::optional::types::{ Option, Some, None }
 use std::result::types::{ Result, Ok, Err }
-use super::contract::{ OpenApiResponseContract, empty_response_contract }
+use super::openapi::contract::{ OpenApiResponseContract, empty_response_contract }
 use super::response::{ IntoResponse, typed_response }
 use super::openapi::response_contracts::{ append_response_contract, merge_response_contracts }
 

@@ -11,7 +11,7 @@ use std::json::{
 use std::optional::types::{ Option, Some, None }
 use std::result::types::{ Result, Ok, Err }
 use std::string::type::{ String, StringSlice }
-use super::contract::{
+use super::openapi::contract::{
   OpenApiResponseContract,
   empty_response_contract,
   opaque_responses

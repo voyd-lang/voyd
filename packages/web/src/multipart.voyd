@@ -6,7 +6,7 @@ use std::http::{ Body, Headers, IncomingRequest }
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
-use super::contract::{ OpenApiRequestContract, multipart_request }
+use super::openapi::contract::{ OpenApiRequestContract, multipart_request }
 use super::extract::{ FromBody, Rejection }
 
 /// One multipart field or uploaded file.

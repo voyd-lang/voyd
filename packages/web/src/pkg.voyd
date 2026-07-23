@@ -1,15 +1,12 @@
 //! Voyd web framework package root.
 
 pub src::all
-pub src::contract
 pub src::extract
 pub src::html
 pub src::middleware
 pub src::multipart
 pub src::negotiate
 pub src::openapi
-pub src::openapi_expose
-pub src::openapi_routes
 pub src::response
 pub src::response_composites
 pub src::response_dynamic
@@ -59,7 +56,7 @@ pub use src::extract::{
   text,
   text_body
 }
-pub use src::contract::{
+pub use src::openapi::{
   OpenApiConfig,
   OpenApiFieldDocs,
   OpenApiHeader,
@@ -87,8 +84,6 @@ pub use src::contract::{
   route_docs,
   text_request
 }
-pub use src::openapi_expose::expose as expose_openapi
-pub use src::openapi_routes::document_route as document_openapi_route
 pub use src::html::{
   Hydration,
   HtmlResponse,
@@ -110,7 +105,9 @@ pub use src::openapi::{
   Document as OpenApi,
   Info as OpenApiInfo,
   Operation as OpenApiOperation,
+  document_route as document_openapi_route,
   document as openapi_document,
+  expose as expose_openapi,
   info as openapi_info,
   operation as openapi_operation
 }
