@@ -31,6 +31,35 @@ describe("TypeArena shape normalization", () => {
     expect(desc.fields).toEqual([{ name: "value", type: i32, optional: false }]);
   });
 
+  it("keeps structural field documentation distinct while interning", () => {
+    const arena = createTypeArena();
+    const i32 = arena.internPrimitive("i32");
+    const first = arena.internStructuralObject({
+      fields: [
+        { name: "value", type: i32, documentation: "First value docs." },
+      ],
+    });
+    const second = arena.internStructuralObject({
+      fields: [
+        { name: "value", type: i32, documentation: "Second value docs." },
+      ],
+    });
+
+    expect(second).not.toBe(first);
+    const firstDesc = arena.get(first);
+    const secondDesc = arena.get(second);
+    expect(firstDesc.kind).toBe("structural-object");
+    expect(secondDesc.kind).toBe("structural-object");
+    if (
+      firstDesc.kind !== "structural-object" ||
+      secondDesc.kind !== "structural-object"
+    ) {
+      throw new Error("expected structural objects");
+    }
+    expect(firstDesc.fields[0]?.documentation).toBe("First value docs.");
+    expect(secondDesc.fields[0]?.documentation).toBe("Second value docs.");
+  });
+
   it("keeps natural field ordering when comparisons are cached", () => {
     const arena = createTypeArena();
     const i32 = arena.internPrimitive("i32");

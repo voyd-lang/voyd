@@ -250,6 +250,10 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     const ownerKey = typeof field.owner === "number" ? field.owner : "u";
     const packageKey =
       field.packageId === undefined ? "u" : jsonStringKey(field.packageId);
+    const documentationKey =
+      field.documentation === undefined
+        ? "u"
+        : jsonStringKey(field.documentation);
     return [
       jsonStringKey(field.name),
       field.type,
@@ -258,6 +262,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
       fieldVisibilityKeyForCache(field.visibility),
       ownerKey,
       packageKey,
+      documentationKey,
     ].join(":");
   };
 

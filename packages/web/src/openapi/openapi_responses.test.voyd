@@ -1,5 +1,5 @@
 use src::openapi::{ document, info, operation, operation_with_request }
-use src::openapi::{ OpenApiHeader, OpenApiParameterContract, OpenApiResponseContract, RouteDocs, openapi_header, openapi_json_response, openapi_opaque_request, openapi_untyped_header, route_docs }
+use src::openapi::{ OpenApiHeader, OpenApiParameterContract, OpenApiResponseContract, RouteDocs, openapi_field_docs, openapi_header, openapi_json_response, openapi_opaque_request, openapi_response_schema_docs, openapi_schema_docs, openapi_untyped_header, route_docs }
 use src::openapi::openapi_response as response_override
 use src::openapi::test_types::{
   DocumentedArticle,
@@ -281,6 +281,37 @@ test "automatic routes cover typed custom text binary result option and opaque r
       require_contains(value, "\"text/event-stream; charset=utf-8\"".as_slice(), "SSE media type omitted its charset")
       require_contains(value, "\"x-voyd-event-schema\"".as_slice(), "SSE event schema metadata was omitted")
       require_contains(value, "Opaque response".as_slice(), "raw response was not kept opaque")
+
+test "typed SSE responses apply explicit event schema documentation":
+  let web_app = app(openapi: { title: "SSE docs", version: "1" })
+    .get<SseResponse>(
+      "/events",
+      handler: sse_reply,
+      docs: RouteDocs::empty().with_response_schemas([
+        openapi_response_schema_docs(
+          status: 200,
+          schema: openapi_schema_docs(
+            description: "Explicit SSE event schema",
+            fields: [openapi_field_docs(
+              name: "data",
+              description: "Explicit SSE data field"
+            )]
+          )
+        )
+      ])
+    )
+    .get<SseResponse>(
+      "/literal-events",
+      handler: sse_reply,
+      docs: { description: "Literal zero-argument route docs" }
+    )
+  match(stringify(web_app.openapi(include_doc_comments: false)))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "Explicit SSE event schema".as_slice(), "SSE schema overlay was omitted")
+      require_contains(value, "Explicit SSE data field".as_slice(), "SSE field overlay was omitted")
+      require_contains(value, "Literal zero-argument route docs".as_slice(), "literal unit route docs were omitted")
 
 test "JSON result and option helpers preserve automatic response contracts":
   let web_app = app(openapi: { title: "Mapped responses", version: "1" })

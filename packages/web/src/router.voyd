@@ -927,6 +927,35 @@ impl App
       contract: route_fragment(operation().with_responses(inferred_responses<T>()))
     )
 
+  api fn route<R: IntoResponse<R>>(
+    self,
+    path: StringSlice,
+    { method: Method, timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+  ) -> App
+    self.with_unit_contract_route(
+      path,
+      method: method,
+      timeout: timeout,
+      handler: () -> Response => typed_response<R>(handler()),
+      contract: typed_fragment<R>(docs)
+    )
+
+  api fn route<R: IntoResponse<R>, D>(
+    self,
+    path: StringSlice,
+    { method: Method, timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+  ) -> App
+    self.with_unit_contract_route(
+      path,
+      method: method,
+      timeout: timeout,
+      handler: () -> Response => typed_response<R>(handler()),
+      contract: documented_fragment(
+        operation().with_responses(inferred_responses<R>()),
+        docs
+      )
+    )
+
   api fn route<S, A: FromAuth<S>, R: IntoResponse<R>>(self, path: StringSlice, { method: Method, auth: A, timeout?: TimeoutPolicy, handler: fn(S) : (open) -> R }) -> App
     self.with_auth_route<S, A, R>(path, method: method, auth: auth, timeout: timeout, handler: handler)
 
@@ -2946,6 +2975,76 @@ impl App
     ) -> App
     self.route<T>(path, method: Method::Delete {}, timeout: timeout, handler: handler)
 
+  api fn get<R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<R>(path, method: Method::Get {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn post<R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<R>(path, method: Method::Post {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<R>(path, method: Method::Put {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<R>(path, method: Method::Patch {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<R>(path, method: Method::Delete {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn get<R: IntoResponse<R>, D>(
+      self,
+      path: StringSlice,
+      { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+    ) -> App
+    self.route<R, D>(path, method: Method::Get {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn post<R: IntoResponse<R>, D>(
+      self,
+      path: StringSlice,
+      { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+    ) -> App
+    self.route<R, D>(path, method: Method::Post {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<R: IntoResponse<R>, D>(
+      self,
+      path: StringSlice,
+      { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+    ) -> App
+    self.route<R, D>(path, method: Method::Put {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<R: IntoResponse<R>, D>(
+      self,
+      path: StringSlice,
+      { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+    ) -> App
+    self.route<R, D>(path, method: Method::Patch {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<R: IntoResponse<R>, D>(
+      self,
+      path: StringSlice,
+      { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+    ) -> App
+    self.route<R, D>(path, method: Method::Delete {}, timeout: timeout, handler: handler, docs: docs)
+
   api fn get<S, A: FromAuth<S>, R: IntoResponse<R>>(self, path: StringSlice, { auth: A, timeout?: TimeoutPolicy, handler: fn(S) : (open) -> R }) -> App
     self.route<S, A, R>(path, method: Method::Get {}, auth: auth, timeout: timeout, handler: handler)
 
@@ -3536,6 +3635,76 @@ impl Router
       ) -> Router
     self.route<T>(path, method: Method::Delete {}, timeout: timeout, handler: handler)
 
+  api fn get<R: IntoResponse<R>>(
+        self,
+        path: StringSlice,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    self.route<R>(path, method: Method::Get {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn post<R: IntoResponse<R>>(
+        self,
+        path: StringSlice,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    self.route<R>(path, method: Method::Post {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<R: IntoResponse<R>>(
+        self,
+        path: StringSlice,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    self.route<R>(path, method: Method::Put {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<R: IntoResponse<R>>(
+        self,
+        path: StringSlice,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    self.route<R>(path, method: Method::Patch {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<R: IntoResponse<R>>(
+        self,
+        path: StringSlice,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    self.route<R>(path, method: Method::Delete {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn get<R: IntoResponse<R>, D>(
+        self,
+        path: StringSlice,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> Router
+    self.route<R, D>(path, method: Method::Get {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn post<R: IntoResponse<R>, D>(
+        self,
+        path: StringSlice,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> Router
+    self.route<R, D>(path, method: Method::Post {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<R: IntoResponse<R>, D>(
+        self,
+        path: StringSlice,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> Router
+    self.route<R, D>(path, method: Method::Put {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<R: IntoResponse<R>, D>(
+        self,
+        path: StringSlice,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> Router
+    self.route<R, D>(path, method: Method::Patch {}, timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<R: IntoResponse<R>, D>(
+        self,
+        path: StringSlice,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> Router
+    self.route<R, D>(path, method: Method::Delete {}, timeout: timeout, handler: handler, docs: docs)
+
   api fn get<S, A: FromAuth<S>, R: IntoResponse<R>>(self, path: StringSlice, { auth: A, timeout?: TimeoutPolicy, handler: fn(S) : (open) -> R }) -> Router
     Router { app: self.app.get<S, A, R>(path, auth: auth, timeout: timeout, handler: handler) }
 
@@ -4011,6 +4180,35 @@ impl Router
           contract: route_fragment(operation().with_responses(inferred_responses<T>()))
         ) }
 
+  api fn route<R: IntoResponse<R>>(
+      self,
+      path: StringSlice,
+      { method: Method, timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+    ) -> Router
+    Router { app: self.app.with_unit_contract_route(
+          path,
+          method: method,
+          timeout: timeout,
+          handler: () -> Response => typed_response<R>(handler()),
+          contract: typed_fragment<R>(docs)
+        ) }
+
+  api fn route<R: IntoResponse<R>, D>(
+      self,
+      path: StringSlice,
+      { method: Method, timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+    ) -> Router
+    Router { app: self.app.with_unit_contract_route(
+          path,
+          method: method,
+          timeout: timeout,
+          handler: () -> Response => typed_response<R>(handler()),
+          contract: documented_fragment(
+            operation().with_responses(inferred_responses<R>()),
+            docs
+          )
+        ) }
+
   api fn route<S, A: FromAuth<S>, R: IntoResponse<R>>(self, path: StringSlice, { method: Method, auth: A, timeout?: TimeoutPolicy, handler: fn(S) : (open) -> R }) -> Router
     Router { app: self.app.with_auth_route<S, A, R>(path, method: method, auth: auth, timeout: timeout, handler: handler) }
 
@@ -4256,6 +4454,20 @@ impl App
     ) -> App
     self.route<T>(path.as_slice(), method: method, timeout: timeout, handler: handler)
 
+  api fn route<R: IntoResponse<R>>(
+      self,
+      path: String,
+      { method: Method, timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+    ) -> App
+    self.route<R>(path.as_slice(), method: method, timeout: timeout, handler: handler, docs: docs)
+
+  api fn route<R: IntoResponse<R>, D>(
+      self,
+      path: String,
+      { method: Method, timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+    ) -> App
+    self.route<R, D>(path.as_slice(), method: method, timeout: timeout, handler: handler, docs: docs)
+
   api fn route<S, A: FromAuth<S>, R: IntoResponse<R>>(self, path: String, { method: Method, auth: A, timeout?: TimeoutPolicy, handler: fn(S) : (open) -> R }) -> App
     self.route<S, A, R>(path.as_slice(), method: method, auth: auth, timeout: timeout, handler: handler)
 
@@ -4493,6 +4705,76 @@ impl App
         { timeout: TimeoutPolicy, handler: fn() : (open) -> T }
       ) -> App
     self.delete<T>(path.as_slice(), timeout: timeout, handler: handler)
+
+  api fn get<R: IntoResponse<R>>(
+        self,
+        path: String,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> App
+    self.get<R>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn post<R: IntoResponse<R>>(
+        self,
+        path: String,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> App
+    self.post<R>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<R: IntoResponse<R>>(
+        self,
+        path: String,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> App
+    self.put<R>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<R: IntoResponse<R>>(
+        self,
+        path: String,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> App
+    self.patch<R>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<R: IntoResponse<R>>(
+        self,
+        path: String,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> App
+    self.delete<R>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn get<R: IntoResponse<R>, D>(
+        self,
+        path: String,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> App
+    self.get<R, D>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn post<R: IntoResponse<R>, D>(
+        self,
+        path: String,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> App
+    self.post<R, D>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<R: IntoResponse<R>, D>(
+        self,
+        path: String,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> App
+    self.put<R, D>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<R: IntoResponse<R>, D>(
+        self,
+        path: String,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> App
+    self.patch<R, D>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<R: IntoResponse<R>, D>(
+        self,
+        path: String,
+        { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> App
+    self.delete<R, D>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
 
   api fn get<S, A: FromAuth<S>, R: IntoResponse<R>>(self, path: String, { auth: A, timeout?: TimeoutPolicy, handler: fn(S) : (open) -> R }) -> App
     self.get<S, A, R>(path.as_slice(), auth: auth, timeout: timeout, handler: handler)
@@ -5148,6 +5430,76 @@ impl Router
         ) -> Router
     self.delete<T>(path.as_slice(), timeout: timeout, handler: handler)
 
+  api fn get<R: IntoResponse<R>>(
+          self,
+          path: String,
+          { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+        ) -> Router
+    self.get<R>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn post<R: IntoResponse<R>>(
+          self,
+          path: String,
+          { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+        ) -> Router
+    self.post<R>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<R: IntoResponse<R>>(
+          self,
+          path: String,
+          { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+        ) -> Router
+    self.put<R>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<R: IntoResponse<R>>(
+          self,
+          path: String,
+          { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+        ) -> Router
+    self.patch<R>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<R: IntoResponse<R>>(
+          self,
+          path: String,
+          { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+        ) -> Router
+    self.delete<R>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn get<R: IntoResponse<R>, D>(
+          self,
+          path: String,
+          { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+        ) -> Router
+    self.get<R, D>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn post<R: IntoResponse<R>, D>(
+          self,
+          path: String,
+          { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+        ) -> Router
+    self.post<R, D>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn put<R: IntoResponse<R>, D>(
+          self,
+          path: String,
+          { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+        ) -> Router
+    self.put<R, D>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn patch<R: IntoResponse<R>, D>(
+          self,
+          path: String,
+          { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+        ) -> Router
+    self.patch<R, D>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
+  api fn delete<R: IntoResponse<R>, D>(
+          self,
+          path: String,
+          { timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+        ) -> Router
+    self.delete<R, D>(path.as_slice(), timeout: timeout, handler: handler, docs: docs)
+
   api fn get<S, A: FromAuth<S>, R: IntoResponse<R>>(self, path: String, { auth: A, timeout?: TimeoutPolicy, handler: fn(S) : (open) -> R }) -> Router
     self.get<S, A, R>(path.as_slice(), auth: auth, timeout: timeout, handler: handler)
 
@@ -5608,6 +5960,20 @@ impl Router
         { method: Method, timeout: TimeoutPolicy, handler: fn() : (open) -> T }
       ) -> Router
     self.route<T>(path.as_slice(), method: method, timeout: timeout, handler: handler)
+
+  api fn route<R: IntoResponse<R>>(
+        self,
+        path: String,
+        { method: Method, timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: RouteDocs }
+      ) -> Router
+    self.route<R>(path.as_slice(), method: method, timeout: timeout, handler: handler, docs: docs)
+
+  api fn route<R: IntoResponse<R>, D>(
+        self,
+        path: String,
+        { method: Method, timeout?: TimeoutPolicy, handler: fn() : (open) -> R, docs: D }
+      ) -> Router
+    self.route<R, D>(path.as_slice(), method: method, timeout: timeout, handler: handler, docs: docs)
 
   api fn route<S, A: FromAuth<S>, R: IntoResponse<R>>(self, path: String, { method: Method, auth: A, timeout?: TimeoutPolicy, handler: fn(S) : (open) -> R }) -> Router
     self.route<S, A, R>(path.as_slice(), method: method, auth: auth, timeout: timeout, handler: handler)
