@@ -10,7 +10,10 @@ import type {
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type { BorrowingDependency } from "./dependency.js";
 import type { CallableBorrowContract, PlaceProjection } from "./model.js";
-import { mergeCallableBorrowContracts } from "./model.js";
+import {
+  borrowTypeConditionId,
+  mergeCallableBorrowContracts,
+} from "./model.js";
 import { typeCanCarryReference } from "./reference-bearing.js";
 
 export type ResolvedBorrowCall = {
@@ -71,9 +74,7 @@ const conservativeContractFor = (
               : "owned",
         retained: reference && mayRetain,
         returned: reference && returnsReference,
-        ...(reference && mayRetain
-          ? { externalRetainedPaths: [[]] }
-          : {}),
+        ...(reference && mayRetain ? { externalRetainedPaths: [[]] } : {}),
       };
     }),
     maySuspend: !typing.effects.isEmpty(signature.effectRow),
@@ -251,9 +252,7 @@ const conservativeContractForArguments = (
             : "owned",
         retained: reference && mayRetain,
         returned: reference && returnsReference,
-        ...(reference && mayRetain
-          ? { externalRetainedPaths: [[]] }
-          : {}),
+        ...(reference && mayRetain ? { externalRetainedPaths: [[]] } : {}),
       };
     }),
     maySuspend: targets.some((target) => targetMaySuspend(target, ctx)),
@@ -267,6 +266,14 @@ const RETAINING_INTRINSICS = new Set([
   "__task_spawn",
   "__task_detach",
 ]);
+
+const fieldPath = (name: string): readonly PlaceProjection[] => [
+  { kind: "field", name },
+];
+
+const dynamicIndexPath = (): readonly PlaceProjection[] => [
+  { kind: "index", stable: false },
+];
 
 const intrinsicBorrowContract = ({
   name,
@@ -284,6 +291,7 @@ const intrinsicBorrowContract = ({
       parameters: [
         {
           access: "shared",
+          accessPaths: [],
           retained: true,
           returned: false,
           externalRetainedPaths: [[]],
@@ -307,6 +315,7 @@ const intrinsicBorrowContract = ({
         };
         return {
           access: "shared",
+          accessPaths: [],
           retained: false,
           returned: true,
           returnedOrigins: [origin],
@@ -347,10 +356,40 @@ const intrinsicBorrowContract = ({
       maySuspend: false,
     };
   }
+  if (name === "__array_len" && argumentCount === 1) {
+    return {
+      parameters: [
+        {
+          access: "shared",
+          accessPaths: [[{ kind: "identity" }]],
+          retained: false,
+          returned: false,
+        },
+      ],
+      maySuspend: false,
+    };
+  }
+  if (name === "__ref_is_null" && argumentCount === 1) {
+    return {
+      parameters: [
+        {
+          access: "shared",
+          accessPaths: [[{ kind: "identity" }]],
+          retained: false,
+          returned: false,
+        },
+      ],
+      maySuspend: false,
+    };
+  }
   if (name === "__array_copy" && argumentCount === 2) {
     return {
       parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
-        access: index === 0 ? "shared" : "owned",
+        access: "shared",
+        accessPaths:
+          index === 0
+            ? [dynamicIndexPath()]
+            : [[{ kind: "field", name: "from" }, ...dynamicIndexPath()]],
         retained: false,
         returned: index === 0,
       })),
@@ -373,6 +412,9 @@ const intrinsicBorrowContract = ({
     return {
       parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
         access: index === 0 || index === 2 ? "shared" : "owned",
+        ...(index === 0 || index === 2
+          ? { accessPaths: [dynamicIndexPath()] }
+          : {}),
         retained: false,
         returned: index === 0,
       })),
@@ -388,6 +430,150 @@ const intrinsicBorrowContract = ({
       maySuspend: false,
     };
   }
+  if (
+    (name === "__shared_cell_begin_read" ||
+      name === "__shared_cell_begin_write" ||
+      name === "__shared_cell_end_read" ||
+      name === "__shared_cell_end_write") &&
+    argumentCount === 1
+  ) {
+    return {
+      parameters: [
+        {
+          access: "shared",
+          accessPaths: [fieldPath("__borrow_state")],
+          retained: false,
+          returned: false,
+        },
+      ],
+      maySuspend: false,
+    };
+  }
+  if (name === "__shared_cell_value" && argumentCount === 1) {
+    const valuePath = fieldPath("__value");
+    return {
+      parameters: [
+        {
+          access: "shared",
+          accessPaths: [valuePath],
+          retained: false,
+          returned: returnsReference,
+          ...(returnsReference
+            ? {
+                returnedOrigins: [{ source: valuePath, result: [] }],
+                returnedBorrowedOrigins: [{ source: valuePath, result: [] }],
+              }
+            : {}),
+        },
+      ],
+      maySuspend: false,
+    };
+  }
+  if (name === "__shared_cell_set_value" && argumentCount === 2) {
+    return {
+      parameters: [
+        {
+          access: "shared",
+          accessPaths: [fieldPath("__value")],
+          retained: false,
+          returned: false,
+        },
+        {
+          access: "shared",
+          accessPaths: [],
+          retained: false,
+          returned: false,
+        },
+      ],
+      transfers: [
+        {
+          sourceParameter: 1,
+          destinationParameter: 0,
+          destinationPath: fieldPath("__value"),
+        },
+      ],
+      maySuspend: false,
+    };
+  }
+  if (
+    (name === "__boundary_value_to_msgpack" ||
+      name === "__boundary_msgpack_to_value") &&
+    argumentCount === 1
+  ) {
+    const identityOrigin = { source: [], result: [] };
+    const conditionId = borrowTypeConditionId({
+      parameter: 0,
+      sourcePath: [],
+      resultPath: [],
+    });
+    return {
+      parameters: [
+        {
+          access: "shared",
+          accessPaths: [[]],
+          accessIfResultTypeDiffers: {
+            conditionId,
+            parameter: 0,
+            sourcePath: [],
+            resultPath: [],
+          },
+          retained: false,
+          returned: returnsReference,
+          ...(returnsReference
+            ? {
+                returnedOrigins: [identityOrigin],
+                returnedTypeMatchingOrigins: [
+                  { ...identityOrigin, conditionId },
+                ],
+              }
+            : {}),
+        },
+      ],
+      maySuspend: false,
+    };
+  }
+  if (
+    name === "__boundary_msgpack_to_value_or_identity" &&
+    argumentCount === 2
+  ) {
+    const identityOrigin = { source: [], result: [] };
+    const conditionId = borrowTypeConditionId({
+      parameter: 0,
+      sourcePath: [],
+      resultPath: [],
+    });
+    return {
+      parameters: [
+        {
+          access: "shared",
+          accessPaths: [],
+          retained: false,
+          returned: returnsReference,
+          ...(returnsReference
+            ? {
+                returnedOrigins: [identityOrigin],
+                returnedTypeMatchingOrigins: [
+                  { ...identityOrigin, conditionId },
+                ],
+              }
+            : {}),
+        },
+        {
+          access: "shared",
+          accessPaths: [[]],
+          accessIfResultTypeDiffers: {
+            conditionId,
+            parameter: 0,
+            sourcePath: [],
+            resultPath: [],
+          },
+          retained: false,
+          returned: false,
+        },
+      ],
+      maySuspend: false,
+    };
+  }
   const storedValueIndex = name === "__array_set" ? 2 : undefined;
   if (typeof storedValueIndex !== "number") {
     return undefined;
@@ -395,6 +581,11 @@ const intrinsicBorrowContract = ({
   return {
     parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
       access: index === 0 || index === storedValueIndex ? "shared" : "owned",
+      ...(index === 0
+        ? { accessPaths: [dynamicIndexPath()] }
+        : index === storedValueIndex
+          ? { accessPaths: [] }
+          : {}),
       retained: false,
       returned: index === 0,
     })),
@@ -549,9 +740,7 @@ const projectedTypes = (
         : projection?.kind === "tuple"
           ? fields?.[projection.index]
           : undefined;
-    return field
-      ? projectedTypes(field.type, remaining, typing, active)
-      : [];
+    return field ? projectedTypes(field.type, remaining, typing, active) : [];
   })();
   active.delete(type);
   return candidates;
@@ -567,6 +756,107 @@ const projectionCanCarryReference = (
     types.length === 0 ||
     types.some((projected) => typeCanCarryReference(projected, typing))
   );
+};
+
+const specializeConditionalContract = (
+  contract: CallableBorrowContract,
+  expr: HirExpression,
+  arguments_: readonly (HirExprId | undefined)[],
+  ctx: ResolveContext,
+): CallableBorrowContract => {
+  if (ctx.borrowIndexMode === "symbolic") {
+    return contract;
+  }
+  const resultType = resolvedTypeFor(expr.id, ctx.typing);
+  const matchesResult = ({
+    parameter,
+    sourcePath,
+    resultPath,
+  }: {
+    parameter: number;
+    sourcePath: readonly PlaceProjection[];
+    resultPath: readonly PlaceProjection[];
+  }): boolean | undefined => {
+    const actual = arguments_[parameter];
+    if (typeof actual !== "number" || typeof resultType !== "number") {
+      return undefined;
+    }
+    const actualType = resolvedTypeFor(actual, ctx.typing);
+    if (typeof actualType !== "number") {
+      return undefined;
+    }
+    const sourceTypes = projectedTypes(actualType, sourcePath, ctx.typing);
+    const resultTypes = projectedTypes(resultType, resultPath, ctx.typing);
+    return sourceTypes.length > 0 && resultTypes.length > 0
+      ? sourceTypes.some((source) => resultTypes.includes(source))
+      : undefined;
+  };
+  return {
+    ...contract,
+    parameters: contract.parameters.map((parameter, index) => {
+      const returnedOriginKey = (origin: {
+        source: readonly PlaceProjection[];
+        result: readonly PlaceProjection[];
+      }): string => JSON.stringify([origin.source, origin.result]);
+      const conditionalOrigins = new Map(
+        (parameter.returnedTypeMatchingOrigins ?? []).map((origin) => [
+          returnedOriginKey(origin),
+          origin,
+        ]),
+      );
+      const returnedOrigins = parameter.returnedOrigins?.filter((origin) => {
+        if (!conditionalOrigins.has(returnedOriginKey(origin))) {
+          return true;
+        }
+        return (
+          matchesResult({
+            parameter: index,
+            sourcePath: origin.source,
+            resultPath: origin.result,
+          }) !== false
+        );
+      });
+      const unresolvedConditionalOrigins =
+        returnedOrigins?.flatMap((origin) => {
+          const condition = conditionalOrigins.get(returnedOriginKey(origin));
+          if (!condition) {
+            return [];
+          }
+          return matchesResult({
+            parameter: index,
+            sourcePath: origin.source,
+            resultPath: origin.result,
+          }) === undefined
+            ? [condition]
+            : [];
+        }) ?? [];
+      const accessMatch = parameter.accessIfResultTypeDiffers
+        ? matchesResult(parameter.accessIfResultTypeDiffers)
+        : undefined;
+      const {
+        returnedOrigins: _returnedOrigins,
+        returnedTypeMatchingOrigins: _returnedConditions,
+        accessIfResultTypeDiffers: _accessCondition,
+        ...rest
+      } = parameter;
+      const returned =
+        parameter.returnedOrigins === undefined
+          ? parameter.returned
+          : (returnedOrigins?.length ?? 0) > 0;
+      return {
+        ...rest,
+        returned,
+        ...(returnedOrigins?.length ? { returnedOrigins } : {}),
+        ...(unresolvedConditionalOrigins.length
+          ? { returnedTypeMatchingOrigins: unresolvedConditionalOrigins }
+          : {}),
+        ...(accessMatch === true ? { accessPaths: [] } : {}),
+        ...(accessMatch === undefined && parameter.accessIfResultTypeDiffers
+          ? { accessIfResultTypeDiffers: parameter.accessIfResultTypeDiffers }
+          : {}),
+      };
+    }),
+  };
 };
 
 const filterConcreteProvenance = (
@@ -609,8 +899,7 @@ const filterConcreteProvenance = (
       !parameter.returnedOrigins &&
       (typeof resultType !== "number" ||
         typeCanCarryReference(resultType, ctx.typing));
-    const returned =
-      retainsBroadReturn || (returnedOrigins?.length ?? 0) > 0;
+    const returned = retainsBroadReturn || (returnedOrigins?.length ?? 0) > 0;
     const {
       retainedPaths: _retainedPaths,
       externalRetainedPaths: _externalRetainedPaths,
@@ -619,6 +908,7 @@ const filterConcreteProvenance = (
       returnedOrigins: _returnedOrigins,
       returnedBorrowedOrigins: _returnedBorrowedOrigins,
       returnedSharedOrigins: _returnedSharedOrigins,
+      returnedTypeMatchingOrigins: _returnedConditions,
       ...rest
     } = parameter;
     const retained = retainedPaths.length > 0;
@@ -638,7 +928,9 @@ const filterConcreteProvenance = (
       }): boolean =>
         returnedOrigins?.some(
           (candidate) =>
-            JSON.stringify(candidate) === JSON.stringify(origin),
+            JSON.stringify(candidate.source) ===
+              JSON.stringify(origin.source) &&
+            JSON.stringify(candidate.result) === JSON.stringify(origin.result),
         ) ?? false;
       return {
         ...rest,
@@ -661,6 +953,12 @@ const filterConcreteProvenance = (
           ? {
               returnedSharedOrigins:
                 parameter.returnedSharedOrigins.filter(matchesReturned),
+            }
+          : {}),
+        ...(parameter.returnedTypeMatchingOrigins
+          ? {
+              returnedTypeMatchingOrigins:
+                parameter.returnedTypeMatchingOrigins.filter(matchesReturned),
             }
           : {}),
       };
@@ -870,8 +1168,7 @@ export const resolveBorrowCall = (
     preferSymbolic,
   );
   const opaque = opaqueCallableFor(expr, ctx);
-  const intrinsicArguments =
-    typedArguments.arguments ?? rawArgumentsFor(expr);
+  const intrinsicArguments = typedArguments.arguments ?? rawArgumentsFor(expr);
   const contracts = entries.flatMap((entry) => {
     if (entry.contract) {
       return [entry.contract];
@@ -981,9 +1278,12 @@ export const resolveBorrowCall = (
     (targets.length === 0 || direct
       ? argumentsFor(expr, signature)
       : rawArgumentsFor(expr));
-  const contract = mergedContract
+  const specializedContract = mergedContract
+    ? specializeConditionalContract(mergedContract, expr, arguments_, ctx)
+    : undefined;
+  const contract = specializedContract
     ? filterConcreteProvenance(
-        mergedContract,
+        specializedContract,
         expressionTypeFor(expr.id, ctx),
         arguments_,
         ctx,

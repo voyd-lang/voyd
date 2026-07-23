@@ -21,7 +21,11 @@ import type {
   PlaceProjection,
   ReturnedBorrowOrigin,
 } from "./model.js";
-import { mergeCallableBorrowContracts } from "./model.js";
+import {
+  mergeCallableBorrowContracts,
+  projectionsOverlap,
+  translateProjectionPath,
+} from "./model.js";
 import type { BorrowingDependency } from "./dependency.js";
 import {
   resolveBorrowCall,
@@ -540,7 +544,7 @@ const returnedPlacesForCall = (
       }
       const origins = returnedOrigins(parameter);
       return origins.flatMap((origin) => {
-        const translated = translateResultProjection({
+        const translated = translateProjectionPath({
           result: origin.result,
           source: origin.source,
           requested,
@@ -585,8 +589,7 @@ const expressionReturnsDetachedSharedValue = (
           resultOrigins.every(
             (origin) =>
               parameter.returnedSharedOrigins?.some(
-                (shared) =>
-                  JSON.stringify(shared) === JSON.stringify(origin),
+                (shared) => JSON.stringify(shared) === JSON.stringify(origin),
               ) === true,
           )
         );
@@ -599,9 +602,7 @@ const expressionReturnsDetachedSharedValue = (
   if (expr.exprKind === "if" || expr.exprKind === "cond") {
     const values = [
       ...expr.branches.map((branch) => branch.value),
-      ...(typeof expr.defaultBranch === "number"
-        ? [expr.defaultBranch]
-        : []),
+      ...(typeof expr.defaultBranch === "number" ? [expr.defaultBranch] : []),
     ];
     return (
       values.length > 0 &&
@@ -617,27 +618,6 @@ const expressionReturnsDetachedSharedValue = (
     );
   }
   return false;
-};
-
-const translateResultProjection = ({
-  result,
-  source,
-  requested,
-}: {
-  result: readonly PlaceProjection[];
-  source: readonly PlaceProjection[];
-  requested: readonly PlaceProjection[];
-}): readonly PlaceProjection[] | undefined => {
-  const common = Math.min(result.length, requested.length);
-  for (let index = 0; index < common; index += 1) {
-    if (JSON.stringify(result[index]) !== JSON.stringify(requested[index])) {
-      return undefined;
-    }
-  }
-  if (requested.length < result.length) {
-    return source;
-  }
-  return [...source, ...requested.slice(result.length)];
 };
 
 function projectedReturnedPlaces(
@@ -670,7 +650,7 @@ function projectedReturnedPlaces(
       if (!alias.resultProjections) {
         return [requested.reduce(appendProjection, alias.place)];
       }
-      const translated = translateResultProjection({
+      const translated = translateProjectionPath({
         result: alias.resultProjections,
         source: [],
         requested,
@@ -813,10 +793,7 @@ function recordExpressionUse(
     return;
   }
   const byEvent = ctx.usePlaces.get(symbol) ?? new Map();
-  byEvent.set(
-    event,
-    uniquePlaces([...(byEvent.get(event) ?? []), ...places]),
-  );
+  byEvent.set(event, uniquePlaces([...(byEvent.get(event) ?? []), ...places]));
   ctx.usePlaces.set(symbol, byEvent);
 }
 
@@ -989,20 +966,10 @@ const aggregateOriginsOfExpression = (
     return uniqueAggregateOrigins(
       aggregateOriginsOfExpression(expr.target, ctx, new Set(seen)).flatMap(
         (origin) => {
-          const [next, ...remaining] = origin.resultProjections;
-          if (
-            !next ||
-            JSON.stringify(next) !== JSON.stringify(requested) ||
-            remaining.length === 0
-          ) {
-            return [];
-          }
-          return [
-            {
-              place: origin.place,
-              resultProjections: remaining,
-            },
-          ];
+          const projected = projectAggregateOrigin(origin, requested);
+          return projected && projected.resultProjections.length > 0
+            ? [projected]
+            : [];
         },
       ),
     );
@@ -1038,32 +1005,19 @@ const aggregateOriginsOfExpression = (
       }
       const destinationPath = transfer.destinationPath ?? [];
       const returnedOrigins =
-        destination.returnedOrigins &&
-        destination.returnedOrigins.length > 0
+        destination.returnedOrigins && destination.returnedOrigins.length > 0
           ? destination.returnedOrigins
-          : (
-              destination.returnedPaths &&
-              destination.returnedPaths.length > 0
-                ? destination.returnedPaths
-                : [[]]
+          : (destination.returnedPaths && destination.returnedPaths.length > 0
+              ? destination.returnedPaths
+              : [[]]
             ).map((source) => ({ source, result: [] }));
       const resultPaths = returnedOrigins.flatMap((origin) => {
-        if (
-          origin.source.length > destinationPath.length ||
-          !origin.source.every(
-            (projection, index) =>
-              JSON.stringify(projection) ===
-              JSON.stringify(destinationPath[index]),
-          )
-        ) {
-          return [];
-        }
-        return [
-          [
-            ...origin.result,
-            ...destinationPath.slice(origin.source.length),
-          ],
-        ];
+        const translated = translateProjectionPath({
+          result: origin.source,
+          source: origin.result,
+          requested: destinationPath,
+        });
+        return translated ? [translated] : [];
       });
       return placesAtProjection(
         actual,
@@ -1077,9 +1031,10 @@ const aggregateOriginsOfExpression = (
         })),
       );
     });
-    return uniqueAggregateOrigins(
-      [...(returned ?? []), ...(transferred ?? [])],
-    );
+    return uniqueAggregateOrigins([
+      ...(returned ?? []),
+      ...(transferred ?? []),
+    ]);
   }
   if (expr?.exprKind === "identifier") {
     const event = ctx.events.get(expr.id);
@@ -1236,25 +1191,25 @@ const isAggregateExpression = (
   return false;
 };
 
-const projectionsEqual = (
-  left: PlaceProjection,
-  right: PlaceProjection,
-): boolean => JSON.stringify(left) === JSON.stringify(right);
-
 const projectAggregateOrigin = (
   origin: AggregateOrigin,
   projection: PlaceProjection,
 ): AggregateOrigin | undefined => {
-  const [next, ...remaining] = origin.resultProjections;
-  if (!next) {
-    return {
-      place: appendProjection(origin.place, projection),
-      resultProjections: [],
-    };
+  const translated = translateProjectionPath({
+    result: origin.resultProjections,
+    source: origin.place.projections,
+    requested: [projection],
+  });
+  if (!translated) {
+    return undefined;
   }
-  return projectionsEqual(next, projection)
-    ? { place: origin.place, resultProjections: remaining }
-    : undefined;
+  return {
+    place: { root: origin.place.root, projections: translated },
+    resultProjections:
+      origin.resultProjections.length > 1
+        ? origin.resultProjections.slice(1)
+        : [],
+  };
 };
 
 const bindPatternAggregateOrigin = ({
@@ -1759,10 +1714,7 @@ const scanExpression = (
           );
           const event = eventFor(statement.span, scan, ctx);
           const returnsDetachedSharedValue =
-            expressionReturnsDetachedSharedValue(
-              statement.initializer,
-              ctx,
-            );
+            expressionReturnsDetachedSharedValue(statement.initializer, ctx);
           const createsMutableBinding =
             statement.mutable ||
             statement.pattern.bindingKind === "mutable-ref";
@@ -1777,9 +1729,7 @@ const scanExpression = (
             bindPatternPlaces({
               pattern: statement.pattern,
               source,
-              mutable:
-                !returnsDetachedSharedValue &&
-                createsMutableBinding,
+              mutable: !returnsDetachedSharedValue && createsMutableBinding,
               span: statement.span,
               event,
               ctx,
@@ -1793,10 +1743,7 @@ const scanExpression = (
           } else {
             sources.forEach(bind);
           }
-          if (
-            returnsDetachedSharedValue &&
-            createsMutableBinding
-          ) {
+          if (returnsDetachedSharedValue && createsMutableBinding) {
             patternSymbols(statement.pattern).forEach((symbol) =>
               ctx.aliases.set(symbol, {
                 symbol,
@@ -2094,24 +2041,7 @@ const placeOverlaps = (left: BorrowPlace, right: BorrowPlace): boolean => {
   for (let index = 0; index < length; index += 1) {
     const a = left.projections[index]!;
     const b = right.projections[index]!;
-    if (a.kind !== b.kind) {
-      return true;
-    }
-    if (a.kind === "field" && b.kind === "field" && a.name !== b.name) {
-      return false;
-    }
-    if (a.kind === "tuple" && b.kind === "tuple" && a.index !== b.index) {
-      return false;
-    }
-    if (
-      a.kind === "index" &&
-      b.kind === "index" &&
-      a.stable &&
-      b.stable &&
-      a.constant !== undefined &&
-      b.constant !== undefined &&
-      a.constant !== b.constant
-    ) {
+    if (!projectionsOverlap(a, b)) {
       return false;
     }
   }
@@ -2162,6 +2092,12 @@ const placeName = (place: BorrowPlace, ctx: BodyContext): string => {
     }
     if (projection.kind === "tuple") {
       return `${name}.${projection.index}`;
+    }
+    if (projection.kind === "discriminant") {
+      return `${name}.<tag>`;
+    }
+    if (projection.kind === "identity") {
+      return `${name}.<identity>`;
     }
     return `${name}[${projection.constant ?? "?"}]`;
   }, root);
@@ -2596,7 +2532,7 @@ const escapedPlacesIn = (
         }
         const origins = returnedOrigins(parameter);
         origins.forEach((origin) => {
-          const translated = translateResultProjection({
+          const translated = translateProjectionPath({
             result: origin.result,
             source: origin.source,
             requested,
@@ -2778,7 +2714,7 @@ const escapeExpression = ({
       if (!alias.resultProjections) {
         return [path.reduce(appendProjection, alias.place)];
       }
-      const translated = translateResultProjection({
+      const translated = translateProjectionPath({
         result: alias.resultProjections,
         source: [],
         requested: path,
@@ -3221,7 +3157,7 @@ const callableValueAtPath = (
                 : [[]]
               ).map((source) => ({ source, result: [] }));
         return origins.flatMap((origin) => {
-          const translated = translateResultProjection({
+          const translated = translateProjectionPath({
             result: origin.result,
             source: origin.source,
             requested: path.map((name) => ({

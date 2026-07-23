@@ -6,7 +6,68 @@ export type BorrowAccessMode = "owned" | "shared" | "mutable";
 export type PlaceProjection =
   | { kind: "field"; name: string }
   | { kind: "tuple"; index: number }
-  | { kind: "index"; constant?: number; stable: boolean };
+  | { kind: "index"; constant?: number; stable: boolean }
+  | { kind: "discriminant" }
+  | { kind: "identity" };
+
+export const projectionsOverlap = (
+  left: PlaceProjection,
+  right: PlaceProjection,
+): boolean => {
+  if (left.kind !== right.kind) {
+    if (
+      left.kind === "discriminant" ||
+      right.kind === "discriminant" ||
+      left.kind === "identity" ||
+      right.kind === "identity"
+    ) {
+      return false;
+    }
+    return true;
+  }
+  if (
+    (left.kind === "discriminant" && right.kind === "discriminant") ||
+    (left.kind === "identity" && right.kind === "identity")
+  ) {
+    return true;
+  }
+  if (left.kind === "field" && right.kind === "field") {
+    return left.name === right.name;
+  }
+  if (left.kind === "tuple" && right.kind === "tuple") {
+    return left.index === right.index;
+  }
+  if (left.kind !== "index" || right.kind !== "index") {
+    return true;
+  }
+  return !(
+    left.stable &&
+    right.stable &&
+    left.constant !== undefined &&
+    right.constant !== undefined &&
+    left.constant !== right.constant
+  );
+};
+
+export const translateProjectionPath = ({
+  result,
+  source,
+  requested,
+}: {
+  result: readonly PlaceProjection[];
+  source: readonly PlaceProjection[];
+  requested: readonly PlaceProjection[];
+}): readonly PlaceProjection[] | undefined => {
+  const common = Math.min(result.length, requested.length);
+  for (let index = 0; index < common; index += 1) {
+    if (!projectionsOverlap(result[index]!, requested[index]!)) {
+      return undefined;
+    }
+  }
+  return requested.length < result.length
+    ? source
+    : [...source, ...requested.slice(result.length)];
+};
 
 export type CallableParameterBorrowContract = {
   access: BorrowAccessMode;
@@ -20,6 +81,8 @@ export type CallableParameterBorrowContract = {
   returnedOrigins?: readonly ReturnedBorrowOrigin[];
   returnedBorrowedOrigins?: readonly ReturnedBorrowOrigin[];
   returnedSharedOrigins?: readonly ReturnedBorrowOrigin[];
+  returnedTypeMatchingOrigins?: readonly ReturnedTypeMatchingOrigin[];
+  accessIfResultTypeDiffers?: BorrowTypeComparison;
   invalidatedPaths?: readonly (readonly PlaceProjection[])[];
   defaultOrigins?: readonly number[];
 };
@@ -41,6 +104,24 @@ export type ReturnedBorrowOrigin = {
   source: readonly PlaceProjection[];
   result: readonly PlaceProjection[];
 };
+
+export type ReturnedTypeMatchingOrigin = ReturnedBorrowOrigin & {
+  conditionId: string;
+};
+
+export type BorrowTypeComparison = {
+  conditionId: string;
+  parameter: number;
+  sourcePath: readonly PlaceProjection[];
+  resultPath: readonly PlaceProjection[];
+};
+
+export const borrowTypeConditionId = ({
+  parameter,
+  sourcePath,
+  resultPath,
+}: Omit<BorrowTypeComparison, "conditionId">): string =>
+  JSON.stringify([parameter, sourcePath, resultPath]);
 
 export type ScopedCallbackBorrowContract = {
   callbackParameter: number;
@@ -132,11 +213,40 @@ export const mergeCallableBorrowContracts = (
       const invalidatedPaths = intersectProjectionPaths(
         parameters.map((parameter) => parameter.invalidatedPaths ?? []),
       );
+      const accessedParameters = parameters.filter(
+        (parameter) =>
+          parameter.access !== "owned" &&
+          (parameter.accessPaths ?? [[]]).length > 0,
+      );
+      const accessConditions = new Map(
+        accessedParameters.flatMap((parameter) =>
+          parameter.accessIfResultTypeDiffers
+            ? [
+                [
+                  JSON.stringify(parameter.accessIfResultTypeDiffers),
+                  parameter.accessIfResultTypeDiffers,
+                ] as const,
+              ]
+            : [],
+        ),
+      );
+      const conditionalAccess =
+        accessedParameters.length > 0 &&
+        accessConditions.size === 1 &&
+        accessedParameters.every(
+          (parameter) => parameter.accessIfResultTypeDiffers !== undefined,
+        )
+          ? Array.from(accessConditions.values())[0]
+          : undefined;
       return {
         access,
         ...mergeProjectionPaths(parameters, "accessPaths"),
         retained: parameters.some((parameter) => parameter.retained),
         returned: parameters.some((parameter) => parameter.returned),
+        ...mergeReturnedTypeMatchingOrigins(parameters, index),
+        ...(conditionalAccess
+          ? { accessIfResultTypeDiffers: conditionalAccess }
+          : {}),
         ...mergeProjectionPaths(parameters, "retainedPaths"),
         ...mergeProjectionPaths(parameters, "externalRetainedPaths"),
         ...mergeProjectionPaths(parameters, "borrowedRetainedPaths"),
@@ -270,6 +380,56 @@ const mergeReturnedBorrowedOrigins = (
   return origins.length > 0 ? { returnedBorrowedOrigins: origins } : {};
 };
 
+const mergeReturnedTypeMatchingOrigins = (
+  parameters: readonly CallableParameterBorrowContract[],
+  parameter: number,
+): Partial<CallableParameterBorrowContract> => {
+  const returnedOrigins = parameters.flatMap(
+    (parameter) => parameter.returnedOrigins ?? [],
+  );
+  const origins = Array.from(
+    new Map(
+      returnedOrigins
+        .flatMap((origin) => {
+          const providers = parameters.filter((parameter) =>
+            parameter.returnedOrigins?.some(
+              (candidate) =>
+                JSON.stringify(candidate) === JSON.stringify(origin),
+            ),
+          );
+          const conditions = providers.flatMap(
+            (parameter) =>
+              parameter.returnedTypeMatchingOrigins?.filter(
+                (candidate) =>
+                  JSON.stringify(candidate.source) ===
+                    JSON.stringify(origin.source) &&
+                  JSON.stringify(candidate.result) ===
+                    JSON.stringify(origin.result),
+              ) ?? [],
+          );
+          if (
+            providers.length === 0 ||
+            conditions.length !== providers.length
+          ) {
+            return [];
+          }
+          return [
+            {
+              ...origin,
+              conditionId: borrowTypeConditionId({
+                parameter,
+                sourcePath: origin.source,
+                resultPath: origin.result,
+              }),
+            },
+          ];
+        })
+        .map((origin) => [JSON.stringify(origin), origin]),
+    ).values(),
+  );
+  return origins.length > 0 ? { returnedTypeMatchingOrigins: origins } : {};
+};
+
 const mergeProjectionPaths = (
   parameters: readonly CallableParameterBorrowContract[],
   key:
@@ -287,10 +447,10 @@ const mergeProjectionPaths = (
             key === "accessPaths"
               ? parameter.access !== "owned"
               : key === "retainedPaths"
-              ? parameter.retained
-              : key === "returnedPaths"
-                ? parameter.returned
-                : parameter[key] !== undefined;
+                ? parameter.retained
+                : key === "returnedPaths"
+                  ? parameter.returned
+                  : parameter[key] !== undefined;
           if (!active) {
             return [];
           }

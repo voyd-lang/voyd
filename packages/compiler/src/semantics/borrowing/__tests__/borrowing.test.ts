@@ -20,11 +20,16 @@ const analyze = (source: string) => {
     !source.includes("__array_set(") &&
     !source.includes("__array_copy(") &&
     !source.includes("__array_get(") &&
+    !source.includes("__array_new_fixed(") &&
+    !source.includes("__array_len(") &&
+    !source.includes("__ref_is_null(") &&
     !source.includes("__retain_callback") &&
     !source.includes("__boundary_retain_callback") &&
     !source.includes("__render_retain_callback") &&
     !source.includes("__task_spawn") &&
-    !source.includes("__task_detach")
+    !source.includes("__task_detach") &&
+    !source.includes("__boundary_value_to_msgpack") &&
+    !source.includes("__boundary_msgpack_to_value")
   ) {
     return semanticsPipeline(ast);
   }
@@ -115,9 +120,7 @@ describe("borrow checking", () => {
     const transfers = Array.from({ length: 33 }, (_entry, index) => ({
       sourceParameter: 1,
       destinationParameter: 0,
-      sourcePath: [
-        { kind: "field" as const, name: `source_${index}` },
-      ],
+      sourcePath: [{ kind: "field" as const, name: `source_${index}` }],
       destinationPath: [
         { kind: "field" as const, name: `destination_${index}` },
       ],
@@ -670,6 +673,34 @@ fn invalid(~value: Box) -> i32
     ).toContain("TY0048");
   });
 
+  it("does not treat aggregate storage as reading stored references", () => {
+    expect(() =>
+      analyze(`${prelude}
+obj Holder { value: Box }
+
+fn aggregate_without_read(value: Box, ~same: Box) -> void
+  let fixed = __array_new_fixed(value)
+  let object = Holder { value }
+  mutate(~same)
+
+fn valid(~value: Box) -> void
+  aggregate_without_read(value, ~value)
+
+fn count_stored(value: Box) -> i32
+  __array_len(__array_new_fixed(value))
+
+fn inspect_identity(value: Box) -> bool
+  __ref_is_null(__array_new_fixed(value))
+
+fn valid_metadata_reads(~value: Box) -> i32
+  let count = count_stored(value)
+  let ignored = inspect_identity(value)
+  mutate(~value)
+  count
+`),
+    ).not.toThrow();
+  });
+
   it("keeps distinct fixed-array literal elements disjoint", () => {
     expect(() =>
       analyze(`${prelude}
@@ -685,6 +716,527 @@ fn valid(~left: Box, ~right: Box) -> i32
   read_second(values)
 `),
     ).not.toThrow();
+  });
+
+  it("keeps dynamic fixed-array reads connected to every possible input", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn fixed(left: Box, right: Box) -> FixedArray<Box>
+  __array_new_fixed(left, right)
+
+fn read_dynamic(values: FixedArray<Box>, index: i32) -> i32
+  __array_get(values, index).value
+
+fn read_fixed_inputs(left: Box, right: Box, index: i32) -> i32
+  read_dynamic(fixed(left, right), index)
+
+fn inspect(
+  left: Box,
+  right: Box,
+  index: i32,
+  ~same: Box
+) -> i32
+  let observed = read_fixed_inputs(left, right, index)
+  mutate(~same)
+  observed
+
+fn invalid(~left: Box, right: Box, index: i32) -> i32
+  inspect(left, right, index, ~left)
+`),
+    ).toContain("TY0048");
+
+    expect(
+      diagnosticCodes(`${prelude}
+fn fixed(left: Box, right: Box) -> FixedArray<Box>
+  __array_new_fixed(left, right)
+
+fn invalid_direct(~left: Box, right: Box, index: i32) -> i32
+  let values = fixed(left, right)
+  mutate(~left)
+  __array_get(values, index).value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("records fixed-array length inspection as shared access", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn fixed_length(values: FixedArray<Box>) -> i32
+  __array_len(values)
+
+fn replace_first(~values: FixedArray<Box>) -> void
+  __array_set(values, 0, Box { value: 1 })
+  void
+
+fn inspect(values: FixedArray<Box>, ~same: FixedArray<Box>) -> i32
+  let length = fixed_length(values)
+  replace_first(~same)
+  length
+
+fn invalid(~values: FixedArray<Box>) -> i32
+  inspect(values, ~values)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("records reference identity inspection as shared access", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn is_null(value: Box) -> bool
+  __ref_is_null(value)
+
+fn inspect(value: Box, ~same: Box) -> bool
+  let result = is_null(value)
+  mutate(~same)
+  result
+
+fn invalid(~value: Box) -> bool
+  inspect(value, ~value)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("does not retain inputs through detached boundary conversion results", () => {
+    expect(() =>
+      analyze(`${prelude}
+obj Packed { value: i32 }
+
+@intrinsic(name: "__boundary_value_to_msgpack")
+fn pack<T>(value: T) -> Packed
+  __boundary_value_to_msgpack(value)
+
+fn read_packed(value: Packed) -> i32
+  value.value
+
+fn valid(~value: Box) -> i32
+  let packed = pack(value)
+  mutate(~value)
+  read_packed(packed)
+`),
+    ).not.toThrow();
+  });
+
+  it("returns only matching source values through identity conversion", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Packed { value: i32 }
+
+@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
+fn convert<T, U>(source: U, value: Packed) -> T
+  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
+
+fn maybe_identity<T, U>(source: U, packed: Packed) -> T
+  convert<T, U>(source, packed)
+
+fn read_identity(source: Box, packed: Packed) -> Box
+  maybe_identity<Box, Box>(source, packed)
+
+fn invalid(~value: Box, packed: Packed) -> i32
+  let identity = read_identity(value, packed)
+  mutate(~value)
+  read(identity)
+`),
+    ).toContain("TY0048");
+
+    expect(() =>
+      analyze(`${prelude}
+obj Packed { value: i32 }
+obj Decoded { value: i32 }
+
+@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
+fn convert<T, U>(source: U, value: Packed) -> T
+  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
+
+fn maybe_identity<T, U>(source: U, packed: Packed) -> T
+  convert<T, U>(source, packed)
+
+fn decode(source: Box, packed: Packed) -> Decoded
+  maybe_identity<Decoded, Box>(source, packed)
+
+fn read_decoded(value: Decoded) -> i32
+  value.value
+
+fn valid(~value: Box, packed: Packed) -> i32
+  let decoded = decode(value, packed)
+  mutate(~value)
+  read_decoded(decoded)
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj Packed { value: i32 }
+
+@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
+fn convert<T, U>(source: U, value: Packed) -> T
+  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
+
+fn maybe_identity<T, U>(source: U, packed: Packed) -> T
+  convert<T, U>(source, packed)
+
+fn mutate_packed(~value: Packed) -> void
+  value.value = value.value + 1
+
+fn choose(
+  source: Box,
+  packed: Packed,
+  ~same: Packed
+) -> Box
+  let chosen = maybe_identity<Box, Box>(source, packed)
+  mutate_packed(~same)
+  chosen
+
+fn valid(source: Box, ~packed: Packed) -> Box
+  choose(source, packed, ~packed)
+`),
+    ).not.toThrow();
+  });
+
+  it("preserves conditional identity through aggregate and source projections", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Packed { value: i32 }
+obj Holder<T> { value: T }
+obj Source<T> { value: T }
+
+@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
+fn convert<T, U>(source: U, value: Packed) -> T
+  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
+
+fn wrap<T, U>(source: U, packed: Packed) -> Holder<T>
+  Holder<T> { value: convert<T, U>(source, packed) }
+
+fn unwrap<T, U>(source: Source<U>, packed: Packed) -> T
+  convert<T, U>(source.value, packed)
+
+fn invalid_wrapped(~value: Box, packed: Packed) -> i32
+  let holder = wrap<Box, Box>(value, packed)
+  mutate(~value)
+  holder.value.value
+
+fn invalid_projected(~source: Source<Box>, packed: Packed) -> i32
+  let alias = unwrap<Box, Box>(source, packed)
+  mutate(~source.value)
+  alias.value
+`),
+    ).toContain("TY0048");
+
+    expect(() =>
+      analyze(`${prelude}
+obj Packed { value: i32 }
+obj Decoded { value: i32 }
+obj Holder<T> { value: T }
+
+@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
+fn convert<T, U>(source: U, value: Packed) -> T
+  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
+
+fn wrap<T, U>(source: U, packed: Packed) -> Holder<T>
+  Holder<T> { value: convert<T, U>(source, packed) }
+
+fn read_decoded(value: Decoded) -> i32
+  value.value
+
+fn valid(~value: Box, packed: Packed) -> i32
+  let holder = wrap<Decoded, Box>(value, packed)
+  mutate(~value)
+  read_decoded(holder.value)
+`),
+    ).not.toThrow();
+  });
+
+  it("keeps conditional packed access when its decoded value is not returned", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Packed { value: i32 }
+obj Decoded { value: i32 }
+
+@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
+fn convert<T, U>(source: U, value: Packed) -> T
+  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
+
+fn mutate_packed(~value: Packed) -> void
+  value.value = value.value + 1
+
+fn decode_and_return_source(
+  source: Box,
+  packed: Packed,
+  ~same: Packed
+) -> Box
+  let decoded = convert<Decoded, Box>(source, packed)
+  let observed = decoded.value
+  mutate_packed(~same)
+  source
+
+fn invalid(source: Box, ~packed: Packed) -> Box
+  decode_and_return_source(source, packed, ~packed)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("does not pair access with an unrelated conditional return", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Packed { value: i32 }
+obj Decoded { value: i32 }
+
+@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
+fn convert<T, U>(source: U, value: Packed) -> T
+  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
+
+fn mutate_packed(~value: Packed) -> void
+  value.value = value.value + 1
+
+fn convert_twice<T, U>(
+  source: U,
+  packed_a: Packed,
+  packed_b: Packed,
+  ~same_a: Packed
+) -> T
+  let decoded = convert<Decoded, U>(source, packed_a)
+  let observed = decoded.value
+  let result = convert<T, U>(source, packed_b)
+  mutate_packed(~same_a)
+  result
+
+fn invalid(
+  source: Box,
+  ~packed_a: Packed,
+  packed_b: Packed
+) -> Box
+  convert_twice<Box, Box>(
+    source,
+    packed_a,
+    packed_b,
+    ~packed_a
+  )
+`),
+    ).toContain("TY0048");
+  });
+
+  it("converges conditional contracts through recursive wrappers", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Packed { value: i32 }
+
+@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
+fn convert<T, U>(source: U, value: Packed) -> T
+  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
+
+fn recursive_convert<T, U>(
+  source: U,
+  packed: Packed,
+  recurse: bool
+) -> T
+  if recurse:
+    recursive_convert<T, U>(source, packed, false)
+  else:
+    convert<T, U>(source, packed)
+
+fn invalid(~source: Box, packed: Packed) -> i32
+  let alias = recursive_convert<Box, Box>(source, packed, true)
+  mutate(~source)
+  read(alias)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("keeps an origin unconditional when any return path is unconditional", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Other { value: i32 }
+obj Packed { value: i32 }
+type Choice = Box | Other
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
+fn convert<T, U>(source: U, value: Packed) -> T
+  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
+
+fn maybe(
+  source: Box,
+  packed: Packed,
+  converted: bool
+) -> Choice
+  if converted:
+    convert<Choice, Box>(source, packed)
+  else:
+    source
+
+fn read_choice(value: Choice) -> i32
+  match(value)
+    Box:
+      value.value
+    Other:
+      value.value
+
+fn invalid(~source: Box, packed: Packed) -> i32
+  let alias = maybe(source, packed, false)
+  mutate(~source)
+  read_choice(alias)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("preserves identity provenance through boundary conversion wrappers", () => {
+    const source = `
+obj Packed { value: i32 }
+
+@intrinsic(name: "__boundary_value_to_msgpack")
+fn pack<T>(value: T) -> Packed
+  __boundary_value_to_msgpack(value)
+
+@intrinsic(name: "__boundary_msgpack_to_value")
+fn unpack<T>(value: Packed) -> T
+  __boundary_msgpack_to_value<T>(value)
+
+fn wrapped_pack<T>(value: T) -> Packed
+  pack(value)
+
+fn wrapped_unpack<T>(value: Packed) -> T
+  unpack<T>(value)
+
+fn mutate_packed(~value: Packed) -> void
+  value.value = value.value + 1
+
+fn read_packed(value: Packed) -> i32
+  value.value
+
+fn invalid_pack(~value: Packed) -> i32
+  let alias = wrapped_pack<Packed>(value)
+  mutate_packed(~value)
+  read_packed(alias)
+
+fn invalid_unpack(~value: Packed) -> i32
+  let alias = wrapped_unpack<Packed>(value)
+  mutate_packed(~value)
+  read_packed(alias)
+`;
+    expect(
+      diagnosticCodes(source).filter((code) => code === "TY0048"),
+    ).toHaveLength(2);
+  });
+
+  it("records union discriminant inspection without reading payloads", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj First { value: Box }
+obj Second { value: Box }
+type Choice = First | Second
+
+fn tag(value: Choice) -> i32
+  match(value)
+    First:
+      1
+    Second:
+      2
+
+fn mutate_choice(~value: Choice) -> void
+  void
+
+fn inspect(value: Choice, ~same: Choice) -> i32
+  let result = tag(value)
+  mutate_choice(~same)
+  result
+
+fn invalid(~value: Choice) -> i32
+  inspect(value, ~value)
+`),
+    ).toContain("TY0048");
+
+    expect(() =>
+      analyze(`${prelude}
+obj First { value: Box }
+obj Second { value: Box }
+type Choice = First | Second
+
+fn tag(value: Choice) -> i32
+  match(value)
+    First:
+      1
+    Second:
+      2
+
+fn valid(~value: Box) -> i32
+  let choice: Choice = First { value }
+  let result = tag(choice)
+  mutate(~value)
+  result
+`),
+    ).not.toThrow();
+  });
+
+  it("records scalar reads through nested destructuring", () => {
+    expect(
+      diagnosticCodes(`
+obj Inner { value: i32 }
+obj Container { inner: Inner, values: (i32, i32) }
+
+fn read_nested(container: Container) -> i32
+  let { inner: { value: result } } = container
+  result
+
+fn read_tuple(container: Container) -> i32
+  let { values: (result, ignored) } = container
+  result
+
+fn mutate_container(~container: Container) -> void
+  void
+
+fn inspect_nested(
+  container: Container,
+  ~same: Container
+) -> i32
+  let result = read_nested(container)
+  mutate_container(~same)
+  result
+
+fn inspect_tuple(
+  container: Container,
+  ~same: Container
+) -> i32
+  let result = read_tuple(container)
+  mutate_container(~same)
+  result
+
+fn invalid_nested(~container: Container) -> i32
+  inspect_nested(container, ~container)
+
+fn invalid_tuple(~container: Container) -> i32
+  inspect_tuple(container, ~container)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("records destructured scalar reads captured by closures", () => {
+    expect(
+      diagnosticCodes(`
+obj Inner { value: i32 }
+obj Container { inner: Inner }
+
+fn read_captured(container: Container) -> i32
+  let { inner: { value: result } } = container
+  let read = () => result
+  read()
+
+fn mutate_container(~container: Container) -> void
+  void
+
+fn inspect(container: Container, ~same: Container) -> i32
+  let result = read_captured(container)
+  mutate_container(~same)
+  result
+
+fn invalid(~container: Container) -> i32
+  inspect(container, ~container)
+`),
+    ).toContain("TY0048");
   });
 
   it("does not borrow through unused shared parameters", () => {
@@ -774,6 +1326,34 @@ fn invalid(
   mutate_array(~values)
 `),
     ).toContain("TY0049");
+  });
+
+  it("records source reads through array-copy options", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn copy_and_mutate(
+  source: FixedArray<Box>,
+  ~same: FixedArray<Box>
+) -> void
+  let destination = __array_new<Box>(1)
+  __array_copy(destination, {
+    from: source,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  mutate_array(~same)
+
+fn mutate_array(~values: FixedArray<Box>) -> void
+  __array_set(values, 0, Box { value: 1 })
+  void
+
+fn invalid(~source: FixedArray<Box>) -> void
+  copy_and_mutate(source, ~source)
+`),
+    ).toContain("TY0048");
   });
 
   it("materializes scalar values stored through array intrinsics", () => {
