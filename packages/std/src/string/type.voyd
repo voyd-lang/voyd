@@ -5,7 +5,6 @@
 //! offsets, with helpers that keep movement on rune or grapheme boundaries.
 
 use std::array::{ Array, new_array_unchecked }
-use std::shared_cell::SharedCell
 use std::fixed_array::fns::{ new_fixed_array }
 use std::string::index::{ make_string_index }
 use std::traits::eq::Eq
@@ -1268,7 +1267,8 @@ obj Utf8Read {
 obj StringIterator {
   source: FixedArray<i32>,
   byte_count: i32,
-  state: SharedCell<StringIteratorState>
+  // Private leaf state keeps returned values independent of a mutable receiver.
+  cursor: FixedArray<i32>
 }
 
 obj StringGraphemeSequence {
@@ -1277,11 +1277,9 @@ obj StringGraphemeSequence {
 
 obj StringGraphemeIterator {
   source: String,
-  state: SharedCell<StringIteratorState>
-}
-
-obj StringIteratorState {
-  index: i32
+  // Grapheme slices borrow `source`, so the cursor cannot live directly on a
+  // mutably borrowed iterator receiver.
+  cursor: FixedArray<i32>
 }
 
 impl Sequence<i32> for String
@@ -1290,44 +1288,42 @@ impl Sequence<i32> for String
     StringIterator {
       source: self.raw_bytes(),
       byte_count: self.byte_len(),
-      state: SharedCell(StringIteratorState { index: 0 })
+      cursor: new_fixed_array<i32>(1)
     }
 
 impl Iterator<i32> for StringIterator
   /// Returns the next item from the iterator.
   api fn next(self) -> Option<i32>
-    self.state.with_mut((~state) =>
-      if state.index >= self.byte_count:
-        return None {}
-      let read = decode_utf8_at(self.source, self.byte_count, state.index)
-      state.index = state.index + read.width
-      Some<i32> { value: read.codepoint }
-    )
+    let index = __array_get(self.cursor, 0)
+    if index >= self.byte_count:
+      return None {}
+    let read = decode_utf8_at(self.source, self.byte_count, index)
+    __array_set(self.cursor, 0, index + read.width)
+    Some<i32> { value: read.codepoint }
 
 impl Sequence<StringSlice> for StringGraphemeSequence
   /// Returns an iterator over values.
   api fn iter(self) -> Iterator<StringSlice>
     StringGraphemeIterator {
       source: self.source,
-      state: SharedCell(StringIteratorState { index: 0 })
+      cursor: new_fixed_array<i32>(1)
     }
 
 impl Iterator<StringSlice> for StringGraphemeIterator
   /// Returns the next item from the iterator.
   api fn next(self) -> Option<StringSlice>
-    self.state.with_mut((~state) =>
-      if state.index >= self.source.byte_len():
-        return None {}
-      let start = state.index
-      state.index = next_grapheme_boundary(
-        self.source.raw_bytes(),
-        self.source.byte_len(),
-        state.index
-      )
-      Some<StringSlice> {
-        value: new_string_slice(self.source, start, state.index - start)
-      }
+    let start = __array_get(self.cursor, 0)
+    if start >= self.source.byte_len():
+      return None {}
+    let end = next_grapheme_boundary(
+      self.source.raw_bytes(),
+      self.source.byte_len(),
+      start
     )
+    __array_set(self.cursor, 0, end)
+    Some<StringSlice> {
+      value: new_string_slice(self.source, start, end - start)
+    }
 
 fn decode_utf8_at(source: FixedArray<i32>, limit: i32, index: i32) -> Utf8Read
   if index < 0 or index >= limit:

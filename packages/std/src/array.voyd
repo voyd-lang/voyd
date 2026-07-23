@@ -6,7 +6,6 @@ use std::traits::sequence::all
 use std::optional::all
 use std::math::all
 use std::range::Range
-use std::shared_cell::SharedCell
 use std::subscript::{ SubscriptRead, SubscriptWrite }
 use std::traits::ord::{ Ordering, Less, Equal, Greater }
 
@@ -854,11 +853,9 @@ fn ref_is_null<T>(value: T) -> bool
 /// Internal iterator state for `Array::iter`.
 obj ArrayIterator<T> {
   array: Array<T>,
-  state: SharedCell<ArrayIteratorState>
-}
-
-obj ArrayIteratorState {
-  index: i32
+  // Private leaf state lets `next` return values derived from `array` without
+  // making the iterator receiver an escaping mutable borrow.
+  cursor: FixedArray<i32>
 }
 
 impl<T> Sequence<T> for Array<T>
@@ -866,20 +863,18 @@ impl<T> Sequence<T> for Array<T>
   api fn iter(self) -> Iterator<T>
     ArrayIterator<T> {
       array: self,
-      state: SharedCell(ArrayIteratorState { index: 0 })
+      cursor: new_fixed_array<i32>(1)
     }
 
 impl<T> Iterator<T> for ArrayIterator<T>
   /// Returns the next item from the iterator.
   api fn next(self) -> Option<T>
-    self.state.with_mut((~state) =>
-      if state.index >= self.array.len():
-        None {}
-      else:
-        let value = self.array.get(state.index)
-        state.index = state.index + 1
-        value
-    )
+    let index = __array_get(self.cursor, 0)
+    if index >= self.array.len():
+      return None {}
+    let value = self.array.get(index)
+    __array_set(self.cursor, 0, index + 1)
+    value
 
 impl<T> SubscriptRead<i32, Optional<T>> for Array<T>
   /// Returns the value addressed by subscript syntax.
