@@ -1373,6 +1373,20 @@ fn make() -> Callback
     ).toContain("TY0049");
   });
 
+  it("rejects mutable scalar captures without other outer mutations", () => {
+    expect(
+      diagnosticCodes(`
+type Callback = fn() : () -> i32
+
+fn make() -> Callback
+  var value = 0
+  () =>
+    value = value + 1
+    value
+`),
+    ).toContain("TY0049");
+  });
+
   it("rejects mutable captures in aggregates returned implicitly", () => {
     expect(
       diagnosticCodes(`${prelude}

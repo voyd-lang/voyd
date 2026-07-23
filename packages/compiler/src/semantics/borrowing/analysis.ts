@@ -137,14 +137,15 @@ const functionNeedsBorrowAnalysis = ({
     exprId: functionItem.body,
     hir,
     options: { skipLambdas: true },
-    onEnterPattern: (pattern) => {
-      if (pattern.bindingKind !== undefined && pattern.bindingKind !== "value") {
+    onEnterExpression: (exprId, expression) => {
+      if (
+        expression.exprKind === "lambda" &&
+        expression.captures.some((capture) => capture.mutable)
+      ) {
         hasBorrowOperation = true;
         hasReferenceState = true;
         return { stop: true };
       }
-    },
-    onEnterExpression: (exprId, expression) => {
       if (hasBorrowOperation && hasReferenceState) {
         return { stop: true };
       }
@@ -177,6 +178,13 @@ const functionNeedsBorrowAnalysis = ({
       }
       hasReferenceState = true;
       if (hasBorrowOperation) {
+        return { stop: true };
+      }
+    },
+    onEnterPattern: (pattern) => {
+      if (pattern.bindingKind !== undefined && pattern.bindingKind !== "value") {
+        hasBorrowOperation = true;
+        hasReferenceState = true;
         return { stop: true };
       }
     },
