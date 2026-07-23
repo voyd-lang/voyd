@@ -36,45 +36,96 @@ import {
   unboxSignatureSpillValue,
 } from "./signature-spill.js";
 
-export const declareLocalWithTypeId = (
-  symbol: SymbolId,
-  typeId: number,
-  ctx: CodegenContext,
-  fnCtx: FunctionContext
-): LocalBinding => {
+export type LocalStorageMode = "direct" | "addressable";
+
+export const declareLocal = ({
+  symbol,
+  typeId,
+  storage,
+  ctx,
+  fnCtx,
+}: {
+  symbol: SymbolId;
+  typeId?: number;
+  storage: LocalStorageMode;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): LocalBinding => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const resolvedTypeId =
+    typeId ?? getSymbolTypeId(symbol, ctx, typeInstanceId);
   const existing = fnCtx.bindings.get(symbol);
   if (existing) {
+    assertCompatibleLocalDeclaration({
+      binding: existing,
+      typeId: resolvedTypeId,
+      storage,
+      ctx,
+    });
     return existing;
   }
 
-  const binding = allocateAddressableLocal({
-    typeId,
-    ctx,
-    fnCtx,
+  const binding =
+    storage === "addressable"
+      ? allocateAddressableLocal({
+          typeId: resolvedTypeId,
+          ctx,
+          fnCtx,
+        })
+      : allocateTempLocal(
+          wasmTypeFor(resolvedTypeId, ctx),
+          fnCtx,
+          resolvedTypeId,
+          ctx
+        );
+  fnCtx.bindings.set(symbol, {
+    ...binding,
+    kind: "local",
+    typeId: resolvedTypeId,
   });
-  fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
   return binding;
 };
 
-export const declareLocal = (
-  symbol: SymbolId,
-  ctx: CodegenContext,
-  fnCtx: FunctionContext
-): LocalBinding => {
-  const existing = fnCtx.bindings.get(symbol);
-  if (existing) {
-    return existing;
+const assertCompatibleLocalDeclaration = ({
+  binding,
+  typeId,
+  storage,
+  ctx,
+}: {
+  binding: LocalBinding;
+  typeId: number;
+  storage: LocalStorageMode;
+  ctx: CodegenContext;
+}): void => {
+  const expectedType = wasmTypeFor(typeId, ctx);
+  if (binding.type !== expectedType) {
+    throw new Error(
+      `local binding ABI mismatch for type ${typeId}: expected ${expectedType}, found ${binding.type}`
+    );
   }
+  if (
+    storage === "addressable" &&
+    typeof getInlineHeapBoxType({ typeId, ctx }) === "number" &&
+    !bindingHasInlineStorageRef(binding, ctx)
+  ) {
+    throw new Error(`local binding for type ${typeId} is not addressable`);
+  }
+};
 
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const typeId = getSymbolTypeId(symbol, ctx, typeInstanceId);
-  const binding = allocateAddressableLocal({
-    typeId,
-    ctx,
-    fnCtx,
-  });
-  fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
-  return binding;
+const bindingHasInlineStorageRef = (
+  binding: LocalBinding,
+  ctx: CodegenContext
+): boolean => {
+  if (binding.kind === "storage-ref") {
+    return true;
+  }
+  if (binding.kind !== "local" && binding.kind !== "capture") {
+    return false;
+  }
+  return (
+    typeof binding.typeId === "number" &&
+    binding.storageType === getInlineHeapBoxType({ typeId: binding.typeId, ctx })
+  );
 };
 
 export const getRequiredBinding = (

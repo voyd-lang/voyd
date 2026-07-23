@@ -19,7 +19,6 @@ import {
 } from "../control-flow-stack.js";
 import {
   allocateTempLocal,
-  declareLocal,
   loadLocalValue,
   storeLocalValue,
 } from "../locals.js";
@@ -34,7 +33,10 @@ import {
   shouldInlineUnionLayout,
   wasmTypeFor,
 } from "../types.js";
-import { compilePatternInitializationFromValue } from "../patterns.js";
+import {
+  compilePatternInitializationFromValue,
+  declareIdentifierPatternLocal,
+} from "../patterns.js";
 import { asStatement, coerceToBinaryenType } from "./utils.js";
 import {
   coerceValueToType,
@@ -58,7 +60,12 @@ const declarePatternLocals = (
     case "wildcard":
       return;
     case "identifier":
-      declareLocal(pattern.symbol, ctx, fnCtx);
+      declareIdentifierPatternLocal({
+        pattern,
+        mutable: false,
+        ctx,
+        fnCtx,
+      });
       return;
     case "tuple":
       pattern.elements.forEach((entry) =>
@@ -95,7 +102,12 @@ const ensurePatternLocals = (
       return;
     case "identifier":
       if (!fnCtx.bindings.has(pattern.symbol)) {
-        declareLocal(pattern.symbol, ctx, fnCtx);
+        declareIdentifierPatternLocal({
+          pattern,
+          mutable: false,
+          ctx,
+          fnCtx,
+        });
       }
       return;
     case "tuple":

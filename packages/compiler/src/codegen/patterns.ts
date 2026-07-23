@@ -11,7 +11,7 @@ import type {
 import {
   allocateTempLocal,
   declareLocal,
-  declareLocalWithTypeId,
+  type LocalStorageMode,
   getRequiredBinding,
   loadBindingValue,
   loadBindingStorageRef,
@@ -67,6 +67,38 @@ interface PendingPatternAssignment {
   temp: ReturnType<typeof allocateTempLocal>;
   typeId: TypeId;
 }
+
+const localStorageForIdentifierPattern = ({
+  pattern,
+  mutable,
+}: {
+  pattern: Extract<HirPattern, { kind: "identifier" }>;
+  mutable: boolean;
+}): LocalStorageMode =>
+  mutable || pattern.bindingKind === "mutable-ref"
+    ? "addressable"
+    : "direct";
+
+export const declareIdentifierPatternLocal = ({
+  pattern,
+  typeId,
+  mutable,
+  ctx,
+  fnCtx,
+}: {
+  pattern: Extract<HirPattern, { kind: "identifier" }>;
+  typeId?: TypeId;
+  mutable: boolean;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}) =>
+  declareLocal({
+    symbol: pattern.symbol,
+    typeId,
+    storage: localStorageForIdentifierPattern({ pattern, mutable }),
+    ctx,
+    fnCtx,
+  });
 
 const storeIntoBinding = ({
   binding,
@@ -331,7 +363,13 @@ export const compilePatternInitialization = ({
   );
 
   const binding = options.declare
-    ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
+    ? declareIdentifierPatternLocal({
+        pattern,
+        typeId: targetTypeId,
+        mutable: options.mutable === true,
+        ctx,
+        fnCtx,
+      })
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
   const directStorageBackedInit = getDirectStorageBackedInit({
     binding,
@@ -392,7 +430,13 @@ export const compilePatternInitializationFromValue = ({
       ? getDeclaredSymbolTypeId(pattern.symbol, ctx, typeInstanceId)
       : getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
     const binding = options.declare
-      ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
+      ? declareIdentifierPatternLocal({
+          pattern,
+          typeId: targetTypeId,
+          mutable: options.mutable === true,
+          ctx,
+          fnCtx,
+        })
       : getRequiredBinding(pattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
@@ -444,7 +488,13 @@ export const compilePatternInitializationFromValue = ({
   pending.forEach(({ pattern: subPattern, temp, typeId }) => {
     const targetTypeId = typeId;
     const binding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
+      ? declareIdentifierPatternLocal({
+          pattern: subPattern,
+          typeId: targetTypeId,
+          mutable: options.mutable === true,
+          ctx,
+          fnCtx,
+        })
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
@@ -529,7 +579,13 @@ const compileTuplePattern = ({
   pending.forEach(({ pattern: subPattern, temp, typeId }) => {
     const targetTypeId = typeId;
     const binding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
+      ? declareIdentifierPatternLocal({
+          pattern: subPattern,
+          typeId: targetTypeId,
+          mutable: options.mutable === true,
+          ctx,
+          fnCtx,
+        })
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
@@ -614,7 +670,13 @@ const compileDestructurePattern = ({
   pending.forEach(({ pattern: subPattern, temp, typeId }) => {
     const targetTypeId = typeId;
     const binding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
+      ? declareIdentifierPatternLocal({
+          pattern: subPattern,
+          typeId: targetTypeId,
+          mutable: options.mutable === true,
+          ctx,
+          fnCtx,
+        })
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
@@ -701,7 +763,13 @@ const compilePatternFromScalarAggregate = ({
   pending.forEach(({ pattern: subPattern, temp, typeId: subPatternTypeId }) => {
     const targetTypeId = subPatternTypeId;
     const targetBinding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
+      ? declareIdentifierPatternLocal({
+          pattern: subPattern,
+          typeId: targetTypeId,
+          mutable: options.mutable === true,
+          ctx,
+          fnCtx,
+        })
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
