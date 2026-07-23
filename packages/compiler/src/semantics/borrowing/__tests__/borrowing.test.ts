@@ -279,6 +279,20 @@ fn conflict(~value: Box) -> void
     ).toContain("TY0048");
   });
 
+  it("rejects overlapping mutable scalar call arguments", () => {
+    expect(
+      diagnosticCodes(`
+fn mutate_both(~left: i32, ~right: i32) -> void
+  left = left + 1
+  right = right + 1
+
+fn conflict() -> void
+  var value = 1
+  mutate_both(~value, ~value)
+`),
+    ).toContain("TY0048");
+  });
+
   it("rejects shared and mutable arguments that overlap", () => {
     expect(
       diagnosticCodes(`${prelude}

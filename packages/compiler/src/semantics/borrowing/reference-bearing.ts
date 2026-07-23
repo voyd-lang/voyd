@@ -1,11 +1,27 @@
 import type { TypeId } from "../ids.js";
 import type { TypingResult } from "../typing/index.js";
 
+const referenceBearingByTyping = new WeakMap<
+  TypingResult,
+  Map<TypeId, boolean>
+>();
+
 export const typeCanCarryReference = (
   typeId: TypeId,
   typing: TypingResult,
   active = new Set<TypeId>(),
 ): boolean => {
+  const cache =
+    active.size === 0
+      ? (referenceBearingByTyping.get(typing) ?? new Map<TypeId, boolean>())
+      : undefined;
+  if (cache && !referenceBearingByTyping.has(typing)) {
+    referenceBearingByTyping.set(typing, cache);
+  }
+  const cached = cache?.get(typeId);
+  if (cached !== undefined) {
+    return cached;
+  }
   if (active.has(typeId)) {
     return false;
   }
@@ -47,5 +63,6 @@ export const typeCanCarryReference = (
   })();
 
   active.delete(typeId);
+  cache?.set(typeId, result);
   return result;
 };

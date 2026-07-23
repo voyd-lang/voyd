@@ -1619,6 +1619,46 @@ const parameterContract = (
   returned: false,
 });
 
+const initialFunctionContract = ({
+  functionItem,
+  typing,
+  symbolTable,
+  moduleId,
+}: {
+  functionItem: HirFunction;
+  typing: TypingResult;
+  symbolTable: SymbolTable;
+  moduleId: string;
+}): CallableBorrowContract => {
+  const scopedCallbacks = declaredScopedCallbacks({
+    functionItem,
+    typing,
+    symbolTable,
+    moduleId,
+  });
+  return {
+    parameters: functionItem.parameters.map((_parameter, index) =>
+      parameterContract(functionItem, index, typing),
+    ),
+    maySuspend: false,
+    ...(scopedCallbacks.length > 0 ? { scopedCallbacks } : {}),
+  };
+};
+
+const functionNeedsBorrowSummary = (
+  functionItem: HirFunction,
+  contract: CallableBorrowContract,
+  typing: TypingResult,
+): boolean => {
+  if (contract.parameters.some((parameter) => parameter.access !== "owned")) {
+    return true;
+  }
+  const signature = typing.functions.getSignature(functionItem.symbol);
+  return (
+    signature === undefined || !typing.effects.isEmpty(signature.effectRow)
+  );
+};
+
 const declaredScopedCallbacks = ({
   functionItem,
   typing,
@@ -1927,8 +1967,11 @@ const summarizeFunction = ({
           source: origin.sourceProjections,
           result: origin.resultProjections,
         }));
+      const access =
+        baseContracts.get(functionItem.symbol)?.parameters[index]?.access ??
+        parameterContract(functionItem, index, typing).access;
       return {
-        ...parameterContract(functionItem, index, typing),
+        access,
         retained: retainedPaths.length > 0,
         returned: returnedOrigins.length > 0,
         ...(retainedPaths.length > 0 ? { retainedPaths } : {}),
@@ -2251,32 +2294,24 @@ export const computeCallableBorrowContracts = ({
   let contracts = new Map<SymbolId, CallableBorrowContract>(
     functions.map((functionItem) => [
       functionItem.symbol,
-      {
-        parameters: functionItem.parameters.map((_parameter, index) =>
-          parameterContract(functionItem, index, typing),
-        ),
-        maySuspend: false,
-        ...(declaredScopedCallbacks({
-          functionItem,
-          typing,
-          symbolTable,
-          moduleId,
-        }).length > 0
-          ? {
-              scopedCallbacks: declaredScopedCallbacks({
-                functionItem,
-                typing,
-                symbolTable,
-                moduleId,
-              }),
-            }
-          : {}),
-      },
+      initialFunctionContract({
+        functionItem,
+        typing,
+        symbolTable,
+        moduleId,
+      }),
     ]),
+  );
+  const summaryFunctions = functions.filter((functionItem) =>
+    functionNeedsBorrowSummary(
+      functionItem,
+      contracts.get(functionItem.symbol)!,
+      typing,
+    ),
   );
 
   const callers = localCallersOf({
-    functions,
+    functions: summaryFunctions,
     hir,
     typing,
     symbolTable,
@@ -2286,12 +2321,13 @@ export const computeCallableBorrowContracts = ({
     decls,
   });
   const converge = (): void => {
-    const worklist = [...functions];
+    const worklist = [...summaryFunctions];
     const queued = new Set(
-      functions.map((functionItem) => functionItem.symbol),
+      summaryFunctions.map((functionItem) => functionItem.symbol),
     );
-    while (worklist.length > 0) {
-      const functionItem = worklist.shift()!;
+    let cursor = 0;
+    while (cursor < worklist.length) {
+      const functionItem = worklist[cursor++]!;
       queued.delete(functionItem.symbol);
       const previous = contracts.get(functionItem.symbol)!;
       const candidate = summarizeFunction({
@@ -2319,7 +2355,7 @@ export const computeCallableBorrowContracts = ({
       });
     }
   };
-  let mustSignature = "";
+  let mustSignature = mustContractSignature(contracts);
   while (true) {
     converge();
     const nextMustSignature = mustContractSignature(contracts);
@@ -2340,7 +2376,7 @@ export const computeCallableBorrowContracts = ({
       stripReturnedSharedOrigins(contract),
     ]),
   );
-  const sharedWorklist = functions.filter((functionItem) =>
+  const sharedWorklist = summaryFunctions.filter((functionItem) =>
     contracts
       .get(functionItem.symbol)
       ?.parameters.some((parameter) => parameter.returned),
@@ -2348,8 +2384,9 @@ export const computeCallableBorrowContracts = ({
   const sharedQueued = new Set(
     sharedWorklist.map((functionItem) => functionItem.symbol),
   );
-  while (sharedWorklist.length > 0) {
-    const functionItem = sharedWorklist.shift()!;
+  let sharedCursor = 0;
+  while (sharedCursor < sharedWorklist.length) {
+    const functionItem = sharedWorklist[sharedCursor++]!;
     sharedQueued.delete(functionItem.symbol);
     const previous = contracts.get(functionItem.symbol)!;
     const candidate = summarizeFunction({
