@@ -36,7 +36,7 @@ import {
   unboxSignatureSpillValue,
 } from "../../signature-spill.js";
 import {
-  compileCallArgumentsForParams,
+  applyCallArgumentWritebacks,
   compileCallArgumentsForParamsWithDetails,
 } from "./arguments.js";
 import {
@@ -234,7 +234,7 @@ export const compileClosureCall = ({
       ? fnField
       : refCast(ctx.mod, fnField, base.fnRefType);
 
-  const args = compileClosureArguments({
+  const compiledArgs = compileClosureArguments({
     call: expr,
     desc: resolvedDesc,
     ctx,
@@ -242,7 +242,7 @@ export const compileClosureCall = ({
     compileExpr,
   });
   const argSetups: binaryen.ExpressionRef[] = [];
-  const userArgs = args.flatMap((arg, index) => {
+  const userArgs = compiledArgs.args.flatMap((arg, index) => {
     const parameter = resolvedDesc.parameters[index];
     const defaulted = parameter?.defaulted === true;
     const flattened = flattenAbiArgument(
@@ -300,7 +300,8 @@ export const compileClosureCall = ({
         callId: expr.id,
         returnTypeId,
         expectedResultTypeId,
-        tailPosition,
+        tailPosition:
+          compiledArgs.writebacks.length === 0 && tailPosition,
         typeInstanceId,
         ctx,
         fnCtx,
@@ -323,7 +324,13 @@ export const compileClosureCall = ({
         usedReturnCall: false,
       };
 
-  ops.push(lowered.expr);
+  const callWithWritebacks = applyCallArgumentWritebacks({
+    call: lowered,
+    writebacks: compiledArgs.writebacks,
+    ctx,
+    fnCtx,
+  });
+  ops.push(callWithWritebacks.expr);
   return {
     expr:
       ops.length === 1
@@ -333,7 +340,7 @@ export const compileClosureCall = ({
             ops,
             getExprBinaryenType(expr.id, ctx, typeInstanceId),
           ),
-    usedReturnCall: lowered.usedReturnCall,
+    usedReturnCall: callWithWritebacks.usedReturnCall,
   };
 };
 
@@ -625,7 +632,10 @@ export const compileCurriedClosureCall = ({
           callId: expr.id,
           returnTypeId,
           expectedResultTypeId: isFinalSlice ? expectedResultTypeId : undefined,
-          tailPosition: tailPosition && isFinalSlice,
+          tailPosition:
+            compiledSlice.writebacks.length === 0 &&
+            tailPosition &&
+            isFinalSlice,
           typeInstanceId,
           ctx,
           fnCtx,
@@ -648,11 +658,17 @@ export const compileCurriedClosureCall = ({
           usedReturnCall: false,
         };
 
-    ops.push(lowered.expr);
+    const callWithWritebacks = applyCallArgumentWritebacks({
+      call: lowered,
+      writebacks: compiledSlice.writebacks,
+      ctx,
+      fnCtx,
+    });
+    ops.push(callWithWritebacks.expr);
     currentValue = {
       expr:
         ops.length === 1 ? ops[0]! : ctx.mod.block(null, ops, returnWasmType),
-      usedReturnCall: lowered.usedReturnCall,
+      usedReturnCall: callWithWritebacks.usedReturnCall,
     };
     currentTypeId = returnTypeId;
     argIndex += compiledSlice.consumedArgCount;
@@ -681,7 +697,7 @@ const compileClosureArguments = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
-}): binaryen.ExpressionRef[] => {
+}): CompiledCallArgumentsForParams => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const params: CallParam[] = desc.parameters.map((param) => ({
     typeId: param.type,
@@ -691,7 +707,7 @@ const compileClosureArguments = ({
     bindingKind: param.bindingKind,
   }));
 
-  return compileCallArgumentsForParams({
+  return compileCallArgumentsForParamsWithDetails({
     call,
     params,
     paramAbiKinds: params.map((param) => closureParamAbiKind({ param, ctx })),

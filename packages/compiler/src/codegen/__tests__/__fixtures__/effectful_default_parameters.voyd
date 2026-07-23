@@ -1,7 +1,7 @@
 eff Tick
   next(tail) -> i32
 
-val Wide {
+obj Wide {
   a: i32,
   b: i32,
   c: i32,
@@ -15,7 +15,7 @@ fn resolve(first: i32 = Tick::next(), second: i32 = first + 1): Tick -> i32
 fn resolve_generic<T>(
   fallback: T,
   trigger: i32 = Tick::next(),
-  ~value: T = fallback
+  value: T = fallback
 ): Tick -> T
   value
 

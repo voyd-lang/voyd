@@ -31,12 +31,19 @@ import {
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import { assignModuleTestIds, isGeneratedTestId } from "../tests/ids.js";
 import { formatEffectRow } from "./effects/format.js";
+import {
+  analyzeBorrowing,
+  emptyBorrowingResult,
+  type BorrowingDependency,
+  type BorrowingResult,
+} from "./borrowing/index.js";
 
 export interface SemanticsPipelineResult {
   binding: BindingResult;
   symbols: ModuleSymbolIndex;
   hir: HirGraph;
   typing: TypingResult;
+  borrowing: BorrowingResult;
   moduleId: string;
   exports: ModuleExportTable;
   diagnostics: readonly Diagnostic[];
@@ -162,6 +169,20 @@ export const semanticsPipeline = (
     moduleId: module.id,
     imports: binding.imports,
   });
+  const borrowing =
+    typing.diagnostics.some(
+      (diagnostic) => diagnostic.severity === "error",
+    )
+    ? emptyBorrowingResult()
+    : analyzeBorrowing({
+        hir,
+        typing,
+        symbolTable,
+        moduleId: module.id,
+        imports: binding.imports,
+        dependencies: projectBorrowingDependencies(dependencies),
+        decls: binding.decls,
+      });
   const exportsTable = collectModuleExports({
     hir,
     symbolTable,
@@ -170,13 +191,22 @@ export const semanticsPipeline = (
     packageId: binding.packageId,
     binding,
     typing,
+    borrowing,
   });
 
   const diagnostics: Diagnostic[] = [
     ...binding.diagnostics,
     ...typing.diagnostics,
+    ...borrowing.diagnostics,
     ...enforcePkgRootEffectRules({ binding, hir, typing, symbolTable }),
   ];
+
+  const borrowingErrors = borrowing.diagnostics.filter(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  if (!recoverFromTypingErrors && borrowingErrors.length > 0) {
+    throw new DiagnosticError(borrowingErrors[0]!, diagnostics);
+  }
 
   const symbols = buildModuleSymbolIndex({
     moduleId: module.id,
@@ -189,6 +219,7 @@ export const semanticsPipeline = (
     symbols,
     hir,
     typing,
+    borrowing,
     moduleId: module.id,
     exports: exportsTable,
     diagnostics,
@@ -196,6 +227,59 @@ export const semanticsPipeline = (
     ...({ symbolTable } as unknown as {}),
   } as SemanticsPipelineResult;
 };
+
+const projectBorrowingDependencies = (
+  dependencies: ReadonlyMap<string, SemanticsPipelineResult> | undefined,
+): ReadonlyMap<string, BorrowingDependency> =>
+  new Map(
+    Array.from(dependencies ?? [], ([moduleId, semantics]) => {
+      const dependencySymbols = getSymbolTable(semantics);
+      const exportedBorrowing = new Map(
+        Array.from(semantics.exports.values()).flatMap(
+          (entry) =>
+            entry.borrowing?.map((borrow) => [
+              borrow.symbol,
+              borrow.contract,
+            ] as const) ?? [],
+        ),
+      );
+      const effectSymbols = new Set(
+        Array.from(semantics.exports.values()).flatMap(
+          (entry) => entry.effects?.map((effect) => effect.symbol) ?? [],
+        ),
+      );
+      const callableSymbols = new Set([
+        ...exportedBorrowing.keys(),
+        ...effectSymbols,
+      ]);
+      const callables = new Map(
+        Array.from(callableSymbols, (symbol) => [
+          symbol,
+          {
+            name: dependencySymbols.getSymbol(symbol).name,
+            signature: semantics.typing.functions.getSignature(symbol),
+            contract: exportedBorrowing.get(symbol),
+          },
+        ]),
+      );
+      const effectOperations = new Map(
+        Array.from(effectSymbols).flatMap((symbol) => {
+          const operation = semantics.binding.decls.getEffectOperation(symbol);
+          return operation
+            ? [
+                [
+                  symbol,
+                  {
+                    maySuspend: operation.operation.resumable === "resume",
+                  },
+                ] as const,
+              ]
+            : [];
+        }),
+      );
+      return [moduleId, { callables, effectOperations }] as const;
+    }),
+  );
 
 const ensureNoBindingErrors = (binding: BindingResult): void => {
   const errors = binding.diagnostics.filter(
@@ -233,6 +317,7 @@ const collectModuleExports = ({
   packageId,
   binding,
   typing,
+  borrowing,
 }: {
   hir: HirGraph;
   symbolTable: SymbolTable;
@@ -241,6 +326,7 @@ const collectModuleExports = ({
   packageId: string;
   binding: BindingResult;
   typing: TypingResult;
+  borrowing: BorrowingResult;
 }): ModuleExportTable => {
   const table: ModuleExportTable = new Map();
 
@@ -309,6 +395,13 @@ const collectModuleExports = ({
       existing?.isStatic === true ? true : (isStatic ?? existing?.isStatic);
     const projected = existing?.apiProjection || apiProjection === true;
     const effects = mergeEffects(existing?.effects, exportEffectFor(symbol));
+    const borrowingContracts = new Map(
+      existing?.borrowing?.map((entry) => [entry.symbol, entry.contract]),
+    );
+    const borrowContract = borrowing.callables.get(symbol);
+    if (borrowContract) {
+      borrowingContracts.set(symbol, borrowContract);
+    }
     table.set(name, {
       name,
       symbol: existing?.symbol ?? symbol,
@@ -323,6 +416,10 @@ const collectModuleExports = ({
       isStatic: mergedStatic,
       apiProjection: projected,
       effects,
+      borrowing: Array.from(borrowingContracts, ([entrySymbol, contract]) => ({
+        symbol: entrySymbol,
+        contract,
+      })),
     });
   };
 

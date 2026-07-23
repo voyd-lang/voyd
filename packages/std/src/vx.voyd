@@ -1256,9 +1256,7 @@ pub fn styles(values: Array<(String, String)>): () -> Array<MsgPack>
 pub fn keyed({ key: String, child: MsgPack }): () -> MsgPack
   match(msgpack::unpack_map(child))
     Ok<Dict<String, MsgPack>> { value }:
-      let ~next = value
-      next.set("key", key)
-      msgpack::make_map(next)
+      msgpack::make_map(value.setting("key", key))
     Err:
       child
 
@@ -2425,18 +2423,14 @@ fn command_map_with_owned_handler(child: MsgPack, handler_id: i32): () -> Dict<S
 fn mark_owned_handler<Msg>(cmd: Cmd<Msg>, handler_id: i32) -> Cmd<Msg>
   match(msgpack::unpack_map(cmd.payload))
     Ok<Dict<String, MsgPack>> { value }:
-      let ~out = value
-      set_owned_handler(~out, handler_id)
-      Cmd<Msg> { payload: msgpack::make_map(out) }
+      Cmd<Msg> { payload: msgpack::make_map(with_owned_handler(value, handler_id)) }
     Err:
       cmd
 
 fn mark_owned_subscription<Msg>(sub: Sub<Msg>, handler_id: i32) -> Sub<Msg>
   match(msgpack::unpack_map(sub.payload))
     Ok<Dict<String, MsgPack>> { value }:
-      let ~out = value
-      set_owned_handler(~out, handler_id)
-      Sub<Msg> { payload: msgpack::make_map(out) }
+      Sub<Msg> { payload: msgpack::make_map(with_owned_handler(value, handler_id)) }
     Err:
       sub
 
@@ -2444,6 +2438,14 @@ fn set_owned_handler(~out: Dict<String, MsgPack>, handler_id: i32) -> void
   let ~owned = Array<MsgPack>::with_capacity(1)
   owned.push(msgpack::make_i32(handler_id))
   out.set("__vxOwnedMapHandlerIds", msgpack::make_array(owned))
+
+fn with_owned_handler(
+  out: Dict<String, MsgPack>,
+  handler_id: i32
+) -> Dict<String, MsgPack>
+  let ~owned = Array<MsgPack>::with_capacity(1)
+  owned.push(msgpack::make_i32(handler_id))
+  out.setting("__vxOwnedMapHandlerIds", msgpack::make_array(owned))
 
 fn subscription_payload(kind: String): () -> MsgPack
   msgpack::make_map(subscription_map(kind))

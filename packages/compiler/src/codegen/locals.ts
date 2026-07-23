@@ -24,6 +24,7 @@ import {
 } from "./structural.js";
 import {
   getInlineHeapBoxType,
+  getMutableRefStorageType,
   getSymbolTypeId,
   wasmTypeFor,
 } from "./types.js";
@@ -52,6 +53,21 @@ export const declareLocalWithTypeId = (
     ctx,
     fnCtx,
   });
+  fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
+  return binding;
+};
+
+export const declareMutableLocalWithTypeId = (
+  symbol: SymbolId,
+  typeId: number,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+): LocalBinding => {
+  const existing = fnCtx.bindings.get(symbol);
+  if (existing) {
+    return existing;
+  }
+  const binding = allocateMutableRefLocal({ typeId, ctx, fnCtx });
   fnCtx.bindings.set(symbol, { ...binding, kind: "local", typeId });
   return binding;
 };
@@ -143,6 +159,31 @@ export const allocateAddressableLocal = ({
   };
 };
 
+export const allocateMutableRefLocal = ({
+  typeId,
+  ctx,
+  fnCtx,
+}: {
+  typeId: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): LocalBindingLocal => {
+  const type = wasmTypeFor(typeId, ctx);
+  const storageType = getMutableRefStorageType({ typeId, ctx });
+  if (typeof storageType !== "number") {
+    throw new Error(`mutable ref local requires addressable storage for ${typeId}`);
+  }
+  const allocated = allocateTempLocal(type, fnCtx, typeId, ctx);
+  if (allocated.storageType === storageType) {
+    return allocated;
+  }
+  fnCtx.locals[fnCtx.locals.length - 1] = storageType;
+  return {
+    ...allocated,
+    storageType,
+  };
+};
+
 export const createStorageRefBinding = ({
   index,
   typeId,
@@ -154,7 +195,9 @@ export const createStorageRefBinding = ({
   mutable: boolean;
   ctx: CodegenContext;
 }): LocalBindingStorageRef => {
-  const storageType = getInlineHeapBoxType({ typeId, ctx });
+  const storageType = mutable
+    ? getMutableRefStorageType({ typeId, ctx })
+    : getInlineHeapBoxType({ typeId, ctx });
   if (typeof storageType !== "number") {
     throw new Error(`storage ref binding requires boxed inline storage for ${typeId}`);
   }
@@ -339,7 +382,8 @@ export const loadBindingStorageRef = (
   if (binding.kind === "local") {
     if (
       typeof binding.typeId !== "number" ||
-      binding.storageType !== getInlineHeapBoxType({ typeId: binding.typeId, ctx })
+      binding.storageType !==
+        getMutableRefStorageType({ typeId: binding.typeId, ctx })
     ) {
       return undefined;
     }
@@ -347,7 +391,8 @@ export const loadBindingStorageRef = (
   }
   if (
     typeof binding.typeId !== "number" ||
-    binding.storageType !== getInlineHeapBoxType({ typeId: binding.typeId, ctx })
+    binding.storageType !==
+      getMutableRefStorageType({ typeId: binding.typeId, ctx })
   ) {
     return undefined;
   }

@@ -24,7 +24,10 @@ import {
 } from "../../intrinsics.js";
 import { effectsFacade } from "../../effects/facade.js";
 import { getRequiredExprType, substituteTypeForInstance } from "../../types.js";
-import { compileCallArgumentsWithMetadata } from "./arguments.js";
+import {
+  applyCallArgumentWritebacks,
+  compileCallArgumentsWithMetadata,
+} from "./arguments.js";
 import { compileClosureCall, compileCurriedClosureCall } from "./closure.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
 import { emitResolvedCall } from "./resolved-call.js";
@@ -242,7 +245,7 @@ export const compileCallExpr = (
           fnCtx,
           compileExpr,
         });
-      return {
+      const compiledCall = {
         expr: compileIntrinsicCall({
           name: intrinsicName,
           externalIdentity: intrinsicMetadata.external,
@@ -259,6 +262,14 @@ export const compileCallExpr = (
         }),
         usedReturnCall: false,
       };
+      return planned
+        ? applyCallArgumentWritebacks({
+            call: compiledCall,
+            writebacks: planned.writebacks,
+            ctx,
+            fnCtx,
+          })
+        : compiledCall;
     }
 
     const meta = getFunctionMetadataForCall({
@@ -286,9 +297,10 @@ export const compileCallExpr = (
         scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
         ctx,
       });
-      return compileWithContractCallScope({
+      const compiledCall = compileWithContractCallScope({
         calleeId,
-        tailPosition,
+        tailPosition:
+          compiledArgs.writebacks.length === 0 && tailPosition,
         ctx,
         fnCtx,
         compile: (scopedTailPosition) =>
@@ -305,6 +317,12 @@ export const compileCallExpr = (
               outResultStorageRef,
             },
           }),
+      });
+      return applyCallArgumentWritebacks({
+        call: compiledCall,
+        writebacks: compiledArgs.writebacks,
+        ctx,
+        fnCtx,
       });
     }
   }
@@ -537,12 +555,12 @@ export const compileMethodCallExpr = (
     scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
     ctx,
   });
-  return compileWithContractCallScope({
+  const compiledCall = compileWithContractCallScope({
     calleeId: ctx.program.symbols.canonicalIdOf(
       targetRef.moduleId,
       targetRef.symbol,
     ),
-    tailPosition,
+    tailPosition: compiledArgs.writebacks.length === 0 && tailPosition,
     ctx,
     fnCtx,
     compile: (scopedTailPosition) =>
@@ -559,6 +577,12 @@ export const compileMethodCallExpr = (
           outResultStorageRef,
         },
       }),
+  });
+  return applyCallArgumentWritebacks({
+    call: compiledCall,
+    writebacks: compiledArgs.writebacks,
+    ctx,
+    fnCtx,
   });
 };
 
@@ -809,7 +833,7 @@ const compileResolvedSymbolCall = ({
         fnCtx,
         compileExpr,
       });
-    return {
+    const compiledCall = {
       expr: compileIntrinsicCall({
         name: intrinsicName,
         externalIdentity: intrinsicMetadata.external,
@@ -826,6 +850,14 @@ const compileResolvedSymbolCall = ({
       }),
       usedReturnCall: false,
     };
+    return planned
+      ? applyCallArgumentWritebacks({
+          call: compiledCall,
+          writebacks: planned.writebacks,
+          ctx,
+          fnCtx,
+        })
+      : compiledCall;
   }
 
   const targetMeta = getFunctionMetadataForCall({
@@ -862,9 +894,9 @@ const compileResolvedSymbolCall = ({
     scalarAggregateResultTypeId,
     ctx,
   });
-  return compileWithContractCallScope({
+  const compiledCall = compileWithContractCallScope({
     calleeId,
-    tailPosition,
+    tailPosition: compiledArgs.writebacks.length === 0 && tailPosition,
     ctx,
     fnCtx,
     compile: (scopedTailPosition) =>
@@ -881,6 +913,12 @@ const compileResolvedSymbolCall = ({
           outResultStorageRef,
         },
       }),
+  });
+  return applyCallArgumentWritebacks({
+    call: compiledCall,
+    writebacks: compiledArgs.writebacks,
+    ctx,
+    fnCtx,
   });
 };
 

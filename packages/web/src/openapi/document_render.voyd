@@ -29,7 +29,7 @@ pub fn document_json(
     let ~existing = match(paths.get(route.path))
       Some<JsonValue> { value }:
         value.match(active)
-          JsonObject: active.value
+          JsonObject: active.value.copied()
           else: Dict<String, JsonValue>::init()
       None: Dict<String, JsonValue>::init()
     existing.set(

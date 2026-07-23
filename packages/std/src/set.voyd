@@ -35,12 +35,14 @@ impl<T: DictKey<T>> Set<T>
   api fn insert(~self, value: T) -> bool
     if self.storage.contains(value):
       return false
-    self.storage.set(value, true)
+    self.storage = self.storage.setting(value, true)
     true
 
   /// Removes `value`, returning true only when it existed.
   api fn remove(~self, value: T) -> bool
-    match(self.storage.remove(value))
+    let result = self.storage.entry(value).remove()
+    self.storage = result.dict
+    match(result.value)
       Some<bool>:
         true
       None:
@@ -48,7 +50,7 @@ impl<T: DictKey<T>> Set<T>
 
   /// Removes all values.
   api fn clear(~self) -> void
-    self.storage.clear()
+    self.storage = Dict<T, bool>::init()
 
   /// Returns all values in unspecified order.
   ///

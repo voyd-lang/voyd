@@ -358,7 +358,7 @@ pub fn value_wide_array_local_materializes_for_mut_param() -> i32
     d: 4,
     e: 5
   })
-  let value = items.at(0)
+  let ~value = items.at(0)
   bump_wide_a(~value)
   value.a + items.at(0).a
 
@@ -390,8 +390,8 @@ pub fn value_wide_array_local_materializes_before_alias_mutation() -> i32
     d: 4,
     e: 5
   })
-  let ~alias = items
   let value = items.at(0)
+  let ~alias = items
   alias.replace(0, with: WideVec5 {
     a: 9,
     b: 10,
@@ -410,8 +410,8 @@ pub fn value_wide_array_local_materializes_before_nested_alias_mutation() -> i32
     d: 4,
     e: 5
   })
-  let ~alias = items
   let value = items.at(0)
+  let ~alias = items
   if true:
     let ~nested = alias
     nested.replace(0, with: WideVec5 {
@@ -549,8 +549,9 @@ pub fn value_wide_array_get_immediate_payload_materializes_before_alias_mutation
     d: 4,
     e: 5
   })
+  let pending = items.get(0)
   let ~alias = items
-  match(items.get(0))
+  match(pending)
     Some<WideVec5> { value }:
       alias.replace(0, with: WideVec5 {
         a: 9,

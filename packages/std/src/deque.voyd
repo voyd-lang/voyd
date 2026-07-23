@@ -29,19 +29,23 @@ impl<T> Deque<T>
 
   /// Pushes `value` to the front.
   api fn push_front(~self, value: T) -> void
-    self.storage.insert(value, at: 0)
+    self.storage = self.storage.inserted(value, at: 0)
 
   /// Pushes `value` to the back.
   api fn push_back(~self, value: T) -> void
-    self.storage.push(value)
+    self.storage = self.storage.pushed(value)
 
   /// Pops and returns the front value.
   api fn pop_front(~self) -> Option<T>
-    self.storage.remove(0)
+    let value = self.storage.get(0)
+    self.storage = self.storage.removed(0)
+    value
 
   /// Pops and returns the back value.
   api fn pop_back(~self) -> Option<T>
-    self.storage.pop()
+    let result = self.storage.popped()
+    self.storage = result.array
+    result.value
 
   /// Returns the front value without removing it.
   api fn front(self) -> Option<T>
@@ -53,4 +57,4 @@ impl<T> Deque<T>
 
   /// Removes all values.
   api fn clear(~self) -> void
-    self.storage.clear()
+    self.storage = self.storage.cleared()

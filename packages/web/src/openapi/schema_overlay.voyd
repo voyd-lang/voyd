@@ -3,7 +3,7 @@
 use std::dict::Dict
 use std::json::{ JsonObject, JsonString, JsonValue }
 use std::optional::types::all
-use std::string::type::{ String, StringSlice }
+use std::string::type::String
 use super::contract::OpenApiSchemaDocs
 
 pub fn apply_schema_docs(
@@ -21,7 +21,12 @@ pub fn apply_schema_docs(
             Some<JsonValue> { value: reference }:
               reference.match(reference_value)
                 JsonString:
-                  let name = component_name(reference_value.value.as_slice())
+                  let parts = reference_value.value.split(on: 47, keep_empty: false)
+                  let name =
+                    if parts.is_empty():
+                      String::init()
+                    else:
+                      parts.at(parts.len() - 1).to_string()
                   match(components.get(name))
                     Some<JsonValue> { value: component }:
                       overlay_object(component, value)
@@ -85,9 +90,3 @@ fn copy_object(source: Dict<String, JsonValue>) -> Dict<String, JsonValue>
     out.set(entry.0, entry.1)
     index = index + 1
   out
-
-fn component_name(reference: StringSlice) -> String
-  let parts = reference.split(on: 47, keep_empty: false)
-  if parts.is_empty():
-    return String::init()
-  parts.at(parts.len() - 1).to_string()

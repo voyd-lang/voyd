@@ -26,7 +26,7 @@ export const assertMutableBinding = ({
 }): void => {
   const record = ctx.symbolTable.getSymbol(symbol);
   const metadata = (record.metadata ?? {}) as BindingMetadata;
-  if (metadata.mutable) {
+  if (metadata.mutable || metadata.bindingKind === "mutable-ref") {
     return;
   }
 

@@ -151,8 +151,10 @@ test "dict extend merged merge":
     right,
     (_key: String, l: i32, r: i32) -> i32 => l + r
   )
-  let ~out = merged
-  out.merge(merged, (_k: String, l: i32, r: i32) -> i32 => l + r)
+  let out = merged.merged(
+    merged,
+    (_k: String, l: i32, r: i32) -> i32 => l + r
+  )
   match(out.get("a"))
     Some<i32> { value }:
       assert(value, eq: 20)
@@ -206,11 +208,12 @@ test "dict entry helpers":
       assert(false)
 
   let removed = next3.entry("pear").remove()
-  match(removed)
+  match(removed.value)
     Some<i32> { value }:
       assert(value, eq: 42)
     None:
       assert(false)
+  assert(removed.dict.contains("pear"), eq: false)
 
 test "dict grows and preserves entries":
   let ~map = Dict<IntKey, i32>::init()

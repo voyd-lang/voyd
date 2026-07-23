@@ -1,3 +1,5 @@
+use std::shared_cell::{ SharedCell }
+
 trait Score
   fn score(self) -> i32
 
@@ -27,10 +29,12 @@ obj Pair {
 }
 
 pub fn heap_alias_identity() -> i32
-  let ~pair = Pair { x: 1, y: 2 }
+  let pair = SharedCell(Pair { x: 1, y: 2 })
   let alias = pair
-  pair.x = 8
-  alias.x + pair.y
+  pair.with_mut((~value) =>
+    value.x = 8
+  )
+  alias.with((value) => value.x + value.y)
 
 eff Probe
   touch(resume) -> void

@@ -134,6 +134,219 @@
       ]
     },
     {
+      "id": "typing.borrow-conflicts",
+      "title": "Exclusive mutable borrow diagnostics",
+      "entry": "cases/typing/borrow-conflicts.voyd",
+      "tags": ["typing", "borrowing", "diagnostics"],
+      "cases": [
+        {
+          "id": "typing.borrowing.conflicts-and-downgrade",
+          "title": "rejects simultaneous mutable aliases and mutation after sharing",
+          "expect": {
+            "kind": "diagnostics",
+            "codes": ["TY0048", "TY0051"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "runtime.borrowing",
+      "title": "Exclusive mutable borrow runtime semantics",
+      "entry": "cases/runtime/borrowing.voyd",
+      "tags": ["runtime", "borrowing", "evaluation-order"],
+      "cases": [
+        {
+          "id": "runtime.borrowing.completed-reborrow",
+          "title": "mutates after a completed reborrow",
+          "entryName": "mutation_after_completed_reborrow",
+          "expect": { "kind": "equals", "value": 5 }
+        },
+        {
+          "id": "runtime.borrowing.read-after-mutable-call",
+          "title": "reads after a mutable call completes",
+          "entryName": "readonly_use_after_mutable_call",
+          "expect": { "kind": "equals", "value": 5 }
+        },
+        {
+          "id": "runtime.borrowing.nested-reborrow",
+          "title": "supports nested reborrows",
+          "entryName": "legal_nested_reborrow",
+          "expect": { "kind": "equals", "value": 10 }
+        },
+        {
+          "id": "runtime.borrowing.default-evaluation-order",
+          "title": "evaluates defaults before activating mutable call borrows",
+          "entryName": "default_argument_precedes_mutable_call_borrow",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.borrowing.shared-cell-mutation",
+          "title": "mutates intentionally shared state through SharedCell",
+          "entryName": "shared_cell_mutation",
+          "expect": { "kind": "equals", "value": 13 }
+        },
+        {
+          "id": "runtime.borrowing.shared-cell-replacement",
+          "title": "replaces SharedCell reference payloads",
+          "entryName": "shared_cell_replacement",
+          "expect": { "kind": "equals", "value": 8 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-capture-replacement",
+          "title": "replaces mutable captured references",
+          "entryName": "mutable_capture_replacement",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-alias-replacement",
+          "title": "replaces values through mutable aliases",
+          "entryName": "mutable_alias_replacement",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-var-copy",
+          "title": "copies values when initializing mutable variables",
+          "entryName": "mutable_var_initialization_copies",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-field-receiver",
+          "title": "mutates a reference-valued field through a mutable receiver",
+          "entryName": "mutable_field_receiver",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-field-replacement",
+          "title": "writes mutable field replacements back to their owner",
+          "entryName": "mutable_field_replacement",
+          "expect": { "kind": "equals", "value": 32 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-field-closure-replacement",
+          "title": "writes mutable field replacements back after closure calls",
+          "entryName": "mutable_field_closure_replacement",
+          "expect": { "kind": "equals", "value": 17 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-trait-receiver-replacement",
+          "title": "writes dynamic mutable trait receiver replacements back",
+          "entryName": "mutable_trait_receiver_replacement",
+          "expect": { "kind": "equals", "value": 23 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-trait-receiver-multivalue",
+          "title": "preserves multivalue results while writing dynamic mutable trait receivers back",
+          "entryName": "mutable_trait_receiver_multivalue",
+          "expect": { "kind": "equals", "value": 39 }
+        },
+        {
+          "id": "runtime.borrowing.shared-cell-conflict",
+          "title": "recovers from a SharedCell borrow conflict",
+          "entryName": "shared_cell_conflict_is_recoverable",
+          "expect": { "kind": "equals", "value": 1 }
+        }
+      ]
+    },
+    {
+      "id": "runtime.borrowing-optimized",
+      "title": "Optimized exclusive mutable borrow semantics",
+      "entry": "cases/runtime/borrowing.voyd",
+      "optimize": true,
+      "tags": ["runtime", "borrowing", "optimization", "evaluation-order"],
+      "cases": [
+        {
+          "id": "runtime.borrowing.optimized-completed-reborrow",
+          "title": "preserves completed reborrows",
+          "entryName": "mutation_after_completed_reborrow",
+          "expect": { "kind": "equals", "value": 5 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-read-after-mutable-call",
+          "title": "preserves reads after mutable calls",
+          "entryName": "readonly_use_after_mutable_call",
+          "expect": { "kind": "equals", "value": 5 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-nested-reborrow",
+          "title": "preserves nested reborrows",
+          "entryName": "legal_nested_reborrow",
+          "expect": { "kind": "equals", "value": 10 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-default-evaluation-order",
+          "title": "preserves default and mutable-borrow evaluation order",
+          "entryName": "default_argument_precedes_mutable_call_borrow",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-shared-cell-mutation",
+          "title": "preserves SharedCell mutation",
+          "entryName": "shared_cell_mutation",
+          "expect": { "kind": "equals", "value": 13 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-shared-cell-replacement",
+          "title": "preserves SharedCell reference replacement",
+          "entryName": "shared_cell_replacement",
+          "expect": { "kind": "equals", "value": 8 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-capture-replacement",
+          "title": "preserves mutable capture replacement",
+          "entryName": "mutable_capture_replacement",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-alias-replacement",
+          "title": "preserves mutable alias replacement",
+          "entryName": "mutable_alias_replacement",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-var-copy",
+          "title": "preserves mutable variable copy initialization",
+          "entryName": "mutable_var_initialization_copies",
+          "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-field-receiver",
+          "title": "preserves mutation through a reference-valued field receiver",
+          "entryName": "mutable_field_receiver",
+          "expect": { "kind": "equals", "value": 7 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-field-replacement",
+          "title": "preserves mutable field replacement writeback",
+          "entryName": "mutable_field_replacement",
+          "expect": { "kind": "equals", "value": 32 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-field-closure-replacement",
+          "title": "preserves mutable field replacement after closure calls",
+          "entryName": "mutable_field_closure_replacement",
+          "expect": { "kind": "equals", "value": 17 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-trait-receiver-replacement",
+          "title": "preserves dynamic mutable trait receiver replacement",
+          "entryName": "mutable_trait_receiver_replacement",
+          "expect": { "kind": "equals", "value": 23 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-trait-receiver-multivalue",
+          "title": "preserves multivalue results and dynamic mutable receiver writeback",
+          "entryName": "mutable_trait_receiver_multivalue",
+          "expect": { "kind": "equals", "value": 39 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-shared-cell-conflict",
+          "title": "preserves recoverable SharedCell conflicts",
+          "entryName": "shared_cell_conflict_is_recoverable",
+          "expect": { "kind": "equals", "value": 1 }
+        }
+      ]
+    },
+    {
       "id": "runtime.prefix-minus",
       "title": "Prefix minus",
       "entry": "cases/runtime/prefix-minus.voyd",

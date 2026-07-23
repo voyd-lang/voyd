@@ -31,6 +31,14 @@ pub obj DictEntry<K, V> {
   api key: K
 }
 
+/// Result of removing a value through a dictionary entry.
+pub obj DictEntryRemove<K, V> {
+  /// Dictionary after the removal.
+  api dict: Dict<K, V>,
+  /// Removed value, when the entry existed.
+  api value: Optional<V>
+}
+
 /// Mutable dictionary with hash-bucket storage.
 ///
 /// Stores values by key and preserves only one value per key.
@@ -138,6 +146,21 @@ impl<K: DictKey<K>, V> Dict<K, V>
     let next = self.with_set(key, value)
     self.buckets = next.buckets
     self.count = next.count
+
+  /// Returns a dictionary with `key` inserted or updated.
+  api fn setting(self, key: K, value: V) -> Dict<K, V>
+    self.with_set(key, value)
+
+  /// Returns a dictionary without `key`.
+  api fn removing(self, key: K) -> Dict<K, V>
+    self.with_deleted(key)
+
+  /// Returns an independently mutable copy of this dictionary.
+  api fn copied(self) -> Dict<K, V>
+    Dict<K, V> {
+      buckets: copy_buckets(self.buckets),
+      count: self.count
+    }
 
   /// Removes and returns a value when present.
   api fn remove(~self, key: K) -> Optional<V>
@@ -263,7 +286,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
     /// Dictionary whose entries are merged into `self`.
     other: Dict<K, V>,
     /// Conflict resolver receiving key, existing value, and incoming value.
-    resolve: (key: K, left: V, right: V) -> V
+    resolve: (key: K, left: V, right: V) : () -> V
   ) -> Dict<K, V>
     if other.count == 0:
       return self
@@ -298,7 +321,7 @@ impl<K: DictKey<K>, V> Dict<K, V>
   api fn merge(
     ~self,
     other: Dict<K, V>,
-    resolve: (key: K, left: V, right: V) -> V
+    resolve: (key: K, left: V, right: V) : () -> V
   ) -> void
     if other.count == 0:
       return void
@@ -370,24 +393,23 @@ impl<K: DictKey<K>, V> Dict<K, V>
     let bucket_index = bucket_index_for_key(bucket_count, key)
     let bucket = __array_get(self.buckets, bucket_index)
     let result = set_in_bucket(bucket, key, value)
+    let next_buckets = copy_buckets(self.buckets)
 
-    __array_set(self.buckets, bucket_index, result.bucket)
+    __array_set(next_buckets, bucket_index, result.bucket)
     let count = if result.inserted then: self.count + 1 else: self.count
-    let next = Dict<K, V> { buckets: self.buckets, count: count }
+    let next = Dict<K, V> { buckets: next_buckets, count: count }
     maybe_grow(next)
 
   fn with_deleted(self, key: K) -> Dict<K, V>
-    if self.count == 0:
-      return self
-
     let bucket_count = __array_len(self.buckets)
     let bucket_index = bucket_index_for_key(bucket_count, key)
     let bucket = __array_get(self.buckets, bucket_index)
     let result = delete_from_bucket(bucket, key)
+    let next_buckets = copy_buckets(self.buckets)
     if result.deleted:
-      __array_set(self.buckets, bucket_index, result.bucket)
-      return Dict<K, V> { buckets: self.buckets, count: self.count - 1 }
-    self
+      __array_set(next_buckets, bucket_index, result.bucket)
+      return Dict<K, V> { buckets: next_buckets, count: self.count - 1 }
+    Dict<K, V> { buckets: next_buckets, count: self.count }
 
 impl<K: DictKey<K>, V> DictEntry<K, V>
   /// Inserts the default value when the entry is vacant and returns the dictionary.
@@ -395,33 +417,31 @@ impl<K: DictKey<K>, V> DictEntry<K, V>
     if self.dict.contains(self.key):
       return self.dict
 
-    let ~next = self.dict
-    next.set(self.key, default)
-    next
+    self.dict.with_set(self.key, default)
 
   /// Lazily inserts a computed value when the entry is vacant and returns the dictionary.
   api fn or_insert_with(self, make: () -> V) -> Dict<K, V>
     if self.dict.contains(self.key):
       return self.dict
 
-    let ~next = self.dict
-    next.set(self.key, make())
-    next
+    self.dict.with_set(self.key, make())
 
   /// Applies a modifier function to the value when the entry already exists.
   api fn and_modify(self, f: (value: V) -> V) -> DictEntry<K, V>
-    let ~next = self.dict
-    match(next.get(self.key))
-      Some<V> { value }:
-        next.set(self.key, f(value))
-      None:
-        void
+    let next =
+      match(self.dict.get(self.key))
+        Some<V> { value }:
+          self.dict.with_set(self.key, f(value))
+        None:
+          self.dict
     DictEntry<K, V> { dict: next, key: self.key }
 
-  /// Removes and returns a value when present.
-  api fn remove(self) -> Optional<V>
-    let ~next = self.dict
-    next.remove(self.key)
+  /// Removes the entry and returns the updated dictionary and previous value.
+  api fn remove(self) -> DictEntryRemove<K, V>
+    DictEntryRemove<K, V> {
+      dict: self.dict.with_deleted(self.key),
+      value: self.dict.get(self.key)
+    }
 
 impl<K: DictKey<K>, V> SubscriptRead<K, Optional<V>> for Dict<K, V>
   /// Returns the value addressed by subscript syntax.
@@ -444,7 +464,7 @@ impl<T> Array<T>
           let group_key = f(value)
           match(out.get(group_key))
             Some<Array<T>> { value: existing }:
-              let ~next = existing
+              let ~next = existing.copied()
               next.push(value)
               out.set(group_key, next)
             None:
@@ -473,6 +493,17 @@ fn new_buckets<K, V>(bucket_count: i32) -> FixedArray<Array<DictPair<K, V>>>
     __array_set(buckets, index, Array<DictPair<K, V>>::init())
     index = index + 1
   buckets
+
+fn copy_buckets<K, V>(
+  source: FixedArray<Array<DictPair<K, V>>>
+) -> FixedArray<Array<DictPair<K, V>>>
+  let length = __array_len(source)
+  let copy = new_fixed_array<Array<DictPair<K, V>>>(length)
+  var index = 0
+  while index < length:
+    __array_set(copy, index, __array_get(source, index).copied())
+    index = index + 1
+  copy
 
 fn maybe_grow<K: DictKey<K>, V>(dict: Dict<K, V>) -> Dict<K, V>
   let bucket_count = __array_len(dict.buckets)

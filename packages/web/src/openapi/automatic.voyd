@@ -73,11 +73,11 @@ fn apply_literal_docs(operation: JsonValue, docs: Option<JsonValue>) -> JsonValu
     Some<JsonValue> { value }:
       let source = object_entries(value)
       reject_advanced_literal_docs(source)
-      let ~target = object_entries(operation)
-      copy_if_present(source, target, from: "summary", to: "summary")
-      copy_if_present(source, target, from: "description", to: "description")
-      copy_if_present(source, target, from: "operation_id", to: "operationId")
-      copy_if_present(source, target, from: "tags", to: "tags")
+      var target = object_entries(operation)
+      target = copy_if_present(source, target, from: "summary", to: "summary")
+      target = copy_if_present(source, target, from: "description", to: "description")
+      target = copy_if_present(source, target, from: "operation_id", to: "operationId")
+      target = copy_if_present(source, target, from: "tags", to: "tags")
       JsonObject { value: target }
 
 fn reject_advanced_literal_docs(docs: Dict<String, JsonValue>) -> void
@@ -93,14 +93,14 @@ fn reject_advanced_literal_docs(docs: Dict<String, JsonValue>) -> void
 
 fn copy_if_present(
   source: Dict<String, JsonValue>,
-  ~target: Dict<String, JsonValue>,
+  target: Dict<String, JsonValue>,
   { from source_name: String, to target_name: String }
-) -> void
+) -> Dict<String, JsonValue>
   match(source.get(source_name))
     Some<JsonValue> { value }:
-      target.set(target_name, value)
+      target.setting(target_name, value)
     None:
-      void
+      target
 
 fn append_route(
   ~paths: Dict<String, JsonValue>,
@@ -113,7 +113,7 @@ fn append_route(
   let complete_operation = with_opaque_path_parameters(normalized, operation)
   if valid_path_parameters(normalized, complete_operation):
     let ~path_item = match(paths.get(normalized))
-      Some<JsonValue> { value }: object_entries(value)
+      Some<JsonValue> { value }: object_entries(value).copied()
       None: Dict<String, JsonValue>::init()
     match(path_item.get(method))
       Some<JsonValue>:
@@ -134,7 +134,7 @@ fn merge_components(~target: Dict<String, JsonValue>, source: Dict<String, JsonV
     index = index + 1
 
 fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
-  let ~fields = object_entries(operation)
+  var fields = object_entries(operation)
   let ~parameters = match(fields.get("parameters"))
     Some<JsonValue> { value }:
       value.match(active)
@@ -170,20 +170,20 @@ fn with_opaque_path_parameters(path: String, operation: JsonValue) -> JsonValue
           parameters.push(JsonObject { value: parameter })
     segment_index = segment_index + 1
   if not parameters.is_empty():
-    fields.set("parameters", JsonArray { value: parameters })
+    fields = fields.setting("parameters", JsonArray { value: parameters })
   JsonObject { value: fields }
 
 /// Operation IDs are optional. The first occurrence keeps a duplicate ID;
 /// later operations remain documented without that ID.
 fn unique_operation_id(~seen: Dict<String, bool>, operation: JsonValue) -> JsonValue
-  let ~fields = object_entries(operation)
+  var fields = object_entries(operation)
   match(fields.get("operationId"))
     Some<JsonValue> { value }:
       value.match(active)
         JsonString:
           match(seen.get(active.value))
             Some<bool>:
-              let _ = fields.remove("operationId")
+              fields = fields.removing("operationId")
             None:
               seen.set(active.value, true)
         else:

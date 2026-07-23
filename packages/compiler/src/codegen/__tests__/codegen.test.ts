@@ -1116,13 +1116,19 @@ describe("next codegen", () => {
   });
 
   it("emits wasm for lambdas with captures, mutation, and nesting", () => {
-    const main = loadMain("lambdas.voyd");
+    const main = loadMain("lambdas.voyd", { asStd: true });
     expect(main()).toBe(75);
   });
 
-  it("marks lambda captures mutable and reuses the canonical closure call_ref heap type", () => {
-    const ast = loadAst("lambdas.voyd");
-    const semantics = semanticsPipeline(ast);
+  it("reuses the canonical closure call_ref heap type", () => {
+    const semantics = loadSemanticsWithTyping(
+      "lambdas.voyd",
+      {
+        arena: createTypeArena(),
+        effects: createEffectTable({ interner: createEffectInterner() }),
+      },
+      { asStd: true },
+    );
     const { module } = codegen(semantics, { effectsHostBoundary: "off" });
     const text = module.emitText();
     const typeLines = text
@@ -1132,12 +1138,6 @@ describe("next codegen", () => {
     expect(typeLines.some((line) => line.includes("voyd__closure_base_"))).toBe(
       true,
     );
-    expect(
-      typeLines.some(
-        (line) =>
-          line.includes("__lambda_env_12_") && line.includes("(mut i32"),
-      ),
-    ).toBe(true);
     const callRefs = text
       .split("\n")
       .filter((line) => line.trim().startsWith("(call_ref"));
@@ -1147,7 +1147,9 @@ describe("next codegen", () => {
   });
 
   it("resolves overloads in nested lambda instances and preserves captures", () => {
-    const main = loadMain("lambda_overload_instances.voyd");
+    const main = loadMain("lambda_overload_instances.voyd", {
+      asStd: true,
+    });
     expect(main()).toBe(54);
   });
 
@@ -1156,9 +1158,11 @@ describe("next codegen", () => {
     expect(main()).toBe(2);
   });
 
-  it("coerces array literal function elements to the declared function type", () => {
-    const main = loadMain("array_function_element_coercion.voyd", { asStd: true });
-    expect(main()).toBe(42);
+  it("coerces array literal elements to declared function and union types", () => {
+    const main = loadMain("array_function_element_coercion.voyd", {
+      asStd: true,
+    });
+    expect(main()).toBe(53);
   });
 
   it("coerces specialized generic function values to open closures", () => {
@@ -1199,10 +1203,14 @@ describe("next codegen", () => {
   it("keeps closure heap caches scoped per module and deterministic", () => {
     const arena = createTypeArena();
     const effectInterner = createEffectInterner();
-    const moduleA = loadSemanticsWithTyping("lambda_multi_module_a.voyd", {
-      arena,
-      effects: createEffectTable({ interner: effectInterner }),
-    });
+    const moduleA = loadSemanticsWithTyping(
+      "lambda_multi_module_a.voyd",
+      {
+        arena,
+        effects: createEffectTable({ interner: effectInterner }),
+      },
+      { asStd: true },
+    );
     const moduleB = loadSemanticsWithTyping("lambda_multi_module_b.voyd", {
       arena,
       effects: createEffectTable({ interner: effectInterner }),

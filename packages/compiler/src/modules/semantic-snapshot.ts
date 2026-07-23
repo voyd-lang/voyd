@@ -23,6 +23,11 @@ export const cloneSemanticsForTypingState = ({
     binding: semantics.binding,
     symbols: semantics.symbols,
     hir: semantics.hir,
+    borrowing: {
+      callables: new Map(semantics.borrowing.callables),
+      facts: [...semantics.borrowing.facts],
+      diagnostics: [...semantics.borrowing.diagnostics],
+    },
     typing: {
       arena,
       table: typing.table.clone(),
@@ -57,6 +62,13 @@ export const cloneSemanticsForTypingState = ({
       callTypeArguments: cloneNestedMap(typing.callTypeArguments),
       callInstanceKeys: cloneNestedMap(typing.callInstanceKeys),
       callTraitDispatches: new Set(typing.callTraitDispatches),
+      borrowCallTargets: cloneNestedMap(typing.borrowCallTargets),
+      borrowCallArgumentPlans: cloneNestedMap(
+        typing.borrowCallArgumentPlans,
+      ),
+      borrowResolvedExprTypes: new Map(
+        typing.borrowResolvedExprTypes,
+      ),
       sourceImportLocals: new Set(typing.sourceImportLocals),
       functionInstantiationInfo: cloneNestedMap(typing.functionInstantiationInfo),
       functionInstanceExprTypes: cloneNestedMap(typing.functionInstanceExprTypes),

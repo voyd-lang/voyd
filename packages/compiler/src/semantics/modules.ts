@@ -2,6 +2,7 @@ import type { HirVisibility } from "./hir/index.js";
 import type { OverloadSetId, SymbolId } from "./ids.js";
 import type { SymbolKind } from "./binder/index.js";
 import type { ModulePath } from "../modules/types.js";
+import type { CallableBorrowContract } from "./borrowing/index.js";
 
 export interface ModuleExportEffect {
   symbol: SymbolId;
@@ -24,6 +25,10 @@ export interface ModuleExportEntry {
   isStatic?: boolean;
   apiProjection?: boolean;
   effects?: readonly ModuleExportEffect[];
+  borrowing?: readonly {
+    symbol: SymbolId;
+    contract: CallableBorrowContract;
+  }[];
 }
 
 export type ModuleExportTable = Map<string, ModuleExportEntry>;

@@ -1,7 +1,6 @@
 fn outer_b(start: i32)
-  var seed = start
   () =>
-    seed = seed - 1
+    let seed = start - 1
     () => seed
 
 pub fn main() -> i32

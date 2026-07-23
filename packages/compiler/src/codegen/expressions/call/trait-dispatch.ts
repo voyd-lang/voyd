@@ -26,13 +26,17 @@ import {
   getRequiredExprType,
   getSignatureSpillBoxType,
   getStructuralTypeInfo,
+  getTraitDispatchReceiverAbiType,
+  lowerValueToMutableRefStorage,
   wasmTypeFor,
 } from "../../types.js";
 import { allocateTempLocal } from "../../locals.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
 import { pickTraitImplMethodMeta } from "../../function-lookup.js";
 import {
-  compileCallArgumentsForParams,
+  applyCallArgumentWritebacks,
+  compileCallArgumentsForParamsWithDetails,
+  lowerMutablePlaceArgument,
   resolveTypedCallArgumentPlan,
   sliceTypedCallArgumentPlan,
 } from "./arguments.js";
@@ -344,6 +348,9 @@ const compileDirectTraitDispatchSwitch = ({
   if (meta.resultAbiKind === "out_ref") {
     return undefined;
   }
+  if (meta.paramAbiKinds[0] === "mutable_ref") {
+    return undefined;
+  }
 
   const impls = directSwitchImpls({
     expr,
@@ -437,9 +444,10 @@ const compileDirectTraitDispatchSwitch = ({
     fnCtx,
   });
   const receiverTemp = allocateTempLocal(ctx.rtt.baseType, fnCtx);
-  const userArgValues = compileCallArgumentsForParams({
+  const compiledUserArgs = compileCallArgumentsForParamsWithDetails({
     call: { ...expr, args: expr.args.slice(1) },
     params: meta.parameters.slice(1),
+    paramAbiKinds: meta.paramAbiKinds.slice(1),
     ctx,
     fnCtx,
     compileExpr,
@@ -450,6 +458,7 @@ const compileDirectTraitDispatchSwitch = ({
       typedPlan: userTypedPlan,
     },
   });
+  const userArgValues = compiledUserArgs.args;
   const userArgTemps = baselineUserParamTypes.map((type) =>
     allocateTempLocal(type, fnCtx),
   );
@@ -475,7 +484,14 @@ const compileDirectTraitDispatchSwitch = ({
       candidate.implName,
       [
         ...(candidate.meta.effectful ? [currentHandlerValue(ctx, fnCtx)] : []),
-        refCast(ctx.mod, makeReceiver(), candidate.receiverType),
+        candidate.meta.paramAbiKinds[0] === "mutable_ref"
+          ? lowerValueToMutableRefStorage({
+              value: makeReceiver(),
+              typeId: candidate.meta.paramTypeIds[0],
+              targetType: candidate.receiverType,
+              ctx,
+            })
+          : refCast(ctx.mod, makeReceiver(), candidate.receiverType),
         ...userArgTemps.map((temp) => ctx.mod.local.get(temp.index, temp.type)),
       ],
       implResultType,
@@ -520,7 +536,8 @@ const compileDirectTraitDispatchSwitch = ({
           ctx,
           fnCtx,
           compileExpr,
-          tailPosition,
+          tailPosition:
+            compiledUserArgs.writebacks.length === 0 && tailPosition,
           expectedResultTypeId,
         }).expr;
   const branchCandidates =
@@ -553,22 +570,31 @@ const compileDirectTraitDispatchSwitch = ({
   );
 
   if (dispatchEffectful) {
-    return ctx.effectsBackend.lowerEffectfulCallResult({
+    const lowered = ctx.effectsBackend.lowerEffectfulCallResult({
       callExpr: switchedBlock,
       callId: expr.id,
       returnTypeId,
       expectedResultTypeId,
-      tailPosition,
+      tailPosition:
+        compiledUserArgs.writebacks.length === 0 && tailPosition,
       typeInstanceId,
+      ctx,
+      fnCtx,
+    });
+    return applyCallArgumentWritebacks({
+      call: lowered,
+      writebacks: compiledUserArgs.writebacks,
       ctx,
       fnCtx,
     });
   }
 
-  return {
-    expr: switchedBlock,
-    usedReturnCall: false,
-  };
+  return applyCallArgumentWritebacks({
+    call: { expr: switchedBlock, usedReturnCall: false },
+    writebacks: compiledUserArgs.writebacks,
+    ctx,
+    fnCtx,
+  });
 };
 
 export const compileTraitDispatchCall = ({
@@ -695,21 +721,52 @@ const compileIndirectTraitDispatchCall = ({
   outResultStorageRef?: binaryen.ExpressionRef;
 }): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
-  const receiverValue = receiverTemp
+  const compiledReceiver = receiverTemp
     ? undefined
     : compileExpr({
         exprId: expr.args[0].expr,
         ctx,
         fnCtx,
       });
+  const mutableReceiver = meta.paramAbiKinds[0] === "mutable_ref";
+  const receiverWritebacks: binaryen.ExpressionRef[] = [];
+  const receiverAbiType = getTraitDispatchReceiverAbiType({
+    mutable: mutableReceiver,
+    ctx,
+  });
   const resolvedReceiverTemp =
-    receiverTemp ?? allocateTempLocal(ctx.rtt.baseType, fnCtx);
-  const ops: binaryen.ExpressionRef[] = receiverValue
-    ? [ctx.mod.local.set(resolvedReceiverTemp.index, receiverValue.expr)]
+    receiverTemp ?? allocateTempLocal(receiverAbiType, fnCtx);
+  const loweredReceiver =
+    compiledReceiver && mutableReceiver
+      ? lowerMutablePlaceArgument({
+          exprId: expr.args[0].expr,
+          value: compiledReceiver.expr,
+          typeId: meta.paramTypeIds[0]!,
+          writebacks: receiverWritebacks,
+          ctx,
+          fnCtx,
+          compileExpr,
+        })
+      : compiledReceiver?.expr;
+  const ops: binaryen.ExpressionRef[] = loweredReceiver
+    ? [ctx.mod.local.set(resolvedReceiverTemp.index, loweredReceiver)]
     : [];
 
-  const loadReceiver = (): binaryen.ExpressionRef =>
+  const loadReceiverArgument = (): binaryen.ExpressionRef =>
     ctx.mod.local.get(resolvedReceiverTemp.index, resolvedReceiverTemp.type);
+  const loadReceiverValue = (): binaryen.ExpressionRef =>
+    mutableReceiver
+      ? structGetFieldValue({
+          mod: ctx.mod,
+          fieldIndex: 0,
+          fieldType: ctx.rtt.baseType,
+          exprRef: refCast(
+            ctx.mod,
+            loadReceiverArgument(),
+            receiverAbiType,
+          ),
+        })
+      : loadReceiverArgument();
 
   const receiverIndex = meta.firstUserParamIndex;
   const userParamTypes = meta.paramTypes.slice(receiverIndex + 1);
@@ -725,8 +782,8 @@ const compileIndirectTraitDispatchCall = ({
       ? [meta.outParamType]
       : [];
   const wrapperParamTypes = dispatchEffectful
-    ? [handlerType(ctx), ...outParamTypes, ctx.rtt.baseType, ...userParamTypes]
-    : [...outParamTypes, ctx.rtt.baseType, ...userParamTypes];
+    ? [handlerType(ctx), ...outParamTypes, receiverAbiType, ...userParamTypes]
+    : [...outParamTypes, receiverAbiType, ...userParamTypes];
   const fnRefType = getFunctionRefType({
     params: wrapperParamTypes,
     result: dispatchEffectful
@@ -741,7 +798,7 @@ const compileIndirectTraitDispatchCall = ({
     mod: ctx.mod,
     fieldType: ctx.rtt.methodLookupHelpers.lookupTableType,
     fieldIndex: RTT_METADATA_SLOTS.METHOD_TABLE,
-    exprRef: loadReceiver(),
+    exprRef: loadReceiverValue(),
   });
 
   const accessor = ctx.mod.call(
@@ -772,11 +829,17 @@ const compileIndirectTraitDispatchCall = ({
         argOffset: 1,
       })
     : undefined;
-  const compiledUserArgs = userArgTemps
-    ? userArgTemps.map((temp) => ctx.mod.local.get(temp.index, temp.type))
-    : compileCallArgumentsForParams({
+  const compiledUserArgDetails = userArgTemps
+    ? {
+        args: userArgTemps.map((temp) =>
+          ctx.mod.local.get(temp.index, temp.type),
+        ),
+        writebacks: [],
+      }
+    : compileCallArgumentsForParamsWithDetails({
         call: { ...expr, args: expr.args.slice(1) },
         params: meta.parameters.slice(1),
+        paramAbiKinds: meta.paramAbiKinds.slice(1),
         ctx,
         fnCtx,
         compileExpr,
@@ -787,6 +850,7 @@ const compileIndirectTraitDispatchCall = ({
           typedPlan: userTypedPlan,
         },
       });
+  const compiledUserArgs = compiledUserArgDetails.args;
   const argSetups: binaryen.ExpressionRef[] = [];
   const flattenedUserArgs = compiledUserArgs.flatMap((arg, index) => {
     const flattened = flattenTraitDispatchArgument({
@@ -828,7 +892,7 @@ const compileIndirectTraitDispatchCall = ({
           wideResultStorage.type,
         )
       : undefined;
-  const args = [loadReceiver(), ...flattenedUserArgs];
+  const args = [loadReceiverArgument(), ...flattenedUserArgs];
 
   const callArgs = dispatchEffectful
     ? [
@@ -886,7 +950,10 @@ const compileIndirectTraitDispatchCall = ({
         callId: expr.id,
         returnTypeId,
         expectedResultTypeId,
-        tailPosition,
+        tailPosition:
+          receiverWritebacks.length === 0 &&
+          compiledUserArgDetails.writebacks.length === 0 &&
+          tailPosition,
         typeInstanceId,
         ctx,
         fnCtx,
@@ -955,11 +1022,20 @@ const compileIndirectTraitDispatchCall = ({
             usedReturnCall: false,
           };
 
-  ops.push(lowered.expr);
+  const callWithWritebacks = applyCallArgumentWritebacks({
+    call: lowered,
+    writebacks: [
+      ...compiledUserArgDetails.writebacks,
+      ...receiverWritebacks,
+    ],
+    ctx,
+    fnCtx,
+  });
+  ops.push(callWithWritebacks.expr);
   const binaryenResult = getExprBinaryenType(expr.id, ctx, typeInstanceId);
   return {
     expr: ops.length === 1 ? ops[0]! : ctx.mod.block(null, ops, binaryenResult),
-    usedReturnCall: lowered.usedReturnCall,
-    usedOutResultStorageRef: lowered.usedOutResultStorageRef,
+    usedReturnCall: callWithWritebacks.usedReturnCall,
+    usedOutResultStorageRef: callWithWritebacks.usedOutResultStorageRef,
   };
 };

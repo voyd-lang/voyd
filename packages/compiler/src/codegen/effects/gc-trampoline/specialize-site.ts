@@ -18,6 +18,7 @@ import type {
 import { sanitizeIdentifier } from "../effect-lowering/layout.js";
 import {
   getInlineHeapBoxType,
+  getMutableRefStorageType,
   getOptimizedParamAbiKind,
   getRequiredExprType,
   wasmHeapFieldTypeFor,
@@ -302,7 +303,9 @@ const specializeEnvField = ({
         }) !== "direct"
       : field.storageRef === true;
   const storageRefType = storageRef
-    ? getInlineHeapBoxType({ typeId: specializedTypeId, ctx })
+    ? field.bindingKind === "mutable-ref"
+      ? getMutableRefStorageType({ typeId: specializedTypeId, ctx })
+      : getInlineHeapBoxType({ typeId: specializedTypeId, ctx })
     : undefined;
   if (storageRef && typeof storageRefType !== "number") {
     throw new Error("default reference temp requires storage-ref ABI");

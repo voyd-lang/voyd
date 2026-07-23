@@ -136,6 +136,10 @@ binds `times` as an `i32`; it does not bind an `Optional<i32>`. Omitting the
 argument evaluates the default once, while supplying the argument skips the
 default entirely. Multiple omitted defaults are evaluated from left to right.
 
+For calls that borrow a receiver or argument mutably, explicit arguments and
+omitted defaults are evaluated before the mutable call borrow begins. See
+[Borrow Checking](./borrow-checking.md#calls-and-evaluation-order).
+
 Reference-bound parameters may also declare defaults:
 
 ```voyd

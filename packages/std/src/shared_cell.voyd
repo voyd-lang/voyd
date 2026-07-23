@@ -1,0 +1,120 @@
+//! Explicit single-threaded shared mutable state.
+//!
+//! `SharedCell<T>` allows multiple owners to retain the same cell while keeping
+//! access to its value lexically scoped. Runtime checks reject overlapping
+//! mutable and shared access; operations never block and are not thread-safe.
+
+use std::enums::{ enum }
+use std::fixed_array::fns::{ new_fixed_array }
+use std::result::types::{ Result, Ok, Err }
+
+/// A single-threaded container for intentionally shared mutable state.
+///
+/// Prefer an ordinary `~T` borrow when one owner can lend exclusive access.
+/// Use `SharedCell<T>` when multiple long-lived owners must retain the state.
+@intrinsic_type(type: "voyd.std.shared-cell")
+pub obj SharedCell<T> {
+  pri __value: T,
+  pri __borrow_state: FixedArray<i32>
+}
+
+pub enum SharedCellBorrowError
+  AlreadyMutablyBorrowed
+  AlreadySharedBorrowed
+
+impl SharedCell<T>
+  /// Creates an unborrowed cell containing `value`.
+  api fn init(value: T) -> SharedCell<T>
+    SharedCell<T> {
+      __value: value,
+      __borrow_state: new_fixed_array<i32>(1)
+    }
+
+  /// Runs `body` with shared access to the contained value.
+  ///
+  /// Multiple nested shared accesses are allowed. A nested mutable access
+  /// panics with a deterministic conflict message.
+  api fn with<R>(self, body: fn(T) : () -> R): () -> R
+    let status = shared_cell_begin_read(self)
+    if status != 0:
+      shared_cell_borrow_fail(status)
+    let result = body(shared_cell_value(self))
+    shared_cell_end_read(self)
+    result
+
+  /// Runs `body` with exclusive access to the contained value.
+  ///
+  /// Any overlapping shared or mutable access panics with a deterministic
+  /// conflict message.
+  api fn with_mut<R>(self, body: fn(~T) : () -> R): () -> R
+    let status = shared_cell_begin_write(self)
+    if status == 1:
+      shared_cell_borrow_fail(status)
+    if status == 2:
+      shared_cell_borrow_fail(status)
+    let ~value = shared_cell_value(self)
+    let result = body(~value)
+    shared_cell_set_value(self, value)
+    shared_cell_end_write(self)
+    result
+
+  /// Attempts to run `body` with shared access.
+  api fn try_with<R>(
+    self,
+    body: fn(T) : () -> R
+  ): () -> Result<R, SharedCellBorrowError>
+    let status = shared_cell_begin_read(self)
+    if status != 0:
+      return Err<SharedCellBorrowError> {
+        error: SharedCellBorrowError::AlreadyMutablyBorrowed {}
+      }
+    let result = body(shared_cell_value(self))
+    shared_cell_end_read(self)
+    Ok<R> { value: result }
+
+  /// Attempts to run `body` with exclusive access.
+  api fn try_with_mut<R>(
+    self,
+    body: fn(~T) : () -> R
+  ): () -> Result<R, SharedCellBorrowError>
+    let status = shared_cell_begin_write(self)
+    if status == 1:
+      return Err<SharedCellBorrowError> {
+        error: SharedCellBorrowError::AlreadyMutablyBorrowed {}
+      }
+    if status == 2:
+      return Err<SharedCellBorrowError> {
+        error: SharedCellBorrowError::AlreadySharedBorrowed {}
+      }
+    let ~value = shared_cell_value(self)
+    let result = body(~value)
+    shared_cell_set_value(self, value)
+    shared_cell_end_write(self)
+    Ok<R> { value: result }
+
+@intrinsic(name: "__shared_cell_begin_read", uses_signature: false)
+fn shared_cell_begin_read<T>(cell: SharedCell<T>): () -> i32
+  __shared_cell_begin_read(cell)
+
+@intrinsic(name: "__shared_cell_begin_write", uses_signature: false)
+fn shared_cell_begin_write<T>(cell: SharedCell<T>): () -> i32
+  __shared_cell_begin_write(cell)
+
+@intrinsic(name: "__shared_cell_end_read", uses_signature: false)
+fn shared_cell_end_read<T>(cell: SharedCell<T>): () -> void
+  __shared_cell_end_read(cell)
+
+@intrinsic(name: "__shared_cell_end_write", uses_signature: false)
+fn shared_cell_end_write<T>(cell: SharedCell<T>): () -> void
+  __shared_cell_end_write(cell)
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+@intrinsic(name: "__shared_cell_set_value", uses_signature: false)
+fn shared_cell_set_value<T>(cell: SharedCell<T>, value: T): () -> void
+  __shared_cell_set_value(cell, value)
+
+fn shared_cell_borrow_fail(status: i32): () -> void
+  __shared_cell_borrow_fail(status)

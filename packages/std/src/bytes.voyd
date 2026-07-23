@@ -51,6 +51,19 @@ impl Bytes
   api fn to_array(self) -> Array<Byte>
     self.storage.copied()
 
+  /// Returns an independently owned copy of these bytes.
+  api fn copied(self) -> Bytes
+    let ~copy = Array<Byte>::with_capacity(self.len())
+    var index = 0
+    while index < self.len():
+      match(self.get(index))
+        Some<Byte> { value }:
+          copy.push(value)
+        None:
+          void
+      index = index + 1
+    bytes_from_array(copy)
+
 /// A mutable, growable byte buffer.
 pub obj ByteBuffer {
   storage: Array<Byte>
@@ -88,17 +101,23 @@ impl ByteBuffer
 
   /// Appends one byte.
   api fn push(~self, value: Byte) -> void
-    self.storage.push(value)
+    let ~storage = self.storage.copied()
+    storage.push(value)
+    self.storage = storage
 
   /// Appends all bytes from `bytes`.
   ///
   /// This is useful for concatenating previously captured `Bytes` values.
   api fn extend(~self, bytes: Bytes) -> void
-    self.storage.extend(bytes.to_array())
+    let ~storage = self.storage.copied()
+    storage.extend(bytes.to_array())
+    self.storage = storage
 
   /// Removes all bytes.
   api fn clear(~self) -> void
-    self.storage.clear()
+    let ~storage = self.storage.copied()
+    storage.clear()
+    self.storage = storage
 
 fn bytes_from_array(storage: Array<Byte>) -> Bytes
   Bytes { storage: storage }

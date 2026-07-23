@@ -1322,6 +1322,13 @@
     "rationale": "Directly tests parseWhileConditionAndBody AST decomposition and its legacy-syntax error; portable while acceptance is represented by the branch-types extraction candidate."
   },
   {
+    "file": "packages/compiler/src/semantics/borrowing/__tests__/borrowing.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-22",
+    "disposition": "compiler-local",
+    "rationale": "Keep compiler-local: exercises HIR-level borrow facts, interprocedural contracts, place overlap, effect-boundary validation, and diagnostic structure; portable source behavior is separately covered by conformance cases."
+  },
+  {
     "file": "packages/compiler/src/semantics/effects/__tests__/effect-table.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
@@ -2285,6 +2292,18 @@
     "owner": "voyd-library",
     "disposition": "library-local",
     "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
+  },
+  {
+    "file": "packages/std/src/shared_cell.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects SharedCell's standard-library API, dynamic borrow-state transitions, conflict results, and restoration after normal callback return."
+  },
+  {
+    "file": "packages/std/src/shared_cell_usage.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects SharedCell's generic mutable callback ABI for value-semantic and structural payloads."
   },
   {
     "file": "packages/std/src/string/type.test.voyd",

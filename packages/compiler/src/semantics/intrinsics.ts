@@ -67,6 +67,34 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
   ["__task_detach", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__task_cancel", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__task_take_value", { intrinsicUsesSignature: false, access: "std-only" }],
+  [
+    "__shared_cell_begin_read",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__shared_cell_begin_write",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__shared_cell_end_read",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__shared_cell_end_write",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__shared_cell_value",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__shared_cell_set_value",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__shared_cell_borrow_fail",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
   ["__retain_callback", { intrinsicUsesSignature: false, access: "std-only" }],
   [
     "__stable_callsite_id",

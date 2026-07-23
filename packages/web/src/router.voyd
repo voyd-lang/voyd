@@ -2257,8 +2257,7 @@ fn buffer_streaming_request(
     None:
       Ok<IncomingRequest> { value: request }
     Some<RequestBody> { value }:
-      let ~reader = value
-      match(reader.read_all())
+      match(value.read_all())
         Err<HostError> { error }:
           Err<HostError> { error: error }
         Ok<Bytes> { value: bytes }:

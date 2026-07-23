@@ -1,0 +1,164 @@
+use std::array::Array
+use std::result::types::{ Err }
+use std::shared_cell::{ SharedCell, SharedCellBorrowError }
+
+obj Box {
+  value: i32
+}
+
+obj Bag {
+  values: Array<i32>
+}
+
+obj Holder {
+  child: Box,
+  count: i32
+}
+
+trait Replaceable
+  fn replace(~self) -> void
+
+trait PairReplaceable
+  fn replace_and_report(~self) -> (i32, i32)
+
+impl Replaceable for Box
+  fn replace(~self) -> void
+    self = Box { value: 23 }
+
+impl PairReplaceable for Box
+  fn replace_and_report(~self) -> (i32, i32)
+    self = Box { value: 30 }
+    (4, 5)
+
+fn increment(~value: Box) -> void
+  value.value = value.value + 1
+
+fn replace_dynamic(~value: Replaceable) -> void
+  value.replace()
+
+fn replace_dynamic_pair(~value: PairReplaceable) -> (i32, i32)
+  value.replace_and_report()
+
+fn replace_box(~value: Box) -> void
+  value = Box { value: 11 }
+
+fn replace_i32(~value: i32) -> void
+  value = 13
+
+fn replace_box_labeled({ ~value: Box }) -> void
+  value = Box { value: 19 }
+
+fn nested_increment(~value: Box) -> void
+  let ~alias = value
+  increment(~alias)
+
+fn update_from_default(
+  ~value: Box,
+  amount: i32 = value.value
+) -> void
+  value.value = value.value + amount
+
+pub fn mutation_after_completed_reborrow() -> i32
+  let ~value = Box { value: 1 }
+  let ~alias = value
+  increment(~alias)
+  value.value = value.value + 3
+  value.value
+
+pub fn readonly_use_after_mutable_call() -> i32
+  let ~value = Box { value: 4 }
+  increment(~value)
+  let alias = value
+  alias.value
+
+pub fn legal_nested_reborrow() -> i32
+  let ~value = Box { value: 8 }
+  nested_increment(~value)
+  increment(~value)
+  value.value
+
+pub fn default_argument_precedes_mutable_call_borrow() -> i32
+  let ~value = Box { value: 6 }
+  update_from_default(~value)
+  value.value
+
+pub fn shared_cell_mutation() -> i32
+  let cell = SharedCell(Box { value: 9 })
+  cell.with_mut((~value) =>
+    value.value = value.value + 4
+  )
+  cell.with((value) => value.value)
+
+pub fn shared_cell_replacement() -> i32
+  let cell = SharedCell(Box { value: 2 })
+  cell.with_mut((~value) =>
+    value = Box { value: 8 }
+    void
+  )
+  cell.with((value) => value.value)
+
+pub fn mutable_capture_replacement() -> i32
+  let ~value = Box { value: 3 }
+  let replace = () =>
+    value = Box { value: 7 }
+    void
+  replace()
+  value.value
+
+pub fn mutable_alias_replacement() -> i32
+  let ~value = Box { value: 3 }
+  let ~alias = value
+  alias = Box { value: 9 }
+  value.value
+
+pub fn mutable_var_initialization_copies() -> i32
+  var source = 1
+  var copy = source
+  copy = copy + 1
+  source * 10 + copy
+
+pub fn mutable_field_receiver() -> i32
+  let ~bag = Bag { values: Array<i32>::init() }
+  bag.values.push(7)
+  bag.values.at(0)
+
+pub fn mutable_field_replacement() -> i32
+  let ~holder = Holder {
+    child: Box { value: 1 },
+    count: 2
+  }
+  replace_box(~holder.child)
+  replace_i32(~holder.count)
+  replace_box_labeled({ value: holder.child })
+  holder.child.value + holder.count
+
+pub fn mutable_field_closure_replacement() -> i32
+  let replace = (~value: Box) =>
+    value = Box { value: 17 }
+    void
+  let ~holder = Holder {
+    child: Box { value: 1 },
+    count: 2
+  }
+  replace(~holder.child)
+  holder.child.value
+
+pub fn mutable_trait_receiver_replacement() -> i32
+  let ~value = Box { value: 1 }
+  replace_dynamic(~value)
+  value.value
+
+pub fn mutable_trait_receiver_multivalue() -> i32
+  let ~value = Box { value: 1 }
+  let (first, second) = replace_dynamic_pair(~value)
+  value.value + first + second
+
+pub fn shared_cell_conflict_is_recoverable() -> i32
+  let cell = SharedCell(Box { value: 1 })
+  cell.with_mut((~value) =>
+    match(cell.try_with((current) => current.value))
+      Err<SharedCellBorrowError>:
+        value.value
+      else:
+        0
+  )

@@ -12,6 +12,7 @@ import {
   allocateTempLocal,
   declareLocal,
   declareLocalWithTypeId,
+  declareMutableLocalWithTypeId,
   getRequiredBinding,
   loadBindingValue,
   loadBindingStorageRef,
@@ -28,6 +29,7 @@ import {
 } from "./structural.js";
 import {
   getDeclaredSymbolTypeId,
+  getMutableRefStorageType,
   getRequiredExprType,
   getStructuralTypeInfo,
   getSymbolTypeId,
@@ -196,6 +198,38 @@ const canDirectInitializeStorageBackedResult = ({
   }
 };
 
+const mutableAliasSourceSymbol = ({
+  initializer,
+  ctx,
+}: {
+  initializer: HirExprId;
+  ctx: CodegenContext;
+}): number | undefined => {
+  const expr = ctx.module.hir.expressions.get(initializer);
+  if (expr?.exprKind === "identifier") {
+    return expr.symbol;
+  }
+  if (expr?.exprKind !== "call" || expr.args.length !== 1) {
+    return undefined;
+  }
+  const callee = ctx.module.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return undefined;
+  }
+  const calleeId = ctx.program.symbols.canonicalIdOf(
+    ctx.moduleId,
+    callee.symbol,
+  );
+  const intrinsic =
+    ctx.program.symbols.getIntrinsicName(calleeId) ??
+    ctx.program.symbols.getName(calleeId);
+  if (intrinsic !== "~") {
+    return undefined;
+  }
+  const source = ctx.module.hir.expressions.get(expr.args[0]!.expr);
+  return source?.exprKind === "identifier" ? source.symbol : undefined;
+};
+
 const getDirectStorageBackedInit = ({
   binding,
   initializer,
@@ -302,8 +336,45 @@ export const compilePatternInitialization = ({
   const targetTypeId = options.declare
     ? getDeclaredSymbolTypeId(pattern.symbol, ctx, typeInstanceId)
     : getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
+  if (wasmTypeFor(targetTypeId, ctx) === binaryen.none) {
+    ops.push(
+      asStatement(
+        ctx,
+        compileExpr({ exprId: initializer, ctx, fnCtx }).expr,
+        fnCtx,
+      ),
+    );
+    return;
+  }
   const mutableBinding =
     options.mutable === true || pattern.bindingKind === "mutable-ref";
+  const aliasSource =
+    options.declare &&
+    options.mutable !== true &&
+    pattern.bindingKind === "mutable-ref"
+      ? mutableAliasSourceSymbol({ initializer, ctx })
+      : undefined;
+  if (typeof aliasSource === "number") {
+    const sourceBinding = getRequiredBinding(aliasSource, ctx, fnCtx);
+    const sourceStorage = loadBindingStorageRef(sourceBinding, ctx);
+    const storageType = getMutableRefStorageType({
+      typeId: targetTypeId,
+      ctx,
+    });
+    if (sourceStorage && typeof storageType === "number") {
+      const aliasStorage = allocateTempLocal(storageType, fnCtx);
+      fnCtx.bindings.set(pattern.symbol, {
+        kind: "storage-ref",
+        index: aliasStorage.index,
+        type: wasmTypeFor(targetTypeId, ctx),
+        storageType,
+        typeId: targetTypeId,
+        mutable: true,
+      });
+      ops.push(ctx.mod.local.set(aliasStorage.index, sourceStorage));
+      return;
+    }
+  }
   const scalarized = options.declare
     ? tryScalarizeAggregateInitializer({
         symbol: pattern.symbol,
@@ -331,7 +402,14 @@ export const compilePatternInitialization = ({
   );
 
   const binding = options.declare
-    ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
+    ? mutableBinding
+      ? declareMutableLocalWithTypeId(
+          pattern.symbol,
+          targetTypeId,
+          ctx,
+          fnCtx,
+        )
+      : declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
   const directStorageBackedInit = getDirectStorageBackedInit({
     binding,
@@ -391,8 +469,17 @@ export const compilePatternInitializationFromValue = ({
     const targetTypeId = options.declare
       ? getDeclaredSymbolTypeId(pattern.symbol, ctx, typeInstanceId)
       : getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
+    const mutableBinding =
+      options.mutable === true || pattern.bindingKind === "mutable-ref";
     const binding = options.declare
-      ? declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
+      ? mutableBinding
+        ? declareMutableLocalWithTypeId(
+            pattern.symbol,
+            targetTypeId,
+            ctx,
+            fnCtx,
+          )
+        : declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
       : getRequiredBinding(pattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({

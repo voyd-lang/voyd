@@ -16,8 +16,8 @@ import { tryStoreScalarAggregateExpression } from "../optimization/scalar-aggreg
 import {
   coerceValueToType,
   initStructuralValue,
-  lowerValueForHeapField,
   loadStructuralField,
+  storeValueIntoStorageRef,
   storeStructuralField,
 } from "../structural.js";
 import { maybeReportValueBoxingNote } from "../value-boxing-notes.js";
@@ -25,6 +25,7 @@ import {
   allocateTempLocal,
   getRequiredBinding,
   loadLocalValue,
+  loadBindingStorageRef,
   materializeOwnedBinding,
   storeScalarAggregateBindingField,
   storeScalarAggregateBindingValue,
@@ -37,7 +38,6 @@ import {
   getSymbolTypeId,
   wasmTypeFor,
 } from "../types.js";
-import { refCast, structSetFieldValue } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
 
 const storeIntoBinding = ({
@@ -67,16 +67,16 @@ const storeIntoBinding = ({
     if (!binding.mutable) {
       throw new Error("cannot assign to immutable capture");
     }
-    const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
-    const typedEnv =
-      binding.envType === binding.envSuperType
-        ? envRef
-        : refCast(ctx.mod, envRef, binding.envType);
-    return structSetFieldValue({
-      mod: ctx.mod,
-      fieldIndex: binding.fieldIndex,
-      ref: typedEnv,
+    const storageRef = loadBindingStorageRef(binding, ctx);
+    if (!storageRef || typeof binding.typeId !== "number") {
+      throw new Error("mutable capture requires addressable storage");
+    }
+    return storeValueIntoStorageRef({
+      pointer: () => storageRef,
       value: coerced,
+      typeId: binding.typeId,
+      ctx,
+      fnCtx,
     });
   }
 
@@ -197,7 +197,7 @@ const rebuildValueOwner = ({
     ctx,
   });
 
-const compileFieldAssignment = ({
+export const compileFieldAssignment = ({
   targetExpr,
   value,
   valueTypeId,
@@ -516,26 +516,17 @@ export const compileAssignExpr = (
     if (!binding.mutable) {
       throw new Error("cannot assign to immutable capture");
     }
-    const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
-    const typedEnv =
-      binding.envType === binding.envSuperType
-        ? envRef
-        : refCast(ctx.mod, envRef, binding.envType);
+    const storageRef = loadBindingStorageRef(binding, ctx);
+    if (!storageRef || typeof binding.typeId !== "number") {
+      throw new Error("mutable capture requires addressable storage");
+    }
     return {
-      expr: structSetFieldValue({
-        mod: ctx.mod,
-        fieldIndex: binding.fieldIndex,
-        ref: typedEnv,
-        value:
-          binding.storageType === binding.type
-            ? coerced
-            : lowerValueForHeapField({
-                value: coerced,
-                typeId: targetTypeId,
-                targetType: binding.storageType,
-                ctx,
-                fnCtx,
-              }),
+      expr: storeValueIntoStorageRef({
+        pointer: () => storageRef,
+        value: coerced,
+        typeId: binding.typeId,
+        ctx,
+        fnCtx,
       }),
       usedReturnCall: false,
     };
