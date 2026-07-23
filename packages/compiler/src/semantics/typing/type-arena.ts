@@ -64,6 +64,7 @@ export interface StructuralField {
   visibility?: HirVisibility;
   owner?: SymbolId;
   packageId?: string;
+  documentation?: string;
 }
 
 export interface StructuralObjectType {
@@ -168,6 +169,7 @@ export interface UnificationConflict {
 
 export interface TypeArena {
   get(id: TypeId): Readonly<TypeDescriptor>;
+  containsTypeParams(id: TypeId): boolean;
   getScheme(id: TypeSchemeId): Readonly<TypeScheme>;
   internPrimitive(name: string): TypeId;
   createRecursiveType(
@@ -219,6 +221,11 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
   const recursiveUnfoldCache = new Map<TypeId, TypeId>(
     snapshot?.recursiveUnfoldCache ?? [],
   );
+  const containedTypeParamsCache = new Map<
+    TypeId,
+    ReadonlySet<TypeParamId>
+  >();
+  const fieldNameComparisonCache = new Map<string, Map<string, number>>();
 
   const jsonStringKey = (value: string): string => JSON.stringify(value);
 
@@ -243,6 +250,10 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     const ownerKey = typeof field.owner === "number" ? field.owner : "u";
     const packageKey =
       field.packageId === undefined ? "u" : jsonStringKey(field.packageId);
+    const documentationKey =
+      field.documentation === undefined
+        ? "u"
+        : jsonStringKey(field.documentation);
     return [
       jsonStringKey(field.name),
       field.type,
@@ -251,6 +262,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
       fieldVisibilityKeyForCache(field.visibility),
       ownerKey,
       packageKey,
+      documentationKey,
     ].join(":");
   };
 
@@ -340,6 +352,110 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     return desc;
   };
 
+  const containedTypeParams = (root: TypeId): ReadonlySet<TypeParamId> => {
+    const cached = containedTypeParamsCache.get(root);
+    if (cached) {
+      return cached;
+    }
+
+    type Frame = {
+      id: TypeId;
+      children: readonly TypeId[];
+      childIndex: number;
+      params: Set<TypeParamId>;
+      complete: boolean;
+      binder?: TypeParamId;
+    };
+
+    const frameFor = (id: TypeId): Frame => {
+      const desc = getDescriptor(id);
+      const children = (() => {
+        switch (desc.kind) {
+          case "recursive":
+            return [desc.body];
+          case "fixed-array":
+            return [desc.element];
+          case "union":
+            return desc.members;
+          case "intersection":
+            return [
+              ...(typeof desc.nominal === "number" ? [desc.nominal] : []),
+              ...(typeof desc.structural === "number"
+                ? [desc.structural]
+                : []),
+              ...(desc.traits ?? []),
+            ];
+          case "trait":
+          case "nominal-object":
+          case "value-object":
+            return desc.typeArgs;
+          case "structural-object":
+            return desc.fields.map((field) => field.type);
+          case "function":
+            return [
+              ...desc.parameters.map((parameter) => parameter.type),
+              desc.returnType,
+            ];
+          default:
+            return [];
+        }
+      })();
+      return {
+        id,
+        children,
+        childIndex: 0,
+        params:
+          desc.kind === "type-param-ref"
+            ? new Set([desc.param])
+            : new Set<TypeParamId>(),
+        complete: true,
+        binder: desc.kind === "recursive" ? desc.binder : undefined,
+      };
+    };
+
+    const visiting = new Set<TypeId>([root]);
+    const stack: Frame[] = [frameFor(root)];
+    let rootParams = new Set<TypeParamId>();
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1]!;
+      const child = frame.children[frame.childIndex];
+      if (typeof child === "number") {
+        frame.childIndex += 1;
+        const known = containedTypeParamsCache.get(child);
+        if (known) {
+          known.forEach((param) => frame.params.add(param));
+          continue;
+        }
+        if (visiting.has(child)) {
+          frame.complete = false;
+          continue;
+        }
+        visiting.add(child);
+        stack.push(frameFor(child));
+        continue;
+      }
+
+      if (typeof frame.binder === "number") {
+        frame.params.delete(frame.binder);
+      }
+      visiting.delete(frame.id);
+      if (frame.complete) {
+        containedTypeParamsCache.set(frame.id, frame.params);
+      }
+      stack.pop();
+
+      const parent = stack[stack.length - 1];
+      if (parent) {
+        frame.params.forEach((param) => parent.params.add(param));
+        parent.complete &&= frame.complete;
+      } else {
+        rootParams = frame.params;
+      }
+    }
+
+    return containedTypeParamsCache.get(root) ?? rootParams;
+  };
+
   const internPrimitive = (name: string): TypeId =>
     storeDescriptor({ kind: "primitive", name });
 
@@ -397,7 +513,10 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
             (typeof rootDesc.nominal === "number" &&
               containsTypeId(rootDesc.nominal, needle, seen)) ||
             (typeof rootDesc.structural === "number" &&
-              containsTypeId(rootDesc.structural, needle, seen))
+              containsTypeId(rootDesc.structural, needle, seen)) ||
+            (rootDesc.traits?.some((trait) =>
+              containsTypeId(trait, needle, seen),
+            ) ?? false)
           );
         case "trait":
         case "nominal-object":
@@ -425,6 +544,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
       // Preserve the previous behavior for non-recursive constructions:
       // return the canonical interned body type.
       descriptors[self] = desc;
+      containedTypeParamsCache.clear();
       return bodyId;
     }
 
@@ -504,11 +624,17 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
               typeof currentDesc.structural === "number"
                 ? cloneReplacingSelf(currentDesc.structural)
                 : undefined;
+            const traits = currentDesc.traits?.map((trait) =>
+              cloneReplacingSelf(trait),
+            );
             const changed =
               nominal !== currentDesc.nominal ||
-              structural !== currentDesc.structural;
+              structural !== currentDesc.structural ||
+              traits?.some(
+                (trait, index) => trait !== currentDesc.traits?.[index],
+              );
             return changed
-              ? internIntersection({ nominal, structural })
+              ? internIntersection({ nominal, structural, traits })
               : current;
           }
           case "trait":
@@ -545,6 +671,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
                 visibility: field.visibility,
                 owner: field.owner,
                 packageId: field.packageId,
+                documentation: field.documentation,
               })),
             });
           case "function":
@@ -567,6 +694,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
       const placeholder = inProgress.get(current);
       if (typeof placeholder === "number" && rebuilt !== current) {
         descriptors[placeholder] = getDescriptor(rebuilt);
+        containedTypeParamsCache.clear();
         resolved.set(current, placeholder);
         inProgress.delete(current);
         return placeholder;
@@ -579,6 +707,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
 
     const body = cloneReplacingSelf(bodyId);
     descriptors[self] = { kind: "recursive", binder: placeholderParam, body };
+    containedTypeParamsCache.clear();
     // Cache the unfolded form (μ binder . body) => body[binder := self]
     recursiveUnfoldCache.delete(self);
     return self;
@@ -620,6 +749,47 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     return structuralFieldKeyForCache(field);
   };
 
+  const compareFieldNames = (left: string, right: string): number => {
+    if (left === right) {
+      return 0;
+    }
+    let byRight = fieldNameComparisonCache.get(left);
+    if (!byRight) {
+      byRight = new Map();
+      fieldNameComparisonCache.set(left, byRight);
+    }
+    const cached = byRight.get(right);
+    if (typeof cached === "number") {
+      return cached;
+    }
+    const result = left.localeCompare(right, undefined, { numeric: true });
+    byRight.set(right, result);
+    let reverse = fieldNameComparisonCache.get(right);
+    if (!reverse) {
+      reverse = new Map();
+      fieldNameComparisonCache.set(right, reverse);
+    }
+    reverse.set(left, -result);
+    return result;
+  };
+
+  const compareStructuralFields = (
+    a: StructuralField,
+    b: StructuralField,
+  ): number => {
+    const byName = compareFieldNames(a.name, b.name);
+    if (byName !== 0) {
+      return byName;
+    }
+    if (a.type !== b.type) {
+      return a.type - b.type;
+    }
+    if ((a.optional ?? false) !== (b.optional ?? false)) {
+      return a.optional ? 1 : -1;
+    }
+    return fieldShapeKey(a).localeCompare(fieldShapeKey(b));
+  };
+
   const normalizeStructuralFieldShapes = (
     fields: readonly StructuralField[],
   ): readonly StructuralField[] => {
@@ -635,30 +805,23 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
         visibility: field.visibility,
         owner: field.owner,
         packageId: field.packageId,
-      }))
-      .sort((a, b) => {
-        const byName = a.name.localeCompare(b.name, undefined, {
-          numeric: true,
-        });
-        if (byName !== 0) {
-          return byName;
-        }
-        if (a.type !== b.type) {
-          return a.type - b.type;
-        }
-        if ((a.optional ?? false) !== (b.optional ?? false)) {
-          return a.optional ? 1 : -1;
-        }
-        return fieldShapeKey(a).localeCompare(fieldShapeKey(b));
-      });
+        documentation: field.documentation,
+      }));
+    const sorted = normalized.every(
+      (field, index) =>
+        index === 0 ||
+        compareStructuralFields(normalized[index - 1]!, field) <= 0,
+    )
+      ? normalized
+      : normalized.sort(compareStructuralFields);
 
-    const seen = new Set<string>();
-    return normalized.filter((field) => {
+    let previousKey: string | undefined;
+    return sorted.filter((field) => {
       const key = fieldShapeKey(field);
-      if (seen.has(key)) {
+      if (key === previousKey) {
         return false;
       }
-      seen.add(key);
+      previousKey = key;
       return true;
     });
   };
@@ -1281,6 +1444,9 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
       subst: Substitution,
       localSeen: Set<string>,
     ): UnificationResult => {
+      if (left === right) {
+        return success(subst);
+      }
       const substitutedLeft = substitute(left, subst);
       const substitutedRight = substitute(right, subst);
       const resolvedLeft = normalizeStructural(substitutedLeft);
@@ -1538,123 +1704,14 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     }
 
     const mappedParams = new Set(subst.keys());
-    const needsCache = new Map<TypeId, boolean>();
-
     const needsSubstitution = (root: TypeId): boolean => {
-      const cachedRoot = needsCache.get(root);
-      if (typeof cachedRoot === "boolean") {
-        return cachedRoot;
-      }
-
-      const inProgress = new Set<TypeId>();
-      const stack: Array<{ id: TypeId; stage: 0 | 1 }> = [
-        { id: root, stage: 0 },
-      ];
-
-      while (stack.length > 0) {
-        const frame = stack.pop();
-        if (!frame) break;
-
-        const cached = needsCache.get(frame.id);
-        if (typeof cached === "boolean") {
-          continue;
+      const params = containedTypeParams(root);
+      for (const param of mappedParams) {
+        if (params.has(param)) {
+          return true;
         }
-
-        if (frame.stage === 0) {
-          if (inProgress.has(frame.id)) {
-            continue;
-          }
-          inProgress.add(frame.id);
-          stack.push({ id: frame.id, stage: 1 });
-
-          const desc = getDescriptor(frame.id);
-          switch (desc.kind) {
-            case "recursive":
-              stack.push({ id: desc.body, stage: 0 });
-              break;
-            case "fixed-array":
-              stack.push({ id: desc.element, stage: 0 });
-              break;
-            case "union":
-              desc.members.forEach((member) =>
-                stack.push({ id: member, stage: 0 }),
-              );
-              break;
-            case "intersection":
-              if (typeof desc.nominal === "number") {
-                stack.push({ id: desc.nominal, stage: 0 });
-              }
-              if (typeof desc.structural === "number") {
-                stack.push({ id: desc.structural, stage: 0 });
-              }
-              break;
-            case "trait":
-            case "nominal-object":
-            case "value-object":
-              desc.typeArgs.forEach((arg) => stack.push({ id: arg, stage: 0 }));
-              break;
-            case "structural-object":
-              desc.fields.forEach((field) =>
-                stack.push({ id: field.type, stage: 0 }),
-              );
-              break;
-            case "function":
-              desc.parameters.forEach((param) =>
-                stack.push({ id: param.type, stage: 0 }),
-              );
-              stack.push({ id: desc.returnType, stage: 0 });
-              break;
-            default:
-              break;
-          }
-          continue;
-        }
-
-        const desc = getDescriptor(frame.id);
-        const result = (() => {
-          switch (desc.kind) {
-            case "type-param-ref":
-              return mappedParams.has(desc.param);
-            case "recursive":
-              return needsCache.get(desc.body) ?? false;
-            case "fixed-array":
-              return needsCache.get(desc.element) ?? false;
-            case "union":
-              return desc.members.some(
-                (member) => needsCache.get(member) ?? false,
-              );
-            case "intersection":
-              return (
-                (typeof desc.nominal === "number" &&
-                  (needsCache.get(desc.nominal) ?? false)) ||
-                (typeof desc.structural === "number" &&
-                  (needsCache.get(desc.structural) ?? false))
-              );
-            case "trait":
-            case "nominal-object":
-            case "value-object":
-              return desc.typeArgs.some((arg) => needsCache.get(arg) ?? false);
-            case "structural-object":
-              return desc.fields.some(
-                (field) => needsCache.get(field.type) ?? false,
-              );
-            case "function":
-              return (
-                desc.parameters.some(
-                  (param) => needsCache.get(param.type) ?? false,
-                ) ||
-                (needsCache.get(desc.returnType) ?? false)
-              );
-            default:
-              return false;
-          }
-        })();
-
-        inProgress.delete(frame.id);
-        needsCache.set(frame.id, result);
       }
-
-      return needsCache.get(root) ?? false;
+      return false;
     };
 
     if (!needsSubstitution(type)) {
@@ -1743,6 +1800,9 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
               if (typeof desc.structural === "number") {
                 stack.push({ id: desc.structural, stage: 0 });
               }
+              desc.traits?.forEach((trait) =>
+                stack.push({ id: trait, stage: 0 }),
+              );
               break;
             case "trait":
             case "nominal-object":
@@ -1827,11 +1887,16 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
                 typeof desc.structural === "number"
                   ? getSubstituted(desc.structural)
                   : undefined;
+              const traits = desc.traits?.map((trait) =>
+                getSubstituted(trait),
+              );
               const changed =
-                nominal !== desc.nominal || structural !== desc.structural;
+                nominal !== desc.nominal ||
+                structural !== desc.structural ||
+                traits?.some((trait, index) => trait !== desc.traits?.[index]);
               return changed
                 ? {
-                    type: internIntersection({ nominal, structural }),
+                    type: internIntersection({ nominal, structural, traits }),
                     changed: true,
                   }
                 : { type: current, changed: false };
@@ -1899,6 +1964,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
                       visibility: field.visibility,
                       owner: field.owner,
                       packageId: field.packageId,
+                      documentation: field.documentation,
                     };
               });
               return changed
@@ -1943,6 +2009,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
           const replacementDesc =
             rebuilt.type === current ? desc : getDescriptor(rebuilt.type);
           descriptors[placeholder] = replacementDesc;
+          containedTypeParamsCache.clear();
           descriptorCache.set(keyFor(replacementDesc), placeholder);
           resolved.set(current, placeholder);
           inProgress.delete(current);
@@ -1975,6 +2042,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
 
   return {
     get,
+    containsTypeParams: (id) => containedTypeParams(id).size > 0,
     getScheme,
     internPrimitive,
     createRecursiveType,
@@ -2064,6 +2132,7 @@ const cloneTypeDescriptor = (desc: TypeDescriptor): TypeDescriptor => {
           visibility: field.visibility ? { ...field.visibility } : undefined,
           owner: field.owner,
           packageId: field.packageId,
+          documentation: field.documentation,
         })),
       };
     case "function":

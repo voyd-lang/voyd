@@ -81,6 +81,10 @@ pub fn pack_boundary_value<T>(value: T): () -> MsgPack
 pub fn unpack_boundary_value<T>(value: MsgPack): () -> T
   boundary_msgpack_to_value<T>(value)
 
+/// Returns `source` when it already has the target type; otherwise decodes `value`.
+pub fn unpack_boundary_value_or_identity<T, U>(source: U, value: MsgPack): () -> T
+  boundary_msgpack_to_value_or_identity<T, U>(source, value)
+
 pub fn unpack_bool(value: MsgPack): () -> Result<bool, MsgPackError>
   value.match(decoded)
     Bool:
@@ -222,6 +226,10 @@ fn boundary_value_to_msgpack<T>(value: T): () -> MsgPack
 @intrinsic(name: "__boundary_msgpack_to_value")
 fn boundary_msgpack_to_value<T>(value: MsgPack): () -> T
   __boundary_msgpack_to_value<T>(value)
+
+@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
+fn boundary_msgpack_to_value_or_identity<T, U>(source: U, value: MsgPack): () -> T
+  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
 
 /// Encodes `value` into the caller-provided memory region `[ptr, ptr + len)`.
 ///

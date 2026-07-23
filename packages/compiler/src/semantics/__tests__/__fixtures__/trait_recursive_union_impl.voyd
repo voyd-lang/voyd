@@ -1,0 +1,20 @@
+trait Describe<T>
+  fn describe(self) -> i32
+
+obj End {}
+
+obj Link {
+  next: Chain
+}
+
+type Chain = End | Link
+
+impl Describe<Chain> for Chain
+  fn describe(self) -> i32
+    42
+
+fn describe<T: Describe<T>>(value: T) -> i32
+  value.describe()
+
+pub fn main() -> i32
+  describe<Chain>(End {})

@@ -11,7 +11,7 @@ use super::router::App
 
 /// Serves a Web app with request-body streaming enabled.
 ///
-/// Routes marked `.streaming()` can access the one-shot reader with
+/// Routes marked with `.streaming(path, method: ...)` can access the one-shot reader with
 /// `ctx.streaming_body()`. Other routes are buffered lazily so ordinary body
 /// extractors can coexist in the same app.
 pub fn serve(

@@ -1,0 +1,19 @@
+pub trait Describe<T>
+  fn describe<U>(self) -> i32
+
+  fn default_description<U>(self) -> i32
+    self
+    91
+
+obj Builtin {}
+
+impl Describe<Builtin> for Builtin
+  fn describe<U>(self) -> i32
+    self
+    1
+
+pub fn describe_value<T, P: Describe<T>>(provider: P) -> i32
+  provider.describe<T>()
+
+pub fn describe_default<T, P: Describe<T>>(provider: P) -> i32
+  provider.default_description<T>()

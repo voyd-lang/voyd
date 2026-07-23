@@ -17,6 +17,8 @@ type ImportMetadata = {
   import?: { moduleId?: unknown; symbol?: unknown };
 };
 
+const externallyHydratedTraitOwners = new WeakMap<TypingContext, Set<string>>();
+
 const resolveDependencySymbolChain = ({
   dependency,
   dependencySymbol,
@@ -147,6 +149,56 @@ export const hydrateImportedTraitMetadataForOwnerRef = ({
     ctx,
   });
   return true;
+};
+
+/** Makes extension implementations visible outside the trait's owner module. */
+export const hydrateExternalTraitImplsForOwnerRef = ({
+  ownerModuleId,
+  ownerSymbol,
+  ctx,
+}: {
+  ownerModuleId: string;
+  ownerSymbol: SymbolId;
+  ctx: TypingContext;
+}): void => {
+  const hydrated = externallyHydratedTraitOwners.get(ctx) ?? new Set<string>();
+  if (!externallyHydratedTraitOwners.has(ctx)) {
+    externallyHydratedTraitOwners.set(ctx, hydrated);
+  }
+  const ownerKey = `${ownerModuleId}::${ownerSymbol}`;
+  if (hydrated.has(ownerKey)) {
+    return;
+  }
+  hydrated.add(ownerKey);
+
+  try {
+    ctx.dependencies.forEach((dependency) => {
+      if (dependency.moduleId === ctx.moduleId) {
+        return;
+      }
+      dependency.typing.traits.getImplTemplates().forEach((template) => {
+        const resolved = resolveDependencySymbolChain({
+          dependency,
+          dependencySymbol: template.traitSymbol,
+          ctx,
+        });
+        if (
+          resolved.dependency.moduleId !== ownerModuleId ||
+          resolved.dependencySymbol !== ownerSymbol
+        ) {
+          return;
+        }
+        registerImportedTraitImplTemplates({
+          dependency,
+          dependencySymbol: template.traitSymbol,
+          ctx,
+        });
+      });
+    });
+  } catch (error) {
+    hydrated.delete(ownerKey);
+    throw error;
+  }
 };
 
 export const hydrateImportedTraitMetadataForNominal = ({

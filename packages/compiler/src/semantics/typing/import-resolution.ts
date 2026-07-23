@@ -9,6 +9,11 @@ import {
 
 export type ImportTarget = { moduleId: string; symbol: SymbolId };
 
+const dependencyContextCache = new WeakMap<
+  TypingContext,
+  WeakMap<DependencySemantics, TypingContext>
+>();
+
 export const importTargetFor = (
   symbol: SymbolId,
   ctx: TypingContext,
@@ -116,8 +121,19 @@ export const findExport = (
 export const makeDependencyContext = (
   dependency: DependencySemantics,
   ctx: TypingContext,
-): TypingContext =>
-  createTypingContextFromTypingResult({
+): TypingContext => {
+  const contexts =
+    dependencyContextCache.get(ctx) ??
+    new WeakMap<DependencySemantics, TypingContext>();
+  if (!dependencyContextCache.has(ctx)) {
+    dependencyContextCache.set(ctx, contexts);
+  }
+  const cached = contexts.get(dependency);
+  if (cached) {
+    return cached;
+  }
+
+  const created = createTypingContextFromTypingResult({
     symbolTable: dependency.symbolTable,
     hir: dependency.hir,
     overloads: dependency.overloads,
@@ -131,3 +147,6 @@ export const makeDependencyContext = (
     importAliasesByModule: new Map(),
     typing: dependency.typing,
   });
+  contexts.set(dependency, created);
+  return created;
+};

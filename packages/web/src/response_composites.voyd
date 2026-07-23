@@ -1,0 +1,34 @@
+//! Composite response contracts for `Result` and `Option`.
+
+use std::array::Array
+use std::http::Response
+use std::optional::types::{ Option, Some, None }
+use std::result::types::{ Result, Ok, Err }
+use super::openapi::contract::{ OpenApiResponseContract, empty_response_contract }
+use super::response::{ IntoResponse, typed_response }
+use super::openapi::response_contracts::{ append_response_contract, merge_response_contracts }
+
+impl<T: IntoResponse<T>, E: IntoResponse<E>> IntoResponse<Result<T, E>> for Result<T, E>
+  fn into_response(self) -> Response
+    match(self)
+      Ok<T> { value }:
+        typed_response<T>(value)
+      Err<E> { error }:
+        typed_response<E>(error)
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    merge_response_contracts(T::openapi_responses(), E::openapi_responses())
+
+impl<T: IntoResponse<T>> IntoResponse<Option<T>> for Option<T>
+  fn into_response(self) -> Response
+    match(self)
+      Some<T> { value }:
+        typed_response<T>(value)
+      None:
+        Response::not_found().empty()
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    let ~responses = T::openapi_responses()
+    append_response_contract(
+      responses,
+      empty_response_contract(status: 404, description: "Not found")
+    )
+    responses

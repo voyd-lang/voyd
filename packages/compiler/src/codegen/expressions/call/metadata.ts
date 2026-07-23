@@ -10,12 +10,14 @@ export const getFunctionMetadataForCall = ({
   ctx,
   moduleId,
   typeInstanceId,
+  typeArgsOverride,
 }: {
   symbol: number;
   callId: HirExprId;
   ctx: CodegenContext;
   moduleId?: string;
   typeInstanceId?: ProgramFunctionInstanceId;
+  typeArgsOverride?: readonly number[];
 }): FunctionMetadata | undefined => {
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, callId);
   const rawTypeArgs = (() => {
@@ -24,6 +26,7 @@ export const getFunctionMetadataForCall = ({
       if (resolved) {
         return resolved;
       }
+      return [];
     }
 
     const template =
@@ -52,9 +55,11 @@ export const getFunctionMetadataForCall = ({
   })();
 
   const substitution = buildInstanceSubstitution({ ctx, typeInstanceId });
-  const typeArgs = substitution
-    ? rawTypeArgs.map((arg) => ctx.program.types.substitute(arg, substitution))
-    : rawTypeArgs;
+  const typeArgs =
+    typeArgsOverride ??
+    (substitution
+      ? rawTypeArgs.map((arg) => ctx.program.types.substitute(arg, substitution))
+      : rawTypeArgs);
 
   const candidates: { moduleId: string; symbol: number }[] = [
     { moduleId: moduleId ?? ctx.moduleId, symbol },

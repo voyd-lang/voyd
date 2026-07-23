@@ -4,23 +4,9 @@ order: 9
 
 # Web
 
-`pkg::web` is Voyd's HTTP framework. Use it to build JSON APIs,
+`pkg::web` is Voyd's web application framework. Use it to build JSON APIs,
 server-rendered sites, or applications that combine HTTP routes with a VX
 client.
-
-This guide starts with ordinary routes and then follows the path of a request:
-
-1. choose a route;
-2. decode request data;
-3. return a response;
-4. handle errors and cross-cutting concerns;
-5. optionally publish an OpenAPI description or render VX pages.
-
-Most applications can begin with one import:
-
-```voyd
-use pkg::web::all
-```
 
 ## Start a project
 
@@ -60,12 +46,8 @@ This is a complete server with two routes:
 
 ```voyd
 use pkg::web::all
-use std::error::HostError
-use std::http::server
-use std::result::types::all
-use std::task
 
-pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
+pub fn main()
   serve(port: 3000, host: "127.0.0.1") routes():
     get("/") do:
       "Hello from Voyd"
@@ -75,8 +57,28 @@ pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError
 ```
 
 `serve` starts the HTTP server and builds the routes inside `routes():`.
-Because it uses `std::http::server`, the entrypoint declares the HTTP server and
-task runtime effects. Effects used by handlers belong in this effect row too.
+
+## Module structure
+
+`pkg::web::all` is the recommended application import. It exports routing,
+extractors, typed responses, middleware, OpenAPI helpers, streaming, SSE, and
+HTML rendering. Import a narrower module when writing reusable framework code:
+
+| Module | Main exports |
+| --- | --- |
+| `pkg::web::router` | `App`, `Router`, `Context`, and app builders |
+| `pkg::web::routes` | Free route functions, composition helpers, and timeout policies |
+| `pkg::web::extract` | Body, auth, parameter, query, header, and cookie extractors |
+| `pkg::web::response` | `IntoResponse`, typed responses, and raw conversion |
+| `pkg::web::openapi` | OpenAPI contracts and the low-level manual document builder |
+| `pkg::web::middleware` | Built-in middleware |
+| `pkg::web::html` | VX server-rendering responses |
+| `pkg::web::multipart` / `pkg::web::negotiate` | Multipart forms and content negotiation |
+| `pkg::web::static_files` | Static-directory middleware |
+| `pkg::web::request_streaming` / `pkg::web::streaming` / `pkg::web::sse` | Request streams, response streams, and server-sent events |
+
+Examples use `use pkg::web::all` unless they show a narrower import explicitly.
+They import standard-library types where those names appear in annotations.
 
 ## Routes
 
@@ -100,6 +102,9 @@ The method helpers share these parameters:
 Policies compose:
 
 ```voyd
+use pkg::web::all
+use std::string::type::String
+
 post(
   "/articles",
   body: json_body(),
@@ -119,6 +124,8 @@ Use `get` for read-only endpoints. It accepts `path`, plus optional `auth` and
 `timeout` policies.
 
 ```voyd
+use pkg::web::all
+
 get("/articles") do:
   json({ count: 0 })
 ```
@@ -126,6 +133,9 @@ get("/articles") do:
 Path parameters begin with `:` and decode into the handler's `params` record:
 
 ```voyd
+use pkg::web::all
+use std::string::type::String
+
 type ArticleParams = {
   slug: String
 }
@@ -140,6 +150,9 @@ Use `post` to create resources or start operations. It accepts `path`, and can
 also accept `body`, `limit`, `auth`, and `timeout`.
 
 ```voyd
+use pkg::web::all
+use std::string::type::String
+
 type CreateArticle = {
   title: String,
   published: bool
@@ -158,6 +171,8 @@ Use `put` when the request replaces a resource. It supports the same policies
 as `post`.
 
 ```voyd
+use pkg::web::all
+
 put("/articles/:slug", body: json_body()) do(
   input: CreateArticle,
   ctx: Context
@@ -172,6 +187,9 @@ Use `patch` for a partial update. Optional record fields distinguish omitted
 values from required ones.
 
 ```voyd
+use pkg::web::all
+use std::string::type::String
+
 type UpdateArticle = {
   title?: String,
   published?: bool
@@ -191,6 +209,8 @@ Use `delete` to remove a resource. A successful deletion commonly returns
 `204 No Content`.
 
 ```voyd
+use pkg::web::all
+
 delete("/articles/:slug") do(params: ArticleParams):
   params
   Response::no_content().empty()
@@ -206,6 +226,8 @@ dynamically. `method` is required; `body`, `limit`, `auth`, and `timeout` remain
 available.
 
 ```voyd
+use pkg::web::all
+
 use std::http::Method
 
 route("/articles", method: Method::Options {}) do:
@@ -220,6 +242,8 @@ route("/articles", method: Method::Options {}) do:
 `routes():` block. Groups can be nested.
 
 ```voyd
+use pkg::web::all
+
 group("/api") routes():
   get("/health") do:
     json({ healthy: true })
@@ -241,6 +265,8 @@ Trailing slashes are strict by default. Configure an app directly when
 `/about` and `/about/` should be equivalent:
 
 ```voyd
+use pkg::web::all
+
 let web_app = app()
   .with(trailing_slash: ignore_trailing_slash())
   .get("/about", handler: () => "About")
@@ -278,6 +304,9 @@ unusual combination, accept `ctx` and read the values dynamically.
 The record field must match the `:name` in the path:
 
 ```voyd
+use pkg::web::all
+use std::string::type::String
+
 type RevisionParams = {
   slug: String,
   revision: String
@@ -293,6 +322,9 @@ produces `400 Bad Request` before the handler runs.
 ### Query parameters
 
 ```voyd
+use pkg::web::all
+use std::string::type::String
+
 type SearchQuery = {
   q: String,
   page: i32,
@@ -311,6 +343,9 @@ A query-only handler includes `ctx` last so its shape is unambiguous.
 ### Headers and cookies
 
 ```voyd
+use pkg::web::all
+use std::string::type::String
+
 type RequestHeaders = {
   authorization: String
 }
@@ -320,6 +355,9 @@ get("/account") do(headers: RequestHeaders):
 ```
 
 ```voyd
+use pkg::web::all
+use std::string::type::String
+
 type SessionCookies = {
   session: String
 }
@@ -337,6 +375,8 @@ may omit it.
 It parses the body and decodes it into the handler's `input` type:
 
 ```voyd
+use pkg::web::all
+
 post("/articles", body: json_body()) do(input: CreateArticle):
   json(input)
 ```
@@ -347,6 +387,8 @@ unsupported content type produces `415 Unsupported Media Type`.
 Limit one route independently of the server-wide body limit:
 
 ```voyd
+use pkg::web::all
+
 post(
   "/articles",
   body: json_body(),
@@ -361,7 +403,9 @@ intentionally distinct.
 ### Text and byte bodies
 
 ```voyd
+use pkg::web::all
 use std::bytes::Bytes
+use std::string::type::String
 
 post("/echo", body: text_body()) do(input: String):
   Response::ok().text(input)
@@ -378,6 +422,8 @@ Use `Context` when the shape is dynamic or framework code needs the raw
 request:
 
 ```voyd
+use pkg::web::all
+
 get("/inspect/:id") do(ctx: Context):
   let id = ctx.param("id") ?? "missing"
   let mode = ctx.query_value("mode") ?? "default"
@@ -396,6 +442,8 @@ Useful methods include:
 Direct JSON access returns an untyped `JsonValue`:
 
 ```voyd
+use pkg::web::all
+
 use std::result::types::all
 
 post("/raw-json") do(ctx: Context):
@@ -412,7 +460,9 @@ A normal HTML form uses `application/x-www-form-urlencoded`. Decode it as text,
 then parse the fields:
 
 ```voyd
+use pkg::web::all
 use std::optional::types::all
+use std::string::type::String
 
 post("/articles", body: text_body()) do(input: String):
   match(parse_query(input).get("title"))
@@ -430,6 +480,8 @@ validation does not replace server-side validation.
 Use `multipart_body()` for `multipart/form-data`. File parts remain bytes:
 
 ```voyd
+use pkg::web::all
+
 post("/upload", body: multipart_body()) do(form: MultipartForm):
   match(form.get("asset"))
     Some<MultipartPart> { value: asset }:
@@ -450,6 +502,8 @@ handler never mutates a shared response object.
 ### Text, bytes, and status codes
 
 ```voyd
+use pkg::web::all
+
 get("/hello") do:
   "hello"
 
@@ -475,6 +529,8 @@ Supported values include:
 Build a response directly for custom headers:
 
 ```voyd
+use pkg::web::all
+
 post("/articles") do:
   Response::created()
     .with(header: "location", value: "/articles/first")
@@ -487,6 +543,8 @@ post("/articles") do:
 `content-type` header:
 
 ```voyd
+use pkg::web::all
+
 get("/api/articles/:slug") do(params: ArticleParams):
   json({
     slug: params.slug,
@@ -497,13 +555,19 @@ get("/api/articles/:slug") do(params: ArticleParams):
 Start from a `Response` to choose another status or add headers:
 
 ```voyd
+use pkg::web::all
+
 post("/api/articles", body: json_body()) do(input: CreateArticle):
   Response::created().json(value: input)
 ```
 
 Use `json_value(value)` only when code already has a `JsonValue`. Use
-`result_json(result)` to serialize the successful branch of a `Result`, or
-`option_json(option)` to serialize `Some` and return 404 for `None`.
+`result_json(result)` to turn `Result<T, E>` into `Result<Json<T>, E>`, or
+`option_json(option)` to turn `Option<T>` into `Option<Json<T>>`. These typed
+values preserve automatic OpenAPI schemas and statuses. If an API explicitly
+needs a raw `Response`, call `to_response(result_json(result))` or use
+`result_json_response(result)`; `option_json_response(option)` is the matching
+raw option helper.
 
 ### Content negotiation
 
@@ -519,6 +583,8 @@ supported representation.
 producer returns. Each `write_stream` waits for host backpressure:
 
 ```voyd
+use pkg::web::all
+
 get("/chunks") do:
   stream(
     Response::ok().with(
@@ -541,6 +607,8 @@ stop after an error.
 SSE wire format:
 
 ```voyd
+use pkg::web::all
+
 use std::http::server::ResponseWriter
 
 fn publish_events(sender: SseSender): ResponseWriter -> void
@@ -559,6 +627,39 @@ get("/events") do:
 an idle watchdog; periodic comments keep a quiet but healthy connection alive.
 WebSockets are not currently part of the framework.
 
+## Composing applications
+
+Use immutable `App` methods when routes are assembled conditionally or passed
+between functions:
+
+```voyd
+use pkg::web::all
+
+let web_app = app()
+  .get("/health", handler: () => "ok")
+  .get_context(
+    "/debug",
+    handler: (ctx) => json({ path: ctx.path() })
+  )
+```
+
+Mount a reusable router under a prefix:
+
+```voyd
+use pkg::web::all
+use pkg::web::router
+
+let api = router::Router::init()
+  .get("/health", handler: () => "ok")
+
+let web_app = app().mount("/api", api)
+```
+
+Grouping and mounting preserve each route's runtime handler and OpenAPI
+contract, applying the same prefix to both. Serve an `App` with
+`serve(web_app, port: 3000)` or `serve_app(web_app, port: 3000)`. `build_app`
+and the free route helpers support callback-based composition.
+
 ## Errors and rejections
 
 Web distinguishes routing failures from request-decoding failures:
@@ -572,6 +673,8 @@ Web distinguishes routing failures from request-decoding failures:
 Customize these responses once at the application boundary:
 
 ```voyd
+use pkg::web::all
+
 serve(port: 3000) routes():
   not_found() do(_ctx: Context):
     Response::not_found().text("Page not found")
@@ -597,7 +700,9 @@ Common constructors are `bad_request`, `not_found`, `payload_too_large`,
 The built-in policies read the `authorization` header:
 
 ```voyd
+use pkg::web::all
 use std::optional::types::all
+use std::string::type::String
 
 get("/account", auth: required_session()) do(session: String):
   json({ user: session })
@@ -622,7 +727,9 @@ Middleware receives `Context` and `Next`. Call `next(ctx)` to continue or
 return early:
 
 ```voyd
+use pkg::web::all
 use std::optional::types::all
+use std::string::type::String
 
 fn require_request_id(ctx: Context, next: Next) -> Response
   match(ctx.header("x-request-id"))
@@ -644,26 +751,38 @@ it, including routes in later groups. The package includes
 
 ## OpenAPI
 
-### What OpenAPI is for
+Web derives OpenAPI 3.1 from the same immutable routes that execute requests.
+There is no second route list to keep synchronized and no handler-body
+analysis.
 
-OpenAPI is a machine-readable description of an HTTP API. An OpenAPI document
-lists paths, methods, parameters, request bodies, response bodies, and their
-schemas. Tools can use that JSON document to:
+### Serve DSL
 
-- render interactive API documentation with Swagger UI or Redoc;
-- generate clients and server stubs;
-- validate requests and responses in tests or gateways;
-- import the API into tools such as Postman.
+Pass document metadata with the top-level `openapi:` label, then add
+`expose_openapi(...)` anywhere in the route block:
 
-Web generates an OpenAPI 3.1 JSON document from explicit route metadata and
-Voyd types. It can serve the raw document at `/openapi.json`. A documentation UI
-is a separate frontend that reads that URL.
+```voyd
+use pkg::web::all
 
-### Complete example
+pub fn main()
+  serve(
+    port: 3000,
+    openapi: {
+      title: "Articles API",
+      version: "1.0.0"
+    }
+  ) routes():
+    get("/health") do:
+      text_response("ok")
 
-Every name used below is defined in the example. The real handler and its
-OpenAPI description are created separately, then connected by
-`document_openapi_route`.
+    expose_openapi(at: "/openapi.json")
+```
+
+The exposure route renders the final application, including routes declared
+after it, and does not document itself. Set `include_doc_comments: false` on
+`expose_openapi` to omit `///` prose. `openapi:` configures the whole document;
+route-level `docs:` continues to describe one operation.
+
+### Complete automatic example
 
 ```voyd
 use pkg::web::all
@@ -683,74 +802,265 @@ obj Article {
   api title: String
 }
 
-fn create_article(input: CreateArticleInput) -> Response
-  let article = Article { id: 1, title: input.title }
-  Response::created().json(value: article)
+fn create_article(input: CreateArticleInput) -> Created<Article>
+  created(Article {
+    id: 1,
+    title: input.title
+  })
 
 fn build_article_app() -> App
-  let routes = post(
-    app(),
-    "/articles".as_slice(),
-    body: json_body(),
-    handler: create_article
-  )
+  app(openapi: {
+    title: "Articles API",
+    version: "1.0.0"
+  })
+    .post(
+      "/articles",
+      body: json_body(),
+      handler: create_article,
+      docs: {
+        description: "Create an article",
+        operation_id: "createArticle",
+        tags: ["articles"]
+      }
+    )
+    .expose_openapi(
+      at: "/openapi.json",
+      include_doc_comments: true
+    )
+```
 
-  let create_article_docs = openapi_operation(
-    summary: "Create an article".to_string(),
-    operation_id: "createArticle".to_string(),
-    response_status: 201,
-    response_description: "Article created".to_string()
-  )
-    .with_json_body<CreateArticleInput>()
-    .responds_json<Article>()
+`app()` still works without OpenAPI. Each route and `expose_openapi` call
+returns a new `App`; the exposure route does not describe itself.
 
-  let empty_docs = openapi_document(openapi_info(
+### What is inferred
+
+| Route type | OpenAPI contract |
+| --- | --- |
+| Typed path record | Required path parameters; `:id` becomes `{id}` |
+| Typed query, header, or cookie record | Names, schemas, and optionality |
+| `json_body()` and limited JSON | `application/json` and the input DTO |
+| `text_body()` and limited text | Text body and string schema |
+| `bytes()` and limited bytes | Binary body |
+| Multipart | `multipart/form-data`, opaque when typed parts are unavailable |
+| Raw `JsonValue` body | `application/json` without a fabricated DTO schema |
+| Raw `Context` or undocumented custom extractor | Honest opaque contract |
+
+Raw `Response` has erased its payload type and runtime statuses cannot be
+guessed. Use a typed response or an explicit override for those routes.
+
+### Typed responses
+
+```voyd
+use pkg::web::all
+
+fn fetch_article() -> Json<Article>
+  json(article)
+
+fn create_article(input: CreateArticleInput) -> Created<Article>
+  created(create(input))
+
+fn queue_article(input: CreateArticleInput) -> Accepted<Article>
+  accepted(queue(input))
+
+fn delete_article() -> NoContent
+  no_content()
+```
+
+`Json<T>`, `Created<T>`, and `Accepted<T>` document JSON responses with status
+`200`, `201`, and `202`. `NoContent` documents an empty `204`.
+`text_response(value)` and `bytes_response(value)` retain their media types.
+The response names stay distinct from the zero-argument `text()` and `bytes()`
+request extractors exported by `pkg::web::all`. Direct imports from
+`pkg::web::response` use the shorter `text(value)` and `bytes(value)` names.
+`Result<T, E>` combines both
+branches, and `Option<T>` adds the framework's empty `404` response. An
+undocumented branch remains an honest `default` response instead of being
+invented as `200` or dropped. Return `typed_sse_response(...)` when an SSE
+handler should contribute its contract; the raw `sse_response(...)` helper is
+opaque. Typed SSE is documented as its encoded
+`text/event-stream; charset=utf-8` wire format, with the statically known event
+shape retained as `x-voyd-event-schema` metadata.
+
+For example, this handler contributes both `201` and `202`:
+
+```voyd
+use pkg::web::all
+use std::result::types::all
+
+fn create_or_queue(input: CreateArticleInput, create_now: bool) -> Result<Created<Article>, Accepted<Article>>
+  let article = Article { id: 1, title: input.title }
+  if create_now:
+    Ok<Created<Article>> { value: created(article) }
+  else:
+    Err<Accepted<Article>> { error: accepted(article) }
+```
+
+Call `to_response(value)` when a boundary specifically needs raw `Response`.
+Existing custom `IntoResponse` implementations continue to work when OpenAPI
+is unused. To document one, also implement `OpenApiResponse`, return
+`DocumentedResponse<YourType>`, and wrap the value with
+`documented_response(value)`. This keeps runtime conversion independent from
+the optional static contract.
+
+```voyd
+use pkg::web::all
+use std::array::Array
+use std::string::type::String
+
+obj PlainReply {
+  api value: String
+}
+
+impl IntoResponse<PlainReply> for PlainReply
+  fn into_response(self) -> Response
+    Response::ok().text(self.value)
+
+impl OpenApiResponse<PlainReply> for PlainReply
+  fn documented_responses() -> Array<OpenApiResponseContract>
+    [openapi_typed_response<String>(
+      status: 200,
+      description: "Successful response",
+      content_type: "text/plain"
+    )]
+
+fn plain_reply() -> DocumentedResponse<PlainReply>
+  documented_response(PlainReply { value: "ready" })
+```
+
+### Overrides, hidden routes, and comments
+
+`docs:` supplements inference and takes precedence over inferred or
+comment-derived text:
+
+```voyd
+use pkg::web::all
+
+app.post(
+  "/articles",
+  body: json_body(),
+  handler: create_article,
+  docs: {
+    summary: "Create an article",
+    description: "Creates and returns an article",
+    operation_id: "createArticle",
+    tags: ["articles"]
+  }
+)
+```
+
+Use `docs: { hidden: true }` to omit a runtime route. Inline `docs: {...}`
+literals are for summary, description, operation ID, tags, and hidden state.
+Build typed request, parameter, response, and schema overrides with
+`route_docs(...)`; this keeps their `Shape` values intact. Dynamic routes can
+supply those advanced overrides. `openapi_json_response<T>(...)`
+and `openapi_response(...)` support multiple responses, media types, and
+headers without requiring overrides on ordinary typed routes. Use
+`openapi_header<T>(...)` for a typed response header or
+`openapi_untyped_header(...)` when only its wire-level string value is known.
+
+```voyd
+use pkg::web::all
+use std::string::type::String
+
+obj ApiError {
+  api message: String
+}
+
+fn dynamic_article_response(_ctx: Context) -> Response
+  Response::not_found().empty()
+
+app.route(
+  "/articles/:id",
+  method: Method::Get {},
+  handler: dynamic_article_response,
+  docs: route_docs(responses: [
+    openapi_json_response<Article>(
+      status: 200,
+      description: "Article found"
+    ),
+    openapi_json_response<ApiError>(
+      status: 404,
+      description: "Article not found"
+    )
+  ])
+)
+```
+
+Use `openapi_schema_docs`, `openapi_field_docs`, and
+`openapi_response_schema_docs` to replace prose on an inferred request or
+response schema without restating its DTO type.
+
+Specialized auth, timeout, context, body-limit, and combined-extractor helpers
+can receive the same metadata after insertion with `with_route_docs`:
+
+```voyd
+use pkg::web::all
+
+let routed = route_query_context<SearchQuery, Json<SearchResults>>(
+  app,
+  "/search",
+  method: Method::Get {},
+  search
+)
+
+let documented = routed
+  .with_route_docs(
+    "/search",
+    method: Method::Get {},
+    docs: RouteDocs::empty()
+      .with_description("Search published articles")
+      .with_operation_id("searchArticles")
+  )
+```
+
+The method and concrete path identify the route, so grouping and mounting do
+not depend on whichever route happened to be added most recently.
+
+DTO and field `///` comments become descriptions. Setting
+`include_doc_comments: false` removes only comment-derived prose; explicit
+`docs:` text, schemas, optionality, and generated descriptions remain.
+
+### Composition and validation
+
+Groups and mounts prefix both runtime and documented paths. Hidden state and
+overrides travel with each concrete route. Multiple methods and response
+statuses are preserved. Output and component identities are deterministic,
+including recursive and distinct same-named DTOs. When runtime routes conflict
+after normalization, the first reachable route is documented. The first use of
+an operation ID keeps it; later duplicates remain documented without the
+optional ID.
+
+### Low-level builder
+
+The manual API remains a low-level escape hatch:
+
+```voyd
+use pkg::web::all
+
+let operation = openapi_operation(
+  summary: "Dynamic response",
+  response_status: 200,
+  response_description: "Runtime-selected payload"
+  )
+let document = openapi_document(openapi_info(
     title: "Articles API",
     version: "1.0.0"
   ))
-
-  let docs = document_openapi_route(
-    routes,
-    empty_docs,
-    create_article_docs
-  )
-
-  expose_openapi(routes, docs, at: "/openapi.json")
 ```
 
-The resulting app has two endpoints:
-
-- `POST /articles` runs `create_article`;
-- `GET /openapi.json` returns the generated OpenAPI document.
-
-`document_openapi_route(app, docs, operation)` reads the method and path of the
-most recently added real route. This prevents the documentation from describing
-a route that does not exist. When documenting several routes, add one route,
-document it, and then repeat with the next route and the updated document.
-
-### Describing request and response shapes
-
-Start with `openapi_operation(...)`, then add the shapes used by the route:
-
-| Method | Documents |
-| --- | --- |
-| `.with_path_params<T>()` | Fields captured from `:name` path segments |
-| `.with_query<T>()` | Query-string fields |
-| `.with_headers<T>()` | Request-header fields |
-| `.with_json_body<T>()` | JSON request body |
-| `.responds_json<T>()` | JSON response body |
-| `.responds_sse<T>()` | SSE event payload |
-| `.tagged(name)` | A grouping tag for documentation tools |
-
-Type and field `///` comments become schema descriptions. Optional fields are
-marked optional. Recursive record references are emitted under OpenAPI
-components with deterministic identities.
+`openapi_info`, `openapi_operation`, `openapi_document`,
+`document_openapi_route`, and explicit document exposure remain available.
+Migrate by moving app metadata into `app(openapi: ...)`, route metadata into
+`docs:`, raw JSON responses into typed helpers, and finally using
+`.expose_openapi(...)`.
 
 ## Static files
 
 Mount a directory as middleware:
 
 ```voyd
+use pkg::web::all
+
 serve(port: 3000) routes():
   get("/api/health") do:
     json({ healthy: true })
@@ -768,6 +1078,8 @@ when API paths should win.
 `html_response` renders `Html<Msg>` into an HTTP response:
 
 ```voyd
+use pkg::web::all
+
 use std::vx::all
 
 get("/") do:
@@ -787,6 +1099,8 @@ For an interactive page, `hydrate_named` embeds the initial model and client
 entry alongside the server-rendered view:
 
 ```voyd
+use pkg::web::all
+
 fn article_page(model: Model) -> Response
   html_response(
     Response::ok(),
@@ -812,6 +1126,8 @@ Use `append_hydration` for additional interactive roots in one document.
 Apply a timeout to slow route work:
 
 ```voyd
+use pkg::web::all
+
 get("/reports/daily", timeout: timeout_millis(2000)) do:
   json({ ready: true })
 ```
@@ -819,6 +1135,8 @@ get("/reports/daily", timeout: timeout_millis(2000)) do:
 Protect the whole process with server options:
 
 ```voyd
+use pkg::web::all
+
 serve(
   port: 3000,
   host: "0.0.0.0",
@@ -839,41 +1157,13 @@ Use smaller route-specific body limits whenever practical.
 ## Streaming request bodies
 
 Ordinary routes buffer bodies. Use `serve_streaming(app, port: ...)` when an
-upload should be consumed incrementally. Mark that route with `.streaming()`,
+upload should be consumed incrementally. Mark that route by method and path,
+such as `.streaming("/upload", method: Method::Post {})`,
 then retrieve its one-shot reader from `ctx.streaming_body()`.
 
 Request reads are backpressure-aware and capped at 16 KiB per chunk. Successful
 reads refresh the response idle watchdog. JSON, text, and multipart extractors
 continue to work on other routes in the same app.
-
-## Composing applications
-
-Use the route DSL for normal applications. Use the `App` method API when routes
-are assembled conditionally or need to be passed to another function:
-
-```voyd
-let web_app = app()
-  .get("/health", handler: () => "ok")
-  .get_context(
-    "/debug",
-    handler: (ctx) => json({ path: ctx.path() })
-  )
-```
-
-Mount a reusable router under a prefix:
-
-```voyd
-use pkg::web::router
-
-let api = router::Router::init()
-  .get("/health", handler: () => "ok")
-
-let web_app = app().mount("/api", api)
-```
-
-Serve an `App` with `serve(web_app, port: 3000)` or
-`serve_app(web_app, port: 3000)`. `build_app` and the free builder helpers are
-available for advanced callback-based composition.
 
 ## Testing
 
@@ -892,7 +1182,7 @@ fn test_app() -> App
 fn health_request() -> IncomingRequest
   IncomingRequest {
     method: Method::Get {},
-    path: "/health".to_string(),
+    path: "/health",
     query: None {},
     headers: Headers::empty(),
     body: Body::empty()
@@ -926,6 +1216,4 @@ Before deploying:
 - retain graceful `SIGINT` and `SIGTERM` handling;
 - monitor rejection rates, handler failures, latency, and pending requests.
 
-For tighter imports, the public modules are `router`, `routes`, `extract`,
-`response`, `html`, `middleware`, `static_files`, `streaming`, `sse`,
-`multipart`, `negotiate`, and `openapi`.
+For tighter imports, use the module table at the beginning of this guide.

@@ -22,6 +22,7 @@ export interface TypeTable {
     options?: { weak?: boolean }
   ): void;
   getExprType(id: HirExprId): TypeId | undefined;
+  getRootExprType(id: HirExprId): TypeId | undefined;
   getExprTypeEntry(id: HirExprId): ExprTypeEntry | undefined;
   clearExprTypes(): void;
   pushExprTypeScope(): void;
@@ -59,6 +60,9 @@ export const createTypeTable = (snapshot?: TypeTableSnapshot): TypeTable => {
 
   const getExprType = (id: HirExprId): TypeId | undefined =>
     currentExprTypes().get(id)?.type;
+
+  const getRootExprType = (id: HirExprId): TypeId | undefined =>
+    exprTypeStack[0]?.get(id)?.type;
 
   const getExprTypeEntry = (id: HirExprId): ExprTypeEntry | undefined =>
     currentExprTypes().get(id);
@@ -100,6 +104,7 @@ export const createTypeTable = (snapshot?: TypeTableSnapshot): TypeTable => {
   return {
     setExprType,
     getExprType,
+    getRootExprType,
     getExprTypeEntry,
     clearExprTypes,
     pushExprTypeScope,

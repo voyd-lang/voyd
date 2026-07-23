@@ -7,11 +7,11 @@ export type IntrinsicValueMetadata = {
 export type IntrinsicTypeMetadata = Record<string, unknown>;
 
 export const intrinsicValueMetadataFor = (
-  name: string
+  name: string,
 ): IntrinsicValueMetadata | undefined => VALUE_INTRINSICS.get(name);
 
 export const intrinsicTypeMetadataFor = (
-  name: string
+  name: string,
 ): IntrinsicTypeMetadata | undefined => TYPE_INTRINSICS.get(name);
 
 export const isStdOnlyIntrinsicName = (name: string): boolean => {
@@ -37,7 +37,10 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
   ["__array_len", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__array_copy", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__ref_is_null", { intrinsicUsesSignature: false, access: "std-only" }],
-  ["__type_to_heap_type", { intrinsicUsesSignature: false, access: "std-only" }],
+  [
+    "__type_to_heap_type",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
   ["__memory_size", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__memory_grow", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__memory_load_u8", { intrinsicUsesSignature: false, access: "std-only" }],
@@ -47,24 +50,24 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
   ["__memory_load_u32", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__memory_store_u32", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__memory_copy", { intrinsicUsesSignature: false, access: "std-only" }],
-  ["__panic_scratch_ptr", { intrinsicUsesSignature: false, access: "std-only" }],
+  [
+    "__panic_scratch_ptr",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
   [
     "__panic_scratch_capacity",
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
-  ["__panic_scratch_set", { intrinsicUsesSignature: false, access: "std-only" }],
+  [
+    "__panic_scratch_set",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
   ["__panic_trap", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__task_spawn", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__task_detach", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__task_cancel", { intrinsicUsesSignature: false, access: "std-only" }],
-  [
-    "__task_take_value",
-    { intrinsicUsesSignature: false, access: "std-only" },
-  ],
-  [
-    "__retain_callback",
-    { intrinsicUsesSignature: false, access: "std-only" },
-  ],
+  ["__task_take_value", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__retain_callback", { intrinsicUsesSignature: false, access: "std-only" }],
   [
     "__stable_callsite_id",
     { intrinsicUsesSignature: false, access: "std-only" },
@@ -90,7 +93,15 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   [
+    "__boundary_msgpack_to_value_or_identity",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
     "__boundary_shape_of",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__boundary_try_shape_of",
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   ["__shift_l", { intrinsicUsesSignature: false, access: "std-only" }],
@@ -105,10 +116,22 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
   ["__i32_trunc_f64_s", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__i64_trunc_f32_s", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__i64_trunc_f64_s", { intrinsicUsesSignature: false, access: "std-only" }],
-  ["__f32_convert_i32_s", { intrinsicUsesSignature: false, access: "std-only" }],
-  ["__f32_convert_i64_s", { intrinsicUsesSignature: false, access: "std-only" }],
-  ["__f64_convert_i32_s", { intrinsicUsesSignature: false, access: "std-only" }],
-  ["__f64_convert_i64_s", { intrinsicUsesSignature: false, access: "std-only" }],
+  [
+    "__f32_convert_i32_s",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__f32_convert_i64_s",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__f64_convert_i32_s",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
+  [
+    "__f64_convert_i64_s",
+    { intrinsicUsesSignature: false, access: "std-only" },
+  ],
   [
     "__reinterpret_f32_to_i32",
     { intrinsicUsesSignature: false, access: "std-only" },

@@ -1,0 +1,14 @@
+trait Factory<T>
+  fn make() -> i32
+
+obj Box<T> {}
+
+impl<T> Factory<Box<T>> for Box<T>
+  fn make() -> i32
+    42
+
+fn make_value<T: Factory<T>>() -> i32
+  T::make()
+
+pub fn main() -> i32
+  make_value<Box<i32>>()

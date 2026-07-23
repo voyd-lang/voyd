@@ -741,7 +741,11 @@ export const registerImportedTraitImplTemplates = ({
     };
 
     const methods = new Map<SymbolId, SymbolId>();
-    template.methods.forEach(
+    const staticMethods = new Map<SymbolId, SymbolId>();
+    const importMethods = (
+      source: ReadonlyMap<SymbolId, SymbolId>,
+      target: Map<SymbolId, SymbolId>,
+    ): void => source.forEach(
       (dependencyImplMethodSymbol, dependencyTraitMethodSymbol) => {
         const traitMethodSymbol = mapImportedTraitMethodSymbol({
           dependency,
@@ -756,7 +760,7 @@ export const registerImportedTraitImplTemplates = ({
           ctx,
           allowUnexported: true,
         });
-        methods.set(traitMethodSymbol, implMethodSymbol);
+        target.set(traitMethodSymbol, implMethodSymbol);
 
         if (!ctx.functions.getSignature(implMethodSymbol)) {
           const dependencySignature =
@@ -793,6 +797,8 @@ export const registerImportedTraitImplTemplates = ({
         }
       },
     );
+    importMethods(template.methods, methods);
+    importMethods(template.staticMethods, staticMethods);
 
     ctx.traits.registerImplTemplate({
       trait: translation(template.trait),
@@ -805,10 +811,11 @@ export const registerImportedTraitImplTemplates = ({
         typeRef: translation(param.typeRef),
       })),
       methods,
+      staticMethods,
       implSymbol: localImplSymbol,
     });
 
-    methods.forEach((implMethodSymbol, traitMethodSymbol) =>
+    new Map([...methods, ...staticMethods]).forEach((implMethodSymbol, traitMethodSymbol) =>
       registerTraitMethodImplMapping({
         traitMethodImpls: ctx.traitMethodImpls,
         implMethodSymbol,

@@ -1617,7 +1617,7 @@ const getInstanceExprType = (
   return typeof instanceType === "number" ? instanceType : undefined;
 };
 
-function substituteTypeForInstance({
+export function substituteTypeForInstance({
   typeId,
   ctx,
   instanceId,
@@ -1857,6 +1857,7 @@ export const getStructuralTypeInfo = (
           ? valueRuntimeIndex
           : index + RTT_METADATA_SLOT_COUNT,
         optional: field.optional,
+        documentation: field.documentation,
         hash: 0,
       };
       inlineStart += inlineWasmTypes.length;
@@ -2235,6 +2236,10 @@ const instantiateTraitImplsForNominal = ({
         traitSymbol: template.traitSymbol,
         target,
         methods: template.methods.map(({ traitMethod, implMethod }) => ({
+          traitMethod,
+          implMethod,
+        })),
+        staticMethods: template.staticMethods.map(({ traitMethod, implMethod }) => ({
           traitMethod,
           implMethod,
         })),

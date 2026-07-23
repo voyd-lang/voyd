@@ -28,6 +28,7 @@ import {
   type ObjectTemplate,
   type ObjectTypeInfo,
   type ObjectField,
+  type FunctionScope,
   type TypingState,
   type TraitImplInstance,
 } from "./types.js";
@@ -52,6 +53,10 @@ import {
 } from "../../perf.js";
 
 const COMPILER_PERF_ENABLED = isCompilerPerfEnabled();
+const unificationResultCache = new WeakMap<
+  TypingContext,
+  Map<string, UnificationResult>
+>();
 
 type UnifyWithBudgetOptions = Omit<UnificationContext, "stepBudget">;
 
@@ -68,27 +73,71 @@ export const unifyWithBudget = ({
   ctx: TypingContext;
   span?: SourceSpan;
 }): UnificationResult => {
+  const cacheable = !options.constraints && !options.structuralResolver;
+  const cacheKey = cacheable
+    ? `${options.reason}:${options.variance ?? "invariant"}:${options.allowUnknown ?? true}:${actual}:${expected}`
+    : undefined;
+  const cached = cacheKey
+    ? unificationResultCache.get(ctx)?.get(cacheKey)
+    : undefined;
+  if (cached) {
+    return cached.ok
+      ? { ok: true, substitution: new Map(cached.substitution) }
+      : cached;
+  }
+  const comparisonSteps = { value: 0 };
   const compatibility = ctx.arena.unify(actual, expected, {
     ...options,
     stepBudget: {
       maxSteps: ctx.typeCheckBudget.maxUnifySteps,
-      stepsUsed: ctx.typeCheckBudget.unifyStepsUsed,
+      stepsUsed: comparisonSteps,
     },
   });
-  const exhaustedBudget =
-    ctx.typeCheckBudget.unifyStepsUsed.value >
-    ctx.typeCheckBudget.maxUnifySteps;
-  if (!compatibility.ok && exhaustedBudget) {
+  ctx.typeCheckBudget.totalUnifyStepsUsed += comparisonSteps.value;
+  if (
+    !compatibility.ok &&
+    comparisonSteps.value > ctx.typeCheckBudget.maxUnifySteps
+  ) {
     emitDiagnostic({
       ctx,
       code: "TY0040",
       params: {
         kind: "typecheck-unify-budget-exceeded",
         maxSteps: ctx.typeCheckBudget.maxUnifySteps,
-        observedSteps: ctx.typeCheckBudget.unifyStepsUsed.value,
+        observedSteps: comparisonSteps.value,
       },
       span: span ?? ctx.hir.module.span,
     });
+  }
+  if (
+    ctx.typeCheckBudget.totalUnifyStepsUsed >
+    ctx.typeCheckBudget.maxTotalUnifySteps
+  ) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0040",
+      params: {
+        kind: "typecheck-unify-budget-exceeded",
+        maxSteps: ctx.typeCheckBudget.maxTotalUnifySteps,
+        observedSteps: ctx.typeCheckBudget.totalUnifyStepsUsed,
+      },
+      span: span ?? ctx.hir.module.span,
+    });
+  }
+  if (
+    cacheKey &&
+    (compatibility.ok || compatibility.conflict.kind !== "budget-exceeded")
+  ) {
+    const entries = unificationResultCache.get(ctx) ?? new Map();
+    entries.set(
+      cacheKey,
+      compatibility.ok
+        ? { ok: true, substitution: new Map(compatibility.substitution) }
+        : compatibility,
+    );
+    if (!unificationResultCache.has(ctx)) {
+      unificationResultCache.set(ctx, entries);
+    }
   }
   return compatibility;
 };
@@ -2592,6 +2641,7 @@ const instantiateTraitImplsFor = ({
       traitSymbol: template.traitSymbol,
       target: appliedTarget,
       methods: template.methods,
+      staticMethods: template.staticMethods,
       implSymbol: template.implSymbol,
     });
   });
@@ -3191,6 +3241,21 @@ const currentFunctionConstraintMap = (
   return constraints;
 };
 
+export const activeTypeParameterConstraint = ({
+  typeParam,
+  ctx,
+  state,
+}: {
+  typeParam: TypeParamId;
+  ctx: TypingContext;
+  state: TypingState;
+}): TypeId | undefined =>
+  resolveTypeParameterConstraint({
+    typeParam,
+    activeConstraints: currentFunctionConstraintMap(ctx, state),
+    ctx,
+  });
+
 const traitSatisfies = (
   actual: TypeId,
   expected: TypeId,
@@ -3247,13 +3312,21 @@ const traitSatisfies = (
   }
 
   const actualNominal = getNominalComponent(actual, ctx);
-  if (typeof actualNominal !== "number") {
-    return false;
-  }
-
-  const info = getObjectInfoForNominal(actualNominal, ctx, state);
+  const info =
+    typeof actualNominal === "number"
+      ? getObjectInfoForNominal(actualNominal, ctx, state)
+      : undefined;
   const impls =
-    ctx.traitImplsByNominal.get(actualNominal) ?? info?.traitImpls ?? [];
+    ctx.traitImplsByNominal.get(actual) ??
+    (typeof actualNominal === "number"
+      ? ctx.traitImplsByNominal.get(actualNominal)
+      : undefined) ??
+    info?.traitImpls ??
+    instantiateTraitImplsFor({
+      nominal: typeof actualNominal === "number" ? actualNominal : actual,
+      ctx,
+      state,
+    });
   return impls.some((impl) => {
     const traitMatches =
       typeof traitSymbol === "number"
@@ -3890,6 +3963,17 @@ type UnionBindingCandidate = {
   remainingActualMembers: readonly TypeId[];
 };
 
+type UnionBindingCache = {
+  unscoped: Map<string, readonly UnionBindingCandidate[]>;
+  byFunction: WeakMap<
+    FunctionScope,
+    Map<string, readonly UnionBindingCandidate[]>
+  >;
+};
+
+const unionBindingCaches = new WeakMap<TypingContext, UnionBindingCache>();
+const MAX_UNION_BINDING_CACHE_ENTRIES = 4_096;
+
 type UnionBindingMatch = {
   actualIndex: number;
   bindings: Map<TypeParamId, TypeId>;
@@ -4046,7 +4130,20 @@ const findUnionBindingCandidates = ({
   bindings: ReadonlyMap<TypeParamId, TypeId>;
   ctx: TypingContext;
   state: TypingState;
-}): UnionBindingCandidate[] => {
+}): readonly UnionBindingCandidate[] => {
+  const cache = unionBindingCacheFor(ctx, state.currentFunction);
+  const cacheKey = [
+    state.mode,
+    expectedMembers.join(","),
+    actualMembers.join(","),
+    serializeTypeParamBindings(bindings),
+  ].join("|");
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    maybeIncrementUnionSearchCounter("typing.union_search.cache_hit");
+    return cached;
+  }
+  maybeIncrementUnionSearchCounter("typing.union_search.cache_miss");
   maybeIncrementUnionSearchCounter("typing.union_search.invocations");
   const solutions: UnionBindingCandidate[] = [];
   const visitedStates = new Set<string>();
@@ -4132,7 +4229,34 @@ const findUnionBindingCandidates = ({
     return [];
   }
 
+  if (cache.size < MAX_UNION_BINDING_CACHE_ENTRIES) {
+    cache.set(cacheKey, solutions);
+  }
   return solutions;
+};
+
+const unionBindingCacheFor = (
+  ctx: TypingContext,
+  currentFunction: FunctionScope | undefined,
+): Map<string, readonly UnionBindingCandidate[]> => {
+  const cache = unionBindingCaches.get(ctx) ?? {
+    unscoped: new Map<string, readonly UnionBindingCandidate[]>(),
+    byFunction: new WeakMap<
+      FunctionScope,
+      Map<string, readonly UnionBindingCandidate[]>
+    >(),
+  };
+  if (!unionBindingCaches.has(ctx)) {
+    unionBindingCaches.set(ctx, cache);
+  }
+  if (!currentFunction) {
+    return cache.unscoped;
+  }
+  const scoped = cache.byFunction.get(currentFunction) ?? new Map();
+  if (!cache.byFunction.has(currentFunction)) {
+    cache.byFunction.set(currentFunction, scoped);
+  }
+  return scoped;
 };
 
 const serializeUnionBindingSearchState = ({

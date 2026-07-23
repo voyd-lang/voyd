@@ -9,6 +9,8 @@ use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use super::streaming
+use super::openapi::contract::{ OpenApiResponseContract, openapi_event_stream_response }
+use super::response::IntoResponse
 
 /// One event in an SSE stream.
 pub obj Event {
@@ -20,6 +22,20 @@ pub obj Event {
 
 /// Sender scoped to one open SSE response.
 pub obj Sender {}
+
+/// Typed SSE response. The event-stream media type is retained for OpenAPI.
+pub obj SseResponse {
+  value: Response
+}
+
+impl IntoResponse<SseResponse> for SseResponse
+  fn into_response(self) -> Response
+    self.value
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    [openapi_event_stream_response<Event>(
+      status: 200,
+      description: "Server-sent event stream"
+    )]
 
 impl Event
   /// Creates a data-only event.
@@ -112,6 +128,12 @@ pub fn response(
     Response::ok().with(headers: headers),
     body: () => body(Sender {})
   )
+
+/// Creates a typed SSE response suitable for automatic OpenAPI inference.
+pub fn typed_response(
+  body: fn(Sender) : (server::ResponseWriter, open) -> void
+): (server::ResponseStream, open) -> SseResponse
+  SseResponse { value: response(body) }
 
 fn encode_event(event: Event) -> String
   var encoded = String::init()

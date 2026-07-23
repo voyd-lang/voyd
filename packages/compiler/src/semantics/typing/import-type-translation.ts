@@ -247,6 +247,10 @@ export const createTranslation = ({
           declaringParams: field.declaringParams?.map((param) =>
             mapTypeParam(param, paramMap, { arena: targetArena }),
           ),
+          visibility: field.visibility,
+          owner: field.owner,
+          packageId: field.packageId,
+          documentation: field.documentation,
         }));
         result = targetArena.internStructuralObject({ fields });
         break;

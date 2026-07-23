@@ -495,6 +495,12 @@ export interface HirCallExpr extends HirExpressionBase {
   args: readonly { label?: string; expr: HirExprId }[];
   typeArguments?: readonly HirTypeExpr[];
   targetTypeArguments?: readonly HirTypeExpr[];
+  /** Static trait method dispatch target, resolved during generic specialization. */
+  staticTraitTarget?: HirTypeExpr;
+  /** Trait that declares the static method. */
+  staticTraitSymbol?: SymbolId;
+  /** Declared static trait method name (stable across module-local symbols). */
+  staticTraitMethod?: string;
 }
 
 export interface HirMethodCallExpr extends HirExpressionBase {

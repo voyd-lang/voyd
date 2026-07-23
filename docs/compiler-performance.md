@@ -13,7 +13,8 @@ Run the quick local scorecard:
 npm run bench:optimizer
 ```
 
-Run the hermetic PR corpus with three fresh-process compile samples per case:
+Run the hermetic PR corpus with three fresh-process compile samples and nine
+runtime samples per case:
 
 ```sh
 npm run bench:optimizer:ci -- --output /tmp/optimizer-scorecard.json
@@ -48,7 +49,9 @@ The scorecard uses a fresh child process for every compile warmup and measured
 sample. Compile timing and peak compile RSS exclude runtime execution and WAT
 emission. After the timed compile it validates
 the Wasm, measures gzip and structural shape counts, checks deterministic bytes
-across identical compiles, and runs the public entrypoint after a warmup. It
+across identical compiles, and runs the public entrypoint after a warmup. CI
+runtime samples batch entrypoint calls for at least 200 ms and report the
+per-call average, reducing timer and host-scheduling noise. It
 also records compiler phase timings, ordinal optimizer-pass metrics, codegen
 optimization decisions, Binaryen stage timings, peak process RSS, and raw
 timing/heap/RSS samples in schema-versioned JSON. Schema v2 identifies each row
@@ -73,6 +76,13 @@ overridden through the `OPTIMIZER_BENCH_*` environment variables or the
 corresponding comparison-script flags. The scheduled
 `.github/workflows/optimizer-scorecard.yml` workflow runs the full corpus and
 retains its JSON artifact for 30 days.
+
+When only sampled compile, runtime, or RSS measurements fail, the PR gate
+reruns the affected scenarios with base/head order reversed. It pools the
+initial and retry samples before making the final comparison, which cancels
+order bias without weakening the thresholds. Deterministic Wasm or gzip size
+failures are never retried. Runtime sample count and minimum batch duration can
+be overridden with `--runtime-samples` and `--runtime-sample-min-ms`.
 
 The PR regression gate intentionally benchmarks the release level through both
 the explicit level and legacy boolean. This lets the head-owned harness compare
@@ -102,7 +112,7 @@ labels and structural-container extraction remain caller-owned. The original
 ABI remains available whenever planning, semantic revalidation, or any budget
 rejects a request.
 
-The quick scorecard includes `call-shape-defaults`, a 50,000-iteration mixed
+The quick scorecard includes `call-shape-defaults`, a 5,000,000-iteration mixed
 omitted/provided recursive labeled-default workload. Run it directly with:
 
 ```sh

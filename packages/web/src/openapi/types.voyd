@@ -1,0 +1,351 @@
+//! OpenAPI builder model shared by manual and automatic generation.
+
+use std::array::Array
+use std::http::Method
+use std::meta::{ Shape, shape_of }
+use std::json::JsonValue
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+use super::contract::{ OpenApiParameterContract, OpenApiRequestContract, OpenApiResponseContract, OpenApiResponseSchemaDocs, OpenApiSchemaDocs, RouteDocs, json_request }
+
+/// Top-level API information.
+pub obj Info {
+  api title: String,
+  api version: String,
+  api description?: String
+}
+
+/// Documentation for one HTTP operation.
+pub obj Operation {
+  api summary?: String,
+  api description?: String,
+  api operation_id?: String,
+  api tags: Array<String>,
+  path_params?: Shape,
+  query_params?: Shape,
+  header_params?: Shape,
+  cookie_params?: Shape,
+  parameter_overrides: Array<OpenApiParameterContract>,
+  has_request_body: bool,
+  request_body?: Shape,
+  request_content_type: String,
+  request_description?: String,
+  request_schema_docs?: OpenApiSchemaDocs,
+  request_required: bool,
+  response_body?: Shape,
+  response_content_type: String,
+  response_status: i32,
+  response_description: String,
+  responses: Array<OpenApiResponseContract>,
+  response_schema_docs: Array<OpenApiResponseSchemaDocs>,
+  opaque_response: bool,
+  hidden: bool
+}
+
+/// Static documentation carried by one concrete runtime route.
+pub obj RouteContract {
+  api hidden: bool,
+  api operation: Operation,
+  api literal_docs?: JsonValue
+}
+
+/// Method, concrete path, and render-time route-owned OpenAPI contract.
+pub obj RecordedOpenApiRoute {
+  api method: Method,
+  api path: String,
+  api runtime_key: String,
+  api contract: RouteContract
+}
+
+pub obj RouteDocument {
+  api method: Method,
+  api path: String,
+  api operation: Operation
+}
+
+impl Info
+  api fn init({ title: StringSlice, version: StringSlice, description?: String }) -> Info
+    Info { title: title.to_string(), version: version.to_string(), description: description }
+
+  api fn init({ title: String, version: String, description?: String }) -> Info
+    Info::init(title: title.as_slice(), version: version.as_slice(), description: description)
+
+impl RouteContract
+  api fn init({ hidden: bool, operation: Operation, literal_docs?: JsonValue }) -> RouteContract
+    RouteContract {
+      hidden: hidden,
+      operation: operation,
+      literal_docs: literal_docs
+    }
+
+impl RecordedOpenApiRoute
+  api fn init({ method: Method, path: String, runtime_key: String, contract: RouteContract }) -> RecordedOpenApiRoute
+    RecordedOpenApiRoute {
+      method: method,
+      path: path,
+      runtime_key: runtime_key,
+      contract: contract
+    }
+
+impl RouteDocument
+  api fn init({ method: Method, path: String, operation: Operation }) -> RouteDocument
+    RouteDocument {
+      method: method,
+      path: path,
+      operation: operation
+    }
+
+impl Operation
+  /// Creates operation metadata. Record field comments supply schema descriptions.
+  api fn init({
+    summary?: String,
+    description?: String,
+    operation_id?: String,
+    response_status?: i32,
+    response_description?: String
+  }) -> Operation
+    Operation {
+      summary: summary,
+      description: description,
+      operation_id: operation_id,
+      tags: Array<String>::init(),
+      path_params: None {},
+      query_params: None {},
+      header_params: None {},
+      cookie_params: None {},
+      parameter_overrides: Array<OpenApiParameterContract>::init(),
+      has_request_body: false,
+      request_body: None {},
+      request_content_type: "application/json".to_string(),
+      request_description: None {},
+      request_schema_docs: None {},
+      request_required: true,
+      response_body: None {},
+      response_content_type: "application/json".to_string(),
+      response_status: response_status ?? 200,
+      response_description: response_description ?? "Successful response".to_string(),
+      responses: Array<OpenApiResponseContract>::init(),
+      response_schema_docs: Array<OpenApiResponseSchemaDocs>::init(),
+      opaque_response: false,
+      hidden: false
+    }
+
+  api fn tagged(self, tag: StringSlice) -> Operation
+    let ~tags = self.tags.copied(1)
+    tags.push(tag.to_string())
+    copy_operation(self, tags: tags)
+
+  api fn tagged(self, tag: String) -> Operation
+    self.tagged(tag.as_slice())
+
+  api fn with_path_params<T>(self) -> Operation
+    copy_operation(self, path_params: shape_of<T>())
+
+  api fn with_query<T>(self) -> Operation
+    copy_operation(self, query_params: shape_of<T>())
+
+  api fn with_headers<T>(self) -> Operation
+    copy_operation(self, header_params: shape_of<T>())
+
+  api fn with_cookies<T>(self) -> Operation
+    copy_operation(self, cookie_params: shape_of<T>())
+
+  api fn with_path_shape(self, shape: Shape) -> Operation
+    copy_operation(self, path_params: shape)
+
+  api fn with_query_shape(self, shape: Shape) -> Operation
+    copy_operation(self, query_params: shape)
+
+  api fn with_header_shape(self, shape: Shape) -> Operation
+    copy_operation(self, header_params: shape)
+
+  api fn with_cookie_shape(self, shape: Shape) -> Operation
+    copy_operation(self, cookie_params: shape)
+
+  api fn with_json_body<T>(self) -> Operation
+    self.with_request(json_request<T>())
+
+  api fn responds_json<T>(self) -> Operation
+    copy_operation(self, response_body: shape_of<T>(), response_content_type: "application/json")
+
+  api fn responds_sse<T>(self) -> Operation
+    copy_operation(self, response_body: shape_of<T>(), response_content_type: "text/event-stream")
+
+  api fn with_responses(self, responses: Array<OpenApiResponseContract>) -> Operation
+    Operation {
+      summary: self.summary,
+      description: self.description,
+      operation_id: self.operation_id,
+      tags: self.tags,
+      path_params: self.path_params,
+      query_params: self.query_params,
+      header_params: self.header_params,
+      cookie_params: self.cookie_params,
+      parameter_overrides: self.parameter_overrides,
+      has_request_body: self.has_request_body,
+      request_body: self.request_body,
+      request_content_type: self.request_content_type,
+      request_description: self.request_description,
+      request_schema_docs: self.request_schema_docs,
+      request_required: self.request_required,
+      response_body: self.response_body,
+      response_content_type: self.response_content_type,
+      response_status: self.response_status,
+      response_description: self.response_description,
+      responses: responses,
+      response_schema_docs: self.response_schema_docs,
+      opaque_response: responses.is_empty(),
+      hidden: self.hidden
+    }
+
+  /// Marks a runtime-dynamic response without inventing a status or schema.
+  api fn with_opaque_response(self) -> Operation
+    Operation {
+      summary: self.summary,
+      description: self.description,
+      operation_id: self.operation_id,
+      tags: self.tags,
+      path_params: self.path_params,
+      query_params: self.query_params,
+      header_params: self.header_params,
+      cookie_params: self.cookie_params,
+      parameter_overrides: self.parameter_overrides,
+      has_request_body: self.has_request_body,
+      request_body: self.request_body,
+      request_content_type: self.request_content_type,
+      request_description: self.request_description,
+      request_schema_docs: self.request_schema_docs,
+      request_required: self.request_required,
+      response_body: self.response_body,
+      response_content_type: self.response_content_type,
+      response_status: self.response_status,
+      response_description: self.response_description,
+      responses: self.responses,
+      response_schema_docs: self.response_schema_docs,
+      opaque_response: true,
+      hidden: self.hidden
+    }
+
+  api fn with_request(self, request: OpenApiRequestContract) -> Operation
+    Operation {
+      summary: self.summary,
+      description: self.description,
+      operation_id: self.operation_id,
+      tags: self.tags,
+      path_params: self.path_params,
+      query_params: self.query_params,
+      header_params: self.header_params,
+      cookie_params: self.cookie_params,
+      parameter_overrides: self.parameter_overrides,
+      has_request_body: true,
+      request_body: request.schema,
+      request_content_type: request.content_type,
+      request_description: request.description,
+      request_schema_docs: self.request_schema_docs,
+      request_required: request.required,
+      response_body: self.response_body,
+      response_content_type: self.response_content_type,
+      response_status: self.response_status,
+      response_description: self.response_description,
+      responses: self.responses,
+      response_schema_docs: self.response_schema_docs,
+      opaque_response: self.opaque_response,
+      hidden: self.hidden
+    }
+
+  api fn with_docs(self, docs: RouteDocs) -> Operation
+    let with_request = match(docs.request)
+      Some<OpenApiRequestContract> { value }:
+        self.with_request(value)
+      None:
+        self
+    let opaque_response = match(docs.responses)
+      Some<Array<OpenApiResponseContract>> { value }:
+        value.is_empty()
+      None:
+        with_request.opaque_response
+    Operation {
+      summary: optional_string_override(docs.summary, with_request.summary),
+      description: optional_string_override(docs.description, with_request.description),
+      operation_id: optional_string_override(docs.operation_id, with_request.operation_id),
+      tags: docs.tags ?? with_request.tags,
+      path_params: with_request.path_params,
+      query_params: with_request.query_params,
+      header_params: with_request.header_params,
+      cookie_params: with_request.cookie_params,
+      parameter_overrides: docs.parameters ?? with_request.parameter_overrides,
+      has_request_body: with_request.has_request_body,
+      request_body: with_request.request_body,
+      request_content_type: with_request.request_content_type,
+      request_description: with_request.request_description,
+      request_schema_docs: docs.request_schema ?? with_request.request_schema_docs,
+      request_required: with_request.request_required,
+      response_body: with_request.response_body,
+      response_content_type: with_request.response_content_type,
+      response_status: with_request.response_status,
+      response_description: with_request.response_description,
+      responses: docs.responses ?? with_request.responses,
+      response_schema_docs: docs.response_schemas ?? with_request.response_schema_docs,
+      opaque_response: opaque_response,
+      hidden: docs.hidden ?? with_request.hidden
+    }
+
+fn copy_operation(
+  source: Operation,
+  {
+    tags?: Array<String>,
+    path_params?: Shape,
+    query_params?: Shape,
+    header_params?: Shape,
+    cookie_params?: Shape,
+    request_body?: Shape,
+    request_content_type?: String,
+    request_schema_docs?: OpenApiSchemaDocs,
+    response_body?: Shape,
+    response_content_type?: String,
+    response_schema_docs?: Array<OpenApiResponseSchemaDocs>
+  }
+) -> Operation
+  let provided_body = match(request_body)
+    Some<Shape>: true
+    None: false
+  let has_request_body = source.has_request_body or provided_body
+  Operation {
+    summary: source.summary,
+    description: source.description,
+    operation_id: source.operation_id,
+    tags: tags ?? source.tags,
+    path_params: shape_override(path_params, source.path_params),
+    query_params: shape_override(query_params, source.query_params),
+    header_params: shape_override(header_params, source.header_params),
+    cookie_params: shape_override(cookie_params, source.cookie_params),
+    parameter_overrides: source.parameter_overrides,
+    has_request_body: has_request_body,
+    request_body: shape_override(request_body, source.request_body),
+    request_content_type: request_content_type ?? source.request_content_type,
+    request_description: source.request_description,
+    request_schema_docs: request_schema_docs ?? source.request_schema_docs,
+    request_required: source.request_required,
+    response_body: shape_override(response_body, source.response_body),
+    response_content_type: response_content_type ?? source.response_content_type,
+    response_status: source.response_status,
+    response_description: source.response_description,
+    responses: source.responses,
+    response_schema_docs: response_schema_docs ?? source.response_schema_docs,
+    opaque_response: source.opaque_response,
+    hidden: source.hidden
+  }
+
+fn shape_override(value: Option<Shape>, fallback: Option<Shape>) -> Option<Shape>
+  match(value)
+    Some<Shape> { value }:
+      Some<Shape> { value: value }
+    None:
+      fallback
+
+fn optional_string_override(value: Option<String>, fallback: Option<String>) -> Option<String>
+  match(value)
+    Some<String> { value }:
+      Some<String> { value: value }
+    None:
+      fallback

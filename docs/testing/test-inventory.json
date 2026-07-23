@@ -2359,10 +2359,28 @@
     "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
   },
   {
-    "file": "packages/web/src/openapi.test.voyd",
+    "file": "packages/web/src/openapi/openapi_app.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
-    "rationale": "Keep co-located: protects pkg::web OpenAPI document building, type reification, and documentation propagation through the native Voyd test runner."
+    "rationale": "Keep co-located: protects pkg::web automatic app-owned request inference, schema identity, route metadata, and public route-surface contracts through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects the retained low-level pkg::web OpenAPI builder and schema rendering contract through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_composition.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web grouping, mounting, exposure exclusion, and HTTP-method contract preservation through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_responses.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web typed, composite, custom, opaque, and manually overridden response contracts through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/phase2.test.voyd",

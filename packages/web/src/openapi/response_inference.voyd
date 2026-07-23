@@ -1,0 +1,64 @@
+//! Built-in static response contracts for automatic OpenAPI generation.
+
+use std::array::Array
+use std::optional::types::Option
+use std::string::type::{ String, StringSlice }
+use super::contract::{
+  OpenApiResponseContract,
+  empty_response_contract,
+  response_contract
+}
+use src::response::IntoResponse
+use super::response_contracts::{ append_response_contract, untyped_responses }
+
+fn typed<T>(
+  { status: i32, description: StringSlice, content_type: StringSlice }
+) -> Array<OpenApiResponseContract>
+  let ~out = Array<OpenApiResponseContract>::with_capacity(1)
+  out.push(response_contract<T>(status: status, description: description, content_type: content_type))
+  out
+
+/// Obtains the static contract from the same response trait used at runtime.
+pub fn inferred_responses<T: IntoResponse<T>>() -> Array<OpenApiResponseContract>
+  T::openapi_responses()
+
+/// Merges the statically documented success and error branches of `Result`.
+/// Alternatives sharing a status and media type are preserved as `anyOf`.
+pub fn result_responses<T: IntoResponse<T>, E: IntoResponse<E>>() -> Array<OpenApiResponseContract>
+  let ~out = T::openapi_responses()
+  let errors = E::openapi_responses()
+  var index = 0
+  while index < errors.len():
+    append_response_contract(out, errors.at(index))
+    index = index + 1
+  out
+
+/// Documents the value branch of `Option` plus its runtime `404` response.
+pub fn option_responses<T: IntoResponse<T>>() -> Array<OpenApiResponseContract>
+  let ~out = T::openapi_responses()
+  append_response_contract(
+    out,
+    empty_response_contract(status: 404, description: "Not found")
+  )
+  out
+
+pub fn json_responses<T>() -> Array<OpenApiResponseContract>
+  typed<T>(status: 200, description: "Successful response".as_slice(), content_type: "application/json".as_slice())
+
+pub fn json_value_responses() -> Array<OpenApiResponseContract>
+  untyped_responses(
+    status: 200,
+    description: "Successful response",
+    content_type: "application/json"
+  )
+
+pub fn created_responses<T>() -> Array<OpenApiResponseContract>
+  typed<T>(status: 201, description: "Created".as_slice(), content_type: "application/json".as_slice())
+
+pub fn accepted_responses<T>() -> Array<OpenApiResponseContract>
+  typed<T>(status: 202, description: "Accepted".as_slice(), content_type: "application/json".as_slice())
+
+pub fn no_content_responses() -> Array<OpenApiResponseContract>
+  let ~out = Array<OpenApiResponseContract>::with_capacity(1)
+  out.push(empty_response_contract(status: 204, description: "No content".as_slice()))
+  out

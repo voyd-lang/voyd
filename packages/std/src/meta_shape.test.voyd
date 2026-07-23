@@ -1,5 +1,6 @@
 use std::array::Array
 use std::error::HostError
+use std::json::JsonValue
 use std::meta::{
   ArrayShape,
   BoolShape,
@@ -7,10 +8,12 @@ use std::meta::{
   F64Shape,
   I64Shape,
   RecordShape,
+  Shape,
   StringShape,
   UnionShape,
   UnitShape,
-  shape_of
+  shape_of,
+  try_shape_of
 }
 use std::optional::all
 use std::string::type::String
@@ -52,6 +55,25 @@ type MetaCanonicalAlias = MetaCanonicalRecord
 test "shape_of reifies nested records arrays optionality and documentation":
   if request_shape_is_complete() == false:
     Test::fail()
+
+test "shape_of preserves documentation through generic specialization":
+  generic_shape<MetaShapeProfile>().root.match(root)
+    RecordShape:
+      match(root.documentation)
+        Some<String> { value: documentation }:
+          assert(documentation, eq: " Profile documentation.")
+        None:
+          Test::fail()
+      match(root.fields.at(0).documentation)
+        Some<String> { value: documentation }:
+          assert(documentation, eq: " Age documentation.")
+        None:
+          Test::fail()
+    else:
+      Test::fail()
+
+fn generic_shape<T>() -> Shape
+  shape_of<T>()
 
 fn request_shape_is_complete() -> bool
   let shape = shape_of<MetaShapeRequest>()
@@ -157,3 +179,11 @@ test "shape_of keeps canonical names and documentation from one declaration":
           Test::fail()
     else:
       Test::fail()
+
+test "try_shape_of returns only honest supported shapes":
+  match(try_shape_of<MetaShapeRequest>())
+    Some<Shape>: void
+    None: Test::fail()
+  match(try_shape_of<JsonValue>())
+    None: void
+    Some<Shape>: Test::fail()

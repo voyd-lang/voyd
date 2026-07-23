@@ -1,0 +1,15 @@
+trait PairContract<T>
+  fn value(self) -> i32
+  fn offset() -> i32
+
+impl PairContract<(i32, i32)> for (i32, i32)
+  fn value(self) -> i32
+    self.0
+  fn offset() -> i32
+    1
+
+fn read<T: PairContract<T>>(value: T) -> i32
+  value.value() + T::offset()
+
+pub fn main() -> i32
+  read<(i32, i32)>((41, 0))

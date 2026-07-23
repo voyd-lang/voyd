@@ -1,0 +1,195 @@
+//! Deterministic OpenAPI response rendering and same-status media merging.
+
+use std::array::Array
+use std::dict::Dict
+use std::json::{ JsonArray, JsonBool, JsonObject, JsonString, JsonValue }
+use std::meta::Shape
+use std::number::cast::to_string
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+use super::contract::{ OpenApiHeader, OpenApiResponseContract, OpenApiResponseSchemaDocs, OpenApiSchemaDocs }
+use super::schema::{ opaque_schema, schema_for }
+use super::schema_overlay::apply_schema_docs
+
+pub fn response_contracts_json(
+  contracts: Array<OpenApiResponseContract>,
+  { schema_docs: Array<OpenApiResponseSchemaDocs>, prefix: String, ~components: Dict<String, JsonValue>, include_doc_comments: bool }
+) -> JsonValue
+  let ~responses = Dict<String, JsonValue>::init()
+  var index = 0
+  while index < contracts.len():
+    let contract = contracts.at(index)
+    var previous = 0
+    var already_rendered = false
+    while previous < index:
+      if same_response_key(contracts.at(previous), contract):
+        already_rendered = true
+      previous = previous + 1
+    if not already_rendered:
+      let ~response = Dict<String, JsonValue>::init()
+      response.set("description", JsonString { value: contract.description })
+      let ~content = Dict<String, JsonValue>::init()
+      let ~headers = Dict<String, JsonValue>::init()
+      var candidate_index = index
+      while candidate_index < contracts.len():
+        let candidate = contracts.at(candidate_index)
+        if same_response_key(candidate, contract):
+          let response_headers = candidate.headers
+          append_content(content, candidate, candidate_index: candidate_index, schema_docs: schema_docs, prefix: prefix, components: components, include_doc_comments: include_doc_comments)
+          append_headers(headers, response_headers, prefix: prefix, components: components, include_doc_comments: include_doc_comments)
+        candidate_index = candidate_index + 1
+      if not content.is_empty():
+        response.set("content", JsonObject { value: content })
+      if not headers.is_empty():
+        response.set("headers", JsonObject { value: headers })
+      responses.set(response_key(contract), JsonObject { value: response })
+    index = index + 1
+  JsonObject { value: responses }
+
+fn append_content(
+  ~content: Dict<String, JsonValue>,
+  candidate: OpenApiResponseContract,
+  {
+    candidate_index: i32,
+    schema_docs: Array<OpenApiResponseSchemaDocs>,
+    prefix: String,
+    ~components: Dict<String, JsonValue>,
+    include_doc_comments: bool
+  }
+) -> void
+  match(candidate.content_type)
+    None:
+      void
+    Some<String> { value: content_type }:
+      let inferred_schema = match(candidate.schema)
+        Some<Shape> { value }:
+          schema_for(value, prefix: prefix.concat("Response".as_slice()).concat(to_string(candidate_index).as_slice()), components: components, include_doc_comments: include_doc_comments)
+        None:
+          opaque_schema(content_type)
+      let selected_schema_docs = matching_response_schema_docs(
+        schema_docs,
+        status: candidate.status,
+        content_type: content_type
+      )
+      let schema = match(candidate.event_schema)
+        Some<Shape> { value: event_shape }:
+          let ~stream = Dict<String, JsonValue>::init()
+          stream.set("type", JsonString { value: "string".to_string() })
+          stream.set(
+            "x-voyd-event-schema",
+            apply_schema_docs(
+              schema_for(
+                event_shape,
+                prefix: prefix.concat("Event".as_slice()).concat(to_string(candidate_index).as_slice()),
+                components: components,
+                include_doc_comments: include_doc_comments
+              ),
+              selected_schema_docs,
+              components: components
+            )
+          )
+          JsonObject { value: stream }
+        None:
+          apply_schema_docs(
+            inferred_schema,
+            selected_schema_docs,
+            components: components
+          )
+      match(content.get(content_type))
+        Some<JsonValue> { value: existing_media }:
+          content.set(content_type, merge_media_schemas(existing_media, schema))
+        None:
+          let ~media = Dict<String, JsonValue>::init()
+          media.set("schema", schema)
+          content.set(content_type, JsonObject { value: media })
+
+fn merge_media_schemas(existing_media: JsonValue, alternative: JsonValue) -> JsonValue
+  let existing_schema = match(existing_media)
+    JsonObject { value: media }:
+      match(media.get("schema".to_string()))
+        Some<JsonValue> { value }:
+          value
+        None:
+          opaque_schema("application/octet-stream")
+    _:
+      opaque_schema("application/octet-stream")
+  let ~alternatives = Array<JsonValue>::with_capacity(2)
+  alternatives.push(existing_schema)
+  alternatives.push(alternative)
+  let ~any_of = Dict<String, JsonValue>::init()
+  any_of.set("anyOf", JsonArray { value: alternatives })
+  let ~media = Dict<String, JsonValue>::init()
+  media.set("schema", JsonObject { value: any_of })
+  JsonObject { value: media }
+
+pub fn matching_response_schema_docs(
+  docs: Array<OpenApiResponseSchemaDocs>,
+  { status: i32, content_type: String }
+) -> Option<OpenApiSchemaDocs>
+  var index = 0
+  while index < docs.len():
+    let candidate = docs.at(index)
+    if candidate.status == status:
+      match(candidate.content_type)
+        Some<String> { value }:
+          if value.equals(content_type):
+            return Some<OpenApiSchemaDocs> { value: candidate.schema }
+        None:
+          return Some<OpenApiSchemaDocs> { value: candidate.schema }
+    index = index + 1
+  None {}
+
+fn append_headers(
+  ~headers: Dict<String, JsonValue>,
+  response_headers: Array<OpenApiHeader>,
+  { prefix: String, ~components: Dict<String, JsonValue>, include_doc_comments: bool }
+) -> void
+  var header_index = 0
+  while header_index < response_headers.len():
+    let header = response_headers.at(header_index)
+    match(headers.get(header.name))
+      Some<JsonValue>:
+        void
+      None:
+        let header_name = header.name
+        let header_description = header.description
+        let header_required = header.required
+        let header_schema = header.schema
+        let ~header_value = Dict<String, JsonValue>::init()
+        set_optional_string(header_value, "description", header_description)
+        header_value.set("required", JsonBool { value: header_required })
+        header_value.set(
+          "schema",
+          header_schema_json(
+            header_schema,
+            prefix: prefix,
+            components: components,
+            include_doc_comments: include_doc_comments
+          )
+        )
+        headers.set(header_name, JsonObject { value: header_value })
+    header_index = header_index + 1
+
+fn header_schema_json(
+  schema: Shape,
+  { prefix: String, ~components: Dict<String, JsonValue>, include_doc_comments: bool }
+) -> JsonValue
+  schema_for(schema, prefix: prefix.concat("Header".as_slice()), components: components, include_doc_comments: include_doc_comments)
+
+fn same_response_key(left: OpenApiResponseContract, right: OpenApiResponseContract) -> bool
+  left.is_default == right.is_default and left.status == right.status
+
+fn response_key(contract: OpenApiResponseContract) -> String
+  if contract.is_default:
+    return "default".to_string()
+  to_string(contract.status)
+
+fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void
+  match(value)
+    Some<String> { value }:
+      target.set(key.to_string(), JsonString { value: value })
+    None:
+      void
+
+fn set_optional_string(~target: Dict<String, JsonValue>, key: String, value: Option<String>) -> void
+  set_optional_string(target, key.as_slice(), value)

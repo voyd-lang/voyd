@@ -437,8 +437,8 @@ const deriveBoundaryFields = ({
       name: field.name,
       typeId: fieldTypeId,
       optional: field.optional ? true : undefined,
-      ...(options.includeDocumentation && sourceField?.documentation
-        ? { documentation: sourceField.documentation }
+      ...(options.includeDocumentation && (sourceField?.documentation ?? field.documentation)
+        ? { documentation: sourceField?.documentation ?? field.documentation }
         : {}),
       schema: deriveBoundarySchemaInternal({
         typeId: fieldTypeId,
@@ -562,7 +562,7 @@ const portableBoundaryIdentity = ({
         : undefined;
   const owner =
     typeof nominal === "number"
-      ? ctx.program.objects.getNominalOwnerRef(nominal)
+      ? ctx.program.types.getNominalOwner(nominal)
       : undefined;
   if (typeof owner === "number") {
     return {
@@ -699,7 +699,7 @@ const recordFieldFor = ({
         : undefined;
   const owner =
     typeof nominal === "number"
-      ? ctx.program.objects.getNominalOwnerRef(nominal)
+      ? ctx.program.types.getNominalOwner(nominal)
       : undefined;
   const template =
     typeof owner === "number"

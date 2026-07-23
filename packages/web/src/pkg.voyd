@@ -7,9 +7,10 @@ pub src::middleware
 pub src::multipart
 pub src::negotiate
 pub src::openapi
-pub src::openapi_expose
-pub src::openapi_routes
 pub src::response
+pub src::response_composites
+pub src::response_dynamic
+pub src::response_json
 pub src::request_streaming
 pub src::router
 pub src::routes
@@ -55,10 +56,37 @@ pub use src::extract::{
   text,
   text_body
 }
-pub use src::openapi_expose::expose as expose_openapi
-pub use src::openapi_routes::document_route as document_openapi_route
+pub use src::openapi::{
+  OpenApiConfig,
+  OpenApiFieldDocs,
+  OpenApiHeader,
+  OpenApiParameterContract,
+  OpenApiRequestContract,
+  OpenApiResponseContract,
+  OpenApiResponseSchemaDocs,
+  OpenApiSchemaDocs,
+  RouteDocs,
+  bytes_request,
+  json_request,
+  multipart_request,
+  openapi_field_docs,
+  openapi_event_stream_response,
+  openapi_header,
+  openapi_json_response,
+  openapi_opaque_request,
+  openapi_parameter,
+  openapi_request,
+  openapi_response,
+  openapi_response_schema_docs,
+  openapi_schema_docs,
+  openapi_typed_response,
+  openapi_untyped_header,
+  route_docs,
+  text_request
+}
 pub use src::html::{
   Hydration,
+  HtmlResponse,
   append_hydration,
   document,
   html as typed_response_html_method,
@@ -77,12 +105,17 @@ pub use src::openapi::{
   Document as OpenApi,
   Info as OpenApiInfo,
   Operation as OpenApiOperation,
+  document_route as document_openapi_route,
   document as openapi_document,
+  expose as expose_openapi,
   info as openapi_info,
   operation as openapi_operation
 }
 pub use src::request_streaming::serve as serve_streaming
 pub use src::response::{
+  Accepted,
+  Binary,
+  DocumentedResponse,
   Body,
   Header,
   HeaderName,
@@ -90,14 +123,28 @@ pub use src::response::{
   HttpError,
   IncomingRequest,
   IntoResponse,
+  OpenApiResponse,
+  Json,
   Method,
   QueryString,
   Response,
   Status,
+  Created,
+  NoContent,
+  Text,
+  accepted,
+  created,
   json,
+  json_response,
   json_value,
   result_json,
   option_json,
+  result_json_response,
+  option_json_response,
+  no_content,
+  text as text_response,
+  bytes as bytes_response,
+  documented_response,
   status,
   to_response
 }
@@ -149,6 +196,7 @@ pub use src::routes::{
   delete_params_query,
   delete_unit,
   route,
+  with_route_docs,
   route_auth,
   route_auth_json,
   route_auth_result_json,
@@ -195,4 +243,4 @@ pub use src::routes::{
 }
 pub use src::static_files::serve_dir
 pub use src::streaming::{ stream, write as write_stream }
-pub use src::sse::{ Event as SseEvent, Sender as SseSender, response as sse_response, make_sse_event }
+pub use src::sse::{ Event as SseEvent, Sender as SseSender, SseResponse, response as sse_response, typed_response as typed_sse_response, make_sse_event }

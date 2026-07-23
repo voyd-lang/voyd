@@ -1,0 +1,17 @@
+use src::types::{ Maybe, Some, None, Number }
+
+pub trait Read<T>
+  fn read(self) -> i32
+
+impl Read<Number> for Number
+  fn read(self) -> i32
+    self.value
+
+impl<T: Read<T>> Read<Maybe<T>> for Maybe<T>
+  fn read(self) -> i32
+    self.match(active)
+      Some<T>: read_value<T>(active.value)
+      None: 0
+
+pub fn read_value<T: Read<T>>(value: T) -> i32
+  value.read()

@@ -24,6 +24,7 @@ import {
   internCheckedUnion,
   resolveTypeExpr,
   getSymbolName,
+  activeTypeParameterConstraint,
 } from "../type-system.js";
 import {
   bindTypeParams as bindTypeParamsFromType,
@@ -42,6 +43,7 @@ import {
   getExprEffectRow,
   ensureEffectCompatibility,
   applyEffectRowSubstitution,
+  resolveEffectAnnotation,
 } from "../effects.js";
 import {
   intrinsicSignaturesFor,
@@ -102,6 +104,7 @@ import {
 import { typingContextsShareInterners } from "../shared-interners.js";
 import { mapDependencySymbolToLocal } from "../import-symbol-mapping.js";
 import { hydrateImportedTraitMetadataForOwnerRef } from "../import-trait-impl-hydration.js";
+import { hydrateExternalTraitImplsForOwnerRef } from "../import-trait-impl-hydration.js";
 import { collectTraitOwnersFromTypeParams } from "../constraint-trait-owners.js";
 import { typeDefaultParameterValues } from "../default-parameters.js";
 import { stableCallsiteIdFor } from "../../../stable-callsite-id.js";
@@ -110,6 +113,9 @@ type SymbolNameResolver = (symbol: SymbolId) => string;
 type MethodCallCandidate = {
   symbol: SymbolId;
   signature: FunctionSignature;
+  originalSignature?: FunctionSignature;
+  inferredTypeArguments?: readonly TypeId[];
+  trustedTypeArguments?: boolean;
   symbolRef: SymbolRef;
   methodAlias?: string;
   nameForSymbol?: SymbolNameResolver;
@@ -324,6 +330,26 @@ export const typeCallExpr = (
     return returnType;
   };
 
+  if (
+    calleeExpr.exprKind === "identifier" &&
+    expr.staticTraitTarget &&
+    typeof expr.staticTraitSymbol === "number"
+  ) {
+    const staticCall = typeStaticTraitCall({
+      expr,
+      calleeExpr,
+      args,
+      typeArguments,
+      expectedReturnType,
+      ctx,
+      state,
+    });
+    return finalizeCall({
+      returnType: staticCall.returnType,
+      latentEffectRow: staticCall.effectRow,
+    });
+  }
+
   if (calleeExpr.exprKind === "overload-set") {
     const probeArgs = args;
     ctx.table.setExprType(calleeExpr.id, ctx.primitives.unknown);
@@ -509,7 +535,8 @@ export const typeCallExpr = (
         applyCurrentSubstitution(calleeType, ctx, state),
       );
       if (
-        intrinsicName === "__boundary_shape_of" &&
+        (intrinsicName === "__boundary_shape_of" ||
+          intrinsicName === "__boundary_try_shape_of") &&
         signature &&
         instantiation &&
         (signature.typeParams?.length ?? 0) > 0
@@ -709,6 +736,303 @@ export const typeCallExpr = (
   });
 };
 
+const typeStaticTraitCall = ({
+  expr,
+  calleeExpr,
+  args,
+  typeArguments,
+  expectedReturnType,
+  ctx,
+  state,
+}: {
+  expr: HirCallExpr;
+  calleeExpr: Extract<HirExpression, { exprKind: "identifier" }>;
+  args: readonly Arg[];
+  typeArguments: readonly TypeId[] | undefined;
+  expectedReturnType?: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): { returnType: TypeId; effectRow: number } => {
+  if (!expr.staticTraitTarget || typeof expr.staticTraitSymbol !== "number") {
+    throw new Error("typing expected static trait dispatch metadata");
+  }
+  const targetType = applyCurrentSubstitution(
+    resolveTypeExpr(
+      expr.staticTraitTarget,
+      ctx,
+      state,
+      ctx.primitives.unknown,
+      state.currentFunction?.typeParams,
+    ),
+    ctx,
+    state,
+  );
+  const traitRef = canonicalSymbolRefForTypingContext(
+    expr.staticTraitSymbol,
+    ctx,
+  );
+  hydrateExternalTraitImplsForOwnerRef({
+    ownerModuleId: traitRef.moduleId,
+    ownerSymbol: traitRef.symbol,
+    ctx,
+  });
+  const templates = ctx.traits.getImplTemplatesForTrait(expr.staticTraitSymbol);
+  const methodName =
+    expr.staticTraitMethod ?? ctx.symbolTable.getSymbol(calleeExpr.symbol).name;
+  const targetDesc = ctx.arena.get(targetType);
+  const targetIsTypeParameter =
+    targetDesc.kind === "type-param-ref" ||
+    targetDesc.kind === "trait" ||
+    (targetDesc.kind === "intersection" &&
+      (targetDesc.traits?.length ?? 0) > 0);
+  const seenGenericTraitMethods = new Set<string>();
+  const candidateTemplates = targetIsTypeParameter
+    ? templates.slice(0, 1)
+    : templates;
+  const rawCandidates = candidateTemplates.flatMap((template) => {
+    const match = targetIsTypeParameter
+      ? undefined
+      : unifyWithBudget({
+          actual: targetType,
+          expected: template.target,
+          options: {
+            location: expr.ast,
+            reason: "static trait method dispatch",
+            variance: "invariant",
+            allowUnknown: state.mode === "relaxed",
+          },
+          ctx,
+        });
+    if (match && !match.ok) {
+      return [];
+    }
+    const inferredSubstitution =
+      match?.ok === true ? match.substitution : new Map<TypeParamId, TypeId>();
+    return Array.from(template.staticMethods.entries()).flatMap(
+      ([traitMethod, implMethod]) => {
+        if (ctx.symbolTable.getSymbol(traitMethod).name !== methodName) {
+          return [];
+        }
+        if (targetIsTypeParameter) {
+          const traitMethodKey = symbolRefKey(
+            canonicalSymbolRefForTypingContext(traitMethod, ctx),
+          );
+          if (seenGenericTraitMethods.has(traitMethodKey)) {
+            return [];
+          }
+          seenGenericTraitMethods.add(traitMethodKey);
+        }
+        const symbolRef = canonicalSymbolRefForTypingContext(implMethod, ctx);
+        const signature =
+          symbolRef.moduleId === ctx.moduleId
+            ? ctx.functions.getSignature(symbolRef.symbol)
+            : (() => {
+                const dependency = ctx.dependencies.get(symbolRef.moduleId);
+                return dependency
+                  ? getDependencyMethodSignature({
+                      dependency,
+                      symbol: symbolRef.symbol,
+                      ctx,
+                    })
+                  : undefined;
+              })();
+        if (!signature) {
+          return [];
+        }
+        const inferredTypeArguments = template.typeParams.map(
+          ({ typeParam }) =>
+            inferredSubstitution.get(typeParam) ?? ctx.primitives.unknown,
+        );
+        const methodTypeParamCount = Math.max(
+          0,
+          (signature.typeParams?.length ?? 0) - inferredTypeArguments.length,
+        );
+        const signatureSubstitution = new Map<TypeParamId, TypeId>();
+        signature.typeParams
+          ?.slice(methodTypeParamCount)
+          .forEach((parameter, index) =>
+            signatureSubstitution.set(
+              parameter.typeParam,
+              inferredTypeArguments[index]!,
+            ),
+          );
+        const specializedSignature: FunctionSignature = {
+          ...signature,
+          parameters: signature.parameters.map((parameter) => ({
+            ...parameter,
+            type: ctx.arena.substitute(parameter.type, signatureSubstitution),
+          })),
+          returnType: ctx.arena.substitute(
+            signature.returnType,
+            signatureSubstitution,
+          ),
+          typeParams: signature.typeParams?.slice(0, methodTypeParamCount),
+        };
+        return [
+          {
+            template,
+            traitMethod,
+            implMethod,
+            substitution: inferredSubstitution,
+            symbol: symbolRef.symbol,
+            symbolRef,
+            signature: specializedSignature,
+            originalSignature: signature,
+            inferredTypeArguments,
+          },
+        ];
+      },
+    );
+  });
+  const seenCandidates = new Set<string>();
+  const candidates = rawCandidates.filter((candidate) => {
+    const key = targetIsTypeParameter
+      ? symbolRefKey(
+          canonicalSymbolRefForTypingContext(candidate.traitMethod, ctx),
+        )
+      : symbolRefKey(candidate.symbolRef);
+    if (seenCandidates.has(key)) {
+      return false;
+    }
+    seenCandidates.add(key);
+    return true;
+  });
+  const matches = findMatchingOverloadCandidates({
+    name: methodName,
+    candidates,
+    args,
+    span: expr.span,
+    ctx,
+    state,
+    typeArguments,
+  });
+  if (matches.length > 1) {
+    throw new Error(`ambiguous static trait method ${methodName}`);
+  }
+  const selected = matches[0];
+  if (selected) {
+    const result = typeFunctionCall({
+      args,
+      signature: selected.originalSignature,
+      calleeSymbol: selected.symbolRef.symbol,
+      typeArguments: [
+        ...(typeArguments ?? []),
+        ...selected.inferredTypeArguments,
+      ],
+      expectedReturnType,
+      callId: expr.id,
+      calleeExprId: calleeExpr.id,
+      calleeModuleId: selected.symbolRef.moduleId,
+      seedSubstitution: selected.substitution,
+      trustTypeArgumentConstraints: true,
+      ctx,
+      state,
+    });
+    const callerInstanceKey = state.currentFunction?.instanceKey;
+    if (!callerInstanceKey) {
+      throw new Error(`missing function instance key for call ${expr.id}`);
+    }
+    const targets = ctx.callResolution.targets.get(expr.id) ?? new Map();
+    targets.set(callerInstanceKey, selected.symbolRef);
+    ctx.callResolution.targets.set(expr.id, targets);
+    return result;
+  }
+  const traitDecl = ctx.traits.getDecl(expr.staticTraitSymbol);
+  const traitMethod = traitDecl?.methods.find(
+    (method) =>
+      method.symbol === calleeExpr.symbol ||
+      ctx.symbolTable.getSymbol(method.symbol).name === methodName,
+  );
+  if (!traitDecl || !traitMethod) {
+    throw new Error(
+      `missing declaration for static trait method ${methodName}`,
+    );
+  }
+  const traitTypeArguments = resolveTypeArguments(
+    expr.targetTypeArguments,
+    ctx,
+    state,
+  );
+  const typeParamMap = new Map(state.currentFunction?.typeParams ?? []);
+  traitDecl.typeParameters?.forEach((parameter, index) => {
+    const argument = traitTypeArguments?.[index];
+    if (typeof argument === "number") {
+      typeParamMap.set(
+        parameter.symbol,
+        applyCurrentSubstitution(argument, ctx, state),
+      );
+    }
+  });
+  traitMethod.typeParameters?.forEach((parameter, index) => {
+    const argument = typeArguments?.[index];
+    if (typeof argument === "number") {
+      typeParamMap.set(
+        parameter.symbol,
+        applyCurrentSubstitution(argument, ctx, state),
+      );
+    }
+  });
+  const parameters = traitMethod.parameters.map((parameter) => ({
+    type: applyCurrentSubstitution(
+      resolveTypeExpr(
+        parameter.type,
+        ctx,
+        state,
+        ctx.primitives.unknown,
+        typeParamMap,
+      ),
+      ctx,
+      state,
+    ),
+    label: parameter.label,
+    optional: false,
+  }));
+  validateCallArgs(args, parameters, ctx, state, expr.span);
+  const returnType = applyCurrentSubstitution(
+    resolveTypeExpr(
+      traitMethod.returnType,
+      ctx,
+      state,
+      ctx.primitives.void,
+      typeParamMap,
+    ),
+    ctx,
+    state,
+  );
+  if (typeof expectedReturnType === "number") {
+    ensureTypeMatches(
+      returnType,
+      expectedReturnType,
+      ctx,
+      state,
+      `static trait method ${methodName} return type`,
+    );
+  }
+  const effectRow =
+    resolveEffectAnnotation(traitMethod.effectType, ctx, state) ??
+    ctx.primitives.defaultEffectRow;
+  const calleeType = ctx.arena.internFunction({
+    parameters,
+    returnType,
+    effectRow,
+  });
+  ctx.table.setExprType(calleeExpr.id, calleeType);
+  ctx.resolvedExprTypes.set(calleeExpr.id, calleeType);
+  const selectedRef = canonicalSymbolRefForTypingContext(
+    calleeExpr.symbol,
+    ctx,
+  );
+  const callerInstanceKey = state.currentFunction?.instanceKey;
+  if (!callerInstanceKey) {
+    throw new Error(`missing function instance key for call ${expr.id}`);
+  }
+  const targets = ctx.callResolution.targets.get(expr.id) ?? new Map();
+  targets.set(callerInstanceKey, selectedRef);
+  ctx.callResolution.targets.set(expr.id, targets);
+  ctx.callResolution.traitDispatches.add(expr.id);
+  return { returnType, effectRow };
+};
+
 const resolveSymbolName = (
   symbol: SymbolId,
   ctx: TypingContext,
@@ -781,6 +1105,60 @@ export const typeMethodCallExpr = (
     return finalizeCall({ returnType: ctx.primitives.unknown });
   }
 
+  const targetExpr = ctx.hir.expressions.get(expr.target);
+  const currentSignature =
+    typeof state.currentFunction?.functionSymbol === "number"
+      ? ctx.functions.getSignature(state.currentFunction.functionSymbol)
+      : undefined;
+  const declaredTargetType =
+    ctx.table.getRootExprType(expr.target) ??
+    (targetExpr?.exprKind === "identifier"
+      ? currentSignature?.parameters.find(
+          (parameter) => parameter.symbol === targetExpr.symbol,
+        )?.type
+      : undefined);
+  const declaredTargetDesc =
+    typeof declaredTargetType === "number"
+      ? ctx.arena.get(declaredTargetType)
+      : undefined;
+  const specializedDeclaredTargetType =
+    typeof declaredTargetType === "number"
+      ? applyCurrentSubstitution(declaredTargetType, ctx, state)
+      : undefined;
+  const specializedDeclaredTargetDesc =
+    typeof specializedDeclaredTargetType === "number"
+      ? ctx.arena.get(specializedDeclaredTargetType)
+      : undefined;
+  const declaredTargetConstraint =
+    declaredTargetDesc?.kind === "type-param-ref"
+      ? activeTypeParameterConstraint({
+          typeParam: declaredTargetDesc.param,
+          ctx,
+          state,
+        })
+      : undefined;
+  const concreteConstrainedResolution =
+    declaredTargetDesc?.kind === "type-param-ref" &&
+    specializedDeclaredTargetDesc?.kind !== "type-param-ref" &&
+    typeof declaredTargetConstraint === "number"
+      ? resolveStructuralTraitMethodCandidates({
+          receiverType: specializedDeclaredTargetType!,
+          methodName: expr.method,
+          constraintType: declaredTargetConstraint,
+          ctx,
+          state,
+        })
+      : undefined;
+  const constrainedResolution =
+    declaredTargetDesc?.kind === "type-param-ref" &&
+    typeof declaredTargetConstraint === "number"
+      ? resolveMethodCallCandidates({
+          receiverType: declaredTargetType!,
+          methodName: expr.method,
+          ctx,
+          state,
+        })
+      : undefined;
   const resolution =
     typeof expr.traitSymbol === "number"
       ? resolveQualifiedTraitMethodCallCandidates({
@@ -789,14 +1167,22 @@ export const typeMethodCallExpr = (
           methodName: expr.method,
           ctx,
         })
-      : resolveMethodCallCandidates({
+      : (constrainedResolution ??
+        resolveMethodCallCandidates({
           receiverType: targetType,
           methodName: expr.method,
           ctx,
-        });
+          state,
+        }));
+  const resolvedSelection =
+    typeof expr.traitSymbol === "number" ||
+    !concreteConstrainedResolution ||
+    concreteConstrainedResolution.candidates.length === 0
+      ? resolution
+      : concreteConstrainedResolution;
   const selection = selectMethodCallCandidate({
     expr,
-    resolution,
+    resolution: resolvedSelection,
     probeArgs,
     typeArguments,
     ctx,
@@ -851,7 +1237,11 @@ export const typeMethodCallExpr = (
 
   const receiverType = selected.receiverTypeOverride ?? targetType;
   if (selected.receiverTypeOverride) {
-    ctx.resolvedExprTypes.set(expr.target, receiverType);
+    const targetDesc = ctx.arena.get(targetType);
+    ctx.resolvedExprTypes.set(
+      expr.target,
+      targetDesc.kind === "type-param-ref" ? receiverType : targetType,
+    );
   }
 
   const hintArgs =
@@ -894,15 +1284,18 @@ export const typeMethodCallExpr = (
 
   const { returnType, effectRow } = typeFunctionCall({
     args,
-    signature: selected.signature,
+    signature: selected.originalSignature ?? selected.signature,
     calleeSymbol: selected.symbol,
-    typeArguments,
+    typeArguments: selected.inferredTypeArguments
+      ? [...(typeArguments ?? []), ...selected.inferredTypeArguments]
+      : typeArguments,
     expectedReturnType,
     callId: expr.id,
     ctx,
     state,
     calleeModuleId: selectedRef.moduleId,
     nameForSymbol: selected.nameForSymbol,
+    trustTypeArgumentConstraints: selected.trustedTypeArguments,
   });
 
   return finalizeCall({
@@ -2261,14 +2654,14 @@ const typeSatisfiesForDiagnostic = ({
   ) {
     return false;
   }
-  const originalMax = ctx.typeCheckBudget.maxUnifySteps;
-  const originalSteps = ctx.typeCheckBudget.unifyStepsUsed.value;
-  ctx.typeCheckBudget.maxUnifySteps = Number.MAX_SAFE_INTEGER;
+  const originalTotalMax = ctx.typeCheckBudget.maxTotalUnifySteps;
+  const originalSteps = ctx.typeCheckBudget.totalUnifyStepsUsed;
+  ctx.typeCheckBudget.maxTotalUnifySteps = Number.MAX_SAFE_INTEGER;
   try {
     return typeSatisfies(actual, expected, ctx, state);
   } finally {
-    ctx.typeCheckBudget.maxUnifySteps = originalMax;
-    ctx.typeCheckBudget.unifyStepsUsed.value = originalSteps;
+    ctx.typeCheckBudget.maxTotalUnifySteps = originalTotalMax;
+    ctx.typeCheckBudget.totalUnifyStepsUsed = originalSteps;
   }
 };
 
@@ -2478,6 +2871,21 @@ const overloadCandidateFailureReason = ({
     onSkipOptionalParam: () => true,
   });
   if (walkResult.kind === "ok") {
+    if (
+      signature.typeParams &&
+      signature.typeParams.length > 0 &&
+      !inferOverloadCandidateSubstitution({
+        signature,
+        args,
+        typeArguments,
+        targetTypeArguments,
+        calleeSymbol: symbol,
+        ctx,
+        state,
+      })
+    ) {
+      return "type arguments do not satisfy the candidate constraints";
+    }
     return undefined;
   }
 
@@ -3206,6 +3614,10 @@ const getTraitMethodTypeBindings = ({
   }
 
   const bindings = new Map<TypeParamId, TypeId>();
+  const implTypeParamOffset = Math.max(
+    0,
+    signature.typeParams.length - template.typeParams.length,
+  );
   signature.typeParams.forEach((param, index) => {
     const fromSymbol = symbolBindings.get(param.symbol);
     if (typeof fromSymbol === "number") {
@@ -3219,7 +3631,7 @@ const getTraitMethodTypeBindings = ({
       return;
     }
 
-    const templateParam = template.typeParams[index];
+    const templateParam = template.typeParams[index - implTypeParamOffset];
     const fromTemplateIndex =
       templateParam && match.substitution.get(templateParam.typeParam);
     if (typeof fromTemplateIndex === "number") {
@@ -3514,42 +3926,60 @@ const selectMethodCallCandidate = ({
   });
   let candidates = methodCandidates;
   let noOverloadDiagnosticCandidates = methodCandidates;
-  enforceOverloadCandidateBudget({
-    name: expr.method,
-    candidateCount: candidates.length,
-    ctx,
-    span: expr.span,
-  });
-  let matches = findMatchingOverloadCandidates({
-    name: expr.method,
-    candidates,
-    args: probeArgs,
-    span: expr.span,
-    ctx,
-    state,
-    typeArguments,
-    argsForCandidate,
-    scoreMatches: (rawMatches) =>
-      scoreOverloadMatchesByLambdaCompatibility({
-        matches: rawMatches,
+  const receiverDesc =
+    probeArgs[0] === undefined ? undefined : ctx.arena.get(probeArgs[0].type);
+  const receiverIsTrait =
+    receiverDesc?.kind === "trait" ||
+    (receiverDesc?.kind === "intersection" &&
+      (receiverDesc.traits?.length ?? 0) > 0) ||
+    methodCandidates.some((candidate) => {
+      const override = candidate.receiverTypeOverride;
+      if (typeof override !== "number") {
+        return false;
+      }
+      const desc = ctx.arena.get(override);
+      return (
+        desc.kind === "trait" ||
+        (desc.kind === "intersection" && (desc.traits?.length ?? 0) > 0)
+      );
+    });
+  if (receiverIsTrait) {
+    enforceOverloadCandidateBudget({
+      name: expr.method,
+      candidateCount: candidates.length,
+      ctx,
+      span: expr.span,
+    });
+  }
+  let matches = receiverIsTrait
+    ? []
+    : findMatchingOverloadCandidates({
+        name: expr.method,
+        candidates,
         args: probeArgs,
-        callArgs: [{ expr: expr.target }, ...expr.args],
-        argsForCandidate,
-        typeArguments,
+        span: expr.span,
         ctx,
         state,
-      }),
-  });
+        typeArguments,
+        argsForCandidate,
+        scoreMatches: (rawMatches) =>
+          scoreOverloadMatchesByLambdaCompatibility({
+            matches: rawMatches,
+            args: probeArgs,
+            callArgs: [{ expr: expr.target }, ...expr.args],
+            argsForCandidate,
+            typeArguments,
+            ctx,
+            state,
+          }),
+      });
 
-  let traitDispatch =
-    matches.length === 0
-      ? resolveMethodTraitDispatchCandidate({
-          candidates,
-          probeArgs,
-          ctx,
-          state,
-        })
-      : undefined;
+  let traitDispatch = resolveMethodTraitDispatchCandidate({
+    candidates,
+    probeArgs,
+    ctx,
+    state,
+  });
 
   if (
     !traitDispatch &&
@@ -3578,12 +4008,6 @@ const selectMethodCallCandidate = ({
           fallbackCandidates: filteredFallbackCandidates,
           ctx,
         });
-      enforceOverloadCandidateBudget({
-        name: expr.method,
-        candidateCount: candidates.length,
-        ctx,
-        span: expr.span,
-      });
       matches = findMatchingOverloadCandidates({
         name: expr.method,
         candidates,
@@ -3686,13 +4110,11 @@ const preferLeastGenericMethodAliases = ({
     }
     const shape = overloadCallShape(candidate.signature);
     const typeParameterCount = candidate.signature.typeParams?.length ?? 0;
-    return !candidates.some(
-      (other) => {
-        if (!isMethodAlias(other)) return false;
-        if (overloadCallShape(other.signature) !== shape) return false;
-        return (other.signature.typeParams?.length ?? 0) < typeParameterCount;
-      },
-    );
+    return !candidates.some((other) => {
+      if (!isMethodAlias(other)) return false;
+      if (overloadCallShape(other.signature) !== shape) return false;
+      return (other.signature.typeParams?.length ?? 0) < typeParameterCount;
+    });
   });
 };
 
@@ -3708,12 +4130,38 @@ const resolveMethodCallCandidates = ({
   receiverType,
   methodName,
   ctx,
+  state,
 }: {
   receiverType: TypeId;
   methodName: string;
   ctx: TypingContext;
+  state: TypingState;
 }): MethodCallResolution | undefined => {
   const receiverDesc = ctx.arena.get(receiverType);
+  if (receiverDesc.kind === "type-param-ref") {
+    const constraint = activeTypeParameterConstraint({
+      typeParam: receiverDesc.param,
+      ctx,
+      state,
+    });
+    if (typeof constraint === "number") {
+      const constrained = resolveMethodCallCandidates({
+        receiverType: constraint,
+        methodName,
+        ctx,
+        state,
+      });
+      return constrained
+        ? {
+            ...constrained,
+            candidates: constrained.candidates.map((candidate) => ({
+              ...candidate,
+              receiverTypeOverride: constraint,
+            })),
+          }
+        : undefined;
+    }
+  }
   if (receiverDesc.kind === "trait") {
     const traitResolution = resolveTraitMethodCandidates({
       receiverDesc,
@@ -3771,6 +4219,18 @@ const resolveMethodCallCandidates = ({
       };
     }
   }
+  const structuralResolution = resolveStructuralTraitMethodCandidates({
+    receiverType,
+    methodName,
+    ctx,
+    state,
+  });
+  if (structuralResolution.candidates.length > 0) {
+    return {
+      ...structuralResolution,
+      includesMethodCandidates: true,
+    };
+  }
   const nominalResolution = resolveNominalMethodCandidates({
     receiverType,
     methodName,
@@ -3787,6 +4247,201 @@ const resolveMethodCallCandidates = ({
     receiverName: nominalResolution?.receiverName,
     includesMethodCandidates: false,
   };
+};
+
+const resolveStructuralTraitMethodCandidates = ({
+  receiverType,
+  methodName,
+  constraintType,
+  ctx,
+  state,
+}: {
+  receiverType: TypeId;
+  methodName: string;
+  constraintType?: TypeId;
+  ctx: TypingContext;
+  state: TypingState;
+}): MethodCallResolution => {
+  // Structural impl dispatch is currently used for union aliases such as
+  // Result<T, E> and Option<T>. Nominal receivers already have the indexed
+  // nominal method path; sweeping every trait template for them is both
+  // redundant and expensive in method-heavy framework modules.
+  if (
+    typeof constraintType !== "number" &&
+    ctx.arena.get(unfoldRecursiveTypeId(receiverType, ctx)).kind !== "union"
+  ) {
+    return { candidates: [] };
+  }
+  const candidates = ctx.traits.getImplTemplates().flatMap((template) => {
+    if (!structuralImplTargetCouldMatch(receiverType, template.target, ctx)) {
+      return [];
+    }
+    const match = unifyWithBudget({
+      actual: receiverType,
+      expected: template.target,
+      options: {
+        location: ctx.hir.module.ast,
+        reason: "structural trait method resolution",
+        variance: "covariant",
+        allowUnknown: state.mode === "relaxed",
+      },
+      ctx,
+    });
+    if (
+      !match.ok &&
+      !typeSatisfies(receiverType, template.target, ctx, state)
+    ) {
+      return [];
+    }
+    const constraintMatch =
+      typeof constraintType === "number"
+        ? unifyWithBudget({
+            actual: constraintType,
+            expected: template.trait,
+            options: {
+              location: ctx.hir.module.ast,
+              reason: "constrained trait method resolution",
+              variance: "covariant",
+              allowUnknown: state.mode === "relaxed",
+            },
+            ctx,
+          })
+        : undefined;
+    const hasProvenTraitContract =
+      constraintMatch?.ok === true ||
+      typeSatisfies(receiverType, template.trait, ctx, state);
+    if (!hasProvenTraitContract) {
+      return [];
+    }
+    const implMethod = Array.from(template.methods.entries()).find(
+      ([traitMethod]) =>
+        ctx.symbolTable.getSymbol(traitMethod).name === methodName,
+    )?.[1];
+    if (typeof implMethod !== "number") {
+      return [];
+    }
+    const symbolRef = canonicalSymbolRefForTypingContext(implMethod, ctx);
+    const signature =
+      symbolRef.moduleId === ctx.moduleId
+        ? ctx.functions.getSignature(symbolRef.symbol)
+        : (() => {
+            const dependency = ctx.dependencies.get(symbolRef.moduleId);
+            return dependency
+              ? getDependencyMethodSignature({
+                  dependency,
+                  symbol: symbolRef.symbol,
+                  ctx,
+                })
+              : undefined;
+          })();
+    if (!signature) {
+      return [];
+    }
+    const inferredSubstitution = new Map<TypeParamId, TypeId>();
+    if (match.ok) {
+      match.substitution.forEach((type, parameter) =>
+        inferredSubstitution.set(parameter, type),
+      );
+    } else {
+      bindTypeParamsFromType(
+        template.target,
+        receiverType,
+        inferredSubstitution,
+        ctx,
+        state,
+      );
+    }
+    if (constraintMatch?.ok) {
+      constraintMatch.substitution.forEach((type, parameter) =>
+        inferredSubstitution.set(parameter, type),
+      );
+    }
+    const inferredTypeArguments = template.typeParams.map(
+      ({ typeParam }) =>
+        inferredSubstitution.get(typeParam) ?? ctx.primitives.unknown,
+    );
+    const substitution = new Map<TypeParamId, TypeId>();
+    const methodTypeParamCount = Math.max(
+      0,
+      (signature.typeParams?.length ?? 0) - inferredTypeArguments.length,
+    );
+    signature.typeParams
+      ?.slice(methodTypeParamCount)
+      .forEach((parameter, index) =>
+        substitution.set(parameter.typeParam, inferredTypeArguments[index]!),
+      );
+    const specializedSignature: FunctionSignature = {
+      ...signature,
+      parameters: signature.parameters.map((parameter) => ({
+        ...parameter,
+        type: ctx.arena.substitute(parameter.type, substitution),
+      })),
+      returnType: ctx.arena.substitute(signature.returnType, substitution),
+      typeParams: signature.typeParams?.slice(0, methodTypeParamCount),
+    };
+    return [
+      {
+        symbol: symbolRef.symbol,
+        symbolRef,
+        signature: specializedSignature,
+        originalSignature: signature,
+        inferredTypeArguments,
+        trustedTypeArguments: true,
+        receiverTypeOverride:
+          typeof constraintType === "number" ? receiverType : undefined,
+      },
+    ];
+  });
+
+  return { candidates };
+};
+
+const structuralImplTargetCouldMatch = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+): boolean => {
+  const actualDesc = ctx.arena.get(unfoldRecursiveTypeId(actual, ctx));
+  const expectedDesc = ctx.arena.get(unfoldRecursiveTypeId(expected, ctx));
+  if (
+    actualDesc.kind === "type-param-ref" ||
+    expectedDesc.kind === "type-param-ref"
+  ) {
+    return true;
+  }
+  if (actualDesc.kind !== "union" || expectedDesc.kind !== "union") {
+    return actualDesc.kind === expectedDesc.kind;
+  }
+  if (actualDesc.members.length !== expectedDesc.members.length) {
+    return false;
+  }
+
+  const nominalOwner = (type: TypeId): SymbolRef | undefined => {
+    const nominal = getNominalComponent(type, ctx);
+    if (typeof nominal !== "number") {
+      return undefined;
+    }
+    const desc = ctx.arena.get(nominal);
+    return desc.kind === "nominal-object" || desc.kind === "value-object"
+      ? desc.owner
+      : undefined;
+  };
+  const remaining = [...actualDesc.members];
+  return expectedDesc.members.every((expectedMember) => {
+    const expectedOwner = nominalOwner(expectedMember);
+    const index = remaining.findIndex((actualMember) => {
+      const actualOwner = nominalOwner(actualMember);
+      return expectedOwner && actualOwner
+        ? symbolRefEquals(expectedOwner, actualOwner)
+        : ctx.arena.get(expectedMember).kind ===
+            ctx.arena.get(actualMember).kind;
+    });
+    if (index < 0) {
+      return false;
+    }
+    remaining.splice(index, 1);
+    return true;
+  });
 };
 
 const resolveQualifiedTraitMethodCallCandidates = ({
@@ -3975,12 +4630,6 @@ const typeOperatorOverloadCall = ({
   });
   let candidates = methodCandidates;
   let noOverloadDiagnosticCandidates = methodCandidates;
-  enforceOverloadCandidateBudget({
-    name: operatorName,
-    candidateCount: candidates.length,
-    ctx,
-    span: call.span,
-  });
 
   let matches = findMatchingOverloadCandidates({
     name: operatorName,
@@ -4034,12 +4683,6 @@ const typeOperatorOverloadCall = ({
           fallbackCandidates: filteredFallbackCandidates,
           ctx,
         });
-      enforceOverloadCandidateBudget({
-        name: operatorName,
-        candidateCount: candidates.length,
-        ctx,
-        span: call.span,
-      });
       matches = findMatchingOverloadCandidates({
         name: operatorName,
         candidates,
@@ -4962,6 +5605,7 @@ const typeFunctionCall = ({
   calleeModuleId,
   nameForSymbol,
   seedSubstitution,
+  trustTypeArgumentConstraints,
 }: {
   args: readonly Arg[];
   signature: FunctionSignature;
@@ -4976,6 +5620,7 @@ const typeFunctionCall = ({
   calleeModuleId?: string;
   nameForSymbol?: SymbolNameResolver;
   seedSubstitution?: ReadonlyMap<TypeParamId, TypeId>;
+  trustTypeArgumentConstraints?: boolean;
 }): { returnType: TypeId; effectRow: number } => {
   const callerInstanceKey = state.currentFunction?.instanceKey;
   if (!callerInstanceKey) {
@@ -5025,6 +5670,7 @@ const typeFunctionCall = ({
         expectedReturnType,
         calleeSymbol,
         prefilledSubstitution,
+        trustTypeArgumentConstraints,
         ctx,
         state,
         nameForSymbol: resolveName,
@@ -5194,8 +5840,16 @@ const typeFunctionCall = ({
       );
     }
   } else {
-    ctx.callResolution.typeArguments.delete(callId);
-    ctx.callResolution.instanceKeys.delete(callId);
+    const typeArgumentsByCaller = ctx.callResolution.typeArguments.get(callId);
+    typeArgumentsByCaller?.delete(callerInstanceKey);
+    if (typeArgumentsByCaller?.size === 0) {
+      ctx.callResolution.typeArguments.delete(callId);
+    }
+    const instanceKeysByCaller = ctx.callResolution.instanceKeys.get(callId);
+    instanceKeysByCaller?.delete(callerInstanceKey);
+    if (instanceKeysByCaller?.size === 0) {
+      ctx.callResolution.instanceKeys.delete(callId);
+    }
   }
 
   return {
@@ -5214,6 +5868,7 @@ const instantiateFunctionCall = ({
   ctx,
   state,
   nameForSymbol,
+  trustTypeArgumentConstraints,
 }: {
   signature: FunctionSignature;
   args: readonly Arg[];
@@ -5224,6 +5879,7 @@ const instantiateFunctionCall = ({
   ctx: TypingContext;
   state: TypingState;
   nameForSymbol?: SymbolNameResolver;
+  trustTypeArgumentConstraints?: boolean;
 }): {
   substitution: ReadonlyMap<TypeParamId, TypeId>;
   parameters: readonly ParamSignature[];
@@ -5275,22 +5931,43 @@ const instantiateFunctionCall = ({
     (param) => !substitution.has(param.typeParam),
   );
   if (missing.length > 0) {
+    const caller = state.currentFunction?.functionSymbol;
+    const callerContext =
+      typeof caller === "number"
+        ? ` while typing ${resolveSymbolName(caller, ctx)}`
+        : "";
     throw new Error(
       `function ${resolveSymbolName(calleeSymbol, ctx, nameForSymbol)} is missing ${
         missing.length
-      } type argument(s); add explicit type arguments`,
+      } type argument(s); add explicit type arguments${callerContext}`,
     );
   }
 
-  typeParams.forEach((param) =>
-    enforceTypeParamConstraint(param, substitution, ctx, state, nameForSymbol),
-  );
+  if (trustTypeArgumentConstraints !== true) {
+    typeParams.forEach((param) =>
+      enforceTypeParamConstraint(
+        param,
+        substitution,
+        ctx,
+        state,
+        nameForSymbol,
+      ),
+    );
+  }
 
   const parameters = signature.parameters.map((param) => ({
     ...param,
-    type: ctx.arena.substitute(param.type, substitution),
+    type: applyCurrentSubstitution(
+      ctx.arena.substitute(param.type, substitution),
+      ctx,
+      state,
+    ),
   }));
-  const returnType = ctx.arena.substitute(signature.returnType, substitution);
+  const returnType = applyCurrentSubstitution(
+    ctx.arena.substitute(signature.returnType, substitution),
+    ctx,
+    state,
+  );
 
   return { substitution, parameters, returnType };
 };
@@ -5310,6 +5987,14 @@ export const enforceTypeParamConstraint = (
     return;
   }
   const constraint = ctx.arena.substitute(param.constraint, substitution);
+  const constraintDesc = ctx.arena.get(constraint);
+  if (constraintDesc.kind === "trait") {
+    hydrateExternalTraitImplsForOwnerRef({
+      ownerModuleId: constraintDesc.owner.moduleId,
+      ownerSymbol: constraintDesc.owner.symbol,
+      ctx,
+    });
+  }
   if (!typeSatisfies(applied, constraint, ctx, state)) {
     const appliedType = typeDescriptorToUserString(
       ctx.arena.get(applied),
@@ -6747,6 +7432,12 @@ const inlineLambdaExpectedTypeParamPenalty = <
     if (expectedDesc.kind !== "function") {
       continue;
     }
+    if (
+      ctx.arena.get(unfoldRecursiveTypeId(expectedDesc.returnType, ctx))
+        .kind === "type-param-ref"
+    ) {
+      penalty += 1;
+    }
     expectedDesc.parameters.forEach((param, paramIndex) => {
       const lambdaParam = lambdaExpr.parameters[paramIndex];
       const annotationPenalty =
@@ -7005,129 +7696,146 @@ const resolveTraitDispatchOverload = <
   }
 
   const allowUnknown = state.mode === "relaxed";
-  const candidate = candidates.find((candidate) => {
-    const { symbol, signature } = candidate;
-    if (signature.parameters.length === 0) {
-      return false;
-    }
-    const candidateModuleId = candidate.symbolRef?.moduleId ?? ctx.moduleId;
-    const methodMetadata = traitMethodImplMetadataFor({
-      symbol,
-      moduleId: candidateModuleId,
-      ctx,
-    });
-    if (!methodMetadata) {
-      return false;
-    }
+  const candidate = [...candidates]
+    .sort(
+      (left, right) =>
+        (left.signature.typeParams?.length ?? 0) -
+        (right.signature.typeParams?.length ?? 0),
+    )
+    .find((candidate) => {
+      const { symbol, signature } = candidate;
+      if (signature.parameters.length === 0) {
+        return false;
+      }
+      const candidateModuleId = candidate.symbolRef?.moduleId ?? ctx.moduleId;
+      const methodMetadata = traitMethodImplMetadataFor({
+        symbol,
+        moduleId: candidateModuleId,
+        ctx,
+      });
+      if (!methodMetadata) {
+        return false;
+      }
 
-    const methodTraitRef = traitSymbolRefFor({
-      traitSymbol: methodMetadata.metadata.traitSymbol,
-      moduleId: methodMetadata.moduleId,
-      ctx,
-    });
-    if (!symbolRefEquals(methodTraitRef, receiverDesc.owner)) {
-      return false;
-    }
+      const methodTraitRef = traitSymbolRefFor({
+        traitSymbol: methodMetadata.metadata.traitSymbol,
+        moduleId: methodMetadata.moduleId,
+        ctx,
+      });
+      if (!symbolRefEquals(methodTraitRef, receiverDesc.owner)) {
+        return false;
+      }
 
-    const impls =
-      methodMetadata.moduleId === ctx.moduleId
-        ? ctx.traitImplsByTrait.get(methodMetadata.metadata.traitSymbol)
-        : ctx.dependencies
-            .get(methodMetadata.moduleId)
-            ?.typing.traitImplsByTrait.get(methodMetadata.metadata.traitSymbol);
-    const templates =
-      methodMetadata.moduleId === ctx.moduleId
-        ? ctx.traits.getImplTemplatesForTrait(
-            methodMetadata.metadata.traitSymbol,
-          )
-        : ctx.dependencies
-            .get(methodMetadata.moduleId)
-            ?.typing.traits.getImplTemplatesForTrait(
+      const impls =
+        methodMetadata.moduleId === ctx.moduleId
+          ? ctx.traitImplsByTrait.get(methodMetadata.metadata.traitSymbol)
+          : ctx.dependencies
+              .get(methodMetadata.moduleId)
+              ?.typing.traitImplsByTrait.get(
+                methodMetadata.metadata.traitSymbol,
+              );
+      const templates =
+        methodMetadata.moduleId === ctx.moduleId
+          ? ctx.traits.getImplTemplatesForTrait(
               methodMetadata.metadata.traitSymbol,
-            );
-    const dependency =
-      methodMetadata.moduleId === ctx.moduleId
-        ? undefined
-        : ctx.dependencies.get(methodMetadata.moduleId);
-    const translateDependencyType =
-      dependency &&
-      !typingContextsShareInterners({
-        sourceArena: dependency.typing.arena,
-        targetArena: ctx.arena,
-        sourceEffects: dependency.typing.effects,
-        targetEffects: ctx.effects,
-      })
-        ? createTranslation({
-            sourceArena: dependency.typing.arena,
-            targetArena: ctx.arena,
-            sourceEffects: dependency.typing.effects,
-            targetEffects: ctx.effects,
-            paramMap: new Map<TypeParamId, TypeParamId>(),
-            cache: new Map(),
-            mapSymbol: (owner) =>
-              mapDependencySymbolToLocal({
-                owner,
-                dependency,
-                ctx,
-                allowUnexported: true,
-              }),
-          })
-        : undefined;
-    const toLocalType = (type: TypeId): TypeId =>
-      translateDependencyType ? translateDependencyType(type) : type;
+            )
+          : ctx.dependencies
+              .get(methodMetadata.moduleId)
+              ?.typing.traits.getImplTemplatesForTrait(
+                methodMetadata.metadata.traitSymbol,
+              );
+      const dependency =
+        methodMetadata.moduleId === ctx.moduleId
+          ? undefined
+          : ctx.dependencies.get(methodMetadata.moduleId);
+      const translateDependencyType =
+        dependency &&
+        !typingContextsShareInterners({
+          sourceArena: dependency.typing.arena,
+          targetArena: ctx.arena,
+          sourceEffects: dependency.typing.effects,
+          targetEffects: ctx.effects,
+        })
+          ? createTranslation({
+              sourceArena: dependency.typing.arena,
+              targetArena: ctx.arena,
+              sourceEffects: dependency.typing.effects,
+              targetEffects: ctx.effects,
+              paramMap: new Map<TypeParamId, TypeParamId>(),
+              cache: new Map(),
+              mapSymbol: (owner) =>
+                mapDependencySymbolToLocal({
+                  owner,
+                  dependency,
+                  ctx,
+                  allowUnexported: true,
+                }),
+            })
+          : undefined;
+      const toLocalType = (type: TypeId): TypeId =>
+        translateDependencyType ? translateDependencyType(type) : type;
 
-    if (
-      (!impls || impls.length === 0) &&
-      (!templates || templates.length === 0)
-    ) {
-      return false;
-    }
+      if (
+        (!impls || impls.length === 0) &&
+        (!templates || templates.length === 0)
+      ) {
+        return false;
+      }
 
-    const hasMatchingImpl =
-      impls?.some(
-        (entry) =>
-          entry.methods.get(methodMetadata.metadata.traitMethodSymbol) ===
-            symbol &&
-          typeSatisfies(receiver.type, toLocalType(entry.trait), ctx, state),
-      ) === true;
-    const hasCompatibleTemplate =
-      templates?.some((template) => {
-        const implMethod = template.methods.get(
-          methodMetadata.metadata.traitMethodSymbol,
-        );
-        if (implMethod !== symbol) {
-          return false;
-        }
-        const comparison = unifyWithBudget({
-          actual: receiver.type,
-          expected: toLocalType(template.trait),
-          options: {
-            location: ctx.hir.module.ast,
-            reason: "trait object dispatch",
-            variance: "covariant",
-            allowUnknown,
-          },
-          ctx,
-        });
-        return comparison.ok;
-      }) === true;
-    if (!hasMatchingImpl && !hasCompatibleTemplate) {
-      return false;
-    }
-    const adjustedSignature = signatureWithAdjustedTraitDispatchParameters({
-      args,
-      signature,
-      calleeSymbol: symbol,
-      calleeModuleId: candidateModuleId,
-      ctx,
+      const hasMatchingImpl =
+        impls?.some(
+          (entry) =>
+            entry.methods.get(methodMetadata.metadata.traitMethodSymbol) ===
+              symbol &&
+            traitTemplateCouldMatch(
+              receiver.type,
+              toLocalType(entry.trait),
+              ctx,
+            ) &&
+            typeSatisfies(receiver.type, toLocalType(entry.trait), ctx, state),
+        ) === true;
+      const hasCompatibleTemplate =
+        templates?.some((template) => {
+          const implMethod = template.methods.get(
+            methodMetadata.metadata.traitMethodSymbol,
+          );
+          if (implMethod !== symbol) {
+            return false;
+          }
+          const templateTrait = toLocalType(template.trait);
+          if (!traitTemplateCouldMatch(receiver.type, templateTrait, ctx)) {
+            return false;
+          }
+          const comparison = unifyWithBudget({
+            actual: receiver.type,
+            expected: templateTrait,
+            options: {
+              location: ctx.hir.module.ast,
+              reason: "trait object dispatch",
+              variance: "covariant",
+              allowUnknown,
+            },
+            ctx,
+          });
+          return comparison.ok;
+        }) === true;
+      if (!hasMatchingImpl && !hasCompatibleTemplate) {
+        return false;
+      }
+      const adjustedSignature = signatureWithAdjustedTraitDispatchParameters({
+        args,
+        signature,
+        calleeSymbol: symbol,
+        calleeModuleId: candidateModuleId,
+        ctx,
+      });
+      return callArgumentsSatisfyParams({
+        args,
+        params: adjustedSignature.parameters,
+        ctx,
+        state,
+      });
     });
-    return callArgumentsSatisfyParams({
-      args,
-      params: adjustedSignature.parameters,
-      ctx,
-      state,
-    });
-  });
 
   if (!candidate) {
     return undefined;
@@ -7148,6 +7856,29 @@ const resolveTraitDispatchOverload = <
     ...candidate,
     signature: adjustedSignature,
   } as T;
+};
+
+const traitTemplateCouldMatch = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+): boolean => {
+  const actualDesc = ctx.arena.get(actual);
+  const expectedDesc = ctx.arena.get(expected);
+  if (actualDesc.kind !== "trait" || expectedDesc.kind !== "trait") {
+    return false;
+  }
+  return (
+    symbolRefEquals(actualDesc.owner, expectedDesc.owner) &&
+    actualDesc.typeArgs.length === expectedDesc.typeArgs.length &&
+    actualDesc.typeArgs.every((actualArg, index) =>
+      structuralImplTargetCouldMatch(
+        actualArg,
+        expectedDesc.typeArgs[index]!,
+        ctx,
+      ),
+    )
+  );
 };
 
 const matchesOverloadSignature = (
@@ -7191,7 +7922,11 @@ const matchesOverloadSignature = (
   const params = substitution
     ? publicCallParametersFor({ signature }).map((param) => ({
         ...param,
-        type: ctx.arena.substitute(param.type, substitution),
+        type: applyCurrentSubstitution(
+          ctx.arena.substitute(param.type, substitution),
+          ctx,
+          state,
+        ),
       }))
     : publicCallParametersFor({ signature });
 
@@ -7414,6 +8149,18 @@ const typeIntrinsicCall = (
         args,
         typeArguments,
       });
+    case "__boundary_msgpack_to_value_or_identity":
+      assertIntrinsicArgCount({
+        name: "__boundary_msgpack_to_value_or_identity",
+        args,
+        expected: 2,
+      });
+      if ((typeArguments?.length ?? 0) !== 2) {
+        throw new Error(
+          "intrinsic __boundary_msgpack_to_value_or_identity requires exactly 2 type arguments",
+        );
+      }
+      return typeArguments![0]!;
     case "__boundary_shape_of":
       assertIntrinsicArgCount({
         name: "__boundary_shape_of",
@@ -7424,6 +8171,18 @@ const typeIntrinsicCall = (
         name: "__boundary_shape_of",
         typeArguments,
         detail: "reified type",
+      });
+      return expectedReturnType ?? ctx.primitives.unknown;
+    case "__boundary_try_shape_of":
+      assertIntrinsicArgCount({
+        name: "__boundary_try_shape_of",
+        args,
+        expected: 0,
+      });
+      requireSingleTypeArgument({
+        name: "__boundary_try_shape_of",
+        typeArguments,
+        detail: "optionally reified type",
       });
       return expectedReturnType ?? ctx.primitives.unknown;
     case "__shift_l":

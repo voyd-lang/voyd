@@ -287,14 +287,14 @@ eff AppBuild
 DSL helpers are thin wrappers:
 
 ```voyd
-pub fn get(path: StringSlice, handler: Handler): AppBuild -> void
+pub fn get(path: String, handler: Handler): AppBuild -> void
   AppBuild::add_route(RouteDefinition::get(path, handler))
 
 pub fn group(
-  prefix: StringSlice,
+  prefix: String,
   { routes build: fn() : (AppBuild, open) -> void }
 ): (AppBuild, open) -> void
-  AppBuild::group(prefix: prefix.to_string(), routes: build)
+  AppBuild::group(prefix: prefix, routes: build)
 ```
 
 `serve` handles `AppBuild`, creates a router, then runs it through
@@ -1029,16 +1029,17 @@ Phase 3 implementation notes:
   successful writes and cleanly closes abandoned started streams.
 - Request streaming is opt-in through `ServerConfig::stream_request_bodies` and
   `accept_streaming`; `pkg::web::serve_streaming` exposes the reader through
-  `Context::streaming_body` on routes marked `.streaming()`, while other routes
+  `Context::streaming_body` on routes marked with
+  `.streaming("/upload", method: Method::Post {})`, while other routes
   in the same app are buffered lazily for ordinary extractors.
 - Multipart parsing preserves binary part bodies and exposes checked UTF-8 only
   as an explicit part operation.
 - OpenAPI 3.1 generation consumes `std::meta::Shape`, including declaration and
-  field documentation. Route behavior metadata remains explicit through
-  `OpenApiOperation`; `document_openapi_route` derives method and path from the
-  router entry instead of accepting an independent route identity. Component
-  names include deterministic full-schema fingerprints so same-named types do
-  not collide across modules.
+  field documentation. Runtime routes own their inferred extractor and typed
+  response contracts, while optional `docs:` values supply operation metadata
+  and overrides. The earlier `OpenApiOperation` and `document_openapi_route`
+  workflow remains a low-level compatibility API. Component names include
+  deterministic full-schema fingerprints so same-named types do not collide.
 - WebSockets are intentionally outside this phase.
 
 ## Testing Direction

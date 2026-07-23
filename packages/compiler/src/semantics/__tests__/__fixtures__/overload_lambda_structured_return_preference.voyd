@@ -1,0 +1,16 @@
+obj Ok<T> { value: T }
+obj Err<E> { error: E }
+type Result<T, E> = Ok<T> | Err<E>
+
+fn route<R>(handler: fn() -> R) -> i32
+  handler()
+  1
+
+fn route<T, E>(handler: fn() -> Result<T, E>) -> i32
+  handler()
+  2
+
+pub fn main() -> i32
+  route do:
+    let value: Result<i32, bool> = Ok<i32> { value: 42 }
+    value

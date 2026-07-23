@@ -114,6 +114,74 @@ const createCandidate = (
 ): OverloadResolutionCandidate => ({ symbol, signature });
 
 describe("overload resolution", () => {
+  it("charges the overload budget only for concrete-type-compatible candidates", () => {
+    const { ctx, state } = createScoringContext();
+    ctx.typeCheckBudget.maxOverloadCandidates = 40;
+    const candidates = Array.from({ length: 70 }, (_, index) =>
+      createCandidate(
+        index + 1,
+        createSignature({
+          ctx,
+          parameters: [
+            {
+              type:
+                index % 2 === 0
+                  ? ctx.primitives.i32
+                  : ctx.primitives.bool,
+            },
+          ],
+        }),
+      ),
+    );
+
+    const matches = findOverloadMatches({
+      name: "large_concrete_family",
+      candidates,
+      args: [{ type: ctx.primitives.i32 }],
+      typeArguments: undefined,
+      span: DUMMY_SPAN,
+      ctx,
+      state,
+      matchesCandidate: () => true,
+    });
+
+    expect(matches).toHaveLength(35);
+    expect(ctx.diagnostics.diagnostics).toHaveLength(0);
+  });
+
+  it("rejects overloads whose function arguments have incompatible arity", () => {
+    const { ctx, state } = createScoringContext();
+    const callback = (parameterCount: number) =>
+      ctx.arena.internFunction({
+        parameters: Array.from({ length: parameterCount }, () => ({
+          type: ctx.primitives.i32,
+        })),
+        returnType: ctx.primitives.i32,
+        effectRow: ctx.effects.emptyRow,
+      });
+    const twoArguments = createCandidate(
+      1,
+      createSignature({ ctx, parameters: [{ type: callback(2) }] }),
+    );
+    const threeArguments = createCandidate(
+      2,
+      createSignature({ ctx, parameters: [{ type: callback(3) }] }),
+    );
+
+    const matches = findOverloadMatches({
+      name: "callback_arity",
+      candidates: [twoArguments, threeArguments],
+      args: [{ type: callback(3) }],
+      typeArguments: undefined,
+      span: DUMMY_SPAN,
+      ctx,
+      state,
+      matchesCandidate: () => true,
+    });
+
+    expect(matches).toEqual([threeArguments]);
+  });
+
   it("records call-shape compatibility before argument matching", () => {
     const { ctx, state } = createScoringContext();
     const oneArg = createCandidate(

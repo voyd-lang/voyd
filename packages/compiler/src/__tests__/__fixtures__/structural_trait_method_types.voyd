@@ -1,0 +1,4 @@
+pub obj Some<T> { value: T }
+pub obj None {}
+pub type Maybe<T> = Some<T> | None
+pub obj Number { value: i32 }

@@ -52,6 +52,14 @@ obj OpenApiCreateArticle {
   summary?: String
 }
 
+/// Article returned by the documented endpoint.
+obj OpenApiArticle {
+  /// Stable article identifier.
+  id: i32,
+  /// Reader-visible article title.
+  title: String
+}
+
 enum SsrMsg
   Edit { value: String }
 
@@ -96,7 +104,11 @@ fn serve_options_dsl_compile_probe()
     host: "127.0.0.1",
     shutdown_timeout: 250,
     max_body_bytes: 1024,
-    max_pending_requests: 8
+    max_pending_requests: 8,
+    openapi: {
+      title: "Serve DSL API",
+      version: "1.0.0"
+    }
   ) routes():
     put("/replace", body: json_body()) do(input: CreateUser):
       Response::ok().text(input.name)
@@ -106,6 +118,8 @@ fn serve_options_dsl_compile_probe()
 
     patch("/update", body: text_body(), auth: required_session()) do(input: String, session: String):
       Response::ok().text(session.concat(":".as_slice()).concat(input))
+
+    expose_openapi(at: "/openapi.json", include_doc_comments: false)
 
     patch("/update-timeout", body: text_body(), auth: required_session(), timeout: timeout_millis(5)) do(input: String, session: String, ctx: Context):
       Response::ok().text(ctx.path().concat(":".as_slice()).concat(session).concat(input))
@@ -321,7 +335,7 @@ pub fn builder_probe() -> i32
   echo.status.code()
 
 pub fn all_json_response_probe() -> i32
-  let typed = json({
+  let typed = json_response({
     slug: "first".as_slice().to_string(),
     title: "A Voyd article".as_slice().to_string()
   })
@@ -349,8 +363,8 @@ pub fn option_response_probe() -> i32
   none_response.status.code()
 
 pub fn router_export_probe() -> i32
-  let api = router::Router::init()
-    .get("/health".as_slice().to_string(), handler: () -> Response =>
+  let api = router::app()
+    .get("/health", handler: (_ctx: router::Context) -> Response =>
       Response::ok().text("router".as_slice())
     )
   let built = app().mount("/api".as_slice(), api)
@@ -420,11 +434,35 @@ pub fn openapi_schema_probe() -> String
     Err:
       "serialization failed".as_slice().to_string()
 
+fn create_openapi_article(input: OpenApiCreateArticle) -> Created<OpenApiArticle>
+  created(OpenApiArticle { id: 1, title: input.title })
+
+pub fn automatic_openapi_schema_probe() -> String
+  let article_app = app(openapi: {
+    title: "Article API",
+    version: "1.0.0"
+  }).post(
+    "/articles",
+    body: json_body(),
+    handler: create_openapi_article,
+    docs: { operation_id: "createArticle" }
+  )
+  let exposed = expose_openapi(
+    article_app,
+    openapi_document(openapi_info(title: "Manual", version: "1")),
+    at: "/manual-openapi.json"
+  )
+  match(stringify(exposed.openapi()))
+    Ok<String> { value }:
+      value
+    Err:
+      "serialization failed"
+
 pub fn serve_streaming_body_probe(): (HttpServer, tasks::TaskRuntime) -> i32
   let uploads = app().post(
     "/upload".as_slice(),
     handler: (ctx: Context) -> Response => streaming_body_response(ctx)
-  ).streaming()
+  ).streaming("/upload", method: Method::Post {})
   let result = serve_streaming(uploads, port: 41236)
   match(result)
     Ok<Unit>:

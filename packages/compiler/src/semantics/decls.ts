@@ -260,6 +260,23 @@ export class DeclTable {
     { effect: EffectDecl; operation: EffectOperationDecl }
   >();
 
+  getTypeParameter(symbol: SymbolId): TypeParameterDecl | undefined {
+    const parameterLists = [
+      ...this.functions.map((decl) => decl.typeParameters),
+      ...this.typeAliases.map((decl) => decl.typeParameters),
+      ...this.objects.map((decl) => decl.typeParameters),
+      ...this.traits.flatMap((decl) => [
+        decl.typeParameters,
+        ...decl.methods.map((method) => method.typeParameters),
+      ]),
+      ...this.impls.map((decl) => decl.typeParameters),
+      ...this.effects.map((decl) => decl.typeParameters),
+    ];
+    return parameterLists
+      .flatMap((parameters) => parameters ?? [])
+      .find((parameter) => parameter.symbol === symbol);
+  }
+
   private bumpId(next: number, used: number): number {
     return Math.max(next, used + 1);
   }

@@ -26,6 +26,11 @@ describe("trait implementations", () => {
     expect(() => semanticsPipeline(ast)).not.toThrow();
   });
 
+  it("supports trait implementations for named recursive union aliases", () => {
+    const ast = loadAst("trait_recursive_union_impl.voyd");
+    expect(() => semanticsPipeline(ast)).not.toThrow();
+  });
+
   it("supports same-name overloaded trait methods when impl signatures match", () => {
     expect(() =>
       semanticsPipeline(loadAst("trait_overload_parse_happy.voyd"))

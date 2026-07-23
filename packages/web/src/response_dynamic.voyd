@@ -1,0 +1,36 @@
+//! Runtime-status and dynamically shaped response implementations.
+
+use std::array::Array
+use std::bytes::Bytes
+use std::http::{ Response, Status }
+use std::json::JsonValue
+use std::string::type::{ String, StringSlice }
+use super::openapi::contract::OpenApiResponseContract
+use super::response::{ IntoResponse, json_value }
+use super::openapi::response_contracts::untyped_responses
+
+impl IntoResponse<JsonValue> for JsonValue
+  fn into_response(self) -> Response
+    json_value(self)
+  fn openapi_responses() -> Array<OpenApiResponseContract>
+    untyped_responses(
+      status: 200,
+      description: "Successful response",
+      content_type: "application/json"
+    )
+
+impl IntoResponse<(Status, String)> for (Status, String)
+  fn into_response(self) -> Response
+    Response::new(status: self.0).text(self.1)
+
+impl IntoResponse<(Status, StringSlice)> for (Status, StringSlice)
+  fn into_response(self) -> Response
+    Response::new(status: self.0).text(self.1)
+
+impl IntoResponse<(Status, Bytes)> for (Status, Bytes)
+  fn into_response(self) -> Response
+    Response::new(status: self.0).bytes(self.1)
+
+impl IntoResponse<(Status, JsonValue)> for (Status, JsonValue)
+  fn into_response(self) -> Response
+    json_value(Response::new(status: self.0), value: self.1)

@@ -1,0 +1,10 @@
+use src::provider::{Factory, make_value}
+
+obj Value {}
+
+impl Factory<Value> for Value
+  fn make() -> i32
+    73
+
+pub fn main() -> i32
+  make_value<Value>()

@@ -1,0 +1,18 @@
+obj Left { value: i32 }
+obj Right { value: i32 }
+type Choice = Left | Right
+
+trait Value<T>
+  fn value(self) -> i32
+
+impl Value<Choice> for Choice
+  fn value(self) -> i32
+    self.match(active)
+      Left: active.value
+      Right: active.value + 1
+
+fn read<T: Value<T>>(value: T) -> i32
+  value.value()
+
+pub fn main() -> i32
+  read<Choice>(Right { value: 41 })

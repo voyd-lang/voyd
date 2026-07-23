@@ -427,7 +427,12 @@ export type CodegenTraitImplTemplate = {
   trait: TypeId;
   traitSymbol: ProgramSymbolId;
   target: TypeId;
+  typeParams: readonly TypeParamId[];
   methods: readonly {
+    traitMethod: ProgramSymbolId;
+    implMethod: ProgramSymbolId;
+  }[];
+  staticMethods: readonly {
     traitMethod: ProgramSymbolId;
     implMethod: ProgramSymbolId;
   }[];
@@ -439,6 +444,10 @@ export type CodegenTraitImplInstance = {
   traitSymbol: ProgramSymbolId;
   target: TypeId;
   methods: readonly {
+    traitMethod: ProgramSymbolId;
+    implMethod: ProgramSymbolId;
+  }[];
+  staticMethods: readonly {
     traitMethod: ProgramSymbolId;
     implMethod: ProgramSymbolId;
   }[];
@@ -1038,11 +1047,16 @@ export const buildProgramCodegenView = (
     traitSymbol,
     implSymbol,
     methods,
+    staticMethods,
   }: {
     impl: TraitImplInstance;
     traitSymbol: ProgramSymbolId;
     implSymbol: ProgramSymbolId;
     methods: readonly {
+      traitMethod: ProgramSymbolId;
+      implMethod: ProgramSymbolId;
+    }[];
+    staticMethods: readonly {
       traitMethod: ProgramSymbolId;
       implMethod: ProgramSymbolId;
     }[];
@@ -1057,6 +1071,7 @@ export const buildProgramCodegenView = (
       traitSymbol,
       target: impl.target,
       methods,
+      staticMethods,
       implSymbol,
     };
     traitImplCache.set(cacheKey, value);
@@ -1306,11 +1321,18 @@ export const buildProgramCodegenView = (
         traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
         implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
       }));
+    const staticMethods = Array.from(impl.staticMethods.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([traitMethod, implMethod]) => ({
+        traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
+        implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
+      }));
     return toCodegenTraitImplInstance({
       impl,
       traitSymbol,
       implSymbol,
       methods,
+      staticMethods,
     });
   };
 
@@ -1323,14 +1345,23 @@ export const buildProgramCodegenView = (
       traitSymbol: SymbolId;
       target: TypeId;
       methods: ReadonlyMap<SymbolId, SymbolId>;
+      staticMethods: ReadonlyMap<SymbolId, SymbolId>;
       implSymbol: SymbolId;
+      typeParams: readonly { typeParam: TypeParamId }[];
     };
     moduleId: string;
   }): CodegenTraitImplTemplate => ({
     trait: template.trait,
     traitSymbol: canonicalProgramSymbolIdOf(moduleId, template.traitSymbol),
     target: template.target,
+    typeParams: template.typeParams.map((parameter) => parameter.typeParam),
     methods: Array.from(template.methods.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([traitMethod, implMethod]) => ({
+        traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
+        implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
+      })),
+    staticMethods: Array.from(template.staticMethods.entries())
       .sort(([a], [b]) => a - b)
       .map(([traitMethod, implMethod]) => ({
         traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
@@ -1828,6 +1859,7 @@ export const buildProgramCodegenView = (
     return {
       ...impl,
       methods: template.methods,
+      staticMethods: template.staticMethods,
     };
   };
   traitImplsByNominal.forEach((bucket, nominal) => {
@@ -1884,7 +1916,7 @@ export const buildProgramCodegenView = (
     );
   };
   uniqueTraitImplTemplates.forEach((template) => {
-    template.methods.forEach(({ traitMethod, implMethod }) =>
+    [...template.methods, ...template.staticMethods].forEach(({ traitMethod, implMethod }) =>
       registerTraitMethodImplMapping({
         implMethod,
         traitSymbol: template.traitSymbol,
@@ -1919,7 +1951,7 @@ export const buildProgramCodegenView = (
     };
 
     uniqueTraitImplTemplates.forEach((template) => {
-      template.methods.forEach(({ traitMethod, implMethod }) =>
+      [...template.methods, ...template.staticMethods].forEach(({ traitMethod, implMethod }) =>
         registerRegistration({
           implMethod,
           traitSymbol: template.traitSymbol,
@@ -1931,7 +1963,7 @@ export const buildProgramCodegenView = (
 
     traitImplsByNominal.forEach((impls, nominal) => {
       impls.forEach((impl) => {
-        impl.methods.forEach(({ traitMethod, implMethod }) =>
+        [...impl.methods, ...impl.staticMethods].forEach(({ traitMethod, implMethod }) =>
           registerRegistration({
             implMethod,
             traitSymbol: impl.traitSymbol,

@@ -1,0 +1,50 @@
+//! Shared route execution policies.
+
+use std::async::types::Cancelled
+use std::error::panic
+use std::http::{ Response, Status }
+use std::number::cast::self as cast
+use std::result::types::all
+use std::task
+use std::time::self as time
+use std::time::{ Duration, Time }
+
+pub obj TimeoutPolicy {
+  api duration: Duration
+}
+
+pub fn timeout(duration: Duration) -> TimeoutPolicy
+  TimeoutPolicy { duration: duration }
+
+pub fn timeout_millis(millis: i64) -> TimeoutPolicy
+  timeout(Duration::from_millis(millis))
+
+pub fn timeout_millis(millis: i32) -> TimeoutPolicy
+  timeout(Duration::from_millis(cast::to_i64(millis)))
+
+/// Runs one route handler under the shared timeout policy.
+pub fn run_with_timeout(
+  timeout: TimeoutPolicy,
+  work: fn() : (open) -> Response
+): (task::TaskRuntime, Time, open) -> Response
+  let worker = task::spawn do:
+    work()
+  let timer = time::set_timeout(timeout.duration) do:
+    task::cancel<Response>(worker)
+  match(task::join(worker))
+    Ok<Response> { value }:
+      let _ = task::cancel<bool>(timer)
+      value
+    Err { error }:
+      let _ = task::cancel<bool>(timer)
+      panic(error.message)
+      Response::internal_server_error()
+    Cancelled:
+      gateway_timeout()
+
+fn gateway_timeout() -> Response
+  match(Status::from(504))
+    Ok<Status> { value }:
+      Response::new(status: value).text("route timed out")
+    Err:
+      Response::internal_server_error().text("route timed out")

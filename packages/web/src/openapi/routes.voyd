@@ -1,8 +1,8 @@
 //! Router integration for OpenAPI documents.
 
 use std::optional::types::all
-use super::openapi::{ Document, Operation }
-use super::router::App
+use super::builder::{ Document, Operation }
+use src::router::App
 
 /// Documents the most recently added real route using its router-owned method
 /// and path, preventing documentation for a nonexistent endpoint.

@@ -1,0 +1,128 @@
+//! Render-time contracts kept beside runtime route data.
+
+use std::optional::types::all
+use std::dict::Dict
+use std::json::{ JsonObject, JsonValue }
+use std::string::type::String
+use super::contract::{ OpenApiRequestContract, RouteDocs }
+use super::builder::{ Operation, operation }
+use super::types::RouteContract
+use src::response::IntoResponse
+use src::response_json::encode_json_value
+use super::response_inference::{ created_responses, inferred_responses }
+
+pub fn opaque_fragment() -> RouteContract
+  RouteContract::init(
+    hidden: false,
+    operation: operation().with_opaque_response(),
+    literal_docs: None {}
+  )
+
+pub fn hidden_fragment() -> RouteContract
+  RouteContract::init(
+    hidden: true,
+    operation: operation().with_opaque_response(),
+    literal_docs: None {}
+  )
+
+pub fn json_request_fragment<I>() -> RouteContract
+  route_fragment(operation().with_json_body<I>().with_opaque_response())
+
+pub fn typed_json_request_fragment<I, R: IntoResponse<R>>() -> RouteContract
+  route_fragment(
+    operation().with_json_body<I>().with_responses(inferred_responses<R>())
+  )
+
+pub fn created_json_fragment<I, T>(docs: RouteDocs) -> RouteContract
+  contract_with_docs(
+    operation().with_json_body<I>().with_responses(created_responses<T>()),
+    docs
+  )
+
+pub fn typed_json_fragment<I, R: IntoResponse<R>>(docs: RouteDocs) -> RouteContract
+  contract_with_docs(
+    operation().with_json_body<I>().with_responses(inferred_responses<R>()),
+    docs
+  )
+
+/// Records a partial route-docs literal while retaining typed overrides.
+pub fn typed_json_fragment<I, R: IntoResponse<R>, D>(docs: D) -> RouteContract
+  documented_fragment(
+    operation().with_json_body<I>().with_responses(inferred_responses<R>()),
+    docs
+  )
+
+pub fn documented_fragment<D>(value: Operation, docs: D) -> RouteContract
+  RouteContract::init(
+    hidden: false,
+    operation: value,
+    literal_docs: Some<JsonValue> { value: encode_json_value<D>(docs) }
+  )
+
+pub fn route_fragment(value: Operation) -> RouteContract
+  RouteContract::init(
+    hidden: false,
+    operation: value,
+    literal_docs: None {}
+  )
+
+pub fn extractor_operation(request: Option<OpenApiRequestContract>) -> Operation
+  match(request)
+    Some<OpenApiRequestContract> { value }:
+      operation().with_request(value).with_opaque_response()
+    None:
+      operation().with_opaque_response()
+
+pub fn typed_fragment<R: IntoResponse<R>>(docs: RouteDocs) -> RouteContract
+  contract_with_docs(operation().with_responses(inferred_responses<R>()), docs)
+
+pub fn created_fragment<T>(docs: RouteDocs) -> RouteContract
+  contract_with_docs(operation().with_responses(created_responses<T>()), docs)
+
+pub fn contract_with_docs(value: Operation, docs: RouteDocs) -> RouteContract
+  let documented = value.with_docs(docs)
+  RouteContract::init(
+    hidden: docs.hidden ?? false,
+    operation: documented,
+    literal_docs: None {}
+  )
+
+/// Applies typed documentation to an existing concrete route contract.
+pub fn with_route_docs(contract: RouteContract, docs: RouteDocs) -> RouteContract
+  let documented = contract_with_docs(contract.operation, docs)
+  RouteContract::init(
+    hidden: docs.hidden ?? contract.hidden,
+    operation: documented.operation,
+    literal_docs: literal_docs_without_overrides(contract.literal_docs, docs)
+  )
+
+fn literal_docs_without_overrides(
+  literal_docs: Option<JsonValue>,
+  docs: RouteDocs
+) -> Option<JsonValue>
+  match(literal_docs)
+    None:
+      None {}
+    Some<JsonValue> { value }:
+      value.match(active)
+        JsonObject:
+          let ~fields = active.value
+          remove_literal_override(fields, "summary", docs.summary)
+          remove_literal_override(fields, "description", docs.description)
+          remove_literal_override(fields, "operation_id", docs.operation_id)
+          remove_literal_override(fields, "tags", docs.tags)
+          remove_literal_override(fields, "hidden", docs.hidden)
+          Some<JsonValue> { value: JsonObject { value: fields } }
+        else:
+          Some<JsonValue> { value: value }
+
+fn remove_literal_override<T>(
+  ~fields: Dict<String, JsonValue>,
+  name: String,
+  value: Option<T>
+) -> void
+  match(value)
+    Some<T>:
+      let _ = fields.remove(name)
+    None:
+      void

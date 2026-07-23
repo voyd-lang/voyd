@@ -1,19 +1,29 @@
-use src::openapi::{ document, info, operation }
-use src::phase3_openapi_types::{
+use src::openapi::{ document, info, operation, operation_with_request }
+use src::openapi::{ OpenApiRequestContract, OpenApiResponseContract, RouteDocs, openapi_json_response, openapi_response_schema_docs, openapi_schema_docs, route_docs }
+use src::openapi::openapi_response as response_override
+use src::openapi::test_types::{
   DocumentedArticle,
   DocumentedArticlePath,
   DocumentedArticleQuery,
   DocumentedCreateArticle,
   DocumentedEvent,
-  DocumentedRecursivePair
+  DocumentedRecursivePair,
+  AutomaticArticle,
+  AutomaticCreateArticle
 }
-use std::http::Method
+use std::array::Array
+use std::http::{ Method, Response }
 use std::json::stringify
 use std::error::panic
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
+use src::extract::json_body
+use src::response::{ Accepted, Created, IntoResponse, Json, NoContent, Text, created, text }
+use src::openapi::response_inference::{ inferred_responses, option_responses, result_responses }
+use src::router::{ App, Context, app }
+use src::openapi::automatic::all
 
 test "OpenAPI reflects record fields and doc comments":
   let base_operation = operation(
@@ -26,9 +36,23 @@ test "OpenAPI reflects record fields and doc comments":
   let with_path = base_operation.with_path_params<DocumentedArticlePath>()
   let with_query = with_path.with_query<DocumentedArticleQuery>()
   let with_body = with_query.with_json_body<DocumentedCreateArticle>()
-  let create_operation = with_body.responds_json<DocumentedArticle>()
+  let create_operation = with_body
+    .responds_json<DocumentedArticle>()
+    .with_docs(RouteDocs::empty().with_response_schemas([
+      openapi_response_schema_docs(
+        status: 201,
+        schema: openapi_schema_docs(description: "Manual JSON response schema")
+      )
+    ]))
   let events_base = operation(summary: "Watch events".as_slice().to_string())
-  let events_operation = events_base.responds_sse<DocumentedEvent>()
+  let events_operation = events_base
+    .responds_sse<DocumentedEvent>()
+    .with_docs(RouteDocs::empty().with_response_schemas([
+      openapi_response_schema_docs(
+        status: 200,
+        schema: openapi_schema_docs(description: "Manual SSE event schema")
+      )
+    ]))
   let spec_base = document(info(
     title: "Article API".as_slice(),
     version: "1.0.0".as_slice(),
@@ -58,6 +82,8 @@ test "OpenAPI reflects record fields and doc comments":
       require_contains(value, "\"required\":[\"title\"]".as_slice(), "missing required field")
       require_contains(value, "\"text/event-stream\"".as_slice(), "missing SSE content")
       require_contains(value, "\"x-voyd-event-schema\"".as_slice(), "missing SSE event schema")
+      require_contains(value, "Manual JSON response schema".as_slice(), "missing direct JSON schema overlay")
+      require_contains(value, "Manual SSE event schema".as_slice(), "missing direct SSE schema overlay")
       require_contains(value, "%23".as_slice(), "recursive component ref is not URI escaped")
       require_contains(
         value,
