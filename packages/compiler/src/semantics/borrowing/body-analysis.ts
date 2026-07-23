@@ -82,6 +82,7 @@ type BodyContext = {
   mutableOwners: Set<SymbolId>;
   events: Map<HirExprId, Event>;
   uses: Map<SymbolId, Event[]>;
+  usePlaces: Map<SymbolId, Map<Event, readonly BorrowPlace[]>>;
   facts: BorrowFact[];
   diagnostics: Diagnostic[];
   downgraded: Downgrade[];
@@ -103,6 +104,7 @@ type ScanContext = {
   path: Map<number, number>;
   loops: Set<number>;
   suppressPlaceAccess?: boolean;
+  suppressUse?: boolean;
 };
 
 const cloneScanContext = (
@@ -113,6 +115,7 @@ const cloneScanContext = (
   loops: new Set(overrides?.loops ?? ctx.loops),
   suppressPlaceAccess:
     overrides?.suppressPlaceAccess ?? ctx.suppressPlaceAccess,
+  suppressUse: overrides?.suppressUse ?? ctx.suppressUse,
 });
 
 const typeOfExpr = (
@@ -159,10 +162,8 @@ const recordExprEvent = (
 ): Event => {
   const event = eventFor(expr.span, scan, ctx);
   ctx.events.set(expr.id, event);
-  if (expr.exprKind === "identifier") {
-    const uses = ctx.uses.get(expr.symbol) ?? [];
-    uses.push(event);
-    ctx.uses.set(expr.symbol, uses);
+  if (expr.exprKind === "identifier" && scan.suppressUse !== true) {
+    recordExpressionUse(expr.id, event, undefined, ctx);
   }
   if (expr.exprKind === "call" || expr.exprKind === "method-call") {
     expr.args.forEach((argument) => {
@@ -782,6 +783,61 @@ function placesAtProjection(
     requested.reduce(appendProjection, place),
   );
 }
+
+function recordExpressionUse(
+  exprId: HirExprId,
+  event: Event,
+  paths: readonly (readonly PlaceProjection[])[] | undefined,
+  ctx: BodyContext,
+): void {
+  const symbol = baseSymbolOf(exprId, ctx);
+  if (typeof symbol !== "number") {
+    return;
+  }
+  const uses = ctx.uses.get(symbol) ?? [];
+  if (!uses.includes(event)) {
+    uses.push(event);
+    ctx.uses.set(symbol, uses);
+  }
+  const places = uniquePlaces(
+    paths?.length
+      ? paths.flatMap((path) =>
+          placesAtProjection(exprId, path, ctx, new Set()),
+        )
+      : placesOfExpression(exprId, ctx),
+  );
+  if (places.length === 0) {
+    return;
+  }
+  const byEvent = ctx.usePlaces.get(symbol) ?? new Map();
+  byEvent.set(
+    event,
+    uniquePlaces([...(byEvent.get(event) ?? []), ...places]),
+  );
+  ctx.usePlaces.set(symbol, byEvent);
+}
+
+const recordCallUses = (
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>,
+  event: Event,
+  ctx: BodyContext,
+): void => {
+  if (expr.exprKind === "call") {
+    recordExpressionUse(expr.callee, event, undefined, ctx);
+  }
+  const resolved = targetInfo(expr, ctx);
+  resolved.arguments.forEach((actual, index) => {
+    if (typeof actual !== "number") {
+      return;
+    }
+    recordExpressionUse(
+      actual,
+      event,
+      resolved.contract?.parameters[index]?.accessPaths,
+      ctx,
+    );
+  });
+};
 
 function hasConservativeReturnedAggregate(
   exprId: HirExprId,
@@ -1627,7 +1683,11 @@ const scanExpression = (
     case "overload-set":
       break;
     case "field-access":
-      scanExpression(expr.target, { ...scan, suppressPlaceAccess: true }, ctx);
+      scanExpression(
+        expr.target,
+        { ...scan, suppressPlaceAccess: true, suppressUse: true },
+        ctx,
+      );
       break;
     case "tuple":
       expr.elements.forEach((element) => scanExpression(element, scan, ctx));
@@ -1636,15 +1696,49 @@ const scanExpression = (
       expr.entries.forEach((entry) => scanExpression(entry.value, scan, ctx));
       break;
     case "call":
-      scanExpression(expr.callee, { ...scan, suppressPlaceAccess: true }, ctx);
+      scanExpression(
+        expr.callee,
+        { ...scan, suppressPlaceAccess: true, suppressUse: true },
+        ctx,
+      );
       expr.args.forEach((arg) =>
-        scanExpression(arg.expr, { ...scan, suppressPlaceAccess: true }, ctx),
+        scanExpression(
+          arg.expr,
+          {
+            ...scan,
+            suppressPlaceAccess: true,
+            suppressUse:
+              ctx.hir.expressions.get(arg.expr)?.exprKind === "identifier" ||
+              ctx.hir.expressions.get(arg.expr)?.exprKind === "field-access",
+          },
+          ctx,
+        ),
       );
       break;
     case "method-call":
-      scanExpression(expr.target, { ...scan, suppressPlaceAccess: true }, ctx);
+      scanExpression(
+        expr.target,
+        {
+          ...scan,
+          suppressPlaceAccess: true,
+          suppressUse:
+            ctx.hir.expressions.get(expr.target)?.exprKind === "identifier" ||
+            ctx.hir.expressions.get(expr.target)?.exprKind === "field-access",
+        },
+        ctx,
+      );
       expr.args.forEach((arg) =>
-        scanExpression(arg.expr, { ...scan, suppressPlaceAccess: true }, ctx),
+        scanExpression(
+          arg.expr,
+          {
+            ...scan,
+            suppressPlaceAccess: true,
+            suppressUse:
+              ctx.hir.expressions.get(arg.expr)?.exprKind === "identifier" ||
+              ctx.hir.expressions.get(arg.expr)?.exprKind === "field-access",
+          },
+          ctx,
+        ),
       );
       break;
     case "block": {
@@ -1927,7 +2021,18 @@ const scanExpression = (
     case "continue":
       break;
   }
-  recordExprEvent(expr, scan, ctx);
+  const event = recordExprEvent(expr, scan, ctx);
+  if (expr.exprKind === "field-access" && scan.suppressUse !== true) {
+    recordExpressionUse(
+      expr.target,
+      event,
+      [[{ kind: "field", name: expr.field }]],
+      ctx,
+    );
+  }
+  if (expr.exprKind === "call" || expr.exprKind === "method-call") {
+    recordCallUses(expr, event, ctx);
+  }
 };
 
 const pathsCompatible = (left: BranchPath, right: BranchPath): boolean => {
@@ -2822,12 +2927,20 @@ const validateCall = (
   });
   validateBorrowedCallbacks(expr, info, ctx);
   const borrows = effectiveActuals.flatMap(({ actual, index }) => {
+    const parameter = info.contract?.parameters[index];
     const access = parameterAccessFor({ index, actual, info, ctx });
     if (access === "owned") {
       return [];
     }
     const actor = baseSymbolOf(actual, ctx);
-    return placesOfExpression(actual, ctx).map((place) => {
+    const places = parameter?.accessPaths?.length
+      ? uniquePlaces(
+          parameter.accessPaths.flatMap((path) =>
+            placesAtProjection(actual, path, ctx, new Set()),
+          ),
+        )
+      : placesOfExpression(actual, ctx);
+    return places.map((place) => {
       if (
         access === "mutable" &&
         (typeof actor === "number"
@@ -3592,6 +3705,7 @@ const initializeCallableContext = ({
     mutableOwners,
     events: new Map(),
     uses: new Map(),
+    usePlaces: new Map(),
     facts,
     diagnostics,
     downgraded: [],
@@ -3843,11 +3957,25 @@ const analyzeCallableBorrowing = ({
   allAliases(ctx).forEach((alias) => {
     const symbol = alias.symbol;
     const uses = ctx.uses.get(symbol) ?? [];
-    alias.uses = uses.filter(
-      (use) =>
-        use.position >= alias.event.position ||
-        definitionCanReachOnLoopBackedge(alias.event, use, ctx),
-    );
+    alias.uses = uses.filter((use) => {
+      const loopCarried = definitionCanReachOnLoopBackedge(
+        alias.event,
+        use,
+        ctx,
+      );
+      if (use.position < alias.event.position && !loopCarried) {
+        return false;
+      }
+      if (loopCarried) {
+        return true;
+      }
+      const places = ctx.usePlaces.get(symbol)?.get(use);
+      return (
+        places === undefined ||
+        places.some((place) => place.root === symbol) ||
+        places.some((place) => placeOverlaps(alias.place, place))
+      );
+    });
     facts.push({
       kind: "alias",
       symbol,

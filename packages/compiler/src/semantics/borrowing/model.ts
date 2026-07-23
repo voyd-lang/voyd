@@ -10,6 +10,7 @@ export type PlaceProjection =
 
 export type CallableParameterBorrowContract = {
   access: BorrowAccessMode;
+  accessPaths?: readonly (readonly PlaceProjection[])[];
   retained: boolean;
   returned: boolean;
   retainedPaths?: readonly (readonly PlaceProjection[])[];
@@ -133,6 +134,7 @@ export const mergeCallableBorrowContracts = (
       );
       return {
         access,
+        ...mergeProjectionPaths(parameters, "accessPaths"),
         retained: parameters.some((parameter) => parameter.retained),
         returned: parameters.some((parameter) => parameter.returned),
         ...mergeProjectionPaths(parameters, "retainedPaths"),
@@ -271,6 +273,7 @@ const mergeReturnedBorrowedOrigins = (
 const mergeProjectionPaths = (
   parameters: readonly CallableParameterBorrowContract[],
   key:
+    | "accessPaths"
     | "retainedPaths"
     | "externalRetainedPaths"
     | "borrowedRetainedPaths"
@@ -281,7 +284,9 @@ const mergeProjectionPaths = (
       parameters
         .flatMap((parameter) => {
           const active =
-            key === "retainedPaths"
+            key === "accessPaths"
+              ? parameter.access !== "owned"
+              : key === "retainedPaths"
               ? parameter.retained
               : key === "returnedPaths"
                 ? parameter.returned

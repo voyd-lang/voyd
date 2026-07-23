@@ -670,6 +670,20 @@ fn invalid(~value: Box) -> i32
     ).toContain("TY0048");
   });
 
+  it("keeps distinct fixed-array literal elements disjoint", () => {
+    expect(() =>
+      analyze(`${prelude}
+fn fixed(left: Box, right: Box) -> FixedArray<Box>
+  __array_new_fixed(left, right)
+
+fn valid(~left: Box, ~right: Box) -> i32
+  let values = fixed(left, right)
+  mutate(~left)
+  __array_get(values, 1).value
+`),
+    ).not.toThrow();
+  });
+
   it("rejects mutation after a helper retains an array-element borrow", () => {
     expect(
       diagnosticCodes(`

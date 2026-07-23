@@ -2109,6 +2109,7 @@ const normalizeCallableBorrowContract = (
     ...baseContract,
     parameters: contract.parameters.map((parameter) => {
       const {
+        accessPaths: _accessPaths,
         invalidatedPaths: _invalidatedPaths,
         externalRetainedPaths: _externalRetainedPaths,
         borrowedRetainedPaths: _borrowedRetainedPaths,
@@ -2116,6 +2117,7 @@ const normalizeCallableBorrowContract = (
         returnedSharedOrigins: _returnedSharedOrigins,
         ...baseParameter
       } = parameter;
+      const accessPaths = projectionPathsOrBroad(parameter.accessPaths);
       const retainedPaths = projectionPathsOrBroad(parameter.retainedPaths);
       const externalRetainedPaths = projectionPathsOrBroad(
         parameter.externalRetainedPaths,
@@ -2141,6 +2143,7 @@ const normalizeCallableBorrowContract = (
           : undefined;
       return {
         ...baseParameter,
+        ...(accessPaths ? { accessPaths } : {}),
         ...(retainedPaths ? { retainedPaths } : {}),
         ...(externalRetainedPaths ? { externalRetainedPaths } : {}),
         ...(borrowedRetainedPaths ? { borrowedRetainedPaths } : {}),

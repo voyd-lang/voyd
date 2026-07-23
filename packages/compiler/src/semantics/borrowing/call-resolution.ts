@@ -272,10 +272,12 @@ const intrinsicBorrowContract = ({
   name,
   argumentCount,
   returnsReference,
+  indexConstant,
 }: {
   name: string;
   argumentCount: number;
   returnsReference: boolean;
+  indexConstant?: number;
 }): CallableBorrowContract | undefined => {
   if (RETAINING_INTRINSICS.has(name) && argumentCount === 1) {
     return {
@@ -292,13 +294,14 @@ const intrinsicBorrowContract = ({
   }
   if (name === "__array_new_fixed" && returnsReference) {
     return {
-      parameters: Array.from({ length: argumentCount }, () => {
+      parameters: Array.from({ length: argumentCount }, (_entry, index) => {
         const origin = {
           source: [],
           result: [
             {
               kind: "index" as const,
-              stable: false,
+              constant: index,
+              stable: true,
             },
           ],
         };
@@ -313,22 +316,28 @@ const intrinsicBorrowContract = ({
     };
   }
   if (name === "__array_get" && argumentCount === 2) {
+    const sourceIndex = {
+      kind: "index" as const,
+      ...(indexConstant === undefined ? {} : { constant: indexConstant }),
+      stable: indexConstant !== undefined,
+    };
     return {
       parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
         access: index === 0 ? "shared" : "owned",
+        ...(index === 0 ? { accessPaths: [[sourceIndex]] } : {}),
         retained: false,
         returned: index === 0 && returnsReference,
         ...(index === 0 && returnsReference
           ? {
               returnedOrigins: [
                 {
-                  source: [{ kind: "index", stable: false }],
+                  source: [sourceIndex],
                   result: [],
                 },
               ],
               returnedBorrowedOrigins: [
                 {
-                  source: [{ kind: "index", stable: false }],
+                  source: [sourceIndex],
                   result: [],
                 },
               ],
@@ -398,6 +407,21 @@ const intrinsicBorrowContract = ({
     ],
     maySuspend: false,
   };
+};
+
+const numericConstant = (
+  exprId: HirExprId | undefined,
+  hir: HirGraph,
+): number | undefined => {
+  if (typeof exprId !== "number") {
+    return undefined;
+  }
+  const expr = hir.expressions.get(exprId);
+  if (expr?.exprKind !== "literal" || expr.literalKind !== "i32") {
+    return undefined;
+  }
+  const value = Number(expr.value);
+  return Number.isInteger(value) ? value : undefined;
 };
 
 const uniqueTargets = (
@@ -846,6 +870,8 @@ export const resolveBorrowCall = (
     preferSymbolic,
   );
   const opaque = opaqueCallableFor(expr, ctx);
+  const intrinsicArguments =
+    typedArguments.arguments ?? rawArgumentsFor(expr);
   const contracts = entries.flatMap((entry) => {
     if (entry.contract) {
       return [entry.contract];
@@ -863,11 +889,15 @@ export const resolveBorrowCall = (
       const metadata = record.metadata as
         | { intrinsicName?: string }
         | undefined;
+      const name = metadata?.intrinsicName ?? record.name;
       const contract = intrinsicBorrowContract({
-        name: metadata?.intrinsicName ?? record.name,
-        argumentCount:
-          typedArguments.arguments?.length ?? rawArgumentsFor(expr).length,
+        name,
+        argumentCount: intrinsicArguments.length,
         returnsReference: expressionCanCarryReference(expr.id, ctx),
+        indexConstant:
+          name === "__array_get"
+            ? numericConstant(intrinsicArguments[1], ctx.hir)
+            : undefined,
       });
       if (contract) {
         return [contract];
@@ -916,9 +946,12 @@ export const resolveBorrowCall = (
     typeof intrinsicName === "string"
       ? intrinsicBorrowContract({
           name: intrinsicName,
-          argumentCount:
-            typedArguments.arguments?.length ?? rawArgumentsFor(expr).length,
+          argumentCount: intrinsicArguments.length,
           returnsReference: expressionCanCarryReference(expr.id, ctx),
+          indexConstant:
+            intrinsicName === "__array_get"
+              ? numericConstant(intrinsicArguments[1], ctx.hir)
+              : undefined,
         })
       : undefined;
   const unresolvedContract =
