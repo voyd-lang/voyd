@@ -81,6 +81,23 @@ export type EffectOpInstanceInfo = {
 
 export type EffectOpKey = string;
 
+const mergeExternalMetadata = ({
+  entry,
+  candidate,
+}: {
+  entry: EffectOpEntry;
+  candidate: EffectOpEntry["external"];
+}): void => {
+  if (!candidate) return;
+  if (!entry.external) {
+    entry.external = candidate;
+    return;
+  }
+  if (entry.external.declaredOnly && !candidate.declaredOnly) {
+    entry.external = candidate;
+  }
+};
+
 const toEffectOpKey = (
   effectId: EffectIdHash,
   opId: number,
@@ -537,33 +554,27 @@ export const buildEffectRegistry = (
         });
         const key = toEffectOpKey(effectId.hash, info.opIndex, signatureHash);
         const external = effectMeta?.external
-            ? {
-                params: signature.params.map((typeId, index) =>
-                  deriveBoundarySchema({
-                    typeId,
-                    ctx,
-                    label: `${effectId.id}::${opName} arg${index}`,
-                    options: { tagStandaloneVariants: true },
-                  }),
-                ),
-                result: deriveBoundarySchema({
-                  typeId: signature.returnType,
+          ? {
+              params: signature.params.map((typeId, index) =>
+                deriveBoundarySchema({
+                  typeId,
                   ctx,
-                  label: `${effectId.id}::${opName} result`,
+                  label: `${effectId.id}::${opName} arg${index}`,
                   options: { tagStandaloneVariants: true },
                 }),
-                ...(!siteReachable ? { declaredOnly: true } : {}),
-              }
-            : undefined;
+              ),
+              result: deriveBoundarySchema({
+                typeId: signature.returnType,
+                ctx,
+                label: `${effectId.id}::${opName} result`,
+                options: { tagStandaloneVariants: true },
+              }),
+              ...(!siteReachable ? { declaredOnly: true } : {}),
+            }
+          : undefined;
         const existing = entriesByKey.get(key);
         if (existing) {
-          if (
-            external &&
-            (!existing.external ||
-              (existing.external.declaredOnly && !external.declaredOnly))
-          ) {
-            existing.external = external;
-          }
+          mergeExternalMetadata({ entry: existing, candidate: external });
           return;
         }
         entriesByKey.set(key, {

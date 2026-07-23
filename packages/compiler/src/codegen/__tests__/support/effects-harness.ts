@@ -116,19 +116,17 @@ const throwIfErrors = (diagnostics: Diagnostic[]) => {
 export const compileEffectFixture = async ({
   entryPath,
   extraEntries,
-  pkgDirs,
   codegenOptions,
   throwOnError = true,
 }: {
   entryPath: string;
   extraEntries?: readonly string[];
-  pkgDirs?: readonly string[];
   codegenOptions?: CodegenOptions;
   throwOnError?: boolean;
 }) => {
   const host = createFsModuleHost();
   const srcRoot = dirname(entryPath);
-  const roots = { src: srcRoot, std: STD_ROOT, pkgDirs };
+  const roots = { src: srcRoot, std: STD_ROOT };
 
   const includeMsgpack =
     codegenOptions?.effectsHostBoundary !== "off";

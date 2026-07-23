@@ -1,5 +1,0 @@
-pub src::external
-pub src::document
-
-pub use src::external::{ Document, WireError, WireRecord }
-pub use src::document::{ Stored, inspect, roundtrip, roundtrip_count }
