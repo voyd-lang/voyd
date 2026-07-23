@@ -656,6 +656,20 @@ fn invalid(
     ).toContain("TY0051");
   });
 
+  it("preserves fixed-array literal element origins", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn fixed(value: Box) -> FixedArray<Box>
+  __array_new_fixed(value)
+
+fn invalid(~value: Box) -> i32
+  let values = fixed(value)
+  mutate(~value)
+  __array_get(values, 0).value
+`),
+    ).toContain("TY0048");
+  });
+
   it("rejects mutation after a helper retains an array-element borrow", () => {
     expect(
       diagnosticCodes(`
@@ -2048,6 +2062,26 @@ impl SharedCell<T>
 
 fn invalid(cell: SharedCell<Box>) -> Box
   cell.with((value) => value)
+`),
+    ).toContain("TY0053");
+  });
+
+  it("rejects fixed arrays returned from SharedCell callback values", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn fixed(value: Box) -> FixedArray<Box>
+  __array_new_fixed(value)
+
+fn invalid(cell: SharedCell<Box>) -> FixedArray<Box>
+  cell.with((value) => fixed(value))
 `),
     ).toContain("TY0053");
   });

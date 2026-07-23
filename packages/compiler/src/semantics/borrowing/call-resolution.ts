@@ -290,6 +290,28 @@ const intrinsicBorrowContract = ({
       maySuspend: false,
     };
   }
+  if (name === "__array_new_fixed" && returnsReference) {
+    return {
+      parameters: Array.from({ length: argumentCount }, () => {
+        const origin = {
+          source: [],
+          result: [
+            {
+              kind: "index" as const,
+              stable: false,
+            },
+          ],
+        };
+        return {
+          access: "shared",
+          retained: false,
+          returned: true,
+          returnedOrigins: [origin],
+        };
+      }),
+      maySuspend: false,
+    };
+  }
   if (name === "__array_get" && argumentCount === 2) {
     return {
       parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
