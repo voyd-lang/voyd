@@ -138,6 +138,68 @@ describe("optimizer scorecard measurement retry policy", () => {
     ]);
   });
 
+  it("does not treat a revision-wide RSS shift as separate modes", () => {
+    const base = poolScorecardMeasurements({
+      initial: scorecard({ rssMib: 100 }),
+      retry: scorecard({ rssMib: 100 }),
+      scenarioNames: ["scenario"],
+    });
+    const head = poolScorecardMeasurements({
+      initial: scorecard({ rssMib: 300 }),
+      retry: scorecard({ rssMib: 300 }),
+      scenarioNames: ["scenario"],
+    });
+    expect(failures({ base, head })).toMatchObject([
+      { scenario: "scenario", metric: "rss" },
+    ]);
+  });
+
+  it.each([
+    {
+      scenario: "tier1-trait-call",
+      base: [177.38, 179.11, 379.58, 384.43, 385.28, 383.21],
+      head: [396.23, 389.17, 384.86, 393.62, 186.09, 397.47],
+    },
+    {
+      scenario: "vtrace-main",
+      base: [201.28, 188.11, 438.72, 442.46, 393.94, 536.16],
+      head: [423.96, 435.8, 432.52, 417, 169.17, 428.83],
+    },
+  ])(
+    "compares matching modes when $scenario RSS mode frequency changes",
+    ({ base, head }) => {
+      const result = failures({
+        base: scorecard({
+          rssMib: 300,
+          rssGrowthMib: 300,
+          rssGrowthSamplesMib: base,
+        }),
+        head: scorecard({
+          rssMib: 300,
+          rssGrowthMib: 300,
+          rssGrowthSamplesMib: head,
+        }),
+      });
+      expect(result).toEqual([]);
+    },
+  );
+
+  it("fails a real regression in a matched RSS mode", () => {
+    const result = failures({
+      base: scorecard({
+        rssMib: 300,
+        rssGrowthMib: 300,
+        rssGrowthSamplesMib: [100, 101, 300, 301, 302, 303],
+      }),
+      head: scorecard({
+        rssMib: 350,
+        rssGrowthMib: 350,
+        rssGrowthSamplesMib: [102, 320, 350, 351, 352, 353],
+      }),
+    });
+    expect(result).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
+  });
+
   it("retries compile and RSS regressions because both are sampled", () => {
     const result = failures({
       base: scorecard({ rssMib: 100 }),

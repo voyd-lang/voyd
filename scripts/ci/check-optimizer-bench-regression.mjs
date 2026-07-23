@@ -13,6 +13,16 @@ const DEFAULT_THRESHOLDS = {
   gzip: { relativePct: 5, absolute: 512 },
 };
 
+const MIB = 1024 * 1024;
+const RSS_MODE_MIN_SAMPLES = 6;
+const RSS_MODE_MIN_CLUSTER_SAMPLES = 3;
+// Only treat samples as modes when their separation is large in absolute,
+// relative, and within-distribution terms. This keeps ordinary noise on the
+// existing lower-quartile path.
+const RSS_MODE_MIN_GAP = 64 * MIB;
+const RSS_MODE_MIN_RELATIVE_GAP = 0.1;
+const RSS_MODE_MIN_GAP_DOMINANCE = 1.5;
+
 const argValue = (name) => {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
@@ -140,13 +150,15 @@ const lowerQuartile = (values) => {
 };
 
 const rssSampleValue = (samples, fallback) =>
-  samples.length >= 6 ? lowerQuartile(samples) : fallback;
+  samples.length >= RSS_MODE_MIN_SAMPLES ? lowerQuartile(samples) : fallback;
 
 const rssComparison = (row) =>
   typeof row.processMaxRssGrowthBytes === "number"
     ? {
+        name: "compile peak RSS growth",
         label:
-          (row.processMaxRssGrowthSamplesBytes?.length ?? 0) >= 6
+          (row.processMaxRssGrowthSamplesBytes?.length ?? 0) >=
+          RSS_MODE_MIN_SAMPLES
             ? "compile peak RSS growth lower-quartile MiB"
             : "compile peak RSS growth median MiB",
         value: rssSampleValue(
@@ -156,8 +168,9 @@ const rssComparison = (row) =>
         samples: row.processMaxRssGrowthSamplesBytes ?? [],
       }
     : {
+        name: "peak RSS",
         label:
-          (row.processMaxRssSamplesBytes?.length ?? 0) >= 6
+          (row.processMaxRssSamplesBytes?.length ?? 0) >= RSS_MODE_MIN_SAMPLES
             ? "peak RSS lower-quartile MiB"
             : "peak RSS median MiB",
         value: rssSampleValue(
@@ -166,6 +179,78 @@ const rssComparison = (row) =>
         ),
         samples: row.processMaxRssSamplesBytes ?? [],
       };
+
+const largestSampleGap = (samples) => {
+  const sorted = [...samples].sort((left, right) => left - right);
+  const gaps = sorted.slice(1).map((value, index) => ({
+    index,
+    size: value - sorted[index],
+  }));
+  const ranked = gaps.sort((left, right) => right.size - left.size);
+  return {
+    sorted,
+    largest: ranked[0],
+    secondLargest: ranked[1]?.size ?? 0,
+  };
+};
+
+const rssModeComparisons = ({ base, head }) => {
+  if (
+    base.samples.length < RSS_MODE_MIN_SAMPLES ||
+    head.samples.length < RSS_MODE_MIN_SAMPLES
+  ) {
+    return [];
+  }
+
+  const { sorted, largest, secondLargest } = largestSampleGap([
+    ...base.samples,
+    ...head.samples,
+  ]);
+  if (!largest) {
+    return [];
+  }
+
+  const lower = sorted.slice(0, largest.index + 1);
+  const upper = sorted.slice(largest.index + 1);
+  const relativeGap = largest.size / Math.max(median(lower), 1);
+  const clearlySeparated =
+    lower.length >= RSS_MODE_MIN_CLUSTER_SAMPLES &&
+    upper.length >= RSS_MODE_MIN_CLUSTER_SAMPLES &&
+    largest.size >= RSS_MODE_MIN_GAP &&
+    relativeGap >= RSS_MODE_MIN_RELATIVE_GAP &&
+    largest.size >= secondLargest * RSS_MODE_MIN_GAP_DOMINANCE;
+  if (!clearlySeparated) {
+    return [];
+  }
+
+  const split = (lower.at(-1) + upper[0]) / 2;
+  const clusters = (samples) => ({
+    low: samples.filter((sample) => sample < split),
+    high: samples.filter((sample) => sample >= split),
+  });
+  const baseClusters = clusters(base.samples);
+  const headClusters = clusters(head.samples);
+  // If a mode only exists in one revision, the gap may be the regression
+  // itself. Fall back to the lower-quartile comparison in that case.
+  if (
+    baseClusters.low.length === 0 ||
+    baseClusters.high.length === 0 ||
+    headClusters.low.length === 0 ||
+    headClusters.high.length === 0
+  ) {
+    return [];
+  }
+
+  return ["low", "high"].map((mode) => ({
+    label: `${base.name} ${mode}-mode median MiB`,
+    base: median(baseClusters[mode]),
+    head: median(headClusters[mode]),
+    samples: {
+      base: baseClusters[mode],
+      head: headClusters[mode],
+    },
+  }));
+};
 
 const percentDelta = (base, head) =>
   base === 0
@@ -349,20 +434,31 @@ export const compareScorecards = ({ base, head, limits }) => {
         `${baseRow.scenario} scorecards use different RSS measurement formats`,
       );
     }
-    compareMetric({
-      failures,
-      scenario: baseRow.scenario,
-      label: baseRss.label,
-      base: baseRss.value,
-      head: headRss.value,
-      threshold: limits.rss,
-      metric: "rss",
-      samples: {
-        base: baseRss.samples,
-        head: headRss.samples,
-      },
-      format: (value) => (value / (1024 * 1024)).toFixed(2),
-    });
+    const rssModes = rssModeComparisons({ base: baseRss, head: headRss });
+    const rssComparisons =
+      rssModes.length > 0
+        ? rssModes
+        : [
+            {
+              label: baseRss.label,
+              base: baseRss.value,
+              head: headRss.value,
+              samples: {
+                base: baseRss.samples,
+                head: headRss.samples,
+              },
+            },
+          ];
+    rssComparisons.forEach((comparison) =>
+      compareMetric({
+        failures,
+        scenario: baseRow.scenario,
+        ...comparison,
+        threshold: limits.rss,
+        metric: "rss",
+        format: (value) => (value / MIB).toFixed(2),
+      }),
+    );
     if (typeof baseRow.processMaxRssGrowthBytes === "number") {
       const formatRss = (value) => (value / (1024 * 1024)).toFixed(2);
       console.log(
