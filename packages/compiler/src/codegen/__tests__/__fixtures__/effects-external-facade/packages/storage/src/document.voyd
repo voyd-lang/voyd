@@ -1,0 +1,37 @@
+use src::external::{ Document, WireError, WireRecord }
+use std::array::Array
+use std::optional::all
+use std::result::types::all
+use std::string::type::String
+
+pub obj Stored<T> {
+  api value: T
+}
+
+pub fn roundtrip<T>(
+  namespace: String,
+  record: WireRecord,
+  current: Optional<WireRecord>,
+  value: T
+): Document -> Result<Optional<Stored<T>>, WireError>
+  match(Document::roundtrip(namespace, record, current))
+    Ok<Array<WireRecord>> { value: records }:
+      if records.is_empty():
+        Ok<Optional<Stored<T>>> { value: None {} }
+      else:
+        Ok<Optional<Stored<T>>> {
+          value: Some<Stored<T>> { value: Stored<T> { value } }
+        }
+    Err<WireError> { error }:
+      Err<WireError> { error }
+
+pub fn roundtrip_count(
+  namespace: String,
+  record: WireRecord,
+  current: Optional<WireRecord>
+): Document -> Result<i32, WireError>
+  match(Document::roundtrip(namespace, record, current))
+    Ok<Array<WireRecord>> { value }:
+      Ok<i32> { value: value.len() }
+    Err<WireError> { error }:
+      Err<WireError> { error }

@@ -1,0 +1,16 @@
+use pkg::storage::{ Document, WireError, WireRecord }
+use std::array::Array
+use std::optional::all
+use std::result::types::all
+use std::string::type::String
+
+fn request(namespace: String): () -> WireRecord
+  { namespace, values: [20, 21] }
+
+pub fn direct(): Document -> i32
+  let input = request("direct")
+  match(Document::roundtrip("direct", input, None {}))
+    Ok<Array<WireRecord>> { value }:
+      value.len()
+    Err<WireError>:
+      -1

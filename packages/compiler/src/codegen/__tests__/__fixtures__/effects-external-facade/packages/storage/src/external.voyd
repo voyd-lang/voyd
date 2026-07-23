@@ -1,0 +1,22 @@
+use std::array::Array
+use std::optional::all
+use std::result::types::all
+use std::string::type::String
+
+pub type WireRecord = {
+  namespace: String,
+  values: Array<i32>
+}
+
+pub type WireError = {
+  message: String
+}
+
+@external(id: "example:storage/document@1")
+pub eff Document
+  roundtrip(
+    tail,
+    namespace: String,
+    record: WireRecord,
+    current: Optional<WireRecord>
+  ) -> Result<Array<WireRecord>, WireError>

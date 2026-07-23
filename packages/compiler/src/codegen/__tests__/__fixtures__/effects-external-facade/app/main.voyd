@@ -1,0 +1,38 @@
+use pkg::storage::{
+  Document,
+  Stored,
+  WireError,
+  WireRecord,
+  roundtrip,
+  roundtrip_count
+}
+use std::array::Array
+use std::optional::all
+use std::result::types::all
+use std::string::type::String
+
+fn request(namespace: String): () -> WireRecord
+  { namespace, values: [20, 21] }
+
+fn result_value(result: Result<Optional<Stored<i32>>, WireError>): () -> i32
+  match(result)
+    Ok<Optional<Stored<i32>>> { value }:
+      match(value)
+        Some<Stored<i32>> { value }:
+          value.value
+        None:
+          -1
+    Err<WireError>:
+      -2
+
+pub fn through_facade(): Document -> i32
+  let input = request("facade")
+  result_value(roundtrip<i32>("facade", input, Some<WireRecord> { value: input }, 41))
+
+pub fn through_non_generic_facade(): Document -> i32
+  let input = request("non-generic")
+  match(roundtrip_count("non-generic", input, None {}))
+    Ok<i32> { value }:
+      value
+    Err<WireError>:
+      -1
