@@ -1326,12 +1326,14 @@ const evaluateExpression = (
       return expressionCanCarryReference(expr.id, ctx)
         ? new Map(env.get(expr.symbol) ?? emptyFlow())
         : emptyFlow();
-    case "field-access":
+    case "field-access": {
+      const target = evaluateExpression(expr.target, env, ctx);
       return expressionCanCarryReference(expr.id, ctx)
-        ? projectFlow(evaluateExpression(expr.target, env, ctx), [
+        ? projectFlow(target, [
             { kind: "field", name: expr.field },
           ])
         : emptyFlow();
+    }
     case "tuple":
       return unionFlows(
         ...expr.elements.map((element, index) => {

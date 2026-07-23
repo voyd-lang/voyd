@@ -1511,6 +1511,27 @@ fn invalid() -> void
     ).toContain("TY0049");
   });
 
+  it("propagates retention through scalar field projections", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Token { id: i32 }
+
+@intrinsic(name: "__retain_callback", uses_signature: true)
+fn retain_callback(handler: fn() -> i32) -> Token
+  Token { id: 0 }
+
+pub fn retain_callback_id(handler: fn() -> i32) -> i32
+  retain_callback(handler).id
+
+fn invalid() -> void
+  let ~box = Box { value: 0 }
+  let callback = () => box.value
+  let _ = retain_callback_id(callback)
+  mutate(~box)
+`),
+    ).toContain("TY0049");
+  });
+
   it.each(["__task_spawn", "__task_detach"])(
     "rejects mutable captures retained by %s",
     (intrinsicName) => {
