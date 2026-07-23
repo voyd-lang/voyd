@@ -48,7 +48,10 @@ const resolveDependencySymbolChain = ({
     }
     const importModuleId = metadata?.import?.moduleId;
     const importSymbol = metadata?.import?.symbol;
-    if (typeof importModuleId !== "string" || typeof importSymbol !== "number") {
+    if (
+      typeof importModuleId !== "string" ||
+      typeof importSymbol !== "number"
+    ) {
       return { dependency: currentDependency, dependencySymbol: currentSymbol };
     }
     const importedDependency = ctx.dependencies.get(importModuleId);
@@ -162,9 +165,7 @@ export const hydrateExternalTraitImplsForOwnerRef = ({
   ctx: TypingContext;
 }): void => {
   const hydrated = externallyHydratedTraitOwners.get(ctx) ?? new Set<string>();
-  if (!externallyHydratedTraitOwners.has(ctx)) {
-    externallyHydratedTraitOwners.set(ctx, hydrated);
-  }
+  externallyHydratedTraitOwners.set(ctx, hydrated);
   const ownerKey = `${ownerModuleId}::${ownerSymbol}`;
   if (hydrated.has(ownerKey)) {
     return;

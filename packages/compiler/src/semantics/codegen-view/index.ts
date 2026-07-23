@@ -477,7 +477,10 @@ const defaultValueIsStableCallsiteId = ({
     intrinsic?: unknown;
     intrinsicName?: unknown;
   };
-  return metadata.intrinsic === true && metadata.intrinsicName === "__stable_callsite_id";
+  return (
+    metadata.intrinsic === true &&
+    metadata.intrinsicName === "__stable_callsite_id"
+  );
 };
 
 export const buildProgramCodegenView = (
@@ -1169,7 +1172,8 @@ export const buildProgramCodegenView = (
         name: effect.name,
         effectId: effect.effectId,
         external: Boolean(
-          (effect.form?.attributes as { external?: unknown } | undefined)?.external,
+          (effect.form?.attributes as { external?: unknown } | undefined)
+            ?.external,
         ),
         visibility: effect.visibility,
         symbol: effect.symbol,
@@ -1309,30 +1313,29 @@ export const buildProgramCodegenView = (
     });
   };
 
+  const canonicalizeTraitMethods = (
+    methods: ReadonlyMap<SymbolId, SymbolId>,
+    moduleId: string,
+  ) =>
+    Array.from(methods.entries())
+      .sort(([a], [b]) => a - b)
+      .map(([traitMethod, implMethod]) => ({
+        traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
+        implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
+      }));
+
   const toCodegenTraitImplInstanceForModule = (
     impl: TraitImplInstance,
     moduleId: string,
   ): CodegenTraitImplInstance => {
     const traitSymbol = canonicalProgramSymbolIdOf(moduleId, impl.traitSymbol);
     const implSymbol = canonicalProgramSymbolIdOf(moduleId, impl.implSymbol);
-    const methods = Array.from(impl.methods.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([traitMethod, implMethod]) => ({
-        traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
-        implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
-      }));
-    const staticMethods = Array.from(impl.staticMethods.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([traitMethod, implMethod]) => ({
-        traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
-        implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
-      }));
     return toCodegenTraitImplInstance({
       impl,
       traitSymbol,
       implSymbol,
-      methods,
-      staticMethods,
+      methods: canonicalizeTraitMethods(impl.methods, moduleId),
+      staticMethods: canonicalizeTraitMethods(impl.staticMethods, moduleId),
     });
   };
 
@@ -1355,18 +1358,8 @@ export const buildProgramCodegenView = (
     traitSymbol: canonicalProgramSymbolIdOf(moduleId, template.traitSymbol),
     target: template.target,
     typeParams: template.typeParams.map((parameter) => parameter.typeParam),
-    methods: Array.from(template.methods.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([traitMethod, implMethod]) => ({
-        traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
-        implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
-      })),
-    staticMethods: Array.from(template.staticMethods.entries())
-      .sort(([a], [b]) => a - b)
-      .map(([traitMethod, implMethod]) => ({
-        traitMethod: canonicalProgramSymbolIdOf(moduleId, traitMethod),
-        implMethod: canonicalProgramSymbolIdOf(moduleId, implMethod),
-      })),
+    methods: canonicalizeTraitMethods(template.methods, moduleId),
+    staticMethods: canonicalizeTraitMethods(template.staticMethods, moduleId),
     implSymbol: canonicalProgramSymbolIdOf(moduleId, template.implSymbol),
   });
 
@@ -1916,13 +1909,14 @@ export const buildProgramCodegenView = (
     );
   };
   uniqueTraitImplTemplates.forEach((template) => {
-    [...template.methods, ...template.staticMethods].forEach(({ traitMethod, implMethod }) =>
-      registerTraitMethodImplMapping({
-        implMethod,
-        traitSymbol: template.traitSymbol,
-        traitMethodSymbol: traitMethod,
-        source: `template ${describeProgramSymbol(template.implSymbol)}`,
-      }),
+    [...template.methods, ...template.staticMethods].forEach(
+      ({ traitMethod, implMethod }) =>
+        registerTraitMethodImplMapping({
+          implMethod,
+          traitSymbol: template.traitSymbol,
+          traitMethodSymbol: traitMethod,
+          source: `template ${describeProgramSymbol(template.implSymbol)}`,
+        }),
     );
   });
   const assertTraitDispatchConsistency = (): void => {
@@ -1951,25 +1945,27 @@ export const buildProgramCodegenView = (
     };
 
     uniqueTraitImplTemplates.forEach((template) => {
-      [...template.methods, ...template.staticMethods].forEach(({ traitMethod, implMethod }) =>
-        registerRegistration({
-          implMethod,
-          traitSymbol: template.traitSymbol,
-          traitMethodSymbol: traitMethod,
-          source: `template ${describeProgramSymbol(template.implSymbol)}`,
-        }),
+      [...template.methods, ...template.staticMethods].forEach(
+        ({ traitMethod, implMethod }) =>
+          registerRegistration({
+            implMethod,
+            traitSymbol: template.traitSymbol,
+            traitMethodSymbol: traitMethod,
+            source: `template ${describeProgramSymbol(template.implSymbol)}`,
+          }),
       );
     });
 
     traitImplsByNominal.forEach((impls, nominal) => {
       impls.forEach((impl) => {
-        [...impl.methods, ...impl.staticMethods].forEach(({ traitMethod, implMethod }) =>
-          registerRegistration({
-            implMethod,
-            traitSymbol: impl.traitSymbol,
-            traitMethodSymbol: traitMethod,
-            source: `nominal ${nominal} impl ${describeProgramSymbol(impl.implSymbol)}`,
-          }),
+        [...impl.methods, ...impl.staticMethods].forEach(
+          ({ traitMethod, implMethod }) =>
+            registerRegistration({
+              implMethod,
+              traitSymbol: impl.traitSymbol,
+              traitMethodSymbol: traitMethod,
+              source: `nominal ${nominal} impl ${describeProgramSymbol(impl.implSymbol)}`,
+            }),
         );
       });
     });
