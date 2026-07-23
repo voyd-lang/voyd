@@ -294,6 +294,9 @@ const mergeProjectionPaths = (
           if (!active) {
             return [];
           }
+          if (key === "accessPaths") {
+            return parameter.accessPaths ?? [[]];
+          }
           return parameter[key] && parameter[key]!.length > 0
             ? parameter[key]!
             : [[]];
@@ -301,7 +304,11 @@ const mergeProjectionPaths = (
         .map((path) => [JSON.stringify(path), path]),
     ).values(),
   );
-  return paths.length > 0 ? { [key]: paths } : {};
+  return key === "accessPaths"
+    ? { accessPaths: paths }
+    : paths.length > 0
+      ? { [key]: paths }
+      : {};
 };
 
 export const emptyBorrowingResult = (): BorrowingResult => ({

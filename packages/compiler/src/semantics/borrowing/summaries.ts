@@ -61,6 +61,7 @@ type SummaryContext = {
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   borrowIndexMode: "symbolic";
+  accessed: MutableFlow;
   retained: MutableFlow;
   externalRetained: MutableFlow;
   borrowedRetained: MutableFlow;
@@ -113,6 +114,10 @@ const retainOrigin = (origin: ParameterOrigin, ctx: SummaryContext): void => {
   if (origin.borrowed === true || origin.shared === true) {
     addOrigin(ctx.borrowedRetained, origin);
   }
+};
+
+const recordAccess = (flow: Flow, ctx: SummaryContext): void => {
+  flow.forEach((origin) => addOrigin(ctx.accessed, origin));
 };
 
 const retainOriginExternally = (
@@ -688,6 +693,11 @@ const applyCallContract = ({
               (origin) => args[origin] ?? emptyFlow(),
             ),
           );
+    if (parameter.access !== "owned") {
+      (parameter.accessPaths ?? [[]]).forEach((path) =>
+        recordAccess(projectFlow(flow, path), ctx),
+      );
+    }
     if (parameter.retained && !retainedOnlyInLocalDestinations(index)) {
       contractPaths(parameter, "retained").forEach((path) =>
         projectFlow(flow, path).forEach((origin) => {
@@ -1328,10 +1338,12 @@ const evaluateExpression = (
         : emptyFlow();
     case "field-access": {
       const target = evaluateExpression(expr.target, env, ctx);
+      const projected = projectFlow(target, [
+        { kind: "field", name: expr.field },
+      ]);
+      recordAccess(projected, ctx);
       return expressionCanCarryReference(expr.id, ctx)
-        ? projectFlow(target, [
-            { kind: "field", name: expr.field },
-          ])
+        ? projected
         : emptyFlow();
     }
     case "tuple":
@@ -1527,7 +1539,8 @@ const evaluateExpression = (
       return emptyFlow();
     }
     case "call": {
-      evaluateExpression(expr.callee, env, ctx);
+      const callee = evaluateExpression(expr.callee, env, ctx);
+      recordAccess(callee, ctx);
       const evaluated = new Map(
         expr.args.map((argument) => [
           argument.expr,
@@ -1603,8 +1616,8 @@ const parameterContract = (
   functionItem: HirFunction,
   index: number,
   typing: TypingResult,
-): CallableParameterBorrowContract => ({
-  access:
+): CallableParameterBorrowContract => {
+  const access =
     functionItem.parameters[index]?.pattern.bindingKind === "mutable-ref"
       ? "mutable"
       : (() => {
@@ -1614,10 +1627,14 @@ const parameterContract = (
             return "shared";
           }
           return typeCanCarryReference(type, typing) ? "shared" : "owned";
-        })(),
-  retained: false,
-  returned: false,
-});
+        })();
+  return {
+    access,
+    ...(access === "shared" ? { accessPaths: [] } : {}),
+    retained: false,
+    returned: false,
+  };
+};
 
 const initialFunctionContract = ({
   functionItem,
@@ -1769,6 +1786,23 @@ const mergePaths = (
     ).values(),
   );
 
+const minimizeProjectionPaths = (
+  paths: readonly (readonly PlaceProjection[])[],
+): readonly (readonly PlaceProjection[])[] =>
+  paths.filter(
+    (path, index) =>
+      !paths.some(
+        (candidate, candidateIndex) =>
+          candidateIndex !== index &&
+          candidate.length <= path.length &&
+          candidate.every(
+            (projection, projectionIndex) =>
+              JSON.stringify(projection) ===
+              JSON.stringify(path[projectionIndex]),
+          ),
+      ),
+  );
+
 const returnedSharedOriginsForParameter = ({
   returned,
   returnSnapshots,
@@ -1828,6 +1862,7 @@ const summarizeFunction = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
 }): CallableBorrowContract => {
+  const accessed = emptyFlow();
   const retained = emptyFlow();
   const externalRetained = emptyFlow();
   const borrowedRetained = emptyFlow();
@@ -1874,6 +1909,7 @@ const summarizeFunction = ({
     dependencies,
     contracts: baseContracts,
     borrowIndexMode: "symbolic",
+    accessed,
     retained,
     externalRetained,
     borrowedRetained,
@@ -1970,8 +2006,12 @@ const summarizeFunction = ({
       const access =
         baseContracts.get(functionItem.symbol)?.parameters[index]?.access ??
         parameterContract(functionItem, index, typing).access;
+      const accessPaths = minimizeProjectionPaths(
+        pathsForParameter(accessed, index),
+      );
       return {
         access,
+        ...(access === "shared" ? { accessPaths } : {}),
         retained: retainedPaths.length > 0,
         returned: returnedOrigins.length > 0,
         ...(retainedPaths.length > 0 ? { retainedPaths } : {}),
@@ -2013,6 +2053,8 @@ const contractsEqual = (
     const candidate = right.parameters[index];
     return (
       candidate?.access === parameter.access &&
+      JSON.stringify(candidate.accessPaths ?? []) ===
+        JSON.stringify(parameter.accessPaths ?? []) &&
       candidate.retained === parameter.retained &&
       candidate.returned === parameter.returned &&
       JSON.stringify(candidate.retainedPaths ?? []) ===
@@ -2117,7 +2159,12 @@ const normalizeCallableBorrowContract = (
         returnedSharedOrigins: _returnedSharedOrigins,
         ...baseParameter
       } = parameter;
-      const accessPaths = projectionPathsOrBroad(parameter.accessPaths);
+      const accessPaths =
+        parameter.accessPaths === undefined
+          ? undefined
+          : minimizeProjectionPaths(
+              projectionPathsOrBroad(parameter.accessPaths) ?? [],
+            );
       const retainedPaths = projectionPathsOrBroad(parameter.retainedPaths);
       const externalRetainedPaths = projectionPathsOrBroad(
         parameter.externalRetainedPaths,
@@ -2143,7 +2190,7 @@ const normalizeCallableBorrowContract = (
           : undefined;
       return {
         ...baseParameter,
-        ...(accessPaths ? { accessPaths } : {}),
+        ...(accessPaths !== undefined ? { accessPaths } : {}),
         ...(retainedPaths ? { retainedPaths } : {}),
         ...(externalRetainedPaths ? { externalRetainedPaths } : {}),
         ...(borrowedRetainedPaths ? { borrowedRetainedPaths } : {}),
@@ -2198,6 +2245,7 @@ const resetDerivedContractFacts = (
   ...contract,
   parameters: contract.parameters.map((parameter) => {
     const {
+      accessPaths: _accessPaths,
       retainedPaths: _retainedPaths,
       externalRetainedPaths: _externalRetainedPaths,
       borrowedRetainedPaths: _borrowedRetainedPaths,
@@ -2209,6 +2257,7 @@ const resetDerivedContractFacts = (
     } = parameter;
     return {
       ...base,
+      ...(parameter.access === "shared" ? { accessPaths: [] } : {}),
       retained: false,
       returned: false,
     };
@@ -2511,6 +2560,7 @@ export const summarizeLambdaBorrowing = ({
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   decls: DeclTable;
 }): CallableBorrowContract => {
+  const accessed = emptyFlow();
   const retained = emptyFlow();
   const externalRetained = emptyFlow();
   const borrowedRetained = emptyFlow();
@@ -2549,6 +2599,7 @@ export const summarizeLambdaBorrowing = ({
     dependencies,
     contracts,
     borrowIndexMode: "symbolic",
+    accessed,
     retained,
     externalRetained,
     borrowedRetained,
@@ -2628,11 +2679,19 @@ export const summarizeLambdaBorrowing = ({
           source: origin.sourceProjections,
           result: origin.resultProjections,
         }));
+      const access =
+        parameter.pattern.bindingKind === "mutable-ref"
+          ? "mutable"
+          : "shared";
       return {
-        access:
-          parameter.pattern.bindingKind === "mutable-ref"
-            ? "mutable"
-            : "shared",
+        access,
+        ...(access === "shared"
+          ? {
+              accessPaths: minimizeProjectionPaths(
+                pathsForParameter(accessed, index),
+              ),
+            }
+          : {}),
         retained: retainedPaths.length > 0,
         returned: returnedOrigins.length > 0,
         ...(retainedPaths.length > 0 ? { retainedPaths } : {}),

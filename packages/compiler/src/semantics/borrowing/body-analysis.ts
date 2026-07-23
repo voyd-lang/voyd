@@ -2933,13 +2933,14 @@ const validateCall = (
       return [];
     }
     const actor = baseSymbolOf(actual, ctx);
-    const places = parameter?.accessPaths?.length
-      ? uniquePlaces(
-          parameter.accessPaths.flatMap((path) =>
-            placesAtProjection(actual, path, ctx, new Set()),
-          ),
-        )
-      : placesOfExpression(actual, ctx);
+    const places =
+      parameter?.accessPaths === undefined
+        ? placesOfExpression(actual, ctx)
+        : uniquePlaces(
+            parameter.accessPaths.flatMap((path) =>
+              placesAtProjection(actual, path, ctx, new Set()),
+            ),
+          );
     return places.map((place) => {
       if (
         access === "mutable" &&

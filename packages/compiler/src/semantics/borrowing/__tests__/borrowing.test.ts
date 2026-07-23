@@ -676,10 +676,13 @@ fn invalid(~value: Box) -> i32
 fn fixed(left: Box, right: Box) -> FixedArray<Box>
   __array_new_fixed(left, right)
 
+fn read_second(values: FixedArray<Box>) -> i32
+  __array_get(values, 1).value
+
 fn valid(~left: Box, ~right: Box) -> i32
   let values = fixed(left, right)
   mutate(~left)
-  __array_get(values, 1).value
+  read_second(values)
 `),
     ).not.toThrow();
   });
@@ -1323,6 +1326,54 @@ pub fn invalid(): (open) -> void
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       "TY0049",
     );
+  });
+
+  it("publishes projected access contracts across modules", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}fixed.voyd`]: `
+pub obj Box { api value: i32 }
+
+pub fn fixed(left: Box, right: Box) -> FixedArray<Box>
+  __array_new_fixed(left, right)
+
+pub fn read_second(values: FixedArray<Box>) -> i32
+  __array_get(values, 1).value
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::fixed::{ Box, fixed, read_second }
+
+fn mutate(~box: Box) -> void
+  box.value = box.value + 1
+
+pub fn valid(~left: Box, ~right: Box) -> i32
+  let values = fixed(left, right)
+  mutate(~left)
+  read_second(values)
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const readExport = analyzed.semantics
+      .get("std::fixed")
+      ?.exports.get("read_second");
+    const readContract = readExport?.borrowing?.find(
+      (entry) => entry.symbol === readExport.symbol,
+    )?.contract;
+
+    expect(readContract?.parameters[0]?.accessPaths).toEqual([
+      [{ kind: "index", constant: 1, stable: true }],
+    ]);
+    expect(diagnostics).toEqual([]);
   });
 
   it("widens recursive returned projections to a conservative root", () => {
