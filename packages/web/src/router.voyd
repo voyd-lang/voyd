@@ -2021,6 +2021,22 @@ pub macro serve(first, second)
       let callback_params = routes_callback.get(1)
       if is_list(callback_params) and callback_params.length == 0:
         let serve_args = all_args.slice(0, all_args.length - 1)
+        let is_openapi_arg = (arg) =>
+          is_list(arg) and arg.calls(:) and arg.get(1) == openapi
+        let openapi_arg_count = serve_args.reduce(0, (count, arg) =>
+          if is_openapi_arg(arg): count + 1 else: count
+        )
+        if openapi_arg_count > 1:
+          panic("serve accepts only one openapi argument")
+        let forwarded_serve_args = serve_args.reduce(`(), (args, arg) =>
+          if is_openapi_arg(arg): args else: args.push(arg)
+        )
+        let initial_app = serve_args.reduce(`(app()), (current, arg) =>
+          if is_openapi_arg(arg):
+            `(app(openapi: $(arg.get(2))))
+          else:
+            current
+        )
         let invalid_handler = () =>
           panic("web route handler extractor parameters must be named params, query, headers, cookies, and optional final ctx")
         let query_requires_context = () =>
@@ -2165,6 +2181,9 @@ pub macro serve(first, second)
                 lower_method_route(builder, statement, `(Method::Delete {}))
               statement.calls(route):
                 lower_manual_route(builder, statement)
+              statement.calls(expose_openapi):
+                let args = statement.slice(1)
+                `(expose_openapi $builder $$args)
               else:
                 let name = statement.get(0)
                 let path = statement.get(1)
@@ -2173,8 +2192,8 @@ pub macro serve(first, second)
           )
         let route_body = routes_callback.get(2)
         let statements = route_body.slice(1)
-        let app_expr = build_routes(`(app()), statements)
-        `(serve_app($app_expr, $$serve_args))
+        let app_expr = build_routes(initial_app, statements)
+        `(serve_app($app_expr, $$forwarded_serve_args))
       else:
         fallback()
     else:

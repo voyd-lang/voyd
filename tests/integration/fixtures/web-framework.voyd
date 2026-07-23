@@ -104,7 +104,11 @@ fn serve_options_dsl_compile_probe()
     host: "127.0.0.1",
     shutdown_timeout: 250,
     max_body_bytes: 1024,
-    max_pending_requests: 8
+    max_pending_requests: 8,
+    openapi: {
+      title: "Serve DSL API",
+      version: "1.0.0"
+    }
   ) routes():
     put("/replace", body: json_body()) do(input: CreateUser):
       Response::ok().text(input.name)
@@ -114,6 +118,8 @@ fn serve_options_dsl_compile_probe()
 
     patch("/update", body: text_body(), auth: required_session()) do(input: String, session: String):
       Response::ok().text(session.concat(":".as_slice()).concat(input))
+
+    expose_openapi(at: "/openapi.json", include_doc_comments: false)
 
     patch("/update-timeout", body: text_body(), auth: required_session(), timeout: timeout_millis(5)) do(input: String, session: String, ctx: Context):
       Response::ok().text(ctx.path().concat(":".as_slice()).concat(session).concat(input))

@@ -5,6 +5,20 @@ use std::string::type::{ String, StringSlice }
 use super::builder::Document
 use src::router::App
 
+/// Exposes the OpenAPI document generated from an application's routes.
+pub fn expose(
+  app: App,
+  { at path: StringSlice, include_doc_comments: bool = true }
+) -> App
+  app.expose_openapi(at: path, include_doc_comments: include_doc_comments)
+
+pub fn expose(
+  app: App,
+  { at path: String, include_doc_comments: bool = true }
+) -> App
+  expose(app, at: path.as_slice(), include_doc_comments: include_doc_comments)
+
+/// Exposes an explicitly constructed low-level OpenAPI document.
 pub fn expose(app: App, spec: Document, { at path: StringSlice }) -> App
   app.expose_openapi_document(path, handler: () -> Response => spec.response())
 

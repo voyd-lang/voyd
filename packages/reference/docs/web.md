@@ -4,45 +4,9 @@ order: 9
 
 # Web
 
-`pkg::web` is Voyd's HTTP framework. Use it to build JSON APIs,
+`pkg::web` is Voyd's web application framework. Use it to build JSON APIs,
 server-rendered sites, or applications that combine HTTP routes with a VX
 client.
-
-This guide starts with ordinary routes and then follows the path of a request:
-
-1. choose a route;
-2. decode request data;
-3. return a response;
-4. handle errors and cross-cutting concerns;
-5. optionally publish an OpenAPI description or render VX pages.
-
-Most applications can begin with one import:
-
-```voyd
-use pkg::web::all
-```
-
-### Module structure
-
-`pkg::web::all` is the recommended application import. It exports routing,
-extractors, typed responses, middleware, OpenAPI helpers, streaming, SSE, and
-HTML rendering. Import a narrower module when writing reusable framework code:
-
-| Module | Main exports |
-| --- | --- |
-| `pkg::web::router` | `App`, `Router`, `Context`, and app builders |
-| `pkg::web::routes` | Free route functions, composition helpers, and timeout policies |
-| `pkg::web::extract` | Body, auth, parameter, query, header, and cookie extractors |
-| `pkg::web::response` | `IntoResponse`, typed responses, and raw conversion |
-| `pkg::web::openapi` | OpenAPI contracts and the low-level manual document builder |
-| `pkg::web::middleware` | Built-in middleware |
-| `pkg::web::html` | VX server-rendering responses |
-| `pkg::web::multipart` / `pkg::web::negotiate` | Multipart forms and content negotiation |
-| `pkg::web::static_files` | Static-directory middleware |
-| `pkg::web::request_streaming` / `pkg::web::streaming` / `pkg::web::sse` | Request streams, response streams, and server-sent events |
-
-Examples use `use pkg::web::all` unless they show a narrower import explicitly.
-They import standard-library types where those names appear in annotations.
 
 ## Start a project
 
@@ -82,12 +46,8 @@ This is a complete server with two routes:
 
 ```voyd
 use pkg::web::all
-use std::error::HostError
-use std::http::server
-use std::result::types::all
-use std::task
 
-pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError>
+pub fn main()
   serve(port: 3000, host: "127.0.0.1") routes():
     get("/") do:
       "Hello from Voyd"
@@ -97,8 +57,28 @@ pub fn main(): (server::HttpServer, task::TaskRuntime) -> Result<Unit, HostError
 ```
 
 `serve` starts the HTTP server and builds the routes inside `routes():`.
-Because it uses `std::http::server`, the entrypoint declares the HTTP server and
-task runtime effects. Effects used by handlers belong in this effect row too.
+
+## Module structure
+
+`pkg::web::all` is the recommended application import. It exports routing,
+extractors, typed responses, middleware, OpenAPI helpers, streaming, SSE, and
+HTML rendering. Import a narrower module when writing reusable framework code:
+
+| Module | Main exports |
+| --- | --- |
+| `pkg::web::router` | `App`, `Router`, `Context`, and app builders |
+| `pkg::web::routes` | Free route functions, composition helpers, and timeout policies |
+| `pkg::web::extract` | Body, auth, parameter, query, header, and cookie extractors |
+| `pkg::web::response` | `IntoResponse`, typed responses, and raw conversion |
+| `pkg::web::openapi` | OpenAPI contracts and the low-level manual document builder |
+| `pkg::web::middleware` | Built-in middleware |
+| `pkg::web::html` | VX server-rendering responses |
+| `pkg::web::multipart` / `pkg::web::negotiate` | Multipart forms and content negotiation |
+| `pkg::web::static_files` | Static-directory middleware |
+| `pkg::web::request_streaming` / `pkg::web::streaming` / `pkg::web::sse` | Request streams, response streams, and server-sent events |
+
+Examples use `use pkg::web::all` unless they show a narrower import explicitly.
+They import standard-library types where those names appear in annotations.
 
 ## Routes
 
@@ -774,6 +754,33 @@ it, including routes in later groups. The package includes
 Web derives OpenAPI 3.1 from the same immutable routes that execute requests.
 There is no second route list to keep synchronized and no handler-body
 analysis.
+
+### Serve DSL
+
+Pass document metadata with the top-level `openapi:` label, then add
+`expose_openapi(...)` anywhere in the route block:
+
+```voyd
+use pkg::web::all
+
+pub fn main()
+  serve(
+    port: 3000,
+    openapi: {
+      title: "Articles API",
+      version: "1.0.0"
+    }
+  ) routes():
+    get("/health") do:
+      text_response("ok")
+
+    expose_openapi(at: "/openapi.json")
+```
+
+The exposure route renders the final application, including routes declared
+after it, and does not document itself. Set `include_doc_comments: false` on
+`expose_openapi` to omit `///` prose. `openapi:` configures the whole document;
+route-level `docs:` continues to describe one operation.
 
 ### Complete automatic example
 
