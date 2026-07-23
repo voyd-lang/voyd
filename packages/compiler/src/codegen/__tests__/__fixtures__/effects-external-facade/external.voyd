@@ -1,0 +1,19 @@
+use std::array::Array
+use std::optional::all
+use std::result::types::all
+use std::string::type::String
+
+pub obj Payload {
+  api current: Optional<i32>,
+  api namespace: String,
+  api values: Array<i32>
+}
+
+pub obj WireError {
+  api message: String
+}
+
+@external(id: "example:storage/document@1")
+pub eff Document
+  roundtrip(tail, payload: Payload) -> Result<i32, WireError>
+  inspect(tail, namespace: String) -> Result<Payload, WireError>
