@@ -67,12 +67,14 @@ import {
   type ExpectedCallContext,
 } from "./overload-candidates.js";
 import {
-  applyExplicitTypeArguments,
+  applyExplicitTypeArgumentSubstitution,
+  applyTargetTypeArguments,
   enforceOverloadCandidateBudget,
   findOverloadMatches,
   type OverloadMatchScoreOverrides,
   selectHintedOverloadCandidates,
   signatureCallShapeCouldMatch,
+  specializeOverloadParameters,
 } from "./overload-resolution.js";
 import { typeExpression, withSpeculativeExprTyping } from "../expressions.js";
 import { applyCurrentSubstitution } from "./shared.js";
@@ -103,8 +105,10 @@ import {
 } from "../import-type-translation.js";
 import { typingContextsShareInterners } from "../shared-interners.js";
 import { mapDependencySymbolToLocal } from "../import-symbol-mapping.js";
-import { hydrateImportedTraitMetadataForOwnerRef } from "../import-trait-impl-hydration.js";
-import { hydrateExternalTraitImplsForOwnerRef } from "../import-trait-impl-hydration.js";
+import {
+  hydrateExternalTraitImplsForOwnerRef,
+  hydrateImportedTraitMetadataForOwnerRef,
+} from "../import-trait-impl-hydration.js";
 import { collectTraitOwnersFromTypeParams } from "../constraint-trait-owners.js";
 import { typeDefaultParameterValues } from "../default-parameters.js";
 import { stableCallsiteIdFor } from "../../../stable-callsite-id.js";
@@ -138,24 +142,6 @@ const dependencyMethodSignatureCache = new WeakMap<
   TypingContext,
   Map<string, FunctionSignature>
 >();
-
-const valueTraitObjectWideningFor = ({
-  actual,
-  expected,
-  ctx,
-  state,
-}: {
-  actual: TypeId;
-  expected: TypeId;
-  ctx: TypingContext;
-  state: TypingState;
-}) =>
-  disallowedValueTraitObjectWidening({
-    actual,
-    expected,
-    ctx,
-    state,
-  });
 
 const ensureImportedConstraintTraitsForSignature = ({
   signature,
@@ -244,6 +230,78 @@ const getDependencyMethodSignature = ({
   }).signature;
   cache.set(key, translated);
   return translated;
+};
+
+const getMethodSignature = ({
+  symbolRef,
+  ctx,
+}: {
+  symbolRef: SymbolRef;
+  ctx: TypingContext;
+}): FunctionSignature | undefined => {
+  if (symbolRef.moduleId === ctx.moduleId) {
+    return ctx.functions.getSignature(symbolRef.symbol);
+  }
+  const dependency = ctx.dependencies.get(symbolRef.moduleId);
+  return dependency
+    ? getDependencyMethodSignature({
+        dependency,
+        symbol: symbolRef.symbol,
+        ctx,
+      })
+    : undefined;
+};
+
+const specializeImplMethodSignature = ({
+  signature,
+  implTypeArguments,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  implTypeArguments: readonly TypeId[];
+  ctx: TypingContext;
+}): FunctionSignature => {
+  const methodTypeParamCount = Math.max(
+    0,
+    (signature.typeParams?.length ?? 0) - implTypeArguments.length,
+  );
+  const substitution = new Map<TypeParamId, TypeId>();
+  signature.typeParams
+    ?.slice(methodTypeParamCount)
+    .forEach((parameter, index) =>
+      substitution.set(parameter.typeParam, implTypeArguments[index]!),
+    );
+  return {
+    ...signature,
+    parameters: signature.parameters.map((parameter) => ({
+      ...parameter,
+      type: ctx.arena.substitute(parameter.type, substitution),
+    })),
+    returnType: ctx.arena.substitute(signature.returnType, substitution),
+    typeParams: signature.typeParams?.slice(0, methodTypeParamCount),
+  };
+};
+
+const recordCallTarget = ({
+  callId,
+  target,
+  context,
+  ctx,
+  state,
+}: {
+  callId: HirExprId;
+  target: SymbolRef;
+  context: string;
+  ctx: TypingContext;
+  state: TypingState;
+}): void => {
+  const instanceKey = state.currentFunction?.instanceKey;
+  if (!instanceKey) {
+    throw new Error(`missing function instance key for ${context} ${callId}`);
+  }
+  const targets = ctx.callResolution.targets.get(callId) ?? new Map();
+  targets.set(instanceKey, target);
+  ctx.callResolution.targets.set(callId, targets);
 };
 
 export const typeCallExpr = (
@@ -823,19 +881,7 @@ const typeStaticTraitCall = ({
           seenGenericTraitMethods.add(traitMethodKey);
         }
         const symbolRef = canonicalSymbolRefForTypingContext(implMethod, ctx);
-        const signature =
-          symbolRef.moduleId === ctx.moduleId
-            ? ctx.functions.getSignature(symbolRef.symbol)
-            : (() => {
-                const dependency = ctx.dependencies.get(symbolRef.moduleId);
-                return dependency
-                  ? getDependencyMethodSignature({
-                      dependency,
-                      symbol: symbolRef.symbol,
-                      ctx,
-                    })
-                  : undefined;
-              })();
+        const signature = getMethodSignature({ symbolRef, ctx });
         if (!signature) {
           return [];
         }
@@ -843,31 +889,6 @@ const typeStaticTraitCall = ({
           ({ typeParam }) =>
             inferredSubstitution.get(typeParam) ?? ctx.primitives.unknown,
         );
-        const methodTypeParamCount = Math.max(
-          0,
-          (signature.typeParams?.length ?? 0) - inferredTypeArguments.length,
-        );
-        const signatureSubstitution = new Map<TypeParamId, TypeId>();
-        signature.typeParams
-          ?.slice(methodTypeParamCount)
-          .forEach((parameter, index) =>
-            signatureSubstitution.set(
-              parameter.typeParam,
-              inferredTypeArguments[index]!,
-            ),
-          );
-        const specializedSignature: FunctionSignature = {
-          ...signature,
-          parameters: signature.parameters.map((parameter) => ({
-            ...parameter,
-            type: ctx.arena.substitute(parameter.type, signatureSubstitution),
-          })),
-          returnType: ctx.arena.substitute(
-            signature.returnType,
-            signatureSubstitution,
-          ),
-          typeParams: signature.typeParams?.slice(0, methodTypeParamCount),
-        };
         return [
           {
             template,
@@ -876,7 +897,11 @@ const typeStaticTraitCall = ({
             substitution: inferredSubstitution,
             symbol: symbolRef.symbol,
             symbolRef,
-            signature: specializedSignature,
+            signature: specializeImplMethodSignature({
+              signature,
+              implTypeArguments: inferredTypeArguments,
+              ctx,
+            }),
             originalSignature: signature,
             inferredTypeArguments,
           },
@@ -928,13 +953,13 @@ const typeStaticTraitCall = ({
       ctx,
       state,
     });
-    const callerInstanceKey = state.currentFunction?.instanceKey;
-    if (!callerInstanceKey) {
-      throw new Error(`missing function instance key for call ${expr.id}`);
-    }
-    const targets = ctx.callResolution.targets.get(expr.id) ?? new Map();
-    targets.set(callerInstanceKey, selected.symbolRef);
-    ctx.callResolution.targets.set(expr.id, targets);
+    recordCallTarget({
+      callId: expr.id,
+      target: selected.symbolRef,
+      context: "call",
+      ctx,
+      state,
+    });
     return result;
   }
   const traitDecl = ctx.traits.getDecl(expr.staticTraitSymbol);
@@ -1022,13 +1047,13 @@ const typeStaticTraitCall = ({
     calleeExpr.symbol,
     ctx,
   );
-  const callerInstanceKey = state.currentFunction?.instanceKey;
-  if (!callerInstanceKey) {
-    throw new Error(`missing function instance key for call ${expr.id}`);
-  }
-  const targets = ctx.callResolution.targets.get(expr.id) ?? new Map();
-  targets.set(callerInstanceKey, selectedRef);
-  ctx.callResolution.targets.set(expr.id, targets);
+  recordCallTarget({
+    callId: expr.id,
+    target: selectedRef,
+    context: "call",
+    ctx,
+    state,
+  });
   ctx.callResolution.traitDispatches.add(expr.id);
   return { returnType, effectRow };
 };
@@ -1194,11 +1219,6 @@ export const typeMethodCallExpr = (
     return finalizeCall({ returnType: ctx.primitives.unknown });
   }
 
-  const instanceKey = state.currentFunction?.instanceKey;
-  if (!instanceKey) {
-    throw new Error(`missing function instance key for method call ${expr.id}`);
-  }
-
   if (selection.usedTraitDispatch) {
     ctx.callResolution.traitDispatches.add(expr.id);
   } else {
@@ -1230,10 +1250,13 @@ export const typeMethodCallExpr = (
       ? canonicalSymbolRefInTypingContext(selected.symbolRef, ctx)
       : selected.symbolRef
     : canonicalSymbolRefForTypingContext(selected.symbol, ctx);
-  const targets =
-    ctx.callResolution.targets.get(expr.id) ?? new Map<string, SymbolRef>();
-  targets.set(instanceKey, selectedRef);
-  ctx.callResolution.targets.set(expr.id, targets);
+  recordCallTarget({
+    callId: expr.id,
+    target: selectedRef,
+    context: "method call",
+    ctx,
+    state,
+  });
 
   const receiverType = selected.receiverTypeOverride ?? targetType;
   if (selected.receiverTypeOverride) {
@@ -1406,25 +1429,13 @@ const getExpectedCallParameters = ({
       return { expectedReturnCandidates };
     }
     const selected = matchingReturn[0]!;
-    const substitution =
-      selected.signature.typeParams && selected.signature.typeParams.length > 0
-        ? applyExplicitTypeArguments({
-            signature: selected.signature,
-            typeArguments,
-            calleeSymbol: selected.symbol,
-            ctx,
-          })
-        : undefined;
-    const combinedSubstitution = mergeInitialCallSubstitutions(
-      substitution,
-      buildTargetTypeArgumentSubstitution({
-        signature: selected.signature,
-        typeArguments,
-        targetTypeArguments,
-        calleeSymbol: selected.symbol,
-        ctx,
-      }),
-    );
+    const combinedSubstitution = applyExplicitTypeArgumentSubstitution({
+      symbol: selected.symbol,
+      signature: selected.signature,
+      typeArguments,
+      targetTypeArguments,
+      ctx,
+    });
     return {
       params: publicCallParametersFor({ signature: selected.signature }).map(
         (param) =>
@@ -1446,25 +1457,13 @@ const getExpectedCallParameters = ({
   if (!signature) {
     return {};
   }
-  const substitution =
-    signature.typeParams && signature.typeParams.length > 0
-      ? applyExplicitTypeArguments({
-          signature,
-          typeArguments,
-          calleeSymbol: callee.symbol,
-          ctx,
-        })
-      : undefined;
-  const combinedSubstitution = mergeInitialCallSubstitutions(
-    substitution,
-    buildTargetTypeArgumentSubstitution({
-      signature,
-      typeArguments,
-      targetTypeArguments,
-      calleeSymbol: callee.symbol,
-      ctx,
-    }),
-  );
+  const combinedSubstitution = applyExplicitTypeArgumentSubstitution({
+    symbol: callee.symbol,
+    signature,
+    typeArguments,
+    targetTypeArguments,
+    ctx,
+  });
   return {
     params: publicCallParametersFor({ signature }).map((param) =>
       combinedSubstitution
@@ -1492,26 +1491,13 @@ const mergeExplicitTypeArgumentSubstitution = ({
   seedSubstitution?: ReadonlyMap<TypeParamId, TypeId>;
   ctx: TypingContext;
 }): ReadonlyMap<TypeParamId, TypeId> | undefined => {
-  const explicitSubstitution =
-    signature.typeParams && signature.typeParams.length > 0
-      ? applyExplicitTypeArguments({
-          signature,
-          typeArguments,
-          calleeSymbol,
-          ctx,
-        })
-      : undefined;
-  const targetSubstitution = buildTargetTypeArgumentSubstitution({
+  const typeArgumentSubstitution = applyExplicitTypeArgumentSubstitution({
     signature,
+    symbol: calleeSymbol,
     typeArguments,
     targetTypeArguments,
-    calleeSymbol,
     ctx,
   });
-  const typeArgumentSubstitution = mergeInitialCallSubstitutions(
-    explicitSubstitution,
-    targetSubstitution,
-  );
 
   if (!seedSubstitution || seedSubstitution.size === 0) {
     return typeArgumentSubstitution;
@@ -1523,76 +1509,6 @@ const mergeExplicitTypeArgumentSubstitution = ({
   const merged = new Map<TypeParamId, TypeId>(seedSubstitution);
   typeArgumentSubstitution.forEach((value, key) => merged.set(key, value));
   return merged;
-};
-
-const buildTargetTypeArgumentSubstitution = ({
-  signature,
-  typeArguments,
-  targetTypeArguments,
-  calleeSymbol,
-  ctx,
-}: {
-  signature: FunctionSignature;
-  typeArguments: readonly TypeId[] | undefined;
-  targetTypeArguments: readonly TypeId[] | undefined;
-  calleeSymbol: SymbolId;
-  ctx: TypingContext;
-}): ReadonlyMap<TypeParamId, TypeId> | undefined => {
-  if (!targetTypeArguments || targetTypeArguments.length === 0) {
-    return undefined;
-  }
-
-  const params = signature.typeParams ?? [];
-  const explicitCount = typeArguments?.length ?? 0;
-  const totalCount = explicitCount + targetTypeArguments.length;
-  if (totalCount > params.length) {
-    throw new Error(
-      `function ${getSymbolName(
-        calleeSymbol,
-        ctx,
-      )} received too many type arguments`,
-    );
-  }
-
-  const start = params.length - targetTypeArguments.length;
-  const substitution = new Map<TypeParamId, TypeId>();
-  targetTypeArguments.forEach((arg, index) => {
-    const param = params[start + index];
-    if (param) {
-      substitution.set(param.typeParam, arg);
-    }
-  });
-  return substitution.size > 0 ? substitution : undefined;
-};
-
-const specializeOverloadParametersWithTargetTypeArguments = ({
-  symbol,
-  signature,
-  typeArguments,
-  targetTypeArguments,
-  ctx,
-}: {
-  symbol: SymbolId;
-  signature: FunctionSignature;
-  typeArguments?: readonly TypeId[];
-  targetTypeArguments?: readonly TypeId[];
-  ctx: TypingContext;
-}): readonly ParamSignature[] => {
-  const substitution = mergeExplicitTypeArgumentSubstitution({
-    signature,
-    typeArguments,
-    targetTypeArguments,
-    calleeSymbol: symbol,
-    ctx,
-  });
-  if (!substitution || substitution.size === 0) {
-    return signature.parameters;
-  }
-
-  return signature.parameters.map((param) => ({
-    ...param,
-    type: ctx.arena.substitute(param.type, substitution),
-  }));
 };
 
 const findMatchingOverloadCandidates = <
@@ -2521,7 +2437,7 @@ const callArgumentsSatisfyParams = ({
     onMatch: (match) =>
       match.matchedType === ctx.primitives.unknown
         ? true
-        : !valueTraitObjectWideningFor({
+        : !disallowedValueTraitObjectWidening({
             actual: match.matchedType,
             expected: providedArgumentTypeForParam(match.param, ctx),
             ctx,
@@ -2645,7 +2561,7 @@ const typeSatisfiesForDiagnostic = ({
   state: TypingState;
 }): boolean => {
   if (
-    valueTraitObjectWideningFor({
+    disallowedValueTraitObjectWidening({
       actual,
       expected,
       ctx,
@@ -4321,19 +4237,7 @@ const resolveStructuralTraitMethodCandidates = ({
       return [];
     }
     const symbolRef = canonicalSymbolRefForTypingContext(implMethod, ctx);
-    const signature =
-      symbolRef.moduleId === ctx.moduleId
-        ? ctx.functions.getSignature(symbolRef.symbol)
-        : (() => {
-            const dependency = ctx.dependencies.get(symbolRef.moduleId);
-            return dependency
-              ? getDependencyMethodSignature({
-                  dependency,
-                  symbol: symbolRef.symbol,
-                  ctx,
-                })
-              : undefined;
-          })();
+    const signature = getMethodSignature({ symbolRef, ctx });
     if (!signature) {
       return [];
     }
@@ -4360,30 +4264,15 @@ const resolveStructuralTraitMethodCandidates = ({
       ({ typeParam }) =>
         inferredSubstitution.get(typeParam) ?? ctx.primitives.unknown,
     );
-    const substitution = new Map<TypeParamId, TypeId>();
-    const methodTypeParamCount = Math.max(
-      0,
-      (signature.typeParams?.length ?? 0) - inferredTypeArguments.length,
-    );
-    signature.typeParams
-      ?.slice(methodTypeParamCount)
-      .forEach((parameter, index) =>
-        substitution.set(parameter.typeParam, inferredTypeArguments[index]!),
-      );
-    const specializedSignature: FunctionSignature = {
-      ...signature,
-      parameters: signature.parameters.map((parameter) => ({
-        ...parameter,
-        type: ctx.arena.substitute(parameter.type, substitution),
-      })),
-      returnType: ctx.arena.substitute(signature.returnType, substitution),
-      typeParams: signature.typeParams?.slice(0, methodTypeParamCount),
-    };
     return [
       {
         symbol: symbolRef.symbol,
         symbolRef,
-        signature: specializedSignature,
+        signature: specializeImplMethodSignature({
+          signature,
+          implTypeArguments: inferredTypeArguments,
+          ctx,
+        }),
         originalSignature: signature,
         inferredTypeArguments,
         trustedTypeArguments: true,
@@ -4780,13 +4669,6 @@ const typeOperatorOverloadCall = ({
     };
   }
 
-  const instanceKey = state.currentFunction?.instanceKey;
-  if (!instanceKey) {
-    throw new Error(
-      `missing function instance key for operator resolution at call ${call.id}`,
-    );
-  }
-
   if (traitDispatch) {
     ctx.callResolution.traitDispatches.add(call.id);
   } else {
@@ -4813,10 +4695,13 @@ const typeOperatorOverloadCall = ({
     }
   }
 
-  const targets =
-    ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolRef>();
-  targets.set(instanceKey, selected.symbolRef);
-  ctx.callResolution.targets.set(call.id, targets);
+  recordCallTarget({
+    callId: call.id,
+    target: selected.symbolRef,
+    context: "operator call",
+    ctx,
+    state,
+  });
 
   return typeFunctionCall({
     args,
@@ -5651,7 +5536,7 @@ const typeFunctionCall = ({
           state,
         })
       : undefined;
-  const typeArgumentSubstitution = buildTargetTypeArgumentSubstitution({
+  const typeArgumentSubstitution = applyTargetTypeArguments({
     signature,
     typeArguments,
     targetTypeArguments,
@@ -6378,19 +6263,13 @@ const typeIntrinsicFallbackCall = ({
   if (typeof fallbackSymbol !== "number") {
     return undefined;
   }
-  const instanceKey = state.currentFunction?.instanceKey;
-  if (!instanceKey) {
-    throw new Error(
-      `missing function instance key for intrinsic fallback at call ${callId}`,
-    );
-  }
-  const targets =
-    ctx.callResolution.targets.get(callId) ?? new Map<string, SymbolRef>();
-  targets.set(
-    instanceKey,
-    canonicalSymbolRefForTypingContext(fallbackSymbol, ctx),
-  );
-  ctx.callResolution.targets.set(callId, targets);
+  recordCallTarget({
+    callId,
+    target: canonicalSymbolRefForTypingContext(fallbackSymbol, ctx),
+    context: "intrinsic fallback call",
+    ctx,
+    state,
+  });
   ctx.callResolution.traitDispatches.delete(callId);
 
   const returnType = typeIntrinsicCall(
@@ -6655,12 +6534,6 @@ const typeOverloadedCall = (
       effectRow: ctx.effects.emptyRow,
     };
   }
-  const instanceKey = state.currentFunction?.instanceKey;
-  if (!instanceKey) {
-    throw new Error(
-      `missing function instance key for overload resolution at call ${call.id}`,
-    );
-  }
   if (traitDispatch) {
     ctx.callResolution.traitDispatches.add(call.id);
   } else {
@@ -6674,10 +6547,13 @@ const typeOverloadedCall = (
     context: "calling member",
   });
   const selectedRef = canonicalSymbolRefForTypingContext(selected.symbol, ctx);
-  const targets =
-    ctx.callResolution.targets.get(call.id) ?? new Map<string, SymbolRef>();
-  targets.set(instanceKey, selectedRef);
-  ctx.callResolution.targets.set(call.id, targets);
+  recordCallTarget({
+    callId: call.id,
+    target: selectedRef,
+    context: "overload call",
+    ctx,
+    state,
+  });
   const lambdaReturnSubstitution =
     inferLambdaReturnSubstitutionForCandidateCached({
       candidate: selected,
@@ -6980,20 +6856,14 @@ const inferLambdaReturnSubstitutionForCandidate = <
   state: TypingState;
 }): LambdaReturnInferenceResult => {
   const substitution = new Map<TypeParamId, TypeId>(
-    applyExplicitTypeArguments({
+    applyExplicitTypeArgumentSubstitution({
+      symbol: candidate.symbol,
       signature: candidate.signature,
       typeArguments,
-      calleeSymbol: candidate.symbol,
+      targetTypeArguments,
       ctx,
     }),
   );
-  buildTargetTypeArgumentSubstitution({
-    signature: candidate.signature,
-    typeArguments,
-    targetTypeArguments,
-    calleeSymbol: candidate.symbol,
-    ctx,
-  })?.forEach((value, key) => substitution.set(key, value));
   const lambdaArgIndexes = callArgs
     .map((arg, index) => ({ arg, index }))
     .filter(
@@ -7235,7 +7105,7 @@ const inlineLambdaArityScoreForCandidate = <
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
 }): { exactMatches: number; omittedParameters: number } | undefined => {
-  const params = specializeOverloadParametersWithTargetTypeArguments({
+  const params = specializeOverloadParameters({
     symbol: candidate.symbol,
     signature: candidate.signature,
     typeArguments,
@@ -7305,7 +7175,7 @@ const inlineLambdaCompatibility = <
   ctx: TypingContext;
   state: TypingState;
 }): InlineLambdaCompatibility => {
-  const params = specializeOverloadParametersWithTargetTypeArguments({
+  const params = specializeOverloadParameters({
     symbol: candidate.symbol,
     signature: candidate.signature,
     typeArguments,
@@ -7398,7 +7268,7 @@ const inlineLambdaExpectedTypeParamPenalty = <
   ctx: TypingContext;
   state: TypingState;
 }): number => {
-  const params = specializeOverloadParametersWithTargetTypeArguments({
+  const params = specializeOverloadParameters({
     symbol: candidate.symbol,
     signature: candidate.signature,
     typeArguments,

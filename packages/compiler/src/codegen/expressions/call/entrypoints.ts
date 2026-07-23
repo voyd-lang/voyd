@@ -23,10 +23,7 @@ import {
   compileIntrinsicCall,
 } from "../../intrinsics.js";
 import { effectsFacade } from "../../effects/facade.js";
-import {
-  getRequiredExprType,
-  substituteTypeForInstance,
-} from "../../types.js";
+import { getRequiredExprType, substituteTypeForInstance } from "../../types.js";
 import { compileCallArgumentsWithMetadata } from "./arguments.js";
 import { compileClosureCall, compileCurriedClosureCall } from "./closure.js";
 import { getFunctionMetadataForCall } from "./metadata.js";
@@ -60,10 +57,24 @@ export const compileCallExpr = (
 
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
   const expectTraitDispatch = callInfo.traitDispatch;
-
-  if (expr.staticTraitTarget && typeof expr.staticTraitSymbol === "number") {
-    return compileStaticTraitCall({
+  const compileResolvedTarget = ({
+    targetFunctionId,
+    traitDispatchEnabled = expectTraitDispatch,
+    missingTraitDispatchMessage,
+    inferImplTypeArgs = true,
+  }: {
+    targetFunctionId: ProgramSymbolId;
+    traitDispatchEnabled?: boolean;
+    missingTraitDispatchMessage: string;
+    inferImplTypeArgs?: boolean;
+  }): CompiledExpression => {
+    const targetRef = ctx.program.symbols.refOf(targetFunctionId);
+    return compileResolvedSymbolCall({
       expr,
+      symbol: targetRef.symbol,
+      moduleId: targetRef.moduleId,
+      traitDispatchEnabled,
+      missingTraitDispatchMessage,
       ctx,
       fnCtx,
       compileExpr,
@@ -72,6 +83,31 @@ export const compileCallExpr = (
       typeInstanceId,
       outResultStorageRef,
       scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
+      typeArgsOverride: inferImplTypeArgs
+        ? inferTraitImplTypeArgs({
+            expr,
+            implMethod: targetFunctionId,
+            ctx,
+            typeInstanceId,
+          })
+        : undefined,
+    });
+  };
+
+  if (expr.staticTraitTarget && typeof expr.staticTraitSymbol === "number") {
+    const targetFunctionId = resolveTargetFunctionId({
+      targets: callInfo.targets,
+      callInstanceId,
+      typeInstanceId,
+    });
+    if (typeof targetFunctionId !== "number") {
+      throw new Error("codegen missing resolved static trait method target");
+    }
+    return compileResolvedTarget({
+      targetFunctionId: targetFunctionId as ProgramSymbolId,
+      traitDispatchEnabled: false,
+      missingTraitDispatchMessage: "",
+      inferImplTypeArgs: false,
     });
   }
 
@@ -100,31 +136,10 @@ export const compileCallExpr = (
       throw new Error("codegen missing overload resolution for indirect call");
     }
 
-    const targetRef = ctx.program.symbols.refOf(
-      targetFunctionId as ProgramSymbolId,
-    );
-    const traitImplTypeArgs = inferTraitImplTypeArgs({
-      expr,
-      implMethod: targetFunctionId as ProgramSymbolId,
-      ctx,
-      typeInstanceId,
-    });
-    return compileResolvedSymbolCall({
-      expr,
-      symbol: targetRef.symbol,
-      moduleId: targetRef.moduleId,
-      traitDispatchEnabled: expectTraitDispatch,
+    return compileResolvedTarget({
+      targetFunctionId: targetFunctionId as ProgramSymbolId,
       missingTraitDispatchMessage:
         "codegen missing trait dispatch target for indirect call",
-      ctx,
-      fnCtx,
-      compileExpr,
-      tailPosition,
-      expectedResultTypeId,
-      typeInstanceId,
-      outResultStorageRef,
-      scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
-      typeArgsOverride: traitImplTypeArgs,
     });
   }
 
@@ -150,31 +165,10 @@ export const compileCallExpr = (
     });
 
     if (typeof targetFunctionId === "number") {
-      const targetRef = ctx.program.symbols.refOf(
-        targetFunctionId as ProgramSymbolId,
-      );
-      const traitImplTypeArgs = inferTraitImplTypeArgs({
-        expr,
-        implMethod: targetFunctionId as ProgramSymbolId,
-        ctx,
-        typeInstanceId,
-      });
-      return compileResolvedSymbolCall({
-        expr,
-        symbol: targetRef.symbol,
-        moduleId: targetRef.moduleId,
-        traitDispatchEnabled: expectTraitDispatch,
+      return compileResolvedTarget({
+        targetFunctionId: targetFunctionId as ProgramSymbolId,
         missingTraitDispatchMessage:
           "codegen missing trait dispatch target for call",
-        ctx,
-        fnCtx,
-        compileExpr,
-        tailPosition,
-        expectedResultTypeId,
-        typeInstanceId,
-        outResultStorageRef,
-        scalarAggregateResultTypeId: options.scalarAggregateResultTypeId,
-        typeArgsOverride: traitImplTypeArgs,
       });
     }
 
@@ -394,7 +388,10 @@ const concreteReceiverTypeForTraitCall = ({
   typeInstanceId: ProgramFunctionInstanceId | undefined;
 }): TypeId => {
   const receiverExpr = ctx.module.hir.expressions.get(receiverExprId);
-  if (typeof typeInstanceId === "number" && receiverExpr?.exprKind === "identifier") {
+  if (
+    typeof typeInstanceId === "number" &&
+    receiverExpr?.exprKind === "identifier"
+  ) {
     const instance = ctx.program.functions.getInstance(typeInstanceId);
     const signature = ctx.program.functions.getSignature(
       instance.symbolRef.moduleId,
@@ -600,20 +597,16 @@ const resolveConcreteTraitMethodTarget = ({
       : receiverType;
   const mapping =
     ctx.program.traits.getTraitMethodImpl(selectedMethod) ??
-    ctx.program.traits
-      .getImplTemplates()
-      .flatMap((template) =>
-        template.methods.some(
-          (method) => method.traitMethod === selectedMethod,
-        )
-          ? [
-              {
-                traitSymbol: template.traitSymbol,
-                traitMethodSymbol: selectedMethod,
-              },
-            ]
-          : [],
-      )[0];
+    ctx.program.traits.getImplTemplates().flatMap((template) =>
+      template.methods.some((method) => method.traitMethod === selectedMethod)
+        ? [
+            {
+              traitSymbol: template.traitSymbol,
+              traitMethodSymbol: selectedMethod,
+            },
+          ]
+        : [],
+    )[0];
   if (!mapping) {
     return undefined;
   }
@@ -627,11 +620,15 @@ const resolveConcreteTraitMethodTarget = ({
     if (!method) {
       return [];
     }
-    const match = ctx.program.types.unify(dispatchReceiverType, template.target, {
-      location: expr.ast,
-      reason: "concrete trait method dispatch",
-      variance: "invariant",
-    });
+    const match = ctx.program.types.unify(
+      dispatchReceiverType,
+      template.target,
+      {
+        location: expr.ast,
+        reason: "concrete trait method dispatch",
+        variance: "invariant",
+      },
+    );
     return match.ok ? [method.implMethod] : [];
   });
   const uniqueMatches = Array.from(new Set(matches));
@@ -711,59 +708,6 @@ const receiverSpecializedMetaForCall = ({
       exactParameterTypes,
     }) ?? meta
   );
-};
-
-const compileStaticTraitCall = ({
-  expr,
-  ctx,
-  fnCtx,
-  compileExpr,
-  tailPosition,
-  expectedResultTypeId,
-  typeInstanceId,
-  outResultStorageRef,
-  scalarAggregateResultTypeId,
-}: {
-  expr: HirCallExpr;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-  compileExpr: ExpressionCompiler;
-  tailPosition: boolean;
-  expectedResultTypeId?: TypeId;
-  typeInstanceId?: ProgramFunctionInstanceId;
-  outResultStorageRef?: CompileCallOptions["outResultStorageRef"];
-  scalarAggregateResultTypeId?: TypeId;
-}): CompiledExpression => {
-  if (!expr.staticTraitTarget || typeof expr.staticTraitSymbol !== "number") {
-    throw new Error("codegen expected static trait dispatch metadata");
-  }
-  const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
-  const targetFunctionId = resolveTargetFunctionId({
-    targets: callInfo.targets,
-    callInstanceId: fnCtx.instanceId ?? typeInstanceId,
-    typeInstanceId,
-  });
-  if (typeof targetFunctionId !== "number") {
-    throw new Error("codegen missing resolved static trait method target");
-  }
-  const targetRef = ctx.program.symbols.refOf(
-    targetFunctionId as ProgramSymbolId,
-  );
-  return compileResolvedSymbolCall({
-    expr,
-    symbol: targetRef.symbol,
-    moduleId: targetRef.moduleId,
-    traitDispatchEnabled: false,
-    missingTraitDispatchMessage: "",
-    ctx,
-    fnCtx,
-    compileExpr,
-    tailPosition,
-    expectedResultTypeId,
-    typeInstanceId,
-    outResultStorageRef,
-    scalarAggregateResultTypeId,
-  });
 };
 
 const compileResolvedSymbolCall = ({

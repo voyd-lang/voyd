@@ -252,12 +252,14 @@ export const signatureCallShapeCouldMatch = ({
   }
 
   const params = publicCallParametersForShape(signature);
-  return callShapeCouldMatch({
-    args,
-    params,
-    ctx,
-    state,
-  }) && positionalArgumentTypesCouldMatch({ args, params, ctx, state });
+  return (
+    callShapeCouldMatch({
+      args,
+      params,
+      ctx,
+      state,
+    }) && positionalArgumentTypesCouldMatch({ args, params, ctx, state })
+  );
 };
 
 // Reject only direct argument/parameter pairs whose fully concrete types are
@@ -531,15 +533,47 @@ export const applyExplicitTypeArgumentSubstitution = ({
   targetTypeArguments?: readonly TypeId[];
   ctx: TypingContext;
 }) =>
-  signature.typeParams && signature.typeParams.length > 0
-    ? mergeTypeArgumentSubstitutions({
-        signature,
-        typeArguments,
-        targetTypeArguments,
-        calleeSymbol: symbol,
-        ctx,
-      })
-    : undefined;
+  mergeTypeArgumentSubstitutions({
+    signature,
+    typeArguments,
+    targetTypeArguments,
+    calleeSymbol: symbol,
+    ctx,
+  });
+
+export const applyTargetTypeArguments = ({
+  signature,
+  typeArguments,
+  targetTypeArguments,
+  calleeSymbol,
+  ctx,
+}: {
+  signature: FunctionSignature;
+  typeArguments: readonly TypeId[] | undefined;
+  targetTypeArguments: readonly TypeId[] | undefined;
+  calleeSymbol: SymbolId;
+  ctx: TypingContext;
+}): ReadonlyMap<TypeParamId, TypeId> | undefined => {
+  if (!targetTypeArguments || targetTypeArguments.length === 0) {
+    return undefined;
+  }
+  const params = signature.typeParams ?? [];
+  if (
+    (typeArguments?.length ?? 0) + targetTypeArguments.length >
+    params.length
+  ) {
+    throw new Error(
+      `function ${getSymbolName(calleeSymbol, ctx)} received too many type arguments`,
+    );
+  }
+  const start = params.length - targetTypeArguments.length;
+  return new Map(
+    targetTypeArguments.map((argument, index) => [
+      params[start + index]!.typeParam,
+      argument,
+    ]),
+  );
+};
 
 const mergeTypeArgumentSubstitutions = ({
   signature,
@@ -554,35 +588,27 @@ const mergeTypeArgumentSubstitutions = ({
   calleeSymbol: SymbolId;
   ctx: TypingContext;
 }): ReadonlyMap<TypeParamId, TypeId> | undefined => {
-  const explicit = applyExplicitTypeArguments({
+  const explicit =
+    signature.typeParams && signature.typeParams.length > 0
+      ? applyExplicitTypeArguments({
+          signature,
+          typeArguments,
+          calleeSymbol,
+          ctx,
+        })
+      : undefined;
+  const target = applyTargetTypeArguments({
     signature,
     typeArguments,
+    targetTypeArguments,
     calleeSymbol,
     ctx,
   });
-  if (!targetTypeArguments || targetTypeArguments.length === 0) {
+  if (!target) {
     return explicit;
   }
-
-  const params = signature.typeParams ?? [];
-  const explicitCount = typeArguments?.length ?? 0;
-  const totalCount = explicitCount + targetTypeArguments.length;
-  if (totalCount > params.length) {
-    throw new Error(
-      `function ${getSymbolName(calleeSymbol, ctx)} received too many type arguments`,
-    );
-  }
-
-  const start = params.length - targetTypeArguments.length;
-  const target = new Map<TypeParamId, TypeId>();
-  targetTypeArguments.forEach((arg, index) => {
-    const param = params[start + index];
-    if (param) {
-      target.set(param.typeParam, arg);
-    }
-  });
   if (!explicit || explicit.size === 0) {
-    return target.size > 0 ? target : undefined;
+    return target;
   }
   const merged = new Map<TypeParamId, TypeId>(explicit);
   target.forEach((value, key) => merged.set(key, value));
