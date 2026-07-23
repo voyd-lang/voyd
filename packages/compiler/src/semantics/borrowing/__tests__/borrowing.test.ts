@@ -19,7 +19,12 @@ const analyze = (source: string) => {
     !source.includes('@intrinsic_type(type: "voyd.std.shared-cell")') &&
     !source.includes("__array_set(") &&
     !source.includes("__array_copy(") &&
-    !source.includes("__array_get(")
+    !source.includes("__array_get(") &&
+    !source.includes("__retain_callback") &&
+    !source.includes("__boundary_retain_callback") &&
+    !source.includes("__render_retain_callback") &&
+    !source.includes("__task_spawn") &&
+    !source.includes("__task_detach")
   ) {
     return semanticsPipeline(ast);
   }
@@ -1222,6 +1227,76 @@ fn invalid(~value: Box) -> i32
     );
   });
 
+  it("publishes retained callback contracts for generic task wrappers", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}task.voyd`]: `
+pub obj Task<T> {
+  api id: i32
+}
+
+@effect(id: "voyd.std.borrowing_test.task")
+pub eff TaskRuntime
+  wait(resume, id: i32) -> i32
+
+@intrinsic(name: "__task_spawn")
+fn spawn_id<T>(work: fn() : (open) -> T): (open) -> i32
+  __task_spawn(work)
+
+pub fn spawn<T>(work: fn() : (open) -> T): (TaskRuntime, open) -> Task<T>
+  Task<T> { id: spawn_id(work) }
+
+pub fn spawn_tuple<T>(
+  work: fn() : (open) -> T
+): (TaskRuntime, open) -> (i32, i32)
+  (spawn_id(work), 0)
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::task::{ spawn }
+
+obj Box { value: i32 }
+
+fn mutate(~box: Box) -> void
+  box.value = box.value + 1
+
+pub fn invalid(): (open) -> void
+  let ~box = Box { value: 0 }
+  let work = () => box.value
+  let _ = spawn(work)
+  mutate(~box)
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const spawnExport = analyzed.semantics
+      .get("std::task")
+      ?.exports.get("spawn");
+    const spawnContract = spawnExport?.borrowing?.find(
+      (entry) => entry.symbol === spawnExport.symbol,
+    )?.contract;
+    const tupleExport = analyzed.semantics
+      .get("std::task")
+      ?.exports.get("spawn_tuple");
+    const tupleContract = tupleExport?.borrowing?.find(
+      (entry) => entry.symbol === tupleExport.symbol,
+    )?.contract;
+
+    expect(spawnContract?.parameters[0]?.retained).toBe(true);
+    expect(tupleContract?.parameters[0]?.retained).toBe(true);
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "TY0049",
+    );
+  });
+
   it("widens recursive returned projections to a conservative root", () => {
     const result = analyze(`
 obj Box { value: i32 }
@@ -1383,6 +1458,98 @@ fn make() -> Callback
   () =>
     value = value + 1
     value
+`),
+    ).toContain("TY0049");
+  });
+
+  it("rejects mutable captures retained by callback intrinsics", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+@intrinsic(name: "__render_retain_callback", uses_signature: true)
+fn retain_callback(handler: fn() -> i32) -> i32
+  0
+
+fn invalid() -> void
+  let ~box = Box { value: 0 }
+  let callback = () => box.value
+  let _ = retain_callback(callback)
+  mutate(~box)
+`),
+    ).toContain("TY0049");
+  });
+
+  it("propagates retained callbacks through public wrappers", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+@intrinsic(name: "__retain_callback", uses_signature: true)
+fn retain_callback_id(handler: fn() -> i32) -> i32
+  0
+
+pub fn retain_callback(handler: fn() -> i32) -> i32
+  retain_callback_id(handler)
+
+fn invalid() -> void
+  let ~box = Box { value: 0 }
+  let callback = () => box.value
+  let _ = retain_callback(callback)
+  mutate(~box)
+`),
+    ).toContain("TY0049");
+  });
+
+  it.each(["__task_spawn", "__task_detach"])(
+    "rejects mutable captures retained by %s",
+    (intrinsicName) => {
+      expect(
+        diagnosticCodes(`${prelude}
+@intrinsic(name: "${intrinsicName}", uses_signature: true)
+fn retain_work(work: fn() -> i32) -> i32
+  0
+
+fn invalid() -> void
+  let ~box = Box { value: 0 }
+  let work = () => box.value
+  let _ = retain_work(work)
+  mutate(~box)
+`),
+      ).toContain("TY0049");
+    },
+  );
+
+  it("propagates task retention through spawn wrappers", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+@intrinsic(name: "__task_spawn", uses_signature: true)
+fn spawn_id(work: fn() : (open) -> i32): (open) -> i32
+  __task_spawn(work)
+
+pub fn spawn(work: fn() : (open) -> i32): (open) -> i32
+  spawn_id(work)
+
+fn invalid(): (open) -> void
+  let ~box = Box { value: 0 }
+  let work = () => box.value
+  let _ = spawn(work)
+  mutate(~box)
+`),
+    ).toContain("TY0049");
+  });
+
+  it("propagates task retention through generic spawn wrappers", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+@intrinsic(name: "__task_spawn", uses_signature: true)
+fn spawn_id<T>(work: fn() : (open) -> T): (open) -> i32
+  __task_spawn(work)
+
+pub fn spawn<T>(work: fn() : (open) -> T): (open) -> i32
+  spawn_id(work)
+
+fn invalid(): (open) -> void
+  let ~box = Box { value: 0 }
+  let work = () => box.value
+  let _ = spawn(work)
+  mutate(~box)
 `),
     ).toContain("TY0049");
   });

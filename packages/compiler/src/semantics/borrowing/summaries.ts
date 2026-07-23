@@ -1334,22 +1334,20 @@ const evaluateExpression = (
         : emptyFlow();
     case "tuple":
       return unionFlows(
-        ...expr.elements.map((element, index) =>
-          !expressionCanCarryReference(element, ctx)
-            ? emptyFlow()
-            : storeFlowAt(evaluateExpression(element, env, ctx), {
-                kind: "tuple",
-                index,
-              }),
-        ),
+        ...expr.elements.map((element, index) => {
+          const flow = evaluateExpression(element, env, ctx);
+          return expressionCanCarryReference(element, ctx)
+            ? storeFlowAt(flow, { kind: "tuple", index })
+            : emptyFlow();
+        }),
       );
     case "object-literal":
       return unionFlows(
         ...expr.entries.map((entry) => {
+          const flow = evaluateExpression(entry.value, env, ctx);
           if (!expressionCanCarryReference(entry.value, ctx)) {
             return emptyFlow();
           }
-          const flow = evaluateExpression(entry.value, env, ctx);
           return entry.kind === "field"
             ? storeFlowAt(flow, { kind: "field", name: entry.name })
             : flow;

@@ -260,7 +260,15 @@ const conservativeContractForArguments = (
   };
 };
 
-const storageIntrinsicContract = ({
+const RETAINING_INTRINSICS = new Set([
+  "__retain_callback",
+  "__boundary_retain_callback",
+  "__render_retain_callback",
+  "__task_spawn",
+  "__task_detach",
+]);
+
+const intrinsicBorrowContract = ({
   name,
   argumentCount,
   returnsReference,
@@ -269,6 +277,19 @@ const storageIntrinsicContract = ({
   argumentCount: number;
   returnsReference: boolean;
 }): CallableBorrowContract | undefined => {
+  if (RETAINING_INTRINSICS.has(name) && argumentCount === 1) {
+    return {
+      parameters: [
+        {
+          access: "shared",
+          retained: true,
+          returned: false,
+          externalRetainedPaths: [[]],
+        },
+      ],
+      maySuspend: false,
+    };
+  }
   if (name === "__array_get" && argumentCount === 2) {
     return {
       parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
@@ -820,7 +841,7 @@ export const resolveBorrowCall = (
       const metadata = record.metadata as
         | { intrinsicName?: string }
         | undefined;
-      const contract = storageIntrinsicContract({
+      const contract = intrinsicBorrowContract({
         name: metadata?.intrinsicName ?? record.name,
         argumentCount:
           typedArguments.arguments?.length ?? rawArgumentsFor(expr).length,
@@ -871,7 +892,7 @@ export const resolveBorrowCall = (
   const intrinsicName = intrinsicNameForCall(expr, ctx);
   const intrinsicContract =
     typeof intrinsicName === "string"
-      ? storageIntrinsicContract({
+      ? intrinsicBorrowContract({
           name: intrinsicName,
           argumentCount:
             typedArguments.arguments?.length ?? rawArgumentsFor(expr).length,
@@ -884,20 +905,22 @@ export const resolveBorrowCall = (
     (!isIntrinsicCall(expr, ctx)
       ? conservativeContractForArguments(expr, [], ctx)
       : undefined);
-  const mergedContract = typedArguments.ambiguous
-    ? conservativeContractForArguments(
-        expr,
-        targets,
-        ctx,
-        targets.some((target) => targetIsEffectOperation(target, ctx)),
-      )
-    : mergeCallableBorrowContracts(
-        targets.length > 0
-          ? contracts
-          : unresolvedContract
-            ? [unresolvedContract]
-            : [],
-      );
+  const mergedContract = intrinsicContract
+    ? intrinsicContract
+    : typedArguments.ambiguous
+      ? conservativeContractForArguments(
+          expr,
+          targets,
+          ctx,
+          targets.some((target) => targetIsEffectOperation(target, ctx)),
+        )
+      : mergeCallableBorrowContracts(
+          targets.length > 0
+            ? contracts
+            : unresolvedContract
+              ? [unresolvedContract]
+              : [],
+        );
   const arguments_ =
     typedArguments.arguments ??
     (targets.length === 0 || direct
