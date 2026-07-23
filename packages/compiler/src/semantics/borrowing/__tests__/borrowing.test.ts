@@ -687,6 +687,20 @@ fn valid(~left: Box, ~right: Box) -> i32
     ).not.toThrow();
   });
 
+  it("does not borrow through unused shared parameters", () => {
+    expect(() =>
+      analyze(`${prelude}
+fn ignore(value: Box) -> void
+  void
+
+fn valid(~value: Box) -> void
+  let alias = value
+  mutate(~value)
+  ignore(alias)
+`),
+    ).not.toThrow();
+  });
+
   it("rejects mutation after a helper retains an array-element borrow", () => {
     expect(
       diagnosticCodes(`

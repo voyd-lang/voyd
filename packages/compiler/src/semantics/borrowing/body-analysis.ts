@@ -790,6 +790,9 @@ function recordExpressionUse(
   paths: readonly (readonly PlaceProjection[])[] | undefined,
   ctx: BodyContext,
 ): void {
+  if (paths?.length === 0) {
+    return;
+  }
   const symbol = baseSymbolOf(exprId, ctx);
   if (typeof symbol !== "number") {
     return;
