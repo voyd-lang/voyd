@@ -35,12 +35,9 @@ const resolvedTypeFor = (
   preferSymbolic = false,
 ): number | undefined => {
   const concrete =
-    typing.resolvedExprTypes.get(exprId) ??
-    typing.table.getExprType(exprId);
+    typing.resolvedExprTypes.get(exprId) ?? typing.table.getExprType(exprId);
   const symbolic = typing.borrowResolvedExprTypes.get(exprId);
-  const direct = preferSymbolic
-    ? (symbolic ?? concrete)
-    : concrete;
+  const direct = preferSymbolic ? (symbolic ?? concrete) : concrete;
   if (typeof direct === "number") {
     return direct;
   }
@@ -51,9 +48,8 @@ const resolvedTypeFor = (
     return typeof type === "number" ? [type] : [];
   });
   const instantiatedType =
-    instantiated.find((type) =>
-      typeCanCarryReference(type, typing),
-    ) ?? instantiated[0];
+    instantiated.find((type) => typeCanCarryReference(type, typing)) ??
+    instantiated[0];
   return instantiatedType ?? symbolic;
 };
 
@@ -61,10 +57,7 @@ const conservativeContractFor = (
   signature: BorrowCallSignature,
   typing: TypingResult,
 ): CallableBorrowContract => {
-  const returnsReference = typeCanCarryReference(
-    signature.returnType,
-    typing,
-  );
+  const returnsReference = typeCanCarryReference(signature.returnType, typing);
   return {
     parameters: signature.parameters.map((parameter) => {
       const reference = typeCanCarryReference(parameter.type, typing);
@@ -125,10 +118,7 @@ const opaqueCallableFor = (
   };
 };
 
-const isIntrinsicCall = (
-  expr: HirExpression,
-  ctx: ResolveContext,
-): boolean => {
+const isIntrinsicCall = (expr: HirExpression, ctx: ResolveContext): boolean => {
   if (expr.exprKind !== "call") {
     return false;
   }
@@ -137,10 +127,11 @@ const isIntrinsicCall = (
     return false;
   }
   return (
-    (ctx.symbolTable.getSymbol(callee.symbol).metadata as
-      | { intrinsic?: boolean }
-      | undefined)?.intrinsic === true &&
-    !ctx.decls.getEffectOperation(callee.symbol)
+    (
+      ctx.symbolTable.getSymbol(callee.symbol).metadata as
+        | { intrinsic?: boolean }
+        | undefined
+    )?.intrinsic === true && !ctx.decls.getEffectOperation(callee.symbol)
   );
 };
 
@@ -200,10 +191,7 @@ const isExplicitMutableBorrow = (
   );
 };
 
-const targetMaySuspend = (
-  target: SymbolRef,
-  ctx: ResolveContext,
-): boolean => {
+const targetMaySuspend = (target: SymbolRef, ctx: ResolveContext): boolean => {
   if (target.moduleId === ctx.moduleId) {
     return (
       ctx.decls.getEffectOperation(target.symbol)?.operation.resumable ===
@@ -211,9 +199,8 @@ const targetMaySuspend = (
     );
   }
   return (
-    ctx.dependencies
-      .get(target.moduleId)
-      ?.effectOperations.get(target.symbol)?.maySuspend === true
+    ctx.dependencies.get(target.moduleId)?.effectOperations.get(target.symbol)
+      ?.maySuspend === true
   );
 };
 
@@ -239,8 +226,7 @@ const conservativeContractForArguments = (
       }
       const type = resolvedTypeFor(actual, ctx.typing, preferSymbolic);
       const reference =
-        typeof type !== "number" ||
-        typeCanCarryReference(type, ctx.typing);
+        typeof type !== "number" || typeCanCarryReference(type, ctx.typing);
       return {
         access: isExplicitMutableBorrow(actual, ctx)
           ? "mutable"
@@ -262,14 +248,52 @@ const storageIntrinsicContract = ({
   name: string;
   argumentCount: number;
 }): CallableBorrowContract | undefined => {
+  if (name === "__array_copy" && argumentCount === 2) {
+    return {
+      parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
+        access: index === 0 ? "shared" : "owned",
+        retained: false,
+        returned: index === 0,
+      })),
+      transfers: [
+        {
+          sourceParameter: 1,
+          destinationParameter: 0,
+          sourcePath: [
+            { kind: "field", name: "from" },
+            { kind: "index", stable: false },
+          ],
+          destinationPath: [{ kind: "index", stable: false }],
+        },
+      ],
+      maySuspend: false,
+    };
+  }
+  if (name === "__array_copy" && argumentCount === 5) {
+    return {
+      parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
+        access: index === 0 || index === 2 ? "shared" : "owned",
+        retained: false,
+        returned: index === 0,
+      })),
+      transfers: [
+        {
+          sourceParameter: 2,
+          destinationParameter: 0,
+          sourcePath: [{ kind: "index", stable: false }],
+          destinationPath: [{ kind: "index", stable: false }],
+        },
+      ],
+      maySuspend: false,
+    };
+  }
   const storedValueIndex = name === "__array_set" ? 2 : undefined;
   if (typeof storedValueIndex !== "number") {
     return undefined;
   }
   return {
     parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
-      access:
-        index === 0 || index === storedValueIndex ? "shared" : "owned",
+      access: index === 0 || index === storedValueIndex ? "shared" : "owned",
       retained: index === storedValueIndex,
       returned: index === 0 || index === storedValueIndex,
     })),
@@ -282,12 +306,8 @@ const uniqueTargets = (
   typing: TypingResult,
   preferSymbolic: boolean,
 ): readonly SymbolRef[] => {
-  const concrete = [
-    ...(typing.callTargets.get(exprId)?.values() ?? []),
-  ];
-  const symbolic = [
-    ...(typing.borrowCallTargets.get(exprId)?.values() ?? []),
-  ];
+  const concrete = [...(typing.callTargets.get(exprId)?.values() ?? [])];
+  const symbolic = [...(typing.borrowCallTargets.get(exprId)?.values() ?? [])];
   const targets = preferSymbolic
     ? [...symbolic, ...concrete]
     : concrete.length > 0
@@ -298,10 +318,7 @@ const uniqueTargets = (
   }
   return Array.from(
     new Map<string, SymbolRef>(
-      targets.map((target) => [
-        `${target.moduleId}:${target.symbol}`,
-        target,
-      ]),
+      targets.map((target) => [`${target.moduleId}:${target.symbol}`, target]),
     ).values(),
   );
 };
@@ -350,9 +367,8 @@ export const expressionTypeFor = (
     }
     const imported = ctx.imports.get(callee.symbol);
     return imported
-      ? ctx.dependencies
-          .get(imported.moduleId)
-          ?.callables.get(imported.symbol)?.signature?.returnType
+      ? ctx.dependencies.get(imported.moduleId)?.callables.get(imported.symbol)
+          ?.signature?.returnType
       : ctx.typing.functions.getSignature(callee.symbol)?.returnType;
   }
   return undefined;
@@ -384,10 +400,7 @@ const directTarget = (
 const alignExplicitArguments = (
   args: readonly { label?: string; expr: HirExprId }[],
   signature:
-    | Pick<
-        FunctionSignature,
-        "parameters" | "returnType" | "effectRow"
-      >
+    | Pick<FunctionSignature, "parameters" | "returnType" | "effectRow">
     | undefined,
   offset: number,
 ): (HirExprId | undefined)[] => {
@@ -420,17 +433,11 @@ const alignExplicitArguments = (
 const argumentsFor = (
   expr: HirExpression,
   signature:
-    | Pick<
-        FunctionSignature,
-        "parameters" | "returnType" | "effectRow"
-      >
+    | Pick<FunctionSignature, "parameters" | "returnType" | "effectRow">
     | undefined,
 ): readonly (HirExprId | undefined)[] => {
   if (expr.exprKind === "method-call") {
-    return [
-      expr.target,
-      ...alignExplicitArguments(expr.args, signature, 1),
-    ];
+    return [expr.target, ...alignExplicitArguments(expr.args, signature, 1)];
   }
   if (expr.exprKind === "call") {
     return alignExplicitArguments(expr.args, signature, 0);
@@ -438,9 +445,7 @@ const argumentsFor = (
   return [];
 };
 
-const rawArgumentsFor = (
-  expr: HirExpression,
-): readonly HirExprId[] =>
+const rawArgumentsFor = (expr: HirExpression): readonly HirExprId[] =>
   expr.exprKind === "method-call"
     ? [expr.target, ...expr.args.map((argument) => argument.expr)]
     : expr.exprKind === "call"
@@ -469,8 +474,7 @@ const argumentsFromPlan = (
       return (
         containerExpr.entries.find(
           (candidate) =>
-            candidate.kind === "field" &&
-            candidate.name === entry.fieldName,
+            candidate.kind === "field" && candidate.name === entry.fieldName,
         )?.value ?? container
       );
     }
@@ -487,9 +491,7 @@ const typedArgumentsFor = (
   arguments?: readonly (HirExprId | undefined)[];
   ambiguous: boolean;
 } => {
-  const concrete = [
-    ...(typing.callArgumentPlans.get(expr.id)?.values() ?? []),
-  ];
+  const concrete = [...(typing.callArgumentPlans.get(expr.id)?.values() ?? [])];
   const symbolic = [
     ...(typing.borrowCallArgumentPlans.get(expr.id)?.values() ?? []),
   ];
@@ -498,9 +500,7 @@ const typedArgumentsFor = (
     : concrete.length > 0
       ? concrete
       : symbolic;
-  const plans = selected.map((plan) =>
-    argumentsFromPlan(expr, plan, hir),
-  );
+  const plans = selected.map((plan) => argumentsFromPlan(expr, plan, hir));
   if (plans.length === 0) {
     return { ambiguous: false };
   }
@@ -518,17 +518,9 @@ export const resolveBorrowCall = (
   ctx: ResolveContext,
 ): ResolvedBorrowCall => {
   const preferSymbolic = ctx.borrowIndexMode === "symbolic";
-  const resolved = uniqueTargets(
-    expr.id,
-    ctx.typing,
-    preferSymbolic,
-  );
-  const direct =
-    resolved.length === 0 ? directTarget(expr, ctx) : undefined;
-  const inferred =
-    resolved.length === 0
-      ? [...(direct ? [direct] : [])]
-      : [];
+  const resolved = uniqueTargets(expr.id, ctx.typing, preferSymbolic);
+  const direct = resolved.length === 0 ? directTarget(expr, ctx) : undefined;
+  const inferred = resolved.length === 0 ? [...(direct ? [direct] : [])] : [];
   const targets = resolved.length > 0 ? resolved : inferred;
   const entries = targets.map((target) => {
     if (target.moduleId === ctx.moduleId) {
@@ -560,9 +552,11 @@ export const resolveBorrowCall = (
     }
     const intrinsic =
       entry.target.moduleId === ctx.moduleId &&
-      ((ctx.symbolTable.getSymbol(entry.target.symbol).metadata as
-        | { intrinsic?: boolean }
-        | undefined)?.intrinsic === true) &&
+      (
+        ctx.symbolTable.getSymbol(entry.target.symbol).metadata as
+          | { intrinsic?: boolean }
+          | undefined
+      )?.intrinsic === true &&
       !ctx.decls.getEffectOperation(entry.target.symbol);
     if (intrinsic) {
       const record = ctx.symbolTable.getSymbol(entry.target.symbol);
@@ -613,8 +607,7 @@ export const resolveBorrowCall = (
       ? storageIntrinsicContract({
           name: intrinsicName,
           argumentCount:
-            typedArguments.arguments?.length ??
-            rawArgumentsFor(expr).length,
+            typedArguments.arguments?.length ?? rawArgumentsFor(expr).length,
         })
       : undefined;
   const unresolvedContract =

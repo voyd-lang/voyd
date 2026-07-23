@@ -222,6 +222,23 @@ const baseSymbolOf = (
   return undefined;
 };
 
+const transferDestinationIsLocal = (
+  exprId: HirExprId,
+  ctx: BodyContext,
+): boolean => {
+  const symbol = baseSymbolOf(exprId, ctx);
+  if (typeof symbol !== "number") {
+    return false;
+  }
+  const place = ctx.places.get(symbol);
+  const root = place?.root ?? symbol;
+  if (ctx.parameterSymbols.has(root)) {
+    return false;
+  }
+  const record = ctx.symbolTable.getSymbol(root);
+  return ctx.symbolTable.getScope(record.scope).kind !== "module";
+};
+
 const isSharedCellValueExpression = (
   exprId: HirExprId,
   ctx: Pick<BodyContext, "hir" | "symbolTable">,
@@ -539,6 +556,67 @@ const returnedPlacesForCall = (
       });
     }) ?? [],
   );
+
+const expressionReturnsDetachedSharedValue = (
+  exprId: HirExprId,
+  ctx: BodyContext,
+): boolean => {
+  const expr = ctx.hir.expressions.get(exprId);
+  if (!expr) {
+    return false;
+  }
+  if (expr.exprKind === "call" || expr.exprKind === "method-call") {
+    const returnedParameters =
+      targetInfo(expr, ctx).contract?.parameters.filter(
+        (parameter) => parameter.returned,
+      ) ?? [];
+    return (
+      returnedParameters.length > 0 &&
+      returnedParameters.every((parameter) => {
+        const returnedOrigins =
+          parameter.returnedOrigins ??
+          (parameter.returnedPaths ?? [[]]).map((source) => ({
+            source,
+            result: [],
+          }));
+        return (
+          returnedOrigins.length > 0 &&
+          returnedOrigins.every(
+            (origin) =>
+              parameter.returnedSharedOrigins?.some(
+                (shared) =>
+                  JSON.stringify(shared) === JSON.stringify(origin),
+              ) === true,
+          )
+        );
+      })
+    );
+  }
+  if (expr.exprKind === "block" && typeof expr.value === "number") {
+    return expressionReturnsDetachedSharedValue(expr.value, ctx);
+  }
+  if (expr.exprKind === "if" || expr.exprKind === "cond") {
+    const values = [
+      ...expr.branches.map((branch) => branch.value),
+      ...(typeof expr.defaultBranch === "number"
+        ? [expr.defaultBranch]
+        : []),
+    ];
+    return (
+      values.length > 0 &&
+      values.every((value) => expressionReturnsDetachedSharedValue(value, ctx))
+    );
+  }
+  if (expr.exprKind === "match") {
+    return (
+      expr.arms.length > 0 &&
+      expr.arms.every((arm) =>
+        expressionReturnsDetachedSharedValue(arm.value, ctx),
+      )
+    );
+  }
+  return false;
+};
 
 const translateResultProjection = ({
   result,
@@ -872,27 +950,76 @@ const aggregateOriginsOfExpression = (
   }
   if (expr?.exprKind === "call" || expr?.exprKind === "method-call") {
     const info = targetInfo(expr, ctx);
-    return uniqueAggregateOrigins(
-      info.contract?.parameters.flatMap((parameter, index) => {
-        const actual = info.arguments[index];
-        if (typeof actual !== "number" || !parameter.returnedOrigins) {
+    const returned = info.contract?.parameters.flatMap((parameter, index) => {
+      const actual = info.arguments[index];
+      if (typeof actual !== "number" || !parameter.returnedOrigins) {
+        return [];
+      }
+      return parameter.returnedOrigins.flatMap((origin) => {
+        if (origin.result.length === 0) {
           return [];
         }
-        return parameter.returnedOrigins.flatMap((origin) => {
-          if (origin.result.length === 0) {
-            return [];
-          }
-          return placesAtProjection(
-            actual,
-            origin.source,
-            ctx,
-            new Set(seen),
-          ).map((place) => ({
-            place,
-            resultProjections: origin.result,
-          }));
-        });
-      }) ?? [],
+        return placesAtProjection(
+          actual,
+          origin.source,
+          ctx,
+          new Set(seen),
+        ).map((place) => ({
+          place,
+          resultProjections: origin.result,
+        }));
+      });
+    });
+    const transferred = info.contract?.transfers?.flatMap((transfer) => {
+      const actual = info.arguments[transfer.sourceParameter];
+      const destination =
+        info.contract?.parameters[transfer.destinationParameter];
+      if (typeof actual !== "number" || !destination?.returned) {
+        return [];
+      }
+      const destinationPath = transfer.destinationPath ?? [];
+      const returnedOrigins =
+        destination.returnedOrigins &&
+        destination.returnedOrigins.length > 0
+          ? destination.returnedOrigins
+          : (
+              destination.returnedPaths &&
+              destination.returnedPaths.length > 0
+                ? destination.returnedPaths
+                : [[]]
+            ).map((source) => ({ source, result: [] }));
+      const resultPaths = returnedOrigins.flatMap((origin) => {
+        if (
+          origin.source.length > destinationPath.length ||
+          !origin.source.every(
+            (projection, index) =>
+              JSON.stringify(projection) ===
+              JSON.stringify(destinationPath[index]),
+          )
+        ) {
+          return [];
+        }
+        return [
+          [
+            ...origin.result,
+            ...destinationPath.slice(origin.source.length),
+          ],
+        ];
+      });
+      return placesAtProjection(
+        actual,
+        transfer.sourcePath ?? [],
+        ctx,
+        new Set(seen),
+      ).flatMap((place) =>
+        resultPaths.map((resultProjections) => ({
+          place,
+          resultProjections,
+        })),
+      );
+    });
+    return uniqueAggregateOrigins(
+      [...(returned ?? []), ...(transferred ?? [])],
     );
   }
   if (expr?.exprKind === "identifier") {
@@ -979,7 +1106,8 @@ const placesStoredByExpression = (
 ): readonly BorrowPlace[] => {
   if (
     isAggregateExpression(exprId, ctx) ||
-    isSharedCellValueExpression(exprId, ctx)
+    isSharedCellValueExpression(exprId, ctx) ||
+    aggregateContentsPlaces(exprId, ctx).length > 0
   ) {
     return [];
   }
@@ -1000,6 +1128,13 @@ const isAggregateExpression = (
   const expr = ctx.hir.expressions.get(exprId);
   if (expr?.exprKind === "tuple" || expr?.exprKind === "object-literal") {
     return true;
+  }
+  if (expr?.exprKind === "call" || expr?.exprKind === "method-call") {
+    return (
+      targetInfo(expr, ctx).contract?.parameters.some((parameter) =>
+        parameter.returnedOrigins?.some((origin) => origin.result.length > 0),
+      ) === true
+    );
   }
   if (expr?.exprKind === "identifier") {
     const event = ctx.events.get(expr.id);
@@ -1037,16 +1172,6 @@ const isAggregateExpression = (
       expr.arms.every((arm) =>
         isAggregateExpression(arm.value, ctx, new Set(seen)),
       )
-    );
-  }
-  if (expr?.exprKind === "call" || expr?.exprKind === "method-call") {
-    return (
-      targetInfo(expr, ctx).contract?.parameters.some(
-        (parameter) =>
-          parameter.returnedOrigins?.some(
-            (origin) => origin.result.length > 0,
-          ) === true,
-      ) === true
     );
   }
   return false;
@@ -1536,14 +1661,22 @@ const scanExpression = (
             ctx,
           );
           const event = eventFor(statement.span, scan, ctx);
-          const sources = placesStoredByExpression(statement.initializer, ctx);
+          const returnsDetachedSharedValue =
+            expressionReturnsDetachedSharedValue(
+              statement.initializer,
+              ctx,
+            );
+          const sources = returnsDetachedSharedValue
+            ? []
+            : placesStoredByExpression(statement.initializer, ctx);
           const bind = (source?: BorrowPlace): void =>
             bindPatternPlaces({
               pattern: statement.pattern,
               source,
               mutable:
-                statement.mutable ||
-                statement.pattern.bindingKind === "mutable-ref",
+                !returnsDetachedSharedValue &&
+                (statement.mutable ||
+                  statement.pattern.bindingKind === "mutable-ref"),
               span: statement.span,
               event,
               ctx,
@@ -1557,10 +1690,27 @@ const scanExpression = (
           } else {
             sources.forEach(bind);
           }
+          if (
+            returnsDetachedSharedValue &&
+            (statement.mutable ||
+              statement.pattern.bindingKind === "mutable-ref")
+          ) {
+            patternSymbols(statement.pattern).forEach((symbol) =>
+              ctx.aliases.set(symbol, {
+                symbol,
+                place: { root: symbol, projections: [] },
+                access: "shared",
+                span: statement.span,
+                event,
+                uses: [],
+              }),
+            );
+          }
           const initializer = ctx.hir.expressions.get(statement.initializer);
           if (
-            isAggregateExpression(statement.initializer, ctx) ||
-            aggregateContentsPlaces(statement.initializer, ctx).length > 0
+            !returnsDetachedSharedValue &&
+            (isAggregateExpression(statement.initializer, ctx) ||
+              aggregateContentsPlaces(statement.initializer, ctx).length > 0)
           ) {
             bindAggregatePatternOrigins({
               pattern: statement.pattern,
@@ -1854,6 +2004,39 @@ const placeOverlaps = (left: BorrowPlace, right: BorrowPlace): boolean => {
     }
   }
   return true;
+};
+
+const projectionPathCovers = (
+  prefix: readonly PlaceProjection[],
+  path: readonly PlaceProjection[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every(
+    (projection, index) =>
+      JSON.stringify(projection) === JSON.stringify(path[index]),
+  );
+
+const parameterReturnsOnlyNonEscapingPlaces = (
+  parameter: CallableBorrowContract["parameters"][number],
+): boolean => {
+  if (!parameter.returned) {
+    return false;
+  }
+  const returnedOrigins =
+    parameter.returnedOrigins ??
+    (parameter.returnedPaths ?? [[]]).map((source) => ({
+      source,
+      result: [],
+    }));
+  return returnedOrigins.every(
+    (origin) =>
+      parameter.returnedSharedOrigins?.some(
+        (shared) => JSON.stringify(shared) === JSON.stringify(origin),
+      ) === true ||
+      parameter.invalidatedPaths?.some((invalidated) =>
+        projectionPathCovers(invalidated, origin.source),
+      ) === true,
+  );
 };
 
 const placeName = (place: BorrowPlace, ctx: BodyContext): string => {
@@ -2699,6 +2882,22 @@ const validateCall = (
     if (info.contract?.parameters[index]?.retained !== true) {
       return;
     }
+    if (intrinsicName === "__array_set" && index === 2) {
+      const destination = actuals[0];
+      const destinationRoots =
+        typeof destination === "number"
+          ? new Set(
+              placesOfExpression(destination, ctx).map((place) => place.root),
+            )
+          : new Set<SymbolId>();
+      if (
+        placesOfExpression(actual, ctx).some((place) =>
+          destinationRoots.has(place.root),
+        )
+      ) {
+        return;
+      }
+    }
     escapeExpression({
       exprId: actual,
       span: event.span,
@@ -2708,6 +2907,44 @@ const validateCall = (
         info.contract.parameters[index]!.retainedPaths!.length > 0
           ? info.contract.parameters[index]!.retainedPaths
           : undefined,
+      ctx,
+    });
+  });
+  info.contract?.transfers?.forEach((transfer) => {
+    if (
+      transfer.sourceInvalidated ||
+      (transfer.sourceParameter === transfer.destinationParameter &&
+        JSON.stringify(transfer.sourcePath ?? []) ===
+          JSON.stringify(transfer.destinationPath ?? []))
+    ) {
+      return;
+    }
+    const source = actuals[transfer.sourceParameter];
+    const destination = actuals[transfer.destinationParameter];
+    if (
+      typeof source !== "number" ||
+      typeof destination !== "number" ||
+      transferDestinationIsLocal(destination, ctx)
+    ) {
+      return;
+    }
+    if (intrinsicName === "__array_set") {
+      const destinationRoots = new Set(
+        placesOfExpression(destination, ctx).map((place) => place.root),
+      );
+      if (
+        placesOfExpression(source, ctx).some((place) =>
+          destinationRoots.has(place.root),
+        )
+      ) {
+        return;
+      }
+    }
+    escapeExpression({
+      exprId: source,
+      span: event.span,
+      through: "storage outside this callable",
+      projectionPaths: [transfer.sourcePath ?? []],
       ctx,
     });
   });
@@ -3240,7 +3477,8 @@ const validateExpression = (
           return;
         }
         const actor = baseSymbolOf(targetId, ctx);
-        placesOfExpression(targetId, ctx).forEach((place) => {
+        const targetPlaces = placesOfExpression(targetId, ctx);
+        targetPlaces.forEach((place) => {
           if (
             typeof actor === "number" &&
             !hasMutableCapabilityAt(actor, event, ctx)
@@ -3628,7 +3866,9 @@ const analyzeCallableBorrowing = ({
   escapeImplicitReturnValues(callable.body, ctx);
 
   contract?.parameters.forEach((parameter, index) => {
-    if (!parameter.retained && !parameter.returned) {
+    const unsafeReturn =
+      parameter.returned && !parameterReturnsOnlyNonEscapingPlaces(parameter);
+    if (!parameter.retained && !unsafeReturn) {
       return;
     }
     const symbols = callable.parameters[index]

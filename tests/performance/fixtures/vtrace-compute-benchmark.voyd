@@ -283,8 +283,14 @@ impl Interval
   fn surrounds(self, x: f64) -> bool
     self.min < x and x < self.max
 
+val ScatterResult {
+  did_scatter: bool,
+  attenuation: Color,
+  scattered: Ray
+}
+
 trait Material
-  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> (bool, Color, Ray)
+  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> ScatterResult
 
 obj Lambertian {
   albedo: Color
@@ -294,16 +300,16 @@ impl Material for Lambertian
   fn init(albedo?: Color) -> Lambertian
     Lambertian { albedo: albedo ?? Color(0.0, 0.0, 0.0) }
 
-  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> (bool, Color, Ray)
+  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> ScatterResult
     var scatter_direction = rec.normal + Vec3::random_unit_vector()
     if scatter_direction.near_zero():
       scatter_direction = rec.normal
 
-    (
-      true,
-      self.albedo,
-      Ray { origin: rec.p, direction: scatter_direction }
-    )
+    ScatterResult {
+      did_scatter: true,
+      attenuation: self.albedo,
+      scattered: Ray { origin: rec.p, direction: scatter_direction }
+    }
 
 obj Metal {
   albedo: Color,
@@ -314,14 +320,14 @@ impl Material for Metal
   fn init(albedo?: Color, fuzz?: f64) -> Metal
     Metal { albedo: albedo ?? Color(0.0, 0.0, 0.0), fuzz: fuzz ?? 0.0 }
 
-  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> (bool, Color, Ray)
+  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> ScatterResult
     var reflected = r_in.direction.reflect(rec.normal)
     reflected = reflected.unit_vector() + (Vec3::random_unit_vector() * self.fuzz)
-    (
-      true,
-      self.albedo,
-      Ray { origin: rec.p, direction: reflected }
-    )
+    ScatterResult {
+      did_scatter: true,
+      attenuation: self.albedo,
+      scattered: Ray { origin: rec.p, direction: reflected }
+    }
 
 obj Dielectric {
   refraction_index: f64
@@ -331,7 +337,7 @@ impl Material for Dielectric
   fn init(refraction_index?: f64) -> Dielectric
     Dielectric { refraction_index: refraction_index ?? 0.0 }
 
-  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> (bool, Color, Ray)
+  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> ScatterResult
     let ri = if rec.front_face
       then: 1.0 / self.refraction_index
       else: self.refraction_index
@@ -343,11 +349,11 @@ impl Material for Dielectric
     let direction = if cannot_refract or self.reflectance(cos_theta) > RenderCtx::rand_f64()
       then: unit_direction.reflect(rec.normal)
       else: unit_direction.refract(rec.normal, ri)
-    (
-      true,
-      Vec3(1.0, 1.0, 1.0),
-      Ray { origin: rec.p, direction }
-    )
+    ScatterResult {
+      did_scatter: true,
+      attenuation: Vec3(1.0, 1.0, 1.0),
+      scattered: Ray { origin: rec.p, direction }
+    }
 
   fn reflectance(self, cosine: f64) -> f64
     var r0 = (1.0 - self.refraction_index) / (1.0 + self.refraction_index)
@@ -592,10 +598,9 @@ fn ray_color(ray: Ray, depth: i32, world: Hittable) -> Color
   let ~rec = HitRecord()
 
   if world.hit({ rec, ray_t: Interval(0.001, INFINITY), ray }):
-    let (did_scatter, attenuation, scattered) =
-      rec.mat.scatter({ r_in: ray, rec })
-    if did_scatter:
-      return attenuation * ray_color(scattered, depth - 1, world)
+    let scatter = rec.mat.scatter({ r_in: ray, rec })
+    if scatter.did_scatter:
+      return scatter.attenuation * ray_color(scatter.scattered, depth - 1, world)
     return Color(0.0, 0.0, 0.0)
 
   let unit_direction = ray.direction.unit_vector()

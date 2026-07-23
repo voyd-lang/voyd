@@ -6,13 +6,16 @@ import { createNodePathAdapter } from "../../../modules/node-path-adapter.js";
 import { analyzeModules, loadModuleGraph } from "../../../pipeline.js";
 import { parse } from "../../../parser/index.js";
 import { semanticsPipeline } from "../../pipeline.js";
+import { mergeCallableBorrowContracts } from "../model.js";
+import { normalizeReturnedSharedOrigins } from "../summaries.js";
 
 const analyze = (source: string) => {
   const filePath = "borrowing.test.voyd";
   const ast = parse(source, filePath);
   if (
     !source.includes('@intrinsic_type(type: "voyd.std.shared-cell")') &&
-    !source.includes("__array_set(")
+    !source.includes("__array_set(") &&
+    !source.includes("__array_copy(")
   ) {
     return semanticsPipeline(ast);
   }
@@ -46,7 +49,7 @@ const diagnosticCodes = (source: string): readonly string[] => {
   }
 };
 
-const recoveryDiagnosticCodes = (source: string): readonly string[] => {
+const analyzeWithRecovery = (source: string) => {
   const filePath = "borrowing-recovery.test.voyd";
   const ast = parse(source, filePath);
   const module = {
@@ -65,8 +68,11 @@ const recoveryDiagnosticCodes = (source: string): readonly string[] => {
       diagnostics: [],
     },
     recoverFromTypingErrors: true,
-  }).diagnostics.map((diagnostic) => diagnostic.code);
+  });
 };
+
+const recoveryDiagnosticCodes = (source: string): readonly string[] =>
+  analyzeWithRecovery(source).diagnostics.map((diagnostic) => diagnostic.code);
 
 const diagnosticsFor = (source: string) => {
   try {
@@ -96,6 +102,37 @@ fn mutate_both(~left: Box, ~right: Box) -> void
 `;
 
 describe("borrow checking", () => {
+  it("keeps shared return provenance only when every target agrees", () => {
+    const origin = { source: [], result: [] };
+    const merged = mergeCallableBorrowContracts([
+      {
+        parameters: [
+          {
+            access: "shared",
+            retained: false,
+            returned: true,
+            returnedOrigins: [origin],
+            returnedSharedOrigins: [origin],
+          },
+        ],
+        maySuspend: false,
+      },
+      {
+        parameters: [
+          {
+            access: "shared",
+            retained: false,
+            returned: true,
+            returnedOrigins: [origin],
+          },
+        ],
+        maySuspend: false,
+      },
+    ]);
+
+    expect(merged?.parameters[0]?.returnedSharedOrigins).toBeUndefined();
+  });
+
   it("rejects overlapping aliases and reports the borrow origin", () => {
     const codes = diagnosticCodes(`${prelude}
 fn conflict(~value: Box) -> i32
@@ -1041,6 +1078,49 @@ fn chain(value: Box, depth: i32) -> Link
     expect(recursive).toBeDefined();
   });
 
+  it("widens recursive transfer projections to a conservative root", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+obj Chain {
+  value: Box,
+  next: Chain
+}
+
+fn write(~destination: Chain, source: Box, recurse: bool) -> void
+  destination.value = source
+  if recurse:
+    write(~destination.next, source, recurse)
+`);
+    const recursive = Array.from(result.borrowing.callables.values()).find(
+      (contract) =>
+        contract.transfers?.some(
+          (transfer) =>
+            transfer.sourceParameter === 1 &&
+            transfer.destinationParameter === 0 &&
+            transfer.conservative,
+        ),
+    );
+
+    expect(recursive).toBeDefined();
+  });
+
+  it("drops shared return guarantees instead of widening them", () => {
+    const indexedOrigins = Array.from({ length: 33 }, (_entry, index) => ({
+      source: [{ kind: "index" as const, constant: index, stable: true }],
+      result: [],
+    }));
+    const deepOrigin = {
+      source: Array.from({ length: 9 }, (_entry, index) => ({
+        kind: "field" as const,
+        name: `level_${index}`,
+      })),
+      result: [],
+    };
+
+    expect(normalizeReturnedSharedOrigins(indexedOrigins)).toBeUndefined();
+    expect(normalizeReturnedSharedOrigins([deepOrigin])).toBeUndefined();
+  });
+
   it("carries conditional break environments into returned origins", () => {
     const source = `${prelude}
 fn choose(first: Box, second: Box, use_second: bool) -> Box
@@ -1449,6 +1529,101 @@ fn valid() -> i32
     ).not.toThrow();
   });
 
+  it("rejects projected references escaping mutable parameters", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn invalid(~pair: Pair) -> Box
+  pair.left
+`),
+    ).toContain("TY0049");
+  });
+
+  it("propagates source invalidation through later-defined helpers", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+fn valid(~values: BoxArray) -> FixedArray<Box>
+  let removed = __array_new<Box>(1)
+  __array_copy(removed, {
+    from: values.storage,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  replace_storage(~values, __array_new<Box>(0))
+  removed
+
+fn replace_storage(~values: BoxArray, storage: FixedArray<Box>) -> void
+  values.storage = storage
+`),
+    ).not.toThrow();
+  });
+
+  it("tracks source invalidation through mutable reborrows", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+fn valid(~values: BoxArray) -> FixedArray<Box>
+  let removed = __array_new<Box>(1)
+  __array_copy(removed, {
+    from: values.storage,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  replace_storage(~values, __array_new<Box>(0))
+  removed
+
+fn replace_storage(~values: BoxArray, storage: FixedArray<Box>) -> void
+  let ~alias = values
+  alias.storage = storage
+`),
+    ).not.toThrow();
+  });
+
+  it("preserves same-root provenance written through helpers", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn invalid(~pair: Pair) -> Box
+  replace_left_with_right(~pair)
+  pair.left
+
+fn replace_left_with_right(~pair: Pair) -> void
+  pair.left = pair.right
+`),
+    ).toContain("TY0049");
+  });
+
+  it("downgrades copied same-root projections at helper call sites", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn invalid(~pair: Pair) -> i32
+  replace_left_with_right(~pair)
+  mutate(~pair.right)
+  pair.left.value
+
+fn replace_left_with_right(~pair: Pair) -> void
+  pair.left = pair.right
+`),
+    ).toContain("TY0051");
+  });
+
+  it("updates physical-place provenance after mutable-reference rebinding", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn invalid(~pair: Pair, ~other: Pair) -> Box
+  let moved = pair.left
+  pair = other
+  pair.left = Box { value: 2 }
+  moved
+`),
+    ).toContain("TY0049");
+  });
+
   it("rejects a mutable borrow across an effect operation", () => {
     expect(
       diagnosticCodes(`${prelude}
@@ -1460,6 +1635,26 @@ fn invalid(~value: Box): Async -> void
   mutate(~value)
 `),
     ).toContain("TY0052");
+  });
+
+  it("allows mutable borrows across pure trait dispatch", () => {
+    expect(() =>
+      analyze(`${prelude}
+trait Mutator
+  fn update(self, { ~left: Box, ~right: Box }) -> void
+
+obj ConcreteMutator {}
+
+impl Mutator for ConcreteMutator
+  fn update(self, { ~left: Box, ~right: Box }) -> void
+    mutate(~left)
+    mutate(~right)
+
+fn valid(mutator: Mutator, ~left: Box, ~right: Box) -> i32
+  mutator.update({ left, right })
+  left.value + right.value
+`),
+    ).not.toThrow();
   });
 
   it("conservatively retains references passed to effect operations", () => {
@@ -1491,6 +1686,191 @@ fn invalid(cell: SharedCell<Box>) -> Box
   cell.with((value) => value)
 `),
     ).toContain("TY0053");
+  });
+
+  it("rejects arrays copied from SharedCell callback values", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+fn copied(self: BoxArray) -> BoxArray
+  let destination = __array_new<Box>(1)
+  __array_copy(destination, {
+    from: self.storage,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  BoxArray { storage: destination }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn invalid(cell: SharedCell<BoxArray>) -> BoxArray
+  cell.with((values) => copied(values))
+`),
+    ).toContain("TY0053");
+  });
+
+  it("rejects directly returned array copies from SharedCell callback values", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+fn copied(self: BoxArray) -> FixedArray<Box>
+  let destination = __array_new<Box>(1)
+  __array_copy(destination, {
+    from: self.storage,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn invalid(cell: SharedCell<BoxArray>) -> FixedArray<Box>
+  cell.with((values) => copied(values))
+`),
+    ).toContain("TY0053");
+  });
+
+  it("tracks array copies into nested destination storage", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+fn copied(self: BoxArray) -> BoxArray
+  let result = BoxArray { storage: __array_new<Box>(1) }
+  __array_copy(result.storage, {
+    from: self.storage,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  result
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn invalid(cell: SharedCell<BoxArray>) -> BoxArray
+  cell.with((values) => copied(values))
+`),
+    ).toContain("TY0053");
+  });
+
+  it("allows copied elements to move out through mutable container APIs", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+fn remove_all(~self: BoxArray) -> BoxArray
+  let removed = __array_new<Box>(1)
+  __array_copy(removed, {
+    from: self.storage,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  self.storage = __array_new<Box>(0)
+  BoxArray { storage: removed }
+`),
+    ).not.toThrow();
+  });
+
+  it("keeps copied aggregate results shared after container replacement", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+fn take_all(~self: BoxArray) -> BoxArray
+  let removed = __array_new<Box>(1)
+  __array_copy(removed, {
+    from: self.storage,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  self.storage = __array_new<Box>(0)
+  BoxArray { storage: removed }
+
+fn invalid(~self: BoxArray) -> i32
+  let ~removed = take_all(~self)
+  clear(~removed)
+  0
+
+fn clear(~value: BoxArray) -> void
+  value.storage = __array_new<Box>(0)
+`),
+    ).toContain("TY0050");
+  });
+
+  it("does not detach a return origin invalidated on only one branch", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+fn maybe_take(~self: BoxArray, detach: bool) -> BoxArray
+  if detach:
+    let removed = __array_new<Box>(1)
+    __array_copy(removed, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: 1
+    })
+    self.storage = __array_new<Box>(0)
+    return BoxArray { storage: removed }
+  BoxArray { storage: self.storage }
+`),
+    ).toContain("TY0049");
+  });
+
+  it("retracts shared return guarantees after forward callees converge", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj BoxArray { storage: FixedArray<Box> }
+
+fn detached(~self: BoxArray) -> BoxArray
+  let removed = __array_new<Box>(1)
+  __array_copy(removed, {
+    from: self.storage,
+    to_index: 0,
+    from_index: 0,
+    count: 1
+  })
+  self.storage = __array_new<Box>(0)
+  BoxArray { storage: removed }
+
+fn maybe_detached(~self: BoxArray, detach: bool) -> BoxArray
+  if detach:
+    detached(~self)
+  else:
+    live(self)
+
+fn live(self: BoxArray) -> BoxArray
+  BoxArray { storage: self.storage }
+`),
+    ).toContain("TY0049");
   });
 
   it("propagates scoped callback loans through higher-order wrappers", () => {

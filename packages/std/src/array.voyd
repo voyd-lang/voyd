@@ -560,11 +560,13 @@ impl<T> Array<T>
     if self.count == 0:
       return None {}
 
-    self.ensure_capacity(self.count)
     let last_index = self.count - 1
-    let value = __array_get(self.storage, last_index)
-    self.count = last_index
-    Some<T> { value: value }
+    let removed = self.splice(
+      at: last_index,
+      removing: 1,
+      inserting: Array<T>::with_capacity(0)
+    )
+    removed.first()
 
   /// Inserts a value at the target location.
   api fn insert(~self, value: T, { at index: i32 }) -> void
@@ -646,7 +648,13 @@ impl<T> Array<T>
     let effective_delete_count =
       if safe_delete_count > available then: available else: safe_delete_count
 
-    let removed = self.slice(from: clamped_start, to: clamped_start + effective_delete_count)
+    let removed_raw = new_fixed_array<T>(effective_delete_count)
+    __array_copy(removed_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: clamped_start,
+      count: effective_delete_count
+    })
     let insert_items = items.to_fixed_array()
     let insert_count = items.count
 
@@ -682,7 +690,10 @@ impl<T> Array<T>
     })
     self.replace_storage(next_raw)
     self.count = next_count
-    removed
+    Array<T> {
+      storage: removed_raw,
+      count: effective_delete_count
+    }
 
   /// Replaces matching content with new content.
   api fn replace(~self, index: i32, { with element: T }) -> bool
