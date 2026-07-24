@@ -187,9 +187,7 @@ fn msgpack_map_new(): () -> Dict<String, MsgPack>
 
 @compiler_contract(id: "voyd.std.boundary.msgpack.map-set")
 fn msgpack_map_set(map: Dict<String, MsgPack>, key: String, value: MsgPack): () -> Dict<String, MsgPack>
-  let ~next = map
-  next.set(key, value)
-  next
+  map.setting(key, value)
 
 @compiler_contract(id: "voyd.std.boundary.msgpack.map-get")
 fn msgpack_map_get(map: Dict<String, MsgPack>, key: String): () -> MsgPack

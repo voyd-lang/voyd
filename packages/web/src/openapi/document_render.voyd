@@ -7,6 +7,7 @@ use std::json::{ JsonObject, JsonString, JsonValue }
 use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
+use super::json_copy::copy_json_object
 use super::operation_render::operation_json
 use super::types::{ Info, RouteDocument }
 
@@ -29,7 +30,7 @@ pub fn document_json(
     let ~existing = match(paths.get(route.path))
       Some<JsonValue> { value }:
         value.match(active)
-          JsonObject: active.value
+          JsonObject: copy_json_object(active.value)
           else: Dict<String, JsonValue>::init()
       None: Dict<String, JsonValue>::init()
     existing.set(

@@ -1,10 +1,12 @@
 //! Explicit prose overlays for inferred schemas.
 
 use std::dict::Dict
+use std::array::Array
 use std::json::{ JsonObject, JsonString, JsonValue }
 use std::optional::types::all
-use std::string::type::{ String, StringSlice }
-use super::contract::OpenApiSchemaDocs
+use std::string::type::String
+use super::contract::{ OpenApiFieldDocs, OpenApiSchemaDocs }
+use super::json_copy::{ copy_json_object, copy_json_value }
 
 pub fn apply_schema_docs(
   schema: JsonValue,
@@ -21,10 +23,19 @@ pub fn apply_schema_docs(
             Some<JsonValue> { value: reference }:
               reference.match(reference_value)
                 JsonString:
-                  let name = component_name(reference_value.value.as_slice())
+                  let parts = reference_value.value.split(on: 47, keep_empty: false)
+                  let name =
+                    if parts.is_empty():
+                      String::init()
+                    else:
+                      parts.at(parts.len() - 1).to_string()
                   match(components.get(name))
                     Some<JsonValue> { value: component }:
-                      overlay_object(component, value)
+                      component.match(component_value)
+                        JsonObject:
+                          overlay_object_fields(component_value.value, value)
+                        else:
+                          schema
                     None:
                       schema
                 else:
@@ -37,57 +48,67 @@ pub fn apply_schema_docs(
 fn overlay_object(schema: JsonValue, docs: OpenApiSchemaDocs) -> JsonValue
   schema.match(active)
     JsonObject:
-      let ~fields = copy_object(active.value)
-      match(docs.description)
-        Some<String> { value }:
-          fields.set("description", JsonString { value: value })
-        None:
-          void
-      if not docs.fields.is_empty():
-        match(fields.get("properties"))
-          Some<JsonValue> { value }:
-            value.match(properties_value)
-              JsonObject:
-                let ~properties = copy_object(properties_value.value)
-                var index = 0
-                while index < docs.fields.len():
-                  let field = docs.fields.at(index)
-                  match(properties.get(field.name))
-                    Some<JsonValue> { value: property }:
-                      properties.set(field.name, with_description(property, field.description))
-                    None:
-                      void
-                  index = index + 1
-                fields.set("properties", JsonObject { value: properties })
-              else:
-                void
-          None:
-            void
-      JsonObject { value: fields }
+      overlay_object_fields(active.value, docs)
     else:
       schema
+
+fn overlay_object_fields(source: Dict<String, JsonValue>, docs: OpenApiSchemaDocs) -> JsonValue
+  let entries = source.entries()
+  let ~fields = Dict<String, JsonValue>::with_capacity(entries.len() + 1)
+  let has_description = match(docs.description)
+    Some<String>:
+      true
+    None:
+      false
+  var index = 0
+  while index < entries.len():
+    let entry = entries.at(index)
+    if entry.0.equals("properties") and not docs.fields.is_empty():
+      fields.set(entry.0.as_slice().to_string(), overlay_properties(entry.1, docs.fields))
+    else:
+      if not entry.0.equals("description") or not has_description:
+        fields.set(entry.0.as_slice().to_string(), copy_json_value(entry.1))
+    index = index + 1
+  match(docs.description)
+    Some<String> { value }:
+      fields.set("description", JsonString { value: value })
+    None:
+      void
+  JsonObject { value: fields }
+
+fn overlay_properties(value: JsonValue, docs: Array<OpenApiFieldDocs>) -> JsonValue
+  value.match(active)
+    JsonObject:
+      let entries = active.value.entries()
+      let ~properties = Dict<String, JsonValue>::with_capacity(entries.len())
+      var index = 0
+      while index < entries.len():
+        let entry = entries.at(index)
+        let property = copy_json_value(entry.1)
+        match(field_description(docs, entry.0))
+          Some<String> { value: description }:
+            properties.set(entry.0.as_slice().to_string(), with_description(property, description))
+          None:
+            properties.set(entry.0.as_slice().to_string(), property)
+        index = index + 1
+      JsonObject { value: properties }
+    else:
+      copy_json_value(value)
+
+fn field_description(docs: Array<OpenApiFieldDocs>, name: String) -> Option<String>
+  var index = 0
+  while index < docs.len():
+    let field = docs.at(index)
+    if field.name.equals(name):
+      return Some<String> { value: field.description }
+    index = index + 1
+  None {}
 
 fn with_description(value: JsonValue, description: String) -> JsonValue
   value.match(active)
     JsonObject:
-      let ~fields = copy_object(active.value)
+      let ~fields = copy_json_object(active.value)
       fields.set("description", JsonString { value: description })
       JsonObject { value: fields }
     else:
       value
-
-fn copy_object(source: Dict<String, JsonValue>) -> Dict<String, JsonValue>
-  let entries = source.entries()
-  let ~out = Dict<String, JsonValue>::with_capacity(entries.len())
-  var index = 0
-  while index < entries.len():
-    let entry = entries.at(index)
-    out.set(entry.0, entry.1)
-    index = index + 1
-  out
-
-fn component_name(reference: StringSlice) -> String
-  let parts = reference.split(on: 47, keep_empty: false)
-  if parts.is_empty():
-    return String::init()
-  parts.at(parts.len() - 1).to_string()

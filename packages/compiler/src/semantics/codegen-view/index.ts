@@ -2,6 +2,7 @@ import type {
   HirBindingKind,
   HirEffectHandlerClause,
   HirGraph,
+  HirPattern,
   HirTypeExpr,
   HirVisibility,
 } from "../hir/index.js";
@@ -343,6 +344,8 @@ export type ModuleCodegenView = {
   types: ModuleTypeIndex;
   effectsInfo: EffectsLoweringInfo;
   effectsIr: EffectsIr;
+  bindingKinds: ReadonlyMap<SymbolId, HirBindingKind>;
+  mutableStorageSymbols: ReadonlySet<SymbolId>;
   functionLocations: ReadonlyMap<SymbolId, CodegenSourceLocation>;
 };
 
@@ -389,6 +392,88 @@ export type ProgramCodegenView = {
   instances: MonomorphizedInstanceIndex;
   imports: ImportWiringIndex;
   modules: ReadonlyMap<string, ModuleCodegenView>;
+};
+
+const collectPatternBindingKinds = (
+  pattern: HirPattern,
+  into: Map<SymbolId, HirBindingKind>,
+): void => {
+  if (pattern.kind === "identifier") {
+    if (pattern.bindingKind) {
+      into.set(pattern.symbol, pattern.bindingKind);
+    }
+    return;
+  }
+  if (pattern.kind === "tuple") {
+    pattern.elements.forEach((entry) =>
+      collectPatternBindingKinds(entry, into),
+    );
+    return;
+  }
+  if (pattern.kind === "destructure") {
+    pattern.fields.forEach((entry) =>
+      collectPatternBindingKinds(entry.pattern, into),
+    );
+    if (pattern.spread) {
+      collectPatternBindingKinds(pattern.spread, into);
+    }
+    return;
+  }
+  if (pattern.kind === "type" && pattern.binding) {
+    collectPatternBindingKinds(pattern.binding, into);
+  }
+};
+
+const buildBindingKindIndex = (
+  hir: HirGraph,
+): ReadonlyMap<SymbolId, HirBindingKind> => {
+  const bindingKinds = new Map<SymbolId, HirBindingKind>();
+  hir.items.forEach((item) => {
+    if (item.kind !== "function") {
+      return;
+    }
+    item.parameters.forEach((parameter) =>
+      collectPatternBindingKinds(parameter.pattern, bindingKinds),
+    );
+  });
+  hir.statements.forEach((statement) => {
+    if (statement.kind === "let") {
+      collectPatternBindingKinds(statement.pattern, bindingKinds);
+    }
+  });
+  hir.expressions.forEach((expression) => {
+    if (expression.exprKind === "lambda") {
+      expression.parameters.forEach((parameter) =>
+        collectPatternBindingKinds(parameter.pattern, bindingKinds),
+      );
+      return;
+    }
+    if (expression.exprKind === "effect-handler") {
+      expression.handlers
+        .flatMap((handler) => handler.parameters)
+        .forEach((parameter) => {
+          if (parameter.bindingKind) {
+            bindingKinds.set(parameter.symbol, parameter.bindingKind);
+          }
+        });
+    }
+  });
+  return bindingKinds;
+};
+
+const buildMutableStorageSymbolIndex = (
+  module: SemanticsPipelineResult,
+): ReadonlySet<SymbolId> => {
+  const symbols = new Set(module.borrowing.mutableStorageSymbols);
+  module.hir.expressions.forEach((expression) => {
+    if (expression.exprKind !== "lambda") {
+      return;
+    }
+    expression.captures
+      ?.filter((capture) => capture.mutable)
+      .forEach((capture) => symbols.add(capture.symbol));
+  });
+  return symbols;
 };
 
 export type CodegenObjectTemplate = {
@@ -1367,10 +1452,11 @@ export const buildProgramCodegenView = (
     for (const template of mod.typing.objects.templates()) {
       const ownerId = canonicalProgramSymbolIdOf(mod.moduleId, template.symbol);
       if (!objectTemplateByOwner.has(ownerId)) {
-        objectTemplateByOwner.set(
-          ownerId,
-          toCodegenObjectTemplate({ template, symbol: ownerId }),
-        );
+        const codegenTemplate = toCodegenObjectTemplate({
+          template,
+          symbol: ownerId,
+        });
+        objectTemplateByOwner.set(ownerId, codegenTemplate);
       }
     }
 
@@ -1399,15 +1485,13 @@ export const buildProgramCodegenView = (
       bucket.push(nominal);
       nominalsByOwner.set(ownerId, bucket);
 
-      objectInfoByNominal.set(
-        nominal,
-        toCodegenObjectTypeInfo({
-          info,
-          traitImpls: info.traitImpls?.map((impl) =>
-            toCodegenTraitImplInstanceForModule(impl, mod.moduleId),
-          ),
-        }),
-      );
+      const codegenInfo = toCodegenObjectTypeInfo({
+        info,
+        traitImpls: info.traitImpls?.map((impl) =>
+          toCodegenTraitImplInstanceForModule(impl, mod.moduleId),
+        ),
+      });
+      objectInfoByNominal.set(nominal, codegenInfo);
     });
 
     const traitImplsForNominal =
@@ -2316,6 +2400,8 @@ export const buildProgramCodegenView = (
       },
       effectsInfo,
       effectsIr: buildEffectsIr({ hir: mod.hir, info: effectsInfo }),
+      bindingKinds: buildBindingKindIndex(mod.hir),
+      mutableStorageSymbols: buildMutableStorageSymbolIndex(mod),
       functionLocations,
     });
   });

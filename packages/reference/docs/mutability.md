@@ -24,7 +24,9 @@ let count = 0
 
 ## Mutable object access
 
-Use `~` when a binding or parameter must support field mutation.
+Use `~` when a binding or parameter must support field mutation. For
+reference-like values, `~` also grants a unique capability: overlapping reads
+and writes are rejected until the mutable borrow's final use.
 
 ```voyd
 obj Point {
@@ -49,6 +51,9 @@ fn reset_x(~point: Point) -> void
 
 Without `~`, field mutation is rejected even if the type itself has mutable
 fields.
+
+See [Borrow Checking](./borrow-checking.md) for reborrowing, alias rules,
+effects, and `SharedCell<T>`.
 
 ## Module scope
 

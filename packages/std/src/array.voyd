@@ -1,4 +1,4 @@
-//! Growable contiguous arrays with copy-on-write storage.
+//! Growable contiguous arrays with isolated copy operations.
 //! Supports negative indexing, range slicing, and eager sequence transforms.
 
 use std::fixed_array::fns::{ new_fixed_array }
@@ -9,15 +9,13 @@ use std::range::Range
 use std::subscript::{ SubscriptRead, SubscriptWrite }
 use std::traits::ord::{ Ordering, Less, Equal, Greater }
 
-/// A growable contiguous collection with copy-on-write semantics.
+/// A growable contiguous collection.
 @intrinsic_type(type: "voyd.std.array")
 pub obj Array<T> {
   /// Internal fixed-size backing storage.
   pri storage: FixedArray<T>,
   /// Number of initialized elements in `storage`.
-  pri count: i32,
-  /// Shared ownership tracker used by copy-on-write operations.
-  pri owners: ArrayOwners
+  pri count: i32
 }
 
 /// Result payload returned by `Array::popped`.
@@ -31,12 +29,12 @@ pub obj ArrayPop<T> {
 impl<T> Array<T>
   /// Creates an empty array.
   api fn init() -> Array<T>
-    Array<T> { storage: make_storage<T>(4), count: 0, owners: new_array_owners() }
+    Array<T> { storage: make_storage<T>(4), count: 0 }
 
   /// Creates an empty array with capacity for at least `size` elements.
   api fn with_capacity(size: i32) -> Array<T>
     let capacity = if size > 0 then: size else: 0
-    Array<T> { storage: make_storage<T>(capacity), count: 0, owners: new_array_owners() }
+    Array<T> { storage: make_storage<T>(capacity), count: 0 }
 
   /// Builds a value from the provided source.
   api fn from(source: FixedArray<T>) -> Optional<Array<T>>
@@ -53,20 +51,21 @@ impl<T> Array<T>
     let additional = add_capacity?.max(0) ?? 0
     let required = self.count + additional
     let current_capacity = __array_len(self.storage)
-    if required > current_capacity:
-      let next_capacity = growth_capacity(current_capacity, required)
-      let next_raw = new_fixed_array<T>(next_capacity)
-      __array_copy(next_raw, {
-        from: self.storage,
-        to_index: 0,
-        from_index: 0,
-        count: self.count
-      })
-      return Array<T> { storage: next_raw, count: self.count, owners: new_array_owners() }
-
-    let ~owners = self.owners
-    owners.retain()
-    Array<T> { storage: self.storage, count: self.count, owners: self.owners }
+    let next_capacity =
+      if required > current_capacity
+        then: growth_capacity(current_capacity, required)
+        else: current_capacity
+    let next_raw = new_fixed_array<T>(next_capacity)
+    __array_copy(next_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: 0,
+      count: self.count
+    })
+    Array<T> {
+      storage: next_raw,
+      count: self.count
+    }
 
   /// Returns the number of stored elements.
   api fn len(self) -> i32
@@ -137,7 +136,7 @@ impl<T> Array<T>
       from_index: computed_start,
       count: next_count
     })
-    Array<T> { storage: next_raw, count: next_count, owners: new_array_owners() }
+    Array<T> { storage: next_raw, count: next_count }
 
   /// Applies a transform to each element and returns a new array.
   api fn map<O>(self, f: (v: T) -> O) -> Array<O>
@@ -151,7 +150,7 @@ impl<T> Array<T>
       __array_set(next_raw, index, f(value))
       index = index + 1
 
-    Array<O> { storage: next_raw, count: self.count, owners: new_array_owners() }
+    Array<O> { storage: next_raw, count: self.count }
 
   /// Returns a collection containing only values that satisfy the predicate.
   api fn filter(self, pred: (v: T) -> bool) -> Array<T>
@@ -294,7 +293,7 @@ impl<T> Array<T>
     self.find_index_where_raw(pred)
 
   /// Returns a sorted copy.
-  api fn sorted(self, compare: (left: T, right: T) -> i32) -> Array<T>
+  api fn sorted(self, compare: (left: T, right: T) : () -> i32) -> Array<T>
     let ~copy = self.copied()
     copy.sort(compare)
     copy
@@ -307,7 +306,7 @@ impl<T> Array<T>
     )
 
   /// Returns a sorted copy.
-  api fn sorted(self, { by compare: (left: T, right: T) -> Ordering }) -> Array<T>
+  api fn sorted(self, { by compare: (left: T, right: T) : () -> Ordering }) -> Array<T>
     let ~copy = self.copied()
     copy.sort(by: compare)
     copy
@@ -348,7 +347,7 @@ impl<T> Array<T>
       __array_set(next_raw, index, (index, __array_get(self.storage, index)))
       index = index + 1
 
-    Array<(i32, T)> { storage: next_raw, count: self.count, owners: new_array_owners() }
+    Array<(i32, T)> { storage: next_raw, count: self.count }
 
   /// Returns a new collection with `other` appended.
   api fn concat(self, other: Array<T>) -> Array<T>
@@ -433,7 +432,7 @@ impl<T> Array<T>
         (__array_get(self.storage, index), __array_get(other.storage, index))
       )
       index = index + 1
-    Array<(T, U)> { storage: next_raw, count: count, owners: new_array_owners() }
+    Array<(T, U)> { storage: next_raw, count: count }
 
   /// Pairs values from two sequences until either sequence ends.
   api fn zip<U>(self, { other: Sequence<U> }) -> Array<(T, U)>
@@ -462,11 +461,11 @@ impl<T> Array<T>
     Some<T> { value: acc }
 
   /// Sorts values in place.
-  api fn sort(~self, compare: (left: T, right: T) -> i32) -> void
+  api fn sort(~self, compare: (left: T, right: T) : () -> i32) -> void
     if self.count < 2:
       return void
 
-    self.ensure_unique(self.count)
+    self.ensure_capacity(self.count)
     var index = 1
     while index < self.count:
       let value = __array_get(self.storage, index)
@@ -488,11 +487,11 @@ impl<T> Array<T>
     )
 
   /// Sorts values in place.
-  api fn sort(~self, { by compare: (left: T, right: T) -> Ordering }) -> void
+  api fn sort(~self, { by compare: (left: T, right: T) : () -> Ordering }) -> void
     if self.count < 2:
       return void
 
-    self.ensure_unique(self.count)
+    self.ensure_capacity(self.count)
     var index = 1
     while index < self.count:
       let value = __array_get(self.storage, index)
@@ -511,7 +510,7 @@ impl<T> Array<T>
     if self.count < 2:
       return void
 
-    self.ensure_unique(self.count)
+    self.ensure_capacity(self.count)
     var left = 0
     var right = self.count - 1
     while left < right:
@@ -527,7 +526,7 @@ impl<T> Array<T>
     if self.count == 0:
       return void
 
-    self.ensure_unique(self.count)
+    self.ensure_capacity(self.count)
     self.count = 0
 
   /// Shrinks the array to the requested length.
@@ -537,7 +536,7 @@ impl<T> Array<T>
     if len <= 0:
       self.clear()
       return void
-    self.ensure_unique(self.count)
+    self.ensure_capacity(self.count)
     self.count = len
 
   /// Ensures capacity for at least `additional` more elements.
@@ -546,12 +545,12 @@ impl<T> Array<T>
       return void
 
     let required = self.count + additional
-    self.ensure_unique(required)
+    self.ensure_capacity(required)
 
   /// Appends a value to the end.
   api fn push(~self, value: T) -> void
     let required = self.count + 1
-    self.ensure_unique(required)
+    self.ensure_capacity(required)
     __array_set(self.storage, self.count, value)
     self.count = required
 
@@ -560,11 +559,13 @@ impl<T> Array<T>
     if self.count == 0:
       return None {}
 
-    self.ensure_unique(self.count)
     let last_index = self.count - 1
-    let value = __array_get(self.storage, last_index)
-    self.count = last_index
-    Some<T> { value: value }
+    let removed = self.splice(
+      at: last_index,
+      removing: 1,
+      inserting: Array<T>::with_capacity(0)
+    )
+    removed.first()
 
   /// Inserts a value at the target location.
   api fn insert(~self, value: T, { at index: i32 }) -> void
@@ -609,7 +610,7 @@ impl<T> Array<T>
     if other.count == 0:
       return void
 
-    self.ensure_unique(self.count + other.count)
+    self.ensure_capacity(self.count + other.count)
     let source = other.to_fixed_array()
     __array_copy(self.storage, {
       from: source,
@@ -646,7 +647,13 @@ impl<T> Array<T>
     let effective_delete_count =
       if safe_delete_count > available then: available else: safe_delete_count
 
-    let removed = self.slice(from: clamped_start, to: clamped_start + effective_delete_count)
+    let removed_raw = new_fixed_array<T>(effective_delete_count)
+    __array_copy(removed_raw, {
+      from: self.storage,
+      to_index: 0,
+      from_index: clamped_start,
+      count: effective_delete_count
+    })
     let insert_items = items.to_fixed_array()
     let insert_count = items.count
 
@@ -682,7 +689,10 @@ impl<T> Array<T>
     })
     self.replace_storage(next_raw)
     self.count = next_count
-    removed
+    Array<T> {
+      storage: removed_raw,
+      count: effective_delete_count
+    }
 
   /// Replaces matching content with new content.
   api fn replace(~self, index: i32, { with element: T }) -> bool
@@ -690,7 +700,7 @@ impl<T> Array<T>
     if computed_index < 0 or computed_index >= self.count:
       return false
 
-    self.ensure_unique(self.count)
+    self.ensure_capacity(self.count)
     __array_set(self.storage, computed_index, element)
     true
 
@@ -742,10 +752,10 @@ impl<T> Array<T>
     copy.splice(at: start, removing: remove_count, inserting: items)
     copy
 
-  /// Ensures this array has unique storage and enough capacity for `required` values.
-  fn ensure_unique(~self, required: i32) -> void
+  /// Ensures this array has enough capacity for `required` values.
+  fn ensure_capacity(~self, required: i32) -> void
     let current_capacity = self.capacity()
-    if required <= current_capacity and not self.owners.is_shared():
+    if required <= current_capacity:
       return void
 
     let next_capacity =
@@ -761,42 +771,11 @@ impl<T> Array<T>
       from_index: 0,
       count: self.count
     })
-    self.replace_storage(next_raw)
-
-  /// Swaps backing storage and resets ownership tracking to this array instance.
-  fn replace_storage(~self, next_raw: FixedArray<T>) -> void
-    self.release_owner()
     self.storage = next_raw
-    self.owners = new_array_owners()
 
-  /// Releases one local ownership reference before storage replacement.
-  fn release_owner(~self) -> void
-    let ~owners = self.owners
-    owners.release()
-
-/// Shared reference counter for `Array` copy-on-write storage.
-obj ArrayOwners {
-  refs: i32
-}
-
-impl ArrayOwners
-  /// Creates a tracker with one owner.
-  fn init() -> ArrayOwners
-    ArrayOwners { refs: 1 }
-
-  /// Records an additional shared owner.
-  fn retain(~self) -> void
-    self.refs = self.refs + 1
-
-  /// Releases a shared owner reference when possible.
-  fn release(~self) -> void
-    if self.refs <= 1:
-      return void
-    self.refs = self.refs - 1
-
-  /// Returns true when more than one array points at the same storage.
-  fn is_shared(self) -> bool
-    self.refs > 1
+  /// Swaps the backing storage.
+  fn replace_storage(~self, next_raw: FixedArray<T>) -> void
+    self.storage = next_raw
 
 /// Resolves negative indices relative to array length.
 fn compute_index(index: i32, length: i32) -> i32
@@ -857,10 +836,6 @@ fn ordering_to_i32(value: Ordering) -> i32
     Greater:
       1
 
-/// Builds a fresh ownership tracker for array storage.
-fn new_array_owners() -> ArrayOwners
-  ArrayOwners::init()
-
 /// Returns true when fixed storage contains any null reference entries.
 fn has_null_entries<T>(source: FixedArray<T>) -> bool
   let length = __array_len(source)
@@ -878,21 +853,25 @@ fn ref_is_null<T>(value: T) -> bool
 /// Internal iterator state for `Array::iter`.
 obj ArrayIterator<T> {
   array: Array<T>,
-  index: i32
+  cursor: IteratorStateCell
 }
 
 impl<T> Sequence<T> for Array<T>
   /// Returns an iterator over values.
   api fn iter(self) -> Iterator<T>
-    ArrayIterator<T> { array: self, index: 0 }
+    ArrayIterator<T> {
+      array: self,
+      cursor: IteratorStateCell::single(0)
+    }
 
 impl<T> Iterator<T> for ArrayIterator<T>
   /// Returns the next item from the iterator.
-  api fn next(~self) -> Option<T>
-    if self.index >= self.array.len():
+  api fn next(self) -> Option<T>
+    let index = self.cursor.get(0)
+    if index >= self.array.len():
       return None {}
-    let value = self.array.get(self.index)
-    self.index = self.index + 1
+    let value = self.array.get(index)
+    self.cursor.set(0, index + 1)
     value
 
 impl<T> SubscriptRead<i32, Optional<T>> for Array<T>
@@ -922,12 +901,12 @@ pub fn new_array<T>({ from source: FixedArray<T> }) -> Optional<Array<T>>
     None {}
   else:
     Some<Array<T>> {
-      value: Array<T> { storage: source, count: __array_len(source), owners: new_array_owners() }
+      value: Array<T> { storage: source, count: __array_len(source) }
     }
 
 /// Creates an array from fixed storage without null-entry checks.
 pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
-  Array<T> { storage: source, count: __array_len(source), owners: new_array_owners() }
+  Array<T> { storage: source, count: __array_len(source) }
 
 /// Normalizes a range start into a concrete slice index.
 fn normalize_range_start(range: Range<i32>, length: i32) -> i32

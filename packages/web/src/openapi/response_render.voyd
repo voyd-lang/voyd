@@ -8,6 +8,7 @@ use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 use super::contract::{ OpenApiHeader, OpenApiResponseContract, OpenApiResponseSchemaDocs, OpenApiSchemaDocs }
+use super::json_copy::copy_json_value
 use super::schema::{ opaque_schema, schema_for }
 use super::schema_overlay::apply_schema_docs
 
@@ -97,7 +98,8 @@ fn append_content(
           )
       match(content.get(content_type))
         Some<JsonValue> { value: existing_media }:
-          content.set(content_type, merge_media_schemas(existing_media, schema))
+          let existing_media_copy = copy_json_value(existing_media)
+          content.set(content_type, merge_media_schemas(existing_media_copy, schema))
         None:
           let ~media = Dict<String, JsonValue>::init()
           media.set("schema", schema)

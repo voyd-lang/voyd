@@ -16,8 +16,8 @@ import { tryStoreScalarAggregateExpression } from "../optimization/scalar-aggreg
 import {
   coerceValueToType,
   initStructuralValue,
-  lowerValueForHeapField,
   loadStructuralField,
+  storeValueIntoStorageRef,
   storeStructuralField,
 } from "../structural.js";
 import { maybeReportValueBoxingNote } from "../value-boxing-notes.js";
@@ -25,7 +25,10 @@ import {
   allocateTempLocal,
   getRequiredBinding,
   loadLocalValue,
+  loadBindingStorageRef,
   materializeOwnedBinding,
+  storeProjectedElementBindingValue,
+  storeProjectedFieldBindingValue,
   storeScalarAggregateBindingField,
   storeScalarAggregateBindingValue,
   storeStorageRefBindingValue,
@@ -37,7 +40,6 @@ import {
   getSymbolTypeId,
   wasmTypeFor,
 } from "../types.js";
-import { refCast, structSetFieldValue } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
 
 const storeIntoBinding = ({
@@ -67,16 +69,16 @@ const storeIntoBinding = ({
     if (!binding.mutable) {
       throw new Error("cannot assign to immutable capture");
     }
-    const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
-    const typedEnv =
-      binding.envType === binding.envSuperType
-        ? envRef
-        : refCast(ctx.mod, envRef, binding.envType);
-    return structSetFieldValue({
-      mod: ctx.mod,
-      fieldIndex: binding.fieldIndex,
-      ref: typedEnv,
+    const storageRef = loadBindingStorageRef(binding, ctx);
+    if (!storageRef || typeof binding.typeId !== "number") {
+      throw new Error("mutable capture requires addressable storage");
+    }
+    return storeValueIntoStorageRef({
+      pointer: () => storageRef,
       value: coerced,
+      typeId: binding.typeId,
+      ctx,
+      fnCtx,
     });
   }
 
@@ -89,7 +91,21 @@ const storeIntoBinding = ({
     });
   }
   if (binding.kind === "projected-element-ref") {
-    throw new Error("cannot assign to a projected element binding");
+    return storeProjectedElementBindingValue({
+      binding,
+      value: coerced,
+      ctx,
+      fnCtx,
+    });
+  }
+  if (binding.kind === "projected-field-ref") {
+    return storeProjectedFieldBindingValue({
+      binding,
+      value: coerced,
+      valueTypeId: targetTypeId,
+      ctx,
+      fnCtx,
+    });
   }
   if (binding.kind === "scalar-aggregate") {
     return storeScalarAggregateBindingValue({
@@ -197,7 +213,7 @@ const rebuildValueOwner = ({
     ctx,
   });
 
-const compileFieldAssignment = ({
+export const compileFieldAssignment = ({
   targetExpr,
   value,
   valueTypeId,
@@ -256,7 +272,7 @@ const compileFieldAssignment = ({
   const rootTemp =
     materializedRoot?.binding ??
     allocateTempLocal(wasmTypeFor(rootTypeId, ctx), fnCtx, rootTypeId, ctx);
-  const ops: binaryen.ExpressionRef[] = materializedRoot
+  const rootSetup: binaryen.ExpressionRef[] = materializedRoot
     ? [...materializedRoot.setup]
     : [
         storeLocalValue({
@@ -271,32 +287,61 @@ const compileFieldAssignment = ({
           fnCtx,
         }),
       ];
-
+  const replacementTemp = allocateTempLocal(
+    wasmTypeFor(valueTypeId, ctx),
+    fnCtx,
+    valueTypeId,
+    ctx,
+  );
+  const lastHeapOwner = segments.findLastIndex(
+    (segment) => segment.ownerInfo.layoutKind === "heap-object",
+  );
+  const ops: binaryen.ExpressionRef[] = [];
   const ownerTemps = [rootTemp];
-  segments.slice(0, -1).forEach((segment, index) => {
-    const childTemp = allocateTempLocal(
-      wasmTypeFor(segment.field.typeId, ctx),
-      fnCtx,
-      segment.field.typeId,
-      ctx,
-    );
-    ops.push(
-      storeLocalValue({
-        binding: childTemp,
-        value: loadStructuralField({
-          structInfo: segment.ownerInfo,
-          field: segment.field,
-          pointer: () => loadLocalValue(ownerTemps[index]!, ctx),
-          ctx,
-        }),
-        ctx,
+  const loadOwnerTempsThrough = (ownerCount: number): void => {
+    while (ownerTemps.length < ownerCount) {
+      const index = ownerTemps.length - 1;
+      const segment = segments[index]!;
+      const childTemp = allocateTempLocal(
+        wasmTypeFor(segment.field.typeId, ctx),
         fnCtx,
-      }),
-    );
-    ownerTemps.push(childTemp);
-  });
+        segment.field.typeId,
+        ctx,
+      );
+      ops.push(
+        storeLocalValue({
+          binding: childTemp,
+          value: loadStructuralField({
+            structInfo: segment.ownerInfo,
+            field: segment.field,
+            pointer: () => loadLocalValue(ownerTemps[index]!, ctx),
+            ctx,
+          }),
+          ctx,
+          fnCtx,
+        }),
+      );
+      ownerTemps.push(childTemp);
+    }
+  };
+  if (lastHeapOwner >= 0) {
+    ops.push(...rootSetup);
+    loadOwnerTempsThrough(lastHeapOwner + 1);
+  }
+  ops.push(
+    storeLocalValue({
+      binding: replacementTemp,
+      value,
+      ctx,
+      fnCtx,
+    }),
+  );
+  if (lastHeapOwner < 0) {
+    ops.push(...rootSetup);
+  }
+  loadOwnerTempsThrough(segments.length);
 
-  let replacementValue = value;
+  let replacementValue = loadLocalValue(replacementTemp, ctx);
   let replacementTypeId = valueTypeId;
 
   for (let index = segments.length - 1; index >= 0; index -= 1) {
@@ -516,26 +561,17 @@ export const compileAssignExpr = (
     if (!binding.mutable) {
       throw new Error("cannot assign to immutable capture");
     }
-    const envRef = ctx.mod.local.get(binding.envIndex, binding.envSuperType);
-    const typedEnv =
-      binding.envType === binding.envSuperType
-        ? envRef
-        : refCast(ctx.mod, envRef, binding.envType);
+    const storageRef = loadBindingStorageRef(binding, ctx);
+    if (!storageRef || typeof binding.typeId !== "number") {
+      throw new Error("mutable capture requires addressable storage");
+    }
     return {
-      expr: structSetFieldValue({
-        mod: ctx.mod,
-        fieldIndex: binding.fieldIndex,
-        ref: typedEnv,
-        value:
-          binding.storageType === binding.type
-            ? coerced
-            : lowerValueForHeapField({
-                value: coerced,
-                typeId: targetTypeId,
-                targetType: binding.storageType,
-                ctx,
-                fnCtx,
-              }),
+      expr: storeValueIntoStorageRef({
+        pointer: () => storageRef,
+        value: coerced,
+        typeId: binding.typeId,
+        ctx,
+        fnCtx,
       }),
       usedReturnCall: false,
     };
@@ -553,7 +589,27 @@ export const compileAssignExpr = (
     };
   }
   if (binding.kind === "projected-element-ref") {
-    throw new Error("cannot assign to a projected element binding");
+    return {
+      expr: storeProjectedElementBindingValue({
+        binding,
+        value: coerced,
+        ctx,
+        fnCtx,
+      }),
+      usedReturnCall: false,
+    };
+  }
+  if (binding.kind === "projected-field-ref") {
+    return {
+      expr: storeProjectedFieldBindingValue({
+        binding,
+        value: coerced,
+        valueTypeId: targetTypeId,
+        ctx,
+        fnCtx,
+      }),
+      usedReturnCall: false,
+    };
   }
   if (binding.kind === "scalar-aggregate") {
     return {

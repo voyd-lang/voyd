@@ -5707,8 +5707,9 @@ const typeFunctionCall = ({
       ctx,
     });
     const skipGenericBody =
-      intrinsicMetadata.intrinsic === true &&
-      intrinsicMetadata.intrinsicUsesSignature !== true;
+      state.indexingGenericCalls === true ||
+      (intrinsicMetadata.intrinsic === true &&
+        intrinsicMetadata.intrinsicUsesSignature !== true);
     if (!skipGenericBody && !isExternal) {
       typeGenericFunctionBody({
         symbol: calleeSymbol,
@@ -5904,6 +5905,7 @@ export const typeGenericFunctionBody = ({
   signature,
   substitution,
   retainInstance = true,
+  retainResolvedTypes = false,
   ctx,
   state,
 }: {
@@ -5911,6 +5913,7 @@ export const typeGenericFunctionBody = ({
   signature: FunctionSignature;
   substitution: ReadonlyMap<TypeParamId, TypeId>;
   retainInstance?: boolean;
+  retainResolvedTypes?: boolean;
   ctx: TypingContext;
   state: TypingState;
 }): void => {
@@ -5946,6 +5949,7 @@ export const typeGenericFunctionBody = ({
   ctx.table.pushExprTypeScope();
   const previousResolved = ctx.resolvedExprTypes;
   ctx.resolvedExprTypes = new Map();
+  const instanceResolved = ctx.resolvedExprTypes;
   const previousValueTypes = ctx.valueTypes;
   ctx.valueTypes = new Map(previousValueTypes);
   const nextTypeParams =
@@ -5994,38 +5998,44 @@ export const typeGenericFunctionBody = ({
       state,
       `function ${getSymbolName(symbol, ctx)} return type`,
     );
-    const bodyEffectRow = getExprEffectRow(fn.body, ctx);
-    const inferredEffectRow =
-      defaultEffectRows.length === 0
-        ? bodyEffectRow
-        : composeEffectRows(ctx.effects, [bodyEffectRow, ...defaultEffectRows]);
-    if (signature.annotatedEffects) {
-      ensureEffectCompatibility({
-        inferred: inferredEffectRow,
-        annotated: signature.effectRow ?? ctx.primitives.defaultEffectRow,
-        ctx,
-        span: fn.span,
-        location: fn.ast,
-        reason: `function ${getSymbolName(symbol, ctx)} effects`,
-      });
-    } else if (signature.effectRow !== inferredEffectRow) {
-      signature.effectRow = inferredEffectRow;
-      signatureUpdated = true;
-    }
-    if (signatureUpdated) {
-      refreshFunctionSignatureTypeForGenericBody({
-        symbol,
-        signature,
-        ctx,
-      });
-    }
-    if (state.mode === "strict" && signature.scheme) {
-      if (ctx.effects.getFunctionEffect(symbol) === undefined) {
-        ctx.effects.setFunctionEffect(
+    if (state.indexingGenericCalls !== true) {
+      const bodyEffectRow = getExprEffectRow(fn.body, ctx);
+      const inferredEffectRow =
+        defaultEffectRows.length === 0
+          ? bodyEffectRow
+          : composeEffectRows(ctx.effects, [
+              bodyEffectRow,
+              ...defaultEffectRows,
+            ]);
+      if (signature.annotatedEffects) {
+        ensureEffectCompatibility({
+          inferred: inferredEffectRow,
+          annotated:
+            signature.effectRow ?? ctx.primitives.defaultEffectRow,
+          ctx,
+          span: fn.span,
+          location: fn.ast,
+          reason: `function ${getSymbolName(symbol, ctx)} effects`,
+        });
+      } else if (signature.effectRow !== inferredEffectRow) {
+        signature.effectRow = inferredEffectRow;
+        signatureUpdated = true;
+      }
+      if (signatureUpdated) {
+        refreshFunctionSignatureTypeForGenericBody({
           symbol,
-          signature.scheme,
-          signature.effectRow ?? ctx.primitives.defaultEffectRow,
-        );
+          signature,
+          ctx,
+        });
+      }
+      if (state.mode === "strict" && signature.scheme) {
+        if (ctx.effects.getFunctionEffect(symbol) === undefined) {
+          ctx.effects.setFunctionEffect(
+            symbol,
+            signature.scheme,
+            signature.effectRow ?? ctx.primitives.defaultEffectRow,
+          );
+        }
       }
     }
     if (retainInstance) {
@@ -6044,6 +6054,11 @@ export const typeGenericFunctionBody = ({
     }
     state.currentFunction = previousFunction;
     ctx.resolvedExprTypes = previousResolved;
+    if (retainResolvedTypes) {
+      instanceResolved.forEach((type, expr) =>
+        ctx.resolvedExprTypes.set(expr, type),
+      );
+    }
     ctx.valueTypes = previousValueTypes;
     ctx.table.popExprTypeScope();
     ctx.functions.endInstantiation(key);
@@ -7965,6 +7980,37 @@ const typeIntrinsicCall = (
       return typePanicScratchSetIntrinsic({ args, ctx, state, typeArguments });
     case "__panic_trap":
       return typePanicTrapIntrinsic({ args, ctx, state, typeArguments });
+    case "__shared_cell_begin_read":
+    case "__shared_cell_begin_write":
+      assertIntrinsicArgCount({ name, args, expected: 1 });
+      assertNoIntrinsicTypeArgs(name, typeArguments);
+      return getPrimitiveType(ctx, "i32");
+    case "__shared_cell_end_read":
+    case "__shared_cell_end_write":
+      assertIntrinsicArgCount({ name, args, expected: 1 });
+      assertNoIntrinsicTypeArgs(name, typeArguments);
+      return ctx.primitives.void;
+    case "__shared_cell_value":
+      assertIntrinsicArgCount({ name, args, expected: 1 });
+      assertNoIntrinsicTypeArgs(name, typeArguments);
+      return expectedReturnType ?? ctx.primitives.unknown;
+    case "__shared_cell_set_value":
+      assertIntrinsicArgCount({ name, args, expected: 2 });
+      assertNoIntrinsicTypeArgs(name, typeArguments);
+      return ctx.primitives.void;
+    case "__shared_cell_borrow_fail": {
+      assertIntrinsicArgCount({ name, args, expected: 1 });
+      assertNoIntrinsicTypeArgs(name, typeArguments);
+      const int32 = getPrimitiveType(ctx, "i32");
+      ensureTypeMatches(
+        args[0]!.type,
+        int32,
+        ctx,
+        state,
+        "__shared_cell_borrow_fail status",
+      );
+      return ctx.primitives.void;
+    }
     case "__task_spawn":
     case "__task_detach":
       return typeTaskSpawnIntrinsic({ name, args, ctx, state, typeArguments });

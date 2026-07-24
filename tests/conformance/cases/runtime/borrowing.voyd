@@ -1,0 +1,304 @@
+use std::array::Array
+use std::optional::all
+use std::result::types::{ Err }
+use std::shared_cell::{ SharedCell, SharedCellBorrowError }
+
+obj Box {
+  value: i32
+}
+
+obj Bag {
+  values: Array<i32>
+}
+
+obj Holder {
+  child: Box,
+  count: i32
+}
+
+obj Pair {
+  left: Box
+}
+
+obj OptionalHolder {
+  value?: i32
+}
+
+val BorrowValue {
+  value: i32
+}
+
+val InnerValue {
+  value: i32
+}
+
+val OuterValue {
+  inner: InnerValue
+}
+
+val DisjointValuePair {
+  left: i32,
+  right: i32
+}
+
+trait Replaceable
+  fn replace(~self) -> void
+
+trait PairReplaceable
+  fn replace_and_report(~self) -> (i32, i32)
+
+impl Replaceable for Box
+  fn replace(~self) -> void
+    self = Box { value: 23 }
+
+impl PairReplaceable for Box
+  fn replace_and_report(~self) -> (i32, i32)
+    self = Box { value: 30 }
+    (4, 5)
+
+fn increment(~value: Box) -> void
+  value.value = value.value + 1
+
+fn replace_dynamic(~value: Replaceable) -> void
+  value.replace()
+
+fn replace_dynamic_pair(~value: PairReplaceable) -> (i32, i32)
+  value.replace_and_report()
+
+fn replace_box(~value: Box) -> void
+  value = Box { value: 11 }
+
+fn replace_i32(~value: i32) -> void
+  value = 13
+
+fn bump_inner_value(~value: InnerValue) -> void
+  value.value = value.value + 8
+
+fn mutate_and_return_nine(~value: i32) -> i32
+  value = 7
+  9
+
+fn replace_box_labeled({ ~value: Box }) -> void
+  value = Box { value: 19 }
+
+fn nested_increment(~value: Box) -> void
+  let ~alias = value
+  increment(~alias)
+
+fn update_from_default(
+  ~value: Box,
+  amount: i32 = value.value
+) -> void
+  value.value = value.value + amount
+
+pub fn mutation_after_completed_reborrow() -> i32
+  let ~value = Box { value: 1 }
+  let ~alias = value
+  increment(~alias)
+  value.value = value.value + 3
+  value.value
+
+pub fn readonly_use_after_mutable_call() -> i32
+  let ~value = Box { value: 4 }
+  increment(~value)
+  let alias = value
+  alias.value
+
+pub fn legal_nested_reborrow() -> i32
+  let ~value = Box { value: 8 }
+  nested_increment(~value)
+  increment(~value)
+  value.value
+
+pub fn default_argument_precedes_mutable_call_borrow() -> i32
+  let ~value = Box { value: 6 }
+  update_from_default(~value)
+  value.value
+
+pub fn shared_cell_mutation() -> i32
+  let cell = SharedCell(Box { value: 9 })
+  cell.with_mut((~value) =>
+    value.value = value.value + 4
+  )
+  cell.with((value) => value.value)
+
+pub fn shared_cell_replacement() -> i32
+  let cell = SharedCell(Box { value: 2 })
+  cell.with_mut((~value) =>
+    value = Box { value: 8 }
+    void
+  )
+  cell.with((value) => value.value)
+
+pub fn mutable_capture_replacement() -> i32
+  let ~value = Box { value: 3 }
+  let replace = () =>
+    value = Box { value: 7 }
+    void
+  replace()
+  value.value
+
+pub fn mutable_alias_replacement() -> i32
+  let ~value = Box { value: 3 }
+  let ~alias = value
+  alias = Box { value: 9 }
+  value.value
+
+pub fn mutable_alias_promotes_var_storage() -> i32
+  var value = 3
+  let ~alias = value
+  alias = 9
+  value
+
+pub fn mutable_value_alias_uses_planned_storage() -> i32
+  var value = BorrowValue { value: 3 }
+  let ~alias = value
+  alias.value = 9
+  value.value
+
+pub fn mutable_destructure_alias_uses_planned_storage() -> i32
+  var { value } = BorrowValue { value: 3 }
+  let ~alias = value
+  alias = 9
+  value
+
+pub fn mutable_field_alias_replacement_writes_through() -> i32
+  let ~pair = Pair { left: Box { value: 1 } }
+  let ~left = pair.left
+  left = Box { value: 9 }
+  pair.left.value
+
+pub fn mutable_value_field_alias_mutation_writes_through() -> i32
+  let ~outer = OuterValue {
+    inner: InnerValue { value: 1 }
+  }
+  let ~inner = outer.inner
+  inner.value = 9
+  outer.inner.value
+
+pub fn mutable_field_alias_call_writes_through() -> i32
+  let ~pair = Pair { left: Box { value: 1 } }
+  let ~left = pair.left
+  replace_box(~left)
+  pair.left.value
+
+pub fn mutable_value_field_alias_call_writes_through() -> i32
+  let ~outer = OuterValue {
+    inner: InnerValue { value: 1 }
+  }
+  let ~inner = outer.inner
+  bump_inner_value(~inner)
+  outer.inner.value
+
+pub fn mutable_field_alias_tuple_assignment_writes_through() -> i32
+  let ~pair = Pair { left: Box { value: 1 } }
+  let ~left = pair.left
+  var other = 0
+  (left, other) = (Box { value: 9 }, 4)
+  pair.left.value + other
+
+pub fn mutable_projected_reborrow_writes_through() -> i32
+  let ~pair = Pair { left: Box { value: 1 } }
+  let ~left = pair.left
+  let ~again = left
+  again = Box { value: 9 }
+  pair.left.value
+
+pub fn mutable_temporary_field_initializes_owned_value() -> i32
+  let ~inner = OuterValue { inner: InnerValue { value: 1 } }.inner
+  inner.value = 9
+  inner.value
+
+pub fn mutable_optional_field_alias_coerces_once() -> i32
+  let ~holder = OptionalHolder {}
+  let ~value = holder.value
+  var other = 0
+  (value, other) = (7, 2)
+  match(holder.value)
+    Some { value }: value + other
+    None: 0
+
+pub fn projected_store_evaluates_rhs_before_owner_snapshot() -> i32
+  let ~pair = DisjointValuePair { left: 1, right: 2 }
+  let ~left = pair.left
+  let ~right = pair.right
+  left = mutate_and_return_nine(~right)
+  pair.left * 10 + pair.right
+
+pub fn direct_field_store_evaluates_rhs_before_owner_snapshot() -> i32
+  let ~pair = DisjointValuePair { left: 1, right: 2 }
+  pair.left = mutate_and_return_nine(~pair.right)
+  pair.left * 10 + pair.right
+
+pub fn mutable_alias_in_taken_branch() -> i32
+  var value = 3
+  if true:
+    let ~alias = value
+    alias = 9
+  value
+
+pub fn mutable_alias_in_skipped_branch() -> i32
+  var value = 3
+  if false:
+    let ~alias = value
+    alias = 9
+  value
+
+pub fn mutable_alias_in_zero_iteration_loop() -> i32
+  var value = 3
+  while false:
+    let ~alias = value
+    alias = 9
+  value
+
+pub fn mutable_var_initialization_copies() -> i32
+  var source = 1
+  var copy = source
+  copy = copy + 1
+  source * 10 + copy
+
+pub fn mutable_field_receiver() -> i32
+  let ~bag = Bag { values: Array<i32>::init() }
+  bag.values.push(7)
+  bag.values.at(0)
+
+pub fn mutable_field_replacement() -> i32
+  let ~holder = Holder {
+    child: Box { value: 1 },
+    count: 2
+  }
+  replace_box(~holder.child)
+  replace_i32(~holder.count)
+  replace_box_labeled({ value: holder.child })
+  holder.child.value + holder.count
+
+pub fn mutable_field_closure_replacement() -> i32
+  let replace = (~value: Box) =>
+    value = Box { value: 17 }
+    void
+  let ~holder = Holder {
+    child: Box { value: 1 },
+    count: 2
+  }
+  replace(~holder.child)
+  holder.child.value
+
+pub fn mutable_trait_receiver_replacement() -> i32
+  let ~value = Box { value: 1 }
+  replace_dynamic(~value)
+  value.value
+
+pub fn mutable_trait_receiver_multivalue() -> i32
+  let ~value = Box { value: 1 }
+  let (first, second) = replace_dynamic_pair(~value)
+  value.value + first + second
+
+pub fn shared_cell_conflict_is_recoverable() -> i32
+  let cell = SharedCell(Box { value: 1 })
+  cell.with_mut((~value) =>
+    match(cell.try_with((current) => current.value))
+      Err<SharedCellBorrowError>:
+        value.value
+      else:
+        0
+  )

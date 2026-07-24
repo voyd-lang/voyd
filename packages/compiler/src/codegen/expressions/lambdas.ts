@@ -15,18 +15,23 @@ import type {
 } from "../context.js";
 import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
 import {
-  getAbiTypesForSignature,
+  getCallableParamAbiKind,
+  getCallableParamAbiTypes,
   getClosureTypeInfo,
   getInlineHeapBoxType,
+  getMutableRefStorageType,
   getRequiredExprType,
   getSignatureSpillBoxType,
   getSymbolTypeId,
   wasmTypeFor,
 } from "../types.js";
 import {
+  allocateMutableRefLocal,
   allocateTempLocal,
+  createStorageRefBinding,
   getRequiredBinding,
   loadBindingValue,
+  loadBindingStorageRef,
   storeLocalValue,
 } from "../locals.js";
 import { wrapValueInOutcome } from "../effects/outcome-values.js";
@@ -193,7 +198,33 @@ const initializeLambdaParameterBindings = ({
   let abiIndex = firstAbiIndex;
 
   return expr.parameters.map((param, index) => {
-    const typeId = desc.parameters[index]!.type;
+    const parameter = desc.parameters[index]!;
+    const typeId = parameter.type;
+    const abiKind = getCallableParamAbiKind({
+      typeId,
+      bindingKind: parameter.bindingKind,
+      defaulted: parameter.defaulted,
+      ctx,
+    });
+    const abiTypes = getCallableParamAbiTypes({
+      typeId,
+      bindingKind: parameter.bindingKind,
+      defaulted: parameter.defaulted,
+      ctx,
+    });
+    if (abiKind === "readonly_ref" || abiKind === "mutable_ref") {
+      fnCtx.bindings.set(
+        param.symbol,
+        createStorageRefBinding({
+          index: abiIndex,
+          typeId,
+          mutable: abiKind === "mutable_ref",
+          ctx,
+        }),
+      );
+      abiIndex += abiTypes.length;
+      return ctx.mod.nop();
+    }
     const localType = wasmTypeFor(typeId, ctx);
     const binding = allocateTempLocal(localType, fnCtx, typeId, ctx);
     fnCtx.bindings.set(param.symbol, {
@@ -201,7 +232,6 @@ const initializeLambdaParameterBindings = ({
       kind: "local",
       typeId,
     });
-    const abiTypes = getAbiTypesForSignature(typeId, ctx);
     const abiValues = abiTypes.map((abiType, abiOffset) =>
       ctx.mod.local.get(abiIndex + abiOffset, abiType),
     );
@@ -473,7 +503,10 @@ export const compileLambdaExpr = (
           typeId,
           wasmType: wasmTypeFor(typeId, ctx),
           storageType:
-            getInlineHeapBoxType({ typeId, ctx }) ?? wasmTypeFor(typeId, ctx),
+            (capture.mutable
+              ? getMutableRefStorageType({ typeId, ctx })
+              : getInlineHeapBoxType({ typeId, ctx })) ??
+            wasmTypeFor(typeId, ctx),
           mutable: capture.mutable,
           fieldIndex: index + 1,
         };
@@ -518,6 +551,40 @@ export const compileLambdaExpr = (
       );
     }
     const binding = getRequiredBinding(captureInfo.symbol, ctx, fnCtx);
+    if (captureInfo.mutable) {
+      const existingStorage = loadBindingStorageRef(binding, ctx);
+      if (existingStorage) {
+        return existingStorage;
+      }
+      const owned = allocateMutableRefLocal({
+        typeId: captureInfo.typeId,
+        ctx,
+        fnCtx,
+      });
+      const initial = loadBindingValue(binding, ctx, fnCtx);
+      fnCtx.bindings.set(captureInfo.symbol, {
+        ...owned,
+        kind: "local",
+        typeId: captureInfo.typeId,
+      });
+      const storage = loadBindingStorageRef(owned, ctx);
+      if (!storage) {
+        throw new Error("mutable capture requires addressable storage");
+      }
+      return ctx.mod.block(
+        null,
+        [
+          storeLocalValue({
+            binding: owned,
+            value: initial,
+            ctx,
+            fnCtx,
+          }),
+          storage,
+        ],
+        owned.storageType,
+      );
+    }
     const value = coerceValueToType({
       value: loadBindingValue(binding, ctx, fnCtx),
       actualType: captureInfo.typeId,
@@ -536,7 +603,7 @@ export const compileLambdaExpr = (
     refFunc(ctx.mod, fnName, base.fnRefType),
     ...captureValues.map((value, index) => {
       const captureInfo = env.captures[index]!;
-      return captureInfo.storageType === captureInfo.wasmType
+      return binaryen.getExpressionType(value) === captureInfo.storageType
         ? value
         : lowerValueForHeapField({
             value,

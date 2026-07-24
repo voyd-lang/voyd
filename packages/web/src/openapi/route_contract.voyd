@@ -106,23 +106,23 @@ fn literal_docs_without_overrides(
     Some<JsonValue> { value }:
       value.match(active)
         JsonObject:
-          let ~fields = active.value
-          remove_literal_override(fields, "summary", docs.summary)
-          remove_literal_override(fields, "description", docs.description)
-          remove_literal_override(fields, "operation_id", docs.operation_id)
-          remove_literal_override(fields, "tags", docs.tags)
-          remove_literal_override(fields, "hidden", docs.hidden)
+          var fields = active.value
+          fields = remove_literal_override(fields, "summary", docs.summary)
+          fields = remove_literal_override(fields, "description", docs.description)
+          fields = remove_literal_override(fields, "operation_id", docs.operation_id)
+          fields = remove_literal_override(fields, "tags", docs.tags)
+          fields = remove_literal_override(fields, "hidden", docs.hidden)
           Some<JsonValue> { value: JsonObject { value: fields } }
         else:
           Some<JsonValue> { value: value }
 
 fn remove_literal_override<T>(
-  ~fields: Dict<String, JsonValue>,
+  fields: Dict<String, JsonValue>,
   name: String,
   value: Option<T>
-) -> void
+) -> Dict<String, JsonValue>
   match(value)
     Some<T>:
-      let _ = fields.remove(name)
+      fields.removing(name)
     None:
-      void
+      fields

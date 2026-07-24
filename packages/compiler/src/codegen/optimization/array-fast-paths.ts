@@ -837,7 +837,10 @@ const loadI32Local = ({
   if (!binding || binding.kind !== "local") {
     return undefined;
   }
-  return ctx.mod.local.get(binding.index, binaryen.i32);
+  const value = loadLocalValue(binding, ctx);
+  return binaryen.getExpressionType(value) === binaryen.i32
+    ? value
+    : undefined;
 };
 
 const withSafeArrayLoopScope = <T>({

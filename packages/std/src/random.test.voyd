@@ -3,18 +3,18 @@ use std::msgpack::self as msgpack
 use std::test::assertions::all
 
 test "fill_bytes calls host op and fills via fallback":
-  let ~buf = ByteBuffer::init()
   let ~requested_lengths = Array<i32>::init()
 
-  try
-    fill_bytes(buf, 3)
-  Random::fill_bytes(tail, requested):
-    requested_lengths.push(requested)
-    tail(msgpack::make_null())
-  Random::next_i64(tail):
-    tail(i64_from_i32(1))
-  Random::next_u64(tail):
-    tail(i64_from_i32(0))
+  let buf =
+    try
+      fill_bytes(ByteBuffer::init(), 3)
+    Random::fill_bytes(tail, requested):
+      requested_lengths.push(requested)
+      tail(msgpack::make_null())
+    Random::next_i64(tail):
+      tail(i64_from_i32(1))
+    Random::next_u64(tail):
+      tail(i64_from_i32(0))
 
   let bytes = buf.as_bytes().to_array()
   assert(optional_i32_or(requested_lengths.get(0), -1), eq: 3)

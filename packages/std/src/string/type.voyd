@@ -311,7 +311,7 @@ impl StringSlice
   /// Splits a string by a delimiter or predicate.
   api fn split(
     self,
-    { where pred: (rune: i32) -> bool, max_splits?: i32, keep_empty?: bool }
+    { where pred: (rune: i32) : () -> bool, max_splits?: i32, keep_empty?: bool }
   ) -> Array<StringSlice>
     let allow_empty = keep_empty ?? false
     let limit = max_splits ?? -1
@@ -855,7 +855,7 @@ impl String
   /// Splits a string by a delimiter or predicate.
   api fn split(
     self,
-    { where pred: (rune: i32) -> bool, max_splits?: i32, keep_empty?: bool }
+    { where pred: (rune: i32) : () -> bool, max_splits?: i32, keep_empty?: bool }
   ) -> Array<StringSlice>
     let allow_empty = keep_empty ?? false
     let limit = max_splits ?? -1
@@ -946,9 +946,6 @@ impl String
 
   /// Returns a lowercase ASCII copy of this string.
   api fn lowered(self): () -> String
-    if self.byte_count == 0:
-      return self
-
     let source = self.bytes.raw_storage()
     let out = new_fixed_array<i32>(self.byte_count)
     var index = 0
@@ -965,9 +962,6 @@ impl String
 
   /// Returns an uppercase ASCII copy of this string.
   api fn uppered(self): () -> String
-    if self.byte_count == 0:
-      return self
-
     let source = self.bytes.raw_storage()
     let out = new_fixed_array<i32>(self.byte_count)
     var index = 0
@@ -988,9 +982,9 @@ impl String
     { old: String, with replacement: String, max_replacements?: i32 }
   ): () -> String
     if old.byte_count <= 0:
-      return self
+      return new_string(self.copy_raw_bytes())
     if self.byte_count == 0:
-      return self
+      return empty_string()
 
     let source = self.bytes.raw_storage()
     let old_source = old.raw_bytes()
@@ -1031,14 +1025,22 @@ impl String
     if self.byte_count == 0:
       return self
 
-    let capacity = self.byte_count * count
-    let ~out = Array<i32>::with_capacity(capacity)
+    let byte_count = self.byte_count * count
+    let out = new_fixed_array<i32>(byte_count)
     let source = self.raw_bytes()
-    var times = 0
-    while times < count:
-      append_bytes(out, source, self.byte_count)
-      times = times + 1
-    new_string(out.to_fixed_array())
+    var offset = 0
+    while offset < byte_count:
+      __array_copy(out, {
+        from: source,
+        to_index: offset,
+        from_index: 0,
+        count: self.byte_count
+      })
+      offset = offset + self.byte_count
+    String {
+      bytes: new_array_unchecked<i32>({ from: out }),
+      byte_count: byte_count
+    }
 
   /// Returns a copy padded on the left to the requested width.
   api fn pad_left(self, { width: i32, with?: i32 }) -> String
@@ -1265,7 +1267,7 @@ obj Utf8Read {
 obj StringIterator {
   source: FixedArray<i32>,
   byte_count: i32,
-  index: i32
+  cursor: IteratorStateCell
 }
 
 obj StringGraphemeSequence {
@@ -1274,7 +1276,7 @@ obj StringGraphemeSequence {
 
 obj StringGraphemeIterator {
   source: String,
-  index: i32
+  cursor: IteratorStateCell
 }
 
 impl Sequence<i32> for String
@@ -1283,31 +1285,42 @@ impl Sequence<i32> for String
     StringIterator {
       source: self.raw_bytes(),
       byte_count: self.byte_len(),
-      index: 0
+      cursor: IteratorStateCell::single(0)
     }
 
 impl Iterator<i32> for StringIterator
   /// Returns the next item from the iterator.
-  api fn next(~self) -> Option<i32>
-    if self.index >= self.byte_count:
+  api fn next(self) -> Option<i32>
+    let index = self.cursor.get(0)
+    if index >= self.byte_count:
       return None {}
-    let read = decode_utf8_at(self.source, self.byte_count, self.index)
-    self.index = self.index + read.width
+    let read = decode_utf8_at(self.source, self.byte_count, index)
+    self.cursor.set(0, index + read.width)
     Some<i32> { value: read.codepoint }
 
 impl Sequence<StringSlice> for StringGraphemeSequence
   /// Returns an iterator over values.
   api fn iter(self) -> Iterator<StringSlice>
-    StringGraphemeIterator { source: self.source, index: 0 }
+    StringGraphemeIterator {
+      source: self.source,
+      cursor: IteratorStateCell::single(0)
+    }
 
 impl Iterator<StringSlice> for StringGraphemeIterator
   /// Returns the next item from the iterator.
-  api fn next(~self) -> Option<StringSlice>
-    if self.index >= self.source.byte_len():
+  api fn next(self) -> Option<StringSlice>
+    let start = self.cursor.get(0)
+    if start >= self.source.byte_len():
       return None {}
-    let start = self.index
-    self.index = next_grapheme_boundary(self.source.raw_bytes(), self.source.byte_len(), self.index)
-    Some<StringSlice> { value: new_string_slice(self.source, start, self.index - start) }
+    let end = next_grapheme_boundary(
+      self.source.raw_bytes(),
+      self.source.byte_len(),
+      start
+    )
+    self.cursor.set(0, end)
+    Some<StringSlice> {
+      value: new_string_slice(self.source, start, end - start)
+    }
 
 fn decode_utf8_at(source: FixedArray<i32>, limit: i32, index: i32) -> Utf8Read
   if index < 0 or index >= limit:

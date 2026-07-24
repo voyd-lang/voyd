@@ -28,6 +28,7 @@ export type CompileCallArgumentOptions = {
 
 export type CompiledCallArgumentsForParams = {
   args: binaryen.ExpressionRef[];
+  writebacks: binaryen.ExpressionRef[];
   consumedArgCount: number;
   meta?: FunctionMetadata;
 };

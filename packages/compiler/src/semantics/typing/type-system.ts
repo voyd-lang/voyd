@@ -1390,6 +1390,7 @@ const resolveFunctionTypeExpr = (
       typeParams,
     ),
     optional: param.optional ?? false,
+    bindingKind: param.bindingKind,
   }));
   const returnType = resolveTypeExpr(
     expr.returnType,

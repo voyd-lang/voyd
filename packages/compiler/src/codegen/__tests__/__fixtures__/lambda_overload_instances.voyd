@@ -1,3 +1,58 @@
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> {
+  pri __value: T,
+  pri __borrow_state: FixedArray<i32>
+}
+
+impl<T> SharedCell<T>
+  fn init(value: T) -> SharedCell<T>
+    SharedCell<T> {
+      __value: value,
+      __borrow_state: __array_new<i32>(1)
+    }
+
+  fn with<R>(self, body: fn(T) : () -> R): () -> R
+    let status = shared_cell_begin_read(self)
+    if status != 0:
+      __shared_cell_borrow_fail(status)
+    let result = body(shared_cell_value(self))
+    shared_cell_end_read(self)
+    result
+
+  fn with_mut<R>(self, body: fn(~T) : () -> R): () -> R
+    let status = shared_cell_begin_write(self)
+    if status != 0:
+      __shared_cell_borrow_fail(status)
+    let ~value = shared_cell_value(self)
+    let result = body(~value)
+    shared_cell_set_value(self, value)
+    shared_cell_end_write(self)
+    result
+
+@intrinsic(name: "__shared_cell_begin_read", uses_signature: false)
+fn shared_cell_begin_read<T>(cell: SharedCell<T>): () -> i32
+  __shared_cell_begin_read(cell)
+
+@intrinsic(name: "__shared_cell_begin_write", uses_signature: false)
+fn shared_cell_begin_write<T>(cell: SharedCell<T>): () -> i32
+  __shared_cell_begin_write(cell)
+
+@intrinsic(name: "__shared_cell_end_read", uses_signature: false)
+fn shared_cell_end_read<T>(cell: SharedCell<T>): () -> void
+  __shared_cell_end_read(cell)
+
+@intrinsic(name: "__shared_cell_end_write", uses_signature: false)
+fn shared_cell_end_write<T>(cell: SharedCell<T>): () -> void
+  __shared_cell_end_write(cell)
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+@intrinsic(name: "__shared_cell_set_value", uses_signature: false)
+fn shared_cell_set_value<T>(cell: SharedCell<T>, value: T): () -> void
+  __shared_cell_set_value(cell, value)
+
 type I32Closure = () -> i32
 
 fn overloaded(value: i32)
@@ -13,12 +68,17 @@ fn make_caller<T>(value: T) -> I32Closure
   () => overloaded(value)
 
 fn make_nested_counter(start: i32)
-  var base = start
+  let base = SharedCell(start)
   (offset: i32) =>
-    base = base + offset
+    base.with_mut((~value) =>
+      value = value + offset
+      void
+    )
     () =>
-      base = base + offset + 1
-      base
+      base.with_mut((~value) =>
+        value = value + offset + 1
+        value
+      )
 
 pub fn main() -> i32
   let call_int = make_caller(1)

@@ -11,6 +11,7 @@ import type {
 import { compileExpression } from "./expressions/index.js";
 import {
   allocateAddressableLocal,
+  allocateMutableRefLocal,
   allocateTempLocal,
   createStorageRefBinding,
   loadBindingStorageRef,
@@ -326,11 +327,16 @@ const compileReferenceDefaultStores = ({
   if (!suppliedStorage) {
     throw new Error("reference default payload requires a storage reference");
   }
-  const defaultStorage = allocateAddressableLocal({ typeId, ctx, fnCtx });
-  const defaultStorageRef = loadBindingStorageRef(defaultStorage, ctx);
-  if (!defaultStorageRef) {
-    throw new Error("reference default requires addressable local storage");
-  }
+  const defaultStorage = mutable
+    ? allocateMutableRefLocal({ typeId, ctx, fnCtx })
+    : allocateAddressableLocal({ typeId, ctx, fnCtx });
+  const defaultStorageRef = (): binaryen.ExpressionRef => {
+    const reference = loadBindingStorageRef(defaultStorage, ctx);
+    if (!reference) {
+      throw new Error("reference default requires addressable local storage");
+    }
+    return reference;
+  };
   const selectedStorage = allocateTempLocal(rawBinding.storageType, fnCtx);
   fnCtx.bindings.set(
     symbol,
@@ -351,7 +357,7 @@ const compileReferenceDefaultStores = ({
           ctx,
           fnCtx,
         }),
-        defaultStorageRef,
+        defaultStorageRef(),
       ],
       defaultStorage.storageType,
     );
@@ -420,7 +426,9 @@ const compileCallShapeOmittedParameterInitialization = ({
     const bindingKind = meta.parameters[index]?.bindingKind;
     const referenceBound = bindingKind !== undefined && bindingKind !== "value";
     const binding = referenceBound
-      ? allocateAddressableLocal({ typeId: targetTypeId, ctx, fnCtx })
+      ? bindingKind === "mutable-ref"
+        ? allocateMutableRefLocal({ typeId: targetTypeId, ctx, fnCtx })
+        : allocateAddressableLocal({ typeId: targetTypeId, ctx, fnCtx })
       : allocateTempLocal(
           wasmTypeFor(targetTypeId, ctx),
           fnCtx,

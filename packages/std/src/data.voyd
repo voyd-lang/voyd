@@ -443,8 +443,10 @@ fn data_value_to_msgpack(value: DataValue): () -> MsgPack
     DataObject:
       msgpack::make_map(data_fields_to_msgpack(active.fields))
     DataVariant:
-      let ~fields = data_fields_to_msgpack(active.fields)
-      fields.set("$variant", msgpack::make_string(active.name))
+      let fields = data_fields_to_msgpack(active.fields).setting(
+        "$variant",
+        msgpack::make_string(active.name)
+      )
       msgpack::make_map(fields)
 
 fn data_fields_to_msgpack(fields: Array<DataField>): () -> Dict<String, MsgPack>

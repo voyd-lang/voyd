@@ -90,6 +90,15 @@ export interface TypingResult {
   callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
   callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
   callTraitDispatches: ReadonlySet<HirExprId>;
+  borrowCallTargets: ReadonlyMap<
+    HirExprId,
+    ReadonlyMap<string, SymbolRef>
+  >;
+  borrowCallArgumentPlans: ReadonlyMap<
+    HirExprId,
+    ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
+  >;
+  borrowResolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   sourceImportLocals: ReadonlySet<SymbolId>;
   functionInstantiationInfo: ReadonlyMap<
     SymbolRefKey,
@@ -681,6 +690,7 @@ export interface FunctionScope {
 
 export interface TypingState {
   mode: TypeCheckMode;
+  indexingGenericCalls?: boolean;
   currentFunction?: FunctionScope;
   /** Internal cache for typeSatisfies current-function generic constraints. */
   currentFunctionConstraintCache: {
@@ -726,6 +736,12 @@ export interface TypingContext {
   activeValueTypeComputations: Set<SymbolId>;
   tailResumptions: Map<HirExprId, HirEffectHandlerClause["tailResumption"]>;
   callResolution: CallResolution;
+  borrowCallTargets: Map<HirExprId, Map<string, SymbolRef>>;
+  borrowCallArgumentPlans: Map<
+    HirExprId,
+    Map<string, readonly CallArgumentPlanEntry[]>
+  >;
+  borrowResolvedExprTypes: Map<HirExprId, TypeId>;
   functions: FunctionStore;
   objects: ObjectStore;
   traits: TraitStore;

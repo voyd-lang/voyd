@@ -4,6 +4,37 @@
 
 use std::optional::all
 
+/// Internal scalar cell for iterator cursor state.
+///
+/// The backing storage never escapes, stores only `i32` values, and is accessed
+/// through non-reentrant leaf operations. This gives shared-receiver iterators
+/// explicit interior mutability without the callback-capable `SharedCell` runtime.
+pub obj IteratorStateCell {
+  pri slots: FixedArray<i32>
+}
+
+impl IteratorStateCell
+  fn single(value: i32) -> IteratorStateCell
+    let slots = new_iterator_state_slots(1)
+    __array_set(slots, 0, value)
+    IteratorStateCell { slots }
+
+  fn pair(first: i32, second: i32) -> IteratorStateCell
+    let slots = new_iterator_state_slots(2)
+    __array_set(slots, 0, first)
+    __array_set(slots, 1, second)
+    IteratorStateCell { slots }
+
+  fn get(self, index: i32) -> i32
+    __array_get(self.slots, index)
+
+  fn set(self, index: i32, value: i32) -> void
+    __array_set(self.slots, index, value)
+    void
+
+fn new_iterator_state_slots(size: i32) -> FixedArray<i32>
+  __array_new<i32>(size)
+
 /// Trait for values that can produce iterators.
 pub trait Sequence<T>
   /// Returns an iterator over sequence items.
@@ -12,7 +43,7 @@ pub trait Sequence<T>
 /// Trait for stateful iterators over `T` values.
 pub trait Iterator<T>
   /// Produces the next item, or `None` when exhausted.
-  fn next(~self) -> Option<T>
+  fn next(self) -> Option<T>
 
 pub macro for(case)
   let cond = case.get(1)
@@ -23,7 +54,7 @@ pub macro for(case)
   let iterator_val_id = identifier(__iterable_val)
 
   `
-    let ~($iterator_id) = $iterable.iter()
+    let $iterator_id = $iterable.iter()
     while true:
       let $iterator_val_id = ($iterator_id).next()
       $iterator_val_id.match

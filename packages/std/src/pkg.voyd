@@ -19,6 +19,7 @@ pub self::enums
 pub self::string
 pub self::box
 pub self::memory
+pub self::shared_cell
 pub self::msgpack
 pub self::dict
 pub self::range
@@ -69,6 +70,7 @@ pub std::string::{
   from_utf8
 }
 pub std::box::{ Box }
+pub std::shared_cell::{ SharedCell, SharedCellBorrowError }
 pub std::json::JsonArray
 pub std::json::JsonBool
 pub std::json::JsonError

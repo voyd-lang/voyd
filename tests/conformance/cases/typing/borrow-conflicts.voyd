@@ -1,0 +1,27 @@
+obj Box {
+  value: i32
+}
+
+obj Holder {
+  value: Box
+}
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn mutate_pair(~left: Box, ~right: Box) -> void
+  mutate(~left)
+  mutate(~right)
+
+fn retain(~holder: Holder, value: Box) -> void
+  holder.value = value
+
+fn simultaneous_mutable_aliases(~value: Box) -> void
+  mutate_pair(~value, ~value)
+
+fn mutation_after_capability_downgrade(
+  ~value: Box,
+  ~holder: Holder
+) -> void
+  retain(~holder, value)
+  mutate(~value)

@@ -332,31 +332,18 @@ impl App
     { method: Method, docs: RouteDocs }
   ) -> App
     let full_path = join_route_paths(self.prefix.as_slice(), path)
-    let ~routes = self.routes.copied()
     let runtime_key = runtime_route_key(full_path.as_slice(), self.trailing_slash_policy)
     var index = 0
-    var documented = false
-    while index < routes.len() and not documented:
-      let route = routes.at(index)
+    var route_index = -1
+    while index < self.routes.len() and route_index < 0:
+      let route = self.routes.at(index)
       if methods_equal(route.method, method) and runtime_route_key(
         route.path.as_slice(),
         self.trailing_slash_policy
       ).equals(runtime_key):
-        let updated = Route {
-          method: route.method,
-          path: route.path,
-          segments: route.segments,
-          middleware: route.middleware,
-          handler: route.handler,
-          error_handler: route.error_handler,
-          streaming_request: route.streaming_request,
-          openapi_exposure_include_doc_comments: route.openapi_exposure_include_doc_comments,
-          order: route.order,
-          contract: apply_route_docs(route.contract, docs)
-        }
-        let _ = routes.replace(index, with: updated)
-        documented = true
+        route_index = index
       index = index + 1
+    let routes = routes_with_docs(self.routes, route_index, docs)
     App {
       routes: routes,
       current_middleware: self.current_middleware,
@@ -1897,30 +1884,17 @@ impl App
   fn mark_streaming(self, path: StringSlice, { method: Method }) -> App
     let full_path = join_route_paths(self.prefix.as_slice(), path)
     let runtime_key = runtime_route_key(full_path.as_slice(), self.trailing_slash_policy)
-    let ~routes = self.routes.copied()
     var index = 0
-    var updated = false
-    while index < routes.len() and not updated:
-      let route = routes.at(index)
+    var route_index = -1
+    while index < self.routes.len() and route_index < 0:
+      let route = self.routes.at(index)
       if methods_equal(route.method, method) and runtime_route_key(
         route.path.as_slice(),
         self.trailing_slash_policy
       ).equals(runtime_key):
-        let next = Route {
-          method: route.method,
-          path: route.path,
-          segments: route.segments,
-          middleware: route.middleware,
-          handler: route.handler,
-          error_handler: route.error_handler,
-          streaming_request: true,
-          openapi_exposure_include_doc_comments: route.openapi_exposure_include_doc_comments,
-          order: route.order,
-          contract: route.contract
-        }
-        let _ = routes.replace(index, with: next)
-        updated = true
+        route_index = index
       index = index + 1
+    let routes = routes_with_streaming(self.routes, route_index)
     App {
       routes: routes,
       current_middleware: self.current_middleware,
@@ -1932,6 +1906,52 @@ impl App
       trailing_slash_policy: self.trailing_slash_policy,
       openapi_info: self.openapi_info
     }
+
+fn routes_with_docs(routes: Array<Route>, target_index: i32, docs: RouteDocs) -> Array<Route>
+  let ~out = Array<Route>::with_capacity(routes.len())
+  var index = 0
+  while index < routes.len():
+    let route = routes.at(index)
+    if index == target_index:
+      out.push(Route {
+        method: route.method,
+        path: route.path,
+        segments: route.segments,
+        middleware: route.middleware,
+        handler: route.handler,
+        error_handler: route.error_handler,
+        streaming_request: route.streaming_request,
+        openapi_exposure_include_doc_comments: route.openapi_exposure_include_doc_comments,
+        order: route.order,
+        contract: apply_route_docs(route.contract, docs)
+      })
+    else:
+      out.push(route)
+    index = index + 1
+  out
+
+fn routes_with_streaming(routes: Array<Route>, target_index: i32) -> Array<Route>
+  let ~out = Array<Route>::with_capacity(routes.len())
+  var index = 0
+  while index < routes.len():
+    let route = routes.at(index)
+    if index == target_index:
+      out.push(Route {
+        method: route.method,
+        path: route.path,
+        segments: route.segments,
+        middleware: route.middleware,
+        handler: route.handler,
+        error_handler: route.error_handler,
+        streaming_request: true,
+        openapi_exposure_include_doc_comments: route.openapi_exposure_include_doc_comments,
+        order: route.order,
+        contract: route.contract
+      })
+    else:
+      out.push(route)
+    index = index + 1
+  out
 
 pub fn app() -> App
   App::init()
@@ -2257,8 +2277,7 @@ fn buffer_streaming_request(
     None:
       Ok<IncomingRequest> { value: request }
     Some<RequestBody> { value }:
-      let ~reader = value
-      match(reader.read_all())
+      match(value.read_all())
         Err<HostError> { error }:
           Err<HostError> { error: error }
         Ok<Bytes> { value: bytes }:

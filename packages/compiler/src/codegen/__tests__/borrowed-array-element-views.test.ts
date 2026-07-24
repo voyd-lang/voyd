@@ -116,7 +116,7 @@ fn bump_wide_a(~value: WideVec5)
 pub fn main() -> i32
   let arr = __array_new<WideVec5>(1)
   __array_set(arr, 0, WideVec5 { a: 1, b: 2, c: 3, d: 4, e: 5 })
-  let value = __array_get(arr, 0)
+  let ~value = __array_get(arr, 0)
   bump_wide_a(~value)
   value.a + __array_get(arr, 0).a
 `);

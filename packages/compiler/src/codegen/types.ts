@@ -2,8 +2,11 @@ import binaryen from "binaryen";
 import {
   binaryenTypeToHeapType,
   defineStructType,
+  initStruct,
   refFunc,
   refCast,
+  structGetFieldValue,
+  structSetFieldValue,
   TypeBuilderBuildError,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { mapPrimitiveToWasm } from "./primitive-types.js";
@@ -16,9 +19,7 @@ import {
 import { MAX_MULTIVALUE_INLINE_LANES } from "./multivalue.js";
 import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { RTT_METADATA_SLOT_COUNT } from "./rtt/index.js";
-import {
-  pickTraitImplMethodMeta,
-} from "./function-lookup.js";
+import { pickTraitImplMethodMeta } from "./function-lookup.js";
 import type {
   CodegenContext,
   ClosureTypeInfo,
@@ -33,6 +34,7 @@ import type {
   FixedArrayWasmType,
   OptimizedValueAbiKind,
 } from "./context.js";
+import { preserveResultAcrossOperations } from "./result-sequencing.js";
 import type { MethodAccessorEntry } from "./rtt/method-accessor.js";
 import type { CodegenTraitImplInstance } from "../semantics/codegen-view/index.js";
 import type {
@@ -153,7 +155,8 @@ const nominalObjectishComponent = (
     return undefined;
   }
   const nominalDesc = ctx.program.types.getTypeDesc(nominalId);
-  return nominalDesc.kind === "nominal-object" || nominalDesc.kind === "value-object"
+  return nominalDesc.kind === "nominal-object" ||
+    nominalDesc.kind === "value-object"
     ? nominalId
     : undefined;
 };
@@ -178,7 +181,9 @@ const collectUnionMembers = (
   if (desc.kind !== "union") {
     return [typeId];
   }
-  return desc.members.flatMap((member) => collectUnionMembers(member, ctx, seen));
+  return desc.members.flatMap((member) =>
+    collectUnionMembers(member, ctx, seen),
+  );
 };
 
 export const shouldInlineUnionLayout = (
@@ -288,7 +293,12 @@ export const getInlineUnionLayout = (
 ): InlineUnionLayout => {
   const optionalInfo = getOptionalLayoutInfo(typeId, ctx);
   if (optionalInfo && shouldInlineUnionLayout(typeId, ctx)) {
-    const abiTypes = flattenTypeToAbiTypes(optionalInfo.innerType, ctx, seen, mode);
+    const abiTypes = flattenTypeToAbiTypes(
+      optionalInfo.innerType,
+      ctx,
+      seen,
+      mode,
+    );
     return {
       typeId,
       abiTypes: [binaryen.i32, ...abiTypes],
@@ -322,7 +332,10 @@ export const getInlineUnionLayout = (
     abiStart += abiTypes.length;
     return layout;
   });
-  const abiTypes = [binaryen.i32, ...memberLayouts.flatMap((member) => member.abiTypes)];
+  const abiTypes = [
+    binaryen.i32,
+    ...memberLayouts.flatMap((member) => member.abiTypes),
+  ];
   return {
     typeId,
     abiTypes,
@@ -439,7 +452,8 @@ const classifyOptionalMember = ({
 export const getDirectAbiTypesForSignature = (
   typeId: TypeId,
   ctx: CodegenContext,
-): readonly binaryen.Type[] => flattenTypeToAbiTypes(typeId, ctx, new Set(), "signature");
+): readonly binaryen.Type[] =>
+  flattenTypeToAbiTypes(typeId, ctx, new Set(), "signature");
 
 export const isWideValueType = ({
   typeId,
@@ -449,7 +463,8 @@ export const isWideValueType = ({
   ctx: CodegenContext;
 }): boolean =>
   typeof getInlineHeapBoxType({ typeId, ctx }) === "number" &&
-  getDirectAbiTypesForSignature(typeId, ctx).length > MAX_MULTIVALUE_INLINE_LANES;
+  getDirectAbiTypesForSignature(typeId, ctx).length >
+    MAX_MULTIVALUE_INLINE_LANES;
 
 export const getWideValueStorageType = ({
   typeId,
@@ -458,7 +473,9 @@ export const getWideValueStorageType = ({
   typeId: TypeId;
   ctx: CodegenContext;
 }): binaryen.Type | undefined =>
-  isWideValueType({ typeId, ctx }) ? getInlineHeapBoxType({ typeId, ctx }) : undefined;
+  isWideValueType({ typeId, ctx })
+    ? getInlineHeapBoxType({ typeId, ctx })
+    : undefined;
 
 export const getOptimizedParamAbiKind = ({
   typeId,
@@ -471,7 +488,7 @@ export const getOptimizedParamAbiKind = ({
 }): OptimizedValueAbiKind => {
   if (
     bindingKind === "mutable-ref" &&
-    typeof getInlineHeapBoxType({ typeId, ctx }) === "number"
+    typeof getMutableRefStorageType({ typeId, ctx }) === "number"
   ) {
     return "mutable_ref";
   }
@@ -503,7 +520,10 @@ export const getOptimizedAbiTypesForParam = ({
   if (abiKind === "direct") {
     return getAbiTypesForSignature(typeId, ctx);
   }
-  const storageType = getInlineHeapBoxType({ typeId, ctx });
+  const storageType =
+    abiKind === "mutable_ref"
+      ? getMutableRefStorageType({ typeId, ctx })
+      : getInlineHeapBoxType({ typeId, ctx });
   if (typeof storageType !== "number") {
     throw new Error(`missing ref storage type for parameter ${typeId}`);
   }
@@ -567,8 +587,7 @@ export const getCallableParamAbiKind = ({
   defaulted?: boolean;
   ctx: CodegenContext;
 }): OptimizedValueAbiKind =>
-  defaulted === true ||
-  (bindingKind !== undefined && bindingKind !== "value")
+  defaulted === true || (bindingKind !== undefined && bindingKind !== "value")
     ? getOptimizedParamAbiKind({ typeId, bindingKind, ctx })
     : "direct";
 
@@ -583,8 +602,7 @@ export const getCallableParamAbiTypes = ({
   defaulted?: boolean;
   ctx: CodegenContext;
 }): readonly binaryen.Type[] =>
-  defaulted === true ||
-  (bindingKind !== undefined && bindingKind !== "value")
+  defaulted === true || (bindingKind !== undefined && bindingKind !== "value")
     ? getOptimizedAbiTypesForParam({ typeId, bindingKind, ctx })
     : getAbiTypesForSignature(typeId, ctx);
 
@@ -696,6 +714,84 @@ export const getInlineHeapBoxType = ({
     label: `${ctx.moduleLabel}__union_${runtimeTypeKeyFor({ typeId, ctx })}`,
     ctx,
   });
+};
+
+export const getMutableRefStorageType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): binaryen.Type | undefined => {
+  const inlineStorage = getInlineHeapBoxType({ typeId, ctx });
+  if (typeof inlineStorage === "number") {
+    return inlineStorage;
+  }
+  const abiTypes = getDirectAbiTypesForSignature(typeId, ctx);
+  if (
+    abiTypes.length !== 1 ||
+    abiTypes[0] === binaryen.none ||
+    abiTypes[0] === binaryen.unreachable
+  ) {
+    return undefined;
+  }
+  return getInlineBoxType({
+    key: `mutable-ref:${abiTypes[0]}`,
+    abiTypes,
+    label: `${ctx.moduleLabel}__mutable_ref_${runtimeTypeKeyFor({
+      typeId,
+      ctx,
+    })}`,
+    ctx,
+  });
+};
+
+export const getTraitDispatchReceiverAbiType = ({
+  mutable,
+  ctx,
+}: {
+  mutable: boolean;
+  ctx: CodegenContext;
+}): binaryen.Type =>
+  mutable
+    ? getInlineBoxType({
+        key: `trait-dispatch-mutable-receiver:${ctx.rtt.baseType}`,
+        abiTypes: [ctx.rtt.baseType],
+        label: "trait_dispatch_mutable_receiver",
+        ctx,
+      })
+    : ctx.rtt.baseType;
+
+export const lowerValueToMutableRefStorage = ({
+  value,
+  typeId,
+  targetType,
+  ctx,
+}: {
+  value: binaryen.ExpressionRef;
+  typeId: TypeId;
+  targetType: binaryen.Type;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  const mutableStorageType = getMutableRefStorageType({ typeId, ctx });
+  if (mutableStorageType !== targetType) {
+    return refCast(ctx.mod, value, targetType);
+  }
+
+  const inlineStorageType = getInlineHeapBoxType({ typeId, ctx });
+  if (inlineStorageType === mutableStorageType) {
+    return refCast(ctx.mod, value, targetType);
+  }
+
+  const directTypes = getDirectAbiTypesForSignature(typeId, ctx);
+  if (directTypes.length !== 1 || !isRefType(directTypes[0]!)) {
+    throw new Error(
+      `mutable ref value ${typeId} requires a single reference ABI lane`,
+    );
+  }
+  return initStruct(ctx.mod, mutableStorageType, [
+    refCast(ctx.mod, value, directTypes[0]!),
+  ]);
 };
 
 const markReachableFunctionSymbol = ({
@@ -1013,13 +1109,7 @@ export const wasmTypeFor = (
           ctx,
           seen,
           mode: "runtime",
-        }) ??
-        wasmHeapFieldTypeFor(
-          desc.element,
-          ctx,
-          seen,
-          "runtime",
-        );
+        }) ?? wasmHeapFieldTypeFor(desc.element, ctx, seen, "runtime");
       return ensureFixedArrayWasmTypesByElement({ elementType, ctx }).type;
     }
     if (desc.kind === "value-object") {
@@ -1107,8 +1197,8 @@ export const wasmTypeFor = (
       if (desc.members.length === 0) {
         throw new Error("cannot map empty union to wasm");
       }
-      const hasValueMember = desc.members.some((member) =>
-        typeof nominalValueComponent(member, ctx) === "number",
+      const hasValueMember = desc.members.some(
+        (member) => typeof nominalValueComponent(member, ctx) === "number",
       );
       const allObjectish = desc.members.every((member) => {
         const memberDesc = ctx.program.types.getTypeDesc(member);
@@ -1288,20 +1378,15 @@ const ensureStructuralRuntimeType = (
     const scc = getSccContainingRoot({ root: structuralId, getDeps });
 
     const isRecursive =
-      scc.length > 1 || getDeps(structuralId).some((dep) => dep === structuralId);
+      scc.length > 1 ||
+      getDeps(structuralId).some((dep) => dep === structuralId);
 
     const baseHeapType = binaryenTypeToHeapType(ctx.rtt.baseType);
 
     const lowerNonStructural = (
       typeId: TypeId,
       _ownerStructuralId?: TypeId,
-    ): binaryen.Type =>
-      wasmTypeFor(
-        typeId,
-        ctx,
-        new Set(),
-        "signature",
-      );
+    ): binaryen.Type => wasmTypeFor(typeId, ctx, new Set(), "signature");
 
     const buildNonRecursive = (id: TypeId): binaryen.Type => {
       getDeps(id).forEach((dep) => {
@@ -1372,8 +1457,10 @@ const ensureStructuralRuntimeType = (
         ctx,
         getDirectDeps: getDeps,
         structNameFor: structuralHeapTypeName,
-        resolveStructuralTypeId: (typeId) => resolveStructuralTypeId(typeId, ctx),
-        ensureStructuralRuntimeType: (id) => ensureStructuralRuntimeType(id, ctx),
+        resolveStructuralTypeId: (typeId) =>
+          resolveStructuralTypeId(typeId, ctx),
+        ensureStructuralRuntimeType: (id) =>
+          ensureStructuralRuntimeType(id, ctx),
         lowerNonStructural: (typeId, ownerStructuralId) =>
           lowerNonStructural(typeId, ownerStructuralId),
         baseHeapType,
@@ -1422,7 +1509,9 @@ const isStructurallyRecursive = (
     return computed;
   };
   const scc = getSccContainingRoot({ root: structuralId, getDeps });
-  return scc.length > 1 || getDeps(structuralId).some((dep) => dep === structuralId);
+  return (
+    scc.length > 1 || getDeps(structuralId).some((dep) => dep === structuralId)
+  );
 };
 
 const lowerHeapObjectFieldRuntimeType = ({
@@ -1474,17 +1563,21 @@ const lowerHeapObjectFieldRuntimeType = ({
     if (inlineBoxType) {
       return assertHeapCompatible(inlineBoxType);
     }
-    return assertHeapCompatible(ensureAbiBoxType({
-      typeId,
-      abiTypes,
-      ctx,
-      label: `voyd_field_${ownerStructuralId}_${typeId}`,
-    }));
+    return assertHeapCompatible(
+      ensureAbiBoxType({
+        typeId,
+        abiTypes,
+        ctx,
+        label: `voyd_field_${ownerStructuralId}_${typeId}`,
+      }),
+    );
   }
   const fieldStructural = resolveStructuralTypeId(typeId, ctx);
   if (typeof fieldStructural === "number") {
     if (isStructurallyRecursive(fieldStructural, ctx)) {
-      return assertHeapCompatible(ensureStructuralRuntimeType(fieldStructural, ctx));
+      return assertHeapCompatible(
+        ensureStructuralRuntimeType(fieldStructural, ctx),
+      );
     }
     const info = getStructuralTypeInfo(
       fieldStructural,
@@ -1541,7 +1634,9 @@ export const wasmHeapFieldTypeFor = (
       if (nominalDesc.kind === "value-object") {
         const info = getStructuralTypeInfo(typeId, ctx, seen);
         if (!info) {
-          throw new Error("missing structural type info for value intersection field");
+          throw new Error(
+            "missing structural type info for value intersection field",
+          );
         }
         return info.runtimeType;
       }
@@ -1791,7 +1886,8 @@ export const getStructuralTypeInfo = (
         ? ctx.program.types.getTypeDesc(nominalId)
         : undefined;
     const isValueLayout =
-      objectInfo?.objectKind === "value" || nominalLayoutDesc?.kind === "value-object";
+      objectInfo?.objectKind === "value" ||
+      nominalLayoutDesc?.kind === "value-object";
     const nominalAncestry = getNominalAncestry(nominalId, ctx);
     const nominalAncestors = nominalAncestry.map((entry) => entry.nominalId);
     const typeLabel = makeRuntimeTypeLabel({
@@ -1801,22 +1897,21 @@ export const getStructuralTypeInfo = (
       nominalId,
     });
     const runtimeTypeId = runtimeTypeIdFor(typeId, ctx);
-    const provisionalInfo =
-      !isValueLayout
-        ? {
-            typeId,
-            layoutKind: "heap-object" as const,
-            runtimeTypeId,
-            structuralId,
-            nominalId,
-            nominalAncestors,
-            runtimeType: ctx.rtt.baseType,
-            interfaceType: ctx.rtt.baseType,
-            fields: [],
-            fieldMap: new Map<string, StructuralFieldInfo>(),
-            typeLabel,
-          }
-        : undefined;
+    const provisionalInfo = !isValueLayout
+      ? {
+          typeId,
+          layoutKind: "heap-object" as const,
+          runtimeTypeId,
+          structuralId,
+          nominalId,
+          nominalAncestors,
+          runtimeType: ctx.rtt.baseType,
+          interfaceType: ctx.rtt.baseType,
+          fields: [],
+          fieldMap: new Map<string, StructuralFieldInfo>(),
+          typeLabel,
+        }
+      : undefined;
     if (provisionalInfo) {
       ctx.structTypes.set(cacheKey, provisionalInfo);
     }
@@ -1925,7 +2020,9 @@ export const getStructuralTypeInfo = (
       nominalId,
       nominalAncestors,
       runtimeType,
-      interfaceType: abiTypeFor(fields.flatMap((field) => field.inlineWasmTypes)),
+      interfaceType: abiTypeFor(
+        fields.flatMap((field) => field.inlineWasmTypes),
+      ),
       fields: [],
       fieldMap: new Map<string, StructuralFieldInfo>(),
       typeLabel,
@@ -2239,10 +2336,12 @@ const instantiateTraitImplsForNominal = ({
           traitMethod,
           implMethod,
         })),
-        staticMethods: template.staticMethods.map(({ traitMethod, implMethod }) => ({
-          traitMethod,
-          implMethod,
-        })),
+        staticMethods: template.staticMethods.map(
+          ({ traitMethod, implMethod }) => ({
+            traitMethod,
+            implMethod,
+          }),
+        ),
         implSymbol: template.implSymbol,
       },
     ] satisfies readonly CodegenTraitImplInstance[];
@@ -2336,8 +2435,9 @@ const synthesizeConcreteFunctionMeta = ({
             : ([] as const);
         })()
       : Array.from(
-          ctx.program.functions.getInstantiationInfo(moduleId, symbol)?.entries() ??
-            [],
+          ctx.program.functions
+            .getInstantiationInfo(moduleId, symbol)
+            ?.entries() ?? [],
         );
   if (instantiations.length === 0) {
     return undefined;
@@ -2362,7 +2462,8 @@ const synthesizeConcreteFunctionMeta = ({
       signature.scheme,
       typeArgs,
     );
-    const instantiatedTypeDesc = ctx.program.types.getTypeDesc(instantiatedTypeId);
+    const instantiatedTypeDesc =
+      ctx.program.types.getTypeDesc(instantiatedTypeId);
     if (instantiatedTypeDesc.kind !== "function") {
       return;
     }
@@ -2376,30 +2477,30 @@ const synthesizeConcreteFunctionMeta = ({
       getCallableParamAbiKind({
         typeId: param.type,
         bindingKind: parameterBindingKind(index),
-        defaulted:
-          signature.parameters[index]?.defaulted ?? param.defaulted,
+        defaulted: signature.parameters[index]?.defaulted ?? param.defaulted,
         ctx,
       }),
     );
-    const paramAbiTypes = instantiatedTypeDesc.parameters.map((param, index) => {
-      const defaulted =
-        signature.parameters[index]?.defaulted ?? param.defaulted;
-      const payload = getCallableParamAbiTypes({
-        typeId: param.type,
-        bindingKind: parameterBindingKind(index),
-        defaulted,
-        ctx,
-      });
-      return defaulted ? [...payload, binaryen.i32] : payload;
-    });
+    const paramAbiTypes = instantiatedTypeDesc.parameters.map(
+      (param, index) => {
+        const defaulted =
+          signature.parameters[index]?.defaulted ?? param.defaulted;
+        const payload = getCallableParamAbiTypes({
+          typeId: param.type,
+          bindingKind: parameterBindingKind(index),
+          defaulted,
+          ctx,
+        });
+        return defaulted ? [...payload, binaryen.i32] : payload;
+      },
+    );
     const userParamTypes = paramAbiTypes.flat();
-    const resultAbiKind =
-      effectful
-        ? "direct"
-        : getOptimizedResultAbiKind({
-            typeId: instantiatedTypeDesc.returnType,
-            ctx,
-          });
+    const resultAbiKind = effectful
+      ? "direct"
+      : getOptimizedResultAbiKind({
+          typeId: instantiatedTypeDesc.returnType,
+          ctx,
+        });
     const outParamType =
       resultAbiKind === "out_ref"
         ? getOptimizedAbiTypeForResult({
@@ -2414,7 +2515,9 @@ const synthesizeConcreteFunctionMeta = ({
     const widened = ctx.effectsBackend.abi.widenSignature({
       ctx,
       effectful,
-      userParamTypes: outParamType ? [outParamType, ...userParamTypes] : userParamTypes,
+      userParamTypes: outParamType
+        ? [outParamType, ...userParamTypes]
+        : userParamTypes,
       userResultType:
         resultAbiKind === "out_ref"
           ? binaryen.none
@@ -2435,8 +2538,7 @@ const synthesizeConcreteFunctionMeta = ({
       paramTypes: widened.paramTypes,
       paramAbiTypes,
       userParamOffset: widened.userParamOffset,
-      firstUserParamIndex:
-        widened.userParamOffset + (outParamType ? 1 : 0),
+      firstUserParamIndex: widened.userParamOffset + (outParamType ? 1 : 0),
       resultType: widened.resultType,
       resultAbiTypes,
       paramTypeIds: instantiatedTypeDesc.parameters.map((param) => param.type),
@@ -2444,8 +2546,7 @@ const synthesizeConcreteFunctionMeta = ({
         typeId: param.type,
         label: param.label,
         optional: param.optional,
-        defaulted:
-          signature.parameters[index]?.defaulted ?? param.defaulted,
+        defaulted: signature.parameters[index]?.defaulted ?? param.defaulted,
         name:
           typeof functionItem.parameters[index]?.symbol === "number"
             ? symbolNameForModuleSymbol({
@@ -2495,8 +2596,9 @@ const resolveTraitImplMethodMeta = ({
     implRef.moduleId,
     implRef.symbol,
   );
-  const intrinsicFlags =
-    ctx.program.symbols.getIntrinsicFunctionFlags(canonicalImplMethodId);
+  const intrinsicFlags = ctx.program.symbols.getIntrinsicFunctionFlags(
+    canonicalImplMethodId,
+  );
   if (
     intrinsicFlags.intrinsic &&
     intrinsicFlags.intrinsicUsesSignature !== true
@@ -2556,7 +2658,9 @@ const resolveTraitImplMethodMeta = ({
     }).ok;
 
   const exactTargetMeta = pickPreferredMeta(
-    knownMetas?.filter((candidate) => candidate.paramTypeIds[0] === impl.target),
+    knownMetas?.filter(
+      (candidate) => candidate.paramTypeIds[0] === impl.target,
+    ),
   );
   if (exactTargetMeta) {
     return exactTargetMeta;
@@ -2619,9 +2723,9 @@ const resolveTraitImplMethodMeta = ({
   const moduleView = ctx.program.modules.get(implRef.moduleId);
   const hasFunctionItem = Boolean(
     moduleView &&
-      Array.from(moduleView.hir.items.values()).some(
-        (item) => item.kind === "function" && item.symbol === implRef.symbol,
-      ),
+    Array.from(moduleView.hir.items.values()).some(
+      (item) => item.kind === "function" && item.symbol === implRef.symbol,
+    ),
   );
   throw new Error(
     [
@@ -2635,6 +2739,102 @@ const resolveTraitImplMethodMeta = ({
       `available instances: ${availableInstances || "<none>"}`,
     ].join("\n"),
   );
+};
+
+const lowerTraitDispatchReceiver = ({
+  meta,
+  receiverParamIndex,
+  receiverType,
+  dispatchReceiverType,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  receiverParamIndex: number;
+  receiverType: binaryen.Type;
+  dispatchReceiverType: binaryen.Type;
+  ctx: CodegenContext;
+}): binaryen.ExpressionRef => {
+  const dispatchReceiver = ctx.mod.local.get(
+    receiverParamIndex,
+    dispatchReceiverType,
+  );
+  if (meta.paramAbiKinds[0] !== "mutable_ref") {
+    return refCast(ctx.mod, dispatchReceiver, receiverType);
+  }
+  const receiver = structGetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: 0,
+    fieldType: ctx.rtt.baseType,
+    exprRef: refCast(ctx.mod, dispatchReceiver, dispatchReceiverType),
+  });
+  return lowerValueToMutableRefStorage({
+    value: receiver,
+    typeId: meta.paramTypeIds[0],
+    targetType: receiverType,
+    ctx,
+  });
+};
+
+const wrapTraitDispatchReceiverWriteback = ({
+  call,
+  dispatchReceiver,
+  dispatchReceiverType,
+  concreteReceiver,
+  concreteReceiverType,
+  concreteTypeId,
+  ctx,
+  fnCtx,
+}: {
+  call: binaryen.ExpressionRef;
+  dispatchReceiver: binaryen.ExpressionRef;
+  dispatchReceiverType: binaryen.Type;
+  concreteReceiver: binaryen.ExpressionRef;
+  concreteReceiverType: binaryen.Type;
+  concreteTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: { locals: binaryen.Type[]; nextLocalIndex: number };
+}): binaryen.ExpressionRef => {
+  const inlineStorage = getInlineHeapBoxType({
+    typeId: concreteTypeId,
+    ctx,
+  });
+  const replacement =
+    inlineStorage === concreteReceiverType
+      ? refCast(ctx.mod, concreteReceiver, ctx.rtt.baseType)
+      : (() => {
+          const valueType = getDirectAbiTypesForSignature(
+            concreteTypeId,
+            ctx,
+          )[0];
+          if (typeof valueType !== "number") {
+            throw new Error(
+              `mutable trait receiver ${concreteTypeId} is missing its value lane`,
+            );
+          }
+          return refCast(
+            ctx.mod,
+            structGetFieldValue({
+              mod: ctx.mod,
+              fieldIndex: 0,
+              fieldType: valueType,
+              exprRef: refCast(ctx.mod, concreteReceiver, concreteReceiverType),
+            }),
+            ctx.rtt.baseType,
+          );
+        })();
+  const writeback = structSetFieldValue({
+    mod: ctx.mod,
+    fieldIndex: 0,
+    ref: refCast(ctx.mod, dispatchReceiver, dispatchReceiverType),
+    value: replacement,
+  });
+
+  return preserveResultAcrossOperations({
+    value: call,
+    operations: [writeback],
+    ctx,
+    fnCtx,
+  });
 };
 
 const createMethodLookupEntries = ({
@@ -2717,7 +2917,8 @@ const createMethodLookupEntries = ({
       const userParamTypes = meta.paramTypes.slice(receiverTypeIndex + 1);
       if (
         meta.effectful &&
-        userParamTypes.length + meta.firstUserParamIndex + 1 !== meta.paramTypes.length
+        userParamTypes.length + meta.firstUserParamIndex + 1 !==
+          meta.paramTypes.length
       ) {
         throw new Error(
           `codegen malformed effectful parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
@@ -2725,7 +2926,8 @@ const createMethodLookupEntries = ({
       }
       if (
         !meta.effectful &&
-        userParamTypes.length + meta.firstUserParamIndex + 1 !== meta.paramTypes.length
+        userParamTypes.length + meta.firstUserParamIndex + 1 !==
+          meta.paramTypes.length
       ) {
         throw new Error(
           `codegen malformed parameter metadata for trait method impl ${implRef.moduleId}::${implRef.symbol}`,
@@ -2753,46 +2955,36 @@ const createMethodLookupEntries = ({
           ].join("\n"),
         );
       }
-      const handlerParamType = ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
+      const handlerParamType =
+        ctx.effectsBackend.abi.hiddenHandlerParamType(ctx);
       const outParamTypes =
-        meta.resultAbiKind === "out_ref" && typeof meta.outParamType === "number"
+        meta.resultAbiKind === "out_ref" &&
+        typeof meta.outParamType === "number"
           ? [meta.outParamType]
           : [];
+      const mutableReceiver = meta.paramAbiKinds[0] === "mutable_ref";
+      const dispatchReceiverType = getTraitDispatchReceiverAbiType({
+        mutable: mutableReceiver,
+        ctx,
+      });
       const params = dispatchEffectful
-        ? [handlerParamType, ...outParamTypes, ctx.rtt.baseType, ...userParamTypes]
-        : [...outParamTypes, ctx.rtt.baseType, ...userParamTypes];
+        ? [
+            handlerParamType,
+            ...outParamTypes,
+            dispatchReceiverType,
+            ...userParamTypes,
+          ]
+        : [...outParamTypes, dispatchReceiverType, ...userParamTypes];
       const receiverParamIndex =
         (dispatchEffectful ? 1 : 0) + outParamTypes.length;
       const firstUserParamIndex = receiverParamIndex + 1;
-      const implCall = ctx.mod.call(
-        meta.wasmName,
-        [
-          ...(meta.effectful
-            ? [ctx.mod.local.get(0, handlerParamType)]
-            : []),
-          ...(outParamTypes.length > 0
-            ? [ctx.mod.local.get(dispatchEffectful ? 1 : 0, outParamTypes[0]!)]
-            : []),
-          refCast(
-            ctx.mod,
-            ctx.mod.local.get(receiverParamIndex, ctx.rtt.baseType),
-            receiverType,
-          ),
-          ...userParamTypes.map((type, index) =>
-            ctx.mod.local.get(index + firstUserParamIndex, type),
-          ),
-        ],
-        meta.resultType,
-      );
       const wrapperResultType = dispatchEffectful
         ? ctx.effectsBackend.abi.effectfulResultType(ctx)
         : meta.resultAbiKind === "out_ref"
           ? binaryen.none
           : meta.resultType;
       const wrappedValueType =
-        meta.resultAbiKind === "out_ref"
-          ? binaryen.none
-          : meta.resultType;
+        meta.resultAbiKind === "out_ref" ? binaryen.none : meta.resultType;
       const wrapperName = `${typeLabel}__method_${hashTraitSymbol}_${hashTraitMethod}_${implRef.symbol}`;
       const wrapperLocals: binaryen.Type[] = [];
       const wrapperParamType = binaryen.createType(params as number[]);
@@ -2800,11 +2992,45 @@ const createMethodLookupEntries = ({
         locals: wrapperLocals,
         nextLocalIndex: binaryen.expandType(wrapperParamType).length,
       };
-      const wrapper = ctx.mod.addFunction(
-        wrapperName,
-        wrapperParamType,
-        wrapperResultType,
-        wrapperLocals,
+      const concreteReceiverIndex = mutableReceiver
+        ? wrapperScratch.nextLocalIndex++
+        : undefined;
+      if (mutableReceiver) {
+        wrapperLocals.push(receiverType);
+      }
+      const loweredReceiver = lowerTraitDispatchReceiver({
+        meta,
+        receiverParamIndex,
+        receiverType,
+        dispatchReceiverType,
+        ctx,
+      });
+      const receiverArgument =
+        typeof concreteReceiverIndex === "number"
+          ? ctx.mod.block(
+              null,
+              [
+                ctx.mod.local.set(concreteReceiverIndex, loweredReceiver),
+                ctx.mod.local.get(concreteReceiverIndex, receiverType),
+              ],
+              receiverType,
+            )
+          : loweredReceiver;
+      const implCall = ctx.mod.call(
+        meta.wasmName,
+        [
+          ...(meta.effectful ? [ctx.mod.local.get(0, handlerParamType)] : []),
+          ...(outParamTypes.length > 0
+            ? [ctx.mod.local.get(dispatchEffectful ? 1 : 0, outParamTypes[0]!)]
+            : []),
+          receiverArgument,
+          ...userParamTypes.map((type, index) =>
+            ctx.mod.local.get(index + firstUserParamIndex, type),
+          ),
+        ],
+        meta.resultType,
+      );
+      const wrappedCall =
         dispatchEffectful && !meta.effectful
           ? wrapValueInOutcome({
               valueExpr: implCall,
@@ -2813,7 +3039,32 @@ const createMethodLookupEntries = ({
               ctx,
               fnCtx: wrapperScratch,
             })
-          : implCall,
+          : implCall;
+      const wrapperBody =
+        typeof concreteReceiverIndex !== "number"
+          ? wrappedCall
+          : wrapTraitDispatchReceiverWriteback({
+              call: wrappedCall,
+              dispatchReceiver: ctx.mod.local.get(
+                receiverParamIndex,
+                dispatchReceiverType,
+              ),
+              dispatchReceiverType,
+              concreteReceiver: ctx.mod.local.get(
+                concreteReceiverIndex,
+                receiverType,
+              ),
+              concreteReceiverType: receiverType,
+              concreteTypeId: meta.paramTypeIds[0]!,
+              ctx,
+              fnCtx: wrapperScratch,
+            });
+      const wrapper = ctx.mod.addFunction(
+        wrapperName,
+        wrapperParamType,
+        wrapperResultType,
+        wrapperLocals,
+        wrapperBody,
       );
       const heapType = bin._BinaryenFunctionGetType(wrapper);
       const fnType = bin._BinaryenTypeFromHeapType(heapType, false);

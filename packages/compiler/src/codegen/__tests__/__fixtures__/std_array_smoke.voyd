@@ -50,7 +50,8 @@ fn push_and_choose(~arr: Array<i32>) -> i32
 pub fn direct_at_index_side_effect() -> i32
   let ~arr = Array<i32>::with_capacity(1)
   arr.push(10)
-  arr.at(push_and_choose(arr))
+  let index = push_and_choose(arr)
+  arr.at(index)
 
 pub fn direct_at_out_of_bounds() -> i32
   let ~arr = Array<i32>::with_capacity(1)
@@ -151,17 +152,19 @@ pub fn while_mutates_array_sum() -> i32
     index = index + 1
   total
 
-pub fn while_alias_mutation_sum() -> i32
+fn append_marker(~values: Array<i32>) -> void
+  values.push(9)
+
+pub fn while_helper_mutation_sum() -> i32
   let ~values = Array<i32>::with_capacity(4)
   values.push(1)
   values.push(2)
-  let ~alias = values
   let length = values.len()
   var index = 0
   var total = 0
   while index < length:
     total = total + values.at(index)
-    alias.push(9)
+    append_marker(values)
     index = index + 1
   total
 
@@ -187,14 +190,15 @@ pub fn while_increment_before_at_trap() -> i32
     total = total + values.at(index)
   total
 
-pub fn while_captured_call_mutation_trap() -> i32
+fn clear_values(~values: Array<i32>) -> void
+  values.clear()
+
+pub fn while_helper_call_mutation_trap() -> i32
   let ~values = build_sparse_ints()
-  let clear_values = () -> void =>
-    values.clear()
   var index = 0
   var total = 0
   while index < values.len():
-    clear_values()
+    clear_values(values)
     total = total + values.at(index)
     index = index + 1
   total

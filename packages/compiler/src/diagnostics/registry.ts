@@ -331,6 +331,39 @@ type DiagnosticParamsMap = {
         subsumedSignature: string;
       }
     | { kind: "subsumed-labeled-overload" };
+  TY0048:
+    | {
+        kind: "borrow-conflict";
+        access: "read" | "mutably borrow";
+        place: string;
+        existing: "shared" | "mutable";
+      }
+    | {
+        kind: "borrow-origin";
+        place: string;
+        borrow: "shared" | "mutable";
+      }
+    | { kind: "borrow-last-use"; alias: string };
+  TY0049:
+    | { kind: "mutable-borrow-escape"; binding: string; through: string }
+    | { kind: "borrow-declaration"; binding: string };
+  TY0050: {
+    kind: "mutable-borrow-from-shared";
+    binding: string;
+  };
+  TY0051:
+    | { kind: "permanently-shared"; binding: string }
+    | { kind: "shared-here"; binding: string };
+  TY0052:
+    | { kind: "borrow-across-effect"; binding: string }
+    | { kind: "borrow-origin"; binding: string };
+  TY0053:
+    | {
+        kind: "borrowed-callback-escape";
+        binding: string;
+        through: string;
+      }
+    | { kind: "borrow-origin"; binding: string };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -1017,6 +1050,101 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0047"]>,
+  TY0048: {
+    code: "TY0048",
+    message: (params) => {
+      switch (params.kind) {
+        case "borrow-conflict":
+          return `cannot ${params.access} '${params.place}' while it has an active ${params.existing} borrow`;
+        case "borrow-origin":
+          return `${params.borrow} borrow of '${params.place}' begins here`;
+        case "borrow-last-use":
+          return `borrow remains active through the last use of '${params.alias}' here`;
+      }
+      return exhaustive(params);
+    },
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "End the earlier borrow before this access, or use SharedCell<T> when the state must remain intentionally shared and mutable.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0048"]>,
+  TY0049: {
+    code: "TY0049",
+    message: (params) =>
+      params.kind === "mutable-borrow-escape"
+        ? `mutable borrow '${params.binding}' escapes through ${params.through}`
+        : `mutable borrow '${params.binding}' is declared here`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Keep mutable borrows scoped to the current call or block; return an owned value or use SharedCell<T> for persistent shared mutation.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0049"]>,
+  TY0050: {
+    code: "TY0050",
+    message: (params) =>
+      `cannot create a mutable borrow from shared binding '${params.binding}'`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Request mutable access at the ownership boundary with a '~' binding or '~' parameter.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0050"]>,
+  TY0051: {
+    code: "TY0051",
+    message: (params) =>
+      params.kind === "permanently-shared"
+        ? `'${params.binding}' was permanently shared and can no longer be mutably borrowed`
+        : `'${params.binding}' became permanently shared here`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Use SharedCell<T> when a value needs both persistent shared ownership and later mutation.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0051"]>,
+  TY0052: {
+    code: "TY0052",
+    message: (params) =>
+      params.kind === "borrow-across-effect"
+        ? `mutable borrow '${params.binding}' cannot cross a suspending or continuation-escaping effect boundary`
+        : `mutable borrow '${params.binding}' begins here`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Complete effectful work before creating the mutable borrow, then perform a short synchronous update.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0052"]>,
+  TY0053: {
+    code: "TY0053",
+    message: (params) =>
+      params.kind === "borrow-origin"
+        ? `borrowed callback value '${params.binding}' originates here`
+        : `borrowed callback value '${params.binding}' cannot escape ${params.through}`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Return owned data from the callback or finish using the borrowed value before the callback returns.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0053"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,

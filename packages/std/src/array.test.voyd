@@ -305,19 +305,14 @@ test "array sorted does not mutate source":
   assert(optional_i32_or(arr.get(0), -1), eq: 3)
   assert(optional_i32_or(sorted.get(0), -1), eq: 1)
 
-test "array copy-on-write keeps copies isolated":
+test "array copied keeps copies isolated":
   let ~base = array_of_2(1, 2)
+  base.push(4)
   let ~copy = base.copied()
 
   copy.push(3)
-  assert(base.len(), eq: 2)
-  assert(copy.len(), eq: 3)
-  assert(optional_i32_or(base.last(), -1), eq: 2)
-  assert(optional_i32_or(copy.last(), -1), eq: 3)
-
-  base.push(4)
   assert(base.len(), eq: 3)
-  assert(copy.len(), eq: 3)
+  assert(copy.len(), eq: 4)
   assert(optional_i32_or(base.last(), -1), eq: 4)
   assert(optional_i32_or(copy.last(), -1), eq: 3)
 

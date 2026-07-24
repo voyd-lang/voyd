@@ -33,6 +33,7 @@ import {
   getDirectAbiTypesForSignature,
   getInlineHeapBoxType,
   getInlineUnionLayout,
+  getMutableRefStorageType,
   getOptionalLayoutInfo,
   getStructuralTypeInfo,
   shouldInlineUnionLayout,
@@ -576,7 +577,10 @@ const unboxInlineValue = ({
   if (desc.kind === "union" && unionBoxType) {
     const layout = getInlineUnionLayout(typeId, ctx);
     const boxRef = () =>
-      refAsNonNull(ctx.mod, refCast(ctx.mod, value, unionBoxType));
+      refAsNonNull(
+        ctx.mod,
+        refCast(ctx.mod, ctx.mod.copyExpression(value), unionBoxType),
+      );
     const lanes = layout.abiTypes.map((abiType, index) =>
       structGetFieldValue({
         mod: ctx.mod,
@@ -593,7 +597,10 @@ const unboxInlineValue = ({
     return value;
   }
   const boxRef = () =>
-    refAsNonNull(ctx.mod, refCast(ctx.mod, value, structInfo.runtimeType));
+    refAsNonNull(
+      ctx.mod,
+      refCast(ctx.mod, ctx.mod.copyExpression(value), structInfo.runtimeType),
+    );
   const lanes = structInfo.fields.flatMap((field) =>
     field.inlineWasmTypes.map((abiType, index) =>
       structGetFieldValue({
@@ -621,15 +628,38 @@ export const lowerValueForHeapField = ({
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   if (wasmTypeFor(typeId, ctx) === binaryen.none) {
+    const valueType = binaryen.getExpressionType(value);
+    const discard =
+      valueType === binaryen.none || valueType === binaryen.unreachable
+        ? value
+        : ctx.mod.drop(value);
     return ctx.mod.block(
       null,
-      [ctx.mod.drop(value), ctx.mod.ref.null(targetType)],
+      [discard, ctx.mod.ref.null(targetType)],
       targetType,
     );
   }
   const inlineBoxType = getInlineHeapBoxType({ typeId, ctx });
   if (inlineBoxType && targetType === inlineBoxType) {
     return boxInlineValue({ value, typeId, ctx, fnCtx });
+  }
+  const mutableRefStorage =
+    binaryen.expandType(targetType).length === 1 &&
+    !NON_REF_TYPES.has(targetType)
+      ? getMutableRefStorageType({ typeId, ctx })
+      : undefined;
+  if (
+    !inlineBoxType &&
+    typeof mutableRefStorage === "number" &&
+    targetType === mutableRefStorage
+  ) {
+    return initStruct(ctx.mod, mutableRefStorage, [
+      coerceExprToWasmType({
+        expr: value,
+        targetType: wasmTypeFor(typeId, ctx),
+        ctx,
+      }),
+    ]);
   }
   return coerceExprToWasmType({
     expr: value,
@@ -652,6 +682,33 @@ export const liftHeapValueToInline = ({
   }
   if (getInlineHeapBoxType({ typeId, ctx })) {
     return unboxInlineValue({ value, typeId, ctx });
+  }
+  const valueType = binaryen.getExpressionType(value);
+  const mutableRefStorage =
+    binaryen.expandType(valueType).length === 1 && !NON_REF_TYPES.has(valueType)
+      ? getMutableRefStorageType({ typeId, ctx })
+      : undefined;
+  if (
+    typeof mutableRefStorage === "number" &&
+    binaryen.getExpressionType(value) === mutableRefStorage
+  ) {
+    const storageValueType = getDirectAbiTypesForSignature(typeId, ctx)[0];
+    if (typeof storageValueType !== "number") {
+      throw new Error(
+        `mutable ref storage is missing its value type for ${typeId}`,
+      );
+    }
+    const loaded = structGetFieldValue({
+      mod: ctx.mod,
+      fieldIndex: 0,
+      fieldType: storageValueType,
+      exprRef: refCast(ctx.mod, value, mutableRefStorage),
+    });
+    return coerceExprToWasmType({
+      expr: loaded,
+      targetType: wasmTypeFor(typeId, ctx),
+      ctx,
+    });
   }
   return coerceExprToWasmType({
     expr: value,
@@ -765,12 +822,13 @@ export const storeValueIntoStorageRef = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const storageType = getInlineHeapBoxType({ typeId, ctx });
+  const storageType = getMutableRefStorageType({ typeId, ctx });
   if (!storageType) {
     throw new Error(
       `cannot store non-inline value ${typeId} through a storage ref`,
     );
   }
+  const inlineBoxType = getInlineHeapBoxType({ typeId, ctx });
   const inlineValue =
     binaryen.getExpressionType(value) === storageType
       ? liftHeapValueToInline({ value, typeId, ctx })
@@ -779,6 +837,14 @@ export const storeValueIntoStorageRef = ({
           targetType: wasmTypeFor(typeId, ctx),
           ctx,
         });
+  if (!inlineBoxType) {
+    return structSetFieldValue({
+      mod: ctx.mod,
+      fieldIndex: 0,
+      ref: refCast(ctx.mod, pointer(), storageType),
+      value: inlineValue,
+    });
+  }
   const abiTypes = getDirectAbiTypesForSignature(typeId, ctx);
   const captured = captureMultivalueLanes({
     value: inlineValue,
@@ -1017,10 +1083,7 @@ const typeRequiresClosureCoercion = (
   if (actualDesc.kind === "function" && targetDesc.kind === "function") {
     return true;
   }
-  if (
-    actualDesc.kind === "fixed-array" &&
-    targetDesc.kind === "fixed-array"
-  ) {
+  if (actualDesc.kind === "fixed-array" && targetDesc.kind === "fixed-array") {
     return typeRequiresClosureCoercion(
       actualDesc.element,
       targetDesc.element,
@@ -1056,6 +1119,9 @@ const fieldTypesMatchExactly = (
   if (typeRequiresClosureCoercion(actualType, targetType, ctx)) {
     return false;
   }
+  if (wasmTypeFor(actualType, ctx) !== wasmTypeFor(targetType, ctx)) {
+    return false;
+  }
 
   const cache = structuralMatchCache(ctx).fieldTypes;
   const key = symmetricTypePairKey(actualType, targetType);
@@ -1079,8 +1145,8 @@ const structuralLayoutsMatchExactly = (
   target: StructuralTypeInfo,
   ctx: CodegenContext,
 ): boolean => {
-  const actualId = actual.nominalId ?? actual.structuralId;
-  const targetId = target.nominalId ?? target.structuralId;
+  const actualId = actual.typeId;
+  const targetId = target.typeId;
   if (typeof actualId === "number" && typeof targetId === "number") {
     const cache = structuralMatchCache(ctx).layouts;
     const key = symmetricTypePairKey(actualId, targetId);
@@ -1091,9 +1157,7 @@ const structuralLayoutsMatchExactly = (
 
     const matches =
       actual.layoutKind === target.layoutKind &&
-      (actual.structuralId === target.structuralId ||
-        (typeof actual.nominalId === "number" &&
-          actual.nominalId === target.nominalId)) &&
+      actual.structuralId === target.structuralId &&
       actual.fields.length === target.fields.length &&
       actual.fields.every((field, index) => {
         const targetField = target.fields[index];
@@ -1110,9 +1174,7 @@ const structuralLayoutsMatchExactly = (
 
   return (
     actual.layoutKind === target.layoutKind &&
-    (actual.structuralId === target.structuralId ||
-      (typeof actual.nominalId === "number" &&
-        actual.nominalId === target.nominalId)) &&
+    actual.structuralId === target.structuralId &&
     actual.fields.length === target.fields.length &&
     actual.fields.every((field, index) => {
       const targetField = target.fields[index];
@@ -1326,10 +1388,7 @@ export const coerceValueToType = ({
       targetType,
       substitution,
     );
-    if (
-      specializedActual !== actualType ||
-      specializedTarget !== targetType
-    ) {
+    if (specializedActual !== actualType || specializedTarget !== targetType) {
       return coerceValueToType({
         value,
         actualType: specializedActual,
@@ -2277,121 +2336,6 @@ export const coerceValueToType = ({
 
   if (structuralLayoutsMatchExactly(actualInfo, targetInfo, ctx)) {
     return value;
-  }
-
-  const tryArrayLikeConversion = (): binaryen.ExpressionRef | undefined => {
-    const actualCount = actualInfo.fieldMap.get("count");
-    const actualStorage = actualInfo.fieldMap.get("storage");
-    const targetCount = targetInfo.fieldMap.get("count");
-    const targetStorage = targetInfo.fieldMap.get("storage");
-    if (!actualCount || !actualStorage || !targetCount || !targetStorage) {
-      return undefined;
-    }
-    if (actualInfo.fields.length !== 2 || targetInfo.fields.length !== 2) {
-      return undefined;
-    }
-    if (
-      actualCount.wasmType !== binaryen.i32 ||
-      targetCount.wasmType !== binaryen.i32
-    ) {
-      return undefined;
-    }
-
-    const isFixedArray = (typeId: TypeId): boolean => {
-      const desc = ctx.program.types.getTypeDesc(typeId);
-      if (desc.kind === "fixed-array") {
-        return true;
-      }
-      if (desc.kind !== "recursive") {
-        return false;
-      }
-      const unfolded = ctx.program.types.substitute(
-        desc.body,
-        new Map([[desc.binder, typeId]]),
-      );
-      return isFixedArray(unfolded);
-    };
-    if (
-      !isFixedArray(actualStorage.typeId) ||
-      !isFixedArray(targetStorage.typeId)
-    ) {
-      return undefined;
-    }
-    const valueType = binaryen.getExpressionType(value);
-    if (valueType !== actualInfo.interfaceType) {
-      return coerceExprToWasmType({
-        expr: value,
-        targetType: targetInfo.interfaceType,
-        ctx,
-      });
-    }
-
-    const temp = allocateTempLocal(
-      actualInfo.interfaceType,
-      fnCtx,
-      actualInfo.typeId,
-      ctx,
-    );
-    const casted = refCast(
-      ctx.mod,
-      coerceExprToWasmType({
-        expr: loadLocalValue(temp, ctx),
-        targetType: actualInfo.runtimeType,
-        ctx,
-      }),
-      actualInfo.runtimeType,
-    );
-
-    const countValue = structGetFieldValue({
-      mod: ctx.mod,
-      fieldType: binaryen.i32,
-      fieldIndex: actualCount.runtimeIndex,
-      exprRef: casted,
-    });
-    const storageValue = structGetFieldValue({
-      mod: ctx.mod,
-      fieldType: actualStorage.heapWasmType,
-      fieldIndex: actualStorage.runtimeIndex,
-      exprRef: casted,
-    });
-    const storageCoerced = coerceValueToType({
-      value: storageValue,
-      actualType: actualStorage.typeId,
-      targetType: targetStorage.typeId,
-      ctx,
-      fnCtx,
-    });
-
-    const storedStorage = coerceExprToWasmType({
-      expr: storageCoerced,
-      targetType: targetStorage.heapWasmType,
-      ctx,
-    });
-
-    const converted = initStructuralValue({
-      structInfo: targetInfo,
-      fieldValues: [countValue, storedStorage],
-      ctx,
-    });
-
-    return ctx.mod.block(
-      null,
-      [
-        storeLocalValue({
-          binding: temp,
-          value,
-          ctx,
-          fnCtx,
-        }),
-        converted,
-      ],
-      targetInfo.interfaceType,
-    );
-  };
-
-  const arrayLike = tryArrayLikeConversion();
-  if (arrayLike) {
-    return arrayLike;
   }
 
   return emitStructuralConversion({

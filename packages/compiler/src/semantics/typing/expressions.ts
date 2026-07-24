@@ -5,6 +5,7 @@ import {
   typeAssignExpr,
   typeBlockExpr,
   typeCallExpr,
+  typeGenericFunctionBody,
   validateGenericFunctionBody,
   typeMethodCallExpr,
   formatFunctionInstanceKey,
@@ -32,7 +33,11 @@ import {
 } from "../../diagnostics/index.js";
 import type { TypingContext, TypingState } from "./types.js";
 
-export { formatFunctionInstanceKey, validateGenericFunctionBody };
+export {
+  formatFunctionInstanceKey,
+  typeGenericFunctionBody,
+  validateGenericFunctionBody,
+};
 
 export type TypeExpressionOptions = {
   expectedType?: TypeId;

@@ -301,6 +301,11 @@ Lifecycle semantics:
   field is true.
 - Hosts split native input into transport-safe chunks no larger than 16 KiB and
   await the underlying reader, providing request-body backpressure.
+- At most one read may be in flight for a request. An overlapping read returns
+  a host error instead of advancing the native reader concurrently.
+- Canceling a task does not cancel a native read already in flight. Its
+  completed chunk is consumed, the read guard is released, and a later read
+  continues with the next chunk.
 - Each successful read refreshes the request's response idle watchdog so an
   active upload is not mistaken for an abandoned handler.
 - `done: true` is terminal; subsequent reads return a host error.

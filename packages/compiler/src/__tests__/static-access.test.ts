@@ -412,7 +412,7 @@ describe("static access e2e", () => {
     expect((instance.exports.main as () => number)()).toBe(15);
   });
 
-  it("handles callback closures that capture mutable state and use labeled calls", async () => {
+  it("handles callback closures that capture shared state and use labeled calls", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;
     const host = createFixtureHost({
