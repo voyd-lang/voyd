@@ -4,6 +4,37 @@
 
 use std::optional::all
 
+/// Internal scalar cell for iterator cursor state.
+///
+/// The backing storage never escapes, stores only `i32` values, and is accessed
+/// through non-reentrant leaf operations. This gives shared-receiver iterators
+/// explicit interior mutability without the callback-capable `SharedCell` runtime.
+pub obj IteratorStateCell {
+  pri slots: FixedArray<i32>
+}
+
+impl IteratorStateCell
+  fn single(value: i32) -> IteratorStateCell
+    let slots = new_iterator_state_slots(1)
+    __array_set(slots, 0, value)
+    IteratorStateCell { slots }
+
+  fn pair(first: i32, second: i32) -> IteratorStateCell
+    let slots = new_iterator_state_slots(2)
+    __array_set(slots, 0, first)
+    __array_set(slots, 1, second)
+    IteratorStateCell { slots }
+
+  fn get(self, index: i32) -> i32
+    __array_get(self.slots, index)
+
+  fn set(self, index: i32, value: i32) -> void
+    __array_set(self.slots, index, value)
+    void
+
+fn new_iterator_state_slots(size: i32) -> FixedArray<i32>
+  __array_new<i32>(size)
+
 /// Trait for values that can produce iterators.
 pub trait Sequence<T>
   /// Returns an iterator over sequence items.

@@ -12,7 +12,6 @@ use std::traits::sequence::all
 use std::optional::all
 use std::result::types::all
 use std::range::{ Range }
-use std::shared_cell::SharedCell
 
 pub use std::string::index::StringIndex
 
@@ -1268,7 +1267,7 @@ obj Utf8Read {
 obj StringIterator {
   source: FixedArray<i32>,
   byte_count: i32,
-  cursor: SharedCell<i32>
+  cursor: IteratorStateCell
 }
 
 obj StringGraphemeSequence {
@@ -1277,7 +1276,7 @@ obj StringGraphemeSequence {
 
 obj StringGraphemeIterator {
   source: String,
-  cursor: SharedCell<i32>
+  cursor: IteratorStateCell
 }
 
 impl Sequence<i32> for String
@@ -1286,19 +1285,17 @@ impl Sequence<i32> for String
     StringIterator {
       source: self.raw_bytes(),
       byte_count: self.byte_len(),
-      cursor: SharedCell(0)
+      cursor: IteratorStateCell::single(0)
     }
 
 impl Iterator<i32> for StringIterator
   /// Returns the next item from the iterator.
   api fn next(self) -> Option<i32>
-    let index = self.cursor.with((cursor) => cursor)
+    let index = self.cursor.get(0)
     if index >= self.byte_count:
       return None {}
     let read = decode_utf8_at(self.source, self.byte_count, index)
-    self.cursor.with_mut((~cursor) =>
-      cursor = index + read.width
-    )
+    self.cursor.set(0, index + read.width)
     Some<i32> { value: read.codepoint }
 
 impl Sequence<StringSlice> for StringGraphemeSequence
@@ -1306,13 +1303,13 @@ impl Sequence<StringSlice> for StringGraphemeSequence
   api fn iter(self) -> Iterator<StringSlice>
     StringGraphemeIterator {
       source: self.source,
-      cursor: SharedCell(0)
+      cursor: IteratorStateCell::single(0)
     }
 
 impl Iterator<StringSlice> for StringGraphemeIterator
   /// Returns the next item from the iterator.
   api fn next(self) -> Option<StringSlice>
-    let start = self.cursor.with((cursor) => cursor)
+    let start = self.cursor.get(0)
     if start >= self.source.byte_len():
       return None {}
     let end = next_grapheme_boundary(
@@ -1320,9 +1317,7 @@ impl Iterator<StringSlice> for StringGraphemeIterator
       self.source.byte_len(),
       start
     )
-    self.cursor.with_mut((~cursor) =>
-      cursor = end
-    )
+    self.cursor.set(0, end)
     Some<StringSlice> {
       value: new_string_slice(self.source, start, end - start)
     }

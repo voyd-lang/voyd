@@ -6,7 +6,6 @@ use std::traits::sequence::all
 use std::optional::all
 use std::math::all
 use std::range::Range
-use std::shared_cell::SharedCell
 use std::subscript::{ SubscriptRead, SubscriptWrite }
 use std::traits::ord::{ Ordering, Less, Equal, Greater }
 
@@ -854,7 +853,7 @@ fn ref_is_null<T>(value: T) -> bool
 /// Internal iterator state for `Array::iter`.
 obj ArrayIterator<T> {
   array: Array<T>,
-  cursor: SharedCell<i32>
+  cursor: IteratorStateCell
 }
 
 impl<T> Sequence<T> for Array<T>
@@ -862,19 +861,17 @@ impl<T> Sequence<T> for Array<T>
   api fn iter(self) -> Iterator<T>
     ArrayIterator<T> {
       array: self,
-      cursor: SharedCell(0)
+      cursor: IteratorStateCell::single(0)
     }
 
 impl<T> Iterator<T> for ArrayIterator<T>
   /// Returns the next item from the iterator.
   api fn next(self) -> Option<T>
-    let index = self.cursor.with((cursor) => cursor)
+    let index = self.cursor.get(0)
     if index >= self.array.len():
       return None {}
     let value = self.array.get(index)
-    self.cursor.with_mut((~cursor) =>
-      cursor = index + 1
-    )
+    self.cursor.set(0, index + 1)
     value
 
 impl<T> SubscriptRead<i32, Optional<T>> for Array<T>
