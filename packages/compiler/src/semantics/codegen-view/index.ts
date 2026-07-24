@@ -464,12 +464,7 @@ const buildBindingKindIndex = (
 const buildMutableStorageSymbolIndex = (
   module: SemanticsPipelineResult,
 ): ReadonlySet<SymbolId> => {
-  const symbols = new Set<SymbolId>();
-  module.borrowing.facts.forEach((fact) => {
-    if ("access" in fact && fact.access === "mutable") {
-      symbols.add(fact.place.root);
-    }
-  });
+  const symbols = new Set(module.borrowing.mutableStorageSymbols);
   module.hir.expressions.forEach((expression) => {
     if (expression.exprKind !== "lambda") {
       return;

@@ -1,5 +1,6 @@
 import type { SymbolTable } from "../binder/index.js";
 import { STD_INTRINSIC_TYPE } from "../../compiler-contracts/index.js";
+import { incrementCompilerPerfCounter } from "../../perf.js";
 import {
   walkExpression,
   type HirExpression,
@@ -2042,6 +2043,7 @@ const summarizeFunction = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
 }): CallableBorrowContract => {
+  incrementCompilerPerfCounter("borrowing.summary.evaluations");
   const accessed = emptyFlow();
   const retained = emptyFlow();
   const externalRetained = emptyFlow();
@@ -2614,6 +2616,10 @@ export const computeCallableBorrowContracts = ({
       typing,
     ),
   );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.functions",
+    summaryFunctions.length,
+  );
   const callers = localCallersOf({
     functions: summaryFunctions,
     hir,
@@ -2668,8 +2674,13 @@ export const computeCallableBorrowContracts = ({
         decls,
       });
       finalCandidates.set(functionItem.symbol, candidate);
+      if (contractsEqual(previous, candidate)) {
+        incrementCompilerPerfCounter("borrowing.summary.unchangedCandidates");
+        continue;
+      }
       const joined = joinCallableBorrowContracts({ previous, candidate });
       if (contractsEqual(previous, joined)) {
+        incrementCompilerPerfCounter("borrowing.summary.unchangedJoins");
         continue;
       }
       contracts.set(functionItem.symbol, joined);

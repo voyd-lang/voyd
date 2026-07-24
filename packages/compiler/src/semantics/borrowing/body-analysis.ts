@@ -15,7 +15,6 @@ import type { TypingResult } from "../typing/index.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type { DeclTable } from "../decls.js";
 import type {
-  BorrowFact,
   BorrowPlace,
   CallableBorrowContract,
   PlaceProjection,
@@ -87,7 +86,7 @@ type BodyContext = {
   events: Map<HirExprId, Event>;
   uses: Map<SymbolId, Event[]>;
   usePlaces: Map<SymbolId, Map<Event, readonly BorrowPlace[]>>;
-  facts: BorrowFact[];
+  mutableStorageSymbols: Set<SymbolId>;
   diagnostics: Diagnostic[];
   downgraded: Downgrade[];
   terminations: Termination[];
@@ -2738,11 +2737,6 @@ const escapeExpression = ({
     selectedPlaces.forEach((place) => {
       if (!activeDowngradeFor(place, event, ctx)) {
         ctx.downgraded.push({ place, span, event });
-        ctx.facts.push({
-          kind: "capability-downgrade",
-          place,
-          span,
-        });
       }
     });
   });
@@ -2779,11 +2773,6 @@ const escapeExpression = ({
         return;
       }
       ctx.downgraded.push({ place, span, event });
-      ctx.facts.push({
-        kind: "capability-downgrade",
-        place,
-        span,
-      });
     });
 };
 
@@ -2891,12 +2880,9 @@ const validateCall = (
         reportMutableCapabilityViolation({ place, actor, event, ctx });
       }
       checkAccess({ place, actor, access, event, ctx });
-      ctx.facts.push({
-        kind: "call-borrow",
-        expr: expr.id,
-        place,
-        access,
-      });
+      if (access === "mutable") {
+        ctx.mutableStorageSymbols.add(place.root);
+      }
       return { index, actual, place, actor, access };
     });
   });
@@ -3594,7 +3580,7 @@ const initializeCallableContext = ({
   dependencies,
   decls,
   contracts,
-  facts,
+  mutableStorageSymbols,
   diagnostics,
 }: {
   callable: BorrowCallable;
@@ -3606,7 +3592,7 @@ const initializeCallableContext = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
-  facts: BorrowFact[];
+  mutableStorageSymbols: Set<SymbolId>;
   diagnostics: Diagnostic[];
 }): BodyContext => {
   const places = new Map<SymbolId, BorrowPlace>();
@@ -3647,7 +3633,7 @@ const initializeCallableContext = ({
     events: new Map(),
     uses: new Map(),
     usePlaces: new Map(),
-    facts,
+    mutableStorageSymbols,
     diagnostics,
     downgraded: [],
     terminations: [],
@@ -3742,7 +3728,7 @@ export const analyzeFunctionBorrowing = ({
   dependencies,
   decls,
   contracts,
-  facts,
+  mutableStorageSymbols,
   diagnostics,
 }: {
   functionItem: HirFunction;
@@ -3754,7 +3740,7 @@ export const analyzeFunctionBorrowing = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
-  facts: BorrowFact[];
+  mutableStorageSymbols: Set<SymbolId>;
   diagnostics: Diagnostic[];
 }): void => {
   analyzeCallableBorrowing({
@@ -3768,7 +3754,7 @@ export const analyzeFunctionBorrowing = ({
     dependencies,
     decls,
     contracts,
-    facts,
+    mutableStorageSymbols,
     diagnostics,
   });
 };
@@ -3783,7 +3769,7 @@ export const analyzeLambdaBodyBorrowing = ({
   dependencies,
   decls,
   contracts,
-  facts,
+  mutableStorageSymbols,
   diagnostics,
 }: {
   lambda: HirLambdaExpr;
@@ -3795,7 +3781,7 @@ export const analyzeLambdaBodyBorrowing = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
-  facts: BorrowFact[];
+  mutableStorageSymbols: Set<SymbolId>;
   diagnostics: Diagnostic[];
 }): void => {
   analyzeCallableBorrowing({
@@ -3819,7 +3805,7 @@ export const analyzeLambdaBodyBorrowing = ({
     dependencies,
     decls,
     contracts,
-    facts,
+    mutableStorageSymbols,
     diagnostics,
   });
 };
@@ -3835,7 +3821,7 @@ const analyzeCallableBorrowing = ({
   dependencies,
   decls,
   contracts,
-  facts,
+  mutableStorageSymbols,
   diagnostics,
 }: {
   callable: BorrowCallable;
@@ -3848,7 +3834,7 @@ const analyzeCallableBorrowing = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
-  facts: BorrowFact[];
+  mutableStorageSymbols: Set<SymbolId>;
   diagnostics: Diagnostic[];
 }): void => {
   const ctx = initializeCallableContext({
@@ -3861,7 +3847,7 @@ const analyzeCallableBorrowing = ({
     dependencies,
     decls,
     contracts,
-    facts,
+    mutableStorageSymbols,
     diagnostics,
   });
   validateReferenceDefaults({ callable, contract, ctx });
@@ -3918,14 +3904,9 @@ const analyzeCallableBorrowing = ({
         places.some((place) => placeOverlaps(alias.place, place))
       );
     });
-    facts.push({
-      kind: "alias",
-      symbol,
-      place: alias.place,
-      access: alias.access,
-      span: alias.span,
-      lastUse: uses.at(-1)?.span,
-    });
+    if (alias.access === "mutable") {
+      mutableStorageSymbols.add(alias.place.root);
+    }
   });
   callable.parameters.forEach((parameter) => {
     if (typeof parameter.defaultValue === "number") {

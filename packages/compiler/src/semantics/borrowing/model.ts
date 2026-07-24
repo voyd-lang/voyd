@@ -1,5 +1,5 @@
 import type { Diagnostic } from "../../diagnostics/index.js";
-import type { HirExprId, SourceSpan, SymbolId } from "../ids.js";
+import type { SymbolId } from "../ids.js";
 
 export type BorrowAccessMode = "owned" | "shared" | "mutable";
 
@@ -142,30 +142,9 @@ export type BorrowPlace = {
   projections: readonly PlaceProjection[];
 };
 
-export type BorrowFact =
-  | {
-      kind: "alias";
-      symbol: SymbolId;
-      place: BorrowPlace;
-      access: "shared" | "mutable";
-      span: SourceSpan;
-      lastUse?: SourceSpan;
-    }
-  | {
-      kind: "capability-downgrade";
-      place: BorrowPlace;
-      span: SourceSpan;
-    }
-  | {
-      kind: "call-borrow";
-      expr: HirExprId;
-      place: BorrowPlace;
-      access: "shared" | "mutable";
-    };
-
 export type BorrowingResult = {
   callables: ReadonlyMap<SymbolId, CallableBorrowContract>;
-  facts: readonly BorrowFact[];
+  mutableStorageSymbols: ReadonlySet<SymbolId>;
   diagnostics: readonly Diagnostic[];
 };
 
@@ -473,6 +452,6 @@ const mergeProjectionPaths = (
 
 export const emptyBorrowingResult = (): BorrowingResult => ({
   callables: new Map(),
-  facts: [],
+  mutableStorageSymbols: new Set(),
   diagnostics: [],
 });

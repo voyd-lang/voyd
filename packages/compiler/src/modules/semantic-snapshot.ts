@@ -25,7 +25,9 @@ export const cloneSemanticsForTypingState = ({
     hir: semantics.hir,
     borrowing: {
       callables: new Map(semantics.borrowing.callables),
-      facts: [...semantics.borrowing.facts],
+      mutableStorageSymbols: new Set(
+        semantics.borrowing.mutableStorageSymbols,
+      ),
       diagnostics: [...semantics.borrowing.diagnostics],
     },
     typing: {

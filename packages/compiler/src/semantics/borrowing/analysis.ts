@@ -62,7 +62,7 @@ export const analyzeBorrowing = ({
     "analyzeBorrowing.computeContracts",
     summariesStartedAt,
   );
-  const facts: BorrowingResult["facts"][number][] = [];
+  const mutableStorageSymbols = new Set<SymbolId>();
   const diagnostics: BorrowingResult["diagnostics"][number][] = [];
   const importMap = new Map(
     imports.flatMap((entry) =>
@@ -111,7 +111,7 @@ export const analyzeBorrowing = ({
       dependencies,
       decls,
       contracts: callables,
-      facts,
+      mutableStorageSymbols,
       diagnostics,
     }),
   );
@@ -126,7 +126,7 @@ export const analyzeBorrowing = ({
       dependencies,
       decls,
       contracts: callables,
-      facts,
+      mutableStorageSymbols,
       diagnostics,
     }),
   );
@@ -134,7 +134,7 @@ export const analyzeBorrowing = ({
     "analyzeBorrowing.checkBodies",
     bodiesStartedAt,
   );
-  return { callables, facts, diagnostics };
+  return { callables, mutableStorageSymbols, diagnostics };
 };
 
 // A body without both reference state and a borrow-producing or mutating
