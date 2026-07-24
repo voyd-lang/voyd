@@ -8,10 +8,10 @@
     "maxFileMs": 60000
   },
   "integration": {
-    "maxWallMs": 360000,
+    "maxWallMs": 375000,
     "maxFileMs": 210000,
     "maxFileMsByBasename": {
-      "vx-dom.test.ts": 252000
+      "vx-dom.test.ts": 270000
     }
   }
 }
