@@ -17,6 +17,8 @@
     "test:affected": "turbo run test --affected --output-logs=errors-only",
     "test:affected:ci": "turbo run test --affected --output-logs=errors-only --concurrency=3",
     "test:unit:affected:ci": "turbo run test --affected --filter=!@voyd-lang/conformance-tests --filter=!@voyd-lang/integration-tests --filter=!@voyd-lang/performance-tests --output-logs=errors-only --concurrency=3",
+    "test:unit:core:affected:ci": "npm run test:unit:affected:ci -- --filter=!@voyd-lang/cli --filter=!@voyd-lang/language-server",
+    "test:unit:tooling:affected:ci": "turbo run test --affected --filter=@voyd-lang/cli --filter=@voyd-lang/language-server --output-logs=errors-only --concurrency=2",
     "test:codegen": "npm run --workspace @voyd-lang/compiler test:codegen --",
     "test:full": "npm run test -- --force && node scripts/testing/run-full-test-extras.mjs",
     "test:perf": "npm --workspace @voyd-lang/performance-tests run test:perf",

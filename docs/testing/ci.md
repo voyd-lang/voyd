@@ -6,9 +6,11 @@ package unit behind one Turbo queue.
 ## Required Lanes
 
 - `typecheck`: affected workspace typechecks through Turbo.
-- `test`: affected package units, excluding the dedicated conformance and
-  integration workspaces, with explicit package concurrency of three and one
-  Vitest worker per package task.
+- `test`: affected core package units, excluding the dedicated conformance,
+  integration and developer-tooling workspaces, with explicit package
+  concurrency of three and one Vitest worker per package task.
+- `tooling-unit`: affected CLI and language-server package units, with the two
+  package tasks running concurrently and one Vitest worker per task.
 - `conformance`: the portable language corpus when compiler/runtime inputs can
   affect it.
 - `integration`: cross-package public behavior when an upstream package can
@@ -22,13 +24,14 @@ Superseded PR runs are cancelled. Turbo caches are restored only in jobs that
 actually execute Turbo tasks; direct Vitest jobs do not restore an ineffective
 Turbo cache.
 
-Unit, conformance and integration jobs record the wall time of the complete
-lane command, emit per-file Vitest JSON timing reports where applicable,
-enforce the checked-in budgets in `scripts/testing/timing-budgets.json`, and
-retain their summaries as 30-day CI artifacts. Measuring the full command keeps
-Voyd-runner, grammar, and other non-Vitest package tasks inside the unit budget.
-Initial budgets are intentionally generous enough to avoid runner noise;
-tighten them from observed p95 data.
+Core-unit, tooling-unit, conformance and integration jobs record the wall time
+of the complete lane command, emit per-file Vitest JSON timing reports where
+applicable, enforce the checked-in budgets in
+`scripts/testing/timing-budgets.json`, and retain their summaries as 30-day CI
+artifacts. Measuring the full command keeps Voyd-runner, grammar, and other
+non-Vitest package tasks inside the unit budget. Initial budgets are
+intentionally generous enough to avoid runner noise; tighten them from observed
+p95 data.
 Dedicated conformance and integration jobs each use two Vitest workers, so the
 unit lane's three-package concurrency cannot multiply into unbounded nested
 worker pools.
@@ -48,6 +51,10 @@ even though every test passed. The initial unit guardrail is therefore 420
 seconds for the lane and 180 seconds per file. This retains regression
 detection without making ordinary hosted-runner variance a required-check
 failure; tighten it once retained artifacts provide a credible p95 baseline.
+The CLI and language-server packages have their own unit shard because their
+compile-heavy files can dominate broad upstream runs. The split stays at
+package boundaries so Turbo's affected selection remains authoritative and new
+test files cannot silently fall out of CI.
 
 The first live hosted-runner integration baseline completed all 128 assertions
 in about 201 seconds, with the slowest file at about 132 seconds. After the
