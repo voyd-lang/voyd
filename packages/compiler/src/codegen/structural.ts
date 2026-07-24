@@ -577,7 +577,10 @@ const unboxInlineValue = ({
   if (desc.kind === "union" && unionBoxType) {
     const layout = getInlineUnionLayout(typeId, ctx);
     const boxRef = () =>
-      refAsNonNull(ctx.mod, refCast(ctx.mod, value, unionBoxType));
+      refAsNonNull(
+        ctx.mod,
+        refCast(ctx.mod, ctx.mod.copyExpression(value), unionBoxType),
+      );
     const lanes = layout.abiTypes.map((abiType, index) =>
       structGetFieldValue({
         mod: ctx.mod,
@@ -594,7 +597,10 @@ const unboxInlineValue = ({
     return value;
   }
   const boxRef = () =>
-    refAsNonNull(ctx.mod, refCast(ctx.mod, value, structInfo.runtimeType));
+    refAsNonNull(
+      ctx.mod,
+      refCast(ctx.mod, ctx.mod.copyExpression(value), structInfo.runtimeType),
+    );
   const lanes = structInfo.fields.flatMap((field) =>
     field.inlineWasmTypes.map((abiType, index) =>
       structGetFieldValue({

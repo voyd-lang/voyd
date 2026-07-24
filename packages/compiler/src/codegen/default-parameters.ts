@@ -330,10 +330,13 @@ const compileReferenceDefaultStores = ({
   const defaultStorage = mutable
     ? allocateMutableRefLocal({ typeId, ctx, fnCtx })
     : allocateAddressableLocal({ typeId, ctx, fnCtx });
-  const defaultStorageRef = loadBindingStorageRef(defaultStorage, ctx);
-  if (!defaultStorageRef) {
-    throw new Error("reference default requires addressable local storage");
-  }
+  const defaultStorageRef = (): binaryen.ExpressionRef => {
+    const reference = loadBindingStorageRef(defaultStorage, ctx);
+    if (!reference) {
+      throw new Error("reference default requires addressable local storage");
+    }
+    return reference;
+  };
   const selectedStorage = allocateTempLocal(rawBinding.storageType, fnCtx);
   fnCtx.bindings.set(
     symbol,
@@ -354,7 +357,7 @@ const compileReferenceDefaultStores = ({
           ctx,
           fnCtx,
         }),
-        defaultStorageRef,
+        defaultStorageRef(),
       ],
       defaultStorage.storageType,
     );
