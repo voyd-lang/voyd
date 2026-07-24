@@ -36,6 +36,7 @@ import type { BorrowingDependency } from "./dependency.js";
 import {
   expressionTypeFor,
   resolveBorrowCall,
+  resolveBorrowCallTargets,
   type ResolvedBorrowCall,
 } from "./call-resolution.js";
 import { expressionCanFallThrough } from "./control-flow.js";
@@ -63,6 +64,9 @@ type ReturnSnapshot = {
   flow: Flow;
   invalidated: Flow;
 };
+
+const originKeys = new WeakMap<ParameterOrigin, string>();
+const contractEqualityKeys = new WeakMap<CallableBorrowContract, string>();
 
 type SummaryContext = {
   hir: HirGraph;
@@ -104,8 +108,46 @@ const expressionCanCarryReference = (
   return typeCanCarryReference(type, ctx.typing);
 };
 
-const originKey = (origin: ParameterOrigin): string =>
-  `${origin.parameter}:${JSON.stringify(origin.sourceProjections)}:${JSON.stringify(origin.resultProjections)}:${origin.borrowed === true}:${origin.shared === true}:${origin.returnTypeConditionId ?? ""}:${JSON.stringify(origin.accessTypeComparator ?? null)}`;
+const projectionPathKey = (
+  projections: readonly PlaceProjection[],
+): string =>
+  projections
+    .map((projection) => {
+      switch (projection.kind) {
+        case "field":
+          return `f${projection.name.length}:${projection.name}`;
+        case "tuple":
+          return `t${projection.index}`;
+        case "index":
+          return `i${projection.stable ? 1 : 0}:${projection.constant ?? ""}`;
+        case "discriminant":
+          return "d";
+        case "identity":
+          return "y";
+      }
+    })
+    .join("/");
+
+const originKey = (origin: ParameterOrigin): string => {
+  const cached = originKeys.get(origin);
+  if (cached) {
+    return cached;
+  }
+  const comparator = origin.accessTypeComparator;
+  const key = [
+    origin.parameter,
+    projectionPathKey(origin.sourceProjections),
+    projectionPathKey(origin.resultProjections),
+    origin.borrowed === true ? 1 : 0,
+    origin.shared === true ? 1 : 0,
+    origin.returnTypeConditionId ?? "",
+    comparator
+      ? `${comparator.conditionId.length}:${comparator.conditionId}:${comparator.parameter}:${projectionPathKey(comparator.sourceProjections)}`
+      : "",
+  ].join("|");
+  originKeys.set(origin, key);
+  return key;
+};
 
 const emptyFlow = (): MutableFlow => new Map();
 
@@ -2174,48 +2216,42 @@ const summarizeFunction = ({
   };
 };
 
+const contractEqualityKey = (contract: CallableBorrowContract): string => {
+  const cached = contractEqualityKeys.get(contract);
+  if (cached) {
+    return cached;
+  }
+  const key = JSON.stringify([
+    contract.parameters.map((parameter) => [
+      parameter.access,
+      parameter.accessPaths ?? [],
+      parameter.retained,
+      parameter.returned,
+      parameter.returnedTypeMatchingOrigins ?? [],
+      parameter.accessIfResultTypeDiffers ?? null,
+      parameter.retainedPaths ?? [],
+      parameter.externalRetainedPaths ?? [],
+      parameter.borrowedRetainedPaths ?? [],
+      parameter.returnedPaths ?? [],
+      parameter.returnedOrigins ?? [],
+      parameter.returnedBorrowedOrigins ?? [],
+      parameter.returnedSharedOrigins ?? [],
+      parameter.invalidatedPaths ?? [],
+      parameter.defaultOrigins ?? [],
+    ]),
+    contract.maySuspend,
+    contract.transfers ?? [],
+    contract.scopedCallbacks ?? [],
+  ]);
+  contractEqualityKeys.set(contract, key);
+  return key;
+};
+
 const contractsEqual = (
   left: CallableBorrowContract,
   right: CallableBorrowContract,
 ): boolean =>
-  left.parameters.length === right.parameters.length &&
-  left.parameters.every((parameter, index) => {
-    const candidate = right.parameters[index];
-    return (
-      candidate?.access === parameter.access &&
-      JSON.stringify(candidate.accessPaths ?? []) ===
-        JSON.stringify(parameter.accessPaths ?? []) &&
-      candidate.retained === parameter.retained &&
-      candidate.returned === parameter.returned &&
-      JSON.stringify(candidate.returnedTypeMatchingOrigins ?? []) ===
-        JSON.stringify(parameter.returnedTypeMatchingOrigins ?? []) &&
-      JSON.stringify(candidate.accessIfResultTypeDiffers ?? null) ===
-        JSON.stringify(parameter.accessIfResultTypeDiffers ?? null) &&
-      JSON.stringify(candidate.retainedPaths ?? []) ===
-        JSON.stringify(parameter.retainedPaths ?? []) &&
-      JSON.stringify(candidate.externalRetainedPaths ?? []) ===
-        JSON.stringify(parameter.externalRetainedPaths ?? []) &&
-      JSON.stringify(candidate.borrowedRetainedPaths ?? []) ===
-        JSON.stringify(parameter.borrowedRetainedPaths ?? []) &&
-      JSON.stringify(candidate.returnedPaths ?? []) ===
-        JSON.stringify(parameter.returnedPaths ?? []) &&
-      JSON.stringify(candidate.returnedOrigins ?? []) ===
-        JSON.stringify(parameter.returnedOrigins ?? []) &&
-      JSON.stringify(candidate.returnedBorrowedOrigins ?? []) ===
-        JSON.stringify(parameter.returnedBorrowedOrigins ?? []) &&
-      JSON.stringify(candidate.returnedSharedOrigins ?? []) ===
-        JSON.stringify(parameter.returnedSharedOrigins ?? []) &&
-      JSON.stringify(candidate.invalidatedPaths ?? []) ===
-        JSON.stringify(parameter.invalidatedPaths ?? []) &&
-      JSON.stringify(candidate.defaultOrigins ?? []) ===
-        JSON.stringify(parameter.defaultOrigins ?? [])
-    );
-  }) &&
-  left.maySuspend === right.maySuspend &&
-  JSON.stringify(left.transfers ?? []) ===
-    JSON.stringify(right.transfers ?? []) &&
-  JSON.stringify(left.scopedCallbacks ?? []) ===
-    JSON.stringify(right.scopedCallbacks ?? []);
+  left === right || contractEqualityKey(left) === contractEqualityKey(right);
 
 const MAX_SUMMARY_PROJECTION_DEPTH = 8;
 const MAX_SUMMARY_PATHS_PER_PARAMETER = 32;
@@ -2488,19 +2524,49 @@ const withReturnedSharedOrigins = ({
 });
 
 const mustContractSignature = (
-  contracts: ReadonlyMap<SymbolId, CallableBorrowContract>,
+  contract: CallableBorrowContract,
 ): string =>
   JSON.stringify(
+    {
+      invalidatedPaths: contract.parameters.map(
+        (parameter) => parameter.invalidatedPaths ?? [],
+      ),
+      transfers: contract.transfers ?? [],
+    },
+  );
+
+const mustContractSignatures = (
+  contracts: ReadonlyMap<SymbolId, CallableBorrowContract>,
+): ReadonlyMap<SymbolId, string> =>
+  new Map(
     Array.from(contracts, ([symbol, contract]) => [
       symbol,
-      {
-        invalidatedPaths: contract.parameters.map(
-          (parameter) => parameter.invalidatedPaths ?? [],
-        ),
-        transfers: contract.transfers ?? [],
-      },
+      mustContractSignature(contract),
     ]),
   );
+
+const transitiveCallersOf = ({
+  symbols,
+  callers,
+}: {
+  symbols: ReadonlySet<SymbolId>;
+  callers: ReadonlyMap<SymbolId, readonly HirFunction[]>;
+}): ReadonlySet<SymbolId> => {
+  const affected = new Set(symbols);
+  const worklist = [...symbols];
+  let cursor = 0;
+  while (cursor < worklist.length) {
+    const symbol = worklist[cursor++]!;
+    (callers.get(symbol) ?? []).forEach((caller) => {
+      if (affected.has(caller.symbol)) {
+        return;
+      }
+      affected.add(caller.symbol);
+      worklist.push(caller.symbol);
+    });
+  }
+  return affected;
+};
 
 export const computeCallableBorrowContracts = ({
   hir,
@@ -2548,7 +2614,6 @@ export const computeCallableBorrowContracts = ({
       typing,
     ),
   );
-
   const callers = localCallersOf({
     functions: summaryFunctions,
     hir,
@@ -2563,10 +2628,28 @@ export const computeCallableBorrowContracts = ({
     summaryFunctions,
     callers,
   );
-  const converge = (): void => {
-    const worklist = [...orderedSummaryFunctions];
+  const summarySymbols = new Set(
+    summaryFunctions.map((functionItem) => functionItem.symbol),
+  );
+  const localSummaryDependencies = new Map<SymbolId, Set<SymbolId>>();
+  callers.forEach((dependents, target) => {
+    if (!summarySymbols.has(target)) {
+      return;
+    }
+    dependents.forEach((dependent) => {
+      const targets =
+        localSummaryDependencies.get(dependent.symbol) ?? new Set<SymbolId>();
+      targets.add(target);
+      localSummaryDependencies.set(dependent.symbol, targets);
+    });
+  });
+  const finalCandidates = new Map<SymbolId, CallableBorrowContract>();
+  const converge = (
+    seeds: readonly HirFunction[] = orderedSummaryFunctions,
+  ): void => {
+    const worklist = [...seeds];
     const queued = new Set(
-      summaryFunctions.map((functionItem) => functionItem.symbol),
+      seeds.map((functionItem) => functionItem.symbol),
     );
     let cursor = 0;
     while (cursor < worklist.length) {
@@ -2584,6 +2667,7 @@ export const computeCallableBorrowContracts = ({
         dependencies,
         decls,
       });
+      finalCandidates.set(functionItem.symbol, candidate);
       const joined = joinCallableBorrowContracts({ previous, candidate });
       if (contractsEqual(previous, joined)) {
         continue;
@@ -2598,19 +2682,34 @@ export const computeCallableBorrowContracts = ({
       });
     }
   };
-  let mustSignature = mustContractSignature(contracts);
+  let mustSignatures = mustContractSignatures(contracts);
+  let convergenceSeeds = orderedSummaryFunctions;
   while (true) {
-    converge();
-    const nextMustSignature = mustContractSignature(contracts);
-    if (nextMustSignature === mustSignature) {
+    converge(convergenceSeeds);
+    const nextMustSignatures = mustContractSignatures(contracts);
+    const changedMustSymbols = new Set(
+      Array.from(nextMustSignatures.keys()).filter(
+        (symbol) => nextMustSignatures.get(symbol) !== mustSignatures.get(symbol),
+      ),
+    );
+    if (changedMustSymbols.size === 0) {
       break;
     }
-    mustSignature = nextMustSignature;
+    mustSignatures = nextMustSignatures;
+    const affectedSymbols = transitiveCallersOf({
+      symbols: changedMustSymbols,
+      callers,
+    });
     contracts = new Map(
       Array.from(contracts, ([symbol, contract]) => [
         symbol,
-        resetDerivedContractFacts(contract),
+        affectedSymbols.has(symbol)
+          ? resetDerivedContractFacts(contract)
+          : contract,
       ]),
+    );
+    convergenceSeeds = orderedSummaryFunctions.filter((functionItem) =>
+      affectedSymbols.has(functionItem.symbol),
     );
   }
   contracts = new Map(
@@ -2627,22 +2726,31 @@ export const computeCallableBorrowContracts = ({
   const sharedQueued = new Set(
     sharedWorklist.map((functionItem) => functionItem.symbol),
   );
+  const sharedContractsChanged = new Set<SymbolId>();
   let sharedCursor = 0;
   while (sharedCursor < sharedWorklist.length) {
     const functionItem = sharedWorklist[sharedCursor++]!;
     sharedQueued.delete(functionItem.symbol);
     const previous = contracts.get(functionItem.symbol)!;
-    const candidate = summarizeFunction({
-      functionItem,
-      baseContracts: contracts,
-      hir,
-      typing,
-      symbolTable,
-      moduleId,
-      imports: importMap,
-      dependencies,
-      decls,
-    });
+    const cachedCandidate =
+      Array.from(
+        localSummaryDependencies.get(functionItem.symbol) ?? [],
+      ).some((dependency) => sharedContractsChanged.has(dependency))
+        ? undefined
+        : finalCandidates.get(functionItem.symbol);
+    const candidate =
+      cachedCandidate ??
+      summarizeFunction({
+        functionItem,
+        baseContracts: contracts,
+        hir,
+        typing,
+        symbolTable,
+        moduleId,
+        imports: importMap,
+        dependencies,
+        decls,
+      });
     const next = withReturnedSharedOrigins({
       contract: previous,
       candidate,
@@ -2651,6 +2759,7 @@ export const computeCallableBorrowContracts = ({
       continue;
     }
     contracts.set(functionItem.symbol, next);
+    sharedContractsChanged.add(functionItem.symbol);
     (callers.get(functionItem.symbol) ?? []).forEach((dependent) => {
       if (sharedQueued.has(dependent.symbol)) {
         return;
@@ -2840,7 +2949,7 @@ const localCallersOf = ({
       if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
         return;
       }
-      resolveBorrowCall(expr, context).targets.forEach((target) => {
+      resolveBorrowCallTargets(expr, context).forEach((target) => {
         if (target.moduleId !== moduleId) {
           return;
         }

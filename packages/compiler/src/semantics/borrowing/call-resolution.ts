@@ -1020,6 +1020,28 @@ const directTarget = (
     : undefined;
 };
 
+const borrowCallTargets = (
+  expr: HirExpression,
+  ctx: ResolveContext,
+): {
+  targets: readonly SymbolRef[];
+  direct?: SymbolRef;
+} => {
+  const resolved = uniqueTargets(
+    expr.id,
+    ctx.typing,
+    ctx.borrowIndexMode === "symbolic",
+  );
+  if (resolved.length > 0) {
+    return { targets: resolved };
+  }
+  const direct = directTarget(expr, ctx);
+  return {
+    targets: direct ? [direct] : [],
+    ...(direct ? { direct } : {}),
+  };
+};
+
 const alignExplicitArguments = (
   args: readonly { label?: string; expr: HirExprId }[],
   signature:
@@ -1146,10 +1168,7 @@ export const resolveBorrowCall = (
     return cached;
   }
   const preferSymbolic = ctx.borrowIndexMode === "symbolic";
-  const resolved = uniqueTargets(expr.id, ctx.typing, preferSymbolic);
-  const direct = resolved.length === 0 ? directTarget(expr, ctx) : undefined;
-  const inferred = resolved.length === 0 ? [...(direct ? [direct] : [])] : [];
-  const targets = resolved.length > 0 ? resolved : inferred;
+  const { targets, direct } = borrowCallTargets(expr, ctx);
   const entries = targets.map((target) => {
     if (target.moduleId === ctx.moduleId) {
       return {
@@ -1315,3 +1334,8 @@ export const resolveBorrowCall = (
   ctx.callResolutionCache?.set(expr.id, result);
   return result;
 };
+
+export const resolveBorrowCallTargets = (
+  expr: HirExpression,
+  ctx: ResolveContext,
+): readonly SymbolRef[] => borrowCallTargets(expr, ctx).targets;

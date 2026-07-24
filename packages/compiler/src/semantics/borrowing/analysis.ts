@@ -172,7 +172,10 @@ const bodyNeedsBorrowAnalysis = ({
         return { stop: true };
       }
       if (expression.exprKind === "assign") {
-        hasBorrowOperation = true;
+        hasBorrowOperation ||= assignmentNeedsBorrowAnalysis(
+          expression,
+          resolveContext,
+        );
       }
       const callAccess =
         expression.exprKind === "call" || expression.exprKind === "method-call"
@@ -220,6 +223,37 @@ const bodyNeedsBorrowAnalysis = ({
     },
   });
   return hasBorrowOperation && hasReferenceState;
+};
+
+const assignmentNeedsBorrowAnalysis = (
+  expression: Extract<HirExpression, { exprKind: "assign" }>,
+  resolveContext: ResolveContext,
+): boolean => {
+  const canCarryReference = (exprId: number): boolean => {
+    const typeId = expressionTypeFor(exprId, resolveContext);
+    return (
+      typeof typeId !== "number" ||
+      typeCanCarryReference(typeId, resolveContext.typing)
+    );
+  };
+  if (canCarryReference(expression.value)) {
+    return true;
+  }
+  if (typeof expression.target !== "number") {
+    return false;
+  }
+  let placeExprId = expression.target;
+  while (true) {
+    if (canCarryReference(placeExprId)) {
+      return true;
+    }
+    const place = resolveContext.hir.expressions.get(placeExprId);
+    if (place?.exprKind === "field-access") {
+      placeExprId = place.target;
+      continue;
+    }
+    return false;
+  }
 };
 
 const callBorrowAccess = (
