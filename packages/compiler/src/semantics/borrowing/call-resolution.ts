@@ -171,6 +171,7 @@ export type ResolveContext = {
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   bindingInitializers: ReadonlyMap<SymbolId, HirExprId>;
+  callResolutionCache?: Map<HirExprId, ResolvedBorrowCall>;
   borrowIndexMode?: "concrete" | "symbolic";
 };
 
@@ -1127,9 +1128,10 @@ const typedArgumentsFor = (
     return { ambiguous: false };
   }
   const first = plans[0]!;
-  const ambiguous = plans.some(
-    (plan) => JSON.stringify(plan) !== JSON.stringify(first),
-  );
+  const firstKey = plans.length > 1 ? JSON.stringify(first) : "";
+  const ambiguous =
+    plans.length > 1 &&
+    plans.slice(1).some((plan) => JSON.stringify(plan) !== firstKey);
   return ambiguous
     ? { arguments: rawArgumentsFor(expr), ambiguous: true }
     : { arguments: first, ambiguous: false };
@@ -1139,6 +1141,10 @@ export const resolveBorrowCall = (
   expr: HirExpression,
   ctx: ResolveContext,
 ): ResolvedBorrowCall => {
+  const cached = ctx.callResolutionCache?.get(expr.id);
+  if (cached) {
+    return cached;
+  }
   const preferSymbolic = ctx.borrowIndexMode === "symbolic";
   const resolved = uniqueTargets(expr.id, ctx.typing, preferSymbolic);
   const direct = resolved.length === 0 ? directTarget(expr, ctx) : undefined;
@@ -1230,14 +1236,20 @@ export const resolveBorrowCall = (
       returnType: signature.returnType,
       effectRow: signature.effectRow,
     });
+  const firstSignature = entrySignatures[0];
+  const firstSignatureKey =
+    entrySignatures.length > 1 && firstSignature
+      ? signatureKey(firstSignature)
+      : "";
   const signature =
-    entrySignatures.length > 0 &&
-    entrySignatures.every(
-      (candidate) =>
-        signatureKey(candidate) === signatureKey(entrySignatures[0]!),
-    )
-      ? entrySignatures[0]
-      : opaque.signature;
+    entrySignatures.length === 1
+      ? firstSignature
+      : firstSignature &&
+          entrySignatures
+            .slice(1)
+            .every((candidate) => signatureKey(candidate) === firstSignatureKey)
+        ? firstSignature
+        : opaque.signature;
   const intrinsicName = intrinsicNameForCall(expr, ctx);
   const intrinsicContract =
     typeof intrinsicName === "string"
@@ -1266,13 +1278,17 @@ export const resolveBorrowCall = (
           ctx,
           targets.some((target) => targetIsEffectOperation(target, ctx)),
         )
-      : mergeCallableBorrowContracts(
-          targets.length > 0
-            ? contracts
-            : unresolvedContract
-              ? [unresolvedContract]
-              : [],
-        );
+      : (() => {
+          const availableContracts =
+            targets.length > 0
+              ? contracts
+              : unresolvedContract
+                ? [unresolvedContract]
+                : [];
+          return availableContracts.length === 1
+            ? availableContracts[0]
+            : mergeCallableBorrowContracts(availableContracts);
+        })();
   const arguments_ =
     typedArguments.arguments ??
     (targets.length === 0 || direct
@@ -1289,11 +1305,13 @@ export const resolveBorrowCall = (
         ctx,
       )
     : undefined;
-  return {
+  const result = {
     target: entries.length === 1 ? entries[0]?.target : undefined,
     targets,
     signature,
     contract,
     arguments: arguments_,
   };
+  ctx.callResolutionCache?.set(expr.id, result);
+  return result;
 };

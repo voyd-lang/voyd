@@ -30,6 +30,10 @@ import {
 } from "./symbol-index.js";
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import { assignModuleTestIds, isGeneratedTestId } from "../tests/ids.js";
+import {
+  markCompilerPerfPhaseDuration,
+  startCompilerPerfPhase,
+} from "../perf.js";
 import { formatEffectRow } from "./effects/format.js";
 import {
   analyzeBorrowing,
@@ -169,10 +173,10 @@ export const semanticsPipeline = (
     moduleId: module.id,
     imports: binding.imports,
   });
-  const borrowing =
-    typing.diagnostics.some(
-      (diagnostic) => diagnostic.severity === "error",
-    )
+  const borrowingStartedAt = startCompilerPerfPhase();
+  const borrowing = typing.diagnostics.some(
+    (diagnostic) => diagnostic.severity === "error",
+  )
     ? emptyBorrowingResult()
     : analyzeBorrowing({
         hir,
@@ -183,6 +187,7 @@ export const semanticsPipeline = (
         dependencies: projectBorrowingDependencies(dependencies),
         decls: binding.decls,
       });
+  markCompilerPerfPhaseDuration("analyzeBorrowing", borrowingStartedAt);
   const exportsTable = collectModuleExports({
     hir,
     symbolTable,

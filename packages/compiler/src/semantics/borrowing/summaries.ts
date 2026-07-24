@@ -81,6 +81,7 @@ type SummaryContext = {
   maySuspend: { value: boolean };
   scopedCallbacks: Map<string, ScopedCallbackBorrowContract>;
   bindingInitializers: Map<SymbolId, HirExprId>;
+  callResolutionCache: Map<HirExprId, ResolvedBorrowCall>;
   parameterOrigins: Map<SymbolId, number>;
   placeEnvs: Map<MutableEnv, Map<SymbolId, MutableFlow>>;
   localOwnedRoots: Set<SymbolId>;
@@ -2055,6 +2056,7 @@ const summarizeFunction = ({
     maySuspend,
     scopedCallbacks,
     bindingInitializers,
+    callResolutionCache: new Map(),
     parameterOrigins,
     placeEnvs,
     localOwnedRoots,
@@ -2557,8 +2559,12 @@ export const computeCallableBorrowContracts = ({
     dependencies,
     decls,
   });
+  const orderedSummaryFunctions = dependencyOrderedFunctions(
+    summaryFunctions,
+    callers,
+  );
   const converge = (): void => {
-    const worklist = [...summaryFunctions];
+    const worklist = [...orderedSummaryFunctions];
     const queued = new Set(
       summaryFunctions.map((functionItem) => functionItem.symbol),
     );
@@ -2613,7 +2619,7 @@ export const computeCallableBorrowContracts = ({
       stripReturnedSharedOrigins(contract),
     ]),
   );
-  const sharedWorklist = summaryFunctions.filter((functionItem) =>
+  const sharedWorklist = orderedSummaryFunctions.filter((functionItem) =>
     contracts
       .get(functionItem.symbol)
       ?.parameters.some((parameter) => parameter.returned),
@@ -2654,6 +2660,147 @@ export const computeCallableBorrowContracts = ({
     });
   }
   return contracts;
+};
+
+const stronglyConnectedComponents = ({
+  symbols,
+  dependents,
+  sourceOrder,
+}: {
+  symbols: readonly SymbolId[];
+  dependents: ReadonlyMap<SymbolId, ReadonlySet<SymbolId>>;
+  sourceOrder: ReadonlyMap<SymbolId, number>;
+}): readonly (readonly SymbolId[])[] => {
+  const indices = new Map<SymbolId, number>();
+  const lowLinks = new Map<SymbolId, number>();
+  const stack: SymbolId[] = [];
+  const onStack = new Set<SymbolId>();
+  const components: SymbolId[][] = [];
+  let nextIndex = 0;
+  const visit = (symbol: SymbolId): void => {
+    const index = nextIndex++;
+    indices.set(symbol, index);
+    lowLinks.set(symbol, index);
+    stack.push(symbol);
+    onStack.add(symbol);
+    (dependents.get(symbol) ?? []).forEach((dependent) => {
+      if (!indices.has(dependent)) {
+        visit(dependent);
+        lowLinks.set(
+          symbol,
+          Math.min(lowLinks.get(symbol)!, lowLinks.get(dependent)!),
+        );
+        return;
+      }
+      if (onStack.has(dependent)) {
+        lowLinks.set(
+          symbol,
+          Math.min(lowLinks.get(symbol)!, indices.get(dependent)!),
+        );
+      }
+    });
+    if (lowLinks.get(symbol) !== indices.get(symbol)) {
+      return;
+    }
+    const component: SymbolId[] = [];
+    while (stack.length > 0) {
+      const member = stack.pop()!;
+      onStack.delete(member);
+      component.push(member);
+      if (member === symbol) {
+        break;
+      }
+    }
+    component.sort(
+      (left, right) => sourceOrder.get(left)! - sourceOrder.get(right)!,
+    );
+    components.push(component);
+  };
+  symbols.forEach((symbol) => {
+    if (!indices.has(symbol)) {
+      visit(symbol);
+    }
+  });
+  return components;
+};
+
+const dependencyOrderedFunctions = (
+  functions: readonly HirFunction[],
+  callers: ReadonlyMap<SymbolId, readonly HirFunction[]>,
+): readonly HirFunction[] => {
+  const bySymbol = new Map(
+    functions.map((functionItem) => [functionItem.symbol, functionItem]),
+  );
+  const sourceOrder = new Map(
+    functions.map((functionItem, index) => [functionItem.symbol, index]),
+  );
+  const dependentsByTarget = new Map(
+    functions.map((functionItem) => [functionItem.symbol, new Set<SymbolId>()]),
+  );
+  callers.forEach((callersForTarget, target) => {
+    if (!bySymbol.has(target)) {
+      return;
+    }
+    const targetDependents = dependentsByTarget.get(target)!;
+    callersForTarget.forEach((dependent) => {
+      if (bySymbol.has(dependent.symbol)) {
+        targetDependents.add(dependent.symbol);
+      }
+    });
+  });
+  const components = stronglyConnectedComponents({
+    symbols: functions.map((functionItem) => functionItem.symbol),
+    dependents: dependentsByTarget,
+    sourceOrder,
+  });
+  const componentBySymbol = new Map<SymbolId, number>();
+  components.forEach((component, componentIndex) =>
+    component.forEach((symbol) =>
+      componentBySymbol.set(symbol, componentIndex),
+    ),
+  );
+  const componentDependents = components.map(() => new Set<number>());
+  const indegrees = components.map(() => 0);
+  dependentsByTarget.forEach((targets, source) => {
+    const sourceComponent = componentBySymbol.get(source)!;
+    targets.forEach((target) => {
+      const targetComponent = componentBySymbol.get(target)!;
+      if (
+        sourceComponent === targetComponent ||
+        componentDependents[sourceComponent]!.has(targetComponent)
+      ) {
+        return;
+      }
+      componentDependents[sourceComponent]!.add(targetComponent);
+      indegrees[targetComponent] = indegrees[targetComponent]! + 1;
+    });
+  });
+  const componentSourceOrder = (componentIndex: number): number =>
+    sourceOrder.get(components[componentIndex]![0]!)!;
+  const worklist = components
+    .map((_component, index) => index)
+    .filter((index) => indegrees[index] === 0)
+    .sort(
+      (left, right) => componentSourceOrder(left) - componentSourceOrder(right),
+    );
+  const orderedComponents: number[] = [];
+  while (worklist.length > 0) {
+    const componentIndex = worklist.shift()!;
+    orderedComponents.push(componentIndex);
+    componentDependents[componentIndex]!.forEach((dependent) => {
+      indegrees[dependent] = indegrees[dependent]! - 1;
+      if (indegrees[dependent] === 0) {
+        worklist.push(dependent);
+        worklist.sort(
+          (left, right) =>
+            componentSourceOrder(left) - componentSourceOrder(right),
+        );
+      }
+    });
+  }
+  return orderedComponents.flatMap((componentIndex) =>
+    components[componentIndex]!.map((symbol) => bySymbol.get(symbol)!),
+  );
 };
 
 const localCallersOf = ({
@@ -2790,6 +2937,7 @@ export const summarizeLambdaBorrowing = ({
     maySuspend,
     scopedCallbacks,
     bindingInitializers,
+    callResolutionCache: new Map(),
     parameterOrigins,
     placeEnvs,
     localOwnedRoots,

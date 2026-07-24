@@ -94,6 +94,7 @@ type BodyContext = {
   mutableParameters: ReadonlySet<SymbolId>;
   closureCaptures: Map<SymbolId, readonly SymbolId[]>;
   bindingInitializers: Map<SymbolId, HirExprId>;
+  callResolutionCache: Map<HirExprId, ResolvedBorrowCall>;
   unknownCallableBindings: Set<SymbolId>;
   parameterSymbols: Set<SymbolId>;
   nextPosition: number;
@@ -3653,6 +3654,7 @@ const initializeCallableContext = ({
     mutableParameters,
     closureCaptures: new Map(),
     bindingInitializers: new Map(),
+    callResolutionCache: new Map(),
     unknownCallableBindings: new Set(),
     parameterSymbols: new Set(
       callable.parameters.flatMap((parameter) =>

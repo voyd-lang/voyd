@@ -1,9 +1,14 @@
 import type { SymbolTable } from "../binder/index.js";
 import {
+  markCompilerPerfPhaseDuration,
+  startCompilerPerfPhase,
+} from "../../perf.js";
+import {
   walkExpression,
   type HirExpression,
   type HirFunction,
   type HirGraph,
+  type HirLambdaExpr,
 } from "../hir/index.js";
 import type { SymbolId } from "../ids.js";
 import type { TypingResult } from "../typing/index.js";
@@ -43,6 +48,7 @@ export const analyzeBorrowing = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
 }): BorrowingResult => {
+  const summariesStartedAt = startCompilerPerfPhase();
   const callables = computeCallableBorrowContracts({
     hir,
     typing,
@@ -52,6 +58,10 @@ export const analyzeBorrowing = ({
     dependencies,
     decls,
   });
+  markCompilerPerfPhaseDuration(
+    "analyzeBorrowing.computeContracts",
+    summariesStartedAt,
+  );
   const facts: BorrowingResult["facts"][number][] = [];
   const diagnostics: BorrowingResult["diagnostics"][number][] = [];
   const importMap = new Map(
@@ -68,73 +78,85 @@ export const analyzeBorrowing = ({
     dependencies,
     contracts: callables,
     bindingInitializers: new Map(),
+    callResolutionCache: new Map(),
     decls,
   };
-  Array.from(hir.items.values())
+  const selectionStartedAt = startCompilerPerfPhase();
+  const functions = Array.from(hir.items.values())
     .filter((item): item is HirFunction => item.kind === "function")
     .filter((functionItem) =>
-      functionNeedsBorrowAnalysis({
-        functionItem,
+      bodyNeedsBorrowAnalysis({
+        body: functionItem,
         hir,
         typing,
         resolveContext,
       }),
-    )
-    .forEach((functionItem) =>
-      analyzeFunctionBorrowing({
-        functionItem,
-        hir,
-        typing,
-        symbolTable,
-        moduleId,
-        imports: importMap,
-        dependencies,
-        decls,
-        contracts: callables,
-        facts,
-        diagnostics,
-      }),
     );
-  Array.from(hir.expressions.values())
-    .filter((expr) => expr.exprKind === "lambda")
-    .forEach((lambda) =>
-      analyzeLambdaBodyBorrowing({
-        lambda,
-        hir,
-        typing,
-        symbolTable,
-        moduleId,
-        imports: importMap,
-        dependencies,
-        decls,
-        contracts: callables,
-        facts,
-        diagnostics,
-      }),
-    );
+  const lambdas = Array.from(hir.expressions.values()).filter(
+    (expr): expr is HirLambdaExpr => expr.exprKind === "lambda",
+  );
+  markCompilerPerfPhaseDuration(
+    "analyzeBorrowing.selectBodies",
+    selectionStartedAt,
+  );
+  const bodiesStartedAt = startCompilerPerfPhase();
+  functions.forEach((functionItem) =>
+    analyzeFunctionBorrowing({
+      functionItem,
+      hir,
+      typing,
+      symbolTable,
+      moduleId,
+      imports: importMap,
+      dependencies,
+      decls,
+      contracts: callables,
+      facts,
+      diagnostics,
+    }),
+  );
+  lambdas.forEach((lambda) =>
+    analyzeLambdaBodyBorrowing({
+      lambda,
+      hir,
+      typing,
+      symbolTable,
+      moduleId,
+      imports: importMap,
+      dependencies,
+      decls,
+      contracts: callables,
+      facts,
+      diagnostics,
+    }),
+  );
+  markCompilerPerfPhaseDuration(
+    "analyzeBorrowing.checkBodies",
+    bodiesStartedAt,
+  );
   return { callables, facts, diagnostics };
 };
 
 // A body without both reference state and a borrow-producing or mutating
 // operation cannot form an alias conflict. Unknown types and calls remain on
 // the full-analysis path.
-const functionNeedsBorrowAnalysis = ({
-  functionItem,
+const bodyNeedsBorrowAnalysis = ({
+  body,
   hir,
   typing,
   resolveContext,
 }: {
-  functionItem: HirFunction;
+  body: HirFunction;
   hir: HirGraph;
   typing: TypingResult;
   resolveContext: ResolveContext;
 }): boolean => {
-  let hasBorrowOperation = functionItem.parameters.some(
+  let hasBorrowOperation = body.parameters.some(
     (parameter) => parameter.pattern.bindingKind === "mutable-ref",
   );
   let hasReferenceState = hasBorrowOperation;
   walkExpression({
-    exprId: functionItem.body,
+    exprId: body.body,
     hir,
     options: { skipLambdas: true },
     onEnterExpression: (exprId, expression) => {
@@ -153,16 +175,21 @@ const functionNeedsBorrowAnalysis = ({
         hasBorrowOperation = true;
       }
       const callAccess =
-        expression.exprKind === "call" ||
-        expression.exprKind === "method-call"
+        expression.exprKind === "call" || expression.exprKind === "method-call"
           ? callBorrowAccess(expression, resolveContext)
-          : "owned";
-      if (callAccess === "mutable") {
+          : undefined;
+      if (callAccess?.access === "mutable") {
         hasBorrowOperation = true;
         hasReferenceState = true;
       }
-      if (callAccess === "shared") {
+      if (callAccess?.access === "shared" && callAccess.requiresAnalysis) {
         hasBorrowOperation = true;
+      }
+      if (
+        expression.exprKind === "overload-set" ||
+        isDeclaredCallableIdentifier(expression, typing)
+      ) {
+        return;
       }
       const typeId = expressionTypeFor(exprId, resolveContext);
       if (typeof typeId !== "number") {
@@ -171,7 +198,7 @@ const functionNeedsBorrowAnalysis = ({
         return { stop: true };
       }
       if (
-        isDeclaredCallableIdentifier(expression, typeId, typing) ||
+        typing.arena.get(typeId).kind === "function" ||
         !typeCanCarryReference(typeId, typing)
       ) {
         return;
@@ -182,7 +209,10 @@ const functionNeedsBorrowAnalysis = ({
       }
     },
     onEnterPattern: (pattern) => {
-      if (pattern.bindingKind !== undefined && pattern.bindingKind !== "value") {
+      if (
+        pattern.bindingKind !== undefined &&
+        pattern.bindingKind !== "value"
+      ) {
         hasBorrowOperation = true;
         hasReferenceState = true;
         return { stop: true };
@@ -195,22 +225,30 @@ const functionNeedsBorrowAnalysis = ({
 const callBorrowAccess = (
   expression: HirExpression,
   resolveContext: ResolveContext,
-): "mutable" | "shared" | "owned" => {
-  const parameters =
-    resolveBorrowCall(expression, resolveContext).contract?.parameters ?? [];
+): {
+  access: "mutable" | "shared" | "owned";
+  requiresAnalysis: boolean;
+} => {
+  const contract = resolveBorrowCall(expression, resolveContext).contract;
+  const parameters = contract?.parameters ?? [];
+  const requiresAnalysis =
+    contract?.maySuspend === true ||
+    (contract?.scopedCallbacks?.length ?? 0) > 0 ||
+    parameters.some((parameter) => parameter.retained || parameter.returned);
   if (parameters.some((parameter) => parameter.access === "mutable")) {
-    return "mutable";
+    return { access: "mutable", requiresAnalysis };
   }
-  return parameters.some((parameter) => parameter.access === "shared")
-    ? "shared"
-    : "owned";
+  return {
+    access: parameters.some((parameter) => parameter.access === "shared")
+      ? "shared"
+      : "owned",
+    requiresAnalysis,
+  };
 };
 
 const isDeclaredCallableIdentifier = (
   expression: HirExpression,
-  typeId: number,
   typing: TypingResult,
 ): boolean =>
   expression.exprKind === "identifier" &&
-  typing.arena.get(typeId).kind === "function" &&
   typing.functions.getSignature(expression.symbol) !== undefined;

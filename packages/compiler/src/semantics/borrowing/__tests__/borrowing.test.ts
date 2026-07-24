@@ -2940,6 +2940,37 @@ fn invalid(cell: SharedCell<BoxArray>) -> BoxArray
     ).toContain("TY0053");
   });
 
+  it("propagates loans from recursive components to earlier callers", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn external(self: Box, depth: i32) -> Box
+  cycle_a(self, depth)
+
+fn cycle_a(self: Box, depth: i32) -> Box
+  if depth <= 0:
+    return self
+  cycle_b(self, depth - 1)
+
+fn cycle_b(self: Box, depth: i32) -> Box
+  if depth <= 0:
+    return self
+  cycle_a(self, depth - 1)
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn invalid(cell: SharedCell<Box>) -> Box
+  cell.with((value) => external(value, 2))
+`),
+    ).toContain("TY0053");
+  });
+
   it("tracks array copies into nested destination storage", () => {
     expect(
       diagnosticCodes(`
