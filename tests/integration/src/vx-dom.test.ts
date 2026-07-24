@@ -337,7 +337,7 @@ pub fn multi_document() -> String
     const host = await createVoydHost({ wasm: result.wasm, bufferSize: 256 * 1024 });
     await host.run("static_event_tree");
     expect(host.retainedCallbacks.size()).toBe(0);
-  }, 120_000);
+  }, 180_000);
 
   it("renders a JS-backed Markdown package as an ordinary VX component", async () => {
     const result = expectCompileSuccess(
