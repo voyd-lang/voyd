@@ -1,0 +1,20 @@
+use src::external::{ Document, Payload, WireError }
+use std::result::types::all
+
+pub obj Stored<T> {
+  api revision: i32,
+  api value: T
+}
+
+pub fn roundtrip<T>(
+  payload: Payload,
+  value: T
+): Document -> Result<Stored<T>, WireError>
+  match(Document::roundtrip(payload))
+    Ok<i32> { value: revision }:
+      Ok<Stored<T>> { value: Stored<T> { revision, value } }
+    Err<WireError> { error }:
+      Err<WireError> { error }
+
+pub fn inspect(namespace: String): Document -> Result<Payload, WireError>
+  Document::inspect(namespace)

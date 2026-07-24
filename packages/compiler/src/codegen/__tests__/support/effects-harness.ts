@@ -8,6 +8,7 @@ import {
   toHostProtocolTable,
   type EffectContinuation,
   type EffectHandler as HostEffectHandler,
+  type HostInitOptions,
   type ParsedEffectOp,
   type ParsedEffectTable,
 } from "@voyd-lang/js-host";
@@ -238,6 +239,7 @@ export const runEffectfulExport = async <T = unknown>({
   handlersByLabelSuffix,
   imports,
   bufferSize,
+  adapters,
 }: {
   wasm: WasmSource;
   entryName: string;
@@ -245,6 +247,7 @@ export const runEffectfulExport = async <T = unknown>({
   handlersByLabelSuffix?: Record<string, EffectHandler>;
   imports?: WebAssembly.Imports;
   bufferSize?: number;
+  adapters?: HostInitOptions["adapters"];
 }): Promise<{
   value: T;
   table: ParsedEffectTable;
@@ -253,7 +256,12 @@ export const runEffectfulExport = async <T = unknown>({
   const module = toModule(wasm);
   const table = parseEffectTable(module);
   const hostTable = toHostProtocolTable(table);
-  const host = await createVoydHost({ wasm: module, imports, bufferSize });
+  const host = await createVoydHost({
+    wasm: module,
+    imports,
+    bufferSize,
+    adapters,
+  });
   const registerHandler = ({
     op,
     handler,

@@ -1,0 +1,18 @@
+use src::external::{ Document, Payload, WireError }
+use src::facade::{ Stored, roundtrip }
+use std::optional::all
+use std::result::types::all
+
+pub src::facade
+
+pub fn through_facade(): Document -> i32
+  let payload = Payload {
+    current: Some<i32> { value: 1 },
+    namespace: "facade",
+    values: [20, 21]
+  }
+  match(roundtrip<i32>(payload, 41))
+    Ok<Stored<i32>> { value }:
+      value.value + value.revision
+    Err<WireError>:
+      -1
