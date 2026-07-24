@@ -52,6 +52,7 @@ const indexGenericFunctionCalls = (
   ctx: TypingContext,
   state: TypingState,
 ): void => {
+  const indexingCtx = createBorrowIndexingContext(ctx);
   for (const fn of ctx.hir.items.values()) {
     if (fn.kind !== "function") {
       continue;
@@ -60,7 +61,6 @@ const indexGenericFunctionCalls = (
     if (!signature?.typeParams || signature.typeParams.length === 0) {
       continue;
     }
-    const indexingCtx = createBorrowIndexingContext(ctx);
     const indexedSignature = indexingCtx.functions.getSignature(fn.symbol);
     if (!indexedSignature?.typeParams) {
       continue;
@@ -92,17 +92,6 @@ const indexGenericFunctionCalls = (
       // Generic bodies are diagnosed when instantiated. This pass only keeps
       // call resolutions that are valid under their symbolic parameters.
     } finally {
-      mergeNestedMaps(
-        ctx.borrowCallTargets,
-        indexingCtx.callResolution.targets,
-      );
-      mergeNestedMaps(
-        ctx.borrowCallArgumentPlans,
-        indexingCtx.callResolution.argumentPlans,
-      );
-      indexingCtx.resolvedExprTypes.forEach((type, expr) =>
-        ctx.borrowResolvedExprTypes.set(expr, type),
-      );
       ctx.effects.restoreExprEffects(previousExprEffects);
       state.mode = previousMode;
       state.indexingGenericCalls = previousIndexingGenericCalls;
@@ -110,6 +99,14 @@ const indexGenericFunctionCalls = (
       ctx.diagnostics.restore(diagnosticCheckpoint);
     }
   }
+  mergeNestedMaps(ctx.borrowCallTargets, indexingCtx.callResolution.targets);
+  mergeNestedMaps(
+    ctx.borrowCallArgumentPlans,
+    indexingCtx.callResolution.argumentPlans,
+  );
+  indexingCtx.resolvedExprTypes.forEach((type, expr) =>
+    ctx.borrowResolvedExprTypes.set(expr, type),
+  );
 };
 
 const createBorrowIndexingContext = (

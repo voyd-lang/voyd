@@ -267,6 +267,8 @@ const restoreTestEnv = (key: string, value: string | undefined): void => {
 };
 
 describe("node sdk", () => {
+  const fixtureSdk = createSdk();
+
   it("restores web environment variables when adapter discovery fails", async () => {
     const previousPort = process.env.VOYD_WEB_PORT;
     const previousHost = process.env.VOYD_WEB_HOST;
@@ -290,9 +292,8 @@ describe("node sdk", () => {
   }, 120_000);
 
   it("closes a long-running web app entry through the SDK helper", async () => {
-    const sdk = createSdk();
     const port = await findFreePort();
-    const result = await sdk.serveWebApp({
+    const result = await fixtureSdk.serveWebApp({
       port,
       readinessTimeoutMs: 10_000,
       source: `
@@ -331,9 +332,8 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
   }, 120_000);
 
   it("serves high-level web route handlers without serializing unrelated requests", async () => {
-    const sdk = createSdk();
     const port = await findFreePort();
-    const result = await sdk.serveWebApp({
+    const result = await fixtureSdk.serveWebApp({
       port,
       readinessTimeoutMs: 10_000,
       source: `
@@ -377,9 +377,8 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env, time::Time) -> i32
   }, 120_000);
 
   beforeAll(async () => {
-    const sdk = createSdk();
     effectCompileResult = expectCompileSuccess(
-      await sdk.compile({ source: EFFECT_SOURCE }),
+      await fixtureSdk.compile({ source: EFFECT_SOURCE }),
     );
   });
 
