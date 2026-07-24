@@ -345,6 +345,7 @@ export type ModuleCodegenView = {
   effectsInfo: EffectsLoweringInfo;
   effectsIr: EffectsIr;
   bindingKinds: ReadonlyMap<SymbolId, HirBindingKind>;
+  mutableStorageSymbols: ReadonlySet<SymbolId>;
   functionLocations: ReadonlyMap<SymbolId, CodegenSourceLocation>;
 };
 
@@ -458,6 +459,26 @@ const buildBindingKindIndex = (
     }
   });
   return bindingKinds;
+};
+
+const buildMutableStorageSymbolIndex = (
+  module: SemanticsPipelineResult,
+): ReadonlySet<SymbolId> => {
+  const symbols = new Set<SymbolId>();
+  module.borrowing.facts.forEach((fact) => {
+    if ("access" in fact && fact.access === "mutable") {
+      symbols.add(fact.place.root);
+    }
+  });
+  module.hir.expressions.forEach((expression) => {
+    if (expression.exprKind !== "lambda") {
+      return;
+    }
+    expression.captures
+      ?.filter((capture) => capture.mutable)
+      .forEach((capture) => symbols.add(capture.symbol));
+  });
+  return symbols;
 };
 
 export type CodegenObjectTemplate = {
@@ -2385,6 +2406,7 @@ export const buildProgramCodegenView = (
       effectsInfo,
       effectsIr: buildEffectsIr({ hir: mod.hir, info: effectsInfo }),
       bindingKinds: buildBindingKindIndex(mod.hir),
+      mutableStorageSymbols: buildMutableStorageSymbolIndex(mod),
       functionLocations,
     });
   });

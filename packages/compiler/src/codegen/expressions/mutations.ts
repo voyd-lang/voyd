@@ -27,6 +27,8 @@ import {
   loadLocalValue,
   loadBindingStorageRef,
   materializeOwnedBinding,
+  storeProjectedElementBindingValue,
+  storeProjectedFieldBindingValue,
   storeScalarAggregateBindingField,
   storeScalarAggregateBindingValue,
   storeStorageRefBindingValue,
@@ -89,7 +91,21 @@ const storeIntoBinding = ({
     });
   }
   if (binding.kind === "projected-element-ref") {
-    throw new Error("cannot assign to a projected element binding");
+    return storeProjectedElementBindingValue({
+      binding,
+      value: coerced,
+      ctx,
+      fnCtx,
+    });
+  }
+  if (binding.kind === "projected-field-ref") {
+    return storeProjectedFieldBindingValue({
+      binding,
+      value: coerced,
+      valueTypeId: targetTypeId,
+      ctx,
+      fnCtx,
+    });
   }
   if (binding.kind === "scalar-aggregate") {
     return storeScalarAggregateBindingValue({
@@ -256,7 +272,7 @@ export const compileFieldAssignment = ({
   const rootTemp =
     materializedRoot?.binding ??
     allocateTempLocal(wasmTypeFor(rootTypeId, ctx), fnCtx, rootTypeId, ctx);
-  const ops: binaryen.ExpressionRef[] = materializedRoot
+  const rootSetup: binaryen.ExpressionRef[] = materializedRoot
     ? [...materializedRoot.setup]
     : [
         storeLocalValue({
@@ -271,32 +287,61 @@ export const compileFieldAssignment = ({
           fnCtx,
         }),
       ];
-
+  const replacementTemp = allocateTempLocal(
+    wasmTypeFor(valueTypeId, ctx),
+    fnCtx,
+    valueTypeId,
+    ctx,
+  );
+  const lastHeapOwner = segments.findLastIndex(
+    (segment) => segment.ownerInfo.layoutKind === "heap-object",
+  );
+  const ops: binaryen.ExpressionRef[] = [];
   const ownerTemps = [rootTemp];
-  segments.slice(0, -1).forEach((segment, index) => {
-    const childTemp = allocateTempLocal(
-      wasmTypeFor(segment.field.typeId, ctx),
-      fnCtx,
-      segment.field.typeId,
-      ctx,
-    );
-    ops.push(
-      storeLocalValue({
-        binding: childTemp,
-        value: loadStructuralField({
-          structInfo: segment.ownerInfo,
-          field: segment.field,
-          pointer: () => loadLocalValue(ownerTemps[index]!, ctx),
-          ctx,
-        }),
-        ctx,
+  const loadOwnerTempsThrough = (ownerCount: number): void => {
+    while (ownerTemps.length < ownerCount) {
+      const index = ownerTemps.length - 1;
+      const segment = segments[index]!;
+      const childTemp = allocateTempLocal(
+        wasmTypeFor(segment.field.typeId, ctx),
         fnCtx,
-      }),
-    );
-    ownerTemps.push(childTemp);
-  });
+        segment.field.typeId,
+        ctx,
+      );
+      ops.push(
+        storeLocalValue({
+          binding: childTemp,
+          value: loadStructuralField({
+            structInfo: segment.ownerInfo,
+            field: segment.field,
+            pointer: () => loadLocalValue(ownerTemps[index]!, ctx),
+            ctx,
+          }),
+          ctx,
+          fnCtx,
+        }),
+      );
+      ownerTemps.push(childTemp);
+    }
+  };
+  if (lastHeapOwner >= 0) {
+    ops.push(...rootSetup);
+    loadOwnerTempsThrough(lastHeapOwner + 1);
+  }
+  ops.push(
+    storeLocalValue({
+      binding: replacementTemp,
+      value,
+      ctx,
+      fnCtx,
+    }),
+  );
+  if (lastHeapOwner < 0) {
+    ops.push(...rootSetup);
+  }
+  loadOwnerTempsThrough(segments.length);
 
-  let replacementValue = value;
+  let replacementValue = loadLocalValue(replacementTemp, ctx);
   let replacementTypeId = valueTypeId;
 
   for (let index = segments.length - 1; index >= 0; index -= 1) {
@@ -544,7 +589,27 @@ export const compileAssignExpr = (
     };
   }
   if (binding.kind === "projected-element-ref") {
-    throw new Error("cannot assign to a projected element binding");
+    return {
+      expr: storeProjectedElementBindingValue({
+        binding,
+        value: coerced,
+        ctx,
+        fnCtx,
+      }),
+      usedReturnCall: false,
+    };
+  }
+  if (binding.kind === "projected-field-ref") {
+    return {
+      expr: storeProjectedFieldBindingValue({
+        binding,
+        value: coerced,
+        valueTypeId: targetTypeId,
+        ctx,
+        fnCtx,
+      }),
+      usedReturnCall: false,
+    };
   }
   if (binding.kind === "scalar-aggregate") {
     return {

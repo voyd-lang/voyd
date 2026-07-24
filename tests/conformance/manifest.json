@@ -204,6 +204,102 @@
           "expect": { "kind": "equals", "value": 9 }
         },
         {
+          "id": "runtime.borrowing.mutable-alias-promotes-var",
+          "title": "promotes mutable variables when creating mutable aliases",
+          "entryName": "mutable_alias_promotes_var_storage",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-value-alias-storage",
+          "title": "uses planned storage for mutable value aliases",
+          "entryName": "mutable_value_alias_uses_planned_storage",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-destructure-alias-storage",
+          "title": "uses planned storage for mutable destructured aliases",
+          "entryName": "mutable_destructure_alias_uses_planned_storage",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-field-alias-replacement",
+          "title": "writes field alias replacement through to the source",
+          "entryName": "mutable_field_alias_replacement_writes_through",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-value-field-alias-mutation",
+          "title": "writes value field alias mutations through to the source",
+          "entryName": "mutable_value_field_alias_mutation_writes_through",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-field-alias-call",
+          "title": "writes mutable calls through field aliases",
+          "entryName": "mutable_field_alias_call_writes_through",
+          "expect": { "kind": "equals", "value": 11 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-value-field-alias-call",
+          "title": "writes mutable calls through value field aliases",
+          "entryName": "mutable_value_field_alias_call_writes_through",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-field-alias-tuple-assignment",
+          "title": "writes tuple assignments through field aliases",
+          "entryName": "mutable_field_alias_tuple_assignment_writes_through",
+          "expect": { "kind": "equals", "value": 13 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-projected-reborrow",
+          "title": "writes direct projected reborrows through to the source",
+          "entryName": "mutable_projected_reborrow_writes_through",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-temporary-field",
+          "title": "initializes mutable bindings from temporary fields as owned values",
+          "entryName": "mutable_temporary_field_initializes_owned_value",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-optional-field-alias",
+          "title": "coerces tuple assignments through projected aliases once",
+          "entryName": "mutable_optional_field_alias_coerces_once",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.projected-store-rhs-sequencing",
+          "title": "evaluates projected store values before snapshotting owners",
+          "entryName": "projected_store_evaluates_rhs_before_owner_snapshot",
+          "expect": { "kind": "equals", "value": 97 }
+        },
+        {
+          "id": "runtime.borrowing.direct-field-store-rhs-sequencing",
+          "title": "evaluates direct field store values before snapshotting owners",
+          "entryName": "direct_field_store_evaluates_rhs_before_owner_snapshot",
+          "expect": { "kind": "equals", "value": 97 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-alias-taken-branch",
+          "title": "preserves mutable alias writes from taken branches",
+          "entryName": "mutable_alias_in_taken_branch",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-alias-skipped-branch",
+          "title": "preserves mutable alias sources across skipped branches",
+          "entryName": "mutable_alias_in_skipped_branch",
+          "expect": { "kind": "equals", "value": 3 }
+        },
+        {
+          "id": "runtime.borrowing.mutable-alias-zero-loop",
+          "title": "preserves mutable alias sources across zero-iteration loops",
+          "entryName": "mutable_alias_in_zero_iteration_loop",
+          "expect": { "kind": "equals", "value": 3 }
+        },
+        {
           "id": "runtime.borrowing.mutable-var-copy",
           "title": "copies values when initializing mutable variables",
           "entryName": "mutable_var_initialization_copies",
@@ -301,6 +397,102 @@
           "title": "preserves mutable alias replacement",
           "entryName": "mutable_alias_replacement",
           "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-alias-promotes-var",
+          "title": "promotes mutable variables for optimized mutable aliases",
+          "entryName": "mutable_alias_promotes_var_storage",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-value-alias-storage",
+          "title": "uses planned storage for optimized mutable value aliases",
+          "entryName": "mutable_value_alias_uses_planned_storage",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-destructure-alias-storage",
+          "title": "uses planned storage for optimized mutable destructured aliases",
+          "entryName": "mutable_destructure_alias_uses_planned_storage",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-field-alias-replacement",
+          "title": "writes optimized field alias replacement through to the source",
+          "entryName": "mutable_field_alias_replacement_writes_through",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-value-field-alias-mutation",
+          "title": "writes optimized value field alias mutations through to the source",
+          "entryName": "mutable_value_field_alias_mutation_writes_through",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-field-alias-call",
+          "title": "writes optimized mutable calls through field aliases",
+          "entryName": "mutable_field_alias_call_writes_through",
+          "expect": { "kind": "equals", "value": 11 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-value-field-alias-call",
+          "title": "writes optimized mutable calls through value field aliases",
+          "entryName": "mutable_value_field_alias_call_writes_through",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-field-alias-tuple-assignment",
+          "title": "writes optimized tuple assignments through field aliases",
+          "entryName": "mutable_field_alias_tuple_assignment_writes_through",
+          "expect": { "kind": "equals", "value": 13 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-projected-reborrow",
+          "title": "writes optimized projected reborrows through to the source",
+          "entryName": "mutable_projected_reborrow_writes_through",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-temporary-field",
+          "title": "initializes optimized mutable bindings from temporary fields as owned values",
+          "entryName": "mutable_temporary_field_initializes_owned_value",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-optional-field-alias",
+          "title": "coerces optimized tuple assignments through projected aliases once",
+          "entryName": "mutable_optional_field_alias_coerces_once",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-projected-store-rhs-sequencing",
+          "title": "evaluates optimized projected store values before snapshotting owners",
+          "entryName": "projected_store_evaluates_rhs_before_owner_snapshot",
+          "expect": { "kind": "equals", "value": 97 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-direct-field-store-rhs-sequencing",
+          "title": "evaluates optimized direct field store values before snapshotting owners",
+          "entryName": "direct_field_store_evaluates_rhs_before_owner_snapshot",
+          "expect": { "kind": "equals", "value": 97 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-alias-taken-branch",
+          "title": "preserves optimized mutable alias writes from taken branches",
+          "entryName": "mutable_alias_in_taken_branch",
+          "expect": { "kind": "equals", "value": 9 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-alias-skipped-branch",
+          "title": "preserves optimized mutable alias sources across skipped branches",
+          "entryName": "mutable_alias_in_skipped_branch",
+          "expect": { "kind": "equals", "value": 3 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-mutable-alias-zero-loop",
+          "title": "preserves optimized mutable alias sources across zero-iteration loops",
+          "entryName": "mutable_alias_in_zero_iteration_loop",
+          "expect": { "kind": "equals", "value": 3 }
         },
         {
           "id": "runtime.borrowing.optimized-mutable-var-copy",

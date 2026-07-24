@@ -19,6 +19,8 @@ import {
   loadLocalValue,
   loadScalarAggregateBindingField,
   materializeOwnedBinding,
+  storeProjectedElementBindingValue,
+  storeProjectedFieldBindingValue,
   storeScalarAggregateBindingValue,
   storeStorageRefBindingValue,
   storeLocalValue,
@@ -117,7 +119,21 @@ const storeIntoBinding = ({
     });
   }
   if (binding.kind === "projected-element-ref") {
-    throw new Error("cannot assign to a projected element binding");
+    return storeProjectedElementBindingValue({
+      binding,
+      value: coerced,
+      ctx,
+      fnCtx,
+    });
+  }
+  if (binding.kind === "projected-field-ref") {
+    return storeProjectedFieldBindingValue({
+      binding,
+      value: coerced,
+      valueTypeId: targetTypeId,
+      ctx,
+      fnCtx,
+    });
   }
   if (binding.kind === "scalar-aggregate") {
     return storeScalarAggregateBindingValue({
@@ -198,16 +214,16 @@ const canDirectInitializeStorageBackedResult = ({
   }
 };
 
-const mutableAliasSourceSymbol = ({
+const mutableAliasSourceExpression = ({
   initializer,
   ctx,
 }: {
   initializer: HirExprId;
   ctx: CodegenContext;
-}): number | undefined => {
+}): HirExprId | undefined => {
   const expr = ctx.module.hir.expressions.get(initializer);
-  if (expr?.exprKind === "identifier") {
-    return expr.symbol;
+  if (expr?.exprKind === "identifier" || expr?.exprKind === "field-access") {
+    return initializer;
   }
   if (expr?.exprKind !== "call" || expr.args.length !== 1) {
     return undefined;
@@ -227,8 +243,48 @@ const mutableAliasSourceSymbol = ({
     return undefined;
   }
   const source = ctx.module.hir.expressions.get(expr.args[0]!.expr);
-  return source?.exprKind === "identifier" ? source.symbol : undefined;
+  return source?.exprKind === "identifier" ||
+    source?.exprKind === "field-access"
+    ? source.id
+    : undefined;
 };
+
+const projectedFieldPlace = ({
+  exprId,
+  ctx,
+}: {
+  exprId: HirExprId;
+  ctx: CodegenContext;
+}): { root: number; fields: readonly string[] } | undefined => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (expr?.exprKind !== "field-access") {
+    return expr?.exprKind === "identifier"
+      ? { root: expr.symbol, fields: [] }
+      : undefined;
+  }
+  const parent = projectedFieldPlace({ exprId: expr.target, ctx });
+  return parent
+    ? { root: parent.root, fields: [...parent.fields, expr.field] }
+    : undefined;
+};
+
+const declarePatternLocal = ({
+  pattern,
+  mutable,
+  typeId,
+  ctx,
+  fnCtx,
+}: {
+  pattern: Extract<HirPattern, { kind: "identifier" }>;
+  mutable: boolean;
+  typeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}) =>
+  pattern.bindingKind === "mutable-ref" ||
+  (mutable && ctx.module.mutableStorageSymbols.has(pattern.symbol))
+    ? declareMutableLocalWithTypeId(pattern.symbol, typeId, ctx, fnCtx)
+    : declareLocalWithTypeId(pattern.symbol, typeId, ctx, fnCtx);
 
 const getDirectStorageBackedInit = ({
   binding,
@@ -348,20 +404,69 @@ export const compilePatternInitialization = ({
   }
   const mutableBinding =
     options.mutable === true || pattern.bindingKind === "mutable-ref";
-  const aliasSource =
+  const aliasSourceExpr =
     options.declare &&
     options.mutable !== true &&
     pattern.bindingKind === "mutable-ref"
-      ? mutableAliasSourceSymbol({ initializer, ctx })
+      ? mutableAliasSourceExpression({ initializer, ctx })
       : undefined;
-  if (typeof aliasSource === "number") {
-    const sourceBinding = getRequiredBinding(aliasSource, ctx, fnCtx);
+  const aliasSource =
+    typeof aliasSourceExpr === "number"
+      ? ctx.module.hir.expressions.get(aliasSourceExpr)
+      : undefined;
+  if (aliasSource?.exprKind === "field-access") {
+    const place = projectedFieldPlace({ exprId: aliasSource.id, ctx });
+    if (place) {
+      const source = getRequiredBinding(place.root, ctx, fnCtx);
+      const root =
+        source.kind === "projected-field-ref" ? source.root : source;
+      const rootTypeId =
+        source.kind === "projected-field-ref"
+          ? source.rootTypeId
+          : source.typeId;
+      if (
+        typeof rootTypeId !== "number" ||
+        !loadBindingStorageRef(root, ctx)
+      ) {
+        throw new Error("mutable field alias root is missing planned storage");
+      }
+      fnCtx.bindings.set(pattern.symbol, {
+        kind: "projected-field-ref",
+        root,
+        rootTypeId,
+        fields:
+          source.kind === "projected-field-ref"
+            ? [...source.fields, ...place.fields]
+            : place.fields,
+        type: wasmTypeFor(targetTypeId, ctx),
+        storageType: wasmTypeFor(targetTypeId, ctx),
+        typeId: targetTypeId,
+      });
+      return;
+    }
+  }
+  if (aliasSource?.exprKind === "identifier") {
+    const sourceBinding = getRequiredBinding(aliasSource.symbol, ctx, fnCtx);
+    if (sourceBinding.kind === "projected-field-ref") {
+      fnCtx.bindings.set(pattern.symbol, {
+        ...sourceBinding,
+        type: wasmTypeFor(targetTypeId, ctx),
+        storageType: wasmTypeFor(targetTypeId, ctx),
+        typeId: targetTypeId,
+      });
+      return;
+    }
     const sourceStorage = loadBindingStorageRef(sourceBinding, ctx);
     const storageType = getMutableRefStorageType({
       typeId: targetTypeId,
       ctx,
     });
-    if (sourceStorage && typeof storageType === "number") {
+    if (typeof storageType === "number") {
+      if (!sourceStorage) {
+        throw new Error(
+          `mutable alias source ${aliasSource.symbol} is missing planned storage`,
+        );
+      }
       const aliasStorage = allocateTempLocal(storageType, fnCtx);
       fnCtx.bindings.set(pattern.symbol, {
         kind: "storage-ref",
@@ -402,14 +507,13 @@ export const compilePatternInitialization = ({
   );
 
   const binding = options.declare
-    ? mutableBinding
-      ? declareMutableLocalWithTypeId(
-          pattern.symbol,
-          targetTypeId,
-          ctx,
-          fnCtx,
-        )
-      : declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
+    ? declarePatternLocal({
+        pattern,
+        mutable: options.mutable === true,
+        typeId: targetTypeId,
+        ctx,
+        fnCtx,
+      })
     : getRequiredBinding(pattern.symbol, ctx, fnCtx);
   const directStorageBackedInit = getDirectStorageBackedInit({
     binding,
@@ -469,17 +573,14 @@ export const compilePatternInitializationFromValue = ({
     const targetTypeId = options.declare
       ? getDeclaredSymbolTypeId(pattern.symbol, ctx, typeInstanceId)
       : getSymbolTypeId(pattern.symbol, ctx, typeInstanceId);
-    const mutableBinding =
-      options.mutable === true || pattern.bindingKind === "mutable-ref";
     const binding = options.declare
-      ? mutableBinding
-        ? declareMutableLocalWithTypeId(
-            pattern.symbol,
-            targetTypeId,
-            ctx,
-            fnCtx,
-          )
-        : declareLocalWithTypeId(pattern.symbol, targetTypeId, ctx, fnCtx)
+      ? declarePatternLocal({
+          pattern,
+          mutable: options.mutable === true,
+          typeId: targetTypeId,
+          ctx,
+          fnCtx,
+        })
       : getRequiredBinding(pattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
@@ -531,7 +632,13 @@ export const compilePatternInitializationFromValue = ({
   pending.forEach(({ pattern: subPattern, temp, typeId }) => {
     const targetTypeId = typeId;
     const binding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
+      ? declarePatternLocal({
+          pattern: subPattern,
+          mutable: options.mutable === true,
+          typeId: targetTypeId,
+          ctx,
+          fnCtx,
+        })
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
@@ -616,7 +723,13 @@ const compileTuplePattern = ({
   pending.forEach(({ pattern: subPattern, temp, typeId }) => {
     const targetTypeId = typeId;
     const binding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
+      ? declarePatternLocal({
+          pattern: subPattern,
+          mutable: options.mutable === true,
+          typeId: targetTypeId,
+          ctx,
+          fnCtx,
+        })
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
@@ -701,7 +814,13 @@ const compileDestructurePattern = ({
   pending.forEach(({ pattern: subPattern, temp, typeId }) => {
     const targetTypeId = typeId;
     const binding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
+      ? declarePatternLocal({
+          pattern: subPattern,
+          mutable: options.mutable === true,
+          typeId: targetTypeId,
+          ctx,
+          fnCtx,
+        })
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({
@@ -788,7 +907,13 @@ const compilePatternFromScalarAggregate = ({
   pending.forEach(({ pattern: subPattern, temp, typeId: subPatternTypeId }) => {
     const targetTypeId = subPatternTypeId;
     const targetBinding = options.declare
-      ? declareLocalWithTypeId(subPattern.symbol, targetTypeId, ctx, fnCtx)
+      ? declarePatternLocal({
+          pattern: subPattern,
+          mutable: options.mutable === true,
+          typeId: targetTypeId,
+          ctx,
+          fnCtx,
+        })
       : getRequiredBinding(subPattern.symbol, ctx, fnCtx);
     ops.push(
       storeIntoBinding({

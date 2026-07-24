@@ -40,6 +40,7 @@ import {
   loadBindingValue,
   loadBindingStorageRef,
   materializeOwnedBinding,
+  storeProjectedFieldBindingValue,
   storeLocalValue,
   loadScalarAggregateBindingField,
   storeScalarAggregateBindingValue,
@@ -1529,6 +1530,41 @@ const lowerCallArgumentForAbi = ({
       return pointer;
     }
     if (abiKind === "mutable_ref") {
+      if (existing.kind === "projected-field-ref") {
+        const storage = allocateMutableRefLocal({
+          typeId: paramTypeId,
+          ctx,
+          fnCtx,
+        });
+        const storagePointer = loadBindingStorageRef(storage, ctx);
+        if (!storagePointer) {
+          throw new Error(
+            `projected mutable argument requires addressable storage (type ${paramTypeId})`,
+          );
+        }
+        writebacks.push(
+          storeProjectedFieldBindingValue({
+            binding: existing,
+            value: loadBindingValue(storage, ctx, fnCtx),
+            valueTypeId: paramTypeId,
+            ctx,
+            fnCtx,
+          }),
+        );
+        return ctx.mod.block(
+          null,
+          [
+            storeLocalValue({
+              binding: storage,
+              value: argValue,
+              ctx,
+              fnCtx,
+            }),
+            storagePointer,
+          ],
+          storage.storageType,
+        );
+      }
       const materialized =
         existing.kind === "projected-element-ref"
           ? materializeProjectedElementBinding({

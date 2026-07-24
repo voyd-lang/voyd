@@ -918,6 +918,27 @@ pub fn main() -> i32
     );
   });
 
+  it("keeps non-borrowed mutable primitive locals in Wasm locals", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+pub fn main() -> i32
+  var index = 0
+  var total = 0
+  while index < 10:
+    total = total + index
+    index = index + 1
+  total
+`);
+
+    expect(runMain(optimizedCodegen.module)()).toBe(45);
+    expect(runMain(baselineCodegen.module)()).toBe(45);
+    expect(optimizedCodegen.module.emitText()).not.toContain(
+      "struct.new_default",
+    );
+    expect(baselineCodegen.module.emitText()).not.toContain(
+      "struct.new_default",
+    );
+  });
+
   it("extracts labeled call arguments from scalar aggregate locals", () => {
     const { optimizedCodegen } = compileOptimized(`
 obj Vec2 {

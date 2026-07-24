@@ -4,27 +4,35 @@ import type {
   FunctionContext,
   LocalBinding,
   LocalBindingProjectedElement,
+  LocalBindingProjectedField,
   LocalBindingLocal,
   LocalBindingStorageRef,
+  StructuralFieldInfo,
+  StructuralTypeInfo,
   SymbolId,
+  TypeId,
 } from "./context.js";
 import {
   arrayGet,
+  arraySet,
   refCast,
   structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import {
+  coerceValueToType,
   fixedArrayStorageElementType,
   initStructuralValue,
   liftFixedArrayElementValue,
   liftHeapValueToInline,
   lowerValueForHeapField,
   loadStructuralField,
+  storeStructuralField,
   storeValueIntoStorageRef,
 } from "./structural.js";
 import {
   getInlineHeapBoxType,
   getMutableRefStorageType,
+  getStructuralTypeInfo,
   getSymbolTypeId,
   wasmTypeFor,
 } from "./types.js";
@@ -328,6 +336,12 @@ export const loadBindingValue = (
   if (binding.kind === "projected-element-ref") {
     return loadProjectedElementBindingValue(binding, ctx, fnCtx);
   }
+  if (binding.kind === "projected-field-ref") {
+    if (!fnCtx) {
+      throw new Error("projected field loads require a function context");
+    }
+    return loadProjectedFieldBindingValue(binding, ctx, fnCtx);
+  }
   if (binding.kind === "local") {
     return loadLocalValue(binding, ctx);
   }
@@ -378,6 +392,9 @@ export const loadBindingStorageRef = (
   }
   if (binding.kind === "projected-element-ref") {
     return loadProjectedElementBindingStorageRef(binding, ctx);
+  }
+  if (binding.kind === "projected-field-ref") {
+    return undefined;
   }
   if (binding.kind === "local") {
     if (
@@ -509,6 +526,329 @@ export const loadProjectedElementBindingValue = (
     typeId: binding.typeId!,
     ctx,
   });
+};
+
+export const storeProjectedElementBindingValue = ({
+  binding,
+  value,
+  ctx,
+  fnCtx,
+}: {
+  binding: LocalBindingProjectedElement;
+  value: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef =>
+  arraySet(
+    ctx.mod,
+    ctx.mod.local.get(
+      binding.arrayIndex,
+      wasmTypeFor(binding.arrayTypeId, ctx),
+    ),
+    ctx.mod.local.get(binding.indexIndex, binaryen.i32),
+    lowerValueForHeapField({
+      value,
+      typeId: binding.typeId!,
+      targetType: fixedArrayStorageElementType({
+        typeId: binding.typeId!,
+        ctx,
+      }),
+      ctx,
+      fnCtx,
+    }),
+  );
+
+const loadProjectedFieldBindingValue = (
+  binding: LocalBindingProjectedField,
+  ctx: CodegenContext,
+  fnCtx: FunctionContext,
+): binaryen.ExpressionRef => {
+  const { segments } = projectedFieldSegments(binding, ctx);
+  const rootTemp = allocateTempLocal(
+    wasmTypeFor(binding.rootTypeId, ctx),
+    fnCtx,
+    binding.rootTypeId,
+    ctx,
+  );
+  const ops = [
+    storeLocalValue({
+      binding: rootTemp,
+      value: loadBindingValue(binding.root, ctx, fnCtx),
+      ctx,
+      fnCtx,
+    }),
+  ];
+  let ownerTemp = rootTemp;
+  segments.forEach((segment, index) => {
+    const loaded = loadStructuralField({
+      structInfo: segment.ownerInfo,
+      field: segment.field,
+      pointer: () => loadLocalValue(ownerTemp, ctx),
+      ctx,
+    });
+    if (index === segments.length - 1) {
+      ops.push(loaded);
+      return;
+    }
+    const childTemp = allocateTempLocal(
+      wasmTypeFor(segment.field.typeId, ctx),
+      fnCtx,
+      segment.field.typeId,
+      ctx,
+    );
+    ops.push(
+      storeLocalValue({
+        binding: childTemp,
+        value: loaded,
+        ctx,
+        fnCtx,
+      }),
+    );
+    ownerTemp = childTemp;
+  });
+  const loaded = ops.pop()!;
+  const resultTypeId = binding.typeId!;
+  const value = coerceValueToType({
+    value: loaded,
+    actualType: segments.at(-1)!.field.typeId,
+    targetType: resultTypeId,
+    ctx,
+    fnCtx,
+  });
+  return ctx.mod.block(
+    null,
+    [...ops, value],
+    binaryen.getExpressionType(value),
+  );
+};
+
+type ProjectedFieldSegment = {
+  ownerTypeId: TypeId;
+  ownerInfo: StructuralTypeInfo;
+  field: StructuralFieldInfo;
+};
+
+const projectedFieldSegments = (
+  binding: LocalBindingProjectedField,
+  ctx: CodegenContext,
+): { segments: readonly ProjectedFieldSegment[] } => {
+  let ownerTypeId = binding.rootTypeId;
+  const segments = binding.fields.map((name) => {
+    const ownerInfo = getStructuralTypeInfo(ownerTypeId, ctx);
+    const field = ownerInfo?.fieldMap.get(name);
+    if (!ownerInfo || !field) {
+      throw new Error(`projected field binding is missing field ${name}`);
+    }
+    const segment = { ownerTypeId, ownerInfo, field };
+    ownerTypeId = field.typeId;
+    return segment;
+  });
+  if (segments.length === 0) {
+    throw new Error("projected field binding requires a field path");
+  }
+  return { segments };
+};
+
+export const storeProjectedFieldBindingValue = ({
+  binding,
+  value,
+  valueTypeId,
+  ctx,
+  fnCtx,
+}: {
+  binding: LocalBindingProjectedField;
+  value: binaryen.ExpressionRef;
+  valueTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const { segments } = projectedFieldSegments(binding, ctx);
+  const replacementTemp = allocateTempLocal(
+    wasmTypeFor(valueTypeId, ctx),
+    fnCtx,
+    valueTypeId,
+    ctx,
+  );
+  const rootTemp = allocateTempLocal(
+    wasmTypeFor(binding.rootTypeId, ctx),
+    fnCtx,
+    binding.rootTypeId,
+    ctx,
+  );
+  const ops = [
+    storeLocalValue({
+      binding: replacementTemp,
+      value,
+      ctx,
+      fnCtx,
+    }),
+    storeLocalValue({
+      binding: rootTemp,
+      value: loadBindingValue(binding.root, ctx, fnCtx),
+      ctx,
+      fnCtx,
+    }),
+  ];
+  const ownerTemps = [rootTemp];
+  segments.slice(0, -1).forEach((segment) => {
+    const childTemp = allocateTempLocal(
+      wasmTypeFor(segment.field.typeId, ctx),
+      fnCtx,
+      segment.field.typeId,
+      ctx,
+    );
+    ops.push(
+      storeLocalValue({
+        binding: childTemp,
+        value: loadStructuralField({
+          structInfo: segment.ownerInfo,
+          field: segment.field,
+          pointer: () => loadLocalValue(ownerTemps.at(-1)!, ctx),
+          ctx,
+        }),
+        ctx,
+        fnCtx,
+      }),
+    );
+    ownerTemps.push(childTemp);
+  });
+
+  let replacement = loadLocalValue(replacementTemp, ctx);
+  let replacementTypeId = valueTypeId;
+  for (let index = segments.length - 1; index >= 0; index -= 1) {
+    const segment = segments[index]!;
+    const ownerTemp = ownerTemps[index]!;
+    if (segment.ownerInfo.layoutKind === "heap-object") {
+      ops.push(
+        storeStructuralField({
+          structInfo: segment.ownerInfo,
+          field: segment.field,
+          pointer: () => loadLocalValue(ownerTemp, ctx),
+          value: coerceValueToType({
+            value: replacement,
+            actualType: replacementTypeId,
+            targetType: segment.field.typeId,
+            ctx,
+            fnCtx,
+          }),
+          ctx,
+          fnCtx,
+        }),
+      );
+      return ctx.mod.block(null, ops, binaryen.none);
+    }
+    replacement = rebuildProjectedValueOwner({
+      segment,
+      ownerTemp,
+      replacement,
+      replacementTypeId,
+      ctx,
+      fnCtx,
+    });
+    replacementTypeId = segment.ownerTypeId;
+  }
+  ops.push(
+    storeProjectedRootValue({
+      binding: binding.root,
+      value: replacement,
+      valueTypeId: replacementTypeId,
+      ctx,
+      fnCtx,
+    }),
+  );
+  return ctx.mod.block(null, ops, binaryen.none);
+};
+
+const rebuildProjectedValueOwner = ({
+  segment,
+  ownerTemp,
+  replacement,
+  replacementTypeId,
+  ctx,
+  fnCtx,
+}: {
+  segment: ProjectedFieldSegment;
+  ownerTemp: LocalBindingLocal;
+  replacement: binaryen.ExpressionRef;
+  replacementTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef =>
+  initStructuralValue({
+    structInfo: segment.ownerInfo,
+    fieldValues: segment.ownerInfo.fields.map((field) =>
+      field.name === segment.field.name
+        ? coerceValueToType({
+            value: replacement,
+            actualType: replacementTypeId,
+            targetType: field.typeId,
+            ctx,
+            fnCtx,
+          })
+        : loadStructuralField({
+            structInfo: segment.ownerInfo,
+            field,
+            pointer: () => loadLocalValue(ownerTemp, ctx),
+            ctx,
+          }),
+    ),
+    ctx,
+  });
+
+const storeProjectedRootValue = ({
+  binding,
+  value,
+  valueTypeId,
+  ctx,
+  fnCtx,
+}: {
+  binding: LocalBindingProjectedField["root"];
+  value: binaryen.ExpressionRef;
+  valueTypeId: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  const targetTypeId = binding.typeId!;
+  const coerced = coerceValueToType({
+    value,
+    actualType: valueTypeId,
+    targetType: targetTypeId,
+    ctx,
+    fnCtx,
+  });
+  if (binding.kind === "storage-ref") {
+    return storeStorageRefBindingValue({ binding, value: coerced, ctx, fnCtx });
+  }
+  if (binding.kind === "capture") {
+    const pointer = loadBindingStorageRef(binding, ctx);
+    if (!pointer) {
+      throw new Error("projected field root capture requires mutable storage");
+    }
+    return storeValueIntoStorageRef({
+      pointer: () => pointer,
+      value: coerced,
+      typeId: targetTypeId,
+      ctx,
+      fnCtx,
+    });
+  }
+  if (binding.kind === "scalar-aggregate") {
+    return storeScalarAggregateBindingValue({
+      binding,
+      value: coerced,
+      ctx,
+      fnCtx,
+    });
+  }
+  if (binding.kind === "projected-element-ref") {
+    return storeProjectedElementBindingValue({
+      binding,
+      value: coerced,
+      ctx,
+      fnCtx,
+    });
+  }
+  return storeLocalValue({ binding, value: coerced, ctx, fnCtx });
 };
 
 export const storeStorageRefBindingValue = ({
