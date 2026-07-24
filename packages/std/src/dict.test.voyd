@@ -90,12 +90,8 @@ test "dict with_capacity clamps unsafe sizes":
 test "dict set insert get contains remove clear":
   let ~map = Dict<String, i32>::init()
   map.set("a", 1)
-  let previous = map.insert("a", 2)
-  match(previous)
-    Some<i32> { value }:
-      assert(value, eq: 1)
-    None:
-      assert(false)
+  assert(map.insert("a", 2), eq: false)
+  assert(map.insert("b", 3), eq: true)
 
   assert(map.contains("a"), eq: true)
   match(map.get("a"))
@@ -115,6 +111,24 @@ test "dict set insert get contains remove clear":
   map.set("x", 9)
   map.clear()
   assert(map.len(), eq: 0)
+
+test "dict persistent updates remain isolated and copies remain mutable":
+  let ~source = Dict<String, i32>::init()
+  source.set("a", 1)
+
+  let persistent = source.setting("a", 2).setting("b", 3)
+  match(source.get("a"))
+    Some<i32> { value }:
+      assert(value, eq: 1)
+    None:
+      assert(false)
+  assert(source.contains("b"), eq: false)
+  assert(persistent.len(), eq: 2)
+
+  let ~copy = source.copied()
+  copy.set("a", 4)
+  copy.set("c", 5)
+  assert(copy.len(), eq: 2)
 
 test "dict keys values entries each":
   let ~map = Dict<String, i32>::init()
@@ -163,6 +177,27 @@ test "dict extend merged merge":
   match(out.get("b"))
     Some<i32> { value }:
       assert(value, eq: 4)
+    None:
+      assert(false)
+
+test "dict merged preserves the bucket load factor":
+  let ~left = Dict<IntKey, i32>::init()
+  let ~right = Dict<IntKey, i32>::init()
+  var index = 0
+  while index < 80:
+    if index < 40 then:
+      left.set(IntKey { value: index }, index)
+    else:
+      right.set(IntKey { value: index }, index)
+    index = index + 1
+
+  let merged = left.merged(right)
+  let bucket_count = bucket_count_of(merged)
+  assert(merged.len(), eq: 80)
+  assert(bucket_count * 3 >= merged.len() * 4, eq: true)
+  match(merged.get(IntKey { value: 79 }))
+    Some<i32> { value }:
+      assert(value, eq: 79)
     None:
       assert(false)
 

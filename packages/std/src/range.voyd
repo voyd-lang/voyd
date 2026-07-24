@@ -4,7 +4,7 @@
 
 use std::optional::all
 use std::optional::types::Optional
-use std::fixed_array::fns::{ new_fixed_array }
+use std::shared_cell::SharedCell
 use std::traits::sequence::all
 
 /// Range value used by slicing and bounded APIs.
@@ -22,10 +22,13 @@ pub obj Range<T> {
 
 /// Iterator state for `Range` sequences.
 obj RangeIterator {
-  // `next` is a leaf operation, so its private fixed storage cannot be
-  // re-entered while an update is in progress.
-  state: FixedArray<i32>,
+  state: SharedCell<RangeIteratorState>,
   end: i32
+}
+
+obj RangeIteratorState {
+  current: i32,
+  include_end: bool
 }
 
 impl Sequence<i32> for Range<i32>
@@ -33,29 +36,33 @@ impl Sequence<i32> for Range<i32>
   api fn iter(self) -> Iterator<i32>
     let start = range_bound_or(self.start, 0)
     let end = range_bound_or(self.end, start)
-    let state = new_fixed_array<i32>(2)
-    __array_set(state, 0, start)
-    __array_set(state, 1, if self.include_end then: 1 else: 0)
-    RangeIterator { state, end }
+    RangeIterator {
+      state: SharedCell(RangeIteratorState {
+        current: start,
+        include_end: self.include_end
+      }),
+      end
+    }
 
 impl Iterator<i32> for RangeIterator
   /// Returns the next value in the range or `None` when exhausted.
   api fn next(self) -> Option<i32>
-    let current = __array_get(self.state, 0)
-    let include_end = __array_get(self.state, 1) == 1
-    if include_end:
-      if current > self.end:
-        return None {}
-    else:
-      if current >= self.end:
-        return None {}
+    self.state.with_mut((~state) =>
+      if state.include_end:
+        if state.current > self.end:
+          return None {}
+      else:
+        if state.current >= self.end:
+          return None {}
 
-    if include_end and current == self.end then:
-      // Avoid i32 overflow for inclusive ranges that end at i32::MAX.
-      __array_set(self.state, 1, 0)
-    else:
-      __array_set(self.state, 0, current + 1)
-    Some<i32> { value: current }
+      let value = state.current
+      if state.include_end and state.current == self.end then:
+        // Avoid i32 overflow for inclusive ranges that end at i32::MAX.
+        state.include_end = false
+      else:
+        state.current = state.current + 1
+      Some<i32> { value }
+    )
 
 fn range_bound_or(value: Optional<i32>, fallback: i32) -> i32
   match(value)

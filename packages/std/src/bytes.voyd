@@ -101,23 +101,17 @@ impl ByteBuffer
 
   /// Appends one byte.
   api fn push(~self, value: Byte) -> void
-    let ~storage = self.storage.copied()
-    storage.push(value)
-    self.storage = storage
+    self.storage.push(value)
 
   /// Appends all bytes from `bytes`.
   ///
   /// This is useful for concatenating previously captured `Bytes` values.
   api fn extend(~self, bytes: Bytes) -> void
-    let ~storage = self.storage.copied()
-    storage.extend(bytes.to_array())
-    self.storage = storage
+    self.storage.extend(bytes.to_array())
 
   /// Removes all bytes.
   api fn clear(~self) -> void
-    let ~storage = self.storage.copied()
-    storage.clear()
-    self.storage = storage
+    self.storage.clear()
 
 fn bytes_from_array(storage: Array<Byte>) -> Bytes
   Bytes { storage: storage }

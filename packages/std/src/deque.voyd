@@ -29,11 +29,11 @@ impl<T> Deque<T>
 
   /// Pushes `value` to the front.
   api fn push_front(~self, value: T) -> void
-    self.storage = self.storage.inserted(value, at: 0)
+    self.storage.insert(value, at: 0)
 
   /// Pushes `value` to the back.
   api fn push_back(~self, value: T) -> void
-    self.storage = self.storage.pushed(value)
+    self.storage.push(value)
 
   /// Pops and returns the front value.
   api fn pop_front(~self) -> Option<T>
@@ -53,4 +53,4 @@ impl<T> Deque<T>
 
   /// Removes all values.
   api fn clear(~self) -> void
-    self.storage = self.storage.cleared()
+    self.storage.clear()

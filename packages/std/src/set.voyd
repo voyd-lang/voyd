@@ -33,21 +33,19 @@ impl<T: DictKey<T>> Set<T>
 
   /// Inserts `value`, returning true only when it was newly inserted.
   api fn insert(~self, value: T) -> bool
-    if self.storage.contains(value):
-      return false
-    self.storage = self.storage.setting(value, true)
-    true
+    self.storage.insert(value, true)
 
   /// Removes `value`, returning true only when it existed.
   api fn remove(~self, value: T) -> bool
-    if not self.storage.contains(value):
-      return false
-    self.storage = self.storage.removing(value)
-    true
+    match(self.storage.remove(value))
+      Some<bool>:
+        true
+      None:
+        false
 
   /// Removes all values.
   api fn clear(~self) -> void
-    self.storage = Dict<T, bool>::init()
+    self.storage.clear()
 
   /// Returns all values in unspecified order.
   ///

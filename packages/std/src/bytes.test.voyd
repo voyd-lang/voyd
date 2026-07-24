@@ -25,6 +25,10 @@ test "bytes and bytebuffer core operations":
   assert(bytes.at(1), eq: 105)
   assert(bytes.to_array().len(), eq: 2)
 
+  buffer.push(33)
+  assert(buffer.len(), eq: 3)
+  assert(bytes.len(), eq: 2)
+
 test "bytes slice and buffer extend clear":
   let ~first = ByteBuffer::init()
   first.push(1)

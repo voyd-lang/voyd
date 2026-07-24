@@ -12,6 +12,7 @@ use std::traits::sequence::all
 use std::optional::all
 use std::result::types::all
 use std::range::{ Range }
+use std::shared_cell::SharedCell
 
 pub use std::string::index::StringIndex
 
@@ -1267,8 +1268,7 @@ obj Utf8Read {
 obj StringIterator {
   source: FixedArray<i32>,
   byte_count: i32,
-  // Private leaf state keeps returned values independent of a mutable receiver.
-  cursor: FixedArray<i32>
+  cursor: SharedCell<i32>
 }
 
 obj StringGraphemeSequence {
@@ -1277,9 +1277,7 @@ obj StringGraphemeSequence {
 
 obj StringGraphemeIterator {
   source: String,
-  // Grapheme slices borrow `source`, so the cursor cannot live directly on a
-  // mutably borrowed iterator receiver.
-  cursor: FixedArray<i32>
+  cursor: SharedCell<i32>
 }
 
 impl Sequence<i32> for String
@@ -1288,17 +1286,19 @@ impl Sequence<i32> for String
     StringIterator {
       source: self.raw_bytes(),
       byte_count: self.byte_len(),
-      cursor: new_fixed_array<i32>(1)
+      cursor: SharedCell(0)
     }
 
 impl Iterator<i32> for StringIterator
   /// Returns the next item from the iterator.
   api fn next(self) -> Option<i32>
-    let index = __array_get(self.cursor, 0)
+    let index = self.cursor.with((cursor) => cursor)
     if index >= self.byte_count:
       return None {}
     let read = decode_utf8_at(self.source, self.byte_count, index)
-    __array_set(self.cursor, 0, index + read.width)
+    self.cursor.with_mut((~cursor) =>
+      cursor = index + read.width
+    )
     Some<i32> { value: read.codepoint }
 
 impl Sequence<StringSlice> for StringGraphemeSequence
@@ -1306,13 +1306,13 @@ impl Sequence<StringSlice> for StringGraphemeSequence
   api fn iter(self) -> Iterator<StringSlice>
     StringGraphemeIterator {
       source: self.source,
-      cursor: new_fixed_array<i32>(1)
+      cursor: SharedCell(0)
     }
 
 impl Iterator<StringSlice> for StringGraphemeIterator
   /// Returns the next item from the iterator.
   api fn next(self) -> Option<StringSlice>
-    let start = __array_get(self.cursor, 0)
+    let start = self.cursor.with((cursor) => cursor)
     if start >= self.source.byte_len():
       return None {}
     let end = next_grapheme_boundary(
@@ -1320,7 +1320,9 @@ impl Iterator<StringSlice> for StringGraphemeIterator
       self.source.byte_len(),
       start
     )
-    __array_set(self.cursor, 0, end)
+    self.cursor.with_mut((~cursor) =>
+      cursor = end
+    )
     Some<StringSlice> {
       value: new_string_slice(self.source, start, end - start)
     }
