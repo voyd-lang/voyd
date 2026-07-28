@@ -103,6 +103,14 @@ export class DiagnosticError extends Error {
 export class DiagnosticEmitter {
   #diagnostics: Diagnostic[] = [];
 
+  checkpoint(): number {
+    return this.#diagnostics.length;
+  }
+
+  restore(checkpoint: number): void {
+    this.#diagnostics.length = checkpoint;
+  }
+
   report(input: DiagnosticInput): Diagnostic {
     const diagnostic = createDiagnostic(input);
     this.#diagnostics.push(diagnostic);

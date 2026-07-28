@@ -3,6 +3,7 @@ use std::async::types::{ Cancelled }
 use std::error::panic
 use std::number::cast::{ to_i64 }
 use std::result::types::all
+use std::shared_cell::{ SharedCell }
 use std::task::self as task
 use std::time::{ Duration, Overlap }
 use std::time::self as time
@@ -64,11 +65,11 @@ pub fn cancel_probe(): (task::TaskRuntime, time::Time) -> i32
       -2
 
 pub fn owner_cancel_cascades_probe(): (task::TaskRuntime, time::Time) -> i32
-  let ~events = Array<i32>::init()
+  let events = SharedCell(Array<i32>::init())
   let owner = task::spawn do:
     let _ = task::spawn do:
       let _ = time::sleep(millis(20))
-      events.push(1)
+      events.with_mut((~values) => values.push(1))
       99
     let _ = time::sleep(millis(50))
     7
@@ -78,7 +79,7 @@ pub fn owner_cancel_cascades_probe(): (task::TaskRuntime, time::Time) -> i32
   let _ = time::sleep(millis(40))
   match(task::join(owner))
     Cancelled:
-      events.len()
+      events.with((values) => values.len())
     Ok { value }:
       value
     Err { error }:
@@ -136,12 +137,12 @@ pub fn effectful_join_probe(): (task::TaskRuntime, time::Time) -> i32
       -2
 
 pub fn yield_now_probe(): task::TaskRuntime -> i32
-  let ~events = Array<i32>::init()
+  let events = SharedCell(Array<i32>::init())
   let child = task::spawn do:
-    events.push(1)
+    events.with_mut((~values) => values.push(1))
     7
   let _ = task::yield_now()
-  let observed = events.len()
+  let observed = events.with((values) => values.len())
   match(task::join(child))
     Ok { value }:
       let _ = value
@@ -288,45 +289,45 @@ pub fn after_delay_effectful_probe(): (task::TaskRuntime, time::Time) -> i32
     7
 
 pub fn interval_serial_probe(): (task::TaskRuntime, time::Time) -> i32
-  let ~events = Array<i32>::init()
+  let events = SharedCell(Array<i32>::init())
   let interval = time::set_interval<Unit>(
     millis(5),
     Overlap::serial()
   ) do:
     let _ = time::sleep(millis(7))
-    events.push(1)
+    events.with_mut((~values) => values.push(1))
     Unit {}
   let _ = time::sleep(millis(20))
   let _ = task::cancel<Unit>(interval)
   let _ = time::sleep(millis(20))
-  events.len()
+  events.with((values) => values.len())
 
 pub fn interval_serial_pure_probe(): (task::TaskRuntime, time::Time) -> i32
-  let ~events = Array<i32>::init()
+  let events = SharedCell(Array<i32>::init())
   let interval = time::set_interval<Unit>(
     millis(5),
     Overlap::serial()
   ) do:
-    events.push(1)
+    events.with_mut((~values) => values.push(1))
     Unit {}
   let _ = time::sleep(millis(20))
   let _ = task::cancel<Unit>(interval)
   let _ = time::sleep(millis(20))
-  events.len()
+  events.with((values) => values.len())
 
 pub fn interval_concurrent_probe(): (task::TaskRuntime, time::Time) -> i32
-  let ~events = Array<i32>::init()
+  let events = SharedCell(Array<i32>::init())
   let interval = time::set_interval<Unit>(
     millis(5),
     Overlap::concurrent()
   ) do:
     let _ = time::sleep(millis(7))
-    events.push(1)
+    events.with_mut((~values) => values.push(1))
     Unit {}
   let _ = time::sleep(millis(20))
   let _ = task::cancel<Unit>(interval)
   let _ = time::sleep(millis(20))
-  events.len()
+  events.with((values) => values.len())
 
 pub fn attached_failure_probe(): task::TaskRuntime -> i32
   let _ = task::spawn do:

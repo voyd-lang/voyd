@@ -2,6 +2,7 @@ import type {
   HirBindingKind,
   HirEffectHandlerClause,
   HirGraph,
+  HirPattern,
   HirTypeExpr,
   HirVisibility,
 } from "../hir/index.js";
@@ -335,6 +336,22 @@ export type CodegenSourceLocation = {
   endColumn?: number;
 };
 
+export type CodegenCallableAccessFootprint = {
+  parameters: readonly {
+    access: "owned" | "shared" | "mutable";
+    reads: readonly (readonly CodegenPlaceProjection[])[];
+    writes: readonly (readonly CodegenPlaceProjection[])[];
+  }[];
+};
+
+export type CodegenPlaceProjection =
+  | { kind: "field"; name: string }
+  | { kind: "tuple"; index: number }
+  | { kind: "index"; constant?: number; stable: boolean }
+  | { kind: "discriminant" }
+  | { kind: "dereference" }
+  | { kind: "identity" };
+
 export type ModuleCodegenView = {
   moduleId: string;
   meta: ModuleCodegenMetadata;
@@ -343,6 +360,12 @@ export type ModuleCodegenView = {
   types: ModuleTypeIndex;
   effectsInfo: EffectsLoweringInfo;
   effectsIr: EffectsIr;
+  bindingKinds: ReadonlyMap<SymbolId, HirBindingKind>;
+  mutableStorageSymbols: ReadonlySet<SymbolId>;
+  callableAccessFootprints: ReadonlyMap<
+    SymbolId,
+    CodegenCallableAccessFootprint
+  >;
   functionLocations: ReadonlyMap<SymbolId, CodegenSourceLocation>;
 };
 
@@ -390,6 +413,93 @@ export type ProgramCodegenView = {
   imports: ImportWiringIndex;
   modules: ReadonlyMap<string, ModuleCodegenView>;
 };
+
+const collectPatternBindingKinds = (
+  pattern: HirPattern,
+  into: Map<SymbolId, HirBindingKind>,
+): void => {
+  if (pattern.kind === "identifier") {
+    if (pattern.bindingKind) {
+      into.set(pattern.symbol, pattern.bindingKind);
+    }
+    return;
+  }
+  if (pattern.kind === "tuple") {
+    pattern.elements.forEach((entry) =>
+      collectPatternBindingKinds(entry, into),
+    );
+    return;
+  }
+  if (pattern.kind === "destructure") {
+    pattern.fields.forEach((entry) =>
+      collectPatternBindingKinds(entry.pattern, into),
+    );
+    if (pattern.spread) {
+      collectPatternBindingKinds(pattern.spread, into);
+    }
+    return;
+  }
+  if (pattern.kind === "type" && pattern.binding) {
+    collectPatternBindingKinds(pattern.binding, into);
+  }
+};
+
+const buildBindingKindIndex = (
+  hir: HirGraph,
+): ReadonlyMap<SymbolId, HirBindingKind> => {
+  const bindingKinds = new Map<SymbolId, HirBindingKind>();
+  hir.items.forEach((item) => {
+    if (item.kind !== "function") {
+      return;
+    }
+    item.parameters.forEach((parameter) =>
+      collectPatternBindingKinds(parameter.pattern, bindingKinds),
+    );
+  });
+  hir.statements.forEach((statement) => {
+    if (statement.kind === "let") {
+      collectPatternBindingKinds(statement.pattern, bindingKinds);
+    }
+  });
+  hir.expressions.forEach((expression) => {
+    if (expression.exprKind === "lambda") {
+      expression.parameters.forEach((parameter) =>
+        collectPatternBindingKinds(parameter.pattern, bindingKinds),
+      );
+      return;
+    }
+    if (expression.exprKind === "effect-handler") {
+      expression.handlers
+        .flatMap((handler) => handler.parameters)
+        .forEach((parameter) => {
+          if (parameter.bindingKind) {
+            bindingKinds.set(parameter.symbol, parameter.bindingKind);
+          }
+        });
+    }
+  });
+  return bindingKinds;
+};
+
+const buildMutableStorageSymbolIndex = (
+  module: SemanticsPipelineResult,
+): ReadonlySet<SymbolId> => {
+  const symbols = new Set(module.borrowing.mutableStorageSymbols);
+  module.hir.expressions.forEach((expression) => {
+    if (expression.exprKind !== "lambda") {
+      return;
+    }
+    expression.captures
+      ?.filter((capture) => capture.mutable)
+      .forEach((capture) => symbols.add(capture.symbol));
+  });
+  return symbols;
+};
+
+const copyAccessPaths = (
+  paths: readonly (readonly CodegenPlaceProjection[])[] | undefined,
+): readonly (readonly CodegenPlaceProjection[])[] =>
+  paths?.map((path) => path.map((projection) => ({ ...projection }))) ?? [];
 
 export type CodegenObjectTemplate = {
   symbol: ProgramSymbolId;
@@ -1367,10 +1477,11 @@ export const buildProgramCodegenView = (
     for (const template of mod.typing.objects.templates()) {
       const ownerId = canonicalProgramSymbolIdOf(mod.moduleId, template.symbol);
       if (!objectTemplateByOwner.has(ownerId)) {
-        objectTemplateByOwner.set(
-          ownerId,
-          toCodegenObjectTemplate({ template, symbol: ownerId }),
-        );
+        const codegenTemplate = toCodegenObjectTemplate({
+          template,
+          symbol: ownerId,
+        });
+        objectTemplateByOwner.set(ownerId, codegenTemplate);
       }
     }
 
@@ -1399,15 +1510,13 @@ export const buildProgramCodegenView = (
       bucket.push(nominal);
       nominalsByOwner.set(ownerId, bucket);
 
-      objectInfoByNominal.set(
-        nominal,
-        toCodegenObjectTypeInfo({
-          info,
-          traitImpls: info.traitImpls?.map((impl) =>
-            toCodegenTraitImplInstanceForModule(impl, mod.moduleId),
-          ),
-        }),
-      );
+      const codegenInfo = toCodegenObjectTypeInfo({
+        info,
+        traitImpls: info.traitImpls?.map((impl) =>
+          toCodegenTraitImplInstanceForModule(impl, mod.moduleId),
+        ),
+      });
+      objectInfoByNominal.set(nominal, codegenInfo);
     });
 
     const traitImplsForNominal =
@@ -2316,6 +2425,22 @@ export const buildProgramCodegenView = (
       },
       effectsInfo,
       effectsIr: buildEffectsIr({ hir: mod.hir, info: effectsInfo }),
+      bindingKinds: buildBindingKindIndex(mod.hir),
+      mutableStorageSymbols: buildMutableStorageSymbolIndex(mod),
+      callableAccessFootprints: new Map(
+        Array.from(mod.borrowing.callables, ([symbol, contract]) => [
+          symbol,
+          {
+            parameters: contract.parameters.map((parameter) => {
+              return {
+                access: parameter.access,
+                reads: copyAccessPaths(parameter.readPaths),
+                writes: copyAccessPaths(parameter.writePaths),
+              };
+            }),
+          },
+        ]),
+      ),
       functionLocations,
     });
   });

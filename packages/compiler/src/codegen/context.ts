@@ -335,12 +335,20 @@ export interface LocalBindingProjectedElement extends LocalBindingBase {
   arrayTypeId: TypeId;
 }
 
+export interface LocalBindingProjectedField extends LocalBindingBase {
+  kind: "projected-field-ref";
+  root: Exclude<LocalBinding, LocalBindingProjectedField>;
+  rootTypeId: TypeId;
+  fields: readonly string[];
+}
+
 export type LocalBinding =
   | LocalBindingLocal
   | LocalBindingScalarAggregate
   | LocalBindingCapture
   | LocalBindingStorageRef
-  | LocalBindingProjectedElement;
+  | LocalBindingProjectedElement
+  | LocalBindingProjectedField;
 
 export interface HandlerScope {
   prevHandler: LocalBindingLocal;

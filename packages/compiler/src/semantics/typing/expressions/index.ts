@@ -5,6 +5,7 @@ export {
   formatFunctionInstanceKey,
   mergeSubstitutions,
   typeCallExpr,
+  typeGenericFunctionBody,
   validateGenericFunctionBody,
   typeMethodCallExpr,
 } from "./call.js";

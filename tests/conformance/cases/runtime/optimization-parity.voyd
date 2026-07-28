@@ -74,7 +74,7 @@ fn alias_identity(box: AliasBox) -> AliasBox
 
 pub fn heap_alias_mutation() -> i32
   let ~a = AliasBox { value: 1 }
-  let ~b = alias_identity(a)
+  let ~b = a
   b.value = 2
   a.value
 

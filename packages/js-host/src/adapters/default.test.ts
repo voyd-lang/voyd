@@ -1791,6 +1791,193 @@ describe("registerDefaultHostAdapters", () => {
     expect(readRequest).toHaveBeenCalledOnce();
   });
 
+  it("discards a late read after response close and request id reuse", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      { effectId: "voyd.std.http.server", opName: "read_request_raw", opId: 2 },
+      { effectId: "voyd.std.http.server", opName: "respond_raw", opId: 3 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 4 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    let settleFirstRead!: (value: {
+      requestId: number;
+      chunk: Uint8Array;
+      done: boolean;
+    }) => void;
+    const firstRead = new Promise<{
+      requestId: number;
+      chunk: Uint8Array;
+      done: boolean;
+    }>((resolve) => {
+      settleFirstRead = resolve;
+    });
+    const readRequest = vi
+      .fn()
+      .mockImplementationOnce(async () => firstRead)
+      .mockResolvedValueOnce({
+        requestId: 7,
+        chunk: Uint8Array.of(2),
+        done: true,
+      });
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "unknown",
+        effectBufferSize: 256,
+        runtimeHooks: {
+          httpServerListen: async () => 1,
+          httpServerAccept: async () => ({
+            requestId: 7,
+            method: "POST",
+            path: "/upload",
+            headers: [],
+            body: new Uint8Array(),
+            bodyStreaming: true,
+          }),
+          httpServerReadRequest: readRequest,
+          httpServerRespond: async () => {},
+          httpServerClose: async () => {},
+        },
+      },
+    });
+
+    await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      { port: 1, stream_request_bodies: true }
+    );
+    await getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      1
+    );
+    const read = getHandler("voyd.std.http.server", "read_request_raw");
+    const abandoned = read(tailContinuation, 7);
+
+    await expect(read(tailContinuation, 7)).resolves.toMatchObject({
+      kind: "resume",
+      value: {
+        ok: false,
+        message: "request 7 already has a body read in progress",
+      },
+    });
+    expect(readRequest).toHaveBeenCalledOnce();
+
+    await getHandler("voyd.std.http.server", "respond_raw")(
+      tailContinuation,
+      {
+        request_id: 7,
+        response: { status: 204, reason: "No Content", headers: [], body: [] },
+      }
+    );
+    await getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      1
+    );
+    settleFirstRead({
+      requestId: 7,
+      chunk: Uint8Array.from({ length: 600 }, () => 1),
+      done: true,
+    });
+    await expect(abandoned).resolves.toMatchObject({
+      kind: "resume",
+      value: {
+        ok: false,
+        message: "request 7 has no open request body stream",
+      },
+    });
+
+    await expect(read(tailContinuation, 7)).resolves.toMatchObject({
+      kind: "resume",
+      value: {
+        ok: true,
+        value: { chunk: [2], done: true },
+      },
+    });
+    expect(readRequest).toHaveBeenCalledTimes(2);
+  });
+
+  it("discards a late request body read after server close", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },
+      { effectId: "voyd.std.http.server", opName: "accept_raw", opId: 1 },
+      { effectId: "voyd.std.http.server", opName: "read_request_raw", opId: 2 },
+      { effectId: "voyd.std.http.server", opName: "close_raw", opId: 3 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+    let settleRead!: (value: {
+      requestId: number;
+      chunk: Uint8Array;
+      done: boolean;
+    }) => void;
+    const deferredRead = new Promise<{
+      requestId: number;
+      chunk: Uint8Array;
+      done: boolean;
+    }>((resolve) => {
+      settleRead = resolve;
+    });
+    const readRequest = vi.fn(async () => deferredRead);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "unknown",
+        effectBufferSize: 256,
+        runtimeHooks: {
+          httpServerListen: async () => 1,
+          httpServerAccept: async () => ({
+            requestId: 8,
+            method: "POST",
+            path: "/upload",
+            headers: [],
+            body: new Uint8Array(),
+            bodyStreaming: true,
+          }),
+          httpServerReadRequest: readRequest,
+          httpServerRespond: async () => {},
+          httpServerClose: async () => {},
+        },
+      },
+    });
+
+    await getHandler("voyd.std.http.server", "listen_raw")(
+      tailContinuation,
+      { port: 1, stream_request_bodies: true }
+    );
+    await getHandler("voyd.std.http.server", "accept_raw")(
+      tailContinuation,
+      1
+    );
+    const read = getHandler("voyd.std.http.server", "read_request_raw");
+    const abandoned = read(tailContinuation, 8);
+
+    await getHandler("voyd.std.http.server", "close_raw")(
+      tailContinuation,
+      1
+    );
+    settleRead({
+      requestId: 8,
+      chunk: Uint8Array.from({ length: 600 }, () => 1),
+      done: true,
+    });
+    await expect(abandoned).resolves.toMatchObject({
+      kind: "resume",
+      value: {
+        ok: false,
+        message: "request 8 has no open request body stream",
+      },
+    });
+    await expect(read(tailContinuation, 8)).resolves.toMatchObject({
+      kind: "resume",
+      value: {
+        ok: false,
+        message: "request 8 has no open request body stream",
+      },
+    });
+    expect(readRequest).toHaveBeenCalledOnce();
+  });
+
   it("drops buffered request remainders when the source times out", async () => {
     const table = buildTable([
       { effectId: "voyd.std.http.server", opName: "listen_raw", opId: 0 },

@@ -22,6 +22,7 @@ import {
   fixedArrayStorageElementType,
   liftFixedArrayElementValue,
   loadStructuralField,
+  lowerValueForHeapField,
   lowerFixedArrayElementValue,
 } from "./structural.js";
 import {
@@ -35,6 +36,7 @@ import {
   modBinaryenTypeToHeapType,
   refCast,
   structGetFieldValue,
+  structSetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
@@ -756,6 +758,344 @@ const fixedArrayLengthExpr = ({
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => arrayLen(ctx.mod, array);
 
+const sharedCellLayout = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId | undefined;
+  ctx: CodegenContext;
+}) => {
+  if (typeof typeId !== "number") {
+    throw new Error("SharedCell intrinsic requires its declared cell type");
+  }
+  const info = getStructuralTypeInfo(typeId, ctx);
+  const state = info?.fieldMap.get("__borrow_state");
+  const value = info?.fieldMap.get("__value");
+  if (!info || !state || !value) {
+    throw new Error(
+      "SharedCell intrinsic requires __borrow_state and __value fields",
+    );
+  }
+  return { info, state, value };
+};
+
+const compileSharedCellStateIntrinsic = ({
+  name,
+  args,
+  call,
+  instanceId,
+  ctx,
+  fnCtx,
+}: {
+  name:
+    | "__shared_cell_begin_read"
+    | "__shared_cell_begin_write"
+    | "__shared_cell_end_read"
+    | "__shared_cell_end_write";
+  args: readonly binaryen.ExpressionRef[];
+  call: HirCallExpr;
+  instanceId?: ProgramFunctionInstanceId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  assertArgCount(name, args, 1);
+  const { info, state } = sharedCellLayout({
+    typeId: getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
+    ctx,
+  });
+  const cellType = getExprBinaryenType(call.args[0]!.expr, ctx, instanceId);
+  const cell = allocateTempLocal(cellType, fnCtx);
+  const cellRef = () => ctx.mod.local.get(cell.index, cellType);
+  const stateType = wasmTypeFor(state.typeId, ctx);
+  const stateStorage = allocateTempLocal(stateType, fnCtx);
+  const stateRef = () =>
+    ctx.mod.local.get(stateStorage.index, stateType);
+  const loadState = () =>
+    arrayGet(
+      ctx.mod,
+      stateRef(),
+      ctx.mod.i32.const(0),
+      binaryen.i32,
+      false,
+    );
+  const storeState = (value: binaryen.ExpressionRef) =>
+    arraySet(ctx.mod, stateRef(), ctx.mod.i32.const(0), value);
+  const setup = ctx.mod.block(null, [
+    ctx.mod.local.set(cell.index, args[0]!),
+    ctx.mod.local.set(
+      stateStorage.index,
+      loadStructuralField({
+        structInfo: info,
+        field: state,
+        pointer: cellRef,
+        exactNominalTypeId: info.nominalId,
+        ctx,
+      }),
+    ),
+  ]);
+
+  if (name === "__shared_cell_end_read") {
+    return ctx.mod.block(null, [
+      setup,
+      storeState(ctx.mod.i32.sub(loadState(), ctx.mod.i32.const(1))),
+    ]);
+  }
+  if (name === "__shared_cell_end_write") {
+    return ctx.mod.block(null, [
+      setup,
+      storeState(ctx.mod.i32.const(0)),
+    ]);
+  }
+
+  const current = allocateTempLocal(binaryen.i32, fnCtx);
+  const currentValue = () => ctx.mod.local.get(current.index, binaryen.i32);
+  const readCurrent = ctx.mod.local.set(current.index, loadState());
+  if (name === "__shared_cell_begin_read") {
+    const begin = ctx.mod.block(
+      null,
+      [
+        storeState(
+          ctx.mod.i32.add(currentValue(), ctx.mod.i32.const(1)),
+        ),
+        ctx.mod.i32.const(0),
+      ],
+      binaryen.i32,
+    );
+    return ctx.mod.block(
+      null,
+      [
+        setup,
+        readCurrent,
+        ctx.mod.if(
+          ctx.mod.i32.lt_s(currentValue(), ctx.mod.i32.const(0)),
+          ctx.mod.i32.const(1),
+          begin,
+        ),
+      ],
+      binaryen.i32,
+    );
+  }
+
+  const begin = ctx.mod.block(
+    null,
+    [storeState(ctx.mod.i32.const(-1)), ctx.mod.i32.const(0)],
+    binaryen.i32,
+  );
+  const conflict = ctx.mod.if(
+    ctx.mod.i32.lt_s(currentValue(), ctx.mod.i32.const(0)),
+    ctx.mod.i32.const(1),
+    ctx.mod.i32.const(2),
+  );
+  return ctx.mod.block(
+    null,
+    [
+      setup,
+      readCurrent,
+      ctx.mod.if(
+        ctx.mod.i32.eq(currentValue(), ctx.mod.i32.const(0)),
+        begin,
+        conflict,
+      ),
+    ],
+    binaryen.i32,
+  );
+};
+
+const compileSharedCellValueIntrinsic = ({
+  name,
+  args,
+  call,
+  instanceId,
+  ctx,
+  fnCtx,
+}: {
+  name: "__shared_cell_value";
+  args: readonly binaryen.ExpressionRef[];
+  call: HirCallExpr;
+  instanceId?: ProgramFunctionInstanceId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  assertArgCount(name, args, 1);
+  const { info, value } = sharedCellLayout({
+    typeId: getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
+    ctx,
+  });
+  const cellType = getExprBinaryenType(call.args[0]!.expr, ctx, instanceId);
+  const cell = allocateTempLocal(cellType, fnCtx);
+  return ctx.mod.block(
+    null,
+    [
+      ctx.mod.local.set(cell.index, args[0]!),
+      loadStructuralField({
+        structInfo: info,
+        field: value,
+        pointer: () => ctx.mod.local.get(cell.index, cellType),
+        exactNominalTypeId: info.nominalId,
+        ctx,
+      }),
+    ],
+    wasmTypeFor(value.typeId, ctx),
+  );
+};
+
+const compileSharedCellSetValueIntrinsic = ({
+  name,
+  args,
+  call,
+  instanceId,
+  ctx,
+  fnCtx,
+}: {
+  name: "__shared_cell_set_value";
+  args: readonly binaryen.ExpressionRef[];
+  call: HirCallExpr;
+  instanceId?: ProgramFunctionInstanceId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  assertArgCount(name, args, 2);
+  const { info, value } = sharedCellLayout({
+    typeId: getRequiredExprType(call.args[0]!.expr, ctx, instanceId),
+    ctx,
+  });
+  const cellType = getExprBinaryenType(call.args[0]!.expr, ctx, instanceId);
+  const cell = allocateTempLocal(cellType, fnCtx);
+  return ctx.mod.block(
+    null,
+    [
+      ctx.mod.local.set(cell.index, args[0]!),
+      structSetFieldValue({
+        mod: ctx.mod,
+        fieldIndex: value.runtimeIndex,
+        ref: refCast(
+          ctx.mod,
+          ctx.mod.local.get(cell.index, cellType),
+          info.runtimeType,
+        ),
+        value: lowerValueForHeapField({
+          value: args[1]!,
+          typeId: value.typeId,
+          targetType: value.heapWasmType,
+          ctx,
+          fnCtx,
+        }),
+      }),
+    ],
+    binaryen.none,
+  );
+};
+
+const compileSharedCellBorrowFailureIntrinsic = ({
+  args,
+  ctx,
+  fnCtx,
+}: {
+  args: readonly binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef => {
+  assertArgCount("__shared_cell_borrow_fail", args, 1);
+  ensurePanicTrapGlobals(ctx);
+  ensureLinearMemoryExport(ctx);
+
+  const mutableMessage =
+    "SharedCell borrow conflict: value is already mutably borrowed";
+  const sharedMessage =
+    "SharedCell borrow conflict: value is already shared borrowed";
+  const maxMessageLength = Math.max(
+    mutableMessage.length,
+    sharedMessage.length,
+  );
+  const status = allocateTempLocal(binaryen.i32, fnCtx);
+  const grownPage = allocateTempLocal(binaryen.i32, fnCtx);
+  const scratchPtr = () =>
+    ctx.mod.global.get(PANIC_SCRATCH_PTR_GLOBAL, binaryen.i32);
+  const scratchCapacity = () =>
+    ctx.mod.global.get(PANIC_SCRATCH_CAPACITY_GLOBAL, binaryen.i32);
+  const storeMessage = (message: string): binaryen.ExpressionRef =>
+    ctx.mod.block(null, [
+      ctx.mod.global.set(
+        PANIC_TRAP_LEN_GLOBAL,
+        ctx.mod.i32.const(message.length),
+      ),
+      ctx.mod.if(
+        ctx.mod.i32.ge_s(scratchPtr(), ctx.mod.i32.const(0)),
+        ctx.mod.block(
+          null,
+          Array.from(message, (character, index) =>
+            ctx.mod.i32.store8(
+              0,
+              1,
+              ctx.mod.i32.add(scratchPtr(), ctx.mod.i32.const(index)),
+              ctx.mod.i32.const(character.charCodeAt(0)),
+              LINEAR_MEMORY_INTERNAL,
+            ),
+          ),
+        ),
+      ),
+    ]);
+  const reserveScratch = ctx.mod.if(
+    ctx.mod.i32.or(
+      ctx.mod.i32.lt_s(scratchPtr(), ctx.mod.i32.const(0)),
+      ctx.mod.i32.lt_s(
+        scratchCapacity(),
+        ctx.mod.i32.const(maxMessageLength),
+      ),
+    ),
+    ctx.mod.block(null, [
+      ctx.mod.local.set(
+        grownPage.index,
+        ctx.mod.memory.grow(ctx.mod.i32.const(1), LINEAR_MEMORY_INTERNAL),
+      ),
+      ctx.mod.if(
+        ctx.mod.i32.eq(
+          ctx.mod.local.get(grownPage.index, binaryen.i32),
+          ctx.mod.i32.const(-1),
+        ),
+        ctx.mod.block(null, [
+          ctx.mod.global.set(
+            PANIC_SCRATCH_PTR_GLOBAL,
+            ctx.mod.i32.const(-1),
+          ),
+          ctx.mod.global.set(
+            PANIC_SCRATCH_CAPACITY_GLOBAL,
+            ctx.mod.i32.const(0),
+          ),
+        ]),
+        ctx.mod.block(null, [
+          ctx.mod.global.set(
+            PANIC_SCRATCH_PTR_GLOBAL,
+            ctx.mod.i32.mul(
+              ctx.mod.local.get(grownPage.index, binaryen.i32),
+              ctx.mod.i32.const(65_536),
+            ),
+          ),
+          ctx.mod.global.set(
+            PANIC_SCRATCH_CAPACITY_GLOBAL,
+            ctx.mod.i32.const(65_536),
+          ),
+        ]),
+      ),
+    ]),
+  );
+
+  return ctx.mod.block(null, [
+    ctx.mod.local.set(status.index, args[0]!),
+    reserveScratch,
+    ctx.mod.if(
+      ctx.mod.i32.eq(
+        ctx.mod.local.get(status.index, binaryen.i32),
+        ctx.mod.i32.const(1),
+      ),
+      storeMessage(mutableMessage),
+      storeMessage(sharedMessage),
+    ),
+    ctx.mod.global.set(PANIC_TRAP_PTR_GLOBAL, scratchPtr()),
+    ctx.mod.unreachable(),
+  ]);
+};
+
 export const compileIntrinsicCall = ({
   name,
   call,
@@ -782,6 +1122,38 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 1);
       return args[0]!;
     }
+    case "__shared_cell_begin_read":
+    case "__shared_cell_begin_write":
+    case "__shared_cell_end_read":
+    case "__shared_cell_end_write":
+      return compileSharedCellStateIntrinsic({
+        name,
+        args,
+        call,
+        instanceId,
+        ctx,
+        fnCtx,
+      });
+    case "__shared_cell_value":
+      return compileSharedCellValueIntrinsic({
+        name,
+        args,
+        call,
+        instanceId,
+        ctx,
+        fnCtx,
+      });
+    case "__shared_cell_set_value":
+      return compileSharedCellSetValueIntrinsic({
+        name,
+        args,
+        call,
+        instanceId,
+        ctx,
+        fnCtx,
+      });
+    case "__shared_cell_borrow_fail":
+      return compileSharedCellBorrowFailureIntrinsic({ args, ctx, fnCtx });
     case "__array_new": {
       assertArgCount(name, args, 1);
       const arrayType = getRequiredExprType(call.id, ctx, instanceId);

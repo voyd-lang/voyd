@@ -169,20 +169,20 @@ export const compileObjectLiteralExpr = (
 
   expr.entries.forEach((entry, entryIndex) => {
     if (entry.kind === "field") {
+      const field = structInfo.fieldMap.get(entry.name);
       const binding = fieldTemps.get(entry.name);
-      if (!binding) {
+      if (!binding || !field) {
         throw new Error(
           `object literal cannot set unknown field ${entry.name}`
         );
       }
-      const expectedTypeId = structInfo.fieldMap.get(entry.name)?.typeId;
-      const actualTypeId = getRequiredExprType(entry.value, ctx, typeInstanceId);
+      const expectedTypeId = field.typeId;
       const coerced = entryValues[entryIndex]!;
       const stored = usesInlineLayout
         ? coerced
         : lowerValueForHeapField({
             value: coerced,
-            typeId: expectedTypeId ?? actualTypeId,
+            typeId: expectedTypeId,
             targetType: binding.type,
             ctx,
             fnCtx,
@@ -709,8 +709,15 @@ export const compileFieldAccessExpr = (
     targetExpr?.exprKind === "identifier"
       ? getRequiredBinding(targetExpr.symbol, ctx, fnCtx)
       : undefined;
-  const borrowedTargetPointer =
+  const targetStorageRef =
     targetBinding ? loadBindingStorageRef(targetBinding, ctx) : undefined;
+  const borrowedTargetPointer =
+    targetBinding &&
+    targetStorageRef &&
+    targetBinding.storageType ===
+      getInlineHeapBoxType({ typeId: sourceTargetTypeId, ctx })
+      ? targetStorageRef
+      : undefined;
 
   const optionalInfo = shouldInlineUnionLayout(sourceTargetTypeId, ctx)
     ? getOptionalLayoutInfo(sourceTargetTypeId, ctx)

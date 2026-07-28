@@ -1,12 +1,10 @@
-obj ArrayOwners { value: i32 }
 obj Array<T> {
   storage: FixedArray<T>,
-  count: i32,
-  owners: ArrayOwners
+  count: i32
 }
 
 pub fn new_array_unchecked<T>({ from source: FixedArray<T> }) -> Array<T>
-  Array<T> { storage: source, count: __array_len(source), owners: ArrayOwners { value: 1 } }
+  Array<T> { storage: source, count: __array_len(source) }
 
 impl<T> Array<T>
   fn len(self) -> i32
@@ -16,6 +14,15 @@ impl<T> Array<T>
     __array_get(self.storage, index)
 
 type Handler = fn(i32) -> i32
+
+obj NumberBox { value: i32 }
+obj EmptyBox {}
+type BoxValue = NumberBox | EmptyBox
+
+obj Buffer<T> {
+  count: i32,
+  storage: FixedArray<T>
+}
 
 fn add_one(value: i32) -> i32
   value + 1
@@ -28,5 +35,27 @@ fn invoke_all(handlers: Array<Handler>) -> i32
   let second = handlers.at(1)
   first(20) + second(19)
 
+fn first_box_value({ values: Array<BoxValue> }) -> i32
+  let first = values.at(0)
+  match(first)
+    NumberBox:
+      first.value
+    EmptyBox:
+      0
+
+fn first_buffer_value(buffer: Buffer<BoxValue>) -> i32
+  let first = __array_get(buffer.storage, 0)
+  match(first)
+    NumberBox:
+      first.value
+    EmptyBox:
+      0
+
 pub fn main() -> i32
-  invoke_all([add_one, add_two])
+  let numbers = [NumberBox { value: 6 }]
+  invoke_all([add_one, add_two]) +
+    first_box_value({ values: [NumberBox { value: 5 }] }) +
+    first_buffer_value(Buffer<NumberBox> {
+      count: numbers.count,
+      storage: numbers.storage
+    })

@@ -3,12 +3,17 @@ import type { CodegenContext, FunctionContext } from "./context.js";
 
 export const MAX_MULTIVALUE_INLINE_LANES = 4;
 
+export type LocalAllocationContext = Pick<
+  FunctionContext,
+  "locals" | "nextLocalIndex"
+>;
+
 const allocateTempLocal = ({
   type,
   fnCtx,
 }: {
   type: binaryen.Type;
-  fnCtx: FunctionContext;
+  fnCtx: LocalAllocationContext;
 }): number => {
   const index = fnCtx.nextLocalIndex;
   fnCtx.nextLocalIndex += 1;
@@ -25,7 +30,7 @@ export const captureMultivalueLanes = ({
   value: binaryen.ExpressionRef;
   abiTypes: readonly binaryen.Type[];
   ctx: CodegenContext;
-  fnCtx: FunctionContext;
+  fnCtx: LocalAllocationContext;
 }): {
   setup: readonly binaryen.ExpressionRef[];
   lanes: readonly binaryen.ExpressionRef[];
@@ -60,11 +65,12 @@ export const captureMultivalueLanes = ({
     setup: [
       ctx.mod.local.set(tupleLocal, value),
       ...laneLocals.map((lane, index) =>
-        ctx.mod.local.set(lane.index, ctx.mod.tuple.extract(tupleValue(), index)),
+        ctx.mod.local.set(
+          lane.index,
+          ctx.mod.tuple.extract(tupleValue(), index),
+        ),
       ),
     ],
-    lanes: laneLocals.map((lane) =>
-      ctx.mod.local.get(lane.index, lane.type),
-    ),
+    lanes: laneLocals.map((lane) => ctx.mod.local.get(lane.index, lane.type)),
   };
 };

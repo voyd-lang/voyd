@@ -1,3 +1,6 @@
+use std::array::Array
+use std::shared_cell::{ SharedCell }
+
 trait Score
   fn score(self) -> i32
 
@@ -27,10 +30,37 @@ obj Pair {
 }
 
 pub fn heap_alias_identity() -> i32
-  let ~pair = Pair { x: 1, y: 2 }
+  let pair = SharedCell(Pair { x: 1, y: 2 })
   let alias = pair
-  pair.x = 8
-  alias.x + pair.y
+  pair.with_mut((~value) =>
+    value.x = 8
+  )
+  alias.with((value) => value.x + value.y)
+
+obj IteratorBox {
+  value: i32
+}
+
+pub fn iterator_retained_object_alias() -> i32
+  let ~first_box = IteratorBox { value: 3 }
+  let ~values = Array<IteratorBox>::with_capacity(2)
+  values.push(first_box)
+  values.push(IteratorBox { value: 5 })
+
+  let ~iterator = values.iter()
+  let first = iterator.next()
+  let second = iterator.next()
+  first_box.value = 7
+
+  match(first)
+    Some<IteratorBox> { value: first_value }:
+      match(second)
+        Some<IteratorBox> { value: second_value }:
+          first_value.value * 10 + second_value.value
+        None:
+          -2
+    None:
+      -1
 
 eff Probe
   touch(resume) -> void

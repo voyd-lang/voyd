@@ -5,7 +5,11 @@ import {
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { CodegenContext } from "../../context.js";
 import type { HirExprId } from "../../../semantics/ids.js";
-import { wasmHeapFieldTypeFor, wasmTypeFor } from "../../types.js";
+import {
+  getMutableRefStorageType,
+  wasmHeapFieldTypeFor,
+  wasmTypeFor,
+} from "../../types.js";
 import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
@@ -84,7 +88,9 @@ const captureFields = ({
         throw new Error("missing temp id for continuation capture");
       }
       const storageRefType = field.storageRef
-        ? getInlineHeapBoxType({ typeId: field.typeId, ctx })
+        ? field.bindingKind === "mutable-ref"
+          ? getMutableRefStorageType({ typeId: field.typeId, ctx })
+          : getInlineHeapBoxType({ typeId: field.typeId, ctx })
         : undefined;
       if (field.storageRef && typeof storageRefType !== "number") {
         throw new Error("default reference temp requires storage-ref ABI");
@@ -111,18 +117,21 @@ const captureFields = ({
       moduleId: ctx.moduleId,
       symbol,
     });
+    const storageRefType =
+      field.bindingKind === "mutable-ref"
+        ? getMutableRefStorageType({ typeId: field.typeId, ctx })
+        : undefined;
     return {
       name: ctx.program.symbols.getName(symbolId) ?? `${symbol}`,
       symbol,
       typeId: field.typeId,
-      wasmType: wasmTypeFor(field.typeId, ctx),
-      storageType: wasmHeapFieldTypeFor(
-        field.typeId,
-        ctx,
-        new Set(),
-        "runtime",
-      ),
+      wasmType: storageRefType ?? wasmTypeFor(field.typeId, ctx),
+      storageType:
+        storageRefType ??
+        wasmHeapFieldTypeFor(field.typeId, ctx, new Set(), "runtime"),
       sourceKind: field.sourceKind,
+      storageRef: typeof storageRefType === "number",
+      bindingKind: field.bindingKind,
     };
   });
 

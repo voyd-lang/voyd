@@ -141,6 +141,7 @@ export interface HirIntersectionTypeExpr extends HirTypeExprBase {
 export interface HirFunctionTypeParameter {
   type: HirTypeExpr;
   optional?: boolean;
+  bindingKind?: HirBindingKind;
 }
 
 export interface HirFunctionTypeExpr extends HirTypeExprBase {

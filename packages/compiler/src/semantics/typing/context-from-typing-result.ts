@@ -65,6 +65,11 @@ export const createTypingContextFromTypingResult = ({
     instanceKeys: cloneNestedMap(typing.callInstanceKeys),
     traitDispatches: new Set(typing.callTraitDispatches),
   },
+  borrowCallTargets: cloneNestedMap(typing.borrowCallTargets),
+  borrowCallArgumentPlans: cloneNestedMap(
+    typing.borrowCallArgumentPlans,
+  ),
+  borrowResolvedExprTypes: new Map(typing.borrowResolvedExprTypes),
   functions: typing.functions,
   objects: typing.objects,
   traits: typing.traits,

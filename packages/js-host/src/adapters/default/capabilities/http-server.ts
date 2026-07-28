@@ -148,46 +148,93 @@ const transportSafeHttpServerSource = ({
   maxChunkBytes: number;
 }): HttpServerSource => {
   const remainder = new Map<number, DefaultAdapterHttpRequestChunk>();
+  const activeReads = new Set<number>();
+  const requestGenerations = new Map<number, number>();
   const serverRequests = new Map<number, Set<number>>();
-  const clearRequest = (requestId: number): void => {
+  let nextRequestGeneration = 1;
+  const clearRequest = (
+    requestId: number,
+    generation = requestGenerations.get(requestId)
+  ): void => {
+    if (
+      generation !== undefined &&
+      requestGenerations.get(requestId) !== generation
+    ) {
+      return;
+    }
     remainder.delete(requestId);
+    requestGenerations.delete(requestId);
     for (const requests of serverRequests.values()) {
       requests.delete(requestId);
     }
   };
   source.onRequestClosed?.(clearRequest);
-  const nextChunk = (value: DefaultAdapterHttpRequestChunk): DefaultAdapterHttpRequestChunk => {
+  const nextChunk = ({
+    value,
+    requestId,
+    generation,
+  }: {
+    value: DefaultAdapterHttpRequestChunk;
+    requestId: number;
+    generation: number;
+  }): DefaultAdapterHttpRequestChunk => {
     if (maxChunkBytes <= 0) {
       throw new Error("http server effect buffer is too small for request streaming");
     }
+    if (requestGenerations.get(requestId) !== generation) {
+      throw new Error(`request ${requestId} has no open request body stream`);
+    }
+    if (value.requestId !== requestId) {
+      throw new Error(
+        `http server body read for request ${requestId} returned request ${value.requestId}`
+      );
+    }
     if (value.chunk.byteLength <= maxChunkBytes) {
-      clearRequest(value.done ? value.requestId : -1);
+      if (value.done) {
+        clearRequest(requestId, generation);
+      }
       return value;
     }
     const head = value.chunk.slice(0, maxChunkBytes);
-    remainder.set(value.requestId, {
-      requestId: value.requestId,
+    remainder.set(requestId, {
+      requestId,
       chunk: value.chunk.slice(maxChunkBytes),
       done: value.done,
     });
-    return { requestId: value.requestId, chunk: head, done: false };
+    return { requestId, chunk: head, done: false };
   };
   return {
     ...source,
     accept: async (serverId) => {
       const request = await source.accept(serverId);
+      clearRequest(request.requestId);
+      requestGenerations.set(request.requestId, nextRequestGeneration);
+      nextRequestGeneration += 1;
       const requests = serverRequests.get(serverId) ?? new Set<number>();
       requests.add(request.requestId);
       serverRequests.set(serverId, requests);
       return request;
     },
     readRequest: async (requestId) => {
-      const pending = remainder.get(requestId);
-      if (pending) {
-        remainder.delete(requestId);
-        return nextChunk(pending);
+      const generation = requestGenerations.get(requestId);
+      if (generation === undefined) {
+        throw new Error(`request ${requestId} has no open request body stream`);
       }
-      return nextChunk(await source.readRequest(requestId));
+      if (activeReads.has(requestId)) {
+        throw new Error(`request ${requestId} already has a body read in progress`);
+      }
+      activeReads.add(requestId);
+      try {
+        const pending = remainder.get(requestId);
+        if (pending) {
+          remainder.delete(requestId);
+          return nextChunk({ value: pending, requestId, generation });
+        }
+        const value = await source.readRequest(requestId);
+        return nextChunk({ value, requestId, generation });
+      } finally {
+        activeReads.delete(requestId);
+      }
     },
     respond: async (response) => {
       clearRequest(response.requestId);
@@ -199,7 +246,7 @@ const transportSafeHttpServerSource = ({
     },
     close: async (serverId) => {
       for (const requestId of serverRequests.get(serverId) ?? []) {
-        remainder.delete(requestId);
+        clearRequest(requestId);
       }
       serverRequests.delete(serverId);
       await source.close(serverId);

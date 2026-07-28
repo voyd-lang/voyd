@@ -10,16 +10,16 @@ use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
+use std::shared_cell::SharedCell
 use std::string::type::String
 use std::test::assertions::all
 
 obj StreamCapture {
-  body: String,
-  response?: Response
+  body: String
 }
 
 test "SSE formats fields and multiline data into streamed chunks":
-  let ~capture = StreamCapture { body: String::init(), response: None {} }
+  let capture = SharedCell(StreamCapture { body: String::init() })
   let response = capture_sse(capture)
   assert(response.status.code(), eq: 200)
   match(response.header("content-type".as_slice()))
@@ -29,11 +29,17 @@ test "SSE formats fields and multiline data into streamed chunks":
       Test::fail()
 
   let expected_prefix = "event: update\nid: 42\nretry: 1500\ndata: first\ndata: second\ndata: third\n\n: alive\n\n".as_slice()
-  assert(capture.body.starts_with(expected_prefix), eq: true)
+  let has_expected_prefix = capture.with((value) =>
+    value.body.starts_with(expected_prefix)
+  )
+  assert(has_expected_prefix, eq: true)
   let expected_suffix = "data: ".as_slice().to_string()
     .concat("x".as_slice().to_string().repeat(17000).as_slice())
     .concat("\n\n".as_slice())
-  assert(capture.body.ends_with(expected_suffix.as_slice()), eq: true)
+  let has_expected_suffix = capture.with((value) =>
+    value.body.ends_with(expected_suffix.as_slice())
+  )
+  assert(has_expected_suffix, eq: true)
 
 test "multipart parses field metadata and binary-safe bodies":
   let request = IncomingRequest {
@@ -140,7 +146,7 @@ test "content negotiation matches parameterized representations by base media ty
     None:
       void
 
-fn capture_sse(~capture: StreamCapture) -> Response
+fn capture_sse(capture: SharedCell<StreamCapture>) -> Response
   try open
     sse do(sender):
       let event_data = SseEvent::data("first\rsecond\r\nthird".as_slice())
@@ -151,29 +157,26 @@ fn capture_sse(~capture: StreamCapture) -> Response
       let _ = sender.comment("alive\rinjected".as_slice())
       let _ = sender.send(SseEvent::data("x".as_slice().to_string().repeat(17000)))
   server::ResponseStream::begin_stream(resume, payload):
-    match(wire::decode_response(payload))
-      Ok<Response> { value }:
-        capture.response = Some<Response> { value: value }
-      Err:
-        void
+    let _ = wire::decode_response(payload)
     resume(msgpack::make_null())
   server::ResponseWriter::write_chunk(tail, payload):
     match(wire::decode_body(payload))
       Ok<Body> { value }:
         match(value.as_text())
           Ok<String> { value }:
-            capture.body = capture.body.concat(value.as_slice())
+            capture.with_mut((~current) =>
+              current.body = current.body.concat(value.as_slice())
+            )
           Err:
             void
       Err:
         void
     tail(test_host_ok())
   server::ResponseStream::finish_stream(_resume, _payload):
-    match(capture.response)
-      Some<Response> { value }:
-        value
-      None:
-        Response::ok()
+    Response::ok().with(
+      header: "content-type".as_slice(),
+      value: "text/event-stream; charset=utf-8".as_slice()
+    )
 
 fn test_host_ok() -> MsgPack
   HostDto::init()

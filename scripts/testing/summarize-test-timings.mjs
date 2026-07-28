@@ -101,10 +101,10 @@ const violations = [
     ? [`wall time ${formatMs(wallMs)} exceeds ${formatMs(budget.maxWallMs)}`]
     : []),
   ...files
-    .filter((file) => file.durationMs > budget.maxFileMs)
+    .filter((file) => file.durationMs > fileBudgetMs(file, budget))
     .map(
       (file) =>
-        `${basename(file.file)} ${formatMs(file.durationMs)} exceeds ${formatMs(budget.maxFileMs)}`,
+        `${basename(file.file)} ${formatMs(file.durationMs)} exceeds ${formatMs(fileBudgetMs(file, budget))}`,
     ),
 ];
 if (violations.length > 0) {
@@ -138,4 +138,8 @@ function readReport(file) {
 
 function formatMs(value) {
   return `${Math.round(value)}ms`;
+}
+
+function fileBudgetMs(file, budget) {
+  return budget.maxFileMsByBasename?.[basename(file.file)] ?? budget.maxFileMs;
 }

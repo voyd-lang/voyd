@@ -24,19 +24,23 @@ import {
   abiTypeFor,
   getCallableParamAbiTypes,
   getInlineHeapBoxType,
+  getMutableRefStorageType,
   getRequiredExprType,
   getSignatureSpillBoxType,
   getStructuralTypeInfo,
+  lowerValueToMutableRefStorage,
   wasmTypeFor,
 } from "../../types.js";
 import {
   allocateAddressableLocal,
+  allocateMutableRefLocal,
   allocateTempLocal,
   getRequiredBinding,
   loadLocalValue,
   loadBindingValue,
   loadBindingStorageRef,
   materializeOwnedBinding,
+  storeProjectedFieldBindingValue,
   storeLocalValue,
   loadScalarAggregateBindingField,
   storeScalarAggregateBindingValue,
@@ -48,6 +52,7 @@ import {
 } from "../../projected-element-views.js";
 import { compileCallArgExpressionsWithTemps } from "./shared.js";
 import { captureMultivalueLanes } from "../../multivalue.js";
+import { preserveResultAcrossOperations } from "../../result-sequencing.js";
 import {
   getOrCreateScalarAggregateCallSpecialization,
   scalarAggregateParameterCanUseSpecializedAbi,
@@ -64,6 +69,7 @@ import type {
   PlannedCallArguments,
 } from "./types.js";
 import { getOrCreateCallShapeSpecialization } from "../../call-shape-specialization.js";
+import { compileFieldAssignment } from "../mutations.js";
 
 type ScalarAggregateCallArg =
   | { kind: "binding"; symbol: SymbolId; typeId: TypeId }
@@ -109,26 +115,33 @@ const heapObjectScalarArgumentNeedsProducerSpecialization = ({
   return false;
 };
 
-export const compileCallArguments = ({
+export const applyCallArgumentWritebacks = ({
   call,
-  meta,
+  writebacks,
   ctx,
   fnCtx,
-  compileExpr,
 }: {
-  call: HirCallExpr;
-  meta: FunctionMetadata;
+  call: import("../../context.js").CompiledExpression;
+  writebacks: readonly binaryen.ExpressionRef[];
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-  compileExpr: ExpressionCompiler;
-}): binaryen.ExpressionRef[] => {
-  return compileCallArgumentsWithMetadata({
-    call,
-    meta,
-    ctx,
-    fnCtx,
-    compileExpr,
-  }).args;
+}): import("../../context.js").CompiledExpression => {
+  if (writebacks.length === 0) {
+    return call;
+  }
+  if (call.usedReturnCall) {
+    throw new Error("call argument writeback cannot follow a return_call");
+  }
+  return {
+    ...call,
+    expr: preserveResultAcrossOperations({
+      value: call.expr,
+      operations: writebacks,
+      ctx,
+      fnCtx,
+    }),
+    usedReturnCall: false,
+  };
 };
 
 export const compileCallArgumentsWithMetadata = ({
@@ -143,7 +156,11 @@ export const compileCallArgumentsWithMetadata = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
-}): { args: binaryen.ExpressionRef[]; meta: FunctionMetadata } => {
+}): {
+  args: binaryen.ExpressionRef[];
+  writebacks: binaryen.ExpressionRef[];
+  meta: FunctionMetadata;
+} => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const typedPlan = resolveTypedCallArgumentPlan({
     callId: call.id,
@@ -164,7 +181,11 @@ export const compileCallArgumentsWithMetadata = ({
       typedPlan,
     },
   });
-  return { args: compiled.args, meta: compiled.meta ?? meta };
+  return {
+    args: compiled.args,
+    writebacks: compiled.writebacks,
+    meta: compiled.meta ?? meta,
+  };
 };
 
 const callShapeSpecializationRequestFor = ({
@@ -183,36 +204,6 @@ const callShapeSpecializationRequestFor = ({
     .get(`${ctx.moduleId}:${callId}`)
     ?.get(callerInstanceId);
 };
-
-export const compileCallArgumentsForParams = ({
-  call,
-  params,
-  paramAbiKinds,
-  meta,
-  ctx,
-  fnCtx,
-  compileExpr,
-  options,
-}: {
-  call: HirCallExpr;
-  params: readonly CallParam[];
-  paramAbiKinds?: readonly string[];
-  meta?: FunctionMetadata;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-  compileExpr: ExpressionCompiler;
-  options: CompileCallArgumentOptions;
-}): binaryen.ExpressionRef[] =>
-  compileCallArgumentsForParamsWithDetails({
-    call,
-    params,
-    paramAbiKinds,
-    meta,
-    ctx,
-    fnCtx,
-    compileExpr,
-    options,
-  }).args;
 
 export const compileCallArgumentsForParamsWithDetails = ({
   call,
@@ -380,6 +371,7 @@ export const compileCallArgumentsForParamsWithDetails = ({
     compileExpr,
   });
 
+  const writebacks: binaryen.ExpressionRef[] = [];
   const args = materializeCallArgumentPlan({
     plan: planned.plan,
     compiledArgs,
@@ -408,10 +400,12 @@ export const compileCallArgumentsForParamsWithDetails = ({
     ctx,
     fnCtx,
     compileExpr,
+    writebacks,
   });
 
   return {
     args,
+    writebacks,
     consumedArgCount: planned.consumedArgCount,
     meta: activeMeta ?? meta,
   };
@@ -984,6 +978,7 @@ const materializeCallArgumentPlan = ({
   ctx,
   fnCtx,
   compileExpr,
+  writebacks,
 }: {
   plan: readonly CallArgumentPlanEntry[];
   compiledArgs: readonly binaryen.ExpressionRef[];
@@ -998,6 +993,7 @@ const materializeCallArgumentPlan = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
+  writebacks: binaryen.ExpressionRef[];
 }): binaryen.ExpressionRef[] => {
   const containerTemps = new Map<
     number,
@@ -1044,6 +1040,7 @@ const materializeCallArgumentPlan = ({
         ctx,
         fnCtx,
         compileExpr,
+        writebacks,
       });
       return encodeProvided(payload);
     }
@@ -1073,6 +1070,7 @@ const materializeCallArgumentPlan = ({
         ctx,
         fnCtx,
         compileExpr,
+        writebacks,
       });
     }
 
@@ -1087,6 +1085,7 @@ const materializeCallArgumentPlan = ({
         ctx,
         fnCtx,
         compileExpr,
+        writebacks,
       });
       return encodeProvided(payload);
     }
@@ -1124,20 +1123,23 @@ const materializeCallArgumentPlan = ({
             fnCtx,
           });
     if (typeof scalarFieldValue === "number") {
-      return encodeProvided(lowerCallArgumentForAbi({
-        argValue: coerceValueToType({
-          value: scalarFieldValue,
-          actualType: field.typeId,
-          targetType: fieldTargetTypeId,
+      return encodeProvided(
+        lowerCallArgumentForAbi({
+          argValue: coerceValueToType({
+            value: scalarFieldValue,
+            actualType: field.typeId,
+            targetType: fieldTargetTypeId,
+            ctx,
+            fnCtx,
+          }),
+          paramTypeId,
+          abiKind,
           ctx,
           fnCtx,
+          compileExpr,
+          writebacks,
         }),
-        paramTypeId,
-        abiKind,
-        ctx,
-        fnCtx,
-        compileExpr,
-      }));
+      );
     }
 
     const existingTemp = containerTemps.get(entry.containerArgIndex);
@@ -1171,6 +1173,48 @@ const materializeCallArgumentPlan = ({
         ];
     initializedContainers.add(entry.containerArgIndex);
 
+    const fieldExprId = resolveContainerFieldValueExprId({
+      containerExprId: containerArg.expr,
+      fieldName: entry.fieldName,
+      ctx,
+    });
+    const addressableFieldSymbol =
+      typeof fieldExprId === "number"
+        ? resolveAddressableIdentifierSymbol({
+            exprId: fieldExprId,
+            ctx,
+          })
+        : undefined;
+    if (
+      abiKind === "mutable_ref" &&
+      typeof addressableFieldSymbol === "number"
+    ) {
+      const fieldBinding = getRequiredBinding(
+        addressableFieldSymbol,
+        ctx,
+        fnCtx,
+      );
+      const result = lowerCallArgumentForAbi({
+        argExprId: fieldExprId,
+        argValue: loadBindingValue(fieldBinding, ctx, fnCtx),
+        paramTypeId,
+        abiKind,
+        ctx,
+        fnCtx,
+        compileExpr,
+        writebacks,
+      });
+      return encodeProvided(
+        initOps.length === 0
+          ? result
+          : ctx.mod.block(
+              null,
+              [...initOps, result],
+              binaryen.getExpressionType(result),
+            ),
+      );
+    }
+
     const loaded = loadStructuralField({
       structInfo: containerInfo,
       field,
@@ -1183,11 +1227,6 @@ const materializeCallArgumentPlan = ({
       targetType: fieldTargetTypeId,
       ctx,
       fnCtx,
-    });
-    const fieldExprId = resolveContainerFieldValueExprId({
-      containerExprId: containerArg.expr,
-      fieldName: entry.fieldName,
-      ctx,
     });
     const containerFieldStorageRef =
       typeof fieldExprId === "number"
@@ -1202,43 +1241,6 @@ const materializeCallArgumentPlan = ({
             fnCtx,
           });
 
-    if (
-      abiKind === "mutable_ref" &&
-      typeof paramTypeId === "number" &&
-      typeof fieldExprId === "number" &&
-      typeof resolveAddressableIdentifierSymbol({
-        exprId: fieldExprId,
-        ctx,
-      }) !== "number" &&
-      !containerFieldStorageRef
-    ) {
-      const fieldTemp = allocateAddressableLocal({
-        typeId: paramTypeId,
-        ctx,
-        fnCtx,
-      });
-      const fieldPointer = loadBindingStorageRef(fieldTemp, ctx);
-      if (!fieldPointer) {
-        throw new Error(
-          `mutable ref labeled argument requires addressable temp storage (type ${paramTypeId})`,
-        );
-      }
-      return encodeProvided(ctx.mod.block(
-        null,
-        [
-          ...initOps,
-          storeLocalValue({
-            binding: fieldTemp,
-            value: coerced,
-            ctx,
-            fnCtx,
-          }),
-          fieldPointer,
-        ],
-        fieldTemp.storageType,
-      ));
-    }
-
     const result = lowerCallArgumentForAbi({
       argExprId: fieldExprId,
       argValue: coerced,
@@ -1248,15 +1250,18 @@ const materializeCallArgumentPlan = ({
       ctx,
       fnCtx,
       compileExpr,
+      writebacks,
     });
     if (initOps.length === 0) {
       return encodeProvided(result);
     }
-    return encodeProvided(ctx.mod.block(
-      null,
-      [...initOps, result],
-      binaryen.getExpressionType(result),
-    ));
+    return encodeProvided(
+      ctx.mod.block(
+        null,
+        [...initOps, result],
+        binaryen.getExpressionType(result),
+      ),
+    );
   });
 };
 
@@ -1388,6 +1393,7 @@ const lowerCallArgumentForAbi = ({
   ctx,
   fnCtx,
   compileExpr,
+  writebacks,
 }: {
   argExprId?: HirExprId;
   argValue: binaryen.ExpressionRef;
@@ -1398,6 +1404,7 @@ const lowerCallArgumentForAbi = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
+  writebacks: binaryen.ExpressionRef[];
 }): binaryen.ExpressionRef => {
   if (abiKind !== "readonly_ref" && abiKind !== "mutable_ref") {
     if (!scalarOverride && typeof argExprId === "number") {
@@ -1441,6 +1448,74 @@ const lowerCallArgumentForAbi = ({
       "ref ABI argument lowering requires a concrete parameter type",
     );
   }
+  const argExpr =
+    typeof argExprId === "number"
+      ? ctx.module.hir.expressions.get(argExprId)
+      : undefined;
+  const mutablePlaceExpr =
+    abiKind === "mutable_ref" && typeof argExprId === "number"
+      ? resolveMutablePlaceExpression({ exprId: argExprId, ctx })
+      : argExpr;
+  if (
+    abiKind === "mutable_ref" &&
+    mutablePlaceExpr?.exprKind === "field-access"
+  ) {
+    const inlineStorageType = getInlineHeapBoxType({
+      typeId: paramTypeId,
+      ctx,
+    });
+    const mutableStorageType = getMutableRefStorageType({
+      typeId: paramTypeId,
+      ctx,
+    });
+    if (typeof mutableStorageType !== "number") {
+      throw new Error(
+        `mutable field argument requires addressable storage for ${paramTypeId}`,
+      );
+    }
+    if (inlineStorageType === mutableStorageType) {
+      return lowerValueToMutableRefStorage({
+        value: argValue,
+        typeId: paramTypeId,
+        targetType: mutableStorageType,
+        ctx,
+      });
+    }
+    const storage = allocateMutableRefLocal({
+      typeId: paramTypeId,
+      ctx,
+      fnCtx,
+    });
+    const pointer = loadBindingStorageRef(storage, ctx);
+    if (!pointer) {
+      throw new Error(
+        `mutable field argument requires addressable storage for ${paramTypeId}`,
+      );
+    }
+    writebacks.push(
+      compileFieldAssignment({
+        targetExpr: mutablePlaceExpr,
+        value: loadBindingValue(storage, ctx, fnCtx),
+        valueTypeId: paramTypeId,
+        ctx,
+        fnCtx,
+        compileExpr,
+      }),
+    );
+    return ctx.mod.block(
+      null,
+      [
+        storeLocalValue({
+          binding: storage,
+          value: argValue,
+          ctx,
+          fnCtx,
+        }),
+        pointer,
+      ],
+      storage.storageType,
+    );
+  }
   if (addressableValue) {
     return addressableValue;
   }
@@ -1455,6 +1530,41 @@ const lowerCallArgumentForAbi = ({
       return pointer;
     }
     if (abiKind === "mutable_ref") {
+      if (existing.kind === "projected-field-ref") {
+        const storage = allocateMutableRefLocal({
+          typeId: paramTypeId,
+          ctx,
+          fnCtx,
+        });
+        const storagePointer = loadBindingStorageRef(storage, ctx);
+        if (!storagePointer) {
+          throw new Error(
+            `projected mutable argument requires addressable storage (type ${paramTypeId})`,
+          );
+        }
+        writebacks.push(
+          storeProjectedFieldBindingValue({
+            binding: existing,
+            value: loadBindingValue(storage, ctx, fnCtx),
+            valueTypeId: paramTypeId,
+            ctx,
+            fnCtx,
+          }),
+        );
+        return ctx.mod.block(
+          null,
+          [
+            storeLocalValue({
+              binding: storage,
+              value: argValue,
+              ctx,
+              fnCtx,
+            }),
+            storagePointer,
+          ],
+          storage.storageType,
+        );
+      }
       const materialized =
         existing.kind === "projected-element-ref"
           ? materializeProjectedElementBinding({
@@ -1491,7 +1601,7 @@ const lowerCallArgumentForAbi = ({
       const ownedValue = materialized
         ? loadBindingValue(materialized.binding, ctx, fnCtx)
         : argValue;
-      const owned = allocateAddressableLocal({
+      const owned = allocateMutableRefLocal({
         typeId: paramTypeId,
         ctx,
         fnCtx,
@@ -1524,12 +1634,43 @@ const lowerCallArgumentForAbi = ({
     }
   }
   if (abiKind === "mutable_ref") {
-    const exprKind =
-      typeof argExprId === "number"
-        ? (ctx.module.hir.expressions.get(argExprId)?.exprKind ?? "missing")
-        : "none";
+    const exprKind = mutablePlaceExpr?.exprKind ?? "none";
+    if (
+      mutablePlaceExpr &&
+      ["block", "call", "method-call", "object-literal", "tuple"].includes(
+        exprKind,
+      )
+    ) {
+      const temp = allocateMutableRefLocal({
+        typeId: paramTypeId,
+        ctx,
+        fnCtx,
+      });
+      const pointer = loadBindingStorageRef(temp, ctx);
+      if (!pointer) {
+        throw new Error(
+          `mutable ref temporary requires addressable storage for ${paramTypeId}`,
+        );
+      }
+      return ctx.mod.block(
+        null,
+        [
+          storeLocalValue({
+            binding: temp,
+            value: argValue,
+            ctx,
+            fnCtx,
+          }),
+          pointer,
+        ],
+        temp.storageType,
+      );
+    }
+    const location = argExpr
+      ? ` at ${argExpr.span.file}:${argExpr.span.start}`
+      : "";
     throw new Error(
-      `mutable ref call argument requires addressable storage (type ${paramTypeId}, expr ${exprKind})`,
+      `mutable ref call argument requires addressable storage (type ${paramTypeId}, expr ${exprKind})${location}`,
     );
   }
   if (typeof argExprId === "number") {
@@ -1565,6 +1706,34 @@ const lowerCallArgumentForAbi = ({
   );
 };
 
+export const lowerMutablePlaceArgument = ({
+  exprId,
+  value,
+  typeId,
+  writebacks,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  exprId: HirExprId;
+  value: binaryen.ExpressionRef;
+  typeId: TypeId;
+  writebacks: binaryen.ExpressionRef[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): binaryen.ExpressionRef =>
+  lowerCallArgumentForAbi({
+    argExprId: exprId,
+    argValue: value,
+    paramTypeId: typeId,
+    abiKind: "mutable_ref",
+    ctx,
+    fnCtx,
+    compileExpr,
+    writebacks,
+  });
+
 const resolveAddressableIdentifierSymbol = ({
   exprId,
   ctx,
@@ -1598,6 +1767,34 @@ const resolveAddressableIdentifierSymbol = ({
   }
   const inner = ctx.module.hir.expressions.get(expr.args[0]!.expr);
   return inner?.exprKind === "identifier" ? inner.symbol : undefined;
+};
+
+const resolveMutablePlaceExpression = ({
+  exprId,
+  ctx,
+}: {
+  exprId: HirExprId;
+  ctx: CodegenContext;
+}): ReturnType<CodegenContext["module"]["hir"]["expressions"]["get"]> => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (expr?.exprKind !== "call" || expr.args.length !== 1) {
+    return expr;
+  }
+  const callee = ctx.module.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return expr;
+  }
+  const calleeId = ctx.program.symbols.canonicalIdOf(
+    ctx.moduleId,
+    callee.symbol,
+  );
+  if (
+    ctx.program.symbols.getIntrinsicName(calleeId) !== "~" &&
+    ctx.program.symbols.getName(calleeId) !== "~"
+  ) {
+    return expr;
+  }
+  return ctx.module.hir.expressions.get(expr.args[0]!.expr);
 };
 
 const NON_REF_TYPES = new Set<number>([

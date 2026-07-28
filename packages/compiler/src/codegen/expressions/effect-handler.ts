@@ -30,6 +30,7 @@ import {
 } from "../locals.js";
 import {
   getInlineHeapBoxType,
+  getMutableRefStorageType,
   getRequiredExprType,
   wasmHeapFieldTypeFor,
   wasmTypeFor,
@@ -387,7 +388,13 @@ const buildClauseEnv = ({
             mutable: binding.kind === "storage-ref" ? binding.mutable : true,
             storageType:
               binding.kind === "local"
-                ? wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime")
+                ? binding.storageType ===
+                  getMutableRefStorageType({ typeId, ctx })
+                  ? binding.storageType
+                  : wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime")
+                : binding.kind === "storage-ref" ||
+                    binding.kind === "capture"
+                  ? binding.storageType
                 : (getInlineHeapBoxType({
                     typeId,
                     ctx,
@@ -595,7 +602,17 @@ const emitClauseFunction = ({
       ctx,
       mode: "runtime",
     });
-    if (typeof inlineBoxType === "number" && field.storageType === inlineBoxType) {
+    const mutableRefStorage = getMutableRefStorageType({
+      typeId: field.typeId,
+      ctx,
+    });
+    if (
+      (typeof inlineBoxType === "number" &&
+        field.storageType === inlineBoxType) ||
+      (field.mutable &&
+        typeof mutableRefStorage === "number" &&
+        field.storageType === mutableRefStorage)
+    ) {
       fnCtx.bindings.set(field.symbol, {
         kind: "capture",
         envIndex: 1,

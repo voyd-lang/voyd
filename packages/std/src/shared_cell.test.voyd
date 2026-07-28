@@ -1,0 +1,99 @@
+use std::result::types::{ Ok, Err }
+use std::test::assertions::assert
+
+obj SharedCellCounter {
+  value: i32
+}
+
+test "SharedCell reads and mutates values":
+  let cell = SharedCell(SharedCellCounter { value: 2 })
+  let initial = cell.with((value) =>
+    value.value
+  )
+  assert(initial, eq: 2)
+
+  cell.with_mut((~value) =>
+    value.value = 7
+  )
+  assert(cell.with((value) => value.value), eq: 7)
+
+test "SharedCell replaces reference payloads in place":
+  let cell = SharedCell(SharedCellCounter { value: 2 })
+  cell.with_mut((~value) =>
+    value = SharedCellCounter { value: 8 }
+    void
+  )
+  assert(cell.with((value) => value.value), eq: 8)
+
+test "SharedCell allows nested shared access":
+  let cell = SharedCell(SharedCellCounter { value: 3 })
+  let total = cell.with((outer) =>
+    cell.with((inner) =>
+      outer.value + inner.value
+    )
+  )
+  assert(total, eq: 6)
+
+test "SharedCell try methods report overlapping access":
+  let cell = SharedCell(SharedCellCounter { value: 1 })
+  let read_during_write = cell.with_mut((~value) =>
+    value.value = value.value + 1
+    cell.try_with((current) => current.value)
+  )
+  match(read_during_write)
+    Err<SharedCellBorrowError> { error }:
+      match(error)
+        AlreadyMutablyBorrowed:
+          void
+        else:
+          assert(false, eq: true)
+    else:
+      assert(false, eq: true)
+
+  let write_during_read = cell.with((value) =>
+    cell.try_with_mut((~current) =>
+      current.value = value.value + 1
+    )
+  )
+  match(write_during_read)
+    Err<SharedCellBorrowError> { error }:
+      match(error)
+        AlreadySharedBorrowed:
+          void
+        else:
+          assert(false, eq: true)
+    else:
+      assert(false, eq: true)
+
+  let write_during_write = cell.with_mut((~value) =>
+    cell.try_with_mut((~current) =>
+      current.value = 2
+    )
+  )
+  match(write_during_write)
+    Err<SharedCellBorrowError> { error }:
+      match(error)
+        AlreadyMutablyBorrowed:
+          void
+        else:
+          assert(false, eq: true)
+    else:
+      assert(false, eq: true)
+
+test "SharedCell restores state after a callback returns":
+  let cell = SharedCell(SharedCellCounter { value: 4 })
+  match(cell.try_with_mut((~value) =>
+    value.value = 9
+    value.value
+  ))
+    Ok<i32> { value }:
+      assert(value, eq: 9)
+    else:
+      assert(false, eq: true)
+
+
+  match(cell.try_with((value) => value.value))
+    Ok<i32> { value }:
+      assert(value, eq: 9)
+    else:
+      assert(false, eq: true)

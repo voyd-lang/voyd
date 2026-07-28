@@ -29,7 +29,7 @@
     "build": "tsc -p tsconfig.build.json",
     "clean": "rm -rf dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run --config ../../vitest.config.ts --testTimeout 60000 --hookTimeout 60000 src --exclude src/codegen/**",
+    "test": "vitest run --config ../../vitest.config.ts --pool=forks --testTimeout 60000 --hookTimeout 60000 src --exclude src/codegen/**",
     "test:codegen": "vitest run --config ../../vitest.config.ts --testTimeout 60000 --hookTimeout 60000 src/codegen",
     "bench:typing": "vitest bench --config ../../vitest.config.ts src/semantics/typing/__tests__/typing.bench.ts",
     "test:w": "vitest --config ../../vitest.config.ts src",

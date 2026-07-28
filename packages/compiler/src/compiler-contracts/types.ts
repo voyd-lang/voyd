@@ -6,6 +6,7 @@ export const STD_INTRINSIC_TYPE = {
   range: "voyd.std.range",
   string: "voyd.std.string",
   stringSlice: "voyd.std.string-slice",
+  sharedCell: "voyd.std.shared-cell",
   optionalSome: "optional-some",
   optionalNone: "optional-none",
 } as const;
@@ -43,6 +44,11 @@ const stdIntrinsicTypeContractSpecs = [
   },
   {
     id: STD_INTRINSIC_TYPE.stringSlice,
+    providerKinds: NOMINAL_PROVIDER_KINDS,
+    outsideStd: "reject",
+  },
+  {
+    id: STD_INTRINSIC_TYPE.sharedCell,
     providerKinds: NOMINAL_PROVIDER_KINDS,
     outsideStd: "reject",
   },

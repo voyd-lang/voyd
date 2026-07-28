@@ -874,6 +874,10 @@ export const tryScalarizeAggregateInitializer = ({
     recordScalarAggregateDecision("initializer", "bailout.effectful");
     return undefined;
   }
+  if (ctx.module.mutableStorageSymbols.has(symbol)) {
+    recordScalarAggregateDecision("initializer", "bailout.address_taken");
+    return undefined;
+  }
   const structInfo = getStructuralTypeInfo(targetTypeId, ctx);
   if (!structInfo) {
     recordScalarAggregateDecision("initializer", "bailout.no_layout");

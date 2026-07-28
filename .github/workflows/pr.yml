@@ -77,20 +77,21 @@ jobs:
       - name: Run release tooling tests
         run: npm run test:release
       - run: mkdir -p test-timings
-      # Package-local units run separately from portable conformance and integration.
-      - name: Run affected package units
+      # Package-local units run separately from portable conformance, integration,
+      # and the developer-tooling unit shard.
+      - name: Run affected core package units
         env:
           VOYD_USE_SRC: "1"
           VITEST_MAX_WORKERS: "1"
           VOYD_TEST_TIMINGS_DIR: ${{ github.workspace }}/test-timings
-        run: node scripts/testing/run-timed-command.mjs --lane unit --output test-timings/unit-wall.json -- npm run test:unit:affected:ci
-      - name: Enforce unit timing budget
-        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane unit --output test-timings/unit-summary.json
-      - name: Upload unit timings
+        run: node scripts/testing/run-timed-command.mjs --lane unit --output test-timings/unit-core-wall.json -- npm run test:unit:core:affected:ci
+      - name: Enforce core unit timing budget
+        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane unit --output test-timings/unit-core-summary.json
+      - name: Upload core unit timings
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: unit-test-timings
+          name: core-unit-test-timings
           path: test-timings
           retention-days: 30
       # Build-only checks for non-CLI artifacts that are not exercised by package tests.
@@ -104,6 +105,50 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TYPING_BENCH_MAX_REGRESSION_PCT: "15"
         run: node scripts/ci/check-typing-bench-regression.mjs
+
+  tooling-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    env:
+      TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+      TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci --include=optional
+      - name: Prepare timing output
+        run: mkdir -p test-timings
+      - name: Run affected developer-tooling units
+        env:
+          VOYD_USE_SRC: "1"
+          VITEST_MAX_WORKERS: "1"
+          VOYD_TEST_TIMINGS_DIR: ${{ github.workspace }}/test-timings
+        run: node scripts/testing/run-timed-command.mjs --lane unit --output test-timings/unit-tooling-wall.json -- npm run test:unit:tooling:affected:ci
+      - name: Enforce tooling unit timing budget
+        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane unit --output test-timings/unit-tooling-summary.json
+      - name: Upload tooling unit timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: tooling-unit-test-timings
+          path: test-timings
+          retention-days: 30
 
   conformance:
     runs-on: ubuntu-latest

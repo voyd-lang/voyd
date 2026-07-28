@@ -137,15 +137,16 @@ pub fn next_u64(): Random -> U64Bits
 /// Fills a byte buffer with cryptographically secure random bytes.
 /// `len` controls the number of bytes appended to `buf`.
 /// Example:
-/// `let buf = ByteBuffer::new()`
-/// `random::fill_bytes(buf, len: 16)`
+/// `let buf = random::fill_bytes(ByteBuffer::init(), len: 16)`
 /// `buf.len() == 16`
-pub fn fill_bytes(~buf: ByteBuffer, len: i32): Random -> void
+pub fn fill_bytes(buf: ByteBuffer, len: i32): Random -> ByteBuffer
   if len <= 0:
-    return void
+    return buf
 
   let payload = Random::fill_bytes(len)
   let decoded = decode_random_byte_payload(payload)
+  let ~out = ByteBuffer::with_capacity(buf.len() + len)
+  out.extend(buf.as_bytes())
 
   var index = 0
   while index < len:
@@ -154,17 +155,18 @@ pub fn fill_bytes(~buf: ByteBuffer, len: i32): Random -> void
         Some<MsgPack> { value }:
           match(msgpack::unpack_i32(value))
             Ok<i32> { value }:
-              buf.push(mod_euclid_i32_or_zero(value, 256))
+              out.push(mod_euclid_i32_or_zero(value, 256))
             Err<MsgPackError>:
               let next = to_i32_wrapping(next_i64())
-              buf.push(mod_euclid_i32_or_zero(next, 256))
+              out.push(mod_euclid_i32_or_zero(next, 256))
         None:
           let next = to_i32_wrapping(next_i64())
-          buf.push(mod_euclid_i32_or_zero(next, 256))
+          out.push(mod_euclid_i32_or_zero(next, 256))
     else:
       let next = to_i32_wrapping(next_i64())
-      buf.push(mod_euclid_i32_or_zero(next, 256))
+      out.push(mod_euclid_i32_or_zero(next, 256))
     index = index + 1
+  out
 
 fn decode_random_byte_payload(payload: MsgPack): () -> Array<MsgPack>
   match(msgpack::unpack_array(payload))

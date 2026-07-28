@@ -1,0 +1,34 @@
+use std::shared_cell::SharedCell
+use std::test::assertions::assert
+
+val SharedCellValueCounter {
+  value: i32
+}
+
+type SharedCellStructuralCounter = {
+  value: i32
+}
+
+test "SharedCell mutates primitive payloads in place":
+  let cell = SharedCell(1)
+  cell.with_mut((~value) =>
+    value = 2
+  )
+  assert(cell.with((value) => value + 0), eq: 2)
+
+test "SharedCell mutates value-semantic payloads in place":
+  let cell = SharedCell(SharedCellValueCounter { value: 5 })
+  cell.with_mut((~value) =>
+    value.value = value.value + 3
+  )
+  let actual = cell.with((value) => value.value)
+  assert(actual, eq: 8)
+
+test "SharedCell supports structural payloads":
+  let initial: SharedCellStructuralCounter = { value: 4 }
+  let cell = SharedCell(initial)
+  cell.with_mut((~value) =>
+    value.value = value.value + 2
+  )
+  let actual = cell.with((value) => value.value)
+  assert(actual, eq: 6)

@@ -153,4 +153,30 @@ describe("integration: runtime trap diagnostics", () => {
       byteLength: 24,
     });
   });
+
+  it("reports a deterministic SharedCell read-during-write conflict", async () => {
+    const error = await expectRuntimeTrap(
+      compiled.run({ entryName: "shared_cell_read_during_write_trap" }),
+    );
+
+    expect(error.voyd.panic).toEqual({
+      status: "available",
+      message:
+        "SharedCell borrow conflict: value is already mutably borrowed",
+      byteLength: 61,
+    });
+  });
+
+  it("reports a deterministic SharedCell write-during-read conflict", async () => {
+    const error = await expectRuntimeTrap(
+      compiled.run({ entryName: "shared_cell_write_during_read_trap" }),
+    );
+
+    expect(error.voyd.panic).toEqual({
+      status: "available",
+      message:
+        "SharedCell borrow conflict: value is already shared borrowed",
+      byteLength: 60,
+    });
+  });
 });

@@ -259,7 +259,11 @@ const lowerFunctionTypeExpr = (
     const type = param.optional
       ? wrapInOptionalTypeExpr({ inner: lowered, ctx, scope })
       : lowered;
-    return { type, optional: param.optional ? true : undefined };
+    return {
+      type,
+      optional: param.optional ? true : undefined,
+      bindingKind: param.bindingKind,
+    };
   });
 
   const returnType = lowerTypeExpr(functionType.returnType, ctx, scope);

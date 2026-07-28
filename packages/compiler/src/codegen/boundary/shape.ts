@@ -538,7 +538,6 @@ const emitArray = ({
   const info = requiredStructuralInfo(arrayTypeId, ctx);
   const storage = requiredField(info, "storage", arrayTypeId);
   requiredField(info, "count", arrayTypeId);
-  const owners = requiredField(info, "owners", arrayTypeId);
   const elementTypeId = arrayElementType(arrayTypeId, ctx);
   const storageTypes = getFixedArrayWasmTypes(storage.typeId, ctx);
   const storageValue = arrayNewFixed(
@@ -559,9 +558,7 @@ const emitArray = ({
         ? storageValue
         : field.name === "count"
           ? ctx.mod.i32.const(elements.length)
-          : field.name === "owners"
-            ? freshArrayOwners(owners.typeId, ctx, fnCtx)
-            : undefined;
+          : undefined;
     if (value === undefined) {
       throw new Error(`unexpected Array shape runtime field ${field.name}`);
     }
@@ -576,28 +573,6 @@ const emitArray = ({
     }
   });
   return initStructuralValue({ structInfo: info, fieldValues, ctx });
-};
-
-const freshArrayOwners = (
-  typeId: TypeId,
-  ctx: CodegenContext,
-  fnCtx: FunctionContext,
-): binaryen.ExpressionRef => {
-  const info = requiredStructuralInfo(typeId, ctx);
-  const refs = requiredField(info, "refs", typeId);
-  return initStructuralValue({
-    structInfo: info,
-    fieldValues: [
-      lowerFieldValue({
-        info,
-        field: refs,
-        value: ctx.mod.i32.const(1),
-        ctx,
-        fnCtx,
-      }),
-    ],
-    ctx,
-  });
 };
 
 const lowerFieldValue = ({

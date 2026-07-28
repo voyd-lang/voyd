@@ -802,7 +802,7 @@ export const compileMatchExpr = (
   for (let index = expr.arms.length - 1; index >= 0; index -= 1) {
     const arm = expr.arms[index]!;
     if (arm.pattern.kind === "wildcard") {
-      const armValue = normalizeOutResultStorageForwarding({
+      const armValue = lowerToOutResultStorageIfNeeded({
         compiled: withRestoredBindings(fnCtx, () =>
           compileExpr({
             exprId: arm.value,
@@ -813,6 +813,11 @@ export const compileMatchExpr = (
             outResultStorageRef,
           }),
         ),
+        exprId: arm.value,
+        resultTypeId,
+        outResultStorageRef,
+        ctx,
+        fnCtx,
       });
       if (armValue.usedOutResultStorageRef) {
         chain = {

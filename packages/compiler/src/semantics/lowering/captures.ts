@@ -109,6 +109,7 @@ export const analyzeLambdaCaptures = ({
       const record = symbolTable.getSymbol(expr.symbol);
       const metadata = (record.metadata ?? {}) as {
         mutable?: boolean;
+        bindingKind?: string;
       };
       if (!isCapturableValue(expr.symbol)) {
         return;
@@ -125,7 +126,9 @@ export const analyzeLambdaCaptures = ({
       captures.push({
         symbol: expr.symbol,
         span: expr.span,
-        mutable: Boolean(metadata.mutable),
+        mutable:
+          Boolean(metadata.mutable) ||
+          metadata.bindingKind === "mutable-ref",
       });
     };
 

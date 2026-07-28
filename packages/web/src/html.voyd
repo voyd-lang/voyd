@@ -134,14 +134,16 @@ pub fn append_hydration<Model>(document: String, hydrate: Hydration<Model>) -> S
   insert_hydration(document, render_hydration<Model>(hydrate))
 
 fn html_response_impl(response: Response, value: MsgPack) -> Response
-  response
-    .with(headers: response.headers.set(header: "content-type".as_slice(), value: "text/html; charset=utf-8".as_slice()))
+  with_html_content_type(response)
     .text(render_impl(value))
 
 fn hydrated_html_response_impl<Model>(response: Response, { view: MsgPack, hydrate: Hydration<Model> }) -> Response
+  with_html_content_type(response)
+    .text(hydrated_document_impl<Model>(view: view, hydrate: hydrate))
+
+fn with_html_content_type(response: Response): () -> Response
   response
     .with(headers: response.headers.set(header: "content-type".as_slice(), value: "text/html; charset=utf-8".as_slice()))
-    .text(hydrated_document_impl<Model>(view: view, hydrate: hydrate))
 
 pub fn hydrate<Model>({ target: StringSlice, entry: StringSlice, model: Model }) -> Hydration<Model>
   Hydration<Model> {

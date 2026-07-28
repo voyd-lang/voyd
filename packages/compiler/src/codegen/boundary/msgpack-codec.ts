@@ -759,7 +759,6 @@ const unpackArray = ({
   const info = requiredStructuralInfo(schema.typeId, ctx);
   const storageField = requiredField(info.fieldMap, "storage", schema.typeId);
   const countField = requiredField(info.fieldMap, "count", schema.typeId);
-  const ownersField = requiredField(info.fieldMap, "owners", schema.typeId);
   const sourceArray = allocateTempLocal(msgpack.unpackArray.resultType, fnCtx);
   const sourceStorage = allocateTempLocal(msgpack.arrayRawStorage.resultType, fnCtx);
   const count = allocateTempLocal(binaryen.i32, fnCtx);
@@ -786,15 +785,6 @@ const unpackArray = ({
         value: countRef(),
         typeId: countField.typeId,
         targetType: countField.heapWasmType,
-        ctx,
-        fnCtx,
-      });
-    }
-    if (field.name === "owners") {
-      return lowerValueForHeapField({
-        value: freshArrayOwners({ typeId: ownersField.typeId, ctx, fnCtx }),
-        typeId: ownersField.typeId,
-        targetType: ownersField.heapWasmType,
         ctx,
         fnCtx,
       });
@@ -1566,29 +1556,6 @@ const lowerFieldValueForInit = ({
         ctx,
         fnCtx,
       });
-
-const freshArrayOwners = ({
-  typeId,
-  ctx,
-}: {
-  typeId: TypeId;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): binaryen.ExpressionRef => {
-  const info = requiredStructuralInfo(typeId, ctx);
-  const refs = requiredField(info.fieldMap, "refs", typeId);
-  return initStructuralValue({
-    structInfo: info,
-    fieldValues: [
-      coerceExprToWasmType({
-        expr: ctx.mod.i32.const(1),
-        targetType: refs.heapWasmType,
-        ctx,
-      }),
-    ],
-    ctx,
-  });
-};
 
 const requiredStructuralInfo = (typeId: TypeId, ctx: CodegenContext) => {
   const info = getStructuralTypeInfo(typeId, ctx);

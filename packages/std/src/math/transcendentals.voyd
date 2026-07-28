@@ -294,9 +294,9 @@ fn multiply_invpio2_by_mantissa(mantissa: i64) -> FixedArray<i32>
   let shifted_mid = shift_ru_i64(mantissa, limb_bits_i32())
   let mid = wrap_i64(bit_and_i64(shifted_mid, limb_mask_i64()))
   let high = wrap_i64(shift_ru_i64(mantissa, limb_bits_i32() * 2))
-  digits = accumulate_product_limb(digits, invpio2, low, 0)
-  digits = accumulate_product_limb(digits, invpio2, mid, 1)
-  digits = accumulate_product_limb(digits, invpio2, high, 2)
+  accumulate_product_limb(~digits, invpio2, low, 0)
+  accumulate_product_limb(~digits, invpio2, mid, 1)
+  accumulate_product_limb(~digits, invpio2, high, 2)
   digits
 
 fn zeroed_i32_digits(count: i32) -> FixedArray<i32>
@@ -308,33 +308,29 @@ fn zeroed_i32_digits(count: i32) -> FixedArray<i32>
   digits
 
 fn accumulate_product_limb(
-  product: FixedArray<i32>,
+  ~product: FixedArray<i32>,
   invpio2: FixedArray<i32>,
   factor: i32,
   offset: i32
-) -> FixedArray<i32>
-  if factor == 0:
-    return product
-  var out = product
+) -> void
   var carry = to_i64(0)
   var index = 0
   while index < invpio2_digit_count():
     let target = index + offset
     let value =
-      to_i64(fixed_i32_get(out, target))
+      to_i64(fixed_i32_get(product, target))
         + (to_i64(fixed_i32_get(invpio2, index)) * to_i64(factor))
         + carry
-    out = fixed_i32_set(out, target, wrap_i64(bit_and_i64(value, limb_mask_i64())))
+    fixed_i32_set(product, target, wrap_i64(bit_and_i64(value, limb_mask_i64())))
     carry = shift_ru_i64(value, limb_bits_i32())
     index = index + 1
 
   var target = invpio2_digit_count() + offset
   while carry > to_i64(0):
-    let value = to_i64(fixed_i32_get(out, target)) + carry
-    out = fixed_i32_set(out, target, wrap_i64(bit_and_i64(value, limb_mask_i64())))
+    let value = to_i64(fixed_i32_get(product, target)) + carry
+    fixed_i32_set(product, target, wrap_i64(bit_and_i64(value, limb_mask_i64())))
     carry = shift_ru_i64(value, limb_bits_i32())
     target = target + 1
-  out
 
 fn extract_bits_i32(product: FixedArray<i32>, start_bit: i32, count: i32) -> i32
   var out = 0

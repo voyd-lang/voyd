@@ -5,7 +5,11 @@ import { parseLambdaSignature, type ParsedLambdaSignature } from "./lambda.js";
 export type SurfaceFunctionType = {
   form: Form;
   signature: ParsedLambdaSignature;
-  parameters: readonly { typeExpr: Expr; optional: boolean }[];
+  parameters: readonly {
+    typeExpr: Expr;
+    optional: boolean;
+    bindingKind?: "mutable-ref";
+  }[];
   returnType: Expr;
   effectType?: Expr;
 };
@@ -63,18 +67,28 @@ export const parseSurfaceFunctionType = (form: Form): SurfaceFunctionType => {
     );
   }
   const parameters = signature.parameters.map((parameter) => {
-    const normalized =
-      isForm(parameter) && (parameter.calls(":") || parameter.calls("?:"))
-        ? normalizeNestedFunctionTypeAnnotation(parameter)
+    const mutable =
+      isForm(parameter) && parameter.calls("~")
+        ? parameter.at(1)
         : undefined;
-    const typeExpr = normalized?.typeExpr ?? parameter;
+    const rawParameter = mutable ?? parameter;
+    const normalized =
+      isForm(rawParameter) &&
+      (rawParameter.calls(":") || rawParameter.calls("?:"))
+        ? normalizeNestedFunctionTypeAnnotation(rawParameter)
+        : undefined;
+    const typeExpr = normalized?.typeExpr ?? rawParameter;
     if (!typeExpr) {
       throw new ParserSyntaxError(
         "function type parameter missing type",
         parameter.location,
       );
     }
-    return { typeExpr, optional: normalized?.optional === true };
+    return {
+      typeExpr,
+      optional: normalized?.optional === true,
+      ...(mutable ? { bindingKind: "mutable-ref" as const } : {}),
+    };
   });
   const parsed = {
     form,

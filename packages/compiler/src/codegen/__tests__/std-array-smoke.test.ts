@@ -67,7 +67,7 @@ describe("std::array compile smoke", () => {
     await expect(host.run<number>("while_non_unit_step_sum")).resolves.toBe(4);
     await expect(host.run<number>("while_unknown_bound_sum")).resolves.toBe(3);
     await expect(host.run<number>("while_mutates_array_sum")).resolves.toBe(3);
-    await expect(host.run<number>("while_alias_mutation_sum")).resolves.toBe(3);
+    await expect(host.run<number>("while_helper_mutation_sum")).resolves.toBe(3);
     await expect(host.run<number>("while_stale_length_sum")).resolves.toBe(3);
   });
 
@@ -82,7 +82,7 @@ describe("std::array compile smoke", () => {
       host.run<number>("while_increment_before_at_trap"),
     ).rejects.toThrow();
     await expect(
-      host.run<number>("while_captured_call_mutation_trap"),
+      host.run<number>("while_helper_call_mutation_trap"),
     ).rejects.toThrow();
   });
 
@@ -129,10 +129,10 @@ describe("std::array compile smoke", () => {
       "while_non_unit_step_sum",
       "while_unknown_bound_sum",
       "while_mutates_array_sum",
-      "while_alias_mutation_sum",
+      "while_helper_mutation_sum",
       "while_stale_length_sum",
       "while_increment_before_at_trap",
-      "while_captured_call_mutation_trap",
+      "while_helper_call_mutation_trap",
     ]) {
       const functionWat = watForExport(wat, exportName);
       expect(functionWat).toContain("array.get");

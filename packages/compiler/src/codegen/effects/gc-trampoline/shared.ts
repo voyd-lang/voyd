@@ -1,7 +1,11 @@
 import binaryen from "binaryen";
 import type { CodegenContext, FunctionContext } from "../../context.js";
 import type { ContinuationEnvField } from "../effect-lowering.js";
-import { getRequiredBinding, loadBindingValue } from "../../locals.js";
+import {
+  getRequiredBinding,
+  loadBindingStorageRef,
+  loadBindingValue,
+} from "../../locals.js";
 import { coerceValueToType, lowerValueForHeapField } from "../../structural.js";
 import { getFunctionRefType } from "../../types.js";
 import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
@@ -67,6 +71,13 @@ export const captureContinuationEnvFieldValue = ({
             })();
       const actualTypeId =
         typeof binding.typeId === "number" ? binding.typeId : field.typeId;
+      if (field.storageRef) {
+        const storageRef = loadBindingStorageRef(binding, ctx);
+        if (!storageRef) {
+          throw new Error("continuation capture requires addressable storage");
+        }
+        return storageRef;
+      }
       const inlineValue = loadBindingValue(binding, ctx, fnCtx);
       const coercedValue =
         actualTypeId === field.typeId

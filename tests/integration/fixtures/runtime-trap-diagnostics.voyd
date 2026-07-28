@@ -1,4 +1,9 @@
 use std::error::panic
+use std::shared_cell::SharedCell
+
+obj SharedCellTrapValue {
+  value: i32
+}
 
 @effect(id: "com.example.trap")
 eff TrapFx
@@ -19,3 +24,20 @@ pub fn panic_trap() -> void
 
 pub fn panic_slice_trap() -> void
   panic("slice panic with context".as_slice())
+
+pub fn shared_cell_read_during_write_trap() -> void
+  let cell = SharedCell(SharedCellTrapValue { value: 1 })
+  cell.with_mut((~value) =>
+    value.value = 2
+    cell.with((current) => current.value)
+  )
+  void
+
+pub fn shared_cell_write_during_read_trap() -> void
+  let cell = SharedCell(SharedCellTrapValue { value: 1 })
+  cell.with((value) =>
+    cell.with_mut((~current) =>
+      current.value = value.value + 1
+    )
+  )
+  void

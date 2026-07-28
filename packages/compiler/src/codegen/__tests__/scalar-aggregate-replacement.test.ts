@@ -439,9 +439,8 @@ fn id(box: Box) -> Box
 
 pub fn main() -> i32
   let ~a = Box { value: 1 }
-  let ~b = id(a)
-  b.value = 2
-  a.value
+  let b = id(a)
+  b.value + a.value
 `);
 
     expect(runMain(optimizedCodegen.module)()).toBe(2);
@@ -501,9 +500,8 @@ fn wrap(box: Box) -> Box
 
 pub fn main() -> i32
   let ~a = Box { value: 1 }
-  let ~b = wrap(a)
-  b.value = 2
-  a.value
+  let b = wrap(a)
+  b.value + a.value
 `);
 
     expect(runMain(optimizedCodegen.module)()).toBe(2);
@@ -555,7 +553,7 @@ obj Box {
   value: i32
 }
 
-fn mutate_alias(box: Box) -> i32
+fn mutate_alias(~box: Box) -> i32
   let ~alias = box
   alias.value = 7
   box.value
@@ -577,7 +575,7 @@ obj Box {
   value: i32
 }
 
-fn mutate_alias(box: Box) -> i32
+fn mutate_alias(~box: Box) -> i32
   let ~alias = box
   alias.value = 20
   box.value
@@ -797,7 +795,7 @@ pub val Vec2 {
   y: i32
 }
 
-fn mutate_alias(box: Box) -> i32
+fn mutate_alias(~box: Box) -> i32
   let ~alias = box
   alias.value = 20
   box.value
@@ -867,7 +865,7 @@ obj Box {
   value: i32
 }
 
-fn mutate_alias_return(box: Box) -> Box
+fn mutate_alias_return(~box: Box) -> Box
   let ~alias = box
   alias.value = 7
   let value = 2
@@ -917,6 +915,27 @@ pub fn main() -> i32
     expect(runMain(optimizedCodegen.module)()).toBe(11);
     expect(optimizedCodegen.module.emitText()).not.toMatch(
       /\(struct\.new \$voyd_struct_shape_/,
+    );
+  });
+
+  it("keeps non-borrowed mutable primitive locals in Wasm locals", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+pub fn main() -> i32
+  var index = 0
+  var total = 0
+  while index < 10:
+    total = total + index
+    index = index + 1
+  total
+`);
+
+    expect(runMain(optimizedCodegen.module)()).toBe(45);
+    expect(runMain(baselineCodegen.module)()).toBe(45);
+    expect(optimizedCodegen.module.emitText()).not.toContain(
+      "struct.new_default",
+    );
+    expect(baselineCodegen.module.emitText()).not.toContain(
+      "struct.new_default",
     );
   });
 

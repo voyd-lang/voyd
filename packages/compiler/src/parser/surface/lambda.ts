@@ -205,6 +205,10 @@ const parseParameters = (
     return { params: [expr], typeParameters };
   }
 
+  if (expr.calls("~")) {
+    return { params: [expr], typeParameters };
+  }
+
   if (withoutGenerics.length === 0) {
     return { params: [], typeParameters };
   }

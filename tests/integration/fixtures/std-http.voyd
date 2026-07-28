@@ -8,6 +8,7 @@ use std::http::server::{ HttpServer, PendingRequest, ServeTaskPolicy, Server, Se
 use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
+use std::shared_cell::{ SharedCell }
 use std::task::self as task
 use std::time::self as time
 use std::time::{ Duration, Time }
@@ -108,7 +109,7 @@ pub fn serve_streaming_head_from_env(): (HttpServer, task::TaskRuntime, env::Env
   if port <= 0:
     return -10
 
-  let ~probe = StreamProbe { complete: false }
+  let probe = SharedCell(StreamProbe { complete: false })
   let result = server::serve_each(
     config: ServerConfig::init(
       port: port,
@@ -124,15 +125,19 @@ pub fn serve_streaming_head_from_env(): (HttpServer, task::TaskRuntime, env::Env
     Err<HostError> { error }:
       -error.code
 
-fn stream_head_response(request: IncomingRequest, ~probe: StreamProbe): (server::ResponseStream, open) -> Response
+fn stream_head_response(request: IncomingRequest, probe: SharedCell<StreamProbe>): (server::ResponseStream, open) -> Response
   if request.path.equals("/status".as_slice().to_string()):
-    let status = if probe.complete then: "complete".as_slice() else: "pending".as_slice()
+    let status = probe.with((value) =>
+      if value.complete then: "complete".as_slice() else: "pending".as_slice()
+    )
     return Response::ok().text(status)
   let response = server::stream(
     Response::ok().text("x".as_slice().to_string().repeat(150000)),
     body: write_streaming_body
   )
-  probe.complete = true
+  probe.with_mut((~value) =>
+    value.complete = true
+  )
   response
 
 fn write_streaming_body(): server::ResponseWriter -> void

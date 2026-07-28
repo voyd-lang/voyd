@@ -158,11 +158,10 @@ impl Vec3
     self.y = vec.y
     self.z = vec.z
 
-  fn '+='(~self, other: Vec3) -> Vec3
+  fn '+='(~self, other: Vec3) -> void
     self.x = self.x + other.x
     self.y = self.y + other.y
     self.z = self.z + other.z
-    self
 
   fn '+'(self, other: Vec3) -> Vec3
     Vec3 { x: self.x + other.x, y: self.y + other.y, z: self.z + other.z }
@@ -284,8 +283,13 @@ impl Interval
   fn surrounds(self, x: f64) -> bool
     self.min < x and x < self.max
 
+val ScatterResult {
+  attenuation: Color,
+  scattered: Ray
+}
+
 trait Material
-  fn scatter(self, { r_in: Ray, rec: HitRecord, ~attenuation: Color, ~scattered: Ray }) -> bool
+  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> ScatterResult
 
 obj Lambertian {
   albedo: Color
@@ -295,14 +299,15 @@ impl Material for Lambertian
   fn init(albedo?: Color) -> Lambertian
     Lambertian { albedo: albedo ?? Color(0.0, 0.0, 0.0) }
 
-  fn scatter(self, { r_in: Ray, rec: HitRecord, ~attenuation: Color, ~scattered: Ray }) -> bool
+  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> ScatterResult
     var scatter_direction = rec.normal + Vec3::random_unit_vector()
     if scatter_direction.near_zero():
       scatter_direction = rec.normal
 
-    scattered.apply(Ray { origin: rec.p, direction: scatter_direction })
-    attenuation.apply(self.albedo)
-    true
+    ScatterResult {
+      attenuation: self.albedo,
+      scattered: Ray { origin: rec.p, direction: scatter_direction }
+    }
 
 obj Metal {
   albedo: Color,
@@ -313,12 +318,13 @@ impl Material for Metal
   fn init(albedo?: Color, fuzz?: f64) -> Metal
     Metal { albedo: albedo ?? Color(0.0, 0.0, 0.0), fuzz: fuzz ?? 0.0 }
 
-  fn scatter(self, { r_in: Ray, rec: HitRecord, ~attenuation: Color, ~scattered: Ray }) -> bool
+  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> ScatterResult
     var reflected = r_in.direction.reflect(rec.normal)
     reflected = reflected.unit_vector() + (Vec3::random_unit_vector() * self.fuzz)
-    scattered.apply(Ray { origin: rec.p, direction: reflected })
-    attenuation.apply(self.albedo)
-    true
+    ScatterResult {
+      attenuation: self.albedo,
+      scattered: Ray { origin: rec.p, direction: reflected }
+    }
 
 obj Dielectric {
   refraction_index: f64
@@ -328,8 +334,7 @@ impl Material for Dielectric
   fn init(refraction_index?: f64) -> Dielectric
     Dielectric { refraction_index: refraction_index ?? 0.0 }
 
-  fn scatter(self, { r_in: Ray, rec: HitRecord, ~attenuation: Color, ~scattered: Ray }) -> bool
-    attenuation.apply(Vec3(1.0, 1.0, 1.0))
+  fn scatter(self, { r_in: Ray, rec: HitRecord }) -> ScatterResult
     let ri = if rec.front_face
       then: 1.0 / self.refraction_index
       else: self.refraction_index
@@ -341,8 +346,10 @@ impl Material for Dielectric
     let direction = if cannot_refract or self.reflectance(cos_theta) > RenderCtx::rand_f64()
       then: unit_direction.reflect(rec.normal)
       else: unit_direction.refract(rec.normal, ri)
-    scattered.apply(Ray { origin: rec.p, direction })
-    true
+    ScatterResult {
+      attenuation: Vec3(1.0, 1.0, 1.0),
+      scattered: Ray { origin: rec.p, direction }
+    }
 
   fn reflectance(self, cosine: f64) -> f64
     var r0 = (1.0 - self.refraction_index) / (1.0 + self.refraction_index)
@@ -367,13 +374,12 @@ impl HitRecord
       front_face: false
     }
 
-  fn apply(~self, rec: HitRecord) -> HitRecord
+  fn apply(~self, rec: HitRecord) -> void
     self.p = rec.p
     self.normal = rec.normal
     self.mat = rec.mat
     self.t = rec.t
     self.front_face = rec.front_face
-    self
 
   fn set_face_normal(~self, ray: Ray, outward_normal: Vec3) -> void
     self.front_face = ray.direction.dot(outward_normal) < 0.0
@@ -391,17 +397,18 @@ impl HittableList
   fn init() -> HittableList
     HittableList { objects: Array<Hittable>() }
 
-  fn add(~self, object: Hittable) -> HittableList
+  fn add(~self, object: Hittable) -> void
     self.objects.push(object)
-    self
 
 impl Hittable for HittableList
   fn hit(self, { ray: Ray, ray_t: Interval, ~rec: HitRecord }) -> bool
     var ~temp_rec = HitRecord()
     var hit_anything = false
     var closest_so_far = ray_t.max
+    var index = 0
 
-    for object in self.objects:
+    while index < self.objects.len():
+      let object = self.objects.at(index)
       if object.hit({
         ray,
         ray_t: Interval(ray_t.min, closest_so_far),
@@ -410,6 +417,7 @@ impl Hittable for HittableList
         hit_anything = true
         closest_so_far = temp_rec.t
         rec.apply(temp_rec)
+      index = index + 1
 
     hit_anything
 
@@ -589,11 +597,8 @@ fn ray_color(ray: Ray, depth: i32, world: Hittable) -> Color
   let ~rec = HitRecord()
 
   if world.hit({ rec, ray_t: Interval(0.001, INFINITY), ray }):
-    let ~scattered = Ray::empty()
-    let ~attenuation = Vec3::empty()
-    if rec.mat.scatter({ r_in: ray, rec, attenuation, scattered }):
-      return attenuation * ray_color(scattered, depth - 1, world)
-    return Color(0.0, 0.0, 0.0)
+    let scatter = rec.mat.scatter({ r_in: ray, rec })
+    return scatter.attenuation * ray_color(scatter.scattered, depth - 1, world)
 
   let unit_direction = ray.direction.unit_vector()
   let a = 0.5 * (unit_direction.y + 1.0)

@@ -24,6 +24,7 @@ import {
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import {
   allocateAddressableLocal,
+  allocateMutableRefLocal,
   allocateTempLocal,
   storeLocalValue,
 } from "../../locals.js";
@@ -529,7 +530,14 @@ export const ensureContinuationFunction = ({
     const typeId = substitution
       ? ctx.program.types.substitute(valueType, substitution)
       : valueType;
-    const seeded = allocateAddressableLocal({ typeId, ctx, fnCtx });
+    const storageRef = groupSites.some((site) =>
+      site.envFields.some(
+        (field) => field.symbol === symbol && field.storageRef === true,
+      ),
+    );
+    const seeded = storageRef
+      ? allocateMutableRefLocal({ typeId, ctx, fnCtx })
+      : allocateAddressableLocal({ typeId, ctx, fnCtx });
     fnCtx.bindings.set(symbol, { ...seeded, kind: "local", typeId });
   });
 
@@ -800,6 +808,10 @@ export const ensureContinuationFunction = ({
       const binding = fnCtx.bindings.get(field.symbol);
       if (!binding || binding.kind !== "local") {
         throw new Error("missing local binding for env restore");
+      }
+      if (field.storageRef) {
+        initOps.push(ctx.mod.local.set(binding.index, storedValue));
+        return;
       }
       initOps.push(storeLocalValue({ binding, value, ctx, fnCtx }));
     });

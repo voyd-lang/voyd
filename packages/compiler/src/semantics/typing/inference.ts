@@ -3,6 +3,7 @@ import { ensureTypeMatches } from "./type-system.js";
 import type { FunctionSignature, TypingContext, TypingState } from "./types.js";
 import {
   formatFunctionInstanceKey,
+  typeGenericFunctionBody,
   typeExpression,
   validateGenericFunctionBody,
 } from "./expressions.js";
@@ -11,6 +12,7 @@ import { mergeBranchType } from "./expressions/branching.js";
 import { composeEffectRows, ensureEffectCompatibility, getExprEffectRow } from "./effects.js";
 import { typeDefaultParameterValues } from "./default-parameters.js";
 import { emitDiagnostic, normalizeSpan } from "../../diagnostics/index.js";
+import { cloneNestedMap } from "./call-resolution.js";
 
 export const runInferencePass = (
   ctx: TypingContext,
@@ -41,8 +43,129 @@ export const runStrictTypeCheck = (
   ctx.table.clearExprTypes();
   ctx.resolvedExprTypes.clear();
   typeAllModuleLets(ctx, state, { collectChanges: false });
+  indexGenericFunctionCalls(ctx, state);
   typeAllFunctions(ctx, state, { collectChanges: false });
   validateGenericConstructorBodies(ctx, state);
+};
+
+const indexGenericFunctionCalls = (
+  ctx: TypingContext,
+  state: TypingState,
+): void => {
+  const indexingCtx = createBorrowIndexingContext(ctx);
+  for (const fn of ctx.hir.items.values()) {
+    if (fn.kind !== "function") {
+      continue;
+    }
+    const signature = ctx.functions.getSignature(fn.symbol);
+    if (!signature?.typeParams || signature.typeParams.length === 0) {
+      continue;
+    }
+    const indexedSignature = indexingCtx.functions.getSignature(fn.symbol);
+    if (!indexedSignature?.typeParams) {
+      continue;
+    }
+    const substitution = new Map(
+      indexedSignature.typeParams.map((param) => [
+        param.typeParam,
+        param.typeRef,
+      ]),
+    );
+    const diagnosticCheckpoint = ctx.diagnostics.checkpoint();
+    const previousMode = state.mode;
+    const previousIndexingGenericCalls = state.indexingGenericCalls;
+    const previousConstraintCache = state.currentFunctionConstraintCache;
+    const previousExprEffects = ctx.effects.snapshotExprEffects();
+    state.mode = "relaxed";
+    state.indexingGenericCalls = true;
+    try {
+      typeGenericFunctionBody({
+        symbol: fn.symbol,
+        signature: indexedSignature,
+        substitution,
+        retainInstance: false,
+        retainResolvedTypes: true,
+        ctx: indexingCtx,
+        state,
+      });
+    } catch {
+      // Generic bodies are diagnosed when instantiated. This pass only keeps
+      // call resolutions that are valid under their symbolic parameters.
+    } finally {
+      ctx.effects.restoreExprEffects(previousExprEffects);
+      state.mode = previousMode;
+      state.indexingGenericCalls = previousIndexingGenericCalls;
+      state.currentFunctionConstraintCache = previousConstraintCache;
+      ctx.diagnostics.restore(diagnosticCheckpoint);
+    }
+  }
+  mergeNestedMaps(ctx.borrowCallTargets, indexingCtx.callResolution.targets);
+  mergeNestedMaps(
+    ctx.borrowCallArgumentPlans,
+    indexingCtx.callResolution.argumentPlans,
+  );
+  indexingCtx.resolvedExprTypes.forEach((type, expr) =>
+    ctx.borrowResolvedExprTypes.set(expr, type),
+  );
+};
+
+const createBorrowIndexingContext = (
+  ctx: TypingContext,
+): TypingContext => ({
+  ...ctx,
+  typeCheckBudget: { ...ctx.typeCheckBudget },
+  importsByLocal: new Map(ctx.importsByLocal),
+  importAliasesByModule: cloneNestedMap(ctx.importAliasesByModule),
+  table: ctx.table.clone(),
+  resolvedExprTypes: new Map(),
+  valueTypes: new Map(ctx.valueTypes),
+  activeValueTypeComputations: new Set(),
+  tailResumptions: new Map(),
+  callResolution: {
+    targets: new Map(),
+    argumentPlans: new Map(),
+    typeArguments: new Map(),
+    instanceKeys: new Map(),
+    traitDispatches: new Set(),
+  },
+  borrowCallTargets: new Map(),
+  borrowCallArgumentPlans: new Map(),
+  borrowResolvedExprTypes: new Map(),
+  functions: ctx.functions.clone(),
+  objects: ctx.objects.clone(),
+  traits: ctx.traits.clone(),
+  typeParameterConstraints: new Map(ctx.typeParameterConstraints),
+  typeAliases: ctx.typeAliases.clone(),
+  primitives: {
+    ...ctx.primitives,
+    cache: new Map(ctx.primitives.cache),
+  },
+  intrinsicTypes: new Map(ctx.intrinsicTypes),
+  memberMetadata: new Map(ctx.memberMetadata),
+  traitImplsByNominal: new Map(
+    Array.from(ctx.traitImplsByNominal, ([nominal, impls]) => [
+      nominal,
+      [...impls],
+    ]),
+  ),
+  traitImplsByTrait: new Map(
+    Array.from(ctx.traitImplsByTrait, ([trait, impls]) => [
+      trait,
+      [...impls],
+    ]),
+  ),
+  traitMethodImpls: new Map(ctx.traitMethodImpls),
+});
+
+const mergeNestedMaps = <Key, InnerKey, Value>(
+  target: Map<Key, Map<InnerKey, Value>>,
+  source: ReadonlyMap<Key, ReadonlyMap<InnerKey, Value>>,
+): void => {
+  source.forEach((values, key) => {
+    const merged = target.get(key) ?? new Map();
+    values.forEach((value, innerKey) => merged.set(innerKey, value));
+    target.set(key, merged);
+  });
 };
 
 const validateGenericConstructorBodies = (

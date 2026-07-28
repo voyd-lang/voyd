@@ -51,6 +51,19 @@ impl Bytes
   api fn to_array(self) -> Array<Byte>
     self.storage.copied()
 
+  /// Returns an independently owned copy of these bytes.
+  api fn copied(self) -> Bytes
+    let ~copy = Array<Byte>::with_capacity(self.len())
+    var index = 0
+    while index < self.len():
+      match(self.get(index))
+        Some<Byte> { value }:
+          copy.push(value)
+        None:
+          void
+      index = index + 1
+    bytes_from_array(copy)
+
 /// A mutable, growable byte buffer.
 pub obj ByteBuffer {
   storage: Array<Byte>

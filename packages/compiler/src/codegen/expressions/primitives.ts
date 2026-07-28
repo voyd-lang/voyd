@@ -126,6 +126,15 @@ export const compileIdentifierExpr = (
   expectedResultTypeId?: TypeId,
   preserveStorageRefs = false,
 ): CompiledExpression => {
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const expressionTypeId = getRequiredExprType(
+    expr.id,
+    ctx,
+    typeInstanceId,
+  );
+  if (wasmTypeFor(expressionTypeId, ctx) === binaryen.none) {
+    return { expr: ctx.mod.nop(), usedReturnCall: false };
+  }
   const binding = fnCtx.bindings.get(expr.symbol);
   if (binding) {
     if (binding.kind === "projected-element-ref") {
@@ -219,7 +228,6 @@ export const compileIdentifierExpr = (
     };
   }
 
-  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const functionTypeId =
     expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
   if (ctx.program.types.getTypeDesc(functionTypeId).kind === "function") {

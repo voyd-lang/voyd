@@ -454,7 +454,11 @@ const compileLetStatement = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): binaryen.ExpressionRef => {
-  if (stmt.pattern.kind === "identifier" && !stmt.mutable) {
+  if (
+    stmt.pattern.kind === "identifier" &&
+    !stmt.mutable &&
+    !ctx.module.mutableStorageSymbols.has(stmt.pattern.symbol)
+  ) {
     if (fnCtx.nonBorrowableProjectedSymbols?.has(stmt.pattern.symbol)) {
       return compileDefaultLetStatement(stmt, ctx, fnCtx, compileExpr);
     }
