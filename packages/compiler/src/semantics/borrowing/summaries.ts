@@ -30,6 +30,7 @@ import {
   borrowTypeConditionId,
   mergeCallableBorrowContracts,
   normalizeCallableBorrowTransfers,
+  projectionPathCovers,
   projectionsOverlap,
   translateProjectionPath,
 } from "./model.js";
@@ -41,7 +42,10 @@ import {
   type ResolvedBorrowCall,
 } from "./call-resolution.js";
 import { expressionCanFallThrough } from "./control-flow.js";
-import { typeCanCarryReference } from "./reference-bearing.js";
+import {
+  typeCanCarryReference,
+  typeIsAllocationBacked,
+} from "./reference-bearing.js";
 
 type ParameterOrigin = {
   parameter: number;
@@ -79,6 +83,7 @@ type SummaryContext = {
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   borrowIndexMode: "symbolic";
   accessed: MutableFlow;
+  written: MutableFlow;
   retained: MutableFlow;
   externalRetained: MutableFlow;
   borrowedRetained: MutableFlow;
@@ -109,9 +114,40 @@ const expressionCanCarryReference = (
   return typeCanCarryReference(type, ctx.typing);
 };
 
-const projectionPathKey = (
-  projections: readonly PlaceProjection[],
-): string =>
+const accessProjectionsFor = (
+  exprId: HirExprId,
+  projection: PlaceProjection,
+  ctx: SummaryContext,
+  needsDereference = false,
+): readonly PlaceProjection[] => {
+  const type = expressionTypeFor(exprId, ctx);
+  const expression = ctx.hir.expressions.get(exprId);
+  const transparentMutableAccess =
+    expression?.exprKind === "call" &&
+    (() => {
+      const callee = ctx.hir.expressions.get(expression.callee);
+      if (callee?.exprKind !== "identifier") {
+        return false;
+      }
+      const record = ctx.symbolTable.getSymbol(callee.symbol);
+      const metadata = (record.metadata ?? {}) as {
+        intrinsic?: boolean;
+        intrinsicName?: string;
+      };
+      return (
+        metadata.intrinsic === true &&
+        (metadata.intrinsicName ?? record.name) === "~"
+      );
+    })();
+  return typeof type === "number" &&
+    typeIsAllocationBacked(type, ctx.typing) &&
+    !transparentMutableAccess &&
+    (expression?.exprKind !== "identifier" || needsDereference)
+    ? [{ kind: "dereference" }, projection]
+    : [projection];
+};
+
+const projectionPathKey = (projections: readonly PlaceProjection[]): string =>
   projections
     .map((projection) => {
       switch (projection.kind) {
@@ -123,6 +159,8 @@ const projectionPathKey = (
           return `i${projection.stable ? 1 : 0}:${projection.constant ?? ""}`;
         case "discriminant":
           return "d";
+        case "dereference":
+          return "r";
         case "identity":
           return "y";
       }
@@ -174,6 +212,10 @@ const retainOrigin = (origin: ParameterOrigin, ctx: SummaryContext): void => {
 
 const recordAccess = (flow: Flow, ctx: SummaryContext): void => {
   flow.forEach((origin) => addOrigin(ctx.accessed, origin));
+};
+
+const recordWrite = (flow: Flow, ctx: SummaryContext): void => {
+  flow.forEach((origin) => addOrigin(ctx.written, origin));
 };
 
 const retainOriginExternally = (
@@ -381,6 +423,26 @@ const projectFlow = (
   return result;
 };
 
+const projectAccessFlow = (
+  flow: Flow,
+  exprId: HirExprId,
+  projection: PlaceProjection,
+  ctx: SummaryContext,
+): MutableFlow =>
+  unionFlows(
+    ...Array.from(flow.values()).map((origin) =>
+      projectFlow(
+        new Map([[originKey(origin), origin]]),
+        accessProjectionsFor(
+          exprId,
+          projection,
+          ctx,
+          origin.sourceProjections.length > 0,
+        ),
+      ),
+    ),
+  );
+
 const storeFlowAt = (flow: Flow, projection: PlaceProjection): MutableFlow =>
   unionFlows(
     new Map(
@@ -509,7 +571,7 @@ const mutablePatternSymbols = (pattern: HirPattern): SymbolId[] => {
 
 const placeOfExpression = (
   exprId: HirExprId,
-  ctx: Pick<SummaryContext, "hir" | "symbolTable">,
+  ctx: SummaryContext,
 ): { root: SymbolId; projections: readonly PlaceProjection[] } | undefined => {
   const expr = ctx.hir.expressions.get(exprId);
   if (expr?.exprKind === "identifier") {
@@ -517,14 +579,15 @@ const placeOfExpression = (
   }
   if (expr?.exprKind === "field-access") {
     const target = placeOfExpression(expr.target, ctx);
+    const projection = Number.isInteger(Number(expr.field))
+      ? ({ kind: "tuple", index: Number(expr.field) } as const)
+      : ({ kind: "field", name: expr.field } as const);
     return target
       ? {
           root: target.root,
           projections: [
             ...target.projections,
-            Number.isInteger(Number(expr.field))
-              ? { kind: "tuple", index: Number(expr.field) }
-              : { kind: "field", name: expr.field },
+            ...accessProjectionsFor(expr.target, projection, ctx),
           ],
         }
       : undefined;
@@ -562,7 +625,20 @@ const physicalFlowOfExpression = (
   if (place) {
     const known = ctx.placeEnvs.get(env)?.get(place.root);
     if (known) {
-      return projectFlow(known, place.projections);
+      const rootType = ctx.typing.valueTypes.get(place.root);
+      const allocationBackedRoot =
+        typeof rootType === "number" &&
+        typeIsAllocationBacked(rootType, ctx.typing);
+      return unionFlows(
+        ...Array.from(known.values()).map((origin) =>
+          projectFlow(
+            new Map([[originKey(origin), origin]]),
+            allocationBackedRoot && origin.sourceProjections.length > 0
+              ? [{ kind: "dereference" }, ...place.projections]
+              : place.projections,
+          ),
+        ),
+      );
     }
     const parameter = ctx.parameterOrigins.get(place.root);
     if (parameter !== undefined) {
@@ -770,6 +846,11 @@ const applyCallContract = ({
             ),
           );
     if (parameter.access !== "owned") {
+      const actual = argExprs[index];
+      const accessedFlow =
+        typeof actual === "number"
+          ? unionFlows(flow, physicalFlowOfExpression(actual, env, ctx))
+          : flow;
       const accessCondition = parameter.accessIfResultTypeDiffers;
       const comparedFlow = accessCondition
         ? projectFlow(
@@ -785,8 +866,23 @@ const applyCallContract = ({
               sourceProjections: comparedOrigins[0]!.sourceProjections,
             }
           : undefined;
-      (parameter.accessPaths ?? [[]]).forEach((path) =>
-        projectFlow(flow, path).forEach((origin) =>
+      const legacyPaths = parameter.accessPaths ?? [[]];
+      const readPaths =
+        parameter.readPaths ??
+        (parameter.writePaths
+          ? []
+          : parameter.access === "shared"
+            ? legacyPaths
+            : []);
+      const writePaths =
+        parameter.writePaths ??
+        (parameter.readPaths
+          ? []
+          : parameter.access === "mutable"
+            ? legacyPaths
+            : []);
+      readPaths.forEach((path) =>
+        projectFlow(accessedFlow, path).forEach((origin) =>
           addOrigin(ctx.accessed, {
             ...origin,
             ...(accessCondition && comparator
@@ -801,6 +897,11 @@ const applyCallContract = ({
                 }
               : {}),
           }),
+        ),
+      );
+      writePaths.forEach((path) =>
+        projectFlow(accessedFlow, path).forEach((origin) =>
+          addOrigin(ctx.written, origin),
         ),
       );
     }
@@ -1025,10 +1126,11 @@ const callableOriginsOf = (
     return [];
   }
   if (expr.exprKind === "field-access") {
+    const projection = Number.isInteger(Number(expr.field))
+      ? ({ kind: "tuple", index: Number(expr.field) } as const)
+      : ({ kind: "field", name: expr.field } as const);
     return callableOriginsOf(expr.target, ctx, seen, [
-      Number.isInteger(Number(expr.field))
-        ? { kind: "tuple", index: Number(expr.field) }
-        : { kind: "field", name: expr.field },
+      ...accessProjectionsFor(expr.target, projection, ctx),
       ...requested,
     ]);
   }
@@ -1437,11 +1539,15 @@ const evaluateExpression = (
     }
     case "field-access": {
       const target = evaluateExpression(expr.target, env, ctx);
-      const projected = projectFlow(target, [
-        Number.isInteger(Number(expr.field))
-          ? { kind: "tuple", index: Number(expr.field) }
-          : { kind: "field", name: expr.field },
-      ]);
+      const projection = Number.isInteger(Number(expr.field))
+        ? ({ kind: "tuple", index: Number(expr.field) } as const)
+        : ({ kind: "field", name: expr.field } as const);
+      const projected = projectAccessFlow(
+        target,
+        expr.target,
+        projection,
+        ctx,
+      );
       recordAccess(projected, ctx);
       return expressionCanCarryReference(expr.id, ctx)
         ? projected
@@ -1562,6 +1668,7 @@ const evaluateExpression = (
         }
         const placeEnv = ctx.placeEnvs.get(env);
         const physicalTarget = placeEnv?.get(targetExpr.symbol) ?? emptyFlow();
+        recordWrite(physicalTarget, ctx);
         if (ctx.parameterOrigins.has(targetExpr.symbol)) {
           const targetParameters = new Set(
             Array.from(physicalTarget.values(), (origin) => origin.parameter),
@@ -1596,6 +1703,7 @@ const evaluateExpression = (
         return emptyFlow();
       }
       const physicalTarget = physicalFlowOfExpression(expr.target, env, ctx);
+      recordWrite(physicalTarget, ctx);
       const rootFlow = env.get(targetPlace.root) ?? emptyFlow();
       const storedValue = storeFlowAtPath(value, targetPlace.projections);
       env.set(targetPlace.root, unionFlows(rootFlow, storedValue));
@@ -1732,7 +1840,7 @@ const parameterContract = (
         })();
   return {
     access,
-    ...(access === "shared" ? { accessPaths: [] } : {}),
+    ...(access !== "owned" ? { accessPaths: [] } : {}),
     retained: false,
     returned: false,
   };
@@ -1756,9 +1864,13 @@ const initialFunctionContract = ({
     moduleId,
   });
   return {
-    parameters: functionItem.parameters.map((_parameter, index) =>
-      parameterContract(functionItem, index, typing),
-    ),
+    parameters: functionItem.parameters.map((_parameter, index) => ({
+      ...parameterContract(functionItem, index, typing),
+      ...(index === 0 &&
+      hasRuntimeCheckedReceiverWrites({ functionItem, typing, symbolTable })
+        ? { runtimeCheckedWrites: true as const }
+        : {}),
+    })),
     maySuspend: false,
     ...(scopedCallbacks.length > 0 ? { scopedCallbacks } : {}),
   };
@@ -1821,6 +1933,25 @@ const declaredScopedCallbacks = ({
       access: method.includes("mut") ? "mutable" : "shared",
     },
   ];
+};
+
+const hasRuntimeCheckedReceiverWrites = ({
+  functionItem,
+  typing,
+  symbolTable,
+}: {
+  functionItem: HirFunction;
+  typing: TypingResult;
+  symbolTable: SymbolTable;
+}): boolean => {
+  const owner = typing.memberMetadata.get(functionItem.symbol)?.owner;
+  if (typeof owner !== "number") {
+    return false;
+  }
+  const metadata = symbolTable.getSymbol(owner).metadata as
+    | { intrinsicType?: unknown }
+    | undefined;
+  return metadata?.intrinsicType === STD_INTRINSIC_TYPE.sharedCell;
 };
 
 const originsForParameter = (
@@ -1991,13 +2122,7 @@ const minimizeProjectionPaths = (
     (path, index) =>
       !paths.some(
         (candidate, candidateIndex) =>
-          candidateIndex !== index &&
-          candidate.length <= path.length &&
-          candidate.every(
-            (projection, projectionIndex) =>
-              JSON.stringify(projection) ===
-              JSON.stringify(path[projectionIndex]),
-          ),
+          candidateIndex !== index && projectionPathCovers(candidate, path),
       ),
   );
 
@@ -2059,13 +2184,14 @@ const summarizeFunction = ({
 }): CallableBorrowContract => {
   incrementCompilerPerfCounter("borrowing.summary.evaluations");
   const functionMetadata = symbolTable.getSymbol(functionItem.symbol)
-    .metadata as
-    | { intrinsic?: boolean; intrinsicName?: string }
-    | undefined;
+    .metadata as { intrinsic?: boolean; intrinsicName?: string } | undefined;
   const preservesInternalBorrowedReturn =
     functionMetadata?.intrinsic === true &&
     functionMetadata.intrinsicName === "__shared_cell_value";
+  const runtimeCheckedReceiverWrites =
+    hasRuntimeCheckedReceiverWrites({ functionItem, typing, symbolTable });
   const accessed = emptyFlow();
+  const written = emptyFlow();
   const retained = emptyFlow();
   const externalRetained = emptyFlow();
   const borrowedRetained = emptyFlow();
@@ -2114,6 +2240,7 @@ const summarizeFunction = ({
     contracts: baseContracts,
     borrowIndexMode: "symbolic",
     accessed,
+    written,
     retained,
     externalRetained,
     borrowedRetained,
@@ -2197,8 +2324,14 @@ const summarizeFunction = ({
       const access =
         baseContracts.get(functionItem.symbol)?.parameters[index]?.access ??
         parameterContract(functionItem, index, typing).access;
-      const accessPaths = minimizeProjectionPaths(
+      const readPaths = minimizeProjectionPaths(
         pathsForParameter(accessed, index),
+      );
+      const writePaths = minimizeProjectionPaths(
+        pathsForParameter(written, index),
+      );
+      const accessPaths = minimizeProjectionPaths(
+        mergePaths(readPaths, writePaths),
       );
       const accessCondition = accessConditionForParameter(
         accessed,
@@ -2208,7 +2341,12 @@ const summarizeFunction = ({
       const returnedTypeMatchingOrigins = returnedContractOrigins.typeMatching;
       return {
         access,
-        ...(access === "shared" ? { accessPaths } : {}),
+        ...(access !== "owned" ? { accessPaths } : {}),
+        ...(readPaths.length > 0 ? { readPaths } : {}),
+        ...(writePaths.length > 0 ? { writePaths } : {}),
+        ...(index === 0 && runtimeCheckedReceiverWrites
+          ? { runtimeCheckedWrites: true as const }
+          : {}),
         ...(accessCondition
           ? { accessIfResultTypeDiffers: accessCondition }
           : {}),
@@ -2250,6 +2388,9 @@ const contractEqualityKey = (contract: CallableBorrowContract): string => {
     contract.parameters.map((parameter) => [
       parameter.access,
       parameter.accessPaths ?? [],
+      parameter.readPaths ?? [],
+      parameter.writePaths ?? [],
+      parameter.runtimeCheckedWrites ?? false,
       parameter.retained,
       parameter.returned,
       parameter.returnedTypeMatchingOrigins ?? [],
@@ -2376,6 +2517,8 @@ const normalizeCallableBorrowContract = (
     parameters: contract.parameters.map((parameter, index) => {
       const {
         accessPaths: _accessPaths,
+        readPaths: _readPaths,
+        writePaths: _writePaths,
         invalidatedPaths: _invalidatedPaths,
         externalRetainedPaths: _externalRetainedPaths,
         borrowedRetainedPaths: _borrowedRetainedPaths,
@@ -2390,6 +2533,18 @@ const normalizeCallableBorrowContract = (
           ? undefined
           : minimizeProjectionPaths(
               projectionPathsOrBroad(parameter.accessPaths) ?? [],
+            );
+      const readPaths =
+        parameter.readPaths === undefined
+          ? undefined
+          : minimizeProjectionPaths(
+              projectionPathsOrBroad(parameter.readPaths) ?? [],
+            );
+      const writePaths =
+        parameter.writePaths === undefined
+          ? undefined
+          : minimizeProjectionPaths(
+              projectionPathsOrBroad(parameter.writePaths) ?? [],
             );
       const retainedPaths = projectionPathsOrBroad(parameter.retainedPaths);
       const externalRetainedPaths = projectionPathsOrBroad(
@@ -2431,6 +2586,8 @@ const normalizeCallableBorrowContract = (
       return {
         ...baseParameter,
         ...(accessPaths !== undefined ? { accessPaths } : {}),
+        ...(readPaths !== undefined ? { readPaths } : {}),
+        ...(writePaths !== undefined ? { writePaths } : {}),
         ...(retainedPaths ? { retainedPaths } : {}),
         ...(externalRetainedPaths ? { externalRetainedPaths } : {}),
         ...(borrowedRetainedPaths ? { borrowedRetainedPaths } : {}),
@@ -2492,6 +2649,8 @@ const resetDerivedContractFacts = (
   parameters: contract.parameters.map((parameter) => {
     const {
       accessPaths: _accessPaths,
+      readPaths: _readPaths,
+      writePaths: _writePaths,
       retainedPaths: _retainedPaths,
       externalRetainedPaths: _externalRetainedPaths,
       borrowedRetainedPaths: _borrowedRetainedPaths,
@@ -2505,7 +2664,7 @@ const resetDerivedContractFacts = (
     } = parameter;
     return {
       ...base,
-      ...(parameter.access === "shared" ? { accessPaths: [] } : {}),
+      ...(parameter.access !== "owned" ? { accessPaths: [] } : {}),
       retained: false,
       returned: false,
     };
@@ -2548,17 +2707,13 @@ const withReturnedSharedOrigins = ({
   }),
 });
 
-const mustContractSignature = (
-  contract: CallableBorrowContract,
-): string =>
-  JSON.stringify(
-    {
-      invalidatedPaths: contract.parameters.map(
-        (parameter) => parameter.invalidatedPaths ?? [],
-      ),
-      transfers: contract.transfers ?? [],
-    },
-  );
+const mustContractSignature = (contract: CallableBorrowContract): string =>
+  JSON.stringify({
+    invalidatedPaths: contract.parameters.map(
+      (parameter) => parameter.invalidatedPaths ?? [],
+    ),
+    transfers: contract.transfers ?? [],
+  });
 
 const mustContractSignatures = (
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>,
@@ -2677,9 +2832,7 @@ export const computeCallableBorrowContracts = ({
     seeds: readonly HirFunction[] = orderedSummaryFunctions,
   ): void => {
     const worklist = [...seeds];
-    const queued = new Set(
-      seeds.map((functionItem) => functionItem.symbol),
-    );
+    const queued = new Set(seeds.map((functionItem) => functionItem.symbol));
     let cursor = 0;
     while (cursor < worklist.length) {
       const functionItem = worklist[cursor++]!;
@@ -2723,7 +2876,8 @@ export const computeCallableBorrowContracts = ({
     const nextMustSignatures = mustContractSignatures(contracts);
     const changedMustSymbols = new Set(
       Array.from(nextMustSignatures.keys()).filter(
-        (symbol) => nextMustSignatures.get(symbol) !== mustSignatures.get(symbol),
+        (symbol) =>
+          nextMustSignatures.get(symbol) !== mustSignatures.get(symbol),
       ),
     );
     if (changedMustSymbols.size === 0) {
@@ -2766,12 +2920,11 @@ export const computeCallableBorrowContracts = ({
     const functionItem = sharedWorklist[sharedCursor++]!;
     sharedQueued.delete(functionItem.symbol);
     const previous = contracts.get(functionItem.symbol)!;
-    const cachedCandidate =
-      Array.from(
-        localSummaryDependencies.get(functionItem.symbol) ?? [],
-      ).some((dependency) => sharedContractsChanged.has(dependency))
-        ? undefined
-        : finalCandidates.get(functionItem.symbol);
+    const cachedCandidate = Array.from(
+      localSummaryDependencies.get(functionItem.symbol) ?? [],
+    ).some((dependency) => sharedContractsChanged.has(dependency))
+      ? undefined
+      : finalCandidates.get(functionItem.symbol);
     const candidate =
       cachedCandidate ??
       summarizeFunction({
@@ -3036,6 +3189,7 @@ export const summarizeLambdaBorrowing = ({
   decls: DeclTable;
 }): CallableBorrowContract => {
   const accessed = emptyFlow();
+  const written = emptyFlow();
   const retained = emptyFlow();
   const externalRetained = emptyFlow();
   const borrowedRetained = emptyFlow();
@@ -3073,6 +3227,7 @@ export const summarizeLambdaBorrowing = ({
     contracts,
     borrowIndexMode: "symbolic",
     accessed,
+    written,
     retained,
     externalRetained,
     borrowedRetained,
@@ -3134,6 +3289,12 @@ export const summarizeLambdaBorrowing = ({
       }));
       const access =
         parameter.pattern.bindingKind === "mutable-ref" ? "mutable" : "shared";
+      const readPaths = minimizeProjectionPaths(
+        pathsForParameter(accessed, index),
+      );
+      const writePaths = minimizeProjectionPaths(
+        pathsForParameter(written, index),
+      );
       const accessCondition = accessConditionForParameter(
         accessed,
         returned,
@@ -3142,13 +3303,9 @@ export const summarizeLambdaBorrowing = ({
       const returnedTypeMatchingOrigins = returnedContractOrigins.typeMatching;
       return {
         access,
-        ...(access === "shared"
-          ? {
-              accessPaths: minimizeProjectionPaths(
-                pathsForParameter(accessed, index),
-              ),
-            }
-          : {}),
+        accessPaths: minimizeProjectionPaths(mergePaths(readPaths, writePaths)),
+        ...(readPaths.length > 0 ? { readPaths } : {}),
+        ...(writePaths.length > 0 ? { writePaths } : {}),
         ...(accessCondition
           ? { accessIfResultTypeDiffers: accessCondition }
           : {}),

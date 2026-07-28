@@ -8,6 +8,7 @@ export type PlaceProjection =
   | { kind: "tuple"; index: number }
   | { kind: "index"; constant?: number; stable: boolean }
   | { kind: "discriminant" }
+  | { kind: "dereference" }
   | { kind: "identity" };
 
 export const projectionsOverlap = (
@@ -18,6 +19,8 @@ export const projectionsOverlap = (
     if (
       left.kind === "discriminant" ||
       right.kind === "discriminant" ||
+      left.kind === "dereference" ||
+      right.kind === "dereference" ||
       left.kind === "identity" ||
       right.kind === "identity"
     ) {
@@ -27,6 +30,7 @@ export const projectionsOverlap = (
   }
   if (
     (left.kind === "discriminant" && right.kind === "discriminant") ||
+    (left.kind === "dereference" && right.kind === "dereference") ||
     (left.kind === "identity" && right.kind === "identity")
   ) {
     return true;
@@ -48,6 +52,51 @@ export const projectionsOverlap = (
     left.constant !== right.constant
   );
 };
+
+export const projectionPathsOverlap = (
+  left: readonly PlaceProjection[],
+  right: readonly PlaceProjection[],
+): boolean => {
+  const leftDereference = left.findLastIndex(
+    (projection) => projection.kind === "dereference",
+  );
+  const rightDereference = right.findLastIndex(
+    (projection) => projection.kind === "dereference",
+  );
+  if (leftDereference >= 0 && rightDereference >= 0) {
+    return projectionPathsOverlap(
+      left.slice(leftDereference + 1),
+      right.slice(rightDereference + 1),
+    );
+  }
+  const length = Math.min(left.length, right.length);
+  for (let index = 0; index < length; index += 1) {
+    if (!projectionsOverlap(left[index]!, right[index]!)) {
+      return false;
+    }
+  }
+  const longer = left.length > right.length ? left : right;
+  return (
+    left.length === right.length ||
+    !longer
+      .slice(length)
+      .some((projection) => projection.kind === "dereference")
+  );
+};
+
+export const projectionPathCovers = (
+  prefix: readonly PlaceProjection[],
+  path: readonly PlaceProjection[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every(
+    (projection, index) =>
+      JSON.stringify(projection) === JSON.stringify(path[index]),
+  ) &&
+  (prefix.length === path.length ||
+    !path
+      .slice(prefix.length)
+      .some((projection) => projection.kind === "dereference"));
 
 export const translateProjectionPath = ({
   result,
@@ -72,6 +121,9 @@ export const translateProjectionPath = ({
 export type CallableParameterBorrowContract = {
   access: BorrowAccessMode;
   accessPaths?: readonly (readonly PlaceProjection[])[];
+  readPaths?: readonly (readonly PlaceProjection[])[];
+  writePaths?: readonly (readonly PlaceProjection[])[];
+  runtimeCheckedWrites?: true;
   retained: boolean;
   returned: boolean;
   retainedPaths?: readonly (readonly PlaceProjection[])[];
@@ -220,6 +272,13 @@ export const mergeCallableBorrowContracts = (
       return {
         access,
         ...mergeProjectionPaths(parameters, "accessPaths"),
+        ...mergeProjectionPaths(parameters, "readPaths"),
+        ...mergeProjectionPaths(parameters, "writePaths"),
+        ...(parameters.every(
+          (parameter) => parameter.runtimeCheckedWrites === true,
+        )
+          ? { runtimeCheckedWrites: true as const }
+          : {}),
         retained: parameters.some((parameter) => parameter.retained),
         returned: parameters.some((parameter) => parameter.returned),
         ...mergeReturnedTypeMatchingOrigins(parameters, index),
@@ -413,6 +472,8 @@ const mergeProjectionPaths = (
   parameters: readonly CallableParameterBorrowContract[],
   key:
     | "accessPaths"
+    | "readPaths"
+    | "writePaths"
     | "retainedPaths"
     | "externalRetainedPaths"
     | "borrowedRetainedPaths"
@@ -422,6 +483,18 @@ const mergeProjectionPaths = (
     new Map(
       parameters
         .flatMap((parameter) => {
+          if (key === "readPaths" || key === "writePaths") {
+            const hasTypedFootprints =
+              parameter.readPaths !== undefined ||
+              parameter.writePaths !== undefined;
+            if (hasTypedFootprints) {
+              return parameter[key] ?? [];
+            }
+            const legacyAccess = key === "readPaths" ? "shared" : "mutable";
+            return parameter.access === legacyAccess
+              ? (parameter.accessPaths ?? [[]])
+              : [];
+          }
           const active =
             key === "accessPaths"
               ? parameter.access !== "owned"

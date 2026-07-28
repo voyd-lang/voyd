@@ -23,7 +23,8 @@ import type {
 } from "./model.js";
 import {
   mergeCallableBorrowContracts,
-  projectionsOverlap,
+  projectionPathCovers,
+  projectionPathsOverlap,
   translateProjectionPath,
 } from "./model.js";
 import type { BorrowingDependency } from "./dependency.js";
@@ -33,7 +34,10 @@ import {
 } from "./call-resolution.js";
 import { summarizeLambdaBorrowing } from "./summaries.js";
 import { expressionCanFallThrough } from "./control-flow.js";
-import { typeCanCarryReference } from "./reference-bearing.js";
+import {
+  typeCanCarryReference,
+  typeIsAllocationBacked,
+} from "./reference-bearing.js";
 
 type BranchPath = ReadonlyMap<number, number>;
 
@@ -216,6 +220,59 @@ const appendProjection = (
   root: place.root,
   projections: [...place.projections, projection],
 });
+
+const accessProjectionsFor = (
+  exprId: HirExprId,
+  projection: PlaceProjection,
+  ctx: BodyContext,
+): readonly PlaceProjection[] => {
+  const type = typeOfExpr(exprId, ctx);
+  const expression = ctx.hir.expressions.get(exprId);
+  const transparentMutableAccess =
+    expression?.exprKind === "call" &&
+    intrinsicNameForCall(expression, ctx) === "~";
+  return typeof type === "number" &&
+    typeIsAllocationBacked(type, ctx.typing) &&
+    !transparentMutableAccess &&
+    expression?.exprKind !== "identifier"
+    ? [{ kind: "dereference" }, projection]
+    : [projection];
+};
+
+const appendAccessProjections = (
+  place: BorrowPlace,
+  projections: readonly PlaceProjection[],
+): BorrowPlace =>
+  projections.reduce((result, projection) => {
+    if (
+      projection.kind === "dereference" &&
+      result.projections.at(-1)?.kind === "dereference"
+    ) {
+      return result;
+    }
+    return appendProjection(result, projection);
+  }, place);
+
+const appendExpressionAccess = (
+  place: BorrowPlace,
+  exprId: HirExprId,
+  projections: readonly PlaceProjection[],
+  ctx: BodyContext,
+): BorrowPlace => {
+  const type = typeOfExpr(exprId, ctx);
+  const expression = ctx.hir.expressions.get(exprId);
+  const needsDereference =
+    expression?.exprKind === "identifier" &&
+    typeof type === "number" &&
+    typeIsAllocationBacked(type, ctx.typing) &&
+    place.projections.length > 0;
+  return appendAccessProjections(
+    place,
+    needsDereference
+      ? [{ kind: "dereference" }, ...projections]
+      : projections,
+  );
+};
 
 const baseSymbolOf = (
   exprId: HirExprId,
@@ -445,9 +502,14 @@ const placesOfExpression = (
     const projection = Number.isInteger(Number(expr.field))
       ? ({ kind: "tuple", index: Number(expr.field) } as const)
       : ({ kind: "field", name: expr.field } as const);
+    const accessProjections = accessProjectionsFor(
+      expr.target,
+      projection,
+      ctx,
+    );
     const returned = projectedReturnedPlaces(
       expr.target,
-      [projection],
+      accessProjections,
       ctx,
       seen,
     );
@@ -467,7 +529,7 @@ const placesOfExpression = (
     return hasConservativeReturnedAggregate(expr.target, ctx)
       ? targets
       : targets.map((target) =>
-          appendProjection(target, projection),
+          appendExpressionAccess(target, expr.target, accessProjections, ctx),
         );
   }
   if (expr.exprKind === "tuple" || expr.exprKind === "object-literal") {
@@ -517,14 +579,19 @@ const placesOfExpression = (
     expr.args[0]
   ) {
     const targets = placesOfExpression(expr.target, ctx, seen);
+    const projections = accessProjectionsFor(
+      expr.target,
+      {
+        kind: "index",
+        constant: numericConstant(expr.args[0]!.expr, ctx),
+        stable: hasStableIndexedStorage(expr.target, ctx),
+      },
+      ctx,
+    );
     return hasConservativeReturnedAggregate(expr.target, ctx)
       ? targets
       : targets.map((target) =>
-          appendProjection(target, {
-            kind: "index",
-            constant: numericConstant(expr.args[0]!.expr, ctx),
-            stable: hasStableIndexedStorage(expr.target, ctx),
-          }),
+          appendExpressionAccess(target, expr.target, projections, ctx),
         );
   }
   if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
@@ -905,19 +972,9 @@ function projectedReturnedPlaces(
   }
   if (expr.exprKind === "effect-handler") {
     return uniquePlaces([
-      ...projectedReturnedPlaces(
-        expr.body,
-        requested,
-        ctx,
-        new Set(seen),
-      ),
+      ...projectedReturnedPlaces(expr.body, requested, ctx, new Set(seen)),
       ...expr.handlers.flatMap((handler) =>
-        projectedReturnedPlaces(
-          handler.body,
-          requested,
-          ctx,
-          new Set(seen),
-        ),
+        projectedReturnedPlaces(handler.body, requested, ctx, new Set(seen)),
       ),
     ]);
   }
@@ -989,7 +1046,7 @@ function placesAtProjection(
     return [];
   }
   return placesOfExpression(exprId, ctx, new Set(seen)).map((place) =>
-    requested.reduce(appendProjection, place),
+    appendExpressionAccess(place, exprId, requested, ctx),
   );
 }
 
@@ -1042,7 +1099,13 @@ const recordCallUses = (
     recordExpressionUse(
       actual,
       event,
-      resolved.contract?.parameters[index]?.accessPaths,
+      (() => {
+        const parameter = resolved.contract?.parameters[index];
+        return parameter?.readPaths !== undefined ||
+          parameter?.writePaths !== undefined
+          ? [...(parameter.readPaths ?? []), ...(parameter.writePaths ?? [])]
+          : parameter?.accessPaths;
+      })(),
       ctx,
     );
   });
@@ -1232,13 +1295,10 @@ function expressionOriginMetadata(
     const projection = Number.isInteger(Number(expr.field))
       ? ({ kind: "tuple", index: Number(expr.field) } as const)
       : ({ kind: "field", name: expr.field } as const);
-    return expressionOriginMetadata(
-      expr.target,
-      place,
-      ctx,
-      new Set(seen),
-      [projection, ...requested],
-    );
+    return expressionOriginMetadata(expr.target, place, ctx, new Set(seen), [
+      projection,
+      ...requested,
+    ]);
   }
   if (expr?.exprKind === "tuple") {
     if (requested.length > 0) {
@@ -1300,13 +1360,7 @@ function expressionOriginMetadata(
   }
   if (expr?.exprKind === "match") {
     const metadata = expr.arms.map((arm) =>
-      expressionOriginMetadata(
-        arm.value,
-        place,
-        ctx,
-        new Set(seen),
-        requested,
-      ),
+      expressionOriginMetadata(arm.value, place, ctx, new Set(seen), requested),
     );
     return {
       access: metadata.some((origin) => origin.access === "mutable")
@@ -1317,13 +1371,7 @@ function expressionOriginMetadata(
   }
   if (expr?.exprKind === "effect-handler") {
     const metadata = [
-      expressionOriginMetadata(
-        expr.body,
-        place,
-        ctx,
-        new Set(seen),
-        requested,
-      ),
+      expressionOriginMetadata(expr.body, place, ctx, new Set(seen), requested),
       ...expr.handlers.map((handler) =>
         expressionOriginMetadata(
           handler.body,
@@ -1388,13 +1436,7 @@ function expressionOriginMetadata(
     };
   }
   if (expr?.exprKind === "block" && typeof expr.value === "number") {
-    return expressionOriginMetadata(
-      expr.value,
-      place,
-      ctx,
-      seen,
-      requested,
-    );
+    return expressionOriginMetadata(expr.value, place, ctx, seen, requested);
   }
   if (expr?.exprKind === "if" || expr?.exprKind === "cond") {
     const metadata = [
@@ -1517,12 +1559,7 @@ const aggregateOriginsOfExpression = (
                 ) === true
                   ? ("storage-borrow" as const)
                   : ("allocation-alias" as const),
-              access: aggregateOriginAccess(
-                actual,
-                place,
-                ctx,
-                origin.source,
-              ),
+              access: aggregateOriginAccess(actual, place, ctx, origin.source),
               capture,
             },
           ];
@@ -2335,10 +2372,20 @@ const scanExpression = (
             : createsMutableBinding && initializerHasAddressableRoot
               ? placesOfExpression(statement.initializer, ctx)
               : placesStoredByExpression(statement.initializer, ctx);
+          const initializerType = typeOfExpr(statement.initializer, ctx);
+          const dereferenceProjectedSource =
+            statement.pattern.bindingKind === "mutable-ref" &&
+            typeof initializerType === "number" &&
+            typeIsAllocationBacked(initializerType, ctx.typing);
           const bind = (source?: BorrowPlace): void =>
             bindPatternPlaces({
               pattern: statement.pattern,
-              source,
+              source:
+                source &&
+                dereferenceProjectedSource &&
+                source.projections.length > 0
+                  ? appendProjection(source, { kind: "dereference" })
+                  : source,
               mutable: !returnsDetachedSharedValue && createsMutableBinding,
               provenance,
               span: statement.span,
@@ -2610,7 +2657,7 @@ const scanExpression = (
     recordExpressionUse(
       expr.target,
       event,
-      [[projection]],
+      [accessProjectionsFor(expr.target, projection, ctx)],
       ctx,
     );
   }
@@ -2668,29 +2715,11 @@ const definitelyReaches = (definition: Event, use: Event): boolean =>
   ) && Array.from(definition.loops).every((loop) => use.loops.has(loop));
 
 const placeOverlaps = (left: BorrowPlace, right: BorrowPlace): boolean => {
-  if (left.root !== right.root) {
-    return false;
-  }
-  const length = Math.min(left.projections.length, right.projections.length);
-  for (let index = 0; index < length; index += 1) {
-    const a = left.projections[index]!;
-    const b = right.projections[index]!;
-    if (!projectionsOverlap(a, b)) {
-      return false;
-    }
-  }
-  return true;
-};
-
-const projectionPathCovers = (
-  prefix: readonly PlaceProjection[],
-  path: readonly PlaceProjection[],
-): boolean =>
-  prefix.length <= path.length &&
-  prefix.every(
-    (projection, index) =>
-      JSON.stringify(projection) === JSON.stringify(path[index]),
+  return (
+    left.root === right.root &&
+    projectionPathsOverlap(left.projections, right.projections)
   );
+};
 
 const parameterReturnsOnlyNonEscapingPlaces = (
   parameter: CallableBorrowContract["parameters"][number],
@@ -2732,6 +2761,9 @@ const placeName = (place: BorrowPlace, ctx: BodyContext): string => {
     }
     if (projection.kind === "identity") {
       return `${name}.<identity>`;
+    }
+    if (projection.kind === "dereference") {
+      return `${name}.<allocation>`;
     }
     return `${name}[${projection.constant ?? "?"}]`;
   }, root);
@@ -3071,9 +3103,11 @@ const lambdaMutablyUsesCapture = (
         optionalRoots.push([expr.body]);
       }
       if (expr.exprKind === "if" || expr.exprKind === "cond") {
-        expr.branches.slice(1).forEach((branch) =>
-          optionalRoots.push([branch.condition, branch.value]),
-        );
+        expr.branches
+          .slice(1)
+          .forEach((branch) =>
+            optionalRoots.push([branch.condition, branch.value]),
+          );
       }
       if (expr.exprKind === "match") {
         expr.arms.forEach((arm) => {
@@ -3103,9 +3137,7 @@ const lambdaMutablyUsesCapture = (
     });
   branchExpressions.forEach((expr, branchId) => {
     if (expr.exprKind === "match") {
-      expr.arms.forEach((arm, index) =>
-        tagBranch(arm.value, branchId, index),
-      );
+      expr.arms.forEach((arm, index) => tagBranch(arm.value, branchId, index));
       return;
     }
     if (expr.exprKind !== "if" && expr.exprKind !== "cond") {
@@ -3180,15 +3212,10 @@ const lambdaMutablyUsesCapture = (
       }
       const event = localEvent(statement.initializer);
       if (event) {
-        addPatternDefinitions(
-          statement.pattern,
-          statement.initializer,
-          {
-            ...event,
-            position:
-              exitPositions.get(statement.initializer) ?? event.position,
-          },
-        );
+        addPatternDefinitions(statement.pattern, statement.initializer, {
+          ...event,
+          position: exitPositions.get(statement.initializer) ?? event.position,
+        });
       }
     },
     onEnterExpression: (_exprId, expr) => {
@@ -3380,9 +3407,7 @@ const lambdaMutablyUsesCapture = (
     }
     if (expr.exprKind === "match") {
       return uniquePaths(
-        expr.arms.flatMap((arm) =>
-          aliasOriginsOf(arm.value, new Set(seen)),
-        ),
+        expr.arms.flatMap((arm) => aliasOriginsOf(arm.value, new Set(seen))),
       );
     }
     if (expr.exprKind === "effect-handler") {
@@ -3411,13 +3436,8 @@ const lambdaMutablyUsesCapture = (
           const root = baseSymbolOf(expr.target, ctx);
           const mutatesCapturedProjection =
             target?.exprKind === "field-access" &&
-            aliasOriginsOf(target.target).some(
-              (origin) => origin.length === 0,
-            );
-          if (
-            root === symbol ||
-            mutatesCapturedProjection
-          ) {
+            aliasOriginsOf(target.target).some((origin) => origin.length === 0);
+          if (root === symbol || mutatesCapturedProjection) {
             mutable = true;
             return { stop: true };
           }
@@ -3513,10 +3533,7 @@ const escapedPlacesIn = (
       const projection = Number.isInteger(Number(expr.field))
         ? ({ kind: "tuple", index: Number(expr.field) } as const)
         : ({ kind: "field", name: expr.field } as const);
-      visitAtProjection(expr.target, [
-        projection,
-        ...requested,
-      ]);
+      visitAtProjection(expr.target, [projection, ...requested]);
       return;
     }
     if (expr.exprKind === "object-literal") {
@@ -3864,41 +3881,62 @@ const validateCall = (
       return [];
     }
     const actor = baseSymbolOf(actual, ctx);
-    const places =
-      parameter?.accessPaths === undefined
-        ? placesOfExpression(actual, ctx)
-        : uniquePlaces(
-            parameter.accessPaths.flatMap((path) =>
-              placesAtProjection(actual, path, ctx, new Set()),
-            ),
-          );
-    return places.map((place) => {
-      const actorInitializer =
-        typeof actor === "number"
-          ? ctx.bindingInitializers.get(actor)
-          : undefined;
-      const actorIsSharedCellBorrow =
-        typeof actorInitializer === "number" &&
-        isSharedCellValueExpression(actorInitializer, ctx);
-      if (
-        access === "mutable" &&
-        !actorIsSharedCellBorrow &&
-        (typeof actor === "number"
-          ? !hasMutableCapabilityAt(actor, event, ctx)
-          : !isSharedCellValueExpression(actual, ctx))
-      ) {
-        reportMutableCapabilityViolation({ place, actor, event, ctx });
-      }
-      checkAccess({ place, actor, access, event, ctx });
-      if (access === "mutable") {
-        ctx.mutableStorageSymbols.add(place.root);
-      }
-      return { index, actual, place, actor, access };
+    const legacyPaths = parameter?.accessPaths;
+    const accesses =
+      parameter?.readPaths !== undefined || parameter?.writePaths !== undefined
+        ? [
+            ...(parameter.readPaths ?? []).map((path) => ({
+              access: "shared" as const,
+              path,
+            })),
+            ...(parameter.writePaths ?? []).map((path) => ({
+              access:
+                parameter.access === "mutable" ||
+                parameter.runtimeCheckedWrites !== true
+                  ? ("mutable" as const)
+                  : ("shared" as const),
+              path,
+            })),
+          ]
+        : (legacyPaths ?? [[]]).map((path) => ({ access, path }));
+    return accesses.flatMap(({ access: pathAccess, path }) => {
+      const places =
+        parameter?.accessPaths === undefined &&
+        parameter?.readPaths === undefined &&
+        parameter?.writePaths === undefined
+          ? placesOfExpression(actual, ctx)
+          : placesAtProjection(actual, path, ctx, new Set());
+      return uniquePlaces(places).map((place) => {
+        const actorInitializer =
+          typeof actor === "number"
+            ? ctx.bindingInitializers.get(actor)
+            : undefined;
+        const actorIsSharedCellBorrow =
+          typeof actorInitializer === "number" &&
+          isSharedCellValueExpression(actorInitializer, ctx);
+        if (
+          access === "mutable" &&
+          !actorIsSharedCellBorrow &&
+          (typeof actor === "number"
+            ? !hasMutableCapabilityAt(actor, event, ctx)
+            : !isSharedCellValueExpression(actual, ctx))
+        ) {
+          reportMutableCapabilityViolation({ place, actor, event, ctx });
+        }
+        checkAccess({ place, actor, access: pathAccess, event, ctx });
+        if (pathAccess === "mutable") {
+          ctx.mutableStorageSymbols.add(place.root);
+        }
+        return { index, actual, place, actor, access: pathAccess };
+      });
     });
   });
 
   borrows.forEach((left, index) => {
     borrows.slice(index + 1).forEach((right) => {
+      if (left.index === right.index) {
+        return;
+      }
       if (!placeOverlaps(left.place, right.place)) {
         return;
       }
@@ -3971,8 +4009,7 @@ const validateCall = (
       typeof destination === "number"
         ? typeOfExpr(destination, ctx)
         : undefined;
-    const destinationIsCallable =
-      isCallableType(destinationType, ctx);
+    const destinationIsCallable = isCallableType(destinationType, ctx);
     const destinationSymbol =
       typeof destination === "number"
         ? baseSymbolOf(destination, ctx)
@@ -3985,8 +4022,7 @@ const validateCall = (
       typeof destinationSymbol === "number" &&
       ctx.parameterSymbols.has(destinationSymbol) &&
       isCallableType(destinationSymbolType, ctx);
-    const callTarget =
-      expr.exprKind === "call" ? expr.callee : expr.target;
+    const callTarget = expr.exprKind === "call" ? expr.callee : expr.target;
     const destinationIsCallTarget =
       typeof destinationSymbol === "number" &&
       baseSymbolOf(callTarget, ctx) === destinationSymbol;
@@ -4047,7 +4083,9 @@ const validateCall = (
     })),
   ][0];
   const mutableCallBorrow = borrows.find(
-    (borrow) => borrow.access === "mutable",
+    (borrow) =>
+      borrow.access === "mutable" &&
+      info.contract?.parameters[borrow.index]?.access === "mutable",
   );
   const borrow =
     activeMutable ??
@@ -4462,8 +4500,10 @@ const validateExpression = (
                 const sourceMutable =
                   sourceActor !== undefined &&
                   ctx.mutableOwners.has(sourceActor);
-                const sourceIsSharedCellBorrow =
-                  isSharedCellValueExpression(statement.initializer, ctx);
+                const sourceIsSharedCellBorrow = isSharedCellValueExpression(
+                  statement.initializer,
+                  ctx,
+                );
                 if (!sourceMutable && !sourceIsSharedCellBorrow) {
                   const binding =
                     sourceActor !== undefined

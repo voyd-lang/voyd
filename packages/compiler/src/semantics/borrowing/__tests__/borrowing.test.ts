@@ -6,9 +6,12 @@ import { createNodePathAdapter } from "../../../modules/node-path-adapter.js";
 import { analyzeModules, loadModuleGraph } from "../../../pipeline.js";
 import { parse } from "../../../parser/index.js";
 import { semanticsPipeline } from "../../pipeline.js";
+import { buildProgramCodegenView } from "../../codegen-view/index.js";
 import {
   mergeCallableBorrowContracts,
   normalizeCallableBorrowTransfers,
+  projectionPathCovers,
+  projectionPathsOverlap,
 } from "../model.js";
 import { normalizeReturnedSharedOrigins } from "../summaries.js";
 
@@ -116,6 +119,111 @@ fn mutate_both(~left: Box, ~right: Box) -> void
 `;
 
 describe("borrow checking", () => {
+  it("keeps handle slots distinct from their referenced allocations", () => {
+    expect(
+      projectionPathsOverlap(
+        [{ kind: "field", name: "source" }],
+        [{ kind: "field", name: "source" }, { kind: "dereference" }],
+      ),
+    ).toBe(false);
+    expect(
+      projectionPathsOverlap(
+        [{ kind: "field", name: "source" }, { kind: "dereference" }],
+        [
+          { kind: "field", name: "source" },
+          { kind: "dereference" },
+          { kind: "field", name: "value" },
+        ],
+      ),
+    ).toBe(true);
+    expect(
+      projectionPathsOverlap(
+        [
+          { kind: "field", name: "left" },
+          { kind: "dereference" },
+          { kind: "field", name: "value" },
+        ],
+        [
+          { kind: "field", name: "right" },
+          { kind: "dereference" },
+          { kind: "field", name: "value" },
+        ],
+      ),
+    ).toBe(true);
+    expect(
+      projectionPathsOverlap(
+        [],
+        [
+          { kind: "field", name: "source" },
+          { kind: "dereference" },
+          { kind: "field", name: "value" },
+        ],
+      ),
+    ).toBe(false);
+    expect(
+      projectionPathCovers(
+        [],
+        [
+          { kind: "field", name: "source" },
+          { kind: "dereference" },
+          { kind: "field", name: "value" },
+        ],
+      ),
+    ).toBe(false);
+    expect(
+      projectionPathsOverlap(
+        [
+          { kind: "field", name: "left" },
+          { kind: "dereference" },
+          { kind: "field", name: "child" },
+          { kind: "dereference" },
+          { kind: "field", name: "value" },
+        ],
+        [
+          { kind: "field", name: "right" },
+          { kind: "dereference" },
+          { kind: "field", name: "value" },
+        ],
+      ),
+    ).toBe(true);
+  });
+
+  it("preserves legacy access modes when merging typed footprints", () => {
+    const merged = mergeCallableBorrowContracts([
+      {
+        parameters: [
+          {
+            access: "shared",
+            accessPaths: [[{ kind: "field", name: "left" }]],
+            retained: false,
+            returned: false,
+          },
+        ],
+        maySuspend: false,
+      },
+      {
+        parameters: [
+          {
+            access: "mutable",
+            accessPaths: [[{ kind: "field", name: "right" }]],
+            readPaths: [],
+            writePaths: [[{ kind: "field", name: "right" }]],
+            retained: false,
+            returned: false,
+          },
+        ],
+        maySuspend: false,
+      },
+    ]);
+
+    expect(merged?.parameters[0]?.readPaths).toEqual([
+      [{ kind: "field", name: "left" }],
+    ]);
+    expect(merged?.parameters[0]?.writePaths).toEqual([
+      [{ kind: "field", name: "right" }],
+    ]);
+  });
+
   it("preserves borrowed-source taint when transfers widen", () => {
     const transfers = Array.from({ length: 33 }, (_entry, index) => ({
       sourceParameter: 1,
@@ -177,6 +285,187 @@ fn conflict(~value: Box) -> i32
 `);
 
     expect(codes).not.toContain("TY0048");
+  });
+
+  it("scopes mutable receiver access to referenced allocation footprints", () => {
+    const source = `
+obj Box { value: i32 }
+obj State { left: i32, right: i32 }
+obj RefState { left: Box }
+
+fn read_left(state: State) -> i32
+  state.left
+
+fn read_right(state: State) -> i32
+  state.right
+
+fn mutate_left(~state: State) -> void
+  state.left = state.left + 1
+
+fn mutate_referenced_left(~state: RefState) -> void
+  state.left.value = state.left.value + 1
+
+fn mutate_referenced_alias(~state: RefState) -> void
+  let ~left = state.left
+  left.value = left.value + 1
+
+fn disjoint(readable: State, ~writable: State) -> i32
+  let result = read_right(readable)
+  mutate_left(~writable)
+  result
+
+fn conflicting(readable: State, ~writable: State) -> i32
+  let result = read_left(readable)
+  mutate_left(~writable)
+  result
+
+fn valid(~state: State) -> i32
+  disjoint(state, ~state)
+
+fn invalid(~state: State) -> i32
+  conflicting(state, ~state)
+`;
+    const result = analyzeWithRecovery(source);
+    const mutateEntry = Array.from(result.borrowing.callables).find(
+      ([, contract]) =>
+        contract.parameters[0]?.access === "mutable" &&
+        contract.parameters[0]?.accessPaths?.some(
+          (path) =>
+            JSON.stringify(path) ===
+            JSON.stringify([
+              { kind: "field", name: "left" },
+              { kind: "dereference" },
+              { kind: "field", name: "value" },
+            ]),
+        ),
+    );
+
+    expect(mutateEntry).toBeDefined();
+    expect(
+      Array.from(result.borrowing.callables.values()).filter((contract) =>
+        contract.parameters[0]?.writePaths?.some(
+          (path) =>
+            JSON.stringify(path) ===
+            JSON.stringify([
+              { kind: "field", name: "left" },
+              { kind: "dereference" },
+              { kind: "field", name: "value" },
+            ]),
+        ),
+      ),
+    ).toHaveLength(2);
+    const codegenFootprint = mutateEntry
+      ? Array.from(
+          buildProgramCodegenView([result]).modules.values(),
+        )[0]?.callableAccessFootprints.get(mutateEntry[0])
+      : undefined;
+    expect(codegenFootprint?.parameters[0]?.writes).toContainEqual([
+      { kind: "field", name: "left" },
+      { kind: "dereference" },
+      { kind: "field", name: "value" },
+    ]);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "TY0048",
+    );
+  });
+
+  it("uses reaching alias definitions for allocation access after reassignment", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Pair { left: Box }
+
+fn invalid(~pair: Pair, ~direct: Box) -> i32
+  var alias = pair.left
+  alias = direct
+  let ~borrow = direct
+  let observed = alias.value
+  borrow.value = 3
+  observed
+`),
+    ).toContain("TY0048");
+  });
+
+  it("preserves direct allocation access across conditional alias joins", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Pair { left: Box }
+
+fn invalid(~direct: Box, pair: Pair, replace: bool) -> i32
+  var alias = direct
+  if replace:
+    alias = pair.left
+  let ~borrow = direct
+  let observed = alias.value
+  borrow.value = 3
+  observed
+`),
+    ).toContain("TY0048");
+  });
+
+  it("summarizes each allocation origin at conditional alias joins", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Pair { left: Box }
+
+fn read_choice(direct: Box, pair: Pair, replace: bool) -> i32
+  var alias = direct
+  if replace:
+    alias = pair.left
+  alias.value
+
+fn invalid(~direct: Box, pair: Pair, replace: bool) -> i32
+  let ~borrow = direct
+  let observed = read_choice(direct, pair, replace)
+  borrow.value = 3
+  observed
+`),
+    ).toContain("TY0048");
+  });
+
+  it("activates projected mutable handles at their allocations", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Pair { left: Box }
+
+fn invalid(~pair: Pair) -> i32
+  let ~alias = pair.left
+  pair.left.value = 3
+  alias.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("keeps projected handle slots replaceable during allocation borrows", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Pair { left: Box }
+
+fn valid(~pair: Pair) -> i32
+  let ~alias = pair.left
+  pair.left = Box { value: 3 }
+  alias.value
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("keeps reassignable projected handles as ordinary aliases", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Pair { left: Box }
+
+fn valid(~pair: Pair) -> i32
+  let ~borrow = pair.left
+  var alias = pair.left
+  borrow.value = 3
+  alias.value
+`),
+    ).not.toContain("TY0048");
   });
 
   it("does not report ordinary aliases as borrows in recovery mode", () => {
@@ -974,7 +1263,7 @@ fn invalid_direct(~left: Box, right: Box, index: i32) -> i32
     ).not.toContain("TY0048");
   });
 
-  it("records fixed-array length inspection as shared access", () => {
+  it("keeps fixed-array identity disjoint from element mutation", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn fixed_length(values: FixedArray<Box>) -> i32
@@ -992,10 +1281,27 @@ fn inspect(values: FixedArray<Box>, ~same: FixedArray<Box>) -> i32
 fn invalid(~values: FixedArray<Box>) -> i32
   inspect(values, ~values)
 `),
+    ).not.toContain("TY0048");
+  });
+
+  it("keeps shared-declared array writes exclusive at call sites", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn write(values: FixedArray<i32>) -> void
+  __array_set(values, 0, 1)
+  void
+
+fn write_two(left: FixedArray<i32>, right: FixedArray<i32>) -> void
+  write(left)
+  write(right)
+
+fn invalid(~values: FixedArray<i32>) -> void
+  write_two(values, values)
+`),
     ).toContain("TY0048");
   });
 
-  it("records reference identity inspection as shared access", () => {
+  it("keeps immutable reference identity disjoint from allocation fields", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn is_null(value: Box) -> bool
@@ -1009,7 +1315,7 @@ fn inspect(value: Box, ~same: Box) -> bool
 fn invalid(~value: Box) -> bool
   inspect(value, ~value)
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("does not retain inputs through detached boundary conversion results", () => {
@@ -1339,7 +1645,7 @@ fn invalid_unpack(~value: Packed) -> i32
     ).toHaveLength(0);
   });
 
-  it("records union discriminant inspection without reading payloads", () => {
+  it("keeps empty mutable footprints disjoint from discriminant reads", () => {
     expect(
       diagnosticCodes(`${prelude}
 obj First { value: Box }
@@ -1364,7 +1670,7 @@ fn inspect(value: Choice, ~same: Choice) -> i32
 fn invalid(~value: Choice) -> i32
   inspect(value, ~value)
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
 
     expect(() =>
       analyze(`${prelude}
@@ -1388,7 +1694,7 @@ fn valid(~value: Box) -> i32
     ).not.toThrow();
   });
 
-  it("records scalar reads through nested destructuring", () => {
+  it("keeps empty mutable footprints disjoint from nested scalar reads", () => {
     expect(
       diagnosticCodes(`
 obj Inner { value: i32 }
@@ -1427,10 +1733,10 @@ fn invalid_nested(~container: Container) -> i32
 fn invalid_tuple(~container: Container) -> i32
   inspect_tuple(container, ~container)
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
-  it("records destructured scalar reads captured by closures", () => {
+  it("keeps empty mutable footprints disjoint from captured scalar reads", () => {
     expect(
       diagnosticCodes(`
 obj Inner { value: i32 }
@@ -1452,7 +1758,7 @@ fn inspect(container: Container, ~same: Container) -> i32
 fn invalid(~container: Container) -> i32
   inspect(container, ~container)
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("does not borrow through unused shared parameters", () => {
@@ -2231,6 +2537,11 @@ pub fn valid(~left: Box, ~right: Box) -> i32
 
     expect(readContract?.parameters[0]?.accessPaths).toEqual([
       [{ kind: "index", constant: 1, stable: true }],
+      [
+        { kind: "index", constant: 1, stable: true },
+        { kind: "dereference" },
+        { kind: "field", name: "value" },
+      ],
     ]);
     expect(diagnostics).toEqual([]);
   });

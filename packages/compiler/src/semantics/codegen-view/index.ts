@@ -336,6 +336,22 @@ export type CodegenSourceLocation = {
   endColumn?: number;
 };
 
+export type CodegenCallableAccessFootprint = {
+  parameters: readonly {
+    access: "owned" | "shared" | "mutable";
+    reads: readonly (readonly CodegenPlaceProjection[])[];
+    writes: readonly (readonly CodegenPlaceProjection[])[];
+  }[];
+};
+
+export type CodegenPlaceProjection =
+  | { kind: "field"; name: string }
+  | { kind: "tuple"; index: number }
+  | { kind: "index"; constant?: number; stable: boolean }
+  | { kind: "discriminant" }
+  | { kind: "dereference" }
+  | { kind: "identity" };
+
 export type ModuleCodegenView = {
   moduleId: string;
   meta: ModuleCodegenMetadata;
@@ -346,6 +362,10 @@ export type ModuleCodegenView = {
   effectsIr: EffectsIr;
   bindingKinds: ReadonlyMap<SymbolId, HirBindingKind>;
   mutableStorageSymbols: ReadonlySet<SymbolId>;
+  callableAccessFootprints: ReadonlyMap<
+    SymbolId,
+    CodegenCallableAccessFootprint
+  >;
   functionLocations: ReadonlyMap<SymbolId, CodegenSourceLocation>;
 };
 
@@ -475,6 +495,11 @@ const buildMutableStorageSymbolIndex = (
   });
   return symbols;
 };
+
+const copyAccessPaths = (
+  paths: readonly (readonly CodegenPlaceProjection[])[] | undefined,
+): readonly (readonly CodegenPlaceProjection[])[] =>
+  paths?.map((path) => path.map((projection) => ({ ...projection }))) ?? [];
 
 export type CodegenObjectTemplate = {
   symbol: ProgramSymbolId;
@@ -2402,6 +2427,35 @@ export const buildProgramCodegenView = (
       effectsIr: buildEffectsIr({ hir: mod.hir, info: effectsInfo }),
       bindingKinds: buildBindingKindIndex(mod.hir),
       mutableStorageSymbols: buildMutableStorageSymbolIndex(mod),
+      callableAccessFootprints: new Map(
+        Array.from(mod.borrowing.callables, ([symbol, contract]) => [
+          symbol,
+          {
+            parameters: contract.parameters.map((parameter) => {
+              const hasTypedFootprints =
+                parameter.readPaths !== undefined ||
+                parameter.writePaths !== undefined;
+              return {
+                access: parameter.access,
+                reads: copyAccessPaths(
+                  hasTypedFootprints
+                    ? parameter.readPaths
+                    : parameter.access === "shared"
+                      ? parameter.accessPaths
+                      : undefined,
+                ),
+                writes: copyAccessPaths(
+                  hasTypedFootprints
+                    ? parameter.writePaths
+                    : parameter.access === "mutable"
+                      ? parameter.accessPaths
+                      : undefined,
+                ),
+              };
+            }),
+          },
+        ]),
+      ),
       functionLocations,
     });
   });

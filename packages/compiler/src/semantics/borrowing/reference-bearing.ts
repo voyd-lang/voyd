@@ -66,3 +66,43 @@ export const typeCanCarryReference = (
   cache?.set(typeId, result);
   return result;
 };
+
+export const typeIsAllocationBacked = (
+  typeId: TypeId,
+  typing: TypingResult,
+  active = new Set<TypeId>(),
+): boolean => {
+  if (active.has(typeId)) {
+    return false;
+  }
+  active.add(typeId);
+  const descriptor = typing.arena.get(typeId);
+  const result = (() => {
+    switch (descriptor.kind) {
+      case "primitive":
+      case "value-object":
+        return false;
+      case "nominal-object":
+      case "trait":
+      case "structural-object":
+      case "fixed-array":
+      case "function":
+      case "type-param-ref":
+        return true;
+      case "recursive":
+        return typeIsAllocationBacked(descriptor.body, typing, active);
+      case "union":
+        return descriptor.members.some((member) =>
+          typeIsAllocationBacked(member, typing, new Set(active)),
+        );
+      case "intersection":
+        return [descriptor.nominal, descriptor.structural].some(
+          (member) =>
+            typeof member === "number" &&
+            typeIsAllocationBacked(member, typing, new Set(active)),
+        );
+    }
+  })();
+  active.delete(typeId);
+  return result;
+};

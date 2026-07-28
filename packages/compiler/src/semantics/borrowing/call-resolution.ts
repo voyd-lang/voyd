@@ -575,7 +575,10 @@ const intrinsicBorrowContract = ({
     parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
       access: index === 0 || index === storedValueIndex ? "shared" : "owned",
       ...(index === 0
-        ? { accessPaths: [dynamicIndexPath()] }
+        ? {
+            accessPaths: [dynamicIndexPath()],
+            writePaths: [dynamicIndexPath()],
+          }
         : index === storedValueIndex
           ? { accessPaths: [] }
           : {}),
@@ -701,6 +704,9 @@ const projectedTypes = (
   active.add(type);
   const descriptor = typing.arena.get(type);
   const [projection, ...remaining] = projections;
+  if (projection?.kind === "dereference") {
+    return projectedTypes(type, remaining, typing);
+  }
   const candidates = (() => {
     if (descriptor.kind === "recursive") {
       return projectedTypes(descriptor.body, projections, typing, active);
@@ -843,7 +849,7 @@ const specializeConditionalContract = (
         ...(unresolvedConditionalOrigins.length
           ? { returnedTypeMatchingOrigins: unresolvedConditionalOrigins }
           : {}),
-        ...(accessMatch === true ? { accessPaths: [] } : {}),
+        ...(accessMatch === true ? { accessPaths: [], readPaths: [] } : {}),
         ...(accessMatch === undefined && parameter.accessIfResultTypeDiffers
           ? { accessIfResultTypeDiffers: parameter.accessIfResultTypeDiffers }
           : {}),
