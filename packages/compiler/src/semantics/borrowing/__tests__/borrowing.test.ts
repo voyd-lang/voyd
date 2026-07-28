@@ -947,6 +947,45 @@ fn relay(shared: Box, ~mutable: Box) -> i32
     ).not.toThrow();
   });
 
+  it("does not project direct local-container writes onto stored aliases", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Holder { value: Box }
+
+fn replace(~holder: Holder, replacement: Box) -> void
+  holder.value = replacement
+
+fn stage(source: Box, replacement: Box, observer: Box) -> Box
+  let ~out = Holder { value: source }
+  replace(~out, replacement)
+  observer
+
+fn valid(~value: Box) -> Box
+  stage(value, Box { value: 0 }, value)
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("does not project direct local-container reads onto stored aliases", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Holder { value: Box }
+
+fn inspect(holder: Holder) -> Box
+  holder.value
+
+fn stage(source: Box, ~target: Box) -> i32
+  let holder = Holder { value: source }
+  mutate(~target)
+  let ignored = inspect(holder)
+  1
+
+fn valid(~value: Box) -> i32
+  stage(value, ~value)
+`),
+    ).not.toContain("TY0048");
+  });
+
   it("allows ordinary handles passed to opaque retaining callables", () => {
     expect(
       diagnosticCodes(`${prelude}
@@ -988,6 +1027,114 @@ fn conflict(
   right: Box = middle
 ) -> i32
   left.value + middle.value + right.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("preserves projections when applying reference defaults", () => {
+    const source = `${prelude}
+obj Owner { primary: Box, secondary: Box }
+
+fn inspect(owner: Owner, selected: Box = owner.primary) -> i32
+  selected.value
+
+fn relay(~target: Box, owner: Owner) -> i32
+  mutate(~target)
+  inspect(owner)
+`;
+    expect(
+      diagnosticCodes(`${source}
+fn valid(~owner: Owner) -> i32
+  relay(~owner.secondary, owner)
+`),
+    ).not.toContain("TY0048");
+    expect(
+      diagnosticCodes(`${source}
+fn conflict(~owner: Owner) -> i32
+  relay(~owner.primary, owner)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("applies default expression reads only when the argument is omitted", () => {
+    const source = `${prelude}
+obj Owner { primary: Box }
+
+fn inspect(owner: Owner, selected: Box = owner.primary) -> i32
+  selected.value
+
+fn relay_explicit(~target: Box, owner: Owner) -> i32
+  mutate(~target)
+  inspect(owner, Box { value: 0 })
+
+fn relay_omitted(~target: Box, owner: Owner) -> i32
+  mutate(~target)
+  inspect(owner)
+`;
+    expect(
+      diagnosticCodes(`${source}
+fn valid(~owner: Owner) -> i32
+  relay_explicit(~owner.primary, owner)
+`),
+    ).not.toContain("TY0048");
+    expect(
+      diagnosticCodes(`${source}
+fn conflict(~owner: Owner) -> i32
+  relay_omitted(~owner.primary, owner)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("ends default-only reads before activating call borrows", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Owner { primary: Box }
+
+fn update(~target: Box, owner: Owner, ignored: i32 = owner.primary.value) -> void
+  target.value = 1
+
+fn valid(~owner: Owner) -> void
+  update(~owner.primary, owner)
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("rejects overlapping accesses within one omitted default", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn write_pair(~left: Box, ~right: Box) -> void
+  left.value = 1
+  right.value = 2
+
+fn default_mutate(~left: Box, ~right: Box) -> i32
+  write_pair(~left, ~right)
+  0
+
+fn run(
+  ~left: Box,
+  ~right: Box,
+  ignored: i32 = default_mutate(~left, ~right)
+) -> i32
+  ignored
+
+fn invalid(~value: Box) -> i32
+  run(~value, ~value)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("propagates direct writes through omitted reference defaults", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn update(~source: Box, ~target: Box = source) -> void
+  target.value = 1
+
+fn relay(~source: Box, observer: Box) -> i32
+  update(~source)
+  observer.value
+
+fn conflict(~value: Box) -> i32
+  relay(~value, value)
 `),
     ).toContain("TY0048");
   });
@@ -1261,6 +1408,49 @@ fn invalid_direct(~left: Box, right: Box, index: i32) -> i32
   __array_get(values, index).value
 `),
     ).not.toContain("TY0048");
+  });
+
+  it("preserves indexed-allocation provenance at projected endpoints", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Source { storage: FixedArray<Box> }
+obj Holder { storage: FixedArray<Box> }
+
+fn fixed(left: Box, right: Box) -> FixedArray<Box>
+  __array_new_fixed(left, right)
+
+fn wrap(source: Source) -> Holder
+  Holder { storage: source.storage }
+
+fn inspect(source: Source, index: i32, ~same: Box) -> i32
+  let holder = wrap(source)
+  let observed = __array_get(holder.storage, index).value
+  mutate(~same)
+  observed
+
+fn invalid(~left: Box, right: Box, index: i32) -> i32
+  inspect(Source { storage: fixed(left, right) }, index, ~left)
+`),
+    ).toContain("TY0048");
+
+    expect(
+      diagnosticCodes(`${prelude}
+fn fixed(left: Box, right: Box) -> FixedArray<Box>
+  __array_new_fixed(left, right)
+
+fn inspect(
+  { values: FixedArray<Box>, ignored: Box },
+  index: i32,
+  ~same: Box
+) -> i32
+  let observed = __array_get(values, index).value
+  mutate(~same)
+  observed + ignored.value
+
+fn invalid(~left: Box, right: Box, index: i32) -> i32
+  inspect({ values: fixed(left, right), ignored: right }, index, ~left)
+`),
+    ).toContain("TY0048");
   });
 
   it("keeps fixed-array identity disjoint from element mutation", () => {
@@ -2536,8 +2726,9 @@ pub fn valid(~left: Box, ~right: Box) -> i32
     )?.contract;
 
     expect(readContract?.parameters[0]?.accessPaths).toEqual([
-      [{ kind: "index", constant: 1, stable: true }],
+      [{ kind: "dereference" }, { kind: "index", constant: 1, stable: true }],
       [
+        { kind: "dereference" },
         { kind: "index", constant: 1, stable: true },
         { kind: "dereference" },
         { kind: "field", name: "value" },

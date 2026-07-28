@@ -18,6 +18,7 @@ import type { DeclTable } from "../decls.js";
 import type {
   BorrowPlace,
   CallableBorrowContract,
+  CallableParameterBorrowContract,
   PlaceProjection,
   ReturnedBorrowOrigin,
 } from "./model.js";
@@ -268,9 +269,7 @@ const appendExpressionAccess = (
     place.projections.length > 0;
   return appendAccessProjections(
     place,
-    needsDereference
-      ? [{ kind: "dereference" }, ...projections]
-      : projections,
+    needsDereference ? [{ kind: "dereference" }, ...projections] : projections,
   );
 };
 
@@ -3848,6 +3847,42 @@ const escapeImplicitReturnValues = (
   });
 };
 
+const directPlacesOfExpression = (
+  exprId: HirExprId,
+  ctx: BodyContext,
+): readonly BorrowPlace[] => {
+  const expr = ctx.hir.expressions.get(exprId);
+  if (!expr) {
+    return [];
+  }
+  if (expr.exprKind === "identifier") {
+    return [
+      ctx.places.get(expr.symbol) ?? {
+        root: expr.symbol,
+        projections: [],
+      },
+    ];
+  }
+  if (expr.exprKind === "field-access") {
+    const projection = Number.isInteger(Number(expr.field))
+      ? ({ kind: "tuple", index: Number(expr.field) } as const)
+      : ({ kind: "field", name: expr.field } as const);
+    return directPlacesOfExpression(expr.target, ctx).map((place) =>
+      appendAccessProjections(
+        place,
+        accessProjectionsFor(expr.target, projection, ctx),
+      ),
+    );
+  }
+  if (expr.exprKind === "call" && intrinsicNameForCall(expr, ctx) === "~") {
+    const operand = expr.args.at(-1)?.expr;
+    return typeof operand === "number"
+      ? directPlacesOfExpression(operand, ctx)
+      : [];
+  }
+  return [];
+};
+
 const validateCall = (
   expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>,
   event: Event,
@@ -3859,24 +3894,82 @@ const validateCall = (
   }
   const info = targetInfo(expr, ctx);
   const actuals = info.arguments;
-  const effectiveActuals = (
+  type EffectiveActual = {
+    index: number;
+    actual: HirExprId;
+    source: readonly PlaceProjection[];
+    result: readonly PlaceProjection[];
+    parameter?: CallableParameterBorrowContract;
+  };
+  const effectiveActuals: readonly EffectiveActual[] = (
     info.contract?.parameters ?? actuals.map(() => undefined)
   ).flatMap((parameter, index) => {
     const actual = actuals[index];
     if (typeof actual === "number") {
-      return [{ index, actual }];
+      return [{ index, actual, source: [], result: [] }];
     }
     return (parameter?.defaultOrigins ?? []).flatMap((origin) => {
-      const defaultActual = actuals[origin];
+      const defaultActual = actuals[origin.parameter];
       return typeof defaultActual === "number"
-        ? [{ index, actual: defaultActual }]
+        ? [
+            {
+              index,
+              actual: defaultActual,
+              source: origin.source,
+              result: origin.result,
+            },
+          ]
         : [];
     });
   });
+  const defaultAccessGroups: readonly (readonly EffectiveActual[])[] =
+    info.contract?.parameters.map((parameter, index) => {
+      if (typeof actuals[index] === "number") {
+        return [];
+      }
+      return [
+        ...(parameter.defaultReadOrigins ?? []).map((origin) => ({
+          origin,
+          access: "shared" as const,
+        })),
+        ...(parameter.defaultWriteOrigins ?? []).map((origin) => ({
+          origin,
+          access: "mutable" as const,
+        })),
+      ].flatMap(({ origin, access }) => {
+        const actual = actuals[origin.parameter];
+        return typeof actual === "number"
+          ? [
+              {
+                index: origin.parameter,
+                actual,
+                source: [],
+                result: [],
+                parameter: {
+                  access,
+                  ...(access === "shared"
+                    ? { readPaths: [origin.path] }
+                    : { writePaths: [origin.path] }),
+                  retained: false,
+                  returned: false,
+                },
+              },
+            ]
+          : [];
+      });
+    }) ?? [];
   validateBorrowedCallbacks(expr, info, ctx);
-  const borrows = effectiveActuals.flatMap(({ actual, index }) => {
-    const parameter = info.contract?.parameters[index];
-    const access = parameterAccessFor({ index, actual, info, ctx });
+  const activateAccesses = ({
+    actual,
+    index,
+    source,
+    result,
+    parameter: parameterOverride,
+  }: EffectiveActual) => {
+    const parameter = parameterOverride ?? info.contract?.parameters[index];
+    const access =
+      parameterOverride?.access ??
+      parameterAccessFor({ index, actual, info, ctx });
     if (access === "owned") {
       return [];
     }
@@ -3900,12 +3993,22 @@ const validateCall = (
           ]
         : (legacyPaths ?? [[]]).map((path) => ({ access, path }));
     return accesses.flatMap(({ access: pathAccess, path }) => {
+      const actualPath = translateProjectionPath({
+        result,
+        source,
+        requested: path,
+      });
+      if (!actualPath) {
+        return [];
+      }
+      const directPlaces = directPlacesOfExpression(actual, ctx);
       const places =
-        parameter?.accessPaths === undefined &&
-        parameter?.readPaths === undefined &&
-        parameter?.writePaths === undefined
-          ? placesOfExpression(actual, ctx)
-          : placesAtProjection(actual, path, ctx, new Set());
+        actualPath.some((projection) => projection.kind === "dereference") ||
+        directPlaces.length === 0
+          ? placesAtProjection(actual, actualPath, ctx, new Set())
+          : directPlaces.map((place) =>
+              appendAccessProjections(place, actualPath),
+            );
       return uniquePlaces(places).map((place) => {
         const actorInitializer =
           typeof actor === "number"
@@ -3930,39 +4033,49 @@ const validateCall = (
         return { index, actual, place, actor, access: pathAccess };
       });
     });
-  });
+  };
+  const defaultBorrowGroups = defaultAccessGroups.map((group) =>
+    group.flatMap(activateAccesses),
+  );
+  const borrows = effectiveActuals.flatMap(activateAccesses);
 
-  borrows.forEach((left, index) => {
-    borrows.slice(index + 1).forEach((right) => {
-      if (left.index === right.index) {
-        return;
-      }
-      if (!placeOverlaps(left.place, right.place)) {
-        return;
-      }
-      if (left.access === "shared" && right.access === "shared") {
-        return;
-      }
-      const synthetic: AliasDefinition = {
-        symbol: left.actor ?? left.place.root,
-        place: left.place,
-        access: left.access,
-        provenance: "storage-borrow",
-        span: ctx.hir.expressions.get(left.actual)?.span ?? event.span,
-        event,
-        uses: [event],
-      };
-      reportConflict({
-        attempted: right.place,
-        access: right.access,
-        existing: synthetic,
-        event: ctx.events.get(right.actual) ?? event,
-        ctx,
+  const reportBorrowConflicts = (
+    activatedBorrows: readonly (typeof borrows)[number][],
+  ): void => {
+    activatedBorrows.forEach((left, index) => {
+      activatedBorrows.slice(index + 1).forEach((right) => {
+        if (left.index === right.index) {
+          return;
+        }
+        if (!placeOverlaps(left.place, right.place)) {
+          return;
+        }
+        if (left.access === "shared" && right.access === "shared") {
+          return;
+        }
+        const synthetic: AliasDefinition = {
+          symbol: left.actor ?? left.place.root,
+          place: left.place,
+          access: left.access,
+          provenance: "storage-borrow",
+          span: ctx.hir.expressions.get(left.actual)?.span ?? event.span,
+          event,
+          uses: [event],
+        };
+        reportConflict({
+          attempted: right.place,
+          access: right.access,
+          existing: synthetic,
+          event: ctx.events.get(right.actual) ?? event,
+          ctx,
+        });
       });
     });
-  });
+  };
+  defaultBorrowGroups.forEach(reportBorrowConflicts);
+  reportBorrowConflicts(borrows);
 
-  effectiveActuals.forEach(({ actual, index }) => {
+  effectiveActuals.forEach(({ actual, index, source, result }) => {
     const parameter = info.contract?.parameters[index];
     if (parameter?.retained !== true) {
       return;
@@ -3989,8 +4102,17 @@ const validateCall = (
       through: "a retaining call",
       projectionPaths:
         parameter.retainedPaths && parameter.retainedPaths.length > 0
-          ? parameter.retainedPaths
-          : undefined,
+          ? parameter.retainedPaths.flatMap((path) => {
+              const translated = translateProjectionPath({
+                result,
+                source,
+                requested: path,
+              });
+              return translated ? [translated] : [];
+            })
+          : source.length > 0
+            ? [source]
+            : undefined,
       ctx,
     });
   });
@@ -4779,55 +4901,57 @@ const validateReferenceDefaults = ({
     if (origins.length === 0) {
       return;
     }
-    origins.forEach((sourceIndex) => {
-      const sourceParameter = callable.parameters[sourceIndex];
-      if (
-        !sourceParameter ||
-        (sourceParameter.pattern.bindingKind !== "mutable-ref" &&
-          parameter.pattern.bindingKind !== "mutable-ref")
-      ) {
-        return;
-      }
-      const sourceSymbol = patternSymbols(sourceParameter.pattern)[0];
-      const sourceName =
-        typeof sourceSymbol === "number"
-          ? ctx.symbolTable.getSymbol(sourceSymbol).name
-          : `parameter ${sourceIndex + 1}`;
-      addDiagnostic(
-        diagnosticFromCode({
-          code: "TY0048",
-          params: {
-            kind: "borrow-conflict",
-            access:
-              parameter.pattern.bindingKind === "mutable-ref"
-                ? "mutably borrow"
-                : "read",
-            place: sourceName,
-            existing:
-              sourceParameter.pattern.bindingKind === "mutable-ref"
-                ? "mutable"
-                : "shared",
-          },
-          span: parameter.span,
-          related: [
-            diagnosticFromCode({
-              code: "TY0048",
-              params: {
-                kind: "borrow-origin",
-                borrow:
-                  sourceParameter.pattern.bindingKind === "mutable-ref"
-                    ? "mutable"
-                    : "shared",
-                place: sourceName,
-              },
-              span: sourceParameter.span,
-              severity: "note",
-            }),
-          ],
-        }),
-        ctx,
-      );
-    });
+    new Set(origins.map((origin) => origin.parameter)).forEach(
+      (sourceIndex) => {
+        const sourceParameter = callable.parameters[sourceIndex];
+        if (
+          !sourceParameter ||
+          (sourceParameter.pattern.bindingKind !== "mutable-ref" &&
+            parameter.pattern.bindingKind !== "mutable-ref")
+        ) {
+          return;
+        }
+        const sourceSymbol = patternSymbols(sourceParameter.pattern)[0];
+        const sourceName =
+          typeof sourceSymbol === "number"
+            ? ctx.symbolTable.getSymbol(sourceSymbol).name
+            : `parameter ${sourceIndex + 1}`;
+        addDiagnostic(
+          diagnosticFromCode({
+            code: "TY0048",
+            params: {
+              kind: "borrow-conflict",
+              access:
+                parameter.pattern.bindingKind === "mutable-ref"
+                  ? "mutably borrow"
+                  : "read",
+              place: sourceName,
+              existing:
+                sourceParameter.pattern.bindingKind === "mutable-ref"
+                  ? "mutable"
+                  : "shared",
+            },
+            span: parameter.span,
+            related: [
+              diagnosticFromCode({
+                code: "TY0048",
+                params: {
+                  kind: "borrow-origin",
+                  borrow:
+                    sourceParameter.pattern.bindingKind === "mutable-ref"
+                      ? "mutable"
+                      : "shared",
+                  place: sourceName,
+                },
+                span: sourceParameter.span,
+                severity: "note",
+              }),
+            ],
+          }),
+          ctx,
+        );
+      },
+    );
   });
 };
 

@@ -136,7 +136,21 @@ export type CallableParameterBorrowContract = {
   returnedTypeMatchingOrigins?: readonly ReturnedTypeMatchingOrigin[];
   accessIfResultTypeDiffers?: BorrowTypeComparison;
   invalidatedPaths?: readonly (readonly PlaceProjection[])[];
-  defaultOrigins?: readonly number[];
+  defaultOrigins?: readonly DefaultBorrowOrigin[];
+  defaultReadOrigins?: readonly DefaultBorrowAccessOrigin[];
+  defaultWriteOrigins?: readonly DefaultBorrowAccessOrigin[];
+};
+
+export type DefaultBorrowOrigin = {
+  parameter: number;
+  source: readonly PlaceProjection[];
+  result: readonly PlaceProjection[];
+  endpointAccess?: BorrowEndpointAccess;
+};
+
+export type DefaultBorrowAccessOrigin = {
+  parameter: number;
+  path: readonly PlaceProjection[];
 };
 
 export type CallableBorrowTransfer = {
@@ -155,7 +169,10 @@ const MAX_BORROW_TRANSFERS_PER_PARAMETER_PAIR = 32;
 export type ReturnedBorrowOrigin = {
   source: readonly PlaceProjection[];
   result: readonly PlaceProjection[];
+  endpointAccess?: BorrowEndpointAccess;
 };
+
+export type BorrowEndpointAccess = "inline" | "dereferenced";
 
 export type ReturnedTypeMatchingOrigin = ReturnedBorrowOrigin & {
   conditionId: string;
@@ -166,14 +183,16 @@ export type BorrowTypeComparison = {
   parameter: number;
   sourcePath: readonly PlaceProjection[];
   resultPath: readonly PlaceProjection[];
+  endpointAccess?: BorrowEndpointAccess;
 };
 
 export const borrowTypeConditionId = ({
   parameter,
   sourcePath,
   resultPath,
+  endpointAccess,
 }: Omit<BorrowTypeComparison, "conditionId">): string =>
-  JSON.stringify([parameter, sourcePath, resultPath]);
+  JSON.stringify([parameter, sourcePath, resultPath, endpointAccess ?? null]);
 
 export type ScopedCallbackBorrowContract = {
   callbackParameter: number;
@@ -295,11 +314,33 @@ export const mergeCallableBorrowContracts = (
         ...(invalidatedPaths.length > 0 ? { invalidatedPaths } : {}),
         ...(() => {
           const defaultOrigins = Array.from(
-            new Set(
-              parameters.flatMap((parameter) => parameter.defaultOrigins ?? []),
-            ),
+            new Map(
+              parameters
+                .flatMap((parameter) => parameter.defaultOrigins ?? [])
+                .map((origin) => [JSON.stringify(origin), origin]),
+            ).values(),
           );
           return defaultOrigins.length > 0 ? { defaultOrigins } : {};
+        })(),
+        ...(() => {
+          const defaultReadOrigins = Array.from(
+            new Map(
+              parameters
+                .flatMap((parameter) => parameter.defaultReadOrigins ?? [])
+                .map((origin) => [JSON.stringify(origin), origin]),
+            ).values(),
+          );
+          return defaultReadOrigins.length > 0 ? { defaultReadOrigins } : {};
+        })(),
+        ...(() => {
+          const defaultWriteOrigins = Array.from(
+            new Map(
+              parameters
+                .flatMap((parameter) => parameter.defaultWriteOrigins ?? [])
+                .map((origin) => [JSON.stringify(origin), origin]),
+            ).values(),
+          );
+          return defaultWriteOrigins.length > 0 ? { defaultWriteOrigins } : {};
         })(),
       };
     }),
@@ -442,7 +483,8 @@ const mergeReturnedTypeMatchingOrigins = (
                   JSON.stringify(candidate.source) ===
                     JSON.stringify(origin.source) &&
                   JSON.stringify(candidate.result) ===
-                    JSON.stringify(origin.result),
+                    JSON.stringify(origin.result) &&
+                  candidate.endpointAccess === origin.endpointAccess,
               ) ?? [],
           );
           if (
@@ -458,6 +500,7 @@ const mergeReturnedTypeMatchingOrigins = (
                 parameter,
                 sourcePath: origin.source,
                 resultPath: origin.result,
+                endpointAccess: origin.endpointAccess,
               }),
             },
           ];

@@ -9,7 +9,11 @@ import type {
 } from "../typing/index.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type { BorrowingDependency } from "./dependency.js";
-import type { CallableBorrowContract, PlaceProjection } from "./model.js";
+import type {
+  CallableBorrowContract,
+  PlaceProjection,
+  ReturnedBorrowOrigin,
+} from "./model.js";
 import {
   borrowTypeConditionId,
   mergeCallableBorrowContracts,
@@ -273,6 +277,7 @@ const fieldPath = (name: string): readonly PlaceProjection[] => [
 ];
 
 const dynamicIndexPath = (): readonly PlaceProjection[] => [
+  { kind: "dereference" },
   { kind: "index", stable: false },
 ];
 
@@ -307,6 +312,7 @@ const intrinsicBorrowContract = ({
         const origin = {
           source: [],
           result: [
+            { kind: "dereference" as const },
             {
               kind: "index" as const,
               constant: index,
@@ -331,17 +337,18 @@ const intrinsicBorrowContract = ({
       ...(indexConstant === undefined ? {} : { constant: indexConstant }),
       stable: indexConstant !== undefined,
     };
+    const sourcePath = [{ kind: "dereference" as const }, sourceIndex];
     return {
       parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
         access: index === 0 ? "shared" : "owned",
-        ...(index === 0 ? { accessPaths: [[sourceIndex]] } : {}),
+        ...(index === 0 ? { accessPaths: [sourcePath] } : {}),
         retained: false,
         returned: index === 0 && returnsReference,
         ...(index === 0 && returnsReference
           ? {
               returnedOrigins: [
                 {
-                  source: [sourceIndex],
+                  source: sourcePath,
                   result: [],
                 },
               ],
@@ -394,9 +401,10 @@ const intrinsicBorrowContract = ({
           destinationParameter: 0,
           sourcePath: [
             { kind: "field", name: "from" },
+            { kind: "dereference" },
             { kind: "index", stable: false },
           ],
-          destinationPath: [{ kind: "index", stable: false }],
+          destinationPath: dynamicIndexPath(),
         },
       ],
       maySuspend: false,
@@ -416,8 +424,8 @@ const intrinsicBorrowContract = ({
         {
           sourceParameter: 2,
           destinationParameter: 0,
-          sourcePath: [{ kind: "index", stable: false }],
-          destinationPath: [{ kind: "index", stable: false }],
+          sourcePath: dynamicIndexPath(),
+          destinationPath: dynamicIndexPath(),
         },
       ],
       maySuspend: false,
@@ -589,7 +597,7 @@ const intrinsicBorrowContract = ({
       {
         sourceParameter: storedValueIndex,
         destinationParameter: 0,
-        destinationPath: [{ kind: "index", stable: false }],
+        destinationPath: dynamicIndexPath(),
       },
     ],
     maySuspend: false,
@@ -793,10 +801,12 @@ const specializeConditionalContract = (
   return {
     ...contract,
     parameters: contract.parameters.map((parameter, index) => {
-      const returnedOriginKey = (origin: {
-        source: readonly PlaceProjection[];
-        result: readonly PlaceProjection[];
-      }): string => JSON.stringify([origin.source, origin.result]);
+      const returnedOriginKey = (origin: ReturnedBorrowOrigin): string =>
+        JSON.stringify([
+          origin.source,
+          origin.result,
+          origin.endpointAccess ?? null,
+        ]);
       const conditionalOrigins = new Map(
         (parameter.returnedTypeMatchingOrigins ?? []).map((origin) => [
           returnedOriginKey(origin),
