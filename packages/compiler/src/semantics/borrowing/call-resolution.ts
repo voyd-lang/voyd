@@ -283,6 +283,12 @@ const fieldPath = (name: string): readonly PlaceProjection[] => [
   { kind: "field", name },
 ];
 
+const sharedCellStatePath = (): readonly PlaceProjection[] => [
+  { kind: "field", name: "__borrow_state" },
+  { kind: "dereference" },
+  { kind: "index", constant: 0, stable: true },
+];
+
 const dynamicIndexPath = (): readonly PlaceProjection[] => [
   { kind: "dereference" },
   { kind: "index", stable: false },
@@ -445,11 +451,16 @@ const intrinsicBorrowContract = ({
       name === "__shared_cell_end_write") &&
     argumentCount === 1
   ) {
+    const statePath = sharedCellStatePath();
     return {
       parameters: [
         {
           access: "shared",
-          readPaths: [fieldPath("__borrow_state")],
+          ...(name === "__shared_cell_end_write"
+            ? {}
+            : { readPaths: [statePath] }),
+          writePaths: [statePath],
+          runtimeCheckedWrites: true,
           retained: false,
           returned: false,
         },
@@ -481,7 +492,8 @@ const intrinsicBorrowContract = ({
       parameters: [
         {
           access: "shared",
-          readPaths: [fieldPath("__value")],
+          writePaths: [fieldPath("__value")],
+          runtimeCheckedWrites: true,
           retained: false,
           returned: false,
         },

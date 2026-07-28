@@ -368,6 +368,66 @@ fn invalid(~state: State) -> i32
     );
   });
 
+  it("serializes SharedCell runtime writes at their physical places", () => {
+    const result = analyze(`
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> {
+  __value: T,
+  __borrow_state: FixedArray<i32>
+}
+
+@intrinsic(name: "__shared_cell_begin_write", uses_signature: false)
+fn shared_cell_begin_write<T>(cell: SharedCell<T>): () -> i32
+  __shared_cell_begin_write(cell)
+
+@intrinsic(name: "__shared_cell_end_write", uses_signature: false)
+fn shared_cell_end_write<T>(cell: SharedCell<T>): () -> void
+  __shared_cell_end_write(cell)
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+@intrinsic(name: "__shared_cell_set_value", uses_signature: false)
+fn shared_cell_set_value<T>(cell: SharedCell<T>, value: T): () -> void
+  __shared_cell_set_value(cell, value)
+
+impl SharedCell<T>
+  fn with_mut(self, body: fn(~T) : () -> void): () -> void
+    let status = shared_cell_begin_write(self)
+    let ~value = shared_cell_value(self)
+    body(~value)
+    shared_cell_set_value(self, value)
+    shared_cell_end_write(self)
+`);
+    const statePath = [
+      { kind: "field", name: "__borrow_state" },
+      { kind: "dereference" },
+      { kind: "index", constant: 0, stable: true },
+    ] as const;
+    const valuePath = [{ kind: "field", name: "__value" }] as const;
+    const withMutEntry = Array.from(result.borrowing.callables).find(
+      ([, contract]) =>
+        contract.parameters[0]?.runtimeCheckedWrites === true &&
+        contract.parameters[0]?.writePaths?.some(
+          (path) => JSON.stringify(path) === JSON.stringify(statePath),
+        ) &&
+        contract.parameters[0]?.writePaths?.some(
+          (path) => JSON.stringify(path) === JSON.stringify(valuePath),
+        ),
+    );
+
+    expect(withMutEntry).toBeDefined();
+    const codegenFootprint = withMutEntry
+      ? Array.from(
+          buildProgramCodegenView([result]).modules.values(),
+        )[0]?.callableAccessFootprints.get(withMutEntry[0])
+      : undefined;
+    expect(codegenFootprint?.parameters[0]?.writes).toEqual(
+      expect.arrayContaining([statePath, valuePath]),
+    );
+  });
+
   it("uses reaching alias definitions for allocation access after reassignment", () => {
     expect(
       diagnosticCodes(`
