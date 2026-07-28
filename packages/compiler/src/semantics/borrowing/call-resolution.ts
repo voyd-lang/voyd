@@ -462,7 +462,6 @@ const intrinsicBorrowContract = ({
           ...(returnsReference
             ? {
                 returnedOrigins: [{ source: valuePath, result: [] }],
-                returnedBorrowedOrigins: [{ source: valuePath, result: [] }],
               }
             : {}),
         },
@@ -915,7 +914,6 @@ const filterConcreteProvenance = (
       borrowedRetainedPaths: _borrowedRetainedPaths,
       returnedPaths: _returnedPaths,
       returnedOrigins: _returnedOrigins,
-      returnedBorrowedOrigins: _returnedBorrowedOrigins,
       returnedSharedOrigins: _returnedSharedOrigins,
       returnedTypeMatchingOrigins: _returnedConditions,
       ...rest
@@ -952,12 +950,6 @@ const filterConcreteProvenance = (
           ? { returnedPaths: parameter.returnedPaths }
           : {}),
         ...(returnedOrigins ? { returnedOrigins } : {}),
-        ...(parameter.returnedBorrowedOrigins
-          ? {
-              returnedBorrowedOrigins:
-                parameter.returnedBorrowedOrigins.filter(matchesReturned),
-            }
-          : {}),
         ...(parameter.returnedSharedOrigins
           ? {
               returnedSharedOrigins:

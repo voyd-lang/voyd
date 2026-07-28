@@ -131,7 +131,6 @@ export type CallableParameterBorrowContract = {
   borrowedRetainedPaths?: readonly (readonly PlaceProjection[])[];
   returnedPaths?: readonly (readonly PlaceProjection[])[];
   returnedOrigins?: readonly ReturnedBorrowOrigin[];
-  returnedBorrowedOrigins?: readonly ReturnedBorrowOrigin[];
   returnedSharedOrigins?: readonly ReturnedBorrowOrigin[];
   returnedTypeMatchingOrigins?: readonly ReturnedTypeMatchingOrigin[];
   accessIfResultTypeDiffers?: BorrowTypeComparison;
@@ -309,7 +308,6 @@ export const mergeCallableBorrowContracts = (
         ...mergeProjectionPaths(parameters, "borrowedRetainedPaths"),
         ...mergeProjectionPaths(parameters, "returnedPaths"),
         ...mergeReturnedOrigins(parameters),
-        ...mergeReturnedBorrowedOrigins(parameters),
         ...mergeReturnedSharedOrigins(parameters),
         ...(invalidatedPaths.length > 0 ? { invalidatedPaths } : {}),
         ...(() => {
@@ -444,19 +442,6 @@ const mergeReturnedSharedOrigins = (
     ),
   );
   return origins.length > 0 ? { returnedSharedOrigins: origins } : {};
-};
-
-const mergeReturnedBorrowedOrigins = (
-  parameters: readonly CallableParameterBorrowContract[],
-): Partial<CallableParameterBorrowContract> => {
-  const origins = Array.from(
-    new Map(
-      parameters
-        .flatMap((parameter) => parameter.returnedBorrowedOrigins ?? [])
-        .map((origin) => [JSON.stringify(origin), origin]),
-    ).values(),
-  );
-  return origins.length > 0 ? { returnedBorrowedOrigins: origins } : {};
 };
 
 const mergeReturnedTypeMatchingOrigins = (

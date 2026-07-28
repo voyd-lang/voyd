@@ -30,6 +30,10 @@ impl SharedCell<T>
       __borrow_state: new_fixed_array<i32>(1)
     }
 
+  // V-448 will spell these callback parameters as `borrow T`. Until that
+  // syntax lands, the SharedCell intrinsic contract gives them the same scoped
+  // borrowed semantics; the temporary `fn(T)` and `fn(~T)` spellings are not
+  // ordinary value passing.
   /// Runs `body` with shared access to the contained value.
   ///
   /// Multiple nested shared accesses are allowed. A nested mutable access

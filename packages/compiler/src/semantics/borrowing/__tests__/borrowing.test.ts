@@ -2605,9 +2605,6 @@ fn invalid(~value: Box) -> i32
     ).find((contract) => contract.parameters[0]?.returned);
 
     expect(identityContract?.parameters[0]?.returned).toBe(true);
-    expect(
-      identityContract?.parameters[0]?.returnedBorrowedOrigins,
-    ).toBeUndefined();
     expect(diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       "TY0048",
     );

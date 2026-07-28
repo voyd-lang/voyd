@@ -24,7 +24,6 @@ import type {
 } from "./model.js";
 import {
   mergeCallableBorrowContracts,
-  projectionPathCovers,
   projectionPathsOverlap,
   translateProjectionPath,
 } from "./model.js";
@@ -678,20 +677,11 @@ const expressionProjectionCarriesBorrowedProvenance = (
   if (!expr) {
     return false;
   }
+  if (isSharedCellValueExpression(exprId, ctx)) {
+    return true;
+  }
   if (expr.exprKind === "call" || expr.exprKind === "method-call") {
-    return (
-      targetInfo(expr, ctx).contract?.parameters.some((parameter) =>
-        (parameter.returnedBorrowedOrigins ?? []).some(
-          (origin) =>
-            requested.length === 0 ||
-            translateProjectionPath({
-              result: origin.result,
-              source: origin.source,
-              requested,
-            }) !== undefined,
-        ),
-      ) === true
-    );
+    return false;
   }
   if (expr.exprKind === "identifier") {
     const event = ctx.events.get(expr.id);
@@ -1551,13 +1541,7 @@ const aggregateOriginsOfExpression = (
             {
               place,
               resultProjections: origin.result,
-              provenance:
-                parameter.returnedBorrowedOrigins?.some(
-                  (borrowed) =>
-                    JSON.stringify(borrowed) === JSON.stringify(origin),
-                ) === true
-                  ? ("storage-borrow" as const)
-                  : ("allocation-alias" as const),
+              provenance: "allocation-alias" as const,
               access: aggregateOriginAccess(actual, place, ctx, origin.source),
               capture,
             },
@@ -2717,32 +2701,6 @@ const placeOverlaps = (left: BorrowPlace, right: BorrowPlace): boolean => {
   return (
     left.root === right.root &&
     projectionPathsOverlap(left.projections, right.projections)
-  );
-};
-
-const parameterReturnsOnlyNonEscapingPlaces = (
-  parameter: CallableBorrowContract["parameters"][number],
-): boolean => {
-  if (!parameter.returned) {
-    return false;
-  }
-  const returnedOrigins =
-    parameter.returnedOrigins ??
-    (parameter.returnedPaths ?? [[]]).map((source) => ({
-      source,
-      result: [],
-    }));
-  return returnedOrigins.every(
-    (origin) =>
-      parameter.returnedBorrowedOrigins?.some(
-        (borrowed) => JSON.stringify(borrowed) === JSON.stringify(origin),
-      ) === true ||
-      parameter.returnedSharedOrigins?.some(
-        (shared) => JSON.stringify(shared) === JSON.stringify(origin),
-      ) === true ||
-      parameter.invalidatedPaths?.some((invalidated) =>
-        projectionPathCovers(invalidated, origin.source),
-      ) === true,
   );
 };
 
@@ -5154,11 +5112,7 @@ const analyzeCallableBorrowing = ({
   escapeImplicitReturnValues(callable.body, ctx);
 
   contract?.parameters.forEach((parameter, index) => {
-    const unsafeBorrowedReturn =
-      parameter.returned &&
-      parameter.returnedBorrowedOrigins !== undefined &&
-      !parameterReturnsOnlyNonEscapingPlaces(parameter);
-    if (!parameter.borrowedRetainedPaths && !unsafeBorrowedReturn) {
+    if (!parameter.borrowedRetainedPaths) {
       return;
     }
     const symbols = callable.parameters[index]

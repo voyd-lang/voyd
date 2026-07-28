@@ -625,12 +625,6 @@ const returnedFlowForParameter = (
         ...origin,
         sourceEndpointAccess:
           contractOrigin.endpointAccess ?? origin.sourceEndpointAccess,
-        ...(parameter.returnedBorrowedOrigins?.some(
-          (borrowedOrigin) =>
-            JSON.stringify(borrowedOrigin) === JSON.stringify(contractOrigin),
-        )
-          ? { borrowed: true }
-          : {}),
         ...(parameter.returnedSharedOrigins?.some(
           (sharedOrigin) =>
             JSON.stringify(sharedOrigin) === JSON.stringify(contractOrigin),
@@ -1474,7 +1468,6 @@ const contractForDirectCallbackInvocation = ({
         borrowedRetainedPaths: _borrowedRetainedPaths,
         returnedPaths: _returnedPaths,
         returnedOrigins: _returnedOrigins,
-        returnedBorrowedOrigins: _returnedBorrowedOrigins,
         returnedSharedOrigins: _returnedSharedOrigins,
         returnedTypeMatchingOrigins: _returnedConditions,
         ...base
@@ -2413,11 +2406,6 @@ const summarizeFunction = ({
   decls: DeclTable;
 }): CallableBorrowContract => {
   incrementCompilerPerfCounter("borrowing.summary.evaluations");
-  const functionMetadata = symbolTable.getSymbol(functionItem.symbol)
-    .metadata as { intrinsic?: boolean; intrinsicName?: string } | undefined;
-  const preservesInternalBorrowedReturn =
-    functionMetadata?.intrinsic === true &&
-    functionMetadata.intrinsicName === "__shared_cell_value";
   const runtimeCheckedReceiverWrites = hasRuntimeCheckedReceiverWrites({
     functionItem,
     typing,
@@ -2593,15 +2581,6 @@ const summarizeFunction = ({
         index,
       );
       const returnedOrigins = returnedContractOrigins.origins;
-      const returnedBorrowedOrigins = preservesInternalBorrowedReturn
-        ? originsForParameter(returned, index)
-            .filter((origin) => origin.borrowed === true)
-            .map((origin) => ({
-              source: origin.sourceProjections,
-              result: origin.resultProjections,
-              endpointAccess: origin.sourceEndpointAccess,
-            }))
-        : [];
       const invalidatedPaths = pathsForParameter(definitelyInvalidated, index);
       const returnedSharedOrigins = returnedSharedOriginsForParameter({
         returned,
@@ -2650,9 +2629,6 @@ const summarizeFunction = ({
         ...(externalRetainedPaths.length > 0 ? { externalRetainedPaths } : {}),
         ...(borrowedRetainedPaths.length > 0 ? { borrowedRetainedPaths } : {}),
         ...(returnedOrigins.length > 0 ? { returnedOrigins } : {}),
-        ...(returnedBorrowedOrigins.length > 0
-          ? { returnedBorrowedOrigins }
-          : {}),
         ...(returnedSharedOrigins.length > 0 ? { returnedSharedOrigins } : {}),
         ...(invalidatedPaths.length > 0 ? { invalidatedPaths } : {}),
         ...(defaultOrigins.get(index)?.length
@@ -2697,7 +2673,6 @@ const contractEqualityKey = (contract: CallableBorrowContract): string => {
       parameter.borrowedRetainedPaths ?? [],
       parameter.returnedPaths ?? [],
       parameter.returnedOrigins ?? [],
-      parameter.returnedBorrowedOrigins ?? [],
       parameter.returnedSharedOrigins ?? [],
       parameter.invalidatedPaths ?? [],
       parameter.defaultOrigins ?? [],
@@ -2833,7 +2808,6 @@ const normalizeCallableBorrowContract = (
         invalidatedPaths: _invalidatedPaths,
         externalRetainedPaths: _externalRetainedPaths,
         borrowedRetainedPaths: _borrowedRetainedPaths,
-        returnedBorrowedOrigins: _returnedBorrowedOrigins,
         returnedSharedOrigins: _returnedSharedOrigins,
         returnedTypeMatchingOrigins: _returnedConditions,
         accessIfResultTypeDiffers: _accessCondition,
@@ -2866,9 +2840,6 @@ const normalizeCallableBorrowContract = (
       );
       const returnedPaths = projectionPathsOrBroad(parameter.returnedPaths);
       const returnedOrigins = normalizedReturnedOrigins[index];
-      const returnedBorrowedOrigins = returnedOriginsOrBroad(
-        parameter.returnedBorrowedOrigins,
-      );
       const returnedSharedOrigins = normalizeReturnedSharedOrigins(
         parameter.returnedSharedOrigins,
       );
@@ -2904,7 +2875,6 @@ const normalizeCallableBorrowContract = (
         ...(borrowedRetainedPaths ? { borrowedRetainedPaths } : {}),
         ...(returnedPaths ? { returnedPaths } : {}),
         ...(returnedOrigins ? { returnedOrigins } : {}),
-        ...(returnedBorrowedOrigins ? { returnedBorrowedOrigins } : {}),
         ...(returnedSharedOrigins ? { returnedSharedOrigins } : {}),
         ...(returnedTypeMatchingOrigins?.length
           ? { returnedTypeMatchingOrigins }
@@ -2967,7 +2937,6 @@ const resetDerivedContractFacts = (
       borrowedRetainedPaths: _borrowedRetainedPaths,
       returnedPaths: _returnedPaths,
       returnedOrigins: _returnedOrigins,
-      returnedBorrowedOrigins: _returnedBorrowedOrigins,
       returnedSharedOrigins: _returnedSharedOrigins,
       returnedTypeMatchingOrigins: _returnedConditions,
       accessIfResultTypeDiffers: _accessCondition,
@@ -3601,7 +3570,6 @@ export const summarizeLambdaBorrowing = ({
         index,
       );
       const returnedOrigins = returnedContractOrigins.origins;
-      const returnedBorrowedOrigins: readonly ReturnedBorrowOrigin[] = [];
       const invalidatedPaths = pathsForParameter(definitelyInvalidated, index);
       const returnedSharedOrigins = returnedSharedOriginsForParameter({
         returned,
@@ -3643,9 +3611,6 @@ export const summarizeLambdaBorrowing = ({
         ...(externalRetainedPaths.length > 0 ? { externalRetainedPaths } : {}),
         ...(borrowedRetainedPaths.length > 0 ? { borrowedRetainedPaths } : {}),
         ...(returnedOrigins.length > 0 ? { returnedOrigins } : {}),
-        ...(returnedBorrowedOrigins.length > 0
-          ? { returnedBorrowedOrigins }
-          : {}),
         ...(returnedSharedOrigins.length > 0 ? { returnedSharedOrigins } : {}),
         ...(invalidatedPaths.length > 0 ? { invalidatedPaths } : {}),
       };
