@@ -522,7 +522,9 @@ const placeOfExpression = (
           root: target.root,
           projections: [
             ...target.projections,
-            { kind: "field", name: expr.field },
+            Number.isInteger(Number(expr.field))
+              ? { kind: "tuple", index: Number(expr.field) }
+              : { kind: "field", name: expr.field },
           ],
         }
       : undefined;
@@ -1024,7 +1026,9 @@ const callableOriginsOf = (
   }
   if (expr.exprKind === "field-access") {
     return callableOriginsOf(expr.target, ctx, seen, [
-      { kind: "field", name: expr.field },
+      Number.isInteger(Number(expr.field))
+        ? { kind: "tuple", index: Number(expr.field) }
+        : { kind: "field", name: expr.field },
       ...requested,
     ]);
   }
@@ -1055,6 +1059,14 @@ const callableOriginsOf = (
     return expr.arms.flatMap((arm) =>
       callableOriginsOf(arm.value, ctx, new Set(seen), requested),
     );
+  }
+  if (expr.exprKind === "effect-handler") {
+    return [
+      ...callableOriginsOf(expr.body, ctx, new Set(seen), requested),
+      ...expr.handlers.flatMap((handler) =>
+        callableOriginsOf(handler.body, ctx, new Set(seen), requested),
+      ),
+    ];
   }
   if (expr.exprKind === "block" && typeof expr.value === "number") {
     return callableOriginsOf(expr.value, ctx, seen, requested);
@@ -1397,7 +1409,7 @@ const evaluateEffectHandler = (
     flows.push(evaluateExpression(handler.body, handlerEnv, ctx));
   });
   if (typeof expr.finallyBranch === "number") {
-    flows.push(evaluateExpression(expr.finallyBranch, env, ctx));
+    evaluateExpression(expr.finallyBranch, env, ctx);
   }
   return unionFlows(...flows);
 };
@@ -1426,7 +1438,9 @@ const evaluateExpression = (
     case "field-access": {
       const target = evaluateExpression(expr.target, env, ctx);
       const projected = projectFlow(target, [
-        { kind: "field", name: expr.field },
+        Number.isInteger(Number(expr.field))
+          ? { kind: "tuple", index: Number(expr.field) }
+          : { kind: "field", name: expr.field },
       ]);
       recordAccess(projected, ctx);
       return expressionCanCarryReference(expr.id, ctx)
@@ -2044,6 +2058,13 @@ const summarizeFunction = ({
   decls: DeclTable;
 }): CallableBorrowContract => {
   incrementCompilerPerfCounter("borrowing.summary.evaluations");
+  const functionMetadata = symbolTable.getSymbol(functionItem.symbol)
+    .metadata as
+    | { intrinsic?: boolean; intrinsicName?: string }
+    | undefined;
+  const preservesInternalBorrowedReturn =
+    functionMetadata?.intrinsic === true &&
+    functionMetadata.intrinsicName === "__shared_cell_value";
   const accessed = emptyFlow();
   const retained = emptyFlow();
   const externalRetained = emptyFlow();
@@ -2156,12 +2177,14 @@ const summarizeFunction = ({
         index,
       );
       const returnedOrigins = returnedContractOrigins.origins;
-      const returnedBorrowedOrigins = originsForParameter(returned, index)
-        .filter((origin) => origin.borrowed === true)
-        .map((origin) => ({
-          source: origin.sourceProjections,
-          result: origin.resultProjections,
-        }));
+      const returnedBorrowedOrigins = preservesInternalBorrowedReturn
+        ? originsForParameter(returned, index)
+            .filter((origin) => origin.borrowed === true)
+            .map((origin) => ({
+              source: origin.sourceProjections,
+              result: origin.resultProjections,
+            }))
+        : [];
       const invalidatedPaths = pathsForParameter(definitelyInvalidated, index);
       const returnedSharedOrigins = returnedSharedOriginsForParameter({
         returned,
@@ -3099,12 +3122,7 @@ export const summarizeLambdaBorrowing = ({
         index,
       );
       const returnedOrigins = returnedContractOrigins.origins;
-      const returnedBorrowedOrigins = originsForParameter(returned, index)
-        .filter((origin) => origin.borrowed === true)
-        .map((origin) => ({
-          source: origin.sourceProjections,
-          result: origin.resultProjections,
-        }));
+      const returnedBorrowedOrigins: readonly ReturnedBorrowOrigin[] = [];
       const invalidatedPaths = pathsForParameter(definitelyInvalidated, index);
       const returnedSharedOrigins = returnedSharedOriginsForParameter({
         returned,

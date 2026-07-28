@@ -168,7 +168,7 @@ describe("borrow checking", () => {
     expect(merged?.parameters[0]?.returnedSharedOrigins).toBeUndefined();
   });
 
-  it("rejects overlapping aliases and reports the borrow origin", () => {
+  it("allows mutation while an ordinary alias remains live", () => {
     const codes = diagnosticCodes(`${prelude}
 fn conflict(~value: Box) -> i32
   let alias = value
@@ -176,10 +176,10 @@ fn conflict(~value: Box) -> i32
   alias.value
 `);
 
-    expect(codes).toContain("TY0048");
+    expect(codes).not.toContain("TY0048");
   });
 
-  it("reports borrow diagnostics in recovery mode when typing is clean", () => {
+  it("does not report ordinary aliases as borrows in recovery mode", () => {
     expect(
       recoveryDiagnosticCodes(`${prelude}
 fn conflict(~value: Box) -> i32
@@ -187,10 +187,10 @@ fn conflict(~value: Box) -> i32
   mutate(~value)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
-  it("tracks transitive alias provenance", () => {
+  it("keeps transitive ordinary aliases independent of source slots", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn conflict(~value: Box) -> i32
@@ -199,7 +199,237 @@ fn conflict(~value: Box) -> i32
   mutate(~value)
   second.value
 `),
+    ).not.toContain("TY0048");
+  });
+
+  it("keeps plain values independent through calls, storage, and capture", () => {
+    expect(() =>
+      analyze(`${prelude}
+obj Holder { value: Box }
+
+fn identity(value: Box) -> Box
+  value
+
+fn valid(~value: Box, ~holder: Holder) -> i32
+  let alias = identity(value)
+  holder.value = alias
+  let read_later = () => alias.value
+  mutate(~value)
+  read_later() + holder.value.value
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects active shared access through an alias during mutation", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn read_and_mutate(readable: Box, ~writable: Box) -> void
+  read(readable)
+  mutate(~writable)
+
+fn conflict(~value: Box) -> void
+  let alias = value
+  read_and_mutate(alias, ~value)
+`),
     ).toContain("TY0048");
+  });
+
+  it("keeps internal borrowed results active through their last use", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+fn mutate_cell(~cell: SharedCell<Box>) -> void
+  cell.value = Box { value: 2 }
+
+fn conflict(~cell: SharedCell<Box>) -> i32
+  let borrowed = shared_cell_value(cell)
+  mutate_cell(~cell)
+  borrowed.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("allows shared access while an internal shared borrow remains live", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+fn valid(cell: SharedCell<Box>) -> i32
+  let borrowed = shared_cell_value(cell)
+  let direct = cell.value.value
+  borrowed.value + direct
+`),
+    ).not.toThrow();
+  });
+
+  it("tracks internal borrowed provenance through effect handlers", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+eff Flag
+  get(resume) -> bool
+
+fn mutate_cell(~cell: SharedCell<Box>) -> void
+  cell.value = Box { value: 2 }
+
+fn conflict(~cell: SharedCell<Box>) -> i32
+  let borrowed =
+    try
+      shared_cell_value(cell)
+    Flag::get(resume):
+      resume(true)
+  mutate_cell(~cell)
+  borrowed.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("does not taint plain siblings of borrowed aggregate values", () => {
+    expect(() =>
+      analyze(`${prelude}
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+fn valid(cell: SharedCell<Box>, ~ordinary: Box) -> i32
+  let values = (shared_cell_value(cell), ordinary)
+  mutate(~ordinary)
+  values.1.value
+`),
+    ).not.toThrow();
+  });
+
+  it("preserves mixed aggregate provenance through reassignment", () => {
+    expect(() =>
+      analyze(`${prelude}
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+fn valid(cell: SharedCell<Box>, ~ordinary: Box, initial: (Box, Box)) -> i32
+  var values = initial
+  values = (shared_cell_value(cell), ordinary)
+  mutate(~ordinary)
+  values.1.value
+`),
+    ).not.toThrow();
+  });
+
+  it("preserves plain provenance when rewrapping an aggregate sibling", () => {
+    expect(() =>
+      analyze(`${prelude}
+obj Wrapper { value: Box }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+fn valid(cell: SharedCell<Box>, ~ordinary: Box) -> i32
+  let mixed = (shared_cell_value(cell), ordinary)
+  let rewrapped = Wrapper { value: mixed.1 }
+  mutate(~ordinary)
+  rewrapped.value.value
+`),
+    ).not.toThrow();
+  });
+
+  it("preserves plain provenance through direct aggregate projections", () => {
+    expect(() =>
+      analyze(`${prelude}
+obj Wrapper { value: Box }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+fn valid(cell: SharedCell<Box>, ~ordinary: Box) -> i32
+  let rewrapped =
+    Wrapper { value: (shared_cell_value(cell), ordinary).1 }
+  mutate(~ordinary)
+  rewrapped.value.value
+`),
+    ).not.toThrow();
+  });
+
+  it("preserves plain provenance through nested tuple projections", () => {
+    expect(() =>
+      analyze(`${prelude}
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+fn valid(cell: SharedCell<Box>, ~ordinary: Box) -> i32
+  let nested = ((shared_cell_value(cell), ordinary), 0)
+  let inner = nested.0
+  let selected = inner.1
+  mutate(~ordinary)
+  selected.value
+`),
+    ).not.toThrow();
+  });
+
+  it("materializes internal borrowed provenance at plain wrapper returns", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+fn copied_value(cell: SharedCell<Box>) -> Box
+  shared_cell_value(cell)
+
+fn mutate_cell(~cell: SharedCell<Box>) -> void
+  cell.value = Box { value: 2 }
+
+fn valid(~cell: SharedCell<Box>) -> i32
+  let copied = copied_value(cell)
+  mutate_cell(~cell)
+  copied.value
+`),
+    ).not.toThrow();
   });
 
   it("tracks unique roots captured by live closures", () => {
@@ -230,29 +460,15 @@ fn valid() -> i32
     ).not.toThrow();
   });
 
-  it("reports both the attempted access and borrow lifetime spans", () => {
-    const diagnostics = diagnosticsFor(`${prelude}
+  it("does not report borrow lifetimes for ordinary aliases", () => {
+    expect(
+      diagnosticsFor(`${prelude}
 fn conflict(~value: Box) -> i32
   let alias = value
   mutate(~value)
   alias.value
-`);
-    const conflict = diagnostics.find(
-      (diagnostic) => diagnostic.code === "TY0048",
-    );
-
-    const relatedMessages =
-      conflict?.related?.map((entry) => entry.message) ?? [];
-    expect(relatedMessages.length).toBeGreaterThanOrEqual(2);
-    expect(conflict?.related?.every((entry) => entry.span.start >= 0)).toBe(
-      true,
-    );
-    expect(
-      [
-        conflict?.message,
-        ...(conflict?.related ?? []).map((entry) => entry.message),
-      ].join("\n"),
-    ).not.toMatch(/HIR|codegen|symbol id/i);
+`),
+    ).toEqual([]);
   });
 
   it("ends a shared borrow after its last use", () => {
@@ -359,7 +575,7 @@ fn conflict(~value: Box) -> i32
   mutate(~value)
   view.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves provenance through trait views", () => {
@@ -377,7 +593,7 @@ fn conflict(~value: Box) -> i32
   mutate(~value)
   view.read()
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("conservatively overlaps indexed places without a stable-storage contract", () => {
@@ -442,13 +658,13 @@ fn relay(shared: Box, ~mutable: Box) -> i32
     ).not.toThrow();
   });
 
-  it("rejects mutable borrows passed to opaque retaining callables", () => {
+  it("allows ordinary handles passed to opaque retaining callables", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn invoke(~value: Box, callback: fn(Box) : () -> void) -> void
   callback(value)
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
   it("allows rebinding after an opaque callable retains the old value", () => {
@@ -496,7 +712,7 @@ fn conflict(~value: Box, other: Box) -> i32
   mutate(~value)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("does not treat an overwritten alias target as a read", () => {
@@ -520,7 +736,7 @@ fn conflict(~value: Box, other: Box, replace: bool) -> i32
   mutate(~value)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves every possible origin when copying a conditional alias", () => {
@@ -534,7 +750,7 @@ fn conflict(~value: Box, other: Box, replace: bool) -> i32
   mutate(~value)
   copy.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves every possible origin returned from a call", () => {
@@ -551,7 +767,7 @@ fn conflict(~value: Box, other: Box, select_first: bool) -> i32
   mutate(~value)
   selected.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves every possible origin of conditional expressions", () => {
@@ -566,7 +782,7 @@ fn conflict(~value: Box, other: Box, select_value: bool) -> i32
   mutate(~value)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves pre-loop alias provenance when a loop may not run", () => {
@@ -580,10 +796,10 @@ fn conflict(~value: Box, other: Box, replace: bool) -> i32
   mutate(~value)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
-  it("keeps outer borrows live when a returning loop may not run", () => {
+  it("does not turn outer aliases into loans around loops", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn conflict(~value: Box, should_return: bool) -> i32
@@ -593,7 +809,7 @@ fn conflict(~value: Box, should_return: bool) -> i32
   mutate(~value)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("does not analyze statements after break or continue", () => {
@@ -625,7 +841,7 @@ fn invalid(~value: Box) -> void
   mutate(~value)
   let result = read(holder.value)
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("keeps fresh mutable aggregate identity separate from its contents", () => {
@@ -645,7 +861,7 @@ fn valid(~first: Pair, ~second: Pair) -> void
     ).not.toThrow();
   });
 
-  it("propagates retained origins through fixed-array storage intrinsics", () => {
+  it("does not downgrade handles stored through fixed-array intrinsics", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn invalid(
@@ -656,7 +872,7 @@ fn invalid(
   mutate(~value)
   __array_get(storage, 0).value
 `),
-    ).toContain("TY0051");
+    ).not.toContain("TY0051");
   });
 
   it("preserves fixed-array literal element origins", () => {
@@ -670,7 +886,7 @@ fn invalid(~value: Box) -> i32
   mutate(~value)
   __array_get(values, 0).value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("does not treat aggregate storage as reading stored references", () => {
@@ -755,7 +971,7 @@ fn invalid_direct(~left: Box, right: Box, index: i32) -> i32
   mutate(~left)
   __array_get(values, index).value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("records fixed-array length inspection as shared access", () => {
@@ -836,7 +1052,7 @@ fn invalid(~value: Box, packed: Packed) -> i32
   mutate(~value)
   read(identity)
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
 
     expect(() =>
       analyze(`${prelude}
@@ -920,7 +1136,7 @@ fn invalid_projected(~source: Source<Box>, packed: Packed) -> i32
   mutate(~source.value)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
 
     expect(() =>
       analyze(`${prelude}
@@ -1041,7 +1257,7 @@ fn invalid(~source: Box, packed: Packed) -> i32
   mutate(~source)
   read(alias)
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("keeps an origin unconditional when any return path is unconditional", () => {
@@ -1081,7 +1297,7 @@ fn invalid(~source: Box, packed: Packed) -> i32
   mutate(~source)
   read_choice(alias)
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves identity provenance through boundary conversion wrappers", () => {
@@ -1120,7 +1336,7 @@ fn invalid_unpack(~value: Packed) -> i32
 `;
     expect(
       diagnosticCodes(source).filter((code) => code === "TY0048"),
-    ).toHaveLength(2);
+    ).toHaveLength(0);
   });
 
   it("records union discriminant inspection without reading payloads", () => {
@@ -1253,7 +1469,7 @@ fn valid(~value: Box) -> void
     ).not.toThrow();
   });
 
-  it("rejects mutation after a helper retains an array-element borrow", () => {
+  it("allows mutation after retaining a copied array element", () => {
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
@@ -1275,10 +1491,10 @@ fn invalid(
   retain_first(values, retain)
   mutate_array(~values)
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
-  it("preserves external retention when a helper also returns the source", () => {
+  it("keeps retained copied elements independent when returning the array", () => {
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
@@ -1302,10 +1518,10 @@ fn invalid(
   let length = __array_len(returned)
   mutate_array(~values)
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
-  it("preserves array-element retention through caller-owned storage", () => {
+  it("allows array mutation after storing a copied element", () => {
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
@@ -1325,7 +1541,7 @@ fn invalid(
   store_first(values, ~holder)
   mutate_array(~values)
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
   it("records source reads through array-copy options", () => {
@@ -1420,7 +1636,7 @@ fn invalid(~value: Box) -> i32
   mutate(~value)
   outer.wrapper.inner.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves contained origins in inline aggregate arguments", () => {
@@ -1452,7 +1668,7 @@ fn invalid(~value: Box, other: Box, choose_value: bool) -> i32
   mutate(~value)
   holder.value.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves reference provenance through tuple storage", () => {
@@ -1463,7 +1679,7 @@ fn invalid(~value: Box, other: Box) -> i32
   mutate(~value)
   values.0.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("updates aggregate provenance after reassignment", () => {
@@ -1477,7 +1693,7 @@ fn invalid(~value: Box, other: Box) -> i32
   mutate(~value)
   holder.value.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves aggregate provenance through destructuring", () => {
@@ -1488,7 +1704,7 @@ fn invalid(~value: Box, other: Box) -> i32
   mutate(~value)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves returned field projections across calls", () => {
@@ -1519,7 +1735,7 @@ fn invalid(~pair: Pair) -> i32
   mutate(~pair.left)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
 
     expect(() =>
       analyze(`${prelude}
@@ -1554,7 +1770,7 @@ fn invalid(~pair: LeafPair) -> i32
   pair.left.other = pair.left.other + 1
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves unresolved projections through nested destructuring", () => {
@@ -1573,7 +1789,7 @@ fn invalid(~pair: LeafPair) -> i32
   pair.left.other = pair.left.other + 1
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("conservatively preserves origins stored in returned aggregates", () => {
@@ -1590,7 +1806,7 @@ fn invalid(~pair: Pair) -> i32
   mutate(~pair.left)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves conservative returned aggregates through reassignment", () => {
@@ -1608,7 +1824,7 @@ fn invalid(~pair: Pair, initial: Holder) -> i32
   mutate(~pair.left)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("merges returned aggregate origins after conditional reassignment", () => {
@@ -1627,7 +1843,7 @@ fn invalid(~first: Pair, second: Pair, replace: bool) -> i32
   mutate(~first.left)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("merges direct and returned aggregate origins after reassignment", () => {
@@ -1646,7 +1862,7 @@ fn invalid(~initial: Holder, pair: Pair, replace: bool) -> i32
   mutate(~initial.value)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("projects returned aggregate provenance through destructuring", () => {
@@ -1662,7 +1878,7 @@ fn invalid(~pair: Pair) -> i32
   mutate(~pair.left)
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("preserves contained origins when passing returned aggregates directly", () => {
@@ -1703,7 +1919,7 @@ fn valid() -> void
     ).not.toThrow();
   });
 
-  it("permanently shares a unique capability passed to a retaining call", () => {
+  it("does not downgrade an ordinary handle passed to a retaining call", () => {
     expect(
       diagnosticCodes(`${prelude}
 obj Holder { value: Box }
@@ -1715,10 +1931,10 @@ fn invalid(~value: Box, ~holder: Holder) -> void
   retain(~holder, value)
   mutate(~value)
 `),
-    ).toContain("TY0051");
+    ).not.toContain("TY0051");
   });
 
-  it("downgrades contained origins retained from returned aggregates", () => {
+  it("does not downgrade aliases retained from returned aggregates", () => {
     expect(
       diagnosticCodes(`${prelude}
 obj Holder { value: Box }
@@ -1737,7 +1953,7 @@ fn invalid(~target: Holder) -> void
   retain(~target, wrap(pair))
   mutate(~pair.left)
 `),
-    ).toContain("TY0051");
+    ).not.toContain("TY0051");
   });
 
   it("retains only the selected field of a returned aggregate alias", () => {
@@ -1802,9 +2018,55 @@ fn invalid(~value: Box, ~holder: Holder) -> void
     ).find((contract) => contract.parameters[0]?.retained);
 
     expect(retainContract?.parameters[0]?.retained).toBe(true);
-    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+    expect(
+      retainContract?.parameters[0]?.borrowedRetainedPaths,
+    ).toBeUndefined();
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       "TY0051",
     );
+  });
+
+  it("materializes internal borrowed values across plain module returns", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+pub obj SharedCell<T> { api value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+pub fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+pub fn copied_value(cell: SharedCell<Box>) -> Box
+  shared_cell_value(cell)
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::storage::{ Box, SharedCell, copied_value }
+
+fn mutate_cell(~cell: SharedCell<Box>) -> void
+  cell.value = Box { value: 2 }
+
+fn valid(~cell: SharedCell<Box>) -> i32
+  let copied = copied_value(cell)
+  mutate_cell(~cell)
+  copied.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+
+    expect(diagnostics).toEqual([]);
   });
 
   it("publishes parametric borrow contracts for exported generics", async () => {
@@ -1847,7 +2109,10 @@ fn invalid(~value: Box) -> i32
     ).find((contract) => contract.parameters[0]?.returned);
 
     expect(identityContract?.parameters[0]?.returned).toBe(true);
-    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+    expect(
+      identityContract?.parameters[0]?.returnedBorrowedOrigins,
+    ).toBeUndefined();
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       "TY0048",
     );
   });
@@ -1917,7 +2182,7 @@ pub fn invalid(): (open) -> void
 
     expect(spawnContract?.parameters[0]?.retained).toBe(true);
     expect(tupleContract?.parameters[0]?.retained).toBe(true);
-    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
       "TY0049",
     );
   });
@@ -2054,7 +2319,7 @@ fn invalid(first: Box, ~second: Box, use_second: bool) -> i32
   mutate(~second)
   selected.value
 `;
-    expect(diagnosticCodes(source)).toContain("TY0048");
+    expect(diagnosticCodes(source)).not.toContain("TY0048");
   });
 
   it("carries mixed break and continue environments through loops", () => {
@@ -2075,19 +2340,19 @@ fn invalid(first: Box, ~second: Box, active: bool, stop: bool) -> i32
   mutate(~second)
   selected.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
-  it("rejects returning a mutable borrow", () => {
+  it("returns a plain value from a mutable parameter", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn escape(~value: Box) -> Box
   value
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
-  it("rejects storing a mutable borrow in caller-owned state", () => {
+  it("stores a plain handle from a mutable parameter", () => {
     expect(
       diagnosticCodes(`${prelude}
 obj Holder { value: Box }
@@ -2095,16 +2360,16 @@ obj Holder { value: Box }
 fn invalid(~value: Box, ~holder: Holder) -> void
   holder.value = value
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
-  it("rejects capturing a mutable parameter", () => {
+  it("captures a plain handle from a mutable parameter", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn invalid(~value: Box) -> (fn() : () -> i32)
   () => value.value
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
   it("rejects mutable captures escaping through implicit returns", () => {
@@ -2121,6 +2386,225 @@ fn make() -> Callback
     ).toContain("TY0049");
   });
 
+  it("rejects mutable captures escaping through local reborrows", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  let callback = () =>
+    let ~alias = value
+    mutate(~alias)
+    alias.value
+  callback
+`),
+    ).toContain("TY0049");
+  });
+
+  it("rejects mutable captures reached after local alias reassignment", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  () =>
+    let ~alias = Box { value: 1 }
+    alias = value
+    mutate(~alias)
+    alias.value
+`),
+    ).toContain("TY0049");
+  });
+
+  it("keeps captured origins active while evaluating reassignment values", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  () =>
+    let ~alias = value
+    alias = alias
+    mutate(~alias)
+    0
+`),
+    ).toContain("TY0049");
+  });
+
+  it("rejects mutable captures reached through aggregate containment", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Holder { value: Box }
+type Callback = fn() : () -> i32
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  () =>
+    let ~holder = Holder { value }
+    mutate(~holder.value)
+    holder.value.value
+`),
+    ).toContain("TY0049");
+  });
+
+  it("allows replacing a captured reference stored in a fresh aggregate", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Holder { value: Box }
+type Callback = fn() : () -> i32
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  () =>
+    let ~holder = Holder { value }
+    holder.value = Box { value: 1 }
+    0
+`),
+    ).not.toContain("TY0049");
+  });
+
+  it("tracks capture aliases independently across conditional branches", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make(flag: bool) -> Callback
+  let ~value = Box { value: 0 }
+  () =>
+    let ~alias = value
+    if flag:
+      alias = Box { value: 1 }
+    else:
+      mutate(~alias)
+    alias.value
+`),
+    ).toContain("TY0049");
+  });
+
+  it("keeps captured origins across optional loop reassignments", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make(flag: bool) -> Callback
+  let ~value = Box { value: 0 }
+  () =>
+    let ~alias = value
+    while flag:
+      alias = Box { value: 1 }
+    mutate(~alias)
+    alias.value
+`),
+    ).toContain("TY0049");
+  });
+
+  it("kills captured origins after reassignment inside an executed loop", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make(flag: bool) -> Callback
+  let ~value = Box { value: 0 }
+  () =>
+    let ~alias = value
+    while flag:
+      alias = Box { value: 1 }
+      mutate(~alias)
+    0
+`),
+    ).not.toContain("TY0049");
+  });
+
+  it("does not apply nested-lambda reassignments to the outer closure", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  () =>
+    let ~alias = value
+    let replace = () =>
+      alias = Box { value: 1 }
+    mutate(~alias)
+    alias.value
+`),
+    ).toContain("TY0049");
+  });
+
+  it("keeps pre-effect captured origins visible inside handlers", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+eff Flag
+  get(resume) -> bool
+
+fn make(): Flag -> Callback
+  let ~value = Box { value: 0 }
+  () =>
+    let ~alias = value
+    try
+      Flag::get()
+      alias = Box { value: 1 }
+    Flag::get(resume):
+      mutate(~alias)
+      resume(true)
+    alias.value
+`),
+    ).toContain("TY0049");
+  });
+
+  it("does not merge fresh aliases into captured conditional branches", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make(flag: bool) -> Callback
+  let ~value = Box { value: 0 }
+  () =>
+    let ~alias = value
+    if flag:
+      alias = Box { value: 1 }
+      mutate(~alias)
+    else:
+      value.value
+    alias.value
+`),
+    ).not.toContain("TY0049");
+  });
+
+  it("does not treat scalar copies in aggregates as captured aliases", () => {
+    expect(() =>
+      analyze(`
+type Callback = fn() : () -> i32
+
+fn make(value: i32) -> Callback
+  () =>
+    let ~pair = (value, 0)
+    pair.0 = 1
+    pair.0
+`),
+    ).not.toThrow();
+  });
+
+  it("allows escaping closures that mutate only fresh local objects", () => {
+    expect(() =>
+      analyze(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make(~value: Box) -> Callback
+  () =>
+    let ~fresh = Box { value: value.value }
+    fresh.value = fresh.value + 1
+    fresh.value
+`),
+    ).not.toThrow();
+  });
+
   it("rejects mutable scalar captures without other outer mutations", () => {
     expect(
       diagnosticCodes(`
@@ -2135,7 +2619,7 @@ fn make() -> Callback
     ).toContain("TY0049");
   });
 
-  it("rejects mutable captures retained by callback intrinsics", () => {
+  it("allows ordinary handle captures retained by callback intrinsics", () => {
     expect(
       diagnosticCodes(`${prelude}
 @intrinsic(name: "__render_retain_callback", uses_signature: true)
@@ -2148,10 +2632,10 @@ fn invalid() -> void
   let _ = retain_callback(callback)
   mutate(~box)
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
-  it("propagates retained callbacks through public wrappers", () => {
+  it("keeps ordinary captures plain through retaining wrappers", () => {
     expect(
       diagnosticCodes(`${prelude}
 @intrinsic(name: "__retain_callback", uses_signature: true)
@@ -2167,10 +2651,10 @@ fn invalid() -> void
   let _ = retain_callback(callback)
   mutate(~box)
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
-  it("propagates retention through scalar field projections", () => {
+  it("keeps retained read-only field captures as ordinary values", () => {
     expect(
       diagnosticCodes(`${prelude}
 obj Token { id: i32 }
@@ -2188,11 +2672,11 @@ fn invalid() -> void
   let _ = retain_callback_id(callback)
   mutate(~box)
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
   it.each(["__task_spawn", "__task_detach"])(
-    "rejects mutable captures retained by %s",
+    "allows ordinary captures retained by %s",
     (intrinsicName) => {
       expect(
         diagnosticCodes(`${prelude}
@@ -2206,11 +2690,11 @@ fn invalid() -> void
   let _ = retain_work(work)
   mutate(~box)
 `),
-      ).toContain("TY0049");
+      ).not.toContain("TY0049");
     },
   );
 
-  it("propagates task retention through spawn wrappers", () => {
+  it("allows ordinary handle captures through spawn wrappers", () => {
     expect(
       diagnosticCodes(`${prelude}
 @intrinsic(name: "__task_spawn", uses_signature: true)
@@ -2226,10 +2710,10 @@ fn invalid(): (open) -> void
   let _ = spawn(work)
   mutate(~box)
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
-  it("propagates task retention through generic spawn wrappers", () => {
+  it("allows ordinary captures through generic spawn wrappers", () => {
     expect(
       diagnosticCodes(`${prelude}
 @intrinsic(name: "__task_spawn", uses_signature: true)
@@ -2245,7 +2729,7 @@ fn invalid(): (open) -> void
   let _ = spawn(work)
   mutate(~box)
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
   it("rejects mutable captures in aggregates returned implicitly", () => {
@@ -2266,6 +2750,119 @@ fn make() -> CallbackResult
     callback,
     count: 1
   }
+`),
+    ).toContain("TY0049");
+  });
+
+  it("rejects mutable captures returned through tuple projections", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  let change = () =>
+    value.value = value.value + 1
+    value.value
+  let callbacks = (change, () => 0)
+  callbacks.0
+`),
+    ).toContain("TY0049");
+  });
+
+  it("preserves conditionally reaching tuple capture escapes", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn make(flag: bool) -> Callback
+  let ~value = Box { value: 0 }
+  let change = () =>
+    value.value = value.value + 1
+    value.value
+  let safe = () => 0
+  var callbacks = (change, safe)
+  if flag:
+    callbacks = (safe, safe)
+  callbacks.0
+`),
+    ).toContain("TY0049");
+  });
+
+  it("preserves mutable capture escapes through returned tuple calls", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn wrap(callback: Callback) -> (Callback, Callback)
+  (callback, () => 0)
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  let change = () =>
+    value.value = value.value + 1
+    value.value
+  let callbacks = wrap(change)
+  callbacks.0
+`),
+    ).toContain("TY0049");
+  });
+
+  it("preserves mutable capture escapes through scalar call bindings", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn identity(callback: Callback) -> Callback
+  callback
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  let change = () =>
+    value.value = value.value + 1
+    value.value
+  let forwarded = identity(change)
+  forwarded
+`),
+    ).toContain("TY0049");
+  });
+
+  it("preserves capture metadata through projected call arguments", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+obj Holder { callback: Callback }
+
+fn identity(callback: Callback) -> Callback
+  callback
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  let change = () =>
+    value.value = value.value + 1
+    value.value
+  let holder = Holder { callback: change }
+  let forwarded = identity(holder.callback)
+  forwarded
+`),
+    ).toContain("TY0049");
+  });
+
+  it("preserves capture metadata through inline aggregate arguments", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+type Callback = fn() : () -> i32
+
+fn first(pair: (Callback, i32)) -> Callback
+  pair.0
+
+fn make() -> Callback
+  let ~value = Box { value: 0 }
+  let change = () =>
+    value.value = value.value + 1
+    value.value
+  let forwarded = first((change, 0))
+  forwarded
 `),
     ).toContain("TY0049");
   });
@@ -2349,7 +2946,7 @@ fn make() -> Callback
     ).toContain("TY0049");
   });
 
-  it("keeps shared captures borrowed through the closure's last use", () => {
+  it("does not turn ordinary closure captures into loans", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn invalid(~value: Box) -> i32
@@ -2358,7 +2955,7 @@ fn invalid(~value: Box) -> i32
   mutate(~value)
   read_alias()
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("ends a shared capture after a local closure's last use", () => {
@@ -2374,7 +2971,7 @@ fn valid(~value: Box) -> i32
     ).not.toThrow();
   });
 
-  it("downgrades a root captured by an escaping closure", () => {
+  it("does not downgrade a handle captured by an escaping closure", () => {
     expect(
       diagnosticCodes(`${prelude}
 type Callback = fn() : () -> i32
@@ -2388,7 +2985,7 @@ fn invalid(~value: Box, ~holder: CallbackHolder) -> void
   holder.callback = read_alias
   mutate(~value)
 `),
-    ).toContain("TY0051");
+    ).not.toContain("TY0051");
   });
 
   it("tracks captures in inline callback arguments", () => {
@@ -2405,7 +3002,7 @@ fn invalid() -> i32
     ).toContain("TY0048");
   });
 
-  it("rejects unique roots captured by inline closures stored in fields", () => {
+  it("allows ordinary handles captured by closures stored in fields", () => {
     expect(
       diagnosticCodes(`${prelude}
 type Callback = fn() : () -> i32
@@ -2418,7 +3015,7 @@ fn invalid(~holder: CallbackHolder) -> void
   holder.callback = () => value.value
   mutate(~value)
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
   it("does not propagate terminated branch state or validate unreachable code", () => {
@@ -2481,7 +3078,7 @@ fn invalid(other: Box, ~value: Box, running: bool) -> i32
     break
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("carries aliases assigned at the end of a loop to its next iteration", () => {
@@ -2494,7 +3091,7 @@ fn invalid(other: Box, ~value: Box, running: bool) -> i32
     alias = value
   alias.value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("tracks loop-carried aliases used before their definition", () => {
@@ -2507,7 +3104,7 @@ fn invalid(other: Box, ~value: Box, running: bool) -> void
     let observed = alias.value
     alias = value
 `),
-    ).toContain("TY0048");
+    ).not.toContain("TY0048");
   });
 
   it("kills loop-carried aliases at definite reassignments", () => {
@@ -2572,13 +3169,13 @@ fn valid() -> i32
     ).not.toThrow();
   });
 
-  it("rejects projected references escaping mutable parameters", () => {
+  it("returns plain projected handles from mutable parameters", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn invalid(~pair: Pair) -> Box
   pair.left
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
   it("propagates source invalidation through later-defined helpers", () => {
@@ -2653,10 +3250,10 @@ fn invalid(~pair: Pair) -> Box
 fn replace_left_with_right(~pair: Pair) -> void
   pair.left = pair.right
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
-  it("downgrades copied same-root projections at helper call sites", () => {
+  it("does not downgrade copied same-root projections at helper calls", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn invalid(~pair: Pair) -> i32
@@ -2667,7 +3264,7 @@ fn invalid(~pair: Pair) -> i32
 fn replace_left_with_right(~pair: Pair) -> void
   pair.left = pair.right
 `),
-    ).toContain("TY0051");
+    ).not.toContain("TY0051");
   });
 
   it("updates physical-place provenance after mutable-reference rebinding", () => {
@@ -2679,7 +3276,7 @@ fn invalid(~pair: Pair, ~other: Pair) -> Box
   pair.left = Box { value: 2 }
   moved
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
   it("rejects a mutable borrow across an effect operation", () => {
@@ -2715,7 +3312,7 @@ fn valid(mutator: Mutator, ~left: Box, ~right: Box) -> i32
     ).not.toThrow();
   });
 
-  it("conservatively retains references passed to effect operations", () => {
+  it("does not downgrade ordinary handles passed to effect operations", () => {
     expect(
       diagnosticCodes(`${prelude}
 eff Async
@@ -2726,7 +3323,7 @@ fn invalid(): Async -> void
   Async::hold(value)
   mutate(~value)
 `),
-    ).toContain("TY0051");
+    ).not.toContain("TY0051");
   });
 
   it("rejects borrowed values returned from SharedCell callbacks", () => {
@@ -3048,7 +3645,7 @@ fn clear(~value: BoxArray) -> void
     ).toContain("TY0050");
   });
 
-  it("does not detach a return origin invalidated on only one branch", () => {
+  it("returns plain aggregate values across conditional invalidation", () => {
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
@@ -3067,10 +3664,10 @@ fn maybe_take(~self: BoxArray, detach: bool) -> BoxArray
     return BoxArray { storage: removed }
   BoxArray { storage: self.storage }
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
-  it("retracts shared return guarantees after forward callees converge", () => {
+  it("keeps forward-call aggregate returns as plain values", () => {
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
@@ -3096,7 +3693,7 @@ fn maybe_detached(~self: BoxArray, detach: bool) -> BoxArray
 fn live(self: BoxArray) -> BoxArray
   BoxArray { storage: self.storage }
 `),
-    ).toContain("TY0049");
+    ).not.toContain("TY0049");
   });
 
   it("propagates scoped callback loans through higher-order wrappers", () => {

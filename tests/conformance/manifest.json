@@ -140,11 +140,11 @@
       "tags": ["typing", "borrowing", "diagnostics"],
       "cases": [
         {
-          "id": "typing.borrowing.conflicts-and-downgrade",
-          "title": "rejects simultaneous mutable aliases and mutation after sharing",
+          "id": "typing.borrowing.conflicting-active-accesses",
+          "title": "rejects simultaneous mutable accesses without rejecting retained ordinary aliases",
           "expect": {
             "kind": "diagnostics",
-            "codes": ["TY0048", "TY0051"]
+            "codes": ["TY0048"]
           }
         }
       ]

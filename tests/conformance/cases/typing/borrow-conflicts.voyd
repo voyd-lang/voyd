@@ -19,7 +19,7 @@ fn retain(~holder: Holder, value: Box) -> void
 fn simultaneous_mutable_aliases(~value: Box) -> void
   mutate_pair(~value, ~value)
 
-fn mutation_after_capability_downgrade(
+fn mutation_after_retaining_ordinary_alias(
   ~value: Box,
   ~holder: Holder
 ) -> void

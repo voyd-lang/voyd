@@ -345,12 +345,6 @@ const intrinsicBorrowContract = ({
                   result: [],
                 },
               ],
-              returnedBorrowedOrigins: [
-                {
-                  source: [sourceIndex],
-                  result: [],
-                },
-              ],
             }
           : {}),
       })),
@@ -403,7 +397,6 @@ const intrinsicBorrowContract = ({
             { kind: "index", stable: false },
           ],
           destinationPath: [{ kind: "index", stable: false }],
-          borrowsSource: true,
         },
       ],
       maySuspend: false,
@@ -425,7 +418,6 @@ const intrinsicBorrowContract = ({
           destinationParameter: 0,
           sourcePath: [{ kind: "index", stable: false }],
           destinationPath: [{ kind: "index", stable: false }],
-          borrowsSource: true,
         },
       ],
       maySuspend: false,
