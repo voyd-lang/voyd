@@ -59,6 +59,9 @@ impl PairReplaceable for Box
 fn increment(~value: Box) -> void
   value.value = value.value + 1
 
+fn identity(value: Box) -> Box
+  value
+
 fn replace_dynamic(~value: Replaceable) -> void
   value.replace()
 
@@ -103,6 +106,24 @@ pub fn readonly_use_after_mutable_call() -> i32
   increment(~value)
   let alias = value
   alias.value
+
+pub fn plain_values_do_not_borrow_source_slots() -> i32
+  let ~source = Box { value: 1 }
+  let assigned = source
+  let returned = identity(source)
+  let stored = Holder { child: source, count: 0 }
+  let captured = () => source.value
+  increment(~source)
+  assigned.value + returned.value + stored.child.value + captured()
+
+pub fn handle_slots_are_distinct_from_allocations() -> i32
+  let ~holder = Holder {
+    child: Box { value: 1 },
+    count: 0
+  }
+  let original = holder.child
+  holder.child = Box { value: 5 }
+  original.value + holder.child.value
 
 pub fn legal_nested_reborrow() -> i32
   let ~value = Box { value: 8 }

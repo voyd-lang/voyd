@@ -2432,25 +2432,10 @@ export const buildProgramCodegenView = (
           symbol,
           {
             parameters: contract.parameters.map((parameter) => {
-              const hasTypedFootprints =
-                parameter.readPaths !== undefined ||
-                parameter.writePaths !== undefined;
               return {
                 access: parameter.access,
-                reads: copyAccessPaths(
-                  hasTypedFootprints
-                    ? parameter.readPaths
-                    : parameter.access === "shared"
-                      ? parameter.accessPaths
-                      : undefined,
-                ),
-                writes: copyAccessPaths(
-                  hasTypedFootprints
-                    ? parameter.writePaths
-                    : parameter.access === "mutable"
-                      ? parameter.accessPaths
-                      : undefined,
-                ),
+                reads: copyAccessPaths(parameter.readPaths),
+                writes: copyAccessPaths(parameter.writePaths),
               };
             }),
           },

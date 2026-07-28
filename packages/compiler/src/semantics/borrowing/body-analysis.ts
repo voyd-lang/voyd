@@ -1090,10 +1090,9 @@ const recordCallUses = (
       event,
       (() => {
         const parameter = resolved.contract?.parameters[index];
-        return parameter?.readPaths !== undefined ||
-          parameter?.writePaths !== undefined
+        return parameter
           ? [...(parameter.readPaths ?? []), ...(parameter.writePaths ?? [])]
-          : parameter?.accessPaths;
+          : undefined;
       })(),
       ctx,
     );
@@ -3932,24 +3931,22 @@ const validateCall = (
       return [];
     }
     const actor = baseSymbolOf(actual, ctx);
-    const legacyPaths = parameter?.accessPaths;
-    const accesses =
-      parameter?.readPaths !== undefined || parameter?.writePaths !== undefined
-        ? [
-            ...(parameter.readPaths ?? []).map((path) => ({
-              access: "shared" as const,
-              path,
-            })),
-            ...(parameter.writePaths ?? []).map((path) => ({
-              access:
-                parameter.access === "mutable" ||
-                parameter.runtimeCheckedWrites !== true
-                  ? ("mutable" as const)
-                  : ("shared" as const),
-              path,
-            })),
-          ]
-        : (legacyPaths ?? [[]]).map((path) => ({ access, path }));
+    const accesses = parameter
+      ? [
+          ...(parameter.readPaths ?? []).map((path) => ({
+            access: "shared" as const,
+            path,
+          })),
+          ...(parameter.writePaths ?? []).map((path) => ({
+            access:
+              parameter.access === "mutable" ||
+              parameter.runtimeCheckedWrites !== true
+                ? ("mutable" as const)
+                : ("shared" as const),
+            path,
+          })),
+        ]
+      : [{ access, path: [] as readonly PlaceProjection[] }];
     return accesses.flatMap(({ access: pathAccess, path }) => {
       const actualPath = translateProjectionPath({
         result,

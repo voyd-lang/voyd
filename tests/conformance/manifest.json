@@ -168,6 +168,18 @@
           "expect": { "kind": "equals", "value": 5 }
         },
         {
+          "id": "runtime.borrowing.plain-values",
+          "title": "passes, returns, stores, and captures ordinary aliases without borrowing source slots",
+          "entryName": "plain_values_do_not_borrow_source_slots",
+          "expect": { "kind": "equals", "value": 8 }
+        },
+        {
+          "id": "runtime.borrowing.slot-allocation-distinction",
+          "title": "keeps object-handle slots distinct from referenced allocations",
+          "entryName": "handle_slots_are_distinct_from_allocations",
+          "expect": { "kind": "equals", "value": 6 }
+        },
+        {
           "id": "runtime.borrowing.nested-reborrow",
           "title": "supports nested reborrows",
           "entryName": "legal_nested_reborrow",
@@ -361,6 +373,18 @@
           "title": "preserves reads after mutable calls",
           "entryName": "readonly_use_after_mutable_call",
           "expect": { "kind": "equals", "value": 5 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-plain-values",
+          "title": "preserves ordinary alias value semantics",
+          "entryName": "plain_values_do_not_borrow_source_slots",
+          "expect": { "kind": "equals", "value": 8 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-slot-allocation-distinction",
+          "title": "preserves the distinction between handle slots and allocations",
+          "entryName": "handle_slots_are_distinct_from_allocations",
+          "expect": { "kind": "equals", "value": 6 }
         },
         {
           "id": "runtime.borrowing.optimized-nested-reborrow",

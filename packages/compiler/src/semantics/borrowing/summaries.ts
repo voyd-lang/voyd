@@ -1058,21 +1058,8 @@ const applyCallContract = ({
               sourceProjections: comparedOrigins[0]!.sourceProjections,
             }
           : undefined;
-      const legacyPaths = parameter.accessPaths ?? [[]];
-      const readPaths =
-        parameter.readPaths ??
-        (parameter.writePaths
-          ? []
-          : parameter.access === "shared"
-            ? legacyPaths
-            : []);
-      const writePaths =
-        parameter.writePaths ??
-        (parameter.readPaths
-          ? []
-          : parameter.access === "mutable"
-            ? legacyPaths
-            : []);
+      const readPaths = parameter.readPaths ?? [];
+      const writePaths = parameter.writePaths ?? [];
       readPaths.forEach((path) =>
         projectAccessFlowForPath(path).forEach((origin) =>
           addOrigin(ctx.accessed, {
@@ -2049,7 +2036,8 @@ const parameterContract = (
         })();
   return {
     access,
-    ...(access !== "owned" ? { accessPaths: [] } : {}),
+    readPaths: [],
+    writePaths: [],
     retained: false,
     returned: false,
   };
@@ -2600,9 +2588,6 @@ const summarizeFunction = ({
       const writePaths = minimizeProjectionPaths(
         pathsForParameter(written, index),
       );
-      const accessPaths = minimizeProjectionPaths(
-        mergePaths(readPaths, writePaths),
-      );
       const accessCondition = accessConditionForParameter(
         accessed,
         returned,
@@ -2611,7 +2596,6 @@ const summarizeFunction = ({
       const returnedTypeMatchingOrigins = returnedContractOrigins.typeMatching;
       return {
         access,
-        ...(access !== "owned" ? { accessPaths } : {}),
         ...(readPaths.length > 0 ? { readPaths } : {}),
         ...(writePaths.length > 0 ? { writePaths } : {}),
         ...(index === 0 && runtimeCheckedReceiverWrites
@@ -2660,7 +2644,6 @@ const contractEqualityKey = (contract: CallableBorrowContract): string => {
   const key = JSON.stringify([
     contract.parameters.map((parameter) => [
       parameter.access,
-      parameter.accessPaths ?? [],
       parameter.readPaths ?? [],
       parameter.writePaths ?? [],
       parameter.runtimeCheckedWrites ?? false,
@@ -2802,7 +2785,6 @@ const normalizeCallableBorrowContract = (
     ...baseContract,
     parameters: contract.parameters.map((parameter, index) => {
       const {
-        accessPaths: _accessPaths,
         readPaths: _readPaths,
         writePaths: _writePaths,
         invalidatedPaths: _invalidatedPaths,
@@ -2813,12 +2795,6 @@ const normalizeCallableBorrowContract = (
         accessIfResultTypeDiffers: _accessCondition,
         ...baseParameter
       } = parameter;
-      const accessPaths =
-        parameter.accessPaths === undefined
-          ? undefined
-          : minimizeProjectionPaths(
-              projectionPathsOrBroad(parameter.accessPaths) ?? [],
-            );
       const readPaths =
         parameter.readPaths === undefined
           ? undefined
@@ -2867,7 +2843,6 @@ const normalizeCallableBorrowContract = (
           : undefined;
       return {
         ...baseParameter,
-        ...(accessPaths !== undefined ? { accessPaths } : {}),
         ...(readPaths !== undefined ? { readPaths } : {}),
         ...(writePaths !== undefined ? { writePaths } : {}),
         ...(retainedPaths ? { retainedPaths } : {}),
@@ -2929,7 +2904,6 @@ const resetDerivedContractFacts = (
   ...contract,
   parameters: contract.parameters.map((parameter) => {
     const {
-      accessPaths: _accessPaths,
       readPaths: _readPaths,
       writePaths: _writePaths,
       retainedPaths: _retainedPaths,
@@ -2944,7 +2918,8 @@ const resetDerivedContractFacts = (
     } = parameter;
     return {
       ...base,
-      ...(parameter.access !== "owned" ? { accessPaths: [] } : {}),
+      readPaths: [],
+      writePaths: [],
       retained: false,
       returned: false,
     };
@@ -3596,7 +3571,6 @@ export const summarizeLambdaBorrowing = ({
       const returnedTypeMatchingOrigins = returnedContractOrigins.typeMatching;
       return {
         access,
-        accessPaths: minimizeProjectionPaths(mergePaths(readPaths, writePaths)),
         ...(readPaths.length > 0 ? { readPaths } : {}),
         ...(writePaths.length > 0 ? { writePaths } : {}),
         ...(accessCondition

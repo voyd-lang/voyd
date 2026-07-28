@@ -69,13 +69,16 @@ const conservativeContractFor = (
   return {
     parameters: signature.parameters.map((parameter) => {
       const reference = typeCanCarryReference(parameter.type, typing);
+      const access =
+        parameter.bindingKind === "mutable-ref"
+          ? "mutable"
+          : reference
+            ? "shared"
+            : "owned";
       return {
-        access:
-          parameter.bindingKind === "mutable-ref"
-            ? "mutable"
-            : reference
-              ? "shared"
-              : "owned",
+        access,
+        ...(access === "shared" ? { readPaths: [[]] } : {}),
+        ...(access === "mutable" ? { writePaths: [[]] } : {}),
         retained: reference && mayRetain,
         returned: reference && returnsReference,
         ...(reference && mayRetain ? { externalRetainedPaths: [[]] } : {}),
@@ -241,6 +244,7 @@ const conservativeContractForArguments = (
       if (typeof actual !== "number") {
         return {
           access: "shared",
+          readPaths: [[]],
           retained: mayRetain,
           returned: returnsReference,
           ...(mayRetain ? { externalRetainedPaths: [[]] } : {}),
@@ -249,12 +253,15 @@ const conservativeContractForArguments = (
       const type = resolvedTypeFor(actual, ctx.typing, preferSymbolic);
       const reference =
         typeof type !== "number" || typeCanCarryReference(type, ctx.typing);
+      const access = isExplicitMutableBorrow(actual, ctx)
+        ? "mutable"
+        : reference
+          ? "shared"
+          : "owned";
       return {
-        access: isExplicitMutableBorrow(actual, ctx)
-          ? "mutable"
-          : reference
-            ? "shared"
-            : "owned",
+        access,
+        ...(access === "shared" ? { readPaths: [[]] } : {}),
+        ...(access === "mutable" ? { writePaths: [[]] } : {}),
         retained: reference && mayRetain,
         returned: reference && returnsReference,
         ...(reference && mayRetain ? { externalRetainedPaths: [[]] } : {}),
@@ -297,7 +304,7 @@ const intrinsicBorrowContract = ({
       parameters: [
         {
           access: "shared",
-          accessPaths: [],
+          readPaths: [],
           retained: true,
           returned: false,
           externalRetainedPaths: [[]],
@@ -322,7 +329,7 @@ const intrinsicBorrowContract = ({
         };
         return {
           access: "shared",
-          accessPaths: [],
+          readPaths: [],
           retained: false,
           returned: true,
           returnedOrigins: [origin],
@@ -341,7 +348,7 @@ const intrinsicBorrowContract = ({
     return {
       parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
         access: index === 0 ? "shared" : "owned",
-        ...(index === 0 ? { accessPaths: [sourcePath] } : {}),
+        ...(index === 0 ? { readPaths: [sourcePath] } : {}),
         retained: false,
         returned: index === 0 && returnsReference,
         ...(index === 0 && returnsReference
@@ -363,7 +370,7 @@ const intrinsicBorrowContract = ({
       parameters: [
         {
           access: "shared",
-          accessPaths: [[{ kind: "identity" }]],
+          readPaths: [[{ kind: "identity" }]],
           retained: false,
           returned: false,
         },
@@ -376,7 +383,7 @@ const intrinsicBorrowContract = ({
       parameters: [
         {
           access: "shared",
-          accessPaths: [[{ kind: "identity" }]],
+          readPaths: [[{ kind: "identity" }]],
           retained: false,
           returned: false,
         },
@@ -388,7 +395,7 @@ const intrinsicBorrowContract = ({
     return {
       parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
         access: "shared",
-        accessPaths:
+        readPaths:
           index === 0
             ? [dynamicIndexPath()]
             : [[{ kind: "field", name: "from" }, ...dynamicIndexPath()]],
@@ -415,7 +422,7 @@ const intrinsicBorrowContract = ({
       parameters: Array.from({ length: argumentCount }, (_entry, index) => ({
         access: index === 0 || index === 2 ? "shared" : "owned",
         ...(index === 0 || index === 2
-          ? { accessPaths: [dynamicIndexPath()] }
+          ? { readPaths: [dynamicIndexPath()] }
           : {}),
         retained: false,
         returned: index === 0,
@@ -442,7 +449,7 @@ const intrinsicBorrowContract = ({
       parameters: [
         {
           access: "shared",
-          accessPaths: [fieldPath("__borrow_state")],
+          readPaths: [fieldPath("__borrow_state")],
           retained: false,
           returned: false,
         },
@@ -456,7 +463,7 @@ const intrinsicBorrowContract = ({
       parameters: [
         {
           access: "shared",
-          accessPaths: [valuePath],
+          readPaths: [valuePath],
           retained: false,
           returned: returnsReference,
           ...(returnsReference
@@ -474,13 +481,13 @@ const intrinsicBorrowContract = ({
       parameters: [
         {
           access: "shared",
-          accessPaths: [fieldPath("__value")],
+          readPaths: [fieldPath("__value")],
           retained: false,
           returned: false,
         },
         {
           access: "shared",
-          accessPaths: [],
+          readPaths: [],
           retained: false,
           returned: false,
         },
@@ -510,7 +517,7 @@ const intrinsicBorrowContract = ({
       parameters: [
         {
           access: "shared",
-          accessPaths: [[]],
+          readPaths: [[]],
           accessIfResultTypeDiffers: {
             conditionId,
             parameter: 0,
@@ -546,7 +553,7 @@ const intrinsicBorrowContract = ({
       parameters: [
         {
           access: "shared",
-          accessPaths: [],
+          readPaths: [],
           retained: false,
           returned: returnsReference,
           ...(returnsReference
@@ -560,7 +567,7 @@ const intrinsicBorrowContract = ({
         },
         {
           access: "shared",
-          accessPaths: [[]],
+          readPaths: [[]],
           accessIfResultTypeDiffers: {
             conditionId,
             parameter: 0,
@@ -583,11 +590,10 @@ const intrinsicBorrowContract = ({
       access: index === 0 || index === storedValueIndex ? "shared" : "owned",
       ...(index === 0
         ? {
-            accessPaths: [dynamicIndexPath()],
             writePaths: [dynamicIndexPath()],
           }
         : index === storedValueIndex
-          ? { accessPaths: [] }
+          ? { readPaths: [] }
           : {}),
       retained: false,
       returned: index === 0,
@@ -858,7 +864,7 @@ const specializeConditionalContract = (
         ...(unresolvedConditionalOrigins.length
           ? { returnedTypeMatchingOrigins: unresolvedConditionalOrigins }
           : {}),
-        ...(accessMatch === true ? { accessPaths: [], readPaths: [] } : {}),
+        ...(accessMatch === true ? { readPaths: [], writePaths: [] } : {}),
         ...(accessMatch === undefined && parameter.accessIfResultTypeDiffers
           ? { accessIfResultTypeDiffers: parameter.accessIfResultTypeDiffers }
           : {}),

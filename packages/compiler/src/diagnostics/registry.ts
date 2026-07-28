@@ -351,9 +351,6 @@ type DiagnosticParamsMap = {
     kind: "mutable-borrow-from-shared";
     binding: string;
   };
-  TY0051:
-    | { kind: "permanently-shared"; binding: string }
-    | { kind: "shared-here"; binding: string };
   TY0052:
     | { kind: "borrow-across-effect"; binding: string }
     | { kind: "borrow-origin"; binding: string };
@@ -1100,21 +1097,6 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0050"]>,
-  TY0051: {
-    code: "TY0051",
-    message: (params) =>
-      params.kind === "permanently-shared"
-        ? `'${params.binding}' was permanently shared and can no longer be mutably borrowed`
-        : `'${params.binding}' became permanently shared here`,
-    severity: "error",
-    phase: "typing",
-    hints: [
-      {
-        message:
-          "Use SharedCell<T> when a value needs both persistent shared ownership and later mutation.",
-      },
-    ],
-  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0051"]>,
   TY0052: {
     code: "TY0052",
     message: (params) =>

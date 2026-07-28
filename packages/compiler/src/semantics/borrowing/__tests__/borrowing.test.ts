@@ -188,13 +188,13 @@ describe("borrow checking", () => {
     ).toBe(true);
   });
 
-  it("preserves legacy access modes when merging typed footprints", () => {
+  it("merges explicit read and write footprints", () => {
     const merged = mergeCallableBorrowContracts([
       {
         parameters: [
           {
             access: "shared",
-            accessPaths: [[{ kind: "field", name: "left" }]],
+            readPaths: [[{ kind: "field", name: "left" }]],
             retained: false,
             returned: false,
           },
@@ -205,7 +205,6 @@ describe("borrow checking", () => {
         parameters: [
           {
             access: "mutable",
-            accessPaths: [[{ kind: "field", name: "right" }]],
             readPaths: [],
             writePaths: [[{ kind: "field", name: "right" }]],
             retained: false,
@@ -329,7 +328,7 @@ fn invalid(~state: State) -> i32
     const mutateEntry = Array.from(result.borrowing.callables).find(
       ([, contract]) =>
         contract.parameters[0]?.access === "mutable" &&
-        contract.parameters[0]?.accessPaths?.some(
+        contract.parameters[0]?.writePaths?.some(
           (path) =>
             JSON.stringify(path) ===
             JSON.stringify([
@@ -1308,7 +1307,7 @@ fn invalid(
   mutate(~value)
   __array_get(storage, 0).value
 `),
-    ).not.toContain("TY0051");
+    ).toEqual([]);
   });
 
   it("preserves fixed-array literal element origins", () => {
@@ -2427,7 +2426,7 @@ fn invalid(~value: Box, ~holder: Holder) -> void
   retain(~holder, value)
   mutate(~value)
 `),
-    ).not.toContain("TY0051");
+    ).toEqual([]);
   });
 
   it("does not downgrade aliases retained from returned aggregates", () => {
@@ -2449,7 +2448,7 @@ fn invalid(~target: Holder) -> void
   retain(~target, wrap(pair))
   mutate(~pair.left)
 `),
-    ).not.toContain("TY0051");
+    ).toEqual([]);
   });
 
   it("retains only the selected field of a returned aggregate alias", () => {
@@ -2517,9 +2516,7 @@ fn invalid(~value: Box, ~holder: Holder) -> void
     expect(
       retainContract?.parameters[0]?.borrowedRetainedPaths,
     ).toBeUndefined();
-    expect(diagnostics.map((diagnostic) => diagnostic.code)).not.toContain(
-      "TY0051",
-    );
+    expect(diagnostics).toEqual([]);
   });
 
   it("materializes internal borrowed values across plain module returns", async () => {
@@ -2722,7 +2719,7 @@ pub fn valid(~left: Box, ~right: Box) -> i32
       (entry) => entry.symbol === readExport.symbol,
     )?.contract;
 
-    expect(readContract?.parameters[0]?.accessPaths).toEqual([
+    expect(readContract?.parameters[0]?.readPaths).toEqual([
       [{ kind: "dereference" }, { kind: "index", constant: 1, stable: true }],
       [
         { kind: "dereference" },
@@ -3484,7 +3481,7 @@ fn invalid(~value: Box, ~holder: CallbackHolder) -> void
   holder.callback = read_alias
   mutate(~value)
 `),
-    ).not.toContain("TY0051");
+    ).toEqual([]);
   });
 
   it("tracks captures in inline callback arguments", () => {
@@ -3763,7 +3760,7 @@ fn invalid(~pair: Pair) -> i32
 fn replace_left_with_right(~pair: Pair) -> void
   pair.left = pair.right
 `),
-    ).not.toContain("TY0051");
+    ).toEqual([]);
   });
 
   it("updates physical-place provenance after mutable-reference rebinding", () => {
@@ -3822,7 +3819,7 @@ fn invalid(): Async -> void
   Async::hold(value)
   mutate(~value)
 `),
-    ).not.toContain("TY0051");
+    ).toEqual([]);
   });
 
   it("rejects borrowed values returned from SharedCell callbacks", () => {

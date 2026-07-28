@@ -120,7 +120,6 @@ export const translateProjectionPath = ({
 
 export type CallableParameterBorrowContract = {
   access: BorrowAccessMode;
-  accessPaths?: readonly (readonly PlaceProjection[])[];
   readPaths?: readonly (readonly PlaceProjection[])[];
   writePaths?: readonly (readonly PlaceProjection[])[];
   runtimeCheckedWrites?: true;
@@ -264,8 +263,8 @@ export const mergeCallableBorrowContracts = (
       );
       const accessedParameters = parameters.filter(
         (parameter) =>
-          parameter.access !== "owned" &&
-          (parameter.accessPaths ?? [[]]).length > 0,
+          (parameter.readPaths?.length ?? 0) > 0 ||
+          (parameter.writePaths?.length ?? 0) > 0,
       );
       const accessConditions = new Map(
         accessedParameters.flatMap((parameter) =>
@@ -289,7 +288,6 @@ export const mergeCallableBorrowContracts = (
           : undefined;
       return {
         access,
-        ...mergeProjectionPaths(parameters, "accessPaths"),
         ...mergeProjectionPaths(parameters, "readPaths"),
         ...mergeProjectionPaths(parameters, "writePaths"),
         ...(parameters.every(
@@ -499,7 +497,6 @@ const mergeReturnedTypeMatchingOrigins = (
 const mergeProjectionPaths = (
   parameters: readonly CallableParameterBorrowContract[],
   key:
-    | "accessPaths"
     | "readPaths"
     | "writePaths"
     | "retainedPaths"
@@ -511,22 +508,8 @@ const mergeProjectionPaths = (
     new Map(
       parameters
         .flatMap((parameter) => {
-          if (key === "readPaths" || key === "writePaths") {
-            const hasTypedFootprints =
-              parameter.readPaths !== undefined ||
-              parameter.writePaths !== undefined;
-            if (hasTypedFootprints) {
-              return parameter[key] ?? [];
-            }
-            const legacyAccess = key === "readPaths" ? "shared" : "mutable";
-            return parameter.access === legacyAccess
-              ? (parameter.accessPaths ?? [[]])
-              : [];
-          }
           const active =
-            key === "accessPaths"
-              ? parameter.access !== "owned"
-              : key === "retainedPaths"
+            key === "retainedPaths"
                 ? parameter.retained
                 : key === "returnedPaths"
                   ? parameter.returned
@@ -534,21 +517,16 @@ const mergeProjectionPaths = (
           if (!active) {
             return [];
           }
-          if (key === "accessPaths") {
-            return parameter.accessPaths ?? [[]];
-          }
           return parameter[key] && parameter[key]!.length > 0
             ? parameter[key]!
-            : [[]];
+            : key === "readPaths" || key === "writePaths"
+              ? []
+              : [[]];
         })
         .map((path) => [JSON.stringify(path), path]),
     ).values(),
   );
-  return key === "accessPaths"
-    ? { accessPaths: paths }
-    : paths.length > 0
-      ? { [key]: paths }
-      : {};
+  return paths.length > 0 ? { [key]: paths } : {};
 };
 
 export const emptyBorrowingResult = (): BorrowingResult => ({
