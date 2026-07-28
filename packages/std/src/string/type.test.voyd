@@ -152,12 +152,14 @@ test "string index and grapheme_index stepping":
 test "string grapheme sequence iteration":
   let joined = "éx"
   let ~iter = joined.graphemes().iter()
-  match(iter.next())
+  let first = iter.next()
+  let second = iter.next()
+  match(first)
     Some<StringSlice> { value }:
       assert(value.to_string().equals("é"), eq: true)
     None:
       assert(false)
-  match(iter.next())
+  match(second)
     Some<StringSlice> { value }:
       assert(value.to_string().equals("x"), eq: true)
     None:

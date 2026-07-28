@@ -1267,7 +1267,7 @@ obj Utf8Read {
 obj StringIterator {
   source: FixedArray<i32>,
   byte_count: i32,
-  cursor: IteratorStateCell
+  index: i32
 }
 
 obj StringGraphemeSequence {
@@ -1276,7 +1276,7 @@ obj StringGraphemeSequence {
 
 obj StringGraphemeIterator {
   source: String,
-  cursor: IteratorStateCell
+  index: i32
 }
 
 impl Sequence<i32> for String
@@ -1285,41 +1285,36 @@ impl Sequence<i32> for String
     StringIterator {
       source: self.raw_bytes(),
       byte_count: self.byte_len(),
-      cursor: IteratorStateCell::single(0)
+      index: 0
     }
 
 impl Iterator<i32> for StringIterator
   /// Returns the next item from the iterator.
-  api fn next(self) -> Option<i32>
-    let index = self.cursor.get(0)
-    if index >= self.byte_count:
+  api fn next(~self) -> Option<i32>
+    if self.index >= self.byte_count:
       return None {}
-    let read = decode_utf8_at(self.source, self.byte_count, index)
-    self.cursor.set(0, index + read.width)
+    let read = decode_utf8_at(self.source, self.byte_count, self.index)
+    self.index = self.index + read.width
     Some<i32> { value: read.codepoint }
 
 impl Sequence<StringSlice> for StringGraphemeSequence
   /// Returns an iterator over values.
   api fn iter(self) -> Iterator<StringSlice>
-    StringGraphemeIterator {
-      source: self.source,
-      cursor: IteratorStateCell::single(0)
-    }
+    StringGraphemeIterator { source: self.source, index: 0 }
 
 impl Iterator<StringSlice> for StringGraphemeIterator
   /// Returns the next item from the iterator.
-  api fn next(self) -> Option<StringSlice>
-    let start = self.cursor.get(0)
-    if start >= self.source.byte_len():
+  api fn next(~self) -> Option<StringSlice>
+    if self.index >= self.source.byte_len():
       return None {}
-    let end = next_grapheme_boundary(
+    let start = self.index
+    self.index = next_grapheme_boundary(
       self.source.raw_bytes(),
       self.source.byte_len(),
-      start
+      self.index
     )
-    self.cursor.set(0, end)
     Some<StringSlice> {
-      value: new_string_slice(self.source, start, end - start)
+      value: new_string_slice(self.source, start, self.index - start)
     }
 
 fn decode_utf8_at(source: FixedArray<i32>, limit: i32, index: i32) -> Utf8Read

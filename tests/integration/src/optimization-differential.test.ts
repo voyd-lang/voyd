@@ -96,6 +96,7 @@ describe("integration: optimization-level differential behavior", () => {
     ["folded_branch", 42],
     ["trait_dispatch", 9],
     ["heap_alias_identity", 10],
+    ["iterator_retained_object_alias", 75],
     ["handled_effect_wide_return", 6],
   ] as const)("preserves %s results", async (entryName, expected) => {
     const results = await Promise.all(

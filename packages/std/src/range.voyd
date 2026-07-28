@@ -21,8 +21,9 @@ pub obj Range<T> {
 
 /// Iterator state for `Range` sequences.
 obj RangeIterator {
-  state: IteratorStateCell,
-  end: i32
+  current: i32,
+  end: i32,
+  include_end: bool
 }
 
 impl Sequence<i32> for Range<i32>
@@ -30,32 +31,25 @@ impl Sequence<i32> for Range<i32>
   api fn iter(self) -> Iterator<i32>
     let start = range_bound_or(self.start, 0)
     let end = range_bound_or(self.end, start)
-    RangeIterator {
-      state: IteratorStateCell::pair(
-        start,
-        if self.include_end then: 1 else: 0
-      ),
-      end
-    }
+    RangeIterator { current: start, end: end, include_end: self.include_end }
 
 impl Iterator<i32> for RangeIterator
   /// Returns the next value in the range or `None` when exhausted.
-  api fn next(self) -> Option<i32>
-    let current = self.state.get(0)
-    let include_end = self.state.get(1) == 1
-    if include_end:
-      if current > self.end:
+  api fn next(~self) -> Option<i32>
+    if self.include_end:
+      if self.current > self.end:
         return None {}
     else:
-      if current >= self.end:
+      if self.current >= self.end:
         return None {}
 
-    if include_end and current == self.end then:
+    let value = self.current
+    if self.include_end and self.current == self.end then:
       // Avoid i32 overflow for inclusive ranges that end at i32::MAX.
-      self.state.set(1, 0)
+      self.include_end = false
     else:
-      self.state.set(0, current + 1)
-    Some<i32> { value: current }
+      self.current = self.current + 1
+    Some<i32> { value: value }
 
 fn range_bound_or(value: Optional<i32>, fallback: i32) -> i32
   match(value)

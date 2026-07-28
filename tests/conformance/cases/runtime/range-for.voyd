@@ -35,6 +35,21 @@ pub fn range_iterator_inclusive_i32_max_stops() -> i32
     Some<i32> { value: _ }:
       0
 
+pub fn range_iterator_retains_prior_values() -> i32
+  let ~iter = (3..5).iter()
+  let first = iter.next()
+  let second = iter.next()
+
+  match(first)
+    Some<i32> { value: first_value }:
+      match(second)
+        Some<i32> { value: second_value }:
+          first_value * 10 + second_value
+        None:
+          -2
+    None:
+      -1
+
 pub fn range_for_handles_tail_effects_after_host_seed() -> f64
   let ~rng = LocalRng::seeded_from_host()
 

@@ -38,6 +38,10 @@ fn optional_i32_or(value: Optional<i32>, fallback: i32) -> i32
     None:
       fallback
 
+obj IteratorBox {
+  value: i32
+}
+
 test "array new from fixed array preserves length":
   var fixed = new_fixed_array<i32>(2)
   fixed = __array_set(fixed, 0, 4)
@@ -57,6 +61,28 @@ test "array new from fixed array preserves length":
           assert(value, eq: 9)
         None:
           assert(false)
+    None:
+      assert(false)
+
+test "array iterator advances while prior values remain live":
+  let ~first_box = IteratorBox { value: 3 }
+  let ~values = Array<IteratorBox>::with_capacity(2)
+  values.push(first_box)
+  values.push(IteratorBox { value: 5 })
+
+  let ~iterator = values.iter()
+  let first = iterator.next()
+  let second = iterator.next()
+  first_box.value = 7
+
+  match(first)
+    Some<IteratorBox> { value }:
+      assert(value.value, eq: 7)
+    None:
+      assert(false)
+  match(second)
+    Some<IteratorBox> { value }:
+      assert(value.value, eq: 5)
     None:
       assert(false)
 

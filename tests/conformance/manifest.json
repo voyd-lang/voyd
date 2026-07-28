@@ -589,6 +589,12 @@
           "expect": { "kind": "equals", "value": 1 }
         },
         {
+          "id": "runtime.range-for.retained-prior-values",
+          "title": "advances while prior values remain live",
+          "entryName": "range_iterator_retains_prior_values",
+          "expect": { "kind": "equals", "value": 34 }
+        },
+        {
           "id": "runtime.range-for.tail-effects",
           "title": "preserves handled tail effects",
           "entryName": "range_for_handles_tail_effects_after_host_seed",
