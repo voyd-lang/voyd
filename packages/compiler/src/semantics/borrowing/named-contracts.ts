@@ -14,6 +14,7 @@ import type {
 import type { SourceSpan, SymbolId, TypeId } from "../ids.js";
 import type { TypingResult } from "../typing/index.js";
 import { borrowedPathsInType } from "./borrowed-types.js";
+import { typeContainsBorrowed } from "./borrowed-types.js";
 import type {
   BorrowingResult,
   CallableBorrowContract,
@@ -21,10 +22,16 @@ import type {
   PlaceProjection,
 } from "./model.js";
 import { projectionPathCovers, projectionPathsOverlap } from "./model.js";
-import { typeIsDefinitelyAllocationBacked } from "./reference-bearing.js";
+import {
+  referenceOriginsInType,
+  retainableReferencePathsInType,
+  typeCanCarryReference,
+  typeIsDefinitelyAllocationBacked,
+} from "./reference-bearing.js";
 
 type NamedContractValidation = {
   contracts: ReadonlyMap<SymbolId, CheckedNamedBorrowContract>;
+  declarationCallables: ReadonlyMap<SymbolId, CallableBorrowContract>;
   diagnostics: BorrowingResult["diagnostics"];
 };
 
@@ -57,11 +64,20 @@ export const validateNamedBorrowContracts = ({
   typing,
   symbolTable,
   callables,
+  moduleId,
+  imports,
+  validateBodies = true,
 }: {
   hir: HirGraph;
   typing: TypingResult;
   symbolTable: SymbolTable;
   callables: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  moduleId: string;
+  imports: readonly {
+    local: SymbolId;
+    target?: { moduleId: string };
+  }[];
+  validateBodies?: boolean;
 }): NamedContractValidation => {
   const diagnostics: BorrowingResult["diagnostics"][number][] = [];
   const checked = new Map<SymbolId, CheckedNamedBorrowContract>();
@@ -76,6 +92,9 @@ export const validateNamedBorrowContracts = ({
       typing,
       symbolTable,
       callables,
+      moduleId,
+      imports,
+      validateBodies,
       diagnostics,
       declared,
       checked,
@@ -95,6 +114,9 @@ export const validateNamedBorrowContracts = ({
       declared,
       checked,
       diagnostics,
+      moduleId,
+      imports,
+      validateBodies,
     }),
   );
   const implMembers = new Set(
@@ -122,7 +144,261 @@ export const validateNamedBorrowContracts = ({
     );
   });
 
-  return { contracts: checked, diagnostics };
+  return {
+    contracts: checked,
+    declarationCallables: declaredCallableContracts({
+      hir,
+      typing,
+      contracts: checked,
+    }),
+    diagnostics,
+  };
+};
+
+const declaredCallableContracts = ({
+  hir,
+  typing,
+  contracts,
+}: {
+  hir: HirGraph;
+  typing: TypingResult;
+  contracts: ReadonlyMap<SymbolId, CheckedNamedBorrowContract>;
+}): ReadonlyMap<SymbolId, CallableBorrowContract> => {
+  const declarations = Array.from(hir.items.values()).flatMap((item) =>
+    item.kind === "trait" ? item.methods : [],
+  );
+  return new Map<SymbolId, CallableBorrowContract>(
+    declarations.flatMap(
+      (method): readonly (readonly [SymbolId, CallableBorrowContract])[] => {
+        const named = contracts.get(method.symbol);
+        const implementationSymbol = Array.from(
+          typing.traitMethodImpls.entries(),
+        ).find(
+          ([, mapping]) => mapping.traitMethodSymbol === method.symbol,
+        )?.[0];
+        const signature =
+          typing.functions.getSignature(method.symbol) ??
+          (typeof implementationSymbol === "number"
+            ? typing.functions.getSignature(implementationSymbol)
+            : undefined);
+        if (named?.implementation !== undefined) {
+          return [];
+        }
+        const returnType =
+          signature?.returnType ?? declaredTypeId(method.returnType, typing);
+        if (!named) {
+          const resultOrigins =
+            typeof returnType === "number"
+              ? referenceOriginsInType(returnType, typing)
+              : [];
+          const parameters = method.parameters.map((parameter, index) => {
+            const signatureParameter = signature?.parameters[index];
+            const parameterType =
+              signatureParameter?.type ?? parameter.type?.typeId;
+            const reference =
+              index === 0 ||
+              (typeof parameterType === "number" &&
+                typeCanCarryReference(parameterType, typing));
+            const access =
+              (signatureParameter?.bindingKind ?? parameter.bindingKind) ===
+              "mutable-ref"
+                ? ("mutable" as const)
+                : reference
+                  ? ("shared" as const)
+                  : ("owned" as const);
+            const returnedOrigins =
+              reference && typeof parameterType === "number"
+                ? referenceOriginsInType(parameterType, typing).flatMap(
+                    (source) =>
+                      resultOrigins.map((result) => ({
+                        source: source.path,
+                        result: result.path,
+                        endpointAccess: source.endpointAccess,
+                      })),
+                  )
+                : [];
+            return {
+              access,
+              ...(access === "shared" ? { readPaths: [[]] } : {}),
+              ...(access === "mutable" ? { writePaths: [[]] } : {}),
+              retained: reference && access !== "mutable",
+              ...(reference && access !== "mutable"
+                ? {
+                    retainedUnlessBorrowed: true as const,
+                    retainedPaths: [[]],
+                    externalRetainedPaths: [[]],
+                  }
+                : {}),
+              returned: returnedOrigins.length > 0,
+              ...(returnedOrigins.length > 0 ? { returnedOrigins } : {}),
+            };
+          });
+          return [
+            [
+              method.symbol,
+              {
+                parameters,
+                maySuspend: signature
+                  ? !typing.effects.isEmpty(signature.effectRow)
+                  : method.effectType !== undefined,
+                borrowedResult:
+                  typeof returnType === "number" &&
+                  borrowedPathsInType(returnType, typing).length > 0
+                    ? ("external" as const)
+                    : ("none" as const),
+                ...(resultOrigins.length > 0
+                  ? {
+                      externalReturnedOrigins: resultOrigins.map((result) => ({
+                        result: result.path,
+                        endpointAccess: result.endpointAccess,
+                      })),
+                    }
+                  : {}),
+              },
+            ] as const,
+          ];
+        }
+        const disjointFor = (region: string): readonly string[] =>
+          named.disjoint.flatMap(([left, right]) =>
+            left === region ? [right] : right === region ? [left] : [],
+          );
+        const regionPath = (name: string): readonly PlaceProjection[] => [
+          {
+            kind: "region",
+            scope: named.scope,
+            name,
+            disjoint: disjointFor(name),
+          },
+        ];
+        const borrowedResultPaths =
+          typeof returnType === "number"
+            ? borrowedPathsInType(returnType, typing)
+            : borrowedPathsInTypeExpression(method.returnType, typing);
+        const returnedOrigins = named.returnsFrom.flatMap((region) =>
+          borrowedResultPaths.map((result) => ({
+            source: regionPath(region),
+            result,
+            endpointAccess: "inline" as const,
+          })),
+        );
+        const resultCarriesReference =
+          typeof returnType === "number" &&
+          typeCanCarryReference(returnType, typing);
+        const resultReferencePaths =
+          typeof returnType === "number"
+            ? retainableReferencePathsInType(returnType, typing)
+            : [];
+        const parameters = method.parameters.map((parameter, index) => {
+          const signatureParameter = signature?.parameters[index];
+          const parameterType =
+            signatureParameter?.type ?? parameter.type?.typeId;
+          const reference =
+            typeof parameterType === "number" &&
+            typeCanCarryReference(parameterType, typing);
+          const containsExplicitBorrow =
+            typeof parameterType === "number"
+              ? typeContainsBorrowed(parameterType, typing)
+              : typeExprContainsBorrowed(parameter.type, typing);
+          const ordinarySources =
+            reference && typeof parameterType === "number"
+              ? referenceOriginsInType(parameterType, typing)
+              : [];
+          const retainablePaths =
+            typeof parameterType === "number"
+              ? retainableReferencePathsInType(parameterType, typing)
+              : [];
+          const receiverRegionSources =
+            index === 0 && resultCarriesReference
+              ? named.regions.map((region) => ({
+                  path: regionPath(region.name),
+                  endpointAccess: "inline" as const,
+                }))
+              : [];
+          const ordinaryReturnedOrigins = resultCarriesReference
+            ? [...ordinarySources, ...receiverRegionSources].flatMap((source) =>
+                resultReferencePaths.map((result) => ({
+                  source: source.path,
+                  result,
+                  endpointAccess: source.endpointAccess,
+                })),
+              )
+            : [];
+          const access =
+            (signatureParameter?.bindingKind ?? parameter.bindingKind) ===
+            "mutable-ref"
+              ? ("mutable" as const)
+              : reference
+                ? ("shared" as const)
+                : ("owned" as const);
+          const ordinaryRetainedPaths =
+            access === "mutable" ? [] : retainablePaths;
+          if (index === 0) {
+            const retained = reference && access !== "mutable";
+            return {
+              access,
+              readPaths: named.reads.map(regionPath),
+              writePaths: named.mutates.map(regionPath),
+              retained,
+              ...(retained
+                ? {
+                    retainedUnlessBorrowed: true as const,
+                    retainedPaths: [[]],
+                    externalRetainedPaths: [[]],
+                  }
+                : {}),
+              returned:
+                returnedOrigins.length > 0 ||
+                ordinaryReturnedOrigins.length > 0,
+              ...(returnedOrigins.length > 0 ||
+              ordinaryReturnedOrigins.length > 0
+                ? {
+                    returnedOrigins: [
+                      ...returnedOrigins,
+                      ...ordinaryReturnedOrigins,
+                    ],
+                    ...(returnedOrigins.length > 0
+                      ? { returnedSharedOrigins: returnedOrigins }
+                      : {}),
+                  }
+                : {}),
+            };
+          }
+          return {
+            access,
+            ...(access === "shared" ? { readPaths: [[]] } : {}),
+            ...(access === "mutable" ? { writePaths: [[]] } : {}),
+            retained: ordinaryRetainedPaths.length > 0,
+            ...(ordinaryRetainedPaths.length > 0
+              ? {
+                  ...(!containsExplicitBorrow
+                    ? { retainedUnlessBorrowed: true as const }
+                    : {}),
+                  retainedPaths: ordinaryRetainedPaths,
+                  externalRetainedPaths: ordinaryRetainedPaths,
+                }
+              : {}),
+            returned: ordinaryReturnedOrigins.length > 0,
+            ...(ordinaryReturnedOrigins.length > 0
+              ? { returnedOrigins: ordinaryReturnedOrigins }
+              : {}),
+          };
+        });
+        return [
+          [
+            method.symbol,
+            {
+              parameters,
+              maySuspend: signature
+                ? !typing.effects.isEmpty(signature.effectRow)
+                : method.effectType !== undefined,
+              borrowedResult:
+                borrowedResultPaths.length > 0 ? "parameter" : "none",
+            },
+          ] as const,
+        ];
+      },
+    ),
+  );
 };
 
 const declaredContractForMethod = ({
@@ -137,12 +413,12 @@ const declaredContractForMethod = ({
   if (!method?.borrowContract) {
     return undefined;
   }
-  const returnType = method.returnType?.typeId;
+  const returnType = declaredTypeId(method.returnType, typing);
   return {
     trait,
     method,
     hasBorrowedResult:
-      typeExprContainsBorrowed(method.returnType) ||
+      typeExprContainsBorrowed(method.returnType, typing) ||
       (typeof returnType === "number" &&
         borrowedPathsInType(returnType, typing).length > 0),
     reads: unique(method.borrowContract.reads ?? []),
@@ -159,6 +435,9 @@ const validateTraitDeclaration = ({
   diagnostics,
   declared,
   checked,
+  moduleId,
+  imports,
+  validateBodies,
 }: {
   trait: HirTraitDecl;
   typing: TypingResult;
@@ -167,6 +446,12 @@ const validateTraitDeclaration = ({
   diagnostics: BorrowingResult["diagnostics"][number][];
   declared: Map<SymbolId, DeclaredContract>;
   checked: Map<SymbolId, CheckedNamedBorrowContract>;
+  moduleId: string;
+  imports: readonly {
+    local: SymbolId;
+    target?: { moduleId: string };
+  }[];
+  validateBodies: boolean;
 }): void => {
   const declarationName = symbolTable.getSymbol(trait.symbol).name;
   const regionNames = new Set<string>();
@@ -220,9 +505,9 @@ const validateTraitDeclaration = ({
   trait.methods.forEach((method) => {
     const methodName = symbolTable.getSymbol(method.symbol).name;
     const contract = method.borrowContract;
-    const returnType = method.returnType?.typeId;
+    const returnType = declaredTypeId(method.returnType, typing);
     const hasBorrowedResult =
-      typeExprContainsBorrowed(method.returnType) ||
+      typeExprContainsBorrowed(method.returnType, typing) ||
       (typeof returnType === "number" &&
         borrowedPathsInType(returnType, typing).length > 0);
     if (!contract) {
@@ -302,7 +587,7 @@ const validateTraitDeclaration = ({
       declaredContractForMethod({ trait, method, typing })!,
     );
     const callable = callables.get(method.symbol);
-    if (typeof method.defaultBody === "number" && callable) {
+    if (validateBodies && typeof method.defaultBody === "number" && callable) {
       validateDefaultDeclarationSubset({
         callable,
         contract: declared.get(method.symbol)!,
@@ -312,6 +597,12 @@ const validateTraitDeclaration = ({
       });
     }
     checked.set(method.symbol, {
+      scope: namedContractScope({
+        trait: trait.symbol,
+        name: declarationName,
+        moduleId,
+        imports,
+      }),
       declaration: method.symbol,
       trait: trait.symbol,
       regions: Array.from(regionNames, (name) => ({ name })),
@@ -337,42 +628,40 @@ const validateDefaultDeclarationSubset = ({
   diagnostics: BorrowingResult["diagnostics"][number][];
 }): void => {
   const receiver = callable.parameters[0];
-  if (
-    unique([...contract.reads, ...contract.mutates, ...contract.returnsFrom])
-      .length === 0
-  ) {
-    (receiver?.readPaths ?? []).forEach((path) =>
-      requireCovered({
-        path,
-        allowed: [],
-        clause: "reads",
-        declaration,
-        span,
-        diagnostics,
-      }),
-    );
-  }
-  if (contract.mutates.length === 0) {
-    (receiver?.writePaths ?? []).forEach((path) =>
-      requireCovered({
-        path,
-        allowed: [],
-        clause: "mutates",
-        declaration,
-        span,
-        diagnostics,
-      }),
-    );
-  }
-  if (contract.returnsFrom.length === 0 && receiver) {
+  const allowedReads = unique([
+    ...contract.reads,
+    ...contract.mutates,
+    ...contract.returnsFrom,
+  ]);
+  (receiver?.readPaths ?? []).forEach((path) =>
+    requireDeclaredRegionCovered({
+      path,
+      allowed: allowedReads,
+      clause: "reads",
+      declaration,
+      span,
+      diagnostics,
+    }),
+  );
+  (receiver?.writePaths ?? []).forEach((path) =>
+    requireDeclaredRegionCovered({
+      path,
+      allowed: contract.mutates,
+      clause: "mutates",
+      declaration,
+      span,
+      diagnostics,
+    }),
+  );
+  if (receiver) {
     returnedBorrowOriginsForContract({
       parameter: receiver,
       parameterIndex: 0,
       contract,
     }).forEach((origin) =>
-      requireCovered({
+      requireDeclaredRegionCovered({
         path: origin.source,
-        allowed: [],
+        allowed: contract.returnsFrom,
         clause: "returns_from",
         declaration,
         span,
@@ -426,6 +715,37 @@ const validateDefaultDeclarationSubset = ({
   });
 };
 
+const requireDeclaredRegionCovered = ({
+  path,
+  allowed,
+  clause,
+  declaration,
+  span,
+  diagnostics,
+}: {
+  path: readonly PlaceProjection[];
+  allowed: readonly string[];
+  clause: "reads" | "mutates" | "returns_from";
+  declaration: string;
+  span: SourceSpan;
+  diagnostics: BorrowingResult["diagnostics"][number][];
+}): void => {
+  const region = path[0];
+  if (region?.kind === "region" && allowed.includes(region.name)) {
+    return;
+  }
+  diagnostics.push(
+    contractDiagnostic({
+      kind: "contract-excess",
+      declaration,
+      clause,
+      place: formatPlace(path),
+      regions: allowed.length > 0 ? allowed.join(", ") : "<none>",
+      span,
+    }),
+  );
+};
+
 const validateImpl = ({
   impl,
   hir,
@@ -435,6 +755,9 @@ const validateImpl = ({
   declared,
   checked,
   diagnostics,
+  moduleId,
+  imports,
+  validateBodies,
 }: {
   impl: HirImplDecl;
   hir: HirGraph;
@@ -444,6 +767,12 @@ const validateImpl = ({
   declared: ReadonlyMap<SymbolId, DeclaredContract>;
   checked: Map<SymbolId, CheckedNamedBorrowContract>;
   diagnostics: BorrowingResult["diagnostics"][number][];
+  moduleId: string;
+  imports: readonly {
+    local: SymbolId;
+    target?: { moduleId: string };
+  }[];
+  validateBodies: boolean;
 }): void => {
   const traitSymbol =
     impl.trait?.typeKind === "named" ? impl.trait.symbol : undefined;
@@ -631,7 +960,7 @@ const validateImpl = ({
       return;
     }
     const callable = callables.get(member.symbol);
-    if (callable) {
+    if (validateBodies && callable) {
       validateCallableSubset({
         callable,
         contract,
@@ -642,6 +971,12 @@ const validateImpl = ({
       });
     }
     checked.set(member.symbol, {
+      scope: namedContractScope({
+        trait: traitSymbol,
+        name: symbolTable.getSymbol(traitSymbol).name,
+        moduleId,
+        imports,
+      }),
       declaration: contract.method.symbol,
       trait: traitSymbol,
       implementation: member.symbol,
@@ -657,6 +992,22 @@ const validateImpl = ({
     });
   });
 };
+
+const namedContractScope = ({
+  trait,
+  name,
+  moduleId,
+  imports,
+}: {
+  trait: SymbolId;
+  name: string;
+  moduleId: string;
+  imports: readonly {
+    local: SymbolId;
+    target?: { moduleId: string };
+  }[];
+}): string =>
+  `${imports.find((entry) => entry.local === trait)?.target?.moduleId ?? moduleId}::${name}`;
 
 const validateCallableSubset = ({
   callable,
@@ -843,6 +1194,7 @@ const returnedBorrowOriginsForContract = ({
     ...(parameter.returnedSharedOrigins ?? []),
     ...(typeExprContainsBorrowed(
       contract.method.parameters[parameterIndex]?.type,
+      undefined,
     )
       ? (parameter.returnedOrigins ?? [])
       : []),
@@ -1171,31 +1523,215 @@ const unique = (values: readonly string[]): readonly string[] =>
 const uniqueNumbers = (values: readonly number[]): readonly number[] =>
   Array.from(new Set(values));
 
+const borrowedPathsInTypeExpression = (
+  expression: HirTypeExpr | undefined,
+  typing: TypingResult,
+  prefix: readonly PlaceProjection[] = [],
+  substitutions: ReadonlyMap<SymbolId, HirTypeExpr> = new Map(),
+  active = new Set<SymbolId>(),
+): readonly (readonly PlaceProjection[])[] => {
+  if (!expression) {
+    return [];
+  }
+  const resolved = declaredTypeId(expression, typing);
+  if (typeof resolved === "number") {
+    return borrowedPathsInType(resolved, typing).map((path) => [
+      ...prefix,
+      ...path,
+    ]);
+  }
+  if (expression.typeKind === "borrowed") {
+    return [
+      prefix,
+      ...borrowedPathsInTypeExpression(
+        expression.inner,
+        typing,
+        prefix,
+        substitutions,
+        active,
+      ),
+    ];
+  }
+  if (
+    expression.typeKind === "named" &&
+    typeof expression.symbol === "number"
+  ) {
+    const substitution = substitutions.get(expression.symbol);
+    if (substitution) {
+      return borrowedPathsInTypeExpression(
+        substitution,
+        typing,
+        prefix,
+        substitutions,
+        active,
+      );
+    }
+    if (active.has(expression.symbol)) {
+      return [];
+    }
+    const nextActive = new Set(active).add(expression.symbol);
+    const object = typing.objects.getDecl(expression.symbol);
+    if (object) {
+      const nextSubstitutions = new Map(substitutions);
+      object.typeParameters?.forEach((parameter, index) => {
+        const argument = expression.typeArguments?.[index];
+        if (argument) {
+          nextSubstitutions.set(parameter.symbol, argument);
+        }
+      });
+      return object.fields.flatMap((field) =>
+        borrowedPathsInTypeExpression(
+          field.type,
+          typing,
+          [...prefix, { kind: "field", name: field.name }],
+          nextSubstitutions,
+          nextActive,
+        ),
+      );
+    }
+    const alias = typing.typeAliases.getTemplate(expression.symbol);
+    return alias
+      ? borrowedPathsInTypeExpression(
+          alias.target,
+          typing,
+          prefix,
+          substitutions,
+          nextActive,
+        )
+      : [];
+  }
+  if (expression.typeKind === "object") {
+    return expression.fields.flatMap((field) =>
+      borrowedPathsInTypeExpression(
+        field.type,
+        typing,
+        [...prefix, { kind: "field", name: field.name }],
+        substitutions,
+        active,
+      ),
+    );
+  }
+  if (expression.typeKind === "tuple") {
+    return expression.elements.flatMap((element, index) =>
+      borrowedPathsInTypeExpression(
+        element,
+        typing,
+        [...prefix, { kind: "tuple", index }],
+        substitutions,
+        active,
+      ),
+    );
+  }
+  if (
+    expression.typeKind === "union" ||
+    expression.typeKind === "intersection"
+  ) {
+    return expression.members.flatMap((member) =>
+      borrowedPathsInTypeExpression(
+        member,
+        typing,
+        prefix,
+        substitutions,
+        new Set(active),
+      ),
+    );
+  }
+  return [];
+};
+
 const typeExprContainsBorrowed = (
   expression: HirTypeExpr | undefined,
+  typing?: TypingResult,
 ): boolean => {
   if (!expression) {
     return false;
   }
+  if (
+    typing !== undefined &&
+    borrowedPathsInTypeExpression(expression, typing).length > 0
+  ) {
+    return true;
+  }
+  const resolved =
+    typing === undefined ? undefined : declaredTypeId(expression, typing);
+  if (
+    typing !== undefined &&
+    typeof resolved === "number" &&
+    typeContainsBorrowed(resolved, typing)
+  ) {
+    return true;
+  }
+  const contains = (child: HirTypeExpr | undefined): boolean =>
+    typeExprContainsBorrowed(child, typing);
   switch (expression.typeKind) {
     case "borrowed":
       return true;
     case "named":
-      return expression.typeArguments?.some(typeExprContainsBorrowed) ?? false;
+      return expression.typeArguments?.some(contains) ?? false;
     case "object":
-      return expression.fields.some((field) =>
-        typeExprContainsBorrowed(field.type),
-      );
+      return expression.fields.some((field) => contains(field.type));
     case "tuple":
-      return expression.elements.some(typeExprContainsBorrowed);
+      return expression.elements.some(contains);
     case "union":
     case "intersection":
-      return expression.members.some(typeExprContainsBorrowed);
+      return expression.members.some(contains);
     case "function":
-      return typeExprContainsBorrowed(expression.returnType);
+      return contains(expression.returnType);
     case "self":
       return false;
   }
+};
+
+const declaredTypeId = (
+  expression: HirTypeExpr | undefined,
+  typing: TypingResult,
+  active = new Set<SymbolId>(),
+): TypeId | undefined => {
+  if (!expression) {
+    return undefined;
+  }
+  if (typeof expression.typeId === "number") {
+    return expression.typeId;
+  }
+  if (expression.typeKind === "borrowed") {
+    const inner = declaredTypeId(expression.inner, typing, active);
+    return typeof inner === "number"
+      ? typing.arena.internBorrowed(inner)
+      : undefined;
+  }
+  if (expression.typeKind === "union") {
+    const members = expression.members.map((member) =>
+      declaredTypeId(member, typing, new Set(active)),
+    );
+    return members.every(
+      (member): member is TypeId => typeof member === "number",
+    )
+      ? typing.arena.internUnion(members)
+      : undefined;
+  }
+  if (
+    expression.typeKind !== "named" ||
+    typeof expression.symbol !== "number" ||
+    active.has(expression.symbol)
+  ) {
+    return undefined;
+  }
+  const object = typing.objects.getTemplate(expression.symbol)?.type;
+  if (typeof object === "number") {
+    return object;
+  }
+  const intrinsic = typing.intrinsicTypes.get(expression.path.at(-1) ?? "");
+  if (typeof intrinsic === "number") {
+    return intrinsic;
+  }
+  const alias = typing.typeAliases.getTemplate(expression.symbol);
+  return alias
+    ? declaredTypeId(
+        alias.target,
+        typing,
+        new Set(active).add(expression.symbol),
+      )
+    : undefined;
 };
 
 const formatPlace = (path: readonly PlaceProjection[]): string =>
@@ -1213,6 +1749,8 @@ const formatPlace = (path: readonly PlaceProjection[]): string =>
         return `${display}.<discriminant>`;
       case "identity":
         return `${display}.<identity>`;
+      case "region":
+        return `${display}.<region ${projection.name}>`;
     }
   }, "self");
 
@@ -1230,6 +1768,8 @@ const formatProjection = (projection: PlaceProjection): string => {
       return "discriminant";
     case "identity":
       return "identity";
+    case "region":
+      return `region ${projection.name}`;
   }
 };
 

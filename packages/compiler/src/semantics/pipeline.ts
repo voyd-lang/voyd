@@ -37,9 +37,15 @@ import {
 import { formatEffectRow } from "./effects/format.js";
 import {
   analyzeBorrowing,
+  callableBorrowSummarySize,
+  deserializeCallableBorrowSummary,
   emptyBorrowingResult,
+  serializeCallableBorrowSummary,
   type BorrowingDependency,
   type BorrowingResult,
+  type CallableBorrowSummaryPrivacy,
+  type CallableBorrowSummarySource,
+  type PlaceProjection,
 } from "./borrowing/index.js";
 
 export interface SemanticsPipelineResult {
@@ -149,7 +155,9 @@ export const semanticsPipeline = (
       effects: typingState?.effects,
       imports: binding.imports,
       sourceImportLocals: binding.uses.flatMap((use) =>
-        use.entries.flatMap((entry) => entry.imports.map((entry) => entry.local)),
+        use.entries.flatMap((entry) =>
+          entry.imports.map((entry) => entry.local),
+        ),
       ),
       moduleId: module.id,
       packageId: binding.packageId,
@@ -242,10 +250,25 @@ const projectBorrowingDependencies = (
       const exportedBorrowing = new Map(
         Array.from(semantics.exports.values()).flatMap(
           (entry) =>
-            entry.borrowing?.map((borrow) => [
-              borrow.symbol,
-              borrow.contract,
-            ] as const) ?? [],
+            entry.borrowing?.map((borrow) => {
+              const summary = borrow.serialized
+                ? deserializeCallableBorrowSummary(borrow.serialized)
+                : {
+                    dispatch: "ordinary" as const,
+                    contract: borrow.contract,
+                    namedContract: undefined,
+                    source: undefined,
+                  };
+              return [
+                borrow.symbol,
+                {
+                  contract: summary.contract,
+                  dispatch: summary.dispatch,
+                  namedContract: summary.namedContract,
+                  source: summary.source,
+                },
+              ] as const;
+            }) ?? [],
         ),
       );
       const effectSymbols = new Set(
@@ -263,7 +286,10 @@ const projectBorrowingDependencies = (
           {
             name: dependencySymbols.getSymbol(symbol).name,
             signature: semantics.typing.functions.getSignature(symbol),
-            contract: exportedBorrowing.get(symbol),
+            contract: exportedBorrowing.get(symbol)?.contract,
+            dispatch: exportedBorrowing.get(symbol)?.dispatch,
+            namedContract: exportedBorrowing.get(symbol)?.namedContract,
+            source: exportedBorrowing.get(symbol)?.source,
           },
         ]),
       );
@@ -285,6 +311,49 @@ const projectBorrowingDependencies = (
       return [moduleId, { callables, effectOperations }] as const;
     }),
   );
+
+const callableBorrowSummarySources = (
+  hir: HirGraph,
+  moduleId: string,
+): ReadonlyMap<SymbolId, CallableBorrowSummarySource> => {
+  const stableSpan = (span: SourceSpan) => ({
+    moduleId,
+    start: span.start,
+    end: span.end,
+  });
+  const sources = new Map<SymbolId, CallableBorrowSummarySource>();
+  for (const item of hir.items.values()) {
+    if (item.kind === "function") {
+      sources.set(item.symbol, {
+        declaration: stableSpan(item.span),
+        parameters: item.parameters.map((parameter) =>
+          stableSpan(parameter.span),
+        ),
+      });
+    }
+    if (item.kind === "trait") {
+      item.methods.forEach((method) => {
+        sources.set(method.symbol, {
+          declaration: stableSpan(method.span),
+          parameters: method.parameters.map((parameter) =>
+            stableSpan(parameter.span),
+          ),
+        });
+      });
+    }
+    if (item.kind === "effect") {
+      item.operations.forEach((operation) => {
+        sources.set(operation.symbol, {
+          declaration: stableSpan(operation.span),
+          parameters: operation.parameters.map((parameter) =>
+            stableSpan(parameter.span),
+          ),
+        });
+      });
+    }
+  }
+  return sources;
+};
 
 const ensureNoBindingErrors = (binding: BindingResult): void => {
   const errors = binding.diagnostics.filter(
@@ -334,6 +403,125 @@ const collectModuleExports = ({
   borrowing: BorrowingResult;
 }): ModuleExportTable => {
   const table: ModuleExportTable = new Map();
+  const borrowSummarySources = callableBorrowSummarySources(hir, moduleId);
+  const firstPrivateFieldProjection = (
+    type: number,
+    path: readonly PlaceProjection[],
+    active = new Set<string>(),
+  ): number | undefined => {
+    const key = `${type}:${JSON.stringify(path)}`;
+    if (path.length === 0 || active.has(key)) {
+      return undefined;
+    }
+    const nextActive = new Set(active).add(key);
+    const descriptor = typing.arena.get(type);
+    if (descriptor.kind === "borrowed") {
+      return firstPrivateFieldProjection(
+        descriptor.inner,
+        path,
+        nextActive,
+      );
+    }
+    if (descriptor.kind === "recursive") {
+      return firstPrivateFieldProjection(
+        descriptor.body,
+        path,
+        nextActive,
+      );
+    }
+    if (descriptor.kind === "union") {
+      const candidates = descriptor.members.flatMap((member) => {
+        const candidate = firstPrivateFieldProjection(
+          member,
+          path,
+          nextActive,
+        );
+        return candidate === undefined ? [] : [candidate];
+      });
+      return candidates.length > 0 ? Math.min(...candidates) : undefined;
+    }
+    if (descriptor.kind === "intersection") {
+      const candidates = [
+        descriptor.nominal,
+        descriptor.structural,
+      ].flatMap((member) => {
+        if (typeof member !== "number") {
+          return [];
+        }
+        const candidate = firstPrivateFieldProjection(
+          member,
+          path,
+          nextActive,
+        );
+        return candidate === undefined ? [] : [candidate];
+      });
+      return candidates.length > 0 ? Math.min(...candidates) : undefined;
+    }
+    const [projection, ...remaining] = path;
+    if (
+      projection?.kind === "dereference" ||
+      projection?.kind === "identity" ||
+      projection?.kind === "discriminant"
+    ) {
+      const nested = firstPrivateFieldProjection(
+        type,
+        remaining,
+        active,
+      );
+      return nested === undefined ? undefined : nested + 1;
+    }
+    if (projection?.kind === "index" && descriptor.kind === "fixed-array") {
+      const nested = firstPrivateFieldProjection(
+        descriptor.element,
+        remaining,
+        nextActive,
+      );
+      return nested === undefined ? undefined : nested + 1;
+    }
+    const fields =
+      descriptor.kind === "structural-object"
+        ? descriptor.fields
+        : descriptor.kind === "nominal-object" ||
+            descriptor.kind === "value-object"
+          ? typing.objectsByNominal.get(type)?.fields
+          : undefined;
+    const field =
+      projection?.kind === "field"
+        ? fields?.find((candidate) => candidate.name === projection.name)
+        : projection?.kind === "tuple"
+          ? fields?.[projection.index]
+          : undefined;
+    if (!field) {
+      return undefined;
+    }
+    if (field.visibility !== undefined && field.visibility.api !== true) {
+      return 0;
+    }
+    const nested = firstPrivateFieldProjection(
+      field.type,
+      remaining,
+      nextActive,
+    );
+    return nested === undefined ? undefined : nested + 1;
+  };
+  const borrowSummaryPrivacyFor = (
+    callableSymbol: SymbolId,
+  ): CallableBorrowSummaryPrivacy | undefined => {
+    const signature = typing.functions.getSignature(callableSymbol);
+    if (!signature) {
+      return undefined;
+    }
+    return {
+      firstPrivateParameterProjection: (parameter, path) => {
+        const type = signature.parameters[parameter]?.type;
+        return typeof type === "number"
+          ? firstPrivateFieldProjection(type, path)
+          : undefined;
+      },
+      firstPrivateResultProjection: (path) =>
+        firstPrivateFieldProjection(signature.returnType, path),
+    };
+  };
 
   const mergeEffects = (
     existing: readonly ModuleExportEffect[] | undefined,
@@ -401,11 +589,59 @@ const collectModuleExports = ({
     const projected = existing?.apiProjection || apiProjection === true;
     const effects = mergeEffects(existing?.effects, exportEffectFor(symbol));
     const borrowingContracts = new Map(
-      existing?.borrowing?.map((entry) => [entry.symbol, entry.contract]),
+      existing?.borrowing?.map((entry) => [entry.symbol, entry]),
     );
-    const borrowContract = borrowing.callables.get(symbol);
-    if (borrowContract) {
-      borrowingContracts.set(symbol, borrowContract);
+    const addBorrowingSummary = (callableSymbol: SymbolId): void => {
+      const borrowContract = borrowing.callables.get(callableSymbol);
+      if (!borrowContract) {
+        return;
+      }
+      const serialized = serializeCallableBorrowSummary({
+        contract: borrowContract,
+        namedContract: borrowing.namedContracts.get(callableSymbol),
+        ...(typing.traitMethodImpls.has(callableSymbol)
+          ? { dispatchHint: "trait-implementation" as const }
+          : Array.from(hir.items.values()).some(
+                (item) =>
+                  item.kind === "trait" &&
+                  item.methods.some(
+                    (method) => method.symbol === callableSymbol,
+                  ),
+              )
+            ? { dispatchHint: "trait-declaration" as const }
+            : {}),
+        ...(!typing.traitMethodImpls.has(callableSymbol) &&
+        !borrowing.namedContracts.has(callableSymbol)
+          ? {
+              publicPrivacy: borrowSummaryPrivacyFor(callableSymbol),
+            }
+          : {}),
+        source: borrowSummarySources.get(callableSymbol),
+      });
+      const publicContract =
+        deserializeCallableBorrowSummary(serialized).contract;
+      borrowingContracts.set(callableSymbol, {
+        symbol: callableSymbol,
+        serialized,
+        serializedBytes: callableBorrowSummarySize(serialized),
+        contract: publicContract,
+      });
+    };
+    addBorrowingSummary(symbol);
+    const owningDeclaration = Array.from(hir.items.values()).find(
+      (item) =>
+        (item.kind === "trait" || item.kind === "effect") &&
+        item.symbol === symbol,
+    );
+    if (owningDeclaration?.kind === "trait") {
+      owningDeclaration.methods.forEach((method) =>
+        addBorrowingSummary(method.symbol),
+      );
+    }
+    if (owningDeclaration?.kind === "effect") {
+      owningDeclaration.operations.forEach((operation) =>
+        addBorrowingSummary(operation.symbol),
+      );
     }
     table.set(name, {
       name,
@@ -421,10 +657,7 @@ const collectModuleExports = ({
       isStatic: mergedStatic,
       apiProjection: projected,
       effects,
-      borrowing: Array.from(borrowingContracts, ([entrySymbol, contract]) => ({
-        symbol: entrySymbol,
-        contract,
-      })),
+      borrowing: Array.from(borrowingContracts.values()),
     });
   };
 
@@ -512,14 +745,19 @@ const enforcePkgRootEffectRules = ({
     try {
       const row = typing.effects.getRow(effectRow);
       const isPure = typing.effects.isEmpty(effectRow);
-      const isPolymorphic = !isPure && row.operations.length === 0 && Boolean(row.tailVar);
+      const isPolymorphic =
+        !isPure && row.operations.length === 0 && Boolean(row.tailVar);
       return {
         isPure,
         isPolymorphic,
         effectsText: formatEffectRow(effectRow, typing.effects),
       };
     } catch {
-      return { isPure: false, isPolymorphic: false, effectsText: "unknown effects" };
+      return {
+        isPure: false,
+        isPolymorphic: false,
+        effectsText: "unknown effects",
+      };
     }
   };
 
@@ -539,7 +777,9 @@ const enforcePkgRootEffectRules = ({
     const signature = typing.functions.getSignature(symbol);
     if (!signature) return;
 
-    const { isPure, isPolymorphic, effectsText } = getEffectInfo(signature.effectRow);
+    const { isPure, isPolymorphic, effectsText } = getEffectInfo(
+      signature.effectRow,
+    );
 
     if (
       !signature.annotatedEffects &&

@@ -342,7 +342,46 @@ export type CodegenCallableAccessFootprint = {
     access: "owned" | "shared" | "mutable";
     reads: readonly (readonly CodegenPlaceProjection[])[];
     writes: readonly (readonly CodegenPlaceProjection[])[];
+    runtimeCheckedWrites?: true;
+    retained: boolean;
+    retainedUnlessBorrowed?: true;
+    returnedAggregate?: true;
+    retainedPaths: readonly (readonly CodegenPlaceProjection[])[];
+    externalRetainedPaths: readonly (readonly CodegenPlaceProjection[])[];
+    borrowedRetainedPaths: readonly (readonly CodegenPlaceProjection[])[];
+    returnedAliases: readonly {
+      source: readonly CodegenPlaceProjection[];
+      result: readonly CodegenPlaceProjection[];
+      endpointAccess?: "inline" | "dereferenced";
+      defaultNoBorrow?: true;
+    }[];
+    returnedBorrows: readonly {
+      source: readonly CodegenPlaceProjection[];
+      result: readonly CodegenPlaceProjection[];
+      endpointAccess?: "inline" | "dereferenced";
+      defaultNoBorrow?: true;
+    }[];
+    defaultExternalAliases: readonly {
+      result: readonly CodegenPlaceProjection[];
+      endpointAccess?: "inline" | "dereferenced";
+      fresh?: true;
+    }[];
+    defaultExternalReturnedAliases: readonly {
+      result: readonly CodegenPlaceProjection[];
+      endpointAccess?: "inline" | "dereferenced";
+      fresh?: true;
+    }[];
+    defaultExternalRead: boolean;
+    defaultExternalWrite: boolean;
   }[];
+  externalReturnedAliases: readonly {
+    result: readonly CodegenPlaceProjection[];
+    endpointAccess?: "inline" | "dereferenced";
+    fresh?: true;
+  }[];
+  externalRead: boolean;
+  externalWrite: boolean;
+  maySuspend: boolean;
 };
 
 export type CodegenNamedBorrowContract = {
@@ -364,6 +403,12 @@ export type CodegenPlaceProjection =
   | { kind: "field"; name: string }
   | { kind: "tuple"; index: number }
   | { kind: "index"; constant?: number; stable: boolean }
+  | {
+      kind: "region";
+      scope: string;
+      name: string;
+      disjoint: readonly string[];
+    }
   | { kind: "discriminant" }
   | { kind: "dereference" }
   | { kind: "identity" };
@@ -516,7 +561,13 @@ const buildMutableStorageSymbolIndex = (
 const copyAccessPaths = (
   paths: readonly (readonly CodegenPlaceProjection[])[] | undefined,
 ): readonly (readonly CodegenPlaceProjection[])[] =>
-  paths?.map((path) => path.map((projection) => ({ ...projection }))) ?? [];
+  paths?.map((path) =>
+    path.map((projection) =>
+      projection.kind === "region"
+        ? { ...projection, disjoint: [...projection.disjoint] }
+        : { ...projection },
+    ),
+  ) ?? [];
 
 export type CodegenObjectTemplate = {
   symbol: ProgramSymbolId;
@@ -2485,8 +2536,87 @@ export const buildProgramCodegenView = (
                 access: parameter.access,
                 reads: copyAccessPaths(parameter.readPaths),
                 writes: copyAccessPaths(parameter.writePaths),
+                ...(parameter.runtimeCheckedWrites
+                  ? { runtimeCheckedWrites: true as const }
+                  : {}),
+                retained: parameter.retained,
+                ...(parameter.retainedUnlessBorrowed
+                  ? { retainedUnlessBorrowed: true as const }
+                  : {}),
+                ...(parameter.returnedAggregate
+                  ? { returnedAggregate: true as const }
+                  : {}),
+                retainedPaths: copyAccessPaths(parameter.retainedPaths),
+                externalRetainedPaths: copyAccessPaths(
+                  parameter.externalRetainedPaths,
+                ),
+                borrowedRetainedPaths: copyAccessPaths(
+                  parameter.borrowedRetainedPaths,
+                ),
+                returnedAliases: (parameter.returnedOrigins ?? [])
+                  .filter(
+                    (origin) =>
+                      !parameter.returnedSharedOrigins?.some(
+                        (shared) =>
+                          JSON.stringify(shared) === JSON.stringify(origin),
+                      ),
+                  )
+                  .map((origin) => ({
+                    source: copyAccessPaths([origin.source])[0] ?? [],
+                    result: copyAccessPaths([origin.result])[0] ?? [],
+                    ...(origin.endpointAccess
+                      ? { endpointAccess: origin.endpointAccess }
+                      : {}),
+                    ...(origin.defaultNoBorrow
+                      ? { defaultNoBorrow: true as const }
+                      : {}),
+                  })),
+                returnedBorrows: (parameter.returnedSharedOrigins ?? []).map(
+                  (origin) => ({
+                    source: copyAccessPaths([origin.source])[0] ?? [],
+                    result: copyAccessPaths([origin.result])[0] ?? [],
+                    ...(origin.endpointAccess
+                      ? { endpointAccess: origin.endpointAccess }
+                      : {}),
+                    ...(origin.defaultNoBorrow
+                      ? { defaultNoBorrow: true as const }
+                      : {}),
+                  }),
+                ),
+                defaultExternalAliases: (
+                  parameter.defaultExternalOrigins ?? []
+                ).map((origin) => ({
+                  result: copyAccessPaths([origin.result])[0] ?? [],
+                  ...(origin.endpointAccess
+                    ? { endpointAccess: origin.endpointAccess }
+                    : {}),
+                  ...(origin.fresh ? { fresh: true as const } : {}),
+                })),
+                defaultExternalReturnedAliases: (
+                  parameter.defaultExternalReturnedOrigins ?? []
+                ).map((origin) => ({
+                  result: copyAccessPaths([origin.result])[0] ?? [],
+                  ...(origin.endpointAccess
+                    ? { endpointAccess: origin.endpointAccess }
+                    : {}),
+                  ...(origin.fresh ? { fresh: true as const } : {}),
+                })),
+                defaultExternalRead: parameter.defaultExternalRead === true,
+                defaultExternalWrite: parameter.defaultExternalWrite === true,
               };
             }),
+            externalReturnedAliases: (
+              contract.externalReturnedOrigins ?? []
+            ).map((origin) => ({
+              result: copyAccessPaths([origin.result])[0] ?? [],
+              ...(origin.endpointAccess
+                ? { endpointAccess: origin.endpointAccess }
+                : {}),
+              ...(origin.fresh ? { fresh: true as const } : {}),
+            })),
+            externalRead: contract.externalRead === true,
+            externalWrite: contract.externalWrite === true,
+            maySuspend: contract.maySuspend,
           },
         ]),
       ),

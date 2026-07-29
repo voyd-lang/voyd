@@ -7,6 +7,12 @@ export type PlaceProjection =
   | { kind: "field"; name: string }
   | { kind: "tuple"; index: number }
   | { kind: "index"; constant?: number; stable: boolean }
+  | {
+      kind: "region";
+      scope: string;
+      name: string;
+      disjoint: readonly string[];
+    }
   | { kind: "discriminant" }
   | { kind: "dereference" }
   | { kind: "identity" };
@@ -16,6 +22,9 @@ export const projectionsOverlap = (
   right: PlaceProjection,
 ): boolean => {
   if (left.kind !== right.kind) {
+    if (left.kind === "region" || right.kind === "region") {
+      return true;
+    }
     if (
       left.kind === "discriminant" ||
       right.kind === "discriminant" ||
@@ -34,6 +43,16 @@ export const projectionsOverlap = (
     (left.kind === "identity" && right.kind === "identity")
   ) {
     return true;
+  }
+  if (left.kind === "region" && right.kind === "region") {
+    if (left.scope !== right.scope) {
+      return true;
+    }
+    return (
+      left.name === right.name ||
+      (!left.disjoint.includes(right.name) &&
+        !right.disjoint.includes(left.name))
+    );
   }
   if (left.kind === "field" && right.kind === "field") {
     return left.name === right.name;
@@ -145,7 +164,14 @@ export type CallableParameterBorrowContract = {
   writePaths?: readonly (readonly PlaceProjection[])[];
   runtimeCheckedWrites?: true;
   retained: boolean;
+  /** A public abstraction may retain ordinary values but never explicit borrows. */
+  retainedUnlessBorrowed?: true;
   returned: boolean;
+  /**
+   * The result is a fresh outer value that conservatively contains returned
+   * provenance from this parameter rather than being the parameter itself.
+   */
+  returnedAggregate?: true;
   retainedPaths?: readonly (readonly PlaceProjection[])[];
   externalRetainedPaths?: readonly (readonly PlaceProjection[])[];
   borrowedRetainedPaths?: readonly (readonly PlaceProjection[])[];
@@ -158,6 +184,10 @@ export type CallableParameterBorrowContract = {
   defaultOrigins?: readonly DefaultBorrowOrigin[];
   defaultReadOrigins?: readonly DefaultBorrowAccessOrigin[];
   defaultWriteOrigins?: readonly DefaultBorrowAccessOrigin[];
+  defaultExternalOrigins?: readonly ExternalReturnedOrigin[];
+  defaultExternalReturnedOrigins?: readonly ExternalReturnedOrigin[];
+  defaultExternalRead?: true;
+  defaultExternalWrite?: true;
   /**
    * Records the only default-value presence fact that is safe to consume
    * without the defining module's HIR.
@@ -196,12 +226,26 @@ export type ReturnedBorrowOrigin = {
   source: readonly PlaceProjection[];
   result: readonly PlaceProjection[];
   endpointAccess?: BorrowEndpointAccess;
+  /**
+   * This explicit shared/borrowed origin contributes no active loan when its
+   * parameter's default is used. It does not suppress ordinary alias
+   * provenance. Kept on the origin so privacy abstraction can redact its
+   * source path without broadening the fact to sibling default projections.
+   */
+  defaultNoBorrow?: true;
 };
 
 export type BorrowEndpointAccess = "inline" | "dereferenced";
 
 export type ReturnedTypeMatchingOrigin = ReturnedBorrowOrigin & {
   conditionId: string;
+};
+
+export type ExternalReturnedOrigin = {
+  result: readonly PlaceProjection[];
+  endpointAccess?: BorrowEndpointAccess;
+  /** The origin is a fresh allocation owned by this call result. */
+  fresh?: true;
 };
 
 export type BorrowTypeComparison = {
@@ -225,6 +269,7 @@ export type ScopedCallbackBorrowContract = {
   callbackValueParameter: number;
   access: "shared" | "mutable";
   callbackPath?: readonly string[];
+  defaultCallbackBehavior?: "safe" | "escapes" | "unknown";
 };
 
 export type CallableBorrowContract = {
@@ -235,8 +280,16 @@ export type CallableBorrowContract = {
    * of the callable's returned parameter origins.
    */
   borrowedResult?: "none" | "parameter" | "external";
+  externalReturnedOrigins?: readonly ExternalReturnedOrigin[];
+  externalRead?: true;
+  externalWrite?: true;
   transfers?: readonly CallableBorrowTransfer[];
   scopedCallbacks?: readonly ScopedCallbackBorrowContract[];
+  /**
+   * Public open-dispatch view for a concrete trait implementation. Direct
+   * concrete calls continue to use the implementation footprint above.
+   */
+  dynamicDispatch?: CallableBorrowContract;
 };
 
 export type BorrowPlace = {
@@ -251,6 +304,7 @@ export type CheckedBorrowRegion = {
 };
 
 export type CheckedNamedBorrowContract = {
+  scope: string;
   declaration: SymbolId;
   trait: SymbolId;
   implementation?: SymbolId;
@@ -289,6 +343,16 @@ export const mergeCallableBorrowContracts = (
           existing?.access === "mutable" || callback.access === "mutable"
             ? "mutable"
             : "shared",
+        ...(existing?.defaultCallbackBehavior === "escapes" ||
+        callback.defaultCallbackBehavior === "escapes"
+          ? { defaultCallbackBehavior: "escapes" as const }
+          : existing?.defaultCallbackBehavior === "unknown" ||
+              callback.defaultCallbackBehavior === "unknown"
+            ? { defaultCallbackBehavior: "unknown" as const }
+            : existing?.defaultCallbackBehavior === "safe" ||
+                callback.defaultCallbackBehavior === "safe"
+              ? { defaultCallbackBehavior: "safe" as const }
+              : {}),
       });
     });
     contract.transfers?.forEach((transfer) => {
@@ -337,6 +401,17 @@ export const mergeCallableBorrowContracts = (
         )
           ? Array.from(accessConditions.values())[0]
           : undefined;
+      const retainingParameters = parameters.filter(
+        (parameter) => parameter.retained,
+      );
+      const returningParameters = parameters.filter(
+        (parameter) => parameter.returned,
+      );
+      const retainedUnlessBorrowed =
+        retainingParameters.length > 0 &&
+        retainingParameters.every(
+          (parameter) => parameter.retainedUnlessBorrowed === true,
+        );
       return {
         access,
         ...mergeProjectionPaths(parameters, "readPaths"),
@@ -347,7 +422,16 @@ export const mergeCallableBorrowContracts = (
           ? { runtimeCheckedWrites: true as const }
           : {}),
         retained: parameters.some((parameter) => parameter.retained),
+        ...(retainedUnlessBorrowed
+          ? { retainedUnlessBorrowed: true as const }
+          : {}),
         returned: parameters.some((parameter) => parameter.returned),
+        ...(returningParameters.length > 0 &&
+        returningParameters.every(
+          (parameter) => parameter.returnedAggregate === true,
+        )
+          ? { returnedAggregate: true as const }
+          : {}),
         ...mergeReturnedTypeMatchingOrigins(parameters, index),
         ...(conditionalAccess
           ? { accessIfResultTypeDiffers: conditionalAccess }
@@ -389,6 +473,38 @@ export const mergeCallableBorrowContracts = (
           );
           return defaultWriteOrigins.length > 0 ? { defaultWriteOrigins } : {};
         })(),
+        ...(() => {
+          const defaultExternalOrigins = Array.from(
+            new Map(
+              parameters
+                .flatMap((parameter) => parameter.defaultExternalOrigins ?? [])
+                .map((origin) => [JSON.stringify(origin), origin]),
+            ).values(),
+          );
+          return defaultExternalOrigins.length > 0
+            ? { defaultExternalOrigins }
+            : {};
+        })(),
+        ...(() => {
+          const defaultExternalReturnedOrigins = Array.from(
+            new Map(
+              parameters
+                .flatMap(
+                  (parameter) => parameter.defaultExternalReturnedOrigins ?? [],
+                )
+                .map((origin) => [JSON.stringify(origin), origin]),
+            ).values(),
+          );
+          return defaultExternalReturnedOrigins.length > 0
+            ? { defaultExternalReturnedOrigins }
+            : {};
+        })(),
+        ...(parameters.some((parameter) => parameter.defaultExternalRead)
+          ? { defaultExternalRead: true as const }
+          : {}),
+        ...(parameters.some((parameter) => parameter.defaultExternalWrite)
+          ? { defaultExternalWrite: true as const }
+          : {}),
         ...(parameters.length === contracts.length &&
         parameters.every(
           (parameter) => parameter.defaultBorrowedResult === "none",
@@ -407,6 +523,12 @@ export const mergeCallableBorrowContracts = (
       };
     }),
     maySuspend: contracts.some((contract) => contract.maySuspend),
+    ...(contracts.some((contract) => contract.externalRead)
+      ? { externalRead: true as const }
+      : {}),
+    ...(contracts.some((contract) => contract.externalWrite)
+      ? { externalWrite: true as const }
+      : {}),
     borrowedResult: contracts.some(
       (contract) =>
         contract.borrowedResult === "external" ||
@@ -416,6 +538,18 @@ export const mergeCallableBorrowContracts = (
       : contracts.some((contract) => contract.borrowedResult === "parameter")
         ? "parameter"
         : "none",
+    ...(() => {
+      const externalReturnedOrigins = Array.from(
+        new Map(
+          contracts
+            .flatMap((contract) => contract.externalReturnedOrigins ?? [])
+            .map((origin) => [JSON.stringify(origin), origin]),
+        ).values(),
+      );
+      return externalReturnedOrigins.length > 0
+        ? { externalReturnedOrigins }
+        : {};
+    })(),
     ...(normalizedTransfers.length > 0
       ? { transfers: normalizedTransfers }
       : {}),
@@ -488,6 +622,13 @@ const intersectProjectionPaths = (
   );
 };
 
+const returnedOriginKey = (origin: ReturnedBorrowOrigin): string =>
+  JSON.stringify([
+    origin.source,
+    origin.result,
+    origin.endpointAccess ?? "inline",
+  ]);
+
 const mergeReturnedOrigins = (
   parameters: readonly CallableParameterBorrowContract[],
 ): Partial<CallableParameterBorrowContract> => {
@@ -495,9 +636,25 @@ const mergeReturnedOrigins = (
     new Map(
       parameters
         .flatMap((parameter) => parameter.returnedOrigins ?? [])
-        .map((origin) => [JSON.stringify(origin), origin]),
+        .map((origin) => [returnedOriginKey(origin), origin]),
     ).values(),
-  );
+  ).map((origin) => {
+    const matching = parameters.flatMap(
+      (parameter) =>
+        parameter.returnedOrigins?.filter(
+          (candidate) =>
+            returnedOriginKey(candidate) === returnedOriginKey(origin),
+        ) ?? [],
+    );
+    const { defaultNoBorrow: _defaultNoBorrow, ...base } = origin;
+    return {
+      ...base,
+      ...(matching.length > 0 &&
+      matching.every((candidate) => candidate.defaultNoBorrow === true)
+        ? { defaultNoBorrow: true as const }
+        : {}),
+    };
+  });
   return origins.length > 0 ? { returnedOrigins: origins } : {};
 };
 
@@ -507,13 +664,28 @@ const mergeReturnedSharedOrigins = (
   const [first, ...remaining] = parameters.map(
     (parameter) => parameter.returnedSharedOrigins ?? [],
   );
-  const origins = (first ?? []).filter((origin) =>
-    remaining.every((candidates) =>
-      candidates.some(
-        (candidate) => JSON.stringify(candidate) === JSON.stringify(origin),
+  const origins = (first ?? []).flatMap((origin) => {
+    const matching = remaining.map((candidates) =>
+      candidates.find(
+        (candidate) =>
+          returnedOriginKey(candidate) === returnedOriginKey(origin),
       ),
-    ),
-  );
+    );
+    if (matching.some((candidate) => candidate === undefined)) {
+      return [];
+    }
+    const { defaultNoBorrow: _defaultNoBorrow, ...base } = origin;
+    return [
+      {
+        ...base,
+        ...([origin, ...matching].every(
+          (candidate) => candidate?.defaultNoBorrow === true,
+        )
+          ? { defaultNoBorrow: true as const }
+          : {}),
+      },
+    ];
+  });
   return origins.length > 0 ? { returnedSharedOrigins: origins } : {};
 };
 
@@ -531,7 +703,7 @@ const mergeReturnedTypeMatchingOrigins = (
           const providers = parameters.filter((parameter) =>
             parameter.returnedOrigins?.some(
               (candidate) =>
-                JSON.stringify(candidate) === JSON.stringify(origin),
+                returnedOriginKey(candidate) === returnedOriginKey(origin),
             ),
           );
           const conditions = providers.flatMap(

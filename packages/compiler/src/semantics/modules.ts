@@ -27,6 +27,13 @@ export interface ModuleExportEntry {
   effects?: readonly ModuleExportEffect[];
   borrowing?: readonly {
     symbol: SymbolId;
+    /** Versioned separate-compilation payload consumed by dependents. */
+    serialized?: string;
+    serializedBytes?: number;
+    /**
+     * Decoded compatibility view for semantic clients. Dependency analysis
+     * deliberately consumes `serialized` instead.
+     */
     contract: CallableBorrowContract;
   }[];
 }

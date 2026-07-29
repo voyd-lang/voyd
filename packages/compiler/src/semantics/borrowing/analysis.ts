@@ -26,17 +26,24 @@ import type {
   CallableBorrowContract,
   PlaceProjection,
 } from "./model.js";
-import { translateProjectionPath } from "./model.js";
+import {
+  mergeCallableBorrowContracts,
+  translateProjectionPath,
+} from "./model.js";
 import type { BorrowingDependency } from "./dependency.js";
 import { computeCallableBorrowContracts } from "./summaries.js";
 import {
+  abstractTraitContractFromImplementation,
   expressionTypeFor,
   projectedTypes,
   resolveBorrowCall,
   type ResolvedBorrowCall,
   type ResolveContext,
 } from "./call-resolution.js";
-import { typeCanCarryReference } from "./reference-bearing.js";
+import {
+  referenceOriginsInType,
+  typeCanCarryReference,
+} from "./reference-bearing.js";
 import { borrowedPathsInType, typeContainsBorrowed } from "./borrowed-types.js";
 import { expressionCanFallThrough } from "./control-flow.js";
 import { objectLiteralFieldProvider } from "./object-literal-providers.js";
@@ -64,38 +71,135 @@ export const analyzeBorrowing = ({
 }): BorrowingResult => {
   const summariesStartedAt = startCompilerPerfPhase();
   const summaryHir = hirWithTraitDefaultFunctions(hir);
-  const inferredCallables = computeCallableBorrowContracts({
-    hir: summaryHir,
+  const effectOperationContracts = effectOperationCallableContracts({
+    hir,
     typing,
-    symbolTable,
-    moduleId,
-    imports,
-    dependencies,
     decls,
   });
-  const callables = annotateBorrowedResultPresence({
-    hir: summaryHir,
+  const inferCallables = (
+    dynamicDispatchContracts?: ReadonlyMap<SymbolId, CallableBorrowContract>,
+    declarationContracts?: ReadonlyMap<SymbolId, CallableBorrowContract>,
+  ): ReadonlyMap<SymbolId, CallableBorrowContract> => {
+    const inferred = computeCallableBorrowContracts({
+      hir: summaryHir,
+      typing,
+      symbolTable,
+      moduleId,
+      imports,
+      dependencies,
+      decls,
+      dynamicDispatchContracts,
+      declarationContracts,
+    });
+    return annotateBorrowedResultPresence({
+      hir: summaryHir,
+      typing,
+      symbolTable,
+      moduleId,
+      imports,
+      dependencies,
+      decls,
+      callables: inferred,
+    });
+  };
+  const preliminaryCallables = inferCallables(
+    undefined,
+    effectOperationContracts,
+  );
+  const preliminaryNamedContracts = validateNamedBorrowContracts({
+    hir,
     typing,
     symbolTable,
+    callables: preliminaryCallables,
     moduleId,
     imports,
-    dependencies,
-    decls,
-    callables: inferredCallables,
+    validateBodies: false,
   });
+  const dynamicDispatchContracts = new Map<SymbolId, CallableBorrowContract>();
+  const publicDynamicContract = ({
+    contract,
+    named,
+    declarations,
+  }: {
+    contract: CallableBorrowContract;
+    named: import("./model.js").CheckedNamedBorrowContract;
+    declarations: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  }): CallableBorrowContract => {
+    const implementation = abstractTraitContractFromImplementation({
+      contract,
+      named,
+      privateFieldNames: new Set(),
+    });
+    const declaration = declarations.get(named.declaration);
+    return declaration
+      ? mergeCallableBorrowContracts([implementation, declaration])!
+      : implementation;
+  };
+  preliminaryNamedContracts.contracts.forEach((named, symbol) => {
+    const contract = preliminaryCallables.get(symbol);
+    if (named.implementation === undefined || !contract) {
+      return;
+    }
+    dynamicDispatchContracts.set(
+      symbol,
+      publicDynamicContract({
+        contract,
+        named,
+        declarations: preliminaryNamedContracts.declarationCallables,
+      }),
+    );
+  });
+  const inferredCallablesWithBorrowedResults =
+    dynamicDispatchContracts.size > 0 ||
+    preliminaryNamedContracts.declarationCallables.size > 0
+      ? inferCallables(
+          dynamicDispatchContracts,
+          new Map([
+            ...effectOperationContracts,
+            ...preliminaryNamedContracts.declarationCallables,
+          ]),
+        )
+      : preliminaryCallables;
   markCompilerPerfPhaseDuration(
     "analyzeBorrowing.computeContracts",
     summariesStartedAt,
   );
   const mutableStorageSymbols = new Set<SymbolId>();
   const diagnostics: BorrowingResult["diagnostics"][number][] = [];
-  const namedContracts = validateNamedBorrowContracts({
-    hir,
-    typing,
-    symbolTable,
-    callables,
-  });
+  const namedContracts =
+    dynamicDispatchContracts.size > 0 ||
+    preliminaryNamedContracts.declarationCallables.size > 0
+      ? validateNamedBorrowContracts({
+          hir,
+          typing,
+          symbolTable,
+          callables: inferredCallablesWithBorrowedResults,
+          moduleId,
+          imports,
+        })
+      : preliminaryNamedContracts;
   diagnostics.push(...namedContracts.diagnostics);
+  const callables = new Map(inferredCallablesWithBorrowedResults);
+  namedContracts.declarationCallables.forEach((contract, symbol) => {
+    callables.set(symbol, contract);
+  });
+  namedContracts.contracts.forEach((named, symbol) => {
+    const contract = callables.get(symbol);
+    if (named.implementation === undefined || !contract) {
+      return;
+    }
+    callables.set(symbol, {
+      ...contract,
+      dynamicDispatch: publicDynamicContract({
+        contract,
+        named,
+        declarations: namedContracts.declarationCallables,
+      }),
+    });
+  });
+  effectOperationContracts.forEach((contract, symbol) => {
+    callables.set(symbol, contract);
+  });
   const importMap = new Map(
     imports.flatMap((entry) =>
       entry.target ? ([[entry.local, entry.target]] as const) : [],
@@ -121,12 +225,12 @@ export const analyzeBorrowing = ({
     diagnostics,
   });
   const selectionStartedAt = startCompilerPerfPhase();
-  const functions = Array.from(hir.items.values())
+  const functions = Array.from(summaryHir.items.values())
     .filter((item): item is HirFunction => item.kind === "function")
     .filter((functionItem) =>
       bodyNeedsBorrowAnalysis({
         body: functionItem,
-        hir,
+        hir: summaryHir,
         typing,
         resolveContext,
       }),
@@ -142,7 +246,7 @@ export const analyzeBorrowing = ({
   functions.forEach((functionItem) =>
     analyzeFunctionBorrowing({
       functionItem,
-      hir,
+      hir: summaryHir,
       typing,
       symbolTable,
       moduleId,
@@ -180,6 +284,93 @@ export const analyzeBorrowing = ({
     diagnostics,
   };
 };
+
+const effectOperationCallableContracts = ({
+  hir,
+  typing,
+  decls,
+}: {
+  hir: HirGraph;
+  typing: TypingResult;
+  decls: DeclTable;
+}): ReadonlyMap<SymbolId, CallableBorrowContract> =>
+  new Map(
+    Array.from(hir.items.values()).flatMap((item) =>
+      item.kind === "effect"
+        ? item.operations.flatMap((operation) => {
+            const signature = typing.functions.getSignature(operation.symbol);
+            if (!signature) {
+              return [];
+            }
+            const resultContainsBorrow = typeContainsBorrowed(
+              signature.returnType,
+              typing,
+            );
+            const resultCarriesReference = typeCanCarryReference(
+              signature.returnType,
+              typing,
+            );
+            const resultReferencePaths = resultCarriesReference
+              ? referenceOriginsInType(signature.returnType, typing).map(
+                  (origin) => origin.path,
+                )
+              : [];
+            const maySuspend =
+              decls.getEffectOperation(operation.symbol)?.operation
+                .resumable === "resume";
+            const operationContract = {
+              parameters: signature.parameters.map((parameter) => {
+                const reference = typeCanCarryReference(parameter.type, typing);
+                const access =
+                  parameter.bindingKind === "mutable-ref"
+                    ? ("mutable" as const)
+                    : reference
+                      ? ("shared" as const)
+                      : ("owned" as const);
+                return {
+                  access,
+                  ...(access === "shared" ? { readPaths: [[]] } : {}),
+                  ...(access === "mutable" ? { writePaths: [[]] } : {}),
+                  retained: reference,
+                  returned: reference && resultCarriesReference,
+                  ...(reference && resultCarriesReference
+                    ? {
+                        returnedOrigins: referenceOriginsInType(
+                          parameter.type,
+                          typing,
+                        ).flatMap((source) =>
+                          resultReferencePaths.map((result) => ({
+                            source: source.path,
+                            result,
+                            endpointAccess: source.endpointAccess,
+                          })),
+                        ),
+                      }
+                    : {}),
+                  ...(reference ? { externalRetainedPaths: [[]] } : {}),
+                };
+              }),
+              maySuspend,
+              borrowedResult: resultContainsBorrow
+                ? ("external" as const)
+                : ("none" as const),
+              ...(resultReferencePaths.length > 0
+                ? {
+                    externalReturnedOrigins: referenceOriginsInType(
+                      signature.returnType,
+                      typing,
+                    ).map((result) => ({
+                      result: result.path,
+                      endpointAccess: result.endpointAccess,
+                    })),
+                  }
+                : {}),
+            };
+            return [[operation.symbol, operationContract] as const];
+          })
+        : [],
+    ),
+  );
 
 const hirWithTraitDefaultFunctions = (hir: HirGraph): HirGraph => {
   const existingSymbols = new Set(
@@ -292,6 +483,8 @@ const createBorrowedResultPresenceAnalyzer = ({
       item.kind === "function" ? [[item.symbol, item] as const] : [],
     ),
   );
+  const declarationPresence = (symbol: SymbolId): BorrowedResultPresence =>
+    resolveContext.contracts.get(symbol)?.borrowedResult ?? "external";
   const placeOfExpressionForPresence = (
     exprId: HirExprId,
     seen: ReadonlySet<HirExprId> = new Set(),
@@ -1583,11 +1776,17 @@ const createBorrowedResultPresenceAnalyzer = ({
             (target) => target.moduleId === resolveContext.moduleId,
           )
         ) {
+          if (resolved.openTraitDispatch) {
+            return resolved.contract?.borrowedResult ?? "external";
+          }
           return combineBorrowedResultPresence(
             resolved.targets.map((target) => {
               const targetFunction = functionsBySymbol.get(target.symbol);
               if (!targetFunction) {
-                return "external";
+                return (
+                  resolved.contract?.borrowedResult ??
+                  declarationPresence(target.symbol)
+                );
               }
               return activeFunctions.has(target.symbol)
                 ? (recursiveSeed.get(target.symbol) ?? "none")
@@ -1614,7 +1813,10 @@ const createBorrowedResultPresenceAnalyzer = ({
           }
           const targetFunction = functionsBySymbol.get(target.symbol);
           if (!targetFunction) {
-            return "external";
+            return (
+              resolved.contract?.borrowedResult ??
+              declarationPresence(target.symbol)
+            );
           }
           if (activeFunctions.has(target.symbol)) {
             return recursiveSeed.get(target.symbol) ?? "none";
@@ -1625,6 +1827,7 @@ const createBorrowedResultPresenceAnalyzer = ({
           );
         });
         const combinedTargetPresence =
+          resolved.contract?.borrowedResult ??
           combineBorrowedResultPresence(targetPresence);
         if (combinedTargetPresence === "external") {
           return combinedTargetPresence;
@@ -1633,32 +1836,45 @@ const createBorrowedResultPresenceAnalyzer = ({
           return "none";
         }
         const returnedInputs =
-          resolved.contract?.parameters.flatMap((parameter, index) =>
-            (parameter.returnedOrigins ?? []).map((origin) => ({
+          resolved.contract?.parameters.flatMap((parameter, index) => {
+            const origins =
+              borrowedContext &&
+              (parameter.returnedSharedOrigins?.length ?? 0) > 0
+                ? parameter.returnedSharedOrigins!
+                : (parameter.returnedOrigins ?? []);
+            return origins.map((origin) => ({
               parameter: index,
               source: origin.source,
+              defaultNoBorrow:
+                origin.defaultNoBorrow === true &&
+                typeof resolved.arguments[index] !== "number",
               borrowedContext:
                 borrowedContext ||
                 parameter.returnedSharedOrigins?.some(
                   (shared) => JSON.stringify(shared) === JSON.stringify(origin),
                 ) === true,
-            })),
-          ) ?? [];
+            }));
+          }) ?? [];
         if (returnedInputs.length === 0) {
           return "external";
         }
         return combineBorrowedResultPresence(
-          returnedInputs.map(({ parameter, source, borrowedContext }) => {
-            return presenceOfResolvedArgument({
-              resolved,
-              parameter,
-              path: source,
-              parameterSymbols,
-              activeFunctions,
-              seenExpressions: nextSeen,
-              borrowedContext,
-            });
-          }),
+          returnedInputs.map(
+            ({ parameter, source, defaultNoBorrow, borrowedContext }) => {
+              if (defaultNoBorrow) {
+                return "none";
+              }
+              return presenceOfResolvedArgument({
+                resolved,
+                parameter,
+                path: source,
+                parameterSymbols,
+                activeFunctions,
+                seenExpressions: nextSeen,
+                borrowedContext,
+              });
+            },
+          ),
         );
       }
       case "assign":
@@ -1873,11 +2089,17 @@ const createBorrowedResultPresenceAnalyzer = ({
           (target) => target.moduleId === resolveContext.moduleId,
         )
       ) {
+        if (resolved.openTraitDispatch) {
+          return resolved.contract?.borrowedResult ?? "external";
+        }
         return combineBorrowedResultPresence(
           resolved.targets.map((target) => {
             const targetFunction = functionsBySymbol.get(target.symbol);
             if (!targetFunction) {
-              return "external";
+              return (
+                resolved.contract?.borrowedResult ??
+                declarationPresence(target.symbol)
+              );
             }
             return activeFunctions.has(target.symbol)
               ? (recursiveSeed.get(target.symbol) ?? "none")
@@ -1892,29 +2114,34 @@ const createBorrowedResultPresenceAnalyzer = ({
           }),
         );
       }
-      const targetPresence = combineBorrowedResultPresence(
-        resolved.targets.map((target) => {
-          if (target.moduleId !== resolveContext.moduleId) {
-            return (
-              resolveContext.dependencies
-                .get(target.moduleId)
-                ?.callables.get(target.symbol)?.contract?.borrowedResult ??
-              "external"
+      const targetPresence =
+        resolved.contract?.borrowedResult ??
+        combineBorrowedResultPresence(
+          resolved.targets.map((target) => {
+            if (target.moduleId !== resolveContext.moduleId) {
+              return (
+                resolveContext.dependencies
+                  .get(target.moduleId)
+                  ?.callables.get(target.symbol)?.contract?.borrowedResult ??
+                "external"
+              );
+            }
+            const targetFunction = functionsBySymbol.get(target.symbol);
+            if (!targetFunction) {
+              return (
+                resolved.contract?.borrowedResult ??
+                declarationPresence(target.symbol)
+              );
+            }
+            if (activeFunctions.has(target.symbol)) {
+              return recursiveSeed.get(target.symbol) ?? "none";
+            }
+            return presenceOfFunction(
+              targetFunction,
+              new Set(activeFunctions).add(target.symbol),
             );
-          }
-          const targetFunction = functionsBySymbol.get(target.symbol);
-          if (!targetFunction) {
-            return "external";
-          }
-          if (activeFunctions.has(target.symbol)) {
-            return recursiveSeed.get(target.symbol) ?? "none";
-          }
-          return presenceOfFunction(
-            targetFunction,
-            new Set(activeFunctions).add(target.symbol),
-          );
-        }),
-      );
+          }),
+        );
       if (targetPresence === "external") {
         return targetPresence;
       }
@@ -1922,8 +2149,13 @@ const createBorrowedResultPresenceAnalyzer = ({
         return "none";
       }
       const returnedInputs =
-        resolved.contract?.parameters.flatMap((parameter, index) =>
-          (parameter.returnedOrigins ?? []).flatMap((origin) => {
+        resolved.contract?.parameters.flatMap((parameter, index) => {
+          const origins =
+            borrowedContext &&
+            (parameter.returnedSharedOrigins?.length ?? 0) > 0
+              ? parameter.returnedSharedOrigins!
+              : (parameter.returnedOrigins ?? []);
+          return origins.flatMap((origin) => {
             const translated = translateProjectionPath({
               result: origin.result,
               source: origin.source,
@@ -1934,6 +2166,9 @@ const createBorrowedResultPresenceAnalyzer = ({
                   {
                     parameter: index,
                     source: translated,
+                    defaultNoBorrow:
+                      origin.defaultNoBorrow === true &&
+                      typeof resolved.arguments[index] !== "number",
                     borrowedContext:
                       borrowedContext ||
                       parameter.returnedSharedOrigins?.some(
@@ -1943,23 +2178,28 @@ const createBorrowedResultPresenceAnalyzer = ({
                   },
                 ]
               : [];
-          }),
-        ) ?? [];
+          });
+        }) ?? [];
       if (returnedInputs.length === 0) {
         return borrowedContext ? "external" : "none";
       }
       return combineBorrowedResultPresence(
-        returnedInputs.map(({ parameter, source, borrowedContext }) => {
-          return presenceOfResolvedArgument({
-            resolved,
-            parameter,
-            path: source,
-            parameterSymbols,
-            activeFunctions,
-            seenExpressions: nextSeen,
-            borrowedContext,
-          });
-        }),
+        returnedInputs.map(
+          ({ parameter, source, defaultNoBorrow, borrowedContext }) => {
+            if (defaultNoBorrow) {
+              return "none";
+            }
+            return presenceOfResolvedArgument({
+              resolved,
+              parameter,
+              path: source,
+              parameterSymbols,
+              activeFunctions,
+              seenExpressions: nextSeen,
+              borrowedContext,
+            });
+          },
+        ),
       );
     }
     return presenceOfExpression(
@@ -2526,15 +2766,22 @@ const callBorrowAccess = (
       typeContainsBorrowed(parameter.type, resolveContext.typing),
     ) ?? false;
   const requiresAnalysis =
+    contract?.externalRead === true ||
+    contract?.externalWrite === true ||
     contract?.maySuspend === true ||
     (contract?.scopedCallbacks?.length ?? 0) > 0 ||
     parameters.some((parameter) => parameter.retained || parameter.returned) ||
     formsExplicitBorrow;
-  if (parameters.some((parameter) => parameter.access === "mutable")) {
+  if (
+    contract?.externalWrite === true ||
+    parameters.some((parameter) => parameter.access === "mutable")
+  ) {
     return { access: "mutable", requiresAnalysis, formsExplicitBorrow };
   }
   return {
-    access: parameters.some((parameter) => parameter.access === "shared")
+    access:
+      contract?.externalRead === true ||
+      parameters.some((parameter) => parameter.access === "shared")
       ? "shared"
       : "owned",
     requiresAnalysis,

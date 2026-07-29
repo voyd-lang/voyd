@@ -15,6 +15,14 @@ import {
 } from "../model.js";
 import { normalizeReturnedSharedOrigins } from "../summaries.js";
 import { borrowedTypeEntriesInType } from "../borrowed-types.js";
+import { abstractTraitContractFromImplementation } from "../call-resolution.js";
+import {
+  CALLABLE_BORROW_SUMMARY_SCHEMA,
+  CALLABLE_BORROW_SUMMARY_VERSION,
+  callableBorrowSummarySize,
+  deserializeCallableBorrowSummary,
+  serializeCallableBorrowSummary,
+} from "../callable-summary.js";
 
 const analyze = (source: string) => {
   const filePath = "borrowing.test.voyd";
@@ -136,6 +144,1147 @@ trait ItemView
 `;
 
 describe("borrow checking", () => {
+  it("round-trips the versioned callable summary schema canonically", () => {
+    const contract = {
+      parameters: [
+        {
+          access: "shared" as const,
+          readPaths: [
+            [
+              {
+                kind: "region" as const,
+                scope: "src::views::View",
+                name: "source",
+                disjoint: [],
+              },
+            ],
+          ],
+          retained: false,
+          returned: true,
+          returnedAggregate: true as const,
+          returnedSharedOrigins: [
+            {
+              source: [
+                {
+                  kind: "region" as const,
+                  scope: "src::views::View",
+                  name: "source",
+                  disjoint: [],
+                },
+              ],
+              result: [],
+              endpointAccess: "inline" as const,
+              defaultNoBorrow: true as const,
+            },
+          ],
+        },
+      ],
+      maySuspend: false,
+      borrowedResult: "parameter" as const,
+      externalReturnedOrigins: [
+        {
+          result: [{ kind: "field" as const, name: "storage" }],
+          endpointAccess: "dereferenced" as const,
+          fresh: true as const,
+        },
+      ],
+    };
+    const source = {
+      declaration: { moduleId: "src::views", start: 10, end: 20 },
+      parameters: [{ moduleId: "src::views", start: 12, end: 16 }],
+    };
+    const serialized = serializeCallableBorrowSummary({ contract, source });
+    const decoded = deserializeCallableBorrowSummary(serialized);
+
+    expect(decoded).toEqual({
+      schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
+      version: CALLABLE_BORROW_SUMMARY_VERSION,
+      dispatch: "ordinary",
+      contract,
+      source,
+    });
+    expect(
+      serializeCallableBorrowSummary({
+        contract: decoded.contract,
+        source: decoded.source,
+      }),
+    ).toBe(serialized);
+    expect(callableBorrowSummarySize(serialized)).toBeGreaterThan(0);
+    expect(() =>
+      deserializeCallableBorrowSummary(
+        serialized.replace('"version":1', '"version":2'),
+      ),
+    ).toThrow(/does not match the V1 schema/);
+    const unknownField = JSON.parse(serialized);
+    unknownField.contract.parameters[0].futureBehavior = true;
+    expect(() =>
+      deserializeCallableBorrowSummary(JSON.stringify(unknownField)),
+    ).toThrow(/does not match the V1 schema/);
+    const invalidRuntimeGuard = JSON.parse(serialized);
+    invalidRuntimeGuard.contract.parameters[0].runtimeCheckedWrites = false;
+    expect(() =>
+      deserializeCallableBorrowSummary(JSON.stringify(invalidRuntimeGuard)),
+    ).toThrow(/does not match the V1 schema/);
+    const invalidDefaultParameter = JSON.parse(serialized);
+    invalidDefaultParameter.contract.parameters[0].defaultOrigins = [
+      { parameter: 1, source: [], result: [] },
+    ];
+    expect(() =>
+      deserializeCallableBorrowSummary(JSON.stringify(invalidDefaultParameter)),
+    ).toThrow(/does not match the V1 schema/);
+    const invalidTransferParameter = JSON.parse(serialized);
+    invalidTransferParameter.contract.transfers = [
+      { sourceParameter: 1, destinationParameter: 0 },
+    ];
+    expect(() =>
+      deserializeCallableBorrowSummary(
+        JSON.stringify(invalidTransferParameter),
+      ),
+    ).toThrow(/does not match the V1 schema/);
+    const invalidCallbackParameter = JSON.parse(serialized);
+    invalidCallbackParameter.contract.scopedCallbacks = [
+      {
+        callbackParameter: 1,
+        callbackValueParameter: 0,
+        access: "shared",
+      },
+    ];
+    expect(() =>
+      deserializeCallableBorrowSummary(
+        JSON.stringify(invalidCallbackParameter),
+      ),
+    ).toThrow(/does not match the V1 schema/);
+    const invalidCallbackValueParameter = JSON.parse(serialized);
+    invalidCallbackValueParameter.contract.scopedCallbacks = [
+      {
+        callbackParameter: 0,
+        callbackValueParameter: 1,
+        access: "shared",
+      },
+    ];
+    expect(() =>
+      deserializeCallableBorrowSummary(
+        JSON.stringify(invalidCallbackValueParameter),
+      ),
+    ).toThrow(/does not match the V1 schema/);
+    const namedScope = "src::views::View";
+    const traitSummary = serializeCallableBorrowSummary({
+      contract: {
+        parameters: [
+          {
+            access: "shared",
+            readPaths: [
+              [
+                {
+                  kind: "region",
+                  scope: namedScope,
+                  name: "source",
+                  disjoint: [],
+                },
+              ],
+            ],
+            retained: false,
+            returned: false,
+          },
+        ],
+        maySuspend: false,
+      },
+      namedContract: {
+        scope: namedScope,
+        declaration: 1,
+        trait: 1,
+        regions: [
+          { name: "source", parameter: 0, place: [] },
+          { name: "cursor", parameter: 0, place: [] },
+        ],
+        disjoint: [],
+        reads: ["source"],
+        mutates: [],
+        returnsFrom: [],
+      },
+    });
+    const forgedDisjoint = JSON.parse(traitSummary);
+    forgedDisjoint.contract.parameters[0].readPaths[0][0].disjoint = ["cursor"];
+    expect(() =>
+      deserializeCallableBorrowSummary(JSON.stringify(forgedDisjoint)),
+    ).toThrow(/does not match the V1 schema/);
+    const forgedOrdinaryDisjoint = structuredClone(forgedDisjoint);
+    forgedOrdinaryDisjoint.dispatch = "ordinary";
+    delete forgedOrdinaryDisjoint.namedContract;
+    expect(() =>
+      deserializeCallableBorrowSummary(JSON.stringify(forgedOrdinaryDisjoint)),
+    ).toThrow(/does not match the V1 schema/);
+    const forgedImplementationDisjoint = structuredClone(forgedDisjoint);
+    forgedImplementationDisjoint.dispatch = "trait-implementation";
+    expect(() =>
+      deserializeCallableBorrowSummary(
+        JSON.stringify(forgedImplementationDisjoint),
+      ),
+    ).toThrow(/does not match the V1 schema/);
+    expect(
+      projectionPathsOverlap(
+        [
+          {
+            kind: "region",
+            scope: "src::one::View",
+            name: "cursor",
+            disjoint: ["source"],
+          },
+        ],
+        [
+          {
+            kind: "region",
+            scope: "src::two::View",
+            name: "source",
+            disjoint: ["cursor"],
+          },
+        ],
+      ),
+    ).toBe(true);
+    expect(
+      projectionPathsOverlap(
+        [
+          {
+            kind: "region",
+            scope: "src::one::View",
+            name: "cursor",
+            disjoint: ["source"],
+          },
+        ],
+        [
+          {
+            kind: "region",
+            scope: "src::one::View",
+            name: "source",
+            disjoint: ["cursor"],
+          },
+        ],
+      ),
+    ).toBe(false);
+  });
+
+  it("redacts every concrete implementation path from public summaries", () => {
+    const privatePath = [{ kind: "field" as const, name: "private_storage" }];
+    const privateCursorPath = [
+      { kind: "field" as const, name: "private_cursor" },
+    ];
+    const implementation = {
+      parameters: [
+        {
+          access: "mutable" as const,
+          readPaths: [privatePath],
+          writePaths: [privatePath],
+          retained: true,
+          returned: true,
+          retainedPaths: [privatePath],
+          externalRetainedPaths: [privatePath],
+          borrowedRetainedPaths: [privatePath],
+          returnedPaths: [privatePath],
+          returnedOrigins: [{ source: privatePath, result: [] }],
+          returnedSharedOrigins: [{ source: privatePath, result: [] }],
+          returnedTypeMatchingOrigins: [
+            {
+              conditionId: "condition:private_storage",
+              source: privatePath,
+              result: [],
+            },
+          ],
+          accessIfResultTypeDiffers: {
+            conditionId: "condition:private_storage",
+            parameter: 0,
+            sourcePath: privatePath,
+            resultPath: [],
+          },
+          invalidatedPaths: [privatePath],
+          defaultOrigins: [{ parameter: 0, source: privatePath, result: [] }],
+          defaultReadOrigins: [
+            { parameter: 0, path: privatePath },
+            { parameter: 0, path: privateCursorPath },
+          ],
+          defaultWriteOrigins: [
+            { parameter: 0, path: privatePath },
+            { parameter: 0, path: privateCursorPath },
+          ],
+        },
+        {
+          access: "owned" as const,
+          readPaths: [privatePath],
+          returned: true,
+          returnedOrigins: [{ source: privatePath, result: privatePath }],
+          defaultOrigins: [
+            { parameter: 0, source: privatePath, result: privatePath },
+          ],
+          defaultReadOrigins: [{ parameter: 0, path: privatePath }],
+          defaultWriteOrigins: [{ parameter: 0, path: privatePath }],
+          retained: false,
+          accessIfResultTypeDiffers: {
+            conditionId: "cross-parameter",
+            parameter: 0,
+            sourcePath: privatePath,
+            resultPath: [],
+          },
+        },
+      ],
+      maySuspend: false,
+      borrowedResult: "parameter" as const,
+      transfers: [
+        {
+          sourceParameter: 0,
+          destinationParameter: 0,
+          sourcePath: privatePath,
+          destinationPath: privatePath,
+        },
+      ],
+    };
+    const named = {
+      scope: "src::views::View",
+      declaration: 1,
+      trait: 2,
+      implementation: 3,
+      regions: [
+        {
+          name: "source",
+          parameter: 0,
+          place: privatePath,
+        },
+        {
+          name: "cursor",
+          parameter: 0,
+          place: privateCursorPath,
+        },
+      ],
+      disjoint: [["source", "cursor"] as const],
+      reads: ["source", "cursor"],
+      mutates: ["source", "cursor"],
+      returnsFrom: ["source"],
+    };
+    const dynamicDispatch = abstractTraitContractFromImplementation({
+      contract: implementation,
+      named,
+    });
+    const serialized = serializeCallableBorrowSummary({
+      contract: { ...implementation, dynamicDispatch },
+      namedContract: named,
+    });
+
+    expect(serialized).not.toContain("private_storage");
+    expect(serialized).not.toContain("private_cursor");
+    const decoded = deserializeCallableBorrowSummary(serialized);
+    expect(
+      decoded.contract.parameters[0]?.returnedTypeMatchingOrigins?.[0]
+        ?.source[0],
+    ).toMatchObject({
+      kind: "region",
+      scope: named.scope,
+      name: "source",
+    });
+    expect(
+      decoded.contract.parameters[0]?.defaultReadOrigins?.map(
+        (origin) => origin.path[0],
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ kind: "region", name: "source" }),
+        expect.objectContaining({ kind: "region", name: "cursor" }),
+      ]),
+    );
+    expect(decoded.contract.parameters[0]?.defaultWriteOrigins).toHaveLength(2);
+  });
+
+  it("preserves safety facts in conservative public summaries", () => {
+    const privatePath = [{ kind: "field" as const, name: "private_storage" }];
+    const privateSummaryPath = [
+      {
+        kind: "region" as const,
+        scope: "voyd.summary.private",
+        name: "storage",
+        disjoint: [],
+      },
+    ];
+    const serialized = serializeCallableBorrowSummary({
+      publicAbstraction: true,
+      contract: {
+        parameters: [
+          {
+            access: "mutable",
+            retained: false,
+            returned: true,
+            returnedOrigins: [
+              {
+                source: privatePath,
+                result: privatePath,
+                endpointAccess: "inline",
+              },
+              {
+                source: privatePath,
+                result: privatePath,
+                endpointAccess: "dereferenced",
+              },
+            ],
+            returnedSharedOrigins: [
+              {
+                source: privatePath,
+                result: privatePath,
+                endpointAccess: "dereferenced",
+              },
+            ],
+          },
+          {
+            access: "owned",
+            retained: false,
+            returned: false,
+          },
+        ],
+        maySuspend: false,
+        transfers: [
+          {
+            sourceParameter: 0,
+            destinationParameter: 1,
+            sourcePath: privatePath,
+            destinationPath: privatePath,
+          },
+        ],
+        scopedCallbacks: [
+          {
+            callbackParameter: 1,
+            callbackValueParameter: 0,
+            access: "shared",
+            callbackPath: ["private_storage"],
+            defaultCallbackBehavior: "escapes",
+          },
+        ],
+      },
+    });
+    const decoded = deserializeCallableBorrowSummary(serialized).contract;
+
+    expect(serialized).not.toContain("private_storage");
+    const returned = decoded.parameters[0]?.returnedOrigins ?? [];
+    const returnedShared = decoded.parameters[0]?.returnedSharedOrigins ?? [];
+    expect(returned).toHaveLength(2);
+    expect(returnedShared).toHaveLength(1);
+    expect(returned).toEqual(expect.arrayContaining([...returnedShared]));
+    expect(decoded.transfers?.[0]).toMatchObject({
+      sourceParameter: 0,
+      destinationParameter: 1,
+      sourcePath: privateSummaryPath,
+      destinationPath: privateSummaryPath,
+      conservative: true,
+    });
+    expect(decoded.scopedCallbacks?.[0]).toEqual({
+      callbackParameter: 1,
+      callbackValueParameter: 0,
+      access: "shared",
+      defaultCallbackBehavior: "escapes",
+    });
+  });
+
+  it("uses disjoint declaration regions for open trait dispatch", () => {
+    expect(() =>
+      analyze(`
+obj Item { value: i32 }
+obj ItemView { cursor: i32, source: Item }
+
+trait View
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(mutates: cursor, returns_from: source)
+  fn next(~self) -> borrow Item
+
+impl View for ItemView
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+fn valid(~view: View) -> i32
+  let first = view.next()
+  let second = view.next()
+  first.value + second.value
+`),
+    ).not.toThrow();
+  });
+
+  it("synthesizes declaration contracts without local implementations", () => {
+    const result = analyze(`
+obj Item { value: i32 }
+
+trait View
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(mutates: cursor, returns_from: source)
+  fn next(~self) -> borrow Item
+`);
+    const traitMethod = Array.from(result.hir.items.values())
+      .flatMap((item) => (item.kind === "trait" ? item.methods : []))
+      .find(() => true);
+    const contract =
+      traitMethod === undefined
+        ? undefined
+        : result.borrowing.callables.get(traitMethod.symbol);
+
+    expect(contract?.parameters[0]?.writePaths?.[0]?.[0]).toMatchObject({
+      kind: "region",
+      scope: "borrowing.test.voyd::View",
+      name: "cursor",
+    });
+    expect(
+      contract?.parameters[0]?.returnedSharedOrigins?.[0]?.source[0],
+    ).toMatchObject({
+      kind: "region",
+      scope: "borrowing.test.voyd::View",
+      name: "source",
+    });
+  });
+
+  it("preserves ordinary returned aliases through open trait summaries", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Chooser {}
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+trait Choose
+  @borrow_contract()
+  fn choose(self, candidate: Box) -> Box
+
+impl Choose for Chooser
+  fn choose(self, candidate: Box) -> Box
+    candidate
+
+fn invalid(chooser: Choose, ~candidate: Box) -> i32
+  let loan: borrow Box = candidate
+  let returned = chooser.choose(candidate)
+  mutate(~returned)
+  loan.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("preserves projected ordinary aliases through open trait summaries", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Holder { item: Box }
+obj Chooser {}
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+trait Choose
+  @borrow_contract()
+  fn choose(self, candidate: Holder) -> Box
+
+impl Choose for Chooser
+  fn choose(self, candidate: Holder) -> Box
+    candidate.item
+
+fn invalid(chooser: Choose, ~candidate: Holder) -> i32
+  let loan: borrow Box = candidate.item
+  let ~returned = chooser.choose(candidate)
+  mutate(~returned)
+  loan.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("conservatively rejects projected aliases from unannotated open traits", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Holder { item: Box }
+obj Chooser {}
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+trait Choose
+  fn choose(self, candidate: Holder) -> Box
+
+impl Choose for Chooser
+  fn choose(self, candidate: Holder) -> Box
+    candidate.item
+
+fn invalid(chooser: Choose, ~candidate: Holder) -> i32
+  let loan: borrow Box = candidate.item
+  let ~returned = chooser.choose(candidate)
+  mutate(~returned)
+  loan.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("conservatively retains callbacks passed through unannotated open traits", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+@intrinsic(name: "__retain_callback", uses_signature: true)
+fn retain_callback(handler: fn() -> i32) -> i32
+  0
+
+obj SinkImpl {}
+
+trait Sink
+  fn accept(self, handler: fn() -> i32) -> void
+
+impl Sink for SinkImpl
+  fn accept(self, handler: fn() -> i32) -> void
+    let _ = retain_callback(handler)
+
+fn invalid(sink: Sink) -> void
+  let ~box = Box { value: 0 }
+  let callback = () =>
+    mutate(~box)
+    0
+  sink.accept(callback)
+  mutate(~box)
+`),
+    ).toEqual(expect.arrayContaining(["TY0049"]));
+  });
+
+  it("retains ordinary siblings of explicit borrows through checked traits", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Package { loan: borrow Box, callback: fn() -> i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+obj SinkImpl {}
+
+trait Sink
+  @borrow_contract()
+  fn accept(self, package: Package) -> void
+
+impl Sink for SinkImpl
+  fn accept(self, package: Package) -> void
+    let _ = 0
+
+fn invalid(sink: Sink, loan: borrow Box) -> void
+  let ~box = Box { value: 0 }
+  let callback = () =>
+    mutate(~box)
+    0
+  sink.accept(Package { loan, callback })
+  mutate(~box)
+`),
+    ).toEqual(expect.arrayContaining(["TY0049"]));
+  });
+
+  it("specializes generic retention to ordinary sibling projections", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Package<T> { loan: T, callback: fn() -> i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+trait Sink<T>
+  @borrow_contract()
+  fn accept(self, package: T) -> void
+
+obj SinkImpl<T> {}
+impl<T> Sink<T> for SinkImpl<T>
+  fn accept(self, package: T) -> void
+    let _ = 0
+
+fn invalid(
+  sink: Sink<Package<borrow Box>>,
+  loan: borrow Box
+) -> void
+  let ~box = Box { value: 0 }
+  let callback = () =>
+    mutate(~box)
+    0
+  sink.accept(Package<borrow Box> { loan, callback })
+  mutate(~box)
+`),
+    ).toEqual(expect.arrayContaining(["TY0049"]));
+  });
+
+  it("retains ordinary alternatives of root-level borrowed unions", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+type Callback = fn() : () -> i32
+type Mixed = borrow Box | Callback
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+trait Sink<T>
+  @borrow_contract()
+  fn accept(self, value: T) -> void
+
+obj SinkImpl<T> {}
+impl<T> Sink<T> for SinkImpl<T>
+  fn accept(self, value: T) -> void
+    let _ = 0
+
+fn invalid(sink: Sink<Mixed>) -> void
+  let ~box = Box { value: 0 }
+  let callback: Callback = () =>
+    mutate(~box)
+    0
+  let mixed: Mixed = callback
+  sink.accept(mixed)
+  mutate(~box)
+`),
+    ).toEqual(expect.arrayContaining(["TY0049"]));
+  });
+
+  it("preserves ordinary siblings in mixed borrowed trait results", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Mixed<T> { loan: T, ordinary: Box }
+obj Chooser { source: Box }
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = right.value
+
+trait Choose
+  region source
+  @borrow_contract(returns_from: source)
+  fn choose(self, candidate: Box) -> Mixed<borrow Box>
+
+impl Choose for Chooser
+  region source = deref(self.source)
+  fn choose(self, candidate: Box) -> Mixed<borrow Box>
+    Mixed<borrow Box> { loan: self.source, ordinary: candidate }
+
+fn invalid(chooser: Choose, ~candidate: Box) -> i32
+  let ~result = chooser.choose(candidate)
+  mutate_both(~candidate, ~result.ordinary)
+  result.loan.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("recognizes borrowed fields in nominal trait results", () => {
+    expect(
+      diagnosticsFor(`
+obj Box { value: i32 }
+obj Mixed { loan: borrow Box }
+
+trait View
+  region source
+  @borrow_contract(returns_from: source)
+  fn get(self) -> Mixed
+`),
+    ).toEqual([]);
+  });
+
+  it("conservatively abstracts private allocation aliases in trait results", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Source { item: Box }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+trait Get
+  @borrow_contract()
+  fn get(self) -> Box
+
+impl Get for Source
+  fn get(self) -> Box
+    self.item
+
+fn invalid(~source: Source) -> i32
+  let getter: Get = source
+  let loan: borrow Box = source.item
+  let ~returned = getter.get()
+  mutate(~returned)
+  loan.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("does not retain explicit-borrow trait arguments", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Reader {}
+
+trait Read
+  @borrow_contract()
+  fn read(self, value: borrow Box) -> i32
+
+impl Read for Reader
+  fn read(self, value: borrow Box) -> i32
+    value.value
+
+fn valid(reader: Read, value: borrow Box) -> i32
+  reader.read(value)
+`),
+    ).not.toContain("TY0051");
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Reader {}
+
+trait Read<T>
+  @borrow_contract()
+  fn read(self, value: T) -> i32
+
+impl Read<borrow Box> for Reader
+  fn read(self, value: borrow Box) -> i32
+    value.value
+
+fn valid(reader: Read<borrow Box>, value: borrow Box) -> i32
+  reader.read(value)
+`),
+    ).not.toContain("TY0051");
+  });
+
+  it("preserves conditional trait retention through generic wrappers", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+trait Sink<T>
+  @borrow_contract()
+  fn accept(self, value: T) -> void
+
+obj SinkImpl<T> {}
+impl<T> Sink<T> for SinkImpl<T>
+  fn accept(self, value: T) -> void
+    let _ = 0
+
+fn relay<T>(sink: Sink<T>, value: T) -> void
+  sink.accept(value)
+
+fn valid(sink: Sink<borrow Box>, value: borrow Box) -> void
+  relay(sink, value)
+`),
+    ).not.toContain("TY0051");
+  });
+
+  it("preserves declaration-region summaries across modules", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::views
+pub use std::views::{ Item, ItemView, View }
+`,
+        [`${stdRoot}${sep}views.voyd`]: `
+pub obj Item { api value: i32 }
+pub obj ItemView { api cursor: i32, api source: Item }
+
+pub trait View
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(mutates: cursor, returns_from: source)
+  fn next(~self) -> borrow Item
+
+impl View for ItemView
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  api fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+fn valid(~view: View) -> i32
+  let first: borrow Item = view.next()
+  let second: borrow Item = view.next()
+  first.value + second.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const exportedSummaries = Array.from(
+      analyzed.semantics.get("std::views")?.exports.values() ?? [],
+    )
+      .flatMap((entry) => entry.borrowing ?? [])
+      .flatMap((entry) =>
+        entry.serialized
+          ? [
+              {
+                entry,
+                summary: deserializeCallableBorrowSummary(entry.serialized),
+              },
+            ]
+          : [],
+      );
+    const declarationSummary = exportedSummaries.find(
+      ({ summary }) => summary.dispatch === "trait-declaration",
+    );
+    const implementationSummary = exportedSummaries.find(
+      ({ summary }) => summary.dispatch === "trait-implementation",
+    );
+    const callerUsesRegions = Array.from(
+      analyzed.semantics.get("src::main")?.borrowing.callables.values() ?? [],
+    ).some((contract) =>
+      contract.parameters.some((parameter) =>
+        [...(parameter.readPaths ?? []), ...(parameter.writePaths ?? [])].some(
+          (path) => path.some((projection) => projection.kind === "region"),
+        ),
+      ),
+    );
+    expect(diagnostics).toEqual([]);
+    expect(declarationSummary?.entry.serializedBytes).toBeGreaterThan(0);
+    expect(declarationSummary?.summary.namedContract?.returnsFrom).toEqual([
+      "source",
+    ]);
+    expect(implementationSummary?.entry.serializedBytes).toBeGreaterThan(0);
+    expect(implementationSummary?.summary.namedContract?.scope).toBe(
+      "std::views::View",
+    );
+    expect(JSON.stringify(implementationSummary?.entry.contract)).not.toContain(
+      '"field"',
+    );
+    expect(
+      implementationSummary?.summary.contract.parameters[0]
+        ?.returnedOrigins?.[0]?.source[0],
+    ).toMatchObject({ kind: "region", name: "source" });
+    expect(
+      implementationSummary?.summary.contract.parameters[0]
+        ?.writePaths?.[0]?.[0],
+    ).toMatchObject({ kind: "region", name: "cursor" });
+    expect(callerUsesRegions).toBe(true);
+  });
+
+  it("publishes conservative summaries for resumable effect operations", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+eff Inspect
+  read(resume, value: borrow Box) -> i32
+`);
+    const operation = Array.from(result.hir.items.values())
+      .flatMap((item) => (item.kind === "effect" ? item.operations : []))
+      .find(() => true);
+    const contract =
+      operation === undefined
+        ? undefined
+        : result.borrowing.callables.get(operation.symbol);
+
+    expect(contract).toMatchObject({
+      maySuspend: true,
+      parameters: [
+        {
+          access: "shared",
+          readPaths: [[]],
+          retained: true,
+          returned: false,
+        },
+      ],
+    });
+    const operationFootprint =
+      operation === undefined
+        ? undefined
+        : Array.from(
+            buildProgramCodegenView([result]).modules.values(),
+          )[0]?.callableAccessFootprints.get(operation.symbol);
+    expect(operationFootprint?.parameters[0]).toMatchObject({
+      retained: true,
+      retainedPaths: [],
+      borrowedRetainedPaths: [],
+    });
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+eff Inspect
+  read(resume, value: borrow Box) -> borrow Box
+
+fn invalid(value: borrow Box): Inspect -> i32
+  let returned = Inspect::read(value)
+  returned.value
+`),
+    ).toContain("TY0051");
+
+    const tailResult = analyzeWithRecovery(`
+obj Box { value: i32 }
+
+eff Inspect
+  read(tail, value: borrow Box) -> i32
+
+fn helper(value: borrow Box): Inspect -> i32
+  Inspect::read(value)
+`);
+    expect(
+      tailResult.diagnostics.map((diagnostic) => diagnostic.code),
+    ).toContain("TY0051");
+    const helper = tailResult.binding.functions.find(
+      (candidate) => candidate.name === "helper",
+    );
+    expect(
+      helper === undefined
+        ? undefined
+        : tailResult.borrowing.callables.get(helper.symbol)?.parameters[0]
+            ?.retained,
+    ).toBe(true);
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+eff Echo
+  echo(tail, value: Box) -> Box
+
+fn invalid(~value: Box): Echo -> i32
+  let loan: borrow Box = value
+  let ~returned = Echo::echo(value)
+  mutate(~returned)
+  loan.value
+`),
+    ).toContain("TY0048");
+    const projectedResult = analyze(`
+obj Box { value: i32 }
+obj Holder { item: Box }
+
+eff Echo
+  echo(tail, value: Holder) -> Box
+`);
+    const projectedOperation = Array.from(projectedResult.hir.items.values())
+      .flatMap((item) => (item.kind === "effect" ? item.operations : []))
+      .find(() => true);
+    expect(
+      projectedOperation === undefined
+        ? undefined
+        : projectedResult.borrowing.callables.get(projectedOperation.symbol)
+            ?.parameters[0]?.returnedOrigins,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: [{ kind: "field", name: "item" }],
+          result: [],
+          endpointAccess: "dereferenced",
+        }),
+      ]),
+    );
+
+    const recursiveResult = analyze(`
+type Node = { value: i32, next: Node }
+
+eff Echo
+  echo(tail, value: Node) -> Node
+`);
+    const recursiveOperation = Array.from(recursiveResult.hir.items.values())
+      .flatMap((item) => (item.kind === "effect" ? item.operations : []))
+      .find(() => true);
+    expect(
+      recursiveOperation === undefined
+        ? undefined
+        : recursiveResult.borrowing.callables.get(recursiveOperation.symbol)
+            ?.parameters[0]?.returnedOrigins,
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          source: [{ kind: "field", name: "next" }],
+          endpointAccess: "dereferenced",
+        }),
+      ]),
+    );
+  });
+
+  it("uses imported contracts for local open-dispatch implementations", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::views
+pub use std::views::{ Item, View }
+`,
+        [`${stdRoot}${sep}views.voyd`]: `
+pub obj Item { api value: i32 }
+
+pub trait View
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(mutates: cursor, returns_from: source)
+  fn next(~self) -> borrow Item
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+obj ItemView { cursor: i32, source: Item }
+
+impl View for ItemView
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+fn valid(~view: View) -> i32
+  let first = view.next()
+  let second = view.next()
+  first.value + second.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const callerUsesRegions = Array.from(
+      analyzed.semantics.get("src::main")?.borrowing.callables.values() ?? [],
+    ).some((contract) =>
+      contract.parameters.some((parameter) =>
+        [...(parameter.readPaths ?? []), ...(parameter.writePaths ?? [])].some(
+          (path) => path.some((projection) => projection.kind === "region"),
+        ),
+      ),
+    );
+    const localSemantics = analyzed.semantics.get("src::main");
+    const localImplementation = Array.from(
+      localSemantics?.borrowing.namedContracts.entries() ?? [],
+    ).find(([, contract]) => contract.implementation !== undefined);
+    const localDispatchScope =
+      localImplementation === undefined
+        ? undefined
+        : localSemantics?.borrowing.callables.get(localImplementation[0])
+            ?.dynamicDispatch?.parameters[0]?.writePaths?.[0]?.[0];
+    expect(diagnostics).toEqual([]);
+    expect(callerUsesRegions).toBe(true);
+    expect(localDispatchScope).toMatchObject({
+      kind: "region",
+      scope: "std::views::View",
+    });
+  });
+
   const borrowedOptionPrelude = `
 obj Some<T> { value: T }
 obj None {}
@@ -280,6 +1429,947 @@ impl Advances for State
       expect.arrayContaining([
         expect.stringContaining("exceeds 'reads'"),
         expect.stringContaining("exceeds 'mutates'"),
+      ]),
+    );
+  });
+
+  it("uses declaration provenance in borrowed trait default bodies", () => {
+    const source = `
+obj Item { value: i32 }
+obj State { source: Item }
+
+trait View
+  region source
+
+  @borrow_contract(returns_from: source)
+  fn current(~self) -> borrow Item
+
+  @borrow_contract(returns_from: source)
+  fn next(~self) -> borrow Item
+    self.current()
+
+impl View for State
+  region source = deref(self.source)
+
+  fn current(~self) -> borrow Item
+    self.source
+`;
+    expect(diagnosticsFor(source)).toEqual([]);
+  });
+
+  it("fully borrow-checks trait default bodies", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = right.value
+
+trait InvalidDefault
+  @borrow_contract()
+  fn conflict(self, ~value: Box) -> i32
+    mutate_both(~value, ~value)
+    value.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("treats tail effect handlers as open retaining boundaries", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+@intrinsic(name: "__retain_callback", uses_signature: true)
+fn retain_callback(handler: fn() -> i32) -> i32
+  0
+
+eff Store
+  store(tail, callback: fn() -> i32) -> i32
+
+fn invalid(): () -> i32
+  let ~box = Box { value: 0 }
+  let callback = () =>
+    mutate(~box)
+    0
+  let result =
+    try
+      Store::store(callback)
+    Store::store(tail, callback):
+      tail(retain_callback(callback))
+  mutate(~box)
+  result
+`),
+    ).toContain("TY0049");
+  });
+
+  it("tracks ordinary aliases returned from module storage", () => {
+    const result = analyzeWithRecovery(`
+obj Box { value: i32 }
+let box = Box { value: 0 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn get() -> Box
+  box
+
+fn wrapper() -> Box
+  get()
+
+fn invalid() -> i32
+  let loan: borrow Box = box
+  let ~returned = wrapper()
+  mutate(~returned)
+  loan.value
+`);
+    const externalEntry = Array.from(result.borrowing.callables).find(
+      ([, contract]) => (contract.externalReturnedOrigins?.length ?? 0) > 0,
+    );
+    expect(externalEntry).toBeDefined();
+    expect(
+      externalEntry
+        ? Array.from(
+            buildProgramCodegenView([result]).modules.values(),
+          )[0]?.callableAccessFootprints.get(externalEntry[0])
+            ?.externalReturnedAliases
+        : undefined,
+    ).toHaveLength(1);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "TY0048",
+    );
+  });
+
+  it("keeps plain external results as ordinary mutable values", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let box = Box { value: 0 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn get() -> Box
+  box
+
+fn valid() -> i32
+  let ~returned = get()
+  mutate(~returned)
+  returned.value
+`),
+    ).not.toContain("TY0050");
+  });
+
+  it("preserves external provenance through contextual borrow formation", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let global = Box { value: 0 }
+
+fn get_loan() -> Box
+  global
+
+fn get_direct() -> Box
+  global
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn invalid() -> i32
+  let loan: borrow Box = get_loan()
+  let ~direct = get_direct()
+  mutate(~direct)
+  loan.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("propagates external returned aliases through dependency wrappers", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+let box = Box { value: 0 }
+
+pub fn get() -> Box
+  box
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::storage::{ Box, get }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn wrapper() -> Box
+  get()
+
+fn valid() -> i32
+  let ~returned = wrapper()
+  mutate(~returned)
+  returned.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    expect(
+      Array.from(
+        analyzed.semantics.get("src::main")?.borrowing.callables.values() ?? [],
+      ).some((contract) => (contract.externalReturnedOrigins?.length ?? 0) > 0),
+    ).toBe(true);
+  });
+
+  it("seeds imported public storage as external provenance", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+pub let global = Box { value: 0 }
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::storage::{ Box, global }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn wrapper() -> Box
+  global
+
+fn invalid() -> i32
+  let loan: borrow Box = global
+  let ~returned = wrapper()
+  mutate(~returned)
+  loan.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    expect(
+      [...graph.diagnostics, ...analyzed.diagnostics].map(
+        (diagnostic) => diagnostic.code,
+      ),
+    ).toContain("TY0048");
+  });
+
+  it("includes external results for opaque callback boundaries", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let box = Box { value: 0 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn invalid(getter: fn() -> Box) -> i32
+  let ~returned = getter()
+  let loan: borrow Box = box
+  mutate(~returned)
+  loan.value
+
+fn trigger() -> i32
+  invalid(() => box)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("applies external wildcard origins to inline call results", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let box = Box { value: 0 }
+
+fn get() -> Box
+  box
+
+fn read(value: Box) -> i32
+  value.value
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn invalid(~candidate: Box) -> i32
+  let ~exclusive = candidate
+  let observed = read(get())
+  mutate(~exclusive)
+  observed
+`),
+    ).toContain("TY0048");
+  });
+
+  it("keeps projected external origins distinct from fresh sibling fields", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+val Result { external: Box, fresh: Box }
+let global = Box { value: 0 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn get() -> Result
+  Result { external: global, fresh: Box { value: 0 } }
+
+fn valid(~candidate: Box) -> i32
+  let loan: borrow Box = candidate
+  let result = get()
+  let ~fresh = result.fresh
+  mutate(~fresh)
+  loan.value
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("keeps direct fresh sibling projections distinct from external results", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+val Result { external: Box, fresh: Box }
+let global = Box { value: 0 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn get() -> Result
+  Result { external: global, fresh: Box { value: 0 } }
+
+fn valid(~candidate: Box) -> i32
+  let loan: borrow Box = candidate
+  let ~result = get()
+  mutate(~result.fresh)
+  loan.value
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("keeps helper-projected fresh fields distinct from external results", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+val Result { external: Box, fresh: Box }
+let global = Box { value: 0 }
+
+fn mutate_fresh(~result: Result) -> void
+  result.fresh.value = result.fresh.value + 1
+
+fn get() -> Result
+  Result { external: global, fresh: Box { value: 0 } }
+
+fn valid(~candidate: Box) -> i32
+  let loan: borrow Box = candidate
+  let ~result = get()
+  mutate_fresh(~result)
+  loan.value
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("serializes module-storage defaults without synthetic parameters", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+let global = Box { value: 0 }
+
+pub fn get(value: Box = global) -> Box
+  value
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::storage::{ get }
+
+let selected = get()
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    const storage = analyzed.semantics.get("src::storage");
+    const exported = storage?.exports
+      .get("get")
+      ?.borrowing?.find(
+        (entry) => entry.symbol === storage.exports.get("get")?.symbol,
+      );
+    const contract = exported?.serialized
+      ? deserializeCallableBorrowSummary(exported.serialized).contract
+      : undefined;
+    expect(contract?.parameters[0]?.defaultOrigins ?? []).toEqual([]);
+    expect(
+      contract?.parameters[0]?.defaultExternalReturnedOrigins ?? [],
+    ).toEqual([]);
+    expect(contract?.parameters[0]?.defaultExternalOrigins).toHaveLength(1);
+  });
+
+  it("applies parameter writes to omitted external defaults", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let global = Box { value: 0 }
+
+fn get() -> Box
+  global
+
+fn access(~left: Box, ~right: Box = global) -> void
+  left.value = 1
+  right.value = 2
+
+fn invalid() -> void
+  let ~candidate = get()
+  access(~candidate)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("does not alias fresh defaults with unrelated external storage", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let global = Box { value: 0 }
+
+fn fresh(
+  values: FixedArray<Box> = __array_new<Box>(1)
+) -> FixedArray<Box>
+  values
+
+fn mutate_array(~values: FixedArray<Box>) -> void
+  __array_set(values, 0, Box { value: 1 })
+  void
+
+fn valid() -> i32
+  let loan: borrow Box = global
+  let ~values = fresh()
+  mutate_array(~values)
+  loan.value
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("does not activate chained external defaults after explicit override", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let global = Box { value: 0 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn get(source: Box = global, selected: Box = source) -> Box
+  selected
+
+fn valid(~candidate: Box) -> i32
+  let loan: borrow Box = candidate
+  let ~returned = get(Box { value: 1 })
+  mutate(~returned)
+  loan.value
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("does not activate an upstream external default for a named override", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let global = Box { value: 0 }
+
+fn get(source: Box = global, selected: Box = source) -> Box
+  selected
+
+fn valid() -> i32
+  let ~returned = get(selected: Box { value: 1 })
+  returned.value
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("resolves external return provenance through omitted defaults", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let global = Box { value: 0 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn get(value: Box = global) -> Box
+  value
+
+fn invalid() -> i32
+  let loan: borrow Box = global
+  let ~returned = get()
+  mutate(~returned)
+  loan.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("stops transitive default reads at an explicit intermediate override", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let global = Box { value: 0 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn choose(
+  source: Box = global,
+  selected: Box = source,
+  observed: i32 = selected.value
+) -> i32
+  observed
+
+fn valid(~candidate: Box) -> i32
+  let ~exclusive = candidate
+  let observed = choose(selected: Box { value: 1 })
+  mutate(~exclusive)
+  observed
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("stops transitive default origins at an explicit intermediate override", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn inspect(
+  source: Box,
+  middle: Box = source,
+  target: Box = middle
+) -> i32
+  target.value
+
+fn valid(~source: Box) -> i32
+  let ~exclusive = source
+  let observed = inspect(source, middle: Box { value: 1 })
+  mutate(~exclusive)
+  observed
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("resolves body access through every omitted-default edge", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn inspect(
+  source: Box,
+  middle: Box = source,
+  target: Box = middle
+) -> i32
+  target.value
+
+fn invalid(~source: Box) -> i32
+  let ~exclusive = source
+  let observed = inspect(source)
+  mutate(~exclusive)
+  observed
+`),
+    ).toContain("TY0048");
+  });
+
+  it("does not apply dependent defaults after an explicit override", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn select(source: Box, selected: Box = source) -> Box
+  selected
+
+fn valid(~source: Box) -> i32
+  let loan: borrow Box = source
+  let ~returned = select(source, selected: Box { value: 1 })
+  mutate(~returned)
+  loan.value
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("does not apply default-expression reads after an explicit override", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn choose(source: Box, selected: i32 = source.value) -> i32
+  selected
+
+fn wrapper(source: Box) -> i32
+  choose(source, 1)
+
+fn valid(~source: Box) -> i32
+  let ~exclusive = source
+  let observed = wrapper(source)
+  mutate(~exclusive)
+  observed
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("abstracts private paths in unchecked trait implementation exports", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+pub obj Store { secret: Box }
+
+pub trait Getter
+  fn get(self) -> Box
+
+impl Getter for Store
+  api fn get(self) -> Box
+    self.secret
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::storage::{ Getter }
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    const serialized = Array.from(
+      analyzed.semantics.get("src::storage")?.exports.values() ?? [],
+    )
+      .flatMap((entry) => entry.borrowing ?? [])
+      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+    expect(serialized.some((entry) => entry.includes("secret"))).toBe(false);
+  });
+
+  it("abstracts private paths in ordinary public callable exports", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+pub obj Store { secret: Box }
+
+impl Store
+  api fn get(self) -> Box
+    self.secret
+
+pub fn get_from(store: Store) -> Box
+  store.secret
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::storage::{ Store }
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    const serialized = Array.from(
+      analyzed.semantics.get("src::storage")?.exports.values() ?? [],
+    )
+      .flatMap((entry) => entry.borrowing ?? [])
+      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+    expect(serialized.length).toBeGreaterThan(0);
+    expect(serialized.some((entry) => entry.includes("secret"))).toBe(false);
+  });
+
+  it("does not redact public paths that share private field names", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+pub obj Pair { api left: Box, api right: Box }
+obj Hidden { value: i32 }
+
+impl Pair
+  api fn mutate_left(~self) -> void
+    self.left.value = self.left.value + 1
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::storage::{ Box, Pair }
+
+fn valid() -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  let view: borrow Box = pair.right
+  pair.mutate_left()
+  view.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const serialized = Array.from(
+      analyzed.semantics.get("src::storage")?.exports.values() ?? [],
+    )
+      .flatMap((entry) => entry.borrowing ?? [])
+      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+
+    expect(diagnostics).toEqual([]);
+    expect(serialized.some((entry) => entry.includes('"left"'))).toBe(true);
+    expect(
+      serialized.some((entry) => entry.includes("voyd.summary.private")),
+    ).toBe(false);
+  });
+
+  it("redacts private paths without obscuring unrelated public paths", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+pub obj Pair { api left: Box, api right: Box }
+pub obj Secret { hidden: Box }
+
+pub fn make_secret() -> Secret
+  Secret { hidden: Box { value: 1 } }
+
+pub fn mutate_left_with_secret(~pair: Pair, secret: Secret) -> void
+  let adjustment = secret.hidden.value
+  pair.left.value = pair.left.value + adjustment
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::storage::{
+  Box,
+  Pair,
+  make_secret,
+  mutate_left_with_secret
+}
+
+fn valid() -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  let view: borrow Box = pair.right
+  mutate_left_with_secret(~pair, make_secret())
+  view.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const serialized = Array.from(
+      analyzed.semantics.get("src::storage")?.exports.values() ?? [],
+    )
+      .flatMap((entry) => entry.borrowing ?? [])
+      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    expect(serialized.some((entry) => entry.includes('"left"'))).toBe(true);
+    expect(serialized.some((entry) => entry.includes("hidden"))).toBe(false);
+    expect(
+      serialized.some((entry) => entry.includes("voyd.summary.private")),
+    ).toBe(true);
+  });
+
+  it("redacts private paths after recursive public fields", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+pub obj Node { api next: Node, secret: Box }
+
+impl Node
+  api fn mutate_next_secret(~self) -> void
+    self.next.secret.value = self.next.secret.value + 1
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::storage::{ Node }
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const serialized = Array.from(
+      analyzed.semantics.get("src::storage")?.exports.values() ?? [],
+    )
+      .flatMap((entry) => entry.borrowing ?? [])
+      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    expect(serialized.some((entry) => entry.includes("secret"))).toBe(false);
+    expect(
+      serialized.some((entry) => entry.includes("voyd.summary.private")),
+    ).toBe(true);
+  });
+
+  it("redacts private paths in default external origins", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+pub obj Store { hidden: Box }
+let global = Box { value: 0 }
+
+fn default_store() -> Store
+  Store { hidden: global }
+
+pub fn consume(store: Store = default_store()) -> i32
+  0
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::storage::{ consume }
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const serialized = Array.from(
+      analyzed.semantics.get("src::storage")?.exports.values() ?? [],
+    )
+      .flatMap((entry) => entry.borrowing ?? [])
+      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    expect(serialized.some((entry) => entry.includes("hidden"))).toBe(false);
+    expect(
+      serialized.some((entry) => entry.includes("voyd.summary.private")),
+    ).toBe(true);
+  });
+
+  it("preserves hidden reference crossings without exposing private paths", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}storage.voyd`]: `
+pub obj Box { api value: i32 }
+pub obj Holder { hidden: Box }
+
+impl Holder
+  api fn mutate_hidden(~self) -> void
+    self.hidden.value = self.hidden.value + 1
+
+  api fn replace_hidden(~self, replacement: Box) -> void
+    self.hidden = replacement
+
+pub fn wrap(value: Box) -> Holder
+  Holder { hidden: value }
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::storage::{ Box, Holder, wrap }
+
+fn invalid(~value: Box) -> i32
+  let loan: borrow Box = value
+  let ~holder = wrap(value)
+  holder.mutate_hidden()
+  loan.value
+
+fn valid(~value: Box) -> i32
+  let loan: borrow Box = value
+  let ~holder = wrap(value)
+  holder.replace_hidden(Box { value: 0 })
+  loan.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const serialized = Array.from(
+      analyzed.semantics.get("src::storage")?.exports.values() ?? [],
+    )
+      .flatMap((entry) => entry.borrowing ?? [])
+      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+
+    expect(
+      diagnostics.filter((diagnostic) => diagnostic.code === "TY0048"),
+    ).toHaveLength(1);
+    expect(serialized.some((entry) => entry.includes("hidden"))).toBe(false);
+    expect(
+      serialized.some((entry) => entry.includes("voyd.summary.private")),
+    ).toBe(true);
+  });
+
+  it("checks nonempty default contracts against declared regions", () => {
+    expect(
+      diagnosticsFor(`
+trait Advances
+  region cursor
+  region source
+
+  @borrow_contract(mutates: source)
+  fn touch_source(~self) -> void
+
+  @borrow_contract(mutates: cursor)
+  fn advance(~self) -> void
+    self.touch_source()
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "exceeds 'mutates' at place 'self.<region source>'",
+        ),
       ]),
     );
   });
@@ -1245,6 +3335,54 @@ fn read(option: borrow Option<i32>) -> i32
       0
 `),
     ).not.toThrow();
+  });
+
+  it("keeps plain mutable projections from borrowed patterns as values", () => {
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+obj Child { value: i32 }
+obj Parent { child: Child }
+
+impl Parent
+  fn project_child(self) -> Child
+    self.child
+
+fn mutate_child(~child: Child) -> void
+  child.value = child.value + 1
+
+fn identity<T>(value: T) -> T
+  value
+
+fn valid(option: Option<borrow Parent>) -> i32
+  match(option)
+    Some<borrow Parent> { value: borrowed }:
+      let ~child = borrowed.child
+      mutate_child(~child)
+      child.value
+    None:
+      0
+
+fn valid_result(option: Option<borrow Parent>) -> i32
+  let ~child =
+    match(option)
+      Some<borrow Parent> { value: borrowed }:
+        borrowed.child
+      None:
+        Child { value: 0 }
+  mutate_child(~child)
+  child.value
+
+fn valid_call(parent: borrow Parent) -> i32
+  let ~child = parent.project_child()
+  mutate_child(~child)
+  child.value
+
+fn valid_generic(parent: borrow Parent) -> i32
+  let ~child = identity(parent.child)
+  mutate_child(~child)
+  child.value
+`),
+    ).not.toContain("TY0050");
   });
 
   it("preserves every borrowed layer in nested borrowed types", () => {
@@ -2737,6 +4875,98 @@ fn view(value: Box) -> borrow Box
     ).toEqual(
       inner === undefined ? undefined : program.types.getTypeDesc(inner),
     );
+    const viewEntry = Array.from(result.borrowing.callables).find(
+      ([, contract]) =>
+        contract.parameters[0]?.returnedSharedOrigins?.length === 1,
+    );
+    expect(
+      viewEntry
+        ? Array.from(program.modules.values())[0]?.callableAccessFootprints.get(
+            viewEntry[0],
+          )?.parameters[0]?.returnedBorrows
+        : undefined,
+    ).toHaveLength(1);
+  });
+
+  it("preserves ordinary returned aliases in ProgramCodegenView", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn identity(value: Box) -> Box
+  value
+`);
+    const identityEntry = Array.from(result.borrowing.callables).find(
+      ([, contract]) =>
+        (contract.parameters[0]?.returnedOrigins?.length ?? 0) > 0,
+    );
+    expect(identityEntry).toBeDefined();
+    const footprint = identityEntry
+      ? Array.from(
+          buildProgramCodegenView([result]).modules.values(),
+        )[0]?.callableAccessFootprints.get(identityEntry[0])
+      : undefined;
+    expect(footprint?.parameters[0]?.returnedAliases).toHaveLength(1);
+    expect(footprint?.parameters[0]?.returnedBorrows).toEqual([]);
+  });
+
+  it("preserves aggregate and fresh result facts in ProgramCodegenView", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn sample(value: Box) -> Box
+  value
+`);
+    const entry = Array.from(result.borrowing.callables).find(
+      ([, contract]) => contract.parameters.length === 1,
+    );
+    expect(entry).toBeDefined();
+    if (!entry) {
+      return;
+    }
+    const [symbol, contract] = entry;
+    const seeded = {
+      ...contract,
+      parameters: contract.parameters.map((parameter, index) =>
+        index === 0
+          ? {
+              ...parameter,
+              runtimeCheckedWrites: true as const,
+              returnedAggregate: true as const,
+              defaultExternalOrigins: [
+                { result: [], fresh: true as const },
+              ],
+              defaultExternalReturnedOrigins: [
+                { result: [], fresh: true as const },
+              ],
+              returnedOrigins: (parameter.returnedOrigins ?? []).map(
+                (origin) => ({ ...origin, defaultNoBorrow: true as const }),
+              ),
+              returnedSharedOrigins: (parameter.returnedOrigins ?? []).map(
+                (origin) => ({ ...origin, defaultNoBorrow: true as const }),
+              ),
+            }
+          : parameter,
+      ),
+      externalReturnedOrigins: [{ result: [], fresh: true as const }],
+    };
+    (result.borrowing.callables as Map<typeof symbol, typeof contract>).set(
+      symbol,
+      seeded,
+    );
+    const view = Array.from(
+      buildProgramCodegenView([result]).modules.values(),
+    )[0]?.callableAccessFootprints.get(symbol);
+
+    expect(view?.parameters[0]).toMatchObject({
+      runtimeCheckedWrites: true,
+      returnedAggregate: true,
+      defaultExternalAliases: [{ result: [], fresh: true }],
+      defaultExternalReturnedAliases: [{ result: [], fresh: true }],
+    });
+    expect(view?.parameters[0]?.returnedBorrows[0]?.defaultNoBorrow).toBe(true);
+    expect(view?.externalReturnedAliases).toEqual([
+      { result: [], fresh: true },
+    ]);
   });
 
   it("preserves explicit borrowed results across modules", async () => {
@@ -2778,10 +5008,36 @@ fn invalid(~value: Box) -> i32
       (signature) =>
         dependency?.typing.arena.get(signature.returnType).kind === "borrowed",
     );
+    const viewSummary = dependency?.exports
+      .get("view")
+      ?.borrowing?.find(
+        (entry) => entry.symbol === dependency.exports.get("view")?.symbol,
+      );
 
     expect(borrowedSignature).toBeDefined();
-    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
-      "TY0048",
+    expect(viewSummary?.serializedBytes).toBe(
+      viewSummary?.serialized
+        ? callableBorrowSummarySize(viewSummary.serialized)
+        : undefined,
+    );
+    expect(
+      viewSummary?.serialized
+        ? deserializeCallableBorrowSummary(viewSummary.serialized).source
+        : undefined,
+    ).toMatchObject({
+      declaration: { moduleId: "src::views" },
+    });
+    const conflict = diagnostics.find(
+      (diagnostic) =>
+        diagnostic.code === "TY0048" &&
+        diagnostic.message.includes("cannot mutably borrow"),
+    );
+    expect(conflict).toBeDefined();
+    expect(conflict?.related).toContainEqual(
+      expect.objectContaining({
+        message: "callable borrow contract declared here",
+        span: expect.objectContaining({ file: "src::views" }),
+      }),
     );
   });
 
@@ -2810,8 +5066,8 @@ pub fn chained_default_view(
   second
 
 pub val Holder {
-  api active: borrow i32,
-  api empty: Option<borrow i32>
+  active: borrow i32,
+  empty: Option<borrow i32>
 }
 
 pub fn selected_default_view(
@@ -2819,6 +5075,12 @@ pub fn selected_default_view(
   holder: Holder = Holder { active: source, empty: None {} }
 ) -> Option<borrow i32>
   holder.empty
+
+pub fn selected_active_view(
+  source: borrow i32,
+  holder: Holder = Holder { active: source, empty: None {} }
+) -> borrow i32
+  holder.active
 `,
         [`${root}${sep}main.voyd`]: `
 use src::views::{
@@ -2829,11 +5091,14 @@ use src::views::{
   selected_default_view
 }
 
+fn relay(source: borrow i32) -> Option<borrow i32>
+  selected_default_view(source)
+
 let source = 1
 let empty: Option<borrow i32> = no_view()
 let default_empty: Option<borrow i32> = default_view()
 let chained_empty: Option<borrow i32> = chained_default_view()
-let selected_empty: Option<borrow i32> = selected_default_view(source)
+let selected_empty: Option<borrow i32> = relay(source)
 `,
       },
       pathAdapter: createNodePathAdapter(),
@@ -2848,9 +5113,516 @@ let selected_empty: Option<borrow i32> = selected_default_view(source)
     const noViewContract = Array.from(
       analyzed.semantics.get("src::views")?.borrowing.callables.values() ?? [],
     ).find((contract) => contract.borrowedResult === "none");
+    const selectedSummary = analyzed.semantics
+      .get("src::views")
+      ?.exports.get("selected_default_view")
+      ?.borrowing?.find((entry) =>
+        entry.serialized?.includes('"defaultNoBorrow":true'),
+      );
+    const selectedContract = selectedSummary?.serialized
+      ? deserializeCallableBorrowSummary(selectedSummary.serialized).contract
+      : undefined;
+    const activeSummary = analyzed.semantics
+      .get("src::views")
+      ?.exports.get("selected_active_view")
+      ?.borrowing?.find(
+        (entry) =>
+          entry.symbol ===
+          analyzed.semantics
+            .get("src::views")
+            ?.exports.get("selected_active_view")?.symbol,
+      );
+    const activeContract = activeSummary?.serialized
+      ? deserializeCallableBorrowSummary(activeSummary.serialized).contract
+      : undefined;
 
     expect(noViewContract?.borrowedResult).toBe("none");
+    expect(selectedSummary).toBeDefined();
+    expect(
+      selectedContract?.parameters[1]?.defaultNoBorrowPaths,
+    ).toBeUndefined();
+    expect(
+      activeContract?.parameters.some((parameter) =>
+        parameter.returnedOrigins?.some(
+          (origin) => origin.defaultNoBorrow === true,
+        ),
+      ),
+    ).toBe(false);
     expect(diagnostics).toEqual([]);
+  });
+
+  it("does not coalesce private default no-borrow sibling paths", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}views.voyd`]: `
+pub obj Box { api value: i32 }
+pub obj Some<T> { api value: T }
+pub obj None {}
+pub type Option<T> = Some<T> | None
+
+pub val Holder {
+  active: Option<borrow Box>,
+  empty: Option<borrow Box>
+}
+
+pub fn selected_active(
+  source: borrow Box,
+  holder: Holder = Holder {
+    active: Some { value: source },
+    empty: None {}
+  }
+) -> Option<borrow Box>
+  holder.active
+`,
+        [`${root}${sep}relay.voyd`]: `
+use src::views::{ Box, Option, selected_active }
+
+pub fn relay(source: borrow Box) -> Option<borrow Box>
+  selected_active(source)
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::views::{ Box, Option }
+use src::relay::{ relay }
+
+let source = Box { value: 1 }
+let escaped: Option<borrow Box> = relay(source)
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+
+    expect(
+      [...graph.diagnostics, ...analyzed.diagnostics].map(
+        (diagnostic) => diagnostic.code,
+      ),
+    ).toContain("TY0051");
+  });
+
+  it("preserves ordinary aliases from private defaults across modules", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}views.voyd`]: `
+pub obj Box { api value: i32 }
+let global = Box { value: 0 }
+pub val Holder { secret: Box }
+
+pub fn get_global() -> Box
+  global
+
+pub fn get(
+  holder: Holder = Holder { secret: global }
+) -> Box
+  holder.secret
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::views::{ Box, get_global, get }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn invalid() -> i32
+  let loan: borrow Box = get_global()
+  let ~returned = get()
+  mutate(~returned)
+  loan.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const getSummary = analyzed.semantics
+      .get("src::views")
+      ?.exports.get("get")
+      ?.borrowing?.find(
+        (entry) =>
+          entry.symbol ===
+          analyzed.semantics.get("src::views")?.exports.get("get")?.symbol,
+      );
+    const contract = getSummary?.serialized
+      ? deserializeCallableBorrowSummary(getSummary.serialized).contract
+      : undefined;
+
+    expect(
+      contract?.parameters.some((parameter) =>
+        parameter.returnedOrigins?.some(
+          (origin) => origin.defaultNoBorrow === true,
+        ),
+      ),
+    ).toBe(false);
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "TY0048",
+    );
+  });
+
+  it("preserves mixed borrowed and ordinary default origins across modules", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}views.voyd`]: `
+pub obj Box { api value: i32 }
+pub obj Item { api value: i32 }
+pub type Mixed = borrow Item | Box
+
+let global = Box { value: 0 }
+
+pub fn get_global() -> Box
+  global
+
+pub val Holder { mixed: Mixed }
+
+pub fn get(
+  holder: Holder = Holder { mixed: global }
+) -> Mixed
+  holder.mixed
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::views::{ Box, Item, Mixed, get_global, get }
+
+fn mutate_mixed(~value: Mixed) -> void
+  match(value)
+    Box:
+      value.value = value.value + 1
+    Item:
+      void
+
+fn invalid() -> i32
+  let loan: borrow Box = get_global()
+  mutate_mixed(~get())
+  loan.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+
+    expect(
+      [...graph.diagnostics, ...analyzed.diagnostics].map(
+        (diagnostic) => diagnostic.code,
+      ),
+    ).toContain("TY0048");
+  });
+
+  it("propagates external writes through returned module aliases", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}views.voyd`]: `
+pub obj Box { api value: i32 }
+let global = Box { value: 0 }
+pub val Holder { api value: Box }
+let holder = Holder { value: global }
+
+pub fn get_holder() -> Holder
+  holder
+
+pub fn get_global() -> Box
+  global
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+pub fn mutate_global() -> void
+  mutate(~get_global())
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::views::{ Box, get_global, mutate_global }
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn invalid() -> i32
+  let loan: borrow Box = get_global()
+  mutate_global()
+  loan.value
+
+fn invalid_arguments() -> void
+  mutate_both(~get_global(), ~get_global())
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const mutateGlobalSummary = analyzed.semantics
+      .get("src::views")
+      ?.exports.get("mutate_global")
+      ?.borrowing?.find(
+        (entry) =>
+          entry.symbol ===
+          analyzed.semantics.get("src::views")?.exports.get("mutate_global")
+            ?.symbol,
+      );
+    const mutateGlobalContract = mutateGlobalSummary?.serialized
+      ? deserializeCallableBorrowSummary(mutateGlobalSummary.serialized).contract
+      : undefined;
+
+    expect(mutateGlobalContract?.externalWrite).toBe(true);
+    expect(
+      [...graph.diagnostics, ...analyzed.diagnostics].map(
+        (diagnostic) => diagnostic.code,
+      ),
+    ).toContain("TY0048");
+    expect(
+      [...graph.diagnostics, ...analyzed.diagnostics].map(
+        (diagnostic) => diagnostic.code,
+      ),
+    ).not.toContain("TY9999");
+  });
+
+  it("stores plain external handles in ordinary aggregates", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}views.voyd`]: `
+pub obj Box { api value: i32 }
+let global = Box { value: 0 }
+
+pub fn get_global() -> Box
+  global
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::views::{ Box, get_global }
+
+val Holder { value: Box }
+
+fn valid() -> i32
+  let holder = Holder { value: get_global() }
+  holder.value.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+  });
+
+  it("allows external writes while a fresh local loan is active", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}views.voyd`]: `
+pub obj Box { api value: i32 }
+let global = Box { value: 0 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn get_global() -> Box
+  global
+
+pub fn mutate_global() -> void
+  mutate(~get_global())
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::views::{ Box, mutate_global }
+
+fn valid() -> i32
+  let ~local = Box { value: 1 }
+  let view: borrow Box = local
+  mutate_global()
+  view.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+  });
+
+  it("tracks escaped allocations before external writes", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}views.voyd`]: `
+pub obj Box { api value: i32 }
+let global = Box { value: 0 }
+
+@intrinsic(name: "__retain_callback", uses_signature: true)
+fn retain_callback_id(handler: fn() -> i32) -> i32
+  0
+
+pub fn retain_callback(handler: fn() -> i32) -> i32
+  retain_callback_id(handler)
+
+fn get_global() -> Box
+  global
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+pub fn mutate_global() -> void
+  mutate(~get_global())
+
+pub fn retain_and_mutate(handler: fn() -> i32) -> void
+  let _ = retain_callback_id(handler)
+  mutate_global()
+
+pub fn retain_default_and_mutate(
+  value: Box,
+  handler: fn() -> i32 = () => value.value
+) -> void
+  let _ = retain_callback_id(handler)
+  mutate_global()
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::views::{
+  Box,
+  retain_callback,
+  mutate_global,
+  retain_and_mutate,
+  retain_default_and_mutate
+}
+
+val Holder { box: Box }
+val ValueHolder { value: i32 }
+
+fn invalid_after_escape() -> i32
+  let ~local = Box { value: 1 }
+  let callback = () => local.value
+  let _ = retain_callback(callback)
+  let view: borrow Box = local
+  mutate_global()
+  view.value
+
+fn invalid_same_call() -> i32
+  let ~local = Box { value: 1 }
+  let callback = () => local.value
+  let view: borrow Box = local
+  retain_and_mutate(callback)
+  view.value
+
+fn invalid_projected_allocation() -> i32
+  let ~local = Holder { box: Box { value: 1 } }
+  let callback = () => local.box.value
+  let _ = retain_callback(callback)
+  let view: borrow Box = local.box
+  mutate_global()
+  view.value
+
+fn invalid_retained_default() -> i32
+  let ~local = Box { value: 1 }
+  let view: borrow Box = local
+  retain_default_and_mutate(local)
+  view.value
+
+fn invalid_mutable_reborrow() -> i32
+  let ~local = Box { value: 1 }
+  let callback = () => local.value
+  let _ = retain_callback(callback)
+  let ~current = local
+  mutate_global()
+  current.value
+
+fn invalid_mutable_reassignment() -> i32
+  let ~local = Box { value: 1 }
+  let callback = () => local.value
+  let _ = retain_callback(callback)
+  let ~current = Box { value: 2 }
+  current = local
+  mutate_global()
+  current.value
+
+fn invalid_nested_mutable_reborrow() -> i32
+  let ~local = Box { value: 1 }
+  let callback = () => local.value
+  let _ = retain_callback(callback)
+  let (~current, ignored) = (local, 0)
+  mutate_global()
+  current.value
+
+fn valid_copied_capture() -> i32
+  let local = ValueHolder { value: 1 }
+  let callback = () => local.value
+  let _ = retain_callback(callback)
+  let view: borrow ValueHolder = local
+  mutate_global()
+  view.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const retainAndMutateSummary = analyzed.semantics
+      .get("std::views")
+      ?.exports.get("retain_and_mutate")
+      ?.borrowing?.find(
+        (entry) =>
+          entry.symbol ===
+          analyzed.semantics.get("std::views")?.exports.get("retain_and_mutate")
+            ?.symbol,
+      );
+    const retainAndMutateContract = retainAndMutateSummary?.serialized
+      ? deserializeCallableBorrowSummary(retainAndMutateSummary.serialized)
+          .contract
+      : undefined;
+    const retainDefaultSummary = analyzed.semantics
+      .get("std::views")
+      ?.exports.get("retain_default_and_mutate")
+      ?.borrowing?.find(
+        (entry) =>
+          entry.symbol ===
+          analyzed.semantics
+            .get("std::views")
+            ?.exports.get("retain_default_and_mutate")?.symbol,
+      );
+    const retainDefaultContract = retainDefaultSummary?.serialized
+      ? deserializeCallableBorrowSummary(retainDefaultSummary.serialized)
+          .contract
+      : undefined;
+    const conflicts = [...graph.diagnostics, ...analyzed.diagnostics].filter(
+      (diagnostic) => diagnostic.code === "TY0048",
+    );
+
+    expect(retainAndMutateContract?.externalWrite).toBe(true);
+    expect(retainDefaultContract?.parameters[1]?.retained).toBe(true);
+    expect(
+      retainDefaultContract?.parameters[1]?.defaultOrigins?.length,
+    ).toBeGreaterThan(0);
+    expect(retainDefaultContract?.externalWrite).toBe(true);
+    expect(conflicts).toHaveLength(7);
+    expect(retainAndMutateContract?.parameters[0]?.retained).toBe(true);
   });
 
   it("keeps handle slots distinct from their referenced allocations", () => {
@@ -2955,6 +5727,39 @@ let selected_empty: Option<borrow i32> = selected_default_view(source)
     expect(merged?.parameters[0]?.writePaths).toEqual([
       [{ kind: "field", name: "right" }],
     ]);
+  });
+
+  it("preserves conditional ordinary-value retention across dispatch merges", () => {
+    const parameter = {
+      access: "shared" as const,
+      retained: true,
+      retainedUnlessBorrowed: true as const,
+      returned: false,
+    };
+    const merged = mergeCallableBorrowContracts([
+      { parameters: [parameter], maySuspend: false },
+      { parameters: [parameter], maySuspend: false },
+    ]);
+
+    expect(merged?.parameters[0]).toMatchObject({
+      retained: true,
+      retainedUnlessBorrowed: true,
+    });
+    expect(
+      mergeCallableBorrowContracts([
+        { parameters: [parameter], maySuspend: false },
+        {
+          parameters: [
+            {
+              access: "shared",
+              retained: true,
+              returned: false,
+            },
+          ],
+          maySuspend: false,
+        },
+      ])?.parameters[0]?.retainedUnlessBorrowed,
+    ).toBeUndefined();
   });
 
   it("preserves borrowed-source taint when transfers widen", () => {
@@ -3160,6 +5965,71 @@ impl SharedCell<T>
     expect(codegenFootprint?.parameters[0]?.writes).toEqual(
       expect.arrayContaining([statePath, valuePath]),
     );
+    expect(codegenFootprint?.parameters[0]?.runtimeCheckedWrites).toBe(true);
+  });
+
+  it("propagates runtime-checked writes through wrappers", () => {
+    const result = analyze(`
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> {
+  __value: T,
+  __borrow_state: FixedArray<i32>
+}
+
+obj Wrapper { state: SharedCell<i32> }
+
+@intrinsic(name: "__shared_cell_begin_write", uses_signature: false)
+fn shared_cell_begin_write<T>(cell: SharedCell<T>): () -> i32
+  __shared_cell_begin_write(cell)
+
+@intrinsic(name: "__shared_cell_end_write", uses_signature: false)
+fn shared_cell_end_write<T>(cell: SharedCell<T>): () -> void
+  __shared_cell_end_write(cell)
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+@intrinsic(name: "__shared_cell_set_value", uses_signature: false)
+fn shared_cell_set_value<T>(cell: SharedCell<T>, value: T): () -> void
+  __shared_cell_set_value(cell, value)
+
+impl SharedCell<T>
+  fn with_mut(self, body: fn(~T) : () -> void): () -> void
+    let status = shared_cell_begin_write(self)
+    let ~value = shared_cell_value(self)
+    body(~value)
+    shared_cell_set_value(self, value)
+    shared_cell_end_write(self)
+
+fn update(wrapper: Wrapper) -> void
+  wrapper.state.with_mut((~value) =>
+    value = value + 1
+  )
+`);
+    const wrapperContract = Array.from(result.borrowing.callables.values()).find(
+      (contract) =>
+        contract.parameters[0]?.runtimeCheckedWrites === true &&
+        contract.parameters[0]?.writePaths?.some(
+          (path) =>
+            path[0]?.kind === "field" && path[0].name === "state",
+        ),
+    );
+
+    expect(wrapperContract).toBeDefined();
+  });
+
+  it("allows mutable owned allocation aliases to escape as values", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+fn owned() -> Box
+  let ~value = Box { value: 1 }
+  value.value = value.value + 1
+  value
+`),
+    ).not.toThrow();
   });
 
   it("uses reaching alias definitions for allocation access after reassignment", () => {
@@ -3759,6 +6629,221 @@ fn valid(~value: Box) -> Box
     ).not.toContain("TY0048");
   });
 
+  it("does not project returned-container slot writes onto field aliases", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Holder { value: Box }
+
+fn make(value: Box) -> Holder
+  Holder { value }
+
+fn update(~holder: Holder, replacement: Box, ~value: Box) -> void
+  holder.value = replacement
+  value.value = value.value + 1
+
+fn valid(~value: Box) -> void
+  let ~holder = make(value)
+  update(~holder, Box { value: 0 }, ~value)
+`),
+    ).not.toContain("TY0048");
+  });
+
+  it("resolves summarized aggregate writes through contained references", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn mutate_left(~pair: Pair) -> void
+  pair.left.value = pair.left.value + 1
+
+fn valid() -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  let view: borrow Box = pair.right
+  mutate_left(~pair)
+  view.value
+
+fn invalid() -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  let view: borrow Box = pair.left
+  mutate_left(~pair)
+  view.value
+
+fn invalid_alias(~value: Box) -> i32
+  let ~pair = Pair { left: value, right: value }
+  let view: borrow Box = pair.right
+  mutate_left(~pair)
+  view.value
+
+fn invalid_replacement() -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  pair.left = pair.right
+  let view: borrow Box = pair.right
+  mutate_left(~pair)
+  view.value
+
+fn replace_left(~pair: Pair) -> void
+  pair.left = pair.right
+
+fn valid_replacement_only() -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  let view: borrow Box = pair.right
+  replace_left(~pair)
+  view.value
+
+fn alias_and_mutate(~pair: Pair) -> void
+  pair.left = pair.right
+  pair.left.value = pair.left.value + 1
+
+fn invalid_same_call() -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  let view: borrow Box = pair.right
+  alias_and_mutate(~pair)
+  view.value
+
+fn valid_sibling_branch(flag: bool) -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  if flag:
+    pair.left = pair.right
+    0
+  else:
+    let view: borrow Box = pair.right
+    mutate_left(~pair)
+    view.value
+
+fn valid_sibling_reassignment(flag: bool, value: Box) -> i32
+  var pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  if flag:
+    pair = Pair { left: value, right: value }
+    0
+  else:
+    let view: borrow Box = pair.right
+    mutate_left(~pair)
+    view.value
+
+fn valid_fresh_reassignment(value: Box) -> i32
+  var pair = Pair { left: value, right: value }
+  pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  let view: borrow Box = pair.right
+  mutate_left(~pair)
+  view.value
+
+fn invalid_loop(flag: bool) -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  while flag:
+    let view: borrow Box = pair.right
+    mutate_left(~pair)
+    let observed = view.value
+    pair.left = pair.right
+    let _ = observed
+  0
+
+fn invalid_call_loop(flag: bool) -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  while flag:
+    let view: borrow Box = pair.right
+    mutate_left(~pair)
+    let observed = view.value
+    replace_left(~pair)
+    let _ = observed
+  0
+
+fn invalid_unconditional_loop(stop: bool) -> i32
+  let ~pair = Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  while true:
+    if stop:
+      break
+    let view: borrow Box = pair.right
+    mutate_left(~pair)
+    let observed = view.value
+    replace_left(~pair)
+    let _ = observed
+  0
+
+fn invalid_conditional(flag: bool, value: Box) -> i32
+  var pair = Pair { left: value, right: value }
+  if flag:
+    pair = Pair {
+      left: Box { value: 1 },
+      right: Box { value: 2 }
+    }
+  let view: borrow Box = pair.right
+  mutate_left(~pair)
+  view.value
+
+val InlinePair { left: Box, right: Box }
+val Outer { pair: InlinePair }
+
+fn mutate_outer_left(~outer: Outer) -> void
+  outer.pair.left.value = outer.pair.left.value + 1
+
+fn invalid_nested_snapshot(value: Box) -> i32
+  var pair = InlinePair { left: value, right: value }
+  let ~outer = Outer { pair }
+  pair = InlinePair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  let view: borrow Box = outer.pair.right
+  mutate_outer_left(~outer)
+  view.value
+
+fn invalid_nested_field_snapshot() -> i32
+  let ~pair = InlinePair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+  pair.left = pair.right
+  let ~outer = Outer { pair }
+  let view: borrow Box = outer.pair.right
+  mutate_outer_left(~outer)
+  view.value
+
+fn invalid_nested_conditional(flag: bool, value: Box) -> i32
+  var pair = InlinePair { left: value, right: value }
+  if flag:
+    pair = InlinePair {
+      left: Box { value: 1 },
+      right: Box { value: 2 }
+    }
+  let ~outer = Outer { pair }
+  let view: borrow Box = outer.pair.right
+  mutate_outer_left(~outer)
+  view.value
+`).filter((code) => code === "TY0048"),
+    ).toHaveLength(11);
+  });
+
   it("does not project direct local-container reads onto stored aliases", () => {
     expect(
       diagnosticCodes(`${prelude}
@@ -3824,6 +6909,29 @@ fn conflict(
     ).toContain("TY0048");
   });
 
+  it("keeps loans produced by earlier defaults active during later defaults", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+val Holder { view: borrow Box }
+let global = Box { value: 0 }
+
+fn mutate_and_read(~value: Box) -> i32
+  value.value = 1
+  value.value
+
+fn conflict(
+  holder: Holder = Holder { view: global },
+  ignored: i32 = mutate_and_read(~global)
+) -> i32
+  holder.view.value + ignored
+
+fn main() -> i32
+  conflict()
+`),
+    ).toContain("TY0048");
+  });
+
   it("preserves projections when applying reference defaults", () => {
     const source = `${prelude}
 obj Owner { primary: Box, secondary: Box }
@@ -3845,6 +6953,23 @@ fn valid(~owner: Owner) -> i32
       diagnosticCodes(`${source}
 fn conflict(~owner: Owner) -> i32
   relay(~owner.primary, owner)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("maps default access paths through allocation-backed actuals", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+obj Owner { primary: Box }
+
+fn inspect(owner: Owner, selected: Box = owner.primary) -> i32
+  selected.value
+
+fn invalid(~owner: Owner) -> i32
+  let ~exclusive = owner.primary
+  let observed = inspect(owner)
+  mutate(~exclusive)
+  observed
 `),
     ).toContain("TY0048");
   });
@@ -5189,8 +8314,7 @@ fn invalid(~pair: Pair) -> i32
   });
 
   it("preserves retained field projections across calls", () => {
-    expect(() =>
-      analyze(`${prelude}
+    const result = analyze(`${prelude}
 obj Holder { value: Box }
 
 fn retain_left(~holder: Holder, pair: Pair) -> void
@@ -5204,8 +8328,31 @@ fn valid() -> void
   var holder = Holder { value: Box { value: 0 } }
   retain_left(~holder, pair)
   mutate(~pair.right)
-`),
-    ).not.toThrow();
+`);
+    const retainedEntry = Array.from(result.borrowing.callables).find(
+      ([, contract]) =>
+        contract.parameters.some(
+          (parameter) => (parameter.retainedPaths?.length ?? 0) > 0,
+        ),
+    );
+    expect(retainedEntry).toBeDefined();
+    if (!retainedEntry) {
+      return;
+    }
+    const footprint = Array.from(
+      buildProgramCodegenView([result]).modules.values(),
+    )[0]?.callableAccessFootprints.get(retainedEntry[0]);
+    retainedEntry[1].parameters.forEach((parameter, index) => {
+      expect(footprint?.parameters[index]?.retainedPaths).toEqual(
+        parameter.retainedPaths ?? [],
+      );
+      expect(footprint?.parameters[index]?.externalRetainedPaths).toEqual(
+        parameter.externalRetainedPaths ?? [],
+      );
+      expect(footprint?.parameters[index]?.borrowedRetainedPaths).toEqual(
+        parameter.borrowedRetainedPaths ?? [],
+      );
+    });
   });
 
   it("does not downgrade an ordinary handle passed to a retaining call", () => {
@@ -5543,6 +8690,31 @@ fn chain(value: Box, depth: i32) -> Link
       (contract) =>
         contract.parameters[0]?.returnedOrigins?.some(
           (origin) => origin.source.length === 0 && origin.result.length === 0,
+        ),
+    );
+
+    expect(recursive).toBeDefined();
+  });
+
+  it("widens recursive external projections to a conservative root", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+obj Empty {}
+obj Link {
+  value: Box | Empty,
+  next: Link | Empty
+}
+let global = Box { value: 0 }
+
+fn chain(depth: i32) -> Link
+  if depth <= 0:
+    return Link { value: global, next: Empty {} }
+  Link { value: Empty {}, next: chain(depth - 1) }
+`);
+    const recursive = Array.from(result.borrowing.callables.values()).find(
+      (contract) =>
+        contract.externalReturnedOrigins?.some(
+          (origin) => origin.result.length === 0,
         ),
     );
 
@@ -6468,6 +9640,24 @@ fn invalid(~pair: Pair) -> Box
     ).not.toContain("TY0049");
   });
 
+  it("preserves projected provenance through explicit mutable arguments", () => {
+    expect(
+      diagnosticCodes(`${prelude}
+fn view(~holder: Pair) -> borrow Box
+  holder.right
+
+fn invalid(~source: Box) -> i32
+  let ~holder = Pair {
+    left: Box { value: 0 },
+    right: source
+  }
+  let loan: borrow Box = view(~holder)
+  mutate(~source)
+  loan.value
+`),
+    ).toContain("TY0048");
+  });
+
   it("propagates source invalidation through later-defined helpers", () => {
     expect(() =>
       analyze(`
@@ -6629,6 +9819,187 @@ impl SharedCell<T>
 
 fn invalid(cell: SharedCell<Box>) -> Box
   cell.with((value) => value)
+`),
+    ).toContain("TY0053");
+  });
+
+  it("resolves scoped callbacks through omitted defaults", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn apply<R>(
+  cell: SharedCell<Box>,
+  supplied: fn(Box) : () -> R,
+  body: fn(Box) : () -> R = supplied
+) -> R
+  cell.with(body)
+
+fn invalid(cell: SharedCell<Box>) -> Box
+  apply(cell, (value) => value)
+`),
+    ).toContain("TY0053");
+  });
+
+  it("checks concrete callable defaults at scoped callback boundaries", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn identity(value: Box) -> Box
+  value
+
+fn apply(
+  cell: SharedCell<Box>,
+  body: fn(Box) : () -> Box = identity
+) -> Box
+  cell.with(body)
+
+fn invalid(cell: SharedCell<Box>) -> Box
+  apply(cell)
+`),
+    ).toContain("TY0053");
+  });
+
+  it("accepts safe lambda defaults at scoped callback boundaries", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn apply(
+  cell: SharedCell<Box>,
+  body: fn(Box) : () -> Box = (_value) => Box { value: 1 }
+) -> Box
+  cell.with(body)
+
+fn valid(cell: SharedCell<Box>) -> Box
+  apply(cell)
+`),
+    ).not.toContain("TY0053");
+  });
+
+  it("resolves projected callable defaults at scoped callback boundaries", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+type Callback = fn(Box) : () -> Box
+obj Config { callback: Callback }
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn fresh(_value: Box) -> Box
+  Box { value: 1 }
+
+fn apply(
+  cell: SharedCell<Box>,
+  config: Config = Config { callback: fresh }
+) -> Box
+  cell.with(config.callback)
+
+fn valid(cell: SharedCell<Box>) -> Box
+  apply(cell)
+`),
+    ).not.toContain("TY0053");
+  });
+
+  it("stops scoped callback defaults at explicit overrides", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn apply<R>(
+  cell: SharedCell<Box>,
+  supplied: fn(Box) : () -> R,
+  body: fn(Box) : () -> R = supplied
+) -> R
+  cell.with(body)
+
+fn valid(cell: SharedCell<Box>) -> Box
+  apply(
+    cell,
+    (value) => value,
+    body: (_value) => Box { value: 1 }
+  )
+`),
+    ).not.toContain("TY0053");
+  });
+
+  it("resolves returned callbacks through omitted defaults", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn choose<R>(
+  supplied: fn(Box) : () -> R,
+  selected: fn(Box) : () -> R = supplied
+) -> (fn(Box) : () -> R)
+  selected
+
+fn valid(cell: SharedCell<Box>) -> Box
+  cell.with(choose((value) => Box { value: 1 }))
+`),
+    ).not.toContain("TY0053");
+  });
+
+  it("propagates returned default callbacks through wrappers", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with<R>(self, body: fn(T) : () -> R) -> R
+    body(self.value)
+
+fn choose<R>(
+  supplied: fn(Box) : () -> R,
+  selected: fn(Box) : () -> R = supplied
+) -> (fn(Box) : () -> R)
+  selected
+
+fn apply<R>(
+  cell: SharedCell<Box>,
+  supplied: fn(Box) : () -> R
+) -> R
+  cell.with(choose(supplied))
+
+fn invalid(cell: SharedCell<Box>) -> Box
+  apply(cell, (value) => value)
 `),
     ).toContain("TY0053");
   });
