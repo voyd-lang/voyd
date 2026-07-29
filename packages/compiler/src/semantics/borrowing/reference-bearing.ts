@@ -114,3 +114,61 @@ export const typeIsAllocationBacked = (
   active.delete(typeId);
   return result;
 };
+
+export const typeIsDefinitelyAllocationBacked = (
+  typeId: TypeId,
+  typing: TypingResult,
+  active = new Set<TypeId>(),
+): boolean => {
+  if (active.has(typeId)) {
+    return false;
+  }
+  active.add(typeId);
+  const descriptor = typing.arena.get(typeId);
+  const result = (() => {
+    switch (descriptor.kind) {
+      case "borrowed":
+        return typeIsDefinitelyAllocationBacked(
+          descriptor.inner,
+          typing,
+          active,
+        );
+      case "primitive":
+      case "value-object":
+      case "structural-object":
+        return false;
+      case "nominal-object":
+      case "fixed-array":
+      case "function":
+        return true;
+      case "trait":
+      case "type-param-ref":
+        return false;
+      case "recursive": {
+        const nominal = typing.arena.nominalComponent(typeId);
+        return typeIsDefinitelyAllocationBacked(
+          typeof nominal === "number" ? nominal : descriptor.body,
+          typing,
+          active,
+        );
+      }
+      case "union":
+        return (
+          descriptor.members.length > 0 &&
+          descriptor.members.every((member) =>
+            typeIsDefinitelyAllocationBacked(member, typing, new Set(active)),
+          )
+        );
+      case "intersection":
+        return typeof descriptor.nominal === "number"
+          ? typeIsDefinitelyAllocationBacked(
+              descriptor.nominal,
+              typing,
+              new Set(active),
+            )
+          : false;
+    }
+  })();
+  active.delete(typeId);
+  return result;
+};

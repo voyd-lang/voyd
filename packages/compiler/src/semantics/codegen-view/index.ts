@@ -345,6 +345,21 @@ export type CodegenCallableAccessFootprint = {
   }[];
 };
 
+export type CodegenNamedBorrowContract = {
+  declaration: SymbolId;
+  trait: SymbolId;
+  implementation?: SymbolId;
+  regions: readonly {
+    name: string;
+    parameter?: number;
+    place?: readonly CodegenPlaceProjection[];
+  }[];
+  disjoint: readonly (readonly [string, string])[];
+  reads: readonly string[];
+  mutates: readonly string[];
+  returnsFrom: readonly string[];
+};
+
 export type CodegenPlaceProjection =
   | { kind: "field"; name: string }
   | { kind: "tuple"; index: number }
@@ -367,6 +382,7 @@ export type ModuleCodegenView = {
     SymbolId,
     CodegenCallableAccessFootprint
   >;
+  namedBorrowContracts: ReadonlyMap<SymbolId, CodegenNamedBorrowContract>;
   functionLocations: ReadonlyMap<SymbolId, CodegenSourceLocation>;
 };
 
@@ -2471,6 +2487,33 @@ export const buildProgramCodegenView = (
                 writes: copyAccessPaths(parameter.writePaths),
               };
             }),
+          },
+        ]),
+      ),
+      namedBorrowContracts: new Map(
+        Array.from(mod.borrowing.namedContracts, ([symbol, contract]) => [
+          symbol,
+          {
+            declaration: contract.declaration,
+            trait: contract.trait,
+            ...(typeof contract.implementation === "number"
+              ? { implementation: contract.implementation }
+              : {}),
+            regions: contract.regions.map((region) => ({
+              name: region.name,
+              ...(typeof region.parameter === "number"
+                ? { parameter: region.parameter }
+                : {}),
+              ...(region.place
+                ? { place: copyAccessPaths([region.place])[0] }
+                : {}),
+            })),
+            disjoint: contract.disjoint.map(
+              ([left, right]) => [left, right] as const,
+            ),
+            reads: [...contract.reads],
+            mutates: [...contract.mutates],
+            returnsFrom: [...contract.returnsFrom],
           },
         ]),
       ),

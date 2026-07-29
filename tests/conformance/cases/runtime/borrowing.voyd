@@ -47,6 +47,22 @@ trait Replaceable
 trait PairReplaceable
   fn replace_and_report(~self) -> (i32, i32)
 
+obj ContractViewState {
+  cursor: i32,
+  source: Box
+}
+
+trait ContractView
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(
+    mutates: cursor,
+    returns_from: source
+  )
+  fn next(~self) -> Optional<borrow Box>
+
 impl Replaceable for Box
   fn replace(~self) -> void
     self = Box { value: 23 }
@@ -55,6 +71,14 @@ impl PairReplaceable for Box
   fn replace_and_report(~self) -> (i32, i32)
     self = Box { value: 30 }
     (4, 5)
+
+impl ContractView for ContractViewState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> Optional<borrow Box>
+    self.cursor = self.cursor + 1
+    Some<borrow Box> { value: self.source }
 
 fn increment(~value: Box) -> void
   value.value = value.value + 1
@@ -131,6 +155,15 @@ pub fn nested_explicit_borrow_preserves_payload() -> i32
   let value = Box { value: 34 }
   match(optional_view(value))
     Some<borrow Box> { value: borrowed }: borrowed.value
+    None: 0
+
+pub fn checked_borrow_contract_view() -> i32
+  let ~view = ContractViewState {
+    cursor: 0,
+    source: Box { value: 41 }
+  }
+  match(view.next())
+    Some<borrow Box> { value }: value.value + view.cursor
     None: 0
 
 pub fn handle_slots_are_distinct_from_allocations() -> i32

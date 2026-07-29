@@ -1,5 +1,7 @@
 import { parse } from "../parser.js";
 import { test } from "vitest";
+import { isForm } from "../ast/index.js";
+import { parseImplDecl, parseTraitDecl } from "../surface/declarations.js";
 
 const toPlain = (code: string) =>
   JSON.parse(JSON.stringify(parse(code).toJSON()));
@@ -197,6 +199,114 @@ trait T
       "T",
       ["block", ["fn", ["=", [":", ["run"], ["->", "open", "i32"]], "1"]]],
     ],
+  ]);
+});
+
+test("parses named regions, disjointness, and borrow contracts", (t) => {
+  const ast = parse(`
+trait ViewIterator<T>
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(
+    reads: source,
+    mutates: cursor,
+    returns_from: [source, cursor]
+  )
+  fn next(~self) -> Option<borrow T>
+`);
+  const declaration = ast.rest.find(
+    (entry) => isForm(entry) && entry.calls("trait"),
+  );
+  t.expect(isForm(declaration)).toBe(true);
+  const parsed = isForm(declaration) ? parseTraitDecl(declaration) : null;
+
+  t.expect(parsed?.regions.map((region) => region.name.value)).toEqual([
+    "cursor",
+    "source",
+  ]);
+  t.expect(
+    parsed?.disjoint.map((entry) =>
+      entry.regions.map((region) => region.value),
+    ),
+  ).toEqual([["cursor", "source"]]);
+  t.expect(parsed?.methods[0]?.borrowContract).toEqual({
+    reads: ["source"],
+    mutates: ["cursor"],
+    returnsFrom: ["source", "cursor"],
+  });
+});
+
+test("parses an empty borrow contract", (t) => {
+  const ast = parse(`
+trait PureView
+  @borrow_contract()
+  fn count(self) -> i32
+`);
+  const declaration = ast.rest.find(
+    (entry) => isForm(entry) && entry.calls("trait"),
+  );
+  t.expect(isForm(declaration)).toBe(true);
+  const parsed = isForm(declaration) ? parseTraitDecl(declaration) : null;
+
+  t.expect(parsed?.methods[0]?.borrowContract).toEqual({});
+});
+
+test("rejects malformed disjoint separators", (t) => {
+  const parseTrait = (declaration: string) => {
+    const ast = parse(declaration);
+    const trait = ast.rest.find(
+      (entry) => isForm(entry) && entry.calls("trait"),
+    );
+    if (!isForm(trait)) {
+      throw new Error("expected trait declaration");
+    }
+    return parseTraitDecl(trait);
+  };
+
+  [
+    "disjoint left right",
+    "disjoint left,, right",
+    "disjoint , left, right",
+    "disjoint left, right,",
+  ].forEach((declaration) => {
+    t.expect(() =>
+      parseTrait(`
+trait Invalid
+  region left
+  region right
+  ${declaration}
+`),
+    ).toThrow(/comma-separated/);
+  });
+});
+
+test("parses impl region mappings including deref places", (t) => {
+  const ast = parse(`
+impl ViewIterator<T> for ArrayViewIterator<T>
+  region cursor = self.cursor
+  region source = deref(self.items)
+
+  api fn next(~self) -> Option<borrow T>
+    None {}
+`);
+  const declaration = ast.rest.find(
+    (entry) => isForm(entry) && entry.calls("impl"),
+  );
+  t.expect(isForm(declaration)).toBe(true);
+  const parsed = isForm(declaration) ? parseImplDecl(declaration) : null;
+
+  t.expect(parsed?.regionMappings.map((mapping) => mapping.name.value)).toEqual(
+    ["cursor", "source"],
+  );
+  t.expect(
+    parsed?.regionMappings.map((mapping) =>
+      JSON.parse(JSON.stringify(mapping.place.toJSON())),
+    ),
+  ).toEqual([
+    [".", "self", "cursor"],
+    ["deref", [".", "self", "items"]],
   ]);
 });
 

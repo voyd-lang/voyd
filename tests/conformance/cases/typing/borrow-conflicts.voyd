@@ -37,3 +37,7 @@ fn mutation_during_explicit_borrow(~value: Box) -> i32
 fn extend_local_borrow() -> borrow Box
   let local = Box { value: 1 }
   local
+
+trait MissingBorrowContract
+  region source
+  fn view(self) -> borrow Box

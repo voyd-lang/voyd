@@ -119,6 +119,22 @@ fn mutate_both(~left: Box, ~right: Box) -> void
   mutate(~right)
 `;
 
+const namedContractPrelude = `
+obj Item { value: i32 }
+obj ViewState { cursor: i32, source: Item }
+
+trait ItemView
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(
+    mutates: cursor,
+    returns_from: source
+  )
+  fn next(~self) -> borrow Item
+`;
+
 describe("borrow checking", () => {
   const borrowedOptionPrelude = `
 obj Some<T> { value: T }
@@ -129,6 +145,659 @@ obj Box { value: i32 }
 fn mutate(~value: Box) -> void
   value.value = value.value + 1
 `;
+
+  it("accepts checked named regions and implementation mappings", () => {
+    const result = analyze(`${namedContractPrelude}
+impl ItemView for ViewState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  api fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+`);
+
+    const next = result.binding.functions.find((fn) => fn.name === "next");
+    expect(next).toBeDefined();
+    expect(result.borrowing.namedContracts.get(next!.symbol)).toMatchObject({
+      reads: [],
+      mutates: ["cursor"],
+      returnsFrom: ["source"],
+      regions: [
+        { name: "cursor", parameter: 0 },
+        { name: "source", parameter: 0 },
+      ],
+    });
+    const codegenContract = buildProgramCodegenView([result])
+      .modules.get(result.moduleId)
+      ?.namedBorrowContracts.get(next!.symbol);
+    expect(codegenContract).toMatchObject({
+      declaration: expect.any(Number),
+      trait: expect.any(Number),
+      implementation: next!.symbol,
+      returnsFrom: ["source"],
+      regions: [
+        {
+          name: "cursor",
+          parameter: 0,
+          place: [{ kind: "field", name: "cursor" }],
+        },
+        {
+          name: "source",
+          parameter: 0,
+          place: [{ kind: "field", name: "source" }, { kind: "dereference" }],
+        },
+      ],
+    });
+  });
+
+  it("requires returns_from for explicit borrowed trait results", () => {
+    expect(
+      diagnosticCodes(`
+obj Item { value: i32 }
+trait InvalidView
+  region source
+  @borrow_contract(reads: source)
+  fn next(self) -> borrow Item
+`),
+    ).toContain("TY0054");
+  });
+
+  it("supports Option<borrow T> results under returns_from", () => {
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Item { value: i32 }
+obj ViewState { cursor: i32, source: Item }
+
+trait ViewIterator<T>
+  region cursor
+  region source
+  disjoint cursor, source
+  @borrow_contract(mutates: cursor, returns_from: source)
+  fn next(~self) -> Option<borrow T>
+
+impl ViewIterator<Item> for ViewState
+  region cursor = self.cursor
+  region source = deref(self.source)
+  api fn next(~self) -> Option<borrow Item>
+    self.cursor = self.cursor + 1
+    Some<borrow Item> { value: self.source }
+`),
+    ).toEqual([]);
+  });
+
+  it("checks declared reads independently from writes", () => {
+    expect(
+      diagnosticCodes(`
+obj State { metadata: i32, hidden: i32 }
+trait Reader
+  region metadata
+  @borrow_contract(reads: metadata)
+  fn inspect(self) -> i32
+
+impl Reader for State
+  region metadata = self.metadata
+  api fn inspect(self) -> i32
+    self.metadata
+`),
+    ).toEqual([]);
+
+    expect(
+      diagnosticsFor(`
+obj State { metadata: i32, hidden: i32 }
+trait Reader
+  region metadata
+  @borrow_contract(reads: metadata)
+  fn inspect(self) -> i32
+
+impl Reader for State
+  region metadata = self.metadata
+  api fn inspect(self) -> i32
+    self.hidden
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([expect.stringContaining("exceeds 'reads'")]),
+    );
+  });
+
+  it("checks inherited trait default bodies against concrete mappings", () => {
+    expect(
+      diagnosticsFor(`
+obj State { cursor: i32, hidden: i32 }
+trait Advances
+  region cursor
+  @borrow_contract(mutates: cursor)
+  fn advance(~self) -> void
+    self.hidden = self.hidden + 1
+
+impl Advances for State
+  region cursor = self.cursor
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("exceeds 'reads'"),
+        expect.stringContaining("exceeds 'mutates'"),
+      ]),
+    );
+  });
+
+  it("rejects false disjointness and missing mappings", () => {
+    const falseDisjointSource = `${namedContractPrelude}
+impl ItemView for ViewState
+  region cursor = self.cursor
+  region source = self.cursor
+
+  api fn next(~self) -> borrow Item
+    self.source
+`;
+    expect(
+      diagnosticsFor(falseDisjointSource).map(
+        (diagnostic) => diagnostic.message,
+      ),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("falsely declares region 'cursor'"),
+      ]),
+    );
+    const recovered = analyzeWithRecovery(falseDisjointSource);
+    const next = recovered.binding.functions.find((fn) => fn.name === "next");
+    expect(next).toBeDefined();
+    expect(
+      recovered.borrowing.namedContracts.get(next!.symbol)?.disjoint,
+    ).toEqual([]);
+    expect(
+      buildProgramCodegenView([recovered])
+        .modules.get(recovered.moduleId)
+        ?.namedBorrowContracts.get(next!.symbol)?.disjoint,
+    ).toEqual([]);
+
+    expect(
+      diagnosticsFor(`${namedContractPrelude}
+impl ItemView for ViewState
+  region cursor = self.cursor
+
+  api fn next(~self) -> borrow Item
+    self.source
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("no place mapping for region 'source'"),
+      ]),
+    );
+
+    const recursiveSource = `
+obj Node { cursor: i32, source: Node }
+trait NodeView
+  region cursor
+  region source
+  disjoint cursor, source
+  @borrow_contract(reads: source, mutates: cursor)
+  fn inspect(~self) -> i32
+
+impl NodeView for Node
+  region cursor = self.cursor
+  region source = deref(self.source)
+  api fn inspect(~self) -> i32
+    self.cursor
+`;
+    expect(
+      diagnosticsFor(recursiveSource).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("falsely declares region 'cursor'"),
+      ]),
+    );
+  });
+
+  it("rejects a region declared disjoint from itself without an implementation", () => {
+    expect(
+      diagnosticsFor(`
+trait ImpossibleView
+  region source
+  disjoint source, source
+  @borrow_contract(reads: source)
+  fn inspect(self) -> i32
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "falsely declares region 'source' disjoint from itself",
+        ),
+      ]),
+    );
+  });
+
+  it("rejects deref mappings that are not definitely allocation-backed", () => {
+    expect(
+      diagnosticsFor(`
+obj GenericState<T> { source: T }
+trait GenericView<T>
+  region source
+  @borrow_contract(reads: source)
+  fn inspect(self) -> i32
+
+impl<T> GenericView<T> for GenericState<T>
+  region source = deref(self.source)
+  api fn inspect(self) -> i32
+    0
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "deref(...) requires a definitely allocation-backed handle slot",
+        ),
+      ]),
+    );
+
+    expect(
+      diagnosticsFor(`
+obj Item { value: i32 }
+obj MixedState { source: Item | i32 }
+trait MixedView
+  region source
+  @borrow_contract(reads: source)
+  fn inspect(self) -> i32
+
+impl MixedView for MixedState
+  region source = deref(self.source)
+  api fn inspect(self) -> i32
+    0
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "deref(...) requires a definitely allocation-backed handle slot",
+        ),
+      ]),
+    );
+
+    expect(
+      diagnosticsFor(`
+trait Marker
+  fn marker(self) -> i32
+
+val Inline { value: i32 }
+impl Marker for Inline
+  api fn marker(self) -> i32
+    self.value
+
+obj GenericState<T: Marker> { source: T }
+trait GenericView<T: Marker>
+  region source
+  @borrow_contract(reads: source)
+  fn inspect(self) -> i32
+
+impl<T: Marker> GenericView<T> for GenericState<T>
+  region source = deref(self.source)
+  api fn inspect(self) -> i32
+    0
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "deref(...) requires a definitely allocation-backed handle slot",
+        ),
+      ]),
+    );
+  });
+
+  it("requires explicit, universally valid contract-place projections", () => {
+    expect(
+      diagnosticsFor(`
+obj Item { value: i32 }
+obj State { source: Item }
+trait View
+  region source
+  @borrow_contract(reads: source)
+  fn inspect(self) -> i32
+
+impl View for State
+  region source = self.source.value
+  api fn inspect(self) -> i32
+    0
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "projection 'value' crosses a handle slot; use explicit deref(...)",
+        ),
+      ]),
+    );
+
+    expect(
+      diagnosticsFor(`
+obj Item { value: i32 }
+obj State { source: Item }
+trait View
+  region source
+  @borrow_contract(reads: source)
+  fn inspect(self) -> i32
+
+impl View for State
+  region source = deref(deref(self.source))
+  api fn inspect(self) -> i32
+    0
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "deref(...) requires a definitely allocation-backed handle slot",
+        ),
+      ]),
+    );
+
+    expect(
+      diagnosticsFor(`
+val WithValue { value: i32 }
+val WithoutValue { other: i32 }
+obj State { source: WithValue | WithoutValue }
+trait View
+  region source
+  @borrow_contract(reads: source)
+  fn inspect(self) -> i32
+
+impl View for State
+  region source = self.source.value
+  api fn inspect(self) -> i32
+    0
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "projection 'value' must exist on every possible mapped type",
+        ),
+      ]),
+    );
+  });
+
+  it("maps fields contributed by structural intersections", () => {
+    const source = `
+obj Base { base: i32 }
+type Extended = Base & { extra: i32 }
+trait ExtraView
+  region extra
+  @borrow_contract(reads: extra)
+  fn inspect(self) -> i32
+
+impl ExtraView for Extended
+  region extra = self.extra
+  api fn inspect(self) -> i32
+    self.extra
+`;
+    expect(
+      diagnosticsFor(source).map((diagnostic) => diagnostic.message),
+    ).toEqual([]);
+  });
+
+  it("does not let a dereferenced region cover a whole-receiver read", () => {
+    expect(
+      diagnosticsFor(`
+obj Item { value: i32 }
+obj State { source: Item }
+trait Reader
+  region source
+  @borrow_contract(reads: source)
+  fn inspect(self, callback: fn(State) : () -> i32) -> i32
+
+impl Reader for State
+  region source = deref(self.source)
+  api fn inspect(self, callback: fn(State) : () -> i32) -> i32
+    callback(self)
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("exceeds 'reads' at place 'self'"),
+      ]),
+    );
+  });
+
+  it("checks declaration-only trait default provenance", () => {
+    const source = `
+obj Item { value: i32 }
+trait LeakyDefault
+  region source
+  @borrow_contract(returns_from: source)
+  fn view(self, value: borrow Item) -> borrow Item
+    value
+`;
+    expect(
+      diagnosticsFor(source).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "exceeds 'returns_from' at place 'parameter[1]",
+        ),
+      ]),
+    );
+  });
+
+  it("checks access-free default contracts without an implementation", () => {
+    expect(
+      diagnosticsFor(`
+trait Reader
+  fn read(self) -> i32
+
+  @borrow_contract()
+  fn inspect(self) -> i32
+    self.read()
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("exceeds 'reads' at place 'self'"),
+      ]),
+    );
+  });
+
+  it("rejects invalid mappings and misplaced contract annotations", () => {
+    expect(
+      diagnosticsFor(`${namedContractPrelude}
+impl ItemView for ViewState
+  region cursor = deref(self.cursor)
+  region source = deref(self.missing)
+
+  api fn next(~self) -> borrow Item
+    self.source
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "region 'cursor' to invalid place 'deref(self.cursor)'",
+        ),
+        expect.stringContaining(
+          "region 'source' to invalid place 'deref(self.missing)'",
+        ),
+      ]),
+    );
+
+    expect(
+      diagnosticsFor(`
+@borrow_contract(reads: source)
+fn inspect(value: i32) -> i32
+  value
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("is not a trait method"),
+      ]),
+    );
+
+    expect(
+      diagnosticsFor(`
+obj State { value: i32 }
+trait StaticReader
+  region source
+  @borrow_contract(reads: source)
+  fn inspect(value: State) -> i32
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("has no instance 'self' receiver"),
+      ]),
+    );
+
+    expect(
+      diagnosticsFor(`
+obj State { value: i32 }
+impl State
+  @borrow_contract()
+  fn inspect(self) -> i32
+    self.value
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("is not a trait method"),
+      ]),
+    );
+
+    expect(
+      diagnosticsFor(`${namedContractPrelude}
+impl ItemView for ViewState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  @borrow_contract(mutates: cursor, returns_from: source)
+  api fn next(~self) -> borrow Item
+    self.source
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("implementations inherit"),
+      ]),
+    );
+  });
+
+  it("checks imported contracted overrides and accepts imported defaults", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}views.voyd`]: `
+pub trait Reader
+  region visible
+  @borrow_contract(reads: visible)
+  fn inspect(self) -> i32
+
+pub trait PureView
+  region state
+  @borrow_contract()
+  fn count(self) -> i32
+    1
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::views::{ Reader, PureView }
+
+obj State { visible: i32, hidden: i32 }
+obj Empty {}
+
+impl Reader for State
+  region visible = self.visible
+  api fn inspect(self) -> i32
+    self.hidden
+
+impl PureView for Empty
+  region state = self
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+
+    expect(diagnostics.map((diagnostic) => diagnostic.message)).toEqual(
+      expect.arrayContaining([expect.stringContaining("exceeds 'reads'")]),
+    );
+  });
+
+  it("accepts an empty contract for an access-free implementation", () => {
+    expect(
+      diagnosticCodes(`
+obj State {}
+trait PureView
+  @borrow_contract()
+  fn count(self) -> i32
+
+impl PureView for State
+  api fn count(self) -> i32
+    1
+`),
+    ).toEqual([]);
+  });
+
+  it("does not treat borrowed callback parameters as returned provenance", () => {
+    expect(
+      diagnosticCodes(`
+obj Item { value: i32 }
+obj State {}
+trait CallbackFactory
+  @borrow_contract()
+  fn make(self) -> (fn(borrow Item) : () -> void)
+`),
+    ).toEqual([]);
+  });
+
+  it("rejects excess mutation and returned provenance", () => {
+    expect(
+      diagnosticsFor(`${namedContractPrelude}
+impl ItemView for ViewState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  api fn next(~self) -> borrow Item
+    self.source.value = self.source.value + 1
+    self.source
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([expect.stringContaining("exceeds 'mutates'")]),
+    );
+
+    expect(
+      diagnosticsFor(`
+obj Item { value: i32 }
+obj PairView { cursor: i32, source: Item, other: Item }
+trait ItemView
+  region cursor
+  region source
+  disjoint cursor, source
+  @borrow_contract(mutates: cursor, returns_from: source)
+  fn next(~self) -> borrow Item
+
+impl ItemView for PairView
+  region cursor = self.cursor
+  region source = deref(self.source)
+  api fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.other
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("exceeds 'returns_from'"),
+      ]),
+    );
+
+    expect(
+      diagnosticsFor(`${namedContractPrelude}
+impl ItemView for ViewState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  api fn next(~self) -> borrow Item
+    Item { value: 0 }
+`).map((diagnostic) => diagnostic.message),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "exceeds 'returns_from' at place '<external provenance>'",
+        ),
+      ]),
+    );
+  });
 
   it("retains explicit borrowed results through their final use", () => {
     expect(

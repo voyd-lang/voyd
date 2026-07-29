@@ -25,9 +25,8 @@ export const cloneSemanticsForTypingState = ({
     hir: semantics.hir,
     borrowing: {
       callables: new Map(semantics.borrowing.callables),
-      mutableStorageSymbols: new Set(
-        semantics.borrowing.mutableStorageSymbols,
-      ),
+      namedContracts: new Map(semantics.borrowing.namedContracts),
+      mutableStorageSymbols: new Set(semantics.borrowing.mutableStorageSymbols),
       diagnostics: [...semantics.borrowing.diagnostics],
     },
     typing: {
@@ -65,16 +64,18 @@ export const cloneSemanticsForTypingState = ({
       callInstanceKeys: cloneNestedMap(typing.callInstanceKeys),
       callTraitDispatches: new Set(typing.callTraitDispatches),
       borrowCallTargets: cloneNestedMap(typing.borrowCallTargets),
-      borrowCallArgumentPlans: cloneNestedMap(
-        typing.borrowCallArgumentPlans,
-      ),
-      borrowResolvedExprTypes: new Map(
-        typing.borrowResolvedExprTypes,
-      ),
+      borrowCallArgumentPlans: cloneNestedMap(typing.borrowCallArgumentPlans),
+      borrowResolvedExprTypes: new Map(typing.borrowResolvedExprTypes),
       sourceImportLocals: new Set(typing.sourceImportLocals),
-      functionInstantiationInfo: cloneNestedMap(typing.functionInstantiationInfo),
-      functionInstanceExprTypes: cloneNestedMap(typing.functionInstanceExprTypes),
-      functionInstanceValueTypes: cloneNestedMap(typing.functionInstanceValueTypes),
+      functionInstantiationInfo: cloneNestedMap(
+        typing.functionInstantiationInfo,
+      ),
+      functionInstanceExprTypes: cloneNestedMap(
+        typing.functionInstanceExprTypes,
+      ),
+      functionInstanceValueTypes: cloneNestedMap(
+        typing.functionInstanceValueTypes,
+      ),
       traitImplsByNominal: new Map(
         Array.from(typing.traitImplsByNominal.entries()).map(
           ([nominal, impls]) => [nominal, [...impls]],
@@ -87,10 +88,9 @@ export const cloneSemanticsForTypingState = ({
       ),
       traitMethodImpls: new Map(typing.traitMethodImpls),
       memberMetadata: new Map(
-        Array.from(typing.memberMetadata.entries()).map(([symbol, metadata]) => [
-          symbol,
-          { ...metadata },
-        ]),
+        Array.from(typing.memberMetadata.entries()).map(
+          ([symbol, metadata]) => [symbol, { ...metadata }],
+        ),
       ),
       diagnostics: [...typing.diagnostics],
     },

@@ -244,8 +244,26 @@ export type BorrowPlace = {
   projections: readonly PlaceProjection[];
 };
 
+export type CheckedBorrowRegion = {
+  name: string;
+  parameter?: number;
+  place?: readonly PlaceProjection[];
+};
+
+export type CheckedNamedBorrowContract = {
+  declaration: SymbolId;
+  trait: SymbolId;
+  implementation?: SymbolId;
+  regions: readonly CheckedBorrowRegion[];
+  disjoint: readonly (readonly [string, string])[];
+  reads: readonly string[];
+  mutates: readonly string[];
+  returnsFrom: readonly string[];
+};
+
 export type BorrowingResult = {
   callables: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  namedContracts: ReadonlyMap<SymbolId, CheckedNamedBorrowContract>;
   mutableStorageSymbols: ReadonlySet<SymbolId>;
   diagnostics: readonly Diagnostic[];
 };
@@ -588,6 +606,7 @@ const mergeProjectionPaths = (
 
 export const emptyBorrowingResult = (): BorrowingResult => ({
   callables: new Map(),
+  namedContracts: new Map(),
   mutableStorageSymbols: new Set(),
   diagnostics: [],
 });

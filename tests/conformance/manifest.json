@@ -144,7 +144,7 @@
           "title": "rejects overlapping mutable access and explicit borrow escapes without rejecting ordinary aliases",
           "expect": {
             "kind": "diagnostics",
-            "codes": ["TY0048", "TY0051"]
+            "codes": ["TY0048", "TY0051", "TY0054"]
           }
         }
       ]
@@ -178,6 +178,12 @@
           "title": "reads through an explicit borrowed result",
           "entryName": "explicit_borrowed_result_reads_source",
           "expect": { "kind": "equals", "value": 21 }
+        },
+        {
+          "id": "runtime.borrowing.checked-region-contract",
+          "title": "uses a checked view contract with Option<borrow T>",
+          "entryName": "checked_borrow_contract_view",
+          "expect": { "kind": "equals", "value": 42 }
         },
         {
           "id": "runtime.borrowing.nested-explicit-borrow",

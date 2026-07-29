@@ -13,7 +13,7 @@ import {
   type HirModuleLet,
   type HirPattern,
 } from "../hir/index.js";
-import type { HirExprId, SymbolId } from "../ids.js";
+import type { HirExprId, HirItemId, SymbolId } from "../ids.js";
 import type { TypingResult } from "../typing/index.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type { DeclTable } from "../decls.js";
@@ -40,6 +40,7 @@ import { typeCanCarryReference } from "./reference-bearing.js";
 import { borrowedPathsInType, typeContainsBorrowed } from "./borrowed-types.js";
 import { expressionCanFallThrough } from "./control-flow.js";
 import { objectLiteralFieldProvider } from "./object-literal-providers.js";
+import { validateNamedBorrowContracts } from "./named-contracts.js";
 
 export const analyzeBorrowing = ({
   hir,
@@ -62,8 +63,9 @@ export const analyzeBorrowing = ({
   decls: DeclTable;
 }): BorrowingResult => {
   const summariesStartedAt = startCompilerPerfPhase();
+  const summaryHir = hirWithTraitDefaultFunctions(hir);
   const inferredCallables = computeCallableBorrowContracts({
-    hir,
+    hir: summaryHir,
     typing,
     symbolTable,
     moduleId,
@@ -72,7 +74,7 @@ export const analyzeBorrowing = ({
     decls,
   });
   const callables = annotateBorrowedResultPresence({
-    hir,
+    hir: summaryHir,
     typing,
     symbolTable,
     moduleId,
@@ -87,6 +89,13 @@ export const analyzeBorrowing = ({
   );
   const mutableStorageSymbols = new Set<SymbolId>();
   const diagnostics: BorrowingResult["diagnostics"][number][] = [];
+  const namedContracts = validateNamedBorrowContracts({
+    hir,
+    typing,
+    symbolTable,
+    callables,
+  });
+  diagnostics.push(...namedContracts.diagnostics);
   const importMap = new Map(
     imports.flatMap((entry) =>
       entry.target ? ([[entry.local, entry.target]] as const) : [],
@@ -164,7 +173,65 @@ export const analyzeBorrowing = ({
     "analyzeBorrowing.checkBodies",
     bodiesStartedAt,
   );
-  return { callables, mutableStorageSymbols, diagnostics };
+  return {
+    callables,
+    namedContracts: namedContracts.contracts,
+    mutableStorageSymbols,
+    diagnostics,
+  };
+};
+
+const hirWithTraitDefaultFunctions = (hir: HirGraph): HirGraph => {
+  const existingSymbols = new Set(
+    Array.from(hir.items.values()).flatMap((item) =>
+      item.kind === "function" ? [item.symbol] : [],
+    ),
+  );
+  const defaultMethods = Array.from(hir.items.values()).flatMap((item) =>
+    item.kind === "trait"
+      ? item.methods.flatMap((method) =>
+          typeof method.defaultBody === "number" &&
+          !existingSymbols.has(method.symbol)
+            ? [{ trait: item, method }]
+            : [],
+        )
+      : [],
+  );
+  if (defaultMethods.length === 0) {
+    return hir;
+  }
+
+  const items = new Map(hir.items);
+  defaultMethods.forEach(({ trait, method }, index) => {
+    const id = (-1 - index) as HirItemId;
+    items.set(id, {
+      kind: "function",
+      id,
+      ast: method.returnType?.ast ?? trait.ast,
+      span: method.span,
+      visibility: trait.visibility,
+      symbol: method.symbol,
+      typeParameters: method.typeParameters,
+      parameters: method.parameters.map((parameter) => ({
+        symbol: parameter.symbol,
+        pattern: {
+          kind: "identifier",
+          symbol: parameter.symbol,
+          bindingKind: parameter.bindingKind,
+          span: parameter.span,
+        },
+        span: parameter.span,
+        label: parameter.label,
+        mutable: parameter.mutable,
+        type: parameter.type,
+      })),
+      returnType: method.returnType,
+      effectType: method.effectType,
+      body: method.defaultBody!,
+      borrowContract: method.borrowContract,
+    });
+  });
+  return { ...hir, items };
 };
 
 type BorrowedResultPresence = "none" | "parameter" | "external";

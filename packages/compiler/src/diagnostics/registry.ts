@@ -370,6 +370,71 @@ type DiagnosticParamsMap = {
         through: string;
       }
     | { kind: "borrow-origin"; binding: string };
+  TY0054:
+    | {
+        kind: "duplicate-region";
+        declaration: string;
+        region: string;
+      }
+    | {
+        kind: "unknown-region";
+        declaration: string;
+        region: string;
+        clause: string;
+      }
+    | {
+        kind: "missing-returns-from";
+        declaration: string;
+      }
+    | {
+        kind: "returns-from-without-borrow";
+        declaration: string;
+        regions: string;
+      }
+    | {
+        kind: "missing-region-mapping";
+        declaration: string;
+        region: string;
+      }
+    | {
+        kind: "invalid-region-mapping";
+        declaration: string;
+        region: string;
+        place: string;
+        reason: string;
+      }
+    | {
+        kind: "false-disjointness";
+        declaration: string;
+        leftRegion: string;
+        leftPlace: string;
+        rightRegion: string;
+        rightPlace: string;
+      }
+    | {
+        kind: "self-disjointness";
+        declaration: string;
+        region: string;
+      }
+    | {
+        kind: "contract-excess";
+        declaration: string;
+        clause: "reads" | "mutates" | "returns_from";
+        place: string;
+        regions: string;
+      }
+    | {
+        kind: "implementation-contract";
+        declaration: string;
+      }
+    | {
+        kind: "invalid-contract-target";
+        declaration: string;
+      }
+    | {
+        kind: "static-contract-target";
+        declaration: string;
+      };
   TY9999: { kind: "unexpected-error"; message: string };
 };
 
@@ -1159,6 +1224,46 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0053"]>,
+  TY0054: {
+    code: "TY0054",
+    message: (params) => {
+      switch (params.kind) {
+        case "duplicate-region":
+          return `borrow contract declaration '${params.declaration}' declares region '${params.region}' more than once`;
+        case "unknown-region":
+          return `borrow contract declaration '${params.declaration}' references undeclared region '${params.region}' in '${params.clause}'`;
+        case "missing-returns-from":
+          return `borrow contract declaration '${params.declaration}' returns an explicit borrow but has no 'returns_from' clause`;
+        case "returns-from-without-borrow":
+          return `borrow contract declaration '${params.declaration}' declares 'returns_from' region(s) ${params.regions}, but its result has no explicit borrowed portion`;
+        case "missing-region-mapping":
+          return `borrow contract implementation '${params.declaration}' has no place mapping for region '${params.region}'`;
+        case "invalid-region-mapping":
+          return `borrow contract implementation '${params.declaration}' maps region '${params.region}' to invalid place '${params.place}': ${params.reason}`;
+        case "false-disjointness":
+          return `borrow contract implementation '${params.declaration}' falsely declares region '${params.leftRegion}' at '${params.leftPlace}' disjoint from region '${params.rightRegion}' at '${params.rightPlace}'`;
+        case "self-disjointness":
+          return `borrow contract declaration '${params.declaration}' falsely declares region '${params.region}' disjoint from itself`;
+        case "contract-excess":
+          return `borrow contract implementation '${params.declaration}' exceeds '${params.clause}' at place '${params.place}'; declared region(s): ${params.regions}`;
+        case "implementation-contract":
+          return `borrow contract implementation '${params.declaration}' repeats '@borrow_contract'; implementations inherit the trait declaration`;
+        case "invalid-contract-target":
+          return `borrow contract declaration '${params.declaration}' is not a trait method; named borrow contracts are declared on trait methods`;
+        case "static-contract-target":
+          return `borrow contract declaration '${params.declaration}' has no instance 'self' receiver; named regions map only through an implementation receiver`;
+      }
+      return exhaustive(params);
+    },
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Correct the named region mapping or contract clause so the declared caller-visible footprint covers the implementation.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0054"]>,
   TY9999: {
     code: "TY9999",
     message: (params) => params.message,
