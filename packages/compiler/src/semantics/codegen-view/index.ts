@@ -173,6 +173,25 @@ export type CallLoweringInfo = {
   >;
   typeArgs?: ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]>;
   traitDispatch: boolean;
+  identityGuards: readonly {
+    left: {
+      parameter: number;
+      expression: HirExprId;
+      display: string;
+      identity: "allocation" | "storage" | "indexed-place";
+      allocationPath?: readonly CodegenPlaceProjection[];
+    };
+    right: {
+      parameter: number;
+      expression: HirExprId;
+      display: string;
+      identity: "allocation" | "storage" | "indexed-place";
+      allocationPath?: readonly CodegenPlaceProjection[];
+    };
+    afterDefaults: boolean;
+    defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
+    omittedParameters: readonly number[];
+  }[];
 };
 
 export type CodegenFunctionSignature = {
@@ -338,6 +357,7 @@ export type CodegenSourceLocation = {
 };
 
 export type CodegenCallableAccessFootprint = {
+  defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
   parameters: readonly {
     access: "owned" | "shared" | "mutable";
     reads: readonly (readonly CodegenPlaceProjection[])[];
@@ -2356,13 +2376,50 @@ export const buildProgramCodegenView = (
     getCallInfo: (moduleId, expr) => {
       const data = callsByModule.get(moduleId);
       if (!data) {
-        return { traitDispatch: false };
+        return { traitDispatch: false, identityGuards: [] };
       }
+      const identityGuards =
+        modulesById.get(moduleId)?.borrowing.runtimeIdentityGuards.get(expr) ??
+        [];
       return {
         targets: data.targets.get(expr),
         argPlans: data.argPlans.get(expr),
         typeArgs: data.typeArgs.get(expr),
         traitDispatch: data.traitDispatches.has(expr),
+        identityGuards: identityGuards.map((guard) => ({
+          left: {
+            parameter: guard.left.parameter,
+            expression: guard.left.expression,
+            display: guard.left.display,
+            identity: guard.left.identity,
+            ...(guard.left.allocationPath
+              ? {
+                  allocationPath:
+                    copyAccessPaths([guard.left.allocationPath])[0] ?? [],
+                }
+              : {}),
+          },
+          right: {
+            parameter: guard.right.parameter,
+            expression: guard.right.expression,
+            display: guard.right.display,
+            identity: guard.right.identity,
+            ...(guard.right.allocationPath
+              ? {
+                  allocationPath:
+                    copyAccessPaths([guard.right.allocationPath])[0] ?? [],
+                }
+              : {}),
+          },
+          afterDefaults: guard.afterDefaults === true,
+          ...(guard.defaultIdentityGuardProtocol
+            ? {
+                defaultIdentityGuardProtocol:
+                  guard.defaultIdentityGuardProtocol,
+              }
+            : {}),
+          omittedParameters: guard.omittedParameters ?? [],
+        })),
       };
     },
   };
@@ -2531,6 +2588,12 @@ export const buildProgramCodegenView = (
         Array.from(mod.borrowing.callables, ([symbol, contract]) => [
           symbol,
           {
+            ...(contract.defaultIdentityGuardProtocol
+              ? {
+                  defaultIdentityGuardProtocol:
+                    contract.defaultIdentityGuardProtocol,
+                }
+              : {}),
             parameters: contract.parameters.map((parameter) => {
               return {
                 access: parameter.access,

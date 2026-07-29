@@ -165,6 +165,10 @@ export const analyzeBorrowing = ({
     summariesStartedAt,
   );
   const mutableStorageSymbols = new Set<SymbolId>();
+  const runtimeIdentityGuards = new Map<
+    number,
+    import("./model.js").RuntimeIdentityGuard[]
+  >();
   const diagnostics: BorrowingResult["diagnostics"][number][] = [];
   const namedContracts =
     dynamicDispatchContracts.size > 0 ||
@@ -255,6 +259,7 @@ export const analyzeBorrowing = ({
       decls,
       contracts: callables,
       mutableStorageSymbols,
+      runtimeIdentityGuards,
       diagnostics,
     }),
   );
@@ -270,6 +275,7 @@ export const analyzeBorrowing = ({
       decls,
       contracts: callables,
       mutableStorageSymbols,
+      runtimeIdentityGuards,
       diagnostics,
     }),
   );
@@ -280,6 +286,7 @@ export const analyzeBorrowing = ({
   return {
     callables,
     namedContracts: namedContracts.contracts,
+    runtimeIdentityGuards,
     mutableStorageSymbols,
     diagnostics,
   };
@@ -2782,8 +2789,8 @@ const callBorrowAccess = (
     access:
       contract?.externalRead === true ||
       parameters.some((parameter) => parameter.access === "shared")
-      ? "shared"
-      : "owned",
+        ? "shared"
+        : "owned",
     requiresAnalysis,
     formsExplicitBorrow,
   };

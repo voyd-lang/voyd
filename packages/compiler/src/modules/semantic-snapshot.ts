@@ -26,6 +26,7 @@ export const cloneSemanticsForTypingState = ({
     borrowing: {
       callables: new Map(semantics.borrowing.callables),
       namedContracts: new Map(semantics.borrowing.namedContracts),
+      runtimeIdentityGuards: new Map(semantics.borrowing.runtimeIdentityGuards),
       mutableStorageSymbols: new Set(semantics.borrowing.mutableStorageSymbols),
       diagnostics: [...semantics.borrowing.diagnostics],
     },

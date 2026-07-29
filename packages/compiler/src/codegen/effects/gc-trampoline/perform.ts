@@ -8,14 +8,8 @@ import type {
   SymbolId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
-import {
-  initStruct,
-  refFunc,
-} from "@voyd-lang/lib/binaryen-gc/index.js";
-import {
-  allocateTempLocal,
-  storeLocalValue,
-} from "../../locals.js";
+import { initStruct, refFunc } from "@voyd-lang/lib/binaryen-gc/index.js";
+import { allocateTempLocal, storeLocalValue } from "../../locals.js";
 import { coerceValueToType, lowerValueForHeapField } from "../../structural.js";
 import {
   getExprBinaryenType,
@@ -30,13 +24,20 @@ import {
   ensureContinuationFunction,
 } from "./continuations.js";
 import { specializeContinuationSite } from "./specialize-site.js";
-import { getEffectOpInstanceInfo, resolvePerformSignature } from "../effect-registry.js";
+import {
+  getEffectOpInstanceInfo,
+  resolvePerformSignature,
+} from "../effect-registry.js";
 import { ensureEffectArgsType } from "../args-type.js";
 import { ensureEffectsMemory } from "../host-boundary/imports.js";
 import { LINEAR_MEMORY_INTERNAL } from "../host-boundary/constants.js";
 import { ensureEffectHandleTable } from "../handle-table.js";
 import { tailResumptionExitChecks } from "../tail-resumptions.js";
 import { canonicalEffectOperation } from "../static-specialization.js";
+import {
+  compileRuntimeIdentityGuard,
+  runtimeIdentityForGuardOperand,
+} from "../../runtime-identity-guards.js";
 
 const tryCompileStaticHandledPerform = ({
   expr,
@@ -151,7 +152,10 @@ export const compileEffectOpCall = ({
   if (!siteTemplate || siteTemplate.kind !== "perform") {
     throw new Error("codegen missing effect lowering info for perform site");
   }
-  const signature = ctx.program.functions.getSignature(ctx.moduleId, calleeSymbol);
+  const signature = ctx.program.functions.getSignature(
+    ctx.moduleId,
+    calleeSymbol,
+  );
   if (!signature) {
     throw new Error("codegen missing effect operation signature");
   }
@@ -179,20 +183,33 @@ export const compileEffectOpCall = ({
     ctx,
     typeInstanceId,
   });
-  const staticHandled = tryCompileStaticHandledPerform({
-    expr,
-    calleeSymbol,
-    signatureTypes,
-    ctx,
-    fnCtx,
-    compileExpr,
-    typeInstanceId,
-  });
+  const identityGuards = ctx.program.calls.getCallInfo(
+    ctx.moduleId,
+    expr.id,
+  ).identityGuards;
+  if (identityGuards.some((guard) => guard.afterDefaults)) {
+    throw new Error(
+      `effect operation call ${expr.id} cannot carry a post-default identity guard`,
+    );
+  }
+  const staticHandled =
+    identityGuards.length === 0
+      ? tryCompileStaticHandledPerform({
+          expr,
+          calleeSymbol,
+          signatureTypes,
+          ctx,
+          fnCtx,
+          compileExpr,
+          typeInstanceId,
+        })
+      : undefined;
   if (staticHandled) {
     return staticHandled;
   }
-  const args = expr.args.map((arg, index) => {
-    const expectedTypeId = signatureTypes.params[index] ?? signature.parameters[index]?.typeId;
+  const compiledArgs = expr.args.map((arg, index) => {
+    const expectedTypeId =
+      signatureTypes.params[index] ?? signature.parameters[index]?.typeId;
     const actualTypeId = getRequiredExprType(arg.expr, ctx, typeInstanceId);
     const value = compileExpr({ exprId: arg.expr, ctx, fnCtx });
     return coerceValueToType({
@@ -203,6 +220,53 @@ export const compileEffectOpCall = ({
       fnCtx,
     });
   });
+  const argLocals =
+    identityGuards.length === 0
+      ? []
+      : compiledArgs.map((arg, index) =>
+          allocateTempLocal(
+            binaryen.getExpressionType(arg),
+            fnCtx,
+            signatureTypes.params[index],
+            ctx,
+          ),
+        );
+  const argSetups = argLocals.map((local, index) =>
+    ctx.mod.local.set(local.index, compiledArgs[index]!),
+  );
+  const args =
+    identityGuards.length === 0
+      ? compiledArgs
+      : argLocals.map((local) => ctx.mod.local.get(local.index, local.type));
+  const identityFor = (parameter: number): binaryen.ExpressionRef => {
+    const local = argLocals[parameter];
+    if (!local) {
+      throw new Error(
+        `effect identity guard is missing parameter ${parameter} at call ${expr.id}`,
+      );
+    }
+    return ctx.mod.local.get(local.index, local.type);
+  };
+  const identityGuardOps = identityGuards.map((guard) =>
+    compileRuntimeIdentityGuard({
+      left: runtimeIdentityForGuardOperand({
+        operand: guard.left,
+        allocation: identityFor(guard.left.parameter),
+        context: `effect call ${expr.id}`,
+        ctx,
+        fnCtx,
+      }),
+      right: runtimeIdentityForGuardOperand({
+        operand: guard.right,
+        allocation: identityFor(guard.right.parameter),
+        context: `effect call ${expr.id}`,
+        ctx,
+        fnCtx,
+      }),
+      context: `effect call ${expr.id}`,
+      ctx,
+    }),
+  );
 
   const envValues = site.envFields.map((field) =>
     captureContinuationEnvFieldValue({
@@ -210,7 +274,7 @@ export const compileEffectOpCall = ({
       siteOrder: site.siteOrder,
       ctx,
       fnCtx,
-    })
+    }),
   );
 
   const contRefType = ensureContinuationFunction({
@@ -237,7 +301,12 @@ export const compileEffectOpCall = ({
         argsType,
         args.map((arg, index) => {
           const typeId = signatureTypes.params[index]!;
-          const storageType = wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime");
+          const storageType = wasmHeapFieldTypeFor(
+            typeId,
+            ctx,
+            new Set(),
+            "runtime",
+          );
           return storageType === binaryen.getExpressionType(arg)
             ? arg
             : lowerValueForHeapField({
@@ -254,13 +323,13 @@ export const compileEffectOpCall = ({
   const handleTable = ensureEffectHandleTable(ctx);
   const handlePtr = ctx.mod.i32.add(
     ctx.mod.global.get(handleTable.tableBaseGlobal, binaryen.i32),
-    ctx.mod.i32.const(opInfo.opIndex * 4)
+    ctx.mod.i32.const(opInfo.opIndex * 4),
   );
   const handleValue = ctx.mod.i32.load(0, 4, handlePtr, LINEAR_MEMORY_INTERNAL);
   const request = ctx.effectsRuntime.makeEffectRequest({
     effectId: ctx.mod.i64.const(
       opInfo.effectId.hash.low,
-      opInfo.effectId.hash.high
+      opInfo.effectId.hash.high,
     ),
     opId: ctx.mod.i32.const(opInfo.opId),
     opIndex: ctx.mod.i32.const(opInfo.opIndex),
@@ -273,8 +342,12 @@ export const compileEffectOpCall = ({
 
   const exprRef = ctx.mod.block(
     null,
-    [ctx.effectsRuntime.makeOutcomeEffect(request)],
-    ctx.effectsRuntime.outcomeType
+    [
+      ...argSetups,
+      ...identityGuardOps,
+      ctx.effectsRuntime.makeOutcomeEffect(request),
+    ],
+    ctx.effectsRuntime.outcomeType,
   );
 
   if (!fnCtx.effectful) {
@@ -292,7 +365,11 @@ export const compileEffectOpCall = ({
     ctx.mod.unreachable(),
   ];
   return {
-    expr: ctx.mod.block(null, ops, getExprBinaryenType(expr.id, ctx, typeInstanceId)),
+    expr: ctx.mod.block(
+      null,
+      ops,
+      getExprBinaryenType(expr.id, ctx, typeInstanceId),
+    ),
     usedReturnCall: false,
   };
 };

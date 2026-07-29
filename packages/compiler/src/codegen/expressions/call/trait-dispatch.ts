@@ -41,8 +41,7 @@ import {
   sliceTypedCallArgumentPlan,
 } from "./arguments.js";
 import { currentHandlerValue, handlerType } from "./shared.js";
-import { coerceValueToType } from "../../structural.js";
-import { liftHeapValueToInline } from "../../structural.js";
+import { coerceValueToType, liftHeapValueToInline } from "../../structural.js";
 import { coerceExprToWasmType } from "../../wasm-type-coercions.js";
 import { typeContainsUnresolvedParam } from "../../../semantics/type-utils.js";
 import type { CodegenTraitImplInstance } from "../../../semantics/codegen-view/index.js";
@@ -54,6 +53,11 @@ import {
   unboxSignatureSpillValue,
 } from "../../signature-spill.js";
 import { wrapValueInOutcome } from "../../effects/outcome-values.js";
+import {
+  compileRuntimeIdentityGuard,
+  projectRuntimeAllocationIdentity,
+  runtimeIdentityForGuardOperand,
+} from "../../runtime-identity-guards.js";
 
 const stabilizeMultivalueResult = ({
   value,
@@ -562,6 +566,69 @@ const compileDirectTraitDispatchSwitch = ({
       ...userArgTemps.map((temp, index) =>
         ctx.mod.local.set(temp.index, userArgValues[index]!),
       ),
+      ...ctx.program.calls
+        .getCallInfo(ctx.moduleId, expr.id)
+        .identityGuards.filter((guard) => !guard.afterDefaults)
+        .map((guard) => {
+          const identityFor = ({
+            parameter,
+            identity,
+            allocationPath,
+          }: {
+            parameter: number;
+            identity: "allocation" | "storage" | "indexed-place";
+            allocationPath?: readonly import("../../../semantics/codegen-view/index.js").CodegenPlaceProjection[];
+          }): binaryen.ExpressionRef => {
+            const value =
+              parameter === 0
+                ? makeReceiver()
+                : (() => {
+                    const temp = userArgTemps[parameter - 1];
+                    if (!temp) {
+                      throw new Error(
+                        `trait identity guard is missing parameter ${parameter}`,
+                      );
+                    }
+                    return ctx.mod.local.get(temp.index, temp.type);
+                  })();
+            const allocation =
+              identity !== "storage" &&
+              meta.paramAbiKinds[parameter] === "mutable_ref"
+                ? liftHeapValueToInline({
+                    value,
+                    typeId: meta.paramTypeIds[parameter]!,
+                    ctx,
+                  })
+                : value;
+            return identity === "allocation"
+              ? projectRuntimeAllocationIdentity({
+                  allocation,
+                  typeId: meta.paramTypeIds[parameter]!,
+                  path: allocationPath ?? [],
+                  context: `trait call ${expr.id}`,
+                  ctx,
+                })
+              : allocation;
+          };
+          return compileRuntimeIdentityGuard({
+            left: runtimeIdentityForGuardOperand({
+              operand: guard.left,
+              allocation: identityFor(guard.left),
+              context: `trait call ${expr.id}`,
+              ctx,
+              fnCtx,
+            }),
+            right: runtimeIdentityForGuardOperand({
+              operand: guard.right,
+              allocation: identityFor(guard.right),
+              context: `trait call ${expr.id}`,
+              ctx,
+              fnCtx,
+            }),
+            context: `trait call ${expr.id}`,
+            ctx,
+          });
+        }),
       switchedExpr,
     ],
     dispatchEffectful
@@ -575,8 +642,7 @@ const compileDirectTraitDispatchSwitch = ({
       callId: expr.id,
       returnTypeId,
       expectedResultTypeId,
-      tailPosition:
-        compiledUserArgs.writebacks.length === 0 && tailPosition,
+      tailPosition: compiledUserArgs.writebacks.length === 0 && tailPosition,
       typeInstanceId,
       ctx,
       fnCtx,
@@ -630,7 +696,15 @@ export const compileTraitDispatchCall = ({
   if (!mapping) {
     return undefined;
   }
-
+  if (
+    ctx.program.calls
+      .getCallInfo(ctx.moduleId, expr.id)
+      .identityGuards.some((guard) => guard.afterDefaults)
+  ) {
+    throw new Error(
+      `trait call ${expr.id} cannot use the deferred default identity-guard protocol`,
+    );
+  }
   const receiverTypeId = getRequiredExprType(
     expr.args[0].expr,
     ctx,
@@ -760,11 +834,7 @@ const compileIndirectTraitDispatchCall = ({
           mod: ctx.mod,
           fieldIndex: 0,
           fieldType: ctx.rtt.baseType,
-          exprRef: refCast(
-            ctx.mod,
-            loadReceiverArgument(),
-            receiverAbiType,
-          ),
+          exprRef: refCast(ctx.mod, loadReceiverArgument(), receiverAbiType),
         })
       : loadReceiverArgument();
 
@@ -852,7 +922,10 @@ const compileIndirectTraitDispatchCall = ({
       });
   const compiledUserArgs = compiledUserArgDetails.args;
   const argSetups: binaryen.ExpressionRef[] = [];
+  const userArgOffsets: number[] = [];
+  let nextUserArgOffset = 0;
   const flattenedUserArgs = compiledUserArgs.flatMap((arg, index) => {
+    userArgOffsets[index] = nextUserArgOffset;
     const flattened = flattenTraitDispatchArgument({
       value: arg,
       abiTypes: meta.paramAbiTypes[index + 1] ?? [
@@ -863,8 +936,92 @@ const compileIndirectTraitDispatchCall = ({
       fnCtx,
     });
     argSetups.push(...flattened.setup);
+    nextUserArgOffset += flattened.args.length;
     return flattened.args;
   });
+  const identityGuards = ctx.program.calls.getCallInfo(
+    ctx.moduleId,
+    expr.id,
+  ).identityGuards;
+  const immediateIdentityGuards = identityGuards.filter(
+    (guard) => !guard.afterDefaults,
+  );
+  const stabilizedBindings: ReturnType<typeof allocateTempLocal>[] = [];
+  const argumentSetups: binaryen.ExpressionRef[] = [];
+  const stabilizedUserArgs =
+    identityGuards.length === 0
+      ? flattenedUserArgs
+      : flattenedUserArgs.map((argument) => {
+          const type = binaryen.getExpressionType(argument);
+          const temp = allocateTempLocal(type, fnCtx);
+          stabilizedBindings.push(temp);
+          argumentSetups.push(ctx.mod.local.set(temp.index, argument));
+          return ctx.mod.local.get(temp.index, type);
+        });
+  const identityFor = ({
+    parameter,
+    identity,
+    allocationPath,
+  }: {
+    parameter: number;
+    identity: "allocation" | "storage" | "indexed-place";
+    allocationPath?: readonly import("../../../semantics/codegen-view/index.js").CodegenPlaceProjection[];
+  }): binaryen.ExpressionRef => {
+    const value =
+      parameter === 0
+        ? loadReceiverArgument()
+        : (() => {
+            const offset = userArgOffsets[parameter - 1];
+            const binding =
+              typeof offset === "number"
+                ? stabilizedBindings[offset]
+                : undefined;
+            if (!binding) {
+              throw new Error(
+                `trait identity guard is missing parameter ${parameter}`,
+              );
+            }
+            return ctx.mod.local.get(binding.index, binding.type);
+          })();
+    const allocation =
+      identity !== "storage" && meta.paramAbiKinds[parameter] === "mutable_ref"
+        ? liftHeapValueToInline({
+            value,
+            typeId: meta.paramTypeIds[parameter]!,
+            ctx,
+          })
+        : value;
+    return identity === "allocation"
+      ? projectRuntimeAllocationIdentity({
+          allocation,
+          typeId: meta.paramTypeIds[parameter]!,
+          path: allocationPath ?? [],
+          context: `trait call ${expr.id}`,
+          ctx,
+        })
+      : allocation;
+  };
+  const identityGuardOps = immediateIdentityGuards.map((guard) =>
+    compileRuntimeIdentityGuard({
+      left: runtimeIdentityForGuardOperand({
+        operand: guard.left,
+        allocation: identityFor(guard.left),
+        context: `trait call ${expr.id}`,
+        ctx,
+        fnCtx,
+      }),
+      right: runtimeIdentityForGuardOperand({
+        operand: guard.right,
+        allocation: identityFor(guard.right),
+        context: `trait call ${expr.id}`,
+        ctx,
+        fnCtx,
+      }),
+      context: `trait call ${expr.id}`,
+      ctx,
+    }),
+  );
+  const preCallOps = [...argSetups, ...argumentSetups, ...identityGuardOps];
   const usingProvidedWideResultStorage =
     !dispatchEffectful &&
     meta.resultAbiKind === "out_ref" &&
@@ -892,7 +1049,7 @@ const compileIndirectTraitDispatchCall = ({
           wideResultStorage.type,
         )
       : undefined;
-  const args = [loadReceiverArgument(), ...flattenedUserArgs];
+  const args = [loadReceiverArgument(), ...stabilizedUserArgs];
 
   const callArgs = dispatchEffectful
     ? [
@@ -933,11 +1090,11 @@ const compileIndirectTraitDispatchCall = ({
         })
       : stabilizedCall;
   const callExpr =
-    argSetups.length === 0
+    preCallOps.length === 0
       ? decodedCall
       : ctx.mod.block(
           null,
-          [...argSetups, decodedCall],
+          [...preCallOps, decodedCall],
           binaryen.getExpressionType(decodedCall),
         );
 
@@ -961,9 +1118,9 @@ const compileIndirectTraitDispatchCall = ({
     : usingProvidedWideResultStorage
       ? {
           expr:
-            argSetups.length === 0
+            preCallOps.length === 0
               ? ctx.mod.block(null, [rawCall], binaryen.none)
-              : ctx.mod.block(null, [...argSetups, rawCall], binaryen.none),
+              : ctx.mod.block(null, [...preCallOps, rawCall], binaryen.none),
           usedReturnCall: false,
           usedOutResultStorageRef: true,
         }
@@ -994,11 +1151,11 @@ const compileIndirectTraitDispatchCall = ({
             });
             return {
               expr:
-                argSetups.length === 0
+                preCallOps.length === 0
                   ? ctx.mod.block(null, [rawCall, resultExpr], resultWasmType)
                   : ctx.mod.block(
                       null,
-                      [...argSetups, rawCall, resultExpr],
+                      [...preCallOps, rawCall, resultExpr],
                       resultWasmType,
                     ),
               usedReturnCall: false,
@@ -1024,10 +1181,7 @@ const compileIndirectTraitDispatchCall = ({
 
   const callWithWritebacks = applyCallArgumentWritebacks({
     call: lowered,
-    writebacks: [
-      ...compiledUserArgDetails.writebacks,
-      ...receiverWritebacks,
-    ],
+    writebacks: [...compiledUserArgDetails.writebacks, ...receiverWritebacks],
     ctx,
     fnCtx,
   });

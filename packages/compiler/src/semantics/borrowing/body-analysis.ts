@@ -27,11 +27,15 @@ import type {
   CallableParameterBorrowContract,
   PlaceProjection,
   ReturnedBorrowOrigin,
+  RuntimeIdentityGuard,
 } from "./model.js";
 import {
+  callableContractAllowsRuntimeIdentityGuards,
+  callableDefaultsPreserveRuntimeIdentity,
   mergeCallableBorrowContracts,
   projectionPathCovers,
   projectionPathsOverlap,
+  runtimeIdentityGuardParameterCanEscape,
   translateProjectionPath,
 } from "./model.js";
 import type { BorrowingDependency } from "./dependency.js";
@@ -111,6 +115,7 @@ type BodyContext = {
   uses: Map<SymbolId, Event[]>;
   usePlaces: Map<SymbolId, Map<Event, readonly BorrowPlace[]>>;
   mutableStorageSymbols: Set<SymbolId>;
+  runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
   diagnostics: Diagnostic[];
   terminations: Termination[];
   mutableParameters: ReadonlySet<SymbolId>;
@@ -788,6 +793,29 @@ const placesOfExpression = (
       const value = expr.args.at(-1);
       return value ? placesOfExpression(value.expr, ctx, seen) : [];
     }
+    if (
+      metadata.intrinsic === true &&
+      intrinsicName === "__array_get" &&
+      expr.args[0] &&
+      expr.args[1]
+    ) {
+      const target = expr.args[0].expr;
+      const targets = placesOfExpression(target, ctx, seen);
+      const projections = accessProjectionsFor(
+        target,
+        {
+          kind: "index",
+          constant: numericConstant(expr.args[1].expr, ctx),
+          stable: hasStableIndexedStorage(target, ctx),
+        },
+        ctx,
+      );
+      return hasConservativeReturnedAggregate(target, ctx)
+        ? targets
+        : targets.map((place) =>
+            appendExpressionAccess(place, target, projections, ctx),
+          );
+    }
   }
   const info = targetInfo(expr, ctx);
   return returnedPlacesForCall(info, [], ctx, seen);
@@ -931,12 +959,7 @@ const effectivePlacesForCallParameter = ({
         ? expression.args.at(-1)?.expr
         : actual;
     return typeof projectedActual === "number"
-      ? placesAtProjection(
-          projectedActual,
-          requested,
-          ctx,
-          seenExpressions,
-        )
+      ? placesAtProjection(projectedActual, requested, ctx, seenExpressions)
       : [];
   }
   if (seenParameters.has(parameterIndex)) {
@@ -1339,9 +1362,7 @@ const expressionMaterializesPlainProjection = (
     ];
     return (
       values.length > 0 &&
-      values.every((value) =>
-        expressionMaterializesPlainProjection(value, ctx),
-      )
+      values.every((value) => expressionMaterializesPlainProjection(value, ctx))
     );
   }
   if (expression.exprKind === "match") {
@@ -1889,9 +1910,7 @@ const localAggregateStoragePlacesAtProjection = (
     return undefined;
   }
   const event = ctx.events.get(exprId);
-  const aliases = event
-    ? reachingAliasDefinitions(symbol, event, ctx)
-    : [];
+  const aliases = event ? reachingAliasDefinitions(symbol, event, ctx) : [];
   const crossesReturnedReference = aliases.some((alias) => {
     if (alias.conservativeReturnedAggregate === true) {
       return requested.length > 0;
@@ -2378,12 +2397,7 @@ function expressionOriginMetadata(
             .some(
               (actualPlace) =>
                 actualPlace.root === place.root &&
-                placeOverlaps(
-                  actualPlace,
-                  place,
-                  ctx,
-                  ctx.events.get(expr.id),
-                ),
+                placeOverlaps(actualPlace, place, ctx, ctx.events.get(expr.id)),
             )
             ? [
                 expressionOriginMetadata(
@@ -2888,9 +2902,7 @@ const isAggregateExpression = (
       contract?.parameters.some(
         (parameter) =>
           parameter.returnedAggregate === true ||
-          parameter.returnedOrigins?.some(
-            (origin) => origin.result.length > 0,
-          ),
+          parameter.returnedOrigins?.some((origin) => origin.result.length > 0),
       ) === true ||
       externalReturnedOriginsForCall(targetInfo(expr, ctx)).some(
         (origin) => origin.fresh === true || origin.result.length > 0,
@@ -2988,8 +3000,7 @@ const bindPatternAggregateOrigin = ({
       const bindingContainsBorrow =
         typeof bindingType === "number" &&
         typeContainsBorrowed(bindingType, ctx.typing);
-      const bindingMutable =
-        pattern.bindingKind === "mutable-ref" || mutable;
+      const bindingMutable = pattern.bindingKind === "mutable-ref" || mutable;
       const localizedPlace =
         origin.externalResult === true
           ? localizeExternalResultPlace(origin.place, pattern.symbol)
@@ -3003,12 +3014,11 @@ const bindPatternAggregateOrigin = ({
           ctx,
         }),
         access: bindingMutable ? "mutable" : (origin.access ?? "shared"),
-        provenance:
-          bindingContainsBorrow
-            ? bindingMutable
-              ? "storage-borrow"
-              : origin.provenance
-            : "allocation-alias",
+        provenance: bindingContainsBorrow
+          ? bindingMutable
+            ? "storage-borrow"
+            : origin.provenance
+          : "allocation-alias",
         span: pattern.span ?? span,
         event,
         uses: [],
@@ -4326,10 +4336,7 @@ const scanExpression = (
                 symbol: target.symbol,
                 place:
                   origin.externalResult === true
-                    ? localizeExternalResultPlace(
-                        origin.place,
-                        target.symbol,
-                      )
+                    ? localizeExternalResultPlace(origin.place, target.symbol)
                     : origin.place,
                 access: "shared",
                 provenance: origin.provenance,
@@ -4503,9 +4510,7 @@ const freshAllocationOriginOfPlace = (
           initializer: reassignment.initializer,
           event: reassignment.event,
         })),
-    ].filter((candidate) =>
-      definitionCanReachAccess(candidate.event, access),
-    );
+    ].filter((candidate) => definitionCanReachAccess(candidate.event, access));
     const reaching = candidates.filter(
       (candidate) =>
         !candidates.some(
@@ -4534,9 +4539,7 @@ const freshAllocationOriginOfPlace = (
     return undefined;
   }
   const storagePath = place.projections.slice(0, dereference);
-  if (
-    storageWasInvalidated(place.root, storagePath, event)
-  ) {
+  if (storageWasInvalidated(place.root, storagePath, event)) {
     return undefined;
   }
   const providerAtPath = (
@@ -4554,17 +4557,17 @@ const freshAllocationOriginOfPlace = (
     }
     if (path.length === 0) {
       const type = typeOfExpr(exprId, ctx);
-      return expression.exprKind === "object-literal" &&
+      if (
+        expression.exprKind === "object-literal" &&
         typeof type === "number" &&
         typeIsAllocationBacked(type, ctx.typing)
-        ? exprId
-        : undefined;
+      ) {
+        return exprId;
+      }
     }
     if (expression.exprKind === "identifier") {
       const providerEvent = ctx.events.get(exprId);
-      if (
-        storageWasInvalidated(expression.symbol, path, providerEvent)
-      ) {
+      if (storageWasInvalidated(expression.symbol, path, providerEvent)) {
         return undefined;
       }
       const nestedInitializer = stableInitializerOf(
@@ -4616,9 +4619,7 @@ const recordFreshnessInvalidation = (
   ctx: BodyContext,
 ): void => {
   if (
-    place.projections.some(
-      (projection) => projection.kind === "dereference",
-    ) ||
+    place.projections.some((projection) => projection.kind === "dereference") ||
     ctx.freshnessInvalidations.some(
       (candidate) =>
         candidate.event === event &&
@@ -4830,8 +4831,7 @@ const reportConflict = ({
       ? localizeExternalResultPlace(existing.place, existing.symbol)
       : existing.place;
   const attemptedPlace =
-    existing.externalResult === true &&
-    attempted.root === existing.place.root
+    existing.externalResult === true && attempted.root === existing.place.root
       ? localizeExternalResultPlace(attempted, existing.symbol)
       : attempted;
   const initializer = ctx.bindingInitializers.get(existing.symbol);
@@ -6944,8 +6944,7 @@ const validateCall = (
     info.contract?.transfers?.flatMap((transfer) =>
       effectiveActuals
         .filter(
-          (effective) =>
-            effective.index === transfer.destinationParameter,
+          (effective) => effective.index === transfer.destinationParameter,
         )
         .flatMap((effective) =>
           storagePlacesForEffectiveActual(
@@ -6958,6 +6957,16 @@ const validateCall = (
     recordFreshnessInvalidation(place, event, ctx),
   );
   validateBorrowedCallbacks(expr, info, ctx);
+  type ActivatedBorrow = {
+    index: number;
+    actual: HirExprId;
+    place: BorrowPlace;
+    actor?: SymbolId;
+    access: "shared" | "mutable";
+    contractPath?: readonly PlaceProjection[];
+    activationKey: string;
+    externalResult?: true;
+  };
   const activateAccesses = ({
     actual,
     index,
@@ -6966,7 +6975,7 @@ const validateCall = (
     parameter: parameterOverride,
     activationKey = `parameter:${index}`,
     translatePath,
-  }: EffectiveActual) => {
+  }: EffectiveActual): ActivatedBorrow[] => {
     const parameter = parameterOverride ?? info.contract?.parameters[index];
     const access =
       parameterOverride?.access ??
@@ -7021,10 +7030,8 @@ const validateCall = (
           : undefined) ??
         placesAtProjection(actual, actualPath, ctx, new Set());
       return uniquePlaces(places).map((place) => {
-        const actorInitializer =
-          typeof actor === "number"
-            ? ctx.bindingInitializers.get(actor)
-            : undefined;
+        const effectiveActor = actor ?? place.root;
+        const actorInitializer = ctx.bindingInitializers.get(effectiveActor);
         const actorIsSharedCellBorrow =
           typeof actorInitializer === "number" &&
           isSharedCellValueExpression(actorInitializer, ctx);
@@ -7035,11 +7042,14 @@ const validateCall = (
           access === "mutable" &&
           !actorIsSharedCellBorrow &&
           !actorIsPlainExternalResult &&
-          (typeof actor === "number"
-            ? !hasMutableCapabilityAt(actor, event, ctx)
-            : !isSharedCellValueExpression(actual, ctx))
+          !hasMutableCapabilityAt(effectiveActor, event, ctx)
         ) {
-          reportMutableCapabilityViolation({ place, actor, event, ctx });
+          reportMutableCapabilityViolation({
+            place,
+            actor: effectiveActor,
+            event,
+            ctx,
+          });
         }
         const externalResult = externalResultAccessHint(
           actual,
@@ -7062,15 +7072,15 @@ const validateCall = (
           index,
           actual,
           place,
-          actor,
+          actor: effectiveActor,
           access: pathAccess,
+          contractPath: path,
           activationKey,
           ...(externalResult === true ? { externalResult: true as const } : {}),
         };
       });
     });
   };
-  type ActivatedBorrow = ReturnType<typeof activateAccesses>[number];
   const externalPlaceRoot = (() => {
     if (expr.exprKind === "call") {
       const callee = ctx.hir.expressions.get(expr.callee);
@@ -7184,6 +7194,546 @@ const validateCall = (
     }) ?? [];
   const borrows = effectiveActuals.flatMap(activateAccesses);
 
+  const stableExpressionIdentity = (
+    exprId: HirExprId,
+    seen = new Set<HirExprId>(),
+  ): string => {
+    if (seen.has(exprId)) {
+      return `recursive:${exprId}`;
+    }
+    seen.add(exprId);
+    const expression = ctx.hir.expressions.get(exprId);
+    if (!expression) {
+      return `missing:${exprId}`;
+    }
+    if (expression.exprKind === "identifier") {
+      return `symbol:${expression.symbol}`;
+    }
+    if (expression.exprKind === "literal") {
+      return `literal:${expression.literalKind}:${expression.value}`;
+    }
+    if (
+      expression.exprKind === "block" &&
+      typeof expression.value === "number"
+    ) {
+      return stableExpressionIdentity(expression.value, seen);
+    }
+    if (
+      expression.exprKind === "call" &&
+      intrinsicNameForCall(expression, ctx) === "~" &&
+      expression.args[0]
+    ) {
+      return stableExpressionIdentity(expression.args[0].expr, seen);
+    }
+    if (
+      expression.exprKind === "method-call" &&
+      (expression.method === "at" || expression.method === "get") &&
+      expression.args[0]
+    ) {
+      return [
+        expression.method,
+        stableExpressionIdentity(expression.target, new Set(seen)),
+        stableExpressionIdentity(expression.args[0].expr, new Set(seen)),
+      ].join(":");
+    }
+    if (
+      expression.exprKind === "call" &&
+      intrinsicNameForCall(expression, ctx) === "__array_get" &&
+      expression.args.length === 2
+    ) {
+      return [
+        "__array_get",
+        stableExpressionIdentity(expression.args[0]!.expr, new Set(seen)),
+        stableExpressionIdentity(expression.args[1]!.expr, new Set(seen)),
+      ].join(":");
+    }
+    return `expr:${exprId}`;
+  };
+  const runtimeComparableReference = (borrow: ActivatedBorrow): boolean => {
+    const actualType = typeOfExpr(borrow.actual, ctx);
+    const parameterType = info.signature?.parameters[borrow.index]?.type;
+    return [actualType, parameterType].some(
+      (type) =>
+        typeof type === "number" && typeIsAllocationBacked(type, ctx.typing),
+    );
+  };
+  const runtimeIdentity = (
+    borrow: ActivatedBorrow,
+  ):
+    | Pick<RuntimeIdentityGuard["left"], "identity" | "allocationPath">
+    | undefined => {
+    const parameter = info.contract?.parameters[borrow.index];
+    const paths = borrow.contractPath
+      ? [borrow.contractPath]
+      : [...(parameter?.readPaths ?? []), ...(parameter?.writePaths ?? [])];
+    if (paths.length === 0) {
+      return undefined;
+    }
+    const dynamicIndexes = borrow.place.projections.filter(
+      (projection) =>
+        projection.kind === "index" &&
+        projection.stable &&
+        projection.constant === undefined,
+    );
+    if (
+      info.signature?.parameters[borrow.index]?.bindingKind === "mutable-ref" &&
+      paths.every((path) => path.length === 0) &&
+      parameter?.invalidatedPaths?.some((path) => path.length === 0) === true
+    ) {
+      const dynamicIndex = borrow.place.projections.findIndex(
+        (projection) =>
+          projection.kind === "index" &&
+          projection.stable &&
+          projection.constant === undefined,
+      );
+      const indexFullyIdentifiesStorage =
+        dynamicIndex >= 0 &&
+        borrow.place.projections
+          .slice(dynamicIndex + 1)
+          .every((projection) => projection.kind === "identity");
+      const isCanonicalRootStorage = borrow.place.projections.every(
+        (projection) => projection.kind === "identity",
+      );
+      return dynamicIndexes.length === 0 && isCanonicalRootStorage
+        ? { identity: "storage" }
+        : dynamicIndexes.length === 1 && indexFullyIdentifiesStorage
+          ? { identity: "indexed-place" }
+          : undefined;
+    }
+    const dereferenceStates = new Set(
+      paths.map((path) =>
+        path.some((projection) => projection.kind === "dereference"),
+      ),
+    );
+    if (dereferenceStates.size !== 1) {
+      return undefined;
+    }
+    if (dereferenceStates.has(true)) {
+      const allocationPaths = paths.map((path) => {
+        const dereference = path.findLastIndex(
+          (projection) => projection.kind === "dereference",
+        );
+        return path.slice(0, dereference);
+      });
+      const firstPath = allocationPaths[0];
+      if (
+        !firstPath ||
+        firstPath.some(
+          (projection) =>
+            projection.kind !== "field" &&
+            projection.kind !== "tuple" &&
+            projection.kind !== "dereference" &&
+            projection.kind !== "identity",
+        ) ||
+        allocationPaths.some(
+          (path) => JSON.stringify(path) !== JSON.stringify(firstPath),
+        )
+      ) {
+        return undefined;
+      }
+      const parameterType = info.signature?.parameters[borrow.index]?.type;
+      return typeof parameterType === "number" &&
+        projectedTypes(parameterType, firstPath, ctx.typing).some((type) =>
+          typeIsAllocationBacked(type, ctx.typing),
+        )
+        ? { identity: "allocation", allocationPath: firstPath }
+        : undefined;
+    }
+    if (dynamicIndexes.length === 1) {
+      return runtimeComparableReference(borrow) &&
+        paths.every((path) => path.length > 0)
+        ? { identity: "allocation", allocationPath: [] }
+        : { identity: "indexed-place" };
+    }
+    return dynamicIndexes.length === 0 && runtimeComparableReference(borrow)
+      ? { identity: "allocation", allocationPath: [] }
+      : undefined;
+  };
+  const allocationIdentityTypes = (
+    borrow: ActivatedBorrow,
+    identity: Pick<RuntimeIdentityGuard["left"], "identity" | "allocationPath">,
+  ): readonly TypeId[] => {
+    if (identity.identity !== "allocation") {
+      return [];
+    }
+    const parameterType = info.signature?.parameters[borrow.index]?.type;
+    if (typeof parameterType !== "number") {
+      return [];
+    }
+    return identity.allocationPath && identity.allocationPath.length > 0
+      ? projectedTypes(parameterType, identity.allocationPath, ctx.typing)
+      : [parameterType];
+  };
+  type AllocationIdentityDomain = {
+    category: "function" | "array" | "object";
+    nominal?: TypeId;
+  };
+  const allocationIdentityDomain = (type: TypeId): AllocationIdentityDomain => {
+    const desc = ctx.typing.arena.get(type);
+    if (desc.kind === "borrowed") {
+      return allocationIdentityDomain(desc.inner);
+    }
+    if (desc.kind === "recursive") {
+      return allocationIdentityDomain(
+        ctx.typing.arena.substitute(desc.body, new Map([[desc.binder, type]])),
+      );
+    }
+    if (desc.kind === "function") {
+      return { category: "function" };
+    }
+    if (desc.kind === "fixed-array") {
+      return { category: "array" };
+    }
+    const nominal = ctx.typing.arena.nominalComponent(type);
+    return {
+      category: "object",
+      ...(typeof nominal === "number" ? { nominal } : {}),
+    };
+  };
+  const nominalCanOverlap = (left: TypeId, right: TypeId): boolean => {
+    if (left === right) {
+      return true;
+    }
+    const extendsNominal = (actual: TypeId, expected: TypeId): boolean => {
+      const seen = new Set<TypeId>();
+      let current: TypeId | undefined = actual;
+      while (typeof current === "number" && !seen.has(current)) {
+        if (current === expected) {
+          return true;
+        }
+        seen.add(current);
+        current = ctx.typing.objectsByNominal.get(current)?.baseNominal;
+      }
+      return false;
+    };
+    return extendsNominal(left, right) || extendsNominal(right, left);
+  };
+  const allocationIdentityDomainsOverlap = (
+    leftTypes: readonly TypeId[],
+    rightTypes: readonly TypeId[],
+  ): boolean =>
+    leftTypes.length > 0 &&
+    rightTypes.length > 0 &&
+    leftTypes.some((leftType) =>
+      rightTypes.some((rightType) => {
+        const left = allocationIdentityDomain(leftType);
+        const right = allocationIdentityDomain(rightType);
+        if (left.category !== right.category) {
+          return false;
+        }
+        if (
+          typeof left.nominal !== "number" ||
+          typeof right.nominal !== "number"
+        ) {
+          return true;
+        }
+        return nominalCanOverlap(left.nominal, right.nominal);
+      }),
+    );
+  const allocationIdentityDomainsCanOverlap = (
+    left: ActivatedBorrow,
+    right: ActivatedBorrow,
+    leftIdentity: Pick<
+      RuntimeIdentityGuard["left"],
+      "identity" | "allocationPath"
+    >,
+    rightIdentity: Pick<
+      RuntimeIdentityGuard["right"],
+      "identity" | "allocationPath"
+    >,
+  ): boolean => {
+    if (
+      leftIdentity.identity !== "allocation" ||
+      rightIdentity.identity !== "allocation"
+    ) {
+      return true;
+    }
+    return allocationIdentityDomainsOverlap(
+      allocationIdentityTypes(left, leftIdentity),
+      allocationIdentityTypes(right, rightIdentity),
+    );
+  };
+  const callScopedLoanRootDomainsCanOverlap = (
+    left: ActivatedBorrow,
+    right: ActivatedBorrow,
+  ): boolean => {
+    const leftType = info.signature?.parameters[left.index]?.type;
+    const rightType = info.signature?.parameters[right.index]?.type;
+    if (
+      typeof leftType !== "number" ||
+      typeof rightType !== "number" ||
+      !typeIsAllocationBacked(leftType, ctx.typing) ||
+      !typeIsAllocationBacked(rightType, ctx.typing)
+    ) {
+      return true;
+    }
+    return allocationIdentityDomainsOverlap([leftType], [rightType]);
+  };
+  const parameterFormsCallScopedLoan = (borrow: ActivatedBorrow): boolean => {
+    const parameter = info.signature?.parameters[borrow.index];
+    return (
+      parameter?.bindingKind === "mutable-ref" ||
+      (typeof parameter?.type === "number" &&
+        typeContainsBorrowed(parameter.type, ctx.typing))
+    );
+  };
+  const pathsHaveBoundedDynamicUncertainty = (
+    left: BorrowPlace,
+    right: BorrowPlace,
+    leftIdentity: Pick<
+      RuntimeIdentityGuard["left"],
+      "identity" | "allocationPath"
+    >,
+    rightIdentity: Pick<
+      RuntimeIdentityGuard["right"],
+      "identity" | "allocationPath"
+    >,
+  ): boolean => {
+    const allocationOriginPlace = (
+      place: BorrowPlace,
+      identity: Pick<
+        RuntimeIdentityGuard["left"],
+        "identity" | "allocationPath"
+      >,
+    ): BorrowPlace =>
+      identity.identity === "allocation" &&
+      (identity.allocationPath?.length ?? 0) === 0
+        ? {
+            root: place.root,
+            projections: [{ kind: "dereference" }],
+          }
+        : place;
+    const identityUsesRootAllocation = (
+      identity: Pick<
+        RuntimeIdentityGuard["left"],
+        "identity" | "allocationPath"
+      >,
+    ): boolean =>
+      identity.identity === "allocation" &&
+      (identity.allocationPath?.length ?? 0) === 0;
+    const leftFresh = identityUsesRootAllocation(leftIdentity)
+      ? freshAllocationOriginOfPlace(
+          allocationOriginPlace(left, leftIdentity),
+          ctx,
+          event,
+        )
+      : undefined;
+    const rightFresh = identityUsesRootAllocation(rightIdentity)
+      ? freshAllocationOriginOfPlace(
+          allocationOriginPlace(right, rightIdentity),
+          ctx,
+          event,
+        )
+      : undefined;
+    if (
+      left.root !== right.root &&
+      typeof leftFresh === "number" &&
+      typeof rightFresh === "number" &&
+      leftFresh !== rightFresh
+    ) {
+      return false;
+    }
+    if (
+      leftIdentity.identity === "allocation" &&
+      rightIdentity.identity === "allocation"
+    ) {
+      const leftDereference = left.projections.findLastIndex(
+        (projection) => projection.kind === "dereference",
+      );
+      const rightDereference = right.projections.findLastIndex(
+        (projection) => projection.kind === "dereference",
+      );
+      if (leftDereference >= 0 && rightDereference >= 0) {
+        return projectionPathsOverlap(
+          left.projections.slice(leftDereference + 1),
+          right.projections.slice(rightDereference + 1),
+        );
+      }
+    }
+    if (left.root !== right.root) {
+      const leftDeref = left.projections.findLastIndex(
+        (projection) => projection.kind === "dereference",
+      );
+      const rightDeref = right.projections.findLastIndex(
+        (projection) => projection.kind === "dereference",
+      );
+      return projectionPathsOverlap(
+        left.projections.slice(leftDeref + 1),
+        right.projections.slice(rightDeref + 1),
+      );
+    }
+    const length = Math.min(left.projections.length, right.projections.length);
+    let dynamic = false;
+    for (let index = 0; index < length; index += 1) {
+      const leftProjection = left.projections[index]!;
+      const rightProjection = right.projections[index]!;
+      if (JSON.stringify(leftProjection) === JSON.stringify(rightProjection)) {
+        if (
+          leftProjection.kind === "index" &&
+          leftProjection.stable &&
+          leftProjection.constant === undefined
+        ) {
+          dynamic = true;
+        }
+        continue;
+      }
+      if (
+        leftProjection.kind !== "index" ||
+        rightProjection.kind !== "index" ||
+        !leftProjection.stable ||
+        !rightProjection.stable
+      ) {
+        return false;
+      }
+      if (
+        leftProjection.constant !== undefined &&
+        rightProjection.constant !== undefined &&
+        leftProjection.constant !== rightProjection.constant
+      ) {
+        return false;
+      }
+      dynamic = true;
+    }
+    return dynamic;
+  };
+  const tryRecordRuntimeIdentityGuard = (
+    left: ActivatedBorrow,
+    right: ActivatedBorrow,
+  ): boolean => {
+    const omittedParameters =
+      info.signature?.parameters.flatMap((parameter, index) =>
+        parameter.defaulted === true && typeof actuals[index] !== "number"
+          ? [index]
+          : [],
+      ) ?? [];
+    const leftIdentity = runtimeIdentity(left);
+    const rightIdentity = runtimeIdentity(right);
+    const identityStoragePlaces = (
+      borrow: ActivatedBorrow,
+    ): readonly BorrowPlace[] => {
+      const handleSlots = borrow.place.projections.flatMap(
+        (projection, index) =>
+          projection.kind === "dereference"
+            ? [
+                {
+                  root: borrow.place.root,
+                  projections: borrow.place.projections.slice(0, index),
+                },
+              ]
+            : [],
+      );
+      return handleSlots.length > 0
+        ? handleSlots
+        : [{ root: borrow.place.root, projections: [] }];
+    };
+    if (
+      !info.contract ||
+      !callableContractAllowsRuntimeIdentityGuards(info.contract) ||
+      (!info.target && info.targets.length === 0) ||
+      typeof actuals[left.index] !== "number" ||
+      typeof actuals[right.index] !== "number" ||
+      !parameterFormsCallScopedLoan(left) ||
+      !parameterFormsCallScopedLoan(right) ||
+      (omittedParameters.length > 0 &&
+        (info.traitDispatch ||
+          !info.target ||
+          info.contract.defaultIdentityGuardProtocol !==
+            "presence-conflict-bit-v1" ||
+          !callableDefaultsPreserveRuntimeIdentity({
+            contract: info.contract,
+            omittedParameters,
+            writePreservesIdentity: (origin) => {
+              const writtenPlaces = resolveDefaultActualOrigins(
+                origin.parameter,
+                origin.path,
+              ).flatMap(({ actual, path }) =>
+                localStoragePlacesAtPath(actual, path),
+              );
+              return (
+                writtenPlaces.length > 0 &&
+                writtenPlaces.every(
+                  (place) =>
+                    !placeOverlaps(place, left.place, ctx, event) &&
+                    !placeOverlaps(place, right.place, ctx, event) &&
+                    [
+                      ...identityStoragePlaces(left),
+                      ...identityStoragePlaces(right),
+                    ].every(
+                      (storage) => !placeOverlaps(place, storage, ctx, event),
+                    ),
+                )
+              );
+            },
+          }))) ||
+      runtimeIdentityGuardParameterCanEscape(
+        info.contract.parameters[left.index],
+      ) ||
+      runtimeIdentityGuardParameterCanEscape(
+        info.contract.parameters[right.index],
+      ) ||
+      !leftIdentity ||
+      !rightIdentity ||
+      leftIdentity.identity !== rightIdentity.identity ||
+      !allocationIdentityDomainsCanOverlap(
+        left,
+        right,
+        leftIdentity,
+        rightIdentity,
+      ) ||
+      !pathsHaveBoundedDynamicUncertainty(
+        left.place,
+        right.place,
+        leftIdentity,
+        rightIdentity,
+      )
+    ) {
+      return false;
+    }
+    if (
+      stableExpressionIdentity(left.actual) ===
+      stableExpressionIdentity(right.actual)
+    ) {
+      return false;
+    }
+    const guard: RuntimeIdentityGuard = {
+      call: expr.id,
+      target: info.target ?? info.targets[0]!,
+      left: {
+        parameter: left.index,
+        expression: left.actual,
+        place: left.place,
+        display: placeName(left.place, ctx),
+        ...leftIdentity,
+      },
+      right: {
+        parameter: right.index,
+        expression: right.actual,
+        place: right.place,
+        display: placeName(right.place, ctx),
+        ...rightIdentity,
+      },
+      ...(omittedParameters.length > 0
+        ? {
+            afterDefaults: true as const,
+            defaultIdentityGuardProtocol: "presence-conflict-bit-v1" as const,
+            omittedParameters,
+          }
+        : {}),
+    };
+    const guards = ctx.runtimeIdentityGuards.get(expr.id) ?? [];
+    const key = `${guard.left.parameter}:${guard.right.parameter}:${guard.left.display}:${guard.right.display}`;
+    if (
+      !guards.some(
+        (candidate) =>
+          `${candidate.left.parameter}:${candidate.right.parameter}:${candidate.left.display}:${candidate.right.display}` ===
+          key,
+      )
+    ) {
+      guards.push(guard);
+      ctx.runtimeIdentityGuards.set(expr.id, guards);
+    }
+    return true;
+  };
   const reportBorrowConflicts = (
     activatedBorrows: readonly ActivatedBorrow[],
   ): void => {
@@ -7208,14 +7758,65 @@ const validateCall = (
         ) {
           return;
         }
+        if (left.access === "shared" && right.access === "shared") {
+          return;
+        }
         if (
           left.externalResult !== true &&
           right.externalResult !== true &&
           !placeOverlaps(left.place, right.place, ctx, event)
         ) {
-          return;
+          if (
+            !parameterFormsCallScopedLoan(left) ||
+            !parameterFormsCallScopedLoan(right)
+          ) {
+            return;
+          }
+          const leftIdentity = runtimeIdentity(left);
+          const rightIdentity = runtimeIdentity(right);
+          const identityUsesParameterRoot = (
+            identity:
+              | Pick<
+                  RuntimeIdentityGuard["left"],
+                  "identity" | "allocationPath"
+                >
+              | undefined,
+          ): boolean =>
+            identity?.identity === "allocation" &&
+            (identity.allocationPath?.length ?? 0) === 0;
+          if (
+            identityUsesParameterRoot(leftIdentity) &&
+            identityUsesParameterRoot(rightIdentity) &&
+            !callScopedLoanRootDomainsCanOverlap(left, right)
+          ) {
+            return;
+          }
+          if (tryRecordRuntimeIdentityGuard(left, right)) {
+            return;
+          }
+          if (
+            leftIdentity &&
+            rightIdentity &&
+            !allocationIdentityDomainsCanOverlap(
+              left,
+              right,
+              leftIdentity,
+              rightIdentity,
+            )
+          ) {
+            return;
+          }
+          const mayOverlapAtRuntime = pathsHaveBoundedDynamicUncertainty(
+            left.place,
+            right.place,
+            leftIdentity ?? { identity: "indexed-place" },
+            rightIdentity ?? { identity: "indexed-place" },
+          );
+          if (!mayOverlapAtRuntime) {
+            return;
+          }
         }
-        if (left.access === "shared" && right.access === "shared") {
+        if (tryRecordRuntimeIdentityGuard(left, right)) {
           return;
         }
         const leftPlace =
@@ -8195,6 +8796,7 @@ const initializeCallableContext = ({
   decls,
   contracts,
   mutableStorageSymbols,
+  runtimeIdentityGuards,
   diagnostics,
 }: {
   callable: BorrowCallable;
@@ -8210,6 +8812,7 @@ const initializeCallableContext = ({
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   mutableStorageSymbols: Set<SymbolId>;
+  runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
   diagnostics: Diagnostic[];
 }): BodyContext => {
   const places = new Map<SymbolId, BorrowPlace>();
@@ -8290,6 +8893,7 @@ const initializeCallableContext = ({
     uses: new Map(),
     usePlaces: new Map(),
     mutableStorageSymbols,
+    runtimeIdentityGuards,
     diagnostics,
     terminations: [],
     mutableParameters,
@@ -8397,6 +9001,7 @@ export const analyzeFunctionBorrowing = ({
   decls,
   contracts,
   mutableStorageSymbols,
+  runtimeIdentityGuards,
   diagnostics,
 }: {
   functionItem: HirFunction;
@@ -8409,6 +9014,7 @@ export const analyzeFunctionBorrowing = ({
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   mutableStorageSymbols: Set<SymbolId>;
+  runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
   diagnostics: Diagnostic[];
 }): void => {
   const signature = typing.functions.getSignature(functionItem.symbol);
@@ -8481,6 +9087,7 @@ export const analyzeFunctionBorrowing = ({
     decls,
     contracts,
     mutableStorageSymbols,
+    runtimeIdentityGuards,
     diagnostics,
   });
 };
@@ -8496,6 +9103,7 @@ export const analyzeLambdaBodyBorrowing = ({
   decls,
   contracts,
   mutableStorageSymbols,
+  runtimeIdentityGuards,
   diagnostics,
 }: {
   lambda: HirLambdaExpr;
@@ -8508,6 +9116,7 @@ export const analyzeLambdaBodyBorrowing = ({
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   mutableStorageSymbols: Set<SymbolId>;
+  runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
   diagnostics: Diagnostic[];
 }): void => {
   const lambdaType = typing.resolvedExprTypes.get(lambda.id);
@@ -8547,6 +9156,7 @@ export const analyzeLambdaBodyBorrowing = ({
     decls,
     contracts,
     mutableStorageSymbols,
+    runtimeIdentityGuards,
     diagnostics,
   });
 };
@@ -8566,6 +9176,7 @@ const analyzeCallableBorrowing = ({
   decls,
   contracts,
   mutableStorageSymbols,
+  runtimeIdentityGuards,
   diagnostics,
 }: {
   callable: BorrowCallable;
@@ -8582,6 +9193,7 @@ const analyzeCallableBorrowing = ({
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   mutableStorageSymbols: Set<SymbolId>;
+  runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
   diagnostics: Diagnostic[];
 }): void => {
   const ctx = initializeCallableContext({
@@ -8598,6 +9210,7 @@ const analyzeCallableBorrowing = ({
     decls,
     contracts,
     mutableStorageSymbols,
+    runtimeIdentityGuards,
     diagnostics,
   });
   validateReferenceDefaults({ callable, contract, ctx });

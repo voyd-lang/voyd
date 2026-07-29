@@ -2294,45 +2294,44 @@ obj NormalizedAttrs {
 }
 
 fn normalize_attrs(attributes: Array<MsgPack>): () -> NormalizedAttrs
-  let ~attrs = Dict<String, MsgPack>::init()
-  let ~props = Dict<String, MsgPack>::init()
-  let ~styles = Dict<String, MsgPack>::init()
-  let ~events = Array<MsgPack>::init()
+  let ~normalized = NormalizedAttrs {
+    attrs: Dict<String, MsgPack>::init(),
+    props: Dict<String, MsgPack>::init(),
+    styles: Dict<String, MsgPack>::init(),
+    events: Array<MsgPack>::init()
+  }
   var index = 0
   while index < attributes.len():
     match(attributes.get(index))
       Some<MsgPack> { value }:
         match(msgpack::unpack_map(value))
           Ok<Dict<String, MsgPack>> { value: entry }:
-            consume_attr_entry(entry, attrs, props, styles, events)
+            consume_attr_entry(entry, normalized)
           Err:
             void
       None:
         void
     index = index + 1
-  NormalizedAttrs { attrs: attrs, props: props, styles: styles, events: events }
+  normalized
 
 fn consume_attr_entry(
   entry: Dict<String, MsgPack>,
-  ~attrs: Dict<String, MsgPack>,
-  ~props: Dict<String, MsgPack>,
-  ~styles: Dict<String, MsgPack>,
-  ~events: Array<MsgPack>
+  ~normalized: NormalizedAttrs
 ) -> void
   match(entry.get("kind"))
     Some<MsgPack> { value }:
       match(msgpack::unpack_string(value))
         Ok<String> { value: kind }:
           if kind == "event":
-            events.push(msgpack::make_map(entry))
+            normalized.events.push(msgpack::make_map(entry))
           else:
             if kind == "style":
-              consume_named_attr(entry, styles)
+              consume_named_attr(entry, normalized.styles)
             else:
               if kind == "prop":
-                consume_named_attr(entry, props)
+                consume_named_attr(entry, normalized.props)
               else:
-                consume_named_attr(entry, attrs)
+                consume_named_attr(entry, normalized.attrs)
         Err:
           void
     None:

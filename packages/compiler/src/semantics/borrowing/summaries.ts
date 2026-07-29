@@ -30,6 +30,7 @@ import type {
 } from "./model.js";
 import {
   borrowTypeConditionId,
+  callableContractHasGuardableAccessPair,
   mergeCallableBorrowContracts,
   normalizeCallableBorrowTransfers,
   projectionPathCovers,
@@ -939,10 +940,7 @@ const placeOfExpression = (
         }
       : undefined;
   }
-  if (
-    expr?.exprKind !== "call" ||
-    !isTransparentMutableAccess(expr, ctx)
-  ) {
+  if (expr?.exprKind !== "call" || !isTransparentMutableAccess(expr, ctx)) {
     return undefined;
   }
   const operand = expr.args.at(-1)?.expr;
@@ -1153,10 +1151,7 @@ const recordTransfersInto = ({
 }): void => {
   destination.forEach((destinationOrigin) =>
     source.forEach((sourceOrigin) => {
-      if (
-        sourceOrigin.parameter < 0 ||
-        destinationOrigin.parameter < 0
-      ) {
+      if (sourceOrigin.parameter < 0 || destinationOrigin.parameter < 0) {
         return;
       }
       const sourcePath = sourceOrigin.sourceProjections;
@@ -1402,7 +1397,9 @@ const applyCallContract = ({
         path: readonly PlaceProjection[],
       ): MutableFlow => {
         const actualPlace =
-          typeof actual === "number" ? placeOfExpression(actual, ctx) : undefined;
+          typeof actual === "number"
+            ? placeOfExpression(actual, ctx)
+            : undefined;
         const actualExpression =
           typeof actual === "number"
             ? ctx.hir.expressions.get(actual)
@@ -2701,6 +2698,16 @@ const evaluateExpressionRaw = (
         const placeEnv = ctx.placeEnvs.get(env);
         const physicalTarget = placeEnv?.get(targetExpr.symbol) ?? emptyFlow();
         recordWrite(physicalTarget, ctx);
+        const invalidated = ctx.invalidated.get(env) ?? emptyFlow();
+        if (physicalTarget.size === 1) {
+          physicalTarget.forEach((origin) =>
+            addOrigin(invalidated, {
+              ...origin,
+              resultProjections: [],
+            }),
+          );
+        }
+        ctx.invalidated.set(env, invalidated);
         if (ctx.parameterOrigins.has(targetExpr.symbol)) {
           const targetParameters = new Set(
             Array.from(physicalTarget.values(), (origin) => origin.parameter),
@@ -3731,8 +3738,7 @@ const summarizeFunction = ({
         ...(readPaths.length > 0 ? { readPaths } : {}),
         ...(writePaths.length > 0 ? { writePaths } : {}),
         ...(writePaths.length > 0 &&
-        ((index === 0 && runtimeCheckedReceiverWrites) ||
-          !hasUncheckedWrites)
+        ((index === 0 && runtimeCheckedReceiverWrites) || !hasUncheckedWrites)
           ? { runtimeCheckedWrites: true as const }
           : {}),
         ...(accessCondition
@@ -3824,6 +3830,7 @@ const contractEqualityKey = (contract: CallableBorrowContract): string => {
       parameter.defaultNoBorrowPaths ?? [],
     ]),
     contract.maySuspend,
+    contract.defaultIdentityGuardProtocol ?? null,
     contract.borrowedResult ?? "external",
     contract.externalReturnedOrigins ?? [],
     contract.externalRead ?? false,
@@ -3920,8 +3927,8 @@ const externalOriginsOrBroad = (
           boolean,
         ];
         return {
-        result: [],
-        endpointAccess,
+          result: [],
+          endpointAccess,
           ...(fresh ? { fresh: true as const } : {}),
         };
       },
@@ -4631,7 +4638,33 @@ export const computeCallableBorrowContracts = ({
       sharedWorklist.push(dependent);
     });
   }
-  return contracts;
+  const functionsBySymbol = new Map(
+    functions.map((functionItem) => [functionItem.symbol, functionItem]),
+  );
+  return new Map(
+    Array.from(contracts, ([symbol, contract]) => {
+      const {
+        defaultIdentityGuardProtocol: _defaultIdentityGuardProtocol,
+        ...baseContract
+      } = contract;
+      const functionItem = functionsBySymbol.get(symbol);
+      const hasDefault =
+        functionItem?.parameters.some(
+          (parameter) => typeof parameter.defaultValue === "number",
+        ) === true;
+      const canRequireIdentityGuard =
+        hasDefault && callableContractHasGuardableAccessPair(contract);
+      return [
+        symbol,
+        canRequireIdentityGuard
+          ? {
+              ...baseContract,
+              defaultIdentityGuardProtocol: "presence-conflict-bit-v1" as const,
+            }
+          : baseContract,
+      ];
+    }),
+  );
 };
 
 const stronglyConnectedComponents = ({

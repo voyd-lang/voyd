@@ -180,6 +180,7 @@ describe("borrow checking", () => {
         },
       ],
       maySuspend: false,
+      defaultIdentityGuardProtocol: "presence-conflict-bit-v1" as const,
       borrowedResult: "parameter" as const,
       externalReturnedOrigins: [
         {
@@ -212,9 +213,25 @@ describe("borrow checking", () => {
     expect(callableBorrowSummarySize(serialized)).toBeGreaterThan(0);
     expect(() =>
       deserializeCallableBorrowSummary(
-        serialized.replace('"version":1', '"version":2'),
+        serialized.replace('"version":2', '"version":3'),
       ),
     ).toThrow(/does not match the V1 schema/);
+    const legacySummary = JSON.parse(serialized);
+    legacySummary.version = 1;
+    delete legacySummary.contract.defaultIdentityGuardProtocol;
+    const {
+      defaultIdentityGuardProtocol: _defaultIdentityGuardProtocol,
+      ...legacyContract
+    } = contract;
+    expect(
+      deserializeCallableBorrowSummary(JSON.stringify(legacySummary)),
+    ).toEqual({
+      schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
+      version: CALLABLE_BORROW_SUMMARY_VERSION,
+      dispatch: "ordinary",
+      contract: legacyContract,
+      source,
+    });
     const unknownField = JSON.parse(serialized);
     unknownField.contract.parameters[0].futureBehavior = true;
     expect(() =>
@@ -224,6 +241,14 @@ describe("borrow checking", () => {
     invalidRuntimeGuard.contract.parameters[0].runtimeCheckedWrites = false;
     expect(() =>
       deserializeCallableBorrowSummary(JSON.stringify(invalidRuntimeGuard)),
+    ).toThrow(/does not match the V1 schema/);
+    const invalidDefaultIdentityGuardProtocol = JSON.parse(serialized);
+    invalidDefaultIdentityGuardProtocol.contract.defaultIdentityGuardProtocol =
+      "future-protocol";
+    expect(() =>
+      deserializeCallableBorrowSummary(
+        JSON.stringify(invalidDefaultIdentityGuardProtocol),
+      ),
     ).toThrow(/does not match the V1 schema/);
     const invalidDefaultParameter = JSON.parse(serialized);
     invalidDefaultParameter.contract.parameters[0].defaultOrigins = [
@@ -4932,9 +4957,7 @@ fn sample(value: Box) -> Box
               ...parameter,
               runtimeCheckedWrites: true as const,
               returnedAggregate: true as const,
-              defaultExternalOrigins: [
-                { result: [], fresh: true as const },
-              ],
+              defaultExternalOrigins: [{ result: [], fresh: true as const }],
               defaultExternalReturnedOrigins: [
                 { result: [], fresh: true as const },
               ],
@@ -5377,7 +5400,8 @@ fn invalid_arguments() -> void
             ?.symbol,
       );
     const mutateGlobalContract = mutateGlobalSummary?.serialized
-      ? deserializeCallableBorrowSummary(mutateGlobalSummary.serialized).contract
+      ? deserializeCallableBorrowSummary(mutateGlobalSummary.serialized)
+          .contract
       : undefined;
 
     expect(mutateGlobalContract?.externalWrite).toBe(true);
@@ -6007,12 +6031,13 @@ fn update(wrapper: Wrapper) -> void
     value = value + 1
   )
 `);
-    const wrapperContract = Array.from(result.borrowing.callables.values()).find(
+    const wrapperContract = Array.from(
+      result.borrowing.callables.values(),
+    ).find(
       (contract) =>
         contract.parameters[0]?.runtimeCheckedWrites === true &&
         contract.parameters[0]?.writePaths?.some(
-          (path) =>
-            path[0]?.kind === "field" && path[0].name === "state",
+          (path) => path[0]?.kind === "field" && path[0].name === "state",
         ),
     );
 
@@ -10619,5 +10644,529 @@ fn valid(cell: SharedCell<State>) -> i32
   plan.kind
 `),
     ).not.toThrow();
+  });
+
+  it("plans bounded identity guards for unknown allocation overlap", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn guarded(~left: Box, ~right: Box) -> void
+  mutate_both(~left, ~right)
+`);
+    const guards = Array.from(
+      result.borrowing.runtimeIdentityGuards.values(),
+    ).flat();
+    expect(guards).toHaveLength(1);
+    expect(guards[0]).toMatchObject({
+      left: { parameter: 0 },
+      right: { parameter: 1 },
+    });
+    const codegenGuard = Array.from(
+      buildProgramCodegenView([result]).modules.values(),
+    )[0]
+      ? Array.from(result.borrowing.runtimeIdentityGuards.keys()).flatMap(
+          (call) =>
+            buildProgramCodegenView([result]).calls.getCallInfo(
+              result.moduleId,
+              call,
+            ).identityGuards,
+        )
+      : [];
+    expect(codegenGuard).toEqual([
+      expect.objectContaining({
+        left: expect.objectContaining({ parameter: 0 }),
+        right: expect.objectContaining({ parameter: 1 }),
+        afterDefaults: false,
+      }),
+    ]);
+  });
+
+  it("plans guards for stable dynamic element projections", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+@intrinsic(name: "__array_get", uses_signature: false)
+fn array_get<T>(values: FixedArray<T>, index: i32) -> T
+  __array_get(values, index)
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn guarded(~values: FixedArray<Box>, left: i32, right: i32) -> void
+  mutate_both(
+    ~array_get(values, left),
+    ~array_get(values, right)
+  )
+`);
+    const guards = Array.from(
+      result.borrowing.runtimeIdentityGuards.values(),
+    ).flat();
+    expect(guards).toHaveLength(1);
+    expect(guards[0]?.left.place.projections).toContainEqual({
+      kind: "index",
+      stable: true,
+    });
+  });
+
+  it("omits guards for statically distinct fixed-array elements", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn distinct(~values: FixedArray<Box>) -> void
+  mutate_both(
+    ~__array_get(values, 0),
+    ~__array_get(values, 1)
+  )
+`);
+    expect(result.borrowing.runtimeIdentityGuards.size).toBe(0);
+  });
+
+  it("guards a fresh call-local allocation against an unknown root", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn valid(~right: Box) -> void
+  let ~left = Box { value: 0 }
+  mutate_both(~left, ~right)
+`);
+    expect(result.borrowing.diagnostics).toEqual([]);
+    expect(result.borrowing.runtimeIdentityGuards.size).toBe(1);
+  });
+
+  it("does not treat ordinary value arguments as runtime loans", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn mutate_and_read(~target: Box, source: Box) -> i32
+  target.value = target.value + 1
+  source.value
+
+fn valid(~target: Box, source: Box) -> i32
+  mutate_and_read(~target, source)
+`);
+    expect(result.borrowing.diagnostics).toEqual([]);
+    expect(result.borrowing.runtimeIdentityGuards.size).toBe(0);
+  });
+
+  it("statically separates loans with disjoint nominal identities", () => {
+    const result = analyze(`
+obj Left { value: i32 }
+obj Right { value: i32 }
+
+fn mutate_both(~left: Left, ~right: Right) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn valid(~left: Left, ~right: Right) -> void
+  mutate_both(~left, ~right)
+`);
+    expect(result.borrowing.diagnostics).toEqual([]);
+    expect(result.borrowing.runtimeIdentityGuards.size).toBe(0);
+  });
+
+  it("does not use outer nominal disjointness for nested identities", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+obj LeftHolder { box: Box }
+obj RightHolder { box: Box }
+
+fn mutate_nested(~left: LeftHolder, ~right: RightHolder) -> void
+  left.box.value = left.box.value + 1
+  right.box.value = right.box.value + 1
+
+fn guarded(~left: LeftHolder, ~right: RightHolder) -> void
+  mutate_nested(~left, ~right)
+`);
+    expect(result.borrowing.diagnostics).toEqual([]);
+    expect(
+      Array.from(result.borrowing.runtimeIdentityGuards.values()).flat(),
+    ).toEqual([
+      expect.objectContaining({
+        left: expect.objectContaining({
+          identity: "allocation",
+          allocationPath: expect.arrayContaining([
+            expect.objectContaining({ kind: "field", name: "box" }),
+          ]),
+        }),
+        right: expect.objectContaining({
+          identity: "allocation",
+          allocationPath: expect.arrayContaining([
+            expect.objectContaining({ kind: "field", name: "box" }),
+          ]),
+        }),
+      }),
+    ]);
+  });
+
+  it("guards possible nested aliases behind distinct outer nominals", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+obj LeftHolder { box: Box }
+obj RightHolder { box: Box }
+
+fn mutate_nested(~left: LeftHolder, ~right: RightHolder) -> void
+  left.box.value = left.box.value + 1
+  right.box.value = right.box.value + 1
+
+fn invalid() -> void
+  let shared = Box { value: 0 }
+  let ~left = LeftHolder { box: shared }
+  let ~right = RightHolder { box: shared }
+  mutate_nested(~left, ~right)
+`);
+    expect(result.borrowing.diagnostics).toEqual([]);
+    expect(result.borrowing.runtimeIdentityGuards.size).toBe(1);
+  });
+
+  it("defers guards until every omitted default has been evaluated", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn mutate_both(
+  ~left: Box,
+  ~right: Box,
+  marker: i32 = 0
+) -> void
+  left.value = left.value + marker
+  right.value = right.value + marker
+
+fn guarded(~left: Box, ~right: Box) -> void
+  mutate_both(~left, ~right)
+`);
+    const guards = Array.from(
+      result.borrowing.runtimeIdentityGuards.values(),
+    ).flat();
+    expect(guards).toEqual([
+      expect.objectContaining({
+        afterDefaults: true,
+        omittedParameters: [2],
+      }),
+    ]);
+    const view = buildProgramCodegenView([result]);
+    const footprint = Array.from(view.modules.values())[0]
+      ?.callableAccessFootprints.values()
+      .find(
+        (candidate) =>
+          candidate.defaultIdentityGuardProtocol === "presence-conflict-bit-v1",
+      );
+    expect(footprint?.defaultIdentityGuardProtocol).toBe(
+      "presence-conflict-bit-v1",
+    );
+  });
+
+  it("rejects deferred guards when a default can mutate guarded identity", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn redirect(~target: Box, replacement: Box) -> i32
+  target = replacement
+  0
+
+fn mutate_both(
+  ~left: Box,
+  ~right: Box,
+  marker: i32 = redirect(~left, right)
+) -> void
+  left.value = left.value + marker
+  right.value = right.value + marker
+
+fn invalid(~left: Box, ~right: Box) -> void
+  mutate_both(~left, ~right)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("rejects deferred guards when a default writes through a possible alias", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn redirect(~target: Box, replacement: Box) -> i32
+  target = replacement
+  0
+
+fn mutate_both(
+  ~left: Box,
+  ~right: Box,
+  ~alias: Box,
+  marker: i32 = redirect(~alias, right)
+) -> void
+  left.value = left.value + marker
+  right.value = right.value + marker
+
+fn invalid(~left: Box, ~right: Box) -> void
+  mutate_both(~left, ~right, ~left)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("rejects guards whose identity-bearing argument is defaulted", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate_both(~left: Box, ~right: Box = left) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn invalid(~left: Box) -> void
+  mutate_both(~left)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("rejects deferred guards when a default can rebind identity-producing storage", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Holder { box: Box }
+
+fn replace_box(~holder: Holder, replacement: Box) -> i32
+  holder.box = replacement
+  0
+
+fn mutate_both(
+  ~left: Box,
+  ~right: Box,
+  ~alias: Holder,
+  marker: i32 = replace_box(~alias, right)
+) -> void
+  left.value = left.value + marker
+  right.value = right.value + marker
+
+fn invalid(
+  ~holders: FixedArray<Holder>,
+  left: i32,
+  right: i32,
+  alias: i32
+) -> void
+  mutate_both(
+    ~__array_get(holders, left).box,
+    ~__array_get(holders, right).box,
+    ~__array_get(holders, alias)
+  )
+`),
+    ).toContain("TY0048");
+  });
+
+  it("rejects deferred guards when a default rebinds an intermediate identity handle", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Holder { box: Box }
+obj Root { holder: Holder }
+
+fn replace_holder(~root: Root, replacement: Holder) -> i32
+  root.holder = replacement
+  0
+
+fn mutate_both(
+  ~left: Root,
+  ~right: Root,
+  marker: i32 = replace_holder(~left, right.holder)
+) -> void
+  left.holder.box.value = left.holder.box.value + marker
+  right.holder.box.value = right.holder.box.value + marker
+
+fn invalid(~left: Root, ~right: Root) -> void
+  mutate_both(~left, ~right)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("rejects incomplete indexed identity for nested reference-backed slots", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Holder { box: Box }
+
+fn replace_both(~left: Box, ~right: Box) -> void
+  left = Box { value: 1 }
+  right = Box { value: 2 }
+
+fn invalid(
+  ~holders: FixedArray<Holder>,
+  left: i32,
+  right: i32
+) -> void
+  replace_both(
+    ~__array_get(holders, left).box,
+    ~__array_get(holders, right).box
+  )
+`),
+    ).toContain("TY0048");
+  });
+
+  it("plans storage identity for uncertain mutable root slots", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn replace_both(~left: Box, ~right: Box) -> void
+  left = Box { value: 1 }
+  right = Box { value: 2 }
+
+fn guarded(~left: Box, ~right: Box) -> void
+  replace_both(~left, ~right)
+`);
+    expect(
+      Array.from(result.borrowing.runtimeIdentityGuards.values()).flat(),
+    ).toEqual([
+      expect.objectContaining({
+        left: expect.objectContaining({ identity: "storage" }),
+        right: expect.objectContaining({ identity: "storage" }),
+      }),
+    ]);
+  });
+
+  it("rejects runtime storage guards for projected mutable slots", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Holder { box: Box }
+
+fn replace_both(~left: Box, ~right: Box) -> void
+  left = Box { value: 1 }
+  right = Box { value: 2 }
+
+fn invalid(~left: Holder, ~right: Holder) -> void
+  replace_both(~left.box, ~right.box)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("does not advertise the default guard protocol without conflicting accesses", () => {
+    const result = analyze(`
+pub fn identity(value: i32 = 1) -> i32
+  value
+`);
+    expect(
+      Array.from(result.borrowing.callables.values()).some(
+        (contract) =>
+          contract.defaultIdentityGuardProtocol === "presence-conflict-bit-v1",
+      ),
+    ).toBe(false);
+  });
+
+  it("plans guards for open trait dispatch", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+trait Mutator
+  fn update(self, ~left: Box, ~right: Box) -> void
+
+obj ConcreteMutator {}
+
+impl Mutator for ConcreteMutator
+  fn update(self, ~left: Box, ~right: Box) -> void
+    left.value = left.value + 1
+    right.value = right.value + 1
+
+fn guarded(mutator: Mutator, ~left: Box, ~right: Box) -> void
+  mutator.update(~left, ~right)
+`);
+    expect(
+      Array.from(result.borrowing.runtimeIdentityGuards.values()).flat(),
+    ).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          left: expect.objectContaining({ parameter: 1 }),
+          right: expect.objectContaining({ parameter: 2 }),
+        }),
+      ]),
+    );
+  });
+
+  it("keeps known identity conflicts as compile errors", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn invalid(~value: Box) -> void
+  mutate_both(~value, ~value)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("keeps known conflicts through ordinary aliases as compile errors", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn invalid(~value: Box) -> void
+  let alias = value
+  mutate_both(~value, ~alias)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("rejects runtime guards for suspending call access", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+eff Async
+  wait(resume) -> void
+
+fn mutate_both(~left: Box, ~right: Box): Async -> void
+  Async::wait()
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn invalid(~left: Box, ~right: Box): Async -> void
+  mutate_both(~left, ~right)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("does not advertise deferred guards for suspending callables", () => {
+    const result = analyzeWithRecovery(`
+obj Box { value: i32 }
+
+eff Async
+  wait(resume) -> void
+
+fn mutate_both(
+  ~left: Box,
+  ~right: Box,
+  marker: i32 = 0
+): Async -> void
+  Async::wait()
+  left.value = left.value + marker
+  right.value = right.value + marker
+
+fn invalid(~left: Box, ~right: Box): Async -> void
+  mutate_both(~left, ~right)
+`);
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "TY0052",
+    );
+    expect(
+      Array.from(result.borrowing.callables.values()).some(
+        (contract) =>
+          contract.defaultIdentityGuardProtocol === "presence-conflict-bit-v1",
+      ),
+    ).toBe(false);
   });
 });

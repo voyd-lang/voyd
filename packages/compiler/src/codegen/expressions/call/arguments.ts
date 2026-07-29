@@ -288,13 +288,17 @@ export const compileCallArgumentsForParamsWithDetails = ({
           paramIndexes: new Set(eligibleScalarAggregateArgs.keys()),
         }) ?? meta)
       : meta;
-  const callShapeRequest = meta
-    ? callShapeSpecializationRequestFor({
-        callId: call.id,
-        callerInstanceId: fnCtx.instanceId ?? typeInstanceId,
-        ctx,
-      })
-    : undefined;
+  const afterDefaultIdentityGuards = ctx.program.calls
+    .getCallInfo(ctx.moduleId, call.id)
+    .identityGuards.filter((guard) => guard.afterDefaults);
+  const callShapeRequest =
+    meta && afterDefaultIdentityGuards.length === 0
+      ? callShapeSpecializationRequestFor({
+          callId: call.id,
+          callerInstanceId: fnCtx.instanceId ?? typeInstanceId,
+          ctx,
+        })
+      : undefined;
   const callShapeMeta =
     resolvedMeta && callShapeRequest && typedPlan
       ? getOrCreateCallShapeSpecialization({

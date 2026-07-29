@@ -58,6 +58,11 @@ obj JsonParser {
   index: i32
 }
 
+obj JsonEscapeState {
+  out: Array<i32>,
+  parser: JsonParser
+}
+
 /// Parses UTF-8 JSON text into a `JsonValue`.
 ///
 /// Params:
@@ -172,6 +177,7 @@ fn parse_string(~parser: JsonParser): () -> Result<String, JsonError>
     return Err<JsonError> { error: json_parse_error("json parse error: expected string") }
 
   let ~bytes = Array<i32>::with_capacity(16)
+  let ~escape = JsonEscapeState { out: bytes, parser: parser }
   while true:
     let byte = next_byte_or(parser, -1)
     if byte < 0:
@@ -182,7 +188,7 @@ fn parse_string(~parser: JsonParser): () -> Result<String, JsonError>
       let escaped = next_byte_or(parser, -1)
       if escaped < 0:
         return Err<JsonError> { error: json_parse_error("json parse error: unterminated escape") }
-      let append_result = append_escaped(bytes, escaped, parser)
+      let append_result = append_escaped(escape, escaped)
       if append_result != 0:
         return Err<JsonError> { error: json_parse_error("json parse error: invalid string escape") }
       continue
@@ -545,53 +551,53 @@ fn consume_byte(~parser: JsonParser, expected: i32) -> bool
     None:
       false
 
-fn append_escaped(~out: Array<i32>, escaped: i32, ~parser: JsonParser) -> i32
+fn append_escaped(~state: JsonEscapeState, escaped: i32) -> i32
   if escaped == 34:
-    out.push(34)
+    state.out.push(34)
     return 0
   if escaped == 92:
-    out.push(92)
+    state.out.push(92)
     return 0
   if escaped == 47:
-    out.push(47)
+    state.out.push(47)
     return 0
   if escaped == 98:
-    out.push(8)
+    state.out.push(8)
     return 0
   if escaped == 102:
-    out.push(12)
+    state.out.push(12)
     return 0
   if escaped == 110:
-    out.push(10)
+    state.out.push(10)
     return 0
   if escaped == 114:
-    out.push(13)
+    state.out.push(13)
     return 0
   if escaped == 116:
-    out.push(9)
+    state.out.push(9)
     return 0
   if escaped != 117:
     return -1
 
-  let lead = read_unicode_escape(parser)
+  let lead = read_unicode_escape(state.parser)
   if lead < 0:
     return -1
   if is_high_surrogate(lead):
-    let checkpoint = parser.index
-    if consume_byte(parser, 92):
-      if consume_byte(parser, 117):
-        let trail = read_unicode_escape(parser)
+    let checkpoint = state.parser.index
+    if consume_byte(state.parser, 92):
+      if consume_byte(state.parser, 117):
+        let trail = read_unicode_escape(state.parser)
         if is_low_surrogate(trail):
-          append_codepoint(out, decode_surrogate_pair(lead, trail))
+          append_codepoint(state.out, decode_surrogate_pair(lead, trail))
           return 0
-      parser.index = checkpoint
-    append_replacement(out)
+      state.parser.index = checkpoint
+    append_replacement(state.out)
     return 0
   if is_low_surrogate(lead):
-    append_replacement(out)
+    append_replacement(state.out)
     return 0
 
-  append_codepoint(out, lead)
+  append_codepoint(state.out, lead)
   0
 
 fn read_unicode_escape(~parser: JsonParser) -> i32

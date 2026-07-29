@@ -2704,14 +2704,6 @@ export const loadStructuralField = ({
       ctx,
     });
   }
-  const dynamicLoad = makeDynamicStructuralFieldLoad({
-    field,
-    pointer,
-    ctx,
-  });
-  if (!shouldUseNominalFieldFastPath(structInfo, ctx)) {
-    return dynamicLoad;
-  }
   if (
     typeof exactNominalTypeId === "number" &&
     exactNominalTypeId === structInfo.nominalId
@@ -2722,6 +2714,14 @@ export const loadStructuralField = ({
       pointer,
       ctx,
     });
+  }
+  const dynamicLoad = makeDynamicStructuralFieldLoad({
+    field,
+    pointer,
+    ctx,
+  });
+  if (!shouldUseNominalFieldFastPath(structInfo, ctx)) {
+    return dynamicLoad;
   }
 
   const exactTypeMatch = ctx.mod.call(

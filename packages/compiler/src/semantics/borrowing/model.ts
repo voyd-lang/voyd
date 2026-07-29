@@ -276,6 +276,12 @@ export type CallableBorrowContract = {
   parameters: readonly CallableParameterBorrowContract[];
   maySuspend: boolean;
   /**
+   * Versioned ABI used by guarded calls whose omitted arguments are evaluated
+   * in the callee. This is serialized so separately compiled callers only use
+   * a protocol explicitly advertised by the target.
+   */
+  defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
+  /**
    * Whether an explicitly borrowed result can carry provenance independently
    * of the callable's returned parameter origins.
    */
@@ -291,6 +297,84 @@ export type CallableBorrowContract = {
    */
   dynamicDispatch?: CallableBorrowContract;
 };
+
+export const runtimeIdentityGuardParameterCanEscape = (
+  parameter: CallableParameterBorrowContract | undefined,
+): boolean =>
+  parameter === undefined ||
+  (parameter.borrowedRetainedPaths?.length ?? 0) > 0 ||
+  (parameter.returnedSharedOrigins?.length ?? 0) > 0;
+
+export const callableContractAllowsRuntimeIdentityGuards = (
+  contract: CallableBorrowContract,
+): boolean =>
+  !contract.maySuspend && !contract.externalRead && !contract.externalWrite;
+
+/**
+ * Callable-level capability used for publishing the deferred-default ABI.
+ * Caller-specific place and type checks remain in body analysis.
+ */
+export const callableContractHasGuardableAccessPair = (
+  contract: CallableBorrowContract,
+): boolean => {
+  if (!callableContractAllowsRuntimeIdentityGuards(contract)) {
+    return false;
+  }
+  const identityShape = (
+    parameter: CallableParameterBorrowContract,
+  ): "dereferenced" | "inline" | undefined => {
+    if (runtimeIdentityGuardParameterCanEscape(parameter)) {
+      return undefined;
+    }
+    const paths = [
+      ...(parameter.readPaths ?? []),
+      ...(parameter.writePaths ?? []),
+    ];
+    if (paths.length === 0) {
+      return undefined;
+    }
+    const dereferenced = new Set(
+      paths.map((path) =>
+        path.some((projection) => projection.kind === "dereference"),
+      ),
+    );
+    if (dereferenced.size !== 1) {
+      return undefined;
+    }
+    return dereferenced.has(true) ? "dereferenced" : "inline";
+  };
+  const shapes = contract.parameters.map(identityShape);
+  return contract.parameters.some(
+    (parameter, index) =>
+      (parameter.writePaths?.length ?? 0) > 0 &&
+      shapes[index] !== undefined &&
+      contract.parameters.some(
+        (candidate, candidateIndex) =>
+          candidateIndex !== index &&
+          shapes[candidateIndex] === shapes[index] &&
+          ((candidate.readPaths?.length ?? 0) > 0 ||
+            (candidate.writePaths?.length ?? 0) > 0),
+      ),
+  );
+};
+
+export const callableDefaultsPreserveRuntimeIdentity = ({
+  contract,
+  omittedParameters,
+  writePreservesIdentity,
+}: {
+  contract: CallableBorrowContract;
+  omittedParameters: readonly number[];
+  writePreservesIdentity: (origin: DefaultBorrowAccessOrigin) => boolean;
+}): boolean =>
+  omittedParameters.every((parameterIndex) => {
+    const parameter = contract.parameters[parameterIndex];
+    return (
+      parameter !== undefined &&
+      !parameter.defaultExternalWrite &&
+      (parameter.defaultWriteOrigins?.every(writePreservesIdentity) ?? true)
+    );
+  });
 
 export type BorrowPlace = {
   root: SymbolId;
@@ -315,9 +399,36 @@ export type CheckedNamedBorrowContract = {
   returnsFrom: readonly string[];
 };
 
+export type RuntimeIdentityGuardOperand = {
+  parameter: number;
+  expression: number;
+  place: BorrowPlace;
+  display: string;
+  identity: "allocation" | "storage" | "indexed-place";
+  /** Projection from the argument allocation to the checked allocation. */
+  allocationPath?: readonly PlaceProjection[];
+};
+
+export type RuntimeIdentityGuard = {
+  call: number;
+  target: { moduleId: string; symbol: number };
+  left: RuntimeIdentityGuardOperand;
+  right: RuntimeIdentityGuardOperand;
+  /**
+   * Omitted defaults are evaluated in the callee. This marker prevents
+   * lowering the guard at an earlier caller-side activation point.
+   */
+  afterDefaults?: true;
+  /** Protocol advertised by the resolved callable for deferred checking. */
+  defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
+  /** The exact omitted-default call shape that requires this guard. */
+  omittedParameters?: readonly number[];
+};
+
 export type BorrowingResult = {
   callables: ReadonlyMap<SymbolId, CallableBorrowContract>;
   namedContracts: ReadonlyMap<SymbolId, CheckedNamedBorrowContract>;
+  runtimeIdentityGuards: ReadonlyMap<number, readonly RuntimeIdentityGuard[]>;
   mutableStorageSymbols: ReadonlySet<SymbolId>;
   diagnostics: readonly Diagnostic[];
 };
@@ -523,6 +634,14 @@ export const mergeCallableBorrowContracts = (
       };
     }),
     maySuspend: contracts.some((contract) => contract.maySuspend),
+    ...(contracts.every(
+      (contract) =>
+        contract.defaultIdentityGuardProtocol === "presence-conflict-bit-v1",
+    )
+      ? {
+          defaultIdentityGuardProtocol: "presence-conflict-bit-v1" as const,
+        }
+      : {}),
     ...(contracts.some((contract) => contract.externalRead)
       ? { externalRead: true as const }
       : {}),
@@ -779,6 +898,7 @@ const mergeProjectionPaths = (
 export const emptyBorrowingResult = (): BorrowingResult => ({
   callables: new Map(),
   namedContracts: new Map(),
+  runtimeIdentityGuards: new Map(),
   mutableStorageSymbols: new Set(),
   diagnostics: [],
 });

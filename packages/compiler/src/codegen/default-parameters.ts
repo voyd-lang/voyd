@@ -53,12 +53,13 @@ export const compileDefaultParameterInitialization = ({
         "effectful default parameters do not support call-shape continuations",
       );
     }
-    return compileCallShapeOmittedParameterInitialization({
+    const ops = compileCallShapeOmittedParameterInitialization({
       fn,
       meta,
       ctx,
       fnCtx,
     });
+    return [...ops, ...compileDefaultIdentityGuards({ fn, meta, ctx, fnCtx })];
   }
 
   const ops: binaryen.ExpressionRef[] = [];
@@ -176,7 +177,72 @@ export const compileDefaultParameterInitialization = ({
     );
   });
 
-  return ops;
+  return [
+    ...ops,
+    ...compileDefaultIdentityGuards({
+      fn,
+      meta,
+      continuation: continuation !== undefined,
+      ctx,
+      fnCtx,
+    }),
+  ];
+};
+
+const compileDefaultIdentityGuards = ({
+  fn,
+  meta,
+  continuation = false,
+  ctx,
+  fnCtx,
+}: {
+  fn: HirFunction;
+  meta: FunctionMetadata;
+  continuation?: boolean;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef[] => {
+  if (
+    !meta.defaultIdentityGuardEntry ||
+    meta.callShape ||
+    !fn.parameters.some(
+      (parameter) => typeof parameter.defaultValue === "number",
+    )
+  ) {
+    return [];
+  }
+  const protocol = ctx.module.callableAccessFootprints.get(
+    fn.symbol,
+  )?.defaultIdentityGuardProtocol;
+  if (protocol !== "presence-conflict-bit-v1") {
+    throw new Error(`missing default identity-guard protocol for ${fn.symbol}`);
+  }
+  const rawGuardMask = (): binaryen.ExpressionRef =>
+    fn.parameters
+      .flatMap((parameter, parameterIndex) =>
+        typeof parameter.defaultValue === "number"
+          ? [
+              rawDefaultPresenceValue({
+                parameterIndex,
+                symbol: parameter.symbol,
+                meta,
+                continuation,
+                ctx,
+                fnCtx,
+              }),
+            ]
+          : [],
+      )
+      .reduce(
+        (mask, presence) => ctx.mod.i32.or(mask, presence),
+        ctx.mod.i32.const(0),
+      );
+  return [
+    ctx.mod.if(
+      ctx.mod.i32.and(rawGuardMask(), ctx.mod.i32.const(2)),
+      ctx.mod.unreachable(),
+    ),
+  ];
 };
 
 const rawDefaultBinding = ({
@@ -220,6 +286,33 @@ const rawDefaultBinding = ({
 };
 
 const defaultPresenceValue = ({
+  parameterIndex,
+  symbol,
+  meta,
+  continuation,
+  ctx,
+  fnCtx,
+}: {
+  parameterIndex: number;
+  symbol: number;
+  meta: FunctionMetadata;
+  continuation: boolean;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef =>
+  ctx.mod.i32.and(
+    rawDefaultPresenceValue({
+      parameterIndex,
+      symbol,
+      meta,
+      continuation,
+      ctx,
+      fnCtx,
+    }),
+    ctx.mod.i32.const(1),
+  );
+
+const rawDefaultPresenceValue = ({
   parameterIndex,
   symbol,
   meta,

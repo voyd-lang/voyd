@@ -18,7 +18,8 @@ import { borrowTypeConditionId, projectionPathCovers } from "./model.js";
 
 export const CALLABLE_BORROW_SUMMARY_SCHEMA =
   "voyd.callable-borrow-summary" as const;
-export const CALLABLE_BORROW_SUMMARY_VERSION = 1 as const;
+export const CALLABLE_BORROW_SUMMARY_VERSION = 2 as const;
+const LEGACY_CALLABLE_BORROW_SUMMARY_VERSION = 1 as const;
 const PRIVATE_SUMMARY_REGION_SCOPE = "voyd.summary.private";
 const PRIVATE_SUMMARY_REGION_NAME = "storage";
 
@@ -171,6 +172,7 @@ type WireScopedCallbackV1 = {
 type WireContractV1 = {
   readonly parameters: readonly WireParameterContractV1[];
   readonly maySuspend: boolean;
+  readonly defaultIdentityGuardProtocol?: never;
   readonly borrowedResult?: "none" | "parameter" | "external";
   readonly externalReturnedOrigins?: readonly WireExternalReturnedOriginV1[];
   readonly externalRead?: true;
@@ -178,6 +180,12 @@ type WireContractV1 = {
   readonly transfers?: readonly WireTransferV1[];
   readonly scopedCallbacks?: readonly WireScopedCallbackV1[];
 };
+
+type WireContractV2 = Omit<WireContractV1, "defaultIdentityGuardProtocol"> & {
+  readonly defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
+};
+
+type WireContract = WireContractV1 | WireContractV2;
 
 type WireNamedContractV1 = {
   readonly scope: string;
@@ -201,12 +209,25 @@ type WireSummarySourceV1 = {
 
 type WireCallableBorrowSummaryV1 = {
   readonly schema: typeof CALLABLE_BORROW_SUMMARY_SCHEMA;
-  readonly version: typeof CALLABLE_BORROW_SUMMARY_VERSION;
+  readonly version: typeof LEGACY_CALLABLE_BORROW_SUMMARY_VERSION;
   readonly dispatch: CallableBorrowDispatchKind;
   readonly contract: WireContractV1;
   readonly namedContract?: WireNamedContractV1;
   readonly source?: WireSummarySourceV1;
 };
+
+type WireCallableBorrowSummaryV2 = {
+  readonly schema: typeof CALLABLE_BORROW_SUMMARY_SCHEMA;
+  readonly version: typeof CALLABLE_BORROW_SUMMARY_VERSION;
+  readonly dispatch: CallableBorrowDispatchKind;
+  readonly contract: WireContractV2;
+  readonly namedContract?: WireNamedContractV1;
+  readonly source?: WireSummarySourceV1;
+};
+
+type WireCallableBorrowSummary =
+  | WireCallableBorrowSummaryV1
+  | WireCallableBorrowSummaryV2;
 
 export const serializeCallableBorrowSummary = ({
   contract,
@@ -245,7 +266,7 @@ export const serializeCallableBorrowSummary = ({
         : publicPrivacy
           ? redactPrivateContractPaths(contract, publicPrivacy)
           : contract;
-  const wire: WireCallableBorrowSummaryV1 = {
+  const wire: WireCallableBorrowSummaryV2 = {
     schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
     version: CALLABLE_BORROW_SUMMARY_VERSION,
     dispatch,
@@ -267,8 +288,8 @@ export const serializeCallableBorrowSummary = ({
 };
 
 const stripWireRegionDisjointness = (
-  contract: WireContractV1,
-): WireContractV1 => {
+  contract: WireContractV2,
+): WireContractV2 => {
   const strip = (value: unknown): unknown => {
     if (Array.isArray(value)) {
       return value.map(strip);
@@ -283,7 +304,7 @@ const stripWireRegionDisjointness = (
       ]),
     );
   };
-  return strip(contract) as WireContractV1;
+  return strip(contract) as WireContractV2;
 };
 
 export const deserializeCallableBorrowSummary = (
@@ -321,9 +342,14 @@ export const summarySpanToSourceSpan = (
   end: span.end,
 });
 
-const toWireContract = (contract: CallableBorrowContract): WireContractV1 => ({
+const toWireContract = (contract: CallableBorrowContract): WireContractV2 => ({
   parameters: contract.parameters.map(toWireParameter),
   maySuspend: contract.maySuspend,
+  ...(contract.defaultIdentityGuardProtocol
+    ? {
+        defaultIdentityGuardProtocol: contract.defaultIdentityGuardProtocol,
+      }
+    : {}),
   ...(contract.borrowedResult
     ? { borrowedResult: contract.borrowedResult }
     : {}),
@@ -581,11 +607,14 @@ const toWireSource = (
   parameters: source.parameters.map((parameter) => ({ ...parameter })),
 });
 
-const fromWireContract = (
-  contract: WireContractV1,
-): CallableBorrowContract => ({
+const fromWireContract = (contract: WireContract): CallableBorrowContract => ({
   parameters: contract.parameters.map(fromWireParameter),
   maySuspend: contract.maySuspend,
+  ...(contract.defaultIdentityGuardProtocol
+    ? {
+        defaultIdentityGuardProtocol: contract.defaultIdentityGuardProtocol,
+      }
+    : {}),
   ...(contract.borrowedResult
     ? { borrowedResult: contract.borrowedResult }
     : {}),
@@ -894,10 +923,7 @@ const redactPrivateContractPaths = (
     parameter: number,
     path: readonly PlaceProjection[],
   ): readonly PlaceProjection[] =>
-    redactPath(
-      path,
-      privacy.firstPrivateParameterProjection(parameter, path),
-    );
+    redactPath(path, privacy.firstPrivateParameterProjection(parameter, path));
   const resultPath = (
     path: readonly PlaceProjection[],
   ): readonly PlaceProjection[] =>
@@ -923,9 +949,7 @@ const redactPrivateContractPaths = (
     ...origin,
     result: resultPath(origin.result),
   });
-  const redact = (
-    current: CallableBorrowContract,
-  ): CallableBorrowContract => ({
+  const redact = (current: CallableBorrowContract): CallableBorrowContract => ({
     ...current,
     parameters: current.parameters.map((parameter, index) => ({
       ...parameter,
@@ -971,10 +995,10 @@ const redactPrivateContractPaths = (
             returnedSharedOrigins: parameter.returnedSharedOrigins.map(
               (origin) => ({
                 ...returnedOrigin(index, origin),
-                ...((parameter.defaultBorrowedResult === "none" ||
-                  parameter.defaultNoBorrowPaths?.some((path) =>
-                    projectionPathCovers(path, origin.source),
-                  ) === true)
+                ...(parameter.defaultBorrowedResult === "none" ||
+                parameter.defaultNoBorrowPaths?.some((path) =>
+                  projectionPathCovers(path, origin.source),
+                ) === true
                   ? { defaultNoBorrow: true as const }
                   : {}),
               }),
@@ -1028,10 +1052,7 @@ const redactPrivateContractPaths = (
         : {}),
       ...(parameter.invalidatedPaths
         ? {
-            invalidatedPaths: parameterPaths(
-              index,
-              parameter.invalidatedPaths,
-            ),
+            invalidatedPaths: parameterPaths(index, parameter.invalidatedPaths),
           }
         : {}),
       ...(parameter.defaultOrigins
@@ -1045,12 +1066,10 @@ const redactPrivateContractPaths = (
         : {}),
       ...(parameter.defaultReadOrigins
         ? {
-            defaultReadOrigins: parameter.defaultReadOrigins.map(
-              (origin) => ({
-                ...origin,
-                path: parameterPath(origin.parameter, origin.path),
-              }),
-            ),
+            defaultReadOrigins: parameter.defaultReadOrigins.map((origin) => ({
+              ...origin,
+              path: parameterPath(origin.parameter, origin.path),
+            })),
           }
         : {}),
       ...(parameter.defaultWriteOrigins
@@ -1137,19 +1156,15 @@ const redactPrivateContractPaths = (
             return path.every(
               (
                 projection,
-              ): projection is Extract<
-                PlaceProjection,
-                { kind: "field" }
-              > => projection.kind === "field",
+              ): projection is Extract<PlaceProjection, { kind: "field" }> =>
+                projection.kind === "field",
             )
               ? {
                   ...callback,
                   callbackPath: path.map((projection) => projection.name),
                 }
-              : (({
-                  callbackPath: _callbackPath,
-                  ...publicCallback
-                }) => publicCallback)(callback);
+              : (({ callbackPath: _callbackPath, ...publicCallback }) =>
+                  publicCallback)(callback);
           }),
         }
       : {}),
@@ -1515,35 +1530,41 @@ const conservativePublicContract = (
   };
 };
 
-const isWireSummary = (value: unknown): value is WireCallableBorrowSummaryV1 =>
-  isRecordWithKeys(value, [
-    "schema",
-    "version",
-    "dispatch",
-    "contract",
-    "namedContract",
-    "source",
-  ]) &&
-  value.schema === CALLABLE_BORROW_SUMMARY_SCHEMA &&
-  value.version === CALLABLE_BORROW_SUMMARY_VERSION &&
-  isOneOf(value.dispatch, [
-    "ordinary",
-    "trait-declaration",
-    "trait-implementation",
-  ]) &&
-  isWireContract(value.contract) &&
-  (value.namedContract === undefined ||
-    ((value.dispatch === "trait-declaration" ||
-      value.dispatch === "trait-implementation") &&
-      isWireNamedContract(value.namedContract))) &&
-  (value.namedContract
+const isWireSummary = (value: unknown): value is WireCallableBorrowSummary => {
+  if (
+    !isRecordWithKeys(value, [
+      "schema",
+      "version",
+      "dispatch",
+      "contract",
+      "namedContract",
+      "source",
+    ]) ||
+    value.schema !== CALLABLE_BORROW_SUMMARY_SCHEMA ||
+    (value.version !== LEGACY_CALLABLE_BORROW_SUMMARY_VERSION &&
+      value.version !== CALLABLE_BORROW_SUMMARY_VERSION) ||
+    !isOneOf(value.dispatch, [
+      "ordinary",
+      "trait-declaration",
+      "trait-implementation",
+    ]) ||
+    !isWireContract(value.contract, value.version) ||
+    (value.namedContract !== undefined &&
+      (!(
+        value.dispatch === "trait-declaration" ||
+        value.dispatch === "trait-implementation"
+      ) ||
+        !isWireNamedContract(value.namedContract))) ||
+    (value.source !== undefined && !isWireSource(value.source))
+  ) {
+    return false;
+  }
+  return value.namedContract
     ? wireContractMatchesNamedRegions(value.contract, value.namedContract)
-    : wireContractHasNoDisjointRegions(value.contract)) &&
-  (value.source === undefined || isWireSource(value.source));
+    : wireContractHasNoDisjointRegions(value.contract);
+};
 
-const wireContractHasNoDisjointRegions = (
-  contract: WireContractV1,
-): boolean => {
+const wireContractHasNoDisjointRegions = (contract: WireContract): boolean => {
   let valid = true;
   const visit = (value: unknown): void => {
     if (!valid) {
@@ -1567,7 +1588,7 @@ const wireContractHasNoDisjointRegions = (
 };
 
 const wireContractMatchesNamedRegions = (
-  contract: WireContractV1,
+  contract: WireContract,
   named: WireNamedContractV1,
 ): boolean => {
   const disjointByRegion = new Map(
@@ -1597,8 +1618,7 @@ const wireContractMatchesNamedRegions = (
         value.scope === PRIVATE_SUMMARY_REGION_SCOPE &&
         value.name === PRIVATE_SUMMARY_REGION_NAME
       ) {
-        valid =
-          Array.isArray(value.disjoint) && value.disjoint.length === 0;
+        valid = Array.isArray(value.disjoint) && value.disjoint.length === 0;
         return;
       }
       const expected =
@@ -1620,21 +1640,43 @@ const wireContractMatchesNamedRegions = (
   return valid;
 };
 
-const isWireContract = (value: unknown): value is WireContractV1 => {
+const isWireContract = (
+  value: unknown,
+  version:
+    | typeof LEGACY_CALLABLE_BORROW_SUMMARY_VERSION
+    | typeof CALLABLE_BORROW_SUMMARY_VERSION,
+): value is WireContract => {
+  const keys =
+    version === CALLABLE_BORROW_SUMMARY_VERSION
+      ? [
+          "parameters",
+          "maySuspend",
+          "defaultIdentityGuardProtocol",
+          "borrowedResult",
+          "externalReturnedOrigins",
+          "externalRead",
+          "externalWrite",
+          "transfers",
+          "scopedCallbacks",
+        ]
+      : [
+          "parameters",
+          "maySuspend",
+          "borrowedResult",
+          "externalReturnedOrigins",
+          "externalRead",
+          "externalWrite",
+          "transfers",
+          "scopedCallbacks",
+        ];
   if (
-    !isRecordWithKeys(value, [
-      "parameters",
-      "maySuspend",
-      "borrowedResult",
-      "externalReturnedOrigins",
-      "externalRead",
-      "externalWrite",
-      "transfers",
-      "scopedCallbacks",
-    ]) ||
+    !isRecordWithKeys(value, keys) ||
     !Array.isArray(value.parameters) ||
     !value.parameters.every(isWireParameter) ||
     typeof value.maySuspend !== "boolean" ||
+    (version === CALLABLE_BORROW_SUMMARY_VERSION &&
+      value.defaultIdentityGuardProtocol !== undefined &&
+      value.defaultIdentityGuardProtocol !== "presence-conflict-bit-v1") ||
     (value.borrowedResult !== undefined &&
       !isOneOf(value.borrowedResult, ["none", "parameter", "external"])) ||
     !optionalArray(
@@ -1652,7 +1694,7 @@ const isWireContract = (value: unknown): value is WireContractV1 => {
   ) {
     return false;
   }
-  const contract = value as WireContractV1;
+  const contract = value as WireContract;
   const parameterCount = contract.parameters.length;
   const parameterInRange = (parameter: number): boolean =>
     parameter < parameterCount;

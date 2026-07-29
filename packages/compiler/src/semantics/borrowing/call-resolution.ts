@@ -42,6 +42,7 @@ export type ResolvedBorrowCall = {
   contract?: CallableBorrowContract;
   arguments: readonly (HirExprId | undefined)[];
   contractSources: readonly import("../ids.js").SourceSpan[];
+  traitDispatch?: true;
   openTraitDispatch?: true;
 };
 
@@ -1633,6 +1634,9 @@ export const resolveBorrowCall = (
     contractSources: entries.flatMap((entry) =>
       entry.source ? [summarySpanToSourceSpan(entry.source.declaration)] : [],
     ),
+    ...(ctx.typing.callTraitDispatches.has(expr.id)
+      ? { traitDispatch: true as const }
+      : {}),
     ...(openTraitDispatch ? { openTraitDispatch: true as const } : {}),
   };
   ctx.callResolutionCache?.set(expr.id, result);
