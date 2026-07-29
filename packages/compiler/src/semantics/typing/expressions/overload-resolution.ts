@@ -8,7 +8,10 @@ import type {
   TypingState,
 } from "../types.js";
 import { getStructuralFields, getSymbolName } from "../type-system.js";
-import { satisfies as typeSatisfies } from "../type-relations.js";
+import {
+  satisfies as typeSatisfies,
+  satisfiesBorrowFormation,
+} from "../type-relations.js";
 import { symbolRefEquals } from "../symbol-ref.js";
 import {
   filterCandidatesByExpectedReturnType,
@@ -24,6 +27,7 @@ export type OverloadCandidateScore<T extends OverloadResolutionCandidate> = {
   candidate: T;
   shapeMatch: boolean;
   argumentMatch: boolean;
+  borrowFormationPenalty: number;
   dominance: number;
   genericityPenalty: number;
   constraintSpecificity: number;
@@ -33,7 +37,10 @@ export type OverloadCandidateScore<T extends OverloadResolutionCandidate> = {
 
 type OverloadScoreInput<T extends OverloadResolutionCandidate> = Omit<
   OverloadCandidateScore<T>,
-  "dominance" | "genericityPenalty" | "constraintSpecificity"
+  | "borrowFormationPenalty"
+  | "dominance"
+  | "genericityPenalty"
+  | "constraintSpecificity"
 >;
 
 export type OverloadMatchScoreOverrides = {
@@ -212,6 +219,12 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
     : initialMatches;
   const scoreOverrides = scoreMatches?.(matches) ?? new Map();
   const matchesSet = new Set(matches);
+  const argumentsByCandidate = new Map(
+    matches.map((candidate) => [
+      candidate,
+      argsForCandidate ? argsForCandidate(candidate) : args,
+    ]),
+  );
   const scoreInputs = shapedScores.map((score) => ({
     ...score,
     argumentMatch: matchesSet.has(score.candidate),
@@ -220,6 +233,7 @@ export const findOverloadMatches = <T extends OverloadResolutionCandidate>({
   }));
   return selectOverloadMatchesFromScores({
     scores: scoreInputs,
+    argumentsByCandidate,
     typeArguments,
     targetTypeArguments,
     ctx,
@@ -319,7 +333,7 @@ const positionalArgumentTypesCouldMatch = ({
         }
       }
     }
-    if (!typeSatisfies(arg.type, param.type, ctx, state)) {
+    if (!satisfiesBorrowFormation(arg.type, param.type, ctx, state)) {
       return false;
     }
   }
@@ -741,6 +755,12 @@ const calculateUnresolvedTypeParamPenalty = ({
   const penalty = (() => {
     const desc = ctx.arena.get(type);
     switch (desc.kind) {
+      case "borrowed":
+        return calculateUnresolvedTypeParamPenalty({
+          type: desc.inner,
+          ctx,
+          visiting,
+        });
       case "type-param-ref":
         return 1;
       case "primitive":
@@ -874,12 +894,14 @@ const overloadConstraintSpecificity = (
 
 const scoreOverloadMatches = <T extends OverloadResolutionCandidate>({
   matches,
+  argumentsByCandidate,
   typeArguments,
   targetTypeArguments,
   ctx,
   state,
 }: {
   matches: readonly T[];
+  argumentsByCandidate?: ReadonlyMap<T, readonly Arg[]>;
   typeArguments: readonly TypeId[] | undefined;
   targetTypeArguments: readonly TypeId[] | undefined;
   ctx: TypingContext;
@@ -926,6 +948,12 @@ const scoreOverloadMatches = <T extends OverloadResolutionCandidate>({
         candidate,
         shapeMatch: true,
         argumentMatch: true,
+        borrowFormationPenalty: overloadBorrowFormationPenalty({
+          args: argumentsByCandidate?.get(candidate) ?? [],
+          parameters: candidateParams,
+          ctx,
+          state,
+        }),
         dominance: isDominated ? 0 : 1,
         genericityPenalty: overloadGenericityPenalty({
           parameters: candidateParams,
@@ -938,14 +966,40 @@ const scoreOverloadMatches = <T extends OverloadResolutionCandidate>({
     });
   })();
 
+const overloadBorrowFormationPenalty = ({
+  args,
+  parameters,
+  ctx,
+  state,
+}: {
+  args: readonly Arg[];
+  parameters: readonly ParamSignature[];
+  ctx: TypingContext;
+  state: TypingState;
+}): number =>
+  args.reduce((penalty, arg, index) => {
+    const parameter =
+      arg.label === undefined
+        ? parameters[index]
+        : parameters.find((candidate) => candidate.label === arg.label);
+    if (!parameter || typeSatisfies(arg.type, parameter.type, ctx, state)) {
+      return penalty;
+    }
+    return ctx.arena.get(parameter.type).kind === "borrowed"
+      ? penalty + 1
+      : penalty;
+  }, 0);
+
 const completeOverloadScores = <T extends OverloadResolutionCandidate>({
   scores,
+  argumentsByCandidate,
   typeArguments,
   targetTypeArguments,
   ctx,
   state,
 }: {
   scores: readonly OverloadScoreInput<T>[];
+  argumentsByCandidate?: ReadonlyMap<T, readonly Arg[]>;
   typeArguments: readonly TypeId[] | undefined;
   targetTypeArguments: readonly TypeId[] | undefined;
   ctx: TypingContext;
@@ -961,6 +1015,7 @@ const completeOverloadScores = <T extends OverloadResolutionCandidate>({
     .map(({ candidate }) => candidate);
   const scoredMatches = scoreOverloadMatches({
     matches: candidates,
+    argumentsByCandidate,
     typeArguments,
     targetTypeArguments,
     ctx,
@@ -974,6 +1029,8 @@ const completeOverloadScores = <T extends OverloadResolutionCandidate>({
     const scored = scoredByCandidate.get(score.candidate);
     return {
       ...score,
+      borrowFormationPenalty:
+        scored?.borrowFormationPenalty ?? Number.POSITIVE_INFINITY,
       dominance: scored?.dominance ?? 0,
       genericityPenalty: scored?.genericityPenalty ?? Number.POSITIVE_INFINITY,
       constraintSpecificity: scored?.constraintSpecificity ?? 0,
@@ -985,12 +1042,14 @@ const selectOverloadMatchesFromScores = <
   T extends OverloadResolutionCandidate,
 >({
   scores,
+  argumentsByCandidate,
   typeArguments,
   targetTypeArguments,
   ctx,
   state,
 }: {
   scores: readonly OverloadScoreInput<T>[];
+  argumentsByCandidate?: ReadonlyMap<T, readonly Arg[]>;
   typeArguments: readonly TypeId[] | undefined;
   targetTypeArguments?: readonly TypeId[] | undefined;
   ctx: TypingContext;
@@ -1005,6 +1064,7 @@ const selectOverloadMatchesFromScores = <
 
   const completedScores = completeOverloadScores({
     scores,
+    argumentsByCandidate,
     typeArguments,
     targetTypeArguments,
     ctx,
@@ -1027,7 +1087,18 @@ const selectOverloadMatchesFromScores = <
     return lambdaCompatibleScores.map(({ candidate }) => candidate);
   }
 
-  const maximalScores = selectScoresByMax(lambdaCompatibleScores, "dominance");
+  const leastBorrowFormingScores = selectScoresByMin(
+    lambdaCompatibleScores,
+    "borrowFormationPenalty",
+  );
+  if (leastBorrowFormingScores.length === 1) {
+    return leastBorrowFormingScores.map(({ candidate }) => candidate);
+  }
+
+  const maximalScores = selectScoresByMax(
+    leastBorrowFormingScores,
+    "dominance",
+  );
   if (maximalScores.length === 1) {
     return maximalScores.map(({ candidate }) => candidate);
   }
@@ -1072,7 +1143,7 @@ const selectScoresByMax = <T extends OverloadResolutionCandidate>(
 
 const selectScoresByMin = <T extends OverloadResolutionCandidate>(
   scores: readonly OverloadCandidateScore<T>[],
-  dimension: "genericityPenalty",
+  dimension: "borrowFormationPenalty" | "genericityPenalty",
 ): readonly OverloadCandidateScore<T>[] => {
   const min = Math.min(...scores.map((score) => score[dimension]));
   return scores.filter((score) => score[dimension] === min);

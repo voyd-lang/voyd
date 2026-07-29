@@ -237,7 +237,10 @@ export const matchTraitMethodsWithShapeFallback = ({
   const implMethodsByShape = groupBySignatureShape(implMethods);
   const consumedImplMethodSymbols = new Set<SymbolId>();
   const unresolvedTraitMethods: TraitMethodSignatureInfo[] = [];
-  const matches: { traitMethod: TraitMethodSignatureInfo; implMethod: ImplMethodSignatureInfo }[] = [];
+  const matches: {
+    traitMethod: TraitMethodSignatureInfo;
+    implMethod: ImplMethodSignatureInfo;
+  }[] = [];
 
   traitMethods.forEach((traitMethod) => {
     const exactMatches = implMethodsBySignature.get(traitMethod.key) ?? [];
@@ -255,7 +258,9 @@ export const matchTraitMethodsWithShapeFallback = ({
 
   const missing: TraitMethodSignatureInfo[] = [];
   unresolvedTraitMethods.forEach((traitMethod) => {
-    const shapeMatches = (implMethodsByShape.get(traitMethod.shapeKey) ?? []).filter(
+    const shapeMatches = (
+      implMethodsByShape.get(traitMethod.shapeKey) ?? []
+    ).filter(
       (methodInfo) => !consumedImplMethodSymbols.has(methodInfo.method.symbol),
     );
     if (shapeMatches.length > 1) {
@@ -312,6 +317,10 @@ export const typeExprKey = (
   if (!expr) return undefined;
 
   switch (expr.typeKind) {
+    case "borrowed":
+      return `borrow ${
+        typeExprKey(expr.inner, substitutions, visiting, selfType) ?? "_"
+      }`;
     case "named": {
       const symbol = expr.symbol;
       const substitution =
@@ -368,7 +377,8 @@ export const typeExprKey = (
         })
         .join(",");
       const returnKey =
-        typeExprKey(expr.returnType, substitutions, visiting, selfType) ?? "void";
+        typeExprKey(expr.returnType, substitutions, visiting, selfType) ??
+        "void";
       const typeParamPart = typeParamCount > 0 ? `<${typeParamCount}>` : "";
       return `fn${typeParamPart}(${params})->${returnKey}`;
     }

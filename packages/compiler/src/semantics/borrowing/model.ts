@@ -57,6 +57,27 @@ export const projectionPathsOverlap = (
   left: readonly PlaceProjection[],
   right: readonly PlaceProjection[],
 ): boolean => {
+  const shorter = left.length <= right.length ? left : right;
+  const prefixLonger = left.length <= right.length ? right : left;
+  const shorterIsExactPrefix = shorter.every(
+    (projection, index) =>
+      JSON.stringify(projection) === JSON.stringify(prefixLonger[index]),
+  );
+  if (
+    shorter.length < prefixLonger.length &&
+    shorterIsExactPrefix &&
+    prefixLonger
+      .slice(shorter.length)
+      .some((projection) => projection.kind === "dereference")
+  ) {
+    return false;
+  }
+  if (left[0]?.kind === "dereference" && right[0]?.kind !== "dereference") {
+    return projectionPathsOverlap(left.slice(1), right);
+  }
+  if (right[0]?.kind === "dereference" && left[0]?.kind !== "dereference") {
+    return projectionPathsOverlap(left, right.slice(1));
+  }
   const leftDereference = left.findLastIndex(
     (projection) => projection.kind === "dereference",
   );
@@ -137,6 +158,13 @@ export type CallableParameterBorrowContract = {
   defaultOrigins?: readonly DefaultBorrowOrigin[];
   defaultReadOrigins?: readonly DefaultBorrowAccessOrigin[];
   defaultWriteOrigins?: readonly DefaultBorrowAccessOrigin[];
+  /**
+   * Records the only default-value presence fact that is safe to consume
+   * without the defining module's HIR.
+   */
+  defaultBorrowedResult?: "none";
+  /** Default-value projections that are definitely free of active loans. */
+  defaultNoBorrowPaths?: readonly (readonly PlaceProjection[])[];
 };
 
 export type DefaultBorrowOrigin = {
@@ -202,6 +230,11 @@ export type ScopedCallbackBorrowContract = {
 export type CallableBorrowContract = {
   parameters: readonly CallableParameterBorrowContract[];
   maySuspend: boolean;
+  /**
+   * Whether an explicitly borrowed result can carry provenance independently
+   * of the callable's returned parameter origins.
+   */
+  borrowedResult?: "none" | "parameter" | "external";
   transfers?: readonly CallableBorrowTransfer[];
   scopedCallbacks?: readonly ScopedCallbackBorrowContract[];
 };
@@ -338,9 +371,33 @@ export const mergeCallableBorrowContracts = (
           );
           return defaultWriteOrigins.length > 0 ? { defaultWriteOrigins } : {};
         })(),
+        ...(parameters.length === contracts.length &&
+        parameters.every(
+          (parameter) => parameter.defaultBorrowedResult === "none",
+        )
+          ? { defaultBorrowedResult: "none" as const }
+          : {}),
+        ...(() => {
+          const defaultNoBorrowPaths = intersectProjectionPaths(
+            parameters.map((parameter) => parameter.defaultNoBorrowPaths ?? []),
+          );
+          return parameters.length === contracts.length &&
+            defaultNoBorrowPaths.length > 0
+            ? { defaultNoBorrowPaths }
+            : {};
+        })(),
       };
     }),
     maySuspend: contracts.some((contract) => contract.maySuspend),
+    borrowedResult: contracts.some(
+      (contract) =>
+        contract.borrowedResult === "external" ||
+        contract.borrowedResult === undefined,
+    )
+      ? "external"
+      : contracts.some((contract) => contract.borrowedResult === "parameter")
+        ? "parameter"
+        : "none",
     ...(normalizedTransfers.length > 0
       ? { transfers: normalizedTransfers }
       : {}),
@@ -510,10 +567,10 @@ const mergeProjectionPaths = (
         .flatMap((parameter) => {
           const active =
             key === "retainedPaths"
-                ? parameter.retained
-                : key === "returnedPaths"
-                  ? parameter.returned
-                  : parameter[key] !== undefined;
+              ? parameter.retained
+              : key === "returnedPaths"
+                ? parameter.returned
+                : parameter[key] !== undefined;
           if (!active) {
             return [];
           }

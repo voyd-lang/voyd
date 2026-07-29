@@ -12,6 +12,14 @@ export const substituteTypeParametersInTypeExpr = ({
   typeExpr: HirTypeExpr;
   substitutionsByName: ReadonlyMap<string, HirTypeExpr | undefined>;
 }): HirTypeExpr => {
+  if (typeExpr.typeKind === "borrowed") {
+    const inner = substituteTypeParametersInTypeExpr({
+      typeExpr: typeExpr.inner,
+      substitutionsByName,
+    });
+    return inner === typeExpr.inner ? typeExpr : { ...typeExpr, inner };
+  }
+
   if (typeExpr.typeKind === "named") {
     const typeName = typeExpr.path.length === 1 ? typeExpr.path[0] : undefined;
     const replacement =
@@ -24,7 +32,10 @@ export const substituteTypeParametersInTypeExpr = ({
     if (!typeExpr.typeArguments || typeExpr.typeArguments.length === 0) {
       return typeExpr;
     }
-    const nextArgs = mapTypeExprList(typeExpr.typeArguments, substitutionsByName);
+    const nextArgs = mapTypeExprList(
+      typeExpr.typeArguments,
+      substitutionsByName,
+    );
     return nextArgs === typeExpr.typeArguments
       ? typeExpr
       : {
@@ -44,7 +55,10 @@ export const substituteTypeParametersInTypeExpr = ({
   }
 
   if (typeExpr.typeKind === "tuple") {
-    const nextElements = mapTypeExprList(typeExpr.elements, substitutionsByName);
+    const nextElements = mapTypeExprList(
+      typeExpr.elements,
+      substitutionsByName,
+    );
     return nextElements === typeExpr.elements
       ? typeExpr
       : {
@@ -53,10 +67,7 @@ export const substituteTypeParametersInTypeExpr = ({
         };
   }
 
-  if (
-    typeExpr.typeKind === "union" ||
-    typeExpr.typeKind === "intersection"
-  ) {
+  if (typeExpr.typeKind === "union" || typeExpr.typeKind === "intersection") {
     const nextMembers = mapTypeExprList(typeExpr.members, substitutionsByName);
     return nextMembers === typeExpr.members
       ? typeExpr

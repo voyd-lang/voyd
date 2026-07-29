@@ -220,7 +220,11 @@ type DiagnosticParamsMap = {
   TY0025: { kind: "array-literal-incompatible" };
   TY0026: { kind: "undefined-type"; name: string };
   TY0027: { kind: "type-mismatch"; expected: string; actual: string };
-  TY0028: { kind: "intersection-nominal-conflict"; left: string; right: string };
+  TY0028: {
+    kind: "intersection-nominal-conflict";
+    left: string;
+    right: string;
+  };
   TY0029: {
     kind: "intersection-field-conflict";
     field: string;
@@ -265,16 +269,18 @@ type DiagnosticParamsMap = {
     maxSteps: number;
     observedSteps: number;
   };
-  TY0041: {
-    kind: "symbol-not-a-value";
-    name: string;
-    symbolKind: string;
-  } | {
-    kind: "overload-candidate-budget-exceeded";
-    name: string;
-    candidates: number;
-    maxCandidates: number;
-  };
+  TY0041:
+    | {
+        kind: "symbol-not-a-value";
+        name: string;
+        symbolKind: string;
+      }
+    | {
+        kind: "overload-candidate-budget-exceeded";
+        name: string;
+        candidates: number;
+        maxCandidates: number;
+      };
   TY0042: {
     kind: "missing-trait-method";
     traitName: string;
@@ -351,6 +357,9 @@ type DiagnosticParamsMap = {
     kind: "mutable-borrow-from-shared";
     binding: string;
   };
+  TY0051:
+    | { kind: "explicit-borrow-escape"; binding: string; through: string }
+    | { kind: "borrow-origin"; binding: string };
   TY0052:
     | { kind: "borrow-across-effect"; binding: string }
     | { kind: "borrow-origin"; binding: string };
@@ -661,9 +670,13 @@ export const diagnosticsRegistry: {
     code: "TY0015",
     message: (params) => {
       const min =
-        params.minCalls === Number.POSITIVE_INFINITY ? "∞" : `${params.minCalls}`;
+        params.minCalls === Number.POSITIVE_INFINITY
+          ? "∞"
+          : `${params.minCalls}`;
       const max =
-        params.maxCalls === Number.POSITIVE_INFINITY ? "∞" : `${params.maxCalls}`;
+        params.maxCalls === Number.POSITIVE_INFINITY
+          ? "∞"
+          : `${params.maxCalls}`;
       const range = min === max ? min : `${min}..${max}`;
       const suffix = params.escapes ? "; continuation escapes" : "";
       return `tail-resumptive operation ${params.operation} must call tail exactly once (observed ${range}${suffix})`;
@@ -868,9 +881,13 @@ export const diagnosticsRegistry: {
     code: "TY0035",
     message: (params) => {
       const min =
-        params.minCalls === Number.POSITIVE_INFINITY ? "∞" : `${params.minCalls}`;
+        params.minCalls === Number.POSITIVE_INFINITY
+          ? "∞"
+          : `${params.minCalls}`;
       const max =
-        params.maxCalls === Number.POSITIVE_INFINITY ? "∞" : `${params.maxCalls}`;
+        params.maxCalls === Number.POSITIVE_INFINITY
+          ? "∞"
+          : `${params.maxCalls}`;
       const range = min === max ? min : `${min}..${max}`;
       const suffix = params.escapes ? "; continuation escapes" : "";
       return `resumptive operation ${params.operation} must call resume at most once (observed ${range}${suffix})`;
@@ -1097,6 +1114,21 @@ export const diagnosticsRegistry: {
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0050"]>,
+  TY0051: {
+    code: "TY0051",
+    message: (params) =>
+      params.kind === "borrow-origin"
+        ? `borrowed value '${params.binding}' originates here`
+        : `borrowed value '${params.binding}' cannot escape through ${params.through}`,
+    severity: "error",
+    phase: "typing",
+    hints: [
+      {
+        message:
+          "Return the borrow through an explicit borrowed result, or finish using it before storing, capturing, or crossing the boundary.",
+      },
+    ],
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0051"]>,
   TY0052: {
     code: "TY0052",
     message: (params) =>

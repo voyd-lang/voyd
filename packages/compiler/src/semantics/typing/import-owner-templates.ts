@@ -101,6 +101,9 @@ const collectOwnerRefs = (
     seenTypes.add(current);
     const desc = arena.get(current);
     switch (desc.kind) {
+      case "borrowed":
+        stack.push(desc.inner);
+        break;
       case "nominal-object":
       case "value-object":
       case "trait": {

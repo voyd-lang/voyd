@@ -256,6 +256,7 @@ export type MonomorphizedInstanceRequest = {
 
 export type TypeLoweringIndex = {
   getTypeDesc(typeId: TypeId): CodegenTypeDesc;
+  getBorrowedInner(typeId: TypeId): TypeId | undefined;
   getScheme(schemeId: TypeSchemeId): CodegenTypeScheme;
   instantiate(
     schemeId: TypeSchemeId,
@@ -928,6 +929,8 @@ export const buildProgramCodegenView = (
     seen.add(typeId);
     const desc = arena.get(typeId);
     switch (desc.kind) {
+      case "borrowed":
+        return typeContainsUnknownPrimitive(desc.inner, seen);
       case "primitive":
         return desc.name === "unknown";
       case "recursive":
@@ -1017,6 +1020,11 @@ export const buildProgramCodegenView = (
       return cached;
     }
     switch (desc.kind) {
+      case "borrowed":
+        return cacheTypeDesc(
+          typeId,
+          toCodegenTypeDesc(desc.inner, arena.get(desc.inner)),
+        );
       case "primitive":
         return cacheTypeDesc(typeId, { kind: "primitive", name: desc.name });
       case "recursive":
@@ -2120,8 +2128,26 @@ export const buildProgramCodegenView = (
 
   allInstances.sort((a, b) => a.instanceId - b.instanceId);
 
+  const runtimeTypeFor = (typeId: TypeId): TypeId => {
+    let current = typeId;
+    const seen = new Set<TypeId>();
+    while (!seen.has(current)) {
+      seen.add(current);
+      const desc = arena.get(current);
+      if (desc.kind !== "borrowed") {
+        break;
+      }
+      current = desc.inner;
+    }
+    return current;
+  };
+
   const types: TypeLoweringIndex = {
     getTypeDesc: (typeId) => toCodegenTypeDesc(typeId, arena.get(typeId)),
+    getBorrowedInner: (typeId) => {
+      const desc = arena.get(typeId);
+      return desc.kind === "borrowed" ? desc.inner : undefined;
+    },
     getScheme: (schemeId) => toCodegenScheme(arena.getScheme(schemeId)),
     instantiate: (schemeId, args, ctx) =>
       arena.instantiate(schemeId, args, ctx as UnificationContext | undefined),
@@ -2129,7 +2155,7 @@ export const buildProgramCodegenView = (
       toCodegenUnificationResult(arena.unify(a, b, ctx as UnificationContext)),
     substitute: (typeId, subst) => arena.substitute(typeId, subst),
     getNominalOwner: (typeId) => {
-      const desc = arena.get(typeId);
+      const desc = arena.get(runtimeTypeFor(typeId));
       return desc.kind === "nominal-object" || desc.kind === "value-object"
         ? symbols.idOf(toSymbolRef(desc.owner))
         : undefined;
@@ -2137,7 +2163,7 @@ export const buildProgramCodegenView = (
     getNominalAncestry: (typeId) => {
       const seen = new Set<TypeId>();
       const ancestry: { nominalId: TypeId; typeId: TypeId }[] = [];
-      let current: TypeId | undefined = typeId;
+      let current: TypeId | undefined = runtimeTypeFor(typeId);
       while (typeof current === "number" && !seen.has(current)) {
         seen.add(current);
         const desc = arena.get(current);
@@ -2151,7 +2177,11 @@ export const buildProgramCodegenView = (
       return ancestry;
     },
     getStructuralLayout: (typeId) => {
-      const desc = arena.get(typeId);
+      const runtimeType = runtimeTypeFor(typeId);
+      const desc = arena.get(runtimeType);
+      if (desc.kind === "borrowed") {
+        return undefined;
+      }
       if (desc.kind === "structural-object") {
         return {
           kind: "structural-object",
@@ -2177,19 +2207,22 @@ export const buildProgramCodegenView = (
       }
       return { kind: "other", kindName: desc.kind };
     },
-    getRuntimeTypeId: (typeId) => typeId,
+    getRuntimeTypeId: runtimeTypeFor,
     getAliasSymbols: (typeId) => {
-      const symbolsForType = aliasSymbolsByType.get(typeId);
+      const symbolsForType =
+        aliasSymbolsByType.get(typeId) ??
+        aliasSymbolsByType.get(runtimeTypeFor(typeId));
       return symbolsForType
         ? Array.from(symbolsForType).sort((a, b) => a - b)
         : [];
     },
     getStandaloneVariantTag: (typeId) => {
-      const desc = arena.get(typeId);
+      const runtimeType = runtimeTypeFor(typeId);
+      const desc = arena.get(runtimeType);
       const nominalTypeId =
         desc.kind === "intersection" && typeof desc.nominal === "number"
           ? desc.nominal
-          : typeId;
+          : runtimeType;
       const nominalDesc = arena.get(nominalTypeId);
       if (
         nominalDesc.kind !== "nominal-object" &&
@@ -2226,7 +2259,7 @@ export const buildProgramCodegenView = (
             canonicalProgramSymbolIdOf(moduleId, symbol),
           ),
       };
-      const info = getOptionalInfo(typeId, ctx);
+      const info = getOptionalInfo(runtimeTypeFor(typeId), ctx);
       return info
         ? {
             optionalType: info.optionalType,

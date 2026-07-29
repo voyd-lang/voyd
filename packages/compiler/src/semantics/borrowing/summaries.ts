@@ -12,7 +12,7 @@ import {
   type HirMatchExpr,
   type HirPattern,
 } from "../hir/index.js";
-import type { HirExprId, SymbolId } from "../ids.js";
+import type { HirExprId, SymbolId, TypeId } from "../ids.js";
 import type { TypingResult } from "../typing/index.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type { DeclTable } from "../decls.js";
@@ -39,6 +39,8 @@ import {
 import type { BorrowingDependency } from "./dependency.js";
 import {
   expressionTypeFor,
+  materializedObjectReferencePaths,
+  projectedTypes,
   resolveBorrowCall,
   resolveBorrowCallTargets,
   type ResolvedBorrowCall,
@@ -48,6 +50,12 @@ import {
   typeCanCarryReference,
   typeIsAllocationBacked,
 } from "./reference-bearing.js";
+import {
+  borrowedPathsInType,
+  borrowedTypeEntriesInType,
+  typeContainsBorrowed,
+} from "./borrowed-types.js";
+import { objectLiteralFieldProvider } from "./object-literal-providers.js";
 
 type ParameterOrigin = {
   parameter: number;
@@ -72,6 +80,8 @@ type ReturnSnapshot = {
   flow: Flow;
   invalidated: Flow;
 };
+
+const MAX_FLOW_PROJECTION_DEPTH = 8;
 
 const originKeys = new WeakMap<ParameterOrigin, string>();
 const contractEqualityKeys = new WeakMap<CallableBorrowContract, string>();
@@ -101,8 +111,11 @@ type SummaryContext = {
   localOwnedRoots: Set<SymbolId>;
   terminatedEnvs: Map<MutableEnv, ExitKind>;
   pendingExits: Map<MutableEnv, ExitEnvironments>;
+  observedEnvironments: MutableEnv[][];
   invalidated: Map<MutableEnv, MutableFlow>;
   returnSnapshots: ReturnSnapshot[];
+  borrowedReturnType?: TypeId;
+  borrowedReturnPaths: readonly (readonly PlaceProjection[])[];
   transfers: Map<string, CallableBorrowTransfer>;
   decls: DeclTable;
 };
@@ -117,6 +130,27 @@ const expressionCanCarryReference = (
   }
   return typeCanCarryReference(type, ctx.typing);
 };
+
+const objectLiteralProjectionProvider = ({
+  expression,
+  projection,
+  ctx,
+}: {
+  expression: Extract<HirExpression, { exprKind: "object-literal" }>;
+  projection: Extract<PlaceProjection, { kind: "field" }>;
+  ctx: SummaryContext;
+}): (typeof expression.entries)[number] | undefined =>
+  objectLiteralFieldProvider({
+    expression,
+    field: projection.name,
+    spreadProvidesField: (value) => {
+      const spreadType = expressionTypeFor(value, ctx);
+      return (
+        typeof spreadType === "number" &&
+        projectedTypes(spreadType, [projection], ctx.typing).length > 0
+      );
+    },
+  });
 
 const accessProjectionsFor = (
   exprId: HirExprId,
@@ -194,6 +228,72 @@ const originKey = (origin: ParameterOrigin): string => {
 };
 
 const emptyFlow = (): MutableFlow => new Map();
+
+const flowWithExplicitBorrowedOrigins = ({
+  flow,
+  parameter,
+  type,
+  typing,
+}: {
+  flow: Flow;
+  parameter: number;
+  type: TypeId | undefined;
+  typing: TypingResult;
+}): MutableFlow => {
+  if (typeof type !== "number") {
+    return new Map(flow);
+  }
+  const borrowedEntries = borrowedTypeEntriesInType(type, typing);
+  if (borrowedEntries.length === 0) {
+    return new Map(flow);
+  }
+  const base = borrowedEntries.some(({ path }) => path.length === 0)
+    ? emptyFlow()
+    : new Map(flow);
+  borrowedEntries.forEach(({ path, inner }) => {
+    const origin: ParameterOrigin = {
+      parameter,
+      sourceEndpointAccess: typeIsAllocationBacked(inner, typing)
+        ? "dereferenced"
+        : "inline",
+      sourceProjections: path,
+      resultProjections: path,
+      borrowed: true,
+      shared: true,
+    };
+    addOrigin(base, origin);
+  });
+  return base;
+};
+
+const flowMarkedForBorrowedReturn = (
+  flow: Flow,
+  borrowedReturnType: TypeId | undefined,
+  typing: TypingResult,
+): MutableFlow =>
+  new Map(
+    Array.from(flow.values(), (origin) => {
+      const entry =
+        typeof borrowedReturnType === "number"
+          ? borrowedTypeEntriesInType(borrowedReturnType, typing)
+              .filter(({ path }) =>
+                projectionPathCovers(path, origin.resultProjections),
+              )
+              .sort((left, right) => right.path.length - left.path.length)[0]
+          : undefined;
+      const marked = entry
+        ? {
+            ...origin,
+            borrowed: true as const,
+            shared: true as const,
+            sourceEndpointAccess: typeIsAllocationBacked(entry.inner, typing)
+              ? ("dereferenced" as const)
+              : origin.sourceEndpointAccess,
+          }
+        : origin;
+      return [originKey(marked), marked] as const;
+    }),
+  );
 
 const parameterFlowForPattern = ({
   parameter,
@@ -385,6 +485,55 @@ const mergeEnvs = (
       ]),
     ),
   );
+};
+
+const widenedLoopFlow = (flow: Flow): MutableFlow =>
+  new Map(
+    Array.from(flow.values(), (origin) => {
+      const widened =
+        origin.sourceProjections.length > MAX_FLOW_PROJECTION_DEPTH ||
+        origin.resultProjections.length > MAX_FLOW_PROJECTION_DEPTH
+          ? {
+              ...origin,
+              sourceProjections: [],
+              resultProjections: [],
+            }
+          : origin;
+      return [originKey(widened), widened] as const;
+    }),
+  );
+
+const widenLoopEnvironment = (
+  environment: MutableEnv,
+  ctx: SummaryContext,
+): void => {
+  environment.forEach((flow, symbol) =>
+    environment.set(symbol, widenedLoopFlow(flow)),
+  );
+  const places = ctx.placeEnvs.get(environment);
+  places?.forEach((flow, symbol) => places.set(symbol, widenedLoopFlow(flow)));
+  ctx.invalidated.set(
+    environment,
+    widenedLoopFlow(ctx.invalidated.get(environment) ?? emptyFlow()),
+  );
+};
+
+const environmentStateKey = (
+  environment: MutableEnv,
+  ctx: SummaryContext,
+): string => {
+  const keyedFlows = (
+    entries: Iterable<readonly [SymbolId, Flow]>,
+  ): readonly (readonly [SymbolId, readonly string[]])[] =>
+    Array.from(
+      entries,
+      ([symbol, flow]) => [symbol, Array.from(flow.keys()).sort()] as const,
+    ).sort(([left], [right]) => left - right);
+  return JSON.stringify([
+    keyedFlows(environment),
+    keyedFlows(ctx.placeEnvs.get(environment) ?? []),
+    Array.from(ctx.invalidated.get(environment)?.keys() ?? []).sort(),
+  ]);
 };
 
 const mergeExitEnvironments = (
@@ -805,6 +954,79 @@ const physicalFlowOfExpression = (
           ),
         );
     }) ?? []),
+  );
+};
+
+const explicitBorrowedResultFlow = (
+  exprId: HirExprId,
+  borrowedPaths: readonly (readonly PlaceProjection[])[],
+  env: MutableEnv,
+  ctx: SummaryContext,
+): MutableFlow => {
+  const physicalFlowAtPath = (
+    id: HirExprId,
+    path: readonly PlaceProjection[],
+  ): MutableFlow => {
+    const expr = ctx.hir.expressions.get(id);
+    if (!expr) {
+      return emptyFlow();
+    }
+    if (expr.exprKind === "block" && typeof expr.value === "number") {
+      return physicalFlowAtPath(expr.value, path);
+    }
+    if (expr.exprKind === "if" || expr.exprKind === "cond") {
+      return unionFlows(
+        ...expr.branches.map((branch) =>
+          physicalFlowAtPath(branch.value, path),
+        ),
+        ...(typeof expr.defaultBranch === "number"
+          ? [physicalFlowAtPath(expr.defaultBranch, path)]
+          : []),
+      );
+    }
+    if (expr.exprKind === "match") {
+      return unionFlows(
+        ...expr.arms.map((arm) => physicalFlowAtPath(arm.value, path)),
+      );
+    }
+    if (expr.exprKind === "effect-handler") {
+      return unionFlows(
+        physicalFlowAtPath(expr.body, path),
+        ...expr.handlers.map((handler) =>
+          physicalFlowAtPath(handler.body, path),
+        ),
+      );
+    }
+    if (path.length === 0) {
+      return physicalFlowOfExpression(id, env, ctx);
+    }
+    const [projection, ...remaining] = path;
+    if (expr.exprKind === "object-literal" && projection?.kind === "field") {
+      const provider = objectLiteralProjectionProvider({
+        expression: expr,
+        projection,
+        ctx,
+      });
+      return provider
+        ? physicalFlowAtPath(
+            provider.value,
+            provider.kind === "spread" ? path : remaining,
+          )
+        : emptyFlow();
+    }
+    if (expr.exprKind === "tuple" && projection?.kind === "tuple") {
+      const element = expr.elements[projection.index];
+      return typeof element === "number"
+        ? physicalFlowAtPath(element, remaining)
+        : emptyFlow();
+    }
+    return emptyFlow();
+  };
+
+  return unionFlows(
+    ...borrowedPaths.map((path) =>
+      storeFlowAtPath(physicalFlowAtPath(exprId, path), path),
+    ),
   );
 };
 
@@ -1357,12 +1579,18 @@ const callableOriginsOf = (
     if (projection?.kind !== "field") {
       return [];
     }
-    const entry = expr.entries.find(
-      (candidate) =>
-        candidate.kind === "field" && candidate.name === projection.name,
-    );
-    return entry
-      ? callableOriginsOf(entry.value, ctx, new Set(seen), remaining)
+    const provider = objectLiteralProjectionProvider({
+      expression: expr,
+      projection,
+      ctx,
+    });
+    return provider
+      ? callableOriginsOf(
+          provider.value,
+          ctx,
+          new Set(seen),
+          provider.kind === "spread" ? requested : remaining,
+        )
       : [];
   }
   if (expr.exprKind === "tuple") {
@@ -1519,10 +1747,23 @@ const evaluateBlock = (
       continue;
     }
     if (statement.kind === "return") {
-      const flow =
+      const rawFlow =
         typeof statement.value === "number"
-          ? evaluateExpression(statement.value, env, ctx)
+          ? unionFlows(
+              evaluateExpression(statement.value, env, ctx),
+              explicitBorrowedResultFlow(
+                statement.value,
+                ctx.borrowedReturnPaths,
+                env,
+                ctx,
+              ),
+            )
           : emptyFlow();
+      const flow = flowMarkedForBorrowedReturn(
+        rawFlow,
+        ctx.borrowedReturnType,
+        ctx.typing,
+      );
       const invalidated = new Map(ctx.invalidated.get(env) ?? emptyFlow());
       ctx.returnSnapshots.push({
         flow: new Map(flow),
@@ -1680,14 +1921,43 @@ const evaluateEffectHandler = (
   env: MutableEnv,
   ctx: SummaryContext,
 ): MutableFlow => {
+  const incoming = cloneEnv(env, ctx);
+  const observed: MutableEnv[] = [];
+  ctx.observedEnvironments.push(observed);
   const flows = [evaluateExpression(expr.body, env, ctx)];
+  ctx.observedEnvironments.pop();
+  const bodyTerminated = ctx.terminatedEnvs.has(env);
+  const pendingExits = takePendingExits(env, ctx);
+  ctx.terminatedEnvs.delete(env);
+  const handlerEntry = cloneEnv(incoming, ctx);
+  mergeEnvs(handlerEntry, [incoming, ...observed, env], ctx);
+  const fallthrough = bodyTerminated ? [] : [env];
   expr.handlers.forEach((handler) => {
-    const handlerEnv = cloneEnv(env, ctx);
+    const handlerEnv = cloneEnv(handlerEntry, ctx);
     handler.parameters.forEach((parameter) =>
       handlerEnv.set(parameter.symbol, emptyFlow()),
     );
     flows.push(evaluateExpression(handler.body, handlerEnv, ctx));
+    const handlerTerminated = ctx.terminatedEnvs.has(handlerEnv);
+    mergeExitEnvironments(pendingExits, takePendingExits(handlerEnv, ctx));
+    ctx.terminatedEnvs.delete(handlerEnv);
+    if (!handlerTerminated) {
+      fallthrough.push(handlerEnv);
+    }
   });
+  if (fallthrough.length > 0) {
+    mergeEnvs(env, fallthrough, ctx);
+  } else if (pendingExits.size > 0) {
+    ctx.terminatedEnvs.set(
+      env,
+      pendingExits.has("break")
+        ? "break"
+        : pendingExits.has("continue")
+          ? "continue"
+          : "return",
+    );
+  }
+  retainPendingExits(env, pendingExits, ctx);
   if (typeof expr.finallyBranch === "number") {
     evaluateExpression(expr.finallyBranch, env, ctx);
   }
@@ -1736,17 +2006,86 @@ const evaluateExpressionRaw = (
         }),
       );
     case "object-literal":
-      return unionFlows(
-        ...expr.entries.map((entry) => {
-          const flow = evaluateExpression(entry.value, env, ctx);
-          if (!expressionCanCarryReference(entry.value, ctx)) {
-            return emptyFlow();
-          }
-          return entry.kind === "field"
+      return expr.entries.reduce<MutableFlow>((result, entry) => {
+        const flow = evaluateExpression(entry.value, env, ctx);
+        const retained = new Map(
+          Array.from(result).filter(([, origin]) => {
+            const provided = origin.resultProjections[0];
+            if (provided?.kind !== "field") {
+              return true;
+            }
+            if (entry.kind === "field") {
+              return provided.name !== entry.name;
+            }
+            const spreadType = expressionTypeFor(entry.value, ctx);
+            return (
+              typeof spreadType !== "number" ||
+              projectedTypes(spreadType, [provided], ctx.typing).length === 0
+            );
+          }),
+        );
+        if (!expressionCanCarryReference(entry.value, ctx)) {
+          return retained;
+        }
+        const stored =
+          entry.kind === "field"
             ? storeFlowAt(flow, { kind: "field", name: entry.name })
-            : flow;
-        }),
-      );
+            : (() => {
+                const spreadType = expressionTypeFor(entry.value, ctx);
+                const resultType = expressionTypeFor(expr.id, ctx);
+                if (
+                  typeof spreadType !== "number" ||
+                  ctx.typing.arena.get(spreadType).kind !== "borrowed" ||
+                  typeof resultType !== "number"
+                ) {
+                  return flow;
+                }
+                return unionFlows(
+                  ...materializedObjectReferencePaths(
+                    resultType,
+                    ctx.typing,
+                  ).flatMap((path) => {
+                    if (
+                      projectedTypes(spreadType, path, ctx.typing).length === 0
+                    ) {
+                      return [];
+                    }
+                    const fieldTypes = projectedTypes(
+                      resultType,
+                      path,
+                      ctx.typing,
+                    );
+                    return fieldTypes.some((type) =>
+                      typeCanCarryReference(type, ctx.typing),
+                    )
+                      ? [
+                          storeFlowAtPath(
+                            fieldTypes.some((type) =>
+                              typeContainsBorrowed(type, ctx.typing),
+                            )
+                              ? projectFlow(flow, path)
+                              : new Map(
+                                  Array.from(
+                                    projectFlow(flow, path).values(),
+                                    (origin) => {
+                                      const {
+                                        borrowed: _borrowed,
+                                        shared: _shared,
+                                        ...plain
+                                      } = origin;
+                                      return [originKey(plain), plain] as const;
+                                    },
+                                  ),
+                                ),
+                            path,
+                          ),
+                        ]
+                      : [];
+                  }),
+                );
+              })();
+        return unionFlows(retained, stored);
+      }, emptyFlow());
     case "lambda":
       return evaluateLambda(expr, env, ctx);
     case "block":
@@ -1762,51 +2101,88 @@ const evaluateExpressionRaw = (
     case "match":
       return evaluateMatch(expr, env, ctx);
     case "loop": {
-      const loopEnv = cloneEnv(env, ctx);
-      const flow = evaluateExpression(expr.body, loopEnv, ctx);
-      const terminated = ctx.terminatedEnvs.has(loopEnv);
-      const exits = takePendingExits(loopEnv, ctx);
-      const breakEnvs = exits.get("break") ?? [];
-      const backEdgeEnvs = [
-        ...(exits.get("continue") ?? []),
-        ...(!terminated ? [loopEnv] : []),
-      ];
-      const returnEnvs = exits.get("return") ?? [];
-      ctx.terminatedEnvs.delete(loopEnv);
-      if (breakEnvs.length > 0 || backEdgeEnvs.length > 0) {
-        mergeEnvs(env, [...breakEnvs, ...backEdgeEnvs], ctx);
+      let head = cloneEnv(env, ctx);
+      const flows: MutableFlow[] = [];
+      const breakEnvs: MutableEnv[] = [];
+      const returnEnvs: MutableEnv[] = [];
+      while (true) {
+        const loopEnv = cloneEnv(head, ctx);
+        flows.push(evaluateExpression(expr.body, loopEnv, ctx));
+        const terminated = ctx.terminatedEnvs.has(loopEnv);
+        const exits = takePendingExits(loopEnv, ctx);
+        breakEnvs.push(...(exits.get("break") ?? []));
+        returnEnvs.push(...(exits.get("return") ?? []));
+        const backEdgeEnvs = [
+          ...(exits.get("continue") ?? []),
+          ...(!terminated ? [loopEnv] : []),
+        ];
+        ctx.terminatedEnvs.delete(loopEnv);
+        const next = cloneEnv(head, ctx);
+        if (backEdgeEnvs.length > 0) {
+          mergeEnvs(next, [head, ...backEdgeEnvs], ctx);
+          widenLoopEnvironment(next, ctx);
+        }
+        if (environmentStateKey(next, ctx) === environmentStateKey(head, ctx)) {
+          head = next;
+          break;
+        }
+        head = next;
+      }
+      if (breakEnvs.length > 0) {
+        mergeEnvs(env, breakEnvs, ctx);
       } else if (returnEnvs.length > 0) {
         ctx.terminatedEnvs.set(env, "return");
       }
       if (returnEnvs.length > 0) {
         retainPendingExits(env, new Map([["return", returnEnvs]]), ctx);
       }
-      return flow;
+      return unionFlows(...flows);
     }
     case "while": {
-      evaluateExpression(expr.condition, env, ctx);
-      const conditionExits = takePendingExits(env, ctx);
-      const loopEnv = cloneEnv(env, ctx);
-      evaluateExpression(expr.body, loopEnv, ctx);
-      const terminated = ctx.terminatedEnvs.has(loopEnv);
-      const exits = takePendingExits(loopEnv, ctx);
-      ctx.terminatedEnvs.delete(loopEnv);
-      mergeEnvs(
-        env,
-        [
-          env,
-          ...(exits.get("break") ?? []),
+      let head = cloneEnv(env, ctx);
+      const conditionEnvs: MutableEnv[] = [];
+      const breakEnvs: MutableEnv[] = [];
+      const propagated: ExitEnvironments = new Map();
+      while (true) {
+        const conditionEnv = cloneEnv(head, ctx);
+        evaluateExpression(expr.condition, conditionEnv, ctx);
+        const conditionTerminated = ctx.terminatedEnvs.has(conditionEnv);
+        mergeExitEnvironments(propagated, takePendingExits(conditionEnv, ctx));
+        ctx.terminatedEnvs.delete(conditionEnv);
+        if (!conditionTerminated) {
+          conditionEnvs.push(conditionEnv);
+        }
+        const loopEnv = cloneEnv(conditionEnv, ctx);
+        if (!conditionTerminated) {
+          evaluateExpression(expr.body, loopEnv, ctx);
+        }
+        const terminated =
+          conditionTerminated || ctx.terminatedEnvs.has(loopEnv);
+        const exits = takePendingExits(loopEnv, ctx);
+        breakEnvs.push(...(exits.get("break") ?? []));
+        const returnEnvs = exits.get("return");
+        if (returnEnvs) {
+          propagated.set("return", [
+            ...(propagated.get("return") ?? []),
+            ...returnEnvs,
+          ]);
+        }
+        const backEdgeEnvs = [
           ...(exits.get("continue") ?? []),
           ...(!terminated ? [loopEnv] : []),
-        ],
-        ctx,
-      );
-      const propagated: ExitEnvironments = new Map();
-      mergeExitEnvironments(propagated, conditionExits);
-      const returnEnvs = exits.get("return");
-      if (returnEnvs) {
-        propagated.set("return", returnEnvs);
+        ];
+        ctx.terminatedEnvs.delete(loopEnv);
+        const next = cloneEnv(head, ctx);
+        if (backEdgeEnvs.length > 0) {
+          mergeEnvs(next, [head, ...backEdgeEnvs], ctx);
+          widenLoopEnvironment(next, ctx);
+        }
+        if (environmentStateKey(next, ctx) === environmentStateKey(head, ctx)) {
+          break;
+        }
+        head = next;
       }
+      mergeEnvs(env, [...conditionEnvs, ...breakEnvs], ctx);
       retainPendingExits(env, propagated, ctx);
       return emptyFlow();
     }
@@ -2000,6 +2376,7 @@ const evaluateExpression = (
   env: MutableEnv,
   ctx: SummaryContext,
 ): MutableFlow => {
+  ctx.observedEnvironments.at(-1)?.push(cloneEnv(env, ctx));
   const flow = evaluateExpressionRaw(exprId, env, ctx);
   const typeId = expressionTypeFor(exprId, ctx);
   const sourceEndpointAccess: ParameterOrigin["sourceEndpointAccess"] =
@@ -2083,7 +2460,9 @@ const functionNeedsBorrowSummary = (
   }
   const signature = typing.functions.getSignature(functionItem.symbol);
   return (
-    signature === undefined || !typing.effects.isEmpty(signature.effectRow)
+    signature === undefined ||
+    !typing.effects.isEmpty(signature.effectRow) ||
+    typeContainsBorrowed(signature.returnType, typing)
   );
 };
 
@@ -2438,13 +2817,23 @@ const summarizeFunction = ({
   const parameterFlows = new Map(
     functionItem.parameters.map((parameter, index) => [
       index,
-      parameterFlowForPattern({
+      flowWithExplicitBorrowedOrigins({
+        flow: parameterFlowForPattern({
+          parameter: index,
+          pattern: parameter.pattern,
+          typing,
+        }),
         parameter: index,
-        pattern: parameter.pattern,
+        type: typing.functions.getSignature(functionItem.symbol)?.parameters[
+          index
+        ]?.type,
         typing,
       }),
     ]),
   );
+  const functionReturnType = typing.functions.getSignature(
+    functionItem.symbol,
+  )?.returnType;
   const parameterSymbolFlows = new Map<SymbolId, Flow>();
   const env: MutableEnv = new Map();
   invalidated.set(env, emptyFlow());
@@ -2484,8 +2873,14 @@ const summarizeFunction = ({
     localOwnedRoots,
     terminatedEnvs,
     pendingExits,
+    observedEnvironments: [],
     invalidated,
     returnSnapshots,
+    borrowedReturnType: functionReturnType,
+    borrowedReturnPaths:
+      typeof functionReturnType === "number"
+        ? borrowedPathsInType(functionReturnType, typing)
+        : [],
     transfers,
     decls,
   };
@@ -2538,7 +2933,19 @@ const summarizeFunction = ({
     );
     bindPattern(parameter.pattern, suppliedFlow, env);
   });
-  const tail = evaluateExpression(functionItem.body, env, ctx);
+  const tail = flowMarkedForBorrowedReturn(
+    unionFlows(
+      evaluateExpression(functionItem.body, env, ctx),
+      explicitBorrowedResultFlow(
+        functionItem.body,
+        ctx.borrowedReturnPaths,
+        env,
+        ctx,
+      ),
+    ),
+    ctx.borrowedReturnType,
+    ctx.typing,
+  );
   if (expressionCanFallThrough(functionItem.body, hir)) {
     const tailInvalidations = new Map(invalidated.get(env) ?? emptyFlow());
     returnSnapshots.push({
@@ -2661,8 +3068,11 @@ const contractEqualityKey = (contract: CallableBorrowContract): string => {
       parameter.defaultOrigins ?? [],
       parameter.defaultReadOrigins ?? [],
       parameter.defaultWriteOrigins ?? [],
+      parameter.defaultBorrowedResult ?? null,
+      parameter.defaultNoBorrowPaths ?? [],
     ]),
     contract.maySuspend,
+    contract.borrowedResult ?? "external",
     contract.transfers ?? [],
     contract.scopedCallbacks ?? [],
   ]);
@@ -3463,13 +3873,35 @@ export const summarizeLambdaBorrowing = ({
   const parameterFlows = new Map(
     lambda.parameters.map((parameter, index) => [
       index,
-      parameterFlowForPattern({
+      flowWithExplicitBorrowedOrigins({
+        flow: parameterFlowForPattern({
+          parameter: index,
+          pattern: parameter.pattern,
+          typing,
+        }),
         parameter: index,
-        pattern: parameter.pattern,
+        type: (() => {
+          const lambdaType = typing.resolvedExprTypes.get(lambda.id);
+          if (typeof lambdaType !== "number") {
+            return undefined;
+          }
+          const descriptor = typing.arena.get(lambdaType);
+          return descriptor.kind === "function"
+            ? descriptor.parameters[index]?.type
+            : undefined;
+        })(),
         typing,
       }),
     ]),
   );
+  const lambdaReturnType = (() => {
+    const lambdaType = typing.resolvedExprTypes.get(lambda.id);
+    if (typeof lambdaType !== "number") {
+      return undefined;
+    }
+    const descriptor = typing.arena.get(lambdaType);
+    return descriptor.kind === "function" ? descriptor.returnType : undefined;
+  })();
   const parameterSymbolFlows = new Map<SymbolId, Flow>();
   const env: MutableEnv = new Map();
   invalidated.set(env, emptyFlow());
@@ -3509,12 +3941,30 @@ export const summarizeLambdaBorrowing = ({
     localOwnedRoots,
     terminatedEnvs,
     pendingExits,
+    observedEnvironments: [],
     invalidated,
     returnSnapshots,
+    borrowedReturnType: lambdaReturnType,
+    borrowedReturnPaths:
+      typeof lambdaReturnType === "number"
+        ? borrowedPathsInType(lambdaReturnType, typing)
+        : [],
     transfers,
     decls,
   };
-  const tail = evaluateExpression(lambda.body, env, ctx);
+  const tail = flowMarkedForBorrowedReturn(
+    unionFlows(
+      evaluateExpression(lambda.body, env, ctx),
+      explicitBorrowedResultFlow(
+        lambda.body,
+        ctx.borrowedReturnPaths,
+        env,
+        ctx,
+      ),
+    ),
+    ctx.borrowedReturnType,
+    ctx.typing,
+  );
   if (expressionCanFallThrough(lambda.body, hir)) {
     const tailInvalidations = new Map(invalidated.get(env) ?? emptyFlow());
     returnSnapshots.push({

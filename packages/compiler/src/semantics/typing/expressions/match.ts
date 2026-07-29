@@ -36,12 +36,19 @@ export const typeMatchExpr = (
   expr: HirMatchExpr,
   ctx: TypingContext,
   state: TypingState,
-  options: TypeExpressionOptions
+  options: TypeExpressionOptions,
 ): TypeId => {
   const discardValue = options.discardValue === true;
   const expectedArmType = discardValue ? undefined : options.expectedType;
   const rawDiscriminantType = typeExpression(expr.discriminant, ctx, state);
-  const discriminantType = ctx.arena.unfoldRecursive(rawDiscriminantType);
+  const unfoldedDiscriminantType =
+    ctx.arena.unfoldRecursive(rawDiscriminantType);
+  const discriminantDescriptor = ctx.arena.get(unfoldedDiscriminantType);
+  const borrowedDiscriminant = discriminantDescriptor.kind === "borrowed";
+  const discriminantType =
+    discriminantDescriptor.kind === "borrowed"
+      ? ctx.arena.unfoldRecursive(discriminantDescriptor.inner)
+      : unfoldedDiscriminantType;
   const discriminantExpr = ctx.hir.expressions.get(expr.discriminant);
   const discriminantSymbol =
     discriminantExpr?.exprKind === "identifier"
@@ -69,7 +76,7 @@ export const typeMatchExpr = (
         patternSpan,
         discriminantSpan,
       },
-      coverage.patternNominalHints
+      coverage.patternNominalHints,
     );
 
     bindMatchPatternBindings(arm.pattern, narrowed, ctx, state, patternSpan);
@@ -82,26 +89,28 @@ export const typeMatchExpr = (
         ctx.primitives.bool,
         ctx,
         state,
-        `match guard ${index + 1}`
+        `match guard ${index + 1}`,
       );
       armEffectRow = ctx.effects.compose(
         armEffectRow,
-        getExprEffectRow(arm.guard, ctx)
+        getExprEffectRow(arm.guard, ctx),
       );
     }
     const valueType = withNarrowedDiscriminant(
       discriminantSymbol,
-      narrowed,
+      borrowedDiscriminant && narrowed !== ctx.primitives.unknown
+        ? ctx.arena.internBorrowed(narrowed)
+        : narrowed,
       ctx,
       () =>
         typeExpression(arm.value, ctx, state, {
           discardValue,
           expectedType: expectedArmType,
-        })
+        }),
     );
     armEffectRow = ctx.effects.compose(
       armEffectRow,
-      getExprEffectRow(arm.value, ctx)
+      getExprEffectRow(arm.value, ctx),
     );
     effectRow = ctx.effects.compose(effectRow, armEffectRow);
     if (!discardValue) {
@@ -112,6 +121,7 @@ export const typeMatchExpr = (
         state,
         span: ctx.hir.expressions.get(arm.value)?.span,
         context: "match arm",
+        expected: expectedArmType,
       });
     }
 
@@ -126,7 +136,9 @@ export const typeMatchExpr = (
   coverage.ensureExhaustive(expr.span);
 
   ctx.effects.setExprEffect(expr.id, effectRow);
-  return discardValue ? ctx.primitives.void : (branchType ?? ctx.primitives.void);
+  return discardValue
+    ? ctx.primitives.void
+    : (branchType ?? ctx.primitives.void);
 };
 
 type MatchCoverageTracker = {
@@ -190,7 +202,12 @@ const createMatchCoverageTracker = ({
         return;
       }
 
-      const matched = matchedUnionMembers(patternType, remainingMembers, ctx, state);
+      const matched = matchedUnionMembers(
+        patternType,
+        remainingMembers,
+        ctx,
+        state,
+      );
       if (
         state.mode === "strict" &&
         patternType !== ctx.primitives.unknown &&
@@ -262,7 +279,7 @@ const narrowMatchPattern = (
   state: TypingState,
   reason: string,
   spans: { patternSpan: SourceSpan; discriminantSpan?: SourceSpan },
-  patternHints?: NominalPatternHints
+  patternHints?: NominalPatternHints,
 ): TypeId => {
   switch (pattern.kind) {
     case "wildcard":
@@ -270,7 +287,12 @@ const narrowMatchPattern = (
       return discriminantType;
     case "tuple": {
       const arity = pattern.elements.length;
-      const candidates = collectTupleCandidates(discriminantType, arity, ctx, state);
+      const candidates = collectTupleCandidates(
+        discriminantType,
+        arity,
+        ctx,
+        state,
+      );
       if (candidates.length === 0) {
         const related = spans.discriminantSpan
           ? [
@@ -349,7 +371,7 @@ const narrowMatchPattern = (
         discriminantType,
         patternType,
         ctx,
-        state
+        state,
       );
       if (typeof narrowed !== "number") {
         const related = spans.discriminantSpan
@@ -393,7 +415,7 @@ const bindMatchPatternBindings = (
   narrowedType: TypeId,
   ctx: TypingContext,
   state: TypingState,
-  spanHint: SourceSpan
+  spanHint: SourceSpan,
 ): void => {
   const bindUnknown = (binding: HirPattern): void => {
     switch (binding.kind) {
@@ -406,7 +428,7 @@ const bindMatchPatternBindings = (
           ctx,
           state,
           "declare",
-          binding.span ?? spanHint
+          binding.span ?? spanHint,
         );
         return;
       case "tuple":
@@ -436,7 +458,7 @@ const bindMatchPatternBindings = (
       ctx,
       state,
       "declare",
-      spanHint
+      spanHint,
     );
   }
 
@@ -453,7 +475,7 @@ const collectTupleCandidates = (
   discriminantType: TypeId,
   arity: number,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): TypeId[] => {
   if (discriminantType === ctx.primitives.unknown) {
     return [];
@@ -493,7 +515,7 @@ type NominalPatternHints = {
 
 const collectNominalPatternHints = (
   discriminantType: TypeId,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): NominalPatternHints | undefined => {
   const desc = ctx.arena.get(discriminantType);
   const members = desc.kind === "union" ? desc.members : [discriminantType];
@@ -598,7 +620,7 @@ const reportRedundantMatchArm = ({
         patternLabel: patternLabelForDiagnostic(pattern),
       },
       span,
-    })
+    }),
   );
 };
 
@@ -619,7 +641,7 @@ const patternLabelForDiagnostic = (pattern: HirPattern): string => {
 
 const resolveNominalPatternSymbol = (
   typeExpr: HirTypeExpr | undefined,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): SymbolId | undefined => {
   if (!typeExpr || typeExpr.typeKind !== "named") {
     return undefined;
@@ -671,9 +693,12 @@ const resolveMatchPatternType = ({
   const namedType =
     pattern.type.typeKind === "named" ? pattern.type : undefined;
   const nominalSymbol =
-    hints && namedType ? resolveNominalPatternSymbol(namedType, ctx) : undefined;
-  const aliasSymbol =
-    namedType ? resolveAliasPatternSymbol(namedType, ctx) : undefined;
+    hints && namedType
+      ? resolveNominalPatternSymbol(namedType, ctx)
+      : undefined;
+  const aliasSymbol = namedType
+    ? resolveAliasPatternSymbol(namedType, ctx)
+    : undefined;
   const aliasTemplate =
     typeof aliasSymbol === "number"
       ? ctx.typeAliases.getTemplate(aliasSymbol)
@@ -829,7 +854,7 @@ const resolveMatchPatternType = ({
 
 const resolveAliasPatternSymbol = (
   typeExpr: HirTypeExpr | undefined,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): SymbolId | undefined => {
   if (!typeExpr || typeExpr.typeKind !== "named") {
     return undefined;
@@ -899,9 +924,7 @@ const hasSourceLexicalTypeBinding = (
   const name = typeExpr.path.at(-1);
   const candidates = new Set([
     typeExpr.symbol,
-    name
-      ? ctx.symbolTable.resolve(name, ctx.symbolTable.rootScope)
-      : undefined,
+    name ? ctx.symbolTable.resolve(name, ctx.symbolTable.rootScope) : undefined,
   ]);
   return Array.from(candidates).some((candidate) => {
     if (typeof candidate !== "number") {
@@ -1011,7 +1034,7 @@ const withNarrowedDiscriminant = (
   symbol: SymbolId | undefined,
   narrowedType: TypeId,
   ctx: TypingContext,
-  run: () => TypeId
+  run: () => TypeId,
 ): TypeId => {
   if (typeof symbol !== "number" || narrowedType === ctx.primitives.unknown) {
     return run();

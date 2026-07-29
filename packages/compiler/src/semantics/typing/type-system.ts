@@ -192,6 +192,8 @@ const paramsReferencedInType = (
 
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
+    case "borrowed":
+      return paramsReferencedInType(desc.inner, allowed, ctx, seen);
     case "type-param-ref":
       return allowed.has(desc.param) ? new Set([desc.param]) : new Set();
     case "trait":
@@ -293,6 +295,8 @@ const containsUnknownType = (
 
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
+    case "borrowed":
+      return containsUnknownType(desc.inner, ctx, seen);
     case "primitive":
     case "type-param-ref":
       return false;
@@ -343,6 +347,8 @@ const containsTypeParam = (
 
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
+    case "borrowed":
+      return containsTypeParam(desc.inner, param, ctx, seen);
     case "type-param-ref":
       return desc.param === param;
     case "recursive":
@@ -393,6 +399,8 @@ const containsAnyTypeParam = (
 
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
+    case "borrowed":
+      return containsAnyTypeParam(desc.inner, ctx, seen);
     case "type-param-ref":
       return true;
     case "recursive":
@@ -467,6 +475,15 @@ const containsAliasSelfUnguarded = (
 
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
+    case "borrowed":
+      return containsAliasSelfUnguarded(
+        desc.inner,
+        aliasSymbol,
+        aliasRoot,
+        ctx,
+        guarded,
+        seen,
+      );
     case "primitive":
     case "type-param-ref":
       return false;
@@ -616,6 +633,8 @@ const assertAliasContractive = ({
 
       const desc = ctx.arena.get(current);
       switch (desc.kind) {
+        case "borrowed":
+          return containsBinderUnguarded(desc.inner, binder, guarded, seen);
         case "primitive":
           return false;
         case "type-param-ref":
@@ -882,6 +901,17 @@ export const resolveTypeExpr = (
 
   let resolved: TypeId;
   switch (expr.typeKind) {
+    case "borrowed":
+      resolved = ctx.arena.internBorrowed(
+        resolveTypeExpr(
+          expr.inner,
+          ctx,
+          state,
+          ctx.primitives.unknown,
+          activeTypeParams,
+        ),
+      );
+      break;
     case "named":
       resolved = resolveNamedTypeExpr(expr, ctx, state, activeTypeParams);
       break;
@@ -1013,6 +1043,9 @@ export const resolveTypeAlias = (
 
         const desc = ctx.arena.get(type);
         switch (desc.kind) {
+          case "borrowed":
+            collect(desc.inner, boundRecursive);
+            return;
           case "type-param-ref":
             if (!boundRecursive.has(desc.param)) {
               collected.add(desc.param);
@@ -1073,6 +1106,8 @@ export const resolveTypeAlias = (
 
       const desc = ctx.arena.get(type);
       switch (desc.kind) {
+        case "borrowed":
+          return containsUnboundTypeParam(desc.inner, boundRecursive, seen);
         case "type-param-ref":
           return (
             !allowedParams.has(desc.param) && !boundRecursive.has(desc.param)
@@ -1742,6 +1777,9 @@ const explicitTraitObjectBoundaryFor = (
   ctx: TypingContext,
 ): TypeId | undefined => {
   const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "borrowed") {
+    return explicitTraitObjectBoundaryFor(expectedDesc.inner, ctx);
+  }
   if (expectedDesc.kind === "trait") {
     return expected;
   }
@@ -1794,7 +1832,12 @@ export const disallowedValueTraitObjectWidening = ({
   if (typeof traitBoundary !== "number") {
     return undefined;
   }
-  const valueInfo = valueObjectInfoForType({ type: actual, ctx, state });
+  const actualDesc = ctx.arena.get(actual);
+  const valueInfo = valueObjectInfoForType({
+    type: actualDesc.kind === "borrowed" ? actualDesc.inner : actual,
+    ctx,
+    state,
+  });
   if (!valueInfo) {
     return undefined;
   }
@@ -1844,6 +1887,17 @@ const validateValueDeclRecursion = ({
   visitedValueDecls: Set<SymbolId>;
 }): void => {
   switch (typeExpr.typeKind) {
+    case "borrowed":
+      validateValueDeclRecursion({
+        typeExpr: typeExpr.inner,
+        rootSymbol,
+        valueTypeName,
+        fieldName,
+        ctx,
+        span,
+        visitedValueDecls,
+      });
+      return;
     case "named": {
       typeExpr.typeArguments?.forEach((typeArg) =>
         validateValueDeclRecursion({
@@ -1969,6 +2023,8 @@ const validateValueFieldType = ({
 }): void => {
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
+    case "borrowed":
+      return;
     case "primitive":
       if (desc.name === "unknown") {
         emitDiagnostic({
@@ -2825,6 +2881,9 @@ export const getStructuralFields = (
   }
 
   const desc = ctx.arena.get(unfolded);
+  if (desc.kind === "borrowed") {
+    return getStructuralFields(desc.inner, ctx, state, options);
+  }
   if (desc.kind === "structural-object") {
     ensureFieldsSubstituted(desc.fields, ctx, "structural object access");
     return options.includeInaccessible
@@ -2933,6 +2992,8 @@ const structuralExpectationOf = (
 
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
+    case "borrowed":
+      return structuralExpectationOf(desc.inner, ctx, state);
     case "structural-object":
       ensureFieldsSubstituted(desc.fields, ctx, "structural comparison");
       return type;
@@ -3063,6 +3124,15 @@ export const typeSatisfies = (
   }
 
   const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "borrowed") {
+    return (
+      actualDesc.kind === "borrowed" &&
+      typeSatisfies(actualDesc.inner, expectedDesc.inner, ctx, state)
+    );
+  }
+  if (actualDesc.kind === "borrowed") {
+    return false;
+  }
   if (expectedDesc.kind === "function") {
     return functionTypeSatisfies({ actual, expected, ctx, state });
   }
@@ -3160,6 +3230,30 @@ export const typeSatisfies = (
     ctx,
   });
   return compatibility.ok;
+};
+
+export const typeSatisfiesBorrowFormation = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+  state: TypingState,
+): boolean => {
+  if (typeSatisfies(actual, expected, ctx, state)) {
+    return true;
+  }
+  const expectedDesc = ctx.arena.get(expected);
+  if (expectedDesc.kind === "borrowed") {
+    return typeSatisfies(actual, expectedDesc.inner, ctx, state);
+  }
+  const actualDesc = ctx.arena.get(actual);
+  if (
+    actualDesc.kind === "borrowed" &&
+    ctx.arena.get(actualDesc.inner).kind === "primitive" &&
+    typeSatisfies(actualDesc.inner, expected, ctx, state)
+  ) {
+    return true;
+  }
+  return false;
 };
 
 const resolveTypeParameterConstraint = ({
@@ -3398,7 +3492,7 @@ export const ensureTypeMatches = (
       ],
     });
   }
-  if (typeSatisfies(actual, expected, ctx, state)) {
+  if (typeSatisfiesBorrowFormation(actual, expected, ctx, state)) {
     return;
   }
 
@@ -3712,6 +3806,26 @@ const bindFixedArray = ({
   );
 };
 
+const bindBorrowed = ({
+  actual,
+  expectedDesc,
+  bindings,
+  ctx,
+  state,
+}: BindTypeParamsArgs): void => {
+  if (expectedDesc.kind !== "borrowed") {
+    return;
+  }
+  const actualDesc = ctx.arena.get(actual);
+  bindTypeParamsFromType(
+    expectedDesc.inner,
+    actualDesc.kind === "borrowed" ? actualDesc.inner : actual,
+    bindings,
+    ctx,
+    state,
+  );
+};
+
 const bindFunction = ({
   actual,
   expectedDesc,
@@ -3808,6 +3922,7 @@ const bindIntersection = ({
 const bindTypeParamsHandlers: Partial<
   Record<TypeDescriptor["kind"], BindTypeParamsHandler>
 > = {
+  borrowed: bindBorrowed,
   "type-param-ref": bindTypeParamRef,
   "nominal-object": bindNominalObject,
   "value-object": bindNominalObject,

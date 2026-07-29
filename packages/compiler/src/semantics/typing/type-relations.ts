@@ -5,6 +5,7 @@ import {
   bindTypeParamsFromType,
   narrowTypeForPattern,
   typeSatisfies,
+  typeSatisfiesBorrowFormation,
   unifyWithBudget,
 } from "./type-system.js";
 
@@ -45,6 +46,7 @@ export const typeRelations: TypeRelations = {
 };
 
 export const satisfies = typeRelations.satisfies;
+export const satisfiesBorrowFormation = typeSatisfiesBorrowFormation;
 export const unify = typeRelations.unify;
 export const narrowForPattern = typeRelations.narrowForPattern;
 export const bindTypeParams = typeRelations.bindTypeParams;

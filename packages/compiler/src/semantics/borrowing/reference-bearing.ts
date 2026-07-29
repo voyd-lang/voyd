@@ -30,6 +30,8 @@ export const typeCanCarryReference = (
   const descriptor = typing.arena.get(typeId);
   const result = (() => {
     switch (descriptor.kind) {
+      case "borrowed":
+        return true;
       case "primitive":
         return false;
       case "value-object": {
@@ -79,12 +81,14 @@ export const typeIsAllocationBacked = (
   const descriptor = typing.arena.get(typeId);
   const result = (() => {
     switch (descriptor.kind) {
+      case "borrowed":
+        return typeIsAllocationBacked(descriptor.inner, typing, active);
       case "primitive":
       case "value-object":
+      case "structural-object":
         return false;
       case "nominal-object":
       case "trait":
-      case "structural-object":
       case "fixed-array":
       case "function":
       case "type-param-ref":
@@ -96,11 +100,15 @@ export const typeIsAllocationBacked = (
           typeIsAllocationBacked(member, typing, new Set(active)),
         );
       case "intersection":
-        return [descriptor.nominal, descriptor.structural].some(
-          (member) =>
-            typeof member === "number" &&
-            typeIsAllocationBacked(member, typing, new Set(active)),
-        );
+        return typeof descriptor.nominal === "number"
+          ? typeIsAllocationBacked(descriptor.nominal, typing, new Set(active))
+          : typeof descriptor.structural === "number"
+            ? typeIsAllocationBacked(
+                descriptor.structural,
+                typing,
+                new Set(active),
+              )
+            : (descriptor.traits?.length ?? 0) > 0;
     }
   })();
   active.delete(typeId);

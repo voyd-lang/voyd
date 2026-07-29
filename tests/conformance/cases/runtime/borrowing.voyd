@@ -62,6 +62,12 @@ fn increment(~value: Box) -> void
 fn identity(value: Box) -> Box
   value
 
+fn view(value: Box) -> borrow Box
+  value
+
+fn optional_view(value: Box) -> Optional<borrow Box>
+  Some<borrow Box> { value }
+
 fn replace_dynamic(~value: Replaceable) -> void
   value.replace()
 
@@ -115,6 +121,17 @@ pub fn plain_values_do_not_borrow_source_slots() -> i32
   let captured = () => source.value
   increment(~source)
   assigned.value + returned.value + stored.child.value + captured()
+
+pub fn explicit_borrowed_result_reads_source() -> i32
+  let value = Box { value: 21 }
+  let borrowed = view(value)
+  borrowed.value
+
+pub fn nested_explicit_borrow_preserves_payload() -> i32
+  let value = Box { value: 34 }
+  match(optional_view(value))
+    Some<borrow Box> { value: borrowed }: borrowed.value
+    None: 0
 
 pub fn handle_slots_are_distinct_from_allocations() -> i32
   let ~holder = Holder {

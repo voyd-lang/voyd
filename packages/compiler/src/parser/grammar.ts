@@ -4,7 +4,10 @@ import { isIdentifierAtom } from "./ast/predicates.js";
 export const identifierIs = (op: unknown, value: string): op is Atom =>
   isIdentifierAtom(op) && op.eq(value);
 
-export const isOp = (op?: unknown): boolean => isInfixOp(op) || isPrefixOp(op);
+export const isOp = (op?: unknown): boolean =>
+  isInfixOp(op) ||
+  (isPrefixOp(op) &&
+    !(isIdentifierAtom(op) && !op.isQuoted && op.value === "borrow"));
 
 /** Key is the operator, value is its precedence */
 export type OpMap = Map<string, number>;
@@ -75,6 +78,7 @@ export const isInfixOp = (op?: unknown): op is Atom =>
 
 export const prefixOps: OpMap = new Map([
   ["#", precedence.assign],
+  ["borrow", precedence.prefix],
   ["-", precedence.prefix],
   ["!", precedence.prefix],
   ["%", precedence.prefix],

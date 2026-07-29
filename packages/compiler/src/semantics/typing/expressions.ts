@@ -203,7 +203,7 @@ const resolveExpressionType = (
     case "effect-handler":
       return typeEffectHandlerExpr(expr, ctx, state, expectedType);
     case "tuple":
-      return typeTupleExpr(expr, ctx, state);
+      return typeTupleExpr(expr, ctx, state, expectedType);
     case "object-literal":
       return typeObjectLiteralExpr(expr, ctx, state, expectedType);
     case "field-access":
@@ -224,7 +224,7 @@ const resolveExpressionType = (
         ctx,
         state,
         expectedType,
-        options.allowOmittedLambdaParameters !== false
+        options.allowOmittedLambdaParameters !== false,
       );
     default:
       throw new Error(`unsupported expression kind: ${expr.exprKind}`);

@@ -1,6 +1,7 @@
 import type { TypeId, TypeParamId } from "./ids.js";
 
 type TypeDescriptorLike =
+  | { kind: "borrowed"; inner: TypeId }
   | { kind: "primitive"; name: string }
   | { kind: "recursive"; binder: TypeParamId; body: TypeId }
   | { kind: "type-param-ref"; param: TypeParamId }
@@ -34,6 +35,13 @@ export const typeContainsUnresolvedParam = ({
   seen.add(typeId);
   const desc = getTypeDesc(typeId);
   switch (desc.kind) {
+    case "borrowed":
+      return typeContainsUnresolvedParam({
+        typeId: desc.inner,
+        getTypeDesc,
+        boundParams,
+        seen,
+      });
     case "type-param-ref":
       return !boundParams.has(desc.param);
     case "recursive": {
@@ -52,7 +60,12 @@ export const typeContainsUnresolvedParam = ({
     case "nominal-object":
     case "value-object":
       return desc.typeArgs.some((arg) =>
-        typeContainsUnresolvedParam({ typeId: arg, getTypeDesc, boundParams, seen })
+        typeContainsUnresolvedParam({
+          typeId: arg,
+          getTypeDesc,
+          boundParams,
+          seen,
+        }),
       );
     case "fixed-array":
       return typeContainsUnresolvedParam({
@@ -68,7 +81,7 @@ export const typeContainsUnresolvedParam = ({
           getTypeDesc,
           boundParams,
           seen,
-        })
+        }),
       );
     case "function":
       return (
@@ -78,7 +91,7 @@ export const typeContainsUnresolvedParam = ({
             getTypeDesc,
             boundParams,
             seen,
-          })
+          }),
         ) ||
         typeContainsUnresolvedParam({
           typeId: desc.returnType,
@@ -94,7 +107,7 @@ export const typeContainsUnresolvedParam = ({
           getTypeDesc,
           boundParams,
           seen,
-        })
+        }),
       );
     case "intersection":
       return (

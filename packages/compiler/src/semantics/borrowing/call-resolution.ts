@@ -717,7 +717,7 @@ const expressionCanCarryReference = (
   return typeof type !== "number" || typeCanCarryReference(type, ctx.typing);
 };
 
-const projectedTypes = (
+export const projectedTypes = (
   type: TypeId,
   projections: readonly PlaceProjection[],
   typing: TypingResult,
@@ -733,6 +733,9 @@ const projectedTypes = (
     return projectedTypes(type, remaining, typing);
   }
   const candidates = (() => {
+    if (descriptor.kind === "borrowed") {
+      return projectedTypes(descriptor.inner, projections, typing, active);
+    }
     if (descriptor.kind === "recursive") {
       return projectedTypes(descriptor.body, projections, typing, active);
     }
@@ -768,6 +771,92 @@ const projectedTypes = (
   })();
   active.delete(type);
   return candidates;
+};
+
+export const materializedObjectReferencePaths = (
+  type: TypeId,
+  typing: TypingResult,
+  prefix: readonly PlaceProjection[] = [],
+  expandNominalObject = true,
+  active = new Set<TypeId>(),
+): readonly (readonly PlaceProjection[])[] => {
+  if (active.has(type)) {
+    return [];
+  }
+  active.add(type);
+  const descriptor = typing.arena.get(type);
+  const paths = (() => {
+    if (descriptor.kind === "borrowed") {
+      return [prefix];
+    }
+    if (descriptor.kind === "recursive") {
+      return materializedObjectReferencePaths(
+        descriptor.body,
+        typing,
+        prefix,
+        expandNominalObject,
+        active,
+      );
+    }
+    if (descriptor.kind === "union") {
+      return descriptor.members.flatMap((member) =>
+        materializedObjectReferencePaths(
+          member,
+          typing,
+          prefix,
+          false,
+          new Set(active),
+        ),
+      );
+    }
+    if (descriptor.kind === "intersection") {
+      if (typeof descriptor.nominal === "number") {
+        return materializedObjectReferencePaths(
+          descriptor.nominal,
+          typing,
+          prefix,
+          expandNominalObject,
+          new Set(active),
+        );
+      }
+      if (typeof descriptor.structural === "number") {
+        return materializedObjectReferencePaths(
+          descriptor.structural,
+          typing,
+          prefix,
+          expandNominalObject,
+          new Set(active),
+        );
+      }
+      return (descriptor.traits?.length ?? 0) > 0 ? [prefix] : [];
+    }
+    if (descriptor.kind === "nominal-object" && !expandNominalObject) {
+      return [prefix];
+    }
+    const fields =
+      descriptor.kind === "structural-object"
+        ? descriptor.fields
+        : descriptor.kind === "nominal-object" ||
+            descriptor.kind === "value-object"
+          ? typing.objectsByNominal.get(type)?.fields
+          : undefined;
+    if (fields) {
+      return fields.flatMap((field) =>
+        materializedObjectReferencePaths(
+          field.type,
+          typing,
+          [...prefix, { kind: "field", name: field.name }],
+          false,
+          new Set(active),
+        ),
+      );
+    }
+    return descriptor.kind === "primitive" ? [] : [prefix];
+  })();
+  active.delete(type);
+  return Array.from(
+    new Map(paths.map((path) => [JSON.stringify(path), path])).values(),
+  );
 };
 
 const projectionCanCarryReference = (

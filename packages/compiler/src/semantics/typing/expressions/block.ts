@@ -13,6 +13,7 @@ import {
   ensureTypeMatches,
   resolveTypeExpr,
   getSymbolName,
+  typeSatisfiesBorrowFormation,
 } from "../type-system.js";
 import { satisfies as typeSatisfies } from "../type-relations.js";
 import { DiagnosticError, emitDiagnostic } from "../../../diagnostics/index.js";
@@ -22,7 +23,7 @@ export const typeBlockExpr = (
   expr: HirBlockExpr,
   ctx: TypingContext,
   state: TypingState,
-  options: TypeExpressionOptions
+  options: TypeExpressionOptions,
 ): TypeId => {
   const expectedType = options.expectedType;
   const discardValue = options.discardValue === true;
@@ -32,11 +33,11 @@ export const typeBlockExpr = (
 
   expr.statements.forEach((stmtId) => {
     const stmtSpan = ctx.hir.statements.get(stmtId)?.span;
-    const { type: stmtReturnType, effect: stmtEffect, error } = typeStatement(
-      stmtId,
-      ctx,
-      state,
-    );
+    const {
+      type: stmtReturnType,
+      effect: stmtEffect,
+      error,
+    } = typeStatement(stmtId, ctx, state);
     firstError ??= error;
     effectRow = ctx.effects.compose(effectRow, stmtEffect);
     if (typeof stmtReturnType === "number") {
@@ -62,10 +63,16 @@ export const typeBlockExpr = (
         firstError ??= error;
       },
     });
-    effectRow = ctx.effects.compose(effectRow, getExprEffectRow(expr.value, ctx));
+    effectRow = ctx.effects.compose(
+      effectRow,
+      getExprEffectRow(expr.value, ctx),
+    );
     ctx.effects.setExprEffect(expr.id, effectRow);
     if (firstError) {
-      throw new DiagnosticError(firstError.diagnostic, ctx.diagnostics.diagnostics);
+      throw new DiagnosticError(
+        firstError.diagnostic,
+        ctx.diagnostics.diagnostics,
+      );
     }
     if (discardValue) {
       return ctx.primitives.void;
@@ -82,7 +89,10 @@ export const typeBlockExpr = (
 
   ctx.effects.setExprEffect(expr.id, effectRow);
   if (firstError) {
-    throw new DiagnosticError(firstError.diagnostic, ctx.diagnostics.diagnostics);
+    throw new DiagnosticError(
+      firstError.diagnostic,
+      ctx.diagnostics.diagnostics,
+    );
   }
   return returnType ?? ctx.primitives.void;
 };
@@ -118,15 +128,17 @@ const typeStatement = (
             ? getSymbolName(state.currentFunction.functionSymbol, ctx)
             : undefined;
         if (typeof stmt.value === "number") {
-          const valueType = typeExpression(
-            stmt.value,
-            ctx,
-            state,
-            { expectedType: expectedReturnType },
-          );
+          const valueType = typeExpression(stmt.value, ctx, state, {
+            expectedType: expectedReturnType,
+          });
           if (
             enforceReturnType &&
-            !typeSatisfies(valueType, expectedReturnType, ctx, state)
+            !typeSatisfiesBorrowFormation(
+              valueType,
+              expectedReturnType,
+              ctx,
+              state,
+            )
           ) {
             emitDiagnostic({
               ctx,
@@ -231,7 +243,7 @@ const typeExpressionWithRecovery = ({
 const typeLetStatement = (
   stmt: HirLetStatement,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): number => {
   const boundSymbols = collectPatternSymbols(stmt.pattern);
   boundSymbols.forEach((symbol) => ctx.activeValueTypeComputations.add(symbol));
@@ -243,18 +255,15 @@ const typeLetStatement = (
           stmt.pattern.typeAnnotation,
           ctx,
           state,
-          ctx.primitives.unknown
+          ctx.primitives.unknown,
         );
       if (
         typeof annotated === "number" &&
         annotated !== ctx.primitives.unknown
       ) {
-        const initializerType = typeExpression(
-          stmt.initializer,
-          ctx,
-          state,
-          { expectedType: annotated }
-        );
+        const initializerType = typeExpression(stmt.initializer, ctx, state, {
+          expectedType: annotated,
+        });
         if (initializerType !== ctx.primitives.unknown) {
           ensureTypeMatches(
             initializerType,
@@ -271,7 +280,7 @@ const typeLetStatement = (
           ctx,
           state,
           "declare",
-          stmt.span
+          stmt.span,
         );
         return getExprEffectRow(stmt.initializer, ctx);
       }
@@ -281,7 +290,7 @@ const typeLetStatement = (
         ctx,
         state,
         "declare",
-        stmt.span
+        stmt.span,
       );
       return getExprEffectRow(stmt.initializer, ctx);
     }
@@ -293,7 +302,7 @@ const typeLetStatement = (
           stmt.pattern.typeAnnotation,
           ctx,
           state,
-          ctx.primitives.unknown
+          ctx.primitives.unknown,
         );
 
       const expectedType =
@@ -301,12 +310,9 @@ const typeLetStatement = (
           ? annotated
           : undefined;
 
-      const initializerType = typeExpression(
-        stmt.initializer,
-        ctx,
-        state,
-        { expectedType }
-      );
+      const initializerType = typeExpression(stmt.initializer, ctx, state, {
+        expectedType,
+      });
 
       if (
         typeof expectedType === "number" &&
@@ -330,7 +336,7 @@ const typeLetStatement = (
         ctx,
         state,
         "declare",
-        stmt.span
+        stmt.span,
       );
       return getExprEffectRow(stmt.initializer, ctx);
     }
@@ -341,15 +347,12 @@ const typeLetStatement = (
             stmt.pattern.typeAnnotation,
             ctx,
             state,
-            ctx.primitives.unknown
+            ctx.primitives.unknown,
           )
         : undefined;
-    const initializerType = typeExpression(
-      stmt.initializer,
-      ctx,
-      state,
-      { expectedType }
-    );
+    const initializerType = typeExpression(stmt.initializer, ctx, state, {
+      expectedType,
+    });
 
     if (
       typeof expectedType === "number" &&
@@ -372,12 +375,14 @@ const typeLetStatement = (
     return getExprEffectRow(stmt.initializer, ctx);
   } finally {
     boundSymbols.forEach((symbol) =>
-      ctx.activeValueTypeComputations.delete(symbol)
+      ctx.activeValueTypeComputations.delete(symbol),
     );
   }
 };
 
-const collectPatternSymbols = (pattern: HirLetStatement["pattern"]): SymbolId[] => {
+const collectPatternSymbols = (
+  pattern: HirLetStatement["pattern"],
+): SymbolId[] => {
   switch (pattern.kind) {
     case "identifier":
       return [pattern.symbol];
@@ -385,7 +390,9 @@ const collectPatternSymbols = (pattern: HirLetStatement["pattern"]): SymbolId[] 
       return pattern.elements.flatMap(collectPatternSymbols);
     case "destructure":
       return [
-        ...pattern.fields.flatMap((field) => collectPatternSymbols(field.pattern)),
+        ...pattern.fields.flatMap((field) =>
+          collectPatternSymbols(field.pattern),
+        ),
         ...(pattern.spread ? collectPatternSymbols(pattern.spread) : []),
       ];
     case "type":

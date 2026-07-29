@@ -3,12 +3,7 @@ import type {
   FunctionSignature,
   TypingContext,
 } from "./types.js";
-import type {
-  EffectRowId,
-  SymbolId,
-  TypeId,
-  TypeParamId,
-} from "../ids.js";
+import type { EffectRowId, SymbolId, TypeId, TypeParamId } from "../ids.js";
 import type { EffectTable } from "../effects/effect-table.js";
 import {
   effectsShareInterner,
@@ -119,10 +114,12 @@ export const translateFunctionSignature = ({
   }));
   const translatedTypeParamMap = signature.typeParamMap
     ? new Map<SymbolId, TypeId>(
-        Array.from(signature.typeParamMap.entries()).map(([symbol, typeRef]) => [
-          mapTypeParamSymbol(symbol),
-          translation(typeRef),
-        ]),
+        Array.from(signature.typeParamMap.entries()).map(
+          ([symbol, typeRef]) => [
+            mapTypeParamSymbol(symbol),
+            translation(typeRef),
+          ],
+        ),
       )
     : params && params.length > 0
       ? new Map<SymbolId, TypeId>(
@@ -187,11 +184,16 @@ export const createTranslation = ({
     const desc = sourceArena.get(type);
     let result: TypeId;
     switch (desc.kind) {
+      case "borrowed":
+        result = targetArena.internBorrowed(translate(desc.inner));
+        break;
       case "primitive":
         result = targetArena.internPrimitive(desc.name);
         break;
       case "type-param-ref": {
-        const mapped = mapTypeParam(desc.param, paramMap, { arena: targetArena });
+        const mapped = mapTypeParam(desc.param, paramMap, {
+          arena: targetArena,
+        });
         result = targetArena.internTypeParamRef(mapped);
         break;
       }

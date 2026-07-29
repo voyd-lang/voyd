@@ -48,7 +48,7 @@ export const visibilityRank = (visibility: HirVisibilityLevel): number => {
 
 export const maxVisibility = (
   a: HirVisibility,
-  b: HirVisibility
+  b: HirVisibility,
 ): HirVisibility =>
   visibilityRank(a.level) >= visibilityRank(b.level)
     ? { ...a, api: a.api || b.api }
@@ -91,6 +91,7 @@ export interface HirTypeExprBase {
 }
 
 export type HirTypeExpr =
+  | HirBorrowedTypeExpr
   | HirNamedTypeExpr
   | HirObjectTypeExpr
   | HirTupleTypeExpr
@@ -98,6 +99,11 @@ export type HirTypeExpr =
   | HirIntersectionTypeExpr
   | HirFunctionTypeExpr
   | HirSelfTypeExpr;
+
+export interface HirBorrowedTypeExpr extends HirTypeExprBase {
+  typeKind: "borrowed";
+  inner: HirTypeExpr;
+}
 
 export interface HirNamedTypeExpr extends HirTypeExprBase {
   typeKind: "named";

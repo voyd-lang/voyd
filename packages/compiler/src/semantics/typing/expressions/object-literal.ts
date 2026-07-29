@@ -3,12 +3,7 @@ import type {
   HirObjectLiteralEntry,
   HirObjectLiteralExpr,
 } from "../../hir/index.js";
-import type {
-  SourceSpan,
-  SymbolId,
-  TypeId,
-  TypeParamId,
-} from "../../ids.js";
+import type { SourceSpan, SymbolId, TypeId, TypeParamId } from "../../ids.js";
 import { typeExpression, withSpeculativeExprTyping } from "../expressions.js";
 import { composeEffectRows, getExprEffectRow } from "../effects.js";
 import {
@@ -21,6 +16,7 @@ import {
   resolveTypeAlias,
   resolveTypeExpr,
   typeSatisfies,
+  typeSatisfiesBorrowFormation,
   unifyWithBudget,
 } from "../type-system.js";
 import { localSymbolForSymbolRef } from "../symbol-ref-utils.js";
@@ -160,8 +156,20 @@ const structuralLiteralFieldForValue = ({
   state: TypingState;
 }): StructuralLiteralField => {
   if (
+    expectedField &&
+    !typeSatisfies(valueType, expectedField.type, ctx, state) &&
+    typeSatisfiesBorrowFormation(valueType, expectedField.type, ctx, state)
+  ) {
+    return {
+      name,
+      type: expectedField.type,
+      optional: expectedField.optional,
+    };
+  }
+
+  if (
     expectedField?.optional &&
-    typeSatisfies(valueType, expectedField.type, ctx, state)
+    typeSatisfiesBorrowFormation(valueType, expectedField.type, ctx, state)
   ) {
     return {
       name,
@@ -331,15 +339,15 @@ const typeNominalObjectLiteral = (
       ? getNominalComponent(resolvedTarget, ctx)
       : undefined;
   const nominalTargetDesc =
-    typeof nominalTarget === "number" ? ctx.arena.get(nominalTarget) : undefined;
+    typeof nominalTarget === "number"
+      ? ctx.arena.get(nominalTarget)
+      : undefined;
   const resolvedTargetSymbol =
     nominalTargetDesc?.kind === "nominal-object" ||
     nominalTargetDesc?.kind === "value-object"
       ? localSymbolForSymbolRef(nominalTargetDesc.owner, ctx)
       : undefined;
-  const targetSymbol =
-    resolvedTargetSymbol ??
-    declaredTargetSymbol;
+  const targetSymbol = resolvedTargetSymbol ?? declaredTargetSymbol;
   if (typeof targetSymbol !== "number") {
     throw new Error("nominal object literal missing target type");
   }
@@ -350,7 +358,8 @@ const typeNominalObjectLiteral = (
     resolvedTarget !== ctx.primitives.unknown &&
     typeof nominalTarget !== "number"
   ) {
-    const targetName = namedTarget?.path.at(-1) ?? getSymbolName(targetSymbol, ctx);
+    const targetName =
+      namedTarget?.path.at(-1) ?? getSymbolName(targetSymbol, ctx);
     return emitDiagnostic({
       ctx,
       code: "TY0041",
@@ -414,27 +423,20 @@ const typeNominalObjectLiteral = (
     expr.nominalConstruction === "fieldwise-call"
       ? Math.max(template.params.length, explicitTypeArgs.length)
       : template.params.length;
-  const typeArgs = Array.from(
-    { length: typeArgumentCount },
-    (_, index) => {
-      const param = template.params[index];
-      const explicit = explicitTypeArgs[index];
-      const needsAliasInference =
-        typeof explicit === "number" &&
-        aliasResolution?.unresolvedSubstitution &&
-        ctx.arena.substitute(
-          explicit,
-          aliasResolution.unresolvedSubstitution,
-        ) !== explicit;
-      if (typeof explicit === "number" && !needsAliasInference) {
-        return explicit;
-      }
-      const inferred = param
-        ? typeParamBindings.get(param.typeParam)
-        : undefined;
-      return inferred ?? expectedTypeArgs?.[index] ?? ctx.primitives.unknown;
-    },
-  );
+  const typeArgs = Array.from({ length: typeArgumentCount }, (_, index) => {
+    const param = template.params[index];
+    const explicit = explicitTypeArgs[index];
+    const needsAliasInference =
+      typeof explicit === "number" &&
+      aliasResolution?.unresolvedSubstitution &&
+      ctx.arena.substitute(explicit, aliasResolution.unresolvedSubstitution) !==
+        explicit;
+    if (typeof explicit === "number" && !needsAliasInference) {
+      return explicit;
+    }
+    const inferred = param ? typeParamBindings.get(param.typeParam) : undefined;
+    return inferred ?? expectedTypeArgs?.[index] ?? ctx.primitives.unknown;
+  });
 
   const objectInfo = ensureObjectType(targetSymbol, ctx, state, typeArgs);
   if (!objectInfo) {
@@ -567,7 +569,8 @@ const expectedNominalTypeArgsForTarget = ({
     return undefined;
   }
   const expectedDesc = ctx.arena.get(expectedType);
-  const members = expectedDesc.kind === "union" ? expectedDesc.members : [expectedType];
+  const members =
+    expectedDesc.kind === "union" ? expectedDesc.members : [expectedType];
   const candidates = members.flatMap((member) => {
     const nominal = getNominalComponent(member, ctx);
     if (typeof nominal !== "number") {

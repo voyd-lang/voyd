@@ -113,6 +113,8 @@ const normalizeConstraintTypeParameters = ({
 
 const childTypeExpressions = (expr: HirTypeExpr): readonly HirTypeExpr[] => {
   switch (expr.typeKind) {
+    case "borrowed":
+      return [expr.inner];
     case "named":
       return expr.typeArguments ?? [];
     case "object":
@@ -862,21 +864,23 @@ export const registerImpls = (ctx: TypingContext, state: TypingState): void => {
         ctx,
       });
       refreshTraitImplInstances(ctx, state);
-      new Map([...instanceMethods, ...staticMethods]).forEach((implMethodSymbol, traitMethodSymbol) => {
-        registerTraitMethodImplMapping({
-          traitMethodImpls: ctx.traitMethodImpls,
-          implMethodSymbol,
-          traitSymbol,
-          traitMethodSymbol,
-          buildConflictMessage: ({ implMethodSymbol, existing, incoming }) =>
-            [
-              "impl method mapped to multiple trait methods",
-              `impl method: ${getSymbolName(implMethodSymbol, ctx)}`,
-              `existing: trait=${getSymbolName(existing.traitSymbol, ctx)}, method=${getSymbolName(existing.traitMethodSymbol, ctx)}`,
-              `incoming: trait=${getSymbolName(incoming.traitSymbol, ctx)}, method=${getSymbolName(incoming.traitMethodSymbol, ctx)}`,
-            ].join("\n"),
-        });
-      });
+      new Map([...instanceMethods, ...staticMethods]).forEach(
+        (implMethodSymbol, traitMethodSymbol) => {
+          registerTraitMethodImplMapping({
+            traitMethodImpls: ctx.traitMethodImpls,
+            implMethodSymbol,
+            traitSymbol,
+            traitMethodSymbol,
+            buildConflictMessage: ({ implMethodSymbol, existing, incoming }) =>
+              [
+                "impl method mapped to multiple trait methods",
+                `impl method: ${getSymbolName(implMethodSymbol, ctx)}`,
+                `existing: trait=${getSymbolName(existing.traitSymbol, ctx)}, method=${getSymbolName(existing.traitMethodSymbol, ctx)}`,
+                `incoming: trait=${getSymbolName(incoming.traitSymbol, ctx)}, method=${getSymbolName(incoming.traitMethodSymbol, ctx)}`,
+              ].join("\n"),
+          });
+        },
+      );
     }
 
     item.with?.forEach((entry) => {
@@ -1171,7 +1175,9 @@ const buildTraitMethodMap = ({
       selfType: impl.target,
     });
     const selectedTraitMethods = traitMethodSignatures.filter((method) =>
-      methodKind === "instance" ? method.hasSelfReceiver : !method.hasSelfReceiver
+      methodKind === "instance"
+        ? method.hasSelfReceiver
+        : !method.hasSelfReceiver,
     );
     if (selectedTraitMethods.length === 0) {
       return undefined;
@@ -1204,7 +1210,9 @@ const buildTraitMethodMap = ({
     selfType: impl.target,
   });
   const selectedTraitMethods = traitMethodSignatures.filter((method) =>
-    methodKind === "instance" ? method.hasSelfReceiver : !method.hasSelfReceiver
+    methodKind === "instance"
+      ? method.hasSelfReceiver
+      : !method.hasSelfReceiver,
   );
   if (selectedTraitMethods.length === 0) {
     return undefined;

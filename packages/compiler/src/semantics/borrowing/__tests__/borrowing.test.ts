@@ -14,6 +14,7 @@ import {
   projectionPathsOverlap,
 } from "../model.js";
 import { normalizeReturnedSharedOrigins } from "../summaries.js";
+import { borrowedTypeEntriesInType } from "../borrowed-types.js";
 
 const analyze = (source: string) => {
   const filePath = "borrowing.test.voyd";
@@ -119,6 +120,2070 @@ fn mutate_both(~left: Box, ~right: Box) -> void
 `;
 
 describe("borrow checking", () => {
+  const borrowedOptionPrelude = `
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+`;
+
+  it("retains explicit borrowed results through their final use", () => {
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+fn view(value: Box) -> borrow Box
+  value
+
+fn invalid(~value: Box) -> i32
+  let borrowed = view(value)
+  mutate(~value)
+  borrowed.value
+`),
+    ).toContain("TY0048");
+
+    expect(() =>
+      analyze(`${borrowedOptionPrelude}
+fn view(value: Box) -> borrow Box
+  value
+
+fn valid(~value: Box) -> i32
+  let borrowed = view(value)
+  let result = borrowed.value
+  mutate(~value)
+  result
+`),
+    ).not.toThrow();
+  });
+
+  it("retains every possible origin of a conditional borrowed value", () => {
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+fn invalid(flag: bool, ~left: Box, ~right: Box) -> i32
+  let chosen: borrow Box =
+    if flag:
+      left
+    else:
+      right
+  mutate(~left)
+  chosen.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("tracks borrows formed by local annotations and aggregate fields", () => {
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+fn invalid(~value: Box) -> i32
+  let borrowed: borrow Box = value
+  mutate(~value)
+  borrowed.value
+`),
+    ).toContain("TY0048");
+
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+obj View { value: borrow Box }
+
+fn invalid(~value: Box) -> i32
+  let view: View = View { value }
+  mutate(~value)
+  view.value.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("retains returned object allocations without borrowing handle slots", () => {
+    expect(() =>
+      analyze(`${borrowedOptionPrelude}
+fn view(value: Box) -> borrow Box
+  value
+
+fn valid() -> i32
+  var source = Box { value: 1 }
+  let borrowed = view(source)
+  source = Box { value: 2 }
+  borrowed.value
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`${borrowedOptionPrelude}
+obj Holder { child: Box }
+
+fn view(value: Box) -> borrow Box
+  value
+
+fn valid(~holder: Holder) -> i32
+  let borrowed = view(holder.child)
+  holder.child = Box { value: 2 }
+  borrowed.value
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+obj Holder { child: Box }
+
+fn view(value: Box) -> borrow Box
+  value
+
+fn invalid(~holder: Holder) -> i32
+  let ~alias = holder.child
+  let borrowed = view(holder.child)
+  mutate(~alias)
+  borrowed.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("prefers exact owned overloads over contextual borrow formation", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+fn pick(value: Box) -> i32
+  1
+
+fn pick(value: borrow Box) -> i32
+  2
+
+fn selected_owned(value: Box) -> i32
+  pick(value)
+
+fn selected_borrowed(value: borrow Box) -> i32
+  pick(value)
+`),
+    ).not.toThrow();
+  });
+
+  it("retains explicit borrowed results through generic call boundaries", () => {
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+fn view<T>(value: borrow T) -> borrow T
+  value
+
+fn invalid(~value: Box) -> i32
+  let borrowed = view<Box>(value)
+  mutate(~value)
+  borrowed.value
+`),
+    ).toContain("TY0048");
+
+    expect(
+      diagnosticCodes(`
+fn forward<T>(value: borrow T) -> borrow T
+  value
+
+fn mutate(~value: i32) -> void
+  value = value + 1
+
+fn invalid(~value: i32) -> i32
+  let borrowed = forward<i32>(value)
+  mutate(~value)
+  borrowed + 1
+`),
+    ).toContain("TY0048");
+  });
+
+  it("treats forwarding through borrowed parameters as a shared use", () => {
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+fn view(value: Box) -> borrow Box
+  value
+
+fn forward(value: borrow Box) -> borrow Box
+  value
+
+fn invalid(~value: Box) -> void
+  let borrowed = view(value)
+  mutate(~value)
+  let _ = forward(borrowed)
+`),
+    ).toContain("TY0048");
+
+    expect(
+      diagnosticCodes(`
+fn overwrite(~value: i32) -> void
+  value = value + 1
+
+fn forward(value: borrow i32, ~other: i32) -> borrow i32
+  overwrite(~other)
+  value
+
+fn invalid(~value: i32) -> void
+  let _ = forward(value, ~value)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("serializes retained provenance for explicit borrowed scalar results", () => {
+    const result = analyze(`
+fn view(value: borrow i32) -> borrow i32
+  value
+`);
+
+    expect(
+      Array.from(result.borrowing.callables.values()).some(
+        (contract) =>
+          (contract.parameters[0]?.returnedSharedOrigins?.length ?? 0) > 0,
+      ),
+    ).toBe(true);
+  });
+
+  it("materializes borrowed values only for bounded read operations", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+impl Box
+  fn read(self) -> i32
+    self.value
+
+fn read_scalar(value: borrow i32) -> i32
+  value + 1
+
+fn read_box(value: borrow Box) -> i32
+  value.read()
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+impl Box
+  fn conceal(self) -> Box
+    self
+
+fn invalid(value: borrow Box) -> Box
+  value.conceal()
+`),
+    ).toContain("TY0051");
+  });
+
+  it("materializes borrowed primitives in bounded value contexts", () => {
+    expect(() =>
+      analyze(`
+fn read(value: i32) -> i32
+  value
+
+fn branch(flag: borrow bool) -> i32
+  if flag:
+    1
+  else:
+    2
+
+fn copy(value: borrow i32) -> i32
+  read(value)
+
+fn direct(value: borrow i32) -> i32
+  value
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+val Out { value: i32 }
+obj Holder { value: i32 }
+
+fn local(value: borrow i32) -> i32
+  let result: i32 = value
+  result
+
+fn aggregate(value: borrow i32) -> Out
+  Out { value }
+
+fn store(~holder: Holder, value: borrow i32) -> void
+  holder.value = value
+
+fn mutate(~value: i32) -> void
+  value = value + 1
+
+fn assignment(~source: i32) -> i32
+  let borrowed: borrow i32 = source
+  var result: i32 = 0
+  result = borrowed
+  mutate(~source)
+  result
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects borrowed recursion that erases to an unbounded layout", () => {
+    expect(() =>
+      analyze(`
+type Loop = borrow Loop
+
+fn id(value: Loop) -> Loop
+  value
+`),
+    ).toThrow("not contractive");
+
+    expect(
+      diagnosticCodes(`
+val Node { next: borrow Node }
+
+fn id(value: Node) -> Node
+  value
+`).length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("materializes plain projected handles through concrete methods", () => {
+    expect(() =>
+      analyze(`
+obj Child { value: i32 }
+obj Parent { child: Child }
+
+impl Parent
+  fn child(self) -> Child
+    self.child
+
+fn valid(parent: borrow Parent) -> Child
+  parent.child()
+`),
+    ).not.toThrow();
+  });
+
+  it("copies plain fields out of explicitly borrowed values", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj Container { child: Box }
+
+fn read_scalar(value: borrow Box) -> i32
+  value.value
+
+fn read_handle(value: borrow Container) -> Box
+  value.child
+`),
+    ).not.toThrow();
+  });
+
+  it("keeps copied plain projections ordinary through bindings and aggregates", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj Container { child: Box }
+obj Out { child: Box }
+obj Holder { child: Box }
+type Callback = fn() : () -> i32
+
+fn copy(value: borrow Container) -> Out
+  Out { child: value.child }
+
+fn capture(value: borrow Holder) -> Callback
+  let child = value.child
+  () => child.value
+`),
+    ).not.toThrow();
+  });
+
+  it("copies plain callback handles from borrowed object fields", () => {
+    expect(() =>
+      analyze(`
+type Callback = fn() : () -> i32
+obj Holder { callback: Callback }
+
+fn extract(holder: borrow Holder) -> Callback
+  holder.callback
+`),
+    ).not.toThrow();
+  });
+
+  it("tracks Option<borrow T> only through its Some payload", () => {
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+fn some_view(value: Box) -> Option<borrow Box>
+  Some<borrow Box> { value }
+
+fn invalid(~value: Box) -> i32
+  let result = some_view(value)
+  mutate(~value)
+  match(result)
+    Some<borrow Box> { value: borrowed }:
+      borrowed.value
+    None:
+      0
+`),
+    ).toContain("TY0048");
+
+    expect(() =>
+      analyze(`${borrowedOptionPrelude}
+fn no_view(value: Box) -> Option<borrow Box>
+  None {}
+
+fn valid(~value: Box) -> i32
+  let result = no_view(value)
+  mutate(~value)
+  match(result)
+    Some<borrow Box> { value: borrowed }:
+      borrowed.value
+    None:
+      0
+`),
+    ).not.toThrow();
+  });
+
+  it("keeps borrow Option<T> distinct from Option<borrow T>", () => {
+    const result = analyze(`${borrowedOptionPrelude}
+fn whole(value: Option<Box>) -> borrow Option<Box>
+  value
+
+fn payload(value: Box) -> Option<borrow Box>
+  Some<borrow Box> { value }
+`);
+    const signatures = Array.from(
+      result.typing.functions.signatures,
+      ([, signature]) => signature,
+    );
+    const whole = signatures.find((signature) => {
+      const descriptor = result.typing.arena.get(signature.returnType);
+      return descriptor.kind === "borrowed";
+    });
+    const payload = signatures.find((signature) => {
+      const descriptor = result.typing.arena.get(signature.returnType);
+      return (
+        descriptor.kind === "union" &&
+        descriptor.members.some((member) => {
+          const nominal = result.typing.arena.nominalComponent(member);
+          const info =
+            typeof nominal === "number"
+              ? result.typing.objectsByNominal.get(nominal)
+              : undefined;
+          return info?.fields.some(
+            (field) => result.typing.arena.get(field.type).kind === "borrowed",
+          );
+        })
+      );
+    });
+
+    expect(whole).toBeDefined();
+    expect(payload).toBeDefined();
+    expect(whole?.returnType).not.toBe(payload?.returnType);
+  });
+
+  it("pattern matches borrowed aggregate unions through their inner type", () => {
+    expect(() =>
+      analyze(`${borrowedOptionPrelude}
+fn read(option: borrow Option<i32>) -> i32
+  match(option)
+    Some<i32> { value }:
+      value
+    None:
+      0
+`),
+    ).not.toThrow();
+  });
+
+  it("preserves every borrowed layer in nested borrowed types", () => {
+    const result = analyze(`${borrowedOptionPrelude}
+fn nested(value: Option<borrow Box>) -> borrow Option<borrow Box>
+  value
+`);
+    const signature = Array.from(
+      result.typing.functions.signatures,
+      ([, candidate]) => candidate,
+    ).find(
+      (candidate) =>
+        result.typing.arena.get(candidate.returnType).kind === "borrowed",
+    );
+    expect(signature).toBeDefined();
+
+    const entries = signature
+      ? borrowedTypeEntriesInType(signature.returnType, result.typing)
+      : [];
+    expect(entries.some(({ path }) => path.length === 0)).toBe(true);
+    expect(
+      entries.some(({ path }) =>
+        path.some(
+          (projection) =>
+            projection.kind === "field" && projection.name === "value",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("rejects explicit borrowed escape and local lifetime extension", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Holder { value: borrow Box }
+
+fn invalid(~holder: Holder, value: borrow Box) -> void
+  holder.value = value
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn invalid() -> borrow Box
+  let local = Box { value: 1 }
+  local
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+fn invalid(value: i32) -> borrow i32
+  value
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+fn invalid() -> borrow i32
+  1
+`),
+    ).toContain("TY0051");
+
+    expect(() =>
+      analyze(`
+fn valid(value: borrow i32) -> borrow i32
+  value
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+fn valid(owner: Box) -> borrow i32
+  owner.value
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+fn invalid(flag: bool, external: borrow i32) -> i32
+  var view: borrow i32 = external
+  if flag:
+    let local = 1
+    view = local
+  view + 1
+`),
+    ).toContain("TY0051");
+  });
+
+  it("rejects originless borrowed parameter defaults", () => {
+    expect(
+      diagnosticCodes(`
+fn read(value: borrow i32 = 1) -> i32
+  value + 1
+
+fn invalid() -> i32
+  read()
+`),
+    ).toContain("TY0051");
+  });
+
+  it("requires stable storage when forming borrowed call arguments", () => {
+    expect(
+      diagnosticCodes(`
+fn read(value: borrow i32) -> i32
+  0
+
+fn invalid() -> i32
+  read(1)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+fn read(value: borrow i32) -> i32
+  0
+
+fn invalid() -> i32
+  let borrowed: borrow i32 = 1
+  read(borrowed)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+fn read(value: borrow i32) -> i32
+  0
+
+fn invalid(value: i32) -> i32
+  var borrowed: borrow i32 = value
+  borrowed = 1
+  read(borrowed)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj View { value: borrow i32 }
+
+fn invalid() -> i32
+  let view: View = View { value: 1 }
+  0
+`),
+    ).toContain("TY0051");
+
+    expect(() =>
+      analyze(`
+fn read(value: borrow i32) -> i32
+  0
+
+fn valid() -> i32
+  let value = 1
+  read(value)
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj View { value: borrow i32 }
+
+fn read(view: View) -> i32
+  view.value + 0
+
+fn invalid() -> i32
+  read(View { value: 1 })
+`),
+    ).toContain("TY0051");
+  });
+
+  it("rejects contextually formed borrows passed to retaining storage", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+type Sink = fn(borrow Box) : () -> void
+
+fn invalid(value: Box, sink: Sink) -> void
+  sink(value)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn invalid(~value: Box, storage: FixedArray<borrow Box>) -> i32
+  __array_set(storage, 0, value)
+  mutate(~value)
+  __array_get(storage, 0).value
+`),
+    ).toContain("TY0051");
+  });
+
+  it("rejects opaque calls that cannot prove nested borrowed-result origins", () => {
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+type Maker = fn(Box) : () -> Option<borrow Box>
+
+fn invalid(~value: Box, maker: Maker) -> i32
+  let result = maker(value)
+  mutate(~value)
+  match(result)
+    Some<borrow Box> { value: borrowed }:
+      borrowed.value
+    None:
+      0
+`),
+    ).toContain("TY0051");
+  });
+
+  it("rejects contextual borrow formation into existing field storage", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Holder { value: borrow Box }
+
+fn invalid(~holder: Holder, source: Box) -> void
+  holder.value = source
+`),
+    ).toContain("TY0051");
+  });
+
+  it("validates every branch that forms a borrowed value", () => {
+    expect(
+      diagnosticCodes(`
+fn invalid(flag: bool, stable: borrow i32) -> borrow i32
+  let chosen: borrow i32 =
+    if flag:
+      stable
+    else:
+      1
+  chosen
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj View { value: borrow i32 }
+
+fn invalid(flag: bool, stable: borrow i32) -> View
+  if flag:
+    View { value: stable }
+  else:
+    View { value: 1 }
+`),
+    ).toContain("TY0051");
+  });
+
+  it("validates newly formed outer borrows independently of nested borrows", () => {
+    expect(
+      diagnosticCodes(`${borrowedOptionPrelude}
+fn invalid(source: borrow Box) -> borrow Option<borrow Box>
+  let payload: Option<borrow Box> = Some<borrow Box> { value: source }
+  payload
+`),
+    ).toContain("TY0051");
+
+    expect(() =>
+      analyze(`${borrowedOptionPrelude}
+fn read(value: borrow Option<borrow Box>) -> i32
+  0
+
+fn valid(payload: Option<borrow Box>) -> i32
+  read(payload)
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects explicit borrowed capture and module storage", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+type Callback = fn() : () -> i32
+
+fn invalid(value: borrow Box) -> Callback
+  () => value.value
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+type Callback = fn() : () -> i32
+
+fn invalid(value: borrow Box) -> Callback
+  let callback = () => value.value
+  callback
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+let value = Box { value: 1 }
+let escaped: borrow Box = value
+`),
+    ).toContain("TY0051");
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+let empty: Option<borrow i32> = None {}
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val Holder { empty: Option<borrow i32> }
+
+fn clear(~holder: Holder) -> void
+  holder.empty = None {}
+
+fn cleared(value: borrow i32) -> Holder
+  let ~holder = Holder {
+    empty: Some<borrow i32> { value }
+  }
+  holder.empty = None {}
+  holder
+
+let source = 1
+let holder: Holder = cleared(source)
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+type Left = { left: Option<borrow i32> }
+type Right = { right: Option<borrow i32> }
+type Both = {
+  left: Option<borrow i32>,
+  right: Option<borrow i32>
+}
+obj Store { right: Right }
+
+fn combine(left: borrow Left, right: borrow Right) -> Both
+  { ...left, ...right }
+
+fn valid(source: borrow i32, ~store: Store) -> i32
+  let left: Left = {
+    left: Some<borrow i32> { value: source }
+  }
+  let both = combine(left, store.right)
+  store.right = { right: None {} }
+  match(both.left)
+    Some<borrow i32> { value }:
+      value + 0
+    None:
+      0
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val Holder {
+  empty: Option<borrow i32>,
+  count: i32
+}
+
+fn unsafe(value: borrow i32) -> Option<borrow i32>
+  let ~a = Holder { empty: None {}, count: 0 }
+  let ~b = Holder {
+    empty: Some<borrow i32> { value },
+    count: 0
+  }
+  let empty: Option<borrow i32> = None {}
+  a.empty = empty
+  let escaped = b.empty
+  b = a
+  escaped
+
+let source = 1
+let escaped: Option<borrow i32> = unsafe(source)
+`),
+    ).toContain("TY0051");
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+let flag = true
+let empty: Option<borrow i32> =
+  if flag:
+    None {}
+  else:
+    None {}
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj View { value: borrow Box }
+
+let source = Box { value: 1 }
+
+fn make() -> View
+  View { value: source }
+
+let escaped: View = make()
+`),
+    ).toContain("TY0051");
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn no_view() -> Option<borrow i32>
+  let result: Option<borrow i32> = None {}
+  result
+
+let empty: Option<borrow i32> = no_view()
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val Holder { empty: Option<borrow i32> }
+
+fn projected() -> Option<borrow i32>
+  let holder = Holder { empty: None {} }
+  holder.empty
+
+fn destructured() -> Option<borrow i32>
+  let (_, empty) = (0, None {})
+  empty
+
+obj Box { value: i32 }
+val BorrowHolder { empty: Option<borrow Box> }
+
+fn selected(holder: BorrowHolder) -> Option<borrow Box>
+  holder.empty
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val Holder {
+  count: i32,
+  empty: Option<borrow i32>
+}
+
+fn no_view() -> Option<borrow i32>
+  let ~holder = Holder { count: 0, empty: None {} }
+  let ~alias = holder
+  alias.count = 1
+  holder.empty
+
+let empty: Option<borrow i32> = no_view()
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn no_view(value: borrow i32) -> Option<borrow i32>
+  return None {}
+  Some<borrow i32> { value }
+
+let source = 1
+let empty: Option<borrow i32> = no_view(source)
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+type Pair = (borrow i32, Option<borrow i32>)
+
+fn no_view(value: borrow i32) -> Option<borrow i32>
+  let pair: Pair = (value, None {})
+  let (_, empty) = pair
+  empty
+
+let source = 1
+let out: Option<borrow i32> = no_view(source)
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn no_view(value: borrow i32) -> Option<borrow i32>
+  var result: Option<borrow i32> = Some<borrow i32> { value }
+  result = None {}
+  result
+
+let source = 1
+let empty: Option<borrow i32> = no_view(source)
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val Holder {
+  active: borrow i32,
+  empty: Option<borrow i32>
+}
+
+fn select(holder: Holder) -> Option<borrow i32>
+  holder.empty
+
+fn no_view(value: borrow i32) -> Option<borrow i32>
+  let holder = Holder { active: value, empty: None {} }
+  select(holder)
+
+let source = 1
+let empty: Option<borrow i32> = no_view(source)
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn rewrap(option: Option<borrow i32>) -> Option<borrow i32>
+  match(option)
+    Some<borrow i32> { value }:
+      Some<borrow i32> { value }
+    None:
+      None {}
+
+let empty: Option<borrow i32> = rewrap(None {})
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn no_view(recurse: bool) -> Option<borrow i32>
+  if recurse:
+    no_view(false)
+  else:
+    None {}
+
+let empty: Option<borrow i32> = no_view(true)
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn inner(value: Option<borrow i32>) -> Option<borrow i32>
+  value
+
+fn middle(value: Option<borrow i32>) -> Option<borrow i32>
+  inner(value)
+
+fn no_view() -> Option<borrow i32>
+  middle(None {})
+
+let empty: Option<borrow i32> = no_view()
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn no_view(
+  value: Option<borrow i32> = None {}
+) -> Option<borrow i32>
+  value
+
+let empty: Option<borrow i32> = no_view()
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+let escaped: Option<borrow i32> =
+  Some<borrow i32> { value: 1 }
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn view(option: Option<Box>) -> Option<borrow Box>
+  match(option)
+    Some<Box> { value }:
+      Some<borrow Box> { value }
+    None:
+      None {}
+
+fn looped(
+  source: Box,
+  keep_going: bool
+) -> Option<borrow Box>
+  var result: Option<Box> = None {}
+  var candidate: Option<Box> = None {}
+  while keep_going:
+    result = candidate
+    candidate = Some<Box> { value: source }
+  view(result)
+
+fn invalid(~source: Box, keep_going: bool) -> i32
+  let borrowed = looped(source, keep_going)
+  mutate(~source)
+  match(borrowed)
+    Some<borrow Box> { value }:
+      value.value
+    None:
+      0
+`),
+    ).toContain("TY0048");
+
+    expect(
+      diagnosticCodes(`
+obj View<T> { value: T }
+obj Box { value: i32 }
+
+fn identity<T>(value: T) -> T
+  value
+
+let source = Box { value: 1 }
+let escaped: View<borrow Box> =
+  identity<View<borrow Box>>(View<borrow Box> { value: source })
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn view(value: borrow i32) -> Option<borrow i32>
+  var result: Option<borrow i32> = None {}
+  while true:
+    result = Some<borrow i32> { value }
+    break
+  result
+
+let source = 1
+let escaped: Option<borrow i32> = view(source)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val Holder { active: borrow i32 }
+
+fn view(value: borrow i32) -> Option<borrow i32>
+  let base = Holder { active: value }
+  let copy = Holder { ...base }
+  Some<borrow i32> { value: copy.active }
+
+let source = 1
+let escaped: Option<borrow i32> = view(source)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Box { value: i32 }
+
+fn view(value: borrow Box) -> Option<borrow Box>
+  Some<borrow Box> { value }
+
+fn wrapper(value: Box) -> Option<borrow Box>
+  let alias = value
+  view(alias)
+
+let source = Box { value: 1 }
+let escaped: Option<borrow Box> = wrapper(source)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Box { value: i32 }
+
+fn make() -> Box
+  Box { value: 1 }
+
+fn view(value: borrow Box) -> Option<borrow Box>
+  Some<borrow Box> { value }
+
+let escaped: Option<borrow Box> = view(make())
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn first(value: borrow i32, base: bool) -> Option<borrow i32>
+  if base:
+    Some<borrow i32> { value }
+  else:
+    second(value, true)
+
+fn second(value: borrow i32, base: bool) -> Option<borrow i32>
+  if base:
+    first(value, true)
+  else:
+    None {}
+
+let source = 1
+let escaped: Option<borrow i32> = second(source, true)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn unsafe(value: borrow i32) -> Option<borrow i32>
+  var result: Option<borrow i32> = None {}
+  var first = true
+  while true:
+    if first:
+      result = Some<borrow i32> { value }
+      first = false
+      continue
+      result = None {}
+    else:
+      break
+  result
+
+let source = 1
+let escaped: Option<borrow i32> = unsafe(source)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val Holder { value: Option<borrow i32> }
+
+fn unsafe(value: borrow i32) -> Option<borrow i32>
+  let ~holder = Holder { value: None {} }
+  holder.value = Some<borrow i32> { value }
+  holder.value
+
+let source = 1
+let escaped: Option<borrow i32> = unsafe(source)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn populate(
+  ~result: Option<borrow i32>,
+  value: borrow i32
+) -> void
+  result = Some<borrow i32> { value }
+
+fn unsafe(value: borrow i32) -> Option<borrow i32>
+  let ~result: Option<borrow i32> = None {}
+  populate(~result, value)
+  result
+
+let source = 1
+let escaped: Option<borrow i32> = unsafe(source)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+
+fn unsafe(
+  value: borrow i32,
+  keep_going: bool
+) -> Option<borrow i32>
+  var result: Option<borrow i32> = None {}
+  var candidate: Option<borrow i32> = None {}
+  while keep_going:
+    result = candidate
+    candidate = Some<borrow i32> { value }
+  result
+
+let source = 1
+let escaped: Option<borrow i32> = unsafe(source, false)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Box { value: i32 }
+obj Holder { option: Option<Box> }
+
+fn view(option: Option<Box>) -> Option<borrow Box>
+  match(option)
+    Some<Box> { value }:
+      Some<borrow Box> { value }
+    None:
+      None {}
+
+fn unsafe(source: Box) -> Option<borrow Box>
+  let ~holder = Holder { option: None {} }
+  let ~alias = holder
+  alias.option = Some<Box> { value: source }
+  view(holder.option)
+
+let source = Box { value: 1 }
+let escaped: Option<borrow Box> = unsafe(source)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Box { value: i32 }
+
+fn view(option: Option<Box>) -> Option<borrow Box>
+  match(option)
+    Some<Box> { value }:
+      Some<borrow Box> { value }
+    None:
+      None {}
+
+fn unsafe(
+  source: Box,
+  keep_going: bool
+) -> Option<borrow Box>
+  var result: Option<Box> = None {}
+  var candidate: Option<Box> = None {}
+  while keep_going:
+    result = candidate
+    candidate = Some<Box> { value: source }
+  view(result)
+
+let source = Box { value: 1 }
+let escaped: Option<borrow Box> = unsafe(source, false)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Box { value: i32 }
+
+eff Stop
+  stop(resume) -> void
+
+fn view(option: Option<Box>) -> Option<borrow Box>
+  match(option)
+    Some<Box> { value }:
+      Some<borrow Box> { value }
+    None:
+      None {}
+
+fn unsafe(source: Box) -> Option<borrow Box>
+  var candidate: Option<Box> = None {}
+  try
+    candidate = Some<Box> { value: source }
+    Stop::stop()
+    None {}
+  Stop::stop(resume):
+    view(candidate)
+
+let source = Box { value: 1 }
+let escaped: Option<borrow Box> = unsafe(source)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+type Callback = fn() : () -> i32
+
+let escaped: Option<borrow Callback> =
+  Some<borrow Callback> { value: () => 1 }
+`),
+    ).toContain("TY0051");
+  });
+
+  it("allows fresh bounded aggregates containing explicit borrows", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj View { value: borrow Box }
+type Pair = (borrow Box, borrow Box)
+
+fn wrap(value: Box) -> View
+  View { value }
+
+fn unwrap(value: View) -> borrow Box
+  value.value
+
+fn pair(left: Box, right: Box) -> Pair
+  (left, right)
+`),
+    ).not.toThrow();
+  });
+
+  it("materializes ordinary read-only function arguments from borrows", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+fn read(value: Box) -> i32
+  value.value
+
+fn valid(value: borrow Box) -> i32
+  read(value)
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn identity(value: Box) -> Box
+  value
+
+fn invalid(value: borrow Box) -> Box
+  identity(value)
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn invalid(value: borrow Box) -> Box
+  let owned: Box = value
+  owned
+`),
+    ).toContain("TY0027");
+
+    expect(
+      diagnosticCodes(`
+trait Drawable
+  fn draw(self) -> i32
+
+val Pixel { value: i32 }
+
+impl Drawable for Pixel
+  fn draw(self) -> i32
+    self.value
+
+fn draw(shape: Drawable) -> i32
+  shape.draw()
+
+fn invalid(value: borrow Pixel) -> i32
+  draw(value)
+`),
+    ).toSatisfy(
+      (codes: readonly string[]) =>
+        codes.includes("TY0045") || codes.includes("TY0027"),
+    );
+  });
+
+  it("retains only nested borrowed fields in returned aggregates", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+obj View { loan: borrow Box, owned: Box }
+
+fn identity(value: View) -> View
+  value
+
+fn valid(source: Box) -> i32
+  let ~wrapped = View {
+    loan: source,
+    owned: Box { value: 1 }
+  }
+  let returned = identity(wrapped)
+  wrapped.owned = Box { value: 2 }
+  returned.loan.value
+`),
+    ).not.toThrow();
+  });
+
+  it("does not apply future value aliases to earlier call writes", () => {
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val Holder { empty: Option<borrow i32> }
+
+fn clear(~holder: Holder) -> void
+  holder.empty = None {}
+
+fn valid(value: borrow i32) -> Option<borrow i32>
+  let ~a = Holder { empty: None {} }
+  let ~b = Holder {
+    empty: Some<borrow i32> { value }
+  }
+  let retained = b.empty
+  clear(~a)
+  b = a
+  retained
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects fresh borrowed aggregates written directly into existing storage", () => {
+    expect(
+      diagnosticCodes(`
+val View { active: borrow i32 }
+obj Store { view: View }
+
+fn invalid(~store: Store, source: borrow i32) -> void
+  store.view = View { active: source }
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+val View { active: borrow i32 }
+obj Store { view: View }
+
+fn invalid(~store: Store, flag: bool, source: i32) -> void
+  store.view =
+    if flag:
+      View { active: source }
+    else:
+      View { active: source }
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Store { view: Option<borrow i32> }
+
+fn invalid(~store: Store, flag: bool, source: i32) -> void
+  store.view =
+    if flag:
+      Some<borrow i32> { value: source }
+    else:
+      None {}
+`),
+    ).toContain("TY0051");
+  });
+
+  it("tracks borrowed fields supplied by ordered object spreads", () => {
+    expect(
+      diagnosticCodes(`
+val Plain { active: i32 }
+val View { active: borrow i32 }
+
+fn invalid() -> View
+  let source = 1
+  let base = Plain { active: source }
+  View { ...base }
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+val Plain { active: i32 }
+val View { active: borrow i32 }
+obj Store { view: View }
+
+fn invalid(~store: Store, source: i32) -> void
+  let base = Plain { active: source }
+  store.view = View { ...base }
+`),
+    ).toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+val Plain { active: Box }
+val View { active: borrow Box }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn invalid(~source: Box) -> i32
+  let base = Plain { active: source }
+  let view = View { ...base }
+  mutate(~source)
+  view.active.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("handles cyclic borrowed aggregate initializers conservatively", () => {
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val View { active: Option<borrow i32> }
+obj Store { view: View }
+
+fn invalid(~store: Store) -> void
+  var first: Option<borrow i32> = None {}
+  var second: Option<borrow i32> = None {}
+  first = second
+  second = first
+  store.view = View { active: first }
+`),
+    ).toContain("TY0051");
+  });
+
+  it("rejects borrowed value-object widening to borrowed trait objects", () => {
+    expect(
+      diagnosticCodes(`
+trait Drawable
+  fn draw(self) -> i32
+
+val Pixel { value: i32 }
+
+impl Drawable for Pixel
+  fn draw(self) -> i32
+    self.value
+
+fn invalid(value: borrow Pixel) -> borrow Drawable
+  let widened: borrow Drawable = value
+  widened
+`),
+    ).toSatisfy(
+      (codes: readonly string[]) =>
+        codes.includes("TY0045") || codes.includes("TY0027"),
+    );
+  });
+
+  it("keeps borrowed fields in copied value containers independent", () => {
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val Holder { empty: Option<borrow i32> }
+
+fn valid(value: borrow i32) -> i32
+  let ~holder = Holder {
+    empty: Some<borrow i32> { value }
+  }
+  let copy = holder
+  holder.empty = None {}
+  match(copy.empty)
+    Some<borrow i32> { value: borrowed }:
+      borrowed + 0
+    None:
+      0
+`),
+    ).not.toThrow();
+  });
+
+  it("borrows tuple and structural values at their source storage", () => {
+    expect(
+      diagnosticCodes(`
+fn invalid() -> i32
+  var current = (1, 2)
+  let borrowed: borrow (i32, i32) = current
+  current = (3, 4)
+  borrowed.0
+`),
+    ).toContain("TY0048");
+
+    expect(
+      diagnosticCodes(`
+type Pair = { first: i32, second: i32 }
+
+fn invalid() -> i32
+  var current: Pair = { first: 1, second: 2 }
+  let borrowed: borrow Pair = current
+  current = { first: 3, second: 4 }
+  borrowed.first
+`),
+    ).toContain("TY0048");
+  });
+
+  it("uses the final object provider when spreads are overridden", () => {
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val View { active: Option<borrow i32> }
+
+fn mutate(~value: i32) -> void
+  value = value + 1
+
+fn valid(~source: i32) -> i32
+  let base = View {
+    active: Some<borrow i32> { value: source }
+  }
+  let cleared = View {
+    ...base,
+    active: None {}
+  }
+  mutate(~source)
+  match(cleared.active)
+    Some<borrow i32> { value }:
+      value + 0
+    None:
+      0
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val View { active: Option<borrow i32> }
+
+fn mutate(~value: i32) -> void
+  value = value + 1
+
+fn cleared(source: borrow i32) -> View
+  let base = View {
+    active: Some<borrow i32> { value: source }
+  }
+  View {
+    ...base,
+    active: None {}
+  }
+
+fn valid(~source: i32) -> i32
+  let cleared_view = cleared(source)
+  mutate(~source)
+  match(cleared_view.active)
+    Some<borrow i32> { value }:
+      value + 0
+    None:
+      0
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val View { active: Option<borrow i32> }
+
+fn mutate(~value: i32) -> void
+  value = value + 1
+
+fn invalid(~source: i32) -> i32
+  let base = View {
+    active: Some<borrow i32> { value: source }
+  }
+  let retained = View {
+    active: None {},
+    ...base
+  }
+  mutate(~source)
+  match(retained.active)
+    Some<borrow i32> { value }:
+      value + 0
+    None:
+      0
+`),
+    ).toContain("TY0048");
+  });
+
+  it("materializes plain fields when spreading explicitly borrowed values", () => {
+    expect(() =>
+      analyze(`
+val Pair { left: i32, right: i32 }
+
+fn copy(value: borrow Pair) -> Pair
+  Pair { ...value }
+
+fn valid() -> i32
+  let ~pair = Pair { left: 1, right: 2 }
+  let borrowed: borrow Pair = pair
+  let copied = copy(borrowed)
+  pair.left = 3
+  copied.left
+`),
+    ).not.toThrow();
+
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+val Inner { child: Box }
+val Outer { inner: Inner }
+
+fn mutate(~box: Box) -> void
+  box.value = 2
+
+fn copied(source: borrow Outer) -> Outer
+  Outer { ...source }
+
+fn valid(source: borrow Outer) -> i32
+  let ~copy = copied(source)
+  mutate(~copy.inner.child)
+  copy.inner.child.value
+`),
+    ).not.toThrow();
+
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+val View { active: Option<borrow i32>, count: i32 }
+
+fn copy(value: borrow View) -> View
+  View { ...value }
+
+fn mutate(~value: i32) -> void
+  value = value + 1
+
+fn invalid(~source: i32) -> i32
+  let view = View {
+    active: Some<borrow i32> { value: source },
+    count: 1
+  }
+  let copied = copy(view)
+  mutate(~source)
+  match(copied.active)
+    Some<borrow i32> { value }:
+      value + 0
+    None:
+      0
+`),
+    ).toContain("TY0048");
+  });
+
+  it("borrows unconstrained generic values at their inline slots", () => {
+    expect(
+      diagnosticCodes(`
+fn invalid<T>(first: T, second: T) -> bool
+  var current = first
+  let borrowed: borrow T = current
+  current = second
+  borrowed == first
+
+pub fn main() -> bool
+  invalid<i32>(1, 2)
+`),
+    ).toContain("TY0048");
+  });
+
+  it("treats trait-only intersections as allocation-backed handles", () => {
+    expect(() =>
+      analyze(`
+trait Readable
+  fn read(self) -> i32
+
+trait Named
+  fn name(self) -> i32
+
+fn consume(value: borrow (Readable & Named)) -> i32
+  0
+
+fn valid(
+  first: Readable & Named,
+  second: Readable & Named
+) -> i32
+  var current = first
+  let borrowed: borrow (Readable & Named) = current
+  current = second
+  consume(borrowed)
+`),
+    ).not.toThrow();
+  });
+
+  it("rejects live explicit borrows across suspending effects", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+eff Async
+  wait(resume) -> void
+
+fn view(value: Box) -> borrow Box
+  value
+
+fn invalid(value: Box): Async -> i32
+  let borrowed = view(value)
+  Async::wait()
+  borrowed.value
+`),
+    ).toContain("TY0052");
+  });
+
+  it("preserves borrowed type facts in ProgramCodegenView", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn view(value: Box) -> borrow Box
+  value
+`);
+    const signature = Array.from(
+      result.typing.functions.signatures,
+      ([, candidate]) => candidate,
+    ).find(
+      (candidate) =>
+        result.typing.arena.get(candidate.returnType).kind === "borrowed",
+    );
+    expect(signature).toBeDefined();
+
+    const program = buildProgramCodegenView([result]);
+    const inner = signature
+      ? program.types.getBorrowedInner(signature.returnType)
+      : undefined;
+    expect(inner).toBeDefined();
+    expect(
+      signature ? program.types.getRuntimeTypeId(signature.returnType) : -1,
+    ).toBe(inner);
+    expect(
+      signature ? program.types.getTypeDesc(signature.returnType) : undefined,
+    ).toEqual(
+      inner === undefined ? undefined : program.types.getTypeDesc(inner),
+    );
+  });
+
+  it("preserves explicit borrowed results across modules", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}views.voyd`]: `
+pub obj Box { api value: i32 }
+
+pub fn view(value: Box) -> borrow Box
+  value
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::views::{ Box, view }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn invalid(~value: Box) -> i32
+  let borrowed = view(value)
+  mutate(~value)
+  borrowed.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const dependency = analyzed.semantics.get("src::views");
+    const borrowedSignature = Array.from(
+      dependency?.typing.functions.signatures ?? [],
+      ([, signature]) => signature,
+    ).find(
+      (signature) =>
+        dependency?.typing.arena.get(signature.returnType).kind === "borrowed",
+    );
+
+    expect(borrowedSignature).toBeDefined();
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "TY0048",
+    );
+  });
+
+  it("preserves no-loan borrowed results across modules", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}views.voyd`]: `
+pub obj Some<T> { api value: T }
+pub obj None {}
+pub type Option<T> = Some<T> | None
+
+pub fn no_view() -> Option<borrow i32>
+  var result: Option<borrow i32> = None {}
+  result
+
+pub fn default_view(
+  value: Option<borrow i32> = None {}
+) -> Option<borrow i32>
+  value
+
+pub fn chained_default_view(
+  first: Option<borrow i32> = None {},
+  second: Option<borrow i32> = first
+) -> Option<borrow i32>
+  second
+
+pub val Holder {
+  api active: borrow i32,
+  api empty: Option<borrow i32>
+}
+
+pub fn selected_default_view(
+  source: borrow i32,
+  holder: Holder = Holder { active: source, empty: None {} }
+) -> Option<borrow i32>
+  holder.empty
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::views::{
+  Option,
+  no_view,
+  default_view,
+  chained_default_view,
+  selected_default_view
+}
+
+let source = 1
+let empty: Option<borrow i32> = no_view()
+let default_empty: Option<borrow i32> = default_view()
+let chained_empty: Option<borrow i32> = chained_default_view()
+let selected_empty: Option<borrow i32> = selected_default_view(source)
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const noViewContract = Array.from(
+      analyzed.semantics.get("src::views")?.borrowing.callables.values() ?? [],
+    ).find((contract) => contract.borrowedResult === "none");
+
+    expect(noViewContract?.borrowedResult).toBe("none");
+    expect(diagnostics).toEqual([]);
+  });
+
   it("keeps handle slots distinct from their referenced allocations", () => {
     expect(
       projectionPathsOverlap(
@@ -4483,6 +6548,35 @@ impl SharedCell<T>
 
 fn valid(cell: SharedCell<Box>) -> i32
   cell.with((value) => value.value)
+`),
+    ).not.toThrow();
+  });
+
+  it("infers aggregate results from SharedCell callbacks", () => {
+    expect(() =>
+      analyze(`
+obj State { done: bool }
+obj Plan { kind: i32 }
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+impl SharedCell<T>
+  fn with_mut<R>(self, body: fn(~T) : () -> R) -> R
+    let ~value = shared_cell_value(self)
+    body(~value)
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+fn valid(cell: SharedCell<State>) -> i32
+  let plan = cell.with_mut((~state) =>
+    if state.done:
+      Plan { kind: 0 }
+    else:
+      Plan { kind: 1 }
+  )
+  plan.kind
 `),
     ).not.toThrow();
   });

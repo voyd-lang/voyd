@@ -1,4 +1,7 @@
-import { createTypeCheckBudgetState, createTypingState } from "./typing/context.js";
+import {
+  createTypeCheckBudgetState,
+  createTypingState,
+} from "./typing/context.js";
 import type {
   CallArgumentPlanEntry,
   DependencySemantics,
@@ -57,7 +60,10 @@ export const monomorphizeProgram = ({
         HirExprId,
         ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
       >;
-      callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
+      callTypeArguments: ReadonlyMap<
+        HirExprId,
+        ReadonlyMap<string, readonly TypeId[]>
+      >;
       callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
       callTraitDispatches: ReadonlySet<HirExprId>;
       objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
@@ -77,7 +83,7 @@ export const monomorphizeProgram = ({
   };
 
   const parseFunctionInstanceKey = (
-    key: string
+    key: string,
   ): { symbol: SymbolId; typeArgs: TypeId[] } | undefined => {
     const match = key.match(/^(\d+)<(.*)>$/);
     if (!match) return undefined;
@@ -103,7 +109,9 @@ export const monomorphizeProgram = ({
     callerInstanceKey: string;
     typeArgs: readonly TypeId[];
   }): readonly TypeId[] => {
-    const parsed = parseFunctionInstanceKey(normalizeCallerInstanceKey(callerInstanceKey));
+    const parsed = parseFunctionInstanceKey(
+      normalizeCallerInstanceKey(callerInstanceKey),
+    );
     if (!parsed) {
       return typeArgs;
     }
@@ -117,30 +125,42 @@ export const monomorphizeProgram = ({
     }
     const substitution = new Map(
       typeParams.map(
-        (param, index) => [param.typeParam, parsed.typeArgs[index]!] as const
-      )
+        (param, index) => [param.typeParam, parsed.typeArgs[index]!] as const,
+      ),
     );
-    return typeArgs.map((typeArg) => callerCtx.arena.substitute(typeArg, substitution));
+    return typeArgs.map((typeArg) =>
+      callerCtx.arena.substitute(typeArg, substitution),
+    );
   };
 
   const stableModules = [...modules].sort((a, b) =>
-    a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true })
+    a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true }),
   );
 
-  const importTargetsByModule = new Map<string, Map<SymbolId, ProgramSymbolRef>>();
+  const importTargetsByModule = new Map<
+    string,
+    Map<SymbolId, ProgramSymbolRef>
+  >();
   stableModules.forEach((mod) => {
     const byLocal = new Map<SymbolId, ProgramSymbolRef>();
     mod.binding.imports.forEach((imp) => {
       if (!imp.target) return;
-      byLocal.set(imp.local, { moduleId: imp.target.moduleId, symbol: imp.target.symbol });
+      byLocal.set(imp.local, {
+        moduleId: imp.target.moduleId,
+        symbol: imp.target.symbol,
+      });
     });
     importTargetsByModule.set(mod.moduleId, byLocal);
   });
 
-  const resolveImportTarget = (ref: ProgramSymbolRef): ProgramSymbolRef | undefined =>
+  const resolveImportTarget = (
+    ref: ProgramSymbolRef,
+  ): ProgramSymbolRef | undefined =>
     importTargetsByModule.get(ref.moduleId)?.get(ref.symbol);
 
-  const canonicalSymbolRef = createCanonicalSymbolRefResolver({ resolveImportTarget });
+  const canonicalSymbolRef = createCanonicalSymbolRefResolver({
+    resolveImportTarget,
+  });
 
   const { moduleExports, dependencies } = buildDependencyIndex(semantics);
   const typingContexts = new Map<string, TypingContext>();
@@ -182,6 +202,12 @@ export const monomorphizeProgram = ({
     seen.add(typeId);
     const desc = ctx.arena.get(typeId);
     switch (desc.kind) {
+      case "borrowed":
+        return typeContainsUnknownPrimitive({
+          ctx,
+          typeId: desc.inner,
+          seen,
+        });
       case "primitive":
         return desc.name === "unknown";
       case "recursive":
@@ -195,7 +221,11 @@ export const monomorphizeProgram = ({
           typeContainsUnknownPrimitive({ ctx, typeId: arg, seen }),
         );
       case "fixed-array":
-        return typeContainsUnknownPrimitive({ ctx, typeId: desc.element, seen });
+        return typeContainsUnknownPrimitive({
+          ctx,
+          typeId: desc.element,
+          seen,
+        });
       case "structural-object":
         return desc.fields.some((field) =>
           typeContainsUnknownPrimitive({ ctx, typeId: field.type, seen }),
@@ -273,7 +303,10 @@ export const monomorphizeProgram = ({
       return [];
     }
     const functionType = calleeCtx.arena.get(scheme.body);
-    if (functionType.kind !== "function" || functionType.parameters.length === 0) {
+    if (
+      functionType.kind !== "function" ||
+      functionType.parameters.length === 0
+    ) {
       return undefined;
     }
     const receiverType = functionType.parameters[0]!.type;
@@ -283,15 +316,14 @@ export const monomorphizeProgram = ({
       variance: "invariant",
       allowUnknown: true,
     });
-    const match =
-      matchTarget.ok
-        ? matchTarget
-        : callerCtx.arena.unify(receiverType, traitType, {
-            location: callerCtx.hir.module.ast,
-            reason: "monomorphize trait impl method (trait match)",
-            variance: "invariant",
-            allowUnknown: true,
-          });
+    const match = matchTarget.ok
+      ? matchTarget
+      : callerCtx.arena.unify(receiverType, traitType, {
+          location: callerCtx.hir.module.ast,
+          reason: "monomorphize trait impl method (trait match)",
+          variance: "invariant",
+          allowUnknown: true,
+        });
     if (!match.ok) {
       return undefined;
     }
@@ -322,12 +354,18 @@ export const monomorphizeProgram = ({
     }
     const canonicalCallee = canonicalSymbolRef(calleeRef);
     const callee = semantics.get(canonicalCallee.moduleId);
-    const calleeCtx = callee ? typingContextFor(canonicalCallee.moduleId) : undefined;
+    const calleeCtx = callee
+      ? typingContextFor(canonicalCallee.moduleId)
+      : undefined;
     if (!callee || !calleeCtx) {
       return;
     }
-    const calleeSignature = callee.typing.functions.getSignature(canonicalCallee.symbol);
-    const calleeFunction = calleeCtx.functions.getFunction(canonicalCallee.symbol);
+    const calleeSignature = callee.typing.functions.getSignature(
+      canonicalCallee.symbol,
+    );
+    const calleeFunction = calleeCtx.functions.getFunction(
+      canonicalCallee.symbol,
+    );
     const typeParams = calleeSignature?.typeParams ?? [];
     if (!calleeSignature || !calleeFunction || typeParams.length === 0) {
       return;
@@ -345,7 +383,9 @@ export const monomorphizeProgram = ({
       typeArgs: [...typeArgs],
     });
     const substitution = new Map(
-      typeParams.map((param, index) => [param.typeParam, typeArgs[index]!] as const)
+      typeParams.map(
+        (param, index) => [param.typeParam, typeArgs[index]!] as const,
+      ),
     );
     typeGenericFunctionBody({
       symbol: canonicalCallee.symbol,
@@ -371,16 +411,18 @@ export const monomorphizeProgram = ({
     >();
     callerCtx.traits.getImplTemplates().forEach((template) => {
       const bucket = templateMethodsByImplSymbol.get(template.implSymbol) ?? [];
-      new Map([...template.methods, ...template.staticMethods]).forEach((implMethod, traitMethod) => {
-        const exists = bucket.some(
-          (method) =>
-            method.traitMethod === traitMethod &&
-            method.implMethod === implMethod,
-        );
-        if (!exists) {
-          bucket.push({ traitMethod, implMethod });
-        }
-      });
+      new Map([...template.methods, ...template.staticMethods]).forEach(
+        (implMethod, traitMethod) => {
+          const exists = bucket.some(
+            (method) =>
+              method.traitMethod === traitMethod &&
+              method.implMethod === implMethod,
+          );
+          if (!exists) {
+            bucket.push({ traitMethod, implMethod });
+          }
+        },
+      );
       templateMethodsByImplSymbol.set(template.implSymbol, bucket);
     });
 
@@ -388,10 +430,12 @@ export const monomorphizeProgram = ({
       impls.forEach((impl) => {
         const methods =
           templateMethodsByImplSymbol.get(impl.implSymbol) ??
-          Array.from(impl.methods.entries()).map(([traitMethod, implMethod]) => ({
-            traitMethod,
-            implMethod,
-          }));
+          Array.from(impl.methods.entries()).map(
+            ([traitMethod, implMethod]) => ({
+              traitMethod,
+              implMethod,
+            }),
+          );
         methods.forEach(({ traitMethod, implMethod }) => {
           const traitMethodImpl = callerCtx.traitMethodImpls.get(implMethod);
           if (
@@ -401,7 +445,10 @@ export const monomorphizeProgram = ({
           ) {
             return;
           }
-          const localCalleeRef = { moduleId: callerModuleId, symbol: implMethod };
+          const localCalleeRef = {
+            moduleId: callerModuleId,
+            symbol: implMethod,
+          };
           const canonicalCallee = canonicalSymbolRef(localCalleeRef);
           const calleeCtx = typingContextFor(canonicalCallee.moduleId);
           if (!calleeCtx) {
@@ -504,7 +551,9 @@ export const monomorphizeProgram = ({
       const callTypeArguments = callerCtx.callResolution.typeArguments;
       callTargets.forEach((targets, callId) => {
         targets.forEach((targetRef, callerInstanceKey) => {
-          const rawTypeArgs = callTypeArguments.get(callId)?.get(callerInstanceKey);
+          const rawTypeArgs = callTypeArguments
+            .get(callId)
+            ?.get(callerInstanceKey);
           if (!rawTypeArgs || rawTypeArgs.length === 0) {
             return;
           }
@@ -520,7 +569,11 @@ export const monomorphizeProgram = ({
               typeArgs,
             });
           }
-          requestInstantiation({ callerModuleId, calleeRef: targetRef, typeArgs });
+          requestInstantiation({
+            callerModuleId,
+            calleeRef: targetRef,
+            typeArgs,
+          });
         });
       });
 
@@ -534,8 +587,8 @@ export const monomorphizeProgram = ({
       }
 
       instantiationSources.forEach((instantiationInfo) => {
-        const sortedRefKeys = Array.from(instantiationInfo.keys()).sort((a, b) =>
-          a.localeCompare(b, undefined, { numeric: true })
+        const sortedRefKeys = Array.from(instantiationInfo.keys()).sort(
+          (a, b) => a.localeCompare(b, undefined, { numeric: true }),
         );
         sortedRefKeys.forEach((refKey) => {
           const instantiations = instantiationInfo.get(refKey);
@@ -546,11 +599,17 @@ export const monomorphizeProgram = ({
           if (!parsed || parsed.moduleId === callerModuleId) {
             return;
           }
-          const sortedInstantiations = Array.from(instantiations.entries()).sort(([a], [b]) =>
-            a.localeCompare(b, undefined, { numeric: true })
+          const sortedInstantiations = Array.from(
+            instantiations.entries(),
+          ).sort(([a], [b]) =>
+            a.localeCompare(b, undefined, { numeric: true }),
           );
           sortedInstantiations.forEach(([, typeArgs]) => {
-            requestInstantiation({ callerModuleId, calleeRef: parsed, typeArgs });
+            requestInstantiation({
+              callerModuleId,
+              calleeRef: parsed,
+              typeArgs,
+            });
           });
         });
       });
@@ -568,7 +627,9 @@ export const monomorphizeProgram = ({
     if (!callee || !calleeCtx) {
       return;
     }
-    const calleeSignature = callee.typing.functions.getSignature(calleeRef.symbol);
+    const calleeSignature = callee.typing.functions.getSignature(
+      calleeRef.symbol,
+    );
     const calleeFunction = calleeCtx.functions.getFunction(calleeRef.symbol);
     const typeParams = calleeSignature?.typeParams ?? [];
     if (!calleeSignature || !calleeFunction || typeParams.length === 0) {
@@ -577,12 +638,16 @@ export const monomorphizeProgram = ({
     if (request.typeArgs.length !== typeParams.length) {
       return;
     }
-    const instanceKey = formatFunctionInstanceKey(calleeRef.symbol, request.typeArgs);
+    const instanceKey = formatFunctionInstanceKey(
+      calleeRef.symbol,
+      request.typeArgs,
+    );
     if (!calleeCtx.functions.getInstanceExprTypes(instanceKey)) {
       const substitution = new Map(
         typeParams.map(
-          (param, index) => [param.typeParam, request.typeArgs[index]!] as const
-        )
+          (param, index) =>
+            [param.typeParam, request.typeArgs[index]!] as const,
+        ),
       );
       typeGenericFunctionBody({
         symbol: calleeRef.symbol,
@@ -607,9 +672,13 @@ export const monomorphizeProgram = ({
   });
 
   const instances = Array.from(instanceRequests.values()).sort((a, b) => {
-    const calleeOrder = a.callee.moduleId.localeCompare(b.callee.moduleId, undefined, {
-      numeric: true,
-    });
+    const calleeOrder = a.callee.moduleId.localeCompare(
+      b.callee.moduleId,
+      undefined,
+      {
+        numeric: true,
+      },
+    );
     if (calleeOrder !== 0) {
       return calleeOrder;
     }
@@ -641,7 +710,10 @@ export const monomorphizeProgram = ({
         HirExprId,
         ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
       >;
-      callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
+      callTypeArguments: ReadonlyMap<
+        HirExprId,
+        ReadonlyMap<string, readonly TypeId[]>
+      >;
       callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
       callTraitDispatches: ReadonlySet<HirExprId>;
       objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
@@ -675,7 +747,7 @@ export const monomorphizeProgram = ({
 };
 
 const buildDependencyIndex = (
-  semantics: Map<string, SemanticsPipelineResult>
+  semantics: Map<string, SemanticsPipelineResult>,
 ): {
   moduleExports: Map<string, ModuleExportTable>;
   dependencies: Map<string, DependencySemantics>;
@@ -694,7 +766,7 @@ const buildDependencyIndex = (
       decls: entry.binding.decls,
       overloads: collectOverloadOptions(
         entry.binding.overloads,
-        entry.binding.importedOverloadOptions
+        entry.binding.importedOverloadOptions,
       ),
       exports: entry.exports,
     });
@@ -770,13 +842,13 @@ const createTypingContextFactory = ({
 
 const collectOverloadOptions = (
   overloads: ReadonlyMap<number, { functions: readonly { symbol: number }[] }>,
-  imported?: ReadonlyMap<number, readonly number[]>
+  imported?: ReadonlyMap<number, readonly number[]>,
 ): Map<number, readonly number[]> => {
   const entries = new Map<number, readonly number[]>(
     Array.from(overloads.entries()).map(([id, set]) => [
       id,
       set.functions.map((fn) => fn.symbol),
-    ])
+    ]),
   );
   if (imported) {
     imported.forEach((symbols, id) => {

@@ -135,16 +135,16 @@
     },
     {
       "id": "typing.borrow-conflicts",
-      "title": "Exclusive mutable borrow diagnostics",
+      "title": "Mutable and explicit borrow diagnostics",
       "entry": "cases/typing/borrow-conflicts.voyd",
       "tags": ["typing", "borrowing", "diagnostics"],
       "cases": [
         {
           "id": "typing.borrowing.conflicting-active-accesses",
-          "title": "rejects simultaneous mutable accesses without rejecting retained ordinary aliases",
+          "title": "rejects overlapping mutable access and explicit borrow escapes without rejecting ordinary aliases",
           "expect": {
             "kind": "diagnostics",
-            "codes": ["TY0048"]
+            "codes": ["TY0048", "TY0051"]
           }
         }
       ]
@@ -172,6 +172,18 @@
           "title": "passes, returns, stores, and captures ordinary aliases without borrowing source slots",
           "entryName": "plain_values_do_not_borrow_source_slots",
           "expect": { "kind": "equals", "value": 8 }
+        },
+        {
+          "id": "runtime.borrowing.explicit-borrowed-result",
+          "title": "reads through an explicit borrowed result",
+          "entryName": "explicit_borrowed_result_reads_source",
+          "expect": { "kind": "equals", "value": 21 }
+        },
+        {
+          "id": "runtime.borrowing.nested-explicit-borrow",
+          "title": "preserves explicit borrows nested in optional payloads",
+          "entryName": "nested_explicit_borrow_preserves_payload",
+          "expect": { "kind": "equals", "value": 34 }
         },
         {
           "id": "runtime.borrowing.slot-allocation-distinction",
