@@ -1,5 +1,5 @@
 import { incrementCompilerPerfCounter } from "../../perf.js";
-import type { SourceSpan } from "../ids.js";
+import type { SourceSpan, SymbolId } from "../ids.js";
 import type {
   BorrowEndpointAccess,
   BorrowTypeComparison,
@@ -103,6 +103,63 @@ export type CallableBorrowSummary = {
   contract: CallableBorrowContract;
   namedContract?: PublicNamedBorrowContract;
   source?: CallableBorrowSummarySource;
+};
+
+export type EncodedCallableBorrowSummary = {
+  serialized: string;
+  serializedBytes: number;
+  summary: CallableBorrowSummary;
+};
+
+export type CallableBorrowSummarySerializationMode = {
+  purpose: "public-export" | "trait-declaration-contract";
+  dispatch: CallableBorrowDispatchKind;
+  privacy: "public-redacted" | "unredacted";
+  source: "included" | "omitted";
+};
+
+export type CallableBorrowSummarySerializationCache = {
+  readonly entries: Map<SymbolId, Map<string, EncodedCallableBorrowSummary>>;
+  readonly stats: {
+    hits: number;
+    misses: number;
+  };
+};
+
+export const createCallableBorrowSummarySerializationCache =
+  (): CallableBorrowSummarySerializationCache => ({
+    entries: new Map(),
+    stats: { hits: 0, misses: 0 },
+  });
+
+export const cachedCallableBorrowSummaryEncoding = ({
+  cache,
+  callable,
+  mode,
+  encode,
+}: {
+  cache: CallableBorrowSummarySerializationCache;
+  callable: SymbolId;
+  mode: CallableBorrowSummarySerializationMode;
+  encode: () => EncodedCallableBorrowSummary;
+}): EncodedCallableBorrowSummary => {
+  const modeKey = JSON.stringify(mode);
+  const cached = cache.entries.get(callable)?.get(modeKey);
+  if (cached) {
+    cache.stats.hits += 1;
+    incrementCompilerPerfCounter("borrowing.summary.serializationCacheHit");
+    return cached;
+  }
+
+  cache.stats.misses += 1;
+  incrementCompilerPerfCounter("borrowing.summary.serializationCacheMiss");
+  const encoded = encode();
+  const modes =
+    cache.entries.get(callable) ??
+    new Map<string, EncodedCallableBorrowSummary>();
+  modes.set(modeKey, encoded);
+  cache.entries.set(callable, modes);
+  return encoded;
 };
 
 export type CallableBorrowSummaryPrivacy = {
@@ -325,7 +382,7 @@ type WireCallableBorrowSummary =
   | WireCallableBorrowSummaryV3
   | WireCallableBorrowSummaryV4;
 
-export const serializeCallableBorrowSummary = ({
+export const encodeCallableBorrowSummary = ({
   contract,
   namedContract,
   dispatchHint,
@@ -339,7 +396,7 @@ export const serializeCallableBorrowSummary = ({
   publicAbstraction?: boolean;
   publicPrivacy?: CallableBorrowSummaryPrivacy;
   source?: CallableBorrowSummarySource;
-}): string => {
+}): EncodedCallableBorrowSummary => {
   const dispatch: CallableBorrowDispatchKind =
     dispatchHint ??
     (namedContract?.implementation !== undefined
@@ -375,13 +432,31 @@ export const serializeCallableBorrowSummary = ({
     ...(source ? { source: toWireSource(source) } : {}),
   };
   const serialized = canonicalJson(wire);
+  const serializedBytes = callableBorrowSummarySize(serialized);
   incrementCompilerPerfCounter("borrowing.summary.serializedCount");
   incrementCompilerPerfCounter(
     "borrowing.summary.serializedBytes",
-    callableBorrowSummarySize(serialized),
+    serializedBytes,
   );
-  return serialized;
+  return {
+    serialized,
+    serializedBytes,
+    summary: {
+      schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
+      version: CALLABLE_BORROW_SUMMARY_VERSION,
+      dispatch,
+      contract: fromWireContract(wire.contract),
+      ...(wire.namedContract
+        ? { namedContract: fromWireNamedContract(wire.namedContract) }
+        : {}),
+      ...(wire.source ? { source: fromWireSource(wire.source) } : {}),
+    },
+  };
 };
+
+export const serializeCallableBorrowSummary = (
+  options: Parameters<typeof encodeCallableBorrowSummary>[0],
+): string => encodeCallableBorrowSummary(options).serialized;
 
 const stripWireRegionDisjointness = (
   contract: WireContractV4,

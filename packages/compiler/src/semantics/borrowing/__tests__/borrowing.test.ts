@@ -8,6 +8,7 @@ import { parse } from "../../../parser/index.js";
 import {
   createBorrowingDependencyProjectionCache,
   projectBorrowingDependencies,
+  selectBorrowingDependencySemantics,
   semanticsPipeline,
   snapshotBorrowingDependencyProjectionCacheStats,
 } from "../../pipeline.js";
@@ -24,8 +25,11 @@ import { abstractTraitContractFromImplementation } from "../call-resolution.js";
 import {
   CALLABLE_BORROW_SUMMARY_SCHEMA,
   CALLABLE_BORROW_SUMMARY_VERSION,
+  cachedCallableBorrowSummaryEncoding,
   callableBorrowSummarySize,
+  createCallableBorrowSummarySerializationCache,
   deserializeCallableBorrowSummary,
+  encodeCallableBorrowSummary,
   serializeCallableBorrowSummary,
 } from "../callable-summary.js";
 
@@ -212,6 +216,82 @@ pub fn read(value: Box) -> i32
     );
     expect(afterAlternateContext.misses).toBe(afterSecond.misses + 1);
     expect(afterAlternateContext.hits).toBe(0);
+  });
+
+  it("assembles borrowing dependencies from graph and import edges", () => {
+    const dependency = analyze(`
+pub fn read() -> i32
+  1
+`);
+    const dependencies = new Map(
+      Array.from({ length: 100 }, (_, index) => [
+        `src::prior_${index}`,
+        dependency,
+      ]),
+    );
+    dependencies.set("src::direct", dependency);
+    dependencies.set("src::canonical_import", dependency);
+
+    const selected = selectBorrowingDependencySemantics({
+      dependencies,
+      directDependencyModuleIds: ["src::direct", "src::direct"],
+      importedModuleIds: ["src::canonical_import", "src::missing"],
+    });
+
+    expect(Array.from(selected.keys())).toEqual([
+      "src::direct",
+      "src::canonical_import",
+    ]);
+  });
+
+  it("serializes each immutable callable and export mode once", () => {
+    const cache = createCallableBorrowSummarySerializationCache();
+    const contract = {
+      parameters: [],
+      maySuspend: false,
+    };
+    let encodes = 0;
+    const encode = () => {
+      encodes += 1;
+      return encodeCallableBorrowSummary({ contract });
+    };
+    const publicMode = {
+      purpose: "public-export" as const,
+      dispatch: "ordinary" as const,
+      privacy: "unredacted" as const,
+      source: "omitted" as const,
+    };
+    const first = cachedCallableBorrowSummaryEncoding({
+      cache,
+      callable: 42,
+      mode: publicMode,
+      encode,
+    });
+    const repeated = cachedCallableBorrowSummaryEncoding({
+      cache,
+      callable: 42,
+      mode: publicMode,
+      encode,
+    });
+    cachedCallableBorrowSummaryEncoding({
+      cache,
+      callable: 42,
+      mode: { ...publicMode, privacy: "public-redacted" },
+      encode,
+    });
+    cachedCallableBorrowSummaryEncoding({
+      cache,
+      callable: 42,
+      mode: { ...publicMode, dispatch: "trait-declaration" },
+      encode,
+    });
+
+    expect(repeated).toBe(first);
+    expect(first.summary).toEqual(
+      deserializeCallableBorrowSummary(first.serialized),
+    );
+    expect(encodes).toBe(3);
+    expect(cache.stats).toEqual({ hits: 1, misses: 3 });
   });
 
   it("types mutable lambdas against explicitly borrowed callback parameters", () => {

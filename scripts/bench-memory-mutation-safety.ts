@@ -98,8 +98,17 @@ const count = (source: string, pattern: RegExp): number =>
 const measureMode = async (optimize: boolean) => {
   const compileMs: number[] = [];
   const compilerTotalMs: number[] = [];
+  const serializedSummaryCount: number[] = [];
   const serializedSummaryBytes: number[] = [];
+  const retainedSummaryCount: number[] = [];
   const retainedSummaryBytes: number[] = [];
+  const summarySerializationCacheHits: number[] = [];
+  const summarySerializationCacheMisses: number[] = [];
+  const dependencyAssemblyAvailableModules: number[] = [];
+  const dependencyAssemblyDirectEdges: number[] = [];
+  const dependencyAssemblyImportTargets: number[] = [];
+  const dependencyAssemblyEdgeCandidates: number[] = [];
+  const dependencyAssemblyProjectedModules: number[] = [];
   const dependencyProjectionCacheHits: number[] = [];
   const dependencyProjectionCacheMisses: number[] = [];
   const dependencyProjectionSummaryDecodes: number[] = [];
@@ -125,11 +134,38 @@ const measureMode = async (optimize: boolean) => {
       throw new Error("compiler did not emit a performance summary");
     }
     compilerTotalMs.push(summary.phasesMs.total ?? compileMs.at(-1)!);
+    serializedSummaryCount.push(
+      summary.counters["borrowing.summary.serializedCount"] ?? 0,
+    );
     serializedSummaryBytes.push(
       summary.counters["borrowing.summary.serializedBytes"] ?? 0,
     );
+    retainedSummaryCount.push(
+      summary.counters["borrowing.summary.retainedCount"] ?? 0,
+    );
     retainedSummaryBytes.push(
       summary.counters["borrowing.summary.retainedBytes"] ?? 0,
+    );
+    summarySerializationCacheHits.push(
+      summary.counters["borrowing.summary.serializationCacheHit"] ?? 0,
+    );
+    summarySerializationCacheMisses.push(
+      summary.counters["borrowing.summary.serializationCacheMiss"] ?? 0,
+    );
+    dependencyAssemblyAvailableModules.push(
+      summary.counters["borrowing.dependencyAssembly.availableModules"] ?? 0,
+    );
+    dependencyAssemblyDirectEdges.push(
+      summary.counters["borrowing.dependencyAssembly.directEdges"] ?? 0,
+    );
+    dependencyAssemblyImportTargets.push(
+      summary.counters["borrowing.dependencyAssembly.importTargets"] ?? 0,
+    );
+    dependencyAssemblyEdgeCandidates.push(
+      summary.counters["borrowing.dependencyAssembly.edgeCandidates"] ?? 0,
+    );
+    dependencyAssemblyProjectedModules.push(
+      summary.counters["borrowing.dependencyAssembly.projectedModules"] ?? 0,
     );
     dependencyProjectionCacheHits.push(
       summary.counters["borrowing.dependencyProjection.cacheHit"] ?? 0,
@@ -179,10 +215,38 @@ const measureMode = async (optimize: boolean) => {
     compileMedianMs: median(compileMs),
     compilerTotalMs,
     compilerTotalMedianMs: median(compilerTotalMs),
+    serializedSummaryCount,
+    serializedSummaryCountMedian: median(serializedSummaryCount),
     serializedSummaryBytes,
     serializedSummaryMedianBytes: median(serializedSummaryBytes),
+    retainedSummaryCount,
+    retainedSummaryCountMedian: median(retainedSummaryCount),
     retainedSummaryBytes,
     retainedSummaryMedianBytes: median(retainedSummaryBytes),
+    summarySerializationCacheHits,
+    summarySerializationCacheHitMedian: median(summarySerializationCacheHits),
+    summarySerializationCacheMisses,
+    summarySerializationCacheMissMedian: median(
+      summarySerializationCacheMisses,
+    ),
+    dependencyAssemblyAvailableModules,
+    dependencyAssemblyAvailableModuleMedian: median(
+      dependencyAssemblyAvailableModules,
+    ),
+    dependencyAssemblyDirectEdges,
+    dependencyAssemblyDirectEdgeMedian: median(dependencyAssemblyDirectEdges),
+    dependencyAssemblyImportTargets,
+    dependencyAssemblyImportTargetMedian: median(
+      dependencyAssemblyImportTargets,
+    ),
+    dependencyAssemblyEdgeCandidates,
+    dependencyAssemblyEdgeCandidateMedian: median(
+      dependencyAssemblyEdgeCandidates,
+    ),
+    dependencyAssemblyProjectedModules,
+    dependencyAssemblyProjectedModuleMedian: median(
+      dependencyAssemblyProjectedModules,
+    ),
     dependencyProjectionCacheHits,
     dependencyProjectionCacheHitMedian: median(dependencyProjectionCacheHits),
     dependencyProjectionCacheMisses,
@@ -303,7 +367,7 @@ console.log(
         summaryBytes:
           "compiler borrowing.summary.retainedBytes is the public snapshot footprint; serializedBytes records total serialization work; zero means the revision has no serialized public-summary format",
         dependencyProjection:
-          "cache hits/misses count immutable semantic-result projections; projection summary decodes/reuses count validated public payloads within cache misses; deserialized summaries count all schema-validation calls",
+          "assembly counters contrast the analyzed-prefix modules available with unique graph/import edge candidates and projected modules; cache hits/misses count immutable semantic-result projections; projection summary decodes/reuses count validated public payloads within cache misses; deserialized summaries count all schema-validation calls",
         allocation:
           "static generated Wasm GC allocation instruction sites plus repeated-run linear-memory growth",
         guardOverhead:

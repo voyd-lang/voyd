@@ -54,6 +54,48 @@ export const projectBorrowingDependencies = (
   return projected;
 };
 
+export const selectBorrowingDependencySemantics = ({
+  dependencies,
+  directDependencyModuleIds,
+  importedModuleIds,
+}: {
+  dependencies: ReadonlyMap<string, SemanticsPipelineResult> | undefined;
+  directDependencyModuleIds: Iterable<string>;
+  importedModuleIds: Iterable<string>;
+}): ReadonlyMap<string, SemanticsPipelineResult> => {
+  const selected = new Map<string, SemanticsPipelineResult>();
+  const directDependencies = Array.from(directDependencyModuleIds);
+  const importedModules = Array.from(importedModuleIds);
+  const dependencyIds = new Set([...directDependencies, ...importedModules]);
+  incrementCompilerPerfCounter(
+    "borrowing.dependencyAssembly.availableModules",
+    dependencies?.size ?? 0,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.dependencyAssembly.directEdges",
+    directDependencies.length,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.dependencyAssembly.importTargets",
+    importedModules.length,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.dependencyAssembly.edgeCandidates",
+    dependencyIds.size,
+  );
+  dependencyIds.forEach((moduleId) => {
+    const dependency = dependencies?.get(moduleId);
+    if (dependency) {
+      selected.set(moduleId, dependency);
+    }
+  });
+  incrementCompilerPerfCounter(
+    "borrowing.dependencyAssembly.projectedModules",
+    selected.size,
+  );
+  return selected;
+};
+
 export const createBorrowingDependencyProjectionCache =
   (): BorrowingDependencyProjectionCache => ({
     entries: new WeakMap(),
