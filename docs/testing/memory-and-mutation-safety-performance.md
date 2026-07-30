@@ -98,28 +98,28 @@ boundary.
 
 ## Precompiled std follow-up
 
-The V-448 branch now ships a compiler-ABI-versioned precompiled semantic snapshot
-for the 48 std modules reachable from the default prelude. Each sample below
-launches a new Node process, creates a new SDK, compiles the representative
-fixture, and exits. Source mode sets
+The V-448 branch now ships a compiler-ABI-versioned precompiled semantic
+snapshot for the 48 std modules reachable from the default prelude. Each sample
+below launches a new Node process, creates a new SDK, compiles the
+representative fixture, and exits. Source mode sets
 `VOYD_DISABLE_PRECOMPILED_STD_SNAPSHOT=1`. Both paths emit identical Wasm:
 37,821 bytes unoptimized
 (`d75204750eb7c80c6744dceba246a96879a9878881b63110e4b379160ab46f77`)
 and 1,112 bytes in release mode
 (`82ffc2152a22bd82a6e2ef939add5d5a8d17ccc28de80b80dd8d6c588a421710`).
 
-| Compile wall time, 7-sample median | Mode    | Source analysis | Precompiled std |                Delta |
-| ---------------------------------- | ------- | --------------: | --------------: | -------------------: |
-| Fresh process                      | none    |     1,974.79 ms |     1,154.91 ms | -819.88 ms (-41.52%) |
-| Fresh process                      | release |     2,460.82 ms |     1,586.48 ms | -874.34 ms (-35.53%) |
+| Compile wall time, 7-sample median | Mode    | Source analysis | Precompiled std |                  Delta |
+| ---------------------------------- | ------- | --------------: | --------------: | ---------------------: |
+| Fresh process                      | none    |     1,899.73 ms |       669.97 ms | -1,229.76 ms (-64.73%) |
+| Fresh process                      | release |     2,289.65 ms |     1,044.31 ms | -1,245.34 ms (-54.39%) |
 
-The checked-in portable artifact is 3,460,791 bytes. Median snapshot loading,
-which includes source-manifest verification, Brotli decompression, reference
-graph decoding, identity restoration, and validation, takes 732.93 ms
-unoptimized and 747.02 ms in release mode. Compiler performance counters prove
-the hit loads 48 precompiled graph modules and performs no
-`graph.load_module.std` work. Semantic analysis then recomputes only the
-application module.
+The checked-in hybrid artifact is 5,235,652 bytes. It includes both the
+canonical portable reference graph and the optional Node/V8 accelerator.
+Median snapshot loading, including source-manifest verification, decompression,
+identity restoration, and validation, takes 266.51 ms unoptimized and 269.90 ms
+in release mode. Compiler performance counters prove the hit loads 48
+precompiled graph modules and performs no `graph.load_module.std` work.
+Semantic analysis then recomputes only the application module.
 
 Reproduce this comparison with:
 
@@ -130,9 +130,9 @@ npm run bench:precompiled-std -- 7
 The original 350–500 ms whole-compile goal is not reachable with the current
 whole-program codegen and compiler-private snapshot shape. Even after std
 analysis is removed, restoring the complete HIR/typing/binding object graph
-accounts for roughly 0.74 seconds. The snapshot recovers most of the feature
-branch regression, but it does not return to the original V-448 baseline
-medians of 907.00 ms and 1,108.87 ms: fresh-process compilation remains 27.33%
-slower unoptimized and 43.07% slower in release mode. A smaller public
-package-contract format and separately reusable dependency codegen are the
-long-term path below this floor.
+accounts for roughly 0.27 seconds. The snapshot more than recovers the feature
+branch regression: against the original V-448 baseline medians of 907.00 ms
+and 1,108.87 ms, fresh-process compilation is 26.13% faster unoptimized and
+5.82% faster in release mode. A smaller public package-contract format and
+separately reusable dependency codegen are the long-term path below this
+floor.
