@@ -13,7 +13,7 @@ whenever the artifact is absent or fails validation.
 The artifact header includes:
 
 - the precompiled-std schema and version;
-- the compiler package/build identity;
+- the compiler's explicit precompiled-std compatibility ABI;
 - the canonical reference-graph/Brotli transport identity and optional
   Node/V8 accelerator schema;
 - the callable-borrow-summary schema and version;
@@ -44,7 +44,7 @@ noise.
 
 ## Generation and freshness
 
-Regenerate after changing the compiler snapshot schema, callable-summary
+Regenerate after changing the compiler snapshot ABI/schema, callable-summary
 schema, or non-test std sources:
 
 ```sh
@@ -62,10 +62,13 @@ The std test task runs the freshness check. The generated binary lives at
 published `@voyd-lang/std` package. It is generated from compiler analysis;
 there is no manually maintained semantic blob.
 
-Release versioning keeps the compiler identity source synchronized with
-`@voyd-lang/compiler` and regenerates the artifact whenever the compiler or std
-package is versioned. Compiler/std version skew rejects reuse and follows the
-source fallback.
+The compiler ABI is intentionally independent of the compiler package patch
+version, so compatible compiler releases keep using the published std
+artifact. A compiler-only release runs the freshness check and is blocked if
+its analysis would produce different snapshot content. In that case, bump
+`PRECOMPILED_STD_COMPILER_ABI_VERSION`, select std in the release plan, and
+regenerate and publish the artifact. Std releases regenerate it automatically.
+An ABI mismatch rejects reuse and follows the source fallback.
 
 The checked-in snapshot covers the default prelude graph. If an application
 imports another std module, that module follows the ordinary source-analysis

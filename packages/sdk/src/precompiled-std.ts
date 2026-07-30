@@ -8,7 +8,7 @@ import {
   constants as zlibConstants,
 } from "node:zlib";
 import {
-  PRECOMPILED_STD_COMPILER_BUILD_ID,
+  PRECOMPILED_STD_COMPILER_ABI_ID,
   PRECOMPILED_STD_OPTIONS_ID,
   PRECOMPILED_STD_SNAPSHOT_SCHEMA,
   PRECOMPILED_STD_SNAPSHOT_VERSION,
@@ -609,8 +609,8 @@ export const validatePrecompiledStdSnapshotHeader = (
   if (header.version !== PRECOMPILED_STD_SNAPSHOT_VERSION) {
     throw new SnapshotLoadError("schema-version");
   }
-  if (header.compilerBuildId !== PRECOMPILED_STD_COMPILER_BUILD_ID) {
-    throw new SnapshotLoadError("compiler-build");
+  if (header.compilerAbiId !== PRECOMPILED_STD_COMPILER_ABI_ID) {
+    throw new SnapshotLoadError("compiler-abi");
   }
   if (header.transportId !== PRECOMPILED_STD_TRANSPORT_ID) {
     throw new SnapshotLoadError("transport");
