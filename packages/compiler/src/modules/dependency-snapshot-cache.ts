@@ -47,6 +47,14 @@ export type PreparedDependencySnapshotReuse = {
   hit: boolean;
 };
 
+export type PreparedPrecompiledDependencySnapshot = {
+  previousSemantics: ReadonlyMap<string, SemanticsPipelineResult>;
+  typingState: {
+    arena: SemanticsPipelineResult["typing"]["arena"];
+    effectInterner: EffectInterner;
+  };
+};
+
 export const createCompilerDependencySnapshotCache =
   (): CompilerDependencySnapshotCache => ({});
 
@@ -104,6 +112,49 @@ export const prepareDependencySnapshotReuse = ({
     previousSemantics,
     typingState: { arena, effectInterner },
     hit: true,
+  };
+};
+
+export const preparePrecompiledDependencySnapshot = ({
+  graph,
+  snapshot,
+}: {
+  graph: ModuleGraph;
+  snapshot: ReusableDependencySemanticsSnapshot;
+}): PreparedPrecompiledDependencySnapshot => {
+  const snapshotModuleIds = new Set(snapshot.moduleIds);
+  const reusableStdModuleIds = Array.from(graph.modules)
+    .filter(([, module]) => module.path.namespace === "std")
+    .map(([moduleId]) => moduleId)
+    .filter((moduleId) => snapshotModuleIds.has(moduleId));
+
+  const arena = createTypeArena(snapshot.arena);
+  const effectInterner = createEffectInterner(snapshot.effectInterner);
+  const selectedSemantics = new Map(
+    reusableStdModuleIds.map((moduleId) => {
+      const semantics = snapshot.semantics.get(moduleId);
+      if (!semantics) {
+        throw new Error(
+          `precompiled std snapshot is missing semantics for ${moduleId}`,
+        );
+      }
+      return [moduleId, semantics] as const;
+    }),
+  );
+  const previousSemantics = cloneSemanticsMapForTypingState({
+    semantics: selectedSemantics,
+    arena,
+    effectInterner,
+  });
+  incrementCompilerPerfCounter("compiler.precompiled_std_snapshot.hit");
+  reusableStdModuleIds.forEach(() =>
+    incrementCompilerPerfCounter(
+      "compiler.precompiled_std_snapshot.reused_module.count",
+    ),
+  );
+  return {
+    previousSemantics,
+    typingState: { arena, effectInterner },
   };
 };
 

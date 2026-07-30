@@ -4,6 +4,13 @@ import type {
   MacroVariableBinding,
 } from "./types.js";
 
+export type MacroScopeSnapshot = {
+  parent?: MacroScope;
+  macros: ReadonlyMap<string, MacroDefinition>;
+  ambiguousMacros: ReadonlySet<string>;
+  variables: ReadonlyMap<string, MacroVariableBinding>;
+};
+
 export class MacroScope {
   #parent?: MacroScope;
   #macros = new Map<string, MacroDefinition>();
@@ -14,6 +21,32 @@ export class MacroScope {
     this.#parent = parent;
   }
 
+  snapshot(): MacroScopeSnapshot {
+    return {
+      parent: this.#parent,
+      macros: new Map(this.#macros),
+      ambiguousMacros: new Set(this.#ambiguousMacros),
+      variables: new Map(
+        Array.from(this.#variables, ([name, binding]) => [
+          name,
+          { ...binding },
+        ]),
+      ),
+    };
+  }
+
+  restore(snapshot: MacroScopeSnapshot): void {
+    this.#parent = snapshot.parent;
+    this.#macros = new Map(snapshot.macros);
+    this.#ambiguousMacros = new Set(snapshot.ambiguousMacros);
+    this.#variables = new Map(
+      Array.from(snapshot.variables, ([name, binding]) => [
+        name,
+        { ...binding },
+      ]),
+    );
+  }
+
   child(): MacroScope {
     return new MacroScope(this);
   }
@@ -22,10 +55,7 @@ export class MacroScope {
     const macros = new Map(this.#macros);
     const ambiguousMacros = new Set(this.#ambiguousMacros);
     const variables = new Map(
-      Array.from(this.#variables, ([name, binding]) => [
-        name,
-        { ...binding },
-      ]),
+      Array.from(this.#variables, ([name, binding]) => [name, { ...binding }]),
     );
     return () => {
       this.#macros = macros;

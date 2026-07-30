@@ -22,9 +22,11 @@ const expectCompileSuccess = (result: CompileResult): void => {
     return;
   }
 
-  throw new Error(result.diagnostics
-    .map((diagnostic) => `${diagnostic.span.file}: ${diagnostic.message}`)
-    .join("\n"));
+  throw new Error(
+    result.diagnostics
+      .map((diagnostic) => `${diagnostic.span.file}: ${diagnostic.message}`)
+      .join("\n"),
+  );
 };
 
 const compileBootstrapEntry = async ({
@@ -34,14 +36,16 @@ const compileBootstrapEntry = async ({
   target: string;
   entry: string;
 }): Promise<void> => {
-  expectCompileSuccess(await sdk.compile({
-    entryPath: resolve(target, "src", entry),
-    optimize: true,
-    roots: {
-      src: resolve(target, "src"),
-      pkgDirs: [resolve(repoRoot, "packages")],
-    },
-  }));
+  expectCompileSuccess(
+    await sdk.compile({
+      entryPath: resolve(target, "src", entry),
+      optimize: true,
+      roots: {
+        src: resolve(target, "src"),
+        pkgDirs: [resolve(repoRoot, "packages")],
+      },
+    }),
+  );
 };
 
 const writePackageFixture = async (packageSrcRoot: string): Promise<void> => {
@@ -111,12 +115,7 @@ const createConfiguredPkgDirFixture = async (): Promise<{
   const root = await mkdtemp(resolve(tmpdir(), "voyd-cli-pkg-dir-config-"));
   const packageRoot = resolve(root, "workspace", "apps", "consumer");
   const srcRoot = resolve(packageRoot, "src");
-  const packageSrcRoot = resolve(
-    packageRoot,
-    "voyd-packages",
-    "my_pkg",
-    "src",
-  );
+  const packageSrcRoot = resolve(packageRoot, "voyd-packages", "my_pkg", "src");
   const entryPath = resolve(srcRoot, "main.voyd");
   await mkdir(srcRoot, { recursive: true });
   await writePackageFixture(packageSrcRoot);
@@ -541,6 +540,45 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 
 describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   // SDK + integration own deep package-resolution semantics. CLI e2e keeps wiring checks.
+  it("loads bundled std semantics in a fresh CLI process", async () => {
+    assertCliRunnerAvailable();
+
+    const fixture = await createNestedEntryFixture();
+    try {
+      const result =
+        cliE2eRuntime === "source"
+          ? spawnSync(
+              process.execPath,
+              [
+                "--conditions=development",
+                "--import",
+                resolve(repoRoot, "node_modules/tsx/dist/loader.mjs"),
+                sourceCliPath,
+                "--run",
+                fixture.entryPath,
+              ],
+              {
+                cwd: fixture.root,
+                encoding: "utf8",
+                env: { ...process.env, VOYD_COMPILER_PERF: "1" },
+                timeout: CLI_E2E_TIMEOUT_MS,
+              },
+            )
+          : runCli(fixture.root, ["--run", fixture.entryPath], {
+              VOYD_COMPILER_PERF: "1",
+            });
+      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+      if (result.status !== 0) {
+        throw new Error(`voyd run failed: ${output}`);
+      }
+      expect(output).toContain('"compiler.precompiled_std_snapshot.hit":1');
+      expect(output).not.toContain("graph.load_module.std");
+    } finally {
+      await rm(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   it("keeps src-root imports when running nested entry files", async () => {
     assertCliRunnerAvailable();
 
@@ -640,10 +678,7 @@ describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 
     const fixture = await createConfiguredPkgDirFixture();
     try {
-      const result = runCli(fixture.cwd, [
-        "--emit-ir-ast",
-        fixture.entryPath,
-      ]);
+      const result = runCli(fixture.cwd, ["--emit-ir-ast", fixture.entryPath]);
       const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
 
       if (result.status !== 0) {
@@ -753,56 +788,66 @@ describe("voyd cli docs command", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 
 describe("voyd cli bootstrap command", () => {
   // Unit tests own scaffold contents. E2E proves CLI wiring and that each generated Voyd entry compiles.
-  it("scaffolds a vx-spa project", async () => {
-    assertCliRunnerAvailable();
+  it(
+    "scaffolds a vx-spa project",
+    async () => {
+      assertCliRunnerAvailable();
 
-    const root = await createFixture();
-    try {
-      const result = runCli(root, ["bootstrap", "demo-app"]);
-      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-      if (result.status !== 0) {
-        throw new Error(`voyd bootstrap failed: ${output}`);
+      const root = await createFixture();
+      try {
+        const result = runCli(root, ["bootstrap", "demo-app"]);
+        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+        if (result.status !== 0) {
+          throw new Error(`voyd bootstrap failed: ${output}`);
+        }
+
+        expect(output).toContain("Created vx-spa project");
+        expect(output).toContain("npm run dev");
+        const packageJson = JSON.parse(
+          await readFile(resolve(root, "demo-app", "package.json"), "utf8"),
+        ) as { scripts: Record<string, string> };
+        expect(packageJson.scripts.build).toBe(
+          "npm run typecheck && vite build",
+        );
+        await compileBootstrapEntry({
+          target: resolve(root, "demo-app"),
+          entry: "main.voyd",
+        });
+      } finally {
+        await rm(root, { recursive: true, force: true });
       }
+    },
+    BOOTSTRAP_E2E_TIMEOUT_MS,
+  );
 
-      expect(output).toContain("Created vx-spa project");
-      expect(output).toContain("npm run dev");
-      const packageJson = JSON.parse(
-        await readFile(resolve(root, "demo-app", "package.json"), "utf8"),
-      ) as { scripts: Record<string, string> };
-      expect(packageJson.scripts.build).toBe("npm run typecheck && vite build");
-      await compileBootstrapEntry({
-        target: resolve(root, "demo-app"),
-        entry: "main.voyd",
-      });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  }, BOOTSTRAP_E2E_TIMEOUT_MS);
+  it(
+    "scaffolds a compilable web-ssr project",
+    async () => {
+      assertCliRunnerAvailable();
 
-  it("scaffolds a compilable web-ssr project", async () => {
-    assertCliRunnerAvailable();
+      const root = await createFixture();
+      const target = resolve(root, "demo-app");
+      try {
+        const result = runCli(root, [
+          "bootstrap",
+          "demo-app",
+          "--template",
+          "web-ssr",
+        ]);
+        const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
+        if (result.status !== 0) {
+          throw new Error(`voyd bootstrap failed: ${output}`);
+        }
 
-    const root = await createFixture();
-    const target = resolve(root, "demo-app");
-    try {
-      const result = runCli(root, [
-        "bootstrap",
-        "demo-app",
-        "--template",
-        "web-ssr",
-      ]);
-      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-      if (result.status !== 0) {
-        throw new Error(`voyd bootstrap failed: ${output}`);
+        expect(output).toContain("Created web-ssr project");
+        await compileBootstrapEntry({ target, entry: "main.voyd" });
+        await compileBootstrapEntry({ target, entry: "client.voyd" });
+      } finally {
+        await rm(root, { recursive: true, force: true });
       }
-
-      expect(output).toContain("Created web-ssr project");
-      await compileBootstrapEntry({ target, entry: "main.voyd" });
-      await compileBootstrapEntry({ target, entry: "client.voyd" });
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  }, BOOTSTRAP_E2E_TIMEOUT_MS);
+    },
+    BOOTSTRAP_E2E_TIMEOUT_MS,
+  );
 });
 
 describe("voyd cli diagnostics output", { timeout: CLI_E2E_TIMEOUT_MS }, () => {

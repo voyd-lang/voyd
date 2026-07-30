@@ -79,7 +79,10 @@ export interface TypingResult {
   effects: EffectTable;
   resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
-  tailResumptions: ReadonlyMap<HirExprId, HirEffectHandlerClause["tailResumption"]>;
+  tailResumptions: ReadonlyMap<
+    HirExprId,
+    HirEffectHandlerClause["tailResumption"]
+  >;
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
   callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolRef>>;
   callArgumentPlans: ReadonlyMap<
@@ -87,13 +90,13 @@ export interface TypingResult {
     ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
   >;
   functionInstances: ReadonlyMap<string, TypeId>;
-  callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
+  callTypeArguments: ReadonlyMap<
+    HirExprId,
+    ReadonlyMap<string, readonly TypeId[]>
+  >;
   callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
   callTraitDispatches: ReadonlySet<HirExprId>;
-  borrowCallTargets: ReadonlyMap<
-    HirExprId,
-    ReadonlyMap<string, SymbolRef>
-  >;
+  borrowCallTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolRef>>;
   borrowCallArgumentPlans: ReadonlyMap<
     HirExprId,
     ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
@@ -104,8 +107,14 @@ export interface TypingResult {
     SymbolRefKey,
     ReadonlyMap<string, readonly TypeId[]>
   >;
-  functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
-  functionInstanceValueTypes: ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>;
+  functionInstanceExprTypes: ReadonlyMap<
+    string,
+    ReadonlyMap<HirExprId, TypeId>
+  >;
+  functionInstanceValueTypes: ReadonlyMap<
+    string,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
   traitImplsByNominal: ReadonlyMap<TypeId, readonly TraitImplInstance[]>;
   traitImplsByTrait: ReadonlyMap<SymbolId, readonly TraitImplInstance[]>;
   traitMethodImpls: ReadonlyMap<SymbolId, TraitMethodImpl>;
@@ -188,6 +197,18 @@ export interface CallResolution {
   traitDispatches: Set<HirExprId>;
 }
 
+export interface FunctionStoreSnapshot {
+  signatures: readonly [SymbolId, FunctionSignature][];
+  functions: readonly [SymbolId, HirFunction][];
+  instances: readonly [string, TypeId][];
+  instantiationInfo: readonly [
+    SymbolRefKey,
+    readonly [string, readonly TypeId[]][],
+  ][];
+  instanceExprTypes: readonly [string, readonly [HirExprId, TypeId][]][];
+  instanceValueTypes: readonly [string, readonly [SymbolId, TypeId][]][];
+}
+
 export class FunctionStore {
   #signatures = new Map<SymbolId, FunctionSignature>();
   #bySymbol = new Map<SymbolId, HirFunction>();
@@ -232,7 +253,7 @@ export class FunctionStore {
   cacheInstance(
     key: string,
     returnType: TypeId,
-    exprTypes: ReadonlyMap<HirExprId, TypeId>
+    exprTypes: ReadonlyMap<HirExprId, TypeId>,
   ): void {
     this.#instances.set(key, returnType);
     this.#instanceExprTypes.set(key, new Map(exprTypes));
@@ -240,7 +261,7 @@ export class FunctionStore {
 
   cacheInstanceValueTypes(
     key: string,
-    valueTypes: ReadonlyMap<SymbolId, TypeId>
+    valueTypes: ReadonlyMap<SymbolId, TypeId>,
   ): void {
     this.#instanceValueTypes.set(key, new Map(valueTypes));
   }
@@ -249,18 +270,22 @@ export class FunctionStore {
     return this.#instances.get(key);
   }
 
-  getInstanceExprTypes(key: string): ReadonlyMap<HirExprId, TypeId> | undefined {
+  getInstanceExprTypes(
+    key: string,
+  ): ReadonlyMap<HirExprId, TypeId> | undefined {
     return this.#instanceExprTypes.get(key);
   }
 
-  getInstanceValueTypes(key: string): ReadonlyMap<SymbolId, TypeId> | undefined {
+  getInstanceValueTypes(
+    key: string,
+  ): ReadonlyMap<SymbolId, TypeId> | undefined {
     return this.#instanceValueTypes.get(key);
   }
 
   recordInstantiation(
     symbolRefKey: SymbolRefKey,
     key: string,
-    typeArgs: readonly TypeId[]
+    typeArgs: readonly TypeId[],
   ): void {
     let bySymbol = this.#instantiationInfo.get(symbolRefKey);
     if (!bySymbol) {
@@ -284,12 +309,14 @@ export class FunctionStore {
     return new Map(this.#instances);
   }
 
-  snapshotInstantiationInfo(): Map<SymbolRefKey, Map<string, readonly TypeId[]>> {
+  snapshotInstantiationInfo(): Map<
+    SymbolRefKey,
+    Map<string, readonly TypeId[]>
+  > {
     return new Map(
-      Array.from(this.#instantiationInfo.entries()).map(([symbolRefKey, info]) => [
-        symbolRefKey,
-        new Map(info),
-      ])
+      Array.from(this.#instantiationInfo.entries()).map(
+        ([symbolRefKey, info]) => [symbolRefKey, new Map(info)],
+      ),
     );
   }
 
@@ -298,7 +325,7 @@ export class FunctionStore {
       Array.from(this.#instanceExprTypes.entries()).map(([key, exprs]) => [
         key,
         new Map(exprs),
-      ])
+      ]),
     );
   }
 
@@ -307,35 +334,64 @@ export class FunctionStore {
       Array.from(this.#instanceValueTypes.entries()).map(([key, types]) => [
         key,
         new Map(types),
-      ])
+      ]),
     );
   }
 
-  clone(): FunctionStore {
-    const copy = new FunctionStore();
-    this.#bySymbol.forEach((fn, symbol) => copy.#bySymbol.set(symbol, fn));
-    this.#signatures.forEach((signature, symbol) =>
-      copy.#signatures.set(symbol, cloneFunctionSignature(signature)),
+  snapshot(): FunctionStoreSnapshot {
+    return {
+      signatures: Array.from(
+        this.#signatures.entries(),
+        ([symbol, signature]) => [symbol, cloneFunctionSignature(signature)],
+      ),
+      functions: Array.from(this.#bySymbol.entries()),
+      instances: Array.from(this.#instances.entries()),
+      instantiationInfo: Array.from(
+        this.#instantiationInfo.entries(),
+        ([symbolRefKey, info]) => [
+          symbolRefKey,
+          Array.from(info.entries(), ([key, typeArgs]) => [key, [...typeArgs]]),
+        ],
+      ),
+      instanceExprTypes: Array.from(
+        this.#instanceExprTypes.entries(),
+        ([key, exprs]) => [key, Array.from(exprs.entries())],
+      ),
+      instanceValueTypes: Array.from(
+        this.#instanceValueTypes.entries(),
+        ([key, types]) => [key, Array.from(types.entries())],
+      ),
+    };
+  }
+
+  static fromSnapshot(snapshot: FunctionStoreSnapshot): FunctionStore {
+    const store = new FunctionStore();
+    snapshot.functions.forEach(([symbol, fn]) =>
+      store.#bySymbol.set(symbol, fn),
     );
-    this.#instances.forEach((type, key) => copy.#instances.set(key, type));
-    this.#instantiationInfo.forEach((info, symbolRefKey) =>
-      copy.#instantiationInfo.set(
+    snapshot.signatures.forEach(([symbol, signature]) =>
+      store.#signatures.set(symbol, cloneFunctionSignature(signature)),
+    );
+    snapshot.instances.forEach(([key, type]) =>
+      store.#instances.set(key, type),
+    );
+    snapshot.instantiationInfo.forEach(([symbolRefKey, info]) =>
+      store.#instantiationInfo.set(
         symbolRefKey,
-        new Map(
-          Array.from(info.entries()).map(([key, typeArgs]) => [
-            key,
-            [...typeArgs],
-          ]),
-        ),
+        new Map(info.map(([key, typeArgs]) => [key, [...typeArgs]])),
       ),
     );
-    this.#instanceExprTypes.forEach((exprs, key) =>
-      copy.#instanceExprTypes.set(key, new Map(exprs)),
+    snapshot.instanceExprTypes.forEach(([key, entries]) =>
+      store.#instanceExprTypes.set(key, new Map(entries)),
     );
-    this.#instanceValueTypes.forEach((types, key) =>
-      copy.#instanceValueTypes.set(key, new Map(types)),
+    snapshot.instanceValueTypes.forEach(([key, entries]) =>
+      store.#instanceValueTypes.set(key, new Map(entries)),
     );
-    return copy;
+    return store;
+  }
+
+  clone(): FunctionStore {
+    return FunctionStore.fromSnapshot(this.snapshot());
   }
 }
 
@@ -344,6 +400,14 @@ export interface BaseObjectInfo {
   nominal: TypeId;
   structural: TypeId;
   type: TypeId;
+}
+
+export interface ObjectStoreSnapshot {
+  base: BaseObjectInfo;
+  templates: readonly [SymbolId, ObjectTemplate][];
+  instances: readonly [string, ObjectTypeInfo][];
+  names: readonly [string, SymbolId][];
+  declarations: readonly [SymbolId, HirObjectDecl][];
 }
 
 export class ObjectStore {
@@ -453,22 +517,49 @@ export class ObjectStore {
     return this.#resolving.has(symbol);
   }
 
-  clone(): ObjectStore {
-    const copy = new ObjectStore();
-    copy.#base = { ...this.#base };
-    this.#templates.forEach((template, symbol) =>
-      copy.#templates.set(symbol, cloneObjectTemplate(template)),
-    );
-    this.#instances.forEach((info, key) =>
-      copy.#instances.set(key, cloneObjectTypeInfo(info)),
-    );
-    this.#byName.forEach((symbol, name) => copy.#byName.set(name, symbol));
-    this.#byNominal.forEach((info, nominal) =>
-      copy.#byNominal.set(nominal, cloneObjectTypeInfo(info)),
-    );
-    this.#decls.forEach((decl, symbol) => copy.#decls.set(symbol, decl));
-    return copy;
+  snapshot(): ObjectStoreSnapshot {
+    return {
+      base: { ...this.#base },
+      templates: Array.from(this.#templates.entries(), ([symbol, template]) => [
+        symbol,
+        cloneObjectTemplate(template),
+      ]),
+      instances: Array.from(this.#instances.entries(), ([key, info]) => [
+        key,
+        cloneObjectTypeInfo(info),
+      ]),
+      names: Array.from(this.#byName.entries()),
+      declarations: Array.from(this.#decls.entries()),
+    };
   }
+
+  static fromSnapshot(snapshot: ObjectStoreSnapshot): ObjectStore {
+    const store = new ObjectStore();
+    store.#base = { ...snapshot.base };
+    snapshot.templates.forEach(([symbol, template]) =>
+      store.#templates.set(symbol, cloneObjectTemplate(template)),
+    );
+    snapshot.instances.forEach(([key, info]) => {
+      const cloned = cloneObjectTypeInfo(info);
+      store.#instances.set(key, cloned);
+      store.#byNominal.set(cloned.nominal, cloned);
+    });
+    snapshot.names.forEach(([name, symbol]) => store.#byName.set(name, symbol));
+    snapshot.declarations.forEach(([symbol, declaration]) =>
+      store.#decls.set(symbol, declaration),
+    );
+    return store;
+  }
+
+  clone(): ObjectStore {
+    return ObjectStore.fromSnapshot(this.snapshot());
+  }
+}
+
+export interface TraitStoreSnapshot {
+  declarations: readonly [SymbolId, HirTraitDecl][];
+  names: readonly [string, SymbolId][];
+  implTemplates: readonly TraitImplTemplate[];
 }
 
 export class TraitStore {
@@ -511,11 +602,11 @@ export class TraitStore {
     template: TraitImplTemplate;
     conflictsWith: (
       existing: TraitImplTemplate,
-      candidate: TraitImplTemplate
+      candidate: TraitImplTemplate,
     ) => boolean;
   }): TraitImplTemplate | undefined {
     const conflict = this.getImplTemplatesForTrait(template.traitSymbol).find(
-      (existing) => conflictsWith(existing, template)
+      (existing) => conflictsWith(existing, template),
     );
     if (conflict) {
       return conflict;
@@ -532,15 +623,38 @@ export class TraitStore {
     return this.#implTemplatesByTrait.get(symbol) ?? [];
   }
 
-  clone(): TraitStore {
-    const copy = new TraitStore();
-    this.#decls.forEach((decl, symbol) => copy.#decls.set(symbol, decl));
-    this.#byName.forEach((symbol, name) => copy.#byName.set(name, symbol));
-    this.#implTemplates.forEach((template) =>
-      copy.registerImplTemplate(cloneTraitImplTemplate(template)),
-    );
-    return copy;
+  snapshot(): TraitStoreSnapshot {
+    return {
+      declarations: Array.from(this.#decls.entries()),
+      names: Array.from(this.#byName.entries()),
+      implTemplates: this.#implTemplates.map(cloneTraitImplTemplate),
+    };
   }
+
+  static fromSnapshot(snapshot: TraitStoreSnapshot): TraitStore {
+    const store = new TraitStore();
+    snapshot.declarations.forEach(([symbol, declaration]) =>
+      store.#decls.set(symbol, declaration),
+    );
+    snapshot.names.forEach(([name, symbol]) => store.#byName.set(name, symbol));
+    snapshot.implTemplates.forEach((template) =>
+      store.registerImplTemplate(cloneTraitImplTemplate(template)),
+    );
+    return store;
+  }
+
+  clone(): TraitStore {
+    return TraitStore.fromSnapshot(this.snapshot());
+  }
+}
+
+export interface TypeAliasStoreSnapshot {
+  templates: readonly [SymbolId, TypeAliasTemplate][];
+  instances: readonly [string, TypeId][];
+  instanceSymbols: readonly [TypeId, readonly SymbolId[]][];
+  validatedInstances: readonly string[];
+  names: readonly [string, SymbolId][];
+  failedInstantiations: readonly string[];
 }
 
 export class TypeAliasStore {
@@ -656,25 +770,54 @@ export class TypeAliasStore {
     return this.#instances.entries();
   }
 
-  clone(): TypeAliasStore {
-    const copy = new TypeAliasStore();
-    this.#templates.forEach((template, symbol) =>
-      copy.#templates.set(symbol, {
+  snapshot(): TypeAliasStoreSnapshot {
+    return {
+      templates: Array.from(this.#templates.entries(), ([symbol, template]) => [
+        symbol,
+        {
+          symbol: template.symbol,
+          params: template.params.map((param) => ({ ...param })),
+          target: template.target,
+        },
+      ]),
+      instances: Array.from(this.#instances.entries()),
+      instanceSymbols: Array.from(
+        this.#instanceSymbols.entries(),
+        ([type, symbols]) => [type, Array.from(symbols)],
+      ),
+      validatedInstances: Array.from(this.#validatedInstances),
+      names: Array.from(this.#byName.entries()),
+      failedInstantiations: Array.from(this.#failedInstantiations),
+    };
+  }
+
+  static fromSnapshot(snapshot: TypeAliasStoreSnapshot): TypeAliasStore {
+    const store = new TypeAliasStore();
+    snapshot.templates.forEach(([symbol, template]) =>
+      store.#templates.set(symbol, {
         symbol: template.symbol,
         params: template.params.map((param) => ({ ...param })),
         target: template.target,
       }),
     );
-    this.#instances.forEach((type, key) => copy.#instances.set(key, type));
-    this.#instanceSymbols.forEach((symbols, type) =>
-      copy.#instanceSymbols.set(type, new Set(symbols)),
+    snapshot.instances.forEach(([key, type]) =>
+      store.#instances.set(key, type),
     );
-    this.#validatedInstances.forEach((key) => copy.#validatedInstances.add(key));
-    this.#byName.forEach((symbol, name) => copy.#byName.set(name, symbol));
-    this.#failedInstantiations.forEach((key) =>
-      copy.#failedInstantiations.add(key),
+    snapshot.instanceSymbols.forEach(([type, symbols]) =>
+      store.#instanceSymbols.set(type, new Set(symbols)),
     );
-    return copy;
+    snapshot.validatedInstances.forEach((key) =>
+      store.#validatedInstances.add(key),
+    );
+    snapshot.names.forEach(([name, symbol]) => store.#byName.set(name, symbol));
+    snapshot.failedInstantiations.forEach((key) =>
+      store.#failedInstantiations.add(key),
+    );
+    return store;
+  }
+
+  clone(): TypeAliasStore {
+    return TypeAliasStore.fromSnapshot(this.snapshot());
   }
 }
 
@@ -851,7 +994,9 @@ const cloneObjectField = (field: ObjectField): ObjectField => ({
   name: field.name,
   type: field.type,
   optional: field.optional,
-  declaringParams: field.declaringParams ? [...field.declaringParams] : undefined,
+  declaringParams: field.declaringParams
+    ? [...field.declaringParams]
+    : undefined,
   visibility: field.visibility ? { ...field.visibility } : undefined,
   owner: field.owner,
   packageId: field.packageId,

@@ -103,6 +103,10 @@ const stdVersionSourcePath = path.join(
   repoRoot,
   "packages/std/src/version.voyd",
 );
+const compilerVersionSourcePath = path.join(
+  repoRoot,
+  "packages/compiler/src/version.ts",
+);
 const releaseNpmCache =
   process.env.NPM_CONFIG_CACHE ??
   path.join(os.tmpdir(), "voyd-release-npm-cache");
@@ -157,6 +161,18 @@ const syncInternalDependencyRanges = ({ packageJson, versionPlan }) => {
   return changed;
 };
 
+export const replaceStdSourceVersion = ({ source, version }) =>
+  source.replace(
+    /(pub fn (?:std_version|language_version)\(\) -> String\s+)"[^"]+"/g,
+    `$1"${version}"`,
+  );
+
+export const replaceCompilerSourceVersion = ({ source, version }) =>
+  source.replace(
+    /export const VOYD_COMPILER_VERSION = "[^"]+" as const;/,
+    `export const VOYD_COMPILER_VERSION = "${version}" as const;`,
+  );
+
 const syncStdSourceVersion = ({ versionPlan }) => {
   const nextVersion = versionPlan.get("@voyd-lang/std");
   if (!nextVersion) {
@@ -164,16 +180,35 @@ const syncStdSourceVersion = ({ versionPlan }) => {
   }
 
   const source = fs.readFileSync(stdVersionSourcePath, "utf8");
-  const updated = source.replace(
-    /(pub fn (?:std_version|language_version)\(\) -> String\s+)"[^"]+"/g,
-    `$1"${nextVersion}"`,
-  );
+  const updated = replaceStdSourceVersion({
+    source,
+    version: nextVersion,
+  });
 
   if (updated === source) {
     return false;
   }
 
   fs.writeFileSync(stdVersionSourcePath, updated);
+  return true;
+};
+
+const syncCompilerSourceVersion = ({ versionPlan }) => {
+  const nextVersion = versionPlan.get("@voyd-lang/compiler");
+  if (!nextVersion) {
+    return false;
+  }
+
+  const source = fs.readFileSync(compilerVersionSourcePath, "utf8");
+  const updated = replaceCompilerSourceVersion({
+    source,
+    version: nextVersion,
+  });
+  if (updated === source) {
+    return false;
+  }
+
+  fs.writeFileSync(compilerVersionSourcePath, updated);
   return true;
 };
 
@@ -218,11 +253,26 @@ export const versionSelectedTargets = ({ targetNames, bump, version }) => {
       `[release] Updated packages/std/src/version.voyd for @voyd-lang/std\n`,
     );
   }
+  if (syncCompilerSourceVersion({ versionPlan })) {
+    changedFiles += 1;
+    process.stdout.write(
+      `[release] Updated packages/compiler/src/version.ts for @voyd-lang/compiler\n`,
+    );
+  }
 
   runCommand({
     command: "npm",
     args: ["install", "--package-lock-only", "--ignore-scripts"],
   });
+  if (
+    versionPlan.has("@voyd-lang/compiler") ||
+    versionPlan.has("@voyd-lang/std")
+  ) {
+    runCommand({
+      command: "npm",
+      args: ["run", "generate:std-snapshot"],
+    });
+  }
 
   process.stdout.write(
     `[release] Updated ${changedFiles} manifest(s): ${nextVersions.join(", ")}\n`,

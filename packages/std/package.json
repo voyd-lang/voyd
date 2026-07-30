@@ -9,15 +9,16 @@
   },
   "files": [
     "src",
-    "dist"
+    "dist",
+    "precompiled"
   ],
   "scripts": {
     "build": "node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/.placeholder','standard library source bundle');\"",
     "clean": "rm -rf dist",
     "typecheck": "echo 'no types for voyd std'",
-    "test": "VOYD_USE_SRC=1 node ../../scripts/voyd test ./src --fail-empty-tests",
+    "test": "npm run --prefix ../.. check:std-snapshot && VOYD_USE_SRC=1 node ../../scripts/voyd test ./src --fail-empty-tests",
     "lint": "echo 'no lint configured'",
-    "prepack": "npm run clean && npm run build",
+    "prepack": "npm run --prefix ../.. check:std-snapshot && npm run clean && npm run build",
     "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"
   }
 }

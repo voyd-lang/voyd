@@ -11,7 +11,7 @@ import {
 export * from "./pipeline-shared.js";
 
 export const loadModuleGraph = async (
-  options: LoadModulesOptions
+  options: LoadModulesOptions,
 ): Promise<ModuleGraph> => {
   const host = options.host ?? createFsModuleHost();
   return buildModuleGraph({
@@ -19,10 +19,11 @@ export const loadModuleGraph = async (
     host,
     roots: options.roots,
     includeTests: options.includeTests,
+    preloadedModules: options.preloadedModules,
   });
 };
 
 export const compileProgram = (
-  options: CompileProgramOptions
+  options: CompileProgramOptions,
 ): Promise<CompileProgramResult> =>
   compileProgramWithLoader(options, loadModuleGraph);

@@ -95,3 +95,33 @@ Runtime and generated-code costs remain bounded:
 Future work may reduce analysis latency or deduplicate snapshot payloads, but
 doing so must preserve the public summary schema and `ProgramCodegenView`
 boundary.
+
+## Precompiled std follow-up
+
+The V-448 branch now ships a compiler-versioned precompiled semantic snapshot
+for the 48 std modules reachable from the default prelude. Each sample below
+launches a new Node process, creates a new SDK, compiles the representative
+fixture, and exits. Source mode sets
+`VOYD_DISABLE_PRECOMPILED_STD_SNAPSHOT=1`. Both paths emit identical Wasm:
+37,821 bytes unoptimized and 1,112 bytes in release mode.
+
+| Compile wall time, 7-sample median | Mode    | Source analysis | Precompiled std |                  Delta |
+| ---------------------------------- | ------- | --------------: | --------------: | ---------------------: |
+| Fresh process                      | none    |     1,999.90 ms |       694.79 ms | -1,305.11 ms (-65.26%) |
+| Fresh process                      | release |     2,440.59 ms |     1,077.15 ms | -1,363.44 ms (-55.86%) |
+
+The checked-in artifact is 1,783,978 bytes. On a representative fresh load,
+source-manifest verification, decompression, identity restoration, and
+validation take about 280 ms. Compiler performance counters prove the hit loads
+48 precompiled graph modules and performs no `graph.load_module.std` work.
+Semantic analysis then recomputes only the application module.
+
+The original 350–500 ms whole-compile goal is not reachable with the current
+whole-program codegen and compiler-private snapshot shape. Even after std
+analysis is removed, representative emission costs about 260–370 ms and
+restoring the complete HIR/typing/binding object graph costs about 280 ms. The
+snapshot nevertheless brings the new branch within the intended merge gate:
+against the original V-448 baseline medians of 907.00 ms and 1,108.87 ms, the
+fresh-process result is about 23.4% faster unoptimized and 2.9% faster in
+release mode. A smaller public package-contract format and separately reusable
+dependency codegen are the long-term path below this floor.

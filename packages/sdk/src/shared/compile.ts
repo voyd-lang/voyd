@@ -4,10 +4,15 @@ import { DiagnosticError } from "@voyd-lang/compiler/diagnostics/index.js";
 import {
   commitDependencySnapshot,
   createCompilerDependencySnapshotCache,
+  preparePrecompiledDependencySnapshot,
   prepareDependencySnapshotReuse,
   type CompilerDependencySnapshotCache,
 } from "@voyd-lang/compiler/modules/dependency-snapshot-cache.js";
-import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
+import type { RestoredPrecompiledStdSnapshot } from "@voyd-lang/compiler/modules/precompiled-std-snapshot.js";
+import type {
+  ModuleHost,
+  ModuleRoots,
+} from "@voyd-lang/compiler/modules/types.js";
 import {
   analyzeModules,
   emitProgram,
@@ -40,7 +45,9 @@ export type CompileArtifactsFailure = {
   diagnostics: Diagnostic[];
 };
 
-export type CompileArtifacts = CompileArtifactsSuccess | CompileArtifactsFailure;
+export type CompileArtifacts =
+  | CompileArtifactsSuccess
+  | CompileArtifactsFailure;
 
 export type CompilerReuseCache = CompilerDependencySnapshotCache;
 
@@ -63,6 +70,7 @@ export const compileWithLoader = async ({
   boundaryExports,
   externalDeclarations,
   cache,
+  precompiledStd,
   setupPhasesMs,
   finalizeSuccess,
 }: {
@@ -79,6 +87,7 @@ export const compileWithLoader = async ({
   boundaryExports?: BoundaryExportsOption;
   externalDeclarations?: boolean;
   cache?: CompilerReuseCache;
+  precompiledStd?: RestoredPrecompiledStdSnapshot;
   setupPhasesMs?: Readonly<Record<string, number>>;
   finalizeSuccess?: (
     result: CompileArtifactsSuccess,
@@ -112,6 +121,7 @@ export const compileWithLoader = async ({
         roots,
         host,
         includeTests: shouldIncludeTests,
+        preloadedModules: precompiledStd?.modules,
       });
       perf.mark("loadModuleGraph", loadStartedAt);
     } catch (error) {
@@ -153,6 +163,13 @@ export const compileWithLoader = async ({
       roots,
       includeTests: shouldIncludeTests,
     });
+    const precompiledDependencySnapshot =
+      !dependencySnapshotReuse.hit && precompiledStd
+        ? preparePrecompiledDependencySnapshot({
+            graph,
+            snapshot: precompiledStd.dependencySnapshot,
+          })
+        : undefined;
 
     const analyzeStartedAt = perf.start();
     const {
@@ -165,8 +182,12 @@ export const compileWithLoader = async ({
       includeTests: shouldIncludeTests,
       testScope: scopedTestScope,
       captureDependencySnapshot: Boolean(dependencySnapshotReuse.key),
-      previousSemantics: dependencySnapshotReuse.previousSemantics,
-      typingState: dependencySnapshotReuse.typingState,
+      previousSemantics:
+        dependencySnapshotReuse.previousSemantics ??
+        precompiledDependencySnapshot?.previousSemantics,
+      typingState:
+        dependencySnapshotReuse.typingState ??
+        precompiledDependencySnapshot?.typingState,
     });
     perf.mark("analyzeModules", analyzeStartedAt);
     const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
@@ -202,12 +223,14 @@ export const compileWithLoader = async ({
           return perf.complete({ success: false, diagnostics: allDiagnostics });
         }
 
-        return perf.complete(await finalize({
-          success: true,
-          wasm: testResult.wasm,
-          tests: testCases,
-          testsWasm: testResult.wasm,
-        }));
+        return perf.complete(
+          await finalize({
+            success: true,
+            wasm: testResult.wasm,
+            tests: testCases,
+            testsWasm: testResult.wasm,
+          }),
+        );
       }
 
       const emitStartedAt = perf.start();
@@ -243,12 +266,14 @@ export const compileWithLoader = async ({
         testsWasm = testResult.wasm;
       }
 
-      return perf.complete(await finalize({
-        success: true,
-        wasm: wasmResult.wasm,
-        tests: testCases,
-        testsWasm,
-      }));
+      return perf.complete(
+        await finalize({
+          success: true,
+          wasm: wasmResult.wasm,
+          tests: testCases,
+          testsWasm,
+        }),
+      );
     } catch (error) {
       const codegenDiagnostics =
         error instanceof DiagnosticError

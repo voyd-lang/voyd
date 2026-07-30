@@ -4,7 +4,10 @@ import binaryen from "binaryen";
 import { createFsModuleHost } from "@voyd-lang/compiler/modules/fs-host.js";
 import { createMemoryModuleHost } from "@voyd-lang/compiler/modules/memory-host.js";
 import { createNodePathAdapter } from "@voyd-lang/compiler/modules/node-path-adapter.js";
-import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
+import type {
+  ModuleHost,
+  ModuleRoots,
+} from "@voyd-lang/compiler/modules/types.js";
 import { loadModuleGraph } from "@voyd-lang/compiler/pipeline.js";
 import { isCompilerPerfEnabled } from "@voyd-lang/compiler/perf.js";
 import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
@@ -27,6 +30,7 @@ import {
   diagnosticsFromUnknownError,
 } from "./shared/diagnostics.js";
 import { detectSrcRootForPath } from "./shared/source-root.js";
+import { loadPrecompiledStdSnapshot } from "./precompiled-std.js";
 import type {
   CompileOptions,
   CompileResult,
@@ -37,6 +41,7 @@ import type {
 } from "./shared/types.js";
 
 export { detectSrcRootForPath } from "./shared/source-root.js";
+export { snapshotPrecompiledStdLoadStats } from "./precompiled-std.js";
 export {
   findVoydPackageAdapterSpecifiers,
   loadVoydPackageAdapters,
@@ -198,7 +203,13 @@ const waitForTcpPort = async ({
     : new Error(`timed out waiting for ${host}:${port}`);
 };
 
-const probeTcpPort = ({ host, port }: { host: string; port: number }): Promise<void> =>
+const probeTcpPort = ({
+  host,
+  port,
+}: {
+  host: string;
+  port: number;
+}): Promise<void> =>
   new Promise((resolve, reject) => {
     const socket = net.createConnection({ host, port });
     socket.once("connect", () => {
@@ -302,6 +313,22 @@ const compileSdk = async (
       name: "sdkSetup.createHost",
       startedAt: hostStartedAt,
     });
+    const precompiledStdStartedAt = perfEnabled ? performance.now() : 0;
+    const entryIsInStd =
+      roots.std !== undefined &&
+      isPathWithinRoot({ root: roots.std, candidate: entryPath });
+    const precompiledStd = entryIsInStd
+      ? undefined
+      : await loadPrecompiledStdSnapshot({
+          stdRoot: roots.std!,
+          includeTests: options.includeTests || options.testsOnly,
+        });
+    recordSetupPhase({
+      phasesMs: setupPhasesMs,
+      enabled: perfEnabled,
+      name: "sdkSetup.loadPrecompiledStd",
+      startedAt: precompiledStdStartedAt,
+    });
     recordSetupPhase({
       phasesMs: setupPhasesMs,
       enabled: perfEnabled,
@@ -327,6 +354,7 @@ const compileSdk = async (
       boundaryExports: options.boundaryExports,
       externalDeclarations: options.externalDeclarations,
       cache: compilerCache,
+      precompiledStd,
       setupPhasesMs,
       finalizeSuccess: (result) => finalizeCompile({ options, result }),
     });
@@ -360,6 +388,22 @@ const compileSdk = async (
       }),
     };
   }
+};
+
+const isPathWithinRoot = ({
+  root,
+  candidate,
+}: {
+  root: string;
+  candidate: string;
+}): boolean => {
+  const relative = path.relative(path.resolve(root), path.resolve(candidate));
+  return (
+    relative === "" ||
+    (!relative.startsWith(`..${path.sep}`) &&
+      relative !== ".." &&
+      !path.isAbsolute(relative))
+  );
 };
 
 const resolveRuntimeDiagnostics = ({
@@ -405,8 +449,8 @@ const resolveEntryPath = ({
   const resolved = path.isAbsolute(normalized)
     ? normalized
     : source === undefined
-    ? path.resolve(normalized)
-    : path.join(srcRoot, normalized);
+      ? path.resolve(normalized)
+      : path.join(srcRoot, normalized);
   return path.resolve(resolved);
 };
 
@@ -482,7 +526,7 @@ const normalizeFiles = ({
     Object.entries(files).map(([filePath, source]) => [
       resolveFilePath({ filePath, srcRoot }),
       source,
-    ])
+    ]),
   );
 
 const resolveFilePath = ({
