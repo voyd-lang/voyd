@@ -28,6 +28,7 @@ import {
 import type { EffectInterner } from "../semantics/effects/effect-table.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypeArena } from "../semantics/typing/type-arena.js";
+import { VOYD_COMPILER_VERSION } from "../version.js";
 import { modulePathToString } from "./path.js";
 import type { ReusableDependencySemanticsSnapshot } from "./semantic-analysis.js";
 import {
@@ -40,11 +41,10 @@ import type { ModuleNode } from "./types.js";
 export const PRECOMPILED_STD_SNAPSHOT_SCHEMA =
   "voyd.precompiled-std-semantics" as const;
 export const PRECOMPILED_STD_SNAPSHOT_VERSION = 1 as const;
-export const PRECOMPILED_STD_COMPILER_ABI_VERSION = 1 as const;
-export const PRECOMPILED_STD_COMPILER_ABI_ID =
-  `voyd.compiler.precompiled-std-abi-v${PRECOMPILED_STD_COMPILER_ABI_VERSION}` as const;
+export const PRECOMPILED_STD_COMPILER_BUILD_ID =
+  `${VOYD_COMPILER_VERSION}:precompiled-std-abi-v1` as const;
 export const PRECOMPILED_STD_TRANSPORT_ID =
-  "voyd:reference-graph-json+brotli-v2;accelerator=node-v8-v1" as const;
+  "voyd:reference-graph-json+brotli-v1" as const;
 export const PRECOMPILED_STD_OPTIONS_ID =
   "includeTests=false;dependency=std" as const;
 export const PRECOMPILED_STD_PATH_TOKEN = "$VOYD_STD_ROOT$";
@@ -88,7 +88,7 @@ export type PrecompiledStdSourceManifestEntry = {
 export type PrecompiledStdSnapshotHeader = {
   schema: typeof PRECOMPILED_STD_SNAPSHOT_SCHEMA;
   version: typeof PRECOMPILED_STD_SNAPSHOT_VERSION;
-  compilerAbiId: typeof PRECOMPILED_STD_COMPILER_ABI_ID;
+  compilerBuildId: typeof PRECOMPILED_STD_COMPILER_BUILD_ID;
   transportId: typeof PRECOMPILED_STD_TRANSPORT_ID;
   callableSummarySchema: string;
   callableSummaryVersion: number;
@@ -100,16 +100,15 @@ export type PrecompiledStdSnapshotHeader = {
 export type PrecompiledStdSnapshotEnvelope = {
   header: PrecompiledStdSnapshotHeader;
   payloadSha256: string;
-  fastPayloadSha256: string;
-  fastPayloadProducer: {
-    node: string;
-    v8: string;
-  };
 };
 
 export type RestoredPrecompiledStdSnapshot = {
   modules: ReadonlyMap<string, ModuleNode>;
   dependencySnapshot: ReusableDependencySemanticsSnapshot;
+  typingState: {
+    arena: TypeArena;
+    effectInterner: EffectInterner;
+  };
 };
 
 export const encodePrecompiledStdSnapshot = ({
@@ -193,6 +192,7 @@ export const restorePrecompiledStdSnapshot = ({
       arena: persistent.arena,
       effectInterner: persistent.effectInterner,
     },
+    typingState: { arena, effectInterner },
   };
 };
 
