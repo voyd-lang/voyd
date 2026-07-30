@@ -1590,7 +1590,7 @@ fn value() -> i32
   it(
     "renames labeled parameters, including external labels",
     async () => {
-      const source = `use std::all\n\nfn reduce<T>(value: T, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  cb(start, value)\n\nfn main() -> i32\n  1.reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
+      const source = `fn reduce<T>(value: T, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  cb(start, value)\n\nfn main() -> i32\n  1.reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
       const project = await createProject({
         "src/main.voyd": source,
       });
