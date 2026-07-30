@@ -1,0 +1,52 @@
+use std::array::Array
+use std::optional::all
+
+val WideValue {
+  first: i32,
+  second: i32,
+  third: i32,
+  fourth: i32
+}
+
+fn values() -> Array<WideValue>
+  let ~result = Array<WideValue>::with_capacity(4)
+  result.push(WideValue { first: 1, second: 2, third: 3, fourth: 4 })
+  result.push(WideValue { first: 5, second: 6, third: 7, fourth: 8 })
+  result.push(WideValue { first: 9, second: 10, third: 11, fourth: 12 })
+  result.push(WideValue { first: 13, second: 14, third: 15, fourth: 16 })
+  result
+
+fn sum(value: WideValue) -> i32
+  value.first + value.second + value.third + value.fourth
+
+pub fn ordinary_iterator_benchmark() -> i32
+  let source = values()
+  var iteration = 0
+  var total = 0
+  while iteration < 2000:
+    let ~iterator = source.iter()
+    while true:
+      match(iterator.next())
+        Some<WideValue> { value }:
+          total = total + sum(value)
+        None:
+          break
+    iteration = iteration + 1
+  total
+
+pub fn physical_materialization() -> i32
+  let ~source = values()
+  let retained = source.at(0)
+  source.replace(
+    0,
+    with: WideValue {
+      first: 20,
+      second: 30,
+      third: 40,
+      fourth: 50
+    }
+  )
+  sum(retained) * 100 + sum(source.at(0))
+
+pub fn main() -> i32
+  ordinary_iterator_benchmark()

@@ -1,0 +1,22 @@
+use std::array::Array
+
+obj StaticBox {
+  value: i32
+}
+
+fn mutate_pair(~left: StaticBox, ~right: StaticBox) -> i32
+  left.value = left.value + 1
+  right.value = right.value + 2
+  left.value + right.value
+
+pub fn statically_disjoint() -> i32
+  let ~values = Array<StaticBox>::with_capacity(2)
+  values.push(StaticBox { value: 1 })
+  values.push(StaticBox { value: 10 })
+  mutate_pair(
+    ~values.at(0),
+    ~values.at(1)
+  )
+
+pub fn main() -> i32
+  statically_disjoint()

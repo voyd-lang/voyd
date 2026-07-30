@@ -263,6 +263,8 @@ export const compileEffectOpCall = ({
         ctx,
         fnCtx,
       }),
+      leftDisplay: guard.left.display,
+      rightDisplay: guard.right.display,
       context: `effect call ${expr.id}`,
       ctx,
     }),

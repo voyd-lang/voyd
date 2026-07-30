@@ -284,7 +284,7 @@ pub fn overlapping() -> i32
   });
 
   it("lowers identity guards after omitted defaults", () => {
-    const { instance } = compileProgram(`
+    const { instance, module } = compileProgram(`
 obj Box { value: i32 }
 
 fn mutate_both(
@@ -305,6 +305,7 @@ pub fn distinct() -> i32
   guarded(~left, ~right)
 `);
     expect((instance.exports.distinct as () => number)()).toBe(15);
+    expect(module.emitText()).toContain("__voyd_panic_ptr");
   });
 
   it("does not emit a guarded companion for a statically safe default", () => {

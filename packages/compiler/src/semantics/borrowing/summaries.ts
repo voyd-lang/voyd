@@ -4643,6 +4643,18 @@ export const computeCallableBorrowContracts = ({
     });
   });
   const finalCandidates = new Map<SymbolId, CallableBorrowContract>();
+  const summarize = (functionItem: HirFunction): CallableBorrowContract =>
+    summarizeFunction({
+      functionItem,
+      baseContracts: contracts,
+      hir,
+      typing,
+      symbolTable,
+      moduleId,
+      imports: importMap,
+      dependencies,
+      decls,
+    });
   const converge = (
     seeds: readonly HirFunction[] = orderedSummaryFunctions,
   ): void => {
@@ -4653,17 +4665,7 @@ export const computeCallableBorrowContracts = ({
       const functionItem = worklist[cursor++]!;
       queued.delete(functionItem.symbol);
       const previous = contracts.get(functionItem.symbol)!;
-      const candidate = summarizeFunction({
-        functionItem,
-        baseContracts: contracts,
-        hir,
-        typing,
-        symbolTable,
-        moduleId,
-        imports: importMap,
-        dependencies,
-        decls,
-      });
+      const candidate = summarize(functionItem);
       finalCandidates.set(functionItem.symbol, candidate);
       if (contractsEqual(previous, candidate)) {
         incrementCompilerPerfCounter("borrowing.summary.unchangedCandidates");
@@ -4724,22 +4726,18 @@ export const computeCallableBorrowContracts = ({
   const refinementQueued = new Set(
     refinementWorklist.map((functionItem) => functionItem.symbol),
   );
+  const refinementContractsChanged = new Set<SymbolId>();
   let refinementCursor = 0;
   while (refinementCursor < refinementWorklist.length) {
     const functionItem = refinementWorklist[refinementCursor++]!;
     refinementQueued.delete(functionItem.symbol);
     const previous = contracts.get(functionItem.symbol)!;
-    const candidate = summarizeFunction({
-      functionItem,
-      baseContracts: contracts,
-      hir,
-      typing,
-      symbolTable,
-      moduleId,
-      imports: importMap,
-      dependencies,
-      decls,
-    });
+    const cachedCandidate = Array.from(
+      localSummaryDependencies.get(functionItem.symbol) ?? [],
+    ).some((dependency) => refinementContractsChanged.has(dependency))
+      ? undefined
+      : finalCandidates.get(functionItem.symbol);
+    const candidate = cachedCandidate ?? summarize(functionItem);
     finalCandidates.set(functionItem.symbol, candidate);
     const declared = declarationContracts.get(functionItem.symbol);
     const evidence = declared
@@ -4765,6 +4763,7 @@ export const computeCallableBorrowContracts = ({
       continue;
     }
     contracts.set(functionItem.symbol, next);
+    refinementContractsChanged.add(functionItem.symbol);
     (callers.get(functionItem.symbol) ?? []).forEach((dependent) => {
       if (refinementQueued.has(dependent.symbol)) {
         return;
@@ -4798,19 +4797,7 @@ export const computeCallableBorrowContracts = ({
     ).some((dependency) => sharedContractsChanged.has(dependency))
       ? undefined
       : finalCandidates.get(functionItem.symbol);
-    const candidate =
-      cachedCandidate ??
-      summarizeFunction({
-        functionItem,
-        baseContracts: contracts,
-        hir,
-        typing,
-        symbolTable,
-        moduleId,
-        imports: importMap,
-        dependencies,
-        decls,
-      });
+    const candidate = cachedCandidate ?? summarize(functionItem);
     const next = withReturnedSharedOrigins({
       contract: previous,
       candidate,

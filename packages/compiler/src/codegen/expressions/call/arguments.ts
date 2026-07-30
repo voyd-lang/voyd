@@ -15,7 +15,7 @@ import type {
   TypeId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
-import type { CallArgumentPlanEntry } from "../../../semantics/typing/types.js";
+import type { CodegenCallArgumentPlanEntry } from "../../../semantics/codegen-view/index.js";
 import type { CallShapeSpecializationRequest } from "../../../optimize/ir.js";
 import { compileOptionalNoneValue } from "../../optionals.js";
 import { stableCallsiteIdFor } from "../../../stable-callsite-id.js";
@@ -422,7 +422,7 @@ const collectScalarAggregateCallArgs = ({
   ctx,
   fnCtx,
 }: {
-  plan: readonly CallArgumentPlanEntry[];
+  plan: readonly CodegenCallArgumentPlanEntry[];
   callArgs: readonly HirCallExpr["args"][number][];
   meta: FunctionMetadata;
   ctx: CodegenContext;
@@ -619,7 +619,7 @@ export const resolveTypedCallArgumentPlan = ({
   callId: HirExprId;
   typeInstanceId: ProgramFunctionInstanceId | undefined;
   ctx: CodegenContext;
-}): readonly CallArgumentPlanEntry[] | undefined => {
+}): readonly CodegenCallArgumentPlanEntry[] | undefined => {
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, callId);
   if (!callInfo.argPlans || callInfo.argPlans.size === 0) {
     return undefined;
@@ -642,10 +642,10 @@ export const sliceTypedCallArgumentPlan = ({
   paramOffset,
   argOffset,
 }: {
-  typedPlan: readonly CallArgumentPlanEntry[];
+  typedPlan: readonly CodegenCallArgumentPlanEntry[];
   paramOffset: number;
   argOffset: number;
-}): readonly CallArgumentPlanEntry[] =>
+}): readonly CodegenCallArgumentPlanEntry[] =>
   typedPlan.slice(paramOffset).map((entry) => {
     if (entry.kind === "direct") {
       if (entry.argIndex < argOffset) {
@@ -781,7 +781,7 @@ const planCallArgumentsForParamsFallback = ({
   const omittedArgumentPlanEntry = (
     param: CallParam,
     paramIndex: number,
-  ): CallArgumentPlanEntry =>
+  ): CodegenCallArgumentPlanEntry =>
     param.synthetic === "stable-callsite-id"
       ? {
           kind: "stable-callsite-id",
@@ -792,7 +792,7 @@ const planCallArgumentsForParamsFallback = ({
         ? { kind: "omitted-default", targetTypeId: param.typeId }
         : { kind: "omitted-optional", targetTypeId: param.typeId };
 
-  const plan: CallArgumentPlanEntry[] = [];
+  const plan: CodegenCallArgumentPlanEntry[] = [];
   const expectedTypeByArgIndex = new Map<number, TypeId>();
   let argIndex = 0;
   let paramIndex = 0;
@@ -889,7 +889,7 @@ const planCallArgumentsFromTypedPlan = ({
   allowTrailingArguments,
   fail,
 }: {
-  typedPlan: readonly CallArgumentPlanEntry[];
+  typedPlan: readonly CodegenCallArgumentPlanEntry[];
   call: HirCallExpr;
   params: readonly CallParam[];
   allowTrailingArguments: boolean;
@@ -902,7 +902,7 @@ const planCallArgumentsFromTypedPlan = ({
   }
 
   const expectedTypeByArgIndex = new Map<number, TypeId>();
-  const plan: CallArgumentPlanEntry[] = [];
+  const plan: CodegenCallArgumentPlanEntry[] = [];
   let consumedArgCount = 0;
 
   typedPlan.forEach((entry, index) => {
@@ -984,7 +984,7 @@ const materializeCallArgumentPlan = ({
   compileExpr,
   writebacks,
 }: {
-  plan: readonly CallArgumentPlanEntry[];
+  plan: readonly CodegenCallArgumentPlanEntry[];
   compiledArgs: readonly binaryen.ExpressionRef[];
   callArgs: readonly HirCallExpr["args"][number][];
   paramTypeIds: readonly TypeId[];
@@ -1363,7 +1363,7 @@ const collectPreservedStorageRefArgIndexes = ({
   plan,
   paramAbiKinds,
 }: {
-  plan: readonly CallArgumentPlanEntry[];
+  plan: readonly CodegenCallArgumentPlanEntry[];
   paramAbiKinds?: readonly string[];
 }): ReadonlySet<number> => {
   const usage = new Map<number, boolean>();

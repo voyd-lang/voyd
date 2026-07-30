@@ -19,6 +19,7 @@ export const finalizeOptimization = ({
   const optimizedProgram: ProgramCodegenView = {
     ...ir.baseProgram,
     calls: {
+      ...ir.baseProgram.calls,
       getCallInfo: (moduleId, exprId) =>
         ir.calls.get(moduleId)?.get(exprId) ??
         ir.baseProgram.calls.getCallInfo(moduleId, exprId),

@@ -327,11 +327,22 @@ export const emitResolvedCall = ({
         ctx,
         fnCtx,
       }),
+      leftDisplay: guard.left.display,
+      rightDisplay: guard.right.display,
       context: `call ${callId}`,
       ctx,
     }),
   );
   const deferredIdentityGuardOps = deferredIdentityGuards.map((guard) => {
+    if (
+      typeof guard.diagnosticId !== "number" ||
+      guard.diagnosticId < 1 ||
+      guard.diagnosticId > 0x3fffffff
+    ) {
+      throw new Error(
+        `runtime identity guard is missing a valid deferred diagnostic id at call ${callId}`,
+      );
+    }
     const omittedParameter = guard.omittedParameters[0];
     const parameterOffset =
       typeof omittedParameter === "number"
@@ -369,11 +380,21 @@ export const emitResolvedCall = ({
       context,
       ctx,
     });
+    const presenceValue = (): binaryen.ExpressionRef =>
+      ctx.mod.local.get(presenceBinding.index, binaryen.i32);
+    const noConflictRecorded = ctx.mod.i32.eq(
+      ctx.mod.i32.shr_u(presenceValue(), ctx.mod.i32.const(1)),
+      ctx.mod.i32.const(0),
+    );
     return ctx.mod.local.set(
       presenceBinding.index,
-      ctx.mod.i32.or(
-        ctx.mod.local.get(presenceBinding.index, binaryen.i32),
-        ctx.mod.i32.shl(conflict, ctx.mod.i32.const(1)),
+      ctx.mod.if(
+        ctx.mod.i32.and(conflict, noConflictRecorded),
+        ctx.mod.i32.or(
+          presenceValue(),
+          ctx.mod.i32.const(guard.diagnosticId << 1),
+        ),
+        presenceValue(),
       ),
     );
   });

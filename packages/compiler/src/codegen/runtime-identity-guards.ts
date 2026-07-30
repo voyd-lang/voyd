@@ -5,12 +5,22 @@ import type { TypeId } from "../semantics/ids.js";
 import { loadStructuralField } from "./structural.js";
 import { getStructuralTypeInfo } from "./types.js";
 import { exactNominalForType } from "./optimization/runtime-type-checks.js";
+import { compileFixedPanicTrap } from "./panic.js";
 
 export type RuntimeIdentityGuardOperandInfo = {
   expression: HirExprId;
   identity: "allocation" | "storage" | "indexed-place";
   allocationPath?: readonly CodegenPlaceProjection[];
 };
+
+export const runtimeIdentityConflictMessage = ({
+  leftDisplay,
+  rightDisplay,
+}: {
+  leftDisplay: string;
+  rightDisplay: string;
+}): string =>
+  `Runtime exclusivity conflict: ${leftDisplay} overlaps ${rightDisplay}`;
 
 type RuntimeIdentityComponent = {
   kind: "reference" | "i32";
@@ -67,16 +77,26 @@ export const projectRuntimeAllocationIdentity = ({
 export const compileRuntimeIdentityGuard = ({
   left,
   right,
+  leftDisplay,
+  rightDisplay,
   context,
   ctx,
 }: {
   left: readonly RuntimeIdentityComponent[];
   right: readonly RuntimeIdentityComponent[];
+  leftDisplay: string;
+  rightDisplay: string;
   context: string;
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
   const equal = compileRuntimeIdentityConflict({ left, right, context, ctx });
-  return ctx.mod.if(equal, ctx.mod.unreachable());
+  return ctx.mod.if(
+    equal,
+    compileFixedPanicTrap({
+      message: runtimeIdentityConflictMessage({ leftDisplay, rightDisplay }),
+      ctx,
+    }),
+  );
 };
 
 export const compileRuntimeIdentityConflict = ({

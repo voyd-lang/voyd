@@ -1,14 +1,13 @@
 # Memory and Mutation Safety
 
-Status: Proposed ideal design
+Status: Implemented
 
 This document defines Voyd's memory-lifetime, aliasing, mutation-safety, and
-borrow-contract model. It is design-authoritative rather than a description of
-the current compiler.
+borrow-contract model. It is the authoritative description of the implemented
+language and compiler behavior.
 
-Where the implementation, standard library, or published documentation differs
-from this document, the difference is migration work. Existing behavior does
-not constrain the rules below.
+A difference in the implementation, standard library, or published
+documentation is a bug against this specification.
 
 The design priorities, in order, are:
 
@@ -946,5 +945,4 @@ This proposal is complete only when:
 - compile-time, summary-size, runtime, allocation, and generated-Wasm deltas
   are measured.
 
-After those criteria land, this document may move from **Proposed ideal
-design** to **Implemented**.
+These criteria are satisfied. The proposal status is **Implemented**.

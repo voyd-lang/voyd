@@ -1,5 +1,8 @@
 import binaryen from "binaryen";
-import { refTest, structGetFieldValue } from "@voyd-lang/lib/binaryen-gc/index.js";
+import {
+  refTest,
+  structGetFieldValue,
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   CompiledExpression,
@@ -36,10 +39,7 @@ import {
 } from "../types.js";
 import { compilePatternInitializationFromValue } from "../patterns.js";
 import { asStatement, coerceToBinaryenType } from "./utils.js";
-import {
-  coerceValueToType,
-  storeValueIntoStorageRef,
-} from "../structural.js";
+import { coerceValueToType, storeValueIntoStorageRef } from "../structural.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import { captureMultivalueLanes } from "../multivalue.js";
 import { tryCompileProjectedOptionalPayloadBinding } from "../projected-element-views.js";
@@ -199,10 +199,7 @@ const normalizeOutResultStorageForwarding = ({
   return compiled;
 };
 
-const withRestoredBindings = <T>(
-  fnCtx: FunctionContext,
-  run: () => T,
-): T => {
+const withRestoredBindings = <T>(fnCtx: FunctionContext, run: () => T): T => {
   const previousBindings = new Map(fnCtx.bindings);
   try {
     return run();
@@ -234,12 +231,19 @@ const lowerToOutResultStorageIfNeeded = ({
     return normalized;
   }
 
-  const actualTypeId = expressionUsesExpectedResultType({
-    exprId,
-    ctx,
-  })
-    ? resultTypeId
-    : getValueSourceTypeId(exprId, ctx, fnCtx.typeInstanceId ?? fnCtx.instanceId);
+  const actualTypeId =
+    expressionUsesExpectedResultType({
+      exprId,
+      ctx,
+    }) &&
+    binaryen.getExpressionType(normalized.expr) ===
+      wasmTypeFor(resultTypeId, ctx)
+      ? resultTypeId
+      : getValueSourceTypeId(
+          exprId,
+          ctx,
+          fnCtx.typeInstanceId ?? fnCtx.instanceId,
+        );
   const coerced = coerceValueToType({
     value: normalized.expr,
     actualType: actualTypeId,
@@ -318,7 +322,10 @@ const prepareMatchDiscriminant = ({
     ctx,
     fnCtx,
   });
-  const inlineDiscriminantLayout = shouldInlineUnionLayout(discriminantTypeId, ctx)
+  const inlineDiscriminantLayout = shouldInlineUnionLayout(
+    discriminantTypeId,
+    ctx,
+  )
     ? getInlineUnionLayout(discriminantTypeId, ctx)
     : undefined;
   const discriminantLaneTemps =
@@ -374,7 +381,9 @@ const prepareMatchDiscriminant = ({
       });
   const discriminantExpr = ctx.module.hir.expressions.get(expr.discriminant);
   const discriminantSymbol =
-    discriminantExpr?.exprKind === "identifier" ? discriminantExpr.symbol : undefined;
+    discriminantExpr?.exprKind === "identifier"
+      ? discriminantExpr.symbol
+      : undefined;
 
   return {
     typeId: discriminantTypeId,
@@ -415,14 +424,20 @@ const compileMatchArmValueWithBindings = ({
       declarePatternLocals(arm.pattern, ctx, fnCtx);
     }
 
-    const discriminantOptionalInfo = shouldInlineUnionLayout(discriminant.typeId, ctx)
+    const discriminantOptionalInfo = shouldInlineUnionLayout(
+      discriminant.typeId,
+      ctx,
+    )
       ? getOptionalLayoutInfo(discriminant.typeId, ctx)
       : undefined;
     const optionalSomePayload =
       discriminantOptionalInfo &&
       patternTypeId === discriminantOptionalInfo.someType
         ? (() => {
-            const someLayout = getInlineUnionLayout(discriminant.typeId, ctx).members.find(
+            const someLayout = getInlineUnionLayout(
+              discriminant.typeId,
+              ctx,
+            ).members.find(
               (member) => member.typeId === discriminantOptionalInfo.someType,
             );
             if (!someLayout) {
@@ -433,7 +448,10 @@ const compileMatchArmValueWithBindings = ({
               return ctx.mod.nop();
             }
             if (someLayout.abiTypes.length === 1) {
-              return ctx.mod.tuple.extract(discriminantValue, someLayout.abiStart);
+              return ctx.mod.tuple.extract(
+                discriminantValue,
+                someLayout.abiStart,
+              );
             }
             return ctx.mod.tuple.make(
               someLayout.abiTypes.map((_, index) =>
@@ -643,12 +661,13 @@ export const compileIfExpr = (
     compiled: CompiledExpression;
     exprId: number;
   }): binaryen.ExpressionRef => {
-    const actualTypeId = expressionUsesExpectedResultType({
-      exprId,
-      ctx,
-    })
-      ? resultTypeId
-      : getValueSourceTypeId(exprId, ctx, typeInstanceId);
+    const actualTypeId =
+      expressionUsesExpectedResultType({
+        exprId,
+        ctx,
+      }) && binaryen.getExpressionType(compiled.expr) === resultType
+        ? resultTypeId
+        : getValueSourceTypeId(exprId, ctx, typeInstanceId);
     return coerceValueToType({
       value: compiled.expr,
       actualType: actualTypeId,
@@ -686,18 +705,16 @@ export const compileIfExpr = (
       ctx,
       fnCtx,
     });
-    if (!fallback.usedOutResultStorageRef && typeof expr.defaultBranch === "number") {
+    if (
+      !fallback.usedOutResultStorageRef &&
+      typeof expr.defaultBranch === "number"
+    ) {
       const coercedFallback = coerceBranchValue({
         compiled: fallback,
         exprId: expr.defaultBranch,
       });
       fallback = {
-        expr: coerceToBinaryenType(
-          ctx,
-          coercedFallback,
-          resultType,
-          fnCtx,
-        ),
+        expr: coerceToBinaryenType(ctx, coercedFallback, resultType, fnCtx),
         usedReturnCall: fallback.usedReturnCall,
       };
     }
@@ -739,19 +756,17 @@ export const compileIfExpr = (
       };
       continue;
     }
-    if (loweredValue.usedOutResultStorageRef || fallback.usedOutResultStorageRef) {
+    if (
+      loweredValue.usedOutResultStorageRef ||
+      fallback.usedOutResultStorageRef
+    ) {
       throw new Error("mixed out-result forwarding in if expression");
     }
     const coercedThen = coerceBranchValue({
       compiled: value,
       exprId: branch.value,
     });
-    const typedThen = coerceToBinaryenType(
-      ctx,
-      coercedThen,
-      resultType,
-      fnCtx,
-    );
+    const typedThen = coerceToBinaryenType(ctx, coercedThen, resultType, fnCtx);
     const typedElse: binaryen.ExpressionRef = fallback.expr;
     fallback = {
       expr: ctx.mod.if(condition, typedThen, typedElse),
@@ -774,7 +789,12 @@ export const compileMatchExpr = (
   const resultTypeId =
     expectedResultTypeId ?? getRequiredExprType(expr.id, ctx, typeInstanceId);
   const resultType = wasmTypeFor(resultTypeId, ctx);
-  const discriminant = prepareMatchDiscriminant({ expr, ctx, fnCtx, compileExpr });
+  const discriminant = prepareMatchDiscriminant({
+    expr,
+    ctx,
+    fnCtx,
+    compileExpr,
+  });
   const discriminantTypeId = discriminant.typeId;
 
   const duplicateNominals = (() => {
@@ -828,12 +848,13 @@ export const compileMatchExpr = (
         continue;
       }
       const armValueExpr = armValue;
-      const armTypeId = expressionUsesExpectedResultType({
-        exprId: arm.value,
-        ctx,
-      })
-        ? resultTypeId
-        : getValueSourceTypeId(arm.value, ctx, typeInstanceId);
+      const armTypeId =
+        expressionUsesExpectedResultType({
+          exprId: arm.value,
+          ctx,
+        }) && binaryen.getExpressionType(armValueExpr.expr) === resultType
+          ? resultTypeId
+          : getValueSourceTypeId(arm.value, ctx, typeInstanceId);
       chain = {
         expr: coerceToBinaryenType(
           ctx,
@@ -902,12 +923,13 @@ export const compileMatchExpr = (
       throw new Error("mixed out-result forwarding in match expression");
     }
 
-    const armTypeId = expressionUsesExpectedResultType({
-      exprId: arm.value,
-      ctx,
-    })
-      ? resultTypeId
-      : getValueSourceTypeId(arm.value, ctx, typeInstanceId);
+    const armTypeId =
+      expressionUsesExpectedResultType({
+        exprId: arm.value,
+        ctx,
+      }) && binaryen.getExpressionType(armExpr.expr) === resultType
+        ? resultTypeId
+        : getValueSourceTypeId(arm.value, ctx, typeInstanceId);
     const coercedThen = coerceValueToType({
       value: armExpr.expr,
       actualType: armTypeId,
@@ -916,7 +938,12 @@ export const compileMatchExpr = (
       fnCtx,
     });
     const typedThen = coerceToBinaryenType(ctx, coercedThen, resultType, fnCtx);
-    const typedElse = coerceToBinaryenType(ctx, fallback.expr, resultType, fnCtx);
+    const typedElse = coerceToBinaryenType(
+      ctx,
+      fallback.expr,
+      resultType,
+      fnCtx,
+    );
 
     chain = {
       expr: ctx.mod.if(condition, typedThen, typedElse),
@@ -948,17 +975,12 @@ const compileMatchCondition = (
   ctx: CodegenContext,
   duplicateNominals: ReadonlySet<TypeId>,
 ): binaryen.ExpressionRef => {
-  if (
-    shouldInlineUnionLayout(discriminantTypeId, ctx)
-  ) {
+  if (shouldInlineUnionLayout(discriminantTypeId, ctx)) {
     const layout = getInlineUnionLayout(discriminantTypeId, ctx);
     const tagValue =
       layout.abiTypes.length === 1
         ? loadDiscriminant()
-        : ctx.mod.tuple.extract(
-            loadDiscriminant(),
-            0,
-          );
+        : ctx.mod.tuple.extract(loadDiscriminant(), 0);
     const collectTargets = (
       typeId: TypeId,
       seen: Set<TypeId>,
@@ -978,7 +1000,9 @@ const compileMatchCondition = (
     const targets: TypeId[] = [];
     collectTargets(patternTypeId, new Set<TypeId>(), targets);
     const conditions = targets
-      .map((target) => layout.members.find((member) => member.typeId === target))
+      .map((target) =>
+        layout.members.find((member) => member.typeId === target),
+      )
       .filter((member): member is NonNullable<typeof member> => Boolean(member))
       .map((member) => ctx.mod.i32.eq(tagValue, ctx.mod.i32.const(member.tag)));
     if (conditions.length === 0) {

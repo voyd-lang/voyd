@@ -6550,6 +6550,29 @@ ${effectUse}`);
     expect(primed).toEqual(expect.arrayContaining(["TY0051", "TY0052"]));
   });
 
+  it("preserves projected loan provenance through recursive wrappers", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+val View { source: borrow Box }
+
+fn wrap(source: borrow Box, depth: i32) -> View
+  if depth <= 0:
+    return View { source }
+  wrap(source, depth - 1)
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn invalid(~value: Box) -> i32
+  let first = wrap(value, 2)
+  let second = wrap(value, 3)
+  mutate(~value)
+  first.source.value + second.source.value
+`),
+    ).toContain("TY0048");
+  });
+
   it("preserves borrowed type facts in ProgramCodegenView", () => {
     const result = analyze(`
 obj Box { value: i32 }
@@ -7573,6 +7596,35 @@ fn conflict(~value: Box) -> i32
 `);
 
     expect(codes).not.toContain("TY0048");
+  });
+
+  it("reports both places, final use, and runtime-guard applicability", () => {
+    const conflict = diagnosticsFor(`${prelude}
+fn view(value: Box) -> borrow Box
+  value
+
+fn invalid(~value: Box) -> i32
+  let borrowed = view(value)
+  mutate(~value)
+  borrowed.value
+`).find(
+      (diagnostic) =>
+        diagnostic.code === "TY0048" &&
+        diagnostic.message.includes("cannot mutably borrow"),
+    );
+
+    expect(conflict?.message).toContain("value");
+    expect(conflict?.related?.map((diagnostic) => diagnostic.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("shared borrow of 'value"),
+        expect.stringContaining("last use of 'borrowed'"),
+      ]),
+    );
+    expect(conflict?.hints?.map((hint) => hint.message)).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("No runtime identity guard can defer"),
+      ]),
+    );
   });
 
   it("scopes mutable receiver access to referenced allocation footprints", () => {
@@ -12490,6 +12542,27 @@ fn valid(~target: Box, source: Box) -> i32
     expect(result.borrowing.runtimeIdentityGuards.size).toBe(0);
   });
 
+  it("keeps distinct mutable inline-value locals statically disjoint", () => {
+    const result = analyze(`
+val Point { x: i32 }
+val Ray { origin: Point, direction: Point }
+
+fn fill(~point: Point, ~ray: Ray) -> void
+  point.x = 1
+  ray.direction.x = 2
+
+fn valid() -> void
+  let ~point = Point { x: 0 }
+  let ~ray = Ray {
+    origin: Point { x: 0 },
+    direction: Point { x: 0 }
+  }
+  fill(point, ray)
+`);
+    expect(result.borrowing.diagnostics).toEqual([]);
+    expect(result.borrowing.runtimeIdentityGuards.size).toBe(0);
+  });
+
   it("statically separates loans with disjoint nominal identities", () => {
     const result = analyze(`
 obj Left { value: i32 }
@@ -12555,6 +12628,26 @@ fn invalid() -> void
   let ~left = LeftHolder { box: shared }
   let ~right = RightHolder { box: shared }
   mutate_nested(~left, ~right)
+`);
+    expect(result.borrowing.diagnostics).toEqual([]);
+    expect(result.borrowing.runtimeIdentityGuards.size).toBe(1);
+  });
+
+  it("guards nested aliases stored in distinct inline-value roots", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+val LeftHolder { box: Box }
+val RightHolder { box: Box }
+
+fn mutate_nested(~left: LeftHolder, ~right: RightHolder) -> void
+  left.box.value = left.box.value + 1
+  right.box.value = right.box.value + 1
+
+fn guarded() -> void
+  let shared = Box { value: 0 }
+  let ~left = LeftHolder { box: shared }
+  let ~right = RightHolder { box: shared }
+  mutate_nested(left, right)
 `);
     expect(result.borrowing.diagnostics).toEqual([]);
     expect(result.borrowing.runtimeIdentityGuards.size).toBe(1);

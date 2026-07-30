@@ -34,6 +34,18 @@ describe("conformance manifest coverage", () => {
         name: "RuntimeError",
         message: "boom",
       });
+      const panic = Object.assign(new WebAssembly.RuntimeError("unreachable"), {
+        voyd: {
+          panic: {
+            status: "available",
+            message: "panic with context",
+          },
+        },
+      });
+      expect(normalizeRuntimeTrap(panic)).toEqual({
+        name: "RuntimeError",
+        message: "panic with context",
+      });
       expect(() => normalizeRuntimeTrap(new Error("adapter failure"))).toThrow(
         "adapter failure",
       );

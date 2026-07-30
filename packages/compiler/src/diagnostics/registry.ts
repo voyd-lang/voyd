@@ -1149,6 +1149,10 @@ export const diagnosticsRegistry: {
         message:
           "End the earlier borrow before this access, or use SharedCell<T> when the state must remain intentionally shared and mutable.",
       },
+      {
+        message:
+          "No runtime identity guard can defer this conflict. Guards apply only to dynamically uncertain, stable comparable places whose accesses stay inside one non-suspending call.",
+      },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0048"]>,
   TY0049: {

@@ -145,6 +145,15 @@ type BodyContext = {
   }[];
   callResolutionCache: Map<HirExprId, ResolvedBorrowCall>;
   externalResultCache: Map<string, boolean>;
+  expressionPlacesCache: Map<HirExprId, readonly BorrowPlace[]>;
+  expressionPlacesInProgress: Set<HirExprId>;
+  projectedPlacesCache: Map<string, readonly BorrowPlace[]>;
+  projectedPlacesInProgress: Set<string>;
+  escapedPlacesCache: Map<
+    HirExprId,
+    readonly { symbol: SymbolId; alias: AliasDefinition }[]
+  >;
+  validatedExpressions: Set<string>;
   analysisComplete: boolean;
   completedAliases?: readonly AliasDefinition[];
   completedAliasesByRoot: Map<SymbolId, AliasDefinition[]>;
@@ -619,10 +628,7 @@ const latestDefinitelyReachingPosition = (
     -1,
   );
 
-const addAssignmentAlias = (
-  alias: AliasDefinition,
-  ctx: BodyContext,
-): void => {
+const addAssignmentAlias = (alias: AliasDefinition, ctx: BodyContext): void => {
   ctx.assignmentAliases.push(alias);
   const aliases = ctx.assignmentAliasesBySymbol.get(alias.symbol) ?? [];
   aliases.push(alias);
@@ -695,7 +701,7 @@ const uniquePlaces = (places: readonly BorrowPlace[]): readonly BorrowPlace[] =>
     new Map(places.map((place) => [JSON.stringify(place), place])).values(),
   );
 
-const placesOfExpression = (
+const computePlacesOfExpression = (
   exprId: HirExprId,
   ctx: BodyContext,
   seen = new Set<HirExprId>(),
@@ -873,6 +879,34 @@ const placesOfExpression = (
   }
   const info = targetInfo(expr, ctx);
   return returnedPlacesForCall(info, [], ctx, seen);
+};
+
+const placesOfExpression = (
+  exprId: HirExprId,
+  ctx: BodyContext,
+  seen = new Set<HirExprId>(),
+): readonly BorrowPlace[] => {
+  if (!ctx.analysisComplete) {
+    return computePlacesOfExpression(exprId, ctx, seen);
+  }
+  if (seen.has(exprId)) {
+    return [];
+  }
+  const cached = ctx.expressionPlacesCache.get(exprId);
+  if (cached) {
+    return cached;
+  }
+  if (ctx.expressionPlacesInProgress.has(exprId)) {
+    return [];
+  }
+  ctx.expressionPlacesInProgress.add(exprId);
+  try {
+    const places = computePlacesOfExpression(exprId, ctx, new Set());
+    ctx.expressionPlacesCache.set(exprId, places);
+    return places;
+  } finally {
+    ctx.expressionPlacesInProgress.delete(exprId);
+  }
 };
 
 const specializedReturnedEndpoint = (
@@ -1959,6 +1993,41 @@ function projectedReturnedPlaces(
 }
 
 function placesAtProjection(
+  exprId: HirExprId,
+  requested: readonly PlaceProjection[],
+  ctx: BodyContext,
+  seen: Set<HirExprId>,
+): readonly BorrowPlace[] {
+  if (ctx.analysisComplete) {
+    if (seen.has(exprId)) {
+      return [];
+    }
+    const key = `${exprId}:${JSON.stringify(requested)}`;
+    const cached = ctx.projectedPlacesCache.get(key);
+    if (cached) {
+      return cached;
+    }
+    if (ctx.projectedPlacesInProgress.has(key)) {
+      return [];
+    }
+    ctx.projectedPlacesInProgress.add(key);
+    try {
+      const places = computePlacesAtProjection(
+        exprId,
+        requested,
+        ctx,
+        new Set(),
+      );
+      ctx.projectedPlacesCache.set(key, places);
+      return places;
+    } finally {
+      ctx.projectedPlacesInProgress.delete(key);
+    }
+  }
+  return computePlacesAtProjection(exprId, requested, ctx, seen);
+}
+
+function computePlacesAtProjection(
   exprId: HirExprId,
   requested: readonly PlaceProjection[],
   ctx: BodyContext,
@@ -3919,9 +3988,7 @@ const recordContextualBorrowAlias = (
   }
   if (
     aliasAlreadyRecorded(current) ||
-    ctx.assignmentAliasesBySymbol
-      .get(alias.symbol)
-      ?.some(aliasAlreadyRecorded)
+    ctx.assignmentAliasesBySymbol.get(alias.symbol)?.some(aliasAlreadyRecorded)
   ) {
     return;
   }
@@ -5133,8 +5200,7 @@ const aliasActiveAt = (
       ),
     ];
     if (
-      alias.event.position <
-      latestDefinitelyReachingPosition(candidates, event)
+      alias.event.position < latestDefinitelyReachingPosition(candidates, event)
     ) {
       return false;
     }
@@ -5997,10 +6063,23 @@ const reportExplicitBorrowEscape = ({
 const escapedPlacesIn = (
   exprId: HirExprId,
   ctx: BodyContext,
-): { symbol: SymbolId; alias: AliasDefinition }[] => {
+): readonly { symbol: SymbolId; alias: AliasDefinition }[] => {
+  const cached = ctx.analysisComplete
+    ? ctx.escapedPlacesCache.get(exprId)
+    : undefined;
+  if (cached) {
+    return cached;
+  }
   const symbols = new Set<SymbolId>();
   const captured: { symbol: SymbolId; alias: AliasDefinition }[] = [];
   const projectedAliases: { symbol: SymbolId; alias: AliasDefinition }[] = [];
+  const seenExpressions = new Set<HirExprId>();
+  const seenProjectedExpressions = new Set<string>();
+  const collectEscaped = (id: HirExprId): void => {
+    escapedPlacesIn(id, ctx).forEach((entry) => {
+      projectedAliases.push(entry);
+    });
+  };
   const visitSymbol = (symbol: SymbolId, seen = new Set<SymbolId>()): void => {
     if (seen.has(symbol)) {
       return;
@@ -6019,6 +6098,11 @@ const escapedPlacesIn = (
       visit(id);
       return;
     }
+    const key = `${id}:${JSON.stringify(requested)}`;
+    if (seenProjectedExpressions.has(key)) {
+      return;
+    }
+    seenProjectedExpressions.add(key);
     const expr = ctx.hir.expressions.get(id);
     if (!expr) {
       return;
@@ -6073,7 +6157,11 @@ const escapedPlacesIn = (
             requested,
           });
           if (translated) {
-            visitAtProjection(actual, translated);
+            if (translated.length === 0) {
+              collectEscaped(actual);
+            } else {
+              visitAtProjection(actual, translated);
+            }
           }
         });
       });
@@ -6172,6 +6260,10 @@ const escapedPlacesIn = (
     }
   }
   function visit(id: HirExprId): void {
+    if (seenExpressions.has(id)) {
+      return;
+    }
+    seenExpressions.add(id);
     const expr = ctx.hir.expressions.get(id);
     if (!expr) {
       return;
@@ -6310,7 +6402,13 @@ const escapedPlacesIn = (
             return;
           }
           const origins = returnedOrigins(parameter);
-          origins.forEach((origin) => visitAtProjection(actual, origin.source));
+          origins.forEach((origin) => {
+            if (origin.source.length === 0) {
+              collectEscaped(actual);
+            } else {
+              visitAtProjection(actual, origin.source);
+            }
+          });
         });
         return;
       }
@@ -6338,7 +6436,7 @@ const escapedPlacesIn = (
     }
   }
   visit(exprId);
-  return [
+  const escaped = [
     ...captured,
     ...projectedAliases,
     ...Array.from(symbols).flatMap((symbol) => {
@@ -6351,6 +6449,10 @@ const escapedPlacesIn = (
       return aliases.map((alias) => ({ symbol, alias }));
     }),
   ];
+  if (ctx.analysisComplete) {
+    ctx.escapedPlacesCache.set(exprId, escaped);
+  }
+  return escaped;
 };
 
 const recordExternalizedExpression = ({
@@ -7120,14 +7222,14 @@ const validateCall = (
         : retainedPaths.flatMap((path) =>
             resolveDefaultActualOrigins(index, path),
           );
-    retainedActuals.forEach((retained) =>
+    retainedActuals.forEach((retained) => {
       recordExternalizedExpression({
         exprId: retained.actual,
         projectionPaths: [retained.path],
         event,
         ctx,
-      }),
-    );
+      });
+    });
   });
   if (overlappingExternalAccess) {
     checkExternalAccess({
@@ -7395,15 +7497,16 @@ const validateCall = (
     activationKey: string;
     externalResult?: true;
   };
-  const activateAccesses = ({
+  type EffectiveAccess = {
+    access: "shared" | "mutable";
+    path: readonly PlaceProjection[];
+    storageAccess: boolean;
+  };
+  const accessesForEffectiveActual = ({
     actual,
     index,
-    source,
-    result,
     parameter: parameterOverride,
-    activationKey = `parameter:${index}`,
-    translatePath,
-  }: EffectiveActual): ActivatedBorrow[] => {
+  }: EffectiveActual): readonly EffectiveAccess[] => {
     const parameter = parameterOverride ?? info.contract?.parameters[index];
     const access =
       parameterOverride?.access ??
@@ -7411,8 +7514,7 @@ const validateCall = (
     if (access === "owned") {
       return [];
     }
-    const actor = baseSymbolOf(actual, ctx);
-    const accesses = parameter
+    return parameter
       ? [
           ...(parameter.readPaths ?? []).map((path) => ({
             access: "shared" as const,
@@ -7441,6 +7543,39 @@ const validateCall = (
             storageAccess: false,
           },
         ];
+  };
+  const activateAccesses = (
+    {
+      actual,
+      index,
+      source,
+      result,
+      parameter: parameterOverride,
+      activationKey = `parameter:${index}`,
+      translatePath,
+    }: EffectiveActual,
+    skipSharedResolution = false,
+  ): ActivatedBorrow[] => {
+    const parameter = parameterOverride ?? info.contract?.parameters[index];
+    const access =
+      parameterOverride?.access ??
+      parameterAccessFor({ index, actual, info, ctx });
+    const accesses = accessesForEffectiveActual({
+      actual,
+      index,
+      source,
+      result,
+      activationKey,
+      translatePath,
+      ...(parameter ? { parameter } : {}),
+    });
+    if (
+      skipSharedResolution &&
+      accesses.every((candidate) => candidate.access === "shared")
+    ) {
+      return [];
+    }
+    const actor = baseSymbolOf(actual, ctx);
     return accesses.flatMap(({ access: pathAccess, path, storageAccess }) => {
       const actualPath = translatePath
         ? translatePath(path)
@@ -7546,7 +7681,7 @@ const validateCall = (
             ? ("shared" as const)
             : undefined;
       return [
-        ...group.flatMap(activateAccesses),
+        ...group.flatMap((effective) => activateAccesses(effective)),
         ...(externalAccess
           ? [
               {
@@ -7620,7 +7755,24 @@ const validateCall = (
         },
       );
     }) ?? [];
-  const borrows = effectiveActuals.flatMap(activateAccesses);
+  const skipSharedCallAccessResolution =
+    !effectiveActuals.some((effective) =>
+      accessesForEffectiveActual(effective).some(
+        (access) => access.access === "mutable",
+      ),
+    ) &&
+    !defaultBorrowGroups.flat().some((borrow) => borrow.access === "mutable") &&
+    !defaultLoanGroups.flat().some((borrow) => borrow.access === "mutable") &&
+    overlappingExternalAccess !== "mutable" &&
+    !allAliases(ctx).some(
+      (alias) =>
+        alias.provenance === "storage-borrow" &&
+        alias.access === "mutable" &&
+        aliasActiveAt(alias, event, ctx),
+    );
+  const borrows = effectiveActuals.flatMap((effective) => {
+    return activateAccesses(effective, skipSharedCallAccessResolution);
+  });
 
   const stableExpressionIdentity = (
     exprId: HirExprId,
@@ -8129,14 +8281,14 @@ const validateCall = (
         parameter: left.index,
         expression: left.actual,
         place: left.place,
-        display: placeName(left.place, ctx),
+        display: `argument ${left.index + 1} place ${placeName(left.place, ctx)}`,
         ...leftIdentity,
       },
       right: {
         parameter: right.index,
         expression: right.actual,
         place: right.place,
-        display: placeName(right.place, ctx),
+        display: `argument ${right.index + 1} place ${placeName(right.place, ctx)}`,
         ...rightIdentity,
       },
       ...(omittedParameters.length > 0
@@ -8174,183 +8326,222 @@ const validateCall = (
         ctx.symbolTable.getScope(record.scope).kind !== "module"
       );
     };
-    activatedBorrows.forEach((left, index) => {
-      activatedBorrows.slice(index + 1).forEach((right) => {
-        if (left.activationKey === right.activationKey) {
-          return;
-        }
-        if (
-          (left.externalResult === true && borrowIsCallLocal(right)) ||
-          (right.externalResult === true && borrowIsCallLocal(left))
-        ) {
-          return;
-        }
-        if (left.access === "shared" && right.access === "shared") {
-          return;
-        }
-        if (
-          left.externalResult !== true &&
-          right.externalResult !== true &&
-          !placeOverlaps(left.place, right.place, ctx, event)
-        ) {
-          if (
-            !parameterFormsCallScopedLoan(left) ||
-            !parameterFormsCallScopedLoan(right)
-          ) {
-            return;
-          }
-          const accessIsConfinedToRoot = (place: BorrowPlace): boolean => {
-            let crossedRootAllocation = false;
-            let reachedPrivateStorage = false;
-            return place.projections.every((projection) => {
-              if (projection.kind === "identity") {
-                return true;
-              }
-              if (projection.kind === "dereference") {
-                if (crossedRootAllocation || reachedPrivateStorage) {
-                  return false;
-                }
-                crossedRootAllocation = true;
-                return true;
-              }
-              if (isPrivateSummaryRegionProjection(projection)) {
-                reachedPrivateStorage = true;
-                return true;
-              }
-              return false;
-            });
-          };
-          const leftFresh = freshAllocationOriginOfPlace(
-            {
-              root: left.place.root,
-              projections: [{ kind: "dereference" }],
-            },
-            ctx,
-            event,
-          );
-          const rightFresh = freshAllocationOriginOfPlace(
-            {
-              root: right.place.root,
-              projections: [{ kind: "dereference" }],
-            },
-            ctx,
-            event,
-          );
-          if (
-            left.place.root !== right.place.root &&
-            accessIsConfinedToRoot(left.place) &&
-            accessIsConfinedToRoot(right.place) &&
-            (typeof leftFresh === "number" || typeof rightFresh === "number") &&
-            leftFresh !== rightFresh
-          ) {
-            return;
-          }
-          const leftIdentity = runtimeIdentity(left);
-          const rightIdentity = runtimeIdentity(right);
-          const identityUsesParameterRoot = (
-            identity:
-              | Pick<
-                  RuntimeIdentityGuard["left"],
-                  "identity" | "allocationPath"
-                >
-              | undefined,
-          ): boolean =>
-            identity?.identity === "allocation" &&
-            (identity.allocationPath?.length ?? 0) === 0;
-          if (
-            identityUsesParameterRoot(leftIdentity) &&
-            identityUsesParameterRoot(rightIdentity) &&
-            !callScopedLoanRootDomainsCanOverlap(left, right)
-          ) {
-            return;
-          }
-          if (
-            isPrivateSummaryRegionProjection(left.place.projections[0]) &&
-            isPrivateSummaryRegionProjection(right.place.projections[0]) &&
-            accessIsConfinedToRoot(left.place) &&
-            accessIsConfinedToRoot(right.place)
-          ) {
-            const leftPrivateFresh = freshAllocationOriginOfPlace(
-              {
-                root: left.place.root,
-                projections: [{ kind: "dereference" }],
-              },
-              ctx,
-              event,
-            );
-            const rightPrivateFresh = freshAllocationOriginOfPlace(
-              {
-                root: right.place.root,
-                projections: [{ kind: "dereference" }],
-              },
-              ctx,
-              event,
-            );
+    const borrowRootIsIndependentInlineValue = (
+      borrow: ActivatedBorrow,
+    ): boolean => {
+      if (!borrowIsCallLocal(borrow)) {
+        return false;
+      }
+      const rootType = ctx.typing.valueTypes.get(borrow.place.root);
+      const staysWithinInlineStorage = borrow.place.projections.every(
+        (projection) =>
+          projection.kind === "field" ||
+          projection.kind === "tuple" ||
+          projection.kind === "index" ||
+          projection.kind === "discriminant",
+      );
+      return (
+        typeof rootType === "number" &&
+        !typeIsAllocationBacked(rootType, ctx.typing) &&
+        !typeContainsBorrowed(rootType, ctx.typing) &&
+        staysWithinInlineStorage
+      );
+    };
+    const activationGroups = Array.from(
+      activatedBorrows
+        .reduce((groups, borrow) => {
+          const group = groups.get(borrow.activationKey) ?? [];
+          group.push(borrow);
+          groups.set(borrow.activationKey, group);
+          return groups;
+        }, new Map<string, ActivatedBorrow[]>())
+        .values(),
+    );
+    activationGroups.forEach((leftGroup, groupIndex) => {
+      activationGroups.slice(groupIndex + 1).forEach((rightGroup) => {
+        leftGroup.forEach((left) => {
+          rightGroup.forEach((right) => {
             if (
-              !callScopedLoanRootDomainsCanOverlap(left, right) ||
-              ((typeof leftPrivateFresh === "number" ||
-                typeof rightPrivateFresh === "number") &&
-                leftPrivateFresh !== rightPrivateFresh)
+              (left.externalResult === true && borrowIsCallLocal(right)) ||
+              (right.externalResult === true && borrowIsCallLocal(left))
             ) {
               return;
             }
-          }
-          if (tryRecordRuntimeIdentityGuard(left, right)) {
-            return;
-          }
-          if (
-            leftIdentity &&
-            rightIdentity &&
-            !allocationIdentityDomainsCanOverlap(
-              left,
-              right,
-              leftIdentity,
-              rightIdentity,
-            )
-          ) {
-            return;
-          }
-          const mayOverlapAtRuntime = pathsHaveBoundedDynamicUncertainty(
-            left.place,
-            right.place,
-            leftIdentity ?? { identity: "indexed-place" },
-            rightIdentity ?? { identity: "indexed-place" },
-          );
-          if (!mayOverlapAtRuntime) {
-            return;
-          }
-        }
-        if (tryRecordRuntimeIdentityGuard(left, right)) {
-          return;
-        }
-        const leftPlace =
-          left.externalResult === true
-            ? localizeExternalResultPlace(left.place, externalPlaceRoot)
-            : left.place;
-        const rightPlace =
-          right.externalResult === true
-            ? localizeExternalResultPlace(right.place, externalPlaceRoot)
-            : right.place;
-        const synthetic: AliasDefinition = {
-          symbol:
-            left.externalResult === true
-              ? externalPlaceRoot
-              : (left.actor ?? left.place.root),
-          place: leftPlace,
-          access: left.access,
-          provenance: "storage-borrow",
-          span: ctx.hir.expressions.get(left.actual)?.span ?? event.span,
-          event,
-          uses: [event],
-          ...(left.externalResult === true ? { externalResult: true } : {}),
-        };
-        reportConflict({
-          attempted: rightPlace,
-          access: right.access,
-          existing: synthetic,
-          event: ctx.events.get(right.actual) ?? event,
-          contractSource: info.contractSources[0],
-          ctx,
+            if (left.access === "shared" && right.access === "shared") {
+              return;
+            }
+            if (
+              left.externalResult !== true &&
+              right.externalResult !== true &&
+              !placeOverlaps(left.place, right.place, ctx, event)
+            ) {
+              if (
+                borrowRootIsIndependentInlineValue(left) ||
+                borrowRootIsIndependentInlineValue(right)
+              ) {
+                return;
+              }
+              if (
+                !parameterFormsCallScopedLoan(left) ||
+                !parameterFormsCallScopedLoan(right)
+              ) {
+                return;
+              }
+              const accessIsConfinedToRoot = (place: BorrowPlace): boolean => {
+                let crossedRootAllocation = false;
+                let reachedPrivateStorage = false;
+                return place.projections.every((projection) => {
+                  if (projection.kind === "identity") {
+                    return true;
+                  }
+                  if (projection.kind === "dereference") {
+                    if (crossedRootAllocation || reachedPrivateStorage) {
+                      return false;
+                    }
+                    crossedRootAllocation = true;
+                    return true;
+                  }
+                  if (isPrivateSummaryRegionProjection(projection)) {
+                    reachedPrivateStorage = true;
+                    return true;
+                  }
+                  return false;
+                });
+              };
+              const leftFresh = freshAllocationOriginOfPlace(
+                {
+                  root: left.place.root,
+                  projections: [{ kind: "dereference" }],
+                },
+                ctx,
+                event,
+              );
+              const rightFresh = freshAllocationOriginOfPlace(
+                {
+                  root: right.place.root,
+                  projections: [{ kind: "dereference" }],
+                },
+                ctx,
+                event,
+              );
+              if (
+                left.place.root !== right.place.root &&
+                accessIsConfinedToRoot(left.place) &&
+                accessIsConfinedToRoot(right.place) &&
+                (typeof leftFresh === "number" ||
+                  typeof rightFresh === "number") &&
+                leftFresh !== rightFresh
+              ) {
+                return;
+              }
+              const leftIdentity = runtimeIdentity(left);
+              const rightIdentity = runtimeIdentity(right);
+              const identityUsesParameterRoot = (
+                identity:
+                  | Pick<
+                      RuntimeIdentityGuard["left"],
+                      "identity" | "allocationPath"
+                    >
+                  | undefined,
+              ): boolean =>
+                identity?.identity === "allocation" &&
+                (identity.allocationPath?.length ?? 0) === 0;
+              if (
+                identityUsesParameterRoot(leftIdentity) &&
+                identityUsesParameterRoot(rightIdentity) &&
+                !callScopedLoanRootDomainsCanOverlap(left, right)
+              ) {
+                return;
+              }
+              if (
+                isPrivateSummaryRegionProjection(left.place.projections[0]) &&
+                isPrivateSummaryRegionProjection(right.place.projections[0]) &&
+                accessIsConfinedToRoot(left.place) &&
+                accessIsConfinedToRoot(right.place)
+              ) {
+                const leftPrivateFresh = freshAllocationOriginOfPlace(
+                  {
+                    root: left.place.root,
+                    projections: [{ kind: "dereference" }],
+                  },
+                  ctx,
+                  event,
+                );
+                const rightPrivateFresh = freshAllocationOriginOfPlace(
+                  {
+                    root: right.place.root,
+                    projections: [{ kind: "dereference" }],
+                  },
+                  ctx,
+                  event,
+                );
+                if (
+                  !callScopedLoanRootDomainsCanOverlap(left, right) ||
+                  ((typeof leftPrivateFresh === "number" ||
+                    typeof rightPrivateFresh === "number") &&
+                    leftPrivateFresh !== rightPrivateFresh)
+                ) {
+                  return;
+                }
+              }
+              if (tryRecordRuntimeIdentityGuard(left, right)) {
+                return;
+              }
+              if (
+                leftIdentity &&
+                rightIdentity &&
+                !allocationIdentityDomainsCanOverlap(
+                  left,
+                  right,
+                  leftIdentity,
+                  rightIdentity,
+                )
+              ) {
+                return;
+              }
+              const mayOverlapAtRuntime = pathsHaveBoundedDynamicUncertainty(
+                left.place,
+                right.place,
+                leftIdentity ?? { identity: "indexed-place" },
+                rightIdentity ?? { identity: "indexed-place" },
+              );
+              if (!mayOverlapAtRuntime) {
+                return;
+              }
+            }
+            if (tryRecordRuntimeIdentityGuard(left, right)) {
+              return;
+            }
+            const leftPlace =
+              left.externalResult === true
+                ? localizeExternalResultPlace(left.place, externalPlaceRoot)
+                : left.place;
+            const rightPlace =
+              right.externalResult === true
+                ? localizeExternalResultPlace(right.place, externalPlaceRoot)
+                : right.place;
+            const synthetic: AliasDefinition = {
+              symbol:
+                left.externalResult === true
+                  ? externalPlaceRoot
+                  : (left.actor ?? left.place.root),
+              place: leftPlace,
+              access: left.access,
+              provenance: "storage-borrow",
+              span: ctx.hir.expressions.get(left.actual)?.span ?? event.span,
+              event,
+              uses: [event],
+              ...(left.externalResult === true ? { externalResult: true } : {}),
+            };
+            reportConflict({
+              attempted: rightPlace,
+              access: right.access,
+              existing: synthetic,
+              event: ctx.events.get(right.actual) ?? event,
+              contractSource: info.contractSources[0],
+              ctx,
+            });
+          });
         });
       });
     });
@@ -8967,6 +9158,11 @@ const validateExpression = (
   ctx: BodyContext,
   suppressTerminalAccess = false,
 ): void => {
+  const validationKey = `${exprId}:${suppressTerminalAccess ? 1 : 0}`;
+  if (ctx.validatedExpressions.has(validationKey)) {
+    return;
+  }
+  ctx.validatedExpressions.add(validationKey);
   const expr = ctx.hir.expressions.get(exprId);
   const event = ctx.events.get(exprId);
   if (!expr || !event) {
@@ -9381,13 +9577,9 @@ const initializeCallableContext = ({
       mutableOwners.add(capture.symbol);
     }
   });
-  const assignmentAliasesBySymbol = new Map<
-    SymbolId,
-    AliasDefinition[]
-  >();
+  const assignmentAliasesBySymbol = new Map<SymbolId, AliasDefinition[]>();
   parameterBorrowAliases.forEach((alias) => {
-    const aliasesForSymbol =
-      assignmentAliasesBySymbol.get(alias.symbol) ?? [];
+    const aliasesForSymbol = assignmentAliasesBySymbol.get(alias.symbol) ?? [];
     aliasesForSymbol.push(alias);
     assignmentAliasesBySymbol.set(alias.symbol, aliasesForSymbol);
   });
@@ -9423,6 +9615,12 @@ const initializeCallableContext = ({
     freshnessInvalidations: [],
     callResolutionCache: new Map(),
     externalResultCache: new Map(),
+    expressionPlacesCache: new Map(),
+    expressionPlacesInProgress: new Set(),
+    projectedPlacesCache: new Map(),
+    projectedPlacesInProgress: new Set(),
+    escapedPlacesCache: new Map(),
+    validatedExpressions: new Set(),
     analysisComplete: false,
     completedAliasesByRoot: new Map(),
     aliasRootLocality: new Map(),

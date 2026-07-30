@@ -146,9 +146,10 @@ export const compileBlockExpr = (
           return;
         }
         const stmt = ctx.module.hir.statements.get(stmtId);
-        const initializer = stmt?.kind === "let"
-          ? ctx.module.hir.expressions.get(stmt.initializer)
-          : undefined;
+        const initializer =
+          stmt?.kind === "let"
+            ? ctx.module.hir.expressions.get(stmt.initializer)
+            : undefined;
         if (stmt?.kind !== "let" || initializer?.exprKind !== "literal") {
           fnCtx.safeArrayLengthSymbols = undefined;
         }
@@ -162,7 +163,11 @@ export const compileBlockExpr = (
           expectedResultTypeId,
           outResultStorageRef,
         });
-        const { expr: valueExpr, usedReturnCall, usedOutResultStorageRef } = value;
+        const {
+          expr: valueExpr,
+          usedReturnCall,
+          usedOutResultStorageRef,
+        } = value;
         if (usedOutResultStorageRef) {
           if (statements.length === 0) {
             return {
@@ -172,7 +177,11 @@ export const compileBlockExpr = (
             };
           }
           return {
-            expr: ctx.mod.block(null, [...statements, valueExpr], binaryen.none),
+            expr: ctx.mod.block(
+              null,
+              [...statements, valueExpr],
+              binaryen.none,
+            ),
             usedReturnCall,
             usedOutResultStorageRef: true,
           };
@@ -180,7 +189,8 @@ export const compileBlockExpr = (
         const requiredActualType =
           typeof expectedResultTypeId === "number" &&
           !usedReturnCall &&
-          expressionUsesExpectedResultType({ exprId: expr.value, ctx })
+          expressionUsesExpectedResultType({ exprId: expr.value, ctx }) &&
+          binaryen.getExpressionType(valueExpr) === blockResultType
             ? expectedResultTypeId
             : getRequiredExprType(expr.value, ctx, typeInstanceId);
         const coercedToExpected =
@@ -205,11 +215,7 @@ export const compileBlockExpr = (
 
         statements.push(coerced);
         return {
-          expr: ctx.mod.block(
-            null,
-            statements,
-            blockResultType
-          ),
+          expr: ctx.mod.block(null, statements, blockResultType),
           usedReturnCall,
         };
       }
@@ -230,7 +236,7 @@ export const compileStatement = (
   stmtId: HirStmtId,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler
+  compileExpr: ExpressionCompiler,
 ): binaryen.ExpressionRef => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const stmt = ctx.module.hir.statements.get(stmtId);
@@ -279,7 +285,12 @@ export const compileStatement = (
             const ops =
               cleanup.length === 0
                 ? [valueExpr.expr, ...tailChecks, ctx.mod.return(wrapped)]
-                : [...tailChecks, ...cleanup, valueExpr.expr, ctx.mod.return(wrapped)];
+                : [
+                    ...tailChecks,
+                    ...cleanup,
+                    valueExpr.expr,
+                    ctx.mod.return(wrapped),
+                  ];
             return ctx.mod.block(null, ops, binaryen.none);
           }
           const ops =
@@ -319,7 +330,12 @@ export const compileStatement = (
             const ops =
               cleanup.length === 0
                 ? [storeReturn, ...tailChecks, ctx.mod.return(wrapped)]
-                : [...tailChecks, ...cleanup, storeReturn, ctx.mod.return(wrapped)];
+                : [
+                    ...tailChecks,
+                    ...cleanup,
+                    storeReturn,
+                    ctx.mod.return(wrapped),
+                  ];
             return ctx.mod.block(null, ops, binaryen.none);
           }
           const ops =
@@ -342,7 +358,12 @@ export const compileStatement = (
             const ops =
               cleanup.length === 0
                 ? [valueStmt, ...tailChecks, ctx.mod.return(wrapped)]
-                : [valueStmt, ...tailChecks, ...cleanup, ctx.mod.return(wrapped)];
+                : [
+                    valueStmt,
+                    ...tailChecks,
+                    ...cleanup,
+                    ctx.mod.return(wrapped),
+                  ];
             return ctx.mod.block(null, ops, binaryen.none);
           }
           const ops =
@@ -354,10 +375,12 @@ export const compileStatement = (
         const requiredActualType = getRequiredExprType(
           stmt.value,
           ctx,
-          typeInstanceId
+          typeInstanceId,
         );
         const actualTypeId =
-          expressionUsesExpectedResultType({ exprId: stmt.value, ctx })
+          expressionUsesExpectedResultType({ exprId: stmt.value, ctx }) &&
+          binaryen.getExpressionType(valueExpr.expr) ===
+            wasmTypeFor(fnCtx.returnTypeId, ctx)
             ? fnCtx.returnTypeId
             : requiredActualType;
         const coerced = coerceValueToType({
@@ -383,12 +406,16 @@ export const compileStatement = (
             fnCtx,
           });
           if (cleanup.length === 0) {
-            return ctx.mod.block(null, [...tailChecks, ctx.mod.return(wrapped)], binaryen.none);
+            return ctx.mod.block(
+              null,
+              [...tailChecks, ctx.mod.return(wrapped)],
+              binaryen.none,
+            );
           }
           return ctx.mod.block(
             null,
             [...tailChecks, ...cleanup, ctx.mod.return(wrapped)],
-            binaryen.none
+            binaryen.none,
           );
         }
         if (binaryen.getExpressionType(returnedValue) === binaryen.none) {
@@ -396,22 +423,26 @@ export const compileStatement = (
             return ctx.mod.block(
               null,
               [returnedValue, ...tailChecks, ctx.mod.return()],
-              binaryen.none
+              binaryen.none,
             );
           }
           return ctx.mod.block(
             null,
             [...tailChecks, ...cleanup, returnedValue, ctx.mod.return()],
-            binaryen.none
+            binaryen.none,
           );
         }
         if (cleanup.length === 0) {
-          return ctx.mod.block(null, [...tailChecks, ctx.mod.return(returnedValue)], binaryen.none);
+          return ctx.mod.block(
+            null,
+            [...tailChecks, ctx.mod.return(returnedValue)],
+            binaryen.none,
+          );
         }
         return ctx.mod.block(
           null,
           [...tailChecks, ...cleanup, ctx.mod.return(returnedValue)],
-          binaryen.none
+          binaryen.none,
         );
       }
       const tailChecks = tailResumptionExitChecks({ ctx, fnCtx });
@@ -425,21 +456,29 @@ export const compileStatement = (
           fnCtx,
         });
         if (cleanup.length === 0) {
-          return ctx.mod.block(null, [...tailChecks, ctx.mod.return(wrapped)], binaryen.none);
+          return ctx.mod.block(
+            null,
+            [...tailChecks, ctx.mod.return(wrapped)],
+            binaryen.none,
+          );
         }
         return ctx.mod.block(
           null,
           [...tailChecks, ...cleanup, ctx.mod.return(wrapped)],
-          binaryen.none
+          binaryen.none,
         );
       }
       if (cleanup.length === 0) {
-        return ctx.mod.block(null, [...tailChecks, ctx.mod.return()], binaryen.none);
+        return ctx.mod.block(
+          null,
+          [...tailChecks, ctx.mod.return()],
+          binaryen.none,
+        );
       }
       return ctx.mod.block(
         null,
         [...tailChecks, ...cleanup, ctx.mod.return()],
-        binaryen.none
+        binaryen.none,
       );
     case "let":
       return compileLetStatement(stmt, ctx, fnCtx, compileExpr);
@@ -452,7 +491,7 @@ const compileLetStatement = (
   stmt: HirLetStatement,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler
+  compileExpr: ExpressionCompiler,
 ): binaryen.ExpressionRef => {
   if (
     stmt.pattern.kind === "identifier" &&
@@ -488,7 +527,7 @@ const compileDefaultLetStatement = (
   stmt: HirLetStatement,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler
+  compileExpr: ExpressionCompiler,
 ): binaryen.ExpressionRef => {
   const ops: binaryen.ExpressionRef[] = [];
   compilePatternInitialization({
@@ -572,7 +611,10 @@ const collectNonBorrowableProjectedSymbols = ({
         if (callee?.exprKind !== "identifier") {
           return;
         }
-        const calleeId = ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol);
+        const calleeId = ctx.program.symbols.canonicalIdOf(
+          ctx.moduleId,
+          callee.symbol,
+        );
         if (
           ctx.program.symbols.getIntrinsicName(calleeId) !== "~" &&
           ctx.program.symbols.getName(calleeId) !== "~"
@@ -656,7 +698,11 @@ const laterBlockCodeUsesAnySymbol = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): boolean => {
-  for (let index = startStatementIndex; index < expr.statements.length; index += 1) {
+  for (
+    let index = startStatementIndex;
+    index < expr.statements.length;
+    index += 1
+  ) {
     const stmt = ctx.module.hir.statements.get(expr.statements[index]!);
     if (stmt && statementUsesAnySymbol({ stmt, symbols, ctx, fnCtx })) {
       return true;
@@ -795,7 +841,9 @@ const isSimpleIdentifierAliasAssignmentExpr = ({
   }
 
   const targetExpr = ctx.module.hir.expressions.get(expr.target);
-  return targetExpr?.exprKind === "identifier" && !symbols.has(targetExpr.symbol);
+  return (
+    targetExpr?.exprKind === "identifier" && !symbols.has(targetExpr.symbol)
+  );
 };
 
 const collectSimpleIdentifierAliases = ({

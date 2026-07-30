@@ -37,6 +37,8 @@ import {
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import { assignModuleTestIds, isGeneratedTestId } from "../tests/ids.js";
 import {
+  incrementCompilerPerfCounter,
+  isCompilerPerfEnabled,
   markCompilerPerfPhaseDuration,
   startCompilerPerfPhase,
 } from "../perf.js";
@@ -3742,6 +3744,40 @@ const collectModuleExports = ({
   );
   if (publicTraitImplementations.length > 0) {
     table.borrowingTraitImplementations = publicTraitImplementations;
+  }
+
+  if (isCompilerPerfEnabled()) {
+    const retainedBorrowingSummaryBytes =
+      Array.from(table.values()).reduce(
+        (total, entry) =>
+          total +
+          (entry.borrowing ?? []).reduce(
+            (sum, summary) => sum + (summary.serializedBytes ?? 0),
+            0,
+          ) +
+          (entry.borrowingCoercions ?? []).reduce(
+            (sum, summary) => sum + summary.serializedBytes,
+            0,
+          ) +
+          (entry.borrowingCallableResultCoercions ?? []).reduce(
+            (sum, summary) => sum + summary.serializedBytes,
+            0,
+          ),
+        0,
+      ) +
+      (table.borrowingTraitImplementations ?? []).reduce(
+        (total, implementation) =>
+          total +
+          implementation.methods.reduce(
+            (sum, method) => sum + method.serializedBytes,
+            0,
+          ),
+        0,
+      );
+    incrementCompilerPerfCounter(
+      "borrowing.summary.retainedBytes",
+      retainedBorrowingSummaryBytes,
+    );
   }
 
   return table;

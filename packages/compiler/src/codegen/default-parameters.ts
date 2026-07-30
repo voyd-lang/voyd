@@ -26,6 +26,8 @@ import {
 } from "./types.js";
 import { compileOptionalNoneValue } from "./optionals.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
+import { compileFixedPanicTrap } from "./panic.js";
+import { runtimeIdentityConflictMessage } from "./runtime-identity-guards.js";
 
 interface ContinuationDefaultInitialization {
   cfg: GroupContinuationCfg;
@@ -237,10 +239,38 @@ const compileDefaultIdentityGuards = ({
         (mask, presence) => ctx.mod.i32.or(mask, presence),
         ctx.mod.i32.const(0),
       );
+  const target = ctx.program.symbols.canonicalIdOf(meta.moduleId, meta.symbol);
+  const diagnostics =
+    ctx.program.calls.getDefaultIdentityGuardDiagnostics(target);
+  const conflictDiagnostic = allocateTempLocal(binaryen.i32, fnCtx);
+  const conflictDiagnosticId = (): binaryen.ExpressionRef =>
+    ctx.mod.local.get(conflictDiagnostic.index, binaryen.i32);
+  const conflictDispatch = ctx.mod.block(null, [
+    ...diagnostics.map((diagnostic) =>
+      ctx.mod.if(
+        ctx.mod.i32.eq(
+          conflictDiagnosticId(),
+          ctx.mod.i32.const(diagnostic.id),
+        ),
+        compileFixedPanicTrap({
+          message: runtimeIdentityConflictMessage(diagnostic),
+          ctx,
+        }),
+      ),
+    ),
+    compileFixedPanicTrap({
+      message: "Runtime exclusivity conflict after default argument evaluation",
+      ctx,
+    }),
+  ]);
   return [
+    ctx.mod.local.set(
+      conflictDiagnostic.index,
+      ctx.mod.i32.shr_u(rawGuardMask(), ctx.mod.i32.const(1)),
+    ),
     ctx.mod.if(
-      ctx.mod.i32.and(rawGuardMask(), ctx.mod.i32.const(2)),
-      ctx.mod.unreachable(),
+      ctx.mod.i32.ne(conflictDiagnosticId(), ctx.mod.i32.const(0)),
+      conflictDispatch,
     ),
   ];
 };

@@ -5,7 +5,7 @@ import type {
   OptimizedValueAbiKind,
 } from "./context.js";
 import type { HirFunction } from "../semantics/hir/index.js";
-import type { CallArgumentPlanEntry } from "../semantics/typing/types.js";
+import type { CodegenCallArgumentPlanEntry } from "../semantics/codegen-view/index.js";
 import type {
   CallShapeParameterState,
   CallShapeSpecializationRequest,
@@ -101,7 +101,7 @@ const hasEffectfulDefaultParameter = ({
 };
 
 export const callShapeStatesForPlan = (
-  plan: readonly CallArgumentPlanEntry[],
+  plan: readonly CodegenCallArgumentPlanEntry[],
 ): readonly CallShapeParameterState[] =>
   plan.map((entry) =>
     entry.kind === "omitted-default" || entry.kind === "omitted-optional"
@@ -197,7 +197,7 @@ export const getOrCreateCallShapeSpecialization = ({
   ctx: CodegenContext;
   meta: FunctionMetadata;
   request: CallShapeSpecializationRequest;
-  typedPlan: readonly CallArgumentPlanEntry[];
+  typedPlan: readonly CodegenCallArgumentPlanEntry[];
 }): FunctionMetadata | undefined => {
   if (
     !ctx.optimization ||

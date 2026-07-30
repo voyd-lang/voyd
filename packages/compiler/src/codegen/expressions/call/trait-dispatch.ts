@@ -625,6 +625,8 @@ const compileDirectTraitDispatchSwitch = ({
               ctx,
               fnCtx,
             }),
+            leftDisplay: guard.left.display,
+            rightDisplay: guard.right.display,
             context: `trait call ${expr.id}`,
             ctx,
           });
@@ -1017,6 +1019,8 @@ const compileIndirectTraitDispatchCall = ({
         ctx,
         fnCtx,
       }),
+      leftDisplay: guard.left.display,
+      rightDisplay: guard.right.display,
       context: `trait call ${expr.id}`,
       ctx,
     }),
