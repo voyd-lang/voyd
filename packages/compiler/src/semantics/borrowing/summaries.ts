@@ -3115,13 +3115,123 @@ const initialFunctionContract = ({
   };
 };
 
-const functionNeedsBorrowSummary = ({
+type HandledCallableBorrowContractField =
+  | "parameters"
+  | "maySuspend"
+  | "freshResult"
+  | "defaultIdentityGuardProtocol"
+  | "borrowedResult"
+  | "externalReturnedOrigins"
+  | "externalRead"
+  | "externalWrite"
+  | "transfers"
+  | "scopedCallbacks"
+  | "callableResultInvocations"
+  | "dynamicDispatch";
+type HandledCallableParameterBorrowContractField =
+  | "access"
+  | "readPaths"
+  | "writePaths"
+  | "runtimeCheckedWrites"
+  | "retained"
+  | "retainedUnlessBorrowed"
+  | "returned"
+  | "returnedAggregate"
+  | "retainedPaths"
+  | "externalRetainedPaths"
+  | "borrowedRetainedPaths"
+  | "returnedPaths"
+  | "returnedOrigins"
+  | "returnedSharedOrigins"
+  | "returnedTypeMatchingOrigins"
+  | "accessIfResultTypeDiffers"
+  | "invalidatedPaths"
+  | "defaultOrigins"
+  | "defaultReadOrigins"
+  | "defaultWriteOrigins"
+  | "defaultExternalOrigins"
+  | "defaultExternalReturnedOrigins"
+  | "defaultExternalRead"
+  | "defaultExternalWrite"
+  | "defaultBorrowedResult"
+  | "defaultNoBorrowPaths";
+const contractDemandFieldsAreExhaustive: [
+  Exclude<keyof CallableBorrowContract, HandledCallableBorrowContractField>,
+  Exclude<
+    keyof CallableParameterBorrowContract,
+    HandledCallableParameterBorrowContractField
+  >,
+] extends [never, never]
+  ? true
+  : never = true;
+void contractDemandFieldsAreExhaustive;
+
+const contractCanAffectBorrowSafety = (
+  contract: CallableBorrowContract | undefined,
+): boolean => {
+  if (!contract) {
+    return true;
+  }
+  if (
+    contract.maySuspend ||
+    contract.externalRead ||
+    contract.externalWrite ||
+    contract.freshResult ||
+    contract.defaultIdentityGuardProtocol !== undefined ||
+    contract.borrowedResult === "parameter" ||
+    contract.borrowedResult === "external" ||
+    (contract.externalReturnedOrigins?.length ?? 0) > 0 ||
+    (contract.transfers?.length ?? 0) > 0 ||
+    (contract.scopedCallbacks?.length ?? 0) > 0 ||
+    (contract.callableResultInvocations?.length ?? 0) > 0 ||
+    (contract.dynamicDispatch !== undefined &&
+      contractCanAffectBorrowSafety(contract.dynamicDispatch))
+  ) {
+    return true;
+  }
+  return contract.parameters.some(
+    (parameter) =>
+      parameter.access !== "owned" ||
+      parameter.retained ||
+      parameter.retainedUnlessBorrowed === true ||
+      parameter.returned ||
+      parameter.returnedAggregate === true ||
+      parameter.runtimeCheckedWrites === true ||
+      parameter.defaultExternalRead === true ||
+      parameter.defaultExternalWrite === true ||
+      (parameter.defaultBorrowedResult !== undefined &&
+        parameter.defaultBorrowedResult !== "none") ||
+      (parameter.readPaths?.length ?? 0) > 0 ||
+      (parameter.writePaths?.length ?? 0) > 0 ||
+      (parameter.retainedPaths?.length ?? 0) > 0 ||
+      (parameter.externalRetainedPaths?.length ?? 0) > 0 ||
+      (parameter.borrowedRetainedPaths?.length ?? 0) > 0 ||
+      (parameter.returnedPaths?.length ?? 0) > 0 ||
+      (parameter.returnedOrigins?.length ?? 0) > 0 ||
+      (parameter.returnedSharedOrigins?.length ?? 0) > 0 ||
+      (parameter.returnedTypeMatchingOrigins?.length ?? 0) > 0 ||
+      parameter.accessIfResultTypeDiffers !== undefined ||
+      (parameter.invalidatedPaths?.length ?? 0) > 0 ||
+      (parameter.defaultOrigins?.length ?? 0) > 0 ||
+      (parameter.defaultReadOrigins?.length ?? 0) > 0 ||
+      (parameter.defaultWriteOrigins?.length ?? 0) > 0 ||
+      (parameter.defaultExternalOrigins?.length ?? 0) > 0 ||
+      (parameter.defaultExternalReturnedOrigins?.length ?? 0) > 0 ||
+      (parameter.defaultNoBorrowPaths?.length ?? 0) > 0,
+  );
+};
+
+type DirectSummaryDemand = "boundary" | "ambient";
+
+const functionDirectlyDemandsBorrowSummary = ({
   functionItem,
   contract,
   typing,
   hir,
   symbolTable,
   resolveContext,
+  localFunctions,
+  forcedBoundary,
 }: {
   functionItem: HirFunction;
   contract: CallableBorrowContract;
@@ -3129,63 +3239,118 @@ const functionNeedsBorrowSummary = ({
   hir: HirGraph;
   symbolTable: SymbolTable;
   resolveContext: ResolveContext;
-}): boolean => {
-  if (contract.parameters.some((parameter) => parameter.access !== "owned")) {
-    return true;
-  }
+  localFunctions: ReadonlySet<SymbolId>;
+  forcedBoundary: boolean;
+}): DirectSummaryDemand | undefined => {
   const signature = typing.functions.getSignature(functionItem.symbol);
-  if (
+  let directDemand: DirectSummaryDemand | undefined =
+    forcedBoundary ||
+    contractCanAffectBorrowSafety(contract) ||
+    functionItem.borrowContract !== undefined ||
     signature === undefined ||
     !typing.effects.isEmpty(signature.effectRow) ||
     typeCanCarryReference(signature.returnType, typing)
-  ) {
-    return true;
-  }
-  let needsSummary = false;
-  walkExpression({
-    exprId: functionItem.body,
-    hir,
-    options: { skipLambdas: true },
-    onEnterExpression: (_exprId, expression) => {
-      if (needsSummary) {
-        return { stop: true };
-      }
-      if (
-        expression.exprKind === "call" ||
-        expression.exprKind === "method-call"
-      ) {
-        const targets = resolveBorrowCallTargets(expression, resolveContext);
-        const onlyLocalIntrinsics =
-          targets.length > 0 &&
-          targets.every((target) => {
+      ? "boundary"
+      : undefined;
+  const expressions = [
+    functionItem.body,
+    ...functionItem.parameters.flatMap((parameter) =>
+      typeof parameter.defaultValue === "number"
+        ? [parameter.defaultValue]
+        : [],
+    ),
+  ];
+  expressions.some((exprId) => {
+    walkExpression({
+      exprId,
+      hir,
+      options: { skipLambdas: true },
+      onEnterExpression: (_currentExprId, expression) => {
+        if (directDemand === "ambient") {
+          return { stop: true };
+        }
+        if (
+          expression.exprKind === "call" ||
+          expression.exprKind === "method-call"
+        ) {
+          const targets = resolveBorrowCallTargets(expression, resolveContext);
+          if (targets.length === 0) {
+            const callee =
+              expression.exprKind === "call"
+                ? hir.expressions.get(expression.callee)
+                : undefined;
+            const intrinsic =
+              callee?.exprKind === "identifier" &&
+              (
+                symbolTable.getSymbol(callee.symbol).metadata as
+                  | { intrinsic?: boolean }
+                  | undefined
+              )?.intrinsic === true &&
+              !resolveContext.decls.getEffectOperation(callee.symbol);
+            if (intrinsic) {
+              return;
+            }
+            // An unresolved callable may be a closure over external storage.
+            // Treat it as ambient so every local wrapper is summarized too.
+            directDemand = "ambient";
+            return;
+          }
+          const targetDemands = targets.map((target) => {
+            if (
+              target.moduleId === resolveContext.moduleId &&
+              localFunctions.has(target.symbol)
+            ) {
+              return undefined;
+            }
             if (target.moduleId !== resolveContext.moduleId) {
-              return false;
+              const dependency = resolveContext.dependencies.get(
+                target.moduleId,
+              );
+              const operation = dependency?.effectOperations.get(target.symbol);
+              if (operation) {
+                return operation.maySuspend ? ("boundary" as const) : undefined;
+              }
+              const targetContract = dependency?.callables.get(
+                target.symbol,
+              )?.contract;
+              return contractCanAffectBorrowSafety(targetContract)
+                ? ("ambient" as const)
+                : undefined;
             }
             const metadata = symbolTable.getSymbol(target.symbol).metadata as
               | { intrinsic?: boolean }
               | undefined;
-            return metadata?.intrinsic === true;
+            if (metadata?.intrinsic === true) {
+              return undefined;
+            }
+            const targetContract = resolveContext.contracts.get(target.symbol);
+            return contractCanAffectBorrowSafety(targetContract)
+              ? ("ambient" as const)
+              : undefined;
           });
-        if (!onlyLocalIntrinsics) {
-          needsSummary = true;
+          directDemand = targetDemands.includes("ambient")
+            ? "ambient"
+            : targetDemands.includes("boundary")
+              ? (directDemand ?? "boundary")
+              : directDemand;
+          return directDemand === "ambient" ? { stop: true } : undefined;
+        }
+        if (expression.exprKind !== "identifier") {
+          return;
+        }
+        const record = symbolTable.getSymbol(expression.symbol);
+        if (
+          symbolTable.getScope(record.scope).kind === "module" &&
+          typing.functions.getSignature(expression.symbol) === undefined
+        ) {
+          directDemand = "ambient";
           return { stop: true };
         }
-        return;
-      }
-      if (expression.exprKind !== "identifier") {
-        return;
-      }
-      const record = symbolTable.getSymbol(expression.symbol);
-      if (
-        symbolTable.getScope(record.scope).kind === "module" &&
-        typing.functions.getSignature(expression.symbol) === undefined
-      ) {
-        needsSummary = true;
-        return { stop: true };
-      }
-    },
+      },
+    });
+    return directDemand === "ambient";
   });
-  return needsSummary;
+  return directDemand;
 };
 
 const declaredScopedCallbacks = ({
@@ -4526,6 +4691,155 @@ const transitiveCallersOf = ({
   return affected;
 };
 
+const demandDependentsWithTraitDispatch = ({
+  callers,
+  functions,
+  typing,
+}: {
+  callers: ReadonlyMap<SymbolId, readonly HirFunction[]>;
+  functions: readonly HirFunction[];
+  typing: TypingResult;
+}): ReadonlyMap<SymbolId, readonly HirFunction[]> => {
+  const result = new Map(
+    Array.from(callers, ([target, dependents]) => [target, [...dependents]]),
+  );
+  const localFunctions = new Set(
+    functions.map((functionItem) => functionItem.symbol),
+  );
+  typing.traitMethodImpls.forEach((mapping, implementation) => {
+    if (!localFunctions.has(implementation)) {
+      return;
+    }
+    const dependents = result.get(implementation) ?? [];
+    (callers.get(mapping.traitMethodSymbol) ?? []).forEach((caller) => {
+      if (!dependents.some((entry) => entry.symbol === caller.symbol)) {
+        dependents.push(caller);
+      }
+    });
+    if (dependents.length > 0) {
+      result.set(implementation, dependents);
+    }
+  });
+  return result;
+};
+
+/**
+ * Detailed inference is omitted only for callables whose seed contract and
+ * signature are owned/value-only and whose body has no ambient safety input.
+ *
+ * Reference-bearing parameters/results, callbacks, defaults, effects, trait
+ * implementations, and named contracts seed boundary demand directly.
+ * Ambient module/import/opaque facts additionally propagate to every local
+ * caller, including first-class callable references and trait dispatch, until
+ * the worklist is stable. Unknown targets therefore stay conservative, while
+ * a closed chain of owned primitive helpers can retain its exact trivial seed.
+ */
+const selectDemandedSummaryFunctions = ({
+  functions,
+  contracts,
+  hir,
+  typing,
+  symbolTable,
+  resolveContext,
+  callers,
+  forcedBoundarySymbols,
+}: {
+  functions: readonly HirFunction[];
+  contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  hir: HirGraph;
+  typing: TypingResult;
+  symbolTable: SymbolTable;
+  resolveContext: ResolveContext;
+  callers: ReadonlyMap<SymbolId, readonly HirFunction[]>;
+  forcedBoundarySymbols: ReadonlySet<SymbolId>;
+}): {
+  functions: readonly HirFunction[];
+  demanded: ReadonlySet<SymbolId>;
+  worklistEdges: number;
+  worklistIterations: number;
+  boundaryRoots: number;
+  ambientRoots: number;
+  initialAmbientRoots: number;
+} => {
+  const localFunctions = new Set(
+    functions.map((functionItem) => functionItem.symbol),
+  );
+  const directDemand = new Map(
+    functions.flatMap((functionItem) => {
+      const demand = functionDirectlyDemandsBorrowSummary({
+        functionItem,
+        contract: contracts.get(functionItem.symbol)!,
+        typing,
+        hir,
+        symbolTable,
+        resolveContext,
+        localFunctions,
+        forcedBoundary: forcedBoundarySymbols.has(functionItem.symbol),
+      });
+      return demand ? ([[functionItem.symbol, demand]] as const) : [];
+    }),
+  );
+  const demanded = new Set(directDemand.keys());
+  const initialAmbientRoots = Array.from(directDemand.values()).filter(
+    (demand) => demand === "ambient",
+  ).length;
+  const worklist = Array.from(directDemand)
+    .filter(([, demand]) => demand === "ambient")
+    .map(([symbol]) => symbol);
+  const worklistEdges = Array.from(callers.values()).reduce(
+    (total, dependents) => total + dependents.length,
+    0,
+  );
+  let worklistIterations = 0;
+  let cursor = 0;
+  while (cursor < worklist.length) {
+    const symbol = worklist[cursor++]!;
+    worklistIterations += 1;
+    (callers.get(symbol) ?? []).forEach((caller) => {
+      if (demanded.has(caller.symbol)) {
+        if (directDemand.get(caller.symbol) === "ambient") {
+          return;
+        }
+      } else {
+        demanded.add(caller.symbol);
+      }
+      directDemand.set(caller.symbol, "ambient");
+      worklist.push(caller.symbol);
+    });
+  }
+  return {
+    functions: functions.filter((functionItem) =>
+      demanded.has(functionItem.symbol),
+    ),
+    demanded,
+    worklistEdges,
+    worklistIterations,
+    boundaryRoots: Array.from(directDemand.values()).filter(
+      (demand) => demand === "boundary",
+    ).length,
+    ambientRoots: Array.from(directDemand.values()).filter(
+      (demand) => demand === "ambient",
+    ).length,
+    initialAmbientRoots,
+  };
+};
+
+export type BorrowSummaryDemandTelemetry = {
+  totalCallables: number;
+  demandedCallables: number;
+  skippedTrivialCallables: number;
+  worklistEdges: number;
+  worklistIterations: number;
+  evaluations: number;
+};
+
+export type CallableBorrowContractComputation = {
+  contracts: Map<SymbolId, CallableBorrowContract>;
+  demand: BorrowSummaryDemandTelemetry & {
+    demandedSymbols: ReadonlySet<SymbolId>;
+  };
+};
+
 export const computeCallableBorrowContracts = ({
   hir,
   typing,
@@ -4549,7 +4863,7 @@ export const computeCallableBorrowContracts = ({
   decls: DeclTable;
   dynamicDispatchContracts?: ReadonlyMap<SymbolId, CallableBorrowContract>;
   declarationContracts?: ReadonlyMap<SymbolId, CallableBorrowContract>;
-}): Map<SymbolId, CallableBorrowContract> => {
+}): CallableBorrowContractComputation => {
   const withDynamicDispatch = (
     symbol: SymbolId,
     contract: CallableBorrowContract,
@@ -4599,36 +4913,84 @@ export const computeCallableBorrowContracts = ({
     borrowIndexMode: "symbolic",
     decls,
   };
-  const summaryFunctions = functions.filter((functionItem) =>
-    functionNeedsBorrowSummary({
-      functionItem,
-      contract: contracts.get(functionItem.symbol)!,
-      typing,
+  const allCallers = demandDependentsWithTraitDispatch({
+    callers: localCallersOf({
+      functions,
       hir,
+      typing,
       symbolTable,
-      resolveContext: summarySelectionContext,
+      moduleId,
+      imports: importMap,
+      dependencies,
+      decls,
     }),
+    functions,
+    typing,
+  });
+  const forcedBoundarySymbols = new Set<SymbolId>([
+    ...dynamicDispatchContracts.keys(),
+    ...declarationContracts.keys(),
+    ...typing.traitMethodImpls.keys(),
+  ]);
+  const selection = selectDemandedSummaryFunctions({
+    functions,
+    contracts,
+    hir,
+    typing,
+    symbolTable,
+    resolveContext: summarySelectionContext,
+    callers: allCallers,
+    forcedBoundarySymbols,
+  });
+  const summaryFunctions = selection.functions;
+  incrementCompilerPerfCounter(
+    "borrowing.summary.totalCallables",
+    functions.length,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.demandedCallables",
+    summaryFunctions.length,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.skippedTrivialCallables",
+    functions.length - summaryFunctions.length,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.demandWorklistEdges",
+    selection.worklistEdges,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.demandWorklistIterations",
+    selection.worklistIterations,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.demandBoundaryRoots",
+    selection.boundaryRoots,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.demandAmbientCallables",
+    selection.ambientRoots,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.demandAmbientRoots",
+    selection.initialAmbientRoots,
   );
   incrementCompilerPerfCounter(
     "borrowing.summary.functions",
     summaryFunctions.length,
   );
-  const callers = localCallersOf({
-    functions: summaryFunctions,
-    hir,
-    typing,
-    symbolTable,
-    moduleId,
-    imports: importMap,
-    dependencies,
-    decls,
-  });
+  const summarySymbols = new Set(
+    summaryFunctions.map((functionItem) => functionItem.symbol),
+  );
+  const callers = new Map(
+    Array.from(allCallers, ([target, dependents]) => [
+      target,
+      dependents.filter((dependent) => summarySymbols.has(dependent.symbol)),
+    ]),
+  );
   const orderedSummaryFunctions = dependencyOrderedFunctions(
     summaryFunctions,
     callers,
-  );
-  const summarySymbols = new Set(
-    summaryFunctions.map((functionItem) => functionItem.symbol),
   );
   const localSummaryDependencies = new Map<SymbolId, Set<SymbolId>>();
   callers.forEach((dependents, target) => {
@@ -4643,8 +5005,10 @@ export const computeCallableBorrowContracts = ({
     });
   });
   const finalCandidates = new Map<SymbolId, CallableBorrowContract>();
-  const summarize = (functionItem: HirFunction): CallableBorrowContract =>
-    summarizeFunction({
+  let evaluationCount = 0;
+  const summarize = (functionItem: HirFunction): CallableBorrowContract => {
+    evaluationCount += 1;
+    return summarizeFunction({
       functionItem,
       baseContracts: contracts,
       hir,
@@ -4655,6 +5019,7 @@ export const computeCallableBorrowContracts = ({
       dependencies,
       decls,
     });
+  };
   const converge = (
     seeds: readonly HirFunction[] = orderedSummaryFunctions,
   ): void => {
@@ -4818,7 +5183,7 @@ export const computeCallableBorrowContracts = ({
   const functionsBySymbol = new Map(
     functions.map((functionItem) => [functionItem.symbol, functionItem]),
   );
-  return new Map(
+  const result = new Map(
     Array.from(contracts, ([symbol, contract]) => {
       const {
         defaultIdentityGuardProtocol: _defaultIdentityGuardProtocol,
@@ -4842,6 +5207,22 @@ export const computeCallableBorrowContracts = ({
       ];
     }),
   );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.retainedDetailedOutputs",
+    summaryFunctions.length,
+  );
+  return {
+    contracts: result,
+    demand: {
+      totalCallables: functions.length,
+      demandedCallables: summaryFunctions.length,
+      skippedTrivialCallables: functions.length - summaryFunctions.length,
+      worklistEdges: selection.worklistEdges,
+      worklistIterations: selection.worklistIterations,
+      evaluations: evaluationCount,
+      demandedSymbols: new Set(selection.demanded),
+    },
+  };
 };
 
 const stronglyConnectedComponents = ({
@@ -5018,7 +5399,21 @@ const localCallersOf = ({
     decls,
   };
   functions.forEach((caller) => {
+    const addCaller = (target: SymbolId): void => {
+      const current = byTarget.get(target) ?? [];
+      if (!current.some((entry) => entry.symbol === caller.symbol)) {
+        current.push(caller);
+        byTarget.set(target, current);
+      }
+    };
     const visit = (_exprId: HirExprId, expr: HirExpression): void => {
+      if (
+        expr.exprKind === "identifier" &&
+        typing.functions.getSignature(expr.symbol) !== undefined &&
+        !imports.has(expr.symbol)
+      ) {
+        addCaller(expr.symbol);
+      }
       if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
         return;
       }
@@ -5026,11 +5421,7 @@ const localCallersOf = ({
         if (target.moduleId !== moduleId) {
           return;
         }
-        const current = byTarget.get(target.symbol) ?? [];
-        if (!current.some((entry) => entry.symbol === caller.symbol)) {
-          current.push(caller);
-          byTarget.set(target.symbol, current);
-        }
+        addCaller(target.symbol);
       });
     };
     caller.parameters.forEach((parameter) => {
@@ -5038,16 +5429,16 @@ const localCallersOf = ({
         walkExpression({
           exprId: parameter.defaultValue,
           hir,
-          onEnterExpression: visit,
           options: { skipLambdas: true },
+          onEnterExpression: visit,
         });
       }
     });
     walkExpression({
       exprId: caller.body,
       hir,
-      onEnterExpression: visit,
       options: { skipLambdas: true },
+      onEnterExpression: visit,
     });
   });
   return byTarget;

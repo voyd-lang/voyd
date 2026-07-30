@@ -114,6 +114,18 @@ const measureMode = async (optimize: boolean) => {
   const dependencyProjectionSummaryDecodes: number[] = [];
   const dependencyProjectionSummaryReuses: number[] = [];
   const deserializedSummaries: number[] = [];
+  const totalSummaryCallables: number[] = [];
+  const demandedSummaryCallables: number[] = [];
+  const skippedTrivialSummaryCallables: number[] = [];
+  const summaryDemandWorklistEdges: number[] = [];
+  const summaryDemandWorklistIterations: number[] = [];
+  const summaryEvaluations: number[] = [];
+  const retainedDetailedSummaryOutputs: number[] = [];
+  const borrowedResultDemandedCallables: number[] = [];
+  const borrowedResultSkippedCallables: number[] = [];
+  const borrowingContractComputationMs: number[] = [];
+  const borrowingInferenceMs: number[] = [];
+  const borrowedResultAnnotationMs: number[] = [];
   let compiled: CompileSuccess | undefined;
 
   for (let sample = 0; sample < sampleCount; sample += 1) {
@@ -181,6 +193,43 @@ const measureMode = async (optimize: boolean) => {
     );
     deserializedSummaries.push(
       summary.counters["borrowing.summary.deserializedCount"] ?? 0,
+    );
+    totalSummaryCallables.push(
+      summary.counters["borrowing.summary.totalCallables"] ?? 0,
+    );
+    demandedSummaryCallables.push(
+      summary.counters["borrowing.summary.demandedCallables"] ?? 0,
+    );
+    skippedTrivialSummaryCallables.push(
+      summary.counters["borrowing.summary.skippedTrivialCallables"] ?? 0,
+    );
+    summaryDemandWorklistEdges.push(
+      summary.counters["borrowing.summary.demandWorklistEdges"] ?? 0,
+    );
+    summaryDemandWorklistIterations.push(
+      summary.counters["borrowing.summary.demandWorklistIterations"] ?? 0,
+    );
+    summaryEvaluations.push(
+      summary.counters["borrowing.summary.evaluations"] ?? 0,
+    );
+    retainedDetailedSummaryOutputs.push(
+      summary.counters["borrowing.summary.retainedDetailedOutputs"] ?? 0,
+    );
+    borrowedResultDemandedCallables.push(
+      summary.counters["borrowing.summary.borrowedResultDemandedCallables"] ??
+        0,
+    );
+    borrowedResultSkippedCallables.push(
+      summary.counters["borrowing.summary.borrowedResultSkippedCallables"] ?? 0,
+    );
+    borrowingContractComputationMs.push(
+      summary.phasesMs["analyzeBorrowing.computeContracts"] ?? 0,
+    );
+    borrowingInferenceMs.push(
+      summary.phasesMs["analyzeBorrowing.inferContracts"] ?? 0,
+    );
+    borrowedResultAnnotationMs.push(
+      summary.phasesMs["analyzeBorrowing.annotateBorrowedResults"] ?? 0,
     );
   }
   if (!compiled) {
@@ -263,6 +312,56 @@ const measureMode = async (optimize: boolean) => {
     ),
     deserializedSummaries,
     deserializedSummaryMedian: median(deserializedSummaries),
+    summaryDemand: {
+      totalCallables: {
+        samples: totalSummaryCallables,
+        median: median(totalSummaryCallables),
+      },
+      demandedCallables: {
+        samples: demandedSummaryCallables,
+        median: median(demandedSummaryCallables),
+      },
+      skippedTrivialCallables: {
+        samples: skippedTrivialSummaryCallables,
+        median: median(skippedTrivialSummaryCallables),
+      },
+      worklistEdges: {
+        samples: summaryDemandWorklistEdges,
+        median: median(summaryDemandWorklistEdges),
+      },
+      worklistIterations: {
+        samples: summaryDemandWorklistIterations,
+        median: median(summaryDemandWorklistIterations),
+      },
+      evaluations: {
+        samples: summaryEvaluations,
+        median: median(summaryEvaluations),
+      },
+      retainedDetailedOutputs: {
+        samples: retainedDetailedSummaryOutputs,
+        median: median(retainedDetailedSummaryOutputs),
+      },
+      borrowedResultDemandedCallables: {
+        samples: borrowedResultDemandedCallables,
+        median: median(borrowedResultDemandedCallables),
+      },
+      borrowedResultSkippedCallables: {
+        samples: borrowedResultSkippedCallables,
+        median: median(borrowedResultSkippedCallables),
+      },
+      contractComputationMs: {
+        samples: borrowingContractComputationMs,
+        median: median(borrowingContractComputationMs),
+      },
+      inferenceMs: {
+        samples: borrowingInferenceMs,
+        median: median(borrowingInferenceMs),
+      },
+      borrowedResultAnnotationMs: {
+        samples: borrowedResultAnnotationMs,
+        median: median(borrowedResultAnnotationMs),
+      },
+    },
     runtimeMs,
     runtimeMedianMs: median(runtimeMs),
     linearMemoryGrowthBytes: afterBytes - beforeBytes,
@@ -366,6 +465,8 @@ console.log(
         freshSdkPerCompile: true,
         summaryBytes:
           "compiler borrowing.summary.retainedBytes is the public snapshot footprint; serializedBytes records total serialization work; zero means the revision has no serialized public-summary format",
+        summaryDemand:
+          "total/demanded/skipped callable counters cover detailed whole-callable inference; worklist counters cover local call, callable-reference, and trait-dispatch propagation; borrowed-result counters cover the narrower explicit-borrow/type-parameter fixed point",
         dependencyProjection:
           "assembly counters contrast the analyzed-prefix modules available with unique graph/import edge candidates and projected modules; cache hits/misses count immutable semantic-result projections; projection summary decodes/reuses count validated public payloads within cache misses; deserialized summaries count all schema-validation calls",
         allocation:

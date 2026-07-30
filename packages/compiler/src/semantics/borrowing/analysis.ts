@@ -1,6 +1,7 @@
 import type { SymbolTable } from "../binder/index.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
 import {
+  incrementCompilerPerfCounter,
   markCompilerPerfPhaseDuration,
   startCompilerPerfPhase,
 } from "../../perf.js";
@@ -47,7 +48,11 @@ import {
   referenceOriginsInType,
   typeCanCarryReference,
 } from "./reference-bearing.js";
-import { borrowedPathsInType, typeContainsBorrowed } from "./borrowed-types.js";
+import {
+  borrowedPathsInType,
+  typeContainsBorrowed,
+  typeParameterPathsInType,
+} from "./borrowed-types.js";
 import { expressionCanFallThrough } from "./control-flow.js";
 import { objectLiteralFieldProvider } from "./object-literal-providers.js";
 import { validateNamedBorrowContracts } from "./named-contracts.js";
@@ -76,6 +81,7 @@ export const analyzeBorrowing = ({
 }): BorrowingResult => {
   const summariesStartedAt = startCompilerPerfPhase();
   const summaryHir = hirWithTraitDefaultFunctions(hir);
+  let demandedSummarySymbols: ReadonlySet<SymbolId> = new Set();
   const effectOperationContracts = effectOperationCallableContracts({
     hir,
     typing,
@@ -85,6 +91,7 @@ export const analyzeBorrowing = ({
     dynamicDispatchContracts?: ReadonlyMap<SymbolId, CallableBorrowContract>,
     declarationContracts?: ReadonlyMap<SymbolId, CallableBorrowContract>,
   ): ReadonlyMap<SymbolId, CallableBorrowContract> => {
+    const inferStartedAt = startCompilerPerfPhase();
     const inferred = computeCallableBorrowContracts({
       hir: summaryHir,
       typing,
@@ -96,7 +103,13 @@ export const analyzeBorrowing = ({
       dynamicDispatchContracts,
       declarationContracts,
     });
-    return annotateBorrowedResultPresence({
+    demandedSummarySymbols = inferred.demand.demandedSymbols;
+    markCompilerPerfPhaseDuration(
+      "analyzeBorrowing.inferContracts",
+      inferStartedAt,
+    );
+    const borrowedResultStartedAt = startCompilerPerfPhase();
+    const annotated = annotateBorrowedResultPresence({
       hir: summaryHir,
       typing,
       symbolTable,
@@ -104,8 +117,14 @@ export const analyzeBorrowing = ({
       imports,
       dependencies,
       decls,
-      callables: inferred,
+      callables: inferred.contracts,
+      analyzedSymbols: demandedSummarySymbols,
     });
+    markCompilerPerfPhaseDuration(
+      "analyzeBorrowing.annotateBorrowedResults",
+      borrowedResultStartedAt,
+    );
+    return annotated;
   };
   const preliminaryCallables = inferCallables(
     undefined,
@@ -2504,6 +2523,7 @@ const annotateBorrowedResultPresence = ({
   dependencies,
   decls,
   callables,
+  analyzedSymbols,
 }: {
   hir: HirGraph;
   typing: TypingResult;
@@ -2513,61 +2533,111 @@ const annotateBorrowedResultPresence = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   callables: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  analyzedSymbols: ReadonlySet<SymbolId>;
 }): ReadonlyMap<SymbolId, CallableBorrowContract> => {
   const functions = Array.from(hir.items.values()).filter(
     (item): item is HirFunction => item.kind === "function",
   );
+  const analyzedFunctions = functions.filter((item) => {
+    if (!analyzedSymbols.has(item.symbol)) {
+      return false;
+    }
+    const returnType = typing.functions.getSignature(item.symbol)?.returnType;
+    return (
+      typeof returnType !== "number" ||
+      typeContainsBorrowed(returnType, typing) ||
+      typeParameterPathsInType(returnType, typing).length > 0
+    );
+  });
+  const analyzedPresenceSymbols = new Set(
+    analyzedFunctions.map((functionItem) => functionItem.symbol),
+  );
+  const defaultNeedsPresenceAnalysis = (
+    functionItem: HirFunction,
+    parameterIndex: number,
+  ): boolean => {
+    const type = typing.functions.getSignature(functionItem.symbol)?.parameters[
+      parameterIndex
+    ]?.type;
+    return (
+      typeof type !== "number" ||
+      typeContainsBorrowed(type, typing) ||
+      typeParameterPathsInType(type, typing).length > 0
+    );
+  };
+  const hasBorrowSensitiveDefault = functions.some((functionItem) =>
+    functionItem.parameters.some(
+      (parameter, index) =>
+        typeof parameter.defaultValue === "number" &&
+        defaultNeedsPresenceAnalysis(functionItem, index),
+    ),
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.borrowedResultDemandedCallables",
+    analyzedFunctions.length,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.borrowedResultSkippedCallables",
+    functions.length - analyzedFunctions.length,
+  );
   let presence = new Map<SymbolId, BorrowedResultPresence>(
     functions.map((item) => [item.symbol, "none"]),
   );
-  for (
-    let iteration = 0;
-    iteration < Math.max(2, functions.length * 3);
-    iteration += 1
-  ) {
-    const contracts = new Map(
-      Array.from(callables, ([symbol, contract]) => [
-        symbol,
-        {
-          ...contract,
-          borrowedResult: presence.get(symbol) ?? contract.borrowedResult,
-        },
-      ]),
-    );
-    const resolveContext: ResolveContext = {
-      hir,
-      typing,
-      symbolTable,
-      moduleId,
-      imports: new Map(
-        imports.flatMap((entry) =>
-          entry.target ? ([[entry.local, entry.target]] as const) : [],
-        ),
-      ),
-      dependencies,
-      contracts,
-      bindingInitializers: new Map(),
-      callResolutionCache: new Map(),
-      decls,
-    };
-    const analyzer = createBorrowedResultPresenceAnalyzer({
-      hir,
-      typing,
-      resolveContext,
-      recursiveSeed: presence,
-    });
-    const next = new Map(
-      functions.map((item) => [item.symbol, analyzer.function(item)]),
-    );
-    if (
-      functions.every(
-        (item) => presence.get(item.symbol) === next.get(item.symbol),
-      )
+  if (analyzedFunctions.length > 0) {
+    for (
+      let iteration = 0;
+      iteration < Math.max(2, analyzedFunctions.length * 3);
+      iteration += 1
     ) {
+      const contracts = new Map(
+        Array.from(callables, ([symbol, contract]) => [
+          symbol,
+          {
+            ...contract,
+            borrowedResult: presence.get(symbol) ?? contract.borrowedResult,
+          },
+        ]),
+      );
+      const resolveContext: ResolveContext = {
+        hir,
+        typing,
+        symbolTable,
+        moduleId,
+        imports: new Map(
+          imports.flatMap((entry) =>
+            entry.target ? ([[entry.local, entry.target]] as const) : [],
+          ),
+        ),
+        dependencies,
+        contracts,
+        bindingInitializers: new Map(),
+        callResolutionCache: new Map(),
+        decls,
+      };
+      const analyzer = createBorrowedResultPresenceAnalyzer({
+        hir,
+        typing,
+        resolveContext,
+        recursiveSeed: presence,
+      });
+      const next = new Map(
+        functions.map((item) => [
+          item.symbol,
+          analyzedPresenceSymbols.has(item.symbol)
+            ? analyzer.function(item)
+            : ("none" as const),
+        ]),
+      );
+      if (
+        analyzedFunctions.every(
+          (item) => presence.get(item.symbol) === next.get(item.symbol),
+        )
+      ) {
+        presence = next;
+        break;
+      }
       presence = next;
-      break;
     }
-    presence = next;
   }
   const annotated = new Map(
     Array.from(callables, ([symbol, contract]) => [
@@ -2578,6 +2648,39 @@ const annotateBorrowedResultPresence = ({
       },
     ]),
   );
+  if (analyzedFunctions.length === 0 && !hasBorrowSensitiveDefault) {
+    const functionsBySymbol = new Map(
+      functions.map((functionItem) => [functionItem.symbol, functionItem]),
+    );
+    return new Map(
+      Array.from(annotated, ([symbol, contract]) => {
+        const functionItem = functionsBySymbol.get(symbol);
+        if (!functionItem) {
+          return [symbol, contract] as const;
+        }
+        return [
+          symbol,
+          {
+            ...contract,
+            parameters: contract.parameters.map((parameterContract, index) => {
+              const hasDefault =
+                typeof functionItem.parameters[index]?.defaultValue ===
+                "number";
+              return {
+                ...parameterContract,
+                ...(hasDefault
+                  ? {
+                      defaultBorrowedResult: "none" as const,
+                      defaultNoBorrowPaths: [[]],
+                    }
+                  : {}),
+              };
+            }),
+          },
+        ] as const;
+      }),
+    );
+  }
   const resolveContext: ResolveContext = {
     hir,
     typing,
@@ -2615,12 +2718,17 @@ const annotateBorrowedResultPresence = ({
             const parameter = functionItem.parameters[index];
             const parameterType =
               typing.functions.getSignature(symbol)?.parameters[index]?.type;
+            const needsPresenceAnalysis = defaultNeedsPresenceAnalysis(
+              functionItem,
+              index,
+            );
             const defaultBorrowedResult =
               typeof parameter?.defaultValue === "number" &&
-              analyzer.expression(
-                parameter.defaultValue,
-                priorParameterSymbols,
-              ) === "none"
+              (!needsPresenceAnalysis ||
+                analyzer.expression(
+                  parameter.defaultValue,
+                  priorParameterSymbols,
+                ) === "none")
                 ? ("none" as const)
                 : undefined;
             const candidateDefaultPaths =
@@ -2637,20 +2745,22 @@ const annotateBorrowedResultPresence = ({
                 : [[]];
             const defaultNoBorrowPaths =
               typeof parameter?.defaultValue === "number"
-                ? Array.from(
-                    new Map(
-                      candidateDefaultPaths
-                        .filter(
-                          (path) =>
-                            analyzer.projection(
-                              parameter.defaultValue!,
-                              path,
-                              priorParameterSymbols,
-                            ) === "none",
-                        )
-                        .map((path) => [JSON.stringify(path), path]),
-                    ).values(),
-                  )
+                ? needsPresenceAnalysis
+                  ? Array.from(
+                      new Map(
+                        candidateDefaultPaths
+                          .filter(
+                            (path) =>
+                              analyzer.projection(
+                                parameter.defaultValue!,
+                                path,
+                                priorParameterSymbols,
+                              ) === "none",
+                          )
+                          .map((path) => [JSON.stringify(path), path]),
+                      ).values(),
+                    )
+                  : candidateDefaultPaths
                 : [];
             if (parameter) {
               symbolsInPattern(parameter.pattern).forEach((parameterSymbol) =>

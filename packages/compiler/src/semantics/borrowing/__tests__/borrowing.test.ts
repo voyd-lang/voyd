@@ -5,6 +5,7 @@ import { createMemoryModuleHost } from "../../../modules/memory-host.js";
 import { createNodePathAdapter } from "../../../modules/node-path-adapter.js";
 import { analyzeModules, loadModuleGraph } from "../../../pipeline.js";
 import { parse } from "../../../parser/index.js";
+import { getSymbolTable } from "../../_internal/symbol-table.js";
 import {
   createBorrowingDependencyProjectionCache,
   projectBorrowingDependencies,
@@ -19,7 +20,10 @@ import {
   projectionPathCovers,
   projectionPathsOverlap,
 } from "../model.js";
-import { normalizeReturnedSharedOrigins } from "../summaries.js";
+import {
+  computeCallableBorrowContracts,
+  normalizeReturnedSharedOrigins,
+} from "../summaries.js";
 import { borrowedTypeEntriesInType } from "../borrowed-types.js";
 import { abstractTraitContractFromImplementation } from "../call-resolution.js";
 import {
@@ -71,6 +75,17 @@ const analyze = (source: string) => {
     },
   });
 };
+
+const summaryDemandFor = (result: ReturnType<typeof analyze>) =>
+  computeCallableBorrowContracts({
+    hir: result.hir,
+    typing: result.typing,
+    symbolTable: getSymbolTable(result),
+    moduleId: result.moduleId,
+    imports: result.binding.imports,
+    dependencies: new Map(),
+    decls: result.binding.decls,
+  }).demand;
 
 const diagnosticCodes = (source: string): readonly string[] => {
   try {
@@ -153,6 +168,115 @@ trait ItemView
 `;
 
 describe("borrow checking", () => {
+  it("skips large private primitive helper chains during summary inference", () => {
+    const helperCount = 80;
+    const helpers = Array.from({ length: helperCount }, (_entry, index) =>
+      index === 0
+        ? `fn helper_0(value: i32) -> i32\n  value`
+        : `fn helper_${index}(value: i32) -> i32\n  helper_${index - 1}(value)`,
+    ).join("\n\n");
+    const result = analyze(`
+${helpers}
+
+pub fn entry(value: i32) -> i32
+  helper_${helperCount - 1}(value)
+`);
+
+    const demand = summaryDemandFor(result);
+    expect(demand).toMatchObject({
+      totalCallables: helperCount + 1,
+      demandedCallables: 0,
+      skippedTrivialCallables: helperCount + 1,
+      evaluations: 0,
+    });
+    expect(demand.worklistEdges).toBeGreaterThanOrEqual(helperCount);
+  });
+
+  it("propagates ambient summary demand through private wrappers", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+let source = Box { value: 1 }
+
+fn leaf() -> i32
+  source.value
+
+fn middle() -> i32
+  leaf()
+
+pub fn entry() -> i32
+  middle()
+`);
+    const entry = result.symbols.resolveTopLevel("entry");
+
+    const demand = summaryDemandFor(result);
+    expect(demand.demandedCallables).toBe(3);
+    expect(demand.worklistIterations).toBe(3);
+    expect(
+      typeof entry === "number"
+        ? result.borrowing.callables.get(entry)?.externalRead
+        : undefined,
+    ).toBe(true);
+  });
+
+  it("upgrades boundary summaries to ambient before propagating callers", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+let source = Box { value: 1 }
+
+fn get() -> Box
+  source
+
+pub fn read() -> i32
+  get().value
+`);
+    const read = result.symbols.resolveTopLevel("read");
+    const demand = summaryDemandFor(result);
+
+    expect(demand.demandedCallables).toBe(2);
+    expect(
+      typeof read === "number"
+        ? result.borrowing.callables.get(read)?.externalRead
+        : undefined,
+    ).toBe(true);
+  });
+
+  it("keeps opaque callbacks and recursive safety call graphs demanded", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn invoke(callback: fn(i32) -> i32, value: i32) -> i32
+  callback(value)
+
+fn left(~value: Box) -> void
+  right(~value)
+
+fn right(~value: Box) -> void
+  left(~value)
+`);
+
+    const demand = summaryDemandFor(result);
+    expect(demand.demandedCallables).toBe(3);
+    expect(demand.evaluations).toBeGreaterThanOrEqual(3);
+  });
+
+  it("keeps nested-lambda dependencies out of the enclosing call graph", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+let source = Box { value: 1 }
+
+fn ignore_reader() -> i32
+  let reader = () -> i32 => source.value
+  0
+`);
+
+    expect(summaryDemandFor(result)).toMatchObject({
+      totalCallables: 1,
+      demandedCallables: 0,
+      skippedTrivialCallables: 1,
+      evaluations: 0,
+    });
+  });
+
   it("decodes immutable dependency summaries once across repeated projections", () => {
     const dependency = analyze(`
 pub obj Box { api value: i32 }
