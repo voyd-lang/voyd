@@ -77,6 +77,26 @@ corresponding comparison-script flags. The scheduled
 `.github/workflows/optimizer-scorecard.yml` workflow runs the full corpus and
 retains its JSON artifact for 30 days.
 
+There is one migration-only RSS exception for precompiled standard-library
+semantics. When the base scorecard has no
+`compiler.precompiled_std_snapshot.hit` counter and the head scorecard does,
+the absolute peak-RSS-growth threshold is 64 MiB instead of 32 MiB for that
+row. Compile time, runtime, Wasm size, and gzip size keep their ordinary
+thresholds. Restoring the semantic graph creates a fixed startup working set;
+the six-sample V-448 comparison measured lower-quartile growth of 152.33 MiB
+before and 207.86 MiB after on the smallest scenario, a 55.53 MiB increase.
+The 64 MiB ceiling leaves 8.47 MiB of measurement headroom. Larger scenarios
+used 149-186 MiB less compile-attributable RSS. The exception does not apply
+when both revisions load the snapshot, or if the head stops hitting it, so the
+ordinary 32 MiB gate automatically resumes for subsequent changes.
+
+Delete this transition exception once all supported comparison bases contain
+the precompiled snapshot. Before removal, rerun the Node 22 CI preset in both
+orders with at least six pooled samples. Package-interface and persistent
+incremental-snapshot work should target the ordinary 32 MiB budget without a
+feature allowance; update that work's stored measurements rather than
+increasing this migration limit.
+
 When only sampled compile, runtime, or RSS measurements fail, the PR gate
 reruns the affected scenarios with base/head order reversed. It pools the
 initial and retry samples before making the final comparison, which cancels
