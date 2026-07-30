@@ -406,6 +406,7 @@ const stripWireRegionDisjointness = (
 export const deserializeCallableBorrowSummary = (
   serialized: string,
 ): CallableBorrowSummary => {
+  incrementCompilerPerfCounter("borrowing.summary.deserializedCount");
   let value: unknown;
   try {
     value = JSON.parse(serialized);

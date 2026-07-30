@@ -6,8 +6,10 @@ import { createNodePathAdapter } from "../../../modules/node-path-adapter.js";
 import { analyzeModules, loadModuleGraph } from "../../../pipeline.js";
 import { parse } from "../../../parser/index.js";
 import {
+  createBorrowingDependencyProjectionCache,
   projectBorrowingDependencies,
   semanticsPipeline,
+  snapshotBorrowingDependencyProjectionCacheStats,
 } from "../../pipeline.js";
 import { buildProgramCodegenView } from "../../codegen-view/index.js";
 import {
@@ -147,6 +149,71 @@ trait ItemView
 `;
 
 describe("borrow checking", () => {
+  it("decodes immutable dependency summaries once across repeated projections", () => {
+    const dependency = analyze(`
+pub obj Box { api value: i32 }
+
+pub fn read(value: Box) -> i32
+  value.value
+`);
+    const cache = createBorrowingDependencyProjectionCache();
+    const dependencies = new Map([[dependency.moduleId, dependency]]);
+
+    const first = projectBorrowingDependencies(dependencies, cache);
+    const afterFirst = snapshotBorrowingDependencyProjectionCacheStats(cache);
+    const second = projectBorrowingDependencies(dependencies, cache);
+    const afterSecond = snapshotBorrowingDependencyProjectionCacheStats(cache);
+
+    expect(afterFirst).toMatchObject({
+      hits: 0,
+      misses: 1,
+    });
+    expect(afterFirst.summaryDecodes).toBeGreaterThan(0);
+    expect(afterSecond).toEqual({
+      ...afterFirst,
+      hits: 1,
+    });
+    expect(second.get(dependency.moduleId)).toBe(
+      first.get(dependency.moduleId),
+    );
+  });
+
+  it("isolates dependency projections across snapshots and module contexts", () => {
+    const source = `
+pub obj Box { api value: i32 }
+
+pub fn read(value: Box) -> i32
+  value.value
+`;
+    const firstSnapshot = analyze(source);
+    const secondSnapshot = analyze(source);
+    const cache = createBorrowingDependencyProjectionCache();
+    const first = projectBorrowingDependencies(
+      new Map([[firstSnapshot.moduleId, firstSnapshot]]),
+      cache,
+    );
+    const afterFirst = snapshotBorrowingDependencyProjectionCacheStats(cache);
+    const second = projectBorrowingDependencies(
+      new Map([[secondSnapshot.moduleId, secondSnapshot]]),
+      cache,
+    );
+    const afterSecond = snapshotBorrowingDependencyProjectionCacheStats(cache);
+    projectBorrowingDependencies(
+      new Map([["src::alternate", firstSnapshot]]),
+      cache,
+    );
+    const afterAlternateContext =
+      snapshotBorrowingDependencyProjectionCacheStats(cache);
+
+    expect(afterSecond.misses).toBe(afterFirst.misses + 1);
+    expect(afterSecond.summaryDecodes).toBe(afterFirst.summaryDecodes * 2);
+    expect(second.get(secondSnapshot.moduleId)).not.toBe(
+      first.get(firstSnapshot.moduleId),
+    );
+    expect(afterAlternateContext.misses).toBe(afterSecond.misses + 1);
+    expect(afterAlternateContext.hits).toBe(0);
+  });
+
   it("types mutable lambdas against explicitly borrowed callback parameters", () => {
     expect(() =>
       analyze(`

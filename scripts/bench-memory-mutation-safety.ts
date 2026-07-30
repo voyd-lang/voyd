@@ -100,6 +100,11 @@ const measureMode = async (optimize: boolean) => {
   const compilerTotalMs: number[] = [];
   const serializedSummaryBytes: number[] = [];
   const retainedSummaryBytes: number[] = [];
+  const dependencyProjectionCacheHits: number[] = [];
+  const dependencyProjectionCacheMisses: number[] = [];
+  const dependencyProjectionSummaryDecodes: number[] = [];
+  const dependencyProjectionSummaryReuses: number[] = [];
+  const deserializedSummaries: number[] = [];
   let compiled: CompileSuccess | undefined;
 
   for (let sample = 0; sample < sampleCount; sample += 1) {
@@ -125,6 +130,21 @@ const measureMode = async (optimize: boolean) => {
     );
     retainedSummaryBytes.push(
       summary.counters["borrowing.summary.retainedBytes"] ?? 0,
+    );
+    dependencyProjectionCacheHits.push(
+      summary.counters["borrowing.dependencyProjection.cacheHit"] ?? 0,
+    );
+    dependencyProjectionCacheMisses.push(
+      summary.counters["borrowing.dependencyProjection.cacheMiss"] ?? 0,
+    );
+    dependencyProjectionSummaryDecodes.push(
+      summary.counters["borrowing.dependencyProjection.summaryDecode"] ?? 0,
+    );
+    dependencyProjectionSummaryReuses.push(
+      summary.counters["borrowing.dependencyProjection.summaryReuse"] ?? 0,
+    );
+    deserializedSummaries.push(
+      summary.counters["borrowing.summary.deserializedCount"] ?? 0,
     );
   }
   if (!compiled) {
@@ -163,6 +183,22 @@ const measureMode = async (optimize: boolean) => {
     serializedSummaryMedianBytes: median(serializedSummaryBytes),
     retainedSummaryBytes,
     retainedSummaryMedianBytes: median(retainedSummaryBytes),
+    dependencyProjectionCacheHits,
+    dependencyProjectionCacheHitMedian: median(dependencyProjectionCacheHits),
+    dependencyProjectionCacheMisses,
+    dependencyProjectionCacheMissMedian: median(
+      dependencyProjectionCacheMisses,
+    ),
+    dependencyProjectionSummaryDecodes,
+    dependencyProjectionSummaryDecodeMedian: median(
+      dependencyProjectionSummaryDecodes,
+    ),
+    dependencyProjectionSummaryReuses,
+    dependencyProjectionSummaryReuseMedian: median(
+      dependencyProjectionSummaryReuses,
+    ),
+    deserializedSummaries,
+    deserializedSummaryMedian: median(deserializedSummaries),
     runtimeMs,
     runtimeMedianMs: median(runtimeMs),
     linearMemoryGrowthBytes: afterBytes - beforeBytes,
@@ -266,6 +302,8 @@ console.log(
         freshSdkPerCompile: true,
         summaryBytes:
           "compiler borrowing.summary.retainedBytes is the public snapshot footprint; serializedBytes records total serialization work; zero means the revision has no serialized public-summary format",
+        dependencyProjection:
+          "cache hits/misses count immutable semantic-result projections; projection summary decodes/reuses count validated public payloads within cache misses; deserialized summaries count all schema-validation calls",
         allocation:
           "static generated Wasm GC allocation instruction sites plus repeated-run linear-memory growth",
         guardOverhead:

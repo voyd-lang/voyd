@@ -51,7 +51,6 @@ import {
   redactPrivateSummaryPath,
   serializeCallableBorrowSummary,
   translateProjectionPath,
-  type BorrowingDependency,
   type BorrowingResult,
   type CallableBorrowContract,
   type CallableResultInvocation,
@@ -60,6 +59,14 @@ import {
   type PrivateSummaryPathRedaction,
   type PlaceProjection,
 } from "./borrowing/index.js";
+import { projectBorrowingDependencies } from "./borrowing/dependency-projection.js";
+export {
+  createBorrowingDependencyProjectionCache,
+  projectBorrowingDependencies,
+  snapshotBorrowingDependencyProjectionCacheStats,
+  type BorrowingDependencyProjectionCache,
+  type BorrowingDependencyProjectionCacheStats,
+} from "./borrowing/dependency-projection.js";
 import { localTraitRegionProjectionMetadata } from "./borrowing/trait-region-projection.js";
 import { projectedTypes } from "./borrowing/call-resolution.js";
 import {
@@ -267,151 +274,6 @@ export const semanticsPipeline = (
     // Intentionally not part of the public result type; semantics-internal only.
     ...({ symbolTable } as unknown as {}),
   } as SemanticsPipelineResult;
-};
-
-export const projectBorrowingDependencies = (
-  dependencies: ReadonlyMap<string, SemanticsPipelineResult> | undefined,
-): ReadonlyMap<string, BorrowingDependency> => {
-  const projected = new Map<string, BorrowingDependency>();
-  const publicTraitImplementations: Array<
-    NonNullable<ModuleExportTable["borrowingTraitImplementations"]>[number]
-  > = [];
-  Array.from(dependencies ?? []).forEach(([moduleId, semantics]) => {
-    const dependencySymbols = getSymbolTable(semantics);
-    const exportedBorrowing = new Map(
-      Array.from(semantics.exports.values()).flatMap(
-        (entry) =>
-          entry.borrowing?.map((borrow) => {
-            const summary = borrow.serialized
-              ? deserializeCallableBorrowSummary(borrow.serialized)
-              : {
-                  dispatch: "ordinary" as const,
-                  contract: borrow.contract,
-                  namedContract: undefined,
-                  source: undefined,
-                };
-            return [
-              borrow.symbol,
-              {
-                contract: summary.contract,
-                dispatch: summary.dispatch,
-                namedContract: summary.namedContract,
-                source: summary.source,
-              },
-            ] as const;
-          }) ?? [],
-      ),
-    );
-    const effectSymbols = new Set(
-      Array.from(semantics.exports.values()).flatMap(
-        (entry) => entry.effects?.map((effect) => effect.symbol) ?? [],
-      ),
-    );
-    const callableSymbols = new Set([
-      ...exportedBorrowing.keys(),
-      ...effectSymbols,
-    ]);
-    const callables = new Map(
-      Array.from(callableSymbols, (symbol) => [
-        symbol,
-        {
-          name: dependencySymbols.getSymbol(symbol).name,
-          signature: semantics.typing.functions.getSignature(symbol),
-          contract: exportedBorrowing.get(symbol)?.contract,
-          dispatch: exportedBorrowing.get(symbol)?.dispatch,
-          namedContract: exportedBorrowing.get(symbol)?.namedContract,
-          source: exportedBorrowing.get(symbol)?.source,
-        },
-      ]),
-    );
-    const effectOperations = new Map(
-      Array.from(effectSymbols).flatMap((symbol) => {
-        const operation = semantics.binding.decls.getEffectOperation(symbol);
-        return operation
-          ? [
-              [
-                symbol,
-                {
-                  maySuspend: operation.operation.resumable === "resume",
-                },
-              ] as const,
-            ]
-          : [];
-      }),
-    );
-    const traitRegionProjections = Array.from(
-      new Map(
-        Array.from(semantics.exports.values())
-          .flatMap((entry) => entry.borrowingCoercions ?? [])
-          .flatMap((coercion) => {
-            const contract = deserializeCallableBorrowSummary(
-              coercion.serialized,
-            ).contract;
-            return (
-              contract.parameters[0]?.returnedOrigins?.flatMap((origin) => {
-                const result = origin.result[0];
-                return result?.kind === "region"
-                  ? [
-                      {
-                        concrete: coercion.concrete,
-                        trait: coercion.trait,
-                        implementation: coercion.implementation,
-                        source: origin.source,
-                        result,
-                      },
-                    ]
-                  : [];
-              }) ?? []
-            );
-          })
-          .map(
-            (projection) => [JSON.stringify(projection), projection] as const,
-          ),
-      ).values(),
-    );
-    publicTraitImplementations.push(
-      ...(semantics.exports.borrowingTraitImplementations ?? []),
-    );
-    const existing = projected.get(moduleId);
-    projected.set(moduleId, {
-      callables: new Map([...(existing?.callables ?? []), ...callables]),
-      effectOperations: new Map([
-        ...(existing?.effectOperations ?? []),
-        ...effectOperations,
-      ]),
-      traitMethodDeclarations: existing?.traitMethodDeclarations ?? new Map(),
-      traitMethodContracts: existing?.traitMethodContracts ?? new Map(),
-      traitRegionProjections: [
-        ...(existing?.traitRegionProjections ?? []),
-        ...traitRegionProjections,
-      ],
-    });
-  });
-  publicTraitImplementations.forEach((implementation) => {
-    implementation.methods.forEach((method) => {
-      const existing = projected.get(method.implementation.moduleId);
-      const traitMethodDeclarations = new Map(
-        existing?.traitMethodDeclarations,
-      );
-      const traitMethodContracts = new Map(existing?.traitMethodContracts);
-      traitMethodDeclarations.set(
-        method.implementation.symbol,
-        method.declaration,
-      );
-      traitMethodContracts.set(
-        method.implementation.symbol,
-        deserializeCallableBorrowSummary(method.serialized).contract,
-      );
-      projected.set(method.implementation.moduleId, {
-        callables: existing?.callables ?? new Map(),
-        effectOperations: existing?.effectOperations ?? new Map(),
-        traitMethodDeclarations,
-        traitMethodContracts,
-        traitRegionProjections: existing?.traitRegionProjections ?? [],
-      });
-    });
-  });
-  return projected;
 };
 
 const callableBorrowSummarySources = (
