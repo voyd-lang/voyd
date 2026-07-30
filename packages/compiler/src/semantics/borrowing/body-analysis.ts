@@ -1480,10 +1480,17 @@ const expressionMaterializesPlainProjection = (
   }
   if (expression.exprKind === "call" || expression.exprKind === "method-call") {
     const info = targetInfo(expression, ctx);
+    const dispatchResultHasNoReturnedAliases =
+      info.contract !== undefined &&
+      !info.contract.parameters.some((parameter) => parameter.returned) &&
+      !externalReturnedOriginsForCall(info).some(
+        (origin) => origin.fresh !== true,
+      );
     return (
       hasConservativeReturnedAggregate(exprId, ctx) ||
-      (info.openTraitDispatch !== true &&
-        !ctx.typing.callTraitDispatches.has(exprId) &&
+      ((dispatchResultHasNoReturnedAliases ||
+        (info.openTraitDispatch !== true &&
+          !ctx.typing.callTraitDispatches.has(exprId))) &&
         (expression.exprKind === "method-call" ||
           intrinsicNameForCall(expression, ctx) === undefined) &&
         !expressionCarriesBorrowedProvenance(exprId, ctx))
@@ -4447,11 +4454,11 @@ const scanExpression = (
                   ),
               ctx,
             );
-          const materializesPlainValue =
-            !createsMutableBinding &&
-            expressionMaterializesPlainProjection(statement.initializer, ctx);
           const initializerHasAddressableRoot =
             baseSymbolOf(statement.initializer, ctx) !== undefined;
+          const materializesPlainValue =
+            (!createsMutableBinding || !initializerHasAddressableRoot) &&
+            expressionMaterializesPlainProjection(statement.initializer, ctx);
           const sources =
             returnsDetachedSharedValue ||
             materializesBorrowedPrimitive ||

@@ -50,5 +50,5 @@ impl<T: DictKey<T>> Set<T>
   /// Returns all values in unspecified order.
   ///
   /// The returned sequence reflects hash-bucket traversal order, not insertion order.
-  api fn values(self) -> Sequence<T>
+  api fn values(self) -> Array<T>
     self.storage.keys()
