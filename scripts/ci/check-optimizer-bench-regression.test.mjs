@@ -5,13 +5,18 @@ import {
   pairedRunOrder,
   poolScorecardMeasurements,
   scorecardInputMode,
+  thresholds,
 } from "./check-optimizer-bench-regression.mjs";
 
 const MIB = 1024 * 1024;
 const limits = {
   compile: { relativePct: 20, absolute: 250 },
   runtime: { relativePct: 20, absolute: 5 },
-  rss: { relativePct: 15, absolute: 32 * MIB },
+  rss: {
+    relativePct: 15,
+    absolute: 32 * MIB,
+    transitionAbsolute: 64 * MIB,
+  },
   wasm: { relativePct: 5, absolute: 1024 },
   gzip: { relativePct: 5, absolute: 512 },
 };
@@ -62,7 +67,8 @@ const scorecard = ({
   ],
 });
 
-const failures = ({ base, head }) => compareScorecards({ base, head, limits });
+const failures = ({ base, head, testLimits = limits }) =>
+  compareScorecards({ base, head, limits: testLimits });
 
 describe("optimizer scorecard measurement retry policy", () => {
   beforeEach(() => {
@@ -71,6 +77,7 @@ describe("optimizer scorecard measurement retry policy", () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.unstubAllEnvs();
   });
 
   it("clears a one-off RSS regression when the paired retry is healthy", () => {
@@ -169,6 +176,47 @@ describe("optimizer scorecard measurement retry policy", () => {
       }),
     });
     expect(result).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
+  });
+
+  it("honors an explicitly stricter RSS limit during the snapshot transition", () => {
+    const result = failures({
+      base: scorecard({ rssMib: 152 }),
+      head: scorecard({
+        rssMib: 208,
+        precompiledStdHits: 1,
+      }),
+      testLimits: {
+        ...limits,
+        rss: {
+          ...limits.rss,
+          transitionAbsolute: 32 * MIB,
+        },
+      },
+    });
+    expect(result).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining("transition RSS limit is 32.00 MiB"),
+    );
+  });
+
+  it("uses an explicit generic RSS option as the transition limit", () => {
+    vi.stubEnv("OPTIMIZER_BENCH_RSS_MIN_BYTES", String(32 * MIB));
+    expect(thresholds().rss).toMatchObject({
+      absolute: 32 * MIB,
+      transitionAbsolute: 32 * MIB,
+    });
+  });
+
+  it("allows a separate explicit snapshot-transition RSS option", () => {
+    vi.stubEnv("OPTIMIZER_BENCH_RSS_MIN_BYTES", String(32 * MIB));
+    vi.stubEnv(
+      "OPTIMIZER_BENCH_PRECOMPILED_STD_TRANSITION_RSS_MIN_BYTES",
+      String(48 * MIB),
+    );
+    expect(thresholds().rss).toMatchObject({
+      absolute: 32 * MIB,
+      transitionAbsolute: 48 * MIB,
+    });
   });
 
   it("uses the ordinary RSS limit after both revisions load precompiled std", () => {

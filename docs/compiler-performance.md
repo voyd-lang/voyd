@@ -89,6 +89,11 @@ The 64 MiB ceiling leaves 8.47 MiB of measurement headroom. Larger scenarios
 used 149-186 MiB less compile-attributable RSS. The exception does not apply
 when both revisions load the snapshot, or if the head stops hitting it, so the
 ordinary 32 MiB gate automatically resumes for subsequent changes.
+An explicit `--rss-min-bytes` or `OPTIMIZER_BENCH_RSS_MIN_BYTES` remains
+authoritative during the transition. Use
+`--precompiled-std-transition-rss-min-bytes` (or
+`OPTIMIZER_BENCH_PRECOMPILED_STD_TRANSITION_RSS_MIN_BYTES`) only to configure
+the migration threshold separately.
 
 Delete this transition exception once all supported comparison bases contain
 the precompiled snapshot. Before removal, rerun the Node 22 CI preset in both
