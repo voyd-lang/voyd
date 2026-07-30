@@ -4,6 +4,7 @@ import type {
   BorrowEndpointAccess,
   BorrowTypeComparison,
   CallableBorrowContract,
+  CallableResultInvocation,
   CallableBorrowTransfer,
   CallableParameterBorrowContract,
   CheckedNamedBorrowContract,
@@ -18,10 +19,57 @@ import { borrowTypeConditionId, projectionPathCovers } from "./model.js";
 
 export const CALLABLE_BORROW_SUMMARY_SCHEMA =
   "voyd.callable-borrow-summary" as const;
-export const CALLABLE_BORROW_SUMMARY_VERSION = 2 as const;
+export const CALLABLE_BORROW_SUMMARY_VERSION = 4 as const;
 const LEGACY_CALLABLE_BORROW_SUMMARY_VERSION = 1 as const;
+const IDENTITY_GUARD_CALLABLE_BORROW_SUMMARY_VERSION = 2 as const;
+const FRESH_RESULT_CALLABLE_BORROW_SUMMARY_VERSION = 3 as const;
 const PRIVATE_SUMMARY_REGION_SCOPE = "voyd.summary.private";
 const PRIVATE_SUMMARY_REGION_NAME = "storage";
+
+export type PrivateSummaryPathRedaction = {
+  index: number;
+  token: string;
+};
+
+export const isPrivateSummaryRegionProjection = (
+  projection: PlaceProjection | undefined,
+): boolean =>
+  projection?.kind === "region" &&
+  projection.scope === PRIVATE_SUMMARY_REGION_SCOPE &&
+  (projection.name === PRIVATE_SUMMARY_REGION_NAME ||
+    projection.name.startsWith(`${PRIVATE_SUMMARY_REGION_NAME}:`));
+
+export const redactPrivateSummaryPath = (
+  path: readonly PlaceProjection[],
+  redaction: PrivateSummaryPathRedaction | undefined,
+): readonly PlaceProjection[] => {
+  if (!redaction) {
+    return path;
+  }
+  const privateStorageProjection = (): PlaceProjection => ({
+    kind: "region",
+    scope: PRIVATE_SUMMARY_REGION_SCOPE,
+    name: `${PRIVATE_SUMMARY_REGION_NAME}:${redaction.token}`,
+    disjoint: [],
+  });
+  const privatePath: PlaceProjection[] = [];
+  let hasHiddenSegment = false;
+  path.slice(redaction.index).forEach((projection) => {
+    if (projection.kind !== "dereference") {
+      hasHiddenSegment = true;
+      return;
+    }
+    if (hasHiddenSegment) {
+      privatePath.push(privateStorageProjection());
+    }
+    privatePath.push(projection);
+    hasHiddenSegment = false;
+  });
+  if (hasHiddenSegment) {
+    privatePath.push(privateStorageProjection());
+  }
+  return [...path.slice(0, redaction.index), ...privatePath];
+};
 
 export type CallableBorrowDispatchKind =
   | "ordinary"
@@ -58,13 +106,18 @@ export type CallableBorrowSummary = {
 };
 
 export type CallableBorrowSummaryPrivacy = {
-  firstPrivateParameterProjection: (
+  privateParameterProjection: (
     parameter: number,
     path: readonly PlaceProjection[],
-  ) => number | undefined;
-  firstPrivateResultProjection: (
+  ) => PrivateSummaryPathRedaction | undefined;
+  privateResultProjection: (
     path: readonly PlaceProjection[],
-  ) => number | undefined;
+  ) => PrivateSummaryPathRedaction | undefined;
+  privateCallbackResultProjection: (
+    parameter: number,
+    source: readonly PlaceProjection[],
+    path: readonly PlaceProjection[],
+  ) => PrivateSummaryPathRedaction | undefined;
 };
 
 type WireProjectionV1 =
@@ -169,6 +222,17 @@ type WireScopedCallbackV1 = {
   readonly defaultCallbackBehavior?: "safe" | "escapes" | "unknown";
 };
 
+type WireCallableResultInvocationV4 = {
+  readonly parameter: number;
+  readonly source: readonly WireProjectionV1[];
+  readonly callbackResult: readonly WireProjectionV1[];
+  readonly callbackResultType?: {
+    readonly moduleId: string;
+    readonly symbol: number;
+  };
+  readonly result: readonly WireProjectionV1[];
+};
+
 type WireContractV1 = {
   readonly parameters: readonly WireParameterContractV1[];
   readonly maySuspend: boolean;
@@ -185,7 +249,19 @@ type WireContractV2 = Omit<WireContractV1, "defaultIdentityGuardProtocol"> & {
   readonly defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
 };
 
-type WireContract = WireContractV1 | WireContractV2;
+type WireContractV3 = WireContractV2 & {
+  readonly freshResult?: true;
+};
+
+type WireContractV4 = WireContractV3 & {
+  readonly callableResultInvocations?: readonly WireCallableResultInvocationV4[];
+};
+
+type WireContract =
+  | WireContractV1
+  | WireContractV2
+  | WireContractV3
+  | WireContractV4;
 
 type WireNamedContractV1 = {
   readonly scope: string;
@@ -218,16 +294,36 @@ type WireCallableBorrowSummaryV1 = {
 
 type WireCallableBorrowSummaryV2 = {
   readonly schema: typeof CALLABLE_BORROW_SUMMARY_SCHEMA;
-  readonly version: typeof CALLABLE_BORROW_SUMMARY_VERSION;
+  readonly version: typeof IDENTITY_GUARD_CALLABLE_BORROW_SUMMARY_VERSION;
   readonly dispatch: CallableBorrowDispatchKind;
   readonly contract: WireContractV2;
   readonly namedContract?: WireNamedContractV1;
   readonly source?: WireSummarySourceV1;
 };
 
+type WireCallableBorrowSummaryV3 = {
+  readonly schema: typeof CALLABLE_BORROW_SUMMARY_SCHEMA;
+  readonly version: typeof FRESH_RESULT_CALLABLE_BORROW_SUMMARY_VERSION;
+  readonly dispatch: CallableBorrowDispatchKind;
+  readonly contract: WireContractV3;
+  readonly namedContract?: WireNamedContractV1;
+  readonly source?: WireSummarySourceV1;
+};
+
+type WireCallableBorrowSummaryV4 = {
+  readonly schema: typeof CALLABLE_BORROW_SUMMARY_SCHEMA;
+  readonly version: typeof CALLABLE_BORROW_SUMMARY_VERSION;
+  readonly dispatch: CallableBorrowDispatchKind;
+  readonly contract: WireContractV4;
+  readonly namedContract?: WireNamedContractV1;
+  readonly source?: WireSummarySourceV1;
+};
+
 type WireCallableBorrowSummary =
   | WireCallableBorrowSummaryV1
-  | WireCallableBorrowSummaryV2;
+  | WireCallableBorrowSummaryV2
+  | WireCallableBorrowSummaryV3
+  | WireCallableBorrowSummaryV4;
 
 export const serializeCallableBorrowSummary = ({
   contract,
@@ -266,7 +362,7 @@ export const serializeCallableBorrowSummary = ({
         : publicPrivacy
           ? redactPrivateContractPaths(contract, publicPrivacy)
           : contract;
-  const wire: WireCallableBorrowSummaryV2 = {
+  const wire: WireCallableBorrowSummaryV4 = {
     schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
     version: CALLABLE_BORROW_SUMMARY_VERSION,
     dispatch,
@@ -288,8 +384,8 @@ export const serializeCallableBorrowSummary = ({
 };
 
 const stripWireRegionDisjointness = (
-  contract: WireContractV2,
-): WireContractV2 => {
+  contract: WireContractV4,
+): WireContractV4 => {
   const strip = (value: unknown): unknown => {
     if (Array.isArray(value)) {
       return value.map(strip);
@@ -304,7 +400,7 @@ const stripWireRegionDisjointness = (
       ]),
     );
   };
-  return strip(contract) as WireContractV2;
+  return strip(contract) as WireContractV4;
 };
 
 export const deserializeCallableBorrowSummary = (
@@ -342,9 +438,10 @@ export const summarySpanToSourceSpan = (
   end: span.end,
 });
 
-const toWireContract = (contract: CallableBorrowContract): WireContractV2 => ({
+const toWireContract = (contract: CallableBorrowContract): WireContractV4 => ({
   parameters: contract.parameters.map(toWireParameter),
   maySuspend: contract.maySuspend,
+  ...(contract.freshResult ? { freshResult: true } : {}),
   ...(contract.defaultIdentityGuardProtocol
     ? {
         defaultIdentityGuardProtocol: contract.defaultIdentityGuardProtocol,
@@ -373,6 +470,13 @@ const toWireContract = (contract: CallableBorrowContract): WireContractV2 => ({
     : {}),
   ...(contract.scopedCallbacks
     ? { scopedCallbacks: contract.scopedCallbacks.map(toWireScopedCallback) }
+    : {}),
+  ...(contract.callableResultInvocations
+    ? {
+        callableResultInvocations: contract.callableResultInvocations.map(
+          toWireCallableResultInvocation,
+        ),
+      }
     : {}),
 });
 
@@ -589,6 +693,18 @@ const toWireScopedCallback = (
     : {}),
 });
 
+const toWireCallableResultInvocation = (
+  invocation: CallableResultInvocation,
+): WireCallableResultInvocationV4 => ({
+  parameter: invocation.parameter,
+  source: toWirePath(invocation.source),
+  callbackResult: toWirePath(invocation.callbackResult),
+  ...(invocation.callbackResultType
+    ? { callbackResultType: { ...invocation.callbackResultType } }
+    : {}),
+  result: toWirePath(invocation.result),
+});
+
 const toWireNamedContract = (
   contract: CheckedNamedBorrowContract,
 ): WireNamedContractV1 => ({
@@ -610,6 +726,9 @@ const toWireSource = (
 const fromWireContract = (contract: WireContract): CallableBorrowContract => ({
   parameters: contract.parameters.map(fromWireParameter),
   maySuspend: contract.maySuspend,
+  ...("freshResult" in contract && contract.freshResult
+    ? { freshResult: true }
+    : {}),
   ...(contract.defaultIdentityGuardProtocol
     ? {
         defaultIdentityGuardProtocol: contract.defaultIdentityGuardProtocol,
@@ -639,6 +758,14 @@ const fromWireContract = (contract: WireContract): CallableBorrowContract => ({
   ...(contract.scopedCallbacks
     ? {
         scopedCallbacks: contract.scopedCallbacks.map(fromWireScopedCallback),
+      }
+    : {}),
+  ...("callableResultInvocations" in contract &&
+  contract.callableResultInvocations
+    ? {
+        callableResultInvocations: contract.callableResultInvocations.map(
+          fromWireCallableResultInvocation,
+        ),
       }
     : {}),
 });
@@ -860,6 +987,18 @@ const fromWireScopedCallback = (
     : {}),
 });
 
+const fromWireCallableResultInvocation = (
+  invocation: WireCallableResultInvocationV4,
+): CallableResultInvocation => ({
+  parameter: invocation.parameter,
+  source: fromWirePath(invocation.source),
+  callbackResult: fromWirePath(invocation.callbackResult),
+  ...(invocation.callbackResultType
+    ? { callbackResultType: { ...invocation.callbackResultType } }
+    : {}),
+  result: fromWirePath(invocation.result),
+});
+
 const fromWireNamedContract = (
   contract: WireNamedContractV1,
 ): PublicNamedBorrowContract => ({
@@ -882,52 +1021,18 @@ const redactPrivateContractPaths = (
   contract: CallableBorrowContract,
   privacy: CallableBorrowSummaryPrivacy,
 ): CallableBorrowContract => {
-  const privateStorageProjection = (): PlaceProjection => ({
-    kind: "region",
-    scope: PRIVATE_SUMMARY_REGION_SCOPE,
-    name: PRIVATE_SUMMARY_REGION_NAME,
-    disjoint: [],
-  });
-  const privatePath = (
-    path: readonly PlaceProjection[],
-  ): readonly PlaceProjection[] => {
-    const result: PlaceProjection[] = [];
-    let hasHiddenSegment = false;
-    path.forEach((projection) => {
-      if (projection.kind !== "dereference") {
-        hasHiddenSegment = true;
-        return;
-      }
-      if (hasHiddenSegment) {
-        result.push(privateStorageProjection());
-      }
-      result.push(projection);
-      hasHiddenSegment = false;
-    });
-    if (hasHiddenSegment) {
-      result.push(privateStorageProjection());
-    }
-    return result;
-  };
-  const redactPath = (
-    path: readonly PlaceProjection[],
-    firstPrivateProjection: number | undefined,
-  ): readonly PlaceProjection[] =>
-    firstPrivateProjection === undefined
-      ? path
-      : [
-          ...path.slice(0, firstPrivateProjection),
-          ...privatePath(path.slice(firstPrivateProjection)),
-        ];
   const parameterPath = (
     parameter: number,
     path: readonly PlaceProjection[],
   ): readonly PlaceProjection[] =>
-    redactPath(path, privacy.firstPrivateParameterProjection(parameter, path));
+    redactPrivateSummaryPath(
+      path,
+      privacy.privateParameterProjection(parameter, path),
+    );
   const resultPath = (
     path: readonly PlaceProjection[],
   ): readonly PlaceProjection[] =>
-    redactPath(path, privacy.firstPrivateResultProjection(path));
+    redactPrivateSummaryPath(path, privacy.privateResultProjection(path));
   const parameterPaths = (
     parameter: number,
     paths: readonly (readonly PlaceProjection[])[] | undefined,
@@ -1104,8 +1209,7 @@ const redactPrivateContractPaths = (
       ...(parameter.defaultNoBorrowPaths
         ? parameter.defaultNoBorrowPaths.every(
             (path) =>
-              privacy.firstPrivateParameterProjection(index, path) ===
-              undefined,
+              privacy.privateParameterProjection(index, path) === undefined,
           )
           ? { defaultNoBorrowPaths: parameter.defaultNoBorrowPaths }
           : { defaultNoBorrowPaths: undefined }
@@ -1166,6 +1270,25 @@ const redactPrivateContractPaths = (
               : (({ callbackPath: _callbackPath, ...publicCallback }) =>
                   publicCallback)(callback);
           }),
+        }
+      : {}),
+    ...(current.callableResultInvocations
+      ? {
+          callableResultInvocations: current.callableResultInvocations.map(
+            (invocation) => ({
+              ...invocation,
+              source: parameterPath(invocation.parameter, invocation.source),
+              callbackResult: redactPrivateSummaryPath(
+                invocation.callbackResult,
+                privacy.privateCallbackResultProjection(
+                  invocation.parameter,
+                  invocation.source,
+                  invocation.callbackResult,
+                ),
+              ),
+              result: resultPath(invocation.result),
+            }),
+          ),
         }
       : {}),
     ...(current.dynamicDispatch
@@ -1493,6 +1616,7 @@ const conservativePublicContract = (
       };
     }),
     maySuspend: contract.maySuspend,
+    ...(contract.freshResult ? { freshResult: true as const } : {}),
     ...(contract.borrowedResult
       ? { borrowedResult: contract.borrowedResult }
       : {}),
@@ -1527,6 +1651,21 @@ const conservativePublicContract = (
           }),
         }
       : {}),
+    ...(contract.callableResultInvocations?.some(
+      (invocation) =>
+        invocation.source.length === 0 &&
+        invocation.callbackResult.length === 0 &&
+        invocation.result.length === 0,
+    )
+      ? {
+          callableResultInvocations: contract.callableResultInvocations.filter(
+            (invocation) =>
+              invocation.source.length === 0 &&
+              invocation.callbackResult.length === 0 &&
+              invocation.result.length === 0,
+          ),
+        }
+      : {}),
   };
 };
 
@@ -1542,6 +1681,8 @@ const isWireSummary = (value: unknown): value is WireCallableBorrowSummary => {
     ]) ||
     value.schema !== CALLABLE_BORROW_SUMMARY_SCHEMA ||
     (value.version !== LEGACY_CALLABLE_BORROW_SUMMARY_VERSION &&
+      value.version !== IDENTITY_GUARD_CALLABLE_BORROW_SUMMARY_VERSION &&
+      value.version !== FRESH_RESULT_CALLABLE_BORROW_SUMMARY_VERSION &&
       value.version !== CALLABLE_BORROW_SUMMARY_VERSION) ||
     !isOneOf(value.dispatch, [
       "ordinary",
@@ -1616,7 +1757,9 @@ const wireContractMatchesNamedRegions = (
     if (value.kind === "region") {
       if (
         value.scope === PRIVATE_SUMMARY_REGION_SCOPE &&
-        value.name === PRIVATE_SUMMARY_REGION_NAME
+        typeof value.name === "string" &&
+        (value.name === PRIVATE_SUMMARY_REGION_NAME ||
+          value.name.startsWith(`${PRIVATE_SUMMARY_REGION_NAME}:`))
       ) {
         valid = Array.isArray(value.disjoint) && value.disjoint.length === 0;
         return;
@@ -1644,37 +1787,39 @@ const isWireContract = (
   value: unknown,
   version:
     | typeof LEGACY_CALLABLE_BORROW_SUMMARY_VERSION
+    | typeof IDENTITY_GUARD_CALLABLE_BORROW_SUMMARY_VERSION
+    | typeof FRESH_RESULT_CALLABLE_BORROW_SUMMARY_VERSION
     | typeof CALLABLE_BORROW_SUMMARY_VERSION,
 ): value is WireContract => {
-  const keys =
+  const keys = [
+    "parameters",
+    "maySuspend",
+    ...(version === FRESH_RESULT_CALLABLE_BORROW_SUMMARY_VERSION ||
     version === CALLABLE_BORROW_SUMMARY_VERSION
-      ? [
-          "parameters",
-          "maySuspend",
-          "defaultIdentityGuardProtocol",
-          "borrowedResult",
-          "externalReturnedOrigins",
-          "externalRead",
-          "externalWrite",
-          "transfers",
-          "scopedCallbacks",
-        ]
-      : [
-          "parameters",
-          "maySuspend",
-          "borrowedResult",
-          "externalReturnedOrigins",
-          "externalRead",
-          "externalWrite",
-          "transfers",
-          "scopedCallbacks",
-        ];
+      ? ["freshResult"]
+      : []),
+    ...(version !== LEGACY_CALLABLE_BORROW_SUMMARY_VERSION
+      ? ["defaultIdentityGuardProtocol"]
+      : []),
+    "borrowedResult",
+    "externalReturnedOrigins",
+    "externalRead",
+    "externalWrite",
+    "transfers",
+    "scopedCallbacks",
+    ...(version === CALLABLE_BORROW_SUMMARY_VERSION
+      ? ["callableResultInvocations"]
+      : []),
+  ];
   if (
     !isRecordWithKeys(value, keys) ||
     !Array.isArray(value.parameters) ||
     !value.parameters.every(isWireParameter) ||
     typeof value.maySuspend !== "boolean" ||
-    (version === CALLABLE_BORROW_SUMMARY_VERSION &&
+    ((version === FRESH_RESULT_CALLABLE_BORROW_SUMMARY_VERSION ||
+      version === CALLABLE_BORROW_SUMMARY_VERSION) &&
+      !optionalTrue(value.freshResult)) ||
+    (version !== LEGACY_CALLABLE_BORROW_SUMMARY_VERSION &&
       value.defaultIdentityGuardProtocol !== undefined &&
       value.defaultIdentityGuardProtocol !== "presence-conflict-bit-v1") ||
     (value.borrowedResult !== undefined &&
@@ -1690,7 +1835,11 @@ const isWireContract = (
         !value.transfers.every(isWireTransfer))) ||
     (value.scopedCallbacks !== undefined &&
       (!Array.isArray(value.scopedCallbacks) ||
-        !value.scopedCallbacks.every(isWireScopedCallback)))
+        !value.scopedCallbacks.every(isWireScopedCallback))) ||
+    ("callableResultInvocations" in value &&
+      value.callableResultInvocations !== undefined &&
+      (!Array.isArray(value.callableResultInvocations) ||
+        !value.callableResultInvocations.every(isWireCallableResultInvocation)))
   ) {
     return false;
   }
@@ -1727,9 +1876,33 @@ const isWireContract = (
         parameterInRange(callback.callbackParameter) &&
         parameterInRange(callback.callbackValueParameter),
     ) ??
-      true)
+      true) &&
+    ("callableResultInvocations" in contract
+      ? (contract.callableResultInvocations?.every((invocation) =>
+          parameterInRange(invocation.parameter),
+        ) ?? true)
+      : true)
   );
 };
+
+const isWireCallableResultInvocation = (
+  value: unknown,
+): value is WireCallableResultInvocationV4 =>
+  isRecordWithKeys(value, [
+    "parameter",
+    "source",
+    "callbackResult",
+    "callbackResultType",
+    "result",
+  ]) &&
+  isNonNegativeInteger(value.parameter) &&
+  isWirePath(value.source) &&
+  isWirePath(value.callbackResult) &&
+  (value.callbackResultType === undefined ||
+    (isRecordWithKeys(value.callbackResultType, ["moduleId", "symbol"]) &&
+      typeof value.callbackResultType.moduleId === "string" &&
+      isNonNegativeInteger(value.callbackResultType.symbol))) &&
+  isWirePath(value.result);
 
 const isWireExternalReturnedOrigin = (
   value: unknown,

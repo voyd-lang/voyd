@@ -59,12 +59,14 @@ import {
   typeContainsBorrowed,
 } from "./borrowed-types.js";
 import { objectLiteralFieldProvider } from "./object-literal-providers.js";
+import { traitRegionProjectionsForCoercion } from "./trait-region-projection.js";
 
 type ParameterOrigin = {
   parameter: number;
   sourceEndpointAccess: "inline" | "dereferenced";
   sourceProjections: readonly PlaceProjection[];
   resultProjections: readonly PlaceProjection[];
+  resultNominal?: TypeId;
   borrowed?: true;
   shared?: true;
   retainedUnlessBorrowed?: true;
@@ -122,6 +124,7 @@ type SummaryContext = {
   observedEnvironments: MutableEnv[][];
   invalidated: Map<MutableEnv, MutableFlow>;
   returnSnapshots: ReturnSnapshot[];
+  freshReturns: boolean[];
   borrowedReturnType?: TypeId;
   borrowedReturnPaths: readonly (readonly PlaceProjection[])[];
   transfers: Map<string, CallableBorrowTransfer>;
@@ -232,6 +235,7 @@ const originKey = (origin: ParameterOrigin): string => {
     origin.sourceEndpointAccess,
     projectionPathKey(origin.sourceProjections),
     projectionPathKey(origin.resultProjections),
+    origin.resultNominal ?? "",
     origin.borrowed === true ? 1 : 0,
     origin.shared === true ? 1 : 0,
     origin.retainedUnlessBorrowed === true ? 1 : 0,
@@ -259,7 +263,7 @@ const flowWithExplicitBorrowedOrigins = ({
   type: TypeId | undefined;
   typing: TypingResult;
 }): MutableFlow => {
-  if (typeof type !== "number") {
+  if (typeof type !== "number" || !typeContainsBorrowed(type, typing)) {
     return new Map(flow);
   }
   const borrowedEntries = borrowedTypeEntriesInType(type, typing);
@@ -313,6 +317,92 @@ const flowMarkedForBorrowedReturn = (
       return [originKey(marked), marked] as const;
     }),
   );
+
+const nominalResultType = (
+  type: TypeId | undefined,
+  typing: TypingResult,
+): TypeId | undefined => {
+  if (typeof type !== "number") {
+    return undefined;
+  }
+  const descriptor = typing.arena.get(type);
+  if (descriptor.kind === "nominal-object") {
+    return type;
+  }
+  return descriptor.kind === "intersection" ? descriptor.nominal : undefined;
+};
+
+const projectionsStartWith = (
+  path: readonly PlaceProjection[],
+  prefix: readonly PlaceProjection[],
+): boolean =>
+  prefix.length <= path.length &&
+  prefix.every(
+    (projection, index) =>
+      JSON.stringify(projection) === JSON.stringify(path[index]),
+  );
+
+const traitRegionResultPath = ({
+  result,
+  mapped,
+  region,
+}: {
+  result: readonly PlaceProjection[];
+  mapped: readonly PlaceProjection[];
+  region: PlaceProjection;
+}): readonly PlaceProjection[] | undefined => {
+  if (projectionsStartWith(result, mapped)) {
+    return [region, ...result.slice(mapped.length)];
+  }
+  const mappedStorage =
+    mapped.at(-1)?.kind === "dereference" ? mapped.slice(0, -1) : undefined;
+  return mappedStorage && projectionsStartWith(result, mappedStorage)
+    ? [region, ...result.slice(mappedStorage.length)]
+    : undefined;
+};
+
+const flowProjectedThroughReturnedTrait = (
+  flow: Flow,
+  returnType: TypeId | undefined,
+  ctx: SummaryContext,
+): MutableFlow => {
+  return unionFlows(
+    ...Array.from(flow.values()).map((origin) => {
+      if (typeof origin.resultNominal !== "number") {
+        return new Map([[originKey(origin), origin]]);
+      }
+      const projected = traitRegionProjectionsForCoercion({
+        sourceType: origin.resultNominal,
+        targetType: returnType,
+        hir: ctx.hir,
+        typing: ctx.typing,
+        symbolTable: ctx.symbolTable,
+        moduleId: ctx.moduleId,
+        imports: ctx.imports,
+        dependencies: ctx.dependencies,
+      }).flatMap(({ source, result }) => {
+        if (origin.resultProjections.length === 0) {
+          return [
+            {
+              ...origin,
+              sourceProjections: [...origin.sourceProjections, ...source],
+              resultProjections: [result],
+            },
+          ];
+        }
+        const resultProjections = traitRegionResultPath({
+          result: origin.resultProjections,
+          mapped: source,
+          region: result,
+        });
+        return resultProjections ? [{ ...origin, resultProjections }] : [];
+      });
+      return projected.length > 0
+        ? new Map(projected.map((entry) => [originKey(entry), entry]))
+        : new Map([[originKey(origin), origin]]);
+    }),
+  );
+};
 
 const parameterFlowForPattern = ({
   parameter,
@@ -806,6 +896,7 @@ const returnedFlowForParameter = (
   parameter: CallableParameterBorrowContract,
   flow: Flow,
   callExprId: HirExprId,
+  borrowedResultPaths: readonly (readonly PlaceProjection[])[],
   usesDefault = false,
 ): MutableFlow => {
   if (!parameter.returned) {
@@ -839,6 +930,9 @@ const returnedFlowForParameter = (
         (sharedOrigin) =>
           returnedOriginKey(sharedOrigin) === returnedOriginKey(contractOrigin),
       ) === true;
+    const returnsExplicitBorrow = borrowedResultPaths.some((borrowedPath) =>
+      projectionPathCovers(borrowedPath, contractOrigin.result),
+    );
     const typeCondition = parameter.returnedTypeMatchingOrigins?.find(
       (conditionalOrigin) =>
         JSON.stringify(conditionalOrigin.source) ===
@@ -854,8 +948,15 @@ const returnedFlowForParameter = (
       ) {
         return;
       }
+      const materializedOrigin =
+        returnedShared || returnsExplicitBorrow
+          ? origin
+          : (() => {
+              const { borrowed: _borrowed, shared: _shared, ...plain } = origin;
+              return plain;
+            })();
       addOrigin(result, {
-        ...origin,
+        ...materializedOrigin,
         sourceEndpointAccess:
           contractOrigin.endpointAccess ?? origin.sourceEndpointAccess,
         ...(returnedShared && !defaultSuppressesBorrowAtResult
@@ -1251,6 +1352,11 @@ const applyCallContract = ({
     return emptyFlow();
   }
   const result = emptyFlow();
+  const callResultType = expressionTypeFor(callExprId, ctx);
+  const borrowedResultPaths =
+    typeof callResultType === "number"
+      ? borrowedPathsInType(callResultType, ctx.typing)
+      : [];
   const externalOrigin = ({
     resultProjections = [],
     endpointAccess = "inline",
@@ -1423,7 +1529,7 @@ const applyCallContract = ({
           ? new Map(
               Array.from(projected).filter(
                 ([, origin]) =>
-                  origin.parameter !== EXTERNAL_STORAGE_PARAMETER ||
+                  origin.parameter === EXTERNAL_STORAGE_PARAMETER &&
                   origin.fresh === true,
               ),
             )
@@ -1507,6 +1613,7 @@ const applyCallContract = ({
         parameter,
         flow,
         callExprId,
+        borrowedResultPaths,
         typeof argExprs[index] !== "number",
       ).forEach((origin) => addOrigin(result, origin));
     }
@@ -1545,9 +1652,12 @@ const applyCallContract = ({
     if (!destination) {
       return;
     }
-    returnedFlowForParameter(destination, transferred, callExprId).forEach(
-      (origin) => addOrigin(result, origin),
-    );
+    returnedFlowForParameter(
+      destination,
+      transferred,
+      callExprId,
+      borrowedResultPaths,
+    ).forEach((origin) => addOrigin(result, origin));
   });
   const effectiveCallableOrigins = (
     parameterIndex: number,
@@ -2227,6 +2337,10 @@ const evaluateBlock = (
       continue;
     }
     if (statement.kind === "return") {
+      ctx.freshReturns.push(
+        typeof statement.value === "number" &&
+          expressionProducesFreshRoot(statement.value, ctx),
+      );
       const rawFlow =
         typeof statement.value === "number"
           ? unionFlows(
@@ -2240,7 +2354,7 @@ const evaluateBlock = (
             )
           : emptyFlow();
       const flow = flowMarkedForBorrowedReturn(
-        rawFlow,
+        flowProjectedThroughReturnedTrait(rawFlow, ctx.borrowedReturnType, ctx),
         ctx.borrowedReturnType,
         ctx.typing,
       );
@@ -2268,6 +2382,60 @@ const evaluateBlock = (
       ? evaluateExpression(expr.value, env, ctx)
       : emptyFlow();
   return finish(flow);
+};
+
+const expressionProducesFreshRoot = (
+  exprId: HirExprId,
+  ctx: SummaryContext,
+  seen = new Set<HirExprId>(),
+): boolean => {
+  if (seen.has(exprId)) {
+    return false;
+  }
+  seen.add(exprId);
+  const expression = ctx.hir.expressions.get(exprId);
+  const type = expressionTypeFor(exprId, ctx);
+  if (typeof type !== "number" || !typeIsAllocationBacked(type, ctx.typing)) {
+    return false;
+  }
+  if (expression?.exprKind === "object-literal") {
+    return true;
+  }
+  if (
+    expression?.exprKind === "call" ||
+    expression?.exprKind === "method-call"
+  ) {
+    return resolveBorrowCall(expression, ctx).contract?.freshResult === true;
+  }
+  if (expression?.exprKind === "block") {
+    return (
+      typeof expression.value === "number" &&
+      expressionProducesFreshRoot(expression.value, ctx, seen)
+    );
+  }
+  if (expression?.exprKind === "if" || expression?.exprKind === "cond") {
+    const values = [
+      ...expression.branches.map((branch) => branch.value),
+      ...(typeof expression.defaultBranch === "number"
+        ? [expression.defaultBranch]
+        : []),
+    ];
+    return (
+      values.length > 0 &&
+      values.every((value) =>
+        expressionProducesFreshRoot(value, ctx, new Set(seen)),
+      )
+    );
+  }
+  if (expression?.exprKind === "match") {
+    return (
+      expression.arms.length > 0 &&
+      expression.arms.every((arm) =>
+        expressionProducesFreshRoot(arm.value, ctx, new Set(seen)),
+      )
+    );
+  }
+  return false;
 };
 
 const evaluateBranches = ({
@@ -2875,6 +3043,7 @@ const evaluateExpression = (
   ctx.observedEnvironments.at(-1)?.push(cloneEnv(env, ctx));
   const flow = evaluateExpressionRaw(exprId, env, ctx);
   const typeId = expressionTypeFor(exprId, ctx);
+  const resultNominal = nominalResultType(typeId, ctx.typing);
   const sourceEndpointAccess: ParameterOrigin["sourceEndpointAccess"] =
     typeof typeId === "number" &&
     ctx.typing.arena.get(typeId).kind === "fixed-array"
@@ -2882,10 +3051,14 @@ const evaluateExpression = (
       : "inline";
   return new Map(
     Array.from(flow.values(), (origin) => {
+      const withResultType =
+        typeof resultNominal === "number"
+          ? { ...origin, resultNominal }
+          : origin;
       const normalized =
         origin.resultProjections.length === 0
-          ? { ...origin, sourceEndpointAccess }
-          : origin;
+          ? { ...withResultType, sourceEndpointAccess }
+          : withResultType;
       return [originKey(normalized), normalized];
     }),
   );
@@ -2920,18 +3093,14 @@ const initialFunctionContract = ({
   functionItem,
   typing,
   symbolTable,
-  moduleId,
 }: {
   functionItem: HirFunction;
   typing: TypingResult;
   symbolTable: SymbolTable;
-  moduleId: string;
 }): CallableBorrowContract => {
   const scopedCallbacks = declaredScopedCallbacks({
     functionItem,
     typing,
-    symbolTable,
-    moduleId,
   });
   return {
     parameters: functionItem.parameters.map((_parameter, index) => ({
@@ -3022,47 +3191,34 @@ const functionNeedsBorrowSummary = ({
 const declaredScopedCallbacks = ({
   functionItem,
   typing,
-  symbolTable,
-  moduleId,
 }: {
   functionItem: HirFunction;
   typing: TypingResult;
-  symbolTable: SymbolTable;
-  moduleId: string;
 }): readonly ScopedCallbackBorrowContract[] => {
-  const owner = typing.memberMetadata.get(functionItem.symbol)?.owner;
-  if (typeof owner !== "number") {
-    return [];
-  }
-  const method = symbolTable.getSymbol(functionItem.symbol).name;
-  if (
-    moduleId === "std::array" &&
-    symbolTable.getSymbol(owner).name === "Array" &&
-    method === "sort" &&
-    functionItem.parameters.length > 1
-  ) {
-    return [0, 1].map((callbackValueParameter) => ({
-      callbackParameter: 1,
-      callbackValueParameter,
-      access: "shared",
-    }));
-  }
-  const ownerMetadata = symbolTable.getSymbol(owner).metadata as
-    | { intrinsicType?: unknown }
-    | undefined;
-  if (ownerMetadata?.intrinsicType !== STD_INTRINSIC_TYPE.sharedCell) {
-    return [];
-  }
-  if (!["with", "with_mut", "try_with", "try_with_mut"].includes(method)) {
-    return [];
-  }
-  return [
-    {
-      callbackParameter: 1,
-      callbackValueParameter: 0,
-      access: method.includes("mut") ? "mutable" : "shared",
-    },
-  ];
+  const signature = typing.functions.getSignature(functionItem.symbol);
+  return (
+    signature?.parameters.flatMap((parameter, callbackParameter) => {
+      const callback = typing.arena.get(parameter.type);
+      if (callback.kind !== "function") {
+        return [];
+      }
+      return callback.parameters.flatMap(
+        (valueParameter, callbackValueParameter) =>
+          typing.arena.get(valueParameter.type).kind === "borrowed"
+            ? [
+                {
+                  callbackParameter,
+                  callbackValueParameter,
+                  access:
+                    valueParameter.bindingKind === "mutable-ref"
+                      ? ("mutable" as const)
+                      : ("shared" as const),
+                },
+              ]
+            : [],
+      );
+    }) ?? []
+  );
 };
 
 const hasRuntimeCheckedReceiverWrites = ({
@@ -3305,28 +3461,31 @@ const returnedSharedOriginsForParameter = ({
   returnSnapshots: readonly ReturnSnapshot[];
   parameter: number;
 }): readonly ParameterOrigin[] => {
+  const sharedOriginKey = (origin: ParameterOrigin): string =>
+    [
+      projectionPathKey(origin.sourceProjections),
+      projectionPathKey(origin.resultProjections),
+      origin.sourceEndpointAccess,
+    ].join("|");
   const origins = Array.from(
     new Map(
       originsForParameter(returned, parameter).map((origin) => [
-        JSON.stringify([
-          origin.sourceProjections,
-          origin.resultProjections,
-          origin.sourceEndpointAccess,
-        ]),
+        sharedOriginKey(origin),
         origin,
       ]),
     ).values(),
   );
+  const snapshotOriginsByKey = returnSnapshots.map((snapshot) => {
+    const byKey = new Map<string, ParameterOrigin[]>();
+    originsForParameter(snapshot.flow, parameter).forEach((origin) => {
+      const key = sharedOriginKey(origin);
+      byKey.set(key, [...(byKey.get(key) ?? []), origin]);
+    });
+    return { snapshot, byKey };
+  });
   return origins.filter((origin) =>
-    returnSnapshots.every((snapshot) => {
-      const matching = originsForParameter(snapshot.flow, parameter).filter(
-        (candidate) =>
-          JSON.stringify(candidate.sourceProjections) ===
-            JSON.stringify(origin.sourceProjections) &&
-          JSON.stringify(candidate.resultProjections) ===
-            JSON.stringify(origin.resultProjections) &&
-          candidate.sourceEndpointAccess === origin.sourceEndpointAccess,
-      );
+    snapshotOriginsByKey.every(({ snapshot, byKey }) => {
+      const matching = byKey.get(sharedOriginKey(origin)) ?? [];
       return (
         matching.length === 0 ||
         originWasInvalidated(origin, snapshot.invalidated) ||
@@ -3375,8 +3534,6 @@ const summarizeFunction = ({
     declaredScopedCallbacks({
       functionItem,
       typing,
-      symbolTable,
-      moduleId,
     }).map((callback) => [
       `${callback.callbackParameter}:${callback.callbackValueParameter}:`,
       callback,
@@ -3390,6 +3547,7 @@ const summarizeFunction = ({
   const pendingExits = new Map<MutableEnv, ExitEnvironments>();
   const invalidated = new Map<MutableEnv, MutableFlow>();
   const returnSnapshots: ReturnSnapshot[] = [];
+  const freshReturns: boolean[] = [];
   const transfers = new Map<string, CallableBorrowTransfer>();
   const defaultOrigins = new Map<number, readonly DefaultBorrowOrigin[]>();
   const defaultReadOrigins = new Map<
@@ -3472,6 +3630,7 @@ const summarizeFunction = ({
     observedEnvironments: [],
     invalidated,
     returnSnapshots,
+    freshReturns,
     borrowedReturnType: functionReturnType,
     borrowedReturnPaths:
       typeof functionReturnType === "number"
@@ -3592,19 +3751,24 @@ const summarizeFunction = ({
     bindPattern(parameter.pattern, suppliedFlow, env);
   });
   const tail = flowMarkedForBorrowedReturn(
-    unionFlows(
-      evaluateExpression(functionItem.body, env, ctx),
-      explicitBorrowedResultFlow(
-        functionItem.body,
-        ctx.borrowedReturnPaths,
-        env,
-        ctx,
+    flowProjectedThroughReturnedTrait(
+      unionFlows(
+        evaluateExpression(functionItem.body, env, ctx),
+        explicitBorrowedResultFlow(
+          functionItem.body,
+          ctx.borrowedReturnPaths,
+          env,
+          ctx,
+        ),
       ),
+      ctx.borrowedReturnType,
+      ctx,
     ),
     ctx.borrowedReturnType,
     ctx.typing,
   );
   if (expressionCanFallThrough(functionItem.body, hir)) {
+    freshReturns.push(expressionProducesFreshRoot(functionItem.body, ctx));
     const tailInvalidations = new Map(invalidated.get(env) ?? emptyFlow());
     returnSnapshots.push({
       flow: new Map(tail),
@@ -3680,7 +3844,7 @@ const summarizeFunction = ({
       return { ...callback, defaultCallbackBehavior };
     },
   );
-  return {
+  const contract: CallableBorrowContract = {
     parameters: functionItem.parameters.map((_parameter, index) => {
       const directlyRetainedPaths = pathsForParameter(escapingRetained, index);
       const externalRetainedPaths = pathsForParameter(externalRetained, index);
@@ -3714,6 +3878,14 @@ const summarizeFunction = ({
         result: origin.resultProjections,
         endpointAccess: origin.sourceEndpointAccess,
       }));
+      const completeReturnedOrigins = Array.from(
+        new Map(
+          [...returnedOrigins, ...returnedSharedOrigins].map((origin) => [
+            JSON.stringify(origin),
+            origin,
+          ]),
+        ).values(),
+      );
       const access =
         baseContracts.get(functionItem.symbol)?.parameters[index]?.access ??
         parameterContract(functionItem, index, typing).access;
@@ -3748,14 +3920,16 @@ const summarizeFunction = ({
         ...(retainedUnlessBorrowed
           ? { retainedUnlessBorrowed: true as const }
           : {}),
-        returned: returnedOrigins.length > 0,
+        returned: completeReturnedOrigins.length > 0,
         ...(returnedTypeMatchingOrigins.length > 0
           ? { returnedTypeMatchingOrigins }
           : {}),
         ...(retainedPaths.length > 0 ? { retainedPaths } : {}),
         ...(externalRetainedPaths.length > 0 ? { externalRetainedPaths } : {}),
         ...(borrowedRetainedPaths.length > 0 ? { borrowedRetainedPaths } : {}),
-        ...(returnedOrigins.length > 0 ? { returnedOrigins } : {}),
+        ...(completeReturnedOrigins.length > 0
+          ? { returnedOrigins: completeReturnedOrigins }
+          : {}),
         ...(returnedSharedOrigins.length > 0 ? { returnedSharedOrigins } : {}),
         ...(invalidatedPaths.length > 0 ? { invalidatedPaths } : {}),
         ...(defaultOrigins.get(index)?.length
@@ -3777,6 +3951,9 @@ const summarizeFunction = ({
       };
     }),
     maySuspend: maySuspend.value,
+    ...(freshReturns.length > 0 && freshReturns.every(Boolean)
+      ? { freshResult: true as const }
+      : {}),
     ...(flowHasUnconditionalExternalOrigin(accessed)
       ? { externalRead: true as const }
       : {}),
@@ -3793,6 +3970,7 @@ const summarizeFunction = ({
       ? { scopedCallbacks: scopedCallbackContracts }
       : {}),
   };
+  return contract;
 };
 
 const contractEqualityKey = (contract: CallableBorrowContract): string => {
@@ -3830,6 +4008,7 @@ const contractEqualityKey = (contract: CallableBorrowContract): string => {
       parameter.defaultNoBorrowPaths ?? [],
     ]),
     contract.maySuspend,
+    contract.freshResult ?? false,
     contract.defaultIdentityGuardProtocol ?? null,
     contract.borrowedResult ?? "external",
     contract.externalReturnedOrigins ?? [],
@@ -4109,6 +4288,9 @@ const joinCallableBorrowContracts = ({
   }
   return normalizeCallableBorrowContract({
     ...merged,
+    ...(previous.freshResult || candidate.freshResult
+      ? { freshResult: true as const }
+      : {}),
     parameters: merged.parameters.map((parameter, index) => {
       const invalidatedPaths = Array.from(
         new Map(
@@ -4134,6 +4316,7 @@ const resetDerivedContractFacts = (
   contract: CallableBorrowContract,
 ): CallableBorrowContract => {
   const {
+    freshResult: _freshResult,
     externalReturnedOrigins: _externalReturnedOrigins,
     externalRead: _externalRead,
     externalWrite: _externalWrite,
@@ -4193,6 +4376,7 @@ const narrowDerivedAccessFacts = ({
   candidate: CallableBorrowContract;
 }): CallableBorrowContract => {
   const {
+    freshResult: _freshResult,
     externalRead: _externalRead,
     externalWrite: _externalWrite,
     ...baseContract
@@ -4209,6 +4393,7 @@ const narrowDerivedAccessFacts = ({
           : {}),
       };
     }),
+    ...(candidate.freshResult ? { freshResult: true as const } : {}),
     ...(candidate.externalRead ? { externalRead: true as const } : {}),
     ...(candidate.externalWrite ? { externalWrite: true as const } : {}),
   };
@@ -4389,7 +4574,6 @@ export const computeCallableBorrowContracts = ({
           functionItem,
           typing,
           symbolTable,
-          moduleId,
         }),
       ),
     ]),
@@ -4561,13 +4745,19 @@ export const computeCallableBorrowContracts = ({
     const evidence = declared
       ? joinCallableBorrowContracts({ previous: declared, candidate })
       : candidate;
+    const refinedEvidence = candidate.freshResult
+      ? { ...evidence, freshResult: true as const }
+      : evidence;
     const next = withDynamicDispatch(
       functionItem.symbol,
       withoutImpossibleWritePaths({
         functionItem,
         typing,
         contract: stripReturnedSharedOrigins(
-          narrowDerivedAccessFacts({ contract: previous, candidate: evidence }),
+          narrowDerivedAccessFacts({
+            contract: previous,
+            candidate: refinedEvidence,
+          }),
         ),
       }),
     );
@@ -4914,6 +5104,7 @@ export const summarizeLambdaBorrowing = ({
   const pendingExits = new Map<MutableEnv, ExitEnvironments>();
   const invalidated = new Map<MutableEnv, MutableFlow>();
   const returnSnapshots: ReturnSnapshot[] = [];
+  const freshReturns: boolean[] = [];
   const transfers = new Map<string, CallableBorrowTransfer>();
   const parameterFlows = new Map(
     lambda.parameters.map((parameter, index) => [
@@ -4993,6 +5184,7 @@ export const summarizeLambdaBorrowing = ({
     observedEnvironments: [],
     invalidated,
     returnSnapshots,
+    freshReturns,
     borrowedReturnType: lambdaReturnType,
     borrowedReturnPaths:
       typeof lambdaReturnType === "number"
@@ -5002,19 +5194,24 @@ export const summarizeLambdaBorrowing = ({
     decls,
   };
   const tail = flowMarkedForBorrowedReturn(
-    unionFlows(
-      evaluateExpression(lambda.body, env, ctx),
-      explicitBorrowedResultFlow(
-        lambda.body,
-        ctx.borrowedReturnPaths,
-        env,
-        ctx,
+    flowProjectedThroughReturnedTrait(
+      unionFlows(
+        evaluateExpression(lambda.body, env, ctx),
+        explicitBorrowedResultFlow(
+          lambda.body,
+          ctx.borrowedReturnPaths,
+          env,
+          ctx,
+        ),
       ),
+      ctx.borrowedReturnType,
+      ctx,
     ),
     ctx.borrowedReturnType,
     ctx.typing,
   );
   if (expressionCanFallThrough(lambda.body, hir)) {
+    freshReturns.push(expressionProducesFreshRoot(lambda.body, ctx));
     const tailInvalidations = new Map(invalidated.get(env) ?? emptyFlow());
     returnSnapshots.push({
       flow: new Map(tail),
@@ -5065,6 +5262,14 @@ export const summarizeLambdaBorrowing = ({
         result: origin.resultProjections,
         endpointAccess: origin.sourceEndpointAccess,
       }));
+      const completeReturnedOrigins = Array.from(
+        new Map(
+          [...returnedOrigins, ...returnedSharedOrigins].map((origin) => [
+            JSON.stringify(origin),
+            origin,
+          ]),
+        ).values(),
+      );
       const access =
         parameter.pattern.bindingKind === "mutable-ref" ? "mutable" : "shared";
       const readPaths = minimizeProjectionPaths(
@@ -5095,19 +5300,24 @@ export const summarizeLambdaBorrowing = ({
         ...(retainedUnlessBorrowed
           ? { retainedUnlessBorrowed: true as const }
           : {}),
-        returned: returnedOrigins.length > 0,
+        returned: completeReturnedOrigins.length > 0,
         ...(returnedTypeMatchingOrigins.length > 0
           ? { returnedTypeMatchingOrigins }
           : {}),
         ...(retainedPaths.length > 0 ? { retainedPaths } : {}),
         ...(externalRetainedPaths.length > 0 ? { externalRetainedPaths } : {}),
         ...(borrowedRetainedPaths.length > 0 ? { borrowedRetainedPaths } : {}),
-        ...(returnedOrigins.length > 0 ? { returnedOrigins } : {}),
+        ...(completeReturnedOrigins.length > 0
+          ? { returnedOrigins: completeReturnedOrigins }
+          : {}),
         ...(returnedSharedOrigins.length > 0 ? { returnedSharedOrigins } : {}),
         ...(invalidatedPaths.length > 0 ? { invalidatedPaths } : {}),
       };
     }),
     maySuspend: maySuspend.value,
+    ...(freshReturns.length > 0 && freshReturns.every(Boolean)
+      ? { freshResult: true as const }
+      : {}),
     ...(flowHasUnconditionalExternalOrigin(accessed)
       ? { externalRead: true as const }
       : {}),

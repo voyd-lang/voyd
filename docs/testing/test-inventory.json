@@ -1329,6 +1329,13 @@
     "rationale": "Keep compiler-local: exercises HIR-level borrow facts, interprocedural contracts, place overlap, effect-boundary validation, and diagnostic structure; portable source behavior is separately covered by conformance cases."
   },
   {
+    "file": "packages/compiler/src/semantics/borrowing/__tests__/callable-result-provenance.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-29",
+    "disposition": "compiler-local",
+    "rationale": "Compiler-local result provenance, callback composition, separate-compilation privacy, path correlation, variant narrowing, defaults, and recursive widening."
+  },
+  {
     "file": "packages/compiler/src/semantics/effects/__tests__/effect-table.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",

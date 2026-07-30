@@ -59,6 +59,8 @@ import {
   typeParameterPathsInType,
 } from "./borrowed-types.js";
 import { objectLiteralFieldProvider } from "./object-literal-providers.js";
+import { traitRegionProjectionsForCoercion } from "./trait-region-projection.js";
+import { isPrivateSummaryRegionProjection } from "./callable-summary.js";
 
 type BranchPath = ReadonlyMap<number, number>;
 
@@ -82,6 +84,7 @@ type AliasDefinition = {
   conservativeReturnedAggregate?: boolean;
   resultProjections?: readonly PlaceProjection[];
   capture?: boolean;
+  plainIdentity?: true;
   contractSource?: SourceSpan;
 };
 
@@ -104,16 +107,26 @@ type BodyContext = {
   decls: DeclTable;
   aliases: Map<SymbolId, AliasDefinition>;
   assignmentAliases: AliasDefinition[];
+  assignmentAliasesBySymbol: Map<SymbolId, AliasDefinition[]>;
   reassignments: {
     symbol: SymbolId;
     event: Event;
     initializer?: HirExprId;
   }[];
+  reassignmentsBySymbol: Map<
+    SymbolId,
+    {
+      symbol: SymbolId;
+      event: Event;
+      initializer?: HirExprId;
+    }[]
+  >;
   places: Map<SymbolId, BorrowPlace>;
   mutableOwners: Set<SymbolId>;
   events: Map<HirExprId, Event>;
   uses: Map<SymbolId, Event[]>;
   usePlaces: Map<SymbolId, Map<Event, readonly BorrowPlace[]>>;
+  moduleStorageSymbols: ReadonlySet<SymbolId>;
   mutableStorageSymbols: Set<SymbolId>;
   runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
   diagnostics: Diagnostic[];
@@ -131,6 +144,11 @@ type BodyContext = {
     event: Event;
   }[];
   callResolutionCache: Map<HirExprId, ResolvedBorrowCall>;
+  externalResultCache: Map<string, boolean>;
+  analysisComplete: boolean;
+  completedAliases?: readonly AliasDefinition[];
+  completedAliasesByRoot: Map<SymbolId, AliasDefinition[]>;
+  aliasRootLocality: Map<SymbolId, boolean>;
   unknownCallableBindings: Set<SymbolId>;
   parameterSymbols: Set<SymbolId>;
   borrowedParameterSymbols: Set<SymbolId>;
@@ -560,8 +578,23 @@ const reachingAliasDefinitions = (
   symbol: SymbolId,
   event: Event,
   ctx: BodyContext,
-): readonly AliasDefinition[] =>
-  allAliases(ctx).filter((alias) => {
+): readonly AliasDefinition[] => {
+  const primary = ctx.aliases.get(symbol);
+  const aliases = [
+    ...(primary ? [primary] : []),
+    ...(ctx.assignmentAliasesBySymbol.get(symbol) ?? []),
+  ];
+  const candidateEvents = [
+    ...aliases.map((candidate) => candidate.event),
+    ...(ctx.reassignmentsBySymbol.get(symbol) ?? []).map(
+      (candidate) => candidate.event,
+    ),
+  ];
+  const latestReachingDefinitionPosition = latestDefinitelyReachingPosition(
+    candidateEvents,
+    event,
+  );
+  return aliases.filter((alias) => {
     if (
       alias.symbol !== symbol ||
       alias.event.position > event.position ||
@@ -570,21 +603,42 @@ const reachingAliasDefinitions = (
     ) {
       return false;
     }
-    return ![
-      ...allAliases(ctx).map((candidate) => ({
-        symbol: candidate.symbol,
-        event: candidate.event,
-      })),
-      ...ctx.reassignments,
-    ].some(
-      (candidate) =>
-        candidate.event !== alias.event &&
-        candidate.symbol === symbol &&
-        candidate.event.position > alias.event.position &&
-        candidate.event.position <= event.position &&
-        definitelyReaches(candidate.event, event),
-    );
+    return alias.event.position >= latestReachingDefinitionPosition;
   });
+};
+
+const latestDefinitelyReachingPosition = (
+  candidates: readonly Event[],
+  use: Event,
+): number =>
+  candidates.reduce(
+    (latest, candidate) =>
+      candidate.position <= use.position && definitelyReaches(candidate, use)
+        ? Math.max(latest, candidate.position)
+        : latest,
+    -1,
+  );
+
+const addAssignmentAlias = (
+  alias: AliasDefinition,
+  ctx: BodyContext,
+): void => {
+  ctx.assignmentAliases.push(alias);
+  const aliases = ctx.assignmentAliasesBySymbol.get(alias.symbol) ?? [];
+  aliases.push(alias);
+  ctx.assignmentAliasesBySymbol.set(alias.symbol, aliases);
+};
+
+const addReassignment = (
+  reassignment: BodyContext["reassignments"][number],
+  ctx: BodyContext,
+): void => {
+  ctx.reassignments.push(reassignment);
+  const reassignments =
+    ctx.reassignmentsBySymbol.get(reassignment.symbol) ?? [];
+  reassignments.push(reassignment);
+  ctx.reassignmentsBySymbol.set(reassignment.symbol, reassignments);
+};
 
 const hasMutableCapabilityAt = (
   symbol: SymbolId,
@@ -857,17 +911,32 @@ const specializedReturnedEndpoint = (
     : origin.endpointAccess;
 };
 
+const externalReturnedOriginsByContract = new WeakMap<
+  CallableBorrowContract,
+  NonNullable<CallableBorrowContract["externalReturnedOrigins"]>
+>();
+
 const externalReturnedOriginsForCall = (
   info: ResolvedBorrowCall,
-): NonNullable<CallableBorrowContract["externalReturnedOrigins"]> =>
-  Array.from(
+): NonNullable<CallableBorrowContract["externalReturnedOrigins"]> => {
+  if (!info.contract) {
+    return [];
+  }
+  const cached = externalReturnedOriginsByContract.get(info.contract);
+  if (cached) {
+    return cached;
+  }
+  const origins = Array.from(
     new Map(
-      (info.contract?.externalReturnedOrigins ?? []).map((origin) => [
+      (info.contract.externalReturnedOrigins ?? []).map((origin) => [
         JSON.stringify(origin),
         origin,
       ]),
     ).values(),
   );
+  externalReturnedOriginsByContract.set(info.contract, origins);
+  return origins;
+};
 
 const callOriginSourceNeedsDereference = ({
   info,
@@ -1104,9 +1173,7 @@ const expressionIsExternalStorage = (
   seen.add(candidate);
   const expression = ctx.hir.expressions.get(candidate);
   if (expression?.exprKind === "identifier") {
-    const localModuleStorage = Array.from(ctx.hir.items.values()).some(
-      (item) => item.kind === "module-let" && item.symbol === expression.symbol,
-    );
+    const localModuleStorage = ctx.moduleStorageSymbols.has(expression.symbol);
     const imported = ctx.imports.get(expression.symbol);
     const importedStorage =
       imported !== undefined &&
@@ -1133,7 +1200,7 @@ const expressionIsExternalStorage = (
   return false;
 };
 
-const expressionReturnsExternalResult = (
+const computeExpressionReturnsExternalResult = (
   exprId: HirExprId,
   ctx: BodyContext,
   requested: readonly PlaceProjection[] = [],
@@ -1151,7 +1218,7 @@ const expressionReturnsExternalResult = (
     if (expr.exprKind === "call" && intrinsicNameForCall(expr, ctx) === "~") {
       const operand = expr.args.at(-1)?.expr;
       return typeof operand === "number"
-        ? expressionReturnsExternalResult(operand, ctx, requested, seen)
+        ? computeExpressionReturnsExternalResult(operand, ctx, requested, seen)
         : false;
     }
     const info = targetInfo(expr, ctx);
@@ -1179,7 +1246,7 @@ const expressionReturnsExternalResult = (
       if (typeof actual === "number") {
         return (
           expressionIsExternalStorage(actual, ctx) ||
-          expressionReturnsExternalResult(
+          computeExpressionReturnsExternalResult(
             actual,
             ctx,
             parameterRequested,
@@ -1247,7 +1314,7 @@ const expressionReturnsExternalResult = (
     const projection = Number.isInteger(Number(expr.field))
       ? ({ kind: "tuple", index: Number(expr.field) } as const)
       : ({ kind: "field", name: expr.field } as const);
-    return expressionReturnsExternalResult(
+    return computeExpressionReturnsExternalResult(
       expr.target,
       ctx,
       [projection, ...requested],
@@ -1275,26 +1342,64 @@ const expressionReturnsExternalResult = (
     }
     const initializer = ctx.bindingInitializers.get(expr.symbol);
     return typeof initializer === "number"
-      ? expressionReturnsExternalResult(initializer, ctx, requested, seen)
+      ? computeExpressionReturnsExternalResult(
+          initializer,
+          ctx,
+          requested,
+          seen,
+        )
       : false;
   }
   if (expr.exprKind === "block" && typeof expr.value === "number") {
-    return expressionReturnsExternalResult(expr.value, ctx, requested, seen);
+    return computeExpressionReturnsExternalResult(
+      expr.value,
+      ctx,
+      requested,
+      seen,
+    );
   }
   if (expr.exprKind === "if" || expr.exprKind === "cond") {
     return [
       ...expr.branches.map((branch) => branch.value),
       ...(typeof expr.defaultBranch === "number" ? [expr.defaultBranch] : []),
     ].some((value) =>
-      expressionReturnsExternalResult(value, ctx, requested, new Set(seen)),
+      computeExpressionReturnsExternalResult(
+        value,
+        ctx,
+        requested,
+        new Set(seen),
+      ),
     );
   }
   if (expr.exprKind === "match") {
     return expr.arms.some((arm) =>
-      expressionReturnsExternalResult(arm.value, ctx, requested, new Set(seen)),
+      computeExpressionReturnsExternalResult(
+        arm.value,
+        ctx,
+        requested,
+        new Set(seen),
+      ),
     );
   }
   return false;
+};
+
+const expressionReturnsExternalResult = (
+  exprId: HirExprId,
+  ctx: BodyContext,
+  requested: readonly PlaceProjection[] = [],
+): boolean => {
+  if (!ctx.analysisComplete) {
+    return computeExpressionReturnsExternalResult(exprId, ctx, requested);
+  }
+  const key = `${exprId}:${JSON.stringify(requested)}`;
+  const cached = ctx.externalResultCache.get(key);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const result = computeExpressionReturnsExternalResult(exprId, ctx, requested);
+  ctx.externalResultCache.set(key, result);
+  return result;
 };
 
 const externalResultAccessHint = (
@@ -1769,6 +1874,17 @@ function projectedReturnedPlaces(
       ? projectedReturnedPlaces(initializer, requested, ctx, seen)
       : [];
   }
+  if (expr.exprKind === "field-access") {
+    const projection = Number.isInteger(Number(expr.field))
+      ? ({ kind: "tuple", index: Number(expr.field) } as const)
+      : ({ kind: "field", name: expr.field } as const);
+    return projectedReturnedPlaces(
+      expr.target,
+      [projection, ...requested],
+      ctx,
+      seen,
+    );
+  }
   if (expr.exprKind === "block" && typeof expr.value === "number") {
     return projectedReturnedPlaces(expr.value, requested, ctx, seen);
   }
@@ -2173,7 +2289,43 @@ type AggregateOrigin = {
   callableResult?: boolean;
   externalResult?: boolean;
   capture?: boolean;
+  checkedView?: true;
   contractSource?: SourceSpan;
+};
+
+const traitCoercionOrigins = ({
+  value,
+  targetType,
+  ctx,
+}: {
+  value: HirExprId;
+  targetType: TypeId | undefined;
+  ctx: BodyContext;
+}): readonly AggregateOrigin[] => {
+  const projections = traitRegionProjectionsForCoercion({
+    sourceType: typeOfExpr(value, ctx),
+    targetType,
+    hir: ctx.hir,
+    typing: ctx.typing,
+    symbolTable: ctx.symbolTable,
+    moduleId: ctx.moduleId,
+    imports: ctx.imports,
+    dependencies: ctx.dependencies,
+  });
+  if (projections.length === 0) {
+    return [];
+  }
+  return uniqueAggregateOrigins(
+    placesOfExpression(value, ctx).flatMap((place) =>
+      projections.map(({ source, result }) => ({
+        place: source.reduce(appendProjection, place),
+        resultProjections: [result],
+        provenance: "allocation-alias" as const,
+        access: "shared" as const,
+        checkedView: true as const,
+      })),
+    ),
+  );
 };
 
 const localizeExternalResultPlace = (
@@ -2509,7 +2661,14 @@ const aggregateOriginsOfExpression = (
       ),
     );
     return expressionMaterializesPlainProjection(expr.id, ctx)
-      ? projected.filter((origin) => origin.capture === true)
+      ? projected.filter(
+          (origin) =>
+            origin.capture === true ||
+            origin.checkedView === true ||
+            origin.resultProjections.some(
+              (projection) => projection.kind === "region",
+            ),
+        )
       : projected;
   }
   if (expr?.exprKind === "call" || expr?.exprKind === "method-call") {
@@ -2648,16 +2807,18 @@ const aggregateOriginsOfExpression = (
     const reaching = event
       ? reachingAliasDefinitions(expr.symbol, event, ctx)
       : [];
-    const contained = reaching.map((alias) => ({
-      place: alias.place,
-      resultProjections: alias.resultProjections ?? [],
-      provenance: alias.provenance,
-      access: alias.access,
-      callableResult: alias.callableResult,
-      externalResult: alias.externalResult,
-      capture: alias.capture,
-      contractSource: alias.contractSource,
-    }));
+    const contained = reaching
+      .filter((alias) => alias.plainIdentity !== true)
+      .map((alias) => ({
+        place: alias.place,
+        resultProjections: alias.resultProjections ?? [],
+        provenance: alias.provenance,
+        access: alias.access,
+        callableResult: alias.callableResult,
+        externalResult: alias.externalResult,
+        capture: alias.capture,
+        contractSource: alias.contractSource,
+      }));
     if (reaching.length > 0) {
       return uniqueAggregateOrigins(contained);
     }
@@ -2685,33 +2846,62 @@ const aggregateOriginsOfExpression = (
           [projection],
           ctx,
         );
+        const resultType = typeOfExpr(expr.id, ctx);
+        const traitCoercions =
+          typeof resultType === "number"
+            ? projectedTypes(resultType, [projection], ctx.typing).flatMap(
+                (targetType) =>
+                  traitCoercionOrigins({
+                    value,
+                    targetType,
+                    ctx,
+                  }).map((origin) => ({
+                    ...origin,
+                    resultProjections: [
+                      projection,
+                      ...origin.resultProjections,
+                    ],
+                  })),
+              )
+            : [];
         const alreadyBorrowed = expressionCarriesBorrowedProvenance(value, ctx);
-        const direct = isReferenceLike(typeOfExpr(value, ctx), ctx)
-          ? placesOfExpression(value, ctx).map((place) => ({
-              place:
-                explicitBorrow &&
-                !alreadyBorrowed &&
-                borrowedEndpointIsDereferenced(explicitBorrow.inner, ctx.typing)
-                  ? applyBorrowEndpoint(place, "dereferenced")
-                  : place,
-              resultProjections: [projection],
-              provenance:
-                explicitBorrow || alreadyBorrowed
-                  ? ("storage-borrow" as const)
-                  : ("allocation-alias" as const),
-              access: aggregateOriginAccess(value, place, ctx),
-              capture: expressionOriginIsCapture(value, place, ctx),
-            }))
-          : [];
-        const nested = aggregateOriginsOfExpression(
+        const nestedOrigins = aggregateOriginsOfExpression(
           value,
           ctx,
           new Set(seen),
-        ).map((origin) => ({
+        );
+        const hasPreciseNestedOrigins = nestedOrigins.some(
+          (origin) => origin.resultProjections.length > 0,
+        );
+        const direct =
+          traitCoercions.length === 0 &&
+          (!hasPreciseNestedOrigins ||
+            baseSymbolOf(value, ctx) !== undefined) &&
+          isReferenceLike(typeOfExpr(value, ctx), ctx)
+            ? placesOfExpression(value, ctx).map((place) => ({
+                place:
+                  explicitBorrow &&
+                  !alreadyBorrowed &&
+                  borrowedEndpointIsDereferenced(
+                    explicitBorrow.inner,
+                    ctx.typing,
+                  )
+                    ? applyBorrowEndpoint(place, "dereferenced")
+                    : place,
+                resultProjections: [projection],
+                provenance:
+                  explicitBorrow || alreadyBorrowed
+                    ? ("storage-borrow" as const)
+                    : ("allocation-alias" as const),
+                access: aggregateOriginAccess(value, place, ctx),
+                capture: expressionOriginIsCapture(value, place, ctx),
+              }))
+            : [];
+        const nested = nestedOrigins.map((origin) => ({
           ...origin,
           resultProjections: [projection, ...origin.resultProjections],
         }));
-        return [...direct, ...nested];
+        return [...direct, ...traitCoercions, ...nested];
       }),
     );
   }
@@ -2738,36 +2928,59 @@ const aggregateOriginsOfExpression = (
         [projection],
         ctx,
       );
+      const resultType = typeOfExpr(expr.id, ctx);
+      const traitCoercions =
+        typeof resultType === "number"
+          ? projectedTypes(resultType, [projection], ctx.typing).flatMap(
+              (targetType) =>
+                traitCoercionOrigins({
+                  value: entry.value,
+                  targetType,
+                  ctx,
+                }).map((origin) => ({
+                  ...origin,
+                  resultProjections: [projection, ...origin.resultProjections],
+                })),
+            )
+          : [];
       const alreadyBorrowed = expressionCarriesBorrowedProvenance(
         entry.value,
         ctx,
       );
-      const direct = isReferenceLike(typeOfExpr(entry.value, ctx), ctx)
-        ? placesOfExpression(entry.value, ctx).map((place) => ({
-            place:
-              explicitBorrow &&
-              !alreadyBorrowed &&
-              borrowedEndpointIsDereferenced(explicitBorrow.inner, ctx.typing)
-                ? applyBorrowEndpoint(place, "dereferenced")
-                : place,
-            resultProjections: [projection],
-            provenance:
-              explicitBorrow || alreadyBorrowed
-                ? ("storage-borrow" as const)
-                : ("allocation-alias" as const),
-            access: aggregateOriginAccess(entry.value, place, ctx),
-            capture: expressionOriginIsCapture(entry.value, place, ctx),
-          }))
-        : [];
-      const nested = aggregateOriginsOfExpression(
+      const nestedOrigins = aggregateOriginsOfExpression(
         entry.value,
         ctx,
         new Set(seen),
-      ).map((origin) => ({
+      );
+      const hasPreciseNestedOrigins = nestedOrigins.some(
+        (origin) => origin.resultProjections.length > 0,
+      );
+      const direct =
+        traitCoercions.length === 0 &&
+        (!hasPreciseNestedOrigins ||
+          baseSymbolOf(entry.value, ctx) !== undefined) &&
+        isReferenceLike(typeOfExpr(entry.value, ctx), ctx)
+          ? placesOfExpression(entry.value, ctx).map((place) => ({
+              place:
+                explicitBorrow &&
+                !alreadyBorrowed &&
+                borrowedEndpointIsDereferenced(explicitBorrow.inner, ctx.typing)
+                  ? applyBorrowEndpoint(place, "dereferenced")
+                  : place,
+              resultProjections: [projection],
+              provenance:
+                explicitBorrow || alreadyBorrowed
+                  ? ("storage-borrow" as const)
+                  : ("allocation-alias" as const),
+              access: aggregateOriginAccess(entry.value, place, ctx),
+              capture: expressionOriginIsCapture(entry.value, place, ctx),
+            }))
+          : [];
+      const nested = nestedOrigins.map((origin) => ({
         ...origin,
         resultProjections: [projection, ...origin.resultProjections],
       }));
-      return [...direct, ...nested];
+      return [...direct, ...traitCoercions, ...nested];
     };
     return uniqueAggregateOrigins(
       expr.entries.reduce<AggregateOrigin[]>((origins, entry) => {
@@ -3033,7 +3246,7 @@ const bindPatternAggregateOrigin = ({
           : {}),
       };
       if (ctx.aliases.has(pattern.symbol)) {
-        ctx.assignmentAliases.push(alias);
+        addAssignmentAlias(alias, ctx);
       } else {
         ctx.aliases.set(pattern.symbol, alias);
       }
@@ -3298,6 +3511,11 @@ const bindAggregatePatternOrigins = ({
     });
   }
   aggregateOriginsOfExpression(value, ctx).forEach((origin) => {
+    const preservesCheckedView =
+      origin.checkedView === true ||
+      origin.resultProjections.some(
+        (projection) => projection.kind === "region",
+      );
     const alias: AliasDefinition = {
       symbol: pattern.symbol,
       place: origin.place,
@@ -3319,6 +3537,11 @@ const bindAggregatePatternOrigins = ({
       ...(origin.callableResult === true ? { callableResult: true } : {}),
       ...(origin.externalResult === true ? { externalResult: true } : {}),
       ...(origin.capture === true ? { capture: true } : {}),
+      ...(materializesPlainValue &&
+      origin.capture !== true &&
+      !preservesCheckedView
+        ? { plainIdentity: true as const }
+        : {}),
       ...(origin.contractSource
         ? { contractSource: origin.contractSource }
         : {}),
@@ -3330,11 +3553,56 @@ const bindAggregatePatternOrigins = ({
         : {}),
     };
     if (ctx.aliases.has(pattern.symbol)) {
-      ctx.assignmentAliases.push(alias);
+      addAssignmentAlias(alias, ctx);
     } else {
       ctx.aliases.set(pattern.symbol, alias);
     }
   });
+};
+
+const bindTraitCoercionPatternOrigins = ({
+  pattern,
+  value,
+  mutable,
+  span,
+  event,
+  ctx,
+}: {
+  pattern: HirPattern;
+  value: HirExprId;
+  mutable: boolean;
+  span: SourceSpan;
+  event: Event;
+  ctx: BodyContext;
+}): void => {
+  if (pattern.kind === "type" && pattern.binding) {
+    bindTraitCoercionPatternOrigins({
+      pattern: pattern.binding,
+      value,
+      mutable,
+      span,
+      event,
+      ctx,
+    });
+    return;
+  }
+  if (pattern.kind !== "identifier") {
+    return;
+  }
+  traitCoercionOrigins({
+    value,
+    targetType: ctx.typing.valueTypes.get(pattern.symbol),
+    ctx,
+  }).forEach((origin) =>
+    bindPatternAggregateOrigin({
+      pattern,
+      origin,
+      mutable,
+      span,
+      event,
+      ctx,
+    }),
+  );
 };
 
 const bindPatternInitializers = ({
@@ -3460,7 +3728,7 @@ const bindPatternPlaces = ({
           ...(contractSource ? { contractSource } : {}),
         };
         if (ctx.aliases.has(pattern.symbol)) {
-          ctx.assignmentAliases.push(alias);
+          addAssignmentAlias(alias, ctx);
         } else {
           ctx.aliases.set(pattern.symbol, alias);
         }
@@ -3482,7 +3750,7 @@ const bindPatternPlaces = ({
             externalResult: true,
           };
           if (ctx.aliases.has(pattern.symbol)) {
-            ctx.assignmentAliases.push(alias);
+            addAssignmentAlias(alias, ctx);
           } else {
             ctx.aliases.set(pattern.symbol, alias);
           }
@@ -3634,10 +3902,14 @@ const recordContextualBorrowAlias = (
     candidate.access === alias.access &&
     candidate.provenance === alias.provenance;
   if (assignment) {
-    if (ctx.assignmentAliases.some(aliasAlreadyRecorded)) {
+    if (
+      ctx.assignmentAliasesBySymbol
+        .get(alias.symbol)
+        ?.some(aliasAlreadyRecorded)
+    ) {
       return;
     }
-    ctx.assignmentAliases.push(alias);
+    addAssignmentAlias(alias, ctx);
     return;
   }
   const current = ctx.aliases.get(alias.symbol);
@@ -3647,11 +3919,13 @@ const recordContextualBorrowAlias = (
   }
   if (
     aliasAlreadyRecorded(current) ||
-    ctx.assignmentAliases.some(aliasAlreadyRecorded)
+    ctx.assignmentAliasesBySymbol
+      .get(alias.symbol)
+      ?.some(aliasAlreadyRecorded)
   ) {
     return;
   }
-  ctx.assignmentAliases.push(alias);
+  addAssignmentAlias(alias, ctx);
 };
 
 const borrowFormationLeaves = (
@@ -3691,16 +3965,97 @@ const borrowFormationLeaves = (
   return [exprId];
 };
 
+const storedIdentityPlacesOfExpression = (
+  exprId: HirExprId,
+  ctx: BodyContext,
+): readonly BorrowPlace[] => {
+  const accessPath = (
+    current: HirExprId,
+  ):
+    | {
+        root: Extract<HirExpression, { exprKind: "identifier" }>;
+        path: PlaceProjection[];
+      }
+    | undefined => {
+    const expression = ctx.hir.expressions.get(current);
+    if (expression?.exprKind === "identifier") {
+      return { root: expression, path: [] };
+    }
+    if (expression?.exprKind !== "field-access") {
+      return undefined;
+    }
+    const target = accessPath(expression.target);
+    if (!target) {
+      return undefined;
+    }
+    const projection = Number.isInteger(Number(expression.field))
+      ? ({ kind: "tuple", index: Number(expression.field) } as const)
+      : ({ kind: "field", name: expression.field } as const);
+    return { root: target.root, path: [...target.path, projection] };
+  };
+  const access = accessPath(exprId);
+  if (!access || access.path.length === 0) {
+    return [];
+  }
+  const event = ctx.events.get(access.root.id);
+  const aliases = event
+    ? reachingAliasDefinitions(access.root.symbol, event, ctx)
+    : [];
+  return uniquePlaces(
+    aliases.flatMap((alias) => {
+      if (alias.resultProjections?.length !== access.path.length) {
+        return [];
+      }
+      const translated = translateProjectionPath({
+        result: alias.resultProjections,
+        source: alias.place.projections,
+        requested: access.path,
+      });
+      return translated
+        ? [{ root: alias.place.root, projections: translated }]
+        : [];
+    }),
+  );
+};
+
 const placesForBorrowFormation = (
   exprId: HirExprId,
   path: readonly PlaceProjection[],
   ctx: BodyContext,
-): readonly BorrowPlace[] =>
-  path.length === 0
-    ? expressionReturnsExternalResult(exprId, ctx)
-      ? placesOfExpression(exprId, ctx)
-      : directPlacesOfExpression(exprId, ctx)
-    : placesAtProjection(exprId, path, ctx, new Set());
+): readonly BorrowPlace[] => {
+  if (path.length > 0) {
+    return placesAtProjection(exprId, path, ctx, new Set());
+  }
+  if (
+    expressionReturnsExternalResult(exprId, ctx) ||
+    expressionReturnsFromArguments(exprId, ctx)
+  ) {
+    return placesOfExpression(exprId, ctx);
+  }
+  const storedIdentity = storedIdentityPlacesOfExpression(exprId, ctx);
+  return uniquePlaces([
+    ...storedIdentity,
+    ...directPlacesOfExpression(exprId, ctx),
+  ]);
+};
+
+const expressionReturnsFromArguments = (
+  exprId: HirExprId,
+  ctx: BodyContext,
+): boolean => {
+  const expression = ctx.hir.expressions.get(exprId);
+  if (
+    expression?.exprKind !== "call" &&
+    expression?.exprKind !== "method-call"
+  ) {
+    return false;
+  }
+  return (
+    targetInfo(expression, ctx).contract?.parameters.some(
+      (parameter) => parameter.returned,
+    ) === true
+  );
+};
 
 const nestedBorrowMayBeAbsentFromCall = (
   exprId: HirExprId,
@@ -4083,6 +4438,14 @@ const scanExpression = (
               }),
             );
           }
+          bindTraitCoercionPatternOrigins({
+            pattern: statement.pattern,
+            value: statement.initializer,
+            mutable: createsMutableBinding,
+            span: statement.span,
+            event,
+            ctx,
+          });
           const initializer = ctx.hir.expressions.get(statement.initializer);
           if (
             !returnsDetachedSharedValue &&
@@ -4137,18 +4500,21 @@ const scanExpression = (
                   capture.symbol,
                   ctx,
                 );
-                ctx.assignmentAliases.push({
-                  symbol,
-                  place,
-                  access: mutableCapture ? "mutable" : "shared",
-                  provenance: mutableCapture
-                    ? "storage-borrow"
-                    : (source?.provenance ?? "allocation-alias"),
-                  span: capture.span,
-                  event,
-                  uses: [],
-                  capture: true,
-                });
+                addAssignmentAlias(
+                  {
+                    symbol,
+                    place,
+                    access: mutableCapture ? "mutable" : "shared",
+                    provenance: mutableCapture
+                      ? "storage-borrow"
+                      : (source?.provenance ?? "allocation-alias"),
+                    span: capture.span,
+                    event,
+                    uses: [],
+                    capture: true,
+                  },
+                  ctx,
+                );
               });
             });
           }
@@ -4250,6 +4616,9 @@ const scanExpression = (
       if (typeof expr.target === "number") {
         const target = ctx.hir.expressions.get(expr.target);
         if (target?.exprKind === "identifier") {
+          if (ctx.borrowedParameterSymbols.has(target.symbol)) {
+            break;
+          }
           const assigned = ctx.hir.expressions.get(expr.value);
           const materializesBorrowedPrimitive =
             expressionMaterializesBorrowedPrimitive(
@@ -4257,12 +4626,18 @@ const scanExpression = (
               [ctx.typing.valueTypes.get(target.symbol)],
               ctx,
             );
+          const traitOrigins = traitCoercionOrigins({
+            value: expr.value,
+            targetType: ctx.typing.valueTypes.get(target.symbol),
+            ctx,
+          });
           const aggregateAssignment =
             !materializesBorrowedPrimitive &&
             (assigned?.exprKind === "tuple" ||
               assigned?.exprKind === "object-literal" ||
               isAggregateExpression(expr.value, ctx) ||
-              aggregateContentsPlaces(expr.value, ctx).length > 0);
+              aggregateContentsPlaces(expr.value, ctx).length > 0 ||
+              traitOrigins.length > 0);
           if (aggregateAssignment) {
             ctx.bindingInitializers.set(target.symbol, expr.value);
           } else {
@@ -4270,11 +4645,14 @@ const scanExpression = (
           }
           ctx.unknownCallableBindings.add(target.symbol);
           const event = eventFor(expr.span, scan, ctx);
-          ctx.reassignments.push({
-            symbol: target.symbol,
-            event,
-            ...(aggregateAssignment ? { initializer: expr.value } : {}),
-          });
+          addReassignment(
+            {
+              symbol: target.symbol,
+              event,
+              ...(aggregateAssignment ? { initializer: expr.value } : {}),
+            },
+            ctx,
+          );
           const sourceActor = baseSymbolOf(expr.value, ctx);
           const preservesMutableCapability =
             hasMutableCapabilityAt(target.symbol, event, ctx) &&
@@ -4305,57 +4683,66 @@ const scanExpression = (
               const localizedSource = externalResult
                 ? localizeExternalResultPlace(source, target.symbol)
                 : source;
-              ctx.assignmentAliases.push({
-                symbol: target.symbol,
-                place: normalizeMutableAliasPlace({
-                  place: localizedSource,
-                  sourceType: assignedType,
-                  mutable: preservesMutableCapability,
-                  ctx,
-                }),
-                access: preservesMutableCapability ? "mutable" : "shared",
-                provenance: preservesMutableCapability
-                  ? "storage-borrow"
-                  : assignedProvenance,
-                span: expr.span,
-                event,
-                uses: [],
-                ...(externalResult ? { externalResult: true } : {}),
-                ...(hasConservativeReturnedAggregate(expr.value, ctx)
-                  ? { conservativeReturnedAggregate: true }
-                  : {}),
-              });
+              addAssignmentAlias(
+                {
+                  symbol: target.symbol,
+                  place: normalizeMutableAliasPlace({
+                    place: localizedSource,
+                    sourceType: assignedType,
+                    mutable: preservesMutableCapability,
+                    ctx,
+                  }),
+                  access: preservesMutableCapability ? "mutable" : "shared",
+                  provenance: preservesMutableCapability
+                    ? "storage-borrow"
+                    : assignedProvenance,
+                  span: expr.span,
+                  event,
+                  uses: [],
+                  ...(externalResult ? { externalResult: true } : {}),
+                  ...(hasConservativeReturnedAggregate(expr.value, ctx)
+                    ? { conservativeReturnedAggregate: true }
+                    : {}),
+                },
+                ctx,
+              );
             });
           }
           const aggregateOrigins = aggregateAssignment
-            ? aggregateOriginsOfExpression(expr.value, ctx)
+            ? [
+                ...aggregateOriginsOfExpression(expr.value, ctx),
+                ...traitOrigins,
+              ]
             : [];
           if (aggregateAssignment) {
             aggregateOrigins.forEach((origin) =>
-              ctx.assignmentAliases.push({
-                symbol: target.symbol,
-                place:
-                  origin.externalResult === true
-                    ? localizeExternalResultPlace(origin.place, target.symbol)
-                    : origin.place,
-                access: "shared",
-                provenance: origin.provenance,
-                span: expr.span,
-                event,
-                uses: [],
-                ...(origin.callableResult === true
-                  ? { callableResult: true }
-                  : {}),
-                ...(origin.externalResult === true
-                  ? { externalResult: true }
-                  : {}),
-                ...(origin.resultProjections.length > 0
-                  ? { resultProjections: origin.resultProjections }
-                  : {}),
-                ...(hasConservativeReturnedAggregate(expr.value, ctx)
-                  ? { conservativeReturnedAggregate: true }
-                  : {}),
-              }),
+              addAssignmentAlias(
+                {
+                  symbol: target.symbol,
+                  place:
+                    origin.externalResult === true
+                      ? localizeExternalResultPlace(origin.place, target.symbol)
+                      : origin.place,
+                  access: "shared",
+                  provenance: origin.provenance,
+                  span: expr.span,
+                  event,
+                  uses: [],
+                  ...(origin.callableResult === true
+                    ? { callableResult: true }
+                    : {}),
+                  ...(origin.externalResult === true
+                    ? { externalResult: true }
+                    : {}),
+                  ...(origin.resultProjections.length > 0
+                    ? { resultProjections: origin.resultProjections }
+                    : {}),
+                  ...(hasConservativeReturnedAggregate(expr.value, ctx)
+                    ? { conservativeReturnedAggregate: true }
+                    : {}),
+                },
+                ctx,
+              ),
             );
           }
           bindContextualBorrowOriginForBinding({
@@ -4454,10 +4841,27 @@ const definitionEndsBefore = (
     );
   });
 
-const allAliases = (ctx: BodyContext): readonly AliasDefinition[] => [
-  ...ctx.aliases.values(),
-  ...ctx.assignmentAliases,
-];
+const allAliases = (ctx: BodyContext): readonly AliasDefinition[] => {
+  if (ctx.completedAliases) {
+    return ctx.completedAliases;
+  }
+  const aliases = [...ctx.aliases.values(), ...ctx.assignmentAliases];
+  if (ctx.analysisComplete) {
+    ctx.completedAliases = aliases;
+  }
+  return aliases;
+};
+
+const aliasesForSymbol = (
+  symbol: SymbolId,
+  ctx: BodyContext,
+): readonly AliasDefinition[] => {
+  const primary = ctx.aliases.get(symbol);
+  return [
+    ...(primary ? [primary] : []),
+    ...(ctx.assignmentAliasesBySymbol.get(symbol) ?? []),
+  ];
+};
 
 const definitelyReaches = (definition: Event, use: Event): boolean =>
   Array.from(definition.path).every(
@@ -4539,7 +4943,10 @@ const freshAllocationOriginOfPlace = (
     return undefined;
   }
   const storagePath = place.projections.slice(0, dereference);
-  if (storageWasInvalidated(place.root, storagePath, event)) {
+  if (
+    storagePath.length > 0 &&
+    storageWasInvalidated(place.root, storagePath, event)
+  ) {
     return undefined;
   }
   const providerAtPath = (
@@ -4561,6 +4968,16 @@ const freshAllocationOriginOfPlace = (
         expression.exprKind === "object-literal" &&
         typeof type === "number" &&
         typeIsAllocationBacked(type, ctx.typing)
+      ) {
+        return exprId;
+      }
+      if (
+        (expression.exprKind === "call" ||
+          expression.exprKind === "method-call") &&
+        (targetInfo(expression, ctx).contract?.freshResult === true ||
+          externalReturnedOriginsForCall(targetInfo(expression, ctx)).some(
+            (origin) => origin.fresh === true && origin.result.length === 0,
+          ))
       ) {
         return exprId;
       }
@@ -4706,24 +5123,21 @@ const aliasActiveAt = (
   if (loopCarried && loopCarriedDefinitionIsOverwritten(alias, event, ctx)) {
     return false;
   }
-  if (
-    !loopCarried &&
-    [
-      ...allAliases(ctx).map((candidate) => ({
-        symbol: candidate.symbol,
-        event: candidate.event,
-      })),
-      ...ctx.reassignments,
-    ].some(
-      (candidate) =>
-        candidate.event !== alias.event &&
-        candidate.symbol === alias.symbol &&
-        candidate.event.position > alias.event.position &&
-        candidate.event.position <= event.position &&
-        definitelyReaches(candidate.event, event),
-    )
-  ) {
-    return false;
+  if (!loopCarried) {
+    const candidates = [
+      ...aliasesForSymbol(alias.symbol, ctx).map(
+        (candidate) => candidate.event,
+      ),
+      ...(ctx.reassignmentsBySymbol.get(alias.symbol) ?? []).map(
+        (candidate) => candidate.event,
+      ),
+    ];
+    if (
+      alias.event.position <
+      latestDefinitelyReachingPosition(candidates, event)
+    ) {
+      return false;
+    }
   }
   return alias.uses.some((use) => {
     if (!pathsCompatible(use.path, event.path)) {
@@ -4774,11 +5188,11 @@ const loopCarriedDefinitionIsOverwritten = (
     Array.from(alias.event.loops).filter((loop) => use.loops.has(loop)),
   );
   const candidates = [
-    ...allAliases(ctx).map((candidate) => ({
+    ...aliasesForSymbol(alias.symbol, ctx).map((candidate) => ({
       symbol: candidate.symbol,
       event: candidate.event,
     })),
-    ...ctx.reassignments,
+    ...(ctx.reassignmentsBySymbol.get(alias.symbol) ?? []),
   ];
   return candidates.some((candidate) => {
     if (
@@ -4916,31 +5330,42 @@ const checkAccess = ({
     externalResult === true ||
     (externalResult === undefined &&
       typeof actor === "number" &&
-      allAliases(ctx).some(
+      aliasesForSymbol(actor, ctx).some(
         (alias) =>
           alias.symbol === actor &&
           alias.externalResult === true &&
           aliasActiveAt(alias, event, ctx),
       ));
-  allAliases(ctx).forEach((alias) => {
-    const aliasRootIsCallLocal =
-      alias.externalResult === true ||
-      (() => {
-        const aliasRootRecord = ctx.symbolTable.getSymbol(alias.place.root);
-        return (
-          !ctx.parameterSymbols.has(alias.place.root) &&
-          ctx.symbolTable.getScope(aliasRootRecord.scope).kind !== "module"
-        );
-      })();
+  const candidates = actorHasExternalResult
+    ? allAliases(ctx)
+    : (ctx.completedAliasesByRoot.get(place.root) ?? []);
+  candidates.forEach((alias) => {
     if (
       alias.symbol === actor ||
-      (actorHasExternalResult &&
-        aliasRootIsCallLocal &&
-        alias.externalResult !== true) ||
       (!actorHasExternalResult &&
         !placeOverlaps(alias.place, place, ctx, event))
     ) {
       return;
+    }
+    if (actorHasExternalResult && alias.externalResult !== true) {
+      const cachedLocality = ctx.aliasRootLocality.get(alias.place.root);
+      const aliasRootIsCallLocal =
+        cachedLocality ??
+        (() => {
+          if (!ctx.symbolTable.hasSymbol(alias.place.root)) {
+            ctx.aliasRootLocality.set(alias.place.root, false);
+            return false;
+          }
+          const aliasRootRecord = ctx.symbolTable.getSymbol(alias.place.root);
+          const local =
+            !ctx.parameterSymbols.has(alias.place.root) &&
+            ctx.symbolTable.getScope(aliasRootRecord.scope).kind !== "module";
+          ctx.aliasRootLocality.set(alias.place.root, local);
+          return local;
+        })();
+      if (aliasRootIsCallLocal) {
+        return;
+      }
     }
     if (alias.provenance === "allocation-alias") {
       return;
@@ -4979,6 +5404,9 @@ const checkExternalAccess = ({
       alias.capture === true ||
       ctx.parameterSymbols.has(alias.place.root) ||
       (() => {
+        if (!ctx.symbolTable.hasSymbol(alias.place.root)) {
+          return true;
+        }
         const root = ctx.symbolTable.getSymbol(alias.place.root);
         return ctx.symbolTable.getScope(root.scope).kind === "module";
       })() ||
@@ -6778,13 +7206,13 @@ const validateCall = (
           (origin) => origin.source.length > 0,
         ) === true;
       const requiresOwnership =
-        !contract ||
-        contract.access === "mutable" ||
-        contract.retained === true ||
-        (contract.returned === true && !returnsMaterializedProjection) ||
-        (contract.retainedPaths?.length ?? 0) > 0 ||
-        (contract.externalRetainedPaths?.length ?? 0) > 0 ||
-        (contract.borrowedRetainedPaths?.length ?? 0) > 0;
+        (parameter.bindingKind === "value" &&
+          (!contract || contract.access === "mutable")) ||
+        contract?.retained === true ||
+        (contract?.returned === true && !returnsMaterializedProjection) ||
+        (contract?.retainedPaths?.length ?? 0) > 0 ||
+        (contract?.externalRetainedPaths?.length ?? 0) > 0 ||
+        (contract?.borrowedRetainedPaths?.length ?? 0) > 0;
       if (requiresOwnership && intrinsicName === undefined) {
         addDiagnostic(
           diagnosticFromCode({
@@ -7527,8 +7955,7 @@ const validateCall = (
       : undefined;
     if (
       left.root !== right.root &&
-      typeof leftFresh === "number" &&
-      typeof rightFresh === "number" &&
+      (typeof leftFresh === "number" || typeof rightFresh === "number") &&
       leftFresh !== rightFresh
     ) {
       return false;
@@ -7772,6 +8199,52 @@ const validateCall = (
           ) {
             return;
           }
+          const accessIsConfinedToRoot = (place: BorrowPlace): boolean => {
+            let crossedRootAllocation = false;
+            let reachedPrivateStorage = false;
+            return place.projections.every((projection) => {
+              if (projection.kind === "identity") {
+                return true;
+              }
+              if (projection.kind === "dereference") {
+                if (crossedRootAllocation || reachedPrivateStorage) {
+                  return false;
+                }
+                crossedRootAllocation = true;
+                return true;
+              }
+              if (isPrivateSummaryRegionProjection(projection)) {
+                reachedPrivateStorage = true;
+                return true;
+              }
+              return false;
+            });
+          };
+          const leftFresh = freshAllocationOriginOfPlace(
+            {
+              root: left.place.root,
+              projections: [{ kind: "dereference" }],
+            },
+            ctx,
+            event,
+          );
+          const rightFresh = freshAllocationOriginOfPlace(
+            {
+              root: right.place.root,
+              projections: [{ kind: "dereference" }],
+            },
+            ctx,
+            event,
+          );
+          if (
+            left.place.root !== right.place.root &&
+            accessIsConfinedToRoot(left.place) &&
+            accessIsConfinedToRoot(right.place) &&
+            (typeof leftFresh === "number" || typeof rightFresh === "number") &&
+            leftFresh !== rightFresh
+          ) {
+            return;
+          }
           const leftIdentity = runtimeIdentity(left);
           const rightIdentity = runtimeIdentity(right);
           const identityUsesParameterRoot = (
@@ -7790,6 +8263,37 @@ const validateCall = (
             !callScopedLoanRootDomainsCanOverlap(left, right)
           ) {
             return;
+          }
+          if (
+            isPrivateSummaryRegionProjection(left.place.projections[0]) &&
+            isPrivateSummaryRegionProjection(right.place.projections[0]) &&
+            accessIsConfinedToRoot(left.place) &&
+            accessIsConfinedToRoot(right.place)
+          ) {
+            const leftPrivateFresh = freshAllocationOriginOfPlace(
+              {
+                root: left.place.root,
+                projections: [{ kind: "dereference" }],
+              },
+              ctx,
+              event,
+            );
+            const rightPrivateFresh = freshAllocationOriginOfPlace(
+              {
+                root: right.place.root,
+                projections: [{ kind: "dereference" }],
+              },
+              ctx,
+              event,
+            );
+            if (
+              !callScopedLoanRootDomainsCanOverlap(left, right) ||
+              ((typeof leftPrivateFresh === "number" ||
+                typeof rightPrivateFresh === "number") &&
+                leftPrivateFresh !== rightPrivateFresh)
+            ) {
+              return;
+            }
           }
           if (tryRecordRuntimeIdentityGuard(left, right)) {
             return;
@@ -8529,12 +9033,12 @@ const validateExpression = (
         }
         if (statement.kind === "let") {
           const symbols = patternSymbols(statement.pattern);
-          const createsAlias = symbols.some((symbol) =>
-            allAliases(ctx).some((alias) => alias.symbol === symbol),
+          const createsAlias = symbols.some(
+            (symbol) => aliasesForSymbol(symbol, ctx).length > 0,
           );
           validateExpression(statement.initializer, ctx, createsAlias);
           symbols.forEach((symbol) => {
-            const aliases = allAliases(ctx).filter(
+            const aliases = aliasesForSymbol(symbol, ctx).filter(
               (alias) =>
                 alias.symbol === symbol &&
                 alias.event.span.start === statement.span.start,
@@ -8795,6 +9299,7 @@ const initializeCallableContext = ({
   dependencies,
   decls,
   contracts,
+  moduleStorageSymbols,
   mutableStorageSymbols,
   runtimeIdentityGuards,
   diagnostics,
@@ -8811,6 +9316,7 @@ const initializeCallableContext = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  moduleStorageSymbols: ReadonlySet<SymbolId>;
   mutableStorageSymbols: Set<SymbolId>;
   runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
   diagnostics: Diagnostic[];
@@ -8875,6 +9381,16 @@ const initializeCallableContext = ({
       mutableOwners.add(capture.symbol);
     }
   });
+  const assignmentAliasesBySymbol = new Map<
+    SymbolId,
+    AliasDefinition[]
+  >();
+  parameterBorrowAliases.forEach((alias) => {
+    const aliasesForSymbol =
+      assignmentAliasesBySymbol.get(alias.symbol) ?? [];
+    aliasesForSymbol.push(alias);
+    assignmentAliasesBySymbol.set(alias.symbol, aliasesForSymbol);
+  });
   return {
     hir,
     typing,
@@ -8886,12 +9402,15 @@ const initializeCallableContext = ({
     contracts,
     aliases,
     assignmentAliases: parameterBorrowAliases,
+    assignmentAliasesBySymbol,
     reassignments: [],
+    reassignmentsBySymbol: new Map(),
     places,
     mutableOwners,
     events: new Map(),
     uses: new Map(),
     usePlaces: new Map(),
+    moduleStorageSymbols,
     mutableStorageSymbols,
     runtimeIdentityGuards,
     diagnostics,
@@ -8903,6 +9422,10 @@ const initializeCallableContext = ({
     externalizedPlaces: [],
     freshnessInvalidations: [],
     callResolutionCache: new Map(),
+    externalResultCache: new Map(),
+    analysisComplete: false,
+    completedAliasesByRoot: new Map(),
+    aliasRootLocality: new Map(),
     unknownCallableBindings: new Set(),
     parameterSymbols: new Set(
       callable.parameters.flatMap((parameter) =>
@@ -9000,6 +9523,7 @@ export const analyzeFunctionBorrowing = ({
   dependencies,
   decls,
   contracts,
+  moduleStorageSymbols,
   mutableStorageSymbols,
   runtimeIdentityGuards,
   diagnostics,
@@ -9013,6 +9537,7 @@ export const analyzeFunctionBorrowing = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  moduleStorageSymbols: ReadonlySet<SymbolId>;
   mutableStorageSymbols: Set<SymbolId>;
   runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
   diagnostics: Diagnostic[];
@@ -9036,25 +9561,27 @@ export const analyzeFunctionBorrowing = ({
     );
   };
   const parameterTypesFromBody = new Map<SymbolId, TypeId>();
-  walkExpression({
-    exprId: functionItem.body,
-    hir,
-    onEnterExpression: (exprId, expression) => {
-      if (
-        expression.exprKind !== "identifier" ||
-        parameterTypesFromBody.has(expression.symbol)
-      ) {
-        return;
-      }
-      const type =
-        typing.borrowResolvedExprTypes.get(exprId) ??
-        typing.resolvedExprTypes.get(exprId) ??
-        typing.table.getExprType(exprId);
-      if (typeof type === "number") {
-        parameterTypesFromBody.set(expression.symbol, type);
-      }
-    },
-  });
+  if (!signature) {
+    walkExpression({
+      exprId: functionItem.body,
+      hir,
+      onEnterExpression: (exprId, expression) => {
+        if (
+          expression.exprKind !== "identifier" ||
+          parameterTypesFromBody.has(expression.symbol)
+        ) {
+          return;
+        }
+        const type =
+          typing.borrowResolvedExprTypes.get(exprId) ??
+          typing.resolvedExprTypes.get(exprId) ??
+          typing.table.getExprType(exprId);
+        if (typeof type === "number") {
+          parameterTypesFromBody.set(expression.symbol, type);
+        }
+      },
+    });
+  }
   const parameterTypes =
     signature?.parameters.map((parameter) => parameter.type) ??
     functionItem.parameters.map(
@@ -9086,6 +9613,7 @@ export const analyzeFunctionBorrowing = ({
     dependencies,
     decls,
     contracts,
+    moduleStorageSymbols,
     mutableStorageSymbols,
     runtimeIdentityGuards,
     diagnostics,
@@ -9102,6 +9630,7 @@ export const analyzeLambdaBodyBorrowing = ({
   dependencies,
   decls,
   contracts,
+  moduleStorageSymbols,
   mutableStorageSymbols,
   runtimeIdentityGuards,
   diagnostics,
@@ -9115,6 +9644,7 @@ export const analyzeLambdaBodyBorrowing = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  moduleStorageSymbols: ReadonlySet<SymbolId>;
   mutableStorageSymbols: Set<SymbolId>;
   runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
   diagnostics: Diagnostic[];
@@ -9155,6 +9685,7 @@ export const analyzeLambdaBodyBorrowing = ({
     dependencies,
     decls,
     contracts,
+    moduleStorageSymbols,
     mutableStorageSymbols,
     runtimeIdentityGuards,
     diagnostics,
@@ -9175,6 +9706,7 @@ const analyzeCallableBorrowing = ({
   dependencies,
   decls,
   contracts,
+  moduleStorageSymbols,
   mutableStorageSymbols,
   runtimeIdentityGuards,
   diagnostics,
@@ -9192,6 +9724,7 @@ const analyzeCallableBorrowing = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  moduleStorageSymbols: ReadonlySet<SymbolId>;
   mutableStorageSymbols: Set<SymbolId>;
   runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
   diagnostics: Diagnostic[];
@@ -9209,6 +9742,7 @@ const analyzeCallableBorrowing = ({
     dependencies,
     decls,
     contracts,
+    moduleStorageSymbols,
     mutableStorageSymbols,
     runtimeIdentityGuards,
     diagnostics,
@@ -9246,6 +9780,12 @@ const analyzeCallableBorrowing = ({
     });
   });
   scanExpression(callable.body, { path: new Map(), loops: new Set() }, ctx);
+  ctx.analysisComplete = true;
+  allAliases(ctx).forEach((alias) => {
+    const aliases = ctx.completedAliasesByRoot.get(alias.place.root) ?? [];
+    aliases.push(alias);
+    ctx.completedAliasesByRoot.set(alias.place.root, aliases);
+  });
   ctx.closureCaptures.forEach((captures, closure) => {
     const closureUses = ctx.uses.get(closure) ?? [];
     const pending = [...captures];

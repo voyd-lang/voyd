@@ -138,8 +138,11 @@ fn string_len(value: StringSlice): () -> i32
   value.byte_len()
 
 fn append_slice_bytes(~into: Array<i32>, source: StringSlice) -> void
-  let raw = source.source.raw_bytes()
   var index = 0
   while index < source.byte_len():
-    into.push(__array_get(raw, source.start + index))
+    match(source.get_byte(index))
+      Some<i32> { value }:
+        into.push(value)
+      None:
+        return void
     index = index + 1

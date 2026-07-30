@@ -6,6 +6,7 @@ import { getSymbolTable } from "../semantics/_internal/symbol-table.js";
 import { cloneNestedMap } from "../semantics/typing/call-resolution.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypeArena } from "../semantics/typing/type-arena.js";
+import { cloneModuleExportTable } from "../semantics/modules.js";
 
 export const cloneSemanticsForTypingState = ({
   semantics,
@@ -96,7 +97,7 @@ export const cloneSemanticsForTypingState = ({
       diagnostics: [...typing.diagnostics],
     },
     moduleId: semantics.moduleId,
-    exports: new Map(semantics.exports),
+    exports: cloneModuleExportTable(semantics.exports),
     diagnostics: [...semantics.diagnostics],
     ...({ symbolTable } as unknown as {}),
   } as SemanticsPipelineResult;

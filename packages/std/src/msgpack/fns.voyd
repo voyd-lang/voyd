@@ -384,10 +384,13 @@ impl Encoder
         self.write_u8(219)
         self.write_u32(len)
 
-    let source = value.bytes.raw_storage()
     var index = 0
     while index < len:
-      self.write_u8(__array_get(source, index))
+      match(value.get_byte(index))
+        Some<i32> { value: byte }:
+          self.write_u8(byte)
+        None:
+          return void
       index = index + 1
 
   fn encode_binary(~self, bytes: Array<i32>) -> void

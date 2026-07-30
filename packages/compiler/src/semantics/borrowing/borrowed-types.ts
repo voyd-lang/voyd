@@ -39,25 +39,31 @@ export const borrowedTypeEntriesInType = (
     if (descriptor.kind === "borrowed") {
       return [
         { path: prefix, inner: descriptor.inner },
-        ...borrowedTypeEntriesInType(
-          descriptor.inner,
-          typing,
-          prefix,
-          new Set(active),
-        ),
+        ...(typeContainsBorrowed(descriptor.inner, typing)
+          ? borrowedTypeEntriesInType(
+              descriptor.inner,
+              typing,
+              prefix,
+              new Set(active),
+            )
+          : []),
       ];
     }
     if (descriptor.kind === "recursive") {
-      return borrowedTypeEntriesInType(descriptor.body, typing, prefix, active);
+      return typeContainsBorrowed(descriptor.body, typing)
+        ? borrowedTypeEntriesInType(descriptor.body, typing, prefix, active)
+        : [];
     }
     if (descriptor.kind === "union") {
       return descriptor.members.flatMap((member) =>
-        borrowedTypeEntriesInType(member, typing, prefix, new Set(active)),
+        typeContainsBorrowed(member, typing)
+          ? borrowedTypeEntriesInType(member, typing, prefix, new Set(active))
+          : [],
       );
     }
     if (descriptor.kind === "intersection") {
       return [descriptor.nominal, descriptor.structural].flatMap((member) =>
-        typeof member === "number"
+        typeof member === "number" && typeContainsBorrowed(member, typing)
           ? borrowedTypeEntriesInType(member, typing, prefix, new Set(active))
           : [],
       );
@@ -69,42 +75,48 @@ export const borrowedTypeEntriesInType = (
       const object = typing.objectsByNominal.get(type);
       return (
         object?.fields.flatMap((field) =>
-          borrowedTypeEntriesInType(
-            field.type,
-            typing,
-            [
-              ...prefix,
-              Number.isInteger(Number(field.name))
-                ? { kind: "tuple", index: Number(field.name) }
-                : { kind: "field", name: field.name },
-            ],
-            new Set(active),
-          ),
+          typeContainsBorrowed(field.type, typing)
+            ? borrowedTypeEntriesInType(
+                field.type,
+                typing,
+                [
+                  ...prefix,
+                  Number.isInteger(Number(field.name))
+                    ? { kind: "tuple", index: Number(field.name) }
+                    : { kind: "field", name: field.name },
+                ],
+                new Set(active),
+              )
+            : [],
         ) ?? []
       );
     }
     if (descriptor.kind === "structural-object") {
       return descriptor.fields.flatMap((field) =>
-        borrowedTypeEntriesInType(
-          field.type,
-          typing,
-          [
-            ...prefix,
-            Number.isInteger(Number(field.name))
-              ? { kind: "tuple", index: Number(field.name) }
-              : { kind: "field", name: field.name },
-          ],
-          new Set(active),
-        ),
+        typeContainsBorrowed(field.type, typing)
+          ? borrowedTypeEntriesInType(
+              field.type,
+              typing,
+              [
+                ...prefix,
+                Number.isInteger(Number(field.name))
+                  ? { kind: "tuple", index: Number(field.name) }
+                  : { kind: "field", name: field.name },
+              ],
+              new Set(active),
+            )
+          : [],
       );
     }
     if (descriptor.kind === "fixed-array") {
-      return borrowedTypeEntriesInType(
-        descriptor.element,
-        typing,
-        [...prefix, { kind: "index", stable: false }],
-        active,
-      );
+      return typeContainsBorrowed(descriptor.element, typing)
+        ? borrowedTypeEntriesInType(
+            descriptor.element,
+            typing,
+            [...prefix, { kind: "index", stable: false }],
+            active,
+          )
+        : [];
     }
     return [];
   })();
@@ -165,64 +177,87 @@ export const typeParameterPathsInType = (
   if (!containsTypeParameterByTyping.has(typing)) {
     containsTypeParameterByTyping.set(typing, containsCache);
   }
-  const containsTypeParameter = (
-    current: TypeId,
-    active = new Set<TypeId>(),
-  ): boolean => {
-    const cacheable = active.size === 0;
-    const cachedContains = cacheable ? containsCache.get(current) : undefined;
+  const childTypes = (current: TypeId): readonly TypeId[] => {
+    const descriptor = typing.arena.get(current);
+    if (descriptor.kind === "borrowed") {
+      return [descriptor.inner];
+    }
+    if (descriptor.kind === "recursive") {
+      return [descriptor.body];
+    }
+    if (descriptor.kind === "union") {
+      return descriptor.members;
+    }
+    if (descriptor.kind === "intersection") {
+      return [descriptor.nominal, descriptor.structural].filter(
+        (member): member is TypeId => typeof member === "number",
+      );
+    }
+    const fields =
+      descriptor.kind === "structural-object"
+        ? descriptor.fields
+        : descriptor.kind === "nominal-object" ||
+            descriptor.kind === "value-object"
+          ? typing.objectsByNominal.get(current)?.fields
+          : undefined;
+    if (fields) {
+      return fields.map((field) => field.type);
+    }
+    return descriptor.kind === "fixed-array" ? [descriptor.element] : [];
+  };
+  const containsTypeParameter = (current: TypeId): boolean => {
+    const cachedContains = containsCache.get(current);
     if (cachedContains !== undefined) {
       return cachedContains;
     }
-    if (active.has(current)) {
-      return false;
-    }
-    active.add(current);
-    const descriptor = typing.arena.get(current);
-    const result = (() => {
+    const pending = [current];
+    const visited = new Set<TypeId>();
+    const predecessors = new Map<TypeId, Set<TypeId>>();
+    let positive: TypeId | undefined;
+    while (pending.length > 0) {
+      const candidate = pending.pop()!;
+      if (visited.has(candidate)) {
+        continue;
+      }
+      const known = containsCache.get(candidate);
+      if (known === true) {
+        positive = candidate;
+        break;
+      }
+      if (known === false) {
+        continue;
+      }
+      visited.add(candidate);
+      const descriptor = typing.arena.get(candidate);
       if (descriptor.kind === "type-param-ref") {
-        return true;
+        positive = candidate;
+        break;
       }
-      if (descriptor.kind === "borrowed") {
-        return containsTypeParameter(descriptor.inner, active);
-      }
-      if (descriptor.kind === "recursive") {
-        return containsTypeParameter(descriptor.body, active);
-      }
-      if (descriptor.kind === "union") {
-        return descriptor.members.some((member) =>
-          containsTypeParameter(member, new Set(active)),
-        );
-      }
-      if (descriptor.kind === "intersection") {
-        return [descriptor.nominal, descriptor.structural].some(
-          (member) =>
-            typeof member === "number" &&
-            containsTypeParameter(member, new Set(active)),
-        );
-      }
-      const fields =
-        descriptor.kind === "structural-object"
-          ? descriptor.fields
-          : descriptor.kind === "nominal-object" ||
-              descriptor.kind === "value-object"
-            ? typing.objectsByNominal.get(current)?.fields
-            : undefined;
-      if (fields) {
-        return fields.some((field) =>
-          containsTypeParameter(field.type, new Set(active)),
-        );
-      }
-      return (
-        descriptor.kind === "fixed-array" &&
-        containsTypeParameter(descriptor.element, active)
-      );
-    })();
-    active.delete(current);
-    if (cacheable) {
-      containsCache.set(current, result);
+      childTypes(candidate).forEach((child) => {
+        const parents = predecessors.get(child) ?? new Set<TypeId>();
+        parents.add(candidate);
+        predecessors.set(child, parents);
+        pending.push(child);
+      });
     }
-    return result;
+    if (positive !== undefined) {
+      const positiveAncestors = [positive];
+      const marked = new Set<TypeId>();
+      while (positiveAncestors.length > 0) {
+        const candidate = positiveAncestors.pop()!;
+        if (marked.has(candidate)) {
+          continue;
+        }
+        marked.add(candidate);
+        containsCache.set(candidate, true);
+        predecessors
+          .get(candidate)
+          ?.forEach((parent) => positiveAncestors.push(parent));
+      }
+      return true;
+    }
+    visited.forEach((candidate) => containsCache.set(candidate, false));
+    return false;
   };
 
   const descriptor = typing.arena.get(type);
@@ -266,54 +301,83 @@ export const typeContainsBorrowed = (
   if (!containsBorrowedCache.has(typing)) {
     containsBorrowedCache.set(typing, cache);
   }
-
-  const visit = (current: TypeId, active: Set<TypeId>): boolean => {
-    const cached = cache.get(current);
-    if (cached !== undefined) {
-      return cached;
-    }
-    if (active.has(current)) {
-      return false;
-    }
-    active.add(current);
+  const cached = cache.get(type);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const childTypes = (current: TypeId): readonly TypeId[] => {
     const descriptor = typing.arena.get(current);
-    const result = (() => {
-      if (descriptor.kind === "borrowed") {
-        return true;
-      }
-      if (descriptor.kind === "recursive") {
-        return visit(descriptor.body, active);
-      }
-      if (descriptor.kind === "union") {
-        return descriptor.members.some((member) => visit(member, active));
-      }
-      if (descriptor.kind === "intersection") {
-        return [descriptor.nominal, descriptor.structural].some(
-          (member) => typeof member === "number" && visit(member, active),
-        );
-      }
-      if (
-        descriptor.kind === "nominal-object" ||
-        descriptor.kind === "value-object"
-      ) {
-        return (
-          typing.objectsByNominal
-            .get(current)
-            ?.fields.some((field) => visit(field.type, active)) ?? false
-        );
-      }
-      if (descriptor.kind === "structural-object") {
-        return descriptor.fields.some((field) => visit(field.type, active));
-      }
-      if (descriptor.kind === "fixed-array") {
-        return visit(descriptor.element, active);
-      }
-      return false;
-    })();
-    active.delete(current);
-    cache.set(current, result);
-    return result;
+    if (descriptor.kind === "recursive") {
+      return [descriptor.body];
+    }
+    if (descriptor.kind === "union") {
+      return descriptor.members;
+    }
+    if (descriptor.kind === "intersection") {
+      return [descriptor.nominal, descriptor.structural].filter(
+        (member): member is TypeId => typeof member === "number",
+      );
+    }
+    if (
+      descriptor.kind === "nominal-object" ||
+      descriptor.kind === "value-object"
+    ) {
+      return (
+        typing.objectsByNominal
+          .get(current)
+          ?.fields.map((field) => field.type) ?? []
+      );
+    }
+    if (descriptor.kind === "structural-object") {
+      return descriptor.fields.map((field) => field.type);
+    }
+    return descriptor.kind === "fixed-array" ? [descriptor.element] : [];
   };
-
-  return visit(type, new Set());
+  const pending = [type];
+  const visited = new Set<TypeId>();
+  const predecessors = new Map<TypeId, Set<TypeId>>();
+  let positive: TypeId | undefined;
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    if (visited.has(current)) {
+      continue;
+    }
+    const known = cache.get(current);
+    if (known === true) {
+      positive = current;
+      break;
+    }
+    if (known === false) {
+      continue;
+    }
+    visited.add(current);
+    if (typing.arena.get(current).kind === "borrowed") {
+      positive = current;
+      break;
+    }
+    childTypes(current).forEach((child) => {
+      const parents = predecessors.get(child) ?? new Set<TypeId>();
+      parents.add(current);
+      predecessors.set(child, parents);
+      pending.push(child);
+    });
+  }
+  if (positive !== undefined) {
+    const positiveAncestors = [positive];
+    const marked = new Set<TypeId>();
+    while (positiveAncestors.length > 0) {
+      const current = positiveAncestors.pop()!;
+      if (marked.has(current)) {
+        continue;
+      }
+      marked.add(current);
+      cache.set(current, true);
+      predecessors
+        .get(current)
+        ?.forEach((parent) => positiveAncestors.push(parent));
+    }
+    return true;
+  }
+  visited.forEach((current) => cache.set(current, false));
+  return false;
 };

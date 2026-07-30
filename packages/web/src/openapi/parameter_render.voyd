@@ -9,8 +9,7 @@ use std::string::type::{ String, StringSlice }
 use super::identity::schema_identity_prefix
 use super::schema::{ schema_for, schema_node }
 
-pub fn append_parameters(
-  ~out: Array<JsonValue>,
+pub fn render_parameters(
   shape: Option<Shape>,
   {
     location: StringSlice,
@@ -19,7 +18,27 @@ pub fn append_parameters(
     ~components: Dict<String, JsonValue>,
     include_doc_comments: bool
   }
-) -> void
+) -> Array<JsonValue>
+  render_parameters(
+    shape,
+    location: location.to_string(),
+    required: required,
+    prefix: prefix,
+    components: components,
+    include_doc_comments: include_doc_comments
+  )
+
+pub fn render_parameters(
+  shape: Option<Shape>,
+  {
+    location: String,
+    required: bool,
+    prefix: String,
+    ~components: Dict<String, JsonValue>,
+    include_doc_comments: bool
+  }
+) -> Array<JsonValue>
+  let ~out = Array<JsonValue>::init()
   match(shape)
     None:
       void
@@ -33,7 +52,7 @@ pub fn append_parameters(
             let field = root.fields.at(index)
             let ~parameter = Dict<String, JsonValue>::init()
             parameter.set("name", JsonString { value: field.name })
-            parameter.set("in", JsonString { value: location.to_string() })
+            parameter.set("in", JsonString { value: location })
             let parameter_required = required or not field.optional
             parameter.set("required", JsonBool { value: parameter_required })
             if include_doc_comments:
@@ -43,27 +62,7 @@ pub fn append_parameters(
             index = index + 1
         else:
           void
-
-pub fn append_parameters(
-  ~out: Array<JsonValue>,
-  shape: Option<Shape>,
-  {
-    location: String,
-    required: bool,
-    prefix: String,
-    ~components: Dict<String, JsonValue>,
-    include_doc_comments: bool
-  }
-) -> void
-  append_parameters(
-    out,
-    shape,
-    location: location.as_slice(),
-    required: required,
-    prefix: prefix,
-    components: components,
-    include_doc_comments: include_doc_comments
-  )
+  out
 
 fn set_optional_string(~target: Dict<String, JsonValue>, key: StringSlice, value: Option<String>) -> void
   match(value)

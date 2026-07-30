@@ -138,6 +138,35 @@ export const projectionPathCovers = (
       .slice(prefix.length)
       .some((projection) => projection.kind === "dereference"));
 
+/**
+ * An allocation-mapped region contains its inline slots. A borrow formed from
+ * one such slot may cross the slot's final handle dereference, but the mapping
+ * does not cover any deeper referenced allocation.
+ */
+export const mappedAllocationCoversReturnedBorrow = (
+  mappedPlace: readonly PlaceProjection[],
+  path: readonly PlaceProjection[],
+): boolean => {
+  if (
+    mappedPlace.at(-1)?.kind !== "dereference" ||
+    path.at(-1)?.kind !== "dereference" ||
+    mappedPlace.length >= path.length
+  ) {
+    return false;
+  }
+  if (
+    !mappedPlace.every(
+      (projection, index) =>
+        JSON.stringify(projection) === JSON.stringify(path[index]),
+    )
+  ) {
+    return false;
+  }
+  return !path
+    .slice(mappedPlace.length, -1)
+    .some((projection) => projection.kind === "dereference");
+};
+
 export const translateProjectionPath = ({
   result,
   source,
@@ -272,9 +301,19 @@ export type ScopedCallbackBorrowContract = {
   defaultCallbackBehavior?: "safe" | "escapes" | "unknown";
 };
 
+export type CallableResultInvocation = {
+  parameter: number;
+  source: readonly PlaceProjection[];
+  callbackResult: readonly PlaceProjection[];
+  callbackResultType?: { moduleId: string; symbol: SymbolId };
+  result: readonly PlaceProjection[];
+};
+
 export type CallableBorrowContract = {
   parameters: readonly CallableParameterBorrowContract[];
   maySuspend: boolean;
+  /** Every successful return produces a fresh root allocation. */
+  freshResult?: true;
   /**
    * Versioned ABI used by guarded calls whose omitted arguments are evaluated
    * in the callee. This is serialized so separately compiled callers only use
@@ -291,6 +330,11 @@ export type CallableBorrowContract = {
   externalWrite?: true;
   transfers?: readonly CallableBorrowTransfer[];
   scopedCallbacks?: readonly ScopedCallbackBorrowContract[];
+  /**
+   * Callable-valued parameter projections whose invocation result can flow to
+   * this callable's result. Callers substitute the concrete callback result.
+   */
+  callableResultInvocations?: readonly CallableResultInvocation[];
   /**
    * Public open-dispatch view for a concrete trait implementation. Direct
    * concrete calls continue to use the implementation footprint above.
@@ -443,6 +487,7 @@ export const mergeCallableBorrowContracts = (
     ...contracts.map((contract) => contract.parameters.length),
   );
   const scopedCallbacks = new Map<string, ScopedCallbackBorrowContract>();
+  const callableResultInvocations = new Map<string, CallableResultInvocation>();
   const transfers: CallableBorrowTransfer[] = [];
   contracts.forEach((contract) => {
     contract.scopedCallbacks?.forEach((callback) => {
@@ -468,6 +513,9 @@ export const mergeCallableBorrowContracts = (
     });
     contract.transfers?.forEach((transfer) => {
       transfers.push(transfer);
+    });
+    contract.callableResultInvocations?.forEach((invocation) => {
+      callableResultInvocations.set(JSON.stringify(invocation), invocation);
     });
   });
   const normalizedTransfers = normalizeCallableBorrowTransfers(transfers);
@@ -634,6 +682,9 @@ export const mergeCallableBorrowContracts = (
       };
     }),
     maySuspend: contracts.some((contract) => contract.maySuspend),
+    ...(contracts.every((contract) => contract.freshResult === true)
+      ? { freshResult: true as const }
+      : {}),
     ...(contracts.every(
       (contract) =>
         contract.defaultIdentityGuardProtocol === "presence-conflict-bit-v1",
@@ -674,6 +725,13 @@ export const mergeCallableBorrowContracts = (
       : {}),
     ...(scopedCallbacks.size > 0
       ? { scopedCallbacks: Array.from(scopedCallbacks.values()) }
+      : {}),
+    ...(callableResultInvocations.size > 0
+      ? {
+          callableResultInvocations: Array.from(
+            callableResultInvocations.values(),
+          ),
+        }
       : {}),
   };
 };
@@ -751,20 +809,15 @@ const returnedOriginKey = (origin: ReturnedBorrowOrigin): string =>
 const mergeReturnedOrigins = (
   parameters: readonly CallableParameterBorrowContract[],
 ): Partial<CallableParameterBorrowContract> => {
-  const origins = Array.from(
-    new Map(
-      parameters
-        .flatMap((parameter) => parameter.returnedOrigins ?? [])
-        .map((origin) => [returnedOriginKey(origin), origin]),
-    ).values(),
-  ).map((origin) => {
-    const matching = parameters.flatMap(
-      (parameter) =>
-        parameter.returnedOrigins?.filter(
-          (candidate) =>
-            returnedOriginKey(candidate) === returnedOriginKey(origin),
-        ) ?? [],
-    );
+  const originsByKey = new Map<string, ReturnedBorrowOrigin[]>();
+  parameters
+    .flatMap((parameter) => parameter.returnedOrigins ?? [])
+    .forEach((origin) => {
+      const key = returnedOriginKey(origin);
+      originsByKey.set(key, [...(originsByKey.get(key) ?? []), origin]);
+    });
+  const origins = Array.from(originsByKey.values()).map((matching) => {
+    const origin = matching[0]!;
     const { defaultNoBorrow: _defaultNoBorrow, ...base } = origin;
     return {
       ...base,
@@ -783,13 +836,13 @@ const mergeReturnedSharedOrigins = (
   const [first, ...remaining] = parameters.map(
     (parameter) => parameter.returnedSharedOrigins ?? [],
   );
+  const remainingByKey = remaining.map(
+    (origins) =>
+      new Map(origins.map((origin) => [returnedOriginKey(origin), origin])),
+  );
   const origins = (first ?? []).flatMap((origin) => {
-    const matching = remaining.map((candidates) =>
-      candidates.find(
-        (candidate) =>
-          returnedOriginKey(candidate) === returnedOriginKey(origin),
-      ),
-    );
+    const key = returnedOriginKey(origin);
+    const matching = remainingByKey.map((candidates) => candidates.get(key));
     if (matching.some((candidate) => candidate === undefined)) {
       return [];
     }

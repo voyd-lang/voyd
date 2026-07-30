@@ -14,6 +14,23 @@ pub trait Iterator<T>
   /// Produces the next item, or `None` when exhausted.
   fn next(~self) -> Option<T>
 
+// Trait for zero-copy iterators over stable source storage.
+//
+// Unlike `Iterator<T>`, each `Some` payload explicitly borrows the source.
+// Advancing the cursor may continue while an earlier item is live because the
+// cursor and source regions are checked as disjoint.
+pub trait ViewIterator<T>
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(
+    mutates: cursor,
+    returns_from: source
+  )
+  // Produces the next borrowed item, or `None` when exhausted.
+  fn next(~self) -> Option<borrow T>
+
 pub macro for(case)
   let cond = case.get(1)
   let do = case.get(2)

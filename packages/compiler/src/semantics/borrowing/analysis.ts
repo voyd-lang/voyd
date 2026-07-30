@@ -24,10 +24,13 @@ import {
 import type {
   BorrowingResult,
   CallableBorrowContract,
+  CallableParameterBorrowContract,
   PlaceProjection,
+  ReturnedBorrowOrigin,
 } from "./model.js";
 import {
   mergeCallableBorrowContracts,
+  projectionPathCovers,
   translateProjectionPath,
 } from "./model.js";
 import type { BorrowingDependency } from "./dependency.js";
@@ -57,6 +60,7 @@ export const analyzeBorrowing = ({
   imports,
   dependencies,
   decls,
+  checkBodies = true,
 }: {
   hir: HirGraph;
   typing: TypingResult;
@@ -68,6 +72,7 @@ export const analyzeBorrowing = ({
   }[];
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
+  checkBodies?: boolean;
 }): BorrowingResult => {
   const summariesStartedAt = startCompilerPerfPhase();
   const summaryHir = hirWithTraitDefaultFunctions(hir);
@@ -180,6 +185,7 @@ export const analyzeBorrowing = ({
           callables: inferredCallablesWithBorrowedResults,
           moduleId,
           imports,
+          validateBodies: checkBodies,
         })
       : preliminaryNamedContracts;
   diagnostics.push(...namedContracts.diagnostics);
@@ -228,61 +234,70 @@ export const analyzeBorrowing = ({
     resolveContext,
     diagnostics,
   });
-  const selectionStartedAt = startCompilerPerfPhase();
-  const functions = Array.from(summaryHir.items.values())
-    .filter((item): item is HirFunction => item.kind === "function")
-    .filter((functionItem) =>
-      bodyNeedsBorrowAnalysis({
-        body: functionItem,
+  if (checkBodies) {
+    const selectionStartedAt = startCompilerPerfPhase();
+    const functions = Array.from(summaryHir.items.values())
+      .filter((item): item is HirFunction => item.kind === "function")
+      .filter((functionItem) =>
+        bodyNeedsBorrowAnalysis({
+          body: functionItem,
+          hir: summaryHir,
+          typing,
+          resolveContext,
+        }),
+      );
+    const lambdas = Array.from(hir.expressions.values()).filter(
+      (expr): expr is HirLambdaExpr => expr.exprKind === "lambda",
+    );
+    const moduleStorageSymbols = new Set(
+      Array.from(summaryHir.items.values())
+        .filter((item) => item.kind === "module-let")
+        .map((item) => item.symbol),
+    );
+    markCompilerPerfPhaseDuration(
+      "analyzeBorrowing.selectBodies",
+      selectionStartedAt,
+    );
+    const bodiesStartedAt = startCompilerPerfPhase();
+    functions.forEach((functionItem) =>
+      analyzeFunctionBorrowing({
+        functionItem,
         hir: summaryHir,
         typing,
-        resolveContext,
+        symbolTable,
+        moduleId,
+        imports: importMap,
+        dependencies,
+        decls,
+        contracts: callables,
+        moduleStorageSymbols,
+        mutableStorageSymbols,
+        runtimeIdentityGuards,
+        diagnostics,
       }),
     );
-  const lambdas = Array.from(hir.expressions.values()).filter(
-    (expr): expr is HirLambdaExpr => expr.exprKind === "lambda",
-  );
-  markCompilerPerfPhaseDuration(
-    "analyzeBorrowing.selectBodies",
-    selectionStartedAt,
-  );
-  const bodiesStartedAt = startCompilerPerfPhase();
-  functions.forEach((functionItem) =>
-    analyzeFunctionBorrowing({
-      functionItem,
-      hir: summaryHir,
-      typing,
-      symbolTable,
-      moduleId,
-      imports: importMap,
-      dependencies,
-      decls,
-      contracts: callables,
-      mutableStorageSymbols,
-      runtimeIdentityGuards,
-      diagnostics,
-    }),
-  );
-  lambdas.forEach((lambda) =>
-    analyzeLambdaBodyBorrowing({
-      lambda,
-      hir,
-      typing,
-      symbolTable,
-      moduleId,
-      imports: importMap,
-      dependencies,
-      decls,
-      contracts: callables,
-      mutableStorageSymbols,
-      runtimeIdentityGuards,
-      diagnostics,
-    }),
-  );
-  markCompilerPerfPhaseDuration(
-    "analyzeBorrowing.checkBodies",
-    bodiesStartedAt,
-  );
+    lambdas.forEach((lambda) =>
+      analyzeLambdaBodyBorrowing({
+        lambda,
+        hir,
+        typing,
+        symbolTable,
+        moduleId,
+        imports: importMap,
+        dependencies,
+        decls,
+        contracts: callables,
+        moduleStorageSymbols,
+        mutableStorageSymbols,
+        runtimeIdentityGuards,
+        diagnostics,
+      }),
+    );
+    markCompilerPerfPhaseDuration(
+      "analyzeBorrowing.checkBodies",
+      bodiesStartedAt,
+    );
+  }
   return {
     callables,
     namedContracts: namedContracts.contracts,
@@ -492,6 +507,15 @@ const createBorrowedResultPresenceAnalyzer = ({
   );
   const declarationPresence = (symbol: SymbolId): BorrowedResultPresence =>
     resolveContext.contracts.get(symbol)?.borrowedResult ?? "external";
+  const returnedOriginContainsSharedResult = (
+    parameter: CallableParameterBorrowContract,
+    origin: ReturnedBorrowOrigin,
+  ): boolean =>
+    parameter.returnedSharedOrigins?.some(
+      (shared) =>
+        projectionPathCovers(origin.source, shared.source) &&
+        projectionPathCovers(origin.result, shared.result),
+    ) === true;
   const placeOfExpressionForPresence = (
     exprId: HirExprId,
     seen: ReadonlySet<HirExprId> = new Set(),
@@ -1310,6 +1334,73 @@ const createBorrowedResultPresenceAnalyzer = ({
       : "external";
   }
 
+  function presenceFromResolvedContract({
+    resolved,
+    resultPath,
+    parameterSymbols,
+    activeFunctions,
+    seenExpressions,
+    borrowedContext,
+  }: {
+    resolved: ResolvedBorrowCall;
+    resultPath: readonly PlaceProjection[];
+    parameterSymbols: ReadonlySet<SymbolId>;
+    activeFunctions: ReadonlySet<SymbolId>;
+    seenExpressions: ReadonlySet<HirExprId>;
+    borrowedContext: boolean;
+  }): BorrowedResultPresence {
+    const returnedInputs =
+      resolved.contract?.parameters.flatMap((parameter, index) => {
+        const origins =
+          borrowedContext && (parameter.returnedSharedOrigins?.length ?? 0) > 0
+            ? parameter.returnedSharedOrigins!
+            : (parameter.returnedOrigins ?? []);
+        return origins.flatMap((origin) => {
+          const source =
+            resultPath.length === 0
+              ? origin.source
+              : translateProjectionPath({
+                  result: origin.result,
+                  source: origin.source,
+                  requested: resultPath,
+                });
+          return source
+            ? [
+                {
+                  parameter: index,
+                  source,
+                  defaultNoBorrow:
+                    origin.defaultNoBorrow === true &&
+                    typeof resolved.arguments[index] !== "number",
+                  borrowedContext:
+                    borrowedContext ||
+                    returnedOriginContainsSharedResult(parameter, origin),
+                },
+              ]
+            : [];
+        });
+      }) ?? [];
+    if (returnedInputs.length === 0) {
+      return "external";
+    }
+    return combineBorrowedResultPresence(
+      returnedInputs.map(
+        ({ parameter, source, defaultNoBorrow, borrowedContext }) =>
+          defaultNoBorrow
+            ? "none"
+            : presenceOfResolvedArgument({
+                resolved,
+                parameter,
+                path: source,
+                parameterSymbols,
+                activeFunctions,
+                seenExpressions,
+                borrowedContext,
+              }),
+      ),
+    );
+  }
+
   function presenceOfInitializerProjection({
     symbol,
     initializer,
@@ -1776,7 +1867,14 @@ const createBorrowedResultPresenceAnalyzer = ({
       case "method-call": {
         const resolved = resolveBorrowCall(expression, resolveContext);
         if (resolved.targets.length === 0) {
-          return "external";
+          return presenceFromResolvedContract({
+            resolved,
+            resultPath: [],
+            parameterSymbols,
+            activeFunctions,
+            seenExpressions: nextSeen,
+            borrowedContext,
+          });
         }
         if (
           resolved.targets.every(
@@ -1857,9 +1955,7 @@ const createBorrowedResultPresenceAnalyzer = ({
                 typeof resolved.arguments[index] !== "number",
               borrowedContext:
                 borrowedContext ||
-                parameter.returnedSharedOrigins?.some(
-                  (shared) => JSON.stringify(shared) === JSON.stringify(origin),
-                ) === true,
+                returnedOriginContainsSharedResult(parameter, origin),
             }));
           }) ?? [];
         if (returnedInputs.length === 0) {
@@ -2089,7 +2185,14 @@ const createBorrowedResultPresenceAnalyzer = ({
     ) {
       const resolved = resolveBorrowCall(expression, resolveContext);
       if (resolved.targets.length === 0) {
-        return "external";
+        return presenceFromResolvedContract({
+          resolved,
+          resultPath: path,
+          parameterSymbols,
+          activeFunctions,
+          seenExpressions: nextSeen,
+          borrowedContext,
+        });
       }
       if (
         resolved.targets.every(
@@ -2178,10 +2281,7 @@ const createBorrowedResultPresenceAnalyzer = ({
                       typeof resolved.arguments[index] !== "number",
                     borrowedContext:
                       borrowedContext ||
-                      parameter.returnedSharedOrigins?.some(
-                        (shared) =>
-                          JSON.stringify(shared) === JSON.stringify(origin),
-                      ) === true,
+                      returnedOriginContainsSharedResult(parameter, origin),
                   },
                 ]
               : [];

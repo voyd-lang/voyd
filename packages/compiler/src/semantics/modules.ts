@@ -2,7 +2,11 @@ import type { HirVisibility } from "./hir/index.js";
 import type { OverloadSetId, SymbolId } from "./ids.js";
 import type { SymbolKind } from "./binder/index.js";
 import type { ModulePath } from "../modules/types.js";
-import type { CallableBorrowContract } from "./borrowing/index.js";
+import type {
+  CallableBorrowContract,
+  PlaceProjection,
+} from "./borrowing/index.js";
+import type { SymbolRef } from "./typing/symbol-ref.js";
 
 export interface ModuleExportEffect {
   symbol: SymbolId;
@@ -36,9 +40,81 @@ export interface ModuleExportEntry {
      */
     contract: CallableBorrowContract;
   }[];
+  borrowingCoercions?: readonly {
+    concrete: SymbolRef;
+    trait: SymbolRef;
+    implementation: SymbolRef;
+    /** Exact result projections at which the implementation is reachable. */
+    resultPaths?: readonly (readonly PlaceProjection[])[];
+    /** Public nominal variant that must carry the reachable implementation. */
+    resultType?: SymbolRef;
+    /**
+     * Callable-specific alternatives that make this implementation
+     * reachable. Absent means the coercion is unconditionally reachable.
+     */
+    applicability?: readonly {
+      callable: SymbolRef;
+      omissionRequirements?: readonly (readonly number[])[];
+    }[];
+    /** Versioned separate-compilation payload consumed by dependents. */
+    serialized: string;
+    serializedBytes: number;
+    /** Decoded compatibility view; dependency analysis uses `serialized`. */
+    contract: CallableBorrowContract;
+  }[];
+  /**
+   * Implementations reachable only after invoking a callable value returned
+   * by this export (for example an omitted callback default).
+   */
+  borrowingCallableResultCoercions?: readonly {
+    concrete: SymbolRef;
+    trait: SymbolRef;
+    implementation: SymbolRef;
+    resultPaths?: readonly (readonly PlaceProjection[])[];
+    resultType?: SymbolRef;
+    applicability?: readonly {
+      callable: SymbolRef;
+      omissionRequirements?: readonly (readonly number[])[];
+    }[];
+    serialized: string;
+    serializedBytes: number;
+    contract: CallableBorrowContract;
+  }[];
 }
 
-export type ModuleExportTable = Map<string, ModuleExportEntry>;
+export interface ModuleBorrowingTraitImplementation {
+  concrete: SymbolRef;
+  trait: SymbolRef;
+  implementation: SymbolRef;
+  methods: readonly {
+    implementation: SymbolRef;
+    declaration: SymbolRef;
+    /** Versioned exact trait-declaration contract. */
+    serialized: string;
+    serializedBytes: number;
+    /** Decoded compatibility view; dependency analysis uses `serialized`. */
+    contract: CallableBorrowContract;
+  }[];
+}
+
+export interface ModuleExportTable extends Map<string, ModuleExportEntry> {
+  /** Versioned module-level metadata preserved through public re-exports. */
+  borrowingTraitImplementations?: readonly ModuleBorrowingTraitImplementation[];
+}
+
+export const cloneModuleExportTable = (
+  table: ModuleExportTable,
+): ModuleExportTable => {
+  const cloned: ModuleExportTable = new Map(table);
+  if (table.borrowingTraitImplementations) {
+    cloned.borrowingTraitImplementations =
+      table.borrowingTraitImplementations.map((implementation) => ({
+        ...implementation,
+        methods: implementation.methods.map((method) => ({ ...method })),
+      }));
+  }
+  return cloned;
+};
 
 export interface ModuleExportSurfaceEntry {
   name: string;

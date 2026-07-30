@@ -5,7 +5,10 @@ import { createMemoryModuleHost } from "../../../modules/memory-host.js";
 import { createNodePathAdapter } from "../../../modules/node-path-adapter.js";
 import { analyzeModules, loadModuleGraph } from "../../../pipeline.js";
 import { parse } from "../../../parser/index.js";
-import { semanticsPipeline } from "../../pipeline.js";
+import {
+  projectBorrowingDependencies,
+  semanticsPipeline,
+} from "../../pipeline.js";
 import { buildProgramCodegenView } from "../../codegen-view/index.js";
 import {
   mergeCallableBorrowContracts,
@@ -144,6 +147,23 @@ trait ItemView
 `;
 
 describe("borrow checking", () => {
+  it("types mutable lambdas against explicitly borrowed callback parameters", () => {
+    expect(() =>
+      analyze(`
+obj Box { value: i32 }
+
+fn accept(body: fn(~value: borrow Box) : () -> void) -> void
+  let ~value = Box { value: 1 }
+  body(~value)
+
+fn valid() -> void
+  accept((~value) =>
+    value.value = 2
+  )
+`),
+    ).not.toThrow();
+  });
+
   it("round-trips the versioned callable summary schema canonically", () => {
     const contract = {
       parameters: [
@@ -180,6 +200,7 @@ describe("borrow checking", () => {
         },
       ],
       maySuspend: false,
+      freshResult: true as const,
       defaultIdentityGuardProtocol: "presence-conflict-bit-v1" as const,
       borrowedResult: "parameter" as const,
       externalReturnedOrigins: [
@@ -187,6 +208,15 @@ describe("borrow checking", () => {
           result: [{ kind: "field" as const, name: "storage" }],
           endpointAccess: "dereferenced" as const,
           fresh: true as const,
+        },
+      ],
+      callableResultInvocations: [
+        {
+          parameter: 0,
+          source: [],
+          callbackResult: [],
+          callbackResultType: { moduleId: "src::views", symbol: 99 },
+          result: [],
         },
       ],
     };
@@ -213,13 +243,51 @@ describe("borrow checking", () => {
     expect(callableBorrowSummarySize(serialized)).toBeGreaterThan(0);
     expect(() =>
       deserializeCallableBorrowSummary(
-        serialized.replace('"version":2', '"version":3'),
+        serialized.replace('"version":4', '"version":5'),
       ),
     ).toThrow(/does not match the V1 schema/);
+    const freshResultSummary = JSON.parse(serialized);
+    freshResultSummary.version = 3;
+    delete freshResultSummary.contract.callableResultInvocations;
+    const {
+      callableResultInvocations: _callableResultInvocations,
+      ...freshResultContract
+    } = contract;
+    expect(
+      deserializeCallableBorrowSummary(JSON.stringify(freshResultSummary)),
+    ).toEqual({
+      schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
+      version: CALLABLE_BORROW_SUMMARY_VERSION,
+      dispatch: "ordinary",
+      contract: freshResultContract,
+      source,
+    });
+    const identityGuardSummary = JSON.parse(serialized);
+    identityGuardSummary.version = 2;
+    delete identityGuardSummary.contract.freshResult;
+    delete identityGuardSummary.contract.callableResultInvocations;
+    const {
+      freshResult: _freshResult,
+      callableResultInvocations: _identityCallableResultInvocations,
+      ...identityGuardContract
+    } = contract;
+    expect(
+      deserializeCallableBorrowSummary(JSON.stringify(identityGuardSummary)),
+    ).toEqual({
+      schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
+      version: CALLABLE_BORROW_SUMMARY_VERSION,
+      dispatch: "ordinary",
+      contract: identityGuardContract,
+      source,
+    });
     const legacySummary = JSON.parse(serialized);
     legacySummary.version = 1;
+    delete legacySummary.contract.freshResult;
+    delete legacySummary.contract.callableResultInvocations;
     delete legacySummary.contract.defaultIdentityGuardProtocol;
     const {
+      freshResult: _legacyFreshResult,
+      callableResultInvocations: _legacyCallableResultInvocations,
       defaultIdentityGuardProtocol: _defaultIdentityGuardProtocol,
       ...legacyContract
     } = contract;
@@ -631,6 +699,398 @@ fn valid(~view: View) -> i32
   first.value + second.value
 `),
     ).not.toThrow();
+  });
+
+  it("uses the selected overloaded trait declaration contract", () => {
+    expect(
+      diagnosticCodes(`
+obj State { left: i32, right: i32 }
+
+trait View
+  region left
+  region right
+  disjoint left, right
+
+  @borrow_contract(returns_from: left)
+  fn get(self, index: i32) -> borrow i32
+
+  @borrow_contract(returns_from: right)
+  fn get(self, flag: bool) -> borrow i32
+
+impl View for State
+  region left = self.left
+  region right = self.right
+
+  fn get(self, index: i32) -> borrow i32
+    self.left
+
+  fn get(self, flag: bool) -> borrow i32
+    self.right
+
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let view: View = state
+  let item = view.get(true)
+  state.right = 2
+  item
+`),
+    ).toContain("TY0048");
+  });
+
+  it("projects object-backed regions through local trait coercions", () => {
+    const declarations = `
+obj Item { value: i32 }
+obj State { source: Item }
+
+trait View
+  region source
+  @borrow_contract(returns_from: source)
+  fn get(self) -> borrow Item
+
+impl View for State
+  region source = deref(self.source)
+
+  fn get(self) -> borrow Item
+    self.source
+`;
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { source: Item { value: 1 } }
+  let view: View = state
+  let item = view.get()
+  state.source.value = 2
+  item.value
+`),
+    ).toContain("TY0048");
+    expect(() =>
+      analyze(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { source: Item { value: 1 } }
+  let view: View = state
+  let item = view.get()
+  let observed = item.value
+  state.source.value = 2
+  observed
+`),
+    ).not.toThrow();
+  });
+
+  it("projects inline regions through local trait coercions", () => {
+    const declarations = `
+obj State { source: i32 }
+
+trait View
+  region source
+  @borrow_contract(returns_from: source)
+  fn get(self) -> borrow i32
+
+impl View for State
+  region source = self.source
+
+  fn get(self) -> borrow i32
+    self.source
+`;
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { source: 1 }
+  let view: View = state
+  let item = view.get()
+  state.source = 2
+  item
+`),
+    ).toContain("TY0048");
+    expect(() =>
+      analyze(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { source: 1 }
+  let view: View = state
+  let item = view.get()
+  let observed = item + 0
+  state.source = 2
+  observed
+`),
+    ).not.toThrow();
+  });
+
+  it("selects trait region projections by generic impl specialization", () => {
+    const declarations = `
+obj State<T> { left: T, right: T }
+
+trait View<T>
+  region source
+  @borrow_contract(returns_from: source)
+  fn get(self) -> borrow T
+
+impl View<i32> for State<i32>
+  region source = self.left
+
+  fn get(self) -> borrow i32
+    self.left
+
+impl View<bool> for State<bool>
+  region source = self.right
+
+  fn get(self) -> borrow bool
+    self.right
+`;
+    expect(() =>
+      analyze(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State<i32> { left: 1, right: 2 }
+  let view: View<i32> = state
+  let item = view.get()
+  state.right = 3
+  item
+`),
+    ).not.toThrow();
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State<i32> { left: 1, right: 2 }
+  let view: View<i32> = state
+  let item = view.get()
+  state.left = 3
+  item
+`),
+    ).toContain("TY0048");
+    expect(() =>
+      analyze(`
+${declarations}
+pub fn main() -> bool
+  let ~state = State<bool> { left: false, right: true }
+  let view: View<bool> = state
+  let item = view.get()
+  state.left = true
+  item
+`),
+    ).not.toThrow();
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> bool
+  let ~state = State<bool> { left: false, right: true }
+  let view: View<bool> = state
+  let item = view.get()
+  state.right = false
+  item
+`),
+    ).toContain("TY0048");
+  });
+
+  it("preserves disjoint trait regions through aggregate wrappers", () => {
+    const declarations = `
+obj State { left: i32, right: i32 }
+obj Wrapper { view: View }
+obj Outer { inner: Wrapper }
+
+trait View
+  region left
+  region right
+  disjoint left, right
+  @borrow_contract(returns_from: right)
+  fn get(self, flag: bool) -> borrow i32
+
+impl View for State
+  region left = self.left
+  region right = self.right
+
+  fn get(self, flag: bool) -> borrow i32
+    self.right
+`;
+    expect(() =>
+      analyze(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let wrapped = Wrapper { view: state }
+  let item = wrapped.view.get(true)
+  state.left = 2
+  item
+`),
+    ).not.toThrow();
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let wrapped = Wrapper { view: state }
+  let item = wrapped.view.get(true)
+  state.right = 2
+  item
+`),
+    ).toContain("TY0048");
+    expect(() =>
+      analyze(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let wrapped = Outer { inner: Wrapper { view: state } }
+  let item = wrapped.inner.view.get(true)
+  state.left = 2
+  item
+`),
+    ).not.toThrow();
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let wrapped = Outer { inner: Wrapper { view: state } }
+  let item = wrapped.inner.view.get(true)
+  state.right = 2
+  item
+`),
+    ).toContain("TY0048");
+    expect(() =>
+      analyze(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let inner = Wrapper { view: state }
+  let wrapped = Outer { inner }
+  let item = wrapped.inner.view.get(true)
+  state.left = 2
+  item
+`),
+    ).not.toThrow();
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let inner = Wrapper { view: state }
+  let wrapped = Outer { inner }
+  let item = wrapped.inner.view.get(true)
+  state.right = 2
+  item
+`),
+    ).toContain("TY0048");
+  });
+
+  it("preserves nested aggregate allocation identity", () => {
+    const declarations = `
+obj Box { value: i32 }
+obj Inner { value: i32, child: Box }
+obj Outer { inner: Inner }
+`;
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> i32
+  let ~inner = Inner { value: 1, child: Box { value: 1 } }
+  let outer = Outer { inner }
+  let loan: borrow Inner = outer.inner
+  inner.value = 2
+  loan.value
+`),
+    ).toContain("TY0048");
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> i32
+  let ~inner = Inner { value: 1, child: Box { value: 1 } }
+  let outer = (inner, 0)
+  let loan: borrow Inner = outer.0
+  inner.value = 2
+  loan.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("preserves disjoint trait regions through optional wrappers", () => {
+    const declarations = `
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Outer<T> { value: T }
+obj State { left: i32, right: i32 }
+
+trait View
+  region left
+  region right
+  disjoint left, right
+  @borrow_contract(returns_from: right)
+  fn get(self, flag: bool) -> borrow i32
+
+impl View for State
+  region left = self.left
+  region right = self.right
+
+  fn get(self, flag: bool) -> borrow i32
+    self.right
+`;
+    expect(() =>
+      analyze(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let wrapped: Option<View> = Some<View> { value: state }
+  match(wrapped)
+    Some<View> { value }:
+      let item = value.get(true)
+      state.left = 2
+      item
+    None:
+      0
+`),
+    ).not.toThrow();
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let wrapped: Option<View> = Some<View> { value: state }
+  match(wrapped)
+    Some<View> { value }:
+      let item = value.get(true)
+      state.right = 2
+      item
+    None:
+      0
+`),
+    ).toContain("TY0048");
+    expect(() =>
+      analyze(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let wrapped = Outer<Option<View>> {
+    value: Some<View> { value: state }
+  }
+  match(wrapped.value)
+    Some<View> { value }:
+      let item = value.get(true)
+      state.left = 2
+      item
+    None:
+      0
+`),
+    ).not.toThrow();
+    expect(
+      diagnosticCodes(`
+${declarations}
+pub fn main() -> i32
+  let ~state = State { left: 1, right: 1 }
+  let wrapped = Outer<Option<View>> {
+    value: Some<View> { value: state }
+  }
+  match(wrapped.value)
+    Some<View> { value }:
+      let item = value.get(true)
+      state.right = 2
+      item
+    None:
+      0
+`),
+    ).toContain("TY0048");
   });
 
   it("synthesizes declaration contracts without local implementations", () => {
@@ -1099,6 +1559,1000 @@ fn valid(~view: View) -> i32
     expect(callerUsesRegions).toBe(true);
   });
 
+  it("uses the selected overloaded trait declaration contract across modules", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::views
+pub use std::views::{ State, View, make_state }
+`,
+        [`${stdRoot}${sep}views.voyd`]: `
+pub obj State { api left: i32, api right: i32, hidden: i32 }
+
+pub trait View
+  region left
+  region right
+  region secret
+  disjoint left, right
+
+  @borrow_contract(returns_from: left)
+  fn get(self, index: i32) -> borrow i32
+
+  @borrow_contract(returns_from: right)
+  fn get(self, flag: bool) -> borrow i32
+
+impl View for State
+  region left = self.left
+  region right = self.right
+  region secret = self.hidden
+
+  fn get(self, index: i32) -> borrow i32
+    self.left
+
+  fn get(self, flag: bool) -> borrow i32
+    self.right
+
+pub fn make_state() -> State
+  State { left: 1, right: 1, hidden: 1 }
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::all::{ View as RenamedView, make_state }
+
+pub fn main() -> i32
+  let ~state = make_state()
+  let view: RenamedView = state
+  let item = view.get(true)
+  state.right = 2
+  item
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const coercion = Array.from(
+      analyzed.semantics.get("std::views")?.exports.values() ?? [],
+    ).find((entry) => entry.name === "State")?.borrowingCoercions?.[0];
+    const packageSemantics = analyzed.semantics.get("std::pkg");
+    const publicImplementations =
+      packageSemantics?.exports.borrowingTraitImplementations ?? [];
+    const publicImplementation = publicImplementations.find(
+      (implementation) => implementation.concrete.moduleId === "std::views",
+    );
+    const publicOnlyDependencies = projectBorrowingDependencies(
+      packageSemantics ? new Map([["std::pkg", packageSemantics]]) : new Map(),
+    );
+    const implementationMethod =
+      publicImplementation?.methods[0]?.implementation;
+
+    expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "TY0048",
+    );
+    expect(coercion?.serializedBytes).toBeGreaterThan(0);
+    expect(coercion?.serialized).not.toContain("hidden");
+    expect(coercion?.serialized).toContain("voyd.summary.private");
+    expect(
+      coercion
+        ? deserializeCallableBorrowSummary(coercion.serialized).contract
+            .parameters[0]?.returnedOrigins?.[0]?.result[0]
+        : undefined,
+    ).toMatchObject({
+      kind: "region",
+      scope: "std::views::View",
+    });
+    expect(publicImplementation).toBeDefined();
+    expect(
+      implementationMethod
+        ? publicOnlyDependencies
+            .get(implementationMethod.moduleId)
+            ?.traitMethodContracts.has(implementationMethod.symbol)
+        : false,
+    ).toBe(true);
+    expect(
+      publicOnlyDependencies
+        .get("std::pkg")
+        ?.traitRegionProjections.some(
+          (projection) =>
+            projection.concrete.moduleId === "std::views" &&
+            projection.result.scope === "std::views::View",
+        ),
+    ).toBe(true);
+  });
+
+  it("preserves trait contracts for private implementations returned by public factories", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::views
+pub use std::views::{
+  Item,
+  Owner,
+  View,
+  make_owner,
+  make_view,
+  make_either_view,
+  make_reassigned_view,
+  make_overwritten_view,
+  make_early_return_view,
+  make_wrapped_view,
+  make_lambda_view,
+  make_captured_lambda_view,
+  make_higher_order_view,
+  make_forwarded_view,
+  make_generic_view,
+  make_labeled_view,
+  make_default_view,
+  make_matched_view,
+  make_variant_view,
+  make_spread_holder,
+  make_overwritten_holder,
+  make_explicit_view
+}
+`,
+        [`${stdRoot}${sep}views.voyd`]: `
+pub obj Item { api value: i32 }
+pub obj Owner { api source: Item }
+obj State { source: Item, cursor: i32 }
+obj AlternateState { source: Item, cursor: i32 }
+obj FieldState { source: Item, cursor: i32 }
+obj LambdaState { source: Item, cursor: i32 }
+obj ForwardState { source: Item, cursor: i32 }
+obj GenericState { source: Item, cursor: i32 }
+obj LabeledState { source: Item, cursor: i32 }
+obj DefaultState { source: Item, cursor: i32 }
+obj MatchedState { source: Item, cursor: i32 }
+obj EarlyState { source: Item, cursor: i32 }
+obj HigherOrderState { source: Item, cursor: i32 }
+obj ShadowedState { source: Item, cursor: i32 }
+obj OverridingState { source: Item, cursor: i32 }
+obj UnusedState { source: Item, cursor: i32 }
+pub obj HiddenState { value: Item }
+pub obj Wrapper { api view: View }
+pub obj Holder { api view: View }
+obj Some<T> { value: T }
+obj None {}
+type Maybe<T> = Some<T> | None
+obj Left<T> { value: T }
+obj Right<T> { value: T }
+type Either<T> = Left<T> | Right<T>
+
+pub trait View
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(mutates: cursor, returns_from: source)
+  fn next(~self) -> borrow Item
+
+impl View for State
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for AlternateState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for FieldState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for LambdaState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for ForwardState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for GenericState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for LabeledState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for DefaultState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for MatchedState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for EarlyState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for HigherOrderState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for ShadowedState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for OverridingState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+impl View for UnusedState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+trait HiddenView
+  region source
+
+  @borrow_contract(returns_from: source)
+  fn get(self) -> borrow Item
+
+impl HiddenView for HiddenState
+  region source = deref(self.value)
+
+  fn get(self) -> borrow Item
+    self.value
+
+pub fn make_owner() -> Owner
+  Owner { source: Item { value: 1 } }
+
+pub fn make_view(owner: Owner) -> View
+  State { source: owner.source, cursor: 0 }
+
+pub fn make_either_view(owner: Owner, alternate: bool) -> View
+  if alternate then:
+    AlternateState { source: owner.source, cursor: 0 }
+  else:
+    State { source: owner.source, cursor: 0 }
+
+pub fn make_reassigned_view(owner: Owner, alternate: bool) -> View
+  var result: View = State { source: owner.source, cursor: 0 }
+  if alternate:
+    result = AlternateState { source: owner.source, cursor: 0 }
+  result
+
+pub fn make_overwritten_view(owner: Owner) -> View
+  var result: View = ShadowedState { source: owner.source, cursor: 0 }
+  result = State { source: owner.source, cursor: 0 }
+  result
+
+pub fn make_early_return_view(owner: Owner, early: bool) -> View
+  var result: View = EarlyState { source: owner.source, cursor: 0 }
+  if early:
+    return result
+  result = State { source: owner.source, cursor: 0 }
+  result
+
+pub fn make_wrapped_view(owner: Owner, alternate: bool) -> Wrapper
+  let ~wrapper = Wrapper {
+    view: State { source: owner.source, cursor: 0 }
+  }
+  if alternate:
+    wrapper.view = FieldState { source: owner.source, cursor: 0 }
+  wrapper
+
+pub fn make_lambda_view(owner: Owner, alternate: bool) -> View
+  let factory = () =>
+    var result: View = State { source: owner.source, cursor: 0 }
+    if alternate:
+      result = LambdaState { source: owner.source, cursor: 0 }
+    result
+  factory()
+
+pub fn make_captured_lambda_view(owner: Owner, early: bool) -> View
+  var result: View = EarlyState { source: owner.source, cursor: 0 }
+  let factory = () => result
+  if early:
+    return factory()
+  result = State { source: owner.source, cursor: 0 }
+  factory()
+
+fn apply(factory: fn() -> View) -> View
+  factory()
+
+pub fn make_higher_order_view(owner: Owner) -> View
+  apply(() =>
+    HigherOrderState { source: owner.source, cursor: 0 }
+  )
+
+fn forward(value: View) -> View
+  value
+
+fn generic_forward<T: View>(value: T) -> View
+  value
+
+pub fn make_forwarded_view(owner: Owner) -> View
+  forward(ForwardState { source: owner.source, cursor: 0 })
+
+pub fn make_generic_view(owner: Owner) -> View
+  generic_forward(GenericState { source: owner.source, cursor: 0 })
+
+fn labeled_forward({ fallback: View, value: View }) -> View
+  value
+
+pub fn make_labeled_view(owner: Owner) -> View
+  labeled_forward(
+    value: LabeledState { source: owner.source, cursor: 0 },
+    fallback: State { source: owner.source, cursor: 0 }
+  )
+
+fn default_forward(
+  value: View = DefaultState {
+    source: Item { value: 2 },
+    cursor: 0
+  }
+) -> View
+  value
+
+pub fn make_default_view() -> View
+  default_forward()
+
+pub fn make_matched_view(owner: Owner) -> View
+  let selected: Maybe<View> = Some<View> {
+    value: MatchedState { source: owner.source, cursor: 0 }
+  }
+  match(selected)
+    Some<View> { value }: value
+    None: State { source: owner.source, cursor: 0 }
+
+pub fn make_variant_view(owner: Owner, alternate: bool) -> View
+  let returned: View = MatchedState {
+    source: owner.source,
+    cursor: 0
+  }
+  let shadowed: View = ShadowedState {
+    source: owner.source,
+    cursor: 0
+  }
+  let selected: Either<View> =
+    if alternate then:
+      Left<View> { value: returned }
+    else:
+      Right<View> { value: shadowed }
+  match(selected)
+    Left<View> { value }: value
+    Right<View>: State { source: owner.source, cursor: 0 }
+
+pub fn make_spread_holder(owner: Owner) -> Holder
+  let shadowed = Holder {
+    view: ShadowedState { source: owner.source, cursor: 0 }
+  }
+  Holder {
+    ...shadowed,
+    view: OverridingState { source: owner.source, cursor: 0 }
+  }
+
+pub fn make_overwritten_holder(owner: Owner) -> Holder
+  let ~result = Holder {
+    view: ShadowedState { source: owner.source, cursor: 0 }
+  }
+  result.view = OverridingState { source: owner.source, cursor: 0 }
+  result
+
+fn explicit_forward(
+  value: View = UnusedState {
+    source: Item { value: 3 },
+    cursor: 0
+  }
+) -> View
+  value
+
+pub fn make_explicit_view(owner: Owner) -> View
+  explicit_forward(State { source: owner.source, cursor: 0 })
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+pub fn main() -> i32
+  let ~owner = make_owner()
+  let ~view = make_view(owner)
+  let item = view.next()
+  owner.source.value = 2
+  item.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const privateImplementation = analyzed.semantics
+      .get("std::views")
+      ?.exports.borrowingTraitImplementations?.find(
+        (implementation) => implementation.concrete.moduleId === "std::views",
+      );
+    const publishedImplementations =
+      analyzed.semantics.get("std::views")?.exports
+        .borrowingTraitImplementations ?? [];
+    const forwardedImplementations =
+      analyzed.semantics.get("std::pkg")?.exports
+        .borrowingTraitImplementations ?? [];
+    const hiddenExport = Array.from(
+      analyzed.semantics.get("std::views")?.exports.values() ?? [],
+    ).find((entry) => entry.name === "HiddenState");
+    const viewsSemantics = analyzed.semantics.get("std::views");
+    const forwardSymbol = viewsSemantics?.symbols.resolveTopLevel("forward");
+    const forwardContract =
+      typeof forwardSymbol === "number"
+        ? viewsSemantics?.borrowing.callables.get(forwardSymbol)
+        : undefined;
+
+    expect(
+      diagnostics.filter((diagnostic) => diagnostic.code === "TY0048"),
+    ).toHaveLength(1);
+    expect(forwardContract?.parameters[0]).toMatchObject({
+      returned: true,
+    });
+    expect(
+      publishedImplementations
+        .map((implementation) =>
+          analyzed.semantics
+            .get("std::views")
+            ?.symbols.getName(implementation.concrete.symbol),
+        )
+        .sort(),
+    ).toEqual(
+      [
+        "AlternateState",
+        "FieldState",
+        "ForwardState",
+        "GenericState",
+        "HigherOrderState",
+        "LabeledState",
+        "LambdaState",
+        "DefaultState",
+        "EarlyState",
+        "MatchedState",
+        "OverridingState",
+        "State",
+      ].sort(),
+    );
+    expect(forwardedImplementations).toHaveLength(12);
+    expect(privateImplementation?.methods).toHaveLength(1);
+    expect(hiddenExport?.borrowingCoercions ?? []).toEqual([]);
+    expect(JSON.stringify(hiddenExport)).not.toContain("HiddenView");
+    expect(
+      Array.from(
+        analyzed.semantics.get("std::views")?.exports.values() ?? [],
+      ).some((entry) => entry.name === "State"),
+    ).toBe(false);
+  });
+
+  it("tracks returned trait values through structural parameter containers", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::api
+pub use std::api::{ View, from_bound_container, from_inline_container }
+`,
+        [`${stdRoot}${sep}api.voyd`]: `
+pub obj Item { api value: i32 }
+obj ReturnedState { source: Item }
+obj InlineState { source: Item }
+obj ShadowedState { source: Item }
+type Args = { value: View }
+
+pub trait View
+  region source
+
+  @borrow_contract(returns_from: source)
+  fn get(self) -> borrow Item
+
+impl View for ReturnedState
+  region source = deref(self.source)
+
+  fn get(self) -> borrow Item
+    self.source
+
+impl View for InlineState
+  region source = deref(self.source)
+
+  fn get(self) -> borrow Item
+    self.source
+
+impl View for ShadowedState
+  region source = deref(self.source)
+
+  fn get(self) -> borrow Item
+    self.source
+
+fn select({ value: View }) -> View
+  value
+
+pub fn from_bound_container() -> View
+  let returned: View = ReturnedState {
+    source: Item { value: 1 }
+  }
+  let arguments: Args = { value: returned }
+  select(arguments)
+
+pub fn from_inline_container() -> View
+  let shadowed_view: View = ShadowedState {
+    source: Item { value: 2 }
+  }
+  let shadowed: Args = {
+    value: shadowed_view
+  }
+  let inline_view: View = InlineState {
+    source: Item { value: 3 }
+  }
+  select({
+    ...shadowed,
+    value: inline_view
+  })
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+pub fn main() -> i32
+  from_bound_container().get().value + from_inline_container().get().value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const api = analyzed.semantics.get("std::api");
+    const coercionNamesFor = (name: string): readonly string[] =>
+      Array.from(api?.exports.values() ?? [])
+        .find((entry) => entry.name === name)
+        ?.borrowingCoercions?.map(
+          (coercion) => api?.symbols.getName(coercion.concrete.symbol) ?? "",
+        ) ?? [];
+
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    expect(coercionNamesFor("from_bound_container")).toEqual(["ReturnedState"]);
+    expect(coercionNamesFor("from_inline_container")).toEqual(["InlineState"]);
+    expect(
+      (api?.exports.borrowingTraitImplementations ?? []).map((implementation) =>
+        api?.symbols.getName(implementation.concrete.symbol),
+      ),
+    ).not.toContain("ShadowedState");
+  });
+
+  it("keeps imported default result provenance in its declaration module", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::api
+pub use std::api::{ Item, View, forward, chained, overloaded, apply }
+`,
+        [`${stdRoot}${sep}api.voyd`]: `
+pub obj Item { api value: i32 }
+obj DefaultState { source: Item }
+obj FirstState { source: Item }
+obj SecondState { source: Item }
+
+pub trait View
+  region source
+
+  @borrow_contract(returns_from: source)
+  fn get(self) -> borrow Item
+
+impl View for DefaultState
+  region source = deref(self.source)
+
+  fn get(self) -> borrow Item
+    self.source
+
+impl View for FirstState
+  region source = deref(self.source)
+
+  fn get(self) -> borrow Item
+    self.source
+
+impl View for SecondState
+  region source = deref(self.source)
+
+  fn get(self) -> borrow Item
+    self.source
+
+pub fn forward({
+  value: View = DefaultState {
+    source: Item { value: 7 }
+  }
+}) -> View
+  value
+
+pub fn chained({
+  base: View = DefaultState {
+    source: Item { value: 9 }
+  },
+  selected: View = base
+}) -> View
+  selected
+
+pub fn overloaded(value: i32) -> View
+  FirstState { source: Item { value } }
+
+pub fn overloaded(value: bool) -> View
+  SecondState {
+    source: Item { value: if value then: 1 else: 0 }
+  }
+
+pub fn apply(factory: fn() -> View) -> View
+  factory()
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+obj CollisionState { value: i32 }
+obj CallerState { source: Item }
+
+impl View for CallerState
+  region source = deref(self.source)
+
+  fn get(self) -> borrow Item
+    self.source
+
+pub fn explicit(owner: Item) -> View
+  forward(value: CallerState { source: owner })
+
+pub fn omitted() -> View
+  forward()
+
+pub fn chained_explicit(owner: Item) -> View
+  chained(base: CallerState { source: owner })
+
+pub fn chained_omitted() -> View
+  chained()
+
+pub fn selected_overload() -> View
+  overloaded(1)
+
+pub fn higher_order(owner: Item) -> View
+  apply(() => CallerState { source: owner })
+
+pub fn main() -> i32
+  let first = CollisionState { value: 1 }
+  let second = CollisionState { value: first.value + 1 }
+  let third = CollisionState { value: second.value + 1 }
+  let view = omitted()
+  view.get().value + third.value
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const api = analyzed.semantics.get("std::api");
+    const main = analyzed.semantics.get("src::main");
+    const forwardExport = Array.from(api?.exports.values() ?? []).find(
+      (entry) => entry.name === "forward",
+    );
+    const forwardedExport = Array.from(
+      analyzed.semantics.get("std::pkg")?.exports.values() ?? [],
+    ).find((entry) => entry.name === "forward");
+    const explicitExport = Array.from(main?.exports.values() ?? []).find(
+      (entry) => entry.name === "explicit",
+    );
+    const omittedExport = Array.from(main?.exports.values() ?? []).find(
+      (entry) => entry.name === "omitted",
+    );
+    const chainedExport = Array.from(api?.exports.values() ?? []).find(
+      (entry) => entry.name === "chained",
+    );
+    const chainedExplicitExport = Array.from(main?.exports.values() ?? []).find(
+      (entry) => entry.name === "chained_explicit",
+    );
+    const chainedOmittedExport = Array.from(main?.exports.values() ?? []).find(
+      (entry) => entry.name === "chained_omitted",
+    );
+    const selectedOverloadExport = Array.from(
+      main?.exports.values() ?? [],
+    ).find((entry) => entry.name === "selected_overload");
+    const higherOrderExport = Array.from(main?.exports.values() ?? []).find(
+      (entry) => entry.name === "higher_order",
+    );
+    const forwardedApplyExport = Array.from(
+      analyzed.semantics.get("std::pkg")?.exports.values() ?? [],
+    ).find((entry) => entry.name === "apply");
+    const forwardSymbol = api?.symbols.resolveTopLevel("forward");
+    const forwardItem = Array.from(api?.hir.items.values() ?? []).find(
+      (item) => item.kind === "function" && item.symbol === forwardSymbol,
+    );
+    const defaultExpression =
+      forwardItem?.kind === "function"
+        ? forwardItem.parameters[0]?.defaultValue
+        : undefined;
+
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    expect(forwardExport?.borrowingCoercions).toHaveLength(1);
+    expect(forwardedExport?.borrowingCoercions).toHaveLength(1);
+    expect(
+      forwardExport?.borrowingCoercions?.[0]?.applicability?.[0]
+        ?.omissionRequirements,
+    ).toEqual([[0]]);
+    expect(
+      explicitExport?.borrowingCoercions?.map(
+        (coercion) => coercion.concrete.moduleId,
+      ),
+    ).toEqual(["src::main"]);
+    expect(
+      omittedExport?.borrowingCoercions?.map(
+        (coercion) => coercion.concrete.moduleId,
+      ),
+    ).toEqual(["std::api"]);
+    expect(
+      chainedExport?.borrowingCoercions?.[0]?.applicability?.[0]
+        ?.omissionRequirements,
+    ).toEqual([[0, 1]]);
+    expect(
+      chainedExplicitExport?.borrowingCoercions?.map(
+        (coercion) => coercion.concrete.moduleId,
+      ),
+    ).toEqual(["src::main"]);
+    expect(
+      chainedOmittedExport?.borrowingCoercions?.map(
+        (coercion) => coercion.concrete.moduleId,
+      ),
+    ).toEqual(["std::api"]);
+    expect(
+      selectedOverloadExport?.borrowingCoercions?.map((coercion) =>
+        api?.symbols.getName(coercion.concrete.symbol),
+      ),
+    ).toEqual(["FirstState"]);
+    expect(
+      higherOrderExport?.borrowingCoercions?.map((coercion) =>
+        main?.symbols.getName(coercion.concrete.symbol),
+      ),
+    ).toEqual(["CallerState"]);
+    expect(
+      forwardedApplyExport?.borrowing?.[0]?.contract.callableResultInvocations,
+    ).toEqual([{ parameter: 0, source: [], callbackResult: [], result: [] }]);
+    expect(typeof defaultExpression).toBe("number");
+    expect(
+      typeof defaultExpression === "number" &&
+        main?.hir.expressions.has(defaultExpression),
+    ).toBe(true);
+  });
+
+  it("keeps re-exported overload applicability module-qualified", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const implementationModule = (parameter: string, literal: string) => `
+use std::common::{ Item, View }
+
+obj State { source: Item }
+
+impl View for State
+  region source = deref(self.source)
+
+  fn get(self) -> borrow Item
+    self.source
+
+pub fn select(value: ${parameter}) -> View
+  let _ = value
+  State { source: Item { value: ${literal} } }
+`;
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::common
+pub use self::a
+pub use self::b
+pub use std::common::{ Item, View }
+pub use std::a::{ select }
+pub use std::b::{ select }
+`,
+        [`${stdRoot}${sep}common.voyd`]: `
+pub obj Item { api value: i32 }
+
+pub trait View
+  region source
+
+  @borrow_contract(returns_from: source)
+  fn get(self) -> borrow Item
+`,
+        [`${stdRoot}${sep}a.voyd`]: implementationModule("i32", "1"),
+        [`${stdRoot}${sep}b.voyd`]: implementationModule("bool", "2"),
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+pub fn chosen() -> View
+  select(true)
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const aSelect = Array.from(
+      analyzed.semantics.get("std::a")?.exports.values() ?? [],
+    ).find((entry) => entry.name === "select");
+    const bSelect = Array.from(
+      analyzed.semantics.get("std::b")?.exports.values() ?? [],
+    ).find((entry) => entry.name === "select");
+    const chosen = Array.from(
+      analyzed.semantics.get("src::main")?.exports.values() ?? [],
+    ).find((entry) => entry.name === "chosen");
+    const aCallable =
+      aSelect?.borrowingCoercions?.[0]?.applicability?.[0]?.callable;
+    const bCallable =
+      bSelect?.borrowingCoercions?.[0]?.applicability?.[0]?.callable;
+
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    expect(aCallable?.symbol).toBe(bCallable?.symbol);
+    expect(aCallable?.moduleId).toBe("std::a");
+    expect(bCallable?.moduleId).toBe("std::b");
+    expect(
+      chosen?.borrowingCoercions?.map((coercion) => coercion.concrete.moduleId),
+    ).toEqual(["std::b"]);
+  });
+
+  it("selects generic trait region specializations across modules", async () => {
+    const srcRoot = resolve("/proj/src");
+    const stdRoot = resolve("/proj/std");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${stdRoot}${sep}pkg.voyd`]: `
+pub use self::views
+pub use std::views::{ State, View }
+`,
+        [`${stdRoot}${sep}views.voyd`]: `
+pub obj State<T> { api left: T, api right: T }
+
+pub trait View<T>
+  region source
+  @borrow_contract(returns_from: source)
+  fn get(self) -> borrow T
+
+impl View<i32> for State<i32>
+  region source = self.left
+
+  fn get(self) -> borrow i32
+    self.left
+
+impl View<bool> for State<bool>
+  region source = self.right
+
+  fn get(self) -> borrow bool
+    self.right
+`,
+        [`${srcRoot}${sep}main.voyd`]: `
+use std::all
+
+fn valid_i32() -> i32
+  let ~state = State<i32> { left: 1, right: 2 }
+  let view: View<i32> = state
+  let item = view.get()
+  state.right = 3
+  item
+
+fn invalid_i32() -> i32
+  let ~state = State<i32> { left: 1, right: 2 }
+  let view: View<i32> = state
+  let item = view.get()
+  state.left = 3
+  item
+
+fn valid_bool() -> bool
+  let ~state = State<bool> { left: false, right: true }
+  let view: View<bool> = state
+  let item = view.get()
+  state.left = true
+  item
+
+fn invalid_bool() -> bool
+  let ~state = State<bool> { left: false, right: true }
+  let view: View<bool> = state
+  let item = view.get()
+  state.right = false
+  item
+
+pub fn main() -> i32
+  valid_i32()
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`,
+      roots: { src: srcRoot, std: stdRoot },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
+    const coercions =
+      Array.from(
+        analyzed.semantics.get("std::pkg")?.exports.values() ?? [],
+      ).find((entry) => entry.name === "State")?.borrowingCoercions ?? [];
+
+    expect(
+      diagnostics.filter((diagnostic) => diagnostic.code === "TY0048"),
+    ).toHaveLength(2);
+    expect(coercions).toHaveLength(2);
+    expect(
+      new Set(
+        coercions.map((coercion) => JSON.stringify(coercion.implementation)),
+      ),
+    ).toHaveLength(2);
+  });
+
   it("publishes conservative summaries for resumable effect operations", () => {
     const result = analyze(`
 obj Box { value: i32 }
@@ -1401,6 +2855,100 @@ impl ViewIterator<Item> for ViewState
     Some<borrow Item> { value: self.source }
 `),
     ).toEqual([]);
+  });
+
+  it("supports generic borrowed views formed from allocation-mapped elements", () => {
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj ViewState<T> { cursor: i32, source: FixedArray<T> }
+
+trait ViewIterator<T>
+  region cursor
+  region source
+  disjoint cursor, source
+  @borrow_contract(mutates: cursor, returns_from: source)
+  fn next(~self) -> Option<borrow T>
+
+impl<T> ViewIterator<T> for ViewState<T>
+  region cursor = self.cursor
+  region source = deref(self.source)
+  api fn next(~self) -> Option<borrow T>
+    let value: borrow T = __array_get(self.source, self.cursor)
+    self.cursor = self.cursor + 1
+    Some<borrow T> { value }
+`),
+    ).toEqual([]);
+  });
+
+  it("projects concrete implementation storage into returned trait regions", () => {
+    const result = analyze(`
+obj Item { value: i32 }
+obj Owner { source: Item }
+obj ConcreteView { source: Item, cursor: i32 }
+
+trait View
+  region cursor
+  region source
+  disjoint cursor, source
+  @borrow_contract(mutates: cursor, returns_from: source)
+  fn next(~self) -> borrow Item
+
+impl View for ConcreteView
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  api fn next(~self) -> borrow Item
+    self.cursor = self.cursor + 1
+    self.source
+
+fn make_view(owner: Owner) -> View
+  ConcreteView { source: owner.source, cursor: 0 }
+`);
+    const factory = result.binding.functions.find(
+      (fn) => fn.name === "make_view",
+    );
+    const contract =
+      factory === undefined
+        ? undefined
+        : result.borrowing.callables.get(factory.symbol);
+
+    expect(contract?.parameters[0]?.returnedOrigins).toEqual([
+      {
+        source: [{ kind: "field", name: "source" }],
+        result: [
+          {
+            kind: "region",
+            scope: "borrowing.test.voyd::View",
+            name: "source",
+            disjoint: ["cursor"],
+          },
+        ],
+        endpointAccess: "inline",
+      },
+    ]);
+  });
+
+  it("does not extend allocation-mapped regions through nested handles", () => {
+    expect(
+      diagnosticCodes(`
+obj Leaf { value: i32 }
+obj Wrapper { child: Leaf }
+obj ViewState { source: FixedArray<Wrapper> }
+
+trait LeafView
+  region source
+  @borrow_contract(returns_from: source)
+  fn get(self) -> borrow Leaf
+
+impl LeafView for ViewState
+  region source = deref(self.source)
+  api fn get(self) -> borrow Leaf
+    __array_get(self.source, 0).child
+`),
+    ).toContain("TY0054");
   });
 
   it("checks declared reads independently from writes", () => {
@@ -2374,6 +3922,83 @@ fn valid(~value: Box) -> i32
     expect(
       serialized.some((entry) => entry.includes("voyd.summary.private")),
     ).toBe(true);
+  });
+
+  it("does not use fresh wrappers to separate shared hidden allocations", async () => {
+    const root = resolve("/proj/src");
+    const storage = `
+pub obj Box { api value: i32 }
+pub obj Wrap { box: Box }
+pub obj InlineWrap { count: i32 }
+
+impl Wrap
+  api fn bump(~self) -> void
+    self.box.value = self.box.value + 1
+
+impl InlineWrap
+  api fn bump(~self) -> void
+    self.count = self.count + 1
+
+pub fn make_box() -> Box
+  Box { value: 0 }
+
+pub fn wrap(box: Box) -> Wrap
+  Wrap { box }
+
+pub fn make_inline() -> InlineWrap
+  InlineWrap { count: 0 }
+
+pub fn mutate_both(~left: Wrap, ~right: Wrap) -> void
+  left.bump()
+  right.bump()
+
+pub fn mutate_inline_both(
+  ~left: InlineWrap,
+  ~right: InlineWrap
+) -> void
+  left.bump()
+  right.bump()
+`;
+    const analyzeCaller = async (source: string) => {
+      const host = createMemoryModuleHost({
+        files: {
+          [`${root}${sep}storage.voyd`]: storage,
+          [`${root}${sep}main.voyd`]: source,
+        },
+        pathAdapter: createNodePathAdapter(),
+      });
+      const graph = await loadModuleGraph({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      });
+      return { graph, analyzed: analyzeModules({ graph }) };
+    };
+    const invalid = await analyzeCaller(`
+use src::storage::all
+
+fn invalid() -> void
+  let ~box = make_box()
+  let ~left = wrap(box)
+  let ~right = wrap(box)
+  mutate_both(~left, ~right)
+`);
+    const valid = await analyzeCaller(`
+use src::storage::all
+
+fn valid() -> void
+  let ~left = make_inline()
+  let ~right = make_inline()
+  mutate_inline_both(~left, ~right)
+`);
+    expect(
+      [...invalid.graph.diagnostics, ...invalid.analyzed.diagnostics].some(
+        (diagnostic) => diagnostic.code === "TY0048",
+      ),
+    ).toBe(true);
+    expect([...valid.graph.diagnostics, ...valid.analyzed.diagnostics]).toEqual(
+      [],
+    );
   });
 
   it("checks nonempty default contracts against declared regions", () => {
@@ -3581,16 +5206,43 @@ fn invalid() -> i32
     ).toContain("TY0051");
   });
 
-  it("rejects contextually formed borrows passed to retaining storage", () => {
+  it("treats explicit borrowed callable parameters as non-retaining", () => {
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
 type Sink = fn(borrow Box) : () -> void
 
-fn invalid(value: Box, sink: Sink) -> void
+fn valid(value: Box, sink: Sink) -> void
   sink(value)
 `),
-    ).toContain("TY0051");
+    ).not.toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn valid(~value: borrow Box) -> i32
+  mutate(~value)
+  value.value
+`),
+    ).not.toContain("TY0051");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+impl Box
+  fn set(~self, value: i32) -> void
+    self.value = value
+
+fn valid(~value: borrow Box) -> i32
+  value.set(2)
+  value.value
+`),
+    ).not.toContain("TY0051");
 
     expect(
       diagnosticCodes(`
@@ -4871,6 +6523,33 @@ fn invalid(value: Box): Async -> i32
     ).toContain("TY0052");
   });
 
+  it("keeps recursive borrowed containment independent of query order", () => {
+    const declarations = `
+obj Empty {}
+obj Box { value: i32 }
+obj A { b: B | Empty, loan: borrow Box }
+obj B { a: A }
+`;
+    const effectUse = `
+eff Hold
+  hold(resume, value: B) -> void
+
+fn invalid(value: B): Hold -> void
+  Hold::hold(value)
+`;
+    const unprimed = diagnosticCodes(`${declarations}${effectUse}`);
+    const primed = diagnosticCodes(`${declarations}
+fn use_a(value: A) -> void
+  void
+
+fn use_b(value: B) -> void
+  void
+${effectUse}`);
+
+    expect(unprimed).toEqual(expect.arrayContaining(["TY0051", "TY0052"]));
+    expect(primed).toEqual(expect.arrayContaining(["TY0051", "TY0052"]));
+  });
+
   it("preserves borrowed type facts in ProgramCodegenView", () => {
     const result = analyze(`
 obj Box { value: i32 }
@@ -5487,6 +7166,53 @@ fn valid() -> i32
     const analyzed = analyzeModules({ graph });
 
     expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+  });
+
+  it("preserves fresh constructor results across module boundaries", async () => {
+    const root = resolve("/fresh-result/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}values.voyd`]: `
+pub obj Box { api value: i32 }
+
+pub fn make_box() -> Box
+  Box { value: 0 }
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::values::{ Box, make_box }
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn valid(~right: Box) -> void
+  let ~left = make_box()
+  left.value = 2
+  mutate_both(~left, ~right)
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const values = analyzed.semantics.get("src::values");
+    const makeBox = values?.exports.get("make_box");
+    const serialized = makeBox?.borrowing?.find(
+      (entry) => entry.symbol === makeBox.symbol,
+    )?.serialized;
+
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    expect(serialized).toBeDefined();
+    expect(
+      deserializeCallableBorrowSummary(serialized!).contract.freshResult,
+    ).toBe(true);
+    expect(
+      analyzed.semantics.get("src::main")?.borrowing.runtimeIdentityGuards.size,
+    ).toBe(0);
   });
 
   it("tracks escaped allocations before external writes", async () => {
@@ -9839,10 +11565,10 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
-fn invalid(cell: SharedCell<Box>) -> Box
+fn invalid(cell: SharedCell<Box>) -> borrow Box
   cell.with((value) => value)
 `),
     ).toContain("TY0053");
@@ -9856,17 +11582,17 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn apply<R>(
   cell: SharedCell<Box>,
-  supplied: fn(Box) : () -> R,
-  body: fn(Box) : () -> R = supplied
+  supplied: fn(borrow Box) : () -> R,
+  body: fn(borrow Box) : () -> R = supplied
 ) -> R
   cell.with(body)
 
-fn invalid(cell: SharedCell<Box>) -> Box
+fn invalid(cell: SharedCell<Box>) -> borrow Box
   apply(cell, (value) => value)
 `),
     ).toContain("TY0053");
@@ -9880,19 +11606,19 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
-fn identity(value: Box) -> Box
+fn identity(value: borrow Box) -> borrow Box
   value
 
 fn apply(
   cell: SharedCell<Box>,
-  body: fn(Box) : () -> Box = identity
-) -> Box
+  body: fn(borrow Box) : () -> borrow Box = identity
+) -> borrow Box
   cell.with(body)
 
-fn invalid(cell: SharedCell<Box>) -> Box
+fn invalid(cell: SharedCell<Box>) -> borrow Box
   apply(cell)
 `),
     ).toContain("TY0053");
@@ -9906,12 +11632,12 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn apply(
   cell: SharedCell<Box>,
-  body: fn(Box) : () -> Box = (_value) => Box { value: 1 }
+  body: fn(borrow Box) : () -> Box = (_value) => Box { value: 1 }
 ) -> Box
   cell.with(body)
 
@@ -9925,13 +11651,13 @@ fn valid(cell: SharedCell<Box>) -> Box
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
-type Callback = fn(Box) : () -> Box
+type Callback = fn(borrow Box) : () -> Box
 obj Config { callback: Callback }
 @intrinsic_type(type: "voyd.std.shared-cell")
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn fresh(_value: Box) -> Box
@@ -9957,13 +11683,13 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn apply<R>(
   cell: SharedCell<Box>,
-  supplied: fn(Box) : () -> R,
-  body: fn(Box) : () -> R = supplied
+  supplied: fn(borrow Box) : () -> R,
+  body: fn(borrow Box) : () -> R = supplied
 ) -> R
   cell.with(body)
 
@@ -9985,13 +11711,13 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn choose<R>(
-  supplied: fn(Box) : () -> R,
-  selected: fn(Box) : () -> R = supplied
-) -> (fn(Box) : () -> R)
+  supplied: fn(borrow Box) : () -> R,
+  selected: fn(borrow Box) : () -> R = supplied
+) -> (fn(borrow Box) : () -> R)
   selected
 
 fn valid(cell: SharedCell<Box>) -> Box
@@ -10008,22 +11734,22 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn choose<R>(
-  supplied: fn(Box) : () -> R,
-  selected: fn(Box) : () -> R = supplied
-) -> (fn(Box) : () -> R)
+  supplied: fn(borrow Box) : () -> R,
+  selected: fn(borrow Box) : () -> R = supplied
+) -> (fn(borrow Box) : () -> R)
   selected
 
 fn apply<R>(
   cell: SharedCell<Box>,
-  supplied: fn(Box) : () -> R
+  supplied: fn(borrow Box) : () -> R
 ) -> R
   cell.with(choose(supplied))
 
-fn invalid(cell: SharedCell<Box>) -> Box
+fn invalid(cell: SharedCell<Box>) -> borrow Box
   apply(cell, (value) => value)
 `),
     ).toContain("TY0053");
@@ -10037,7 +11763,7 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn fixed(value: Box) -> FixedArray<Box>
@@ -10069,7 +11795,7 @@ fn copied(self: BoxArray) -> BoxArray
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(cell: SharedCell<BoxArray>) -> BoxArray
@@ -10097,7 +11823,7 @@ fn copied(self: BoxArray) -> FixedArray<Box>
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(cell: SharedCell<BoxArray>) -> FixedArray<Box>
@@ -10116,7 +11842,7 @@ obj BoxArray { storage: FixedArray<Box> }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(cell: SharedCell<BoxArray>) -> Box
@@ -10125,36 +11851,36 @@ fn invalid(cell: SharedCell<BoxArray>) -> Box
     ).toContain("TY0053");
   });
 
-  it("allows scalar values returned from SharedCell callbacks", () => {
+  it("allows owned scalar results from SharedCell callbacks", () => {
     expect(() =>
       analyze(`
 @intrinsic_type(type: "voyd.std.shared-cell")
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn valid(cell: SharedCell<i32>) -> i32
-  cell.with((value) => value)
+  cell.with((value) => value + 0)
 `),
     ).not.toThrow();
   });
 
-  it("allows scalar values captured by callbacks returned from SharedCell", () => {
-    expect(() =>
-      analyze(`
+  it("rejects scalar borrows captured by callbacks returned from SharedCell", () => {
+    expect(
+      diagnosticCodes(`
 @intrinsic_type(type: "voyd.std.shared-cell")
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn valid(cell: SharedCell<i32>) -> (fn() : () -> i32)
   cell.with((value) => () => value)
 `),
-    ).not.toThrow();
+    ).toContain("TY0053");
   });
 
   it("rejects mutable upgrades from shared array elements", () => {
@@ -10169,7 +11895,7 @@ fn invalid(values: FixedArray<Box>) -> void
     ).toContain("TY0050");
   });
 
-  it("rejects array elements retained from SharedCell callback values", () => {
+  it("allows array elements passed to explicitly borrowed callbacks", () => {
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
@@ -10179,16 +11905,16 @@ obj BoxArray { storage: FixedArray<Box> }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(
   cell: SharedCell<BoxArray>,
-  retain: fn(Box) : () -> void
+  retain: fn(borrow Box) : () -> void
 ) -> void
   cell.with((values) => retain(__array_get(values.storage, 0)))
 `),
-    ).toContain("TY0053");
+    ).not.toContain("TY0053");
   });
 
   it("preserves array-copy loans through recursive helpers", () => {
@@ -10214,7 +11940,7 @@ fn copied(self: BoxArray, depth: i32) -> BoxArray
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(cell: SharedCell<BoxArray>) -> BoxArray
@@ -10245,7 +11971,7 @@ fn cycle_b(self: Box, depth: i32) -> Box
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(cell: SharedCell<Box>) -> Box
@@ -10274,7 +12000,7 @@ fn copied(self: BoxArray) -> BoxArray
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(cell: SharedCell<BoxArray>) -> BoxArray
@@ -10390,13 +12116,16 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
-fn apply(cell: SharedCell<Box>, body: fn(Box) : () -> Box) -> Box
+fn apply(
+  cell: SharedCell<Box>,
+  body: fn(borrow Box) : () -> borrow Box
+) -> borrow Box
   cell.with(body)
 
-fn invalid(cell: SharedCell<Box>) -> Box
+fn invalid(cell: SharedCell<Box>) -> borrow Box
   apply(cell, (value) => value)
 `),
     ).toContain("TY0053");
@@ -10410,18 +12139,18 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
-fn invalid(cell: SharedCell<Box>) -> Box
-  let callback: fn(Box) : () -> Box =
-    (value: Box) -> Box => value
+fn invalid(cell: SharedCell<Box>) -> borrow Box
+  let callback: fn(borrow Box) : () -> borrow Box =
+    (value: borrow Box) -> borrow Box => value
   cell.with(callback)
 `),
     ).toContain("TY0053");
   });
 
-  it("rejects opaque callbacks that may retain SharedCell values", () => {
+  it("allows SharedCell values passed to explicitly borrowed callbacks", () => {
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
@@ -10429,23 +12158,23 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(
   cell: SharedCell<Box>,
-  callback: fn(Box) : () -> void
+  callback: fn(borrow Box) : () -> void
 ) -> void
   cell.with((value) => callback(value))
 `),
-    ).toContain("TY0053");
+    ).not.toContain("TY0053");
   });
 
   it("rejects borrowed values returned through callable fields", () => {
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
-type Callback = fn(Box) : () -> Box
+type Callback = fn(borrow Box) : () -> borrow Box
 obj Callbacks {
   body: Callback
 }
@@ -10453,10 +12182,10 @@ obj Callbacks {
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
-fn invalid(cell: SharedCell<Box>) -> Box
+fn invalid(cell: SharedCell<Box>) -> borrow Box
   let callbacks = Callbacks {
     body: (value) => value
   }
@@ -10469,7 +12198,7 @@ fn invalid(cell: SharedCell<Box>) -> Box
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
-type Callback = fn(Box) : () -> Box
+type Callback = fn(borrow Box) : () -> borrow Box
 obj Callbacks {
   body: Callback
 }
@@ -10477,13 +12206,13 @@ obj Callbacks {
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
-fn apply(cell: SharedCell<Box>, callbacks: Callbacks) -> Box
+fn apply(cell: SharedCell<Box>, callbacks: Callbacks) -> borrow Box
   cell.with(callbacks.body)
 
-fn invalid(cell: SharedCell<Box>) -> Box
+fn invalid(cell: SharedCell<Box>) -> borrow Box
   let callbacks = Callbacks {
     body: (value) => value
   }
@@ -10496,7 +12225,7 @@ fn invalid(cell: SharedCell<Box>) -> Box
     expect(() =>
       analyze(`
 obj Box { value: i32 }
-type Callback = fn(Box) : () -> i32
+type Callback = fn(borrow Box) : () -> i32
 obj Callbacks {
   body: Callback
 }
@@ -10504,7 +12233,7 @@ obj Callbacks {
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn callback_of(callbacks: Callbacks) -> Callback
@@ -10531,7 +12260,7 @@ obj Wrapper { inner: Box }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(cell: SharedCell<Wrapper>) -> Box
@@ -10548,7 +12277,7 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(cell: SharedCell<Box>) -> (fn() : () -> i32)
@@ -10566,7 +12295,7 @@ obj Holder { value: Box }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn invalid(cell: SharedCell<Box>, ~holder: Holder) -> void
@@ -10574,7 +12303,7 @@ fn invalid(cell: SharedCell<Box>, ~holder: Holder) -> void
     holder.value = value
   )
 `),
-    ).toContain("TY0053");
+    ).toContain("TY0027");
   });
 
   it("rejects effectful SharedCell callbacks", () => {
@@ -10585,7 +12314,7 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 eff Async
@@ -10608,7 +12337,7 @@ obj Box { value: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with<R>(self, body: fn(T) : () -> R) -> R
+  fn with<R>(self, body: fn(borrow T) : () -> R) -> R
     body(self.value)
 
 fn valid(cell: SharedCell<Box>) -> i32
@@ -10626,7 +12355,7 @@ obj Plan { kind: i32 }
 obj SharedCell<T> { value: T }
 
 impl SharedCell<T>
-  fn with_mut<R>(self, body: fn(~T) : () -> R) -> R
+  fn with_mut<R>(self, body: fn(~value: borrow T) : () -> R) -> R
     let ~value = shared_cell_value(self)
     body(~value)
 
@@ -10730,7 +12459,7 @@ fn distinct(~values: FixedArray<Box>) -> void
     expect(result.borrowing.runtimeIdentityGuards.size).toBe(0);
   });
 
-  it("guards a fresh call-local allocation against an unknown root", () => {
+  it("statically separates a fresh call-local allocation from an unknown root", () => {
     const result = analyze(`
 obj Box { value: i32 }
 
@@ -10743,7 +12472,7 @@ fn valid(~right: Box) -> void
   mutate_both(~left, ~right)
 `);
     expect(result.borrowing.diagnostics).toEqual([]);
-    expect(result.borrowing.runtimeIdentityGuards.size).toBe(1);
+    expect(result.borrowing.runtimeIdentityGuards.size).toBe(0);
   });
 
   it("does not treat ordinary value arguments as runtime loans", () => {

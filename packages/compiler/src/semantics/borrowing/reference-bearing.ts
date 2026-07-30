@@ -276,6 +276,14 @@ const referenceBearingByTyping = new WeakMap<
   TypingResult,
   Map<TypeId, boolean>
 >();
+const allocationBackedByTyping = new WeakMap<
+  TypingResult,
+  Map<TypeId, boolean>
+>();
+const definitelyAllocationBackedByTyping = new WeakMap<
+  TypingResult,
+  Map<TypeId, boolean>
+>();
 
 export const typeCanCarryReference = (
   typeId: TypeId,
@@ -345,6 +353,17 @@ export const typeIsAllocationBacked = (
   typing: TypingResult,
   active = new Set<TypeId>(),
 ): boolean => {
+  const cache =
+    active.size === 0
+      ? (allocationBackedByTyping.get(typing) ?? new Map<TypeId, boolean>())
+      : undefined;
+  if (cache && !allocationBackedByTyping.has(typing)) {
+    allocationBackedByTyping.set(typing, cache);
+  }
+  const cached = cache?.get(typeId);
+  if (cached !== undefined) {
+    return cached;
+  }
   if (active.has(typeId)) {
     return false;
   }
@@ -383,6 +402,7 @@ export const typeIsAllocationBacked = (
     }
   })();
   active.delete(typeId);
+  cache?.set(typeId, result);
   return result;
 };
 
@@ -391,6 +411,18 @@ export const typeIsDefinitelyAllocationBacked = (
   typing: TypingResult,
   active = new Set<TypeId>(),
 ): boolean => {
+  const cache =
+    active.size === 0
+      ? (definitelyAllocationBackedByTyping.get(typing) ??
+        new Map<TypeId, boolean>())
+      : undefined;
+  if (cache && !definitelyAllocationBackedByTyping.has(typing)) {
+    definitelyAllocationBackedByTyping.set(typing, cache);
+  }
+  const cached = cache?.get(typeId);
+  if (cached !== undefined) {
+    return cached;
+  }
   if (active.has(typeId)) {
     return false;
   }
@@ -441,5 +473,6 @@ export const typeIsDefinitelyAllocationBacked = (
     }
   })();
   active.delete(typeId);
+  cache?.set(typeId, result);
   return result;
 };

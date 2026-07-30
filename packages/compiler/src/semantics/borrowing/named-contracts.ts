@@ -21,7 +21,11 @@ import type {
   CheckedNamedBorrowContract,
   PlaceProjection,
 } from "./model.js";
-import { projectionPathCovers, projectionPathsOverlap } from "./model.js";
+import {
+  mappedAllocationCoversReturnedBorrow,
+  projectionPathCovers,
+  projectionPathsOverlap,
+} from "./model.js";
 import {
   referenceOriginsInType,
   retainableReferencePathsInType,
@@ -270,10 +274,16 @@ const declaredCallableContracts = ({
             disjoint: disjointFor(name),
           },
         ];
-        const borrowedResultPaths =
-          typeof returnType === "number"
-            ? borrowedPathsInType(returnType, typing)
-            : borrowedPathsInTypeExpression(method.returnType, typing);
+        const borrowedResultPaths = Array.from(
+          new Map(
+            [
+              ...(typeof returnType === "number"
+                ? borrowedPathsInType(returnType, typing)
+                : []),
+              ...borrowedPathsInTypeExpression(method.returnType, typing),
+            ].map((path) => [JSON.stringify(path), path]),
+          ).values(),
+        );
         const returnedOrigins = named.returnsFrom.flatMap((region) =>
           borrowedResultPaths.map((result) => ({
             source: regionPath(region),
@@ -352,6 +362,10 @@ const declaredCallableContracts = ({
               ...(returnedOrigins.length > 0 ||
               ordinaryReturnedOrigins.length > 0
                 ? {
+                    ...(returnedOrigins.length > 0 &&
+                    method.returnType?.typeKind !== "borrowed"
+                      ? { returnedAggregate: true as const }
+                      : {}),
                     returnedOrigins: [
                       ...returnedOrigins,
                       ...ordinaryReturnedOrigins,
@@ -1228,6 +1242,8 @@ const requireCovered = ({
     allowed.some(
       (region) =>
         projectionPathCovers(region.place, path) ||
+        (clause === "returns_from" &&
+          mappedAllocationCoversReturnedBorrow(region.place, path)) ||
         (clause === "reads" &&
           region.place.some(
             (projection, index) =>
@@ -1348,6 +1364,19 @@ const resolveContractPlace = (
   }
   return { ok: true, place: resolved, storage };
 };
+
+export const namedRegionPlacePath = (
+  place: HirContractPlace,
+): readonly PlaceProjection[] =>
+  place.projections.map((projection) =>
+    projection.kind === "index"
+      ? {
+          kind: "index" as const,
+          constant: projection.constant,
+          stable: true,
+        }
+      : projection,
+  );
 
 const projectContractType = ({
   type,
@@ -1534,11 +1563,15 @@ const borrowedPathsInTypeExpression = (
     return [];
   }
   const resolved = declaredTypeId(expression, typing);
-  if (typeof resolved === "number") {
-    return borrowedPathsInType(resolved, typing).map((path) => [
-      ...prefix,
-      ...path,
-    ]);
+  const resolvedPaths =
+    typeof resolved === "number"
+      ? borrowedPathsInType(resolved, typing).map((path) => [
+          ...prefix,
+          ...path,
+        ])
+      : [];
+  if (resolvedPaths.length > 0) {
+    return resolvedPaths;
   }
   if (expression.typeKind === "borrowed") {
     return [
@@ -1590,15 +1623,38 @@ const borrowedPathsInTypeExpression = (
       );
     }
     const alias = typing.typeAliases.getTemplate(expression.symbol);
-    return alias
-      ? borrowedPathsInTypeExpression(
-          alias.target,
+    const aliasPaths = alias
+      ? (() => {
+          const nextSubstitutions = new Map(substitutions);
+          alias.params.forEach((parameter, index) => {
+            const argument = expression.typeArguments?.[index];
+            if (argument) {
+              nextSubstitutions.set(parameter.symbol, argument);
+            }
+          });
+          return borrowedPathsInTypeExpression(
+            alias.target,
+            typing,
+            prefix,
+            nextSubstitutions,
+            nextActive,
+          );
+        })()
+      : [];
+    if (aliasPaths.length > 0) {
+      return aliasPaths;
+    }
+    const borrowedTypeArguments = expression.typeArguments?.flatMap(
+      (argument) =>
+        borrowedPathsInTypeExpression(
+          argument,
           typing,
           prefix,
           substitutions,
           nextActive,
-        )
-      : [];
+        ),
+    );
+    return borrowedTypeArguments?.length ? [prefix] : [];
   }
   if (expression.typeKind === "object") {
     return expression.fields.flatMap((field) =>

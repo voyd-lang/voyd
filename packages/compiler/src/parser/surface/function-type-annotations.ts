@@ -68,15 +68,15 @@ export const parseSurfaceFunctionType = (form: Form): SurfaceFunctionType => {
   }
   const parameters = signature.parameters.map((parameter) => {
     const mutable =
-      isForm(parameter) && parameter.calls("~")
-        ? parameter.at(1)
-        : undefined;
+      isForm(parameter) && parameter.calls("~") ? parameter.at(1) : undefined;
     const rawParameter = mutable ?? parameter;
     const normalized =
       isForm(rawParameter) &&
       (rawParameter.calls(":") || rawParameter.calls("?:"))
         ? normalizeNestedFunctionTypeAnnotation(rawParameter)
         : undefined;
+    const namedMutable =
+      isForm(normalized?.nameExpr) && normalized.nameExpr.calls("~");
     const typeExpr = normalized?.typeExpr ?? rawParameter;
     if (!typeExpr) {
       throw new ParserSyntaxError(
@@ -87,7 +87,9 @@ export const parseSurfaceFunctionType = (form: Form): SurfaceFunctionType => {
     return {
       typeExpr,
       optional: normalized?.optional === true,
-      ...(mutable ? { bindingKind: "mutable-ref" as const } : {}),
+      ...(mutable || namedMutable
+        ? { bindingKind: "mutable-ref" as const }
+        : {}),
     };
   });
   const parsed = {

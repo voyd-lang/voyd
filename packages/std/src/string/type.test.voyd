@@ -114,6 +114,23 @@ test "string slice and as_slice":
   assert(sliced.to_string().equals("😀"), eq: true)
   assert(value.as_slice().to_string().equals(value), eq: true)
 
+test "string slices retain stable backing across source mutation":
+  let reserved = String::with_capacity(bytes: 64)
+  assert(reserved.slice(bytes: 0, len: 64).is_empty(), eq: true)
+
+  let ~source = "  AbCd  "
+  let slice = source.slice(bytes: 2, len: 4)
+  let nested = slice.slice(bytes: 1, len: 2)
+
+  source.lower()
+  source.trim()
+  source.upper()
+  source.replace(old: "BC", with: "xy")
+
+  assert(source.equals("AxyD"), eq: true)
+  assert(slice.to_string().equals("AbCd"), eq: true)
+  assert(nested.to_string().equals("bC"), eq: true)
+
 test "string slice overloads and to_string forwarders":
   let value = "a😀b"
   assert(value.slice(bytes: 1, len: 4).to_string().equals("😀"), eq: true)

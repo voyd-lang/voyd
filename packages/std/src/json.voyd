@@ -480,10 +480,13 @@ fn append_ascii(~out: Array<i32>, value: StringSlice) -> void
   append_string(out, value)
 
 fn append_string(~out: Array<i32>, value: StringSlice) -> void
-  let source = value.source.raw_bytes()
   var index = 0
   while index < value.byte_len():
-    out.push(__array_get(source, value.start + index))
+    match(value.get_byte(index))
+      Some<i32> { value: byte }:
+        out.push(byte)
+      None:
+        return void
     index = index + 1
 
 fn consume_digits(~parser: JsonParser) -> void

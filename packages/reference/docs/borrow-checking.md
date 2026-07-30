@@ -16,11 +16,10 @@ The short version:
 - The compiler ends non-escaping borrows after their final use.
 - Use `SharedCell<T>` when several long-lived owners must mutate the same state.
 
-> **Current scope:** Voyd enforces mutable reborrows, active call-access
-> conflicts, caller-visible access footprints, and scoped `SharedCell`
-> callbacks. Explicit `borrow T` types, regions, `@borrow_contract`, and bounded
-> runtime identity guards are planned language work. Ordinary values do not
-> acquire those future borrowed semantics implicitly.
+> **Current scope:** Voyd supports explicit `borrow T` views, checked regions
+> and `@borrow_contract` declarations, scoped `SharedCell` callbacks, and
+> bounded call-scoped identity guards. These features are explicit: a plain
+> `T` remains a value and does not become a loan because it is aliased.
 
 ## Unique and shared access
 
@@ -102,6 +101,49 @@ opaque boundary, conflicting mutation, or another ownership-demanding use.
 This optimization does not change accepted source programs or public callable
 contracts.
 
+## Explicit borrowed views
+
+Use `borrow T` when an API returns a view into storage owned elsewhere:
+
+```voyd
+fn item_at(self, index: i32) -> borrow Item
+```
+
+The borrow carries its source provenance through aggregates and pattern
+matching. It cannot outlive or escape its source.
+
+`borrow` applies to the next type, so these types are different:
+
+```voyd
+Option<borrow Item> // an ordinary Option with a borrowed Some payload
+borrow Option<Item> // a borrowed view of an Option stored elsewhere
+```
+
+## Ordinary and view iterators
+
+An ordinary iterator returns values:
+
+```voyd
+trait Iterator<T>
+  fn next(~self) -> Option<T>
+```
+
+Earlier results remain usable after the cursor advances. Use a view iterator
+only when the result should borrow stable source storage:
+
+```voyd
+trait ViewIterator<T>
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(mutates: cursor, returns_from: source)
+  fn next(~self) -> Option<borrow T>
+```
+
+`Array<T>.iter()` uses the ordinary contract. `Array<T>.view_iter()` uses the
+explicit view contract.
+
 ## Conflicting calls
 
 All call borrows remain active for the entire call. Known aliases are checked
@@ -144,9 +186,33 @@ caller-visible read and write footprint. When a precise footprint is
 unavailable, direct and inline receiver storage is the conservative fallback;
 referenced allocations remain separate.
 
-When indexed or otherwise projected aliasing cannot be proven safe, the
-compiler currently rejects the access conservatively. Bounded runtime identity
-guards for stable call-scoped projections are deferred.
+When stable call-scoped projections might overlap, the compiler may insert a
+bounded identity guard if the operation is eligible. The guard covers only the
+call and traps deterministically on conflict. Escaping borrows, unstable
+projections, effects, and continuation boundaries are not eligible and remain
+compile-time errors.
+
+## Borrow contracts
+
+Traits can name caller-visible regions and state exactly what a method reads,
+mutates, or returns a borrow from:
+
+```voyd
+trait CacheView<V>
+  region entries
+  region statistics
+  disjoint entries, statistics
+
+  @borrow_contract(
+    mutates: statistics,
+    returns_from: entries
+  )
+  fn get(~self, key: i32) -> Option<borrow V>
+```
+
+Implementations map each region to a representation place. The compiler checks
+that an implementation stays within the declared contract, and code generation
+consumes the checked contract through the program codegen view.
 
 ## Calls and evaluation order
 
@@ -219,8 +285,7 @@ The callback value has scoped borrowed semantics: it and its borrowed
 projections cannot be returned, stored, captured, or passed to an opaque
 retaining call. Copied results such as numbers may be returned.
 
-The current callback signatures use transitional `T` and `~T` spellings.
-Explicit `borrow T` syntax will make this contract visible in the public type:
+The public callback signatures make the scoped borrow explicit:
 
 ```voyd
 fn with<R>(self, body: fn(value: borrow T) : () -> R): () -> R
@@ -231,3 +296,20 @@ fn with_mut<R>(
 ```
 
 `SharedCell` does not block, synchronize threads, or provide thread safety.
+
+## Stable StringSlice values
+
+An ordinary `StringSlice` retains immutable backing storage. Mutating its
+source `String` replaces the source backing instead of changing an existing
+slice:
+
+```voyd
+let ~source = "hello"
+let slice = source.slice(bytes: 1, len: 3)
+source.replace(old: "ell", with: "i")
+print(slice) // "ell"
+```
+
+A `StringSlice` is therefore a stable value, not a source loan, and it does not
+block later mutation of the source string. APIs that intentionally expose
+mutable or reusable storage use an explicit borrowed type instead.

@@ -3525,8 +3525,9 @@ const typeIdToDiagnosticString = (
         const params = desc.parameters
           .map((param) => {
             const label = param.label ? `${param.label}: ` : "";
+            const binding = param.bindingKind === "mutable-ref" ? "~" : "";
             const optionalSuffix = param.optional ? "?" : "";
-            return `${label}${typeIdToDiagnosticString(param.type, ctx, active)}${optionalSuffix}`;
+            return `${label}${binding}${typeIdToDiagnosticString(param.type, ctx, active)}${optionalSuffix}`;
           })
           .join(", ");
         const returnType = typeIdToDiagnosticString(

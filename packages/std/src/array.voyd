@@ -311,6 +311,19 @@ impl<T> Array<T>
     copy.sort(by: compare)
     copy
 
+  /// Returns a zero-copy iterator over borrowed element views.
+  ///
+  /// Use `iter()` when retained independent values are required. A view item
+  /// keeps shared access to this array's backing storage through its final use.
+  api fn view_iter(self) -> ViewIterator<T>
+    ArrayViewIterator<T> {
+      source: self.storage,
+      cursor: ArrayViewCursor {
+        count: self.count,
+        index: 0
+      }
+    }
+
   /// Returns a reversed copy.
   api fn reversed(self) -> Array<T>
     let ~copy = self.copied()
@@ -856,6 +869,18 @@ obj ArrayIterator<T> {
   index: i32
 }
 
+/// Inline state that advances independently from a view iterator's source.
+val ArrayViewCursor {
+  count: i32,
+  index: i32
+}
+
+/// Internal iterator state for `Array::view_iter`.
+obj ArrayViewIterator<T> {
+  source: FixedArray<T>,
+  cursor: ArrayViewCursor
+}
+
 impl<T> Sequence<T> for Array<T>
   /// Returns an iterator over values.
   api fn iter(self) -> Iterator<T>
@@ -869,6 +894,18 @@ impl<T> Iterator<T> for ArrayIterator<T>
     let value = self.array.get(self.index)
     self.index = self.index + 1
     value
+
+impl<T> ViewIterator<T> for ArrayViewIterator<T>
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  /// Returns the next borrowed element view.
+  api fn next(~self) -> Option<borrow T>
+    if self.cursor.index >= self.cursor.count:
+      return None {}
+    let value: borrow T = __array_get(self.source, self.cursor.index)
+    self.cursor.index = self.cursor.index + 1
+    Some<borrow T> { value }
 
 impl<T> SubscriptRead<i32, Optional<T>> for Array<T>
   /// Returns the value addressed by subscript syntax.

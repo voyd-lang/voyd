@@ -433,6 +433,9 @@ const analyzeCyclicScc = ({
   const finalPassSemantics = new Map<string, SemanticsPipelineResult>();
   const finalPassExports = new Map<string, ModuleExportTable>();
 
+  // The first two passes only stabilize cyclic export contracts. Their body
+  // diagnostics and runtime-guard plans are discarded, so defer body checking
+  // until the final pass sees the stabilized dependency surface.
   moduleIds.forEach((moduleId) => {
     throwIfCancelled(isCancelled);
 
@@ -440,6 +443,7 @@ const analyzeCyclicScc = ({
       moduleId,
       includeTests,
       recoverFromTypingErrors: true,
+      checkBorrowBodies: false,
       cycleModuleIdsByModuleId,
       graph,
       exportSurfaces: cyclicExportSurfaces,
@@ -463,6 +467,7 @@ const analyzeCyclicScc = ({
       moduleId,
       includeTests,
       recoverFromTypingErrors: true,
+      checkBorrowBodies: false,
       cycleModuleIdsByModuleId,
       graph,
       semantics: mergeWithOverrides({
@@ -545,6 +550,7 @@ const analyzeModule = ({
   moduleId,
   includeTests,
   recoverFromTypingErrors,
+  checkBorrowBodies = true,
   cycleModuleIdsByModuleId,
   graph,
   exportSurfaces,
@@ -558,6 +564,7 @@ const analyzeModule = ({
   moduleId: string;
   includeTests: boolean | undefined;
   recoverFromTypingErrors: boolean | undefined;
+  checkBorrowBodies?: boolean;
   cycleModuleIdsByModuleId: ReadonlyMap<string, readonly string[]>;
   graph: ModuleGraph;
   exportSurfaces?: Map<string, ModuleExportSurfaceTable>;
@@ -585,6 +592,7 @@ const analyzeModule = ({
       typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
       includeTests,
       recoverFromTypingErrors,
+      checkBorrowBodies,
     });
     diagnostics?.push(
       ...augmentCycleTy0022Diagnostics({
