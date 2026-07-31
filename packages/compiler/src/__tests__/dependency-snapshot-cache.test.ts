@@ -162,12 +162,7 @@ describe("compiler dependency snapshots", () => {
     const prepared = preparePrecompiledDependencySnapshot({
       graph: restoredGraph,
       snapshot: restored.dependencySnapshot,
-      liveTypingState: restored.typingState,
     });
-    expect(prepared.typingState).toBe(restored.typingState);
-    expect(prepared.previousSemantics.get("std::mathdep")).toBe(
-      restored.dependencySnapshot.semantics.get("std::mathdep"),
-    );
     const second = analyzeModules({
       graph: restoredGraph,
       previousSemantics: prepared.previousSemantics,

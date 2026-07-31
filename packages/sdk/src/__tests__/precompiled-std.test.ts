@@ -5,7 +5,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import {
-  PRECOMPILED_STD_COMPILER_BUILD_ID,
+  PRECOMPILED_STD_COMPILER_ABI_ID,
   PRECOMPILED_STD_OPTIONS_ID,
   PRECOMPILED_STD_SNAPSHOT_SCHEMA,
   PRECOMPILED_STD_SNAPSHOT_VERSION,
@@ -52,8 +52,8 @@ describe("precompiled std semantic snapshots", () => {
       ["schema", { schema: "other" }],
       ["schema version", { version: 2 }],
       [
-        "compiler/std version skew",
-        { compilerBuildId: `${PRECOMPILED_STD_COMPILER_BUILD_ID}-other` },
+        "compiler snapshot ABI skew",
+        { compilerAbiId: `${PRECOMPILED_STD_COMPILER_ABI_ID}-other` },
       ],
       ["transport", { transportId: "other" }],
       ["summary schema", { callableSummarySchema: "other" }],
@@ -104,13 +104,28 @@ describe("precompiled std semantic snapshots", () => {
     const bundled = await fs.readFile(
       path.join(repoRoot, "packages/std", PRECOMPILED_STD_SNAPSHOT_FILE),
     );
-    bundled[bundled.byteLength - 1] ^= 0xff;
+    const headerLength = bundled.readUInt32BE(8);
+    const fastPayloadStart = 12 + headerLength + 4;
+    bundled[fastPayloadStart] ^= 0xff;
     await fs.writeFile(artifactPath, bundled);
-    const corruptedResult = await createSdk().compile({
+    const canonicalFallbackResult = await createSdk().compile({
       source: "pub fn main() -> i32 = 42",
       roots: { src: path.resolve(root, "..", "app"), std: root },
     });
-    expect(corruptedResult.success).toBe(true);
+    expect(canonicalFallbackResult.success).toBe(true);
+    expect(snapshotPrecompiledStdLoadStats()).toMatchObject({
+      hits: 1,
+      fallbacks: 0,
+    });
+
+    resetPrecompiledStdLoadStatsForTesting();
+    bundled[bundled.byteLength - 1] ^= 0xff;
+    await fs.writeFile(artifactPath, bundled);
+    const fullyCorruptedResult = await createSdk().compile({
+      source: "pub fn main() -> i32 = 42",
+      roots: { src: path.resolve(root, "..", "app"), std: root },
+    });
+    expect(fullyCorruptedResult.success).toBe(true);
     expect(snapshotPrecompiledStdLoadStats().fallbacks).toBe(1);
   });
 
@@ -267,7 +282,7 @@ const validEnvelope = (): PrecompiledStdSnapshotEnvelope => ({
   header: {
     schema: PRECOMPILED_STD_SNAPSHOT_SCHEMA,
     version: PRECOMPILED_STD_SNAPSHOT_VERSION,
-    compilerBuildId: PRECOMPILED_STD_COMPILER_BUILD_ID,
+    compilerAbiId: PRECOMPILED_STD_COMPILER_ABI_ID,
     transportId: PRECOMPILED_STD_TRANSPORT_ID,
     callableSummarySchema: CALLABLE_BORROW_SUMMARY_SCHEMA,
     callableSummaryVersion: CALLABLE_BORROW_SUMMARY_VERSION,
@@ -276,6 +291,11 @@ const validEnvelope = (): PrecompiledStdSnapshotEnvelope => ({
     sources: [{ path: "pkg.voyd", sha256: "hash", bytes: 1 }],
   },
   payloadSha256: "hash",
+  fastPayloadSha256: "fast-hash",
+  fastPayloadProducer: {
+    node: process.versions.node,
+    v8: process.versions.v8,
+  },
 });
 
 const createTemporaryStdRoot = async ({

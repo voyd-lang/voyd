@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { readFile, readdir } from "node:fs/promises";
 import path from "node:path";
+import { deserialize, serialize } from "node:v8";
 import {
   brotliCompressSync,
   brotliDecompressSync,
   constants as zlibConstants,
 } from "node:zlib";
 import {
-  PRECOMPILED_STD_COMPILER_BUILD_ID,
+  PRECOMPILED_STD_COMPILER_ABI_ID,
   PRECOMPILED_STD_OPTIONS_ID,
   PRECOMPILED_STD_SNAPSHOT_SCHEMA,
   PRECOMPILED_STD_SNAPSHOT_VERSION,
@@ -26,7 +27,7 @@ import {
 import { incrementCompilerPerfCounter } from "@voyd-lang/compiler/perf.js";
 
 export const PRECOMPILED_STD_SNAPSHOT_FILE = "precompiled/std-semantics-v1.bin";
-const ARTIFACT_MAGIC = Buffer.from("VOYDSTD1");
+const ARTIFACT_MAGIC = Buffer.from("VOYDSTD2");
 const MAX_ARTIFACT_BYTES = 64 * 1024 * 1024;
 const MAX_HEADER_BYTES = 1024 * 1024;
 const MAX_SERIALIZED_PAYLOAD_BYTES = 128 * 1024 * 1024;
@@ -75,7 +76,9 @@ const artifactByPath = new Map<
   string,
   {
     envelope: PrecompiledStdSnapshotEnvelope;
-    wireGraph: unknown;
+    fastSerializedPayload?: Uint8Array;
+    wireGraph?: unknown;
+    canonicalCompressedPayload: Uint8Array;
     artifactBytes: number;
   }
 >();
@@ -127,27 +130,24 @@ export const loadPrecompiledStdSnapshot = async ({
     PRECOMPILED_STD_SNAPSHOT_FILE,
   );
   try {
-    const cached = artifactByPath.get(artifactPath);
-    const parsed = cached
-      ? undefined
-      : parsePrecompiledStdArtifact(await readFile(artifactPath));
-    const artifact = cached ?? parsed;
-    if (!artifact) {
-      throw new SnapshotLoadError("artifact-shape");
-    }
+    const artifact =
+      artifactByPath.get(artifactPath) ??
+      parsePrecompiledStdArtifact(await readFile(artifactPath));
     const envelope = artifact.envelope;
     validatePrecompiledStdSnapshotHeader(envelope);
     await validateSourceManifest({
       stdRoot: normalizedStdRoot,
       header: envelope.header,
     });
-    const restored = restorePrecompiledStdSnapshot({
-      encoded: parsed?.payload ?? decodeReferenceGraph(artifact.wireGraph),
+    const restored = restoreArtifactPayload({
+      artifact,
       stdRoot: normalizedStdRoot,
     });
     artifactByPath.set(artifactPath, {
       envelope: artifact.envelope,
+      fastSerializedPayload: artifact.fastSerializedPayload,
       wireGraph: artifact.wireGraph,
+      canonicalCompressedPayload: artifact.canonicalCompressedPayload,
       artifactBytes: artifact.artifactBytes,
     });
     mutableStats.hits += 1;
@@ -170,35 +170,52 @@ export const serializePrecompiledStdArtifact = ({
   header: PrecompiledStdSnapshotHeader;
   payload: EncodedPrecompiledStdSnapshot;
 }): Uint8Array => {
-  const serializedPayload = Buffer.from(
+  const canonicalPayload = Buffer.from(
     JSON.stringify(encodeReferenceGraph(payload)),
   );
+  const fastPayload = serialize(payload);
   const envelope: PrecompiledStdSnapshotEnvelope = {
     header,
-    payloadSha256: sha256(serializedPayload),
+    payloadSha256: sha256(canonicalPayload),
+    fastPayloadSha256: sha256(fastPayload),
+    fastPayloadProducer: {
+      node: process.versions.node,
+      v8: process.versions.v8,
+    },
   };
   const serializedHeader = Buffer.from(JSON.stringify(envelope));
-  const compressedPayload = brotliCompressSync(serializedPayload, {
+  const compressedFastPayload = brotliCompressSync(fastPayload, {
+    params: {
+      [zlibConstants.BROTLI_PARAM_QUALITY]: 6,
+    },
+  });
+  const compressedCanonicalPayload = brotliCompressSync(canonicalPayload, {
     params: {
       [zlibConstants.BROTLI_PARAM_QUALITY]: 6,
     },
   });
   const headerLength = Buffer.allocUnsafe(4);
   headerLength.writeUInt32BE(serializedHeader.byteLength);
+  const fastPayloadLength = Buffer.allocUnsafe(4);
+  fastPayloadLength.writeUInt32BE(compressedFastPayload.byteLength);
   return Buffer.concat([
     ARTIFACT_MAGIC,
     headerLength,
     serializedHeader,
-    compressedPayload,
+    fastPayloadLength,
+    compressedFastPayload,
+    compressedCanonicalPayload,
   ]);
 };
 
 export const parsePrecompiledStdArtifact = (
   raw: Uint8Array,
+  { verifyCanonicalPayload = false }: { verifyCanonicalPayload?: boolean } = {},
 ): {
   envelope: PrecompiledStdSnapshotEnvelope;
-  wireGraph: unknown;
-  payload: EncodedPrecompiledStdSnapshot;
+  fastSerializedPayload?: Uint8Array;
+  wireGraph?: unknown;
+  canonicalCompressedPayload: Uint8Array;
   artifactBytes: number;
 } => {
   const bytes = Buffer.from(raw);
@@ -211,31 +228,115 @@ export const parsePrecompiledStdArtifact = (
   }
   const headerLength = bytes.readUInt32BE(ARTIFACT_MAGIC.byteLength);
   const headerStart = ARTIFACT_MAGIC.byteLength + 4;
-  const payloadStart = headerStart + headerLength;
+  const fastPayloadLengthStart = headerStart + headerLength;
   if (
     headerLength <= 0 ||
     headerLength > MAX_HEADER_BYTES ||
-    payloadStart >= bytes.byteLength
+    fastPayloadLengthStart + 4 >= bytes.byteLength
   ) {
     throw new SnapshotLoadError("artifact-shape");
   }
   const envelope = JSON.parse(
-    bytes.subarray(headerStart, payloadStart).toString("utf8"),
+    bytes.subarray(headerStart, fastPayloadLengthStart).toString("utf8"),
   ) as PrecompiledStdSnapshotEnvelope;
   validatePrecompiledStdSnapshotHeader(envelope);
-  const serializedPayload = brotliDecompressSync(bytes.subarray(payloadStart), {
-    maxOutputLength: MAX_SERIALIZED_PAYLOAD_BYTES,
-  });
-  if (sha256(serializedPayload) !== envelope.payloadSha256) {
-    throw new SnapshotLoadError("payload-integrity");
+
+  const compressedFastPayloadLength = bytes.readUInt32BE(
+    fastPayloadLengthStart,
+  );
+  const fastPayloadStart = fastPayloadLengthStart + 4;
+  const canonicalPayloadStart = fastPayloadStart + compressedFastPayloadLength;
+  if (
+    compressedFastPayloadLength <= 0 ||
+    canonicalPayloadStart >= bytes.byteLength
+  ) {
+    throw new SnapshotLoadError("artifact-shape");
   }
-  const wireGraph = JSON.parse(serializedPayload.toString("utf8")) as unknown;
+
+  let fastSerializedPayload: Uint8Array | undefined;
+  try {
+    const candidate = brotliDecompressSync(
+      bytes.subarray(fastPayloadStart, canonicalPayloadStart),
+      { maxOutputLength: MAX_SERIALIZED_PAYLOAD_BYTES },
+    );
+    if (sha256(candidate) !== envelope.fastPayloadSha256) {
+      throw new SnapshotLoadError("fast-payload-integrity");
+    }
+    fastSerializedPayload = candidate;
+  } catch {
+    fastSerializedPayload = undefined;
+  }
+
+  const canonicalCompressedPayload = bytes.subarray(canonicalPayloadStart);
+  let wireGraph: unknown;
+  if (!fastSerializedPayload || verifyCanonicalPayload) {
+    wireGraph = decodeCanonicalPayload({
+      compressedPayload: canonicalCompressedPayload,
+      expectedSha256: envelope.payloadSha256,
+    });
+    decodeReferenceGraph(wireGraph);
+  }
+
   return {
     envelope,
+    fastSerializedPayload,
     wireGraph,
-    payload: decodeReferenceGraph(wireGraph),
+    canonicalCompressedPayload,
     artifactBytes: bytes.byteLength,
   };
+};
+
+const restoreArtifactPayload = ({
+  artifact,
+  stdRoot,
+}: {
+  artifact: {
+    envelope: PrecompiledStdSnapshotEnvelope;
+    fastSerializedPayload?: Uint8Array;
+    wireGraph?: unknown;
+    canonicalCompressedPayload: Uint8Array;
+  };
+  stdRoot: string;
+}): RestoredPrecompiledStdSnapshot => {
+  if (artifact.fastSerializedPayload) {
+    try {
+      return restorePrecompiledStdSnapshot({
+        encoded: deserialize(
+          artifact.fastSerializedPayload,
+        ) as EncodedPrecompiledStdSnapshot,
+        stdRoot,
+      });
+    } catch {
+      // The canonical graph is authoritative across Node/V8 versions.
+    }
+  }
+
+  const wireGraph =
+    artifact.wireGraph ??
+    decodeCanonicalPayload({
+      compressedPayload: artifact.canonicalCompressedPayload,
+      expectedSha256: artifact.envelope.payloadSha256,
+    });
+  return restorePrecompiledStdSnapshot({
+    encoded: decodeReferenceGraph(wireGraph),
+    stdRoot,
+  });
+};
+
+const decodeCanonicalPayload = ({
+  compressedPayload,
+  expectedSha256,
+}: {
+  compressedPayload: Uint8Array;
+  expectedSha256: string;
+}): unknown => {
+  const serializedPayload = brotliDecompressSync(compressedPayload, {
+    maxOutputLength: MAX_SERIALIZED_PAYLOAD_BYTES,
+  });
+  if (sha256(serializedPayload) !== expectedSha256) {
+    throw new SnapshotLoadError("payload-integrity");
+  }
+  return JSON.parse(serializedPayload.toString("utf8")) as unknown;
 };
 
 export const createStdSourceManifest = async ({
@@ -508,8 +609,8 @@ export const validatePrecompiledStdSnapshotHeader = (
   if (header.version !== PRECOMPILED_STD_SNAPSHOT_VERSION) {
     throw new SnapshotLoadError("schema-version");
   }
-  if (header.compilerBuildId !== PRECOMPILED_STD_COMPILER_BUILD_ID) {
-    throw new SnapshotLoadError("compiler-build");
+  if (header.compilerAbiId !== PRECOMPILED_STD_COMPILER_ABI_ID) {
+    throw new SnapshotLoadError("compiler-abi");
   }
   if (header.transportId !== PRECOMPILED_STD_TRANSPORT_ID) {
     throw new SnapshotLoadError("transport");
@@ -527,7 +628,11 @@ export const validatePrecompiledStdSnapshotHeader = (
     !Array.isArray(header.sources) ||
     header.sources.length === 0 ||
     typeof header.stdContentSha256 !== "string" ||
-    typeof envelope.payloadSha256 !== "string"
+    typeof envelope.payloadSha256 !== "string" ||
+    typeof envelope.fastPayloadSha256 !== "string" ||
+    !envelope.fastPayloadProducer ||
+    typeof envelope.fastPayloadProducer.node !== "string" ||
+    typeof envelope.fastPayloadProducer.v8 !== "string"
   ) {
     throw new SnapshotLoadError("artifact-shape");
   }

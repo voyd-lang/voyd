@@ -6,7 +6,7 @@ import {
   loadModuleGraph,
 } from "@voyd-lang/compiler/pipeline.js";
 import {
-  PRECOMPILED_STD_COMPILER_BUILD_ID,
+  PRECOMPILED_STD_COMPILER_ABI_ID,
   PRECOMPILED_STD_OPTIONS_ID,
   PRECOMPILED_STD_SNAPSHOT_SCHEMA,
   PRECOMPILED_STD_SNAPSHOT_VERSION,
@@ -83,7 +83,7 @@ const serialized = serializePrecompiledStdArtifact({
   header: {
     schema: PRECOMPILED_STD_SNAPSHOT_SCHEMA,
     version: PRECOMPILED_STD_SNAPSHOT_VERSION,
-    compilerBuildId: PRECOMPILED_STD_COMPILER_BUILD_ID,
+    compilerAbiId: PRECOMPILED_STD_COMPILER_ABI_ID,
     transportId: PRECOMPILED_STD_TRANSPORT_ID,
     callableSummarySchema: CALLABLE_BORROW_SUMMARY_SCHEMA,
     callableSummaryVersion: CALLABLE_BORROW_SUMMARY_VERSION,
@@ -97,9 +97,11 @@ const serialized = serializePrecompiledStdArtifact({
 if (check) {
   const existing = await readFile(artifactPath).catch(() => undefined);
   const existingArtifact = existing
-    ? parsePrecompiledStdArtifact(existing)
+    ? parsePrecompiledStdArtifact(existing, { verifyCanonicalPayload: true })
     : undefined;
-  const generatedArtifact = parsePrecompiledStdArtifact(serialized);
+  const generatedArtifact = parsePrecompiledStdArtifact(serialized, {
+    verifyCanonicalPayload: true,
+  });
   if (
     !existingArtifact ||
     JSON.stringify(existingArtifact.envelope.header) !==

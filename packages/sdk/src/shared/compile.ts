@@ -168,7 +168,6 @@ export const compileWithLoader = async ({
         ? preparePrecompiledDependencySnapshot({
             graph,
             snapshot: precompiledStd.dependencySnapshot,
-            liveTypingState: precompiledStd.typingState,
           })
         : undefined;
 

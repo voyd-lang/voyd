@@ -17,10 +17,7 @@ import type {
   ModulePath,
   ModuleRoots,
 } from "./types.js";
-import type {
-  ReusableDependencySemanticsSnapshot,
-  SemanticsTypingState,
-} from "./semantic-analysis.js";
+import type { ReusableDependencySemanticsSnapshot } from "./semantic-analysis.js";
 
 const COMPILER_DEPENDENCY_SNAPSHOT_VERSION =
   "0.2.0:v375-dependency-snapshot-v2";
@@ -121,11 +118,9 @@ export const prepareDependencySnapshotReuse = ({
 export const preparePrecompiledDependencySnapshot = ({
   graph,
   snapshot,
-  liveTypingState,
 }: {
   graph: ModuleGraph;
   snapshot: ReusableDependencySemanticsSnapshot;
-  liveTypingState?: SemanticsTypingState;
 }): PreparedPrecompiledDependencySnapshot => {
   const snapshotModuleIds = new Set(snapshot.moduleIds);
   const reusableStdModuleIds = Array.from(graph.modules)
@@ -133,6 +128,8 @@ export const preparePrecompiledDependencySnapshot = ({
     .map(([moduleId]) => moduleId)
     .filter((moduleId) => snapshotModuleIds.has(moduleId));
 
+  const arena = createTypeArena(snapshot.arena);
+  const effectInterner = createEffectInterner(snapshot.effectInterner);
   const selectedSemantics = new Map(
     reusableStdModuleIds.map((moduleId) => {
       const semantics = snapshot.semantics.get(moduleId);
@@ -144,26 +141,17 @@ export const preparePrecompiledDependencySnapshot = ({
       return [moduleId, semantics] as const;
     }),
   );
+  const previousSemantics = cloneSemanticsMapForTypingState({
+    semantics: selectedSemantics,
+    arena,
+    effectInterner,
+  });
   incrementCompilerPerfCounter("compiler.precompiled_std_snapshot.hit");
   reusableStdModuleIds.forEach(() =>
     incrementCompilerPerfCounter(
       "compiler.precompiled_std_snapshot.reused_module.count",
     ),
   );
-  if (liveTypingState) {
-    return {
-      previousSemantics: selectedSemantics,
-      typingState: liveTypingState,
-    };
-  }
-
-  const arena = createTypeArena(snapshot.arena);
-  const effectInterner = createEffectInterner(snapshot.effectInterner);
-  const previousSemantics = cloneSemanticsMapForTypingState({
-    semantics: selectedSemantics,
-    arena,
-    effectInterner,
-  });
   return {
     previousSemantics,
     typingState: { arena, effectInterner },
