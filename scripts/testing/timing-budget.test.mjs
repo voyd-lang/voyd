@@ -20,6 +20,7 @@ const webBudget = {
   maxWallMsByCommand: {
     "npm run test:unit:web:ci:0": 1_800_000,
     "npm run test:unit:web:ci:1": 1_800_000,
+    "npm run test:unit:web:ci:2": 1_800_000,
   },
   maxFileMs: 180_000,
 };
@@ -51,6 +52,9 @@ describe("lane wall timing budgets", () => {
       1_800_000,
     );
     expect(wallBudgetMs(["npm", "run", "test:unit:web:ci:1"], webBudget)).toBe(
+      1_800_000,
+    );
+    expect(wallBudgetMs(["npm", "run", "test:unit:web:ci:2"], webBudget)).toBe(
       1_800_000,
     );
     expect(

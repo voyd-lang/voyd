@@ -109,7 +109,7 @@ jobs:
         run: node scripts/ci/check-typing-bench-regression.mjs
 
   web-unit:
-    name: web-unit (partition ${{ matrix.partition }} of 2)
+    name: web-unit (partition ${{ matrix.partition }} of 3)
     runs-on: ubuntu-latest
     timeout-minutes: 35
     strategy:
@@ -120,6 +120,8 @@ jobs:
             command: npm run test:unit:web:ci:0
           - partition: 2
             command: npm run test:unit:web:ci:1
+          - partition: 3
+            command: npm run test:unit:web:ci:2
     steps:
       - uses: actions/checkout@v4
         with:
