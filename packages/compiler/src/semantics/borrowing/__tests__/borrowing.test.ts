@@ -1451,6 +1451,38 @@ fn invalid(chooser: Choose, ~candidate: Holder) -> i32
     ).toContain("TY0048");
   });
 
+  it("materializes value-only results through open trait summaries", () => {
+    expect(
+      diagnosticCodes(`
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Counter { index: i32 }
+
+trait Next
+  fn next(~self) -> Option<i32>
+
+impl Next for Counter
+  fn next(~self) -> Option<i32>
+    self.index = self.index + 1
+    Some<i32> { value: self.index }
+
+fn valid(~counter: Next) -> i32
+  let first = counter.next()
+  let second = counter.next()
+  match(first)
+    Some<i32> { value }:
+      value
+    None:
+      match(second)
+        Some<i32> { value }:
+          value
+        None:
+          0
+`),
+    ).toEqual([]);
+  });
+
   it("conservatively rejects projected aliases from unannotated open traits", () => {
     expect(
       diagnosticCodes(`
