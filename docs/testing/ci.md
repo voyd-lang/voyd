@@ -56,6 +56,35 @@ compile-heavy files can dominate broad upstream runs. The split stays at
 package boundaries so Turbo's affected selection remains authoritative and new
 test files cannot silently fall out of CI.
 
+### V-448 tooling transition
+
+V-448's call-scoped memory and mutation analysis increased the cost of source
+compilations used by two developer-tooling test files. On PR #752, hosted CI
+measured `apps/cli/src/__tests__/bootstrap.test.ts` at 208,119 ms and
+`packages/language-server/src/__tests__/project.test.ts` at 190,624 ms. Both
+exceeded the general 180,000 ms per-file budget while the tooling lane stayed
+within its 420,000 ms wall-time budget.
+
+The transition allowance preserves the lane-wide budget and every test:
+
+- `bootstrap.test.ts`: 240,000 ms
+- `project.test.ts`: 240,000 ms
+- every other unit test file: 180,000 ms
+
+These are exact-path overrides, not basename-wide or lane-wide increases. They
+include roughly the same runner-noise headroom as the original unit budget.
+
+V-462, **Build package-scale incremental compilation after V-448**, must define
+the reusable package semantic interfaces that make these independent analyses
+cheaper. V-467, **Persist package and callable caches across processes**, must
+then remove repeated package and callable work from fresh tooling processes.
+After those land, V-468, **Rebaseline compiler performance and restore strict
+CI gates**, must use at least ten successful hosted tooling timing artifacts,
+set caps from observed p95 plus 20% runner headroom, delete these exact-path
+exceptions when that value is at or below the general 180,000 ms limit, and
+restore strict permanent budgets. Keep the 420,000 ms lane guard unchanged
+throughout so aggregate regressions remain visible.
+
 The first live hosted-runner integration baseline completed all 128 assertions
 in about 201 seconds, with the slowest file at about 132 seconds. After the
 public web package gained request streaming, SSE, and OpenAPI generation,

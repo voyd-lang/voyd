@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
+import { fileBudgetMs } from "./timing-budget.mjs";
 
 const options = parseArgs(process.argv.slice(2));
 const budgets = JSON.parse(
@@ -138,8 +139,4 @@ function readReport(file) {
 
 function formatMs(value) {
   return `${Math.round(value)}ms`;
-}
-
-function fileBudgetMs(file, budget) {
-  return budget.maxFileMsByBasename?.[basename(file.file)] ?? budget.maxFileMs;
 }

@@ -2453,6 +2453,13 @@
     "reviewed": "2026-07-30"
   },
   {
+    "file": "scripts/testing/timing-budget.test.mjs",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects exact-path CI timing exceptions and their precedence over broader file budgets.",
+    "reviewed": "2026-07-30"
+  },
+  {
     "file": "tests/conformance/src/effects.test.ts",
     "owner": "language-conformance",
     "disposition": "portable-conformance",

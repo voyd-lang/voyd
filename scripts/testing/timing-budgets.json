@@ -1,7 +1,11 @@
 {
   "unit": {
     "maxWallMs": 420000,
-    "maxFileMs": 180000
+    "maxFileMs": 180000,
+    "maxFileMsByPathSuffix": {
+      "apps/cli/src/__tests__/bootstrap.test.ts": 240000,
+      "packages/language-server/src/__tests__/project.test.ts": 240000
+    }
   },
   "conformance": {
     "maxWallMs": 120000,
