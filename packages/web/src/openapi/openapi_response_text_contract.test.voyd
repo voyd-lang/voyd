@@ -1,0 +1,21 @@
+use src::openapi::{ document, info, operation }
+use std::http::Method
+use std::json::stringify
+use std::error::panic
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::response::Text
+use src::openapi::response_inference::inferred_responses
+
+test "typed text response contracts include the wire media type":
+  let spec = document(info(title: "Responses", version: "1"))
+    .route("/text", method: Method::Get {}, operation: operation().with_responses(inferred_responses<Text>()))
+  match(stringify(spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"text/plain; charset=utf-8\"".as_slice(), "missing text response")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

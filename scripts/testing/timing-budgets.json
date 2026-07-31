@@ -14,7 +14,8 @@
   "web-unit": {
     "maxWallMs": 420000,
     "maxWallMsByCommand": {
-      "npm run test:unit:web:ci": 2700000
+      "npm run test:unit:web:ci:0": 1800000,
+      "npm run test:unit:web:ci:1": 1800000
     },
     "maxFileMs": 180000
   },

@@ -1,0 +1,31 @@
+use std::bytes::{ ByteBuffer, Bytes }
+use std::json::stringify
+use std::error::panic
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::response::{ Accepted, Created, DocumentedResponse, IntoResponse, Json, NoContent, OpenApiResponse, Text, accepted, bytes, created, documented_response, json, no_content, option_json, result_json, text }
+use src::response_composites::self as response_composites
+use src::router::app
+use src::openapi::automatic::all
+
+fn binary_reply() -> Bytes
+  let ~buffer = ByteBuffer::init()
+  buffer.push(98)
+  buffer.push(121)
+  buffer.push(116)
+  buffer.push(101)
+  buffer.push(115)
+  buffer.as_bytes()
+
+test "automatic routes cover binary responses":
+  let web_app = app(openapi: { title: "Responses", version: "1" })
+    .get<Bytes>("/binary", handler: binary_reply)
+  match(stringify(web_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"application/octet-stream\"".as_slice(), "missing automatic binary response")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

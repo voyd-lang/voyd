@@ -1,0 +1,29 @@
+use std::http::server::self as server
+use std::json::stringify
+use std::error::panic
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::router::app
+use src::openapi::automatic::all
+use src::sse::{ Sender, SseResponse }
+use src::sse::typed_response as sse_response
+
+fn write_sse(_sender: Sender): server::ResponseWriter -> void
+  void
+
+fn sse_reply(): (server::ResponseStream, open) -> SseResponse
+  sse_response(write_sse)
+
+test "automatic routes cover SSE responses":
+  let web_app = app(openapi: { title: "Responses", version: "1" })
+    .get<SseResponse>("/events", handler: sse_reply)
+  match(stringify(web_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"text/event-stream; charset=utf-8\"".as_slice(), "SSE media type omitted its charset")
+      require_contains(value, "\"x-voyd-event-schema\"".as_slice(), "SSE event schema metadata was omitted")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

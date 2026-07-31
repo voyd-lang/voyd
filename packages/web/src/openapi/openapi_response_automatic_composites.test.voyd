@@ -1,0 +1,49 @@
+use src::openapi::test_types::AutomaticArticle
+use std::json::stringify
+use std::error::panic
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::response::{ Accepted, Created, IntoResponse, Json, NoContent, accepted, created, json, no_content }
+use src::router::app
+use src::openapi::automatic::all
+
+fn accepted_reply() -> Accepted<AutomaticArticle>
+  accepted(AutomaticArticle { id: 2, title: "queued".to_string() })
+
+fn empty_reply() -> NoContent
+  no_content()
+
+fn result_reply() -> Result<Created<AutomaticArticle>, Accepted<AutomaticArticle>>
+  Ok<Created<AutomaticArticle>> {
+    value: created(AutomaticArticle { id: 3, title: "created".to_string() })
+  }
+
+fn option_reply() -> Option<Json<AutomaticArticle>>
+  Some<Json<AutomaticArticle>> {
+    value: json(AutomaticArticle { id: 4, title: "found".to_string() })
+  }
+
+fn accepts_response<T: IntoResponse<T>>(value: T) -> T
+  value
+
+test "automatic routes cover status result and option responses":
+  let _ = accepts_response<Result<Created<AutomaticArticle>, Accepted<AutomaticArticle>>>(result_reply())
+  let web_app = app(openapi: { title: "Responses", version: "1" })
+    .get("/accepted", handler: accepted_reply)
+    .get("/empty", handler: empty_reply)
+    .get<Result<Created<AutomaticArticle>, Accepted<AutomaticArticle>>>("/result", handler: result_reply)
+    .get<Option<Json<AutomaticArticle>>>("/option", handler: option_reply)
+  match(stringify(web_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"202\"".as_slice(), "missing accepted automatic response")
+      require_contains(value, "\"204\"".as_slice(), "missing no-content automatic response")
+      require_contains(value, "\"201\"".as_slice(), "missing result success response")
+      require_contains(value, "\"404\"".as_slice(), "missing option not-found response")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

@@ -2452,10 +2452,46 @@
     "rationale": "Keep co-located: protects pkg::web same-status typed response alternatives through the native Voyd test runner."
   },
   {
+    "file": "packages/web/src/openapi/openapi_response_automatic_binary.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic binary response media inference through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_automatic_composites.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic status, result, and option response inference through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_automatic_html.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic HTML response media inference through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_automatic_media.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic text response media inference through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_automatic_sse.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic SSE response media and event-schema metadata through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_composite_contracts.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web explicit result and option response contracts through the native Voyd test runner."
+  },
+  {
     "file": "packages/web/src/openapi/openapi_response_contracts.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
-    "rationale": "Keep co-located: protects pkg::web inferred typed, result, option, text, and status response contracts through the native Voyd test runner."
+    "rationale": "Keep co-located: protects pkg::web inferred success and empty-status response contracts through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/openapi/openapi_response_explicit_docs.test.voyd",
@@ -2485,13 +2521,19 @@
     "file": "packages/web/src/openapi/openapi_response_routes.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
-    "rationale": "Keep co-located: protects pkg::web automatic response inference across custom, raw, text, binary, composite, HTML, and SSE routes through the native Voyd test runner."
+    "rationale": "Keep co-located: protects pkg::web automatic custom and opaque response inference through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/openapi/openapi_response_sse.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
     "rationale": "Keep co-located: protects pkg::web explicit SSE schema and route documentation overlays through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_text_contract.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web explicit text response media contracts through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/openapi/openapi_response_untyped_overrides.test.voyd",
@@ -2535,6 +2577,12 @@
     "disposition": "package-local",
     "rationale": "Keep co-located: protects release synchronization of compiler and standard-library source version identities.",
     "reviewed": "2026-07-30"
+  },
+  {
+    "file": "scripts/testing/run-web-test-shards.test.mjs",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep with CI tooling: protects deterministic complete web-shard partition selection and rejects invalid partition arguments."
   },
   {
     "file": "scripts/testing/timing-budget.test.mjs",
