@@ -1,0 +1,15 @@
+use src::openapi::test_types::AutomaticArticle
+use src::response::{ Accepted, Json, option_json, result_json }
+use std::optional::types::all
+use std::result::types::all
+
+pub fn mapped_result_reply() -> Result<Json<AutomaticArticle>, Accepted<AutomaticArticle>>
+  let value: Result<AutomaticArticle, Accepted<AutomaticArticle>> = Ok<AutomaticArticle> {
+    value: AutomaticArticle { id: 5, title: "mapped" }
+  }
+  result_json<AutomaticArticle, Accepted<AutomaticArticle>>(value)
+
+pub fn mapped_option_reply() -> Option<Json<AutomaticArticle>>
+  option_json<AutomaticArticle>(Some<AutomaticArticle> {
+    value: AutomaticArticle { id: 6, title: "optional" }
+  })

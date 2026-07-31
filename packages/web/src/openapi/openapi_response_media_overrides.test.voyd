@@ -1,0 +1,48 @@
+use src::openapi::{ document, info, openapi_header, openapi_json_response, openapi_opaque_request, operation, operation_with_request }
+use src::openapi::builder_test_helpers::require_contains
+use src::openapi::openapi_response as response_override
+use src::openapi::test_types::AutomaticArticle
+use std::http::Method
+use std::json::stringify
+use std::optional::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+test "request overrides and same-status response media types are preserved":
+  let request = openapi_opaque_request(
+    content_type: "application/json",
+    description: "Optional input".to_string(),
+    required: false
+  )
+  let spec = document(info(title: "Overrides", version: "1"))
+    .route(
+      "/merge",
+      method: Method::Post {},
+      operation: operation_with_request(operation(), request)
+        .with_responses([
+          openapi_json_response<AutomaticArticle>(
+            status: 200,
+            description: "JSON",
+            headers: [openapi_header<i32>(
+              name: "x-rate-limit",
+              description: "Remaining requests".to_string(),
+              required: true
+            )]
+          ),
+          response_override(
+            status: 200,
+            description: "Text".to_string(),
+            content_type: Some<String> { value: "text/plain".to_string() }
+          )
+        ])
+    )
+  match(stringify(spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "Optional input".as_slice(), "missing request description")
+      require_contains(value, "\"required\":false".as_slice(), "missing optional request body")
+      require_contains(value, "\"application/json\"".as_slice(), "missing JSON response alternative")
+      require_contains(value, "\"text/plain\"".as_slice(), "missing text response alternative")
+      require_contains(value, "x-rate-limit".as_slice(), "missing response header")
+      require_contains(value, "\"required\":true".as_slice(), "required response header became optional")

@@ -1,0 +1,77 @@
+use src::openapi::{ OpenApiParameterContract, RouteDocs, openapi_json_response, openapi_untyped_header }
+use src::openapi::automatic::all
+use src::openapi::builder_test_helpers::require_contains
+use src::openapi::response_automatic_route_test_helpers::{ accepted_reply, accepts_response, binary_reply, empty_reply, html_reply, option_reply, raw_unit_reply, result_reply, text_reply }
+use src::openapi::response_custom_test_helpers::{ CustomReply, custom_reply }
+use src::openapi::response_sse_test_helpers::sse_reply
+use src::openapi::test_types::AutomaticArticle
+use src::response::{ Accepted, Created, DocumentedResponse, Json }
+use src::router::{ Context, app }
+use src::sse::SseResponse
+use std::http::{ Method, Response }
+use std::json::stringify
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+test "automatic routes cover typed custom text binary result option and opaque responses":
+  let _ = accepts_response<Result<Created<AutomaticArticle>, Accepted<AutomaticArticle>>>(result_reply())
+  let with_custom = app(openapi: { title: "Responses", version: "1" })
+    .get<DocumentedResponse<CustomReply>>("/custom", handler: custom_reply)
+  let with_raw = with_custom.get("/raw", handler: raw_unit_reply)
+  let with_text = with_raw.get("/text", handler: text_reply)
+  let with_binary = with_text.get("/binary", handler: binary_reply)
+  let with_accepted = with_binary.get("/accepted", handler: accepted_reply)
+  let with_empty = with_accepted.get("/empty", handler: empty_reply)
+  let with_result = with_empty.get<Result<Created<AutomaticArticle>, Accepted<AutomaticArticle>>>("/result", handler: result_reply)
+  let with_option = with_result.get<Option<Json<AutomaticArticle>>>("/option", handler: option_reply)
+  let with_html = with_option.get("/html", handler: html_reply)
+  let web_app = with_html.get<SseResponse>("/events", handler: sse_reply)
+  match(stringify(web_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"203\"".as_slice(), "missing custom automatic response")
+      require_contains(value, "\"202\"".as_slice(), "missing accepted automatic response")
+      require_contains(value, "\"204\"".as_slice(), "missing no-content automatic response")
+      require_contains(value, "\"201\"".as_slice(), "missing result success response")
+      require_contains(value, "\"404\"".as_slice(), "missing option not-found response")
+      require_contains(value, "\"text/plain; charset=utf-8\"".as_slice(), "missing automatic text response")
+      require_contains(value, "\"application/octet-stream\"".as_slice(), "missing automatic binary response")
+      require_contains(value, "\"text/html; charset=utf-8\"".as_slice(), "missing automatic HTML response")
+      require_contains(value, "\"text/event-stream; charset=utf-8\"".as_slice(), "SSE media type omitted its charset")
+      require_contains(value, "\"x-voyd-event-schema\"".as_slice(), "SSE event schema metadata was omitted")
+      require_contains(value, "Opaque response".as_slice(), "raw response was not kept opaque")
+
+test "untyped parameter and response header overrides emit honest schemas":
+  let parameter = OpenApiParameterContract {
+    name: "trace".to_string(),
+    location: "query".to_string(),
+    description: None {},
+    schema: None {},
+    required: false
+  }
+  let header = openapi_untyped_header(name: "x-dynamic")
+  let response = openapi_json_response<AutomaticArticle>(
+    status: 200,
+    description: "Dynamic response",
+    headers: [header]
+  )
+  let parameter_docs = RouteDocs::empty().with_parameters([parameter])
+  let docs = parameter_docs.with_responses([response])
+  let documented = app(openapi: { title: "Opaque overrides", version: "1" })
+    .route<Response>(
+      "/opaque-overrides",
+      method: Method::Get {},
+      handler: (_ctx: Context) -> Response => Response::ok().empty(),
+      docs: docs
+    )
+  match(stringify(documented.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"name\":\"trace\"".as_slice(), "untyped parameter was omitted")
+      require_contains(value, "\"x-dynamic\"".as_slice(), "untyped response header was omitted")
+      require_contains(value, "\"schema\":{}".as_slice(), "untyped parameter omitted its honest empty schema")
+      require_contains(value, "\"type\":\"string\"".as_slice(), "untyped response header omitted its wire string schema")

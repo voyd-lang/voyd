@@ -1,0 +1,41 @@
+use src::extract::json_body
+use src::openapi::{ document, info, openapi_json_response, operation, route_docs }
+use src::openapi::builder_test_helpers::require_contains
+use src::openapi::response_custom_test_helpers::CustomReply
+use src::openapi::test_types::{ AutomaticArticle, AutomaticCreateArticle }
+use src::router::app
+use std::http::{ Method, Response }
+use std::json::stringify
+use std::string::type::String
+use std::test::assertions::all
+
+fn raw_reply(_input: AutomaticCreateArticle): (open) -> Response
+  Response::ok().text("raw")
+
+test "raw and custom responses use explicit response documentation":
+  let custom_spec = document(info(title: "Custom", version: "1"))
+    .route("/custom", method: Method::Get {}, operation: operation().with_responses(CustomReply::documented_responses()))
+    .route("/raw-override", method: Method::Get {}, operation: operation().with_responses([
+      openapi_json_response<AutomaticArticle>(status: 206, description: "Partial article")
+    ]))
+  let documented = app(openapi: { title: "Overrides", version: "1" })
+    .post(
+      "/raw".as_slice(),
+      body: json_body(),
+      handler: raw_reply,
+      docs: route_docs(responses: [
+        openapi_json_response<AutomaticArticle>(status: 206, description: "Partial article")
+      ])
+    )
+  match(stringify(custom_spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"203\"".as_slice(), "missing custom response contract")
+      require_contains(value, "\"206\"".as_slice(), "missing response override")
+  match(stringify(documented.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"/raw\"".as_slice(), "missing raw response route")
+      require_contains(value, "\"206\"".as_slice(), "missing raw response override")

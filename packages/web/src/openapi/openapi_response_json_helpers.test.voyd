@@ -1,0 +1,31 @@
+use src::openapi::automatic::all
+use src::openapi::builder_test_helpers::require_contains
+use src::openapi::response_json_test_helpers::{ mapped_option_reply, mapped_result_reply }
+use src::openapi::test_types::AutomaticArticle
+use src::response::{ Accepted, Json }
+use src::router::app
+use std::json::stringify
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+test "JSON result and option helpers preserve automatic response contracts":
+  let web_app = app(openapi: { title: "Mapped responses", version: "1" })
+    .get<Result<Json<AutomaticArticle>, Accepted<AutomaticArticle>>>(
+      "/result-json",
+      handler: mapped_result_reply
+    )
+    .get<Option<Json<AutomaticArticle>>>(
+      "/option-json",
+      handler: mapped_option_reply
+    )
+  match(stringify(web_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"200\"".as_slice(), "mapped JSON success was erased")
+      require_contains(value, "\"202\"".as_slice(), "mapped result error was erased")
+      require_contains(value, "\"404\"".as_slice(), "mapped option fallback was erased")
+      require_contains(value, "\"id\"".as_slice(), "mapped JSON DTO schema was erased")
+      require_contains(value, "\"title\"".as_slice(), "mapped JSON DTO fields were erased")

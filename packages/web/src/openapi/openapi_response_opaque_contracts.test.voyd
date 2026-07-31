@@ -1,0 +1,43 @@
+use src::openapi::{ document, info, operation }
+use src::openapi::builder_test_helpers::require_contains
+use src::openapi::response_inference::inferred_responses
+use src::openapi::test_types::AutomaticArticle
+use src::response::{ Created, IntoResponse }
+use std::http::{ Method, Response }
+use std::json::stringify
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+obj UndocumentedReply {
+  api message: String
+}
+
+impl IntoResponse<UndocumentedReply> for UndocumentedReply
+  fn into_response(self) -> Response
+    Response::ok().text(self.message)
+
+test "opaque branches remain visible in result and option contracts":
+  let spec = document(info(title: "Opaque composites", version: "1"))
+    .route(
+      "/result",
+      method: Method::Get {},
+      operation: operation().with_responses(
+        inferred_responses<Result<Created<AutomaticArticle>, UndocumentedReply>>()
+      )
+    )
+    .route(
+      "/option",
+      method: Method::Get {},
+      operation: operation().with_responses(
+        inferred_responses<Option<UndocumentedReply>>()
+      )
+    )
+  match(stringify(spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"201\"".as_slice(), "typed result branch was omitted")
+      require_contains(value, "\"404\"".as_slice(), "option fallback was omitted")
+      require_contains(value, "\"default\"".as_slice(), "opaque composite branch was fabricated or dropped")

@@ -1,0 +1,9 @@
+use src::sse::{ Sender, SseResponse }
+use src::sse::typed_response as sse_response
+use std::http::server::self as server
+
+fn write_sse(_sender: Sender): server::ResponseWriter -> void
+  void
+
+pub fn sse_reply(): (server::ResponseStream, open) -> SseResponse
+  sse_response(write_sse)

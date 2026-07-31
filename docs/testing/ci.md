@@ -127,9 +127,15 @@ library and SDK tests completed successfully, but the job reached its
 The first bounded local shard sweep passed the first eight sorted files at the
 default heap and reached 725,760 ms when the existing
 `openapi_responses.test.voyd` shard hit the intentionally strict 180,000 ms
-local validation cutoff. The initial hosted limits therefore account for both
-the observed sequential cost and the prior hosted-runner slowdown; they are
-transition bounds, not a new permanent baseline.
+local validation cutoff. On the first hosted run, shards 1–9 passed before the
+same responses fixture reached the unchanged 600,000 ms hard timeout without
+an assertion failure or OOM. That run measured `openapi_app.test.voyd` at
+about 178 seconds for all 27 cases, the single-feature builder shards at about
+126–130 seconds, `openapi_composition.test.voyd` at about 236 seconds, and
+`openapi_operation_docs.test.voyd` at about 126 seconds. The initial hosted
+limits therefore account for both the observed sequential cost and the prior
+hosted-runner slowdown; they are transition bounds, not a new permanent
+baseline.
 
 This is addressed by isolation instead of an unbounded heap increase:
 
@@ -145,12 +151,24 @@ This is addressed by isolation instead of an unbounded heap increase:
   full-repository test commands cannot fall back to the monolithic OOM path;
 - the former compound OpenAPI builder test is separated by contract family,
   preserving every assertion while bounding each semantic graph;
+- the responses fixture is separated into eight contract-focused test shards,
+  while shared handlers and response types live in non-test helper modules so
+  deterministic discovery executes every original test exactly once;
 - the generated string-overload freshness check still runs before the shards;
 - only the exact `npm run test:unit:web:ci` command has a temporary
   2,700,000 ms wall budget and each shard has a 600,000 ms hard timeout; all
   ordinary unit budgets remain unchanged;
 - the dedicated web job has a 50-minute orchestration ceiling and retains its
   timing artifact for 30 days.
+
+The split preserves the responses fixture's nine tests and 44 containment
+assertions. Local validation passed the typed-contract, automatic-route,
+opaque-branch, schema-alternative, and media-override shards under the existing
+600-second gate. Normal uncontended runs completed in about 50–105 seconds; one
+typed-contract run completed in 533 seconds while the shared development
+machine was contended. The complete hosted web job remains definitive for the
+full sorted shard sweep, peak-memory behavior, and the 600-second per-shard
+gate. No command, job, heap, or per-shard limit was raised for this split.
 
 The main `test` job also has a 25-minute orchestration ceiling. This does not
 relax a test gate: its exact core command remains capped at 630,000 ms. The

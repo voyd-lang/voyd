@@ -2446,10 +2446,52 @@
     "rationale": "Keep co-located: protects the pkg::web low-level Operation.with_docs response-schema overlay contract through the native Voyd test runner."
   },
   {
-    "file": "packages/web/src/openapi/openapi_responses.test.voyd",
+    "file": "packages/web/src/openapi/openapi_response_automatic_routes.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
-    "rationale": "Keep co-located: protects pkg::web typed, composite, custom, opaque, and manually overridden response contracts through the native Voyd test runner."
+    "rationale": "Keep co-located: protects pkg::web automatic response inference across custom, text, binary, result, option, HTML, SSE, opaque, and untyped override route returns through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_explicit_docs.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web explicit response documentation for raw handlers and custom OpenApiResponse implementations through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_json_helpers.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web JSON result and option helper response inference, fallback statuses, and DTO schema preservation through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_media_overrides.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web request overrides and same-status multi-media response/header contracts through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_opaque_contracts.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web result and option response inference when one response branch is intentionally undocumented through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_schema_alternatives.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web same-status response schema alternatives so neither typed JSON branch is erased through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_sse_docs.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web typed SSE response schema overlays, field descriptions, and literal route documentation through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_typed_contracts.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web status, media type, result, and option response contracts through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/phase2.test.voyd",

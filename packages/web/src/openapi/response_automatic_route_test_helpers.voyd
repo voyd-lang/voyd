@@ -1,0 +1,45 @@
+use src::html::{ HtmlResponse, html }
+use src::openapi::test_types::AutomaticArticle
+use src::response::{ Accepted, Created, IntoResponse, Json, NoContent, accepted, created, json, no_content }
+use std::bytes::{ ByteBuffer, Bytes }
+use std::http::Response
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+
+pub fn raw_unit_reply() -> Response
+  Response::ok().text("raw")
+
+pub fn text_reply() -> String
+  "plain".to_string()
+
+pub fn binary_reply() -> Bytes
+  let ~buffer = ByteBuffer::init()
+  buffer.push(98)
+  buffer.push(121)
+  buffer.push(116)
+  buffer.push(101)
+  buffer.push(115)
+  buffer.as_bytes()
+
+pub fn accepted_reply() -> Accepted<AutomaticArticle>
+  accepted(AutomaticArticle { id: 2, title: "queued".to_string() })
+
+pub fn empty_reply() -> NoContent
+  no_content()
+
+pub fn result_reply() -> Result<Created<AutomaticArticle>, Accepted<AutomaticArticle>>
+  Ok<Created<AutomaticArticle>> {
+    value: created(AutomaticArticle { id: 3, title: "created".to_string() })
+  }
+
+pub fn option_reply() -> Option<Json<AutomaticArticle>>
+  Some<Json<AutomaticArticle>> {
+    value: json(AutomaticArticle { id: 4, title: "found".to_string() })
+  }
+
+pub fn html_reply() -> HtmlResponse
+  html("<main>ready</main>")
+
+pub fn accepts_response<T: IntoResponse<T>>(value: T) -> T
+  value

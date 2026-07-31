@@ -1,0 +1,21 @@
+use src::openapi::{ OpenApiResponseContract, openapi_json_response }
+use src::openapi::test_types::AutomaticArticle
+use src::response::{ DocumentedResponse, IntoResponse, OpenApiResponse, documented_response }
+use std::array::Array
+use std::http::Response
+use std::string::type::String
+
+pub obj CustomReply {
+  api message: String
+}
+
+impl IntoResponse<CustomReply> for CustomReply
+  fn into_response(self) -> Response
+    Response::ok().text(self.message)
+
+impl OpenApiResponse<CustomReply> for CustomReply
+  fn documented_responses() -> Array<OpenApiResponseContract>
+    [openapi_json_response<AutomaticArticle>(status: 203, description: "Custom response")]
+
+pub fn custom_reply() -> DocumentedResponse<CustomReply>
+  documented_response(CustomReply { message: "custom" })
