@@ -29,8 +29,16 @@ test "low-level operations retain manual response schema overlays":
     documented.response_schema_docs.at(0).content_type ?? "".as_slice().to_string(),
     eq: "application/json"
   )
+  assert(
+    documented.response_schema_docs.at(0).schema.description ?? "".as_slice().to_string(),
+    eq: "Manual JSON response schema"
+  )
   assert(documented.response_schema_docs.at(1).status, eq: 200)
   assert(
     documented.response_schema_docs.at(1).content_type ?? "".as_slice().to_string(),
     eq: "text/event-stream"
+  )
+  assert(
+    documented.response_schema_docs.at(1).schema.description ?? "".as_slice().to_string(),
+    eq: "Manual SSE event schema"
   )
