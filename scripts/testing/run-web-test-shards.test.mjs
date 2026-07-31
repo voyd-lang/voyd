@@ -17,16 +17,21 @@ describe("web test shard partitioning", () => {
     ];
     const first = selectPartition(
       files,
-      parsePartitionArgs(["--partition-index=0", "--partition-count=2"]),
+      parsePartitionArgs(["--partition-index=0", "--partition-count=3"]),
     );
     const second = selectPartition(
       files,
-      parsePartitionArgs(["--partition-index=1", "--partition-count=2"]),
+      parsePartitionArgs(["--partition-index=1", "--partition-count=3"]),
+    );
+    const third = selectPartition(
+      files,
+      parsePartitionArgs(["--partition-index=2", "--partition-count=3"]),
     );
 
-    expect(first).toEqual(["a.test.voyd", "c.test.voyd", "e.test.voyd"]);
-    expect(second).toEqual(["b.test.voyd", "d.test.voyd"]);
-    expect([...first, ...second].sort()).toEqual(files);
+    expect(first).toEqual(["a.test.voyd", "d.test.voyd"]);
+    expect(second).toEqual(["b.test.voyd", "e.test.voyd"]);
+    expect(third).toEqual(["c.test.voyd"]);
+    expect([...first, ...second, ...third].sort()).toEqual(files);
   });
 
   it.each([

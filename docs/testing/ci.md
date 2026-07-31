@@ -9,7 +9,7 @@ package unit behind one Turbo queue.
 - `test`: affected core package units, excluding the dedicated conformance,
   integration, web-package and developer-tooling workspaces, with explicit package
   concurrency of three and one Vitest worker per package task.
-- `web-unit`: affected Voyd web-package tests in two isolated deterministic
+- `web-unit`: affected Voyd web-package tests in three isolated deterministic
   partitions. Files remain sequential within each runner, so compiler heaps are
   never combined in one process.
 - `tooling-unit`: affected CLI and language-server package units, with the two
@@ -132,6 +132,15 @@ local validation cutoff. The initial hosted limits therefore account for both
 the observed sequential cost and the prior hosted-runner slowdown; they are
 transition bounds, not a new permanent baseline.
 
+Hosted run 30608445317 confirmed that two partitions were still too coarse:
+partition 1 reached shard 13 of 14 after about 33 minutes, while partition 2 was
+cancelled near the 35-minute job ceiling. The same run also exposed hidden
+overload context in a split untyped OpenAPI fixture. Expressing that fixture as
+a raw response route with explicit route documentation preserves its opaque
+response inference and every schema assertion without depending on imports
+from the former compound test. Three round-robin partitions reduce each
+runner's sequential work without raising a shard, command, or job limit.
+
 This is addressed by isolation instead of an unbounded heap increase:
 
 - the core-unit command excludes `@voyd-lang/web`;
@@ -142,7 +151,7 @@ This is addressed by isolation instead of an unbounded heap increase:
   suppress shards after one of those hidden source inputs changes;
 - the web task discovers every `packages/web/src/**/*.test.voyd`
   file, sorts them deterministically, and runs each in a fresh compiler process;
-- CI assigns the sorted files round-robin across two isolated runners. Each file
+- CI assigns the sorted files round-robin across three isolated runners. Each file
   belongs to exactly one partition, while the ordinary local command omits
   partition arguments and still runs the complete sorted list;
 - the ordinary web-package `test` script uses the same runner, so local and
@@ -151,10 +160,10 @@ This is addressed by isolation instead of an unbounded heap increase:
   contract family, preserving every assertion while bounding each semantic
   graph and long automatic-route chain;
 - the generated string-overload freshness check still runs before the shards;
-- only the exact partition commands `npm run test:unit:web:ci:0` and
-  `npm run test:unit:web:ci:1` have temporary 1,800,000 ms wall budgets, and
-  each shard retains its 600,000 ms hard timeout; all ordinary unit budgets
-  remain unchanged;
+- only the exact partition commands `npm run test:unit:web:ci:0`,
+  `npm run test:unit:web:ci:1`, and `npm run test:unit:web:ci:2` have temporary
+  1,800,000 ms wall budgets, and each shard retains its 600,000 ms hard timeout;
+  all ordinary unit budgets remain unchanged;
 - each dedicated partition job has a 35-minute orchestration ceiling and
   retains a uniquely named timing artifact for 30 days.
 
