@@ -19,8 +19,9 @@ The artifact header includes:
 - the callable-borrow-summary schema and version;
 - the complete non-test std source manifest and aggregate SHA-256;
 - the semantic options identity (`includeTests=false`, std dependency scope);
-- independent SHA-256 hashes for the canonical payload and V8 accelerator,
-  plus the accelerator's Node and V8 producer versions.
+- independent SHA-256 hashes for the canonical payload, its compressed
+  transport bytes, and the V8 accelerator, plus the accelerator's Node and V8
+  producer versions.
 
 The loader rejects incompatible, stale, truncated, corrupt, or partial
 artifacts before exposing semantic facts. It verifies the current std file set
@@ -28,9 +29,11 @@ as well as every recorded file hash, so adding, removing, or changing a source
 file invalidates the snapshot. Test-enabled std builds use source analysis.
 The uncompressed reference graph has a canonical, engine-independent encoding,
 so freshness is not coupled to the producer's V8 serialization format or
-compressed bytes. The loader attempts the faster V8 payload first. If that
-payload is corrupt or cannot be deserialized by the current engine, it restores
-the canonical payload instead; source analysis remains the final fallback.
+compressed bytes. The loader verifies both payload transports before attempting
+the faster V8 payload, without eagerly decompressing the canonical fallback.
+If the accelerator is corrupt or cannot be deserialized by the current engine,
+it restores the canonical payload instead; source analysis remains the final
+fallback.
 
 Paths in the payload are rooted at `$VOYD_STD_ROOT$` and are rebound to the
 installed package location during restoration. Type-arena IDs, effect rows,

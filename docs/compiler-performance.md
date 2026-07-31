@@ -84,23 +84,26 @@ the absolute peak-RSS-growth threshold is 64 MiB instead of 32 MiB for that
 row. Compile time, runtime, Wasm size, and gzip size keep their ordinary
 thresholds. Restoring the semantic graph creates a fixed startup working set;
 the six-sample V-448 comparison measured lower-quartile growth of 152.33 MiB
-before and 207.86 MiB after on the smallest scenario, a 55.53 MiB increase.
-The 64 MiB ceiling leaves 8.47 MiB of measurement headroom. Larger scenarios
-used 149-186 MiB less compile-attributable RSS. The exception does not apply
-when both revisions load the snapshot, or if the head stops hitting it, so the
-ordinary 32 MiB gate automatically resumes for subsequent changes.
+before and 207.86 MiB after on the smallest scenario; the scorecard reported a
+55.52 MiB increase from the unrounded values. That comparison left 8.48 MiB
+below the 64 MiB ceiling. A later hosted confirmation measured a 63.90 MiB
+increase on the same scenario, leaving only 0.10 MiB and demonstrating that
+the exception is tightly bounded. Larger scenarios in the six-sample
+comparison used 149-186 MiB less compile-attributable RSS. The exception does
+not apply when both revisions load the snapshot, or if the head stops hitting
+it, so the ordinary 32 MiB gate automatically resumes for subsequent changes.
 An explicit `--rss-min-bytes` or `OPTIMIZER_BENCH_RSS_MIN_BYTES` remains
 authoritative during the transition. Use
 `--precompiled-std-transition-rss-min-bytes` (or
 `OPTIMIZER_BENCH_PRECOMPILED_STD_TRANSITION_RSS_MIN_BYTES`) only to configure
 the migration threshold separately.
 
-Delete this transition exception once all supported comparison bases contain
-the precompiled snapshot. Before removal, rerun the Node 22 CI preset in both
-orders with at least six pooled samples. Package-interface and persistent
-incremental-snapshot work should target the ordinary 32 MiB budget without a
-feature allowance; update that work's stored measurements rather than
-increasing this migration limit.
+V-468 owns deleting this transition exception once all supported comparison
+bases contain the precompiled snapshot. Before removal, rerun the Node 22 CI
+preset in both orders with at least six pooled samples. V-462's package
+interfaces and V-467's persistent incremental snapshots must target the
+ordinary 32 MiB budget without a feature allowance; update those tickets'
+stored measurements rather than increasing this migration limit.
 
 When only sampled compile, runtime, or RSS measurements fail, the PR gate
 reruns the affected scenarios with base/head order reversed. It pools the

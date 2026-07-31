@@ -174,16 +174,6 @@ export const serializePrecompiledStdArtifact = ({
     JSON.stringify(encodeReferenceGraph(payload)),
   );
   const fastPayload = serialize(payload);
-  const envelope: PrecompiledStdSnapshotEnvelope = {
-    header,
-    payloadSha256: sha256(canonicalPayload),
-    fastPayloadSha256: sha256(fastPayload),
-    fastPayloadProducer: {
-      node: process.versions.node,
-      v8: process.versions.v8,
-    },
-  };
-  const serializedHeader = Buffer.from(JSON.stringify(envelope));
   const compressedFastPayload = brotliCompressSync(fastPayload, {
     params: {
       [zlibConstants.BROTLI_PARAM_QUALITY]: 6,
@@ -194,6 +184,17 @@ export const serializePrecompiledStdArtifact = ({
       [zlibConstants.BROTLI_PARAM_QUALITY]: 6,
     },
   });
+  const envelope: PrecompiledStdSnapshotEnvelope = {
+    header,
+    payloadSha256: sha256(canonicalPayload),
+    canonicalCompressedPayloadSha256: sha256(compressedCanonicalPayload),
+    fastPayloadSha256: sha256(fastPayload),
+    fastPayloadProducer: {
+      node: process.versions.node,
+      v8: process.versions.v8,
+    },
+  };
+  const serializedHeader = Buffer.from(JSON.stringify(envelope));
   const headerLength = Buffer.allocUnsafe(4);
   headerLength.writeUInt32BE(serializedHeader.byteLength);
   const fastPayloadLength = Buffer.allocUnsafe(4);
@@ -268,6 +269,12 @@ export const parsePrecompiledStdArtifact = (
   }
 
   const canonicalCompressedPayload = bytes.subarray(canonicalPayloadStart);
+  if (
+    sha256(canonicalCompressedPayload) !==
+    envelope.canonicalCompressedPayloadSha256
+  ) {
+    throw new SnapshotLoadError("canonical-payload-integrity");
+  }
   let wireGraph: unknown;
   if (!fastSerializedPayload || verifyCanonicalPayload) {
     wireGraph = decodeCanonicalPayload({
@@ -641,6 +648,7 @@ export const validatePrecompiledStdSnapshotHeader = (
     header.sources.length === 0 ||
     typeof header.stdContentSha256 !== "string" ||
     typeof envelope.payloadSha256 !== "string" ||
+    typeof envelope.canonicalCompressedPayloadSha256 !== "string" ||
     typeof envelope.fastPayloadSha256 !== "string" ||
     !envelope.fastPayloadProducer ||
     typeof envelope.fastPayloadProducer.node !== "string" ||

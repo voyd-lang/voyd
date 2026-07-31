@@ -23,7 +23,7 @@
     "maxFileMs": 60000
   },
   "integration": {
-    "maxWallMs": 515000,
+    "maxWallMs": 420000,
     "maxFileMs": 210000,
     "maxFileMsByPathSuffix": {
       "tests/integration/src/vx-dom.test.ts": 330000,

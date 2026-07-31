@@ -91,9 +91,15 @@ type ReturnSnapshot = {
 };
 
 const MAX_FLOW_PROJECTION_DEPTH = 8;
+const MAX_FLOW_PATHS_PER_PARAMETER = 32;
 
 const originKeys = new WeakMap<ParameterOrigin, string>();
 const contractEqualityKeys = new WeakMap<CallableBorrowContract, string>();
+type FlowWideningState = {
+  parameterCounts: Map<number, number>;
+  broadFamilies: Set<string>;
+};
+const flowWideningStates = new WeakMap<MutableFlow, FlowWideningState>();
 
 type SummaryContext = {
   hir: HirGraph;
@@ -251,6 +257,95 @@ const originKey = (origin: ParameterOrigin): string => {
 };
 
 const emptyFlow = (): MutableFlow => new Map();
+
+const broadFlowOrigin = (origin: ParameterOrigin): ParameterOrigin => ({
+  ...origin,
+  sourceProjections: [],
+  resultProjections: [],
+  ...(origin.accessTypeComparator
+    ? {
+        accessTypeComparator: {
+          ...origin.accessTypeComparator,
+          sourceProjections: [],
+        },
+      }
+    : {}),
+});
+
+const flowOriginFamilyKey = (origin: ParameterOrigin): string => {
+  const comparator = origin.accessTypeComparator;
+  return [
+    origin.parameter,
+    origin.sourceEndpointAccess,
+    origin.resultNominal ?? "",
+    origin.borrowed === true ? 1 : 0,
+    origin.shared === true ? 1 : 0,
+    origin.retainedUnlessBorrowed === true ? 1 : 0,
+    origin.fresh === true ? 1 : 0,
+    origin.defaultParameter ?? "",
+    origin.returnTypeConditionId ?? "",
+    comparator
+      ? `${comparator.conditionId.length}:${comparator.conditionId}:${comparator.parameter}`
+      : "",
+  ].join("|");
+};
+
+const flowOriginIsBroad = (origin: ParameterOrigin): boolean =>
+  origin.sourceProjections.length === 0 &&
+  origin.resultProjections.length === 0 &&
+  (origin.accessTypeComparator?.sourceProjections.length ?? 0) === 0;
+
+const flowWideningState = (flow: MutableFlow): FlowWideningState => {
+  const existing = flowWideningStates.get(flow);
+  if (existing) {
+    return existing;
+  }
+  const state: FlowWideningState = {
+    parameterCounts: new Map(),
+    broadFamilies: new Set(),
+  };
+  flow.forEach((origin) => {
+    state.parameterCounts.set(
+      origin.parameter,
+      (state.parameterCounts.get(origin.parameter) ?? 0) + 1,
+    );
+    if (flowOriginIsBroad(origin)) {
+      state.broadFamilies.add(flowOriginFamilyKey(origin));
+    }
+  });
+  flowWideningStates.set(flow, state);
+  return state;
+};
+
+const addBroadOrigin = (
+  flow: MutableFlow,
+  origin: ParameterOrigin,
+): void => {
+  const state = flowWideningState(flow);
+  const broad = broadFlowOrigin(origin);
+  const broadKey = originKey(broad);
+  const familyKey = flowOriginFamilyKey(broad);
+  if (state.broadFamilies.has(familyKey)) {
+    return;
+  }
+  let removed = 0;
+  Array.from(flow).forEach(([key, existing]) => {
+    if (
+      existing.parameter === origin.parameter &&
+      flowOriginFamilyKey(existing) === familyKey
+    ) {
+      flow.delete(key);
+      removed += 1;
+    }
+  });
+  flow.set(broadKey, broad);
+  state.parameterCounts.set(
+    origin.parameter,
+    (state.parameterCounts.get(origin.parameter) ?? 0) - removed + 1,
+  );
+  state.broadFamilies.add(familyKey);
+  incrementCompilerPerfCounter("borrowing.summary.flowWidenings");
+};
 
 const flowWithExplicitBorrowedOrigins = ({
   flow,
@@ -512,7 +607,34 @@ const externalModuleBindingFlows = (
   );
 
 const addOrigin = (flow: MutableFlow, origin: ParameterOrigin): void => {
-  flow.set(originKey(origin), origin);
+  const state = flowWideningState(flow);
+  const familyKey = flowOriginFamilyKey(origin);
+  if (
+    origin.sourceProjections.length > MAX_FLOW_PROJECTION_DEPTH ||
+    origin.resultProjections.length > MAX_FLOW_PROJECTION_DEPTH ||
+    (origin.accessTypeComparator?.sourceProjections.length ?? 0) >
+      MAX_FLOW_PROJECTION_DEPTH
+  ) {
+    addBroadOrigin(flow, origin);
+  } else if (!state.broadFamilies.has(familyKey)) {
+    const key = originKey(origin);
+    if (!flow.has(key)) {
+      flow.set(key, origin);
+      state.parameterCounts.set(
+        origin.parameter,
+        (state.parameterCounts.get(origin.parameter) ?? 0) + 1,
+      );
+    }
+  }
+  if (
+    (state.parameterCounts.get(origin.parameter) ?? 0) >
+    MAX_FLOW_PATHS_PER_PARAMETER
+  ) {
+    const parameterOrigins = Array.from(flow.values()).filter(
+      (candidate) => candidate.parameter === origin.parameter,
+    );
+    parameterOrigins.forEach((candidate) => addBroadOrigin(flow, candidate));
+  }
 };
 
 const retainOrigin = (origin: ParameterOrigin, ctx: SummaryContext): void => {
@@ -1055,7 +1177,18 @@ const physicalFlowOfExpression = (
   env: MutableEnv,
   ctx: SummaryContext,
   seen = new Set<SymbolId>(),
+  cache = new Map<string, Flow>(),
 ): MutableFlow => {
+  const cacheKey = `${exprId}:${Array.from(seen).sort((left, right) => left - right).join(",")}`;
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    incrementCompilerPerfCounter("borrowing.summary.physicalFlowCacheHits");
+    return new Map(cached);
+  }
+  const finish = (flow: MutableFlow): MutableFlow => {
+    cache.set(cacheKey, flow);
+    return new Map(flow);
+  };
   const place = placeOfExpression(exprId, ctx);
   if (place) {
     const known = ctx.placeEnvs.get(env)?.get(place.root);
@@ -1064,29 +1197,33 @@ const physicalFlowOfExpression = (
       const allocationBackedRoot =
         typeof rootType === "number" &&
         typeIsAllocationBacked(rootType, ctx.typing);
-      return unionFlows(
-        ...Array.from(known.values()).map((origin) =>
-          projectFlow(
-            new Map([[originKey(origin), origin]]),
-            allocationBackedRoot && origin.sourceProjections.length > 0
-              ? [{ kind: "dereference" }, ...place.projections]
-              : place.projections,
+      return finish(
+        unionFlows(
+          ...Array.from(known.values()).map((origin) =>
+            projectFlow(
+              new Map([[originKey(origin), origin]]),
+              allocationBackedRoot && origin.sourceProjections.length > 0
+                ? [{ kind: "dereference" }, ...place.projections]
+                : place.projections,
+            ),
           ),
         ),
       );
     }
     const parameterFlow = ctx.parameterSymbolFlows.get(place.root);
     if (parameterFlow) {
-      return projectFlow(parameterFlow, place.projections);
+      return finish(projectFlow(parameterFlow, place.projections));
     }
     const initializer = ctx.bindingInitializers.get(place.root);
     if (typeof initializer !== "number" || seen.has(place.root)) {
-      return emptyFlow();
+      return finish(emptyFlow());
     }
     seen.add(place.root);
-    return projectFlow(
-      physicalFlowOfExpression(initializer, env, ctx, seen),
-      place.projections,
+    return finish(
+      projectFlow(
+        physicalFlowOfExpression(initializer, env, ctx, seen, cache),
+        place.projections,
+      ),
     );
   }
   const expression = ctx.hir.expressions.get(exprId);
@@ -1094,34 +1231,42 @@ const physicalFlowOfExpression = (
     expression?.exprKind !== "call" &&
     expression?.exprKind !== "method-call"
   ) {
-    return emptyFlow();
+    return finish(emptyFlow());
   }
   const resolved = resolveBorrowCall(expression, ctx);
-  return unionFlows(
-    ...(resolved.contract?.parameters.flatMap((parameter, index) => {
-      if (!parameter.returned) {
-        return [];
-      }
-      const actual = resolved.arguments[index];
-      if (typeof actual !== "number") {
-        return [];
-      }
-      const origins =
-        parameter.returnedOrigins && parameter.returnedOrigins.length > 0
-          ? parameter.returnedOrigins
-          : (parameter.returnedPaths && parameter.returnedPaths.length > 0
-              ? parameter.returnedPaths
-              : [[]]
-            ).map((source) => ({ source, result: [] }));
-      return origins
-        .filter((origin) => origin.result.length === 0)
-        .map((origin) =>
-          projectFlow(
-            physicalFlowOfExpression(actual, env, ctx, new Set(seen)),
-            origin.source,
-          ),
-        );
-    }) ?? []),
+  return finish(
+    unionFlows(
+      ...(resolved.contract?.parameters.flatMap((parameter, index) => {
+        if (!parameter.returned) {
+          return [];
+        }
+        const actual = resolved.arguments[index];
+        if (typeof actual !== "number") {
+          return [];
+        }
+        const origins =
+          parameter.returnedOrigins && parameter.returnedOrigins.length > 0
+            ? parameter.returnedOrigins
+            : (parameter.returnedPaths && parameter.returnedPaths.length > 0
+                ? parameter.returnedPaths
+                : [[]]
+              ).map((source) => ({ source, result: [] }));
+        return origins
+          .filter((origin) => origin.result.length === 0)
+          .map((origin) =>
+            projectFlow(
+              physicalFlowOfExpression(
+                actual,
+                env,
+                ctx,
+                new Set(seen),
+                cache,
+              ),
+              origin.source,
+            ),
+          );
+      }) ?? []),
+    ),
   );
 };
 

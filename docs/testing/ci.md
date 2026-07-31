@@ -94,7 +94,7 @@ package before checking readiness, requests, and shutdown. On PR #752, hosted
 CI completed that test in 260,705 ms after its 120,000 ms Vitest timeout had
 already fired. The complete `sdk-node.test.ts` file took 349,978 ms, and the
 affected core-unit command took 523,746 ms. An isolated local run completed the
-same test and all shutdown assertions in 54,462 ms, confirming slow compilation
+same test and all shutdown assertions in 59,750 ms, confirming slow compilation
 rather than a server or cancellation hang.
 
 The temporary allowances preserve the test and the ordinary unit defaults:
@@ -184,18 +184,27 @@ V-448 also increased the semantic-analysis cost of the integration suite's two
 web-package compilations. On PR #752, hosted CI measured
 `vx-dom.test.ts` at 345,303 ms; its initial web-package compile reached the
 180,000 ms test timeout after 191,849 ms. The shared web-framework fixture hit
-the same 180,000 ms hook timeout. The failed two-worker run ended at 386,040 ms
-with 745,660 ms of aggregate test time. On the same revision, isolated local
-runs completed `web-framework.test.ts` in 95,660 ms and `vx-dom.test.ts` in
-102,770 ms, confirming slow completion rather than a hang.
+the same 180,000 ms hook timeout. The retained timing artifact records a
+396,968 ms failed lane wall time. On the same revision, isolated local runs
+completed `web-framework.test.ts` in 95,660 ms and `vx-dom.test.ts` in 102,770
+ms, confirming slow completion rather than a hang.
 
 The VX tests now share one SDK instance so their distinct entry compilations
-reuse the package dependency snapshot. A validation run reduced the isolated
-local VX file to 80,810 ms, and the two affected files passed together in
-86,180 ms. The first hosted rerun with that reuse passed all 141 assertions:
+reuse the package dependency snapshot. A local validation of the complete stack
+passed all 33 affected assertions in 84,550 ms. The first hosted rerun with
+that reuse passed all 141 assertions:
 `vx-dom.test.ts` completed in 280,143 ms and `web-framework.test.ts` completed
 in 91,818 ms. Its 427,481 ms lane wall time exceeded the pre-V-448 375,000 ms
 cap even though both file caps passed.
+
+A subsequent hosted run after bounded borrow-summary inference passed all 141
+assertions in 312,358 ms. `vx-dom.test.ts` completed in 208,424 ms and
+`web-framework.test.ts` in 73,857 ms. A later hosted run (30600608976) again
+passed all 16 files and 141 assertions, but its 394,740 ms lane wall exceeded
+the restored 375,000 ms cap. In that run, `vx-dom.test.ts` took 256,162 ms,
+`wasm-validation.test.ts` took 106,437 ms, and `web-framework.test.ts` took
+91,427 ms. This is healthy hosted-runner variance across several compile-heavy
+files, not a failed assertion or an individual-file overrun.
 
 The temporary hosted-runner allowances preserve every assertion:
 
@@ -204,17 +213,17 @@ The temporary hosted-runner allowances preserve every assertion:
   `tests/integration/src/web-framework.test.ts` each have a 330,000 ms file
   budget;
 - every other integration file retains the 210,000 ms budget;
-- only the integration lane budget is 515,000 ms, the observed 427,481 ms plus
-  20% hosted-runner headroom, rounded up.
+- only the integration lane wall budget increases from 375,000 ms to 420,000
+  ms, leaving 25,260 ms of headroom over the latest healthy run.
 
 V-462 and V-467 must make package semantics and callable caches reusable across
 these compilations and fresh processes. After they land, V-468 must collect at
-least ten successful hosted integration timing artifacts, set budgets from p95
-plus 20% runner headroom, remove the two file overrides when they fit under the
-general limit, and restore the 180,000 ms compile timeout when that value
-exceeds the measured bound. V-468 must also restore the 375,000 ms lane budget
-once hosted p95 plus 20% fits beneath it; until then, it should lower the
-temporary cap to the smallest rounded value above that measured bound.
+least ten successful hosted integration timing artifacts and set budgets from
+p95 plus 20% runner headroom. It must remove this 420,000 ms transition
+allowance by restoring the 375,000 ms lane cap when that measured bound fits,
+or tighten below 375,000 ms if the data supports it. V-468 must also remove the
+two file overrides when they fit under the general limit and restore the
+180,000 ms compile timeout when that value exceeds the measured bound.
 Assertions and test files must not be skipped to meet a timing budget.
 
 ## Runtime Selection
