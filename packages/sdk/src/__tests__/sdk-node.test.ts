@@ -404,8 +404,35 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env, time::Time) -> i32
 
   it("preserves array view loans through the public prelude API", async () => {
     const sdk = createSdk();
+    const invalidSource = `obj Item { value: i32 }
+
+fn replace_slot_during_view() -> i32
+  let ~values = Array<Item>::with_capacity(1)
+  values.push(Item { value: 1 })
+  let ~view: ViewIterator<Item> = values.view_iter()
+  match(view.next())
+    Some<borrow Item> { value }:
+      let _ = values.replace(0, with: Item { value: 2 })
+      value.value
+    None:
+      0
+`;
     const invalid = await sdk.compile({
-      source: `obj Item { value: i32 }
+      source: invalidSource,
+    });
+    expect(invalid.success).toBe(false);
+    if (invalid.success) return;
+    const conflicts = invalid.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "TY0048",
+    );
+    expect(conflicts).toHaveLength(1);
+    expect(
+      invalidSource.slice(conflicts[0]!.span.start, conflicts[0]!.span.end),
+    ).toContain("values.replace");
+
+    expectCompileSuccess(
+      await sdk.compile({
+        source: `obj Item { value: i32 }
 
 fn mutate(~item: Item) -> void
   item.value = item.value + 1
@@ -421,28 +448,6 @@ fn mutate_alias_during_view() -> i32
       value.value
     None:
       0
-
-fn replace_slot_during_view() -> i32
-  let ~values = Array<Item>::with_capacity(1)
-  values.push(Item { value: 1 })
-  let ~view: ViewIterator<Item> = values.view_iter()
-  match(view.next())
-    Some<borrow Item> { value }:
-      let _ = values.replace(0, with: Item { value: 2 })
-      value.value
-    None:
-      0
-`,
-    });
-    expect(invalid.success).toBe(false);
-    if (invalid.success) return;
-    expect(
-      invalid.diagnostics.filter((diagnostic) => diagnostic.code === "TY0048"),
-    ).toHaveLength(2);
-
-    expectCompileSuccess(
-      await sdk.compile({
-        source: `obj Item { value: i32 }
 
 pub fn main() -> i32
   let ~values = Array<Item>::with_capacity(1)
