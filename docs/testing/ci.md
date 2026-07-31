@@ -95,14 +95,27 @@ affected core-unit command took 523,746 ms. An isolated local run completed the
 same test and all shutdown assertions in 59,750 ms, confirming slow compilation
 rather than a server or cancellation hang.
 
+After snapshot reuse and bounded borrow-summary inference landed, hosted run
+30601155766 passed every completed package report (358 suites across compiler,
+SDK, JS host, lib, and markdown) but the 12-minute job timeout cancelled the
+still-running core command at 691,614 ms. Because cancellation prevented its
+wall report from being written, this is a lower bound rather than a completed
+hosted timing. The exact affected command subsequently passed all ten local
+Turbo tasks in 666,137 ms. Both measurements exceed the previous 630,000 ms
+command cap, and the hosted job left only about 11.5 minutes for the command
+after setup.
+
 The temporary allowances preserve the test and the ordinary unit defaults:
 
 - only `closes a long-running web app entry through the SDK helper` has a
   330,000 ms test timeout;
 - only `packages/sdk/src/__tests__/sdk-node.test.ts` has a 420,000 ms file
   budget;
-- only the exact `npm run test:unit:core:affected:ci` command has a 630,000 ms
+- only the exact `npm run test:unit:core:affected:ci` command has a 900,000 ms
   wall budget;
+- only the outer `test` job timeout is 20 minutes, leaving setup, artifact
+  summarization, conditional build, and typing-benchmark time outside the
+  command budget;
 - every other unit test file retains the 180,000 ms budget, and every other
   unit command—including the tooling shard—retains the 420,000 ms wall budget.
 
@@ -110,9 +123,10 @@ V-462 and V-467 must make package semantics and callable caches reusable across
 the SDK's fresh web-package compilation. After they land, V-468 must collect at
 least ten successful hosted core-unit timing artifacts, set temporary bounds
 from observed p95 plus 20% runner headroom, remove the exact file and command
-overrides when they fit under the ordinary limits, and restore the test's
-120,000 ms timeout. Assertions and test files must not be skipped to meet a
-timing budget.
+overrides when they fit under the ordinary limits, restore the outer `test` job
+timeout to 12 minutes once the complete job fits with operational headroom, and
+restore the test's 120,000 ms timeout. Assertions and test files must not be
+skipped to meet a timing budget.
 
 The first live hosted-runner integration baseline completed all 128 assertions
 in about 201 seconds, with the slowest file at about 132 seconds. After the

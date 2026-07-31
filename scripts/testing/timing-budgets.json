@@ -2,7 +2,7 @@
   "unit": {
     "maxWallMs": 420000,
     "maxWallMsByCommand": {
-      "npm run test:unit:core:affected:ci": 630000
+      "npm run test:unit:core:affected:ci": 900000
     },
     "maxFileMs": 180000,
     "maxFileMsByPathSuffix": {
