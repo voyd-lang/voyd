@@ -331,7 +331,7 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
 
     await expect(result.close()).resolves.toBeUndefined();
     await expect(httpGet(`${result.url}/hello`)).rejects.toThrow();
-  }, 120_000);
+  }, 330_000);
 
   it("serves high-level web route handlers without serializing unrelated requests", async () => {
     const port = await findFreePort();

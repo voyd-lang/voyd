@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { fileBudgetMs } from "./timing-budget.mjs";
+import { fileBudgetMs, wallBudgetMs } from "./timing-budget.mjs";
 
 const budget = {
+  maxWallMs: 420_000,
+  maxWallMsByCommand: {
+    "npm run test:unit:core:affected:ci": 630_000,
+  },
   maxFileMs: 180_000,
   maxFileMsByBasename: {
     "slow.test.ts": 210_000,
@@ -10,6 +14,29 @@ const budget = {
     "apps/cli/src/__tests__/slow.test.ts": 240_000,
   },
 };
+
+describe("lane wall timing budgets", () => {
+  it("uses an exact command override", () => {
+    expect(
+      wallBudgetMs(["npm", "run", "test:unit:core:affected:ci"], budget),
+    ).toBe(630_000);
+  });
+
+  it("does not apply an override to a command with extra arguments", () => {
+    expect(
+      wallBudgetMs(
+        ["npm", "run", "test:unit:core:affected:ci", "--", "--filter=x"],
+        budget,
+      ),
+    ).toBe(420_000);
+  });
+
+  it("falls back to the lane default for other commands", () => {
+    expect(
+      wallBudgetMs(["npm", "run", "test:unit:tooling:affected:ci"], budget),
+    ).toBe(420_000);
+  });
+});
 
 describe("file timing budgets", () => {
   it("uses an exact path-suffix override before a basename override", () => {

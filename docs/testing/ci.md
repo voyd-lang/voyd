@@ -85,6 +85,35 @@ exceptions when that value is at or below the general 180,000 ms limit, and
 restore strict permanent budgets. Keep the 420,000 ms lane guard unchanged
 throughout so aggregate regressions remain visible.
 
+### V-448 SDK transition
+
+The SDK's end-to-end web helper test performs a first compile of the full web
+package before checking readiness, requests, and shutdown. On PR #752, hosted
+CI completed that test in 260,705 ms after its 120,000 ms Vitest timeout had
+already fired. The complete `sdk-node.test.ts` file took 349,978 ms, and the
+affected core-unit command took 523,746 ms. An isolated local run completed the
+same test and all shutdown assertions in 54,462 ms, confirming slow compilation
+rather than a server or cancellation hang.
+
+The temporary allowances preserve the test and the ordinary unit defaults:
+
+- only `closes a long-running web app entry through the SDK helper` has a
+  330,000 ms test timeout;
+- only `packages/sdk/src/__tests__/sdk-node.test.ts` has a 420,000 ms file
+  budget;
+- only the exact `npm run test:unit:core:affected:ci` command has a 630,000 ms
+  wall budget;
+- every other unit test file retains the 180,000 ms budget, and every other
+  unit command—including the tooling shard—retains the 420,000 ms wall budget.
+
+V-462 and V-467 must make package semantics and callable caches reusable across
+the SDK's fresh web-package compilation. After they land, V-468 must collect at
+least ten successful hosted core-unit timing artifacts, set temporary bounds
+from observed p95 plus 20% runner headroom, remove the exact file and command
+overrides when they fit under the ordinary limits, and restore the test's
+120,000 ms timeout. Assertions and test files must not be skipped to meet a
+timing budget.
+
 The first live hosted-runner integration baseline completed all 128 assertions
 in about 201 seconds, with the slowest file at about 132 seconds. After the
 public web package gained request streaming, SSE, and OpenAPI generation,

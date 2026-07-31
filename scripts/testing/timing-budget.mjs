@@ -1,5 +1,8 @@
 import { basename } from "node:path";
 
+export const wallBudgetMs = (command, budget) =>
+  budget.maxWallMsByCommand?.[command.join(" ")] ?? budget.maxWallMs;
+
 export const fileBudgetMs = (file, budget) => {
   const normalizedFile = file.file.replaceAll("\\", "/");
   const pathOverride = Object.entries(budget.maxFileMsByPathSuffix ?? {}).find(
