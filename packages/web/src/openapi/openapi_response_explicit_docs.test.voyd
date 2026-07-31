@@ -1,6 +1,6 @@
 use src::extract::json_body
 use src::openapi::{ document, info, openapi_json_response, operation, route_docs }
-use src::openapi::builder_test_helpers::require_contains
+use src::openapi::response_test_assertions::require_contains
 use src::openapi::response_custom_test_helpers::CustomReply
 use src::openapi::test_types::{ AutomaticArticle, AutomaticCreateArticle }
 use src::router::app

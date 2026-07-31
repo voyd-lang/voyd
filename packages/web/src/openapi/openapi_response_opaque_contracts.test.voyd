@@ -1,5 +1,5 @@
 use src::openapi::{ document, info, operation }
-use src::openapi::builder_test_helpers::require_contains
+use src::openapi::response_test_assertions::require_contains
 use src::openapi::response_inference::inferred_responses
 use src::openapi::test_types::AutomaticArticle
 use src::response::{ Created, IntoResponse }

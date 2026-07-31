@@ -1,6 +1,6 @@
 use src::openapi::{ RouteDocs, openapi_field_docs, openapi_response_schema_docs, openapi_schema_docs }
 use src::openapi::automatic::all
-use src::openapi::builder_test_helpers::require_contains
+use src::openapi::response_test_assertions::require_contains
 use src::openapi::response_sse_test_helpers::sse_reply
 use src::router::app
 use src::sse::SseResponse

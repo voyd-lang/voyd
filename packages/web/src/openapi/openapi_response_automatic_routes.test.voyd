@@ -1,6 +1,6 @@
 use src::openapi::{ OpenApiParameterContract, RouteDocs, openapi_json_response, openapi_untyped_header }
 use src::openapi::automatic::all
-use src::openapi::builder_test_helpers::require_contains
+use src::openapi::response_test_assertions::require_contains
 use src::openapi::response_automatic_route_test_helpers::{ accepted_reply, accepts_response, binary_reply, empty_reply, html_reply, option_reply, raw_unit_reply, result_reply, text_reply }
 use src::openapi::response_custom_test_helpers::{ CustomReply, custom_reply }
 use src::openapi::response_sse_test_helpers::sse_reply
