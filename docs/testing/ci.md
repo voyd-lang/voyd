@@ -7,8 +7,10 @@ package unit behind one Turbo queue.
 
 - `typecheck`: affected workspace typechecks through Turbo.
 - `test`: affected core package units, excluding the dedicated conformance,
-  integration and developer-tooling workspaces, with explicit package
+  integration, web-package and developer-tooling workspaces, with explicit package
   concurrency of three and one Vitest worker per package task.
+- `web-unit`: affected Voyd web-package tests in deterministic, sequential
+  test-file shards, with no concurrent package tasks.
 - `tooling-unit`: affected CLI and language-server package units, with the two
   package tasks running concurrently and one Vitest worker per task.
 - `conformance`: the portable language corpus when compiler/runtime inputs can
@@ -24,7 +26,7 @@ Superseded PR runs are cancelled. Turbo caches are restored only in jobs that
 actually execute Turbo tasks; direct Vitest jobs do not restore an ineffective
 Turbo cache.
 
-Core-unit, tooling-unit, conformance and integration jobs record the wall time
+Core-unit, web-unit, tooling-unit, conformance and integration jobs record the wall time
 of the complete lane command, emit per-file Vitest JSON timing reports where
 applicable, enforce the checked-in budgets in
 `scripts/testing/timing-budgets.json`, and retain their summaries as 30-day CI
@@ -95,27 +97,14 @@ affected core-unit command took 523,746 ms. An isolated local run completed the
 same test and all shutdown assertions in 59,750 ms, confirming slow compilation
 rather than a server or cancellation hang.
 
-After snapshot reuse and bounded borrow-summary inference landed, hosted run
-30601155766 passed every completed package report (358 suites across compiler,
-SDK, JS host, lib, and markdown) but the 12-minute job timeout cancelled the
-still-running core command at 691,614 ms. Because cancellation prevented its
-wall report from being written, this is a lower bound rather than a completed
-hosted timing. The exact affected command subsequently passed all ten local
-Turbo tasks in 666,137 ms. Both measurements exceed the previous 630,000 ms
-command cap, and the hosted job left only about 11.5 minutes for the command
-after setup.
-
 The temporary allowances preserve the test and the ordinary unit defaults:
 
 - only `closes a long-running web app entry through the SDK helper` has a
   330,000 ms test timeout;
 - only `packages/sdk/src/__tests__/sdk-node.test.ts` has a 420,000 ms file
   budget;
-- only the exact `npm run test:unit:core:affected:ci` command has a 900,000 ms
+- only the exact `npm run test:unit:core:affected:ci` command has a 630,000 ms
   wall budget;
-- only the outer `test` job timeout is 20 minutes, leaving setup, artifact
-  summarization, conditional build, and typing-benchmark time outside the
-  command budget;
 - every other unit test file retains the 180,000 ms budget, and every other
   unit command—including the tooling shard—retains the 420,000 ms wall budget.
 
@@ -123,10 +112,62 @@ V-462 and V-467 must make package semantics and callable caches reusable across
 the SDK's fresh web-package compilation. After they land, V-468 must collect at
 least ten successful hosted core-unit timing artifacts, set temporary bounds
 from observed p95 plus 20% runner headroom, remove the exact file and command
-overrides when they fit under the ordinary limits, restore the outer `test` job
-timeout to 12 minutes once the complete job fits with operational headroom, and
-restore the test's 120,000 ms timeout. Assertions and test files must not be
-skipped to meet a timing budget.
+overrides when they fit under the ordinary limits, and restore the test's
+120,000 ms timeout. Assertions and test files must not be skipped to meet a
+timing budget.
+
+### V-448 web-package transition
+
+The web package previously compiled every co-located Voyd test in one compiler
+process. On PR #752, that process spent 188,800 ms compiling before exhausting
+Node's default heap at approximately 4.06 GiB. Raising the heap to 6 GiB only
+delayed the failure to 212,360 ms. In the shared affected-core job, compiler,
+library and SDK tests completed successfully, but the job reached its
+12-minute orchestration ceiling before the web package completed.
+The first bounded local shard sweep passed the first eight sorted files at the
+default heap and reached 725,760 ms when the existing
+`openapi_responses.test.voyd` shard hit the intentionally strict 180,000 ms
+local validation cutoff. The initial hosted limits therefore account for both
+the observed sequential cost and the prior hosted-runner slowdown; they are
+transition bounds, not a new permanent baseline.
+
+This is addressed by isolation instead of an unbounded heap increase:
+
+- the core-unit command excludes `@voyd-lang/web`;
+- the web job runs for changes to the web package or its source compiler, CLI,
+  runtime, standard-library, SDK, and test-runner inputs instead of relying on
+  the web package's published dependency graph;
+- the job calls the web workspace script directly, so a Turbo cache hit cannot
+  suppress shards after one of those hidden source inputs changes;
+- the web task discovers every `packages/web/src/**/*.test.voyd`
+  file, sorts them deterministically, and runs each in a fresh compiler process;
+- the ordinary web-package `test` script uses the same runner, so local and
+  full-repository test commands cannot fall back to the monolithic OOM path;
+- the former compound OpenAPI builder test is separated by contract family,
+  preserving every assertion while bounding each semantic graph;
+- the generated string-overload freshness check still runs before the shards;
+- only the exact `npm run test:unit:web:ci` command has a temporary
+  2,700,000 ms wall budget and each shard has a 600,000 ms hard timeout; all
+  ordinary unit budgets remain unchanged;
+- the dedicated web job has a 50-minute orchestration ceiling and retains its
+  timing artifact for 30 days.
+
+The main `test` job also has a 25-minute orchestration ceiling. This does not
+relax a test gate: its exact core command remains capped at 630,000 ms. The
+extra job-level time only allows dependency installation, timing enforcement,
+conditional builds and the typing benchmark to run after a healthy core
+command.
+
+V-462 must define reusable package semantic contracts, and V-467 must persist
+package and callable caches so these fresh compiler processes do less repeated
+work. After those land, V-468 must collect at least ten successful hosted
+`web-unit-test-timings` artifacts, set the temporary command budget to observed
+p95 plus 20% runner headroom, and delete the exact override when that value is
+at or below the ordinary 420,000 ms command budget. It must then test merging
+the web task back into the core lane without increasing the core lane's memory
+or wall-time bounds. Keep deterministic full test discovery until a replacement
+provides equivalent coverage; never skip assertions or files to satisfy a
+resource gate.
 
 The first live hosted-runner integration baseline completed all 128 assertions
 in about 201 seconds, with the slowest file at about 132 seconds. After the

@@ -2,7 +2,7 @@
   "unit": {
     "maxWallMs": 420000,
     "maxWallMsByCommand": {
-      "npm run test:unit:core:affected:ci": 900000
+      "npm run test:unit:core:affected:ci": 630000
     },
     "maxFileMs": 180000,
     "maxFileMsByPathSuffix": {
@@ -10,6 +10,13 @@
       "packages/language-server/src/__tests__/project.test.ts": 240000,
       "packages/sdk/src/__tests__/sdk-node.test.ts": 420000
     }
+  },
+  "web-unit": {
+    "maxWallMs": 420000,
+    "maxWallMsByCommand": {
+      "npm run test:unit:web:ci": 2700000
+    },
+    "maxFileMs": 180000
   },
   "conformance": {
     "maxWallMs": 120000,

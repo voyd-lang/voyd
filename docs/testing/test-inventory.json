@@ -2398,16 +2398,52 @@
     "rationale": "Keep co-located: protects pkg::web automatic app-owned request inference, schema identity, route metadata, and public route-surface contracts through the native Voyd test runner."
   },
   {
-    "file": "packages/web/src/openapi/openapi_builder.test.voyd",
+    "file": "packages/web/src/openapi/openapi_builder_json_body.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
-    "rationale": "Keep co-located: protects the retained low-level pkg::web OpenAPI builder and schema rendering contract through the native Voyd test runner."
+    "rationale": "Keep co-located: protects pkg::web low-level OpenAPI JSON request-schema rendering through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder_json_response.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web low-level OpenAPI JSON response-schema rendering through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder_path.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web low-level OpenAPI operation and path-parameter documentation through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder_query.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web low-level OpenAPI query-parameter documentation through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder_recursive.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web low-level recursive OpenAPI component identity through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder_sse.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web low-level typed SSE OpenAPI response metadata through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/openapi/openapi_composition.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
     "rationale": "Keep co-located: protects pkg::web grouping, mounting, exposure exclusion, and HTTP-method contract preservation through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_operation_docs.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects the pkg::web low-level Operation.with_docs response-schema overlay contract through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/openapi/openapi_responses.test.voyd",

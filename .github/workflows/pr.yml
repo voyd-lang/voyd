@@ -36,7 +36,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     env:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -107,6 +107,62 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TYPING_BENCH_MAX_REGRESSION_PCT: "15"
         run: node scripts/ci/check-typing-bench-regression.mjs
+
+  web-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect web-test-sensitive changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            web:
+              - "packages/web/**"
+              - "packages/compiler/**"
+              - "packages/std/**"
+              - "packages/sdk/**"
+              - "packages/js-host/**"
+              - "packages/lib/**"
+              - "packages/package-adapter/**"
+              - "apps/cli/**"
+              - "scripts/voyd"
+              - "scripts/testing/**"
+              - "package.json"
+              - "package-lock.json"
+              - "turbo.json"
+              - "tsconfig*.json"
+      - name: Use Node.js
+        if: steps.changes.outputs.web == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        if: steps.changes.outputs.web == 'true'
+        run: npm ci --include=optional
+      - name: Prepare timing output
+        if: steps.changes.outputs.web == 'true'
+        run: mkdir -p test-timings
+      - name: Run web package unit
+        if: steps.changes.outputs.web == 'true'
+        env:
+          VOYD_USE_SRC: "1"
+        run: node scripts/testing/run-timed-command.mjs --lane web-unit --output test-timings/web-unit-wall.json -- npm run test:unit:web:ci
+      - name: Enforce web package timing budget
+        if: steps.changes.outputs.web == 'true'
+        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane web-unit --output test-timings/web-unit-summary.json
+      - name: Upload web package timings
+        if: always() && steps.changes.outputs.web == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-unit-test-timings
+          path: test-timings
+          retention-days: 30
 
   tooling-unit:
     runs-on: ubuntu-latest

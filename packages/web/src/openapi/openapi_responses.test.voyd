@@ -291,7 +291,7 @@ test "typed SSE responses apply explicit event schema documentation":
         openapi_response_schema_docs(
           status: 200,
           schema: openapi_schema_docs(
-            description: "Explicit SSE event schema",
+            description: "Manual SSE event schema",
             fields: [openapi_field_docs(
               name: "data",
               description: "Explicit SSE data field"
@@ -309,7 +309,7 @@ test "typed SSE responses apply explicit event schema documentation":
     Err:
       Test::fail()
     Ok<String> { value }:
-      require_contains(value, "Explicit SSE event schema".as_slice(), "SSE schema overlay was omitted")
+      require_contains(value, "Manual SSE event schema".as_slice(), "missing direct SSE schema overlay")
       require_contains(value, "Explicit SSE data field".as_slice(), "SSE field overlay was omitted")
       require_contains(value, "Literal zero-argument route docs".as_slice(), "literal unit route docs were omitted")
 

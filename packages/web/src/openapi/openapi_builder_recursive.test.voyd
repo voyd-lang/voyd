@@ -1,0 +1,32 @@
+use src::openapi::{ document, info, operation }
+use src::openapi::test_types::DocumentedRecursivePair
+use src::openapi::automatic::all
+use src::openapi::builder_test_helpers::require_contains
+use std::http::Method
+use std::json::stringify
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+test "OpenAPI preserves recursive component identity":
+  let spec = document(info(
+    title: "Article API".as_slice(),
+    version: "1.0.0".as_slice(),
+    description: "Example API".as_slice().to_string()
+  )).route(
+    "/recursive".as_slice(),
+    method: Method::Get {},
+    operation: operation().responds_json<DocumentedRecursivePair>()
+  )
+
+  match(stringify(spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "%23".as_slice(), "recursive component ref is not URI escaped")
+      require_contains(
+        value,
+        "DocumentedRecursivePair_".as_slice(),
+        "recursive component identity is not type based"
+      )
