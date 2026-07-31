@@ -11,6 +11,13 @@
       "packages/sdk/src/__tests__/sdk-node.test.ts": 420000
     }
   },
+  "web-unit": {
+    "maxWallMs": 420000,
+    "maxWallMsByCommand": {
+      "npm run test:unit:web:affected:ci": 2700000
+    },
+    "maxFileMs": 180000
+  },
   "conformance": {
     "maxWallMs": 120000,
     "maxFileMs": 60000

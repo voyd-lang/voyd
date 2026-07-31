@@ -15,6 +15,14 @@ const budget = {
   },
 };
 
+const webBudget = {
+  maxWallMs: 420_000,
+  maxWallMsByCommand: {
+    "npm run test:unit:web:affected:ci": 2_700_000,
+  },
+  maxFileMs: 180_000,
+};
+
 describe("lane wall timing budgets", () => {
   it("uses an exact command override", () => {
     expect(
@@ -34,6 +42,21 @@ describe("lane wall timing budgets", () => {
   it("falls back to the lane default for other commands", () => {
     expect(
       wallBudgetMs(["npm", "run", "test:unit:tooling:affected:ci"], budget),
+    ).toBe(420_000);
+  });
+
+  it("scopes the web-package allowance to its exact isolated command", () => {
+    expect(
+      wallBudgetMs(["npm", "run", "test:unit:web:affected:ci"], webBudget),
+    ).toBe(2_700_000);
+    expect(
+      wallBudgetMs(
+        ["npm", "run", "test:unit:web:affected:ci", "--", "--force"],
+        webBudget,
+      ),
+    ).toBe(420_000);
+    expect(
+      wallBudgetMs(["npm", "run", "test:unit:core:affected:ci"], webBudget),
     ).toBe(420_000);
   });
 });

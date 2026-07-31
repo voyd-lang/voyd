@@ -7,8 +7,10 @@ package unit behind one Turbo queue.
 
 - `typecheck`: affected workspace typechecks through Turbo.
 - `test`: affected core package units, excluding the dedicated conformance,
-  integration and developer-tooling workspaces, with explicit package
+  integration, web-package and developer-tooling workspaces, with explicit package
   concurrency of three and one Vitest worker per package task.
+- `web-unit`: affected Voyd web-package tests in deterministic, sequential
+  test-file shards, with no concurrent package tasks.
 - `tooling-unit`: affected CLI and language-server package units, with the two
   package tasks running concurrently and one Vitest worker per task.
 - `conformance`: the portable language corpus when compiler/runtime inputs can
@@ -24,7 +26,7 @@ Superseded PR runs are cancelled. Turbo caches are restored only in jobs that
 actually execute Turbo tasks; direct Vitest jobs do not restore an ineffective
 Turbo cache.
 
-Core-unit, tooling-unit, conformance and integration jobs record the wall time
+Core-unit, web-unit, tooling-unit, conformance and integration jobs record the wall time
 of the complete lane command, emit per-file Vitest JSON timing reports where
 applicable, enforce the checked-in budgets in
 `scripts/testing/timing-budgets.json`, and retain their summaries as 30-day CI
@@ -113,6 +115,52 @@ from observed p95 plus 20% runner headroom, remove the exact file and command
 overrides when they fit under the ordinary limits, and restore the test's
 120,000 ms timeout. Assertions and test files must not be skipped to meet a
 timing budget.
+
+### V-448 web-package transition
+
+The web package previously compiled every co-located Voyd test in one compiler
+process. On PR #752, that process spent 188,800 ms compiling before exhausting
+Node's default heap at approximately 4.06 GiB. Raising the heap to 6 GiB only
+delayed the failure to 212,360 ms. In the shared affected-core job, compiler,
+library and SDK tests completed successfully, but the job reached its
+12-minute orchestration ceiling before the web package completed.
+The first bounded local shard sweep passed the first eight sorted files at the
+default heap and reached 725,760 ms when the existing
+`openapi_responses.test.voyd` shard hit the intentionally strict 180,000 ms
+local validation cutoff. The initial hosted limits therefore account for both
+the observed sequential cost and the prior hosted-runner slowdown; they are
+transition bounds, not a new permanent baseline.
+
+This is addressed by isolation instead of an unbounded heap increase:
+
+- the core-unit command excludes `@voyd-lang/web`;
+- the affected web task discovers every `packages/web/src/**/*.test.voyd`
+  file, sorts them deterministically, and runs each in a fresh compiler process;
+- the former compound OpenAPI builder test is separated by contract family,
+  preserving every assertion while bounding each semantic graph;
+- the generated string-overload freshness check still runs before the shards;
+- only the exact `npm run test:unit:web:affected:ci` command has a temporary
+  2,700,000 ms wall budget and each shard has a 600,000 ms hard timeout; all
+  ordinary unit budgets remain unchanged;
+- the dedicated web job has a 50-minute orchestration ceiling and retains its
+  timing artifact for 30 days.
+
+The main `test` job also has a 25-minute orchestration ceiling. This does not
+relax a test gate: its exact core command remains capped at 630,000 ms. The
+extra job-level time only allows dependency installation, timing enforcement,
+conditional builds and the typing benchmark to run after a healthy core
+command.
+
+V-462 must define reusable package semantic contracts, and V-467 must persist
+package and callable caches so these fresh compiler processes do less repeated
+work. After those land, V-468 must collect at least ten successful hosted
+`web-unit-test-timings` artifacts, set the temporary command budget to observed
+p95 plus 20% runner headroom, and delete the exact override when that value is
+at or below the ordinary 420,000 ms command budget. It must then test merging
+the web task back into the core lane without increasing the core lane's memory
+or wall-time bounds. Keep deterministic full test discovery until a replacement
+provides equivalent coverage; never skip assertions or files to satisfy a
+resource gate.
 
 The first live hosted-runner integration baseline completed all 128 assertions
 in about 201 seconds, with the slowest file at about 132 seconds. After the

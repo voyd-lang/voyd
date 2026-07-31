@@ -36,7 +36,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     env:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -107,6 +107,48 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TYPING_BENCH_MAX_REGRESSION_PCT: "15"
         run: node scripts/ci/check-typing-bench-regression.mjs
+
+  web-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+    env:
+      TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
+      TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Restore Turbo cache
+        uses: actions/cache@v4
+        with:
+          path: .turbo
+          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ github.event.pull_request.head.sha }}
+          restore-keys: |
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        run: npm ci --include=optional
+      - name: Prepare timing output
+        run: mkdir -p test-timings
+      - name: Run affected web package unit
+        env:
+          VOYD_USE_SRC: "1"
+        run: node scripts/testing/run-timed-command.mjs --lane web-unit --output test-timings/web-unit-wall.json -- npm run test:unit:web:affected:ci
+      - name: Enforce web package timing budget
+        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane web-unit --output test-timings/web-unit-summary.json
+      - name: Upload web package timings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-unit-test-timings
+          path: test-timings
+          retention-days: 30
 
   tooling-unit:
     runs-on: ubuntu-latest

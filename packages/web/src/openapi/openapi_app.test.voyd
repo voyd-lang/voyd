@@ -178,7 +178,7 @@ test "explicit schema prose overlays inferred request and response types":
         response_schemas: [openapi_response_schema_docs(
           status: 201,
           schema: openapi_schema_docs(
-            description: "Explicit response schema",
+            description: "Manual JSON response schema",
             fields: [openapi_field_docs(name: "id", description: "Explicit response id")]
           )
         )]
@@ -187,7 +187,7 @@ test "explicit schema prose overlays inferred request and response types":
   let rendered = openapi_string(article_app, include_doc_comments: false)
   assert(rendered.contains("Explicit request schema".as_slice()), eq: true)
   require_contains(rendered, "Explicit request title".as_slice(), "request field overlay was omitted")
-  require_contains(rendered, "Explicit response schema".as_slice(), "response schema overlay was omitted")
+  require_contains(rendered, "Manual JSON response schema".as_slice(), "missing direct JSON schema overlay")
   require_contains(rendered, "Explicit response id".as_slice(), "response field overlay was omitted")
 
 test "schema prose overlays do not mutate shared inferred components":
