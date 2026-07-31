@@ -89,10 +89,43 @@ The first live hosted-runner integration baseline completed all 128 assertions
 in about 201 seconds, with the slowest file at about 132 seconds. After the
 public web package gained request streaming, SSE, and OpenAPI generation,
 healthy runs completed in about 247 seconds with the expanded web fixture at
-183-193 seconds. The budget is therefore 300 seconds for the lane and 210
-seconds per file. This preserves the lane-wide regression guard while leaving
-headroom for ordinary runner variance; tighten it after enough successful runs
-exist to estimate p95 reliably.
+183-193 seconds. Follow-up runner variance brought the pre-V-448 budget to 375
+seconds for the lane, 210 seconds per file, and a 270-second VX file override.
+This preserved the lane-wide regression guard while leaving headroom for
+ordinary runner variance.
+
+### V-448 integration transition
+
+V-448 also increased the semantic-analysis cost of the integration suite's two
+web-package compilations. On PR #752, hosted CI measured
+`vx-dom.test.ts` at 345,303 ms; its initial web-package compile reached the
+180,000 ms test timeout after 191,849 ms. The shared web-framework fixture hit
+the same 180,000 ms hook timeout. The failed two-worker run ended at 386,040 ms
+with 745,660 ms of aggregate test time. On the same revision, isolated local
+runs completed `web-framework.test.ts` in 95,660 ms and `vx-dom.test.ts` in
+102,770 ms, confirming slow completion rather than a hang.
+
+The VX tests now share one SDK instance so their distinct entry compilations
+reuse the package dependency snapshot. A validation run reduced the isolated
+local VX file to 80,810 ms, and the two affected files passed together in
+86,180 ms. The temporary hosted-runner allowances preserve every assertion:
+
+- the two initial web-package compile test/hook timeouts are 240,000 ms;
+- the exact paths `tests/integration/src/vx-dom.test.ts` and
+  `tests/integration/src/web-framework.test.ts` each have a 330,000 ms file
+  budget;
+- every other integration file retains the 210,000 ms budget;
+- the integration lane budget remains 375,000 ms so aggregate regressions stay
+  visible.
+
+V-462 and V-467 must make package semantics and callable caches reusable across
+these compilations and fresh processes. After they land, V-468 must collect at
+least ten successful hosted integration timing artifacts, set budgets from p95
+plus 20% runner headroom, remove the two file overrides when they fit under the
+general limit, and restore the 180,000 ms compile timeout when that value
+exceeds the measured bound. The 375,000 ms lane budget was not relaxed and
+must not be raised as part of re-tightening. Assertions and test files must not
+be skipped to meet a timing budget.
 
 ## Runtime Selection
 

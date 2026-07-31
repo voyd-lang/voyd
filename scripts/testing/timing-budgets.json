@@ -14,8 +14,9 @@
   "integration": {
     "maxWallMs": 375000,
     "maxFileMs": 210000,
-    "maxFileMsByBasename": {
-      "vx-dom.test.ts": 270000
+    "maxFileMsByPathSuffix": {
+      "tests/integration/src/vx-dom.test.ts": 330000,
+      "tests/integration/src/web-framework.test.ts": 330000
     }
   }
 }
