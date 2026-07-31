@@ -1,12 +1,12 @@
 use src::openapi::{ document, info, operation }
 use src::openapi::test_types::DocumentedArticlePath
 use src::openapi::automatic::all
-use src::openapi::builder_test_helpers::require_contains
+use std::error::panic
 use std::http::Method
 use std::json::stringify
 use std::optional::types::all
 use std::result::types::all
-use std::string::type::String
+use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
 
 test "OpenAPI reflects operation and path documentation":
@@ -36,3 +36,7 @@ test "OpenAPI reflects operation and path documentation":
       require_contains(value, "\"/articles/{id}\"".as_slice(), "missing path")
       require_contains(value, "\"operationId\":\"createArticle\"".as_slice(), "missing operation id")
       require_contains(value, "Stable article identifier.".as_slice(), "missing path documentation")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

@@ -131,6 +131,7 @@ jobs:
               - "apps/cli/**"
               - "scripts/voyd"
               - "scripts/testing/**"
+              - ".github/workflows/pr.yml"
               - "package.json"
               - "package-lock.json"
               - "turbo.json"

@@ -46,9 +46,9 @@ describe("lane wall timing budgets", () => {
   });
 
   it("scopes the web-package allowance to its exact isolated command", () => {
-    expect(
-      wallBudgetMs(["npm", "run", "test:unit:web:ci"], webBudget),
-    ).toBe(2_700_000);
+    expect(wallBudgetMs(["npm", "run", "test:unit:web:ci"], webBudget)).toBe(
+      2_700_000,
+    );
     expect(
       wallBudgetMs(
         ["npm", "run", "test:unit:web:ci", "--", "--force"],
