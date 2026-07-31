@@ -286,6 +286,18 @@ export const parsePrecompiledStdArtifact = (
   };
 };
 
+export const precompiledStdArtifactsHaveMatchingCanonicalContent = (
+  left: {
+    envelope: PrecompiledStdSnapshotEnvelope;
+  },
+  right: {
+    envelope: PrecompiledStdSnapshotEnvelope;
+  },
+): boolean =>
+  JSON.stringify(left.envelope.header) ===
+    JSON.stringify(right.envelope.header) &&
+  left.envelope.payloadSha256 === right.envelope.payloadSha256;
+
 const restoreArtifactPayload = ({
   artifact,
   stdRoot,

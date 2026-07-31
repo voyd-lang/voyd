@@ -22,6 +22,7 @@ import {
   collectStdSourcePaths,
   createStdSourceManifest,
   parsePrecompiledStdArtifact,
+  precompiledStdArtifactsHaveMatchingCanonicalContent,
   serializePrecompiledStdArtifact,
 } from "../packages/sdk/src/precompiled-std.js";
 
@@ -104,10 +105,10 @@ if (check) {
   });
   if (
     !existingArtifact ||
-    JSON.stringify(existingArtifact.envelope.header) !==
-      JSON.stringify(generatedArtifact.envelope.header) ||
-    existingArtifact.envelope.payloadSha256 !==
-      generatedArtifact.envelope.payloadSha256
+    !precompiledStdArtifactsHaveMatchingCanonicalContent(
+      existingArtifact,
+      generatedArtifact,
+    )
   ) {
     throw new Error(
       `precompiled std snapshot is stale; run npm run generate:std-snapshot`,
