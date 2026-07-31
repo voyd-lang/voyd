@@ -113,20 +113,31 @@ describe("precompiled std semantic snapshots", () => {
       roots: { src: path.resolve(root, "..", "app"), std: root },
     });
     expect(canonicalFallbackResult.success).toBe(true);
+    if (result.success && canonicalFallbackResult.success) {
+      expect(Buffer.from(canonicalFallbackResult.wasm)).toEqual(
+        Buffer.from(result.wasm),
+      );
+    }
     expect(snapshotPrecompiledStdLoadStats()).toMatchObject({
       hits: 1,
       fallbacks: 0,
     });
 
     resetPrecompiledStdLoadStatsForTesting();
-    bundled[bundled.byteLength - 1] ^= 0xff;
-    await fs.writeFile(artifactPath, bundled);
+    const canonicalCorruption = await fs.readFile(
+      path.join(repoRoot, "packages/std", PRECOMPILED_STD_SNAPSHOT_FILE),
+    );
+    canonicalCorruption[canonicalCorruption.byteLength - 1] ^= 0xff;
+    await fs.writeFile(artifactPath, canonicalCorruption);
     const fullyCorruptedResult = await createSdk().compile({
       source: "pub fn main() -> i32 = 42",
       roots: { src: path.resolve(root, "..", "app"), std: root },
     });
     expect(fullyCorruptedResult.success).toBe(true);
-    expect(snapshotPrecompiledStdLoadStats().fallbacks).toBe(1);
+    expect(snapshotPrecompiledStdLoadStats()).toMatchObject({
+      fallbacks: 1,
+      fallbackReasons: { "canonical-payload-integrity": 1 },
+    });
   });
 
   it("invalidates the bundled artifact when std source content changes", async () => {
@@ -163,6 +174,10 @@ describe("precompiled std semantic snapshots", () => {
     );
     expect(second?.dependencySnapshot.semantics.get("std::array")).not.toBe(
       first?.dependencySnapshot.semantics.get("std::array"),
+    );
+    expect(second?.typingState.arena).not.toBe(first?.typingState.arena);
+    expect(second?.typingState.effectInterner).not.toBe(
+      first?.typingState.effectInterner,
     );
   });
 
@@ -291,6 +306,7 @@ const validEnvelope = (): PrecompiledStdSnapshotEnvelope => ({
     sources: [{ path: "pkg.voyd", sha256: "hash", bytes: 1 }],
   },
   payloadSha256: "hash",
+  canonicalCompressedPayloadSha256: "canonical-compressed-hash",
   fastPayloadSha256: "fast-hash",
   fastPayloadProducer: {
     node: process.versions.node,

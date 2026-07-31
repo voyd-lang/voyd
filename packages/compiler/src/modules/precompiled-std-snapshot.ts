@@ -100,6 +100,7 @@ export type PrecompiledStdSnapshotHeader = {
 export type PrecompiledStdSnapshotEnvelope = {
   header: PrecompiledStdSnapshotHeader;
   payloadSha256: string;
+  canonicalCompressedPayloadSha256: string;
   fastPayloadSha256: string;
   fastPayloadProducer: {
     node: string;
@@ -110,6 +111,10 @@ export type PrecompiledStdSnapshotEnvelope = {
 export type RestoredPrecompiledStdSnapshot = {
   modules: ReadonlyMap<string, ModuleNode>;
   dependencySnapshot: ReusableDependencySemanticsSnapshot;
+  typingState: {
+    arena: TypeArena;
+    effectInterner: EffectInterner;
+  };
 };
 
 export const encodePrecompiledStdSnapshot = ({
@@ -193,6 +198,7 @@ export const restorePrecompiledStdSnapshot = ({
       arena: persistent.arena,
       effectInterner: persistent.effectInterner,
     },
+    typingState: { arena, effectInterner },
   };
 };
 
