@@ -1,12 +1,13 @@
 use src::openapi::{ OpenApiParameterContract, RouteDocs, openapi_json_response, openapi_untyped_header }
 use src::openapi::test_types::AutomaticArticle
-use std::http::{ Method, Response }
+use std::http::Response
 use std::json::stringify
 use std::error::panic
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
-use src::router::app
+use src::response::all
+use src::router::{ Context, app }
 
 test "untyped parameter and response header overrides emit honest schemas":
   let parameter = OpenApiParameterContract {
@@ -25,13 +26,9 @@ test "untyped parameter and response header overrides emit honest schemas":
   let parameter_docs = RouteDocs::empty().with_parameters([parameter])
   let docs = parameter_docs.with_responses([response])
   let documented = app(openapi: { title: "Opaque overrides", version: "1" })
-    .get_unit(
+    .get<Response>(
       "/opaque-overrides".as_slice(),
-      handler: opaque_response
-    )
-    .with_route_docs(
-      "/opaque-overrides".as_slice(),
-      method: Method::Get {},
+      handler: (_ctx: Context) -> Response => Response::ok().empty(),
       docs: docs
     )
   match(stringify(documented.openapi()))
@@ -42,9 +39,6 @@ test "untyped parameter and response header overrides emit honest schemas":
       require_contains(value, "\"x-dynamic\"".as_slice(), "untyped response header was omitted")
       require_contains(value, "\"schema\":{}".as_slice(), "untyped parameter omitted its honest empty schema")
       require_contains(value, "\"type\":\"string\"".as_slice(), "untyped response header omitted its wire string schema")
-
-fn opaque_response(): (open) -> Response
-  Response::ok().empty()
 
 fn require_contains(value: String, needle: StringSlice, message: String) -> void
   if not value.contains(needle):

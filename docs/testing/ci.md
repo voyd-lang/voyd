@@ -135,11 +135,12 @@ transition bounds, not a new permanent baseline.
 Hosted run 30608445317 confirmed that two partitions were still too coarse:
 partition 1 reached shard 13 of 14 after about 33 minutes, while partition 2 was
 cancelled near the 35-minute job ceiling. The same run also exposed hidden
-overload context in a split untyped OpenAPI fixture. Expressing that fixture as
-a raw response route with explicit route documentation preserves its opaque
-response inference and every schema assertion without depending on imports
-from the former compound test. Three round-robin partitions reduce each
-runner's sequential work without raising a shard, command, or job limit.
+response-trait context in a split untyped OpenAPI fixture. Restoring that
+fixture's response traits preserves its original generic `get<Response>` route,
+opaque response inference, and every schema assertion without depending on
+unrelated imports from the former compound test. Three round-robin partitions
+reduce each runner's sequential work without raising a shard, command, or job
+limit.
 
 This is addressed by isolation instead of an unbounded heap increase:
 
