@@ -19,6 +19,7 @@ import {
 import {
   PRECOMPILED_STD_SNAPSHOT_FILE,
   loadPrecompiledStdSnapshot,
+  precompiledStdArtifactsHaveMatchingCanonicalContent,
   resetPrecompiledStdLoadStatsForTesting,
   serializePrecompiledStdArtifact,
   snapshotPrecompiledStdLoadStats,
@@ -138,6 +139,38 @@ describe("precompiled std semantic snapshots", () => {
       fallbacks: 1,
       fallbackReasons: { "canonical-payload-integrity": 1 },
     });
+  });
+
+  it("checks freshness independently from the optional V8 accelerator", () => {
+    const canonical = validEnvelope();
+    const otherEngine = {
+      envelope: {
+        ...canonical,
+        fastPayloadSha256: "another-engine-payload",
+        fastPayloadProducer: {
+          node: "22.23.1",
+          v8: "12.4.254.21-node.33",
+        },
+      },
+    };
+
+    expect(
+      precompiledStdArtifactsHaveMatchingCanonicalContent(
+        { envelope: canonical },
+        otherEngine,
+      ),
+    ).toBe(true);
+    expect(
+      precompiledStdArtifactsHaveMatchingCanonicalContent(
+        { envelope: canonical },
+        {
+          envelope: {
+            ...canonical,
+            payloadSha256: "changed-canonical-payload",
+          },
+        },
+      ),
+    ).toBe(false);
   });
 
   it("invalidates the bundled artifact when std source content changes", async () => {
