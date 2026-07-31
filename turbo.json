@@ -13,11 +13,6 @@
       "env": ["VITEST_MAX_WORKERS", "VOYD_TEST_TIMINGS_DIR"],
       "outputs": []
     },
-    "test:sharded": {
-      "dependsOn": [],
-      "env": ["VOYD_USE_SRC"],
-      "outputs": []
-    },
     "lint": {
       "outputs": []
     },

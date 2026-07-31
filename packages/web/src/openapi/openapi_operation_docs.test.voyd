@@ -1,0 +1,36 @@
+use src::openapi::{
+  RouteDocs,
+  openapi_response_schema_docs,
+  openapi_schema_docs,
+  operation
+}
+use std::optional::all
+use std::test::assertions::all
+
+test "low-level operations retain manual response schema overlays":
+  let documented = operation().with_docs(
+    RouteDocs::empty().with_response_schemas([
+      openapi_response_schema_docs(
+        status: 201,
+        content_type: "application/json".as_slice().to_string(),
+        schema: openapi_schema_docs(description: "Manual JSON response schema")
+      ),
+      openapi_response_schema_docs(
+        status: 200,
+        content_type: "text/event-stream".as_slice().to_string(),
+        schema: openapi_schema_docs(description: "Manual SSE event schema")
+      )
+    ])
+  )
+
+  assert(documented.response_schema_docs.len(), eq: 2)
+  assert(documented.response_schema_docs.at(0).status, eq: 201)
+  assert(
+    documented.response_schema_docs.at(0).content_type ?? "".as_slice().to_string(),
+    eq: "application/json"
+  )
+  assert(documented.response_schema_docs.at(1).status, eq: 200)
+  assert(
+    documented.response_schema_docs.at(1).content_type ?? "".as_slice().to_string(),
+    eq: "text/event-stream"
+  )

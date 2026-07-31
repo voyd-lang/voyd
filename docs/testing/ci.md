@@ -134,12 +134,19 @@ transition bounds, not a new permanent baseline.
 This is addressed by isolation instead of an unbounded heap increase:
 
 - the core-unit command excludes `@voyd-lang/web`;
-- the affected web task discovers every `packages/web/src/**/*.test.voyd`
+- the web job runs for changes to the web package or its source compiler, CLI,
+  runtime, standard-library, SDK, and test-runner inputs instead of relying on
+  the web package's published dependency graph;
+- the job calls the web workspace script directly, so a Turbo cache hit cannot
+  suppress shards after one of those hidden source inputs changes;
+- the web task discovers every `packages/web/src/**/*.test.voyd`
   file, sorts them deterministically, and runs each in a fresh compiler process;
+- the ordinary web-package `test` script uses the same runner, so local and
+  full-repository test commands cannot fall back to the monolithic OOM path;
 - the former compound OpenAPI builder test is separated by contract family,
   preserving every assertion while bounding each semantic graph;
 - the generated string-overload freshness check still runs before the shards;
-- only the exact `npm run test:unit:web:affected:ci` command has a temporary
+- only the exact `npm run test:unit:web:ci` command has a temporary
   2,700,000 ms wall budget and each shard has a 600,000 ms hard timeout; all
   ordinary unit budgets remain unchanged;
 - the dedicated web job has a 50-minute orchestration ceiling and retains its

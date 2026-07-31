@@ -2440,6 +2440,12 @@
     "rationale": "Keep co-located: protects pkg::web grouping, mounting, exposure exclusion, and HTTP-method contract preservation through the native Voyd test runner."
   },
   {
+    "file": "packages/web/src/openapi/openapi_operation_docs.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects the pkg::web low-level Operation.with_docs response-schema overlay contract through the native Voyd test runner."
+  },
+  {
     "file": "packages/web/src/openapi/openapi_responses.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
