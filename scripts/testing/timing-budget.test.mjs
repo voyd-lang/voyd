@@ -4,7 +4,7 @@ import { fileBudgetMs, wallBudgetMs } from "./timing-budget.mjs";
 const budget = {
   maxWallMs: 420_000,
   maxWallMsByCommand: {
-    "npm run test:unit:core:affected:ci": 630_000,
+    "npm run test:unit:core:affected:ci": 900_000,
   },
   maxFileMs: 180_000,
   maxFileMsByBasename: {
@@ -28,7 +28,7 @@ describe("lane wall timing budgets", () => {
   it("uses an exact command override", () => {
     expect(
       wallBudgetMs(["npm", "run", "test:unit:core:affected:ci"], budget),
-    ).toBe(630_000);
+    ).toBe(900_000);
   });
 
   it("does not apply an override to a command with extra arguments", () => {

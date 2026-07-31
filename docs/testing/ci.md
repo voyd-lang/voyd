@@ -98,14 +98,27 @@ affected core-unit command took 523,746 ms. An isolated local run completed the
 same test and all shutdown assertions in 59,750 ms, confirming slow compilation
 rather than a server or cancellation hang.
 
+After snapshot reuse and bounded borrow-summary inference landed, hosted run
+30601155766 passed every completed package report (358 suites across compiler,
+SDK, JS host, lib, and markdown) but the 12-minute job timeout cancelled the
+still-running core command at 691,614 ms. Because cancellation prevented its
+wall report from being written, this is a lower bound rather than a completed
+hosted timing. The exact affected command subsequently passed all ten local
+Turbo tasks in 666,137 ms. Both measurements exceed the previous 630,000 ms
+command cap, and the hosted job left only about 11.5 minutes for the command
+after setup.
+
 The temporary allowances preserve the test and the ordinary unit defaults:
 
 - only `closes a long-running web app entry through the SDK helper` has a
   330,000 ms test timeout;
 - only `packages/sdk/src/__tests__/sdk-node.test.ts` has a 420,000 ms file
   budget;
-- only the exact `npm run test:unit:core:affected:ci` command has a 630,000 ms
+- only the exact `npm run test:unit:core:affected:ci` command has a 900,000 ms
   wall budget;
+- only the outer `test` job timeout is 20 minutes, leaving setup, artifact
+  summarization, conditional build, and typing-benchmark time outside the
+  command budget;
 - every other unit test file retains the 180,000 ms budget, and every other
   unit command—including the tooling shard—retains the 420,000 ms wall budget.
 
@@ -113,9 +126,10 @@ V-462 and V-467 must make package semantics and callable caches reusable across
 the SDK's fresh web-package compilation. After they land, V-468 must collect at
 least ten successful hosted core-unit timing artifacts, set temporary bounds
 from observed p95 plus 20% runner headroom, remove the exact file and command
-overrides when they fit under the ordinary limits, and restore the test's
-120,000 ms timeout. Assertions and test files must not be skipped to meet a
-timing budget.
+overrides when they fit under the ordinary limits, restore the outer `test` job
+timeout to 12 minutes once the complete job fits with operational headroom, and
+restore the test's 120,000 ms timeout. Assertions and test files must not be
+skipped to meet a timing budget.
 
 ### V-448 web-package transition
 
@@ -158,10 +172,10 @@ This is addressed by isolation instead of an unbounded heap increase:
 - each dedicated partition job has a 35-minute orchestration ceiling and
   retains a uniquely named timing artifact for 30 days.
 
-The main `test` job also has a 25-minute orchestration ceiling. This does not
-relax a test gate: its exact core command remains capped at 630,000 ms. The
-extra job-level time only allows dependency installation, timing enforcement,
-conditional builds and the typing benchmark to run after a healthy core
+The main `test` job retains the evidence-backed 20-minute orchestration ceiling
+described above. Its exact core command remains capped at 900,000 ms; the
+remaining five minutes reserve time for dependency installation, timing
+enforcement, conditional builds and the typing benchmark after a healthy core
 command.
 
 V-462 must define reusable package semantic contracts, and V-467 must persist
