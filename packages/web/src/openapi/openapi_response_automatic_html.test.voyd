@@ -13,7 +13,7 @@ fn html_reply() -> HtmlResponse
 
 test "automatic routes cover HTML responses":
   let web_app = app(openapi: { title: "Responses", version: "1" })
-    .get<HtmlResponse>("/html", handler: html_reply)
+    .get("/html", handler: html_reply)
   match(stringify(web_app.openapi()))
     Err:
       Test::fail()

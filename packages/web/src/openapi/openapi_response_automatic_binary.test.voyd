@@ -19,7 +19,7 @@ fn binary_reply() -> Bytes
 
 test "automatic routes cover binary responses":
   let web_app = app(openapi: { title: "Responses", version: "1" })
-    .get<Bytes>("/binary", handler: binary_reply)
+    .get("/binary", handler: binary_reply)
   match(stringify(web_app.openapi()))
     Err:
       Test::fail()

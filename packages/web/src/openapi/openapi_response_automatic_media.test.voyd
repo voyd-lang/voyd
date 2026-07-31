@@ -12,7 +12,7 @@ fn text_reply() -> String
 
 test "automatic routes cover text responses":
   let web_app = app(openapi: { title: "Responses", version: "1" })
-    .get<String>("/text", handler: text_reply)
+    .get("/text", handler: text_reply)
   match(stringify(web_app.openapi()))
     Err:
       Test::fail()
