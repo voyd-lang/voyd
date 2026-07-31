@@ -82,6 +82,7 @@ type AliasDefinition = {
   callableResult?: boolean;
   externalResult?: boolean;
   conservativeReturnedAggregate?: boolean;
+  impreciseAggregate?: true;
   resultProjections?: readonly PlaceProjection[];
   capture?: boolean;
   plainIdentity?: true;
@@ -1181,13 +1182,56 @@ const returnedOrigins = (
         : [[]]
       ).map((source) => ({ source, result: [] }));
 
-const returnedOriginIsShared = (
+type AggregateReturnedOrigin = {
+  origin: ReturnedBorrowOrigin;
+  shared: boolean;
+  imprecise: boolean;
+};
+
+const aggregateReturnedOrigins = (
   parameter: CallableBorrowContract["parameters"][number],
-  origin: ReturnedBorrowOrigin,
-): boolean =>
-  parameter.returnedSharedOrigins?.some(
-    (shared) => JSON.stringify(shared) === JSON.stringify(origin),
-  ) === true;
+): readonly AggregateReturnedOrigin[] => {
+  const sharedKeys = new Set(
+    parameter.returnedSharedOrigins?.map((origin) => JSON.stringify(origin)) ??
+      [],
+  );
+  const classified = returnedOrigins(parameter).map((origin) => ({
+    origin,
+    shared: sharedKeys.has(JSON.stringify(origin)),
+    imprecise: false,
+  }));
+  const mustBroaden =
+    classified.length > MAX_AGGREGATE_ORIGINS_PER_FAMILY ||
+    classified.some(
+      ({ origin }) =>
+        origin.source.length > MAX_AGGREGATE_ORIGIN_PROJECTION_DEPTH ||
+        origin.result.length > MAX_AGGREGATE_ORIGIN_PROJECTION_DEPTH,
+    );
+  if (!mustBroaden) {
+    return classified;
+  }
+  const broad = new Map<string, AggregateReturnedOrigin>();
+  classified.forEach(({ origin, shared }) => {
+    const key = JSON.stringify([
+      shared,
+      origin.endpointAccess ?? null,
+      origin.defaultNoBorrow ?? false,
+    ]);
+    broad.set(key, {
+      origin: {
+        source: [],
+        result: [],
+        ...(origin.endpointAccess
+          ? { endpointAccess: origin.endpointAccess }
+          : {}),
+        ...(origin.defaultNoBorrow ? { defaultNoBorrow: true } : {}),
+      },
+      shared,
+      imprecise: true,
+    });
+  });
+  return Array.from(broad.values());
+};
 
 const expressionCarriesBorrowedProvenance = (
   exprId: HirExprId,
@@ -1234,26 +1278,207 @@ const expressionIsExternalStorage = (
   return false;
 };
 
+const expressionMayReturnExternalResult = (
+  exprId: HirExprId,
+  ctx: BodyContext,
+  memo = new Map<HirExprId, boolean>(),
+  inProgress = new Set<HirExprId>(),
+): boolean => {
+  const cached = memo.get(exprId);
+  if (cached !== undefined) {
+    return cached;
+  }
+  if (inProgress.has(exprId)) {
+    return false;
+  }
+  inProgress.add(exprId);
+  const expression = ctx.hir.expressions.get(exprId);
+  const result = (() => {
+    if (!expression) {
+      return false;
+    }
+    if (expressionIsExternalStorage(exprId, ctx)) {
+      return true;
+    }
+    if (
+      expression.exprKind === "call" ||
+      expression.exprKind === "method-call"
+    ) {
+      if (
+        expression.exprKind === "call" &&
+        intrinsicNameForCall(expression, ctx) === "~"
+      ) {
+        const operand = expression.args.at(-1)?.expr;
+        return (
+          typeof operand === "number" &&
+          expressionMayReturnExternalResult(operand, ctx, memo, inProgress)
+        );
+      }
+      const info = targetInfo(expression, ctx);
+      if (
+        externalReturnedOriginsForCall(info).some(
+          (origin) => origin.fresh !== true,
+        )
+      ) {
+        return true;
+      }
+      const parameterMayReturnExternal = (
+        parameterIndex: number,
+        seenParameters = new Set<number>(),
+      ): boolean => {
+        const actual = info.arguments[parameterIndex];
+        if (typeof actual === "number") {
+          return (
+            expressionIsExternalStorage(actual, ctx) ||
+            expressionMayReturnExternalResult(actual, ctx, memo, inProgress)
+          );
+        }
+        if (seenParameters.has(parameterIndex)) {
+          return false;
+        }
+        seenParameters.add(parameterIndex);
+        const parameter = info.contract?.parameters[parameterIndex];
+        return (
+          parameter?.defaultExternalOrigins?.some(
+            (origin) => origin.fresh !== true,
+          ) === true ||
+          parameter?.defaultOrigins?.some((origin) =>
+            parameterMayReturnExternal(
+              origin.parameter,
+              new Set(seenParameters),
+            ),
+          ) === true
+        );
+      };
+      return (
+        info.contract?.parameters.some(
+          (parameter, index) =>
+            parameter.returned && parameterMayReturnExternal(index),
+        ) === true
+      );
+    }
+    if (expression.exprKind === "field-access") {
+      return expressionMayReturnExternalResult(
+        expression.target,
+        ctx,
+        memo,
+        inProgress,
+      );
+    }
+    if (expression.exprKind === "identifier") {
+      const event = ctx.events.get(expression.id);
+      if (
+        event &&
+        reachingAliasDefinitions(expression.symbol, event, ctx).some(
+          (alias) => alias.externalResult === true,
+        )
+      ) {
+        return true;
+      }
+      const initializer = ctx.bindingInitializers.get(expression.symbol);
+      return (
+        typeof initializer === "number" &&
+        expressionMayReturnExternalResult(initializer, ctx, memo, inProgress)
+      );
+    }
+    if (
+      expression.exprKind === "block" &&
+      typeof expression.value === "number"
+    ) {
+      return expressionMayReturnExternalResult(
+        expression.value,
+        ctx,
+        memo,
+        inProgress,
+      );
+    }
+    if (expression.exprKind === "if" || expression.exprKind === "cond") {
+      return [
+        ...expression.branches.map((branch) => branch.value),
+        ...(typeof expression.defaultBranch === "number"
+          ? [expression.defaultBranch]
+          : []),
+      ].some((value) =>
+        expressionMayReturnExternalResult(value, ctx, memo, inProgress),
+      );
+    }
+    return (
+      expression.exprKind === "match" &&
+      expression.arms.some((arm) =>
+        expressionMayReturnExternalResult(arm.value, ctx, memo, inProgress),
+      )
+    );
+  })();
+  inProgress.delete(exprId);
+  // False can be cycle-pruned and is therefore path-sensitive. Only publish
+  // the monotone positive result into this call-local memo.
+  if (result) {
+    memo.set(exprId, true);
+  }
+  return result;
+};
+
 const computeExpressionReturnsExternalResult = (
   exprId: HirExprId,
   ctx: BodyContext,
   requested: readonly PlaceProjection[] = [],
   seen = new Set<HirExprId>(),
+  cache = new Map<string, boolean>(),
+  requestsByExpression = new Map<HirExprId, Set<string>>(),
+  externalTopMemo = new Map<HirExprId, boolean>(),
+  cyclic = new Set<HirExprId>(),
 ): boolean => {
   if (seen.has(exprId)) {
+    seen.forEach((candidate) => cyclic.add(candidate));
+    cyclic.add(exprId);
     return false;
   }
+  if (requested.length > MAX_AGGREGATE_ORIGIN_PROJECTION_DEPTH) {
+    return expressionMayReturnExternalResult(exprId, ctx, externalTopMemo);
+  }
+  const requestedKey = JSON.stringify(requested);
+  const expressionRequests = requestsByExpression.get(exprId) ?? new Set();
+  if (
+    !expressionRequests.has(requestedKey) &&
+    expressionRequests.size >= MAX_AGGREGATE_ORIGINS_PER_FAMILY
+  ) {
+    return expressionMayReturnExternalResult(exprId, ctx, externalTopMemo);
+  }
+  expressionRequests.add(requestedKey);
+  requestsByExpression.set(exprId, expressionRequests);
+  const cacheKey = `${exprId}:${requestedKey}`;
+  const cached = cache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+  const finish = (result: boolean): boolean => {
+    if (!cyclic.has(exprId)) {
+      cache.set(cacheKey, result);
+    }
+    return result;
+  };
   seen.add(exprId);
   const expr = ctx.hir.expressions.get(exprId);
   if (!expr) {
-    return false;
+    return finish(false);
   }
   if (expr.exprKind === "call" || expr.exprKind === "method-call") {
     if (expr.exprKind === "call" && intrinsicNameForCall(expr, ctx) === "~") {
       const operand = expr.args.at(-1)?.expr;
-      return typeof operand === "number"
-        ? computeExpressionReturnsExternalResult(operand, ctx, requested, seen)
-        : false;
+      return finish(
+        typeof operand === "number"
+          ? computeExpressionReturnsExternalResult(
+              operand,
+              ctx,
+              requested,
+              seen,
+              cache,
+              requestsByExpression,
+              externalTopMemo,
+              cyclic,
+            )
+          : false,
+      );
     }
     const info = targetInfo(expr, ctx);
     const hasUnconditionalExternalResult = externalReturnedOriginsForCall(
@@ -1269,7 +1494,7 @@ const computeExpressionReturnsExternalResult = (
         }) !== undefined,
     );
     if (hasUnconditionalExternalResult) {
-      return true;
+      return finish(true);
     }
     const parameterProjectionIsExternal = (
       parameterIndex: number,
@@ -1285,6 +1510,10 @@ const computeExpressionReturnsExternalResult = (
             ctx,
             parameterRequested,
             new Set(seen),
+            cache,
+            requestsByExpression,
+            externalTopMemo,
+            cyclic,
           )
         );
       }
@@ -1325,7 +1554,7 @@ const computeExpressionReturnsExternalResult = (
         }) ?? false
       );
     };
-    return (
+    return finish(
       info.contract?.parameters.some((parameter, index) => {
         if (!parameter.returned) {
           return false;
@@ -1341,18 +1570,24 @@ const computeExpressionReturnsExternalResult = (
             parameterProjectionIsExternal(index, translated)
           );
         });
-      }) ?? false
+      }) ?? false,
     );
   }
   if (expr.exprKind === "field-access") {
     const projection = Number.isInteger(Number(expr.field))
       ? ({ kind: "tuple", index: Number(expr.field) } as const)
       : ({ kind: "field", name: expr.field } as const);
-    return computeExpressionReturnsExternalResult(
-      expr.target,
-      ctx,
-      [projection, ...requested],
-      seen,
+    return finish(
+      computeExpressionReturnsExternalResult(
+        expr.target,
+        ctx,
+        [projection, ...requested],
+        seen,
+        cache,
+        requestsByExpression,
+        externalTopMemo,
+        cyclic,
+      ),
     );
   }
   if (expr.exprKind === "identifier") {
@@ -1372,50 +1607,74 @@ const computeExpressionReturnsExternalResult = (
               }) !== undefined),
       )
     ) {
-      return true;
+      return finish(true);
     }
     const initializer = ctx.bindingInitializers.get(expr.symbol);
-    return typeof initializer === "number"
-      ? computeExpressionReturnsExternalResult(
-          initializer,
-          ctx,
-          requested,
-          seen,
-        )
-      : false;
+    return finish(
+      typeof initializer === "number"
+        ? computeExpressionReturnsExternalResult(
+            initializer,
+            ctx,
+            requested,
+            seen,
+            cache,
+            requestsByExpression,
+            externalTopMemo,
+            cyclic,
+          )
+        : false,
+    );
   }
   if (expr.exprKind === "block" && typeof expr.value === "number") {
-    return computeExpressionReturnsExternalResult(
-      expr.value,
-      ctx,
-      requested,
-      seen,
+    return finish(
+      computeExpressionReturnsExternalResult(
+        expr.value,
+        ctx,
+        requested,
+        seen,
+        cache,
+        requestsByExpression,
+        externalTopMemo,
+        cyclic,
+      ),
     );
   }
   if (expr.exprKind === "if" || expr.exprKind === "cond") {
-    return [
-      ...expr.branches.map((branch) => branch.value),
-      ...(typeof expr.defaultBranch === "number" ? [expr.defaultBranch] : []),
-    ].some((value) =>
-      computeExpressionReturnsExternalResult(
-        value,
-        ctx,
-        requested,
-        new Set(seen),
+    return finish(
+      [
+        ...expr.branches.map((branch) => branch.value),
+        ...(typeof expr.defaultBranch === "number" ? [expr.defaultBranch] : []),
+      ].some((value) =>
+        computeExpressionReturnsExternalResult(
+          value,
+          ctx,
+          requested,
+          new Set(seen),
+          cache,
+          requestsByExpression,
+          externalTopMemo,
+          cyclic,
+        ),
       ),
     );
   }
   if (expr.exprKind === "match") {
-    return expr.arms.some((arm) =>
-      computeExpressionReturnsExternalResult(
-        arm.value,
-        ctx,
-        requested,
-        new Set(seen),
+    return finish(
+      expr.arms.some((arm) =>
+        computeExpressionReturnsExternalResult(
+          arm.value,
+          ctx,
+          requested,
+          new Set(seen),
+          cache,
+          requestsByExpression,
+          externalTopMemo,
+          cyclic,
+        ),
       ),
     );
   }
-  return false;
+  return finish(false);
 };
 
 const expressionReturnsExternalResult = (
@@ -2366,8 +2625,46 @@ type AggregateOrigin = {
   externalResult?: boolean;
   capture?: boolean;
   checkedView?: true;
+  /** Conservative top relation; projecting it must remain at the root. */
+  imprecise?: true;
   contractSource?: SourceSpan;
 };
+
+const MAX_AGGREGATE_ORIGIN_PROJECTION_DEPTH = 8;
+const MAX_AGGREGATE_ORIGINS_PER_FAMILY = 32;
+
+const aggregateOriginAccessAnchor = (
+  projections: readonly PlaceProjection[],
+): readonly PlaceProjection[] => {
+  const lastBoundary = projections.findLastIndex(
+    (projection) =>
+      projection.kind === "dereference" || projection.kind === "identity",
+  );
+  return lastBoundary < 0 ? [] : projections.slice(0, lastBoundary + 1);
+};
+
+const aggregateOriginFamilyKey = (origin: AggregateOrigin): string =>
+  JSON.stringify([
+    origin.place.root,
+    aggregateOriginAccessAnchor(origin.place.projections),
+    origin.provenance,
+    origin.access ?? "shared",
+    origin.callableResult ?? false,
+    origin.externalResult ?? false,
+    origin.capture ?? false,
+    origin.checkedView ?? false,
+    origin.contractSource ?? null,
+  ]);
+
+const broadAggregateOrigin = (origin: AggregateOrigin): AggregateOrigin => ({
+  ...origin,
+  place: {
+    root: origin.place.root,
+    projections: aggregateOriginAccessAnchor(origin.place.projections),
+  },
+  resultProjections: [],
+  imprecise: true,
+});
 
 const traitCoercionOrigins = ({
   value,
@@ -2414,10 +2711,40 @@ const localizeExternalResultPlace = (
 
 const uniqueAggregateOrigins = (
   origins: readonly AggregateOrigin[],
-): readonly AggregateOrigin[] =>
-  Array.from(
-    new Map(origins.map((origin) => [JSON.stringify(origin), origin])).values(),
+): readonly AggregateOrigin[] => {
+  const families = new Map<string, Map<string, AggregateOrigin>>();
+  origins.forEach((origin) => {
+    const familyKey = aggregateOriginFamilyKey(origin);
+    const family = families.get(familyKey) ?? new Map();
+    families.set(familyKey, family);
+    const broad = broadAggregateOrigin(origin);
+    const broadKey = JSON.stringify(broad);
+    if (family.has(broadKey)) {
+      return;
+    }
+    const canBroaden =
+      origin.provenance === "allocation-alias" &&
+      origin.access !== "mutable" &&
+      origin.capture !== true &&
+      origin.checkedView !== true;
+    const shouldBroaden =
+      canBroaden &&
+      (origin.place.projections.length >
+        MAX_AGGREGATE_ORIGIN_PROJECTION_DEPTH ||
+        origin.resultProjections.length >
+          MAX_AGGREGATE_ORIGIN_PROJECTION_DEPTH ||
+        family.size >= MAX_AGGREGATE_ORIGINS_PER_FAMILY);
+    if (shouldBroaden) {
+      family.clear();
+      family.set(broadKey, broad);
+      return;
+    }
+    family.set(JSON.stringify(origin), origin);
+  });
+  return Array.from(families.values()).flatMap((family) =>
+    Array.from(family.values()),
   );
+};
 
 const aggregateOriginAccess = (
   exprId: HirExprId,
@@ -2686,37 +3013,86 @@ const aggregateOriginsOfExpression = (
   exprId: HirExprId,
   ctx: BodyContext,
   seen = new Set<HirExprId>(),
+  cache = new Map<HirExprId, readonly AggregateOrigin[]>(),
+  cyclic = new Set<HirExprId>(),
 ): readonly AggregateOrigin[] => {
+  const cached = cache.get(exprId);
+  if (cached) {
+    return cached;
+  }
   if (seen.has(exprId)) {
+    seen.forEach((candidate) => cyclic.add(candidate));
+    cyclic.add(exprId);
     return [];
   }
+  const finish = (
+    origins: readonly AggregateOrigin[],
+  ): readonly AggregateOrigin[] => {
+    const bounded = uniqueAggregateOrigins(origins);
+    if (!cyclic.has(exprId)) {
+      cache.set(exprId, bounded);
+    }
+    return bounded;
+  };
   seen.add(exprId);
   const expr = ctx.hir.expressions.get(exprId);
   if (expr?.exprKind === "block" && typeof expr.value === "number") {
-    return aggregateOriginsOfExpression(expr.value, ctx, seen);
+    return finish(
+      aggregateOriginsOfExpression(expr.value, ctx, seen, cache, cyclic),
+    );
   }
   if (expr?.exprKind === "if" || expr?.exprKind === "cond") {
-    return uniqueAggregateOrigins([
+    return finish([
       ...expr.branches.flatMap((branch) =>
-        aggregateOriginsOfExpression(branch.value, ctx, new Set(seen)),
+        aggregateOriginsOfExpression(
+          branch.value,
+          ctx,
+          new Set(seen),
+          cache,
+          cyclic,
+        ),
       ),
       ...(typeof expr.defaultBranch === "number"
-        ? aggregateOriginsOfExpression(expr.defaultBranch, ctx, new Set(seen))
+        ? aggregateOriginsOfExpression(
+            expr.defaultBranch,
+            ctx,
+            new Set(seen),
+            cache,
+            cyclic,
+          )
         : []),
     ]);
   }
   if (expr?.exprKind === "match") {
-    return uniqueAggregateOrigins(
+    return finish(
       expr.arms.flatMap((arm) =>
-        aggregateOriginsOfExpression(arm.value, ctx, new Set(seen)),
+        aggregateOriginsOfExpression(
+          arm.value,
+          ctx,
+          new Set(seen),
+          cache,
+          cyclic,
+        ),
       ),
     );
   }
   if (expr?.exprKind === "effect-handler") {
-    return uniqueAggregateOrigins([
-      ...aggregateOriginsOfExpression(expr.body, ctx, new Set(seen)),
+    return finish([
+      ...aggregateOriginsOfExpression(
+        expr.body,
+        ctx,
+        new Set(seen),
+        cache,
+        cyclic,
+      ),
       ...expr.handlers.flatMap((handler) =>
-        aggregateOriginsOfExpression(handler.body, ctx, new Set(seen)),
+        aggregateOriginsOfExpression(
+          handler.body,
+          ctx,
+          new Set(seen),
+          cache,
+          cyclic,
+        ),
       ),
     ]);
   }
@@ -2724,28 +3100,34 @@ const aggregateOriginsOfExpression = (
     const requested = Number.isInteger(Number(expr.field))
       ? ({ kind: "tuple", index: Number(expr.field) } as const)
       : ({ kind: "field", name: expr.field } as const);
-    const projected = uniqueAggregateOrigins(
-      aggregateOriginsOfExpression(expr.target, ctx, new Set(seen)).flatMap(
-        (origin) => {
-          const projected = projectAggregateOrigin(origin, requested);
-          return projected &&
-            (projected.resultProjections.length > 0 ||
-              projected.capture === true)
-            ? [projected]
-            : [];
-        },
-      ),
+    const projected = aggregateOriginsOfExpression(
+      expr.target,
+      ctx,
+      new Set(seen),
+      cache,
+      cyclic,
+    ).flatMap((origin) => {
+      const projected = projectAggregateOrigin(origin, requested);
+      return projected &&
+        (projected.resultProjections.length > 0 ||
+          projected.imprecise === true ||
+          projected.capture === true)
+        ? [projected]
+        : [];
+    });
+    return finish(
+      expressionMaterializesPlainProjection(expr.id, ctx)
+        ? projected.filter(
+            (origin) =>
+              origin.capture === true ||
+              origin.imprecise === true ||
+              origin.checkedView === true ||
+              origin.resultProjections.some(
+                (projection) => projection.kind === "region",
+              ),
+          )
+        : projected,
     );
-    return expressionMaterializesPlainProjection(expr.id, ctx)
-      ? projected.filter(
-          (origin) =>
-            origin.capture === true ||
-            origin.checkedView === true ||
-            origin.resultProjections.some(
-              (projection) => projection.kind === "region",
-            ),
-        )
-      : projected;
   }
   if (expr?.exprKind === "call" || expr?.exprKind === "method-call") {
     const info = targetInfo(expr, ctx);
@@ -2754,7 +3136,8 @@ const aggregateOriginsOfExpression = (
       if (typeof actual !== "number" || !parameter.returned) {
         return [];
       }
-      return returnedOrigins(parameter).flatMap((origin) => {
+      const aggregateOrigins = aggregateReturnedOrigins(parameter);
+      return aggregateOrigins.flatMap(({ origin, shared, imprecise }) => {
         const places = placesAtProjection(
           actual,
           origin.source,
@@ -2775,6 +3158,7 @@ const aggregateOriginsOfExpression = (
           );
           if (
             origin.result.length === 0 &&
+            !imprecise &&
             !capture &&
             parameter.returnedAggregate !== true
           ) {
@@ -2784,11 +3168,12 @@ const aggregateOriginsOfExpression = (
             {
               place,
               resultProjections: origin.result,
-              provenance: returnedOriginIsShared(parameter, origin)
+              provenance: shared
                 ? ("storage-borrow" as const)
                 : ("allocation-alias" as const),
               access: aggregateOriginAccess(actual, place, ctx, origin.source),
               callableResult: true,
+              ...(imprecise ? { imprecise: true as const } : {}),
               capture,
               contractSource: info.contractSources[0],
             },
@@ -2872,11 +3257,7 @@ const aggregateOriginsOfExpression = (
         },
       ];
     });
-    return uniqueAggregateOrigins([
-      ...(returned ?? []),
-      ...(transferred ?? []),
-      ...external,
-    ]);
+    return finish([...(returned ?? []), ...(transferred ?? []), ...external]);
   }
   if (expr?.exprKind === "identifier") {
     const event = ctx.events.get(expr.id);
@@ -2893,18 +3274,21 @@ const aggregateOriginsOfExpression = (
         callableResult: alias.callableResult,
         externalResult: alias.externalResult,
         capture: alias.capture,
+        imprecise: alias.impreciseAggregate,
         contractSource: alias.contractSource,
       }));
     if (reaching.length > 0) {
-      return uniqueAggregateOrigins(contained);
+      return finish(contained);
     }
     const initializer = ctx.bindingInitializers.get(expr.symbol);
     return typeof initializer === "number"
-      ? aggregateOriginsOfExpression(initializer, ctx, seen)
-      : [];
+      ? finish(
+          aggregateOriginsOfExpression(initializer, ctx, seen, cache, cyclic),
+        )
+      : finish([]);
   }
   if (expr?.exprKind === "tuple") {
-    return uniqueAggregateOrigins(
+    return finish(
       expr.elements.flatMap((value, index) => {
         const projection = { kind: "tuple" as const, index };
         if (
@@ -2945,6 +3329,8 @@ const aggregateOriginsOfExpression = (
           value,
           ctx,
           new Set(seen),
+          cache,
+          cyclic,
         );
         const hasPreciseNestedOrigins = nestedOrigins.some(
           (origin) => origin.resultProjections.length > 0,
@@ -2975,7 +3361,10 @@ const aggregateOriginsOfExpression = (
             : [];
         const nested = nestedOrigins.map((origin) => ({
           ...origin,
-          resultProjections: [projection, ...origin.resultProjections],
+          resultProjections:
+            origin.imprecise === true
+              ? []
+              : [projection, ...origin.resultProjections],
         }));
         return [...direct, ...traitCoercions, ...nested];
       }),
@@ -3027,6 +3416,8 @@ const aggregateOriginsOfExpression = (
         entry.value,
         ctx,
         new Set(seen),
+        cache,
+        cyclic,
       );
       const hasPreciseNestedOrigins = nestedOrigins.some(
         (origin) => origin.resultProjections.length > 0,
@@ -3054,11 +3445,14 @@ const aggregateOriginsOfExpression = (
           : [];
       const nested = nestedOrigins.map((origin) => ({
         ...origin,
-        resultProjections: [projection, ...origin.resultProjections],
+        resultProjections:
+          origin.imprecise === true
+            ? []
+            : [projection, ...origin.resultProjections],
       }));
       return [...direct, ...traitCoercions, ...nested];
     };
-    return uniqueAggregateOrigins(
+    return finish(
       expr.entries.reduce<AggregateOrigin[]>((origins, entry) => {
         if (entry.kind === "field") {
           return [
@@ -3082,6 +3476,8 @@ const aggregateOriginsOfExpression = (
           entry.value,
           ctx,
           new Set(seen),
+          cache,
+          cyclic,
         );
         const spreadDescriptor =
           typeof spreadType === "number"
@@ -3094,6 +3490,7 @@ const aggregateOriginsOfExpression = (
           typeof resultType === "number"
             ? spreadOrigins.flatMap((origin) => {
                 if (
+                  origin.imprecise === true ||
                   origin.resultProjections.length > 0 ||
                   origin.provenance !== "storage-borrow"
                 ) {
@@ -3144,7 +3541,7 @@ const aggregateOriginsOfExpression = (
       }, []),
     );
   }
-  return [];
+  return finish([]);
 };
 
 const aggregateContentsPlaces = (
@@ -3243,6 +3640,9 @@ const projectAggregateOrigin = (
   origin: AggregateOrigin,
   projection: PlaceProjection,
 ): AggregateOrigin | undefined => {
+  if (origin.imprecise === true) {
+    return origin;
+  }
   const translated = translateProjectionPath({
     result: origin.resultProjections,
     source: origin.place.projections,
@@ -3319,6 +3719,12 @@ const bindPatternAggregateOrigin = ({
           : {}),
         ...(origin.resultProjections.length > 0
           ? { resultProjections: origin.resultProjections }
+          : {}),
+        ...(origin.imprecise === true
+          ? {
+              conservativeReturnedAggregate: true,
+              impreciseAggregate: true as const,
+            }
           : {}),
       };
       if (ctx.aliases.has(pattern.symbol)) {
@@ -3402,6 +3808,7 @@ const bindAggregatePatternOrigins = ({
   provenance = "allocation-alias",
   span,
   event,
+  aggregateOrigins,
   ctx,
 }: {
   pattern: HirPattern;
@@ -3410,6 +3817,7 @@ const bindAggregatePatternOrigins = ({
   provenance?: AliasDefinition["provenance"];
   span: SourceSpan;
   event: Event;
+  aggregateOrigins?: readonly AggregateOrigin[];
   ctx: BodyContext;
 }): void => {
   const expression = ctx.hir.expressions.get(value);
@@ -3557,7 +3965,9 @@ const bindAggregatePatternOrigins = ({
     ? []
     : bindsMutableReference
       ? placesOfExpression(value, ctx)
-      : placesStoredByExpression(value, ctx);
+      : aggregateOrigins
+        ? []
+        : placesStoredByExpression(value, ctx);
   const contractSource = borrowContractSourceOfExpression(value, ctx);
   const conservativeReturnedAggregate = hasConservativeReturnedAggregate(
     value,
@@ -3586,54 +3996,59 @@ const bindAggregatePatternOrigins = ({
       ctx,
     });
   }
-  aggregateOriginsOfExpression(value, ctx).forEach((origin) => {
-    const preservesCheckedView =
-      origin.checkedView === true ||
-      origin.resultProjections.some(
-        (projection) => projection.kind === "region",
-      );
-    const alias: AliasDefinition = {
-      symbol: pattern.symbol,
-      place: origin.place,
-      access:
-        !materializesPlainValue &&
-        directPlaces.length > 0 &&
-        (mutable || pattern.bindingKind === "mutable-ref")
-          ? "mutable"
-          : (origin.access ?? "shared"),
-      provenance:
-        !materializesPlainValue &&
-        directPlaces.length > 0 &&
-        (mutable || pattern.bindingKind === "mutable-ref")
-          ? "storage-borrow"
-          : origin.provenance,
-      span: pattern.span ?? span,
-      event,
-      uses: [],
-      ...(origin.callableResult === true ? { callableResult: true } : {}),
-      ...(origin.externalResult === true ? { externalResult: true } : {}),
-      ...(origin.capture === true ? { capture: true } : {}),
-      ...(materializesPlainValue &&
-      origin.capture !== true &&
-      !preservesCheckedView
-        ? { plainIdentity: true as const }
-        : {}),
-      ...(origin.contractSource
-        ? { contractSource: origin.contractSource }
-        : {}),
-      ...(origin.resultProjections.length > 0
-        ? { resultProjections: origin.resultProjections }
-        : {}),
-      ...(conservativeReturnedAggregate
-        ? { conservativeReturnedAggregate: true }
-        : {}),
-    };
-    if (ctx.aliases.has(pattern.symbol)) {
-      addAssignmentAlias(alias, ctx);
-    } else {
-      ctx.aliases.set(pattern.symbol, alias);
-    }
-  });
+  (aggregateOrigins ?? aggregateOriginsOfExpression(value, ctx)).forEach(
+    (origin) => {
+      const preservesCheckedView =
+        origin.checkedView === true ||
+        origin.resultProjections.some(
+          (projection) => projection.kind === "region",
+        );
+      const alias: AliasDefinition = {
+        symbol: pattern.symbol,
+        place: origin.place,
+        access:
+          !materializesPlainValue &&
+          directPlaces.length > 0 &&
+          (mutable || pattern.bindingKind === "mutable-ref")
+            ? "mutable"
+            : (origin.access ?? "shared"),
+        provenance:
+          !materializesPlainValue &&
+          directPlaces.length > 0 &&
+          (mutable || pattern.bindingKind === "mutable-ref")
+            ? "storage-borrow"
+            : origin.provenance,
+        span: pattern.span ?? span,
+        event,
+        uses: [],
+        ...(origin.callableResult === true ? { callableResult: true } : {}),
+        ...(origin.externalResult === true ? { externalResult: true } : {}),
+        ...(origin.capture === true ? { capture: true } : {}),
+        ...(materializesPlainValue &&
+        origin.capture !== true &&
+        !preservesCheckedView
+          ? { plainIdentity: true as const }
+          : {}),
+        ...(origin.contractSource
+          ? { contractSource: origin.contractSource }
+          : {}),
+        ...(origin.resultProjections.length > 0
+          ? { resultProjections: origin.resultProjections }
+          : {}),
+        ...(conservativeReturnedAggregate || origin.imprecise === true
+          ? { conservativeReturnedAggregate: true }
+          : {}),
+        ...(origin.imprecise === true
+          ? { impreciseAggregate: true as const }
+          : {}),
+      };
+      if (ctx.aliases.has(pattern.symbol)) {
+        addAssignmentAlias(alias, ctx);
+      } else {
+        ctx.aliases.set(pattern.symbol, alias);
+      }
+    },
+  );
 };
 
 const bindTraitCoercionPatternOrigins = ({
@@ -3976,7 +4391,8 @@ const recordContextualBorrowAlias = (
     JSON.stringify(candidate.resultProjections ?? []) === resultKey &&
     JSON.stringify(candidate.place) === JSON.stringify(alias.place) &&
     candidate.access === alias.access &&
-    candidate.provenance === alias.provenance;
+    candidate.provenance === alias.provenance &&
+    candidate.impreciseAggregate === alias.impreciseAggregate;
   if (assignment) {
     if (
       ctx.assignmentAliasesBySymbol
@@ -4529,17 +4945,22 @@ const scanExpression = (
             ctx,
           });
           const initializer = ctx.hir.expressions.get(statement.initializer);
-          if (
+          const mayBindAggregateOrigins =
             !returnsDetachedSharedValue &&
             !materializesBorrowedPrimitive &&
             !(
               createsMutableBinding &&
               initializerHasAddressableRoot &&
               !materializesPlainValue
-            ) &&
+            );
+          const aggregateOrigins = mayBindAggregateOrigins
+            ? aggregateOriginsOfExpression(statement.initializer, ctx)
+            : [];
+          const bindsAggregateOrigins =
+            mayBindAggregateOrigins &&
             (isAggregateExpression(statement.initializer, ctx) ||
-              aggregateContentsPlaces(statement.initializer, ctx).length > 0)
-          ) {
+              aggregateOrigins.length > 0);
+          if (bindsAggregateOrigins) {
             bindAggregatePatternOrigins({
               pattern: statement.pattern,
               value: statement.initializer,
@@ -4547,6 +4968,7 @@ const scanExpression = (
               provenance,
               span: statement.span,
               event,
+              aggregateOrigins,
               ctx,
             });
           }
@@ -4819,8 +5241,12 @@ const scanExpression = (
                   ...(origin.resultProjections.length > 0
                     ? { resultProjections: origin.resultProjections }
                     : {}),
-                  ...(hasConservativeReturnedAggregate(expr.value, ctx)
+                  ...(hasConservativeReturnedAggregate(expr.value, ctx) ||
+                  origin.imprecise === true
                     ? { conservativeReturnedAggregate: true }
+                    : {}),
+                  ...(origin.imprecise === true
+                    ? { impreciseAggregate: true as const }
                     : {}),
                 },
                 ctx,
@@ -6364,6 +6790,12 @@ const escapedPlacesIn = (
                 ? { resultProjections: origin.resultProjections }
                 : {}),
               ...(origin.capture === true ? { capture: true } : {}),
+              ...(origin.imprecise === true
+                ? {
+                    conservativeReturnedAggregate: true,
+                    impreciseAggregate: true as const,
+                  }
+                : {}),
             },
           });
         });

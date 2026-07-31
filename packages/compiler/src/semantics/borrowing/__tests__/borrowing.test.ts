@@ -10910,6 +10910,41 @@ fn select(value: Wide, index: i32) -> Box
     expect(widened).toBeDefined();
   });
 
+  it("keeps widened aggregate origins conservative through field projection", () => {
+    const fields = Array.from(
+      { length: 40 },
+      (_entry, index) => `field_${index}`,
+    );
+    const selectExpression = fields
+      .slice(0, -1)
+      .reduceRight(
+        (otherwise, field, index) =>
+          `if index == ${index}:\n  View { active: value.${field} }\nelse:\n  ${otherwise.replaceAll("\n", "\n  ")}`,
+        `View { active: value.${fields.at(-1)} }`,
+      );
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Wide {
+  ${fields.map((field) => `${field}: Box`).join(",\n  ")}
+}
+obj View { active: borrow Box }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn select(value: borrow Wide, index: i32) -> View
+  ${selectExpression.replaceAll("\n", "\n  ")}
+
+fn invalid(~value: Wide, index: i32) -> i32
+  let view = select(value, index)
+  mutate(~value.field_39)
+  view.active.value
+`),
+    ).toContain("TY0048");
+  });
+
   it("drops shared return guarantees instead of widening them", () => {
     const indexedOrigins = Array.from({ length: 33 }, (_entry, index) => ({
       source: [{ kind: "index" as const, constant: index, stable: true }],
