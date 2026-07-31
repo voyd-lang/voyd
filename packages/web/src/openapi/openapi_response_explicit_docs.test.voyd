@@ -1,0 +1,59 @@
+use src::openapi::{ document, info, operation }
+use src::openapi::{ OpenApiResponseContract, openapi_json_response, route_docs }
+use src::openapi::test_types::{ AutomaticArticle, AutomaticCreateArticle }
+use std::array::Array
+use std::http::{ Method, Response }
+use std::json::stringify
+use std::error::panic
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::extract::json_body
+use src::response::{ IntoResponse, OpenApiResponse }
+use src::router::app
+
+obj CustomReply {
+  api message: String
+}
+
+impl IntoResponse<CustomReply> for CustomReply
+  fn into_response(self) -> Response
+    Response::ok().text(self.message)
+
+impl OpenApiResponse<CustomReply> for CustomReply
+  fn documented_responses() -> Array<OpenApiResponseContract>
+    [openapi_json_response<AutomaticArticle>(status: 203, description: "Custom response")]
+
+fn raw_reply(_input: AutomaticCreateArticle): (open) -> Response
+  Response::ok().text("raw")
+
+test "raw and custom responses use explicit response documentation":
+  let custom_spec = document(info(title: "Custom", version: "1"))
+    .route("/custom", method: Method::Get {}, operation: operation().with_responses(CustomReply::documented_responses()))
+    .route("/raw-override", method: Method::Get {}, operation: operation().with_responses([
+      openapi_json_response<AutomaticArticle>(status: 206, description: "Partial article")
+    ]))
+  let documented = app(openapi: { title: "Overrides", version: "1" })
+    .post(
+      "/raw".as_slice(),
+      body: json_body(),
+      handler: raw_reply,
+      docs: route_docs(responses: [
+        openapi_json_response<AutomaticArticle>(status: 206, description: "Partial article")
+      ])
+    )
+  match(stringify(custom_spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"203\"".as_slice(), "missing custom response contract")
+      require_contains(value, "\"206\"".as_slice(), "missing response override")
+  match(stringify(documented.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"/raw\"".as_slice(), "missing raw response route")
+      require_contains(value, "\"206\"".as_slice(), "missing raw response override")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

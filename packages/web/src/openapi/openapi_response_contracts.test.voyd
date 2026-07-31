@@ -1,0 +1,33 @@
+use src::openapi::{ document, info, operation }
+use src::openapi::test_types::AutomaticArticle
+use std::http::Method
+use std::json::stringify
+use std::error::panic
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::response::{ Accepted, Created, Json, NoContent, Text }
+use src::openapi::response_inference::{ inferred_responses, option_responses, result_responses }
+
+test "typed response contracts cover statuses text result and option":
+  let spec = document(info(title: "Responses", version: "1"))
+    .route("/created", method: Method::Get {}, operation: operation().with_responses(inferred_responses<Created<AutomaticArticle>>()))
+    .route("/accepted", method: Method::Get {}, operation: operation().with_responses(inferred_responses<Accepted<AutomaticArticle>>()))
+    .route("/empty", method: Method::Get {}, operation: operation().with_responses(inferred_responses<NoContent>()))
+    .route("/text", method: Method::Get {}, operation: operation().with_responses(inferred_responses<Text>()))
+    .route("/result", method: Method::Get {}, operation: operation().with_responses(result_responses<Created<AutomaticArticle>, Accepted<AutomaticArticle>>() ))
+    .route("/option", method: Method::Get {}, operation: operation().with_responses(option_responses<Json<AutomaticArticle>>() ))
+  match(stringify(spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"201\"".as_slice(), "missing created response")
+      require_contains(value, "\"202\"".as_slice(), "missing accepted response")
+      require_contains(value, "\"204\"".as_slice(), "missing no-content response")
+      require_contains(value, "\"404\"".as_slice(), "missing option not-found response")
+      require_contains(value, "\"text/plain; charset=utf-8\"".as_slice(), "missing text response")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

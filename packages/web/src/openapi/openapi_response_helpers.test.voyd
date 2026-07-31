@@ -1,0 +1,45 @@
+use src::openapi::test_types::AutomaticArticle
+use std::json::stringify
+use std::error::panic
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::response::{ Accepted, Json, accepted, option_json, result_json }
+use src::router::app
+use src::openapi::automatic::all
+
+fn mapped_result_reply() -> Result<Json<AutomaticArticle>, Accepted<AutomaticArticle>>
+  let value: Result<AutomaticArticle, Accepted<AutomaticArticle>> = Ok<AutomaticArticle> {
+    value: AutomaticArticle { id: 5, title: "mapped" }
+  }
+  result_json<AutomaticArticle, Accepted<AutomaticArticle>>(value)
+
+fn mapped_option_reply() -> Option<Json<AutomaticArticle>>
+  option_json<AutomaticArticle>(Some<AutomaticArticle> {
+    value: AutomaticArticle { id: 6, title: "optional" }
+  })
+
+test "JSON result and option helpers preserve automatic response contracts":
+  let web_app = app(openapi: { title: "Mapped responses", version: "1" })
+    .get<Result<Json<AutomaticArticle>, Accepted<AutomaticArticle>>>(
+      "/result-json",
+      handler: mapped_result_reply
+    )
+    .get<Option<Json<AutomaticArticle>>>(
+      "/option-json",
+      handler: mapped_option_reply
+    )
+  match(stringify(web_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"200\"".as_slice(), "mapped JSON success was erased")
+      require_contains(value, "\"202\"".as_slice(), "mapped result error was erased")
+      require_contains(value, "\"404\"".as_slice(), "mapped option fallback was erased")
+      require_contains(value, "\"id\"".as_slice(), "mapped JSON DTO schema was erased")
+      require_contains(value, "\"title\"".as_slice(), "mapped JSON DTO fields were erased")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)
