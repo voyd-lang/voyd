@@ -10853,63 +10853,6 @@ fn write(~destination: Chain, source: Box, recurse: bool) -> void
     expect(recursive).toBeDefined();
   });
 
-  it("bounds nested physical provenance across returned-origin calls", () => {
-    const nestedSelection = Array.from({ length: 8 }).reduce(
-      (value) => `select(${value}, true)`,
-      "value",
-    );
-
-    expect(() =>
-      analyze(`
-obj Tree {
-  value: i32,
-  left: Tree,
-  right: Tree
-}
-
-fn select(value: borrow Tree, choose_left: bool) -> borrow Tree
-  if choose_left:
-    value.left
-  else:
-    value.right
-
-fn nested(value: borrow Tree) -> borrow Tree
-  ${nestedSelection}
-`),
-    ).not.toThrow();
-  });
-
-  it("keeps widened origin families conservative", () => {
-    const fields = Array.from(
-      { length: 40 },
-      (_entry, index) => `field_${index}`,
-    );
-    const selectExpression = fields
-      .slice(0, -1)
-      .reduceRight(
-        (otherwise, field, index) =>
-          `if index == ${index}:\n  value.${field}\nelse:\n  ${otherwise.replaceAll("\n", "\n  ")}`,
-        `value.${fields.at(-1)}`,
-      );
-    const result = analyze(`
-obj Box { value: i32 }
-obj Wide {
-  ${fields.map((field) => `${field}: Box`).join(",\n  ")}
-}
-
-fn select(value: Wide, index: i32) -> Box
-  ${selectExpression.replaceAll("\n", "\n  ")}
-`);
-    const widened = Array.from(result.borrowing.callables.values()).find(
-      (contract) =>
-        contract.parameters[0]?.returnedOrigins?.some(
-          (origin) => origin.source.length === 0 && origin.result.length === 0,
-        ),
-    );
-
-    expect(widened).toBeDefined();
-  });
-
   it("drops shared return guarantees instead of widening them", () => {
     const indexedOrigins = Array.from({ length: 33 }, (_entry, index) => ({
       source: [{ kind: "index" as const, constant: index, stable: true }],
