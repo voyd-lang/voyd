@@ -9,9 +9,10 @@ package unit behind one Turbo queue.
 - `test`: affected core package units, excluding the dedicated conformance,
   integration, web-package and developer-tooling workspaces, with explicit package
   concurrency of three and one Vitest worker per package task.
-- `web-unit`: affected Voyd web-package tests in three isolated deterministic
-  partitions. Files remain sequential within each runner, so compiler heaps are
-  never combined in one process.
+- `web-unit`: affected Voyd web-package tests in eight isolated deterministic
+  partitions. Each runner compiles its selected test modules together once;
+  local and full-suite runs execute the same eight partitions sequentially to
+  keep compiler memory bounded.
 - `tooling-unit`: affected CLI and language-server package units, with the two
   package tasks running concurrently and one Vitest worker per task.
 - `conformance`: the portable language corpus when compiler/runtime inputs can
@@ -139,10 +140,13 @@ response-trait context in a split untyped OpenAPI fixture. Restoring that
 fixture's response traits preserves its original generic `get<Response>` route,
 opaque response inference, and every schema assertion without depending on
 unrelated imports from the former compound test. Three round-robin partitions
-reduce each runner's sequential work without raising a shard, command, or job
-limit.
+bounded memory, but the final hosted run still took 21-27 minutes per
+partition. Each `.test.voyd` file launched a fresh compiler process, so the
+full `pkg::web` dependency graph was analyzed 28 times; 23 of those processes
+existed to run a single test.
 
-This is addressed by isolation instead of an unbounded heap increase:
+This is addressed by compile-level partitioning instead of an unbounded heap
+increase or per-file compiler processes:
 
 - the core-unit command excludes `@voyd-lang/web`;
 - the web job runs for changes to the web package or its source compiler, CLI,
@@ -150,22 +154,26 @@ This is addressed by isolation instead of an unbounded heap increase:
   the web package's published dependency graph;
 - the job calls the web workspace script directly, so a Turbo cache hit cannot
   suppress shards after one of those hidden source inputs changes;
-- the web task discovers every `packages/web/src/**/*.test.voyd`
-  file, sorts them deterministically, and runs each in a fresh compiler process;
-- CI assigns the sorted files round-robin across three isolated runners. Each file
-  belongs to exactly one partition, while the ordinary local command omits
-  partition arguments and still runs the complete sorted list;
+- `voyd test --shard N/M` discovers and sorts test modules before compilation,
+  selects each module by deterministic round-robin index, and compiles the
+  selected modules together in one process;
+- CI assigns the sorted modules round-robin across eight isolated runners. Each
+  module belongs to exactly one partition and each partition contains three or
+  four of the current 28 test files;
+- the ordinary local command runs the same eight compile-level partitions
+  sequentially, preserving complete coverage without combining their compiler
+  heaps;
 - the ordinary web-package `test` script uses the same runner, so local and
   full-repository test commands cannot fall back to the monolithic OOM path;
 - the former compound OpenAPI builder and response tests are separated by
   contract family, preserving every assertion while bounding each semantic
   graph and long automatic-route chain;
 - the generated string-overload freshness check still runs before the shards;
-- only the exact partition commands `npm run test:unit:web:ci:0`,
-  `npm run test:unit:web:ci:1`, and `npm run test:unit:web:ci:2` have temporary
-  1,800,000 ms wall budgets, and each shard retains its 600,000 ms hard timeout;
-  all ordinary unit budgets remain unchanged;
-- each dedicated partition job has a 35-minute orchestration ceiling and
+- only the eight exact partition commands from `npm run test:unit:web:ci:0`
+  through `npm run test:unit:web:ci:7` have temporary 600,000 ms wall budgets,
+  matching the compiler-process hard timeout; all ordinary unit budgets remain
+  unchanged;
+- each dedicated partition job has a 15-minute orchestration ceiling and
   retains a uniquely named timing artifact for 30 days.
 
 The main `test` job also has a 25-minute orchestration ceiling. This does not

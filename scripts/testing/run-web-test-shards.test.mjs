@@ -1,37 +1,23 @@
 import { describe, expect, it } from "vitest";
-import { parsePartitionArgs, selectPartition } from "./run-web-test-shards.mjs";
+import {
+  parsePartitionArgs,
+  partitionsForArgs,
+} from "./run-web-test-shards.mjs";
 
 describe("web test shard partitioning", () => {
-  it("runs every sorted file when partitioning is absent", () => {
-    const files = ["a.test.voyd", "b.test.voyd", "c.test.voyd"];
-    expect(selectPartition(files, parsePartitionArgs([]))).toEqual(files);
+  it("runs eight compile-level partitions for local and full-suite tests", () => {
+    expect(partitionsForArgs([])).toEqual(
+      Array.from({ length: 8 }, (_value, index) => ({ index, count: 8 })),
+    );
   });
 
-  it("assigns every file exactly once across deterministic partitions", () => {
-    const files = [
-      "a.test.voyd",
-      "b.test.voyd",
-      "c.test.voyd",
-      "d.test.voyd",
-      "e.test.voyd",
-    ];
-    const first = selectPartition(
-      files,
-      parsePartitionArgs(["--partition-index=0", "--partition-count=3"]),
-    );
-    const second = selectPartition(
-      files,
-      parsePartitionArgs(["--partition-index=1", "--partition-count=3"]),
-    );
-    const third = selectPartition(
-      files,
-      parsePartitionArgs(["--partition-index=2", "--partition-count=3"]),
-    );
-
-    expect(first).toEqual(["a.test.voyd", "d.test.voyd"]);
-    expect(second).toEqual(["b.test.voyd", "e.test.voyd"]);
-    expect(third).toEqual(["c.test.voyd"]);
-    expect([...first, ...second, ...third].sort()).toEqual(files);
+  it("runs only the requested CI partition", () => {
+    expect(
+      partitionsForArgs([
+        "--partition-index=6",
+        "--partition-count=8",
+      ]),
+    ).toEqual([{ index: 6, count: 8 }]);
   });
 
   it.each([

@@ -62,6 +62,7 @@ async function main() {
       rootPath: config.index,
       reporter: config.testReporter,
       failOnEmptyTests: config.failOnEmptyTests,
+      shard: config.testShard,
       pkgDirs: config.pkgDirs,
     });
   }

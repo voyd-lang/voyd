@@ -14,9 +14,14 @@
   "web-unit": {
     "maxWallMs": 420000,
     "maxWallMsByCommand": {
-      "npm run test:unit:web:ci:0": 1800000,
-      "npm run test:unit:web:ci:1": 1800000,
-      "npm run test:unit:web:ci:2": 1800000
+      "npm run test:unit:web:ci:0": 600000,
+      "npm run test:unit:web:ci:1": 600000,
+      "npm run test:unit:web:ci:2": 600000,
+      "npm run test:unit:web:ci:3": 600000,
+      "npm run test:unit:web:ci:4": 600000,
+      "npm run test:unit:web:ci:5": 600000,
+      "npm run test:unit:web:ci:6": 600000,
+      "npm run test:unit:web:ci:7": 600000
     },
     "maxFileMs": 180000
   },
