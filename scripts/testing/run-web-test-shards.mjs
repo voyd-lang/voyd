@@ -18,9 +18,7 @@ if (!Number.isFinite(shardTimeoutMs) || shardTimeoutMs <= 0) {
   throw new Error("VOYD_WEB_TEST_SHARD_TIMEOUT_MS must be a positive number");
 }
 
-process.stdout.write(
-  `Discovered ${testFiles.length} web test-file shards.\n`,
-);
+process.stdout.write(`Discovered ${testFiles.length} web test-file shards.\n`);
 
 for (const [index, testFile] of testFiles.entries()) {
   process.stdout.write(
@@ -28,12 +26,7 @@ for (const [index, testFile] of testFiles.entries()) {
   );
   const result = spawnSync(
     process.execPath,
-    [
-      resolve(repoRoot, "scripts/voyd"),
-      "test",
-      testFile,
-      "--fail-empty-tests",
-    ],
+    [resolve(repoRoot, "scripts/voyd"), "test", testFile, "--fail-empty-tests"],
     {
       cwd: repoRoot,
       env: { ...process.env, VOYD_USE_SRC: "1" },

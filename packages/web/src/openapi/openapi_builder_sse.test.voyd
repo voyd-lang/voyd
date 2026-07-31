@@ -1,12 +1,12 @@
 use src::openapi::{ document, info, operation }
 use src::openapi::test_types::DocumentedEvent
 use src::openapi::automatic::all
-use src::openapi::builder_test_helpers::require_contains
+use std::error::panic
 use std::http::Method
 use std::json::stringify
 use std::optional::types::all
 use std::result::types::all
-use std::string::type::String
+use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
 
 test "OpenAPI reflects typed SSE response documentation":
@@ -30,3 +30,7 @@ test "OpenAPI reflects typed SSE response documentation":
     Ok<String> { value }:
       require_contains(value, "\"text/event-stream\"".as_slice(), "missing SSE content")
       require_contains(value, "\"x-voyd-event-schema\"".as_slice(), "missing SSE event schema")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)
