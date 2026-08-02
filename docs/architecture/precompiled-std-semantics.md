@@ -83,7 +83,9 @@ facts from different std revisions.
 
 This mechanism is intentionally std-specific. It serializes the current
 compiler semantic snapshot closely enough to preserve codegen and diagnostics;
-it is not the package interface format.
+it is not the package interface format. Generalization is tracked by
+[V-462](https://linear.app/voyd-lang/issue/V-462); implementation requirements
+and completion criteria live in its Linear child issues.
 
 General package contracts should instead expose a smaller, stable
 consumer-facing boundary:

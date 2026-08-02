@@ -1,256 +1,128 @@
 # Test And CI Modes
 
-PR CI separates workloads so compile-heavy public tests do not serialize every
-package unit behind one Turbo queue.
+PR CI separates compile-heavy workloads so one package cannot serialize the
+complete correctness suite behind a single Turbo queue.
 
-## Required Lanes
+## Required lanes
 
 - `typecheck`: affected workspace typechecks through Turbo.
-- `test`: affected core package units, excluding the dedicated conformance,
-  integration, web-package and developer-tooling workspaces, with explicit package
+- `test`: affected core package units, excluding conformance, integration,
+  web-package, performance, and developer-tooling workspaces. It uses package
   concurrency of three and one Vitest worker per package task.
-- `web-unit`: affected Voyd web-package tests in eight isolated deterministic
-  partitions. Each runner compiles its selected test modules together once;
-  local and full-suite runs execute the same eight partitions sequentially to
-  keep compiler memory bounded.
-- `tooling-unit`: affected CLI and language-server package units, with the two
-  package tasks running concurrently and one Vitest worker per task.
-- `conformance`: the portable language corpus when compiler/runtime inputs can
+- `web-unit`: affected Voyd web-package tests in eight deterministic
+  compile-level partitions.
+- `tooling-unit`: affected CLI and language-server units, with the two package
+  tasks concurrent and one Vitest worker per task.
+- `conformance`: portable language behavior when compiler/runtime inputs can
   affect it.
 - `integration`: cross-package public behavior when an upstream package can
   affect it.
 - `compiler-codegen`: four Vitest shards for compiler codegen.
-- `cli-dist-e2e`: the full distributed CLI suite for direct CLI changes; a
-  small startup/compile/run/test smoke for upstream runtime changes.
+- `cli-dist-e2e`: full distributed CLI coverage for direct CLI changes and a
+  smaller dist smoke for upstream runtime changes.
 - `optimizer-scorecard`: conditional optimizer regression comparison.
 
-Superseded PR runs are cancelled. Turbo caches are restored only in jobs that
-actually execute Turbo tasks; direct Vitest jobs do not restore an ineffective
-Turbo cache.
+Superseded PR runs are cancelled. Turbo caches are restored only for jobs that
+actually execute Turbo tasks; direct Vitest or Voyd test jobs do not restore an
+ineffective Turbo cache.
 
-Core-unit, web-unit, tooling-unit, conformance and integration jobs record the wall time
-of the complete lane command, emit per-file Vitest JSON timing reports where
-applicable, enforce the checked-in budgets in
-`scripts/testing/timing-budgets.json`, and retain their summaries as 30-day CI
-artifacts. Measuring the full command keeps Voyd-runner, grammar, and other
-non-Vitest package tasks inside the unit budget. Initial budgets are
-intentionally generous enough to avoid runner noise; tighten them from observed
-p95 data.
-Dedicated conformance and integration jobs each use two Vitest workers, so the
-unit lane's three-package concurrency cannot multiply into unbounded nested
-worker pools.
+`npm run test:full` runs its independent compiler-codegen and CLI e2e tail
+phases concurrently after the main workspace sweep.
 
-The shared Vitest configuration defaults to one worker when `CI` is set and
-uses Vitest's unrestricted worker default otherwise. `VITEST_MAX_WORKERS`
-overrides both behaviors. This keeps hosted runners bounded without forcing
-developer machines to run compiler tests serially.
+## Timing and resource budgets
 
-`npm run test:full` also runs its independent compiler-codegen and CLI e2e
-tail phases concurrently after the main workspace sweep completes.
+Core-unit, web-unit, tooling-unit, conformance, and integration jobs measure
+the complete lane command. Vitest lanes also emit per-file timing reports. The
+jobs enforce `scripts/testing/timing-budgets.json` and retain summaries for 30
+days. Measuring the full command keeps Voyd-runner, grammar, and other
+non-Vitest work inside the lane budget.
 
-The first broad upstream unit runs after the lane split varied from about 224
-to 342 seconds on hosted runners. The slowest unchanged file varied from about
-119 to 147 seconds, and the file exceeding the limit changed between attempts
-even though every test passed. The initial unit guardrail is therefore 420
-seconds for the lane and 180 seconds per file. This retains regression
-detection without making ordinary hosted-runner variance a required-check
-failure; tighten it once retained artifacts provide a credible p95 baseline.
-The CLI and language-server packages have their own unit shard because their
-compile-heavy files can dominate broad upstream runs. The split stays at
-package boundaries so Turbo's affected selection remains authoritative and new
-test files cannot silently fall out of CI.
+The shared Vitest configuration defaults to one worker in CI and uses Vitest's
+unrestricted default locally. `VITEST_MAX_WORKERS` overrides both behaviors.
+Conformance and integration explicitly use two workers.
 
-### V-448 tooling transition
+The general unit guardrails are:
 
-V-448's call-scoped memory and mutation analysis increased the cost of source
-compilations used by two developer-tooling test files. On PR #752, hosted CI
-measured `apps/cli/src/__tests__/bootstrap.test.ts` at 208,119 ms and
-`packages/language-server/src/__tests__/project.test.ts` at 190,624 ms. Both
-exceeded the general 180,000 ms per-file budget while the tooling lane stayed
-within its 420,000 ms wall-time budget.
+- lane wall time: 420,000 ms;
+- file time: 180,000 ms.
 
-The transition allowance preserves the lane-wide budget and every test:
+The CLI and language-server packages have a dedicated tooling lane because
+their compile-heavy files can dominate a broad upstream run. The split stays at
+package boundaries so Turbo's affected selection remains authoritative.
 
-- `bootstrap.test.ts`: 240,000 ms
-- `project.test.ts`: 240,000 ms
-- every other unit test file: 180,000 ms
+## V-448 temporary limits
 
-These are exact-path overrides, not basename-wide or lane-wide increases. They
-include roughly the same runner-noise headroom as the original unit budget.
+V-448 added borrow analysis and versioned callable summaries.
+Snapshot-hit default-prelude compilation recovers the representative fixture,
+but package-heavy and snapshot-miss paths remain slower. The measurements and
+hosted-run history are recorded in
+[Memory and mutation safety performance](./memory-and-mutation-safety-performance.md).
 
-V-462, **Build package-scale incremental compilation after V-448**, must define
-the reusable package semantic interfaces that make these independent analyses
-cheaper. V-467, **Persist package and callable caches across processes**, must
-then remove repeated package and callable work from fresh tooling processes.
-After those land, V-468, **Rebaseline compiler performance and restore strict
-CI gates**, must use at least ten successful hosted tooling timing artifacts,
-set caps from observed p95 plus 20% runner headroom, delete these exact-path
-exceptions when that value is at or below the general 180,000 ms limit, and
-restore strict permanent budgets. Keep the 420,000 ms lane guard unchanged
-throughout so aggregate regressions remain visible.
+The limits below are narrowly scoped and retain all assertions. They describe
+the current CI contract; cleanup and remeasurement are tracked exclusively by
+[V-468](https://linear.app/voyd-lang/issue/V-468). Package-scale performance
+work is tracked under [V-462](https://linear.app/voyd-lang/issue/V-462).
 
-### V-448 SDK transition
+### Tooling
 
-The SDK's end-to-end web helper test performs a first compile of the full web
-package before checking readiness, requests, and shutdown. On PR #752, hosted
-CI completed that test in 260,705 ms after its 120,000 ms Vitest timeout had
-already fired. The complete `sdk-node.test.ts` file took 349,978 ms, and the
-affected core-unit command took 523,746 ms. An isolated local run completed the
-same test and all shutdown assertions in 59,750 ms, confirming slow compilation
-rather than a server or cancellation hang.
+- `apps/cli/src/__tests__/bootstrap.test.ts`: 240,000 ms;
+- `packages/language-server/src/__tests__/project.test.ts`: 240,000 ms;
+- every other tooling file: 180,000 ms;
+- tooling lane wall time: 420,000 ms.
 
-The temporary allowances preserve the test and the ordinary unit defaults:
+These are exact-path overrides, not basename-wide or lane-wide increases.
+
+### SDK and core units
 
 - only `closes a long-running web app entry through the SDK helper` has a
   330,000 ms test timeout;
 - only `packages/sdk/src/__tests__/sdk-node.test.ts` has a 420,000 ms file
   budget;
-- only the exact `npm run test:unit:core:affected:ci` command has a 630,000 ms
-  wall budget;
-- every other unit test file retains the 180,000 ms budget, and every other
-  unit command—including the tooling shard—retains the 420,000 ms wall budget.
+- only `npm run test:unit:core:affected:ci` has a 630,000 ms command budget;
+- every other unit command retains the 420,000 ms wall budget;
+- the outer `test` job has a 25-minute orchestration ceiling so setup,
+  post-command checks, conditional builds, and benchmarks can follow a healthy
+  bounded core command.
 
-V-462 and V-467 must make package semantics and callable caches reusable across
-the SDK's fresh web-package compilation. After they land, V-468 must collect at
-least ten successful hosted core-unit timing artifacts, set temporary bounds
-from observed p95 plus 20% runner headroom, remove the exact file and command
-overrides when they fit under the ordinary limits, and restore the test's
-120,000 ms timeout. Assertions and test files must not be skipped to meet a
-timing budget.
+### Web package
 
-### V-448 web-package transition
+The web package is excluded from the core Turbo queue and runs through a direct,
+non-cached matrix. Its path filter includes the web package and every source
+compiler, runtime, standard-library, SDK, CLI, and test-runner input that can
+change its result.
 
-The web package previously compiled every co-located Voyd test in one compiler
-process. On PR #752, that process spent 188,800 ms compiling before exhausting
-Node's default heap at approximately 4.06 GiB. Raising the heap to 6 GiB only
-delayed the failure to 212,360 ms. In the shared affected-core job, compiler,
-library and SDK tests completed successfully, but the job reached its
-12-minute orchestration ceiling before the web package completed.
-The first bounded local shard sweep passed the first eight sorted files at the
-default heap and reached 725,760 ms when the existing
-`openapi_responses.test.voyd` shard hit the intentionally strict 180,000 ms
-local validation cutoff. The initial hosted limits therefore account for both
-the observed sequential cost and the prior hosted-runner slowdown; they are
-transition bounds, not a new permanent baseline.
+`voyd test --shard N/M` discovers and sorts test modules before compilation,
+selects modules by deterministic round-robin index, and compiles each selected
+set together once. CI distributes the current 28 files across eight runners as
+4/4/4/4/3/3/3/3. Local and full-repository tests run the same eight partitions
+sequentially so compiler heaps remain bounded. Every test module belongs to
+exactly one partition.
 
-Hosted run 30608445317 confirmed that two partitions were still too coarse:
-partition 1 reached shard 13 of 14 after about 33 minutes, while partition 2 was
-cancelled near the 35-minute job ceiling. The same run also exposed hidden
-response-trait context in a split untyped OpenAPI fixture. Restoring that
-fixture's response traits preserves its original generic `get<Response>` route,
-opaque response inference, and every schema assertion without depending on
-unrelated imports from the former compound test. Three round-robin partitions
-bounded memory, but the final hosted run still took 21-27 minutes per
-partition. Each `.test.voyd` file launched a fresh compiler process, so the
-full `pkg::web` dependency graph was analyzed 28 times; 23 of those processes
-existed to run a single test.
+- exact commands `npm run test:unit:web:ci:0` through `:7`: 600,000 ms each;
+- compiler-process hard timeout: 600,000 ms;
+- partition job orchestration ceiling: 15 minutes;
+- timing artifacts: `web-unit-test-timings-partition-*`, retained for 30 days.
 
-This is addressed by compile-level partitioning instead of an unbounded heap
-increase or per-file compiler processes:
+The string-overload freshness check runs before every partition command.
 
-- the core-unit command excludes `@voyd-lang/web`;
-- the web job runs for changes to the web package or its source compiler, CLI,
-  runtime, standard-library, SDK, and test-runner inputs instead of relying on
-  the web package's published dependency graph;
-- the job calls the web workspace script directly, so a Turbo cache hit cannot
-  suppress shards after one of those hidden source inputs changes;
-- `voyd test --shard N/M` discovers and sorts test modules before compilation,
-  selects each module by deterministic round-robin index, and compiles the
-  selected modules together in one process;
-- CI assigns the sorted modules round-robin across eight isolated runners. Each
-  module belongs to exactly one partition and each partition contains three or
-  four of the current 28 test files;
-- the ordinary local command runs the same eight compile-level partitions
-  sequentially, preserving complete coverage without combining their compiler
-  heaps;
-- the ordinary web-package `test` script uses the same runner, so local and
-  full-repository test commands cannot fall back to the monolithic OOM path;
-- the former compound OpenAPI builder and response tests are separated by
-  contract family, preserving every assertion while bounding each semantic
-  graph and long automatic-route chain;
-- the generated string-overload freshness check still runs before the shards;
-- only the eight exact partition commands from `npm run test:unit:web:ci:0`
-  through `npm run test:unit:web:ci:7` have temporary 600,000 ms wall budgets,
-  matching the compiler-process hard timeout; all ordinary unit budgets remain
-  unchanged;
-- each dedicated partition job has a 15-minute orchestration ceiling and
-  retains a uniquely named timing artifact for 30 days.
+### Integration
 
-The main `test` job also has a 25-minute orchestration ceiling. This does not
-relax a test gate: its exact core command remains capped at 630,000 ms. The
-extra job-level time only allows dependency installation, timing enforcement,
-conditional builds and the typing benchmark to run after a healthy core
-command.
+- initial web-package compile test/hook timeouts: 240,000 ms;
+- `tests/integration/src/vx-dom.test.ts`: 330,000 ms;
+- `tests/integration/src/web-framework.test.ts`: 330,000 ms;
+- every other integration file: 210,000 ms;
+- integration lane wall time: 420,000 ms.
 
-V-462 must define reusable package semantic contracts, and V-467 must persist
-package and callable caches so these fresh compiler processes do less repeated
-work. After those land, V-468 must collect at least ten successful hosted
-`web-unit-test-timings-partition-*` artifacts, set each temporary command budget
-to observed p95 plus 20% runner headroom, and delete the exact overrides when
-the complete web command fits at or below the ordinary 420,000 ms command
-budget. It must then recombine the partitions and test merging the web task back
-into the core lane without increasing the core lane's memory or wall-time
-bounds. Keep deterministic full test discovery until a replacement provides
-equivalent coverage; never skip assertions or files to satisfy a resource gate.
+The VX integration tests share one SDK instance so distinct entry compilations
+can reuse the in-process package dependency snapshot.
 
-The first live hosted-runner integration baseline completed all 128 assertions
-in about 201 seconds, with the slowest file at about 132 seconds. After the
-public web package gained request streaming, SSE, and OpenAPI generation,
-healthy runs completed in about 247 seconds with the expanded web fixture at
-183-193 seconds. Follow-up runner variance brought the pre-V-448 budget to 375
-seconds for the lane, 210 seconds per file, and a 270-second VX file override.
-This preserved the lane-wide regression guard while leaving headroom for
-ordinary runner variance.
+### Optimizer scorecard
 
-### V-448 integration transition
+The precompiled-std migration-only RSS rule and its current measurements are
+documented in [Compiler performance](../compiler-performance.md). Its removal
+is also owned by V-468.
 
-V-448 also increased the semantic-analysis cost of the integration suite's two
-web-package compilations. On PR #752, hosted CI measured
-`vx-dom.test.ts` at 345,303 ms; its initial web-package compile reached the
-180,000 ms test timeout after 191,849 ms. The shared web-framework fixture hit
-the same 180,000 ms hook timeout. The retained timing artifact records a
-396,968 ms failed lane wall time. On the same revision, isolated local runs
-completed `web-framework.test.ts` in 95,660 ms and `vx-dom.test.ts` in 102,770
-ms, confirming slow completion rather than a hang.
-
-The VX tests now share one SDK instance so their distinct entry compilations
-reuse the package dependency snapshot. A local validation of the complete stack
-passed all 33 affected assertions in 84,550 ms. The first hosted rerun with
-that reuse passed all 141 assertions:
-`vx-dom.test.ts` completed in 280,143 ms and `web-framework.test.ts` completed
-in 91,818 ms. Its 427,481 ms lane wall time exceeded the pre-V-448 375,000 ms
-cap even though both file caps passed.
-
-A subsequent hosted run after bounded borrow-summary inference passed all 141
-assertions in 312,358 ms. `vx-dom.test.ts` completed in 208,424 ms and
-`web-framework.test.ts` in 73,857 ms. A later hosted run (30600608976) again
-passed all 16 files and 141 assertions, but its 394,740 ms lane wall exceeded
-the restored 375,000 ms cap. In that run, `vx-dom.test.ts` took 256,162 ms,
-`wasm-validation.test.ts` took 106,437 ms, and `web-framework.test.ts` took
-91,427 ms. This is healthy hosted-runner variance across several compile-heavy
-files, not a failed assertion or an individual-file overrun.
-
-The temporary hosted-runner allowances preserve every assertion:
-
-- the two initial web-package compile test/hook timeouts are 240,000 ms;
-- the exact paths `tests/integration/src/vx-dom.test.ts` and
-  `tests/integration/src/web-framework.test.ts` each have a 330,000 ms file
-  budget;
-- every other integration file retains the 210,000 ms budget;
-- only the integration lane wall budget increases from 375,000 ms to 420,000
-  ms, leaving 25,260 ms of headroom over the latest healthy run.
-
-V-462 and V-467 must make package semantics and callable caches reusable across
-these compilations and fresh processes. After they land, V-468 must collect at
-least ten successful hosted integration timing artifacts and set budgets from
-p95 plus 20% runner headroom. It must remove this 420,000 ms transition
-allowance by restoring the 375,000 ms lane cap when that measured bound fits,
-or tighten below 375,000 ms if the data supports it. V-468 must also remove the
-two file overrides when they fit under the general limit and restore the
-180,000 ms compile timeout when that value exceeds the measured bound.
-Assertions and test files must not be skipped to meet a timing budget.
-
-## Runtime Selection
+## Runtime selection
 
 `scripts/voyd` selects the CLI runtime in this order:
 
@@ -258,16 +130,11 @@ Assertions and test files must not be skipped to meet a timing budget.
 2. `VOYD_USE_DIST=1` forces the built CLI.
 3. Otherwise it uses dist when present and source when absent.
 
-The ordinary PR suites use source mode. The CLI distribution job builds and
-tests dist explicitly.
+Ordinary PR suites use source mode. The CLI distribution job builds and tests
+dist explicitly.
 
 ## Tradeoffs
 
 Separate jobs use more parallel runner minutes and repeat dependency
-installation, but recent installs take seconds while the former serialized
-test step took seven to eight minutes. The split optimizes feedback latency
-without moving full correctness coverage to a nightly-only lane.
-
-Codegen keeps path-based Vitest sharding for now. Duration-aware sharding needs
-a checked-in timing map and reproducible sequencer; hard-coded file lists would
-quickly become stale.
+installation. The lane split favors bounded memory and fast reviewer feedback
+while preserving full required coverage on every relevant PR.

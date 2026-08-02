@@ -98,12 +98,11 @@ authoritative during the transition. Use
 `OPTIMIZER_BENCH_PRECOMPILED_STD_TRANSITION_RSS_MIN_BYTES`) only to configure
 the migration threshold separately.
 
-V-468 owns deleting this transition exception once all supported comparison
-bases contain the precompiled snapshot. Before removal, rerun the Node 22 CI
-preset in both orders with at least six pooled samples. V-462's package
-interfaces and V-467's persistent incremental snapshots must target the
-ordinary 32 MiB budget without a feature allowance; update those tickets'
-stored measurements rather than increasing this migration limit.
+This exception is temporary. Its remeasurement and removal are tracked by
+[V-468](https://linear.app/voyd-lang/issue/V-468); package-scale compilation
+work is tracked under [V-462](https://linear.app/voyd-lang/issue/V-462). The
+tickets own the exit criteria. This document defines only the currently
+enforced scorecard behavior and the evidence for it.
 
 When only sampled compile, runtime, or RSS measurements fail, the PR gate
 reruns the affected scenarios with base/head order reversed. It pools the

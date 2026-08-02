@@ -92,31 +92,32 @@ Runtime and generated-code costs remain bounded:
   focused benchmark;
 - all guard and ordinary-value behavior is checked in both build modes.
 
-Future work may reduce analysis latency or deduplicate snapshot payloads, but
-doing so must preserve the public summary schema and `ProgramCodegenView`
-boundary.
+Package-scale performance work is tracked by
+[V-462](https://linear.app/voyd-lang/issue/V-462). It must preserve the public
+summary schema and `ProgramCodegenView` boundary.
 
-## Precompiled std follow-up
+## Precompiled std snapshot
 
-The V-448 branch now ships a compiler-ABI-versioned precompiled semantic
-snapshot for the 48 std modules reachable from the default prelude. Each sample
-below launches a new Node process, creates a new SDK, compiles the
-representative fixture, and exits. Source mode sets
+The V-448 branch ships a compiler-ABI-versioned precompiled semantic snapshot
+for the 48 std modules reachable from the default prelude. The final-head
+confirmation below was run on 2 August 2026 against compiler and artifact
+revision `d139047f`. Each sample launches a new Node process, creates a new SDK,
+compiles the representative fixture, and exits. Source mode sets
 `VOYD_DISABLE_PRECOMPILED_STD_SNAPSHOT=1`. Both paths emit identical Wasm:
-37,821 bytes unoptimized
-(`d75204750eb7c80c6744dceba246a96879a9878881b63110e4b379160ab46f77`)
+37,854 bytes unoptimized
+(`85c607b9c5ce04d556c66fa1f1a0f7c46182685d87fc19a6c7ff740c6fd0fd7d`)
 and 1,112 bytes in release mode
 (`82ffc2152a22bd82a6e2ef939add5d5a8d17ccc28de80b80dd8d6c588a421710`).
 
 | Compile wall time, 7-sample median | Mode    | Source analysis | Precompiled std |                  Delta |
 | ---------------------------------- | ------- | --------------: | --------------: | ---------------------: |
-| Fresh process                      | none    |     1,899.73 ms |       669.97 ms | -1,229.76 ms (-64.73%) |
-| Fresh process                      | release |     2,289.65 ms |     1,044.31 ms | -1,245.34 ms (-54.39%) |
+| Fresh process                      | none    |     2,097.13 ms |       697.78 ms | -1,399.36 ms (-66.73%) |
+| Fresh process                      | release |     2,513.49 ms |     1,101.20 ms | -1,412.29 ms (-56.19%) |
 
-The checked-in hybrid artifact is 5,235,652 bytes. It includes both the
+The checked-in hybrid artifact is 5,239,953 bytes. It includes both the
 canonical portable reference graph and the optional Node/V8 accelerator.
 Median snapshot loading, including source-manifest verification, decompression,
-identity restoration, and validation, takes 266.51 ms unoptimized and 269.90 ms
+identity restoration, and validation, takes 282.48 ms unoptimized and 283.96 ms
 in release mode. Compiler performance counters prove the hit loads 48
 precompiled graph modules and performs no `graph.load_module.std` work.
 Semantic analysis then recomputes only the application module.
@@ -128,11 +129,37 @@ npm run bench:precompiled-std -- 7
 ```
 
 The original 350–500 ms whole-compile goal is not reachable with the current
-whole-program codegen and compiler-private snapshot shape. Even after std
-analysis is removed, restoring the complete HIR/typing/binding object graph
-accounts for roughly 0.27 seconds. The snapshot more than recovers the feature
-branch regression: against the original V-448 baseline medians of 907.00 ms
-and 1,108.87 ms, fresh-process compilation is 26.13% faster unoptimized and
-5.82% faster in release mode. A smaller public package-contract format and
-separately reusable dependency codegen are the long-term path below this
-floor.
+whole-program codegen and compiler-private snapshot shape. Restoring the
+complete HIR/typing/binding object graph accounts for roughly 0.28 seconds.
+Against the original V-448 baseline medians of 907.00 ms and 1,108.87 ms,
+final-head source analysis is 131.22% slower unoptimized and 126.67% slower in
+release mode. Snapshot-hit compilation is 23.07% faster unoptimized and 0.69%
+faster in release mode. The snapshot recovers the representative default-
+prelude path, but package-heavy and snapshot-miss paths retain the source-
+analysis regression. Smaller public package contracts, incremental callable
+analysis, persistent caches, and reusable dependency codegen are tracked under
+[V-462](https://linear.app/voyd-lang/issue/V-462).
+
+## Hosted CI impact
+
+The feature's package-heavy compilations also affected hosted CI. These are the
+durable measurements behind the temporary limits documented in the
+[CI guide](./ci.md):
+
+| Area | Observed impact |
+| --- | --- |
+| Tooling | `bootstrap.test.ts` reached 208,119 ms and `project.test.ts` reached 190,624 ms. |
+| SDK/core | The web-helper test reached 260,705 ms, `sdk-node.test.ts` reached 349,978 ms, and the affected core command reached 523,746 ms. |
+| Integration | A healthy run reached 394,740 ms wall; its slowest files were VX DOM at 256,162 ms, Wasm validation at 106,437 ms, and web framework at 91,427 ms. |
+| Web package | The monolithic compile exhausted a 4.06 GiB heap after 188.8 seconds and still failed with a 6 GiB heap after 212.4 seconds. Per-file isolation bounded memory but left a 27:42 critical path. |
+
+Compile-level eight-way web partitioning reduced the subsequent hosted workflow
+from 27:42 in [run 30611360104](https://github.com/voyd-lang/voyd/actions/runs/30611360104)
+to 7:07 in
+[run 30661296540](https://github.com/voyd-lang/voyd/actions/runs/30661296540).
+All 19 jobs passed; individual web partitions completed in 2:43–6:07. This
+fixes feedback latency and memory isolation, but it does not remove the
+underlying package-analysis costs above.
+
+Removal of every temporary performance allowance is tracked exclusively by
+[V-468](https://linear.app/voyd-lang/issue/V-468).
