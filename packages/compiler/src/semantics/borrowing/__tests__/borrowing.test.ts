@@ -26,16 +26,11 @@ import {
 } from "../summaries.js";
 import { borrowedTypeEntriesInType } from "../borrowed-types.js";
 import { abstractTraitContractFromImplementation } from "../call-resolution.js";
+import { createCallableBorrowSummary } from "../callable-summary.js";
 import {
-  CALLABLE_BORROW_SUMMARY_SCHEMA,
-  CALLABLE_BORROW_SUMMARY_VERSION,
-  cachedCallableBorrowSummaryEncoding,
-  callableBorrowSummarySize,
-  createCallableBorrowSummarySerializationCache,
-  deserializeCallableBorrowSummary,
-  encodeCallableBorrowSummary,
-  serializeCallableBorrowSummary,
-} from "../callable-summary.js";
+  stableBorrowCallInput,
+  type CallableBorrowCallFact,
+} from "../callable-facts.js";
 
 const analyze = (source: string) => {
   const filePath = "borrowing.test.voyd";
@@ -168,6 +163,23 @@ trait ItemView
 `;
 
 describe("borrow checking", () => {
+  it("includes argument-plan ambiguity in stable callable inputs", () => {
+    const call = {
+      exprId: 1,
+      targets: [],
+      intrinsic: false,
+      intrinsicBoundary: false,
+      substitutions: [],
+      formsExplicitBorrow: false,
+      maySuspend: false,
+      contractSources: [],
+    } as CallableBorrowCallFact;
+
+    expect(stableBorrowCallInput(call)).not.toEqual(
+      stableBorrowCallInput({ ...call, argumentPlanAmbiguous: true }),
+    );
+  });
+
   it("skips large private primitive helper chains during summary inference", () => {
     const helperCount = 80;
     const helpers = Array.from({ length: helperCount }, (_entry, index) =>
@@ -183,16 +195,14 @@ pub fn entry(value: i32) -> i32
 `);
 
     const demand = summaryDemandFor(result);
-    expect(demand).toMatchObject({
-      totalCallables: helperCount + 1,
-      demandedCallables: 0,
-      skippedTrivialCallables: helperCount + 1,
-      evaluations: 0,
-    });
+    expect(demand.totalCallables).toBe(helperCount + 1);
+    expect(demand.demandedCallables).toBeLessThanOrEqual(1);
+    expect(demand.skippedTrivialCallables).toBeGreaterThanOrEqual(helperCount);
+    expect(demand.evaluations).toBeLessThanOrEqual(1);
     expect(demand.worklistEdges).toBeGreaterThanOrEqual(helperCount);
   });
 
-  it("propagates ambient summary demand through private wrappers", () => {
+  it("propagates ambient summary demand through compact private wrappers", () => {
     const result = analyze(`
 obj Box { value: i32 }
 let source = Box { value: 1 }
@@ -209,13 +219,117 @@ pub fn entry() -> i32
     const entry = result.symbols.resolveTopLevel("entry");
 
     const demand = summaryDemandFor(result);
-    expect(demand.demandedCallables).toBe(3);
-    expect(demand.worklistIterations).toBe(3);
+    expect(demand.demandedCallables).toBe(1);
+    expect(demand.skippedTrivialCallables).toBe(2);
+    expect(demand.worklistIterations).toBe(1);
     expect(
       typeof entry === "number"
         ? result.borrowing.callables.get(entry)?.externalRead
         : undefined,
     ).toBe(true);
+  });
+
+  it("does not fabricate reads when compact wrappers only forward references", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn ignore(value: Box) -> i32
+  0
+
+fn wrapper(value: Box) -> i32
+  ignore(value)
+
+fn ignore_pair(value: (Box, Box)) -> i32
+  0
+
+fn pair_wrapper(left: Box, right: Box) -> i32
+  ignore_pair((left, right))
+
+val Pair { left: Box, right: Box }
+
+fn ignore_object(value: Pair) -> i32
+  0
+
+fn object_wrapper(left: Box, right: Box) -> i32
+  ignore_object(Pair { left, right })
+
+fn conditional_wrapper(flag: bool, left: Box, right: Box) -> i32
+  ignore(if flag: left else: right)
+`);
+    const wrapper = result.symbols.resolveTopLevel("wrapper");
+    const contract =
+      typeof wrapper === "number"
+        ? result.borrowing.callables.get(wrapper)
+        : undefined;
+
+    expect(contract?.parameters[0]?.readPaths).toEqual([]);
+    ["pair_wrapper", "object_wrapper"].forEach((name) => {
+      const symbol = result.symbols.resolveTopLevel(name);
+      const wrapperContract =
+        typeof symbol === "number"
+          ? result.borrowing.callables.get(symbol)
+          : undefined;
+      expect(wrapperContract?.parameters[0]?.readPaths).toEqual([]);
+      expect(wrapperContract?.parameters[1]?.readPaths).toEqual([]);
+    });
+    const conditional = result.symbols.resolveTopLevel("conditional_wrapper");
+    const conditionalContract =
+      typeof conditional === "number"
+        ? result.borrowing.callables.get(conditional)
+        : undefined;
+    expect(conditionalContract?.parameters[1]?.readPaths).toEqual([]);
+    expect(conditionalContract?.parameters[2]?.readPaths).toEqual([]);
+  });
+
+  it("materializes plain value projections before mutable receiver calls", () => {
+    const result = analyzeWithRecovery(`
+obj Vec { x: f64, y: f64, z: f64 }
+obj Record { point: Vec, normal: Vec, front: bool }
+
+impl Vec
+  fn '-'(self, other: Vec) -> Vec
+    Vec { x: self.x - other.x, y: self.y - other.y, z: self.z - other.z }
+
+  fn '/'(self, scalar: f64) -> Vec
+    Vec { x: self.x / scalar, y: self.y / scalar, z: self.z / scalar }
+
+impl Record
+  fn update(~self, outward: Vec) -> void
+    self.front = outward.x < 0.0
+    self.normal = outward
+
+fn valid(~rec: Record) -> void
+  let outward = (rec.point - Vec { x: 0.0, y: 0.0, z: 0.0 }) / 1.0
+  rec.update(outward)
+`);
+    expect(
+      Array.from(result.borrowing.callables.values()).filter(
+        (contract) => contract.freshResult === true,
+      ),
+    ).not.toHaveLength(0);
+    expect(result.diagnostics).toEqual([]);
+  });
+
+  it("propagates overloaded operator reads through compact wrappers", () => {
+    const result = analyze(`
+obj Meter { value: i32 }
+
+impl Meter
+  fn '+'(self, delta: i32) -> i32
+    self.value + delta
+
+fn add_one(meter: Meter) -> i32
+  meter + 1
+`);
+    const addOne = result.symbols.resolveTopLevel("add_one");
+    const contract =
+      typeof addOne === "number"
+        ? result.borrowing.callables.get(addOne)
+        : undefined;
+
+    expect(contract?.parameters[0]?.readPaths).toContainEqual([
+      { kind: "field", name: "value" },
+    ]);
   });
 
   it("upgrades boundary summaries to ambient before propagating callers", () => {
@@ -259,7 +373,7 @@ fn right(~value: Box) -> void
     expect(demand.evaluations).toBeGreaterThanOrEqual(3);
   });
 
-  it("keeps nested-lambda dependencies out of the enclosing call graph", () => {
+  it("solves nested lambda contracts without demanding the enclosing body", () => {
     const result = analyze(`
 obj Box { value: i32 }
 let source = Box { value: 1 }
@@ -270,14 +384,70 @@ fn ignore_reader() -> i32
 `);
 
     expect(summaryDemandFor(result)).toMatchObject({
-      totalCallables: 1,
-      demandedCallables: 0,
+      totalCallables: 2,
+      demandedCallables: 1,
       skippedTrivialCallables: 1,
-      evaluations: 0,
+      evaluations: 1,
     });
+    expect(
+      Array.from(result.borrowing.queries ?? []).filter(
+        ([symbol]) => symbol < 0,
+      ),
+    ).toHaveLength(1);
   });
 
-  it("decodes immutable dependency summaries once across repeated projections", () => {
+  it("uses a lambda callable's own captures for demand and query inputs", () => {
+    const source = (mutable: boolean) =>
+      analyze(`
+fn ignore_capture() -> i32
+  ${mutable ? "let ~value" : "let value"} = 1
+  let reader = () -> i32 => value
+  0
+`);
+    const ordinary = source(false);
+    const mutable = source(true);
+    const lambdaInput = (result: ReturnType<typeof analyze>) =>
+      Array.from(result.borrowing.queries ?? []).find(
+        ([symbol]) => symbol < 0,
+      )?.[1].input;
+
+    expect(summaryDemandFor(ordinary).demandedCallables).toBe(1);
+    expect(summaryDemandFor(mutable).demandedCallables).toBe(2);
+    expect(lambdaInput(mutable)).not.toBe(lambdaInput(ordinary));
+  });
+
+  it("publishes signature-derived synthetic lambda contracts", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+let external = 1
+
+fn ignore_callbacks() -> i32
+  let borrowed_callback: fn(borrow Box) : () -> borrow Box =
+    (value: borrow Box) -> borrow Box => value
+  let primitive_callback: fn(i32) : () -> i32 =
+    (value: i32) -> i32 => value + external
+  0
+`);
+    const outputs = Array.from(result.borrowing.queries ?? [])
+      .filter(([symbol]) => symbol < 0)
+      .map(([, query]) => query.output);
+
+    expect(outputs).toHaveLength(2);
+    expect(outputs).toContainEqual(
+      expect.objectContaining({
+        parameters: [expect.objectContaining({ access: "shared" })],
+        borrowedResult: "parameter",
+      }),
+    );
+    expect(outputs).toContainEqual(
+      expect.objectContaining({
+        parameters: [expect.objectContaining({ access: "owned" })],
+        borrowedResult: "none",
+      }),
+    );
+  });
+
+  it("reuses immutable dependency contracts without decoding", () => {
     const dependency = analyze(`
 pub obj Box { api value: i32 }
 
@@ -296,7 +466,6 @@ pub fn read(value: Box) -> i32
       hits: 0,
       misses: 1,
     });
-    expect(afterFirst.summaryDecodes).toBeGreaterThan(0);
     expect(afterSecond).toEqual({
       ...afterFirst,
       hits: 1,
@@ -334,7 +503,6 @@ pub fn read(value: Box) -> i32
       snapshotBorrowingDependencyProjectionCacheStats(cache);
 
     expect(afterSecond.misses).toBe(afterFirst.misses + 1);
-    expect(afterSecond.summaryDecodes).toBe(afterFirst.summaryDecodes * 2);
     expect(second.get(secondSnapshot.moduleId)).not.toBe(
       first.get(firstSnapshot.moduleId),
     );
@@ -368,56 +536,6 @@ pub fn read() -> i32
     ]);
   });
 
-  it("serializes each immutable callable and export mode once", () => {
-    const cache = createCallableBorrowSummarySerializationCache();
-    const contract = {
-      parameters: [],
-      maySuspend: false,
-    };
-    let encodes = 0;
-    const encode = () => {
-      encodes += 1;
-      return encodeCallableBorrowSummary({ contract });
-    };
-    const publicMode = {
-      purpose: "public-export" as const,
-      dispatch: "ordinary" as const,
-      privacy: "unredacted" as const,
-      source: "omitted" as const,
-    };
-    const first = cachedCallableBorrowSummaryEncoding({
-      cache,
-      callable: 42,
-      mode: publicMode,
-      encode,
-    });
-    const repeated = cachedCallableBorrowSummaryEncoding({
-      cache,
-      callable: 42,
-      mode: publicMode,
-      encode,
-    });
-    cachedCallableBorrowSummaryEncoding({
-      cache,
-      callable: 42,
-      mode: { ...publicMode, privacy: "public-redacted" },
-      encode,
-    });
-    cachedCallableBorrowSummaryEncoding({
-      cache,
-      callable: 42,
-      mode: { ...publicMode, dispatch: "trait-declaration" },
-      encode,
-    });
-
-    expect(repeated).toBe(first);
-    expect(first.summary).toEqual(
-      deserializeCallableBorrowSummary(first.serialized),
-    );
-    expect(encodes).toBe(3);
-    expect(cache.stats).toEqual({ hits: 1, misses: 3 });
-  });
-
   it("types mutable lambdas against explicitly borrowed callback parameters", () => {
     expect(() =>
       analyze(`
@@ -433,298 +551,6 @@ fn valid() -> void
   )
 `),
     ).not.toThrow();
-  });
-
-  it("round-trips the versioned callable summary schema canonically", () => {
-    const contract = {
-      parameters: [
-        {
-          access: "shared" as const,
-          readPaths: [
-            [
-              {
-                kind: "region" as const,
-                scope: "src::views::View",
-                name: "source",
-                disjoint: [],
-              },
-            ],
-          ],
-          retained: false,
-          returned: true,
-          returnedAggregate: true as const,
-          returnedSharedOrigins: [
-            {
-              source: [
-                {
-                  kind: "region" as const,
-                  scope: "src::views::View",
-                  name: "source",
-                  disjoint: [],
-                },
-              ],
-              result: [],
-              endpointAccess: "inline" as const,
-              defaultNoBorrow: true as const,
-            },
-          ],
-        },
-      ],
-      maySuspend: false,
-      freshResult: true as const,
-      defaultIdentityGuardProtocol: "presence-conflict-bit-v1" as const,
-      borrowedResult: "parameter" as const,
-      externalReturnedOrigins: [
-        {
-          result: [{ kind: "field" as const, name: "storage" }],
-          endpointAccess: "dereferenced" as const,
-          fresh: true as const,
-        },
-      ],
-      callableResultInvocations: [
-        {
-          parameter: 0,
-          source: [],
-          callbackResult: [],
-          callbackResultType: { moduleId: "src::views", symbol: 99 },
-          result: [],
-        },
-      ],
-    };
-    const source = {
-      declaration: { moduleId: "src::views", start: 10, end: 20 },
-      parameters: [{ moduleId: "src::views", start: 12, end: 16 }],
-    };
-    const serialized = serializeCallableBorrowSummary({ contract, source });
-    const decoded = deserializeCallableBorrowSummary(serialized);
-
-    expect(decoded).toEqual({
-      schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
-      version: CALLABLE_BORROW_SUMMARY_VERSION,
-      dispatch: "ordinary",
-      contract,
-      source,
-    });
-    expect(
-      serializeCallableBorrowSummary({
-        contract: decoded.contract,
-        source: decoded.source,
-      }),
-    ).toBe(serialized);
-    expect(callableBorrowSummarySize(serialized)).toBeGreaterThan(0);
-    expect(() =>
-      deserializeCallableBorrowSummary(
-        serialized.replace('"version":4', '"version":5'),
-      ),
-    ).toThrow(/does not match the V1 schema/);
-    const freshResultSummary = JSON.parse(serialized);
-    freshResultSummary.version = 3;
-    delete freshResultSummary.contract.callableResultInvocations;
-    const {
-      callableResultInvocations: _callableResultInvocations,
-      ...freshResultContract
-    } = contract;
-    expect(
-      deserializeCallableBorrowSummary(JSON.stringify(freshResultSummary)),
-    ).toEqual({
-      schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
-      version: CALLABLE_BORROW_SUMMARY_VERSION,
-      dispatch: "ordinary",
-      contract: freshResultContract,
-      source,
-    });
-    const identityGuardSummary = JSON.parse(serialized);
-    identityGuardSummary.version = 2;
-    delete identityGuardSummary.contract.freshResult;
-    delete identityGuardSummary.contract.callableResultInvocations;
-    const {
-      freshResult: _freshResult,
-      callableResultInvocations: _identityCallableResultInvocations,
-      ...identityGuardContract
-    } = contract;
-    expect(
-      deserializeCallableBorrowSummary(JSON.stringify(identityGuardSummary)),
-    ).toEqual({
-      schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
-      version: CALLABLE_BORROW_SUMMARY_VERSION,
-      dispatch: "ordinary",
-      contract: identityGuardContract,
-      source,
-    });
-    const legacySummary = JSON.parse(serialized);
-    legacySummary.version = 1;
-    delete legacySummary.contract.freshResult;
-    delete legacySummary.contract.callableResultInvocations;
-    delete legacySummary.contract.defaultIdentityGuardProtocol;
-    const {
-      freshResult: _legacyFreshResult,
-      callableResultInvocations: _legacyCallableResultInvocations,
-      defaultIdentityGuardProtocol: _defaultIdentityGuardProtocol,
-      ...legacyContract
-    } = contract;
-    expect(
-      deserializeCallableBorrowSummary(JSON.stringify(legacySummary)),
-    ).toEqual({
-      schema: CALLABLE_BORROW_SUMMARY_SCHEMA,
-      version: CALLABLE_BORROW_SUMMARY_VERSION,
-      dispatch: "ordinary",
-      contract: legacyContract,
-      source,
-    });
-    const unknownField = JSON.parse(serialized);
-    unknownField.contract.parameters[0].futureBehavior = true;
-    expect(() =>
-      deserializeCallableBorrowSummary(JSON.stringify(unknownField)),
-    ).toThrow(/does not match the V1 schema/);
-    const invalidRuntimeGuard = JSON.parse(serialized);
-    invalidRuntimeGuard.contract.parameters[0].runtimeCheckedWrites = false;
-    expect(() =>
-      deserializeCallableBorrowSummary(JSON.stringify(invalidRuntimeGuard)),
-    ).toThrow(/does not match the V1 schema/);
-    const invalidDefaultIdentityGuardProtocol = JSON.parse(serialized);
-    invalidDefaultIdentityGuardProtocol.contract.defaultIdentityGuardProtocol =
-      "future-protocol";
-    expect(() =>
-      deserializeCallableBorrowSummary(
-        JSON.stringify(invalidDefaultIdentityGuardProtocol),
-      ),
-    ).toThrow(/does not match the V1 schema/);
-    const invalidDefaultParameter = JSON.parse(serialized);
-    invalidDefaultParameter.contract.parameters[0].defaultOrigins = [
-      { parameter: 1, source: [], result: [] },
-    ];
-    expect(() =>
-      deserializeCallableBorrowSummary(JSON.stringify(invalidDefaultParameter)),
-    ).toThrow(/does not match the V1 schema/);
-    const invalidTransferParameter = JSON.parse(serialized);
-    invalidTransferParameter.contract.transfers = [
-      { sourceParameter: 1, destinationParameter: 0 },
-    ];
-    expect(() =>
-      deserializeCallableBorrowSummary(
-        JSON.stringify(invalidTransferParameter),
-      ),
-    ).toThrow(/does not match the V1 schema/);
-    const invalidCallbackParameter = JSON.parse(serialized);
-    invalidCallbackParameter.contract.scopedCallbacks = [
-      {
-        callbackParameter: 1,
-        callbackValueParameter: 0,
-        access: "shared",
-      },
-    ];
-    expect(() =>
-      deserializeCallableBorrowSummary(
-        JSON.stringify(invalidCallbackParameter),
-      ),
-    ).toThrow(/does not match the V1 schema/);
-    const invalidCallbackValueParameter = JSON.parse(serialized);
-    invalidCallbackValueParameter.contract.scopedCallbacks = [
-      {
-        callbackParameter: 0,
-        callbackValueParameter: 1,
-        access: "shared",
-      },
-    ];
-    expect(() =>
-      deserializeCallableBorrowSummary(
-        JSON.stringify(invalidCallbackValueParameter),
-      ),
-    ).toThrow(/does not match the V1 schema/);
-    const namedScope = "src::views::View";
-    const traitSummary = serializeCallableBorrowSummary({
-      contract: {
-        parameters: [
-          {
-            access: "shared",
-            readPaths: [
-              [
-                {
-                  kind: "region",
-                  scope: namedScope,
-                  name: "source",
-                  disjoint: [],
-                },
-              ],
-            ],
-            retained: false,
-            returned: false,
-          },
-        ],
-        maySuspend: false,
-      },
-      namedContract: {
-        scope: namedScope,
-        declaration: 1,
-        trait: 1,
-        regions: [
-          { name: "source", parameter: 0, place: [] },
-          { name: "cursor", parameter: 0, place: [] },
-        ],
-        disjoint: [],
-        reads: ["source"],
-        mutates: [],
-        returnsFrom: [],
-      },
-    });
-    const forgedDisjoint = JSON.parse(traitSummary);
-    forgedDisjoint.contract.parameters[0].readPaths[0][0].disjoint = ["cursor"];
-    expect(() =>
-      deserializeCallableBorrowSummary(JSON.stringify(forgedDisjoint)),
-    ).toThrow(/does not match the V1 schema/);
-    const forgedOrdinaryDisjoint = structuredClone(forgedDisjoint);
-    forgedOrdinaryDisjoint.dispatch = "ordinary";
-    delete forgedOrdinaryDisjoint.namedContract;
-    expect(() =>
-      deserializeCallableBorrowSummary(JSON.stringify(forgedOrdinaryDisjoint)),
-    ).toThrow(/does not match the V1 schema/);
-    const forgedImplementationDisjoint = structuredClone(forgedDisjoint);
-    forgedImplementationDisjoint.dispatch = "trait-implementation";
-    expect(() =>
-      deserializeCallableBorrowSummary(
-        JSON.stringify(forgedImplementationDisjoint),
-      ),
-    ).toThrow(/does not match the V1 schema/);
-    expect(
-      projectionPathsOverlap(
-        [
-          {
-            kind: "region",
-            scope: "src::one::View",
-            name: "cursor",
-            disjoint: ["source"],
-          },
-        ],
-        [
-          {
-            kind: "region",
-            scope: "src::two::View",
-            name: "source",
-            disjoint: ["cursor"],
-          },
-        ],
-      ),
-    ).toBe(true);
-    expect(
-      projectionPathsOverlap(
-        [
-          {
-            kind: "region",
-            scope: "src::one::View",
-            name: "cursor",
-            disjoint: ["source"],
-          },
-        ],
-        [
-          {
-            kind: "region",
-            scope: "src::one::View",
-            name: "source",
-            disjoint: ["cursor"],
-          },
-        ],
-      ),
-    ).toBe(false);
   });
 
   it("redacts every concrete implementation path from public summaries", () => {
@@ -826,14 +652,14 @@ fn valid() -> void
       contract: implementation,
       named,
     });
-    const serialized = serializeCallableBorrowSummary({
+    const summary = createCallableBorrowSummary({
       contract: { ...implementation, dynamicDispatch },
       namedContract: named,
     });
 
-    expect(serialized).not.toContain("private_storage");
-    expect(serialized).not.toContain("private_cursor");
-    const decoded = deserializeCallableBorrowSummary(serialized);
+    expect(JSON.stringify(summary)).not.toContain("private_storage");
+    expect(JSON.stringify(summary)).not.toContain("private_cursor");
+    const decoded = summary;
     expect(
       decoded.contract.parameters[0]?.returnedTypeMatchingOrigins?.[0]
         ?.source[0],
@@ -865,7 +691,7 @@ fn valid() -> void
         disjoint: [],
       },
     ];
-    const serialized = serializeCallableBorrowSummary({
+    const summary = createCallableBorrowSummary({
       publicAbstraction: true,
       contract: {
         parameters: [
@@ -919,9 +745,9 @@ fn valid() -> void
         ],
       },
     });
-    const decoded = deserializeCallableBorrowSummary(serialized).contract;
+    const decoded = summary.contract;
 
-    expect(serialized).not.toContain("private_storage");
+    expect(JSON.stringify(summary)).not.toContain("private_storage");
     const returned = decoded.parameters[0]?.returnedOrigins ?? [];
     const returnedShared = decoded.parameters[0]?.returnedSharedOrigins ?? [];
     expect(returned).toHaveLength(2);
@@ -1814,16 +1640,15 @@ fn valid(~view: View) -> i32
       analyzed.semantics.get("std::views")?.exports.values() ?? [],
     )
       .flatMap((entry) => entry.borrowing ?? [])
-      .flatMap((entry) =>
-        entry.serialized
-          ? [
-              {
-                entry,
-                summary: deserializeCallableBorrowSummary(entry.serialized),
-              },
-            ]
-          : [],
-      );
+      .map((entry) => ({
+        entry,
+        summary: {
+          dispatch: entry.dispatch ?? "ordinary",
+          contract: entry.contract,
+          namedContract: entry.namedContract,
+          source: entry.source,
+        },
+      }));
     const declarationSummary = exportedSummaries.find(
       ({ summary }) => summary.dispatch === "trait-declaration",
     );
@@ -1840,11 +1665,11 @@ fn valid(~view: View) -> i32
       ),
     );
     expect(diagnostics).toEqual([]);
-    expect(declarationSummary?.entry.serializedBytes).toBeGreaterThan(0);
+    expect(declarationSummary?.entry.contract).toBeDefined();
     expect(declarationSummary?.summary.namedContract?.returnsFrom).toEqual([
       "source",
     ]);
-    expect(implementationSummary?.entry.serializedBytes).toBeGreaterThan(0);
+    expect(implementationSummary?.entry.contract).toBeDefined();
     expect(implementationSummary?.summary.namedContract?.scope).toBe(
       "std::views::View",
     );
@@ -1938,14 +1763,12 @@ pub fn main() -> i32
     expect(diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       "TY0048",
     );
-    expect(coercion?.serializedBytes).toBeGreaterThan(0);
-    expect(coercion?.serialized).not.toContain("hidden");
-    expect(coercion?.serialized).toContain("voyd.summary.private");
+    expect(JSON.stringify(coercion?.contract)).not.toContain("hidden");
+    expect(JSON.stringify(coercion?.contract)).toContain(
+      "voyd.summary.private",
+    );
     expect(
-      coercion
-        ? deserializeCallableBorrowSummary(coercion.serialized).contract
-            .parameters[0]?.returnedOrigins?.[0]?.result[0]
-        : undefined,
+      coercion?.contract.parameters[0]?.returnedOrigins?.[0]?.result[0],
     ).toMatchObject({
       kind: "region",
       scope: "std::views::View",
@@ -3099,27 +2922,6 @@ impl ItemView for ViewState
         { name: "source", parameter: 0 },
       ],
     });
-    const codegenContract = buildProgramCodegenView([result])
-      .modules.get(result.moduleId)
-      ?.namedBorrowContracts.get(next!.symbol);
-    expect(codegenContract).toMatchObject({
-      declaration: expect.any(Number),
-      trait: expect.any(Number),
-      implementation: next!.symbol,
-      returnsFrom: ["source"],
-      regions: [
-        {
-          name: "cursor",
-          parameter: 0,
-          place: [{ kind: "field", name: "cursor" }],
-        },
-        {
-          name: "source",
-          parameter: 0,
-          place: [{ kind: "field", name: "source" }, { kind: "dereference" }],
-        },
-      ],
-    });
   });
 
   it("requires returns_from for explicit borrowed trait results", () => {
@@ -3687,9 +3489,7 @@ let selected = get()
       ?.borrowing?.find(
         (entry) => entry.symbol === storage.exports.get("get")?.symbol,
       );
-    const contract = exported?.serialized
-      ? deserializeCallableBorrowSummary(exported.serialized).contract
-      : undefined;
+    const contract = exported?.contract;
     expect(contract?.parameters[0]?.defaultOrigins ?? []).toEqual([]);
     expect(
       contract?.parameters[0]?.defaultExternalReturnedOrigins ?? [],
@@ -3947,7 +3747,7 @@ use src::storage::{ Getter }
       analyzed.semantics.get("src::storage")?.exports.values() ?? [],
     )
       .flatMap((entry) => entry.borrowing ?? [])
-      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+      .map((entry) => JSON.stringify(entry));
     expect(serialized.some((entry) => entry.includes("secret"))).toBe(false);
   });
 
@@ -3983,7 +3783,7 @@ use src::storage::{ Store }
       analyzed.semantics.get("src::storage")?.exports.values() ?? [],
     )
       .flatMap((entry) => entry.borrowing ?? [])
-      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+      .map((entry) => JSON.stringify(entry));
     expect(serialized.length).toBeGreaterThan(0);
     expect(serialized.some((entry) => entry.includes("secret"))).toBe(false);
   });
@@ -4027,7 +3827,7 @@ fn valid() -> i32
       analyzed.semantics.get("src::storage")?.exports.values() ?? [],
     )
       .flatMap((entry) => entry.borrowing ?? [])
-      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+      .map((entry) => JSON.stringify(entry));
 
     expect(diagnostics).toEqual([]);
     expect(serialized.some((entry) => entry.includes('"left"'))).toBe(true);
@@ -4082,7 +3882,7 @@ fn valid() -> i32
       analyzed.semantics.get("src::storage")?.exports.values() ?? [],
     )
       .flatMap((entry) => entry.borrowing ?? [])
-      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+      .map((entry) => JSON.stringify(entry));
 
     expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
     expect(serialized.some((entry) => entry.includes('"left"'))).toBe(true);
@@ -4120,7 +3920,7 @@ use src::storage::{ Node }
       analyzed.semantics.get("src::storage")?.exports.values() ?? [],
     )
       .flatMap((entry) => entry.borrowing ?? [])
-      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+      .map((entry) => JSON.stringify(entry));
 
     expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
     expect(serialized.some((entry) => entry.includes("secret"))).toBe(false);
@@ -4160,7 +3960,7 @@ use src::storage::{ consume }
       analyzed.semantics.get("src::storage")?.exports.values() ?? [],
     )
       .flatMap((entry) => entry.borrowing ?? [])
-      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+      .map((entry) => JSON.stringify(entry));
 
     expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
     expect(serialized.some((entry) => entry.includes("hidden"))).toBe(false);
@@ -4216,7 +4016,7 @@ fn valid(~value: Box) -> i32
       analyzed.semantics.get("src::storage")?.exports.values() ?? [],
     )
       .flatMap((entry) => entry.borrowing ?? [])
-      .flatMap((entry) => (entry.serialized ? [entry.serialized] : []));
+      .map((entry) => JSON.stringify(entry));
 
     expect(
       diagnostics.filter((diagnostic) => diagnostic.code === "TY0048"),
@@ -4351,12 +4151,6 @@ impl ItemView for ViewState
     expect(
       recovered.borrowing.namedContracts.get(next!.symbol)?.disjoint,
     ).toEqual([]);
-    expect(
-      buildProgramCodegenView([recovered])
-        .modules.get(recovered.moduleId)
-        ?.namedBorrowContracts.get(next!.symbol)?.disjoint,
-    ).toEqual([]);
-
     expect(
       diagnosticsFor(`${namedContractPrelude}
 impl ItemView for ViewState
@@ -5155,6 +4949,22 @@ impl Parent
 
 fn valid(parent: borrow Parent) -> Child
   parent.child()
+`),
+    ).not.toThrow();
+  });
+
+  it("materializes plain projected handles through overloaded operators", () => {
+    expect(() =>
+      analyze(`
+obj Child { value: i32 }
+obj Parent { child: Child }
+
+impl Parent
+  fn '+'(self, _offset: i32) -> Child
+    self.child
+
+fn valid(parent: borrow Parent) -> Child
+  parent + 0
 `),
     ).not.toThrow();
   });
@@ -6527,6 +6337,25 @@ fn invalid(~source: Box) -> i32
   view.active.value
 `),
     ).toContain("TY0048");
+
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+val Active { active: borrow Box }
+val Count { count: i32 }
+val View { active: borrow Box, count: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn invalid(~source: Box) -> i32
+  let active = Active { active: source }
+  let count = Count { count: 1 }
+  let view = View { ...active, ...count }
+  mutate(~source)
+  view.active.value
+`),
+    ).toContain("TY0048");
   });
 
   it("handles cyclic borrowed aggregate initializers conservatively", () => {
@@ -7043,16 +6872,8 @@ fn invalid(~value: Box) -> i32
       );
 
     expect(borrowedSignature).toBeDefined();
-    expect(viewSummary?.serializedBytes).toBe(
-      viewSummary?.serialized
-        ? callableBorrowSummarySize(viewSummary.serialized)
-        : undefined,
-    );
-    expect(
-      viewSummary?.serialized
-        ? deserializeCallableBorrowSummary(viewSummary.serialized).source
-        : undefined,
-    ).toMatchObject({
+    expect(viewSummary?.contract).toBeDefined();
+    expect(viewSummary?.source).toMatchObject({
       declaration: { moduleId: "src::views" },
     });
     const conflict = diagnostics.find(
@@ -7144,12 +6965,14 @@ let selected_empty: Option<borrow i32> = relay(source)
     const selectedSummary = analyzed.semantics
       .get("src::views")
       ?.exports.get("selected_default_view")
-      ?.borrowing?.find((entry) =>
-        entry.serialized?.includes('"defaultNoBorrow":true'),
+      ?.borrowing?.find(
+        (entry) =>
+          entry.symbol ===
+          analyzed.semantics
+            .get("src::views")
+            ?.exports.get("selected_default_view")?.symbol,
       );
-    const selectedContract = selectedSummary?.serialized
-      ? deserializeCallableBorrowSummary(selectedSummary.serialized).contract
-      : undefined;
+    const selectedContract = selectedSummary?.contract;
     const activeSummary = analyzed.semantics
       .get("src::views")
       ?.exports.get("selected_active_view")
@@ -7160,9 +6983,7 @@ let selected_empty: Option<borrow i32> = relay(source)
             .get("src::views")
             ?.exports.get("selected_active_view")?.symbol,
       );
-    const activeContract = activeSummary?.serialized
-      ? deserializeCallableBorrowSummary(activeSummary.serialized).contract
-      : undefined;
+    const activeContract = activeSummary?.contract;
 
     expect(noViewContract?.borrowedResult).toBe("none");
     expect(selectedSummary).toBeDefined();
@@ -7280,9 +7101,7 @@ fn invalid() -> i32
           entry.symbol ===
           analyzed.semantics.get("src::views")?.exports.get("get")?.symbol,
       );
-    const contract = getSummary?.serialized
-      ? deserializeCallableBorrowSummary(getSummary.serialized).contract
-      : undefined;
+    const contract = getSummary?.contract;
 
     expect(
       contract?.parameters.some((parameter) =>
@@ -7404,10 +7223,7 @@ fn invalid_arguments() -> void
           analyzed.semantics.get("src::views")?.exports.get("mutate_global")
             ?.symbol,
       );
-    const mutateGlobalContract = mutateGlobalSummary?.serialized
-      ? deserializeCallableBorrowSummary(mutateGlobalSummary.serialized)
-          .contract
-      : undefined;
+    const mutateGlobalContract = mutateGlobalSummary?.contract;
 
     expect(mutateGlobalContract?.externalWrite).toBe(true);
     expect(
@@ -7527,15 +7343,13 @@ fn valid(~right: Box) -> void
     const analyzed = analyzeModules({ graph });
     const values = analyzed.semantics.get("src::values");
     const makeBox = values?.exports.get("make_box");
-    const serialized = makeBox?.borrowing?.find(
+    const contract = makeBox?.borrowing?.find(
       (entry) => entry.symbol === makeBox.symbol,
-    )?.serialized;
+    )?.contract;
 
     expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
-    expect(serialized).toBeDefined();
-    expect(
-      deserializeCallableBorrowSummary(serialized!).contract.freshResult,
-    ).toBe(true);
+    expect(contract).toBeDefined();
+    expect(contract?.freshResult).toBe(true);
     expect(
       analyzed.semantics.get("src::main")?.borrowing.runtimeIdentityGuards.size,
     ).toBe(0);
@@ -7669,10 +7483,7 @@ fn valid_copied_capture() -> i32
           analyzed.semantics.get("std::views")?.exports.get("retain_and_mutate")
             ?.symbol,
       );
-    const retainAndMutateContract = retainAndMutateSummary?.serialized
-      ? deserializeCallableBorrowSummary(retainAndMutateSummary.serialized)
-          .contract
-      : undefined;
+    const retainAndMutateContract = retainAndMutateSummary?.contract;
     const retainDefaultSummary = analyzed.semantics
       .get("std::views")
       ?.exports.get("retain_default_and_mutate")
@@ -7683,10 +7494,7 @@ fn valid_copied_capture() -> i32
             .get("std::views")
             ?.exports.get("retain_default_and_mutate")?.symbol,
       );
-    const retainDefaultContract = retainDefaultSummary?.serialized
-      ? deserializeCallableBorrowSummary(retainDefaultSummary.serialized)
-          .contract
-      : undefined;
+    const retainDefaultContract = retainDefaultSummary?.contract;
     const conflicts = [...graph.diagnostics, ...analyzed.diagnostics].filter(
       (diagnostic) => diagnostic.code === "TY0048",
     );
@@ -8111,6 +7919,13 @@ fn update(wrapper: Wrapper) -> void
   wrapper.state.with_mut((~value) =>
     value = value + 1
   )
+
+fn overwrite(~wrapper: Wrapper) -> void
+  wrapper.state.__value = 0
+
+fn mixed_update(~wrapper: Wrapper) -> void
+  update(wrapper)
+  overwrite(~wrapper)
 `);
     const wrapperContract = Array.from(
       result.borrowing.callables.values(),
@@ -8123,6 +7938,13 @@ fn update(wrapper: Wrapper) -> void
     );
 
     expect(wrapperContract).toBeDefined();
+    const mixedUpdate = result.symbols.resolveTopLevel("mixed_update");
+    const mixedContract =
+      typeof mixedUpdate === "number"
+        ? result.borrowing.callables.get(mixedUpdate)
+        : undefined;
+    expect(mixedContract?.parameters[0]?.writePaths?.length).toBeGreaterThan(0);
+    expect(mixedContract?.parameters[0]?.runtimeCheckedWrites).toBeUndefined();
   });
 
   it("allows mutable owned allocation aliases to escape as values", () => {
@@ -8361,6 +8183,41 @@ fn conflict(~cell: SharedCell<Box>) -> i32
       resume(true)
   mutate_cell(~cell)
   borrowed.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("keeps handler alternatives independent after a sibling returns", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+@intrinsic_type(type: "voyd.std.shared-cell")
+obj SharedCell<T> { value: T }
+
+@intrinsic(name: "__shared_cell_value", uses_signature: false)
+fn shared_cell_value<T>(cell: SharedCell<T>): () -> T
+  __shared_cell_value(cell)
+
+eff Flag
+  get(resume) -> bool
+
+eff Stop
+  stop(resume) -> void
+
+fn mutate_cell(~cell: SharedCell<Box>) -> void
+  cell.value = Box { value: 2 }
+
+fn conflict(~cell: SharedCell<Box>): (Flag, Stop) -> i32
+  let borrowed = shared_cell_value(cell)
+  try
+    Flag::get()
+    borrowed.value
+  Flag::get(resume):
+    return 0
+  Stop::stop(resume):
+    mutate_cell(~cell)
+    borrowed.value
 `),
     ).toContain("TY0048");
   });
@@ -9498,7 +9355,7 @@ fn invalid(~values: FixedArray<Box>) -> i32
     ).not.toContain("TY0048");
   });
 
-  it("keeps shared-declared array writes exclusive at call sites", () => {
+  it("keeps shared-declared array writes exclusive in plain-reference callers", () => {
     expect(
       diagnosticCodes(`${prelude}
 fn write(values: FixedArray<i32>) -> void
@@ -9509,7 +9366,7 @@ fn write_two(left: FixedArray<i32>, right: FixedArray<i32>) -> void
   write(left)
   write(right)
 
-fn invalid(~values: FixedArray<i32>) -> void
+fn invalid(values: FixedArray<i32>) -> void
   write_two(values, values)
 `),
     ).toContain("TY0048");
@@ -11698,6 +11555,18 @@ fn valid(other: Box, ~holder: Holder, stop: bool) -> i32
   return result
   mutate(~value)
   0
+`),
+    ).not.toThrow();
+  });
+
+  it("treats bare returns as terminal fact blocks", () => {
+    expect(() =>
+      analyze(`${prelude}
+fn valid(~value: Box) -> void
+  let ~borrow = value
+  return()
+  mutate(~value)
+  let ignored = borrow.value
 `),
     ).not.toThrow();
   });

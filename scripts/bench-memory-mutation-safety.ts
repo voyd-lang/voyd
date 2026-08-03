@@ -98,12 +98,12 @@ const count = (source: string, pattern: RegExp): number =>
 const measureMode = async (optimize: boolean) => {
   const compileMs: number[] = [];
   const compilerTotalMs: number[] = [];
-  const serializedSummaryCount: number[] = [];
-  const serializedSummaryBytes: number[] = [];
-  const retainedSummaryCount: number[] = [];
-  const retainedSummaryBytes: number[] = [];
-  const summarySerializationCacheHits: number[] = [];
-  const summarySerializationCacheMisses: number[] = [];
+  const retainedContractCount: number[] = [];
+  const retainedContractBytes: number[] = [];
+  const factBlocks: number[] = [];
+  const factOperations: number[] = [];
+  const totalBodyCallables: number[] = [];
+  const checkedBodyCallables: number[] = [];
   const dependencyAssemblyAvailableModules: number[] = [];
   const dependencyAssemblyDirectEdges: number[] = [];
   const dependencyAssemblyImportTargets: number[] = [];
@@ -111,21 +111,19 @@ const measureMode = async (optimize: boolean) => {
   const dependencyAssemblyProjectedModules: number[] = [];
   const dependencyProjectionCacheHits: number[] = [];
   const dependencyProjectionCacheMisses: number[] = [];
-  const dependencyProjectionSummaryDecodes: number[] = [];
-  const dependencyProjectionSummaryReuses: number[] = [];
-  const deserializedSummaries: number[] = [];
   const totalSummaryCallables: number[] = [];
   const demandedSummaryCallables: number[] = [];
   const skippedTrivialSummaryCallables: number[] = [];
   const summaryDemandWorklistEdges: number[] = [];
   const summaryDemandWorklistIterations: number[] = [];
   const summaryEvaluations: number[] = [];
-  const retainedDetailedSummaryOutputs: number[] = [];
-  const borrowedResultDemandedCallables: number[] = [];
-  const borrowedResultSkippedCallables: number[] = [];
+  const summaryDemandReasons = new Map<string, number[]>();
   const borrowingContractComputationMs: number[] = [];
+  const borrowingFactExtractionMs: number[] = [];
   const borrowingInferenceMs: number[] = [];
-  const borrowedResultAnnotationMs: number[] = [];
+  const borrowingValidationMs: number[] = [];
+  const borrowingBodySelectionMs: number[] = [];
+  const borrowingLoanCheckingMs: number[] = [];
   let compiled: CompileSuccess | undefined;
 
   for (let sample = 0; sample < sampleCount; sample += 1) {
@@ -146,23 +144,19 @@ const measureMode = async (optimize: boolean) => {
       throw new Error("compiler did not emit a performance summary");
     }
     compilerTotalMs.push(summary.phasesMs.total ?? compileMs.at(-1)!);
-    serializedSummaryCount.push(
-      summary.counters["borrowing.summary.serializedCount"] ?? 0,
+    retainedContractCount.push(
+      summary.counters["borrowing.contract.retainedCount"] ?? 0,
     );
-    serializedSummaryBytes.push(
-      summary.counters["borrowing.summary.serializedBytes"] ?? 0,
+    retainedContractBytes.push(
+      summary.counters["borrowing.contract.retainedBytes"] ?? 0,
     );
-    retainedSummaryCount.push(
-      summary.counters["borrowing.summary.retainedCount"] ?? 0,
+    factBlocks.push(summary.counters["borrowing.facts.blocks"] ?? 0);
+    factOperations.push(summary.counters["borrowing.facts.operations"] ?? 0);
+    totalBodyCallables.push(
+      summary.counters["borrowing.body.totalCallables"] ?? 0,
     );
-    retainedSummaryBytes.push(
-      summary.counters["borrowing.summary.retainedBytes"] ?? 0,
-    );
-    summarySerializationCacheHits.push(
-      summary.counters["borrowing.summary.serializationCacheHit"] ?? 0,
-    );
-    summarySerializationCacheMisses.push(
-      summary.counters["borrowing.summary.serializationCacheMiss"] ?? 0,
+    checkedBodyCallables.push(
+      summary.counters["borrowing.body.checkedCallables"] ?? 0,
     );
     dependencyAssemblyAvailableModules.push(
       summary.counters["borrowing.dependencyAssembly.availableModules"] ?? 0,
@@ -185,15 +179,6 @@ const measureMode = async (optimize: boolean) => {
     dependencyProjectionCacheMisses.push(
       summary.counters["borrowing.dependencyProjection.cacheMiss"] ?? 0,
     );
-    dependencyProjectionSummaryDecodes.push(
-      summary.counters["borrowing.dependencyProjection.summaryDecode"] ?? 0,
-    );
-    dependencyProjectionSummaryReuses.push(
-      summary.counters["borrowing.dependencyProjection.summaryReuse"] ?? 0,
-    );
-    deserializedSummaries.push(
-      summary.counters["borrowing.summary.deserializedCount"] ?? 0,
-    );
     totalSummaryCallables.push(
       summary.counters["borrowing.summary.totalCallables"] ?? 0,
     );
@@ -212,24 +197,31 @@ const measureMode = async (optimize: boolean) => {
     summaryEvaluations.push(
       summary.counters["borrowing.summary.evaluations"] ?? 0,
     );
-    retainedDetailedSummaryOutputs.push(
-      summary.counters["borrowing.summary.retainedDetailedOutputs"] ?? 0,
-    );
-    borrowedResultDemandedCallables.push(
-      summary.counters["borrowing.summary.borrowedResultDemandedCallables"] ??
-        0,
-    );
-    borrowedResultSkippedCallables.push(
-      summary.counters["borrowing.summary.borrowedResultSkippedCallables"] ?? 0,
-    );
+    Object.entries(summary.counters)
+      .filter(([name]) => name.startsWith("borrowing.summary.demandReason."))
+      .forEach(([name, value]) => {
+        const reason = name.slice("borrowing.summary.demandReason.".length);
+        const samples = summaryDemandReasons.get(reason) ?? [];
+        samples.push(value);
+        summaryDemandReasons.set(reason, samples);
+      });
     borrowingContractComputationMs.push(
       summary.phasesMs["analyzeBorrowing.computeContracts"] ?? 0,
+    );
+    borrowingFactExtractionMs.push(
+      summary.phasesMs["analyzeBorrowing.extractFacts"] ?? 0,
     );
     borrowingInferenceMs.push(
       summary.phasesMs["analyzeBorrowing.inferContracts"] ?? 0,
     );
-    borrowedResultAnnotationMs.push(
-      summary.phasesMs["analyzeBorrowing.annotateBorrowedResults"] ?? 0,
+    borrowingValidationMs.push(
+      summary.phasesMs["analyzeBorrowing.validateContracts"] ?? 0,
+    );
+    borrowingBodySelectionMs.push(
+      summary.phasesMs["analyzeBorrowing.selectBodies"] ?? 0,
+    );
+    borrowingLoanCheckingMs.push(
+      summary.phasesMs["analyzeBorrowing.checkLoans"] ?? 0,
     );
   }
   if (!compiled) {
@@ -264,20 +256,18 @@ const measureMode = async (optimize: boolean) => {
     compileMedianMs: median(compileMs),
     compilerTotalMs,
     compilerTotalMedianMs: median(compilerTotalMs),
-    serializedSummaryCount,
-    serializedSummaryCountMedian: median(serializedSummaryCount),
-    serializedSummaryBytes,
-    serializedSummaryMedianBytes: median(serializedSummaryBytes),
-    retainedSummaryCount,
-    retainedSummaryCountMedian: median(retainedSummaryCount),
-    retainedSummaryBytes,
-    retainedSummaryMedianBytes: median(retainedSummaryBytes),
-    summarySerializationCacheHits,
-    summarySerializationCacheHitMedian: median(summarySerializationCacheHits),
-    summarySerializationCacheMisses,
-    summarySerializationCacheMissMedian: median(
-      summarySerializationCacheMisses,
-    ),
+    retainedContractCount,
+    retainedContractCountMedian: median(retainedContractCount),
+    retainedContractBytes,
+    retainedContractMedianBytes: median(retainedContractBytes),
+    factBlocks,
+    factBlockMedian: median(factBlocks),
+    factOperations,
+    factOperationMedian: median(factOperations),
+    totalBodyCallables,
+    totalBodyCallableMedian: median(totalBodyCallables),
+    checkedBodyCallables,
+    checkedBodyCallableMedian: median(checkedBodyCallables),
     dependencyAssemblyAvailableModules,
     dependencyAssemblyAvailableModuleMedian: median(
       dependencyAssemblyAvailableModules,
@@ -302,16 +292,6 @@ const measureMode = async (optimize: boolean) => {
     dependencyProjectionCacheMissMedian: median(
       dependencyProjectionCacheMisses,
     ),
-    dependencyProjectionSummaryDecodes,
-    dependencyProjectionSummaryDecodeMedian: median(
-      dependencyProjectionSummaryDecodes,
-    ),
-    dependencyProjectionSummaryReuses,
-    dependencyProjectionSummaryReuseMedian: median(
-      dependencyProjectionSummaryReuses,
-    ),
-    deserializedSummaries,
-    deserializedSummaryMedian: median(deserializedSummaries),
     summaryDemand: {
       totalCallables: {
         samples: totalSummaryCallables,
@@ -337,29 +317,35 @@ const measureMode = async (optimize: boolean) => {
         samples: summaryEvaluations,
         median: median(summaryEvaluations),
       },
-      retainedDetailedOutputs: {
-        samples: retainedDetailedSummaryOutputs,
-        median: median(retainedDetailedSummaryOutputs),
-      },
-      borrowedResultDemandedCallables: {
-        samples: borrowedResultDemandedCallables,
-        median: median(borrowedResultDemandedCallables),
-      },
-      borrowedResultSkippedCallables: {
-        samples: borrowedResultSkippedCallables,
-        median: median(borrowedResultSkippedCallables),
-      },
+      demandReasons: Object.fromEntries(
+        Array.from(summaryDemandReasons, ([reason, samples]) => [
+          reason,
+          { samples, median: median(samples) },
+        ]),
+      ),
       contractComputationMs: {
         samples: borrowingContractComputationMs,
         median: median(borrowingContractComputationMs),
+      },
+      factExtractionMs: {
+        samples: borrowingFactExtractionMs,
+        median: median(borrowingFactExtractionMs),
       },
       inferenceMs: {
         samples: borrowingInferenceMs,
         median: median(borrowingInferenceMs),
       },
-      borrowedResultAnnotationMs: {
-        samples: borrowedResultAnnotationMs,
-        median: median(borrowedResultAnnotationMs),
+      validationMs: {
+        samples: borrowingValidationMs,
+        median: median(borrowingValidationMs),
+      },
+      bodySelectionMs: {
+        samples: borrowingBodySelectionMs,
+        median: median(borrowingBodySelectionMs),
+      },
+      loanCheckingMs: {
+        samples: borrowingLoanCheckingMs,
+        median: median(borrowingLoanCheckingMs),
       },
     },
     runtimeMs,
@@ -463,12 +449,14 @@ console.log(
         runtimeWarmups: 3,
         runtimeSamples: runtimeSampleCount,
         freshSdkPerCompile: true,
-        summaryBytes:
-          "compiler borrowing.summary.retainedBytes is the public snapshot footprint; serializedBytes records total serialization work; zero means the revision has no serialized public-summary format",
+        contractBytes:
+          "borrowing.contract.retainedBytes is the compact caller-visible contract footprint retained in the public semantic table",
+        factAndBodyDemand:
+          "fact blocks/operations measure the single callable-local extraction; total/checked body callables measure conservative fast-path admission",
         summaryDemand:
-          "total/demanded/skipped callable counters cover detailed whole-callable inference; worklist counters cover local call, callable-reference, and trait-dispatch propagation; borrowed-result counters cover the narrower explicit-borrow/type-parameter fixed point",
+          "total/demanded/skipped callable counters cover compact contract inference; worklist counters cover local call, callable-reference, and trait-dispatch propagation in the single SCC solve",
         dependencyProjection:
-          "assembly counters contrast the analyzed-prefix modules available with unique graph/import edge candidates and projected modules; cache hits/misses count immutable semantic-result projections; projection summary decodes/reuses count validated public payloads within cache misses; deserialized summaries count all schema-validation calls",
+          "assembly counters contrast analyzed-prefix modules with unique graph/import edge candidates and projected modules; cache hits/misses count immutable compact-contract projections",
         allocation:
           "static generated Wasm GC allocation instruction sites plus repeated-run linear-memory growth",
         guardOverhead:

@@ -2,10 +2,6 @@ import { incrementCompilerPerfCounter } from "../../perf.js";
 import { getSymbolTable } from "../_internal/symbol-table.js";
 import type { ModuleExportTable } from "../modules.js";
 import type { SemanticsPipelineResult } from "../pipeline.js";
-import {
-  deserializeCallableBorrowSummary,
-  type CallableBorrowSummary,
-} from "./callable-summary.js";
 import type { BorrowingDependency } from "./dependency.js";
 import type { CallableBorrowContract } from "./model.js";
 
@@ -102,8 +98,6 @@ export const createBorrowingDependencyProjectionCache =
     stats: {
       hits: 0,
       misses: 0,
-      summaryDecodes: 0,
-      summaryReuses: 0,
     },
   });
 
@@ -114,8 +108,6 @@ export const snapshotBorrowingDependencyProjectionCacheStats = (
 export type BorrowingDependencyProjectionCacheStats = {
   hits: number;
   misses: number;
-  summaryDecodes: number;
-  summaryReuses: number;
 };
 
 export type BorrowingDependencyProjectionCache = {
@@ -172,7 +164,6 @@ const cachedBorrowingDependencyProjection = ({
   const projection = buildBorrowingDependencyProjection({
     moduleId,
     semantics,
-    cache,
   });
   const entries =
     cache.entries.get(semantics) ??
@@ -185,44 +176,21 @@ const cachedBorrowingDependencyProjection = ({
 const buildBorrowingDependencyProjection = ({
   moduleId,
   semantics,
-  cache,
 }: {
   moduleId: string;
   semantics: SemanticsPipelineResult;
-  cache: BorrowingDependencyProjectionCache;
 }): CachedBorrowingDependencyProjection => {
-  const decodedSummaries = new Map<string, CallableBorrowSummary>();
-  const decodeSummary = (serialized: string): CallableBorrowSummary => {
-    const cached = decodedSummaries.get(serialized);
-    if (cached) {
-      cache.stats.summaryReuses += 1;
-      incrementCompilerPerfCounter(
-        "borrowing.dependencyProjection.summaryReuse",
-      );
-      return cached;
-    }
-
-    const decoded = deserializeCallableBorrowSummary(serialized);
-    decodedSummaries.set(serialized, decoded);
-    cache.stats.summaryDecodes += 1;
-    incrementCompilerPerfCounter(
-      "borrowing.dependencyProjection.summaryDecode",
-    );
-    return decoded;
-  };
   const dependencySymbols = getSymbolTable(semantics);
   const exportedBorrowing = new Map(
     Array.from(semantics.exports.values()).flatMap(
       (entry) =>
         entry.borrowing?.map((borrow) => {
-          const summary = borrow.serialized
-            ? decodeSummary(borrow.serialized)
-            : {
-                dispatch: "ordinary" as const,
-                contract: borrow.contract,
-                namedContract: undefined,
-                source: undefined,
-              };
+          const summary = {
+            dispatch: borrow.dispatch ?? ("ordinary" as const),
+            contract: borrow.contract,
+            namedContract: borrow.namedContract,
+            source: borrow.source,
+          };
           return [
             borrow.symbol,
             {
@@ -277,22 +245,23 @@ const buildBorrowingDependencyProjection = ({
       Array.from(semantics.exports.values())
         .flatMap((entry) => entry.borrowingCoercions ?? [])
         .flatMap((coercion) => {
-          const contract = decodeSummary(coercion.serialized).contract;
           return (
-            contract.parameters[0]?.returnedOrigins?.flatMap((origin) => {
-              const result = origin.result[0];
-              return result?.kind === "region"
-                ? [
-                    {
-                      concrete: coercion.concrete,
-                      trait: coercion.trait,
-                      implementation: coercion.implementation,
-                      source: origin.source,
-                      result,
-                    },
-                  ]
-                : [];
-            }) ?? []
+            coercion.contract.parameters[0]?.returnedOrigins?.flatMap(
+              (origin) => {
+                const result = origin.result[0];
+                return result?.kind === "region"
+                  ? [
+                      {
+                        concrete: coercion.concrete,
+                        trait: coercion.trait,
+                        implementation: coercion.implementation,
+                        source: origin.source,
+                        result,
+                      },
+                    ]
+                  : [];
+              },
+            ) ?? []
           );
         })
         .map((projection) => [JSON.stringify(projection), projection] as const),
@@ -304,7 +273,7 @@ const buildBorrowingDependencyProjection = ({
     implementation.methods.map((method) => ({
       implementation: method.implementation,
       declaration: method.declaration,
-      contract: decodeSummary(method.serialized).contract,
+      contract: method.contract,
     })),
   );
   return {

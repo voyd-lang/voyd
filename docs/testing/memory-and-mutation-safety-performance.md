@@ -163,3 +163,45 @@ underlying package-analysis costs above.
 
 Removal of every temporary performance allowance is tracked exclusively by
 [V-468](https://linear.app/voyd-lang/issue/V-468).
+
+## V-472 architecture repair result
+
+V-472 replaced the overlapping rich-summary passes with one callable-fact
+boundary, a declared-contract-seeded SCC solve, post-solve contract validation,
+and loan checking over the same facts and compact callee contracts. It also
+removed compiler-internal rich-summary encoding and decoding. The final
+production compiler diff is 875 lines smaller (7,359 additions and 8,234
+deletions), including the new fact representation.
+
+The reviewed implementation did not meet the source-performance completion
+gate and therefore was not committed or pushed. The final comparison used
+seven alternating fresh Node processes for each revision and mode, with the
+precompiled std snapshot disabled. Raw samples and machine-readable counters
+are in [`v472-source-benchmark.json`](./v472-source-benchmark.json).
+
+| Seven-sample source median | `876f1680` | PR `1488efd4` | V-472 working tree | V-472 vs baseline | V-472 vs PR |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Unoptimized | 1,373.20 ms | 2,112.87 ms | 2,070.98 ms | +697.78 ms (+50.81%) | -41.88 ms (-1.98%) |
+| Release | 1,919.76 ms | 2,659.35 ms | 2,617.76 ms | +698.00 ms (+36.36%) | -41.59 ms (-1.56%) |
+
+The implementation reduced effective detailed contract analysis from
+1,015/1,052 callables on the PR to 762/887, checked 395 bodies for conflicts,
+performed 783 contract evaluations, and admitted 176 callables to the compact
+fast path. It performed zero internal summary decodes (down from 696) and
+retained 1,408,914 bytes of compact contracts. Borrow analysis still took
+about 672 ms: approximately 262 ms for fact extraction, 254 ms for contract
+inference, and 142 ms for loan checking. That remaining source cost exceeds
+both V-472 gate thresholds.
+
+Current Wasm is byte-identical to PR `1488efd4` in both modes. A separate
+seven-sample snapshot/source run measured 699.02 ms snapshot versus 2,033.71 ms
+source unoptimized, and 1,083.71 ms versus 2,410.56 ms release. Snapshot hits
+are below baseline source time, but do not make the source regression
+acceptable. The snapshot was intentionally left stale rather than regenerated
+over a failing source architecture.
+
+The focused runtime/allocation check retained zero repeated-run linear-memory
+growth. Unoptimized current runtime was 0.183959 ms versus 0.186250 ms at the
+baseline, with 939 versus 997 generated allocation sites. Release runtime was
+0.042125 ms versus 0.043416 ms, with five allocation sites at both revisions.
+Runtime guards remained supported and bounded.

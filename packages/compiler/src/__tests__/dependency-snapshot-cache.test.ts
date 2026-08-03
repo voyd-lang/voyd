@@ -145,6 +145,11 @@ describe("compiler dependency snapshots", () => {
       encoded,
       stdRoot: stdOnlyRoots.std,
     });
+    expect(
+      "queries" in
+        (restored.dependencySnapshot.semantics.get("std::mathdep")!
+          .borrowing as object),
+    ).toBe(false);
     const sourceOnlyHost = createMemoryHost({
       [`${stdOnlyRoots.src}${sep}main.voyd`]: [
         "#!no_prelude",
@@ -181,7 +186,7 @@ describe("compiler dependency snapshots", () => {
     );
     expect(
       second.semantics.get("std::mathdep")?.exports.get("std_value")
-        ?.borrowing?.[0]?.serialized,
+        ?.borrowing?.[0]?.contract,
     ).toBeDefined();
   });
 

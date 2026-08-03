@@ -46,15 +46,13 @@ import {
 import { formatEffectRow } from "./effects/format.js";
 import {
   analyzeBorrowing,
-  cachedCallableBorrowSummaryEncoding,
-  callableBorrowSummarySize,
-  createCallableBorrowSummarySerializationCache,
+  createCallableBorrowSummary,
   emptyBorrowingResult,
-  encodeCallableBorrowSummary,
   redactPrivateSummaryPath,
   translateProjectionPath,
   type BorrowingResult,
   type CallableBorrowContract,
+  type CallableBorrowSummary,
   type CallableResultInvocation,
   type CallableBorrowSummaryPrivacy,
   type CallableBorrowSummarySource,
@@ -385,8 +383,6 @@ const collectModuleExports = ({
 }): ModuleExportTable => {
   const table: ModuleExportTable = new Map();
   const borrowSummarySources = callableBorrowSummarySources(hir, moduleId);
-  const borrowSummarySerializationCache =
-    createCallableBorrowSummarySerializationCache();
   const opaquePrivateProjectionToken = (value: string): string => {
     let first = 5381;
     let second = 2166136261;
@@ -668,7 +664,7 @@ const collectModuleExports = ({
       ],
       maySuspend: false,
     };
-    const encoded = encodeCallableBorrowSummary({
+    const summary = createCallableBorrowSummary({
       contract,
       namedContract,
       publicPrivacy: {
@@ -682,9 +678,7 @@ const collectModuleExports = ({
       concrete: first.concrete,
       trait: first.trait,
       implementation: first.implementation,
-      serialized: encoded.serialized,
-      serializedBytes: encoded.serializedBytes,
-      contract: encoded.summary.contract,
+      contract: summary.contract,
     };
   };
   const localCoercions = new Map<string, ExportedCoercion>();
@@ -3258,29 +3252,18 @@ const collectModuleExports = ({
   };
   const localTraitDeclarationSummaryFor = (
     declarationSymbol: SymbolId,
-  ): ReturnType<typeof encodeCallableBorrowSummary> | undefined => {
+  ): CallableBorrowSummary | undefined => {
     const contract = borrowing.callables.get(declarationSymbol);
     if (!contract) {
       return undefined;
     }
-    return cachedCallableBorrowSummaryEncoding({
-      cache: borrowSummarySerializationCache,
-      callable: declarationSymbol,
-      mode: {
-        purpose: "trait-declaration-contract",
-        dispatch: "trait-declaration",
-        privacy: "unredacted",
-        source: "omitted",
-      },
-      encode: () =>
-        encodeCallableBorrowSummary({
-          contract: contractWithCallableResultInvocations(
-            declarationSymbol,
-            contract,
-          ),
-          namedContract: borrowing.namedContracts.get(declarationSymbol),
-          dispatchHint: "trait-declaration",
-        }),
+    return createCallableBorrowSummary({
+      contract: contractWithCallableResultInvocations(
+        declarationSymbol,
+        contract,
+      ),
+      namedContract: borrowing.namedContracts.get(declarationSymbol),
+      dispatchHint: "trait-declaration",
     });
   };
   const traitImplementationsFor = (
@@ -3303,32 +3286,22 @@ const collectModuleExports = ({
           return [];
         }
         const declaration = canonicalRef(mapping.traitMethodSymbol);
-        const encoded =
+        const summary =
           declaration.moduleId === moduleId
             ? localTraitDeclarationSummaryFor(mapping.traitMethodSymbol)
             : Array.from(
                 dependencyExports.get(declaration.moduleId)?.values() ?? [],
               )
                 .flatMap((entry) => entry.borrowing ?? [])
-                .find(
-                  (entry) =>
-                    entry.symbol === declaration.symbol && entry.serialized,
-                );
-        if (!encoded?.serialized) {
+                .find((entry) => entry.symbol === declaration.symbol);
+        if (!summary) {
           return [];
         }
         return [
           {
             implementation: { moduleId, symbol: implementation },
             declaration,
-            serialized: encoded.serialized,
-            serializedBytes:
-              encoded.serializedBytes ??
-              callableBorrowSummarySize(encoded.serialized),
-            contract:
-              "summary" in encoded
-                ? encoded.summary.contract
-                : encoded.contract,
+            contract: summary.contract,
           },
         ];
       });
@@ -3396,7 +3369,7 @@ const collectModuleExports = ({
   const exportBorrowSummaryFor = (
     callableSymbol: SymbolId,
     borrowContract: CallableBorrowContract,
-  ): ReturnType<typeof encodeCallableBorrowSummary> => {
+  ): CallableBorrowSummary => {
     const isTraitImplementation = typing.traitMethodImpls.has(callableSymbol);
     const isTraitDeclaration =
       !isTraitImplementation &&
@@ -3416,26 +3389,15 @@ const collectModuleExports = ({
       : isTraitDeclaration
         ? ("trait-declaration" as const)
         : ("ordinary" as const);
-    return cachedCallableBorrowSummaryEncoding({
-      cache: borrowSummarySerializationCache,
-      callable: callableSymbol,
-      mode: {
-        purpose: "public-export",
-        dispatch,
-        privacy: publicPrivacy ? "public-redacted" : "unredacted",
-        source: source ? "included" : "omitted",
-      },
-      encode: () =>
-        encodeCallableBorrowSummary({
-          contract: contractWithCallableResultInvocations(
-            callableSymbol,
-            borrowContract,
-          ),
-          namedContract: borrowing.namedContracts.get(callableSymbol),
-          ...(dispatch === "ordinary" ? {} : { dispatchHint: dispatch }),
-          ...(publicPrivacy ? { publicPrivacy } : {}),
-          source,
-        }),
+    return createCallableBorrowSummary({
+      contract: contractWithCallableResultInvocations(
+        callableSymbol,
+        borrowContract,
+      ),
+      namedContract: borrowing.namedContracts.get(callableSymbol),
+      ...(dispatch === "ordinary" ? {} : { dispatchHint: dispatch }),
+      ...(publicPrivacy ? { publicPrivacy } : {}),
+      source,
     });
   };
 
@@ -3499,12 +3461,13 @@ const collectModuleExports = ({
       if (!borrowContract) {
         return;
       }
-      const encoded = exportBorrowSummaryFor(callableSymbol, borrowContract);
+      const summary = exportBorrowSummaryFor(callableSymbol, borrowContract);
       borrowingContracts.set(callableSymbol, {
         symbol: callableSymbol,
-        serialized: encoded.serialized,
-        serializedBytes: encoded.serializedBytes,
-        contract: encoded.summary.contract,
+        contract: summary.contract,
+        dispatch: summary.dispatch,
+        namedContract: summary.namedContract,
+        source: summary.source,
       });
     };
     addBorrowingSummary(symbol);
@@ -3649,7 +3612,7 @@ const collectModuleExports = ({
           implementation.methods.map((method) => [
             method.implementation,
             method.declaration,
-            method.serialized,
+            method.contract,
           ]),
         ]),
         implementation,
@@ -3671,17 +3634,14 @@ const collectModuleExports = ({
         (implementation) => implementation.methods,
       ),
     ];
-    const retainedBorrowingSummaryBytes = retainedBorrowingSummaries.reduce(
-      (total, summary) => total + (summary.serializedBytes ?? 0),
-      0,
-    );
     incrementCompilerPerfCounter(
-      "borrowing.summary.retainedCount",
+      "borrowing.contract.retainedCount",
       retainedBorrowingSummaries.length,
     );
     incrementCompilerPerfCounter(
-      "borrowing.summary.retainedBytes",
-      retainedBorrowingSummaryBytes,
+      "borrowing.contract.retainedBytes",
+      new TextEncoder().encode(JSON.stringify(retainedBorrowingSummaries))
+        .byteLength,
     );
   }
 

@@ -1,5 +1,6 @@
 import type { Diagnostic } from "../../diagnostics/index.js";
 import type { SymbolId } from "../ids.js";
+import type { SymbolRef } from "../typing/symbol-ref.js";
 
 export type BorrowAccessMode = "owned" | "shared" | "mutable";
 
@@ -475,6 +476,15 @@ export type BorrowingResult = {
   runtimeIdentityGuards: ReadonlyMap<number, readonly RuntimeIdentityGuard[]>;
   mutableStorageSymbols: ReadonlySet<SymbolId>;
   diagnostics: readonly Diagnostic[];
+  /** Process-local callable boundary for incremental invalidation (V-465). */
+  queries?: ReadonlyMap<
+    SymbolId,
+    {
+      input: string;
+      dependencies: readonly SymbolRef[];
+      output: CallableBorrowContract;
+    }
+  >;
 };
 
 export const mergeCallableBorrowContracts = (

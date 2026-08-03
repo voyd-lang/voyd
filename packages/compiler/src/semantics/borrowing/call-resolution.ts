@@ -40,14 +40,114 @@ export type ResolvedBorrowCall = {
   contract?: CallableBorrowContract;
   arguments: readonly (HirExprId | undefined)[];
   contractSources: readonly import("../ids.js").SourceSpan[];
+  argumentPlanAmbiguous?: true;
   traitDispatch?: true;
   openTraitDispatch?: true;
+};
+
+export type BorrowCallFactResolution = Pick<
+  ResolvedBorrowCall,
+  | "targets"
+  | "signature"
+  | "contractSources"
+  | "argumentPlanAmbiguous"
+  | "traitDispatch"
+  | "openTraitDispatch"
+> & {
+  intrinsic: boolean;
+  intrinsicBoundary: boolean;
+  substitutions: readonly { argument?: HirExprId }[];
+  baseContract?: CallableBorrowContract;
 };
 
 type BorrowCallSignature = Pick<
   FunctionSignature,
   "parameters" | "returnType" | "effectRow"
 >;
+
+export const BORROW_IRRELEVANT_VALUE_INTRINSICS = new Set([
+  "+",
+  "-",
+  "*",
+  "/",
+  "%",
+  "<",
+  "<=",
+  ">",
+  ">=",
+  "==",
+  "!=",
+  "and",
+  "or",
+  "xor",
+  "not",
+  "__shift_l",
+  "__shift_ru",
+  "__bit_and",
+  "__bit_or",
+  "__bit_xor",
+  "__i32_wrap_i64",
+  "__i64_extend_u",
+  "__i64_extend_s",
+  "__i32_trunc_f32_s",
+  "__i32_trunc_f64_s",
+  "__i64_trunc_f32_s",
+  "__i64_trunc_f64_s",
+  "__f32_convert_i32_s",
+  "__f32_convert_i64_s",
+  "__f64_convert_i32_s",
+  "__f64_convert_i64_s",
+  "__reinterpret_f32_to_i32",
+  "__reinterpret_i32_to_f32",
+  "__f32_demote_f64",
+  "__f64_promote_f32",
+  "__floor",
+  "__ceil",
+  "__round",
+  "__trunc",
+  "__sqrt",
+  "__reinterpret_f64_to_i64",
+  "__reinterpret_i64_to_f64",
+]);
+
+const instantiatedExpressionTypesByTyping = new WeakMap<
+  TypingResult,
+  ReadonlyMap<HirExprId, TypeId>
+>();
+const conservativeContractsByTyping = new WeakMap<
+  TypingResult,
+  Map<string, CallableBorrowContract>
+>();
+
+const instantiatedExpressionTypes = (
+  typing: TypingResult,
+): ReadonlyMap<HirExprId, TypeId> => {
+  const cached = instantiatedExpressionTypesByTyping.get(typing);
+  if (cached) return cached;
+  const candidates = new Map<
+    HirExprId,
+    { first: TypeId; reference?: TypeId }
+  >();
+  typing.functionInstanceExprTypes.forEach((types) =>
+    types.forEach((type, exprId) => {
+      const prior = candidates.get(exprId);
+      candidates.set(exprId, {
+        first: prior?.first ?? type,
+        reference:
+          prior?.reference ??
+          (typeCanCarryReference(type, typing) ? type : undefined),
+      });
+    }),
+  );
+  const resolved = new Map(
+    Array.from(candidates, ([exprId, candidate]) => [
+      exprId,
+      candidate.reference ?? candidate.first,
+    ]),
+  );
+  instantiatedExpressionTypesByTyping.set(typing, resolved);
+  return resolved;
+};
 
 const resolvedTypeFor = (
   exprId: HirExprId,
@@ -61,16 +161,7 @@ const resolvedTypeFor = (
   if (typeof direct === "number") {
     return direct;
   }
-  const instantiated = Array.from(
-    typing.functionInstanceExprTypes.values(),
-  ).flatMap((types) => {
-    const type = types.get(exprId);
-    return typeof type === "number" ? [type] : [];
-  });
-  const instantiatedType =
-    instantiated.find((type) => typeCanCarryReference(type, typing)) ??
-    instantiated[0];
-  return instantiatedType ?? symbolic;
+  return instantiatedExpressionTypes(typing).get(exprId) ?? symbolic;
 };
 
 const conservativeContractFor = (
@@ -78,6 +169,21 @@ const conservativeContractFor = (
   typing: TypingResult,
   mayRetain = false,
 ): CallableBorrowContract => {
+  const cache =
+    conservativeContractsByTyping.get(typing) ??
+    new Map<string, CallableBorrowContract>();
+  conservativeContractsByTyping.set(typing, cache);
+  const key = JSON.stringify([
+    signature.parameters.map((parameter) => [
+      parameter.type,
+      parameter.bindingKind,
+    ]),
+    signature.returnType,
+    signature.effectRow,
+    mayRetain,
+  ]);
+  const cached = cache.get(key);
+  if (cached) return cached;
   const returnsReference = typeCanCarryReference(signature.returnType, typing);
   const resultOrigins = returnsReference
     ? referenceOriginsInType(signature.returnType, typing)
@@ -88,7 +194,7 @@ const conservativeContractFor = (
     right: readonly PlaceProjection[],
   ): boolean =>
     projectionPathCovers(left, right) || projectionPathCovers(right, left);
-  return {
+  const contract: CallableBorrowContract = {
     parameters: signature.parameters.map((parameter) => {
       const reference = typeCanCarryReference(parameter.type, typing);
       const sourceOrigins = referenceOriginsInType(parameter.type, typing);
@@ -147,6 +253,8 @@ const conservativeContractFor = (
         }
       : {}),
   };
+  cache.set(key, contract);
+  return contract;
 };
 
 const opaqueCallableFor = (
@@ -1323,6 +1431,20 @@ const borrowCallTargets = (
   };
 };
 
+export const callHasIntrinsicBorrowBoundary = (
+  expr: HirExpression,
+  ctx: ResolveContext,
+): boolean => {
+  if (!isIntrinsicCall(expr, ctx)) return false;
+  return borrowCallTargets(expr, ctx).targets.every((target) => {
+    if (target.moduleId !== ctx.moduleId) return false;
+    const metadata = ctx.symbolTable.getSymbol(target.symbol).metadata as
+      | { intrinsic?: boolean }
+      | undefined;
+    return metadata?.intrinsic === true;
+  });
+};
+
 const selectedTraitDeclarationContracts = (
   targets: readonly SymbolRef[],
   ctx: ResolveContext,
@@ -1436,9 +1558,10 @@ const typedArgumentsFor = (
     : { arguments: first, ambiguous: false };
 };
 
-export const resolveBorrowCall = (
+const resolveBorrowCallInternal = (
   expr: HirExpression,
   ctx: ResolveContext,
+  deferAvailableContracts: boolean,
 ): ResolvedBorrowCall => {
   const cached = ctx.callResolutionCache?.get(expr.id);
   if (cached) {
@@ -1476,7 +1599,66 @@ export const resolveBorrowCall = (
     ctx.moduleId,
     preferSymbolic,
   );
-  const opaque = opaqueCallableFor(expr, ctx);
+  const entrySignatures = entries.flatMap((entry) =>
+    entry.signature ? [entry.signature] : [],
+  );
+  const signatureKey = (signature: BorrowCallSignature): string =>
+    JSON.stringify({
+      parameters: signature.parameters.map((parameter) => ({
+        type: parameter.type,
+        label: parameter.label,
+        bindingKind: parameter.bindingKind,
+      })),
+      returnType: signature.returnType,
+      effectRow: signature.effectRow,
+    });
+  const firstSignature = entrySignatures[0];
+  const firstSignatureKey =
+    entrySignatures.length > 1 && firstSignature
+      ? signatureKey(firstSignature)
+      : "";
+  const signaturesAgree =
+    firstSignature !== undefined &&
+    (entrySignatures.length === 1 ||
+      entrySignatures
+        .slice(1)
+        .every((candidate) => signatureKey(candidate) === firstSignatureKey));
+  const opaque = signaturesAgree ? {} : opaqueCallableFor(expr, ctx);
+  const signature = signaturesAgree ? firstSignature : opaque.signature;
+  const traitDispatch = ctx.typing.callTraitDispatches.has(expr.id);
+  const arguments_ =
+    typedArguments.arguments ??
+    (targets.length === 0 || direct
+      ? bindCallArgumentExpressions({
+          expression: expr,
+          parameters: signature?.parameters,
+          callerModuleId: ctx.moduleId,
+          hir: ctx.hir,
+        })
+      : bindCallArgumentExpressions({
+          expression: expr,
+          callerModuleId: ctx.moduleId,
+          hir: ctx.hir,
+        }));
+  if (
+    deferAvailableContracts &&
+    !typedArguments.ambiguous &&
+    targets.length > 0 &&
+    !traitDispatch &&
+    !openTraitDispatch &&
+    !isIntrinsicCall(expr, ctx) &&
+    entries.every((entry) => entry.contract !== undefined)
+  ) {
+    return {
+      target: entries.length === 1 ? entries[0]?.target : undefined,
+      targets,
+      signature,
+      arguments: arguments_,
+      contractSources: entries.flatMap((entry) =>
+        entry.source ? [summarySpanToSourceSpan(entry.source.declaration)] : [],
+      ),
+    };
+  }
   const intrinsicArguments =
     typedArguments.arguments ??
     bindCallArgumentExpressions({
@@ -1532,33 +1714,6 @@ export const resolveBorrowCall = (
           ));
     return [fallback];
   });
-  const entrySignatures = entries.flatMap((entry) =>
-    entry.signature ? [entry.signature] : [],
-  );
-  const signatureKey = (signature: BorrowCallSignature): string =>
-    JSON.stringify({
-      parameters: signature.parameters.map((parameter) => ({
-        type: parameter.type,
-        label: parameter.label,
-        bindingKind: parameter.bindingKind,
-      })),
-      returnType: signature.returnType,
-      effectRow: signature.effectRow,
-    });
-  const firstSignature = entrySignatures[0];
-  const firstSignatureKey =
-    entrySignatures.length > 1 && firstSignature
-      ? signatureKey(firstSignature)
-      : "";
-  const signature =
-    entrySignatures.length === 1
-      ? firstSignature
-      : firstSignature &&
-          entrySignatures
-            .slice(1)
-            .every((candidate) => signatureKey(candidate) === firstSignatureKey)
-        ? firstSignature
-        : opaque.signature;
   const intrinsicName = intrinsicNameForCall(expr, ctx);
   const intrinsicContract =
     typeof intrinsicName === "string"
@@ -1642,20 +1797,6 @@ export const resolveBorrowCall = (
             ? availableContracts[0]
             : mergeCallableBorrowContracts(availableContracts);
         })();
-  const arguments_ =
-    typedArguments.arguments ??
-    (targets.length === 0 || direct
-      ? bindCallArgumentExpressions({
-          expression: expr,
-          parameters: signature?.parameters,
-          callerModuleId: ctx.moduleId,
-          hir: ctx.hir,
-        })
-      : bindCallArgumentExpressions({
-          expression: expr,
-          callerModuleId: ctx.moduleId,
-          hir: ctx.hir,
-        }));
   const specializedContract = mergedContract
     ? specializeConditionalContract(mergedContract, expr, arguments_, ctx)
     : undefined;
@@ -1684,10 +1825,93 @@ export const resolveBorrowCall = (
             : [],
         ),
       ),
-    ...(ctx.typing.callTraitDispatches.has(expr.id)
-      ? { traitDispatch: true as const }
-      : {}),
+    ...(traitDispatch ? { traitDispatch: true as const } : {}),
     ...(openTraitDispatch ? { openTraitDispatch: true as const } : {}),
+    ...(typedArguments.ambiguous
+      ? { argumentPlanAmbiguous: true as const }
+      : {}),
+  };
+  ctx.callResolutionCache?.set(expr.id, result);
+  return result;
+};
+
+export const resolveBorrowCall = (
+  expr: HirExpression,
+  ctx: ResolveContext,
+): ResolvedBorrowCall => resolveBorrowCallInternal(expr, ctx, false);
+
+export const resolveBorrowCallForFacts = (
+  expr: HirExpression,
+  ctx: ResolveContext,
+): ResolvedBorrowCall => resolveBorrowCallInternal(expr, ctx, true);
+
+/** Resolve an extracted call fact against the current compact contracts. */
+export const resolveBorrowCallFromFact = ({
+  expr,
+  fact,
+  ctx,
+}: {
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
+  fact: BorrowCallFactResolution;
+  ctx: ResolveContext;
+}): ResolvedBorrowCall => {
+  const cached = ctx.callResolutionCache?.get(expr.id);
+  if (cached) return cached;
+  const currentContracts = fact.targets.flatMap((target) => {
+    const contract =
+      target.moduleId === ctx.moduleId
+        ? ctx.contracts.get(target.symbol)
+        : ctx.dependencies.get(target.moduleId)?.callables.get(target.symbol)
+            ?.contract;
+    return contract ? [contract] : [];
+  });
+  const usesExtractedBoundaryContract =
+    fact.intrinsicBoundary ||
+    fact.argumentPlanAmbiguous === true ||
+    fact.traitDispatch === true ||
+    fact.openTraitDispatch === true ||
+    fact.targets.length === 0;
+  const reusesSpecializedBoundaryContract =
+    fact.intrinsicBoundary ||
+    fact.argumentPlanAmbiguous === true ||
+    (fact.targets.length === 0 &&
+      fact.traitDispatch !== true &&
+      fact.openTraitDispatch !== true);
+  const unspecialized =
+    usesExtractedBoundaryContract || currentContracts.length === 0
+      ? fact.baseContract
+      : currentContracts.length === 1
+        ? currentContracts[0]
+        : mergeCallableBorrowContracts(currentContracts);
+  const arguments_ = fact.substitutions.map(
+    (substitution) => substitution.argument,
+  );
+  const specialized =
+    !reusesSpecializedBoundaryContract && unspecialized
+      ? specializeConditionalContract(unspecialized, expr, arguments_, ctx)
+      : undefined;
+  const contract = reusesSpecializedBoundaryContract
+    ? unspecialized
+    : specialized
+      ? filterConcreteProvenance(
+          specialized,
+          expressionTypeFor(expr.id, ctx),
+          arguments_,
+          ctx,
+        )
+      : undefined;
+  const result: ResolvedBorrowCall = {
+    target: fact.targets.length === 1 ? fact.targets[0] : undefined,
+    targets: fact.targets,
+    ...(fact.signature ? { signature: fact.signature } : {}),
+    ...(contract ? { contract } : {}),
+    arguments: arguments_,
+    contractSources: fact.contractSources,
+    ...(fact.traitDispatch ? { traitDispatch: true as const } : {}),
+    ...(fact.openTraitDispatch ? { openTraitDispatch: true as const } : {}),
+    ...(fact.argumentPlanAmbiguous
+      ? { argumentPlanAmbiguous: true as const }
+      : {}),
   };
   ctx.callResolutionCache?.set(expr.id, result);
   return result;

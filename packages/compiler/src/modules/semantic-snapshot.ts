@@ -13,6 +13,7 @@ import { DeclTable, type DeclTableSnapshot } from "../semantics/decls.js";
 import { getSymbolTable } from "../semantics/_internal/symbol-table.js";
 import { cloneNestedMap } from "../semantics/typing/call-resolution.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
+import type { BorrowingResult } from "../semantics/borrowing/model.js";
 import {
   createTypeArena,
   type TypeArena,
@@ -88,10 +89,11 @@ export type PersistentTypingSnapshot = Omit<
 
 export type PersistentSemanticsSnapshot = Omit<
   SemanticsPipelineResult,
-  "binding" | "symbols" | "typing"
+  "binding" | "symbols" | "typing" | "borrowing"
 > & {
   binding: PersistentBindingSnapshot;
   typing: PersistentTypingSnapshot;
+  borrowing: Omit<BorrowingResult, "queries">;
 };
 
 export type PersistentSemanticsMapSnapshot = {
@@ -289,10 +291,11 @@ const snapshotSemanticsForPersistence = (
 ): PersistentSemanticsSnapshot => {
   const binding = semantics.binding;
   const typing = semantics.typing;
+  const { queries: _queries, ...persistentBorrowing } = semantics.borrowing;
   return {
     moduleId: semantics.moduleId,
     hir: semantics.hir,
-    borrowing: semantics.borrowing,
+    borrowing: persistentBorrowing,
     exports: semantics.exports,
     diagnostics: semantics.diagnostics,
     binding: {

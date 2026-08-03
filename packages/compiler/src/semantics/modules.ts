@@ -4,7 +4,10 @@ import type { SymbolKind } from "./binder/index.js";
 import type { ModulePath } from "../modules/types.js";
 import type {
   CallableBorrowContract,
+  CallableBorrowDispatchKind,
+  CallableBorrowSummarySource,
   PlaceProjection,
+  PublicNamedBorrowContract,
 } from "./borrowing/index.js";
 import type { SymbolRef } from "./typing/symbol-ref.js";
 
@@ -31,14 +34,10 @@ export interface ModuleExportEntry {
   effects?: readonly ModuleExportEffect[];
   borrowing?: readonly {
     symbol: SymbolId;
-    /** Versioned separate-compilation payload consumed by dependents. */
-    serialized?: string;
-    serializedBytes?: number;
-    /**
-     * Decoded compatibility view for semantic clients. Dependency analysis
-     * deliberately consumes `serialized` instead.
-     */
     contract: CallableBorrowContract;
+    dispatch?: CallableBorrowDispatchKind;
+    namedContract?: PublicNamedBorrowContract;
+    source?: CallableBorrowSummarySource;
   }[];
   borrowingCoercions?: readonly {
     concrete: SymbolRef;
@@ -56,10 +55,6 @@ export interface ModuleExportEntry {
       callable: SymbolRef;
       omissionRequirements?: readonly (readonly number[])[];
     }[];
-    /** Versioned separate-compilation payload consumed by dependents. */
-    serialized: string;
-    serializedBytes: number;
-    /** Decoded compatibility view; dependency analysis uses `serialized`. */
     contract: CallableBorrowContract;
   }[];
   /**
@@ -76,8 +71,6 @@ export interface ModuleExportEntry {
       callable: SymbolRef;
       omissionRequirements?: readonly (readonly number[])[];
     }[];
-    serialized: string;
-    serializedBytes: number;
     contract: CallableBorrowContract;
   }[];
 }
@@ -89,10 +82,6 @@ export interface ModuleBorrowingTraitImplementation {
   methods: readonly {
     implementation: SymbolRef;
     declaration: SymbolRef;
-    /** Versioned exact trait-declaration contract. */
-    serialized: string;
-    serializedBytes: number;
-    /** Decoded compatibility view; dependency analysis uses `serialized`. */
     contract: CallableBorrowContract;
   }[];
 }
