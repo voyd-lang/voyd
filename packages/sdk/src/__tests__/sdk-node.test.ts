@@ -623,6 +623,35 @@ pub fn main() -> i32
     }
   });
 
+  it("supports one-shot compilation without retaining compiler cache state", async () => {
+    const sdk = createSdk({ compilerCache: "none" });
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: `pub fn main() -> i32
+  42
+`,
+      }),
+    );
+
+    await expect(result.run<number>({ entryName: "main" })).resolves.toBe(42);
+    expect(sdk.exportCompilerArtifact()).toBeUndefined();
+  });
+
+  it("rejects an artifact when compiler caching is disabled", () => {
+    expect(() =>
+      createSdk({
+        compilerCache: "none",
+        compilerArtifact: {} as never,
+      } as never),
+    ).toThrow('compilerArtifact requires compilerCache: "memory"');
+  });
+
+  it("rejects an unknown compiler cache policy from untyped callers", () => {
+    expect(() => createSdk({ compilerCache: "disk" } as never)).toThrow(
+      'unknown compiler cache policy "disk"',
+    );
+  });
+
   it("keeps dependency snapshot app edits valid for generic-heavy programs", async () => {
     const sdk = createSdk();
     const entryPath = path.join(

@@ -16,7 +16,7 @@ const maxRssBytes = Number(
 if (worker) {
   const { createSdk } = await import("@voyd-lang/sdk");
   const startedAt = performance.now();
-  const result = await createSdk().compile({
+  const result = await createSdk({ compilerCache: "none" }).compile({
     entryPath: resolve(
       repoRoot,
       "tests/integration/fixtures/web-framework.voyd",

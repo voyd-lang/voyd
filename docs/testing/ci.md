@@ -110,8 +110,11 @@ The string-overload freshness check runs before every partition command.
 The optimizer scorecard path filter includes `packages/compiler/src/semantics`
 and `packages/compiler/src/modules`. Those changes also run
 `npm run test:web-compile-gate`, which compiles the web integration fixture in
-one fresh process under a 3.5 GiB V8 heap and enforces 240 seconds / 4.25 GiB
-peak RSS. Shards cannot mask an aggregate package OOM.
+one fresh process with `compilerCache: "none"` under a 3.5 GiB V8 heap and
+enforces 240 seconds / 4.25 GiB peak RSS. The gate therefore measures a true
+one-shot cold build: it imports no artifact, captures no in-process dependency
+snapshot, and performs no artifact serialization. Shards cannot mask an
+aggregate package OOM.
 
 ### Integration
 

@@ -137,9 +137,11 @@ describe("compiler dependency snapshots", () => {
       roots: initial.roots,
       cache: firstCache,
     });
+    expect(firstCache.borrowArtifact).toBeUndefined();
     const artifact = exportCompilerDependencyBorrowArtifact(firstCache);
     expect(artifact?.schema).toBe("voyd.compiler-dependency-borrow-cache");
     expect(artifact?.modules.length).toBeGreaterThan(0);
+    expect(exportCompilerDependencyBorrowArtifact(firstCache)).toBe(artifact);
 
     const freshCache = createCompilerDependencySnapshotCache(
       JSON.parse(JSON.stringify(artifact)),

@@ -24,12 +24,14 @@ import {
   addCompilerPerfPhaseDuration,
   completeCompilerPerfSession,
   markCompilerPerfPhaseDuration,
+  incrementCompilerPerfCounter,
+  recordCompilerPerfMemory,
   startCompilerPerfPhase,
   startCompilerPerfSession,
 } from "@voyd-lang/compiler/perf.js";
 import type { BoundaryExportsOption } from "@voyd-lang/compiler/codegen/context.js";
 import type { OptimizationLevel } from "@voyd-lang/compiler/optimization-policy.js";
-import type { TestCase } from "./types.js";
+import type { CreateSdkOptions, TestCase } from "./types.js";
 import { diagnosticsFromUnknownError } from "./diagnostics.js";
 
 export type CompileArtifactsSuccess = {
@@ -55,6 +57,20 @@ const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === "error");
 
 export const createCompilerReuseCache = createCompilerDependencySnapshotCache;
+export const createCompilerReuseCacheForOptions = (
+  options: CreateSdkOptions,
+): CompilerReuseCache | undefined => {
+  const policy = (options as { compilerCache?: unknown }).compilerCache;
+  if (policy !== undefined && policy !== "memory" && policy !== "none") {
+    throw new Error(`unknown compiler cache policy ${JSON.stringify(policy)}`);
+  }
+  if (policy === "none" && options.compilerArtifact !== undefined) {
+    throw new Error('compilerArtifact requires compilerCache: "memory"');
+  }
+  return policy === "none"
+    ? undefined
+    : createCompilerReuseCache(options.compilerArtifact);
+};
 export const exportCompilerReuseArtifact =
   exportCompilerDependencyBorrowArtifact;
 export type CompilerReuseArtifact = CompilerDependencyBorrowArtifact;
@@ -124,6 +140,11 @@ export const compileWithLoader = async ({
         includeTests: shouldIncludeTests,
       });
       perf.mark("loadModuleGraph", loadStartedAt);
+      incrementCompilerPerfCounter(
+        "compiler.graph.module.count",
+        graph.modules.size,
+      );
+      recordCompilerPerfMemory("graph.loaded");
     } catch (error) {
       perf.mark("loadModuleGraph", loadStartedAt);
       return perf.complete({
@@ -197,7 +218,7 @@ export const compileWithLoader = async ({
     try {
       if (testsOnly) {
         const emitStartedAt = perf.start();
-        const testResult = await emitProgram({
+        const testResult = await emitSdkWasm({
           graph,
           semantics,
           codegenOptions: {
@@ -223,7 +244,7 @@ export const compileWithLoader = async ({
       }
 
       const emitStartedAt = perf.start();
-      const wasmResult = await emitProgram({
+      const wasmResult = await emitSdkWasm({
         graph,
         semantics,
         codegenOptions: codegenOption,
@@ -238,7 +259,7 @@ export const compileWithLoader = async ({
 
       if (shouldIncludeTests && tests.length > 0) {
         const testEmitStartedAt = perf.start();
-        const testResult = await emitProgram({
+        const testResult = await emitSdkWasm({
           graph,
           semantics,
           codegenOptions: {
@@ -303,6 +324,7 @@ const createCompilePerfScope = ({
   const start = startCompilerPerfPhase;
   const mark = markCompilerPerfPhaseDuration;
   const complete = <T extends CompileArtifacts>(result: T): T => {
+    recordCompilerPerfMemory("compile.finalize");
     completeCompilerPerfSession({
       session,
       success: result.success,
@@ -313,4 +335,23 @@ const createCompilePerfScope = ({
   };
 
   return { start, mark, complete };
+};
+
+const emitSdkWasm = async (
+  options: Parameters<typeof emitProgram>[0],
+): Promise<{ wasm: Uint8Array; diagnostics: Diagnostic[] }> => {
+  const result = await emitProgram(options);
+  try {
+    return {
+      wasm: new Uint8Array(result.wasm),
+      diagnostics: result.diagnostics,
+    };
+  } finally {
+    result.module.dispose();
+    recordCompilerPerfMemory(
+      options.codegenOptions?.testMode
+        ? "emit.tests.after_dispose"
+        : "emit.after_dispose",
+    );
+  }
 };

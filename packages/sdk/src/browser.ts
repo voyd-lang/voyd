@@ -3,9 +3,8 @@ import { loadModuleGraph } from "@voyd-lang/compiler/pipeline-browser.js";
 import { isCompilerPerfEnabled } from "@voyd-lang/compiler/perf.js";
 import {
   compileWithLoader,
-  createCompilerReuseCache,
+  createCompilerReuseCacheForOptions,
   exportCompilerReuseArtifact,
-  type CompilerReuseArtifact,
   type CompilerReuseCache,
 } from "./shared/compile.js";
 import { runWithHandlers } from "./shared/host.js";
@@ -17,6 +16,7 @@ import {
 import type {
   CompileOptions,
   CompileResult,
+  CreateSdkOptions,
   ServeWebAppOptions,
   ServeWebAppResult,
   VoydSdk,
@@ -32,12 +32,8 @@ import {
   type ParsedModule,
 } from "./compiler-browser.js";
 
-export type CreateSdkOptions = {
-  compilerArtifact?: CompilerReuseArtifact;
-};
-
 export const createSdk = (options: CreateSdkOptions = {}): VoydSdk => {
-  const compilerCache = createCompilerReuseCache(options.compilerArtifact);
+  const compilerCache = createCompilerReuseCacheForOptions(options);
   return {
     compile: (options) => compileSdk(options, compilerCache),
     run: runWithHandlers,
@@ -206,6 +202,8 @@ export * from "@voyd-lang/lib/wasm.js";
 export type {
   CompileOptions,
   CompileResult,
+  CompilerCachePolicy,
+  CreateSdkOptions,
   DefaultAdapterOptions,
   EffectsInfo,
   EffectContinuation,

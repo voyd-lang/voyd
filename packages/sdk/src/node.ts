@@ -13,9 +13,8 @@ import { isCompilerPerfEnabled } from "@voyd-lang/compiler/perf.js";
 import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import {
   compileWithLoader,
-  createCompilerReuseCache,
+  createCompilerReuseCacheForOptions,
   exportCompilerReuseArtifact,
-  type CompilerReuseArtifact,
   type CompilerReuseCache,
 } from "./shared/compile.js";
 import {
@@ -35,6 +34,7 @@ import { detectSrcRootForPath } from "./shared/source-root.js";
 import type {
   CompileOptions,
   CompileResult,
+  CreateSdkOptions,
   DefaultAdapterOptions,
   ServeWebAppOptions,
   ServeWebAppResult,
@@ -50,12 +50,8 @@ export {
 const DEFAULT_ENTRY = "index.voyd";
 const DEFAULT_VIRTUAL_ROOT = ".voyd";
 
-export type CreateSdkOptions = {
-  compilerArtifact?: CompilerReuseArtifact;
-};
-
 export const createSdk = (options: CreateSdkOptions = {}): VoydSdk => {
-  const compilerCache = createCompilerReuseCache(options.compilerArtifact);
+  const compilerCache = createCompilerReuseCacheForOptions(options);
   return {
     compile: (options) => compileSdk(options, compilerCache),
     run: runWithHandlers,
@@ -530,9 +526,12 @@ const finalizeCompile = ({
   }
 
   const module = binaryen.readBinary(result.wasm);
-  const wasmText = options.emitWasmText ? module.emitText() : undefined;
-
-  return wasmText ? { ...result, wasmText } : result;
+  try {
+    const wasmText = module.emitText();
+    return wasmText ? { ...result, wasmText } : result;
+  } finally {
+    module.dispose();
+  }
 };
 
 const createOverlayModuleHost = ({
@@ -573,6 +572,8 @@ const createOverlayModuleHost = ({
 export type {
   CompileOptions,
   CompileResult,
+  CompilerCachePolicy,
+  CreateSdkOptions,
   DefaultAdapterOptions,
   EffectsInfo,
   EffectContinuation,

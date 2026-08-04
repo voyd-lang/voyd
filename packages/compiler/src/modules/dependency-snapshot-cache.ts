@@ -13,7 +13,14 @@ import {
   createTypeArena,
   type TypeArenaSnapshot,
 } from "../semantics/typing/type-arena.js";
-import { incrementCompilerPerfCounter } from "../perf.js";
+import {
+  completeCompilerPerfSession,
+  incrementCompilerPerfCounter,
+  markCompilerPerfPhaseDuration,
+  recordCompilerPerfMemory,
+  startCompilerPerfPhase,
+  startCompilerPerfSession,
+} from "../perf.js";
 import { cloneSemanticsMapForTypingState } from "./semantic-snapshot.js";
 import type {
   ModuleDependency,
@@ -81,6 +88,7 @@ type SerializedBorrowingResult = {
 
 type CompilerDependencySnapshotEntry = {
   key: string;
+  borrowArtifactKey: string;
   moduleFingerprints: ReadonlyMap<string, string>;
   moduleIds: readonly string[];
   arena: TypeArenaSnapshot;
@@ -111,8 +119,74 @@ export const createCompilerDependencySnapshotCache = (
 });
 
 export const exportCompilerDependencyBorrowArtifact = (
-  cache: CompilerDependencySnapshotCache,
-): CompilerDependencyBorrowArtifact | undefined => cache.borrowArtifact;
+  cache: CompilerDependencySnapshotCache | undefined,
+): CompilerDependencyBorrowArtifact | undefined => {
+  if (!cache?.dependency) {
+    return cache?.borrowArtifact;
+  }
+  if (cache.borrowArtifact) {
+    return cache.borrowArtifact;
+  }
+
+  const session = startCompilerPerfSession({
+    entryPath: "<compiler-artifact>",
+  });
+  try {
+    const artifact = materializeDependencyBorrowArtifact(cache.dependency);
+    cache.borrowArtifact = artifact;
+    completeCompilerPerfSession({
+      session,
+      success: true,
+      diagnostics: 0,
+    });
+    return artifact;
+  } catch (error) {
+    completeCompilerPerfSession({
+      session,
+      success: false,
+      diagnostics: 0,
+    });
+    throw error;
+  }
+};
+
+const materializeDependencyBorrowArtifact = (
+  dependency: CompilerDependencySnapshotEntry,
+): CompilerDependencyBorrowArtifact => {
+  const startedAt = startCompilerPerfPhase();
+  recordCompilerPerfMemory("artifact.before");
+  const modules = dependency.moduleIds.flatMap((moduleId) => {
+    const borrowing = dependency.semantics.get(moduleId)?.borrowing;
+    const fingerprint = dependency.moduleFingerprints.get(moduleId);
+    return borrowing && fingerprint
+      ? [
+          {
+            moduleId,
+            fingerprint,
+            borrowing: serializeBorrowingResult(borrowing),
+          },
+        ]
+      : [];
+  });
+  const artifact = {
+    schema: COMPILER_BORROW_CACHE_SCHEMA,
+    version: COMPILER_BORROW_CACHE_VERSION,
+    key: dependency.borrowArtifactKey,
+    payloadHash: persistedBorrowQueryInput(JSON.stringify(modules)),
+    modules,
+  } satisfies CompilerDependencyBorrowArtifact;
+  incrementCompilerPerfCounter("compiler.dependency_borrow_cache.materialize");
+  incrementCompilerPerfCounter(
+    "compiler.dependency_borrow_cache.module.count",
+    modules.length,
+  );
+  markCompilerPerfPhaseDuration(
+    "materializeDependencyBorrowArtifact",
+    startedAt,
+  );
+  recordCompilerPerfMemory("artifact.after");
+  return artifact;
+};
 
 export const prepareDependencySnapshotReuse = ({
   cache,
@@ -225,45 +299,18 @@ export const commitDependencySnapshot = ({
     return;
   }
 
-  const arena = createTypeArena(dependencySnapshot.arena);
-  const effectInterner = createEffectInterner(
-    dependencySnapshot.effectInterner,
-  );
-  const semantics = cloneSemanticsMapForTypingState({
-    semantics: dependencySnapshot.semantics,
-    arena,
-    effectInterner,
-  });
-
   prepared.cache.dependency = {
     key: prepared.key,
+    borrowArtifactKey: prepared.borrowArtifactKey ?? prepared.key,
     moduleFingerprints: prepared.moduleFingerprints,
     moduleIds: dependencySnapshot.moduleIds,
     arena: dependencySnapshot.arena,
     effectInterner: dependencySnapshot.effectInterner,
-    semantics,
+    semantics: dependencySnapshot.semantics,
   };
-  const modules = dependencySnapshot.moduleIds.flatMap((moduleId) => {
-    const borrowing = dependencySnapshot.semantics.get(moduleId)?.borrowing;
-    const fingerprint = prepared.moduleFingerprints?.get(moduleId);
-    return borrowing && fingerprint
-      ? [
-          {
-            moduleId,
-            fingerprint,
-            borrowing: serializeBorrowingResult(borrowing),
-          },
-        ]
-      : [];
-  });
-  prepared.cache.borrowArtifact = {
-    schema: COMPILER_BORROW_CACHE_SCHEMA,
-    version: COMPILER_BORROW_CACHE_VERSION,
-    key: prepared.borrowArtifactKey ?? prepared.key,
-    payloadHash: persistedBorrowQueryInput(JSON.stringify(modules)),
-    modules,
-  };
+  prepared.cache.borrowArtifact = undefined;
   incrementCompilerPerfCounter("compiler.dependency_snapshot.write");
+  recordCompilerPerfMemory("dependency_snapshot.commit");
 };
 
 const reusableBorrowingFromArtifact = ({

@@ -23,9 +23,11 @@ export type CompilerPerfSession = {
 const COMPILER_PERF_ENV = "VOYD_COMPILER_PERF";
 
 const readPerfEnv = (): string | undefined => {
-  const processValue = (globalThis as {
-    process?: { env?: Record<string, string | undefined> };
-  }).process;
+  const processValue = (
+    globalThis as {
+      process?: { env?: Record<string, string | undefined> };
+    }
+  ).process;
   return processValue?.env?.[COMPILER_PERF_ENV];
 };
 
@@ -40,8 +42,7 @@ const counters = new Map<string, number>();
 const phaseDurationsMs = new Map<string, number>();
 const activeSessions = new Set<CompilerPerfSession>();
 
-const roundMs = (value: number): number =>
-  Math.round(value * 1000) / 1000;
+const roundMs = (value: number): number => Math.round(value * 1000) / 1000;
 
 const toSortedRecord = (
   entries: ReadonlyMap<string, number>,
@@ -62,6 +63,51 @@ export const incrementCompilerPerfCounter = (
     return;
   }
   counters.set(name, (counters.get(name) ?? 0) + amount);
+};
+
+/** Record a low-overhead process memory checkpoint in the active perf summary. */
+export const recordCompilerPerfMemory = (name: string): void => {
+  if (!PERF_ENABLED) {
+    return;
+  }
+
+  const processValue = (
+    globalThis as {
+      process?: {
+        memoryUsage?: () => {
+          rss: number;
+          heapTotal: number;
+          heapUsed: number;
+          external: number;
+          arrayBuffers?: number;
+        };
+      };
+    }
+  ).process;
+  const memory = processValue?.memoryUsage?.();
+  if (!memory) {
+    return;
+  }
+
+  incrementCompilerPerfCounter(`compiler.memory.${name}.rss_bytes`, memory.rss);
+  incrementCompilerPerfCounter(
+    `compiler.memory.${name}.heap_total_bytes`,
+    memory.heapTotal,
+  );
+  incrementCompilerPerfCounter(
+    `compiler.memory.${name}.heap_used_bytes`,
+    memory.heapUsed,
+  );
+  incrementCompilerPerfCounter(
+    `compiler.memory.${name}.external_bytes`,
+    memory.external,
+  );
+  if (typeof memory.arrayBuffers === "number") {
+    incrementCompilerPerfCounter(
+      `compiler.memory.${name}.array_buffers_bytes`,
+      memory.arrayBuffers,
+    );
+  }
 };
 
 export const startCompilerPerfPhase = (): number =>

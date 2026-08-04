@@ -119,6 +119,7 @@ export const compileParsedModule = async (
     });
     const allDiagnostics = [...diagnostics, ...result.diagnostics];
     if (hasErrorDiagnostics(allDiagnostics)) {
+      result.module.dispose();
       return {
         success: false,
         diagnostics: allDiagnostics,
