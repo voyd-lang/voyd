@@ -188,6 +188,7 @@ export const compileWithLoader = async ({
       previousSemantics: dependencySnapshotReuse.previousSemantics,
       typingState: dependencySnapshotReuse.typingState,
       reusableBorrowing: dependencySnapshotReuse.reusableBorrowing,
+      retainBorrowingIncrementalData: Boolean(cache),
     });
     perf.mark("analyzeModules", analyzeStartedAt);
     const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];

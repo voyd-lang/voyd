@@ -4442,7 +4442,7 @@ export type CallableBorrowContractComputation = {
       output: CallableBorrowContract;
     }
   >;
-  demand: BorrowSummaryDemandTelemetry & {
+  demand?: BorrowSummaryDemandTelemetry & {
     demandedSymbols: ReadonlySet<SymbolId>;
   };
 };
@@ -4462,6 +4462,8 @@ export const computeCallableBorrowContracts = ({
   initialContracts,
   flowSymbols,
   dirtySymbols,
+  collectQueries = true,
+  collectDemandTelemetry = true,
 }: {
   hir: HirGraph;
   typing: TypingResult;
@@ -4483,6 +4485,8 @@ export const computeCallableBorrowContracts = ({
   flowSymbols: ReadonlySet<SymbolId>;
   /** Newly promoted symbols; their flow-sensitive callers are recomputed. */
   dirtySymbols?: ReadonlySet<SymbolId>;
+  collectQueries?: boolean;
+  collectDemandTelemetry?: boolean;
 }): CallableBorrowContractComputation => {
   const withDynamicDispatch = (
     symbol: SymbolId,
@@ -4844,76 +4848,84 @@ export const computeCallableBorrowContracts = ({
   return {
     contracts: result,
     lambdaContracts: resolvedLambdaContracts,
-    queries: new Map(
-      Array.from(
-        new Map<SymbolId, CallableBorrowContract>([
-          ...result,
-          ...lambdas.flatMap((lambda) => {
-            const contract = resolvedLambdaContracts.get(lambda.id);
-            return contract
-              ? [[(-1 - lambda.id) as SymbolId, contract] as const]
-              : [];
-          }),
-        ]),
-        ([symbol, output]) => {
-          const callableFacts =
-            facts.get(symbol) ??
-            Array.from(effectiveLambdaFacts.values()).find(
-              (candidate) => candidate.symbol === symbol,
-            );
-          const queryDependencies = new Map(
-            (callableFacts?.dependencies ?? []).map((dependency) => [
-              `${dependency.moduleId}:${dependency.symbol}`,
-              dependency,
+    queries: collectQueries
+      ? new Map(
+          Array.from(
+            new Map<SymbolId, CallableBorrowContract>([
+              ...result,
+              ...lambdas.flatMap((lambda) => {
+                const contract = resolvedLambdaContracts.get(lambda.id);
+                return contract
+                  ? [[(-1 - lambda.id) as SymbolId, contract] as const]
+                  : [];
+              }),
             ]),
-          );
-          (localSummaryDependencies.get(symbol) ?? []).forEach((dependency) => {
-            const target = { moduleId, symbol: dependency };
-            queryDependencies.set(`${moduleId}:${dependency}`, target);
-          });
-          return [
-            symbol,
-            {
-              input: callableFacts?.stableInput ?? `${moduleId}:${symbol}`,
-              dependencies: Array.from(queryDependencies.values()),
-              dependencyOutputs: Array.from(
-                queryDependencies,
-                ([key, target]) =>
-                  [
-                    key,
-                    target.moduleId === moduleId
-                      ? (contracts.get(target.symbol) ?? null)
-                      : (dependencies
-                          .get(target.moduleId)
-                          ?.callables.get(target.symbol)?.contract ??
-                        dependencies
-                          .get(target.moduleId)
-                          ?.traitMethodContracts.get(target.symbol) ??
-                        null),
-                  ] as const,
-              ),
-              output,
+            ([symbol, output]) => {
+              const callableFacts =
+                facts.get(symbol) ??
+                Array.from(effectiveLambdaFacts.values()).find(
+                  (candidate) => candidate.symbol === symbol,
+                );
+              const queryDependencies = new Map(
+                (callableFacts?.dependencies ?? []).map((dependency) => [
+                  `${dependency.moduleId}:${dependency.symbol}`,
+                  dependency,
+                ]),
+              );
+              (localSummaryDependencies.get(symbol) ?? []).forEach(
+                (dependency) => {
+                  const target = { moduleId, symbol: dependency };
+                  queryDependencies.set(`${moduleId}:${dependency}`, target);
+                },
+              );
+              return [
+                symbol,
+                {
+                  input: callableFacts?.stableInput ?? `${moduleId}:${symbol}`,
+                  dependencies: Array.from(queryDependencies.values()),
+                  dependencyOutputs: Array.from(
+                    queryDependencies,
+                    ([key, target]) =>
+                      [
+                        key,
+                        target.moduleId === moduleId
+                          ? (contracts.get(target.symbol) ?? null)
+                          : (dependencies
+                              .get(target.moduleId)
+                              ?.callables.get(target.symbol)?.contract ??
+                            dependencies
+                              .get(target.moduleId)
+                              ?.traitMethodContracts.get(target.symbol) ??
+                            null),
+                      ] as const,
+                  ),
+                  output,
+                },
+              ] as const;
             },
-          ] as const;
-        },
-      ),
-    ),
-    demand: {
-      totalCallables: functions.length + lambdas.length,
-      demandedCallables: detailedCallables,
-      skippedTrivialCallables:
-        functions.length + lambdas.length - detailedCallables,
-      worklistEdges: selection.worklistEdges,
-      worklistIterations: selection.worklistIterations,
-      evaluations: evaluationCount,
-      reusedCallables: summarySymbols.size - dirtySummarySymbols.size,
-      demandedSymbols: new Set([
-        ...selection.demanded,
-        ...demandedLambdas.map(
-          (lambda) => effectiveLambdaFacts.get(lambda.id)!.symbol,
-        ),
-      ]),
-    },
+          ),
+        )
+      : new Map(),
+    ...(collectDemandTelemetry
+      ? {
+          demand: {
+            totalCallables: functions.length + lambdas.length,
+            demandedCallables: detailedCallables,
+            skippedTrivialCallables:
+              functions.length + lambdas.length - detailedCallables,
+            worklistEdges: selection.worklistEdges,
+            worklistIterations: selection.worklistIterations,
+            evaluations: evaluationCount,
+            reusedCallables: summarySymbols.size - dirtySummarySymbols.size,
+            demandedSymbols: new Set([
+              ...selection.demanded,
+              ...demandedLambdas.map(
+                (lambda) => effectiveLambdaFacts.get(lambda.id)!.symbol,
+              ),
+            ]),
+          },
+        }
+      : {}),
   };
 };
 

@@ -232,6 +232,7 @@ export const inferBorrowingContracts = ({
   fullInitialContracts,
   resultProvenance,
   previousQueries,
+  retainIncrementalData = true,
 }: {
   hir: HirGraph;
   typing: TypingResult;
@@ -252,6 +253,7 @@ export const inferBorrowingContracts = ({
   fullInitialContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   resultProvenance: ReadonlyMap<SymbolId, CallableResultProvenance>;
   previousQueries?: BorrowingResult["queries"];
+  retainIncrementalData?: boolean;
 }): BorrowingContractInferenceResult => {
   let routing = inferTransientBorrowingRouting({
     indexes,
@@ -314,6 +316,7 @@ export const inferBorrowingContracts = ({
       },
       functionCache: functionFactCache,
       lambdaCache: lambdaFactCache,
+      collectStableInput: retainIncrementalData,
     });
     functionFacts = lazyFacts.functions;
     lambdaFacts = lazyFacts.lambdas;
@@ -356,6 +359,8 @@ export const inferBorrowingContracts = ({
       lambdaFacts,
       initialContracts: flowInitialContracts,
       flowSymbols,
+      collectQueries: retainIncrementalData,
+      collectDemandTelemetry: retainIncrementalData,
       dirtySymbols:
         routingPass === 1 && previousQueries
           ? dirtyFromPrevious
@@ -516,7 +521,10 @@ const dirtySymbolsFromQueries = ({
           return !callableBorrowContractsEqual(previousOutput, currentOutput);
         },
       );
-      return !previous ||
+      if (!previous) {
+        return [symbol];
+      }
+      return !callableFacts.stableInput ||
         !borrowQueryInputsEqual(previous.input, callableFacts.stableInput) ||
         changedDependency
         ? [symbol]

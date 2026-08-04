@@ -13,6 +13,8 @@ import type {
   TypeId,
 } from "../ids.js";
 import type { TypingResult } from "../typing/index.js";
+import type { FunctionSignature } from "../typing/types.js";
+import type { FunctionType } from "../typing/type-arena.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import {
   callHasIntrinsicBorrowBoundary,
@@ -178,7 +180,7 @@ export type CallableBorrowFactBlock = {
  * loan checking share this extraction; neither pass needs another discovery
  * walk merely to decide which bodies, calls, or places are relevant.
  *
- * `stableInput` and `dependencies` form a complete process-local query
+ * When requested, `stableInput` and `dependencies` form a complete process-local query
  * boundary. V-465 can add invalidation around it without reaching into either
  * solver's private state; durable names and persisted keys intentionally live
  * outside V-472.
@@ -269,7 +271,7 @@ export type CallableBorrowFacts = {
   hasUnknownExpressionType: boolean;
   hasModuleStorageAccess: boolean;
   hasUnresolvedCall: boolean;
-  stableInput: string;
+  stableInput?: string;
 };
 
 /**
@@ -460,6 +462,7 @@ export const createLazyCallableBorrowFacts = ({
   resolveContext,
   functionCache = new Map(),
   lambdaCache = new Map(),
+  collectStableInput = true,
 }: {
   functions: readonly HirFunction[];
   lambdas: readonly HirLambdaExpr[];
@@ -468,6 +471,8 @@ export const createLazyCallableBorrowFacts = ({
   resolveContext: ResolveContext;
   functionCache?: Map<SymbolId, CallableBorrowFacts>;
   lambdaCache?: Map<HirExprId, CallableBorrowFacts>;
+  /** Build the expensive incremental-query input only for reusable analysis. */
+  collectStableInput?: boolean;
 }): LazyCallableBorrowFacts => {
   const functionMap = new Map(
     functions.map(
@@ -483,7 +488,13 @@ export const createLazyCallableBorrowFacts = ({
       const functionItem = functionMap.get(symbol);
       if (!functionItem) return undefined;
       const startedAt = startCompilerPerfPhase();
-      const facts = extractFacts({ functionItem, hir, typing, resolveContext });
+      const facts = extractFacts({
+        functionItem,
+        hir,
+        typing,
+        resolveContext,
+        collectStableInput,
+      });
       markCompilerPerfPhaseDuration(
         "analyzeBorrowing.materializeFullFacts",
         startedAt,
@@ -509,6 +520,7 @@ export const createLazyCallableBorrowFacts = ({
         hir,
         typing,
         resolveContext,
+        collectStableInput,
       });
       markCompilerPerfPhaseDuration(
         "analyzeBorrowing.materializeFullFacts",
@@ -543,11 +555,13 @@ const extractFacts = ({
   hir,
   typing,
   resolveContext,
+  collectStableInput,
 }: {
   functionItem: FactCallable;
   hir: HirGraph;
   typing: TypingResult;
   resolveContext: ResolveContext;
+  collectStableInput: boolean;
 }): CallableBorrowFacts => {
   const expressionIds: HirExprId[] = [];
   const expressionTypes = new Map<HirExprId, number | undefined>();
@@ -994,69 +1008,22 @@ const extractFacts = ({
     "borrowing.facts.expressionValueLiveness",
     valueLivenessStartedAt,
   );
-  const stableInputStartedAt = startCompilerPerfPhase();
-  const typeState = borrowingTypeFingerprint({
-    roots: [
-      ...Array.from(expressionTypes.values()),
-      ...Array.from(concreteExpressionTypes.values()),
-      ...(signature?.parameters.map((parameter) => parameter.type) ?? []),
-      signature?.returnType,
-      ...(functionItem.captures?.map((capture) =>
-        typing.valueTypes.get(capture.symbol),
-      ) ?? []),
-      ...calls.flatMap((call) => [
-        ...(call.signature?.parameters.map((parameter) => parameter.type) ??
-          []),
-        call.signature?.returnType,
-      ]),
-    ].filter((type): type is TypeId => typeof type === "number"),
-    effectRows: [
-      signature?.effectRow,
-      ...calls.map((call) => call.signature?.effectRow),
-    ].filter((row): row is EffectRowId => typeof row === "number"),
-    typing,
-  });
-  const stableInput = hashBorrowFactInput({
-    symbol: functionItem.symbol,
-    signature: signature
-      ? {
-          parameters: signature.parameters.map(
-            (parameter) => parameter.bindingKind,
-          ),
-        }
-      : undefined,
-    borrowContract: functionItem.borrowContract,
-    parameters: functionItem.parameters.map((parameter) => ({
-      symbol: parameter.symbol,
-      mutable: parameter.mutable,
-      label: parameter.label,
-      optional: parameter.optional,
-      hasDefault: parameter.defaultValue !== undefined,
-      bindingKind: parameter.pattern.bindingKind,
-    })),
-    captures: Array.from(captures.values()),
-    blocks: factBlocks,
-    places,
-    valueNodes: Array.from(valueNodes),
-    returns,
-    typeFingerprint: {
-      types: typeState.types,
-      effects: typeState.effects,
-    },
-    calls: calls.map((call) => {
-      const {
-        signature: _signature,
-        substitutions: _substitutions,
-        ...stable
-      } = stableBorrowCallInput(call);
-      return stable;
-    }),
-    dependencies: Array.from(dependencies.values()),
-  });
-  markCompilerPerfPhaseDuration(
-    "borrowing.facts.stableInput",
-    stableInputStartedAt,
-  );
+  const stableInput = collectStableInput
+    ? buildStableBorrowFactInput({
+        functionItem,
+        typing,
+        signature,
+        expressionTypes,
+        concreteExpressionTypes,
+        calls,
+        captures,
+        factBlocks,
+        places,
+        valueNodes,
+        returns,
+        dependencies,
+      })
+    : undefined;
   const reachableBlocks = reachableFactBlocks(flow.entryBlock, factBlocks);
   const reachableExpressions = new Set(
     factBlocks.flatMap((block) =>
@@ -1149,6 +1116,99 @@ const extractFacts = ({
     hasUnresolvedCall,
     stableInput,
   };
+};
+
+const buildStableBorrowFactInput = ({
+  functionItem,
+  typing,
+  signature,
+  expressionTypes,
+  concreteExpressionTypes,
+  calls,
+  captures,
+  factBlocks,
+  places,
+  valueNodes,
+  returns,
+  dependencies,
+}: {
+  functionItem: FactCallable;
+  typing: TypingResult;
+  signature: FunctionSignature | Readonly<FunctionType> | undefined;
+  expressionTypes: ReadonlyMap<HirExprId, number | undefined>;
+  concreteExpressionTypes: ReadonlyMap<HirExprId, number | undefined>;
+  calls: readonly CallableBorrowCallFact[];
+  captures: ReadonlyMap<SymbolId, { symbol: SymbolId; mutable: boolean }>;
+  factBlocks: readonly CallableBorrowFactBlock[];
+  places: readonly CallableBorrowPlace[];
+  valueNodes: ReadonlyMap<HirExprId, CallableBorrowValueNode>;
+  returns: readonly { exprId: HirExprId; placeId?: number }[];
+  dependencies: ReadonlyMap<string, SymbolRef>;
+}): string => {
+  const stableInputStartedAt = startCompilerPerfPhase();
+  const typeState = borrowingTypeFingerprint({
+    roots: [
+      ...Array.from(expressionTypes.values()),
+      ...Array.from(concreteExpressionTypes.values()),
+      ...(signature?.parameters.map((parameter) => parameter.type) ?? []),
+      signature?.returnType,
+      ...(functionItem.captures?.map((capture) =>
+        typing.valueTypes.get(capture.symbol),
+      ) ?? []),
+      ...calls.flatMap((call) => [
+        ...(call.signature?.parameters.map((parameter) => parameter.type) ??
+          []),
+        call.signature?.returnType,
+      ]),
+    ].filter((type): type is TypeId => typeof type === "number"),
+    effectRows: [
+      signature?.effectRow,
+      ...calls.map((call) => call.signature?.effectRow),
+    ].filter((row): row is EffectRowId => typeof row === "number"),
+    typing,
+  });
+  const stableInput = hashBorrowFactInput({
+    symbol: functionItem.symbol,
+    signature: signature
+      ? {
+          parameters: signature.parameters.map(
+            (parameter) => parameter.bindingKind,
+          ),
+        }
+      : undefined,
+    borrowContract: functionItem.borrowContract,
+    parameters: functionItem.parameters.map((parameter) => ({
+      symbol: parameter.symbol,
+      mutable: parameter.mutable,
+      label: parameter.label,
+      optional: parameter.optional,
+      hasDefault: parameter.defaultValue !== undefined,
+      bindingKind: parameter.pattern.bindingKind,
+    })),
+    captures: Array.from(captures.values()),
+    blocks: factBlocks,
+    places,
+    valueNodes: Array.from(valueNodes),
+    returns,
+    typeFingerprint: {
+      types: typeState.types,
+      effects: typeState.effects,
+    },
+    calls: calls.map((call) => {
+      const {
+        signature: _signature,
+        substitutions: _substitutions,
+        ...stable
+      } = stableBorrowCallInput(call);
+      return stable;
+    }),
+    dependencies: Array.from(dependencies.values()),
+  });
+  markCompilerPerfPhaseDuration(
+    "borrowing.facts.stableInput",
+    stableInputStartedAt,
+  );
+  return stableInput;
 };
 
 type FlowFragment = { entry: number; exits: readonly number[] };

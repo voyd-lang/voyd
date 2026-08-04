@@ -40,6 +40,7 @@ export type AnalyzeModuleSemanticsOptions = {
   changedModuleIds?: ReadonlySet<string>;
   typingState?: SemanticsTypingState;
   reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
+  retainBorrowingIncrementalData?: boolean;
   isCancelled?: () => boolean;
 };
 
@@ -94,6 +95,7 @@ export const analyzeModuleSemantics = ({
   changedModuleIds,
   typingState,
   reusableBorrowing,
+  retainBorrowingIncrementalData = true,
   isCancelled,
 }: AnalyzeModuleSemanticsOptions): AnalyzeModuleSemanticsResult => {
   if (previousSemantics && !typingState) {
@@ -225,6 +227,7 @@ export const analyzeModuleSemantics = ({
         isCancelled,
         reusableBorrowing,
         previousSemantics,
+        retainBorrowingIncrementalData,
       });
       return;
     }
@@ -242,6 +245,7 @@ export const analyzeModuleSemantics = ({
       diagnostics,
       isCancelled,
       reusableBorrowing,
+      retainBorrowingIncrementalData,
       previousBorrowing: previousSemantics?.get(moduleId)?.borrowing,
     });
     if (!result) {
@@ -410,6 +414,7 @@ const analyzeCyclicScc = ({
   isCancelled,
   reusableBorrowing,
   previousSemantics,
+  retainBorrowingIncrementalData,
 }: {
   moduleIds: readonly string[];
   includeTests: boolean | undefined;
@@ -424,6 +429,7 @@ const analyzeCyclicScc = ({
   isCancelled: (() => boolean) | undefined;
   reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
+  retainBorrowingIncrementalData: boolean;
 }) => {
   const seedErrorByModuleId = new Map<string, string>();
   const cyclicExportSurfaces = collectCyclicModuleExportSurfaces({
@@ -473,6 +479,7 @@ const analyzeCyclicScc = ({
       effectInterner,
       isCancelled,
       reusableBorrowing,
+      retainBorrowingIncrementalData: false,
     });
     if (!result) {
       return;
@@ -546,6 +553,7 @@ const analyzeCyclicScc = ({
       isCancelled,
       reusableBorrowing,
       previousBorrowing: previousSemantics?.get(moduleId)?.borrowing,
+      retainBorrowingIncrementalData,
     });
     if (!result) {
       return;
@@ -598,6 +606,7 @@ const analyzeModule = ({
   isCancelled,
   reusableBorrowing,
   previousBorrowing,
+  retainBorrowingIncrementalData,
 }: {
   moduleId: string;
   includeTests: boolean | undefined;
@@ -614,6 +623,7 @@ const analyzeModule = ({
   isCancelled: (() => boolean) | undefined;
   reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
   previousBorrowing?: BorrowingResult;
+  retainBorrowingIncrementalData?: boolean;
 }): SemanticsPipelineResult | undefined => {
   throwIfCancelled(isCancelled);
 
@@ -638,6 +648,7 @@ const analyzeModule = ({
       checkBorrowBodies,
       borrowingOverride: reusableBorrowing?.get(moduleId),
       previousBorrowing,
+      retainBorrowingIncrementalData,
     });
     diagnostics?.push(
       ...augmentCycleTy0022Diagnostics({

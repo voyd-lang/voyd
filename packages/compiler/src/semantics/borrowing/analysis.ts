@@ -64,6 +64,7 @@ import {
   inferCallableResultProvenance,
   resultCallableFromLambda,
 } from "./callable-result-flow.js";
+import { persistedBorrowQueryInput } from "./query-digest.js";
 
 export const analyzeBorrowing = ({
   hir,
@@ -75,6 +76,7 @@ export const analyzeBorrowing = ({
   decls,
   checkBodies = true,
   previousQueries,
+  retainIncrementalData = true,
 }: {
   hir: HirGraph;
   typing: TypingResult;
@@ -88,6 +90,8 @@ export const analyzeBorrowing = ({
   decls: DeclTable;
   checkBodies?: boolean;
   previousQueries?: BorrowingResult["queries"];
+  /** Keep incremental reuse payloads only when the caller can retain them. */
+  retainIncrementalData?: boolean;
 }): BorrowingResult => {
   const summariesStartedAt = startCompilerPerfPhase();
   const summaryHir = hirWithTraitDefaultFunctions(hir);
@@ -284,6 +288,7 @@ export const analyzeBorrowing = ({
     fullInitialContracts,
     resultProvenance: publishedResults.provenance,
     previousQueries,
+    retainIncrementalData,
   });
   const capabilities = routing.capabilities;
   const compactFallbacks = routing.compactFallbacks;
@@ -555,28 +560,6 @@ export const analyzeBorrowing = ({
       bodiesStartedAt,
     );
   }
-  const queryDependencies = new Map(
-    Array.from(inferred.queries, ([symbol, query]) => [
-      symbol,
-      new Map(
-        query.dependencies.map((dependency) => [
-          `${dependency.moduleId}:${dependency.symbol}`,
-          dependency,
-        ]),
-      ),
-    ]),
-  );
-  namedContracts.contracts.forEach((named, symbol) => {
-    const dependenciesForCallable =
-      queryDependencies.get(symbol) ?? new Map<string, SymbolRef>();
-    const declaration = { moduleId, symbol: named.declaration };
-    dependenciesForCallable.set(
-      `${declaration.moduleId}:${declaration.symbol}`,
-      declaration,
-    );
-    queryDependencies.set(symbol, dependenciesForCallable);
-  });
-  const queries = new Map(inferred.queries);
   const outputCallables = new Map(
     Array.from(
       callables,
@@ -594,15 +577,93 @@ export const analyzeBorrowing = ({
         ] as const,
     ),
   );
+  const reusableData = retainIncrementalData
+    ? buildBorrowingReusableData({
+        inferredQueries: inferred.queries,
+        namedContracts: namedContracts.contracts,
+        outputCallables,
+        dependencies,
+        moduleId,
+      })
+    : undefined;
+  return {
+    callables: outputCallables,
+    capabilities,
+    namedContracts: namedContracts.contracts,
+    runtimeIdentityGuards,
+    mutableStorageSymbols,
+    diagnostics,
+    ...(reusableData
+      ? {
+          analysisMetrics: {
+            fullFactsMaterialized: allCallableFacts.size,
+            fullFactSymbols: Array.from(allCallableFacts.keys()),
+          },
+          summaryDemand: inferred.demand!,
+          queries: reusableData,
+        }
+      : {}),
+  };
+};
+
+const buildBorrowingReusableData = ({
+  inferredQueries,
+  namedContracts,
+  outputCallables,
+  dependencies,
+  moduleId,
+}: {
+  inferredQueries: NonNullable<BorrowingResult["queries"]>;
+  namedContracts: ReadonlyMap<SymbolId, { declaration: SymbolId }>;
+  outputCallables: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  dependencies: ReadonlyMap<string, BorrowingDependency>;
+  moduleId: string;
+}): BorrowingResult["queries"] => {
+  const queryDependencies = new Map(
+    Array.from(inferredQueries, ([symbol, query]) => [
+      symbol,
+      new Map(
+        query.dependencies.map((dependency) => [
+          `${dependency.moduleId}:${dependency.symbol}`,
+          dependency,
+        ]),
+      ),
+    ]),
+  );
+  namedContracts.forEach((named, symbol) => {
+    const dependenciesForCallable =
+      queryDependencies.get(symbol) ?? new Map<string, SymbolRef>();
+    const declaration = { moduleId, symbol: named.declaration };
+    dependenciesForCallable.set(
+      `${declaration.moduleId}:${declaration.symbol}`,
+      declaration,
+    );
+    queryDependencies.set(symbol, dependenciesForCallable);
+  });
+  const queries: Map<
+    SymbolId,
+    NonNullable<BorrowingResult["queries"]> extends ReadonlyMap<
+      SymbolId,
+      infer Query
+    >
+      ? Query
+      : never
+  > = new Map(
+    Array.from(inferredQueries, ([symbol, query]) => [
+      symbol,
+      { ...query, input: persistedBorrowQueryInput(query.input) },
+    ]),
+  );
   outputCallables.forEach((output, symbol) => {
-    const prior = inferred.queries.get(symbol);
+    const prior = inferredQueries.get(symbol);
     const callableDependencies = Array.from(
       queryDependencies.get(symbol)?.values() ?? [],
     );
     queries.set(symbol, {
-      input:
+      input: persistedBorrowQueryInput(
         prior?.input ??
-        `${moduleId}:${symbol}:declared:${JSON.stringify(output)}`,
+          `${moduleId}:${symbol}:declared:${JSON.stringify(output)}`,
+      ),
       dependencies: callableDependencies,
       dependencyOutputs: callableDependencies.map(
         (dependency) =>
@@ -622,20 +683,7 @@ export const analyzeBorrowing = ({
       output,
     });
   });
-  return {
-    callables: outputCallables,
-    capabilities,
-    namedContracts: namedContracts.contracts,
-    runtimeIdentityGuards,
-    mutableStorageSymbols,
-    diagnostics,
-    analysisMetrics: {
-      fullFactsMaterialized: allCallableFacts.size,
-      fullFactSymbols: Array.from(allCallableFacts.keys()),
-    },
-    summaryDemand: inferred.demand,
-    queries,
-  };
+  return queries;
 };
 
 const effectOperationCallableContracts = ({

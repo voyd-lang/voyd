@@ -69,6 +69,8 @@ export type AnalyzeModulesOptions = {
   changedModuleIds?: ReadonlySet<string>;
   typingState?: SemanticsTypingState;
   reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
+  /** Retain borrowing incremental data for a caller-owned reuse cache. */
+  retainBorrowingIncrementalData?: boolean;
   isCancelled?: () => boolean;
 };
 
@@ -147,6 +149,7 @@ export const analyzeModules = ({
   changedModuleIds,
   typingState,
   reusableBorrowing,
+  retainBorrowingIncrementalData,
   isCancelled,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
   const {
@@ -164,6 +167,7 @@ export const analyzeModules = ({
     changedModuleIds,
     typingState,
     reusableBorrowing,
+    retainBorrowingIncrementalData,
     isCancelled,
   });
 
@@ -761,6 +765,7 @@ export const compileProgramWithLoader = async (
     previousSemantics: dependencySnapshotReuse.previousSemantics,
     typingState: dependencySnapshotReuse.typingState,
     reusableBorrowing: dependencySnapshotReuse.reusableBorrowing,
+    retainBorrowingIncrementalData: Boolean(options.dependencySnapshotCache),
   });
   markCompilerPerfPhaseDuration("analyzeModules", analyzeStartedAt);
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];

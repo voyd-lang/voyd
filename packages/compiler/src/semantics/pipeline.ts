@@ -106,6 +106,8 @@ export interface SemanticsPipelineOptions {
   /** Compiler-versioned private cache; fingerprint validation happens upstream. */
   borrowingOverride?: BorrowingResult;
   previousBorrowing?: BorrowingResult;
+  /** Keep borrowing reuse data only when an in-process cache can consume it. */
+  retainBorrowingIncrementalData?: boolean;
 }
 
 type SemanticsPipelineInput = SemanticsPipelineOptions | Form;
@@ -124,6 +126,7 @@ export const semanticsPipeline = (
     checkBorrowBodies,
     borrowingOverride,
     previousBorrowing,
+    retainBorrowingIncrementalData,
   } = normalizeSemanticsInput(input);
   const form = module.ast;
   if (!form.callsInternal("ast")) {
@@ -247,6 +250,7 @@ export const semanticsPipeline = (
         decls: binding.decls,
         checkBodies: checkBorrowBodies,
         previousQueries: previousBorrowing?.queries,
+        retainIncrementalData: retainBorrowingIncrementalData,
       }));
   markCompilerPerfPhaseDuration("analyzeBorrowing", borrowingStartedAt);
   const exportsTable = buildPackageSemanticInterface({

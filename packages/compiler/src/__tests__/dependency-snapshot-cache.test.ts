@@ -42,6 +42,7 @@ const loadAndAnalyze = async ({
     previousSemantics: prepared.previousSemantics,
     typingState: prepared.typingState,
     reusableBorrowing: prepared.reusableBorrowing,
+    retainBorrowingIncrementalData: true,
   });
   const diagnostics = [...graph.diagnostics, ...analyzed.diagnostics];
   expect(diagnostics).toHaveLength(0);
@@ -108,6 +109,27 @@ describe("compiler dependency snapshots", () => {
     expect(analyzed.dependencySnapshot).toBeUndefined();
   });
 
+  it("omits borrowing reuse payloads when the caller cannot cache them", async () => {
+    const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
+    const graph = await loadModuleGraph({
+      entryPath: `${initial.roots.src}${sep}main.voyd`,
+      roots: initial.roots,
+      host: createMemoryHost(initial.files),
+    });
+
+    const analyzed = analyzeModules({
+      graph,
+      retainBorrowingIncrementalData: false,
+    });
+
+    expect(analyzed.diagnostics).toHaveLength(0);
+    analyzed.semantics.forEach(({ borrowing }) => {
+      expect(borrowing.queries).toBeUndefined();
+      expect(borrowing.analysisMetrics).toBeUndefined();
+      expect(borrowing.summaryDemand).toBeUndefined();
+    });
+  });
+
   it("reuses std and installed package semantics after a source edit", async () => {
     const cache = createCompilerDependencySnapshotCache();
     const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
@@ -127,6 +149,24 @@ describe("compiler dependency snapshots", () => {
 
     expect(second.prepared.hit).toBe(true);
     expect(second.analyzed.recomputedModuleIds).toEqual(["src::main"]);
+  });
+
+  it("keeps only SHA-256 borrowing query inputs for in-memory reuse", async () => {
+    const cache = createCompilerDependencySnapshotCache();
+    const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
+    const { analyzed } = await loadAndAnalyze({
+      files: initial.files,
+      roots: initial.roots,
+      cache,
+    });
+
+    const inputs = Array.from(analyzed.semantics.values()).flatMap((entry) =>
+      Array.from(entry.borrowing.queries?.values() ?? [], ({ input }) => input),
+    );
+    expect(inputs.length).toBeGreaterThan(0);
+    expect(inputs.every((input) => /^sha256:[a-f0-9]{64}$/.test(input))).toBe(
+      true,
+    );
   });
 
   it("reuses versioned borrowing results in a fresh compiler cache", async () => {
