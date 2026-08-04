@@ -96,6 +96,8 @@ export type CallableBorrowIndexFlags = {
   hasNonFreshMutableReferenceRebinding: boolean;
   hasCapture: boolean;
   hasRetention: boolean;
+  /** Returned reference shape whose provenance is owned by the upstream publisher. */
+  hasResultProvenanceTrigger: boolean;
   hasSuspension: boolean;
   hasModuleStorageAccess: boolean;
   hasModuleStorageWrite: boolean;
@@ -107,7 +109,6 @@ export type CallableBorrowIndexFlags = {
   hasDefaultBorrowFlow: boolean;
   hasRuntimeCheckedReceiverWrites: boolean;
   hasAllocationResult: boolean;
-  hasSyntacticFreshResult: boolean;
   hasTraitResult: boolean;
   hasCallableResult: boolean;
   hasReturnedParameterValue: boolean;
@@ -173,6 +174,7 @@ const emptyFlags = (): MutableFlags => ({
   hasNonFreshMutableReferenceRebinding: false,
   hasCapture: false,
   hasRetention: false,
+  hasResultProvenanceTrigger: false,
   hasSuspension: false,
   hasModuleStorageAccess: false,
   hasModuleStorageWrite: false,
@@ -184,7 +186,6 @@ const emptyFlags = (): MutableFlags => ({
   hasDefaultBorrowFlow: false,
   hasRuntimeCheckedReceiverWrites: false,
   hasAllocationResult: false,
-  hasSyntacticFreshResult: false,
   hasTraitResult: false,
   hasCallableResult: false,
   hasReturnedParameterValue: false,
@@ -677,8 +678,7 @@ export const extractSingleCallableBorrowIndex = ({
     if (expression?.exprKind !== "call") return false;
     const intrinsicName = callIntrinsicName(expression, context);
     return (
-      intrinsicName === "__array_new" ||
-      intrinsicName === "__array_new_fixed"
+      intrinsicName === "__array_new" || intrinsicName === "__array_new_fixed"
     );
   };
   const expressionIsProvenanceFreeFresh = (
@@ -730,7 +730,7 @@ export const extractSingleCallableBorrowIndex = ({
         // A reference-capable leaf whose origin is not syntactically fresh
         // needs full returned-provenance analysis. The index records only
         // the bounded trigger.
-        flags.hasRetention = true;
+        flags.hasResultProvenanceTrigger = true;
       }
     }
     const expression = hir.expressions.get(expressionId);
@@ -761,8 +761,6 @@ export const extractSingleCallableBorrowIndex = ({
       typing.arena.get(type).kind !== "function"
     ) {
       flags.hasAllocationResult = true;
-      flags.hasSyntacticFreshResult ||=
-        expressionIsSyntacticFreshAllocation(expressionId);
     }
     const place = placeOfExpression(expressionId, hir, context);
     const source = place ? parameterPlaces.get(place.root) : undefined;
@@ -772,18 +770,14 @@ export const extractSingleCallableBorrowIndex = ({
     }
     const returnsProvenanceFreeFreshRoot =
       place !== undefined &&
-      place.projections.every(
-        (projection) => projection.kind === "identity",
-      ) &&
+      place.projections.every((projection) => projection.kind === "identity") &&
       provenanceFreeFreshBindingRoots.has(place.root);
-    if (returnsProvenanceFreeFreshRoot) {
-      flags.hasSyntacticFreshResult = true;
-    } else if (place && !isStoragePlace(place)) {
+    if (!returnsProvenanceFreeFreshRoot && place && !isStoragePlace(place)) {
       // Returning a reference-capable local requires full provenance even
       // when its generic signature does not reveal the concrete reference
       // shape. Direct calls and aggregate literals are classified below from
       // their bounded syntax instead.
-      flags.hasRetention = true;
+      flags.hasResultProvenanceTrigger = true;
     }
     directAggregateValues(expression).forEach(recordReturnedAggregateValue);
     if (
@@ -925,8 +919,7 @@ export const extractSingleCallableBorrowIndex = ({
           !expressionIsDirectFresh(statement.initializer);
         if (
           bindingSymbols(statement.pattern).length > 0 &&
-          (nonFreshMutableReferenceBinding ||
-            nonFreshReferenceCapableVariable)
+          (nonFreshMutableReferenceBinding || nonFreshReferenceCapableVariable)
         ) {
           // This is a bounded escape trigger, not liveness inference: a
           // mutable reference sourced from a non-fresh value may remain
@@ -1056,6 +1049,20 @@ export const extractSingleCallableBorrowIndex = ({
               // trigger; provenance is still computed by full facts.
               flags.hasRetainedReferenceStore = true;
             }
+          }
+          if (
+            referenceValue &&
+            !freshRebinding &&
+            targetPlace !== undefined &&
+            targetPlace.projections.length > 0 &&
+            targetParameter === undefined &&
+            !isStoragePlace(targetPlace) &&
+            mutableBindingRoots.has(targetPlace.root)
+          ) {
+            // A non-fresh value written into a projected local can escape when
+            // that local is returned. Result publication decides whether it
+            // actually does; the index records only the bounded shape trigger.
+            flags.hasResultProvenanceTrigger = true;
           }
           if (targetPlace && isStoragePlace(targetPlace)) {
             flags.hasModuleStorageAccess = true;
@@ -1323,7 +1330,7 @@ export const extractSingleCallableBorrowIndex = ({
       ) {
         // The fresh array owns its storage, but reference-capable elements
         // preserve their input provenance when the aggregate escapes.
-        flags.hasRetention = true;
+        flags.hasResultProvenanceTrigger = true;
       }
       if (
         intrinsicBoundary &&
@@ -1345,10 +1352,7 @@ export const extractSingleCallableBorrowIndex = ({
         const sourceIsMutableBinding =
           sourcePlace !== undefined &&
           mutableBindingRoots.has(sourcePlace.root);
-        if (
-          !sourceIsFresh &&
-          !sourceIsMutableBinding
-        ) {
+        if (!sourceIsFresh && !sourceIsMutableBinding) {
           flags.hasUnsafeBorrowFormation = true;
         }
       }

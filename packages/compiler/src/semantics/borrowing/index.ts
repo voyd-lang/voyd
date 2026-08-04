@@ -3,6 +3,7 @@ export * from "./capability.js";
 export * from "./capability-classifier.js";
 export * from "./callable-borrow-index.js";
 export * from "./transient-contract.js";
+export * from "./result-provenance.js";
 export * from "./contract-routing.js";
 export * from "./dependency.js";
 export * from "./analysis.js";

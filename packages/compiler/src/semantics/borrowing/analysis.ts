@@ -59,6 +59,11 @@ import {
 } from "./transient-contract.js";
 import { inferBorrowingContracts } from "./contract-routing.js";
 import { planRuntimeBorrowing } from "./transient-guards.js";
+import {
+  contractWithResultProvenance,
+  inferCallableResultProvenance,
+  resultCallableFromLambda,
+} from "./result-provenance.js";
 
 export const analyzeBorrowing = ({
   hir,
@@ -153,6 +158,11 @@ export const analyzeBorrowing = ({
     borrowIndexMode: "symbolic",
     decls,
   };
+  const moduleStorageSymbols = new Set(
+    Array.from(summaryHir.items.values())
+      .filter((item) => item.kind === "module-let")
+      .map((item) => item.symbol),
+  );
   const resolvedCallTargets = new Map(
     Array.from(summaryHir.expressions).flatMap(([exprId, expression]) =>
       expression.exprKind === "call" || expression.exprKind === "method-call"
@@ -165,13 +175,41 @@ export const analyzeBorrowing = ({
         : [],
     ),
   );
+  const resultProvenanceStartedAt = startCompilerPerfPhase();
+  const publishedResults = inferCallableResultProvenance({
+    callables: [
+      ...functions,
+      ...lambdas.map((lambda) => resultCallableFromLambda(lambda, typing)),
+    ],
+    hir: summaryHir,
+    typing,
+    resolveContext: indexResolveContext,
+    baseContracts: declaredContracts,
+    moduleStorage: moduleStorageSymbols,
+    imports: new Set(imports.map((entry) => entry.local)),
+    resolvedCallTargets,
+  });
+  publishedResults.provenance.forEach((provenance) =>
+    incrementCompilerPerfCounter(
+      `borrowing.resultProvenance.${provenance.kind}`,
+    ),
+  );
+  markCompilerPerfPhaseDuration(
+    "analyzeBorrowing.resultProvenance",
+    resultProvenanceStartedAt,
+  );
+  const indexedResolveContext: ResolveContext = {
+    ...indexResolveContext,
+    contracts: publishedResults.contracts,
+    callResolutionCache: new Map(),
+  };
   const functionIndexes = extractCallableBorrowIndex({
     callables: functions,
     hir: summaryHir,
     typing,
     symbolTable,
     decls,
-    resolveContext: indexResolveContext,
+    resolveContext: indexedResolveContext,
     resolvedCallTargets,
   });
   const lambdaIndexes = extractCallableBorrowIndex({
@@ -186,34 +224,39 @@ export const analyzeBorrowing = ({
     typing,
     symbolTable,
     decls,
-    resolveContext: indexResolveContext,
+    resolveContext: indexedResolveContext,
     resolvedCallTargets,
   });
   const indexes = new Map<SymbolId, CallableBorrowIndex>([
     ...functionIndexes,
     ...lambdaIndexes,
   ]);
-  const initialContracts = new Map<SymbolId, CallableBorrowContract>(
+  const fullInitialContracts = new Map<SymbolId, CallableBorrowContract>(
     Array.from(indexes, ([symbol, index]) => [
       symbol,
       contractFromBorrowIndex(index),
     ]),
   );
   effectOperationContracts.forEach((contract, symbol) =>
-    initialContracts.set(symbol, contract),
+    fullInitialContracts.set(symbol, contract),
   );
   declaredContracts.forEach((contract, symbol) =>
-    initialContracts.set(symbol, contract),
+    fullInitialContracts.set(symbol, contract),
   );
+  const initialContracts = new Map(fullInitialContracts);
+  publishedResults.provenance.forEach((provenance, symbol) => {
+    const contract = initialContracts.get(symbol);
+    if (!contract) return;
+    initialContracts.set(
+      symbol,
+      contractWithResultProvenance({ contract, provenance }),
+    );
+  });
   // Flow-sensitive callables do not publish these seed contracts as their
   // final ABI. They provide only the cheap access/effect footprint needed to
   // classify an immediate caller use without treating the callee's maximum
   // mode as contagious.
-  const initialCompactContracts = new Map<SymbolId, CallableBorrowContract>([
-    ...initialContracts,
-    ...effectOperationContracts,
-    ...declaredContracts,
-  ]);
+  const initialCompactContracts = new Map(initialContracts);
   initialCompactContracts.forEach((contract, symbol) => {
     const prior = localCallables.get(symbol);
     localCallables.set(symbol, { ...prior, contract });
@@ -227,7 +270,7 @@ export const analyzeBorrowing = ({
     imports,
     dependencies,
     decls,
-    resolveContext: indexResolveContext,
+    resolveContext: indexedResolveContext,
     functions,
     lambdas,
     indexes,
@@ -236,6 +279,8 @@ export const analyzeBorrowing = ({
     localCallables,
     initialContracts,
     initialCompactContracts,
+    fullInitialContracts,
+    resultProvenance: publishedResults.provenance,
   });
   const capabilities = routing.capabilities;
   const compactFallbacks = routing.compactFallbacks;
@@ -441,11 +486,6 @@ export const analyzeBorrowing = ({
     incrementCompilerPerfCounter(
       "borrowing.body.checkedCallables",
       checkedFunctions.length + checkedLambdas.length,
-    );
-    const moduleStorageSymbols = new Set(
-      Array.from(summaryHir.items.values())
-        .filter((item) => item.kind === "module-let")
-        .map((item) => item.symbol),
     );
     markCompilerPerfPhaseDuration(
       "analyzeBorrowing.selectBodies",

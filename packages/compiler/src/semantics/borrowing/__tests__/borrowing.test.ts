@@ -365,6 +365,112 @@ fn conflict(~shared: Box) -> void
     );
   });
 
+  it("publishes owned aggregate projections before capability routing", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+val Pair { left: Box, right: Box }
+
+fn make_pair() -> Pair
+  Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+
+fn relay_pair() -> Pair
+  let pair = make_pair()
+  pair
+`);
+    expect(capabilityFor(result, "make_pair")).toBe("none");
+    expect(capabilityFor(result, "relay_pair")).toBe("none");
+    expect(result.borrowing.analysisMetrics?.fullFactsMaterialized).toBe(0);
+  });
+
+  it("keeps module aliases on the flow-sensitive provenance path", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+let stored = Box { value: 1 }
+
+fn module_alias() -> Box
+  let alias = stored
+  alias
+`);
+
+    expect(capabilityFor(result, "module_alias")).toBe("flow-sensitive");
+    expect(result.borrowing.analysisMetrics?.fullFactsMaterialized).toBe(1);
+  });
+
+  it("converges owned provenance through recursive wrappers", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn recursive_box(depth: i32) -> Box
+  if depth <= 0:
+    Box { value: 0 }
+  else:
+    recursive_box(depth - 1)
+
+fn relay_recursive(depth: i32) -> Box
+  let result = recursive_box(depth)
+  result
+`);
+
+    expect(capabilityFor(result, "recursive_box")).toBe("none");
+    expect(capabilityFor(result, "relay_recursive")).toBe("none");
+    expect(result.borrowing.analysisMetrics?.fullFactsMaterialized).toBe(0);
+  });
+
+  it("routes projected local reference writes through full provenance", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+obj Holder { item: Box }
+
+fn wrap(~source: Box) -> Holder
+  let ~out = Holder { item: Box { value: 0 } }
+  out.item = source
+  out
+`);
+    const wrapSymbol = result.symbols.resolveTopLevel("wrap");
+    const contract =
+      typeof wrapSymbol === "number"
+        ? result.borrowing.callables.get(wrapSymbol)
+        : undefined;
+
+    expect(capabilityFor(result, "wrap")).toBe("flow-sensitive");
+    expect(contract?.parameters[0]?.returnedOrigins).toEqual([
+      expect.objectContaining({
+        source: [],
+        result: [{ kind: "field", name: "item" }],
+      }),
+    ]);
+    expect(result.borrowing.analysisMetrics?.fullFactsMaterialized).toBe(1);
+  });
+
+  it("preserves runtime guards through owned-result wrappers", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn guarded_result(~left: Box, ~right: Box) -> Box
+  mutate_both(~left, ~right)
+  Box { value: left.value + right.value }
+
+fn relay_guarded(~left: Box, ~right: Box) -> Box
+  let result = guarded_result(~left, ~right)
+  result
+`);
+    const guards = Array.from(
+      result.borrowing.runtimeIdentityGuards.values(),
+    ).flat();
+
+    expect(capabilityFor(result, "guarded_result")).toBe("transient");
+    expect(capabilityFor(result, "relay_guarded")).toBe("transient");
+    expect(guards).toHaveLength(2);
+    expect(result.borrowing.analysisMetrics?.fullFactsMaterialized).toBe(0);
+  });
+
   it("includes argument-plan ambiguity in stable callable inputs", () => {
     const call = {
       exprId: 1,
@@ -7505,6 +7611,57 @@ pub fn valid(~right: Box) -> void
     expect(
       analyzed.semantics.get("src::main")?.borrowing.runtimeIdentityGuards.size,
     ).toBe(0);
+  });
+
+  it("preserves owned aggregate projections across module boundaries", async () => {
+    const root = resolve("/fresh-aggregate-result/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}values.voyd`]: `
+pub obj Box { api value: i32 }
+pub val Pair { api left: Box, api right: Box }
+
+pub fn make_pair() -> Pair
+  Pair {
+    left: Box { value: 1 },
+    right: Box { value: 2 }
+  }
+`,
+        [`${root}${sep}main.voyd`]: `
+use src::values::{ Pair, make_pair }
+
+pub fn relay_pair() -> Pair
+  let pair = make_pair()
+  pair
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    const values = analyzed.semantics.get("src::values");
+    const makePair = values?.exports.get("make_pair");
+    const contract = makePair?.borrowing?.find(
+      (entry) => entry.symbol === makePair.symbol,
+    )?.contract;
+    const main = analyzed.semantics.get("src::main");
+    const relayPair = main?.exports.get("relay_pair");
+
+    expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
+    expect(
+      contract?.externalReturnedOrigins?.filter(
+        (origin) => origin.fresh === true,
+      ),
+    ).toHaveLength(2);
+    expect(
+      typeof relayPair?.symbol === "number"
+        ? main?.borrowing.capabilities.get(relayPair.symbol)
+        : undefined,
+    ).toBe("none");
   });
 
   it("tracks escaped allocations before external writes", async () => {

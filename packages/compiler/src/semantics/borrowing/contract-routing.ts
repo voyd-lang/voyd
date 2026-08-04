@@ -30,6 +30,7 @@ import {
   computeCallableBorrowContracts,
   type CallableBorrowContractComputation,
 } from "./summaries.js";
+import type { CallableResultProvenance } from "./result-provenance.js";
 
 export type TransientRoutingResult = {
   capabilities: ReadonlyMap<SymbolId, LoanAnalysisMode>;
@@ -54,6 +55,7 @@ export const inferTransientBorrowingRouting = ({
   localCallables,
   initialContracts,
   initialCompactContracts,
+  resultProvenance,
   knownLocalCapabilities = new Map(),
 }: {
   indexes: ReadonlyMap<SymbolId, CallableBorrowIndex>;
@@ -63,6 +65,7 @@ export const inferTransientBorrowingRouting = ({
   localCallables: Map<SymbolId, ImportedCallableCapability>;
   initialContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   initialCompactContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  resultProvenance: ReadonlyMap<SymbolId, CallableResultProvenance>;
   knownLocalCapabilities?: ReadonlyMap<SymbolId, LoanAnalysisMode>;
 }): TransientRoutingResult => {
   let decisions = classifyCallableCapabilities({
@@ -72,6 +75,7 @@ export const inferTransientBorrowingRouting = ({
     importedCallables,
     localCallables,
     knownLocalCapabilities,
+    resultProvenance,
   });
   const capabilities = new Map<SymbolId, LoanAnalysisMode>(
     Array.from(decisions, ([symbol, decision]) => [symbol, decision.mode]),
@@ -96,6 +100,7 @@ export const inferTransientBorrowingRouting = ({
         localCallables,
         knownLocalCapabilities: capabilities,
         compactContractFallbacks,
+        resultProvenance,
       });
       decisions.forEach((decision, symbol) => {
         capabilities.set(
@@ -117,6 +122,7 @@ export const inferTransientBorrowingRouting = ({
         const candidate = composeTransientCallableContract({
           index,
           declaredContract: declaredContracts.get(symbol),
+          resultProvenance: resultProvenance.get(symbol),
           lookup: {
             localModuleId,
             localCapabilities: capabilities,
@@ -165,6 +171,7 @@ export const inferTransientBorrowingRouting = ({
       localCallables,
       knownLocalCapabilities: capabilities,
       compactContractFallbacks,
+      resultProvenance,
     });
     decisions.forEach((decision, symbol) => {
       const current = capabilities.get(symbol) ?? "none";
@@ -217,6 +224,8 @@ export const inferBorrowingContracts = ({
   localCallables,
   initialContracts,
   initialCompactContracts,
+  fullInitialContracts,
+  resultProvenance,
 }: {
   hir: HirGraph;
   typing: TypingResult;
@@ -234,6 +243,8 @@ export const inferBorrowingContracts = ({
   localCallables: Map<SymbolId, ImportedCallableCapability>;
   initialContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   initialCompactContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  fullInitialContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  resultProvenance: ReadonlyMap<SymbolId, CallableResultProvenance>;
 }): BorrowingContractInferenceResult => {
   let routing = inferTransientBorrowingRouting({
     indexes,
@@ -243,6 +254,7 @@ export const inferBorrowingContracts = ({
     localCallables,
     initialContracts,
     initialCompactContracts,
+    resultProvenance,
   });
   let capabilities = new Map(routing.capabilities);
   let contracts = new Map(routing.contracts);
@@ -267,7 +279,7 @@ export const inferBorrowingContracts = ({
         if (capabilities.get(symbol) !== "flow-sensitive") return;
         flowInitialContracts.set(
           symbol,
-          declaredContracts.get(symbol) ?? initialContracts.get(symbol)!,
+          declaredContracts.get(symbol) ?? fullInitialContracts.get(symbol)!,
         );
       });
     }
@@ -331,14 +343,23 @@ export const inferBorrowingContracts = ({
         contract,
       });
     });
+    const routedContracts = new Map(contracts);
+    inferredContracts.forEach((contract, symbol) =>
+      routedContracts.set(symbol, contract),
+    );
+    const routedCompactContracts = new Map(routing.compactContracts);
+    inferredContracts.forEach((contract, symbol) =>
+      routedCompactContracts.set(symbol, contract),
+    );
     const nextRouting = inferTransientBorrowingRouting({
       indexes,
       localModuleId: moduleId,
       declaredContracts,
       importedCallables,
       localCallables,
-      initialContracts: inferredContracts,
-      initialCompactContracts: inferredContracts,
+      initialContracts: routedContracts,
+      initialCompactContracts: routedCompactContracts,
+      resultProvenance,
       knownLocalCapabilities: capabilities,
     });
     const promotedSymbols = new Set(

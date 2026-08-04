@@ -25,6 +25,8 @@ import type { LoanAnalysisMode } from "./capability.js";
 import type { ImportedCallableCapability } from "./capability-classifier.js";
 import { transientParameterPairKey } from "./transient-guards.js";
 import { COMPACT_BORROW_INTRINSICS } from "./call-resolution.js";
+import type { CallableResultProvenance } from "./result-provenance.js";
+import { contractWithResultProvenance } from "./result-provenance.js";
 
 export type CallableContractLookup = {
   localModuleId: string;
@@ -77,7 +79,9 @@ const pathStaysWithinRootAllocation = (
   return (
     dereference === 0 &&
     projections.length <= 2 &&
-    projections.slice(1).every((projection) => projection.kind !== "dereference")
+    projections
+      .slice(1)
+      .every((projection) => projection.kind !== "dereference")
   );
 };
 
@@ -125,9 +129,10 @@ const contractForTarget = (
 
 export const contractFromBorrowIndex = (
   index: CallableBorrowIndex,
+  resultProvenance?: CallableResultProvenance,
 ): CallableBorrowContract => {
   const effects = directEffects(index);
-  return {
+  const contract: CallableBorrowContract = {
     parameters: index.parameters.map((parameter, parameterIndex) => {
       const effect = effects[parameterIndex]!;
       const readPaths = sortedPaths(effect.readPaths);
@@ -149,9 +154,6 @@ export const contractFromBorrowIndex = (
     }),
     maySuspend: false,
     borrowedResult: "none",
-    ...(index.flags.hasSyntacticFreshResult
-      ? { freshResult: true as const }
-      : {}),
     ...(index.flags.hasModuleStorageAccess
       ? { externalRead: true as const }
       : {}),
@@ -159,6 +161,9 @@ export const contractFromBorrowIndex = (
       ? { externalWrite: true as const }
       : {}),
   };
+  return resultProvenance
+    ? contractWithResultProvenance({ contract, provenance: resultProvenance })
+    : contract;
 };
 
 const placeForArgument = (
@@ -313,10 +318,12 @@ const targetContractsForCall = (
 export const composeTransientCallableContract = ({
   index,
   declaredContract,
+  resultProvenance,
   lookup,
 }: {
   index: CallableBorrowIndex;
   declaredContract?: CallableBorrowContract;
+  resultProvenance?: CallableResultProvenance;
   lookup: CallableContractLookup;
 }): CallableBorrowContract | undefined => {
   const effects = directEffects(index);
@@ -381,7 +388,7 @@ export const composeTransientCallableContract = ({
     }
   }
   const bodyContract = mergeParameterEffects({
-    contract: contractFromBorrowIndex(index),
+    contract: contractFromBorrowIndex(index, resultProvenance),
     effects,
   });
   const storageContract = {

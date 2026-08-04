@@ -45,7 +45,7 @@ const openDispatchIndex = (): CallableBorrowIndex =>
       hasDefaultBorrowFlow: false,
       hasRuntimeCheckedReceiverWrites: false,
       hasAllocationResult: false,
-      hasSyntacticFreshResult: false,
+      hasResultProvenanceTrigger: false,
       hasTraitResult: false,
       hasCallableResult: false,
       hasReturnedParameterValue: false,

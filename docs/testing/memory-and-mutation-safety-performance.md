@@ -205,3 +205,41 @@ growth. Unoptimized current runtime was 0.183959 ms versus 0.186250 ms at the
 baseline, with 939 versus 997 generated allocation sites. Release runtime was
 0.042125 ms versus 0.043416 ms, with five allocation sites at both revisions.
 Runtime guards remained supported and bounded.
+
+## V-473 owned-result provenance result
+
+V-473 publishes a projection-aware result-provenance summary before capability
+routing. Owned aggregate results and safe wrappers can now take the no-analysis
+or transient paths, while parameter, module, external, mixed, unresolved, and
+depth-widened results remain conservative. The callable index and transient
+contract composer consume the published fact and do not perform provenance
+analysis themselves.
+
+The final source comparison used seven alternating fresh Node processes for
+each revision and mode, with the precompiled std snapshot disabled. Raw samples
+and machine-readable routing, work, memory, and Wasm measurements are in
+[`v473-source-benchmark.json`](./v473-source-benchmark.json).
+
+| Seven-sample source median | PR head `15077084` | V-473 | Change |
+| --- | ---: | ---: | ---: |
+| Unoptimized compile | 2,049.82 ms | 2,106.16 ms | +56.34 ms (+2.75%) |
+| Release compile | 2,620.68 ms | 2,675.32 ms | +54.63 ms (+2.08%) |
+| Unoptimized peak heap | 680,139,560 B | 666,047,048 B | -2.07% |
+| Release peak heap | 698,993,864 B | 691,122,992 B | -1.13% |
+| Unoptimized RSS growth | 128,794,624 B | 133,693,440 B | +3.80% |
+| Release RSS growth | 157,319,168 B | 164,184,064 B | +4.36% |
+
+Routing moved 32 of 481 callables off the flow-sensitive tier: no-analysis
+callables increased from 287 to 305 and transient callables from 119 to 133.
+Materialized full-fact blocks fell from 3,114 to 3,012 and operations from
+18,490 to 18,266. Full-contract evaluations increased from 531 to 541;
+compact evaluations increased from 827 to 1,118 as more callables entered
+compact routing. The bounded provenance pass cost about 32 ms, and retained
+contract bytes increased from 1,487,881 to 1,502,816 because owned field
+projections are now preserved across module contracts.
+
+Unoptimized and release Wasm are byte-identical to the PR head. Focused
+regressions cover local and cross-module aggregate projections, module aliases,
+recursive wrappers, runtime-checked wrappers, and projected-local reference
+escapes. The regenerated std snapshot and the complete monorepo suite pass;
+the std source lane completes under the default heap.

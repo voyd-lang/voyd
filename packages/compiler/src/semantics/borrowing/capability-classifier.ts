@@ -13,6 +13,11 @@ import type {
   CallableBorrowIndex,
   CallableBorrowIndexCall,
 } from "./callable-borrow-index.js";
+import type { CallableResultProvenance } from "./result-provenance.js";
+import {
+  callableResultHasOwnedRoot,
+  callableResultIsOwned,
+} from "./result-provenance.js";
 
 export type ImportedCallableCapability = {
   capability?: LoanAnalysisMode;
@@ -27,6 +32,7 @@ export type CapabilityClassifierInput = {
   importedCallables: ReadonlyMap<string, ImportedCallableCapability>;
   localCallables?: ReadonlyMap<SymbolId, ImportedCallableCapability>;
   compactContractFallback?: boolean;
+  resultProvenance?: CallableResultProvenance;
   dispatch?: {
     hasOpenDispatch?: boolean;
     hasUnresolvedDispatch?: boolean;
@@ -323,6 +329,7 @@ export const classifyCallableCapability = ({
   importedCallables,
   localCallables,
   compactContractFallback,
+  resultProvenance,
   dispatch,
 }: CapabilityClassifierInput): CapabilityDecision => {
   const decisions: CapabilityDecision[] = [];
@@ -342,7 +349,7 @@ export const classifyCallableCapability = ({
     index.parameters.some((parameter) => parameter.loanBearing === true);
   const allocationResultNeedsFullFacts =
     index.flags.hasAllocationResult &&
-    !index.flags.hasSyntacticFreshResult &&
+    !callableResultHasOwnedRoot(resultProvenance) &&
     !index.parameters.some((parameter) => parameter.loanBearing === true);
   const hasBorrowRelevantOpenDispatch = index.calls.some(
     (call) =>
@@ -379,6 +386,8 @@ export const classifyCallableCapability = ({
     index.flags.hasCapture ||
     index.flags.hasTraitResult ||
     index.flags.hasCallableResult ||
+    (index.flags.hasResultProvenanceTrigger &&
+      !callableResultIsOwned(resultProvenance)) ||
     allocationResultNeedsFullFacts ||
     hasReturnedBorrowParameter ||
     (index.flags.hasReferenceBinding && index.flags.hasBorrowOperation) ||
@@ -410,6 +419,10 @@ export const classifyCallableCapability = ({
         ...(index.flags.hasCapture ? ["capture"] : []),
         ...(index.flags.hasTraitResult ? ["trait-result"] : []),
         ...(index.flags.hasCallableResult ? ["callable-result"] : []),
+        ...(index.flags.hasResultProvenanceTrigger &&
+        !callableResultIsOwned(resultProvenance)
+          ? ["result-provenance-trigger"]
+          : []),
         ...(allocationResultNeedsFullFacts ? ["allocation-result"] : []),
         ...(hasReturnedBorrowParameter ? ["returned-parameter-value"] : []),
         ...(index.flags.hasReferenceBinding ? ["reference-binding"] : []),
@@ -477,6 +490,7 @@ export const classifyCallableCapabilities = ({
   dispatch = new Map(),
   knownLocalCapabilities = new Map(),
   compactContractFallbacks = new Set(),
+  resultProvenance = new Map(),
 }: {
   indexes: ReadonlyMap<SymbolId, CallableBorrowIndex>;
   localModuleId: string;
@@ -486,6 +500,7 @@ export const classifyCallableCapabilities = ({
   dispatch?: ReadonlyMap<SymbolId, CapabilityClassifierInput["dispatch"]>;
   knownLocalCapabilities?: ReadonlyMap<SymbolId, LoanAnalysisMode>;
   compactContractFallbacks?: ReadonlySet<SymbolId>;
+  resultProvenance?: ReadonlyMap<SymbolId, CallableResultProvenance>;
 }): ReadonlyMap<SymbolId, CapabilityDecision> => {
   const modes = new Map<SymbolId, LoanAnalysisMode>();
   knownLocalCapabilities.forEach((mode, symbol) => modes.set(symbol, mode));
@@ -503,6 +518,7 @@ export const classifyCallableCapabilities = ({
       importedCallables,
       localCallables,
       compactContractFallback: compactContractFallbacks.has(index.symbol),
+      resultProvenance: resultProvenance.get(index.symbol),
       dispatch: dispatch.get(index.symbol),
     });
     const joined = joinLoanAnalysisModes([prior, decision.mode]);
