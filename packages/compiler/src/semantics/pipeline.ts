@@ -38,8 +38,6 @@ import {
 import { getSymbolTable } from "./_internal/symbol-table.js";
 import { assignModuleTestIds, isGeneratedTestId } from "../tests/ids.js";
 import {
-  incrementCompilerPerfCounter,
-  isCompilerPerfEnabled,
   markCompilerPerfPhaseDuration,
   startCompilerPerfPhase,
 } from "../perf.js";
@@ -77,11 +75,12 @@ import {
   analyzeResultValueFlow,
   type ResultValueProjection,
   type ResultValueSource,
-} from "./result-value-flow.js";
+} from "./borrowing/callable-result-flow.js";
 import {
   bindCallArgumentSources,
   omittedDefaultParameterIndices,
 } from "./typing/call-argument-binding.js";
+import { buildPackageSemanticInterface } from "./package-borrow-interface.js";
 
 export interface SemanticsPipelineResult {
   binding: BindingResult;
@@ -104,6 +103,9 @@ export interface SemanticsPipelineOptions {
   includeTests?: boolean;
   recoverFromTypingErrors?: boolean;
   checkBorrowBodies?: boolean;
+  /** Compiler-versioned private cache; fingerprint validation happens upstream. */
+  borrowingOverride?: BorrowingResult;
+  previousBorrowing?: BorrowingResult;
 }
 
 type SemanticsPipelineInput = SemanticsPipelineOptions | Form;
@@ -120,6 +122,8 @@ export const semanticsPipeline = (
     typing: typingState,
     recoverFromTypingErrors,
     checkBorrowBodies,
+    borrowingOverride,
+    previousBorrowing,
   } = normalizeSemanticsInput(input);
   const form = module.ast;
   if (!form.callsInternal("ast")) {
@@ -232,7 +236,8 @@ export const semanticsPipeline = (
     (diagnostic) => diagnostic.severity === "error",
   )
     ? emptyBorrowingResult()
-    : analyzeBorrowing({
+    : (borrowingOverride ??
+      analyzeBorrowing({
         hir,
         typing,
         symbolTable,
@@ -241,18 +246,26 @@ export const semanticsPipeline = (
         dependencies: projectBorrowingDependencies(borrowingDependencies),
         decls: binding.decls,
         checkBodies: checkBorrowBodies,
-      });
+        previousQueries: previousBorrowing?.queries,
+      }));
   markCompilerPerfPhaseDuration("analyzeBorrowing", borrowingStartedAt);
-  const exportsTable = collectModuleExports({
+  const exportsTable = buildPackageSemanticInterface({
+    moduleId: module.id,
     hir,
     symbolTable,
-    moduleId: module.id,
-    modulePath: module.path,
-    packageId: binding.packageId,
-    binding,
     typing,
-    borrowing,
     dependencyExports: exports ?? new Map(),
+    exports: collectModuleExports({
+      hir,
+      symbolTable,
+      moduleId: module.id,
+      modulePath: module.path,
+      packageId: binding.packageId,
+      binding,
+      typing,
+      borrowing,
+      dependencyExports: exports ?? new Map(),
+    }),
   });
 
   const diagnostics: Diagnostic[] = [
@@ -3515,6 +3528,7 @@ const collectModuleExports = ({
       const summary = exportBorrowSummaryFor(callableSymbol, borrowContract);
       borrowingContracts.set(callableSymbol, {
         symbol: callableSymbol,
+        summaryId: `${moduleId}:${callableSymbol}`,
         ...(borrowing.capabilities.get(callableSymbol) !== undefined
           ? { capability: borrowing.capabilities.get(callableSymbol) }
           : {}),
@@ -3675,28 +3689,6 @@ const collectModuleExports = ({
   );
   if (publicTraitImplementations.length > 0) {
     table.borrowingTraitImplementations = publicTraitImplementations;
-  }
-
-  if (isCompilerPerfEnabled()) {
-    const retainedBorrowingSummaries = [
-      ...Array.from(table.values()).flatMap((entry) => [
-        ...(entry.borrowing ?? []),
-        ...(entry.borrowingCoercions ?? []),
-        ...(entry.borrowingCallableResultCoercions ?? []),
-      ]),
-      ...(table.borrowingTraitImplementations ?? []).flatMap(
-        (implementation) => implementation.methods,
-      ),
-    ];
-    incrementCompilerPerfCounter(
-      "borrowing.contract.retainedCount",
-      retainedBorrowingSummaries.length,
-    );
-    incrementCompilerPerfCounter(
-      "borrowing.contract.retainedBytes",
-      new TextEncoder().encode(JSON.stringify(retainedBorrowingSummaries))
-        .byteLength,
-    );
   }
 
   return table;

@@ -19,9 +19,7 @@ export type PlaceProjection =
   | { kind: "dereference" }
   | { kind: "identity" };
 
-const projectionPathKey = (
-  path: readonly PlaceProjection[],
-): string =>
+const projectionPathKey = (path: readonly PlaceProjection[]): string =>
   path
     .map((projection) => {
       switch (projection.kind) {
@@ -514,6 +512,7 @@ export type BorrowingResult = {
     worklistEdges: number;
     worklistIterations: number;
     evaluations: number;
+    reusedCallables: number;
     demandedSymbols: ReadonlySet<SymbolId>;
   };
   /** Process-local callable boundary for incremental invalidation (V-465). */
@@ -522,6 +521,11 @@ export type BorrowingResult = {
     {
       input: string;
       dependencies: readonly SymbolRef[];
+      /** Exact canonical contracts observed for dependency query outputs. */
+      dependencyOutputs: readonly (readonly [
+        string,
+        CallableBorrowContract | null | string,
+      ])[];
       output: CallableBorrowContract;
     }
   >;

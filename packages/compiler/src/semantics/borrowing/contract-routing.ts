@@ -31,6 +31,11 @@ import {
   type CallableBorrowContractComputation,
 } from "./summaries.js";
 import type { CallableResultProvenance } from "./result-provenance.js";
+import type { BorrowingResult } from "./model.js";
+import {
+  borrowQueryInputsEqual,
+  persistedBorrowQueryOutput,
+} from "./query-digest.js";
 
 export type TransientRoutingResult = {
   capabilities: ReadonlyMap<SymbolId, LoanAnalysisMode>;
@@ -226,6 +231,7 @@ export const inferBorrowingContracts = ({
   initialCompactContracts,
   fullInitialContracts,
   resultProvenance,
+  previousQueries,
 }: {
   hir: HirGraph;
   typing: TypingResult;
@@ -245,6 +251,7 @@ export const inferBorrowingContracts = ({
   initialCompactContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   fullInitialContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   resultProvenance: ReadonlyMap<SymbolId, CallableResultProvenance>;
+  previousQueries?: BorrowingResult["queries"];
 }): BorrowingContractInferenceResult => {
   let routing = inferTransientBorrowingRouting({
     indexes,
@@ -310,6 +317,31 @@ export const inferBorrowingContracts = ({
     });
     functionFacts = lazyFacts.functions;
     lambdaFacts = lazyFacts.lambdas;
+    const dirtyFromPrevious = dirtySymbolsFromQueries({
+      moduleId,
+      facts: new Map([
+        ...functionFacts,
+        ...Array.from(
+          lambdaFacts.values(),
+          (facts) => [facts.symbol, facts] as const,
+        ),
+      ]),
+      previousQueries,
+      contracts,
+      dependencies,
+    });
+    if (routingPass === 1 && previousQueries) {
+      previousQueries.forEach((query, symbol) => {
+        if (!dirtyFromPrevious.has(symbol) && flowSymbols.has(symbol)) {
+          flowInitialContracts.set(symbol, query.output);
+          contracts.set(symbol, query.output);
+          localCallables.set(symbol, {
+            capability: capabilities.get(symbol),
+            contract: query.output,
+          });
+        }
+      });
+    }
     const inferStartedAt = startCompilerPerfPhase();
     inferred = computeCallableBorrowContracts({
       hir,
@@ -324,7 +356,10 @@ export const inferBorrowingContracts = ({
       lambdaFacts,
       initialContracts: flowInitialContracts,
       flowSymbols,
-      dirtySymbols: dirtyFlowSymbols,
+      dirtySymbols:
+        routingPass === 1 && previousQueries
+          ? dirtyFromPrevious
+          : dirtyFlowSymbols,
     });
     markCompilerPerfPhaseDuration(
       "analyzeBorrowing.inferContracts",
@@ -427,4 +462,80 @@ export const inferBorrowingContracts = ({
     flowLambdas,
     materializedFacts: functionFactCache.size + lambdaFactCache.size,
   };
+};
+
+const dirtySymbolsFromQueries = ({
+  moduleId,
+  facts,
+  previousQueries,
+  contracts,
+  dependencies,
+}: {
+  moduleId: string;
+  facts: ReadonlyMap<SymbolId, CallableBorrowFacts>;
+  previousQueries: BorrowingResult["queries"];
+  contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  dependencies: ReadonlyMap<string, BorrowingDependency>;
+}): ReadonlySet<SymbolId> => {
+  if (!previousQueries) return new Set(facts.keys());
+  const dependencyOutput = (
+    dependency: SymbolRef,
+  ): CallableBorrowContract | null =>
+    dependency.moduleId === moduleId
+      ? (contracts.get(dependency.symbol) ?? null)
+      : (dependencies.get(dependency.moduleId)?.callables.get(dependency.symbol)
+          ?.contract ??
+        dependencies
+          .get(dependency.moduleId)
+          ?.traitMethodContracts.get(dependency.symbol) ??
+        null);
+  const dirty = new Set(
+    Array.from(facts).flatMap(([symbol, callableFacts]) => {
+      const previous = previousQueries.get(symbol);
+      const previousDependencyOutputs = new Map(
+        previous?.dependencyOutputs ?? [],
+      );
+      const currentDependencies = new Map(
+        [...callableFacts.dependencies, ...(previous?.dependencies ?? [])].map(
+          (dependency) => [
+            `${dependency.moduleId}:${dependency.symbol}`,
+            dependency,
+          ],
+        ),
+      );
+      const changedDependency = Array.from(currentDependencies).some(
+        ([key, dependency]) => {
+          const previousOutput = previousDependencyOutputs.get(key);
+          const currentOutput = dependencyOutput(dependency);
+          if (typeof previousOutput === "string") {
+            return previousOutput !== persistedBorrowQueryOutput(currentOutput);
+          }
+          if (!previousOutput || !currentOutput) {
+            return previousOutput !== currentOutput;
+          }
+          return !callableBorrowContractsEqual(previousOutput, currentOutput);
+        },
+      );
+      return !previous ||
+        !borrowQueryInputsEqual(previous.input, callableFacts.stableInput) ||
+        changedDependency
+        ? [symbol]
+        : [];
+    }),
+  );
+  let changed = true;
+  while (changed) {
+    changed = false;
+    facts.forEach((callableFacts, symbol) => {
+      if (dirty.has(symbol)) return;
+      const dependsOnDirty = callableFacts.dependencies.some(
+        (dependency) =>
+          dependency.moduleId === moduleId && dirty.has(dependency.symbol),
+      );
+      if (!dependsOnDirty) return;
+      dirty.add(symbol);
+      changed = true;
+    });
+  }
+  return dirty;
 };

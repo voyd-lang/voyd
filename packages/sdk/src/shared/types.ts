@@ -2,6 +2,7 @@ import type { Diagnostic } from "@voyd-lang/compiler/diagnostics/index.js";
 import type { BoundaryExportsOption } from "@voyd-lang/compiler/codegen/context.js";
 import type { ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
 import type { OptimizationLevel } from "@voyd-lang/compiler/optimization-policy.js";
+import type { CompilerDependencyBorrowArtifact } from "@voyd-lang/compiler/modules/dependency-snapshot-cache.js";
 import type { TestCase as CompilerTestCase } from "@voyd-lang/compiler/pipeline-shared.js";
 import type {
   DefaultAdapterOptions,
@@ -110,7 +111,7 @@ export type ServeWebAppResult = ServeWebAppSuccessResult | CompileFailureResult;
 export type EffectsInfo = {
   table: HostProtocolTable;
   findUniqueOpByLabelSuffix: (
-    labelSuffix: string
+    labelSuffix: string,
   ) => HostProtocolTable["ops"][number];
   signatureHashFor: (opts: {
     effectId: string;
@@ -196,4 +197,6 @@ export type VoydSdk = {
   compile: (opts: CompileOptions) => Promise<CompileResult>;
   run: <T = unknown>(opts: RunOptions) => Promise<T>;
   serveWebApp: (opts: ServeWebAppOptions) => Promise<ServeWebAppResult>;
+  /** Serializable dependency borrowing cache for reuse by another process. */
+  exportCompilerArtifact: () => CompilerDependencyBorrowArtifact | undefined;
 };

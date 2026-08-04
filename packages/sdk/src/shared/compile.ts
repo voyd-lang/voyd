@@ -4,7 +4,9 @@ import { DiagnosticError } from "@voyd-lang/compiler/diagnostics/index.js";
 import {
   commitDependencySnapshot,
   createCompilerDependencySnapshotCache,
+  exportCompilerDependencyBorrowArtifact,
   prepareDependencySnapshotReuse,
+  type CompilerDependencyBorrowArtifact,
   type CompilerDependencySnapshotCache,
 } from "@voyd-lang/compiler/modules/dependency-snapshot-cache.js";
 import type {
@@ -53,6 +55,9 @@ const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === "error");
 
 export const createCompilerReuseCache = createCompilerDependencySnapshotCache;
+export const exportCompilerReuseArtifact =
+  exportCompilerDependencyBorrowArtifact;
+export type CompilerReuseArtifact = CompilerDependencyBorrowArtifact;
 
 export const compileWithLoader = async ({
   entryPath,
@@ -171,6 +176,7 @@ export const compileWithLoader = async ({
       captureDependencySnapshot: Boolean(dependencySnapshotReuse.key),
       previousSemantics: dependencySnapshotReuse.previousSemantics,
       typingState: dependencySnapshotReuse.typingState,
+      reusableBorrowing: dependencySnapshotReuse.reusableBorrowing,
     });
     perf.mark("analyzeModules", analyzeStartedAt);
     const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];

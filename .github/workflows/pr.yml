@@ -140,6 +140,7 @@ jobs:
         with:
           filters: |
             web:
+              - "tests/integration/fixtures/web-framework.voyd"
               - "packages/web/**"
               - "packages/compiler/**"
               - "packages/std/**"
@@ -458,11 +459,30 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
+            web:
+              - "tests/integration/fixtures/web-framework.voyd"
+              - "packages/web/**"
+              - "packages/compiler/**"
+              - "packages/std/**"
+              - "packages/sdk/**"
+              - "packages/js-host/**"
+              - "packages/lib/**"
+              - "packages/package-adapter/**"
+              - "apps/cli/**"
+              - "scripts/voyd"
+              - "scripts/testing/**"
+              - ".github/workflows/pr.yml"
+              - "package.json"
+              - "package-lock.json"
+              - "turbo.json"
+              - "tsconfig*.json"
             optimizer:
               - "packages/compiler/src/optimize/**"
               - "packages/compiler/src/codegen/**"
               - "packages/compiler/src/optimization-policy.ts"
               - "packages/compiler/src/pipeline-shared.ts"
+              - "packages/compiler/src/modules/**"
+              - "packages/compiler/src/semantics/**"
               - "packages/compiler/src/perf.ts"
               - "packages/lib/src/lib/binaryen-optimize.ts"
               - "packages/std/**"
@@ -470,23 +490,31 @@ jobs:
               - "scripts/bench-optimizer.ts"
               - "scripts/ci/check-optimizer-bench-regression.mjs"
               - "scripts/ci/check-optimizer-bench-regression.test.mjs"
+              - "scripts/testing/run-web-compile-gate.mjs"
               - "tests/performance/fixtures/vtrace-compute-benchmark.voyd"
               # Root dependency changes are represented by the lockfile. Avoid
               # triggering this noisy, expensive benchmark for unrelated scripts.
               - "package-lock.json"
       - name: Use Node.js
-        if: steps.changes.outputs.optimizer == 'true'
+        if: steps.changes.outputs.optimizer == 'true' || steps.changes.outputs.web == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "22.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        if: steps.changes.outputs.optimizer == 'true'
+        if: steps.changes.outputs.optimizer == 'true' || steps.changes.outputs.web == 'true'
         run: npm ci --include=optional
       - name: Test optimizer scorecard gate
         if: steps.changes.outputs.optimizer == 'true'
         run: npx vitest run scripts/ci/check-optimizer-bench-regression.test.mjs
+      - name: Compile whole web package under memory budget
+        if: steps.changes.outputs.web == 'true'
+        env:
+          VOYD_WEB_COMPILE_MAX_OLD_SPACE_MB: "3584"
+          VOYD_WEB_COMPILE_MAX_MS: "120000"
+          VOYD_WEB_COMPILE_MAX_RSS_BYTES: "4563402752"
+        run: npm run test:web-compile-gate
       - name: Compare optimizer scorecards
         if: steps.changes.outputs.optimizer == 'true'
         env:

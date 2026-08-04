@@ -995,47 +995,62 @@ const extractFacts = ({
     valueLivenessStartedAt,
   );
   const stableInputStartedAt = startCompilerPerfPhase();
+  const typeState = borrowingTypeFingerprint({
+    roots: [
+      ...Array.from(expressionTypes.values()),
+      ...Array.from(concreteExpressionTypes.values()),
+      ...(signature?.parameters.map((parameter) => parameter.type) ?? []),
+      signature?.returnType,
+      ...(functionItem.captures?.map((capture) =>
+        typing.valueTypes.get(capture.symbol),
+      ) ?? []),
+      ...calls.flatMap((call) => [
+        ...(call.signature?.parameters.map((parameter) => parameter.type) ??
+          []),
+        call.signature?.returnType,
+      ]),
+    ].filter((type): type is TypeId => typeof type === "number"),
+    effectRows: [
+      signature?.effectRow,
+      ...calls.map((call) => call.signature?.effectRow),
+    ].filter((row): row is EffectRowId => typeof row === "number"),
+    typing,
+  });
   const stableInput = hashBorrowFactInput({
     symbol: functionItem.symbol,
     signature: signature
       ? {
-          parameters: signature.parameters.map((parameter) => [
-            parameter.type,
-            parameter.bindingKind,
-          ]),
-          returnType: signature.returnType,
-          effectRow: signature.effectRow,
+          parameters: signature.parameters.map(
+            (parameter) => parameter.bindingKind,
+          ),
         }
       : undefined,
     borrowContract: functionItem.borrowContract,
-    parameters: functionItem.parameters,
+    parameters: functionItem.parameters.map((parameter) => ({
+      symbol: parameter.symbol,
+      mutable: parameter.mutable,
+      label: parameter.label,
+      optional: parameter.optional,
+      hasDefault: parameter.defaultValue !== undefined,
+      bindingKind: parameter.pattern.bindingKind,
+    })),
     captures: Array.from(captures.values()),
-    expressions: expressionIds.map((exprId) => expressions.get(exprId)),
-    statements: Array.from(statements),
-    expressionTypes: Array.from(expressionTypes),
-    concreteExpressionTypes: Array.from(concreteExpressionTypes),
-    typeFingerprint: borrowingTypeFingerprint({
-      roots: [
-        ...Array.from(expressionTypes.values()),
-        ...Array.from(concreteExpressionTypes.values()),
-        ...(signature?.parameters.map((parameter) => parameter.type) ?? []),
-        signature?.returnType,
-        ...(functionItem.captures?.map((capture) =>
-          typing.valueTypes.get(capture.symbol),
-        ) ?? []),
-        ...calls.flatMap((call) => [
-          ...(call.signature?.parameters.map((parameter) => parameter.type) ??
-            []),
-          call.signature?.returnType,
-        ]),
-      ].filter((type): type is TypeId => typeof type === "number"),
-      effectRows: [
-        signature?.effectRow,
-        ...calls.map((call) => call.signature?.effectRow),
-      ].filter((row): row is EffectRowId => typeof row === "number"),
-      typing,
+    blocks: factBlocks,
+    places,
+    valueNodes: Array.from(valueNodes),
+    returns,
+    typeFingerprint: {
+      types: typeState.types,
+      effects: typeState.effects,
+    },
+    calls: calls.map((call) => {
+      const {
+        signature: _signature,
+        substitutions: _substitutions,
+        ...stable
+      } = stableBorrowCallInput(call);
+      return stable;
     }),
-    calls: calls.map(stableBorrowCallInput),
     dependencies: Array.from(dependencies.values()),
   });
   markCompilerPerfPhaseDuration(
@@ -2484,15 +2499,9 @@ const transferTargetsInPattern = (
   }
 };
 
-const hashBorrowFactInput = (value: unknown): string => {
-  const serialized = JSON.stringify(value);
-  let hash = 0x811c9dc5;
-  for (let index = 0; index < serialized.length; index += 1) {
-    hash ^= serialized.charCodeAt(index);
-    hash = Math.imul(hash, 0x01000193);
-  }
-  return `${serialized.length}:${(hash >>> 0).toString(16).padStart(8, "0")}`;
-};
+/** Exact canonical input. The type graph below keeps the representation
+ * bounded, while exact comparison avoids cache-unsound hash collisions. */
+const hashBorrowFactInput = (value: unknown): string => JSON.stringify(value);
 
 /**
  * Captures every process-local type/effect input that borrowing transfer
@@ -2500,8 +2509,6 @@ const hashBorrowFactInput = (value: unknown): string => {
  * object fields and effect rows live in side tables and can change while a
  * callable continues to address the same IDs.
  */
-const typeFingerprintCache = new WeakMap<TypingResult, Map<TypeId, string>>();
-
 const borrowingTypeFingerprint = ({
   roots,
   effectRows,
@@ -2511,19 +2518,18 @@ const borrowingTypeFingerprint = ({
   effectRows: readonly EffectRowId[];
   typing: TypingResult;
 }): {
-  types: readonly [TypeId, string][];
-  effects: readonly [EffectRowId, unknown][];
+  types: unknown;
+  effects: readonly unknown[];
 } => {
-  const cache = typeFingerprintCache.get(typing) ?? new Map<TypeId, string>();
-  typeFingerprintCache.set(typing, cache);
-  const fingerprintType = (
-    type: TypeId,
-    active = new Set<TypeId>(),
-  ): string => {
-    const cached = cache.get(type);
+  const ids = new Map<TypeId, string>();
+  const descriptors: { id: string; descriptor: unknown }[] = [];
+  const fingerprintType = (type: TypeId): string => {
+    const cached = ids.get(type);
     if (cached) return cached;
-    if (active.has(type)) return `cycle:${type}`;
-    const nextActive = new Set(active).add(type);
+    const id = `t${ids.size}`;
+    ids.set(type, id);
+    const entry = { id, descriptor: undefined as unknown };
+    descriptors.push(entry);
     const descriptor = typing.arena.get(type);
     const object =
       descriptor.kind === "nominal-object" || descriptor.kind === "value-object"
@@ -2569,42 +2575,79 @@ const borrowingTypeFingerprint = ({
           return [];
       }
     })();
-    const fingerprint = hashBorrowFactInput({
-      descriptor,
+    const stableDescriptor = (() => {
+      switch (descriptor.kind) {
+        case "borrowed":
+        case "fixed-array":
+        case "union":
+        case "intersection":
+          return { kind: descriptor.kind };
+        case "primitive":
+          return descriptor;
+        case "recursive":
+          return { kind: descriptor.kind };
+        case "trait":
+        case "nominal-object":
+        case "value-object":
+          return {
+            kind: descriptor.kind,
+            owner: descriptor.owner,
+            name: descriptor.name,
+          };
+        case "structural-object":
+          return {
+            kind: descriptor.kind,
+            fields: descriptor.fields.map(({ type: _type, ...field }) => field),
+          };
+        case "function":
+          return {
+            kind: descriptor.kind,
+            parameters: descriptor.parameters.map(
+              ({ type: _type, ...parameter }) => parameter,
+            ),
+          };
+        case "type-param-ref":
+          return { kind: descriptor.kind, param: descriptor.param };
+      }
+    })();
+    entry.descriptor = {
+      descriptor: stableDescriptor,
       ...(object
         ? {
             object: {
               objectKind: object.objectKind,
-              baseNominal: object.baseNominal,
+              baseNominal:
+                typeof object.baseNominal === "number"
+                  ? fingerprintType(object.baseNominal)
+                  : undefined,
               fields: object.fields.map((field) => [
                 field.name,
                 field.optional,
-                fingerprintType(field.type, nextActive),
+                fingerprintType(field.type),
               ]),
             },
           }
         : {}),
       ...(constraint === undefined
         ? {}
-        : { constraint: fingerprintType(constraint, nextActive) }),
-      children: children.map((child) => [
-        child,
-        fingerprintType(child, nextActive),
-      ]),
+        : { constraint: fingerprintType(constraint) }),
+      children: children.map((child) => fingerprintType(child)),
       ...(descriptor.kind === "function"
         ? { effect: typing.effects.getRow(descriptor.effectRow) }
         : {}),
-    });
-    cache.set(type, fingerprint);
-    return fingerprint;
+    };
+    return id;
   };
+  const rootIds = roots.map(fingerprintType);
   return {
-    types: Array.from(new Set(roots))
-      .sort((left, right) => left - right)
-      .map((type) => [type, fingerprintType(type)]),
-    effects: Array.from(new Set(effectRows))
-      .sort((left, right) => left - right)
-      .map((row) => [row, typing.effects.getRow(row)]),
+    types: { roots: rootIds, descriptors },
+    effects: Array.from(new Set(effectRows)).map((row) => {
+      const effect = typing.effects.getRow(row);
+      return {
+        operations: effect.operations,
+        ...(effect.tailVar ? { tail: { rigid: effect.tailVar.rigid } } : {}),
+      };
+    }),
   };
 };
 const targetMaySuspend = (

@@ -105,6 +105,12 @@ exactly one partition.
 
 The string-overload freshness check runs before every partition command.
 
+The optimizer scorecard path filter includes `packages/compiler/src/semantics`
+and `packages/compiler/src/modules`. Those changes also run
+`npm run test:web-compile-gate`, which compiles the web integration fixture in
+one fresh process under a 3.5 GiB V8 heap and enforces 120 seconds / 4.25 GiB
+peak RSS. Shards cannot mask an aggregate package OOM.
+
 ### Integration
 
 - initial web-package compile test/hook timeouts: 240,000 ms;

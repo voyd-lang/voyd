@@ -2400,10 +2400,7 @@ const evaluateExpressionRaw = (
         if (!expressionCanCarryReference(entry.value, ctx)) {
           return retained;
         }
-        const freshAllocation = expressionProducesFreshRoot(
-          entry.value,
-          ctx,
-        )
+        const freshAllocation = expressionProducesFreshRoot(entry.value, ctx)
           ? new Map<string, ParameterOrigin>([
               [
                 originKey({
@@ -2425,10 +2422,10 @@ const evaluateExpressionRaw = (
           : emptyFlow();
         const stored =
           entry.kind === "field"
-            ? storeFlowAt(
-                unionFlows(flow, freshAllocation),
-                { kind: "field", name: entry.name },
-              )
+            ? storeFlowAt(unionFlows(flow, freshAllocation), {
+                kind: "field",
+                name: entry.name,
+              })
             : (() => {
                 const spreadType = summaryExpressionTypeFor(entry.value, ctx);
                 const resultType = summaryExpressionTypeFor(expr.id, ctx);
@@ -2832,7 +2829,8 @@ const evaluateFactRoot = (
       );
       const hasBinding =
         (ctx.facts.bindingsAfterExpression.get(expression)?.length ?? 0) > 0;
-      const operations = ctx.facts.operationsForExpression.get(expression) ?? [];
+      const operations =
+        ctx.facts.operationsForExpression.get(expression) ?? [];
       if (!hasBinding) {
         operations.forEach((operation) => {
           if (operation.kind === "define") state.delete(operation.symbol);
@@ -3990,8 +3988,7 @@ const returnedOriginsOrBroad = (
 const returnedOriginsWereBroadened = (
   origins: CallableParameterBorrowContract["returnedOrigins"],
 ): boolean =>
-  origins !== undefined &&
-  origins.length > MAX_SUMMARY_PATHS_PER_PARAMETER ||
+  (origins !== undefined && origins.length > MAX_SUMMARY_PATHS_PER_PARAMETER) ||
   origins?.some(
     (origin) =>
       origin.source.length > MAX_SUMMARY_PROJECTION_DEPTH ||
@@ -4021,10 +4018,10 @@ const externalOriginsOrBroad = (
             (origin) => origin.fresh !== true || origin.result.length === 0,
           )
           .map((origin) =>
-          JSON.stringify([
-            origin.endpointAccess ?? "inline",
-            origin.fresh ?? false,
-          ]),
+            JSON.stringify([
+              origin.endpointAccess ?? "inline",
+              origin.fresh ?? false,
+            ]),
           ),
       ),
       (serialized) => {
@@ -4427,6 +4424,7 @@ export type BorrowSummaryDemandTelemetry = {
   worklistEdges: number;
   worklistIterations: number;
   evaluations: number;
+  reusedCallables: number;
 };
 
 export type CallableBorrowContractComputation = {
@@ -4437,6 +4435,10 @@ export type CallableBorrowContractComputation = {
     {
       input: string;
       dependencies: readonly SymbolRef[];
+      dependencyOutputs: readonly (readonly [
+        string,
+        CallableBorrowContract | null,
+      ])[];
       output: CallableBorrowContract;
     }
   >;
@@ -4679,9 +4681,7 @@ export const computeCallableBorrowContracts = ({
   const dirtySummarySymbols = new Set<SymbolId>(
     dirtySymbols === undefined
       ? summarySymbols
-      : Array.from(dirtySymbols).filter((symbol) =>
-          summarySymbols.has(symbol),
-        ),
+      : Array.from(dirtySymbols).filter((symbol) => summarySymbols.has(symbol)),
   );
   const dirtyWorklist =
     dirtySymbols === undefined ? [...summarySymbols] : [...dirtySymbols];
@@ -4832,6 +4832,10 @@ export const computeCallableBorrowContracts = ({
     "borrowing.contract.fullEvaluations",
     evaluationCount,
   );
+  incrementCompilerPerfCounter(
+    "borrowing.summary.reusedCallables",
+    summarySymbols.size - dirtySummarySymbols.size,
+  );
   const detailedCallables = summaryFunctions.length + demandedLambdas.length;
   incrementCompilerPerfCounter(
     "borrowing.summary.effectiveDetailedCallables",
@@ -4872,6 +4876,22 @@ export const computeCallableBorrowContracts = ({
             {
               input: callableFacts?.stableInput ?? `${moduleId}:${symbol}`,
               dependencies: Array.from(queryDependencies.values()),
+              dependencyOutputs: Array.from(
+                queryDependencies,
+                ([key, target]) =>
+                  [
+                    key,
+                    target.moduleId === moduleId
+                      ? (contracts.get(target.symbol) ?? null)
+                      : (dependencies
+                          .get(target.moduleId)
+                          ?.callables.get(target.symbol)?.contract ??
+                        dependencies
+                          .get(target.moduleId)
+                          ?.traitMethodContracts.get(target.symbol) ??
+                        null),
+                  ] as const,
+              ),
               output,
             },
           ] as const;
@@ -4886,6 +4906,7 @@ export const computeCallableBorrowContracts = ({
       worklistEdges: selection.worklistEdges,
       worklistIterations: selection.worklistIterations,
       evaluations: evaluationCount,
+      reusedCallables: summarySymbols.size - dirtySummarySymbols.size,
       demandedSymbols: new Set([
         ...selection.demanded,
         ...demandedLambdas.map(
@@ -4987,10 +5008,7 @@ const dependencyOrderedSolveNodes = <T extends { symbol: SymbolId }>(
     dependents: dependentsByTarget,
     sourceOrder,
   });
-  incrementCompilerPerfCounter(
-    "borrowing.scc.evaluations",
-    components.length,
-  );
+  incrementCompilerPerfCounter("borrowing.scc.evaluations", components.length);
   const componentBySymbol = new Map<SymbolId, number>();
   components.forEach((component, componentIndex) =>
     component.forEach((symbol) =>

@@ -63,7 +63,7 @@ import {
   contractWithResultProvenance,
   inferCallableResultProvenance,
   resultCallableFromLambda,
-} from "./result-provenance.js";
+} from "./callable-result-flow.js";
 
 export const analyzeBorrowing = ({
   hir,
@@ -74,6 +74,7 @@ export const analyzeBorrowing = ({
   dependencies,
   decls,
   checkBodies = true,
+  previousQueries,
 }: {
   hir: HirGraph;
   typing: TypingResult;
@@ -86,6 +87,7 @@ export const analyzeBorrowing = ({
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
   checkBodies?: boolean;
+  previousQueries?: BorrowingResult["queries"];
 }): BorrowingResult => {
   const summariesStartedAt = startCompilerPerfPhase();
   const summaryHir = hirWithTraitDefaultFunctions(hir);
@@ -281,6 +283,7 @@ export const analyzeBorrowing = ({
     initialCompactContracts,
     fullInitialContracts,
     resultProvenance: publishedResults.provenance,
+    previousQueries,
   });
   const capabilities = routing.capabilities;
   const compactFallbacks = routing.compactFallbacks;
@@ -593,11 +596,29 @@ export const analyzeBorrowing = ({
   );
   outputCallables.forEach((output, symbol) => {
     const prior = inferred.queries.get(symbol);
+    const callableDependencies = Array.from(
+      queryDependencies.get(symbol)?.values() ?? [],
+    );
     queries.set(symbol, {
       input:
         prior?.input ??
         `${moduleId}:${symbol}:declared:${JSON.stringify(output)}`,
-      dependencies: Array.from(queryDependencies.get(symbol)?.values() ?? []),
+      dependencies: callableDependencies,
+      dependencyOutputs: callableDependencies.map(
+        (dependency) =>
+          [
+            `${dependency.moduleId}:${dependency.symbol}`,
+            dependency.moduleId === moduleId
+              ? (outputCallables.get(dependency.symbol) ?? null)
+              : (dependencies
+                  .get(dependency.moduleId)
+                  ?.callables.get(dependency.symbol)?.contract ??
+                dependencies
+                  .get(dependency.moduleId)
+                  ?.traitMethodContracts.get(dependency.symbol) ??
+                null),
+          ] as const,
+      ),
       output,
     });
   });

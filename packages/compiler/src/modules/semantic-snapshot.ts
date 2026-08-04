@@ -31,6 +31,37 @@ export const cloneSemanticsForTypingState = ({
       runtimeIdentityGuards: new Map(semantics.borrowing.runtimeIdentityGuards),
       mutableStorageSymbols: new Set(semantics.borrowing.mutableStorageSymbols),
       diagnostics: [...semantics.borrowing.diagnostics],
+      ...(semantics.borrowing.analysisMetrics
+        ? { analysisMetrics: semantics.borrowing.analysisMetrics }
+        : {}),
+      ...(semantics.borrowing.summaryDemand
+        ? {
+            summaryDemand: {
+              ...semantics.borrowing.summaryDemand,
+              demandedSymbols: new Set(
+                semantics.borrowing.summaryDemand.demandedSymbols,
+              ),
+            },
+          }
+        : {}),
+      ...(semantics.borrowing.queries
+        ? {
+            queries: new Map(
+              Array.from(semantics.borrowing.queries, ([symbol, query]) => [
+                symbol,
+                {
+                  ...query,
+                  dependencies: query.dependencies.map((entry) => ({
+                    ...entry,
+                  })),
+                  dependencyOutputs: query.dependencyOutputs.map(
+                    (entry) => [...entry] as const,
+                  ),
+                },
+              ]),
+            ),
+          }
+        : {}),
     },
     typing: {
       arena,

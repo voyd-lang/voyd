@@ -76,12 +76,12 @@ guard, and equal runtime identities produce the required deterministic panic.
 
 ## Assessment
 
-The proposal adds a substantial compile-time and public-summary-size cost. That
-cost comes from whole-program borrow analysis plus versioned,
-privacy-preserving callable summaries for std and user modules. It is explicit and accepted for
-this proposal because it buys separate-compilation safety across traits,
-generics, wrappers, effects, defaults, and re-exports; the completion gate has
-no regression threshold for these new capabilities.
+The proposal originally added a substantial compile-time and public-summary
+cost. That result is no longer accepted merely because the feature lacked a
+threshold. Semantic changes now enter the alternating fresh-process optimizer
+scorecard, with the same 20%/250 ms compile and 15%/32 MiB RSS tolerances. A
+separate whole-web-package compile must finish within 120 seconds and 4.25 GiB
+peak RSS under a 3.5 GiB V8 heap.
 
 Runtime and generated-code costs remain bounded:
 
@@ -98,20 +98,30 @@ summary schema and `ProgramCodegenView` boundary.
 
 ## Source-compilation behavior
 
-Fresh SDK instances and compiler processes load and analyze the standard
-library from source. Against the original V-448 baseline medians of 907.00 ms
+Fresh SDK instances still load and type the standard library from source.
+Borrow analysis for unchanged dependencies can be restored from the versioned
+`voyd.compiler-dependency-borrow-cache` artifact without restoring a
+compiler-private type arena or `SemanticsPipelineResult`. Against the original V-448 baseline medians of 907.00 ms
 unoptimized and 1,108.87 ms in release mode, the later seven-sample source
 measurements were 2,097.13 ms and 2,513.49 ms respectively: 131.22% and 126.67%
 slower. The source-analysis regression remains the representative cold-compile
 behavior for default-prelude, package-heavy, and test-enabled workflows.
 
-A reused SDK instance still keeps unchanged std and package semantics in the
-in-process `CompilerDependencySnapshotCache`. Application edits can therefore
-reuse dependency typing state and incremental semantic inputs, while fresh SDKs
-repeat dependency analysis and every compile repeats whole-program codegen.
-Smaller public package contracts, incremental callable analysis, and reusable
-dependency codegen are tracked under
-[V-462](https://linear.app/voyd-lang/issue/V-462).
+A reused SDK instance keeps the optional compiler-private typing/codegen
+snapshot in process. Across processes, callers can persist
+`sdk.exportCompilerArtifact()` and pass it to
+`createSdk({ compilerArtifact })`. Per-module source fingerprints and reverse
+dependency invalidation select reusable borrowing results; exact in-process
+query inputs and SHA-256-compacted persisted inputs/dependency outputs handle
+edits within a recomputed module. Public
+exports use a separate `voyd.package-semantic-interface` contract table, so
+re-exports reference canonical summary ids instead of owning another summary.
+
+On the report machine, a JSON-round-tripped artifact reduced the focused fresh
+SDK compile from 1,967 ms to 1,003 ms (49.0%); exporting it took 5.8 ms and the
+artifact was 3.05 MB. This is
+the supported durable boundary. The removed 5.2 MB full semantic snapshot is
+not restored as a package ABI.
 
 ## Hosted CI impact
 
@@ -119,20 +129,21 @@ The feature's package-heavy compilations also affected hosted CI. These are the
 durable measurements behind the temporary limits documented in the
 [CI guide](./ci.md):
 
-| Area | Observed impact |
-| --- | --- |
-| Tooling | `bootstrap.test.ts` reached 208,119 ms and `project.test.ts` reached 190,624 ms. |
-| SDK/core | The web-helper test reached 260,705 ms, `sdk-node.test.ts` reached 349,978 ms, and the affected core command reached 523,746 ms. |
-| Integration | A healthy run reached 394,740 ms wall; its slowest files were VX DOM at 256,162 ms, Wasm validation at 106,437 ms, and web framework at 91,427 ms. |
+| Area        | Observed impact                                                                                                                                                                                |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tooling     | `bootstrap.test.ts` reached 208,119 ms and `project.test.ts` reached 190,624 ms.                                                                                                               |
+| SDK/core    | The web-helper test reached 260,705 ms, `sdk-node.test.ts` reached 349,978 ms, and the affected core command reached 523,746 ms.                                                               |
+| Integration | A healthy run reached 394,740 ms wall; its slowest files were VX DOM at 256,162 ms, Wasm validation at 106,437 ms, and web framework at 91,427 ms.                                             |
 | Web package | The monolithic compile exhausted a 4.06 GiB heap after 188.8 seconds and still failed with a 6 GiB heap after 212.4 seconds. Per-file isolation bounded memory but left a 27:42 critical path. |
 
 Compile-level eight-way web partitioning reduced the subsequent hosted workflow
 from 27:42 in [run 30611360104](https://github.com/voyd-lang/voyd/actions/runs/30611360104)
 to 7:07 in
 [run 30661296540](https://github.com/voyd-lang/voyd/actions/runs/30661296540).
-All 19 jobs passed; individual web partitions completed in 2:43–6:07. This
-fixes feedback latency and memory isolation, but it does not remove the
-underlying package-analysis costs above.
+All 19 jobs passed; individual web partitions completed in 2:43–6:07. Sharding
+remains the throughput path. The required whole-package compile gate also keeps
+the aggregate package workload visible and fails on timeout, OOM, or RSS-budget
+breach.
 
 Removal of every temporary performance allowance is tracked exclusively by
 [V-468](https://linear.app/voyd-lang/issue/V-468).
@@ -152,10 +163,10 @@ and mode. Each fresh process compiled std from source. Raw samples and
 machine-readable counters are in
 [`v472-source-benchmark.json`](./v472-source-benchmark.json).
 
-| Seven-sample source median | `876f1680` | PR `1488efd4` | V-472 working tree | V-472 vs baseline | V-472 vs PR |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Unoptimized | 1,373.20 ms | 2,112.87 ms | 2,070.98 ms | +697.78 ms (+50.81%) | -41.88 ms (-1.98%) |
-| Release | 1,919.76 ms | 2,659.35 ms | 2,617.76 ms | +698.00 ms (+36.36%) | -41.59 ms (-1.56%) |
+| Seven-sample source median |  `876f1680` | PR `1488efd4` | V-472 working tree |    V-472 vs baseline |        V-472 vs PR |
+| -------------------------- | ----------: | ------------: | -----------------: | -------------------: | -----------------: |
+| Unoptimized                | 1,373.20 ms |   2,112.87 ms |        2,070.98 ms | +697.78 ms (+50.81%) | -41.88 ms (-1.98%) |
+| Release                    | 1,919.76 ms |   2,659.35 ms |        2,617.76 ms | +698.00 ms (+36.36%) | -41.59 ms (-1.56%) |
 
 The implementation reduced effective detailed contract analysis from
 1,015/1,052 callables on the PR to 762/887, checked 395 bodies for conflicts,
@@ -189,14 +200,14 @@ each revision and mode. Each fresh process compiled std from source. Raw samples
 and machine-readable routing, work, memory, and Wasm measurements are in
 [`v473-source-benchmark.json`](./v473-source-benchmark.json).
 
-| Seven-sample source median | PR head `15077084` | V-473 | Change |
-| --- | ---: | ---: | ---: |
-| Unoptimized compile | 2,049.82 ms | 2,106.16 ms | +56.34 ms (+2.75%) |
-| Release compile | 2,620.68 ms | 2,675.32 ms | +54.63 ms (+2.08%) |
-| Unoptimized peak heap | 680,139,560 B | 666,047,048 B | -2.07% |
-| Release peak heap | 698,993,864 B | 691,122,992 B | -1.13% |
-| Unoptimized RSS growth | 128,794,624 B | 133,693,440 B | +3.80% |
-| Release RSS growth | 157,319,168 B | 164,184,064 B | +4.36% |
+| Seven-sample source median | PR head `15077084` |         V-473 |             Change |
+| -------------------------- | -----------------: | ------------: | -----------------: |
+| Unoptimized compile        |        2,049.82 ms |   2,106.16 ms | +56.34 ms (+2.75%) |
+| Release compile            |        2,620.68 ms |   2,675.32 ms | +54.63 ms (+2.08%) |
+| Unoptimized peak heap      |      680,139,560 B | 666,047,048 B |             -2.07% |
+| Release peak heap          |      698,993,864 B | 691,122,992 B |             -1.13% |
+| Unoptimized RSS growth     |      128,794,624 B | 133,693,440 B |             +3.80% |
+| Release RSS growth         |      157,319,168 B | 164,184,064 B |             +4.36% |
 
 Routing moved 32 of 481 callables off the flow-sensitive tier: no-analysis
 callables increased from 287 to 305 and transient callables from 119 to 133.
