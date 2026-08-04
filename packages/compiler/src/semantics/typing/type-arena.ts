@@ -209,11 +209,6 @@ export interface TypeArena {
   unify(a: TypeId, b: TypeId, ctx: UnificationContext): UnificationResult;
   substitute(type: TypeId, subst: Substitution): TypeId;
   widen(type: TypeId, constraint: ConstraintSet): TypeId;
-  counts(): {
-    types: number;
-    schemes: number;
-    typeParameters: number;
-  };
   snapshot(): TypeArenaSnapshot;
   clone(): TypeArena;
 }
@@ -2109,11 +2104,6 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     unify,
     substitute,
     widen,
-    counts: () => ({
-      types: nextTypeId,
-      schemes: nextSchemeId,
-      typeParameters: nextTypeParamId,
-    }),
     snapshot: snapshotArena,
     clone: () => createTypeArena(snapshotArena()),
   };

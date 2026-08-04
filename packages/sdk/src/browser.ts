@@ -3,7 +3,7 @@ import { loadModuleGraph } from "@voyd-lang/compiler/pipeline-browser.js";
 import { isCompilerPerfEnabled } from "@voyd-lang/compiler/perf.js";
 import {
   compileWithLoader,
-  createCompilerReuseCacheForOptions,
+  createCompilerReuseCache,
   exportCompilerReuseArtifact,
   type CompilerReuseCache,
 } from "./shared/compile.js";
@@ -33,7 +33,7 @@ import {
 } from "./compiler-browser.js";
 
 export const createSdk = (options: CreateSdkOptions = {}): VoydSdk => {
-  const compilerCache = createCompilerReuseCacheForOptions(options);
+  const compilerCache = createCompilerReuseCache(options);
   return {
     compile: (options) => compileSdk(options, compilerCache),
     run: runWithHandlers,
@@ -202,7 +202,6 @@ export * from "@voyd-lang/lib/wasm.js";
 export type {
   CompileOptions,
   CompileResult,
-  CompilerCachePolicy,
   CreateSdkOptions,
   DefaultAdapterOptions,
   EffectsInfo,

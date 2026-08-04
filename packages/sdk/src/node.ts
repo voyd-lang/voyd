@@ -13,7 +13,7 @@ import { isCompilerPerfEnabled } from "@voyd-lang/compiler/perf.js";
 import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import {
   compileWithLoader,
-  createCompilerReuseCacheForOptions,
+  createCompilerReuseCache,
   exportCompilerReuseArtifact,
   type CompilerReuseCache,
 } from "./shared/compile.js";
@@ -51,7 +51,7 @@ const DEFAULT_ENTRY = "index.voyd";
 const DEFAULT_VIRTUAL_ROOT = ".voyd";
 
 export const createSdk = (options: CreateSdkOptions = {}): VoydSdk => {
-  const compilerCache = createCompilerReuseCacheForOptions(options);
+  const compilerCache = createCompilerReuseCache(options);
   return {
     compile: (options) => compileSdk(options, compilerCache),
     run: runWithHandlers,
@@ -572,7 +572,6 @@ const createOverlayModuleHost = ({
 export type {
   CompileOptions,
   CompileResult,
-  CompilerCachePolicy,
   CreateSdkOptions,
   DefaultAdapterOptions,
   EffectsInfo,

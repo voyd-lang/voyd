@@ -25,13 +25,6 @@ import { getModuleSccGroups } from "./scc.js";
 import { collectCyclicModuleExportSurfaces } from "./cyclic-export-surfaces.js";
 import { cloneSemanticsMapForTypingState } from "./semantic-snapshot.js";
 import type { BorrowingResult } from "../semantics/borrowing/index.js";
-import {
-  incrementCompilerPerfCounter,
-  isCompilerPerfEnabled,
-  markCompilerPerfPhaseDuration,
-  recordCompilerPerfMemory,
-  startCompilerPerfPhase,
-} from "../perf.js";
 
 export type SemanticsTypingState = {
   arena: TypeArena;
@@ -268,8 +261,6 @@ export const analyzeModuleSemantics = ({
     });
   }
 
-  recordSemanticStructure({ semantics, typingState: activeTypingState });
-
   return {
     semantics,
     diagnostics,
@@ -277,44 +268,6 @@ export const analyzeModuleSemantics = ({
     typingState: activeTypingState,
     dependencySnapshot,
   };
-};
-
-const recordSemanticStructure = ({
-  semantics,
-  typingState,
-}: {
-  semantics: ReadonlyMap<string, SemanticsPipelineResult>;
-  typingState: SemanticsTypingState;
-}): void => {
-  incrementCompilerPerfCounter(
-    "compiler.semantics.module.count",
-    semantics.size,
-  );
-  if (isCompilerPerfEnabled()) {
-    incrementCompilerPerfCounter(
-      "compiler.hir.node.count",
-      Array.from(semantics.values()).reduce(
-        (count, entry) =>
-          count +
-          1 +
-          entry.hir.items.size +
-          entry.hir.statements.size +
-          entry.hir.expressions.size,
-        0,
-      ),
-    );
-    const typeCounts = typingState.arena.counts();
-    incrementCompilerPerfCounter("compiler.type.count", typeCounts.types);
-    incrementCompilerPerfCounter(
-      "compiler.type_scheme.count",
-      typeCounts.schemes,
-    );
-    incrementCompilerPerfCounter(
-      "compiler.type_parameter.count",
-      typeCounts.typeParameters,
-    );
-  }
-  recordCompilerPerfMemory("semantics.analyzed");
 };
 
 const orderSccGroupsForDependencySnapshot = ({
@@ -425,8 +378,6 @@ const captureReusableDependencySnapshot = ({
     return undefined;
   }
 
-  const startedAt = startCompilerPerfPhase();
-  recordCompilerPerfMemory("dependency_snapshot.before");
   const arenaSnapshot = arena.snapshot();
   const effectInternerSnapshot = effectInterner.snapshotInterner();
   const snapshotArena = createTypeArena(arenaSnapshot);
@@ -436,26 +387,6 @@ const captureReusableDependencySnapshot = ({
     arena: snapshotArena,
     effectInterner: snapshotEffectInterner,
   });
-
-  incrementCompilerPerfCounter(
-    "compiler.dependency_snapshot.module.count",
-    entries.length,
-  );
-  incrementCompilerPerfCounter(
-    "compiler.dependency_snapshot.type.count",
-    arenaSnapshot.descriptors.length,
-  );
-  if (isCompilerPerfEnabled()) {
-    incrementCompilerPerfCounter(
-      "compiler.dependency_snapshot.query.count",
-      Array.from(semanticsSnapshot.values()).reduce(
-        (count, entry) => count + (entry.borrowing.queries?.size ?? 0),
-        0,
-      ),
-    );
-  }
-  markCompilerPerfPhaseDuration("captureDependencySnapshot", startedAt);
-  recordCompilerPerfMemory("dependency_snapshot.after");
 
   return {
     moduleIds: entries.map(([moduleId]) => moduleId),

@@ -65,51 +65,6 @@ export const incrementCompilerPerfCounter = (
   counters.set(name, (counters.get(name) ?? 0) + amount);
 };
 
-/** Record a low-overhead process memory checkpoint in the active perf summary. */
-export const recordCompilerPerfMemory = (name: string): void => {
-  if (!PERF_ENABLED) {
-    return;
-  }
-
-  const processValue = (
-    globalThis as {
-      process?: {
-        memoryUsage?: () => {
-          rss: number;
-          heapTotal: number;
-          heapUsed: number;
-          external: number;
-          arrayBuffers?: number;
-        };
-      };
-    }
-  ).process;
-  const memory = processValue?.memoryUsage?.();
-  if (!memory) {
-    return;
-  }
-
-  incrementCompilerPerfCounter(`compiler.memory.${name}.rss_bytes`, memory.rss);
-  incrementCompilerPerfCounter(
-    `compiler.memory.${name}.heap_total_bytes`,
-    memory.heapTotal,
-  );
-  incrementCompilerPerfCounter(
-    `compiler.memory.${name}.heap_used_bytes`,
-    memory.heapUsed,
-  );
-  incrementCompilerPerfCounter(
-    `compiler.memory.${name}.external_bytes`,
-    memory.external,
-  );
-  if (typeof memory.arrayBuffers === "number") {
-    incrementCompilerPerfCounter(
-      `compiler.memory.${name}.array_buffers_bytes`,
-      memory.arrayBuffers,
-    );
-  }
-};
-
 export const startCompilerPerfPhase = (): number =>
   PERF_ENABLED ? performance.now() : 0;
 

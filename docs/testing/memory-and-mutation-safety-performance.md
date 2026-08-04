@@ -124,7 +124,7 @@ artifact was 3.05 MB. This is
 the supported durable boundary. The removed 5.2 MB full semantic snapshot is
 not restored as a package ABI.
 
-### Cache lifetime and whole-web remeasurement
+### Cache lifetime
 
 The SDK now makes cache retention explicit:
 
@@ -139,44 +139,9 @@ and repeated SDK workloads. In-memory snapshot commit transfers the already
 isolated dependency clone into the cache instead of cloning it a second time.
 Borrow-artifact serialization is deferred until `exportCompilerArtifact()`.
 
-Measurements below used the same Apple M4 Pro / 48 GiB machine and Node.js
-24.18.0. The before revision is `c75466d2`; the after revision is this change.
-Each row is a fresh process unless it says same SDK.
-
-| Mode                                  |                              Before |            After |                                      Peak RSS / artifact size |
-| ------------------------------------- | ----------------------------------: | ---------------: | ------------------------------------------------------------: |
-| Whole-web cold one-shot               |                           66,023 ms | 60,183 ms median |   4,286,939,136 B before; 4,204,691,456–4,303,470,592 B after |
-| Focused cold, cache disabled          |                                   — |   1,865–1,895 ms |                                 4,144,676,864–4,236,836,864 B |
-| Focused warm, same SDK                |                                   — |       437–446 ms | 4,234,231,808–4,273,405,952 B process peak across cold + warm |
-| Focused artifact-seeded fresh process |                 1,003 ms historical |   1,307–1,338 ms |                                 4,218,306,560–4,220,305,408 B |
-| Lazy artifact materialization         | 5.8 ms historical eager-export cost |       165–194 ms |                                                   3,051,697 B |
-
-Run the maintained cache-mode benchmark with `npm run
-bench:compiler-cache`. The historical artifact timing measured export after
-eager artifact work had already happened during compile; the new timing
-contains the complete serialization and integrity-hash cost. That work no
-longer overlaps codegen unless the caller explicitly exports while another
-compile is active.
-
-The cache-disabled whole-web perf trace attributed 1.20 s to graph loading,
-54.51 s to semantic analysis, 0.44 s to monomorphization, 0.13 s to
-`ProgramCodegenView`, 3.46 s to codegen, and 0.16 s to binary emission. Its
-sampled RSS was 4.12 GB after graph loading, 3.21 GB after semantics, 3.24 GB
-after monomorphization, 3.26 GB after the codegen view, and 3.36 GB after byte
-emission/disposal. The focused cache-enabled trace measured dependency-snapshot
-capture at 9.45 ms cold and 5.55 ms warm for 48 modules, 7,153 dependency-arena
-types, and 914 borrowing queries.
-
-The four retained whole-web samples were 59,317 ms, 59,414 ms, 60,952 ms, and
-61,162 ms. The 60,183 ms median is 8.8% below the baseline. Peak RSS varied by
-roughly 100 MB between those runs; the final validation sample was
-4,301,062,144 B, effectively the 4,286,939,136 B baseline. No durable cold
-peak-RSS win is claimed. The dominant peak remains process/native
-initialization plus whole-program semantic state. Delaying Binaryen
-initialization until after semantics increased peak RSS to 5,420,761,088 B and
-failed the unchanged 4.25 GiB gate, so that experiment was reverted. Explicit
-Binaryen disposal is retained because it bounds native lifetime after bytes
-are copied, especially across repeated SDK compiles.
+The cache-disabled whole-web gate had a 60.2-second median after this change,
+down from 66.0 seconds. Peak RSS remained approximately 4.29 GB, so this work
+does not claim a cold-memory reduction.
 
 ## Hosted CI impact
 

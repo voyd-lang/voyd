@@ -6,7 +6,6 @@ import {
   createCompilerDependencySnapshotCache,
   exportCompilerDependencyBorrowArtifact,
   prepareDependencySnapshotReuse,
-  type CompilerDependencyBorrowArtifact,
   type CompilerDependencySnapshotCache,
 } from "@voyd-lang/compiler/modules/dependency-snapshot-cache.js";
 import type {
@@ -24,8 +23,6 @@ import {
   addCompilerPerfPhaseDuration,
   completeCompilerPerfSession,
   markCompilerPerfPhaseDuration,
-  incrementCompilerPerfCounter,
-  recordCompilerPerfMemory,
   startCompilerPerfPhase,
   startCompilerPerfSession,
 } from "@voyd-lang/compiler/perf.js";
@@ -56,8 +53,7 @@ export type CompilerReuseCache = CompilerDependencySnapshotCache;
 const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === "error");
 
-export const createCompilerReuseCache = createCompilerDependencySnapshotCache;
-export const createCompilerReuseCacheForOptions = (
+export const createCompilerReuseCache = (
   options: CreateSdkOptions,
 ): CompilerReuseCache | undefined => {
   const policy = (options as { compilerCache?: unknown }).compilerCache;
@@ -69,11 +65,10 @@ export const createCompilerReuseCacheForOptions = (
   }
   return policy === "none"
     ? undefined
-    : createCompilerReuseCache(options.compilerArtifact);
+    : createCompilerDependencySnapshotCache(options.compilerArtifact);
 };
 export const exportCompilerReuseArtifact =
   exportCompilerDependencyBorrowArtifact;
-export type CompilerReuseArtifact = CompilerDependencyBorrowArtifact;
 
 export const compileWithLoader = async ({
   entryPath,
@@ -140,11 +135,6 @@ export const compileWithLoader = async ({
         includeTests: shouldIncludeTests,
       });
       perf.mark("loadModuleGraph", loadStartedAt);
-      incrementCompilerPerfCounter(
-        "compiler.graph.module.count",
-        graph.modules.size,
-      );
-      recordCompilerPerfMemory("graph.loaded");
     } catch (error) {
       perf.mark("loadModuleGraph", loadStartedAt);
       return perf.complete({
@@ -324,7 +314,6 @@ const createCompilePerfScope = ({
   const start = startCompilerPerfPhase;
   const mark = markCompilerPerfPhaseDuration;
   const complete = <T extends CompileArtifacts>(result: T): T => {
-    recordCompilerPerfMemory("compile.finalize");
     completeCompilerPerfSession({
       session,
       success: result.success,
@@ -348,10 +337,5 @@ const emitSdkWasm = async (
     };
   } finally {
     result.module.dispose();
-    recordCompilerPerfMemory(
-      options.codegenOptions?.testMode
-        ? "emit.tests.after_dispose"
-        : "emit.after_dispose",
-    );
   }
 };

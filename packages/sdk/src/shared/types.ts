@@ -69,18 +69,16 @@ export type CompileOptions = {
   emitWasmText?: boolean;
 };
 
-export type CompilerCachePolicy = "memory" | "none";
-
 export type CreateSdkOptions =
   | {
       compilerArtifact?: CompilerDependencyBorrowArtifact;
       /** Retain reusable compiler state between calls. Defaults to `memory`. */
-      compilerCache?: Extract<CompilerCachePolicy, "memory">;
+      compilerCache?: "memory";
     }
   | {
       compilerArtifact?: never;
       /** Disable reusable compiler state for one-shot compilation. */
-      compilerCache: Extract<CompilerCachePolicy, "none">;
+      compilerCache: "none";
     };
 
 export type CompileSuccessResult = {

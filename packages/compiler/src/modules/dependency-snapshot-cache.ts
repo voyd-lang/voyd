@@ -13,14 +13,7 @@ import {
   createTypeArena,
   type TypeArenaSnapshot,
 } from "../semantics/typing/type-arena.js";
-import {
-  completeCompilerPerfSession,
-  incrementCompilerPerfCounter,
-  markCompilerPerfPhaseDuration,
-  recordCompilerPerfMemory,
-  startCompilerPerfPhase,
-  startCompilerPerfSession,
-} from "../perf.js";
+import { incrementCompilerPerfCounter } from "../perf.js";
 import { cloneSemanticsMapForTypingState } from "./semantic-snapshot.js";
 import type {
   ModuleDependency,
@@ -128,33 +121,7 @@ export const exportCompilerDependencyBorrowArtifact = (
     return cache.borrowArtifact;
   }
 
-  const session = startCompilerPerfSession({
-    entryPath: "<compiler-artifact>",
-  });
-  try {
-    const artifact = materializeDependencyBorrowArtifact(cache.dependency);
-    cache.borrowArtifact = artifact;
-    completeCompilerPerfSession({
-      session,
-      success: true,
-      diagnostics: 0,
-    });
-    return artifact;
-  } catch (error) {
-    completeCompilerPerfSession({
-      session,
-      success: false,
-      diagnostics: 0,
-    });
-    throw error;
-  }
-};
-
-const materializeDependencyBorrowArtifact = (
-  dependency: CompilerDependencySnapshotEntry,
-): CompilerDependencyBorrowArtifact => {
-  const startedAt = startCompilerPerfPhase();
-  recordCompilerPerfMemory("artifact.before");
+  const dependency = cache.dependency;
   const modules = dependency.moduleIds.flatMap((moduleId) => {
     const borrowing = dependency.semantics.get(moduleId)?.borrowing;
     const fingerprint = dependency.moduleFingerprints.get(moduleId);
@@ -168,24 +135,14 @@ const materializeDependencyBorrowArtifact = (
         ]
       : [];
   });
-  const artifact = {
+  cache.borrowArtifact = {
     schema: COMPILER_BORROW_CACHE_SCHEMA,
     version: COMPILER_BORROW_CACHE_VERSION,
     key: dependency.borrowArtifactKey,
     payloadHash: persistedBorrowQueryInput(JSON.stringify(modules)),
     modules,
-  } satisfies CompilerDependencyBorrowArtifact;
-  incrementCompilerPerfCounter("compiler.dependency_borrow_cache.materialize");
-  incrementCompilerPerfCounter(
-    "compiler.dependency_borrow_cache.module.count",
-    modules.length,
-  );
-  markCompilerPerfPhaseDuration(
-    "materializeDependencyBorrowArtifact",
-    startedAt,
-  );
-  recordCompilerPerfMemory("artifact.after");
-  return artifact;
+  };
+  return cache.borrowArtifact;
 };
 
 export const prepareDependencySnapshotReuse = ({
@@ -310,7 +267,6 @@ export const commitDependencySnapshot = ({
   };
   prepared.cache.borrowArtifact = undefined;
   incrementCompilerPerfCounter("compiler.dependency_snapshot.write");
-  recordCompilerPerfMemory("dependency_snapshot.commit");
 };
 
 const reusableBorrowingFromArtifact = ({

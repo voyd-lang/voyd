@@ -37,10 +37,8 @@ import { formatEffectRow } from "./semantics/effects/format.js";
 import {
   completeCompilerPerfSession,
   isCompilerPerfEnabled,
-  incrementCompilerPerfCounter,
   markCompilerPerfPhaseDuration,
   recordCompilerPerfDuration,
-  recordCompilerPerfMemory,
   startCompilerPerfPhase,
   startCompilerPerfSession,
 } from "./perf.js";
@@ -459,10 +457,8 @@ const prepareProgramForCodegen = ({
   entryModuleId,
   linkSemantics,
   metricPrefix,
-  memoryPrefix,
 }: EmitProgramOptions & {
   metricPrefix: "emit" | "emit_fallback";
-  memoryPrefix: string;
 }): PreparedProgramForCodegen => {
   const lowerStartedAt = startCompilerPerfPhase();
   const { orderedModules, entry } = lowerProgram({ graph, semantics });
@@ -478,8 +474,6 @@ const prepareProgramForCodegen = ({
   if (modules.length === 0) {
     throw new Error("No semantics available for codegen");
   }
-  incrementCompilerPerfCounter("compiler.codegen.module.count", modules.length);
-  recordCompilerPerfMemory(`${memoryPrefix}.before_monomorphize`);
 
   const linkStartedAt = startCompilerPerfPhase();
   const monomorphized =
@@ -491,11 +485,6 @@ const prepareProgramForCodegen = ({
     name: `${metricPrefix}.link_semantics.ms`,
     startedAt: linkStartedAt,
   });
-  incrementCompilerPerfCounter(
-    "compiler.codegen.function_instance.count",
-    monomorphized.instances.length,
-  );
-  recordCompilerPerfMemory(`${memoryPrefix}.after_monomorphize`);
 
   const viewStartedAt = startCompilerPerfPhase();
   const program = buildProgramCodegenView(modules, {
@@ -507,11 +496,6 @@ const prepareProgramForCodegen = ({
     name: `${metricPrefix}.build_codegen_view.ms`,
     startedAt: viewStartedAt,
   });
-  incrementCompilerPerfCounter(
-    "compiler.codegen.view_module.count",
-    program.modules.size,
-  );
-  recordCompilerPerfMemory(`${memoryPrefix}.after_codegen_view`);
 
   if (!isOptimizationEnabled(codegenOptions)) {
     return { entryModuleId: targetModuleId, program };
@@ -550,7 +534,6 @@ export const emitProgram = async ({
     entryModuleId,
     linkSemantics,
     metricPrefix: "emit",
-    memoryPrefix: codegenOptions?.testMode ? "emit.tests" : "emit",
   });
 
   const codegenLoadStartedAt = startCompilerPerfPhase();
@@ -569,17 +552,10 @@ export const emitProgram = async ({
     optimization: prepared.optimization?.facts,
   });
   markCompilerPerfPhaseDuration("codegenProgram", codegenStartedAt);
-  const memoryPrefix = codegenOptions?.testMode ? "emit.tests" : "emit";
-  recordCompilerPerfMemory(`${memoryPrefix}.after_codegen_program`);
   try {
     const emitStartedAt = startCompilerPerfPhase();
     const wasm = result.wasm ?? emitBinary(result.module);
     markCompilerPerfPhaseDuration("emitBinary", emitStartedAt);
-    incrementCompilerPerfCounter(
-      "compiler.codegen.wasm.bytes",
-      wasm.byteLength,
-    );
-    recordCompilerPerfMemory(`${memoryPrefix}.after_binary`);
     recordCompilerPerfDuration({
       name: "emit.codegen_program.ms",
       startedAt: codegenStartedAt,
@@ -616,7 +592,6 @@ export const emitProgramWithContinuationFallback = async ({
     entryModuleId,
     linkSemantics,
     metricPrefix: "emit_fallback",
-    memoryPrefix: "emit_fallback",
   });
 
   const loadCodegenStartedAt = isCompilerPerfEnabled() ? performance.now() : 0;
@@ -660,7 +635,6 @@ export const emitProgramWithContinuationFallback = async ({
   } finally {
     preferred.module.dispose();
     fallback?.module.dispose();
-    recordCompilerPerfMemory("emit_fallback.after_dispose");
   }
 };
 
@@ -744,11 +718,6 @@ export const compileProgramWithLoader = async (
   try {
     graph = await loadModuleGraph(options);
     markCompilerPerfPhaseDuration("loadModuleGraph", loadStartedAt);
-    incrementCompilerPerfCounter(
-      "compiler.graph.module.count",
-      graph.modules.size,
-    );
-    recordCompilerPerfMemory("graph.loaded");
   } catch (error) {
     markCompilerPerfPhaseDuration("loadModuleGraph", loadStartedAt);
     return complete(
@@ -834,7 +803,6 @@ export const compileProgramWithLoader = async (
       );
     } finally {
       wasmResult.module.dispose();
-      recordCompilerPerfMemory("emit.after_dispose");
     }
   } catch (error) {
     markCompilerPerfPhaseDuration("emitProgram", emitStartedAt);

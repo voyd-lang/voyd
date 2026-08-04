@@ -59,15 +59,5 @@ describe("SDK compiler perf instrumentation", () => {
         "optimize.pass.4.whole-program-specialization-pruning.ms"
       ],
     ).toBeGreaterThanOrEqual(0);
-    expect(summary.counters["compiler.graph.module.count"]).toBeGreaterThan(0);
-    expect(
-      summary.counters["compiler.memory.graph.loaded.rss_bytes"],
-    ).toBeGreaterThan(0);
-    expect(
-      summary.counters["compiler.memory.emit.after_dispose.rss_bytes"],
-    ).toBeGreaterThan(0);
-    expect(
-      summary.counters["compiler.memory.compile.finalize.heap_used_bytes"],
-    ).toBeGreaterThan(0);
   });
 });
