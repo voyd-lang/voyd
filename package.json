@@ -44,6 +44,7 @@
     "bench:release:v0.3.0": "node scripts/release/benchmark-v0.3.0.mjs",
     "bench:compiler-latency": "tsx --conditions=development scripts/bench-v375-compiler-latency.ts && npm run --workspace @voyd-lang/compiler bench:typing",
     "bench:memory-safety": "node --import tsx --conditions=development scripts/bench-memory-mutation-safety.ts",
+    "bench:web-openapi": "npm run --workspace @voyd-lang/performance-tests bench:web-openapi --",
     "test:web-compile-gate": "node scripts/testing/run-web-compile-gate.mjs",
     "typecheck": "turbo run typecheck --affected",
     "lint": "turbo run lint --affected --parallel",

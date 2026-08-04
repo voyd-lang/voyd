@@ -9,6 +9,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "echo 'performance tests are opt-in'",
     "test:perf": "VOYD_RUN_PERF_SMOKE=1 vitest run --config ../../vitest.config.ts --testTimeout 300000 --hookTimeout 120000 src",
+    "bench:web-openapi": "node scripts/web-openapi-package-scale.mjs",
     "lint": "echo 'no lint configured'"
   },
   "dependencies": {
