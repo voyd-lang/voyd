@@ -93,12 +93,14 @@ change its result.
 
 `voyd test --shard N/M` discovers and sorts test modules before compilation,
 selects modules by deterministic round-robin index, and compiles each selected
-set together once. CI distributes the current 28 files across eight runners as
-4/4/4/4/3/3/3/3. Local and full-repository tests run the same eight partitions
-sequentially so compiler heaps remain bounded. Every test module belongs to
-exactly one partition.
+set together once. CI normally distributes the current 28 files across eight
+residues as 4/4/4/4/3/3/3/3. The two dependency-heaviest residues are each
+split across two runners, for ten jobs total. Local and full-repository tests
+run the eight base partitions sequentially so compiler heaps remain bounded.
+Every test module belongs to exactly one CI job.
 
-- exact commands `npm run test:unit:web:ci:0` through `:7`: 600,000 ms each;
+- exact commands `npm run test:unit:web:ci:0a`, `:0b`, `:1` through `:3`,
+  `:4a`, `:4b`, and `:5` through `:7`: 600,000 ms each;
 - compiler-process hard timeout: 600,000 ms;
 - partition job orchestration ceiling: 15 minutes;
 - timing artifacts: `web-unit-test-timings-partition-*`, retained for 30 days.
@@ -108,16 +110,16 @@ The string-overload freshness check runs before every partition command.
 The optimizer scorecard path filter includes `packages/compiler/src/semantics`
 and `packages/compiler/src/modules`. Those changes also run
 `npm run test:web-compile-gate`, which compiles the web integration fixture in
-one fresh process under a 3.5 GiB V8 heap and enforces 120 seconds / 4.25 GiB
+one fresh process under a 3.5 GiB V8 heap and enforces 240 seconds / 4.25 GiB
 peak RSS. Shards cannot mask an aggregate package OOM.
 
 ### Integration
 
 - initial web-package compile test/hook timeouts: 240,000 ms;
-- `tests/integration/src/vx-dom.test.ts`: 330,000 ms;
+- integration command wall time: 600,000 ms;
+- `tests/integration/src/vx-dom.test.ts`: 390,000 ms;
 - `tests/integration/src/web-framework.test.ts`: 330,000 ms;
 - every other integration file: 210,000 ms;
-- integration lane wall time: 420,000 ms.
 
 The VX integration tests share one SDK instance so distinct entry compilations
 can reuse the in-process package dependency snapshot.

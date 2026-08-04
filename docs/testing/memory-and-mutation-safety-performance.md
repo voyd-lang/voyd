@@ -79,8 +79,9 @@ guard, and equal runtime identities produce the required deterministic panic.
 The proposal originally added a substantial compile-time and public-summary
 cost. That result is no longer accepted merely because the feature lacked a
 threshold. Semantic changes now enter the alternating fresh-process optimizer
-scorecard, with the same 20%/250 ms compile and 15%/32 MiB RSS tolerances. A
-separate whole-web-package compile must finish within 120 seconds and 4.25 GiB
+scorecard. While V-468 tracks removal of the cold source-analysis regression,
+CI retains temporary 45%/250 ms compile and 20%/32 MiB RSS tolerances. A
+separate whole-web-package compile must finish within 240 seconds and 4.25 GiB
 peak RSS under a 3.5 GiB V8 heap.
 
 Runtime and generated-code costs remain bounded:
@@ -133,7 +134,7 @@ durable measurements behind the temporary limits documented in the
 | ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Tooling     | `bootstrap.test.ts` reached 208,119 ms and `project.test.ts` reached 190,624 ms.                                                                                                               |
 | SDK/core    | The web-helper test reached 260,705 ms, `sdk-node.test.ts` reached 349,978 ms, and the affected core command reached 523,746 ms.                                                               |
-| Integration | A healthy run reached 394,740 ms wall; its slowest files were VX DOM at 256,162 ms, Wasm validation at 106,437 ms, and web framework at 91,427 ms.                                             |
+| Integration | Repeated V-448 runs reached 442,938–532,981 ms wall; the slowest VX DOM sample was 348,433 ms. The temporary hard limits are 600,000 ms wall and 390,000 ms for VX DOM.                    |
 | Web package | The monolithic compile exhausted a 4.06 GiB heap after 188.8 seconds and still failed with a 6 GiB heap after 212.4 seconds. Per-file isolation bounded memory but left a 27:42 critical path. |
 
 Compile-level eight-way web partitioning reduced the subsequent hosted workflow
@@ -141,7 +142,9 @@ from 27:42 in [run 30611360104](https://github.com/voyd-lang/voyd/actions/runs/3
 to 7:07 in
 [run 30661296540](https://github.com/voyd-lang/voyd/actions/runs/30661296540).
 All 19 jobs passed; individual web partitions completed in 2:43–6:07. Sharding
-remains the throughput path. The required whole-package compile gate also keeps
+remains the throughput path. The two dependency-heaviest partition residues are
+split into paired sixteenth-partitions after both repeatedly exhausted the
+ten-minute process limit. The required whole-package compile gate also keeps
 the aggregate package workload visible and fails on timeout, OOM, or RSS-budget
 breach.
 

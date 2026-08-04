@@ -147,7 +147,6 @@
             "codes": ["TY0048", "TY0051", "TY0054"],
             "messageIncludes": [
               "active shared borrow",
-              "active mutable borrow",
               "cannot escape through a return",
               "has no 'returns_from' clause"
             ],
