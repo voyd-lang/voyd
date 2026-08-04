@@ -21,8 +21,16 @@ const valueAfter = (name) => {
 
 const timeoutMs = Number(valueAfter("--timeout-ms") ?? DEFAULT_TIMEOUT_MS);
 const cpuProfileDir = valueAfter("--cpu-profile-dir");
+const compilerCache = valueAfter("--compiler-cache") ?? "none";
+const compileCount = Number(valueAfter("--compile-count") ?? 1);
 if (!Number.isFinite(timeoutMs) || timeoutMs <= 0) {
   throw new Error("--timeout-ms must be a positive number");
+}
+if (!["none", "memory", "artifact"].includes(compilerCache)) {
+  throw new Error("--compiler-cache must be none, memory, or artifact");
+}
+if (!Number.isInteger(compileCount) || compileCount < 1) {
+  throw new Error("--compile-count must be a positive integer");
 }
 if (cpuProfileDir) {
   await mkdir(resolve(cpuProfileDir), { recursive: true });
@@ -40,11 +48,31 @@ const nodeArgs = [
   "--import",
   "tsx",
   "--conditions=development",
-  resolve(repoRoot, "apps/cli/src/cli.ts"),
-  "test",
+  "--input-type=module",
+  "--eval",
+  `import { createSdk, detectSrcRootForPath } from "@voyd-lang/sdk";
+import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
+const entryPath = process.env.VOYD_BENCH_ENTRY_PATH;
+const compilerCache = process.env.VOYD_BENCH_COMPILER_CACHE;
+const compileCount = Number(process.env.VOYD_BENCH_COMPILE_COUNT);
+const sdk = createSdk({ compilerCache });
+const options = {
   entryPath,
-  "--reporter=silent",
-  "--fail-empty-tests",
+  roots: { src: detectSrcRootForPath(entryPath), std: resolveStdRoot() },
+  includeTests: true,
+  testsOnly: true,
+};
+for (let index = 0; index < compileCount; index += 1) {
+  const result = await sdk.compile(options);
+  if (!result.success) {
+    console.error(JSON.stringify(result.diagnostics));
+    process.exitCode = 1;
+    break;
+  }
+}
+if (compilerCache === "artifact") {
+  process.stdout.write(JSON.stringify(sdk.exportCompilerArtifact()) + "\\n");
+}`,
 ];
 
 const startedAt = performance.now();
@@ -54,6 +82,9 @@ const child = spawn(process.execPath, nodeArgs, {
     ...process.env,
     VOYD_COMPILER_PERF: "1",
     VOYD_USE_SRC: "1",
+    VOYD_BENCH_ENTRY_PATH: entryPath,
+    VOYD_BENCH_COMPILER_CACHE: compilerCache,
+    VOYD_BENCH_COMPILE_COUNT: String(compileCount),
   },
   stdio: ["ignore", "pipe", "pipe"],
 });
@@ -78,13 +109,14 @@ const { code, signal } = await new Promise((accept, reject) => {
 });
 clearTimeout(timeout);
 const processWallMs = performance.now() - startedAt;
+const resourceUsage = child.resourceUsage?.();
 
 const summaries = stderr
   .split(/\r?\n/u)
   .filter((line) => line.startsWith(PERF_PREFIX))
   .map((line) => JSON.parse(line.slice(PERF_PREFIX.length)));
 
-if (code !== 0 || summaries.length !== 1) {
+if (code !== 0 || summaries.length !== compileCount) {
   process.stderr.write(stdout);
   process.stderr.write(stderr);
   throw new Error(
@@ -92,7 +124,7 @@ if (code !== 0 || summaries.length !== 1) {
   );
 }
 
-const [compiler] = summaries;
+const compiler = summaries.at(-1);
 const requiredPhases = [
   "total",
   "analyzeBorrowing",
@@ -125,6 +157,8 @@ const result = {
     exactFileTarget: true,
     testExecutionIncludedInProcessWall: true,
     compilerTotalExcludesTestExecution: true,
+    compilerCache,
+    compileCount,
     ...(cpuProfileDir
       ? { cpuProfileIntervalUs: CPU_PROFILE_INTERVAL_US }
       : {}),
@@ -138,12 +172,23 @@ const result = {
     totalMemoryBytes: totalmem(),
   },
   processWallMs: Math.round(processWallMs * 1000) / 1000,
+  ...(resourceUsage?.maxRSS
+    ? { maxRssBytes: resourceUsage.maxRSS * 1024 }
+    : {}),
   compiler: {
     success: compiler.success,
     diagnostics: compiler.diagnostics,
     phasesMs: compiler.phasesMs,
     counters: compiler.counters,
   },
+  ...(compileCount > 1
+    ? {
+        priorCompiles: summaries.slice(0, -1).map((summary) => ({
+          phasesMs: summary.phasesMs,
+          counters: summary.counters,
+        })),
+      }
+    : {}),
   ...(cpuProfileDir
     ? { cpuProfile: resolve(cpuProfileDir, "web-openapi-package-scale.cpuprofile") }
     : {}),

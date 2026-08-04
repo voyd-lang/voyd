@@ -53,7 +53,7 @@ export default function WikiDemoRoute() {
           import("@voyd-lang/vx-dom/browser"),
         ]);
 
-        const { compile } = createSdk();
+        const { compile } = createSdk({ compilerCache: "none" });
         const result = await compile({
           source: wikiSource,
           entryPath: "wiki.voyd",

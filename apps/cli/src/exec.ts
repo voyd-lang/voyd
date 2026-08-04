@@ -189,7 +189,9 @@ const loadModuleRoots = async ({
 };
 
 const getSdk = async (): Promise<VoydSdk> => {
-  sdkPromise ??= import("@voyd-lang/sdk").then(({ createSdk }) => createSdk());
+  sdkPromise ??= import("@voyd-lang/sdk").then(({ createSdk }) =>
+    createSdk({ compilerCache: "none" }),
+  );
   return sdkPromise;
 };
 

@@ -765,7 +765,8 @@ export const compileProgramWithLoader = async (
     previousSemantics: dependencySnapshotReuse.previousSemantics,
     typingState: dependencySnapshotReuse.typingState,
     reusableBorrowing: dependencySnapshotReuse.reusableBorrowing,
-    retainBorrowingIncrementalData: Boolean(options.dependencySnapshotCache),
+    retainBorrowingIncrementalData:
+      options.dependencySnapshotCache?.artifactEnabled === true,
   });
   markCompilerPerfPhaseDuration("analyzeModules", analyzeStartedAt);
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];

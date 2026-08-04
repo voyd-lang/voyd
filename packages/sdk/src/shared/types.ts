@@ -71,9 +71,19 @@ export type CompileOptions = {
 
 export type CreateSdkOptions =
   | {
-      compilerArtifact?: CompilerDependencyBorrowArtifact;
-      /** Retain reusable compiler state between calls. Defaults to `memory`. */
+      /**
+       * Retain dependency semantics between calls in this SDK instance.
+       * This does not collect data for a cross-process artifact.
+       */
       compilerCache?: "memory";
+    }
+  | {
+      /**
+       * Retain dependency semantics and collect a serializable borrowing
+       * artifact. Use this only when the artifact will be exported or loaded.
+       */
+      compilerCache: "artifact";
+      compilerArtifact?: CompilerDependencyBorrowArtifact;
     }
   | {
       compilerArtifact?: never;
@@ -209,6 +219,9 @@ export type VoydSdk = {
   compile: (opts: CompileOptions) => Promise<CompileResult>;
   run: <T = unknown>(opts: RunOptions) => Promise<T>;
   serveWebApp: (opts: ServeWebAppOptions) => Promise<ServeWebAppResult>;
-  /** Serializable dependency borrowing cache for reuse by another process. */
+  /**
+   * Serializable dependency borrowing cache for reuse by another process.
+   * Available only from an SDK created with `compilerCache: "artifact"`.
+   */
   exportCompilerArtifact: () => CompilerDependencyBorrowArtifact | undefined;
 };

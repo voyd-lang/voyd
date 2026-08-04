@@ -8,11 +8,14 @@ type Outbound =
 // Signal readiness so the main thread can queue messages safely
 self.postMessage({ type: "ready" });
 
+// The worker handles successive editor updates, so retain dependency semantics
+// for the worker lifetime instead of allocating a one-shot SDK per message.
+const sdk = createSdk({ compilerCache: "memory" });
+
 self.addEventListener("message", async (event: MessageEvent<Inbound>) => {
   const { id, code } = event.data || {};
   try {
-    const { compile } = createSdk();
-    const program = await compile({ source: code });
+    const program = await sdk.compile({ source: code });
     if (!program.success) {
       const message = program.diagnostics
         .map((diagnostic) => diagnostic.message)

@@ -17,7 +17,9 @@ import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import { resolvePackageDirs } from "./package-dirs.js";
 import type { TestShard } from "./config/types.js";
 
-const sdk = createSdk();
+// Each CLI test command compiles one assembled test program before executing
+// it, so retaining dependency snapshots cannot benefit this process.
+const sdk = createSdk({ compilerCache: "none" });
 
 type CliTestResult = {
   displayName: string;

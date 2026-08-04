@@ -31,7 +31,7 @@ export const generatePackageAdapter = async ({
   const compiledRequirements = await Promise.all(
     entryPaths.map(async (candidate) => {
       const roots = await adapterModuleRoots({ entryPath: candidate, pkgDirs });
-      const result = await createSdk().compile({
+      const result = await createSdk({ compilerCache: "none" }).compile({
         entryPath: candidate,
         roots,
         boundaryExports: "auto",
@@ -104,9 +104,12 @@ export const generateAdapterRegistry = async ({
     await Promise.all([
       import("@voyd-lang/sdk"),
       import("@voyd-lang/sdk/js-host"),
-    ]);
+  ]);
   const roots = await adapterModuleRoots({ entryPath, pkgDirs });
-  const result = await createSdk().compile({ entryPath, roots });
+  const result = await createSdk({ compilerCache: "none" }).compile({
+    entryPath,
+    roots,
+  });
   if (!result.success) throw { diagnostics: result.diagnostics };
   const interfaces = Array.from(
     new Set(

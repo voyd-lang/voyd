@@ -45,6 +45,8 @@ export type CompilerDependencyBorrowArtifact = {
 };
 
 export type CompilerDependencySnapshotCache = {
+  /** Whether this cache collects borrowing query state for artifact export. */
+  artifactEnabled: boolean;
   dependency?: CompilerDependencySnapshotEntry;
   borrowArtifact?: CompilerDependencyBorrowArtifact;
 };
@@ -105,7 +107,9 @@ export type PreparedDependencySnapshotReuse = {
 
 export const createCompilerDependencySnapshotCache = (
   borrowArtifact?: CompilerDependencyBorrowArtifact,
+  { artifactEnabled = true }: { artifactEnabled?: boolean } = {},
 ): CompilerDependencySnapshotCache => ({
+  artifactEnabled,
   ...(isCompilerDependencyBorrowArtifact(borrowArtifact)
     ? { borrowArtifact }
     : {}),
@@ -114,6 +118,9 @@ export const createCompilerDependencySnapshotCache = (
 export const exportCompilerDependencyBorrowArtifact = (
   cache: CompilerDependencySnapshotCache | undefined,
 ): CompilerDependencyBorrowArtifact | undefined => {
+  if (!cache?.artifactEnabled) {
+    return undefined;
+  }
   if (!cache?.dependency) {
     return cache?.borrowArtifact;
   }

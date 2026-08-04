@@ -637,13 +637,46 @@ pub fn main() -> i32
     expect(sdk.exportCompilerArtifact()).toBeUndefined();
   });
 
+  it("keeps memory reuse separate from durable borrowing artifacts", async () => {
+    const sdk = createSdk({ compilerCache: "memory" });
+    const source = `#!no_prelude
+pub fn main() -> i32
+  42
+`;
+
+    expectCompileSuccess(await sdk.compile({ source }));
+    expectCompileSuccess(await sdk.compile({ source }));
+
+    expect(sdk.exportCompilerArtifact()).toBeUndefined();
+  });
+
+  it("requires explicit artifact mode to export and import compiler artifacts", async () => {
+    const entryPath = path.join(
+      repoRoot,
+      "tests",
+      "performance",
+      "fixtures",
+      "vtrace-compute-benchmark.voyd",
+    );
+    const producer = createSdk({ compilerCache: "artifact" });
+    expectCompileSuccess(await producer.compile({ entryPath }));
+    const artifact = producer.exportCompilerArtifact();
+
+    expect(artifact?.schema).toBe("voyd.compiler-dependency-borrow-cache");
+    const consumer = createSdk({ compilerCache: "artifact", compilerArtifact: artifact });
+    const result = expectCompileSuccess(await consumer.compile({ entryPath }));
+    await expect(result.run<number>({ entryName: "main" })).resolves.toBe(
+      3_825_271,
+    );
+  });
+
   it("rejects an artifact when compiler caching is disabled", () => {
     expect(() =>
       createSdk({
         compilerCache: "none",
         compilerArtifact: {} as never,
       } as never),
-    ).toThrow('compilerArtifact requires compilerCache: "memory"');
+    ).toThrow('compilerArtifact requires compilerCache: "artifact"');
   });
 
   it("rejects an unknown compiler cache policy from untyped callers", () => {

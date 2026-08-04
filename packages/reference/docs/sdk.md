@@ -55,6 +55,32 @@ The older `optimize` boolean remains compatible: `true` maps to `"release"`
 and `false` maps to `"none"`. If both are supplied, `optimizationLevel` wins.
 Raw Binaryen pass configuration is intentionally not public SDK API.
 
+## Compiler cache lifetime
+
+Use the default `memory` cache when one SDK instance compiles successive
+versions of a program, such as an editor worker. It reuses unchanged dependency
+semantics, but does not prepare a disk-transferable compiler artifact.
+
+For a one-shot command or request, disable the cache explicitly:
+
+```ts
+const sdk = createSdk({ compilerCache: "none" });
+```
+
+Create an artifact cache only when a caller will export its borrowing artifact
+and load it in another process:
+
+```ts
+const producer = createSdk({ compilerCache: "artifact" });
+await producer.compile({ entryPath: "./src/main.voyd" });
+const artifact = producer.exportCompilerArtifact();
+
+const consumer = createSdk({ compilerCache: "artifact", compilerArtifact: artifact });
+```
+
+Artifact mode retains and fingerprints additional borrowing-analysis state; it
+is intentionally more expensive than ordinary in-memory reuse.
+
 ## Typed JavaScript boundary exports
 
 SDK builds automatically expose boundary-compatible public Voyd functions
