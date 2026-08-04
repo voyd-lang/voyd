@@ -1336,6 +1336,12 @@
     "rationale": "Compiler-local result provenance, callback composition, separate-compilation privacy, path correlation, variant narrowing, defaults, and recursive widening."
   },
   {
+    "file": "packages/compiler/src/semantics/borrowing/__tests__/capability.test.ts",
+    "owner": "compiler-implementation",
+    "disposition": "needs-review",
+    "rationale": "Classify this test by the contract it protects before committing it."
+  },
+  {
     "file": "packages/compiler/src/semantics/effects/__tests__/effect-table.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",

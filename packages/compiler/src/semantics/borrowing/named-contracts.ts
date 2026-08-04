@@ -39,6 +39,69 @@ type NamedContractValidation = {
   diagnostics: BorrowingResult["diagnostics"];
 };
 
+type NamedContractLowering = {
+  declarationCallables: ReadonlyMap<SymbolId, CallableBorrowContract>;
+};
+
+/**
+ * Lower the public callable view of named contracts for inference. This is a
+ * contract-input step, not validation: diagnostics and body/subset checks are
+ * intentionally reserved for validateNamedBorrowContracts after inference.
+ */
+export const lowerNamedBorrowContracts = ({
+  hir,
+  typing,
+  symbolTable,
+  moduleId,
+  imports,
+}: {
+  hir: HirGraph;
+  typing: TypingResult;
+  symbolTable: SymbolTable;
+  moduleId: string;
+  imports: readonly {
+    local: SymbolId;
+    target?: { moduleId: string };
+  }[];
+}): NamedContractLowering => {
+  const checked = new Map<SymbolId, CheckedNamedBorrowContract>();
+  Array.from(hir.items.values())
+    .filter((item): item is HirTraitDecl => item.kind === "trait")
+    .forEach((trait) => {
+      const regions = Array.from(trait.regions ?? [], (region) => ({
+        name: region.name,
+      }));
+      const disjoint = disjointPairs(trait.disjoint ?? []).map(
+        ([left, right]) => [left, right] as const,
+      );
+      trait.methods.forEach((method) => {
+        if (!method.borrowContract) return;
+        checked.set(method.symbol, {
+          scope: namedContractScope({
+            trait: trait.symbol,
+            name: symbolTable.getSymbol(trait.symbol).name,
+            moduleId,
+            imports,
+          }),
+          declaration: method.symbol,
+          trait: trait.symbol,
+          regions,
+          disjoint,
+          reads: unique(method.borrowContract.reads ?? []),
+          mutates: unique(method.borrowContract.mutates ?? []),
+          returnsFrom: unique(method.borrowContract.returnsFrom ?? []),
+        });
+      });
+    });
+  return {
+    declarationCallables: declaredCallableContracts({
+      hir,
+      typing,
+      contracts: checked,
+    }),
+  };
+};
+
 type DeclaredContract = {
   trait: HirTraitDecl;
   method: HirTraitMethod;

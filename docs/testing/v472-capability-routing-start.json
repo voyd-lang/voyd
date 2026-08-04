@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-08-03",
+  "scenario": "std-math-transcendentals",
+  "startingCommit": "ba5595a4a0dd7182ccf804d5eaf5eb59e3e2bbb3",
+  "baselineCommit": "876f168019f95eeab7b90bdecfb081f234f1de65",
+  "methodology": {
+    "samplesPerRevisionAndMode": 7,
+    "freshNodeProcessPerSample": true,
+    "alternatingRevisionOrder": true,
+    "precompiledStdSnapshotDisabled": true,
+    "command": "node --import tsx scripts/bench-alternating-revisions.ts --repo baseline=/tmp/voyd-v472-baseline --repo start=/Users/drewy/code/voyd --samples 7 --compact"
+  },
+  "results": {
+    "baseline": {
+      "unoptimized": {
+        "compileMs": [1397.464958, 1363.6861250000002, 1367.4764999999998, 1368.493875, 1374.2660409999999, 1376.863584, 1368.411875],
+        "compileMedianMs": 1368.493875,
+        "peakHeapUsedMedianBytes": 610897000,
+        "processMaxRssGrowthMedianBytes": 97320960,
+        "borrowingPhaseMediansMs": {"analyzeBorrowing": 173.573, "analyzeBorrowing.checkBodies": 64.228, "analyzeBorrowing.computeContracts": 86.198, "analyzeBorrowing.selectBodies": 15.641},
+        "borrowingCounterMedians": {"borrowing.summary.evaluations": 620, "borrowing.summary.functions": 504, "borrowing.summary.unchangedCandidates": 7, "borrowing.summary.unchangedJoins": 3},
+        "wasmBytes": 46728,
+        "wasmSha256": "3f9455866bc05146d2d8792f10d7a28d4c57d2465498cb634bb82adda9ad9fee"
+      },
+      "release": {
+        "compileMs": [1921.86575, 1929.537167, 1925.813875, 1932.7155000000002, 1917.716625, 1918.0069999999998, 1927.819458],
+        "compileMedianMs": 1925.813875,
+        "peakHeapUsedMedianBytes": 604741152,
+        "processMaxRssGrowthMedianBytes": 150126592,
+        "borrowingPhaseMediansMs": {"analyzeBorrowing": 173.234, "analyzeBorrowing.checkBodies": 64.142, "analyzeBorrowing.computeContracts": 87.578, "analyzeBorrowing.selectBodies": 15.363},
+        "borrowingCounterMedians": {"borrowing.summary.evaluations": 620, "borrowing.summary.functions": 504, "borrowing.summary.unchangedCandidates": 7, "borrowing.summary.unchangedJoins": 3},
+        "wasmBytes": 4810,
+        "wasmSha256": "4bf282a25c62fe3548d1c03177d56f0fae7c773253c86eebd07a0f3e1c72dd54"
+      }
+    },
+    "startingHead": {
+      "unoptimized": {
+        "compileMs": [2089.372041, 2062.966958, 2055.583125, 2057.4600419999997, 2073.061667, 2057.424041, 2056.50475],
+        "compileMedianMs": 2057.4600419999997,
+        "peakHeapUsedMedianBytes": 671372304,
+        "processMaxRssGrowthMedianBytes": 130482176,
+        "borrowingPhaseMediansMs": {"analyzeBorrowing": 670.393, "analyzeBorrowing.checkLoans": 146.386, "analyzeBorrowing.computeContracts": 515.861, "analyzeBorrowing.extractFacts": 261.692, "analyzeBorrowing.inferContracts": 251.038, "analyzeBorrowing.selectBodies": 4.05, "analyzeBorrowing.validateContracts": 1.324},
+        "borrowingCounterMedians": {"borrowing.body.checkedCallables": 395, "borrowing.contract.inferredCount": 714, "borrowing.contract.retainedBytes": 1408914, "borrowing.facts.blocks": 5293, "borrowing.facts.calls": 4161, "borrowing.facts.operations": 27698, "borrowing.summary.effectiveDetailedCallables": 762, "borrowing.summary.evaluations": 783, "borrowing.summary.fastPathAccepted": 176, "borrowing.summary.fastPathRejected": 706, "borrowing.summary.totalCallables": 887, "borrowing.summary.skippedTrivialCallables": 168},
+        "wasmBytes": 45009,
+        "wasmSha256": "fa335df17782d3844a8e37ab6983239654faea036ed46fdda99e258a5d1db168"
+      },
+      "release": {
+        "compileMs": [2627.15975, 2609.235041, 2610.154417, 2621.2851250000003, 2609.2917500000003, 2625.8516250000002, 2600.8714580000005],
+        "compileMedianMs": 2610.154417,
+        "peakHeapUsedMedianBytes": 675683128,
+        "processMaxRssGrowthMedianBytes": 157548544,
+        "borrowingPhaseMediansMs": {"analyzeBorrowing": 668.474, "analyzeBorrowing.checkLoans": 146.603, "analyzeBorrowing.computeContracts": 513.739, "analyzeBorrowing.extractFacts": 261.352, "analyzeBorrowing.inferContracts": 249.808, "analyzeBorrowing.selectBodies": 4.125, "analyzeBorrowing.validateContracts": 1.322},
+        "borrowingCounterMedians": {"borrowing.body.checkedCallables": 395, "borrowing.contract.inferredCount": 714, "borrowing.contract.retainedBytes": 1408914, "borrowing.facts.blocks": 5293, "borrowing.facts.calls": 4161, "borrowing.facts.operations": 27698, "borrowing.summary.effectiveDetailedCallables": 762, "borrowing.summary.evaluations": 783, "borrowing.summary.fastPathAccepted": 176, "borrowing.summary.fastPathRejected": 706, "borrowing.summary.totalCallables": 887, "borrowing.summary.skippedTrivialCallables": 168},
+        "wasmBytes": 4810,
+        "wasmSha256": "2acf9f792e7924a561400ba2ed04c9e932ac994b56f62f36bb55ca002030514a"
+      }
+    }
+  }
+}

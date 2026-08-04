@@ -6,6 +6,7 @@ import type {
   CallableBorrowContract,
   CallableBorrowDispatchKind,
   CallableBorrowSummarySource,
+  LoanAnalysisMode,
   PlaceProjection,
   PublicNamedBorrowContract,
 } from "./borrowing/index.js";
@@ -34,6 +35,7 @@ export interface ModuleExportEntry {
   effects?: readonly ModuleExportEffect[];
   borrowing?: readonly {
     symbol: SymbolId;
+    capability?: LoanAnalysisMode;
     contract: CallableBorrowContract;
     dispatch?: CallableBorrowDispatchKind;
     namedContract?: PublicNamedBorrowContract;

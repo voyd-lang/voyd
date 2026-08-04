@@ -42,13 +42,27 @@ import {
 } from "./reference-bearing.js";
 import { borrowedPathsInType, typeContainsBorrowed } from "./borrowed-types.js";
 import { objectLiteralFieldProvider } from "./object-literal-providers.js";
-import { validateNamedBorrowContracts } from "./named-contracts.js";
 import {
-  extractCallableBorrowFacts,
-  extractLambdaBorrowFacts,
-  type CallableBorrowCallFact,
+  lowerNamedBorrowContracts,
+  validateNamedBorrowContracts,
+} from "./named-contracts.js";
+import {
+  createLazyCallableBorrowFacts,
   type CallableBorrowFacts,
 } from "./callable-facts.js";
+import {
+  type ImportedCallableCapability,
+} from "./capability-classifier.js";
+import {
+  extractCallableBorrowIndex,
+  type CallableBorrowIndex,
+} from "./callable-borrow-index.js";
+import {
+  checkTransientSameCallOverlaps,
+  contractFromBorrowIndex,
+} from "./transient-contract.js";
+import { inferTransientBorrowingRouting } from "./contract-routing.js";
+import { planTransientRuntimeIdentityGuards } from "./transient-guards.js";
 
 export const analyzeBorrowing = ({
   hir,
@@ -83,14 +97,12 @@ export const analyzeBorrowing = ({
   // validation does not need inferred body facts; seeding the single contract
   // solve here avoids analyzing every callable once to discover declarations
   // and then again with those declarations installed.
-  const preliminaryNamedContracts = validateNamedBorrowContracts({
+  const preliminaryNamedContracts = lowerNamedBorrowContracts({
     hir,
     typing,
     symbolTable,
-    callables: new Map(),
     moduleId,
     imports,
-    validateBodies: false,
   });
   const importMap = new Map(
     imports.flatMap((entry) =>
@@ -107,54 +119,197 @@ export const analyzeBorrowing = ({
   const lambdas = Array.from(hir.expressions.values()).filter(
     (expr): expr is HirLambdaExpr => expr.exprKind === "lambda",
   );
-  const factsStartedAt = startCompilerPerfPhase();
-  const callableFacts = extractCallableBorrowFacts({
-    functions,
+  const importedCallables = new Map<string, ImportedCallableCapability>();
+  dependencies.forEach((dependency, dependencyModuleId) => {
+    dependency.callables.forEach((callable, symbol) => {
+      importedCallables.set(`${dependencyModuleId}:${symbol}`, {
+        ...(callable.capability !== undefined
+          ? { capability: callable.capability }
+          : {}),
+        ...(callable.contract ? { contract: callable.contract } : {}),
+      });
+    });
+    dependency.effectOperations.forEach((_operation, symbol) => {
+      const key = `${dependencyModuleId}:${symbol}`;
+      if (importedCallables.has(key)) return;
+      importedCallables.set(key, {
+        // An effect operation without an exported capability is an ambiguous
+        // boundary. Its compact contract is not available here, so keep the
+        // unknown case on the conservative flow-sensitive path.
+        capability: "flow-sensitive",
+      });
+    });
+  });
+  const localCallables = new Map<SymbolId, ImportedCallableCapability>();
+  declaredContracts.forEach((contract, symbol) => {
+    localCallables.set(symbol, { contract });
+  });
+  const indexResolveContext: ResolveContext = {
+    hir: summaryHir,
+    typing,
+    symbolTable,
+    moduleId,
+    imports: importMap,
+    dependencies,
+    contracts: declaredContracts,
+    bindingInitializers: new Map(),
+    callResolutionCache: new Map(),
+    borrowIndexMode: "symbolic",
+    decls,
+  };
+  const functionIndexes = extractCallableBorrowIndex({
+    callables: functions,
+    hir: summaryHir,
+    typing,
+    symbolTable,
+    decls,
+    resolveContext: indexResolveContext,
+  });
+  const lambdaIndexes = extractCallableBorrowIndex({
+    callables: lambdas.map((lambda) => ({
+      symbol: (-1 - lambda.id) as SymbolId,
+      parameters: lambda.parameters,
+      body: lambda.body,
+      type: typing.resolvedExprTypes.get(lambda.id),
+      captures: lambda.captures,
+    })),
+    hir: summaryHir,
+    typing,
+    symbolTable,
+    decls,
+    resolveContext: indexResolveContext,
+  });
+  const indexes = new Map<SymbolId, CallableBorrowIndex>([
+    ...functionIndexes,
+    ...lambdaIndexes,
+  ]);
+  const initialContracts = new Map<SymbolId, CallableBorrowContract>(
+    Array.from(indexes, ([symbol, index]) => [
+      symbol,
+      contractFromBorrowIndex(index),
+    ]),
+  );
+  effectOperationContracts.forEach((contract, symbol) =>
+    initialContracts.set(symbol, contract),
+  );
+  declaredContracts.forEach((contract, symbol) => initialContracts.set(symbol, contract));
+  // Flow-sensitive callables do not publish these seed contracts as their
+  // final ABI. They provide only the cheap access/effect footprint needed to
+  // classify an immediate caller use without treating the callee's maximum
+  // mode as contagious.
+  const initialCompactContracts = new Map<SymbolId, CallableBorrowContract>([
+    ...initialContracts,
+    ...effectOperationContracts,
+    ...declaredContracts,
+  ]);
+  initialCompactContracts.forEach((contract, symbol) => {
+    const prior = localCallables.get(symbol);
+    localCallables.set(symbol, { ...prior, contract });
+  });
+  const compactStartedAt = startCompilerPerfPhase();
+  const transientRouting = inferTransientBorrowingRouting({
+    indexes,
+    localModuleId: moduleId,
+    declaredContracts,
+    importedCallables,
+    localCallables,
+    initialContracts,
+    initialCompactContracts,
+  });
+  const capabilities = new Map(transientRouting.capabilities);
+  const contracts = new Map(transientRouting.contracts);
+  const compactFallbacks = transientRouting.compactFallbacks;
+  capabilities.forEach((mode) =>
+    incrementCompilerPerfCounter(`borrowing.capability.${mode}`),
+  );
+  transientRouting.decisions.forEach((decision) =>
+    decision.reasons.forEach((reason) =>
+      incrementCompilerPerfCounter(`borrowing.capability.reason.${reason}`),
+    ),
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.capability.compactFallbacks",
+    compactFallbacks,
+  );
+  markCompilerPerfPhaseDuration(
+    "analyzeBorrowing.composeCompactContracts",
+    compactStartedAt,
+  );
+  const flowInitialContracts = new Map(contracts);
+  indexes.forEach((index, symbol) => {
+    if (capabilities.get(symbol) !== "flow-sensitive") return;
+    flowInitialContracts.set(
+      symbol,
+      declaredContracts.get(symbol) ?? contractFromBorrowIndex(index),
+    );
+  });
+  const flowFunctions = functions.filter(
+    (functionItem) => capabilities.get(functionItem.symbol) === "flow-sensitive",
+  );
+  const flowLambdas = lambdas.filter(
+    (lambda) => capabilities.get((-1 - lambda.id) as SymbolId) === "flow-sensitive",
+  );
+  const flowSymbols = new Set<SymbolId>([
+    ...flowFunctions.map((functionItem) => functionItem.symbol),
+    ...flowLambdas.map((lambda) => (-1 - lambda.id) as SymbolId),
+  ]);
+  const lazyFacts = createLazyCallableBorrowFacts({
+    functions: flowFunctions,
+    lambdas: flowLambdas,
     hir: summaryHir,
     typing,
     resolveContext: {
-      hir: summaryHir,
-      typing,
-      symbolTable,
-      moduleId,
-      imports: importMap,
-      dependencies,
-      contracts: declaredContracts,
-      bindingInitializers: new Map(),
+      ...indexResolveContext,
+      contracts,
       callResolutionCache: new Map(),
-      borrowIndexMode: "symbolic",
-      decls,
     },
   });
-  const lambdaFacts = extractLambdaBorrowFacts({
-    lambdas,
+  const callableFacts = lazyFacts.functions;
+  const lambdaFacts = lazyFacts.lambdas;
+  const nonFlowFactSymbols = [
+    ...Array.from(callableFacts.keys()),
+    ...Array.from(
+      lambdaFacts.keys(),
+      (exprId) => (-1 - exprId) as SymbolId,
+    ),
+  ].filter(
+    (symbol) => capabilities.get(symbol) !== "flow-sensitive",
+  );
+  if (nonFlowFactSymbols.length > 0) {
+    throw new Error(
+      `borrowing architecture violation: full facts materialized for ${nonFlowFactSymbols.join(", ")}`,
+    );
+  }
+  const inferStartedAt = startCompilerPerfPhase();
+  const inferred = computeCallableBorrowContracts({
     hir: summaryHir,
     typing,
-    resolveContext: {
-      hir: summaryHir,
-      typing,
-      symbolTable,
-      moduleId,
-      imports: importMap,
-      dependencies,
-      contracts: declaredContracts,
-      bindingInitializers: new Map(),
-      callResolutionCache: new Map(),
-      borrowIndexMode: "symbolic",
-      decls,
-    },
+    symbolTable,
+    moduleId,
+    imports,
+    dependencies,
+    decls,
+    declarationContracts: declaredContracts,
+    facts: callableFacts,
+    lambdaFacts,
+    initialContracts: flowInitialContracts,
+    flowSymbols,
   });
+  markCompilerPerfPhaseDuration(
+    "analyzeBorrowing.inferContracts",
+    inferStartedAt,
+  );
+  incrementCompilerPerfCounter(
+    "borrowing.fullFacts.materialized",
+    lazyFacts.materializedCount(),
+  );
   const allCallableFacts = new Map<SymbolId, CallableBorrowFacts>([
-    ...callableFacts,
+    ...Array.from(callableFacts.entries()),
     ...Array.from(
       lambdaFacts.values(),
       (facts) => [facts.symbol, facts] as const,
     ),
   ]);
-  markCompilerPerfPhaseDuration(
-    "analyzeBorrowing.extractFacts",
-    factsStartedAt,
-  );
   incrementCompilerPerfCounter(
     "borrowing.facts.blocks",
     Array.from(allCallableFacts.values()).reduce(
@@ -175,23 +330,6 @@ export const analyzeBorrowing = ({
       (total, facts) => total + facts.suspensionPoints.length,
       0,
     ),
-  );
-  const inferStartedAt = startCompilerPerfPhase();
-  const inferred = computeCallableBorrowContracts({
-    hir: summaryHir,
-    typing,
-    symbolTable,
-    moduleId,
-    imports,
-    dependencies,
-    decls,
-    declarationContracts: declaredContracts,
-    facts: callableFacts,
-    lambdaFacts,
-  });
-  markCompilerPerfPhaseDuration(
-    "analyzeBorrowing.inferContracts",
-    inferStartedAt,
   );
   const publicDynamicContract = ({
     contract,
@@ -259,6 +397,52 @@ export const analyzeBorrowing = ({
     const facts = lambdaFacts.get(exprId);
     if (facts) resolvedContracts.set(facts.symbol, contract);
   });
+  const lambdaContracts = new Map(
+    lambdas.flatMap((lambda) => {
+      const contract = resolvedContracts.get((-1 - lambda.id) as SymbolId);
+      return contract ? [[lambda.id, contract] as const] : [];
+    }),
+  );
+  indexes.forEach((index, symbol) => {
+    if (capabilities.get(symbol) !== "transient") return;
+    const transientGuardPlan = planTransientRuntimeIdentityGuards({
+      index,
+      typing,
+      lookup: {
+        localModuleId: moduleId,
+        localCapabilities: capabilities,
+        localContracts: resolvedContracts,
+        importedCallables,
+      },
+    });
+    transientGuardPlan.guards.forEach((guards, call) => {
+      const existing = runtimeIdentityGuards.get(call) ?? [];
+      guards.forEach((guard) => {
+        if (
+          !existing.some(
+            (candidate) =>
+              candidate.left.parameter === guard.left.parameter &&
+              candidate.right.parameter === guard.right.parameter,
+          )
+        ) {
+          existing.push(guard);
+        }
+      });
+      runtimeIdentityGuards.set(call, existing);
+    });
+    diagnostics.push(
+      ...checkTransientSameCallOverlaps({
+        index,
+        lookup: {
+          localModuleId: moduleId,
+          localCapabilities: capabilities,
+          localContracts: resolvedContracts,
+          importedCallables,
+        },
+        guardedPairs: transientGuardPlan.guardedPairs,
+      }),
+    );
+  });
   const resolveContext: ResolveContext = {
     hir,
     typing,
@@ -284,40 +468,15 @@ export const analyzeBorrowing = ({
   );
   if (checkBodies) {
     const selectionStartedAt = startCompilerPerfPhase();
-    const bodyDecisions = functions.map((functionItem) => ({
-      functionItem,
-      decision: bodyBorrowAnalysisDemand({
-        body: functionItem,
-        facts: callableFacts.get(functionItem.symbol),
-        typing,
-        resolveContext,
-      }),
-    }));
-    const lambdaDecisions = lambdas.map((lambda) => ({
-      lambda,
-      decision: lambdaBorrowAnalysisDemand({
-        lambda,
-        facts: lambdaFacts.get(lambda.id)!,
-        typing,
-        resolveContext,
-      }),
-    }));
-    const checkedFunctions = bodyDecisions
-      .filter(({ decision }) => decision.required)
-      .map(({ functionItem }) => functionItem);
-    [...bodyDecisions, ...lambdaDecisions].forEach(({ decision }) =>
-      decision.reasons.forEach((reason) =>
-        incrementCompilerPerfCounter(`borrowing.body.demandReason.${reason}`),
-      ),
-    );
+    const checkedFunctions = flowFunctions;
+    const checkedLambdas = flowLambdas;
     incrementCompilerPerfCounter(
       "borrowing.body.totalCallables",
       functions.length + lambdas.length,
     );
     incrementCompilerPerfCounter(
       "borrowing.body.checkedCallables",
-      checkedFunctions.length +
-        lambdaDecisions.filter(({ decision }) => decision.required).length,
+      checkedFunctions.length + checkedLambdas.length,
     );
     const moduleStorageSymbols = new Set(
       Array.from(summaryHir.items.values())
@@ -330,31 +489,35 @@ export const analyzeBorrowing = ({
     );
     const bodiesStartedAt = startCompilerPerfPhase();
     checkedFunctions.forEach((functionItem) =>
-      analyzeFunctionBorrowing({
-        functionItem,
-        facts: callableFacts.get(functionItem.symbol)!,
-        lambdaFacts,
-        hir: summaryHir,
-        typing,
-        symbolTable,
-        moduleId,
-        imports: importMap,
-        dependencies,
-        decls,
-        contracts: resolvedContracts,
-        moduleStorageSymbols,
-        mutableStorageSymbols,
-        runtimeIdentityGuards,
-        diagnostics,
-      }),
+      callableFacts.get(functionItem.symbol)
+        ? analyzeFunctionBorrowing({
+            functionItem,
+            facts: callableFacts.get(functionItem.symbol)!,
+            lambdaFacts,
+            lambdaContracts,
+            hir: summaryHir,
+            typing,
+            symbolTable,
+            moduleId,
+            imports: importMap,
+            dependencies,
+            decls,
+            contracts: resolvedContracts,
+            moduleStorageSymbols,
+            mutableStorageSymbols,
+            runtimeIdentityGuards,
+            diagnostics,
+          })
+        : undefined,
     );
-    lambdaDecisions
-      .filter(({ decision }) => decision.required)
-      .forEach(({ lambda }) =>
+    checkedLambdas.forEach((lambda) =>
+      lambdaFacts.get(lambda.id)
+        ?
         analyzeLambdaBodyBorrowing({
           lambda,
           facts: lambdaFacts.get(lambda.id)!,
           lambdaFacts,
+          lambdaContracts,
           hir,
           typing,
           symbolTable,
@@ -367,8 +530,9 @@ export const analyzeBorrowing = ({
           mutableStorageSymbols,
           runtimeIdentityGuards,
           diagnostics,
-        }),
-      );
+        })
+        : undefined,
+    );
     markCompilerPerfPhaseDuration(
       "analyzeBorrowing.checkLoans",
       bodiesStartedAt,
@@ -396,7 +560,20 @@ export const analyzeBorrowing = ({
     queryDependencies.set(symbol, dependenciesForCallable);
   });
   const queries = new Map(inferred.queries);
-  callables.forEach((output, symbol) => {
+  const outputCallables = new Map(
+    Array.from(callables, ([symbol, contract]) => [
+      symbol,
+      {
+        ...contract,
+        parameters: contract.parameters.map((parameter) => ({
+          ...parameter,
+          readPaths: parameter.readPaths ?? [],
+          writePaths: parameter.writePaths ?? [],
+        })),
+      },
+    ] as const),
+  );
+  outputCallables.forEach((output, symbol) => {
     const prior = inferred.queries.get(symbol);
     queries.set(symbol, {
       input:
@@ -407,11 +584,17 @@ export const analyzeBorrowing = ({
     });
   });
   return {
-    callables,
+    callables: outputCallables,
+    capabilities,
     namedContracts: namedContracts.contracts,
     runtimeIdentityGuards,
     mutableStorageSymbols,
     diagnostics,
+    analysisMetrics: {
+      fullFactsMaterialized: lazyFacts.materializedCount(),
+      fullFactSymbols: Array.from(allCallableFacts.keys()),
+    },
+    summaryDemand: inferred.demand,
     queries,
   };
 };
@@ -751,7 +934,23 @@ const moduleInitializerBorrowedPresence = ({
           ? "none"
           : "external";
       }
-      if (resultPresence !== "parameter") {
+      const hasReturnedArgument =
+        contract?.parameters.some(
+          (parameter, parameterIndex) =>
+            parameter.returned === true &&
+            typeof resolved.arguments[parameterIndex] === "number",
+        ) === true;
+      if (resultPresence !== "parameter" && !hasReturnedArgument) {
+        if (
+          resultPresence === "external" &&
+          contract?.externalReturnedOrigins !== undefined &&
+          contract.externalReturnedOrigins.length > 0 &&
+          contract.externalReturnedOrigins.every(
+            (origin) => origin.fresh === true,
+          )
+        ) {
+          return "none";
+        }
         return resultPresence;
       }
       const inputs =
@@ -883,320 +1082,3 @@ const validateModuleBorrowStorage = ({
       );
     });
 };
-
-// A body without both reference state and a borrow-producing or mutating
-// operation cannot form an alias conflict. Unknown types and calls remain on
-// the full-analysis path.
-const bodyBorrowAnalysisDemand = ({
-  body,
-  facts,
-  typing,
-  resolveContext,
-}: {
-  body: HirFunction;
-  facts: CallableBorrowFacts | undefined;
-  typing: TypingResult;
-  resolveContext: ResolveContext;
-}): { required: boolean; reasons: readonly string[] } => {
-  if (!facts) {
-    return { required: true, reasons: ["missing-facts"] };
-  }
-  const reasons = new Set<string>();
-  const signature = typing.functions.getSignature(body.symbol);
-  const hasSignatureBorrow =
-    body.parameters.some(
-      (parameter) => parameter.pattern.bindingKind === "mutable-ref",
-    ) ||
-    (signature?.parameters.some((parameter) =>
-      typeContainsBorrowed(parameter.type, typing),
-    ) ??
-      false) ||
-    (typeof signature?.returnType === "number" &&
-      typeContainsBorrowed(signature.returnType, typing));
-  if (facts.hasMutableCapture) {
-    return { required: true, reasons: ["mutable-capture"] };
-  }
-  if (facts.hasUnknownExpressionType) {
-    return { required: true, reasons: ["unknown-expression-type"] };
-  }
-  if (hasSignatureBorrow) reasons.add("signature-borrow");
-  if (facts.hasReferenceAssignment) reasons.add("reference-assignment");
-  if (facts.hasBorrowTypedExpression) reasons.add("borrowed-expression");
-  // Explicit reference bindings require alias/storage planning even when the
-  // referenced value is scalar. For example, `let ~alias = value` must promote
-  // a mutable scalar source to codegen storage. Filtering this admission on
-  // reference-bearing types skips that planning and leaves codegen with an
-  // alias whose source has no storage slot.
-  const hasLiveMutableBinding = Array.from(facts.mutableSymbols).some((symbol) =>
-    facts.liveness.has(symbol),
-  );
-  if (hasLiveMutableBinding) reasons.add("mutable-binding");
-  let hasBorrowOperation =
-    hasSignatureBorrow ||
-    facts.hasReferenceAssignment ||
-    facts.hasBorrowTypedExpression ||
-    hasLiveMutableBinding;
-  let hasReferenceState =
-    hasSignatureBorrow || facts.hasReferenceState || hasLiveMutableBinding;
-  facts.calls.forEach((call) => {
-    const demand = borrowDemandForCallFact(
-      call,
-      resolveContext,
-      callResultIsConsumed(call.exprId, facts),
-      facts,
-    );
-    hasBorrowOperation ||= demand.requiresAnalysis;
-    hasReferenceState ||= demand.referenceState;
-    if (demand.requiresAnalysis) {
-      reasons.add("callee-contract");
-      demand.reasons.forEach((reason) => reasons.add(`callee-${reason}`));
-    }
-  });
-  const required = hasBorrowOperation && hasReferenceState;
-  if (!required) {
-    reasons.add(
-      hasBorrowOperation ? "no-reference-state" : "no-borrow-operation",
-    );
-  }
-  return { required, reasons: Array.from(reasons) };
-};
-
-const lambdaBorrowAnalysisDemand = ({
-  lambda,
-  facts,
-  typing,
-  resolveContext,
-}: {
-  lambda: HirLambdaExpr;
-  facts: CallableBorrowFacts | undefined;
-  typing: TypingResult;
-  resolveContext: ResolveContext;
-}): { required: boolean; reasons: readonly string[] } => {
-  if (!facts) {
-    return { required: true, reasons: ["missing-facts"] };
-  }
-  if (facts.hasMutableCapture) {
-    return { required: true, reasons: ["mutable-capture"] };
-  }
-  if (facts.hasUnknownExpressionType) {
-    return { required: true, reasons: ["unknown-expression-type"] };
-  }
-  const lambdaType = typing.resolvedExprTypes.get(lambda.id);
-  const signature =
-    typeof lambdaType === "number" ? typing.arena.get(lambdaType) : undefined;
-  const hasSignatureBorrow =
-    signature?.kind === "function" &&
-    (signature.parameters.some((parameter) =>
-      typeContainsBorrowed(parameter.type, typing),
-    ) ||
-      typeContainsBorrowed(signature.returnType, typing));
-  const reasons = new Set<string>();
-  if (hasSignatureBorrow) reasons.add("signature-borrow");
-  if (facts.hasReferenceAssignment) reasons.add("reference-assignment");
-  if (facts.hasBorrowTypedExpression) reasons.add("borrowed-expression");
-  const hasLiveMutableBinding = Array.from(facts.mutableSymbols).some((symbol) =>
-    facts.liveness.has(symbol),
-  );
-  if (hasLiveMutableBinding) reasons.add("mutable-binding");
-  let hasBorrowOperation =
-    hasSignatureBorrow ||
-    facts.hasReferenceAssignment ||
-    facts.hasBorrowTypedExpression ||
-    hasLiveMutableBinding;
-  let hasReferenceState =
-    hasSignatureBorrow || facts.hasReferenceState || hasLiveMutableBinding;
-  facts.calls.forEach((call) => {
-    const demand = borrowDemandForCallFact(
-      call,
-      resolveContext,
-      callResultIsConsumed(call.exprId, facts),
-      facts,
-    );
-    hasBorrowOperation ||= demand.requiresAnalysis;
-    hasReferenceState ||= demand.referenceState;
-    if (demand.requiresAnalysis) {
-      reasons.add("callee-contract");
-      demand.reasons.forEach((reason) => reasons.add(`callee-${reason}`));
-    }
-  });
-  const required = hasBorrowOperation && hasReferenceState;
-  if (!required) {
-    reasons.add(
-      hasBorrowOperation ? "no-reference-state" : "no-borrow-operation",
-    );
-  }
-  return { required, reasons: Array.from(reasons) };
-};
-
-const borrowDemandForCallFact = (
-  call: CallableBorrowCallFact,
-  resolveContext: ResolveContext,
-  resultIsConsumed: boolean,
-  facts: CallableBorrowFacts,
-): {
-  requiresAnalysis: boolean;
-  referenceState: boolean;
-  reasons: readonly string[];
-} => {
-  if (call.targets.length === 0) {
-    if (call.intrinsicBoundary) {
-      return {
-        requiresAnalysis: call.formsExplicitBorrow,
-        referenceState: false,
-        reasons: call.formsExplicitBorrow ? ["explicit-borrow"] : [],
-      };
-    }
-    const contract = call.baseContract;
-    if (!contract) {
-      return {
-        requiresAnalysis: true,
-        referenceState: true,
-        reasons: ["unknown-contract"],
-      };
-    }
-    const reasons = borrowDemandReasons({
-      contract,
-      resultIsConsumed,
-      call,
-      facts,
-      typing: resolveContext.typing,
-    });
-    return {
-      requiresAnalysis: reasons.length > 0,
-      referenceState:
-        contract.externalRead === true ||
-        contract.externalWrite === true ||
-        contract.parameters.some(
-          (parameter, index) =>
-            parameter.access === "mutable" ||
-            (parameter.access !== "owned" &&
-              callParameterCanAffectBorrow({
-                call,
-                parameter: index,
-                facts,
-                typing: resolveContext.typing,
-              })),
-        ),
-      reasons,
-    };
-  }
-  const contracts = call.targets.map((target) =>
-    target.moduleId === resolveContext.moduleId
-      ? resolveContext.contracts.get(target.symbol)
-      : resolveContext.dependencies
-          .get(target.moduleId)
-          ?.callables.get(target.symbol)?.contract,
-  );
-  const effects = call.targets.map((target) =>
-    target.moduleId === resolveContext.moduleId
-      ? undefined
-      : resolveContext.dependencies
-          .get(target.moduleId)
-          ?.effectOperations.get(target.symbol),
-  );
-  const reasons = new Set<string>();
-  if (call.formsExplicitBorrow) reasons.add("explicit-borrow");
-  if (effects.some((effect) => effect?.maySuspend)) reasons.add("suspension");
-  contracts.forEach((contract) => {
-    if (!contract) reasons.add("unknown-contract");
-    else
-      borrowDemandReasons({
-        contract,
-        resultIsConsumed,
-        call,
-        facts,
-        typing: resolveContext.typing,
-      }).forEach((reason) => reasons.add(reason));
-  });
-  const requiresAnalysis = reasons.size > 0;
-  const referenceState =
-    call.formsExplicitBorrow ||
-    contracts.some(
-      (contract) =>
-        !contract ||
-        contract.externalRead === true ||
-        contract.externalWrite === true ||
-        contract.parameters.some(
-          (parameter, index) =>
-            parameter.access === "mutable" ||
-            (parameter.access !== "owned" &&
-              callParameterCanAffectBorrow({
-                call,
-                parameter: index,
-                facts,
-                typing: resolveContext.typing,
-              })),
-        ),
-    );
-  return {
-    requiresAnalysis,
-    referenceState,
-    reasons: Array.from(reasons),
-  };
-};
-
-const callParameterCanAffectBorrow = ({
-  call,
-  parameter,
-  facts,
-  typing,
-}: {
-  call: CallableBorrowCallFact;
-  parameter: number;
-  facts: CallableBorrowFacts;
-  typing: TypingResult;
-}): boolean => {
-  const argument = call.substitutions.find(
-    (candidate) => candidate.parameter === parameter,
-  )?.argument;
-  if (argument === undefined) return true;
-  const type = facts.concreteExpressionTypes.get(argument);
-  return (
-    type === undefined ||
-    typeCanCarryReference(type, typing) ||
-    typeContainsBorrowed(type, typing)
-  );
-};
-
-const borrowDemandReasons = ({
-  contract,
-  resultIsConsumed,
-  call,
-  facts,
-  typing,
-}: {
-  contract: CallableBorrowContract;
-  resultIsConsumed: boolean;
-  call: CallableBorrowCallFact;
-  facts: CallableBorrowFacts;
-  typing: TypingResult;
-}): readonly string[] => {
-  const reasons = new Set<string>();
-  if (contract.externalWrite) reasons.add("external-write");
-  if (contract.maySuspend) reasons.add("suspension");
-  if ((contract.scopedCallbacks?.length ?? 0) > 0) reasons.add("callback");
-  if (contract.defaultIdentityGuardProtocol !== undefined) {
-    reasons.add("default-identity-guard");
-  }
-  contract.parameters.forEach((parameter, index) => {
-    if (parameter.access === "mutable") reasons.add("mutable-access");
-    if (
-      !callParameterCanAffectBorrow({ call, parameter: index, facts, typing })
-    )
-      return;
-    if ((parameter.writePaths?.length ?? 0) > 0) {
-      reasons.add("write-footprint");
-    }
-    if (parameter.retained) reasons.add("retained");
-    if (resultIsConsumed && parameter.returned) reasons.add("returned");
-  });
-  return Array.from(reasons);
-};
-
-const callResultIsConsumed = (
-  exprId: HirExprId,
-  facts: CallableBorrowFacts,
-): boolean =>
-  facts.valueUses.has(exprId) ||
-  facts.bindingsAfterExpression.has(exprId) ||
-  facts.returns.some((returned) => returned.exprId === exprId);

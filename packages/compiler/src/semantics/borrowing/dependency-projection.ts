@@ -186,6 +186,7 @@ const buildBorrowingDependencyProjection = ({
       (entry) =>
         entry.borrowing?.map((borrow) => {
           const summary = {
+            capability: borrow.capability,
             dispatch: borrow.dispatch ?? ("ordinary" as const),
             contract: borrow.contract,
             namedContract: borrow.namedContract,
@@ -194,6 +195,7 @@ const buildBorrowingDependencyProjection = ({
           return [
             borrow.symbol,
             {
+              capability: summary.capability,
               contract: summary.contract,
               dispatch: summary.dispatch,
               namedContract: summary.namedContract,
@@ -219,6 +221,7 @@ const buildBorrowingDependencyProjection = ({
         name: dependencySymbols.getSymbol(symbol).name,
         signature: semantics.typing.functions.getSignature(symbol),
         contract: exportedBorrowing.get(symbol)?.contract,
+        capability: exportedBorrowing.get(symbol)?.capability,
         dispatch: exportedBorrowing.get(symbol)?.dispatch,
         namedContract: exportedBorrowing.get(symbol)?.namedContract,
         source: exportedBorrowing.get(symbol)?.source,

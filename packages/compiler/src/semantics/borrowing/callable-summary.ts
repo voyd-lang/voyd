@@ -38,6 +38,9 @@ export const redactPrivateSummaryPath = (
     name: `${PRIVATE_SUMMARY_REGION_NAME}:${redaction.token}`,
     disjoint: [],
   });
+  if (path.length === 0 && redaction.index === 0) {
+    return [privateStorageProjection()];
+  }
   const privatePath: PlaceProjection[] = [];
   let hasHiddenSegment = false;
   path.slice(redaction.index).forEach((projection) => {

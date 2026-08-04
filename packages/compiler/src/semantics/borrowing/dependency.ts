@@ -3,6 +3,7 @@ import type { FunctionSignature } from "../typing/index.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type { CallableBorrowContract } from "./model.js";
 import type { PlaceProjection } from "./model.js";
+import type { LoanAnalysisMode } from "./capability.js";
 import type {
   CallableBorrowDispatchKind,
   CallableBorrowSummarySource,
@@ -12,6 +13,7 @@ import type {
 export type BorrowingCallableDependency = {
   name?: string;
   signature?: FunctionSignature;
+  capability?: LoanAnalysisMode;
   contract?: CallableBorrowContract;
   dispatch?: CallableBorrowDispatchKind;
   namedContract?: PublicNamedBorrowContract;

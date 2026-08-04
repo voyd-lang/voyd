@@ -189,6 +189,7 @@ export const cloneSemanticsForTypingState = ({
     hir: semantics.hir,
     borrowing: {
       callables: new Map(semantics.borrowing.callables),
+      capabilities: new Map(semantics.borrowing.capabilities),
       namedContracts: new Map(semantics.borrowing.namedContracts),
       runtimeIdentityGuards: new Map(semantics.borrowing.runtimeIdentityGuards),
       mutableStorageSymbols: new Set(semantics.borrowing.mutableStorageSymbols),

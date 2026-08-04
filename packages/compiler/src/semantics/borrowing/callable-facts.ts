@@ -26,6 +26,7 @@ import {
   typeCanCarryReference,
   typeIsAllocationBacked,
 } from "./reference-bearing.js";
+import { placeOfExpression } from "./places.js";
 import { typeContainsBorrowed } from "./borrowed-types.js";
 import {
   incrementCompilerPerfCounter,
@@ -369,39 +370,122 @@ const translateValueRequest = (
     : undefined;
 };
 
-export const extractCallableBorrowFacts = ({
-  functions,
-  hir,
-  typing,
-  resolveContext,
-}: {
-  functions: readonly HirFunction[];
-  hir: HirGraph;
-  typing: TypingResult;
-  resolveContext: ResolveContext;
-}): ReadonlyMap<SymbolId, CallableBorrowFacts> =>
-  new Map(
-    functions.map((functionItem) => [
-      functionItem.symbol,
-      extractFacts({ functionItem, hir, typing, resolveContext }),
-    ]),
-  );
+class LazyFactsMap<Key, Value> {
+  private readonly cache = new Map<Key, Value>();
+  private readonly keySet: ReadonlySet<Key>;
 
-export const extractLambdaBorrowFacts = ({
+  public constructor(
+    private readonly keysList: readonly Key[],
+    private readonly create: (key: Key) => Value | undefined,
+  ) {
+    this.keySet = new Set(keysList);
+  }
+
+  public get size(): number {
+    return this.keysList.length;
+  }
+
+  public get(key: Key): Value | undefined {
+    if (!this.keySet.has(key)) return undefined;
+    if (!this.cache.has(key)) {
+      const value = this.create(key);
+      if (value !== undefined) this.cache.set(key, value);
+    }
+    return this.cache.get(key);
+  }
+
+  public has(key: Key): boolean {
+    return this.keySet.has(key);
+  }
+
+  public keys(): IterableIterator<Key> {
+    return this.keysList[Symbol.iterator]();
+  }
+
+  public values(): IterableIterator<Value> {
+    return this.keysList.flatMap((key) => {
+      const value = this.get(key);
+      return value === undefined ? [] : [value];
+    })[Symbol.iterator]();
+  }
+
+  public entries(): IterableIterator<[Key, Value]> {
+    return this.keysList.flatMap((key) => {
+      const value = this.get(key);
+      return value === undefined ? [] : [[key, value] as [Key, Value]];
+    })[Symbol.iterator]();
+  }
+
+  public forEach(
+    callbackfn: (value: Value, key: Key, map: ReadonlyMap<Key, Value>) => void,
+    thisArg?: unknown,
+  ): void {
+    this.keysList.forEach((key) => {
+      const value = this.get(key);
+      if (value !== undefined) {
+        callbackfn.call(
+          thisArg,
+          value,
+          key,
+          this as unknown as ReadonlyMap<Key, Value>,
+        );
+      }
+    });
+  }
+
+  public [Symbol.iterator](): IterableIterator<[Key, Value]> {
+    return this.entries();
+  }
+
+  public materializedCount(): number {
+    return this.cache.size;
+  }
+}
+
+export type LazyCallableBorrowFacts = {
+  functions: ReadonlyMap<SymbolId, CallableBorrowFacts>;
+  lambdas: ReadonlyMap<HirExprId, CallableBorrowFacts>;
+  materializedCount: () => number;
+};
+
+export const createLazyCallableBorrowFacts = ({
+  functions,
   lambdas,
   hir,
   typing,
   resolveContext,
 }: {
+  functions: readonly HirFunction[];
   lambdas: readonly HirLambdaExpr[];
   hir: HirGraph;
   typing: TypingResult;
   resolveContext: ResolveContext;
-}): ReadonlyMap<HirExprId, CallableBorrowFacts> =>
-  new Map(
-    lambdas.map((lambda) => [
-      lambda.id,
-      extractFacts({
+}): LazyCallableBorrowFacts => {
+  const functionMap = new Map(
+    functions.map((functionItem) => [functionItem.symbol, functionItem] as const),
+  );
+  const lambdaMap = new Map(lambdas.map((lambda) => [lambda.id, lambda] as const));
+  const functionFacts = new LazyFactsMap(
+    functions.map((functionItem) => functionItem.symbol),
+    (symbol) => {
+      const functionItem = functionMap.get(symbol);
+      if (!functionItem) return undefined;
+      const startedAt = startCompilerPerfPhase();
+      const facts = extractFacts({ functionItem, hir, typing, resolveContext });
+      markCompilerPerfPhaseDuration(
+        "analyzeBorrowing.materializeFullFacts",
+        startedAt,
+      );
+      return facts;
+    },
+  );
+  const lambdaFacts = new LazyFactsMap(
+    lambdas.map((lambda) => lambda.id),
+    (exprId) => {
+      const lambda = lambdaMap.get(exprId);
+      if (!lambda) return undefined;
+      const startedAt = startCompilerPerfPhase();
+      const facts = extractFacts({
         functionItem: {
           symbol: (-1 - lambda.id) as SymbolId,
           parameters: lambda.parameters,
@@ -412,9 +496,27 @@ export const extractLambdaBorrowFacts = ({
         hir,
         typing,
         resolveContext,
-      }),
-    ]),
+      });
+      markCompilerPerfPhaseDuration(
+        "analyzeBorrowing.materializeFullFacts",
+        startedAt,
+      );
+      return facts;
+    },
   );
+  return {
+    functions: functionFacts as unknown as ReadonlyMap<
+      SymbolId,
+      CallableBorrowFacts
+    >,
+    lambdas: lambdaFacts as unknown as ReadonlyMap<
+      HirExprId,
+      CallableBorrowFacts
+    >,
+    materializedCount: () =>
+      functionFacts.materializedCount() + lambdaFacts.materializedCount(),
+  };
+};
 
 type FactCallable = Pick<HirFunction, "symbol" | "parameters" | "body"> & {
   borrowContract?: HirFunction["borrowContract"];
@@ -2508,98 +2610,4 @@ const targetMaySuspend = (
     (signature !== undefined &&
       !resolveContext.typing.effects.isEmpty(signature.effectRow))
   );
-};
-
-const placeOfExpression = (
-  exprId: HirExprId,
-  hir: HirGraph,
-  resolveContext?: ResolveContext,
-): CallableBorrowAccessFact["place"] => {
-  const expression = hir.expressions.get(exprId);
-  if (expression?.exprKind === "identifier") {
-    return { root: expression.symbol, projections: [] };
-  }
-  if (expression?.exprKind === "call" && resolveContext) {
-    const callee = hir.expressions.get(expression.callee);
-    const metadata =
-      callee?.exprKind === "identifier"
-        ? (resolveContext.symbolTable.getSymbol(callee.symbol).metadata as
-            | { intrinsic?: boolean; intrinsicName?: string }
-            | undefined)
-        : undefined;
-    const name =
-      callee?.exprKind === "identifier"
-        ? (metadata?.intrinsicName ??
-          resolveContext.symbolTable.getSymbol(callee.symbol).name)
-        : undefined;
-    const intrinsicBoundary = callHasIntrinsicBorrowBoundary(
-      expression,
-      resolveContext,
-    );
-    if (intrinsicBoundary && name === "~") {
-      const argument = expression.args.at(-1)?.expr;
-      return typeof argument === "number"
-        ? placeOfExpression(argument, hir, resolveContext)
-        : undefined;
-    }
-    if (intrinsicBoundary && name === "__array_get") {
-      const target = expression.args[0]?.expr;
-      if (typeof target !== "number") return undefined;
-      const place = placeOfExpression(target, hir, resolveContext);
-      if (!place) return undefined;
-      const index = expression.args[1]?.expr;
-      const indexExpression =
-        typeof index === "number" ? hir.expressions.get(index) : undefined;
-      const constant =
-        indexExpression?.exprKind === "literal" &&
-        indexExpression.literalKind === "i32"
-          ? Number(indexExpression.value)
-          : undefined;
-      return {
-        root: place.root,
-        projections: [
-          ...place.projections,
-          ...(typeof expressionTypeFor(target, resolveContext) === "number" &&
-          typeIsAllocationBacked(
-            expressionTypeFor(target, resolveContext)!,
-            resolveContext.typing,
-          )
-            ? ([{ kind: "dereference" }] as const)
-            : []),
-          {
-            kind: "index",
-            stable: false,
-            ...(Number.isInteger(constant) ? { constant } : {}),
-          },
-        ],
-      };
-    }
-  }
-  if (expression?.exprKind !== "field-access") {
-    return undefined;
-  }
-  const target = placeOfExpression(expression.target, hir, resolveContext);
-  if (!target) {
-    return undefined;
-  }
-  const projection = Number.isInteger(Number(expression.field))
-    ? ({ kind: "tuple", index: Number(expression.field) } as const)
-    : ({ kind: "field", name: expression.field } as const);
-  const targetType = resolveContext
-    ? expressionTypeFor(expression.target, resolveContext)
-    : undefined;
-  const targetExpression = hir.expressions.get(expression.target);
-  const needsDereference =
-    typeof targetType === "number" &&
-    typeIsAllocationBacked(targetType, resolveContext!.typing) &&
-    resolveContext!.typing.arena.get(targetType).kind !== "borrowed" &&
-    targetExpression?.exprKind !== "identifier";
-  return {
-    root: target.root,
-    projections: [
-      ...target.projections,
-      ...(needsDereference ? ([{ kind: "dereference" }] as const) : []),
-      projection,
-    ],
-  };
 };

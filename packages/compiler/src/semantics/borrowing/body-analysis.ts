@@ -34,6 +34,7 @@ import {
   mergeCallableBorrowContracts,
   projectionPathCovers,
   projectionPathsOverlap,
+  projectionsOverlap,
   runtimeIdentityGuardParameterCanEscape,
   translateProjectionPath,
 } from "./model.js";
@@ -63,6 +64,7 @@ import {
   factValueRequests,
   type CallableBorrowFacts,
 } from "./callable-facts.js";
+import { walkExpression } from "../hir/walk.js";
 import {
   markCompilerPerfPhaseDuration,
   startCompilerPerfPhase,
@@ -174,6 +176,7 @@ type BodyContext = {
   returnType: TypeId | undefined;
   facts: CallableBorrowFacts;
   lambdaFacts: ReadonlyMap<HirExprId, CallableBorrowFacts>;
+  lambdaContracts: ReadonlyMap<HirExprId, CallableBorrowContract>;
   factsForExpression: ReadonlyMap<HirExprId, CallableBorrowFacts>;
 };
 
@@ -995,6 +998,16 @@ const externalReturnedOriginsForCall = (
   return origins;
 };
 
+const freshResultPathCovers = (
+  freshPath: readonly PlaceProjection[],
+  requested: readonly PlaceProjection[],
+): boolean =>
+  freshPath.length > 0 &&
+  requested.length >= freshPath.length &&
+  freshPath.every((projection, index) =>
+    projectionsOverlap(projection, requested[index]!),
+  );
+
 const callOriginSourceNeedsDereference = ({
   info,
   parameterIndex,
@@ -1175,6 +1188,15 @@ const returnedPlacesForCall = (
     }) ?? []),
     ...externalReturnedOriginsForCall(info).flatMap((origin) => {
       if (origin.fresh) {
+        return [];
+      }
+      if (
+        externalReturnedOriginsForCall(info).some(
+          (fresh) =>
+            fresh.fresh === true &&
+            freshResultPathCovers(fresh.result, requested),
+        )
+      ) {
         return [];
       }
       const root = info.target?.symbol ?? info.targets[0]?.symbol;
@@ -1503,11 +1525,17 @@ const computeExpressionReturnsExternalResult = (
       );
     }
     const info = targetInfo(expr, ctx);
+    const requestedFreshResult = externalReturnedOriginsForCall(info).some(
+      (origin) =>
+        origin.fresh === true &&
+        freshResultPathCovers(origin.result, requested),
+    );
     const hasUnconditionalExternalResult = externalReturnedOriginsForCall(
       info,
     ).some(
       (origin) =>
         origin.fresh !== true &&
+        !requestedFreshResult &&
         requested.length >= origin.result.length &&
         translateProjectionPath({
           result: origin.result,
@@ -1614,7 +1642,8 @@ const computeExpressionReturnsExternalResult = (
   }
   if (expr.exprKind === "identifier") {
     const event = ctx.events.get(expr.id);
-    if (
+    const initializer = ctx.bindingInitializers.get(expr.symbol);
+    const hasExternalAlias =
       event &&
       reachingAliasDefinitions(expr.symbol, event, ctx).some(
         (alias) =>
@@ -1627,11 +1656,28 @@ const computeExpressionReturnsExternalResult = (
                 source: [],
                 requested,
               }) !== undefined),
-      )
-    ) {
+      );
+    if (hasExternalAlias) {
+      // A wildcard external alias may still contain a sibling fresh result.
+      // Re-evaluate the bounded initializer for the requested projection
+      // before treating the whole value as external.
+      if (typeof initializer === "number") {
+        const initializerIsExternal = computeExpressionReturnsExternalResult(
+          initializer,
+          ctx,
+          requested,
+          new Set(seen),
+          cache,
+          requestsByExpression,
+          externalTopMemo,
+          cyclic,
+        );
+        if (!initializerIsExternal) {
+          return finish(false);
+        }
+      }
       return finish(true);
     }
-    const initializer = ctx.bindingInitializers.get(expr.symbol);
     return finish(
       typeof initializer === "number"
         ? computeExpressionReturnsExternalResult(
@@ -1737,6 +1783,35 @@ const externalResultAccessHint = (
     expr?.exprKind === "method-call"
     ? false
     : undefined;
+};
+
+const expressionHasFreshExternalProjection = (
+  exprId: HirExprId,
+  ctx: BodyContext,
+  seen = new Set<HirExprId>(),
+): boolean => {
+  if (seen.has(exprId)) return false;
+  seen.add(exprId);
+  const expression = bodyExpression(exprId, ctx);
+  if (!expression) return false;
+  if (expression.exprKind === "call" || expression.exprKind === "method-call") {
+    return externalReturnedOriginsForCall(targetInfo(expression, ctx)).some(
+      (origin) => origin.fresh === true && origin.result.length > 0,
+    );
+  }
+  if (expression.exprKind === "field-access") {
+    return expressionHasFreshExternalProjection(expression.target, ctx, seen);
+  }
+  if (expression.exprKind === "identifier") {
+    const initializer = ctx.bindingInitializers.get(expression.symbol);
+    return typeof initializer === "number"
+      ? expressionHasFreshExternalProjection(initializer, ctx, seen)
+      : false;
+  }
+  if (expression.exprKind === "block" && typeof expression.value === "number") {
+    return expressionHasFreshExternalProjection(expression.value, ctx, seen);
+  }
+  return false;
 };
 
 const expressionMaterializesPlainProjection = (
@@ -5012,6 +5087,17 @@ const freshAllocationOriginOfPlace = (
     if (!expression) {
       return undefined;
     }
+    if (
+      (expression.exprKind === "call" ||
+        expression.exprKind === "method-call") &&
+      externalReturnedOriginsForCall(targetInfo(expression, ctx)).some(
+        (origin) =>
+          origin.fresh === true &&
+          freshResultPathCovers(origin.result, path),
+      )
+    ) {
+      return expression.id;
+    }
     if (path.length === 0) {
       const type = typeOfExpr(exprId, ctx);
       if (
@@ -5031,6 +5117,13 @@ const freshAllocationOriginOfPlace = (
       ) {
         return exprId;
       }
+    }
+    if (
+      expression.exprKind === "field-access" &&
+      path[0]?.kind === "field" &&
+      path[0].name === expression.field
+    ) {
+      return providerAtPath(expression.target, path, seen);
     }
     if (expression.exprKind === "identifier") {
       const providerEvent = ctx.events.get(exprId);
@@ -5104,18 +5197,29 @@ const placeOverlaps = (
   ctx: BodyContext,
   event?: Event,
 ): boolean => {
+  const leftFreshOrigin = freshAllocationOriginOfPlace(left, ctx, event);
+  const rightFreshOrigin = freshAllocationOriginOfPlace(right, ctx, event);
+  if (
+    left.root !== right.root &&
+    (typeof leftFreshOrigin === "number" ||
+      typeof rightFreshOrigin === "number")
+  ) {
+    return leftFreshOrigin === rightFreshOrigin;
+  }
   if (left.root !== right.root) {
     return false;
   }
-  const leftFreshOrigin = freshAllocationOriginOfPlace(left, ctx, event);
-  const rightFreshOrigin = freshAllocationOriginOfPlace(right, ctx, event);
+  if (
+    typeof leftFreshOrigin === "number" &&
+    typeof rightFreshOrigin === "number" &&
+    leftFreshOrigin !== rightFreshOrigin
+  ) {
+    return false;
+  }
   if (
     typeof leftFreshOrigin === "number" &&
     typeof rightFreshOrigin === "number"
   ) {
-    if (leftFreshOrigin !== rightFreshOrigin) {
-      return false;
-    }
     const leftDereference = left.projections.findIndex(
       (projection) => projection.kind === "dereference",
     );
@@ -5615,7 +5719,67 @@ const lambdaMutablyUsesCapture = (
 ): boolean => {
   const facts = ctx.lambdaFacts?.get(lambda.id);
   if (!facts) {
-    return true;
+    let mutable = false;
+    const expressionUsesSymbol = (exprId: HirExprId): boolean => {
+      let usesSymbol = false;
+      walkExpression({
+        exprId,
+        hir: ctx.hir,
+        onEnterExpression: (_candidateId, expression) => {
+          if (
+            expression.exprKind === "identifier" &&
+            expression.symbol === symbol
+          ) {
+            usesSymbol = true;
+            return { stop: true };
+          }
+          return undefined;
+        },
+      });
+      return usesSymbol;
+    };
+    walkExpression({
+      exprId: lambda.body,
+      hir: ctx.hir,
+      onEnterExpression: (_exprId, expression) => {
+        if (expression.exprKind === "assign") {
+          if (
+            typeof expression.target === "number" &&
+            expressionUsesSymbol(expression.target)
+          ) {
+            mutable = true;
+            return { stop: true };
+          }
+          return undefined;
+        }
+        if (
+          (expression.exprKind === "call" ||
+            expression.exprKind === "method-call") &&
+          (expression.exprKind === "call"
+            ? expression.args.some((argument) =>
+                expressionUsesSymbol(argument.expr),
+              )
+            : expression.args.some((argument) =>
+                expressionUsesSymbol(argument.expr),
+              ) || expressionUsesSymbol(expression.target))
+        ) {
+          const callee =
+            expression.exprKind === "call"
+              ? bodyExpression(expression.callee, ctx)
+              : undefined;
+          const calleeName =
+            callee?.exprKind === "identifier"
+              ? ctx.symbolTable.getSymbol(callee.symbol).name
+              : undefined;
+          // A direct borrow operator is definitely mutable. Other calls
+          // using the capture remain unknown without a resolved lambda fact.
+          mutable = calleeName !== undefined;
+          return mutable ? { stop: true } : undefined;
+        }
+        return undefined;
+      },
+    });
+    return mutable;
   }
   type AliasState = Map<SymbolId, readonly (readonly PlaceProjection[])[]>;
   const uniquePaths = (
@@ -6906,11 +7070,16 @@ const validateCall = (
     }
   });
   const resultType = typeOfExpr(expr.id, ctx);
+  const externalResultOrigins = externalReturnedOriginsForCall(info);
+  const hasOpaqueExternalBorrowResult =
+    info.targets.length === 0 ||
+    (info.contract?.borrowedResult === "external" &&
+      (externalResultOrigins.length === 0 ||
+        externalResultOrigins.some((origin) => origin.fresh !== true)));
   if (
     typeof resultType === "number" &&
     typeContainsBorrowed(resultType, ctx.typing) &&
-    (info.targets.length === 0 ||
-      info.contract?.borrowedResult === "external") &&
+    hasOpaqueExternalBorrowResult &&
     !info.contract?.parameters.some(
       (parameter) => (parameter.returnedSharedOrigins?.length ?? 0) > 0,
     )
@@ -7159,9 +7328,19 @@ const validateCall = (
     const access =
       parameterOverride?.access ??
       parameterAccessFor({ index, actual, info, ctx });
-    if (access === "owned") {
+    if (
+      access === "owned" &&
+      (parameter?.readPaths?.length ?? 0) === 0 &&
+      (parameter?.writePaths?.length ?? 0) === 0
+    ) {
       return [];
     }
+    const effectiveAccess: "shared" | "mutable" =
+      access === "owned"
+        ? (parameter?.writePaths?.length ?? 0) > 0
+          ? "mutable"
+          : "shared"
+        : access;
     return parameter
       ? [
           ...(parameter.readPaths ?? []).map((path) => ({
@@ -7186,7 +7365,7 @@ const validateCall = (
         ]
       : [
           {
-            access,
+            access: effectiveAccess,
             path: [] as readonly PlaceProjection[],
             storageAccess: false,
           },
@@ -7408,6 +7587,10 @@ const validateCall = (
       accessesForEffectiveActual(effective).some(
         (access) => access.access === "mutable",
       ),
+    ) &&
+    !info.contract?.parameters.some(
+      (parameter) =>
+        parameter.access !== "owned" && parameter.returned === true,
     ) &&
     !defaultBorrowGroups.flat().some((borrow) => borrow.access === "mutable") &&
     !defaultLoanGroups.flat().some((borrow) => borrow.access === "mutable") &&
@@ -8650,7 +8833,7 @@ const callableValueAtPath = (
     const lambdaFacts = ctx.lambdaFacts.get(callback.id);
     const contract = lambdaFacts
       ? ctx.contracts.get(lambdaFacts.symbol)
-      : undefined;
+      : ctx.lambdaContracts.get(callback.id);
     if (!contract) return { kind: "unknown" };
     return {
       kind: "known",
@@ -8920,6 +9103,10 @@ const validateLetBinding = (
   ctx: BodyContext,
 ): void => {
   const symbols = patternSymbols(statement.pattern);
+  const initializerHasFreshProjection = expressionHasFreshExternalProjection(
+    statement.initializer,
+    ctx,
+  );
   symbols.forEach((symbol) => {
     const aliases = aliasesForSymbol(symbol, ctx).filter(
       (alias) =>
@@ -8927,6 +9114,17 @@ const validateLetBinding = (
         alias.event.span.start === statement.span.start,
     );
     aliases.forEach((alias) => {
+      if (
+        initializerHasFreshProjection &&
+        alias.externalResult === true &&
+        alias.place.projections.length === 0
+      ) {
+        // The aggregate root may include an external sibling, but a later
+        // projected access can be a distinct fresh allocation. Defer the
+        // overlap decision to that projected access instead of charging the
+        // whole root at binding creation.
+        return;
+      }
       if (alias.access === "mutable" && alias.capture !== true) {
         const sourceActor = baseSymbolOf(statement.initializer, ctx);
         const sourceMutable =
@@ -9051,6 +9249,7 @@ const initializeCallableContext = ({
   callable,
   facts,
   lambdaFacts,
+  lambdaContracts,
   parameterTypes,
   returnType,
   borrowedReturnEntries,
@@ -9070,6 +9269,7 @@ const initializeCallableContext = ({
   callable: BorrowCallable;
   facts: CallableBorrowFacts;
   lambdaFacts: ReadonlyMap<HirExprId, CallableBorrowFacts>;
+  lambdaContracts: ReadonlyMap<HirExprId, CallableBorrowContract>;
   parameterTypes: readonly (TypeId | undefined)[];
   returnType?: TypeId;
   borrowedReturnEntries: readonly BorrowedTypeEntry[];
@@ -9209,6 +9409,7 @@ const initializeCallableContext = ({
     returnType,
     facts,
     lambdaFacts,
+    lambdaContracts,
     factsForExpression: new Map(
       [facts, ...lambdaFacts.values()].flatMap((callableFacts) =>
         callableFacts.expressionIds.map(
@@ -9291,6 +9492,7 @@ export const analyzeFunctionBorrowing = ({
   functionItem,
   facts,
   lambdaFacts,
+  lambdaContracts,
   hir,
   typing,
   symbolTable,
@@ -9307,6 +9509,7 @@ export const analyzeFunctionBorrowing = ({
   functionItem: HirFunction;
   facts: CallableBorrowFacts;
   lambdaFacts: ReadonlyMap<HirExprId, CallableBorrowFacts>;
+  lambdaContracts: ReadonlyMap<HirExprId, CallableBorrowContract>;
   hir: HirGraph;
   typing: TypingResult;
   symbolTable: SymbolTable;
@@ -9375,6 +9578,7 @@ export const analyzeFunctionBorrowing = ({
     callable: functionItem,
     facts,
     lambdaFacts,
+    lambdaContracts,
     parameterTypes,
     returnType,
     borrowedReturnEntries:
@@ -9401,6 +9605,7 @@ export const analyzeLambdaBodyBorrowing = ({
   lambda,
   facts,
   lambdaFacts,
+  lambdaContracts,
   hir,
   typing,
   symbolTable,
@@ -9417,6 +9622,7 @@ export const analyzeLambdaBodyBorrowing = ({
   lambda: HirLambdaExpr;
   facts: CallableBorrowFacts;
   lambdaFacts: ReadonlyMap<HirExprId, CallableBorrowFacts>;
+  lambdaContracts: ReadonlyMap<HirExprId, CallableBorrowContract>;
   hir: HirGraph;
   typing: TypingResult;
   symbolTable: SymbolTable;
@@ -9437,6 +9643,7 @@ export const analyzeLambdaBodyBorrowing = ({
     callable: lambda,
     facts,
     lambdaFacts,
+    lambdaContracts,
     parameterTypes:
       lambdaDescriptor?.kind === "function"
         ? lambdaDescriptor.parameters.map((parameter) => parameter.type)
@@ -9469,6 +9676,7 @@ const analyzeCallableBorrowing = ({
   callable,
   facts,
   lambdaFacts,
+  lambdaContracts,
   parameterTypes,
   returnType,
   borrowedReturnEntries,
@@ -9489,6 +9697,7 @@ const analyzeCallableBorrowing = ({
   callable: BorrowCallable;
   facts: CallableBorrowFacts;
   lambdaFacts: ReadonlyMap<HirExprId, CallableBorrowFacts>;
+  lambdaContracts: ReadonlyMap<HirExprId, CallableBorrowContract>;
   parameterTypes: readonly (TypeId | undefined)[];
   returnType?: TypeId;
   borrowedReturnEntries: readonly BorrowedTypeEntry[];
@@ -9526,6 +9735,7 @@ const analyzeCallableBorrowing = ({
     diagnostics,
     facts,
     lambdaFacts,
+    lambdaContracts,
   });
   markCompilerPerfPhaseDuration(
     "borrowing.body.initialize",

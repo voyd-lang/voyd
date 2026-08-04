@@ -14,6 +14,12 @@ export type WalkControl = {
   stop?: boolean;
 };
 
+export type HirWalkExpressionContext = {
+  parent?: HirExprId;
+  statement?: HirStatement;
+  tailPosition: boolean;
+};
+
 const walkPatternInternal = ({
   pattern,
   onEnterPattern,
@@ -105,9 +111,16 @@ export const walkExpression = ({
 }: {
   exprId: HirExprId;
   hir: HirGraph;
-  onEnterExpression?: (exprId: HirExprId, expr: HirExpression) => WalkControl | void;
+  onEnterExpression?: (
+    exprId: HirExprId,
+    expr: HirExpression,
+    context: HirWalkExpressionContext,
+  ) => WalkControl | void;
   onExitExpression?: (exprId: HirExprId, expr: HirExpression) => void;
-  onEnterStatement?: (stmtId: HirStmtId, stmt: HirStatement) => WalkControl | void;
+  onEnterStatement?: (
+    stmtId: HirStmtId,
+    stmt: HirStatement,
+  ) => WalkControl | void;
   onExitStatement?: (stmtId: HirStmtId, stmt: HirStatement) => void;
   onEnterPattern?: (pattern: HirPattern) => WalkControl | void;
   onExitPattern?: (pattern: HirPattern) => void;
@@ -120,12 +133,15 @@ export const walkExpression = ({
   const visitPattern = (pattern: HirPattern): boolean =>
     walkPatternInternal({ pattern, onEnterPattern, onExitPattern });
 
-  const visitExpression = (id: HirExprId): boolean => {
+  const visitExpression = (
+    id: HirExprId,
+    context: HirWalkExpressionContext,
+  ): boolean => {
     const expr = hir.expressions.get(id);
     if (!expr) {
       throw new Error(`missing HirExpression ${id}`);
     }
-    const control = onEnterExpression?.(id, expr);
+    const control = onEnterExpression?.(id, expr, context);
     if (control?.stop) {
       return true;
     }
@@ -144,88 +160,248 @@ export const walkExpression = ({
           break;
         case "break":
           if (typeof expr.value === "number") {
-            if (visitExpression(expr.value)) return true;
+            if (
+              visitExpression(expr.value, {
+                parent: id,
+                statement: context.statement,
+                tailPosition: false,
+              })
+            )
+              return true;
           }
           break;
         case "lambda":
-          if (visitExpression(expr.body)) return true;
+          if (
+            visitExpression(expr.body, {
+              parent: id,
+              tailPosition: true,
+            })
+          )
+            return true;
           break;
         case "effect-handler":
-          if (visitExpression(expr.body)) return true;
+          if (
+            visitExpression(expr.body, {
+              parent: id,
+              tailPosition: context.tailPosition,
+            })
+          )
+            return true;
           if (visitHandlerBodies) {
             for (const handler of expr.handlers) {
-              if (visitExpression(handler.body)) return true;
+              if (
+                visitExpression(handler.body, {
+                  parent: id,
+                  tailPosition: context.tailPosition,
+                })
+              )
+                return true;
             }
           }
           if (typeof expr.finallyBranch === "number") {
-            if (visitExpression(expr.finallyBranch)) return true;
+            if (
+              visitExpression(expr.finallyBranch, {
+                parent: id,
+                tailPosition: context.tailPosition,
+              })
+            )
+              return true;
           }
           break;
         case "block":
           for (const stmtId of expr.statements) {
-            if (visitStatement(stmtId)) return true;
+            if (visitStatement(stmtId, id)) return true;
           }
           if (typeof expr.value === "number") {
-            if (visitExpression(expr.value)) return true;
+            if (
+              visitExpression(expr.value, {
+                parent: id,
+                tailPosition: context.tailPosition,
+              })
+            )
+              return true;
           }
           break;
         case "call":
-          if (visitExpression(expr.callee)) return true;
+          if (
+            visitExpression(expr.callee, {
+              parent: id,
+              statement: context.statement,
+              tailPosition: false,
+            })
+          )
+            return true;
           for (const arg of expr.args) {
-            if (visitExpression(arg.expr)) return true;
+            if (
+              visitExpression(arg.expr, {
+                parent: id,
+                statement: context.statement,
+                tailPosition: false,
+              })
+            )
+              return true;
           }
           break;
         case "method-call":
-          if (visitExpression(expr.target)) return true;
+          if (
+            visitExpression(expr.target, {
+              parent: id,
+              statement: context.statement,
+              tailPosition: false,
+            })
+          )
+            return true;
           for (const arg of expr.args) {
-            if (visitExpression(arg.expr)) return true;
+            if (
+              visitExpression(arg.expr, {
+                parent: id,
+                statement: context.statement,
+                tailPosition: false,
+              })
+            )
+              return true;
           }
           break;
         case "tuple":
           for (const entry of expr.elements) {
-            if (visitExpression(entry)) return true;
+            if (
+              visitExpression(entry, {
+                parent: id,
+                statement: context.statement,
+                tailPosition: false,
+              })
+            )
+              return true;
           }
           break;
         case "loop":
-          if (visitExpression(expr.body)) return true;
+          if (
+            visitExpression(expr.body, {
+              parent: id,
+              statement: context.statement,
+              tailPosition: false,
+            })
+          )
+            return true;
           break;
         case "while":
-          if (visitExpression(expr.condition)) return true;
-          if (visitExpression(expr.body)) return true;
+          if (
+            visitExpression(expr.condition, {
+              parent: id,
+              statement: context.statement,
+              tailPosition: false,
+            })
+          )
+            return true;
+          if (
+            visitExpression(expr.body, {
+              parent: id,
+              statement: context.statement,
+              tailPosition: false,
+            })
+          )
+            return true;
           break;
         case "cond":
         case "if":
           for (const branch of expr.branches) {
-            if (visitExpression(branch.condition)) return true;
-            if (visitExpression(branch.value)) return true;
+            if (
+              visitExpression(branch.condition, {
+                parent: id,
+                statement: context.statement,
+                tailPosition: false,
+              })
+            )
+              return true;
+            if (
+              visitExpression(branch.value, {
+                parent: id,
+                tailPosition: context.tailPosition,
+              })
+            )
+              return true;
           }
           if (typeof expr.defaultBranch === "number") {
-            if (visitExpression(expr.defaultBranch)) return true;
+            if (
+              visitExpression(expr.defaultBranch, {
+                parent: id,
+                tailPosition: context.tailPosition,
+              })
+            )
+              return true;
           }
           break;
         case "match":
-          if (visitExpression(expr.discriminant)) return true;
+          if (
+            visitExpression(expr.discriminant, {
+              parent: id,
+              statement: context.statement,
+              tailPosition: false,
+            })
+          )
+            return true;
           for (const arm of expr.arms) {
             if (shouldVisitPatterns && visitPattern(arm.pattern)) return true;
             if (typeof arm.guard === "number") {
-              if (visitExpression(arm.guard)) return true;
+              if (
+                visitExpression(arm.guard, {
+                  parent: id,
+                  statement: context.statement,
+                  tailPosition: false,
+                })
+              )
+                return true;
             }
-            if (visitExpression(arm.value)) return true;
+            if (
+              visitExpression(arm.value, {
+                parent: id,
+                tailPosition: context.tailPosition,
+              })
+            )
+              return true;
           }
           break;
         case "object-literal":
           for (const entry of expr.entries) {
-            if (visitExpression(entry.value)) return true;
+            if (
+              visitExpression(entry.value, {
+                parent: id,
+                statement: context.statement,
+                tailPosition: false,
+              })
+            )
+              return true;
           }
           break;
         case "field-access":
-          if (visitExpression(expr.target)) return true;
+          if (
+            visitExpression(expr.target, {
+              parent: id,
+              statement: context.statement,
+              tailPosition: false,
+            })
+          )
+            return true;
           break;
         case "assign":
           if (typeof expr.target === "number") {
-            if (visitExpression(expr.target)) return true;
+            if (
+              visitExpression(expr.target, {
+                parent: id,
+                statement: context.statement,
+                tailPosition: false,
+              })
+            )
+              return true;
           }
-          if (visitExpression(expr.value)) return true;
+          if (
+            visitExpression(expr.value, {
+              parent: id,
+              statement: context.statement,
+              tailPosition: false,
+            })
+          )
+            return true;
           if (expr.pattern && shouldVisitPatterns) {
             if (visitPattern(expr.pattern)) return true;
           }
@@ -237,7 +413,7 @@ export const walkExpression = ({
     return false;
   };
 
-  const visitStatement = (id: HirStmtId): boolean => {
+  const visitStatement = (id: HirStmtId, parent: HirExprId): boolean => {
     const stmt = hir.statements.get(id);
     if (!stmt) {
       throw new Error(`missing HirStatement ${id}`);
@@ -253,14 +429,35 @@ export const walkExpression = ({
           if (shouldVisitPatterns) {
             if (visitPattern(stmt.pattern)) return true;
           }
-          if (visitExpression(stmt.initializer)) return true;
+          if (
+            visitExpression(stmt.initializer, {
+              parent,
+              statement: stmt,
+              tailPosition: false,
+            })
+          )
+            return true;
           break;
         case "expr-stmt":
-          if (visitExpression(stmt.expr)) return true;
+          if (
+            visitExpression(stmt.expr, {
+              parent,
+              statement: stmt,
+              tailPosition: false,
+            })
+          )
+            return true;
           break;
         case "return":
           if (typeof stmt.value === "number") {
-            if (visitExpression(stmt.value)) return true;
+            if (
+              visitExpression(stmt.value, {
+                parent,
+                statement: stmt,
+                tailPosition: true,
+              })
+            )
+              return true;
           }
           break;
       }
@@ -270,5 +467,5 @@ export const walkExpression = ({
     return false;
   };
 
-  visitExpression(exprId);
+  visitExpression(exprId, { tailPosition: true });
 };

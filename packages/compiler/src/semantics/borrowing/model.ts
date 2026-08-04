@@ -1,6 +1,7 @@
 import type { Diagnostic } from "../../diagnostics/index.js";
 import type { SymbolId } from "../ids.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
+import type { LoanAnalysisMode } from "./capability.js";
 
 export type BorrowAccessMode = "owned" | "shared" | "mutable";
 
@@ -17,6 +18,30 @@ export type PlaceProjection =
   | { kind: "discriminant" }
   | { kind: "dereference" }
   | { kind: "identity" };
+
+const projectionPathKey = (
+  path: readonly PlaceProjection[],
+): string =>
+  path
+    .map((projection) => {
+      switch (projection.kind) {
+        case "field":
+          return `field:${projection.name}`;
+        case "tuple":
+          return `tuple:${projection.index}`;
+        case "index":
+          return `index:${projection.stable ? "stable" : "unstable"}:${projection.constant ?? ""}`;
+        case "region":
+          return `region:${projection.scope}:${projection.name}:${[...projection.disjoint].sort().join(",")}`;
+        case "discriminant":
+          return "discriminant";
+        case "dereference":
+          return "dereference";
+        case "identity":
+          return "identity";
+      }
+    })
+    .join("/");
 
 export const projectionsOverlap = (
   left: PlaceProjection,
@@ -472,10 +497,25 @@ export type RuntimeIdentityGuard = {
 
 export type BorrowingResult = {
   callables: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  capabilities: ReadonlyMap<SymbolId, LoanAnalysisMode>;
   namedContracts: ReadonlyMap<SymbolId, CheckedNamedBorrowContract>;
   runtimeIdentityGuards: ReadonlyMap<number, readonly RuntimeIdentityGuard[]>;
   mutableStorageSymbols: ReadonlySet<SymbolId>;
   diagnostics: readonly Diagnostic[];
+  /** Architecture telemetry; not part of dependency/codegen projections. */
+  analysisMetrics?: {
+    fullFactsMaterialized: number;
+    fullFactSymbols: readonly SymbolId[];
+  };
+  summaryDemand?: {
+    totalCallables: number;
+    demandedCallables: number;
+    skippedTrivialCallables: number;
+    worklistEdges: number;
+    worklistIterations: number;
+    evaluations: number;
+    demandedSymbols: ReadonlySet<SymbolId>;
+  };
   /** Process-local callable boundary for incremental invalidation (V-465). */
   queries?: ReadonlyMap<
     SymbolId,
@@ -952,14 +992,20 @@ const mergeProjectionPaths = (
               ? []
               : [[]];
         })
-        .map((path) => [JSON.stringify(path), path]),
+        .map((path) => [projectionPathKey(path), path]),
     ).values(),
+  );
+  paths.sort(
+    (left, right) =>
+      left.length - right.length ||
+      projectionPathKey(left).localeCompare(projectionPathKey(right)),
   );
   return paths.length > 0 ? { [key]: paths } : {};
 };
 
 export const emptyBorrowingResult = (): BorrowingResult => ({
   callables: new Map(),
+  capabilities: new Map(),
   namedContracts: new Map(),
   runtimeIdentityGuards: new Map(),
   mutableStorageSymbols: new Set(),

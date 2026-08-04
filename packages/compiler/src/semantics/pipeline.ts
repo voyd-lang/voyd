@@ -393,14 +393,65 @@ const collectModuleExports = ({
     }
     return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`;
   };
+  const typeContainsPrivateField = (
+    type: number,
+    active = new Set<number>(),
+  ): boolean => {
+    if (active.has(type)) {
+      return false;
+    }
+    const nextActive = new Set(active).add(type);
+    const descriptor = typing.arena.get(type);
+    if (descriptor.kind === "borrowed") {
+      return typeContainsPrivateField(descriptor.inner, nextActive);
+    }
+    if (descriptor.kind === "recursive") {
+      return typeContainsPrivateField(descriptor.body, nextActive);
+    }
+    if (descriptor.kind === "union") {
+      return descriptor.members.some((member) =>
+        typeContainsPrivateField(member, nextActive),
+      );
+    }
+    if (descriptor.kind === "intersection") {
+      return [descriptor.nominal, descriptor.structural]
+        .filter((member): member is number => typeof member === "number")
+        .some((member) => typeContainsPrivateField(member, nextActive));
+    }
+    if (descriptor.kind === "fixed-array") {
+      return typeContainsPrivateField(descriptor.element, nextActive);
+    }
+    const fields =
+      descriptor.kind === "structural-object"
+        ? descriptor.fields
+        : descriptor.kind === "nominal-object" ||
+            descriptor.kind === "value-object"
+          ? typing.objectsByNominal.get(type)?.fields
+          : undefined;
+    return (
+      fields?.some(
+        (field) =>
+          (field.visibility !== undefined && field.visibility.api !== true) ||
+          typeContainsPrivateField(field.type, nextActive),
+      ) ?? false
+    );
+  };
   const privateFieldProjection = (
     type: number,
     path: readonly PlaceProjection[],
     active = new Set<string>(),
   ): PrivateSummaryPathRedaction | undefined => {
     const key = `${type}:${JSON.stringify(path)}`;
-    if (path.length === 0 || active.has(key)) {
+    if (active.has(key)) {
       return undefined;
+    }
+    if (path.length === 0) {
+      return typeContainsPrivateField(type)
+        ? {
+            index: 0,
+            token: opaquePrivateProjectionToken(`${moduleId}:type:${type}`),
+          }
+        : undefined;
     }
     const nextActive = new Set(active).add(key);
     const descriptor = typing.arena.get(type);
@@ -3464,6 +3515,9 @@ const collectModuleExports = ({
       const summary = exportBorrowSummaryFor(callableSymbol, borrowContract);
       borrowingContracts.set(callableSymbol, {
         symbol: callableSymbol,
+        ...(borrowing.capabilities.get(callableSymbol) !== undefined
+          ? { capability: borrowing.capabilities.get(callableSymbol) }
+          : {}),
         contract: summary.contract,
         dispatch: summary.dispatch,
         namedContract: summary.namedContract,

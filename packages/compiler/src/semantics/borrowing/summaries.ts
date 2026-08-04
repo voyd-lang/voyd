@@ -35,12 +35,10 @@ import {
 } from "./model.js";
 import type { BorrowingDependency } from "./dependency.js";
 import {
-  BORROW_IRRELEVANT_VALUE_INTRINSICS,
   materializedObjectReferencePaths,
   projectedTypes,
   resolveBorrowCallFromFact,
   type ResolvedBorrowCall,
-  type ResolveContext,
 } from "./call-resolution.js";
 import {
   referenceOriginsInType,
@@ -55,8 +53,6 @@ import {
 } from "./borrowed-types.js";
 import { traitRegionProjectionsForCoercion } from "./trait-region-projection.js";
 import {
-  extractCallableBorrowFacts,
-  extractLambdaBorrowFacts,
   factValueRequests,
   type CallableBorrowFacts,
 } from "./callable-facts.js";
@@ -1603,7 +1599,10 @@ const applyCallContract = ({
       );
     }
     const flow = effectiveFlows[index] ?? emptyFlow();
-    if (parameter.access !== "owned") {
+    // Owned values can still have a compact read/write footprint. Access
+    // paths describe the operation performed on the value; ownership only
+    // controls retention and returned provenance below.
+    {
       const actual = argExprs[index];
       const directPlaceFlow =
         typeof actual === "number"
@@ -2401,9 +2400,35 @@ const evaluateExpressionRaw = (
         if (!expressionCanCarryReference(entry.value, ctx)) {
           return retained;
         }
+        const freshAllocation = expressionProducesFreshRoot(
+          entry.value,
+          ctx,
+        )
+          ? new Map<string, ParameterOrigin>([
+              [
+                originKey({
+                  parameter: EXTERNAL_STORAGE_PARAMETER,
+                  sourceEndpointAccess: "inline",
+                  sourceProjections: [],
+                  resultProjections: [],
+                  fresh: true,
+                }),
+                {
+                  parameter: EXTERNAL_STORAGE_PARAMETER,
+                  sourceEndpointAccess: "inline",
+                  sourceProjections: [],
+                  resultProjections: [],
+                  fresh: true,
+                },
+              ],
+            ])
+          : emptyFlow();
         const stored =
           entry.kind === "field"
-            ? storeFlowAt(flow, { kind: "field", name: entry.name })
+            ? storeFlowAt(
+                unionFlows(flow, freshAllocation),
+                { kind: "field", name: entry.name },
+              )
             : (() => {
                 const spreadType = summaryExpressionTypeFor(entry.value, ctx);
                 const resultType = summaryExpressionTypeFor(expr.id, ctx);
@@ -3035,951 +3060,6 @@ const initialLambdaContract = (
   };
 };
 
-const parameterPlacesForFacts = (
-  parameters: HirFunction["parameters"],
-): ReadonlyMap<
-  SymbolId,
-  { parameter: number; path: readonly PlaceProjection[] }
-> => {
-  const parameterPlaces = new Map<
-    SymbolId,
-    { parameter: number; path: readonly PlaceProjection[] }
-  >();
-  const recordPattern = (
-    pattern: HirPattern,
-    parameter: number,
-    path: readonly PlaceProjection[] = [],
-  ): void => {
-    if (pattern.kind === "identifier") {
-      parameterPlaces.set(pattern.symbol, { parameter, path });
-      return;
-    }
-    if (pattern.kind === "tuple") {
-      pattern.elements.forEach((element, index) =>
-        recordPattern(element, parameter, [...path, { kind: "tuple", index }]),
-      );
-      return;
-    }
-    if (pattern.kind === "destructure") {
-      pattern.fields.forEach((field) =>
-        recordPattern(field.pattern, parameter, [
-          ...path,
-          { kind: "field", name: field.name },
-        ]),
-      );
-      if (pattern.spread) {
-        recordPattern(pattern.spread, parameter, path);
-      }
-      return;
-    }
-    if (pattern.kind === "type" && pattern.binding) {
-      recordPattern(pattern.binding, parameter, path);
-    }
-  };
-  parameters.forEach((parameter, index) =>
-    recordPattern(parameter.pattern, index),
-  );
-  return parameterPlaces;
-};
-
-const trivialFunctionContract = ({
-  parameters,
-  facts,
-  seed,
-  typing,
-}: {
-  parameters: HirFunction["parameters"];
-  facts: CallableBorrowFacts;
-  seed: CallableBorrowContract;
-  typing: TypingResult;
-}): CallableBorrowContract => {
-  const parameterPlaces = parameterPlacesForFacts(parameters);
-  const returnedOriginsByParameter = new Map<
-    number,
-    Map<string, ReturnedBorrowOrigin>
-  >();
-  const borrowedReturnEntry =
-    facts.declaredConstraints.returnType === undefined
-      ? undefined
-      : borrowedTypeEntriesInType(
-          facts.declaredConstraints.returnType,
-          typing,
-        ).find(({ path }) => path.length === 0);
-  const freshScalarAggregateResult = factsHaveOnlyFreshScalarAggregateReturns({
-    facts,
-    typing,
-  });
-  facts.returns.forEach((returned) => {
-    if (returned.placeId === undefined) return;
-    const place = facts.places[returned.placeId];
-    if (!place) return;
-    const parameterPlace = parameterPlaces.get(place.root);
-    if (!parameterPlace) return;
-    const source = [...parameterPlace.path, ...place.projections];
-    const origin = {
-      source,
-      result: [],
-      ...(borrowedReturnEntry
-        ? {
-            endpointAccess: typeIsAllocationBacked(
-              borrowedReturnEntry.inner,
-              typing,
-            )
-              ? ("dereferenced" as const)
-              : ("inline" as const),
-          }
-        : {}),
-    };
-    const origins =
-      returnedOriginsByParameter.get(parameterPlace.parameter) ?? new Map();
-    origins.set(JSON.stringify(origin), origin);
-    returnedOriginsByParameter.set(parameterPlace.parameter, origins);
-  });
-  const reads = new Map<number, Map<string, readonly PlaceProjection[]>>();
-  const writes = new Map<number, Map<string, readonly PlaceProjection[]>>();
-  facts.operations.forEach((operation) => {
-    const argumentType = facts.concreteExpressionTypes.get(operation.exprId);
-    const isReferenceCallArgument =
-      operation.kind === "read" &&
-      operation.accessRole === "call-argument" &&
-      typeof argumentType === "number" &&
-      (typeCanCarryReference(argumentType, typing) ||
-        typeContainsBorrowed(argumentType, typing));
-    if (
-      (operation.kind !== "read" && operation.kind !== "write") ||
-      operation.accessRole === "projection-base" ||
-      isReferenceCallArgument ||
-      (operation.kind === "read" &&
-        operation.accessRole === "assignment-target")
-    ) {
-      return;
-    }
-    const place =
-      operation.placeId === undefined
-        ? undefined
-        : facts.places[operation.placeId];
-    if (!place) {
-      return;
-    }
-    const parameterPlace = parameterPlaces.get(place.root);
-    if (!parameterPlace) return;
-    const path = [...parameterPlace.path, ...place.projections];
-    const byParameter = operation.kind === "write" ? writes : reads;
-    const paths = byParameter.get(parameterPlace.parameter) ?? new Map();
-    paths.set(JSON.stringify(path), path);
-    byParameter.set(parameterPlace.parameter, paths);
-  });
-  return {
-    ...seed,
-    parameters: seed.parameters.map((parameter, index) => {
-      const readPaths =
-        parameter.access === "owned"
-          ? []
-          : Array.from(reads.get(index)?.values() ?? []);
-      const returnedOrigins = Array.from(
-        returnedOriginsByParameter.get(index)?.values() ?? [],
-      );
-      const returnsExplicitBorrow =
-        facts.declaredConstraints.returnType !== undefined &&
-        typeContainsBorrowed(facts.declaredConstraints.returnType, typing);
-      const writePaths = Array.from(writes.get(index)?.values() ?? []);
-      return {
-        ...parameter,
-        ...(readPaths.length > 0 ? { readPaths } : {}),
-        ...(writePaths.length > 0 ? { writePaths } : {}),
-        ...(returnedOrigins.length > 0
-          ? {
-              returned: true,
-              returnedPaths: returnedOrigins.map((origin) => origin.source),
-              returnedOrigins,
-              ...(returnsExplicitBorrow
-                ? { returnedSharedOrigins: returnedOrigins }
-                : {}),
-            }
-          : {}),
-      };
-    }),
-    borrowedResult:
-      returnedOriginsByParameter.size > 0 &&
-      facts.declaredConstraints.returnType !== undefined &&
-      (typeContainsBorrowed(facts.declaredConstraints.returnType, typing) ||
-        typeParameterPathsInType(facts.declaredConstraints.returnType, typing)
-          .length > 0)
-        ? "parameter"
-        : "none",
-    ...(freshScalarAggregateResult ? { freshResult: true as const } : {}),
-  };
-};
-
-const factsHaveOnlyFreshScalarAggregateReturns = ({
-  facts,
-  typing,
-}: {
-  facts: CallableBorrowFacts;
-  typing: TypingResult;
-}): boolean =>
-  facts.returns.length > 0 &&
-  facts.returns.every((returned) => {
-    const terminals = factValueRequests({
-      facts,
-      expression: returned.exprId,
-      stopAtCalls: true,
-    });
-    return (
-      terminals.length > 0 &&
-      terminals.every(({ expression }) => {
-        const value = facts.expressions.get(expression);
-        return (
-          value?.exprKind === "object-literal" &&
-          value.entries.every((entry) => {
-            if (entry.kind !== "field") return false;
-            const type = facts.concreteExpressionTypes.get(entry.value);
-            return (
-              typeof type === "number" &&
-              !typeCanCarryReference(type, typing) &&
-              !typeContainsBorrowed(type, typing)
-            );
-          })
-        );
-      })
-    );
-  });
-
-const functionSupportsCompactFactTransfer = ({
-  functionItem,
-  facts,
-  typing,
-}: {
-  functionItem: HirFunction;
-  facts: CallableBorrowFacts;
-  typing: TypingResult;
-}): boolean => {
-  const signature = typing.functions.getSignature(functionItem.symbol);
-  const reasons = new Set<string>();
-  if (!signature) reasons.add("missing-signature");
-  if (functionItem.borrowContract !== undefined)
-    reasons.add("declared-contract");
-  if (signature && !typing.effects.isEmpty(signature.effectRow))
-    reasons.add("effect-row");
-  if (
-    functionItem.parameters.some(
-      (parameter) => typeof parameter.defaultValue === "number",
-    )
-  )
-    reasons.add("default-argument");
-  if (facts.hasUnknownExpressionType) reasons.add("unknown-expression-type");
-  if (facts.hasModuleStorageAccess) reasons.add("module-storage");
-  if (facts.hasReferenceAssignment) reasons.add("reference-assignment");
-  if (facts.hasMutableCapture) reasons.add("mutable-capture");
-  if (facts.hasUnresolvedCall) reasons.add("unresolved-call");
-  if (facts.captures.length > 0) reasons.add("capture");
-  if (facts.suspensionPoints.length > 0) reasons.add("suspension");
-  if (facts.operations.some((operation) => operation.kind === "move"))
-    reasons.add("move");
-  if (!signature || reasons.size > 0) {
-    reasons.forEach((reason) =>
-      incrementCompilerPerfCounter(`borrowing.summary.compactReject.${reason}`),
-    );
-    return false;
-  }
-  const returnHasBorrowSemantics =
-    typeContainsBorrowed(signature.returnType, typing) ||
-    typeParameterPathsInType(signature.returnType, typing).length > 0;
-  const returnCanCarryReference = typeCanCarryReference(
-    signature.returnType,
-    typing,
-  );
-  const freshScalarAggregateResult = factsHaveOnlyFreshScalarAggregateReturns({
-    facts,
-    typing,
-  });
-  if (facts.calls.length === 0) {
-    const simpleParameterReturns = factsHaveOnlySimpleParameterReturns({
-      functionItem,
-      facts,
-    });
-    const supported =
-      (!returnHasBorrowSemantics || simpleParameterReturns) &&
-      (!returnCanCarryReference ||
-        simpleParameterReturns ||
-        freshScalarAggregateResult);
-    if (!supported) {
-      incrementCompilerPerfCounter(
-        `borrowing.summary.compactReject.${facts.hasAssignment ? "assignment" : returnHasBorrowSemantics ? "borrowed-result" : "reference-result"}`,
-      );
-    }
-    return supported;
-  }
-  if (
-    (returnCanCarryReference && !freshScalarAggregateResult) ||
-    returnHasBorrowSemantics
-  ) {
-    incrementCompilerPerfCounter(
-      `borrowing.summary.compactReject.${returnHasBorrowSemantics ? "borrowed-result" : "reference-result"}`,
-    );
-    return false;
-  }
-  const callReasons = new Set<string>();
-  const supported = facts.calls.every((call) => {
-    if (!call.signature) {
-      callReasons.add("missing-signature");
-      callReasons.add(
-        call.baseContract === undefined
-          ? "missing-signature.no-base-contract"
-          : contractCanAffectBorrowSafety(call.baseContract)
-            ? "missing-signature.borrow-relevant-base"
-            : "missing-signature.trivial-base",
-      );
-    }
-    if (call.signature && !typing.effects.isEmpty(call.signature.effectRow))
-      callReasons.add("effect-row");
-    if (
-      call.signature &&
-      typeCanCarryReference(call.signature.returnType, typing)
-    )
-      callReasons.add("reference-result");
-    if (
-      call.signature &&
-      typeContainsBorrowed(call.signature.returnType, typing)
-    )
-      callReasons.add("borrowed-result");
-    if (
-      call.intrinsicBoundary &&
-      (call.intrinsicName === undefined ||
-        !BORROW_IRRELEVANT_VALUE_INTRINSICS.has(call.intrinsicName))
-    )
-      callReasons.add("impure-intrinsic");
-    const signatureIsCompact =
-      call.signature !== undefined &&
-      typing.effects.isEmpty(call.signature.effectRow) &&
-      !typeCanCarryReference(call.signature.returnType, typing) &&
-      !typeContainsBorrowed(call.signature.returnType, typing);
-    return (
-      signatureIsCompact &&
-      (!call.intrinsicBoundary ||
-        (call.intrinsicName !== undefined &&
-          BORROW_IRRELEVANT_VALUE_INTRINSICS.has(call.intrinsicName)))
-    );
-  });
-  if (!supported) {
-    incrementCompilerPerfCounter("borrowing.summary.compactReject.call");
-    callReasons.forEach((reason) =>
-      incrementCompilerPerfCounter(
-        `borrowing.summary.compactReject.call.${reason}`,
-      ),
-    );
-  }
-  return supported;
-};
-
-const compactFactContract = ({
-  functionItem,
-  facts,
-  seed,
-  typing,
-  moduleId,
-  dependencies,
-  contracts,
-}: {
-  functionItem: HirFunction;
-  facts: CallableBorrowFacts;
-  seed: CallableBorrowContract;
-  typing: TypingResult;
-  moduleId: string;
-  dependencies: ReadonlyMap<string, BorrowingDependency>;
-  contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
-}): CallableBorrowContract | undefined => {
-  const directSeed = {
-    ...seed,
-    parameters: seed.parameters.map((parameter) => {
-      const {
-        retainedUnlessBorrowed: _retainedUnlessBorrowed,
-        ...baseParameter
-      } = parameter;
-      return baseParameter;
-    }),
-  };
-  const direct = trivialFunctionContract({
-    parameters: functionItem.parameters,
-    facts,
-    seed: directSeed,
-    typing,
-  });
-  const parameterPlaces = parameterPlacesForFacts(functionItem.parameters);
-  const effects = new Map<
-    number,
-    {
-      readPaths: Map<string, readonly PlaceProjection[]>;
-      writePaths: Map<string, readonly PlaceProjection[]>;
-      retainedPaths: Map<string, readonly PlaceProjection[]>;
-      externalRetainedPaths: Map<string, readonly PlaceProjection[]>;
-      borrowedRetainedPaths: Map<string, readonly PlaceProjection[]>;
-      retainedUnlessBorrowed: boolean;
-      allWritesRuntimeChecked: boolean;
-    }
-  >();
-  let externalRead: boolean =
-    facts.hasModuleStorageAccess || direct.externalRead === true;
-  let externalWrite = direct.externalWrite === true;
-  const recordPaths = ({
-    parameter,
-    place,
-    paths,
-    key,
-  }: {
-    parameter: number;
-    place: readonly PlaceProjection[];
-    paths: readonly (readonly PlaceProjection[])[];
-    key:
-      | "readPaths"
-      | "writePaths"
-      | "retainedPaths"
-      | "externalRetainedPaths"
-      | "borrowedRetainedPaths";
-  }): void => {
-    const current = effects.get(parameter) ?? {
-      readPaths: new Map(),
-      writePaths: new Map(),
-      retainedPaths: new Map(),
-      externalRetainedPaths: new Map(),
-      borrowedRetainedPaths: new Map(),
-      retainedUnlessBorrowed: true,
-      allWritesRuntimeChecked: true,
-    };
-    paths.forEach((path) => {
-      const projected = [...place, ...path];
-      current[key].set(JSON.stringify(projected), projected);
-    });
-    effects.set(parameter, current);
-  };
-  for (const call of facts.calls) {
-    if (call.intrinsicBoundary) continue;
-    const targetContracts = call.targets.flatMap((target) => {
-      const targetContract =
-        target.moduleId === moduleId
-          ? contracts.get(target.symbol)
-          : dependencies.get(target.moduleId)?.callables.get(target.symbol)
-              ?.contract;
-      return targetContract ? [targetContract] : [];
-    });
-    const contract =
-      mergeCallableBorrowContracts(targetContracts) ?? call.baseContract;
-    if (
-      !contract ||
-      contract.maySuspend ||
-      contract.freshResult ||
-      contract.borrowedResult === "parameter" ||
-      contract.borrowedResult === "external" ||
-      contract.defaultIdentityGuardProtocol !== undefined ||
-      (contract.externalReturnedOrigins?.length ?? 0) > 0 ||
-      (contract.transfers?.length ?? 0) > 0 ||
-      (contract.scopedCallbacks?.length ?? 0) > 0 ||
-      (contract.callableResultInvocations?.length ?? 0) > 0 ||
-      contract.dynamicDispatch !== undefined
-    ) {
-      return undefined;
-    }
-    externalRead ||= contract.externalRead === true;
-    externalWrite ||= contract.externalWrite === true;
-    for (const [parameterIndex, parameter] of contract.parameters.entries()) {
-      const hasUnsupportedEffect =
-        parameter.returned ||
-        parameter.returnedAggregate === true ||
-        (parameter.returnedPaths?.length ?? 0) > 0 ||
-        (parameter.returnedOrigins?.length ?? 0) > 0 ||
-        (parameter.returnedSharedOrigins?.length ?? 0) > 0 ||
-        (parameter.returnedTypeMatchingOrigins?.length ?? 0) > 0 ||
-        parameter.accessIfResultTypeDiffers !== undefined ||
-        (parameter.invalidatedPaths?.length ?? 0) > 0 ||
-        (parameter.defaultOrigins?.length ?? 0) > 0 ||
-        (parameter.defaultReadOrigins?.length ?? 0) > 0 ||
-        (parameter.defaultWriteOrigins?.length ?? 0) > 0 ||
-        (parameter.defaultExternalOrigins?.length ?? 0) > 0 ||
-        (parameter.defaultExternalReturnedOrigins?.length ?? 0) > 0 ||
-        parameter.defaultExternalRead === true ||
-        parameter.defaultExternalWrite === true ||
-        parameter.defaultBorrowedResult !== undefined ||
-        (parameter.defaultNoBorrowPaths?.length ?? 0) > 0;
-      if (hasUnsupportedEffect) return undefined;
-      const readPaths = parameter.readPaths ?? [];
-      const writePaths = parameter.writePaths ?? [];
-      const retainedPaths = parameter.retained
-        ? parameter.retainedPaths?.length
-          ? parameter.retainedPaths
-          : [[]]
-        : [];
-      const hasEffect =
-        readPaths.length > 0 ||
-        writePaths.length > 0 ||
-        retainedPaths.length > 0 ||
-        (parameter.externalRetainedPaths?.length ?? 0) > 0 ||
-        (parameter.borrowedRetainedPaths?.length ?? 0) > 0;
-      if (!hasEffect) continue;
-      const substitution = call.substitutions.find(
-        (candidate) => candidate.parameter === parameterIndex,
-      );
-      const argumentPlace =
-        substitution?.placeId === undefined
-          ? undefined
-          : facts.places[substitution.placeId];
-      const source = argumentPlace
-        ? parameterPlaces.get(argumentPlace.root)
-        : undefined;
-      if (!argumentPlace || !source) return undefined;
-      const base = [...source.path, ...argumentPlace.projections];
-      recordPaths({
-        parameter: source.parameter,
-        place: base,
-        paths: readPaths,
-        key: "readPaths",
-      });
-      recordPaths({
-        parameter: source.parameter,
-        place: base,
-        paths: writePaths,
-        key: "writePaths",
-      });
-      recordPaths({
-        parameter: source.parameter,
-        place: base,
-        paths: retainedPaths,
-        key: "retainedPaths",
-      });
-      recordPaths({
-        parameter: source.parameter,
-        place: base,
-        paths: parameter.externalRetainedPaths ?? [],
-        key: "externalRetainedPaths",
-      });
-      recordPaths({
-        parameter: source.parameter,
-        place: base,
-        paths: parameter.borrowedRetainedPaths ?? [],
-        key: "borrowedRetainedPaths",
-      });
-      const current = effects.get(source.parameter)!;
-      if (
-        retainedPaths.length > 0 ||
-        (parameter.externalRetainedPaths?.length ?? 0) > 0
-      ) {
-        current.retainedUnlessBorrowed &&=
-          parameter.retainedUnlessBorrowed === true;
-      }
-      if (writePaths.length > 0) {
-        current.allWritesRuntimeChecked &&=
-          parameter.runtimeCheckedWrites === true;
-      }
-    }
-  }
-  return {
-    ...direct,
-    parameters: direct.parameters.map((parameter, index) => {
-      const effect = effects.get(index);
-      if (!effect) return parameter;
-      const mergedPaths = (
-        directPaths: readonly (readonly PlaceProjection[])[] | undefined,
-        propagated: Map<string, readonly PlaceProjection[]>,
-      ): readonly (readonly PlaceProjection[])[] =>
-        Array.from(
-          new Map([
-            ...(directPaths ?? []).map(
-              (path) => [JSON.stringify(path), path] as const,
-            ),
-            ...propagated,
-          ]).values(),
-        );
-      const readPaths = mergedPaths(parameter.readPaths, effect.readPaths);
-      const writePaths = mergedPaths(parameter.writePaths, effect.writePaths);
-      const retainedPaths = mergedPaths(
-        parameter.retainedPaths,
-        effect.retainedPaths,
-      );
-      const externalRetainedPaths = mergedPaths(
-        parameter.externalRetainedPaths,
-        effect.externalRetainedPaths,
-      );
-      const borrowedRetainedPaths = mergedPaths(
-        parameter.borrowedRetainedPaths,
-        effect.borrowedRetainedPaths,
-      );
-      const directWritesRuntimeChecked =
-        (parameter.writePaths?.length ?? 0) === 0 ||
-        parameter.runtimeCheckedWrites === true;
-      const propagatedWritesRuntimeChecked =
-        effect.writePaths.size === 0 || effect.allWritesRuntimeChecked;
-      return {
-        ...parameter,
-        ...(readPaths.length > 0 ? { readPaths } : {}),
-        ...(writePaths.length > 0 ? { writePaths } : {}),
-        ...(writePaths.length > 0 &&
-        directWritesRuntimeChecked &&
-        propagatedWritesRuntimeChecked
-          ? { runtimeCheckedWrites: true as const }
-          : {}),
-        retained: parameter.retained || retainedPaths.length > 0,
-        ...(retainedPaths.length > 0 ? { retainedPaths } : {}),
-        ...(parameter.retainedUnlessBorrowed ||
-        (retainedPaths.length > 0 && effect.retainedUnlessBorrowed)
-          ? { retainedUnlessBorrowed: true as const }
-          : {}),
-        ...(externalRetainedPaths.length > 0 ? { externalRetainedPaths } : {}),
-        ...(borrowedRetainedPaths.length > 0 ? { borrowedRetainedPaths } : {}),
-      };
-    }),
-    ...(externalRead ? { externalRead: true as const } : {}),
-    ...(externalWrite ? { externalWrite: true as const } : {}),
-  };
-};
-
-const factsHaveOnlySimpleParameterReturns = ({
-  functionItem,
-  facts,
-}: {
-  functionItem: HirFunction;
-  facts: CallableBorrowFacts;
-}): boolean => {
-  if (
-    facts.returns.length === 0 ||
-    facts.hasAssignment ||
-    facts.hasMutableCapture ||
-    facts.hasUnresolvedCall ||
-    facts.calls.length > 0
-  ) {
-    return false;
-  }
-  const parameterSymbols = new Set(
-    functionItem.parameters.flatMap((parameter) =>
-      patternSymbols(parameter.pattern),
-    ),
-  );
-  return facts.returns.every((returned) => {
-    if (returned.placeId === undefined) return false;
-    const place = facts.places[returned.placeId];
-    return place !== undefined && parameterSymbols.has(place.root);
-  });
-};
-
-type HandledCallableBorrowContractField =
-  | "parameters"
-  | "maySuspend"
-  | "freshResult"
-  | "defaultIdentityGuardProtocol"
-  | "borrowedResult"
-  | "externalReturnedOrigins"
-  | "externalRead"
-  | "externalWrite"
-  | "transfers"
-  | "scopedCallbacks"
-  | "callableResultInvocations"
-  | "dynamicDispatch";
-type HandledCallableParameterBorrowContractField =
-  | "access"
-  | "readPaths"
-  | "writePaths"
-  | "runtimeCheckedWrites"
-  | "retained"
-  | "retainedUnlessBorrowed"
-  | "returned"
-  | "returnedAggregate"
-  | "retainedPaths"
-  | "externalRetainedPaths"
-  | "borrowedRetainedPaths"
-  | "returnedPaths"
-  | "returnedOrigins"
-  | "returnedSharedOrigins"
-  | "returnedTypeMatchingOrigins"
-  | "accessIfResultTypeDiffers"
-  | "invalidatedPaths"
-  | "defaultOrigins"
-  | "defaultReadOrigins"
-  | "defaultWriteOrigins"
-  | "defaultExternalOrigins"
-  | "defaultExternalReturnedOrigins"
-  | "defaultExternalRead"
-  | "defaultExternalWrite"
-  | "defaultBorrowedResult"
-  | "defaultNoBorrowPaths";
-const contractDemandFieldsAreExhaustive: [
-  Exclude<keyof CallableBorrowContract, HandledCallableBorrowContractField>,
-  Exclude<
-    keyof CallableParameterBorrowContract,
-    HandledCallableParameterBorrowContractField
-  >,
-] extends [never, never]
-  ? true
-  : never = true;
-void contractDemandFieldsAreExhaustive;
-
-const contractCanAffectBorrowSafety = (
-  contract: CallableBorrowContract | undefined,
-): boolean => {
-  if (!contract) {
-    return true;
-  }
-  if (
-    contract.maySuspend ||
-    contract.externalRead ||
-    contract.externalWrite ||
-    contract.freshResult ||
-    contract.defaultIdentityGuardProtocol !== undefined ||
-    contract.borrowedResult === "parameter" ||
-    contract.borrowedResult === "external" ||
-    (contract.externalReturnedOrigins?.length ?? 0) > 0 ||
-    (contract.transfers?.length ?? 0) > 0 ||
-    (contract.scopedCallbacks?.length ?? 0) > 0 ||
-    (contract.callableResultInvocations?.length ?? 0) > 0 ||
-    (contract.dynamicDispatch !== undefined &&
-      contractCanAffectBorrowSafety(contract.dynamicDispatch))
-  ) {
-    return true;
-  }
-  return contract.parameters.some(
-    (parameter) =>
-      parameter.access !== "owned" ||
-      parameter.retained ||
-      parameter.retainedUnlessBorrowed === true ||
-      parameter.returned ||
-      parameter.returnedAggregate === true ||
-      parameter.runtimeCheckedWrites === true ||
-      parameter.defaultExternalRead === true ||
-      parameter.defaultExternalWrite === true ||
-      (parameter.defaultBorrowedResult !== undefined &&
-        parameter.defaultBorrowedResult !== "none") ||
-      (parameter.readPaths?.length ?? 0) > 0 ||
-      (parameter.writePaths?.length ?? 0) > 0 ||
-      (parameter.retainedPaths?.length ?? 0) > 0 ||
-      (parameter.externalRetainedPaths?.length ?? 0) > 0 ||
-      (parameter.borrowedRetainedPaths?.length ?? 0) > 0 ||
-      (parameter.returnedPaths?.length ?? 0) > 0 ||
-      (parameter.returnedOrigins?.length ?? 0) > 0 ||
-      (parameter.returnedSharedOrigins?.length ?? 0) > 0 ||
-      (parameter.returnedTypeMatchingOrigins?.length ?? 0) > 0 ||
-      parameter.accessIfResultTypeDiffers !== undefined ||
-      (parameter.invalidatedPaths?.length ?? 0) > 0 ||
-      (parameter.defaultOrigins?.length ?? 0) > 0 ||
-      (parameter.defaultReadOrigins?.length ?? 0) > 0 ||
-      (parameter.defaultWriteOrigins?.length ?? 0) > 0 ||
-      (parameter.defaultExternalOrigins?.length ?? 0) > 0 ||
-      (parameter.defaultExternalReturnedOrigins?.length ?? 0) > 0 ||
-      (parameter.defaultNoBorrowPaths?.length ?? 0) > 0,
-  );
-};
-
-const contractDemandsDetailedInference = (
-  contract: CallableBorrowContract | undefined,
-): boolean => {
-  if (!contract) {
-    return true;
-  }
-  if (
-    contract.maySuspend ||
-    contract.externalRead ||
-    contract.externalWrite ||
-    contract.freshResult ||
-    contract.defaultIdentityGuardProtocol !== undefined ||
-    contract.borrowedResult === "parameter" ||
-    contract.borrowedResult === "external" ||
-    (contract.externalReturnedOrigins?.length ?? 0) > 0 ||
-    (contract.transfers?.length ?? 0) > 0 ||
-    (contract.scopedCallbacks?.length ?? 0) > 0 ||
-    (contract.callableResultInvocations?.length ?? 0) > 0 ||
-    contract.dynamicDispatch !== undefined
-  ) {
-    return true;
-  }
-  return contract.parameters.some(
-    (parameter) =>
-      parameter.access === "mutable" ||
-      parameter.retained ||
-      parameter.retainedUnlessBorrowed === true ||
-      parameter.returned ||
-      parameter.returnedAggregate === true ||
-      parameter.runtimeCheckedWrites === true ||
-      (parameter.writePaths?.length ?? 0) > 0 ||
-      (parameter.retainedPaths?.length ?? 0) > 0 ||
-      (parameter.externalRetainedPaths?.length ?? 0) > 0 ||
-      (parameter.borrowedRetainedPaths?.length ?? 0) > 0 ||
-      (parameter.returnedPaths?.length ?? 0) > 0 ||
-      (parameter.returnedOrigins?.length ?? 0) > 0 ||
-      (parameter.returnedSharedOrigins?.length ?? 0) > 0 ||
-      (parameter.returnedTypeMatchingOrigins?.length ?? 0) > 0 ||
-      parameter.accessIfResultTypeDiffers !== undefined ||
-      (parameter.invalidatedPaths?.length ?? 0) > 0 ||
-      (parameter.defaultOrigins?.length ?? 0) > 0 ||
-      (parameter.defaultReadOrigins?.length ?? 0) > 0 ||
-      (parameter.defaultWriteOrigins?.length ?? 0) > 0 ||
-      (parameter.defaultExternalOrigins?.length ?? 0) > 0 ||
-      (parameter.defaultExternalReturnedOrigins?.length ?? 0) > 0 ||
-      parameter.defaultExternalRead === true ||
-      parameter.defaultExternalWrite === true ||
-      (parameter.defaultNoBorrowPaths?.length ?? 0) > 0,
-  );
-};
-
-type DirectSummaryDemand = "boundary" | "ambient";
-
-const functionDirectlyDemandsBorrowSummary = ({
-  functionItem,
-  facts,
-  contract,
-  typing,
-  symbolTable,
-  resolveContext,
-  localFunctions,
-  forcedBoundary,
-  compact,
-}: {
-  functionItem: HirFunction;
-  facts: CallableBorrowFacts;
-  contract: CallableBorrowContract;
-  typing: TypingResult;
-  symbolTable: SymbolTable;
-  resolveContext: ResolveContext;
-  localFunctions: ReadonlySet<SymbolId>;
-  forcedBoundary: boolean;
-  compact: boolean;
-}): DirectSummaryDemand | undefined => {
-  if (compact) {
-    incrementCompilerPerfCounter(
-      "borrowing.summary.demandReason.compact-value-flow",
-    );
-    incrementCompilerPerfCounter("borrowing.summary.fastPathAccepted");
-    return undefined;
-  }
-  const signature = typing.functions.getSignature(functionItem.symbol);
-  const reasons = new Set<string>();
-  if (forcedBoundary) reasons.add("forced-boundary");
-  if (functionItem.borrowContract !== undefined) {
-    reasons.add("declared-contract");
-  }
-  if (!signature) reasons.add("unknown-signature");
-  if (facts.hasUnknownExpressionType) reasons.add("unknown-expression-type");
-  if (signature && !typing.effects.isEmpty(signature.effectRow)) {
-    reasons.add("effect-row");
-  }
-  if (
-    signature &&
-    typeCanCarryReference(signature.returnType, typing) &&
-    (typeContainsBorrowed(signature.returnType, typing) ||
-      !factsHaveOnlySimpleParameterReturns({ functionItem, facts }))
-  ) {
-    reasons.add("reference-result");
-  }
-  if (
-    functionItem.parameters.some(
-      (parameter) => parameter.pattern.bindingKind === "mutable-ref",
-    )
-  ) {
-    reasons.add("mutable-parameter");
-  }
-  if (
-    signature?.parameters.some((parameter) =>
-      typeContainsBorrowed(parameter.type, typing),
-    )
-  ) {
-    reasons.add("borrowed-parameter");
-  }
-  const hasCallbackParameter =
-    signature?.parameters.some(
-      (parameter) => typing.arena.get(parameter.type).kind === "function",
-    ) === true;
-  if (hasCallbackParameter) reasons.add("callback-parameter");
-  if (contractDemandsDetailedInference(contract)) {
-    reasons.add("contract-seed");
-  }
-  if (facts.hasAssignment) reasons.add("assignment");
-  if (
-    Array.from(facts.mutableSymbols).some((symbol) =>
-      facts.liveness.has(symbol),
-    )
-  ) {
-    reasons.add("mutable-binding");
-  }
-  if (facts.hasMutableCapture) reasons.add("mutable-capture");
-  if (
-    functionItem.parameters.some(
-      (parameter) => typeof parameter.defaultValue === "number",
-    )
-  ) {
-    reasons.add("default-argument");
-  }
-  let directDemand: DirectSummaryDemand | undefined =
-    reasons.size > 0 ? "boundary" : undefined;
-  if (hasCallbackParameter) {
-    directDemand = "ambient";
-  }
-  if (facts.hasModuleStorageAccess) {
-    reasons.add("module-storage");
-    directDemand = "ambient";
-  }
-  facts.calls.some(({ targets, intrinsicBoundary }) => {
-    if (directDemand === "ambient") {
-      return true;
-    }
-    if (targets.length === 0) {
-      if (intrinsicBoundary) {
-        return false;
-      }
-      // An unresolved callable may be a closure over external storage.
-      // Treat it as ambient so every local wrapper is summarized too.
-      directDemand = "ambient";
-      reasons.add("unresolved-call");
-      return true;
-    }
-    const targetDemands = targets.map((target) => {
-      if (
-        target.moduleId === resolveContext.moduleId &&
-        localFunctions.has(target.symbol)
-      ) {
-        return undefined;
-      }
-      if (target.moduleId !== resolveContext.moduleId) {
-        const dependency = resolveContext.dependencies.get(target.moduleId);
-        const operation = dependency?.effectOperations.get(target.symbol);
-        if (operation) {
-          return operation.maySuspend ? ("boundary" as const) : undefined;
-        }
-        const targetContract = dependency?.callables.get(
-          target.symbol,
-        )?.contract;
-        return contractCanAffectBorrowSafety(targetContract)
-          ? ("ambient" as const)
-          : undefined;
-      }
-      const metadata = symbolTable.getSymbol(target.symbol).metadata as
-        | { intrinsic?: boolean }
-        | undefined;
-      if (metadata?.intrinsic === true) {
-        return undefined;
-      }
-      const targetContract = resolveContext.contracts.get(target.symbol);
-      return contractCanAffectBorrowSafety(targetContract)
-        ? ("boundary" as const)
-        : undefined;
-    });
-    directDemand = targetDemands.includes("ambient")
-      ? "ambient"
-      : targetDemands.includes("boundary")
-        ? (directDemand ?? "boundary")
-        : directDemand;
-    if (targetDemands.includes("ambient")) {
-      reasons.add("external-callee-contract");
-    } else if (targetDemands.includes("boundary")) {
-      reasons.add("local-callee-contract");
-    }
-    return directDemand === "ambient";
-  });
-  reasons.forEach((reason) =>
-    incrementCompilerPerfCounter(`borrowing.summary.demandReason.${reason}`),
-  );
-  incrementCompilerPerfCounter(
-    directDemand
-      ? "borrowing.summary.fastPathRejected"
-      : "borrowing.summary.fastPathAccepted",
-  );
-  return directDemand;
-};
-
 const declaredScopedCallbacks = ({
   functionItem,
   typing,
@@ -4084,15 +3164,17 @@ const escapingRetainedOrigins = ({
 const pathsForParameter = (
   flow: Flow,
   parameter: number,
-): readonly (readonly PlaceProjection[])[] =>
-  Array.from(
+): readonly (readonly PlaceProjection[])[] => {
+  const paths = Array.from(
     new Map(
       originsForParameter(flow, parameter).map((origin) => [
-        JSON.stringify(origin.sourceProjections),
+        projectionPathKey(origin.sourceProjections),
         origin.sourceProjections,
       ]),
     ).values(),
   );
+  return paths;
+};
 
 const returnedContractOriginsForParameter = (
   returned: Flow,
@@ -4693,6 +3775,14 @@ const summarizeFunction = ({
           ]),
         ).values(),
       );
+      const returnedAggregate =
+        typeof functionReturnType === "number" &&
+        borrowedPathsInType(functionReturnType, typing).some(
+          (path) => path.length > 0,
+        ) &&
+        completeReturnedOrigins.some(
+          (origin) => origin.source.length === 0 && origin.result.length === 0,
+        );
       const access =
         baseContracts.get(functionItem.symbol)?.parameters[index]?.access ??
         parameterContract(functionItem, index, typing).access;
@@ -4737,6 +3827,7 @@ const summarizeFunction = ({
         ...(completeReturnedOrigins.length > 0
           ? { returnedOrigins: completeReturnedOrigins }
           : {}),
+        ...(returnedAggregate ? { returnedAggregate: true as const } : {}),
         ...(returnedSharedOrigins.length > 0 ? { returnedSharedOrigins } : {}),
         ...(invalidatedPaths.length > 0 ? { invalidatedPaths } : {}),
         ...(defaultOrigins.get(index)?.length
@@ -4896,12 +3987,26 @@ const returnedOriginsOrBroad = (
   return origins;
 };
 
+const returnedOriginsWereBroadened = (
+  origins: CallableParameterBorrowContract["returnedOrigins"],
+): boolean =>
+  origins !== undefined &&
+  origins.length > MAX_SUMMARY_PATHS_PER_PARAMETER ||
+  origins?.some(
+    (origin) =>
+      origin.source.length > MAX_SUMMARY_PROJECTION_DEPTH ||
+      origin.result.length > MAX_SUMMARY_PROJECTION_DEPTH,
+  ) === true;
+
 const externalOriginsOrBroad = (
   origins: CallableBorrowContract["externalReturnedOrigins"] | undefined,
 ): CallableBorrowContract["externalReturnedOrigins"] => {
   if (!origins || origins.length === 0) {
     return undefined;
   }
+  const freshProjections = origins.filter(
+    (origin) => origin.fresh === true && origin.result.length > 0,
+  );
   if (
     origins.some((origin) => origin.result.length === 0) ||
     origins.length > MAX_SUMMARY_PATHS_PER_PARAMETER ||
@@ -4909,14 +4014,18 @@ const externalOriginsOrBroad = (
       (origin) => origin.result.length > MAX_SUMMARY_PROJECTION_DEPTH,
     )
   ) {
-    return Array.from(
+    const broadened = Array.from(
       new Set(
-        origins.map((origin) =>
+        origins
+          .filter(
+            (origin) => origin.fresh !== true || origin.result.length === 0,
+          )
+          .map((origin) =>
           JSON.stringify([
             origin.endpointAccess ?? "inline",
             origin.fresh ?? false,
           ]),
-        ),
+          ),
       ),
       (serialized) => {
         const [endpointAccess, fresh] = JSON.parse(serialized) as [
@@ -4930,6 +4039,15 @@ const externalOriginsOrBroad = (
         };
       },
     );
+    return [
+      ...broadened,
+      ...freshProjections.filter(
+        (origin) =>
+          !broadened.some(
+            (candidate) => JSON.stringify(candidate) === JSON.stringify(origin),
+          ),
+      ),
+    ];
   }
   return origins;
 };
@@ -5032,6 +4150,9 @@ const normalizeCallableBorrowContract = (
       );
       const returnedPaths = projectionPathsOrBroad(parameter.returnedPaths);
       const returnedOrigins = normalizedReturnedOrigins[index];
+      const returnedAggregate =
+        parameter.returnedAggregate === true ||
+        returnedOriginsWereBroadened(parameter.returnedOrigins);
       const returnedSharedOrigins = normalizeReturnedSharedOrigins(
         parameter.returnedSharedOrigins,
       );
@@ -5072,6 +4193,7 @@ const normalizeCallableBorrowContract = (
         ...(borrowedRetainedPaths ? { borrowedRetainedPaths } : {}),
         ...(returnedPaths ? { returnedPaths } : {}),
         ...(returnedOrigins ? { returnedOrigins } : {}),
+        ...(returnedAggregate ? { returnedAggregate: true as const } : {}),
         ...(returnedSharedOrigins ? { returnedSharedOrigins } : {}),
         ...(returnedTypeMatchingOrigins?.length
           ? { returnedTypeMatchingOrigins }
@@ -5266,7 +4388,7 @@ const withReturnedSharedOrigins = ({
   }),
 });
 
-const demandDependentsWithTraitDispatch = ({
+const callersWithTraitDispatch = ({
   callers,
   functions,
   typing,
@@ -5296,117 +4418,6 @@ const demandDependentsWithTraitDispatch = ({
     }
   });
   return result;
-};
-
-/**
- * Detailed inference is omitted only for callables whose seed contract and
- * signature are owned/value-only and whose body has no ambient safety input.
- *
- * Reference-bearing parameters/results, callbacks, defaults, effects, trait
- * implementations, and named contracts seed boundary demand directly.
- * Ambient module/import/opaque facts additionally propagate to every local
- * caller, including first-class callable references and trait dispatch, until
- * the worklist is stable. Unknown targets therefore stay conservative, while
- * a closed chain of owned primitive helpers can retain its exact trivial seed.
- */
-const selectDemandedSummaryFunctions = ({
-  functions,
-  facts,
-  contracts,
-  typing,
-  symbolTable,
-  resolveContext,
-  callers,
-  forcedBoundarySymbols,
-  compactSymbols,
-}: {
-  functions: readonly HirFunction[];
-  facts: ReadonlyMap<SymbolId, CallableBorrowFacts>;
-  contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
-  typing: TypingResult;
-  symbolTable: SymbolTable;
-  resolveContext: ResolveContext;
-  callers: ReadonlyMap<SymbolId, readonly HirFunction[]>;
-  forcedBoundarySymbols: ReadonlySet<SymbolId>;
-  compactSymbols: ReadonlySet<SymbolId>;
-}): {
-  functions: readonly HirFunction[];
-  demanded: ReadonlySet<SymbolId>;
-  worklistEdges: number;
-  worklistIterations: number;
-  boundaryRoots: number;
-  ambientRoots: number;
-  initialAmbientRoots: number;
-} => {
-  const localFunctions = new Set(
-    functions.map((functionItem) => functionItem.symbol),
-  );
-  const directDemand = new Map(
-    functions.flatMap((functionItem) => {
-      const callableFacts = facts.get(functionItem.symbol);
-      if (!callableFacts) {
-        return [];
-      }
-      const demand = functionDirectlyDemandsBorrowSummary({
-        functionItem,
-        facts: callableFacts,
-        contract: contracts.get(functionItem.symbol)!,
-        typing,
-        symbolTable,
-        resolveContext,
-        localFunctions,
-        forcedBoundary: forcedBoundarySymbols.has(functionItem.symbol),
-        compact: compactSymbols.has(functionItem.symbol),
-      });
-      return demand ? ([[functionItem.symbol, demand]] as const) : [];
-    }),
-  );
-  const demanded = new Set(directDemand.keys());
-  const initialAmbientRoots = Array.from(directDemand.values()).filter(
-    (demand) => demand === "ambient",
-  ).length;
-  const worklist = Array.from(directDemand)
-    .filter(([, demand]) => demand === "ambient")
-    .map(([symbol]) => symbol);
-  const worklistEdges = Array.from(callers.values()).reduce(
-    (total, dependents) => total + dependents.length,
-    0,
-  );
-  let worklistIterations = 0;
-  let cursor = 0;
-  while (cursor < worklist.length) {
-    const symbol = worklist[cursor++]!;
-    worklistIterations += 1;
-    (callers.get(symbol) ?? []).forEach((caller) => {
-      if (compactSymbols.has(caller.symbol)) {
-        return;
-      }
-      if (demanded.has(caller.symbol)) {
-        if (directDemand.get(caller.symbol) === "ambient") {
-          return;
-        }
-      } else {
-        demanded.add(caller.symbol);
-      }
-      directDemand.set(caller.symbol, "ambient");
-      worklist.push(caller.symbol);
-    });
-  }
-  return {
-    functions: functions.filter((functionItem) =>
-      demanded.has(functionItem.symbol),
-    ),
-    demanded,
-    worklistEdges,
-    worklistIterations,
-    boundaryRoots: Array.from(directDemand.values()).filter(
-      (demand) => demand === "boundary",
-    ).length,
-    ambientRoots: Array.from(directDemand.values()).filter(
-      (demand) => demand === "ambient",
-    ).length,
-    initialAmbientRoots,
-  };
 };
 
 export type BorrowSummaryDemandTelemetry = {
@@ -5446,6 +4457,8 @@ export const computeCallableBorrowContracts = ({
   dynamicDispatchContracts = new Map(),
   declarationContracts = new Map(),
   lambdaFacts,
+  initialContracts,
+  flowSymbols,
 }: {
   hir: HirGraph;
   typing: TypingResult;
@@ -5457,10 +4470,14 @@ export const computeCallableBorrowContracts = ({
   }[];
   dependencies: ReadonlyMap<string, BorrowingDependency>;
   decls: DeclTable;
-  facts?: ReadonlyMap<SymbolId, CallableBorrowFacts>;
+  facts: ReadonlyMap<SymbolId, CallableBorrowFacts>;
   dynamicDispatchContracts?: ReadonlyMap<SymbolId, CallableBorrowContract>;
   declarationContracts?: ReadonlyMap<SymbolId, CallableBorrowContract>;
-  lambdaFacts?: ReadonlyMap<HirExprId, CallableBorrowFacts>;
+  lambdaFacts: ReadonlyMap<HirExprId, CallableBorrowFacts>;
+  /** Contracts produced by the capability/index paths seed the flow solve. */
+  initialContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  /** Only flow-sensitive callables may reach full contract inference. */
+  flowSymbols: ReadonlySet<SymbolId>;
 }): CallableBorrowContractComputation => {
   const withDynamicDispatch = (
     symbol: SymbolId,
@@ -5476,6 +4493,12 @@ export const computeCallableBorrowContracts = ({
     (expression): expression is HirLambdaExpr =>
       expression.exprKind === "lambda",
   );
+  const analysisFunctions = functions.filter((functionItem) =>
+    flowSymbols.has(functionItem.symbol),
+  );
+  const analysisLambdas = lambdas.filter((lambda) => {
+    return flowSymbols.has((-1 - lambda.id) as SymbolId);
+  });
   const importMap = new Map(
     imports.flatMap((entry) =>
       entry.target ? ([[entry.local, entry.target]] as const) : [],
@@ -5488,11 +4511,12 @@ export const computeCallableBorrowContracts = ({
           functionItem.symbol,
           withDynamicDispatch(
             functionItem.symbol,
-            initialFunctionContract({
-              functionItem,
-              typing,
-              symbolTable,
-            }),
+            initialContracts?.get(functionItem.symbol) ??
+              initialFunctionContract({
+                functionItem,
+                typing,
+                symbolTable,
+              }),
           ),
         ] as const,
     ),
@@ -5500,7 +4524,8 @@ export const computeCallableBorrowContracts = ({
       (lambda) =>
         [
           (-1 - lambda.id) as SymbolId,
-          initialLambdaContract(lambda, typing),
+          initialContracts?.get((-1 - lambda.id) as SymbolId) ??
+            initialLambdaContract(lambda, typing),
         ] as const,
     ),
   ]);
@@ -5513,144 +4538,35 @@ export const computeCallableBorrowContracts = ({
     // validator reports as an excess.
     contracts.set(symbol, withDynamicDispatch(symbol, contract));
   });
-  const contractSeeds = new Map(contracts);
-  const summarySelectionContext: ResolveContext = {
-    hir,
-    typing,
-    symbolTable,
-    moduleId,
-    imports: importMap,
-    dependencies,
-    contracts,
-    bindingInitializers: new Map(),
-    borrowIndexMode: "symbolic",
-    decls,
-  };
-  const facts =
-    providedFacts ??
-    extractCallableBorrowFacts({
-      functions,
-      hir,
-      typing,
-      resolveContext: summarySelectionContext,
-    });
-  const effectiveLambdaFacts =
-    lambdaFacts ??
-    extractLambdaBorrowFacts({
-      lambdas,
-      hir,
-      typing,
-      resolveContext: summarySelectionContext,
-    });
-  const allCallers = demandDependentsWithTraitDispatch({
+  const facts = providedFacts;
+  const effectiveLambdaFacts = lambdaFacts;
+  const allCallers = callersWithTraitDispatch({
     callers: localCallersOf({
-      functions,
+      functions: analysisFunctions,
       facts,
       moduleId,
     }),
-    functions,
+    functions: analysisFunctions,
     typing,
   });
-  const forcedBoundarySymbols = new Set<SymbolId>([
-    ...dynamicDispatchContracts.keys(),
-    ...declarationContracts.keys(),
-    ...typing.traitMethodImpls.keys(),
-  ]);
-  const compactSymbols = new Set(
-    functions.flatMap((functionItem) => {
-      const callableFacts = facts.get(functionItem.symbol);
-      return callableFacts &&
-        !forcedBoundarySymbols.has(functionItem.symbol) &&
-        functionSupportsCompactFactTransfer({
-          functionItem,
-          facts: callableFacts,
-          typing,
-        })
-        ? [functionItem.symbol]
-        : [];
-    }),
-  );
-  const selection = selectDemandedSummaryFunctions({
-    functions,
-    facts,
-    contracts,
-    typing,
-    symbolTable,
-    resolveContext: summarySelectionContext,
-    callers: allCallers,
-    forcedBoundarySymbols,
-    compactSymbols,
-  });
-  const summaryFunctions = selection.functions;
-  const compactFunctions = functions.filter((functionItem) =>
-    compactSymbols.has(functionItem.symbol),
-  );
-  functions.forEach((functionItem) => {
-    if (selection.demanded.has(functionItem.symbol)) {
-      return;
-    }
-    const callableFacts = facts.get(functionItem.symbol);
-    const seed = contracts.get(functionItem.symbol);
-    if (!callableFacts || !seed) {
-      return;
-    }
-    contracts.set(
-      functionItem.symbol,
-      trivialFunctionContract({
-        parameters: functionItem.parameters,
-        facts: callableFacts,
-        seed,
-        typing,
-      }),
-    );
-  });
-  const demandedLambdas = lambdas.filter((lambda) => {
-    const callableFacts = effectiveLambdaFacts.get(lambda.id)!;
-    const reasons = new Set<string>();
-    if (callableFacts.hasUnknownExpressionType)
-      reasons.add("lambda-unknown-type");
-    if (callableFacts.hasAssignment) reasons.add("lambda-assignment");
-    if (callableFacts.hasReferenceAssignment)
-      reasons.add("lambda-reference-assignment");
-    if (callableFacts.hasReferenceState) reasons.add("lambda-reference-state");
-    if (callableFacts.hasBorrowTypedExpression)
-      reasons.add("lambda-borrowed-expression");
-    if (callableFacts.hasMutableCapture) reasons.add("lambda-mutable-capture");
-    if (callableFacts.hasModuleStorageAccess)
-      reasons.add("lambda-module-storage");
-    if (callableFacts.hasUnresolvedCall) reasons.add("lambda-unresolved-call");
-    if (callableFacts.calls.length > 0) reasons.add("lambda-call");
-    if (callableFacts.captures.length > 0) reasons.add("lambda-capture");
-    if (
-      Array.from(callableFacts.mutableSymbols).some((symbol) =>
-        callableFacts.liveness.has(symbol),
-      )
-    ) {
-      reasons.add("lambda-mutable-binding");
-    }
-    reasons.forEach((reason) =>
-      incrementCompilerPerfCounter(`borrowing.summary.demandReason.${reason}`),
-    );
-    const required = reasons.size > 0;
-    incrementCompilerPerfCounter(
-      required
-        ? "borrowing.summary.lambdaFastPathRejected"
-        : "borrowing.summary.lambdaFastPathAccepted",
-    );
-    if (!required) {
-      const seed = contracts.get(callableFacts.symbol)!;
-      contracts.set(
-        callableFacts.symbol,
-        trivialFunctionContract({
-          parameters: lambda.parameters,
-          facts: callableFacts,
-          seed,
-          typing,
-        }),
-      );
-    }
-    return required;
-  });
+  // Capability classification is the only routing decision. The compact
+  // path has already published contracts for every non-flow callable; this
+  // solve owns only the full facts supplied for flow-sensitive callables.
+  const summaryFunctions = analysisFunctions;
+  const demandedLambdas = analysisLambdas;
+  const selection = {
+    demanded: new Set<SymbolId>([
+      ...summaryFunctions.map((functionItem) => functionItem.symbol),
+      ...demandedLambdas.map(
+        (lambda) => effectiveLambdaFacts.get(lambda.id)!.symbol,
+      ),
+    ]),
+    worklistEdges: 0,
+    worklistIterations: 0,
+    boundaryRoots: 0,
+    ambientRoots: 0,
+    initialAmbientRoots: 0,
+  };
   incrementCompilerPerfCounter(
     "borrowing.summary.totalCallables",
     functions.length + lambdas.length,
@@ -5692,7 +4608,6 @@ export const computeCallableBorrowContracts = ({
   );
   const summarySymbols = new Set([
     ...summaryFunctions.map((functionItem) => functionItem.symbol),
-    ...compactFunctions.map((functionItem) => functionItem.symbol),
     ...demandedLambdas.map(
       (lambda) => effectiveLambdaFacts.get(lambda.id)!.symbol,
     ),
@@ -5702,7 +4617,6 @@ export const computeCallableBorrowContracts = ({
         symbol: SymbolId;
         functionItem: HirFunction;
         facts: CallableBorrowFacts;
-        compact: boolean;
       }
     | { symbol: SymbolId; lambda: HirLambdaExpr; facts: CallableBorrowFacts };
   const solveNodes: SummarySolveNode[] = [
@@ -5710,13 +4624,6 @@ export const computeCallableBorrowContracts = ({
       symbol: functionItem.symbol,
       functionItem,
       facts: facts.get(functionItem.symbol)!,
-      compact: false,
-    })),
-    ...compactFunctions.map((functionItem) => ({
-      symbol: functionItem.symbol,
-      functionItem,
-      facts: facts.get(functionItem.symbol)!,
-      compact: true,
     })),
     ...demandedLambdas.map((lambda) => ({
       symbol: effectiveLambdaFacts.get(lambda.id)!.symbol,
@@ -5767,23 +4674,7 @@ export const computeCallableBorrowContracts = ({
     });
   });
   let evaluationCount = 0;
-  let compactEvaluationCount = 0;
-  const compactFallbackSymbols = new Set<SymbolId>();
   const summarize = (node: SummarySolveNode): CallableBorrowContract => {
-    if ("functionItem" in node && node.compact) {
-      compactEvaluationCount += 1;
-      const compact = compactFactContract({
-        functionItem: node.functionItem,
-        facts: node.facts,
-        seed: contractSeeds.get(node.symbol)!,
-        typing,
-        moduleId,
-        dependencies,
-        contracts,
-      });
-      if (compact) return compact;
-      compactFallbackSymbols.add(node.symbol);
-    }
     evaluationCount += 1;
     return "functionItem" in node
       ? summarizeFunction({
@@ -5862,7 +4753,7 @@ export const computeCallableBorrowContracts = ({
     functions.map((functionItem) => [functionItem.symbol, functionItem]),
   );
   const lambdaSymbols = new Set(
-    lambdas.map((lambda) => effectiveLambdaFacts.get(lambda.id)!.symbol),
+    lambdas.map((lambda) => (-1 - lambda.id) as SymbolId),
   );
   const result = new Map(
     Array.from(contracts, ([symbol, contract]) => {
@@ -5893,27 +4784,20 @@ export const computeCallableBorrowContracts = ({
     ),
   );
   const resolvedLambdaContracts = new Map(
-    lambdas.map((lambda) => [
-      lambda.id,
-      contracts.get(effectiveLambdaFacts.get(lambda.id)!.symbol)!,
-    ]),
+    lambdas.flatMap((lambda) => {
+      const contract = contracts.get((-1 - lambda.id) as SymbolId);
+      return contract ? [[lambda.id, contract] as const] : [];
+    }),
   );
   incrementCompilerPerfCounter(
     "borrowing.contract.inferredCount",
     summaryFunctions.length,
   );
   incrementCompilerPerfCounter(
-    "borrowing.summary.compactEvaluations",
-    compactEvaluationCount,
+    "borrowing.contract.fullEvaluations",
+    evaluationCount,
   );
-  incrementCompilerPerfCounter(
-    "borrowing.summary.compactFallbackCallables",
-    compactFallbackSymbols.size,
-  );
-  const detailedCallables =
-    summaryFunctions.length +
-    demandedLambdas.length +
-    compactFallbackSymbols.size;
+  const detailedCallables = summaryFunctions.length + demandedLambdas.length;
   incrementCompilerPerfCounter(
     "borrowing.summary.effectiveDetailedCallables",
     detailedCallables,
@@ -5925,13 +4809,12 @@ export const computeCallableBorrowContracts = ({
       Array.from(
         new Map<SymbolId, CallableBorrowContract>([
           ...result,
-          ...lambdas.map(
-            (lambda) =>
-              [
-                effectiveLambdaFacts.get(lambda.id)!.symbol,
-                resolvedLambdaContracts.get(lambda.id)!,
-              ] as const,
-          ),
+          ...lambdas.flatMap((lambda) => {
+            const contract = resolvedLambdaContracts.get(lambda.id);
+            return contract
+              ? [[(-1 - lambda.id) as SymbolId, contract] as const]
+              : [];
+          }),
         ]),
         ([symbol, output]) => {
           const callableFacts =
@@ -6069,6 +4952,10 @@ const dependencyOrderedSolveNodes = <T extends { symbol: SymbolId }>(
     dependents: dependentsByTarget,
     sourceOrder,
   });
+  incrementCompilerPerfCounter(
+    "borrowing.scc.evaluations",
+    components.length,
+  );
   const componentBySymbol = new Map<SymbolId, number>();
   components.forEach((component, componentIndex) =>
     component.forEach((symbol) =>

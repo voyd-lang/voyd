@@ -5,7 +5,7 @@ import { createMemoryModuleHost } from "../../../modules/memory-host.js";
 import { createNodePathAdapter } from "../../../modules/node-path-adapter.js";
 import { analyzeModules, loadModuleGraph } from "../../../pipeline.js";
 import { parse } from "../../../parser/index.js";
-import { getSymbolTable } from "../../_internal/symbol-table.js";
+import { walkExpression } from "../../hir/index.js";
 import {
   createBorrowingDependencyProjectionCache,
   projectBorrowingDependencies,
@@ -20,10 +20,7 @@ import {
   projectionPathCovers,
   projectionPathsOverlap,
 } from "../model.js";
-import {
-  computeCallableBorrowContracts,
-  normalizeReturnedSharedOrigins,
-} from "../summaries.js";
+import { normalizeReturnedSharedOrigins } from "../summaries.js";
 import { borrowedTypeEntriesInType } from "../borrowed-types.js";
 import { abstractTraitContractFromImplementation } from "../call-resolution.js";
 import { createCallableBorrowSummary } from "../callable-summary.js";
@@ -72,15 +69,7 @@ const analyze = (source: string) => {
 };
 
 const summaryDemandFor = (result: ReturnType<typeof analyze>) =>
-  computeCallableBorrowContracts({
-    hir: result.hir,
-    typing: result.typing,
-    symbolTable: getSymbolTable(result),
-    moduleId: result.moduleId,
-    imports: result.binding.imports,
-    dependencies: new Map(),
-    decls: result.binding.decls,
-  }).demand;
+  result.borrowing.summaryDemand!;
 
 const diagnosticCodes = (source: string): readonly string[] => {
   try {
@@ -92,6 +81,19 @@ const diagnosticCodes = (source: string): readonly string[] => {
     }
     return error.diagnostics.map((diagnostic) => diagnostic.code);
   }
+};
+
+const capabilityFor = (
+  result:
+    | ReturnType<typeof analyze>
+    | ReturnType<typeof analyzeWithRecovery>,
+  name: string,
+) => {
+  const symbol = result.symbols.resolveTopLevel(name);
+  expect(typeof symbol).toBe("number");
+  return typeof symbol === "number"
+    ? result.borrowing.capabilities.get(symbol)
+    : undefined;
 };
 
 const analyzeWithRecovery = (source: string) => {
@@ -163,6 +165,170 @@ trait ItemView
 `;
 
 describe("borrow checking", () => {
+  it("does not materialize full facts for none or transient callables", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+
+fn square(value: i32) -> i32
+  value * value
+
+fn identity(value: Box) -> Box
+  value
+
+fn fresh_local(~value: Box) -> i32
+  let ~out = Box { value: 0 }
+  out.value = value.value
+  square(out.value)
+`);
+
+    expect(capabilityFor(result, "square")).toBe("none");
+    expect(capabilityFor(result, "identity")).toBe("none");
+    expect(capabilityFor(result, "fresh_local")).toBe("transient");
+    expect(
+      Array.from(result.borrowing.capabilities.values()).every(
+        (mode) => mode !== "flow-sensitive",
+      ),
+    ).toBe(true);
+    expect(result.borrowing.analysisMetrics).toEqual({
+      fullFactsMaterialized: 0,
+      fullFactSymbols: [],
+    });
+  });
+
+  it("routes symbolic open dispatch through the flow-sensitive path", () => {
+    const result = analyze(`
+obj Box<T> { value: T }
+
+impl<T> Box<T>
+  fn update(~self, value: T) -> void
+    self.value = value
+  fn relay(~self, value: T) -> void
+    self.update(value)
+`);
+    const useFunction = Array.from(result.hir.items.values()).find(
+      (item) =>
+        item.kind === "function" &&
+        result.binding.symbolTable.getSymbol(item.symbol).name === "relay",
+    );
+    expect(useFunction).toBeDefined();
+    const callIds: number[] = [];
+    if (useFunction?.kind === "function") {
+      walkExpression({
+        exprId: useFunction.body,
+        hir: result.hir,
+        onEnterExpression: (exprId, expression) => {
+          if (expression.exprKind === "method-call") callIds.push(exprId);
+        },
+      });
+    }
+    const callId = callIds[0];
+    expect(callId).toBeDefined();
+    if (callId !== undefined) {
+      expect(result.typing.callTraitDispatches.has(callId)).toBe(false);
+      expect(result.typing.callTargets.has(callId)).toBe(false);
+      expect(result.typing.borrowCallTargets.has(callId)).toBe(true);
+    }
+    expect(
+      useFunction?.kind !== "function"
+        ? undefined
+        : result.borrowing.capabilities.get(useFunction.symbol),
+    ).toBe("flow-sensitive");
+  });
+
+  it("routes capability modes from compact behavior and escaping use", () => {
+    const source = `
+obj Some<T> { value: T }
+obj None {}
+type Option<T> = Some<T> | None
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+fn square(value: i32) -> i32
+  value * value
+
+fn generic_identity<T>(value: T) -> T
+  value
+
+fn fresh_local(~value: Box) -> void
+  let ~out = Box { value: 0 }
+  out.value = value.value
+
+fn next(~self: Box) -> Option<Box>
+  Some<Box> { value: Box { value: 1 } }
+
+fn returned_borrow(value: Box) -> Option<borrow Box>
+  Some<borrow Box> { value }
+
+fn sequential(~value: Box) -> void
+  mutate(~value)
+  mutate(~value)
+
+fn branch_local(~value: Box, condition: bool) -> void
+  if condition:
+    mutate(~value)
+  else:
+    mutate(~value)
+
+fn borrowed_live(~value: Box) -> i32
+  let loan: borrow Box = value
+  square(1) + loan.value
+
+fn ignore_flow_result(value: Box) -> void
+  let _ = returned_borrow(value)
+
+fn flow_owned(value: Box) -> Box
+  let ~out = Box { value: value.value }
+  let loan: borrow Box = out
+  value
+
+fn ignore_flow_owned(value: Box) -> void
+  let _ = flow_owned(value)
+
+`;
+    const result = analyze(source);
+
+    expect(capabilityFor(result, "square")).toBe("none");
+    expect(capabilityFor(result, "generic_identity")).toBe("flow-sensitive");
+    expect(capabilityFor(result, "fresh_local")).toBe("transient");
+    expect(capabilityFor(result, "next")).toBe("transient");
+    expect(capabilityFor(result, "returned_borrow")).toBe("flow-sensitive");
+    expect(capabilityFor(result, "sequential")).toBe("transient");
+    expect(capabilityFor(result, "branch_local")).toBe("transient");
+    expect(capabilityFor(result, "borrowed_live")).toBe("flow-sensitive");
+    expect(capabilityFor(result, "ignore_flow_result")).not.toBe(
+      "flow-sensitive",
+    );
+    expect(capabilityFor(result, "flow_owned")).toBe("flow-sensitive");
+    expect(capabilityFor(result, "ignore_flow_owned")).not.toBe(
+      "flow-sensitive",
+    );
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+
+fn overlap(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn overlap_caller(~value: Box) -> void
+  overlap(~value, ~value)
+`),
+    ).toContain("TY0048");
+    const overlapResult = analyzeWithRecovery(`
+obj Box { value: i32 }
+
+fn overlap(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn overlap_caller(~value: Box) -> void
+  overlap(~value, ~value)
+`);
+    expect(capabilityFor(overlapResult, "overlap_caller")).toBe("transient");
+  });
+
   it("includes argument-plan ambiguity in stable callable inputs", () => {
     const call = {
       exprId: 1,
@@ -195,14 +361,17 @@ pub fn entry(value: i32) -> i32
 `);
 
     const demand = summaryDemandFor(result);
+    expect(new Set(result.borrowing.capabilities.values())).toEqual(
+      new Set(["none"]),
+    );
     expect(demand.totalCallables).toBe(helperCount + 1);
     expect(demand.demandedCallables).toBeLessThanOrEqual(1);
     expect(demand.skippedTrivialCallables).toBeGreaterThanOrEqual(helperCount);
     expect(demand.evaluations).toBeLessThanOrEqual(1);
-    expect(demand.worklistEdges).toBeGreaterThanOrEqual(helperCount);
+    expect(demand.worklistEdges).toBe(0);
   });
 
-  it("propagates ambient summary demand through compact private wrappers", () => {
+  it("routes module-storage reads through compact callable capabilities", () => {
     const result = analyze(`
 obj Box { value: i32 }
 let source = Box { value: 1 }
@@ -219,9 +388,12 @@ pub fn entry() -> i32
     const entry = result.symbols.resolveTopLevel("entry");
 
     const demand = summaryDemandFor(result);
-    expect(demand.demandedCallables).toBe(1);
-    expect(demand.skippedTrivialCallables).toBe(2);
-    expect(demand.worklistIterations).toBe(1);
+    expect(new Set(result.borrowing.capabilities.values())).toEqual(
+      new Set(["transient"]),
+    );
+    expect(demand.demandedCallables).toBe(0);
+    expect(demand.skippedTrivialCallables).toBe(3);
+    expect(demand.worklistIterations).toBe(0);
     expect(
       typeof entry === "number"
         ? result.borrowing.callables.get(entry)?.externalRead
@@ -326,7 +498,6 @@ fn add_one(meter: Meter) -> i32
       typeof addOne === "number"
         ? result.borrowing.callables.get(addOne)
         : undefined;
-
     expect(contract?.parameters[0]?.readPaths).toContainEqual([
       { kind: "field", name: "value" },
     ]);
@@ -346,7 +517,7 @@ pub fn read() -> i32
     const read = result.symbols.resolveTopLevel("read");
     const demand = summaryDemandFor(result);
 
-    expect(demand.demandedCallables).toBe(2);
+    expect(demand.demandedCallables).toBe(1);
     expect(
       typeof read === "number"
         ? result.borrowing.callables.get(read)?.externalRead
@@ -354,7 +525,7 @@ pub fn read() -> i32
     ).toBe(true);
   });
 
-  it("keeps opaque callbacks and recursive safety call graphs demanded", () => {
+  it("keeps opaque callbacks demanded while routing transient recursion compactly", () => {
     const result = analyze(`
 obj Box { value: i32 }
 
@@ -369,11 +540,11 @@ fn right(~value: Box) -> void
 `);
 
     const demand = summaryDemandFor(result);
-    expect(demand.demandedCallables).toBe(3);
-    expect(demand.evaluations).toBeGreaterThanOrEqual(3);
+    expect(demand.demandedCallables).toBe(1);
+    expect(demand.evaluations).toBeGreaterThanOrEqual(1);
   });
 
-  it("solves nested lambda contracts without demanding the enclosing body", () => {
+  it("routes lambda captures through the flow-sensitive path", () => {
     const result = analyze(`
 obj Box { value: i32 }
 let source = Box { value: 1 }
@@ -385,9 +556,9 @@ fn ignore_reader() -> i32
 
     expect(summaryDemandFor(result)).toMatchObject({
       totalCallables: 2,
-      demandedCallables: 1,
-      skippedTrivialCallables: 1,
-      evaluations: 1,
+      demandedCallables: 0,
+      skippedTrivialCallables: 2,
+      evaluations: 0,
     });
     expect(
       Array.from(result.borrowing.queries ?? []).filter(
@@ -411,7 +582,7 @@ fn ignore_capture() -> i32
         ([symbol]) => symbol < 0,
       )?.[1].input;
 
-    expect(summaryDemandFor(ordinary).demandedCallables).toBe(1);
+    expect(summaryDemandFor(ordinary).demandedCallables).toBe(0);
     expect(summaryDemandFor(mutable).demandedCallables).toBe(2);
     expect(lambdaInput(mutable)).not.toBe(lambdaInput(ordinary));
   });
@@ -10622,7 +10793,6 @@ pub fn valid(~left: Box, ~right: Box) -> i32
     const readContract = readExport?.borrowing?.find(
       (entry) => entry.symbol === readExport.symbol,
     )?.contract;
-
     expect(readContract?.parameters[0]?.readPaths).toEqual([
       [{ kind: "dereference" }, { kind: "index", constant: 1, stable: true }],
       [
