@@ -16,10 +16,7 @@ import type { FunctionSignature, TypingResult } from "../typing/index.js";
 import { bindCallArgumentExpressions } from "../typing/call-argument-binding.js";
 import type { CallArgumentPlanEntry } from "../typing/types.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
-import {
-  expressionTypeFor,
-  type ResolveContext,
-} from "./call-resolution.js";
+import { expressionTypeFor, type ResolveContext } from "./call-resolution.js";
 import type {
   BorrowAccessMode,
   BorrowPlace,
@@ -31,7 +28,10 @@ import {
   typeIsAllocationBacked,
 } from "./reference-bearing.js";
 import { typeContainsBorrowed } from "./borrowed-types.js";
-import { BORROW_IRRELEVANT_VALUE_INTRINSICS } from "./call-resolution.js";
+import {
+  BORROW_IRRELEVANT_VALUE_INTRINSICS,
+  COMPACT_BORROW_INTRINSICS,
+} from "./call-resolution.js";
 import { placeOfExpression } from "./places.js";
 
 export type CallableBorrowIndexAccess = {
@@ -52,6 +52,9 @@ export type CallableBorrowIndexArgument = {
   place?: BorrowPlace;
   type?: TypeId;
   loanBearing?: true;
+  referenceCapable?: true;
+  moduleStorage?: true;
+  fresh?: true;
   defaulted?: true;
 };
 
@@ -85,7 +88,7 @@ export type CallableBorrowIndexFlags = {
   hasUnsafeBorrowFormation: boolean;
   hasMutableParameter: boolean;
   hasMutableBinding: boolean;
-  /** A mutable reference-capable binding sourced from a non-fresh expression. */
+  /** A mutable reference binding sourced from a non-fresh expression. */
   hasNonFreshMutableBinding: boolean;
   hasReferenceBinding: boolean;
   hasRetainedReferenceStore: boolean;
@@ -103,11 +106,11 @@ export type CallableBorrowIndexFlags = {
   hasDefaultArgument: boolean;
   hasDefaultBorrowFlow: boolean;
   hasRuntimeCheckedReceiverWrites: boolean;
-  hasFreshResult: boolean;
+  hasAllocationResult: boolean;
+  hasSyntacticFreshResult: boolean;
   hasTraitResult: boolean;
   hasCallableResult: boolean;
   hasReturnedParameterValue: boolean;
-  hasSimplePlainReturn: boolean;
 };
 
 export type CallableBorrowIndexParameter = {
@@ -180,11 +183,11 @@ const emptyFlags = (): MutableFlags => ({
   hasDefaultArgument: false,
   hasDefaultBorrowFlow: false,
   hasRuntimeCheckedReceiverWrites: false,
-  hasFreshResult: false,
+  hasAllocationResult: false,
+  hasSyntacticFreshResult: false,
   hasTraitResult: false,
   hasCallableResult: false,
   hasReturnedParameterValue: false,
-  hasSimplePlainReturn: false,
 });
 
 const parameterPlacesFor = (
@@ -208,10 +211,7 @@ const parameterPlacesFor = (
         return;
       case "tuple":
         pattern.elements.forEach((element, index) =>
-          visit(element, parameter, [
-            ...path,
-            { kind: "tuple", index },
-          ]),
+          visit(element, parameter, [...path, { kind: "tuple", index }]),
         );
         return;
       case "destructure":
@@ -294,7 +294,8 @@ const isLoanBearingType = (
   typing: TypingResult,
 ): boolean =>
   typeof type === "number" &&
-  (isBorrowedType(type, typing) || typing.arena.get(type).kind === "type-param-ref");
+  (isBorrowedType(type, typing) ||
+    typing.arena.get(type).kind === "type-param-ref");
 
 const isBorrowCapableType = (
   type: TypeId | undefined,
@@ -303,9 +304,7 @@ const isBorrowCapableType = (
   typeof type === "number" &&
   (typeContainsBorrowed(type, typing) || typeCanCarryReference(type, typing));
 
-const normalizeIndex = (
-  index: CallableBorrowIndex,
-): CallableBorrowIndex => ({
+const normalizeIndex = (index: CallableBorrowIndex): CallableBorrowIndex => ({
   ...index,
   parameters: [...index.parameters],
   accesses: [...index.accesses],
@@ -321,6 +320,7 @@ export const extractCallableBorrowIndex = ({
   symbolTable,
   decls,
   resolveContext,
+  resolvedCallTargets,
 }: {
   callables: readonly IndexCallable[];
   hir: HirGraph;
@@ -328,6 +328,7 @@ export const extractCallableBorrowIndex = ({
   symbolTable: SymbolTable;
   decls: DeclTable;
   resolveContext: ResolveContext;
+  resolvedCallTargets: ReadonlyMap<HirExprId, readonly SymbolRef[]>;
 }): ReadonlyMap<SymbolId, CallableBorrowIndex> =>
   new Map(
     callables.map((callable) => [
@@ -339,6 +340,7 @@ export const extractCallableBorrowIndex = ({
         symbolTable,
         decls,
         resolveContext,
+        resolvedCallTargets,
       }),
     ]),
   );
@@ -350,6 +352,7 @@ export const extractSingleCallableBorrowIndex = ({
   symbolTable,
   decls,
   resolveContext,
+  resolvedCallTargets,
 }: {
   callable: IndexCallable;
   hir: HirGraph;
@@ -357,6 +360,7 @@ export const extractSingleCallableBorrowIndex = ({
   symbolTable: SymbolTable;
   decls: DeclTable;
   resolveContext: ResolveContext;
+  resolvedCallTargets: ReadonlyMap<HirExprId, readonly SymbolRef[]>;
 }): CallableBorrowIndex => {
   const context: ResolveContext = {
     ...resolveContext,
@@ -404,7 +408,9 @@ export const extractSingleCallableBorrowIndex = ({
   flags.hasMutableParameter = parameters.some(
     (parameter) => parameter.bindingKind === "mutable-ref",
   );
-  flags.hasDefaultArgument = parameters.some((parameter) => parameter.defaulted);
+  flags.hasDefaultArgument = parameters.some(
+    (parameter) => parameter.defaulted,
+  );
   flags.hasBorrowOperation =
     flags.hasMutableParameter ||
     parameters.some(
@@ -413,14 +419,6 @@ export const extractSingleCallableBorrowIndex = ({
         isBorrowedType(parameter.type, typing),
     );
   if (signature === undefined) flags.hasUnknownBehavior = true;
-  if (
-    signature !== undefined &&
-    typing.arena.containsTypeParams(signature.returnType)
-  ) {
-    // A generic result may become a borrowed value after instantiation. The
-    // cheap route cannot resolve that provenance without full facts.
-    flags.hasUnknownBehavior = true;
-  }
   if (
     signature !== undefined &&
     typing.arena.get(signature.returnType).kind === "trait"
@@ -433,11 +431,13 @@ export const extractSingleCallableBorrowIndex = ({
   const calls: CallableBorrowIndexCall[] = [];
   const directCallEdges = new Map<string, SymbolRef>();
   const parameterPlaces = parameterPlacesFor(callable.parameters);
-  const traitMethodSymbols = new Set(
-    Array.from(hir.items.values()).flatMap((item) =>
-      item.kind === "trait" ? item.methods.map((method) => method.symbol) : [],
+  const mutableBindingRoots = new Set(
+    parameters.flatMap((parameter) =>
+      parameter.bindingKind === "mutable-ref" ? [parameter.symbol] : [],
     ),
   );
+  const freshBindingRoots = new Set<SymbolId>();
+  const provenanceFreeFreshBindingRoots = new Set<SymbolId>();
   const isStoragePlace = (place: BorrowPlace | undefined): boolean =>
     place !== undefined &&
     !parameterPlaces.has(place.root) &&
@@ -479,8 +479,7 @@ export const extractSingleCallableBorrowIndex = ({
   const roleForExpression = (
     expressionId: HirExprId,
     parentId: HirExprId | undefined,
-  ): CallableBorrowIndexAccess["role"] =>
-    roleForChild(parentId, expressionId);
+  ): CallableBorrowIndexAccess["role"] => roleForChild(parentId, expressionId);
   const recordAccess = (
     exprId: HirExprId,
     kind: CallableBorrowIndexAccess["kind"],
@@ -519,7 +518,8 @@ export const extractSingleCallableBorrowIndex = ({
   ): void => {
     const annotationType = pattern.typeId;
     const annotatedBorrow =
-      borrowed || isBorrowedType(annotationType, typing) ||
+      borrowed ||
+      isBorrowedType(annotationType, typing) ||
       (pattern.bindingKind !== "mutable-ref" &&
         pattern.typeAnnotation?.typeKind === "borrowed");
     if (annotatedBorrow && bindingSymbols(pattern).length > 0) {
@@ -539,7 +539,8 @@ export const extractSingleCallableBorrowIndex = ({
       pattern.fields.forEach((field) =>
         recordPattern(field.pattern, annotatedBorrow, mutable),
       );
-      if (pattern.spread) recordPattern(pattern.spread, annotatedBorrow, mutable);
+      if (pattern.spread)
+        recordPattern(pattern.spread, annotatedBorrow, mutable);
     }
     if (pattern.kind === "type" && pattern.binding) {
       recordPattern(pattern.binding, annotatedBorrow, mutable);
@@ -562,6 +563,29 @@ export const extractSingleCallableBorrowIndex = ({
         return [];
     }
   };
+  const hasMutableReferenceBinding = (pattern: HirPattern): boolean => {
+    if (pattern.bindingKind === "mutable-ref") return true;
+    switch (pattern.kind) {
+      case "tuple":
+        return pattern.elements.some(hasMutableReferenceBinding);
+      case "destructure":
+        return (
+          pattern.fields.some((field) =>
+            hasMutableReferenceBinding(field.pattern),
+          ) ||
+          (pattern.spread !== undefined &&
+            hasMutableReferenceBinding(pattern.spread))
+        );
+      case "type":
+        return (
+          pattern.binding !== undefined &&
+          hasMutableReferenceBinding(pattern.binding)
+        );
+      case "identifier":
+      case "wildcard":
+        return false;
+    }
+  };
 
   callable.parameters.forEach((parameter) =>
     recordPattern(parameter.pattern, false, parameter.mutable === true),
@@ -574,42 +598,18 @@ export const extractSingleCallableBorrowIndex = ({
     const parameter = parameterPlaces.get(capture.symbol);
     const record = symbolTable.getSymbol(capture.symbol);
     return (
-      type !== undefined &&
-      (isBorrowedType(type, typing) ||
-        typing.arena.get(type).kind === "type-param-ref")
-    ) ||
-      (capture.mutable === true &&
-        record.kind === "value" &&
-        !parameter);
+      (type !== undefined &&
+        (isBorrowedType(type, typing) ||
+          typing.arena.get(type).kind === "type-param-ref")) ||
+      (capture.mutable === true && record.kind === "value" && !parameter)
+    );
   };
   callable.captures?.forEach((capture) => {
     flags.hasCapture ||= captureNeedsLoanFlow(capture);
   });
 
-  const callTargetsFor = (
-    expressionId: HirExprId,
-  ): readonly SymbolRef[] => {
-    const targets = new Map<string, SymbolRef>();
-    [
-      typing.callTargets.get(expressionId),
-      typing.borrowCallTargets.get(expressionId),
-    ].forEach((entries) =>
-      entries?.forEach((target, key) => {
-        targets.set(`${key}:${target.moduleId}:${target.symbol}`, target);
-      }),
-    );
-    const resolved = Array.from(targets.values());
-    if (resolved.length > 0) return resolved;
-    const expression = hir.expressions.get(expressionId);
-    if (expression?.exprKind !== "call") return [];
-    const callee = hir.expressions.get(expression.callee);
-    if (callee?.exprKind !== "identifier") return [];
-    const imported = context.imports.get(callee.symbol);
-    if (imported) return [imported];
-    return typing.functions.getSignature(callee.symbol)
-      ? [{ moduleId: context.moduleId, symbol: callee.symbol }]
-      : [];
-  };
+  const callTargetsFor = (expressionId: HirExprId): readonly SymbolRef[] =>
+    resolvedCallTargets.get(expressionId) ?? [];
   const callPlansFor = (
     expressionId: HirExprId,
   ): readonly (readonly CallArgumentPlanEntry[])[] => [
@@ -618,10 +618,13 @@ export const extractSingleCallableBorrowIndex = ({
   ];
   const targetSignatureFor = (
     target: SymbolRef,
-  ): Pick<FunctionSignature, "parameters" | "returnType" | "effectRow"> | undefined => {
+  ):
+    | Pick<FunctionSignature, "parameters" | "returnType" | "effectRow">
+    | undefined => {
     if (target.moduleId !== context.moduleId) {
-      return context.dependencies.get(target.moduleId)?.callables.get(target.symbol)
-        ?.signature;
+      return context.dependencies
+        .get(target.moduleId)
+        ?.callables.get(target.symbol)?.signature;
     }
     const signature = typing.functions.getSignature(target.symbol);
     if (signature) return signature;
@@ -636,10 +639,12 @@ export const extractSingleCallableBorrowIndex = ({
           ?.contract;
   const targetMaySuspend = (target: SymbolRef): boolean =>
     target.moduleId === context.moduleId
-      ? decls.getEffectOperation(target.symbol)?.operation.resumable === "resume" ||
-        targetContractFor(target)?.maySuspend === true
-      : context.dependencies.get(target.moduleId)?.effectOperations.get(target.symbol)
-          ?.maySuspend === true || targetContractFor(target)?.maySuspend === true;
+      ? decls.getEffectOperation(target.symbol)?.operation.resumable ===
+          "resume" || targetContractFor(target)?.maySuspend === true
+      : context.dependencies
+          .get(target.moduleId)
+          ?.effectOperations.get(target.symbol)?.maySuspend === true ||
+        targetContractFor(target)?.maySuspend === true;
   const targetIsIntrinsic = (target: SymbolRef): boolean => {
     if (target.moduleId !== context.moduleId || target.symbol < 0) return false;
     const metadata = symbolTable.getSymbol(target.symbol).metadata as
@@ -647,27 +652,16 @@ export const extractSingleCallableBorrowIndex = ({
       | undefined;
     return metadata?.intrinsic === true;
   };
-  const expressionIsFresh = (expressionId: HirExprId, depth = 0): boolean => {
-    if (depth > 2) return false;
+  const expressionIsDirectFresh = (expressionId: HirExprId): boolean => {
     const expression = hir.expressions.get(expressionId);
-    if (!expression) return false;
-    if (expression.exprKind === "object-literal") return true;
-    if (expression.exprKind === "block") {
-      return typeof expression.value === "number"
-        ? expressionIsFresh(expression.value, depth + 1)
-        : false;
-    }
-    if (expression.exprKind !== "call" && expression.exprKind !== "method-call") {
-      return false;
-    }
-    if (expression.exprKind === "call") {
-      const intrinsicName = callIntrinsicName(expression, context);
-      if (
-        intrinsicName === "__array_new" ||
-        intrinsicName === "__array_new_fixed"
-      ) {
-        return true;
-      }
+    if (expression?.exprKind === "object-literal") return true;
+    if (expression?.exprKind !== "call") return false;
+    const intrinsicName = callIntrinsicName(expression, context);
+    if (
+      intrinsicName === "__array_new" ||
+      intrinsicName === "__array_new_fixed"
+    ) {
+      return true;
     }
     const targets = callTargetsFor(expressionId);
     return (
@@ -675,332 +669,130 @@ export const extractSingleCallableBorrowIndex = ({
       targets.every((target) => targetContractFor(target)?.freshResult === true)
     );
   };
-  const expressionContainsModuleStorageValue = (
+  const expressionIsSyntacticFreshAllocation = (
     expressionId: HirExprId,
-    depth = 0,
   ): boolean => {
-    if (depth > 4) return true;
     const expression = hir.expressions.get(expressionId);
-    if (!expression) return true;
-    const type = typeFor(expressionId, context);
-    if (
-      isStoragePlace(placeOfExpression(expressionId, hir, context)) &&
-      typeof type === "number" &&
-      typeCanCarryReference(type, typing)
-    ) {
-      return true;
-    }
-    if (expression.exprKind === "block") {
-      return (
-        (typeof expression.value === "number" &&
-          expressionContainsModuleStorageValue(expression.value, depth + 1)) ||
-        expression.statements.some((statementId) => {
-          const statement = hir.statements.get(statementId);
-          const statementExpression =
-            statement?.kind === "expr-stmt"
-              ? hir.expressions.get(statement.expr)
-              : undefined;
-          return (
-            (statement?.kind === "return" &&
-              typeof statement.value === "number" &&
-              expressionContainsModuleStorageValue(statement.value, depth + 1)) ||
-            (statement?.kind === "expr-stmt" &&
-              (statementExpression?.exprKind === "if" ||
-                statementExpression?.exprKind === "cond" ||
-                statementExpression?.exprKind === "match" ||
-                statementExpression?.exprKind === "block" ||
-                statementExpression?.exprKind === "effect-handler") &&
-              expressionContainsModuleStorageValue(statement.expr, depth + 1))
-          );
-        })
-      );
-    }
-    if (expression.exprKind === "tuple") {
-      return expression.elements.some((element) =>
-        expressionContainsModuleStorageValue(element, depth + 1),
-      );
-    }
-    if (expression.exprKind === "object-literal") {
-      return expression.entries.some((entry) =>
-        expressionContainsModuleStorageValue(entry.value, depth + 1),
-      );
-    }
-    if (expression.exprKind === "field-access") {
-      return expressionContainsModuleStorageValue(expression.target, depth + 1);
-    }
-    if (
-      expression.exprKind === "if" ||
-      expression.exprKind === "cond" ||
-      expression.exprKind === "match"
-    ) {
-      const values =
-        expression.exprKind === "match"
-          ? expression.arms.map((arm) => arm.value)
-          : [
-              ...expression.branches.map((branch) => branch.value),
-              ...(typeof expression.defaultBranch === "number"
-                ? [expression.defaultBranch]
-                : []),
-            ];
-      return values.some((value) =>
-        expressionContainsModuleStorageValue(value, depth + 1),
-      );
-    }
-    return false;
-  };
-  const expressionContainsParameterValue = (
-    expressionId: HirExprId,
-    depth = 0,
-  ): boolean => {
-    if (depth > 4) return true;
-    const expression = hir.expressions.get(expressionId);
-    if (!expression) return true;
-    if (expression.exprKind === "identifier") {
-      const parameter = parameterPlaces.get(expression.symbol);
-      if (parameter !== undefined) {
-        const parameterType = parameters[parameter.parameter]?.type;
-        if (
-          typeof parameterType === "number" &&
-          typeCanCarryReference(parameterType, typing)
-        ) {
-          return true;
-        }
-      }
-    }
-    const place = placeOfExpression(expressionId, hir, context);
-    if (place && parameterPlaces.has(place.root)) {
-      const parameterPlace = parameterPlaces.get(place.root);
-      const parameter =
-        parameterPlace === undefined ? undefined : parameters[parameterPlace.parameter];
-      if (
-        parameter &&
-        typeof parameter.type === "number" &&
-        typeCanCarryReference(parameter.type, typing)
-      ) {
-        return true;
-      }
-    }
-    if (expression.exprKind === "block") {
-      return (
-        (typeof expression.value === "number" &&
-          expressionContainsParameterValue(expression.value, depth + 1)) ||
-        expression.statements.some((statementId) => {
-          const statement = hir.statements.get(statementId);
-          const statementExpression =
-            statement?.kind === "expr-stmt"
-              ? hir.expressions.get(statement.expr)
-              : undefined;
-          return (
-            (statement?.kind === "return" &&
-              typeof statement.value === "number" &&
-              expressionContainsParameterValue(statement.value, depth + 1)) ||
-            (statement?.kind === "expr-stmt" &&
-              (statementExpression?.exprKind === "if" ||
-                statementExpression?.exprKind === "cond" ||
-                statementExpression?.exprKind === "match" ||
-                statementExpression?.exprKind === "block" ||
-                statementExpression?.exprKind === "effect-handler") &&
-              expressionContainsParameterValue(statement.expr, depth + 1))
-          );
-        })
-      );
-    }
-    if (expression.exprKind === "tuple") {
-      return expression.elements.some((element) =>
-        expressionContainsParameterValue(element, depth + 1),
-      );
-    }
-    if (expression.exprKind === "object-literal") {
-      return expression.entries.some((entry) =>
-        expressionContainsParameterValue(entry.value, depth + 1),
-      );
-    }
-    if (expression.exprKind === "field-access") {
-      return expressionContainsParameterValue(expression.target, depth + 1);
-    }
-    if (
-      expression.exprKind === "if" ||
-      expression.exprKind === "cond" ||
-      expression.exprKind === "match"
-    ) {
-      const values =
-        expression.exprKind === "match"
-          ? expression.arms.map((arm) => arm.value)
-          : [
-              ...expression.branches.map((branch) => branch.value),
-              ...(typeof expression.defaultBranch === "number"
-                ? [expression.defaultBranch]
-                : []),
-            ];
-      return values.some((value) =>
-        expressionContainsParameterValue(value, depth + 1),
-      );
-    }
-    return false;
-  };
-  const expressionIsSimplePlainParameterReturn = (
-    expressionId: HirExprId,
-    depth = 0,
-  ): boolean => {
-    if (depth > 2) return false;
-    const expression = hir.expressions.get(expressionId);
-    if (!expression) return false;
-    if (expression.exprKind === "block") {
-      return typeof expression.value === "number"
-        ? expressionIsSimplePlainParameterReturn(expression.value, depth + 1)
-        : false;
-    }
-    if (expression.exprKind !== "identifier") return false;
-    const place = placeOfExpression(expressionId, hir, context);
-    if (!place || place.projections.length > 0) return false;
-    const parameter = parameterPlaces.get(place.root);
+    if (expression?.exprKind === "object-literal") return true;
+    if (expression?.exprKind !== "call") return false;
+    const intrinsicName = callIntrinsicName(expression, context);
     return (
-      parameter !== undefined &&
-      parameters[parameter.parameter]?.access === "owned" &&
-      typeof parameters[parameter.parameter]?.type === "number" &&
-      typeCanCarryReference(parameters[parameter.parameter]!.type!, typing)
+      intrinsicName === "__array_new" ||
+      intrinsicName === "__array_new_fixed"
     );
   };
-  const expressionHasNonFreshReferenceValue = (
+  const expressionIsProvenanceFreeFresh = (
     expressionId: HirExprId,
   ): boolean => {
     const type = typeFor(expressionId, context);
     if (typeof type !== "number" || !typeCanCarryReference(type, typing)) {
-      return false;
+      return true;
     }
-    return !(
-      expressionIsFresh(expressionId) &&
-      !expressionContainsParameterValue(expressionId) &&
-      !expressionContainsModuleStorageValue(expressionId)
+    const expression = hir.expressions.get(expressionId);
+    if (expression?.exprKind === "object-literal") {
+      return expression.entries.every((entry) =>
+        expressionIsProvenanceFreeFresh(entry.value),
+      );
+    }
+    if (expression?.exprKind !== "call") return false;
+    const intrinsicName = callIntrinsicName(expression, context);
+    return (
+      (intrinsicName === "__array_new" ||
+        intrinsicName === "__array_new_fixed") &&
+      expression.args.every((argument) =>
+        expressionIsProvenanceFreeFresh(argument.expr),
+      )
     );
   };
-  const typeContainsCallable = (
-    type: TypeId | undefined,
-    active = new Set<TypeId>(),
-  ): boolean => {
-    if (typeof type !== "number" || active.has(type)) return false;
-    const nextActive = new Set(active).add(type);
-    const descriptor = typing.arena.get(type);
-    switch (descriptor.kind) {
-      case "function":
-        return true;
-      case "borrowed":
-        return typeContainsCallable(descriptor.inner, nextActive);
-      case "recursive":
-        return typeContainsCallable(descriptor.body, nextActive);
-      case "union":
-        return descriptor.members.some((member) =>
-          typeContainsCallable(member, nextActive),
-        );
-      case "intersection":
-        return (
-          (typeof descriptor.nominal === "number" &&
-            typeContainsCallable(descriptor.nominal, nextActive)) ||
-          (typeof descriptor.structural === "number" &&
-            typeContainsCallable(descriptor.structural, nextActive))
-        );
-      case "value-object":
-      case "nominal-object":
-      case "structural-object": {
-        const fields =
-          descriptor.kind === "structural-object"
-            ? descriptor.fields
-            : typing.objectsByNominal.get(type)?.fields;
-        return (
-          fields?.some((field) =>
-            typeContainsCallable(field.type, nextActive),
-          ) ?? false
-        );
-      }
-      case "fixed-array":
-        return typeContainsCallable(descriptor.element, nextActive);
-      case "type-param-ref":
-      case "primitive":
-        return false;
-    }
-    return false;
-  };
-  const expressionReturnsLoanSensitiveCallable = (
-    expressionId: HirExprId,
-    depth = 0,
-  ): boolean => {
-    if (depth > 4) return true;
-    const expression = hir.expressions.get(expressionId);
-    if (!expression) return true;
-    if (expression.exprKind === "lambda") {
-      return expression.captures.some((capture) => {
-        const captureType = typing.valueTypes.get(capture.symbol);
-        const captureRecord = symbolTable.getSymbol(capture.symbol);
-        return (
-          isLoanBearingType(captureType, typing) ||
-          (capture.mutable && captureRecord.kind === "value")
-        );
-      });
-    }
-    if (expression.exprKind === "identifier") {
-      return typeContainsCallable(typeFor(expressionId, context));
-    }
-    if (expression.exprKind === "block") {
-      return typeof expression.value === "number"
-        ? expressionReturnsLoanSensitiveCallable(expression.value, depth + 1)
-        : false;
-    }
-    if (expression.exprKind === "tuple") {
-      return expression.elements.some((element) =>
-        expressionReturnsLoanSensitiveCallable(element, depth + 1),
-      );
-    }
+  const directAggregateValues = (
+    expression: HirExpression,
+  ): readonly HirExprId[] => {
+    if (expression.exprKind === "tuple") return expression.elements;
     if (expression.exprKind === "object-literal") {
-      return expression.entries.some((entry) =>
-        expressionReturnsLoanSensitiveCallable(entry.value, depth + 1),
-      );
+      return expression.entries.map((entry) => entry.value);
     }
+    return [];
+  };
+  const recordReturnedAggregateValue = (expressionId: HirExprId): void => {
+    const place = placeOfExpression(expressionId, hir, context);
+    const type = typeFor(expressionId, context);
+    if (typeof type === "number" && typeCanCarryReference(type, typing)) {
+      const parameterSource = place
+        ? parameterPlaces.get(place.root)
+        : undefined;
+      if (parameterSource) flags.hasReturnedParameterValue = true;
+      if (place && isStoragePlace(place)) flags.hasModuleStorageBorrow = true;
+      if (
+        !parameterSource &&
+        !(place && isStoragePlace(place)) &&
+        !expressionIsSyntacticFreshAllocation(expressionId)
+      ) {
+        // A reference-capable leaf whose origin is not syntactically fresh
+        // needs full returned-provenance analysis. The index records only
+        // the bounded trigger.
+        flags.hasRetention = true;
+      }
+    }
+    const expression = hir.expressions.get(expressionId);
+    if (!expression) return;
+    directAggregateValues(expression).forEach(recordReturnedAggregateValue);
+  };
+  const recordReturnedValue = (
+    expressionId: HirExprId,
+    expression: HirExpression,
+    returning: boolean,
+  ): void => {
+    if (!returning) return;
     if (
+      expression.exprKind === "block" ||
       expression.exprKind === "if" ||
       expression.exprKind === "cond" ||
-      expression.exprKind === "match"
+      expression.exprKind === "match" ||
+      expression.exprKind === "effect-handler"
     ) {
-      const values =
-        expression.exprKind === "match"
-          ? expression.arms.map((arm) => arm.value)
-          : [
-              ...expression.branches.map((branch) => branch.value),
-              ...(typeof expression.defaultBranch === "number"
-                ? [expression.defaultBranch]
-                : []),
-            ];
-      return values.some((value) =>
-        expressionReturnsLoanSensitiveCallable(value, depth + 1),
-      );
+      return;
+    }
+    const type = typeFor(expressionId, context);
+    if (typeof type !== "number" || !typeCanCarryReference(type, typing)) {
+      return;
     }
     if (
-      expression.exprKind === "call" ||
-      expression.exprKind === "method-call" ||
-      expression.exprKind === "field-access"
+      typeIsAllocationBacked(type, typing) &&
+      typing.arena.get(type).kind !== "function"
     ) {
-      if (
-        expression.exprKind === "call" ||
-        expression.exprKind === "method-call"
-      ) {
-        const operands = [
-          ...(expression.exprKind === "method-call"
-            ? [expression.target]
-            : []),
-          ...expression.args.map((argument) => argument.expr),
-        ];
-        if (
-          operands.some((operand) =>
-            expressionContainsParameterValue(operand, depth + 1),
-          )
-        ) {
-          return true;
-        }
-      }
-      return typeContainsCallable(typeFor(expressionId, context));
+      flags.hasAllocationResult = true;
+      flags.hasSyntacticFreshResult ||=
+        expressionIsSyntacticFreshAllocation(expressionId);
     }
-    return false;
+    const place = placeOfExpression(expressionId, hir, context);
+    const source = place ? parameterPlaces.get(place.root) : undefined;
+    if (source) {
+      flags.hasReturnedParameterValue = true;
+      return;
+    }
+    const returnsProvenanceFreeFreshRoot =
+      place !== undefined &&
+      place.projections.every(
+        (projection) => projection.kind === "identity",
+      ) &&
+      provenanceFreeFreshBindingRoots.has(place.root);
+    if (returnsProvenanceFreeFreshRoot) {
+      flags.hasSyntacticFreshResult = true;
+    } else if (place && !isStoragePlace(place)) {
+      // Returning a reference-capable local requires full provenance even
+      // when its generic signature does not reveal the concrete reference
+      // shape. Direct calls and aggregate literals are classified below from
+      // their bounded syntax instead.
+      flags.hasRetention = true;
+    }
+    directAggregateValues(expression).forEach(recordReturnedAggregateValue);
+    if (
+      expression.exprKind === "lambda" &&
+      expression.captures.some(captureNeedsLoanFlow)
+    ) {
+      flags.hasCallableResult = true;
+    }
   };
-
   const resultUseFor = ({
     expressionId,
     returnsBorrowed,
@@ -1022,16 +814,23 @@ export const extractSingleCallableBorrowIndex = ({
     const resultType = typeFor(expressionId, context);
     const resultIsBorrowed =
       returnsBorrowed || isLoanBearingType(resultType, typing);
+    const resultCanCarryReference =
+      resultIsBorrowed ||
+      (typeof resultType === "number" &&
+        typeCanCarryReference(resultType, typing));
     const resultIsKnown =
       typeof resultType === "number" &&
       !typing.arena.containsTypeParams(resultType);
     if (statement?.kind === "return" || tailPosition) {
-      return resultIsBorrowed || !resultIsKnown
+      return resultCanCarryReference || !resultIsKnown
         ? "escapes-or-ambiguous"
         : "immediate";
     }
     if (statement?.kind === "let" && statement.initializer === expressionId) {
-      if (!statement.pattern || bindingSymbols(statement.pattern).length === 0) {
+      if (
+        !statement.pattern ||
+        bindingSymbols(statement.pattern).length === 0
+      ) {
         return "ignored";
       }
       if (resultIsBorrowed) {
@@ -1050,62 +849,31 @@ export const extractSingleCallableBorrowIndex = ({
     if (statement?.kind === "expr-stmt" && statement.expr === expressionId) {
       return "ignored";
     }
-
     const parent =
       parentId === undefined ? undefined : hir.expressions.get(parentId);
     if (parent?.exprKind === "call" || parent?.exprKind === "method-call") {
-      const argumentIndex =
-        parent.exprKind === "method-call" && parent.target === expressionId
-          ? 0
-          : (() => {
-              const explicitIndex = parent.args.findIndex(
-                (argument) => argument.expr === expressionId,
-              );
-              return explicitIndex < 0
-                ? -1
-                : explicitIndex + (parent.exprKind === "method-call" ? 1 : 0);
-            })();
-      if (argumentIndex < 0) return "escapes-or-ambiguous";
-      const signatures = callTargetsFor(parent.id)
-        .map((target) => targetSignatureFor(target))
-        .filter((candidate): candidate is NonNullable<typeof candidate> =>
-          candidate !== undefined,
-        );
-      if (signatures.length === 0) {
-        return resultIsBorrowed || !resultIsKnown
-          ? "escapes-or-ambiguous"
-          : "immediate";
-      }
-      const hasLoanParameter = signatures.some((signature) => {
-        const parameter = signature.parameters[argumentIndex];
-        return (
-          parameter?.bindingKind === "mutable-ref" ||
-          isBorrowedType(parameter?.type, typing)
-        );
-      });
-      return hasLoanParameter || (!resultIsBorrowed && resultIsKnown)
-        ? "immediate"
-        : "escapes-or-ambiguous";
+      const isOperand =
+        (parent.exprKind === "method-call" && parent.target === expressionId) ||
+        parent.args.some((argument) => argument.expr === expressionId);
+      return isOperand ? "immediate" : "escapes-or-ambiguous";
     }
     if (parent?.exprKind === "assign" && parent.value === expressionId) {
       const targetType =
         typeof parent.target === "number"
           ? typeFor(parent.target, context)
           : undefined;
-      return (
-        resultIsBorrowed ||
+      return resultIsBorrowed ||
         !resultIsKnown ||
         isBorrowedType(targetType, typing)
-      )
         ? "escapes-or-ambiguous"
         : "immediate";
     }
     if (parent !== undefined) {
-      return resultIsBorrowed || !resultIsKnown
+      return resultCanCarryReference || !resultIsKnown
         ? "escapes-or-ambiguous"
         : "immediate";
     }
-    return resultIsBorrowed || !resultIsKnown
+    return resultCanCarryReference || !resultIsKnown
       ? "escapes-or-ambiguous"
       : "immediate";
   };
@@ -1118,6 +886,24 @@ export const extractSingleCallableBorrowIndex = ({
     onEnterStatement: (_statementId, statement) => {
       if (statement.kind === "let") {
         const type = typeFor(statement.initializer, context);
+        if (
+          statement.mutable !== true &&
+          statement.pattern.kind === "identifier" &&
+          expressionIsDirectFresh(statement.initializer)
+        ) {
+          freshBindingRoots.add(statement.pattern.symbol);
+          if (expressionIsProvenanceFreeFresh(statement.initializer)) {
+            provenanceFreeFreshBindingRoots.add(statement.pattern.symbol);
+          }
+        }
+        if (
+          statement.mutable === true ||
+          statement.pattern.bindingKind === "mutable-ref"
+        ) {
+          bindingSymbols(statement.pattern).forEach((symbol) =>
+            mutableBindingRoots.add(symbol),
+          );
+        }
         const referenceBindingType =
           isBorrowedType(type, typing) ||
           (typeof type === "number" &&
@@ -1129,15 +915,23 @@ export const extractSingleCallableBorrowIndex = ({
           flags.hasReferenceBinding = true;
           flags.hasBorrowedBinding = true;
         }
+        const nonFreshMutableReferenceBinding =
+          hasMutableReferenceBinding(statement.pattern) &&
+          !expressionIsDirectFresh(statement.initializer);
+        const nonFreshReferenceCapableVariable =
+          statement.mutable === true &&
+          typeof type === "number" &&
+          typeCanCarryReference(type, typing) &&
+          !expressionIsDirectFresh(statement.initializer);
         if (
-          (statement.mutable === true ||
-            statement.pattern.bindingKind === "mutable-ref") &&
           bindingSymbols(statement.pattern).length > 0 &&
-          expressionHasNonFreshReferenceValue(statement.initializer)
+          (nonFreshMutableReferenceBinding ||
+            nonFreshReferenceCapableVariable)
         ) {
           // This is a bounded escape trigger, not liveness inference: a
-          // mutable handle sourced from a non-fresh value may remain usable
-          // after the forming expression. Fresh owned values stay transient.
+          // mutable reference sourced from a non-fresh value may remain
+          // usable after the forming expression. Fresh owned values stay
+          // transient.
           flags.hasNonFreshMutableBinding = true;
         }
         recordPattern(
@@ -1147,6 +941,10 @@ export const extractSingleCallableBorrowIndex = ({
         );
       }
       if (statement.kind === "return" && typeof statement.value === "number") {
+        const returnedExpression = hir.expressions.get(statement.value);
+        if (returnedExpression) {
+          recordReturnedValue(statement.value, returnedExpression, true);
+        }
         flags.hasBorrowedReturn ||= isBorrowedType(
           typeFor(statement.value, context),
           typing,
@@ -1159,28 +957,29 @@ export const extractSingleCallableBorrowIndex = ({
     onEnterExpression: (exprId, expression, walkContext) => {
       const currentParentExpression = walkContext.parent;
       const type = typeFor(exprId, context);
+      recordReturnedValue(
+        exprId,
+        expression,
+        walkContext.tailPosition ||
+          (walkContext.statement?.kind === "return" &&
+            walkContext.statement.value === exprId),
+      );
       if (isBorrowedType(type, typing)) {
         flags.hasBorrowOperation = true;
       }
       if (expression.exprKind === "identifier") {
         const place = placeOfExpression(exprId, hir, context);
-        if (
-          place &&
-          isStoragePlace(place) &&
-          isBorrowedType(type, typing)
-        ) {
+        if (place && isStoragePlace(place) && isBorrowedType(type, typing)) {
           flags.hasModuleStorageBorrow = true;
         }
-        if (
-          place &&
-          isStoragePlace(place)
-        ) {
+        if (place && isStoragePlace(place)) {
           flags.hasModuleStorageAccess = true;
           if (
             (walkContext.tailPosition ||
               (walkContext.statement?.kind === "return" &&
                 walkContext.statement.value === exprId)) &&
-            typeof type === "number" && typeCanCarryReference(type, typing)
+            typeof type === "number" &&
+            typeCanCarryReference(type, typing)
           ) {
             flags.hasModuleStorageBorrow = true;
           }
@@ -1200,7 +999,8 @@ export const extractSingleCallableBorrowIndex = ({
           (walkContext.tailPosition ||
             (walkContext.statement?.kind === "return" &&
               walkContext.statement.value === exprId)) &&
-          typeof type === "number" && typeCanCarryReference(type, typing)
+          typeof type === "number" &&
+          typeCanCarryReference(type, typing)
         ) {
           flags.hasModuleStorageBorrow = true;
         }
@@ -1208,13 +1008,12 @@ export const extractSingleCallableBorrowIndex = ({
       }
       if (expression.exprKind === "assign") {
         if (typeof expression.target === "number") {
-          recordAccess(
-            exprId,
-            "write",
+          recordAccess(exprId, "write", expression.target, exprId);
+          const targetPlace = placeOfExpression(
             expression.target,
-            exprId,
+            hir,
+            context,
           );
-          const targetPlace = placeOfExpression(expression.target, hir, context);
           const valueType = typeFor(expression.value, context);
           const targetType = typeFor(expression.target, context);
           const targetParameter = targetPlace
@@ -1235,10 +1034,7 @@ export const extractSingleCallableBorrowIndex = ({
             isBorrowedType(targetType, typing)
           ) {
             flags.hasBorrowedStore = true;
-            if (
-              targetPlace &&
-              isStoragePlace(targetPlace)
-            ) {
+            if (targetPlace && isStoragePlace(targetPlace)) {
               flags.hasModuleStorageBorrow = true;
             }
           }
@@ -1252,8 +1048,7 @@ export const extractSingleCallableBorrowIndex = ({
           ) {
             if (targetPlace?.projections.length === 0) {
               flags.hasMutableReferenceRebinding = true;
-              flags.hasNonFreshMutableReferenceRebinding ||=
-                !freshRebinding;
+              flags.hasNonFreshMutableReferenceRebinding ||= !freshRebinding;
             } else if (!freshRebinding) {
               // Storing a reference-capable non-fresh value through a
               // projected mutable place can retain an alias beyond this
@@ -1262,10 +1057,7 @@ export const extractSingleCallableBorrowIndex = ({
               flags.hasRetainedReferenceStore = true;
             }
           }
-          if (
-            targetPlace &&
-            isStoragePlace(targetPlace)
-          ) {
+          if (targetPlace && isStoragePlace(targetPlace)) {
             flags.hasModuleStorageAccess = true;
             flags.hasModuleStorageWrite = true;
             if (referenceValue && !freshRebinding) {
@@ -1275,7 +1067,10 @@ export const extractSingleCallableBorrowIndex = ({
         }
         return;
       }
-      if (expression.exprKind !== "call" && expression.exprKind !== "method-call") {
+      if (
+        expression.exprKind !== "call" &&
+        expression.exprKind !== "method-call"
+      ) {
         return;
       }
       const targets = callTargetsFor(exprId);
@@ -1306,8 +1101,7 @@ export const extractSingleCallableBorrowIndex = ({
         !(
           intrinsicName !== undefined &&
           (BORROW_IRRELEVANT_VALUE_INTRINSICS.has(intrinsicName) ||
-            intrinsicName === "~" ||
-            intrinsicName === "__shared_cell_value")
+            COMPACT_BORROW_INTRINSICS.has(intrinsicName))
         ) &&
         (targets.length === 0 ||
           signatures.length === 0 ||
@@ -1328,7 +1122,13 @@ export const extractSingleCallableBorrowIndex = ({
         // flow-sensitive.
         incrementCompilerPerfCounter("borrowing.index.missingCallPlans");
       }
-      const argumentsFromTyping = firstPlan ?? [];
+      const argumentsFromTyping =
+        firstPlan ??
+        (intrinsicName !== undefined &&
+        COMPACT_BORROW_INTRINSICS.has(intrinsicName) &&
+        expression.exprKind === "call"
+          ? expression.args.map((argument) => argument.expr)
+          : []);
       const unresolvedDefaultPlan =
         plans[0]?.some(
           (entry, parameter) =>
@@ -1340,10 +1140,12 @@ export const extractSingleCallableBorrowIndex = ({
         unresolvedDefaultPlan ||
         (planArguments.length > 1 &&
           planArguments
-          .slice(1)
-          .some((candidate) =>
-            firstPlan === undefined || !sameBoundCallArguments(candidate, firstPlan),
-          ));
+            .slice(1)
+            .some(
+              (candidate) =>
+                firstPlan === undefined ||
+                !sameBoundCallArguments(candidate, firstPlan),
+            ));
       const intrinsicIndex =
         (intrinsicName === "__array_get" || intrinsicName === "__array_set") &&
         expression.exprKind === "call"
@@ -1370,55 +1172,68 @@ export const extractSingleCallableBorrowIndex = ({
         expression.exprKind === "method-call" &&
         typing.borrowCallTargets.has(exprId) &&
         !typing.callTargets.has(exprId);
-      const traitDefaultDispatch = targets.some(
-        (target) =>
-          target.moduleId === context.moduleId &&
-          traitMethodSymbols.has(target.symbol),
-      );
       // The cheap index has no devirtualization proof. A trait-dispatch bit is
       // therefore an open boundary even when the current target set happens
       // to contain concrete implementations.
-      const openTraitDispatch =
-        traitDispatch || symbolicTraitDispatch || traitDefaultDispatch;
-      const arguments_: CallableBorrowIndexArgument[] = argumentsFromTyping.map((argument, parameter) => ({
-        parameter,
-        ...(plans[0]?.[parameter]?.kind === "omitted-default"
-          ? { defaulted: true as const }
-          : {}),
-        ...(typeof argument === "number" ? { expression: argument } : {}),
-        ...(typeof argument === "number"
-          ? (() => {
-              const rawPlace = placeOfExpression(argument, hir, context);
-              if (!rawPlace) return {};
-              return { place: rawPlace };
-            })()
-          : {}),
-        ...(typeof argument === "number"
-          ? (() => {
-              const argumentType = typeFor(argument, context);
-              return typeof argumentType === "number"
-                ? {
-                    type: argumentType,
-                    ...((isLoanBearingType(argumentType, typing) ||
-                      signature?.parameters[parameter]?.bindingKind ===
-                        "mutable-ref" ||
-                      signature?.parameters[parameter]?.bindingKind ===
-                        "immutable-ref")
-                      ? { loanBearing: true as const }
+      const openTraitDispatch = traitDispatch || symbolicTraitDispatch;
+      const arguments_: CallableBorrowIndexArgument[] = argumentsFromTyping.map(
+        (argument, parameter) =>
+          ({
+            parameter,
+            ...(plans[0]?.[parameter]?.kind === "omitted-default"
+              ? { defaulted: true as const }
+              : {}),
+            ...(typeof argument === "number" ? { expression: argument } : {}),
+            ...(typeof argument === "number"
+              ? (() => {
+                  const rawPlace = placeOfExpression(argument, hir, context);
+                  if (!rawPlace) return {};
+                  return {
+                    place: rawPlace,
+                    ...(isStoragePlace(rawPlace)
+                      ? { moduleStorage: true as const }
                       : {}),
-                  }
-                : {};
-            })()
-          : {}),
-        } satisfies CallableBorrowIndexArgument));
+                    ...(freshBindingRoots.has(rawPlace.root) &&
+                    rawPlace.projections.every(
+                      (projection) => projection.kind === "identity",
+                    )
+                      ? { fresh: true as const }
+                      : {}),
+                  };
+                })()
+              : {}),
+            ...(typeof argument === "number"
+              ? (() => {
+                  const argumentType = typeFor(argument, context);
+                  return typeof argumentType === "number"
+                    ? {
+                        type: argumentType,
+                        ...(typeCanCarryReference(argumentType, typing)
+                          ? { referenceCapable: true as const }
+                          : {}),
+                        ...(isLoanBearingType(argumentType, typing) ||
+                        signature?.parameters[parameter]?.bindingKind ===
+                          "mutable-ref" ||
+                        signature?.parameters[parameter]?.bindingKind ===
+                          "immutable-ref"
+                          ? { loanBearing: true as const }
+                          : {}),
+                      }
+                    : {};
+                })()
+              : {}),
+          }) satisfies CallableBorrowIndexArgument,
+      );
       const returnsBorrowed =
-        (signature !== undefined && isBorrowedType(signature.returnType, typing)) ||
+        (signature !== undefined &&
+          isBorrowedType(signature.returnType, typing)) ||
         ((intrinsicName === "__shared_cell_value" ||
           intrinsicName === "__array_get" ||
           intrinsicName === "__array_copy") &&
           isBorrowCapableType(typeFor(exprId, context), typing));
       const maySuspend =
-        (signature !== undefined && !typing.effects.isEmpty(signature.effectRow)) ||
+        (signature !== undefined &&
+          !typing.effects.isEmpty(signature.effectRow)) ||
         targets.some(targetMaySuspend);
       const call = {
         exprId,
@@ -1431,7 +1246,9 @@ export const extractSingleCallableBorrowIndex = ({
         ...(intrinsicName ? { intrinsicName } : {}),
         ...(intrinsicIndex ? { intrinsicIndex } : {}),
         formsExplicitBorrow:
-          signature?.parameters.some((parameter) => isBorrowedType(parameter.type, typing)) ?? false,
+          signature?.parameters.some((parameter) =>
+            isBorrowedType(parameter.type, typing),
+          ) ?? false,
         returnsBorrowed,
         resultUse: resultUseFor({
           expressionId: exprId,
@@ -1441,7 +1258,9 @@ export const extractSingleCallableBorrowIndex = ({
           tailPosition: walkContext.tailPosition,
         }),
         maySuspend,
-        ...(argumentPlanAmbiguous ? { argumentPlanAmbiguous: true as const } : {}),
+        ...(argumentPlanAmbiguous
+          ? { argumentPlanAmbiguous: true as const }
+          : {}),
         ...(traitDispatch ? { traitDispatch: true as const } : {}),
         ...(openTraitDispatch ? { openTraitDispatch: true as const } : {}),
       } satisfies CallableBorrowIndexCall;
@@ -1451,9 +1270,9 @@ export const extractSingleCallableBorrowIndex = ({
       );
       flags.hasBorrowOperation ||= call.formsExplicitBorrow;
       flags.hasSuspension ||= maySuspend;
-      flags.hasOpenDispatch ||= call.openTraitDispatch === true || call.argumentPlanAmbiguous === true;
+      flags.hasOpenDispatch ||=
+        call.openTraitDispatch === true || call.argumentPlanAmbiguous === true;
       flags.hasUnresolvedBehavior ||= targets.length === 0 && !intrinsic;
-      flags.hasUnknownBehavior ||= signature === undefined && !intrinsic;
       if (intrinsicName === "~" || intrinsicName === "__shared_cell_value") {
         flags.hasBorrowOperation = true;
       }
@@ -1464,6 +1283,13 @@ export const extractSingleCallableBorrowIndex = ({
         intrinsicName === "__ref_is_null"
       ) {
         flags.hasBorrowOperation = true;
+      }
+      if (
+        intrinsicName === "__array_set" &&
+        typeof call.arguments[0]?.type === "number" &&
+        typeContainsBorrowed(call.arguments[0].type, typing)
+      ) {
+        flags.hasBorrowedStore = true;
       }
       if (
         intrinsicName === "__array_get" &&
@@ -1487,35 +1313,41 @@ export const extractSingleCallableBorrowIndex = ({
         flags.hasRetention = true;
       }
       if (
+        intrinsicName === "__array_new_fixed" &&
+        call.resultUse === "escapes-or-ambiguous" &&
+        call.arguments.some(
+          (argument) =>
+            typeof argument.type === "number" &&
+            typeCanCarryReference(argument.type, typing),
+        )
+      ) {
+        // The fresh array owns its storage, but reference-capable elements
+        // preserve their input provenance when the aggregate escapes.
+        flags.hasRetention = true;
+      }
+      if (
         intrinsicBoundary &&
         intrinsicName !== undefined &&
         !BORROW_IRRELEVANT_VALUE_INTRINSICS.has(intrinsicName) &&
-        !new Set([
-          "__array_get",
-          "__array_copy",
-          "__array_new",
-          "__array_new_fixed",
-          "__array_set",
-          "__array_len",
-          "__ref_is_null",
-        ]).has(intrinsicName) &&
-        intrinsicName !== "~" &&
-        intrinsicName !== "__shared_cell_value"
+        !COMPACT_BORROW_INTRINSICS.has(intrinsicName)
       ) {
         flags.hasUnknownBehavior = true;
       }
       if (intrinsicName === "~") {
         const sourceExpression = expression.args.at(-1)?.expr;
+        const sourceIsFresh =
+          typeof sourceExpression === "number" &&
+          expressionIsDirectFresh(sourceExpression);
         const sourcePlace =
           typeof sourceExpression === "number"
             ? placeOfExpression(sourceExpression, hir, context)
             : undefined;
-        const parameterSource = sourcePlace
-          ? parameterPlaces.get(sourcePlace.root)
-          : undefined;
+        const sourceIsMutableBinding =
+          sourcePlace !== undefined &&
+          mutableBindingRoots.has(sourcePlace.root);
         if (
-          !parameterSource ||
-          parameters[parameterSource.parameter]?.bindingKind !== "mutable-ref"
+          !sourceIsFresh &&
+          !sourceIsMutableBinding
         ) {
           flags.hasUnsafeBorrowFormation = true;
         }
@@ -1533,7 +1365,9 @@ export const extractSingleCallableBorrowIndex = ({
     },
   });
 
-  const defaultHasBorrowFlow = (parameter: (typeof callable.parameters)[number]): boolean => {
+  const defaultHasBorrowFlow = (
+    parameter: (typeof callable.parameters)[number],
+  ): boolean => {
     if (typeof parameter.defaultValue !== "number") return false;
     const defaultExpression = hir.expressions.get(parameter.defaultValue);
     const defaultType = typeFor(parameter.defaultValue, context);
@@ -1610,14 +1444,14 @@ export const extractSingleCallableBorrowIndex = ({
       signatures.length === 0 ||
       targetHasBorrowInput ||
       targetHasBorrowEffect ||
-      signatures.some((targetSignature) =>
-        isLoanBearingType(targetSignature.returnType, typing) ||
-        typeCanCarryReference(targetSignature.returnType, typing),
+      signatures.some(
+        (targetSignature) =>
+          isLoanBearingType(targetSignature.returnType, typing) ||
+          typeCanCarryReference(targetSignature.returnType, typing),
       )
     );
   };
   flags.hasDefaultBorrowFlow = callable.parameters.some(defaultHasBorrowFlow);
-
 
   const receiverOwner = typing.memberMetadata.get(callable.symbol)?.owner;
   if (typeof receiverOwner === "number") {
@@ -1628,52 +1462,25 @@ export const extractSingleCallableBorrowIndex = ({
       metadata?.intrinsicType === STD_INTRINSIC_TYPE.sharedCell;
   }
   const resultType = signature?.returnType;
-  if (typeof resultType === "number" && typeContainsBorrowed(resultType, typing)) {
+  if (
+    typeof resultType === "number" &&
+    typeContainsBorrowed(resultType, typing)
+  ) {
     flags.hasBorrowedReturn = true;
   }
   if (
-    typeof resultType === "number" &&
-    typeIsAllocationBacked(resultType, typing) &&
-    !typeContainsBorrowed(resultType, typing) &&
-    expressionIsFresh(callable.body)
+    flags.hasBorrowedReturn ||
+    flags.hasBorrowedStore ||
+    flags.hasBorrowedBinding
   ) {
-    flags.hasFreshResult = true;
-  }
-  if (
-    typeof resultType === "number" &&
-    typeCanCarryReference(resultType, typing) &&
-    expressionContainsParameterValue(callable.body)
-  ) {
-    flags.hasReturnedParameterValue = true;
-    flags.hasSimplePlainReturn =
-      !typeContainsBorrowed(resultType, typing) &&
-      expressionIsSimplePlainParameterReturn(callable.body);
-  }
-  if (
-    typeof resultType === "number" &&
-    typeCanCarryReference(resultType, typing) &&
-    expressionContainsModuleStorageValue(callable.body)
-  ) {
-    flags.hasModuleStorageBorrow = true;
-  }
-  if (
-    typeof resultType === "number" &&
-    typeContainsCallable(resultType) &&
-    expressionReturnsLoanSensitiveCallable(callable.body)
-  ) {
-    // A returned callable can retain captures or a callback contract. Only
-    // the bounded result shape is inspected here; callable body provenance
-    // remains owned by full facts once this boundary is crossed.
-    flags.hasCallableResult = true;
-  }
-
-  if (flags.hasBorrowedReturn || flags.hasBorrowedStore || flags.hasBorrowedBinding) {
     flags.hasBorrowOperation = true;
   }
   const normalized = normalizeIndex({
     symbol: callable.symbol,
     ...(signature ? { signature } : {}),
-    ...(callable.borrowContract ? { declaredContract: callable.borrowContract } : {}),
+    ...(callable.borrowContract
+      ? { declaredContract: callable.borrowContract }
+      : {}),
     parameters,
     parameterPlaces,
     accesses,
@@ -1691,7 +1498,10 @@ export const parameterPlaceForIndexPlace = (
   if (!place) return undefined;
   const parameter = index.parameterPlaces.get(place.root);
   return parameter
-    ? { parameter: parameter.parameter, path: [...parameter.path, ...place.projections] }
+    ? {
+        parameter: parameter.parameter,
+        path: [...parameter.path, ...place.projections],
+      }
     : undefined;
 };
 

@@ -110,6 +110,19 @@ export const BORROW_IRRELEVANT_VALUE_INTRINSICS = new Set([
   "__reinterpret_i64_to_f64",
 ]);
 
+/** Intrinsics whose borrow footprint is fully described by their operands. */
+export const COMPACT_BORROW_INTRINSICS = new Set([
+  "~",
+  "__shared_cell_value",
+  "__array_get",
+  "__array_set",
+  "__array_copy",
+  "__array_new",
+  "__array_new_fixed",
+  "__array_len",
+  "__ref_is_null",
+]);
+
 const instantiatedExpressionTypesByTyping = new WeakMap<
   TypingResult,
   ReadonlyMap<HirExprId, TypeId>

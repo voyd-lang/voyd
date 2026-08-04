@@ -3930,7 +3930,7 @@ const contractEqualityKey = (contract: CallableBorrowContract): string => {
   return key;
 };
 
-const contractsEqual = (
+export const callableBorrowContractsEqual = (
   left: CallableBorrowContract,
   right: CallableBorrowContract,
 ): boolean =>
@@ -4459,6 +4459,7 @@ export const computeCallableBorrowContracts = ({
   lambdaFacts,
   initialContracts,
   flowSymbols,
+  dirtySymbols,
 }: {
   hir: HirGraph;
   typing: TypingResult;
@@ -4478,6 +4479,8 @@ export const computeCallableBorrowContracts = ({
   initialContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   /** Only flow-sensitive callables may reach full contract inference. */
   flowSymbols: ReadonlySet<SymbolId>;
+  /** Newly promoted symbols; their flow-sensitive callers are recomputed. */
+  dirtySymbols?: ReadonlySet<SymbolId>;
 }): CallableBorrowContractComputation => {
   const withDynamicDispatch = (
     symbol: SymbolId,
@@ -4635,7 +4638,19 @@ export const computeCallableBorrowContracts = ({
     solveNodes.map((node) => [node.symbol, node]),
   );
   const callers = new Map<SymbolId, SummarySolveNode[]>();
+  const invalidationCallers = new Map<SymbolId, SummarySolveNode[]>();
+  const addInvalidationCaller = (
+    target: SymbolId,
+    dependent: SummarySolveNode,
+  ): void => {
+    const current = invalidationCallers.get(target) ?? [];
+    if (!current.some((candidate) => candidate.symbol === dependent.symbol)) {
+      current.push(dependent);
+      invalidationCallers.set(target, current);
+    }
+  };
   const addCaller = (target: SymbolId, dependent: SummarySolveNode): void => {
+    addInvalidationCaller(target, dependent);
     if (!summarySymbols.has(target)) return;
     const current = callers.get(target) ?? [];
     if (!current.some((candidate) => candidate.symbol === dependent.symbol)) {
@@ -4661,6 +4676,24 @@ export const computeCallableBorrowContracts = ({
     });
   });
   const orderedSummaryNodes = dependencyOrderedSolveNodes(solveNodes, callers);
+  const dirtySummarySymbols = new Set<SymbolId>(
+    dirtySymbols === undefined
+      ? summarySymbols
+      : Array.from(dirtySymbols).filter((symbol) =>
+          summarySymbols.has(symbol),
+        ),
+  );
+  const dirtyWorklist =
+    dirtySymbols === undefined ? [...summarySymbols] : [...dirtySymbols];
+  for (let cursor = 0; cursor < dirtyWorklist.length; cursor += 1) {
+    (invalidationCallers.get(dirtyWorklist[cursor]!) ?? []).forEach(
+      (dependent) => {
+        if (dirtySummarySymbols.has(dependent.symbol)) return;
+        dirtySummarySymbols.add(dependent.symbol);
+        dirtyWorklist.push(dependent.symbol);
+      },
+    );
+  }
   const localSummaryDependencies = new Map<SymbolId, Set<SymbolId>>();
   callers.forEach((dependents, target) => {
     if (!summarySymbols.has(target)) {
@@ -4704,7 +4737,9 @@ export const computeCallableBorrowContracts = ({
           decls,
         });
   };
-  const solveWorklist = [...orderedSummaryNodes];
+  const solveWorklist = orderedSummaryNodes.filter((node) =>
+    dirtySummarySymbols.has(node.symbol),
+  );
   const solveQueued = new Set(solveWorklist.map((node) => node.symbol));
   let solveCursor = 0;
   while (solveCursor < solveWorklist.length) {
@@ -4736,7 +4771,7 @@ export const computeCallableBorrowContracts = ({
       node.symbol,
       withReturnedSharedOrigins({ contract: normalized, candidate: evidence }),
     );
-    if (contractsEqual(previous, next)) {
+    if (callableBorrowContractsEqual(previous, next)) {
       incrementCompilerPerfCounter("borrowing.summary.unchangedCandidates");
       continue;
     }

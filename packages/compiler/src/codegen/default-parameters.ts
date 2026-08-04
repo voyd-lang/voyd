@@ -213,7 +213,7 @@ const compileDefaultIdentityGuards = ({
   ) {
     return [];
   }
-  const protocol = ctx.module.callableAccessFootprints.get(
+  const protocol = ctx.module.callableRuntimeProtocols.get(
     fn.symbol,
   )?.defaultIdentityGuardProtocol;
   if (protocol !== "presence-conflict-bit-v1") {

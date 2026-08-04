@@ -371,12 +371,12 @@ const translateValueRequest = (
 };
 
 class LazyFactsMap<Key, Value> {
-  private readonly cache = new Map<Key, Value>();
   private readonly keySet: ReadonlySet<Key>;
 
   public constructor(
     private readonly keysList: readonly Key[],
     private readonly create: (key: Key) => Value | undefined,
+    private readonly cache: Map<Key, Value> = new Map(),
   ) {
     this.keySet = new Set(keysList);
   }
@@ -403,17 +403,21 @@ class LazyFactsMap<Key, Value> {
   }
 
   public values(): IterableIterator<Value> {
-    return this.keysList.flatMap((key) => {
-      const value = this.get(key);
-      return value === undefined ? [] : [value];
-    })[Symbol.iterator]();
+    return this.keysList
+      .flatMap((key) => {
+        const value = this.get(key);
+        return value === undefined ? [] : [value];
+      })
+      [Symbol.iterator]();
   }
 
   public entries(): IterableIterator<[Key, Value]> {
-    return this.keysList.flatMap((key) => {
-      const value = this.get(key);
-      return value === undefined ? [] : [[key, value] as [Key, Value]];
-    })[Symbol.iterator]();
+    return this.keysList
+      .flatMap((key) => {
+        const value = this.get(key);
+        return value === undefined ? [] : [[key, value] as [Key, Value]];
+      })
+      [Symbol.iterator]();
   }
 
   public forEach(
@@ -454,17 +458,25 @@ export const createLazyCallableBorrowFacts = ({
   hir,
   typing,
   resolveContext,
+  functionCache = new Map(),
+  lambdaCache = new Map(),
 }: {
   functions: readonly HirFunction[];
   lambdas: readonly HirLambdaExpr[];
   hir: HirGraph;
   typing: TypingResult;
   resolveContext: ResolveContext;
+  functionCache?: Map<SymbolId, CallableBorrowFacts>;
+  lambdaCache?: Map<HirExprId, CallableBorrowFacts>;
 }): LazyCallableBorrowFacts => {
   const functionMap = new Map(
-    functions.map((functionItem) => [functionItem.symbol, functionItem] as const),
+    functions.map(
+      (functionItem) => [functionItem.symbol, functionItem] as const,
+    ),
   );
-  const lambdaMap = new Map(lambdas.map((lambda) => [lambda.id, lambda] as const));
+  const lambdaMap = new Map(
+    lambdas.map((lambda) => [lambda.id, lambda] as const),
+  );
   const functionFacts = new LazyFactsMap(
     functions.map((functionItem) => functionItem.symbol),
     (symbol) => {
@@ -478,6 +490,7 @@ export const createLazyCallableBorrowFacts = ({
       );
       return facts;
     },
+    functionCache,
   );
   const lambdaFacts = new LazyFactsMap(
     lambdas.map((lambda) => lambda.id),
@@ -503,6 +516,7 @@ export const createLazyCallableBorrowFacts = ({
       );
       return facts;
     },
+    lambdaCache,
   );
   return {
     functions: functionFacts as unknown as ReadonlyMap<

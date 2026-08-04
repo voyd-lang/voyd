@@ -36,9 +36,7 @@ export type CapabilityClassifierInput = {
 const keyFor = (target: SymbolRef): string =>
   `${target.moduleId}:${target.symbol}`;
 
-const contractHasCompactEffect = (
-  contract: CallableBorrowContract,
-): boolean =>
+const contractHasCompactEffect = (contract: CallableBorrowContract): boolean =>
   contract.externalRead === true ||
   contract.externalWrite === true ||
   contract.parameters.some(
@@ -48,28 +46,25 @@ const contractHasCompactEffect = (
       (parameter.writePaths?.length ?? 0) > 0,
   );
 
-const contractHasEscapingResult = (
-  contract: CallableBorrowContract,
-): boolean =>
+const contractHasEscapingResult = (contract: CallableBorrowContract): boolean =>
   contract.borrowedResult !== "none" ||
   contract.externalReturnedOrigins?.some((origin) => origin.fresh !== true) ===
     true ||
   contract.parameters.some(
     (parameter) =>
-      parameter.access !== "owned" &&
       parameter.returned === true ||
-      (parameter.access !== "owned" &&
-        ((parameter.returnedOrigins?.length ?? 0) > 0 ||
-          (parameter.returnedPaths?.length ?? 0) > 0)),
+      parameter.returnedAggregate === true ||
+      (parameter.returnedOrigins?.length ?? 0) > 0 ||
+      (parameter.returnedPaths?.length ?? 0) > 0 ||
+      (parameter.returnedSharedOrigins?.length ?? 0) > 0 ||
+      (parameter.returnedTypeMatchingOrigins?.length ?? 0) > 0 ||
+      parameter.accessIfResultTypeDiffers !== undefined,
   );
 
-const contractHasRetainedInput = (
-  contract: CallableBorrowContract,
-): boolean =>
+const contractHasRetainedInput = (contract: CallableBorrowContract): boolean =>
   contract.parameters.some(
     (parameter) =>
-      parameter.access !== "owned" &&
-      parameter.retained === true ||
+      (parameter.access !== "owned" && parameter.retained === true) ||
       (parameter.access !== "owned" &&
         ((parameter.retainedPaths?.length ?? 0) > 0 ||
           (parameter.externalRetainedPaths?.length ?? 0) > 0 ||
@@ -99,6 +94,14 @@ const contractHasDefaultFlow = (
     );
   });
 
+const callHasBorrowRelevantBoundary = (
+  call: CallableBorrowIndexCall,
+): boolean =>
+  call.formsExplicitBorrow ||
+  call.returnsBorrowed ||
+  call.resultUse === "escapes-or-ambiguous" ||
+  call.arguments.some((argument) => argument.loanBearing === true);
+
 const calleeEffectDecision = ({
   call,
   mode,
@@ -110,6 +113,9 @@ const calleeEffectDecision = ({
 }): CapabilityDecision => {
   const loanArgument = call.arguments.some(
     (argument) => argument.loanBearing === true,
+  );
+  const referenceArgument = call.arguments.some(
+    (argument) => argument.referenceCapable === true,
   );
   if (mode === undefined) {
     // A resolved value-only call cannot form or propagate a caller loan even
@@ -165,6 +171,12 @@ const calleeEffectDecision = ({
     return capabilityDecision("flow-sensitive", ["callee-loan-ownership"]);
   }
   const resultEscapes = call.resultUse === "escapes-or-ambiguous";
+  const resultRequiresFlow =
+    contract.borrowedResult !== "none" ||
+    contract.externalReturnedOrigins?.some(
+      (origin) => origin.fresh !== true,
+    ) === true ||
+    (referenceArgument && contractHasEscapingResult(contract));
   const invalidatedProjection = contract.parameters.some(
     (parameter, parameterIndex) =>
       parameter.invalidatedPaths?.some((path) => path.length === 0) === true &&
@@ -178,24 +190,12 @@ const calleeEffectDecision = ({
     ]);
   }
   if (
-    loanArgument &&
-    ((contractHasEscapingResult(contract) &&
-      call.resultUse === "escapes-or-ambiguous") ||
-      contractHasRetainedInput(contract))
+    (resultRequiresFlow && resultEscapes) ||
+    (loanArgument && contractHasRetainedInput(contract))
   ) {
     return capabilityDecision("flow-sensitive", ["callee-loan-escape"]);
   }
   if (mode === "none") return capabilityDecision("none");
-  if (
-    mode === "flow-sensitive" &&
-    // A flow callee's seed contract intentionally omits full provenance.
-    // An escaping result therefore re-enters the full boundary; an immediate
-    // owned use can still consume its compact effects.
-    (resultEscapes ||
-      (loanArgument && contractHasRetainedInput(contract)))
-  ) {
-    return capabilityDecision("flow-sensitive", ["callee-escape"]);
-  }
   return contractHasCompactEffect(contract) || call.formsExplicitBorrow
     ? capabilityDecision("transient", ["callee-compact-effect"])
     : capabilityDecision("none");
@@ -209,8 +209,9 @@ export const classifyBorrowContractCapability = (
     contract.maySuspend ||
     contract.borrowedResult === "parameter" ||
     contract.borrowedResult === "external" ||
-    contract.externalReturnedOrigins?.some((origin) => origin.fresh !== true) ===
-      true ||
+    contract.externalReturnedOrigins?.some(
+      (origin) => origin.fresh !== true,
+    ) === true ||
     (contract.transfers?.length ?? 0) > 0 ||
     (contract.scopedCallbacks?.length ?? 0) > 0 ||
     (contract.callableResultInvocations?.length ?? 0) > 0 ||
@@ -332,14 +333,23 @@ export const classifyCallableCapability = ({
     return index.parameters[parameter.parameter]?.loanBearing === true;
   });
   const hasCompactAccessFootprint = index.accesses.some(
-    (access) => access.kind === "write" || (access.place?.projections.length ?? 0) > 0,
+    (access) =>
+      access.kind === "write" || (access.place?.projections.length ?? 0) > 0,
   );
-  const hasReturnedBorrowParameter =
-    index.flags.hasReturnedParameterValue &&
-    !index.flags.hasSimplePlainReturn;
+  const hasReturnedBorrowParameter = index.flags.hasReturnedParameterValue;
   const hasBorrowedDefaultParameter =
     index.flags.hasDefaultArgument &&
     index.parameters.some((parameter) => parameter.loanBearing === true);
+  const allocationResultNeedsFullFacts =
+    index.flags.hasAllocationResult &&
+    !index.flags.hasSyntacticFreshResult &&
+    !index.parameters.some((parameter) => parameter.loanBearing === true);
+  const hasBorrowRelevantOpenDispatch = index.calls.some(
+    (call) =>
+      (call.openTraitDispatch === true ||
+        call.argumentPlanAmbiguous === true) &&
+      callHasBorrowRelevantBoundary(call),
+  );
   if (declaredContract) {
     decisions.push(classifyBorrowContractCapability(declaredContract));
   }
@@ -349,11 +359,8 @@ export const classifyCallableCapability = ({
   if (compactContractFallback) {
     decisions.push(conservativeCapabilityDecision("compact-contract-fallback"));
   }
-  if (index.flags.hasUnresolvedBehavior) {
-    decisions.push(conservativeCapabilityDecision("unresolved-call"));
-  }
   if (
-    index.flags.hasOpenDispatch ||
+    hasBorrowRelevantOpenDispatch ||
     dispatch?.hasOpenDispatch ||
     dispatch?.hasUnresolvedDispatch
   ) {
@@ -372,14 +379,11 @@ export const classifyCallableCapability = ({
     index.flags.hasCapture ||
     index.flags.hasTraitResult ||
     index.flags.hasCallableResult ||
+    allocationResultNeedsFullFacts ||
     hasReturnedBorrowParameter ||
     (index.flags.hasReferenceBinding && index.flags.hasBorrowOperation) ||
     index.flags.hasDefaultBorrowFlow ||
     hasBorrowedDefaultParameter ||
-    index.calls.some(
-      (call) =>
-        call.returnsBorrowed && call.resultUse === "escapes-or-ambiguous",
-    ) ||
     (index.flags.hasSuspension &&
       (index.parameters.some((parameter) => parameter.loanBearing === true) ||
         index.flags.hasBorrowedBinding ||
@@ -391,7 +395,9 @@ export const classifyCallableCapability = ({
         ...(index.flags.hasBorrowedReturn ? ["returned-borrow"] : []),
         ...(index.flags.hasBorrowedBinding ? ["borrowed-binding"] : []),
         ...(index.flags.hasBorrowedStore ? ["retained-borrow"] : []),
-        ...(index.flags.hasRetainedReferenceStore ? ["retained-reference-store"] : []),
+        ...(index.flags.hasRetainedReferenceStore
+          ? ["retained-reference-store"]
+          : []),
         ...(index.flags.hasNonFreshMutableBinding
           ? ["non-fresh-mutable-binding"]
           : []),
@@ -404,9 +410,8 @@ export const classifyCallableCapability = ({
         ...(index.flags.hasCapture ? ["capture"] : []),
         ...(index.flags.hasTraitResult ? ["trait-result"] : []),
         ...(index.flags.hasCallableResult ? ["callable-result"] : []),
-        ...(hasReturnedBorrowParameter
-          ? ["returned-parameter-value"]
-          : []),
+        ...(allocationResultNeedsFullFacts ? ["allocation-result"] : []),
+        ...(hasReturnedBorrowParameter ? ["returned-parameter-value"] : []),
         ...(index.flags.hasReferenceBinding ? ["reference-binding"] : []),
         ...(index.flags.hasDefaultBorrowFlow ? ["default-borrow-flow"] : []),
         ...(hasBorrowedDefaultParameter ? ["borrowed-default"] : []),
@@ -437,10 +442,12 @@ export const classifyCallableCapability = ({
         index.flags.hasCapture ||
         index.parameters.some((parameter) => parameter.loanBearing === true))
     ) {
-      decisions.push(capabilityDecision("flow-sensitive", ["callee-suspension"]));
+      decisions.push(
+        capabilityDecision("flow-sensitive", ["callee-suspension"]),
+      );
     }
     if (call.targets.length === 0 && !call.intrinsic) {
-      decisions.push(conservativeCapabilityDecision("unresolved-call"));
+      decisions.push(calleeEffectDecision({ call, mode: undefined }));
       return;
     }
     call.targets.forEach((target) =>
@@ -502,10 +509,7 @@ export const classifyCallableCapabilities = ({
     modes.set(index.symbol, joined);
     decisions.set(
       index.symbol,
-      joinCapabilityDecisions([
-        capabilityDecision(joined),
-        decision,
-      ]),
+      joinCapabilityDecisions([capabilityDecision(joined), decision]),
     );
   });
   return decisions;

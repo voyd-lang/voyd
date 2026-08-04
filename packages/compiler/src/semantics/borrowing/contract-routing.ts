@@ -1,5 +1,14 @@
-import type { SymbolId } from "../ids.js";
-import { incrementCompilerPerfCounter } from "../../perf.js";
+import type { SymbolTable } from "../binder/index.js";
+import type { DeclTable } from "../decls.js";
+import type { HirFunction, HirGraph, HirLambdaExpr } from "../hir/index.js";
+import type { HirExprId, SymbolId } from "../ids.js";
+import type { TypingResult } from "../typing/index.js";
+import type { SymbolRef } from "../typing/symbol-ref.js";
+import {
+  incrementCompilerPerfCounter,
+  markCompilerPerfPhaseDuration,
+  startCompilerPerfPhase,
+} from "../../perf.js";
 import type { CallableBorrowContract } from "./model.js";
 import { callableContractHasGuardableAccessPair } from "./model.js";
 import type { CallableBorrowIndex } from "./callable-borrow-index.js";
@@ -7,12 +16,20 @@ import {
   classifyCallableCapabilities,
   type ImportedCallableCapability,
 } from "./capability-classifier.js";
-import {
-  joinLoanAnalysisModes,
-  type LoanAnalysisMode,
-} from "./capability.js";
+import { joinLoanAnalysisModes, type LoanAnalysisMode } from "./capability.js";
 import type { CapabilityDecision } from "./capability.js";
 import { composeTransientCallableContract } from "./transient-contract.js";
+import type { BorrowingDependency } from "./dependency.js";
+import type { ResolveContext } from "./call-resolution.js";
+import {
+  createLazyCallableBorrowFacts,
+  type CallableBorrowFacts,
+} from "./callable-facts.js";
+import {
+  callableBorrowContractsEqual,
+  computeCallableBorrowContracts,
+  type CallableBorrowContractComputation,
+} from "./summaries.js";
 
 export type TransientRoutingResult = {
   capabilities: ReadonlyMap<SymbolId, LoanAnalysisMode>;
@@ -37,6 +54,7 @@ export const inferTransientBorrowingRouting = ({
   localCallables,
   initialContracts,
   initialCompactContracts,
+  knownLocalCapabilities = new Map(),
 }: {
   indexes: ReadonlyMap<SymbolId, CallableBorrowIndex>;
   localModuleId: string;
@@ -45,6 +63,7 @@ export const inferTransientBorrowingRouting = ({
   localCallables: Map<SymbolId, ImportedCallableCapability>;
   initialContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   initialCompactContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  knownLocalCapabilities?: ReadonlyMap<SymbolId, LoanAnalysisMode>;
 }): TransientRoutingResult => {
   let decisions = classifyCallableCapabilities({
     indexes,
@@ -52,6 +71,7 @@ export const inferTransientBorrowingRouting = ({
     declaredContracts,
     importedCallables,
     localCallables,
+    knownLocalCapabilities,
   });
   const capabilities = new Map<SymbolId, LoanAnalysisMode>(
     Array.from(decisions, ([symbol, decision]) => [symbol, decision.mode]),
@@ -62,15 +82,35 @@ export const inferTransientBorrowingRouting = ({
   const compactContractFallbacks = new Set<SymbolId>();
   let iterations = 0;
   let changed = true;
+  let changedSymbols = new Set<SymbolId>();
   const maximumIterations = Math.max(4, indexes.size * 4 + 4);
   while (changed) {
     iterations += 1;
     if (iterations > maximumIterations) {
-      throw new Error(
-        `borrowing compact contract inference did not converge after ${maximumIterations} iterations`,
-      );
+      changedSymbols.forEach((symbol) => compactContractFallbacks.add(symbol));
+      decisions = classifyCallableCapabilities({
+        indexes,
+        localModuleId,
+        declaredContracts,
+        importedCallables,
+        localCallables,
+        knownLocalCapabilities: capabilities,
+        compactContractFallbacks,
+      });
+      decisions.forEach((decision, symbol) => {
+        capabilities.set(
+          symbol,
+          joinLoanAnalysisModes([
+            capabilities.get(symbol) ?? "none",
+            decision.mode,
+          ]),
+        );
+      });
+      compactFallbacks = compactContractFallbacks.size;
+      break;
     }
     changed = false;
+    changedSymbols = new Set();
     Array.from(indexes)
       .filter(([symbol]) => capabilities.get(symbol) === "transient")
       .forEach(([symbol, index]) => {
@@ -90,6 +130,7 @@ export const inferTransientBorrowingRouting = ({
             compactContractFallbacks.add(symbol);
             compactFallbacks += 1;
             changed = true;
+            changedSymbols.add(symbol);
           }
           return;
         }
@@ -113,6 +154,7 @@ export const inferTransientBorrowingRouting = ({
           contract: publishedCandidate,
         });
         changed = true;
+        changedSymbols.add(symbol);
       });
 
     decisions = classifyCallableCapabilities({
@@ -130,6 +172,7 @@ export const inferTransientBorrowingRouting = ({
       if (joined !== current) {
         capabilities.set(symbol, joined);
         changed = true;
+        changedSymbols.add(symbol);
       }
     });
   }
@@ -140,5 +183,227 @@ export const inferTransientBorrowingRouting = ({
     compactContracts,
     compactFallbacks,
     iterations,
+  };
+};
+
+export type BorrowingContractInferenceResult = TransientRoutingResult & {
+  inferred: CallableBorrowContractComputation;
+  functionFacts: ReadonlyMap<SymbolId, CallableBorrowFacts>;
+  lambdaFacts: ReadonlyMap<HirExprId, CallableBorrowFacts>;
+  flowFunctions: readonly HirFunction[];
+  flowLambdas: readonly HirLambdaExpr[];
+  materializedFacts: number;
+};
+
+/**
+ * Owns monotonic capability routing and full-contract convergence. Full facts
+ * are added lazily when a callable first reaches the flow-sensitive tier and
+ * retained for every later inference pass and for diagnostic checking.
+ */
+export const inferBorrowingContracts = ({
+  hir,
+  typing,
+  symbolTable,
+  moduleId,
+  imports,
+  dependencies,
+  decls,
+  resolveContext,
+  functions,
+  lambdas,
+  indexes,
+  declaredContracts,
+  importedCallables,
+  localCallables,
+  initialContracts,
+  initialCompactContracts,
+}: {
+  hir: HirGraph;
+  typing: TypingResult;
+  symbolTable: SymbolTable;
+  moduleId: string;
+  imports: readonly { local: SymbolId; target?: SymbolRef }[];
+  dependencies: ReadonlyMap<string, BorrowingDependency>;
+  decls: DeclTable;
+  resolveContext: ResolveContext;
+  functions: readonly HirFunction[];
+  lambdas: readonly HirLambdaExpr[];
+  indexes: ReadonlyMap<SymbolId, CallableBorrowIndex>;
+  declaredContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  importedCallables: ReadonlyMap<string, ImportedCallableCapability>;
+  localCallables: Map<SymbolId, ImportedCallableCapability>;
+  initialContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  initialCompactContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+}): BorrowingContractInferenceResult => {
+  let routing = inferTransientBorrowingRouting({
+    indexes,
+    localModuleId: moduleId,
+    declaredContracts,
+    importedCallables,
+    localCallables,
+    initialContracts,
+    initialCompactContracts,
+  });
+  let capabilities = new Map(routing.capabilities);
+  let contracts = new Map(routing.contracts);
+  const functionFactCache = new Map<SymbolId, CallableBorrowFacts>();
+  const lambdaFactCache = new Map<HirExprId, CallableBorrowFacts>();
+  let functionFacts: ReadonlyMap<SymbolId, CallableBorrowFacts> = new Map();
+  let lambdaFacts: ReadonlyMap<HirExprId, CallableBorrowFacts> = new Map();
+  let flowFunctions: readonly HirFunction[] = [];
+  let flowLambdas: readonly HirLambdaExpr[] = [];
+  let inferred!: CallableBorrowContractComputation;
+  let dirtyFlowSymbols: ReadonlySet<SymbolId> | undefined;
+  const maximumRoutingPasses = Math.max(2, indexes.size + 1);
+
+  for (
+    let routingPass = 1;
+    routingPass <= maximumRoutingPasses;
+    routingPass += 1
+  ) {
+    const flowInitialContracts = new Map(contracts);
+    if (routingPass === 1) {
+      indexes.forEach((_index, symbol) => {
+        if (capabilities.get(symbol) !== "flow-sensitive") return;
+        flowInitialContracts.set(
+          symbol,
+          declaredContracts.get(symbol) ?? initialContracts.get(symbol)!,
+        );
+      });
+    }
+    flowFunctions = functions.filter(
+      (functionItem) =>
+        capabilities.get(functionItem.symbol) === "flow-sensitive",
+    );
+    flowLambdas = lambdas.filter(
+      (lambda) =>
+        capabilities.get((-1 - lambda.id) as SymbolId) === "flow-sensitive",
+    );
+    const flowSymbols = new Set<SymbolId>([
+      ...flowFunctions.map((functionItem) => functionItem.symbol),
+      ...flowLambdas.map((lambda) => (-1 - lambda.id) as SymbolId),
+    ]);
+    const lazyFacts = createLazyCallableBorrowFacts({
+      functions: flowFunctions,
+      lambdas: flowLambdas,
+      hir,
+      typing,
+      resolveContext: {
+        ...resolveContext,
+        contracts,
+        callResolutionCache: new Map(),
+      },
+      functionCache: functionFactCache,
+      lambdaCache: lambdaFactCache,
+    });
+    functionFacts = lazyFacts.functions;
+    lambdaFacts = lazyFacts.lambdas;
+    const inferStartedAt = startCompilerPerfPhase();
+    inferred = computeCallableBorrowContracts({
+      hir,
+      typing,
+      symbolTable,
+      moduleId,
+      imports,
+      dependencies,
+      decls,
+      declarationContracts: declaredContracts,
+      facts: functionFacts,
+      lambdaFacts,
+      initialContracts: flowInitialContracts,
+      flowSymbols,
+      dirtySymbols: dirtyFlowSymbols,
+    });
+    markCompilerPerfPhaseDuration(
+      "analyzeBorrowing.inferContracts",
+      inferStartedAt,
+    );
+    const inferredContracts = new Map<SymbolId, CallableBorrowContract>([
+      ...inferred.contracts,
+      ...Array.from(
+        inferred.lambdaContracts,
+        ([exprId, contract]) => [(-1 - exprId) as SymbolId, contract] as const,
+      ),
+    ]);
+    inferredContracts.forEach((contract, symbol) => {
+      localCallables.set(symbol, {
+        capability: capabilities.get(symbol),
+        contract,
+      });
+    });
+    const nextRouting = inferTransientBorrowingRouting({
+      indexes,
+      localModuleId: moduleId,
+      declaredContracts,
+      importedCallables,
+      localCallables,
+      initialContracts: inferredContracts,
+      initialCompactContracts: inferredContracts,
+      knownLocalCapabilities: capabilities,
+    });
+    const promotedSymbols = new Set(
+      Array.from(nextRouting.capabilities).flatMap(([symbol, mode]) =>
+        mode === "flow-sensitive" && capabilities.get(symbol) !== mode
+          ? [symbol]
+          : [],
+      ),
+    );
+    const changedSymbols = new Set(
+      Array.from(nextRouting.contracts).flatMap(([symbol, contract]) => {
+        const previous = contracts.get(symbol);
+        return nextRouting.capabilities.get(symbol) !== "flow-sensitive" &&
+          (previous === undefined ||
+            !callableBorrowContractsEqual(previous, contract))
+          ? [symbol]
+          : [];
+      }),
+    );
+    promotedSymbols.forEach((symbol) => changedSymbols.add(symbol));
+    const changed = changedSymbols.size > 0;
+    routing = nextRouting;
+    capabilities = new Map(nextRouting.capabilities);
+    contracts = new Map(nextRouting.contracts);
+    if (!changed) break;
+    dirtyFlowSymbols = changedSymbols;
+    if (routingPass === maximumRoutingPasses) {
+      throw new Error(
+        `borrowing capability routing did not converge after ${maximumRoutingPasses} passes`,
+      );
+    }
+  }
+
+  const functionSymbols = new Set(functions.map((item) => item.symbol));
+  inferred = {
+    ...inferred,
+    contracts: new Map(
+      Array.from(contracts).filter(([symbol]) => functionSymbols.has(symbol)),
+    ),
+    lambdaContracts: new Map(
+      lambdas.flatMap((lambda) => {
+        const contract = contracts.get((-1 - lambda.id) as SymbolId);
+        return contract ? [[lambda.id, contract] as const] : [];
+      }),
+    ),
+  };
+  const nonFlowFactSymbols = [
+    ...functionFactCache.keys(),
+    ...Array.from(lambdaFactCache.values(), (facts) => facts.symbol),
+  ].filter((symbol) => capabilities.get(symbol) !== "flow-sensitive");
+  if (nonFlowFactSymbols.length > 0) {
+    throw new Error(
+      `borrowing architecture violation: full facts materialized for ${nonFlowFactSymbols.join(", ")}`,
+    );
+  }
+  return {
+    ...routing,
+    capabilities,
+    contracts,
+    compactContracts: routing.compactContracts,
+    inferred,
+    functionFacts,
+    lambdaFacts,
+    flowFunctions,
+    flowLambdas,
+    materializedFacts: functionFactCache.size + lambdaFactCache.size,
   };
 };

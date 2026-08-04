@@ -39,16 +39,16 @@ const openDispatchIndex = (): CallableBorrowIndex =>
       hasModuleStorageWrite: false,
       hasModuleStorageBorrow: false,
       hasUnresolvedBehavior: false,
-      hasOpenDispatch: true,
+      hasOpenDispatch: false,
       hasUnknownBehavior: false,
       hasDefaultArgument: false,
       hasDefaultBorrowFlow: false,
       hasRuntimeCheckedReceiverWrites: false,
-      hasFreshResult: false,
+      hasAllocationResult: false,
+      hasSyntacticFreshResult: false,
       hasTraitResult: false,
       hasCallableResult: false,
       hasReturnedParameterValue: false,
-      hasSimplePlainReturn: false,
     },
   }) as CallableBorrowIndex;
 
@@ -56,9 +56,9 @@ describe("borrow capability lattice", () => {
   it("joins modes monotonically", () => {
     expect(joinLoanAnalysisModes([])).toBe("none");
     expect(joinLoanAnalysisModes(["none", "transient"])).toBe("transient");
-    expect(
-      joinLoanAnalysisModes(["transient", "flow-sensitive", "none"]),
-    ).toBe("flow-sensitive");
+    expect(joinLoanAnalysisModes(["transient", "flow-sensitive", "none"])).toBe(
+      "flow-sensitive",
+    );
   });
 
   it("joins decisions and preserves unique reasons", () => {
@@ -86,6 +86,7 @@ describe("borrow capability lattice", () => {
       localModuleId: "test",
       localCapabilities: new Map(),
       importedCallables: new Map(),
+      dispatch: { hasOpenDispatch: true },
     };
     expect(classifyCallableCapability(input).mode).toBe("flow-sensitive");
   });

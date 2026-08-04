@@ -406,52 +406,8 @@ export type CodegenSourceLocation = {
   endColumn?: number;
 };
 
-export type CodegenCallableAccessFootprint = {
+export type CodegenCallableRuntimeProtocol = {
   defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
-  parameters: readonly {
-    access: "owned" | "shared" | "mutable";
-    reads: readonly (readonly CodegenPlaceProjection[])[];
-    writes: readonly (readonly CodegenPlaceProjection[])[];
-    runtimeCheckedWrites?: true;
-    retained: boolean;
-    retainedUnlessBorrowed?: true;
-    returnedAggregate?: true;
-    retainedPaths: readonly (readonly CodegenPlaceProjection[])[];
-    externalRetainedPaths: readonly (readonly CodegenPlaceProjection[])[];
-    borrowedRetainedPaths: readonly (readonly CodegenPlaceProjection[])[];
-    returnedAliases: readonly {
-      source: readonly CodegenPlaceProjection[];
-      result: readonly CodegenPlaceProjection[];
-      endpointAccess?: "inline" | "dereferenced";
-      defaultNoBorrow?: true;
-    }[];
-    returnedBorrows: readonly {
-      source: readonly CodegenPlaceProjection[];
-      result: readonly CodegenPlaceProjection[];
-      endpointAccess?: "inline" | "dereferenced";
-      defaultNoBorrow?: true;
-    }[];
-    defaultExternalAliases: readonly {
-      result: readonly CodegenPlaceProjection[];
-      endpointAccess?: "inline" | "dereferenced";
-      fresh?: true;
-    }[];
-    defaultExternalReturnedAliases: readonly {
-      result: readonly CodegenPlaceProjection[];
-      endpointAccess?: "inline" | "dereferenced";
-      fresh?: true;
-    }[];
-    defaultExternalRead: boolean;
-    defaultExternalWrite: boolean;
-  }[];
-  externalReturnedAliases: readonly {
-    result: readonly CodegenPlaceProjection[];
-    endpointAccess?: "inline" | "dereferenced";
-    fresh?: true;
-  }[];
-  externalRead: boolean;
-  externalWrite: boolean;
-  maySuspend: boolean;
 };
 
 export type CodegenPlaceProjection =
@@ -478,9 +434,9 @@ export type ModuleCodegenView = {
   effectsIr: EffectsIr;
   bindingKinds: ReadonlyMap<SymbolId, HirBindingKind>;
   mutableStorageSymbols: ReadonlySet<SymbolId>;
-  callableAccessFootprints: ReadonlyMap<
+  callableRuntimeProtocols: ReadonlyMap<
     SymbolId,
-    CodegenCallableAccessFootprint
+    CodegenCallableRuntimeProtocol
   >;
   functionLocations: ReadonlyMap<SymbolId, CodegenSourceLocation>;
 };
@@ -2669,104 +2625,20 @@ export const buildProgramCodegenView = (
       effectsIr: buildEffectsIr({ hir: mod.hir, info: effectsInfo }),
       bindingKinds: buildBindingKindIndex(mod.hir),
       mutableStorageSymbols: buildMutableStorageSymbolIndex(mod),
-      callableAccessFootprints: new Map(
-        Array.from(mod.borrowing.callables, ([symbol, contract]) => [
-          symbol,
-          {
-            ...(contract.defaultIdentityGuardProtocol
-              ? {
-                  defaultIdentityGuardProtocol:
-                    contract.defaultIdentityGuardProtocol,
-                }
-              : {}),
-            parameters: contract.parameters.map((parameter) => {
-              return {
-                access: parameter.access,
-                reads: copyAccessPaths(parameter.readPaths),
-                writes: copyAccessPaths(parameter.writePaths),
-                ...(parameter.runtimeCheckedWrites
-                  ? { runtimeCheckedWrites: true as const }
-                  : {}),
-                retained: parameter.retained,
-                ...(parameter.retainedUnlessBorrowed
-                  ? { retainedUnlessBorrowed: true as const }
-                  : {}),
-                ...(parameter.returnedAggregate
-                  ? { returnedAggregate: true as const }
-                  : {}),
-                retainedPaths: copyAccessPaths(parameter.retainedPaths),
-                externalRetainedPaths: copyAccessPaths(
-                  parameter.externalRetainedPaths,
-                ),
-                borrowedRetainedPaths: copyAccessPaths(
-                  parameter.borrowedRetainedPaths,
-                ),
-                returnedAliases: (parameter.returnedOrigins ?? [])
-                  .filter(
-                    (origin) =>
-                      !parameter.returnedSharedOrigins?.some(
-                        (shared) =>
-                          JSON.stringify(shared) === JSON.stringify(origin),
-                      ),
-                  )
-                  .map((origin) => ({
-                    source: copyAccessPaths([origin.source])[0] ?? [],
-                    result: copyAccessPaths([origin.result])[0] ?? [],
-                    ...(origin.endpointAccess
-                      ? { endpointAccess: origin.endpointAccess }
-                      : {}),
-                    ...(origin.defaultNoBorrow
-                      ? { defaultNoBorrow: true as const }
-                      : {}),
-                  })),
-                returnedBorrows: (parameter.returnedSharedOrigins ?? []).map(
-                  (origin) => ({
-                    source: copyAccessPaths([origin.source])[0] ?? [],
-                    result: copyAccessPaths([origin.result])[0] ?? [],
-                    ...(origin.endpointAccess
-                      ? { endpointAccess: origin.endpointAccess }
-                      : {}),
-                    ...(origin.defaultNoBorrow
-                      ? { defaultNoBorrow: true as const }
-                      : {}),
-                  }),
-                ),
-                defaultExternalAliases: (
-                  parameter.defaultExternalOrigins ?? []
-                ).map((origin) => ({
-                  result: copyAccessPaths([origin.result])[0] ?? [],
-                  ...(origin.endpointAccess
-                    ? { endpointAccess: origin.endpointAccess }
-                    : {}),
-                  ...(origin.fresh ? { fresh: true as const } : {}),
-                })),
-                defaultExternalReturnedAliases: (
-                  parameter.defaultExternalReturnedOrigins ?? []
-                ).map((origin) => ({
-                  result: copyAccessPaths([origin.result])[0] ?? [],
-                  ...(origin.endpointAccess
-                    ? { endpointAccess: origin.endpointAccess }
-                    : {}),
-                  ...(origin.fresh ? { fresh: true as const } : {}),
-                })),
-                defaultExternalRead: parameter.defaultExternalRead === true,
-                defaultExternalWrite: parameter.defaultExternalWrite === true,
-              };
-            }),
-            externalReturnedAliases: (
-              contract.externalReturnedOrigins ?? []
-            ).map((origin) => ({
-              result: copyAccessPaths([origin.result])[0] ?? [],
-              ...(origin.endpointAccess
-                ? { endpointAccess: origin.endpointAccess }
-                : {}),
-              ...(origin.fresh ? { fresh: true as const } : {}),
-            })),
-            externalRead: contract.externalRead === true,
-            externalWrite: contract.externalWrite === true,
-            maySuspend: contract.maySuspend,
-          },
-        ]),
+      callableRuntimeProtocols: new Map(
+        Array.from(mod.borrowing.callables).flatMap(([symbol, contract]) =>
+          contract.defaultIdentityGuardProtocol
+            ? [
+                [
+                  symbol,
+                  {
+                    defaultIdentityGuardProtocol:
+                      contract.defaultIdentityGuardProtocol,
+                  },
+                ] as const,
+              ]
+            : [],
+        ),
       ),
       functionLocations,
     });

@@ -1,4 +1,7 @@
-import { diagnosticFromCode, type Diagnostic } from "../../diagnostics/index.js";
+import {
+  diagnosticFromCode,
+  type Diagnostic,
+} from "../../diagnostics/index.js";
 import type { SymbolId } from "../ids.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type {
@@ -9,6 +12,7 @@ import type {
 } from "./model.js";
 import {
   mergeCallableBorrowContracts,
+  projectionPathCovers,
   projectionPathsOverlap,
 } from "./model.js";
 import {
@@ -20,6 +24,7 @@ import {
 import type { LoanAnalysisMode } from "./capability.js";
 import type { ImportedCallableCapability } from "./capability-classifier.js";
 import { transientParameterPairKey } from "./transient-guards.js";
+import { COMPACT_BORROW_INTRINSICS } from "./call-resolution.js";
 
 export type CallableContractLookup = {
   localModuleId: string;
@@ -33,18 +38,6 @@ type ParameterEffect = {
   writePaths: Map<string, readonly PlaceProjection[]>;
   runtimeCheckedWrites: boolean;
 };
-
-const INTRINSICS_WITH_COMPACT_FOOTPRINT = new Set([
-  "~",
-  "__shared_cell_value",
-  "__array_get",
-  "__array_set",
-  "__array_copy",
-  "__array_new",
-  "__array_new_fixed",
-  "__array_len",
-  "__ref_is_null",
-]);
 
 const keyFor = (target: SymbolRef): string =>
   `${target.moduleId}:${target.symbol}`;
@@ -71,12 +64,46 @@ const pathKey = (path: readonly PlaceProjection[]): string =>
     })
     .join("/");
 
+const pathStaysWithinRootAllocation = (
+  path: readonly PlaceProjection[],
+): boolean => {
+  const projections = path.filter(
+    (projection) => projection.kind !== "identity",
+  );
+  const dereference = projections.findIndex(
+    (projection) => projection.kind === "dereference",
+  );
+  if (dereference < 0) return true;
+  return (
+    dereference === 0 &&
+    projections.length <= 2 &&
+    projections.slice(1).every((projection) => projection.kind !== "dereference")
+  );
+};
+
 const addPath = (
   paths: Map<string, readonly PlaceProjection[]>,
   path: readonly PlaceProjection[],
 ): void => {
+  if (
+    Array.from(paths.values()).some((existing) =>
+      projectionPathCovers(existing, path),
+    )
+  ) {
+    return;
+  }
+  Array.from(paths).forEach(([key, existing]) => {
+    if (projectionPathCovers(path, existing)) paths.delete(key);
+  });
   paths.set(pathKey(path), path);
 };
+
+const sortedPaths = (
+  paths: ReadonlyMap<string, readonly PlaceProjection[]>,
+): readonly (readonly PlaceProjection[])[] =>
+  Array.from(paths)
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, path]) => path);
 
 const parameterEffects = (
   parameter: CallableParameterBorrowContract,
@@ -101,48 +128,36 @@ export const contractFromBorrowIndex = (
 ): CallableBorrowContract => {
   const effects = directEffects(index);
   return {
-  parameters: index.parameters.map((parameter, parameterIndex) => {
-    const effect = effects[parameterIndex]!;
-    const readPaths = Array.from(effect.readPaths.values());
-    const writePaths = Array.from(effect.writePaths.values());
-    return {
-      access: parameter.access,
-      ...(readPaths.length > 0 ? { readPaths } : {}),
-      ...(writePaths.length > 0 ? { writePaths } : {}),
-      ...(parameterIndex === 0 && index.flags.hasRuntimeCheckedReceiverWrites
-        ? { runtimeCheckedWrites: true as const }
-        : {}),
-      ...(index.flags.hasMutableReferenceRebinding &&
-      parameter.bindingKind === "mutable-ref"
-        ? { invalidatedPaths: [[]] }
-        : {}),
-      retained: false,
-      returned:
-        index.flags.hasSimplePlainReturn && index.parameters.length === 1,
-      ...(index.flags.hasSimplePlainReturn && index.parameters.length === 1
-        ? {
-            returnedPaths: [[]],
-            returnedOrigins: [{ source: [], result: [] }],
-          }
-        : {}),
-    };
-  }),
-  maySuspend: false,
-  borrowedResult: "none",
-  ...(index.flags.hasModuleStorageAccess
-    ? { externalRead: true as const }
-    : {}),
-  ...(index.flags.hasModuleStorageWrite
-    ? { externalWrite: true as const }
-    : {}),
-  ...(index.flags.hasModuleStorageBorrow
-    ? {
-        externalReturnedOrigins: [
-          { result: [], endpointAccess: "inline" as const },
-        ],
-      }
-    : {}),
-  ...(index.flags.hasFreshResult ? { freshResult: true as const } : {}),
+    parameters: index.parameters.map((parameter, parameterIndex) => {
+      const effect = effects[parameterIndex]!;
+      const readPaths = sortedPaths(effect.readPaths);
+      const writePaths = sortedPaths(effect.writePaths);
+      return {
+        access: parameter.access,
+        ...(readPaths.length > 0 ? { readPaths } : {}),
+        ...(writePaths.length > 0 ? { writePaths } : {}),
+        ...(parameterIndex === 0 && index.flags.hasRuntimeCheckedReceiverWrites
+          ? { runtimeCheckedWrites: true as const }
+          : {}),
+        ...(index.flags.hasMutableReferenceRebinding &&
+        parameter.bindingKind === "mutable-ref"
+          ? { invalidatedPaths: [[]] }
+          : {}),
+        retained: false,
+        returned: false,
+      };
+    }),
+    maySuspend: false,
+    borrowedResult: "none",
+    ...(index.flags.hasSyntacticFreshResult
+      ? { freshResult: true as const }
+      : {}),
+    ...(index.flags.hasModuleStorageAccess
+      ? { externalRead: true as const }
+      : {}),
+    ...(index.flags.hasModuleStorageWrite
+      ? { externalWrite: true as const }
+      : {}),
   };
 };
 
@@ -155,17 +170,19 @@ const addTranslatedEffects = ({
   effects,
   index,
   argumentPlace,
+  allowUnmapped,
   parameter,
 }: {
   effects: ParameterEffect[];
   index: CallableBorrowIndex;
   argumentPlace: BorrowPlace;
+  allowUnmapped: boolean;
   parameter: CallableParameterBorrowContract;
 }): boolean => {
   const paths = parameterEffects(parameter);
   if (paths.reads.length === 0 && paths.writes.length === 0) return true;
   const source = parameterPlaceForIndexPlace(index, argumentPlace);
-  if (!source) return false;
+  if (!source) return allowUnmapped;
   const target = effects[source.parameter];
   if (!target) return true;
   paths.reads.forEach((path) =>
@@ -190,8 +207,8 @@ const mergeParameterEffects = ({
   parameters: contract.parameters.map((parameter, index) => {
     const effect = effects[index];
     if (!effect) return parameter;
-    const readPaths = Array.from(effect.readPaths.values());
-    const writePaths = Array.from(effect.writePaths.values());
+    const readPaths = sortedPaths(effect.readPaths);
+    const writePaths = sortedPaths(effect.writePaths);
     return {
       ...parameter,
       ...(readPaths.length > 0 ? { readPaths } : {}),
@@ -311,7 +328,7 @@ export const composeTransientCallableContract = ({
       call.intrinsicName !== undefined &&
       call.targets.length === 0 &&
       !call.returnsBorrowed &&
-      !INTRINSICS_WITH_COMPACT_FOOTPRINT.has(call.intrinsicName)
+      !COMPACT_BORROW_INTRINSICS.has(call.intrinsicName)
     ) {
       continue;
     }
@@ -331,8 +348,13 @@ export const composeTransientCallableContract = ({
     externalRead ||= target.externalRead === true;
     externalWrite ||= target.externalWrite === true;
     for (const [parameterIndex, parameter] of target.parameters.entries()) {
-      const argumentPlace = placeForArgument(call, parameterIndex);
+      const argument = indexCallArgumentFor(call, parameterIndex);
+      const argumentPlace = argument?.place;
       const paths = parameterEffects(parameter);
+      if (argument?.moduleStorage === true) {
+        externalRead ||= paths.reads.length > 0;
+        externalWrite ||= paths.writes.length > 0;
+      }
       if (
         (paths.reads.length > 0 || paths.writes.length > 0) &&
         !argumentPlace
@@ -340,11 +362,17 @@ export const composeTransientCallableContract = ({
         return undefined;
       }
       if (!argumentPlace) continue;
+      const staysWithinFreshRoot = [...paths.reads, ...paths.writes].every(
+        pathStaysWithinRootAllocation,
+      );
       if (
         !addTranslatedEffects({
           effects,
           index,
           argumentPlace,
+          allowUnmapped:
+            argument?.moduleStorage === true ||
+            (argument?.fresh === true && staysWithinFreshRoot),
           parameter,
         })
       ) {
@@ -362,10 +390,7 @@ export const composeTransientCallableContract = ({
     ...(externalWrite ? { externalWrite: true as const } : {}),
   };
   if (!declaredContract) return storageContract;
-  const merged = mergeCallableBorrowContracts([storageContract, declaredContract]);
-  return index.flags.hasFreshResult && merged
-    ? { ...merged, freshResult: true as const }
-    : merged;
+  return mergeCallableBorrowContracts([storageContract, declaredContract]);
 };
 
 const displayPlace = (
@@ -448,7 +473,11 @@ export const checkTransientSameCallOverlaps = ({
     ];
     for (let leftIndex = 0; leftIndex < accesses.length; leftIndex += 1) {
       const left = accesses[leftIndex]!;
-      for (let rightIndex = leftIndex + 1; rightIndex < accesses.length; rightIndex += 1) {
+      for (
+        let rightIndex = leftIndex + 1;
+        rightIndex < accesses.length;
+        rightIndex += 1
+      ) {
         const right = accesses[rightIndex]!;
         if (left.parameterIndex === right.parameterIndex) continue;
         if (

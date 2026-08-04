@@ -58,7 +58,7 @@ export const getOrCreateDefaultIdentityGuardEntry = ({
     return meta;
   }
   const targetCtx = ctx.moduleContexts.get(meta.moduleId);
-  const protocol = targetCtx?.module.callableAccessFootprints.get(
+  const protocol = targetCtx?.module.callableRuntimeProtocols.get(
     meta.symbol,
   )?.defaultIdentityGuardProtocol;
   if (protocol !== "presence-conflict-bit-v1") {

@@ -1,4 +1,4 @@
-import type { TypeId } from "../ids.js";
+import type { SymbolId, TypeId } from "../ids.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type { TypingResult } from "../typing/index.js";
 import type {
@@ -31,9 +31,10 @@ type TransientIdentity = Pick<
 
 type TransientOverlap = "disjoint" | "overlap" | "uncertain";
 
-export type TransientRuntimeIdentityPlan = {
+export type RuntimeBorrowPlan = {
   guards: ReadonlyMap<number, readonly RuntimeIdentityGuard[]>;
   guardedPairs: ReadonlyMap<number, ReadonlySet<string>>;
+  mutableStorageSymbols: ReadonlySet<SymbolId>;
 };
 
 export const transientParameterPairKey = (
@@ -192,8 +193,8 @@ const identityForParameter = ({
   if (!argument.place) return undefined;
   const paths = [
     ...((parameter.writePaths?.length ?? 0) > 0
-      ? parameter.writePaths ?? []
-      : parameter.readPaths ?? []),
+      ? (parameter.writePaths ?? [])
+      : (parameter.readPaths ?? [])),
   ];
   if (paths.length === 0) return undefined;
   const dereferenceStates = new Set(
@@ -315,11 +316,8 @@ const parameterFormsCallScopedLoan = ({
   ) {
     return true;
   }
-  return [
-    ...(parameter.readPaths ?? []),
-    ...(parameter.writePaths ?? []),
-  ].some((path) =>
-    path.some((projection) => projection.kind === "dereference"),
+  return [...(parameter.readPaths ?? []), ...(parameter.writePaths ?? [])].some(
+    (path) => path.some((projection) => projection.kind === "dereference"),
   );
 };
 
@@ -349,7 +347,7 @@ const targetContractForGuard = (
 ): CallableBorrowContract | undefined =>
   mergeCallableBorrowContracts(
     targetContractsForCall(call, lookup).map((contract) =>
-      call.traitDispatch ? contract.dynamicDispatch ?? contract : contract,
+      call.traitDispatch ? (contract.dynamicDispatch ?? contract) : contract,
     ),
   );
 
@@ -358,7 +356,7 @@ const targetContractForGuard = (
  * consumes index places, types, and published contracts; it has no facts,
  * provenance, sequencing, CFG, or liveness state.
  */
-export const planTransientRuntimeIdentityGuards = ({
+export const planRuntimeBorrowing = ({
   index,
   lookup,
   typing,
@@ -366,20 +364,33 @@ export const planTransientRuntimeIdentityGuards = ({
   index: CallableBorrowIndex;
   lookup: CallableContractLookup;
   typing: TypingResult;
-}): TransientRuntimeIdentityPlan => {
+}): RuntimeBorrowPlan => {
   const guards = new Map<number, RuntimeIdentityGuard[]>();
   const guardedPairs = new Map<number, Set<string>>();
+  const mutableStorageSymbols = new Set<SymbolId>(
+    index.parameters.flatMap((parameter) =>
+      parameter.bindingKind === "mutable-ref" ? [parameter.symbol] : [],
+    ),
+  );
   index.calls.forEach((call) => {
-    if (call.targets.length === 0 || call.openTraitDispatch === true) return;
+    if (call.targets.length === 0) return;
     const contract = targetContractForGuard(call, lookup);
-    if (!contract || !callableContractAllowsRuntimeIdentityGuards(contract)) {
-      return;
-    }
+    if (!contract) return;
+    contract.parameters.forEach((parameter, parameterIndex) => {
+      if (
+        parameter.access !== "mutable" &&
+        (parameter.writePaths?.length ?? 0) === 0
+      ) {
+        return;
+      }
+      const argument = indexCallArgumentFor(call, parameterIndex);
+      if (argument?.place) mutableStorageSymbols.add(argument.place.root);
+    });
+    if (!callableContractAllowsRuntimeIdentityGuards(contract)) return;
     const omittedParameters = defaultArgumentsFor(call);
     if (
       omittedParameters.length > 0 &&
-      (contract.defaultIdentityGuardProtocol !==
-        "presence-conflict-bit-v1" ||
+      (contract.defaultIdentityGuardProtocol !== "presence-conflict-bit-v1" ||
         call.traitDispatch ||
         !defaultsPreserveIdentity(contract, omittedParameters))
     ) {
@@ -439,12 +450,24 @@ export const planTransientRuntimeIdentityGuards = ({
           typing,
         });
         if (!leftIdentity || !rightIdentity) continue;
-        const overlap = overlapForArguments({
-          left: leftArgument.place,
-          leftIdentity,
-          right: rightArgument.place,
-          rightIdentity,
-        });
+        const identityUsesRootAllocation = (
+          identity: TransientIdentity,
+        ): boolean =>
+          identity.identity === "allocation" &&
+          (identity.allocationPath?.length ?? 0) === 0;
+        const definitelyDistinctFreshRoot =
+          leftArgument.place.root !== rightArgument.place.root &&
+          identityUsesRootAllocation(leftIdentity) &&
+          identityUsesRootAllocation(rightIdentity) &&
+          (leftArgument.fresh === true || rightArgument.fresh === true);
+        const overlap = definitelyDistinctFreshRoot
+          ? "disjoint"
+          : overlapForArguments({
+              left: leftArgument.place,
+              leftIdentity,
+              right: rightArgument.place,
+              rightIdentity,
+            });
         if (overlap !== "uncertain") continue;
         if (
           leftIdentity.identity === "allocation" &&
@@ -467,7 +490,10 @@ export const planTransientRuntimeIdentityGuards = ({
         }
         const leftExpression = leftArgument.expression;
         const rightExpression = rightArgument.expression;
-        if (typeof leftExpression !== "number" || typeof rightExpression !== "number") {
+        if (
+          typeof leftExpression !== "number" ||
+          typeof rightExpression !== "number"
+        ) {
           continue;
         }
         const pair = transientParameterPairKey(
@@ -519,5 +545,5 @@ export const planTransientRuntimeIdentityGuards = ({
       }
     }
   });
-  return { guards, guardedPairs };
+  return { guards, guardedPairs, mutableStorageSymbols };
 };

@@ -34,7 +34,6 @@ import {
   mergeCallableBorrowContracts,
   projectionPathCovers,
   projectionPathsOverlap,
-  projectionsOverlap,
   runtimeIdentityGuardParameterCanEscape,
   translateProjectionPath,
 } from "./model.js";
@@ -64,7 +63,6 @@ import {
   factValueRequests,
   type CallableBorrowFacts,
 } from "./callable-facts.js";
-import { walkExpression } from "../hir/walk.js";
 import {
   markCompilerPerfPhaseDuration,
   startCompilerPerfPhase,
@@ -139,6 +137,7 @@ type BodyContext = {
   moduleStorageSymbols: ReadonlySet<SymbolId>;
   mutableStorageSymbols: Set<SymbolId>;
   runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
+  runtimePlanning: boolean;
   diagnostics: Diagnostic[];
   terminations: Termination[];
   mutableParameters: ReadonlySet<SymbolId>;
@@ -492,10 +491,7 @@ const baseSymbolOf = (
     const fact = ctx.factsForExpression
       .get(expr.id)
       ?.callForExpression.get(expr.id);
-    if (
-      fact?.intrinsicBoundary === true &&
-      fact.intrinsicName === "~"
-    ) {
+    if (fact?.intrinsicBoundary === true && fact.intrinsicName === "~") {
       const source = expr.args.at(-1);
       return source ? baseSymbolOf(source.expr, ctx) : undefined;
     }
@@ -1003,10 +999,7 @@ const freshResultPathCovers = (
   requested: readonly PlaceProjection[],
 ): boolean =>
   freshPath.length > 0 &&
-  requested.length >= freshPath.length &&
-  freshPath.every((projection, index) =>
-    projectionsOverlap(projection, requested[index]!),
-  );
+  projectionPathCovers(freshPath, requested);
 
 const callOriginSourceNeedsDereference = ({
   info,
@@ -5092,8 +5085,7 @@ const freshAllocationOriginOfPlace = (
         expression.exprKind === "method-call") &&
       externalReturnedOriginsForCall(targetInfo(expression, ctx)).some(
         (origin) =>
-          origin.fresh === true &&
-          freshResultPathCovers(origin.result, path),
+          origin.fresh === true && freshResultPathCovers(origin.result, path),
       )
     ) {
       return expression.id;
@@ -5718,69 +5710,9 @@ const lambdaMutablyUsesCapture = (
   ctx: BodyContext,
 ): boolean => {
   const facts = ctx.lambdaFacts?.get(lambda.id);
-  if (!facts) {
-    let mutable = false;
-    const expressionUsesSymbol = (exprId: HirExprId): boolean => {
-      let usesSymbol = false;
-      walkExpression({
-        exprId,
-        hir: ctx.hir,
-        onEnterExpression: (_candidateId, expression) => {
-          if (
-            expression.exprKind === "identifier" &&
-            expression.symbol === symbol
-          ) {
-            usesSymbol = true;
-            return { stop: true };
-          }
-          return undefined;
-        },
-      });
-      return usesSymbol;
-    };
-    walkExpression({
-      exprId: lambda.body,
-      hir: ctx.hir,
-      onEnterExpression: (_exprId, expression) => {
-        if (expression.exprKind === "assign") {
-          if (
-            typeof expression.target === "number" &&
-            expressionUsesSymbol(expression.target)
-          ) {
-            mutable = true;
-            return { stop: true };
-          }
-          return undefined;
-        }
-        if (
-          (expression.exprKind === "call" ||
-            expression.exprKind === "method-call") &&
-          (expression.exprKind === "call"
-            ? expression.args.some((argument) =>
-                expressionUsesSymbol(argument.expr),
-              )
-            : expression.args.some((argument) =>
-                expressionUsesSymbol(argument.expr),
-              ) || expressionUsesSymbol(expression.target))
-        ) {
-          const callee =
-            expression.exprKind === "call"
-              ? bodyExpression(expression.callee, ctx)
-              : undefined;
-          const calleeName =
-            callee?.exprKind === "identifier"
-              ? ctx.symbolTable.getSymbol(callee.symbol).name
-              : undefined;
-          // A direct borrow operator is definitely mutable. Other calls
-          // using the capture remain unknown without a resolved lambda fact.
-          mutable = calleeName !== undefined;
-          return mutable ? { stop: true } : undefined;
-        }
-        return undefined;
-      },
-    });
-    return mutable;
-  }
+  // Borrow-relevant captures route the lambda through full facts. A lambda
+  // without facts has no capture loan to reconstruct inside the checker.
+  if (!facts) return false;
   type AliasState = Map<SymbolId, readonly (readonly PlaceProjection[])[]>;
   const uniquePaths = (
     paths: readonly (readonly PlaceProjection[])[],
@@ -6910,6 +6842,7 @@ const validateCall = (
   expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>,
   event: Event,
   ctx: BodyContext,
+  runtimePlanningOnly = false,
 ): void => {
   const intrinsicName = intrinsicNameForCall(expr, ctx);
   if (intrinsicName === "~") {
@@ -7455,7 +7388,7 @@ const validateCall = (
           externalResult,
           ctx,
         });
-        if (pathAccess === "mutable") {
+        if (ctx.runtimePlanning && pathAccess === "mutable") {
           ctx.mutableStorageSymbols.add(place.root);
         }
         return {
@@ -8105,6 +8038,14 @@ const validateCall = (
     ) {
       return false;
     }
+    const existingGuard = ctx.runtimeIdentityGuards
+      .get(expr.id)
+      ?.some(
+        (guard) =>
+          guard.left.parameter === left.index &&
+          guard.right.parameter === right.index,
+      );
+    if (!ctx.runtimePlanning) return existingGuard === true;
     const guard: RuntimeIdentityGuard = {
       call: expr.id,
       target: info.target ?? info.targets[0]!,
@@ -8386,8 +8327,8 @@ const validateCall = (
     reportBorrowConflicts([...activeDefaultLoans, ...group]);
     activeDefaultLoans.push(...(defaultLoanGroups[index] ?? []));
   });
-  const externalBodyBorrow: readonly ActivatedBorrow[] =
-    overlappingExternalAccess === undefined
+  const externalDefaultBorrow: readonly ActivatedBorrow[] =
+    externalDefaultBodyAccess === undefined
       ? []
       : [
           {
@@ -8395,16 +8336,17 @@ const validateCall = (
             actual: expr.id,
             place: { root: externalPlaceRoot, projections: [] },
             actor: undefined,
-            access: overlappingExternalAccess,
-            activationKey: "call:external",
+            access: externalDefaultBodyAccess,
+            activationKey: "default:external-body",
             externalResult: true,
           },
         ];
   reportBorrowConflicts([
     ...activeDefaultLoans,
     ...borrows,
-    ...externalBodyBorrow,
+    ...externalDefaultBorrow,
   ]);
+  if (runtimePlanningOnly) return;
   effectiveActuals.forEach((effectiveActual) => {
     const { actual, index, source } = effectiveActual;
     const parameter = info.contract?.parameters[index];
@@ -9374,6 +9316,7 @@ const initializeCallableContext = ({
     moduleStorageSymbols,
     mutableStorageSymbols,
     runtimeIdentityGuards,
+    runtimePlanning: false,
     diagnostics,
     terminations: [],
     mutableParameters,
@@ -9488,7 +9431,18 @@ const validateReferenceDefaults = ({
   });
 };
 
-export const analyzeFunctionBorrowing = ({
+export type PreparedBorrowingAnalysis = {
+  runtimePlan: {
+    mutableStorageSymbols: ReadonlySet<SymbolId>;
+    runtimeIdentityGuards: ReadonlyMap<
+      HirExprId,
+      readonly RuntimeIdentityGuard[]
+    >;
+  };
+  check: () => readonly Diagnostic[];
+};
+
+export const prepareFunctionBorrowing = ({
   functionItem,
   facts,
   lambdaFacts,
@@ -9502,9 +9456,6 @@ export const analyzeFunctionBorrowing = ({
   decls,
   contracts,
   moduleStorageSymbols,
-  mutableStorageSymbols,
-  runtimeIdentityGuards,
-  diagnostics,
 }: {
   functionItem: HirFunction;
   facts: CallableBorrowFacts;
@@ -9519,10 +9470,7 @@ export const analyzeFunctionBorrowing = ({
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   moduleStorageSymbols: ReadonlySet<SymbolId>;
-  mutableStorageSymbols: Set<SymbolId>;
-  runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
-  diagnostics: Diagnostic[];
-}): void => {
+}): PreparedBorrowingAnalysis => {
   const signature = typing.functions.getSignature(functionItem.symbol);
   const declaredTypeId = (
     type: HirFunction["parameters"][number]["type"],
@@ -9574,7 +9522,7 @@ export const analyzeFunctionBorrowing = ({
     typing.borrowResolvedExprTypes.get(functionItem.body) ??
     typing.resolvedExprTypes.get(functionItem.body) ??
     typing.table.getExprType(functionItem.body);
-  analyzeCallableBorrowing({
+  return prepareCallableBorrowing({
     callable: functionItem,
     facts,
     lambdaFacts,
@@ -9595,13 +9543,10 @@ export const analyzeFunctionBorrowing = ({
     decls,
     contracts,
     moduleStorageSymbols,
-    mutableStorageSymbols,
-    runtimeIdentityGuards,
-    diagnostics,
   });
 };
 
-export const analyzeLambdaBodyBorrowing = ({
+export const prepareLambdaBorrowing = ({
   lambda,
   facts,
   lambdaFacts,
@@ -9615,9 +9560,6 @@ export const analyzeLambdaBodyBorrowing = ({
   decls,
   contracts,
   moduleStorageSymbols,
-  mutableStorageSymbols,
-  runtimeIdentityGuards,
-  diagnostics,
 }: {
   lambda: HirLambdaExpr;
   facts: CallableBorrowFacts;
@@ -9632,14 +9574,11 @@ export const analyzeLambdaBodyBorrowing = ({
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   moduleStorageSymbols: ReadonlySet<SymbolId>;
-  mutableStorageSymbols: Set<SymbolId>;
-  runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
-  diagnostics: Diagnostic[];
-}): void => {
+}): PreparedBorrowingAnalysis => {
   const lambdaType = typing.resolvedExprTypes.get(lambda.id);
   const lambdaDescriptor =
     typeof lambdaType === "number" ? typing.arena.get(lambdaType) : undefined;
-  analyzeCallableBorrowing({
+  return prepareCallableBorrowing({
     callable: lambda,
     facts,
     lambdaFacts,
@@ -9666,13 +9605,10 @@ export const analyzeLambdaBodyBorrowing = ({
     decls,
     contracts,
     moduleStorageSymbols,
-    mutableStorageSymbols,
-    runtimeIdentityGuards,
-    diagnostics,
   });
 };
 
-const analyzeCallableBorrowing = ({
+const prepareCallableBorrowing = ({
   callable,
   facts,
   lambdaFacts,
@@ -9690,9 +9626,6 @@ const analyzeCallableBorrowing = ({
   decls,
   contracts,
   moduleStorageSymbols,
-  mutableStorageSymbols,
-  runtimeIdentityGuards,
-  diagnostics,
 }: {
   callable: BorrowCallable;
   facts: CallableBorrowFacts;
@@ -9711,10 +9644,10 @@ const analyzeCallableBorrowing = ({
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   moduleStorageSymbols: ReadonlySet<SymbolId>;
-  mutableStorageSymbols: Set<SymbolId>;
-  runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
-  diagnostics: Diagnostic[];
-}): void => {
+}): PreparedBorrowingAnalysis => {
+  const mutableStorageSymbols = new Set<SymbolId>();
+  const runtimeIdentityGuards = new Map<HirExprId, RuntimeIdentityGuard[]>();
+  const diagnostics: Diagnostic[] = [];
   const initializationStartedAt = startCompilerPerfPhase();
   const ctx = initializeCallableContext({
     callable,
@@ -9827,20 +9760,43 @@ const analyzeCallableBorrowing = ({
     "borrowing.body.finalizeAliases",
     finalizeStartedAt,
   );
+  const planningContext: BodyContext = {
+    ...ctx,
+    diagnostics: [],
+    externalizedPlaces: [...ctx.externalizedPlaces],
+    freshnessInvalidations: [...ctx.freshnessInvalidations],
+    validatedExpressions: new Set(),
+    runtimePlanning: true,
+  };
+  facts.calls.forEach((call) => {
+    const expression = bodyExpression(call.exprId, planningContext);
+    const event = planningContext.events.get(call.exprId);
+    if (
+      event &&
+      (expression?.exprKind === "call" ||
+        expression?.exprKind === "method-call")
+    ) {
+      validateCall(expression, event, planningContext, true);
+    }
+  });
+  const runtimePlan = {
+    mutableStorageSymbols: new Set(mutableStorageSymbols),
+    runtimeIdentityGuards: new Map(
+      Array.from(runtimeIdentityGuards, ([exprId, guards]) => [
+        exprId,
+        [...guards],
+      ]),
+    ),
+  };
   const validationStartedAt = startCompilerPerfPhase();
   validateCallableFacts(ctx);
-
   contract?.parameters.forEach((parameter, index) => {
-    if (!parameter.borrowedRetainedPaths) {
-      return;
-    }
+    if (!parameter.borrowedRetainedPaths) return;
     const symbols = callable.parameters[index]
       ? patternSymbols(callable.parameters[index]!.pattern)
       : [];
     symbols.forEach((symbol) => {
-      if (!ctx.mutableParameters.has(symbol)) {
-        return;
-      }
+      if (!ctx.mutableParameters.has(symbol)) return;
       reportMutableEscape({
         symbol,
         span: callable.span,
@@ -9853,4 +9809,8 @@ const analyzeCallableBorrowing = ({
     "borrowing.body.validateFacts",
     validationStartedAt,
   );
+  return {
+    runtimePlan,
+    check: () => diagnostics,
+  };
 };

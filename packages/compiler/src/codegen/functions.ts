@@ -1185,7 +1185,7 @@ export const compileFunctions = ({
       continue;
     }
     const publishesDefaultIdentityGuardEntry =
-      ctx.module.callableAccessFootprints.get(item.symbol)
+      ctx.module.callableRuntimeProtocols.get(item.symbol)
         ?.defaultIdentityGuardProtocol === "presence-conflict-bit-v1" &&
       (getModuleExportEntries(ctx).some(
         (entry) => entry.symbol === item.symbol,

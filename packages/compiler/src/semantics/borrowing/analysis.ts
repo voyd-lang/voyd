@@ -16,8 +16,9 @@ import type { TypingResult } from "../typing/index.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type { DeclTable } from "../decls.js";
 import {
-  analyzeFunctionBorrowing,
-  analyzeLambdaBodyBorrowing,
+  prepareFunctionBorrowing,
+  prepareLambdaBorrowing,
+  type PreparedBorrowingAnalysis,
 } from "./body-analysis.js";
 import type {
   BorrowingResult,
@@ -29,11 +30,11 @@ import {
   translateProjectionPath,
 } from "./model.js";
 import type { BorrowingDependency } from "./dependency.js";
-import { computeCallableBorrowContracts } from "./summaries.js";
 import {
   abstractTraitContractFromImplementation,
   projectedTypes,
   resolveBorrowCall,
+  resolveBorrowCallTargets,
   type ResolveContext,
 } from "./call-resolution.js";
 import {
@@ -46,13 +47,8 @@ import {
   lowerNamedBorrowContracts,
   validateNamedBorrowContracts,
 } from "./named-contracts.js";
-import {
-  createLazyCallableBorrowFacts,
-  type CallableBorrowFacts,
-} from "./callable-facts.js";
-import {
-  type ImportedCallableCapability,
-} from "./capability-classifier.js";
+import type { CallableBorrowFacts } from "./callable-facts.js";
+import { type ImportedCallableCapability } from "./capability-classifier.js";
 import {
   extractCallableBorrowIndex,
   type CallableBorrowIndex,
@@ -61,8 +57,8 @@ import {
   checkTransientSameCallOverlaps,
   contractFromBorrowIndex,
 } from "./transient-contract.js";
-import { inferTransientBorrowingRouting } from "./contract-routing.js";
-import { planTransientRuntimeIdentityGuards } from "./transient-guards.js";
+import { inferBorrowingContracts } from "./contract-routing.js";
+import { planRuntimeBorrowing } from "./transient-guards.js";
 
 export const analyzeBorrowing = ({
   hir,
@@ -157,6 +153,18 @@ export const analyzeBorrowing = ({
     borrowIndexMode: "symbolic",
     decls,
   };
+  const resolvedCallTargets = new Map(
+    Array.from(summaryHir.expressions).flatMap(([exprId, expression]) =>
+      expression.exprKind === "call" || expression.exprKind === "method-call"
+        ? [
+            [
+              exprId,
+              resolveBorrowCallTargets(expression, indexResolveContext),
+            ] as const,
+          ]
+        : [],
+    ),
+  );
   const functionIndexes = extractCallableBorrowIndex({
     callables: functions,
     hir: summaryHir,
@@ -164,6 +172,7 @@ export const analyzeBorrowing = ({
     symbolTable,
     decls,
     resolveContext: indexResolveContext,
+    resolvedCallTargets,
   });
   const lambdaIndexes = extractCallableBorrowIndex({
     callables: lambdas.map((lambda) => ({
@@ -178,6 +187,7 @@ export const analyzeBorrowing = ({
     symbolTable,
     decls,
     resolveContext: indexResolveContext,
+    resolvedCallTargets,
   });
   const indexes = new Map<SymbolId, CallableBorrowIndex>([
     ...functionIndexes,
@@ -192,7 +202,9 @@ export const analyzeBorrowing = ({
   effectOperationContracts.forEach((contract, symbol) =>
     initialContracts.set(symbol, contract),
   );
-  declaredContracts.forEach((contract, symbol) => initialContracts.set(symbol, contract));
+  declaredContracts.forEach((contract, symbol) =>
+    initialContracts.set(symbol, contract),
+  );
   // Flow-sensitive callables do not publish these seed contracts as their
   // final ABI. They provide only the cheap access/effect footprint needed to
   // classify an immediate caller use without treating the callee's maximum
@@ -207,22 +219,35 @@ export const analyzeBorrowing = ({
     localCallables.set(symbol, { ...prior, contract });
   });
   const compactStartedAt = startCompilerPerfPhase();
-  const transientRouting = inferTransientBorrowingRouting({
+  const routing = inferBorrowingContracts({
+    hir: summaryHir,
+    typing,
+    symbolTable,
+    moduleId,
+    imports,
+    dependencies,
+    decls,
+    resolveContext: indexResolveContext,
+    functions,
+    lambdas,
     indexes,
-    localModuleId: moduleId,
     declaredContracts,
     importedCallables,
     localCallables,
     initialContracts,
     initialCompactContracts,
   });
-  const capabilities = new Map(transientRouting.capabilities);
-  const contracts = new Map(transientRouting.contracts);
-  const compactFallbacks = transientRouting.compactFallbacks;
+  const capabilities = routing.capabilities;
+  const compactFallbacks = routing.compactFallbacks;
+  const flowFunctions = routing.flowFunctions;
+  const flowLambdas = routing.flowLambdas;
+  const callableFacts = routing.functionFacts;
+  const lambdaFacts = routing.lambdaFacts;
+  const inferred = routing.inferred;
   capabilities.forEach((mode) =>
     incrementCompilerPerfCounter(`borrowing.capability.${mode}`),
   );
-  transientRouting.decisions.forEach((decision) =>
+  routing.decisions.forEach((decision) =>
     decision.reasons.forEach((reason) =>
       incrementCompilerPerfCounter(`borrowing.capability.reason.${reason}`),
     ),
@@ -231,77 +256,13 @@ export const analyzeBorrowing = ({
     "borrowing.capability.compactFallbacks",
     compactFallbacks,
   );
+  incrementCompilerPerfCounter(
+    "borrowing.fullFacts.materialized",
+    routing.materializedFacts,
+  );
   markCompilerPerfPhaseDuration(
     "analyzeBorrowing.composeCompactContracts",
     compactStartedAt,
-  );
-  const flowInitialContracts = new Map(contracts);
-  indexes.forEach((index, symbol) => {
-    if (capabilities.get(symbol) !== "flow-sensitive") return;
-    flowInitialContracts.set(
-      symbol,
-      declaredContracts.get(symbol) ?? contractFromBorrowIndex(index),
-    );
-  });
-  const flowFunctions = functions.filter(
-    (functionItem) => capabilities.get(functionItem.symbol) === "flow-sensitive",
-  );
-  const flowLambdas = lambdas.filter(
-    (lambda) => capabilities.get((-1 - lambda.id) as SymbolId) === "flow-sensitive",
-  );
-  const flowSymbols = new Set<SymbolId>([
-    ...flowFunctions.map((functionItem) => functionItem.symbol),
-    ...flowLambdas.map((lambda) => (-1 - lambda.id) as SymbolId),
-  ]);
-  const lazyFacts = createLazyCallableBorrowFacts({
-    functions: flowFunctions,
-    lambdas: flowLambdas,
-    hir: summaryHir,
-    typing,
-    resolveContext: {
-      ...indexResolveContext,
-      contracts,
-      callResolutionCache: new Map(),
-    },
-  });
-  const callableFacts = lazyFacts.functions;
-  const lambdaFacts = lazyFacts.lambdas;
-  const nonFlowFactSymbols = [
-    ...Array.from(callableFacts.keys()),
-    ...Array.from(
-      lambdaFacts.keys(),
-      (exprId) => (-1 - exprId) as SymbolId,
-    ),
-  ].filter(
-    (symbol) => capabilities.get(symbol) !== "flow-sensitive",
-  );
-  if (nonFlowFactSymbols.length > 0) {
-    throw new Error(
-      `borrowing architecture violation: full facts materialized for ${nonFlowFactSymbols.join(", ")}`,
-    );
-  }
-  const inferStartedAt = startCompilerPerfPhase();
-  const inferred = computeCallableBorrowContracts({
-    hir: summaryHir,
-    typing,
-    symbolTable,
-    moduleId,
-    imports,
-    dependencies,
-    decls,
-    declarationContracts: declaredContracts,
-    facts: callableFacts,
-    lambdaFacts,
-    initialContracts: flowInitialContracts,
-    flowSymbols,
-  });
-  markCompilerPerfPhaseDuration(
-    "analyzeBorrowing.inferContracts",
-    inferStartedAt,
-  );
-  incrementCompilerPerfCounter(
-    "borrowing.fullFacts.materialized",
-    lazyFacts.materializedCount(),
   );
   const allCallableFacts = new Map<SymbolId, CallableBorrowFacts>([
     ...Array.from(callableFacts.entries()),
@@ -405,7 +366,7 @@ export const analyzeBorrowing = ({
   );
   indexes.forEach((index, symbol) => {
     if (capabilities.get(symbol) !== "transient") return;
-    const transientGuardPlan = planTransientRuntimeIdentityGuards({
+    const runtimePlan = planRuntimeBorrowing({
       index,
       typing,
       lookup: {
@@ -415,7 +376,10 @@ export const analyzeBorrowing = ({
         importedCallables,
       },
     });
-    transientGuardPlan.guards.forEach((guards, call) => {
+    runtimePlan.mutableStorageSymbols.forEach((storageSymbol) =>
+      mutableStorageSymbols.add(storageSymbol),
+    );
+    runtimePlan.guards.forEach((guards, call) => {
       const existing = runtimeIdentityGuards.get(call) ?? [];
       guards.forEach((guard) => {
         if (
@@ -439,7 +403,7 @@ export const analyzeBorrowing = ({
           localContracts: resolvedContracts,
           importedCallables,
         },
-        guardedPairs: transientGuardPlan.guardedPairs,
+        guardedPairs: runtimePlan.guardedPairs,
       }),
     );
   });
@@ -488,51 +452,61 @@ export const analyzeBorrowing = ({
       selectionStartedAt,
     );
     const bodiesStartedAt = startCompilerPerfPhase();
-    checkedFunctions.forEach((functionItem) =>
-      callableFacts.get(functionItem.symbol)
-        ? analyzeFunctionBorrowing({
-            functionItem,
-            facts: callableFacts.get(functionItem.symbol)!,
-            lambdaFacts,
-            lambdaContracts,
-            hir: summaryHir,
-            typing,
-            symbolTable,
-            moduleId,
-            imports: importMap,
-            dependencies,
-            decls,
-            contracts: resolvedContracts,
-            moduleStorageSymbols,
-            mutableStorageSymbols,
-            runtimeIdentityGuards,
-            diagnostics,
-          })
-        : undefined,
-    );
-    checkedLambdas.forEach((lambda) =>
-      lambdaFacts.get(lambda.id)
-        ?
-        analyzeLambdaBodyBorrowing({
-          lambda,
-          facts: lambdaFacts.get(lambda.id)!,
-          lambdaFacts,
-          lambdaContracts,
-          hir,
-          typing,
-          symbolTable,
-          moduleId,
-          imports: importMap,
-          dependencies,
-          decls,
-          contracts: resolvedContracts,
-          moduleStorageSymbols,
-          mutableStorageSymbols,
-          runtimeIdentityGuards,
-          diagnostics,
-        })
-        : undefined,
-    );
+    const prepared: PreparedBorrowingAnalysis[] = [
+      ...checkedFunctions.flatMap((functionItem) => {
+        const facts = callableFacts.get(functionItem.symbol);
+        return facts
+          ? [
+              prepareFunctionBorrowing({
+                functionItem,
+                facts,
+                lambdaFacts,
+                lambdaContracts,
+                hir: summaryHir,
+                typing,
+                symbolTable,
+                moduleId,
+                imports: importMap,
+                dependencies,
+                decls,
+                contracts: resolvedContracts,
+                moduleStorageSymbols,
+              }),
+            ]
+          : [];
+      }),
+      ...checkedLambdas.flatMap((lambda) => {
+        const facts = lambdaFacts.get(lambda.id);
+        return facts
+          ? [
+              prepareLambdaBorrowing({
+                lambda,
+                facts,
+                lambdaFacts,
+                lambdaContracts,
+                hir,
+                typing,
+                symbolTable,
+                moduleId,
+                imports: importMap,
+                dependencies,
+                decls,
+                contracts: resolvedContracts,
+                moduleStorageSymbols,
+              }),
+            ]
+          : [];
+      }),
+    ];
+    prepared.forEach(({ runtimePlan }) => {
+      runtimePlan.mutableStorageSymbols.forEach((symbol) =>
+        mutableStorageSymbols.add(symbol),
+      );
+      runtimePlan.runtimeIdentityGuards.forEach((guards, call) => {
+        runtimeIdentityGuards.set(call, [...guards]);
+      });
+    });
+    prepared.forEach((body) => diagnostics.push(...body.check()));
     markCompilerPerfPhaseDuration(
       "analyzeBorrowing.checkLoans",
       bodiesStartedAt,
@@ -561,17 +535,21 @@ export const analyzeBorrowing = ({
   });
   const queries = new Map(inferred.queries);
   const outputCallables = new Map(
-    Array.from(callables, ([symbol, contract]) => [
-      symbol,
-      {
-        ...contract,
-        parameters: contract.parameters.map((parameter) => ({
-          ...parameter,
-          readPaths: parameter.readPaths ?? [],
-          writePaths: parameter.writePaths ?? [],
-        })),
-      },
-    ] as const),
+    Array.from(
+      callables,
+      ([symbol, contract]) =>
+        [
+          symbol,
+          {
+            ...contract,
+            parameters: contract.parameters.map((parameter) => ({
+              ...parameter,
+              readPaths: parameter.readPaths ?? [],
+              writePaths: parameter.writePaths ?? [],
+            })),
+          },
+        ] as const,
+    ),
   );
   outputCallables.forEach((output, symbol) => {
     const prior = inferred.queries.get(symbol);
@@ -591,7 +569,7 @@ export const analyzeBorrowing = ({
     mutableStorageSymbols,
     diagnostics,
     analysisMetrics: {
-      fullFactsMaterialized: lazyFacts.materializedCount(),
+      fullFactsMaterialized: allCallableFacts.size,
       fullFactSymbols: Array.from(allCallableFacts.keys()),
     },
     summaryDemand: inferred.demand,

@@ -84,9 +84,7 @@ const diagnosticCodes = (source: string): readonly string[] => {
 };
 
 const capabilityFor = (
-  result:
-    | ReturnType<typeof analyze>
-    | ReturnType<typeof analyzeWithRecovery>,
+  result: ReturnType<typeof analyze> | ReturnType<typeof analyzeWithRecovery>,
   name: string,
 ) => {
   const symbol = result.symbols.resolveTopLevel(name);
@@ -165,7 +163,7 @@ trait ItemView
 `;
 
 describe("borrow checking", () => {
-  it("does not materialize full facts for none or transient callables", () => {
+  it("materializes full facts only for flow-sensitive callables", () => {
     const result = analyze(`
 obj Box { value: i32 }
 
@@ -182,17 +180,12 @@ fn fresh_local(~value: Box) -> i32
 `);
 
     expect(capabilityFor(result, "square")).toBe("none");
-    expect(capabilityFor(result, "identity")).toBe("none");
+    expect(capabilityFor(result, "identity")).toBe("flow-sensitive");
     expect(capabilityFor(result, "fresh_local")).toBe("transient");
-    expect(
-      Array.from(result.borrowing.capabilities.values()).every(
-        (mode) => mode !== "flow-sensitive",
-      ),
-    ).toBe(true);
-    expect(result.borrowing.analysisMetrics).toEqual({
-      fullFactsMaterialized: 0,
-      fullFactSymbols: [],
+    expect(result.borrowing.analysisMetrics).toMatchObject({
+      fullFactsMaterialized: 1,
     });
+    expect(result.borrowing.analysisMetrics?.fullFactSymbols).toHaveLength(1);
   });
 
   it("routes symbolic open dispatch through the flow-sensitive path", () => {
@@ -241,6 +234,7 @@ obj Some<T> { value: T }
 obj None {}
 type Option<T> = Some<T> | None
 obj Box { value: i32 }
+obj Snapshot { count: i32, owned: Box }
 
 fn mutate(~value: Box) -> void
   value.value = value.value + 1
@@ -257,6 +251,17 @@ fn fresh_local(~value: Box) -> void
 
 fn next(~self: Box) -> Option<Box>
   Some<Box> { value: Box { value: 1 } }
+
+fn next_snapshot(~self: Box, count: i32) -> Snapshot
+  Snapshot { count, owned: Box { value: self.value } }
+
+fn fresh_after_flow(~value: Box) -> Box
+  let ~out = Box { value: value.value }
+  let loan: borrow Box = out
+  Box { value: loan.value }
+
+fn relay_fresh_after_flow(~value: Box) -> Box
+  fresh_after_flow(~value)
 
 fn returned_borrow(value: Box) -> Option<borrow Box>
   Some<borrow Box> { value }
@@ -293,6 +298,9 @@ fn ignore_flow_owned(value: Box) -> void
     expect(capabilityFor(result, "generic_identity")).toBe("flow-sensitive");
     expect(capabilityFor(result, "fresh_local")).toBe("transient");
     expect(capabilityFor(result, "next")).toBe("transient");
+    expect(capabilityFor(result, "next_snapshot")).toBe("transient");
+    expect(capabilityFor(result, "fresh_after_flow")).toBe("flow-sensitive");
+    expect(capabilityFor(result, "relay_fresh_after_flow")).toBe("transient");
     expect(capabilityFor(result, "returned_borrow")).toBe("flow-sensitive");
     expect(capabilityFor(result, "sequential")).toBe("transient");
     expect(capabilityFor(result, "branch_local")).toBe("transient");
@@ -327,6 +335,34 @@ fn overlap_caller(~value: Box) -> void
   overlap(~value, ~value)
 `);
     expect(capabilityFor(overlapResult, "overlap_caller")).toBe("transient");
+  });
+
+  it("routes nested aliases inside fresh roots through full facts", () => {
+    const source = `
+obj Box { value: i32 }
+obj Holder { box: Box }
+
+fn mutate_holder(~holder: Holder) -> void
+  holder.box.value = holder.box.value + 1
+
+fn mutate_both(~left: Box, ~right: Box) -> void
+  left.value = left.value + 1
+  right.value = right.value + 1
+
+fn via_fresh(~shared: Box) -> void
+  let ~holder = Holder { box: shared }
+  mutate_holder(~holder)
+
+fn conflict(~shared: Box) -> void
+  let ~holder = Holder { box: shared }
+  mutate_both(~holder.box, ~shared)
+`;
+    const result = analyzeWithRecovery(source);
+
+    expect(capabilityFor(result, "via_fresh")).toBe("flow-sensitive");
+    expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
+      "TY0048",
+    );
   });
 
   it("includes argument-plan ambiguity in stable callable inputs", () => {
@@ -517,7 +553,9 @@ pub fn read() -> i32
     const read = result.symbols.resolveTopLevel("read");
     const demand = summaryDemandFor(result);
 
-    expect(demand.demandedCallables).toBe(1);
+    // Returned external provenance is owned by full facts for both the
+    // boundary and the caller that projects through its result.
+    expect(demand.demandedCallables).toBe(2);
     expect(
       typeof read === "number"
         ? result.borrowing.callables.get(read)?.externalRead
@@ -2876,17 +2914,6 @@ eff Inspect
         },
       ],
     });
-    const operationFootprint =
-      operation === undefined
-        ? undefined
-        : Array.from(
-            buildProgramCodegenView([result]).modules.values(),
-          )[0]?.callableAccessFootprints.get(operation.symbol);
-    expect(operationFootprint?.parameters[0]).toMatchObject({
-      retained: true,
-      retainedPaths: [],
-      borrowedRetainedPaths: [],
-    });
     expect(
       diagnosticCodes(`
 obj Box { value: i32 }
@@ -3378,14 +3405,7 @@ fn invalid() -> i32
       ([, contract]) => (contract.externalReturnedOrigins?.length ?? 0) > 0,
     );
     expect(externalEntry).toBeDefined();
-    expect(
-      externalEntry
-        ? Array.from(
-            buildProgramCodegenView([result]).modules.values(),
-          )[0]?.callableAccessFootprints.get(externalEntry[0])
-            ?.externalReturnedAliases
-        : undefined,
-    ).toHaveLength(1);
+    expect(externalEntry?.[1].externalReturnedOrigins).toHaveLength(1);
     expect(result.diagnostics.map((diagnostic) => diagnostic.code)).toContain(
       "TY0048",
     );
@@ -6401,6 +6421,25 @@ fn valid(source: Box) -> i32
     ).not.toThrow();
   });
 
+  it("routes parameters nested in returned aggregates through full facts", () => {
+    const result = analyze(`
+obj Box { value: i32 }
+obj Inner { box: Box }
+obj Outer { inner: Inner }
+
+fn wrap(~value: Box) -> Outer
+  Outer { inner: Inner { box: value } }
+`);
+    const wrap = result.symbols.resolveTopLevel("wrap");
+
+    expect(capabilityFor(result, "wrap")).toBe("flow-sensitive");
+    expect(
+      typeof wrap === "number"
+        ? result.borrowing.callables.get(wrap)?.parameters[0]?.returnedOrigins
+        : undefined,
+    ).not.toEqual([]);
+  });
+
   it("does not apply future value aliases to earlier call writes", () => {
     expect(() =>
       analyze(`
@@ -6909,16 +6948,10 @@ fn view(value: Box) -> borrow Box
       ([, contract]) =>
         contract.parameters[0]?.returnedSharedOrigins?.length === 1,
     );
-    expect(
-      viewEntry
-        ? Array.from(program.modules.values())[0]?.callableAccessFootprints.get(
-            viewEntry[0],
-          )?.parameters[0]?.returnedBorrows
-        : undefined,
-    ).toHaveLength(1);
+    expect(viewEntry?.[1].parameters[0]?.returnedSharedOrigins).toHaveLength(1);
   });
 
-  it("preserves ordinary returned aliases in ProgramCodegenView", () => {
+  it("keeps borrow contracts private from ProgramCodegenView", () => {
     const result = analyze(`
 obj Box { value: i32 }
 
@@ -6930,71 +6963,12 @@ fn identity(value: Box) -> Box
         (contract.parameters[0]?.returnedOrigins?.length ?? 0) > 0,
     );
     expect(identityEntry).toBeDefined();
-    const footprint = identityEntry
+    const protocol = identityEntry
       ? Array.from(
           buildProgramCodegenView([result]).modules.values(),
-        )[0]?.callableAccessFootprints.get(identityEntry[0])
+        )[0]?.callableRuntimeProtocols.get(identityEntry[0])
       : undefined;
-    expect(footprint?.parameters[0]?.returnedAliases).toHaveLength(1);
-    expect(footprint?.parameters[0]?.returnedBorrows).toEqual([]);
-  });
-
-  it("preserves aggregate and fresh result facts in ProgramCodegenView", () => {
-    const result = analyze(`
-obj Box { value: i32 }
-
-fn sample(value: Box) -> Box
-  value
-`);
-    const entry = Array.from(result.borrowing.callables).find(
-      ([, contract]) => contract.parameters.length === 1,
-    );
-    expect(entry).toBeDefined();
-    if (!entry) {
-      return;
-    }
-    const [symbol, contract] = entry;
-    const seeded = {
-      ...contract,
-      parameters: contract.parameters.map((parameter, index) =>
-        index === 0
-          ? {
-              ...parameter,
-              runtimeCheckedWrites: true as const,
-              returnedAggregate: true as const,
-              defaultExternalOrigins: [{ result: [], fresh: true as const }],
-              defaultExternalReturnedOrigins: [
-                { result: [], fresh: true as const },
-              ],
-              returnedOrigins: (parameter.returnedOrigins ?? []).map(
-                (origin) => ({ ...origin, defaultNoBorrow: true as const }),
-              ),
-              returnedSharedOrigins: (parameter.returnedOrigins ?? []).map(
-                (origin) => ({ ...origin, defaultNoBorrow: true as const }),
-              ),
-            }
-          : parameter,
-      ),
-      externalReturnedOrigins: [{ result: [], fresh: true as const }],
-    };
-    (result.borrowing.callables as Map<typeof symbol, typeof contract>).set(
-      symbol,
-      seeded,
-    );
-    const view = Array.from(
-      buildProgramCodegenView([result]).modules.values(),
-    )[0]?.callableAccessFootprints.get(symbol);
-
-    expect(view?.parameters[0]).toMatchObject({
-      runtimeCheckedWrites: true,
-      returnedAggregate: true,
-      defaultExternalAliases: [{ result: [], fresh: true }],
-      defaultExternalReturnedAliases: [{ result: [], fresh: true }],
-    });
-    expect(view?.parameters[0]?.returnedBorrows[0]?.defaultNoBorrow).toBe(true);
-    expect(view?.externalReturnedAliases).toEqual([
-      { result: [], fresh: true },
-    ]);
+    expect(protocol).toBeUndefined();
   });
 
   it("preserves explicit borrowed results across modules", async () => {
@@ -7498,7 +7472,7 @@ fn mutate_both(~left: Box, ~right: Box) -> void
   left.value = left.value + 1
   right.value = right.value + 1
 
-fn valid(~right: Box) -> void
+pub fn valid(~right: Box) -> void
   let ~left = make_box()
   left.value = 2
   mutate_both(~left, ~right)
@@ -7517,10 +7491,17 @@ fn valid(~right: Box) -> void
     const contract = makeBox?.borrowing?.find(
       (entry) => entry.symbol === makeBox.symbol,
     )?.contract;
+    const main = analyzed.semantics.get("src::main");
+    const valid = main?.exports.get("valid");
 
     expect([...graph.diagnostics, ...analyzed.diagnostics]).toEqual([]);
     expect(contract).toBeDefined();
     expect(contract?.freshResult).toBe(true);
+    expect(
+      typeof valid?.symbol === "number"
+        ? main?.borrowing.capabilities.get(valid.symbol)
+        : undefined,
+    ).toBe("transient");
     expect(
       analyzed.semantics.get("src::main")?.borrowing.runtimeIdentityGuards.size,
     ).toBe(0);
@@ -7976,12 +7957,7 @@ fn invalid(~state: State) -> i32
         ),
       ),
     ).toHaveLength(2);
-    const codegenFootprint = mutateEntry
-      ? Array.from(
-          buildProgramCodegenView([result]).modules.values(),
-        )[0]?.callableAccessFootprints.get(mutateEntry[0])
-      : undefined;
-    expect(codegenFootprint?.parameters[0]?.writes).toContainEqual([
+    expect(mutateEntry?.[1].parameters[0]?.writePaths).toContainEqual([
       { kind: "field", name: "left" },
       { kind: "dereference" },
       { kind: "field", name: "value" },
@@ -8041,15 +8017,10 @@ impl SharedCell<T>
     );
 
     expect(withMutEntry).toBeDefined();
-    const codegenFootprint = withMutEntry
-      ? Array.from(
-          buildProgramCodegenView([result]).modules.values(),
-        )[0]?.callableAccessFootprints.get(withMutEntry[0])
-      : undefined;
-    expect(codegenFootprint?.parameters[0]?.writes).toEqual(
+    expect(withMutEntry?.[1].parameters[0]?.writePaths).toEqual(
       expect.arrayContaining([statePath, valuePath]),
     );
-    expect(codegenFootprint?.parameters[0]?.runtimeCheckedWrites).toBe(true);
+    expect(withMutEntry?.[1].parameters[0]?.runtimeCheckedWrites).toBe(true);
   });
 
   it("propagates runtime-checked writes through wrappers", () => {
@@ -10473,20 +10444,11 @@ fn valid() -> void
     if (!retainedEntry) {
       return;
     }
-    const footprint = Array.from(
-      buildProgramCodegenView([result]).modules.values(),
-    )[0]?.callableAccessFootprints.get(retainedEntry[0]);
-    retainedEntry[1].parameters.forEach((parameter, index) => {
-      expect(footprint?.parameters[index]?.retainedPaths).toEqual(
-        parameter.retainedPaths ?? [],
-      );
-      expect(footprint?.parameters[index]?.externalRetainedPaths).toEqual(
-        parameter.externalRetainedPaths ?? [],
-      );
-      expect(footprint?.parameters[index]?.borrowedRetainedPaths).toEqual(
-        parameter.borrowedRetainedPaths ?? [],
-      );
-    });
+    expect(
+      retainedEntry[1].parameters.some(
+        (parameter) => (parameter.retainedPaths?.length ?? 0) > 0,
+      ),
+    ).toBe(true);
   });
 
   it("does not downgrade an ordinary handle passed to a retaining call", () => {
@@ -11636,9 +11598,12 @@ fn make() -> Callback
   it("does not turn ordinary closure captures into loans", () => {
     expect(
       diagnosticCodes(`${prelude}
+fn read(value: Box) -> i32
+  value.value
+
 fn invalid(~value: Box) -> i32
   let alias = value
-  let read_alias = () => alias.value
+  let read_alias = () => read(alias)
   mutate(~value)
   read_alias()
 `),
@@ -13113,7 +13078,7 @@ fn guarded(~left: Box, ~right: Box) -> void
     ]);
     const view = buildProgramCodegenView([result]);
     const footprint = Array.from(view.modules.values())[0]
-      ?.callableAccessFootprints.values()
+      ?.callableRuntimeProtocols.values()
       .find(
         (candidate) =>
           candidate.defaultIdentityGuardProtocol === "presence-conflict-bit-v1",
