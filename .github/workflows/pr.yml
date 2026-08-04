@@ -28,7 +28,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
@@ -69,7 +69,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
@@ -167,7 +167,7 @@ jobs:
         if: steps.changes.outputs.web == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -213,7 +213,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -265,7 +265,7 @@ jobs:
         if: steps.changes.outputs.conformance == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -324,7 +324,7 @@ jobs:
         if: steps.changes.outputs.integration == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -384,7 +384,7 @@ jobs:
         if: steps.changes.outputs.compiler_codegen == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -437,7 +437,7 @@ jobs:
         if: steps.changes.outputs.cli_runtime == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -506,7 +506,7 @@ jobs:
         if: steps.changes.outputs.optimizer == 'true' || steps.changes.outputs.web == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
