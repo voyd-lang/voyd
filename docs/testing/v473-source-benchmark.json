@@ -4,7 +4,6 @@
     "samplesPerRevisionAndMode": 7,
     "freshNodeProcessPerSample": true,
     "alternatingRevisionOrder": true,
-    "precompiledStdSnapshotDisabled": true,
     "node": "24.18.0",
     "beforeRevision": "15077084f4d3a1dd229850ddd44d51a5c24a16d7",
     "command": "npx tsx scripts/bench-alternating-revisions.ts --repo before=/private/tmp/voyd-v473-before --repo after=<v473-working-tree> --samples 7 --compact"

@@ -2088,13 +2088,6 @@
     "rationale": "Keep co-located: protects the public SDK API or an SDK adapter, lifecycle, cache, or reporting contract."
   },
   {
-    "file": "packages/sdk/src/__tests__/precompiled-std.test.ts",
-    "owner": "sdk-contract",
-    "reviewed": "2026-07-30",
-    "disposition": "sdk-local",
-    "rationale": "Protects the Node SDK artifact compatibility, invalidation, fallback, fresh-process loading, and source-analysis parity boundary. Compiler-local restoration mechanics remain in dependency-snapshot-cache.test.ts; portable borrowing behavior remains in conformance."
-  },
-  {
     "file": "packages/sdk/src/__tests__/sdk-node.test.ts",
     "owner": "sdk-contract",
     "disposition": "sdk-local",

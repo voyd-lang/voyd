@@ -8,7 +8,6 @@
     "samplesPerRevisionAndMode": 7,
     "freshNodeProcessPerSample": true,
     "alternatingRevisionOrder": true,
-    "precompiledStdSnapshotDisabled": true,
     "command": "node --import tsx scripts/bench-alternating-revisions.ts --repo baseline=/tmp/voyd-v472-baseline --repo start=/Users/drewy/code/voyd --samples 7 --compact"
   },
   "results": {

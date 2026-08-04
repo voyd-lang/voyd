@@ -87,7 +87,6 @@ for (const mode of modes) {
           env: {
             ...process.env,
             VOYD_COMPILER_PERF: "1",
-            VOYD_DISABLE_PRECOMPILED_STD_SNAPSHOT: "1",
           },
           maxBuffer: 10 * 1024 * 1024,
         },
@@ -172,7 +171,6 @@ process.stdout.write(
         samplesPerRevisionAndMode: sampleCount,
         freshNodeProcessPerSample: true,
         alternatingRevisionOrder: true,
-        precompiledStdSnapshotDisabled: true,
       },
       results: Object.fromEntries(
         Array.from(results, ([label, byMode]) => [

@@ -5,7 +5,6 @@ import type {
   ModuleHeaderView,
   SurfaceModuleView,
 } from "../parser/surface/index.js";
-import type { MacroDefinition } from "../parser/syntax-macros/functional-macro-expander/types.js";
 
 export type ModuleNamespace = "src" | "std" | "pkg";
 
@@ -98,13 +97,6 @@ export interface ModuleNode {
    * Includes local `pub macro` exports and `pub use` re-exports.
    */
   macroExports?: readonly string[];
-  /**
-   * Expanded public macro definitions retained by precompiled module-graph
-   * artifacts. Source-loaded graphs populate this alongside `macroExports`;
-   * consumers use it to seed macro scope without reparsing dependency bodies.
-   */
-  macroExportDefinitions?: readonly MacroDefinition[];
-  ambiguousMacroExports?: readonly string[];
   /** Macro names imported into this module after alias resolution. */
   macroImports?: readonly {
     name: string;

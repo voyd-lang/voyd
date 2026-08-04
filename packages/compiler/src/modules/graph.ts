@@ -45,7 +45,6 @@ type BuildGraphOptions = {
   host: ModuleHost;
   roots: ModuleRoots;
   includeTests?: boolean;
-  preloadedModules?: ReadonlyMap<string, ModuleNode>;
 };
 
 type PendingDependency = {
@@ -158,7 +157,6 @@ export const buildModuleGraph = async ({
   host,
   roots,
   includeTests,
-  preloadedModules,
 }: BuildGraphOptions): Promise<ModuleGraph> => {
   const modules = new Map<string, ModuleNode>();
   const modulesByPath = new Map<string, ModuleNode>();
@@ -299,27 +297,6 @@ export const buildModuleGraph = async ({
     }
     missingModules.set(importer, new Set([pathKey]));
   };
-
-  preloadedModules?.forEach((module, moduleId) => {
-    if (moduleId !== module.id || module.path.namespace === "src") {
-      throw new Error(`invalid preloaded dependency module ${moduleId}`);
-    }
-    modules.set(moduleId, module);
-    modulesByPath.set(modulePathToString(module.path), module);
-    noPreludeByModule.set(moduleId, false);
-    collectedMacroScopeKeys.set(moduleId, macroScopeKeys(module));
-    if (module.origin.kind === "inline") {
-      inlineModuleAstKeys.set(module.id, moduleAstKey(module));
-    }
-    updateNestedPrefixCounts({
-      counts: moduleNestedPrefixCounts,
-      pathKey: modulePathToString(module.path),
-      delta: 1,
-    });
-    incrementCompilerPerfCounter(
-      `graph.precompiled_module.${module.path.namespace}.count`,
-    );
-  });
 
   const preludeStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const hasStdPreludeModule = await supportsStdPreludeAutoImport({

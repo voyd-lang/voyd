@@ -244,16 +244,6 @@ export type EffectDeclInput = Omit<EffectDecl, "id" | "operations"> & {
   operations: readonly EffectOperationDeclInput[];
 };
 
-export interface DeclTableSnapshot {
-  functions: readonly FunctionDecl[];
-  moduleLets: readonly ModuleLetDecl[];
-  typeAliases: readonly TypeAliasDecl[];
-  objects: readonly ObjectDecl[];
-  traits: readonly TraitDecl[];
-  impls: readonly ImplDecl[];
-  effects: readonly EffectDecl[];
-}
-
 export class DeclTable {
   functions: FunctionDecl[] = [];
   moduleLets: ModuleLetDecl[] = [];
@@ -292,91 +282,6 @@ export class DeclTable {
     SymbolId,
     { effect: EffectDecl; operation: EffectOperationDecl }
   >();
-
-  snapshot(): DeclTableSnapshot {
-    return {
-      functions: [...this.functions],
-      moduleLets: [...this.moduleLets],
-      typeAliases: [...this.typeAliases],
-      objects: [...this.objects],
-      traits: [...this.traits],
-      impls: [...this.impls],
-      effects: [...this.effects],
-    };
-  }
-
-  static fromSnapshot(snapshot: DeclTableSnapshot): DeclTable {
-    const table = new DeclTable();
-    table.functions.push(...snapshot.functions);
-    table.moduleLets.push(...snapshot.moduleLets);
-    table.typeAliases.push(...snapshot.typeAliases);
-    table.objects.push(...snapshot.objects);
-    table.traits.push(...snapshot.traits);
-    table.impls.push(...snapshot.impls);
-    table.effects.push(...snapshot.effects);
-
-    const bump = (current: number, id: number): number =>
-      Math.max(current, id + 1);
-    snapshot.functions.forEach((declaration) => {
-      table.nextFunctionId = bump(table.nextFunctionId, declaration.id);
-      table.functionsBySymbol.set(declaration.symbol, declaration);
-      table.functionsById.set(declaration.id, declaration);
-      declaration.params.forEach((parameter) => {
-        table.nextParamId = bump(table.nextParamId, parameter.id);
-        table.parametersBySymbol.set(parameter.symbol, parameter);
-        table.parametersById.set(parameter.id, parameter);
-      });
-    });
-    snapshot.moduleLets.forEach((declaration) => {
-      table.nextModuleLetId = bump(table.nextModuleLetId, declaration.id);
-      table.moduleLetsBySymbol.set(declaration.symbol, declaration);
-      table.moduleLetsById.set(declaration.id, declaration);
-    });
-    snapshot.typeAliases.forEach((declaration) => {
-      table.nextAliasId = bump(table.nextAliasId, declaration.id);
-      table.typeAliasesBySymbol.set(declaration.symbol, declaration);
-      table.typeAliasesById.set(declaration.id, declaration);
-    });
-    snapshot.objects.forEach((declaration) => {
-      table.nextObjectId = bump(table.nextObjectId, declaration.id);
-      table.objectsBySymbol.set(declaration.symbol, declaration);
-      table.objectsById.set(declaration.id, declaration);
-    });
-    snapshot.traits.forEach((declaration) => {
-      table.nextTraitId = bump(table.nextTraitId, declaration.id);
-      table.traitsBySymbol.set(declaration.symbol, declaration);
-      table.traitsById.set(declaration.id, declaration);
-      declaration.methods.forEach((method) =>
-        method.params.forEach((parameter) => {
-          table.nextParamId = bump(table.nextParamId, parameter.id);
-          table.parametersBySymbol.set(parameter.symbol, parameter);
-          table.parametersById.set(parameter.id, parameter);
-        }),
-      );
-    });
-    snapshot.impls.forEach((declaration) => {
-      table.nextImplId = bump(table.nextImplId, declaration.id);
-      table.implsBySymbol.set(declaration.symbol, declaration);
-      table.implsById.set(declaration.id, declaration);
-    });
-    snapshot.effects.forEach((declaration) => {
-      table.nextEffectId = bump(table.nextEffectId, declaration.id);
-      table.effectsBySymbol.set(declaration.symbol, declaration);
-      table.effectsById.set(declaration.id, declaration);
-      declaration.operations.forEach((operation) => {
-        operation.parameters.forEach((parameter) => {
-          table.nextParamId = bump(table.nextParamId, parameter.id);
-          table.parametersBySymbol.set(parameter.symbol, parameter);
-          table.parametersById.set(parameter.id, parameter);
-        });
-        table.effectOperationsBySymbol.set(operation.symbol, {
-          effect: declaration,
-          operation,
-        });
-      });
-    });
-    return table;
-  }
 
   getTypeParameter(symbol: SymbolId): TypeParameterDecl | undefined {
     const parameterLists = [

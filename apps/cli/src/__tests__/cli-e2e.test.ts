@@ -540,45 +540,6 @@ describe("voyd cli test diagnostics", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
 
 describe("voyd cli package resolution", { timeout: CLI_E2E_TIMEOUT_MS }, () => {
   // SDK + integration own deep package-resolution semantics. CLI e2e keeps wiring checks.
-  it("loads bundled std semantics in a fresh CLI process", async () => {
-    assertCliRunnerAvailable();
-
-    const fixture = await createNestedEntryFixture();
-    try {
-      const result =
-        cliE2eRuntime === "source"
-          ? spawnSync(
-              process.execPath,
-              [
-                "--conditions=development",
-                "--import",
-                resolve(repoRoot, "node_modules/tsx/dist/loader.mjs"),
-                sourceCliPath,
-                "--run",
-                fixture.entryPath,
-              ],
-              {
-                cwd: fixture.root,
-                encoding: "utf8",
-                env: { ...process.env, VOYD_COMPILER_PERF: "1" },
-                timeout: CLI_E2E_TIMEOUT_MS,
-              },
-            )
-          : runCli(fixture.root, ["--run", fixture.entryPath], {
-              VOYD_COMPILER_PERF: "1",
-            });
-      const output = `${result.stdout ?? ""}${result.stderr ?? ""}`;
-
-      if (result.status !== 0) {
-        throw new Error(`voyd run failed: ${output}`);
-      }
-      expect(output).toContain('"compiler.precompiled_std_snapshot.hit":1');
-      expect(output).not.toContain("graph.load_module.std");
-    } finally {
-      await rm(fixture.root, { recursive: true, force: true });
-    }
-  });
-
   it("keeps src-root imports when running nested entry files", async () => {
     assertCliRunnerAvailable();
 

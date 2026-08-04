@@ -15,7 +15,6 @@ const limits = {
   rss: {
     relativePct: 15,
     absolute: 32 * MIB,
-    transitionAbsolute: 64 * MIB,
   },
   wasm: { relativePct: 5, absolute: 1024 },
   gzip: { relativePct: 5, absolute: 512 },
@@ -32,7 +31,6 @@ const scorecard = ({
   runtimeSamplesMs = [runtimeMs - 1, runtimeMs, runtimeMs + 1],
   wasmBytes = 10_000,
   gzipBytes = 5_000,
-  precompiledStdHits = 0,
 }) => ({
   schemaVersion: 2,
   corpusHashes: { scenario: "same-source" },
@@ -54,12 +52,7 @@ const scorecard = ({
       wasmBytes,
       gzipBytes,
       wasmSha256: "same-artifact",
-      counterMedians:
-        precompiledStdHits > 0
-          ? {
-              "compiler.precompiled_std_snapshot.hit": precompiledStdHits,
-            }
-          : {},
+      counterMedians: {},
       optimizerPasses: [],
       codegenMetrics: {},
       wasmStructure: {},
@@ -149,112 +142,6 @@ describe("optimizer scorecard measurement retry policy", () => {
     });
     expect(failures({ base, head })).toMatchObject([
       { scenario: "scenario", metric: "rss" },
-    ]);
-  });
-
-  it("allows the fixed RSS cost only when precompiled std snapshots are introduced", () => {
-    const result = failures({
-      base: scorecard({
-        rssMib: 152,
-        rssGrowthSamplesMib: [151.83, 154.7, 385.56, 152.33, 174.37, 168.31],
-      }),
-      head: scorecard({
-        rssMib: 208,
-        rssGrowthSamplesMib: [223.18, 207.84, 207.86, 213.93, 210.21, 212.69],
-        precompiledStdHits: 1,
-      }),
-    });
-    expect(result).toEqual([]);
-  });
-
-  it("fails an oversized RSS regression when precompiled std snapshots are introduced", () => {
-    const result = failures({
-      base: scorecard({ rssMib: 152 }),
-      head: scorecard({
-        rssMib: 217,
-        precompiledStdHits: 1,
-      }),
-    });
-    expect(result).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
-  });
-
-  it("honors an explicitly stricter RSS limit during the snapshot transition", () => {
-    const result = failures({
-      base: scorecard({ rssMib: 152 }),
-      head: scorecard({
-        rssMib: 208,
-        precompiledStdHits: 1,
-      }),
-      testLimits: {
-        ...limits,
-        rss: {
-          ...limits.rss,
-          transitionAbsolute: 32 * MIB,
-        },
-      },
-    });
-    expect(result).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
-    expect(console.log).toHaveBeenCalledWith(
-      expect.stringContaining("transition RSS limit is 32.00 MiB"),
-    );
-  });
-
-  it("uses an explicit generic RSS option as the transition limit", () => {
-    vi.stubEnv("OPTIMIZER_BENCH_RSS_MIN_BYTES", String(32 * MIB));
-    expect(thresholds().rss).toMatchObject({
-      absolute: 32 * MIB,
-      transitionAbsolute: 32 * MIB,
-    });
-  });
-
-  it("allows a separate explicit snapshot-transition RSS option", () => {
-    vi.stubEnv("OPTIMIZER_BENCH_RSS_MIN_BYTES", String(32 * MIB));
-    vi.stubEnv(
-      "OPTIMIZER_BENCH_PRECOMPILED_STD_TRANSITION_RSS_MIN_BYTES",
-      String(48 * MIB),
-    );
-    expect(thresholds().rss).toMatchObject({
-      absolute: 32 * MIB,
-      transitionAbsolute: 48 * MIB,
-    });
-  });
-
-  it("uses the ordinary RSS limit after both revisions load precompiled std", () => {
-    const result = failures({
-      base: scorecard({ rssMib: 152, precompiledStdHits: 1 }),
-      head: scorecard({
-        rssMib: 208,
-        precompiledStdHits: 1,
-      }),
-    });
-    expect(result).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
-  });
-
-  it("uses the ordinary RSS limit when a snapshot-enabled base stops hitting", () => {
-    const result = failures({
-      base: scorecard({ rssMib: 152, precompiledStdHits: 1 }),
-      head: scorecard({ rssMib: 208 }),
-    });
-    expect(result).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
-  });
-
-  it("does not relax time or artifact limits during the snapshot transition", () => {
-    const result = failures({
-      base: scorecard({ rssMib: 152 }),
-      head: scorecard({
-        rssMib: 208,
-        compileMs: 400,
-        runtimeMs: 18,
-        wasmBytes: 12_000,
-        gzipBytes: 6_000,
-        precompiledStdHits: 1,
-      }),
-    });
-    expect(result.map(({ metric }) => metric)).toEqual([
-      "compile",
-      "runtime",
-      "wasm",
-      "gzip",
     ]);
   });
 

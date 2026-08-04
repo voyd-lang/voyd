@@ -6,7 +6,6 @@
     "samplesPerRevisionAndMode": 7,
     "freshNodeProcessPerSample": true,
     "alternatingRevisionOrder": true,
-    "precompiledStdSnapshotDisabled": true,
     "node": "24.18.0",
     "baselineRevision": "876f1680",
     "prRevision": "1488efd4"

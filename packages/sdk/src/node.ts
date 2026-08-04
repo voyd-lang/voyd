@@ -30,7 +30,6 @@ import {
   diagnosticsFromUnknownError,
 } from "./shared/diagnostics.js";
 import { detectSrcRootForPath } from "./shared/source-root.js";
-import { loadPrecompiledStdSnapshot } from "./precompiled-std.js";
 import type {
   CompileOptions,
   CompileResult,
@@ -41,7 +40,6 @@ import type {
 } from "./shared/types.js";
 
 export { detectSrcRootForPath } from "./shared/source-root.js";
-export { snapshotPrecompiledStdLoadStats } from "./precompiled-std.js";
 export {
   findVoydPackageAdapterSpecifiers,
   loadVoydPackageAdapters,
@@ -313,22 +311,6 @@ const compileSdk = async (
       name: "sdkSetup.createHost",
       startedAt: hostStartedAt,
     });
-    const precompiledStdStartedAt = perfEnabled ? performance.now() : 0;
-    const entryIsInStd =
-      roots.std !== undefined &&
-      isPathWithinRoot({ root: roots.std, candidate: entryPath });
-    const precompiledStd = entryIsInStd
-      ? undefined
-      : await loadPrecompiledStdSnapshot({
-          stdRoot: roots.std!,
-          includeTests: options.includeTests || options.testsOnly,
-        });
-    recordSetupPhase({
-      phasesMs: setupPhasesMs,
-      enabled: perfEnabled,
-      name: "sdkSetup.loadPrecompiledStd",
-      startedAt: precompiledStdStartedAt,
-    });
     recordSetupPhase({
       phasesMs: setupPhasesMs,
       enabled: perfEnabled,
@@ -354,7 +336,6 @@ const compileSdk = async (
       boundaryExports: options.boundaryExports,
       externalDeclarations: options.externalDeclarations,
       cache: compilerCache,
-      precompiledStd,
       setupPhasesMs,
       finalizeSuccess: (result) => finalizeCompile({ options, result }),
     });
@@ -388,22 +369,6 @@ const compileSdk = async (
       }),
     };
   }
-};
-
-const isPathWithinRoot = ({
-  root,
-  candidate,
-}: {
-  root: string;
-  candidate: string;
-}): boolean => {
-  const relative = path.relative(path.resolve(root), path.resolve(candidate));
-  return (
-    relative === "" ||
-    (!relative.startsWith(`..${path.sep}`) &&
-      relative !== ".." &&
-      !path.isAbsolute(relative))
-  );
 };
 
 const resolveRuntimeDiagnostics = ({

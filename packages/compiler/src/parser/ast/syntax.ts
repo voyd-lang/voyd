@@ -121,11 +121,3 @@ export const getSyntaxId = () => {
   currentSyntaxId += 1;
   return current;
 };
-
-/**
- * Keeps syntax ids restored from a persistent compiler artifact disjoint from
- * syntax parsed later in the current process.
- */
-export const reserveSyntaxIdsThrough = (id: number): void => {
-  currentSyntaxId = Math.max(currentSyntaxId, id + 1);
-};

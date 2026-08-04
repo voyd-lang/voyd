@@ -77,33 +77,6 @@ corresponding comparison-script flags. The scheduled
 `.github/workflows/optimizer-scorecard.yml` workflow runs the full corpus and
 retains its JSON artifact for 30 days.
 
-There is one migration-only RSS exception for precompiled standard-library
-semantics. When the base scorecard has no
-`compiler.precompiled_std_snapshot.hit` counter and the head scorecard does,
-the absolute peak-RSS-growth threshold is 64 MiB instead of 32 MiB for that
-row. Compile time, runtime, Wasm size, and gzip size keep their ordinary
-thresholds. Restoring the semantic graph creates a fixed startup working set;
-the six-sample V-448 comparison measured lower-quartile growth of 152.33 MiB
-before and 207.86 MiB after on the smallest scenario; the scorecard reported a
-55.52 MiB increase from the unrounded values. That comparison left 8.48 MiB
-below the 64 MiB ceiling. A later hosted confirmation measured a 63.90 MiB
-increase on the same scenario, leaving only 0.10 MiB and demonstrating that
-the exception is tightly bounded. Larger scenarios in the six-sample
-comparison used 149-186 MiB less compile-attributable RSS. The exception does
-not apply when both revisions load the snapshot, or if the head stops hitting
-it, so the ordinary 32 MiB gate automatically resumes for subsequent changes.
-An explicit `--rss-min-bytes` or `OPTIMIZER_BENCH_RSS_MIN_BYTES` remains
-authoritative during the transition. Use
-`--precompiled-std-transition-rss-min-bytes` (or
-`OPTIMIZER_BENCH_PRECOMPILED_STD_TRANSITION_RSS_MIN_BYTES`) only to configure
-the migration threshold separately.
-
-This exception is temporary. Its remeasurement and removal are tracked by
-[V-468](https://linear.app/voyd-lang/issue/V-468); package-scale compilation
-work is tracked under [V-462](https://linear.app/voyd-lang/issue/V-462). The
-tickets own the exit criteria. This document defines only the currently
-enforced scorecard behavior and the evidence for it.
-
 When only sampled compile, runtime, or RSS measurements fail, the PR gate
 reruns the affected scenarios with base/head order reversed. It pools the
 initial and retry samples before making the final comparison, which cancels
@@ -287,11 +260,11 @@ Local M-series run, optimized mode, one-line app edit between iterations:
 | `voyd_examples/ray-vtrace-tuned`        |          5787.530 |             5157.944 |  629.586 | 10.9% |
 
 `VOYD_COMPILER_PERF=1` on `smoke/vtrace-compute-main` showed the warm app-edit
-compile hitting the snapshot for all 49 std modules. The profiled cold compile
-spent about 970 ms in semantic analysis and 4689 ms in emit; the warm app-edit
-spent about 172 ms in semantic analysis and 4411 ms in emit. The remaining
-optimized latency is therefore dominated by whole-program emit/codegen rather
-than std typing.
+compile reusing all 49 std modules from the in-process dependency cache. The
+profiled cold compile spent about 970 ms in semantic analysis and 4689 ms in
+emit; the warm app-edit spent about 172 ms in semantic analysis and 4411 ms in
+emit. The remaining optimized latency is therefore dominated by whole-program
+emit/codegen rather than std typing.
 
 The optional suite benchmark at
 `/Users/drew/projects/voyd_examples/benchmarks/suite/voyd/benchmarks.voyd`

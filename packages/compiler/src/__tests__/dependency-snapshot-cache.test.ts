@@ -6,13 +6,8 @@ import type { ModuleHost, ModuleRoots } from "../modules/types.js";
 import {
   commitDependencySnapshot,
   createCompilerDependencySnapshotCache,
-  preparePrecompiledDependencySnapshot,
   prepareDependencySnapshotReuse,
 } from "../modules/dependency-snapshot-cache.js";
-import {
-  encodePrecompiledStdSnapshot,
-  restorePrecompiledStdSnapshot,
-} from "../modules/precompiled-std-snapshot.js";
 import { analyzeModules, loadModuleGraph } from "../pipeline.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
@@ -107,87 +102,6 @@ describe("compiler dependency snapshots", () => {
     const analyzed = analyzeModules({ graph });
 
     expect(analyzed.dependencySnapshot).toBeUndefined();
-  });
-
-  it("restores std graph and semantic state without reading dependency source", async () => {
-    const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
-    const stdOnlyRoots = {
-      src: initial.roots.src,
-      std: initial.roots.std,
-    };
-    const graph = await loadModuleGraph({
-      entryPath: `${stdOnlyRoots.src}${sep}main.voyd`,
-      roots: stdOnlyRoots,
-      host: createMemoryHost({
-        [`${stdOnlyRoots.src}${sep}main.voyd`]: [
-          "#!no_prelude",
-          "use std::mathdep::{ std_value }",
-          "pub fn main() -> i32",
-          "  std_value() + 1",
-        ].join("\n"),
-        [`${stdOnlyRoots.std}${sep}mathdep.voyd`]:
-          initial.files[`${initial.roots.std}${sep}mathdep.voyd`]!,
-      }),
-    });
-    const analyzed = analyzeModules({
-      graph,
-      captureDependencySnapshot: true,
-    });
-    expect(analyzed.diagnostics).toHaveLength(0);
-    expect(analyzed.dependencySnapshot).toBeDefined();
-
-    const encoded = encodePrecompiledStdSnapshot({
-      graphModules: graph.modules,
-      dependencySnapshot: analyzed.dependencySnapshot!,
-      stdRoot: stdOnlyRoots.std,
-    });
-    const restored = restorePrecompiledStdSnapshot({
-      encoded,
-      stdRoot: stdOnlyRoots.std,
-    });
-    expect(
-      "queries" in
-        (restored.dependencySnapshot.semantics.get("std::mathdep")!
-          .borrowing as object),
-    ).toBe(false);
-    const sourceOnlyHost = createMemoryHost({
-      [`${stdOnlyRoots.src}${sep}main.voyd`]: [
-        "#!no_prelude",
-        "use std::mathdep::{ std_value }",
-        "pub fn main() -> i32",
-        "  std_value() + 2",
-      ].join("\n"),
-    });
-    const restoredGraph = await loadModuleGraph({
-      entryPath: `${stdOnlyRoots.src}${sep}main.voyd`,
-      roots: stdOnlyRoots,
-      host: sourceOnlyHost,
-      preloadedModules: restored.modules,
-    });
-    const prepared = preparePrecompiledDependencySnapshot({
-      graph: restoredGraph,
-      snapshot: restored.dependencySnapshot,
-      liveTypingState: restored.typingState,
-    });
-    expect(prepared.typingState).toBe(restored.typingState);
-    expect(prepared.previousSemantics.get("std::mathdep")).toBe(
-      restored.dependencySnapshot.semantics.get("std::mathdep"),
-    );
-    const second = analyzeModules({
-      graph: restoredGraph,
-      previousSemantics: prepared.previousSemantics,
-      typingState: prepared.typingState,
-    });
-
-    expect(second.diagnostics).toHaveLength(0);
-    expect(second.recomputedModuleIds).toEqual(["src::main"]);
-    expect(second.semantics.get("std::mathdep")?.typing.arena).toBe(
-      second.typingState.arena,
-    );
-    expect(
-      second.semantics.get("std::mathdep")?.exports.get("std_value")
-        ?.borrowing?.[0]?.contract,
-    ).toBeDefined();
   });
 
   it("reuses std and installed package semantics after a source edit", async () => {

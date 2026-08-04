@@ -4,11 +4,9 @@ import { DiagnosticError } from "@voyd-lang/compiler/diagnostics/index.js";
 import {
   commitDependencySnapshot,
   createCompilerDependencySnapshotCache,
-  preparePrecompiledDependencySnapshot,
   prepareDependencySnapshotReuse,
   type CompilerDependencySnapshotCache,
 } from "@voyd-lang/compiler/modules/dependency-snapshot-cache.js";
-import type { RestoredPrecompiledStdSnapshot } from "@voyd-lang/compiler/modules/precompiled-std-snapshot.js";
 import type {
   ModuleHost,
   ModuleRoots,
@@ -70,7 +68,6 @@ export const compileWithLoader = async ({
   boundaryExports,
   externalDeclarations,
   cache,
-  precompiledStd,
   setupPhasesMs,
   finalizeSuccess,
 }: {
@@ -87,7 +84,6 @@ export const compileWithLoader = async ({
   boundaryExports?: BoundaryExportsOption;
   externalDeclarations?: boolean;
   cache?: CompilerReuseCache;
-  precompiledStd?: RestoredPrecompiledStdSnapshot;
   setupPhasesMs?: Readonly<Record<string, number>>;
   finalizeSuccess?: (
     result: CompileArtifactsSuccess,
@@ -121,7 +117,6 @@ export const compileWithLoader = async ({
         roots,
         host,
         includeTests: shouldIncludeTests,
-        preloadedModules: precompiledStd?.modules,
       });
       perf.mark("loadModuleGraph", loadStartedAt);
     } catch (error) {
@@ -163,15 +158,6 @@ export const compileWithLoader = async ({
       roots,
       includeTests: shouldIncludeTests,
     });
-    const precompiledDependencySnapshot =
-      !dependencySnapshotReuse.hit && precompiledStd
-        ? preparePrecompiledDependencySnapshot({
-            graph,
-            snapshot: precompiledStd.dependencySnapshot,
-            liveTypingState: precompiledStd.typingState,
-          })
-        : undefined;
-
     const analyzeStartedAt = perf.start();
     const {
       semantics,
@@ -183,12 +169,8 @@ export const compileWithLoader = async ({
       includeTests: shouldIncludeTests,
       testScope: scopedTestScope,
       captureDependencySnapshot: Boolean(dependencySnapshotReuse.key),
-      previousSemantics:
-        dependencySnapshotReuse.previousSemantics ??
-        precompiledDependencySnapshot?.previousSemantics,
-      typingState:
-        dependencySnapshotReuse.typingState ??
-        precompiledDependencySnapshot?.typingState,
+      previousSemantics: dependencySnapshotReuse.previousSemantics,
+      typingState: dependencySnapshotReuse.typingState,
     });
     perf.mark("analyzeModules", analyzeStartedAt);
     const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];

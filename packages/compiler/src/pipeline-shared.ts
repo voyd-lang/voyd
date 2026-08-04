@@ -3,7 +3,6 @@ import { modulePathToString } from "./modules/path.js";
 import type {
   ModuleGraph,
   ModuleHost,
-  ModuleNode,
   ModulePath,
   ModuleRoots,
 } from "./modules/types.js";
@@ -53,7 +52,6 @@ export type LoadModulesOptions = {
   roots: ModuleRoots;
   host?: ModuleHost;
   includeTests?: boolean;
-  preloadedModules?: ReadonlyMap<string, ModuleNode>;
 };
 
 export type AnalyzeModulesOptions = {

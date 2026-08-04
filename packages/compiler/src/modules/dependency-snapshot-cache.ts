@@ -17,10 +17,7 @@ import type {
   ModulePath,
   ModuleRoots,
 } from "./types.js";
-import type {
-  ReusableDependencySemanticsSnapshot,
-  SemanticsTypingState,
-} from "./semantic-analysis.js";
+import type { ReusableDependencySemanticsSnapshot } from "./semantic-analysis.js";
 
 const COMPILER_DEPENDENCY_SNAPSHOT_VERSION =
   "0.2.0:v375-dependency-snapshot-v2";
@@ -48,14 +45,6 @@ export type PreparedDependencySnapshotReuse = {
     effectInterner: EffectInterner;
   };
   hit: boolean;
-};
-
-export type PreparedPrecompiledDependencySnapshot = {
-  previousSemantics: ReadonlyMap<string, SemanticsPipelineResult>;
-  typingState: {
-    arena: SemanticsPipelineResult["typing"]["arena"];
-    effectInterner: EffectInterner;
-  };
 };
 
 export const createCompilerDependencySnapshotCache =
@@ -115,57 +104,6 @@ export const prepareDependencySnapshotReuse = ({
     previousSemantics,
     typingState: { arena, effectInterner },
     hit: true,
-  };
-};
-
-export const preparePrecompiledDependencySnapshot = ({
-  graph,
-  snapshot,
-  liveTypingState,
-}: {
-  graph: ModuleGraph;
-  snapshot: ReusableDependencySemanticsSnapshot;
-  liveTypingState?: SemanticsTypingState;
-}): PreparedPrecompiledDependencySnapshot => {
-  const snapshotModuleIds = new Set(snapshot.moduleIds);
-  const reusableStdModuleIds = Array.from(graph.modules)
-    .filter(([, module]) => module.path.namespace === "std")
-    .map(([moduleId]) => moduleId)
-    .filter((moduleId) => snapshotModuleIds.has(moduleId));
-
-  const selectedSemantics = new Map(
-    reusableStdModuleIds.map((moduleId) => {
-      const semantics = snapshot.semantics.get(moduleId);
-      if (!semantics) {
-        throw new Error(
-          `precompiled std snapshot is missing semantics for ${moduleId}`,
-        );
-      }
-      return [moduleId, semantics] as const;
-    }),
-  );
-  incrementCompilerPerfCounter("compiler.precompiled_std_snapshot.hit");
-  reusableStdModuleIds.forEach(() =>
-    incrementCompilerPerfCounter(
-      "compiler.precompiled_std_snapshot.reused_module.count",
-    ),
-  );
-  if (liveTypingState) {
-    return {
-      previousSemantics: selectedSemantics,
-      typingState: liveTypingState,
-    };
-  }
-
-  const arena = createTypeArena(snapshot.arena);
-  const effectInterner = createEffectInterner(snapshot.effectInterner);
-  return {
-    previousSemantics: cloneSemanticsMapForTypingState({
-      semantics: selectedSemantics,
-      arena,
-      effectInterner,
-    }),
-    typingState: { arena, effectInterner },
   };
 };
 

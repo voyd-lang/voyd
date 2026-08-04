@@ -22,13 +22,6 @@ const RSS_MODE_MIN_CLUSTER_SAMPLES = 3;
 const RSS_MODE_MIN_GAP = 64 * MIB;
 const RSS_MODE_MIN_RELATIVE_GAP = 0.1;
 const RSS_MODE_MIN_GAP_DOMINANCE = 1.5;
-// Restoring the precompiled std semantic graph adds a fixed startup working
-// set. Permit that cost only while comparing a pre-snapshot base with the
-// first snapshot-enabled head. Once both revisions load the snapshot, the
-// ordinary RSS threshold applies again.
-const PRECOMPILED_STD_TRANSITION_RSS_LIMIT = 64 * MIB;
-const PRECOMPILED_STD_HIT_COUNTER = "compiler.precompiled_std_snapshot.hit";
-
 const argValue = (name) => {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
@@ -47,15 +40,6 @@ const numericOption = ({ argument, environment, fallback }) => {
 };
 
 export const thresholds = () => {
-  const rssAbsoluteOption = {
-    argument: "--rss-min-bytes",
-    environment: "OPTIMIZER_BENCH_RSS_MIN_BYTES",
-  };
-  const rssAbsoluteWasConfigured = rawOption(rssAbsoluteOption) !== undefined;
-  const rssAbsolute = numericOption({
-    ...rssAbsoluteOption,
-    fallback: DEFAULT_THRESHOLDS.rss.absolute,
-  });
   return {
     compile: {
       relativePct: numericOption({
@@ -87,13 +71,10 @@ export const thresholds = () => {
         environment: "OPTIMIZER_BENCH_RSS_MAX_PCT",
         fallback: DEFAULT_THRESHOLDS.rss.relativePct,
       }),
-      absolute: rssAbsolute,
-      transitionAbsolute: numericOption({
-        argument: "--precompiled-std-transition-rss-min-bytes",
-        environment: "OPTIMIZER_BENCH_PRECOMPILED_STD_TRANSITION_RSS_MIN_BYTES",
-        fallback: rssAbsoluteWasConfigured
-          ? rssAbsolute
-          : PRECOMPILED_STD_TRANSITION_RSS_LIMIT,
+      absolute: numericOption({
+        argument: "--rss-min-bytes",
+        environment: "OPTIMIZER_BENCH_RSS_MIN_BYTES",
+        fallback: DEFAULT_THRESHOLDS.rss.absolute,
       }),
     },
     wasm: {
@@ -202,24 +183,6 @@ const rssComparison = (row) =>
         ),
         samples: row.processMaxRssSamplesBytes ?? [],
       };
-
-const rssThreshold = ({ baseRow, headRow, threshold }) => {
-  const baseUsesPrecompiledStd =
-    (baseRow.counterMedians?.[PRECOMPILED_STD_HIT_COUNTER] ?? 0) > 0;
-  const headUsesPrecompiledStd =
-    (headRow.counterMedians?.[PRECOMPILED_STD_HIT_COUNTER] ?? 0) > 0;
-  if (baseUsesPrecompiledStd || !headUsesPrecompiledStd) {
-    return { threshold };
-  }
-  const transitionAbsolute = threshold.transitionAbsolute ?? threshold.absolute;
-  return {
-    threshold: {
-      ...threshold,
-      absolute: transitionAbsolute,
-    },
-    note: `precompiled-std transition RSS limit is ${(transitionAbsolute / MIB).toFixed(2)} MiB; the ordinary limit resumes when both revisions load the snapshot`,
-  };
-};
 
 const largestSampleGap = (samples) => {
   const sorted = [...samples].sort((left, right) => left - right);
@@ -476,14 +439,6 @@ export const compareScorecards = ({ base, head, limits }) => {
       );
     }
     const rssModes = rssModeComparisons({ base: baseRss, head: headRss });
-    const rssLimit = rssThreshold({
-      baseRow,
-      headRow,
-      threshold: limits.rss,
-    });
-    if (rssLimit.note) {
-      console.log(`  [info] ${rssLimit.note}`);
-    }
     const rssComparisons =
       rssModes.length > 0
         ? rssModes
@@ -503,7 +458,7 @@ export const compareScorecards = ({ base, head, limits }) => {
         failures,
         scenario: baseRow.scenario,
         ...comparison,
-        threshold: rssLimit.threshold,
+        threshold: limits.rss,
         metric: "rss",
         format: (value) => (value / MIB).toFixed(2),
       }),

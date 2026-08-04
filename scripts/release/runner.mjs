@@ -183,15 +183,6 @@ const syncStdSourceVersion = ({ versionPlan }) => {
   return true;
 };
 
-export const resolvePrecompiledStdVersioningAction = (targetNames) => {
-  if (targetNames.includes("@voyd-lang/std")) {
-    return "generate:std-snapshot";
-  }
-  return targetNames.includes("@voyd-lang/compiler")
-    ? "check:std-snapshot"
-    : undefined;
-};
-
 export const versionSelectedTargets = ({ targetNames, bump, version }) => {
   const versionPlan = resolveVersionPlan({ targetNames, bump, version });
   if (!versionPlan) {
@@ -237,14 +228,6 @@ export const versionSelectedTargets = ({ targetNames, bump, version }) => {
     command: "npm",
     args: ["install", "--package-lock-only", "--ignore-scripts"],
   });
-  const snapshotAction = resolvePrecompiledStdVersioningAction(targetNames);
-  if (snapshotAction) {
-    runCommand({
-      command: "npm",
-      args: ["run", snapshotAction],
-    });
-  }
-
   process.stdout.write(
     `[release] Updated ${changedFiles} manifest(s): ${nextVersions.join(", ")}\n`,
   );
@@ -456,22 +439,8 @@ const runVscodePackageCheck = (targetNames) => {
   npmRunWorkspaceScript({ workspace: "voyd-vscode", script: "package" });
 };
 
-const runPrecompiledStdCheck = (targetNames) => {
-  if (
-    !targetNames.includes("@voyd-lang/compiler") &&
-    !targetNames.includes("@voyd-lang/std")
-  ) {
-    return;
-  }
-  runCommand({
-    command: "npm",
-    args: ["run", "check:std-snapshot"],
-  });
-};
-
 export const runReleaseCheck = ({ targetNames }) => {
   targetNames.forEach(validateNpmPackageMetadata);
-  runPrecompiledStdCheck(targetNames);
   runTurboClean(targetNames);
   runTurboBuild(targetNames);
   runOwnChecks(targetNames);

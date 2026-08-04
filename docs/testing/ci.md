@@ -52,11 +52,11 @@ package boundaries so Turbo's affected selection remains authoritative.
 
 ## V-448 temporary limits
 
-V-448 added borrow analysis and versioned callable summaries.
-Snapshot-hit default-prelude compilation recovers the representative fixture,
-but package-heavy and snapshot-miss paths remain slower. The measurements and
-hosted-run history are recorded in
-[Memory and mutation safety performance](./memory-and-mutation-safety-performance.md).
+V-448 added borrow analysis and versioned callable summaries. Fresh compiles
+analyze the standard library from source; repeated compiles through one SDK can
+reuse unchanged dependency semantics in process. The measurements and
+hosted-run history are recorded in [Memory and mutation safety
+performance](./memory-and-mutation-safety-performance.md).
 
 The limits below are narrowly scoped and retain all assertions. They describe
 the current CI contract; cleanup and remeasurement are tracked exclusively by
@@ -115,12 +115,6 @@ The string-overload freshness check runs before every partition command.
 
 The VX integration tests share one SDK instance so distinct entry compilations
 can reuse the in-process package dependency snapshot.
-
-### Optimizer scorecard
-
-The precompiled-std migration-only RSS rule and its current measurements are
-documented in [Compiler performance](../compiler-performance.md). Its removal
-is also owned by V-468.
 
 ## Runtime selection
 

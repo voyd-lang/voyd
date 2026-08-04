@@ -76,9 +76,9 @@ guard, and equal runtime identities produce the required deterministic panic.
 
 ## Assessment
 
-The proposal adds a substantial compile-time and snapshot-size cost. That cost
-comes from whole-program borrow analysis plus versioned, privacy-preserving
-callable summaries for std and user modules. It is explicit and accepted for
+The proposal adds a substantial compile-time and public-summary-size cost. That
+cost comes from whole-program borrow analysis plus versioned,
+privacy-preserving callable summaries for std and user modules. It is explicit and accepted for
 this proposal because it buys separate-compilation safety across traits,
 generics, wrappers, effects, defaults, and re-exports; the completion gate has
 no regression threshold for these new capabilities.
@@ -96,48 +96,21 @@ Package-scale performance work is tracked by
 [V-462](https://linear.app/voyd-lang/issue/V-462). It must preserve the public
 summary schema and `ProgramCodegenView` boundary.
 
-## Precompiled std snapshot
+## Source-compilation behavior
 
-The V-448 branch ships a compiler-ABI-versioned precompiled semantic snapshot
-for the 48 std modules reachable from the default prelude. The final-head
-confirmation below was run on 2 August 2026 against compiler and artifact
-revision `d139047f`. Each sample launches a new Node process, creates a new SDK,
-compiles the representative fixture, and exits. Source mode sets
-`VOYD_DISABLE_PRECOMPILED_STD_SNAPSHOT=1`. Both paths emit identical Wasm:
-37,854 bytes unoptimized
-(`85c607b9c5ce04d556c66fa1f1a0f7c46182685d87fc19a6c7ff740c6fd0fd7d`)
-and 1,112 bytes in release mode
-(`82ffc2152a22bd82a6e2ef939add5d5a8d17ccc28de80b80dd8d6c588a421710`).
+Fresh SDK instances and compiler processes load and analyze the standard
+library from source. Against the original V-448 baseline medians of 907.00 ms
+unoptimized and 1,108.87 ms in release mode, the later seven-sample source
+measurements were 2,097.13 ms and 2,513.49 ms respectively: 131.22% and 126.67%
+slower. The source-analysis regression remains the representative cold-compile
+behavior for default-prelude, package-heavy, and test-enabled workflows.
 
-| Compile wall time, 7-sample median | Mode    | Source analysis | Precompiled std |                  Delta |
-| ---------------------------------- | ------- | --------------: | --------------: | ---------------------: |
-| Fresh process                      | none    |     2,097.13 ms |       697.78 ms | -1,399.36 ms (-66.73%) |
-| Fresh process                      | release |     2,513.49 ms |     1,101.20 ms | -1,412.29 ms (-56.19%) |
-
-The checked-in hybrid artifact is 5,239,953 bytes. It includes both the
-canonical portable reference graph and the optional Node/V8 accelerator.
-Median snapshot loading, including source-manifest verification, decompression,
-identity restoration, and validation, takes 282.48 ms unoptimized and 283.96 ms
-in release mode. Compiler performance counters prove the hit loads 48
-precompiled graph modules and performs no `graph.load_module.std` work.
-Semantic analysis then recomputes only the application module.
-
-Reproduce this comparison with:
-
-```sh
-npm run bench:precompiled-std -- 7
-```
-
-The original 350–500 ms whole-compile goal is not reachable with the current
-whole-program codegen and compiler-private snapshot shape. Restoring the
-complete HIR/typing/binding object graph accounts for roughly 0.28 seconds.
-Against the original V-448 baseline medians of 907.00 ms and 1,108.87 ms,
-final-head source analysis is 131.22% slower unoptimized and 126.67% slower in
-release mode. Snapshot-hit compilation is 23.07% faster unoptimized and 0.69%
-faster in release mode. The snapshot recovers the representative default-
-prelude path, but package-heavy and snapshot-miss paths retain the source-
-analysis regression. Smaller public package contracts, incremental callable
-analysis, persistent caches, and reusable dependency codegen are tracked under
+A reused SDK instance still keeps unchanged std and package semantics in the
+in-process `CompilerDependencySnapshotCache`. Application edits can therefore
+reuse dependency typing state and incremental semantic inputs, while fresh SDKs
+repeat dependency analysis and every compile repeats whole-program codegen.
+Smaller public package contracts, incremental callable analysis, and reusable
+dependency codegen are tracked under
 [V-462](https://linear.app/voyd-lang/issue/V-462).
 
 ## Hosted CI impact
@@ -173,11 +146,11 @@ removed compiler-internal rich-summary encoding and decoding. The final
 production compiler diff is 875 lines smaller (7,359 additions and 8,234
 deletions), including the new fact representation.
 
-The reviewed implementation did not meet the source-performance completion
-gate and therefore was not committed or pushed. The final comparison used
-seven alternating fresh Node processes for each revision and mode, with the
-precompiled std snapshot disabled. Raw samples and machine-readable counters
-are in [`v472-source-benchmark.json`](./v472-source-benchmark.json).
+The implementation did not meet the source-performance completion gate. The
+final comparison used seven alternating fresh Node processes for each revision
+and mode. Each fresh process compiled std from source. Raw samples and
+machine-readable counters are in
+[`v472-source-benchmark.json`](./v472-source-benchmark.json).
 
 | Seven-sample source median | `876f1680` | PR `1488efd4` | V-472 working tree | V-472 vs baseline | V-472 vs PR |
 | --- | ---: | ---: | ---: | ---: | ---: |
@@ -193,12 +166,8 @@ about 672 ms: approximately 262 ms for fact extraction, 254 ms for contract
 inference, and 142 ms for loan checking. That remaining source cost exceeds
 both V-472 gate thresholds.
 
-Current Wasm is byte-identical to PR `1488efd4` in both modes. A separate
-seven-sample snapshot/source run measured 699.02 ms snapshot versus 2,033.71 ms
-source unoptimized, and 1,083.71 ms versus 2,410.56 ms release. Snapshot hits
-are below baseline source time, but do not make the source regression
-acceptable. The snapshot was intentionally left stale rather than regenerated
-over a failing source architecture.
+Current Wasm is byte-identical to PR `1488efd4` in both modes. The cold source
+regression remains above both V-472 completion thresholds.
 
 The focused runtime/allocation check retained zero repeated-run linear-memory
 growth. Unoptimized current runtime was 0.183959 ms versus 0.186250 ms at the
@@ -216,7 +185,7 @@ contract composer consume the published fact and do not perform provenance
 analysis themselves.
 
 The final source comparison used seven alternating fresh Node processes for
-each revision and mode, with the precompiled std snapshot disabled. Raw samples
+each revision and mode. Each fresh process compiled std from source. Raw samples
 and machine-readable routing, work, memory, and Wasm measurements are in
 [`v473-source-benchmark.json`](./v473-source-benchmark.json).
 
@@ -241,5 +210,5 @@ projections are now preserved across module contracts.
 Unoptimized and release Wasm are byte-identical to the PR head. Focused
 regressions cover local and cross-module aggregate projections, module aliases,
 recursive wrappers, runtime-checked wrappers, and projected-local reference
-escapes. The regenerated std snapshot and the complete monorepo suite pass;
-the std source lane completes under the default heap.
+escapes. The complete monorepo suite passes, and the std source lane completes
+under the default heap.

@@ -68,25 +68,6 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
       const diagnosticsByModule = new Map<string, Diagnostic[]>();
       const expandedModuleIds: string[] = [];
 
-      graph.modules.forEach((module, moduleId) => {
-        if (exportsByModule.has(moduleId)) {
-          return;
-        }
-        const definitions = module.macroExportDefinitions;
-        if (!definitions) {
-          return;
-        }
-        exportsByModule.set(moduleId, {
-          macros: new Map(
-            definitions.map((definition) => [
-              definition.name.value,
-              definition,
-            ]),
-          ),
-          ambiguousNames: new Set(module.ambiguousMacroExports ?? []),
-        });
-      });
-
       sortModules(graph).forEach((id) => {
         const module = graph.modules.get(id);
         const invalidationGeneration = invalidatedModules.get(id);
@@ -242,12 +223,6 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
         });
         const previousExports = exportsByModule.get(id);
         module.macroExports = Array.from(exportedMacros.macros.keys());
-        module.macroExportDefinitions = Array.from(
-          exportedMacros.macros.values(),
-        );
-        module.ambiguousMacroExports = Array.from(
-          exportedMacros.ambiguousNames,
-        );
         exportsByModule.set(id, exportedMacros);
         const exportNamesChanged = !haveSameMacroExportNames(
           previousExports,

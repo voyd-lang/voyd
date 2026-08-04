@@ -29,7 +29,6 @@ export const releaseTargets = {
       "package.json",
       "src/pkg.voyd",
       "dist/.placeholder",
-      "precompiled/std-semantics-v1.bin",
     ],
     relatedTests: [
       "own",
