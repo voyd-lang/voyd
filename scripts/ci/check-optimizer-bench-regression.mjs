@@ -156,6 +156,19 @@ const lowerQuartile = (values) => {
 const rssSampleValue = (samples, fallback) =>
   samples.length >= RSS_MODE_MIN_SAMPLES ? lowerQuartile(samples) : fallback;
 
+const absoluteRssComparison = (row) => ({
+  name: "peak RSS",
+  label:
+    (row.processMaxRssSamplesBytes?.length ?? 0) >= RSS_MODE_MIN_SAMPLES
+      ? "peak RSS lower-quartile MiB"
+      : "peak RSS median MiB",
+  value: rssSampleValue(
+    row.processMaxRssSamplesBytes ?? [],
+    row.processMaxRssBytes,
+  ),
+  samples: row.processMaxRssSamplesBytes ?? [],
+});
+
 const rssComparison = (row) =>
   typeof row.processMaxRssGrowthBytes === "number"
     ? {
@@ -171,18 +184,7 @@ const rssComparison = (row) =>
         ),
         samples: row.processMaxRssGrowthSamplesBytes ?? [],
       }
-    : {
-        name: "peak RSS",
-        label:
-          (row.processMaxRssSamplesBytes?.length ?? 0) >= RSS_MODE_MIN_SAMPLES
-            ? "peak RSS lower-quartile MiB"
-            : "peak RSS median MiB",
-        value: rssSampleValue(
-          row.processMaxRssSamplesBytes ?? [],
-          row.processMaxRssBytes,
-        ),
-        samples: row.processMaxRssSamplesBytes ?? [],
-      };
+    : absoluteRssComparison(row);
 
 const largestSampleGap = (samples) => {
   const sorted = [...samples].sort((left, right) => left - right);
@@ -431,11 +433,18 @@ export const compareScorecards = ({ base, head, limits }) => {
         head: headRow.runtimeSamplesMs ?? [],
       },
     });
-    const baseRss = rssComparison(baseRow);
-    const headRss = rssComparison(headRow);
+    let baseRss = rssComparison(baseRow);
+    let headRss = rssComparison(headRow);
     if (baseRss.label !== headRss.label) {
       throw new Error(
         `${baseRow.scenario} scorecards use different RSS measurement formats`,
+      );
+    }
+    if (baseRss.name === "compile peak RSS growth" && baseRss.value === 0) {
+      baseRss = absoluteRssComparison(baseRow);
+      headRss = absoluteRssComparison(headRow);
+      console.log(
+        "  [info] compile peak RSS growth baseline is zero; comparing absolute peak RSS",
       );
     }
     const rssModes = rssModeComparisons({ base: baseRss, head: headRss });

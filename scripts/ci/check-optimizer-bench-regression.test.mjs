@@ -129,6 +129,47 @@ describe("optimizer scorecard measurement retry policy", () => {
     expect(result).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
   });
 
+  it("uses absolute peak RSS when the growth lower quartile is zero", () => {
+    const result = failures({
+      base: scorecard({
+        rssMib: 1_765,
+        rssSamplesMib: [1_751, 1_822, 1_765, 1_763, 1_743, 1_822],
+        rssGrowthMib: 73,
+        rssGrowthSamplesMib: [73, 0, 86, 90, 111, 0],
+      }),
+      head: scorecard({
+        rssMib: 1_772,
+        rssSamplesMib: [1_803, 1_798, 1_771, 1_719, 1_738, 1_779],
+        rssGrowthMib: 104,
+        rssGrowthSamplesMib: [125, 120, 92, 87, 107, 101],
+      }),
+    });
+
+    expect(result).toEqual([]);
+    expect(console.log).toHaveBeenCalledWith(
+      expect.stringContaining("growth baseline is zero"),
+    );
+  });
+
+  it("fails an absolute peak RSS regression when growth has no baseline", () => {
+    const result = failures({
+      base: scorecard({
+        rssMib: 1_700,
+        rssSamplesMib: [1_695, 1_700, 1_705, 1_695, 1_700, 1_705],
+        rssGrowthMib: 0,
+        rssGrowthSamplesMib: [0, 0, 0, 0, 0, 0],
+      }),
+      head: scorecard({
+        rssMib: 2_000,
+        rssSamplesMib: [1_995, 2_000, 2_005, 1_995, 2_000, 2_005],
+        rssGrowthMib: 300,
+        rssGrowthSamplesMib: [295, 300, 305, 295, 300, 305],
+      }),
+    });
+
+    expect(result).toMatchObject([{ scenario: "scenario", metric: "rss" }]);
+  });
+
   it("still fails a stable synthetic RSS regression after retry", () => {
     const base = poolScorecardMeasurements({
       initial: scorecard({ rssMib: 100 }),
