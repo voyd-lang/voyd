@@ -19,10 +19,16 @@ const webBudget = {
   maxWallMs: 420_000,
   maxWallMsByCommand: {
     "npm run test:unit:web:ci:0": 600_000,
+    "npm run test:unit:web:ci:0a": 600_000,
+    "npm run test:unit:web:ci:0b": 600_000,
+    "npm run test:unit:web:ci:0c": 600_000,
     "npm run test:unit:web:ci:1": 600_000,
     "npm run test:unit:web:ci:2": 600_000,
     "npm run test:unit:web:ci:3": 600_000,
     "npm run test:unit:web:ci:4": 600_000,
+    "npm run test:unit:web:ci:4a": 600_000,
+    "npm run test:unit:web:ci:4b": 600_000,
+    "npm run test:unit:web:ci:4c": 600_000,
     "npm run test:unit:web:ci:5": 600_000,
     "npm run test:unit:web:ci:6": 600_000,
     "npm run test:unit:web:ci:7": 600_000,
@@ -53,9 +59,17 @@ describe("lane wall timing budgets", () => {
   });
 
   it("scopes the web-package allowance to its exact isolated command", () => {
-    Array.from({ length: 8 }, (_value, index) =>
-      `test:unit:web:ci:${index}`,
-    ).forEach((command) => {
+    [
+      ...Array.from({ length: 8 }, (_value, index) =>
+        `test:unit:web:ci:${index}`,
+      ),
+      "test:unit:web:ci:0a",
+      "test:unit:web:ci:0b",
+      "test:unit:web:ci:0c",
+      "test:unit:web:ci:4a",
+      "test:unit:web:ci:4b",
+      "test:unit:web:ci:4c",
+    ].forEach((command) => {
       expect(wallBudgetMs(["npm", "run", command], webBudget)).toBe(600_000);
     });
     expect(

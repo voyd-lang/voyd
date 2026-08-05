@@ -95,12 +95,12 @@ change its result.
 selects modules by deterministic round-robin index, and compiles each selected
 set together once. CI normally distributes the current 28 files across eight
 residues as 4/4/4/4/3/3/3/3. The two dependency-heaviest residues are each
-split across two runners, for ten jobs total. Local and full-repository tests
+split across three runners, for twelve jobs total. Local and full-repository tests
 run the eight base partitions sequentially so compiler heaps remain bounded.
 Every test module belongs to exactly one CI job.
 
-- exact commands `npm run test:unit:web:ci:0a`, `:0b`, `:1` through `:3`,
-  `:4a`, `:4b`, and `:5` through `:7`: 600,000 ms each;
+- exact commands `npm run test:unit:web:ci:0a`, `:0b`, `:0c`, `:1` through
+  `:3`, `:4a`, `:4b`, `:4c`, and `:5` through `:7`: 600,000 ms each;
 - compiler-process hard timeout: 600,000 ms;
 - partition job orchestration ceiling: 15 minutes;
 - timing artifacts: `web-unit-test-timings-partition-*`, retained for 30 days.
