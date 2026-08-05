@@ -17,12 +17,7 @@ const workflow = readFileSync(
   resolve(repoRoot, ".github/workflows/pr.yml"),
   "utf8",
 );
-const ciPartitionCommands = [
-  "test:unit:web:ci:0",
-  "test:unit:web:ci:1",
-  "test:unit:web:ci:2",
-  "test:unit:web:ci:3",
-];
+const ciPartitionCommands = ["test:unit:web:ci"];
 const ciPartitions = ciPartitionCommands.map((command) => {
   const match = /--partition-index=(\d+) --partition-count=(\d+)/.exec(
     packageScripts[command],
@@ -55,7 +50,7 @@ describe("web test shard partitioning", () => {
     ).toEqual([{ index: 6, count: 8 }]);
   });
 
-  it("assigns all current Web test modules exactly once in CI", () => {
+  it("assigns all current Web test modules to one CI compile", () => {
     const assignments = ciPartitions.flatMap((partition) =>
       modulesForPartition(webTestModules, partition).map((module) => ({
         module,
@@ -67,38 +62,15 @@ describe("web test shard partitioning", () => {
       webTestModules,
     );
     expect(new Set(assignments.map(({ module }) => module))).toHaveLength(28);
-    expect(
-      Array.from(workflow.matchAll(/command: npm run (test:unit:web:ci:\S+)/g),
-        (match) => match[1],
-      ),
-    ).toEqual(ciPartitionCommands);
-  });
-
-  it("runs the formerly isolated OpenAPI modules in the first four-way partition", () => {
-    const assignments = new Map(
-      ciPartitions.flatMap((partition) =>
-        modulesForPartition(webTestModules, partition).map((module) => [
-          module,
-          partition.command,
-        ]),
-      ),
-    );
-
-    expect(assignments.get("openapi/openapi_app.test.voyd")).toBe(
-      "test:unit:web:ci:0",
-    );
-    expect(
-      assignments.get("openapi/openapi_response_contracts.test.voyd"),
-    ).toBe(
-      "test:unit:web:ci:0",
-    );
-    expect(assignments.get("openapi/openapi_builder_query.test.voyd")).toBe(
-      "test:unit:web:ci:0",
-    );
-    expect(
-      assignments.get("openapi/openapi_response_overrides.test.voyd"),
-    ).toBe(
-      "test:unit:web:ci:0",
+    expect(ciPartitions).toEqual([
+      {
+        command: "test:unit:web:ci",
+        index: 0,
+        count: 1,
+      },
+    ]);
+    expect(workflow).toContain(
+      "-- npm run test:unit:web:ci",
     );
   });
 

@@ -24,10 +24,7 @@ const budget = {
 const webBudget = {
   maxWallMs: 420_000,
   maxWallMsByCommand: {
-    "npm run test:unit:web:ci:0": 600_000,
-    "npm run test:unit:web:ci:1": 600_000,
-    "npm run test:unit:web:ci:2": 600_000,
-    "npm run test:unit:web:ci:3": 600_000,
+    "npm run test:unit:web:ci": 600_000,
   },
   maxFileMs: 180_000,
 };
@@ -54,17 +51,13 @@ describe("lane wall timing budgets", () => {
     ).toBe(420_000);
   });
 
-  it("scopes the web-package allowance to its exact partition command", () => {
-    [
-      ...Array.from({ length: 4 }, (_value, index) =>
-        `test:unit:web:ci:${index}`,
-      ),
-    ].forEach((command) => {
-      expect(wallBudgetMs(["npm", "run", command], webBudget)).toBe(600_000);
-    });
+  it("scopes the web-package allowance to its exact command", () => {
+    expect(
+      wallBudgetMs(["npm", "run", "test:unit:web:ci"], webBudget),
+    ).toBe(600_000);
     expect(
       wallBudgetMs(
-        ["npm", "run", "test:unit:web:ci:0", "--", "--force"],
+        ["npm", "run", "test:unit:web:ci", "--", "--force"],
         webBudget,
       ),
     ).toBe(420_000);

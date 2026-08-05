@@ -9,8 +9,7 @@ complete correctness suite behind a single Turbo queue.
 - `test`: affected core package units, excluding conformance, integration,
   web-package, performance, and developer-tooling workspaces. It uses package
   concurrency of three and one Vitest worker per package task.
-- `web-unit`: affected Voyd web-package tests in four deterministic
-  compile-level partitions.
+- `web-unit`: affected Voyd web-package tests in one combined compile.
 - `tooling-unit`: affected CLI and language-server units, with the two package
   tasks concurrent and one Vitest worker per task.
 - `conformance`: portable language behavior when compiler/runtime inputs can
@@ -103,17 +102,18 @@ change its result.
 
 `voyd test --shard N/M` discovers and sorts test modules before compilation,
 selects modules by deterministic round-robin index, and compiles each selected
-set together once. CI distributes the current 28 files across four seven-file
-partitions. Local and full-repository tests retain eight sequential partitions
-for conservative heap isolation. Every test module belongs to exactly one CI
-job.
+set together once. CI compiles all 28 files together to avoid paying compiler
+startup and standard-library analysis costs once per partition. Local and
+full-repository tests retain eight sequential partitions for conservative heap
+isolation. The generic shard runner still supports two- or four-way CI
+partitioning if the combined run proves unreliable on hosted workers.
 
-- exact commands `npm run test:unit:web:ci:0` through `:3`: 600,000 ms each;
+- exact command `npm run test:unit:web:ci`: 600,000 ms;
 - compiler-process hard timeout: 600,000 ms;
-- partition job orchestration ceiling: 15 minutes;
-- timing artifacts: `web-unit-test-timings-partition-*`, retained for 30 days.
+- job orchestration ceiling: 15 minutes;
+- timing artifact: `web-unit-test-timings`, retained for 30 days.
 
-The string-overload freshness check runs before every partition command.
+The string-overload freshness check runs before the combined command.
 
 The optimizer scorecard path filter includes `packages/compiler/src/semantics`
 and `packages/compiler/src/modules`. Those changes also run

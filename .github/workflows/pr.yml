@@ -107,21 +107,8 @@ jobs:
         run: node scripts/ci/check-typing-bench-regression.mjs
 
   web-unit:
-    name: web-unit (partition ${{ matrix.partition }})
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - partition: 1 of 4
-            command: npm run test:unit:web:ci:0
-          - partition: 2 of 4
-            command: npm run test:unit:web:ci:1
-          - partition: 3 of 4
-            command: npm run test:unit:web:ci:2
-          - partition: 4 of 4
-            command: npm run test:unit:web:ci:3
     steps:
       - uses: actions/checkout@v4
         with:
@@ -165,7 +152,7 @@ jobs:
         if: steps.changes.outputs.web == 'true'
         env:
           VOYD_USE_SRC: "1"
-        run: node scripts/testing/run-timed-command.mjs --lane web-unit --output test-timings/web-unit-wall.json -- ${{ matrix.command }}
+        run: node scripts/testing/run-timed-command.mjs --lane web-unit --output test-timings/web-unit-wall.json -- npm run test:unit:web:ci
       - name: Enforce web package timing budget
         if: steps.changes.outputs.web == 'true'
         run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane web-unit --output test-timings/web-unit-summary.json
@@ -173,7 +160,7 @@ jobs:
         if: always() && steps.changes.outputs.web == 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: web-unit-test-timings-partition-${{ matrix.partition }}
+          name: web-unit-test-timings
           path: test-timings
           retention-days: 30
 
