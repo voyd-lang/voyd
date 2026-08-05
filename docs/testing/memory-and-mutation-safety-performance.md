@@ -161,11 +161,14 @@ from 27:42 in [run 30611360104](https://github.com/voyd-lang/voyd/actions/runs/3
 to 7:07 in
 [run 30661296540](https://github.com/voyd-lang/voyd/actions/runs/30661296540).
 All 19 jobs passed; individual web partitions completed in 2:43–6:07. Sharding
-remains the throughput path. The two dependency-heaviest partition residues are
-split into paired sixteenth-partitions after both repeatedly exhausted the
-ten-minute process limit. The required whole-package compile gate also keeps
-the aggregate package workload visible and fails on timeout, OOM, or RSS-budget
-breach.
+remains the throughput path. The two dependency-heaviest partition residues
+were temporarily split further after both repeatedly exhausted the ten-minute
+process limit. Query-scoped aggregate-origin memoization subsequently reduced
+the pathological response-overrides fact scan by about 90%. All four recombined
+CI partitions then passed locally in 45–100 seconds, allowing the matrix to
+contract from twelve jobs to four. The required whole-package compile gate also
+keeps the aggregate package workload visible and fails on timeout, OOM, or
+RSS-budget breach.
 
 Removal of every temporary performance allowance is tracked exclusively by
 [V-468](https://linear.app/voyd-lang/issue/V-468).
@@ -245,3 +248,44 @@ regressions cover local and cross-module aggregate projections, module aliases,
 recursive wrappers, runtime-checked wrappers, and projected-local reference
 escapes. The complete monorepo suite passes, and the std source lane completes
 under the default heap.
+
+## Current pre-PR comparison
+
+The comparison at `34f22a6f` reran the original `876f1680` baseline on Node
+24.18.0 and the same Apple M4 Pro host. The source compiler result uses seven
+alternating fresh Node processes for each revision and mode. It supersedes the
+earlier intermediate PR measurements above.
+
+| Seven-sample source median | `876f1680` | `34f22a6f` | Change |
+| -------------------------- | ---------: | ---------: | -----: |
+| Unoptimized compile | 1,295.67 ms | 1,898.31 ms | +602.64 ms (+46.51%) |
+| Release compile | 1,827.99 ms | 2,438.51 ms | +610.52 ms (+33.40%) |
+| Unoptimized borrow analysis | 161.34 ms | 596.39 ms | +435.05 ms (+269.65%) |
+| Release borrow analysis | 164.00 ms | 603.98 ms | +439.98 ms (+268.28%) |
+| Unoptimized peak heap | 556,683,776 B | 660,891,976 B | +18.72% |
+| Release peak heap | 624,833,576 B | 678,272,144 B | +8.55% |
+| Unoptimized process max RSS | 4,188,700,672 B | 4,219,355,136 B | +0.73% |
+| Release process max RSS | 4,239,097,856 B | 4,256,628,736 B | +0.41% |
+
+The focused scalar-aggregate benchmark shows a larger compile regression:
+945.50 to 1,552.44 ms unoptimized (+64.19%) and 1,140.51 to 1,755.51 ms in
+release (+53.92%). Runtime medians changed from 0.1872 to 0.1946 ms
+unoptimized and 0.0403 to 0.0409 ms in release. These sub-millisecond deltas
+remain timing-noise sensitive. Repeated-run linear-memory growth stayed at
+zero. Unoptimized generated allocation sites fell from 997 to 939 and Wasm
+size fell 4.35%; both release signals were unchanged. The new dynamic fallback
+cost about 1.0 ns per guarded call unoptimized and 1.8 ns in release.
+
+A fresh cold whole-Web compile remains the scale outlier. One controlled sample
+increased from 23.31 seconds to 62.12 seconds (+166.44%). Peak RSS in that pair
+fell from 4,297,015,296 to 4,147,773,440 bytes (-3.47%), and emitted Wasm size
+fell 10.75%. The compile-time result is consistent with the existing
+60.2-second current median, while the single-sample RSS comparison is
+directional rather than a new memory median.
+
+The remaining source delta is concentrated in memory-safety analysis: it adds
+about 435–440 ms to the representative compile while the complete compile adds
+about 603–611 ms. Package-scale compilation amplifies that cost further. The
+next performance work should therefore reduce conservative contract/provenance
+propagation and make the final local checker consume bounded authoritative
+facts; the aggregate-origin repair does not replace either architectural step.

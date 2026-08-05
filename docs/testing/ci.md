@@ -9,7 +9,7 @@ complete correctness suite behind a single Turbo queue.
 - `test`: affected core package units, excluding conformance, integration,
   web-package, performance, and developer-tooling workspaces. It uses package
   concurrency of three and one Vitest worker per package task.
-- `web-unit`: affected Voyd web-package tests in eight deterministic
+- `web-unit`: affected Voyd web-package tests in four deterministic
   compile-level partitions.
 - `tooling-unit`: affected CLI and language-server units, with the two package
   tasks concurrent and one Vitest worker per task.
@@ -103,14 +103,12 @@ change its result.
 
 `voyd test --shard N/M` discovers and sorts test modules before compilation,
 selects modules by deterministic round-robin index, and compiles each selected
-set together once. CI normally distributes the current 28 files across eight
-residues as 4/4/4/4/3/3/3/3. The two dependency-heaviest residues are each
-split across three runners, for twelve jobs total. Local and full-repository tests
-run the eight base partitions sequentially so compiler heaps remain bounded.
-Every test module belongs to exactly one CI job.
+set together once. CI distributes the current 28 files across four seven-file
+partitions. Local and full-repository tests retain eight sequential partitions
+for conservative heap isolation. Every test module belongs to exactly one CI
+job.
 
-- exact commands `npm run test:unit:web:ci:0a`, `:0b`, `:0c`, `:1` through
-  `:3`, `:4a`, `:4b`, `:4c`, and `:5` through `:7`: 600,000 ms each;
+- exact commands `npm run test:unit:web:ci:0` through `:3`: 600,000 ms each;
 - compiler-process hard timeout: 600,000 ms;
 - partition job orchestration ceiling: 15 minutes;
 - timing artifacts: `web-unit-test-timings-partition-*`, retained for 30 days.

@@ -18,18 +18,10 @@ const workflow = readFileSync(
   "utf8",
 );
 const ciPartitionCommands = [
-  "test:unit:web:ci:0a",
-  "test:unit:web:ci:0b",
-  "test:unit:web:ci:0c",
+  "test:unit:web:ci:0",
   "test:unit:web:ci:1",
   "test:unit:web:ci:2",
   "test:unit:web:ci:3",
-  "test:unit:web:ci:4a",
-  "test:unit:web:ci:4b",
-  "test:unit:web:ci:4c",
-  "test:unit:web:ci:5",
-  "test:unit:web:ci:6",
-  "test:unit:web:ci:7",
 ];
 const ciPartitions = ciPartitionCommands.map((command) => {
   const match = /--partition-index=(\d+) --partition-count=(\d+)/.exec(
@@ -82,7 +74,7 @@ describe("web test shard partitioning", () => {
     ).toEqual(ciPartitionCommands);
   });
 
-  it("isolates the four OpenAPI test modules that exceeded the process timeout", () => {
+  it("runs the formerly isolated OpenAPI modules in the first four-way partition", () => {
     const assignments = new Map(
       ciPartitions.flatMap((partition) =>
         modulesForPartition(webTestModules, partition).map((module) => [
@@ -93,20 +85,20 @@ describe("web test shard partitioning", () => {
     );
 
     expect(assignments.get("openapi/openapi_app.test.voyd")).toBe(
-      "test:unit:web:ci:0a",
+      "test:unit:web:ci:0",
     );
     expect(
       assignments.get("openapi/openapi_response_contracts.test.voyd"),
     ).toBe(
-      "test:unit:web:ci:0c",
+      "test:unit:web:ci:0",
     );
     expect(assignments.get("openapi/openapi_builder_query.test.voyd")).toBe(
-      "test:unit:web:ci:4a",
+      "test:unit:web:ci:0",
     );
     expect(
       assignments.get("openapi/openapi_response_overrides.test.voyd"),
     ).toBe(
-      "test:unit:web:ci:4c",
+      "test:unit:web:ci:0",
     );
   });
 

@@ -114,33 +114,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          # Partitions 1 and 5 carry the largest OpenAPI dependency closures.
-          # Split just those lanes to retain deterministic coverage without
-          # relaxing the ten-minute per-process ceiling.
-          - partition: 1a of 12
-            command: npm run test:unit:web:ci:0a
-          - partition: 1b of 12
-            command: npm run test:unit:web:ci:0b
-          - partition: 1c of 12
-            command: npm run test:unit:web:ci:0c
-          - partition: 2 of 12
+          - partition: 1 of 4
+            command: npm run test:unit:web:ci:0
+          - partition: 2 of 4
             command: npm run test:unit:web:ci:1
-          - partition: 3 of 12
+          - partition: 3 of 4
             command: npm run test:unit:web:ci:2
-          - partition: 4 of 12
+          - partition: 4 of 4
             command: npm run test:unit:web:ci:3
-          - partition: 5a of 12
-            command: npm run test:unit:web:ci:4a
-          - partition: 5b of 12
-            command: npm run test:unit:web:ci:4b
-          - partition: 5c of 12
-            command: npm run test:unit:web:ci:4c
-          - partition: 6 of 12
-            command: npm run test:unit:web:ci:5
-          - partition: 7 of 12
-            command: npm run test:unit:web:ci:6
-          - partition: 8 of 12
-            command: npm run test:unit:web:ci:7
     steps:
       - uses: actions/checkout@v4
         with:
