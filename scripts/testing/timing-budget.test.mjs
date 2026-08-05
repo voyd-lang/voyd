@@ -1,5 +1,11 @@
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { fileBudgetMs, wallBudgetMs } from "./timing-budget.mjs";
+
+const timingBudgets = JSON.parse(
+  readFileSync(resolve(import.meta.dirname, "timing-budgets.json"), "utf8"),
+);
 
 const budget = {
   maxWallMs: 420_000,
@@ -85,6 +91,22 @@ describe("lane wall timing budgets", () => {
 });
 
 describe("file timing budgets", () => {
+  it("scopes the conformance runtime allowance to its exact path", () => {
+    const conformanceBudget = timingBudgets.conformance;
+    expect(
+      fileBudgetMs(
+        { file: "/checkout/tests/conformance/src/runtime.test.ts" },
+        conformanceBudget,
+      ),
+    ).toBe(80_000);
+    expect(
+      fileBudgetMs(
+        { file: "/checkout/tests/conformance/src/typing.test.ts" },
+        conformanceBudget,
+      ),
+    ).toBe(60_000);
+  });
+
   it("uses an exact path-suffix override before a basename override", () => {
     expect(
       fileBudgetMs(

@@ -84,6 +84,16 @@ These are exact-path overrides, not basename-wide or lane-wide increases.
   post-command checks, conditional builds, and benchmarks can follow a healthy
   bounded core command.
 
+### Conformance
+
+- `tests/conformance/src/runtime.test.ts`: 80,000 ms;
+- every other conformance file: 60,000 ms;
+- conformance lane wall time: 120,000 ms.
+
+The runtime override is based on five recent Node 24 hosted-run measurements
+from 54,505 ms to 74,432 ms. It keeps the general conformance limit unchanged
+while giving the compile-heavy runtime corpus measured runner headroom.
+
 ### Web package
 
 The web package is excluded from the core Turbo queue and runs through a direct,
