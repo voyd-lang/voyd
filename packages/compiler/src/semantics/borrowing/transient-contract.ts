@@ -303,6 +303,7 @@ const targetContractsForCall = (
   call: CallableBorrowIndexCall,
   lookup: CallableContractLookup,
 ): readonly CallableBorrowContract[] => {
+  if (call.boundaryContract) return [call.boundaryContract];
   const contracts = call.targets.flatMap((target) => {
     const contract = contractForTarget(target, lookup);
     return contract ? [contract] : [];
@@ -443,7 +444,7 @@ export const checkTransientSameCallOverlaps = ({
 }): readonly Diagnostic[] => {
   const diagnostics: Diagnostic[] = [];
   index.calls.forEach((call) => {
-    if (call.targets.length === 0) return;
+    if (call.targets.length === 0 && !call.boundaryContract) return;
     const contracts = targetContractsForCall(call, lookup);
     const contract = mergeCallableBorrowContracts(contracts);
     if (!contract) {

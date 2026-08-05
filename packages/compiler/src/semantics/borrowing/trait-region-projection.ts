@@ -116,6 +116,52 @@ export const resolvedTraitRegionProjectionsForCoercion = ({
   imports: ReadonlyMap<SymbolId, SymbolRef>;
   dependencies: ReadonlyMap<string, BorrowingDependency>;
 }): readonly ResolvedTraitRegionProjection[] => {
+  const localProjections = localTraitRegionProjectionMetadata({
+    hir,
+    typing,
+    symbolTable,
+    moduleId,
+    imports,
+  });
+  const dependencyProjections = Array.from(dependencies.values()).flatMap(
+    (dependency) => dependency.traitRegionProjections,
+  );
+  return resolvedTraitRegionProjectionsFromMetadata({
+    sourceType,
+    targetType,
+    typing,
+    symbolTable,
+    moduleId,
+    imports,
+    localProjections,
+    dependencyProjections,
+  });
+};
+
+/**
+ * Resolves one local coercion from immutable projection metadata. Keeping this
+ * operation separate lets the final loan checker consume a compact local
+ * input instead of retaining every dependency's semantic interface.
+ */
+export const resolvedTraitRegionProjectionsFromMetadata = ({
+  sourceType,
+  targetType,
+  typing,
+  symbolTable,
+  moduleId,
+  imports,
+  localProjections,
+  dependencyProjections,
+}: {
+  sourceType: TypeId | undefined;
+  targetType: TypeId | undefined;
+  typing: TypingResult;
+  symbolTable: SymbolTable;
+  moduleId: string;
+  imports: ReadonlyMap<SymbolId, SymbolRef>;
+  localProjections: readonly LocalTraitRegionProjection[];
+  dependencyProjections: readonly ResolvedTraitRegionProjection[];
+}): readonly ResolvedTraitRegionProjection[] => {
   const nominalType = nominalComponent(sourceType, typing);
   if (typeof nominalType !== "number") {
     return [];
@@ -162,13 +208,7 @@ export const resolvedTraitRegionProjectionsForCoercion = ({
   }
   const implementationWasSelected = (implementation: SymbolRef): boolean =>
     selectedImplementations.has(JSON.stringify(implementation));
-  const local = localTraitRegionProjectionMetadata({
-    hir,
-    typing,
-    symbolTable,
-    moduleId,
-    imports,
-  }).filter(
+  const local = localProjections.filter(
     (projection) =>
       projection.concrete.moduleId === nominal.owner.moduleId &&
       projection.concrete.symbol === nominal.owner.symbol &&
@@ -182,16 +222,14 @@ export const resolvedTraitRegionProjectionsForCoercion = ({
         : [];
     }),
   );
-  const external = Array.from(dependencies.values()).flatMap((dependency) =>
-    dependency.traitRegionProjections.filter(
-      (projection) =>
-        projection.concrete.moduleId === nominal.owner.moduleId &&
-        projection.concrete.symbol === nominal.owner.symbol &&
-        implementationWasSelected(projection.implementation) &&
-        targetTraitOwners.has(
-          `${projection.trait.moduleId}:${projection.trait.symbol}`,
-        ),
-    ),
+  const external = dependencyProjections.filter(
+    (projection) =>
+      projection.concrete.moduleId === nominal.owner.moduleId &&
+      projection.concrete.symbol === nominal.owner.symbol &&
+      implementationWasSelected(projection.implementation) &&
+      targetTraitOwners.has(
+        `${projection.trait.moduleId}:${projection.trait.symbol}`,
+      ),
   );
   const projections = [
     ...local

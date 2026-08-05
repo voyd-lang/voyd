@@ -2324,9 +2324,12 @@ const evaluatedFactFlow = (
   new Map(ctx.expressionFlows.get(env)?.get(exprId) ?? emptyFlow());
 
 /**
- * Contract-lattice transfer over an extracted callable fact graph. Recursive
- * calls model expression value flow; expression, type, place, call, and CFG
- * discovery have already been completed by `CallableBorrowFacts`.
+ * Combines compact contracts over an extracted callable fact graph. Contract
+ * states form a finite ordered set: an update may add possible behavior but
+ * cannot remove behavior already observed. Recursive call groups therefore
+ * reach a stable answer after a bounded number of distinct contract changes.
+ * Expression, type, place, call, and control-flow discovery have already been
+ * completed by `CallableBorrowFacts`.
  */
 const evaluateExpressionRaw = (
   exprId: HirExprId,
@@ -4991,6 +4994,12 @@ const stronglyConnectedComponents = ({
   return components;
 };
 
+/**
+ * Orders callees before callers. Mutually recursive callables are one
+ * strongly connected component (SCC): a group where every member can reach
+ * every other member through calls. Members retain source order so repeated
+ * solves are deterministic.
+ */
 const dependencyOrderedSolveNodes = <T extends { symbol: SymbolId }>(
   functions: readonly T[],
   callers: ReadonlyMap<SymbolId, readonly T[]>,

@@ -345,6 +345,7 @@ const targetContractForGuard = (
   call: CallableBorrowIndexCall,
   lookup: CallableContractLookup,
 ): CallableBorrowContract | undefined =>
+  call.boundaryContract ??
   mergeCallableBorrowContracts(
     targetContractsForCall(call, lookup).map((contract) =>
       call.traitDispatch ? (contract.dynamicDispatch ?? contract) : contract,
@@ -373,7 +374,7 @@ export const planRuntimeBorrowing = ({
     ),
   );
   index.calls.forEach((call) => {
-    if (call.targets.length === 0) return;
+    if (call.targets.length === 0 && !call.boundaryContract) return;
     const contract = targetContractForGuard(call, lookup);
     if (!contract) return;
     contract.parameters.forEach((parameter, parameterIndex) => {

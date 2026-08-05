@@ -16,7 +16,11 @@ import type { FunctionSignature, TypingResult } from "../typing/index.js";
 import { bindCallArgumentExpressions } from "../typing/call-argument-binding.js";
 import type { CallArgumentPlanEntry } from "../typing/types.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
-import { expressionTypeFor, type ResolveContext } from "./call-resolution.js";
+import {
+  expressionTypeFor,
+  resolveBorrowCallForFacts,
+  type ResolveContext,
+} from "./call-resolution.js";
 import type {
   BorrowAccessMode,
   BorrowPlace,
@@ -78,6 +82,8 @@ export type CallableBorrowIndexCall = {
   argumentPlanAmbiguous?: true;
   traitDispatch?: true;
   openTraitDispatch?: true;
+  /** Authoritative declaration contract for an open dispatch boundary. */
+  boundaryContract?: CallableBorrowContract;
 };
 
 export type CallableBorrowIndexFlags = {
@@ -1183,6 +1189,17 @@ export const extractSingleCallableBorrowIndex = ({
       // therefore an open boundary even when the current target set happens
       // to contain concrete implementations.
       const openTraitDispatch = traitDispatch || symbolicTraitDispatch;
+      const hasTraitDeclarationTarget = targets.some((target) =>
+        target.moduleId === context.moduleId
+          ? context.typing.traitMethodImpls.has(target.symbol)
+          : context.dependencies
+              .get(target.moduleId)
+              ?.traitMethodDeclarations.has(target.symbol) === true,
+      );
+      const boundaryContract =
+        traitDispatch || (symbolicTraitDispatch && hasTraitDeclarationTarget)
+          ? resolveBorrowCallForFacts(expression, context).contract
+          : undefined;
       const arguments_: CallableBorrowIndexArgument[] = argumentsFromTyping.map(
         (argument, parameter) =>
           ({
@@ -1270,6 +1287,7 @@ export const extractSingleCallableBorrowIndex = ({
           : {}),
         ...(traitDispatch ? { traitDispatch: true as const } : {}),
         ...(openTraitDispatch ? { openTraitDispatch: true as const } : {}),
+        ...(boundaryContract ? { boundaryContract } : {}),
       } satisfies CallableBorrowIndexCall;
       calls.push(call);
       targets.forEach((target) =>

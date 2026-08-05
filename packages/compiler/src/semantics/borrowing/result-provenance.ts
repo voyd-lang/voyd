@@ -9,6 +9,7 @@ import { walkExpression } from "../hir/index.js";
 import type { HirExprId, SymbolId, TypeId } from "../ids.js";
 import type { FunctionSignature, TypingResult } from "../typing/index.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
+import { incrementCompilerPerfCounter } from "../../perf.js";
 import {
   expressionTypeFor,
   projectedTypes,
@@ -285,12 +286,13 @@ export const contractWithResultProvenance = ({
   );
   const externalReturnedOrigins = Array.from(
     new Map(
-      [...(contract.externalReturnedOrigins ?? []), ...ownedReturnedOrigins].map(
-        (origin) => [
-          `${pathKey(origin.result)}:${origin.endpointAccess}:${origin.fresh === true}`,
-          origin,
-        ],
-      ),
+      [
+        ...(contract.externalReturnedOrigins ?? []),
+        ...ownedReturnedOrigins,
+      ].map((origin) => [
+        `${pathKey(origin.result)}:${origin.endpointAccess}:${origin.fresh === true}`,
+        origin,
+      ]),
     ).values(),
   );
   const rootIsOwned = provenance.projections.some(
@@ -497,6 +499,7 @@ const classifyCallable = ({
   resolvedCallTargets,
   resolvedCalls,
   dependents,
+  contractOrigins,
 }: {
   prepared: PreparedResultCallable;
   context: ResolveContext;
@@ -507,17 +510,34 @@ const classifyCallable = ({
   resolvedCallTargets: ReadonlyMap<HirExprId, readonly SymbolRef[]>;
   resolvedCalls: Map<HirExprId, ReturnType<typeof resolveBorrowCall>>;
   dependents: Map<SymbolId, Set<SymbolId>>;
+  /** Stable, pass-scoped substitutions keyed by call expression and result path. */
+  contractOrigins: Map<string, readonly ResultProvenanceOrigin[]>;
 }): CallableResultProvenance => {
   const { bindings, resultValues, signature } = prepared;
   const active = new Set<string>();
   const classified = new Map<string, readonly ResultProvenanceOrigin[]>();
+  const unknown = (
+    reason:
+      | "ambiguous-call"
+      | "depth-limit"
+      | "missing-expression"
+      | "missing-field-provider"
+      | "missing-result-origin"
+      | "unresolved-binding"
+      | "unsupported-expression",
+  ): readonly ResultProvenanceOrigin[] => {
+    incrementCompilerPerfCounter(
+      `borrowing.resultProvenance.unknownReason.${reason}`,
+    );
+    return [{ kind: "unknown" }];
+  };
 
   const classify = (
     expressionId: HirExprId,
     path: readonly PlaceProjection[],
   ): readonly ResultProvenanceOrigin[] => {
     if (path.length > MAX_RESULT_PROVENANCE_DEPTH) {
-      return [{ kind: "unknown" }];
+      return unknown("depth-limit");
     }
     const activeKey = `${expressionId}:${pathKey(path)}`;
     const cached = classified.get(activeKey);
@@ -533,13 +553,13 @@ const classifyCallable = ({
       classified.set(activeKey, result);
       return result;
     };
-    if (!expression) return finish([{ kind: "unknown" }]);
+    if (!expression) return finish(unknown("missing-expression"));
     if (expression.exprKind === "identifier") {
       const binding = bindings.get(expression.symbol);
       if (binding?.kind === "parameter") {
         const source = [...binding.path, ...path];
         if (source.length > MAX_RESULT_PROVENANCE_DEPTH) {
-          return finish([{ kind: "unknown" }]);
+          return finish(unknown("depth-limit"));
         }
         return finish([
           {
@@ -552,11 +572,13 @@ const classifyCallable = ({
       if (binding?.kind === "expression") {
         return finish(classify(binding.expression, [...binding.path, ...path]));
       }
-      if (binding?.kind === "unknown") return finish([{ kind: "unknown" }]);
+      if (binding?.kind === "unknown") {
+        return finish(unknown("unresolved-binding"));
+      }
       if (moduleStorage.has(expression.symbol))
         return finish([{ kind: "module" }]);
       if (imports.has(expression.symbol)) return finish([{ kind: "external" }]);
-      return finish([{ kind: "unknown" }]);
+      return finish(unknown("unresolved-binding"));
     }
     if (expression.exprKind === "field-access") {
       const projection = Number.isInteger(Number(expression.field))
@@ -598,7 +620,7 @@ const classifyCallable = ({
           );
         },
       });
-      if (!provider) return finish([{ kind: "unknown" }]);
+      if (!provider) return finish(unknown("missing-field-provider"));
       return finish(
         provider.kind === "field"
           ? classify(provider.value, path.slice(1))
@@ -652,79 +674,105 @@ const classifyCallable = ({
           ? resolveBorrowCallForFacts(expression, context)
           : resolveBorrowCall(expression, context));
       resolvedCalls.set(expression.id, resolved);
-      if (
-        resolved.argumentPlanAmbiguous === true ||
+      const authoritativeBoundary =
         resolved.openTraitDispatch === true ||
         resolved.traitDispatch === true ||
-        resolved.targets.length === 0
+        resolved.targets.length === 0;
+      if (
+        resolved.argumentPlanAmbiguous === true ||
+        (authoritativeBoundary && !resolved.contract)
       ) {
-        return finish([{ kind: "unknown" }]);
+        return finish(unknown("ambiguous-call"));
       }
-      const targetOrigins = resolved.targets.flatMap((target) => {
-        if (target.moduleId === context.moduleId) {
-          const callers = dependents.get(target.symbol) ?? new Set<SymbolId>();
-          callers.add(prepared.callable.symbol);
-          dependents.set(target.symbol, callers);
-          const summary = summaries.get(target.symbol);
-          const projection = summary?.projections.find(
-            (candidate) => pathKey(candidate.path) === pathKey(path),
-          );
-          if (!projection) return [];
-          return projection.origins.flatMap((origin) => {
-            if (origin.kind !== "parameter") return [origin];
-            const argument = resolved.arguments[origin.parameter];
-            return typeof argument === "number"
-              ? classify(argument, origin.source)
-              : [{ kind: "unknown" } as const];
+      const targetOrigins = authoritativeBoundary
+        ? []
+        : resolved.targets.flatMap((target) => {
+            if (target.moduleId === context.moduleId) {
+              const callers =
+                dependents.get(target.symbol) ?? new Set<SymbolId>();
+              callers.add(prepared.callable.symbol);
+              dependents.set(target.symbol, callers);
+              const summary = summaries.get(target.symbol);
+              const projection = summary?.projections.find(
+                (candidate) => pathKey(candidate.path) === pathKey(path),
+              );
+              if (!projection) return [];
+              return projection.origins.flatMap((origin) => {
+                if (origin.kind !== "parameter") return [origin];
+                const argument = resolved.arguments[origin.parameter];
+                return typeof argument === "number"
+                  ? classify(argument, origin.source)
+                  : [{ kind: "unknown" } as const];
+              });
+            }
+            return [];
           });
-        }
-        return [];
-      });
       if (
         targetOrigins.length > 0 ||
-        resolved.targets.every(
-          (target) =>
-            target.moduleId === context.moduleId &&
-            localResultSymbols.has(target.symbol),
-        )
+        (!authoritativeBoundary &&
+          resolved.targets.every(
+            (target) =>
+              target.moduleId === context.moduleId &&
+              localResultSymbols.has(target.symbol),
+          ))
       ) {
         return finish(targetOrigins);
       }
       const contract = resolved.contract;
       if (!contract) return finish([]);
-      const origins: ResultProvenanceOrigin[] = [];
-      contract.parameters.forEach((parameter, parameterIndex) =>
-        parameter.returnedOrigins?.forEach((origin) => {
-          const source = translateProjectionPath({
-            result: origin.result,
-            source: origin.source,
-            requested: path,
-          });
-          const argument = resolved.arguments[parameterIndex];
-          if (source && typeof argument === "number") {
-            origins.push(...classify(argument, source));
+      const contractOriginKey = `${expression.id}:${pathKey(path)}`;
+      let abstractOrigins = contractOrigins.get(contractOriginKey);
+      if (!abstractOrigins) {
+        const computed: ResultProvenanceOrigin[] = [];
+        contract.parameters.forEach((parameter, parameterIndex) =>
+          parameter.returnedOrigins?.forEach((origin) => {
+            const source = translateProjectionPath({
+              result: origin.result,
+              source: origin.source,
+              requested: path,
+            });
+            if (source) {
+              computed.push({
+                kind: "parameter",
+                parameter: parameterIndex,
+                source,
+              });
+            }
+          }),
+        );
+        contract.externalReturnedOrigins?.forEach((origin) => {
+          if (
+            translateProjectionPath({
+              result: origin.result,
+              source: [],
+              requested: path,
+            })
+          ) {
+            computed.push(
+              origin.fresh === true ? { kind: "owned" } : { kind: "external" },
+            );
           }
-        }),
-      );
-      contract.externalReturnedOrigins?.forEach((origin) => {
-        if (
-          translateProjectionPath({
-            result: origin.result,
-            source: [],
-            requested: path,
-          })
-        ) {
-          origins.push(
-            origin.fresh === true ? { kind: "owned" } : { kind: "external" },
-          );
+        });
+        if (path.length === 0 && contract.freshResult === true) {
+          computed.push({ kind: "owned" });
         }
-      });
-      if (path.length === 0 && contract.freshResult === true) {
-        origins.push({ kind: "owned" });
+        abstractOrigins = uniqueOrigins(computed);
+        contractOrigins.set(contractOriginKey, abstractOrigins);
       }
-      return finish(origins.length > 0 ? origins : [{ kind: "unknown" }]);
+      const origins = abstractOrigins.flatMap(
+        (origin): readonly ResultProvenanceOrigin[] => {
+          if (origin.kind !== "parameter") return [origin];
+          const argument = resolved.arguments[origin.parameter];
+          return typeof argument === "number"
+            ? classify(argument, origin.source)
+            : [{ kind: "unknown" }];
+        },
+      );
+      return finish(
+        origins.length > 0 ? origins : unknown("missing-result-origin"),
+      );
     }
-    return finish([{ kind: "unknown" }]);
+    return finish(unknown("unsupported-expression"));
   };
 
   const projections = referenceOriginsInType(
@@ -818,6 +866,7 @@ export const inferCallableResultProvenance = ({
     ReturnType<typeof resolveBorrowCall>
   >();
   const dependents = new Map<SymbolId, Set<SymbolId>>();
+  const contractOrigins = new Map<string, readonly ResultProvenanceOrigin[]>();
   const worklist = Array.from(prepared.keys()).filter(
     (symbol) => !baseContracts.has(symbol),
   );
@@ -843,6 +892,7 @@ export const inferCallableResultProvenance = ({
             resolvedCallTargets,
             resolvedCalls,
             dependents,
+            contractOrigins,
           });
     if (evaluationCount > MAX_RESULT_PROVENANCE_EVALUATIONS) {
       widened.add(symbol);

@@ -56,7 +56,12 @@ import {
   typeParameterPathsInType,
 } from "./borrowed-types.js";
 import { objectLiteralFieldProvider } from "./object-literal-providers.js";
-import { traitRegionProjectionsForCoercion } from "./trait-region-projection.js";
+import {
+  localTraitRegionProjectionMetadata,
+  resolvedTraitRegionProjectionsFromMetadata,
+  type LocalTraitRegionProjection,
+  type ResolvedTraitRegionProjection,
+} from "./trait-region-projection.js";
 import { isPrivateSummaryRegionProjection } from "./callable-summary.js";
 import {
   factControlFlowLeaves,
@@ -105,14 +110,15 @@ type Termination = {
 };
 
 type BodyContext = {
-  hir: HirGraph;
   typing: TypingResult;
   symbolTable: SymbolTable;
   moduleId: string;
   imports: ReadonlyMap<SymbolId, SymbolRef>;
-  dependencies: ReadonlyMap<string, BorrowingDependency>;
-  contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
-  decls: DeclTable;
+  resolvedCalls: ReadonlyMap<HirExprId, ResolvedBorrowCall>;
+  callableValueContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  externalStorageSymbols: ReadonlySet<SymbolId>;
+  localTraitRegionProjections: readonly LocalTraitRegionProjection[];
+  dependencyTraitRegionProjections: readonly ResolvedTraitRegionProjection[];
   aliases: Map<SymbolId, AliasDefinition>;
   assignmentAliases: AliasDefinition[];
   assignmentAliasesBySymbol: Map<SymbolId, AliasDefinition[]>;
@@ -152,7 +158,6 @@ type BodyContext = {
     place: BorrowPlace;
     event: Event;
   }[];
-  callResolutionCache: Map<HirExprId, ResolvedBorrowCall>;
   externalResultCache: Map<string, boolean>;
   expressionPlacesCache: Map<HirExprId, readonly BorrowPlace[]>;
   expressionPlacesInProgress: Set<HirExprId>;
@@ -191,7 +196,7 @@ type ScanContext = {
 
 const typeOfExpr = (
   exprId: HirExprId,
-  ctx: Pick<BodyContext, "hir" | "typing"> &
+  ctx: Pick<BodyContext, "typing" | "factsForExpression"> &
     Partial<Pick<BodyContext, "facts">>,
 ): TypeId | undefined => {
   const expressionType =
@@ -209,9 +214,11 @@ const typeOfExpr = (
 
 const bodyExpression = (
   exprId: HirExprId,
-  ctx: Pick<BodyContext, "hir"> & Partial<Pick<BodyContext, "facts">>,
+  ctx: Pick<BodyContext, "factsForExpression"> &
+    Partial<Pick<BodyContext, "facts">>,
 ): HirExpression | undefined =>
-  ctx.facts?.expressions.get(exprId) ?? ctx.hir.expressions.get(exprId);
+  ctx.facts?.expressions.get(exprId) ??
+  ctx.factsForExpression.get(exprId)?.expressions.get(exprId);
 
 const isReferenceLike = (
   typeId: TypeId | undefined,
@@ -233,7 +240,7 @@ const borrowedEndpointIsDereferenced = (
 const expressionMaterializesBorrowedPrimitive = (
   exprId: HirExprId,
   expectedTypes: readonly (TypeId | undefined)[],
-  ctx: Pick<BodyContext, "hir" | "typing">,
+  ctx: Pick<BodyContext, "typing" | "factsForExpression">,
 ): boolean => {
   const expression = bodyExpression(exprId, ctx);
   const actualType =
@@ -257,7 +264,7 @@ const aggregateProjectionMaterializesBorrowedPrimitive = (
   aggregate: HirExprId,
   value: HirExprId,
   projection: PlaceProjection,
-  ctx: Pick<BodyContext, "hir" | "typing">,
+  ctx: Pick<BodyContext, "typing" | "factsForExpression">,
 ): boolean => {
   const aggregateType = typeOfExpr(aggregate, ctx);
   return (
@@ -551,13 +558,13 @@ const targetInfo = (
   if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
     throw new Error(`expression ${expr.id} is not a call`);
   }
-  const fact = ctx.factsForExpression
-    .get(expr.id)
-    ?.callForExpression.get(expr.id);
-  if (!fact) {
-    throw new Error(`missing borrow call fact for expression ${expr.id}`);
+  const resolved = ctx.resolvedCalls.get(expr.id);
+  if (!resolved) {
+    throw new Error(
+      `missing specialized borrow call for expression ${expr.id}`,
+    );
   }
-  return resolveBorrowCallFromFact({ expr, fact, ctx });
+  return resolved;
 };
 
 const borrowContractSourceOfExpression = (
@@ -1288,16 +1295,9 @@ const expressionIsExternalStorage = (
   const expression = bodyExpression(candidate, ctx);
   if (expression?.exprKind === "identifier") {
     const localModuleStorage = ctx.moduleStorageSymbols.has(expression.symbol);
-    const imported = ctx.imports.get(expression.symbol);
-    const importedStorage =
-      imported !== undefined &&
-      !ctx.dependencies
-        .get(imported.moduleId)
-        ?.callables.has(imported.symbol) &&
-      !ctx.dependencies
-        .get(imported.moduleId)
-        ?.effectOperations.has(imported.symbol);
-    return localModuleStorage || importedStorage;
+    return (
+      localModuleStorage || ctx.externalStorageSymbols.has(expression.symbol)
+    );
   }
   if (expression?.exprKind === "field-access") {
     return expressionIsExternalStorage(expression.target, ctx, seen);
@@ -2582,15 +2582,15 @@ const traitCoercionOrigins = ({
   targetType: TypeId | undefined;
   ctx: BodyContext;
 }): readonly AggregateOrigin[] => {
-  const projections = traitRegionProjectionsForCoercion({
+  const projections = resolvedTraitRegionProjectionsFromMetadata({
     sourceType: typeOfExpr(value, ctx),
     targetType,
-    hir: ctx.hir,
     typing: ctx.typing,
     symbolTable: ctx.symbolTable,
     moduleId: ctx.moduleId,
     imports: ctx.imports,
-    dependencies: ctx.dependencies,
+    localProjections: ctx.localTraitRegionProjections,
+    dependencyProjections: ctx.dependencyTraitRegionProjections,
   });
   if (projections.length === 0) {
     return [];
@@ -8645,22 +8645,6 @@ const callMaySuspend = (
   if (ctx.facts.callForExpression.get(exprId)?.maySuspend === true) {
     return true;
   }
-  const target = info.target;
-  if (target) {
-    if (target.moduleId === ctx.moduleId) {
-      const operation = ctx.decls.getEffectOperation(target.symbol);
-      if (operation) {
-        return operation.operation.resumable === "resume";
-      }
-    } else {
-      const operation = ctx.dependencies
-        .get(target.moduleId)
-        ?.effectOperations.get(target.symbol);
-      if (operation) {
-        return operation.maySuspend;
-      }
-    }
-  }
   const effectRow = info.signature?.effectRow;
   return (
     typeof effectRow === "number" && !ctx.typing.effects.isEmpty(effectRow)
@@ -8703,11 +8687,7 @@ const callableValueAtPath = (
     return { kind: "unknown" };
   }
   if (callback.exprKind === "identifier") {
-    const imported = ctx.imports.get(callback.symbol);
-    const direct = imported
-      ? ctx.dependencies.get(imported.moduleId)?.callables.get(imported.symbol)
-          ?.contract
-      : ctx.contracts.get(callback.symbol);
+    const direct = ctx.callableValueContracts.get(callback.symbol);
     if (path.length === 0 && direct) {
       return { kind: "known", contract: direct };
     }
@@ -8873,7 +8853,7 @@ const callableValueAtPath = (
   if (callback?.exprKind === "lambda") {
     const lambdaFacts = ctx.lambdaFacts.get(callback.id);
     const contract = lambdaFacts
-      ? ctx.contracts.get(lambdaFacts.symbol)
+      ? ctx.callableValueContracts.get(lambdaFacts.symbol)
       : ctx.lambdaContracts.get(callback.id);
     if (!contract) return { kind: "unknown" };
     return {
@@ -9294,14 +9274,15 @@ const initializeCallableContext = ({
   parameterTypes,
   returnType,
   borrowedReturnEntries,
-  hir,
   typing,
   symbolTable,
   moduleId,
   imports,
-  dependencies,
-  decls,
-  contracts,
+  resolvedCalls,
+  callableValueContracts,
+  externalStorageSymbols,
+  localTraitRegionProjections,
+  dependencyTraitRegionProjections,
   moduleStorageSymbols,
   mutableStorageSymbols,
   runtimeIdentityGuards,
@@ -9314,14 +9295,15 @@ const initializeCallableContext = ({
   parameterTypes: readonly (TypeId | undefined)[];
   returnType?: TypeId;
   borrowedReturnEntries: readonly BorrowedTypeEntry[];
-  hir: HirGraph;
   typing: TypingResult;
   symbolTable: SymbolTable;
   moduleId: string;
   imports: ReadonlyMap<SymbolId, SymbolRef>;
-  dependencies: ReadonlyMap<string, BorrowingDependency>;
-  decls: DeclTable;
-  contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  resolvedCalls: ReadonlyMap<HirExprId, ResolvedBorrowCall>;
+  callableValueContracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
+  externalStorageSymbols: ReadonlySet<SymbolId>;
+  localTraitRegionProjections: readonly LocalTraitRegionProjection[];
+  dependencyTraitRegionProjections: readonly ResolvedTraitRegionProjection[];
   moduleStorageSymbols: ReadonlySet<SymbolId>;
   mutableStorageSymbols: Set<SymbolId>;
   runtimeIdentityGuards: Map<HirExprId, RuntimeIdentityGuard[]>;
@@ -9394,14 +9376,15 @@ const initializeCallableContext = ({
     assignmentAliasesBySymbol.set(alias.symbol, aliasesForSymbol);
   });
   return {
-    hir,
     typing,
     symbolTable,
     moduleId,
     imports,
-    dependencies,
-    decls,
-    contracts,
+    resolvedCalls,
+    callableValueContracts,
+    externalStorageSymbols,
+    localTraitRegionProjections,
+    dependencyTraitRegionProjections,
     aliases,
     assignmentAliases: parameterBorrowAliases,
     assignmentAliasesBySymbol,
@@ -9424,7 +9407,6 @@ const initializeCallableContext = ({
     initialBindingInitializers: new Map(),
     externalizedPlaces: [],
     freshnessInvalidations: [],
-    callResolutionCache: new Map(),
     externalResultCache: new Map(),
     expressionPlacesCache: new Map(),
     expressionPlacesInProgress: new Set(),
@@ -9541,6 +9523,53 @@ export type PreparedBorrowingAnalysis = {
   check: () => readonly Diagnostic[];
 };
 
+/**
+ * Immutable module metadata specialized before local loan checking. It keeps
+ * dependency interfaces and HIR ownership outside the checker while allowing
+ * each body to resolve imported storage and trait-region coercions locally.
+ */
+export type LocalBorrowingEnvironment = {
+  externalStorageSymbols: ReadonlySet<SymbolId>;
+  localTraitRegionProjections: readonly LocalTraitRegionProjection[];
+  dependencyTraitRegionProjections: readonly ResolvedTraitRegionProjection[];
+};
+
+export const createLocalBorrowingEnvironment = ({
+  hir,
+  typing,
+  symbolTable,
+  moduleId,
+  imports,
+  dependencies,
+}: {
+  hir: HirGraph;
+  typing: TypingResult;
+  symbolTable: SymbolTable;
+  moduleId: string;
+  imports: ReadonlyMap<SymbolId, SymbolRef>;
+  dependencies: ReadonlyMap<string, BorrowingDependency>;
+}): LocalBorrowingEnvironment => ({
+  externalStorageSymbols: new Set(
+    Array.from(imports).flatMap(([local, imported]) => {
+      const dependency = dependencies.get(imported.moduleId);
+      return !dependency?.callables.has(imported.symbol) &&
+        !dependency?.effectOperations.has(imported.symbol)
+        ? [local]
+        : [];
+    }),
+  ),
+  localTraitRegionProjections: localTraitRegionProjectionMetadata({
+    hir,
+    typing,
+    symbolTable,
+    moduleId,
+    imports,
+  }),
+  dependencyTraitRegionProjections: Array.from(dependencies.values()).flatMap(
+    (dependency) => dependency.traitRegionProjections,
+  ),
+});
+
 export const prepareFunctionBorrowing = ({
   functionItem,
   facts,
@@ -9555,6 +9584,7 @@ export const prepareFunctionBorrowing = ({
   decls,
   contracts,
   moduleStorageSymbols,
+  localEnvironment,
 }: {
   functionItem: HirFunction;
   facts: CallableBorrowFacts;
@@ -9569,6 +9599,7 @@ export const prepareFunctionBorrowing = ({
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   moduleStorageSymbols: ReadonlySet<SymbolId>;
+  localEnvironment: LocalBorrowingEnvironment;
 }): PreparedBorrowingAnalysis => {
   const signature = typing.functions.getSignature(functionItem.symbol);
   const declaredTypeId = (
@@ -9642,6 +9673,7 @@ export const prepareFunctionBorrowing = ({
     decls,
     contracts,
     moduleStorageSymbols,
+    localEnvironment,
   });
 };
 
@@ -9659,6 +9691,7 @@ export const prepareLambdaBorrowing = ({
   decls,
   contracts,
   moduleStorageSymbols,
+  localEnvironment,
 }: {
   lambda: HirLambdaExpr;
   facts: CallableBorrowFacts;
@@ -9673,6 +9706,7 @@ export const prepareLambdaBorrowing = ({
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   moduleStorageSymbols: ReadonlySet<SymbolId>;
+  localEnvironment: LocalBorrowingEnvironment;
 }): PreparedBorrowingAnalysis => {
   const lambdaType = typing.resolvedExprTypes.get(lambda.id);
   const lambdaDescriptor =
@@ -9704,6 +9738,7 @@ export const prepareLambdaBorrowing = ({
     decls,
     contracts,
     moduleStorageSymbols,
+    localEnvironment,
   });
 };
 
@@ -9725,6 +9760,7 @@ const prepareCallableBorrowing = ({
   decls,
   contracts,
   moduleStorageSymbols,
+  localEnvironment,
 }: {
   callable: BorrowCallable;
   facts: CallableBorrowFacts;
@@ -9743,30 +9779,102 @@ const prepareCallableBorrowing = ({
   decls: DeclTable;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   moduleStorageSymbols: ReadonlySet<SymbolId>;
+  localEnvironment: LocalBorrowingEnvironment;
 }): PreparedBorrowingAnalysis => {
   const mutableStorageSymbols = new Set<SymbolId>();
   const runtimeIdentityGuards = new Map<HirExprId, RuntimeIdentityGuard[]>();
   const diagnostics: Diagnostic[] = [];
-  const initializationStartedAt = startCompilerPerfPhase();
-  const ctx = initializeCallableContext({
-    callable,
-    parameterTypes,
-    returnType,
-    borrowedReturnEntries,
+  const localLambdaFacts = new Map<HirExprId, CallableBorrowFacts>();
+  const localFacts = [facts];
+  for (let index = 0; index < localFacts.length; index += 1) {
+    localFacts[index]!.expressions.forEach((expression) => {
+      if (
+        expression.exprKind !== "lambda" ||
+        localLambdaFacts.has(expression.id)
+      ) {
+        return;
+      }
+      const nested = lambdaFacts.get(expression.id);
+      if (!nested) return;
+      localLambdaFacts.set(expression.id, nested);
+      localFacts.push(nested);
+    });
+  }
+  const resolutionContext = {
     hir,
     typing,
     symbolTable,
     moduleId,
     imports,
     dependencies,
-    decls,
     contracts,
+    bindingInitializers: new Map<SymbolId, HirExprId>(),
+    callResolutionCache: new Map<HirExprId, ResolvedBorrowCall>(),
+    decls,
+  };
+  const resolvedCalls = new Map<HirExprId, ResolvedBorrowCall>();
+  localFacts.forEach((callableFacts) => {
+    callableFacts.calls.forEach((call) => {
+      const expression = callableFacts.expressions.get(call.exprId);
+      if (
+        expression?.exprKind !== "call" &&
+        expression?.exprKind !== "method-call"
+      ) {
+        return;
+      }
+      resolvedCalls.set(
+        call.exprId,
+        resolveBorrowCallFromFact({
+          expr: expression,
+          fact: call,
+          ctx: resolutionContext,
+        }),
+      );
+    });
+  });
+  const referencedCallableSymbols = new Set(
+    localFacts.flatMap((callableFacts) =>
+      Array.from(callableFacts.expressions.values()).flatMap((expression) =>
+        expression.exprKind === "identifier" ? [expression.symbol] : [],
+      ),
+    ),
+  );
+  const callableValueContracts = new Map<SymbolId, CallableBorrowContract>();
+  referencedCallableSymbols.forEach((symbol) => {
+    const imported = imports.get(symbol);
+    const contract = imported
+      ? dependencies.get(imported.moduleId)?.callables.get(imported.symbol)
+          ?.contract
+      : contracts.get(symbol);
+    if (contract) callableValueContracts.set(symbol, contract);
+  });
+  localLambdaFacts.forEach((lambdaFact, expression) => {
+    const contract =
+      contracts.get(lambdaFact.symbol) ?? lambdaContracts.get(expression);
+    if (contract) callableValueContracts.set(lambdaFact.symbol, contract);
+  });
+  const initializationStartedAt = startCompilerPerfPhase();
+  const ctx = initializeCallableContext({
+    callable,
+    parameterTypes,
+    returnType,
+    borrowedReturnEntries,
+    typing,
+    symbolTable,
+    moduleId,
+    imports,
+    resolvedCalls,
+    callableValueContracts,
+    externalStorageSymbols: localEnvironment.externalStorageSymbols,
+    localTraitRegionProjections: localEnvironment.localTraitRegionProjections,
+    dependencyTraitRegionProjections:
+      localEnvironment.dependencyTraitRegionProjections,
     moduleStorageSymbols,
     mutableStorageSymbols,
     runtimeIdentityGuards,
     diagnostics,
     facts,
-    lambdaFacts,
+    lambdaFacts: localLambdaFacts,
     lambdaContracts,
   });
   markCompilerPerfPhaseDuration(

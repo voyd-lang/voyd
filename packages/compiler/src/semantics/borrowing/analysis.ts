@@ -16,6 +16,7 @@ import type { TypingResult } from "../typing/index.js";
 import type { SymbolRef } from "../typing/symbol-ref.js";
 import type { DeclTable } from "../decls.js";
 import {
+  createLocalBorrowingEnvironment,
   prepareFunctionBorrowing,
   prepareLambdaBorrowing,
   type PreparedBorrowingAnalysis,
@@ -25,10 +26,7 @@ import type {
   CallableBorrowContract,
   PlaceProjection,
 } from "./model.js";
-import {
-  mergeCallableBorrowContracts,
-  translateProjectionPath,
-} from "./model.js";
+import { translateProjectionPath } from "./model.js";
 import type { BorrowingDependency } from "./dependency.js";
 import {
   abstractTraitContractFromImplementation,
@@ -360,9 +358,7 @@ export const analyzeBorrowing = ({
       privateFieldNames: new Set(),
     });
     const declaration = declarations.get(named.declaration);
-    return declaration
-      ? mergeCallableBorrowContracts([implementation, declaration])!
-      : implementation;
+    return declaration ?? implementation;
   };
   markCompilerPerfPhaseDuration(
     "analyzeBorrowing.computeContracts",
@@ -500,61 +496,70 @@ export const analyzeBorrowing = ({
       selectionStartedAt,
     );
     const bodiesStartedAt = startCompilerPerfPhase();
-    const prepared: PreparedBorrowingAnalysis[] = [
-      ...checkedFunctions.flatMap((functionItem) => {
-        const facts = callableFacts.get(functionItem.symbol);
-        return facts
-          ? [
-              prepareFunctionBorrowing({
-                functionItem,
-                facts,
-                lambdaFacts,
-                lambdaContracts,
-                hir: summaryHir,
-                typing,
-                symbolTable,
-                moduleId,
-                imports: importMap,
-                dependencies,
-                decls,
-                contracts: resolvedContracts,
-                moduleStorageSymbols,
-              }),
-            ]
-          : [];
-      }),
-      ...checkedLambdas.flatMap((lambda) => {
-        const facts = lambdaFacts.get(lambda.id);
-        return facts
-          ? [
-              prepareLambdaBorrowing({
-                lambda,
-                facts,
-                lambdaFacts,
-                lambdaContracts,
-                hir,
-                typing,
-                symbolTable,
-                moduleId,
-                imports: importMap,
-                dependencies,
-                decls,
-                contracts: resolvedContracts,
-                moduleStorageSymbols,
-              }),
-            ]
-          : [];
-      }),
-    ];
-    prepared.forEach(({ runtimePlan }) => {
+    const localEnvironment = createLocalBorrowingEnvironment({
+      hir: summaryHir,
+      typing,
+      symbolTable,
+      moduleId,
+      imports: importMap,
+      dependencies,
+    });
+    const checkPrepared = ({
+      runtimePlan,
+      check,
+    }: PreparedBorrowingAnalysis): void => {
       runtimePlan.mutableStorageSymbols.forEach((symbol) =>
         mutableStorageSymbols.add(symbol),
       );
       runtimePlan.runtimeIdentityGuards.forEach((guards, call) => {
         runtimeIdentityGuards.set(call, [...guards]);
       });
+      diagnostics.push(...check());
+    };
+    checkedFunctions.forEach((functionItem) => {
+      const facts = callableFacts.get(functionItem.symbol);
+      if (!facts) return;
+      checkPrepared(
+        prepareFunctionBorrowing({
+          functionItem,
+          facts,
+          lambdaFacts,
+          lambdaContracts,
+          hir: summaryHir,
+          typing,
+          symbolTable,
+          moduleId,
+          imports: importMap,
+          dependencies,
+          decls,
+          contracts: resolvedContracts,
+          moduleStorageSymbols,
+          localEnvironment,
+        }),
+      );
     });
-    prepared.forEach((body) => diagnostics.push(...body.check()));
+    checkedLambdas.forEach((lambda) => {
+      const facts = lambdaFacts.get(lambda.id);
+      if (!facts) return;
+      checkPrepared(
+        prepareLambdaBorrowing({
+          lambda,
+          facts,
+          lambdaFacts,
+          lambdaContracts,
+          hir,
+          typing,
+          symbolTable,
+          moduleId,
+          imports: importMap,
+          dependencies,
+          decls,
+          contracts: resolvedContracts,
+          moduleStorageSymbols,
+          localEnvironment,
+        }),
+      );
+    });
     markCompilerPerfPhaseDuration(
       "analyzeBorrowing.checkLoans",
       bodiesStartedAt,

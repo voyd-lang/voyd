@@ -9,15 +9,23 @@ import {
   classifyCallableCapability,
   type CapabilityClassifierInput,
 } from "../capability-classifier.js";
-import type { CallableBorrowIndex } from "../callable-borrow-index.js";
+import type {
+  CallableBorrowIndex,
+  CallableBorrowIndexCall,
+} from "../callable-borrow-index.js";
+import type { CallableBorrowContract } from "../model.js";
+import { planRuntimeBorrowing } from "../transient-guards.js";
+import type { TypingResult } from "../../typing/index.js";
 
-const openDispatchIndex = (): CallableBorrowIndex =>
+const openDispatchIndex = (
+  calls: readonly CallableBorrowIndexCall[] = [],
+): CallableBorrowIndex =>
   ({
     symbol: 1,
     parameters: [],
     parameterPlaces: new Map(),
     accesses: [],
-    calls: [],
+    calls,
     directCallEdges: [],
     flags: {
       hasBorrowOperation: false,
@@ -89,5 +97,95 @@ describe("borrow capability lattice", () => {
       dispatch: { hasOpenDispatch: true },
     };
     expect(classifyCallableCapability(input).mode).toBe("flow-sensitive");
+  });
+
+  it("uses an authoritative declaration contract for open dispatch", () => {
+    const contract = {
+      parameters: [],
+      maySuspend: false,
+      borrowedResult: "none" as const,
+      freshResult: true as const,
+    };
+    const index = openDispatchIndex([
+      {
+        exprId: 2,
+        span: { file: "test.voyd", start: 0, end: 1 },
+        targets: [{ moduleId: "test", symbol: 3 }],
+        arguments: [],
+        intrinsic: false,
+        intrinsicBoundary: false,
+        formsExplicitBorrow: false,
+        returnsBorrowed: false,
+        resultUse: "escapes-or-ambiguous",
+        maySuspend: false,
+        openTraitDispatch: true,
+        boundaryContract: contract,
+      },
+    ]);
+    expect(
+      classifyCallableCapability({
+        index,
+        localModuleId: "test",
+        localCapabilities: new Map(),
+        importedCallables: new Map(),
+      }),
+    ).toEqual({ mode: "none", reasons: [] });
+  });
+
+  it("plans open-dispatch guards from the authoritative contract", () => {
+    const boundaryContract: CallableBorrowContract = {
+      parameters: [0, 1].map(() => ({
+        access: "mutable" as const,
+        writePaths: [[]],
+        invalidatedPaths: [[]],
+        retained: false,
+        returned: false,
+      })),
+      maySuspend: false,
+      borrowedResult: "none",
+    };
+    const implementationContract: CallableBorrowContract = {
+      ...boundaryContract,
+      parameters: boundaryContract.parameters.map((parameter) => ({
+        ...parameter,
+        writePaths: [],
+        invalidatedPaths: [],
+      })),
+    };
+    const call: CallableBorrowIndexCall = {
+      exprId: 2,
+      span: { file: "test.voyd", start: 0, end: 1 },
+      targets: [{ moduleId: "test", symbol: 3 }],
+      arguments: [
+        { parameter: 0, expression: 4, place: { root: 10, projections: [] } },
+        { parameter: 1, expression: 5, place: { root: 11, projections: [] } },
+      ],
+      signature: {
+        parameters: [
+          { bindingKind: "mutable-ref" },
+          { bindingKind: "mutable-ref" },
+        ],
+      } as unknown as CallableBorrowIndexCall["signature"],
+      intrinsic: false,
+      intrinsicBoundary: false,
+      formsExplicitBorrow: false,
+      returnsBorrowed: false,
+      resultUse: "ignored",
+      maySuspend: false,
+      openTraitDispatch: true,
+      boundaryContract,
+    };
+    const plan = planRuntimeBorrowing({
+      index: openDispatchIndex([call]),
+      lookup: {
+        localModuleId: "test",
+        localCapabilities: new Map(),
+        localContracts: new Map([[3, implementationContract]]),
+        importedCallables: new Map(),
+      },
+      typing: {} as TypingResult,
+    });
+
+    expect(plan.guards.get(call.exprId)).toHaveLength(1);
   });
 });

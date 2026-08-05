@@ -289,3 +289,56 @@ about 603–611 ms. Package-scale compilation amplifies that cost further. The
 next performance work should therefore reduce conservative contract/provenance
 propagation and make the final local checker consume bounded authoritative
 facts; the aggregate-origin repair does not replace either architectural step.
+
+## Authoritative dispatch and local-checker repair
+
+This change makes declared trait contracts authoritative at dynamic-dispatch
+boundaries and narrows the final body checker to prepared, immutable borrowing
+facts. Call resolution, dependency projection, and storage classification now
+happen before that checker runs. Bodies are checked sequentially so each
+body-specific context can be released after its diagnostics and optional debug
+detail have been collected.
+
+The representative source comparison used seven alternating fresh Node
+processes per revision and mode. `630b8d6c` is the immediate before revision;
+`876f1680` is the original memory-safety baseline.
+
+| Seven-sample source median | `876f1680` | `630b8d6c` | Current | Current vs before | Current vs baseline |
+| -------------------------- | ---------: | ---------: | ------: | ----------------: | ------------------: |
+| Unoptimized compile | 1,324.48 ms | 1,968.63 ms | 1,950.05 ms | -18.58 ms (-0.94%) | +625.57 ms (+47.23%) |
+| Release compile | 1,856.71 ms | 2,499.45 ms | 2,483.59 ms | -15.86 ms (-0.63%) | +626.88 ms (+33.76%) |
+| Unoptimized peak heap | 541,518,792 B | 650,779,464 B | 666,136,208 B | +2.36% | +23.01% |
+| Release peak heap | 605,141,224 B | 680,008,912 B | 684,720,584 B | +0.69% | +13.15% |
+| Unoptimized process max RSS | 4,182,294,528 B | 4,225,531,904 B | 4,224,630,784 B | -0.02% | +1.01% |
+| Release process max RSS | 4,229,054,464 B | 4,255,891,456 B | 4,255,744,000 B | effectively flat | +0.63% |
+
+Peak heap is the largest JavaScript heap observed during compilation. Maximum
+RSS is the operating system's peak resident-memory reading for the process.
+Process RSS remained flat relative to the immediate before revision. Because
+the benchmark compares complete revisions, it does not isolate the effect of
+sequential body disposal or demonstrate a peak-memory reduction.
+
+The checker workset stayed bounded: 449 of 887 body callables were checked and
+699 public contracts retained 1,012,550 bytes in both revisions. Compact
+contract evaluations fell from 1,118 to 1,113. Result classification became
+more precise: unknown results fell from 268 to 258, parameter-derived results
+rose from 19 to 27, and mixed results rose from 45 to 47. Wasm output is
+byte-identical to `630b8d6c` in both modes.
+
+The focused scalar benchmark independently measured a 1,318.28 ms
+unoptimized median and a 1,480.36 ms release median, versus 1,408.60 ms and
+1,564.37 ms at `630b8d6c`. Its contract-computation median fell from 349.20 to
+325.47 ms unoptimized and from 329.97 to 321.34 ms in release. Loan checking
+fell from 113.95 to 111.34 ms and from 106.32 to 100.57 ms respectively.
+Runtime, allocation sites, retained-contract size, and generated Wasm size were
+unchanged within measurement noise. Dynamic guard overhead remained about
+1.0 ns per guarded call unoptimized and 1.6 ns in release.
+
+A cold whole-Web compile completed in 66.84 seconds with a 4,308,189,184-byte
+maximum RSS and a 1,045,057-byte Wasm module, within the existing package gate.
+Recovering declared result origins at trait boundaries added roughly 2.2--2.6
+seconds to the result-provenance phase in repeated whole-Web samples. This is a
+deliberate precision cost at the package-scale outlier; the overall gate still
+passes, and the representative source benchmark improved slightly. Performance
+counters now attribute unknown provenance to causes such as an ambiguous call,
+missing result origin, unsupported expression, or the bounded depth limit.

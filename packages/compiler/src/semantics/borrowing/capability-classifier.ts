@@ -220,8 +220,7 @@ export const classifyBorrowContractCapability = (
     ) === true ||
     (contract.transfers?.length ?? 0) > 0 ||
     (contract.scopedCallbacks?.length ?? 0) > 0 ||
-    (contract.callableResultInvocations?.length ?? 0) > 0 ||
-    contract.dynamicDispatch !== undefined
+    (contract.callableResultInvocations?.length ?? 0) > 0
   ) {
     return capabilityDecision("flow-sensitive", ["contract-flow"]);
   }
@@ -355,6 +354,7 @@ export const classifyCallableCapability = ({
     (call) =>
       (call.openTraitDispatch === true ||
         call.argumentPlanAmbiguous === true) &&
+      call.boundaryContract === undefined &&
       callHasBorrowRelevantBoundary(call),
   );
   if (declaredContract) {
@@ -460,7 +460,27 @@ export const classifyCallableCapability = ({
       );
     }
     if (call.targets.length === 0 && !call.intrinsic) {
+      if (call.boundaryContract) {
+        decisions.push(
+          calleeEffectDecision({
+            call,
+            mode: classifyBorrowContractCapability(call.boundaryContract).mode,
+            contract: call.boundaryContract,
+          }),
+        );
+        return;
+      }
       decisions.push(calleeEffectDecision({ call, mode: undefined }));
+      return;
+    }
+    if (call.openTraitDispatch && call.boundaryContract) {
+      decisions.push(
+        calleeEffectDecision({
+          call,
+          mode: classifyBorrowContractCapability(call.boundaryContract).mode,
+          contract: call.boundaryContract,
+        }),
+      );
       return;
     }
     call.targets.forEach((target) =>

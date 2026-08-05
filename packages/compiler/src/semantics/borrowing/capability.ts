@@ -1,7 +1,8 @@
 /**
- * The capability lattice is deliberately independent of HIR and analysis.
- * It is the routing contract between cheap callable indexing and the
- * capability-specific borrowing implementations.
+ * A lattice here is just an ordered set of choices: `none` is cheaper than
+ * `transient`, which is cheaper than `flow-sensitive`. Combining choices may
+ * only move upward to a safer mode, never back down. Keeping that rule
+ * independent of HIR makes routing deterministic.
  */
 export type LoanAnalysisMode = "none" | "transient" | "flow-sensitive";
 
@@ -28,7 +29,9 @@ export const joinLoanAnalysisModes = (
 export const joinCapabilityDecisions = (
   decisions: readonly CapabilityDecision[],
 ): CapabilityDecision => {
-  const mode = joinLoanAnalysisModes(decisions.map((decision) => decision.mode));
+  const mode = joinLoanAnalysisModes(
+    decisions.map((decision) => decision.mode),
+  );
   return {
     mode,
     reasons: Array.from(

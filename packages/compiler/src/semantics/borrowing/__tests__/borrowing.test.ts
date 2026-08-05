@@ -228,6 +228,33 @@ impl<T> Box<T>
     ).toBe("flow-sensitive");
   });
 
+  it("routes trait dispatch from its authoritative declaration contract", () => {
+    const result = analyze(`
+obj Item { value: i32 }
+obj ItemView { source: Item }
+
+trait Inspect
+  region source
+
+  @borrow_contract(reads: source)
+  fn read(self) -> i32
+
+impl Inspect for ItemView
+  region source = deref(self.source)
+
+  fn read(self) -> i32
+    self.source.value
+
+fn inspect(value: Inspect) -> i32
+  value.read()
+`);
+
+    expect(
+      result.borrowing.diagnostics.map((diagnostic) => diagnostic.code),
+    ).toEqual([]);
+    expect(capabilityFor(result, "inspect")).toBe("transient");
+  });
+
   it("routes capability modes from compact behavior and escaping use", () => {
     const source = `
 obj Some<T> { value: T }
@@ -1559,6 +1586,32 @@ impl Choose for Chooser
 fn invalid(chooser: Choose, ~candidate: Box) -> i32
   let loan: borrow Box = candidate
   let returned = chooser.choose(candidate)
+  mutate(~returned)
+  loan.value
+`),
+    ).toContain("TY0048");
+  });
+
+  it("uses declared result origins instead of a more precise implementation", () => {
+    expect(
+      diagnosticCodes(`
+obj Box { value: i32 }
+obj Chooser {}
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+trait Choose
+  @borrow_contract(returns_from: candidate)
+  fn choose(self, candidate: Box) -> Box
+
+impl Choose for Chooser
+  fn choose(self, candidate: Box) -> Box
+    Box { value: candidate.value }
+
+fn invalid(chooser: Choose, ~candidate: Box) -> i32
+  let loan: borrow Box = candidate
+  let ~returned = chooser.choose(candidate)
   mutate(~returned)
   loan.value
 `),
