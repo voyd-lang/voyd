@@ -998,8 +998,7 @@ const freshResultPathCovers = (
   freshPath: readonly PlaceProjection[],
   requested: readonly PlaceProjection[],
 ): boolean =>
-  freshPath.length > 0 &&
-  projectionPathCovers(freshPath, requested);
+  freshPath.length > 0 && projectionPathCovers(freshPath, requested);
 
 const callOriginSourceNeedsDereference = ({
   info,
@@ -2654,21 +2653,95 @@ const uniqueAggregateOrigins = (
   );
 };
 
-const aggregateOriginAccess = (
-  exprId: HirExprId,
-  place: BorrowPlace,
-  ctx: BodyContext,
-  requested: readonly PlaceProjection[] = [],
-): AliasDefinition["access"] =>
-  expressionOriginMetadata(exprId, place, ctx, new Set(), requested).access;
+type OriginMetadata = {
+  access: AliasDefinition["access"];
+  capture: boolean;
+};
 
-const expressionOriginIsCapture = (
+type AggregateOriginQuery = {
+  origins: Map<HirExprId, readonly AggregateOrigin[]>;
+  cyclicOrigins: Set<HirExprId>;
+  metadata: Map<string, OriginMetadata>;
+  metadataInProgress: Set<string>;
+  projectedPlaces: Map<string, readonly BorrowPlace[]>;
+  projectedPlacesInProgress: Set<string>;
+};
+
+const createAggregateOriginQuery = (): AggregateOriginQuery => ({
+  origins: new Map(),
+  cyclicOrigins: new Set(),
+  metadata: new Map(),
+  metadataInProgress: new Set(),
+  projectedPlaces: new Map(),
+  projectedPlacesInProgress: new Set(),
+});
+
+const aggregateOriginQueryKey = (
+  exprId: HirExprId,
+  place: BorrowPlace,
+  requested: readonly PlaceProjection[] = [],
+): string => JSON.stringify([exprId, place, requested]);
+
+const aggregateOriginMetadata = (
   exprId: HirExprId,
   place: BorrowPlace,
   ctx: BodyContext,
-  requested: readonly PlaceProjection[] = [],
-): boolean =>
-  expressionOriginMetadata(exprId, place, ctx, new Set(), requested).capture;
+  requested: readonly PlaceProjection[],
+  query: AggregateOriginQuery,
+): OriginMetadata => {
+  const key = aggregateOriginQueryKey(exprId, place, requested);
+  const cached = query.metadata.get(key);
+  if (cached) {
+    return cached;
+  }
+  if (query.metadataInProgress.has(key)) {
+    return { access: "shared", capture: false };
+  }
+  query.metadataInProgress.add(key);
+  try {
+    const metadata = expressionOriginMetadata(
+      exprId,
+      place,
+      ctx,
+      new Set(),
+      requested,
+      query,
+    );
+    query.metadata.set(key, metadata);
+    return metadata;
+  } finally {
+    query.metadataInProgress.delete(key);
+  }
+};
+
+const aggregateOriginPlacesAtProjection = (
+  exprId: HirExprId,
+  requested: readonly PlaceProjection[],
+  ctx: BodyContext,
+  seen: Set<HirExprId>,
+  query: AggregateOriginQuery,
+): readonly BorrowPlace[] => {
+  const key = JSON.stringify([
+    exprId,
+    requested,
+    Array.from(seen).sort((left, right) => left - right),
+  ]);
+  const cached = query.projectedPlaces.get(key);
+  if (cached) {
+    return cached;
+  }
+  if (query.projectedPlacesInProgress.has(key)) {
+    return [];
+  }
+  query.projectedPlacesInProgress.add(key);
+  try {
+    const places = placesAtProjection(exprId, requested, ctx, seen);
+    query.projectedPlaces.set(key, places);
+    return places;
+  } finally {
+    query.projectedPlacesInProgress.delete(key);
+  }
+};
 
 const explicitBorrowedEntryAtPath = (
   exprId: HirExprId,
@@ -2718,11 +2791,8 @@ const originValueRequests = (
 };
 
 const mergeOriginMetadata = (
-  metadata: readonly {
-    access: AliasDefinition["access"];
-    capture: boolean;
-  }[],
-): { access: AliasDefinition["access"]; capture: boolean } => ({
+  metadata: readonly OriginMetadata[],
+): OriginMetadata => ({
   access: metadata.some((origin) => origin.access === "mutable")
     ? "mutable"
     : "shared",
@@ -2735,7 +2805,8 @@ function expressionOriginMetadata(
   ctx: BodyContext,
   seen = new Set<HirExprId>(),
   requested: readonly PlaceProjection[] = [],
-): { access: AliasDefinition["access"]; capture: boolean } {
+  query?: AggregateOriginQuery,
+): OriginMetadata {
   if (seen.has(exprId)) {
     return { access: "shared", capture: false };
   }
@@ -2754,6 +2825,7 @@ function expressionOriginMetadata(
           ctx,
           new Set(seen),
           request.requested,
+          query,
         ),
       ),
     );
@@ -2816,7 +2888,17 @@ function expressionOriginMetadata(
           if (!translated) {
             return [];
           }
-          const matches = placesAtProjection(actual, translated, ctx, new Set())
+          const matches = (
+            query
+              ? aggregateOriginPlacesAtProjection(
+                  actual,
+                  translated,
+                  ctx,
+                  new Set(),
+                  query,
+                )
+              : placesAtProjection(actual, translated, ctx, new Set())
+          )
             .map((actualPlace) =>
               applyBorrowEndpoint(
                 actualPlace,
@@ -2836,6 +2918,7 @@ function expressionOriginMetadata(
                   ctx,
                   new Set(seen),
                   translated,
+                  query,
                 ),
               ]
             : [];
@@ -2850,24 +2933,23 @@ const aggregateOriginsOfExpression = (
   exprId: HirExprId,
   ctx: BodyContext,
   seen = new Set<HirExprId>(),
-  cache = new Map<HirExprId, readonly AggregateOrigin[]>(),
-  cyclic = new Set<HirExprId>(),
+  query = createAggregateOriginQuery(),
 ): readonly AggregateOrigin[] => {
-  const cached = cache.get(exprId);
+  const cached = query.origins.get(exprId);
   if (cached) {
     return cached;
   }
   if (seen.has(exprId)) {
-    seen.forEach((candidate) => cyclic.add(candidate));
-    cyclic.add(exprId);
+    seen.forEach((candidate) => query.cyclicOrigins.add(candidate));
+    query.cyclicOrigins.add(exprId);
     return [];
   }
   const finish = (
     origins: readonly AggregateOrigin[],
   ): readonly AggregateOrigin[] => {
     const bounded = uniqueAggregateOrigins(origins);
-    if (!cyclic.has(exprId)) {
-      cache.set(exprId, bounded);
+    if (!query.cyclicOrigins.has(exprId)) {
+      query.origins.set(exprId, bounded);
     }
     return bounded;
   };
@@ -2885,8 +2967,7 @@ const aggregateOriginsOfExpression = (
         request.expression,
         ctx,
         new Set(seen),
-        cache,
-        cyclic,
+        query,
       ).flatMap((origin) => {
         const result = request.requested.reduce<AggregateOrigin | undefined>(
           (current, projection) =>
@@ -2925,11 +3006,12 @@ const aggregateOriginsOfExpression = (
       }
       const aggregateOrigins = aggregateReturnedOrigins(parameter);
       return aggregateOrigins.flatMap(({ origin, shared, imprecise }) => {
-        const places = placesAtProjection(
+        const places = aggregateOriginPlacesAtProjection(
           actual,
           origin.source,
           ctx,
           new Set(seen),
+          query,
         ).map((place) =>
           applyBorrowEndpoint(
             place,
@@ -2937,16 +3019,17 @@ const aggregateOriginsOfExpression = (
           ),
         );
         return places.flatMap((place) => {
-          const capture = expressionOriginIsCapture(
+          const metadata = aggregateOriginMetadata(
             actual,
             place,
             ctx,
             origin.source,
+            query,
           );
           if (
             origin.result.length === 0 &&
             !imprecise &&
-            !capture &&
+            !metadata.capture &&
             parameter.returnedAggregate !== true
           ) {
             return [];
@@ -2958,10 +3041,10 @@ const aggregateOriginsOfExpression = (
               provenance: shared
                 ? ("storage-borrow" as const)
                 : ("allocation-alias" as const),
-              access: aggregateOriginAccess(actual, place, ctx, origin.source),
+              access: metadata.access,
               callableResult: true,
               ...(imprecise ? { imprecise: true as const } : {}),
-              capture,
+              capture: metadata.capture,
               contractSource: info.contractSources[0],
             },
           ];
@@ -2991,34 +3074,34 @@ const aggregateOriginsOfExpression = (
         });
         return translated ? [translated] : [];
       });
-      return placesAtProjection(
+      return aggregateOriginPlacesAtProjection(
         actual,
         transfer.sourcePath ?? [],
         ctx,
         new Set(seen),
+        query,
       ).flatMap((place) =>
-        resultPaths.map((resultProjections) => ({
-          place,
-          resultProjections,
-          provenance:
-            transfer.borrowsSource === true
-              ? ("storage-borrow" as const)
-              : ("allocation-alias" as const),
-          access: aggregateOriginAccess(
+        resultPaths.map((resultProjections) => {
+          const metadata = aggregateOriginMetadata(
             actual,
             place,
             ctx,
             transfer.sourcePath ?? [],
-          ),
-          callableResult: true,
-          capture: expressionOriginIsCapture(
-            actual,
+            query,
+          );
+          return {
             place,
-            ctx,
-            transfer.sourcePath ?? [],
-          ),
-          contractSource: info.contractSources[0],
-        })),
+            resultProjections,
+            provenance:
+              transfer.borrowsSource === true
+                ? ("storage-borrow" as const)
+                : ("allocation-alias" as const),
+            access: metadata.access,
+            callableResult: true,
+            capture: metadata.capture,
+            contractSource: info.contractSources[0],
+          };
+        }),
       );
     });
     const external = externalReturnedOriginsForCall(info).flatMap((origin) => {
@@ -3069,9 +3152,7 @@ const aggregateOriginsOfExpression = (
     }
     const initializer = ctx.bindingInitializers.get(expr.symbol);
     return typeof initializer === "number"
-      ? finish(
-          aggregateOriginsOfExpression(initializer, ctx, seen, cache, cyclic),
-        )
+      ? finish(aggregateOriginsOfExpression(initializer, ctx, seen, query))
       : finish([]);
   }
   if (expr?.exprKind === "tuple") {
@@ -3116,8 +3197,7 @@ const aggregateOriginsOfExpression = (
           value,
           ctx,
           new Set(seen),
-          cache,
-          cyclic,
+          query,
         );
         const hasPreciseNestedOrigins = nestedOrigins.some(
           (origin) => origin.resultProjections.length > 0,
@@ -3127,24 +3207,33 @@ const aggregateOriginsOfExpression = (
           (!hasPreciseNestedOrigins ||
             baseSymbolOf(value, ctx) !== undefined) &&
           isReferenceLike(typeOfExpr(value, ctx), ctx)
-            ? placesOfExpression(value, ctx).map((place) => ({
-                place:
-                  explicitBorrow &&
-                  !alreadyBorrowed &&
-                  borrowedEndpointIsDereferenced(
-                    explicitBorrow.inner,
-                    ctx.typing,
-                  )
-                    ? applyBorrowEndpoint(place, "dereferenced")
-                    : place,
-                resultProjections: [projection],
-                provenance:
-                  explicitBorrow || alreadyBorrowed
-                    ? ("storage-borrow" as const)
-                    : ("allocation-alias" as const),
-                access: aggregateOriginAccess(value, place, ctx),
-                capture: expressionOriginIsCapture(value, place, ctx),
-              }))
+            ? placesOfExpression(value, ctx).map((place) => {
+                const metadata = aggregateOriginMetadata(
+                  value,
+                  place,
+                  ctx,
+                  [],
+                  query,
+                );
+                return {
+                  place:
+                    explicitBorrow &&
+                    !alreadyBorrowed &&
+                    borrowedEndpointIsDereferenced(
+                      explicitBorrow.inner,
+                      ctx.typing,
+                    )
+                      ? applyBorrowEndpoint(place, "dereferenced")
+                      : place,
+                  resultProjections: [projection],
+                  provenance:
+                    explicitBorrow || alreadyBorrowed
+                      ? ("storage-borrow" as const)
+                      : ("allocation-alias" as const),
+                  access: metadata.access,
+                  capture: metadata.capture,
+                };
+              })
             : [];
         const nested = nestedOrigins.map((origin) => ({
           ...origin,
@@ -3203,8 +3292,7 @@ const aggregateOriginsOfExpression = (
         entry.value,
         ctx,
         new Set(seen),
-        cache,
-        cyclic,
+        query,
       );
       const hasPreciseNestedOrigins = nestedOrigins.some(
         (origin) => origin.resultProjections.length > 0,
@@ -3214,21 +3302,33 @@ const aggregateOriginsOfExpression = (
         (!hasPreciseNestedOrigins ||
           baseSymbolOf(entry.value, ctx) !== undefined) &&
         isReferenceLike(typeOfExpr(entry.value, ctx), ctx)
-          ? placesOfExpression(entry.value, ctx).map((place) => ({
-              place:
-                explicitBorrow &&
-                !alreadyBorrowed &&
-                borrowedEndpointIsDereferenced(explicitBorrow.inner, ctx.typing)
-                  ? applyBorrowEndpoint(place, "dereferenced")
-                  : place,
-              resultProjections: [projection],
-              provenance:
-                explicitBorrow || alreadyBorrowed
-                  ? ("storage-borrow" as const)
-                  : ("allocation-alias" as const),
-              access: aggregateOriginAccess(entry.value, place, ctx),
-              capture: expressionOriginIsCapture(entry.value, place, ctx),
-            }))
+          ? placesOfExpression(entry.value, ctx).map((place) => {
+              const metadata = aggregateOriginMetadata(
+                entry.value,
+                place,
+                ctx,
+                [],
+                query,
+              );
+              return {
+                place:
+                  explicitBorrow &&
+                  !alreadyBorrowed &&
+                  borrowedEndpointIsDereferenced(
+                    explicitBorrow.inner,
+                    ctx.typing,
+                  )
+                    ? applyBorrowEndpoint(place, "dereferenced")
+                    : place,
+                resultProjections: [projection],
+                provenance:
+                  explicitBorrow || alreadyBorrowed
+                    ? ("storage-borrow" as const)
+                    : ("allocation-alias" as const),
+                access: metadata.access,
+                capture: metadata.capture,
+              };
+            })
           : [];
       const nested = nestedOrigins.map((origin) => ({
         ...origin,
@@ -3263,8 +3363,7 @@ const aggregateOriginsOfExpression = (
           entry.value,
           ctx,
           new Set(seen),
-          cache,
-          cyclic,
+          query,
         );
         const spreadDescriptor =
           typeof spreadType === "number"
