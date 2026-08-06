@@ -370,6 +370,26 @@ export type CallLoweringIndex = {
   }[];
 };
 
+export type CodegenCallableAccessFootprint = {
+  parameters: readonly {
+    readPaths: readonly (readonly CodegenPlaceProjection[])[];
+    writePaths: readonly (readonly CodegenPlaceProjection[])[];
+    runtimeCheckedWrites: boolean;
+    retained: boolean;
+    returned: boolean;
+    returnedProvenance: boolean;
+  }[];
+  maySuspend: boolean;
+  externalRead: boolean;
+  externalWrite: boolean;
+};
+
+export type CallableAccessIndex = {
+  getFootprint(
+    target: ProgramFunctionId,
+  ): CodegenCallableAccessFootprint | undefined;
+};
+
 export type MonomorphizedInstanceIndex = {
   getAll(): readonly MonomorphizedInstanceInfo[];
   getById(
@@ -481,6 +501,7 @@ export type ProgramCodegenView = {
   objects: ObjectLayoutIndex;
   traits: TraitDispatchIndex;
   calls: CallLoweringIndex;
+  callableAccesses: CallableAccessIndex;
   instances: MonomorphizedInstanceIndex;
   imports: ImportWiringIndex;
   modules: ReadonlyMap<string, ModuleCodegenView>;
@@ -2465,6 +2486,41 @@ export const buildProgramCodegenView = (
       defaultIdentityGuardDiagnosticsByTarget.get(target) ?? [],
   };
 
+  const callableAccesses: CallableAccessIndex = {
+    getFootprint: (target) => {
+      const ref = symbols.refOf(target);
+      const contract = modulesById
+        .get(ref.moduleId)
+        ?.borrowing.callables.get(ref.symbol);
+      if (!contract) {
+        return undefined;
+      }
+      return {
+        parameters: contract.parameters.map((parameter) => ({
+          readPaths: copyAccessPaths(parameter.readPaths),
+          writePaths: copyAccessPaths(parameter.writePaths),
+          runtimeCheckedWrites: parameter.runtimeCheckedWrites === true,
+          retained:
+            parameter.retained === true ||
+            parameter.retainedUnlessBorrowed === true ||
+            (parameter.retainedPaths?.length ?? 0) > 0 ||
+            (parameter.externalRetainedPaths?.length ?? 0) > 0 ||
+            (parameter.borrowedRetainedPaths?.length ?? 0) > 0,
+          returned: parameter.returned === true,
+          returnedProvenance:
+            parameter.returnedAggregate === true ||
+            (parameter.returnedPaths?.length ?? 0) > 0 ||
+            (parameter.returnedOrigins?.length ?? 0) > 0 ||
+            (parameter.returnedSharedOrigins?.length ?? 0) > 0 ||
+            (parameter.returnedTypeMatchingOrigins?.length ?? 0) > 0,
+        })),
+        maySuspend: contract.maySuspend,
+        externalRead: contract.externalRead === true,
+        externalWrite: contract.externalWrite === true,
+      };
+    },
+  };
+
   const functions: FunctionLoweringIndex = {
     getSignature: (moduleId, symbol) => {
       const mod = modulesById.get(moduleId);
@@ -2666,6 +2722,7 @@ export const buildProgramCodegenView = (
     objects,
     traits,
     calls,
+    callableAccesses,
     instances,
     imports,
     modules: moduleViews,

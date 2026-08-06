@@ -572,6 +572,13 @@ export const compileFieldAccessExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler
 ): CompiledExpression => {
+  const forwardedBinding = fnCtx.stableFieldLoadBindings?.get(expr.id);
+  if (forwardedBinding) {
+    return {
+      expr: loadLocalValue(forwardedBinding, ctx),
+      usedReturnCall: false,
+    };
+  }
   const projected = tryCompileProjectedFieldAccess({
     expr,
     ctx,

@@ -100,6 +100,7 @@ const compileEffectFixtureWithCompilerOptimization = async (
       escapeAnalysis: { origins: new Map(), parameters: new Map() },
       runtimeTypeCheckElisionFieldAccesses: new Map(),
       semanticCopyForwardingFieldAccesses: new Map(),
+      stableFieldLoadForwarding: new Map(),
       codegenPlan: {
         representations: {},
         specializationPolicy:

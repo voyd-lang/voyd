@@ -686,6 +686,13 @@
     "rationale": "Tests internal specialization identities, reservation ordering, per-kind/program/body-node budgets, and context caps; another compiler may use no such policy."
   },
   {
+    "file": "packages/compiler/src/codegen/__tests__/stable-field-load-forwarding.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-08-05",
+    "disposition": "compiler-local",
+    "rationale": "Tests the optimizer's checked-access planning facts, conservative bailout rules, runtime behavior, and emitted struct.get shape; these are compiler implementation contracts."
+  },
+  {
     "file": "packages/compiler/src/codegen/__tests__/std-array-smoke.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",

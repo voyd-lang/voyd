@@ -401,6 +401,7 @@ export interface FunctionContext {
   loopStack?: LoopScope[];
   safeArrayLoopScopes?: readonly SafeArrayLoopScope[];
   safeArrayLengthSymbols?: ReadonlyMap<SymbolId, SymbolId>;
+  stableFieldLoadBindings?: ReadonlyMap<HirExprId, LocalBindingLocal>;
   runtimePlaceIdentities?: Map<HirExprId, RuntimePlaceIdentity>;
   runtimePlaceIdentityRequests?: Set<HirExprId>;
   continuations?: Map<SymbolId, ContinuationBinding>;

@@ -13,6 +13,7 @@ export type OptimizationPassRegistry = {
   handlerEnvironmentShrinking: ProgramOptimizationPass;
   runtimeTypeCheckElimination: ProgramOptimizationPass;
   semanticCopyForwarding: ProgramOptimizationPass;
+  stableFieldLoadForwarding: ProgramOptimizationPass;
   escapeAnalysis: ProgramOptimizationPass;
   callShapeSpecialization: ProgramOptimizationPass;
 };
@@ -52,6 +53,7 @@ export const createOptimizationSchedule = (
     passes.handlerEnvironmentShrinking,
     passes.runtimeTypeCheckElimination,
     passes.semanticCopyForwarding,
+    passes.stableFieldLoadForwarding,
     passes.escapeAnalysis,
   ],
   minimumFixedPointIterations: 32,

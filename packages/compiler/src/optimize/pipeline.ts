@@ -33,6 +33,7 @@ import {
 import { wholeProgramSpecializationPruningPass } from "./passes/reachability.js";
 import { escapeAnalysisPass } from "./passes/escape-analysis.js";
 import { callShapeSpecializationPlanningPass } from "./passes/call-shape-planning.js";
+import { stableFieldLoadForwardingPass } from "./passes/stable-field-loads.js";
 
 const OPTIMIZATION_SCHEDULE = createOptimizationSchedule({
   pureCompileTimeEvaluation: pureCompileTimeEvaluationPass,
@@ -46,6 +47,7 @@ const OPTIMIZATION_SCHEDULE = createOptimizationSchedule({
   handlerEnvironmentShrinking: continuationAndHandlerEnvironmentShrinkingPass,
   runtimeTypeCheckElimination: redundantRuntimeTypeCheckEliminationPass,
   semanticCopyForwarding: semanticCopyForwardingPass,
+  stableFieldLoadForwarding: stableFieldLoadForwardingPass,
   escapeAnalysis: escapeAnalysisPass,
   callShapeSpecialization: callShapeSpecializationPlanningPass,
 });

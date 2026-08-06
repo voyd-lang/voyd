@@ -21,6 +21,7 @@ describe("optimizer schedule", () => {
       handlerEnvironmentShrinking: pass("handler-captures"),
       runtimeTypeCheckElimination: pass("runtime-types"),
       semanticCopyForwarding: pass("copy-forwarding"),
+      stableFieldLoadForwarding: pass("stable-field-loads"),
       escapeAnalysis: pass("escape"),
       callShapeSpecialization: pass("call-shape"),
     });
@@ -46,6 +47,7 @@ describe("optimizer schedule", () => {
       "handler-captures",
       "runtime-types",
       "copy-forwarding",
+      "stable-field-loads",
       "escape",
     ]);
     expect(schedule.minimumFixedPointIterations).toBeGreaterThan(3);

@@ -143,6 +143,15 @@ export type ProgramOptimizationFacts = {
     string,
     ReadonlySet<HirExprId>
   >;
+  stableFieldLoadForwarding: ReadonlyMap<
+    string,
+    ReadonlyMap<
+      HirExprId,
+      readonly {
+        accessExprIds: readonly HirExprId[];
+      }[]
+    >
+  >;
   codegenPlan: ProgramCodegenOptimizationPlan;
 };
 

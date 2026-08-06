@@ -29,6 +29,7 @@ import {
 import { RTT_METADATA_SLOTS } from "../rtt/index.js";
 import {
   getInlineUnionLayout,
+  getExprBinaryenType,
   getOptionalLayoutInfo,
   getRequiredExprType,
   getStructuralTypeInfo,
@@ -1099,11 +1100,51 @@ export const compileWhileExpr = (
     ctx.mod.br(breakLabel),
   );
 
+  const forwardingGroups =
+    ctx.optimization?.stableFieldLoadForwarding
+      .get(ctx.moduleId)
+      ?.get(expr.id) ?? [];
+  const forwardingStores: binaryen.ExpressionRef[] = [];
+  const forwardedBindings = new Map(fnCtx.stableFieldLoadBindings);
+  forwardingGroups.forEach((group) => {
+    const representative = group.accessExprIds[0];
+    if (typeof representative !== "number") {
+      return;
+    }
+    const binding = allocateTempLocal(
+      getExprBinaryenType(
+        representative,
+        ctx,
+        fnCtx.typeInstanceId ?? fnCtx.instanceId,
+      ),
+      fnCtx,
+      getRequiredExprType(
+        representative,
+        ctx,
+        fnCtx.typeInstanceId ?? fnCtx.instanceId,
+      ),
+      ctx,
+    );
+    forwardingStores.push(
+      storeLocalValue({
+        binding,
+        value: compileExpr({ exprId: representative, ctx, fnCtx }).expr,
+        ctx,
+        fnCtx,
+      }),
+    );
+    group.accessExprIds.forEach((accessExprId) =>
+      forwardedBindings.set(accessExprId, binding),
+    );
+  });
+  const previousForwardedBindings = fnCtx.stableFieldLoadBindings;
+  fnCtx.stableFieldLoadBindings = forwardedBindings;
   const body = withLoopScope(
     fnCtx,
     { breakLabel, continueLabel: loopLabel },
     () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr,
   );
+  fnCtx.stableFieldLoadBindings = previousForwardedBindings;
   const loopBody = ctx.mod.block(
     null,
     [conditionCheck, body, ctx.mod.br(loopLabel)],
@@ -1113,7 +1154,7 @@ export const compileWhileExpr = (
   return {
     expr: ctx.mod.block(
       breakLabel,
-      [ctx.mod.loop(loopLabel, loopBody)],
+      [...forwardingStores, ctx.mod.loop(loopLabel, loopBody)],
       binaryen.none,
     ),
     usedReturnCall: false,
