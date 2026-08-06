@@ -18,10 +18,11 @@ npm run bench:v439 -- --label <label> --samples 7 --runtime-samples 31
 ```
 
 Each reported compile time is the median of seven fresh SDK compiles. Runtime
-results are medians of 31 samples after three warmups. Scenarios run in isolated
-child processes so differently shaped Binaryen programs cannot share runtime
-type state. Code-shape counts are static instruction-site counts over each
-complete emitted module.
+results are medians of 31 samples after three warmups. Each entrypoint gets a
+fresh host instance so one stage cannot inherit another stage's GC heap.
+Scenarios run in isolated child processes so differently shaped Binaryen
+programs cannot share runtime type state. Code-shape counts are static
+instruction-site counts over each complete emitted module.
 
 These measurements used Node 24.18.0 on an Apple M4 Pro with 14 logical CPUs.
 The before run used the benchmark commit before either optimization; the after
@@ -69,7 +70,55 @@ time was 1448.440 -> 1449.742 ms (+0.09%), Wasm was 54,536 -> 54,555 bytes
 `Array.get` workload improved from 0.856292 to 0.305583 ms (-64.3%); the other
 focused runtimes moved by at most 5.2%.
 
-## Representative controls
+## Representative web-app request pipeline
+
+`web-app-request-pipeline.voyd` models the CPU-bound part of a server-rendered
+product page after network and database I/O completes. Each 10,000-request
+batch performs:
+
+- indexed route selection over a stable route table;
+- product-card view-model construction over a stable catalog;
+- `Array.get` handling as an application would use before V-476; and
+- serialization of a 128-node response using stable template, locale,
+  escaping, and hydration configuration while a writer updates response byte
+  and node counters.
+
+The route/view-model and serialization stages are exported separately to
+attribute their cost, while `main` measures the integrated handler. The
+V-475-only revision is included between the original baseline and the final
+branch.
+
+| Release runtime | Baseline | V-475 only | Final | Final vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Integrated request pipeline | 8.020 ms | 7.770 ms | 5.067 ms | **-36.8%** |
+| Route and view-model lookup | 1.789 ms | 1.817 ms | 0.682 ms | **-61.9%** |
+| Response serialization | 7.229 ms | 7.058 ms | 7.072 ms | **-2.2%** |
+
+V-475 alone improved the integrated pipeline by 3.1% and the serialization
+stage by 2.4%. The lookup movement on that revision was noise: its emitted
+lookup path did not change. Adding V-476 improved the lookup stage by 62.5%
+relative to V-475 and the integrated pipeline by another 34.8%. Compiler
+telemetry reports four forwarded stable loads in the serialization loop.
+
+| Release module metric | Baseline | V-475 only | Final | Final vs baseline |
+| --- | ---: | ---: | ---: | ---: |
+| Compile median | 1705.131 ms | 1719.093 ms | 1664.837 ms | -2.4% |
+| Wasm | 4,945 B | 4,937 B | 4,550 B | -8.0% |
+| Gzip | 2,320 B | 2,334 B | 2,154 B | -7.2% |
+| Allocation sites | 38 | 38 | 38 | 0 |
+| `struct.get` sites | 60 | 56 | 52 | -8 |
+| `struct.set` sites | 16 | 16 | 16 | 0 |
+| Direct calls | 67 | 67 | 53 | -14 |
+| Indirect calls | 32 | 32 | 26 | -6 |
+| Linear-memory growth | 0 B | 0 B | 0 B | 0 B |
+
+Without release optimization, the final compiler improved the integrated
+pipeline from 36.085 to 31.004 ms (-14.1%) and the lookup stage from 6.388 to
+1.053 ms (-83.5%). Serialization was unchanged. This is expected: V-476 is a
+proven codegen fast path, while V-475 consumes release optimizer facts. The
+non-release module grew by 0.27% before gzip and 0.68% after gzip.
+
+## Unmatched representative controls
 
 The final Wasm hash and every recorded instruction-site count are identical
 before and after for both representative programs, in both compiler modes.
@@ -105,8 +154,8 @@ retains its Option behavior outside the proven region.
 
 | Opportunity | Decision | Reason |
 | --- | --- | --- |
-| Stable field loads across calls | Accepted as V-475 | Repeatable 19.8% focused win; focused Wasm shrank; representatives were byte-identical. |
-| `Array.get` Option traffic in proven loops | Accepted as V-476 | Repeatable 72.3% focused win; focused Wasm shrank; representatives were byte-identical. |
+| Stable field loads across calls | Accepted as V-475 | Repeatable 19.8% focused win and a 2.4% representative response-serialization win. |
+| `Array.get` Option traffic in proven loops | Accepted as V-476 | Repeatable 72.3% focused win and a 61.9% representative route/view-model lookup win. |
 | `SharedCell` runtime-check traffic | Deferred | The focused gap was large, but the representative programs had no meaningful use and explicit shared-cell runtime semantics need a separate design decision. |
 | Remaining access guards | Stopped | The existing focused guard benchmark measured about 1.34 ns per call, below the threshold for another optimization ticket. |
 | Aggregate materialization | Stopped | Existing scalar-replacement work already removes the representative traffic; measurement found no new checked-access-specific gap. |

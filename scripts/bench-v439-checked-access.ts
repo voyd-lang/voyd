@@ -3,10 +3,9 @@ import { execFileSync } from "node:child_process";
 import { cpus, totalmem } from "node:os";
 import { performance } from "node:perf_hooks";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { gzipSync } from "node:zlib";
-import { createSdk, type CompileResult } from "@voyd-lang/sdk";
-import { createVoydHost } from "@voyd-lang/sdk/js-host";
+import type { CompileResult } from "@voyd-lang/sdk";
 
 type Entrypoint = {
   name: string;
@@ -33,6 +32,7 @@ const runtimeSampleCount = Number.parseInt(
 );
 const label = valueAfter("--label") ?? "worktree";
 const scenarioFilter = valueAfter("--scenario");
+const sdkRoot = valueAfter("--sdk-root");
 if (sampleCount < 3 || runtimeSampleCount < 3) {
   throw new Error(
     "benchmark requires at least three compile and runtime samples",
@@ -40,6 +40,19 @@ if (sampleCount < 3 || runtimeSampleCount < 3) {
 }
 
 const repository = path.resolve(import.meta.dirname, "..");
+const sdkModule = sdkRoot
+  ? pathToFileURL(path.join(sdkRoot, "packages", "sdk", "src", "index.ts")).href
+  : "@voyd-lang/sdk";
+const sdkHostModule = sdkRoot
+  ? pathToFileURL(path.join(sdkRoot, "packages", "sdk", "src", "js-host.ts"))
+      .href
+  : "@voyd-lang/sdk/js-host";
+const { createSdk } = (await import(
+  sdkModule
+)) as typeof import("@voyd-lang/sdk");
+const { createVoydHost } = (await import(
+  sdkHostModule
+)) as typeof import("@voyd-lang/sdk/js-host");
 const performanceFixtures = path.join(
   repository,
   "tests",
@@ -73,6 +86,15 @@ const scenarios: readonly Scenario[] = [
     ),
     entrypoints: [{ name: "main", expected: 1_100_340_000 }],
   },
+  {
+    name: "representative-web-app-request",
+    entryPath: path.join(performanceFixtures, "web-app-request-pipeline.voyd"),
+    entrypoints: [
+      { name: "main", expected: 708_207_620 },
+      { name: "request_lookup_stage", expected: 302_557_517 },
+      { name: "response_serialization_stage", expected: 600_952_779 },
+    ],
+  },
 ];
 
 if (!scenarioFilter) {
@@ -95,6 +117,7 @@ if (!scenarioFilter) {
             runtimeSampleCount.toString(),
             "--scenario",
             scenario.name,
+            ...(sdkRoot ? ["--sdk-root", sdkRoot] : []),
           ],
           {
             cwd: repository,
@@ -222,24 +245,22 @@ const measureScenario = async ({
     throw new Error(`${scenario.name} did not produce a compiled module`);
   }
 
-  const host = await createVoydHost({ wasm: compiled.wasm });
-  for (let warmup = 0; warmup < 3; warmup += 1) {
-    for (const entrypoint of scenario.entrypoints) {
+  let maxLinearMemoryGrowthBytes = 0;
+  const runtimeEntries: Array<
+    readonly [string, { samplesMs: number[]; medianMs: number }]
+  > = [];
+  for (const entrypoint of scenario.entrypoints) {
+    const host = await createVoydHost({ wasm: compiled.wasm });
+    for (let warmup = 0; warmup < 3; warmup += 1) {
       assertResult({
         scenario: scenario.name,
         entrypoint,
         actual: await host.run<unknown>(entrypoint.name),
       });
     }
-  }
-
-  const memory = host.instance.exports.memory;
-  const beforeBytes =
-    memory instanceof WebAssembly.Memory ? memory.buffer.byteLength : 0;
-  const runtimeEntries: Array<
-    readonly [string, { samplesMs: number[]; medianMs: number }]
-  > = [];
-  for (const entrypoint of scenario.entrypoints) {
+    const memory = host.instance.exports.memory;
+    const beforeBytes =
+      memory instanceof WebAssembly.Memory ? memory.buffer.byteLength : 0;
     const samplesMs: number[] = [];
     for (let sample = 0; sample < runtimeSampleCount; sample += 1) {
       const startedAt = performance.now();
@@ -251,17 +272,21 @@ const measureScenario = async ({
       entrypoint.name,
       { samplesMs, medianMs: median(samplesMs) },
     ]);
+    const afterBytes =
+      memory instanceof WebAssembly.Memory ? memory.buffer.byteLength : 0;
+    maxLinearMemoryGrowthBytes = Math.max(
+      maxLinearMemoryGrowthBytes,
+      afterBytes - beforeBytes,
+    );
   }
   const runtime = Object.fromEntries(runtimeEntries);
-  const afterBytes =
-    memory instanceof WebAssembly.Memory ? memory.buffer.byteLength : 0;
   const wasmText = compiled.wasmText ?? "";
 
   return {
     optimize,
     compile: { samplesMs: compileMs, medianMs: median(compileMs) },
     runtime,
-    linearMemoryGrowthBytes: afterBytes - beforeBytes,
+    linearMemoryGrowthBytes: maxLinearMemoryGrowthBytes,
     wasmBytes: compiled.wasm.byteLength,
     gzipBytes: gzipSync(compiled.wasm).byteLength,
     wasmTextBytes: new TextEncoder().encode(wasmText).byteLength,
@@ -288,7 +313,9 @@ console.log(
         freshSdkPerCompile: true,
         runtimeWarmups: 3,
         runtimeSamples: runtimeSampleCount,
+        freshHostPerEntrypoint: true,
         modes: ["none", "release"],
+        sdkRoot: sdkRoot ? path.resolve(sdkRoot) : repository,
         codeShape:
           "Static instruction-site counts from the emitted WAT for each complete module",
       },

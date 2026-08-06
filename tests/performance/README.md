@@ -3,6 +3,46 @@
 Performance tests and large regression workloads are opt-in. They do not run
 as part of the default test suite.
 
+## Checked-access application benchmark
+
+Run the complete checked-access benchmark suite from the repository root:
+
+```sh
+npm run bench:v439 -- --label <label> --samples 7 --runtime-samples 31
+```
+
+To measure only the representative server-rendered web-app request pipeline:
+
+```sh
+npm run bench:v439 -- \
+  --label <label> \
+  --samples 7 \
+  --runtime-samples 31 \
+  --scenario representative-web-app-request
+```
+
+The web-app scenario runs 10,000 route, catalog/view-model, and response
+serialization operations per sample. It reports the integrated handler plus
+separate lookup and serialization stages. Each entrypoint uses a fresh warmed
+host instance.
+
+Compare another local compiler revision without copying the fixture by passing
+the other checkout's repository root:
+
+```sh
+npm run bench:v439 -- \
+  --label before \
+  --samples 7 \
+  --runtime-samples 31 \
+  --scenario representative-web-app-request \
+  --sdk-root /path/to/voyd-checkout
+```
+
+The JSON output includes all raw samples, medians, emitted Wasm and gzip sizes,
+artifact hashes, static instruction-site counts, host details, and memory
+growth. The committed V-439 results and methodology are in
+`docs/notes/v439-checked-access-optimization-results.md`.
+
 ## Web OpenAPI package-scale compile
 
 Run the dependency-heavy Web OpenAPI compile in a fresh Node process:
