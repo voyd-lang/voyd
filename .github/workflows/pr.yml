@@ -14,11 +14,11 @@ jobs:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Restore Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ github.event.pull_request.head.sha }}
@@ -26,7 +26,7 @@ jobs:
             ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-
             ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24.x"
           cache: npm
@@ -41,11 +41,11 @@ jobs:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Restore Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ github.event.pull_request.head.sha }}
@@ -54,7 +54,7 @@ jobs:
             ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
       - name: Detect changed areas
         id: changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             compiler_semantics:
@@ -67,7 +67,7 @@ jobs:
               - "turbo.json"
               - "tsconfig*.json"
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24.x"
           cache: npm
@@ -89,7 +89,7 @@ jobs:
         run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane unit --output test-timings/unit-core-summary.json
       - name: Upload core unit timings
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: core-unit-test-timings
           path: test-timings
@@ -110,12 +110,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Detect web-test-sensitive changes
         id: changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             web:
@@ -137,7 +137,7 @@ jobs:
               - "tsconfig*.json"
       - name: Use Node.js
         if: steps.changes.outputs.web == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24.x"
           cache: npm
@@ -158,7 +158,7 @@ jobs:
         run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane web-unit --output test-timings/web-unit-summary.json
       - name: Upload web package timings
         if: always() && steps.changes.outputs.web == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: web-unit-test-timings
           path: test-timings
@@ -171,11 +171,11 @@ jobs:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Restore Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ github.event.pull_request.head.sha }}
@@ -183,7 +183,7 @@ jobs:
             ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-
             ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
       - name: Use Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24.x"
           cache: npm
@@ -202,7 +202,7 @@ jobs:
         run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane unit --output test-timings/unit-tooling-summary.json
       - name: Upload tooling unit timings
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: tooling-unit-test-timings
           path: test-timings
@@ -212,12 +212,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Detect conformance-sensitive changes
         id: changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             conformance:
@@ -235,7 +235,7 @@ jobs:
               - "tsconfig*.json"
       - name: Use Node.js
         if: steps.changes.outputs.conformance == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24.x"
           cache: npm
@@ -258,7 +258,7 @@ jobs:
         run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane conformance --output test-timings/conformance-summary.json
       - name: Upload conformance timings
         if: always() && steps.changes.outputs.conformance == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: conformance-test-timings
           path: test-timings
@@ -268,12 +268,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Detect integration-sensitive changes
         id: changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             integration:
@@ -294,7 +294,7 @@ jobs:
               - "tsconfig*.json"
       - name: Use Node.js
         if: steps.changes.outputs.integration == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24.x"
           cache: npm
@@ -317,7 +317,7 @@ jobs:
         run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane integration --output test-timings/integration-summary.json
       - name: Upload integration timings
         if: always() && steps.changes.outputs.integration == 'true'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: integration-test-timings
           path: test-timings
@@ -325,21 +325,17 @@ jobs:
 
   compiler-codegen:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
-    strategy:
-      fail-fast: false
-      matrix:
-        shard: [1, 2, 3, 4]
+    timeout-minutes: 20
     env:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Detect changed areas
         id: changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             compiler_codegen:
@@ -354,7 +350,7 @@ jobs:
               - "tsconfig*.json"
       - name: Use Node.js
         if: steps.changes.outputs.compiler_codegen == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24.x"
           cache: npm
@@ -362,9 +358,9 @@ jobs:
       - name: Install dependencies
         if: steps.changes.outputs.compiler_codegen == 'true'
         run: npm ci --include=optional
-      - name: Run compiler codegen shard
+      - name: Run compiler codegen tests
         if: steps.changes.outputs.compiler_codegen == 'true'
-        run: npm run --workspace @voyd-lang/compiler test:codegen -- --shard=${{ matrix.shard }}/4
+        run: npm run --workspace @voyd-lang/compiler test:codegen
 
   cli-dist-e2e:
     runs-on: ubuntu-latest
@@ -373,11 +369,11 @@ jobs:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Restore Turbo cache
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: .turbo
           key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ github.event.pull_request.head.sha }}
@@ -386,7 +382,7 @@ jobs:
             ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
       - name: Detect changed areas
         id: changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             cli_direct:
@@ -407,7 +403,7 @@ jobs:
               - "tsconfig*.json"
       - name: Use Node.js
         if: steps.changes.outputs.cli_runtime == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24.x"
           cache: npm
@@ -430,12 +426,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
       - name: Detect optimizer-sensitive changes
         id: changes
-        uses: dorny/paths-filter@v3
+        uses: dorny/paths-filter@v4
         with:
           filters: |
             web:
@@ -476,7 +472,7 @@ jobs:
               - "package-lock.json"
       - name: Use Node.js
         if: steps.changes.outputs.optimizer == 'true' || steps.changes.outputs.web == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: "24.x"
           cache: npm
