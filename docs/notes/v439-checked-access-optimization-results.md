@@ -111,6 +111,117 @@ mutation control's cost. The full focused release module changes as follows:
 Without release optimization, the focused module's Wasm hash, byte size, and
 every instruction-site count are identical before and after V-479.
 
+## How V-479 transforms Voyd
+
+V-479 keeps a fresh mutable object in scalar Wasm values even when the object
+crosses an eligible function call. It does this by specializing the callee's
+internal Wasm ABI. It does not inline the function or change the source-level
+Voyd API.
+
+Consider a reduced version of the response-writer pattern exercised by the
+representative web application:
+
+```voyd
+obj Writer {
+  bytes: i32,
+  nodes: i32,
+  escape_cost: i32
+}
+
+fn append_node(~writer: Writer, width: i32) -> void
+  writer.bytes = writer.bytes + width + writer.escape_cost
+  writer.nodes = writer.nodes + 1
+
+pub fn render(count: i32) -> i32
+  let ~writer = Writer {
+    bytes: 0,
+    nodes: 0,
+    escape_cost: 3
+  }
+
+  for i in 0..count:
+    append_node(~writer, i)
+
+  writer.bytes + writer.nodes
+```
+
+Without V-479, the compiler must preserve `writer` as a Wasm GC object across
+the call. Conceptually, it allocates the object, passes its reference to
+`append_node`, and performs `struct.get` and `struct.set` operations in the
+callee:
+
+```text
+writer_ref = allocate Writer(0, 0, 3)
+
+for i in 0..count:
+  append_node(writer_ref, i)
+
+load(writer_ref.bytes) + load(writer_ref.nodes)
+```
+
+When V-479's proof succeeds, the compiler instead keeps each field in a local
+scalar lane. The following is explanatory pseudocode rather than valid Voyd:
+
+```text
+writer_bytes = 0
+writer_nodes = 0
+writer_escape_cost = 3
+
+for i in 0..count:
+  (writer_bytes, writer_nodes, writer_escape_cost) =
+    append_node$scalar(
+      writer_bytes,
+      writer_nodes,
+      writer_escape_cost,
+      i
+    )
+
+writer_bytes + writer_nodes
+```
+
+The specialized callee receives the fields as individual Wasm parameters,
+operates on locals, and returns their updated state as a Wasm multivalue:
+
+```text
+append_node$scalar(bytes, nodes, escape_cost, width):
+  updated_bytes = bytes + width + escape_cost
+  updated_nodes = nodes + 1
+  return (updated_bytes, updated_nodes, escape_cost)
+```
+
+The caller captures those returned values back into the same scalar lanes. For
+the matching case, no `struct.new`, `struct.get`, or `struct.set` is needed for
+the source object.
+
+Immutable aliases continue to observe the same logical state:
+
+```voyd
+let ~writer = Writer { bytes: 0, nodes: 0, escape_cost: 3 }
+let writer_alias = writer
+
+append_node(~writer, 20)
+writer_alias.bytes
+```
+
+Both names are represented by the same lane group. If a later operation needs
+observable object identity or crosses a boundary that does not support the
+lane ABI, the compiler materializes one ordinary object and reconnects all of
+its aliases to it.
+
+The optimization requires a fresh object proven not to escape, one exact and
+pure callee, a `void` return, and a first mutable-borrow parameter used only
+through known direct fields. It rejects calls that may retain or return the
+object, suspend, perform external access, observe runtime identity, introduce
+unsupported aliases, or exceed the specialization budget. Rejected calls keep
+the normal reference ABI.
+
+This transformation depends directly on Voyd's memory-safety analysis. Escape
+facts prove where the object's identity can be observed. Callable access
+summaries prove that the exact callee cannot hide the reference or read and
+write storage outside its declared field footprint. Together, those facts make
+it sound to replace one heap identity with independent scalar values across a
+mutable call.
+
 ## Representative web-app request pipeline
 
 `web-app-request-pipeline.voyd` models the CPU-bound part of a server-rendered
