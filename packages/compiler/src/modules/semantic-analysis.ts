@@ -516,6 +516,7 @@ const analyzeCyclicScc = ({
       effectInterner,
       isCancelled,
       reusableBorrowing,
+      retainBorrowingIncrementalData: false,
     });
     if (!result) {
       return;

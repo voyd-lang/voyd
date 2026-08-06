@@ -937,11 +937,115 @@ const expressionCanCarryReference = (
   return typeof type !== "number" || typeCanCarryReference(type, ctx.typing);
 };
 
+const projectedTypesCache = new WeakMap<
+  TypingResult,
+  Map<TypeId, Map<string, readonly TypeId[]>>
+>();
+const projectedTypeFieldsCache = new WeakMap<
+  TypingResult,
+  Map<
+    TypeId,
+    {
+      byName: ReadonlyMap<string, TypeId>;
+      byIndex: readonly TypeId[];
+    }
+  >
+>();
+
+const projectionPathKey = (projections: readonly PlaceProjection[]): string =>
+  projections
+    .map((projection) => {
+      switch (projection.kind) {
+        case "field":
+          return `f${projection.name.length}:${projection.name}`;
+        case "tuple":
+          return `t${projection.index}`;
+        case "index":
+          return `i${projection.stable ? 1 : 0}:${projection.constant ?? ""}`;
+        case "region":
+          return `r${projection.scope.length}:${projection.scope}:${projection.name.length}:${projection.name}:${projection.disjoint.join(",")}`;
+        case "discriminant":
+          return "c";
+        case "dereference":
+          return "d";
+        case "identity":
+          return "y";
+      }
+    })
+    .join("/");
+
+const projectedTypeFields = (
+  type: TypeId,
+  typing: TypingResult,
+):
+  | {
+      byName: ReadonlyMap<string, TypeId>;
+      byIndex: readonly TypeId[];
+    }
+  | undefined => {
+  let fieldsByType = projectedTypeFieldsCache.get(typing);
+  if (!fieldsByType) {
+    fieldsByType = new Map();
+    projectedTypeFieldsCache.set(typing, fieldsByType);
+  }
+  const cached = fieldsByType.get(type);
+  if (cached) {
+    return cached;
+  }
+  const descriptor = typing.arena.get(type);
+  const fields =
+    descriptor.kind === "structural-object"
+      ? descriptor.fields
+      : descriptor.kind === "nominal-object" ||
+          descriptor.kind === "value-object"
+        ? typing.objectsByNominal.get(type)?.fields
+        : undefined;
+  if (!fields) {
+    return undefined;
+  }
+  const indexed = {
+    byName: new Map(fields.map((field) => [field.name, field.type])),
+    byIndex: fields.map((field) => field.type),
+  };
+  fieldsByType.set(type, indexed);
+  return indexed;
+};
+
 export const projectedTypes = (
   type: TypeId,
   projections: readonly PlaceProjection[],
   typing: TypingResult,
-  active = new Set<TypeId>(),
+): readonly TypeId[] => {
+  let cacheByType = projectedTypesCache.get(typing);
+  if (!cacheByType) {
+    cacheByType = new Map();
+    projectedTypesCache.set(typing, cacheByType);
+  }
+  let cacheByPath = cacheByType.get(type);
+  if (!cacheByPath) {
+    cacheByPath = new Map();
+    cacheByType.set(type, cacheByPath);
+  }
+  const pathKey = projectionPathKey(projections);
+  const cached = cacheByPath.get(pathKey);
+  if (cached) {
+    return cached;
+  }
+  const result = resolveProjectedTypes(
+    type,
+    projections,
+    typing,
+    new Set<TypeId>(),
+  );
+  cacheByPath.set(pathKey, result);
+  return result;
+};
+
+const resolveProjectedTypes = (
+  type: TypeId,
+  projections: readonly PlaceProjection[],
+  typing: TypingResult,
+  active: Set<TypeId>,
 ): readonly TypeId[] => {
   if (projections.length === 0 || active.has(type)) {
     return projections.length === 0 ? [type] : [];
@@ -950,44 +1054,55 @@ export const projectedTypes = (
   const descriptor = typing.arena.get(type);
   const [projection, ...remaining] = projections;
   if (projection?.kind === "dereference") {
-    return projectedTypes(type, remaining, typing);
+    return resolveProjectedTypes(type, remaining, typing, new Set<TypeId>());
   }
   const candidates = (() => {
     if (descriptor.kind === "borrowed") {
-      return projectedTypes(descriptor.inner, projections, typing, active);
+      return resolveProjectedTypes(
+        descriptor.inner,
+        projections,
+        typing,
+        active,
+      );
     }
     if (descriptor.kind === "recursive") {
-      return projectedTypes(descriptor.body, projections, typing, active);
+      return resolveProjectedTypes(
+        descriptor.body,
+        projections,
+        typing,
+        active,
+      );
     }
     if (descriptor.kind === "union") {
       return descriptor.members.flatMap((member) =>
-        projectedTypes(member, projections, typing, new Set(active)),
+        resolveProjectedTypes(member, projections, typing, new Set(active)),
       );
     }
     if (descriptor.kind === "intersection") {
       return [descriptor.nominal, descriptor.structural].flatMap((member) =>
         typeof member === "number"
-          ? projectedTypes(member, projections, typing, new Set(active))
+          ? resolveProjectedTypes(member, projections, typing, new Set(active))
           : [],
       );
     }
     if (projection?.kind === "index" && descriptor.kind === "fixed-array") {
-      return projectedTypes(descriptor.element, remaining, typing, active);
+      return resolveProjectedTypes(
+        descriptor.element,
+        remaining,
+        typing,
+        active,
+      );
     }
-    const fields =
-      descriptor.kind === "structural-object"
-        ? descriptor.fields
-        : descriptor.kind === "nominal-object" ||
-            descriptor.kind === "value-object"
-          ? typing.objectsByNominal.get(type)?.fields
-          : undefined;
-    const field =
+    const fields = projectedTypeFields(type, typing);
+    const fieldType =
       projection?.kind === "field"
-        ? fields?.find((candidate) => candidate.name === projection.name)
+        ? fields?.byName.get(projection.name)
         : projection?.kind === "tuple"
-          ? fields?.[projection.index]
+          ? fields?.byIndex[projection.index]
           : undefined;
-    return field ? projectedTypes(field.type, remaining, typing, active) : [];
+    return typeof fieldType === "number"
+      ? resolveProjectedTypes(fieldType, remaining, typing, active)
+      : [];
   })();
   active.delete(type);
   return candidates;
