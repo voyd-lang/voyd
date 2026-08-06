@@ -214,10 +214,10 @@ Option<borrow T> // an ordinary Option with a borrowed Some payload
 borrow Option<T> // borrowed access to an Option stored elsewhere
 ```
 
-Borrowed results are shared views in the initial design. Exclusive borrowed
-results are not part of this proposal. Scoped APIs such as `SharedCell.with_mut`
-may grant exclusive access to borrowed storage through the existing `~`
-parameter marker.
+Borrowed results are shared views. Exclusive borrowed results are not defined
+by this specification. Scoped APIs such as `SharedCell.with_mut` may grant
+exclusive access to borrowed storage through the existing `~` parameter
+marker.
 
 Borrow provenance follows borrowed values through optionals, results, tuples,
 structural values, nominal values, generic wrappers, pattern matching, and
@@ -312,15 +312,19 @@ slot itself.
 Implementations inherit the trait contract. They do not repeat the annotation.
 The compiler checks default implementations and every override.
 
+At a trait-dispatch boundary, the trait declaration's contract is the
+authoritative caller-visible behavior. A known implementation's more precise
+inferred behavior may validate or optimize a concrete call, but it must not
+narrow the contract used to check a call through the trait.
+
 ### Receiver access uses callable footprints
 
 `~self` requests exclusive mutation capability, but it does not activate a
 loan over the entire transitive object graph.
 
 For concrete code, the compiler infers the exact caller-observable read and
-write footprint. Public summaries serialize that footprint. A declared
-`@borrow_contract` bounds it across open traits and other abstraction
-boundaries.
+write footprint. Public semantic interfaces publish that footprint. A declared
+`@borrow_contract` bounds it across traits and other abstraction boundaries.
 
 When no precise summary or contract is available, the conservative fallback is
 the receiver's direct and inline storage. Transitively referenced allocations
@@ -356,10 +360,9 @@ use(slice) // observes the original bytes
 Other handles to the same `String` object observe its new contents. Existing
 slices continue to observe their retained backing.
 
-The initial implementation may copy on mutation. Reference-counted copy-on-
-write or compiler-proven unique in-place mutation may be added when
-unobservable. Safety and accepted source behavior must not depend on those
-optimizations.
+String mutation may copy. Reference-counted copy-on-write or compiler-proven
+unique in-place mutation may be used when unobservable. Safety and accepted
+source behavior must not depend on those optimizations.
 
 An API that intentionally exposes mutable or reusable source storage must use
 an explicit borrowed type rather than ordinary `StringSlice`.
@@ -441,9 +444,9 @@ The optimizer may eliminate or hoist a guard only when it proves that place
 identity, source evaluation order, access duration, and conflict behavior are
 unchanged. Required guards remain enabled in every build mode.
 
-General escaped runtime loans are not part of this proposal. Use explicit
-borrow contracts for static views and `SharedCell` for longer-lived dynamic
-shared mutation.
+General escaped runtime loans are not defined by this specification. Use
+explicit borrow contracts for static views and `SharedCell` for longer-lived
+dynamic shared mutation.
 
 ### Closures, callbacks, effects, and continuations
 
@@ -671,7 +674,7 @@ would reject a program accepted by value semantics.
 
 Physical borrows MUST NOT appear in source types or public callable contracts.
 
-### 9. Callable summaries and receiver footprints
+### 9. Callable contracts and receiver footprints
 
 For concrete callables, the compiler SHOULD infer:
 
@@ -683,8 +686,8 @@ For concrete callables, the compiler SHOULD infer:
 - callback escape behavior;
 - suspension behavior.
 
-Public summaries MUST serialize the caller-visible subset required for
-separate compilation.
+Public semantic interfaces MUST preserve the caller-visible subset required
+across module, package, cache, and separate-compilation boundaries.
 
 `~self` requests exclusive capability. Activated access MUST be limited to the
 checked inferred or declared footprint. It MUST NOT automatically include the
@@ -732,6 +735,11 @@ For every implementation:
 - plain result portions MUST NOT acquire borrowed provenance.
 
 A default trait body and every overriding implementation MUST be checked.
+
+At a trait-dispatch boundary, the declaration contract MUST be authoritative.
+Implementation-specific inference MUST NOT narrow the caller-visible reads,
+writes, returned provenance, retention, suspension, or runtime-guard
+requirements used to check a call through the trait.
 
 ### 11. Region mappings
 
@@ -920,29 +928,3 @@ A conforming implementation MUST test:
 - all `SharedCell` state transitions and callback restrictions;
 - optimized/unoptimized equivalence;
 - actionable diagnostics.
-
-### 20. Completion criteria
-
-This proposal is complete only when:
-
-- plain values never acquire source-visible borrowed provenance;
-- slot and dereferenced-allocation provenance are distinct;
-- ordinary object aliases do not become hidden loans;
-- `borrow T` and borrowed aggregate payloads are implemented;
-- `@borrow_contract` read, mutation, and returned-provenance bounds, regions,
-  mappings, and validation are implemented;
-- callable contracts serialize across every public boundary;
-- `~self` uses checked access footprints;
-- ordinary Iterator uses `next(~self) -> Option<T>` with direct cursor storage;
-- ViewIterator uses `Option<borrow T>`;
-- bounded runtime identity guards are implemented and diagnosed;
-- SharedCell uses explicit scoped borrowed callback parameters;
-- ordinary StringSlice has stable backing semantics;
-- the standard-library API audit and migration are complete;
-- user documentation reflects this model;
-- conformance, compiler, std, integration, optimized/unoptimized, typecheck, and
-  test-audit suites pass;
-- compile-time, summary-size, runtime, allocation, and generated-Wasm deltas
-  are measured.
-
-These criteria are satisfied. The proposal status is **Implemented**.

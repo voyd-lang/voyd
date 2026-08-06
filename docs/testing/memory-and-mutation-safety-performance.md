@@ -1,8 +1,9 @@
 # Memory and mutation safety performance
 
-This report records the V-448 before/after measurements required by
-`docs/specs/memory-and-mutation-safety.md`. The comparison uses baseline
-`876f1680` and the V-456 working tree after V-451 through V-455.
+This report records the V-448 before/after measurements and subsequent
+performance work for the memory-and-mutation-safety implementation. The
+comparison uses baseline `876f1680` and the V-456 working tree after V-451
+through V-455.
 
 ## Method
 
@@ -76,13 +77,13 @@ guard, and equal runtime identities produce the required deterministic panic.
 
 ## Assessment
 
-The proposal originally added a substantial compile-time and public-summary
-cost. That result is no longer accepted merely because the feature lacked a
-threshold. Semantic changes now enter the alternating fresh-process optimizer
-scorecard. While V-468 tracks removal of the cold source-analysis regression,
-CI retains temporary 45%/250 ms compile and 20%/32 MiB RSS tolerances. A
-separate whole-web-package compile must finish within 240 seconds and 4.25 GiB
-peak RSS under a 3.5 GiB V8 heap.
+The implementation originally added a substantial compile-time and
+public-summary cost. That result is no longer accepted merely because the
+feature lacked a threshold. Semantic changes now enter the alternating
+fresh-process optimizer scorecard. While V-468 tracks removal of the cold
+source-analysis regression, CI retains temporary 45%/250 ms compile and 20%/32
+MiB RSS tolerances. A separate whole-web-package compile must finish within 240
+seconds and 4.25 GiB peak RSS under a 3.5 GiB V8 heap.
 
 Runtime and generated-code costs remain bounded:
 

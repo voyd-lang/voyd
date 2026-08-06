@@ -42,7 +42,7 @@ The installed command is `voyd`.
 - [Syntax](./syntax.md)
 - [Functions](./functions.md)
 - [Control Flow](./control-flow.md)
-- [Borrow Checking](./borrow-checking.md)
+- [Memory Safety](./memory-safety.md)
 - [Tasks and Time](./tasks-and-time.md)
 - [VX](./vx.md)
 - [Web](./web.md)

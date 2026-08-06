@@ -128,4 +128,5 @@ impl Color
     self.x + self.y + self.z
 ```
 
-See [Mutability](../mutability.md) for `~self` and mutable field access.
+See [Memory Safety](../memory-safety.md#binding-mutability-and-object-mutation)
+for `~self` and mutable field access.

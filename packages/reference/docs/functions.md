@@ -138,7 +138,7 @@ default entirely. Multiple omitted defaults are evaluated from left to right.
 
 For calls that borrow a receiver or argument mutably, explicit arguments and
 omitted defaults are evaluated before the mutable call borrow begins. See
-[Borrow Checking](./borrow-checking.md#calls-and-evaluation-order).
+[Memory Safety](./memory-safety.md#calls-and-evaluation-order).
 
 Reference-bound parameters may also declare defaults:
 
