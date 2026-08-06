@@ -71,6 +71,8 @@ type PreparedResultCallable = {
   resultValues: readonly HirExprId[];
 };
 
+type ResultProjectionIndex = ReadonlyMap<string, ResultProjectionProvenance>;
+
 type BindingSource =
   | {
       kind: "parameter";
@@ -500,6 +502,7 @@ const classifyCallable = ({
   resolvedCalls,
   dependents,
   contractOrigins,
+  projectionIndexes,
 }: {
   prepared: PreparedResultCallable;
   context: ResolveContext;
@@ -512,6 +515,7 @@ const classifyCallable = ({
   dependents: Map<SymbolId, Set<SymbolId>>;
   /** Stable, pass-scoped substitutions keyed by call expression and result path. */
   contractOrigins: Map<string, readonly ResultProvenanceOrigin[]>;
+  projectionIndexes: WeakMap<CallableResultProvenance, ResultProjectionIndex>;
 }): CallableResultProvenance => {
   const { bindings, resultValues, signature } = prepared;
   const active = new Set<string>();
@@ -537,9 +541,15 @@ const classifyCallable = ({
     path: readonly PlaceProjection[],
   ): readonly ResultProvenanceOrigin[] => {
     if (path.length > MAX_RESULT_PROVENANCE_DEPTH) {
-      return unknown("depth-limit");
+      const depthLimitKey = `${expressionId}:depth-limit`;
+      const cached = classified.get(depthLimitKey);
+      if (cached) return cached;
+      const result = unknown("depth-limit");
+      classified.set(depthLimitKey, result);
+      return result;
     }
-    const activeKey = `${expressionId}:${pathKey(path)}`;
+    const currentPathKey = pathKey(path);
+    const activeKey = `${expressionId}:${currentPathKey}`;
     const cached = classified.get(activeKey);
     if (cached) return cached;
     if (active.has(activeKey)) return [];
@@ -693,9 +703,19 @@ const classifyCallable = ({
               callers.add(prepared.callable.symbol);
               dependents.set(target.symbol, callers);
               const summary = summaries.get(target.symbol);
-              const projection = summary?.projections.find(
-                (candidate) => pathKey(candidate.path) === pathKey(path),
-              );
+              let projectionIndex = summary
+                ? projectionIndexes.get(summary)
+                : undefined;
+              if (summary && !projectionIndex) {
+                const indexed = new Map<string, ResultProjectionProvenance>();
+                summary.projections.forEach((projection) => {
+                  const key = pathKey(projection.path);
+                  if (!indexed.has(key)) indexed.set(key, projection);
+                });
+                projectionIndex = indexed;
+                projectionIndexes.set(summary, projectionIndex);
+              }
+              const projection = projectionIndex?.get(currentPathKey);
               if (!projection) return [];
               return projection.origins.flatMap((origin) => {
                 if (origin.kind !== "parameter") return [origin];
@@ -720,7 +740,7 @@ const classifyCallable = ({
       }
       const contract = resolved.contract;
       if (!contract) return finish([]);
-      const contractOriginKey = `${expression.id}:${pathKey(path)}`;
+      const contractOriginKey = `${expression.id}:${currentPathKey}`;
       let abstractOrigins = contractOrigins.get(contractOriginKey);
       if (!abstractOrigins) {
         const computed: ResultProvenanceOrigin[] = [];
@@ -867,6 +887,10 @@ export const inferCallableResultProvenance = ({
   >();
   const dependents = new Map<SymbolId, Set<SymbolId>>();
   const contractOrigins = new Map<string, readonly ResultProvenanceOrigin[]>();
+  const projectionIndexes = new WeakMap<
+    CallableResultProvenance,
+    ResultProjectionIndex
+  >();
   const worklist = Array.from(prepared.keys()).filter(
     (symbol) => !baseContracts.has(symbol),
   );
@@ -893,6 +917,7 @@ export const inferCallableResultProvenance = ({
             resolvedCalls,
             dependents,
             contractOrigins,
+            projectionIndexes,
           });
     if (evaluationCount > MAX_RESULT_PROVENANCE_EVALUATIONS) {
       widened.add(symbol);
