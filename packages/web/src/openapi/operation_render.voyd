@@ -7,12 +7,18 @@ use std::meta::Shape
 use std::number::cast::to_string
 use std::optional::types::all
 use std::string::type::{ String, StringSlice }
-use super::parameter_render::append_parameters
+use super::parameter_render::render_parameters
 use super::response_render::{ matching_response_schema_docs, response_contracts_json }
 use super::schema::{ content_json, content_without_schema, opaque_schema, schema_for }
 use super::schema_overlay::apply_schema_docs
 use super::types::Operation
 use super::contract::OpenApiParameterContract
+
+obj RenderedParameterOverride {
+  name: String,
+  location: String,
+  value: JsonValue
+}
 
 pub fn operation_json(
   operation: Operation,
@@ -31,11 +37,12 @@ pub fn operation_json(
     out.set("tags", JsonArray { value: tags })
 
   let ~parameters = Array<JsonValue>::init()
-  append_parameters(parameters, operation.path_params, location: "path".as_slice(), required: true, prefix: prefix.concat("Path".as_slice()), components: components, include_doc_comments: include_doc_comments)
-  append_parameters(parameters, operation.query_params, location: "query".as_slice(), required: false, prefix: prefix.concat("Query".as_slice()), components: components, include_doc_comments: include_doc_comments)
-  append_parameters(parameters, operation.header_params, location: "header".as_slice(), required: false, prefix: prefix.concat("Header".as_slice()), components: components, include_doc_comments: include_doc_comments)
-  append_parameters(parameters, operation.cookie_params, location: "cookie".as_slice(), required: false, prefix: prefix.concat("Cookie".as_slice()), components: components, include_doc_comments: include_doc_comments)
-  apply_parameter_overrides(parameters, operation.parameter_overrides, prefix: prefix, components: components, include_doc_comments: include_doc_comments)
+  parameters.extend(render_parameters(operation.path_params, location: "path".as_slice(), required: true, prefix: prefix.concat("Path".as_slice()), components: components, include_doc_comments: include_doc_comments))
+  parameters.extend(render_parameters(operation.query_params, location: "query".as_slice(), required: false, prefix: prefix.concat("Query".as_slice()), components: components, include_doc_comments: include_doc_comments))
+  parameters.extend(render_parameters(operation.header_params, location: "header".as_slice(), required: false, prefix: prefix.concat("Header".as_slice()), components: components, include_doc_comments: include_doc_comments))
+  parameters.extend(render_parameters(operation.cookie_params, location: "cookie".as_slice(), required: false, prefix: prefix.concat("Cookie".as_slice()), components: components, include_doc_comments: include_doc_comments))
+  let rendered_parameter_overrides = render_parameter_overrides(operation.parameter_overrides, prefix: prefix, components: components, include_doc_comments: include_doc_comments)
+  apply_parameter_overrides(parameters, rendered_parameter_overrides)
   if not parameters.is_empty():
     out.set("parameters", JsonArray { value: parameters })
 
@@ -45,13 +52,15 @@ pub fn operation_json(
     set_optional_string(body, "description", operation.request_description)
     let request_content = match(operation.request_body)
       Some<Shape> { value }:
+        let inferred_request_schema = schema_for(value, prefix: prefix.concat("Request".as_slice()), components: components, include_doc_comments: include_doc_comments)
+        let request_schema = apply_schema_docs(
+          inferred_request_schema,
+          operation.request_schema_docs,
+          components: components
+        )
         content_json(
           operation.request_content_type,
-          apply_schema_docs(
-            schema_for(value, prefix: prefix.concat("Request".as_slice()), components: components, include_doc_comments: include_doc_comments),
-            operation.request_schema_docs,
-            components: components
-          )
+          request_schema
         )
       None:
         if operation.request_content_type.starts_with("text/plain") or operation.request_content_type.equals("application/octet-stream"):
@@ -85,8 +94,9 @@ pub fn operation_json(
   response.set("description", JsonString { value: operation.response_description })
   match(operation.response_body)
     Some<Shape> { value }:
+      let inferred_response_schema = schema_for(value, prefix: prefix.concat("Response".as_slice()), components: components, include_doc_comments: include_doc_comments)
       let schema = apply_schema_docs(
-        schema_for(value, prefix: prefix.concat("Response".as_slice()), components: components, include_doc_comments: include_doc_comments),
+        inferred_response_schema,
         matching_response_schema_docs(
           operation.response_schema_docs,
           status: operation.response_status,
@@ -109,29 +119,43 @@ pub fn operation_json(
 
 fn apply_parameter_overrides(
   ~parameters: Array<JsonValue>,
-  overrides: Array<OpenApiParameterContract>,
-  { prefix: String, ~components: Dict<String, JsonValue>, include_doc_comments: bool }
+  overrides: Array<RenderedParameterOverride>
 ) -> void
   var override_index = 0
   while override_index < overrides.len():
     let override = overrides.at(override_index)
-    let rendered = render_parameter_override(
-      override,
-      prefix: prefix.concat("Parameter".as_slice()),
-      components: components,
-      include_doc_comments: include_doc_comments
-    )
     var parameter_index = 0
     var replaced = false
     while parameter_index < parameters.len():
       let fields = object_fields(parameters.at(parameter_index))
       if string_value(fields, "name").equals(override.name) and string_value(fields, "in").equals(override.location):
-        let _ = parameters.replace(parameter_index, with: rendered)
+        let _ = parameters.replace(parameter_index, with: override.value)
         replaced = true
       parameter_index = parameter_index + 1
     if not replaced:
-      parameters.push(rendered)
+      parameters.push(override.value)
     override_index = override_index + 1
+
+fn render_parameter_overrides(
+  overrides: Array<OpenApiParameterContract>,
+  { prefix: String, ~components: Dict<String, JsonValue>, include_doc_comments: bool }
+) -> Array<RenderedParameterOverride>
+  let ~rendered = Array<RenderedParameterOverride>::with_capacity(overrides.len())
+  var override_index = 0
+  while override_index < overrides.len():
+    let override = overrides.at(override_index)
+    rendered.push(RenderedParameterOverride {
+      name: override.name,
+      location: override.location,
+      value: render_parameter_override(
+        override,
+        prefix: prefix.concat("Parameter".as_slice()),
+        components: components,
+        include_doc_comments: include_doc_comments
+      )
+    })
+    override_index = override_index + 1
+  rendered
 
 fn render_parameter_override(
   parameter: OpenApiParameterContract,

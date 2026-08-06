@@ -38,7 +38,8 @@ const targetTypeIncludesDependencySymbol = ({
   const desc = dependency.typing.arena.get(type);
   if (desc.kind === "nominal-object" || desc.kind === "value-object") {
     return (
-      desc.owner.moduleId === dependency.moduleId && desc.owner.symbol === symbol
+      desc.owner.moduleId === dependency.moduleId &&
+      desc.owner.symbol === symbol
     );
   }
   if (desc.kind === "intersection" && typeof desc.nominal === "number") {
@@ -194,6 +195,17 @@ const translateTraitTypeExpr = ({
     typeof expr.typeId === "number" ? translation(expr.typeId) : undefined;
 
   switch (expr.typeKind) {
+    case "borrowed":
+      return {
+        ...expr,
+        inner:
+          translateTraitTypeExpr({
+            expr: expr.inner,
+            translation,
+            mapSymbol,
+          }) ?? expr.inner,
+        typeId,
+      };
     case "named":
       return {
         ...expr,
@@ -201,7 +213,7 @@ const translateTraitTypeExpr = ({
         typeArguments: expr.typeArguments?.map(
           (arg) =>
             translateTraitTypeExpr({ expr: arg, translation, mapSymbol }) ??
-            arg
+            arg,
         ),
         typeId,
       };
@@ -225,7 +237,7 @@ const translateTraitTypeExpr = ({
         elements: expr.elements.map(
           (entry) =>
             translateTraitTypeExpr({ expr: entry, translation, mapSymbol }) ??
-            entry
+            entry,
         ),
         typeId,
       };
@@ -235,7 +247,7 @@ const translateTraitTypeExpr = ({
         members: expr.members.map(
           (entry) =>
             translateTraitTypeExpr({ expr: entry, translation, mapSymbol }) ??
-            entry
+            entry,
         ),
         typeId,
       };
@@ -245,7 +257,7 @@ const translateTraitTypeExpr = ({
         members: expr.members.map(
           (entry) =>
             translateTraitTypeExpr({ expr: entry, translation, mapSymbol }) ??
-            entry
+            entry,
         ),
         typeId,
       };
@@ -253,7 +265,7 @@ const translateTraitTypeExpr = ({
       return {
         ...expr,
         typeParameters: expr.typeParameters?.map((param) =>
-          translateTraitTypeParameter({ param, translation, mapSymbol })
+          translateTraitTypeParameter({ param, translation, mapSymbol }),
         ),
         parameters: expr.parameters.map((param) => ({
           ...param,
@@ -342,10 +354,10 @@ const translateTraitMethod = ({
   ...method,
   symbol: mapSymbol(method.symbol) ?? method.symbol,
   typeParameters: method.typeParameters?.map((param) =>
-    translateTraitTypeParameter({ param, translation, mapSymbol })
+    translateTraitTypeParameter({ param, translation, mapSymbol }),
   ),
   parameters: method.parameters.map((parameter) =>
-    translateTraitMethodParameter({ parameter, translation, mapSymbol })
+    translateTraitMethodParameter({ parameter, translation, mapSymbol }),
   ),
   returnType: translateTraitTypeExpr({
     expr: method.returnType,
@@ -429,7 +441,7 @@ export const registerImportedObjectTemplate = ({
   };
 
   const translateTypeParam = (id: TypeParamId | undefined) =>
-    typeof id === "number" ? typeParamMap.get(id) ?? id : undefined;
+    typeof id === "number" ? (typeParamMap.get(id) ?? id) : undefined;
 
   const translateDeclaringParams = (
     params?: readonly TypeParamId[],
@@ -621,14 +633,15 @@ export const registerImportedTraitDecl = ({
         param,
         translation,
         mapSymbol: mapTypeExprSymbol,
-      })
+      }),
     ),
-    requirements: traitDecl.requirements?.map((requirement) =>
-      translateTraitTypeExpr({
-        expr: requirement,
-        translation,
-        mapSymbol: mapTypeExprSymbol,
-      }) ?? requirement
+    requirements: traitDecl.requirements?.map(
+      (requirement) =>
+        translateTraitTypeExpr({
+          expr: requirement,
+          translation,
+          mapSymbol: mapTypeExprSymbol,
+        }) ?? requirement,
     ),
     methods: traitDecl.methods.map((method) => {
       const localMethodSymbol = mapDependencySymbolToLocal({
@@ -664,17 +677,15 @@ export const registerImportedTraitImplTemplates = ({
 }): void => {
   const dependencyRecord = dependency.symbolTable.getSymbol(dependencySymbol);
   const dependencyIsTrait = dependencyRecord.kind === "trait";
-  const relevantTemplates = dependency.typing.traits
-    .getImplTemplates()
-    .filter(
-      (template) =>
-        (dependencyIsTrait && template.traitSymbol === dependencySymbol) ||
-        targetTypeIncludesDependencySymbol({
-          type: template.target,
-          dependency,
-          symbol: dependencySymbol,
-        }),
-    );
+  const relevantTemplates = dependency.typing.traits.getImplTemplates().filter(
+    (template) =>
+      (dependencyIsTrait && template.traitSymbol === dependencySymbol) ||
+      targetTypeIncludesDependencySymbol({
+        type: template.target,
+        dependency,
+        symbol: dependencySymbol,
+      }),
+  );
 
   if (relevantTemplates.length === 0) {
     return;
@@ -745,58 +756,67 @@ export const registerImportedTraitImplTemplates = ({
     const importMethods = (
       source: ReadonlyMap<SymbolId, SymbolId>,
       target: Map<SymbolId, SymbolId>,
-    ): void => source.forEach(
-      (dependencyImplMethodSymbol, dependencyTraitMethodSymbol) => {
-        const traitMethodSymbol = mapImportedTraitMethodSymbol({
-          dependency,
-          dependencyTraitSymbol: template.traitSymbol,
-          dependencyTraitMethodSymbol,
-          localTraitSymbol,
-          ctx,
-        });
-        const implMethodSymbol = mapDependencySymbolToLocal({
-          owner: dependencyImplMethodSymbol,
-          dependency,
-          ctx,
-          allowUnexported: true,
-        });
-        target.set(traitMethodSymbol, implMethodSymbol);
+    ): void =>
+      source.forEach(
+        (dependencyImplMethodSymbol, dependencyTraitMethodSymbol) => {
+          const traitMethodSymbol = mapImportedTraitMethodSymbol({
+            dependency,
+            dependencyTraitSymbol: template.traitSymbol,
+            dependencyTraitMethodSymbol,
+            localTraitSymbol,
+            ctx,
+          });
+          const implMethodSymbol = mapDependencySymbolToLocal({
+            owner: dependencyImplMethodSymbol,
+            dependency,
+            ctx,
+            allowUnexported: true,
+          });
+          target.set(traitMethodSymbol, implMethodSymbol);
 
-        if (!ctx.functions.getSignature(implMethodSymbol)) {
-          const dependencySignature =
-            dependency.typing.functions.getSignature(dependencyImplMethodSymbol);
-          if (dependencySignature) {
-            const signatureTypeParamMap = new Map<TypeParamId, TypeParamId>();
-            const signatureCache = new Map<TypeId, TypeId>();
-            const signatureTranslation = createTranslation({
-              sourceArena: dependency.typing.arena,
-              targetArena: ctx.arena,
-              sourceEffects: dependency.typing.effects,
-              targetEffects: ctx.effects,
-              paramMap: signatureTypeParamMap,
-              cache: signatureCache,
-              mapSymbol: (owner) =>
-                mapDependencySymbolToLocal({
-                  owner,
-                  dependency,
-                  ctx,
-                  allowUnexported: true,
-                }),
-            });
-            const translated = translateFunctionSignature({
-              signature: dependencySignature,
-              translation: signatureTranslation,
-              dependency,
-              ctx,
-              paramMap: signatureTypeParamMap,
-            });
-            ctx.functions.setSignature(implMethodSymbol, translated.signature);
-            ctx.table.setSymbolScheme(implMethodSymbol, translated.signature.scheme);
-            ctx.valueTypes.set(implMethodSymbol, translated.signature.typeId);
+          if (!ctx.functions.getSignature(implMethodSymbol)) {
+            const dependencySignature =
+              dependency.typing.functions.getSignature(
+                dependencyImplMethodSymbol,
+              );
+            if (dependencySignature) {
+              const signatureTypeParamMap = new Map<TypeParamId, TypeParamId>();
+              const signatureCache = new Map<TypeId, TypeId>();
+              const signatureTranslation = createTranslation({
+                sourceArena: dependency.typing.arena,
+                targetArena: ctx.arena,
+                sourceEffects: dependency.typing.effects,
+                targetEffects: ctx.effects,
+                paramMap: signatureTypeParamMap,
+                cache: signatureCache,
+                mapSymbol: (owner) =>
+                  mapDependencySymbolToLocal({
+                    owner,
+                    dependency,
+                    ctx,
+                    allowUnexported: true,
+                  }),
+              });
+              const translated = translateFunctionSignature({
+                signature: dependencySignature,
+                translation: signatureTranslation,
+                dependency,
+                ctx,
+                paramMap: signatureTypeParamMap,
+              });
+              ctx.functions.setSignature(
+                implMethodSymbol,
+                translated.signature,
+              );
+              ctx.table.setSymbolScheme(
+                implMethodSymbol,
+                translated.signature.scheme,
+              );
+              ctx.valueTypes.set(implMethodSymbol, translated.signature.typeId);
+            }
           }
-        }
-      },
-    );
+        },
+      );
     importMethods(template.methods, methods);
     importMethods(template.staticMethods, staticMethods);
 
@@ -807,7 +827,9 @@ export const registerImportedTraitImplTemplates = ({
       typeParams: template.typeParams.map((param) => ({
         symbol: mapTypeParamSymbol(param.symbol),
         typeParam: mapTypeParam(param.typeParam, typeParamMap, ctx),
-        constraint: param.constraint ? translation(param.constraint) : undefined,
+        constraint: param.constraint
+          ? translation(param.constraint)
+          : undefined,
         typeRef: translation(param.typeRef),
       })),
       methods,
@@ -815,20 +837,21 @@ export const registerImportedTraitImplTemplates = ({
       implSymbol: localImplSymbol,
     });
 
-    new Map([...methods, ...staticMethods]).forEach((implMethodSymbol, traitMethodSymbol) =>
-      registerTraitMethodImplMapping({
-        traitMethodImpls: ctx.traitMethodImpls,
-        implMethodSymbol,
-        traitSymbol: localTraitSymbol,
-        traitMethodSymbol,
-        buildConflictMessage: ({ implMethodSymbol, existing, incoming }) =>
-          [
-            "imported impl method mapped to multiple trait methods",
-            `impl method symbol: ${implMethodSymbol}`,
-            `existing trait/method: ${existing.traitSymbol}/${existing.traitMethodSymbol}`,
-            `incoming trait/method: ${incoming.traitSymbol}/${incoming.traitMethodSymbol}`,
-          ].join("\n"),
-      }),
+    new Map([...methods, ...staticMethods]).forEach(
+      (implMethodSymbol, traitMethodSymbol) =>
+        registerTraitMethodImplMapping({
+          traitMethodImpls: ctx.traitMethodImpls,
+          implMethodSymbol,
+          traitSymbol: localTraitSymbol,
+          traitMethodSymbol,
+          buildConflictMessage: ({ implMethodSymbol, existing, incoming }) =>
+            [
+              "imported impl method mapped to multiple trait methods",
+              `impl method symbol: ${implMethodSymbol}`,
+              `existing trait/method: ${existing.traitSymbol}/${existing.traitMethodSymbol}`,
+              `incoming trait/method: ${incoming.traitSymbol}/${incoming.traitMethodSymbol}`,
+            ].join("\n"),
+        }),
     );
   });
 };
@@ -851,10 +874,7 @@ export const mapDependencySymbolToLocal = ({
     moduleId: string;
     symbol: SymbolId;
   }): { moduleId: string; symbol: SymbolId } =>
-    canonicalSymbolRefInTypingContext(
-      { moduleId, symbol },
-      ctx,
-    );
+    canonicalSymbolRefInTypingContext({ moduleId, symbol }, ctx);
 
   const visit = (
     candidateOwner: SymbolId,
@@ -929,8 +949,7 @@ export const mapDependencySymbolToLocal = ({
           symbol: candidateOwner,
         });
         const bucket =
-          ctx.importAliasesByModule.get(canonicalTarget.moduleId) ??
-          new Map();
+          ctx.importAliasesByModule.get(canonicalTarget.moduleId) ?? new Map();
         bucket.set(canonicalTarget.symbol, declared);
         ctx.importAliasesByModule.set(canonicalTarget.moduleId, bucket);
         if (
@@ -952,9 +971,8 @@ export const mapDependencySymbolToLocal = ({
       );
     }
 
-    const dependencyRecord = candidateDependency.symbolTable.getSymbol(
-      candidateOwner,
-    );
+    const dependencyRecord =
+      candidateDependency.symbolTable.getSymbol(candidateOwner);
     const importableMetadata = importableMetadataFrom(
       dependencyRecord.metadata as Record<string, unknown> | undefined,
     );
@@ -963,7 +981,10 @@ export const mapDependencySymbolToLocal = ({
       kind: exportEntry.kind,
       declaredAt: ctx.hir.module.ast,
       metadata: {
-        import: { moduleId: candidateDependency.moduleId, symbol: candidateOwner },
+        import: {
+          moduleId: candidateDependency.moduleId,
+          symbol: candidateOwner,
+        },
         ...(importableMetadata ?? {}),
       },
     });
@@ -1008,7 +1029,8 @@ const resolveLocalSymbolForModule = ({
 
   let dependencyRecord: Readonly<{ name: string; kind: SymbolKind }>;
   try {
-    dependencyRecord = candidateDependency.symbolTable.getSymbol(candidateOwner);
+    dependencyRecord =
+      candidateDependency.symbolTable.getSymbol(candidateOwner);
   } catch {
     return undefined;
   }

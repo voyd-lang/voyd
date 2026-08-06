@@ -42,6 +42,12 @@ obj IteratorBox {
   value: i32
 }
 
+fn iterator_boxes() -> Array<IteratorBox>
+  let ~values = Array<IteratorBox>::with_capacity(2)
+  values.push(IteratorBox { value: 3 })
+  values.push(IteratorBox { value: 5 })
+  values
+
 test "array new from fixed array preserves length":
   var fixed = new_fixed_array<i32>(2)
   fixed = __array_set(fixed, 0, 4)
@@ -85,6 +91,24 @@ test "array iterator advances while prior values remain live":
       assert(value.value, eq: 5)
     None:
       assert(false)
+
+test "array view iterator borrows elements while advancing its cursor":
+  let values = iterator_boxes()
+  let ~iterator = values.view_iter()
+  let first = iterator.next()
+  let second = iterator.next()
+
+  let first_value =
+    match(first)
+      Some<borrow IteratorBox> { value }: value.value
+      None: -1
+  let second_value =
+    match(second)
+      Some<borrow IteratorBox> { value }: value.value
+      None: -1
+
+  assert(first_value, eq: 3)
+  assert(second_value, eq: 5)
 
 test "array from null ref source returns none":
   let fixed = new_fixed_array<FixedArray<i32>>(1)

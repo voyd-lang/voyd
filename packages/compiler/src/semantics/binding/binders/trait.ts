@@ -52,6 +52,14 @@ export const bindTraitDecl = (
   rememberSyntax(decl.form, ctx);
   rememberSyntax(decl.name, ctx);
   rememberSyntax(decl.body, ctx);
+  decl.regions.forEach((region) => {
+    rememberSyntax(region.form, ctx);
+    rememberSyntax(region.name, ctx);
+  });
+  decl.disjoint.forEach((entry) => {
+    rememberSyntax(entry.form, ctx);
+    entry.regions.forEach((region) => rememberSyntax(region, ctx));
+  });
   reportInvalidTypeDeclarationName({
     declarationKind: "trait",
     name: decl.name,
@@ -104,6 +112,14 @@ export const bindTraitDecl = (
     visibility: decl.visibility,
     symbol,
     typeParameters,
+    regions: decl.regions.map((region) => ({
+      name: region.name.value,
+      ast: region.form,
+    })),
+    disjoint: decl.disjoint.map((entry) => ({
+      regions: entry.regions.map((region) => region.value),
+      ast: entry.form,
+    })),
     methods,
     scope: traitScope,
     moduleIndex: ctx.nextModuleIndex++,
@@ -183,6 +199,7 @@ const bindTraitMethod = ({
     effectTypeExpr: decl.signature.effectType,
     defaultBody: decl.body,
     intrinsic: decl.intrinsic,
+    borrowContract: decl.borrowContract,
     documentation: declarationDocForSyntax(decl.signature.name, ctx),
   };
 };
@@ -387,6 +404,7 @@ export const makeParsedFunctionFromTraitMethod = (
       optional: param.optional,
       ast: clonedAst,
       typeExpr,
+      bindingKind: param.bindingKind,
     };
   });
 

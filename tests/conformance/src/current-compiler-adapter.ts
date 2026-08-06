@@ -85,5 +85,16 @@ export const normalizeRuntimeTrap = (
   if (!(error instanceof WebAssembly.RuntimeError)) {
     throw error;
   }
-  return { name: error.name, message: error.message };
+  const panic = (
+    error as WebAssembly.RuntimeError & {
+      voyd?: {
+        panic?: { status: "available"; message: string } | { status: string };
+      };
+    }
+  ).voyd?.panic;
+  const message =
+    panic?.status === "available" && "message" in panic
+      ? panic.message
+      : error.message;
+  return { name: error.name, message };
 };

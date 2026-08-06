@@ -133,6 +133,8 @@ export interface FunctionMetadata {
     keyTokens: readonly string[];
     parameterStates: readonly CallShapeParameterState[];
   }>;
+  /** ABI-compatible companion that consumes the deferred default guard bit. */
+  defaultIdentityGuardEntry?: true;
 }
 
 export interface StaticEffectHandlerCapture {
@@ -373,6 +375,11 @@ export interface SafeArrayLoopScope {
   indexSymbol: SymbolId;
 }
 
+export type RuntimePlaceIdentity = {
+  backingLocal: { index: number; type: binaryen.Type };
+  indexLocal: { index: number; type: binaryen.Type };
+};
+
 export interface FunctionContext {
   bindings: Map<SymbolId, LocalBinding>;
   tempLocals: Map<number, LocalBindingLocal>;
@@ -394,6 +401,8 @@ export interface FunctionContext {
   loopStack?: LoopScope[];
   safeArrayLoopScopes?: readonly SafeArrayLoopScope[];
   safeArrayLengthSymbols?: ReadonlyMap<SymbolId, SymbolId>;
+  runtimePlaceIdentities?: Map<HirExprId, RuntimePlaceIdentity>;
+  runtimePlaceIdentityRequests?: Set<HirExprId>;
   continuations?: Map<SymbolId, ContinuationBinding>;
   suppressTailResumptionExitChecks?: boolean;
   staticEffectContext?: StaticEffectHandlerContext;

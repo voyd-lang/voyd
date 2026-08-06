@@ -1,5 +1,6 @@
 import { readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
+import { fileBudgetMs, wallBudgetMs } from "./timing-budget.mjs";
 
 const options = parseArgs(process.argv.slice(2));
 const budgets = JSON.parse(
@@ -68,6 +69,12 @@ const wallMs =
     ? Math.max(...laneWallReports.map((report) => report.wallMs))
     : vitestWallMs;
 const totalFileMs = files.reduce((total, file) => total + file.durationMs, 0);
+const commandWalls = laneWallReports.map((report) => ({
+  command: report.command,
+  wallMs: report.wallMs,
+  status: report.status,
+  budgetMs: wallBudgetMs(report.command, budget),
+}));
 const slowestTests = files
   .flatMap((file) => file.tests.map((test) => ({ file: file.file, ...test })))
   .sort((left, right) => right.durationMs - left.durationMs)
@@ -78,11 +85,7 @@ const summary = {
   wallMs,
   totalFileMs,
   reportCount: reports.length,
-  commandWalls: laneWallReports.map((report) => ({
-    command: report.command,
-    wallMs: report.wallMs,
-    status: report.status,
-  })),
+  commandWalls,
   files,
   slowestTests,
   budget,
@@ -97,9 +100,16 @@ files.slice(0, 10).forEach((file) => {
 });
 
 const violations = [
-  ...(wallMs > budget.maxWallMs
-    ? [`wall time ${formatMs(wallMs)} exceeds ${formatMs(budget.maxWallMs)}`]
-    : []),
+  ...(commandWalls.length > 0
+    ? commandWalls
+        .filter((report) => report.wallMs > report.budgetMs)
+        .map(
+          (report) =>
+            `${report.command.join(" ")} wall time ${formatMs(report.wallMs)} exceeds ${formatMs(report.budgetMs)}`,
+        )
+    : wallMs > budget.maxWallMs
+      ? [`wall time ${formatMs(wallMs)} exceeds ${formatMs(budget.maxWallMs)}`]
+      : []),
   ...files
     .filter((file) => file.durationMs > fileBudgetMs(file, budget))
     .map(
@@ -138,8 +148,4 @@ function readReport(file) {
 
 function formatMs(value) {
   return `${Math.round(value)}ms`;
-}
-
-function fileBudgetMs(file, budget) {
-  return budget.maxFileMsByBasename?.[basename(file.file)] ?? budget.maxFileMs;
 }

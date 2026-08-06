@@ -12,6 +12,7 @@ import { symbolRefEquals, type SymbolRef } from "./symbol-ref.js";
 export type Substitution = ReadonlyMap<TypeParamId, TypeId>;
 
 export type TypeDescriptor =
+  | BorrowedType
   | PrimitiveType
   | RecursiveType
   | TraitType
@@ -23,6 +24,11 @@ export type TypeDescriptor =
   | IntersectionType
   | FixedArrayType
   | TypeParamRef;
+
+export interface BorrowedType {
+  kind: "borrowed";
+  inner: TypeId;
+}
 
 export interface PrimitiveType {
   kind: "primitive";
@@ -172,6 +178,7 @@ export interface TypeArena {
   containsTypeParams(id: TypeId): boolean;
   getScheme(id: TypeSchemeId): Readonly<TypeScheme>;
   internPrimitive(name: string): TypeId;
+  internBorrowed(inner: TypeId): TypeId;
   createRecursiveType(
     build: (self: TypeId, placeholderParam: TypeParamId) => TypeDescriptor,
   ): TypeId;
@@ -221,10 +228,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
   const recursiveUnfoldCache = new Map<TypeId, TypeId>(
     snapshot?.recursiveUnfoldCache ?? [],
   );
-  const containedTypeParamsCache = new Map<
-    TypeId,
-    ReadonlySet<TypeParamId>
-  >();
+  const containedTypeParamsCache = new Map<TypeId, ReadonlySet<TypeParamId>>();
   const fieldNameComparisonCache = new Map<string, Map<string, number>>();
 
   const jsonStringKey = (value: string): string => JSON.stringify(value);
@@ -268,6 +272,8 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
 
   const keyFor = (desc: TypeDescriptor): string => {
     switch (desc.kind) {
+      case "borrowed":
+        return `borrowed:${desc.inner}`;
       case "primitive":
         return `primitive:${jsonStringKey(desc.name)}`;
       case "type-param-ref":
@@ -371,6 +377,8 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
       const desc = getDescriptor(id);
       const children = (() => {
         switch (desc.kind) {
+          case "borrowed":
+            return [desc.inner];
           case "recursive":
             return [desc.body];
           case "fixed-array":
@@ -380,9 +388,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
           case "intersection":
             return [
               ...(typeof desc.nominal === "number" ? [desc.nominal] : []),
-              ...(typeof desc.structural === "number"
-                ? [desc.structural]
-                : []),
+              ...(typeof desc.structural === "number" ? [desc.structural] : []),
               ...(desc.traits ?? []),
             ];
           case "trait":
@@ -459,6 +465,9 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
   const internPrimitive = (name: string): TypeId =>
     storeDescriptor({ kind: "primitive", name });
 
+  const internBorrowed = (inner: TypeId): TypeId =>
+    storeDescriptor({ kind: "borrowed", inner });
+
   const internRecursive = (desc: Omit<RecursiveType, "kind">): TypeId =>
     storeDescriptor({
       kind: "recursive",
@@ -497,6 +506,8 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
 
       const rootDesc = getDescriptor(root);
       switch (rootDesc.kind) {
+        case "borrowed":
+          return containsTypeId(rootDesc.inner, needle, seen);
         case "primitive":
         case "type-param-ref":
           return false;
@@ -516,7 +527,8 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
               containsTypeId(rootDesc.structural, needle, seen)) ||
             (rootDesc.traits?.some((trait) =>
               containsTypeId(trait, needle, seen),
-            ) ?? false)
+            ) ??
+              false)
           );
         case "trait":
         case "nominal-object":
@@ -591,6 +603,12 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
       const currentDesc = getDescriptor(current);
       const rebuilt = (() => {
         switch (currentDesc.kind) {
+          case "borrowed": {
+            const inner = cloneReplacingSelf(currentDesc.inner);
+            return inner === currentDesc.inner
+              ? current
+              : internBorrowed(inner);
+          }
           case "primitive":
           case "type-param-ref":
             return current;
@@ -793,20 +811,19 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
   const normalizeStructuralFieldShapes = (
     fields: readonly StructuralField[],
   ): readonly StructuralField[] => {
-    const normalized = fields
-      .map((field) => ({
-        name: field.name,
-        type: field.type,
-        optional: field.optional ?? false,
-        declaringParams:
-          field.declaringParams && field.declaringParams.length > 0
-            ? Array.from(new Set(field.declaringParams)).sort((a, b) => a - b)
-            : undefined,
-        visibility: field.visibility,
-        owner: field.owner,
-        packageId: field.packageId,
-        documentation: field.documentation,
-      }));
+    const normalized = fields.map((field) => ({
+      name: field.name,
+      type: field.type,
+      optional: field.optional ?? false,
+      declaringParams:
+        field.declaringParams && field.declaringParams.length > 0
+          ? Array.from(new Set(field.declaringParams)).sort((a, b) => a - b)
+          : undefined,
+      visibility: field.visibility,
+      owner: field.owner,
+      packageId: field.packageId,
+      documentation: field.documentation,
+    }));
     const sorted = normalized.every(
       (field, index) =>
         index === 0 ||
@@ -961,6 +978,8 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     const unfolded = unfoldRecursive(type);
     const desc = getDescriptor(unfolded);
     switch (desc.kind) {
+      case "borrowed":
+        return nominalComponent(desc.inner, seen);
       case "nominal-object":
       case "value-object":
         return unfolded;
@@ -988,6 +1007,8 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     const unfolded = unfoldRecursive(type);
     const desc = getDescriptor(unfolded);
     switch (desc.kind) {
+      case "borrowed":
+        return structuralComponent(desc.inner, seen);
       case "structural-object":
         return unfolded;
       case "intersection":
@@ -1555,6 +1576,16 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
       }
 
       switch (leftDesc.kind) {
+        case "borrowed":
+          return rightDesc.kind === "borrowed"
+            ? unifyInternal(
+                leftDesc.inner,
+                rightDesc.inner,
+                currentVariance,
+                subst,
+                localSeen,
+              )
+            : conflict(resolvedLeft, resolvedRight);
         case "recursive":
           return conflict(resolvedLeft, resolvedRight);
         case "primitive": {
@@ -1780,6 +1811,9 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
 
           const desc = getDescriptor(frame.id);
           switch (desc.kind) {
+            case "borrowed":
+              stack.push({ id: desc.inner, stage: 0 });
+              break;
             case "recursive":
               if (!subst.has(desc.binder)) {
                 stack.push({ id: desc.body, stage: 0 });
@@ -1830,6 +1864,12 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
         const desc = getDescriptor(current);
         const rebuilt = (() => {
           switch (desc.kind) {
+            case "borrowed": {
+              const inner = getSubstituted(desc.inner);
+              return inner === desc.inner
+                ? { type: current, changed: false }
+                : { type: internBorrowed(inner), changed: true };
+            }
             case "primitive":
               return { type: current, changed: false };
             case "recursive": {
@@ -1887,9 +1927,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
                 typeof desc.structural === "number"
                   ? getSubstituted(desc.structural)
                   : undefined;
-              const traits = desc.traits?.map((trait) =>
-                getSubstituted(trait),
-              );
+              const traits = desc.traits?.map((trait) => getSubstituted(trait));
               const changed =
                 nominal !== desc.nominal ||
                 structural !== desc.structural ||
@@ -2045,6 +2083,7 @@ export const createTypeArena = (snapshot?: TypeArenaSnapshot): TypeArena => {
     containsTypeParams: (id) => containedTypeParams(id).size > 0,
     getScheme,
     internPrimitive,
+    internBorrowed,
     createRecursiveType,
     internTrait,
     internNominalObject,
@@ -2094,6 +2133,8 @@ const cloneTypeScheme = (scheme: TypeScheme): TypeScheme => ({
 
 const cloneTypeDescriptor = (desc: TypeDescriptor): TypeDescriptor => {
   switch (desc.kind) {
+    case "borrowed":
+      return { kind: "borrowed", inner: desc.inner };
     case "primitive":
       return { kind: "primitive", name: desc.name };
     case "recursive":
@@ -2173,6 +2214,8 @@ export const typeDescriptorToUserString = (
   arena: TypeArena,
 ): string => {
   switch (type.kind) {
+    case "borrowed":
+      return `borrow ${typeDescriptorToUserString(arena.get(type.inner), arena)}`;
     case "primitive":
       return type.name;
     case "trait":

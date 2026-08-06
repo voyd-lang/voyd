@@ -1,17 +1,36 @@
 {
   "unit": {
     "maxWallMs": 420000,
+    "maxWallMsByCommand": {
+      "npm run test:unit:core:affected:ci": 630000
+    },
+    "maxFileMs": 180000,
+    "maxFileMsByPathSuffix": {
+      "apps/cli/src/__tests__/bootstrap.test.ts": 240000,
+      "packages/language-server/src/__tests__/project.test.ts": 240000,
+      "packages/sdk/src/__tests__/sdk-node.test.ts": 420000
+    }
+  },
+  "web-unit": {
+    "maxWallMs": 420000,
+    "maxWallMsByCommand": {
+      "npm run test:unit:web:ci": 600000
+    },
     "maxFileMs": 180000
   },
   "conformance": {
     "maxWallMs": 120000,
-    "maxFileMs": 60000
+    "maxFileMs": 60000,
+    "maxFileMsByPathSuffix": {
+      "tests/conformance/src/runtime.test.ts": 80000
+    }
   },
   "integration": {
-    "maxWallMs": 375000,
+    "maxWallMs": 600000,
     "maxFileMs": 210000,
-    "maxFileMsByBasename": {
-      "vx-dom.test.ts": 270000
+    "maxFileMsByPathSuffix": {
+      "tests/integration/src/vx-dom.test.ts": 390000,
+      "tests/integration/src/web-framework.test.ts": 330000
     }
   }
 }

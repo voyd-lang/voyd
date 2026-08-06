@@ -2,6 +2,7 @@ import type { OptimizationLevel } from "@voyd-lang/sdk";
 
 export type DocumentationFormat = "html" | "json";
 export type BootstrapTemplate = "vx-spa" | "web-ssr";
+export type TestShard = { index: number; count: number };
 
 export type VoydConfig = {
   /** Write raw parser AST to stdout */
@@ -30,6 +31,8 @@ export type VoydConfig = {
   testReporter?: string;
   /** Exit with status 1 if no tests are found */
   failOnEmptyTests?: boolean;
+  /** Run one deterministic, one-based test shard */
+  testShard?: TestShard;
   /** Additional package search directories */
   pkgDirs?: string[];
   /** Generate documentation output */

@@ -10,6 +10,7 @@ import type {
   HirMethodCallExpr,
   HirPattern,
   LocalBindingProjectedElement,
+  RuntimePlaceIdentity,
   SymbolId,
   TypeId,
 } from "./context.js";
@@ -173,7 +174,8 @@ export const tryCompileProjectedElementValueExpr = ({
   });
   if (
     !projected ||
-    !isWideValueType({ typeId: projected.elementTypeId, ctx })
+    (!isWideValueType({ typeId: projected.elementTypeId, ctx }) &&
+      !fnCtx.runtimePlaceIdentityRequests?.has(exprId))
   ) {
     return undefined;
   }
@@ -188,6 +190,19 @@ export const tryCompileProjectedElementValueExpr = ({
     arrayTypeId: projected.arrayTypeId,
   };
   const value = loadProjectedElementBindingValue(binding, ctx, fnCtx);
+  const runtimePlaceIdentities =
+    fnCtx.runtimePlaceIdentities ?? new Map<HirExprId, RuntimePlaceIdentity>();
+  runtimePlaceIdentities.set(exprId, {
+    backingLocal: {
+      index: projected.arrayLocal.index,
+      type: projected.arrayLocal.type,
+    },
+    indexLocal: {
+      index: projected.indexLocal.index,
+      type: projected.indexLocal.type,
+    },
+  });
+  fnCtx.runtimePlaceIdentities = runtimePlaceIdentities;
   const exprValue =
     typeof expectedResultTypeId === "number"
       ? coerceValueToType({
@@ -453,11 +468,30 @@ const tryBuildProjectedElementViewFromExpr = ({
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const elementTypeId = getRequiredExprType(exprId, ctx, typeInstanceId);
-  if (!isWideValueType({ typeId: elementTypeId, ctx })) {
+  if (
+    !isWideValueType({ typeId: elementTypeId, ctx }) &&
+    !fnCtx.runtimePlaceIdentityRequests?.has(exprId)
+  ) {
     return undefined;
   }
 
   if (expr.exprKind === "call") {
+    if (expr.args.length === 2 && isFixedArrayGetCall({ expr, ctx, fnCtx })) {
+      const arrayTypeId = getRequiredExprType(
+        expr.args[0]!.expr,
+        ctx,
+        typeInstanceId,
+      );
+      return stabilizeNormalizedFixedArrayAccess({
+        arrayExprId: expr.args[0]!.expr,
+        indexExprId: expr.args[1]!.expr,
+        arrayTypeId,
+        elementTypeId,
+        ctx,
+        fnCtx,
+        compileExpr,
+      });
+    }
     return tryBuildIntrinsicArrayGetView({
       expr,
       elementTypeId,
@@ -1003,7 +1037,10 @@ const isIntrinsicArrayGetCall = ({
     ctx.moduleId,
     callee.symbol,
   );
-  return ctx.program.symbols.getIntrinsicName(calleeId) === "__array_get";
+  return (
+    (ctx.program.symbols.getIntrinsicName(calleeId) ??
+      ctx.program.symbols.getName(calleeId)) === "__array_get"
+  );
 };
 
 const isIntrinsicArrayLenCall = ({
@@ -1021,7 +1058,10 @@ const isIntrinsicArrayLenCall = ({
     ctx.moduleId,
     callee.symbol,
   );
-  return ctx.program.symbols.getIntrinsicName(calleeId) === "__array_len";
+  return (
+    (ctx.program.symbols.getIntrinsicName(calleeId) ??
+      ctx.program.symbols.getName(calleeId)) === "__array_len"
+  );
 };
 
 const isFixedArrayGetCall = ({

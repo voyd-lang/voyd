@@ -242,6 +242,7 @@ const cloneCallInfo = (callInfo: CallLoweringInfo): OptimizedCallInfo => ({
   argPlans: callInfo.argPlans ? new Map(callInfo.argPlans) : undefined,
   typeArgs: callInfo.typeArgs ? new Map(callInfo.typeArgs) : undefined,
   traitDispatch: callInfo.traitDispatch,
+  identityGuards: callInfo.identityGuards,
 });
 
 const normalizeCalls = ({

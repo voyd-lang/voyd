@@ -24,6 +24,7 @@ import {
 import { getModuleSccGroups } from "./scc.js";
 import { collectCyclicModuleExportSurfaces } from "./cyclic-export-surfaces.js";
 import { cloneSemanticsMapForTypingState } from "./semantic-snapshot.js";
+import type { BorrowingResult } from "../semantics/borrowing/index.js";
 
 export type SemanticsTypingState = {
   arena: TypeArena;
@@ -38,6 +39,8 @@ export type AnalyzeModuleSemanticsOptions = {
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
   typingState?: SemanticsTypingState;
+  reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
+  retainBorrowingIncrementalData?: boolean;
   isCancelled?: () => boolean;
 };
 
@@ -91,6 +94,8 @@ export const analyzeModuleSemantics = ({
   previousSemantics,
   changedModuleIds,
   typingState,
+  reusableBorrowing,
+  retainBorrowingIncrementalData = true,
   isCancelled,
 }: AnalyzeModuleSemanticsOptions): AnalyzeModuleSemanticsResult => {
   if (previousSemantics && !typingState) {
@@ -101,7 +106,8 @@ export const analyzeModuleSemantics = ({
     ? Array.from(previousSemantics?.entries() ?? []).find(
         ([, entry]) =>
           entry.typing.arena !== typingState.arena ||
-          entry.typing.effects.internRow !== typingState.effectInterner.internRow,
+          entry.typing.effects.internRow !==
+            typingState.effectInterner.internRow,
       )?.[0]
     : undefined;
   if (mismatchedTypingStateModuleId) {
@@ -219,6 +225,9 @@ export const analyzeModuleSemantics = ({
         arena,
         effectInterner,
         isCancelled,
+        reusableBorrowing,
+        previousSemantics,
+        retainBorrowingIncrementalData,
       });
       return;
     }
@@ -235,6 +244,9 @@ export const analyzeModuleSemantics = ({
       effectInterner,
       diagnostics,
       isCancelled,
+      reusableBorrowing,
+      retainBorrowingIncrementalData,
+      previousBorrowing: previousSemantics?.get(moduleId)?.borrowing,
     });
     if (!result) {
       return;
@@ -360,9 +372,11 @@ const captureReusableDependencySnapshot = ({
         reusableModuleIds.has(moduleId) &&
         graph.modules.get(moduleId)?.path.namespace !== "src",
     )
-    .sort(([left], [right]) => left.localeCompare(right, undefined, {
-      numeric: true,
-    }));
+    .sort(([left], [right]) =>
+      left.localeCompare(right, undefined, {
+        numeric: true,
+      }),
+    );
 
   if (entries.length === 0) {
     return undefined;
@@ -398,6 +412,9 @@ const analyzeCyclicScc = ({
   arena,
   effectInterner,
   isCancelled,
+  reusableBorrowing,
+  previousSemantics,
+  retainBorrowingIncrementalData,
 }: {
   moduleIds: readonly string[];
   includeTests: boolean | undefined;
@@ -410,6 +427,9 @@ const analyzeCyclicScc = ({
   arena: ReturnType<typeof createTypeArena>;
   effectInterner: ReturnType<typeof createEffectInterner>;
   isCancelled: (() => boolean) | undefined;
+  reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
+  previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
+  retainBorrowingIncrementalData: boolean;
 }) => {
   const seedErrorByModuleId = new Map<string, string>();
   const cyclicExportSurfaces = collectCyclicModuleExportSurfaces({
@@ -433,6 +453,9 @@ const analyzeCyclicScc = ({
   const finalPassSemantics = new Map<string, SemanticsPipelineResult>();
   const finalPassExports = new Map<string, ModuleExportTable>();
 
+  // The first two passes only stabilize cyclic export contracts. Their body
+  // diagnostics and runtime-guard plans are discarded, so defer body checking
+  // until the final pass sees the stabilized dependency surface.
   moduleIds.forEach((moduleId) => {
     throwIfCancelled(isCancelled);
 
@@ -440,14 +463,23 @@ const analyzeCyclicScc = ({
       moduleId,
       includeTests,
       recoverFromTypingErrors: true,
+      checkBorrowBodies: false,
       cycleModuleIdsByModuleId,
       graph,
       exportSurfaces: cyclicExportSurfaces,
-      semantics: mergeWithOverrides({ base: semantics, overrides: firstPassSemantics }),
-      exports: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
+      semantics: mergeWithOverrides({
+        base: semantics,
+        overrides: firstPassSemantics,
+      }),
+      exports: mergeWithOverrides({
+        base: exports,
+        overrides: firstPassExports,
+      }),
       arena,
       effectInterner,
       isCancelled,
+      reusableBorrowing,
+      retainBorrowingIncrementalData: false,
     });
     if (!result) {
       return;
@@ -463,19 +495,27 @@ const analyzeCyclicScc = ({
       moduleId,
       includeTests,
       recoverFromTypingErrors: true,
+      checkBorrowBodies: false,
       cycleModuleIdsByModuleId,
       graph,
       semantics: mergeWithOverrides({
-        base: mergeWithOverrides({ base: semantics, overrides: firstPassSemantics }),
+        base: mergeWithOverrides({
+          base: semantics,
+          overrides: firstPassSemantics,
+        }),
         overrides: stabilizationSemantics,
       }),
       exports: mergeWithOverrides({
-        base: mergeWithOverrides({ base: exports, overrides: firstPassExports }),
+        base: mergeWithOverrides({
+          base: exports,
+          overrides: firstPassExports,
+        }),
         overrides: stabilizationExports,
       }),
       arena,
       effectInterner,
       isCancelled,
+      reusableBorrowing,
     });
     if (!result) {
       return;
@@ -494,17 +534,26 @@ const analyzeCyclicScc = ({
       cycleModuleIdsByModuleId,
       graph,
       semantics: mergeWithOverrides({
-        base: mergeWithOverrides({ base: semantics, overrides: stabilizationSemantics }),
+        base: mergeWithOverrides({
+          base: semantics,
+          overrides: stabilizationSemantics,
+        }),
         overrides: finalPassSemantics,
       }),
       exports: mergeWithOverrides({
-        base: mergeWithOverrides({ base: exports, overrides: stabilizationExports }),
+        base: mergeWithOverrides({
+          base: exports,
+          overrides: stabilizationExports,
+        }),
         overrides: finalPassExports,
       }),
       arena,
       effectInterner,
       diagnostics,
       isCancelled,
+      reusableBorrowing,
+      previousBorrowing: previousSemantics?.get(moduleId)?.borrowing,
+      retainBorrowingIncrementalData,
     });
     if (!result) {
       return;
@@ -545,6 +594,7 @@ const analyzeModule = ({
   moduleId,
   includeTests,
   recoverFromTypingErrors,
+  checkBorrowBodies = true,
   cycleModuleIdsByModuleId,
   graph,
   exportSurfaces,
@@ -554,10 +604,14 @@ const analyzeModule = ({
   effectInterner,
   diagnostics,
   isCancelled,
+  reusableBorrowing,
+  previousBorrowing,
+  retainBorrowingIncrementalData,
 }: {
   moduleId: string;
   includeTests: boolean | undefined;
   recoverFromTypingErrors: boolean | undefined;
+  checkBorrowBodies?: boolean;
   cycleModuleIdsByModuleId: ReadonlyMap<string, readonly string[]>;
   graph: ModuleGraph;
   exportSurfaces?: Map<string, ModuleExportSurfaceTable>;
@@ -567,6 +621,9 @@ const analyzeModule = ({
   effectInterner: ReturnType<typeof createEffectInterner>;
   diagnostics?: Diagnostic[];
   isCancelled: (() => boolean) | undefined;
+  reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
+  previousBorrowing?: BorrowingResult;
+  retainBorrowingIncrementalData?: boolean;
 }): SemanticsPipelineResult | undefined => {
   throwIfCancelled(isCancelled);
 
@@ -582,9 +639,16 @@ const analyzeModule = ({
       exports,
       exportSurfaces,
       dependencies: semantics,
-      typing: { arena, effects: createEffectTable({ interner: effectInterner }) },
+      typing: {
+        arena,
+        effects: createEffectTable({ interner: effectInterner }),
+      },
       includeTests,
       recoverFromTypingErrors,
+      checkBorrowBodies,
+      borrowingOverride: reusableBorrowing?.get(moduleId),
+      previousBorrowing,
+      retainBorrowingIncrementalData,
     });
     diagnostics?.push(
       ...augmentCycleTy0022Diagnostics({
@@ -682,12 +746,18 @@ const resolveIncrementalModuleIds = ({
   const currentModuleIds = new Set(graph.modules.keys());
   const previousModuleIds = new Set(previousSemantics.keys());
 
-  if (Array.from(previousModuleIds).some((moduleId) => !currentModuleIds.has(moduleId))) {
+  if (
+    Array.from(previousModuleIds).some(
+      (moduleId) => !currentModuleIds.has(moduleId),
+    )
+  ) {
     return undefined;
   }
 
   const missingCurrentModuleIds = new Set(
-    Array.from(currentModuleIds).filter((moduleId) => !previousModuleIds.has(moduleId)),
+    Array.from(currentModuleIds).filter(
+      (moduleId) => !previousModuleIds.has(moduleId),
+    ),
   );
 
   if (
@@ -754,7 +824,8 @@ const buildReverseDependencies = ({
       if (!graph.modules.has(dependencyId)) {
         return;
       }
-      const dependents = reverseDependencies.get(dependencyId) ?? new Set<string>();
+      const dependents =
+        reverseDependencies.get(dependencyId) ?? new Set<string>();
       dependents.add(moduleId);
       reverseDependencies.set(dependencyId, dependents);
     });

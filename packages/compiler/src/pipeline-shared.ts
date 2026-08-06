@@ -21,10 +21,13 @@ import {
   type SemanticsTypingState,
 } from "./modules/semantic-analysis.js";
 import type { ReusableDependencySemanticsSnapshot } from "./modules/semantic-analysis.js";
+import type { BorrowingResult } from "./semantics/borrowing/index.js";
 import {
   commitDependencySnapshot,
   createCompilerDependencySnapshotCache,
+  exportCompilerDependencyBorrowArtifact,
   prepareDependencySnapshotReuse,
+  type CompilerDependencyBorrowArtifact,
   type CompilerDependencySnapshotCache,
 } from "./modules/dependency-snapshot-cache.js";
 import { formatTestExportName } from "./tests/exports.js";
@@ -43,6 +46,8 @@ import { isOptimizationEnabled } from "./optimization-policy.js";
 
 export {
   createCompilerDependencySnapshotCache,
+  exportCompilerDependencyBorrowArtifact,
+  type CompilerDependencyBorrowArtifact,
   type CompilerDependencySnapshotCache,
 };
 export type { OptimizationLevel } from "./optimization-policy.js";
@@ -63,6 +68,9 @@ export type AnalyzeModulesOptions = {
   previousSemantics?: ReadonlyMap<string, SemanticsPipelineResult>;
   changedModuleIds?: ReadonlySet<string>;
   typingState?: SemanticsTypingState;
+  reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
+  /** Retain borrowing incremental data for a caller-owned reuse cache. */
+  retainBorrowingIncrementalData?: boolean;
   isCancelled?: () => boolean;
 };
 
@@ -140,6 +148,8 @@ export const analyzeModules = ({
   previousSemantics,
   changedModuleIds,
   typingState,
+  reusableBorrowing,
+  retainBorrowingIncrementalData,
   isCancelled,
 }: AnalyzeModulesOptions): AnalyzeModulesResult => {
   const {
@@ -149,15 +159,17 @@ export const analyzeModules = ({
     typingState: nextTypingState,
     dependencySnapshot,
   } = analyzeModuleSemantics({
-      graph,
-      includeTests,
-      recoverFromTypingErrors,
-      captureDependencySnapshot,
-      previousSemantics,
-      changedModuleIds,
-      typingState,
-      isCancelled,
-    });
+    graph,
+    includeTests,
+    recoverFromTypingErrors,
+    captureDependencySnapshot,
+    previousSemantics,
+    changedModuleIds,
+    typingState,
+    reusableBorrowing,
+    retainBorrowingIncrementalData,
+    isCancelled,
+  });
 
   diagnostics.push(...enforcePublicApiMethodEffectAnnotations({ semantics }));
 
@@ -544,19 +556,24 @@ export const emitProgram = async ({
     optimization: prepared.optimization?.facts,
   });
   markCompilerPerfPhaseDuration("codegenProgram", codegenStartedAt);
-  const emitStartedAt = startCompilerPerfPhase();
-  const wasm = result.wasm ?? emitBinary(result.module);
-  markCompilerPerfPhaseDuration("emitBinary", emitStartedAt);
-  recordCompilerPerfDuration({
-    name: "emit.codegen_program.ms",
-    startedAt: codegenStartedAt,
-  });
+  try {
+    const emitStartedAt = startCompilerPerfPhase();
+    const wasm = result.wasm ?? emitBinary(result.module);
+    markCompilerPerfPhaseDuration("emitBinary", emitStartedAt);
+    recordCompilerPerfDuration({
+      name: "emit.codegen_program.ms",
+      startedAt: codegenStartedAt,
+    });
 
-  recordCompilerPerfDuration({
-    name: "emit.emit_binary.ms",
-    startedAt: emitStartedAt,
-  });
-  return { wasm, module: result.module, diagnostics: result.diagnostics };
+    recordCompilerPerfDuration({
+      name: "emit.emit_binary.ms",
+      startedAt: emitStartedAt,
+    });
+    return { wasm, module: result.module, diagnostics: result.diagnostics };
+  } catch (error) {
+    result.module.dispose();
+    throw error;
+  }
 };
 
 export type ContinuationFallbackBundle = {
@@ -610,14 +627,19 @@ export const emitProgramWithContinuationFallback = async ({
       name: "emit_fallback.emit_binary.ms",
       startedAt: emitBinaryStartedAt,
     });
-    return wasm;
+    return new Uint8Array(wasm);
   };
 
-  return {
-    preferredKind,
-    preferredWasm: toWasmBytes(preferred),
-    fallbackWasm: fallback ? toWasmBytes(fallback) : undefined,
-  };
+  try {
+    return {
+      preferredKind,
+      preferredWasm: toWasmBytes(preferred),
+      fallbackWasm: fallback ? toWasmBytes(fallback) : undefined,
+    };
+  } finally {
+    preferred.module.dispose();
+    fallback?.module.dispose();
+  }
 };
 
 export type LoadModuleGraphFn = (
@@ -742,6 +764,9 @@ export const compileProgramWithLoader = async (
     captureDependencySnapshot: Boolean(dependencySnapshotReuse.key),
     previousSemantics: dependencySnapshotReuse.previousSemantics,
     typingState: dependencySnapshotReuse.typingState,
+    reusableBorrowing: dependencySnapshotReuse.reusableBorrowing,
+    retainBorrowingIncrementalData:
+      options.dependencySnapshotCache?.artifactEnabled === true,
   });
   markCompilerPerfPhaseDuration("analyzeModules", analyzeStartedAt);
   const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
@@ -768,19 +793,23 @@ export const compileProgramWithLoader = async (
     });
     markCompilerPerfPhaseDuration("emitProgram", emitStartedAt);
 
-    diagnostics.push(...wasmResult.diagnostics);
+    try {
+      diagnostics.push(...wasmResult.diagnostics);
 
-    if (hasErrorDiagnostics(diagnostics)) {
-      return complete(compileProgramFailure(diagnostics));
+      if (hasErrorDiagnostics(diagnostics)) {
+        return complete(compileProgramFailure(diagnostics));
+      }
+
+      return complete(
+        compileProgramSuccess({
+          graph,
+          semantics,
+          wasm: new Uint8Array(wasmResult.wasm),
+        }),
+      );
+    } finally {
+      wasmResult.module.dispose();
     }
-
-    return complete(
-      compileProgramSuccess({
-        graph,
-        semantics,
-        wasm: wasmResult.wasm,
-      }),
-    );
   } catch (error) {
     markCompilerPerfPhaseDuration("emitProgram", emitStartedAt);
     return complete(

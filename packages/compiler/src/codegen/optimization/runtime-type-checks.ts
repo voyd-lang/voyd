@@ -5,7 +5,7 @@ import type {
   TypeId,
 } from "../context.js";
 
-const exactNominalForType = ({
+export const exactNominalForType = ({
   typeId,
   ctx,
 }: {
@@ -47,7 +47,9 @@ export const exactNominalForRuntimeTypeCheckElision = ({
 
   const targetExpr = ctx.module.hir.expressions.get(expr.target);
   if (targetExpr?.exprKind === "identifier") {
-    const exactParameterType = fnCtx.exactParameterTypes?.get(targetExpr.symbol);
+    const exactParameterType = fnCtx.exactParameterTypes?.get(
+      targetExpr.symbol,
+    );
     if (typeof exactParameterType === "number") {
       return exactParameterType;
     }

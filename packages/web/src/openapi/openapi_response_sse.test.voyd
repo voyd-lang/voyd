@@ -1,0 +1,51 @@
+use src::openapi::{ RouteDocs, openapi_field_docs, openapi_response_schema_docs, openapi_schema_docs }
+use std::http::server::self as server
+use std::json::stringify
+use std::error::panic
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::router::app
+use src::openapi::automatic::all
+use src::sse::{ Sender, SseResponse }
+use src::sse::typed_response as sse_response
+
+fn write_sse(_sender: Sender): server::ResponseWriter -> void
+  void
+
+fn sse_reply(): (server::ResponseStream, open) -> SseResponse
+  sse_response(write_sse)
+
+test "typed SSE responses apply explicit event schema documentation":
+  let web_app = app(openapi: { title: "SSE docs", version: "1" })
+    .get<SseResponse>(
+      "/events",
+      handler: sse_reply,
+      docs: RouteDocs::empty().with_response_schemas([
+        openapi_response_schema_docs(
+          status: 200,
+          schema: openapi_schema_docs(
+            description: "Manual SSE event schema",
+            fields: [openapi_field_docs(
+              name: "data",
+              description: "Explicit SSE data field"
+            )]
+          )
+        )
+      ])
+    )
+    .get<SseResponse>(
+      "/literal-events",
+      handler: sse_reply,
+      docs: { description: "Literal zero-argument route docs" }
+    )
+  match(stringify(web_app.openapi(include_doc_comments: false)))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "Manual SSE event schema".as_slice(), "missing direct SSE schema overlay")
+      require_contains(value, "Explicit SSE data field".as_slice(), "SSE field overlay was omitted")
+      require_contains(value, "Literal zero-argument route docs".as_slice(), "literal unit route docs were omitted")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

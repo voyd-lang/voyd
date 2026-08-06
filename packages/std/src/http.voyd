@@ -643,11 +643,14 @@ fn default_reason(code: i32): () -> String
 fn is_valid_header_name(name: String) -> bool
   if name.is_empty():
     return false
-  let source = name.raw_bytes()
   var index = 0
   while index < name.byte_len():
-    if not is_header_token_byte(__array_get(source, index)):
-      return false
+    match(name.get_byte(index))
+      Some<i32> { value }:
+        if not is_header_token_byte(value):
+          return false
+      None:
+        return false
     index = index + 1
   true
 
@@ -709,10 +712,13 @@ fn get_all_normalized_headers(headers: Headers, normalized: String) -> Array<Str
 
 fn bytes_from_text(value: String) -> Bytes
   let ~buffer = ByteBuffer::with_capacity(value.byte_len())
-  let source = value.raw_bytes()
   var index = 0
   while index < value.byte_len():
-    buffer.push(__array_get(source, index))
+    match(value.get_byte(index))
+      Some<i32> { value: byte }:
+        buffer.push(byte)
+      None:
+        return buffer.as_bytes()
     index = index + 1
   buffer.as_bytes()
 

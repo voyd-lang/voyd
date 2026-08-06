@@ -57,6 +57,11 @@ export const bindImplDecl = (
   rememberSyntax(decl.target, ctx);
   rememberSyntax(decl.trait, ctx);
   rememberSyntax(decl.body, ctx);
+  decl.regionMappings.forEach((mapping) => {
+    rememberSyntax(mapping.form, ctx);
+    rememberSyntax(mapping.name, ctx);
+    rememberSyntax(mapping.place, ctx);
+  });
 
   const implName = isIdentifierAtom(decl.target)
     ? `${decl.target.value}::impl`
@@ -273,6 +278,11 @@ export const bindImplDecl = (
     target: decl.target,
     trait: decl.trait,
     typeParameters,
+    regionMappings: decl.regionMappings.map((mapping) => ({
+      name: mapping.name.value,
+      ast: mapping.form,
+      place: mapping.place,
+    })),
     methods,
     scope: implScope,
     moduleIndex: ctx.nextModuleIndex++,

@@ -39,6 +39,9 @@ const createTypeValidator = (ctx: TypingContext): TypeValidator => {
 
     const desc = ctx.arena.get(typeId);
     switch (desc.kind) {
+      case "borrowed":
+        ensureKnownType(desc.inner, `${context} borrowed inner type`);
+        return;
       case "primitive":
         return;
       case "recursive":
@@ -48,23 +51,23 @@ const createTypeValidator = (ctx: TypingContext): TypeValidator => {
       case "nominal-object":
       case "value-object":
         desc.typeArgs.forEach((arg, index) =>
-          ensureKnownType(arg, `${context} type argument ${index + 1}`)
+          ensureKnownType(arg, `${context} type argument ${index + 1}`),
         );
         return;
       case "structural-object":
         desc.fields.forEach((field) =>
-          ensureKnownType(field.type, `${context} field ${field.name}`)
+          ensureKnownType(field.type, `${context} field ${field.name}`),
         );
         return;
       case "function":
         desc.parameters.forEach((param, index) =>
-          ensureKnownType(param.type, `${context} parameter ${index + 1}`)
+          ensureKnownType(param.type, `${context} parameter ${index + 1}`),
         );
         ensureKnownType(desc.returnType, `${context} return type`);
         return;
       case "union":
         desc.members.forEach((member, index) =>
-          ensureKnownType(member, `${context} union member ${index + 1}`)
+          ensureKnownType(member, `${context} union member ${index + 1}`),
         );
         return;
       case "intersection":
@@ -82,7 +85,9 @@ const createTypeValidator = (ctx: TypingContext): TypeValidator => {
         return;
       default: {
         const unreachable: never = desc;
-        throw new Error(`unsupported type descriptor ${(unreachable as TypeId) ?? ""}`);
+        throw new Error(
+          `unsupported type descriptor ${(unreachable as TypeId) ?? ""}`,
+        );
       }
     }
   };
@@ -93,7 +98,7 @@ const createTypeValidator = (ctx: TypingContext): TypeValidator => {
 const collectReferencedParams = (
   typeId: TypeId,
   ctx: TypingContext,
-  seen: Set<TypeId> = new Set()
+  seen: Set<TypeId> = new Set(),
 ): Set<TypeParamId> => {
   if (seen.has(typeId)) {
     return new Set();
@@ -102,6 +107,8 @@ const collectReferencedParams = (
 
   const desc = ctx.arena.get(typeId);
   switch (desc.kind) {
+    case "borrowed":
+      return collectReferencedParams(desc.inner, ctx, seen);
     case "type-param-ref":
       return new Set([desc.param]);
     case "recursive": {
@@ -114,28 +121,31 @@ const collectReferencedParams = (
     case "value-object":
       return desc.typeArgs.reduce((acc, arg) => {
         collectReferencedParams(arg, ctx, seen).forEach((entry) =>
-          acc.add(entry)
+          acc.add(entry),
         );
         return acc;
       }, new Set<TypeParamId>());
     case "structural-object":
       return desc.fields.reduce((acc, field) => {
         collectReferencedParams(field.type, ctx, seen).forEach((entry) =>
-          acc.add(entry)
+          acc.add(entry),
         );
         return acc;
       }, new Set<TypeParamId>());
     case "function":
-      return desc.parameters.reduce((acc, param) => {
-        collectReferencedParams(param.type, ctx, seen).forEach((entry) =>
-          acc.add(entry)
-        );
-        return acc;
-      }, collectReferencedParams(desc.returnType, ctx, seen));
+      return desc.parameters.reduce(
+        (acc, param) => {
+          collectReferencedParams(param.type, ctx, seen).forEach((entry) =>
+            acc.add(entry),
+          );
+          return acc;
+        },
+        collectReferencedParams(desc.returnType, ctx, seen),
+      );
     case "union":
       return desc.members.reduce((acc, member) => {
         collectReferencedParams(member, ctx, seen).forEach((entry) =>
-          acc.add(entry)
+          acc.add(entry),
         );
         return acc;
       }, new Set<TypeParamId>());
@@ -143,12 +153,12 @@ const collectReferencedParams = (
       const acc = new Set<TypeParamId>();
       if (typeof desc.nominal === "number") {
         collectReferencedParams(desc.nominal, ctx, seen).forEach((entry) =>
-          acc.add(entry)
+          acc.add(entry),
         );
       }
       if (typeof desc.structural === "number") {
         collectReferencedParams(desc.structural, ctx, seen).forEach((entry) =>
-          acc.add(entry)
+          acc.add(entry),
         );
       }
       return acc;
@@ -163,12 +173,13 @@ const collectReferencedParams = (
 const referencedTemplateParams = (
   field: ObjectField,
   templateParams: ReadonlySet<TypeParamId>,
-  ctx: TypingContext
-): Set<TypeParamId> => new Set(
-  Array.from(collectReferencedParams(field.type, ctx)).filter((param) =>
-    templateParams.has(param)
-  )
-);
+  ctx: TypingContext,
+): Set<TypeParamId> =>
+  new Set(
+    Array.from(collectReferencedParams(field.type, ctx)).filter((param) =>
+      templateParams.has(param),
+    ),
+  );
 
 const ensureFieldsSubstituted = ({
   fields,
@@ -195,11 +206,11 @@ const ensureFieldsSubstituted = ({
       const remaining = referencedTemplateParams(field, templateParams, ctx);
       const declared = new Set(field.declaringParams);
       const missing = Array.from(remaining).filter(
-        (param) => !declared.has(param)
+        (param) => !declared.has(param),
       );
       if (missing.length > 0) {
         throw new Error(
-          `${context} field ${field.name} is missing declaring params for structural type variables`
+          `${context} field ${field.name} is missing declaring params for structural type variables`,
         );
       }
       return;
@@ -208,11 +219,11 @@ const ensureFieldsSubstituted = ({
     const declaredParams = new Set(field.declaringParams);
     const remaining = collectReferencedParams(field.type, ctx);
     const unsubstituted = Array.from(remaining).filter((param) =>
-      declaredParams.has(param)
+      declaredParams.has(param),
     );
     if (requireSubstitution && unsubstituted.length > 0) {
       throw new Error(
-        `${context} is missing substitutions for field ${field.name}`
+        `${context} is missing substitutions for field ${field.name}`,
       );
     }
   });
@@ -220,11 +231,11 @@ const ensureFieldsSubstituted = ({
 
 const validateObjectTemplates = (
   ctx: TypingContext,
-  validateType: TypeValidator
+  validateType: TypeValidator,
 ): void => {
   for (const template of ctx.objects.templates()) {
     const declaredParams = new Set(
-      template.params.map((param) => param.typeParam)
+      template.params.map((param) => param.typeParam),
     );
     const context = `object template ${getSymbolName(template.symbol, ctx)}`;
     validateType(template.type, context);
@@ -242,14 +253,13 @@ const validateObjectTemplates = (
 };
 
 const parseInstanceKey = (
-  key: string
+  key: string,
 ): { symbol?: number; typeArgs: readonly number[] } => {
   const [symbolText, argsText] = key.split("<");
   const symbol = Number(symbolText);
-  const typeArgs =
-    argsText?.endsWith(">")
-      ? argsText.slice(0, -1).split(",").filter(Boolean).map(Number)
-      : [];
+  const typeArgs = argsText?.endsWith(">")
+    ? argsText.slice(0, -1).split(",").filter(Boolean).map(Number)
+    : [];
   return {
     symbol: Number.isNaN(symbol) ? undefined : symbol,
     typeArgs,
@@ -258,7 +268,7 @@ const parseInstanceKey = (
 
 const validateObjectInstances = (
   ctx: TypingContext,
-  validateType: TypeValidator
+  validateType: TypeValidator,
 ): void => {
   for (const [key, info] of ctx.objects.instanceEntries()) {
     const parsed = parseInstanceKey(key);
@@ -291,7 +301,7 @@ const validateObjectInstances = (
 
 const validateTypeAliasInstances = (
   ctx: TypingContext,
-  validateType: TypeValidator
+  validateType: TypeValidator,
 ): void => {
   const substitutionSeen = new Set<TypeId>();
   for (const [key, instance] of ctx.typeAliases.instanceEntries()) {
@@ -314,7 +324,7 @@ const enforceStructuralSubstitution = (
   typeId: TypeId,
   ctx: TypingContext,
   context: string,
-  seen: Set<TypeId>
+  seen: Set<TypeId>,
 ): void => {
   if (seen.has(typeId)) {
     return;
@@ -323,6 +333,9 @@ const enforceStructuralSubstitution = (
 
   const desc = ctx.arena.get(typeId);
   switch (desc.kind) {
+    case "borrowed":
+      enforceStructuralSubstitution(desc.inner, ctx, context, seen);
+      return;
     case "recursive":
       enforceStructuralSubstitution(desc.body, ctx, context, seen);
       return;
@@ -332,17 +345,14 @@ const enforceStructuralSubstitution = (
           enforceStructuralSubstitution(field.type, ctx, context, seen);
           return;
         }
-        const remaining = collectReferencedParams(
-          field.type,
-          ctx
-        );
+        const remaining = collectReferencedParams(field.type, ctx);
         const declared = new Set(field.declaringParams);
         const unsubstituted = Array.from(remaining).filter((param) =>
-          declared.has(param)
+          declared.has(param),
         );
         if (unsubstituted.length > 0) {
           throw new Error(
-            `${context} still has unsubstituted structural fields`
+            `${context} still has unsubstituted structural fields`,
           );
         }
         enforceStructuralSubstitution(field.type, ctx, context, seen);
@@ -353,18 +363,18 @@ const enforceStructuralSubstitution = (
     case "nominal-object":
     case "value-object":
       desc.typeArgs.forEach((arg) =>
-        enforceStructuralSubstitution(arg, ctx, context, seen)
+        enforceStructuralSubstitution(arg, ctx, context, seen),
       );
       return;
     case "function":
       desc.parameters.forEach((param) =>
-        enforceStructuralSubstitution(param.type, ctx, context, seen)
+        enforceStructuralSubstitution(param.type, ctx, context, seen),
       );
       enforceStructuralSubstitution(desc.returnType, ctx, context, seen);
       return;
     case "union":
       desc.members.forEach((member) =>
-        enforceStructuralSubstitution(member, ctx, context, seen)
+        enforceStructuralSubstitution(member, ctx, context, seen),
       );
       return;
     case "intersection":
@@ -384,7 +394,7 @@ const enforceStructuralSubstitution = (
     default: {
       const unreachable: never = desc;
       throw new Error(
-        `unsupported type descriptor ${(unreachable as TypeId) ?? ""}`
+        `unsupported type descriptor ${(unreachable as TypeId) ?? ""}`,
       );
     }
   }
@@ -392,7 +402,7 @@ const enforceStructuralSubstitution = (
 
 const validateTypeTable = (
   ctx: TypingContext,
-  validateType: TypeValidator
+  validateType: TypeValidator,
 ): void => {
   for (const [exprId, typeId] of ctx.table.entries()) {
     const expr = ctx.hir.expressions.get(exprId);
@@ -405,7 +415,7 @@ const validateTypeTable = (
 
 const validateValueTypes = (
   ctx: TypingContext,
-  validateType: TypeValidator
+  validateType: TypeValidator,
 ): void => {
   for (const [symbol, typeId] of ctx.valueTypes.entries()) {
     validateType(typeId, `value ${getSymbolName(symbol, ctx)}`);
@@ -414,7 +424,7 @@ const validateValueTypes = (
 
 const validateHirTypeExprs = (
   hir: HirGraph,
-  validateType: TypeValidator
+  validateType: TypeValidator,
 ): void => {
   for (const item of hir.items.values()) {
     validateItemTypeExprs(item, validateType);
@@ -431,7 +441,7 @@ const validateHirTypeExprs = (
 
 const validateItemTypeExprs = (
   item: HirItem,
-  validateType: TypeValidator
+  validateType: TypeValidator,
 ): void => {
   switch (item.kind) {
     case "function":
@@ -440,18 +450,18 @@ const validateItemTypeExprs = (
         visitTypeExpr(
           param.type,
           validateType,
-          `function parameter ${param.symbol}`
-        )
+          `function parameter ${param.symbol}`,
+        ),
       );
       visitTypeExpr(
         item.returnType,
         validateType,
-        `function ${item.symbol} return type`
+        `function ${item.symbol} return type`,
       );
       visitTypeExpr(
         item.effectType,
         validateType,
-        `function ${item.symbol} effect type`
+        `function ${item.symbol} effect type`,
       );
       return;
     case "type-alias":
@@ -459,28 +469,20 @@ const validateItemTypeExprs = (
       visitTypeExpr(
         item.target,
         validateType,
-        `type alias ${item.symbol} target`
+        `type alias ${item.symbol} target`,
       );
       return;
     case "object":
       visitTypeParameters(item.typeParameters, validateType);
-      visitTypeExpr(
-        item.base,
-        validateType,
-        `object ${item.symbol} base`
-      );
+      visitTypeExpr(item.base, validateType, `object ${item.symbol} base`);
       item.fields.forEach((field) =>
-        visitTypeExpr(
-          field.type,
-          validateType,
-          `object field ${field.name}`
-        )
+        visitTypeExpr(field.type, validateType, `object field ${field.name}`),
       );
       return;
     case "trait":
       visitTypeParameters(item.typeParameters, validateType);
       item.requirements?.forEach((req, index) =>
-        visitTypeExpr(req, validateType, `trait requirement ${index + 1}`)
+        visitTypeExpr(req, validateType, `trait requirement ${index + 1}`),
       );
       item.methods.forEach((method) => {
         visitTypeParameters(method.typeParameters, validateType);
@@ -488,13 +490,13 @@ const validateItemTypeExprs = (
           visitTypeExpr(
             param.type,
             validateType,
-            `trait method parameter ${param.symbol}`
-          )
+            `trait method parameter ${param.symbol}`,
+          ),
         );
         visitTypeExpr(
           method.returnType,
           validateType,
-          `trait method ${method.symbol} return type`
+          `trait method ${method.symbol} return type`,
         );
       });
       return;
@@ -507,19 +509,19 @@ const validateItemTypeExprs = (
           visitTypeExpr(
             entry.source,
             validateType,
-            `impl member source ${item.symbol}`
+            `impl member source ${item.symbol}`,
           );
           return;
         }
         visitTypeExpr(
           entry.source,
           validateType,
-          `impl trait source ${item.symbol}`
+          `impl trait source ${item.symbol}`,
         );
         visitTypeExpr(
           entry.trait,
           validateType,
-          `impl trait import ${item.symbol}`
+          `impl trait import ${item.symbol}`,
         );
       });
       return;
@@ -530,13 +532,13 @@ const validateItemTypeExprs = (
           visitTypeExpr(
             param.type,
             validateType,
-            `effect parameter ${param.symbol}`
-          )
+            `effect parameter ${param.symbol}`,
+          ),
         );
         visitTypeExpr(
           op.returnType,
           validateType,
-          `effect return type ${op.symbol}`
+          `effect return type ${op.symbol}`,
         );
       });
       return;
@@ -547,25 +549,25 @@ const validateItemTypeExprs = (
 
 const visitTypeParameters = (
   params: readonly HirTypeParameter[] | undefined,
-  validateType: TypeValidator
+  validateType: TypeValidator,
 ): void => {
   params?.forEach((param) => {
     visitTypeExpr(
       param.constraint,
       validateType,
-      `type parameter constraint ${param.symbol}`
+      `type parameter constraint ${param.symbol}`,
     );
     visitTypeExpr(
       param.defaultType,
       validateType,
-      `type parameter default ${param.symbol}`
+      `type parameter default ${param.symbol}`,
     );
   });
 };
 
 const validateStatementTypeExprs = (
   stmt: HirStatement,
-  validateType: TypeValidator
+  validateType: TypeValidator,
 ): void => {
   if (stmt.kind === "let") {
     visitPattern(stmt.pattern, validateType);
@@ -574,23 +576,19 @@ const validateStatementTypeExprs = (
 
 const validateExpressionTypeExprs = (
   expr: HirExpression,
-  validateType: TypeValidator
+  validateType: TypeValidator,
 ): void => {
   switch (expr.exprKind) {
     case "call":
       expr.typeArguments?.forEach((arg, index) =>
-        visitTypeExpr(
-          arg,
-          validateType,
-          `call type argument ${index + 1}`
-        )
+        visitTypeExpr(arg, validateType, `call type argument ${index + 1}`),
       );
       expr.targetTypeArguments?.forEach((arg, index) =>
         visitTypeExpr(
           arg,
           validateType,
-          `call target type argument ${index + 1}`
-        )
+          `call target type argument ${index + 1}`,
+        ),
       );
       return;
     case "method-call":
@@ -598,8 +596,8 @@ const validateExpressionTypeExprs = (
         visitTypeExpr(
           arg,
           validateType,
-          `method call type argument ${index + 1}`
-        )
+          `method call type argument ${index + 1}`,
+        ),
       );
       return;
     case "lambda":
@@ -608,34 +606,30 @@ const validateExpressionTypeExprs = (
         visitTypeExpr(
           param.type,
           validateType,
-          `lambda parameter ${param.symbol}`
-        )
+          `lambda parameter ${param.symbol}`,
+        ),
       );
       visitTypeExpr(
         expr.returnType,
         validateType,
-        `lambda return type ${expr.id}`
+        `lambda return type ${expr.id}`,
       );
       visitTypeExpr(
         expr.effectType,
         validateType,
-        `lambda effect type ${expr.id}`
+        `lambda effect type ${expr.id}`,
       );
       return;
     case "match":
       expr.arms.forEach((arm, index) =>
-        visitPattern(
-          arm.pattern,
-          validateType,
-          `match arm ${index + 1}`
-        )
+        visitPattern(arm.pattern, validateType, `match arm ${index + 1}`),
       );
       return;
     case "object-literal":
       visitTypeExpr(
         expr.target,
         validateType,
-        `object literal target ${expr.id}`
+        `object literal target ${expr.id}`,
       );
       return;
     default:
@@ -646,34 +640,28 @@ const validateExpressionTypeExprs = (
 const visitPattern = (
   pattern: HirPattern,
   validateType: TypeValidator,
-  context?: string
+  context?: string,
 ): void => {
   if (pattern.kind === "type") {
-    visitTypeExpr(
-      pattern.type,
-      validateType,
-      context ?? "type pattern"
-    );
+    visitTypeExpr(pattern.type, validateType, context ?? "type pattern");
   }
   if (pattern.kind === "destructure") {
     pattern.fields.forEach((field) =>
-      visitPattern(field.pattern, validateType)
+      visitPattern(field.pattern, validateType),
     );
     if (pattern.spread) {
       visitPattern(pattern.spread, validateType);
     }
   }
   if (pattern.kind === "tuple") {
-    pattern.elements.forEach((element) =>
-      visitPattern(element, validateType)
-    );
+    pattern.elements.forEach((element) => visitPattern(element, validateType));
   }
 };
 
 const visitTypeExpr = (
   expr: HirTypeExpr | undefined,
   validateType: TypeValidator,
-  context: string
+  context: string,
 ): void => {
   if (!expr) {
     return;
@@ -683,13 +671,16 @@ const visitTypeExpr = (
   }
 
   switch (expr.typeKind) {
+    case "borrowed":
+      visitTypeExpr(expr.inner, validateType, `${context} borrowed inner type`);
+      return;
     case "named":
       expr.typeArguments?.forEach((arg, index) =>
         visitTypeExpr(
           arg,
           validateType,
-          `${context} type argument ${index + 1}`
-        )
+          `${context} type argument ${index + 1}`,
+        ),
       );
       return;
     case "object":
@@ -697,27 +688,19 @@ const visitTypeExpr = (
         visitTypeExpr(
           field.type,
           validateType,
-          `${context} field ${field.name}`
-        )
+          `${context} field ${field.name}`,
+        ),
       );
       return;
     case "tuple":
       expr.elements.forEach((element, index) =>
-        visitTypeExpr(
-          element,
-          validateType,
-          `${context} element ${index + 1}`
-        )
+        visitTypeExpr(element, validateType, `${context} element ${index + 1}`),
       );
       return;
     case "union":
     case "intersection":
       expr.members.forEach((member, index) =>
-        visitTypeExpr(
-          member,
-          validateType,
-          `${context} member ${index + 1}`
-        )
+        visitTypeExpr(member, validateType, `${context} member ${index + 1}`),
       );
       return;
     case "function":
@@ -726,8 +709,8 @@ const visitTypeExpr = (
         visitTypeExpr(
           param.type,
           validateType,
-          `${context} parameter ${index + 1}`
-        )
+          `${context} parameter ${index + 1}`,
+        ),
       );
       visitTypeExpr(expr.returnType, validateType, `${context} return type`);
       visitTypeExpr(expr.effectType, validateType, `${context} effect type`);

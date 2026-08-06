@@ -18,7 +18,9 @@ const formatTypeArguments = ({
   typeArgs: readonly TypeId[];
   formatType: (typeId: TypeId) => string;
 }): string =>
-  typeArgs.length === 0 ? "" : `<${typeArgs.map((arg) => formatType(arg)).join(", ")}>`;
+  typeArgs.length === 0
+    ? ""
+    : `<${typeArgs.map((arg) => formatType(arg)).join(", ")}>`;
 
 const nominalNameForTypeId = ({
   arena,
@@ -28,10 +30,16 @@ const nominalNameForTypeId = ({
   typeId: TypeId;
 }): string | undefined => {
   const descriptor = arena.get(typeId);
-  if (descriptor.kind === "nominal-object" || descriptor.kind === "value-object") {
+  if (
+    descriptor.kind === "nominal-object" ||
+    descriptor.kind === "value-object"
+  ) {
     return descriptor.name;
   }
-  if (descriptor.kind === "intersection" && typeof descriptor.nominal === "number") {
+  if (
+    descriptor.kind === "intersection" &&
+    typeof descriptor.nominal === "number"
+  ) {
     return nominalNameForTypeId({ arena, typeId: descriptor.nominal });
   }
   return undefined;
@@ -64,7 +72,8 @@ const optionalInnerTypeForTypeId = ({
 
     const memberDescriptor = arena.get(member);
     const someDescriptor =
-      memberDescriptor.kind === "intersection" && typeof memberDescriptor.nominal === "number"
+      memberDescriptor.kind === "intersection" &&
+      typeof memberDescriptor.nominal === "number"
         ? arena.get(memberDescriptor.nominal)
         : memberDescriptor;
     if (
@@ -95,7 +104,9 @@ const functionSignatureTypeParameters = ({
       }
     })
     .filter((name): name is string => typeof name === "string");
-  return typeParams && typeParams.length > 0 ? `<${typeParams.join(", ")}>` : "";
+  return typeParams && typeParams.length > 0
+    ? `<${typeParams.join(", ")}>`
+    : "";
 };
 
 const formatFunctionSignatureParameters = ({
@@ -115,14 +126,17 @@ const formatFunctionSignatureParameters = ({
     .map((parameter) => {
       const label = parameter.label;
       const name = parameter.name;
-      const prefix = label && name && label !== name ? `${label} ${name}` : name ?? label;
+      const prefix =
+        label && name && label !== name ? `${label} ${name}` : (name ?? label);
       const optionalSuffix = parameter.optional ? "?" : "";
       const normalizedType = normalizeOptionalParameterType({
         typeId: parameter.type,
         optional: parameter.optional,
       });
       const typeText = formatType(normalizedType);
-      return prefix ? `${prefix}${optionalSuffix}: ${typeText}` : `${typeText}${optionalSuffix}`;
+      return prefix
+        ? `${prefix}${optionalSuffix}: ${typeText}`
+        : `${typeText}${optionalSuffix}`;
     })
     .join(", ");
 
@@ -156,7 +170,10 @@ const formatFunctionSignature = ({
   });
 
   const returnType = formatType(signature.returnType);
-  const effects = formatEffectRow(signature.effectRow, semantics.typing.effects);
+  const effects = formatEffectRow(
+    signature.effectRow,
+    semantics.typing.effects,
+  );
   const effectSuffix = effects === "()" ? "" : ` ! ${effects}`;
 
   return `fn ${functionName}${typeParameterSuffix}(${params}) -> ${returnType}${effectSuffix}`;
@@ -170,7 +187,10 @@ const formatWithRecursionGuard = ({
 }: {
   typeId: TypeId;
   arena: TypeArena;
-  formatTypeDescriptor: (descriptor: TypeDescriptor, active: Set<TypeId>) => string;
+  formatTypeDescriptor: (
+    descriptor: TypeDescriptor,
+    active: Set<TypeId>,
+  ) => string;
   active: Set<TypeId>;
 }): string => {
   if (active.has(typeId)) {
@@ -230,8 +250,13 @@ const formatTypeId = ({
     return ownerModule.binding.symbolTable.getSymbol(ownerSymbol).name;
   };
 
-  const formatTypeDescriptor = (descriptor: TypeDescriptor, active: Set<TypeId>): string => {
+  const formatTypeDescriptor = (
+    descriptor: TypeDescriptor,
+    active: Set<TypeId>,
+  ): string => {
     switch (descriptor.kind) {
+      case "borrowed":
+        return `borrow ${formatTypeRef(descriptor.inner, active)}`;
       case "primitive":
         return descriptor.name;
       case "type-param-ref":
@@ -277,14 +302,22 @@ const formatTypeId = ({
           })
           .join(", ");
         const returnType = formatTypeRef(descriptor.returnType, active);
-        const effects = formatEffectRow(descriptor.effectRow, moduleSemantics.typing.effects);
+        const effects = formatEffectRow(
+          descriptor.effectRow,
+          moduleSemantics.typing.effects,
+        );
         const effectSuffix = effects === "()" ? "" : ` ! ${effects}`;
         return `(${params}) -> ${returnType}${effectSuffix}`;
       }
       case "union":
-        return descriptor.members.map((member) => formatTypeRef(member, active)).join(" | ");
+        return descriptor.members
+          .map((member) => formatTypeRef(member, active))
+          .join(" | ");
       case "intersection": {
-        if (detailLevel === "compact" && typeof descriptor.nominal === "number") {
+        if (
+          detailLevel === "compact" &&
+          typeof descriptor.nominal === "number"
+        ) {
           return formatTypeRef(descriptor.nominal, active);
         }
 
@@ -293,7 +326,9 @@ const formatTypeId = ({
           parts.push(formatTypeRef(descriptor.nominal, active));
         }
         if (descriptor.traits && descriptor.traits.length > 0) {
-          descriptor.traits.forEach((trait) => parts.push(formatTypeRef(trait, active)));
+          descriptor.traits.forEach((trait) =>
+            parts.push(formatTypeRef(trait, active)),
+          );
         }
         if (typeof descriptor.structural === "number") {
           parts.push(formatTypeRef(descriptor.structural, active));
@@ -324,7 +359,9 @@ export const buildTypeParamNameIndex = ({
     for (const [, signature] of semantics.typing.functions.signatures) {
       signature.typeParams?.forEach((param) => {
         try {
-          const name = semantics.binding.symbolTable.getSymbol(param.symbol).name;
+          const name = semantics.binding.symbolTable.getSymbol(
+            param.symbol,
+          ).name;
           names.set(param.typeParam, name);
         } catch {
           // Imported signatures can retain external symbol ids that don't exist in this table.
@@ -374,9 +411,12 @@ export const typeSummaryForSymbol = ({
     });
   }
 
-  const symbolName = displayName ?? semantics.binding.symbolTable.getSymbol(ref.symbol).name;
+  const symbolName =
+    displayName ?? semantics.binding.symbolTable.getSymbol(ref.symbol).name;
 
-  const constructors = semantics.binding.staticMethods.get(ref.symbol)?.get("init");
+  const constructors = semantics.binding.staticMethods
+    .get(ref.symbol)
+    ?.get("init");
   if (constructors && constructors.size > 0) {
     const constructorSummaries = Array.from(constructors)
       .map((symbol) => {
@@ -405,7 +445,9 @@ export const typeSummaryForSymbol = ({
       ownerSymbol: number;
       params: readonly { symbol: number }[];
     }): string | undefined => {
-      const parameterIndex = params.findIndex((parameter) => parameter.symbol === ref.symbol);
+      const parameterIndex = params.findIndex(
+        (parameter) => parameter.symbol === ref.symbol,
+      );
       if (parameterIndex < 0) {
         return undefined;
       }

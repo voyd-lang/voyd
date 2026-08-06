@@ -47,6 +47,7 @@ type ExpandFunctionalMacroOptions = {
 const DEFAULT_MAX_ATTRIBUTE_EXPANSION_DEPTH = 64;
 const RESERVED_ATTRIBUTE_NAMES = new Set([
   "boundary",
+  "borrow_contract",
   "compiler_contract",
   "effect",
   "external",
@@ -60,12 +61,15 @@ export const functionalMacroExpander: SyntaxMacro = (form: Form): Form =>
 
 export const expandFunctionalMacros = (
   form: Form,
-  options: ExpandFunctionalMacroOptions = {}
+  options: ExpandFunctionalMacroOptions = {},
 ): { form: Form; exports: MacroDefinition[] } => {
   const scope = options.scope ?? new MacroScope();
   const exports: MacroDefinition[] = [];
   try {
-    return { form: ensureForm(expandExpr(form, scope, exports, options)), exports };
+    return {
+      form: ensureForm(expandExpr(form, scope, exports, options)),
+      exports,
+    };
   } catch (error) {
     const macroError = toSyntaxMacroError(error, form);
     if (!options.onError) {
@@ -80,7 +84,7 @@ const expandExpr = (
   expr: Expr,
   scope: MacroScope,
   exports: MacroDefinition[],
-  options: ExpandFunctionalMacroOptions
+  options: ExpandFunctionalMacroOptions,
 ): Expr => {
   if (!isForm(expr)) {
     return expr;
@@ -109,7 +113,9 @@ const expandExpr = (
     }
 
     const head = expr.at(0);
-    const macro = isIdentifierAtom(head) ? scope.getMacro(head.value) : undefined;
+    const macro = isIdentifierAtom(head)
+      ? scope.getMacro(head.value)
+      : undefined;
     if (macro) {
       if (macro.kind === "attribute") {
         throw new SyntaxMacroError(
@@ -141,7 +147,7 @@ const expandForm = (
   form: Form,
   scope: MacroScope,
   exports: MacroDefinition[],
-  options: ExpandFunctionalMacroOptions
+  options: ExpandFunctionalMacroOptions,
 ): Form => {
   const head = form.at(0);
   const bodyScope = createsScopeFor(head) ? scope.child() : scope;
@@ -311,7 +317,8 @@ const expandAttributedDeclaration = ({
   }
 
   const reserved: Form[] = [];
-  const userAttributes: Array<ParsedAttribute & { macro: MacroDefinition }> = [];
+  const userAttributes: Array<ParsedAttribute & { macro: MacroDefinition }> =
+    [];
   const seenUserAttributes = new Set<string>();
 
   for (const attribute of attributes) {
@@ -397,10 +404,7 @@ const expandAttributedDeclaration = ({
     isForm(expanded) && isEmitManyForm(expanded) ? expanded.rest : [expanded];
   const expansionAst = new Form({
     location: expanded.location?.clone(),
-    elements: [
-      new InternalIdentifierAtom("ast"),
-      ...emitted.map(cloneExpr),
-    ],
+    elements: [new InternalIdentifierAtom("ast"), ...emitted.map(cloneExpr)],
   });
   const recursivelyExpanded = expandExpr(expansionAst, scope, exports, {
     ...options,
@@ -492,7 +496,10 @@ const expandVisibilityWrappedMacroCall = ({
     );
   }
 
-  const invocation = recreateForm(expr, [macroName, ...expr.toArray().slice(2)]);
+  const invocation = recreateForm(expr, [
+    macroName,
+    ...expr.toArray().slice(2),
+  ]);
   const expanded = expandMacroCall(invocation, macro, scope);
   const withVisibility = applyPubVisibility(expanded);
   return expandExpr(withVisibility, scope, exports, options);
@@ -522,7 +529,10 @@ const withPubModifier = (expr: Expr): Expr => {
   if (isIdentifierAtom(first) && first.value === "pub") {
     return expr;
   }
-  if (!isIdentifierAtom(first) || !PUB_ELIGIBLE_TOP_LEVEL_HEADS.has(first.value)) {
+  if (
+    !isIdentifierAtom(first) ||
+    !PUB_ELIGIBLE_TOP_LEVEL_HEADS.has(first.value)
+  ) {
     return expr;
   }
 
@@ -570,8 +580,8 @@ const expandMacroDefinition = (
     .map((expr, index) =>
       expectIdentifier(
         expr,
-        `macro parameter ${index + 1} for ${name.value ?? "anonymous macro"}`
-      ).clone()
+        `macro parameter ${index + 1} for ${name.value ?? "anonymous macro"}`,
+      ).clone(),
     );
 
   const macro: MacroDefinition = {

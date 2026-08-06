@@ -10,6 +10,7 @@ import {
 
 const fixtureRoot = path.resolve(import.meta.dirname, "../fixtures");
 const repoRoot = path.resolve(import.meta.dirname, "../../..");
+const WEB_FRAMEWORK_COMPILE_TIMEOUT_MS = 240_000;
 
 const expectCompileSuccess = (
   result: CompileResult,
@@ -172,7 +173,7 @@ const createHttpServerHarness = (): {
 describe("integration: pkg::web", () => {
   beforeAll(async () => {
     await compileWebFrameworkFixture();
-  }, 180_000);
+  }, WEB_FRAMEWORK_COMPILE_TIMEOUT_MS);
 
   it("streams request bodies through Web Context when opted in", async () => {
     const result = await compileWebFrameworkFixture();

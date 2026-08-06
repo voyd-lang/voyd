@@ -26,6 +26,8 @@ import {
 } from "./types.js";
 import { compileOptionalNoneValue } from "./optionals.js";
 import type { GroupContinuationCfg } from "./effects/continuation-cfg.js";
+import { compileFixedPanicTrap } from "./panic.js";
+import { runtimeIdentityConflictMessage } from "./runtime-identity-guards.js";
 
 interface ContinuationDefaultInitialization {
   cfg: GroupContinuationCfg;
@@ -53,12 +55,13 @@ export const compileDefaultParameterInitialization = ({
         "effectful default parameters do not support call-shape continuations",
       );
     }
-    return compileCallShapeOmittedParameterInitialization({
+    const ops = compileCallShapeOmittedParameterInitialization({
       fn,
       meta,
       ctx,
       fnCtx,
     });
+    return [...ops, ...compileDefaultIdentityGuards({ fn, meta, ctx, fnCtx })];
   }
 
   const ops: binaryen.ExpressionRef[] = [];
@@ -176,7 +179,100 @@ export const compileDefaultParameterInitialization = ({
     );
   });
 
-  return ops;
+  return [
+    ...ops,
+    ...compileDefaultIdentityGuards({
+      fn,
+      meta,
+      continuation: continuation !== undefined,
+      ctx,
+      fnCtx,
+    }),
+  ];
+};
+
+const compileDefaultIdentityGuards = ({
+  fn,
+  meta,
+  continuation = false,
+  ctx,
+  fnCtx,
+}: {
+  fn: HirFunction;
+  meta: FunctionMetadata;
+  continuation?: boolean;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef[] => {
+  if (
+    !meta.defaultIdentityGuardEntry ||
+    meta.callShape ||
+    !fn.parameters.some(
+      (parameter) => typeof parameter.defaultValue === "number",
+    )
+  ) {
+    return [];
+  }
+  const protocol = ctx.module.callableRuntimeProtocols.get(
+    fn.symbol,
+  )?.defaultIdentityGuardProtocol;
+  if (protocol !== "presence-conflict-bit-v1") {
+    throw new Error(`missing default identity-guard protocol for ${fn.symbol}`);
+  }
+  const rawGuardMask = (): binaryen.ExpressionRef =>
+    fn.parameters
+      .flatMap((parameter, parameterIndex) =>
+        typeof parameter.defaultValue === "number"
+          ? [
+              rawDefaultPresenceValue({
+                parameterIndex,
+                symbol: parameter.symbol,
+                meta,
+                continuation,
+                ctx,
+                fnCtx,
+              }),
+            ]
+          : [],
+      )
+      .reduce(
+        (mask, presence) => ctx.mod.i32.or(mask, presence),
+        ctx.mod.i32.const(0),
+      );
+  const target = ctx.program.symbols.canonicalIdOf(meta.moduleId, meta.symbol);
+  const diagnostics =
+    ctx.program.calls.getDefaultIdentityGuardDiagnostics(target);
+  const conflictDiagnostic = allocateTempLocal(binaryen.i32, fnCtx);
+  const conflictDiagnosticId = (): binaryen.ExpressionRef =>
+    ctx.mod.local.get(conflictDiagnostic.index, binaryen.i32);
+  const conflictDispatch = ctx.mod.block(null, [
+    ...diagnostics.map((diagnostic) =>
+      ctx.mod.if(
+        ctx.mod.i32.eq(
+          conflictDiagnosticId(),
+          ctx.mod.i32.const(diagnostic.id),
+        ),
+        compileFixedPanicTrap({
+          message: runtimeIdentityConflictMessage(diagnostic),
+          ctx,
+        }),
+      ),
+    ),
+    compileFixedPanicTrap({
+      message: "Runtime exclusivity conflict after default argument evaluation",
+      ctx,
+    }),
+  ]);
+  return [
+    ctx.mod.local.set(
+      conflictDiagnostic.index,
+      ctx.mod.i32.shr_u(rawGuardMask(), ctx.mod.i32.const(1)),
+    ),
+    ctx.mod.if(
+      ctx.mod.i32.ne(conflictDiagnosticId(), ctx.mod.i32.const(0)),
+      conflictDispatch,
+    ),
+  ];
 };
 
 const rawDefaultBinding = ({
@@ -220,6 +316,33 @@ const rawDefaultBinding = ({
 };
 
 const defaultPresenceValue = ({
+  parameterIndex,
+  symbol,
+  meta,
+  continuation,
+  ctx,
+  fnCtx,
+}: {
+  parameterIndex: number;
+  symbol: number;
+  meta: FunctionMetadata;
+  continuation: boolean;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): binaryen.ExpressionRef =>
+  ctx.mod.i32.and(
+    rawDefaultPresenceValue({
+      parameterIndex,
+      symbol,
+      meta,
+      continuation,
+      ctx,
+      fnCtx,
+    }),
+    ctx.mod.i32.const(1),
+  );
+
+const rawDefaultPresenceValue = ({
   parameterIndex,
   symbol,
   meta,

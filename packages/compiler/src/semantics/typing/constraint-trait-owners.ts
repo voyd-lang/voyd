@@ -24,6 +24,14 @@ const collectTraitOwnersInType = ({
 
   const desc = arena.get(type);
   switch (desc.kind) {
+    case "borrowed":
+      collectTraitOwnersInType({
+        type: desc.inner,
+        arena,
+        owners,
+        seen,
+      });
+      return;
     case "trait":
       owners.set(`${desc.owner.moduleId}::${desc.owner.symbol}`, desc.owner);
       desc.typeArgs.forEach((arg) =>

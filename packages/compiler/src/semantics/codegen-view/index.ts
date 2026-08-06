@@ -36,7 +36,7 @@ import type { EffectsIr } from "../effects/ir/types.js";
 import { getSymbolTable } from "../_internal/symbol-table.js";
 import type { SymbolRef as TypingSymbolRef } from "../typing/symbol-ref.js";
 import type {
-  CallArgumentPlanEntry,
+  CallArgumentPlanEntry as TypingCallArgumentPlanEntry,
   ObjectTemplate,
   ObjectTypeInfo,
   ObjectField,
@@ -56,6 +56,50 @@ import { parseSymbolRefKey } from "../typing/symbol-ref-utils.js";
 import { enumNamespaceMemberNamesFromMetadata } from "../enum-namespace.js";
 
 export type { SymbolRef } from "../program-symbol-arena.js";
+
+export type CodegenCallArgumentPlanEntry =
+  | { kind: "direct"; argIndex: number }
+  | { kind: "omitted-default"; targetTypeId: TypeId }
+  | { kind: "omitted-optional"; targetTypeId: TypeId }
+  | { kind: "stable-callsite-id"; targetTypeId: TypeId; value: number }
+  | {
+      kind: "container-field";
+      containerArgIndex: number;
+      fieldName: string;
+      targetTypeId: TypeId;
+    };
+
+const toCodegenCallArgumentPlanEntry = (
+  entry: TypingCallArgumentPlanEntry,
+): CodegenCallArgumentPlanEntry => {
+  switch (entry.kind) {
+    case "direct":
+      return { kind: "direct", argIndex: entry.argIndex };
+    case "omitted-default":
+      return {
+        kind: "omitted-default",
+        targetTypeId: entry.targetTypeId,
+      };
+    case "omitted-optional":
+      return {
+        kind: "omitted-optional",
+        targetTypeId: entry.targetTypeId,
+      };
+    case "stable-callsite-id":
+      return {
+        kind: "stable-callsite-id",
+        targetTypeId: entry.targetTypeId,
+        value: entry.value,
+      };
+    case "container-field":
+      return {
+        kind: "container-field",
+        containerArgIndex: entry.containerArgIndex,
+        fieldName: entry.fieldName,
+        targetTypeId: entry.targetTypeId,
+      };
+  }
+};
 
 export type CodegenStructuralField = {
   name: string;
@@ -169,10 +213,30 @@ export type CallLoweringInfo = {
   targets?: ReadonlyMap<ProgramFunctionInstanceId, ProgramFunctionId>;
   argPlans?: ReadonlyMap<
     ProgramFunctionInstanceId,
-    readonly CallArgumentPlanEntry[]
+    readonly CodegenCallArgumentPlanEntry[]
   >;
   typeArgs?: ReadonlyMap<ProgramFunctionInstanceId, readonly TypeId[]>;
   traitDispatch: boolean;
+  identityGuards: readonly {
+    left: {
+      parameter: number;
+      expression: HirExprId;
+      display: string;
+      identity: "allocation" | "storage" | "indexed-place";
+      allocationPath?: readonly CodegenPlaceProjection[];
+    };
+    right: {
+      parameter: number;
+      expression: HirExprId;
+      display: string;
+      identity: "allocation" | "storage" | "indexed-place";
+      allocationPath?: readonly CodegenPlaceProjection[];
+    };
+    afterDefaults: boolean;
+    defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
+    omittedParameters: readonly number[];
+    diagnosticId?: number;
+  }[];
 };
 
 export type CodegenFunctionSignature = {
@@ -256,6 +320,7 @@ export type MonomorphizedInstanceRequest = {
 
 export type TypeLoweringIndex = {
   getTypeDesc(typeId: TypeId): CodegenTypeDesc;
+  getBorrowedInner(typeId: TypeId): TypeId | undefined;
   getScheme(schemeId: TypeSchemeId): CodegenTypeScheme;
   instantiate(
     schemeId: TypeSchemeId,
@@ -298,6 +363,11 @@ export type TraitDispatchIndex = {
 
 export type CallLoweringIndex = {
   getCallInfo(moduleId: string, expr: HirExprId): CallLoweringInfo;
+  getDefaultIdentityGuardDiagnostics(target: ProgramFunctionId): readonly {
+    id: number;
+    leftDisplay: string;
+    rightDisplay: string;
+  }[];
 };
 
 export type MonomorphizedInstanceIndex = {
@@ -336,18 +406,20 @@ export type CodegenSourceLocation = {
   endColumn?: number;
 };
 
-export type CodegenCallableAccessFootprint = {
-  parameters: readonly {
-    access: "owned" | "shared" | "mutable";
-    reads: readonly (readonly CodegenPlaceProjection[])[];
-    writes: readonly (readonly CodegenPlaceProjection[])[];
-  }[];
+export type CodegenCallableRuntimeProtocol = {
+  defaultIdentityGuardProtocol?: "presence-conflict-bit-v1";
 };
 
 export type CodegenPlaceProjection =
   | { kind: "field"; name: string }
   | { kind: "tuple"; index: number }
   | { kind: "index"; constant?: number; stable: boolean }
+  | {
+      kind: "region";
+      scope: string;
+      name: string;
+      disjoint: readonly string[];
+    }
   | { kind: "discriminant" }
   | { kind: "dereference" }
   | { kind: "identity" };
@@ -362,9 +434,9 @@ export type ModuleCodegenView = {
   effectsIr: EffectsIr;
   bindingKinds: ReadonlyMap<SymbolId, HirBindingKind>;
   mutableStorageSymbols: ReadonlySet<SymbolId>;
-  callableAccessFootprints: ReadonlyMap<
+  callableRuntimeProtocols: ReadonlyMap<
     SymbolId,
-    CodegenCallableAccessFootprint
+    CodegenCallableRuntimeProtocol
   >;
   functionLocations: ReadonlyMap<SymbolId, CodegenSourceLocation>;
 };
@@ -499,7 +571,13 @@ const buildMutableStorageSymbolIndex = (
 const copyAccessPaths = (
   paths: readonly (readonly CodegenPlaceProjection[])[] | undefined,
 ): readonly (readonly CodegenPlaceProjection[])[] =>
-  paths?.map((path) => path.map((projection) => ({ ...projection }))) ?? [];
+  paths?.map((path) =>
+    path.map((projection) =>
+      projection.kind === "region"
+        ? { ...projection, disjoint: [...projection.disjoint] }
+        : { ...projection },
+    ),
+  ) ?? [];
 
 export type CodegenObjectTemplate = {
   symbol: ProgramSymbolId;
@@ -618,7 +696,7 @@ export const buildProgramCodegenView = (
         >;
         callArgumentPlans: ReadonlyMap<
           HirExprId,
-          ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
+          ReadonlyMap<string, readonly TypingCallArgumentPlanEntry[]>
         >;
         callTypeArguments: ReadonlyMap<
           HirExprId,
@@ -689,7 +767,7 @@ export const buildProgramCodegenView = (
       targets: Map<HirExprId, ReadonlyMap<string, TypingSymbolRef>>;
       argPlans: Map<
         HirExprId,
-        ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
+        ReadonlyMap<string, readonly TypingCallArgumentPlanEntry[]>
       >;
       typeArgs: Map<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
       traitDispatches: Set<HirExprId>;
@@ -704,7 +782,10 @@ export const buildProgramCodegenView = (
       >;
       argPlans: Map<
         HirExprId,
-        ReadonlyMap<ProgramFunctionInstanceId, readonly CallArgumentPlanEntry[]>
+        ReadonlyMap<
+          ProgramFunctionInstanceId,
+          readonly CodegenCallArgumentPlanEntry[]
+        >
       >;
       typeArgs: Map<
         HirExprId,
@@ -928,6 +1009,8 @@ export const buildProgramCodegenView = (
     seen.add(typeId);
     const desc = arena.get(typeId);
     switch (desc.kind) {
+      case "borrowed":
+        return typeContainsUnknownPrimitive(desc.inner, seen);
       case "primitive":
         return desc.name === "unknown";
       case "recursive":
@@ -1017,6 +1100,11 @@ export const buildProgramCodegenView = (
       return cached;
     }
     switch (desc.kind) {
+      case "borrowed":
+        return cacheTypeDesc(
+          typeId,
+          toCodegenTypeDesc(desc.inner, arena.get(desc.inner)),
+        );
       case "primitive":
         return cacheTypeDesc(typeId, { kind: "primitive", name: desc.name });
       case "recursive":
@@ -1343,6 +1431,43 @@ export const buildProgramCodegenView = (
   const getProgramFunctionId = (
     ref: SymbolRef,
   ): ProgramFunctionId | undefined => symbols.tryIdOf(canonicalSymbolRef(ref));
+
+  const defaultIdentityGuardDiagnosticIdByGuard = new Map<object, number>();
+  const defaultIdentityGuardDiagnosticsByTarget = new Map<
+    ProgramFunctionId,
+    { id: number; leftDisplay: string; rightDisplay: string }[]
+  >();
+  stableModules.forEach((mod) => {
+    mod.borrowing.runtimeIdentityGuards.forEach((guards) => {
+      guards
+        .filter((guard) => guard.afterDefaults === true)
+        .forEach((guard) => {
+          const target = getProgramFunctionId(guard.target);
+          if (target === undefined) {
+            return;
+          }
+          const diagnostics =
+            defaultIdentityGuardDiagnosticsByTarget.get(target) ?? [];
+          const existing = diagnostics.find(
+            (diagnostic) =>
+              diagnostic.leftDisplay === guard.left.display &&
+              diagnostic.rightDisplay === guard.right.display,
+          );
+          const diagnostic =
+            existing ??
+            ({
+              id: diagnostics.length + 1,
+              leftDisplay: guard.left.display,
+              rightDisplay: guard.right.display,
+            } as const);
+          if (!existing) {
+            diagnostics.push(diagnostic);
+            defaultIdentityGuardDiagnosticsByTarget.set(target, diagnostics);
+          }
+          defaultIdentityGuardDiagnosticIdByGuard.set(guard, diagnostic.id);
+        });
+    });
+  });
 
   const canonicalProgramSymbolIdOf = (
     moduleId: string,
@@ -1847,19 +1972,22 @@ export const buildProgramCodegenView = (
 
     const mappedArgPlans = new Map<
       HirExprId,
-      ReadonlyMap<ProgramFunctionInstanceId, readonly CallArgumentPlanEntry[]>
+      ReadonlyMap<
+        ProgramFunctionInstanceId,
+        readonly CodegenCallArgumentPlanEntry[]
+      >
     >();
     data.argPlans.forEach((plansByInstanceKey, exprId) => {
       const mapped = new Map<
         ProgramFunctionInstanceId,
-        readonly CallArgumentPlanEntry[]
+        readonly CodegenCallArgumentPlanEntry[]
       >();
       plansByInstanceKey.forEach((plan, instanceKey) => {
         const callerInstanceId = getCallerInstanceId(moduleId, instanceKey);
         if (callerInstanceId === undefined) {
           return;
         }
-        mapped.set(callerInstanceId, plan);
+        mapped.set(callerInstanceId, plan.map(toCodegenCallArgumentPlanEntry));
       });
       mappedArgPlans.set(exprId, mapped);
     });
@@ -2120,8 +2248,26 @@ export const buildProgramCodegenView = (
 
   allInstances.sort((a, b) => a.instanceId - b.instanceId);
 
+  const runtimeTypeFor = (typeId: TypeId): TypeId => {
+    let current = typeId;
+    const seen = new Set<TypeId>();
+    while (!seen.has(current)) {
+      seen.add(current);
+      const desc = arena.get(current);
+      if (desc.kind !== "borrowed") {
+        break;
+      }
+      current = desc.inner;
+    }
+    return current;
+  };
+
   const types: TypeLoweringIndex = {
     getTypeDesc: (typeId) => toCodegenTypeDesc(typeId, arena.get(typeId)),
+    getBorrowedInner: (typeId) => {
+      const desc = arena.get(typeId);
+      return desc.kind === "borrowed" ? desc.inner : undefined;
+    },
     getScheme: (schemeId) => toCodegenScheme(arena.getScheme(schemeId)),
     instantiate: (schemeId, args, ctx) =>
       arena.instantiate(schemeId, args, ctx as UnificationContext | undefined),
@@ -2129,7 +2275,7 @@ export const buildProgramCodegenView = (
       toCodegenUnificationResult(arena.unify(a, b, ctx as UnificationContext)),
     substitute: (typeId, subst) => arena.substitute(typeId, subst),
     getNominalOwner: (typeId) => {
-      const desc = arena.get(typeId);
+      const desc = arena.get(runtimeTypeFor(typeId));
       return desc.kind === "nominal-object" || desc.kind === "value-object"
         ? symbols.idOf(toSymbolRef(desc.owner))
         : undefined;
@@ -2137,7 +2283,7 @@ export const buildProgramCodegenView = (
     getNominalAncestry: (typeId) => {
       const seen = new Set<TypeId>();
       const ancestry: { nominalId: TypeId; typeId: TypeId }[] = [];
-      let current: TypeId | undefined = typeId;
+      let current: TypeId | undefined = runtimeTypeFor(typeId);
       while (typeof current === "number" && !seen.has(current)) {
         seen.add(current);
         const desc = arena.get(current);
@@ -2151,7 +2297,11 @@ export const buildProgramCodegenView = (
       return ancestry;
     },
     getStructuralLayout: (typeId) => {
-      const desc = arena.get(typeId);
+      const runtimeType = runtimeTypeFor(typeId);
+      const desc = arena.get(runtimeType);
+      if (desc.kind === "borrowed") {
+        return undefined;
+      }
       if (desc.kind === "structural-object") {
         return {
           kind: "structural-object",
@@ -2177,19 +2327,22 @@ export const buildProgramCodegenView = (
       }
       return { kind: "other", kindName: desc.kind };
     },
-    getRuntimeTypeId: (typeId) => typeId,
+    getRuntimeTypeId: runtimeTypeFor,
     getAliasSymbols: (typeId) => {
-      const symbolsForType = aliasSymbolsByType.get(typeId);
+      const symbolsForType =
+        aliasSymbolsByType.get(typeId) ??
+        aliasSymbolsByType.get(runtimeTypeFor(typeId));
       return symbolsForType
         ? Array.from(symbolsForType).sort((a, b) => a - b)
         : [];
     },
     getStandaloneVariantTag: (typeId) => {
-      const desc = arena.get(typeId);
+      const runtimeType = runtimeTypeFor(typeId);
+      const desc = arena.get(runtimeType);
       const nominalTypeId =
         desc.kind === "intersection" && typeof desc.nominal === "number"
           ? desc.nominal
-          : typeId;
+          : runtimeType;
       const nominalDesc = arena.get(nominalTypeId);
       if (
         nominalDesc.kind !== "nominal-object" &&
@@ -2226,7 +2379,7 @@ export const buildProgramCodegenView = (
             canonicalProgramSymbolIdOf(moduleId, symbol),
           ),
       };
-      const info = getOptionalInfo(typeId, ctx);
+      const info = getOptionalInfo(runtimeTypeFor(typeId), ctx);
       return info
         ? {
             optionalType: info.optionalType,
@@ -2256,15 +2409,60 @@ export const buildProgramCodegenView = (
     getCallInfo: (moduleId, expr) => {
       const data = callsByModule.get(moduleId);
       if (!data) {
-        return { traitDispatch: false };
+        return { traitDispatch: false, identityGuards: [] };
       }
+      const identityGuards =
+        modulesById.get(moduleId)?.borrowing.runtimeIdentityGuards.get(expr) ??
+        [];
       return {
         targets: data.targets.get(expr),
         argPlans: data.argPlans.get(expr),
         typeArgs: data.typeArgs.get(expr),
         traitDispatch: data.traitDispatches.has(expr),
+        identityGuards: identityGuards.map((guard) => ({
+          left: {
+            parameter: guard.left.parameter,
+            expression: guard.left.expression,
+            display: guard.left.display,
+            identity: guard.left.identity,
+            ...(guard.left.allocationPath
+              ? {
+                  allocationPath:
+                    copyAccessPaths([guard.left.allocationPath])[0] ?? [],
+                }
+              : {}),
+          },
+          right: {
+            parameter: guard.right.parameter,
+            expression: guard.right.expression,
+            display: guard.right.display,
+            identity: guard.right.identity,
+            ...(guard.right.allocationPath
+              ? {
+                  allocationPath:
+                    copyAccessPaths([guard.right.allocationPath])[0] ?? [],
+                }
+              : {}),
+          },
+          afterDefaults: guard.afterDefaults === true,
+          ...(guard.defaultIdentityGuardProtocol
+            ? {
+                defaultIdentityGuardProtocol:
+                  guard.defaultIdentityGuardProtocol,
+              }
+            : {}),
+          omittedParameters: guard.omittedParameters ?? [],
+          ...(guard.afterDefaults
+            ? {
+                diagnosticId:
+                  defaultIdentityGuardDiagnosticIdByGuard.get(guard),
+              }
+            : {}),
+        })),
       };
     },
+    getDefaultIdentityGuardDiagnostics: (target) =>
+      defaultIdentityGuardDiagnosticsByTarget.get(target) ?? [],
   };
 
   const functions: FunctionLoweringIndex = {
@@ -2427,19 +2625,20 @@ export const buildProgramCodegenView = (
       effectsIr: buildEffectsIr({ hir: mod.hir, info: effectsInfo }),
       bindingKinds: buildBindingKindIndex(mod.hir),
       mutableStorageSymbols: buildMutableStorageSymbolIndex(mod),
-      callableAccessFootprints: new Map(
-        Array.from(mod.borrowing.callables, ([symbol, contract]) => [
-          symbol,
-          {
-            parameters: contract.parameters.map((parameter) => {
-              return {
-                access: parameter.access,
-                reads: copyAccessPaths(parameter.readPaths),
-                writes: copyAccessPaths(parameter.writePaths),
-              };
-            }),
-          },
-        ]),
+      callableRuntimeProtocols: new Map(
+        Array.from(mod.borrowing.callables).flatMap(([symbol, contract]) =>
+          contract.defaultIdentityGuardProtocol
+            ? [
+                [
+                  symbol,
+                  {
+                    defaultIdentityGuardProtocol:
+                      contract.defaultIdentityGuardProtocol,
+                  },
+                ] as const,
+              ]
+            : [],
+        ),
       ),
       functionLocations,
     });

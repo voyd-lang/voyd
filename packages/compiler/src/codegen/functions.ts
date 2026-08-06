@@ -96,6 +96,12 @@ import {
   takePendingCallShapeSpecializations,
   type CallShapeSpecialization,
 } from "./call-shape-specialization.js";
+import {
+  getOrCreateDefaultIdentityGuardEntry,
+  markDefaultIdentityGuardEntryCompiled,
+  takePendingDefaultIdentityGuardEntries,
+  type DefaultIdentityGuardEntry,
+} from "./default-identity-guard-entry.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -1178,6 +1184,20 @@ export const compileFunctions = ({
     if (!hasPendingMeta) {
       continue;
     }
+    const publishesDefaultIdentityGuardEntry =
+      ctx.module.callableRuntimeProtocols.get(item.symbol)
+        ?.defaultIdentityGuardProtocol === "presence-conflict-bit-v1" &&
+      (getModuleExportEntries(ctx).some(
+        (entry) => entry.symbol === item.symbol,
+      ) ||
+        item.memberVisibility?.api === true ||
+        (item.memberVisibility !== undefined &&
+          isPackageVisible(item.memberVisibility)));
+    if (publishesDefaultIdentityGuardEntry) {
+      metas.forEach((meta) => {
+        getOrCreateDefaultIdentityGuardEntry({ ctx, meta });
+      });
+    }
     walkFunctionReachabilityExpressions({
       item,
       ctx,
@@ -1242,6 +1262,7 @@ export const compileFunctions = ({
   compiledCount += compilePendingReceiverSpecializations(ctx);
   compiledCount += compilePendingScalarAggregateCallSpecializations(ctx);
   compiledCount += compilePendingCallShapeSpecializations(ctx);
+  compiledCount += compilePendingDefaultIdentityGuardEntries(ctx);
   return compiledCount;
 };
 
@@ -2628,6 +2649,28 @@ const compilePendingCallShapeSpecializations = (
   pending.forEach((specialization) =>
     compileCallShapeSpecialization(specialization, ctx),
   );
+  return pending.length;
+};
+
+const compileDefaultIdentityGuardEntry = (
+  entry: DefaultIdentityGuardEntry,
+  ctx: CodegenContext,
+): void => {
+  const { item, meta } = entry;
+  if (ctx.mod.getFunction(meta.wasmName) === 0) {
+    compileFunctionItem(item, meta, ctx);
+  }
+  markDefaultIdentityGuardEntryCompiled({
+    ctx,
+    wasmName: meta.wasmName,
+  });
+};
+
+const compilePendingDefaultIdentityGuardEntries = (
+  ctx: CodegenContext,
+): number => {
+  const pending = takePendingDefaultIdentityGuardEntries(ctx);
+  pending.forEach((entry) => compileDefaultIdentityGuardEntry(entry, ctx));
   return pending.length;
 };
 

@@ -22,10 +22,7 @@ export class MacroScope {
     const macros = new Map(this.#macros);
     const ambiguousMacros = new Set(this.#ambiguousMacros);
     const variables = new Map(
-      Array.from(this.#variables, ([name, binding]) => [
-        name,
-        { ...binding },
-      ]),
+      Array.from(this.#variables, ([name, binding]) => [name, { ...binding }]),
     );
     return () => {
       this.#macros = macros;

@@ -77,6 +77,8 @@ const expectCompileSuccess = (
   return result;
 };
 
+const WEB_PACKAGE_COMPILE_TIMEOUT_MS = 240_000;
+const vxDomSdk = createSdk();
 const fixtureCompilations = new Map<
   string,
   Promise<SuccessfulCompileResult>
@@ -88,7 +90,7 @@ const compileFixture = (entryPath: string): Promise<SuccessfulCompileResult> => 
     return existing;
   }
 
-  const compilation = createSdk()
+  const compilation = vxDomSdk
     .compile({ entryPath })
     .then(expectCompileSuccess);
   fixtureCompilations.set(entryPath, compilation);
@@ -113,7 +115,7 @@ const expectBasicSvgTree = (tree: unknown, html: string): void => {
 
 describe("integration: compiled VX DOM rendering", () => {
   it("hydrates pkg::web output and renders SVG in default builds", async () => {
-    const result = expectCompileSuccess(await createSdk().compile({
+    const result = expectCompileSuccess(await vxDomSdk.compile({
       source: `
 use pkg::web::{
   append_hydration,
@@ -337,11 +339,11 @@ pub fn multi_document() -> String
     const host = await createVoydHost({ wasm: result.wasm, bufferSize: 256 * 1024 });
     await host.run("static_event_tree");
     expect(host.retainedCallbacks.size()).toBe(0);
-  }, 180_000);
+  }, WEB_PACKAGE_COMPILE_TIMEOUT_MS);
 
   it("renders a JS-backed Markdown package as an ordinary VX component", async () => {
     const result = expectCompileSuccess(
-      await createSdk().compile({ entryPath: markdownEntryPath }),
+      await vxDomSdk.compile({ entryPath: markdownEntryPath }),
     );
     const tree = await result.run<unknown>({
       entryName: "main",
@@ -355,8 +357,9 @@ pub fn multi_document() -> String
   });
 
   it("rejects explicit component state ids", async () => {
-    const sdk = createSdk();
-    const result = await sdk.compile({ entryPath: explicitStateIdEntryPath });
+    const result = await vxDomSdk.compile({
+      entryPath: explicitStateIdEntryPath,
+    });
 
     expect(result.success).toBe(false);
     if (result.success) {
@@ -388,7 +391,7 @@ pub fn multi_document() -> String
 
   it("renders conditional arguments forwarded through a generic VX wrapper", async () => {
     const result = expectCompileSuccess(
-      await createSdk().compile({
+      await vxDomSdk.compile({
         entryPath: genericConditionalWrapperEntryPath,
       }),
     );
@@ -534,9 +537,8 @@ pub fn multi_document() -> String
   });
 
   it("dispatches typed task command results from a mounted Voyd app", async () => {
-    const sdk = createSdk();
     const result = expectCompileSuccess(
-      await sdk.compile({ entryPath: asyncTaskCommandEntryPath }),
+      await vxDomSdk.compile({ entryPath: asyncTaskCommandEntryPath }),
     );
     const host = await createVoydHost({
       wasm: result.wasm,
@@ -569,9 +571,8 @@ pub fn multi_document() -> String
   });
 
   it("runs the mini-wikipedia browser edit, save, and reload flow", async () => {
-    const sdk = createSdk();
     const result = expectCompileSuccess(
-      await sdk.compile({
+      await vxDomSdk.compile({
         entryPath: path.join(miniWikipediaRoot, "src/client.voyd"),
         roots: {
           src: path.join(miniWikipediaRoot, "src"),
@@ -697,9 +698,8 @@ pub fn multi_document() -> String
   }, 120_000);
 
   it("marshals wide value models through typed VX export wrappers", async () => {
-    const sdk = createSdk();
     const result = expectCompileSuccess(
-      await sdk.compile({ entryPath: wideValueModelEntryPath }),
+      await vxDomSdk.compile({ entryPath: wideValueModelEntryPath }),
     );
     const host = await createVoydHost({
       wasm: result.wasm,
@@ -722,9 +722,8 @@ pub fn multi_document() -> String
   });
 
   it("marshals value arrays through typed VX export wrappers", async () => {
-    const sdk = createSdk();
     const result = expectCompileSuccess(
-      await sdk.compile({ entryPath: valueArrayModelEntryPath }),
+      await vxDomSdk.compile({ entryPath: valueArrayModelEntryPath }),
     );
     const host = await createVoydHost({
       wasm: result.wasm,
@@ -759,9 +758,8 @@ pub fn multi_document() -> String
   });
 
   it("runs effectful component-local state updates from retained event callbacks", async () => {
-    const sdk = createSdk();
     const result = expectCompileSuccess(
-      await sdk.compile({ entryPath: effectfulComponentEventEntryPath }),
+      await vxDomSdk.compile({ entryPath: effectfulComponentEventEntryPath }),
     );
     const host = await createVoydHost({
       wasm: result.wasm,
@@ -791,9 +789,8 @@ pub fn multi_document() -> String
   });
 
   it("marshals typed mouse payload callbacks and integer JS numbers to f64 fields", async () => {
-    const sdk = createSdk();
     const result = expectCompileSuccess(
-      await sdk.compile({ entryPath: typedMouseEventEntryPath }),
+      await vxDomSdk.compile({ entryPath: typedMouseEventEntryPath }),
     );
     const host = await createVoydHost({
       wasm: result.wasm,
@@ -825,9 +822,8 @@ pub fn multi_document() -> String
       configurable: true,
       value: { writeText },
     });
-    const sdk = createSdk();
     const result = expectCompileSuccess(
-      await sdk.compile({ entryPath: runtimeBrowserEntryPath }),
+      await vxDomSdk.compile({ entryPath: runtimeBrowserEntryPath }),
     );
     const host = await createVoydHost({
       wasm: result.wasm,
@@ -870,9 +866,8 @@ pub fn multi_document() -> String
   });
 
   it("marshals typed message variants with omitted optional fields", async () => {
-    const sdk = createSdk();
     const result = expectCompileSuccess(
-      await sdk.compile({
+      await vxDomSdk.compile({
         source: `
 use std::enums::{ enum }
 use std::optional::types::{ Optional, Some, None }
@@ -937,9 +932,8 @@ fn count_label(value: i32) -> String
   });
 
   it("does not apply std::vx ABI shortcuts to user types with VX-like names", async () => {
-    const sdk = createSdk();
     const result = expectCompileSuccess(
-      await sdk.compile({ entryPath: userProgramNameEntryPath }),
+      await vxDomSdk.compile({ entryPath: userProgramNameEntryPath }),
     );
 
     await expect(result.run<number>({ entryName: "main" })).resolves.toBe(42);

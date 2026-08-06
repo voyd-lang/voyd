@@ -19,13 +19,11 @@ import type {
   BoundUse,
 } from "../binding/binding.js";
 import type { Syntax } from "../../parser/index.js";
-import {
-  isPackageVisible,
-  type HirVisibility,
-} from "../hir/index.js";
+import { isPackageVisible, type HirVisibility } from "../hir/index.js";
+import { displayContractPlace, lowerContractPlace } from "./contract-places.js";
 
 export const getModuleDeclarations = (
-  binding: BindingResult
+  binding: BindingResult,
 ): ModuleDeclaration[] => {
   const entries: ModuleDeclaration[] = [
     ...binding.uses.map((use) => ({
@@ -75,7 +73,7 @@ export const getModuleDeclarations = (
 
 const toExportVisibility = (
   visibility: HirVisibility,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): HirVisibility => {
   if (!isPackageVisible(visibility)) {
     return visibility;
@@ -122,14 +120,14 @@ export const lowerUseDecl = (use: BoundUse, ctx: LowerContext): void => {
           item: useId,
           alias: entry.selectionKind === "all" ? undefined : entry.alias,
         });
-      })
+      }),
     );
   }
 };
 
 export const lowerFunctionDecl = (
   fn: BoundFunction,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): void => {
   const scopes = createLowerScopeStack(fn.scope);
   const fallbackSyntax = fn.form ?? fn.body;
@@ -146,7 +144,9 @@ export const lowerFunctionDecl = (
     } as const,
     label: param.label,
     ...(param.optional && !param.defaultValue ? { optional: true } : {}),
-    ...(param.defaultValue ? { defaultValue: lowerExpr(param.defaultValue, ctx, scopes) } : {}),
+    ...(param.defaultValue
+      ? { defaultValue: lowerExpr(param.defaultValue, ctx, scopes) }
+      : {}),
     span: toSourceSpan(param.ast ?? fallbackSyntax),
     mutable: false,
     type: (() => {
@@ -159,10 +159,14 @@ export const lowerFunctionDecl = (
       }
       if (!lowered) {
         throw new Error(
-          `optional parameter ${param.name} must declare a type annotation`
+          `optional parameter ${param.name} must declare a type annotation`,
         );
       }
-      return wrapInOptionalTypeExpr({ inner: lowered, ctx, scope: currentScope });
+      return wrapInOptionalTypeExpr({
+        inner: lowered,
+        ctx,
+        scope: currentScope,
+      });
     })(),
   }));
 
@@ -186,6 +190,7 @@ export const lowerFunctionDecl = (
     ...(effectType ? { effectType } : {}),
     body: bodyId,
     ...(fn.intrinsic ? { intrinsic: fn.intrinsic } : {}),
+    ...(fn.borrowContract ? { borrowContract: fn.borrowContract } : {}),
   });
 
   if (isPackageVisible(fn.visibility)) {
@@ -231,7 +236,7 @@ export const lowerModuleLetDecl = (
 
 export const lowerTypeAliasDecl = (
   alias: BoundTypeAlias,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): void => {
   const aliasScope =
     (alias.form && ctx.scopeByNode.get(alias.form.syntaxId)) ??
@@ -270,7 +275,7 @@ export const lowerTypeAliasDecl = (
 
 export const lowerObjectDecl = (
   object: BoundObject,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): void => {
   const objectScope =
     (object.form && ctx.scopeByNode.get(object.form.syntaxId)) ??
@@ -289,13 +294,18 @@ export const lowerObjectDecl = (
       if (!lowered) {
         throw new Error(`optional field ${field.name} must declare a type`);
       }
-      return wrapInOptionalTypeExpr({ inner: lowered, ctx, scope: objectScope });
+      return wrapInOptionalTypeExpr({
+        inner: lowered,
+        ctx,
+        scope: objectScope,
+      });
     })(),
     span: toSourceSpan(field.ast ?? object.form),
   }));
 
   const base = lowerTypeExpr(object.baseTypeExpr, ctx, objectScope);
-  const baseSymbol = base && base.typeKind === "named" ? base.symbol : undefined;
+  const baseSymbol =
+    base && base.typeKind === "named" ? base.symbol : undefined;
 
   const objectSyntax =
     object.form ?? object.baseTypeExpr ?? object.fields[0]?.ast;
@@ -331,10 +341,7 @@ export const lowerObjectDecl = (
   }
 };
 
-export const lowerTraitDecl = (
-  trait: BoundTrait,
-  ctx: LowerContext
-): void => {
+export const lowerTraitDecl = (trait: BoundTrait, ctx: LowerContext): void => {
   const traitScope =
     trait.scope ??
     ctx.scopeByNode.get(trait.form?.syntaxId ?? trait.scope) ??
@@ -369,13 +376,12 @@ export const lowerTraitDecl = (
         scope: methodScope,
       }),
       parameters,
-      returnType: lowerTypeExpr(
-        method.returnTypeExpr,
-        ctx,
-        methodScope
-      ),
+      returnType: lowerTypeExpr(method.returnTypeExpr, ctx, methodScope),
       ...(effectType ? { effectType } : {}),
       defaultBody,
+      ...(method.borrowContract
+        ? { borrowContract: method.borrowContract }
+        : {}),
     };
   });
 
@@ -392,6 +398,14 @@ export const lowerTraitDecl = (
       scope: traitScope,
     }),
     requirements: undefined,
+    regions: (trait.regions ?? []).map((region) => ({
+      name: region.name,
+      span: toSourceSpan(region.ast),
+    })),
+    disjoint: (trait.disjoint ?? []).map((entry) => ({
+      regions: entry.regions,
+      span: toSourceSpan(entry.ast),
+    })),
     methods,
   });
 
@@ -405,15 +419,12 @@ export const lowerTraitDecl = (
   }
 };
 
-export const lowerImplDecl = (
-  impl: BoundImpl,
-  ctx: LowerContext
-): void => {
+export const lowerImplDecl = (impl: BoundImpl, ctx: LowerContext): void => {
   const implScope = ctx.scopeByNode.get(impl.form?.syntaxId ?? impl.scope);
   const target = lowerTypeExpr(
     impl.target,
     ctx,
-    implScope ?? impl.scope ?? ctx.symbolTable.rootScope
+    implScope ?? impl.scope ?? ctx.symbolTable.rootScope,
   );
   if (!target) {
     throw new Error("impl requires a target type expression");
@@ -447,6 +458,12 @@ export const lowerImplDecl = (
     target,
     trait,
     with: undefined,
+    regionMappings: (impl.regionMappings ?? []).map((mapping) => ({
+      name: mapping.name,
+      place: lowerContractPlace(mapping.place),
+      display: displayContractPlace(mapping.place),
+      span: toSourceSpan(mapping.ast),
+    })),
     members,
   });
 
@@ -462,7 +479,7 @@ export const lowerImplDecl = (
 
 export const lowerEffectDecl = (
   effect: BoundEffect,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): void => {
   const effectScope =
     effect.scope ??
@@ -479,8 +496,7 @@ export const lowerEffectDecl = (
       mutable: false,
       bindingKind: param.bindingKind,
     }));
-    const resumableMode: "ctl" | "fn" =
-      op.resumable === "tail" ? "fn" : "ctl";
+    const resumableMode: "ctl" | "fn" = op.resumable === "tail" ? "fn" : "ctl";
     return {
       symbol: op.symbol,
       span: toSourceSpan(op.ast ?? effect.form),
@@ -494,7 +510,8 @@ export const lowerEffectDecl = (
     kind: "effect",
     symbol: effect.symbol,
     visibility: effect.visibility,
-    ast: (effect.form ?? effect.operations[0]?.ast)?.syntaxId ?? ctx.moduleNodeId,
+    ast:
+      (effect.form ?? effect.operations[0]?.ast)?.syntaxId ?? ctx.moduleNodeId,
     span: toSourceSpan(effect.form),
     typeParameters: lowerTypeParameters({
       params: effect.typeParameters,
@@ -525,7 +542,7 @@ export const lowerEffectDecl = (
 
 const findFunctionItemId = (
   symbol: number,
-  ctx: LowerContext
+  ctx: LowerContext,
 ): number | undefined => {
   for (const itemId of ctx.builder.module.items) {
     const node = ctx.builder.getNode(itemId);

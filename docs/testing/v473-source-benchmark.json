@@ -1,0 +1,79 @@
+{
+  "methodology": {
+    "scenarioName": "std-math-transcendentals",
+    "samplesPerRevisionAndMode": 7,
+    "freshNodeProcessPerSample": true,
+    "alternatingRevisionOrder": true,
+    "node": "24.18.0",
+    "beforeRevision": "15077084f4d3a1dd229850ddd44d51a5c24a16d7",
+    "command": "npx tsx scripts/bench-alternating-revisions.ts --repo before=/private/tmp/voyd-v473-before --repo after=<v473-working-tree> --samples 7 --compact"
+  },
+  "results": {
+    "before": {
+      "unoptimized": {
+        "compileMs": [2041.846833, 2042.7505, 2046.585917, 2049.822042, 2056.319292, 2050.459, 2052.600875],
+        "compileMedianMs": 2049.822042,
+        "peakHeapUsedBytes": [680392424, 681086880, 548742816, 617717280, 680612736, 680139560, 612343144],
+        "peakHeapUsedMedianBytes": 680139560,
+        "processMaxRssGrowthBytes": [126533632, 129417216, 102727680, 131448832, 128794624, 130908160, 101498880],
+        "processMaxRssGrowthMedianBytes": 128794624,
+        "borrowingMedianMs": 631.101,
+        "resultProvenanceMedianMs": 0,
+        "routing": { "none": 287, "transient": 119, "flowSensitive": 481 },
+        "fullFacts": { "callables": 481, "blocks": 3114, "operations": 18490 },
+        "contractWork": { "compactEvaluations": 827, "fullEvaluations": 531, "retainedBytes": 1487881 },
+        "wasmBytes": 45009,
+        "wasmSha256": "fa335df17782d3844a8e37ab6983239654faea036ed46fdda99e258a5d1db168"
+      },
+      "release": {
+        "compileMs": [2611.970042, 2616.833625, 2615.681875, 2620.681875, 2621.353833, 2621.035875, 2621.049083],
+        "compileMedianMs": 2620.681875,
+        "peakHeapUsedBytes": [698993864, 699615920, 699291280, 629392376, 683499600, 690812808, 699759816],
+        "peakHeapUsedMedianBytes": 698993864,
+        "processMaxRssGrowthBytes": [176521216, 166821888, 164429824, 135528448, 155041792, 144719872, 157319168],
+        "processMaxRssGrowthMedianBytes": 157319168,
+        "borrowingMedianMs": 637.084,
+        "resultProvenanceMedianMs": 0,
+        "routing": { "none": 287, "transient": 119, "flowSensitive": 481 },
+        "fullFacts": { "callables": 481, "blocks": 3114, "operations": 18490 },
+        "contractWork": { "compactEvaluations": 827, "fullEvaluations": 531, "retainedBytes": 1487881 },
+        "wasmBytes": 4810,
+        "wasmSha256": "2acf9f792e7924a561400ba2ed04c9e932ac994b56f62f36bb55ca002030514a"
+      }
+    },
+    "after": {
+      "unoptimized": {
+        "compileMs": [2099.155042, 2107.4345, 2106.086, 2102.639042, 2112.231917, 2107.672875, 2106.160042],
+        "compileMedianMs": 2106.160042,
+        "peakHeapUsedBytes": [669455384, 596050224, 666047048, 600402944, 669301576, 664196096, 669288352],
+        "peakHeapUsedMedianBytes": 666047048,
+        "processMaxRssGrowthBytes": [134217728, 104710144, 134823936, 108249088, 133693440, 134184960, 131252224],
+        "processMaxRssGrowthMedianBytes": 133693440,
+        "borrowingMedianMs": 686.541,
+        "resultProvenanceMedianMs": 31.439,
+        "routing": { "none": 305, "transient": 133, "flowSensitive": 449 },
+        "resultProvenance": { "owned": 46, "parameter": 19, "mixed": 45, "unknown": 268 },
+        "fullFacts": { "callables": 449, "blocks": 3012, "operations": 18266 },
+        "contractWork": { "compactEvaluations": 1118, "fullEvaluations": 541, "retainedBytes": 1502816 },
+        "wasmBytes": 45009,
+        "wasmSha256": "fa335df17782d3844a8e37ab6983239654faea036ed46fdda99e258a5d1db168"
+      },
+      "release": {
+        "compileMs": [2682.958167, 2665.918833, 2664.699041, 2673.340333, 2682.322166, 2675.315084, 2681.156209],
+        "compileMedianMs": 2675.315084,
+        "peakHeapUsedBytes": [694777360, 673064992, 683167360, 689298960, 693734680, 691122992, 693371520],
+        "peakHeapUsedMedianBytes": 691122992,
+        "processMaxRssGrowthBytes": [180813824, 166838272, 164184064, 166707200, 162136064, 161120256, 162447360],
+        "processMaxRssGrowthMedianBytes": 164184064,
+        "borrowingMedianMs": 691.368,
+        "resultProvenanceMedianMs": 32.309,
+        "routing": { "none": 305, "transient": 133, "flowSensitive": 449 },
+        "resultProvenance": { "owned": 46, "parameter": 19, "mixed": 45, "unknown": 268 },
+        "fullFacts": { "callables": 449, "blocks": 3012, "operations": 18266 },
+        "contractWork": { "compactEvaluations": 1118, "fullEvaluations": 541, "retainedBytes": 1502816 },
+        "wasmBytes": 4810,
+        "wasmSha256": "2acf9f792e7924a561400ba2ed04c9e932ac994b56f62f36bb55ca002030514a"
+      }
+    }
+  }
+}

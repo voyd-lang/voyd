@@ -260,11 +260,11 @@ Local M-series run, optimized mode, one-line app edit between iterations:
 | `voyd_examples/ray-vtrace-tuned`        |          5787.530 |             5157.944 |  629.586 | 10.9% |
 
 `VOYD_COMPILER_PERF=1` on `smoke/vtrace-compute-main` showed the warm app-edit
-compile hitting the snapshot for all 49 std modules. The profiled cold compile
-spent about 970 ms in semantic analysis and 4689 ms in emit; the warm app-edit
-spent about 172 ms in semantic analysis and 4411 ms in emit. The remaining
-optimized latency is therefore dominated by whole-program emit/codegen rather
-than std typing.
+compile reusing all 49 std modules from the in-process dependency cache. The
+profiled cold compile spent about 970 ms in semantic analysis and 4689 ms in
+emit; the warm app-edit spent about 172 ms in semantic analysis and 4411 ms in
+emit. The remaining optimized latency is therefore dominated by whole-program
+emit/codegen rather than std typing.
 
 The optional suite benchmark at
 `/Users/drew/projects/voyd_examples/benchmarks/suite/voyd/benchmarks.voyd`

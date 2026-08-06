@@ -37,6 +37,10 @@ import { getOrCreateReceiverSpecialization } from "../../receiver-specialization
 import { getOrCreateScalarAggregateCallSpecialization } from "../../optimization/scalar-aggregate-calls.js";
 import { allocateTempLocal } from "../../locals.js";
 import { captureMultivalueLanes } from "../../multivalue.js";
+import {
+  assertNoRuntimeIdentityGuards,
+  prepareRuntimeIdentityGuardsForCall,
+} from "../../runtime-identity-guards.js";
 
 export const compileCallExpr = (
   expr: HirCallExpr,
@@ -59,6 +63,11 @@ export const compileCallExpr = (
   }
 
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
+  prepareRuntimeIdentityGuardsForCall({
+    callId: expr.id,
+    ctx,
+    fnCtx,
+  });
   const expectTraitDispatch = callInfo.traitDispatch;
   const compileResolvedTarget = ({
     targetFunctionId,
@@ -117,6 +126,11 @@ export const compileCallExpr = (
   if (callee.exprKind === "identifier") {
     const continuation = fnCtx.continuations?.get(callee.symbol);
     if (continuation) {
+      assertNoRuntimeIdentityGuards({
+        callId: expr.id,
+        lowering: "continuation-call lowering",
+        ctx,
+      });
       return ctx.effectsBackend.compileContinuationCall({
         expr,
         continuation,
@@ -213,6 +227,11 @@ export const compileCallExpr = (
       });
 
     if (shouldCompileIntrinsic) {
+      assertNoRuntimeIdentityGuards({
+        callId: expr.id,
+        lowering: "intrinsic-call lowering",
+        ctx,
+      });
       const externalMeta = intrinsicMetadata.external
         ? getFunctionMetadataForCall({
             symbol: callee.symbol,
@@ -299,8 +318,7 @@ export const compileCallExpr = (
       });
       const compiledCall = compileWithContractCallScope({
         calleeId,
-        tailPosition:
-          compiledArgs.writebacks.length === 0 && tailPosition,
+        tailPosition: compiledArgs.writebacks.length === 0 && tailPosition,
         ctx,
         fnCtx,
         compile: (scopedTailPosition) =>
@@ -328,6 +346,11 @@ export const compileCallExpr = (
   }
 
   if (calleeDesc.kind === "function") {
+    assertNoRuntimeIdentityGuards({
+      callId: expr.id,
+      lowering: "closure-call lowering",
+      ctx,
+    });
     if (expr.args.length > calleeDesc.parameters.length) {
       return compileCurriedClosureCall({
         expr,
@@ -452,6 +475,11 @@ export const compileMethodCallExpr = (
   const callInstanceId = fnCtx.instanceId ?? typeInstanceId;
 
   const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
+  prepareRuntimeIdentityGuardsForCall({
+    callId: expr.id,
+    ctx,
+    fnCtx,
+  });
   const targetFunctionId = resolveTargetFunctionId({
     targets: callInfo.targets,
     callInstanceId,

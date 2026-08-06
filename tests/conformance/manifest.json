@@ -135,16 +135,28 @@
     },
     {
       "id": "typing.borrow-conflicts",
-      "title": "Exclusive mutable borrow diagnostics",
+      "title": "Mutable and explicit borrow diagnostics",
       "entry": "cases/typing/borrow-conflicts.voyd",
       "tags": ["typing", "borrowing", "diagnostics"],
       "cases": [
         {
           "id": "typing.borrowing.conflicting-active-accesses",
-          "title": "rejects simultaneous mutable accesses without rejecting retained ordinary aliases",
+          "title": "rejects overlapping mutable access and explicit borrow escapes without rejecting ordinary aliases",
           "expect": {
             "kind": "diagnostics",
-            "codes": ["TY0048"]
+            "codes": ["TY0048", "TY0051", "TY0054"],
+            "messageIncludes": [
+              "active shared borrow",
+              "cannot escape through a return",
+              "has no 'returns_from' clause"
+            ],
+            "spans": [
+              { "code": "TY0051", "text": "local" },
+              {
+                "code": "TY0054",
+                "text": "fn view(self) -> borrow Box"
+              }
+            ]
           }
         }
       ]
@@ -174,6 +186,24 @@
           "expect": { "kind": "equals", "value": 8 }
         },
         {
+          "id": "runtime.borrowing.explicit-borrowed-result",
+          "title": "reads through an explicit borrowed result",
+          "entryName": "explicit_borrowed_result_reads_source",
+          "expect": { "kind": "equals", "value": 21 }
+        },
+        {
+          "id": "runtime.borrowing.checked-region-contract",
+          "title": "uses a checked view contract with Option<borrow T>",
+          "entryName": "checked_borrow_contract_view",
+          "expect": { "kind": "equals", "value": 42 }
+        },
+        {
+          "id": "runtime.borrowing.nested-explicit-borrow",
+          "title": "preserves explicit borrows nested in optional payloads",
+          "entryName": "nested_explicit_borrow_preserves_payload",
+          "expect": { "kind": "equals", "value": 34 }
+        },
+        {
           "id": "runtime.borrowing.slot-allocation-distinction",
           "title": "keeps object-handle slots distinct from referenced allocations",
           "entryName": "handle_slots_are_distinct_from_allocations",
@@ -190,6 +220,38 @@
           "title": "evaluates defaults before activating mutable call borrows",
           "entryName": "default_argument_precedes_mutable_call_borrow",
           "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.borrowing.identity-guard-success",
+          "title": "allows dynamically disjoint stable projected places with a call-scoped identity guard",
+          "entryName": "runtime_identity_guard_success",
+          "expect": { "kind": "equals", "value": 14 }
+        },
+        {
+          "id": "runtime.borrowing.identity-guard-conflict",
+          "title": "reports both projected places on a runtime identity conflict",
+          "entryName": "runtime_identity_guard_conflict",
+          "expect": {
+            "kind": "trap",
+            "messageIncludes": [
+              "Runtime exclusivity conflict",
+              "argument 1 place values",
+              "argument 2 place values"
+            ]
+          }
+        },
+        {
+          "id": "runtime.borrowing.identity-guard-after-default-conflict",
+          "title": "reports both projected places after default evaluation",
+          "entryName": "runtime_identity_guard_after_default_conflict",
+          "expect": {
+            "kind": "trap",
+            "messageIncludes": [
+              "Runtime exclusivity conflict",
+              "argument 1 place values",
+              "argument 2 place values"
+            ]
+          }
         },
         {
           "id": "runtime.borrowing.shared-cell-mutation",
@@ -397,6 +459,38 @@
           "title": "preserves default and mutable-borrow evaluation order",
           "entryName": "default_argument_precedes_mutable_call_borrow",
           "expect": { "kind": "equals", "value": 12 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-identity-guard-success",
+          "title": "preserves call-scoped identity guard success",
+          "entryName": "runtime_identity_guard_success",
+          "expect": { "kind": "equals", "value": 14 }
+        },
+        {
+          "id": "runtime.borrowing.optimized-identity-guard-conflict",
+          "title": "preserves projected-place runtime identity conflict diagnostics",
+          "entryName": "runtime_identity_guard_conflict",
+          "expect": {
+            "kind": "trap",
+            "messageIncludes": [
+              "Runtime exclusivity conflict",
+              "argument 1 place values",
+              "argument 2 place values"
+            ]
+          }
+        },
+        {
+          "id": "runtime.borrowing.optimized-identity-guard-after-default-conflict",
+          "title": "preserves projected-place diagnostics after default evaluation",
+          "entryName": "runtime_identity_guard_after_default_conflict",
+          "expect": {
+            "kind": "trap",
+            "messageIncludes": [
+              "Runtime exclusivity conflict",
+              "argument 1 place values",
+              "argument 2 place values"
+            ]
+          }
         },
         {
           "id": "runtime.borrowing.optimized-shared-cell-mutation",

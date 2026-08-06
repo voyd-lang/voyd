@@ -4,6 +4,7 @@
 //! `std::error` only defines cross-cutting runtime failures plus panic support.
 
 use std::memory::self as memory
+use std::optional::types::{ Some, None }
 use std::string::type::{ String, StringSlice, new_string }
 
 pub obj HostError {
@@ -73,8 +74,11 @@ fn panic_scratch_capacity_bytes(): () -> i32
   65536
 
 fn copy_string_to_linear_memory(message: String, ptr: i32) -> void
-  let raw = message.raw_bytes()
   var index = 0
   while index < message.byte_len():
-    memory::store_u8(ptr + index, __array_get(raw, index))
+    match(message.get_byte(index))
+      Some<i32> { value }:
+        memory::store_u8(ptr + index, value)
+      None:
+        return void
     index = index + 1

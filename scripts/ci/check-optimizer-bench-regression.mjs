@@ -22,14 +22,16 @@ const RSS_MODE_MIN_CLUSTER_SAMPLES = 3;
 const RSS_MODE_MIN_GAP = 64 * MIB;
 const RSS_MODE_MIN_RELATIVE_GAP = 0.1;
 const RSS_MODE_MIN_GAP_DOMINANCE = 1.5;
-
 const argValue = (name) => {
   const index = process.argv.indexOf(name);
   return index >= 0 ? process.argv[index + 1] : undefined;
 };
 
+const rawOption = ({ argument, environment }) =>
+  argValue(argument) ?? process.env[environment];
+
 const numericOption = ({ argument, environment, fallback }) => {
-  const raw = argValue(argument) ?? process.env[environment];
+  const raw = rawOption({ argument, environment });
   const value = raw === undefined ? fallback : Number(raw);
   if (!Number.isFinite(value) || value < 0) {
     throw new Error(`${argument} must be a non-negative number`);
@@ -37,68 +39,70 @@ const numericOption = ({ argument, environment, fallback }) => {
   return value;
 };
 
-const thresholds = () => ({
-  compile: {
-    relativePct: numericOption({
-      argument: "--compile-max-pct",
-      environment: "OPTIMIZER_BENCH_COMPILE_MAX_PCT",
-      fallback: DEFAULT_THRESHOLDS.compile.relativePct,
-    }),
-    absolute: numericOption({
-      argument: "--compile-min-ms",
-      environment: "OPTIMIZER_BENCH_COMPILE_MIN_MS",
-      fallback: DEFAULT_THRESHOLDS.compile.absolute,
-    }),
-  },
-  runtime: {
-    relativePct: numericOption({
-      argument: "--runtime-max-pct",
-      environment: "OPTIMIZER_BENCH_RUNTIME_MAX_PCT",
-      fallback: DEFAULT_THRESHOLDS.runtime.relativePct,
-    }),
-    absolute: numericOption({
-      argument: "--runtime-min-ms",
-      environment: "OPTIMIZER_BENCH_RUNTIME_MIN_MS",
-      fallback: DEFAULT_THRESHOLDS.runtime.absolute,
-    }),
-  },
-  rss: {
-    relativePct: numericOption({
-      argument: "--rss-max-pct",
-      environment: "OPTIMIZER_BENCH_RSS_MAX_PCT",
-      fallback: DEFAULT_THRESHOLDS.rss.relativePct,
-    }),
-    absolute: numericOption({
-      argument: "--rss-min-bytes",
-      environment: "OPTIMIZER_BENCH_RSS_MIN_BYTES",
-      fallback: DEFAULT_THRESHOLDS.rss.absolute,
-    }),
-  },
-  wasm: {
-    relativePct: numericOption({
-      argument: "--wasm-max-pct",
-      environment: "OPTIMIZER_BENCH_WASM_MAX_PCT",
-      fallback: DEFAULT_THRESHOLDS.wasm.relativePct,
-    }),
-    absolute: numericOption({
-      argument: "--wasm-min-bytes",
-      environment: "OPTIMIZER_BENCH_WASM_MIN_BYTES",
-      fallback: DEFAULT_THRESHOLDS.wasm.absolute,
-    }),
-  },
-  gzip: {
-    relativePct: numericOption({
-      argument: "--gzip-max-pct",
-      environment: "OPTIMIZER_BENCH_GZIP_MAX_PCT",
-      fallback: DEFAULT_THRESHOLDS.gzip.relativePct,
-    }),
-    absolute: numericOption({
-      argument: "--gzip-min-bytes",
-      environment: "OPTIMIZER_BENCH_GZIP_MIN_BYTES",
-      fallback: DEFAULT_THRESHOLDS.gzip.absolute,
-    }),
-  },
-});
+export const thresholds = () => {
+  return {
+    compile: {
+      relativePct: numericOption({
+        argument: "--compile-max-pct",
+        environment: "OPTIMIZER_BENCH_COMPILE_MAX_PCT",
+        fallback: DEFAULT_THRESHOLDS.compile.relativePct,
+      }),
+      absolute: numericOption({
+        argument: "--compile-min-ms",
+        environment: "OPTIMIZER_BENCH_COMPILE_MIN_MS",
+        fallback: DEFAULT_THRESHOLDS.compile.absolute,
+      }),
+    },
+    runtime: {
+      relativePct: numericOption({
+        argument: "--runtime-max-pct",
+        environment: "OPTIMIZER_BENCH_RUNTIME_MAX_PCT",
+        fallback: DEFAULT_THRESHOLDS.runtime.relativePct,
+      }),
+      absolute: numericOption({
+        argument: "--runtime-min-ms",
+        environment: "OPTIMIZER_BENCH_RUNTIME_MIN_MS",
+        fallback: DEFAULT_THRESHOLDS.runtime.absolute,
+      }),
+    },
+    rss: {
+      relativePct: numericOption({
+        argument: "--rss-max-pct",
+        environment: "OPTIMIZER_BENCH_RSS_MAX_PCT",
+        fallback: DEFAULT_THRESHOLDS.rss.relativePct,
+      }),
+      absolute: numericOption({
+        argument: "--rss-min-bytes",
+        environment: "OPTIMIZER_BENCH_RSS_MIN_BYTES",
+        fallback: DEFAULT_THRESHOLDS.rss.absolute,
+      }),
+    },
+    wasm: {
+      relativePct: numericOption({
+        argument: "--wasm-max-pct",
+        environment: "OPTIMIZER_BENCH_WASM_MAX_PCT",
+        fallback: DEFAULT_THRESHOLDS.wasm.relativePct,
+      }),
+      absolute: numericOption({
+        argument: "--wasm-min-bytes",
+        environment: "OPTIMIZER_BENCH_WASM_MIN_BYTES",
+        fallback: DEFAULT_THRESHOLDS.wasm.absolute,
+      }),
+    },
+    gzip: {
+      relativePct: numericOption({
+        argument: "--gzip-max-pct",
+        environment: "OPTIMIZER_BENCH_GZIP_MAX_PCT",
+        fallback: DEFAULT_THRESHOLDS.gzip.relativePct,
+      }),
+      absolute: numericOption({
+        argument: "--gzip-min-bytes",
+        environment: "OPTIMIZER_BENCH_GZIP_MIN_BYTES",
+        fallback: DEFAULT_THRESHOLDS.gzip.absolute,
+      }),
+    },
+  };
+};
 
 const run = (command, args, label, options = {}) => {
   const result = spawnSync(command, args, {
@@ -152,6 +156,19 @@ const lowerQuartile = (values) => {
 const rssSampleValue = (samples, fallback) =>
   samples.length >= RSS_MODE_MIN_SAMPLES ? lowerQuartile(samples) : fallback;
 
+const absoluteRssComparison = (row) => ({
+  name: "peak RSS",
+  label:
+    (row.processMaxRssSamplesBytes?.length ?? 0) >= RSS_MODE_MIN_SAMPLES
+      ? "peak RSS lower-quartile MiB"
+      : "peak RSS median MiB",
+  value: rssSampleValue(
+    row.processMaxRssSamplesBytes ?? [],
+    row.processMaxRssBytes,
+  ),
+  samples: row.processMaxRssSamplesBytes ?? [],
+});
+
 const rssComparison = (row) =>
   typeof row.processMaxRssGrowthBytes === "number"
     ? {
@@ -167,18 +184,7 @@ const rssComparison = (row) =>
         ),
         samples: row.processMaxRssGrowthSamplesBytes ?? [],
       }
-    : {
-        name: "peak RSS",
-        label:
-          (row.processMaxRssSamplesBytes?.length ?? 0) >= RSS_MODE_MIN_SAMPLES
-            ? "peak RSS lower-quartile MiB"
-            : "peak RSS median MiB",
-        value: rssSampleValue(
-          row.processMaxRssSamplesBytes ?? [],
-          row.processMaxRssBytes,
-        ),
-        samples: row.processMaxRssSamplesBytes ?? [],
-      };
+    : absoluteRssComparison(row);
 
 const largestSampleGap = (samples) => {
   const sorted = [...samples].sort((left, right) => left - right);
@@ -427,11 +433,18 @@ export const compareScorecards = ({ base, head, limits }) => {
         head: headRow.runtimeSamplesMs ?? [],
       },
     });
-    const baseRss = rssComparison(baseRow);
-    const headRss = rssComparison(headRow);
+    let baseRss = rssComparison(baseRow);
+    let headRss = rssComparison(headRow);
     if (baseRss.label !== headRss.label) {
       throw new Error(
         `${baseRow.scenario} scorecards use different RSS measurement formats`,
+      );
+    }
+    if (baseRss.name === "compile peak RSS growth" && baseRss.value === 0) {
+      baseRss = absoluteRssComparison(baseRow);
+      headRss = absoluteRssComparison(headRow);
+      console.log(
+        "  [info] compile peak RSS growth baseline is zero; comparing absolute peak RSS",
       );
     }
     const rssModes = rssModeComparisons({ base: baseRss, head: headRss });

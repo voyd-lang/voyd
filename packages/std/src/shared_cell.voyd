@@ -30,15 +30,11 @@ impl SharedCell<T>
       __borrow_state: new_fixed_array<i32>(1)
     }
 
-  // V-448 will spell these callback parameters as `borrow T`. Until that
-  // syntax lands, the SharedCell intrinsic contract gives them the same scoped
-  // borrowed semantics; the temporary `fn(T)` and `fn(~T)` spellings are not
-  // ordinary value passing.
   /// Runs `body` with shared access to the contained value.
   ///
   /// Multiple nested shared accesses are allowed. A nested mutable access
   /// panics with a deterministic conflict message.
-  api fn with<R>(self, body: fn(T) : () -> R): () -> R
+  api fn with<R>(self, body: fn(value: borrow T) : () -> R): () -> R
     let status = shared_cell_begin_read(self)
     if status != 0:
       shared_cell_borrow_fail(status)
@@ -50,7 +46,7 @@ impl SharedCell<T>
   ///
   /// Any overlapping shared or mutable access panics with a deterministic
   /// conflict message.
-  api fn with_mut<R>(self, body: fn(~T) : () -> R): () -> R
+  api fn with_mut<R>(self, body: fn(~value: borrow T) : () -> R): () -> R
     let status = shared_cell_begin_write(self)
     if status == 1:
       shared_cell_borrow_fail(status)
@@ -65,7 +61,7 @@ impl SharedCell<T>
   /// Attempts to run `body` with shared access.
   api fn try_with<R>(
     self,
-    body: fn(T) : () -> R
+    body: fn(value: borrow T) : () -> R
   ): () -> Result<R, SharedCellBorrowError>
     let status = shared_cell_begin_read(self)
     if status != 0:
@@ -79,7 +75,7 @@ impl SharedCell<T>
   /// Attempts to run `body` with exclusive access.
   api fn try_with_mut<R>(
     self,
-    body: fn(~T) : () -> R
+    body: fn(~value: borrow T) : () -> R
   ): () -> Result<R, SharedCellBorrowError>
     let status = shared_cell_begin_write(self)
     if status == 1:

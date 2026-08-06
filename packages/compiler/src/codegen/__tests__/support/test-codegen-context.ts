@@ -154,7 +154,7 @@ export const createTestCodegenContext = (): {
         getTraitMethodImpl: () => undefined,
       },
       calls: {
-        getCallInfo: () => ({ traitDispatch: false }),
+        getCallInfo: () => ({ traitDispatch: false, identityGuards: [] }),
       },
       instances: { getAll: () => [], getById: () => undefined },
       imports: {

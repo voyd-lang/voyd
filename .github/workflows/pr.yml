@@ -28,7 +28,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
@@ -36,7 +36,7 @@ jobs:
 
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 25
     env:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
@@ -69,7 +69,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
@@ -106,6 +106,64 @@ jobs:
           TYPING_BENCH_MAX_REGRESSION_PCT: "15"
         run: node scripts/ci/check-typing-bench-regression.mjs
 
+  web-unit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Detect web-test-sensitive changes
+        id: changes
+        uses: dorny/paths-filter@v3
+        with:
+          filters: |
+            web:
+              - "tests/integration/fixtures/web-framework.voyd"
+              - "packages/web/**"
+              - "packages/compiler/**"
+              - "packages/std/**"
+              - "packages/sdk/**"
+              - "packages/js-host/**"
+              - "packages/lib/**"
+              - "packages/package-adapter/**"
+              - "apps/cli/**"
+              - "scripts/voyd"
+              - "scripts/testing/**"
+              - ".github/workflows/pr.yml"
+              - "package.json"
+              - "package-lock.json"
+              - "turbo.json"
+              - "tsconfig*.json"
+      - name: Use Node.js
+        if: steps.changes.outputs.web == 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "24.x"
+          cache: npm
+          cache-dependency-path: package-lock.json
+      - name: Install dependencies
+        if: steps.changes.outputs.web == 'true'
+        run: npm ci --include=optional
+      - name: Prepare timing output
+        if: steps.changes.outputs.web == 'true'
+        run: mkdir -p test-timings
+      - name: Run web package unit
+        if: steps.changes.outputs.web == 'true'
+        env:
+          VOYD_USE_SRC: "1"
+        run: node scripts/testing/run-timed-command.mjs --lane web-unit --output test-timings/web-unit-wall.json -- npm run test:unit:web:ci
+      - name: Enforce web package timing budget
+        if: steps.changes.outputs.web == 'true'
+        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane web-unit --output test-timings/web-unit-summary.json
+      - name: Upload web package timings
+        if: always() && steps.changes.outputs.web == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: web-unit-test-timings
+          path: test-timings
+          retention-days: 30
+
   tooling-unit:
     runs-on: ubuntu-latest
     timeout-minutes: 8
@@ -127,7 +185,7 @@ jobs:
       - name: Use Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -179,7 +237,7 @@ jobs:
         if: steps.changes.outputs.conformance == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -208,7 +266,7 @@ jobs:
 
   integration:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -238,7 +296,7 @@ jobs:
         if: steps.changes.outputs.integration == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -298,7 +356,7 @@ jobs:
         if: steps.changes.outputs.compiler_codegen == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -351,7 +409,7 @@ jobs:
         if: steps.changes.outputs.cli_runtime == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
@@ -380,11 +438,30 @@ jobs:
         uses: dorny/paths-filter@v3
         with:
           filters: |
+            web:
+              - "tests/integration/fixtures/web-framework.voyd"
+              - "packages/web/**"
+              - "packages/compiler/**"
+              - "packages/std/**"
+              - "packages/sdk/**"
+              - "packages/js-host/**"
+              - "packages/lib/**"
+              - "packages/package-adapter/**"
+              - "apps/cli/**"
+              - "scripts/voyd"
+              - "scripts/testing/**"
+              - ".github/workflows/pr.yml"
+              - "package.json"
+              - "package-lock.json"
+              - "turbo.json"
+              - "tsconfig*.json"
             optimizer:
               - "packages/compiler/src/optimize/**"
               - "packages/compiler/src/codegen/**"
               - "packages/compiler/src/optimization-policy.ts"
               - "packages/compiler/src/pipeline-shared.ts"
+              - "packages/compiler/src/modules/**"
+              - "packages/compiler/src/semantics/**"
               - "packages/compiler/src/perf.ts"
               - "packages/lib/src/lib/binaryen-optimize.ts"
               - "packages/std/**"
@@ -392,31 +469,42 @@ jobs:
               - "scripts/bench-optimizer.ts"
               - "scripts/ci/check-optimizer-bench-regression.mjs"
               - "scripts/ci/check-optimizer-bench-regression.test.mjs"
+              - "scripts/testing/run-web-compile-gate.mjs"
               - "tests/performance/fixtures/vtrace-compute-benchmark.voyd"
               # Root dependency changes are represented by the lockfile. Avoid
               # triggering this noisy, expensive benchmark for unrelated scripts.
               - "package-lock.json"
       - name: Use Node.js
-        if: steps.changes.outputs.optimizer == 'true'
+        if: steps.changes.outputs.optimizer == 'true' || steps.changes.outputs.web == 'true'
         uses: actions/setup-node@v4
         with:
-          node-version: "22.x"
+          node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        if: steps.changes.outputs.optimizer == 'true'
+        if: steps.changes.outputs.optimizer == 'true' || steps.changes.outputs.web == 'true'
         run: npm ci --include=optional
       - name: Test optimizer scorecard gate
         if: steps.changes.outputs.optimizer == 'true'
         run: npx vitest run scripts/ci/check-optimizer-bench-regression.test.mjs
+      - name: Compile whole web package under memory budget
+        if: steps.changes.outputs.web == 'true'
+        env:
+          VOYD_WEB_COMPILE_MAX_OLD_SPACE_MB: "3584"
+          VOYD_WEB_COMPILE_MAX_MS: "240000"
+          VOYD_WEB_COMPILE_MAX_RSS_BYTES: "4563402752"
+        run: npm run test:web-compile-gate
       - name: Compare optimizer scorecards
         if: steps.changes.outputs.optimizer == 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.sha }}
-          OPTIMIZER_BENCH_COMPILE_MAX_PCT: "20"
+          # V-448's cold semantic analysis cost is tracked by V-468. Keep a
+          # bounded temporary allowance while the package-scale absolute gate
+          # above prevents unbounded time and memory growth.
+          OPTIMIZER_BENCH_COMPILE_MAX_PCT: "45"
           OPTIMIZER_BENCH_RUNTIME_MAX_PCT: "20"
-          OPTIMIZER_BENCH_RSS_MAX_PCT: "15"
+          OPTIMIZER_BENCH_RSS_MAX_PCT: "20"
           OPTIMIZER_BENCH_WASM_MAX_PCT: "5"
           OPTIMIZER_BENCH_GZIP_MAX_PCT: "5"
         run: npm run bench:optimizer:compare

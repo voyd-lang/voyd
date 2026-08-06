@@ -7,6 +7,7 @@ import { effectAttributeMacro } from "./effect-attribute.js";
 import { externalAttributeMacro } from "./external-attribute.js";
 import { serializerAttributeMacro } from "./serializer-attribute.js";
 import { boundaryAttributeMacro } from "./boundary-attribute.js";
+import { borrowContractAttributeMacro } from "./borrow-contract-attribute.js";
 import { primary } from "./primary.js";
 import { attachColonClauses } from "./colon-clauses.js";
 import { constructorObjectLiteral } from "./constructor-object-literal.js";
@@ -26,6 +27,7 @@ export const BASE_SYNTAX_MACROS: SyntaxMacro[] = [
 
 export const POST_SYNTAX_MACROS: SyntaxMacro[] = [
   intrinsicAttributeMacro,
+  borrowContractAttributeMacro,
   compilerContractAttributeMacro,
   intrinsicTypeAttributeMacro,
   boundaryAttributeMacro,

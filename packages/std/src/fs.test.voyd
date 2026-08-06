@@ -12,6 +12,16 @@ use std::string::type::{ String, StringSlice, new_string }
 use std::test::assertions::all
 use std::test::host_dto::self as host_dto_test
 
+obj StringWriteCapture {
+  paths: Array<String>,
+  values: Array<String>
+}
+
+obj BytesWriteCapture {
+  paths: Array<String>,
+  values: Array<i32>
+}
+
 test "fs read_string decodes host payload":
   let result = read_string_with_payload(host_dto_test::host_ok_with_value(msgpack::make_string("hello")))
   match(result)
@@ -33,28 +43,32 @@ test "fs read_bytes decodes host payload":
       assert(false, eq: true)
 
 test "fs write_string encodes path and value":
-  let ~paths = Array<String>::init()
-  let ~values = Array<String>::init()
+  let ~capture = StringWriteCapture {
+    paths: Array<String>::init(),
+    values: Array<String>::init()
+  }
 
-  let result = write_string_with_capture(paths, values)
+  let result = write_string_with_capture(capture)
 
   match(result)
     Ok<Unit>:
-      assert(optional_string_or(paths.get(0), "missing".as_slice()).equals("/tmp/app.log"), eq: true)
-      assert(optional_string_or(values.get(0), "missing".as_slice()).equals("line"), eq: true)
+      assert(optional_string_or(capture.paths.get(0), "missing".as_slice()).equals("/tmp/app.log"), eq: true)
+      assert(optional_string_or(capture.values.get(0), "missing".as_slice()).equals("line"), eq: true)
     Err<IoError>:
       assert(false, eq: true)
 
 test "fs write_bytes encodes path and values":
-  let ~paths = Array<String>::init()
-  let ~bytes = Array<i32>::init()
-  let result = write_bytes_with_capture(paths, bytes)
+  let ~capture = BytesWriteCapture {
+    paths: Array<String>::init(),
+    values: Array<i32>::init()
+  }
+  let result = write_bytes_with_capture(capture)
 
   match(result)
     Ok<Unit>:
-      assert(optional_string_or(paths.get(0), "missing".as_slice()).equals("/tmp/data.bin"), eq: true)
-      assert(optional_i32_or(bytes.get(0), -1), eq: 7)
-      assert(optional_i32_or(bytes.get(1), -1), eq: 8)
+      assert(optional_string_or(capture.paths.get(0), "missing".as_slice()).equals("/tmp/data.bin"), eq: true)
+      assert(optional_i32_or(capture.values.get(0), -1), eq: 7)
+      assert(optional_i32_or(capture.values.get(1), -1), eq: 8)
     Err<IoError>:
       assert(false, eq: true)
 
@@ -143,7 +157,7 @@ fn list_dir_with_payload(payload: MsgPack): () -> Result<Array<Path>, IoError>
   Fs::list_dir(tail, _path):
     tail(payload)
 
-fn write_string_with_capture(~paths: Array<String>, ~values: Array<String>): () -> Result<Unit, IoError>
+fn write_string_with_capture(~capture: StringWriteCapture): () -> Result<Unit, IoError>
   try
     write_string(Path::new("/tmp/app.log".as_slice().to_string()), "line".as_slice().to_string())
   Fs::read_bytes(tail, _path):
@@ -154,8 +168,8 @@ fn write_string_with_capture(~paths: Array<String>, ~values: Array<String>): () 
     tail(host_dto_test::host_default_error_payload())
   Fs::write_string(tail, payload):
     let decoded = unpack_host_dto(payload)
-    paths.push(read_host_string(decoded, "path"))
-    values.push(read_host_string(decoded, "value"))
+    capture.paths.push(read_host_string(decoded, "path"))
+    capture.values.push(read_host_string(decoded, "value"))
     tail(host_dto_test::host_ok_payload())
   Fs::exists(tail, _path):
     tail(false)
@@ -164,7 +178,7 @@ fn write_string_with_capture(~paths: Array<String>, ~values: Array<String>): () 
   Fs::list_dir(tail, _path):
     tail(host_dto_test::host_default_error_payload())
 
-fn write_bytes_with_capture(~paths: Array<String>, ~values: Array<i32>): () -> Result<Unit, IoError>
+fn write_bytes_with_capture(~capture: BytesWriteCapture): () -> Result<Unit, IoError>
   let ~buffer = ByteBuffer::init()
   buffer.push(7)
   buffer.push(8)
@@ -177,13 +191,13 @@ fn write_bytes_with_capture(~paths: Array<String>, ~values: Array<i32>): () -> R
     tail(host_dto_test::host_default_error_payload())
   Fs::write_bytes(tail, payload):
     let decoded = unpack_host_dto(payload)
-    paths.push(read_host_string(decoded, "path"))
+    capture.paths.push(read_host_string(decoded, "path"))
     let encoded_values = unpack_msgpack_array(read_host_msgpack(decoded, "bytes"))
     var index = 0
     while index < encoded_values.len():
       match(encoded_values.get(index))
         Some<MsgPack> { value }:
-          values.push(unpack_msgpack_i32(value))
+          capture.values.push(unpack_msgpack_i32(value))
         None:
           void
       index = index + 1

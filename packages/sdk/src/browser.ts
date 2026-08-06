@@ -4,6 +4,7 @@ import { isCompilerPerfEnabled } from "@voyd-lang/compiler/perf.js";
 import {
   compileWithLoader,
   createCompilerReuseCache,
+  exportCompilerReuseArtifact,
   type CompilerReuseCache,
 } from "./shared/compile.js";
 import { runWithHandlers } from "./shared/host.js";
@@ -15,6 +16,7 @@ import {
 import type {
   CompileOptions,
   CompileResult,
+  CreateSdkOptions,
   ServeWebAppOptions,
   ServeWebAppResult,
   VoydSdk,
@@ -30,12 +32,13 @@ import {
   type ParsedModule,
 } from "./compiler-browser.js";
 
-export const createSdk = (): VoydSdk => {
-  const compilerCache = createCompilerReuseCache();
+export const createSdk = (options: CreateSdkOptions = {}): VoydSdk => {
+  const compilerCache = createCompilerReuseCache(options);
   return {
     compile: (options) => compileSdk(options, compilerCache),
     run: runWithHandlers,
     serveWebApp,
+    exportCompilerArtifact: () => exportCompilerReuseArtifact(compilerCache),
   };
 };
 
@@ -199,6 +202,7 @@ export * from "@voyd-lang/lib/wasm.js";
 export type {
   CompileOptions,
   CompileResult,
+  CreateSdkOptions,
   DefaultAdapterOptions,
   EffectsInfo,
   EffectContinuation,

@@ -1,4 +1,4 @@
-import { Form } from "../ast/form.js";
+import { CallForm, Form } from "../ast/form.js";
 import {
   Expr,
   formCallsInternal,
@@ -18,6 +18,12 @@ const parseForm = (form: Form): Form => {
   if (form.callsInternal("subscript")) {
     return parseSubscriptForm(form);
   }
+  if (
+    form instanceof CallForm &&
+    !form.toArray().some((entry) => isInfixOp(entry))
+  ) {
+    return parseDelimitedCallForm(form);
+  }
 
   const hadSingleFormChild = form.length === 1 && isForm(form.at(0));
 
@@ -29,7 +35,7 @@ const parseForm = (form: Form): Form => {
   const cursor = form.cursor();
 
   while (!cursor.done) {
-    items.push(parsePrecedence(cursor, 0));
+    items.push(parsePrecedence(cursor));
   }
 
   let result: Form;
@@ -42,6 +48,15 @@ const parseForm = (form: Form): Form => {
   }
 
   return restructureOperatorTail(result);
+};
+
+const parseDelimitedCallForm = (form: CallForm): Form => {
+  const items = form.toArray().map(parseExpression);
+  if (items.length > 0 && isForm(items[0])) {
+    const [head, ...rest] = items;
+    return formWithLocation(form, [...head.toArray(), ...rest]);
+  }
+  return formWithLocation(form, items);
 };
 
 const parseSubscriptForm = (form: Form): Form => {
@@ -59,9 +74,22 @@ const parsePrecedence = (cursor: FormCursor, minPrecedence = 0): Expr => {
 
   let expr: Expr;
 
-  if (isPrefixOp(first)) {
+  if (isPrefixOp(first) && contextualPrefixIsActive(first, cursor)) {
     const op = cursor.consume()!;
-    const right = parsePrecedence(cursor, unaryOpInfo(op) ?? -1);
+    let right = parsePrecedence(cursor, unaryOpInfo(op) ?? -1);
+    const genericTail = cursor.peek();
+    if (
+      isIdentifierAtom(op) &&
+      op.value === "borrow" &&
+      isForm(genericTail) &&
+      genericTail.callsInternal("generics")
+    ) {
+      const parsedTail = parseExpression(cursor.consume()!);
+      right = new Form({
+        location: mergeLocation(right, parsedTail),
+        elements: [right, parsedTail],
+      });
+    }
     expr = new Form({
       location: mergeLocation(op, right),
       elements: [op, right],
@@ -89,6 +117,17 @@ const parsePrecedence = (cursor: FormCursor, minPrecedence = 0): Expr => {
   }
 
   return expr;
+};
+
+const contextualPrefixIsActive = (op: Expr, cursor: FormCursor): boolean => {
+  const next = cursor.peek(1);
+  return !(
+    isIdentifierAtom(op) &&
+    op.value === "borrow" &&
+    (next === undefined ||
+      isInfixOp(next) ||
+      (isForm(next) && next.callsInternal("generics")))
+  );
 };
 
 const infixOpInfo = (op?: Expr): number | undefined => {

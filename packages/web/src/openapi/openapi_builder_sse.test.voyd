@@ -1,0 +1,36 @@
+use src::openapi::{ document, info, operation }
+use src::openapi::test_types::DocumentedEvent
+use src::openapi::automatic::all
+use std::error::panic
+use std::http::Method
+use std::json::stringify
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+
+test "OpenAPI reflects typed SSE response documentation":
+  let events_operation = operation(
+    summary: "Watch events".as_slice().to_string()
+  )
+    .responds_sse<DocumentedEvent>()
+  let spec = document(info(
+    title: "Article API".as_slice(),
+    version: "1.0.0".as_slice(),
+    description: "Example API".as_slice().to_string()
+  )).route(
+    "/events".as_slice(),
+    method: Method::Get {},
+    operation: events_operation
+  )
+
+  match(stringify(spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"text/event-stream\"".as_slice(), "missing SSE content")
+      require_contains(value, "\"x-voyd-event-schema\"".as_slice(), "missing SSE event schema")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

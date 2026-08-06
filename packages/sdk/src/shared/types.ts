@@ -2,6 +2,7 @@ import type { Diagnostic } from "@voyd-lang/compiler/diagnostics/index.js";
 import type { BoundaryExportsOption } from "@voyd-lang/compiler/codegen/context.js";
 import type { ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
 import type { OptimizationLevel } from "@voyd-lang/compiler/optimization-policy.js";
+import type { CompilerDependencyBorrowArtifact } from "@voyd-lang/compiler/modules/dependency-snapshot-cache.js";
 import type { TestCase as CompilerTestCase } from "@voyd-lang/compiler/pipeline-shared.js";
 import type {
   DefaultAdapterOptions,
@@ -68,6 +69,28 @@ export type CompileOptions = {
   emitWasmText?: boolean;
 };
 
+export type CreateSdkOptions =
+  | {
+      /**
+       * Retain dependency semantics between calls in this SDK instance.
+       * This does not collect data for a cross-process artifact.
+       */
+      compilerCache?: "memory";
+    }
+  | {
+      /**
+       * Retain dependency semantics and collect a serializable borrowing
+       * artifact. Use this only when the artifact will be exported or loaded.
+       */
+      compilerCache: "artifact";
+      compilerArtifact?: CompilerDependencyBorrowArtifact;
+    }
+  | {
+      compilerArtifact?: never;
+      /** Disable reusable compiler state for one-shot compilation. */
+      compilerCache: "none";
+    };
+
 export type CompileSuccessResult = {
   success: true;
   wasm: Uint8Array;
@@ -110,7 +133,7 @@ export type ServeWebAppResult = ServeWebAppSuccessResult | CompileFailureResult;
 export type EffectsInfo = {
   table: HostProtocolTable;
   findUniqueOpByLabelSuffix: (
-    labelSuffix: string
+    labelSuffix: string,
   ) => HostProtocolTable["ops"][number];
   signatureHashFor: (opts: {
     effectId: string;
@@ -196,4 +219,9 @@ export type VoydSdk = {
   compile: (opts: CompileOptions) => Promise<CompileResult>;
   run: <T = unknown>(opts: RunOptions) => Promise<T>;
   serveWebApp: (opts: ServeWebAppOptions) => Promise<ServeWebAppResult>;
+  /**
+   * Serializable dependency borrowing cache for reuse by another process.
+   * Available only from an SDK created with `compilerCache: "artifact"`.
+   */
+  exportCompilerArtifact: () => CompilerDependencyBorrowArtifact | undefined;
 };

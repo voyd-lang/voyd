@@ -4,6 +4,7 @@ import type { OptimizationLevel } from "@voyd-lang/sdk";
 import type {
   BootstrapTemplate,
   DocumentationFormat,
+  TestShard,
   VoydConfig,
 } from "./types.js";
 
@@ -56,6 +57,31 @@ const parseOptimizationLevel = (value: string): OptimizationLevel => {
   throw new InvalidArgumentError(
     `invalid optimization level "${value}" (allowed: ${OPTIMIZATION_LEVELS.join(", ")})`,
   );
+};
+
+const parseTestShard = (value: string): TestShard => {
+  const match = /^(\d+)\/(\d+)$/.exec(value);
+  if (!match) {
+    throw new InvalidArgumentError(
+      `invalid test shard "${value}" (expected a one-based index such as 1/8)`,
+    );
+  }
+
+  const oneBasedIndex = Number(match[1]);
+  const count = Number(match[2]);
+  if (
+    !Number.isSafeInteger(oneBasedIndex) ||
+    !Number.isSafeInteger(count) ||
+    count <= 0 ||
+    oneBasedIndex <= 0 ||
+    oneBasedIndex > count
+  ) {
+    throw new InvalidArgumentError(
+      `invalid test shard "${value}" (index must be between 1 and the shard count)`,
+    );
+  }
+
+  return { index: oneBasedIndex - 1, count };
 };
 
 const createBaseCommand = ({
@@ -230,6 +256,10 @@ const parseTestConfig = (argv: readonly string[]): VoydConfig => {
     .option("--reporter <name>", "test reporter (default: minimal)")
     .option("--fail-empty-tests", "exit 1 if no tests are found")
     .option(
+      "--shard <index/count>",
+      "run one deterministic test shard (for example: 1/8)",
+    )
+    .option(
       "--pkg-dir <path>",
       "additional package directory (repeatable)",
       appendOptionValue,
@@ -245,6 +275,7 @@ const parseTestConfig = (argv: readonly string[]): VoydConfig => {
     test: true,
     testReporter: opts.reporter,
     failOnEmptyTests: opts.failEmptyTests,
+    testShard: opts.shard ? parseTestShard(opts.shard) : undefined,
     pkgDirs: opts.pkgDir,
     doc: false,
     docFormat: "html",

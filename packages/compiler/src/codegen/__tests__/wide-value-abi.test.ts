@@ -32,6 +32,28 @@ const compileModule = (source: string) => {
 };
 
 describe("wide value abi", () => {
+  it("erases borrow wrappers consistently for optional union ABI", () => {
+    const module = compileModule(`
+obj Present<T> { value: T }
+obj Absent {}
+type Maybe<T> = Present<T> | Absent
+
+fn read(value: borrow Maybe<i32>) -> i32
+  match(value)
+    Present<i32> { value }:
+      value
+    Absent:
+      0
+
+pub fn main() -> i32
+  let source: Maybe<i32> = Present<i32> { value: 7 }
+  read(source)
+`);
+
+    const instance = getWasmInstance(module);
+    expect((instance.exports.main as () => number)()).toBe(7);
+  });
+
   it("allocates out-ref return storage directly", () => {
     const module = compileModule(`
 pub val WideVec5 {
@@ -126,7 +148,9 @@ pub fn main() -> i32
 `);
 
     const text = module.emitText();
-    expect(text).toMatch(/\(call \$std__wide_value_abi__make_\d+\s+\(local\.get \$0\)/);
+    expect(text).toMatch(
+      /\(call \$std__wide_value_abi__make_\d+\s+\(local\.get \$0\)/,
+    );
     expect(text).toMatch(/\(struct\.new_default\s/);
     expect(text).not.toMatch(/\(struct\.new\s/);
 

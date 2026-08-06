@@ -157,6 +157,12 @@ const syncInternalDependencyRanges = ({ packageJson, versionPlan }) => {
   return changed;
 };
 
+export const replaceStdSourceVersion = ({ source, version }) =>
+  source.replace(
+    /(pub fn (?:std_version|language_version)\(\) -> String\s+)"[^"]+"/g,
+    `$1"${version}"`,
+  );
+
 const syncStdSourceVersion = ({ versionPlan }) => {
   const nextVersion = versionPlan.get("@voyd-lang/std");
   if (!nextVersion) {
@@ -164,10 +170,10 @@ const syncStdSourceVersion = ({ versionPlan }) => {
   }
 
   const source = fs.readFileSync(stdVersionSourcePath, "utf8");
-  const updated = source.replace(
-    /(pub fn (?:std_version|language_version)\(\) -> String\s+)"[^"]+"/g,
-    `$1"${nextVersion}"`,
-  );
+  const updated = replaceStdSourceVersion({
+    source,
+    version: nextVersion,
+  });
 
   if (updated === source) {
     return false;
@@ -218,12 +224,10 @@ export const versionSelectedTargets = ({ targetNames, bump, version }) => {
       `[release] Updated packages/std/src/version.voyd for @voyd-lang/std\n`,
     );
   }
-
   runCommand({
     command: "npm",
     args: ["install", "--package-lock-only", "--ignore-scripts"],
   });
-
   process.stdout.write(
     `[release] Updated ${changedFiles} manifest(s): ${nextVersions.join(", ")}\n`,
   );

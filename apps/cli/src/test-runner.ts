@@ -15,8 +15,11 @@ import {
 } from "@voyd-lang/sdk/compiler";
 import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import { resolvePackageDirs } from "./package-dirs.js";
+import type { TestShard } from "./config/types.js";
 
-const sdk = createSdk();
+// Each CLI test command compiles one assembled test program before executing
+// it, so retaining dependency snapshots cannot benefit this process.
+const sdk = createSdk({ compilerCache: "none" });
 
 type CliTestResult = {
   displayName: string;
@@ -203,6 +206,15 @@ const selectTestModules = async ({
   return selected.filter((filePath): filePath is string => Boolean(filePath));
 };
 
+export const selectTestShard = (
+  values: readonly string[],
+  shard?: TestShard,
+): string[] => {
+  const sorted = [...values].sort((left, right) => left.localeCompare(right));
+  if (!shard) return sorted;
+  return sorted.filter((_value, index) => index % shard.count === shard.index);
+};
+
 const buildAllowedTestFiles = ({
   testModules,
   knownFiles,
@@ -381,11 +393,13 @@ export const runTests = async ({
   rootPath,
   reporter = "default",
   failOnEmptyTests = false,
+  shard,
   pkgDirs = [],
 }: {
   rootPath: string;
   reporter?: string;
   failOnEmptyTests?: boolean;
+  shard?: TestShard;
   pkgDirs?: readonly string[];
 }): Promise<TestRunSummary> => {
   const host = createFsModuleHost();
@@ -401,7 +415,10 @@ export const runTests = async ({
   const moduleFiles = files.filter(
     (filePath) => !isCompanionTestFile({ filePath, knownFiles }),
   );
-  const testModules = await selectTestModules({ moduleFiles, knownFiles });
+  const testModules = selectTestShard(
+    await selectTestModules({ moduleFiles, knownFiles }),
+    shard,
+  );
   const cliReporter = createCliReporter(reporter);
 
   if (testModules.length === 0) {

@@ -306,7 +306,7 @@ import { compileClient } from "./compile-client.mjs";
 import { formatDiagnostic } from "./diagnostics.mjs";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const result = await createSdk().compile({
+const result = await createSdk({ compilerCache: "none" }).compile({
   entryPath: resolve(rootDir, "src/main.voyd"),
   optimize: true,
   runtimeDiagnostics: true,
@@ -335,7 +335,7 @@ export async function serve({
   port = readPort(),
   optimize = true,
 } = {}) {
-  const result = await createSdk().serveWebApp({
+  const result = await createSdk({ compilerCache: "none" }).serveWebApp({
     entryPath,
     host,
     port,
@@ -353,7 +353,7 @@ export async function serve({
 }
 
 export async function checkServer({ optimize = false } = {}) {
-  const result = await createSdk().compile({
+  const result = await createSdk({ compilerCache: "none" }).compile({
     entryPath,
     optimize,
     runtimeDiagnostics: true,

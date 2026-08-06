@@ -79,7 +79,10 @@ export interface TypingResult {
   effects: EffectTable;
   resolvedExprTypes: ReadonlyMap<HirExprId, TypeId>;
   valueTypes: ReadonlyMap<SymbolId, TypeId>;
-  tailResumptions: ReadonlyMap<HirExprId, HirEffectHandlerClause["tailResumption"]>;
+  tailResumptions: ReadonlyMap<
+    HirExprId,
+    HirEffectHandlerClause["tailResumption"]
+  >;
   objectsByNominal: ReadonlyMap<TypeId, ObjectTypeInfo>;
   callTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolRef>>;
   callArgumentPlans: ReadonlyMap<
@@ -87,13 +90,13 @@ export interface TypingResult {
     ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
   >;
   functionInstances: ReadonlyMap<string, TypeId>;
-  callTypeArguments: ReadonlyMap<HirExprId, ReadonlyMap<string, readonly TypeId[]>>;
+  callTypeArguments: ReadonlyMap<
+    HirExprId,
+    ReadonlyMap<string, readonly TypeId[]>
+  >;
   callInstanceKeys: ReadonlyMap<HirExprId, ReadonlyMap<string, string>>;
   callTraitDispatches: ReadonlySet<HirExprId>;
-  borrowCallTargets: ReadonlyMap<
-    HirExprId,
-    ReadonlyMap<string, SymbolRef>
-  >;
+  borrowCallTargets: ReadonlyMap<HirExprId, ReadonlyMap<string, SymbolRef>>;
   borrowCallArgumentPlans: ReadonlyMap<
     HirExprId,
     ReadonlyMap<string, readonly CallArgumentPlanEntry[]>
@@ -104,8 +107,14 @@ export interface TypingResult {
     SymbolRefKey,
     ReadonlyMap<string, readonly TypeId[]>
   >;
-  functionInstanceExprTypes: ReadonlyMap<string, ReadonlyMap<HirExprId, TypeId>>;
-  functionInstanceValueTypes: ReadonlyMap<string, ReadonlyMap<SymbolId, TypeId>>;
+  functionInstanceExprTypes: ReadonlyMap<
+    string,
+    ReadonlyMap<HirExprId, TypeId>
+  >;
+  functionInstanceValueTypes: ReadonlyMap<
+    string,
+    ReadonlyMap<SymbolId, TypeId>
+  >;
   traitImplsByNominal: ReadonlyMap<TypeId, readonly TraitImplInstance[]>;
   traitImplsByTrait: ReadonlyMap<SymbolId, readonly TraitImplInstance[]>;
   traitMethodImpls: ReadonlyMap<SymbolId, TraitMethodImpl>;
@@ -232,7 +241,7 @@ export class FunctionStore {
   cacheInstance(
     key: string,
     returnType: TypeId,
-    exprTypes: ReadonlyMap<HirExprId, TypeId>
+    exprTypes: ReadonlyMap<HirExprId, TypeId>,
   ): void {
     this.#instances.set(key, returnType);
     this.#instanceExprTypes.set(key, new Map(exprTypes));
@@ -240,7 +249,7 @@ export class FunctionStore {
 
   cacheInstanceValueTypes(
     key: string,
-    valueTypes: ReadonlyMap<SymbolId, TypeId>
+    valueTypes: ReadonlyMap<SymbolId, TypeId>,
   ): void {
     this.#instanceValueTypes.set(key, new Map(valueTypes));
   }
@@ -249,18 +258,22 @@ export class FunctionStore {
     return this.#instances.get(key);
   }
 
-  getInstanceExprTypes(key: string): ReadonlyMap<HirExprId, TypeId> | undefined {
+  getInstanceExprTypes(
+    key: string,
+  ): ReadonlyMap<HirExprId, TypeId> | undefined {
     return this.#instanceExprTypes.get(key);
   }
 
-  getInstanceValueTypes(key: string): ReadonlyMap<SymbolId, TypeId> | undefined {
+  getInstanceValueTypes(
+    key: string,
+  ): ReadonlyMap<SymbolId, TypeId> | undefined {
     return this.#instanceValueTypes.get(key);
   }
 
   recordInstantiation(
     symbolRefKey: SymbolRefKey,
     key: string,
-    typeArgs: readonly TypeId[]
+    typeArgs: readonly TypeId[],
   ): void {
     let bySymbol = this.#instantiationInfo.get(symbolRefKey);
     if (!bySymbol) {
@@ -284,12 +297,14 @@ export class FunctionStore {
     return new Map(this.#instances);
   }
 
-  snapshotInstantiationInfo(): Map<SymbolRefKey, Map<string, readonly TypeId[]>> {
+  snapshotInstantiationInfo(): Map<
+    SymbolRefKey,
+    Map<string, readonly TypeId[]>
+  > {
     return new Map(
-      Array.from(this.#instantiationInfo.entries()).map(([symbolRefKey, info]) => [
-        symbolRefKey,
-        new Map(info),
-      ])
+      Array.from(this.#instantiationInfo.entries()).map(
+        ([symbolRefKey, info]) => [symbolRefKey, new Map(info)],
+      ),
     );
   }
 
@@ -298,7 +313,7 @@ export class FunctionStore {
       Array.from(this.#instanceExprTypes.entries()).map(([key, exprs]) => [
         key,
         new Map(exprs),
-      ])
+      ]),
     );
   }
 
@@ -307,7 +322,7 @@ export class FunctionStore {
       Array.from(this.#instanceValueTypes.entries()).map(([key, types]) => [
         key,
         new Map(types),
-      ])
+      ]),
     );
   }
 
@@ -460,12 +475,9 @@ export class ObjectStore {
       copy.#templates.set(symbol, cloneObjectTemplate(template)),
     );
     this.#instances.forEach((info, key) =>
-      copy.#instances.set(key, cloneObjectTypeInfo(info)),
+      copy.addInstance(key, cloneObjectTypeInfo(info)),
     );
     this.#byName.forEach((symbol, name) => copy.#byName.set(name, symbol));
-    this.#byNominal.forEach((info, nominal) =>
-      copy.#byNominal.set(nominal, cloneObjectTypeInfo(info)),
-    );
     this.#decls.forEach((decl, symbol) => copy.#decls.set(symbol, decl));
     return copy;
   }
@@ -511,11 +523,11 @@ export class TraitStore {
     template: TraitImplTemplate;
     conflictsWith: (
       existing: TraitImplTemplate,
-      candidate: TraitImplTemplate
+      candidate: TraitImplTemplate,
     ) => boolean;
   }): TraitImplTemplate | undefined {
     const conflict = this.getImplTemplatesForTrait(template.traitSymbol).find(
-      (existing) => conflictsWith(existing, template)
+      (existing) => conflictsWith(existing, template),
     );
     if (conflict) {
       return conflict;
@@ -669,7 +681,9 @@ export class TypeAliasStore {
     this.#instanceSymbols.forEach((symbols, type) =>
       copy.#instanceSymbols.set(type, new Set(symbols)),
     );
-    this.#validatedInstances.forEach((key) => copy.#validatedInstances.add(key));
+    this.#validatedInstances.forEach((key) =>
+      copy.#validatedInstances.add(key),
+    );
     this.#byName.forEach((symbol, name) => copy.#byName.set(name, symbol));
     this.#failedInstantiations.forEach((key) =>
       copy.#failedInstantiations.add(key),
@@ -851,7 +865,9 @@ const cloneObjectField = (field: ObjectField): ObjectField => ({
   name: field.name,
   type: field.type,
   optional: field.optional,
-  declaringParams: field.declaringParams ? [...field.declaringParams] : undefined,
+  declaringParams: field.declaringParams
+    ? [...field.declaringParams]
+    : undefined,
   visibility: field.visibility ? { ...field.visibility } : undefined,
   owner: field.owner,
   packageId: field.packageId,

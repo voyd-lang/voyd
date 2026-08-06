@@ -1,0 +1,44 @@
+use src::openapi::{ OpenApiResponseContract, openapi_json_response }
+use src::openapi::test_types::AutomaticArticle
+use std::array::Array
+use std::http::Response
+use std::json::stringify
+use std::error::panic
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::response::{ DocumentedResponse, IntoResponse, OpenApiResponse, documented_response }
+use src::router::app
+use src::openapi::automatic::all
+
+obj CustomReply {
+  api message: String
+}
+
+impl IntoResponse<CustomReply> for CustomReply
+  fn into_response(self) -> Response
+    Response::ok().text(self.message)
+
+impl OpenApiResponse<CustomReply> for CustomReply
+  fn documented_responses() -> Array<OpenApiResponseContract>
+    [openapi_json_response<AutomaticArticle>(status: 203, description: "Custom response")]
+
+fn custom_reply() -> DocumentedResponse<CustomReply>
+  documented_response(CustomReply { message: "custom" })
+
+fn raw_unit_reply() -> Response
+  Response::ok().text("raw")
+
+test "automatic routes cover custom and opaque responses":
+  let web_app = app(openapi: { title: "Responses", version: "1" })
+    .get<DocumentedResponse<CustomReply>>("/custom", handler: custom_reply)
+    .get("/raw", handler: raw_unit_reply)
+  match(stringify(web_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"203\"".as_slice(), "missing custom automatic response")
+      require_contains(value, "Opaque response".as_slice(), "raw response was not kept opaque")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

@@ -36,6 +36,13 @@ import {
   unboxSignatureSpillValue,
 } from "../../signature-spill.js";
 import { getOrCreateStaticEffectSpecialization } from "../../effects/static-specialization.js";
+import {
+  compileRuntimeIdentityConflict,
+  compileRuntimeIdentityGuard,
+  projectRuntimeAllocationIdentity,
+  runtimeIdentityForGuardOperand,
+} from "../../runtime-identity-guards.js";
+import { getOrCreateDefaultIdentityGuardEntry } from "../../default-identity-guard-entry.js";
 
 export const emitResolvedCall = ({
   meta,
@@ -65,11 +72,17 @@ export const emitResolvedCall = ({
       ctx,
       fnCtx,
     });
-    const tuple = ctx.mod.tuple.make(captured.lanes as binaryen.ExpressionRef[]);
+    const tuple = ctx.mod.tuple.make(
+      captured.lanes as binaryen.ExpressionRef[],
+    );
     if (captured.setup.length === 0) {
       return tuple;
     }
-    return ctx.mod.block(null, [...captured.setup, tuple], abiTypeFor(abiTypes));
+    return ctx.mod.block(
+      null,
+      [...captured.setup, tuple],
+      abiTypeFor(abiTypes),
+    );
   };
 
   const flattenAbiArgument = (
@@ -99,9 +112,10 @@ export const emitResolvedCall = ({
         ],
       };
     };
-    const valueAbiTypes = binaryen.getExpressionType(value) === binaryen.none
-      ? []
-      : [...binaryen.expandType(binaryen.getExpressionType(value))];
+    const valueAbiTypes =
+      binaryen.getExpressionType(value) === binaryen.none
+        ? []
+        : [...binaryen.expandType(binaryen.getExpressionType(value))];
     if (
       typeof typeId === "number" &&
       abiTypes.length === 1 &&
@@ -166,15 +180,38 @@ export const emitResolvedCall = ({
   const callResultWasmType = wasmTypeFor(expectedTypeId, ctx);
   const callerReturnWasmType =
     fnCtx.returnWasmType ?? wasmTypeFor(fnCtx.returnTypeId, ctx);
-  const staticSpecializedMeta =
-    fnCtx.staticEffectContext
-      ? getOrCreateStaticEffectSpecialization({
+  const identityGuards = ctx.program.calls.getCallInfo(
+    ctx.moduleId,
+    callId,
+  ).identityGuards;
+  const immediateIdentityGuards = identityGuards.filter(
+    (guard) => !guard.afterDefaults,
+  );
+  const deferredIdentityGuards = identityGuards.filter(
+    (guard) => guard.afterDefaults,
+  );
+  deferredIdentityGuards.forEach((guard) => {
+    if (guard.defaultIdentityGuardProtocol !== "presence-conflict-bit-v1") {
+      throw new Error(
+        `call ${callId} is missing the deferred identity-guard protocol`,
+      );
+    }
+  });
+  const staticSpecializedMeta = fnCtx.staticEffectContext
+    ? getOrCreateStaticEffectSpecialization({
+        ctx,
+        meta,
+        context: fnCtx.staticEffectContext,
+      })
+    : undefined;
+  const callBaseMeta = staticSpecializedMeta ?? meta;
+  const resolvedMeta =
+    deferredIdentityGuards.length > 0
+      ? getOrCreateDefaultIdentityGuardEntry({
           ctx,
-          meta,
-          context: fnCtx.staticEffectContext,
+          meta: callBaseMeta,
         })
-      : undefined;
-  const resolvedMeta = staticSpecializedMeta ?? meta;
+      : callBaseMeta;
   const argSetups: binaryen.ExpressionRef[] = [];
   const staticCaptureArgs =
     staticSpecializedMeta && fnCtx.staticEffectContext
@@ -200,25 +237,173 @@ export const emitResolvedCall = ({
             return storageRef;
           }
           return loadBindingValue(binding, ctx, fnCtx);
-      })
+        })
       : [];
 
   const allArgs = [...args, ...staticCaptureArgs];
+  const userArgOffsets: number[] = [];
+  let nextUserArgOffset = 0;
   const userArgs = allArgs.flatMap((arg, index) => {
+    userArgOffsets[index] = nextUserArgOffset;
     const typeId =
       resolvedMeta.scalarAggregateParamIndexes?.includes(index) ||
       (resolvedMeta.parameters[index]?.defaulted === true &&
         !resolvedMeta.callShape)
-      ? undefined
-      : resolvedMeta.paramTypeIds[index];
+        ? undefined
+        : resolvedMeta.paramTypeIds[index];
     const flattened = flattenAbiArgument(
       arg,
       resolvedMeta.paramAbiTypes[index] ?? [binaryen.getExpressionType(arg)],
       typeId,
     );
     argSetups.push(...flattened.setup);
+    nextUserArgOffset += flattened.args.length;
     return flattened.args;
   });
+  const argumentSetups: binaryen.ExpressionRef[] = [];
+  const stabilizedBindings: ReturnType<typeof allocateTempLocal>[] = [];
+  const stabilizedUserArgs =
+    identityGuards.length === 0
+      ? userArgs
+      : userArgs.map((arg) => {
+          const type = binaryen.getExpressionType(arg);
+          const local = allocateTempLocal(type, fnCtx);
+          stabilizedBindings.push(local);
+          argumentSetups.push(ctx.mod.local.set(local.index, arg));
+          return ctx.mod.local.get(local.index, type);
+        });
+  const identityOperandFor = ({
+    parameter,
+    identity,
+    allocationPath,
+  }: {
+    parameter: number;
+    identity: "allocation" | "storage" | "indexed-place";
+    allocationPath?: readonly import("../../../semantics/codegen-view/index.js").CodegenPlaceProjection[];
+  }): binaryen.ExpressionRef => {
+    const offset = userArgOffsets[parameter];
+    const binding =
+      typeof offset === "number" ? stabilizedBindings[offset] : undefined;
+    if (!binding) {
+      throw new Error(
+        `runtime identity guard is missing parameter ${parameter} at call ${callId}`,
+      );
+    }
+    const operand = ctx.mod.local.get(binding.index, binding.type);
+    if (identity === "storage") {
+      return operand;
+    }
+    const allocationIdentity =
+      resolvedMeta.paramAbiKinds[parameter] === "mutable_ref"
+        ? liftHeapValueToInline({
+            value: operand,
+            typeId: resolvedMeta.paramTypeIds[parameter]!,
+            ctx,
+          })
+        : operand;
+    return identity === "allocation"
+      ? projectRuntimeAllocationIdentity({
+          allocation: allocationIdentity,
+          typeId: resolvedMeta.paramTypeIds[parameter]!,
+          path: allocationPath ?? [],
+          context: `call ${callId}`,
+          ctx,
+        })
+      : allocationIdentity;
+  };
+  const identityGuardOps = immediateIdentityGuards.map((guard) =>
+    compileRuntimeIdentityGuard({
+      left: runtimeIdentityForGuardOperand({
+        operand: guard.left,
+        allocation: identityOperandFor(guard.left),
+        context: `call ${callId}`,
+        ctx,
+        fnCtx,
+      }),
+      right: runtimeIdentityForGuardOperand({
+        operand: guard.right,
+        allocation: identityOperandFor(guard.right),
+        context: `call ${callId}`,
+        ctx,
+        fnCtx,
+      }),
+      leftDisplay: guard.left.display,
+      rightDisplay: guard.right.display,
+      context: `call ${callId}`,
+      ctx,
+    }),
+  );
+  const deferredIdentityGuardOps = deferredIdentityGuards.map((guard) => {
+    if (
+      typeof guard.diagnosticId !== "number" ||
+      guard.diagnosticId < 1 ||
+      guard.diagnosticId > 0x3fffffff
+    ) {
+      throw new Error(
+        `runtime identity guard is missing a valid deferred diagnostic id at call ${callId}`,
+      );
+    }
+    const omittedParameter = guard.omittedParameters[0];
+    const parameterOffset =
+      typeof omittedParameter === "number"
+        ? userArgOffsets[omittedParameter]
+        : undefined;
+    const presenceOffset =
+      typeof omittedParameter === "number"
+        ? (resolvedMeta.paramAbiTypes[omittedParameter]?.length ?? 0) - 1
+        : -1;
+    const presenceBinding =
+      typeof parameterOffset === "number" && presenceOffset >= 0
+        ? stabilizedBindings[parameterOffset + presenceOffset]
+        : undefined;
+    if (!presenceBinding || presenceBinding.type !== binaryen.i32) {
+      throw new Error(
+        `runtime identity guard is missing an omitted-default presence lane at call ${callId}`,
+      );
+    }
+    const context = `call ${callId}`;
+    const conflict = compileRuntimeIdentityConflict({
+      left: runtimeIdentityForGuardOperand({
+        operand: guard.left,
+        allocation: identityOperandFor(guard.left),
+        context,
+        ctx,
+        fnCtx,
+      }),
+      right: runtimeIdentityForGuardOperand({
+        operand: guard.right,
+        allocation: identityOperandFor(guard.right),
+        context,
+        ctx,
+        fnCtx,
+      }),
+      context,
+      ctx,
+    });
+    const presenceValue = (): binaryen.ExpressionRef =>
+      ctx.mod.local.get(presenceBinding.index, binaryen.i32);
+    const noConflictRecorded = ctx.mod.i32.eq(
+      ctx.mod.i32.shr_u(presenceValue(), ctx.mod.i32.const(1)),
+      ctx.mod.i32.const(0),
+    );
+    return ctx.mod.local.set(
+      presenceBinding.index,
+      ctx.mod.if(
+        ctx.mod.i32.and(conflict, noConflictRecorded),
+        ctx.mod.i32.or(
+          presenceValue(),
+          ctx.mod.i32.const(guard.diagnosticId << 1),
+        ),
+        presenceValue(),
+      ),
+    );
+  });
+  const preCallOps = [
+    ...argSetups,
+    ...argumentSetups,
+    ...identityGuardOps,
+    ...deferredIdentityGuardOps,
+  ];
   const usingProvidedWideResultStorage =
     !resolvedMeta.effectful &&
     resolvedMeta.resultAbiKind === "out_ref" &&
@@ -249,16 +434,12 @@ export const emitResolvedCall = ({
   const callArgs = resolvedMeta.effectful
     ? [
         currentHandlerValue(ctx, fnCtx),
-        ...(initializedWideResultStorage
-          ? [initializedWideResultStorage]
-          : []),
-        ...userArgs,
+        ...(initializedWideResultStorage ? [initializedWideResultStorage] : []),
+        ...stabilizedUserArgs,
       ]
-      : [
-        ...(initializedWideResultStorage
-          ? [initializedWideResultStorage]
-          : []),
-        ...userArgs,
+    : [
+        ...(initializedWideResultStorage ? [initializedWideResultStorage] : []),
+        ...stabilizedUserArgs,
       ];
 
   if (resolvedMeta.effectful) {
@@ -268,11 +449,11 @@ export const emitResolvedCall = ({
       resolvedMeta.resultType,
     );
     const callExpr =
-      argSetups.length === 0
+      preCallOps.length === 0
         ? rawCall
         : ctx.mod.block(
             null,
-            [...argSetups, rawCall],
+            [...preCallOps, rawCall],
             resolvedMeta.resultType,
           );
     return ctx.effectsBackend.lowerEffectfulCallResult({
@@ -289,7 +470,7 @@ export const emitResolvedCall = ({
 
   const allowReturnCall =
     resolvedMeta.resultAbiKind === "direct" &&
-    argSetups.length === 0 &&
+    preCallOps.length === 0 &&
     tailPosition &&
     !fnCtx.effectful &&
     resolvedMeta.resultTypeId === expectedTypeId &&
@@ -303,7 +484,7 @@ export const emitResolvedCall = ({
       expr: ctx.mod.return_call(
         resolvedMeta.wasmName,
         callArgs as number[],
-        intrinsicResultWasmType
+        intrinsicResultWasmType,
       ),
       usedReturnCall: true,
     };
@@ -315,10 +496,7 @@ export const emitResolvedCall = ({
     resolvedMeta.resultType,
   );
   if (usingProvidedWideResultStorage) {
-    const ops =
-      argSetups.length === 0
-        ? [rawCall]
-        : [...argSetups, rawCall];
+    const ops = preCallOps.length === 0 ? [rawCall] : [...preCallOps, rawCall];
     return {
       expr: ctx.mod.block(null, ops, binaryen.none),
       usedReturnCall: false,
@@ -327,10 +505,7 @@ export const emitResolvedCall = ({
   }
   if (resolvedMeta.resultAbiKind === "out_ref" && wideResultStorage) {
     const reloaded = liftHeapValueToInline({
-      value: ctx.mod.local.get(
-        wideResultStorage.index,
-        wideResultStorage.type,
-      ),
+      value: ctx.mod.local.get(wideResultStorage.index, wideResultStorage.type),
       typeId: resolvedMeta.resultTypeId,
       ctx,
     });
@@ -345,12 +520,23 @@ export const emitResolvedCall = ({
             fnCtx,
           });
     const ops =
-      argSetups.length === 0
-        ? [rawCall, coerceExprToWasmType({ expr: coerced, targetType: callResultWasmType, ctx })]
-        : [
-            ...argSetups,
+      preCallOps.length === 0
+        ? [
             rawCall,
-            coerceExprToWasmType({ expr: coerced, targetType: callResultWasmType, ctx }),
+            coerceExprToWasmType({
+              expr: coerced,
+              targetType: callResultWasmType,
+              ctx,
+            }),
+          ]
+        : [
+            ...preCallOps,
+            rawCall,
+            coerceExprToWasmType({
+              expr: coerced,
+              targetType: callResultWasmType,
+              ctx,
+            }),
           ];
     return {
       expr: ctx.mod.block(null, ops, callResultWasmType),
@@ -363,11 +549,11 @@ export const emitResolvedCall = ({
   );
   if (resolvedMeta.scalarAggregateResult) {
     const callExpr =
-      argSetups.length === 0
+      preCallOps.length === 0
         ? stabilizedCall
         : ctx.mod.block(
             null,
-            [...argSetups, stabilizedCall],
+            [...preCallOps, stabilizedCall],
             binaryen.getExpressionType(stabilizedCall),
           );
     return {
@@ -386,11 +572,11 @@ export const emitResolvedCall = ({
         })
       : stabilizedCall;
   const callExpr =
-    argSetups.length === 0
+    preCallOps.length === 0
       ? decodedCall
       : ctx.mod.block(
           null,
-          [...argSetups, decodedCall],
+          [...preCallOps, decodedCall],
           binaryen.getExpressionType(decodedCall),
         );
   const coercedCall =

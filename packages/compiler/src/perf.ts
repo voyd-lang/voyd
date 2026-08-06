@@ -23,9 +23,11 @@ export type CompilerPerfSession = {
 const COMPILER_PERF_ENV = "VOYD_COMPILER_PERF";
 
 const readPerfEnv = (): string | undefined => {
-  const processValue = (globalThis as {
-    process?: { env?: Record<string, string | undefined> };
-  }).process;
+  const processValue = (
+    globalThis as {
+      process?: { env?: Record<string, string | undefined> };
+    }
+  ).process;
   return processValue?.env?.[COMPILER_PERF_ENV];
 };
 
@@ -40,8 +42,7 @@ const counters = new Map<string, number>();
 const phaseDurationsMs = new Map<string, number>();
 const activeSessions = new Set<CompilerPerfSession>();
 
-const roundMs = (value: number): number =>
-  Math.round(value * 1000) / 1000;
+const roundMs = (value: number): number => Math.round(value * 1000) / 1000;
 
 const toSortedRecord = (
   entries: ReadonlyMap<string, number>,

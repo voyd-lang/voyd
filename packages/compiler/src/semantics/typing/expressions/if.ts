@@ -10,7 +10,7 @@ export const typeIfExpr = (
   expr: HirIfExpr,
   ctx: TypingContext,
   state: TypingState,
-  options: TypeExpressionOptions
+  options: TypeExpressionOptions,
 ): TypeId => {
   const hasDefault = typeof expr.defaultBranch === "number";
   const discardValue = options.discardValue === true || !hasDefault;
@@ -40,7 +40,7 @@ export const typeIfExpr = (
       composeEffectRows(ctx.effects, [
         getExprEffectRow(branch.condition, ctx),
         getExprEffectRow(branch.value, ctx),
-      ])
+      ]),
     );
     if (!discardValue) {
       branchType = mergeBranchType({
@@ -50,6 +50,7 @@ export const typeIfExpr = (
         state,
         span: ctx.hir.expressions.get(branch.value)?.span,
         context: "if branch",
+        expected: expectedBranchType,
       });
     }
   });
@@ -61,7 +62,7 @@ export const typeIfExpr = (
     });
     effectRow = ctx.effects.compose(
       effectRow,
-      getExprEffectRow(expr.defaultBranch!, ctx)
+      getExprEffectRow(expr.defaultBranch!, ctx),
     );
     ctx.effects.setExprEffect(expr.id, effectRow);
     if (discardValue) {
@@ -75,6 +76,7 @@ export const typeIfExpr = (
       state,
       span: ctx.hir.expressions.get(expr.defaultBranch!)?.span,
       context: "if default branch",
+      expected: expectedBranchType,
     });
     return branchType ?? ctx.primitives.void;
   }

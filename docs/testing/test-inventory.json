@@ -1329,6 +1329,20 @@
     "rationale": "Keep compiler-local: exercises HIR-level borrow facts, interprocedural contracts, place overlap, effect-boundary validation, and diagnostic structure; portable source behavior is separately covered by conformance cases."
   },
   {
+    "file": "packages/compiler/src/semantics/borrowing/__tests__/callable-result-provenance.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-29",
+    "disposition": "compiler-local",
+    "rationale": "Compiler-local result provenance, callback composition, separate-compilation privacy, path correlation, variant narrowing, defaults, and recursive widening."
+  },
+  {
+    "file": "packages/compiler/src/semantics/borrowing/__tests__/capability.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-08-03",
+    "disposition": "compiler-local",
+    "rationale": "Compiler-local capability lattice and pure classifier contracts, including HIR-free routing inputs, monotonic joins, and conservative unknown behavior."
+  },
+  {
     "file": "packages/compiler/src/semantics/effects/__tests__/effect-table.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
@@ -2384,10 +2398,40 @@
     "rationale": "Keep co-located: protects pkg::web automatic app-owned request inference, schema identity, route metadata, and public route-surface contracts through the native Voyd test runner."
   },
   {
-    "file": "packages/web/src/openapi/openapi_builder.test.voyd",
+    "file": "packages/web/src/openapi/openapi_builder_json_body.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
-    "rationale": "Keep co-located: protects the retained low-level pkg::web OpenAPI builder and schema rendering contract through the native Voyd test runner."
+    "rationale": "Keep co-located: protects pkg::web low-level OpenAPI JSON request-schema rendering through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder_json_response.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web low-level OpenAPI JSON response-schema rendering through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder_path.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web low-level OpenAPI operation and path-parameter documentation through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder_query.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web low-level OpenAPI query-parameter documentation through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder_recursive.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web low-level recursive OpenAPI component identity through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_builder_sse.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web low-level typed SSE OpenAPI response metadata through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/openapi/openapi_composition.test.voyd",
@@ -2396,10 +2440,106 @@
     "rationale": "Keep co-located: protects pkg::web grouping, mounting, exposure exclusion, and HTTP-method contract preservation through the native Voyd test runner."
   },
   {
-    "file": "packages/web/src/openapi/openapi_responses.test.voyd",
+    "file": "packages/web/src/openapi/openapi_operation_docs.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
-    "rationale": "Keep co-located: protects pkg::web typed, composite, custom, opaque, and manually overridden response contracts through the native Voyd test runner."
+    "rationale": "Keep co-located: protects the pkg::web low-level Operation.with_docs response-schema overlay contract through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_alternatives.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web same-status typed response alternatives through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_automatic_binary.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic binary response media inference through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_automatic_composites.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic status, result, and option response inference through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_automatic_html.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic HTML response media inference through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_automatic_media.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic text response media inference through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_automatic_sse.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic SSE response media and event-schema metadata through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_composite_contracts.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web explicit result and option response contracts through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_contracts.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web inferred success and empty-status response contracts through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_explicit_docs.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web explicit custom and raw response documentation through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_helpers.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web JSON result and option helper response inference through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_opaque_contracts.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web opaque result and option response branches through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_overrides.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web request, media-type, and typed-header response overrides through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_routes.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web automatic custom and opaque response inference through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_sse.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web explicit SSE schema and route documentation overlays through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_text_contract.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web explicit text response media contracts through the native Voyd test runner."
+  },
+  {
+    "file": "packages/web/src/openapi/openapi_response_untyped_overrides.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects pkg::web honest untyped parameter and response-header schemas through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/phase2.test.voyd",
@@ -2430,6 +2570,26 @@
     "owner": "package-unit",
     "disposition": "package-local",
     "rationale": "Keep co-located: protects release tooling path discovery against Git porcelain parsing regressions."
+  },
+  {
+    "file": "scripts/release/source-versions.test.mjs",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects release synchronization of compiler and standard-library source version identities.",
+    "reviewed": "2026-07-30"
+  },
+  {
+    "file": "scripts/testing/run-web-test-shards.test.mjs",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep with CI tooling: protects deterministic complete web-shard partition selection and rejects invalid partition arguments."
+  },
+  {
+    "file": "scripts/testing/timing-budget.test.mjs",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Keep co-located: protects exact-path CI timing exceptions and their precedence over broader file budgets.",
+    "reviewed": "2026-07-30"
   },
   {
     "file": "tests/conformance/src/effects.test.ts",
@@ -2574,6 +2734,12 @@
     "owner": "cross-package-integration",
     "disposition": "cross-package-integration",
     "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
+  },
+  {
+    "file": "tests/performance/src/memory-mutation-safety.test.ts",
+    "owner": "performance",
+    "disposition": "opt-in-performance",
+    "rationale": "Keep opt-in: verifies proposal-wide compile/runtime/allocation/guard parity and records performance signals outside default correctness CI."
   },
   {
     "file": "tests/performance/src/recursive-effect-evaluator.test.ts",

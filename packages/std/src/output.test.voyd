@@ -11,15 +11,27 @@ use std::string::type::{ String, StringSlice, new_string }
 use std::test::assertions::all
 use std::test::host_dto::self as host_dto_test
 
+obj StringOutputCapture {
+  values: Array<String>,
+  targets: Array<String>
+}
+
+obj ByteOutputCapture {
+  values: Array<i32>,
+  targets: Array<String>
+}
+
 test "output write defaults to stdout":
-  let ~values = Array<String>::init()
-  let ~targets = Array<String>::init()
-  let result = write_with_capture(values, targets)
+  let ~capture = StringOutputCapture {
+    values: Array<String>::init(),
+    targets: Array<String>::init()
+  }
+  let result = write_with_capture(capture)
 
   match(result)
     Ok<Unit>:
-      assert(optional_string_or(values.get(0), "missing".as_slice()).equals("hello"), eq: true)
-      assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
+      assert(optional_string_or(capture.values.get(0), "missing".as_slice()).equals("hello"), eq: true)
+      assert(optional_string_or(capture.targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
     Err<IoError>:
       assert(false, eq: true)
 
@@ -34,16 +46,18 @@ test "output write encodes stderr target":
       assert(false, eq: true)
 
 test "output write_line appends exactly newline":
-  let ~targets = Array<String>::init()
-  let ~values = Array<String>::init()
-  let result = write_line_with_capture(targets, values)
+  let ~capture = StringOutputCapture {
+    values: Array<String>::init(),
+    targets: Array<String>::init()
+  }
+  let result = write_line_with_capture(capture)
 
   match(result)
     Ok<Unit>:
-      assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
-      assert(targets.len(), eq: 1)
-      assert(values.len(), eq: 1)
-      let line = optional_string_or(values.get(0), "missing".as_slice())
+      assert(optional_string_or(capture.targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
+      assert(capture.targets.len(), eq: 1)
+      assert(capture.values.len(), eq: 1)
+      let line = optional_string_or(capture.values.get(0), "missing".as_slice())
       let bytes = line.to_utf8()
       assert(optional_i32_or(bytes.get(0), -1), eq: 104)
       assert(optional_i32_or(bytes.get(1), -1), eq: 105)
@@ -52,29 +66,33 @@ test "output write_line appends exactly newline":
       assert(false, eq: true)
 
 test "output print appends exactly newline and ignores result":
-  let ~targets = Array<String>::init()
-  let ~values = Array<String>::init()
-  print_with_capture(targets, values)
+  let ~capture = StringOutputCapture {
+    values: Array<String>::init(),
+    targets: Array<String>::init()
+  }
+  print_with_capture(capture)
 
-  assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
-  assert(targets.len(), eq: 1)
-  assert(values.len(), eq: 1)
-  let line = optional_string_or(values.get(0), "missing".as_slice())
+  assert(optional_string_or(capture.targets.get(0), "missing".as_slice()).equals("stdout"), eq: true)
+  assert(capture.targets.len(), eq: 1)
+  assert(capture.values.len(), eq: 1)
+  let line = optional_string_or(capture.values.get(0), "missing".as_slice())
   let bytes = line.to_utf8()
   assert(optional_i32_or(bytes.get(0), -1), eq: 104)
   assert(optional_i32_or(bytes.get(1), -1), eq: 105)
   assert(optional_i32_or(bytes.get(2), -1), eq: 10)
 
 test "output write(Bytes) encodes stderr target":
-  let ~targets = Array<String>::init()
-  let ~values = Array<i32>::init()
-  let result = write_byte_payload_with_capture(targets, values)
+  let ~capture = ByteOutputCapture {
+    values: Array<i32>::init(),
+    targets: Array<String>::init()
+  }
+  let result = write_byte_payload_with_capture(capture)
 
   match(result)
     Ok<Unit>:
-      assert(optional_string_or(targets.get(0), "missing".as_slice()).equals("stderr"), eq: true)
-      assert(optional_i32_or(values.get(0), -1), eq: 7)
-      assert(optional_i32_or(values.get(1), -1), eq: 8)
+      assert(optional_string_or(capture.targets.get(0), "missing".as_slice()).equals("stderr"), eq: true)
+      assert(optional_i32_or(capture.values.get(0), -1), eq: 7)
+      assert(optional_i32_or(capture.values.get(1), -1), eq: 8)
     Err<IoError>:
       assert(false, eq: true)
 
@@ -108,13 +126,13 @@ test "output write decodes host errors":
     Ok<Unit>:
       assert(false, eq: true)
 
-fn write_with_capture(~values: Array<String>, ~targets: Array<String>): () -> Result<Unit, IoError>
+fn write_with_capture(~capture: StringOutputCapture): () -> Result<Unit, IoError>
   try
     write("hello".as_slice().to_string())
   Output::write_op(tail, payload):
     let decoded = unpack_host_dto(payload)
-    values.push(read_host_string(decoded, "value"))
-    targets.push(read_host_string(decoded, "target"))
+    capture.values.push(read_host_string(decoded, "value"))
+    capture.targets.push(read_host_string(decoded, "target"))
     tail(host_dto_test::host_ok_payload())
   Output::write_bytes_op(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
@@ -137,16 +155,13 @@ fn write_stderr_with_capture(~targets: Array<String>): () -> Result<Unit, IoErro
   Output::is_tty_op(tail, _payload):
     tail(false)
 
-fn write_line_with_capture(
-  ~targets: Array<String>,
-  ~values: Array<String>
-): () -> Result<Unit, IoError>
+fn write_line_with_capture(~capture: StringOutputCapture): () -> Result<Unit, IoError>
   try
     write_line("hi".as_slice().to_string())
   Output::write_op(tail, payload):
     let decoded = unpack_host_dto(payload)
-    targets.push(read_host_string(decoded, "target"))
-    values.push(read_host_string(decoded, "value"))
+    capture.targets.push(read_host_string(decoded, "target"))
+    capture.values.push(read_host_string(decoded, "value"))
     tail(host_dto_test::host_ok_payload())
   Output::write_bytes_op(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
@@ -155,13 +170,13 @@ fn write_line_with_capture(
   Output::is_tty_op(tail, _payload):
     tail(false)
 
-fn print_with_capture(~targets: Array<String>, ~values: Array<String>): () -> void
+fn print_with_capture(~capture: StringOutputCapture): () -> void
   try
     print("hi".as_slice().to_string())
   Output::write_op(tail, payload):
     let decoded = unpack_host_dto(payload)
-    targets.push(read_host_string(decoded, "target"))
-    values.push(read_host_string(decoded, "value"))
+    capture.targets.push(read_host_string(decoded, "target"))
+    capture.values.push(read_host_string(decoded, "value"))
     tail(host_dto_test::host_ok_payload())
   Output::write_bytes_op(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
@@ -170,10 +185,7 @@ fn print_with_capture(~targets: Array<String>, ~values: Array<String>): () -> vo
   Output::is_tty_op(tail, _payload):
     tail(false)
 
-fn write_byte_payload_with_capture(
-  ~targets: Array<String>,
-  ~values: Array<i32>
-): () -> Result<Unit, IoError>
+fn write_byte_payload_with_capture(~capture: ByteOutputCapture): () -> Result<Unit, IoError>
   let ~buffer = ByteBuffer::with_capacity(2)
   buffer.push(7)
   buffer.push(8)
@@ -182,8 +194,8 @@ fn write_byte_payload_with_capture(
     write(buffer.as_bytes(), StdErr {})
   Output::write_bytes_op(tail, payload):
     let decoded = unpack_host_dto(payload)
-    targets.push(read_host_string(decoded, "target"))
-    decode_bytes_into(read_host_msgpack(decoded, "bytes"), values)
+    capture.targets.push(read_host_string(decoded, "target"))
+    decode_bytes_into(read_host_msgpack(decoded, "bytes"), capture.values)
     tail(host_dto_test::host_ok_payload())
   Output::write_op(tail, _payload):
     tail(host_dto_test::host_default_error_payload())

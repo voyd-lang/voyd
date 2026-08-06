@@ -256,23 +256,25 @@ const prefixesOverlapAt = ({
     return false;
   }
 
-  return withForkedOverlap(overlap, (candidate) =>
-    typesOverlap({
-      left: leftParam.type,
-      right: rightParam.type,
-      ctx,
-      state,
-      overlap: candidate,
-    }) &&
-    prefixesOverlapAt({
-      left,
-      right,
-      leftIndex: leftIndex + 1,
-      rightIndex: rightIndex + 1,
-      ctx,
-      state,
-      overlap: candidate,
-    }),
+  return withForkedOverlap(
+    overlap,
+    (candidate) =>
+      typesOverlap({
+        left: leftParam.type,
+        right: rightParam.type,
+        ctx,
+        state,
+        overlap: candidate,
+      }) &&
+      prefixesOverlapAt({
+        left,
+        right,
+        leftIndex: leftIndex + 1,
+        rightIndex: rightIndex + 1,
+        ctx,
+        state,
+        overlap: candidate,
+      }),
   );
 };
 
@@ -348,7 +350,10 @@ const hasShapeSubsumptionSignal = ({
   );
 };
 
-const labelsEqual = (left: readonly string[], right: readonly string[]): boolean =>
+const labelsEqual = (
+  left: readonly string[],
+  right: readonly string[],
+): boolean =>
   left.length === right.length &&
   left.every((label, index) => label === right[index]);
 
@@ -644,6 +649,8 @@ const containsTypeParamRef = ({
 
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
+    case "borrowed":
+      return containsTypeParamRef({ type: desc.inner, ctx, seen });
     case "type-param-ref":
       return true;
     case "recursive":
@@ -669,11 +676,7 @@ const containsTypeParamRef = ({
         containsTypeParamRef({ type: member, ctx, seen }),
       );
     case "intersection":
-      return [
-        desc.nominal,
-        desc.structural,
-        ...(desc.traits ?? []),
-      ].some(
+      return [desc.nominal, desc.structural, ...(desc.traits ?? [])].some(
         (component): component is number =>
           typeof component === "number" &&
           containsTypeParamRef({ type: component, ctx, seen }),

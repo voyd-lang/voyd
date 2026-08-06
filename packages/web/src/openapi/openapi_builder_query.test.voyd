@@ -1,0 +1,37 @@
+use src::openapi::{ document, info, operation }
+use src::openapi::test_types::DocumentedArticleQuery
+use src::openapi::automatic::all
+use std::error::panic
+use std::http::Method
+use std::json::stringify
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+
+test "OpenAPI reflects query documentation":
+  let route_operation = operation()
+    .with_query<DocumentedArticleQuery>()
+  let spec = document(info(
+    title: "Article API".as_slice(),
+    version: "1.0.0".as_slice(),
+    description: "Example API".as_slice().to_string()
+  )).route(
+    "/articles".as_slice(),
+    method: Method::Get {},
+    operation: route_operation
+  )
+
+  match(stringify(spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(
+        value,
+        "Include unpublished articles when true.".as_slice(),
+        "missing query documentation"
+      )
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

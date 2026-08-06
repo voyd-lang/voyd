@@ -1,6 +1,9 @@
 import type { SourceSpan, TypeId } from "../../ids.js";
 import type { TypingContext, TypingState } from "../types.js";
-import { internCheckedUnion } from "../type-system.js";
+import {
+  internCheckedUnion,
+  typeSatisfiesBorrowFormation,
+} from "../type-system.js";
 import { satisfies as typeSatisfies } from "../type-relations.js";
 import { emitDiagnostic, normalizeSpan } from "../../../diagnostics/index.js";
 
@@ -11,6 +14,7 @@ export const mergeBranchType = ({
   state,
   span,
   context,
+  expected,
 }: {
   acc: TypeId | undefined;
   next: TypeId;
@@ -18,7 +22,18 @@ export const mergeBranchType = ({
   state: TypingState;
   span?: SourceSpan;
   context?: string;
+  expected?: TypeId;
 }): TypeId => {
+  if (
+    typeof expected === "number" &&
+    expected !== ctx.primitives.unknown &&
+    ctx.arena.get(expected).kind !== "type-param-ref" &&
+    typeSatisfiesBorrowFormation(next, expected, ctx, state) &&
+    (typeof acc !== "number" ||
+      typeSatisfiesBorrowFormation(acc, expected, ctx, state))
+  ) {
+    return expected;
+  }
   if (typeof acc !== "number") {
     return next;
   }
@@ -68,7 +83,7 @@ type BranchWasmRepresentation =
 export const branchWasmRepresentation = (
   type: TypeId,
   ctx: TypingContext,
-  seen: Set<TypeId> = new Set()
+  seen: Set<TypeId> = new Set(),
 ): BranchWasmRepresentation => {
   if (seen.has(type)) {
     return "ref";
@@ -77,6 +92,8 @@ export const branchWasmRepresentation = (
 
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
+    case "borrowed":
+      return branchWasmRepresentation(desc.inner, ctx, seen);
     case "primitive":
       switch (desc.name) {
         case "i32":
@@ -107,11 +124,11 @@ export const branchWasmRepresentation = (
     case "union": {
       const memberReprs = new Set(
         desc.members.map((member) =>
-          branchWasmRepresentation(member, ctx, seen)
-        )
+          branchWasmRepresentation(member, ctx, seen),
+        ),
       );
       return memberReprs.size === 1
-        ? memberReprs.values().next().value ?? "mixed"
+        ? (memberReprs.values().next().value ?? "mixed")
         : "mixed";
     }
     case "intersection": {
@@ -122,7 +139,9 @@ export const branchWasmRepresentation = (
       if (typeof desc.structural === "number") {
         reps.add(branchWasmRepresentation(desc.structural, ctx, seen));
       }
-      return reps.size === 1 ? reps.values().next().value ?? "mixed" : "mixed";
+      return reps.size === 1
+        ? (reps.values().next().value ?? "mixed")
+        : "mixed";
     }
     case "type-param-ref":
       return "unknown";

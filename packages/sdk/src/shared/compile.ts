@@ -4,10 +4,15 @@ import { DiagnosticError } from "@voyd-lang/compiler/diagnostics/index.js";
 import {
   commitDependencySnapshot,
   createCompilerDependencySnapshotCache,
+  exportCompilerDependencyBorrowArtifact,
   prepareDependencySnapshotReuse,
+  type CompilerDependencyBorrowArtifact,
   type CompilerDependencySnapshotCache,
 } from "@voyd-lang/compiler/modules/dependency-snapshot-cache.js";
-import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
+import type {
+  ModuleHost,
+  ModuleRoots,
+} from "@voyd-lang/compiler/modules/types.js";
 import {
   analyzeModules,
   emitProgram,
@@ -24,7 +29,7 @@ import {
 } from "@voyd-lang/compiler/perf.js";
 import type { BoundaryExportsOption } from "@voyd-lang/compiler/codegen/context.js";
 import type { OptimizationLevel } from "@voyd-lang/compiler/optimization-policy.js";
-import type { TestCase } from "./types.js";
+import type { CreateSdkOptions, TestCase } from "./types.js";
 import { diagnosticsFromUnknownError } from "./diagnostics.js";
 
 export type CompileArtifactsSuccess = {
@@ -40,14 +45,42 @@ export type CompileArtifactsFailure = {
   diagnostics: Diagnostic[];
 };
 
-export type CompileArtifacts = CompileArtifactsSuccess | CompileArtifactsFailure;
+export type CompileArtifacts =
+  | CompileArtifactsSuccess
+  | CompileArtifactsFailure;
 
 export type CompilerReuseCache = CompilerDependencySnapshotCache;
 
 const hasErrorDiagnostics = (diagnostics: readonly Diagnostic[]): boolean =>
   diagnostics.some((diagnostic) => diagnostic.severity === "error");
 
-export const createCompilerReuseCache = createCompilerDependencySnapshotCache;
+export const createCompilerReuseCache = (
+  options: CreateSdkOptions,
+): CompilerReuseCache | undefined => {
+  const cacheOptions = options as {
+    compilerCache?: unknown;
+    compilerArtifact?: CompilerDependencyBorrowArtifact;
+  };
+  const policy = cacheOptions.compilerCache;
+  if (
+    policy !== undefined &&
+    policy !== "memory" &&
+    policy !== "artifact" &&
+    policy !== "none"
+  ) {
+    throw new Error(`unknown compiler cache policy ${JSON.stringify(policy)}`);
+  }
+  if (policy === "none" && cacheOptions.compilerArtifact !== undefined) {
+    throw new Error('compilerArtifact requires compilerCache: "artifact"');
+  }
+  return policy === "none"
+    ? undefined
+    : createCompilerDependencySnapshotCache(cacheOptions.compilerArtifact, {
+        artifactEnabled: policy === "artifact",
+      });
+};
+export const exportCompilerReuseArtifact =
+  exportCompilerDependencyBorrowArtifact;
 
 export const compileWithLoader = async ({
   entryPath,
@@ -153,7 +186,6 @@ export const compileWithLoader = async ({
       roots,
       includeTests: shouldIncludeTests,
     });
-
     const analyzeStartedAt = perf.start();
     const {
       semantics,
@@ -167,6 +199,8 @@ export const compileWithLoader = async ({
       captureDependencySnapshot: Boolean(dependencySnapshotReuse.key),
       previousSemantics: dependencySnapshotReuse.previousSemantics,
       typingState: dependencySnapshotReuse.typingState,
+      reusableBorrowing: dependencySnapshotReuse.reusableBorrowing,
+      retainBorrowingIncrementalData: cache?.artifactEnabled === true,
     });
     perf.mark("analyzeModules", analyzeStartedAt);
     const diagnostics = [...graph.diagnostics, ...semanticDiagnostics];
@@ -187,7 +221,7 @@ export const compileWithLoader = async ({
     try {
       if (testsOnly) {
         const emitStartedAt = perf.start();
-        const testResult = await emitProgram({
+        const testResult = await emitSdkWasm({
           graph,
           semantics,
           codegenOptions: {
@@ -202,16 +236,18 @@ export const compileWithLoader = async ({
           return perf.complete({ success: false, diagnostics: allDiagnostics });
         }
 
-        return perf.complete(await finalize({
-          success: true,
-          wasm: testResult.wasm,
-          tests: testCases,
-          testsWasm: testResult.wasm,
-        }));
+        return perf.complete(
+          await finalize({
+            success: true,
+            wasm: testResult.wasm,
+            tests: testCases,
+            testsWasm: testResult.wasm,
+          }),
+        );
       }
 
       const emitStartedAt = perf.start();
-      const wasmResult = await emitProgram({
+      const wasmResult = await emitSdkWasm({
         graph,
         semantics,
         codegenOptions: codegenOption,
@@ -226,7 +262,7 @@ export const compileWithLoader = async ({
 
       if (shouldIncludeTests && tests.length > 0) {
         const testEmitStartedAt = perf.start();
-        const testResult = await emitProgram({
+        const testResult = await emitSdkWasm({
           graph,
           semantics,
           codegenOptions: {
@@ -243,12 +279,14 @@ export const compileWithLoader = async ({
         testsWasm = testResult.wasm;
       }
 
-      return perf.complete(await finalize({
-        success: true,
-        wasm: wasmResult.wasm,
-        tests: testCases,
-        testsWasm,
-      }));
+      return perf.complete(
+        await finalize({
+          success: true,
+          wasm: wasmResult.wasm,
+          tests: testCases,
+          testsWasm,
+        }),
+      );
     } catch (error) {
       const codegenDiagnostics =
         error instanceof DiagnosticError
@@ -299,4 +337,18 @@ const createCompilePerfScope = ({
   };
 
   return { start, mark, complete };
+};
+
+const emitSdkWasm = async (
+  options: Parameters<typeof emitProgram>[0],
+): Promise<{ wasm: Uint8Array; diagnostics: Diagnostic[] }> => {
+  const result = await emitProgram(options);
+  try {
+    return {
+      wasm: new Uint8Array(result.wasm),
+      diagnostics: result.diagnostics,
+    };
+  } finally {
+    result.module.dispose();
+  }
 };

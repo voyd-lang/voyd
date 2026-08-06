@@ -74,6 +74,14 @@ import {
   compileOptionalSomeValue,
 } from "./optionals.js";
 import { DiagnosticError, diagnosticFromCode } from "../diagnostics/index.js";
+import {
+  compilePanicTrap,
+  ensurePanicTrapGlobals,
+  PANIC_SCRATCH_CAPACITY_GLOBAL,
+  PANIC_SCRATCH_PTR_GLOBAL,
+  PANIC_TRAP_LEN_GLOBAL,
+  PANIC_TRAP_PTR_GLOBAL,
+} from "./panic.js";
 
 type NumericKind = "i32" | "i64" | "f32" | "f64";
 type EqualityKind = NumericKind | "bool";
@@ -118,10 +126,6 @@ interface EmitFloatUnaryIntrinsicParams {
   ctx: CodegenContext;
 }
 
-const PANIC_TRAP_PTR_GLOBAL = "__voyd_panic_ptr";
-const PANIC_TRAP_LEN_GLOBAL = "__voyd_panic_len";
-const PANIC_SCRATCH_PTR_GLOBAL = "__voyd_panic_scratch_ptr";
-const PANIC_SCRATCH_CAPACITY_GLOBAL = "__voyd_panic_scratch_capacity";
 const TASK_IMPORT_MODULE = "voyd.task";
 const TASK_IMPORTS_KEY = Symbol("voyd.task.imports");
 const TASK_STARTERS_KEY = Symbol("voyd.task.starters");
@@ -137,43 +141,6 @@ const RENDER_CALLBACK_IMPORT_MODULE = "voyd.render.callback";
 const RENDER_CALLBACK_IMPORTS_KEY = Symbol("voyd.render.callback.imports");
 const CALLBACK_SCOPE_IMPORT_MODULE = "voyd.callback.scope";
 const CALLBACK_SCOPE_IMPORTS_KEY = Symbol("voyd.callback.scope.imports");
-
-const ensurePanicTrapGlobals = (ctx: CodegenContext): void => {
-  if (ctx.mod.getGlobal(PANIC_TRAP_PTR_GLOBAL) === 0) {
-    ctx.mod.addGlobal(
-      PANIC_TRAP_PTR_GLOBAL,
-      binaryen.i32,
-      true,
-      ctx.mod.i32.const(-1),
-    );
-    ctx.mod.addGlobalExport(PANIC_TRAP_PTR_GLOBAL, PANIC_TRAP_PTR_GLOBAL);
-  }
-  if (ctx.mod.getGlobal(PANIC_TRAP_LEN_GLOBAL) === 0) {
-    ctx.mod.addGlobal(
-      PANIC_TRAP_LEN_GLOBAL,
-      binaryen.i32,
-      true,
-      ctx.mod.i32.const(0),
-    );
-    ctx.mod.addGlobalExport(PANIC_TRAP_LEN_GLOBAL, PANIC_TRAP_LEN_GLOBAL);
-  }
-  if (ctx.mod.getGlobal(PANIC_SCRATCH_PTR_GLOBAL) === 0) {
-    ctx.mod.addGlobal(
-      PANIC_SCRATCH_PTR_GLOBAL,
-      binaryen.i32,
-      true,
-      ctx.mod.i32.const(-1),
-    );
-  }
-  if (ctx.mod.getGlobal(PANIC_SCRATCH_CAPACITY_GLOBAL) === 0) {
-    ctx.mod.addGlobal(
-      PANIC_SCRATCH_CAPACITY_GLOBAL,
-      binaryen.i32,
-      true,
-      ctx.mod.i32.const(0),
-    );
-  }
-};
 
 const sanitizeTaskKey = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
@@ -808,16 +775,9 @@ const compileSharedCellStateIntrinsic = ({
   const cellRef = () => ctx.mod.local.get(cell.index, cellType);
   const stateType = wasmTypeFor(state.typeId, ctx);
   const stateStorage = allocateTempLocal(stateType, fnCtx);
-  const stateRef = () =>
-    ctx.mod.local.get(stateStorage.index, stateType);
+  const stateRef = () => ctx.mod.local.get(stateStorage.index, stateType);
   const loadState = () =>
-    arrayGet(
-      ctx.mod,
-      stateRef(),
-      ctx.mod.i32.const(0),
-      binaryen.i32,
-      false,
-    );
+    arrayGet(ctx.mod, stateRef(), ctx.mod.i32.const(0), binaryen.i32, false);
   const storeState = (value: binaryen.ExpressionRef) =>
     arraySet(ctx.mod, stateRef(), ctx.mod.i32.const(0), value);
   const setup = ctx.mod.block(null, [
@@ -841,10 +801,7 @@ const compileSharedCellStateIntrinsic = ({
     ]);
   }
   if (name === "__shared_cell_end_write") {
-    return ctx.mod.block(null, [
-      setup,
-      storeState(ctx.mod.i32.const(0)),
-    ]);
+    return ctx.mod.block(null, [setup, storeState(ctx.mod.i32.const(0))]);
   }
 
   const current = allocateTempLocal(binaryen.i32, fnCtx);
@@ -854,9 +811,7 @@ const compileSharedCellStateIntrinsic = ({
     const begin = ctx.mod.block(
       null,
       [
-        storeState(
-          ctx.mod.i32.add(currentValue(), ctx.mod.i32.const(1)),
-        ),
+        storeState(ctx.mod.i32.add(currentValue(), ctx.mod.i32.const(1))),
         ctx.mod.i32.const(0),
       ],
       binaryen.i32,
@@ -996,103 +951,29 @@ const compileSharedCellBorrowFailureIntrinsic = ({
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   assertArgCount("__shared_cell_borrow_fail", args, 1);
-  ensurePanicTrapGlobals(ctx);
-  ensureLinearMemoryExport(ctx);
 
   const mutableMessage =
     "SharedCell borrow conflict: value is already mutably borrowed";
   const sharedMessage =
     "SharedCell borrow conflict: value is already shared borrowed";
-  const maxMessageLength = Math.max(
-    mutableMessage.length,
-    sharedMessage.length,
-  );
   const status = allocateTempLocal(binaryen.i32, fnCtx);
-  const grownPage = allocateTempLocal(binaryen.i32, fnCtx);
-  const scratchPtr = () =>
-    ctx.mod.global.get(PANIC_SCRATCH_PTR_GLOBAL, binaryen.i32);
-  const scratchCapacity = () =>
-    ctx.mod.global.get(PANIC_SCRATCH_CAPACITY_GLOBAL, binaryen.i32);
-  const storeMessage = (message: string): binaryen.ExpressionRef =>
-    ctx.mod.block(null, [
-      ctx.mod.global.set(
-        PANIC_TRAP_LEN_GLOBAL,
-        ctx.mod.i32.const(message.length),
-      ),
-      ctx.mod.if(
-        ctx.mod.i32.ge_s(scratchPtr(), ctx.mod.i32.const(0)),
-        ctx.mod.block(
-          null,
-          Array.from(message, (character, index) =>
-            ctx.mod.i32.store8(
-              0,
-              1,
-              ctx.mod.i32.add(scratchPtr(), ctx.mod.i32.const(index)),
-              ctx.mod.i32.const(character.charCodeAt(0)),
-              LINEAR_MEMORY_INTERNAL,
-            ),
-          ),
-        ),
-      ),
-    ]);
-  const reserveScratch = ctx.mod.if(
-    ctx.mod.i32.or(
-      ctx.mod.i32.lt_s(scratchPtr(), ctx.mod.i32.const(0)),
-      ctx.mod.i32.lt_s(
-        scratchCapacity(),
-        ctx.mod.i32.const(maxMessageLength),
-      ),
-    ),
-    ctx.mod.block(null, [
-      ctx.mod.local.set(
-        grownPage.index,
-        ctx.mod.memory.grow(ctx.mod.i32.const(1), LINEAR_MEMORY_INTERNAL),
-      ),
-      ctx.mod.if(
-        ctx.mod.i32.eq(
-          ctx.mod.local.get(grownPage.index, binaryen.i32),
-          ctx.mod.i32.const(-1),
-        ),
-        ctx.mod.block(null, [
-          ctx.mod.global.set(
-            PANIC_SCRATCH_PTR_GLOBAL,
-            ctx.mod.i32.const(-1),
-          ),
-          ctx.mod.global.set(
-            PANIC_SCRATCH_CAPACITY_GLOBAL,
-            ctx.mod.i32.const(0),
-          ),
-        ]),
-        ctx.mod.block(null, [
-          ctx.mod.global.set(
-            PANIC_SCRATCH_PTR_GLOBAL,
-            ctx.mod.i32.mul(
-              ctx.mod.local.get(grownPage.index, binaryen.i32),
-              ctx.mod.i32.const(65_536),
-            ),
-          ),
-          ctx.mod.global.set(
-            PANIC_SCRATCH_CAPACITY_GLOBAL,
-            ctx.mod.i32.const(65_536),
-          ),
-        ]),
-      ),
-    ]),
-  );
 
   return ctx.mod.block(null, [
     ctx.mod.local.set(status.index, args[0]!),
-    reserveScratch,
-    ctx.mod.if(
-      ctx.mod.i32.eq(
-        ctx.mod.local.get(status.index, binaryen.i32),
-        ctx.mod.i32.const(1),
-      ),
-      storeMessage(mutableMessage),
-      storeMessage(sharedMessage),
-    ),
-    ctx.mod.global.set(PANIC_TRAP_PTR_GLOBAL, scratchPtr()),
-    ctx.mod.unreachable(),
+    compilePanicTrap({
+      messages: [mutableMessage, sharedMessage],
+      selectMessage: ([mutableStore, sharedStore]) =>
+        ctx.mod.if(
+          ctx.mod.i32.eq(
+            ctx.mod.local.get(status.index, binaryen.i32),
+            ctx.mod.i32.const(1),
+          ),
+          mutableStore!,
+          sharedStore!,
+        ),
+      ctx,
+      fnCtx,
+    }),
   ]);
 };
 

@@ -6,6 +6,7 @@ import { getSymbolTable } from "../semantics/_internal/symbol-table.js";
 import { cloneNestedMap } from "../semantics/typing/call-resolution.js";
 import type { SemanticsPipelineResult } from "../semantics/pipeline.js";
 import type { TypeArena } from "../semantics/typing/type-arena.js";
+import { cloneModuleExportTable } from "../semantics/modules.js";
 
 export const cloneSemanticsForTypingState = ({
   semantics,
@@ -25,10 +26,42 @@ export const cloneSemanticsForTypingState = ({
     hir: semantics.hir,
     borrowing: {
       callables: new Map(semantics.borrowing.callables),
-      mutableStorageSymbols: new Set(
-        semantics.borrowing.mutableStorageSymbols,
-      ),
+      capabilities: new Map(semantics.borrowing.capabilities),
+      namedContracts: new Map(semantics.borrowing.namedContracts),
+      runtimeIdentityGuards: new Map(semantics.borrowing.runtimeIdentityGuards),
+      mutableStorageSymbols: new Set(semantics.borrowing.mutableStorageSymbols),
       diagnostics: [...semantics.borrowing.diagnostics],
+      ...(semantics.borrowing.analysisMetrics
+        ? { analysisMetrics: semantics.borrowing.analysisMetrics }
+        : {}),
+      ...(semantics.borrowing.summaryDemand
+        ? {
+            summaryDemand: {
+              ...semantics.borrowing.summaryDemand,
+              demandedSymbols: new Set(
+                semantics.borrowing.summaryDemand.demandedSymbols,
+              ),
+            },
+          }
+        : {}),
+      ...(semantics.borrowing.queries
+        ? {
+            queries: new Map(
+              Array.from(semantics.borrowing.queries, ([symbol, query]) => [
+                symbol,
+                {
+                  ...query,
+                  dependencies: query.dependencies.map((entry) => ({
+                    ...entry,
+                  })),
+                  dependencyOutputs: query.dependencyOutputs.map(
+                    (entry) => [...entry] as const,
+                  ),
+                },
+              ]),
+            ),
+          }
+        : {}),
     },
     typing: {
       arena,
@@ -65,16 +98,18 @@ export const cloneSemanticsForTypingState = ({
       callInstanceKeys: cloneNestedMap(typing.callInstanceKeys),
       callTraitDispatches: new Set(typing.callTraitDispatches),
       borrowCallTargets: cloneNestedMap(typing.borrowCallTargets),
-      borrowCallArgumentPlans: cloneNestedMap(
-        typing.borrowCallArgumentPlans,
-      ),
-      borrowResolvedExprTypes: new Map(
-        typing.borrowResolvedExprTypes,
-      ),
+      borrowCallArgumentPlans: cloneNestedMap(typing.borrowCallArgumentPlans),
+      borrowResolvedExprTypes: new Map(typing.borrowResolvedExprTypes),
       sourceImportLocals: new Set(typing.sourceImportLocals),
-      functionInstantiationInfo: cloneNestedMap(typing.functionInstantiationInfo),
-      functionInstanceExprTypes: cloneNestedMap(typing.functionInstanceExprTypes),
-      functionInstanceValueTypes: cloneNestedMap(typing.functionInstanceValueTypes),
+      functionInstantiationInfo: cloneNestedMap(
+        typing.functionInstantiationInfo,
+      ),
+      functionInstanceExprTypes: cloneNestedMap(
+        typing.functionInstanceExprTypes,
+      ),
+      functionInstanceValueTypes: cloneNestedMap(
+        typing.functionInstanceValueTypes,
+      ),
       traitImplsByNominal: new Map(
         Array.from(typing.traitImplsByNominal.entries()).map(
           ([nominal, impls]) => [nominal, [...impls]],
@@ -87,15 +122,14 @@ export const cloneSemanticsForTypingState = ({
       ),
       traitMethodImpls: new Map(typing.traitMethodImpls),
       memberMetadata: new Map(
-        Array.from(typing.memberMetadata.entries()).map(([symbol, metadata]) => [
-          symbol,
-          { ...metadata },
-        ]),
+        Array.from(typing.memberMetadata.entries()).map(
+          ([symbol, metadata]) => [symbol, { ...metadata }],
+        ),
       ),
       diagnostics: [...typing.diagnostics],
     },
     moduleId: semantics.moduleId,
-    exports: new Map(semantics.exports),
+    exports: cloneModuleExportTable(semantics.exports),
     diagnostics: [...semantics.diagnostics],
     ...({ symbolTable } as unknown as {}),
   } as SemanticsPipelineResult;

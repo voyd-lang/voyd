@@ -629,6 +629,7 @@ describe("next codegen", () => {
       test9_closure_without_arg,
       test10_optional_spread_wraps_some,
       test11_full_optional_object_conversion,
+      test12_contextual_optional_method_branch,
       main,
     } = instance.exports as Record<string, unknown>;
 
@@ -645,7 +646,10 @@ describe("next codegen", () => {
     expect((test11_full_optional_object_conversion as () => number)()).toBe(
       2111,
     );
-    expect((main as () => number)()).toBe(2136);
+    expect((test12_contextual_optional_method_branch as () => number)()).toBe(
+      5,
+    );
+    expect((main as () => number)()).toBe(2141);
   });
 
   it("infers generic labeled params from function-valued structural objects", () => {

@@ -1,0 +1,58 @@
+use std::array::Array
+
+obj GuardBox {
+  value: i32
+}
+
+fn mutate_pair(~left: GuardBox, ~right: GuardBox) -> i32
+  left.value = left.value + 1
+  right.value = right.value + 2
+  left.value + right.value
+
+fn guarded(
+  ~values: Array<GuardBox>,
+  left: i32,
+  right: i32
+) -> i32
+  mutate_pair(
+    ~values.at(left),
+    ~values.at(right)
+  )
+
+pub fn guard_success() -> i32
+  let ~values = Array<GuardBox>::with_capacity(2)
+  values.push(GuardBox { value: 1 })
+  values.push(GuardBox { value: 10 })
+  guarded(~values, 0, 1)
+
+pub fn guard_conflict() -> i32
+  let ~values = Array<GuardBox>::with_capacity(2)
+  values.push(GuardBox { value: 1 })
+  values.push(GuardBox { value: 10 })
+  guarded(~values, 0, 0)
+
+pub fn guard_success_benchmark() -> i32
+  let ~values = Array<GuardBox>::with_capacity(2)
+  values.push(GuardBox { value: 1 })
+  values.push(GuardBox { value: 10 })
+  var iteration = 0
+  while iteration < 10000:
+    guarded(~values, 0, 1)
+    iteration = iteration + 1
+  values.at(0).value + values.at(1).value
+
+pub fn static_success_benchmark() -> i32
+  let ~values = Array<GuardBox>::with_capacity(2)
+  values.push(GuardBox { value: 1 })
+  values.push(GuardBox { value: 10 })
+  var iteration = 0
+  while iteration < 10000:
+    mutate_pair(
+      ~values.at(0),
+      ~values.at(1)
+    )
+    iteration = iteration + 1
+  values.at(0).value + values.at(1).value
+
+pub fn main() -> i32
+  guard_success()

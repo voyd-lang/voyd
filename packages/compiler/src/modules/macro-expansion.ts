@@ -335,10 +335,7 @@ const remapExpandedDocumentation = ({
   };
 };
 
-const visitSyntax = (
-  syntax: Syntax,
-  visit: (entry: Syntax) => void,
-): void => {
+const visitSyntax = (syntax: Syntax, visit: (entry: Syntax) => void): void => {
   visit(syntax);
   if (isForm(syntax)) {
     syntax.toArray().forEach((entry) => visitSyntax(entry, visit));
@@ -348,11 +345,7 @@ const visitSyntax = (
 const documentationLocationKey = (syntax: Syntax): string | undefined => {
   const location = syntax.location;
   return location
-    ? [
-        location.filePath,
-        location.startIndex,
-        location.endIndex,
-      ].join(":")
+    ? [location.filePath, location.startIndex, location.endIndex].join(":")
     : undefined;
 };
 
@@ -695,9 +688,7 @@ const collectMacroReexports = ({
 
       addReexport(
         alias,
-        alias === macro.name.value
-          ? macro
-          : cloneMacroWithAlias(macro, alias),
+        alias === macro.name.value ? macro : cloneMacroWithAlias(macro, alias),
       );
     });
 

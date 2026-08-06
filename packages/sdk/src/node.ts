@@ -4,13 +4,17 @@ import binaryen from "binaryen";
 import { createFsModuleHost } from "@voyd-lang/compiler/modules/fs-host.js";
 import { createMemoryModuleHost } from "@voyd-lang/compiler/modules/memory-host.js";
 import { createNodePathAdapter } from "@voyd-lang/compiler/modules/node-path-adapter.js";
-import type { ModuleHost, ModuleRoots } from "@voyd-lang/compiler/modules/types.js";
+import type {
+  ModuleHost,
+  ModuleRoots,
+} from "@voyd-lang/compiler/modules/types.js";
 import { loadModuleGraph } from "@voyd-lang/compiler/pipeline.js";
 import { isCompilerPerfEnabled } from "@voyd-lang/compiler/perf.js";
 import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import {
   compileWithLoader,
   createCompilerReuseCache,
+  exportCompilerReuseArtifact,
   type CompilerReuseCache,
 } from "./shared/compile.js";
 import {
@@ -30,6 +34,7 @@ import { detectSrcRootForPath } from "./shared/source-root.js";
 import type {
   CompileOptions,
   CompileResult,
+  CreateSdkOptions,
   DefaultAdapterOptions,
   ServeWebAppOptions,
   ServeWebAppResult,
@@ -45,12 +50,13 @@ export {
 const DEFAULT_ENTRY = "index.voyd";
 const DEFAULT_VIRTUAL_ROOT = ".voyd";
 
-export const createSdk = (): VoydSdk => {
-  const compilerCache = createCompilerReuseCache();
+export const createSdk = (options: CreateSdkOptions = {}): VoydSdk => {
+  const compilerCache = createCompilerReuseCache(options);
   return {
     compile: (options) => compileSdk(options, compilerCache),
     run: runWithHandlers,
     serveWebApp: (options) => serveWebApp(options, compilerCache),
+    exportCompilerArtifact: () => exportCompilerReuseArtifact(compilerCache),
   };
 };
 
@@ -198,7 +204,13 @@ const waitForTcpPort = async ({
     : new Error(`timed out waiting for ${host}:${port}`);
 };
 
-const probeTcpPort = ({ host, port }: { host: string; port: number }): Promise<void> =>
+const probeTcpPort = ({
+  host,
+  port,
+}: {
+  host: string;
+  port: number;
+}): Promise<void> =>
   new Promise((resolve, reject) => {
     const socket = net.createConnection({ host, port });
     socket.once("connect", () => {
@@ -405,8 +417,8 @@ const resolveEntryPath = ({
   const resolved = path.isAbsolute(normalized)
     ? normalized
     : source === undefined
-    ? path.resolve(normalized)
-    : path.join(srcRoot, normalized);
+      ? path.resolve(normalized)
+      : path.join(srcRoot, normalized);
   return path.resolve(resolved);
 };
 
@@ -482,7 +494,7 @@ const normalizeFiles = ({
     Object.entries(files).map(([filePath, source]) => [
       resolveFilePath({ filePath, srcRoot }),
       source,
-    ])
+    ]),
   );
 
 const resolveFilePath = ({
@@ -514,9 +526,12 @@ const finalizeCompile = ({
   }
 
   const module = binaryen.readBinary(result.wasm);
-  const wasmText = options.emitWasmText ? module.emitText() : undefined;
-
-  return wasmText ? { ...result, wasmText } : result;
+  try {
+    const wasmText = module.emitText();
+    return wasmText ? { ...result, wasmText } : result;
+  } finally {
+    module.dispose();
+  }
 };
 
 const createOverlayModuleHost = ({
@@ -557,6 +572,7 @@ const createOverlayModuleHost = ({
 export type {
   CompileOptions,
   CompileResult,
+  CreateSdkOptions,
   DefaultAdapterOptions,
   EffectsInfo,
   EffectContinuation,

@@ -161,6 +161,10 @@ export class SymbolTable {
     return cloneSymbolRecord(record);
   }
 
+  hasSymbol(id: SymbolId): boolean {
+    return this.symbolRecords[id] !== undefined;
+  }
+
   resolve(name: string, fromScope: ScopeId): SymbolId | undefined {
     return this.resolveInternal(name, fromScope);
   }

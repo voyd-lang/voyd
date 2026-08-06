@@ -16,6 +16,9 @@ fn mutate_pair(~left: Box, ~right: Box) -> void
 fn retain(~holder: Holder, value: Box) -> void
   holder.value = value
 
+fn view(value: Box) -> borrow Box
+  value
+
 fn simultaneous_mutable_aliases(~value: Box) -> void
   mutate_pair(~value, ~value)
 
@@ -25,3 +28,16 @@ fn mutation_after_retaining_ordinary_alias(
 ) -> void
   retain(~holder, value)
   mutate(~value)
+
+fn mutation_during_explicit_borrow(~value: Box) -> i32
+  let borrowed = view(value)
+  mutate(~value)
+  borrowed.value
+
+fn extend_local_borrow() -> borrow Box
+  let local = Box { value: 1 }
+  local
+
+trait MissingBorrowContract
+  region source
+  fn view(self) -> borrow Box

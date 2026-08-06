@@ -61,6 +61,23 @@ export const lowerTypeExpr = (
     return lowerNamedType(expr, ctx, currentScope);
   }
 
+  if (isForm(expr) && expr.calls("borrow")) {
+    const innerExpr = expr.at(1);
+    if (!innerExpr || expr.length !== 2) {
+      throw new Error("borrow type expects exactly one inner type");
+    }
+    const inner = lowerTypeExpr(innerExpr, ctx, currentScope);
+    if (!inner) {
+      throw new Error("borrow type missing inner type");
+    }
+    return {
+      typeKind: "borrowed",
+      ast: expr.syntaxId,
+      span: toSourceSpan(expr),
+      inner,
+    };
+  }
+
   if (isForm(expr) && isObjectTypeForm(expr)) {
     return lowerObjectTypeExpr(expr, ctx, currentScope);
   }

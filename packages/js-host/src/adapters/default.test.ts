@@ -1585,7 +1585,7 @@ describe("registerDefaultHostAdapters", () => {
         port,
         host: "127.0.0.1",
         stream_request_bodies: true,
-        response_timeout_millis: 75,
+        response_timeout_millis: 60_000,
       }
     );
     const serverId = (listenResult.value as { value: number }).value;

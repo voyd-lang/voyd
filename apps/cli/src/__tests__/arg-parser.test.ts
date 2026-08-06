@@ -192,6 +192,28 @@ describe("getConfigFromCli", () => {
     expect(config.testReporter).toBe("doc");
   });
 
+  it("parses a one-based test shard", () => {
+    const config = runWithArgv([
+      "node",
+      "voyd",
+      "test",
+      "./suite",
+      "--shard",
+      "3/8",
+    ]);
+
+    expect(config.testShard).toEqual({ index: 2, count: 8 });
+  });
+
+  it.each(["0/8", "9/8", "1/0", "one/eight", "1"])(
+    "rejects invalid test shard %s",
+    (shard) => {
+      expect(() =>
+        runWithArgv(["node", "voyd", "test", "--shard", shard]),
+      ).toThrow(/invalid test shard/);
+    },
+  );
+
   it("does not treat --entry values as subcommands", () => {
     const config = runWithArgv(["node", "voyd", "--run", "--entry", "test"]);
     expect(config.run).toBe(true);

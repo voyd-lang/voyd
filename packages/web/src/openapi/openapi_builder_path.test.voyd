@@ -1,0 +1,42 @@
+use src::openapi::{ document, info, operation }
+use src::openapi::test_types::DocumentedArticlePath
+use src::openapi::automatic::all
+use std::error::panic
+use std::http::Method
+use std::json::stringify
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+
+test "OpenAPI reflects operation and path documentation":
+  let route_operation = operation(
+    summary: "Create an article".as_slice().to_string(),
+    description: "Creates and returns one article.".as_slice().to_string(),
+    operation_id: "createArticle".as_slice().to_string(),
+    response_status: 201,
+    response_description: "Article created".as_slice().to_string()
+  )
+    .with_path_params<DocumentedArticlePath>()
+  let spec = document(info(
+    title: "Article API".as_slice(),
+    version: "1.0.0".as_slice(),
+    description: "Example API".as_slice().to_string()
+  )).route(
+    "/articles/:id".as_slice(),
+    method: Method::Post {},
+    operation: route_operation
+  )
+
+  match(stringify(spec.json()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"openapi\":\"3.1.0\"".as_slice(), "missing version")
+      require_contains(value, "\"/articles/{id}\"".as_slice(), "missing path")
+      require_contains(value, "\"operationId\":\"createArticle\"".as_slice(), "missing operation id")
+      require_contains(value, "Stable article identifier.".as_slice(), "missing path documentation")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

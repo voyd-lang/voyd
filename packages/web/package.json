@@ -18,7 +18,9 @@
     "check:string-overloads": "node ./scripts/generate-string-overloads.mjs --check",
     "typecheck": "echo 'no types for voyd web'",
     "pretest": "npm run check:string-overloads",
-    "test": "VOYD_USE_SRC=1 node ../../scripts/voyd test ./src --fail-empty-tests",
+    "test": "node ../../scripts/testing/run-web-test-shards.mjs",
+    "pretest:sharded": "npm run check:string-overloads",
+    "test:sharded": "node ../../scripts/testing/run-web-test-shards.mjs",
     "lint": "echo 'no lint configured'",
     "prepack": "npm run clean && npm run build",
     "prepublishOnly": "node ../../scripts/release/enforce-workspace-release.mjs"

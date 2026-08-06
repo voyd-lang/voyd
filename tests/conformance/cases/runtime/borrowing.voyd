@@ -47,6 +47,22 @@ trait Replaceable
 trait PairReplaceable
   fn replace_and_report(~self) -> (i32, i32)
 
+obj ContractViewState {
+  cursor: i32,
+  source: Box
+}
+
+trait ContractView
+  region cursor
+  region source
+  disjoint cursor, source
+
+  @borrow_contract(
+    mutates: cursor,
+    returns_from: source
+  )
+  fn next(~self) -> Optional<borrow Box>
+
 impl Replaceable for Box
   fn replace(~self) -> void
     self = Box { value: 23 }
@@ -56,11 +72,25 @@ impl PairReplaceable for Box
     self = Box { value: 30 }
     (4, 5)
 
+impl ContractView for ContractViewState
+  region cursor = self.cursor
+  region source = deref(self.source)
+
+  fn next(~self) -> Optional<borrow Box>
+    self.cursor = self.cursor + 1
+    Some<borrow Box> { value: self.source }
+
 fn increment(~value: Box) -> void
   value.value = value.value + 1
 
 fn identity(value: Box) -> Box
   value
+
+fn view(value: Box) -> borrow Box
+  value
+
+fn optional_view(value: Box) -> Optional<borrow Box>
+  Some<borrow Box> { value }
 
 fn replace_dynamic(~value: Replaceable) -> void
   value.replace()
@@ -94,6 +124,40 @@ fn update_from_default(
 ) -> void
   value.value = value.value + amount
 
+fn mutate_guarded_pair(~left: Box, ~right: Box) -> i32
+  left.value = left.value + 1
+  right.value = right.value + 2
+  left.value + right.value
+
+fn mutate_guarded_pair_after_default(
+  ~left: Box,
+  ~right: Box,
+  increment: i32 = 1
+) -> i32
+  left.value = left.value + increment
+  right.value = right.value + increment
+  left.value + right.value
+
+fn guarded_pair(
+  ~values: Array<Box>,
+  left: i32,
+  right: i32
+) -> i32
+  mutate_guarded_pair(
+    ~values.at(left),
+    ~values.at(right)
+  )
+
+fn guarded_pair_after_default(
+  ~values: Array<Box>,
+  left: i32,
+  right: i32
+) -> i32
+  mutate_guarded_pair_after_default(
+    ~values.at(left),
+    ~values.at(right)
+  )
+
 pub fn mutation_after_completed_reborrow() -> i32
   let ~value = Box { value: 1 }
   let ~alias = value
@@ -115,6 +179,26 @@ pub fn plain_values_do_not_borrow_source_slots() -> i32
   let captured = () => source.value
   increment(~source)
   assigned.value + returned.value + stored.child.value + captured()
+
+pub fn explicit_borrowed_result_reads_source() -> i32
+  let value = Box { value: 21 }
+  let borrowed = view(value)
+  borrowed.value
+
+pub fn nested_explicit_borrow_preserves_payload() -> i32
+  let value = Box { value: 34 }
+  match(optional_view(value))
+    Some<borrow Box> { value: borrowed }: borrowed.value
+    None: 0
+
+pub fn checked_borrow_contract_view() -> i32
+  let ~view = ContractViewState {
+    cursor: 0,
+    source: Box { value: 41 }
+  }
+  match(view.next())
+    Some<borrow Box> { value }: value.value + view.cursor
+    None: 0
 
 pub fn handle_slots_are_distinct_from_allocations() -> i32
   let ~holder = Holder {
@@ -323,3 +407,21 @@ pub fn shared_cell_conflict_is_recoverable() -> i32
       else:
         0
   )
+
+pub fn runtime_identity_guard_success() -> i32
+  let ~values = Array<Box>::with_capacity(2)
+  values.push(Box { value: 1 })
+  values.push(Box { value: 10 })
+  guarded_pair(~values, 0, 1)
+
+pub fn runtime_identity_guard_conflict() -> i32
+  let ~values = Array<Box>::with_capacity(2)
+  values.push(Box { value: 1 })
+  values.push(Box { value: 10 })
+  guarded_pair(~values, 0, 0)
+
+pub fn runtime_identity_guard_after_default_conflict() -> i32
+  let ~values = Array<Box>::with_capacity(2)
+  values.push(Box { value: 1 })
+  values.push(Box { value: 10 })
+  guarded_pair_after_default(~values, 0, 0)

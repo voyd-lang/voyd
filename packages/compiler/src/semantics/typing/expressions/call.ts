@@ -29,6 +29,7 @@ import {
 import {
   bindTypeParams as bindTypeParamsFromType,
   satisfies as typeSatisfies,
+  satisfiesBorrowFormation,
   unify as unifyWithBudget,
 } from "../type-relations.js";
 import {
@@ -387,7 +388,6 @@ export const typeCallExpr = (
     ctx.effects.setExprEffect(expr.id, callEffect);
     return returnType;
   };
-
   if (
     calleeExpr.exprKind === "identifier" &&
     expr.staticTraitTarget &&
@@ -1085,9 +1085,12 @@ export const typeMethodCallExpr = (
       : undefined;
 
   const targetType = typeExpression(expr.target, ctx, state);
+  const targetDescriptor = ctx.arena.get(targetType);
+  const readReceiverType =
+    targetDescriptor.kind === "borrowed" ? targetDescriptor.inner : targetType;
   ctx.table.pushExprTypeScope();
   const probeArgs: Arg[] = [
-    { type: targetType, exprId: expr.target },
+    { type: readReceiverType, exprId: expr.target },
     ...expr.args.map((arg) => ({
       label: arg.label,
       type:
@@ -1187,14 +1190,14 @@ export const typeMethodCallExpr = (
   const resolution =
     typeof expr.traitSymbol === "number"
       ? resolveQualifiedTraitMethodCallCandidates({
-          receiverType: targetType,
+          receiverType: readReceiverType,
           traitSymbol: expr.traitSymbol,
           methodName: expr.method,
           ctx,
         })
       : (constrainedResolution ??
         resolveMethodCallCandidates({
-          receiverType: targetType,
+          receiverType: readReceiverType,
           methodName: expr.method,
           ctx,
           state,
@@ -1258,7 +1261,7 @@ export const typeMethodCallExpr = (
     state,
   });
 
-  const receiverType = selected.receiverTypeOverride ?? targetType;
+  const receiverType = selected.receiverTypeOverride ?? readReceiverType;
   if (selected.receiverTypeOverride) {
     const targetDesc = ctx.arena.get(targetType);
     ctx.resolvedExprTypes.set(
@@ -2227,6 +2230,45 @@ const providedArgumentTypeForParam = (
   _ctx: TypingContext,
 ): TypeId => param.type;
 
+const callArgumentTypeSatisfiesParameter = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+  state: TypingState,
+): boolean => {
+  if (satisfiesBorrowFormation(actual, expected, ctx, state)) {
+    return true;
+  }
+  const descriptor = ctx.arena.get(actual);
+  return (
+    descriptor.kind === "borrowed" &&
+    !disallowedValueTraitObjectWidening({
+      actual: descriptor.inner,
+      expected,
+      ctx,
+      state,
+    }) &&
+    typeSatisfies(descriptor.inner, expected, ctx, state)
+  );
+};
+
+const materializedBorrowInnerForParameter = (
+  actual: TypeId,
+  expected: TypeId,
+  ctx: TypingContext,
+  state: TypingState,
+): TypeId | undefined => {
+  const descriptor = ctx.arena.get(actual);
+  if (
+    descriptor.kind !== "borrowed" ||
+    ctx.arena.get(expected).kind === "borrowed" ||
+    !typeSatisfies(descriptor.inner, expected, ctx, state)
+  ) {
+    return undefined;
+  }
+  return descriptor.inner;
+};
+
 const argumentTargetsSyntheticParam = (
   arg: Arg,
   params: readonly ParamSignature[],
@@ -2292,9 +2334,17 @@ const validateCallArgs = (
           ? spanForObjectLiteralFieldValue(match.arg, match.fieldName, ctx)
           : spanForArg(match.arg, ctx);
       if (!(state.mode === "relaxed" && hasUnknownArgs)) {
+        const expected = providedArgumentTypeForParam(match.param, ctx);
+        const materialized =
+          materializedBorrowInnerForParameter(
+            match.matchedType,
+            expected,
+            ctx,
+            state,
+          ) ?? match.matchedType;
         ensureTypeMatches(
-          match.matchedType,
-          providedArgumentTypeForParam(match.param, ctx),
+          materialized,
+          expected,
           ctx,
           state,
           `call argument ${match.paramIndex + 1}`,
@@ -2443,7 +2493,7 @@ const callArgumentsSatisfyParams = ({
             ctx,
             state,
           }) &&
-          typeSatisfies(
+          callArgumentTypeSatisfiesParameter(
             match.matchedType,
             providedArgumentTypeForParam(match.param, ctx),
             ctx,
@@ -2574,7 +2624,7 @@ const typeSatisfiesForDiagnostic = ({
   const originalSteps = ctx.typeCheckBudget.totalUnifyStepsUsed;
   ctx.typeCheckBudget.maxTotalUnifySteps = Number.MAX_SAFE_INTEGER;
   try {
-    return typeSatisfies(actual, expected, ctx, state);
+    return satisfiesBorrowFormation(actual, expected, ctx, state);
   } finally {
     ctx.typeCheckBudget.maxTotalUnifySteps = originalTotalMax;
     ctx.typeCheckBudget.totalUnifyStepsUsed = originalSteps;
@@ -4054,6 +4104,14 @@ const resolveMethodCallCandidates = ({
   state: TypingState;
 }): MethodCallResolution | undefined => {
   const receiverDesc = ctx.arena.get(receiverType);
+  if (receiverDesc.kind === "borrowed") {
+    return resolveMethodCallCandidates({
+      receiverType: receiverDesc.inner,
+      methodName,
+      ctx,
+      state,
+    });
+  }
   if (receiverDesc.kind === "type-param-ref") {
     const constraint = activeTypeParameterConstraint({
       typeParam: receiverDesc.param,
@@ -4492,7 +4550,28 @@ const typeOperatorOverloadCall = ({
     return undefined;
   }
 
-  const receiverType = args[0]!.type;
+  const readArgs = args.map((arg) => {
+    const descriptor = ctx.arena.get(arg.type);
+    return descriptor.kind === "borrowed"
+      ? { ...arg, type: descriptor.inner }
+      : arg;
+  });
+  if (readArgs.some((arg, index) => arg.type !== args[index]?.type)) {
+    const intrinsicRead = typeIntrinsicFallbackCall({
+      name: operatorName,
+      args: readArgs,
+      typeArguments,
+      callId: call.id,
+      callSpan: call.span,
+      calleeExprId: callee.id,
+      ctx,
+      state,
+    });
+    if (intrinsicRead) {
+      return intrinsicRead;
+    }
+  }
+  const receiverType = readArgs[0]!.type;
   if (receiverType === ctx.primitives.unknown) {
     return undefined;
   }
@@ -4506,7 +4585,7 @@ const typeOperatorOverloadCall = ({
     return undefined;
   }
 
-  const hasUnresolvedOperand = args.some(
+  const hasUnresolvedOperand = readArgs.some(
     (arg) => arg.type === ctx.primitives.unknown,
   );
   if (hasUnresolvedOperand && resolution.includesMethodCandidates !== true) {
@@ -4523,7 +4602,7 @@ const typeOperatorOverloadCall = ({
   let matches = findMatchingOverloadCandidates({
     name: operatorName,
     candidates,
-    args,
+    args: readArgs,
     span: call.span,
     ctx,
     state,
@@ -4531,7 +4610,7 @@ const typeOperatorOverloadCall = ({
     scoreMatches: (rawMatches) =>
       scoreOverloadMatchesByLambdaCompatibility({
         matches: rawMatches,
-        args,
+        args: readArgs,
         callArgs: call.args,
         typeArguments,
         ctx,
@@ -4542,7 +4621,7 @@ const typeOperatorOverloadCall = ({
     matches.length === 0
       ? resolveTraitDispatchOverload({
           candidates,
-          args,
+          args: readArgs,
           ctx,
           state,
         })
@@ -4575,7 +4654,7 @@ const typeOperatorOverloadCall = ({
       matches = findMatchingOverloadCandidates({
         name: operatorName,
         candidates,
-        args,
+        args: readArgs,
         span: call.span,
         ctx,
         state,
@@ -4583,7 +4662,7 @@ const typeOperatorOverloadCall = ({
         scoreMatches: (rawMatches) =>
           scoreOverloadMatchesByLambdaCompatibility({
             matches: rawMatches,
-            args,
+            args: readArgs,
             callArgs: call.args,
             typeArguments,
             ctx,
@@ -4599,7 +4678,7 @@ const typeOperatorOverloadCall = ({
     if (matches.length === 0) {
       const intrinsicFallback = typeIntrinsicFallbackCall({
         name: operatorName,
-        args,
+        args: readArgs,
         typeArguments,
         callId: call.id,
         callSpan: call.span,
@@ -4614,7 +4693,7 @@ const typeOperatorOverloadCall = ({
       if (
         emitConsensusCallArgumentShapeDiagnostic({
           candidates: noOverloadDiagnosticCandidates,
-          args,
+          args: readArgs,
           ctx,
           state,
           span: call.span,
@@ -4632,7 +4711,7 @@ const typeOperatorOverloadCall = ({
         params: noOverloadDiagnosticParams({
           name: operatorName,
           candidates: noOverloadDiagnosticCandidates,
-          args,
+          args: readArgs,
           ctx,
           state,
           typeArguments,
@@ -4649,7 +4728,7 @@ const typeOperatorOverloadCall = ({
         params: ambiguousOverloadDiagnosticParams({
           name: operatorName,
           matches,
-          args,
+          args: readArgs,
           ctx,
           state,
           typeArguments,
@@ -4704,7 +4783,7 @@ const typeOperatorOverloadCall = ({
   });
 
   return typeFunctionCall({
-    args,
+    args: readArgs,
     signature: selected.signature,
     calleeSymbol: selected.symbol,
     typeArguments,
@@ -6010,8 +6089,7 @@ export const typeGenericFunctionBody = ({
       if (signature.annotatedEffects) {
         ensureEffectCompatibility({
           inferred: inferredEffectRow,
-          annotated:
-            signature.effectRow ?? ctx.primitives.defaultEffectRow,
+          annotated: signature.effectRow ?? ctx.primitives.defaultEffectRow,
           ctx,
           span: fn.span,
           location: fn.ast,
@@ -6413,6 +6491,22 @@ const typeOverloadedCall = (
     }
     return { symbol, signature };
   });
+  const materializesBorrowedReads =
+    (intrinsicSignaturesFor(callee.name, ctx)?.length ?? 0) > 0 ||
+    rawCandidates.every(({ symbol }) => {
+      const metadata = (ctx.symbolTable.getSymbol(symbol).metadata ?? {}) as {
+        intrinsic?: boolean;
+      };
+      return metadata.intrinsic === true;
+    });
+  const resolutionArgs = materializesBorrowedReads
+    ? probeArgs.map((arg) => {
+        const descriptor = ctx.arena.get(arg.type);
+        return descriptor.kind === "borrowed"
+          ? { ...arg, type: descriptor.inner }
+          : arg;
+      })
+    : probeArgs;
   const candidates = preferLeastGenericContractOverloads({
     candidates: rawCandidates,
     hasExplicitTypeArguments: (typeArguments?.length ?? 0) > 0,
@@ -6437,7 +6531,7 @@ const typeOverloadedCall = (
   const matches = findOverloadMatches({
     name: callee.name,
     candidates: candidatesForResolution,
-    args: probeArgs,
+    args: resolutionArgs,
     typeArguments,
     targetTypeArguments,
     span: call.span,
@@ -6459,7 +6553,7 @@ const typeOverloadedCall = (
     scoreMatches: (rawMatches) =>
       scoreOverloadMatchesByLambdaCompatibility({
         matches: rawMatches,
-        args: probeArgs,
+        args: resolutionArgs,
         callArgs: call.args,
         typeArguments,
         targetTypeArguments,
@@ -6473,7 +6567,7 @@ const typeOverloadedCall = (
     matches.length === 0 && (!typeArguments || typeArguments.length === 0)
       ? resolveTraitDispatchOverload({
           candidates: candidatesForResolution,
-          args: probeArgs,
+          args: resolutionArgs,
           ctx,
           state,
         })
@@ -6484,7 +6578,7 @@ const typeOverloadedCall = (
     if (matches.length === 0) {
       const intrinsicFallback = typeIntrinsicFallbackCall({
         name: callee.name,
-        args: probeArgs,
+        args: resolutionArgs,
         typeArguments,
         callId: call.id,
         callSpan: call.span,
@@ -6498,7 +6592,7 @@ const typeOverloadedCall = (
       if (
         emitConsensusCallArgumentShapeDiagnostic({
           candidates: candidatesForResolution,
-          args: probeArgs,
+          args: resolutionArgs,
           ctx,
           state,
           span: call.span,
@@ -6515,7 +6609,7 @@ const typeOverloadedCall = (
         params: noOverloadDiagnosticParams({
           name: callee.name,
           candidates: candidatesForResolution,
-          args: probeArgs,
+          args: resolutionArgs,
           ctx,
           state,
           typeArguments,
@@ -6532,7 +6626,7 @@ const typeOverloadedCall = (
         params: ambiguousOverloadDiagnosticParams({
           name: callee.name,
           matches,
-          args: probeArgs,
+          args: resolutionArgs,
           ctx,
           state,
           typeArguments,
@@ -6581,7 +6675,7 @@ const typeOverloadedCall = (
     }).substitution;
   const hintSubstitution = buildCallArgumentHintSubstitution({
     signature: selected.signature,
-    probeArgs,
+    probeArgs: resolutionArgs,
     expectedReturnType,
     seedSubstitution: mergeExplicitTypeArgumentSubstitution({
       signature: selected.signature,
@@ -6594,7 +6688,7 @@ const typeOverloadedCall = (
     ctx,
     state,
   });
-  const args = typeCallArgsWithSignatureContext({
+  const typedArgs = typeCallArgsWithSignatureContext({
     args: call.args,
     signature: selected.signature,
     paramOffset: 0,
@@ -6602,6 +6696,14 @@ const typeOverloadedCall = (
     ctx,
     state,
   });
+  const args = materializesBorrowedReads
+    ? typedArgs.map((arg) => {
+        const descriptor = ctx.arena.get(arg.type);
+        return descriptor.kind === "borrowed"
+          ? { ...arg, type: descriptor.inner }
+          : arg;
+      })
+    : typedArgs;
 
   return typeFunctionCall({
     args,
@@ -7447,6 +7549,8 @@ const containsTypeParamRef = (
   seen.add(type);
   const desc = ctx.arena.get(unfoldRecursiveTypeId(type, ctx));
   switch (desc.kind) {
+    case "borrowed":
+      return containsTypeParamRef(desc.inner, ctx, seen);
     case "type-param-ref":
       return true;
     case "recursive":
@@ -7497,6 +7601,8 @@ const containsTypeParamRefFrom = (
   seen.add(type);
   const desc = ctx.arena.get(unfoldRecursiveTypeId(type, ctx));
   switch (desc.kind) {
+    case "borrowed":
+      return containsTypeParamRefFrom(desc.inner, targetParams, ctx, seen);
     case "type-param-ref":
       return targetParams.has(desc.param);
     case "recursive":

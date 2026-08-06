@@ -13,9 +13,12 @@ export const createSdk = (): VoydSdk => ({
   run: async <T = unknown>(_options: RunOptions): Promise<T> => {
     throw new Error("Deno SDK is not implemented yet");
   },
-  serveWebApp: async (_options: ServeWebAppOptions): Promise<ServeWebAppResult> => {
+  serveWebApp: async (
+    _options: ServeWebAppOptions,
+  ): Promise<ServeWebAppResult> => {
     throw new Error("Deno SDK is not implemented yet");
   },
+  exportCompilerArtifact: () => undefined,
 });
 
 export type {

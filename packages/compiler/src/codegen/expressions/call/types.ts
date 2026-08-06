@@ -6,7 +6,7 @@ import type {
   TypeId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
-import type { CallArgumentPlanEntry } from "../../../semantics/typing/types.js";
+import type { CodegenCallArgumentPlanEntry } from "../../../semantics/codegen-view/index.js";
 
 export type CallParam = {
   typeId: TypeId;
@@ -23,7 +23,7 @@ export type CompileCallArgumentOptions = {
   argIndexOffset?: number;
   allowTrailingArguments?: boolean;
   allCallArgExprIds?: readonly HirExprId[];
-  typedPlan?: readonly CallArgumentPlanEntry[];
+  typedPlan?: readonly CodegenCallArgumentPlanEntry[];
 };
 
 export type CompiledCallArgumentsForParams = {
@@ -34,7 +34,7 @@ export type CompiledCallArgumentsForParams = {
 };
 
 export type PlannedCallArguments = {
-  plan: CallArgumentPlanEntry[];
+  plan: CodegenCallArgumentPlanEntry[];
   expectedTypeByArgIndex: Map<number, TypeId>;
   consumedArgCount: number;
 };

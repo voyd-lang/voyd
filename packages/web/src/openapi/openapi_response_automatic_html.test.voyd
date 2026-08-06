@@ -1,0 +1,25 @@
+use std::json::stringify
+use std::error::panic
+use std::string::type::{ String, StringSlice }
+use std::test::assertions::all
+use src::response::{ Accepted, Created, DocumentedResponse, IntoResponse, Json, NoContent, OpenApiResponse, Text, accepted, bytes, created, documented_response, json, no_content, option_json, result_json, text }
+use src::response_composites::self as response_composites
+use src::router::app
+use src::openapi::automatic::all
+use src::html::{ HtmlResponse, html }
+
+fn html_reply() -> HtmlResponse
+  html("<main>ready</main>")
+
+test "automatic routes cover HTML responses":
+  let web_app = app(openapi: { title: "Responses", version: "1" })
+    .get("/html", handler: html_reply)
+  match(stringify(web_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"text/html; charset=utf-8\"".as_slice(), "missing automatic HTML response")
+
+fn require_contains(value: String, needle: StringSlice, message: String) -> void
+  if not value.contains(needle):
+    panic(message)

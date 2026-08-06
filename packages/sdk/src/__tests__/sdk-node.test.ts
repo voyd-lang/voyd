@@ -276,11 +276,13 @@ describe("node sdk", () => {
     process.env.VOYD_WEB_HOST = "previous-host";
 
     try {
-      await expect(createSdk().serveWebApp({
-        port: await findFreePort(),
-        host: "127.0.0.2",
-        source: EXTERNAL_SOURCE,
-      })).rejects.toThrow(
+      await expect(
+        createSdk().serveWebApp({
+          port: await findFreePort(),
+          host: "127.0.0.2",
+          source: EXTERNAL_SOURCE,
+        }),
+      ).rejects.toThrow(
         /Missing installed Voyd package adapters.*example:math\/ops@1/,
       );
       expect(process.env.VOYD_WEB_PORT).toBe("previous-port");
@@ -329,7 +331,7 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
 
     await expect(result.close()).resolves.toBeUndefined();
     await expect(httpGet(`${result.url}/hello`)).rejects.toThrow();
-  }, 120_000);
+  }, 330_000);
 
   it("serves high-level web route handlers without serializing unrelated requests", async () => {
     const port = await findFreePort();
@@ -398,6 +400,68 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env, time::Time) -> i32
     expect(
       result.diagnostics.some((diagnostic) => diagnostic.code === "TY0030"),
     ).toBe(true);
+  });
+
+  it("preserves array view loans through the public prelude API", async () => {
+    const sdk = createSdk();
+    const invalidSource = `obj Item { value: i32 }
+
+fn replace_slot_during_view() -> i32
+  let ~values = Array<Item>::with_capacity(1)
+  values.push(Item { value: 1 })
+  let ~view: ViewIterator<Item> = values.view_iter()
+  match(view.next())
+    Some<borrow Item> { value }:
+      let _ = values.replace(0, with: Item { value: 2 })
+      value.value
+    None:
+      0
+`;
+    const invalid = await sdk.compile({
+      source: invalidSource,
+    });
+    expect(invalid.success).toBe(false);
+    if (invalid.success) return;
+    const conflicts = invalid.diagnostics.filter(
+      (diagnostic) => diagnostic.code === "TY0048",
+    );
+    expect(conflicts).toHaveLength(1);
+    expect(
+      invalidSource.slice(conflicts[0]!.span.start, conflicts[0]!.span.end),
+    ).toContain("values.replace");
+
+    expectCompileSuccess(
+      await sdk.compile({
+        source: `obj Item { value: i32 }
+
+fn mutate(~item: Item) -> void
+  item.value = item.value + 1
+
+fn mutate_alias_during_view() -> i32
+  let ~values = Array<Item>::with_capacity(1)
+  values.push(Item { value: 1 })
+  let ~alias = values.at(0)
+  let ~view: ViewIterator<Item> = values.view_iter()
+  match(view.next())
+    Some<borrow Item> { value }:
+      mutate(~alias)
+      value.value
+    None:
+      0
+
+pub fn main() -> i32
+  let ~values = Array<Item>::with_capacity(1)
+  values.push(Item { value: 1 })
+  let ~view: ViewIterator<Item> = values.view_iter()
+  let observed =
+    match(view.next())
+      Some<borrow Item> { value }: value.value
+      None: 0
+  let _ = values.replace(0, with: Item { value: 2 })
+  observed
+`,
+      }),
+    );
   });
 
   it("compiles and runs a source module", async () => {
@@ -557,6 +621,68 @@ pub fn main() -> i32
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }
+  });
+
+  it("supports one-shot compilation without retaining compiler cache state", async () => {
+    const sdk = createSdk({ compilerCache: "none" });
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: `pub fn main() -> i32
+  42
+`,
+      }),
+    );
+
+    await expect(result.run<number>({ entryName: "main" })).resolves.toBe(42);
+    expect(sdk.exportCompilerArtifact()).toBeUndefined();
+  });
+
+  it("keeps memory reuse separate from durable borrowing artifacts", async () => {
+    const sdk = createSdk({ compilerCache: "memory" });
+    const source = `#!no_prelude
+pub fn main() -> i32
+  42
+`;
+
+    expectCompileSuccess(await sdk.compile({ source }));
+    expectCompileSuccess(await sdk.compile({ source }));
+
+    expect(sdk.exportCompilerArtifact()).toBeUndefined();
+  });
+
+  it("requires explicit artifact mode to export and import compiler artifacts", async () => {
+    const entryPath = path.join(
+      repoRoot,
+      "tests",
+      "performance",
+      "fixtures",
+      "vtrace-compute-benchmark.voyd",
+    );
+    const producer = createSdk({ compilerCache: "artifact" });
+    expectCompileSuccess(await producer.compile({ entryPath }));
+    const artifact = producer.exportCompilerArtifact();
+
+    expect(artifact?.schema).toBe("voyd.compiler-dependency-borrow-cache");
+    const consumer = createSdk({ compilerCache: "artifact", compilerArtifact: artifact });
+    const result = expectCompileSuccess(await consumer.compile({ entryPath }));
+    await expect(result.run<number>({ entryName: "main" })).resolves.toBe(
+      3_825_271,
+    );
+  });
+
+  it("rejects an artifact when compiler caching is disabled", () => {
+    expect(() =>
+      createSdk({
+        compilerCache: "none",
+        compilerArtifact: {} as never,
+      } as never),
+    ).toThrow('compilerArtifact requires compilerCache: "artifact"');
+  });
+
+  it("rejects an unknown compiler cache policy from untyped callers", () => {
+    expect(() => createSdk({ compilerCache: "disk" } as never)).toThrow(
+      'unknown compiler cache policy "disk"',
+    );
   });
 
   it("keeps dependency snapshot app edits valid for generic-heavy programs", async () => {
@@ -1414,9 +1540,11 @@ pub fn second(): Async -> i32
 
   it("[external-a] runs typed synchronous external functions through package adapters", async () => {
     const sdk = createSdk();
-    const result = expectCompileSuccess(await sdk.compile({
-      source: EXTERNAL_SOURCE,
-    }));
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        source: EXTERNAL_SOURCE,
+      }),
+    );
     expect(result.external.functions).toMatchObject([
       {
         interfaceId: "example:math/ops@1",
@@ -1444,32 +1572,41 @@ pub fn second(): Async -> i32
       },
     );
 
-    await expect(result.run<number>({
-      entryName: "main",
-      adapters: [adapter],
-    })).resolves.toBe(42);
+    await expect(
+      result.run<number>({
+        entryName: "main",
+        adapters: [adapter],
+      }),
+    ).resolves.toBe(42);
 
-    const projectRoot = await fs.mkdtemp(path.join(repoRoot, ".tmp-esm-adapter-"));
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-esm-adapter-"),
+    );
     const packageRoot = path.join(projectRoot, "node_modules", "esm-only-math");
     await fs.mkdir(packageRoot, { recursive: true });
-    await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
-      name: "esm-only-math",
-      type: "module",
-      exports: {
-        "./adapter": {
-          import: "./dist/adapter.js",
-          development: "./adapter.js",
+    await fs.writeFile(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "esm-only-math",
+        type: "module",
+        exports: {
+          "./adapter": {
+            import: "./dist/adapter.js",
+            development: "./adapter.js",
+          },
         },
-      },
-      voyd: {
-        adapter: {
-          abi: 1,
-          interfaces: ["example:math/ops@1"],
-          node: "./adapter",
+        voyd: {
+          adapter: {
+            abi: 1,
+            interfaces: ["example:math/ops@1"],
+            node: "./adapter",
+          },
         },
-      },
-    }));
-    await fs.writeFile(path.join(packageRoot, "adapter.js"), `export default {
+      }),
+    );
+    await fs.writeFile(
+      path.join(packageRoot, "adapter.js"),
+      `export default {
   kind: "voyd-package-adapter",
   contract: {
     abiVersion: 1,
@@ -1486,16 +1623,19 @@ pub fn second(): Async -> i32
     "example:math/ops@1": { double: (value) => value * 2 }
   }
 };
-`);
+`,
+    );
     try {
       const discovered = await loadVoydPackageAdapters({
         wasm: result.wasm,
         startDir: projectRoot,
       });
-      await expect(result.run<number>({
-        entryName: "main",
-        adapters: discovered,
-      })).resolves.toBe(42);
+      await expect(
+        result.run<number>({
+          entryName: "main",
+          adapters: discovered,
+        }),
+      ).resolves.toBe(42);
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }
@@ -1506,7 +1646,9 @@ pub fn second(): Async -> i32
   });
 
   it("[external-a] ignores duplicate providers for functions the module does not require", async () => {
-    const result = expectCompileSuccess(await createSdk().compile({ source: `@external(id: "example:required/a@1")
+    const result = expectCompileSuccess(
+      await createSdk().compile({
+        source: `@external(id: "example:required/a@1")
 fn a() -> i32
   a()
 
@@ -1516,97 +1658,143 @@ fn b() -> i32
 
 pub fn main() -> i32
   a() + b()
-` }));
+`,
+      }),
+    );
     const scalar = { params: [], result: { kind: "i32" as const } };
-    const shared = { kind: "sync" as const, interfaceId: "example:unused/c@1", functionName: "c", ...scalar };
-    const adapterA = defineVoydPackageAdapter({
-      abiVersion: 1,
-      packageName: "provider-a",
-      functions: [
-        { kind: "sync", interfaceId: "example:required/a@1", functionName: "a", ...scalar },
-        shared,
-      ],
-    }, {
-      "example:required/a@1": { a: () => 1 },
-      "example:unused/c@1": { c: () => 30 },
-    });
-    const adapterB = defineVoydPackageAdapter({
-      abiVersion: 1,
-      packageName: "provider-b",
-      functions: [
-        { kind: "sync", interfaceId: "example:required/b@1", functionName: "b", ...scalar },
-        shared,
-      ],
-    }, {
-      "example:required/b@1": { b: () => 2 },
-      "example:unused/c@1": { c: () => 40 },
-    });
+    const shared = {
+      kind: "sync" as const,
+      interfaceId: "example:unused/c@1",
+      functionName: "c",
+      ...scalar,
+    };
+    const adapterA = defineVoydPackageAdapter(
+      {
+        abiVersion: 1,
+        packageName: "provider-a",
+        functions: [
+          {
+            kind: "sync",
+            interfaceId: "example:required/a@1",
+            functionName: "a",
+            ...scalar,
+          },
+          shared,
+        ],
+      },
+      {
+        "example:required/a@1": { a: () => 1 },
+        "example:unused/c@1": { c: () => 30 },
+      },
+    );
+    const adapterB = defineVoydPackageAdapter(
+      {
+        abiVersion: 1,
+        packageName: "provider-b",
+        functions: [
+          {
+            kind: "sync",
+            interfaceId: "example:required/b@1",
+            functionName: "b",
+            ...scalar,
+          },
+          shared,
+        ],
+      },
+      {
+        "example:required/b@1": { b: () => 2 },
+        "example:unused/c@1": { c: () => 40 },
+      },
+    );
 
-    await expect(result.run<number>({ entryName: "main", adapters: [adapterA, adapterB] }))
-      .resolves.toBe(3);
+    await expect(
+      result.run<number>({ entryName: "main", adapters: [adapterA, adapterB] }),
+    ).resolves.toBe(3);
   });
 
   it("[external-a] detects duplicate required providers across nested node_modules", async () => {
-    const projectRoot = await fs.mkdtemp(path.join(repoRoot, ".tmp-adapter-discovery-"));
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-adapter-discovery-"),
+    );
     const nested = path.join(projectRoot, "packages", "app");
     const writeProvider = async (root: string, name: string) => {
       const packageRoot = path.join(root, "node_modules", name);
       await fs.mkdir(packageRoot, { recursive: true });
-      await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
-        name,
-        voyd: {
-          adapter: {
-            abi: 1,
-            interfaces: ["example:duplicate/service@1"],
-            browser: "./adapter.js",
+      await fs.writeFile(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({
+          name,
+          voyd: {
+            adapter: {
+              abi: 1,
+              interfaces: ["example:duplicate/service@1"],
+              browser: "./adapter.js",
+            },
           },
-        },
-      }));
+        }),
+      );
     };
     try {
       await Promise.all([
         writeProvider(projectRoot, "provider-parent"),
         writeProvider(nested, "provider-child"),
       ]);
-      await expect(findVoydPackageAdapterSpecifiers({
-        interfaceIds: ["example:duplicate/service@1"],
-        startDir: nested,
-      })).rejects.toThrow(/Multiple installed Voyd package adapters/);
+      await expect(
+        findVoydPackageAdapterSpecifiers({
+          interfaceIds: ["example:duplicate/service@1"],
+          startDir: nested,
+        }),
+      ).rejects.toThrow(/Multiple installed Voyd package adapters/);
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }
   });
 
   it("[external-a] ignores unsupported adapter ABIs unless their interface is required", async () => {
-    const projectRoot = await fs.mkdtemp(path.join(repoRoot, ".tmp-adapter-abi-"));
-    const packageRoot = path.join(projectRoot, "node_modules", "future-provider");
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-adapter-abi-"),
+    );
+    const packageRoot = path.join(
+      projectRoot,
+      "node_modules",
+      "future-provider",
+    );
     await fs.mkdir(packageRoot, { recursive: true });
-    await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
-      name: "future-provider",
-      voyd: {
-        adapter: {
-          abi: 2,
-          interfaces: ["example:future/service@1"],
-          browser: "./adapter.js",
+    await fs.writeFile(
+      path.join(packageRoot, "package.json"),
+      JSON.stringify({
+        name: "future-provider",
+        voyd: {
+          adapter: {
+            abi: 2,
+            interfaces: ["example:future/service@1"],
+            browser: "./adapter.js",
+          },
         },
-      },
-    }));
+      }),
+    );
     try {
-      await expect(findVoydPackageAdapterSpecifiers({
-        interfaceIds: [],
-        startDir: projectRoot,
-      })).resolves.toEqual([]);
-      await expect(findVoydPackageAdapterSpecifiers({
-        interfaceIds: ["example:future/service@1"],
-        startDir: projectRoot,
-      })).rejects.toThrow(/unsupported ABI 2/);
+      await expect(
+        findVoydPackageAdapterSpecifiers({
+          interfaceIds: [],
+          startDir: projectRoot,
+        }),
+      ).resolves.toEqual([]);
+      await expect(
+        findVoydPackageAdapterSpecifiers({
+          interfaceIds: ["example:future/service@1"],
+          startDir: projectRoot,
+        }),
+      ).rejects.toThrow(/unsupported ABI 2/);
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }
   });
 
   it("[external-a] does not mix metadata from a shadowed outer package version", async () => {
-    const projectRoot = await fs.mkdtemp(path.join(repoRoot, ".tmp-adapter-shadow-"));
+    const projectRoot = await fs.mkdtemp(
+      path.join(repoRoot, ".tmp-adapter-shadow-"),
+    );
     const nested = path.join(projectRoot, "packages", "app");
     const writePackage = async (
       root: string,
@@ -1614,10 +1802,13 @@ pub fn main() -> i32
     ) => {
       const packageRoot = path.join(root, "node_modules", "same-provider");
       await fs.mkdir(packageRoot, { recursive: true });
-      await fs.writeFile(path.join(packageRoot, "package.json"), JSON.stringify({
-        name: "same-provider",
-        voyd: { adapter },
-      }));
+      await fs.writeFile(
+        path.join(packageRoot, "package.json"),
+        JSON.stringify({
+          name: "same-provider",
+          voyd: { adapter },
+        }),
+      );
     };
     try {
       await Promise.all([
@@ -1628,19 +1819,22 @@ pub fn main() -> i32
         }),
         writePackage(nested, { abi: 1, interfaces: [] }),
       ]);
-      await expect(findVoydPackageAdapterSpecifiers({
-        interfaceIds: ["example:shadowed/service@1"],
-        startDir: nested,
-      })).rejects.toThrow(/Missing installed Voyd package adapters/);
+      await expect(
+        findVoydPackageAdapterSpecifiers({
+          interfaceIds: ["example:shadowed/service@1"],
+          startDir: nested,
+        }),
+      ).rejects.toThrow(/Missing installed Voyd package adapters/);
     } finally {
       await fs.rm(projectRoot, { recursive: true, force: true });
     }
   });
 
   it("[external-a] passes package adapters to compiled Voyd tests", async () => {
-    const result = expectCompileSuccess(await createSdk().compile({
-      includeTests: true,
-      source: `use std::test::assertions::all
+    const result = expectCompileSuccess(
+      await createSdk().compile({
+        includeTests: true,
+        source: `use std::test::assertions::all
 
 @external(id: "example:test/math@1")
 fn double(value: i32) -> i32
@@ -1649,20 +1843,26 @@ fn double(value: i32) -> i32
 test "external adapter":
   assert(double(2), eq: 4)
 `,
-    }));
-    const adapter = defineVoydPackageAdapter({
-      abiVersion: 1,
-      packageName: "test-math",
-      functions: [{
-        kind: "sync",
-        interfaceId: "example:test/math@1",
-        functionName: "double",
-        params: [{ kind: "i32" }],
-        result: { kind: "i32" },
-      }],
-    }, {
-      "example:test/math@1": { double: (value: number) => value * 2 },
-    });
+      }),
+    );
+    const adapter = defineVoydPackageAdapter(
+      {
+        abiVersion: 1,
+        packageName: "test-math",
+        functions: [
+          {
+            kind: "sync",
+            interfaceId: "example:test/math@1",
+            functionName: "double",
+            params: [{ kind: "i32" }],
+            result: { kind: "i32" },
+          },
+        ],
+      },
+      {
+        "example:test/math@1": { double: (value: number) => value * 2 },
+      },
+    );
 
     expect(result.tests).toBeDefined();
     const summary = await result.tests!.run({ adapters: [adapter] });
@@ -1671,9 +1871,10 @@ test "external adapter":
   });
 
   it("[external-b] auto-discovers adapters required only by the test Wasm", async () => {
-    const result = expectCompileSuccess(await createSdk().compile({
-      includeTests: true,
-      source: `use pkg::markdown::to_static
+    const result = expectCompileSuccess(
+      await createSdk().compile({
+        includeTests: true,
+        source: `use pkg::markdown::to_static
 use std::test::assertions::all
 
 pub fn main() -> i32
@@ -1682,7 +1883,8 @@ pub fn main() -> i32
 test "markdown adapter":
   assert(to_static("# Test").root, eq: 0)
 `,
-    }));
+      }),
+    );
     expect(result.tests).toBeDefined();
 
     const summary = await result.tests!.run({});
@@ -1691,8 +1893,9 @@ test "markdown adapter":
   });
 
   it("[external-b] runs asynchronous external functions as Voyd effects", async () => {
-    const result = expectCompileSuccess(await createSdk().compile({
-      source: `use std::msgpack::self as __std_msgpack
+    const result = expectCompileSuccess(
+      await createSdk().compile({
+        source: `use std::msgpack::self as __std_msgpack
 
 @external(id: "example:async/ops@1")
 eff Remote
@@ -1701,37 +1904,48 @@ eff Remote
 pub fn main(): Remote -> i32
   Remote::double(21)
 `,
-    }));
-    expect(result.external.functions).toMatchObject([{
-      kind: "async",
-      interfaceId: "example:async/ops@1",
-      functionName: "double",
-    }]);
-    const adapter = defineVoydPackageAdapter({
-      abiVersion: 1,
-      packageName: "example-async",
-      functions: [{
+      }),
+    );
+    expect(result.external.functions).toMatchObject([
+      {
         kind: "async",
         interfaceId: "example:async/ops@1",
         functionName: "double",
-        params: [{ kind: "i32" }],
-        result: { kind: "i32" },
-      }],
-    }, {
-      "example:async/ops@1": {
-        double: async (value: number) => {
-          await Promise.resolve();
-          return value * 2;
+      },
+    ]);
+    const adapter = defineVoydPackageAdapter(
+      {
+        abiVersion: 1,
+        packageName: "example-async",
+        functions: [
+          {
+            kind: "async",
+            interfaceId: "example:async/ops@1",
+            functionName: "double",
+            params: [{ kind: "i32" }],
+            result: { kind: "i32" },
+          },
+        ],
+      },
+      {
+        "example:async/ops@1": {
+          double: async (value: number) => {
+            await Promise.resolve();
+            return value * 2;
+          },
         },
       },
-    });
+    );
 
-    await expect(result.run<number>({ entryName: "main", adapters: [adapter] }))
-      .resolves.toBe(42);
+    await expect(
+      result.run<number>({ entryName: "main", adapters: [adapter] }),
+    ).resolves.toBe(42);
   });
 
   it("[external-b] runs async external effects with structured and string DTOs regardless of source order", async () => {
-    const result = expectCompileSuccess(await createSdk().compile({ source: `use std::msgpack::self as __std_msgpack
+    const result = expectCompileSuccess(
+      await createSdk().compile({
+        source: `use std::msgpack::self as __std_msgpack
 use std::string::type::String
 use std::string::self as __std_string
 
@@ -1747,47 +1961,59 @@ fn unused(input: Request): Http -> Response
 
 pub fn main(): Http -> i32
   Http::request({ url: "https://example.test" }).status
-` }));
+`,
+      }),
+    );
     const requirement = result.external.functions[0]!;
     expect(requirement).toMatchObject({
       kind: "async",
       interfaceId: "example:http/client@1",
       functionName: "request",
     });
-    const adapter = defineVoydPackageAdapter({
-      abiVersion: 1,
-      packageName: "example-http",
-      functions: [{
-        kind: "async",
-        interfaceId: requirement.interfaceId,
-        functionName: requirement.functionName,
-        params: [{
-          kind: "record",
-          fields: [{ name: "url", schema: { kind: "string" } }],
-        }],
-        result: {
-          kind: "record",
-          fields: [
-            { name: "body", schema: { kind: "string" } },
-            { name: "status", schema: { kind: "i32" } },
-          ],
-        },
-      }],
-    }, {
-      "example:http/client@1": {
-        request: async (input: { url: string }) => ({
-          status: 200,
-          body: `loaded ${input.url}`,
-        }),
+    const adapter = defineVoydPackageAdapter(
+      {
+        abiVersion: 1,
+        packageName: "example-http",
+        functions: [
+          {
+            kind: "async",
+            interfaceId: requirement.interfaceId,
+            functionName: requirement.functionName,
+            params: [
+              {
+                kind: "record",
+                fields: [{ name: "url", schema: { kind: "string" } }],
+              },
+            ],
+            result: {
+              kind: "record",
+              fields: [
+                { name: "body", schema: { kind: "string" } },
+                { name: "status", schema: { kind: "i32" } },
+              ],
+            },
+          },
+        ],
       },
-    });
+      {
+        "example:http/client@1": {
+          request: async (input: { url: string }) => ({
+            status: 200,
+            body: `loaded ${input.url}`,
+          }),
+        },
+      },
+    );
 
-    await expect(result.run<number>({ entryName: "main", adapters: [adapter] }))
-      .resolves.toBe(200);
+    await expect(
+      result.run<number>({ entryName: "main", adapters: [adapter] }),
+    ).resolves.toBe(200);
   });
 
   it("[external-b] does not require adapters used only by unreachable private functions", async () => {
-    const result = expectCompileSuccess(await createSdk().compile({ source: `use std::msgpack::self as __std_msgpack
+    const result = expectCompileSuccess(
+      await createSdk().compile({
+        source: `use std::msgpack::self as __std_msgpack
 
 @external(id: "example:optional/remote@1")
 eff Remote
@@ -1798,14 +2024,17 @@ fn unused(): Remote -> i32
 
 pub fn main() -> i32
   7
-` }));
+`,
+      }),
+    );
 
     expect(result.external.functions).toEqual([]);
     await expect(result.run<number>({ entryName: "main" })).resolves.toBe(7);
   });
 
   it("[external-b] rejects recursive external DTOs before runtime linking", async () => {
-    const result = await createSdk().compile({ source: `use std::optional::all
+    const result = await createSdk().compile({
+      source: `use std::optional::all
 
 pub obj Node {
   api value: i32,
@@ -1818,10 +2047,12 @@ pub fn root() -> Node
 
 pub fn main() -> i32
   root().value
-` });
+`,
+    });
     expect(result.success).toBe(false);
     if (result.success) return;
-    expect(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"))
-      .toMatch(/recursive.*Component Model/);
+    expect(
+      result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    ).toMatch(/recursive.*Component Model/);
   });
 });

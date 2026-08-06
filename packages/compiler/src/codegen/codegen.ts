@@ -102,15 +102,34 @@ export const codegen = (
     options,
   });
 
-export const codegenProgram = ({
+export const codegenProgram = (params: CodegenProgramParams): CodegenResult => {
+  const module = createCodegenModule();
+  const ownership: { module?: binaryen.Module } = { module };
+  try {
+    return codegenProgramWithModule({
+      ...params,
+      mod: module,
+      ownership,
+    });
+  } catch (error) {
+    ownership.module?.dispose();
+    throw error;
+  }
+};
+
+const codegenProgramWithModule = ({
   program,
   entryModuleId,
   options = {},
   optimization,
-}: CodegenProgramParams): CodegenResult => {
+  mod,
+  ownership,
+}: CodegenProgramParams & {
+  mod: binaryen.Module;
+  ownership: { module?: binaryen.Module };
+}): CodegenResult => {
   const codegenStartedAt = startCompilerPerfPhase();
   const modules = Array.from(program.modules.values());
-  const mod = createCodegenModule();
   const mergedOptions = normalizeCodegenOptions(options);
   const rtt = createRttContext(mod);
   const effectsRuntime = createEffectRuntime(mod);
@@ -264,7 +283,10 @@ export const codegenProgram = ({
   let outputModule = mod;
   if (mergedOptions.optimize) {
     const prepareStartedAt = startCompilerPerfPhase();
-    outputModule = binaryen.readBinary(emitWasmBytes(mod));
+    const optimizedModule = binaryen.readBinary(emitWasmBytes(mod));
+    ownership.module = optimizedModule;
+    mod.dispose();
+    outputModule = optimizedModule;
     markCompilerPerfPhaseDuration(
       "binaryen.prepareOptimizeModule",
       prepareStartedAt,
@@ -311,13 +333,15 @@ export const codegenProgram = ({
     }
   }
 
-  return {
+  const result = {
     module: outputModule,
     wasm,
     effectTable,
     diagnostics: [...diagnostics.diagnostics],
     continuationBackendKind: entryCtx.effectsBackend.kind,
   };
+  ownership.module = undefined;
+  return result;
 };
 
 export const codegenProgramWithContinuationFallback = ({
@@ -360,19 +384,24 @@ export const codegenProgramWithContinuationFallback = ({
   if (preferredKind !== "stack-switch") {
     return { preferredKind, preferred };
   }
-  const fallback = codegenProgram({
-    program,
-    entryModuleId,
-    optimization,
-    options: {
-      ...options,
-      continuationBackend: {
-        ...(options.continuationBackend ?? {}),
-        stackSwitching: false,
+  try {
+    const fallback = codegenProgram({
+      program,
+      entryModuleId,
+      optimization,
+      options: {
+        ...options,
+        continuationBackend: {
+          ...(options.continuationBackend ?? {}),
+          stackSwitching: false,
+        },
       },
-    },
-  });
-  return { preferredKind, preferred, fallback };
+    });
+    return { preferredKind, preferred, fallback };
+  } catch (error) {
+    preferred.module.dispose();
+    throw error;
+  }
 };
 
 export type { CodegenOptions, CodegenResult } from "./context.js";
