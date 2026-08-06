@@ -76,6 +76,8 @@ export interface EffectTable {
   cloneInterner(): EffectInterner;
   setExprEffect(expr: HirExprId, row: EffectRowId): void;
   getExprEffect(expr: HirExprId): EffectRowId | undefined;
+  pushExprEffectScope(): void;
+  popExprEffectScope(): void;
   snapshotExprEffects(): ReadonlyMap<HirExprId, EffectRowId>;
   restoreExprEffects(snapshot: ReadonlyMap<HirExprId, EffectRowId>): void;
   setFunctionEffect(symbol: SymbolId, scheme: TypeSchemeId, row: EffectRowId): void;
@@ -87,6 +89,8 @@ export type EffectInterner = Omit<
   EffectTable,
   | "setExprEffect"
   | "getExprEffect"
+  | "pushExprEffectScope"
+  | "popExprEffectScope"
   | "snapshotExprEffects"
   | "restoreExprEffects"
   | "setFunctionEffect"
@@ -330,6 +334,7 @@ export const createEffectTable = ({
       { scheme: effect.scheme, row: effect.row },
     ]) ?? [],
   );
+  const exprEffectScopes: Map<HirExprId, EffectRowId | undefined>[] = [];
 
   const setExprEffect = (expr: HirExprId, row: EffectRowId): void => {
     const existing = exprEffects.get(expr);
@@ -339,11 +344,33 @@ export const createEffectTable = ({
       }
       row = shared.compose(existing, row);
     }
+    const activeScope = exprEffectScopes.at(-1);
+    if (activeScope && !activeScope.has(expr)) {
+      activeScope.set(expr, existing);
+    }
     exprEffects.set(expr, row);
   };
 
   const getExprEffect = (expr: HirExprId): EffectRowId | undefined =>
     exprEffects.get(expr);
+
+  const pushExprEffectScope = (): void => {
+    exprEffectScopes.push(new Map());
+  };
+
+  const popExprEffectScope = (): void => {
+    const scope = exprEffectScopes.pop();
+    if (!scope) {
+      throw new Error("cannot pop expression effect scope: no scope is active");
+    }
+    scope.forEach((row, expr) => {
+      if (typeof row === "number") {
+        exprEffects.set(expr, row);
+      } else {
+        exprEffects.delete(expr);
+      }
+    });
+  };
 
   const snapshotExprEffects = (): ReadonlyMap<HirExprId, EffectRowId> =>
     new Map(exprEffects);
@@ -386,6 +413,8 @@ export const createEffectTable = ({
     ...shared,
     setExprEffect,
     getExprEffect,
+    pushExprEffectScope,
+    popExprEffectScope,
     snapshotExprEffects,
     restoreExprEffects,
     setFunctionEffect,

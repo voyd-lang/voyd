@@ -53,7 +53,6 @@ export const withSpeculativeExprTyping = <T>(
 ): T => {
   const previousResolved = ctx.resolvedExprTypes;
   const previousTailResumptions = ctx.tailResumptions;
-  const previousExprEffects = ctx.effects.snapshotExprEffects();
   const previousTargets = ctx.callResolution.targets;
   const previousArgumentPlans = ctx.callResolution.argumentPlans;
   const previousTypeArguments = ctx.callResolution.typeArguments;
@@ -61,6 +60,7 @@ export const withSpeculativeExprTyping = <T>(
   const previousTraitDispatches = ctx.callResolution.traitDispatches;
 
   ctx.table.pushExprTypeScope();
+  ctx.effects.pushExprEffectScope();
   ctx.resolvedExprTypes = new Map(previousResolved);
   ctx.tailResumptions = new Map(previousTailResumptions);
   ctx.callResolution.targets = cloneNestedMap(previousTargets);
@@ -72,7 +72,7 @@ export const withSpeculativeExprTyping = <T>(
   try {
     return run();
   } finally {
-    ctx.effects.restoreExprEffects(previousExprEffects);
+    ctx.effects.popExprEffectScope();
     ctx.callResolution.targets = previousTargets;
     ctx.callResolution.argumentPlans = previousArgumentPlans;
     ctx.callResolution.typeArguments = previousTypeArguments;
