@@ -347,7 +347,9 @@ export type ObjectLayoutIndex = {
   getTemplate(owner: ProgramSymbolId): CodegenObjectTemplate | undefined;
   getInfoByNominal(nominal: TypeId): CodegenObjectTypeInfo | undefined;
   getNominalOwnerRef(nominal: TypeId): ProgramSymbolId | undefined;
-  getNominalInstancesByOwner(owner: ProgramSymbolId): readonly TypeId[];
+  getCompatibleNominalInstantiations(
+    nominal: TypeId,
+  ): readonly { nominalId: TypeId; typeId: TypeId }[];
 };
 
 export type TraitDispatchIndex = {
@@ -745,6 +747,10 @@ export const buildProgramCodegenView = (
   const objectInfoByNominal = new Map<TypeId, CodegenObjectTypeInfo>();
   const nominalOwnerByNominal = new Map<TypeId, ProgramSymbolId>();
   const nominalsByOwner = new Map<ProgramSymbolId, TypeId[]>();
+  const compatibleNominalInstantiations = new Map<
+    TypeId,
+    readonly { nominalId: TypeId; typeId: TypeId }[]
+  >();
   const aliasSymbolsByType = new Map<TypeId, Set<ProgramSymbolId>>();
   const standaloneVariantAliasesByType = new Map<
     TypeId,
@@ -2391,11 +2397,64 @@ export const buildProgramCodegenView = (
     },
   };
 
+  const isUnknownPrimitive = (typeId: TypeId): boolean => {
+    const desc = arena.get(typeId);
+    return desc.kind === "primitive" && desc.name === "unknown";
+  };
+
   const objects: ObjectLayoutIndex = {
     getTemplate: (owner) => objectTemplateByOwner.get(owner),
     getInfoByNominal: (nominal) => objectInfoByNominal.get(nominal),
     getNominalOwnerRef: (nominal) => nominalOwnerByNominal.get(nominal),
-    getNominalInstancesByOwner: (owner) => nominalsByOwner.get(owner) ?? [],
+    getCompatibleNominalInstantiations: (nominal) => {
+      const cached = compatibleNominalInstantiations.get(nominal);
+      if (cached) {
+        return cached;
+      }
+
+      const sourceDesc = arena.get(nominal);
+      if (
+        sourceDesc.kind !== "nominal-object" ||
+        sourceDesc.typeArgs.some(isUnknownPrimitive)
+      ) {
+        compatibleNominalInstantiations.set(nominal, []);
+        return [];
+      }
+
+      const compatible = (
+        nominalsByOwner.get(
+          symbols.idOf(canonicalSymbolRef(sourceDesc.owner)),
+        ) ?? []
+      ).flatMap((candidateNominal) => {
+        if (candidateNominal === nominal) {
+          return [];
+        }
+        const info = objectInfoByNominal.get(candidateNominal);
+        const targetDesc = arena.get(candidateNominal);
+        if (
+          !info ||
+          info.nominal !== candidateNominal ||
+          targetDesc.kind !== "nominal-object" ||
+          targetDesc.typeArgs.length !== sourceDesc.typeArgs.length ||
+          targetDesc.typeArgs.some(isUnknownPrimitive)
+        ) {
+          return [];
+        }
+        const isCompatible = sourceDesc.typeArgs.every(
+          (typeArg, index) =>
+            arena.unify(typeArg, targetDesc.typeArgs[index]!, {
+              location: first.hir.module.ast,
+              reason: "nominal instantiation compatibility",
+              variance: "covariant",
+            }).ok,
+        );
+        return isCompatible
+          ? [{ nominalId: candidateNominal, typeId: info.type }]
+          : [];
+      });
+      compatibleNominalInstantiations.set(nominal, compatible);
+      return compatible;
+    },
   };
 
   const traits: TraitDispatchIndex = {

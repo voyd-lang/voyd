@@ -183,73 +183,106 @@ const paramsReferencedInType = (
   type: TypeId,
   allowed: ReadonlySet<TypeParamId>,
   ctx: TypingContext,
-  seen: Set<TypeId> = new Set(),
 ): Set<TypeParamId> => {
+  const referenced = new Set<TypeParamId>();
+  collectParamsReferencedInType(type, allowed, ctx, referenced, new Set());
+  return referenced;
+};
+
+const collectParamsReferencedInType = (
+  type: TypeId,
+  allowed: ReadonlySet<TypeParamId>,
+  ctx: TypingContext,
+  referenced: Set<TypeParamId>,
+  seen: Set<TypeId>,
+): void => {
   if (seen.has(type)) {
-    return new Set();
+    return;
   }
   seen.add(type);
 
   const desc = ctx.arena.get(type);
   switch (desc.kind) {
     case "borrowed":
-      return paramsReferencedInType(desc.inner, allowed, ctx, seen);
+      collectParamsReferencedInType(desc.inner, allowed, ctx, referenced, seen);
+      return;
     case "type-param-ref":
-      return allowed.has(desc.param) ? new Set([desc.param]) : new Set();
+      if (allowed.has(desc.param)) {
+        referenced.add(desc.param);
+      }
+      return;
     case "trait":
     case "nominal-object":
-    case "value-object": {
-      return desc.typeArgs.reduce((acc, arg) => {
-        paramsReferencedInType(arg, allowed, ctx, seen).forEach((entry) =>
-          acc.add(entry),
-        );
-        return acc;
-      }, new Set<TypeParamId>());
-    }
+    case "value-object":
+      desc.typeArgs.forEach((arg) =>
+        collectParamsReferencedInType(arg, allowed, ctx, referenced, seen),
+      );
+      return;
     case "structural-object":
-      return desc.fields.reduce((acc, field) => {
-        paramsReferencedInType(field.type, allowed, ctx, seen).forEach(
-          (entry) => acc.add(entry),
-        );
-        return acc;
-      }, new Set<TypeParamId>());
-    case "function": {
-      const acc = new Set<TypeParamId>();
-      desc.parameters.forEach((param) =>
-        paramsReferencedInType(param.type, allowed, ctx, seen).forEach(
-          (entry) => acc.add(entry),
+      desc.fields.forEach((field) =>
+        collectParamsReferencedInType(
+          field.type,
+          allowed,
+          ctx,
+          referenced,
+          seen,
         ),
       );
-      paramsReferencedInType(desc.returnType, allowed, ctx, seen).forEach(
-        (entry) => acc.add(entry),
+      return;
+    case "function":
+      desc.parameters.forEach((param) =>
+        collectParamsReferencedInType(
+          param.type,
+          allowed,
+          ctx,
+          referenced,
+          seen,
+        ),
       );
-      return acc;
-    }
+      collectParamsReferencedInType(
+        desc.returnType,
+        allowed,
+        ctx,
+        referenced,
+        seen,
+      );
+      return;
     case "union":
-      return desc.members.reduce((acc, member) => {
-        paramsReferencedInType(member, allowed, ctx, seen).forEach((entry) =>
-          acc.add(entry),
-        );
-        return acc;
-      }, new Set<TypeParamId>());
-    case "intersection": {
-      const acc = new Set<TypeParamId>();
+      desc.members.forEach((member) =>
+        collectParamsReferencedInType(member, allowed, ctx, referenced, seen),
+      );
+      return;
+    case "intersection":
       if (typeof desc.nominal === "number") {
-        paramsReferencedInType(desc.nominal, allowed, ctx, seen).forEach(
-          (entry) => acc.add(entry),
+        collectParamsReferencedInType(
+          desc.nominal,
+          allowed,
+          ctx,
+          referenced,
+          seen,
         );
       }
       if (typeof desc.structural === "number") {
-        paramsReferencedInType(desc.structural, allowed, ctx, seen).forEach(
-          (entry) => acc.add(entry),
+        collectParamsReferencedInType(
+          desc.structural,
+          allowed,
+          ctx,
+          referenced,
+          seen,
         );
       }
-      return acc;
-    }
+      return;
     case "fixed-array":
-      return paramsReferencedInType(desc.element, allowed, ctx, seen);
+      collectParamsReferencedInType(
+        desc.element,
+        allowed,
+        ctx,
+        referenced,
+        seen,
+      );
+      return;
     default:
-      return new Set();
+      return;
   }
 };
 

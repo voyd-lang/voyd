@@ -785,6 +785,12 @@ use SecondStore::{ save }
       host,
     });
 
+    const strict = analyzeModules({ graph });
+    expect(strict.semantics.has("src::b")).toBe(false);
+    expect(strict.diagnostics.some((diag) => diag.code === "TY0006")).toBe(
+      true,
+    );
+
     const { diagnostics, semantics } = analyzeModules({
       graph,
       recoverFromTypingErrors: true,

@@ -110,6 +110,17 @@ export interface SemanticsPipelineOptions {
   retainBorrowingIncrementalData?: boolean;
 }
 
+export interface ReanalyzeSemanticsBorrowingOptions {
+  semantics: SemanticsPipelineResult;
+  module: ModuleNode;
+  exports?: Map<string, ModuleExportTable>;
+  dependencies?: Map<string, SemanticsPipelineResult>;
+  recoverFromTypingErrors?: boolean;
+  borrowingOverride?: BorrowingResult;
+  previousBorrowing?: BorrowingResult;
+  retainBorrowingIncrementalData?: boolean;
+}
+
 type SemanticsPipelineInput = SemanticsPipelineOptions | Form;
 
 export const semanticsPipeline = (
@@ -225,6 +236,86 @@ export const semanticsPipeline = (
     moduleId: module.id,
     imports: binding.imports,
   });
+  return finalizeSemanticsPipeline({
+    module,
+    binding,
+    symbolTable,
+    hir,
+    typing,
+    exports,
+    dependencies,
+    recoverFromTypingErrors,
+    checkBorrowBodies,
+    borrowingOverride,
+    previousBorrowing,
+    retainBorrowingIncrementalData,
+  });
+};
+
+/**
+ * Reuses stabilized binding, lowering, and typing state while recomputing the
+ * dependency-sensitive borrowing and export contracts for a cyclic module.
+ */
+export const reanalyzeSemanticsBorrowing = ({
+  semantics,
+  module,
+  exports,
+  dependencies,
+  recoverFromTypingErrors,
+  borrowingOverride,
+  previousBorrowing,
+  retainBorrowingIncrementalData,
+}: ReanalyzeSemanticsBorrowingOptions): SemanticsPipelineResult => {
+  const symbolTable = (
+    semantics as SemanticsPipelineResult & { symbolTable?: SymbolTable }
+  ).symbolTable;
+  if (!symbolTable) {
+    throw new Error("semantics result is missing its internal symbol table");
+  }
+
+  return finalizeSemanticsPipeline({
+    module,
+    binding: semantics.binding,
+    symbolTable,
+    hir: semantics.hir,
+    typing: semantics.typing,
+    exports,
+    dependencies,
+    recoverFromTypingErrors,
+    checkBorrowBodies: true,
+    borrowingOverride,
+    previousBorrowing,
+    retainBorrowingIncrementalData,
+  });
+};
+
+const finalizeSemanticsPipeline = ({
+  module,
+  binding,
+  symbolTable,
+  hir,
+  typing,
+  exports,
+  dependencies,
+  recoverFromTypingErrors,
+  checkBorrowBodies,
+  borrowingOverride,
+  previousBorrowing,
+  retainBorrowingIncrementalData,
+}: {
+  module: ModuleNode;
+  binding: BindingResult;
+  symbolTable: SymbolTable;
+  hir: HirGraph;
+  typing: TypingResult;
+  exports?: Map<string, ModuleExportTable>;
+  dependencies?: Map<string, SemanticsPipelineResult>;
+  recoverFromTypingErrors?: boolean;
+  checkBorrowBodies?: boolean;
+  borrowingOverride?: BorrowingResult;
+  previousBorrowing?: BorrowingResult;
+  retainBorrowingIncrementalData?: boolean;
+}): SemanticsPipelineResult => {
   const borrowingStartedAt = startCompilerPerfPhase();
   const borrowingDependencies = selectBorrowingDependencySemantics({
     dependencies,

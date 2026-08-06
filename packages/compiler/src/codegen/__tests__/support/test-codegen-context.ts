@@ -145,7 +145,7 @@ export const createTestCodegenContext = (): {
         getTemplate: () => undefined,
         getInfoByNominal: () => undefined,
         getNominalOwnerRef: () => undefined,
-        getNominalInstancesByOwner: () => [],
+        getCompatibleNominalInstantiations: () => [],
       },
       traits: {
         getImplsByNominal: () => [],

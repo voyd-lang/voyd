@@ -126,6 +126,34 @@ describe("EffectTable", () => {
     expect(() => effects.setFunctionEffect(2, scheme, effects.emptyRow)).toThrow();
   });
 
+  it("rolls back nested expression effect scopes", () => {
+    const effects = createEffectTable();
+    const initial = effects.internRow({
+      operations: [{ name: "Async.await" }],
+    });
+    const outer = effects.internRow({ operations: [{ name: "Log.write" }] });
+    const inner = effects.internRow({ operations: [{ name: "State.get" }] });
+    effects.setExprEffect(1, initial);
+
+    effects.pushExprEffectScope();
+    effects.setExprEffect(1, outer);
+    effects.setExprEffect(2, outer);
+    const outerComposed = effects.getExprEffect(1);
+
+    effects.pushExprEffectScope();
+    effects.setExprEffect(1, inner);
+    effects.setExprEffect(3, inner);
+    effects.popExprEffectScope();
+
+    expect(effects.getExprEffect(1)).toBe(outerComposed);
+    expect(effects.getExprEffect(2)).toBe(outer);
+    expect(effects.getExprEffect(3)).toBeUndefined();
+
+    effects.popExprEffectScope();
+    expect(effects.getExprEffect(1)).toBe(initial);
+    expect(effects.getExprEffect(2)).toBeUndefined();
+  });
+
   it("exposes empty vs open rows", () => {
     const effects = createEffectTable();
     expect(effects.isEmpty(effects.emptyRow)).toBe(true);

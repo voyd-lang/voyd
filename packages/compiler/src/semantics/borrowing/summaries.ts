@@ -230,11 +230,23 @@ const originKey = (origin: ParameterOrigin): string => {
     return cached;
   }
   const comparator = origin.accessTypeComparator;
+  const sourceProjectionKey = projectionPathKey(origin.sourceProjections);
+  const resultProjectionKey =
+    origin.resultProjections === origin.sourceProjections
+      ? sourceProjectionKey
+      : projectionPathKey(origin.resultProjections);
+  const comparatorProjectionKey = comparator
+    ? comparator.sourceProjections === origin.sourceProjections
+      ? sourceProjectionKey
+      : comparator.sourceProjections === origin.resultProjections
+        ? resultProjectionKey
+        : projectionPathKey(comparator.sourceProjections)
+    : "";
   const key = [
     origin.parameter,
     origin.sourceEndpointAccess,
-    projectionPathKey(origin.sourceProjections),
-    projectionPathKey(origin.resultProjections),
+    sourceProjectionKey,
+    resultProjectionKey,
     origin.resultNominal ?? "",
     origin.borrowed === true ? 1 : 0,
     origin.shared === true ? 1 : 0,
@@ -243,7 +255,7 @@ const originKey = (origin: ParameterOrigin): string => {
     origin.defaultParameter ?? "",
     origin.returnTypeConditionId ?? "",
     comparator
-      ? `${comparator.conditionId.length}:${comparator.conditionId}:${comparator.parameter}:${projectionPathKey(comparator.sourceProjections)}`
+      ? `${comparator.conditionId.length}:${comparator.conditionId}:${comparator.parameter}:${comparatorProjectionKey}`
       : "",
   ].join("|");
   originKeys.set(origin, key);
@@ -3381,6 +3393,7 @@ const summarizeFunction = ({
   moduleId,
   imports,
   dependencies,
+  externalBindingFlows,
   decls,
 }: {
   functionItem: HirFunction;
@@ -3393,6 +3406,7 @@ const summarizeFunction = ({
   moduleId: string;
   imports: ReadonlyMap<SymbolId, SymbolRef>;
   dependencies: ReadonlyMap<string, BorrowingDependency>;
+  externalBindingFlows: ReadonlyMap<SymbolId, Flow>;
   decls: DeclTable;
 }): CallableBorrowContract => {
   incrementCompilerPerfCounter("borrowing.summary.evaluations");
@@ -3468,8 +3482,8 @@ const summarizeFunction = ({
   invalidated.set(env, emptyFlow());
   placeEnvs.set(env, new Map());
   expressionFlows.set(env, new Map());
-  externalModuleBindingFlows(hir, typing, imports, dependencies).forEach(
-    (flow, symbol) => env.set(symbol, new Map(flow)),
+  externalBindingFlows.forEach((flow, symbol) =>
+    env.set(symbol, new Map(flow)),
   );
   functionItem.parameters.forEach((parameter, index) => {
     bindPattern(parameter.pattern, parameterFlows.get(index)!, env);
@@ -4713,6 +4727,12 @@ export const computeCallableBorrowContracts = ({
       localSummaryDependencies.set(dependent.symbol, targets);
     });
   });
+  const externalBindingFlows = externalModuleBindingFlows(
+    hir,
+    typing,
+    importMap,
+    dependencies,
+  );
   let evaluationCount = 0;
   const summarize = (node: SummarySolveNode): CallableBorrowContract => {
     evaluationCount += 1;
@@ -4728,6 +4748,7 @@ export const computeCallableBorrowContracts = ({
           moduleId,
           imports: importMap,
           dependencies,
+          externalBindingFlows,
           decls,
         })
       : summarizeLambdaBorrowing({
@@ -4740,6 +4761,7 @@ export const computeCallableBorrowContracts = ({
           moduleId,
           imports: importMap,
           dependencies,
+          externalBindingFlows,
           contracts,
           decls,
         });
@@ -5115,6 +5137,7 @@ const summarizeLambdaBorrowing = ({
   moduleId,
   imports,
   dependencies,
+  externalBindingFlows,
   contracts,
   decls,
 }: {
@@ -5127,6 +5150,7 @@ const summarizeLambdaBorrowing = ({
   moduleId: string;
   imports: ReadonlyMap<SymbolId, SymbolRef>;
   dependencies: ReadonlyMap<string, BorrowingDependency>;
+  externalBindingFlows: ReadonlyMap<SymbolId, Flow>;
   contracts: ReadonlyMap<SymbolId, CallableBorrowContract>;
   decls: DeclTable;
 }): CallableBorrowContract => {
@@ -5174,8 +5198,8 @@ const summarizeLambdaBorrowing = ({
   invalidated.set(env, emptyFlow());
   placeEnvs.set(env, new Map());
   expressionFlows.set(env, new Map());
-  externalModuleBindingFlows(hir, typing, imports, dependencies).forEach(
-    (flow, symbol) => env.set(symbol, new Map(flow)),
+  externalBindingFlows.forEach((flow, symbol) =>
+    env.set(symbol, new Map(flow)),
   );
   lambda.parameters.forEach((parameter, index) => {
     bindPattern(parameter.pattern, parameterFlows.get(index)!, env);

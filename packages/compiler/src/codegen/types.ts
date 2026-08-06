@@ -2185,11 +2185,6 @@ const makeRuntimeTypeLabel = ({
   return `${moduleLabel}__struct_${nominalPrefix}type_${typeId}_shape_${structuralId}`;
 };
 
-const isUnknownPrimitive = (typeId: TypeId, ctx: CodegenContext): boolean => {
-  const desc = ctx.program.types.getTypeDesc(typeId);
-  return desc.kind === "primitive" && desc.name === "unknown";
-};
-
 const buildRuntimeAncestors = ({
   typeId,
   structuralId,
@@ -2233,57 +2228,15 @@ const buildRuntimeAncestors = ({
   });
   add(structuralId);
 
-  const addCompatibleSuperInstantiations = (nominalId?: TypeId) => {
-    if (typeof nominalId !== "number") {
-      return;
-    }
-    const sourceDesc = ctx.program.types.getTypeDesc(nominalId);
-    if (
-      sourceDesc.kind !== "nominal-object" ||
-      sourceDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
-    ) {
-      return;
-    }
-
-    const candidates = ctx.program.objects.getNominalInstancesByOwner(
-      sourceDesc.owner,
-    );
-
-    candidates.forEach((candidateNominal) => {
-      if (candidateNominal === nominalId) {
-        return;
-      }
-      const info = ctx.program.objects.getInfoByNominal(candidateNominal);
-      if (!info || info.nominal !== candidateNominal) {
-        return;
-      }
-      const targetDesc = ctx.program.types.getTypeDesc(candidateNominal);
-      if (
-        targetDesc.kind !== "nominal-object" ||
-        targetDesc.typeArgs.length !== sourceDesc.typeArgs.length ||
-        targetDesc.typeArgs.some((arg) => isUnknownPrimitive(arg, ctx))
-      ) {
-        return;
-      }
-
-      const compatible = sourceDesc.typeArgs.every((arg, index) => {
-        const targetArg = targetDesc.typeArgs[index]!;
-        const forward = ctx.program.types.unify(arg, targetArg, {
-          location: ctx.module.hir.module.ast,
-          reason: "nominal instantiation compatibility",
-          variance: "covariant",
-        });
-        return forward.ok;
+  const nominalId = nominalAncestry[0]?.nominalId;
+  if (typeof nominalId === "number") {
+    ctx.program.objects
+      .getCompatibleNominalInstantiations(nominalId)
+      .forEach((entry) => {
+        add(entry.typeId);
+        add(entry.nominalId);
       });
-
-      if (compatible) {
-        add(info.type);
-        add(candidateNominal);
-      }
-    });
-  };
-
-  addCompatibleSuperInstantiations(nominalAncestry[0]?.nominalId);
+  }
 
   return ancestors;
 };
