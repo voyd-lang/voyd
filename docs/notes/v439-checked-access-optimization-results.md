@@ -83,6 +83,11 @@ batch performs:
   escaping, and hydration configuration while a writer updates response byte
   and node counters.
 
+Setup, array traversal, and the 10,000-request driver use idiomatic range-based
+`for` loops. The 128-node serialization inner loop remains an explicit `while`
+loop; the loop-syntax control below shows why that distinction matters with the
+current compiler.
+
 The route/view-model and serialization stages are exported separately to
 attribute their cost, while `main` measures the integrated handler. The
 V-475-only revision is included between the original baseline and the final
@@ -90,33 +95,60 @@ branch.
 
 | Release runtime | Baseline | V-475 only | Final | Final vs baseline |
 | --- | ---: | ---: | ---: | ---: |
-| Integrated request pipeline | 8.020 ms | 7.770 ms | 5.067 ms | **-36.8%** |
-| Route and view-model lookup | 1.789 ms | 1.817 ms | 0.682 ms | **-61.9%** |
-| Response serialization | 7.229 ms | 7.058 ms | 7.072 ms | **-2.2%** |
+| Integrated request pipeline | 7.945 ms | 7.680 ms | 5.132 ms | **-35.4%** |
+| Route and view-model lookup | 3.203 ms | 3.211 ms | 0.691 ms | **-78.4%** |
+| Response serialization | 6.225 ms | 6.219 ms | 6.232 ms | +0.1% |
 
-V-475 alone improved the integrated pipeline by 3.1% and the serialization
-stage by 2.4%. The lookup movement on that revision was noise: its emitted
-lookup path did not change. Adding V-476 improved the lookup stage by 62.5%
-relative to V-475 and the integrated pipeline by another 34.8%. Compiler
+V-475 removes four repeated field-load sites and improved the integrated
+pipeline by 3.3%; the isolated serialization timing was unchanged at this
+workload size. The lookup movement on that revision was noise: its emitted
+lookup path did not change. Adding V-476 improved the lookup stage by 78.5%
+relative to V-475 and the integrated pipeline by another 33.2%. Compiler
 telemetry reports four forwarded stable loads in the serialization loop.
 
 | Release module metric | Baseline | V-475 only | Final | Final vs baseline |
 | --- | ---: | ---: | ---: | ---: |
-| Compile median | 1705.131 ms | 1719.093 ms | 1664.837 ms | -2.4% |
-| Wasm | 4,945 B | 4,937 B | 4,550 B | -8.0% |
-| Gzip | 2,320 B | 2,334 B | 2,154 B | -7.2% |
-| Allocation sites | 38 | 38 | 38 | 0 |
-| `struct.get` sites | 60 | 56 | 52 | -8 |
-| `struct.set` sites | 16 | 16 | 16 | 0 |
-| Direct calls | 67 | 67 | 53 | -14 |
-| Indirect calls | 32 | 32 | 26 | -6 |
+| Compile median | 1700.449 ms | 1741.339 ms | 1710.165 ms | +0.6% |
+| Wasm | 6,195 B | 6,187 B | 5,418 B | -12.5% |
+| Gzip | 2,857 B | 2,870 B | 2,558 B | -10.5% |
+| Allocation sites | 82 | 82 | 65 | -17 |
+| `struct.get` sites | 92 | 88 | 71 | -21 |
+| `struct.set` sites | 20 | 20 | 20 | 0 |
+| Direct calls | 99 | 99 | 77 | -22 |
+| Indirect calls | 41 | 41 | 33 | -8 |
 | Linear-memory growth | 0 B | 0 B | 0 B | 0 B |
 
 Without release optimization, the final compiler improved the integrated
-pipeline from 36.085 to 31.004 ms (-14.1%) and the lookup stage from 6.388 to
-1.053 ms (-83.5%). Serialization was unchanged. This is expected: V-476 is a
-proven codegen fast path, while V-475 consumes release optimizer facts. The
-non-release module grew by 0.27% before gzip and 0.68% after gzip.
+pipeline from 45.098 to 30.434 ms (-32.5%) and the lookup stage from 15.107 to
+1.175 ms (-92.2%). Serialization moved from 31.661 to 29.342 ms (-7.3%). V-476
+is a proven codegen fast path, while V-475 consumes release optimizer facts.
+The non-release module shrank by 1.0% before gzip and 1.7% after gzip.
+
+### Counted-loop syntax control
+
+The final compiler was also measured with the fixture's counted loops written
+three ways. The hybrid retained below uses `for` for setup, array traversal,
+and each 10,000-request driver, while keeping the 128-iteration serialization
+inner loop as `while`.
+
+| Final-compiler release metric | All `while` | Idiomatic hybrid | All `for` |
+| --- | ---: | ---: | ---: |
+| Integrated request pipeline | 5.067 ms | 5.132 ms (+1.3%) | 9.083 ms (+79.3%) |
+| Route and view-model lookup | 0.682 ms | 0.691 ms (+1.4%) | 0.679 ms (-0.4%) |
+| Response serialization | 7.072 ms | 6.232 ms (-11.9%) | 11.648 ms (+64.7%) |
+| Wasm | 4,550 B | 5,418 B (+19.1%) | 5,489 B (+20.6%) |
+| Gzip | 2,154 B | 2,558 B (+18.8%) | 2,576 B (+19.6%) |
+
+The array lookup timing confirms that V-476 works with
+`for index in 0..array.len()`: that form has a dedicated direct counted-loop
+path. A general `for index in 0..N` currently expands through `Range.iter()` and
+`next()`. Using that form for the 1.28 million serialization-node iterations
+per sample adds iterator allocation and dispatch, and the macro-generated loop
+does not expose V-475's stable-load opportunity. The hybrid keeps the requested
+idiomatic 10,000-request loops with a 1.3% integrated runtime cost, while
+avoiding the large hot-inner-loop regression. Its 18.8% gzip-size cost is the
+current price of including general range-iterator machinery in this small
+standalone module.
 
 ## Unmatched representative controls
 
@@ -154,8 +186,8 @@ retains its Option behavior outside the proven region.
 
 | Opportunity | Decision | Reason |
 | --- | --- | --- |
-| Stable field loads across calls | Accepted as V-475 | Repeatable 19.8% focused win and a 2.4% representative response-serialization win. |
-| `Array.get` Option traffic in proven loops | Accepted as V-476 | Repeatable 72.3% focused win and a 61.9% representative route/view-model lookup win. |
+| Stable field loads across calls | Accepted as V-475 | Repeatable 19.8% focused win; the representative loop removes four repeated field-load sites. |
+| `Array.get` Option traffic in proven loops | Accepted as V-476 | Repeatable 72.3% focused win and a 78.4% representative route/view-model lookup win. |
 | `SharedCell` runtime-check traffic | Deferred | The focused gap was large, but the representative programs had no meaningful use and explicit shared-cell runtime semantics need a separate design decision. |
 | Remaining access guards | Stopped | The existing focused guard benchmark measured about 1.34 ns per call, below the threshold for another optimization ticket. |
 | Aggregate materialization | Stopped | Existing scalar-replacement work already removes the representative traffic; measurement found no new checked-access-specific gap. |

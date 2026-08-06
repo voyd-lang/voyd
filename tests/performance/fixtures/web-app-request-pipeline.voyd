@@ -35,27 +35,23 @@ obj ResponseRenderState {
 
 fn routes() -> Array<Route>
   let ~result = Array<Route>::with_capacity(12)
-  var index = 0
-  while index < 12:
+  for index in 0..12:
     result.push(Route {
       path_hash: 1000 + index * 37,
       auth_cost: 3 + index % 5,
       layout_id: 11 + index % 4
     })
-    index = index + 1
   result
 
 fn catalog() -> Array<ProductCard>
   let ~result = Array<ProductCard>::with_capacity(48)
-  var index = 0
-  while index < 48:
+  for index in 0..48:
     result.push(ProductCard {
       id: index + 1,
       price_cents: 499 + index * 73,
       inventory: 5 + index % 17,
       personalization: 7 + index % 9
     })
-    index = index + 1
   result
 
 fn route_score(route: Route, request: RequestContext) -> i32
@@ -67,9 +63,8 @@ fn product_card_score(card: ProductCard, request: RequestContext) -> i32
   tenant_price % 997 + card.inventory * 5 + card.personalization * request.user_segment + request.request_id % 11
 
 fn select_route(route_table: Array<Route>, request: RequestContext) -> i32
-  var index = 0
   var score = 1000000
-  while index < route_table.len():
+  for index in 0..route_table.len():
     match(route_table.get(index))
       Some<Route> { value }:
         let candidate = route_score(value, request)
@@ -77,19 +72,16 @@ fn select_route(route_table: Array<Route>, request: RequestContext) -> i32
           score = candidate
       None:
         score = -100000
-    index = index + 1
   score
 
 fn build_product_view(cards: Array<ProductCard>, request: RequestContext) -> i32
-  var index = 0
   var checksum = 0
-  while index < cards.len():
+  for index in 0..cards.len():
     match(cards.get(index))
       Some<ProductCard> { value }:
         checksum = checksum + product_card_score(value, request)
       None:
         checksum = checksum - 100000
-    index = index + 1
   checksum
 
 fn record_response_chunk(~state: ResponseRenderState, bytes: i32) -> void
@@ -106,6 +98,8 @@ fn render_response(route: i32, products: i32, request: RequestContext) -> i32
     response_bytes: 0
   }
   let state_alias = state
+  // Keep this hot inner loop explicit so V-475 is measured independently from
+  // the general Range iterator used by the outer request loop.
   var node = 0
   var checksum = route + products
   while node < 128:
@@ -135,35 +129,29 @@ fn handle_request(
 pub fn main() -> i32
   let route_table = routes()
   let cards = catalog()
-  var request_id = 0
   var checksum = 0
-  while request_id < 10000:
+  for request_id in 0..10000:
     let request = request_context(request_id)
     checksum = checksum + handle_request(route_table, cards, request)
-    request_id = request_id + 1
   checksum
 
 pub fn request_lookup_stage() -> i32
   let route_table = routes()
   let cards = catalog()
-  var request_id = 0
   var checksum = 0
-  while request_id < 10000:
+  for request_id in 0..10000:
     let request = request_context(request_id)
     checksum = checksum + select_route(route_table, request)
     checksum = checksum + build_product_view(cards, request)
-    request_id = request_id + 1
   checksum
 
 pub fn response_serialization_stage() -> i32
-  var request_id = 0
   var checksum = 0
-  while request_id < 10000:
+  for request_id in 0..10000:
     let request = request_context(request_id)
     checksum = checksum + render_response(
       31 + request_id % 7,
       19000 + request_id % 997,
       request
     )
-    request_id = request_id + 1
   checksum

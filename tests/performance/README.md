@@ -24,7 +24,9 @@ npm run bench:v439 -- \
 The web-app scenario runs 10,000 route, catalog/view-model, and response
 serialization operations per sample. It reports the integrated handler plus
 separate lookup and serialization stages. Each entrypoint uses a fresh warmed
-host instance.
+host instance. Counted setup and request-driver loops use range-based `for`
+syntax; the hot response-node inner loop remains `while` to isolate stable-load
+forwarding from the general range iterator's cost.
 
 Compare another local compiler revision without copying the fixture by passing
 the other checkout's repository root:
