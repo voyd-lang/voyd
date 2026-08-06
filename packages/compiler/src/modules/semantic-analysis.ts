@@ -3,6 +3,7 @@ import { diagnosticFromCode, DiagnosticError } from "../diagnostics/index.js";
 import type { ModuleGraph, ModuleNode } from "./types.js";
 import { modulePathToString } from "./path.js";
 import {
+  reanalyzeSemanticsBorrowing,
   semanticsPipeline,
   type SemanticsPipelineResult,
 } from "../semantics/pipeline.js";
@@ -25,6 +26,7 @@ import { getModuleSccGroups } from "./scc.js";
 import { collectCyclicModuleExportSurfaces } from "./cyclic-export-surfaces.js";
 import { cloneSemanticsMapForTypingState } from "./semantic-snapshot.js";
 import type { BorrowingResult } from "../semantics/borrowing/index.js";
+import { incrementCompilerPerfCounter } from "../perf.js";
 
 export type SemanticsTypingState = {
   arena: TypeArena;
@@ -525,37 +527,98 @@ const analyzeCyclicScc = ({
     stabilizationExports.set(moduleId, result.exports);
   });
 
+  const cyclicModuleIds = new Set(moduleIds);
+  const cyclicModuleIndex = new Map(
+    moduleIds.map((moduleId, index) => [moduleId, index]),
+  );
+
   moduleIds.forEach((moduleId) => {
     throwIfCancelled(isCancelled);
 
-    const result = analyzeModule({
-      moduleId,
-      includeTests,
-      recoverFromTypingErrors,
-      cycleModuleIdsByModuleId,
-      graph,
-      semantics: mergeWithOverrides({
-        base: mergeWithOverrides({
-          base: semantics,
-          overrides: stabilizationSemantics,
-        }),
-        overrides: finalPassSemantics,
+    const dependencySemantics = mergeWithOverrides({
+      base: mergeWithOverrides({
+        base: semantics,
+        overrides: stabilizationSemantics,
       }),
-      exports: mergeWithOverrides({
-        base: mergeWithOverrides({
-          base: exports,
-          overrides: stabilizationExports,
-        }),
-        overrides: finalPassExports,
-      }),
-      arena,
-      effectInterner,
-      diagnostics,
-      isCancelled,
-      reusableBorrowing,
-      previousBorrowing: previousSemantics?.get(moduleId)?.borrowing,
-      retainBorrowingIncrementalData,
+      overrides: finalPassSemantics,
     });
+    const dependencyExports = mergeWithOverrides({
+      base: mergeWithOverrides({
+        base: exports,
+        overrides: stabilizationExports,
+      }),
+      overrides: finalPassExports,
+    });
+    const stabilized = stabilizationSemantics.get(moduleId);
+    // Stabilization recovers typing errors and may have observed first-pass
+    // dependencies. Retain its typing only when strictness and every cyclic
+    // dependency's public typing contract match the final-pass inputs.
+    const canReuseRecoveredTyping =
+      recoverFromTypingErrors === true ||
+      !stabilized?.typing.diagnostics.some(
+        (diagnostic) => diagnostic.severity === "error",
+      );
+    const canReuseStabilizedTyping =
+      canReuseRecoveredTyping &&
+      graph.modules
+        .get(moduleId)
+        ?.dependencies.filter((dependency) =>
+          cyclicModuleIds.has(modulePathToString(dependency.path)),
+        )
+        .every((dependency) => {
+          const dependencyId = modulePathToString(dependency.path);
+          const dependencyIndex = cyclicModuleIndex.get(dependencyId);
+          const moduleIndex = cyclicModuleIndex.get(moduleId);
+          const exportsUsedForStabilization =
+            dependencyIndex !== undefined &&
+            moduleIndex !== undefined &&
+            dependencyIndex < moduleIndex
+              ? stabilizationExports.get(dependencyId)
+              : firstPassExports.get(dependencyId);
+          const exportsUsedForFinalization =
+            finalPassExports.get(dependencyId) ??
+            stabilizationExports.get(dependencyId);
+          return haveEquivalentPublicTypingSurfaces(
+            exportsUsedForStabilization,
+            exportsUsedForFinalization,
+          );
+        }) === true;
+    incrementCompilerPerfCounter(
+      canReuseStabilizedTyping
+        ? "semantics.cyclic_scc.stabilized_typing_reused"
+        : "semantics.cyclic_scc.full_final_pass",
+    );
+    const result =
+      canReuseStabilizedTyping && stabilized
+        ? reanalyzeBorrowing({
+            semantics: stabilized,
+            moduleId,
+            graph,
+            cycleModuleIdsByModuleId,
+            dependencies: dependencySemantics,
+            exports: dependencyExports,
+            recoverFromTypingErrors,
+            diagnostics,
+            reusableBorrowing,
+            previousBorrowing: previousSemantics?.get(moduleId)?.borrowing,
+            retainBorrowingIncrementalData,
+          })
+        : analyzeModule({
+            moduleId,
+            includeTests,
+            recoverFromTypingErrors,
+            cycleModuleIdsByModuleId,
+            graph,
+            semantics: dependencySemantics,
+            exports: dependencyExports,
+            arena,
+            effectInterner,
+            diagnostics,
+            isCancelled,
+            reusableBorrowing,
+            previousBorrowing: previousSemantics?.get(moduleId)?.borrowing,
+            retainBorrowingIncrementalData,
+          });
     if (!result) {
       return;
     }
@@ -589,6 +652,116 @@ const analyzeCyclicScc = ({
       }),
     );
   });
+};
+
+const haveEquivalentPublicTypingSurfaces = (
+  left: ModuleExportTable | undefined,
+  right: ModuleExportTable | undefined,
+): boolean => {
+  const leftInterface = left?.packageSemanticInterface;
+  const rightInterface = right?.packageSemanticInterface;
+  if (!leftInterface || !rightInterface) {
+    return false;
+  }
+
+  const publicTypingSurface = (
+    packageInterface: NonNullable<ModuleExportTable["packageSemanticInterface"]>,
+  ) => ({
+    moduleId: packageInterface.moduleId,
+    exports: packageInterface.exports.map((entry) => ({
+      name: entry.name,
+      kind: entry.kind,
+      visibility: entry.visibility,
+      declarations: entry.declarations.map(
+        ({ summaryId: _summaryId, capability: _capability, ...declaration }) =>
+          declaration,
+      ),
+      members: entry.members.map(
+        ({ summaryId: _summaryId, capability: _capability, ...member }) =>
+          member,
+      ),
+    })),
+    types: packageInterface.types,
+  });
+
+  return (
+    JSON.stringify(publicTypingSurface(leftInterface)) ===
+    JSON.stringify(publicTypingSurface(rightInterface))
+  );
+};
+
+const reanalyzeBorrowing = ({
+  semantics,
+  moduleId,
+  graph,
+  cycleModuleIdsByModuleId,
+  dependencies,
+  exports,
+  recoverFromTypingErrors,
+  diagnostics,
+  reusableBorrowing,
+  previousBorrowing,
+  retainBorrowingIncrementalData,
+}: {
+  semantics: SemanticsPipelineResult;
+  moduleId: string;
+  graph: ModuleGraph;
+  cycleModuleIdsByModuleId: ReadonlyMap<string, readonly string[]>;
+  dependencies: Map<string, SemanticsPipelineResult>;
+  exports: Map<string, ModuleExportTable>;
+  recoverFromTypingErrors: boolean | undefined;
+  diagnostics: Diagnostic[];
+  reusableBorrowing?: ReadonlyMap<string, BorrowingResult>;
+  previousBorrowing?: BorrowingResult;
+  retainBorrowingIncrementalData: boolean;
+}): SemanticsPipelineResult | undefined => {
+  const module = graph.modules.get(moduleId);
+  if (!module) {
+    return undefined;
+  }
+
+  try {
+    const result = reanalyzeSemanticsBorrowing({
+      semantics,
+      module,
+      dependencies,
+      exports,
+      recoverFromTypingErrors,
+      borrowingOverride: reusableBorrowing?.get(moduleId),
+      previousBorrowing,
+      retainBorrowingIncrementalData,
+    });
+    diagnostics.push(
+      ...augmentCycleTy0022Diagnostics({
+        diagnostics: result.diagnostics,
+        moduleId,
+        cycleModuleIdsByModuleId,
+      }),
+    );
+    return result;
+  } catch (error) {
+    if (error instanceof DiagnosticError) {
+      diagnostics.push(
+        ...augmentCycleTy0022Diagnostics({
+          diagnostics: error.diagnostics,
+          moduleId,
+          cycleModuleIdsByModuleId,
+        }),
+      );
+      return undefined;
+    }
+    diagnostics.push(
+      diagnosticFromCode({
+        code: "TY9999",
+        params: {
+          kind: "unexpected-error",
+          message: error instanceof Error ? error.message : String(error),
+        },
+        span: { file: moduleDiagnosticFilePath(module), start: 0, end: 0 },
+      }),
+    );
+    return undefined;
+  }
 };
 
 const analyzeModule = ({
