@@ -350,7 +350,10 @@ const isSafeArrayLoopRead = ({
   if (expr.method === "len" && expr.args.length === 0) {
     return true;
   }
-  if (expr.method !== "at" || expr.args.length !== 1) {
+  if (
+    (expr.method !== "at" && expr.method !== "get") ||
+    expr.args.length !== 1
+  ) {
     return false;
   }
   return expressionSymbol({ exprId: expr.args[0]!.expr, ctx }) === indexSymbol;
@@ -410,6 +413,51 @@ const isSafeLoopIntrinsicCall = ({
       }),
     )
   );
+};
+
+const isSafeLoopResolvedCall = ({
+  expr,
+  ctx,
+}: {
+  expr: HirCallExpr;
+  ctx: CodegenContext;
+}): boolean => {
+  const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
+  if (callInfo.traitDispatch || callInfo.identityGuards.length > 0) {
+    return false;
+  }
+  const targets = [...(callInfo.targets?.values() ?? [])];
+  if (targets.length === 0) {
+    const callee = ctx.module.hir.expressions.get(expr.callee);
+    const target =
+      callee?.exprKind === "identifier"
+        ? ctx.program.functions.getFunctionId({
+            moduleId: ctx.moduleId,
+            symbol: callee.symbol,
+          })
+        : undefined;
+    if (typeof target !== "number") {
+      return false;
+    }
+    targets.push(target);
+  }
+  return targets.every((target) => {
+    const footprint = ctx.program.callableAccesses.getFootprint(target);
+    return (
+      footprint !== undefined &&
+      !footprint.maySuspend &&
+      !footprint.externalRead &&
+      !footprint.externalWrite &&
+      footprint.parameters.every(
+        (parameter) =>
+          parameter.writePaths.length === 0 &&
+          !parameter.runtimeCheckedWrites &&
+          !parameter.retained &&
+          !parameter.returned &&
+          !parameter.returnedProvenance,
+      )
+    );
+  });
 };
 
 const isSafeLoopPrimitiveType = ({
@@ -557,7 +605,10 @@ const bodyPreservesArrayLoopProof = ({
           return "stop";
         }
         if (expr.exprKind === "call") {
-          if (!isSafeLoopIntrinsicCall({ expr, ctx, fnCtx })) {
+          if (
+            !isSafeLoopIntrinsicCall({ expr, ctx, fnCtx }) &&
+            !isSafeLoopResolvedCall({ expr, ctx })
+          ) {
             valid = false;
             return "stop";
           }
@@ -1673,6 +1724,108 @@ const compileArrayAtFastPath = ({
   };
 };
 
+const compileArrayGetFastPath = ({
+  expr,
+  info,
+  expectedResultTypeId,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  expr: HirMethodCallExpr;
+  info: ArrayMethodInfo;
+  expectedResultTypeId?: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): CompiledExpression | undefined => {
+  if (expr.args.length !== 1) {
+    return undefined;
+  }
+
+  const safeLoopScope = activeSafeArrayLoopScope({ expr, fnCtx, ctx });
+  if (!safeLoopScope) {
+    return undefined;
+  }
+
+  const storageDesc = ctx.program.types.getTypeDesc(info.storageField.typeId);
+  if (storageDesc.kind !== "fixed-array") {
+    return undefined;
+  }
+
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const returnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultTypeId = expectedResultTypeId ?? returnTypeId;
+  const resultWasmType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const storageLocal = allocateTempLocal(
+    wasmTypeFor(info.storageField.typeId, ctx),
+    fnCtx,
+    info.storageField.typeId,
+    ctx,
+  );
+  const indexLocal = allocateTempLocal(binaryen.i32, fnCtx);
+  const { setup: setupTarget, target } = compileArrayTarget({
+    expr,
+    info,
+    ctx,
+    fnCtx,
+    compileExpr,
+  });
+  const storage = () => loadLocalValue(storageLocal, ctx);
+  const index = () => ctx.mod.local.get(indexLocal.index, binaryen.i32);
+  const value = liftFixedArrayElementValue({
+    value: arrayGet(
+      ctx.mod,
+      storage(),
+      index(),
+      fixedArrayStorageElementType({ typeId: storageDesc.element, ctx }),
+      false,
+    ),
+    typeId: storageDesc.element,
+    ctx,
+    fnCtx,
+  });
+  const some = coerceValueToType({
+    value,
+    actualType: storageDesc.element,
+    targetType: resultTypeId,
+    ctx,
+    fnCtx,
+  });
+
+  return {
+    expr: ctx.mod.block(
+      null,
+      [
+        setupTarget,
+        ctx.mod.local.set(
+          indexLocal.index,
+          compileExpr({
+            exprId: expr.args[0]!.expr,
+            ctx,
+            fnCtx,
+            expectedResultTypeId: ctx.program.primitives.i32,
+          }).expr,
+        ),
+        storeLocalValue({
+          binding: storageLocal,
+          value: directArrayFieldLoad({
+            target,
+            structInfo: info.structInfo,
+            field: info.storageField,
+            ctx,
+          }),
+          ctx,
+          fnCtx,
+        }),
+        coerceExprToWasmType({ expr: some, targetType: resultWasmType, ctx }),
+      ],
+      resultWasmType,
+    ),
+    usedReturnCall: false,
+  };
+};
+
 export const tryCompileArrayMethodFastPath = ({
   expr,
   expectedResultTypeId,
@@ -1686,7 +1839,7 @@ export const tryCompileArrayMethodFastPath = ({
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): CompiledExpression | undefined => {
-  if (expr.method !== "len" && expr.method !== "at") {
+  if (expr.method !== "len" && expr.method !== "at" && expr.method !== "get") {
     return undefined;
   }
   const info = arrayMethodInfo({ expr, ctx, fnCtx });
@@ -1695,6 +1848,16 @@ export const tryCompileArrayMethodFastPath = ({
   }
   if (expr.method === "len") {
     return compileArrayLenFastPath({ expr, info, ctx, fnCtx, compileExpr });
+  }
+  if (expr.method === "get") {
+    return compileArrayGetFastPath({
+      expr,
+      info,
+      expectedResultTypeId,
+      ctx,
+      fnCtx,
+      compileExpr,
+    });
   }
   return compileArrayAtFastPath({
     expr,

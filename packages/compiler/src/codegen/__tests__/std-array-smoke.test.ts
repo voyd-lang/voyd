@@ -61,6 +61,10 @@ describe("std::array compile smoke", () => {
     await expect(host.run<number>("direct_at_index_side_effect")).resolves.toBe(20);
     await expect(host.run<number>("safe_while_sum")).resolves.toBe(10);
     await expect(host.run<number>("safe_while_cached_len_sum")).resolves.toBe(10);
+    await expect(host.run<number>("safe_while_get_sum")).resolves.toBe(10);
+    await expect(host.run<number>("safe_while_get_value_sum")).resolves.toBe(
+      18,
+    );
     await expect(host.run<number>("safe_while_value_sum")).resolves.toBe(18);
     await expect(host.run<number>("safe_for_sum")).resolves.toBe(10);
     await expect(host.run<number>("while_non_zero_start_sum")).resolves.toBe(9);
@@ -98,7 +102,7 @@ describe("std::array compile smoke", () => {
     expect(functionWat).not.toContain("call_ref");
   });
 
-  it("elides loop-proven Array.at checks in safe counted loops", async () => {
+  it("elides loop-proven Array.at and Array.get dispatch in safe counted loops", async () => {
     const result = await compileStdArrayFixture({
       boundaryExports: false,
     });
@@ -115,6 +119,17 @@ describe("std::array compile smoke", () => {
       expect(functionWat).not.toContain("unreachable");
       expect(functionWat).not.toContain("call_ref");
       expect(functionWat).not.toContain("call_indirect");
+    }
+
+    for (const exportName of [
+      "safe_while_get_sum",
+      "safe_while_get_value_sum",
+    ]) {
+      const getWat = watForExport(wat, exportName);
+      expect(getWat).toContain("array.get");
+      expect(getWat).not.toContain("$std__array__get");
+      expect(getWat).not.toContain("call_ref");
+      expect(getWat).not.toContain("call_indirect");
     }
   });
 
@@ -138,5 +153,8 @@ describe("std::array compile smoke", () => {
       expect(functionWat).toContain("array.get");
       expect(functionWat).toContain("unreachable");
     }
+
+    const mutationGetWat = watForExport(wat, "while_helper_mutation_get_sum");
+    expect(mutationGetWat).toContain("$std__array__get");
   });
 });

@@ -7,6 +7,9 @@ pub val Vec2 {
   y: i32
 }
 
+fn sum_vec(value: Vec2) -> i32
+  value.x + value.y
+
 pub fn entry_tail() -> i32
   let ~arr = Array<i32>::with_capacity(2)
   arr.push(1)
@@ -92,6 +95,34 @@ pub fn safe_while_cached_len_sum() -> i32
     index = index + 1
   total
 
+pub fn safe_while_get_sum() -> i32
+  let values = build_ints()
+  var index = 0
+  var total = 0
+  while index < values.len():
+    match(values.get(index))
+      Some<i32> { value }:
+        total = total + value
+      None:
+        total = total - 1
+    index = index + 1
+  total
+
+pub fn safe_while_get_value_sum() -> i32
+  let ~values = Array<Vec2>::with_capacity(2)
+  values.push(Vec2 { x: 3, y: 4 })
+  values.push(Vec2 { x: 5, y: 6 })
+  var index = 0
+  var total = 0
+  while index < values.len():
+    match(values.get(index))
+      Some<Vec2> { value }:
+        total = total + sum_vec(value)
+      None:
+        total = total - 1
+    index = index + 1
+  total
+
 pub fn safe_while_value_sum() -> i32
   let ~values = Array<Vec2>::with_capacity(2)
   values.push(Vec2 { x: 3, y: 4 })
@@ -165,6 +196,23 @@ pub fn while_helper_mutation_sum() -> i32
   while index < length:
     total = total + values.at(index)
     append_marker(values)
+    index = index + 1
+  total
+
+pub fn while_helper_mutation_get_sum() -> i32
+  let ~values = Array<i32>::with_capacity(4)
+  values.push(1)
+  values.push(2)
+  let length = values.len()
+  var index = 0
+  var total = 0
+  while index < length:
+    append_marker(values)
+    match(values.get(index))
+      Some<i32> { value }:
+        total = total + value
+      None:
+        total = total - 1
     index = index + 1
   total
 
