@@ -35,6 +35,7 @@ import {
   boxSignatureSpillValue,
   unboxSignatureSpillValue,
 } from "../../signature-spill.js";
+import { storeScalarAggregateBindingAbiValue } from "../../optimization/scalar-aggregates.js";
 import { getOrCreateStaticEffectSpecialization } from "../../effects/static-specialization.js";
 import {
   compileRuntimeIdentityConflict,
@@ -495,6 +496,22 @@ export const emitResolvedCall = ({
     callArgs as number[],
     resolvedMeta.resultType,
   );
+  if (typeof resolvedMeta.scalarAggregateMutableParamIndex === "number") {
+    const binding = options.mutableScalarAggregateResultBinding;
+    if (!binding) {
+      throw new Error("mutable scalar aggregate call is missing its writeback");
+    }
+    const stores = storeScalarAggregateBindingAbiValue({
+      binding,
+      value: rawCall,
+      ctx,
+      fnCtx,
+    });
+    return {
+      expr: ctx.mod.block(null, [...preCallOps, ...stores], binaryen.none),
+      usedReturnCall: false,
+    };
+  }
   if (usingProvidedWideResultStorage) {
     const ops = preCallOps.length === 0 ? [rawCall] : [...preCallOps, rawCall];
     return {

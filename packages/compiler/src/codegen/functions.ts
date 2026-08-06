@@ -526,7 +526,10 @@ const bindRawFunctionParameters = ({
         const scalarized = tryBindScalarAggregateParameter({
           symbol: param.symbol,
           typeId,
-          mutable: param.mutable,
+          mutable:
+            meta.scalarAggregateMutableParamIndex === index ||
+            param.mutable === true ||
+            param.pattern.bindingKind === "mutable-ref",
           abiValues,
           scalarAggregateAbi:
             meta.scalarAggregateParamIndexes?.includes(index) ?? false,
@@ -1988,6 +1991,24 @@ const compileFunctionItem = (
     ctx,
     fnCtx,
   });
+  const mutableScalarResultBody = compileMutableScalarAggregateParameterResult({
+    fn,
+    meta,
+    ctx,
+    fnCtx,
+    paramInitOps,
+    defaultInitOps,
+  });
+  if (mutableScalarResultBody) {
+    ctx.mod.addFunction(
+      meta.wasmName,
+      binaryen.createType(meta.paramTypes as number[]),
+      meta.resultType,
+      fnCtx.locals,
+      mutableScalarResultBody,
+    );
+    return;
+  }
   const scalarResultBody = compileScalarAggregateFunctionResult({
     fn,
     meta,
@@ -2097,6 +2118,48 @@ const compileFunctionItem = (
     meta.resultType,
     fnCtx.locals,
     functionBody,
+  );
+};
+
+const compileMutableScalarAggregateParameterResult = ({
+  fn,
+  meta,
+  ctx,
+  fnCtx,
+  paramInitOps,
+  defaultInitOps,
+}: {
+  fn: HirFunction;
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  paramInitOps: readonly binaryen.ExpressionRef[];
+  defaultInitOps: readonly binaryen.ExpressionRef[];
+}): binaryen.ExpressionRef | undefined => {
+  const paramIndex = meta.scalarAggregateMutableParamIndex;
+  if (typeof paramIndex !== "number") {
+    return undefined;
+  }
+  const param = fn.parameters[paramIndex];
+  const binding =
+    param && typeof param.symbol === "number"
+      ? fnCtx.bindings.get(param.symbol)
+      : undefined;
+  if (binding?.kind !== "scalar-aggregate" || !binding.mutable) {
+    throw new Error("mutable scalar aggregate parameter was not scalarized");
+  }
+  const body = compileExpression({
+    exprId: fn.body,
+    ctx,
+    fnCtx,
+    tailPosition: false,
+    expectedResultTypeId: ctx.program.primitives.void,
+  }).expr;
+  const result = loadScalarAggregateBindingAbiValue({ binding, ctx });
+  return ctx.mod.block(
+    null,
+    [...paramInitOps, ...defaultInitOps, body, result],
+    meta.resultType,
   );
 };
 

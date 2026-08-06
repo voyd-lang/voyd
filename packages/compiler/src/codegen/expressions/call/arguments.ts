@@ -160,6 +160,7 @@ export const compileCallArgumentsWithMetadata = ({
   args: binaryen.ExpressionRef[];
   writebacks: binaryen.ExpressionRef[];
   meta: FunctionMetadata;
+  mutableScalarAggregateResultBinding?: LocalBindingScalarAggregate;
 } => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const typedPlan = resolveTypedCallArgumentPlan({
@@ -185,6 +186,8 @@ export const compileCallArgumentsWithMetadata = ({
     args: compiled.args,
     writebacks: compiled.writebacks,
     meta: compiled.meta ?? meta,
+    mutableScalarAggregateResultBinding:
+      compiled.mutableScalarAggregateResultBinding,
   };
 };
 
@@ -280,8 +283,11 @@ export const compileCallArgumentsForParamsWithDetails = ({
       );
     }),
   );
+  const hasRuntimeIdentityGuards =
+    ctx.program.calls.getCallInfo(ctx.moduleId, call.id).identityGuards.length >
+    0;
   const resolvedMeta =
-    meta && eligibleScalarAggregateArgs.size > 0
+    meta && eligibleScalarAggregateArgs.size > 0 && !hasRuntimeIdentityGuards
       ? (getOrCreateScalarAggregateCallSpecialization({
           ctx,
           meta,
@@ -331,6 +337,18 @@ export const compileCallArgumentsForParamsWithDetails = ({
     }
   });
   const scalarOverrideArgIndexes = new Set(selectedScalarArgsByArgIndex.keys());
+  const mutableScalarAggregateResultBinding = (() => {
+    const paramIndex = activeMeta?.scalarAggregateMutableParamIndex;
+    const arg =
+      typeof paramIndex === "number"
+        ? selectedScalarArgs.get(paramIndex)
+        : undefined;
+    if (arg?.kind !== "binding") {
+      return undefined;
+    }
+    const binding = fnCtx.bindings.get(arg.symbol);
+    return binding?.kind === "scalar-aggregate" ? binding : undefined;
+  })();
 
   const consumedArgs = call.args.slice(0, planned.consumedArgCount);
   const preservedArgIndexes = collectPreservedStorageRefArgIndexes({
@@ -412,6 +430,7 @@ export const compileCallArgumentsForParamsWithDetails = ({
     writebacks,
     consumedArgCount: planned.consumedArgCount,
     meta: activeMeta ?? meta,
+    mutableScalarAggregateResultBinding,
   };
 };
 
@@ -433,7 +452,8 @@ const collectScalarAggregateCallArgs = ({
     if (
       entry.kind !== "direct" ||
       entry.argIndex !== 0 ||
-      meta.paramAbiKinds[paramIndex] !== "direct" ||
+      (meta.paramAbiKinds[paramIndex] !== "direct" &&
+        meta.paramAbiKinds[paramIndex] !== "mutable_ref") ||
       !scalarAggregateParameterCanUseSpecializedAbi({ meta, paramIndex, ctx })
     ) {
       return;
@@ -443,15 +463,19 @@ const collectScalarAggregateCallArgs = ({
     if (!argExpr) {
       return;
     }
-    if (argExpr.exprKind === "identifier") {
-      const binding = fnCtx.bindings.get(argExpr.symbol);
+    const addressableSymbol = resolveAddressableIdentifierSymbol({
+      exprId: argExprId,
+      ctx,
+    });
+    if (typeof addressableSymbol === "number") {
+      const binding = fnCtx.bindings.get(addressableSymbol);
       if (
         binding?.kind === "scalar-aggregate" &&
         binding.typeId === meta.paramTypeIds[paramIndex]
       ) {
         bindings.set(paramIndex, {
           kind: "binding",
-          symbol: argExpr.symbol,
+          symbol: addressableSymbol,
           typeId: meta.paramTypeIds[paramIndex]!,
         });
       }

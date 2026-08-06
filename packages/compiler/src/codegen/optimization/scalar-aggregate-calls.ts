@@ -5,6 +5,7 @@ import type { HirExprId, SymbolId, TypeId } from "../../semantics/ids.js";
 import { abiTypeFor, getStructuralTypeInfo } from "../types.js";
 import {
   canStoreScalarAggregateExpression,
+  mutableScalarAggregateAbiTypesForType,
   scalarAggregateAbiTypesForType,
 } from "./scalar-aggregates.js";
 import { walkHirExpression } from "../hir-walk.js";
@@ -13,6 +14,11 @@ import {
   functionSpecializationIdentity,
   tryAdmitFunctionSpecialization,
 } from "../specialization-policy.js";
+import {
+  mutableScalarAggregateCalleeCanUseLaneAbi,
+  mutableScalarAggregateSpecializationDimensions,
+  tryReserveMutableScalarAggregateSpecialization,
+} from "./mutable-scalar-aggregate-calls.js";
 
 export interface ScalarAggregateCallSpecialization {
   base: FunctionMetadata;
@@ -44,6 +50,11 @@ const stateOf = (ctx: CodegenContext): ScalarAggregateCallSpecializationState =>
 
 const sanitize = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
+
+const parameterIsMutable = (
+  param: HirFunction["parameters"][number] | undefined,
+): boolean =>
+  param?.mutable === true || param?.pattern.bindingKind === "mutable-ref";
 
 const functionItemFor = ({
   ctx,
@@ -208,6 +219,32 @@ const parameterHasFieldAssignment = ({
   return hasAssignment;
 };
 
+const mutableScalarAggregateParameterCanUseSpecializedAbi = ({
+  meta,
+  paramIndex,
+  item,
+  ctx,
+}: {
+  meta: FunctionMetadata;
+  paramIndex: number;
+  item: HirFunction;
+  ctx: CodegenContext;
+}): boolean => {
+  const param = meta.parameters[paramIndex];
+  if (
+    !param ||
+    typeof param.symbol !== "number" ||
+    item.parameters[paramIndex]?.symbol !== param.symbol
+  ) {
+    return false;
+  }
+  return mutableScalarAggregateCalleeCanUseLaneAbi({
+    meta,
+    paramIndex,
+    ctx,
+  });
+};
+
 export const scalarAggregateParameterCanUseSpecializedAbi = ({
   meta,
   paramIndex,
@@ -228,18 +265,34 @@ export const scalarAggregateParameterCanUseSpecializedAbi = ({
   if (!structInfo || structInfo.layoutKind !== "heap-object") {
     return false;
   }
-  const abiTypes = scalarAggregateAbiTypesForType({
-    typeId: param.typeId,
-    ctx,
-  });
+  const item = functionItemFor({ ctx, meta });
+  const targetCtx = ctx.moduleContexts.get(meta.moduleId) ?? ctx;
+  const mutable =
+    meta.paramAbiKinds[paramIndex] === "mutable_ref" ||
+    parameterIsMutable(item?.parameters[paramIndex]);
+  const abiTypes = mutable
+    ? mutableScalarAggregateAbiTypesForType({
+        typeId: param.typeId,
+        ctx,
+      })
+    : scalarAggregateAbiTypesForType({
+        typeId: param.typeId,
+        ctx,
+      });
   if (!abiTypes || abiTypes.length === 0) {
     return false;
   }
-  const item = functionItemFor({ ctx, meta });
-  if (item?.parameters[paramIndex]?.mutable) {
-    return false;
+  if (mutable) {
+    return Boolean(
+      item &&
+      mutableScalarAggregateParameterCanUseSpecializedAbi({
+        meta,
+        paramIndex,
+        item,
+        ctx: targetCtx,
+      }),
+    );
   }
-  const targetCtx = ctx.moduleContexts.get(meta.moduleId) ?? ctx;
   if (
     item &&
     parameterHasFieldAssignment({
@@ -381,11 +434,27 @@ export const getOrCreateScalarAggregateCallSpecialization = ({
   if (!ctx.optimization || (paramIndexes.size === 0 && !scalarResult)) {
     return undefined;
   }
-  const selectedIndexes = Array.from(paramIndexes)
+  const eligibleIndexes = Array.from(paramIndexes)
     .filter((paramIndex) =>
       scalarAggregateParameterCanUseSpecializedAbi({ meta, paramIndex, ctx }),
     )
     .sort((left, right) => left - right);
+  const mutableIndexes = eligibleIndexes.filter(
+    (paramIndex) =>
+      meta.paramAbiKinds[paramIndex] === "mutable_ref" ||
+      parameterIsMutable(item?.parameters[paramIndex]),
+  );
+  if (
+    mutableIndexes.length > 1 ||
+    (mutableIndexes.length > 0 && scalarResult)
+  ) {
+    return undefined;
+  }
+  const mutableParamIndex = mutableIndexes[0];
+  const selectedIndexes =
+    typeof mutableParamIndex === "number"
+      ? [mutableParamIndex]
+      : eligibleIndexes;
   if (selectedIndexes.length === 0 && !scalarResult) {
     return undefined;
   }
@@ -393,15 +462,21 @@ export const getOrCreateScalarAggregateCallSpecialization = ({
     return undefined;
   }
 
-  const specializationDimensions = composeSpecializationDimensions({
-    meta,
-    next: {
-      scalarAggregate: {
-        parameterIndexes: selectedIndexes,
-        result: scalarResult,
-      },
-    },
-  });
+  const specializationDimensions =
+    typeof mutableParamIndex === "number"
+      ? mutableScalarAggregateSpecializationDimensions({
+          meta,
+          paramIndex: mutableParamIndex,
+        })
+      : composeSpecializationDimensions({
+          meta,
+          next: {
+            scalarAggregate: {
+              parameterIndexes: selectedIndexes,
+              result: scalarResult,
+            },
+          },
+        });
   const key = functionSpecializationIdentity({
     meta,
     dimensions: specializationDimensions,
@@ -416,65 +491,96 @@ export const getOrCreateScalarAggregateCallSpecialization = ({
       specialization.base.moduleId === meta.moduleId &&
       specialization.base.instanceId === meta.instanceId,
   );
-  if (
-    !tryAdmitFunctionSpecialization({
-      ctx,
-      meta,
-      item,
-      kind: "scalar_aggregate",
-      dimensions: specializationDimensions,
-      existingKindVariants: existingForFunction.length,
-      maxKindVariants:
-        ctx.specializationPolicy.scalarAggregateCallContextsPerFunction,
-    })
-  ) {
+  const admitted =
+    typeof mutableParamIndex === "number"
+      ? tryReserveMutableScalarAggregateSpecialization({
+          ctx,
+          meta,
+          paramIndex: mutableParamIndex,
+          existingKindVariants: existingForFunction.length,
+        })
+      : tryAdmitFunctionSpecialization({
+          ctx,
+          meta,
+          item,
+          kind: "scalar_aggregate",
+          dimensions: specializationDimensions,
+          existingKindVariants: existingForFunction.length,
+          maxKindVariants:
+            ctx.specializationPolicy.scalarAggregateCallContextsPerFunction,
+        });
+  if (!admitted) {
     return undefined;
   }
 
   const paramAbiTypes = meta.paramAbiTypes.map((abiTypes, index) =>
     selectedIndexes.includes(index) &&
     typeof meta.paramTypeIds[index] === "number"
-      ? (scalarAggregateAbiTypesForType({
-          typeId: meta.paramTypeIds[index]!,
-          ctx,
-        }) ?? abiTypes)
+      ? ((meta.paramAbiKinds[index] === "mutable_ref" ||
+        parameterIsMutable(item.parameters[index])
+          ? mutableScalarAggregateAbiTypesForType({
+              typeId: meta.paramTypeIds[index]!,
+              ctx,
+            })
+          : scalarAggregateAbiTypesForType({
+              typeId: meta.paramTypeIds[index]!,
+              ctx,
+            })) ?? abiTypes)
       : abiTypes,
   );
+  const paramAbiKinds = meta.paramAbiKinds.map((kind, index) =>
+    index === mutableParamIndex ? "direct" : kind,
+  );
   const userParamTypes = paramAbiTypes.flat();
+  const mutableResultAbiTypes =
+    typeof mutableParamIndex === "number"
+      ? mutableScalarAggregateAbiTypesForType({
+          typeId: meta.paramTypeIds[mutableParamIndex]!,
+          ctx,
+        })
+      : undefined;
   const widened = ctx.effectsBackend.abi.widenSignature({
     ctx,
     effectful: meta.effectful,
     userParamTypes: meta.outParamType
       ? [meta.outParamType, ...userParamTypes]
       : userParamTypes,
-    userResultType: scalarResult
-      ? abiTypeFor(
-          scalarAggregateAbiTypesForType({
-            typeId: meta.resultTypeId,
-            ctx,
-          }) ?? [meta.resultType],
-        )
-      : meta.resultAbiKind === "out_ref"
-        ? binaryen.none
-        : meta.resultType,
+    userResultType: mutableResultAbiTypes
+      ? abiTypeFor(mutableResultAbiTypes)
+      : scalarResult
+        ? abiTypeFor(
+            scalarAggregateAbiTypesForType({
+              typeId: meta.resultTypeId,
+              ctx,
+            }) ?? [meta.resultType],
+          )
+        : meta.resultAbiKind === "out_ref"
+          ? binaryen.none
+          : meta.resultType,
   });
-  const resultAbiTypes = scalarResult
-    ? (scalarAggregateAbiTypesForType({ typeId: meta.resultTypeId, ctx }) ??
-      meta.resultAbiTypes)
-    : meta.resultAbiTypes;
+  const resultAbiTypes =
+    mutableResultAbiTypes ??
+    (scalarResult
+      ? (scalarAggregateAbiTypesForType({ typeId: meta.resultTypeId, ctx }) ??
+        meta.resultAbiTypes)
+      : meta.resultAbiTypes);
   const specializedMeta: FunctionMetadata = {
     ...meta,
     wasmName: `${meta.wasmName}__scalar_agg_${sanitize(
-      `${selectedIndexes.join("_")}${scalarResult ? "_result" : ""}`,
+      `${selectedIndexes.join("_")}${
+        typeof mutableParamIndex === "number" ? "_mutable" : ""
+      }${scalarResult ? "_result" : ""}`,
     )}`,
     paramTypes: widened.paramTypes,
     paramAbiTypes,
+    paramAbiKinds,
     userParamOffset: widened.userParamOffset,
     firstUserParamIndex: widened.userParamOffset + (meta.outParamType ? 1 : 0),
     resultType: widened.resultType,
     resultAbiTypes,
     scalarAggregateParamIndexes: selectedIndexes,
     scalarAggregateResult: scalarResult,
+    scalarAggregateMutableParamIndex: mutableParamIndex,
     specialization: specializationDimensions,
   };
   const specialization: ScalarAggregateCallSpecialization = {

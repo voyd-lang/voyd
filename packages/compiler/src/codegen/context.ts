@@ -129,6 +129,8 @@ export interface FunctionMetadata {
   specialization?: FunctionSpecializationDimensions;
   scalarAggregateParamIndexes?: readonly number[];
   scalarAggregateResult?: boolean;
+  /** Scalarized mutable parameter whose updated lanes are the specialized result. */
+  scalarAggregateMutableParamIndex?: number;
   callShape?: Readonly<{
     keyTokens: readonly string[];
     parameterStates: readonly CallShapeParameterState[];
@@ -428,6 +430,7 @@ export interface CompileCallOptions {
   typeInstanceId?: ProgramFunctionInstanceId;
   outResultStorageRef?: binaryen.ExpressionRef;
   scalarAggregateResultTypeId?: TypeId;
+  mutableScalarAggregateResultBinding?: LocalBindingScalarAggregate;
 }
 
 export interface ExpressionCompilerParams {

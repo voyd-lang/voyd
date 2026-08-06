@@ -67,12 +67,14 @@ describe("compiler optimization policy", () => {
     const balanced = specializationPolicyForOptimizationLevel("balanced");
     const release = specializationPolicyForOptimizationLevel("release");
 
-    expect(balanced).toBe(release);
+    expect(balanced).not.toBe(release);
     expect(Object.isFrozen(balanced)).toBe(true);
-    Object.values(balanced).forEach((limit) => {
+    Object.values(release).forEach((limit) => {
       expect(Number.isSafeInteger(limit)).toBe(true);
       expect(limit).toBeGreaterThan(0);
     });
+    expect(balanced.mutableScalarAggregateLanes).toBe(0);
+    expect(release.mutableScalarAggregateLanes).toBe(8);
     expect(balanced.receiverContextsPerFunction).toBe(4);
     expect(balanced.receiverExactParametersPerContext).toBe(2);
     expect(balanced.directTraitSwitchImplementations).toBe(4);

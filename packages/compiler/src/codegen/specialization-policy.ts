@@ -84,16 +84,15 @@ export const decideFunctionSpecializationAdmission = ({
 }): SpecializationAdmissionDecision => {
   const metricPrefix = `codegen.specialization.${kind}`;
   incrementCompilerPerfCounter(`${metricPrefix}.requested`);
-  if (existingKindVariants >= maxKindVariants) {
-    incrementCompilerPerfCounter(`${metricPrefix}.rejected.kind_budget`);
-    return { stage: "admission", outcome: "rejected", reason: "kind_budget" };
-  }
-
   const state = stateOf(ctx);
   const identity = functionSpecializationIdentity({ meta, dimensions });
   if (state.identities.has(identity)) {
     incrementCompilerPerfCounter(`${metricPrefix}.reused`);
     return { stage: "admission", outcome: "reused" };
+  }
+  if (existingKindVariants >= maxKindVariants) {
+    incrementCompilerPerfCounter(`${metricPrefix}.rejected.kind_budget`);
+    return { stage: "admission", outcome: "rejected", reason: "kind_budget" };
   }
 
   const reservation = ctx.specializationReservations[kind];

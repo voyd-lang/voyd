@@ -23,6 +23,7 @@ export type SpecializationPolicy = Readonly<{
   receiverExactParametersPerContext: number;
   directTraitSwitchImplementations: number;
   scalarAggregateLanes: number;
+  mutableScalarAggregateLanes: number;
   scalarAggregateCallContextsPerFunction: number;
   staticEffectContextsPerFunction: number;
   callShapeContextsPerFunction: number;
@@ -36,6 +37,7 @@ const DEFAULT_SPECIALIZATION_POLICY: SpecializationPolicy = Object.freeze({
   receiverExactParametersPerContext: 2,
   directTraitSwitchImplementations: 4,
   scalarAggregateLanes: 4,
+  mutableScalarAggregateLanes: 8,
   scalarAggregateCallContextsPerFunction: 8,
   staticEffectContextsPerFunction: 8,
   callShapeContextsPerFunction: 4,
@@ -44,10 +46,17 @@ const DEFAULT_SPECIALIZATION_POLICY: SpecializationPolicy = Object.freeze({
   totalEstimatedBodyNodes: 100_000,
 });
 
-/** Public levels currently share semantic specialization limits. */
+const BALANCED_SPECIALIZATION_POLICY: SpecializationPolicy = Object.freeze({
+  ...DEFAULT_SPECIALIZATION_POLICY,
+  mutableScalarAggregateLanes: 0,
+});
+
 export const specializationPolicyForOptimizationLevel = (
-  _level: OptimizationLevel,
-): SpecializationPolicy => DEFAULT_SPECIALIZATION_POLICY;
+  level: OptimizationLevel,
+): SpecializationPolicy =>
+  level === "release"
+    ? DEFAULT_SPECIALIZATION_POLICY
+    : BALANCED_SPECIALIZATION_POLICY;
 
 export const resolveOptimizationPolicy = (
   input: OptimizationPolicyInput = {},
