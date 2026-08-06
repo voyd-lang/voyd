@@ -410,9 +410,36 @@ const collectModuleExports = ({
     }
     return `${(first >>> 0).toString(36)}${(second >>> 0).toString(36)}`;
   };
-  const typeContainsPrivateField = (
+  const summaryProjectionPathKey = (path: readonly PlaceProjection[]): string =>
+    path
+      .map((projection) => {
+        switch (projection.kind) {
+          case "field":
+            return `f:${projection.name.length}:${projection.name}`;
+          case "tuple":
+            return `t:${projection.index}`;
+          case "index":
+            return `i:${projection.stable ? 1 : 0}:${projection.constant ?? ""}`;
+          case "region":
+            return `g:${JSON.stringify([
+              projection.scope,
+              projection.name,
+              [...projection.disjoint].sort(),
+            ])}`;
+          case "discriminant":
+            return "c";
+          case "dereference":
+            return "d";
+          case "identity":
+            return "r";
+        }
+      })
+      .map((projection) => `${projection.length}:${projection}`)
+      .join("");
+  const typeContainsPrivateFieldCache = new Map<number, boolean>();
+  const typeContainsPrivateFieldUncached = (
     type: number,
-    active = new Set<number>(),
+    active: ReadonlySet<number>,
   ): boolean => {
     if (active.has(type)) {
       return false;
@@ -420,23 +447,23 @@ const collectModuleExports = ({
     const nextActive = new Set(active).add(type);
     const descriptor = typing.arena.get(type);
     if (descriptor.kind === "borrowed") {
-      return typeContainsPrivateField(descriptor.inner, nextActive);
+      return typeContainsPrivateFieldUncached(descriptor.inner, nextActive);
     }
     if (descriptor.kind === "recursive") {
-      return typeContainsPrivateField(descriptor.body, nextActive);
+      return typeContainsPrivateFieldUncached(descriptor.body, nextActive);
     }
     if (descriptor.kind === "union") {
       return descriptor.members.some((member) =>
-        typeContainsPrivateField(member, nextActive),
+        typeContainsPrivateFieldUncached(member, nextActive),
       );
     }
     if (descriptor.kind === "intersection") {
       return [descriptor.nominal, descriptor.structural]
         .filter((member): member is number => typeof member === "number")
-        .some((member) => typeContainsPrivateField(member, nextActive));
+        .some((member) => typeContainsPrivateFieldUncached(member, nextActive));
     }
     if (descriptor.kind === "fixed-array") {
-      return typeContainsPrivateField(descriptor.element, nextActive);
+      return typeContainsPrivateFieldUncached(descriptor.element, nextActive);
     }
     const fields =
       descriptor.kind === "structural-object"
@@ -449,16 +476,27 @@ const collectModuleExports = ({
       fields?.some(
         (field) =>
           (field.visibility !== undefined && field.visibility.api !== true) ||
-          typeContainsPrivateField(field.type, nextActive),
+          typeContainsPrivateFieldUncached(field.type, nextActive),
       ) ?? false
     );
   };
-  const privateFieldProjection = (
+  const typeContainsPrivateField = (type: number): boolean => {
+    const cached = typeContainsPrivateFieldCache.get(type);
+    if (cached !== undefined) return cached;
+    const result = typeContainsPrivateFieldUncached(type, new Set());
+    typeContainsPrivateFieldCache.set(type, result);
+    return result;
+  };
+  const privateFieldProjectionCache = new Map<
+    string,
+    PrivateSummaryPathRedaction | undefined
+  >();
+  const privateFieldProjectionUncached = (
     type: number,
     path: readonly PlaceProjection[],
-    active = new Set<string>(),
+    active: ReadonlySet<string>,
   ): PrivateSummaryPathRedaction | undefined => {
-    const key = `${type}:${JSON.stringify(path)}`;
+    const key = `${type}:${summaryProjectionPathKey(path)}`;
     if (active.has(key)) {
       return undefined;
     }
@@ -473,14 +511,18 @@ const collectModuleExports = ({
     const nextActive = new Set(active).add(key);
     const descriptor = typing.arena.get(type);
     if (descriptor.kind === "borrowed") {
-      return privateFieldProjection(descriptor.inner, path, nextActive);
+      return privateFieldProjectionUncached(descriptor.inner, path, nextActive);
     }
     if (descriptor.kind === "recursive") {
-      return privateFieldProjection(descriptor.body, path, nextActive);
+      return privateFieldProjectionUncached(descriptor.body, path, nextActive);
     }
     if (descriptor.kind === "union") {
       const candidates = descriptor.members.flatMap((member) => {
-        const candidate = privateFieldProjection(member, path, nextActive);
+        const candidate = privateFieldProjectionUncached(
+          member,
+          path,
+          nextActive,
+        );
         return candidate === undefined ? [] : [candidate];
       });
       return candidates.toSorted(
@@ -494,7 +536,11 @@ const collectModuleExports = ({
           if (typeof member !== "number") {
             return [];
           }
-          const candidate = privateFieldProjection(member, path, nextActive);
+          const candidate = privateFieldProjectionUncached(
+            member,
+            path,
+            nextActive,
+          );
           return candidate === undefined ? [] : [candidate];
         },
       );
@@ -509,11 +555,11 @@ const collectModuleExports = ({
       projection?.kind === "identity" ||
       projection?.kind === "discriminant"
     ) {
-      const nested = privateFieldProjection(type, remaining, active);
+      const nested = privateFieldProjectionUncached(type, remaining, active);
       return nested ? { ...nested, index: nested.index + 1 } : undefined;
     }
     if (projection?.kind === "index" && descriptor.kind === "fixed-array") {
-      const nested = privateFieldProjection(
+      const nested = privateFieldProjectionUncached(
         descriptor.element,
         remaining,
         nextActive,
@@ -551,8 +597,24 @@ const collectModuleExports = ({
         token: opaquePrivateProjectionToken(`${owner}:${fieldIndex}`),
       };
     }
-    const nested = privateFieldProjection(field.type, remaining, nextActive);
+    const nested = privateFieldProjectionUncached(
+      field.type,
+      remaining,
+      nextActive,
+    );
     return nested ? { ...nested, index: nested.index + 1 } : undefined;
+  };
+  const privateFieldProjection = (
+    type: number,
+    path: readonly PlaceProjection[],
+  ): PrivateSummaryPathRedaction | undefined => {
+    const key = `${type}:${summaryProjectionPathKey(path)}`;
+    if (privateFieldProjectionCache.has(key)) {
+      return privateFieldProjectionCache.get(key);
+    }
+    const result = privateFieldProjectionUncached(type, path, new Set());
+    privateFieldProjectionCache.set(key, result);
+    return result;
   };
   const borrowSummaryPrivacyFor = (
     callableSymbol: SymbolId,
@@ -2560,6 +2622,12 @@ const collectModuleExports = ({
     localCalls: Map<string, LocalResultCall>;
     widenResultPaths: boolean;
   };
+  const cloneResultExposure = (exposure: ResultExposure): ResultExposure => ({
+    coercions: new Map(exposure.coercions),
+    localCalls: new Map(exposure.localCalls),
+    widenResultPaths: exposure.widenResultPaths,
+  });
+  const resultExposureCache = new Map<string, ResultExposure>();
   const resultExposureForExpression = (
     exprId: number,
     targetType: TypeId | undefined,
@@ -2569,6 +2637,52 @@ const collectModuleExports = ({
     requestedPath: readonly PlaceProjection[] = [],
     resultType?: { moduleId: string; symbol: SymbolId },
     requestedTypes: readonly { moduleId: string; symbol: SymbolId }[] = [],
+  ): ResultExposure => {
+    if (active.size > 0) {
+      return computeResultExposureForExpression(
+        exprId,
+        targetType,
+        active,
+        useAtExpression,
+        resultPath,
+        requestedPath,
+        resultType,
+        requestedTypes,
+      );
+    }
+    const key = JSON.stringify([
+      exprId,
+      targetType,
+      useAtExpression,
+      resultPath,
+      requestedPath,
+      resultType,
+      requestedTypes,
+    ]);
+    const cached = resultExposureCache.get(key);
+    if (cached) return cloneResultExposure(cached);
+    const result = computeResultExposureForExpression(
+      exprId,
+      targetType,
+      active,
+      useAtExpression,
+      resultPath,
+      requestedPath,
+      resultType,
+      requestedTypes,
+    );
+    resultExposureCache.set(key, cloneResultExposure(result));
+    return result;
+  };
+  const computeResultExposureForExpression = (
+    exprId: number,
+    targetType: TypeId | undefined,
+    active: Set<string>,
+    useAtExpression: number | undefined,
+    resultPath: readonly PlaceProjection[],
+    requestedPath: readonly PlaceProjection[],
+    resultType: { moduleId: string; symbol: SymbolId } | undefined,
+    requestedTypes: readonly { moduleId: string; symbol: SymbolId }[],
   ): ResultExposure => {
     const exposure: ResultExposure = {
       coercions: new Map(),
@@ -3249,30 +3363,46 @@ const collectModuleExports = ({
     });
     resultExposures.set(item.symbol, exposure);
   });
-  let resultExposureChanged = true;
-  while (resultExposureChanged) {
-    resultExposureChanged = false;
-    resultExposures.forEach((exposure) => {
-      exposure.localCalls.forEach((call) => {
-        resultExposures.get(call.symbol)?.coercions.forEach((coercion) => {
-          const translated = translatedCoercionReachability({
-            coercion,
-            requested: call.requested,
-            result: call.result,
-            requestedTypes: call.requestedTypes,
-            resultType: call.resultType,
-          });
-          if (!translated) {
-            return;
-          }
-          const key = coercionKey(translated);
-          if (exposure.coercions.has(key)) {
-            return;
-          }
-          exposure.coercions.set(key, translated);
-          resultExposureChanged = true;
+  const resultExposureDependents = new Map<SymbolId, Set<SymbolId>>();
+  resultExposures.forEach((exposure, caller) => {
+    exposure.localCalls.forEach((call) => {
+      const callers = resultExposureDependents.get(call.symbol) ?? new Set();
+      callers.add(caller);
+      resultExposureDependents.set(call.symbol, callers);
+    });
+  });
+  const resultExposureWorklist = Array.from(resultExposures.keys());
+  const queuedResultExposures = new Set(resultExposureWorklist);
+  for (let cursor = 0; cursor < resultExposureWorklist.length; cursor += 1) {
+    const symbol = resultExposureWorklist[cursor]!;
+    queuedResultExposures.delete(symbol);
+    const exposure = resultExposures.get(symbol)!;
+    let changed = false;
+    exposure.localCalls.forEach((call) => {
+      resultExposures.get(call.symbol)?.coercions.forEach((coercion) => {
+        const translated = translatedCoercionReachability({
+          coercion,
+          requested: call.requested,
+          result: call.result,
+          requestedTypes: call.requestedTypes,
+          resultType: call.resultType,
         });
+        if (!translated) {
+          return;
+        }
+        const key = coercionKey(translated);
+        if (exposure.coercions.has(key)) {
+          return;
+        }
+        exposure.coercions.set(key, translated);
+        changed = true;
       });
+    });
+    if (!changed) continue;
+    resultExposureDependents.get(symbol)?.forEach((caller) => {
+      if (queuedResultExposures.has(caller)) return;
+      queuedResultExposures.add(caller);
+      resultExposureWorklist.push(caller);
     });
   }
   const coercionsFor = (
