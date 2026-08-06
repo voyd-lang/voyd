@@ -325,6 +325,7 @@ jobs:
 
   compiler-codegen:
     runs-on: ubuntu-latest
+    # Keep the complete suite in one job so CI reports its true end-to-end cost.
     timeout-minutes: 20
     env:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
