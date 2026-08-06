@@ -98,15 +98,11 @@ fn render_response(route: i32, products: i32, request: RequestContext) -> i32
     response_bytes: 0
   }
   let state_alias = state
-  // Keep this hot inner loop explicit so V-475 is measured independently from
-  // the general Range iterator used by the outer request loop.
-  var node = 0
   var checksum = route + products
-  while node < 128:
+  for node in 0..128:
     checksum = checksum + state_alias.template_seed + state_alias.locale_bias + state_alias.escaping_seed + state_alias.hydration_seed
     record_response_chunk(~state, 80 + (products + node) % 31)
     checksum = checksum + state_alias.template_seed + state_alias.locale_bias + state_alias.escaping_seed + state_alias.hydration_seed
-    node = node + 1
   checksum + state_alias.emitted_nodes + state_alias.response_bytes
 
 fn request_context(request_id: i32) -> RequestContext

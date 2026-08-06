@@ -660,6 +660,17 @@
     "rationale": "Asserts one-time/deduplicated dispatcher and runtime helper emission across module contexts and test builds, an implementation registry property."
   },
   {
+    "file": "packages/compiler/src/codegen/__tests__/range-for-fast-path.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-08-06",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "Emitted direct-loop shape and optimizer-fact integration are compiler-local; portable Range iteration semantics remain in runtime.range-for.",
+    "portableCaseIds": [
+      "runtime.range-for.half-open",
+      "runtime.range-for.inclusive"
+    ]
+  },
+  {
     "file": "packages/compiler/src/codegen/__tests__/scalar-aggregate-replacement.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",

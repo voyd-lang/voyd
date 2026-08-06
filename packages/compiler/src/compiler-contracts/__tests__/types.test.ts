@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { ProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import {
   isStdIntrinsicNominalType,
+  isStdIntrinsicNominalTypeInstantiation,
   STD_INTRINSIC_TYPE,
   type StdIntrinsicTypeContractId,
 } from "../types.js";
@@ -91,6 +92,33 @@ describe("std intrinsic nominal type contracts", () => {
       }),
     ).toBe(true);
   });
+
+  it("requires exact generic arguments for an intrinsic instantiation", () => {
+    const program = programWithNominal({
+      name: "Range",
+      packageId: "std",
+      intrinsicType: STD_INTRINSIC_TYPE.range,
+      validatedContractId: STD_INTRINSIC_TYPE.range,
+      typeArgs: [21],
+    });
+
+    expect(
+      isStdIntrinsicNominalTypeInstantiation({
+        program,
+        typeId: 11,
+        intrinsicType: STD_INTRINSIC_TYPE.range,
+        typeArgs: [21],
+      }),
+    ).toBe(true);
+    expect(
+      isStdIntrinsicNominalTypeInstantiation({
+        program,
+        typeId: 11,
+        intrinsicType: STD_INTRINSIC_TYPE.range,
+        typeArgs: [22],
+      }),
+    ).toBe(false);
+  });
 });
 
 const programWithNominal = ({
@@ -98,11 +126,13 @@ const programWithNominal = ({
   packageId,
   intrinsicType,
   validatedContractId,
+  typeArgs = [],
 }: {
   name: string;
   packageId: string;
   intrinsicType: string | undefined;
   validatedContractId: StdIntrinsicTypeContractId | undefined;
+  typeArgs?: readonly number[];
 }): ProgramCodegenView =>
   ({
     types: {
@@ -110,7 +140,7 @@ const programWithNominal = ({
         kind: "nominal-object",
         name,
         owner: 3,
-        typeArgs: [],
+        typeArgs,
       }),
     },
     symbols: {

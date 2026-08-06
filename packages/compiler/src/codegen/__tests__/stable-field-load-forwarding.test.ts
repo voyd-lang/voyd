@@ -147,6 +147,11 @@ impl Mutator for Increment
   fn bump(self, ~value: Record) -> void
     value.changing = value.changing + 1
 
+obj Reset {}
+impl Mutator for Reset
+  fn bump(self, ~value: Record) -> void
+    value.stable = 0
+
 fn run(mutator: Mutator) -> i32
   let ~value = Record { stable: 3, changing: 0 }
   let alias = value
@@ -159,8 +164,9 @@ fn run(mutator: Mutator) -> i32
     iteration = iteration + 1
   total
 
-pub fn main() -> i32
-  run(Increment {})
+pub fn main(flag: i32) -> i32
+  let mutator: Mutator = if flag == 0 then: Increment {} else: Reset {}
+  run(mutator)
 `);
     expect(
       optimized.facts.stableFieldLoadForwarding.get(moduleId)?.size ?? 0,

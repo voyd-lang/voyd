@@ -22,6 +22,7 @@ import type {
   TypeId,
 } from "../context.js";
 import { allocateLoopLabels, withLoopScope } from "../control-flow-stack.js";
+import { withStableFieldLoadForwarding } from "../expressions/control-flow.js";
 import { walkHirExpression } from "../hir-walk.js";
 import {
   allocateTempLocal,
@@ -43,6 +44,7 @@ import {
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import {
   isStdIntrinsicNominalType,
+  isStdIntrinsicNominalTypeInstantiation,
   STD_INTRINSIC_TYPE,
 } from "../../compiler-contracts/types.js";
 
@@ -59,10 +61,15 @@ type SafeArrayWhileLoopAnalysis = {
   cachedLengthExpr?: HirExprId;
 };
 
-type SafeArrayForLoopAnalysis = {
-  scope: SafeArrayLoopScope;
-  lengthExpr: HirExprId;
+type RangeForLoopAnalysis = {
+  whileExpr: HirWhileExpr;
+  startExpr: HirExprId;
+  endExpr: HirExprId;
+  includeEnd: boolean;
+  indexSymbol: SymbolId;
+  userBodyExpr: HirExprId;
   userStatements: readonly number[];
+  safeArrayScope?: SafeArrayLoopScope;
 };
 
 type StatementCompiler = (stmtId: number) => binaryen.ExpressionRef;
@@ -889,9 +896,7 @@ const loadI32Local = ({
     return undefined;
   }
   const value = loadLocalValue(binding, ctx);
-  return binaryen.getExpressionType(value) === binaryen.i32
-    ? value
-    : undefined;
+  return binaryen.getExpressionType(value) === binaryen.i32 ? value : undefined;
 };
 
 const withSafeArrayLoopScope = <T>({
@@ -1058,7 +1063,14 @@ const parseRangeForIterator = ({
   initializer: HirExprId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): { arraySymbol: SymbolId; lengthExpr: HirExprId } | undefined => {
+}):
+  | {
+      startExpr: HirExprId;
+      endExpr: HirExprId;
+      includeEnd: boolean;
+      safeArray?: { arraySymbol: SymbolId };
+    }
+  | undefined => {
   const iterCall = ctx.module.hir.expressions.get(initializer);
   if (
     iterCall?.exprKind !== "method-call" ||
@@ -1074,10 +1086,11 @@ const parseRangeForIterator = ({
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const rangeTypeId = getRequiredExprType(iterCall.target, ctx, typeInstanceId);
   if (
-    !isStdIntrinsicNominalType({
+    !isStdIntrinsicNominalTypeInstantiation({
       program: ctx.program,
       typeId: rangeTypeId,
       intrinsicType: STD_INTRINSIC_TYPE.range,
+      typeArgs: [ctx.program.primitives.i32],
     })
   ) {
     return undefined;
@@ -1094,19 +1107,25 @@ const parseRangeForIterator = ({
   if (!start || start.kind !== "field" || !end || end.kind !== "field") {
     return undefined;
   }
-  if (
-    !includeEnd ||
-    includeEnd.kind !== "field" ||
-    !isLiteralBoolean({ exprId: includeEnd.value, value: "false", ctx })
-  ) {
+  if (!includeEnd || includeEnd.kind !== "field") {
     return undefined;
   }
   const startValue = somePayloadExpr({ exprId: start.value, ctx });
   const endValue = somePayloadExpr({ exprId: end.value, ctx });
+  const isInclusive = isLiteralBoolean({
+    exprId: includeEnd.value,
+    value: "true",
+    ctx,
+  });
+  const isHalfOpen = isLiteralBoolean({
+    exprId: includeEnd.value,
+    value: "false",
+    ctx,
+  });
   if (
     typeof startValue !== "number" ||
-    !isLiteralI32({ exprId: startValue, value: "0", ctx }) ||
-    typeof endValue !== "number"
+    typeof endValue !== "number" ||
+    (!isInclusive && !isHalfOpen)
   ) {
     return undefined;
   }
@@ -1115,12 +1134,18 @@ const parseRangeForIterator = ({
     ctx,
     fnCtx,
   });
-  return length
-    ? {
-        arraySymbol: length.arraySymbol,
-        lengthExpr: endValue,
-      }
-    : undefined;
+  const safeArray =
+    isHalfOpen &&
+    isLiteralI32({ exprId: startValue, value: "0", ctx }) &&
+    length
+      ? { arraySymbol: length.arraySymbol }
+      : undefined;
+  return {
+    startExpr: startValue,
+    endExpr: endValue,
+    includeEnd: isInclusive,
+    safeArray,
+  };
 };
 
 const isLiteralBoolean = ({
@@ -1162,17 +1187,17 @@ const isBreakBlock = ({
 const parseRangeForBody = ({
   whileExpr,
   iteratorSymbol,
-  arraySymbol,
   ctx,
-  fnCtx,
 }: {
   whileExpr: HirWhileExpr;
   iteratorSymbol: SymbolId;
-  arraySymbol: SymbolId;
   ctx: CodegenContext;
-  fnCtx: FunctionContext;
 }):
-  | { indexSymbol: SymbolId; userStatements: readonly number[] }
+  | {
+      indexSymbol: SymbolId;
+      userBodyExpr: HirExprId;
+      userStatements: readonly number[];
+    }
   | undefined => {
   if (!isLiteralBoolean({ exprId: whileExpr.condition, value: "true", ctx })) {
     return undefined;
@@ -1194,6 +1219,7 @@ const parseRangeForBody = ({
   if (
     nextCall?.exprKind !== "method-call" ||
     nextCall.method !== "next" ||
+    nextCall.args.length !== 0 ||
     expressionSymbol({ exprId: nextCall.target, ctx }) !== iteratorSymbol
   ) {
     return undefined;
@@ -1204,6 +1230,7 @@ const parseRangeForBody = ({
       : undefined;
   if (
     match?.exprKind !== "match" ||
+    match.arms.length !== 2 ||
     expressionSymbol({ exprId: match.discriminant, ctx }) !== nextValueSymbol
   ) {
     return undefined;
@@ -1238,25 +1265,14 @@ const parseRangeForBody = ({
     return undefined;
   }
   const indexSymbol = indexStmt.pattern.symbol;
-  if (
-    !bodyPreservesArrayLoopProof({
-      bodyExprId: someArm.value,
-      indexSymbol,
-      arraySymbol,
-      indexUpdate: "none",
-      ctx,
-      fnCtx,
-    })
-  ) {
-    return undefined;
-  }
   return {
     indexSymbol,
+    userBodyExpr: someArm.value,
     userStatements: someBlock.statements.slice(1),
   };
 };
 
-const tryAnalyzeSafeArrayForLoop = ({
+const tryAnalyzeRangeForLoop = ({
   block,
   statementIndex,
   ctx,
@@ -1266,7 +1282,7 @@ const tryAnalyzeSafeArrayForLoop = ({
   statementIndex: number;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): SafeArrayForLoopAnalysis | undefined => {
+}): RangeForLoopAnalysis | undefined => {
   const currentStmt = ctx.module.hir.statements.get(
     block.statements[statementIndex]!,
   );
@@ -1300,31 +1316,45 @@ const tryAnalyzeSafeArrayForLoop = ({
   const body = parseRangeForBody({
     whileExpr,
     iteratorSymbol: iteratorStmt.pattern.symbol,
-    arraySymbol: iterator.arraySymbol,
     ctx,
-    fnCtx,
   });
   if (!body) {
     return undefined;
   }
   return {
-    scope: {
-      arraySymbol: iterator.arraySymbol,
-      indexSymbol: body.indexSymbol,
-    },
-    lengthExpr: iterator.lengthExpr,
+    whileExpr,
+    startExpr: iterator.startExpr,
+    endExpr: iterator.endExpr,
+    includeEnd: iterator.includeEnd,
+    indexSymbol: body.indexSymbol,
+    userBodyExpr: body.userBodyExpr,
     userStatements: body.userStatements,
+    safeArrayScope:
+      iterator.safeArray &&
+      bodyPreservesArrayLoopProof({
+        bodyExprId: body.userBodyExpr,
+        indexSymbol: body.indexSymbol,
+        arraySymbol: iterator.safeArray.arraySymbol,
+        indexUpdate: "none",
+        ctx,
+        fnCtx,
+      })
+        ? {
+            arraySymbol: iterator.safeArray.arraySymbol,
+            indexSymbol: body.indexSymbol,
+          }
+        : undefined,
   };
 };
 
-const compileSafeArrayForLoop = ({
+const compileRangeForLoop = ({
   analysis,
   ctx,
   fnCtx,
   compileExpr,
   compileStatement,
 }: {
-  analysis: SafeArrayForLoopAnalysis;
+  analysis: RangeForLoopAnalysis;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -1332,65 +1362,97 @@ const compileSafeArrayForLoop = ({
 }): binaryen.ExpressionRef => {
   const { loopLabel, breakLabel } = allocateLoopLabels({
     fnCtx,
-    prefix: "array_safe_for_loop",
+    prefix: "range_for_loop",
   });
-  const lengthLocal = allocateTempLocal(binaryen.i32, fnCtx);
+  const cursorLocal = allocateTempLocal(
+    binaryen.i32,
+    fnCtx,
+    ctx.program.primitives.i32,
+    ctx,
+  );
+  const endLocal = allocateTempLocal(binaryen.i32, fnCtx);
   const indexLocal = allocateTempLocal(
     binaryen.i32,
     fnCtx,
     ctx.program.primitives.i32,
     ctx,
   );
-  const previousIndexBinding = fnCtx.bindings.get(analysis.scope.indexSymbol);
-  fnCtx.bindings.set(analysis.scope.indexSymbol, {
+  const doneLocal = analysis.includeEnd
+    ? allocateTempLocal(binaryen.i32, fnCtx)
+    : undefined;
+  const previousIndexBinding = fnCtx.bindings.get(analysis.indexSymbol);
+  fnCtx.bindings.set(analysis.indexSymbol, {
     ...indexLocal,
     kind: "local",
     typeId: ctx.program.primitives.i32,
   });
-  const body = (() => {
+  const { setup: forwardingStores, value: body } = (() => {
     try {
-      return withSafeArrayLoopScope({
-        scope: analysis.scope,
+      return withStableFieldLoadForwarding({
+        loopExprId: analysis.whileExpr.id,
+        ctx,
         fnCtx,
-        run: () =>
-          withLoopScope(fnCtx, { breakLabel, continueLabel: loopLabel }, () =>
-            ctx.mod.block(
-              null,
-              analysis.userStatements.map((stmtId) => compileStatement(stmtId)),
-              binaryen.none,
-            ),
-          ),
+        compileExpr,
+        run: () => {
+          const compileBody = () =>
+            withLoopScope(fnCtx, { breakLabel, continueLabel: loopLabel }, () =>
+              ctx.mod.block(
+                null,
+                analysis.userStatements.map((stmtId) =>
+                  compileStatement(stmtId),
+                ),
+                binaryen.none,
+              ),
+            );
+          return analysis.safeArrayScope
+            ? withSafeArrayLoopScope({
+                scope: analysis.safeArrayScope,
+                fnCtx,
+                run: compileBody,
+              })
+            : compileBody();
+        },
       });
     } finally {
       if (previousIndexBinding) {
-        fnCtx.bindings.set(analysis.scope.indexSymbol, previousIndexBinding);
+        fnCtx.bindings.set(analysis.indexSymbol, previousIndexBinding);
       } else {
-        fnCtx.bindings.delete(analysis.scope.indexSymbol);
+        fnCtx.bindings.delete(analysis.indexSymbol);
       }
     }
   })();
 
+  const cursor = () => ctx.mod.local.get(cursorLocal.index, binaryen.i32);
+  const end = () => ctx.mod.local.get(endLocal.index, binaryen.i32);
   const conditionCheck = ctx.mod.if(
-    ctx.mod.i32.eqz(
-      ctx.mod.i32.lt_s(
-        ctx.mod.local.get(indexLocal.index, binaryen.i32),
-        ctx.mod.local.get(lengthLocal.index, binaryen.i32),
-      ),
-    ),
+    analysis.includeEnd
+      ? ctx.mod.i32.or(
+          ctx.mod.local.get(doneLocal!.index, binaryen.i32),
+          ctx.mod.i32.gt_s(cursor(), end()),
+        )
+      : ctx.mod.i32.ge_s(cursor(), end()),
     ctx.mod.br(breakLabel),
   );
+  const advance = analysis.includeEnd
+    ? ctx.mod.if(
+        ctx.mod.i32.eq(cursor(), end()),
+        ctx.mod.local.set(doneLocal!.index, ctx.mod.i32.const(1)),
+        ctx.mod.local.set(
+          cursorLocal.index,
+          ctx.mod.i32.add(cursor(), ctx.mod.i32.const(1)),
+        ),
+      )
+    : ctx.mod.local.set(
+        cursorLocal.index,
+        ctx.mod.i32.add(cursor(), ctx.mod.i32.const(1)),
+      );
   const loopBody = ctx.mod.block(
     null,
     [
       conditionCheck,
+      ctx.mod.local.set(indexLocal.index, cursor()),
+      advance,
       body,
-      ctx.mod.local.set(
-        indexLocal.index,
-        ctx.mod.i32.add(
-          ctx.mod.local.get(indexLocal.index, binaryen.i32),
-          ctx.mod.i32.const(1),
-        ),
-      ),
       ctx.mod.br(loopLabel),
     ],
     binaryen.none,
@@ -1399,22 +1461,34 @@ const compileSafeArrayForLoop = ({
     breakLabel,
     [
       ctx.mod.local.set(
-        lengthLocal.index,
+        cursorLocal.index,
         compileExpr({
-          exprId: analysis.lengthExpr,
+          exprId: analysis.startExpr,
           ctx,
           fnCtx,
           expectedResultTypeId: ctx.program.primitives.i32,
         }).expr,
       ),
-      ctx.mod.local.set(indexLocal.index, ctx.mod.i32.const(0)),
+      ctx.mod.local.set(
+        endLocal.index,
+        compileExpr({
+          exprId: analysis.endExpr,
+          ctx,
+          fnCtx,
+          expectedResultTypeId: ctx.program.primitives.i32,
+        }).expr,
+      ),
+      ...(doneLocal
+        ? [ctx.mod.local.set(doneLocal.index, ctx.mod.i32.const(0))]
+        : []),
+      ...forwardingStores,
       ctx.mod.loop(loopLabel, loopBody),
     ],
     binaryen.none,
   );
 };
 
-export const tryCompileArraySafeForStatement = ({
+export const tryCompileRangeForStatement = ({
   block,
   statementIndex,
   ctx,
@@ -1429,14 +1503,17 @@ export const tryCompileArraySafeForStatement = ({
   compileExpr: ExpressionCompiler;
   compileStatement: StatementCompiler;
 }): binaryen.ExpressionRef | undefined => {
-  const analysis = tryAnalyzeSafeArrayForLoop({
+  if (fnCtx.effectful) {
+    return undefined;
+  }
+  const analysis = tryAnalyzeRangeForLoop({
     block,
     statementIndex,
     ctx,
     fnCtx,
   });
   return analysis
-    ? compileSafeArrayForLoop({
+    ? compileRangeForLoop({
         analysis,
         ctx,
         fnCtx,

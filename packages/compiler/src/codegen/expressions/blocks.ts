@@ -31,7 +31,7 @@ import { tailResumptionExitChecks } from "../effects/tail-resumptions.js";
 import { boxSignatureSpillValue } from "../signature-spill.js";
 import {
   arrayLengthBindingForStatement,
-  tryCompileArraySafeForStatement,
+  tryCompileRangeForStatement,
   tryCompileArraySafeWhileStatement,
 } from "../optimization/array-fast-paths.js";
 
@@ -122,7 +122,7 @@ export const compileBlockExpr = (
             fnCtx,
             compileExpr,
           }) ??
-            tryCompileArraySafeForStatement({
+            tryCompileRangeForStatement({
               block: expr,
               statementIndex,
               ctx,

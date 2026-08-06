@@ -14,9 +14,7 @@ export const STD_INTRINSIC_TYPE = {
 export type StdIntrinsicTypeId =
   (typeof STD_INTRINSIC_TYPE)[keyof typeof STD_INTRINSIC_TYPE];
 
-export type StdIntrinsicTypeProviderKind =
-  | "nominal-object"
-  | "value-object";
+export type StdIntrinsicTypeProviderKind = "nominal-object" | "value-object";
 
 const NOMINAL_PROVIDER_KINDS = [
   "nominal-object",
@@ -118,6 +116,37 @@ export const isStdIntrinsicNominalType = ({
   }
   return (
     program.symbols.getPackageId(desc.owner) === "std" &&
-    program.symbols.getStdIntrinsicTypeContract(desc.owner)?.id === intrinsicType
+    program.symbols.getStdIntrinsicTypeContract(desc.owner)?.id ===
+      intrinsicType
+  );
+};
+
+export const isStdIntrinsicNominalTypeInstantiation = ({
+  program,
+  typeId,
+  intrinsicType,
+  typeArgs,
+}: {
+  program: ProgramCodegenView;
+  typeId: TypeId;
+  intrinsicType: StdIntrinsicTypeId;
+  typeArgs: readonly TypeId[];
+}): boolean => {
+  if (!isStdIntrinsicNominalType({ program, typeId, intrinsicType })) {
+    return false;
+  }
+  const desc = program.types.getTypeDesc(typeId);
+  if (desc.kind === "intersection" && typeof desc.nominal === "number") {
+    return isStdIntrinsicNominalTypeInstantiation({
+      program,
+      typeId: desc.nominal,
+      intrinsicType,
+      typeArgs,
+    });
+  }
+  return (
+    (desc.kind === "nominal-object" || desc.kind === "value-object") &&
+    desc.typeArgs.length === typeArgs.length &&
+    desc.typeArgs.every((arg, index) => arg === typeArgs[index])
   );
 };

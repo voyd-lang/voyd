@@ -1100,11 +1100,53 @@ export const compileWhileExpr = (
     ctx.mod.br(breakLabel),
   );
 
+  const { setup: forwardingStores, value: body } =
+    withStableFieldLoadForwarding({
+      loopExprId: expr.id,
+      ctx,
+      fnCtx,
+      compileExpr,
+      run: () =>
+        withLoopScope(
+          fnCtx,
+          { breakLabel, continueLabel: loopLabel },
+          () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr,
+        ),
+    });
+  const loopBody = ctx.mod.block(
+    null,
+    [conditionCheck, body, ctx.mod.br(loopLabel)],
+    binaryen.none,
+  );
+
+  return {
+    expr: ctx.mod.block(
+      breakLabel,
+      [...forwardingStores, ctx.mod.loop(loopLabel, loopBody)],
+      binaryen.none,
+    ),
+    usedReturnCall: false,
+  };
+};
+
+export const withStableFieldLoadForwarding = <T>({
+  loopExprId,
+  ctx,
+  fnCtx,
+  compileExpr,
+  run,
+}: {
+  loopExprId: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  run: () => T;
+}): { setup: binaryen.ExpressionRef[]; value: T } => {
   const forwardingGroups =
     ctx.optimization?.stableFieldLoadForwarding
       .get(ctx.moduleId)
-      ?.get(expr.id) ?? [];
-  const forwardingStores: binaryen.ExpressionRef[] = [];
+      ?.get(loopExprId) ?? [];
+  const setup: binaryen.ExpressionRef[] = [];
   const forwardedBindings = new Map(fnCtx.stableFieldLoadBindings);
   forwardingGroups.forEach((group) => {
     const representative = group.accessExprIds[0];
@@ -1125,7 +1167,7 @@ export const compileWhileExpr = (
       ),
       ctx,
     );
-    forwardingStores.push(
+    setup.push(
       storeLocalValue({
         binding,
         value: compileExpr({ exprId: representative, ctx, fnCtx }).expr,
@@ -1139,26 +1181,11 @@ export const compileWhileExpr = (
   });
   const previousForwardedBindings = fnCtx.stableFieldLoadBindings;
   fnCtx.stableFieldLoadBindings = forwardedBindings;
-  const body = withLoopScope(
-    fnCtx,
-    { breakLabel, continueLabel: loopLabel },
-    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr,
-  );
-  fnCtx.stableFieldLoadBindings = previousForwardedBindings;
-  const loopBody = ctx.mod.block(
-    null,
-    [conditionCheck, body, ctx.mod.br(loopLabel)],
-    binaryen.none,
-  );
-
-  return {
-    expr: ctx.mod.block(
-      breakLabel,
-      [...forwardingStores, ctx.mod.loop(loopLabel, loopBody)],
-      binaryen.none,
-    ),
-    usedReturnCall: false,
-  };
+  try {
+    return { setup, value: run() };
+  } finally {
+    fnCtx.stableFieldLoadBindings = previousForwardedBindings;
+  }
 };
 
 export const compileLoopExpr = (

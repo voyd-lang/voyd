@@ -19,6 +19,51 @@ pub fn range_for_nested() -> i32
       total = total + (x + y)
   total
 
+pub fn range_for_nonzero_negative_and_empty() -> i32
+  var total = 0
+  for value in -2..2:
+    total = total * 10 + value
+  for value in 5..2:
+    total = total + value * 1000
+  for value in 3..3:
+    total = total + value * 1000
+  total
+
+pub fn range_for_break_and_continue() -> i32
+  var total = 0
+  for value in 0..10:
+    if value == 2:
+      continue
+    if value == 5:
+      break
+    total = total + value
+  total
+
+pub fn range_for_inclusive_i32_max_stops() -> i32
+  var count = 0
+  var last = 0
+  for value in 2147483647..=2147483647:
+    count = count + 1
+    last = value
+  if count == 1 and last == 2147483647 then: 1 else: 0
+
+obj BoundProbe {
+  order: i32,
+  evaluations: i32
+}
+
+fn record_bound(~probe: BoundProbe, label: i32, value: i32) -> i32
+  probe.order = probe.order * 10 + label
+  probe.evaluations = probe.evaluations + 1
+  value
+
+pub fn range_for_evaluates_bounds_once_in_order() -> i32
+  let ~probe = BoundProbe { order: 0, evaluations: 0 }
+  var total = 0
+  for value in record_bound(~probe, 1, -2)..record_bound(~probe, 2, 2):
+    total = total + value
+  probe.order * 100 + probe.evaluations * 10 + total
+
 pub fn range_iterator_inclusive_i32_max_stops() -> i32
   let ~iter = (2147483647..=2147483647).iter()
 

@@ -255,7 +255,15 @@ const loopPreservesCandidate = ({
           return;
         }
         if (expr.exprKind === "method-call") {
-          safe = false;
+          safe = callIsDisjoint({
+            exprId,
+            expr,
+            candidate,
+            aliases,
+            callInfo: calls.get(exprId),
+            moduleView,
+            program,
+          });
           return;
         }
         if (
@@ -388,15 +396,18 @@ const loopPreservesCandidate = ({
         safe = false;
         return;
       }
-      if (expr.exprKind !== "call") {
+      if (expr.exprKind !== "call" && expr.exprKind !== "method-call") {
         return;
       }
-      if (isBorrowMarker({ expr, moduleView, program })) {
+      if (
+        expr.exprKind === "call" &&
+        isBorrowMarker({ expr, moduleView, program })
+      ) {
         return;
       }
-      const aliasesRoot = expr.args.some((argument) => {
+      const aliasesRoot = callArgumentExprIds(expr).some((argumentExprId) => {
         const symbol = argumentRootSymbol({
-          exprId: argument.expr,
+          exprId: argumentExprId,
           moduleView,
           program,
         });
@@ -482,14 +493,13 @@ const isBorrowMarker = ({
   if (callee?.exprKind !== "identifier") {
     return false;
   }
-  return (
-    program.symbols.getName(
-      program.symbols.idOf({
-        moduleId: moduleView.moduleId,
-        symbol: callee.symbol,
-      }),
-    ) === "~"
+  const name = program.symbols.getName(
+    program.symbols.idOf({
+      moduleId: moduleView.moduleId,
+      symbol: callee.symbol,
+    }),
   );
+  return name === "~";
 };
 
 const callHasNoEscape = ({
@@ -499,7 +509,7 @@ const callHasNoEscape = ({
   program,
 }: {
   callInfo: OptimizedCallInfo | undefined;
-  expr: Extract<HirExpression, { exprKind: "call" }>;
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
   moduleView: ReadonlyOptimizedModuleView;
   program: ProgramCodegenView;
 }): boolean => {
@@ -531,19 +541,30 @@ const callIsDisjoint = ({
   program,
 }: {
   exprId: HirExprId;
-  expr: Extract<HirExpression, { exprKind: "call" }>;
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
   candidate: Candidate;
   aliases: AliasGroups;
   callInfo: OptimizedCallInfo | undefined;
   moduleView: ReadonlyOptimizedModuleView;
   program: ProgramCodegenView;
 }): boolean => {
-  if (isBorrowMarker({ expr, moduleView, program })) {
+  if (
+    expr.exprKind === "call" &&
+    isBorrowMarker({ expr, moduleView, program })
+  ) {
     return true;
   }
-  const passesRoot = expr.args.some((argument) => {
+  if (
+    expr.exprKind === "method-call" &&
+    callInfo?.traitDispatch &&
+    expr.args.length > 0
+  ) {
+    return false;
+  }
+  const argumentExprIds = callArgumentExprIds(expr);
+  const passesRoot = argumentExprIds.some((argumentExprId) => {
     const symbol = argumentRootSymbol({
-      exprId: argument.expr,
+      exprId: argumentExprId,
       moduleView,
       program,
     });
@@ -593,10 +614,11 @@ const callIsDisjoint = ({
       if (typeof argumentIndex !== "number") {
         return parameter.writePaths.length === 0;
       }
-      const argument = expr.args[argumentIndex];
-      const argumentSymbol = argument
-        ? argumentRootSymbol({ exprId: argument.expr, moduleView, program })
-        : undefined;
+      const argumentExprId = argumentExprIds[argumentIndex];
+      const argumentSymbol =
+        typeof argumentExprId === "number"
+          ? argumentRootSymbol({ exprId: argumentExprId, moduleView, program })
+          : undefined;
       if (
         typeof argumentSymbol !== "number" ||
         !aliases.aliases(argumentSymbol, candidate.root)
@@ -648,7 +670,7 @@ const resolvedFootprints = ({
   program,
 }: {
   callInfo: OptimizedCallInfo | undefined;
-  expr: Extract<HirExpression, { exprKind: "call" }>;
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
   moduleView: ReadonlyOptimizedModuleView;
   program: ProgramCodegenView;
 }): readonly CodegenCallableAccessFootprint[] => {
@@ -683,7 +705,7 @@ const resolvedTargetEntries = ({
   program,
 }: {
   callInfo: OptimizedCallInfo;
-  expr: Extract<HirExpression, { exprKind: "call" }>;
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>;
   moduleView: ReadonlyOptimizedModuleView;
   program: ProgramCodegenView;
 }): readonly [ProgramFunctionInstanceId, ProgramFunctionId][] => {
@@ -694,7 +716,10 @@ const resolvedTargetEntries = ({
   // Monomorphic direct calls intentionally omit the per-instance target map;
   // the callee's declaration symbol plus its callable footprint is their
   // resolution proof. Function-value locals have no footprint and bail out.
-  const callee = moduleView.hir.expressions.get(expr.callee);
+  const callee =
+    expr.exprKind === "call"
+      ? moduleView.hir.expressions.get(expr.callee)
+      : undefined;
   const target =
     callee?.exprKind === "identifier"
       ? program.functions.getFunctionId({
@@ -710,3 +735,10 @@ const resolvedTargetEntries = ({
     ? callerInstances.map((caller) => [caller, target] as const)
     : [[-1 as ProgramFunctionInstanceId, target]];
 };
+
+const callArgumentExprIds = (
+  expr: Extract<HirExpression, { exprKind: "call" | "method-call" }>,
+): readonly HirExprId[] =>
+  expr.exprKind === "method-call"
+    ? [expr.target, ...expr.args.map((argument) => argument.expr)]
+    : expr.args.map((argument) => argument.expr);
