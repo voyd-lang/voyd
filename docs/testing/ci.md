@@ -10,9 +10,9 @@ complete correctness suite behind a single Turbo queue.
   excluding conformance, integration, web-package, performance, and
   developer-tooling workspaces. Compiler files are balanced from measured
   timings, and standard-library test modules are divided between both jobs.
-  The SDK runs beside the first compiler/std partition, while the remaining
-  package units run beside the second. The first shard also carries the
-  non-CLI artifact build, while the second carries the typing gate.
+  The SDK and measured lighter std partitions run in the first shard beside
+  the non-CLI artifact build. The measured heavier std partitions and the
+  remaining package units run in the second shard beside the typing gate.
 - `web-unit`: affected Voyd web-package tests in one combined compile.
 - `tooling-unit`: affected CLI and language-server units, with the two package
   tasks concurrent and one Vitest worker per task.
@@ -44,10 +44,13 @@ non-Vitest work inside the lane budget.
 
 Compiler unit and codegen shards discover the complete suite before assigning
 files. Measured slow files carry explicit weights; new files receive a stable
-default weight and are still assigned automatically. Standard-library shards
-use `voyd test --shard N/M`, which discovers every test module and assigns the
-sorted list exactly once by round-robin index. This avoids silently dropping
-new tests while keeping compile-heavy work active in both jobs.
+default weight and are still assigned automatically. The standard-library
+runner expands the two logical jobs into four sequential `voyd test --shard
+N/4` compile partitions. It pairs the even partitions with SDK/build work and
+runs the disproportionately expensive odd partitions separately in the other
+job. Every discovered module is still assigned exactly once. This avoids
+silently dropping new tests while keeping compile-heavy work active in both
+jobs.
 
 The shared Vitest configuration defaults to one worker in CI and uses Vitest's
 unrestricted default locally. `VITEST_MAX_WORKERS` overrides both behaviors.

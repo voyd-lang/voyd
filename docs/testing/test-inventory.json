@@ -2491,6 +2491,12 @@
     "rationale": "Protects complete, non-overlapping duration-aware compiler shard assignment and rejects invalid shard coordinates."
   },
   {
+    "file": "scripts/testing/run-std-test-shards.test.mjs",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Protects complete, non-overlapping standard-library CI partition assignment while retaining unsharded local coverage."
+  },
+  {
     "file": "scripts/testing/run-web-test-shards.test.mjs",
     "owner": "package-unit",
     "disposition": "package-local",

@@ -115,6 +115,22 @@ jobs:
           TYPING_BENCH_MAX_REGRESSION_PCT: "15"
         run: node scripts/ci/check-typing-bench-regression.mjs
 
+  test-status:
+    name: test
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require successful core test shards
+        env:
+          SHARD_RESULT: ${{ needs.test.result }}
+        run: |
+          if [ "$SHARD_RESULT" != "success" ]; then
+            echo "One or more core test shards did not succeed."
+            exit 1
+          fi
+
   web-unit:
     runs-on: ubuntu-latest
     timeout-minutes: 15

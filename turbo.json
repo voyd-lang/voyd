@@ -10,6 +10,11 @@
     },
     "test": {
       "dependsOn": [],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/testing/compiler-test-shards.mjs",
+        "$TURBO_ROOT$/scripts/testing/run-std-test-shards.mjs"
+      ],
       "env": [
         "VITEST_MAX_WORKERS",
         "VOYD_COMPILER_TEST_SHARD",
