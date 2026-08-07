@@ -32,8 +32,13 @@ Superseded PR runs are cancelled. Turbo caches are restored only for jobs that
 actually execute Turbo tasks; direct Vitest or Voyd test jobs do not restore an
 ineffective Turbo cache.
 
-`npm run test:full` runs its independent compiler-codegen and CLI e2e tail
-phases concurrently after the main workspace sweep.
+The local `npm test` command covers every deterministic correctness lane:
+release/test tooling, all workspace defaults, compiler codegen, source CLI e2e
+and built CLI e2e. Locally, release/tooling runs beside the workspace sweep,
+then codegen and both CLI modes run concurrently. When `CI` is set, every lane
+runs sequentially. `npm run test:uncached` covers the same lanes with Turbo
+caches forced off. PR CI calls the affected and sharded commands above directly
+so hosted-runner concurrency remains explicit and bounded.
 
 ## Timing and resource budgets
 

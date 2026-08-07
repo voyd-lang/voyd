@@ -82,10 +82,10 @@ jobs:
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
       - if: matrix.shard == 2
-        run: npm run test:audit
-      - name: Run release tooling tests
+        run: npm run check:test-inventory
+      - name: Run repository tooling tests
         if: matrix.shard == 2
-        run: npm run test:release
+        run: npm run test:tooling
       - run: mkdir -p test-timings
       # Package-local units run separately from portable conformance, integration,
       # and the developer-tooling unit shard.

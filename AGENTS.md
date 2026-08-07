@@ -65,9 +65,9 @@ Before adding, moving, or substantially expanding tests, read
 [`docs/testing/README.md`](docs/testing/README.md). It is the canonical guide
 for ownership, portable conformance, CI lanes, and test-cost expectations.
 
-- `npm test` (runs vitest suite). Always confirm this passes before finishing.
-- `npm run typecheck`.
-- `npm run test:audit`.
+- `npm test` (runs the complete deterministic correctness suite). Always
+  confirm this passes before finishing.
+- `npm run check` (runs typechecking, linting and the test-inventory check).
 - `npx vitest <path-to-test>`
 
 You should generally add unit tests when they protect new behavior or a regression.
@@ -84,7 +84,7 @@ Before adding tests, read [`docs/testing/ownership.md`](docs/testing/ownership.m
 - `apps/cli`: argument parsing, command wiring, process UX, and exit/reporting behavior.
 - `tests/performance`: opt-in benchmarks, large sweeps, and external regression programs.
 - Avoid duplicating semantic assertions across layers unless each test protects a distinct boundary; keep semantic depth in exactly one canonical layer.
-- After adding or removing a test file, run `npm run test:audit:update` and explicitly resolve any `needs-review` inventory entry by contract; directory placement is not an ownership decision.
+- After adding or removing a test file, run `npm run update:test-inventory` and explicitly resolve any `needs-review` inventory entry by contract; directory placement is not an ownership decision.
 
 ## Test Hygiene
 

@@ -2503,6 +2503,12 @@
     "rationale": "Protects complete, non-overlapping standard-library CI partition assignment while retaining unsharded local coverage."
   },
   {
+    "file": "scripts/testing/run-test-suite.test.mjs",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Protects the root correctness-suite lane contract, local-only concurrency and uncached Turbo coverage without executing the expensive suite in the policy test."
+  },
+  {
     "file": "scripts/testing/run-web-test-shards.test.mjs",
     "owner": "package-unit",
     "disposition": "package-local",
