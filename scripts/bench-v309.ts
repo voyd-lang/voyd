@@ -200,7 +200,7 @@ const scenarios: Scenario[] = [
     entryName: "main",
     iterations: vtraceIterations,
     warmups: 1,
-    expected: 3_825_271,
+    expected: 428_553,
   },
 ];
 

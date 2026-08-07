@@ -19,7 +19,7 @@ const perfIterations = Number.parseInt(
   process.env.VOYD_PERF_ITERATIONS ?? "3",
   10,
 );
-const mainChecksum = 3_825_271;
+const mainChecksum = 428_553;
 const benchmarkChecksum = 57_372_071;
 
 const expectCompileSuccess = (

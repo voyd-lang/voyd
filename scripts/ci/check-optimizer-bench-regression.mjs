@@ -537,6 +537,18 @@ export const scorecardInputMode = ({
   return baseRef && headRef ? "refs" : undefined;
 };
 
+export const parseScenarioNames = (value) => {
+  if (value === undefined) return undefined;
+  const scenarioNames = value
+    .split(",")
+    .map((scenario) => scenario.trim())
+    .filter(Boolean);
+  if (scenarioNames.length === 0) {
+    throw new Error("--scenarios must name at least one optimizer scenario");
+  }
+  return [...new Set(scenarioNames)];
+};
+
 export const pairedRunOrder = ({
   scenarioNames,
   scenarioOrder = scenarioNames,
@@ -888,6 +900,7 @@ const main = () => {
   const headJson = argValue("--head-json");
   const baseRef = argValue("--base") ?? process.env.BASE_SHA;
   const headRef = argValue("--head") ?? process.env.HEAD_SHA;
+  const scenarioNames = parseScenarioNames(argValue("--scenarios"));
   const tempRoot = mkdtempSync(path.join(tmpdir(), "voyd-optimizer-bench-"));
   const resources = { worktrees: new Map() };
   try {
@@ -907,6 +920,7 @@ const main = () => {
               headRef,
               tempRoot,
               resources,
+              scenarioNames,
               attempt: "initial",
             })
           : undefined;

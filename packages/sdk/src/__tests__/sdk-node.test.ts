@@ -621,7 +621,7 @@ pub fn main() -> i32
     const consumer = createSdk({ compilerCache: "artifact", compilerArtifact: artifact });
     const result = expectCompileSuccess(await consumer.compile({ entryPath }));
     await expect(result.run<number>({ entryName: "main" })).resolves.toBe(
-      3_825_271,
+      428_553,
     );
   });
 
@@ -661,7 +661,7 @@ pub fn main() -> i32
       }),
     );
     await expect(warm.run<number>({ entryName: "main" })).resolves.toBe(
-      3_825_271,
+      428_553,
     );
   });
 

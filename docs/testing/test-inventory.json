@@ -2485,6 +2485,12 @@
     "reviewed": "2026-07-30"
   },
   {
+    "file": "scripts/testing/compiler-test-shards.test.mjs",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Protects complete, non-overlapping duration-aware compiler shard assignment and rejects invalid shard coordinates."
+  },
+  {
     "file": "scripts/testing/run-web-test-shards.test.mjs",
     "owner": "package-unit",
     "disposition": "package-local",

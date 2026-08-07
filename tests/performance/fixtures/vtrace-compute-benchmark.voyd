@@ -8,7 +8,7 @@ use std::random::LocalRng
 pub fn main() -> i32
   render_with_seed({
     seed: to_i64(42),
-    image_width: 48,
+    image_width: 16,
     samples_per_pixel: 4,
     max_depth: 8
   })

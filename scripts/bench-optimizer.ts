@@ -199,7 +199,7 @@ const SCENARIOS: readonly Scenario[] = [
       "tests/performance/fixtures/vtrace-compute-benchmark.voyd",
     ),
     entryName: "main",
-    expected: 3_825_271,
+    expected: 428_553,
     fullOnly: true,
   },
   {

@@ -10,7 +10,11 @@
     },
     "test": {
       "dependsOn": [],
-      "env": ["VITEST_MAX_WORKERS", "VOYD_TEST_TIMINGS_DIR"],
+      "env": [
+        "VITEST_MAX_WORKERS",
+        "VOYD_COMPILER_TEST_SHARD",
+        "VOYD_TEST_TIMINGS_DIR"
+      ],
       "outputs": []
     },
     "lint": {
