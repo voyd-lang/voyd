@@ -1,3 +1,5 @@
+// Keep this renderer source-idiomatic. It intentionally uses ordinary objects,
+// range-based loops, and direct Array iteration instead of hand-lowered controls.
 use std::math::{ INFINITY }
 use std::number::all
 use std::number::cast::to_i64
@@ -153,12 +155,7 @@ impl Vec3
   fn init(x: f64, y: f64, z: f64) -> Vec3
     Vec3 { x, y, z }
 
-  fn apply(~self, vec: Vec3) -> void
-    self.x = vec.x
-    self.y = vec.y
-    self.z = vec.z
-
-  fn '+='(~self, other: Vec3) -> void
+  fn add_assign(~self, other: Vec3) -> void
     self.x = self.x + other.x
     self.y = self.y + other.y
     self.z = self.z + other.z
@@ -258,13 +255,6 @@ impl Ray
   fn at(self, t: f64) -> Vec3
     self.origin + self.direction * t
 
-  fn apply(~self, ray: Ray) -> void
-    self.origin = ray.origin
-    self.direction = ray.direction
-
-  fn empty() -> Ray
-    Ray { origin: Vec3::empty(), direction: Vec3::empty() }
-
 obj Interval {
   min: f64,
   max: f64
@@ -283,7 +273,7 @@ impl Interval
   fn surrounds(self, x: f64) -> bool
     self.min < x and x < self.max
 
-val ScatterResult {
+obj ScatterResult {
   attenuation: Color,
   scattered: Ray
 }
@@ -319,8 +309,8 @@ impl Material for Metal
     Metal { albedo: albedo ?? Color(0.0, 0.0, 0.0), fuzz: fuzz ?? 0.0 }
 
   fn scatter(self, { r_in: Ray, rec: HitRecord }) -> ScatterResult
-    var reflected = r_in.direction.reflect(rec.normal)
-    reflected = reflected.unit_vector() + (Vec3::random_unit_vector() * self.fuzz)
+    let reflected = r_in.direction.reflect(rec.normal).unit_vector()
+      + (Vec3::random_unit_vector() * self.fuzz)
     ScatterResult {
       attenuation: self.albedo,
       scattered: Ray { origin: rec.p, direction: reflected }
@@ -352,8 +342,8 @@ impl Material for Dielectric
     }
 
   fn reflectance(self, cosine: f64) -> f64
-    var r0 = (1.0 - self.refraction_index) / (1.0 + self.refraction_index)
-    r0 = r0 * r0
+    let base = (1.0 - self.refraction_index) / (1.0 + self.refraction_index)
+    let r0 = base * base
     r0 + (1.0 - r0) * math::pow((1.0 - cosine), 5.0)
 
 obj HitRecord {
@@ -402,13 +392,11 @@ impl HittableList
 
 impl Hittable for HittableList
   fn hit(self, { ray: Ray, ray_t: Interval, ~rec: HitRecord }) -> bool
-    var ~temp_rec = HitRecord()
+    let ~temp_rec = HitRecord()
     var hit_anything = false
     var closest_so_far = ray_t.max
-    var index = 0
 
-    while index < self.objects.len():
-      let object = self.objects.at(index)
+    for object in self.objects:
       if object.hit({
         ray,
         ray_t: Interval(ray_t.min, closest_so_far),
@@ -417,7 +405,6 @@ impl Hittable for HittableList
         hit_anything = true
         closest_so_far = temp_rec.t
         rec.apply(temp_rec)
-      index = index + 1
 
     hit_anything
 
@@ -563,7 +550,7 @@ impl Camera
         let ~color = Color(1.0, 1.0, 1.0)
         for sample in 0..self.samples_per_pixel:
           let r = self.get_ray(i_f, j_f)
-          color.apply(color + ray_color(r, self.max_depth, world))
+          color.add_assign(ray_color(r, self.max_depth, world))
 
         checksum = checksum + checksum_color(color * self.pixel_samples_scale)
 

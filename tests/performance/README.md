@@ -101,6 +101,25 @@ artifact hashes, static instruction-site counts, host details, and memory
 growth. The committed V-439 results and methodology are in
 `docs/notes/v439-checked-access-optimization-results.md`.
 
+### Idiomatic Vtrace renderer
+
+Measure only the compute-bound path tracer with:
+
+```sh
+npm run bench:v439 -- \
+  --label <label> \
+  --samples 7 \
+  --runtime-samples 31 \
+  --scenario representative-vtrace
+```
+
+The fixture deliberately uses normal application source: mutable data is
+modeled with `obj`, counted work uses range-based `for`, and the scene is
+traversed with `for object in self.objects`. It avoids manual indexed-loop and
+value-layout controls so the result includes the cost of Voyd's standard
+abstractions. Use `--sdk-root` as shown above to compile this same source with a
+different compiler checkout.
+
 ## Web OpenAPI package-scale compile
 
 Run the dependency-heavy Web OpenAPI compile in a fresh Node process:

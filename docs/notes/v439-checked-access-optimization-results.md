@@ -556,32 +556,56 @@ The complete representative suite was rerun after both iterator optimizations.
 These rows compare the original PR base with the combined final branch using
 the same final fixtures and harness.
 
+The Vtrace fixture now preserves the source shape an application author would
+naturally write. `ScatterResult` is an ordinary `obj`, the world uses
+`for object in self.objects`, and the color accumulator calls a named mutable
+helper. The old fixture used a `val` result plus a manually indexed `while`
+loop, which hid the cost of standard Array iteration from this representative
+program.
+
 | Representative release program | Before PR | Final | Change |
 | --- | ---: | ---: | ---: |
-| Vtrace renderer | 79.094 ms | 79.835 ms | +0.9% |
+| Idiomatic Vtrace renderer | 167.419 ms | 78.101 ms | **-53.4%** |
 | Scalar aggregate | 0.0407 ms | 0.0408 ms | +0.3% |
 | Web request pipeline | 14.199 ms | 2.850 ms | **-79.9%** |
 
 | Representative release artifact | Before PR | Final | Change |
 | --- | ---: | ---: | ---: |
-| Vtrace Wasm / gzip | 34,669 / 12,826 B | 34,037 / 12,702 B | -1.8% / -1.0% |
+| Idiomatic Vtrace Wasm / gzip | 36,058 / 13,108 B | 34,105 / 12,666 B | -5.4% / -3.4% |
 | Scalar aggregate Wasm / gzip | 1,112 / 677 B | 1,112 / 677 B | 0.0% / 0.0% |
 | Web pipeline Wasm / gzip | 6,262 / 2,884 B | 3,878 / 1,883 B | **-38.1% / -34.7%** |
 
+Vtrace's non-release runtime also improves from 521.656 to 367.473 ms
+(-29.6%). The release compile median moves from 2,881.7 to 2,908.1 ms (+0.9%),
+which is within the observed noise for this module. The release artifact drops
+23 allocation sites, 46 `struct.get` sites, four `struct.set` sites, and 24
+indirect-call sites.
+
+An intermediate attribution run compiled the same idiomatic source immediately
+before and after the intrinsic Array path. Using three compile samples and 11
+warmed runtime samples, release runtime fell from 165.317 to 77.689 ms (-53.0%).
+The later exact-iterator and generalized V-479 work reduced the emitted module
+further, but did not produce a measurable additional Vtrace runtime change.
+The former hand-shaped fixture ran in 78.448 ms on the final compiler, so the
+idiomatic 78.101 ms result is parity within noise. The practical gain is that
+ordinary `for object in objects` source no longer needs to be rewritten as a
+manual indexed loop to reach that performance.
+
 The final web lookup stage is 0.644 ms versus 3.245 ms at the PR base (-80.2%),
 and serialization is 2.152 versus 11.715 ms (-81.6%). Vtrace now benefits in
-release artifact shape from exact iterator/receiver specialization while its
-runtime remains effectively flat. Scalar aggregate remains byte-identical.
-Without release optimization, Vtrace and scalar aggregate remain byte-identical
-to the PR base; the existing proven Array/range codegen paths account for the
-non-release web improvement already described above.
+release runtime and artifact shape from intrinsic Array iteration. Scalar
+aggregate remains byte-identical. Without release optimization, the proven
+Array/range codegen paths account for the Vtrace and web improvements; scalar
+aggregate remains byte-identical to the PR base.
 
-## V-479 unmatched controls
+## V-479 unmatched controls on the former Vtrace source
 
-The Wasm hash and every recorded instruction-site count are identical before
-and after V-479 for both unmatched representative programs, in both modes.
-Their small timing movements therefore reflect run-to-run measurement variance
-rather than added runtime instructions.
+The incremental V-479 measurements used the Vtrace source that existed at that
+stage of the work: a `val` result and manually indexed scene loop. The Wasm hash
+and every recorded instruction-site count were identical before and after
+V-479 for both unmatched representative programs, in both modes. Their small
+timing movements therefore reflect run-to-run measurement variance rather than
+added runtime instructions.
 
 | Scenario | Mode | Compile before -> after | Runtime before -> after | Wasm / gzip |
 | --- | --- | ---: | ---: | ---: |
@@ -661,7 +685,7 @@ with independent scalar values across a mutable call would be unsound.
 | `Array.get` Option traffic in proven loops | Accepted as V-476 | Repeatable 72.3% focused win and a 78.8% representative route/view-model lookup win. |
 | Intrinsic `Range<i32>` iterator traffic | Accepted as V-477 | Restores all-`for` source to all-`while` parity; cuts the incremental integrated pipeline by 44.3%, serialization by 40.1%, and gzip size by 16.7%. |
 | Fresh mutable aggregate traffic across exact calls | Accepted as V-479 | The original `void` path cuts incremental integrated runtime by 44.1%, serialization by 69.4%, and the direct-object focused workload by 90.0%. Generalized direct value-returning calls remove 80 field-load and 16 field-store sites from the realistic writer module and improve its discarded-result path by 7.0–7.6%; used-result timing is inconclusive and nested receiver helpers conservatively retain the ordinary ABI. |
-| Intrinsic `Array<T>` `for` traffic | Accepted | Reaches indexed-loop parity: 95.6% faster in the focused element loop and 91.2% faster in representative view-model serialization. |
+| Intrinsic `Array<T>` `for` traffic | Accepted | Reaches indexed-loop parity: 95.6% faster in the focused element loop, 91.2% faster in representative view-model serialization, and 53.0% faster in the idiomatic Vtrace renderer. |
 | Exact user-iterator and receiver traffic | Accepted | Non-intrinsic iterators improve by 84.4% in the light case and 55.7% for filtered/strided traversal; emitted iterator traffic falls to zero, and the shared exact-store proof improves the projected-field workload by 70.7%. |
 | `SharedCell` runtime-check traffic | Deferred | The focused gap was large, but the representative programs had no meaningful use and explicit shared-cell runtime semantics need a separate design decision. |
 | Remaining access guards | Stopped | The existing focused guard benchmark measured about 1.34 ns per call, below the threshold for another optimization ticket. |
