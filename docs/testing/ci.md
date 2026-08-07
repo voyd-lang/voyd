@@ -102,7 +102,7 @@ change its result.
 
 `voyd test --shard N/M` discovers and sorts test modules before compilation,
 selects modules by deterministic round-robin index, and compiles each selected
-set together once. CI compiles all 28 files together to avoid paying compiler
+set together once. CI compiles all 24 files together to avoid paying compiler
 startup and standard-library analysis costs once per partition. Local and
 full-repository tests retain eight sequential partitions for conservative heap
 isolation. The generic shard runner still supports two- or four-way CI

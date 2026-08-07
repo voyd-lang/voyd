@@ -112,20 +112,6 @@
     ]
   },
   {
-    "file": "packages/compiler/src/__tests__/intersections.e2e.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local-with-portable-signal",
-    "rationale": "runtime.intersections.nominal, runtime.intersections.structural, runtime.intersections.traits, runtime.intersections.structural-trait, runtime.intersections.nominal-structural-trait.",
-    "portableCaseIds": [
-      "runtime.intersections.nominal",
-      "runtime.intersections.structural",
-      "runtime.intersections.traits",
-      "runtime.intersections.structural-trait",
-      "runtime.intersections.nominal-structural-trait"
-    ]
-  },
-  {
     "file": "packages/compiler/src/__tests__/macro-expansion.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
@@ -260,16 +246,6 @@
     "portableGap": "Stable TY0008/TY0021/TY0042 trait-call and missing-impl diagnostics are observable; conformance only covers successful labeled trait dispatch."
   },
   {
-    "file": "packages/compiler/src/__tests__/tuple-codegen.e2e.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local-with-portable-signal",
-    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Tuple return/value projection after generic `unwrap_or` executes observably and no portable tuple case exists.",
-    "portableCaseIds": [
-      "runtime.tuples.generic-return-projection"
-    ]
-  },
-  {
     "file": "packages/compiler/src/__tests__/type-lowering-regression.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
@@ -285,7 +261,9 @@
     "reviewed": "2026-08-06",
     "disposition": "compiler-local-with-portable-signal",
     "rationale": "Emitted direct-loop shape, exact intrinsic eligibility, and general-iterator fallback are compiler-local; portable Array growth-during-iteration behavior is represented by runtime.collections.array-iteration-growth.",
-    "portableCaseIds": ["runtime.collections.array-iteration-growth"]
+    "portableCaseIds": [
+      "runtime.collections.array-iteration-growth"
+    ]
   },
   {
     "file": "packages/compiler/src/codegen/__tests__/borrowed-array-element-views.test.ts",
@@ -549,26 +527,6 @@
     "portableGap": "An in-Wasm effect handler receiving an object argument must return 42; current effects conformance only covers a scalar host argument."
   },
   {
-    "file": "packages/compiler/src/codegen/__tests__/effects-wasm-overloads-alias.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local-with-portable-signal",
-    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Effect handler overload selection through semantic type aliases returns 12 and has no portable representative.",
-    "portableCaseIds": [
-      "effects.overloads.semantic-alias"
-    ]
-  },
-  {
-    "file": "packages/compiler/src/codegen/__tests__/effects-wasm-overloads.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local-with-portable-signal",
-    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Overloaded effect operations must route to the matching handler clause and return 12; no conformance case covers effect overload dispatch.",
-    "portableCaseIds": [
-      "effects.overloads.semantic-alias"
-    ]
-  },
-  {
     "file": "packages/compiler/src/codegen/__tests__/export-abi.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
@@ -588,18 +546,6 @@
       "runtime.fixed-arrays.iteration"
     ],
     "portableGap": "Observable FixedArray semantics are absent: negative index tail=2 and empty/OOB no-op=0, copy clamp=11 and overlap=211, iteration=12, default value elements=0, value copy=13, and mixed value/heap union storage=18."
-  },
-  {
-    "file": "packages/compiler/src/codegen/__tests__/fixed-array-smoke.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local-with-portable-signal",
-    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Public fixed-array helper wiring returns len/head=4, copied tail=2, and iteration sum=6; fold one representative into the missing FixedArray conformance suite rather than preserving this as a portable compiler-package smoke.",
-    "portableCaseIds": [
-      "runtime.fixed-arrays.length-and-get",
-      "runtime.fixed-arrays.copy",
-      "runtime.fixed-arrays.iteration"
-    ]
   },
   {
     "file": "packages/compiler/src/codegen/__tests__/fixed-array-structural-coercion.test.ts",
@@ -732,22 +678,6 @@
     "portableGap": "Runtime Array behavior is absent: optimized len/at and loop sums (43/20/10/etc.) plus OOB traps should be representative conformance cases; retain array.get/unreachable/call_ref WAT optimization checks locally."
   },
   {
-    "file": "packages/compiler/src/codegen/__tests__/subscript-smoke.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local-with-portable-signal",
-    "rationale": "The hand audit extracted the observable contract; detailed compiler assertions remain co-located. Review basis: Portable index assignment, exclusive/inclusive/unbounded slices, Dict subscript round-trip, and OOB assignment trap are absent; expected exports return 20, 99, 5, 5, 3, 3, 7, 4, 7 and write_oob traps.",
-    "portableCaseIds": [
-      "runtime.collections.array-read",
-      "runtime.collections.array-write",
-      "runtime.collections.slice-exclusive",
-      "runtime.collections.slice-inclusive",
-      "runtime.collections.slice-unbounded",
-      "runtime.collections.dict-subscript",
-      "runtime.collections.array-write-oob"
-    ]
-  },
-  {
     "file": "packages/compiler/src/codegen/__tests__/union-coercion-target.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
@@ -846,20 +776,6 @@
     "reviewed": "2026-07-10",
     "disposition": "compiler-local",
     "rationale": "Asserts incremental recomputation identity, changed-module invalidation, and cancellation error classes."
-  },
-  {
-    "file": "packages/compiler/src/modules/__tests__/use-decl.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local",
-    "rationale": "Tests the compiler's top-level declaration classifier output for use/pub/mod/macro forms, not externally visible semantics."
-  },
-  {
-    "file": "packages/compiler/src/modules/__tests__/use-path.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local",
-    "rationale": "Tests internal parseUsePaths selectionKind/path decomposition rather than compiled module behavior."
   },
   {
     "file": "packages/compiler/src/optimize/__tests__/mutation-contract.test.ts",
@@ -1058,6 +974,20 @@
     "rationale": "Trusted intrinsic nominal-type metadata is compiler/std bootstrapping; the AST attribute representation is implementation-specific."
   },
   {
+    "file": "packages/compiler/src/parser/__tests__/language-syntax-contract.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-08-07",
+    "disposition": "compiler-local-with-portable-signal-and-gap",
+    "rationale": "Every current Voyd reference example must parse, while compact snapshots preserve this compiler's grouping-sensitive expanded AST. Representative runtime meaning remains in conformance.",
+    "portableCaseIds": [
+      "syntax.string-interpolation.basic",
+      "syntax.string-interpolation.escape",
+      "syntax.string-interpolation.chain",
+      "syntax.html.attributes-and-events"
+    ],
+    "portableGap": "Portable conformance does not yet compile every syntax family or reference example; the full documented syntax acceptance corpus currently runs only through this parser."
+  },
+  {
     "file": "packages/compiler/src/parser/__tests__/lexer.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
@@ -1066,13 +996,6 @@
     "portableCaseIds": [
       "runtime.value-types.static-trait"
     ]
-  },
-  {
-    "file": "packages/compiler/src/parser/__tests__/parser.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local",
-    "rationale": "Snapshot-compares the current fully expanded AST for broad fixtures, which a replacement parser should not reproduce byte-for-byte."
   },
   {
     "file": "packages/compiler/src/parser/__tests__/qualified-trait-methods.test.ts",
@@ -1228,13 +1151,6 @@
     "portableCaseIds": [
       "effects.open-callback-row.forward-tail"
     ]
-  },
-  {
-    "file": "packages/compiler/src/semantics/__tests__/hir-builder.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local",
-    "rationale": "Constructs HirBuilder nodes directly and asserts item/export storage and visibility records."
   },
   {
     "file": "packages/compiler/src/semantics/__tests__/if-clause-style.test.ts",
@@ -1768,13 +1684,6 @@
     "rationale": "Directly asserts TypeArena/effect-interner identity and recursive type translation shortcuts."
   },
   {
-    "file": "packages/compiler/src/semantics/typing/__tests__/structural-objects.test.ts",
-    "owner": "compiler-implementation",
-    "reviewed": "2026-07-10",
-    "disposition": "compiler-local",
-    "rationale": "Constructs HIR manually and asserts arena field sets/type IDs; public structural compatibility is better represented by object-assignability extraction."
-  },
-  {
     "file": "packages/compiler/src/semantics/typing/__tests__/subscript.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",
@@ -2007,12 +1916,6 @@
     "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
   },
   {
-    "file": "packages/js-host/src/runtime/scheduling-policy.test.ts",
-    "owner": "package-unit",
-    "disposition": "package-local",
-    "rationale": "Keep co-located: protects one package or app implementation contract at the cheapest precise boundary."
-  },
-  {
     "file": "packages/js-host/src/runtime/trap-diagnostics.test.ts",
     "owner": "package-unit",
     "disposition": "package-local",
@@ -2152,12 +2055,6 @@
   },
   {
     "file": "packages/std/src/array.test.voyd",
-    "owner": "voyd-library",
-    "disposition": "library-local",
-    "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
-  },
-  {
-    "file": "packages/std/src/async.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
     "rationale": "Keep co-located: protects a Voyd source package or library contract through the native test runner."
@@ -2503,28 +2400,10 @@
     "rationale": "Keep co-located: protects pkg::web automatic HTML response media inference through the native Voyd test runner."
   },
   {
-    "file": "packages/web/src/openapi/openapi_response_automatic_media.test.voyd",
-    "owner": "voyd-library",
-    "disposition": "library-local",
-    "rationale": "Keep co-located: protects pkg::web automatic text response media inference through the native Voyd test runner."
-  },
-  {
     "file": "packages/web/src/openapi/openapi_response_automatic_sse.test.voyd",
     "owner": "voyd-library",
     "disposition": "library-local",
     "rationale": "Keep co-located: protects pkg::web automatic SSE response media and event-schema metadata through the native Voyd test runner."
-  },
-  {
-    "file": "packages/web/src/openapi/openapi_response_composite_contracts.test.voyd",
-    "owner": "voyd-library",
-    "disposition": "library-local",
-    "rationale": "Keep co-located: protects pkg::web explicit result and option response contracts through the native Voyd test runner."
-  },
-  {
-    "file": "packages/web/src/openapi/openapi_response_contracts.test.voyd",
-    "owner": "voyd-library",
-    "disposition": "library-local",
-    "rationale": "Keep co-located: protects pkg::web inferred success and empty-status response contracts through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/openapi/openapi_response_explicit_docs.test.voyd",
@@ -2561,12 +2440,6 @@
     "owner": "voyd-library",
     "disposition": "library-local",
     "rationale": "Keep co-located: protects pkg::web explicit SSE schema and route documentation overlays through the native Voyd test runner."
-  },
-  {
-    "file": "packages/web/src/openapi/openapi_response_text_contract.test.voyd",
-    "owner": "voyd-library",
-    "disposition": "library-local",
-    "rationale": "Keep co-located: protects pkg::web explicit text response media contracts through the native Voyd test runner."
   },
   {
     "file": "packages/web/src/openapi/openapi_response_untyped_overrides.test.voyd",
@@ -2665,12 +2538,6 @@
     "owner": "language-conformance",
     "disposition": "portable-conformance",
     "rationale": "Keep in the portable suite: asserts implementation-independent language behavior through the conformance adapter."
-  },
-  {
-    "file": "tests/integration/fixtures/sink.test.voyd",
-    "owner": "cross-package-integration",
-    "disposition": "cross-package-integration",
-    "rationale": "Keep in integration: protects a public cross-package, host, runtime, packaging, or browser boundary."
   },
   {
     "file": "tests/integration/src/doc-generation.test.ts",

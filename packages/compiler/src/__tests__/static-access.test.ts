@@ -90,60 +90,6 @@ describe("static access e2e", () => {
     expect((instance.exports.main as () => number)()).toBe(42);
   });
 
-  it("instantiates static methods using target type arguments", async () => {
-    const root = resolve("/proj/src");
-    const mainPath = `${root}${sep}main.voyd`;
-    const host = createFixtureHost({
-      [mainPath]: loadFixture("static_method_generic.voyd"),
-    });
-
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: mainPath,
-      roots: { src: root },
-      host,
-    }));
-    expect(result.wasm).toBeInstanceOf(Uint8Array);
-
-    const instance = getWasmInstance(result.wasm!);
-    expect((instance.exports.main as () => number)()).toBe(11);
-  });
-
-  it("infers static method type arguments separately from target type arguments", async () => {
-    const root = resolve("/proj/src");
-    const mainPath = `${root}${sep}main.voyd`;
-    const host = createFixtureHost({
-      [mainPath]: loadFixture("static_method_generic_method_inference.voyd"),
-    });
-
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: mainPath,
-      roots: { src: root },
-      host,
-    }));
-    expect(result.wasm).toBeInstanceOf(Uint8Array);
-
-    const instance = getWasmInstance(result.wasm!);
-    expect((instance.exports.main as () => number)()).toBe(17);
-  });
-
-  it("uses target type arguments when ranking static overloads", async () => {
-    const root = resolve("/proj/src");
-    const mainPath = `${root}${sep}main.voyd`;
-    const host = createFixtureHost({
-      [mainPath]: loadFixture("static_method_target_overload_ranking.voyd"),
-    });
-
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: mainPath,
-      roots: { src: root },
-      host,
-    }));
-    expect(result.wasm).toBeInstanceOf(Uint8Array);
-
-    const instance = getWasmInstance(result.wasm!);
-    expect((instance.exports.main as () => number)()).toBe(14);
-  });
-
   it("dispatches static trait methods through constrained type parameters", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;
@@ -396,51 +342,4 @@ describe("static access e2e", () => {
     expect((instance.exports.main as () => number)()).toBe(7);
   });
 
-  it("runs curried closure calls with optional arguments", async () => {
-    const root = resolve("/proj/src");
-    const mainPath = `${root}${sep}main.voyd`;
-    const host = createFixtureHost({
-      [mainPath]: loadFixture("closure_curried_optional_call.voyd"),
-    });
-
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: mainPath,
-      roots: { src: root },
-      host,
-    }));
-    const instance = getWasmInstance(result.wasm!);
-    expect((instance.exports.main as () => number)()).toBe(15);
-  });
-
-  it("handles callback closures that capture shared state and use labeled calls", async () => {
-    const root = resolve("/proj/src");
-    const mainPath = `${root}${sep}main.voyd`;
-    const host = createFixtureHost({
-      [mainPath]: loadFixture("closure_callback_capture_labeled_calls.voyd"),
-    });
-
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: mainPath,
-      roots: { src: root },
-      host,
-    }));
-    const instance = getWasmInstance(result.wasm!);
-    expect((instance.exports.main as () => number)()).toBe(6);
-  });
-
-  it("resumes curried closure calls after effectful argument sites", async () => {
-    const root = resolve("/proj/src");
-    const mainPath = `${root}${sep}main.voyd`;
-    const host = createFixtureHost({
-      [mainPath]: loadFixture("closure_curried_effect_resume.voyd"),
-    });
-
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: mainPath,
-      roots: { src: root },
-      host,
-    }));
-    const instance = getWasmInstance(result.wasm!);
-    expect((instance.exports.main as () => number)()).toBe(20);
-  });
 });

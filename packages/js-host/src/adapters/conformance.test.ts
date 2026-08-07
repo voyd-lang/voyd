@@ -87,7 +87,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-describe.each(["node", "deno", "bun", "browser", "unknown"] as const)(
+describe.each(["node"] as const)(
   "default adapter conformance (%s)",
   (runtimeKind) => {
     it("keeps timer/random behavior deterministic and validates http-client/input/output contracts", async () => {

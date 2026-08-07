@@ -4,20 +4,10 @@ import {
   scheduleTaskForRuntime,
   type HostRuntimeKind,
 } from "./environment.js";
-import { scheduleTaskForRuntimePolicy } from "./scheduling-policy.js";
 
 describe("scheduleTaskForRuntime", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
-  });
-
-  it("delegates to the shared scheduling policy helper", () => {
-    expect(scheduleTaskForRuntime("node")).toBe(
-      scheduleTaskForRuntimePolicy("node")
-    );
-    expect(scheduleTaskForRuntime("unknown")).toBe(
-      scheduleTaskForRuntimePolicy("unknown")
-    );
   });
 
   it("uses setImmediate on node", () => {

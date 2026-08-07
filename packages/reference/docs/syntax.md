@@ -106,6 +106,16 @@ stream::fold(init: 0) do(acc, item):
   acc + item
 ```
 
+A lambda can follow `.` to receive the value on its left. Dot-lambda
+application is useful for short, inline transformation chains.
+
+```voyd
+fn transformed() -> i32
+  2
+    .(value: i32) => value + 3
+    .(value: i32) => value * 5
+```
+
 ## Literals
 
 ```voyd

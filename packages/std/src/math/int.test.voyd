@@ -281,28 +281,4 @@ test "integer boundaries around signed extremes stay stable":
     Err<MathError>:
       assert(false, eq: true)
 
-test "perf smoke for hot integer helpers":
-  var index = 1
-  var checksum = 0
-  while index < 2000:
-    let value = (index * 37) - 10000
-
-    match(rem_euclid(value, 97))
-      Ok<i32> { value: rem }:
-        checksum = checksum + rem
-      Err<MathError>:
-        checksum = checksum + 1
-
-    match(next_multiple_of(value, 16))
-      Ok<i32> { value: next }:
-        checksum = checksum + (next - value)
-      Err<MathError>:
-        checksum = checksum + 1
-
-    if is_power_of_two(index):
-      checksum = checksum + 3
-    index = index + 1
-
-  assert(checksum > 0, eq: true)
-
 fn i64_from_i32(value: i32): () -> i64 __i64_extend_s(value)

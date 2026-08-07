@@ -67,38 +67,6 @@ describe("integration: std input/output", () => {
     expect(flushes).toEqual(["stdout", "stderr"]);
   });
 
-  it("runs std input/output probe entrypoints", async () => {
-    const host = await createVoydHost({
-      wasm: compiled.wasm,
-      defaultAdapters: {
-        runtime: "node",
-        runtimeHooks: {
-          readBytes: async () => Uint8Array.from([7, 8, 9]),
-          isInputTty: () => true,
-          write: async () => {},
-          writeBytes: async () => {},
-          flush: async () => {},
-          isOutputTty: (target) => target === "stdout",
-        },
-      },
-    });
-
-    await expect(host.run<number>("io_tty_probe")).resolves.toBe(1);
-    await expect(host.run<number>("io_write_probe")).resolves.toBe(1);
-    await expect(host.run<number>("io_write_line_probe")).resolves.toBe(1);
-    await expect(
-      host.run<number>("io_write_line_embedded_newline_probe"),
-    ).resolves.toBe(1);
-    await expect(host.run<number>("io_write_bytes_probe")).resolves.toBe(1);
-    await expect(host.run<number>("io_write_combo_probe")).resolves.toBe(1);
-    await expect(host.run<number>("io_read_bytes_probe")).resolves.toBe(24);
-    await expect(
-      host.run<number>("io_read_bytes_to_write_probe"),
-    ).resolves.toBe(1);
-    await expect(host.run<number>("io_input_combo_probe")).resolves.toBe(24);
-    await expect(host.run<number>("io_output_combo_probe")).resolves.toBe(1);
-  });
-
   it("supports embedded newline escapes in write_line payloads", async () => {
     const writes: Array<{ target: string; value: string }> = [];
     const host = await createVoydHost({

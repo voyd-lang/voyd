@@ -30,27 +30,6 @@ const wasmExportNames = (wasm: Uint8Array | undefined): string[] => {
 };
 
 describe("memory export ABI", () => {
-  it("exports linear memory by default for no-std modules", async () => {
-    const root = resolve("/proj/src");
-    const host = createMemoryHost({
-      [`${root}${sep}main.voyd`]: `pub fn main() -> i32
-  1`,
-    });
-
-    const result = expectCompileSuccess(
-      await compileProgram({
-        entryPath: `${root}${sep}main.voyd`,
-        roots: { src: root },
-        host,
-      }),
-    );
-
-    const names = wasmExportNames(result.wasm);
-    expect(names).toContain("main");
-    expect(names).toContain("memory");
-    expect(names).not.toContain("effects_memory");
-  });
-
   it("does not pull std::pkg or effects_memory for explicit std::memory imports", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

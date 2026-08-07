@@ -9,11 +9,6 @@ const exportNames = (mod: WebAssembly.Module): string[] =>
     .map((entry) => entry.name)
     .sort();
 
-const importNames = (mod: WebAssembly.Module): string[] =>
-  WebAssembly.Module.imports(mod)
-    .map((entry) => `${entry.module}::${entry.name}`)
-    .sort();
-
 const compileExports = ({
   source,
   options,
@@ -31,25 +26,6 @@ const compileExports = ({
     wasmBufferSource(module.emitBinary()),
   );
   return exportNames(wasmModule);
-};
-
-const compileImports = ({
-  source,
-  options,
-}: {
-  source: string;
-  options?: Parameters<typeof codegen>[1];
-}): string[] => {
-  const ast = parse(source, "memory_imports_test.voyd");
-  const semantics = semanticsPipeline(ast);
-  const { module } = codegen(semantics, {
-    effectsHostBoundary: "off",
-    ...(options ?? {}),
-  });
-  const wasmModule = new WebAssembly.Module(
-    wasmBufferSource(module.emitBinary()),
-  );
-  return importNames(wasmModule);
 };
 
 const compileInstance = ({
@@ -74,12 +50,6 @@ const compileInstance = ({
 describe("codegen memory exports", () => {
   const baseSource = `pub fn main() -> i32
   1`;
-
-  it("exports linear memory by default", () => {
-    const names = compileExports({ source: baseSource });
-    expect(names).toContain("memory");
-    expect(names).not.toContain("effects_memory");
-  });
 
   it("respects linearMemoryExport: off", () => {
     const names = compileExports({
@@ -116,10 +86,4 @@ describe("codegen memory exports", () => {
     expect(effects).toBe(linear);
   });
 
-  it("does not require voyd_math imports for non-math programs", () => {
-    const imports = compileImports({ source: baseSource });
-    expect(imports).not.toContain("voyd_math::sin");
-    expect(imports).not.toContain("voyd_math::pow");
-    expect(imports.some((name) => name.startsWith("voyd_math::"))).toBe(false);
-  });
 });

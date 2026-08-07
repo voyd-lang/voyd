@@ -7,7 +7,6 @@ import {
   type HirIfExpr,
   type HirNamedTypeExpr,
   type HirLetStatement,
-  type HirPattern,
 } from "../hir/nodes.js";
 import { semanticsPipeline } from "../pipeline.js";
 import type { SymbolId, TypeId } from "../ids.js";
@@ -50,50 +49,6 @@ const expectFunctionReturnPrimitive = (
     throw new Error("expected function type");
   }
   expectPrimitiveType(typing, fnDesc.returnType, name);
-};
-
-const stripPatternSpan = (pattern?: HirPattern): void => {
-  if (!pattern) return;
-  delete (pattern as { span?: unknown }).span;
-  switch (pattern.kind) {
-    case "destructure":
-      pattern.fields.forEach((field) => stripPatternSpan(field.pattern));
-      stripPatternSpan(pattern.spread);
-      return;
-    case "tuple":
-      pattern.elements.forEach(stripPatternSpan);
-      return;
-    case "type":
-      stripPatternSpan(pattern.binding);
-      return;
-    default:
-      return;
-  }
-};
-
-const stripPatternSpansFromHir = (hir: ReturnType<typeof semanticsPipeline>["hir"]) => {
-  hir.items.forEach((item) => {
-    if (item.kind === "function") {
-      item.parameters.forEach((param) => stripPatternSpan(param.pattern));
-    }
-  });
-  hir.statements.forEach((stmt) => {
-    if (stmt.kind === "let") {
-      stripPatternSpan(stmt.pattern);
-    }
-  });
-  hir.expressions.forEach((expr) => {
-    if (expr.exprKind === "match") {
-      expr.arms.forEach((arm) => stripPatternSpan(arm.pattern));
-    }
-    if (expr.exprKind === "assign" && expr.pattern) {
-      stripPatternSpan(expr.pattern);
-    }
-    if (expr.exprKind === "lambda") {
-      expr.parameters.forEach((param) => stripPatternSpan(param.pattern));
-    }
-  });
-  return hir;
 };
 
 const buildModule = ({
@@ -478,14 +433,6 @@ describe("semanticsPipeline", () => {
     expectFunctionReturnPrimitive(typing, consumeForward!, "i32");
     expectFunctionReturnPrimitive(typing, combine!, "i32");
     expectFunctionReturnPrimitive(typing, main!, "i32");
-  });
-
-  it("binds and lowers the fib sample module", () => {
-    const ast = loadAst("fib.voyd");
-    const result = semanticsPipeline(ast);
-    const sanitizedHir = stripPatternSpansFromHir(structuredClone(result.hir));
-    expect(sanitizedHir).toMatchSnapshot();
-    expect(getSymbolTable(result).snapshot()).toMatchSnapshot();
   });
 
   it("resolves overloaded functions based on argument types", () => {

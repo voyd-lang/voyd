@@ -61,7 +61,7 @@ describe("web test shard partitioning", () => {
     expect(assignments.map(({ module }) => module).sort()).toEqual(
       webTestModules,
     );
-    expect(new Set(assignments.map(({ module }) => module))).toHaveLength(28);
+    expect(new Set(assignments.map(({ module }) => module))).toHaveLength(24);
     expect(ciPartitions).toEqual([
       {
         command: "test:unit:web:ci",

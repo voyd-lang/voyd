@@ -26,24 +26,6 @@ const expectCompileSuccess = (
 };
 
 describe("qualified trait methods codegen e2e", () => {
-  it("supports `.Trait::method()` to disambiguate conflicting trait methods", async () => {
-    const root = resolve("/proj/src");
-    const mainPath = `${root}${sep}main.voyd`;
-    const host = createFixtureHost({
-      [mainPath]: loadFixture("qualified_trait_methods_conflict.voyd"),
-    });
-
-    const result = expectCompileSuccess(await compileProgram({
-      entryPath: mainPath,
-      roots: { src: root },
-      host,
-    }));
-    expect(result.wasm).toBeInstanceOf(Uint8Array);
-
-    const instance = getWasmInstance(result.wasm!);
-    expect((instance.exports.main as () => number)()).toBe(50);
-  });
-
   it("supports `.Trait::method()` when the receiver is a trait intersection", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;

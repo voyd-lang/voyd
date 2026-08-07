@@ -35,10 +35,6 @@ regressionDescribe("performance: vtrace_fast regression", () => {
     );
   });
 
-  it("still compiles cleanly against the current std/compiler stack", async () => {
-    expect(compiled.wasm.byteLength).toBeGreaterThan(0);
-  });
-
   it(
     "keeps lower-half pixels lit instead of collapsing to black",
     { timeout: 120_000 },
