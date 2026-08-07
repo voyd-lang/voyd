@@ -79,6 +79,10 @@ export type MutableOptimizationIr = {
     };
     runtimeTypeCheckElisionFieldAccesses: Map<string, Set<HirExprId>>;
     semanticCopyForwardingFieldAccesses: Map<string, Set<HirExprId>>;
+    stableFieldLoadForwarding: Map<
+      string,
+      Map<HirExprId, readonly { accessExprIds: readonly HirExprId[] }[]>
+    >;
     codegenPlan: ProgramCodegenOptimizationPlan;
   };
 };
@@ -199,6 +203,7 @@ export const buildOptimizationIr = ({
       },
       runtimeTypeCheckElisionFieldAccesses: new Map(),
       semanticCopyForwardingFieldAccesses: new Map(),
+      stableFieldLoadForwarding: new Map(),
       codegenPlan: {
         representations: {},
         specializationPolicy,

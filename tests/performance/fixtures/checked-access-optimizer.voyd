@@ -1,0 +1,130 @@
+use std::array::Array
+use std::optional::all
+use std::shared_cell::SharedCell
+
+obj AccessRecord {
+  stable: i32,
+  changing: i32
+}
+
+val WideElement {
+  first: i32,
+  second: i32,
+  third: i32,
+  fourth: i32
+}
+
+fn bump_changing(~value: AccessRecord) -> void
+  value.changing = value.changing + 1
+
+fn access_records() -> Array<AccessRecord>
+  let ~result = Array<AccessRecord>::with_capacity(2)
+  result.push(AccessRecord { stable: 3, changing: 0 })
+  result.push(AccessRecord { stable: 7, changing: 0 })
+  result
+
+fn wide_elements() -> Array<WideElement>
+  let ~result = Array<WideElement>::with_capacity(4)
+  result.push(WideElement { first: 1, second: 2, third: 3, fourth: 4 })
+  result.push(WideElement { first: 5, second: 6, third: 7, fourth: 8 })
+  result.push(WideElement { first: 9, second: 10, third: 11, fourth: 12 })
+  result.push(WideElement { first: 13, second: 14, third: 15, fourth: 16 })
+  result
+
+fn sum(value: WideElement) -> i32
+  value.first + value.second + value.third + value.fourth
+
+pub fn checked_access_memory_traffic() -> i32
+  let ~records = access_records()
+  let first_alias = records.at(0)
+  let second_alias = records.at(1)
+  var iteration = 0
+  var total = 0
+  while iteration < 100000:
+    total = total + first_alias.stable + second_alias.stable
+    bump_changing(~records.at(0))
+    bump_changing(~records.at(1))
+    total = total + first_alias.stable + second_alias.stable
+    iteration = iteration + 1
+  total + first_alias.changing + second_alias.changing
+
+pub fn memory_traffic_control() -> i32
+  let ~first = AccessRecord { stable: 3, changing: 0 }
+  let ~second = AccessRecord { stable: 7, changing: 0 }
+  let first_alias = first
+  let second_alias = second
+  var iteration = 0
+  var total = 0
+  while iteration < 100000:
+    total = total + first_alias.stable + second_alias.stable
+    bump_changing(~first)
+    bump_changing(~second)
+    total = total + first_alias.stable + second_alias.stable
+    iteration = iteration + 1
+  total + first_alias.changing + second_alias.changing
+
+pub fn hoisted_memory_traffic_control() -> i32
+  let ~first = AccessRecord { stable: 3, changing: 0 }
+  let ~second = AccessRecord { stable: 7, changing: 0 }
+  let first_alias = first
+  let second_alias = second
+  let first_stable = first_alias.stable
+  let second_stable = second_alias.stable
+  var iteration = 0
+  var total = 0
+  while iteration < 100000:
+    total = total + first_stable + second_stable
+    bump_changing(~first)
+    bump_changing(~second)
+    total = total + first_stable + second_stable
+    iteration = iteration + 1
+  total + first_alias.changing + second_alias.changing
+
+pub fn ordinary_mutation_control() -> i32
+  let ~value = AccessRecord { stable: 3, changing: 0 }
+  var iteration = 0
+  while iteration < 100000:
+    value.changing = value.changing + 1
+    iteration = iteration + 1
+  value.stable + value.changing
+
+pub fn shared_cell_runtime_checks() -> i32
+  let value = SharedCell(AccessRecord { stable: 3, changing: 0 })
+  var iteration = 0
+  while iteration < 100000:
+    value.with_mut((~current) =>
+      current.changing = current.changing + 1
+    )
+    iteration = iteration + 1
+  value.with((current) => current.stable + current.changing)
+
+pub fn checked_array_loop() -> i32
+  let values = wide_elements()
+  var iteration = 0
+  var total = 0
+  while iteration < 25000:
+    var index = 0
+    while index < values.len():
+      total = total + sum(values.at(index))
+      index = index + 1
+    iteration = iteration + 1
+  total
+
+pub fn optional_array_loop() -> i32
+  let values = wide_elements()
+  var iteration = 0
+  var total = 0
+  while iteration < 25000:
+    var index = 0
+    while index < values.len():
+      match(values.get(index))
+        Some<WideElement> { value }:
+          total = total + sum(value)
+        None:
+          total = total - 1
+      index = index + 1
+    iteration = iteration + 1
+  total
+
+pub fn main() -> i32
+  checked_access_memory_traffic()

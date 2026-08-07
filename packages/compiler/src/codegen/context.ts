@@ -25,6 +25,7 @@ import type {
   HirItemId,
   HirStmtId,
   ProgramFunctionInstanceId,
+  ProgramSymbolId,
   SymbolId,
   TypeId,
   TypeParamId,
@@ -48,7 +49,6 @@ import type { SerializerMetadata } from "../semantics/symbol-index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 import type { ProgramHelperRegistry } from "./program-helpers.js";
 import type { ProgramOptimizationFacts } from "../optimize/ir.js";
-import type { ProgramSymbolId } from "../semantics/ids.js";
 import type {
   OptimizationLevel,
   SpecializationPolicy,
@@ -129,6 +129,13 @@ export interface FunctionMetadata {
   specialization?: FunctionSpecializationDimensions;
   scalarAggregateParamIndexes?: readonly number[];
   scalarAggregateResult?: boolean;
+  /** Scalarized mutable parameter whose updated lanes are the specialized result. */
+  scalarAggregateMutableParamIndex?: number;
+  /** Ordered combined-result ABI: logical lanes first, mutable writeback lanes last. */
+  scalarAggregateMutableCombinedResult?: Readonly<{
+    logicalAbiTypes: readonly binaryen.Type[];
+    writebackAbiTypes: readonly binaryen.Type[];
+  }>;
   callShape?: Readonly<{
     keyTokens: readonly string[];
     parameterStates: readonly CallShapeParameterState[];
@@ -401,12 +408,19 @@ export interface FunctionContext {
   loopStack?: LoopScope[];
   safeArrayLoopScopes?: readonly SafeArrayLoopScope[];
   safeArrayLengthSymbols?: ReadonlyMap<SymbolId, SymbolId>;
+  stableFieldLoadBindings?: ReadonlyMap<HirExprId, LocalBindingLocal>;
   runtimePlaceIdentities?: Map<HirExprId, RuntimePlaceIdentity>;
   runtimePlaceIdentityRequests?: Set<HirExprId>;
   continuations?: Map<SymbolId, ContinuationBinding>;
   suppressTailResumptionExitChecks?: boolean;
   staticEffectContext?: StaticEffectHandlerContext;
   exactParameterTypes?: ReadonlyMap<SymbolId, TypeId>;
+  exactTraitDispatchTargets?: ReadonlyMap<HirExprId, ProgramSymbolId>;
+  exactCallReceiverTypes?: ReadonlyMap<HirExprId, TypeId>;
+  scalarAggregateMutableReturn?: Readonly<{
+    binding: LocalBindingScalarAggregate;
+    logicalResultAbiTypes: readonly binaryen.Type[];
+  }>;
   continuation?: {
     cfg: GroupContinuationCfg;
     startedLocal: LocalBindingLocal;
@@ -427,6 +441,7 @@ export interface CompileCallOptions {
   typeInstanceId?: ProgramFunctionInstanceId;
   outResultStorageRef?: binaryen.ExpressionRef;
   scalarAggregateResultTypeId?: TypeId;
+  mutableScalarAggregateResultBinding?: LocalBindingScalarAggregate;
 }
 
 export interface ExpressionCompilerParams {

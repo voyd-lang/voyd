@@ -443,15 +443,35 @@ export const materializeOwnedBinding = ({
     return { binding: existing, setup: [] };
   }
   if (existing.kind === "scalar-aggregate") {
+    const sharedBindings = Array.from(fnCtx.bindings.entries()).filter(
+      (
+        entry,
+      ): entry is [
+        SymbolId,
+        Extract<LocalBinding, { kind: "scalar-aggregate" }>,
+      ] =>
+        entry[1].kind === "scalar-aggregate" &&
+        entry[1].fields === existing.fields,
+    );
+    const needsMutableStorage = sharedBindings.some(
+      ([, candidate]) => candidate.mutable,
+    );
     const owned =
-      typeof existing.typeId === "number" &&
-      typeof getInlineHeapBoxType({ typeId: existing.typeId, ctx }) === "number"
-        ? allocateAddressableLocal({
+      typeof existing.typeId === "number" && needsMutableStorage
+        ? allocateMutableRefLocal({
             typeId: existing.typeId,
             ctx,
             fnCtx,
           })
-        : allocateTempLocal(existing.type, fnCtx, existing.typeId, ctx);
+        : typeof existing.typeId === "number" &&
+            typeof getInlineHeapBoxType({ typeId: existing.typeId, ctx }) ===
+              "number"
+          ? allocateAddressableLocal({
+              typeId: existing.typeId,
+              ctx,
+              fnCtx,
+            })
+          : allocateTempLocal(existing.type, fnCtx, existing.typeId, ctx);
     const setup = [
       storeLocalValue({
         binding: owned,
@@ -460,11 +480,14 @@ export const materializeOwnedBinding = ({
         fnCtx,
       }),
     ];
-    fnCtx.bindings.set(symbol, {
+    const materializedBinding: LocalBindingLocal = {
       ...owned,
       kind: "local",
       typeId: existing.typeId,
-    });
+    };
+    sharedBindings.forEach(([candidateSymbol]) =>
+      fnCtx.bindings.set(candidateSymbol, materializedBinding),
+    );
     return { binding: owned, setup };
   }
   if (existing.kind === "capture") {

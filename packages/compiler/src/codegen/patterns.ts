@@ -498,6 +498,27 @@ export const compilePatternInitialization = ({
     return;
   }
 
+  const immutableAliasSource = ctx.module.hir.expressions.get(initializer);
+  const immutableAliasBinding =
+    options.declare &&
+    !mutableBinding &&
+    immutableAliasSource?.exprKind === "identifier"
+      ? fnCtx.bindings.get(immutableAliasSource.symbol)
+      : undefined;
+  if (
+    immutableAliasBinding?.kind === "scalar-aggregate" &&
+    immutableAliasBinding.mutable &&
+    ctx.specializationPolicy.mutableScalarAggregateLanes > 0 &&
+    immutableAliasBinding.structInfo.layoutKind === "heap-object" &&
+    immutableAliasBinding.typeId === targetTypeId
+  ) {
+    fnCtx.bindings.set(pattern.symbol, {
+      ...immutableAliasBinding,
+      mutable: false,
+    });
+    return;
+  }
+
   ops.push(
     ...materializeScalarHeapInitializerAlias({
       initializer,

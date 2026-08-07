@@ -1,0 +1,153 @@
+use std::array::Array
+use std::optional::all
+
+// Models the CPU-bound handler work after request I/O and database access:
+// route selection, product view-model construction, and SSR serialization.
+
+val Route {
+  path_hash: i32,
+  auth_cost: i32,
+  layout_id: i32
+}
+
+val ProductCard {
+  id: i32,
+  price_cents: i32,
+  inventory: i32,
+  personalization: i32
+}
+
+val RequestContext {
+  request_id: i32,
+  tenant_id: i32,
+  user_segment: i32,
+  route_hash: i32
+}
+
+obj ResponseRenderState {
+  template_seed: i32,
+  locale_bias: i32,
+  escaping_seed: i32,
+  hydration_seed: i32,
+  emitted_nodes: i32,
+  response_bytes: i32
+}
+
+fn routes() -> Array<Route>
+  let ~result = Array<Route>::with_capacity(12)
+  for index in 0..12:
+    result.push(Route {
+      path_hash: 1000 + index * 37,
+      auth_cost: 3 + index % 5,
+      layout_id: 11 + index % 4
+    })
+  result
+
+fn catalog() -> Array<ProductCard>
+  let ~result = Array<ProductCard>::with_capacity(48)
+  for index in 0..48:
+    result.push(ProductCard {
+      id: index + 1,
+      price_cents: 499 + index * 73,
+      inventory: 5 + index % 17,
+      personalization: 7 + index % 9
+    })
+  result
+
+fn route_score(route: Route, request: RequestContext) -> i32
+  let distance = (route.path_hash - request.route_hash) % 97
+  distance * distance + route.auth_cost * request.user_segment + route.layout_id
+
+fn product_card_score(card: ProductCard, request: RequestContext) -> i32
+  let tenant_price = card.price_cents + request.tenant_id * 13
+  tenant_price % 997 + card.inventory * 5 + card.personalization * request.user_segment + request.request_id % 11
+
+fn select_route(route_table: Array<Route>, request: RequestContext) -> i32
+  var score = 1000000
+  for index in 0..route_table.len():
+    match(route_table.get(index))
+      Some<Route> { value }:
+        let candidate = route_score(value, request)
+        if candidate < score:
+          score = candidate
+      None:
+        score = -100000
+  score
+
+fn build_product_view(cards: Array<ProductCard>, request: RequestContext) -> i32
+  var checksum = 0
+  for index in 0..cards.len():
+    match(cards.get(index))
+      Some<ProductCard> { value }:
+        checksum = checksum + product_card_score(value, request)
+      None:
+        checksum = checksum - 100000
+  checksum
+
+fn record_response_chunk(~state: ResponseRenderState, bytes: i32) -> void
+  state.emitted_nodes = state.emitted_nodes + 1
+  state.response_bytes = state.response_bytes + bytes
+
+fn render_response(route: i32, products: i32, request: RequestContext) -> i32
+  let ~state = ResponseRenderState {
+    template_seed: 19 + request.tenant_id + request.request_id % 3,
+    locale_bias: 23 + request.user_segment,
+    escaping_seed: 29 + request.tenant_id % 3,
+    hydration_seed: 31 + request.user_segment % 2,
+    emitted_nodes: 0,
+    response_bytes: 0
+  }
+  let state_alias = state
+  var checksum = route + products
+  for node in 0..128:
+    checksum = checksum + state_alias.template_seed + state_alias.locale_bias + state_alias.escaping_seed + state_alias.hydration_seed
+    record_response_chunk(~state, 80 + (products + node) % 31)
+    checksum = checksum + state_alias.template_seed + state_alias.locale_bias + state_alias.escaping_seed + state_alias.hydration_seed
+  checksum + state_alias.emitted_nodes + state_alias.response_bytes
+
+fn request_context(request_id: i32) -> RequestContext
+  RequestContext {
+    request_id: request_id,
+    tenant_id: request_id % 7,
+    user_segment: 1 + request_id % 5,
+    route_hash: 1000 + request_id % 12 * 37
+  }
+
+fn handle_request(
+  route_table: Array<Route>,
+  cards: Array<ProductCard>,
+  request: RequestContext
+) -> i32
+  let selected_route = select_route(route_table, request)
+  let product_view = build_product_view(cards, request)
+  render_response(selected_route, product_view, request)
+
+pub fn main() -> i32
+  let route_table = routes()
+  let cards = catalog()
+  var checksum = 0
+  for request_id in 0..10000:
+    let request = request_context(request_id)
+    checksum = checksum + handle_request(route_table, cards, request)
+  checksum
+
+pub fn request_lookup_stage() -> i32
+  let route_table = routes()
+  let cards = catalog()
+  var checksum = 0
+  for request_id in 0..10000:
+    let request = request_context(request_id)
+    checksum = checksum + select_route(route_table, request)
+    checksum = checksum + build_product_view(cards, request)
+  checksum
+
+pub fn response_serialization_stage() -> i32
+  var checksum = 0
+  for request_id in 0..10000:
+    let request = request_context(request_id)
+    checksum = checksum + render_response(
+      31 + request_id % 7,
+      19000 + request_id % 997,
+      request
+    )
+  checksum

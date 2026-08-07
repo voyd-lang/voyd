@@ -3,6 +3,123 @@
 Performance tests and large regression workloads are opt-in. They do not run
 as part of the default test suite.
 
+## Intrinsic Array `for` benchmark
+
+Measure intrinsic Array iteration against equivalent indexed-loop controls:
+
+```sh
+npm run bench:array-for -- \
+  --label <label> \
+  --compile-samples 5 \
+  --runtime-samples 21
+```
+
+The light-body case makes iterator overhead visible. The render case traverses
+view-model records and computes representative serialization work. Output is
+JSON with raw and median compile/runtime samples, checksums, Wasm/gzip sizes,
+and code-shape counts.
+
+## General iterator `for` benchmark
+
+Measure exact non-intrinsic user iterators against equivalent manual state
+machines:
+
+```sh
+npm run bench:iterator-for -- \
+  --label <label> \
+  --compile-samples 7 \
+  --runtime-samples 31
+```
+
+The focused case uses a light-body counter. The application-shaped case uses
+a filtered, strided iterator with variable internal work and early returns.
+Output includes raw samples, medians, checksums, compile time, Wasm/gzip size,
+and dispatch, allocation, Option, and structural-access site counts.
+
+## Mutable-result specialization benchmark
+
+Measure mutable scalar-aggregate calls that both update request-local state and
+return a value:
+
+```sh
+npm run bench:mutable-result -- \
+  --label <label> \
+  --compile-samples 7 \
+  --runtime-samples 31
+```
+
+The fixture models the hot inner loop of a server-rendered response encoder. A
+writer accumulates response bytes, emitted-node counts, escape events, and a
+checksum while each helper returns the number of bytes it wrote. The benchmark
+separately measures a caller that uses the result and one that discards it. A
+manually expanded implementation provides a checksum-equivalence control.
+
+Output is JSON with every raw and median compile/runtime sample, result
+checksums, Wasm/gzip sizes, and static call, allocation, and structural-access
+site counts. To compare another compiler checkout against the current fixture,
+add `--sdk-root /path/to/voyd-checkout`. Run once with that flag and once
+without it, then compare the reported medians and code-shape counts.
+
+## Checked-access application benchmark
+
+Run the complete checked-access benchmark suite from the repository root:
+
+```sh
+npm run bench:v439 -- --label <label> --samples 7 --runtime-samples 31
+```
+
+To measure only the representative server-rendered web-app request pipeline:
+
+```sh
+npm run bench:v439 -- \
+  --label <label> \
+  --samples 7 \
+  --runtime-samples 31 \
+  --scenario representative-web-app-request
+```
+
+The web-app scenario runs 10,000 route, catalog/view-model, and response
+serialization operations per sample. It reports the integrated handler plus
+separate lookup and serialization stages. Each entrypoint uses a fresh warmed
+host instance. Every counted setup, request-driver, array, and response-node
+loop uses idiomatic range-based `for` syntax.
+
+Compare another local compiler revision without copying the fixture by passing
+the other checkout's repository root:
+
+```sh
+npm run bench:v439 -- \
+  --label before \
+  --samples 7 \
+  --runtime-samples 31 \
+  --scenario representative-web-app-request \
+  --sdk-root /path/to/voyd-checkout
+```
+
+The JSON output includes all raw samples, medians, emitted Wasm and gzip sizes,
+artifact hashes, static instruction-site counts, host details, and memory
+growth. The committed V-439 results and methodology are in
+`docs/notes/v439-checked-access-optimization-results.md`.
+
+### Idiomatic Vtrace renderer
+
+Measure only the compute-bound path tracer with:
+
+```sh
+npm run bench:v439 -- \
+  --label <label> \
+  --samples 7 \
+  --runtime-samples 31 \
+  --scenario representative-vtrace
+```
+
+The fixture deliberately uses normal application source: mutable data is
+modeled with `obj`, counted work uses range-based `for`, and the scene is
+traversed with `for object in self.objects`. It avoids manual indexed-loop and
+value-layout controls so the result includes the cost of Voyd's standard
+abstractions. Use `--sdk-root` as shown above to compile this same source with a
+different compiler checkout.
+
 ## Web OpenAPI package-scale compile
 
 Run the dependency-heavy Web OpenAPI compile in a fresh Node process:

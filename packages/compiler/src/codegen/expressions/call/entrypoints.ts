@@ -33,7 +33,7 @@ import { getFunctionMetadataForCall } from "./metadata.js";
 import { emitResolvedCall } from "./resolved-call.js";
 import { compileTraitDispatchCall } from "./trait-dispatch.js";
 import { compileCallArgExpressionsWithTemps } from "./shared.js";
-import { getOrCreateReceiverSpecialization } from "../../receiver-specialization.js";
+import { receiverSpecializedMetaForCall } from "../../receiver-specialization.js";
 import { getOrCreateScalarAggregateCallSpecialization } from "../../optimization/scalar-aggregate-calls.js";
 import { allocateTempLocal } from "../../locals.js";
 import { captureMultivalueLanes } from "../../multivalue.js";
@@ -299,7 +299,7 @@ export const compileCallExpr = (
     });
     if (meta) {
       const resolvedMeta = receiverSpecializedMetaForCall({
-        expr,
+        callId: expr.id,
         meta,
         ctx,
         fnCtx,
@@ -318,7 +318,10 @@ export const compileCallExpr = (
       });
       const compiledCall = compileWithContractCallScope({
         calleeId,
-        tailPosition: compiledArgs.writebacks.length === 0 && tailPosition,
+        tailPosition:
+          compiledArgs.writebacks.length === 0 &&
+          !compiledArgs.mutableScalarAggregateResultBinding &&
+          tailPosition,
         ctx,
         fnCtx,
         compile: (scopedTailPosition) =>
@@ -333,6 +336,8 @@ export const compileCallExpr = (
               expectedResultTypeId,
               typeInstanceId,
               outResultStorageRef,
+              mutableScalarAggregateResultBinding:
+                compiledArgs.mutableScalarAggregateResultBinding,
             },
           }),
       });
@@ -494,12 +499,18 @@ export const compileMethodCallExpr = (
   );
   const callView = toMethodCallView(expr);
   const concreteTraitTarget = callInfo.traitDispatch
-    ? resolveConcreteTraitMethodTarget({
-        expr: callView,
-        selectedMethod: targetFunctionId as ProgramSymbolId,
-        ctx,
-        typeInstanceId,
-      })
+    ? (() => {
+        const forcedTarget = fnCtx.exactTraitDispatchTargets?.get(expr.id);
+        if (typeof forcedTarget === "number") {
+          return ctx.program.symbols.refOf(forcedTarget);
+        }
+        return resolveConcreteTraitMethodTarget({
+          expr: callView,
+          selectedMethod: targetFunctionId as ProgramSymbolId,
+          ctx,
+          typeInstanceId,
+        });
+      })()
     : undefined;
   if (concreteTraitTarget) {
     return compileResolvedSymbolCall({
@@ -565,7 +576,7 @@ export const compileMethodCallExpr = (
     );
   }
   const resolvedMeta = receiverSpecializedMetaForCall({
-    expr: callView,
+    callId: callView.id,
     meta,
     ctx,
     fnCtx,
@@ -588,7 +599,10 @@ export const compileMethodCallExpr = (
       targetRef.moduleId,
       targetRef.symbol,
     ),
-    tailPosition: compiledArgs.writebacks.length === 0 && tailPosition,
+    tailPosition:
+      compiledArgs.writebacks.length === 0 &&
+      !compiledArgs.mutableScalarAggregateResultBinding &&
+      tailPosition,
     ctx,
     fnCtx,
     compile: (scopedTailPosition) =>
@@ -603,6 +617,8 @@ export const compileMethodCallExpr = (
           expectedResultTypeId,
           typeInstanceId,
           outResultStorageRef,
+          mutableScalarAggregateResultBinding:
+            compiledArgs.mutableScalarAggregateResultBinding,
         },
       }),
   });
@@ -700,67 +716,6 @@ const toMethodCallView = (expr: HirMethodCallExpr): HirCallExpr => ({
   args: [{ expr: expr.target }, ...expr.args],
   typeArguments: expr.typeArguments,
 });
-
-const receiverSpecializationCallSiteKey = ({
-  moduleId,
-  exprId,
-}: {
-  moduleId: string;
-  exprId: number;
-}): string => `${moduleId}:${exprId}`;
-
-const receiverSpecializationContextKey = ({
-  instanceId,
-  exactParameterTypes,
-}: {
-  instanceId: ProgramFunctionInstanceId;
-  exactParameterTypes: ReadonlyMap<SymbolId, TypeId> | undefined;
-}): string => {
-  const serializedFacts = Array.from(exactParameterTypes?.entries() ?? [])
-    .sort(([left], [right]) => left - right)
-    .map(([symbol, type]) => `${symbol}=${type}`)
-    .join(",");
-  return `${instanceId}:${serializedFacts}`;
-};
-
-const receiverSpecializedMetaForCall = ({
-  expr,
-  meta,
-  ctx,
-  fnCtx,
-}: {
-  expr: HirCallExpr;
-  meta: FunctionMetadata;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): FunctionMetadata => {
-  if (!ctx.optimization || typeof fnCtx.instanceId !== "number") {
-    return meta;
-  }
-
-  const callSiteKey = receiverSpecializationCallSiteKey({
-    moduleId: ctx.moduleId,
-    exprId: expr.id,
-  });
-  const callerContextKey = receiverSpecializationContextKey({
-    instanceId: fnCtx.instanceId,
-    exactParameterTypes: fnCtx.exactParameterTypes,
-  });
-  const exactParameterTypes = ctx.optimization.receiverSpecializationRequests
-    .get(callSiteKey)
-    ?.get(callerContextKey);
-  if (!exactParameterTypes || exactParameterTypes.size === 0) {
-    return meta;
-  }
-
-  return (
-    getOrCreateReceiverSpecialization({
-      ctx,
-      meta,
-      exactParameterTypes,
-    }) ?? meta
-  );
-};
 
 const compileResolvedSymbolCall = ({
   expr,
@@ -904,7 +859,7 @@ const compileResolvedSymbolCall = ({
     );
   }
   const resolvedMeta = receiverSpecializedMetaForCall({
-    expr,
+    callId: expr.id,
     meta: targetMeta,
     ctx,
     fnCtx,
@@ -924,7 +879,10 @@ const compileResolvedSymbolCall = ({
   });
   const compiledCall = compileWithContractCallScope({
     calleeId,
-    tailPosition: compiledArgs.writebacks.length === 0 && tailPosition,
+    tailPosition:
+      compiledArgs.writebacks.length === 0 &&
+      !compiledArgs.mutableScalarAggregateResultBinding &&
+      tailPosition,
     ctx,
     fnCtx,
     compile: (scopedTailPosition) =>
@@ -939,6 +897,8 @@ const compileResolvedSymbolCall = ({
           expectedResultTypeId,
           typeInstanceId,
           outResultStorageRef,
+          mutableScalarAggregateResultBinding:
+            compiledArgs.mutableScalarAggregateResultBinding,
         },
       }),
   });

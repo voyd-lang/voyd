@@ -3,6 +3,7 @@ import type {
   CodegenContext,
   ExpressionCompiler,
   FunctionContext,
+  FunctionMetadata,
   HirExprId,
   HirBlockExpr,
   HirCondExpr,
@@ -31,10 +32,24 @@ import {
 } from "../types.js";
 import { compileCallArgExpressionsWithTemps } from "../expressions/call/shared.js";
 import { incrementCompilerPerfCounter } from "../../perf.js";
+import { walkHirExpression } from "../hir-walk.js";
+import { getFunctionMetadataForCall } from "../expressions/call/metadata.js";
+import { receiverSpecializedMetaForCall } from "../receiver-specialization.js";
+import {
+  mutableScalarAggregateCalleeCanUseLaneAbi,
+  tryReserveMutableScalarAggregateSpecialization,
+} from "./mutable-scalar-aggregate-calls.js";
 
 const SCALAR_AGGREGATE_MATERIALIZATION_BOUNDARY_REASONS = new Set([
   "assignment",
   "return",
+]);
+
+const MUTABLE_SCALAR_AGGREGATE_BOUNDARY_REASONS = new Set([
+  "assignment",
+  "call-boundary",
+  "mutable-call-argument",
+  "unknown",
 ]);
 
 const recordScalarAggregateDecision = (
@@ -57,14 +72,16 @@ const aggregateLaneCount = (structInfo: StructuralTypeInfo): number =>
 
 const isSmallScalarAggregate = ({
   structInfo,
+  maxLanes,
   ctx,
 }: {
   structInfo: StructuralTypeInfo;
+  maxLanes?: number;
   ctx: CodegenContext;
 }): boolean =>
   structInfo.fields.length > 0 &&
   aggregateLaneCount(structInfo) <=
-    ctx.specializationPolicy.scalarAggregateLanes;
+    (maxLanes ?? ctx.specializationPolicy.scalarAggregateLanes);
 
 const symbolIsUsedAsMethodReceiver = ({
   symbol,
@@ -178,6 +195,281 @@ const heapObjectSymbolNeedsStableIdentity = ({
   ctx: CodegenContext;
 }): boolean => symbolIsUsedAsMutableAliasInitializer({ symbol, ctx });
 
+const owningFunctionBody = ({
+  ctx,
+  fnCtx,
+}: {
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): HirExprId | undefined => {
+  const instanceId = fnCtx.instanceId ?? fnCtx.typeInstanceId;
+  const meta =
+    typeof instanceId === "number"
+      ? ctx.functionInstances.get(instanceId)
+      : undefined;
+  if (!meta || meta.moduleId !== ctx.moduleId) {
+    return undefined;
+  }
+  const item = Array.from(ctx.module.hir.items.values()).find(
+    (candidate) =>
+      candidate.kind === "function" && candidate.symbol === meta.symbol,
+  );
+  return item?.kind === "function" ? item.body : undefined;
+};
+
+const expressionUsesAlias = ({
+  exprId,
+  aliases,
+  ctx,
+}: {
+  exprId: HirExprId;
+  aliases: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+}): boolean => {
+  let found = false;
+  walkHirExpression({
+    exprId,
+    ctx,
+    visitor: {
+      onExpr: (_candidateId, expr) => {
+        if (expr.exprKind === "identifier" && aliases.has(expr.symbol)) {
+          found = true;
+          return "stop";
+        }
+        return undefined;
+      },
+    },
+  });
+  return found;
+};
+
+const mutableAggregateUsesCanPromote = ({
+  symbol,
+  initializer,
+  structInfo,
+  ctx,
+  fnCtx,
+}: {
+  symbol: SymbolId;
+  initializer: HirExprId;
+  structInfo: StructuralTypeInfo;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): boolean => {
+  const origin = ctx.optimization?.escapeAnalysis.origins
+    .get(ctx.moduleId)
+    ?.get(initializer);
+  if (!origin || !origin.directLocalSymbols.includes(symbol)) {
+    return false;
+  }
+  const body = owningFunctionBody({ ctx, fnCtx });
+  if (typeof body !== "number") {
+    return false;
+  }
+  const aliases = new Set(origin.directLocalSymbols);
+  const allowedIdentifiers = new Set<HirExprId>();
+  const requiredSpecializations: {
+    meta: FunctionMetadata;
+    paramIndex: number;
+  }[] = [];
+  let safe = true;
+
+  walkHirExpression({
+    exprId: body,
+    ctx,
+    visitor: {
+      onStmt: (_stmtId, stmt) => {
+        if (
+          stmt.kind !== "let" ||
+          stmt.mutable ||
+          stmt.pattern.kind !== "identifier" ||
+          !aliases.has(stmt.pattern.symbol)
+        ) {
+          return undefined;
+        }
+        const value = ctx.module.hir.expressions.get(stmt.initializer);
+        if (value?.exprKind === "identifier" && aliases.has(value.symbol)) {
+          allowedIdentifiers.add(value.id);
+        }
+        return undefined;
+      },
+      onExpr: (_exprId, expr) => {
+        if (!safe) {
+          return "stop";
+        }
+        if (expr.exprKind === "field-access") {
+          const target = ctx.module.hir.expressions.get(expr.target);
+          if (target?.exprKind === "identifier" && aliases.has(target.symbol)) {
+            allowedIdentifiers.add(target.id);
+          }
+          return undefined;
+        }
+        if (expr.exprKind === "identifier") {
+          if (aliases.has(expr.symbol) && !allowedIdentifiers.has(expr.id)) {
+            safe = false;
+            return "stop";
+          }
+          return undefined;
+        }
+        if (expr.exprKind !== "call") {
+          return undefined;
+        }
+        const callee = ctx.module.hir.expressions.get(expr.callee);
+        const calleeId =
+          callee?.exprKind === "identifier"
+            ? ctx.program.symbols.canonicalIdOf(ctx.moduleId, callee.symbol)
+            : undefined;
+        if (
+          typeof calleeId === "number" &&
+          (ctx.program.symbols.getIntrinsicName(calleeId) === "~" ||
+            ctx.program.symbols.getName(calleeId) === "~")
+        ) {
+          return undefined;
+        }
+        const groupArgs = expr.args.flatMap((arg, argumentIndex) => {
+          const root = scalarMutableArgumentRoot({
+            exprId: arg.expr,
+            aliases,
+            ctx,
+          });
+          return root ? [{ ...root, argumentIndex }] : [];
+        });
+        if (groupArgs.length === 0) {
+          return undefined;
+        }
+        const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
+        const directTarget =
+          typeof calleeId === "number"
+            ? ctx.program.functions.getFunctionId(
+                ctx.program.symbols.refOf(calleeId),
+              )
+            : undefined;
+        const targetIds = [
+          ...new Set([
+            ...(callInfo.targets?.values() ?? []),
+            ...(typeof directTarget === "number" ? [directTarget] : []),
+          ]),
+        ];
+        const targetRef =
+          targetIds.length === 1
+            ? ctx.program.functions.getFunctionRef(targetIds[0]!)
+            : undefined;
+        if (
+          groupArgs.length !== 1 ||
+          groupArgs[0]!.argumentIndex !== 0 ||
+          callInfo.traitDispatch ||
+          callInfo.identityGuards.length > 0 ||
+          callee?.exprKind !== "identifier" ||
+          !targetRef ||
+          expr.args
+            .slice(1)
+            .some((arg) =>
+              expressionUsesAlias({ exprId: arg.expr, aliases, ctx }),
+            ) ||
+          (ctx.effectLowering.callArgTemps.get(expr.id) ?? []).some(
+            (entry) => entry.argIndex === 0,
+          )
+        ) {
+          safe = false;
+          return "stop";
+        }
+        const callerInstanceId = fnCtx.instanceId ?? fnCtx.typeInstanceId;
+        const plan =
+          typeof callerInstanceId === "number"
+            ? callInfo.argPlans?.get(callerInstanceId)
+            : undefined;
+        const parameterIndex = plan
+          ? plan.findIndex(
+              (entry) =>
+                entry.kind === "direct" &&
+                entry.argIndex === groupArgs[0]!.argumentIndex,
+            )
+          : groupArgs[0]!.argumentIndex;
+        const baseMeta = getFunctionMetadataForCall({
+          symbol: targetRef.symbol,
+          moduleId: targetRef.moduleId,
+          callId: expr.id,
+          ctx,
+          typeInstanceId: callerInstanceId,
+        });
+        const meta = baseMeta
+          ? receiverSpecializedMetaForCall({
+              callId: expr.id,
+              meta: baseMeta,
+              ctx,
+              fnCtx,
+            })
+          : undefined;
+        if (
+          parameterIndex < 0 ||
+          !meta ||
+          meta.paramTypeIds[parameterIndex] !== structInfo.typeId ||
+          !mutableScalarAggregateCalleeCanUseLaneAbi({
+            meta,
+            paramIndex: parameterIndex,
+            ctx,
+          })
+        ) {
+          safe = false;
+          return "stop";
+        }
+        requiredSpecializations.push({ meta, paramIndex: parameterIndex });
+        allowedIdentifiers.add(groupArgs[0]!.identifierExprId);
+        return undefined;
+      },
+    },
+  });
+  return (
+    safe &&
+    requiredSpecializations.length > 0 &&
+    requiredSpecializations.every(({ meta, paramIndex }) =>
+      tryReserveMutableScalarAggregateSpecialization({
+        meta,
+        paramIndex,
+        existingKindVariants: 0,
+        ctx,
+      }),
+    )
+  );
+};
+
+const scalarMutableArgumentRoot = ({
+  exprId,
+  aliases,
+  ctx,
+}: {
+  exprId: HirExprId;
+  aliases: ReadonlySet<SymbolId>;
+  ctx: CodegenContext;
+}): { symbol: SymbolId; identifierExprId: HirExprId } | undefined => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  if (expr?.exprKind === "identifier" && aliases.has(expr.symbol)) {
+    return { symbol: expr.symbol, identifierExprId: expr.id };
+  }
+  if (expr?.exprKind !== "call" || expr.args.length !== 1) {
+    return undefined;
+  }
+  const callee = ctx.module.hir.expressions.get(expr.callee);
+  if (callee?.exprKind !== "identifier") {
+    return undefined;
+  }
+  const calleeId = ctx.program.symbols.canonicalIdOf(
+    ctx.moduleId,
+    callee.symbol,
+  );
+  if (
+    ctx.program.symbols.getIntrinsicName(calleeId) !== "~" &&
+    ctx.program.symbols.getName(calleeId) !== "~"
+  ) {
+    return undefined;
+  }
+  return scalarMutableArgumentRoot({
+    exprId: expr.args[0]!.expr,
+    aliases,
+    ctx,
+  });
+};
+
 export const scalarAggregateAbiTypesForType = ({
   typeId,
   ctx,
@@ -194,15 +486,40 @@ export const scalarAggregateAbiTypesForType = ({
   ]);
 };
 
+export const mutableScalarAggregateAbiTypesForType = ({
+  typeId,
+  ctx,
+}: {
+  typeId: TypeId;
+  ctx: CodegenContext;
+}): readonly binaryen.Type[] | undefined => {
+  const structInfo = getStructuralTypeInfo(typeId, ctx);
+  if (
+    !structInfo ||
+    !isSmallScalarAggregate({
+      structInfo,
+      maxLanes: ctx.specializationPolicy.mutableScalarAggregateLanes,
+      ctx,
+    })
+  ) {
+    return undefined;
+  }
+  return structInfo.fields.flatMap((field) => [
+    ...binaryen.expandType(field.wasmType),
+  ]);
+};
+
 const nonEscapingOriginFactAllowsScalarization = ({
   symbol,
   exprId,
   typeId,
+  allowMutableCallBoundary = false,
   ctx,
 }: {
   symbol: SymbolId;
   exprId: HirExprId;
   typeId: TypeId;
+  allowMutableCallBoundary?: boolean;
   ctx: CodegenContext;
 }): boolean => {
   const fact = ctx.optimization?.escapeAnalysis.origins
@@ -215,9 +532,11 @@ const nonEscapingOriginFactAllowsScalarization = ({
     fact.typeId === typeId &&
     (!fact.escapes ||
       fact.escapeReasons.every((reason) =>
-        reason === "assignment"
-          ? structInfo?.layoutKind === "value-object"
-          : SCALAR_AGGREGATE_MATERIALIZATION_BOUNDARY_REASONS.has(reason),
+        allowMutableCallBoundary
+          ? MUTABLE_SCALAR_AGGREGATE_BOUNDARY_REASONS.has(reason)
+          : reason === "assignment"
+            ? structInfo?.layoutKind === "value-object"
+            : SCALAR_AGGREGATE_MATERIALIZATION_BOUNDARY_REASONS.has(reason),
       )) &&
     fact.directLocalSymbols.includes(symbol),
   );
@@ -481,6 +800,7 @@ const exprCanScalarizeAggregateAssignment = ({
   targetTypeId,
   structInfo,
   requireOriginFact,
+  allowMutableCallBoundary = false,
   allowBlockStatements,
   ctx,
 }: {
@@ -489,6 +809,7 @@ const exprCanScalarizeAggregateAssignment = ({
   targetTypeId: TypeId;
   structInfo: StructuralTypeInfo;
   requireOriginFact: boolean;
+  allowMutableCallBoundary?: boolean;
   allowBlockStatements: boolean;
   ctx: CodegenContext;
 }): boolean => {
@@ -505,6 +826,7 @@ const exprCanScalarizeAggregateAssignment = ({
             symbol,
             exprId,
             typeId: targetTypeId,
+            allowMutableCallBoundary,
             ctx,
           }))) &&
       objectLiteralCanScalarize(expr, structInfo)
@@ -519,6 +841,7 @@ const exprCanScalarizeAggregateAssignment = ({
             symbol,
             exprId,
             typeId: targetTypeId,
+            allowMutableCallBoundary,
             ctx,
           }))) &&
       structInfo.fields.length === expr.elements.length
@@ -535,6 +858,7 @@ const exprCanScalarizeAggregateAssignment = ({
         targetTypeId,
         structInfo,
         requireOriginFact,
+        allowMutableCallBoundary,
         allowBlockStatements,
         ctx,
       })
@@ -551,6 +875,7 @@ const exprCanScalarizeAggregateAssignment = ({
           targetTypeId,
           structInfo,
           requireOriginFact,
+          allowMutableCallBoundary,
           allowBlockStatements,
           ctx,
         }),
@@ -561,6 +886,7 @@ const exprCanScalarizeAggregateAssignment = ({
         targetTypeId,
         structInfo,
         requireOriginFact,
+        allowMutableCallBoundary,
         allowBlockStatements,
         ctx,
       })
@@ -874,23 +1200,43 @@ export const tryScalarizeAggregateInitializer = ({
     recordScalarAggregateDecision("initializer", "bailout.effectful");
     return undefined;
   }
-  if (ctx.module.mutableStorageSymbols.has(symbol)) {
-    recordScalarAggregateDecision("initializer", "bailout.address_taken");
-    return undefined;
-  }
   const structInfo = getStructuralTypeInfo(targetTypeId, ctx);
   if (!structInfo) {
     recordScalarAggregateDecision("initializer", "bailout.no_layout");
     return undefined;
   }
-  if (!isSmallScalarAggregate({ structInfo, ctx })) {
+  const addressTaken = ctx.module.mutableStorageSymbols.has(symbol);
+  const promoteAcrossMutableCalls =
+    mutable &&
+    addressTaken &&
+    mutableAggregateUsesCanPromote({
+      symbol,
+      initializer,
+      structInfo,
+      ctx,
+      fnCtx,
+    });
+  if (addressTaken && !promoteAcrossMutableCalls) {
+    recordScalarAggregateDecision("initializer", "bailout.address_taken");
+    return undefined;
+  }
+  if (
+    !isSmallScalarAggregate({
+      structInfo,
+      maxLanes: promoteAcrossMutableCalls
+        ? ctx.specializationPolicy.mutableScalarAggregateLanes
+        : undefined,
+      ctx,
+    })
+  ) {
     recordScalarAggregateDecision("initializer", "bailout.too_wide");
     return undefined;
   }
   if (
     mutable &&
     (symbolIsUsedAsMethodReceiver({ symbol, ctx }) ||
-      symbolIsUsedAsCallArgument({ symbol, ctx }))
+      (!promoteAcrossMutableCalls &&
+        symbolIsUsedAsCallArgument({ symbol, ctx })))
   ) {
     recordScalarAggregateDecision("initializer", "bailout.mutable_dynamic_use");
     return undefined;
@@ -918,6 +1264,7 @@ export const tryScalarizeAggregateInitializer = ({
       exprId: initializer,
       targetTypeId,
       requireOriginFact: true,
+      allowMutableCallBoundary: promoteAcrossMutableCalls,
       allowBlockStatements: Boolean(
         compileStatement && compileBlockInitializer,
       ),
@@ -1080,7 +1427,20 @@ export const loadScalarAggregateBindingAbiValue = ({
   binding: LocalBindingScalarAggregate;
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
-  const lanes = binding.structInfo.fields.flatMap((field) => {
+  const lanes = loadScalarAggregateBindingAbiLanes({ binding, ctx });
+  return lanes.length === 1
+    ? lanes[0]!
+    : ctx.mod.tuple.make(lanes as binaryen.ExpressionRef[]);
+};
+
+export const loadScalarAggregateBindingAbiLanes = ({
+  binding,
+  ctx,
+}: {
+  binding: LocalBindingScalarAggregate;
+  ctx: CodegenContext;
+}): readonly binaryen.ExpressionRef[] =>
+  binding.structInfo.fields.flatMap((field) => {
     const fieldBinding = binding.fields.get(field.name);
     if (!fieldBinding) {
       throw new Error(`scalar aggregate missing field ${field.name}`);
@@ -1091,10 +1451,6 @@ export const loadScalarAggregateBindingAbiValue = ({
       ? [value]
       : fieldAbiTypes.map((_, index) => ctx.mod.tuple.extract(value, index));
   });
-  return lanes.length === 1
-    ? lanes[0]!
-    : ctx.mod.tuple.make(lanes as binaryen.ExpressionRef[]);
-};
 
 export const tryBindScalarAggregateParameter = ({
   symbol,
@@ -1117,11 +1473,14 @@ export const tryBindScalarAggregateParameter = ({
     recordScalarAggregateDecision("parameter", "bailout.effectful");
     return undefined;
   }
-  if (mutable) {
+  if (mutable && scalarAggregateAbi !== true) {
     recordScalarAggregateDecision("parameter", "bailout.mutable");
     return undefined;
   }
-  if (!nonEscapingParameterFactAllowsScalarization({ symbol, fnCtx, ctx })) {
+  if (
+    !mutable &&
+    !nonEscapingParameterFactAllowsScalarization({ symbol, fnCtx, ctx })
+  ) {
     recordScalarAggregateDecision("parameter", "bailout.escapes");
     return undefined;
   }
@@ -1134,7 +1493,15 @@ export const tryBindScalarAggregateParameter = ({
     recordScalarAggregateDecision("parameter", "bailout.incompatible_abi");
     return undefined;
   }
-  if (!isSmallScalarAggregate({ structInfo, ctx })) {
+  if (
+    !isSmallScalarAggregate({
+      structInfo,
+      maxLanes: mutable
+        ? ctx.specializationPolicy.mutableScalarAggregateLanes
+        : undefined,
+      ctx,
+    })
+  ) {
     recordScalarAggregateDecision("parameter", "bailout.too_wide");
     return undefined;
   }
@@ -1146,7 +1513,7 @@ export const tryBindScalarAggregateParameter = ({
   const binding = createScalarAggregateBinding({
     symbol,
     typeId,
-    mutable: false,
+    mutable,
     structInfo,
     ctx,
     fnCtx,

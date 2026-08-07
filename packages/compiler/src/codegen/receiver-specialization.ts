@@ -1,4 +1,8 @@
-import type { CodegenContext, FunctionMetadata } from "./context.js";
+import type {
+  CodegenContext,
+  FunctionContext,
+  FunctionMetadata,
+} from "./context.js";
 import type { HirFunction } from "../semantics/hir/index.js";
 import type { SymbolId, TypeId } from "../semantics/ids.js";
 import {
@@ -139,6 +143,57 @@ export const getOrCreateReceiverSpecialization = ({
   state.byKey.set(key, specialization);
   state.pending.push(specialization);
   return specializedMeta;
+};
+
+export const receiverSpecializedMetaForCall = ({
+  callId,
+  meta,
+  ctx,
+  fnCtx,
+}: {
+  callId: number;
+  meta: FunctionMetadata;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): FunctionMetadata => {
+  const exactReceiverType = fnCtx.exactCallReceiverTypes?.get(callId);
+  const receiverSymbol = meta.parameters[0]?.symbol;
+  if (
+    typeof exactReceiverType === "number" &&
+    typeof receiverSymbol === "number"
+  ) {
+    return (
+      getOrCreateReceiverSpecialization({
+        ctx,
+        meta,
+        exactParameterTypes: new Map([[receiverSymbol, exactReceiverType]]),
+      }) ?? meta
+    );
+  }
+  if (!ctx.optimization || typeof fnCtx.instanceId !== "number") {
+    return meta;
+  }
+
+  const callSiteKey = `${ctx.moduleId}:${callId}`;
+  const serializedFacts = Array.from(fnCtx.exactParameterTypes?.entries() ?? [])
+    .sort(([left], [right]) => left - right)
+    .map(([symbol, type]) => `${symbol}=${type}`)
+    .join(",");
+  const callerContextKey = `${fnCtx.instanceId}:${serializedFacts}`;
+  const exactParameterTypes = ctx.optimization.receiverSpecializationRequests
+    .get(callSiteKey)
+    ?.get(callerContextKey);
+  if (!exactParameterTypes || exactParameterTypes.size === 0) {
+    return meta;
+  }
+
+  return (
+    getOrCreateReceiverSpecialization({
+      ctx,
+      meta,
+      exactParameterTypes,
+    }) ?? meta
+  );
 };
 
 export const takePendingReceiverSpecializations = (

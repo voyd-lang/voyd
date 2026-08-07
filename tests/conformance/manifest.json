@@ -701,6 +701,30 @@
           "expect": { "kind": "equals", "value": 18 }
         },
         {
+          "id": "runtime.range-for.nonzero-negative-empty",
+          "title": "handles nonzero, negative, descending, and empty bounds",
+          "entryName": "range_for_nonzero_negative_and_empty",
+          "expect": { "kind": "equals", "value": -2099 }
+        },
+        {
+          "id": "runtime.range-for.break-continue",
+          "title": "advances correctly across break and continue",
+          "entryName": "range_for_break_and_continue",
+          "expect": { "kind": "equals", "value": 8 }
+        },
+        {
+          "id": "runtime.range-for.fast-i32-max",
+          "title": "stops direct inclusive iteration at i32 max",
+          "entryName": "range_for_inclusive_i32_max_stops",
+          "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "runtime.range-for.bound-evaluation",
+          "title": "evaluates bounds once in source order",
+          "entryName": "range_for_evaluates_bounds_once_in_order",
+          "expect": { "kind": "equals", "value": 1218 }
+        },
+        {
           "id": "runtime.range-for.i32-max",
           "title": "stops inclusive iteration at i32 max",
           "entryName": "range_iterator_inclusive_i32_max_stops",
@@ -1204,6 +1228,12 @@
           "title": "writes array subscripts",
           "entryName": "write_index",
           "expect": { "kind": "equals", "value": 99 }
+        },
+        {
+          "id": "runtime.collections.array-iteration-growth",
+          "title": "observes Array growth while iterating",
+          "entryName": "array_iteration_observes_growth",
+          "expect": { "kind": "equals", "value": 6 }
         },
         {
           "id": "runtime.collections.slice-exclusive",

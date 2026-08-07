@@ -29,6 +29,7 @@ import {
 import { RTT_METADATA_SLOTS } from "../rtt/index.js";
 import {
   getInlineUnionLayout,
+  getExprBinaryenType,
   getOptionalLayoutInfo,
   getRequiredExprType,
   getStructuralTypeInfo,
@@ -1099,11 +1100,19 @@ export const compileWhileExpr = (
     ctx.mod.br(breakLabel),
   );
 
-  const body = withLoopScope(
-    fnCtx,
-    { breakLabel, continueLabel: loopLabel },
-    () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr,
-  );
+  const { setup: forwardingStores, value: body } =
+    withStableFieldLoadForwarding({
+      loopExprId: expr.id,
+      ctx,
+      fnCtx,
+      compileExpr,
+      run: () =>
+        withLoopScope(
+          fnCtx,
+          { breakLabel, continueLabel: loopLabel },
+          () => compileExpr({ exprId: expr.body, ctx, fnCtx }).expr,
+        ),
+    });
   const loopBody = ctx.mod.block(
     null,
     [conditionCheck, body, ctx.mod.br(loopLabel)],
@@ -1113,11 +1122,70 @@ export const compileWhileExpr = (
   return {
     expr: ctx.mod.block(
       breakLabel,
-      [ctx.mod.loop(loopLabel, loopBody)],
+      [...forwardingStores, ctx.mod.loop(loopLabel, loopBody)],
       binaryen.none,
     ),
     usedReturnCall: false,
   };
+};
+
+export const withStableFieldLoadForwarding = <T>({
+  loopExprId,
+  ctx,
+  fnCtx,
+  compileExpr,
+  run,
+}: {
+  loopExprId: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  run: () => T;
+}): { setup: binaryen.ExpressionRef[]; value: T } => {
+  const forwardingGroups =
+    ctx.optimization?.stableFieldLoadForwarding
+      .get(ctx.moduleId)
+      ?.get(loopExprId) ?? [];
+  const setup: binaryen.ExpressionRef[] = [];
+  const forwardedBindings = new Map(fnCtx.stableFieldLoadBindings);
+  forwardingGroups.forEach((group) => {
+    const representative = group.accessExprIds[0];
+    if (typeof representative !== "number") {
+      return;
+    }
+    const binding = allocateTempLocal(
+      getExprBinaryenType(
+        representative,
+        ctx,
+        fnCtx.typeInstanceId ?? fnCtx.instanceId,
+      ),
+      fnCtx,
+      getRequiredExprType(
+        representative,
+        ctx,
+        fnCtx.typeInstanceId ?? fnCtx.instanceId,
+      ),
+      ctx,
+    );
+    setup.push(
+      storeLocalValue({
+        binding,
+        value: compileExpr({ exprId: representative, ctx, fnCtx }).expr,
+        ctx,
+        fnCtx,
+      }),
+    );
+    group.accessExprIds.forEach((accessExprId) =>
+      forwardedBindings.set(accessExprId, binding),
+    );
+  });
+  const previousForwardedBindings = fnCtx.stableFieldLoadBindings;
+  fnCtx.stableFieldLoadBindings = forwardedBindings;
+  try {
+    return { setup, value: run() };
+  } finally {
+    fnCtx.stableFieldLoadBindings = previousForwardedBindings;
+  }
 };
 
 export const compileLoopExpr = (

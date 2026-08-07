@@ -22,6 +22,7 @@ import type {
   TypeId,
 } from "../context.js";
 import { allocateLoopLabels, withLoopScope } from "../control-flow-stack.js";
+import { withStableFieldLoadForwarding } from "../expressions/control-flow.js";
 import { walkHirExpression } from "../hir-walk.js";
 import {
   allocateTempLocal,
@@ -36,13 +37,16 @@ import {
 } from "../structural.js";
 import {
   getExprBinaryenType,
+  getMatchPatternTypeId,
   getRequiredExprType,
   getStructuralTypeInfo,
   wasmTypeFor,
 } from "../types.js";
+import { compilePatternInitializationFromValue } from "../patterns.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
 import {
   isStdIntrinsicNominalType,
+  isStdIntrinsicNominalTypeInstantiation,
   STD_INTRINSIC_TYPE,
 } from "../../compiler-contracts/types.js";
 
@@ -59,9 +63,24 @@ type SafeArrayWhileLoopAnalysis = {
   cachedLengthExpr?: HirExprId;
 };
 
-type SafeArrayForLoopAnalysis = {
-  scope: SafeArrayLoopScope;
-  lengthExpr: HirExprId;
+type RangeForLoopAnalysis = {
+  whileExpr: HirWhileExpr;
+  startExpr: HirExprId;
+  endExpr: HirExprId;
+  includeEnd: boolean;
+  indexSymbol: SymbolId;
+  userBodyExpr: HirExprId;
+  userStatements: readonly number[];
+  safeArrayScope?: SafeArrayLoopScope;
+};
+
+type ArrayForLoopAnalysis = {
+  whileExpr: HirWhileExpr;
+  arrayExpr: HirExprId;
+  arrayTypeId: TypeId;
+  arrayInfo: ArrayMethodInfo;
+  elementTypeId: TypeId;
+  elementPattern: HirPattern;
   userStatements: readonly number[];
 };
 
@@ -350,7 +369,10 @@ const isSafeArrayLoopRead = ({
   if (expr.method === "len" && expr.args.length === 0) {
     return true;
   }
-  if (expr.method !== "at" || expr.args.length !== 1) {
+  if (
+    (expr.method !== "at" && expr.method !== "get") ||
+    expr.args.length !== 1
+  ) {
     return false;
   }
   return expressionSymbol({ exprId: expr.args[0]!.expr, ctx }) === indexSymbol;
@@ -410,6 +432,51 @@ const isSafeLoopIntrinsicCall = ({
       }),
     )
   );
+};
+
+const isSafeLoopResolvedCall = ({
+  expr,
+  ctx,
+}: {
+  expr: HirCallExpr;
+  ctx: CodegenContext;
+}): boolean => {
+  const callInfo = ctx.program.calls.getCallInfo(ctx.moduleId, expr.id);
+  if (callInfo.traitDispatch || callInfo.identityGuards.length > 0) {
+    return false;
+  }
+  const targets = [...(callInfo.targets?.values() ?? [])];
+  if (targets.length === 0) {
+    const callee = ctx.module.hir.expressions.get(expr.callee);
+    const target =
+      callee?.exprKind === "identifier"
+        ? ctx.program.functions.getFunctionId({
+            moduleId: ctx.moduleId,
+            symbol: callee.symbol,
+          })
+        : undefined;
+    if (typeof target !== "number") {
+      return false;
+    }
+    targets.push(target);
+  }
+  return targets.every((target) => {
+    const footprint = ctx.program.callableAccesses.getFootprint(target);
+    return (
+      footprint !== undefined &&
+      !footprint.maySuspend &&
+      !footprint.externalRead &&
+      !footprint.externalWrite &&
+      footprint.parameters.every(
+        (parameter) =>
+          parameter.writePaths.length === 0 &&
+          !parameter.runtimeCheckedWrites &&
+          !parameter.retained &&
+          !parameter.returned &&
+          !parameter.returnedProvenance,
+      )
+    );
+  });
 };
 
 const isSafeLoopPrimitiveType = ({
@@ -557,7 +624,10 @@ const bodyPreservesArrayLoopProof = ({
           return "stop";
         }
         if (expr.exprKind === "call") {
-          if (!isSafeLoopIntrinsicCall({ expr, ctx, fnCtx })) {
+          if (
+            !isSafeLoopIntrinsicCall({ expr, ctx, fnCtx }) &&
+            !isSafeLoopResolvedCall({ expr, ctx })
+          ) {
             valid = false;
             return "stop";
           }
@@ -838,9 +908,7 @@ const loadI32Local = ({
     return undefined;
   }
   const value = loadLocalValue(binding, ctx);
-  return binaryen.getExpressionType(value) === binaryen.i32
-    ? value
-    : undefined;
+  return binaryen.getExpressionType(value) === binaryen.i32 ? value : undefined;
 };
 
 const withSafeArrayLoopScope = <T>({
@@ -980,6 +1048,506 @@ const patternTypeName = (pattern: HirPattern): string | undefined => {
   return pattern.type.path.at(-1);
 };
 
+const isStdIntrinsicTypePattern = ({
+  pattern,
+  intrinsicType,
+  ctx,
+}: {
+  pattern: HirPattern;
+  intrinsicType:
+    | typeof STD_INTRINSIC_TYPE.optionalSome
+    | typeof STD_INTRINSIC_TYPE.optionalNone;
+  ctx: CodegenContext;
+}): boolean =>
+  pattern.kind === "type" &&
+  isStdIntrinsicNominalType({
+    program: ctx.program,
+    typeId: getMatchPatternTypeId(pattern, ctx),
+    intrinsicType,
+  });
+
+const isVoidLiteral = ({
+  exprId,
+  ctx,
+}: {
+  exprId: HirExprId;
+  ctx: CodegenContext;
+}): boolean => {
+  const expr = ctx.module.hir.expressions.get(exprId);
+  return expr?.exprKind === "literal" && expr.literalKind === "void";
+};
+
+export const isCanonicalStdTraitMethodCall = ({
+  expr,
+  traitName,
+  methodName,
+  allowExternalImplementations = false,
+  ctx,
+}: {
+  expr: HirMethodCallExpr;
+  traitName: "Sequence" | "Iterator";
+  methodName: "iter" | "next";
+  allowExternalImplementations?: boolean;
+  ctx: CodegenContext;
+}): boolean => {
+  if (
+    expr.method !== methodName ||
+    expr.args.length !== 0 ||
+    ctx.program.calls.getCallInfo(ctx.moduleId, expr.id).identityGuards.length >
+      0
+  ) {
+    return false;
+  }
+  const targets = new Set(
+    ctx.program.calls.getCallInfo(ctx.moduleId, expr.id).targets?.values() ??
+      [],
+  );
+  if (targets.size !== 1) {
+    return false;
+  }
+  return [...targets].every((target) => {
+    const traitMethod = ctx.program.traits.getTraitMethodImpl(target);
+    return (
+      (allowExternalImplementations ||
+        (ctx.program.symbols.getPackageId(target) === "std" &&
+          ctx.program.symbols.getName(target) === methodName)) &&
+      traitMethod !== undefined &&
+      ctx.program.symbols.getPackageId(traitMethod.traitSymbol) === "std" &&
+      ctx.program.symbols.getName(traitMethod.traitSymbol) === traitName &&
+      ctx.program.symbols.getPackageId(traitMethod.traitMethodSymbol) ===
+        "std" &&
+      ctx.program.symbols.getName(traitMethod.traitMethodSymbol) === methodName
+    );
+  });
+};
+
+const parseArrayForIterator = ({
+  initializer,
+  ctx,
+  fnCtx,
+}: {
+  initializer: HirExprId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}):
+  | {
+      arrayExpr: HirExprId;
+      arrayTypeId: TypeId;
+      arrayInfo: ArrayMethodInfo;
+      elementTypeId: TypeId;
+    }
+  | undefined => {
+  const iterCall = ctx.module.hir.expressions.get(initializer);
+  if (
+    iterCall?.exprKind !== "method-call" ||
+    !isCanonicalStdTraitMethodCall({
+      expr: iterCall,
+      traitName: "Sequence",
+      methodName: "iter",
+      ctx,
+    })
+  ) {
+    return undefined;
+  }
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const arrayTypeId = getRequiredExprType(iterCall.target, ctx, typeInstanceId);
+  if (!isStdArrayType({ typeId: arrayTypeId, ctx })) {
+    return undefined;
+  }
+  const structInfo = getStructuralTypeInfo(arrayTypeId, ctx);
+  const storageField = structInfo?.fieldMap.get("storage");
+  const countField = structInfo?.fieldMap.get("count");
+  if (!structInfo || !storageField || !countField) {
+    return undefined;
+  }
+  const storageDesc = ctx.program.types.getTypeDesc(storageField.typeId);
+  if (storageDesc.kind !== "fixed-array") {
+    return undefined;
+  }
+  return {
+    arrayExpr: iterCall.target,
+    arrayTypeId,
+    arrayInfo: {
+      targetTypeId: arrayTypeId,
+      structInfo,
+      storageField,
+      countField,
+    },
+    elementTypeId: storageDesc.element,
+  };
+};
+
+export const parseCanonicalStdForBody = ({
+  whileExpr,
+  iteratorSymbol,
+  allowExternalImplementations = false,
+  ctx,
+}: {
+  whileExpr: HirWhileExpr;
+  iteratorSymbol: SymbolId;
+  allowExternalImplementations?: boolean;
+  ctx: CodegenContext;
+}):
+  | {
+      elementPattern: HirPattern;
+      userStatements: readonly number[];
+      nextCall: HirMethodCallExpr;
+    }
+  | undefined => {
+  if (!isLiteralBoolean({ exprId: whileExpr.condition, value: "true", ctx })) {
+    return undefined;
+  }
+  const body = ctx.module.hir.expressions.get(whileExpr.body);
+  if (body?.exprKind !== "block" || body.statements.length !== 1) {
+    return undefined;
+  }
+  const nextStmt = ctx.module.hir.statements.get(body.statements[0]!);
+  if (
+    nextStmt?.kind !== "let" ||
+    nextStmt.mutable ||
+    nextStmt.pattern.kind !== "identifier"
+  ) {
+    return undefined;
+  }
+  const nextValueSymbol = nextStmt.pattern.symbol;
+  const nextCall = ctx.module.hir.expressions.get(nextStmt.initializer);
+  if (
+    nextCall?.exprKind !== "method-call" ||
+    expressionSymbol({ exprId: nextCall.target, ctx }) !== iteratorSymbol ||
+    !isCanonicalStdTraitMethodCall({
+      expr: nextCall,
+      traitName: "Iterator",
+      methodName: "next",
+      allowExternalImplementations,
+      ctx,
+    })
+  ) {
+    return undefined;
+  }
+  const match =
+    typeof body.value === "number"
+      ? ctx.module.hir.expressions.get(body.value)
+      : undefined;
+  if (
+    match?.exprKind !== "match" ||
+    match.arms.length !== 2 ||
+    expressionSymbol({ exprId: match.discriminant, ctx }) !== nextValueSymbol
+  ) {
+    return undefined;
+  }
+  const [someArm, noneArm] = match.arms;
+  if (
+    !someArm ||
+    !noneArm ||
+    someArm.guard !== undefined ||
+    noneArm.guard !== undefined ||
+    someArm.pattern.kind !== "type" ||
+    someArm.pattern.binding !== undefined ||
+    !isStdIntrinsicTypePattern({
+      pattern: someArm.pattern,
+      intrinsicType: STD_INTRINSIC_TYPE.optionalSome,
+      ctx,
+    }) ||
+    noneArm.pattern.kind !== "type" ||
+    noneArm.pattern.binding !== undefined ||
+    !isStdIntrinsicTypePattern({
+      pattern: noneArm.pattern,
+      intrinsicType: STD_INTRINSIC_TYPE.optionalNone,
+      ctx,
+    }) ||
+    !isBreakBlock({ exprId: noneArm.value, ctx })
+  ) {
+    return undefined;
+  }
+  const someBlock = ctx.module.hir.expressions.get(someArm.value);
+  if (
+    someBlock?.exprKind !== "block" ||
+    someBlock.statements.length === 0 ||
+    typeof someBlock.value !== "number" ||
+    !isVoidLiteral({ exprId: someBlock.value, ctx })
+  ) {
+    return undefined;
+  }
+  const elementStmt = ctx.module.hir.statements.get(someBlock.statements[0]!);
+  if (elementStmt?.kind !== "let" || elementStmt.mutable) {
+    return undefined;
+  }
+  const payload = ctx.module.hir.expressions.get(elementStmt.initializer);
+  if (
+    payload?.exprKind !== "field-access" ||
+    payload.field !== "value" ||
+    expressionSymbol({ exprId: payload.target, ctx }) !== nextValueSymbol
+  ) {
+    return undefined;
+  }
+  let usesMacroTemporary = false;
+  walkHirExpression({
+    exprId: someArm.value,
+    ctx,
+    visitor: {
+      onExpr: (exprId, expr) => {
+        if (
+          expr.exprKind !== "identifier" ||
+          (expr.symbol !== iteratorSymbol &&
+            (expr.symbol !== nextValueSymbol || exprId === payload.target))
+        ) {
+          return;
+        }
+        usesMacroTemporary = true;
+        return "stop";
+      },
+    },
+  });
+  if (usesMacroTemporary) {
+    return undefined;
+  }
+  return {
+    elementPattern: elementStmt.pattern,
+    userStatements: someBlock.statements.slice(1),
+    nextCall,
+  };
+};
+
+const tryAnalyzeArrayForLoop = ({
+  block,
+  statementIndex,
+  ctx,
+  fnCtx,
+}: {
+  block: HirBlockExpr;
+  statementIndex: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}): ArrayForLoopAnalysis | undefined => {
+  const currentStmt = ctx.module.hir.statements.get(
+    block.statements[statementIndex]!,
+  );
+  if (currentStmt?.kind !== "expr-stmt") {
+    return undefined;
+  }
+  const wrapper = ctx.module.hir.expressions.get(currentStmt.expr);
+  if (wrapper?.exprKind !== "block" || wrapper.statements.length !== 1) {
+    return undefined;
+  }
+  const iteratorStmt = ctx.module.hir.statements.get(wrapper.statements[0]!);
+  if (
+    iteratorStmt?.kind !== "let" ||
+    iteratorStmt.mutable ||
+    iteratorStmt.pattern.kind !== "identifier"
+  ) {
+    return undefined;
+  }
+  const iterator = parseArrayForIterator({
+    initializer: iteratorStmt.initializer,
+    ctx,
+    fnCtx,
+  });
+  const whileExpr =
+    typeof wrapper.value === "number"
+      ? ctx.module.hir.expressions.get(wrapper.value)
+      : undefined;
+  if (!iterator || whileExpr?.exprKind !== "while") {
+    return undefined;
+  }
+  const body = parseCanonicalStdForBody({
+    whileExpr,
+    iteratorSymbol: iteratorStmt.pattern.symbol,
+    ctx,
+  });
+  return body
+    ? {
+        whileExpr,
+        ...iterator,
+        ...body,
+      }
+    : undefined;
+};
+
+const compileArrayForLoop = ({
+  analysis,
+  ctx,
+  fnCtx,
+  compileExpr,
+  compileStatement,
+}: {
+  analysis: ArrayForLoopAnalysis;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  compileStatement: StatementCompiler;
+}): binaryen.ExpressionRef => {
+  const { loopLabel, breakLabel } = allocateLoopLabels({
+    fnCtx,
+    prefix: "array_for_loop",
+  });
+  const arrayLocal = allocateTempLocal(
+    wasmTypeFor(analysis.arrayTypeId, ctx),
+    fnCtx,
+    analysis.arrayTypeId,
+    ctx,
+  );
+  const storageLocal = allocateTempLocal(
+    wasmTypeFor(analysis.arrayInfo.storageField.typeId, ctx),
+    fnCtx,
+    analysis.arrayInfo.storageField.typeId,
+    ctx,
+  );
+  const cursorLocal = allocateTempLocal(
+    binaryen.i32,
+    fnCtx,
+    ctx.program.primitives.i32,
+    ctx,
+  );
+  const array = () => loadLocalValue(arrayLocal, ctx);
+  const storage = () => loadLocalValue(storageLocal, ctx);
+  const cursor = () => ctx.mod.local.get(cursorLocal.index, binaryen.i32);
+  const previousBindings = new Map(fnCtx.bindings);
+  const { setup: forwardingStores, value: body } = (() => {
+    try {
+      return withStableFieldLoadForwarding({
+        loopExprId: analysis.whileExpr.id,
+        ctx,
+        fnCtx,
+        compileExpr,
+        run: () => {
+          const itemOps: binaryen.ExpressionRef[] = [];
+          const item = liftFixedArrayElementValue({
+            value: arrayGet(
+              ctx.mod,
+              storage(),
+              cursor(),
+              fixedArrayStorageElementType({
+                typeId: analysis.elementTypeId,
+                ctx,
+              }),
+              false,
+            ),
+            typeId: analysis.elementTypeId,
+            ctx,
+            fnCtx,
+          });
+          compilePatternInitializationFromValue({
+            pattern: analysis.elementPattern,
+            value: item,
+            valueTypeId: analysis.elementTypeId,
+            ctx,
+            fnCtx,
+            ops: itemOps,
+            options: { declare: true },
+          });
+          const userBody = withLoopScope(
+            fnCtx,
+            { breakLabel, continueLabel: loopLabel },
+            () =>
+              ctx.mod.block(
+                null,
+                analysis.userStatements.map((stmtId) =>
+                  compileStatement(stmtId),
+                ),
+                binaryen.none,
+              ),
+          );
+          return ctx.mod.block(
+            null,
+            [
+              ...itemOps,
+              ctx.mod.local.set(
+                cursorLocal.index,
+                ctx.mod.i32.add(cursor(), ctx.mod.i32.const(1)),
+              ),
+              userBody,
+            ],
+            binaryen.none,
+          );
+        },
+      });
+    } finally {
+      fnCtx.bindings = previousBindings;
+    }
+  })();
+  const count = directArrayFieldLoad({
+    target: array,
+    structInfo: analysis.arrayInfo.structInfo,
+    field: analysis.arrayInfo.countField,
+    ctx,
+  });
+  const conditionCheck = ctx.mod.if(
+    ctx.mod.i32.ge_s(cursor(), count),
+    ctx.mod.br(breakLabel),
+  );
+  const loadStorage = storeLocalValue({
+    binding: storageLocal,
+    value: directArrayFieldLoad({
+      target: array,
+      structInfo: analysis.arrayInfo.structInfo,
+      field: analysis.arrayInfo.storageField,
+      ctx,
+    }),
+    ctx,
+    fnCtx,
+  });
+  const loopBody = ctx.mod.block(
+    null,
+    [conditionCheck, loadStorage, body, ctx.mod.br(loopLabel)],
+    binaryen.none,
+  );
+  return ctx.mod.block(
+    breakLabel,
+    [
+      storeLocalValue({
+        binding: arrayLocal,
+        value: compileExpr({
+          exprId: analysis.arrayExpr,
+          ctx,
+          fnCtx,
+          expectedResultTypeId: analysis.arrayTypeId,
+        }).expr,
+        ctx,
+        fnCtx,
+      }),
+      ctx.mod.local.set(cursorLocal.index, ctx.mod.i32.const(0)),
+      ...forwardingStores,
+      ctx.mod.loop(loopLabel, loopBody),
+    ],
+    binaryen.none,
+  );
+};
+
+export const tryCompileArrayForStatement = ({
+  block,
+  statementIndex,
+  ctx,
+  fnCtx,
+  compileExpr,
+  compileStatement,
+}: {
+  block: HirBlockExpr;
+  statementIndex: number;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+  compileStatement: StatementCompiler;
+}): binaryen.ExpressionRef | undefined => {
+  if (fnCtx.effectful) {
+    return undefined;
+  }
+  const analysis = tryAnalyzeArrayForLoop({
+    block,
+    statementIndex,
+    ctx,
+    fnCtx,
+  });
+  return analysis
+    ? compileArrayForLoop({
+        analysis,
+        ctx,
+        fnCtx,
+        compileExpr,
+        compileStatement,
+      })
+    : undefined;
+};
+
 const somePayloadExpr = ({
   exprId,
   ctx,
@@ -1007,7 +1575,14 @@ const parseRangeForIterator = ({
   initializer: HirExprId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): { arraySymbol: SymbolId; lengthExpr: HirExprId } | undefined => {
+}):
+  | {
+      startExpr: HirExprId;
+      endExpr: HirExprId;
+      includeEnd: boolean;
+      safeArray?: { arraySymbol: SymbolId };
+    }
+  | undefined => {
   const iterCall = ctx.module.hir.expressions.get(initializer);
   if (
     iterCall?.exprKind !== "method-call" ||
@@ -1023,10 +1598,11 @@ const parseRangeForIterator = ({
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const rangeTypeId = getRequiredExprType(iterCall.target, ctx, typeInstanceId);
   if (
-    !isStdIntrinsicNominalType({
+    !isStdIntrinsicNominalTypeInstantiation({
       program: ctx.program,
       typeId: rangeTypeId,
       intrinsicType: STD_INTRINSIC_TYPE.range,
+      typeArgs: [ctx.program.primitives.i32],
     })
   ) {
     return undefined;
@@ -1043,19 +1619,25 @@ const parseRangeForIterator = ({
   if (!start || start.kind !== "field" || !end || end.kind !== "field") {
     return undefined;
   }
-  if (
-    !includeEnd ||
-    includeEnd.kind !== "field" ||
-    !isLiteralBoolean({ exprId: includeEnd.value, value: "false", ctx })
-  ) {
+  if (!includeEnd || includeEnd.kind !== "field") {
     return undefined;
   }
   const startValue = somePayloadExpr({ exprId: start.value, ctx });
   const endValue = somePayloadExpr({ exprId: end.value, ctx });
+  const isInclusive = isLiteralBoolean({
+    exprId: includeEnd.value,
+    value: "true",
+    ctx,
+  });
+  const isHalfOpen = isLiteralBoolean({
+    exprId: includeEnd.value,
+    value: "false",
+    ctx,
+  });
   if (
     typeof startValue !== "number" ||
-    !isLiteralI32({ exprId: startValue, value: "0", ctx }) ||
-    typeof endValue !== "number"
+    typeof endValue !== "number" ||
+    (!isInclusive && !isHalfOpen)
   ) {
     return undefined;
   }
@@ -1064,12 +1646,18 @@ const parseRangeForIterator = ({
     ctx,
     fnCtx,
   });
-  return length
-    ? {
-        arraySymbol: length.arraySymbol,
-        lengthExpr: endValue,
-      }
-    : undefined;
+  const safeArray =
+    isHalfOpen &&
+    isLiteralI32({ exprId: startValue, value: "0", ctx }) &&
+    length
+      ? { arraySymbol: length.arraySymbol }
+      : undefined;
+  return {
+    startExpr: startValue,
+    endExpr: endValue,
+    includeEnd: isInclusive,
+    safeArray,
+  };
 };
 
 const isLiteralBoolean = ({
@@ -1111,17 +1699,17 @@ const isBreakBlock = ({
 const parseRangeForBody = ({
   whileExpr,
   iteratorSymbol,
-  arraySymbol,
   ctx,
-  fnCtx,
 }: {
   whileExpr: HirWhileExpr;
   iteratorSymbol: SymbolId;
-  arraySymbol: SymbolId;
   ctx: CodegenContext;
-  fnCtx: FunctionContext;
 }):
-  | { indexSymbol: SymbolId; userStatements: readonly number[] }
+  | {
+      indexSymbol: SymbolId;
+      userBodyExpr: HirExprId;
+      userStatements: readonly number[];
+    }
   | undefined => {
   if (!isLiteralBoolean({ exprId: whileExpr.condition, value: "true", ctx })) {
     return undefined;
@@ -1143,6 +1731,7 @@ const parseRangeForBody = ({
   if (
     nextCall?.exprKind !== "method-call" ||
     nextCall.method !== "next" ||
+    nextCall.args.length !== 0 ||
     expressionSymbol({ exprId: nextCall.target, ctx }) !== iteratorSymbol
   ) {
     return undefined;
@@ -1153,6 +1742,7 @@ const parseRangeForBody = ({
       : undefined;
   if (
     match?.exprKind !== "match" ||
+    match.arms.length !== 2 ||
     expressionSymbol({ exprId: match.discriminant, ctx }) !== nextValueSymbol
   ) {
     return undefined;
@@ -1187,25 +1777,14 @@ const parseRangeForBody = ({
     return undefined;
   }
   const indexSymbol = indexStmt.pattern.symbol;
-  if (
-    !bodyPreservesArrayLoopProof({
-      bodyExprId: someArm.value,
-      indexSymbol,
-      arraySymbol,
-      indexUpdate: "none",
-      ctx,
-      fnCtx,
-    })
-  ) {
-    return undefined;
-  }
   return {
     indexSymbol,
+    userBodyExpr: someArm.value,
     userStatements: someBlock.statements.slice(1),
   };
 };
 
-const tryAnalyzeSafeArrayForLoop = ({
+const tryAnalyzeRangeForLoop = ({
   block,
   statementIndex,
   ctx,
@@ -1215,7 +1794,7 @@ const tryAnalyzeSafeArrayForLoop = ({
   statementIndex: number;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
-}): SafeArrayForLoopAnalysis | undefined => {
+}): RangeForLoopAnalysis | undefined => {
   const currentStmt = ctx.module.hir.statements.get(
     block.statements[statementIndex]!,
   );
@@ -1249,31 +1828,45 @@ const tryAnalyzeSafeArrayForLoop = ({
   const body = parseRangeForBody({
     whileExpr,
     iteratorSymbol: iteratorStmt.pattern.symbol,
-    arraySymbol: iterator.arraySymbol,
     ctx,
-    fnCtx,
   });
   if (!body) {
     return undefined;
   }
   return {
-    scope: {
-      arraySymbol: iterator.arraySymbol,
-      indexSymbol: body.indexSymbol,
-    },
-    lengthExpr: iterator.lengthExpr,
+    whileExpr,
+    startExpr: iterator.startExpr,
+    endExpr: iterator.endExpr,
+    includeEnd: iterator.includeEnd,
+    indexSymbol: body.indexSymbol,
+    userBodyExpr: body.userBodyExpr,
     userStatements: body.userStatements,
+    safeArrayScope:
+      iterator.safeArray &&
+      bodyPreservesArrayLoopProof({
+        bodyExprId: body.userBodyExpr,
+        indexSymbol: body.indexSymbol,
+        arraySymbol: iterator.safeArray.arraySymbol,
+        indexUpdate: "none",
+        ctx,
+        fnCtx,
+      })
+        ? {
+            arraySymbol: iterator.safeArray.arraySymbol,
+            indexSymbol: body.indexSymbol,
+          }
+        : undefined,
   };
 };
 
-const compileSafeArrayForLoop = ({
+const compileRangeForLoop = ({
   analysis,
   ctx,
   fnCtx,
   compileExpr,
   compileStatement,
 }: {
-  analysis: SafeArrayForLoopAnalysis;
+  analysis: RangeForLoopAnalysis;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
@@ -1281,65 +1874,97 @@ const compileSafeArrayForLoop = ({
 }): binaryen.ExpressionRef => {
   const { loopLabel, breakLabel } = allocateLoopLabels({
     fnCtx,
-    prefix: "array_safe_for_loop",
+    prefix: "range_for_loop",
   });
-  const lengthLocal = allocateTempLocal(binaryen.i32, fnCtx);
+  const cursorLocal = allocateTempLocal(
+    binaryen.i32,
+    fnCtx,
+    ctx.program.primitives.i32,
+    ctx,
+  );
+  const endLocal = allocateTempLocal(binaryen.i32, fnCtx);
   const indexLocal = allocateTempLocal(
     binaryen.i32,
     fnCtx,
     ctx.program.primitives.i32,
     ctx,
   );
-  const previousIndexBinding = fnCtx.bindings.get(analysis.scope.indexSymbol);
-  fnCtx.bindings.set(analysis.scope.indexSymbol, {
+  const doneLocal = analysis.includeEnd
+    ? allocateTempLocal(binaryen.i32, fnCtx)
+    : undefined;
+  const previousIndexBinding = fnCtx.bindings.get(analysis.indexSymbol);
+  fnCtx.bindings.set(analysis.indexSymbol, {
     ...indexLocal,
     kind: "local",
     typeId: ctx.program.primitives.i32,
   });
-  const body = (() => {
+  const { setup: forwardingStores, value: body } = (() => {
     try {
-      return withSafeArrayLoopScope({
-        scope: analysis.scope,
+      return withStableFieldLoadForwarding({
+        loopExprId: analysis.whileExpr.id,
+        ctx,
         fnCtx,
-        run: () =>
-          withLoopScope(fnCtx, { breakLabel, continueLabel: loopLabel }, () =>
-            ctx.mod.block(
-              null,
-              analysis.userStatements.map((stmtId) => compileStatement(stmtId)),
-              binaryen.none,
-            ),
-          ),
+        compileExpr,
+        run: () => {
+          const compileBody = () =>
+            withLoopScope(fnCtx, { breakLabel, continueLabel: loopLabel }, () =>
+              ctx.mod.block(
+                null,
+                analysis.userStatements.map((stmtId) =>
+                  compileStatement(stmtId),
+                ),
+                binaryen.none,
+              ),
+            );
+          return analysis.safeArrayScope
+            ? withSafeArrayLoopScope({
+                scope: analysis.safeArrayScope,
+                fnCtx,
+                run: compileBody,
+              })
+            : compileBody();
+        },
       });
     } finally {
       if (previousIndexBinding) {
-        fnCtx.bindings.set(analysis.scope.indexSymbol, previousIndexBinding);
+        fnCtx.bindings.set(analysis.indexSymbol, previousIndexBinding);
       } else {
-        fnCtx.bindings.delete(analysis.scope.indexSymbol);
+        fnCtx.bindings.delete(analysis.indexSymbol);
       }
     }
   })();
 
+  const cursor = () => ctx.mod.local.get(cursorLocal.index, binaryen.i32);
+  const end = () => ctx.mod.local.get(endLocal.index, binaryen.i32);
   const conditionCheck = ctx.mod.if(
-    ctx.mod.i32.eqz(
-      ctx.mod.i32.lt_s(
-        ctx.mod.local.get(indexLocal.index, binaryen.i32),
-        ctx.mod.local.get(lengthLocal.index, binaryen.i32),
-      ),
-    ),
+    analysis.includeEnd
+      ? ctx.mod.i32.or(
+          ctx.mod.local.get(doneLocal!.index, binaryen.i32),
+          ctx.mod.i32.gt_s(cursor(), end()),
+        )
+      : ctx.mod.i32.ge_s(cursor(), end()),
     ctx.mod.br(breakLabel),
   );
+  const advance = analysis.includeEnd
+    ? ctx.mod.if(
+        ctx.mod.i32.eq(cursor(), end()),
+        ctx.mod.local.set(doneLocal!.index, ctx.mod.i32.const(1)),
+        ctx.mod.local.set(
+          cursorLocal.index,
+          ctx.mod.i32.add(cursor(), ctx.mod.i32.const(1)),
+        ),
+      )
+    : ctx.mod.local.set(
+        cursorLocal.index,
+        ctx.mod.i32.add(cursor(), ctx.mod.i32.const(1)),
+      );
   const loopBody = ctx.mod.block(
     null,
     [
       conditionCheck,
+      ctx.mod.local.set(indexLocal.index, cursor()),
+      advance,
       body,
-      ctx.mod.local.set(
-        indexLocal.index,
-        ctx.mod.i32.add(
-          ctx.mod.local.get(indexLocal.index, binaryen.i32),
-          ctx.mod.i32.const(1),
-        ),
-      ),
       ctx.mod.br(loopLabel),
     ],
     binaryen.none,
@@ -1348,22 +1973,34 @@ const compileSafeArrayForLoop = ({
     breakLabel,
     [
       ctx.mod.local.set(
-        lengthLocal.index,
+        cursorLocal.index,
         compileExpr({
-          exprId: analysis.lengthExpr,
+          exprId: analysis.startExpr,
           ctx,
           fnCtx,
           expectedResultTypeId: ctx.program.primitives.i32,
         }).expr,
       ),
-      ctx.mod.local.set(indexLocal.index, ctx.mod.i32.const(0)),
+      ctx.mod.local.set(
+        endLocal.index,
+        compileExpr({
+          exprId: analysis.endExpr,
+          ctx,
+          fnCtx,
+          expectedResultTypeId: ctx.program.primitives.i32,
+        }).expr,
+      ),
+      ...(doneLocal
+        ? [ctx.mod.local.set(doneLocal.index, ctx.mod.i32.const(0))]
+        : []),
+      ...forwardingStores,
       ctx.mod.loop(loopLabel, loopBody),
     ],
     binaryen.none,
   );
 };
 
-export const tryCompileArraySafeForStatement = ({
+export const tryCompileRangeForStatement = ({
   block,
   statementIndex,
   ctx,
@@ -1378,14 +2015,17 @@ export const tryCompileArraySafeForStatement = ({
   compileExpr: ExpressionCompiler;
   compileStatement: StatementCompiler;
 }): binaryen.ExpressionRef | undefined => {
-  const analysis = tryAnalyzeSafeArrayForLoop({
+  if (fnCtx.effectful) {
+    return undefined;
+  }
+  const analysis = tryAnalyzeRangeForLoop({
     block,
     statementIndex,
     ctx,
     fnCtx,
   });
   return analysis
-    ? compileSafeArrayForLoop({
+    ? compileRangeForLoop({
         analysis,
         ctx,
         fnCtx,
@@ -1673,6 +2313,108 @@ const compileArrayAtFastPath = ({
   };
 };
 
+const compileArrayGetFastPath = ({
+  expr,
+  info,
+  expectedResultTypeId,
+  ctx,
+  fnCtx,
+  compileExpr,
+}: {
+  expr: HirMethodCallExpr;
+  info: ArrayMethodInfo;
+  expectedResultTypeId?: TypeId;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  compileExpr: ExpressionCompiler;
+}): CompiledExpression | undefined => {
+  if (expr.args.length !== 1) {
+    return undefined;
+  }
+
+  const safeLoopScope = activeSafeArrayLoopScope({ expr, fnCtx, ctx });
+  if (!safeLoopScope) {
+    return undefined;
+  }
+
+  const storageDesc = ctx.program.types.getTypeDesc(info.storageField.typeId);
+  if (storageDesc.kind !== "fixed-array") {
+    return undefined;
+  }
+
+  const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
+  const returnTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
+  const resultTypeId = expectedResultTypeId ?? returnTypeId;
+  const resultWasmType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const storageLocal = allocateTempLocal(
+    wasmTypeFor(info.storageField.typeId, ctx),
+    fnCtx,
+    info.storageField.typeId,
+    ctx,
+  );
+  const indexLocal = allocateTempLocal(binaryen.i32, fnCtx);
+  const { setup: setupTarget, target } = compileArrayTarget({
+    expr,
+    info,
+    ctx,
+    fnCtx,
+    compileExpr,
+  });
+  const storage = () => loadLocalValue(storageLocal, ctx);
+  const index = () => ctx.mod.local.get(indexLocal.index, binaryen.i32);
+  const value = liftFixedArrayElementValue({
+    value: arrayGet(
+      ctx.mod,
+      storage(),
+      index(),
+      fixedArrayStorageElementType({ typeId: storageDesc.element, ctx }),
+      false,
+    ),
+    typeId: storageDesc.element,
+    ctx,
+    fnCtx,
+  });
+  const some = coerceValueToType({
+    value,
+    actualType: storageDesc.element,
+    targetType: resultTypeId,
+    ctx,
+    fnCtx,
+  });
+
+  return {
+    expr: ctx.mod.block(
+      null,
+      [
+        setupTarget,
+        ctx.mod.local.set(
+          indexLocal.index,
+          compileExpr({
+            exprId: expr.args[0]!.expr,
+            ctx,
+            fnCtx,
+            expectedResultTypeId: ctx.program.primitives.i32,
+          }).expr,
+        ),
+        storeLocalValue({
+          binding: storageLocal,
+          value: directArrayFieldLoad({
+            target,
+            structInfo: info.structInfo,
+            field: info.storageField,
+            ctx,
+          }),
+          ctx,
+          fnCtx,
+        }),
+        coerceExprToWasmType({ expr: some, targetType: resultWasmType, ctx }),
+      ],
+      resultWasmType,
+    ),
+    usedReturnCall: false,
+  };
+};
+
 export const tryCompileArrayMethodFastPath = ({
   expr,
   expectedResultTypeId,
@@ -1686,7 +2428,7 @@ export const tryCompileArrayMethodFastPath = ({
   fnCtx: FunctionContext;
   compileExpr: ExpressionCompiler;
 }): CompiledExpression | undefined => {
-  if (expr.method !== "len" && expr.method !== "at") {
+  if (expr.method !== "len" && expr.method !== "at" && expr.method !== "get") {
     return undefined;
   }
   const info = arrayMethodInfo({ expr, ctx, fnCtx });
@@ -1695,6 +2437,16 @@ export const tryCompileArrayMethodFastPath = ({
   }
   if (expr.method === "len") {
     return compileArrayLenFastPath({ expr, info, ctx, fnCtx, compileExpr });
+  }
+  if (expr.method === "get") {
+    return compileArrayGetFastPath({
+      expr,
+      info,
+      expectedResultTypeId,
+      ctx,
+      fnCtx,
+      compileExpr,
+    });
   }
   return compileArrayAtFastPath({
     expr,

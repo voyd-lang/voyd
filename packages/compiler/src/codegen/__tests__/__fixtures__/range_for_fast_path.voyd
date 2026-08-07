@@ -1,0 +1,17 @@
+obj RenderState {
+  stable: i32,
+  changing: i32
+}
+
+fn advance(~state: RenderState) -> void
+  state.changing = state.changing + 1
+
+pub fn stable_range_sum() -> i32
+  let ~state = RenderState { stable: 3, changing: 0 }
+  let alias = state
+  var total = 0
+  for index in -2..=2:
+    total = total + alias.stable + index
+    advance(~state)
+    total = total + alias.stable
+  total + state.changing

@@ -1,0 +1,206 @@
+use std::optional::all
+
+obj CountSequence {
+  end: i32
+}
+
+obj CountIterator {
+  current: i32,
+  end: i32
+}
+
+impl Sequence<i32> for CountSequence
+  fn iter(self) -> Iterator<i32>
+    CountIterator { current: 0, end: self.end }
+
+impl Iterator<i32> for CountIterator
+  fn next(~self) -> Option<i32>
+    let alias = self
+    if self.current >= alias.end:
+      return None {}
+    let value = self.current
+    self.current = self.current + 1
+    Some<i32> { value }
+
+obj FilteredSequence {
+  end: i32,
+  stride: i32
+}
+
+obj FilteredIterator {
+  current: i32,
+  end: i32,
+  stride: i32
+}
+
+impl Sequence<i32> for FilteredSequence
+  fn iter(self) -> Iterator<i32>
+    FilteredIterator {
+      current: 0,
+      end: self.end,
+      stride: self.stride
+    }
+
+impl Iterator<i32> for FilteredIterator
+  fn next(~self) -> Option<i32>
+    while self.current < self.end:
+      let candidate = self.current
+      self.current = self.current + self.stride
+      if (candidate % 3) != 0:
+        return Some<i32> { value: candidate }
+    None {}
+
+val WideValue {
+  first: i32,
+  second: i32,
+  third: i32,
+  fourth: i32
+}
+
+obj WideSequence {}
+
+obj WideIterator {
+  emitted: i32
+}
+
+impl Sequence<WideValue> for WideSequence
+  fn iter(self) -> Iterator<WideValue>
+    WideIterator { emitted: 0 }
+
+impl Iterator<WideValue> for WideIterator
+  fn next(~self) -> Option<WideValue>
+    if self.emitted != 0:
+      return None {}
+    self.emitted = 1
+    Some<WideValue> {
+      value: WideValue { first: 1, second: 2, third: 3, fourth: 4 }
+    }
+
+obj Node {
+  value: i32
+}
+
+obj NodeSequence {
+  node: Node
+}
+
+obj NodeIterator {
+  node: Node,
+  emitted: i32
+}
+
+impl Sequence<Node> for NodeSequence
+  fn iter(self) -> Iterator<Node>
+    NodeIterator { node: self.node, emitted: 0 }
+
+impl Iterator<Node> for NodeIterator
+  fn next(~self) -> Option<Node>
+    if self.emitted != 0:
+      return None {}
+    self.emitted = 1
+    Some<Node> { value: self.node }
+
+obj SingleSequence<T> {
+  value: T
+}
+
+obj SingleIterator<T> {
+  value: T,
+  emitted: i32
+}
+
+impl<T> Sequence<T> for SingleSequence<T>
+  fn iter(self) -> Iterator<T>
+    SingleIterator<T> { value: self.value, emitted: 0 }
+
+impl<T> Iterator<T> for SingleIterator<T>
+  fn next(~self) -> Option<T>
+    if self.emitted != 0:
+      return None {}
+    self.emitted = 1
+    Some<T> { value: self.value }
+
+obj EvaluationCounter {
+  count: i32
+}
+
+fn counted_sequence(~counter: EvaluationCounter) -> FilteredSequence
+  counter.count = counter.count + 1
+  FilteredSequence { end: 12, stride: 2 }
+
+trait CustomSequence<T>
+  fn iter(self) -> CustomIterator<T>
+
+trait CustomIterator<T>
+  fn next(~self) -> Option<T>
+
+obj CustomCounter {
+  end: i32
+}
+
+obj CustomCounterIterator {
+  current: i32,
+  end: i32
+}
+
+impl CustomSequence<i32> for CustomCounter
+  fn iter(self) -> CustomIterator<i32>
+    CustomCounterIterator { current: 0, end: self.end }
+
+impl CustomIterator<i32> for CustomCounterIterator
+  fn next(~self) -> Option<i32>
+    if self.current >= self.end:
+      return None {}
+    let value = self.current
+    self.current = self.current + 1
+    Some<i32> { value }
+
+fn sum_dynamic(sequence: Sequence<i32>) -> i32
+  var total = 0
+  for value in sequence:
+    total = total + value
+  total
+
+pub fn exact_count() -> i32
+  var total = 0
+  for value in CountSequence { end: 4 }:
+    total = total + value
+  total
+
+pub fn filtered_control_flow() -> i32
+  let ~counter = EvaluationCounter { count: 0 }
+  var total = 0
+  for value in counted_sequence(~counter):
+    if value == 2:
+      continue
+    if value >= 8:
+      break
+    total = total + value
+  (counter.count * 100) + total
+
+pub fn wide_and_object_results() -> i32
+  var wide_total = 0
+  for value in WideSequence {}:
+    wide_total = value.first + value.second + value.third + value.fourth
+  var object_total = 0
+  for node in NodeSequence { node: Node { value: 7 } }:
+    object_total = node.value
+  (wide_total * 10) + object_total
+
+pub fn generic_user_iterator() -> i32
+  var total = 0
+  for value in SingleSequence<i32> { value: 9 }:
+    total = total + value
+  total
+
+pub fn dynamic_count_fallback() -> i32
+  sum_dynamic(CountSequence { end: 4 })
+
+pub fn dynamic_filtered_fallback() -> i32
+  sum_dynamic(FilteredSequence { end: 10, stride: 2 })
+
+pub fn noncanonical_fallback() -> i32
+  var total = 0
+  for value in CustomCounter { end: 4 }:
+    total = total + value
+  total

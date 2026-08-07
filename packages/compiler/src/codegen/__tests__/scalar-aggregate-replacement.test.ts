@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { resolve, sep } from "node:path";
 import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
@@ -6,9 +7,17 @@ import { monomorphizeProgram } from "../../semantics/linking.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
 import { optimizeProgram } from "../../optimize/pipeline.js";
 import { codegenProgram } from "../index.js";
+import { createMemoryModuleHost } from "../../modules/memory-host.js";
+import { createNodePathAdapter } from "../../modules/node-path-adapter.js";
+import { buildModuleGraph } from "../../modules/graph.js";
+import { analyzeModules } from "../../pipeline-shared.js";
 import type { ModuleGraph, ModuleNode } from "../../modules/types.js";
 
-const compileOptimized = (source: string) => {
+const compileOptimized = (
+  source: string,
+  optimizationLevel: "balanced" | "release" = "release",
+  scalarAggregateContextsPerProgram?: number,
+) => {
   const ast = parse(source, "scalar_aggregate_replacement.voyd");
   const moduleNode: ModuleNode = {
     id: "std::scalar_aggregate_replacement",
@@ -40,11 +49,29 @@ const compileOptimized = (source: string) => {
     program,
     modules: [semantics],
     entryModuleId: moduleNode.id,
+    options: { optimizationLevel },
   });
+  const optimizationFacts =
+    typeof scalarAggregateContextsPerProgram === "number"
+      ? {
+          ...optimized.facts,
+          codegenPlan: {
+            ...optimized.facts.codegenPlan,
+            specializationReservations: {
+              ...optimized.facts.codegenPlan.specializationReservations,
+              scalar_aggregate: {
+                ...optimized.facts.codegenPlan.specializationReservations
+                  .scalar_aggregate,
+                contextsPerProgram: scalarAggregateContextsPerProgram,
+              },
+            },
+          },
+        }
+      : optimized.facts;
   const optimizedCodegen = codegenProgram({
     program: optimized.program,
     entryModuleId: moduleNode.id,
-    optimization: optimized.facts,
+    optimization: optimizationFacts,
     options: { validate: false },
   });
   const baselineCodegen = codegenProgram({
@@ -69,6 +96,100 @@ const runMain = (
 };
 
 describe("scalar aggregate replacement", () => {
+  it("keeps immutable heap-object aliases materialized in balanced builds", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(
+      `
+obj State {
+  count: i32
+}
+
+pub fn main() -> i32
+  let ~state = State { count: 1 }
+  let alias = state
+  state.count = 4
+  alias.count
+`,
+      "balanced",
+    );
+
+    expect(runMain(baselineCodegen.module)()).toBe(4);
+    expect(runMain(optimizedCodegen.module)()).toBe(4);
+    expect(optimizedCodegen.module.emitText()).toMatch(
+      /\(struct\.new \$voyd_struct_shape_/,
+    );
+  });
+
+  it("promotes mutable state across an imported canonical callee", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryModuleHost({
+      files: {
+        [`${root}${sep}main.voyd`]: `
+pub use self::writer::all
+
+pub fn main(seed: i32) -> i32
+  let ~state = State { stable: 7, count: seed }
+  increment(~state, 4)
+  state.stable * 10 + state.count
+`,
+        [`${root}${sep}main${sep}writer.voyd`]: `
+pub obj State {
+  stable: i32,
+  count: i32
+}
+
+pub fn increment(~state: State, amount: i32) -> void
+  state.count = state.count + amount
+`,
+      },
+      pathAdapter: createNodePathAdapter(),
+    });
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const analyzed = analyzeModules({ graph });
+    expect(
+      analyzed.diagnostics.filter(
+        (diagnostic) => diagnostic.severity === "error",
+      ),
+    ).toHaveLength(0);
+    const modules = Array.from(analyzed.semantics.values());
+    const monomorphized = monomorphizeProgram({
+      modules,
+      semantics: analyzed.semantics,
+    });
+    const program = buildProgramCodegenView(modules, {
+      instances: monomorphized.instances,
+      moduleTyping: monomorphized.moduleTyping,
+    });
+    const optimized = optimizeProgram({
+      program,
+      modules,
+      entryModuleId: graph.entry,
+      options: { optimizationLevel: "release" },
+    });
+    const emitted = codegenProgram({
+      program: optimized.program,
+      entryModuleId: graph.entry,
+      optimization: optimized.facts,
+      options: { validate: false },
+    });
+    expect(
+      emitted.diagnostics.filter(
+        (diagnostic) => diagnostic.severity === "error",
+      ),
+    ).toHaveLength(0);
+    expect(
+      (
+        getWasmInstance(emitted.module).exports.main as (seed: number) => number
+      )(1),
+    ).toBe(75);
+    expect(emitted.module.emitText()).toMatch(
+      /increment[^\s]*__scalar_agg_0_mutable/,
+    );
+  });
+
   it("passes scalarized arrays to optional parameters", () => {
     const { optimizedCodegen, baselineCodegen } = compileOptimized(`
 obj Array<T> { storage: FixedArray<T>, count: i32 }
@@ -529,8 +650,100 @@ pub fn main() -> i32
     expect(runMain(optimizedCodegen.module)()).toBe(5);
   });
 
-  it("does not scalarize heap-object parameters mutated by the callee", () => {
+  it("returns updated lanes from exact mutable heap-object calls", () => {
     const { optimizedCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn set_value(~box: Box, value: i32 = 9) -> void
+  box.value = value
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  set_value(box)
+  box.value
+`);
+
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(runMain(optimizedCodegen.module)()).toBe(9);
+    expect(optimizedText).toMatch(/set_value[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).not.toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("keeps wide mutable objects and aliases in lanes across repeated calls", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj State {
+  stable: i32,
+  count: i32,
+  template: i32,
+  locale: i32,
+  flags: i32,
+  nodes: i32
+}
+
+fn increment(~state: State, amount: i32) -> void
+  state.count = state.count + amount
+  state.nodes = state.nodes + 1
+
+fn next_amount(~amount: i32) -> i32
+  amount = amount + 1
+  amount
+
+pub fn main() -> i32
+  let ~state = State {
+    stable: 7,
+    count: 1,
+    template: 2,
+    locale: 3,
+    flags: 4,
+    nodes: 10
+  }
+  let alias = state
+  var amount = 1
+  var index = 0
+  while index < 2:
+    increment(~state, next_amount(~amount))
+    index = index + 1
+  alias.stable * 1000 + alias.count * 100 + alias.nodes * 10 + amount
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(7723);
+    expect(runMain(optimizedCodegen.module)()).toBe(7723);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).toMatch(/increment[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).not.toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("materializes safely when a mutable callee cannot use the lane ABI", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn maybe_set(~box: Box, should_set: bool) -> void
+  if should_set:
+    box.value = 9
+  else:
+    return void
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  if false:
+    maybe_set(~box, true)
+  box.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(1);
+    expect(runMain(optimizedCodegen.module)()).toBe(1);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).not.toMatch(/maybe_set[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("declines promotion before control flow when the companion budget is exhausted", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(
+      `
 obj Box {
   value: i32
 }
@@ -540,11 +753,269 @@ fn set_value(~box: Box) -> void
 
 pub fn main() -> i32
   let ~box = Box { value: 1 }
-  set_value(box)
+  if true:
+    set_value(~box)
+  box.value
+`,
+      "release",
+      0,
+    );
+
+    expect(runMain(baselineCodegen.module)()).toBe(9);
+    expect(runMain(optimizedCodegen.module)()).toBe(9);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).not.toMatch(/set_value[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("returns a logical result and mutable lanes from the same exact call", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn increment(~box: Box) -> i32
+  box.value = box.value + 1
+  box.value
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  let first = increment(~box)
+  increment(~box)
+  first * 100 + box.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(203);
+    expect(runMain(optimizedCodegen.module)()).toBe(203);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).toMatch(/increment[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).not.toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("writes back mutable lanes on an early non-void return", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn advance(~box: Box, stop: bool) -> i32
+  box.value = box.value + 1
+  if stop:
+    return box.value * 10
+  box.value + 2
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  advance(~box, true) + box.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(22);
+    expect(runMain(optimizedCodegen.module)()).toBe(22);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).toMatch(/advance[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).not.toMatch(/\(struct\.new \$voyd_struct_shape_/);
+    expect(optimizedText).not.toContain("(return_call");
+  });
+
+  it("preserves logical multivalue ordering ahead of mutable lanes", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+val PairResult {
+  tens: i32,
+  hundreds: i32
+}
+
+fn advance_pair(~box: Box) -> PairResult
+  box.value = box.value + 1
+  PairResult { tens: box.value * 10, hundreds: box.value * 100 }
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  let result = advance_pair(~box)
+  result.tens + result.hundreds + box.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(222);
+    expect(runMain(optimizedCodegen.module)()).toBe(222);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).toMatch(/advance_pair[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).not.toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("falls back when the logical result returns receiver provenance", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn expose(~box: Box) -> Box
+  box.value = box.value + 1
+  box
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  let exposed = expose(~box)
+  exposed.value + box.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(4);
+    expect(runMain(optimizedCodegen.module)()).toBe(4);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).not.toMatch(/expose[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("keeps wide logical results on the ordinary out-ref ABI", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+val WideResult {
+  first: i32,
+  second: i32,
+  third: i32,
+  fourth: i32,
+  fifth: i32
+}
+
+fn advance_wide(~box: Box) -> WideResult
+  box.value = box.value + 1
+  WideResult {
+    first: box.value,
+    second: 2,
+    third: 3,
+    fourth: 4,
+    fifth: 5
+  }
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  let result = advance_wide(~box)
+  result.first + result.second + result.third + result.fourth + result.fifth + box.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(18);
+    expect(runMain(optimizedCodegen.module)()).toBe(18);
+    expect(optimizedCodegen.module.emitText()).not.toMatch(
+      /advance_wide[^\s]*__scalar_agg_0_mutable/,
+    );
+  });
+
+  it("keeps conditional nested receiver calls on the ordinary ABI", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn increment(~box: Box) -> i32
+  box.value = box.value + 1
+  box.value
+
+fn maybe_increment(~box: Box, apply: bool) -> i32
+  if apply:
+    return increment(~box)
+  box.value
+
+pub fn main() -> i32
+  let ~first = Box { value: 1 }
+  let ~second = Box { value: 10 }
+  maybe_increment(~first, false) * 1000 + first.value * 100 + maybe_increment(~second, true) * 10 + second.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(1221);
+    expect(runMain(optimizedCodegen.module)()).toBe(1221);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).not.toMatch(
+      /maybe_increment[^\s]*__scalar_agg_0_mutable/,
+    );
+    expect(optimizedText).not.toMatch(/__increment_\d+__scalar_agg_0_mutable/);
+    expect(optimizedText).toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("keeps zero-iteration nested receiver loops on the ordinary ABI", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn increment(~box: Box) -> i32
+  box.value = box.value + 1
+  box.value
+
+fn repeat_increment(~box: Box, iterations: i32) -> i32
+  var remaining = iterations
+  while remaining > 0:
+    increment(~box)
+    remaining = remaining - 1
+  box.value
+
+pub fn main() -> i32
+  let ~first = Box { value: 3 }
+  let ~second = Box { value: 5 }
+  repeat_increment(~first, 0) * 1000 + first.value * 100 + repeat_increment(~second, 2) * 10 + second.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(3377);
+    expect(runMain(optimizedCodegen.module)()).toBe(3377);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).not.toMatch(
+      /repeat_increment[^\s]*__scalar_agg_0_mutable/,
+    );
+    expect(optimizedText).not.toMatch(/__increment_\d+__scalar_agg_0_mutable/);
+    expect(optimizedText).toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("keeps later argument mutations ahead of the mutable call", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn add(~box: Box, amount: i32) -> void
+  box.value = box.value + amount
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  add(~box, block
+    box.value = 10
+    2)
   box.value
 `);
 
-    expect(runMain(optimizedCodegen.module)()).toBe(9);
+    expect(runMain(baselineCodegen.module)()).toBe(12);
+    expect(runMain(optimizedCodegen.module)()).toBe(12);
+    expect(optimizedCodegen.module.emitText()).not.toMatch(
+      /add[^\s]*__scalar_agg_0_mutable/,
+    );
+  });
+
+  it("preserves a second mutable object's updates across control flow", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn mutate_both(~first: Box, ~second: Box) -> void
+  first.value = first.value + 1
+  second.value = second.value + 10
+
+pub fn main() -> i32
+  let ~first = Box { value: 1 }
+  let ~second = Box { value: 2 }
+  if true:
+    mutate_both(~first, ~second)
+  first.value * 100 + second.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(212);
+    expect(runMain(optimizedCodegen.module)()).toBe(212);
+    expect(optimizedCodegen.module.emitText()).toMatch(
+      /mutate_both[^\s]*__scalar_agg_0_mutable/,
+    );
   });
 
   it("does not scalarize heap-object parameters mutated through local aliases", () => {

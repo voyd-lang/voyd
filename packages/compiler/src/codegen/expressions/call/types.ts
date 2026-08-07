@@ -3,6 +3,7 @@ import type {
   HirCallExpr,
   HirExprId,
   FunctionMetadata,
+  LocalBindingScalarAggregate,
   TypeId,
 } from "../../context.js";
 import type { ProgramFunctionInstanceId } from "../../../semantics/ids.js";
@@ -31,6 +32,7 @@ export type CompiledCallArgumentsForParams = {
   writebacks: binaryen.ExpressionRef[];
   consumedArgCount: number;
   meta?: FunctionMetadata;
+  mutableScalarAggregateResultBinding?: LocalBindingScalarAggregate;
 };
 
 export type PlannedCallArguments = {

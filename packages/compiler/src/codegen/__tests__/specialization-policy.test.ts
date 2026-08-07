@@ -309,6 +309,33 @@ describe("codegen specialization admission", () => {
       }),
     ).toBe(false);
   });
+
+  it("reuses a reserved identity after the local kind budget is full", () => {
+    const { ctx, item } = createAdmissionFixture();
+    const request = {
+      ctx,
+      meta: baseMeta,
+      item,
+      kind: "scalar_aggregate" as const,
+      dimensions: {
+        scalarAggregate: { parameterIndexes: [0], result: false },
+      },
+      maxKindVariants: 1,
+    };
+
+    expect(
+      tryAdmitFunctionSpecialization({
+        ...request,
+        existingKindVariants: 0,
+      }),
+    ).toBe(true);
+    expect(
+      tryAdmitFunctionSpecialization({
+        ...request,
+        existingKindVariants: 1,
+      }),
+    ).toBe(true);
+  });
 });
 
 const createAdmissionFixture = (

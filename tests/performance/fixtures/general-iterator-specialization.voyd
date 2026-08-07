@@ -1,0 +1,98 @@
+use std::optional::all
+
+obj CountSequence {
+  end: i32
+}
+
+obj CountIterator {
+  current: i32,
+  end: i32
+}
+
+impl Sequence<i32> for CountSequence
+  fn iter(self) -> Iterator<i32>
+    CountIterator { current: 0, end: self.end }
+
+impl Iterator<i32> for CountIterator
+  fn next(~self) -> Option<i32>
+    if self.current >= self.end:
+      return None {}
+    let value = self.current
+    self.current = self.current + 1
+    Some<i32> { value }
+
+obj FilteredSequence {
+  end: i32,
+  stride: i32
+}
+
+obj FilteredIterator {
+  current: i32,
+  end: i32,
+  stride: i32
+}
+
+impl Sequence<i32> for FilteredSequence
+  fn iter(self) -> Iterator<i32>
+    FilteredIterator {
+      current: 0,
+      end: self.end,
+      stride: self.stride
+    }
+
+impl Iterator<i32> for FilteredIterator
+  fn next(~self) -> Option<i32>
+    while self.current < self.end:
+      let candidate = self.current
+      self.current = self.current + self.stride
+      if (candidate % 3) != 0:
+        return Some<i32> { value: candidate }
+    None {}
+
+fn score(value: i32, request: i32) -> i32
+  ((value * 5) + (request % 11)) % 997
+
+pub fn light_for_benchmark() -> i32
+  var pass = 0
+  var total = 0
+  while pass < 20000:
+    for value in CountSequence { end: 64 }:
+      total = total + value
+    pass = pass + 1
+  total
+
+pub fn light_manual_control() -> i32
+  var pass = 0
+  var total = 0
+  while pass < 20000:
+    var current = 0
+    while current < 64:
+      total = total + current
+      current = current + 1
+    pass = pass + 1
+  total
+
+pub fn filtered_for_benchmark() -> i32
+  var request = 0
+  var total = 0
+  while request < 10000:
+    for value in FilteredSequence { end: 96, stride: 2 }:
+      total = total + score(value, request)
+    request = request + 1
+  total
+
+pub fn filtered_manual_control() -> i32
+  var request = 0
+  var total = 0
+  while request < 10000:
+    var current = 0
+    while current < 96:
+      let candidate = current
+      current = current + 2
+      if (candidate % 3) != 0:
+        total = total + score(candidate, request)
+    request = request + 1
+  total
+
+pub fn main() -> i32
+  filtered_for_benchmark()

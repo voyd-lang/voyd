@@ -277,7 +277,8 @@ export const getOrCreateCallShapeSpecialization = ({
     userResultType:
       meta.resultAbiKind === "out_ref"
         ? binaryen.none
-        : meta.scalarAggregateResult
+        : meta.scalarAggregateResult ||
+            typeof meta.scalarAggregateMutableParamIndex === "number"
           ? meta.resultType
           : getSignatureWasmType(meta.resultTypeId, ctx),
   });

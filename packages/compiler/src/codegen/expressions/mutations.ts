@@ -41,6 +41,7 @@ import {
   wasmTypeFor,
 } from "../types.js";
 import type { ProgramFunctionInstanceId } from "../../semantics/ids.js";
+import { exactNominalForType } from "../optimization/runtime-type-checks.js";
 
 const storeIntoBinding = ({
   binding,
@@ -239,6 +240,16 @@ export const compileFieldAssignment = ({
     rootExpr?.exprKind === "identifier"
       ? fnCtx.bindings.get(rootExpr.symbol)
       : undefined;
+  const exactRootNominalTypeId = (() => {
+    if (rootExpr?.exprKind !== "identifier") {
+      return undefined;
+    }
+    const exactTypeId = fnCtx.exactParameterTypes?.get(rootExpr.symbol);
+    if (typeof exactTypeId !== "number") {
+      return undefined;
+    }
+    return exactNominalForType({ typeId: exactTypeId, ctx });
+  })();
   if (rootBinding?.kind === "scalar-aggregate" && segments.length === 1) {
     const field = rootBinding.structInfo.fieldMap.get(targetExpr.field);
     if (!field) {
@@ -366,6 +377,7 @@ export const compileFieldAssignment = ({
             ctx,
             fnCtx,
           }),
+          exactNominalTypeId: index === 0 ? exactRootNominalTypeId : undefined,
           ctx,
           fnCtx,
         }),

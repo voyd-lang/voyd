@@ -35,6 +35,7 @@ import {
   boxSignatureSpillValue,
   unboxSignatureSpillValue,
 } from "../../signature-spill.js";
+import { storeScalarAggregateBindingAbiValue } from "../../optimization/scalar-aggregates.js";
 import { getOrCreateStaticEffectSpecialization } from "../../effects/static-specialization.js";
 import {
   compileRuntimeIdentityConflict,
@@ -495,6 +496,95 @@ export const emitResolvedCall = ({
     callArgs as number[],
     resolvedMeta.resultType,
   );
+  if (typeof resolvedMeta.scalarAggregateMutableParamIndex === "number") {
+    const binding = options.mutableScalarAggregateResultBinding;
+    if (!binding) {
+      throw new Error("mutable scalar aggregate call is missing its writeback");
+    }
+    const combinedResult = resolvedMeta.scalarAggregateMutableCombinedResult;
+    if (!combinedResult) {
+      throw new Error(
+        "mutable scalar aggregate call is missing combined-result ABI metadata",
+      );
+    }
+    const combinedAbiTypes = [
+      ...combinedResult.logicalAbiTypes,
+      ...combinedResult.writebackAbiTypes,
+    ];
+    const captured = captureMultivalueLanes({
+      value: rawCall,
+      abiTypes: combinedAbiTypes,
+      ctx,
+      fnCtx,
+    });
+    const logicalLanes = captured.lanes.slice(
+      0,
+      combinedResult.logicalAbiTypes.length,
+    );
+    const writebackLanes = captured.lanes.slice(
+      combinedResult.logicalAbiTypes.length,
+    );
+    const writebackValue =
+      writebackLanes.length === 1
+        ? writebackLanes[0]!
+        : ctx.mod.tuple.make(writebackLanes as binaryen.ExpressionRef[]);
+    const stores = storeScalarAggregateBindingAbiValue({
+      binding,
+      value: writebackValue,
+      ctx,
+      fnCtx,
+    });
+    if (logicalLanes.length === 0) {
+      return {
+        expr: ctx.mod.block(
+          null,
+          [...preCallOps, ...captured.setup, ...stores],
+          binaryen.none,
+        ),
+        usedReturnCall: false,
+      };
+    }
+    const logicalValue =
+      logicalLanes.length === 1
+        ? logicalLanes[0]!
+        : ctx.mod.tuple.make(logicalLanes as binaryen.ExpressionRef[]);
+    const decodedLogicalValue =
+      getSignatureSpillBoxType({ typeId: resolvedMeta.resultTypeId, ctx }) ===
+      combinedResult.logicalAbiTypes[0]
+        ? unboxSignatureSpillValue({
+            value: logicalValue,
+            typeId: resolvedMeta.resultTypeId,
+            ctx,
+          })
+        : logicalValue;
+    const coercedLogicalValue =
+      resolvedMeta.resultTypeId === expectedTypeId
+        ? decodedLogicalValue
+        : coerceValueToType({
+            value: decodedLogicalValue,
+            actualType: resolvedMeta.resultTypeId,
+            targetType: expectedTypeId,
+            ctx,
+            fnCtx,
+          });
+    return {
+      expr: ctx.mod.block(
+        null,
+        [
+          ...preCallOps,
+          ...captured.setup,
+          ...stores,
+          coerceExprToWasmType({
+            expr: coercedLogicalValue,
+            targetType: callResultWasmType,
+            ctx,
+          }),
+        ],
+        callResultWasmType,
+      ),
+      usedReturnCall: false,
+    };
+  }
   if (usingProvidedWideResultStorage) {
     const ops = preCallOps.length === 0 ? [rawCall] : [...preCallOps, rawCall];
     return {
