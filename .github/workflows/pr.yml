@@ -45,6 +45,7 @@ jobs:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
       VOYD_COMPILER_TEST_SHARD: ${{ matrix.shard }}/2
+      VOYD_STD_TEST_SHARD: ${{ matrix.shard }}/2
     steps:
       - uses: actions/checkout@v6
         with:
@@ -436,6 +437,7 @@ jobs:
         run: VOYD_USE_DIST=1 npm run --workspace @voyd-lang/cli test:dist-smoke
 
   optimizer-scorecard:
+    name: optimizer-scorecard (${{ matrix.shard }})
     runs-on: ubuntu-latest
     timeout-minutes: 18
     strategy:
@@ -527,4 +529,4 @@ jobs:
           OPTIMIZER_BENCH_WASM_MAX_PCT: "5"
           OPTIMIZER_BENCH_GZIP_MAX_PCT: "5"
           OPTIMIZER_BENCH_SCENARIOS: ${{ steps.changes.outputs.web == 'true' && matrix.scenarios_with_web || matrix.scenarios_without_web }}
-        run: npm run bench:optimizer:compare -- --scenarios="$OPTIMIZER_BENCH_SCENARIOS"
+        run: npm run bench:optimizer:compare -- --scenarios "$OPTIMIZER_BENCH_SCENARIOS"

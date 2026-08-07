@@ -13,6 +13,7 @@
       "env": [
         "VITEST_MAX_WORKERS",
         "VOYD_COMPILER_TEST_SHARD",
+        "VOYD_STD_TEST_SHARD",
         "VOYD_TEST_TIMINGS_DIR"
       ],
       "outputs": []
