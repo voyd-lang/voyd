@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -44,11 +44,37 @@ export const groupsForShard = (value) => {
   throw new Error("SDK tests support one or two shards");
 };
 
-const run = () => {
-  for (const groupName of groupsForShard(process.env.VOYD_SDK_TEST_SHARD)) {
-    const group = groups[groupName];
-    process.stdout.write(`\n[SDK test group ${groupName}]\n`);
-    const result = spawnSync(
+export const executionBatches = ({ shardValue, isCi }) => {
+  const selectedGroups = groupsForShard(shardValue);
+  if (!isCi && shardValue === undefined) {
+    return [["base"], ["external-a", "external-b"]];
+  }
+  return [selectedGroups];
+};
+
+const run = async () => {
+  const shardValue = process.env.VOYD_SDK_TEST_SHARD;
+  const batches = executionBatches({
+    shardValue,
+    isCi: process.env.CI !== undefined,
+  });
+  const statuses = await Promise.all(batches.map(runGroupSequence));
+  process.exitCode = statuses.every((status) => status === 0) ? 0 : 1;
+};
+
+const runGroupSequence = async (groupNames) => {
+  for (const groupName of groupNames) {
+    const status = await runGroup(groupName);
+    if (status !== 0) return status;
+  }
+  return 0;
+};
+
+const runGroup = (groupName) => {
+  const group = groups[groupName];
+  process.stdout.write(`\n[SDK test group ${groupName}]\n`);
+  return new Promise((resolve, reject) => {
+    const child = spawn(
       process.execPath,
       [
         vitestPath,
@@ -63,14 +89,14 @@ const run = () => {
       ],
       { cwd: sdkRoot, env: process.env, stdio: "inherit" },
     );
-    if (result.error) throw result.error;
-    if (result.status !== 0) process.exit(result.status ?? 1);
-  }
+    child.on("error", reject);
+    child.on("exit", (status) => resolve(status ?? 1));
+  });
 };
 
 if (
   process.argv[1] &&
   pathToFileURL(path.resolve(process.argv[1])).href === import.meta.url
 ) {
-  run();
+  await run();
 }

@@ -2494,7 +2494,7 @@
     "file": "scripts/testing/run-sdk-test-shards.test.mjs",
     "owner": "package-unit",
     "disposition": "package-local",
-    "rationale": "Protects complete, non-overlapping SDK CI group assignment while retaining every group in the unsharded local suite."
+    "rationale": "Protects complete SDK group assignment, local-only batch concurrency, and sequential CI shard execution."
   },
   {
     "file": "scripts/testing/run-std-test-shards.test.mjs",
@@ -2506,7 +2506,7 @@
     "file": "scripts/testing/run-web-test-shards.test.mjs",
     "owner": "package-unit",
     "disposition": "package-local",
-    "rationale": "Keep with CI tooling: protects deterministic complete web-shard partition selection and rejects invalid partition arguments."
+    "rationale": "Protects the combined local web compile, explicit sequential isolation fallback, complete CI selection, and invalid partition handling."
   },
   {
     "file": "scripts/testing/timing-budget.test.mjs",

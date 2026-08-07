@@ -54,6 +54,10 @@ typing gates. Every SDK group and discovered std module is assigned exactly
 once. This avoids silently dropping new tests while keeping compile-heavy work
 active in both jobs.
 
+The unsharded SDK command runs its base group alongside the sequential pair of
+external-adapter groups on local machines. CI and explicit SDK shards remain
+sequential so hosted runners retain predictable CPU and memory use.
+
 The shared Vitest configuration defaults to one worker in CI and uses Vitest's
 unrestricted default locally. `VITEST_MAX_WORKERS` overrides both behaviors.
 Conformance and integration explicitly use two workers.
@@ -122,11 +126,11 @@ change its result.
 
 `voyd test --shard N/M` discovers and sorts test modules before compilation,
 selects modules by deterministic round-robin index, and compiles each selected
-set together once. CI compiles all 24 files together to avoid paying compiler
-startup and standard-library analysis costs once per partition. Local and
-full-repository tests retain eight sequential partitions for conservative heap
-isolation. The generic shard runner still supports two- or four-way CI
-partitioning if the combined run proves unreliable on hosted workers.
+set together once. CI and the default local suite compile all 24 files together
+to avoid paying compiler startup and standard-library analysis costs once per
+partition. `npm run --workspace @voyd-lang/web test:isolated` retains eight
+sequential partitions as a low-memory and debugging fallback. The generic
+shard runner still supports explicit partition selection for CI diagnostics.
 
 - exact command `npm run test:unit:web:ci`: 600,000 ms;
 - compiler-process hard timeout: 600,000 ms;

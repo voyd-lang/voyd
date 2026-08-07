@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { groupsForShard, parseShard } from "./run-sdk-test-shards.mjs";
+import {
+  executionBatches,
+  groupsForShard,
+  parseShard,
+} from "./run-sdk-test-shards.mjs";
 
 describe("SDK CI test sharding", () => {
   it("assigns every test group to one logical CI shard", () => {
@@ -15,11 +19,27 @@ describe("SDK CI test sharding", () => {
     ]);
   });
 
-  it("retains all SDK groups in the default local suite", () => {
+  it("runs all SDK groups in two concurrent batches only by default locally", () => {
     expect(groupsForShard(undefined)).toEqual([
       "base",
       "external-a",
       "external-b",
+    ]);
+    expect(executionBatches({ shardValue: undefined, isCi: false })).toEqual([
+      ["base"],
+      ["external-a", "external-b"],
+    ]);
+    expect(executionBatches({ shardValue: undefined, isCi: true })).toEqual([
+      ["base", "external-a", "external-b"],
+    ]);
+  });
+
+  it("keeps explicit CI shards sequential", () => {
+    expect(executionBatches({ shardValue: "1/2", isCi: false })).toEqual([
+      ["base"],
+    ]);
+    expect(executionBatches({ shardValue: "2/2", isCi: false })).toEqual([
+      ["external-a", "external-b"],
     ]);
   });
 

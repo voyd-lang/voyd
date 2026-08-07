@@ -13,6 +13,9 @@ const webTestModules = globSync("**/*.test.voyd", {
 const packageScripts = JSON.parse(
   readFileSync(resolve(repoRoot, "package.json"), "utf8"),
 ).scripts;
+const webPackageScripts = JSON.parse(
+  readFileSync(resolve(repoRoot, "packages/web/package.json"), "utf8"),
+).scripts;
 const workflow = readFileSync(
   resolve(repoRoot, ".github/workflows/pr.yml"),
   "utf8",
@@ -35,18 +38,20 @@ const modulesForPartition = (modules, partition) =>
   );
 
 describe("web test shard partitioning", () => {
-  it("runs eight compile-level partitions for local and full-suite tests", () => {
-    expect(partitionsForArgs([])).toEqual(
+  it("runs one combined compile by default locally", () => {
+    expect(partitionsForArgs([])).toEqual([{ index: 0, count: 1 }]);
+  });
+
+  it("retains eight sequential partitions as an isolation fallback", () => {
+    expect(partitionsForArgs(["--isolated"])).toEqual(
       Array.from({ length: 8 }, (_value, index) => ({ index, count: 8 })),
     );
+    expect(webPackageScripts["test:isolated"]).toContain("--isolated");
   });
 
   it("runs only the requested CI partition", () => {
     expect(
-      partitionsForArgs([
-        "--partition-index=6",
-        "--partition-count=8",
-      ]),
+      partitionsForArgs(["--partition-index=6", "--partition-count=8"]),
     ).toEqual([{ index: 6, count: 8 }]);
   });
 
@@ -69,9 +74,7 @@ describe("web test shard partitioning", () => {
         count: 1,
       },
     ]);
-    expect(workflow).toContain(
-      "-- npm run test:unit:web:ci",
-    );
+    expect(workflow).toContain("-- npm run test:unit:web:ci");
   });
 
   it.each([
