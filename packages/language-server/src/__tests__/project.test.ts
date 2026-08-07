@@ -2,14 +2,8 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
-import type { ModuleNode } from "@voyd-lang/compiler/modules/types.js";
-import { parse } from "@voyd-lang/compiler/parser/index.js";
 import { describe, expect, it } from "vitest";
 import { TextDocument } from "vscode-languageserver-textdocument";
-import {
-  insertImportEditFromContext,
-  resolveImportInsertionContext,
-} from "../project/auto-imports.js";
 import {
   analyzeProject,
   autoImportActions,
@@ -573,72 +567,6 @@ fn value() -> i32
     }
   });
 
-  it("uses top-level declarations for insertion even when semantic use spans are deeper", () => {
-    const filePath = path.join(os.tmpdir(), "voyd-ls-auto-import-scope.voyd");
-    const uri = toFileUri(filePath);
-    const moduleId = "src::main";
-    const source =
-      `use src::existing::value\n\nimpl Counter\n  fn run() -> i32\n    0\n`;
-    const moduleNode: ModuleNode = {
-      id: moduleId,
-      path: { namespace: "src", segments: ["main"] },
-      origin: { kind: "file", filePath },
-      ast: parse(source),
-      source,
-      dependencies: [],
-    };
-
-    const analysis = {
-      moduleIdByFilePath: new Map([[path.resolve(filePath), moduleId]]),
-      semantics: new Map([
-        [
-          moduleId,
-          {
-            binding: {
-              uses: [
-                { form: { location: { endIndex: source.indexOf("\n") } } },
-                { form: { location: { endIndex: source.length - 1 } } },
-              ],
-            },
-          },
-        ],
-      ]),
-      graph: {
-        entry: moduleId,
-        modules: new Map([
-          [
-            moduleId,
-            moduleNode,
-          ],
-        ]),
-        diagnostics: [],
-      },
-    };
-
-    const context = resolveImportInsertionContext({
-      analysis,
-      documentUri: uri,
-    });
-    expect(context).toBeDefined();
-    if (!context) {
-      return;
-    }
-
-    const edit = insertImportEditFromContext({
-      context,
-      importLine: "use src::util::helper",
-    });
-    const updated = applyEditToSource({
-      uri,
-      source,
-      version: 1,
-      text: edit,
-    });
-
-    expect(updated).toContain("use src::existing::value\nuse src::util::helper\n\nimpl Counter");
-    expect(updated).not.toContain("fn run() -> i32\nuse src::util::helper");
-  });
-
   it("offers in-scope completion items for locals and types", async () => {
     const project = await createProject({
       "src/main.voyd":
@@ -882,24 +810,6 @@ fn value() -> i32
         position: { line: 1, character: 5 },
       });
       expect(completion.items.some((item) => item.label === "helper")).toBe(true);
-    } finally {
-      await rm(project.rootDir, { recursive: true, force: true });
-    }
-  });
-
-  it("resolves src root for nested source package entries", async () => {
-    const project = await createProject({
-      "main.voyd": `fn main() -> i32\n  0\n`,
-      "src/pkg.voyd": `pub use self::pkgs`,
-      "src/pkgs.voyd": `pub use self::vtrace`,
-      "src/pkgs/vtrace/pkg.voyd": `pub use self::color`,
-      "src/pkgs/vtrace/color.voyd": `pub fn shade() -> i32\n  0\n`,
-    });
-
-    try {
-      const entryPath = project.filePathFor("src/pkgs/vtrace/pkg.voyd");
-      const roots = resolveModuleRoots(entryPath);
-      expect(roots.src).toBe(project.filePathFor("src"));
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }

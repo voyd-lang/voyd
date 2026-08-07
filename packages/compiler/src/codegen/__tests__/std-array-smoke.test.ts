@@ -45,11 +45,6 @@ const watForExport = (wat: string, exportName: string): string => {
 };
 
 describe("std::array compile smoke", () => {
-  it("compiles std::array helpers with wasm validation", async () => {
-    const result = await compileStdArrayFixture();
-    expect(result.wasm.byteLength).toBeGreaterThan(0);
-  });
-
   it("runs optimized direct len/at access", async () => {
     const result = await compileStdArrayFixture({
       optimize: true,

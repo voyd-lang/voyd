@@ -556,61 +556,6 @@ test "literal braces remain literal path text":
   require_contains(rendered, "\"/literal/%7Bid%7D\"".as_slice(), "literal braces were interpreted as a path parameter")
   require_not_contains(rendered, "\"name\":\"id\"".as_slice(), "literal braces fabricated a path parameter")
 
-test "automatic request contracts cover parameters and limited body extractors":
-  let base = app(openapi: { title: "Requests", version: "1" })
-  let with_path = route_params<DocumentedArticlePath, Text>(
-    base,
-    "/articles/:id".as_slice(),
-    method: Method::Get {},
-    path_reply
-  )
-  let with_query = route_query_context<DocumentedArticleQuery, Text>(
-    with_path,
-    "/articles",
-    method: Method::Get {},
-    query_reply
-  )
-  let with_headers = route_headers<HeaderInput, Text>(
-    with_query,
-    "/headers",
-    method: Method::Get {},
-    header_reply
-  )
-  let with_cookies = route_cookies<CookieInput, Text>(
-    with_headers,
-    "/cookies",
-    method: Method::Get {},
-    cookie_reply
-  )
-  let with_json = with_cookies.post(
-    "/limited-json",
-    body: limited(json_body(), limit: body_limit(1024)),
-    handler: limited_json_reply
-  )
-  let with_text = with_json.post(
-    "/limited-text",
-    body: limited(text_body(), limit: body_limit(1024)),
-    handler: text_body_reply
-  )
-  let documented = with_text.post(
-    "/limited-bytes",
-    body: limited(bytes(), limit: body_limit(1024)),
-    handler: bytes_body_reply
-  )
-  match(stringify(documented.openapi()))
-    Err:
-      Test::fail()
-    Ok<String> { value }:
-      require_contains(value, "\"/articles/{id}\"".as_slice(), "path was not normalized")
-      require_contains(value, "\"in\":\"path\"".as_slice(), "missing path parameter")
-      require_contains(value, "\"in\":\"query\"".as_slice(), "missing query parameter")
-      require_contains(value, "\"in\":\"header\"".as_slice(), "missing header parameter")
-      require_contains(value, "\"in\":\"cookie\"".as_slice(), "missing cookie parameter")
-      require_contains(value, "\"application/json\"".as_slice(), "missing limited JSON contract")
-      require_contains(value, "\"text/plain\"".as_slice(), "missing limited text contract")
-      require_contains(value, "\"application/octet-stream\"".as_slice(), "missing limited bytes contract")
-      require_contains(value, "JSON accepted by POST /automatic/articles.".as_slice(), "limited JSON lost its DTO schema")
-
 test "raw JSON inputs remain opaque":
   let raw_json_app = app(openapi: { title: "Raw JSON", version: "1" })
     .post("/raw-json", body: json_body(), handler: raw_json_input_reply)

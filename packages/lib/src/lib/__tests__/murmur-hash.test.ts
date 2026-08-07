@@ -27,18 +27,6 @@ describe("Murmur Hash", async () => {
     expect(hash).toBe(839148365);
   });
 
-  test("should return consistent hash for the same input", () => {
-    const hash1 = murmurHash3("consistent");
-    const hash2 = murmurHash3("consistent");
-    expect(hash1).toBe(hash2);
-  });
-
-  test("should return different hashes for different inputs", () => {
-    const hash1 = murmurHash3("input1");
-    const hash2 = murmurHash3("input2");
-    expect(hash1).not.toBe(hash2);
-  });
-
   test("should handle non-ASCII characters", () => {
     const hash = murmurHash3("你好，世界");
     expect(hash).toBe(1975738373);

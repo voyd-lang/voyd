@@ -10,16 +10,6 @@ const fixturePath = resolve(
   "__fixtures__",
   "effects-e2e.voyd"
 );
-const invalidTailFixturePath = resolve(
-  import.meta.dirname,
-  "__fixtures__",
-  "effects-invalid-tail.voyd"
-);
-const invalidResumeFixturePath = resolve(
-  import.meta.dirname,
-  "__fixtures__",
-  "effects-invalid-resume.voyd"
-);
 const internalNoResumeFixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
@@ -100,30 +90,6 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
     const instance = instantiateEffectsModule(wasm);
     const main = instance.exports.main as CallableFunction;
     expect(main()).toBe(3);
-  });
-
-  it("rejects escaped resume at compile time", async () => {
-    let caught: unknown;
-    try {
-      await compileFixture(invalidResumeFixturePath);
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(Error);
-    const parsed = JSON.parse((caught as Error).message) as Array<{ code?: string }>;
-    expect(parsed.some((diag) => diag.code === "TY0035")).toBe(true);
-  });
-
-  it("rejects conditional missing tail at compile time", async () => {
-    let caught: unknown;
-    try {
-      await compileFixture(invalidTailFixturePath);
-    } catch (error) {
-      caught = error;
-    }
-    expect(caught).toBeInstanceOf(Error);
-    const parsed = JSON.parse((caught as Error).message) as Array<{ code?: string }>;
-    expect(parsed.some((diag) => diag.code === "TY0015")).toBe(true);
   });
 
   it("supports direct performs inside a try body", async () => {

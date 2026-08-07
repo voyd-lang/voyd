@@ -37,9 +37,16 @@ jobs:
   test:
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     env:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
+      VOYD_COMPILER_TEST_SHARD: ${{ matrix.shard }}/2
+      VOYD_SDK_TEST_SHARD: ${{ matrix.shard }}/2
+      VOYD_STD_TEST_SHARD: ${{ matrix.shard }}/2
     steps:
       - uses: actions/checkout@v6
         with:
@@ -48,8 +55,9 @@ jobs:
         uses: actions/cache@v5
         with:
           path: .turbo
-          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ github.event.pull_request.head.sha }}
+          key: ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ matrix.shard }}-${{ github.event.pull_request.head.sha }}
           restore-keys: |
+            ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-${{ matrix.shard }}-
             ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-${{ github.job }}-
             ${{ runner.os }}-turbo-pr-${{ hashFiles('package-lock.json') }}-
       - name: Detect changed areas
@@ -73,38 +81,56 @@ jobs:
           cache: npm
           cache-dependency-path: package-lock.json
       - run: npm ci --include=optional
-      - run: npm run test:audit
-      - name: Run release tooling tests
-        run: npm run test:release
+      - if: matrix.shard == 2
+        run: npm run check:test-inventory
+      - name: Run repository tooling tests
+        if: matrix.shard == 2
+        run: npm run test:tooling
       - run: mkdir -p test-timings
       # Package-local units run separately from portable conformance, integration,
       # and the developer-tooling unit shard.
-      - name: Run affected core package units
+      - name: Run affected core package unit shard
         env:
           VOYD_USE_SRC: "1"
           VITEST_MAX_WORKERS: "1"
           VOYD_TEST_TIMINGS_DIR: ${{ github.workspace }}/test-timings
-        run: node scripts/testing/run-timed-command.mjs --lane unit --output test-timings/unit-core-wall.json -- npm run test:unit:core:affected:ci
+        run: node scripts/testing/run-timed-command.mjs --lane unit --output test-timings/unit-core-${{ matrix.shard }}-wall.json -- npm run test:unit:core:shard:${{ matrix.shard }}:ci
       - name: Enforce core unit timing budget
-        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane unit --output test-timings/unit-core-summary.json
+        run: node scripts/testing/summarize-test-timings.mjs --dir test-timings --lane unit --output test-timings/unit-core-${{ matrix.shard }}-summary.json
       - name: Upload core unit timings
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: core-unit-test-timings
+          name: core-unit-test-timings-${{ matrix.shard }}
           path: test-timings
           retention-days: 30
       # Build-only checks for non-CLI artifacts that are not exercised by package tests.
       - name: Build non-CLI artifacts
-        if: steps.changes.outputs.non_cli_build == 'true'
+        if: matrix.shard == 2 && steps.changes.outputs.non_cli_build == 'true'
         run: npx turbo run build --affected --output-logs=errors-only
       - name: Run typing benchmark regression gate
-        if: steps.changes.outputs.compiler_semantics == 'true'
+        if: matrix.shard == 2 && steps.changes.outputs.compiler_semantics == 'true'
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           TYPING_BENCH_MAX_REGRESSION_PCT: "15"
         run: node scripts/ci/check-typing-bench-regression.mjs
+
+  test-status:
+    name: test
+    needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Require successful core test shards
+        env:
+          SHARD_RESULT: ${{ needs.test.result }}
+        run: |
+          if [ "$SHARD_RESULT" != "success" ]; then
+            echo "One or more core test shards did not succeed."
+            exit 1
+          fi
 
   web-unit:
     runs-on: ubuntu-latest
@@ -325,11 +351,15 @@ jobs:
 
   compiler-codegen:
     runs-on: ubuntu-latest
-    # Keep the complete suite in one job so CI reports its true end-to-end cost.
-    timeout-minutes: 20
+    timeout-minutes: 12
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     env:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
+      VOYD_COMPILER_TEST_SHARD: ${{ matrix.shard }}/2
     steps:
       - uses: actions/checkout@v6
         with:
@@ -359,7 +389,7 @@ jobs:
       - name: Install dependencies
         if: steps.changes.outputs.compiler_codegen == 'true'
         run: npm ci --include=optional
-      - name: Run compiler codegen tests
+      - name: Run compiler codegen shard
         if: steps.changes.outputs.compiler_codegen == 'true'
         run: npm run --workspace @voyd-lang/compiler test:codegen
 
@@ -424,8 +454,19 @@ jobs:
         run: VOYD_USE_DIST=1 npm run --workspace @voyd-lang/cli test:dist-smoke
 
   optimizer-scorecard:
+    name: optimizer-scorecard (${{ matrix.shard }})
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: 1
+            scenarios_with_web: vtrace-main
+            scenarios_without_web: vtrace-main,call-shape-defaults
+          - shard: 2
+            scenarios_with_web: tier1-trait-call,scalar-aggregate,call-shape-defaults
+            scenarios_without_web: tier1-trait-call,scalar-aggregate
     steps:
       - uses: actions/checkout@v6
         with:
@@ -472,20 +513,20 @@ jobs:
               # triggering this noisy, expensive benchmark for unrelated scripts.
               - "package-lock.json"
       - name: Use Node.js
-        if: steps.changes.outputs.optimizer == 'true' || steps.changes.outputs.web == 'true'
+        if: steps.changes.outputs.optimizer == 'true' || (matrix.shard == 1 && steps.changes.outputs.web == 'true')
         uses: actions/setup-node@v6
         with:
           node-version: "24.x"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Install dependencies
-        if: steps.changes.outputs.optimizer == 'true' || steps.changes.outputs.web == 'true'
+        if: steps.changes.outputs.optimizer == 'true' || (matrix.shard == 1 && steps.changes.outputs.web == 'true')
         run: npm ci --include=optional
       - name: Test optimizer scorecard gate
-        if: steps.changes.outputs.optimizer == 'true'
+        if: matrix.shard == 1 && steps.changes.outputs.optimizer == 'true'
         run: npx vitest run scripts/ci/check-optimizer-bench-regression.test.mjs
       - name: Compile whole web package under memory budget
-        if: steps.changes.outputs.web == 'true'
+        if: matrix.shard == 1 && steps.changes.outputs.web == 'true'
         env:
           VOYD_WEB_COMPILE_MAX_OLD_SPACE_MB: "3584"
           VOYD_WEB_COMPILE_MAX_MS: "240000"
@@ -504,4 +545,5 @@ jobs:
           OPTIMIZER_BENCH_RSS_MAX_PCT: "20"
           OPTIMIZER_BENCH_WASM_MAX_PCT: "5"
           OPTIMIZER_BENCH_GZIP_MAX_PCT: "5"
-        run: npm run bench:optimizer:compare
+          OPTIMIZER_BENCH_SCENARIOS: ${{ steps.changes.outputs.web == 'true' && matrix.scenarios_with_web || matrix.scenarios_without_web }}
+        run: npm run bench:optimizer:compare -- --scenarios "$OPTIMIZER_BENCH_SCENARIOS"

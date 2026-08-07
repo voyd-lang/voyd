@@ -34,63 +34,11 @@ pub fn io_tty_probe() -> i32
     return -12
   1
 
-pub fn io_write_probe() -> i32
-  let _ = write("hello".as_slice())
-  let _ = flush()
-  1
-
-pub fn io_write_line_probe() -> i32
-  let _ = write_line("ok".as_slice())
-  1
-
 pub fn io_write_line_embedded_newline_probe() -> i32
   let _ = write_line("A\nB".as_slice())
   1
 
-pub fn io_write_bytes_probe() -> i32
-  let ~buffer = ByteBuffer::with_capacity(2)
-  buffer.push(7)
-  buffer.push(8)
-  let _ = write(buffer.as_bytes(), StdErr {})
-  1
-
-pub fn io_write_combo_probe() -> i32
-  let ~buffer = ByteBuffer::with_capacity(2)
-  buffer.push(7)
-  buffer.push(8)
-  let _ = write("hello".as_slice())
-  let _ = write_line("ok".as_slice())
-  let _ = write(buffer.as_bytes(), StdErr {})
-  let _ = flush()
-  let _ = flush(StdErr {})
-  1
-
 pub fn io_read_bytes_probe() -> i32
-  match(read_bytes(4))
-    Ok<Option<Bytes>> { value }:
-      match(value)
-        Some<Bytes> { value: bytes }:
-          sum_bytes(bytes)
-        None:
-          -1
-    Err<IoError>:
-      -2
-
-pub fn io_read_bytes_to_write_probe() -> i32
-  match(read_bytes(4))
-    Ok<Option<Bytes>> { value }:
-      match(value)
-        Some<Bytes> { value: bytes }:
-          let _ = write(bytes, StdErr {})
-          1
-        None:
-          -1
-    Err<IoError>:
-      -2
-
-pub fn io_input_combo_probe() -> i32
-  if input_is_tty() == false then:
-    return -10
   match(read_bytes(4))
     Ok<Option<Bytes>> { value }:
       match(value)

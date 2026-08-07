@@ -5,7 +5,8 @@ use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
-use src::response::{ Accepted, Created, IntoResponse, Json, NoContent, accepted, created, json, no_content }
+use src::response::{ Accepted, Created, DocumentedResponse, IntoResponse, Json, NoContent, OpenApiResponse, Text, accepted, bytes, created, documented_response, json, no_content, option_json, result_json, text }
+use src::response_composites::self as response_composites
 use src::router::app
 use src::openapi::automatic::all
 
@@ -14,6 +15,9 @@ fn accepted_reply() -> Accepted<AutomaticArticle>
 
 fn empty_reply() -> NoContent
   no_content()
+
+fn text_reply() -> String
+  "plain".to_string()
 
 fn result_reply() -> Result<Created<AutomaticArticle>, Accepted<AutomaticArticle>>
   Ok<Created<AutomaticArticle>> {
@@ -25,11 +29,7 @@ fn option_reply() -> Option<Json<AutomaticArticle>>
     value: json(AutomaticArticle { id: 4, title: "found".to_string() })
   }
 
-fn accepts_response<T: IntoResponse<T>>(value: T) -> T
-  value
-
-test "automatic routes cover status result and option responses":
-  let _ = accepts_response<Result<Created<AutomaticArticle>, Accepted<AutomaticArticle>>>(result_reply())
+test "automatic routes cover status result option and text responses":
   let web_app = app(openapi: { title: "Responses", version: "1" })
     .get("/accepted", handler: accepted_reply)
     .get("/empty", handler: empty_reply)
@@ -43,6 +43,14 @@ test "automatic routes cover status result and option responses":
       require_contains(value, "\"204\"".as_slice(), "missing no-content automatic response")
       require_contains(value, "\"201\"".as_slice(), "missing result success response")
       require_contains(value, "\"404\"".as_slice(), "missing option not-found response")
+
+  let text_app = app(openapi: { title: "Responses", version: "1" })
+    .get("/text", handler: text_reply)
+  match(stringify(text_app.openapi()))
+    Err:
+      Test::fail()
+    Ok<String> { value }:
+      require_contains(value, "\"text/plain; charset=utf-8\"".as_slice(), "missing automatic text response")
 
 fn require_contains(value: String, needle: StringSlice, message: String) -> void
   if not value.contains(needle):

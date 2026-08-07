@@ -1,3 +1,0 @@
-pub obj Animal {
-  name: i32
-}

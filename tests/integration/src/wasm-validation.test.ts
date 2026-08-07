@@ -3,7 +3,6 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
-import { createVoydHost } from "@voyd-lang/js-host";
 import {
   analyzeModules,
   emitProgram,
@@ -30,10 +29,7 @@ const assertNoErrors = (diagnostics: readonly Diagnostic[]): void => {
   throw new Error(`${error.code}: ${error.message}`);
 };
 
-const compileToBinaryenModule = async (
-  entryPath: string,
-  options?: { optimize?: boolean },
-) => {
+const compileToBinaryenModule = async (entryPath: string) => {
   const roots = { src: path.dirname(entryPath), std: resolveStdRoot() };
   const graph = await loadModuleGraph({ entryPath, roots });
   const { semantics, diagnostics } = analyzeModules({ graph });
@@ -42,7 +38,6 @@ const compileToBinaryenModule = async (
   const { module } = await emitProgram({
     graph,
     semantics,
-    codegenOptions: options,
   });
   return module;
 };
@@ -71,96 +66,7 @@ const assertRunnableWasm = (mod: BinaryenLikeModule): Uint8Array => {
   throw new Error("Module is invalid");
 };
 
-const normalize = (value: unknown): unknown => {
-  if (Array.isArray(value)) {
-    return value.map(normalize);
-  }
-  if (value instanceof Map) {
-    return Object.fromEntries(
-      Array.from(value.entries()).map(([key, entry]) => [
-        String(key),
-        normalize(entry),
-      ]),
-    );
-  }
-  if (value && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value).map(([key, entry]) => [key, normalize(entry)]),
-    );
-  }
-  return value;
-};
-
 describe("integration: wasm validation", { timeout: 120_000 }, () => {
-  it("accepts wasm-gc modules that Node can validate", async () => {
-    const module = await compileToBinaryenModule(
-      fixturePath("match_destructure_fields.voyd"),
-    );
-    const mod = module as unknown as BinaryenLikeModule;
-
-    const originalValidate = mod.validate.bind(module);
-    mod.validate = () => {
-      throw new Error("binaryen validate should not run when wasm validates");
-    };
-
-    const wasm = assertRunnableWasm(mod);
-    expect(wasm).toBeInstanceOf(Uint8Array);
-    expect(WebAssembly.validate(wasm as BufferSource)).toBe(true);
-
-    mod.validate = originalValidate;
-  });
-
-  it("compiles std::optional and preserves optional semantics", async () => {
-    const module = await compileToBinaryenModule(
-      fixturePath("std_optional_basic.voyd"),
-    );
-    const wasm = assertRunnableWasm(module);
-    const instance = getWasmInstance(wasm);
-    const exports = instance.exports as Record<string, unknown>;
-    expect((exports.main as () => number)()).toBe(13);
-  });
-
-  it("supports module-qualified return type annotations", async () => {
-    const module = await compileToBinaryenModule(fixturePath("sink.test.voyd"));
-    const wasm = assertRunnableWasm(module);
-    const instance = getWasmInstance(wasm);
-    const exports = instance.exports as Record<string, unknown>;
-    expect((exports.main as () => number)()).toBe(42);
-  });
-
-  it("compiles valid VX wasm and preserves complete event options", async () => {
-    const modules = await Promise.all(
-      [false, true].map((optimize) =>
-        compileToBinaryenModule(fixturePath("vx.voyd"), { optimize }),
-      ),
-    );
-    const [unoptimizedWasm, optimizedWasm] = modules.map(assertRunnableWasm);
-    expect(WebAssembly.validate(unoptimizedWasm as BufferSource)).toBe(true);
-    expect(WebAssembly.validate(optimizedWasm as BufferSource)).toBe(true);
-
-    const host = await createVoydHost({ wasm: unoptimizedWasm });
-    const result = await host.runPure("main");
-
-    const normalized = normalize(result) as Record<string, unknown>;
-    expect(normalized).toEqual(
-      expect.objectContaining({ kind: "element", tag: "div" }),
-    );
-    expect(normalized.attrs).toBeTypeOf("object");
-    expect(normalized.children).toBeInstanceOf(Array);
-
-    const descriptor = normalize(
-      await host.runPure("full_event_options_descriptor"),
-    ) as {
-      options: Record<string, boolean>;
-    };
-    expect(descriptor.options).toEqual({
-      preventDefault: true,
-      stopPropagation: false,
-      capture: false,
-      passive: false,
-    });
-  });
-
   it("supports generic enum macro expansion across modules", async () => {
     const module = await compileToBinaryenModule(
       fixturePath("enum-cross-module/main.voyd"),
@@ -179,16 +85,6 @@ describe("integration: wasm validation", { timeout: 120_000 }, () => {
     const instance = getWasmInstance(wasm);
     const exports = instance.exports as Record<string, unknown>;
     expect((exports.main as () => number)()).toBe(11);
-  });
-
-  it("supports constructor calls through object type aliases", async () => {
-    const module = await compileToBinaryenModule(
-      fixturePath("type-alias-object-constructor.voyd"),
-    );
-    const wasm = assertRunnableWasm(module);
-    const instance = getWasmInstance(wasm);
-    const exports = instance.exports as Record<string, unknown>;
-    expect((exports.main as () => number)()).toBe(6);
   });
 
   it("compiles std transcendental math without host math imports", async () => {

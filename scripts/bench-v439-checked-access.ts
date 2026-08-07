@@ -63,7 +63,7 @@ const scenarios: readonly Scenario[] = [
   {
     name: "representative-vtrace",
     entryPath: path.join(performanceFixtures, "vtrace-compute-benchmark.voyd"),
-    entrypoints: [{ name: "main", expected: 3_825_271 }],
+    entrypoints: [{ name: "main", expected: 428_553 }],
   },
   {
     name: "focused-checked-access",

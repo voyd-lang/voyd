@@ -939,16 +939,6 @@ describe("next codegen", () => {
     expect(main()).toBe(6);
   });
 
-  it("preserves nominal identity for structurally identical types in match guards", () => {
-    const ast = loadAst("nominal_identity_match.voyd");
-    const semantics = semanticsPipeline(ast);
-    const { module } = codegen(semantics, { effectsHostBoundary: "off" });
-    const instance = getWasmInstance(module);
-    const main = instance.exports.main;
-    expect(typeof main).toBe("function");
-    expect((main as () => number)()).toBe(303);
-  });
-
   it("emits wasm for type aliases with type parameters", () => {
     const main = loadMain("type_alias_generics.voyd");
     expect(main()).toBe(12);

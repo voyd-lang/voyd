@@ -33,11 +33,11 @@ New regression tests should fail on the buggy implementation. When reproducing
 the failure directly is impractical, explain why and identify the pre-existing
 test boundary that would have missed it.
 
-After adding or removing a test file, run `npm run test:audit:update`, then edit
+After adding or removing a test file, run `npm run update:test-inventory`, then edit
 the new `needs-review` entry in `docs/testing/test-inventory.json` to record the
 contract-based disposition and rationale. The update command preserves prior
 decisions; it never infers that a test is correctly placed from its directory.
 
-Run `npm run test:audit` before submitting. It rejects unreviewed inventory
+Run `npm run check:test-inventory` before submitting. It rejects unreviewed inventory
 entries, focused `.only` tests, obsolete `apps/smoke` placement and
 compiler-internal imports from the conformance suite.

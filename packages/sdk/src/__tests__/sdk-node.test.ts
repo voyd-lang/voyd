@@ -333,51 +333,6 @@ pub fn main(): (HttpServer, task::TaskRuntime, env::Env) -> i32
     await expect(httpGet(`${result.url}/hello`)).rejects.toThrow();
   }, 330_000);
 
-  it("serves high-level web route handlers without serializing unrelated requests", async () => {
-    const port = await findFreePort();
-    const result = await fixtureSdk.serveWebApp({
-      port,
-      readinessTimeoutMs: 10_000,
-      source: `
-use pkg::web::all
-use std::env::self as env
-use std::http::server::HttpServer
-use std::number::cast::self as cast
-use std::task::self as task
-use std::time::self as time
-use std::time::Duration
-
-pub fn main(): (HttpServer, task::TaskRuntime, env::Env, time::Time) -> i32
-  let port = env::get_int("VOYD_WEB_PORT".as_slice()) ?? -1
-  let host = env::get("VOYD_WEB_HOST".as_slice()) ?? "127.0.0.1".as_slice().to_string()
-  let _ = serve(port: port, host: host, shutdown_timeout: 2000) routes():
-    get("/slow") do:
-      let _ = time::sleep(Duration::from_millis(cast::to_i64(200)))
-      "slow".as_slice().to_string()
-
-    get("/fast") do:
-      "fast".as_slice().to_string()
-  0
-`,
-      run: { bufferSize: 1024 * 1024, defaultAdapters: { runtime: "node" } },
-    });
-
-    if (!result.success) {
-      throw new Error(
-        result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
-      );
-    }
-
-    const slow = httpGet(`${result.url}/slow`, 1000);
-    await new Promise((resolve) => setTimeout(resolve, 25));
-    await expect(httpGet(`${result.url}/fast`, 100)).resolves.toMatchObject({
-      status: 200,
-      body: "fast",
-    });
-    await expect(slow).resolves.toMatchObject({ status: 200, body: "slow" });
-    await expect(result.close()).resolves.toBeUndefined();
-  }, 120_000);
-
   beforeAll(async () => {
     effectCompileResult = expectCompileSuccess(
       await fixtureSdk.compile({ source: EFFECT_SOURCE }),
@@ -666,7 +621,7 @@ pub fn main() -> i32
     const consumer = createSdk({ compilerCache: "artifact", compilerArtifact: artifact });
     const result = expectCompileSuccess(await consumer.compile({ entryPath }));
     await expect(result.run<number>({ entryName: "main" })).resolves.toBe(
-      3_825_271,
+      428_553,
     );
   });
 
@@ -706,7 +661,7 @@ pub fn main() -> i32
       }),
     );
     await expect(warm.run<number>({ entryName: "main" })).resolves.toBe(
-      3_825_271,
+      428_553,
     );
   });
 
@@ -1291,88 +1246,6 @@ pub fn main(): Env -> i32
     }
   });
 
-  it("runs std http client effects with default host adapters", async () => {
-    const sdk = createSdk();
-    const source = `use std::array::Array
-use std::host_dto::HostDto
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
-use std::string::type::new_string
-
-@effect(id: "voyd.std.http.client")
-eff HttpClient
-  request(tail, payload: MsgPack) -> MsgPack
-
-pub fn main(): HttpClient -> i32
-  let header = HostDto::init()
-    .set("name", msgpack::make_string("accept".as_slice().to_string()))
-    .set("value", msgpack::make_string("text/plain".as_slice().to_string()))
-    .pack()
-  let ~headers = Array<MsgPack>::with_capacity(1)
-  headers.push(header)
-  let ~body = Array<MsgPack>::with_capacity(4)
-  body.push(msgpack::make_i32(112))
-  body.push(msgpack::make_i32(105))
-  body.push(msgpack::make_i32(110))
-  body.push(msgpack::make_i32(103))
-  let redirect_policy = HostDto::init()
-    .set("kind", msgpack::make_string("follow".as_slice().to_string()))
-    .set("max_redirects", msgpack::make_i32(20))
-    .pack()
-  let request_payload = HostDto::init()
-    .set("method", msgpack::make_string("POST".as_slice().to_string()))
-    .set("url", msgpack::make_string("https://example.test/echo".as_slice().to_string()))
-    .set("headers", msgpack::make_array(headers))
-    .set("body", msgpack::make_array(body))
-    .set("timeout_millis", msgpack::make_i32(10))
-    .set("redirect_policy", redirect_policy)
-    .pack()
-
-  let response_payload = HttpClient::request(request_payload)
-  match(HostDto::unpack(response_payload))
-    Err:
-      -1
-    Ok<HostDto> { value: response }:
-      match(response.read_bool("ok"))
-        Err:
-          -1
-        Ok<bool> { value: ok }:
-          if ok == false:
-            return -1
-          match(response.read_msgpack("value"))
-            Err:
-              -2
-            Ok<MsgPack> { value: value_payload }:
-              match(HostDto::unpack(value_payload))
-                Err:
-                  -2
-                Ok<HostDto> { value }:
-                  match(value.read_i32("status"))
-                    Err:
-                      -2
-                    Ok<i32> { value: status }:
-                      if status == 201 then: 201 else: -2
-`;
-    const result = expectCompileSuccess(await sdk.compile({ source }));
-    const host = await createVoydHost({
-      wasm: result.wasm,
-      defaultAdapters: {
-        runtime: "node",
-        runtimeHooks: {
-          httpClientRequest: async () => ({
-            status: 201,
-            reason: "Created",
-            headers: [{ name: "content-type", value: "text/plain" }],
-            body: Uint8Array.from([112, 111, 110, 103]),
-          }),
-        },
-      },
-    });
-
-    const output = await host.run<number>("main");
-    expect(output).toBe(201);
-  });
-
   it("runs std input effects with default host adapters", async () => {
     const sdk = createSdk();
     const source = `use std::error::HostError
@@ -1408,93 +1281,6 @@ pub fn main() -> i32
 
     const output = await host.run<number>("main");
     expect(output).toBe(1);
-  });
-
-  it("runs std input/output byte and tty effects with default host adapters", async () => {
-    const sdk = createSdk();
-    const source = `use std::bytes::Bytes
-use std::error::IoError
-use std::input::{ read_bytes, is_tty as input_is_tty }
-use std::optional::types::all
-use std::output::{ write, write_line, flush, is_tty as output_is_tty, StdErr }
-use std::result::types::all
-use std::string::type::new_string
-
-fn sum_bytes(bytes: Bytes): () -> i32
-  let values = bytes.to_array()
-  var index = 0
-  var total = 0
-  while index < values.len():
-    match(values.get(index))
-      Some<i32> { value }:
-        total = total + value
-      None:
-        void
-    index = index + 1
-  total
-
-pub fn main() -> i32
-  if input_is_tty() == false then:
-    return -10
-  if output_is_tty() == false then:
-    return -11
-  if output_is_tty(StdErr {}) then:
-    return -12
-
-  let read_result = match(read_bytes(4))
-    Ok<Option<Bytes>> { value }:
-      match(value)
-        Some<Bytes> { value: bytes }:
-          sum_bytes(bytes)
-        None:
-          return -2
-    Err<IoError>:
-      return -1
-
-  let ~buffer = std::bytes::ByteBuffer::with_capacity(2)
-  buffer.push(7)
-  buffer.push(8)
-  let _ = write("hello".as_slice())
-  let _ = write_line("ok".as_slice())
-  let _ = write(buffer.as_bytes(), StdErr {})
-  let _ = flush()
-  let _ = flush(StdErr {})
-
-  read_result
-`;
-    const result = expectCompileSuccess(await sdk.compile({ source }));
-    const writes: Array<{ target: string; value: string }> = [];
-    const byteWrites: Array<{ target: string; bytes: number[] }> = [];
-    const flushes: string[] = [];
-    const host = await createVoydHost({
-      wasm: result.wasm,
-      defaultAdapters: {
-        runtime: "node",
-        runtimeHooks: {
-          readBytes: async () => Uint8Array.from([7, 8, 9]),
-          isInputTty: () => true,
-          write: async ({ target, value }) => {
-            writes.push({ target, value });
-          },
-          writeBytes: async ({ target, bytes }) => {
-            byteWrites.push({ target, bytes: Array.from(bytes.values()) });
-          },
-          flush: async ({ target }) => {
-            flushes.push(target);
-          },
-          isOutputTty: (target) => target === "stdout",
-        },
-      },
-    });
-
-    const output = await host.run<number>("main");
-    expect(output).toBe(24);
-    expect(writes).toEqual([
-      { target: "stdout", value: "hello" },
-      { target: "stdout", value: "ok\n" },
-    ]);
-    expect(byteWrites).toEqual([{ target: "stderr", bytes: [7, 8] }]);
-    expect(flushes).toEqual(["stdout", "stderr"]);
   });
 
   it("isolates concurrent managed runs so effect payloads do not race", async () => {

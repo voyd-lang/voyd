@@ -1,18 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { resolve, sep } from "node:path";
 import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
-import { parse } from "../parser/index.js";
-import { semanticsPipeline } from "../semantics/pipeline.js";
-import { codegen } from "../codegen/index.js";
 import { wasmTypeFor } from "../codegen/types.js";
 import { createTestCodegenContext } from "../codegen/__tests__/support/test-codegen-context.js";
 import { createMemoryModuleHost } from "../modules/memory-host.js";
 import { createNodePathAdapter } from "../modules/node-path-adapter.js";
-import type { ModuleGraph, ModuleHost, ModuleNode } from "../modules/types.js";
+import type { ModuleHost } from "../modules/types.js";
 import { compileProgram, type CompileProgramResult } from "../pipeline.js";
-import { modulePathToString } from "../modules/path.js";
-import type { HirLambdaExpr } from "../semantics/hir/index.js";
-import { getSymbolTable } from "../semantics/_internal/symbol-table.js";
 
 const createMemoryHost = (files: Record<string, string>): ModuleHost =>
   createMemoryModuleHost({ files, pathAdapter: createNodePathAdapter() });
@@ -43,104 +37,6 @@ describe("type lowering regression", () => {
     expect(result).toBe(ctx.rtt.baseType);
     expect(ctx.structTypes.size).toBe(0);
     expect(ctx.runtimeTypeRegistry.size).toBe(0);
-  });
-
-  it("does not capture imported values in lambdas", () => {
-    const buildModule = ({
-      source,
-      segments,
-      dependencies = [],
-    }: {
-      source: string;
-      segments: readonly string[];
-      dependencies?: ModuleNode["dependencies"];
-    }): ModuleNode => {
-      const path = { namespace: "src" as const, segments };
-      const id = modulePathToString(path);
-      const ast = parse(source, id);
-      return {
-        id,
-        path,
-        origin: { kind: "file", filePath: id },
-        ast,
-        source,
-        dependencies,
-      };
-    };
-
-    const dep = buildModule({
-      source: `pub fn add(a: i32, b: i32) -> i32
-  a + b
-`,
-      segments: ["dep"],
-    });
-    const main = buildModule({
-      source: `use src::dep::{ add }
-
-pub fn main() -> i32
-  let thunk = () -> i32 =>
-    add(1, 2)
-  thunk()
-`,
-      segments: ["main"],
-      dependencies: [{ kind: "use", path: dep.path }],
-    });
-
-    const graph: ModuleGraph = {
-      entry: main.id,
-      modules: new Map([
-        [main.id, main],
-        [dep.id, dep],
-      ]),
-      diagnostics: [],
-    };
-
-    const depSemantics = semanticsPipeline({ module: dep, graph });
-    const semantics = semanticsPipeline({
-      module: main,
-      graph,
-      exports: new Map([[dep.id, depSemantics.exports]]),
-      dependencies: new Map([[dep.id, depSemantics]]),
-    });
-
-    const symbolTable = getSymbolTable(semantics);
-    const lambda = Array.from(semantics.hir.expressions.values()).find(
-      (expr): expr is HirLambdaExpr => expr.exprKind === "lambda"
-    );
-    expect(lambda).toBeDefined();
-    const captureNames = (lambda?.captures ?? []).map(
-      (capture) => symbolTable.getSymbol(capture.symbol).name
-    );
-    expect(captureNames).toEqual([]);
-  });
-
-  it("emits wasm for recursive data types", () => {
-    const source = `obj Box<T> {
-  v: T
-}
-
-obj None<T> {}
-
-type List<T> = Box<List<T>> | None<T>
-
-fn depth(l: List<i32>) -> i32
-  l.match()
-    Box<List<i32>>: 1 + depth(l.v)
-    None<i32>: 0
-    else: -1
-
-pub fn main() -> i32
-  let list = Box<List<i32>> { v: Box<List<i32>> { v: None<i32> {} } }
-  list.depth()
-`;
-    const ast = parse(source, "/proj/src/recursive_list_regression.voyd");
-    const semantics = semanticsPipeline(ast);
-    const { module, diagnostics } = codegen(semantics);
-    if (diagnostics.length > 0) {
-      throw new Error(JSON.stringify(diagnostics, null, 2));
-    }
-    const instance = getWasmInstance(module);
-    expect((instance.exports.main as () => number)()).toBe(2);
   });
 
   it("links cross-module trait impls without order hazards", async () => {

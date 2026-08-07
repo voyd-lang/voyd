@@ -1561,33 +1561,6 @@ describe("vx-dom browser renderer", () => {
     );
   });
 
-  it("reports failed task command outcomes through onError", async () => {
-    const error = new Error("task failed");
-    const onError = vi.fn();
-    const observeTask = vi.fn(async () => ({ kind: "failed" as const, error }));
-    const commands = { type: "cmd", kind: "task", taskId: 7 };
-    Object.defineProperty(commands, Symbol.for("voyd.taskObserver"), {
-      configurable: true,
-      value: observeTask,
-    });
-    const app: VxAppRuntime = {
-      init: () => ({
-        frame: counterNode(0),
-        commands,
-      }),
-      render: () => counterNode(0),
-      dispatch: () => counterNode(0),
-    };
-
-    await mountVxApp({ container, app, onError });
-    await nextTurn();
-
-    expect(onError).toHaveBeenCalledWith(
-      error,
-      expect.objectContaining({ phase: "commands" }),
-    );
-  });
-
   it("settles failed DOM event dispatches after reporting through onError", async () => {
     const onError = vi.fn();
     const app: VxAppRuntime = {

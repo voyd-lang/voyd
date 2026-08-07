@@ -6,9 +6,14 @@ complete correctness suite behind a single Turbo queue.
 ## Required lanes
 
 - `typecheck`: affected workspace typechecks through Turbo.
-- `test`: affected core package units, excluding conformance, integration,
-  web-package, performance, and developer-tooling workspaces. It uses package
-  concurrency of three and one Vitest worker per package task.
+- `test`: two duration-balanced shards for affected core package units,
+  excluding conformance, integration, web-package, performance, and
+  developer-tooling workspaces. Compiler files are balanced from measured
+  timings, and standard-library test modules are divided between both jobs.
+  The SDK's base group and measured lighter std partitions run in the first
+  shard. Its external-adapter groups, the measured heavier std partitions, and
+  the remaining package units run in the second shard beside the non-CLI
+  artifact build and typing gate.
 - `web-unit`: affected Voyd web-package tests in one combined compile.
 - `tooling-unit`: affected CLI and language-server units, with the two package
   tasks concurrent and one Vitest worker per task.
@@ -16,17 +21,24 @@ complete correctness suite behind a single Turbo queue.
   affect it.
 - `integration`: cross-package public behavior when an upstream package can
   affect it.
-- `compiler-codegen`: four Vitest shards for compiler codegen.
+- `compiler-codegen`: two duration-balanced Vitest shards for compiler codegen.
 - `cli-dist-e2e`: full distributed CLI coverage for direct CLI changes and a
   smaller dist smoke for upstream runtime changes.
-- `optimizer-scorecard`: conditional optimizer regression comparison.
+- `optimizer-scorecard`: two scenario-balanced optimizer regression shards.
+  When the whole-web memory gate also runs, it is paired with the lighter
+  scenario set.
 
 Superseded PR runs are cancelled. Turbo caches are restored only for jobs that
 actually execute Turbo tasks; direct Vitest or Voyd test jobs do not restore an
 ineffective Turbo cache.
 
-`npm run test:full` runs its independent compiler-codegen and CLI e2e tail
-phases concurrently after the main workspace sweep.
+The local `npm test` command covers every deterministic correctness lane:
+release/test tooling, all workspace defaults, compiler codegen, source CLI e2e
+and built CLI e2e. Locally, release/tooling runs beside the workspace sweep,
+then codegen and both CLI modes run concurrently. When `CI` is set, every lane
+runs sequentially. `npm run test:uncached` covers the same lanes with Turbo
+caches forced off. PR CI calls the affected and sharded commands above directly
+so hosted-runner concurrency remains explicit and bounded.
 
 ## Timing and resource budgets
 
@@ -35,6 +47,21 @@ the complete lane command. Vitest lanes also emit per-file timing reports. The
 jobs enforce `scripts/testing/timing-budgets.json` and retain summaries for 30
 days. Measuring the full command keeps Voyd-runner, grammar, and other
 non-Vitest work inside the lane budget.
+
+Compiler unit and codegen shards discover the complete suite before assigning
+files. Measured slow files carry explicit weights; new files receive a stable
+default weight and are still assigned automatically. The standard-library
+runner expands the two logical jobs into four sequential `voyd test --shard
+N/4` compile partitions. It pairs the even partitions with the SDK base group
+and runs the disproportionately expensive odd partitions beside the SDK's two
+external-adapter groups. The second shard also owns the conditional build and
+typing gates. Every SDK group and discovered std module is assigned exactly
+once. This avoids silently dropping new tests while keeping compile-heavy work
+active in both jobs.
+
+The unsharded SDK command runs its base group alongside the sequential pair of
+external-adapter groups on local machines. CI and explicit SDK shards remain
+sequential so hosted runners retain predictable CPU and memory use.
 
 The shared Vitest configuration defaults to one worker in CI and uses Vitest's
 unrestricted default locally. `VITEST_MAX_WORKERS` overrides both behaviors.
@@ -77,9 +104,11 @@ These are exact-path overrides, not basename-wide or lane-wide increases.
   330,000 ms test timeout;
 - only `packages/sdk/src/__tests__/sdk-node.test.ts` has a 420,000 ms file
   budget;
-- only `npm run test:unit:core:affected:ci` has a 630,000 ms command budget;
-- every other unit command retains the 420,000 ms wall budget;
-- the outer `test` job has a 25-minute orchestration ceiling so setup,
+- the unsharded `npm run test:unit:core:affected:ci` fallback retains its
+  630,000 ms command budget;
+- each CI core shard and every other unit command retain the 420,000 ms wall
+  budget;
+- each outer `test` shard has a 25-minute orchestration ceiling so setup,
   post-command checks, conditional builds, and benchmarks can follow a healthy
   bounded core command.
 
@@ -102,11 +131,11 @@ change its result.
 
 `voyd test --shard N/M` discovers and sorts test modules before compilation,
 selects modules by deterministic round-robin index, and compiles each selected
-set together once. CI compiles all 28 files together to avoid paying compiler
-startup and standard-library analysis costs once per partition. Local and
-full-repository tests retain eight sequential partitions for conservative heap
-isolation. The generic shard runner still supports two- or four-way CI
-partitioning if the combined run proves unreliable on hosted workers.
+set together once. CI and the default local suite compile all 24 files together
+to avoid paying compiler startup and standard-library analysis costs once per
+partition. `npm run --workspace @voyd-lang/web test:isolated` retains eight
+sequential partitions as a low-memory and debugging fallback. The generic
+shard runner still supports explicit partition selection for CI diagnostics.
 
 - exact command `npm run test:unit:web:ci`: 600,000 ms;
 - compiler-process hard timeout: 600,000 ms;

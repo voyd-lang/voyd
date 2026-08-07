@@ -10,7 +10,19 @@
     },
     "test": {
       "dependsOn": [],
-      "env": ["VITEST_MAX_WORKERS", "VOYD_TEST_TIMINGS_DIR"],
+      "inputs": [
+        "$TURBO_DEFAULT$",
+        "$TURBO_ROOT$/scripts/testing/compiler-test-shards.mjs",
+        "$TURBO_ROOT$/scripts/testing/run-sdk-test-shards.mjs",
+        "$TURBO_ROOT$/scripts/testing/run-std-test-shards.mjs"
+      ],
+      "env": [
+        "VITEST_MAX_WORKERS",
+        "VOYD_COMPILER_TEST_SHARD",
+        "VOYD_SDK_TEST_SHARD",
+        "VOYD_STD_TEST_SHARD",
+        "VOYD_TEST_TIMINGS_DIR"
+      ],
       "outputs": []
     },
     "lint": {

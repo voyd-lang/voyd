@@ -4,7 +4,7 @@ import { pathToFileURL } from "node:url";
 
 const repoRoot = resolve(import.meta.dirname, "../..");
 const webSource = resolve(repoRoot, "packages/web/src");
-const defaultPartitionCount = 8;
+const isolatedPartitionCount = 8;
 const isMain =
   process.argv[1] &&
   pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
@@ -40,11 +40,14 @@ export function parsePartitionArgs(args) {
 }
 
 export function partitionsForArgs(args) {
-  if (args.length > 0) return [parsePartitionArgs(args)];
-  return Array.from({ length: defaultPartitionCount }, (_value, index) => ({
-    index,
-    count: defaultPartitionCount,
-  }));
+  if (args.length === 0) return [{ index: 0, count: 1 }];
+  if (args.length === 1 && args[0] === "--isolated") {
+    return Array.from({ length: isolatedPartitionCount }, (_value, index) => ({
+      index,
+      count: isolatedPartitionCount,
+    }));
+  }
+  return [parsePartitionArgs(args)];
 }
 
 function run() {

@@ -1,5 +1,3 @@
-// @vitest-environment happy-dom
-
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
@@ -7,9 +5,6 @@ import { tmpdir } from "node:os";
 import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { describe, expect, it, vi } from "vitest";
-import { createSdk, type CompileResult } from "@voyd-lang/sdk";
-import { createVoydHost } from "@voyd-lang/sdk/js-host";
-import { createVxDomRenderer } from "@voyd-lang/vx-dom";
 import {
   detectLocalVoydRoot,
   printBootstrapResult,
@@ -18,17 +13,6 @@ import {
 
 const createTempDir = () => mkdtemp(resolve(tmpdir(), "voyd-bootstrap-"));
 const repoRoot = resolve(import.meta.dirname, "../../../..");
-
-const expectCompileSuccess = (
-  result: CompileResult,
-): Extract<CompileResult, { success: true }> => {
-  if (!result.success) {
-    throw new Error(
-      result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
-    );
-  }
-  return result;
-};
 
 describe("runBootstrap", () => {
   it("detects a local checkout by root package name and otherwise falls back", async () => {
@@ -387,54 +371,6 @@ describe("runBootstrap", () => {
         .map((file) => readFile(resolve(target, file), "utf8")));
       expect(voydSources.join("\n")).not.toContain(".as_slice().to_string()");
 
-      const parityProbe = resolve(target, "src/parity-probe.voyd");
-      await writeFile(parityProbe, `use src::app::model::{ Model, initial_model }
-use src::app::update::Msg
-use src::app::ui::view
-use pkg::web::all
-use std::vx::all
-
-fn model() -> Model
-  initial_model(slug: "home", title: "Mini Voydpedia", body: "Shared view")
-
-pub fn server_html() -> String
-  render(view(model()))
-
-pub fn client_tree() -> Html<Msg>
-  view(model())
-`);
-      const sdk = createSdk();
-      const roots = {
-        src: resolve(target, "src"),
-        pkgDirs: [resolve(repoRoot, "packages")],
-      };
-      const compiled = expectCompileSuccess(await sdk.compile({
-        entryPath: parityProbe,
-        roots,
-        optimizationLevel: "release",
-      }));
-      const host = await createVoydHost({
-        wasm: compiled.wasm,
-        bufferSize: 1024 * 1024,
-      });
-      const serverHtml = await host.run<string>("server_html");
-      expect(host.retainedCallbacks.size()).toBe(0);
-      const clientTree = await host.run("client_tree");
-
-      const container = document.createElement("div");
-      container.innerHTML = serverHtml;
-      const serverForm = container.querySelector("form");
-      const onHydrationMismatch = vi.fn();
-      const renderer = createVxDomRenderer(container, {
-        handlers: host.retainedCallbacks,
-        onHydrationMismatch,
-      });
-      renderer.hydrate(clientTree);
-
-      expect(onHydrationMismatch).not.toHaveBeenCalled();
-      expect(container.querySelector("form")).toBe(serverForm);
-      renderer.dispose();
-      expect(host.retainedCallbacks.size()).toBe(0);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

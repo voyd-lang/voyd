@@ -156,7 +156,7 @@ function updateDispositionLedger(entries) {
 function checkDispositionLedger(expectedEntries) {
   if (!existsSync(dispositionLedgerPath)) {
     return [
-      "docs/testing/test-inventory.json: missing; run npm run test:audit:update",
+      "docs/testing/test-inventory.json: missing; run npm run update:test-inventory",
     ];
   }
 
@@ -184,13 +184,13 @@ function checkDispositionLedger(expectedEntries) {
     const actual = actualByFile.get(expected.file);
     if (!actual) {
       violations.push(
-        `docs/testing/test-inventory.json: missing entry ${expected.file}; run npm run test:audit:update`,
+        `docs/testing/test-inventory.json: missing entry ${expected.file}; run npm run update:test-inventory`,
       );
       return;
     }
     if (actual.owner !== expected.owner) {
       violations.push(
-        `docs/testing/test-inventory.json: stale owner for ${expected.file}; run npm run test:audit:update and review the pending decision`,
+        `docs/testing/test-inventory.json: stale owner for ${expected.file}; run npm run update:test-inventory and review the pending decision`,
       );
     }
     if (actual.disposition === "needs-review") {
@@ -261,7 +261,7 @@ function checkDispositionLedger(expectedEntries) {
   actualEntries.forEach(({ file }) => {
     if (!expectedByFile.has(file)) {
       violations.push(
-        `docs/testing/test-inventory.json: stale removed-file entry ${file}; run npm run test:audit:update`,
+        `docs/testing/test-inventory.json: stale removed-file entry ${file}; run npm run update:test-inventory`,
       );
     }
   });

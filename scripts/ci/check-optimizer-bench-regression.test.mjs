@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   compareScorecards,
   measurementRetryScenarios,
+  parseScenarioNames,
   pairedRunOrder,
   poolScorecardMeasurements,
   scorecardInputMode,
@@ -323,6 +324,14 @@ it("prefers JSON scorecards over ambient ref environment inputs", () => {
       headRef: "ambient-head",
     }),
   ).toBe("json");
+});
+
+it("parses a deduplicated optimizer scenario subset", () => {
+  expect(
+    parseScenarioNames("vtrace-main, tier1-trait-call,vtrace-main"),
+  ).toEqual(["vtrace-main", "tier1-trait-call"]);
+  expect(parseScenarioNames(undefined)).toBeUndefined();
+  expect(() => parseScenarioNames(" , ")).toThrow(/at least one/);
 });
 
 it("alternates the first revision across paired scenarios", () => {

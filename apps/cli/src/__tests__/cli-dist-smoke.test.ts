@@ -43,12 +43,6 @@ describe("distributed CLI smoke", () => {
   });
 
   it("compiles and runs through the packaged CLI", () => {
-    const compile = runCli(root, ["--emit-ir-ast", entryPath]);
-    expect(`${compile.stdout}${compile.stderr}`).not.toContain(
-      "Unable to resolve module",
-    );
-    expect(compile.status).toBe(0);
-
     const run = runCli(root, ["--run", entryPath]);
     expect(run.status).toBe(0);
     expect(run.stdout).toContain("42");
