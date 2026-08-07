@@ -430,6 +430,15 @@ moved from 1,554.7 to 1,588.3 ms (+2.2%), which is inconclusive at this sample
 count. A parent rerun reproduced the final emitted shape and measured 0.354 ms
 for the light loop and 0.423 ms for the filtered traversal.
 
+The exact nominal receiver fact used to specialize mutable `next()` calls now
+also permits direct field stores under the same proof that already permitted
+direct field loads. That is a general receiver-specialization improvement, so
+it benefits exact receivers outside iteration as well. In the final focused
+suite, the projected-field workload that remained outside V-479 improves from
+0.3635 to 0.1064 ms (-70.7%). The final focused module is 6,688 bytes (2,626
+gzip), with 99 `struct.get` and eight `struct.set` sites, compared with 6,968
+bytes, 2,694 gzip, 108 gets, and 15 sets immediately before this follow-up.
+
 Dynamic or ambiguous dispatch, noncanonical traits, non-fresh iterator
 results, unsupported result control flow, and builds without release optimizer
 facts keep the ordinary trait call. The intrinsic Array path retains its
@@ -542,7 +551,7 @@ with independent scalar values across a mutable call would be unsound.
 | Intrinsic `Range<i32>` iterator traffic | Accepted as V-477 | Restores all-`for` source to all-`while` parity; cuts the incremental integrated pipeline by 44.3%, serialization by 40.1%, and gzip size by 16.7%. |
 | Fresh mutable aggregate traffic across exact calls | Accepted as V-479 | Cuts incremental integrated runtime by 44.1%, serialization by 69.4%, and the direct-object focused workload by 90.0%; shrinks representative gzip by 6.5%. |
 | Intrinsic `Array<T>` `for` traffic | Accepted | Reaches indexed-loop parity: 95.6% faster in the focused element loop and 91.2% faster in representative view-model serialization. |
-| Exact user-iterator dispatch and state traffic | Accepted | Non-intrinsic iterators improve by 84.4% in the light case and 55.7% for filtered/strided traversal; emitted allocation, indirect-call, and iterator field traffic falls to zero. |
+| Exact user-iterator and receiver traffic | Accepted | Non-intrinsic iterators improve by 84.4% in the light case and 55.7% for filtered/strided traversal; emitted iterator traffic falls to zero, and the shared exact-store proof improves the projected-field workload by 70.7%. |
 | `SharedCell` runtime-check traffic | Deferred | The focused gap was large, but the representative programs had no meaningful use and explicit shared-cell runtime semantics need a separate design decision. |
 | Remaining access guards | Stopped | The existing focused guard benchmark measured about 1.34 ns per call, below the threshold for another optimization ticket. |
 
