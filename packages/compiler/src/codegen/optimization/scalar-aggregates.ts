@@ -1427,7 +1427,20 @@ export const loadScalarAggregateBindingAbiValue = ({
   binding: LocalBindingScalarAggregate;
   ctx: CodegenContext;
 }): binaryen.ExpressionRef => {
-  const lanes = binding.structInfo.fields.flatMap((field) => {
+  const lanes = loadScalarAggregateBindingAbiLanes({ binding, ctx });
+  return lanes.length === 1
+    ? lanes[0]!
+    : ctx.mod.tuple.make(lanes as binaryen.ExpressionRef[]);
+};
+
+export const loadScalarAggregateBindingAbiLanes = ({
+  binding,
+  ctx,
+}: {
+  binding: LocalBindingScalarAggregate;
+  ctx: CodegenContext;
+}): readonly binaryen.ExpressionRef[] =>
+  binding.structInfo.fields.flatMap((field) => {
     const fieldBinding = binding.fields.get(field.name);
     if (!fieldBinding) {
       throw new Error(`scalar aggregate missing field ${field.name}`);
@@ -1438,10 +1451,6 @@ export const loadScalarAggregateBindingAbiValue = ({
       ? [value]
       : fieldAbiTypes.map((_, index) => ctx.mod.tuple.extract(value, index));
   });
-  return lanes.length === 1
-    ? lanes[0]!
-    : ctx.mod.tuple.make(lanes as binaryen.ExpressionRef[]);
-};
 
 export const tryBindScalarAggregateParameter = ({
   symbol,

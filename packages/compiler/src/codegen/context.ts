@@ -131,6 +131,11 @@ export interface FunctionMetadata {
   scalarAggregateResult?: boolean;
   /** Scalarized mutable parameter whose updated lanes are the specialized result. */
   scalarAggregateMutableParamIndex?: number;
+  /** Ordered combined-result ABI: logical lanes first, mutable writeback lanes last. */
+  scalarAggregateMutableCombinedResult?: Readonly<{
+    logicalAbiTypes: readonly binaryen.Type[];
+    writebackAbiTypes: readonly binaryen.Type[];
+  }>;
   callShape?: Readonly<{
     keyTokens: readonly string[];
     parameterStates: readonly CallShapeParameterState[];
@@ -412,6 +417,10 @@ export interface FunctionContext {
   exactParameterTypes?: ReadonlyMap<SymbolId, TypeId>;
   exactTraitDispatchTargets?: ReadonlyMap<HirExprId, ProgramSymbolId>;
   exactCallReceiverTypes?: ReadonlyMap<HirExprId, TypeId>;
+  scalarAggregateMutableReturn?: Readonly<{
+    binding: LocalBindingScalarAggregate;
+    logicalResultAbiTypes: readonly binaryen.Type[];
+  }>;
   continuation?: {
     cfg: GroupContinuationCfg;
     startedLocal: LocalBindingLocal;

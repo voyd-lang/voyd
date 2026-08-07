@@ -34,6 +34,7 @@
     "bench:memory-safety": "node --import tsx --conditions=development scripts/bench-memory-mutation-safety.ts",
     "bench:array-for": "node --import tsx --conditions=development scripts/bench-array-for-fast-path.ts",
     "bench:iterator-for": "node --import tsx --conditions=development scripts/bench-general-iterator-specialization.ts",
+    "bench:mutable-result": "node --import tsx --conditions=development scripts/bench-mutable-result-specialization.ts",
     "bench:v439": "node --import tsx --conditions=development scripts/bench-v439-checked-access.ts",
     "bench:web-openapi": "npm run --workspace @voyd-lang/performance-tests bench:web-openapi --",
     "test:web-compile-gate": "node scripts/testing/run-web-compile-gate.mjs",

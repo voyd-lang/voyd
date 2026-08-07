@@ -501,14 +501,87 @@ export const emitResolvedCall = ({
     if (!binding) {
       throw new Error("mutable scalar aggregate call is missing its writeback");
     }
-    const stores = storeScalarAggregateBindingAbiValue({
-      binding,
+    const combinedResult = resolvedMeta.scalarAggregateMutableCombinedResult;
+    if (!combinedResult) {
+      throw new Error(
+        "mutable scalar aggregate call is missing combined-result ABI metadata",
+      );
+    }
+    const combinedAbiTypes = [
+      ...combinedResult.logicalAbiTypes,
+      ...combinedResult.writebackAbiTypes,
+    ];
+    const captured = captureMultivalueLanes({
       value: rawCall,
+      abiTypes: combinedAbiTypes,
       ctx,
       fnCtx,
     });
+    const logicalLanes = captured.lanes.slice(
+      0,
+      combinedResult.logicalAbiTypes.length,
+    );
+    const writebackLanes = captured.lanes.slice(
+      combinedResult.logicalAbiTypes.length,
+    );
+    const writebackValue =
+      writebackLanes.length === 1
+        ? writebackLanes[0]!
+        : ctx.mod.tuple.make(writebackLanes as binaryen.ExpressionRef[]);
+    const stores = storeScalarAggregateBindingAbiValue({
+      binding,
+      value: writebackValue,
+      ctx,
+      fnCtx,
+    });
+    if (logicalLanes.length === 0) {
+      return {
+        expr: ctx.mod.block(
+          null,
+          [...preCallOps, ...captured.setup, ...stores],
+          binaryen.none,
+        ),
+        usedReturnCall: false,
+      };
+    }
+    const logicalValue =
+      logicalLanes.length === 1
+        ? logicalLanes[0]!
+        : ctx.mod.tuple.make(logicalLanes as binaryen.ExpressionRef[]);
+    const decodedLogicalValue =
+      getSignatureSpillBoxType({ typeId: resolvedMeta.resultTypeId, ctx }) ===
+      combinedResult.logicalAbiTypes[0]
+        ? unboxSignatureSpillValue({
+            value: logicalValue,
+            typeId: resolvedMeta.resultTypeId,
+            ctx,
+          })
+        : logicalValue;
+    const coercedLogicalValue =
+      resolvedMeta.resultTypeId === expectedTypeId
+        ? decodedLogicalValue
+        : coerceValueToType({
+            value: decodedLogicalValue,
+            actualType: resolvedMeta.resultTypeId,
+            targetType: expectedTypeId,
+            ctx,
+            fnCtx,
+          });
     return {
-      expr: ctx.mod.block(null, [...preCallOps, ...stores], binaryen.none),
+      expr: ctx.mod.block(
+        null,
+        [
+          ...preCallOps,
+          ...captured.setup,
+          ...stores,
+          coerceExprToWasmType({
+            expr: coercedLogicalValue,
+            targetType: callResultWasmType,
+            ctx,
+          }),
+        ],
+        callResultWasmType,
+      ),
       usedReturnCall: false,
     };
   }

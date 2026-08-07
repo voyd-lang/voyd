@@ -5,7 +5,7 @@ import type {
 } from "../context.js";
 import type { HirFunction } from "../../semantics/hir/index.js";
 import type { HirExprId, SymbolId } from "../../semantics/ids.js";
-import { getStructuralTypeInfo } from "../types.js";
+import { getOptimizedResultAbiKind, getStructuralTypeInfo } from "../types.js";
 import { walkHirExpression } from "../hir-walk.js";
 import {
   composeSpecializationDimensions,
@@ -53,9 +53,11 @@ export const mutableScalarAggregateCalleeCanUseLaneAbi = ({
     !hirParameter ||
     typeof hirParameter.symbol !== "number" ||
     !signature ||
-    signature.returnType !== ctx.program.primitives.void ||
     !ctx.program.effects.isEmpty(signature.effectRow) ||
-    meta.resultTypeId !== ctx.program.primitives.void ||
+    meta.resultTypeId !== signature.returnType ||
+    meta.resultAbiKind !== "direct" ||
+    getOptimizedResultAbiKind({ typeId: meta.resultTypeId, ctx: targetCtx }) !==
+      "direct" ||
     meta.effectful ||
     meta.paramAbiKinds[paramIndex] !== "mutable_ref" ||
     parameter?.bindingKind !== "mutable-ref" ||
@@ -75,6 +77,7 @@ export const mutableScalarAggregateCalleeCanUseLaneAbi = ({
     !parameterUsesOnlyDirectFields({
       item,
       symbol: hirParameter.symbol,
+      allowReturns: meta.resultTypeId !== ctx.program.primitives.void,
       ctx: targetCtx,
     })
   ) {
@@ -153,10 +156,12 @@ const functionItemFor = ({
 const parameterUsesOnlyDirectFields = ({
   item,
   symbol,
+  allowReturns,
   ctx,
 }: {
   item: HirFunction;
   symbol: SymbolId;
+  allowReturns: boolean;
   ctx: CodegenContext;
 }): boolean => {
   const allowedIdentifiers = new Set<HirExprId>();
@@ -166,7 +171,7 @@ const parameterUsesOnlyDirectFields = ({
     ctx,
     visitor: {
       onStmt: (_stmtId, stmt) => {
-        if (stmt.kind === "return") {
+        if (stmt.kind === "return" && !allowReturns) {
           safe = false;
           return "stop";
         }

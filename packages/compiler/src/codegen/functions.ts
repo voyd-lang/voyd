@@ -85,6 +85,7 @@ import {
   tryBindScalarAggregateParameter,
   tryStoreScalarAggregateExpression,
 } from "./optimization/scalar-aggregates.js";
+import { packMutableScalarAggregateResult } from "./optimization/mutable-scalar-aggregate-results.js";
 import {
   markScalarAggregateCallSpecializationCompiled,
   takePendingScalarAggregateCallSpecializations,
@@ -2148,17 +2149,34 @@ const compileMutableScalarAggregateParameterResult = ({
   if (binding?.kind !== "scalar-aggregate" || !binding.mutable) {
     throw new Error("mutable scalar aggregate parameter was not scalarized");
   }
+  const combinedResult = meta.scalarAggregateMutableCombinedResult;
+  if (!combinedResult) {
+    throw new Error(
+      "mutable scalar aggregate call is missing combined-result ABI metadata",
+    );
+  }
+  fnCtx.scalarAggregateMutableReturn = {
+    binding,
+    logicalResultAbiTypes: combinedResult.logicalAbiTypes,
+  };
   const body = compileExpression({
     exprId: fn.body,
     ctx,
     fnCtx,
     tailPosition: false,
-    expectedResultTypeId: ctx.program.primitives.void,
+    expectedResultTypeId: meta.resultTypeId,
   }).expr;
-  const result = loadScalarAggregateBindingAbiValue({ binding, ctx });
+  const result = packMutableScalarAggregateResult({
+    logicalValue: body,
+    logicalResultTypeId: meta.resultTypeId,
+    logicalResultAbiTypes: combinedResult.logicalAbiTypes,
+    binding,
+    ctx,
+    fnCtx,
+  });
   return ctx.mod.block(
     null,
-    [...paramInitOps, ...defaultInitOps, body, result],
+    [...paramInitOps, ...defaultInitOps, result],
     meta.resultType,
   );
 };

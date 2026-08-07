@@ -1,0 +1,122 @@
+// Models the hot inner loop of an SSR response encoder. Each helper mutates
+// request-local writer state and returns the number of bytes emitted so the
+// caller can update a response budget.
+
+obj ResponseWriter {
+  template_seed: i32,
+  escape_seed: i32,
+  response_bytes: i32,
+  emitted_nodes: i32,
+  escape_events: i32,
+  checksum: i32
+}
+
+fn write_dynamic_text(~writer: ResponseWriter, value: i32) -> i32
+  if value < 0:
+    writer.escape_events = writer.escape_events + 1
+    writer.checksum = (writer.checksum + writer.template_seed * 3) % 1000003
+    writer.checksum = (writer.checksum + writer.escape_seed * 5) % 1000003
+    writer.checksum = (writer.checksum + writer.response_bytes * 7) % 1000003
+    writer.response_bytes = writer.response_bytes + 12
+    writer.emitted_nodes = writer.emitted_nodes + 1
+    return 12
+  if value > 1000000000:
+    writer.escape_events = writer.escape_events + 1
+    writer.checksum = (writer.checksum + value * 11) % 1000003
+    writer.checksum = (writer.checksum + writer.template_seed * 13) % 1000003
+    writer.checksum = (writer.checksum + writer.escape_seed * 17) % 1000003
+    writer.response_bytes = writer.response_bytes + 16
+    writer.emitted_nodes = writer.emitted_nodes + 1
+    return 16
+  let bytes = 8 + ((value + writer.escape_seed) % 23)
+  writer.response_bytes = writer.response_bytes + bytes
+  writer.emitted_nodes = writer.emitted_nodes + 1
+  writer.checksum = (writer.checksum + value * 7 + writer.template_seed) % 1000003
+  if (value % 11) == 0:
+    writer.escape_events = writer.escape_events + 1
+    return bytes + 2
+  bytes
+
+pub fn direct_result_workload() -> i32
+  let ~writer = ResponseWriter {
+    template_seed: 19,
+    escape_seed: 29,
+    response_bytes: 0,
+    emitted_nodes: 0,
+    escape_events: 0,
+    checksum: 0
+  }
+  let writer_alias = writer
+  var budget = 0
+  for request in 0..10000:
+    for node in 0..64:
+      budget = budget + writer_alias.template_seed + writer_alias.escape_seed
+      budget = budget + write_dynamic_text(~writer, request * 64 + node)
+      budget = budget + writer_alias.template_seed + writer_alias.escape_seed
+  budget + writer.response_bytes + writer.emitted_nodes + writer.escape_events + writer.checksum
+
+pub fn discarded_result_workload() -> i32
+  let ~writer = ResponseWriter {
+    template_seed: 19,
+    escape_seed: 29,
+    response_bytes: 0,
+    emitted_nodes: 0,
+    escape_events: 0,
+    checksum: 0
+  }
+  let writer_alias = writer
+  var observer = 0
+  for request in 0..10000:
+    for node in 0..64:
+      observer = observer + writer_alias.template_seed + writer_alias.escape_seed
+      write_dynamic_text(~writer, request * 64 + node)
+      observer = observer + writer_alias.template_seed + writer_alias.escape_seed
+  observer + writer.response_bytes + writer.emitted_nodes + writer.escape_events + writer.checksum
+
+pub fn manual_control() -> i32
+  let ~writer = ResponseWriter {
+    template_seed: 19,
+    escape_seed: 29,
+    response_bytes: 0,
+    emitted_nodes: 0,
+    escape_events: 0,
+    checksum: 0
+  }
+  let writer_alias = writer
+  var budget = 0
+  for request in 0..10000:
+    for node in 0..64:
+      let value = request * 64 + node
+      budget = budget + writer_alias.template_seed + writer_alias.escape_seed
+      if value < 0:
+        writer.escape_events = writer.escape_events + 1
+        writer.checksum = (writer.checksum + writer.template_seed * 3) % 1000003
+        writer.checksum = (writer.checksum + writer.escape_seed * 5) % 1000003
+        writer.checksum = (writer.checksum + writer.response_bytes * 7) % 1000003
+        writer.response_bytes = writer.response_bytes + 12
+        writer.emitted_nodes = writer.emitted_nodes + 1
+        budget = budget + 12
+      else:
+        if value > 1000000000:
+          writer.escape_events = writer.escape_events + 1
+          writer.checksum = (writer.checksum + value * 11) % 1000003
+          writer.checksum = (writer.checksum + writer.template_seed * 13) % 1000003
+          writer.checksum = (writer.checksum + writer.escape_seed * 17) % 1000003
+          writer.response_bytes = writer.response_bytes + 16
+          writer.emitted_nodes = writer.emitted_nodes + 1
+          budget = budget + 16
+        else:
+          let bytes = 8 + ((value + writer.escape_seed) % 23)
+          writer.response_bytes = writer.response_bytes + bytes
+          writer.emitted_nodes = writer.emitted_nodes + 1
+          writer.checksum = (writer.checksum + value * 7 + writer.template_seed) % 1000003
+          if (value % 11) == 0:
+            writer.escape_events = writer.escape_events + 1
+            budget = budget + bytes + 2
+          else:
+            budget = budget + bytes
+      budget = budget + writer_alias.template_seed + writer_alias.escape_seed
+  budget + writer.response_bytes + writer.emitted_nodes + writer.escape_events + writer.checksum
+
+pub fn main() -> i32
+  direct_result_workload()

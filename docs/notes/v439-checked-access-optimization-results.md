@@ -12,8 +12,9 @@ The final branch contains six accepted optimizations:
   expansion and emits a direct counted loop instead of allocating an iterator
   and matching `Option` on every iteration.
 - V-479 keeps eligible fresh mutable objects in scalar lanes across exact,
-  pure mutable-borrow calls and returns the updated lanes directly instead of
-  allocating and repeatedly loading and storing a heap object.
+  pure mutable-borrow calls. Its original `void` form returns the updated lanes
+  directly; the generalized form returns the callee's logical value followed
+  by those updated lanes.
 - Intrinsic `Array<T>` iteration recognizes the exact standard `for` expansion
   and emits direct array traversal without allocating `ArrayIterator` or
   constructing and matching `Option` for every element.
@@ -44,13 +45,27 @@ npm run bench:iterator-for -- \
   --runtime-samples 31
 ```
 
+Run the generalized V-479 value-result benchmark with:
+
+```sh
+npm run bench:mutable-result -- \
+  --label <label> \
+  --compile-samples 7 \
+  --runtime-samples 31
+```
+
+Add `--sdk-root /path/to/voyd-checkout` to compile the current fixture with a
+different compiler revision.
+
 The V-439 and general-iterator compile times are medians of seven fresh SDK
 compiles, and their runtimes are medians of 31 samples after three warmups. The
-Array follow-up uses five compile and 21 runtime samples. Each V-439 entrypoint
-gets a fresh host instance so one stage cannot inherit another stage's GC heap.
-Scenarios run in isolated child processes so differently shaped Binaryen
-programs cannot share runtime type state. Code-shape counts are static
-instruction-site counts over each complete emitted module.
+Array follow-up uses five compile and 21 runtime samples. The generalized
+V-479 benchmark uses seven uncached compiles and 31 timed runs after one
+untimed warmup for each entrypoint. Each V-439 entrypoint gets a fresh host
+instance so one stage cannot inherit another stage's GC heap. Scenarios run in
+isolated child processes so differently shaped Binaryen programs cannot share
+runtime type state. Code-shape counts are static instruction-site counts over
+each complete emitted module.
 
 These measurements used Node 24.18.0 on an Apple M4 Pro with 14 logical CPUs.
 The focused table measures the original compiler against V-475 and V-476. The
@@ -137,12 +152,13 @@ every instruction-site count are identical before and after V-479.
 ## How V-479 transforms Voyd
 
 V-479 keeps a fresh mutable object in scalar Wasm values even when the object
-crosses an eligible function call. It does this by specializing the callee's
-internal Wasm ABI. It does not inline the function or change the source-level
-Voyd API.
+crosses an eligible function call. It does this by specializing an internal
+Wasm ABI between the caller and the exact callee. The source-level Voyd API is
+unchanged, and the optimization does not depend on inlining.
 
-Consider a reduced version of the response-writer pattern exercised by the
-representative web application:
+### Original `void` writeback
+
+The original V-479 case was a procedure that only updated the borrowed object:
 
 ```voyd
 obj Writer {
@@ -168,53 +184,94 @@ pub fn render(count: i32) -> i32
   writer.bytes + writer.nodes
 ```
 
-Without V-479, the compiler must preserve `writer` as a Wasm GC object across
-the call. Conceptually, it allocates the object, passes its reference to
-`append_node`, and performs `struct.get` and `struct.set` operations in the
-callee:
+Without specialization, the compiler preserves `writer` as a Wasm GC object,
+passes its reference to `append_node`, and loads and stores fields through that
+reference. V-479 instead keeps the fields in local scalar lanes. Its internal
+specialized call is conceptually:
 
 ```text
-writer_ref = allocate Writer(0, 0, 3)
-
-for i in 0..count:
-  append_node(writer_ref, i)
-
-load(writer_ref.bytes) + load(writer_ref.nodes)
+append_node$scalar(bytes, nodes, escape_cost, width)
+  -> (updated_bytes, updated_nodes, updated_escape_cost)
 ```
 
-When V-479's proof succeeds, the compiler instead keeps each field in a local
-scalar lane. The following is explanatory pseudocode rather than valid Voyd:
+The caller passes each field as a normal Wasm value, captures the returned
+lanes, and uses them as the object's new state. For a fully matched object,
+there is no source-object `struct.new`, `struct.get`, or `struct.set` in the
+hot path.
+
+### Returning a value and mutable state together
+
+Real helpers often update state and return a useful result. A response encoder,
+for example, needs both the updated writer and the byte count for its response
+budget:
+
+```voyd
+obj ResponseWriter {
+  template_seed: i32,
+  response_bytes: i32,
+  emitted_nodes: i32,
+  checksum: i32
+}
+
+fn write_dynamic_text(~writer: ResponseWriter, value: i32) -> i32
+  if value < 0:
+    writer.response_bytes = writer.response_bytes + 12
+    writer.emitted_nodes = writer.emitted_nodes + 1
+    return 12
+
+  let bytes = 8 + ((value + writer.template_seed) % 23)
+  writer.response_bytes = writer.response_bytes + bytes
+  writer.emitted_nodes = writer.emitted_nodes + 1
+  writer.checksum = (writer.checksum + value * 7) % 1000003
+  bytes
+
+pub fn render_response() -> i32
+  let ~writer = ResponseWriter {
+    template_seed: 19,
+    response_bytes: 0,
+    emitted_nodes: 0,
+    checksum: 0
+  }
+  var budget = 0
+
+  for value in 0..10000:
+    budget = budget + write_dynamic_text(~writer, value)
+
+  budget + writer.response_bytes + writer.checksum
+```
+
+The generalized ABI places the normal function result first and the mutable
+writeback lanes after it:
 
 ```text
-writer_bytes = 0
-writer_nodes = 0
-writer_escape_cost = 3
-
-for i in 0..count:
-  (writer_bytes, writer_nodes, writer_escape_cost) =
-    append_node$scalar(
-      writer_bytes,
-      writer_nodes,
-      writer_escape_cost,
-      i
-    )
-
-writer_bytes + writer_nodes
+write_dynamic_text$scalar(template_seed, response_bytes, emitted_nodes,
+                          checksum, value)
+  -> (bytes_written,
+      updated_template_seed,
+      updated_response_bytes,
+      updated_emitted_nodes,
+      updated_checksum)
 ```
 
-The specialized callee receives the fields as individual Wasm parameters,
-operates on locals, and returns their updated state as a Wasm multivalue:
+The caller evaluates that call exactly once, writes the trailing state lanes
+back to the scalarized `writer`, and then exposes `bytes_written` as the value
+of the original Voyd call. This ordering also handles a discarded logical
+result: the compiler can drop `bytes_written` while still applying every state
+update. Logical results that already use several direct ABI lanes keep their
+lane order ahead of the writeback lanes.
 
-```text
-append_node$scalar(bytes, nodes, escape_cost, width):
-  updated_bytes = bytes + width + escape_cost
-  updated_nodes = nodes + 1
-  return (updated_bytes, updated_nodes, escape_cost)
-```
+Every explicit early return in the specialized callee packages its logical
+value with the current mutable state. The ordinary fallthrough result does the
+same.
 
-The caller captures those returned values back into the same scalar lanes. For
-the matching case, no `struct.new`, `struct.get`, or `struct.set` is needed for
-the source object.
+Specialization stops when a callee passes its mutable receiver to another
+helper. For example, a `write_pair(~writer, ...)` wrapper that calls
+`write_dynamic_text(~writer, ...)` stays on the ordinary reference ABI even
+when `write_dynamic_text` is independently eligible at direct call sites. This
+conservative boundary avoids reconstructing scalar state after conditional or
+zero-iteration nested calls. Supporting that composition would require a
+path-aware state merge or transitive specialization reservation; neither is
+part of this optimization.
 
 Immutable aliases continue to observe the same logical state:
 
@@ -232,11 +289,13 @@ lane ABI, the compiler materializes one ordinary object and reconnects all of
 its aliases to it.
 
 The optimization requires a fresh object proven not to escape, one exact and
-pure callee, a `void` return, and a first mutable-borrow parameter used only
-through known direct fields. It rejects calls that may retain or return the
-object, suspend, perform external access, observe runtime identity, introduce
-unsupported aliases, or exceed the specialization budget. Rejected calls keep
-the normal reference ABI.
+pure callee, and a first source argument that maps to a mutable-borrow parameter
+used only through known direct fields. A non-`void` logical result must use the
+direct ABI. Wide results that require an out pointer retain the normal ABI.
+Calls also fall back when they pass the receiver to another helper, may retain
+or return the borrowed object or its provenance, suspend, perform external
+access, require runtime identity guards, introduce unsupported aliases, or
+exceed the specialization budget.
 
 This transformation depends directly on Voyd's memory-safety analysis. Escape
 facts prove where the object's identity can be observed. Callable access
@@ -244,6 +303,53 @@ summaries prove that the exact callee cannot hide the reference or read and
 write storage outside its declared field footprint. Together, those facts make
 it sound to replace one heap identity with independent scalar values across a
 mutable call.
+
+### Generalized value-result benchmark
+
+The opt-in benchmark expands the response-writer example into 640,000 dynamic
+text writes per sample. It measures a caller that uses the byte result, one
+that discards it, and a manually expanded checksum control. Nested-call
+fallback is covered by focused conditional and zero-iteration-loop regressions
+instead of sharing the helper in this module and distorting the direct-path
+artifact measurement. Both revisions compiled the same final fixture.
+Checksums matched for every entrypoint.
+
+Runtime was measured in three isolated, counterbalanced A/B pairs with 31 timed
+samples per process. The table reports the range of each process median rather
+than selecting the most favorable run.
+
+| Release runtime | Before range | Generalized range | Paired change range | Conclusion |
+| --- | ---: | ---: | ---: | --- |
+| Used logical result | 3.0264–3.0606 ms | 2.8347–3.0332 ms | +0.1% to -7.4% | Inconclusive |
+| Discarded logical result | 3.0055–3.0274 ms | 2.7936–2.8037 ms | **-7.0% to -7.6%** | Repeatable improvement |
+| Manual checksum control | 4.6820–4.7293 ms | 4.5313–4.5968 ms | -2.4% to -4.2% | Whole-run timing drift |
+
+| Release module metric | Before generalized ABI | Generalized ABI | Change |
+| --- | ---: | ---: | ---: |
+| Wasm | 3,861 B | 3,334 B | **-13.6%** |
+| Gzip | 1,541 B | 1,559 B | +1.2% |
+| Allocation sites | 33 | 27 | -6 |
+| `struct.get` sites | 121 | 41 | -80 |
+| `struct.set` sites | 26 | 10 | -16 |
+
+The seven-sample compile median moved from 1,579.2 to 1,609.5 ms (+1.9%), which
+is within normal run-to-run variation. A separate 51-sample pair measured a
+7.8% discarded-result improvement. The manual control exposes meaningful
+whole-run timing drift; the discarded-result path nevertheless improves in a
+tight range and by another 2.8 to 5.2 percentage points beyond its paired
+control. The emitted-shape reduction and repeatable discarded-result change are
+the useful signals. There is no supported used-result runtime claim.
+
+This generalization complements the two `for in` optimizations rather than
+replacing them. Intrinsic `Array<T>` lowering bypasses iterator objects and
+`Option` traffic directly, so its release module remained byte- and
+instruction-identical with the generalized V-479 change. General exact
+iterator specialization keeps the ordinary `next() -> Option<T>` source ABI
+and exposes the exact state machine to Binaryen; its optimized module likewise
+remained identical, with no allocation, field-access, or indirect-call sites.
+Runtime movements in both controls were measurement noise. Those loop paths
+are already doing their intended jobs, while generalized V-479 covers ordinary
+non-void mutable helpers elsewhere in application code.
 
 ## Representative web-app request pipeline
 
@@ -523,18 +629,23 @@ instance. The scoped direct-call and receiver facts preserve the normal ABI;
 dynamic, ambiguous, noncanonical, or non-fresh paths retain trait dispatch.
 
 Mutable aggregate promotion requires a fresh heap object covered by escape
-analysis, a single exact canonical call target, a pure `void` callee, and a
+analysis, a single exact canonical call target, a pure callee, and a
 mutable-borrow parameter whose callable-access footprint reads and writes only
-known direct fields. The callee cannot retain or return the object, suspend,
-perform external access, use runtime identity guards, alias the parameter, or
-contain an explicit return. The mutable object must be the first source
-argument, and later arguments cannot reference any of its aliases. Eligible
-specialization identities are reserved before scalar lanes are installed, so a
-budget rejection materializes normally before control flow. Imported targets
-and receiver specializations are resolved through the shared eligibility
-contract, call-shape variants preserve the lane result, and fallback
-materializes every shared alias together. Balanced and non-release builds set
-the mutable-lane allowance to zero.
+known direct fields. A logical result must have a direct ABI; out-pointer
+results fall back. The callee cannot retain or return the borrowed object or
+its provenance, suspend, perform external access, use runtime identity guards,
+or introduce an unsupported alias. Explicit non-`void` returns are supported
+because each return packages the logical result and current writeback lanes.
+
+The mutable object must be the first source argument, and later arguments
+cannot reference any of its aliases. Passing the mutable receiver to a nested
+call rejects specialization for the outer callee, including conditional and
+loop-shaped calls. Eligible specialization identities are reserved before
+scalar lanes are installed, so a budget rejection materializes normally before
+control flow. Imported targets and receiver specializations are resolved
+through the shared eligibility contract, call-shape variants preserve the
+combined result, and fallback materializes every shared alias together.
+Balanced and non-release builds set the mutable-lane allowance to zero.
 
 Mutable aggregate promotion directly depends on Voyd's memory-safety work.
 Fresh-origin escape facts prove where identity can be observed, while immutable callable
@@ -549,7 +660,7 @@ with independent scalar values across a mutable call would be unsound.
 | Stable field loads across calls | Accepted as V-475 | Repeatable 19.8% focused win; the representative loop removes four repeated field-load sites. |
 | `Array.get` Option traffic in proven loops | Accepted as V-476 | Repeatable 72.3% focused win and a 78.8% representative route/view-model lookup win. |
 | Intrinsic `Range<i32>` iterator traffic | Accepted as V-477 | Restores all-`for` source to all-`while` parity; cuts the incremental integrated pipeline by 44.3%, serialization by 40.1%, and gzip size by 16.7%. |
-| Fresh mutable aggregate traffic across exact calls | Accepted as V-479 | Cuts incremental integrated runtime by 44.1%, serialization by 69.4%, and the direct-object focused workload by 90.0%; shrinks representative gzip by 6.5%. |
+| Fresh mutable aggregate traffic across exact calls | Accepted as V-479 | The original `void` path cuts incremental integrated runtime by 44.1%, serialization by 69.4%, and the direct-object focused workload by 90.0%. Generalized direct value-returning calls remove 80 field-load and 16 field-store sites from the realistic writer module and improve its discarded-result path by 7.0–7.6%; used-result timing is inconclusive and nested receiver helpers conservatively retain the ordinary ABI. |
 | Intrinsic `Array<T>` `for` traffic | Accepted | Reaches indexed-loop parity: 95.6% faster in the focused element loop and 91.2% faster in representative view-model serialization. |
 | Exact user-iterator and receiver traffic | Accepted | Non-intrinsic iterators improve by 84.4% in the light case and 55.7% for filtered/strided traversal; emitted iterator traffic falls to zero, and the shared exact-store proof improves the projected-field workload by 70.7%. |
 | `SharedCell` runtime-check traffic | Deferred | The focused gap was large, but the representative programs had no meaningful use and explicit shared-cell runtime semantics need a separate design decision. |

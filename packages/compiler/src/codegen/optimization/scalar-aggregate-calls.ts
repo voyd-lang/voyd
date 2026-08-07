@@ -539,14 +539,17 @@ export const getOrCreateScalarAggregateCallSpecialization = ({
           ctx,
         })
       : undefined;
+  const combinedMutableResultAbiTypes = mutableResultAbiTypes
+    ? [...meta.resultAbiTypes, ...mutableResultAbiTypes]
+    : undefined;
   const widened = ctx.effectsBackend.abi.widenSignature({
     ctx,
     effectful: meta.effectful,
     userParamTypes: meta.outParamType
       ? [meta.outParamType, ...userParamTypes]
       : userParamTypes,
-    userResultType: mutableResultAbiTypes
-      ? abiTypeFor(mutableResultAbiTypes)
+    userResultType: combinedMutableResultAbiTypes
+      ? abiTypeFor(combinedMutableResultAbiTypes)
       : scalarResult
         ? abiTypeFor(
             scalarAggregateAbiTypesForType({
@@ -559,7 +562,7 @@ export const getOrCreateScalarAggregateCallSpecialization = ({
           : meta.resultType,
   });
   const resultAbiTypes =
-    mutableResultAbiTypes ??
+    combinedMutableResultAbiTypes ??
     (scalarResult
       ? (scalarAggregateAbiTypesForType({ typeId: meta.resultTypeId, ctx }) ??
         meta.resultAbiTypes)
@@ -581,6 +584,13 @@ export const getOrCreateScalarAggregateCallSpecialization = ({
     scalarAggregateParamIndexes: selectedIndexes,
     scalarAggregateResult: scalarResult,
     scalarAggregateMutableParamIndex: mutableParamIndex,
+    scalarAggregateMutableCombinedResult:
+      mutableResultAbiTypes && combinedMutableResultAbiTypes
+        ? {
+            logicalAbiTypes: meta.resultAbiTypes,
+            writebackAbiTypes: mutableResultAbiTypes,
+          }
+        : undefined,
     specialization: specializationDimensions,
   };
   const specialization: ScalarAggregateCallSpecialization = {

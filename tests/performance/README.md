@@ -36,6 +36,30 @@ a filtered, strided iterator with variable internal work and early returns.
 Output includes raw samples, medians, checksums, compile time, Wasm/gzip size,
 and dispatch, allocation, Option, and structural-access site counts.
 
+## Mutable-result specialization benchmark
+
+Measure mutable scalar-aggregate calls that both update request-local state and
+return a value:
+
+```sh
+npm run bench:mutable-result -- \
+  --label <label> \
+  --compile-samples 7 \
+  --runtime-samples 31
+```
+
+The fixture models the hot inner loop of a server-rendered response encoder. A
+writer accumulates response bytes, emitted-node counts, escape events, and a
+checksum while each helper returns the number of bytes it wrote. The benchmark
+separately measures a caller that uses the result and one that discards it. A
+manually expanded implementation provides a checksum-equivalence control.
+
+Output is JSON with every raw and median compile/runtime sample, result
+checksums, Wasm/gzip sizes, and static call, allocation, and structural-access
+site counts. To compare another compiler checkout against the current fixture,
+add `--sdk-root /path/to/voyd-checkout`. Run once with that flag and once
+without it, then compare the reported medians and code-shape counts.
+
 ## Checked-access application benchmark
 
 Run the complete checked-access benchmark suite from the repository root:

@@ -36,6 +36,7 @@ import {
   tryCompileArraySafeWhileStatement,
 } from "../optimization/array-fast-paths.js";
 import { withExactIteratorForCallTargets } from "../optimization/iterator-fast-paths.js";
+import { packMutableScalarAggregateResult } from "../optimization/mutable-scalar-aggregate-results.js";
 
 const expressionUsesExpectedResultType = ({
   exprId,
@@ -270,6 +271,59 @@ export const compileStatement = (
         fnCtx,
       );
     case "return":
+      if (fnCtx.scalarAggregateMutableReturn) {
+        if (typeof stmt.value !== "number") {
+          throw new Error(
+            "non-void mutable scalar aggregate specialization requires a return value",
+          );
+        }
+        const valueExpr = compileExpr({
+          exprId: stmt.value,
+          ctx,
+          fnCtx,
+          tailPosition: false,
+          expectedResultTypeId: fnCtx.returnTypeId,
+        }).expr;
+        const requiredActualType = getRequiredExprType(
+          stmt.value,
+          ctx,
+          typeInstanceId,
+        );
+        const actualTypeId =
+          expressionUsesExpectedResultType({ exprId: stmt.value, ctx }) &&
+          binaryen.getExpressionType(valueExpr) ===
+            wasmTypeFor(fnCtx.returnTypeId, ctx)
+            ? fnCtx.returnTypeId
+            : requiredActualType;
+        const logicalValue = coerceValueToType({
+          value: valueExpr,
+          actualType: actualTypeId,
+          targetType: fnCtx.returnTypeId,
+          ctx,
+          fnCtx,
+        });
+        const packed = packMutableScalarAggregateResult({
+          logicalValue,
+          logicalResultTypeId: fnCtx.returnTypeId,
+          logicalResultAbiTypes:
+            fnCtx.scalarAggregateMutableReturn.logicalResultAbiTypes,
+          binding: fnCtx.scalarAggregateMutableReturn.binding,
+          ctx,
+          fnCtx,
+        });
+        if (binaryen.getExpressionType(packed) === binaryen.unreachable) {
+          return packed;
+        }
+        return ctx.mod.block(
+          null,
+          [
+            ...tailResumptionExitChecks({ ctx, fnCtx }),
+            ...handlerCleanupOps({ ctx, fnCtx }),
+            ctx.mod.return(packed),
+          ],
+          binaryen.none,
+        );
+      }
       if (typeof stmt.value === "number") {
         const returnOutResultStorageRef =
           fnCtx.returnAbiKind === "out_ref" && fnCtx.returnOutPointer

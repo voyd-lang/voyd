@@ -768,7 +768,7 @@ pub fn main() -> i32
     expect(optimizedText).toMatch(/\(struct\.new \$voyd_struct_shape_/);
   });
 
-  it("keeps non-void mutable callees on the reference ABI", () => {
+  it("returns a logical result and mutable lanes from the same exact call", () => {
     const { optimizedCodegen, baselineCodegen } = compileOptimized(`
 obj Box {
   value: i32
@@ -780,13 +780,192 @@ fn increment(~box: Box) -> i32
 
 pub fn main() -> i32
   let ~box = Box { value: 1 }
-  increment(~box) * 10 + box.value
+  let first = increment(~box)
+  increment(~box)
+  first * 100 + box.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(203);
+    expect(runMain(optimizedCodegen.module)()).toBe(203);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).toMatch(/increment[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).not.toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("writes back mutable lanes on an early non-void return", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn advance(~box: Box, stop: bool) -> i32
+  box.value = box.value + 1
+  if stop:
+    return box.value * 10
+  box.value + 2
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  advance(~box, true) + box.value
 `);
 
     expect(runMain(baselineCodegen.module)()).toBe(22);
     expect(runMain(optimizedCodegen.module)()).toBe(22);
     const optimizedText = optimizedCodegen.module.emitText();
-    expect(optimizedText).not.toMatch(/increment[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).toMatch(/advance[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).not.toMatch(/\(struct\.new \$voyd_struct_shape_/);
+    expect(optimizedText).not.toContain("(return_call");
+  });
+
+  it("preserves logical multivalue ordering ahead of mutable lanes", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+val PairResult {
+  tens: i32,
+  hundreds: i32
+}
+
+fn advance_pair(~box: Box) -> PairResult
+  box.value = box.value + 1
+  PairResult { tens: box.value * 10, hundreds: box.value * 100 }
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  let result = advance_pair(~box)
+  result.tens + result.hundreds + box.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(222);
+    expect(runMain(optimizedCodegen.module)()).toBe(222);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).toMatch(/advance_pair[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).not.toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("falls back when the logical result returns receiver provenance", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn expose(~box: Box) -> Box
+  box.value = box.value + 1
+  box
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  let exposed = expose(~box)
+  exposed.value + box.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(4);
+    expect(runMain(optimizedCodegen.module)()).toBe(4);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).not.toMatch(/expose[^\s]*__scalar_agg_0_mutable/);
+    expect(optimizedText).toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("keeps wide logical results on the ordinary out-ref ABI", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+val WideResult {
+  first: i32,
+  second: i32,
+  third: i32,
+  fourth: i32,
+  fifth: i32
+}
+
+fn advance_wide(~box: Box) -> WideResult
+  box.value = box.value + 1
+  WideResult {
+    first: box.value,
+    second: 2,
+    third: 3,
+    fourth: 4,
+    fifth: 5
+  }
+
+pub fn main() -> i32
+  let ~box = Box { value: 1 }
+  let result = advance_wide(~box)
+  result.first + result.second + result.third + result.fourth + result.fifth + box.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(18);
+    expect(runMain(optimizedCodegen.module)()).toBe(18);
+    expect(optimizedCodegen.module.emitText()).not.toMatch(
+      /advance_wide[^\s]*__scalar_agg_0_mutable/,
+    );
+  });
+
+  it("keeps conditional nested receiver calls on the ordinary ABI", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn increment(~box: Box) -> i32
+  box.value = box.value + 1
+  box.value
+
+fn maybe_increment(~box: Box, apply: bool) -> i32
+  if apply:
+    return increment(~box)
+  box.value
+
+pub fn main() -> i32
+  let ~first = Box { value: 1 }
+  let ~second = Box { value: 10 }
+  maybe_increment(~first, false) * 1000 + first.value * 100 + maybe_increment(~second, true) * 10 + second.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(1221);
+    expect(runMain(optimizedCodegen.module)()).toBe(1221);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).not.toMatch(
+      /maybe_increment[^\s]*__scalar_agg_0_mutable/,
+    );
+    expect(optimizedText).not.toMatch(/__increment_\d+__scalar_agg_0_mutable/);
+    expect(optimizedText).toMatch(/\(struct\.new \$voyd_struct_shape_/);
+  });
+
+  it("keeps zero-iteration nested receiver loops on the ordinary ABI", () => {
+    const { optimizedCodegen, baselineCodegen } = compileOptimized(`
+obj Box {
+  value: i32
+}
+
+fn increment(~box: Box) -> i32
+  box.value = box.value + 1
+  box.value
+
+fn repeat_increment(~box: Box, iterations: i32) -> i32
+  var remaining = iterations
+  while remaining > 0:
+    increment(~box)
+    remaining = remaining - 1
+  box.value
+
+pub fn main() -> i32
+  let ~first = Box { value: 3 }
+  let ~second = Box { value: 5 }
+  repeat_increment(~first, 0) * 1000 + first.value * 100 + repeat_increment(~second, 2) * 10 + second.value
+`);
+
+    expect(runMain(baselineCodegen.module)()).toBe(3377);
+    expect(runMain(optimizedCodegen.module)()).toBe(3377);
+    const optimizedText = optimizedCodegen.module.emitText();
+    expect(optimizedText).not.toMatch(
+      /repeat_increment[^\s]*__scalar_agg_0_mutable/,
+    );
+    expect(optimizedText).not.toMatch(/__increment_\d+__scalar_agg_0_mutable/);
     expect(optimizedText).toMatch(/\(struct\.new \$voyd_struct_shape_/);
   });
 
