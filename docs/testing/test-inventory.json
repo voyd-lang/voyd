@@ -2491,6 +2491,12 @@
     "rationale": "Protects complete, non-overlapping duration-aware compiler shard assignment and rejects invalid shard coordinates."
   },
   {
+    "file": "scripts/testing/run-sdk-test-shards.test.mjs",
+    "owner": "package-unit",
+    "disposition": "package-local",
+    "rationale": "Protects complete, non-overlapping SDK CI group assignment while retaining every group in the unsharded local suite."
+  },
+  {
     "file": "scripts/testing/run-std-test-shards.test.mjs",
     "owner": "package-unit",
     "disposition": "package-local",

@@ -24,9 +24,9 @@ export const partitionsForShard = (value) => {
   if (shard.count === 1) return [{ index: 0, count: 1 }];
 
   // Hosted timings show that combining the odd quartiles produces a
-  // disproportionately expensive compile. Keep them separate on the logical
-  // shard without the SDK/build work, and pair the lighter even quartiles with
-  // that additional work.
+  // disproportionately expensive compile. Keep them beside the smaller SDK
+  // external groups, and pair the lighter even quartiles with the SDK base
+  // group.
   if (shard.count === 2) {
     const indices = shard.index === 1 ? [1, 3] : [0, 2];
     return indices.map((index) => ({ index, count: 4 }));

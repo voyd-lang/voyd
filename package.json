@@ -19,7 +19,7 @@
     "test:unit:affected:ci": "turbo run test --affected --filter=!@voyd-lang/conformance-tests --filter=!@voyd-lang/integration-tests --filter=!@voyd-lang/performance-tests --output-logs=errors-only --concurrency=3",
     "test:unit:core:affected:ci": "npm run test:unit:affected:ci -- --filter=!@voyd-lang/cli --filter=!@voyd-lang/language-server --filter=!@voyd-lang/web",
     "test:unit:core:shard:1:ci": "turbo run test --affected --filter=@voyd-lang/compiler --filter=@voyd-lang/std --filter=@voyd-lang/sdk --output-logs=errors-only --concurrency=3",
-    "test:unit:core:shard:2:ci": "npm run test:unit:core:affected:ci -- --filter=!@voyd-lang/sdk",
+    "test:unit:core:shard:2:ci": "npm run test:unit:core:affected:ci",
     "test:unit:web:ci": "npm run --workspace @voyd-lang/web test:sharded -- --partition-index=0 --partition-count=1",
     "test:unit:tooling:affected:ci": "turbo run test --affected --filter=@voyd-lang/cli --filter=@voyd-lang/language-server --output-logs=errors-only --concurrency=2",
     "test:codegen": "npm run --workspace @voyd-lang/compiler test:codegen --",

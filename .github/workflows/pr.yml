@@ -45,6 +45,7 @@ jobs:
       TURBO_SCM_BASE: ${{ github.event.pull_request.base.sha }}
       TURBO_SCM_HEAD: ${{ github.event.pull_request.head.sha }}
       VOYD_COMPILER_TEST_SHARD: ${{ matrix.shard }}/2
+      VOYD_SDK_TEST_SHARD: ${{ matrix.shard }}/2
       VOYD_STD_TEST_SHARD: ${{ matrix.shard }}/2
     steps:
       - uses: actions/checkout@v6
@@ -105,7 +106,7 @@ jobs:
           retention-days: 30
       # Build-only checks for non-CLI artifacts that are not exercised by package tests.
       - name: Build non-CLI artifacts
-        if: matrix.shard == 1 && steps.changes.outputs.non_cli_build == 'true'
+        if: matrix.shard == 2 && steps.changes.outputs.non_cli_build == 'true'
         run: npx turbo run build --affected --output-logs=errors-only
       - name: Run typing benchmark regression gate
         if: matrix.shard == 2 && steps.changes.outputs.compiler_semantics == 'true'
