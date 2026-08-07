@@ -25,6 +25,7 @@ import type {
   HirItemId,
   HirStmtId,
   ProgramFunctionInstanceId,
+  ProgramSymbolId,
   SymbolId,
   TypeId,
   TypeParamId,
@@ -48,7 +49,6 @@ import type { SerializerMetadata } from "../semantics/symbol-index.js";
 import type { Diagnostic, DiagnosticEmitter } from "../diagnostics/index.js";
 import type { ProgramHelperRegistry } from "./program-helpers.js";
 import type { ProgramOptimizationFacts } from "../optimize/ir.js";
-import type { ProgramSymbolId } from "../semantics/ids.js";
 import type {
   OptimizationLevel,
   SpecializationPolicy,
@@ -410,6 +410,8 @@ export interface FunctionContext {
   suppressTailResumptionExitChecks?: boolean;
   staticEffectContext?: StaticEffectHandlerContext;
   exactParameterTypes?: ReadonlyMap<SymbolId, TypeId>;
+  exactTraitDispatchTargets?: ReadonlyMap<HirExprId, ProgramSymbolId>;
+  exactCallReceiverTypes?: ReadonlyMap<HirExprId, TypeId>;
   continuation?: {
     cfg: GroupContinuationCfg;
     startedLocal: LocalBindingLocal;

@@ -499,12 +499,18 @@ export const compileMethodCallExpr = (
   );
   const callView = toMethodCallView(expr);
   const concreteTraitTarget = callInfo.traitDispatch
-    ? resolveConcreteTraitMethodTarget({
-        expr: callView,
-        selectedMethod: targetFunctionId as ProgramSymbolId,
-        ctx,
-        typeInstanceId,
-      })
+    ? (() => {
+        const forcedTarget = fnCtx.exactTraitDispatchTargets?.get(expr.id);
+        if (typeof forcedTarget === "number") {
+          return ctx.program.symbols.refOf(forcedTarget);
+        }
+        return resolveConcreteTraitMethodTarget({
+          expr: callView,
+          selectedMethod: targetFunctionId as ProgramSymbolId,
+          ctx,
+          typeInstanceId,
+        });
+      })()
     : undefined;
   if (concreteTraitTarget) {
     return compileResolvedSymbolCall({

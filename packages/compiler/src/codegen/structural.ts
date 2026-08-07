@@ -2749,6 +2749,7 @@ export const storeStructuralField = ({
   field,
   pointer,
   value,
+  exactNominalTypeId,
   ctx,
   fnCtx,
 }: {
@@ -2756,6 +2757,7 @@ export const storeStructuralField = ({
   field: StructuralFieldInfo;
   pointer: () => binaryen.ExpressionRef;
   value: binaryen.ExpressionRef;
+  exactNominalTypeId?: TypeId;
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
@@ -2763,6 +2765,23 @@ export const storeStructuralField = ({
     throw new Error(
       "storing directly into inline value-object fields is not supported",
     );
+  }
+  if (
+    typeof exactNominalTypeId === "number" &&
+    exactNominalTypeId === structInfo.nominalId
+  ) {
+    return structSetFieldValue({
+      mod: ctx.mod,
+      fieldIndex: field.runtimeIndex,
+      ref: refCast(ctx.mod, pointer(), structInfo.runtimeType),
+      value: lowerValueForHeapField({
+        value,
+        typeId: field.typeId,
+        targetType: field.heapWasmType,
+        ctx,
+        fnCtx,
+      }),
+    });
   }
   if (!field.setterType) {
     throw new Error(`missing setter for structural field ${field.name}`);

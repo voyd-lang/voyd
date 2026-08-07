@@ -2,7 +2,7 @@
 
 V-439 measured where Voyd's checked memory-access facts leave avoidable work in
 optimized Wasm, then implemented only the opportunities with a repeatable win.
-The final branch contains four accepted optimizations:
+The final branch contains six accepted optimizations:
 
 - V-475 forwards fixed-field loads out of loops when every resolved call is
   proven unable to write the loaded place.
@@ -14,6 +14,13 @@ The final branch contains four accepted optimizations:
 - V-479 keeps eligible fresh mutable objects in scalar lanes across exact,
   pure mutable-borrow calls and returns the updated lanes directly instead of
   allocating and repeatedly loading and storing a heap object.
+- Intrinsic `Array<T>` iteration recognizes the exact standard `for` expansion
+  and emits direct array traversal without allocating `ArrayIterator` or
+  constructing and matching `Option` for every element.
+- General exact-iterator specialization proves fresh concrete iterator results
+  from canonical standard `Sequence.iter` implementations, directly targets
+  their standard `Iterator.next` implementation, and exposes the unchanged
+  iterator state machine to Binaryen scalar replacement.
 
 ## Method
 
@@ -23,9 +30,24 @@ Run the benchmark with:
 npm run bench:v439 -- --label <label> --samples 7 --runtime-samples 31
 ```
 
-Each reported compile time is the median of seven fresh SDK compiles. Runtime
-results are medians of 31 samples after three warmups. Each entrypoint gets a
-fresh host instance so one stage cannot inherit another stage's GC heap.
+Run the two iterator follow-up benchmarks with:
+
+```sh
+npm run bench:array-for -- \
+  --label <label> \
+  --compile-samples 5 \
+  --runtime-samples 21
+
+npm run bench:iterator-for -- \
+  --label <label> \
+  --compile-samples 7 \
+  --runtime-samples 31
+```
+
+The V-439 and general-iterator compile times are medians of seven fresh SDK
+compiles, and their runtimes are medians of 31 samples after three warmups. The
+Array follow-up uses five compile and 21 runtime samples. Each V-439 entrypoint
+gets a fresh host instance so one stage cannot inherit another stage's GC heap.
 Scenarios run in isolated child processes so differently shaped Binaryen
 programs cannot share runtime type state. Code-shape counts are static
 instruction-site counts over each complete emitted module.
@@ -36,7 +58,8 @@ representative web-app table measures four compiler revisions against the same
 final all-`for` fixture: original baseline, V-475 only, V-475 plus V-476, and
 V-477. V-479 was then measured against the merged V-477 branch with the same
 harness, fixtures, sample counts, and machine. The final overall comparison
-uses the original baseline and the accepted V-479 end state.
+uses the original baseline and the combined accepted end state after both
+iterator follow-ups.
 
 ## Focused release results
 
@@ -329,6 +352,115 @@ endpoints once in source order, advances iterator state before the user body so
 reuses V-476's array-stability scope for `0..array.len()`. Effectful functions
 conservatively keep the normal continuation-aware iterator path.
 
+## Intrinsic Array `for` follow-up
+
+`Array<T>` is a compiler-owned intrinsic type. The follow-up recognizes the
+exact standard expansion of `for element in array`, evaluates the array once,
+and directly reads its count, current backing storage, and element. It advances
+the synthetic cursor before the user body so `continue` retains its original
+meaning.
+
+The lowering re-reads count and storage every iteration. That preserves the
+existing `ArrayIterator` behavior when the body grows the array, triggers
+backing-storage replacement, or mutates it through an alias. Reassigning the
+source variable does not retarget iteration because the original array value is
+captured once. Custom and non-intrinsic `Sequence` implementations remain on
+the general iterator path.
+
+The benchmark traverses 48 view-model records. Its light-body case isolates
+iterator overhead, while the rendering case performs record-based response
+size calculation representative of serialization work.
+
+| Release runtime | General Array iterator | Intrinsic direct path | Indexed control | Change |
+| --- | ---: | ---: | ---: | ---: |
+| Light element loop | 3.264 ms | 0.143 ms | 0.145 ms | **-95.6%** |
+| View-model serialization | 1.708 ms | 0.150 ms | 0.154 ms | **-91.2%** |
+
+| Release module metric | Before | Array path | Change |
+| --- | ---: | ---: | ---: |
+| Wasm | 4,078 B | 3,018 B | -26.0% |
+| Gzip | 1,956 B | 1,482 B | -24.2% |
+| Indirect calls | 23 | 12 | -11 |
+| Allocation sites | 31 | 18 | -13 |
+
+Five uncached compiles and 21 warmed runtime samples were used. The adjacent
+compile medians were 1,606.9 and 1,602.7 ms (-0.3%); later reruns were noisy,
+so this is evidence of no material compile regression rather than a compile
+speedup. On the combined final branch, the same benchmark is 2,880 bytes
+(1,413 gzip) and retains indexed-loop runtime parity.
+
+## General exact-iterator follow-up
+
+The general path applies to non-intrinsic user types implementing the standard
+`Sequence` and `Iterator` traits. It requires an exact nominal iterable, an
+exact selected `iter` implementation, and a fresh concrete nominal iterator
+returned directly by that implementation. It uses the selected generic
+function instance when the iterator is generic, resolves exactly one canonical
+standard `Iterator.next` implementation for that returned type, and scopes the
+direct target to the macro-generated call.
+
+The iterator still has its ordinary source-level object representation and
+`next() -> Option<T>` ABI. Exact receiver specialization removes dynamic
+dispatch and permits direct field stores under the same exact nominal-type fact
+already used for direct field loads. Binaryen then inlines the state machine
+and removes the iterator and `Option` objects when its own escape analysis
+proves them unobservable. This avoids a new combined value-plus-mutable-state
+ABI and naturally preserves early returns, variable strides, skipped values,
+aliases, wide and object results, and existing fallback behavior.
+
+The representative case uses a filtered, strided iterator whose `next` method
+performs variable internal work and returns early when it finds a usable value.
+
+| Release runtime | General dispatch | Exact specialization | Manual state machine | Change |
+| --- | ---: | ---: | ---: | ---: |
+| Light user iterator | 2.472 ms | 0.385 ms | 0.309 ms | **-84.4%** |
+| Filtered/strided traversal | 0.992 ms | 0.440 ms | 0.398 ms | **-55.7%** |
+
+| Release module metric | Before | After | Change |
+| --- | ---: | ---: | ---: |
+| Wasm | 2,221 B | 1,654 B | -25.5% |
+| Gzip | 1,088 B | 781 B | -28.2% |
+| Indirect calls | 4 | 0 | -4 |
+| Allocation sites | 15 | 0 | -15 |
+| `struct.get` sites | 13 | 0 | -13 |
+| `struct.set` sites | 7 | 0 | -7 |
+
+Seven uncached compiles and 31 warmed runtime samples were used. Compile median
+moved from 1,554.7 to 1,588.3 ms (+2.2%), which is inconclusive at this sample
+count. A parent rerun reproduced the final emitted shape and measured 0.354 ms
+for the light loop and 0.423 ms for the filtered traversal.
+
+Dynamic or ambiguous dispatch, noncanonical traits, non-fresh iterator
+results, unsupported result control flow, and builds without release optimizer
+facts keep the ordinary trait call. The intrinsic Array path retains its
+stricter requirement that both implementations belong to std.
+
+## Final representative results with iterator follow-ups
+
+The complete representative suite was rerun after both iterator optimizations.
+These rows compare the original PR base with the combined final branch using
+the same final fixtures and harness.
+
+| Representative release program | Before PR | Final | Change |
+| --- | ---: | ---: | ---: |
+| Vtrace renderer | 79.094 ms | 79.835 ms | +0.9% |
+| Scalar aggregate | 0.0407 ms | 0.0408 ms | +0.3% |
+| Web request pipeline | 14.199 ms | 2.850 ms | **-79.9%** |
+
+| Representative release artifact | Before PR | Final | Change |
+| --- | ---: | ---: | ---: |
+| Vtrace Wasm / gzip | 34,669 / 12,826 B | 34,037 / 12,702 B | -1.8% / -1.0% |
+| Scalar aggregate Wasm / gzip | 1,112 / 677 B | 1,112 / 677 B | 0.0% / 0.0% |
+| Web pipeline Wasm / gzip | 6,262 / 2,884 B | 3,878 / 1,883 B | **-38.1% / -34.7%** |
+
+The final web lookup stage is 0.644 ms versus 3.245 ms at the PR base (-80.2%),
+and serialization is 2.152 versus 11.715 ms (-81.6%). Vtrace now benefits in
+release artifact shape from exact iterator/receiver specialization while its
+runtime remains effectively flat. Scalar aggregate remains byte-identical.
+Without release optimization, Vtrace and scalar aggregate remain byte-identical
+to the PR base; the existing proven Array/range codegen paths account for the
+non-release web improvement already described above.
+
 ## V-479 unmatched controls
 
 The Wasm hash and every recorded instruction-site count are identical before
@@ -369,6 +501,18 @@ the exact std `for` macro shape. Other range instantiations, open-ended ranges,
 arbitrary iterators, malformed expansions, and effectful functions use normal
 iteration. Bounds are evaluated once before any forwarded field loads.
 
+The intrinsic Array `for` path requires the validated std intrinsic Array
+type, the exact standard `for` expansion, and canonical std-owned `iter` and
+`next` implementations. It captures the iterable once and reloads count and
+storage on every iteration to preserve mutation and reallocation semantics.
+
+General iterator specialization requires the exact standard `for` expansion,
+an exact nominal source, a single canonical standard `Sequence.iter` target,
+and a fresh concrete nominal object result that resolves to one standard
+`Iterator.next` implementation. Generic results use the selected function
+instance. The scoped direct-call and receiver facts preserve the normal ABI;
+dynamic, ambiguous, noncanonical, or non-fresh paths retain trait dispatch.
+
 Mutable aggregate promotion requires a fresh heap object covered by escape
 analysis, a single exact canonical call target, a pure `void` callee, and a
 mutable-borrow parameter whose callable-access footprint reads and writes only
@@ -383,8 +527,8 @@ contract, call-shape variants preserve the lane result, and fallback
 materializes every shared alias together. Balanced and non-release builds set
 the mutable-lane allowance to zero.
 
-This optimization directly depends on Voyd's memory-safety work. Fresh-origin
-escape facts prove where identity can be observed, while immutable callable
+Mutable aggregate promotion directly depends on Voyd's memory-safety work.
+Fresh-origin escape facts prove where identity can be observed, while immutable callable
 access summaries prove the exact callee cannot hide, retain, or mutate storage
 outside the listed fields. Without those contracts, replacing a heap identity
 with independent scalar values across a mutable call would be unsound.
@@ -397,6 +541,8 @@ with independent scalar values across a mutable call would be unsound.
 | `Array.get` Option traffic in proven loops | Accepted as V-476 | Repeatable 72.3% focused win and a 78.8% representative route/view-model lookup win. |
 | Intrinsic `Range<i32>` iterator traffic | Accepted as V-477 | Restores all-`for` source to all-`while` parity; cuts the incremental integrated pipeline by 44.3%, serialization by 40.1%, and gzip size by 16.7%. |
 | Fresh mutable aggregate traffic across exact calls | Accepted as V-479 | Cuts incremental integrated runtime by 44.1%, serialization by 69.4%, and the direct-object focused workload by 90.0%; shrinks representative gzip by 6.5%. |
+| Intrinsic `Array<T>` `for` traffic | Accepted | Reaches indexed-loop parity: 95.6% faster in the focused element loop and 91.2% faster in representative view-model serialization. |
+| Exact user-iterator dispatch and state traffic | Accepted | Non-intrinsic iterators improve by 84.4% in the light case and 55.7% for filtered/strided traversal; emitted allocation, indirect-call, and iterator field traffic falls to zero. |
 | `SharedCell` runtime-check traffic | Deferred | The focused gap was large, but the representative programs had no meaningful use and explicit shared-cell runtime semantics need a separate design decision. |
 | Remaining access guards | Stopped | The existing focused guard benchmark measured about 1.34 ns per call, below the threshold for another optimization ticket. |
 
@@ -404,4 +550,7 @@ Each accepted optimization passed focused runtime and emitted-shape tests,
 repository tests and typechecking, the test inventory audit, and an independent
 review followed by a fresh verification review. V-479 additionally passed
 separate completeness, design, and correctness review lenses because it crosses
-the scalar-replacement and call-ABI boundaries.
+the scalar-replacement and call-ABI boundaries. The intrinsic Array review
+caught and repaired an overbroad macro-lookalike matcher. The general iterator
+review caught and repaired missing generic contextual instantiation and missing
+post-Binaryen shape coverage before a clean extra-high verification.

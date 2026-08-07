@@ -651,6 +651,13 @@
     ]
   },
   {
+    "file": "packages/compiler/src/codegen/__tests__/iterator-for-specialization.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-08-06",
+    "disposition": "compiler-local",
+    "rationale": "Exact standard-for recognition, concrete trait-target selection, specialized direct-call shape, and conservative dynamic/noncanonical fallback are compiler-internal optimization contracts. Runtime assertions guard equivalence while exercising those codegen paths rather than introducing new language behavior."
+  },
+  {
     "file": "packages/compiler/src/codegen/__tests__/memory-exports.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",

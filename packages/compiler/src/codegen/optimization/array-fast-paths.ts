@@ -1077,15 +1077,17 @@ const isVoidLiteral = ({
   return expr?.exprKind === "literal" && expr.literalKind === "void";
 };
 
-const isCanonicalStdTraitMethodCall = ({
+export const isCanonicalStdTraitMethodCall = ({
   expr,
   traitName,
   methodName,
+  allowExternalImplementations = false,
   ctx,
 }: {
   expr: HirMethodCallExpr;
   traitName: "Sequence" | "Iterator";
   methodName: "iter" | "next";
+  allowExternalImplementations?: boolean;
   ctx: CodegenContext;
 }): boolean => {
   if (
@@ -1106,8 +1108,9 @@ const isCanonicalStdTraitMethodCall = ({
   return [...targets].every((target) => {
     const traitMethod = ctx.program.traits.getTraitMethodImpl(target);
     return (
-      ctx.program.symbols.getPackageId(target) === "std" &&
-      ctx.program.symbols.getName(target) === methodName &&
+      (allowExternalImplementations ||
+        (ctx.program.symbols.getPackageId(target) === "std" &&
+          ctx.program.symbols.getName(target) === methodName)) &&
       traitMethod !== undefined &&
       ctx.program.symbols.getPackageId(traitMethod.traitSymbol) === "std" &&
       ctx.program.symbols.getName(traitMethod.traitSymbol) === traitName &&
@@ -1174,18 +1177,21 @@ const parseArrayForIterator = ({
   };
 };
 
-const parseArrayForBody = ({
+export const parseCanonicalStdForBody = ({
   whileExpr,
   iteratorSymbol,
+  allowExternalImplementations = false,
   ctx,
 }: {
   whileExpr: HirWhileExpr;
   iteratorSymbol: SymbolId;
+  allowExternalImplementations?: boolean;
   ctx: CodegenContext;
 }):
   | {
       elementPattern: HirPattern;
       userStatements: readonly number[];
+      nextCall: HirMethodCallExpr;
     }
   | undefined => {
   if (!isLiteralBoolean({ exprId: whileExpr.condition, value: "true", ctx })) {
@@ -1212,6 +1218,7 @@ const parseArrayForBody = ({
       expr: nextCall,
       traitName: "Iterator",
       methodName: "next",
+      allowExternalImplementations,
       ctx,
     })
   ) {
@@ -1297,6 +1304,7 @@ const parseArrayForBody = ({
   return {
     elementPattern: elementStmt.pattern,
     userStatements: someBlock.statements.slice(1),
+    nextCall,
   };
 };
 
@@ -1341,7 +1349,7 @@ const tryAnalyzeArrayForLoop = ({
   if (!iterator || whileExpr?.exprKind !== "while") {
     return undefined;
   }
-  const body = parseArrayForBody({
+  const body = parseCanonicalStdForBody({
     whileExpr,
     iteratorSymbol: iteratorStmt.pattern.symbol,
     ctx,

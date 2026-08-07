@@ -19,6 +19,23 @@ view-model records and computes representative serialization work. Output is
 JSON with raw and median compile/runtime samples, checksums, Wasm/gzip sizes,
 and code-shape counts.
 
+## General iterator `for` benchmark
+
+Measure exact non-intrinsic user iterators against equivalent manual state
+machines:
+
+```sh
+npm run bench:iterator-for -- \
+  --label <label> \
+  --compile-samples 7 \
+  --runtime-samples 31
+```
+
+The focused case uses a light-body counter. The application-shaped case uses
+a filtered, strided iterator with variable internal work and early returns.
+Output includes raw samples, medians, checksums, compile time, Wasm/gzip size,
+and dispatch, allocation, Option, and structural-access site counts.
+
 ## Checked-access application benchmark
 
 Run the complete checked-access benchmark suite from the repository root:

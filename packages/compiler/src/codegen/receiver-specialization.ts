@@ -156,6 +156,20 @@ export const receiverSpecializedMetaForCall = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): FunctionMetadata => {
+  const exactReceiverType = fnCtx.exactCallReceiverTypes?.get(callId);
+  const receiverSymbol = meta.parameters[0]?.symbol;
+  if (
+    typeof exactReceiverType === "number" &&
+    typeof receiverSymbol === "number"
+  ) {
+    return (
+      getOrCreateReceiverSpecialization({
+        ctx,
+        meta,
+        exactParameterTypes: new Map([[receiverSymbol, exactReceiverType]]),
+      }) ?? meta
+    );
+  }
   if (!ctx.optimization || typeof fnCtx.instanceId !== "number") {
     return meta;
   }

@@ -35,6 +35,7 @@ import {
   tryCompileRangeForStatement,
   tryCompileArraySafeWhileStatement,
 } from "../optimization/array-fast-paths.js";
+import { withExactIteratorForCallTargets } from "../optimization/iterator-fast-paths.js";
 
 const expressionUsesExpectedResultType = ({
   exprId,
@@ -140,6 +141,13 @@ export const compileBlockExpr = (
               compileExpr,
               compileStatement: (nestedStmtId) =>
                 compileStatement(nestedStmtId, ctx, fnCtx, compileExpr),
+            }) ??
+            withExactIteratorForCallTargets({
+              block: expr,
+              statementIndex,
+              ctx,
+              fnCtx,
+              compile: () => compileStatement(stmtId, ctx, fnCtx, compileExpr),
             }) ??
             compileStatement(stmtId, ctx, fnCtx, compileExpr),
         );
