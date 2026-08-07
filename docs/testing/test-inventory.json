@@ -280,6 +280,14 @@
     ]
   },
   {
+    "file": "packages/compiler/src/codegen/__tests__/array-for-fast-path.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-08-06",
+    "disposition": "compiler-local-with-portable-signal",
+    "rationale": "Emitted direct-loop shape, exact intrinsic eligibility, and general-iterator fallback are compiler-local; portable Array growth-during-iteration behavior is represented by runtime.collections.array-iteration-growth.",
+    "portableCaseIds": ["runtime.collections.array-iteration-growth"]
+  },
+  {
     "file": "packages/compiler/src/codegen/__tests__/borrowed-array-element-views.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",

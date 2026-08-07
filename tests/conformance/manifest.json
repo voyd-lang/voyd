@@ -1230,6 +1230,12 @@
           "expect": { "kind": "equals", "value": 99 }
         },
         {
+          "id": "runtime.collections.array-iteration-growth",
+          "title": "observes Array growth while iterating",
+          "entryName": "array_iteration_observes_growth",
+          "expect": { "kind": "equals", "value": 6 }
+        },
+        {
           "id": "runtime.collections.slice-exclusive",
           "title": "creates exclusive slices",
           "entryName": "slice_exclusive",

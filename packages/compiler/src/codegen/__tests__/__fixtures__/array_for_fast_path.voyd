@@ -1,0 +1,150 @@
+use std::array::Array
+use std::optional::all
+
+trait CustomSequence<T>
+  fn iter(self) -> CustomIterator<T>
+
+trait CustomIterator<T>
+  fn next(~self) -> Option<T>
+
+fn add_to(~total: i32, value: i32) -> void
+  total = total + value
+
+macro manual_array_loop(iterable, total)
+  let iterator_id = identifier(__manual_iterator)
+  let next_id = identifier(__manual_next)
+  let value_id = identifier(__manual_value)
+
+  `
+    let ~($iterator_id) = $iterable.iter()
+    while true:
+      let $next_id = ($iterator_id).next()
+      $next_id.match
+        Some:
+          let $value_id = $next_id.value
+          add_to(~$total, $value_id)
+        None:
+          break
+
+val WideValue {
+  first: i32,
+  second: i32,
+  third: i32,
+  fourth: i32
+}
+
+obj Node {
+  value: i32
+}
+
+obj EvaluationCounter {
+  count: i32
+}
+
+obj CounterSequence {
+  end: i32
+}
+
+obj CounterIterator {
+  current: i32,
+  end: i32
+}
+
+impl CustomSequence<i32> for CounterSequence
+  fn iter(self) -> CustomIterator<i32>
+    CounterIterator { current: 0, end: self.end }
+
+impl CustomIterator<i32> for CounterIterator
+  fn next(~self) -> Option<i32>
+    if self.current >= self.end:
+      return None {}
+    let value = self.current
+    self.current = self.current + 1
+    Some<i32> { value }
+
+fn integers() -> Array<i32>
+  let ~result = Array<i32>::with_capacity(2)
+  result.push(1)
+  result.push(2)
+  result
+
+fn count_evaluation(~counter: EvaluationCounter) -> Array<i32>
+  counter.count = counter.count + 1
+  integers()
+
+fn first<T>(source: Array<T>, fallback: T) -> T
+  for value in source:
+    return value
+  fallback
+
+pub fn dynamic_growth_and_storage_replacement() -> i32
+  let ~source = Array<i32>::with_capacity(1)
+  source.push(1)
+  let alias = source
+  var total = 0
+  for value in alias:
+    total = total + value
+    if value < 4:
+      source.push(value + 1)
+  total
+
+pub fn iterable_evaluated_once() -> i32
+  let ~counter = EvaluationCounter { count: 0 }
+  var total = 0
+  for value in count_evaluation(~counter):
+    total = total + value
+  (counter.count * 100) + total
+
+pub fn replacement_does_not_retarget_iterator() -> i32
+  var source = integers()
+  var total = 0
+  for value in source:
+    total = total + value
+    if value == 1:
+      let ~replacement = Array<i32>::with_capacity(1)
+      replacement.push(9)
+      source = replacement
+  total
+
+pub fn break_and_continue() -> i32
+  let source = integers()
+  var continued = 0
+  for value in source:
+    if value == 1:
+      continue
+    continued = continued + value
+  var broken = 0
+  for value in source:
+    broken = broken + value
+    break
+  (continued * 10) + broken
+
+pub fn generic_and_wide_values() -> i32
+  let ~wide = Array<WideValue>::with_capacity(1)
+  wide.push(WideValue { first: 1, second: 2, third: 3, fourth: 4 })
+  let value = first<WideValue>(
+    wide,
+    WideValue { first: 0, second: 0, third: 0, fourth: 0 }
+  )
+  value.first + value.second + value.third + value.fourth
+
+pub fn object_elements() -> i32
+  let ~nodes = Array<Node>::with_capacity(2)
+  nodes.push(Node { value: 4 })
+  nodes.push(Node { value: 7 })
+  var total = 0
+  for node in nodes:
+    total = total + node.value
+  total
+
+pub fn custom_sequence_fallback() -> i32
+  var total = 0
+  for value in CounterSequence { end: 4 }:
+    total = total + value
+  total
+
+pub fn manual_array_iterator_fallback() -> i32
+  let source = integers()
+  var total = 0
+  manual_array_loop(source, total)
+  total

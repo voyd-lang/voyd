@@ -3,6 +3,22 @@
 Performance tests and large regression workloads are opt-in. They do not run
 as part of the default test suite.
 
+## Intrinsic Array `for` benchmark
+
+Measure intrinsic Array iteration against equivalent indexed-loop controls:
+
+```sh
+npm run bench:array-for -- \
+  --label <label> \
+  --compile-samples 5 \
+  --runtime-samples 21
+```
+
+The light-body case makes iterator overhead visible. The render case traverses
+view-model records and computes representative serialization work. Output is
+JSON with raw and median compile/runtime samples, checksums, Wasm/gzip sizes,
+and code-shape counts.
+
 ## Checked-access application benchmark
 
 Run the complete checked-access benchmark suite from the repository root:

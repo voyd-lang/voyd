@@ -17,6 +17,15 @@ pub fn write_index() -> i32
   arr[1] = 99
   optional_i32_or(arr[1], -1)
 
+pub fn array_iteration_observes_growth() -> i32
+  let ~arr = [1]
+  var total = 0
+  for value in arr:
+    total = total + value
+    if value < 3:
+      arr.push(value + 1)
+  total
+
 pub fn slice_exclusive() -> i32
   let arr = [1, 2, 3, 4]
   let slice = arr[1..3]

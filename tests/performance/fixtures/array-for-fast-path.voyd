@@ -1,0 +1,75 @@
+use std::array::Array
+
+val ViewNode {
+  kind: i32,
+  text_length: i32,
+  attribute_count: i32,
+  child_count: i32
+}
+
+fn nodes() -> Array<ViewNode>
+  let ~result = Array<ViewNode>::with_capacity(48)
+  var index = 0
+  while index < 48:
+    result.push(ViewNode {
+      kind: (index % 5) + 1,
+      text_length: (index * 3) + 7,
+      attribute_count: index % 4,
+      child_count: index % 6
+    })
+    index = index + 1
+  result
+
+fn serialized_size(node: ViewNode) -> i32
+  let tag_bytes = (node.kind * 2) + 3
+  let attribute_bytes = node.attribute_count * 9
+  let child_markers = node.child_count * 4
+  tag_bytes + attribute_bytes + child_markers + node.text_length
+
+pub fn light_for_benchmark() -> i32
+  let source = nodes()
+  var pass = 0
+  var total = 0
+  while pass < 8000:
+    for node in source:
+      total = total + node.kind
+    pass = pass + 1
+  total
+
+pub fn light_indexed_control() -> i32
+  let source = nodes()
+  var pass = 0
+  var total = 0
+  while pass < 8000:
+    var index = 0
+    while index < source.len():
+      total = total + source.at(index).kind
+      index = index + 1
+    pass = pass + 1
+  total
+
+pub fn render_for_benchmark() -> i32
+  let source = nodes()
+  var request = 0
+  var total = 0
+  while request < 4000:
+    for node in source:
+      total = total + serialized_size(node) + (request % 7)
+    request = request + 1
+  total
+
+pub fn render_indexed_control() -> i32
+  let source = nodes()
+  var request = 0
+  var total = 0
+  while request < 4000:
+    var index = 0
+    while index < source.len():
+      let node = source.at(index)
+      total = total + serialized_size(node) + (request % 7)
+      index = index + 1
+    request = request + 1
+  total
+
+pub fn main() -> i32
+  render_for_benchmark()
