@@ -11,19 +11,24 @@ import { bindTypeAlias, seedTypeAliasNamespaces } from "./type-alias.js";
 import { bindTraitDecl } from "./trait.js";
 import { bindImplDecl, flushPendingStaticMethods } from "./impl.js";
 import { bindEffectDecl } from "./effect.js";
-import type { BindingContext, BoundUseEntry, BoundImport } from "../types.js";
+import { flushPendingHandlerOperationBindings } from "./expressions.js";
+import type {
+  BindingContext,
+  BindingResult,
+  BoundUseEntry,
+  BoundImport,
+} from "../types.js";
 import {
   diagnosticFromCode,
   type Diagnostic,
   type DiagnosticParams,
 } from "../../../diagnostics/index.js";
 import { modulePathToString } from "../../../modules/path.js";
-import type { ModulePath } from "../../../modules/types.js";
+import type { ModuleNode, ModulePath } from "../../../modules/types.js";
 import type { NormalizedUseEntry } from "../../../parser/surface/index.js";
 import { matchesDependencyPath } from "../../../modules/resolve.js";
 import {
   type HirVisibility,
-  isPackageVisible,
   moduleVisibility,
   packageVisibility,
 } from "../../hir/index.js";
@@ -31,6 +36,10 @@ import type { SymbolKind } from "../../binder/index.js";
 import type {
   ModuleExportEntry,
   ModuleExportSurfaceEntry,
+} from "../../modules.js";
+import {
+  firstInstanceMemberOwner,
+  moduleNamespaceExportEntry,
 } from "../../modules.js";
 import type { SourceSpan, SymbolId } from "../../ids.js";
 import { BinderScopeTracker } from "./scope-tracker.js";
@@ -46,11 +55,15 @@ import {
   stdPkgExportsFor,
 } from "../export-visibility.js";
 import {
+  enumNamespaceMemberNamesFromMetadata,
   enumVariantTypeTargetsFromAliasTarget,
   importedSymbolTargetFromMetadata,
 } from "../../enum-namespace.js";
 import { isPackageRootModule } from "../../packages.js";
-import { requireModuleSurface } from "../../../modules/views.js";
+import {
+  requireModuleHeader,
+  requireModuleSurface,
+} from "../../../modules/views.js";
 import { resolveNominalTypeSymbol } from "../../nominal-type-target.js";
 
 export const bindModule = (
@@ -133,8 +146,9 @@ export const bindModule = (
     }
   }
 
-  flushPendingStaticMethods(ctx);
+  flushPendingHandlerOperationBindings(ctx, tracker);
   seedTypeAliasNamespaces(ctx);
+  flushPendingStaticMethods(ctx);
   validateEffectOperationSelectionValueConflicts(ctx);
 
   if (tracker.depth() !== 1) {
@@ -144,8 +158,6 @@ export const bindModule = (
 
 const surfaceItemForm = (item: SurfaceModuleItem): Form =>
   "form" in item ? item.form : item.declaration.form;
-
-let implicitEnumNamespaceImportId = 0;
 
 type ParsedUseEntry = NormalizedUseEntry;
 
@@ -569,13 +581,10 @@ const resolveQualifiedEffectNamespaceUseEntry = ({
       explicitlyTargetsStdSubmodule,
     })
   ) {
-    recordImportDiagnostic({
-      params: {
-        kind: "out-of-scope-export",
-        moduleId,
-        target: namespaceName,
-        visibility: exportedEffect.visibility.level,
-      },
+    recordOutOfScopeExportDiagnostic({
+      exported: exportedEffect,
+      moduleId,
+      targetName: namespaceName,
       span: entry.span,
       ctx,
     });
@@ -726,6 +735,7 @@ const bindEffectNamespaceOperations = ({
           name: importedName,
           incomingKind: "effect-op",
           existingKind: moduleConflict.kind,
+          effectName: effect.name,
           span: entry.span,
           previousSpan: moduleConflict.span,
           ctx,
@@ -745,6 +755,7 @@ const bindEffectNamespaceOperations = ({
           name: importedName,
           incomingKind: "effect-op",
           existingKind: conflict.kind,
+          effectName: effect.name,
           span: entry.span,
           previousSpan: conflict.span,
           ctx,
@@ -780,30 +791,31 @@ const bindEffectNamespaceOperations = ({
     });
   }
 
-  const exports = ctx.moduleExports.get(effectModuleId);
-  if (!exports) {
+  const dependency = ctx.dependencies.get(effectModuleId);
+  if (!dependency) {
     return [];
   }
   return selectedNames.flatMap((name) => {
-    const operationSymbols = new Set(
-      effect.operations
-        .filter((operation) => operation.name === name)
-        .map((operation) => operation.symbol),
+    const operation = effect.operations.find(
+      (candidate) => candidate.name === name,
     );
-    const exported = exports.get(name);
-    if (!exported || exported.kind !== "effect-op") {
-      return [];
-    }
-    const symbols = (exported.symbols ?? [exported.symbol]).filter((symbol) =>
-      operationSymbols.has(symbol),
-    );
-    if (symbols.length === 0) {
+    if (!operation) {
       return [];
     }
     return declareImportedSymbol({
-      exported: { ...exported, symbol: symbols[0]!, symbols },
+      exported: {
+        name,
+        symbol: operation.symbol,
+        symbols: [operation.symbol],
+        moduleId: effectModuleId,
+        modulePath: dependency.modulePath,
+        packageId: dependency.packageId,
+        kind: "effect-op",
+        visibility: effect.visibility,
+      },
       alias: entry.alias ?? name,
       explicitlyTargetsStdSubmodule,
+      effectName: effect.name,
       ctx,
       declaredAt,
       span: entry.span,
@@ -838,6 +850,10 @@ const validateEffectOperationSelectionValueConflicts = (
           name,
           incomingKind: "effect-op",
           existingKind: "value",
+          effectName: effectNameForImportedOperations(
+            effectOperationImports,
+            ctx,
+          ),
           span: entry.span,
           previousSpan: syntax ? toSourceSpan(syntax) : entry.span,
           ctx,
@@ -895,7 +911,7 @@ const findEffectOperationSelectionConflict = ({
   incomingSymbols: readonly SymbolId[];
   fallbackSpan: SourceSpan;
   ctx: BindingContext;
-}): { kind: SymbolKind; span: SourceSpan } | undefined => {
+}): { kind: SymbolKind; span: SourceSpan; effectName?: string } | undefined => {
   const incoming = new Set(incomingSymbols);
   for (const symbol of ctx.symbolTable.symbolsInScope(
     ctx.symbolTable.rootScope,
@@ -912,11 +928,13 @@ const findEffectOperationSelectionConflict = ({
     }
     const metadata = (record.metadata ?? {}) as {
       import?: { moduleId?: unknown; symbol?: unknown };
+      qualifiedOnlyEffectOperation?: unknown;
       unqualifiedEffectOperationNames?: readonly string[];
     };
     const isExposedEffectOperation =
       record.kind !== "effect-op" ||
-      metadata.import !== undefined ||
+      (metadata.import !== undefined &&
+        metadata.qualifiedOnlyEffectOperation !== true) ||
       metadata.unqualifiedEffectOperationNames?.includes(name) === true;
     if (!isExposedEffectOperation) {
       continue;
@@ -938,9 +956,42 @@ const findEffectOperationSelectionConflict = ({
     return {
       kind: record.kind,
       span: syntax ? toSourceSpan(syntax) : fallbackSpan,
+      ...(record.kind === "effect-op"
+        ? { effectName: effectNameForEffectOperationSymbol(symbol, ctx) }
+        : {}),
     };
   }
   return undefined;
+};
+
+const effectNameForImportedOperations = (
+  operations: readonly BoundImport[],
+  ctx: BindingContext,
+): string | undefined =>
+  operations
+    .map((operation) =>
+      effectNameForEffectOperationSymbol(operation.local, ctx),
+    )
+    .find((name): name is string => typeof name === "string");
+
+const effectNameForEffectOperationSymbol = (
+  symbol: SymbolId,
+  ctx: BindingContext,
+): string | undefined => {
+  const local = ctx.decls.getEffectOperation(symbol);
+  if (local) {
+    return local.effect.name;
+  }
+  const imported = importedSymbolTargetFromMetadata(
+    ctx.symbolTable.getSymbol(symbol).metadata as
+      | Record<string, unknown>
+      | undefined,
+  );
+  return imported
+    ? ctx.dependencies
+        .get(imported.moduleId)
+        ?.decls.getEffectOperation(imported.symbol)?.effect.name
+    : undefined;
 };
 
 const resolveLocalTypeNamespaceUseEntry = ({
@@ -999,7 +1050,7 @@ const resolveLocalTypeNamespaceUseEntry = ({
     }
     const importedName = entry.alias ?? name;
     if (record.scope === ctx.symbolTable.rootScope && record.name === name) {
-      if (importedName !== name) {
+      if (importedName !== name || record.bindingIdentity !== undefined) {
         const importNameCollision = findModuleNamespaceNameCollision({
           name: importedName,
           scope: ctx.symbolTable.rootScope,
@@ -1497,7 +1548,8 @@ const bindImportsFromExportTable = ({
   visibility: HirVisibility;
 }): BoundImport[] => {
   const ownerNameFor = (exported: ModuleExportEntry): string | undefined => {
-    if (typeof exported.memberOwner !== "number") {
+    const owner = firstInstanceMemberOwner(exported);
+    if (typeof owner !== "number") {
       return undefined;
     }
     const dependency = ctx.dependencies.get(moduleId);
@@ -1505,23 +1557,10 @@ const bindImportsFromExportTable = ({
       return undefined;
     }
     try {
-      return dependency.symbolTable.getSymbol(exported.memberOwner).name;
+      return dependency.symbolTable.getSymbol(owner).name;
     } catch {
       return undefined;
     }
-  };
-
-  const isInstanceMemberExport = (exported: ModuleExportEntry): boolean =>
-    typeof exported.memberOwner === "number" && exported.isStatic !== true;
-
-  const allowMemberExport = (exported: ModuleExportEntry): boolean => {
-    if (!isInstanceMemberExport(exported)) {
-      return true;
-    }
-    if (isPackageVisible(visibility)) {
-      return exported.apiProjection === true;
-    }
-    return true;
   };
 
   const includeInWildcardImport = (
@@ -1529,9 +1568,9 @@ const bindImportsFromExportTable = ({
   ): boolean => exported.kind !== "effect-op";
 
   if (entry.selectionKind === "all") {
-    const allowed = Array.from(exports.values()).filter((item) => {
+    const allowed = Array.from(exports.values()).flatMap((item) => {
       if (!includeInWildcardImport(item)) {
-        return false;
+        return [];
       }
       const accessible = canAccessExport({
         exported: item,
@@ -1540,22 +1579,10 @@ const bindImportsFromExportTable = ({
         explicitlyTargetsStdSubmodule,
       });
       if (!accessible) {
-        return false;
+        return [];
       }
-      if (!allowMemberExport(item)) {
-        recordImportDiagnostic({
-          params: {
-            kind: "instance-member-import",
-            moduleId,
-            target: item.name,
-            owner: ownerNameFor(item),
-          },
-          span: entry.span,
-          ctx,
-        });
-        return false;
-      }
-      return true;
+      const moduleExport = moduleNamespaceExportEntry(item);
+      return moduleExport ? [moduleExport] : [];
     });
     return allowed.flatMap((item) =>
       declareImportedSymbol({
@@ -1583,8 +1610,23 @@ const bindImportsFromExportTable = ({
   const exported = exports.get(targetName);
   if (!exported) {
     if (isMacroExportedFromModule({ moduleId, targetName, ctx })) {
+      recordMacroBoundaryDiagnostic({
+        moduleId,
+        targetName,
+        span: entry.span,
+        ctx,
+      });
       return [];
     }
+    recordUnavailableExportDiagnostic({
+      moduleId,
+      targetName,
+      span: entry.span,
+      ctx,
+    });
+    return [];
+  }
+  if (isImplicitEffectOperationExport({ exported, ctx })) {
     recordImportDiagnostic({
       params: { kind: "missing-export", moduleId, target: targetName },
       span: entry.span,
@@ -1593,7 +1635,8 @@ const bindImportsFromExportTable = ({
     return [];
   }
 
-  if (isInstanceMemberExport(exported)) {
+  const moduleExport = moduleNamespaceExportEntry(exported);
+  if (!moduleExport) {
     recordImportDiagnostic({
       params: {
         kind: "instance-member-import",
@@ -1615,13 +1658,10 @@ const bindImportsFromExportTable = ({
       explicitlyTargetsStdSubmodule,
     })
   ) {
-    recordImportDiagnostic({
-      params: {
-        kind: "out-of-scope-export",
-        moduleId,
-        target: targetName,
-        visibility: exported.visibility.level,
-      },
+    recordOutOfScopeExportDiagnostic({
+      exported,
+      moduleId,
+      targetName,
       span: entry.span,
       ctx,
     });
@@ -1629,7 +1669,7 @@ const bindImportsFromExportTable = ({
   }
 
   return declareImportedSymbol({
-    exported,
+    exported: moduleExport,
     alias: entry.alias ?? targetName,
     explicitlyTargetsStdSubmodule,
     ctx,
@@ -1638,6 +1678,18 @@ const bindImportsFromExportTable = ({
     visibility,
   });
 };
+
+const isImplicitEffectOperationExport = ({
+  exported,
+  ctx,
+}: {
+  exported: ModuleExportEntry;
+  ctx: BindingContext;
+}): boolean =>
+  exported.kind === "effect-op" &&
+  ctx.dependencies
+    .get(exported.moduleId)
+    ?.decls.getEffectOperation(exported.symbol) !== undefined;
 
 const bindImportsFromExportSurface = ({
   moduleId,
@@ -1699,8 +1751,23 @@ const bindImportsFromExportSurface = ({
   const exported = exportSurface.get(targetName);
   if (!exported) {
     if (isMacroExportedFromModule({ moduleId, targetName, ctx })) {
+      recordMacroBoundaryDiagnostic({
+        moduleId,
+        targetName,
+        span: entry.span,
+        ctx,
+      });
       return [];
     }
+    recordUnavailableExportDiagnostic({
+      moduleId,
+      targetName,
+      span: entry.span,
+      ctx,
+    });
+    return [];
+  }
+  if (exported.kind === "effect-op") {
     recordImportDiagnostic({
       params: { kind: "missing-export", moduleId, target: targetName },
       span: entry.span,
@@ -1710,13 +1777,10 @@ const bindImportsFromExportSurface = ({
   }
 
   if (!isAccessible(exported)) {
-    recordImportDiagnostic({
-      params: {
-        kind: "out-of-scope-export",
-        moduleId,
-        target: targetName,
-        visibility: exported.visibility.level,
-      },
+    recordOutOfScopeExportDiagnostic({
+      exported,
+      moduleId,
+      targetName,
       span: entry.span,
       ctx,
     });
@@ -1745,10 +1809,357 @@ const isMacroExportedFromModule = ({
 }): boolean =>
   Boolean(ctx.graph.modules.get(moduleId)?.macroExports?.includes(targetName));
 
+const recordUnavailableExportDiagnostic = ({
+  moduleId,
+  targetName,
+  span,
+  ctx,
+}: {
+  moduleId: string;
+  targetName: string;
+  span: SourceSpan;
+  ctx: BindingContext;
+}): void => {
+  const module = ctx.graph.modules.get(moduleId);
+  const declarationFile = moduleFilePath(module);
+  const packageRoot = packageRootReferenceFor({ moduleId, ctx });
+  const crossesPackageBoundary =
+    module !== undefined &&
+    modulePackageId(module) !== ctx.packageId &&
+    !isPackageRootModule(module.path, {
+      sourcePackageRoot: module.sourcePackageRoot,
+    }) &&
+    packageRoot !== undefined;
+  const macro = module
+    ? requireModuleHeader(module).items.find(
+        (item) =>
+          item.kind === "macro" && item.declaration.name === targetName,
+      )
+    : undefined;
+  if (macro && declarationFile) {
+    recordImportDiagnostic({
+      params: {
+        kind: "macro-not-exported",
+        moduleId,
+        target: targetName,
+        declarationFile,
+        ...(crossesPackageBoundary && packageRoot
+          ? {
+              packageRootFile: packageRoot.file,
+              packageRootPath: packageRoot.path,
+            }
+          : {}),
+      },
+      span,
+      ctx,
+    });
+    return;
+  }
+
+  const dependency = ctx.dependencies.get(moduleId);
+  const visibility = dependency
+    ? topLevelDeclarationVisibility({ targetName, dependency })
+    : undefined;
+  if (crossesPackageBoundary && packageRoot && visibility) {
+    recordImportDiagnostic({
+      params: {
+        kind: "hidden-package-internal",
+        moduleId,
+        target: targetName,
+        visibility: visibility.level,
+        packageRootFile: packageRoot.file,
+        packageRootPath: packageRoot.path,
+      },
+      span,
+      ctx,
+    });
+    return;
+  }
+  if (visibility?.level === "module" && declarationFile) {
+    recordImportDiagnostic({
+      params: {
+        kind: "module-private-access",
+        moduleId,
+        target: targetName,
+        declarationFile,
+      },
+      span,
+      ctx,
+    });
+    return;
+  }
+
+  if (
+    module &&
+    packageRoot &&
+    isPackageRootModule(module.path, {
+      sourcePackageRoot: module.sourcePackageRoot,
+    })
+  ) {
+    recordImportDiagnostic({
+      params: {
+        kind: "missing-export",
+        moduleId: packageRoot.path,
+        target: targetName,
+        packageRootFile: packageRoot.file,
+      },
+      span,
+      ctx,
+    });
+    return;
+  }
+
+  recordImportDiagnostic({
+    params: { kind: "missing-export", moduleId, target: targetName },
+    span,
+    ctx,
+  });
+};
+
+const topLevelDeclarationVisibility = ({
+  targetName,
+  dependency,
+}: {
+  targetName: string;
+  dependency: BindingResult;
+}): HirVisibility | undefined => {
+  const declarations = [
+    ...dependency.decls.functions.filter((decl) => decl.implId === undefined),
+    ...dependency.decls.moduleLets,
+    ...dependency.decls.typeAliases,
+    ...dependency.decls.objects,
+    ...dependency.decls.traits,
+    ...dependency.decls.effects,
+  ];
+  return declarations.find((decl) => decl.name === targetName)?.visibility;
+};
+
+const recordMacroBoundaryDiagnostic = ({
+  moduleId,
+  targetName,
+  span,
+  ctx,
+}: {
+  moduleId: string;
+  targetName: string;
+  span: SourceSpan;
+  ctx: BindingContext;
+}): void => {
+  const module = ctx.graph.modules.get(moduleId);
+  if (
+    !module ||
+    module.path.namespace === "std" ||
+    modulePackageId(module) === ctx.packageId ||
+    isPackageRootModule(module.path, {
+      sourcePackageRoot: module.sourcePackageRoot,
+    })
+  ) {
+    return;
+  }
+  const packageRoot = packageRootReferenceFor({ moduleId, ctx });
+  if (!packageRoot) {
+    return;
+  }
+  recordImportDiagnostic({
+    params: {
+      kind: "hidden-package-internal",
+      moduleId,
+      target: targetName,
+      visibility: "package",
+      packageRootFile: packageRoot.file,
+      packageRootPath: packageRoot.path,
+    },
+    span,
+    ctx,
+  });
+};
+
+const recordOutOfScopeExportDiagnostic = ({
+  exported,
+  moduleId,
+  targetName,
+  span,
+  ctx,
+}: {
+  exported: Pick<ModuleExportEntry, "visibility" | "packageId">;
+  moduleId: string;
+  targetName: string;
+  span: SourceSpan;
+  ctx: BindingContext;
+}): void => {
+  const module = ctx.graph.modules.get(moduleId);
+  const packageRoot = packageRootReferenceFor({ moduleId, ctx });
+  if (
+    module &&
+    exported.packageId !== ctx.packageId &&
+    !isPackageRootModule(module.path, {
+      sourcePackageRoot: module.sourcePackageRoot,
+    }) &&
+    packageRoot
+  ) {
+    recordImportDiagnostic({
+      params: {
+        kind: "hidden-package-internal",
+        moduleId,
+        target: targetName,
+        visibility: exported.visibility.level,
+        packageRootFile: packageRoot.file,
+        packageRootPath: packageRoot.path,
+      },
+      span,
+      ctx,
+    });
+    return;
+  }
+
+  if (exported.packageId !== ctx.packageId) {
+    recordImportDiagnostic({
+      params: {
+        kind: "package-private-access",
+        moduleId,
+        target: targetName,
+        visibility: exported.visibility.level,
+        ownerPackage: exported.packageId,
+        consumerPackage: ctx.packageId,
+        packageRootFile: packageRoot?.file,
+        packageRootPath: packageRoot?.path,
+      },
+      span,
+      ctx,
+    });
+    return;
+  }
+
+  recordImportDiagnostic({
+    params: {
+      kind: "out-of-scope-export",
+      moduleId,
+      target: targetName,
+      visibility: exported.visibility.level,
+    },
+    span,
+    ctx,
+  });
+};
+
+const moduleFilePath = (module: ModuleNode | undefined): string | undefined =>
+  module?.origin.kind === "file"
+    ? module.origin.filePath
+    : module?.origin.span?.file;
+
+const modulePackageId = (module: ModuleNode): string => {
+  if (module.path.namespace === "std") {
+    return "std";
+  }
+  if (module.path.namespace === "pkg") {
+    return `pkg:${module.path.packageName ?? "unknown"}`;
+  }
+  return module.sourcePackageRoot && module.sourcePackageRoot.length > 0
+    ? `local:${module.sourcePackageRoot.join("::")}`
+    : "local";
+};
+
+type PackageRootReference = {
+  file: string;
+  path: string;
+};
+
+const packageRootReferenceFor = ({
+  moduleId,
+  ctx,
+}: {
+  moduleId: string;
+  ctx: BindingContext;
+}): PackageRootReference | undefined => {
+  const module = ctx.graph.modules.get(moduleId);
+  if (!module) {
+    return undefined;
+  }
+  const packageId = modulePackageId(module);
+  const loadedRoot = Array.from(ctx.graph.modules.values())
+    .filter(
+      (candidate) =>
+        modulePackageId(candidate) === packageId &&
+        isPackageRootModule(candidate.path, {
+          sourcePackageRoot: candidate.sourcePackageRoot,
+        }) &&
+        packageRootContainsModule({ packageRoot: candidate, module }),
+    )
+    .sort(
+      (left, right) =>
+        right.path.segments.length - left.path.segments.length,
+    )[0];
+  const file = moduleFilePath(loadedRoot) ?? inferredPackageRootFile(module);
+  const path = loadedRoot
+    ? logicalPackageRootPath(loadedRoot.path)
+    : inferredPackageRootPath(module);
+  return file && path ? { file, path } : undefined;
+};
+
+const packageRootContainsModule = ({
+  packageRoot,
+  module,
+}: {
+  packageRoot: ModuleNode;
+  module: ModuleNode;
+}): boolean => {
+  if (
+    packageRoot.path.namespace !== module.path.namespace ||
+    packageRoot.path.packageName !== module.path.packageName
+  ) {
+    return false;
+  }
+  const rootSegments = packageRoot.path.segments.slice(0, -1);
+  return rootSegments.every(
+    (segment, index) => module.path.segments[index] === segment,
+  );
+};
+
+const logicalPackageRootPath = (path: ModulePath): string => {
+  const segments = path.segments.slice(0, -1);
+  if (path.namespace === "pkg") {
+    return ["pkg", path.packageName, ...segments].filter(Boolean).join("::");
+  }
+  return [path.namespace, ...segments].join("::");
+};
+
+const inferredPackageRootPath = (module: ModuleNode): string | undefined => {
+  if (module.path.namespace === "pkg") {
+    return module.path.packageName
+      ? `pkg::${module.path.packageName}`
+      : undefined;
+  }
+  if (module.path.namespace === "std") {
+    return "std";
+  }
+  return module.sourcePackageRoot && module.sourcePackageRoot.length > 0
+    ? `src::${module.sourcePackageRoot.join("::")}`
+    : "src";
+};
+
+const inferredPackageRootFile = (module: ModuleNode): string | undefined => {
+  const filePath = moduleFilePath(module);
+  if (!filePath) {
+    return undefined;
+  }
+  const separator = filePath.includes("\\") ? "\\" : "/";
+  const rootSegmentCount = module.sourcePackageRoot?.length ?? 0;
+  const moduleDepth = Math.max(
+    1,
+    module.path.segments.length - rootSegmentCount,
+  );
+  let directory = filePath.slice(0, filePath.lastIndexOf(separator));
+  for (let level = 1; level < moduleDepth; level += 1) {
+    directory = directory.slice(0, directory.lastIndexOf(separator));
+  }
+  return `${directory}${separator}pkg.voyd`;
+};
+
 const declareImportedSymbol = ({
   exported,
   alias,
   explicitlyTargetsStdSubmodule = false,
+  effectName,
   ctx,
   declaredAt,
   span,
@@ -1757,15 +2168,23 @@ const declareImportedSymbol = ({
   exported: ModuleExportEntry;
   alias: string;
   explicitlyTargetsStdSubmodule?: boolean;
+  effectName?: string;
   ctx: BindingContext;
   declaredAt: Form;
   span: SourceSpan;
   visibility: HirVisibility;
 }): BoundImport[] => {
-  const symbols =
+  const exportedSymbols =
     exported.symbols && exported.symbols.length > 0
       ? exported.symbols
       : [exported.symbol];
+  const dependency = ctx.dependencies.get(exported.moduleId);
+  const symbols = dependency
+    ? exportedSymbols.filter(
+        (symbol) =>
+          dependency.symbolTable.getSymbol(symbol).kind === exported.kind,
+      )
+    : exportedSymbols;
   const locals: BoundImport[] = [];
 
   const effectOperationConflict = findEffectOperationSelectionConflict({
@@ -1781,6 +2200,7 @@ const declareImportedSymbol = ({
       name: alias,
       incomingKind: exported.kind,
       existingKind: effectOperationConflict.kind,
+      effectName: effectName ?? effectOperationConflict.effectName,
       span,
       previousSpan: effectOperationConflict.span,
       ctx,
@@ -1800,6 +2220,7 @@ const declareImportedSymbol = ({
         name: alias,
         incomingKind: exported.kind,
         existingKind: importNameCollision.kind,
+        effectName,
         span,
         previousSpan: importNameCollision.span,
         ctx,
@@ -1807,7 +2228,6 @@ const declareImportedSymbol = ({
       return;
     }
 
-    const dependency = ctx.dependencies.get(exported.moduleId);
     const sourceMetadata = dependency
       ? dependency.symbolTable.getSymbol(symbol).metadata
       : undefined;
@@ -1977,6 +2397,13 @@ const hydrateImportedEnumAliasNamespace = ({
     return;
   }
 
+  const importedAliasMetadata = dependency.symbolTable.getSymbol(
+    importedSymbolId,
+  ).metadata;
+  const declaredVariantNames = new Set(
+    enumNamespaceMemberNamesFromMetadata(importedAliasMetadata) ?? [],
+  );
+
   const variantMembers = collectLocalTypeNamespaceMembers({
     namespaceSymbol: importedSymbolId,
     ctx: dependency,
@@ -1997,25 +2424,26 @@ const hydrateImportedEnumAliasNamespace = ({
     const exported = Array.from(
       ctx.moduleExports.get(canonical.moduleId)?.values() ?? [],
     ).find((entry) => entry.symbol === canonical.symbol);
-    if (!exported) {
-      return;
-    }
-    if (
-      !canAccessExport({
-        exported,
-        moduleId: canonical.moduleId,
-        ctx,
-        explicitlyTargetsStdSubmodule,
-      })
-    ) {
-      return;
-    }
-
     const exportedRecord = canonical.binding.symbolTable.getSymbol(
       canonical.symbol,
     );
     const metadata = exportedRecord.metadata as { entity?: string } | undefined;
     if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
+      return;
+    }
+    const isPrivateFreshEnumVariant =
+      exportedRecord.bindingIdentity?.startsWith("fresh:") === true &&
+      declaredVariantNames.has(variantName);
+    if (
+      !isPrivateFreshEnumVariant &&
+      (!exported ||
+        !canAccessExport({
+          exported,
+          moduleId: canonical.moduleId,
+          ctx,
+          explicitlyTargetsStdSubmodule,
+        }))
+    ) {
       return;
     }
 
@@ -2024,14 +2452,25 @@ const hydrateImportedEnumAliasNamespace = ({
         entry.target?.moduleId === canonical.moduleId &&
         entry.target.symbol === canonical.symbol,
     )?.local;
-    const hiddenImportName = `__enum_ns_${implicitEnumNamespaceImportId++}_${variantName}`;
+    const moduleNameFragment = canonical.moduleId.replace(
+      /[^A-Za-z0-9_]/g,
+      "_",
+    );
+    const hiddenImportName =
+      `__enum_ns_${moduleNameFragment}_${canonical.symbol}_${exportedRecord.name}`;
+    const hiddenBindingIdentity =
+      `internal:enum-namespace-link:${JSON.stringify([
+        canonical.moduleId,
+        canonical.symbol,
+      ])}`;
     const local =
       typeof existing === "number"
         ? existing
         : ctx.symbolTable.declare({
             name: hiddenImportName,
-            kind: exported.kind,
+            kind: exportedRecord.kind,
             declaredAt: declaredAt.syntaxId,
+            bindingIdentity: hiddenBindingIdentity,
             metadata: {
               import: {
                 moduleId: canonical.moduleId,
@@ -2041,6 +2480,7 @@ const hydrateImportedEnumAliasNamespace = ({
               ...(importableMetadataFrom(
                 exportedRecord.metadata as Record<string, unknown> | undefined,
               ) ?? {}),
+              implicitCompilerImport: true,
             },
           });
     if (typeof existing !== "number") {
@@ -2150,6 +2590,7 @@ const recordImportNameConflict = ({
   name,
   incomingKind,
   existingKind,
+  effectName,
   span,
   previousSpan,
   ctx,
@@ -2157,6 +2598,7 @@ const recordImportNameConflict = ({
   name: string;
   incomingKind: SymbolKind;
   existingKind: SymbolKind;
+  effectName?: string;
   span: SourceSpan;
   previousSpan: SourceSpan;
   ctx: BindingContext;
@@ -2169,6 +2611,7 @@ const recordImportNameConflict = ({
         name,
         incomingKind,
         existingKind,
+        effectName,
       },
       span,
       related: [

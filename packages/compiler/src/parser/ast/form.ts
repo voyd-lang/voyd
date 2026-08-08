@@ -95,6 +95,7 @@ export class Form extends Syntax {
       elements: this.#elements.toArray().map((e) => e.clone()),
     });
     cloned.attributes = this.attributes ? { ...this.attributes } : undefined;
+    this.cloneSyntaxInto(cloned);
     return cloned;
   }
 

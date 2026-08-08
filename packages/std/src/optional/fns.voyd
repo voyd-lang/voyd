@@ -116,7 +116,7 @@ pub fn or_else<T>(
       fallback()
 
 pub macro '??'(l, r)
-  let l_result = identifier(__optional_coalesce_left)
+  let l_result = identifier("__optional_coalesce_left")
   `
     let $l_result = $l
     if $l_result is Some:
@@ -125,8 +125,8 @@ pub macro '??'(l, r)
       $r
 
 pub macro '?.'(l, r)
-  let l_result = identifier(__optional_chain_left)
-  let value = identifier(__optional_chain_value)
+  let l_result = identifier("__optional_chain_left")
+  let value = identifier("__optional_chain_value")
   `
     let $l_result = $l
     match($l_result)

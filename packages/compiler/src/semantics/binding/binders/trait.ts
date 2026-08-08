@@ -28,7 +28,7 @@ import {
   type ParsedFunctionDecl,
 } from "../../../parser/surface/declarations.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
-import { bindExpr } from "./expressions.js";
+import { bindExpr, resolveBoundIdentifierSymbol } from "./expressions.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { moduleVisibility } from "../../hir/index.js";
@@ -37,6 +37,7 @@ import { reportOverloadNameCollision } from "../name-collisions.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 import { bindTypeExpr } from "./expressions.js";
 import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contracts.js";
+import { bindingIdentityForSyntax } from "../hygiene.js";
 
 export const bindTraitDecl = (
   decl: ParsedTraitDecl,
@@ -76,6 +77,7 @@ export const bindTraitDecl = (
     name: decl.name.value,
     kind: "trait",
     declaredAt: decl.form.syntaxId,
+    bindingIdentity: bindingIdentityForSyntax(decl.name),
     metadata: { entity: "trait" },
   });
 
@@ -269,7 +271,11 @@ export const resolveTraitDecl = (
   if (!traitIdentifier) {
     return undefined;
   }
-  const traitSymbol = ctx.symbolTable.resolve(traitIdentifier.value, scope);
+  const traitSymbol = resolveBoundIdentifierSymbol({
+    identifier: traitIdentifier,
+    ctx,
+    scope,
+  });
   if (typeof traitSymbol !== "number") {
     return undefined;
   }

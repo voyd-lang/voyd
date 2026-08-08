@@ -5,21 +5,35 @@
 use super::model::{ Interaction, Model, Trail }
 use src::simulation::{ Body, BodyKind, Vec2 }
 use std::array::Array
-use std::math::{ abs, clamp, floor, max, min, round, sin, sqrt }
-use std::number::cast::{ to_f64, to_string }
+use std::math::{ abs, atan2, clamp, floor, max, min, sin, sqrt }
+use std::number::cast::{ format_significant, to_f64, to_string }
 use std::optional::types::all
 use std::string::type::String
 use std::vx::{
+  CanvasCompositeOperation,
   CanvasDraw,
+  CanvasPathSegment,
   CanvasPoint,
+  CanvasTextMetrics,
   Cmd,
   canvas_circle,
+  canvas_composite,
   canvas_ellipse,
   canvas_frame,
   canvas_line,
+  canvas_line_dash,
+  canvas_path,
+  canvas_path_close,
+  canvas_path_line_to,
+  canvas_path_move_to,
+  canvas_path_rect,
   canvas_polyline,
   canvas_radial_gradient,
-  canvas_text
+  canvas_restore,
+  canvas_rotate,
+  canvas_save,
+  canvas_text,
+  canvas_translate
 }
 
 type RenderView = {
@@ -41,6 +55,7 @@ pub fn draw<Msg>(model: Model) -> Cmd<Msg>
   append_bodies(draws, model, view)
   append_body_adornments(draws, model, view)
   append_placement_preview(draws, model, view)
+  append_canvas_title(draws, model, view)
   Cmd<Msg>::canvas_render(canvas_frame(
     selector: ".simulation-canvas",
     width: view.width,
@@ -49,6 +64,18 @@ pub fn draw<Msg>(model: Model) -> Cmd<Msg>
     clear: true,
     background: "rgba(3, 6, 14, 0.74)"
   ))
+
+/// Measures the canvas title using the same font used by the scene projection.
+pub fn measure_title<Msg>(
+  value: String,
+  { handler: fn(CanvasTextMetrics) -> Msg }
+) -> Cmd<Msg>
+  Cmd<Msg>::canvas_measure_text(
+    selector: "#orbit-canvas",
+    value: value,
+    font: "600 12px Inter, sans-serif",
+    handler: handler
+  )
 
 fn append_spatial_grid(~draws: Array<CanvasDraw>, view: RenderView) -> void
   let major_step_au = adaptive_grid_step(view.pixels_per_au)
@@ -489,7 +516,7 @@ fn append_placement_preview(
   view: RenderView
 ) -> void
   match(model.ui.interaction)
-    Interaction::PlacingBody { kind, origin_au, cursor_au }:
+    Interaction::PlacingBody { pointer_id: _, kind, origin_au, cursor_au }:
       let origin = world_to_canvas(view, origin_au)
       let cursor = world_to_canvas(view, cursor_au)
       let radius = preview_radius(kind)
@@ -521,9 +548,10 @@ fn append_placement_preview(
         glow_blur: 7.0
       ))
       let velocity = (cursor_au - origin_au) * 0.02
-      let speed = round(velocity.length() * 100000.0) / 100000.0
+      let speed = velocity.length()
       let drag_pixels = canvas_distance(origin, cursor)
-      let release_hint = "Release · ".concat(to_string(speed)).concat(" AU/day")
+      let speed_label = unwrap_or(format_significant(speed, digits: 6), to_string(speed))
+      let release_hint = "Release · ".concat(speed_label).concat(" AU/day")
       let hint = if drag_pixels < 7.0 then: "Drag to set initial velocity" else: release_hint
       draws.push(canvas_text(
         position: point(cursor.x + 12.0, cursor.y - 12.0),
@@ -535,6 +563,59 @@ fn append_placement_preview(
       ))
     else:
       void
+
+fn append_canvas_title(
+  ~draws: Array<CanvasDraw>,
+  model: Model,
+  view: RenderView
+) -> void
+  let measured_width = max(48.0, model.ui.canvas_title_width)
+  let title_width = min(measured_width, max(48.0, view.width - 80.0))
+  let box_width = title_width + 24.0
+  let box_height = 30.0
+  let x = max(16.0, view.width - box_width - 24.0)
+  let y = max(16.0, view.height - box_height - 24.0)
+  let ~box_segments = Array<CanvasPathSegment>::with_capacity(2)
+  box_segments.push(canvas_path_rect(
+    origin: point(0.0, 0.0),
+    width: box_width,
+    height: box_height
+  ))
+  box_segments.push(canvas_path_close())
+
+  draws.push(canvas_save())
+  draws.push(canvas_translate(x: x, y: y))
+  draws.push(canvas_composite(CanvasCompositeOperation::SourceOver {}))
+  draws.push(canvas_path(
+    segments: box_segments,
+    fill: "rgba(7, 14, 27, 0.72)",
+    stroke: "rgba(132, 218, 255, 0.28)",
+    stroke_width: 0.8,
+    alpha: 0.95
+  ))
+  draws.push(canvas_text(
+    position: point(12.0, 14.0),
+    value: model.session.name,
+    color: "#cceeff",
+    font: "600 12px Inter, sans-serif",
+    baseline: "middle",
+    alpha: 0.88,
+    max_width: title_width
+  ))
+  draws.push(canvas_line_dash(pattern: [4.0, 3.0], offset: 0.0))
+  draws.push(canvas_composite(CanvasCompositeOperation::Lighter {}))
+  draws.push(canvas_path(
+    segments: [
+      canvas_path_move_to(point(12.0, box_height - 5.0)),
+      canvas_path_line_to(point(12.0 + title_width, box_height - 5.0))
+    ],
+    stroke: "#5edcff",
+    stroke_width: 0.8,
+    alpha: 0.62,
+    glow_color: "#42d5ff",
+    glow_blur: 4.0
+  ))
+  draws.push(canvas_restore())
 
 fn append_preview_body(
   ~draws: Array<CanvasDraw>,
@@ -620,46 +701,35 @@ fn append_arrow(
     glow_blur: f64
   }
 ) -> void
-  draws.push(canvas_line(
-    from: from,
-    to: to,
-    color: color,
-    width: width,
-    alpha: alpha,
-    glow_color: color,
-    glow_blur: glow_blur
-  ))
   let dx = to.x - from.x
   let dy = to.y - from.y
   let length = sqrt((dx * dx) + (dy * dy))
-  if length < 7.0:
+  if length <= 0.0:
     return void
-  let unit_x = dx / length
-  let unit_y = dy / length
-  let head_length = clamp(length * 0.18, 6.0, 10.0)
-  let wing = head_length * 0.48
-  let base_x = to.x - (unit_x * head_length)
-  let base_y = to.y - (unit_y * head_length)
-  let perpendicular_x = 0.0 - unit_y
-  let perpendicular_y = unit_x
-  draws.push(canvas_line(
-    from: to,
-    to: point(base_x + (perpendicular_x * wing), base_y + (perpendicular_y * wing)),
-    color: color,
-    width: width,
+  let ~segments = Array<CanvasPathSegment>::with_capacity(6)
+  segments.push(canvas_path_move_to(point(0.0, 0.0)))
+  segments.push(canvas_path_line_to(point(length, 0.0)))
+  if length >= 7.0:
+    let head_length = clamp(length * 0.18, 6.0, 10.0)
+    let wing = head_length * 0.48
+    segments.push(canvas_path_move_to(point(length, 0.0)))
+    segments.push(canvas_path_line_to(point(length - head_length, wing)))
+    segments.push(canvas_path_move_to(point(length, 0.0)))
+    segments.push(canvas_path_line_to(point(length - head_length, 0.0 - wing)))
+
+  draws.push(canvas_save())
+  draws.push(canvas_translate(x: from.x, y: from.y))
+  draws.push(canvas_rotate(atan2(dy, dx)))
+  draws.push(canvas_composite(CanvasCompositeOperation::Lighter {}))
+  draws.push(canvas_path(
+    segments: segments,
+    stroke: color,
+    stroke_width: width,
     alpha: alpha,
     glow_color: color,
     glow_blur: glow_blur
   ))
-  draws.push(canvas_line(
-    from: to,
-    to: point(base_x - (perpendicular_x * wing), base_y - (perpendicular_y * wing)),
-    color: color,
-    width: width,
-    alpha: alpha,
-    glow_color: color,
-    glow_blur: glow_blur
-  ))
+  draws.push(canvas_restore())
 
 fn render_view(model: Model) -> RenderView
   {

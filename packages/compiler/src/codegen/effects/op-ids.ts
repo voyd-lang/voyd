@@ -4,7 +4,7 @@ import { RESUME_KIND, type ResumeKind } from "./runtime-abi.js";
 import type { EffectIdInfo } from "./effect-registry.js";
 import type { EffectOperationRuntimeInfo } from "../../semantics/effects/analysis.js";
 
-const effectOpInfoFor = (
+export const resolveEffectOpRuntimeInfo = (
   symbol: SymbolId,
   ctx: CodegenContext
 ): { info: EffectOperationRuntimeInfo; moduleId: string } | undefined => {
@@ -31,7 +31,7 @@ export const getEffectOpIds = (
   resumeKind: ResumeKind;
   effectSymbol: SymbolId;
 } => {
-  const resolved = effectOpInfoFor(symbol, ctx);
+  const resolved = resolveEffectOpRuntimeInfo(symbol, ctx);
   if (!resolved) {
     throw new Error(`codegen missing effect metadata for op ${symbol}`);
   }

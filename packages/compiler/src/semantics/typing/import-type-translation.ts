@@ -45,6 +45,7 @@ const translateEffectRow = ({
     : undefined;
   return targetEffects.internRow({
     operations: desc.operations.map((op) => ({
+      identity: { ...op.identity },
       name: op.name,
       ...(typeof op.region === "number" ? { region: op.region } : {}),
     })),

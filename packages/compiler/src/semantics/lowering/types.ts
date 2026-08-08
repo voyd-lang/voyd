@@ -56,6 +56,7 @@ export interface LowerContext {
   decls: DeclTable;
   dependencies: ReadonlyMap<string, BindingResult>;
   importSpansByLocal: ReadonlyMap<SymbolId, SourceSpan>;
+  directSymbolBySyntax: ReadonlyMap<NodeId, SymbolId>;
   modulePath: ModulePath;
   packageId: string;
   isPackageRoot: boolean;

@@ -3,6 +3,7 @@ import {
   type Form,
   type Syntax,
   formCallsInternal,
+  identifierBindingKey,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -33,6 +34,11 @@ import { lowerQualifiedTraitMethodCall } from "./qualified-trait-call.js";
 import { lowerEnumNamespaceMemberTypeArgumentsFromMetadata } from "../../enum-namespace.js";
 import { lowerNominalTargetTypeArgumentsFromMetadata } from "../../nominal-type-target.js";
 import { substituteTypeParametersInTypeExpr } from "../../hir/type-expr-substitution.js";
+import {
+  canonicalEffectIdentitySymbol,
+  canonicalEffectOperationIdentitySymbol,
+  resolveQualifiedEffectOperation,
+} from "../../effect-operation-resolution.js";
 
 export const lowerStaticAccessExpr = ({
   form,
@@ -96,7 +102,8 @@ export const lowerStaticAccessExpr = ({
               .get(importedModuleId)
               ?.decls.getTrait(importedSymbol)
           : undefined;
-      const traitDecl = ctx.decls.getTrait(constraint.symbol) ?? importedTraitDecl;
+      const traitDecl =
+        ctx.decls.getTrait(constraint.symbol) ?? importedTraitDecl;
       if (!traitDecl || !isForm(memberExpr)) {
         throw new Error(
           `trait ${traitRecord.name} does not expose static methods in this module`,
@@ -316,6 +323,7 @@ const lowerModuleAccess = ({
   if (typeof moduleSymbol !== "number") {
     return undefined;
   }
+  const namespaceRecord = ctx.symbolTable.getSymbol(moduleSymbol);
   const memberName = extractModuleMemberName(memberExpr);
   if (!memberName) {
     return undefined;
@@ -324,6 +332,23 @@ const lowerModuleAccess = ({
   if (!memberTable) {
     const targetName = ctx.symbolTable.getSymbol(moduleSymbol).name;
     throw new Error(`module ${targetName} does not expose members`);
+  }
+
+  if (namespaceRecord.kind === "effect") {
+    if (!isForm(memberExpr)) {
+      throw new Error(
+        `${namespaceRecord.name}::${memberName} is an effect-operation designator, not a first-class value`,
+      );
+    }
+    return lowerQualifiedEffectOperationCall({
+      accessForm,
+      memberForm: memberExpr,
+      effectSymbol: moduleSymbol,
+      targetTypeArguments,
+      ctx,
+      scopes,
+      lowerExpr,
+    });
   }
 
   if (isForm(memberExpr)) {
@@ -352,6 +377,97 @@ const lowerModuleAccess = ({
     resolution,
     syntax: memberExpr as Syntax,
     ctx,
+  });
+};
+
+const lowerQualifiedEffectOperationCall = ({
+  accessForm,
+  memberForm,
+  effectSymbol,
+  targetTypeArguments,
+  ctx,
+  scopes,
+  lowerExpr,
+}: {
+  accessForm: Form;
+  memberForm: Form;
+  effectSymbol: SymbolId;
+  targetTypeArguments?: HirTypeExpr[];
+} & LoweringParams): HirExprId => {
+  const elements = memberForm.toArray();
+  const calleeExpr = elements[0];
+  if (
+    !calleeExpr ||
+    (!isIdentifierAtom(calleeExpr) && !isInternalIdentifierAtom(calleeExpr))
+  ) {
+    throw new Error("effect operation name must be an identifier");
+  }
+
+  const boundOperation = ctx.directSymbolBySyntax.get(calleeExpr.syntaxId);
+  const operation =
+    typeof boundOperation === "number" &&
+    ctx.symbolTable.getSymbol(boundOperation).kind === "effect-op" &&
+    ctx.moduleMembers
+      .get(effectSymbol)
+      ?.get(calleeExpr.value)
+      ?.has(boundOperation)
+      ? boundOperation
+      : resolveQualifiedEffectOperation({
+          effectSymbol,
+          name: calleeExpr.value,
+          symbolTable: ctx.symbolTable,
+          moduleMembers: ctx.moduleMembers,
+        });
+  if (typeof operation !== "number") {
+    const effectName = ctx.symbolTable.getSymbol(effectSymbol).name;
+    throw new Error(
+      `effect ${effectName} does not declare operation ${calleeExpr.value}`,
+    );
+  }
+
+  const potentialGenerics = elements[1];
+  const hasTypeArguments =
+    isForm(potentialGenerics) &&
+    formCallsInternal(potentialGenerics, "generics");
+  const typeArguments = hasTypeArguments
+    ? ((potentialGenerics as Form).rest
+        .map((entry) => lowerTypeExpr(entry, ctx, scopes.current()))
+        .filter(Boolean) as HirTypeExpr[])
+    : undefined;
+  const args = parseSurfaceCallArguments(
+    elements.slice(hasTypeArguments ? 2 : 1),
+  ).map((argument) => ({
+    ...(argument.label ? { label: argument.label.value } : {}),
+    expr: lowerExpr(argument.value, ctx, scopes),
+  }));
+  const callee = lowerResolvedCallee({
+    resolution: {
+      kind: "symbol",
+      symbol: operation,
+      name: calleeExpr.value,
+    },
+    syntax: calleeExpr,
+    ctx,
+  });
+  return ctx.builder.addExpression({
+    kind: "expr",
+    exprKind: "call",
+    ast: accessForm.syntaxId,
+    span: toSourceSpan(accessForm),
+    callee,
+    args,
+    effectOperation: {
+      effect: canonicalEffectIdentitySymbol({
+        effectSymbol,
+        symbolTable: ctx.symbolTable,
+      }),
+      operation: canonicalEffectOperationIdentitySymbol({
+        operationSymbol: operation,
+        symbolTable: ctx.symbolTable,
+      }),
+    },
+    typeArguments,
+    targetTypeArguments,
   });
 };
 
@@ -670,7 +786,8 @@ const lowerModuleQualifiedCall = ({
     const moduleName = ctx.symbolTable.getSymbol(moduleSymbol).name;
     throw new Error(`module ${moduleName} does not export ${calleeExpr.value}`);
   }
-  const memberSymbols = memberTable.get(calleeExpr.value) ?? new Set<SymbolId>();
+  const memberSymbols =
+    memberTable.get(calleeExpr.value) ?? new Set<SymbolId>();
 
   const nominal = lowerNominalObjectLiteral({
     callee: calleeExpr,
@@ -766,7 +883,18 @@ const resolveStaticTargetSymbol = (
   if (!identifier) {
     return undefined;
   }
-  return resolveTypeSymbol(identifier.value, scope, ctx);
+  const lexicalContext = identifier.lexicalContext;
+  const definitionModuleId =
+    lexicalContext?.kind === "macro-template"
+      ? lexicalContext.definitionModuleId
+      : lexicalContext?.kind === "symbol-reference"
+        ? lexicalContext.targetModuleId
+        : undefined;
+  return resolveTypeSymbol(identifier.value, scope, ctx, {
+    bindingIdentity: identifierBindingKey(identifier),
+    definitionModuleId,
+    directSymbol: ctx.directSymbolBySyntax.get(identifier.syntaxId),
+  });
 };
 
 const extractStaticTargetTypeArguments = ({

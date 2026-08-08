@@ -17,7 +17,10 @@ import {
 
 const createProject = async (
   files: Record<string, string>,
-): Promise<{ rootDir: string; filePathFor: (relativePath: string) => string }> => {
+): Promise<{
+  rootDir: string;
+  filePathFor: (relativePath: string) => string;
+}> => {
   const rootDir = await mkdtemp(path.join(os.tmpdir(), "voyd-ls-test-"));
 
   await Promise.all(
@@ -69,7 +72,9 @@ describe("language server project analysis", () => {
     process.env.VOYD_STD_ROOT = stdRoot;
 
     try {
-      const roots = resolveModuleRoots(path.join(os.tmpdir(), "voyd-main.voyd"));
+      const roots = resolveModuleRoots(
+        path.join(os.tmpdir(), "voyd-main.voyd"),
+      );
       expect(roots.std).toBe(stdRoot);
     } finally {
       if (previousStdRoot === undefined) {
@@ -85,10 +90,8 @@ describe("language server project analysis", () => {
       "packages/native/package.json": JSON.stringify({
         voyd: { packageDirectories: ["./local-packages"] },
       }),
-      "packages/native/examples/chart/main.voyd":
-        `use pkg::native_sdk::all\n\nfn main() -> i32\n  answer()\n`,
-      "packages/native/local-packages/native_sdk/src/pkg.voyd":
-        `pub fn answer() -> i32\n  42\n`,
+      "packages/native/examples/chart/main.voyd": `use pkg::native_sdk::all\n\nfn main() -> i32\n  answer()\n`,
+      "packages/native/local-packages/native_sdk/src/pkg.voyd": `pub fn answer() -> i32\n  42\n`,
     });
 
     try {
@@ -105,7 +108,8 @@ describe("language server project analysis", () => {
         roots,
         openDocuments: new Map(),
       });
-      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+      const diagnostics =
+        analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
 
       expect(
         diagnostics.some((diagnostic) =>
@@ -139,7 +143,137 @@ describe("language server project analysis", () => {
       });
 
       expect(definitions).toHaveLength(1);
-      expect(definitions[0]?.uri).toBe(toFileUri(project.filePathFor("src/util.voyd")));
+      expect(definitions[0]?.uri).toBe(
+        toFileUri(project.filePathFor("src/util.voyd")),
+      );
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("navigates and renames hygienic macro helpers at their definition syntax", async () => {
+    const project = await createProject({
+      "src/main.voyd": `use src::macros::all
+
+fn main() -> i32
+  call_private_helper(1)
+`,
+      "src/macros.voyd": `fn private_helper(value: i32) -> i32
+  value + 1
+
+pub macro call_private_helper(value)
+  let helper = symbol_reference(private_helper)
+  \`($helper $value)
+`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const macroPath = project.filePathFor("src/macros.voyd");
+      const macroUri = toFileUri(macroPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+
+      const definitions = definitionsAtPosition({
+        analysis,
+        uri: macroUri,
+        position: { line: 4, character: 34 },
+      });
+      expect(definitions).toHaveLength(1);
+      expect(definitions[0]?.uri).toBe(macroUri);
+      expect(definitions[0]?.range.start.line).toBe(0);
+
+      const rename = renameAtPosition({
+        analysis,
+        uri: macroUri,
+        position: { line: 4, character: 34 },
+        newName: "normalized_helper",
+      });
+      const macroChanges = rename?.changes?.[macroUri] ?? [];
+      expect(macroChanges.some((change) => change.range.start.line === 0)).toBe(
+        true,
+      );
+      expect(macroChanges.some((change) => change.range.start.line === 4)).toBe(
+        true,
+      );
+      expect(rename?.changes?.[toFileUri(entryPath)] ?? []).toHaveLength(0);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("indexes generated declarations and references at definition syntax per invocation", async () => {
+    const project = await createProject({
+      "src/main.voyd": `macro define_private()
+  let helper = identifier("generated_helper")
+  \`(fn $helper() -> i32
+    $helper())
+
+define_private()
+define_private()
+
+fn main() -> i32
+  0
+`,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+      const generated = (analysis.occurrencesByUri.get(uri) ?? []).filter(
+        (occurrence) => occurrence.name === "generated_helper",
+      );
+      const declarations = generated.filter(
+        (occurrence) => occurrence.kind === "declaration",
+      );
+      const references = generated.filter(
+        (occurrence) => occurrence.kind === "reference",
+      );
+
+      expect(declarations).toHaveLength(2);
+      expect(references).toHaveLength(2);
+      expect(declarations.map((entry) => entry.range.start.line)).toEqual([
+        1, 1,
+      ]);
+      expect(references.map((entry) => entry.range.start.line)).toEqual([1, 1]);
+      expect(
+        new Set(declarations.map((entry) => entry.canonicalKey)).size,
+      ).toBe(2);
+      declarations.forEach((declaration) => {
+        expect(
+          references.some(
+            (reference) => reference.canonicalKey === declaration.canonicalKey,
+          ),
+        ).toBe(true);
+      });
+
+      const definitions = definitionsAtPosition({
+        analysis,
+        uri,
+        position: { line: 1, character: 30 },
+      });
+      expect(definitions).toHaveLength(1);
+      expect(definitions[0]?.range.start.line).toBe(1);
+
+      const rename = renameAtPosition({
+        analysis,
+        uri,
+        position: { line: 1, character: 30 },
+        newName: "renamed_helper",
+      });
+      const changes = rename?.changes?.[uri] ?? [];
+      expect(changes.length).toBeGreaterThan(0);
+      expect(changes.every((change) => change.range.start.line === 1)).toBe(
+        true,
+      );
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
@@ -251,7 +385,9 @@ fn value() -> i32
       });
 
       expect(definitions).toHaveLength(1);
-      expect(definitions[0]?.uri).toBe(toFileUri(project.filePathFor("src/constants.voyd")));
+      expect(definitions[0]?.uri).toBe(
+        toFileUri(project.filePathFor("src/constants.voyd")),
+      );
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
@@ -284,7 +420,9 @@ fn value() -> i32
       });
 
       expect(utilDefinitions).toHaveLength(1);
-      expect(utilDefinitions[0]?.uri).toBe(toFileUri(project.filePathFor("src/util.voyd")));
+      expect(utilDefinitions[0]?.uri).toBe(
+        toFileUri(project.filePathFor("src/util.voyd")),
+      );
       expect(mathDefinitions).toHaveLength(1);
       expect(mathDefinitions[0]?.uri).toBe(
         toFileUri(project.filePathFor("src/util/math.voyd")),
@@ -296,8 +434,7 @@ fn value() -> i32
 
   it("resolves inline module go-to-definition to mod declaration", async () => {
     const project = await createProject({
-      "src/main.voyd":
-        `use self::util::helper\n\nmod util\n  pub fn helper() -> i32\n    1\n\nfn main() -> i32\n  helper()\n`,
+      "src/main.voyd": `use self::util::helper\n\nmod util\n  pub fn helper() -> i32\n    1\n\nfn main() -> i32\n  helper()\n`,
     });
 
     try {
@@ -370,9 +507,11 @@ fn value() -> i32
 
       const changes = edit?.changes?.[toFileUri(entryPath)] ?? [];
       expect(changes.length).toBeGreaterThanOrEqual(2);
-      expect(changes.every((change: { newText: string }) => change.newText === "total")).toBe(
-        true,
-      );
+      expect(
+        changes.every(
+          (change: { newText: string }) => change.newText === "total",
+        ),
+      ).toBe(true);
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
@@ -402,9 +541,15 @@ fn value() -> i32
 
       const mainChanges = edit?.changes?.[toFileUri(entryPath)] ?? [];
       const utilChanges = edit?.changes?.[toFileUri(utilPath)] ?? [];
-      expect(mainChanges.some((change) => change.range.start.line === 0)).toBe(true);
-      expect(mainChanges.some((change) => change.range.start.line === 3)).toBe(true);
-      expect(utilChanges.some((change) => change.range.start.line === 0)).toBe(true);
+      expect(mainChanges.some((change) => change.range.start.line === 0)).toBe(
+        true,
+      );
+      expect(mainChanges.some((change) => change.range.start.line === 3)).toBe(
+        true,
+      );
+      expect(utilChanges.some((change) => change.range.start.line === 0)).toBe(
+        true,
+      );
       expect(
         [...mainChanges, ...utilChanges].every(
           (change: { newText: string }) => change.newText === "assist",
@@ -482,8 +627,7 @@ fn value() -> i32
   it("offers auto-import quick fixes for unknown type-alias constructors", async () => {
     const project = await createProject({
       "src/main.voyd": `fn main() -> i32\n  Color(1, 2, 3)\n`,
-      "src/model.voyd":
-        `pub obj Vec3 { x: i32, y: i32, z: i32 }\n\npub type Color = Vec3\n`,
+      "src/model.voyd": `pub obj Vec3 { x: i32, y: i32, z: i32 }\n\npub type Color = Vec3\n`,
     });
 
     try {
@@ -514,8 +658,7 @@ fn value() -> i32
 
   it("inserts auto-imports at module scope when diagnostics originate inside impl blocks", async () => {
     const project = await createProject({
-      "src/main.voyd":
-        `use src::existing::value\n\npub obj Counter {}\n\nimpl Counter\n  fn run() -> i32\n    helper()\n`,
+      "src/main.voyd": `use src::existing::value\n\npub obj Counter {}\n\nimpl Counter\n  fn run() -> i32\n    helper()\n`,
       "src/existing.voyd": `pub let value = 1\n`,
       "src/util.voyd": `pub fn helper() -> i32\n  1\n`,
     });
@@ -552,8 +695,7 @@ fn value() -> i32
 
       const updated = applyEditToSource({
         uri,
-        source:
-          `use src::existing::value\n\npub obj Counter {}\n\nimpl Counter\n  fn run() -> i32\n    helper()\n`,
+        source: `use src::existing::value\n\npub obj Counter {}\n\nimpl Counter\n  fn run() -> i32\n    helper()\n`,
         version: 1,
         text: edit,
       });
@@ -569,8 +711,7 @@ fn value() -> i32
 
   it("offers in-scope completion items for locals and types", async () => {
     const project = await createProject({
-      "src/main.voyd":
-        `type Counter = i32\n\nfn main() -> i32\n  let count = 1\n  cou\n  Cou\n`,
+      "src/main.voyd": `type Counter = i32\n\nfn main() -> i32\n  let count = 1\n  cou\n  Cou\n`,
     });
 
     try {
@@ -604,10 +745,61 @@ fn value() -> i32
     }
   });
 
+  it("omits compiler-only enum namespace links from completions", async () => {
+    const source = `use src::drinks::{ Drink }\n\npub fn main() -> i32\n  let _coffee: Drink = Drink::Coffee()\n  // __enum_ns_\n  0\n`;
+    const project = await createProject({
+      "src/drinks.voyd": `pub obj Coffee {}\npub obj Tea {}\npub type Drink = Coffee | Tea\n`,
+      "src/main.voyd": source,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+      const mainSemantics = analysis.semantics.get("src::main");
+      const internalRecords = mainSemantics
+        ? Array.from(
+            mainSemantics.binding.symbolTable.symbolsInScope(
+              mainSemantics.binding.symbolTable.rootScope,
+            ),
+          )
+            .map((symbol) =>
+              mainSemantics.binding.symbolTable.getSymbol(symbol),
+            )
+            .filter((record) => record.name.startsWith("__enum_ns_"))
+        : [];
+      const completionLine = source
+        .split("\n")
+        .findIndex((line) => line.includes("__enum_ns_"));
+      const completion = completionsAtPosition({
+        analysis,
+        uri,
+        position: {
+          line: completionLine,
+          character:
+            (source.split("\n")[completionLine]?.indexOf("__enum_ns_") ??
+              -1) + "__enum_ns_".length,
+        },
+      });
+
+      expect(internalRecords.length).toBeGreaterThan(0);
+      expect(
+        completion.items.filter((item) =>
+          item.label.startsWith("__enum_ns_"),
+        ),
+      ).toEqual([]);
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  });
+
   it("does not suggest locals declared after the cursor", async () => {
     const project = await createProject({
-      "src/main.voyd":
-        `fn main() -> i32\n  fut\n  let future_local_thing = 1\n  future_local_thing\n`,
+      "src/main.voyd": `fn main() -> i32\n  fut\n  let future_local_thing = 1\n  future_local_thing\n`,
     });
 
     try {
@@ -652,7 +844,9 @@ fn value() -> i32
         uri,
         position: { line: 1, character: 5 },
       });
-      const helperSuggestion = completion.items.find((item) => item.label === "helper");
+      const helperSuggestion = completion.items.find(
+        (item) => item.label === "helper",
+      );
       expect(helperSuggestion).toBeDefined();
       expect(helperSuggestion?.additionalTextEdits).toBeDefined();
       expect(helperSuggestion?.additionalTextEdits?.[0]?.newText).toContain(
@@ -684,9 +878,9 @@ fn value() -> i32
         position: { line: 1, character: 3 },
       });
 
-      expect(
-        completion.items.some((item) => item.label === "helper"),
-      ).toBe(false);
+      expect(completion.items.some((item) => item.label === "helper")).toBe(
+        false,
+      );
       expect(
         completion.items.some((item) => item.additionalTextEdits !== undefined),
       ).toBe(false);
@@ -697,8 +891,7 @@ fn value() -> i32
 
   it("ranks in-scope values before auto-import suggestions", async () => {
     const project = await createProject({
-      "src/main.voyd":
-        `fn main() -> i32\n  let helper_local = 1\n  hel\n  helper_local\n`,
+      "src/main.voyd": `fn main() -> i32\n  let helper_local = 1\n  hel\n  helper_local\n`,
       "src/util.voyd": `pub fn helper(value: i32) -> i32\n  value\n`,
     });
 
@@ -716,9 +909,12 @@ fn value() -> i32
         uri,
         position: { line: 2, character: 5 },
       });
-      const localIndex = completion.items.findIndex((item) => item.label === "helper_local");
+      const localIndex = completion.items.findIndex(
+        (item) => item.label === "helper_local",
+      );
       const importedIndex = completion.items.findIndex(
-        (item) => item.label === "helper" && item.additionalTextEdits !== undefined,
+        (item) =>
+          item.label === "helper" && item.additionalTextEdits !== undefined,
       );
 
       expect(localIndex).toBeGreaterThanOrEqual(0);
@@ -809,7 +1005,9 @@ fn value() -> i32
         uri,
         position: { line: 1, character: 5 },
       });
-      expect(completion.items.some((item) => item.label === "helper")).toBe(true);
+      expect(completion.items.some((item) => item.label === "helper")).toBe(
+        true,
+      );
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
@@ -848,7 +1046,8 @@ fn value() -> i32
         openDocuments: new Map(),
       });
       expect(analysis.graph.modules.has("src::util")).toBe(true);
-      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+      const diagnostics =
+        analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
       expect(
         diagnostics.some((diagnostic) =>
           diagnostic.message.includes("Unable to resolve module src::util"),
@@ -877,7 +1076,8 @@ fn value() -> i32
         openDocuments: new Map(),
       });
       expect(analysis.graph.modules.has("src::util")).toBe(true);
-      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+      const diagnostics =
+        analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
       expect(
         diagnostics.some((diagnostic) =>
           diagnostic.message.includes("Unable to resolve module src::util"),
@@ -908,12 +1108,15 @@ fn value() -> i32
         openDocuments: new Map(),
       });
       expect(analysis.graph.modules.has("src::util")).toBe(true);
-      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+      const diagnostics =
+        analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
       expect(
         diagnostics.some(
           (diagnostic) =>
             diagnostic.message.includes("Unable to resolve module src::util") ||
-            diagnostic.message.includes("Module src::util is not available for import"),
+            diagnostic.message.includes(
+              "Module src::util is not available for import",
+            ),
         ),
       ).toBe(false);
     } finally {
@@ -939,7 +1142,8 @@ fn value() -> i32
         openDocuments: new Map(),
       });
       expect(analysis.graph.modules.has("src::util")).toBe(true);
-      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+      const diagnostics =
+        analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
       expect(
         diagnostics.some((diagnostic) =>
           diagnostic.message.includes("Unable to resolve module src::util"),
@@ -969,7 +1173,8 @@ fn value() -> i32
         openDocuments: new Map(),
       });
       expect(analysis.graph.modules.has("src::pkgs::vtrace::util")).toBe(true);
-      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+      const diagnostics =
+        analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
       expect(
         diagnostics.some((diagnostic) =>
           diagnostic.message.includes("Unable to resolve module self::util"),
@@ -985,10 +1190,8 @@ fn value() -> i32
       "src/pkg.voyd": `pub use self::pkgs`,
       "src/pkgs.voyd": `pub use self::vtrace`,
       "src/pkgs/vtrace/pkg.voyd": `pub use self::color\npub use self::io`,
-      "src/pkgs/vtrace/color.voyd":
-        `use super::io::{ write_line, write, StdErr }\n\npub fn shade() -> i32\n  vec3()\n`,
-      "src/pkgs/vtrace/io.voyd":
-        `pub fn write_line() -> i32\n  0\n\npub fn write() -> i32\n  0\n\npub obj StdErr {}\n`,
+      "src/pkgs/vtrace/color.voyd": `use super::io::{ write_line, write, StdErr }\n\npub fn shade() -> i32\n  vec3()\n`,
+      "src/pkgs/vtrace/io.voyd": `pub fn write_line() -> i32\n  0\n\npub fn write() -> i32\n  0\n\npub obj StdErr {}\n`,
       "src/vec3.voyd": `pub fn vec3() -> i32\n  0\n`,
     });
 
@@ -1026,8 +1229,7 @@ fn value() -> i32
 
       const updated = applyEditToSource({
         uri,
-        source:
-          `use super::io::{ write_line, write, StdErr }\n\npub fn shade() -> i32\n  vec3()\n`,
+        source: `use super::io::{ write_line, write, StdErr }\n\npub fn shade() -> i32\n  vec3()\n`,
         version: 1,
         text: edit,
       });
@@ -1045,10 +1247,8 @@ fn value() -> i32
     const project = await createProject({
       "main.voyd": `fn main() -> i32\n  0\n`,
       "src/pkg.voyd": `pub use self::main`,
-      "src/pkgs/vtrace/pkg.voyd":
-        `use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
-      "src/pkgs/vtrace/hit.voyd":
-        `pub fn hittable() -> i32\n  0\n\npub fn hit_record() -> i32\n  0\n`,
+      "src/pkgs/vtrace/pkg.voyd": `use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
+      "src/pkgs/vtrace/hit.voyd": `pub fn hittable() -> i32\n  0\n\npub fn hit_record() -> i32\n  0\n`,
     });
 
     try {
@@ -1083,14 +1283,15 @@ fn value() -> i32
 
       const updated = applyEditToSource({
         uri,
-        source:
-          `use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
+        source: `use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
         version: 1,
         text: edit,
       });
 
       expect(updated).toContain("use self::hit::{ hittable, hit_record }");
-      expect(updated).not.toContain("use self::hit::hittable\nuse self::hit::hit_record");
+      expect(updated).not.toContain(
+        "use self::hit::hittable\nuse self::hit::hit_record",
+      );
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
@@ -1100,10 +1301,8 @@ fn value() -> i32
     const project = await createProject({
       "main.voyd": `fn main() -> i32\n  0\n`,
       "src/pkg.voyd": `pub use self::main`,
-      "src/pkgs/vtrace/pkg.voyd":
-        `pub use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
-      "src/pkgs/vtrace/hit.voyd":
-        `pub fn hittable() -> i32\n  0\n\npub fn hit_record() -> i32\n  0\n`,
+      "src/pkgs/vtrace/pkg.voyd": `pub use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
+      "src/pkgs/vtrace/hit.voyd": `pub fn hittable() -> i32\n  0\n\npub fn hit_record() -> i32\n  0\n`,
     });
 
     try {
@@ -1138,14 +1337,17 @@ fn value() -> i32
 
       const updated = applyEditToSource({
         uri,
-        source:
-          `pub use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
+        source: `pub use self::hit::hittable\n\npub fn materialize() -> i32\n  hit_record()\n`,
         version: 1,
         text: edit,
       });
 
-      expect(updated).toContain("pub use self::hit::hittable\nuse self::hit::hit_record\n\n");
-      expect(updated).not.toContain("pub use self::hit::{ hittable, hit_record }");
+      expect(updated).toContain(
+        "pub use self::hit::hittable\nuse self::hit::hit_record\n\n",
+      );
+      expect(updated).not.toContain(
+        "pub use self::hit::{ hittable, hit_record }",
+      );
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
     }
@@ -1166,7 +1368,9 @@ fn value() -> i32
       });
 
       const diagnostics = analysis.diagnosticsByUri.get(uri) ?? [];
-      expect(diagnostics.some((diagnostic) => diagnostic.code === "TY0034")).toBe(true);
+      expect(
+        diagnostics.some((diagnostic) => diagnostic.code === "TY0034"),
+      ).toBe(true);
 
       const rename = renameAtPosition({
         analysis,
@@ -1203,9 +1407,7 @@ fn value() -> i32
         return;
       }
 
-      expect(
-        diagnostic.message.includes("Failed to parse"),
-      ).toBe(true);
+      expect(diagnostic.message.includes("Failed to parse")).toBe(true);
       expect(diagnostic.range.start.line).toBeGreaterThan(0);
       expect(diagnostic.range.end.line).toBeGreaterThanOrEqual(
         diagnostic.range.start.line,
@@ -1233,7 +1435,8 @@ fn value() -> i32
         openDocuments: new Map(),
       });
 
-      const diagnostics = analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
+      const diagnostics =
+        analysis.diagnosticsByUri.get(toFileUri(entryPath)) ?? [];
       expect(diagnostics).toHaveLength(0);
     } finally {
       await rm(project.rootDir, { recursive: true, force: true });
@@ -1261,7 +1464,8 @@ fn value() -> i32
       });
       expect(fnHover?.contents).toEqual({
         kind: "markdown",
-        value: "```voyd\nfn add(left: i32, right: i32) -> i32\n```\n\n Adds two numbers.",
+        value:
+          "```voyd\nfn add(left: i32, right: i32) -> i32\n```\n\n Adds two numbers.",
       });
 
       const paramHover = hoverAtPosition({
@@ -1421,6 +1625,282 @@ fn value() -> i32
     }
   });
 
+  it("keeps effect operation tooling distinct from same-named module functions", async () => {
+    const effectsSource = `@effect(id: "example.storage")\npub eff Store\n  /// Saves a value through the storage effect.\n  save(tail, value: i32) -> i32\n  load(resume) -> i32\n\npub fn save(value: i32) -> i32\n  value + 100\n`;
+    const mainSource = `use src::effects\nuse src::effects::Store as Files\nuse Files::save as persist\n\nfn qualified(value: i32): Files -> i32\n  Files::save(value)\n\nfn imported(value: i32): Files -> i32\n  persist(value)\n\nfn handled(value: i32) -> i32\n  try\n    Files::save(value)\n  Files::save(tail, result):\n    tail(result)\n\nfn wrapped(value: i32) -> i32\n  effects::save(value)\n\nfn complete_effect(value: i32): Files -> i32\n  Files::save(value)\n\nfn complete_module(value: i32) -> i32\n  effects::save(value)\n`;
+    const project = await createProject({
+      "src/main.voyd": mainSource,
+      "src/effects.voyd": effectsSource,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const effectsPath = project.filePathFor("src/effects.voyd");
+      const uri = toFileUri(entryPath);
+      const effectsUri = toFileUri(effectsPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+      expect(analysis.diagnosticsByUri.get(uri) ?? []).toEqual([]);
+
+      const lines = mainSource.split("\n");
+      const qualifiedLine = lines.findIndex((line) =>
+        line.includes("Files::save(value)"),
+      );
+      const qualifiedOperation = lines[qualifiedLine]?.indexOf("save") ?? -1;
+      const aliasLine = lines.findIndex((line) =>
+        line.includes("persist(value)"),
+      );
+      const aliasCharacter = lines[aliasLine]?.indexOf("persist") ?? -1;
+      const wrapperLine = lines.findIndex((line) =>
+        line.includes("effects::save(value)"),
+      );
+      const wrapperOperation = lines[wrapperLine]?.indexOf("save") ?? -1;
+      expect(qualifiedLine).toBeGreaterThanOrEqual(0);
+      expect(qualifiedOperation).toBeGreaterThanOrEqual(0);
+      expect(aliasLine).toBeGreaterThanOrEqual(0);
+      expect(aliasCharacter).toBeGreaterThanOrEqual(0);
+      expect(wrapperLine).toBeGreaterThanOrEqual(0);
+      expect(wrapperOperation).toBeGreaterThanOrEqual(0);
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: qualifiedLine, character: qualifiedOperation + 1 },
+      });
+      const hoverText = JSON.stringify(hover?.contents);
+      expect(hoverText).toContain(
+        "effect operation Store::save(tail, value: i32) -> i32",
+      );
+      expect(hoverText).toContain("effect id: example.storage");
+      expect(hoverText).toContain("resumption: tail");
+      expect(hoverText).toContain("source: src::effects");
+      expect(hoverText).toContain("Saves a value through the storage effect.");
+
+      const aliasHover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: aliasLine, character: aliasCharacter + 1 },
+      });
+      expect(JSON.stringify(aliasHover?.contents)).toContain(
+        "Local alias: `persist` (declared as `save`)",
+      );
+
+      const effectDefinition = definitionsAtPosition({
+        analysis,
+        uri,
+        position: { line: qualifiedLine, character: qualifiedOperation + 1 },
+      });
+      const aliasDefinition = definitionsAtPosition({
+        analysis,
+        uri,
+        position: { line: aliasLine, character: aliasCharacter + 1 },
+      });
+      const wrapperDefinition = definitionsAtPosition({
+        analysis,
+        uri,
+        position: { line: wrapperLine, character: wrapperOperation + 1 },
+      });
+      expect(effectDefinition).toEqual(aliasDefinition);
+      expect(effectDefinition).toHaveLength(1);
+      expect(effectDefinition[0]?.uri).toBe(effectsUri);
+      expect(effectDefinition[0]?.range.start.line).toBe(3);
+      expect(wrapperDefinition).toHaveLength(1);
+      expect(wrapperDefinition[0]?.uri).toBe(effectsUri);
+      expect(wrapperDefinition[0]?.range.start.line).toBe(6);
+
+      const effectRename = renameAtPosition({
+        analysis,
+        uri,
+        position: { line: qualifiedLine, character: qualifiedOperation + 1 },
+        newName: "store",
+      });
+      const effectChanges = effectRename?.changes?.[effectsUri] ?? [];
+      const mainChanges = effectRename?.changes?.[uri] ?? [];
+      expect(
+        effectChanges.some((change) => change.range.start.line === 3),
+      ).toBe(true);
+      expect(
+        effectChanges.some((change) => change.range.start.line === 6),
+      ).toBe(false);
+      expect(
+        mainChanges.some((change) => change.range.start.line === wrapperLine),
+      ).toBe(false);
+      expect(
+        mainChanges
+          .filter((change) => change.range.start.line === 2)
+          .map((change) => change.range.start.character)
+          .sort((left, right) => left - right),
+      ).toEqual([11, 19]);
+
+      const effectCompletionLine =
+        lines.findIndex((line) => line.includes("fn complete_effect")) + 1;
+      const effectQualifierEnd =
+        (lines[effectCompletionLine]?.indexOf("Files::") ?? -1) +
+        "Files::".length;
+      const effectCompletion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: effectCompletionLine, character: effectQualifierEnd },
+      });
+      expect(effectCompletion.items.map((item) => item.label)).toEqual([
+        "save",
+        "load",
+      ]);
+      expect(
+        effectCompletion.items.find((item) => item.label === "save")?.detail,
+      ).toContain("effect operation Store::save");
+
+      const moduleCompletionLine =
+        lines.findIndex((line) => line.includes("fn complete_module")) + 1;
+      const moduleQualifierEnd =
+        (lines[moduleCompletionLine]?.indexOf("effects::") ?? -1) +
+        "effects::".length;
+      const moduleCompletion = completionsAtPosition({
+        analysis,
+        uri,
+        position: { line: moduleCompletionLine, character: moduleQualifierEnd },
+      });
+      expect(moduleCompletion.items.map((item) => item.label)).toContain(
+        "save",
+      );
+      expect(moduleCompletion.items.map((item) => item.label)).not.toContain(
+        "load",
+      );
+      expect(
+        moduleCompletion.items.find((item) => item.label === "save")?.detail,
+      ).toContain("fn save");
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
+  it("uses local effect operation aliases across language tooling", async () => {
+    const source = `@effect(id: "example.local-store")
+eff Store
+  /// Saves a value through the local storage effect.
+  save(tail, value: i32) -> i32
+
+use Store::save as persist
+
+fn imported(value: i32): Store -> i32
+  persist(value)
+
+fn handled(value: i32) -> i32
+  try
+    persist(value)
+  persist(tail, result):
+    tail(result)
+
+fn complete(value: i32): Store -> i32
+  per
+
+fn complete_hidden(value: i32): Store -> i32
+  sa
+`;
+    const project = await createProject({ "src/main.voyd": source });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
+      });
+      const lines = source.split("\n");
+      const operationLine = lines.findIndex((line) =>
+        line.includes("save(tail"),
+      );
+      const useLine = lines.findIndex((line) => line.startsWith("use Store"));
+      const callLine = lines.findIndex((line) =>
+        line.includes("persist(value)"),
+      );
+      const completionLine = lines.findIndex((line) => line.trim() === "per");
+      const hiddenCompletionLine = lines.findIndex(
+        (line) => line.trim() === "sa",
+      );
+      const callCharacter = lines[callLine]?.indexOf("persist") ?? -1;
+      expect(operationLine).toBeGreaterThanOrEqual(0);
+      expect(useLine).toBeGreaterThanOrEqual(0);
+      expect(callLine).toBeGreaterThanOrEqual(0);
+      expect(completionLine).toBeGreaterThanOrEqual(0);
+      expect(hiddenCompletionLine).toBeGreaterThanOrEqual(0);
+      expect(callCharacter).toBeGreaterThanOrEqual(0);
+
+      const hover = hoverAtPosition({
+        analysis,
+        uri,
+        position: { line: callLine, character: callCharacter + 1 },
+      });
+      const hoverText = JSON.stringify(hover?.contents);
+      expect(hoverText).toContain(
+        "effect operation Store::save(tail, value: i32) -> i32",
+      );
+      expect(hoverText).toContain(
+        "Local alias: `persist` (declared as `save`)",
+      );
+
+      const definition = definitionsAtPosition({
+        analysis,
+        uri,
+        position: { line: callLine, character: callCharacter + 1 },
+      });
+      expect(definition).toHaveLength(1);
+      expect(definition[0]?.uri).toBe(uri);
+      expect(definition[0]?.range.start.line).toBe(operationLine);
+
+      const rename = renameAtPosition({
+        analysis,
+        uri,
+        position: { line: callLine, character: callCharacter + 1 },
+        newName: "store",
+      });
+      const changes = rename?.changes?.[uri] ?? [];
+      expect(
+        changes.some((change) => change.range.start.line === operationLine),
+      ).toBe(true);
+      expect(
+        changes.some((change) => change.range.start.line === callLine),
+      ).toBe(true);
+      expect(
+        changes
+          .filter((change) => change.range.start.line === useLine)
+          .map((change) => change.range.start.character)
+          .sort((left, right) => left - right),
+      ).toEqual([
+        lines[useLine]?.indexOf("save"),
+        lines[useLine]?.indexOf("persist"),
+      ]);
+
+      const completion = completionsAtPosition({
+        analysis,
+        uri,
+        position: {
+          line: completionLine,
+          character: (lines[completionLine]?.indexOf("per") ?? -1) + 3,
+        },
+      });
+      expect(completion.items.map((item) => item.label)).toContain("persist");
+
+      const hiddenCompletion = completionsAtPosition({
+        analysis,
+        uri,
+        position: {
+          line: hiddenCompletionLine,
+          character: (lines[hiddenCompletionLine]?.indexOf("sa") ?? -1) + 2,
+        },
+      });
+      expect(hiddenCompletion.items.map((item) => item.label)).not.toContain(
+        "save",
+      );
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  }, 15_000);
+
   it("shows overloaded object init constructor signatures in hover before a target is selected", async () => {
     const project = await createProject({
       "src/main.voyd": `obj MyObj {\n  x: i32,\n}\n\nimpl MyObj\n  fn init(y: i32)\n    MyObj { x: y }\n\n  fn init(flag: bool)\n    MyObj { x: 0 }\n\nfn main() -> MyObj\n  MyObj()\n\nfn other() -> MyObj\n  My\n`,
@@ -1497,68 +1977,82 @@ fn value() -> i32
     }
   });
 
-  it(
-    "renames labeled parameters, including external labels",
-    async () => {
-      const source = `fn reduce<T>(value: T, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  cb(start, value)\n\nfn main() -> i32\n  1.reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
-      const project = await createProject({
-        "src/main.voyd": source,
+  it("renames labeled parameters, including external labels", async () => {
+    const source = `fn reduce<T>(value: T, { start: T, reducer cb: (acc: T, current: T) -> T }) -> T\n  cb(start, value)\n\nfn main() -> i32\n  1.reduce start: 0 reducer: (acc, current) =>\n    acc + current\n`;
+    const project = await createProject({
+      "src/main.voyd": source,
+    });
+
+    try {
+      const entryPath = project.filePathFor("src/main.voyd");
+      const uri = toFileUri(entryPath);
+      const analysis = await analyzeProject({
+        entryPath,
+        roots: resolveModuleRoots(entryPath),
+        openDocuments: new Map(),
       });
+      const lines = source.split("\n");
+      const callLine = lines.findIndex((line) => line.includes("reducer:"));
+      const callChar = lines[callLine]?.indexOf("reducer") ?? -1;
+      const reducerDeclLine = lines.findIndex((line) =>
+        line.includes("reducer cb"),
+      );
+      const startBodyLine = lines.findIndex((line) =>
+        line.includes("cb(start, value)"),
+      );
+      expect(callLine).toBeGreaterThanOrEqual(0);
+      expect(callChar).toBeGreaterThanOrEqual(0);
+      expect(reducerDeclLine).toBeGreaterThanOrEqual(0);
+      expect(startBodyLine).toBeGreaterThanOrEqual(0);
 
-      try {
-        const entryPath = project.filePathFor("src/main.voyd");
-        const uri = toFileUri(entryPath);
-        const analysis = await analyzeProject({
-          entryPath,
-          roots: resolveModuleRoots(entryPath),
-          openDocuments: new Map(),
-        });
-        const lines = source.split("\n");
-        const callLine = lines.findIndex((line) => line.includes("reducer:"));
-        const callChar = lines[callLine]?.indexOf("reducer") ?? -1;
-        const reducerDeclLine = lines.findIndex((line) => line.includes("reducer cb"));
-        const startBodyLine = lines.findIndex((line) => line.includes("cb(start, value)"));
-        expect(callLine).toBeGreaterThanOrEqual(0);
-        expect(callChar).toBeGreaterThanOrEqual(0);
-        expect(reducerDeclLine).toBeGreaterThanOrEqual(0);
-        expect(startBodyLine).toBeGreaterThanOrEqual(0);
+      const externalLabelRename = renameAtPosition({
+        analysis,
+        uri,
+        position: { line: callLine, character: callChar + 1 },
+        newName: "combine",
+      });
+      const externalLabelChanges = externalLabelRename?.changes?.[uri] ?? [];
+      expect(
+        externalLabelChanges.some(
+          (change) => change.range.start.line === reducerDeclLine,
+        ),
+      ).toBe(true);
+      expect(
+        externalLabelChanges.some(
+          (change) => change.range.start.line === callLine,
+        ),
+      ).toBe(true);
+      expect(
+        externalLabelChanges.every((change) => change.newText === "combine"),
+      ).toBe(true);
 
-        const externalLabelRename = renameAtPosition({
-          analysis,
-          uri,
-          position: { line: callLine, character: callChar + 1 },
-          newName: "combine",
-        });
-        const externalLabelChanges = externalLabelRename?.changes?.[uri] ?? [];
-        expect(
-          externalLabelChanges.some((change) => change.range.start.line === reducerDeclLine),
-        ).toBe(true);
-        expect(externalLabelChanges.some((change) => change.range.start.line === callLine)).toBe(
-          true,
-        );
-        expect(externalLabelChanges.every((change) => change.newText === "combine")).toBe(true);
-
-        const startCallChar = lines[callLine]?.indexOf("start") ?? -1;
-        expect(startCallChar).toBeGreaterThanOrEqual(0);
-        const startRename = renameAtPosition({
-          analysis,
-          uri,
-          position: { line: callLine, character: startCallChar + 1 },
-          newName: "initial",
-        });
-        const startChanges = startRename?.changes?.[uri] ?? [];
-        expect(startChanges.some((change) => change.range.start.line === reducerDeclLine)).toBe(
-          true,
-        );
-        expect(startChanges.some((change) => change.range.start.line === startBodyLine)).toBe(
-          true,
-        );
-        expect(startChanges.some((change) => change.range.start.line === callLine)).toBe(true);
-        expect(startChanges.every((change) => change.newText === "initial")).toBe(true);
-      } finally {
-        await rm(project.rootDir, { recursive: true, force: true });
-      }
-    },
-    15000,
-  );
+      const startCallChar = lines[callLine]?.indexOf("start") ?? -1;
+      expect(startCallChar).toBeGreaterThanOrEqual(0);
+      const startRename = renameAtPosition({
+        analysis,
+        uri,
+        position: { line: callLine, character: startCallChar + 1 },
+        newName: "initial",
+      });
+      const startChanges = startRename?.changes?.[uri] ?? [];
+      expect(
+        startChanges.some(
+          (change) => change.range.start.line === reducerDeclLine,
+        ),
+      ).toBe(true);
+      expect(
+        startChanges.some(
+          (change) => change.range.start.line === startBodyLine,
+        ),
+      ).toBe(true);
+      expect(
+        startChanges.some((change) => change.range.start.line === callLine),
+      ).toBe(true);
+      expect(startChanges.every((change) => change.newText === "initial")).toBe(
+        true,
+      );
+    } finally {
+      await rm(project.rootDir, { recursive: true, force: true });
+    }
+  }, 15000);
 });

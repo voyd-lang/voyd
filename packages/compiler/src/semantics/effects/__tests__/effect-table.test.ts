@@ -2,43 +2,72 @@ import { describe, expect, it } from "vitest";
 import { createEffectTable } from "../effect-table.js";
 import type { NodeId, TypeSchemeId } from "../../ids.js";
 
+const effectOp = (name: string) => {
+  const effectName = name.split(".")[0]!;
+  const effect = { Async: 1, Log: 2, State: 3 }[effectName] ?? 0;
+  return {
+    identity: { moduleId: "test", effect, operation: 0 },
+    name,
+  };
+};
+
 describe("EffectTable", () => {
   it("interns rows canonically and caches duplicates", () => {
     const effects = createEffectTable();
     const rowA = effects.internRow({
       operations: [
-        { name: "Log.write" },
-        { name: "Async.await" },
-        { name: "Async.await" },
+        effectOp("Log.write"),
+        effectOp("Async.await"),
+        effectOp("Async.await"),
       ],
     });
     const rowB = effects.internRow({
-      operations: [{ name: "Async.await" }, { name: "Log.write" }],
+      operations: [effectOp("Async.await"), effectOp("Log.write")],
     });
     expect(rowA).toBe(rowB);
     const desc = effects.getRow(rowA);
-    expect(desc.operations).toEqual([
-      { name: "Async.await" },
-      { name: "Log.write" },
+    expect(desc.operations.map((op) => op.name)).toEqual([
+      "Async.await",
+      "Log.write",
     ]);
+  });
+
+  it("keys operations by semantic identity instead of display name", () => {
+    const effects = createEffectTable();
+    const left = {
+      identity: { moduleId: "src::left", effect: 1, operation: 2 },
+      name: "Store.save(i32)",
+    };
+    const right = {
+      identity: { moduleId: "src::right", effect: 1, operation: 2 },
+      name: "Store.save(i32)",
+    };
+    const combined = effects.internRow({ operations: [left, right] });
+    expect(effects.getRow(combined).operations).toHaveLength(2);
+
+    const renamed = effects.internRow({
+      operations: [{ ...left, name: "Alias.persist(i32)" }],
+    });
+    const original = effects.internRow({ operations: [left] });
+    expect(renamed).toBe(original);
   });
 
   it("composes rows and preserves tail variables", () => {
     const effects = createEffectTable();
     const tail = effects.freshTailVar();
     const left = effects.internRow({
-      operations: [{ name: "Async.await" }],
+      operations: [effectOp("Async.await")],
       tailVar: tail,
     });
     const right = effects.internRow({
-      operations: [{ name: "Log.write" }],
+      operations: [effectOp("Log.write")],
     });
 
     const composed = effects.compose(left, right);
     const desc = effects.getRow(composed);
-    expect(desc.operations).toEqual([
-      { name: "Async.await" },
-      { name: "Log.write" },
+    expect(desc.operations.map((op) => op.name)).toEqual([
+      "Async.await",
+      "Log.write",
     ]);
     expect(desc.tailVar?.id).toBe(tail.id);
   });
@@ -47,11 +76,11 @@ describe("EffectTable", () => {
     const effects = createEffectTable();
     const supTail = effects.freshTailVar();
     const sup = effects.internRow({
-      operations: [{ name: "Async.await" }],
+      operations: [effectOp("Async.await")],
       tailVar: supTail,
     });
     const sub = effects.internRow({
-      operations: [{ name: "Async.await" }, { name: "Log.write" }],
+      operations: [effectOp("Async.await"), effectOp("Log.write")],
     });
 
     const result = effects.constrain(sub, sup, {
@@ -63,7 +92,7 @@ describe("EffectTable", () => {
     const tailRowId = substitution?.get(supTail.id);
     expect(typeof tailRowId).toBe("number");
     const tailRow = effects.getRow(tailRowId!);
-    expect(tailRow.operations).toEqual([{ name: "Log.write" }]);
+    expect(tailRow.operations.map((op) => op.name)).toEqual(["Log.write"]);
   });
 
   it("binds open super-row tails to empty rows for closed sub-rows", () => {
@@ -90,9 +119,9 @@ describe("EffectTable", () => {
 
   it("flags conflicts when constraining closed rows", () => {
     const effects = createEffectTable();
-    const sup = effects.internRow({ operations: [{ name: "Async.await" }] });
+    const sup = effects.internRow({ operations: [effectOp("Async.await")] });
     const sub = effects.internRow({
-      operations: [{ name: "Async.await" }, { name: "Log.write" }],
+      operations: [effectOp("Async.await"), effectOp("Log.write")],
     });
 
     const result = effects.constrain(sub, sup, {
@@ -105,34 +134,36 @@ describe("EffectTable", () => {
 
   it("records expr and function effects idempotently", () => {
     const effects = createEffectTable();
-    const row = effects.internRow({ operations: [{ name: "Async.await" }] });
+    const row = effects.internRow({ operations: [effectOp("Async.await")] });
     effects.setExprEffect(1, row);
     effects.setExprEffect(1, row);
-    const added = effects.internRow({ operations: [{ name: "Log.write" }] });
+    const added = effects.internRow({ operations: [effectOp("Log.write")] });
     effects.setExprEffect(1, effects.emptyRow);
     effects.setExprEffect(1, added);
     const combined = effects.getExprEffect(1);
     expect(combined).toBeTypeOf("number");
     const desc = effects.getRow(combined!);
-    expect(desc.operations).toEqual([
-      { name: "Async.await" },
-      { name: "Log.write" },
+    expect(desc.operations.map((op) => op.name)).toEqual([
+      "Async.await",
+      "Log.write",
     ]);
 
     const scheme: TypeSchemeId = 7;
     effects.setFunctionEffect(2, scheme, row);
     effects.setFunctionEffect(2, scheme, row);
     expect(effects.getFunctionEffect(2)).toBe(row);
-    expect(() => effects.setFunctionEffect(2, scheme, effects.emptyRow)).toThrow();
+    expect(() =>
+      effects.setFunctionEffect(2, scheme, effects.emptyRow),
+    ).toThrow();
   });
 
   it("rolls back nested expression effect scopes", () => {
     const effects = createEffectTable();
     const initial = effects.internRow({
-      operations: [{ name: "Async.await" }],
+      operations: [effectOp("Async.await")],
     });
-    const outer = effects.internRow({ operations: [{ name: "Log.write" }] });
-    const inner = effects.internRow({ operations: [{ name: "State.get" }] });
+    const outer = effects.internRow({ operations: [effectOp("Log.write")] });
+    const inner = effects.internRow({ operations: [effectOp("State.get")] });
     effects.setExprEffect(1, initial);
 
     effects.pushExprEffectScope();

@@ -844,6 +844,18 @@
           "expect": { "kind": "equals", "value": 1 }
         },
         {
+          "id": "runtime.value-types.pure-fresh-identity-once",
+          "title": "evaluates nominally pure fresh expressions once",
+          "entryName": "pure_fresh_identity_evaluates_once",
+          "expect": { "kind": "equals", "value": 11 }
+        },
+        {
+          "id": "runtime.value-types.explicit-fresh-identity-occurrences",
+          "title": "evaluates explicit fresh expression occurrences separately",
+          "entryName": "explicit_fresh_identity_occurrences_evaluate_separately",
+          "expect": { "kind": "equals", "value": 122 }
+        },
+        {
           "id": "runtime.value-types.array",
           "title": "stores values in arrays",
           "entryName": "value_array_storage",
@@ -1388,9 +1400,9 @@
     },
     {
       "id": "effects.advanced",
-      "title": "Continuation and overload behavior",
+      "title": "Continuation and operation identity behavior",
       "entry": "cases/effects/advanced.voyd",
-      "tags": ["effects", "continuations", "overloads", "runtime"],
+      "tags": ["effects", "continuations", "identity", "runtime"],
       "cases": [
         {
           "id": "effects.continuations.while-no-replay",
@@ -1423,10 +1435,23 @@
           "expect": { "kind": "equals", "value": 25 }
         },
         {
-          "id": "effects.overloads.semantic-alias",
-          "title": "selects overloaded handler clauses through aliases",
-          "entryName": "overloaded_handler_alias",
+          "id": "effects.operations.distinct-identity",
+          "title": "matches distinct operation calls and handlers by identity",
+          "entryName": "distinct_handler_operations",
           "expect": { "kind": "equals", "value": 12 }
+        }
+      ]
+    },
+    {
+      "id": "effects.duplicate-operation",
+      "title": "Duplicate effect operation diagnostics",
+      "entry": "cases/effects/duplicate-operation.voyd",
+      "tags": ["effects", "diagnostics", "identity"],
+      "cases": [
+        {
+          "id": "effects.diagnostics.duplicate-operation",
+          "title": "rejects duplicate operation names within one effect",
+          "expect": { "kind": "diagnostics", "codes": ["BD0009"] }
         }
       ]
     },
@@ -1540,6 +1565,12 @@
           "title": "accepts local enum namespace imports",
           "entryName": "local_namespace_use",
           "expect": { "kind": "equals", "value": 1 }
+        },
+        {
+          "id": "modules.enum-ergonomics.reused-variant-names",
+          "title": "keeps repeated variant names distinct across enums",
+          "entryName": "reused_variant_names",
+          "expect": { "kind": "equals", "value": 1 }
         }
       ]
     },
@@ -1649,6 +1680,23 @@
             "kind": "diagnostics",
             "codes": ["TY0009"],
             "messageIncludes": ["hidden"]
+          }
+        }
+      ]
+    },
+    {
+      "id": "modules.source-pkg.ambiguous-file-pair",
+      "title": "Source subpackage file-pair ambiguity",
+      "entry": "cases/modules/source-level-pkg/src/fails_ambiguous_package.voyd",
+      "tags": ["modules", "packages", "diagnostics"],
+      "cases": [
+        {
+          "id": "modules.source-pkg.ambiguous-file-pair.rejected",
+          "title": "rejects an ordinary module and package root with the same logical path",
+          "expect": {
+            "kind": "diagnostics",
+            "codes": ["MD0006"],
+            "messageIncludes": ["conflict.voyd", "conflict/pkg.voyd"]
           }
         }
       ]

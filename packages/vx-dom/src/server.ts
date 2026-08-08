@@ -3,6 +3,7 @@ import {
   childNamespace,
   elementNamespace,
   normalizeRenderFrame,
+  ssrDomPropertyRepresentation,
   type MarkupNamespace,
   validateCssPropertyName,
   validateCssPropertyValue,
@@ -54,9 +55,6 @@ const voidTags = new Set([
 ]);
 const newlineStrippingTags = new Set(["listing", "pre", "textarea"]);
 const rawTextTags = new Set(["script", "style"]);
-const disableableTags = new Set([
-  "button", "fieldset", "input", "optgroup", "option", "select", "textarea",
-]);
 
 export async function renderVxToString(
   options: RenderVxToStringOptions,
@@ -175,13 +173,9 @@ function renderAttrs(
 }
 
 function validateSsrProperty(tag: string, property: string, value: unknown): void {
-  if (property === "value" && (tag === "input" || (tag === "textarea" && typeof value === "string"))) {
-    return;
-  }
-  if (property === "checked" && tag === "input") return;
-  if (property === "disabled" && disableableTags.has(tag)) {
-    return;
-  }
+  const representation = ssrDomPropertyRepresentation(tag, property);
+  if (representation === "attribute") return;
+  if (representation === "text" && typeof value === "string") return;
   throw new Error(`vx-dom/server: property ${property} has no stable SSR representation on <${tag}>`);
 }
 

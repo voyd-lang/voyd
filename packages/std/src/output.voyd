@@ -6,7 +6,7 @@
 
 use std::array::Array
 use std::bytes::{ Bytes }
-use std::error::{ HostError, IoError }
+use std::error::{ HostError, IoError, IoOther }
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::MsgPackError
@@ -206,8 +206,8 @@ fn decode_io_error_result(payload: HostDto): () -> Result<Unit, IoError>
           Err<IoError> { error: host_error_to_io_error(error) }
         Ok<String> { value: message }:
           Err<IoError> {
-            error: IoError { code: code, message: message }
+            error: IoError { kind: IoOther {}, code: code, message: message }
           }
 
 fn host_error_to_io_error(error: HostError): () -> IoError
-  IoError { code: error.code, message: error.message }
+  IoError { kind: IoOther {}, code: error.code, message: error.message }

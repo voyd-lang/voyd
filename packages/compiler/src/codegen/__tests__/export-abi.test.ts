@@ -110,6 +110,52 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     expect(result).toEqual(payload);
   });
 
+  it("unwraps compiler-derived canvas payloads through boundary metadata", async () => {
+    const wasm = await buildModule({
+      entryFile: "boundary-export-contract.voyd",
+    });
+    const host = await createVoydHost({ wasm });
+
+    await expect(host.runPure("derived_canvas_frame", [])).resolves.toEqual({
+      version: 2,
+      selector: "#scene",
+      width: 320,
+      height: 180,
+      clear: true,
+      draws: [
+        {
+          kind: "line",
+          from: { x: 1, y: 2 },
+          to: { x: 3, y: 4 },
+          color: "#ffffff",
+          width: 1,
+          alpha: 1,
+          glowBlur: 0,
+        },
+      ],
+    });
+
+    const externalDraw = {
+      kind: "line",
+      from: { x: 10, y: 20 },
+      to: { x: 30, y: 40 },
+      color: "#77ddff",
+      width: 2,
+      alpha: 0.5,
+      glowBlur: 0,
+    };
+    await expect(
+      host.runPure("repack_canvas_frame", [externalDraw]),
+    ).resolves.toEqual({
+      version: 2,
+      selector: "#repacked",
+      width: 640,
+      height: 360,
+      clear: true,
+      draws: [externalDraw],
+    });
+  });
+
   it("does not activate companion boundary exports from unrelated boundary helpers", async () => {
     const wasm = await buildModule({
       entryFile: "boundary-preview-export-contract.voyd",
@@ -184,6 +230,51 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     const host = await createVoydHost({ wasm });
 
     await expect(host.runPure("main", [])).resolves.toBe(42);
+  });
+
+  it("locates unsupported and ambiguous derived boundary codec shapes", async () => {
+    const cases = [
+      {
+        fixture: "boundary-derived-codec-unsupported.voyd",
+        path: "__boundary_msgpack_to_value target",
+        expected: "fn() -> i32 is not a supported DTO shape",
+      },
+      {
+        fixture: "boundary-derived-codec-ambiguous.voyd",
+        path: "__boundary_value_to_msgpack value",
+        expected:
+          'variant payload fields named "tag" conflict with the JS boundary discriminator',
+      },
+      {
+        fixture: "boundary-derived-codec-duplicate-variant.voyd",
+        path: "__boundary_value_to_msgpack value.RepeatedBoundaryVariant",
+        expected:
+          'multiple union variants use the "$variant" discriminator "RepeatedBoundaryVariant"',
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = await compileProgram({
+        entryPath: resolve(fixtureRoot, testCase.fixture),
+        roots: { src: fixtureRoot, std: stdRoot },
+        host: createFsModuleHost(),
+        codegenOptions: { validate: true },
+      });
+
+      expect(result.success).toBe(false);
+      if (result.success) {
+        throw new Error(`expected ${testCase.fixture} to fail`);
+      }
+      expect(
+        result.diagnostics.some(
+          (diagnostic) =>
+            diagnostic.code === "CG0001" &&
+            diagnostic.span.start > 0 &&
+            diagnostic.message.includes(testCase.path) &&
+            diagnostic.message.includes(testCase.expected),
+        ),
+      ).toBe(true);
+    }
   });
 
   it("exports memory for serialized wrappers under linearMemoryExport: auto", async () => {

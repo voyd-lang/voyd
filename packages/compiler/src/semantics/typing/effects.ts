@@ -6,15 +6,20 @@ import type {
   HirExprId,
 } from "../ids.js";
 import type { TypingContext, TypingState } from "./types.js";
-import type { EffectTable } from "../effects/effect-table.js";
+import {
+  effectOpRowKey,
+  type EffectOp,
+  type EffectTable,
+} from "../effects/effect-table.js";
+import { formatEffectOp } from "../effects/format.js";
 import { emitDiagnostic } from "../../diagnostics/index.js";
-import type {
-  HirTypeExpr,
-  HirNamedTypeExpr,
-} from "../hir/index.js";
+import type { HirTypeExpr, HirNamedTypeExpr } from "../hir/index.js";
 import type { Expr } from "../../parser/index.js";
 import { formatTypeAnnotation } from "../../parser/surface/utils.js";
-import type { UnificationContext, UnificationResult } from "../effects/effect-table.js";
+import type {
+  UnificationContext,
+  UnificationResult,
+} from "../effects/effect-table.js";
 
 const pureEffectRow = (effects: EffectTable): EffectRowId => effects.emptyRow;
 
@@ -52,7 +57,9 @@ const importedEffectOperationDeclFor = ({
   ctx: Pick<TypingContext, "importsByLocal" | "dependencies">;
 }):
   | {
-      decl: NonNullable<ReturnType<TypingContext["decls"]["getEffectOperation"]>>;
+      decl: NonNullable<
+        ReturnType<TypingContext["decls"]["getEffectOperation"]>
+      >;
       moduleId: string;
     }
   | undefined => {
@@ -71,9 +78,48 @@ const importedEffectOperationDeclFor = ({
   return { decl, moduleId: imported.moduleId };
 };
 
+const resolvedEffectOperationDeclFor = ({
+  symbol,
+  ctx,
+}: {
+  symbol: SymbolId;
+  ctx: TypingContext;
+}):
+  | {
+      decl: NonNullable<
+        ReturnType<TypingContext["decls"]["getEffectOperation"]>
+      >;
+      moduleId: string;
+    }
+  | undefined => {
+  const local = ctx.decls.getEffectOperation(symbol);
+  return local
+    ? { decl: local, moduleId: ctx.moduleId }
+    : importedEffectOperationDeclFor({ symbol, ctx });
+};
+
+const effectOpFromDecl = ({
+  decl,
+  moduleId,
+}: {
+  decl: NonNullable<ReturnType<TypingContext["decls"]["getEffectOperation"]>>;
+  moduleId: string;
+}): EffectOp => ({
+  identity: {
+    moduleId,
+    effect: decl.effect.symbol,
+    operation: decl.operation.symbol,
+  },
+  name: effectOperationKeyFromDecl({
+    effectName: decl.effect.name,
+    opName: decl.operation.name,
+    params: decl.operation.parameters,
+  }),
+});
+
 export const freshOpenEffectRow = (
   effects: EffectTable,
-  options?: { rigid?: boolean }
+  options?: { rigid?: boolean },
 ): EffectRowId =>
   effects.internRow({
     operations: [],
@@ -82,7 +128,7 @@ export const freshOpenEffectRow = (
 
 export const composeEffectRows = (
   effects: EffectTable,
-  rows: readonly EffectRowId[]
+  rows: readonly EffectRowId[],
 ): EffectRowId =>
   rows.reduce((acc, row) => effects.compose(acc, row), pureEffectRow(effects));
 
@@ -99,31 +145,23 @@ export const constrainFunctionEffectRows = ({
 }): UnificationResult => {
   const actualRow = effects.getRow(actual);
   const expectedRow = effects.getRow(expected);
-  const opKey = ({ name, region }: { name: string; region?: number }): string =>
-    `${name}#${typeof region === "number" ? region : ""}`;
-  const formatOps = (
-    ops: readonly { name: string; region?: number }[]
-  ): string =>
-    ops
-      .map((op) =>
-        typeof op.region === "number" ? `${op.name}@${op.region}` : op.name
-      )
-      .join(", ");
+  const formatOps = (ops: readonly EffectOp[]): string =>
+    ops.map(formatEffectOp).join(", ");
 
-  const actualOps = new Set(actualRow.operations.map(opKey));
-  const expectedOps = new Set(expectedRow.operations.map(opKey));
+  const actualOps = new Set(actualRow.operations.map(effectOpRowKey));
+  const expectedOps = new Set(expectedRow.operations.map(effectOpRowKey));
   const missingRequired = expectedRow.operations.filter(
-    (op) => !actualOps.has(opKey(op))
+    (op) => !actualOps.has(effectOpRowKey(op)),
   );
   const extraActual = actualRow.operations.filter(
-    (op) => !expectedOps.has(opKey(op))
+    (op) => !expectedOps.has(effectOpRowKey(op)),
   );
 
   const actualCanSpecialize = Boolean(
-    actualRow.tailVar && !actualRow.tailVar.rigid
+    actualRow.tailVar && !actualRow.tailVar.rigid,
   );
   const expectedAllowsExtra = Boolean(
-    expectedRow.tailVar && !expectedRow.tailVar.rigid
+    expectedRow.tailVar && !expectedRow.tailVar.rigid,
   );
   const substitution = new Map<number, EffectRowId>();
 
@@ -167,7 +205,7 @@ export const constrainFunctionEffectRows = ({
         effects.internRow({
           operations: missingRequired,
           tailVar: sharedTail,
-        })
+        }),
       );
     }
   }
@@ -187,11 +225,14 @@ export const constrainFunctionEffectRows = ({
           })
         : actualRow.tailVar
           ? effects.internRow({ operations: [], tailVar: actualRow.tailVar })
-          : effects.emptyRow
+          : effects.emptyRow,
     );
   }
 
-  if (actualRow.tailVar && (!expectedRow.tailVar || expectedRow.tailVar.rigid)) {
+  if (
+    actualRow.tailVar &&
+    (!expectedRow.tailVar || expectedRow.tailVar.rigid)
+  ) {
     if (actualRow.tailVar.rigid) {
       return {
         ok: false,
@@ -212,43 +253,43 @@ export const constrainFunctionEffectRows = ({
 
 export const getExprEffectRow = (
   expr: HirExprId,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): EffectRowId => ctx.effects.getExprEffect(expr) ?? pureEffectRow(ctx.effects);
 
-export const effectOpName = (
+export const effectOpForSymbol = (
   symbol: SymbolId,
-  ctx: TypingContext
-): string => {
+  ctx: TypingContext,
+): EffectOp => {
   const record = ctx.symbolTable.getSymbol(symbol);
   const ownerEffect = (
     record.metadata as { ownerEffect?: SymbolId } | undefined
   )?.ownerEffect;
-  const localDecl = ctx.decls.getEffectOperation(symbol);
-  const importedDecl = localDecl
-    ? undefined
-    : importedEffectOperationDeclFor({ symbol, ctx });
-  const decl = localDecl ?? importedDecl?.decl;
+  const resolved = resolvedEffectOperationDeclFor({ symbol, ctx });
+  if (resolved) {
+    return effectOpFromDecl(resolved);
+  }
 
   const effectName =
     typeof ownerEffect === "number"
       ? ctx.symbolTable.getSymbol(ownerEffect).name
-      : decl?.effect.name;
-  if (!effectName) {
-    return record.name;
-  }
-  if (!decl) {
-    return `${effectName}.${record.name}`;
-  }
-  return effectOperationKeyFromDecl({
-    effectName,
-    opName: decl.operation.name,
-    params: decl.operation.parameters,
-  });
+      : undefined;
+  const imported = importedTargetFor({ symbol, ctx });
+  return {
+    identity: {
+      moduleId: imported?.moduleId ?? ctx.moduleId,
+      effect: ownerEffect ?? imported?.symbol ?? symbol,
+      operation: imported?.symbol ?? symbol,
+    },
+    name: effectName ? `${effectName}.${record.name}` : record.name,
+  };
 };
+
+export const effectOpName = (symbol: SymbolId, ctx: TypingContext): string =>
+  effectOpForSymbol(symbol, ctx).name;
 
 const resolveEffectAnnotationSymbol = (
   expr: HirNamedTypeExpr,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): SymbolId | undefined => {
   const name = expr.path[0];
   const explicit = typeof expr.symbol === "number" ? expr.symbol : undefined;
@@ -263,7 +304,7 @@ const resolveEffectAnnotationSymbol = (
     const byKind = ctx.symbolTable.resolveByKinds(
       name,
       ctx.symbolTable.rootScope,
-      ["effect", "effect-op"]
+      ["effect", "effect-op"],
     );
     if (typeof byKind === "number") {
       return byKind;
@@ -282,7 +323,7 @@ const resolveEffectAnnotationSymbol = (
 
 const resolveNamedEffectRow = (
   expr: HirNamedTypeExpr,
-  ctx: TypingContext
+  ctx: TypingContext,
 ): EffectRowId => {
   if (
     expr.path.length === 1 &&
@@ -299,30 +340,30 @@ const resolveNamedEffectRow = (
 
   const record = ctx.symbolTable.getSymbol(symbol);
   if (record.kind === "effect") {
-    const decl =
-      ctx.decls.getEffect(symbol) ??
-      (() => {
-        const imported = importedTargetFor({ symbol, ctx });
-        if (!imported) return undefined;
-        const dependency = ctx.dependencies.get(imported.moduleId);
-        if (!dependency) return undefined;
-        return dependency.decls.getEffect(imported.symbol);
-      })();
-    const effectName = record.name;
+    const localDecl = ctx.decls.getEffect(symbol);
+    const imported = localDecl ? undefined : importedTargetFor({ symbol, ctx });
+    const importedDecl = imported
+      ? ctx.dependencies
+          .get(imported.moduleId)
+          ?.decls.getEffect(imported.symbol)
+      : undefined;
+    const decl = localDecl ?? importedDecl;
+    const moduleId = localDecl ? ctx.moduleId : imported?.moduleId;
     const ops =
-      decl?.operations.map((op) => ({
-        name: effectOperationKeyFromDecl({
-          effectName,
-          opName: op.name,
-          params: op.parameters,
-        }),
-      })) ?? [];
+      decl && moduleId
+        ? decl.operations.map((operation) =>
+            effectOpFromDecl({
+              decl: { effect: decl, operation },
+              moduleId,
+            }),
+          )
+        : [];
     return ctx.effects.internRow({ operations: ops });
   }
 
   if (record.kind === "effect-op") {
     return ctx.effects.internRow({
-      operations: [{ name: effectOpName(symbol, ctx) }],
+      operations: [effectOpForSymbol(symbol, ctx)],
     });
   }
 
@@ -332,12 +373,12 @@ const resolveNamedEffectRow = (
 const resolveEffectRowFromExpr = (
   effectType: HirTypeExpr,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): EffectRowId => {
   const compose = (types: readonly HirTypeExpr[]): EffectRowId =>
     composeEffectRows(
       ctx.effects,
-      types.map((type) => resolveEffectRowFromExpr(type, ctx, state))
+      types.map((type) => resolveEffectRowFromExpr(type, ctx, state)),
     );
 
   switch (effectType.typeKind) {
@@ -361,7 +402,7 @@ const resolveEffectRowFromExpr = (
 export const resolveEffectAnnotation = (
   effectType: HirTypeExpr | undefined,
   ctx: TypingContext,
-  state: TypingState
+  state: TypingState,
 ): EffectRowId | undefined =>
   effectType ? resolveEffectRowFromExpr(effectType, ctx, state) : undefined;
 
@@ -448,7 +489,10 @@ export const ensureEffectCompatibility = ({
     return true;
   }
 
-  const backward = ctx.effects.constrain(annotated, inferred, { location, reason });
+  const backward = ctx.effects.constrain(annotated, inferred, {
+    location,
+    reason,
+  });
   if (backward.ok) {
     return true;
   }

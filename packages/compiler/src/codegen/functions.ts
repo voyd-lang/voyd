@@ -103,6 +103,7 @@ import {
   takePendingDefaultIdentityGuardEntries,
   type DefaultIdentityGuardEntry,
 } from "./default-identity-guard-entry.js";
+import { wasmSymbolName } from "./symbol-names.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 const FUNCTION_METADATA_REGISTRATION_STATE = Symbol.for(
@@ -2761,7 +2762,7 @@ const makeFunctionName = (
   typeArgs: readonly TypeId[],
 ): string => {
   const safeSymbolName = sanitizeIdentifier(
-    symbolName(ctx, ctx.moduleId, fn.symbol),
+    wasmSymbolName({ ctx, moduleId: ctx.moduleId, symbol: fn.symbol }),
   );
   const suffix =
     typeArgs.length === 0

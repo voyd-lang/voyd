@@ -101,6 +101,62 @@ test "to_string formats floating-point values":
   assert(to_string((0.0 - 1.0) / 0.0).equals("-Infinity"), eq: true)
   assert(to_string(0.0 / 0.0).equals("NaN"), eq: true)
 
+test "format_fixed uses deterministic ties-to-even rounding and zero policy":
+  assert_formatted(format_fixed(12.5, decimal_places: 2), "12.50")
+  assert_formatted(
+    format_fixed(12.5, decimal_places: 2, trim_trailing_zeros: true),
+    "12.5"
+  )
+  assert_formatted(format_fixed(2.5, decimal_places: 0), "2")
+  assert_formatted(format_fixed(3.5, decimal_places: 0), "4")
+  assert_formatted(format_fixed(to_f32(2.5), decimal_places: 0), "2")
+  let negative_zero = (0.0 - 1.0) * 0.0
+  assert_formatted(format_fixed(negative_zero, decimal_places: 2), "0.00")
+  assert_formatted(
+    format_fixed(1.09999999999999, decimal_places: 15),
+    "1.099999999999990"
+  )
+
+test "format_significant selects plain or compact scientific notation":
+  assert_formatted(format_significant(12345.0, digits: 3), "12300")
+  assert_formatted(format_significant(to_f32(12345.0), digits: 3), "12300")
+  assert_formatted(format_significant(0.0012345, digits: 3), "0.00123")
+  assert_formatted(format_significant(1230000000000000000000.0, digits: 3), "1.23e21")
+
+test "format_scientific controls significant digits and trailing zeros":
+  assert_formatted(format_scientific(1234567.0, digits: 3), "1.23e6")
+  assert_formatted(format_scientific(to_f32(1234567.0), digits: 3), "1.23e6")
+  assert_formatted(format_scientific(0.000001234, digits: 3), "1.23e-6")
+  assert_formatted(
+    format_scientific(1200.0, digits: 4, trim_trailing_zeros: false),
+    "1.200e3"
+  )
+
+test "explicit number formatting applies non-finite and precision policies":
+  assert_formatted(format_fixed(1.0 / 0.0, decimal_places: 2), "Infinity")
+  match(format_fixed(
+    1.0 / 0.0,
+    decimal_places: 2,
+    non_finite: NonFinitePolicy::reject()
+  ))
+    Ok<String>:
+      assert(false, eq: true)
+    Err<NumberFormatError> { error }:
+      assert(error.code, eq: number_format_error_code_non_finite())
+
+  match(format_fixed(1.0, decimal_places: 16))
+    Ok<String>:
+      assert(false, eq: true)
+    Err<NumberFormatError> { error }:
+      assert(error.code, eq: number_format_error_code_invalid_precision())
+
+fn assert_formatted(result: Result<String, NumberFormatError>, expected: String) -> void
+  match(result)
+    Ok<String> { value }:
+      assert(value.equals(expected), eq: true)
+    Err<NumberFormatError>:
+      assert(false, eq: true)
+
 fn pow2_i64(exp: i32): () -> i64
   var out = to_i64(1)
   var index = 0

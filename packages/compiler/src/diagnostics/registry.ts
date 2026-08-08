@@ -45,13 +45,55 @@ const formatOverloadDiagnosticDetails = ({
   return sections.length > 0 ? `\n${sections.join("\n")}` : "";
 };
 
+const constructorInitGuidance = (constructorInit?: string): string =>
+  constructorInit
+    ? `; this value type declares an initializer—call ${constructorInit}(...) explicitly`
+    : "";
+
 type DiagnosticParamsMap = {
   BD0001:
     | { kind: "unresolved-use-path"; path: readonly string[] }
     | { kind: "missing-path-prefix"; path: readonly string[] }
     | { kind: "module-unavailable"; moduleId: string }
     | { kind: "missing-target" }
-    | { kind: "missing-export"; moduleId: string; target: string }
+    | {
+        kind: "missing-export";
+        moduleId: string;
+        target: string;
+        packageRootFile?: string;
+      }
+    | {
+        kind: "module-private-access";
+        moduleId: string;
+        target: string;
+        declarationFile: string;
+      }
+    | {
+        kind: "package-private-access";
+        moduleId: string;
+        target: string;
+        visibility: string;
+        ownerPackage: string;
+        consumerPackage: string;
+        packageRootFile?: string;
+        packageRootPath?: string;
+      }
+    | {
+        kind: "hidden-package-internal";
+        moduleId: string;
+        target: string;
+        visibility: string;
+        packageRootFile: string;
+        packageRootPath: string;
+      }
+    | {
+        kind: "macro-not-exported";
+        moduleId: string;
+        target: string;
+        declarationFile: string;
+        packageRootFile?: string;
+        packageRootPath?: string;
+      }
     | { kind: "missing-module-identifier" }
     | {
         kind: "ambiguous-namespace-member";
@@ -75,6 +117,7 @@ type DiagnosticParamsMap = {
         name: string;
         incomingKind: string;
         existingKind: string;
+        effectName?: string;
       }
     | { kind: "previous-import-name-conflict" };
   BD0002:
@@ -102,6 +145,39 @@ type DiagnosticParamsMap = {
     declarationKind: "type alias" | "obj" | "value" | "trait" | "effect";
     name: string;
   };
+  BD0008:
+    | {
+        kind: "unresolved-symbol-reference";
+        name: string;
+        moduleId: string;
+      }
+    | { kind: "macro-definition-reference" };
+  BD0009:
+    | {
+        kind: "duplicate-effect-operation";
+        effectName: string;
+        operationName: string;
+      }
+    | { kind: "previous-effect-operation" }
+    | {
+        kind: "missing-effect-operation";
+        effectName: string;
+        operationName: string;
+      }
+    | {
+        kind: "invalid-effect-handler-qualifier";
+        qualifier: string;
+        operationName: string;
+      }
+    | {
+        kind: "handler-not-effect-operation";
+        operationName: string;
+      }
+    | {
+        kind: "first-class-effect-operation";
+        effectName: string;
+        operationName: string;
+      };
   CG0001: { kind: "codegen-error"; message: string };
   CG0002: {
     kind: "unsupported-effectful-export-return";
@@ -138,6 +214,15 @@ type DiagnosticParamsMap = {
     requested: string;
     segment: string;
   };
+  MD0006:
+    | {
+        kind: "ambiguous-module-path";
+        requested: string;
+        ordinaryFile: string;
+        packageRootFile: string;
+      }
+    | { kind: "ordinary-declaration"; requested: string }
+    | { kind: "package-root-declaration"; requested: string };
   TY0001:
     | { kind: "immutable-assignment"; name: string }
     | { kind: "binding-declaration"; name: string };
@@ -162,20 +247,37 @@ type DiagnosticParamsMap = {
     name: string;
     inferredArguments?: readonly string[];
     candidates?: readonly OverloadDiagnosticCandidate[];
+    constructorInit?: string;
   };
-  TY0009: {
-    kind: "member-access";
-    memberKind: "field" | "method";
-    name: string;
-    visibility: string;
-    context?: string;
-  };
-  TY0010: {
-    kind: "inaccessible-construction";
-    typeName: string;
-    member: string;
-    visibility: string;
-  };
+  TY0009:
+    | {
+        kind: "member-access";
+        memberKind: "field" | "method";
+        name: string;
+        visibility: string;
+        context?: string;
+      }
+    | {
+        kind: "external-member-requires-api";
+        memberKind: "field" | "method";
+        name: string;
+        ownerPackage: string;
+        consumerPackage: string;
+      };
+  TY0010:
+    | {
+        kind: "inaccessible-construction";
+        typeName: string;
+        member: string;
+        visibility: string;
+      }
+    | {
+        kind: "external-construction-requires-api";
+        typeName: string;
+        member: string;
+        ownerPackage: string;
+        consumerPackage: string;
+      };
   TY0011: { kind: "return-type-mismatch"; functionName?: string };
   TY0012: { kind: "branch-type-mismatch"; context?: string };
   TY0013: { kind: "unhandled-effects"; operations: string };
@@ -205,16 +307,43 @@ type DiagnosticParamsMap = {
   };
   TY0020: { kind: "ambiguous-nominal-match-pattern"; typeName: string };
   TY0021:
-    | { kind: "call-missing-argument"; paramName: string }
-    | { kind: "call-missing-labeled-argument"; label: string }
+    | {
+        kind: "call-missing-argument";
+        paramName: string;
+        constructorInit?: string;
+      }
+    | {
+        kind: "call-missing-labeled-argument";
+        label: string;
+        constructorInit?: string;
+      }
     | {
         kind: "call-argument-label-mismatch";
         argumentIndex: number;
         expectedLabel?: string;
         actualLabel?: string;
+        constructorInit?: string;
       }
-    | { kind: "call-extra-arguments"; extra: number };
-  TY0022: { kind: "unknown-method"; name: string; receiver?: string };
+    | {
+        kind: "call-extra-arguments";
+        extra: number;
+        constructorInit?: string;
+      };
+  TY0022:
+    | { kind: "unknown-method"; name: string; receiver?: string }
+    | {
+        kind: "operator-not-imported";
+        name: string;
+        moduleId: string;
+        facadeFile: string;
+      }
+    | {
+        kind: "trait-implementation-not-imported";
+        name: string;
+        receiver?: string;
+        moduleId: string;
+        facadeFile: string;
+      };
   TY0023: { kind: "array-literal-empty" };
   TY0024: { kind: "array-literal-mixed-primitives" };
   TY0025: { kind: "array-literal-incompatible" };
@@ -458,7 +587,29 @@ export const diagnosticsRegistry: {
         case "missing-target":
           return "use entry missing target name";
         case "missing-export":
-          return `Module ${params.moduleId} does not export ${params.target}`;
+          return params.packageRootFile
+            ? `Module ${params.moduleId} does not export ${params.target}. If it belongs in the public API, re-export it in ${params.packageRootFile}.`
+            : `Module ${params.moduleId} does not export ${params.target}`;
+        case "module-private-access":
+          return `Cannot import ${params.target} from ${params.moduleId}: it is module-private in ${params.declarationFile}. Add pub to the declaration if sibling modules should use it.`;
+        case "package-private-access": {
+          const facade =
+            params.packageRootFile && params.packageRootPath
+              ? ` If it belongs in the external API, re-export it in ${params.packageRootFile}, then import it through ${params.packageRootPath}.`
+              : params.packageRootFile
+                ? ` Re-export it in the package root ${params.packageRootFile} if it belongs in the external API.`
+                : " Re-export it from the owning package root if it belongs in the external API.";
+          return `Cannot import ${params.target} from ${params.moduleId}: it is package-private and not visible here across the ${params.ownerPackage} -> ${params.consumerPackage} boundary (visibility: ${params.visibility}).${facade}`;
+        }
+        case "hidden-package-internal":
+          return `Cannot import ${params.target} through hidden nested-package internals ${params.moduleId}: it is not visible here (visibility: ${params.visibility}). If external access is intended, re-export it in ${params.packageRootFile}, then import it through ${params.packageRootPath}.`;
+        case "macro-not-exported": {
+          const packageGuidance =
+            params.packageRootFile && params.packageRootPath
+              ? `, then re-export it in ${params.packageRootFile} and import it through ${params.packageRootPath}`
+              : ", then re-export it from the package root when crossing a package boundary";
+          return `Macro ${params.target} is present in ${params.declarationFile} but is not exported by ${params.moduleId}. Add pub to the macro declaration${packageGuidance}.`;
+        }
         case "missing-module-identifier":
           return "missing module identifier for import";
         case "ambiguous-namespace-member":
@@ -469,8 +620,13 @@ export const diagnosticsRegistry: {
           const ownerPrefix = params.owner ? `${params.owner}::` : "";
           return `Cannot import ${params.target} from ${params.moduleId}; ${ownerPrefix}${params.target} is an instance member and must be accessed through its type`;
         }
-        case "import-name-conflict":
-          return `Cannot import ${params.name} as ${params.incomingKind}; ${params.name} is already bound as ${params.existingKind} in this scope`;
+        case "import-name-conflict": {
+          const operationGuidance =
+            params.effectName
+              ? `; call ${params.effectName}::${params.name}(...) or import it with an alias, for example \`use ${params.effectName}::${params.name} as ${params.name}_effect\``
+              : "";
+          return `Cannot import ${params.name} as ${params.incomingKind}; ${params.name} is already bound as ${params.existingKind} in this scope${operationGuidance}`;
+        }
         case "previous-import-name-conflict":
           return "previous conflicting import binding is here";
       }
@@ -537,6 +693,35 @@ export const diagnosticsRegistry: {
       `${params.declarationKind} ${params.name} must be UpperCamelCase`,
     severity: "error",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0007"]>,
+  BD0008: {
+    code: "BD0008",
+    message: (params) =>
+      params.kind === "unresolved-symbol-reference"
+        ? `Unable to resolve symbol_reference target ${params.name} in module ${params.moduleId}`
+        : "symbol_reference was written here in the macro definition",
+    severity: "error",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0008"]>,
+  BD0009: {
+    code: "BD0009",
+    message: (params) => {
+      switch (params.kind) {
+        case "duplicate-effect-operation":
+          return `effect ${params.effectName} already declares operation ${params.operationName}; operation names within an effect must be unique`;
+        case "previous-effect-operation":
+          return "previous effect operation declared here";
+        case "missing-effect-operation":
+          return `effect ${params.effectName} does not declare operation ${params.operationName}`;
+        case "invalid-effect-handler-qualifier":
+          return `${params.qualifier} does not resolve to an effect, so ${params.qualifier}::${params.operationName}(...) cannot be used as a handler; qualify the operation with its declaring effect`;
+        case "handler-not-effect-operation":
+          return `${params.operationName}(...) does not resolve to an imported effect operation and cannot be used as a handler; import the operation explicitly or qualify it with its declaring effect`;
+        case "first-class-effect-operation":
+          return `${params.effectName}::${params.operationName} is an effect-operation designator, not a first-class value; call it, use it as a handler head, or import it explicitly`;
+      }
+      return exhaustive(params);
+    },
+    severity: "error",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["BD0009"]>,
   CG0001: {
     code: "CG0001",
     message: (params) => params.message,
@@ -604,6 +789,20 @@ export const diagnosticsRegistry: {
     severity: "error",
     phase: "module-graph",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["MD0005"]>,
+  MD0006: {
+    code: "MD0006",
+    message: (params) => {
+      if (params.kind === "ordinary-declaration") {
+        return `Ordinary module declaration for ${params.requested} is here`;
+      }
+      if (params.kind === "package-root-declaration") {
+        return `Nested source-package declaration for ${params.requested} is here`;
+      }
+      return `Module path ${params.requested} is ambiguous: ${params.ordinaryFile} and ${params.packageRootFile} both claim it. Keep the ordinary module as a facade, or remove it and use the nested pkg.voyd as the package boundary.`;
+    },
+    severity: "error",
+    phase: "module-graph",
+  } satisfies DiagnosticDefinition<DiagnosticParamsMap["MD0006"]>,
   TY0001: {
     code: "TY0001",
     message: (params) =>
@@ -681,13 +880,16 @@ export const diagnosticsRegistry: {
           inferredArguments: params.inferredArguments,
           candidates: params.candidates,
         },
-      )}`,
+      )}${constructorInitGuidance(params.constructorInit)}`,
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0008"]>,
   TY0009: {
     code: "TY0009",
     message: (params) => {
+      if (params.kind === "external-member-requires-api") {
+        return `${params.memberKind} '${params.name}' crosses the ${params.ownerPackage} -> ${params.consumerPackage} package boundary and requires api visibility on the exported owning type`;
+      }
       const context = params.context ? ` when ${params.context}` : "";
       return `${params.memberKind} '${params.name}' is not accessible${context} (visibility: ${params.visibility})`;
     },
@@ -697,7 +899,9 @@ export const diagnosticsRegistry: {
   TY0010: {
     code: "TY0010",
     message: (params) =>
-      `cannot construct ${params.typeName}; field '${params.member}' is not accessible (visibility: ${params.visibility})`,
+      params.kind === "external-construction-requires-api"
+        ? `cannot construct ${params.typeName} across the ${params.ownerPackage} -> ${params.consumerPackage} package boundary; field '${params.member}' requires api visibility. Expose an api constructor when the field should remain hidden.`
+        : `cannot construct ${params.typeName}; field '${params.member}' is not accessible (visibility: ${params.visibility})`,
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0010"]>,
@@ -799,18 +1003,21 @@ export const diagnosticsRegistry: {
   TY0021: {
     code: "TY0021",
     message: (params) => {
+      const constructorGuidance = constructorInitGuidance(
+        params.constructorInit,
+      );
       switch (params.kind) {
         case "call-missing-argument":
-          return `missing required call argument for ${params.paramName}`;
+          return `missing required call argument for ${params.paramName}${constructorGuidance}`;
         case "call-missing-labeled-argument":
-          return `missing required labeled call argument ${params.label}`;
+          return `missing required labeled call argument ${params.label}${constructorGuidance}`;
         case "call-argument-label-mismatch": {
           const expected = params.expectedLabel ?? "no label";
           const actual = params.actualLabel ?? "no label";
-          return `call argument ${params.argumentIndex} label mismatch: expected ${expected}, got ${actual}`;
+          return `call argument ${params.argumentIndex} label mismatch: expected ${expected}, got ${actual}${constructorGuidance}`;
         }
         case "call-extra-arguments":
-          return `call has ${params.extra} extra argument(s)`;
+          return `call has ${params.extra} extra argument(s)${constructorGuidance}`;
       }
       return exhaustive(params);
     },
@@ -819,10 +1026,18 @@ export const diagnosticsRegistry: {
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0021"]>,
   TY0022: {
     code: "TY0022",
-    message: (params) =>
-      params.receiver
+    message: (params) => {
+      if (params.kind === "operator-not-imported") {
+        return `operator '${params.name}' is exported by ${params.moduleId} (${params.facadeFile}) but is not imported; select '${params.name}' explicitly or import ${params.moduleId}::all`;
+      }
+      if (params.kind === "trait-implementation-not-imported") {
+        const receiver = params.receiver ? ` for ${params.receiver}` : "";
+        return `trait implementation providing '${params.name}'${receiver} is available through ${params.moduleId} (${params.facadeFile}) but is not imported; import the owning type or trait from that facade`;
+      }
+      return params.receiver
         ? `method '${params.name}' is not defined on ${params.receiver}`
-        : `method '${params.name}' is not defined`,
+        : `method '${params.name}' is not defined`;
+    },
     severity: "error",
     phase: "typing",
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0022"]>,
@@ -1166,7 +1381,11 @@ export const diagnosticsRegistry: {
     hints: [
       {
         message:
-          "Keep mutable borrows scoped to the current call or block; return an owned value or use SharedCell<T> for persistent shared mutation.",
+          "Return an owned snapshot. In an effect handler, keep read fixtures immutable or copy the stored value before calling tail/resume.",
+      },
+      {
+        message:
+          "Use SharedCell<T> for observations that must change across calls; finish with/with_mut before invoking an effect continuation.",
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0049"]>,
@@ -1210,6 +1429,10 @@ export const diagnosticsRegistry: {
       {
         message:
           "Complete effectful work before creating the mutable borrow, then perform a short synchronous update.",
+      },
+      {
+        message:
+          "In a mock handler, snapshot owned response data before tail/resume and keep mutable read/write observations in SharedCell<T> callbacks that finish first.",
       },
     ],
   } satisfies DiagnosticDefinition<DiagnosticParamsMap["TY0052"]>,

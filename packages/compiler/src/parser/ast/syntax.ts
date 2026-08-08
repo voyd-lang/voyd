@@ -3,6 +3,8 @@ export abstract class Syntax {
   readonly syntaxId = getSyntaxId();
   location?: SourceLocation;
   attributes?: Attributes;
+  /** Compilation-only provenance for syntax produced by macro expansion. */
+  macroProvenance?: MacroSourceProvenance;
 
   constructor(opts: { location?: SourceLocation; attributes?: Attributes } = {}) {
     this.location = opts.location;
@@ -22,7 +24,21 @@ export abstract class Syntax {
     this.location?.setEndToStartOf(loc);
     return this;
   }
+
+  protected cloneSyntaxInto(cloned: Syntax): void {
+    cloned.macroProvenance = this.macroProvenance
+      ? {
+          invocation: this.macroProvenance.invocation?.clone(),
+          definition: this.macroProvenance.definition?.clone(),
+        }
+      : undefined;
+  }
 }
+
+export type MacroSourceProvenance = {
+  invocation?: SourceLocation;
+  definition?: SourceLocation;
+};
 
 export type Attributes = { [key: string]: unknown };
 

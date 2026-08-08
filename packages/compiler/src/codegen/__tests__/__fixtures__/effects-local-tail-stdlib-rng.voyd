@@ -4,7 +4,7 @@ use std::range::{ Range }
 
 eff RenderCtx
   rand_f64(tail) -> f64
-  rand_f64(tail, range: Range<f64>) -> f64
+  rand_f64_in(tail, range: Range<f64>) -> f64
 
 val Triple {
   x: f64,
@@ -14,9 +14,9 @@ val Triple {
 
 fn random_triple(range: Range<f64>): RenderCtx -> Triple
   Triple {
-    x: RenderCtx::rand_f64(range),
-    y: RenderCtx::rand_f64(range),
-    z: RenderCtx::rand_f64(range)
+    x: RenderCtx::rand_f64_in(range),
+    y: RenderCtx::rand_f64_in(range),
+    z: RenderCtx::rand_f64_in(range)
   }
 
 pub fn rand_plain(): () -> f64
@@ -26,17 +26,17 @@ pub fn rand_plain(): () -> f64
     RenderCtx::rand_f64()
   RenderCtx::rand_f64(tail):
     tail(rng.random_f64())
-  RenderCtx::rand_f64(tail, range: Range<f64>):
+  RenderCtx::rand_f64_in(tail, range: Range<f64>):
     tail(rng.random_f64(range))
 
 pub fn rand_range(): () -> f64
   let ~rng = LocalRng::seeded(to_i64(42))
 
   try open
-    RenderCtx::rand_f64(0.0..0.5)
+    RenderCtx::rand_f64_in(0.0..0.5)
   RenderCtx::rand_f64(tail):
     tail(rng.random_f64())
-  RenderCtx::rand_f64(tail, range: Range<f64>):
+  RenderCtx::rand_f64_in(tail, range: Range<f64>):
     tail(rng.random_f64(range))
 
 pub fn rand_triple_sum(): () -> f64
@@ -47,5 +47,5 @@ pub fn rand_triple_sum(): () -> f64
     value.x + value.y + value.z
   RenderCtx::rand_f64(tail):
     tail(rng.random_f64())
-  RenderCtx::rand_f64(tail, range: Range<f64>):
+  RenderCtx::rand_f64_in(tail, range: Range<f64>):
     tail(rng.random_f64(range))

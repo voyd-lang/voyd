@@ -1,0 +1,9 @@
+use std::msgpack::{ make_null, unpack_boundary_value }
+
+obj UnsupportedBoundaryValue {
+  callback: fn() -> i32
+}
+
+pub fn main() -> void
+  unpack_boundary_value<UnsupportedBoundaryValue>(make_null())
+  void

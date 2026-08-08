@@ -3,6 +3,172 @@ use std::dict::Dict
 use std::string::{ String, new_string }
 use std::test::assertions::all
 
+obj DecodeProfile {
+  age: i32,
+  nickname?: String
+}
+
+obj DecodeStarted { id: i32 }
+obj DecodeStopped { reason: String }
+type DecodeEvent = DecodeStarted | DecodeStopped
+
+obj DecodeRequest {
+  version: i32,
+  profiles: Array<DecodeProfile>,
+  event: DecodeEvent
+}
+
+obj VersionedName {
+  version: i32,
+  name: String
+}
+
+obj DecodeFloat { value: f32 }
+
+test "typed JSON decode composes nested arrays optional fields and enum payloads":
+  let source = "{\"version\":1,\"profiles\":[{\"age\":7},{\"age\":9,\"nickname\":\"nine\"}],\"event\":{\"$variant\":\"DecodeStarted\",\"id\":42}}"
+  match(decode<DecodeRequest>(source))
+    Err<JsonDecodeError>:
+      assert(false, eq: true)
+    Ok<DecodeRequest> { value }:
+      assert(value.version, eq: 1)
+      assert(value.profiles.len(), eq: 2)
+      assert(value.profiles.at(0).age, eq: 7)
+      value.event.match(event)
+        DecodeStarted:
+          assert(event.id, eq: 42)
+        else:
+          assert(false, eq: true)
+
+test "typed JSON decode reports precise nested paths and strict unknown fields":
+  let mistyped = "{\"version\":1,\"profiles\":[{\"age\":7},{\"age\":\"old\"}],\"event\":\"DecodeStopped\"}"
+  match(decode<DecodeRequest>(mistyped))
+    Ok<DecodeRequest>:
+      assert(false, eq: true)
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.profiles[1].age")
+      error.kind.match(kind)
+        JsonSchemaFailure:
+          void
+        else:
+          assert(false, eq: true)
+
+  let unknown = "{\"version\":1,\"name\":\"orbit\",\"extra\":true}"
+  match(decode<VersionedName>(unknown))
+    Ok<VersionedName>:
+      assert(false, eq: true)
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.extra")
+
+  match(decode<VersionedName>(unknown, options: permissive_decode_options()))
+    Err<JsonDecodeError>:
+      assert(false, eq: true)
+    Ok<VersionedName> { value }:
+      assert(value.name, eq: "orbit")
+
+test "version dispatch requires explicit migration to the current version":
+  match(decode_versioned<VersionedName>(
+    "{\"version\":0,\"name\":\"legacy\"}",
+    current: 1,
+    migrate: migrate_versioned_name
+  ))
+    Err<JsonDecodeError>:
+      assert(false, eq: true)
+    Ok<VersionedName> { value }:
+      assert(value.version, eq: 1)
+      assert(value.name, eq: "legacy")
+
+  match(decode_versioned<VersionedName>(
+    "{\"version\":9,\"name\":\"future\"}",
+    current: 1,
+    migrate: migrate_versioned_name
+  ))
+    Ok<VersionedName>:
+      assert(false, eq: true)
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.version")
+      error.kind.match(kind)
+        JsonVersionFailure:
+          void
+        else:
+          assert(false, eq: true)
+
+  match(decode_versioned<VersionedName>(
+    "{\"version\":1.5,\"name\":\"fractional\"}",
+    current: 1,
+    migrate: migrate_versioned_name
+  ))
+    Ok<VersionedName>:
+      assert(false, eq: true)
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.version")
+      error.kind.match(kind)
+        JsonVersionFailure:
+          void
+        else:
+          assert(false, eq: true)
+
+test "typed JSON decode rejects fractional integers and overflowing f32 values":
+  match(decode<VersionedName>("{\"version\":1.5,\"name\":\"fractional\"}"))
+    Ok<VersionedName>:
+      assert(false, eq: true)
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.version")
+
+  match(decode<DecodeFloat>("{\"value\":1e100}"))
+    Ok<DecodeFloat>:
+      assert(false, eq: true)
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.value")
+
+test "numeric constraints retain the caller path":
+  match(number_in_range(JsonNumber { value: 12.0 }, at: "$.mass", min: 0.0, max: 10.0))
+    Ok<f64>:
+      assert(false, eq: true)
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.mass")
+      error.kind.match(kind)
+        JsonConstraintFailure:
+          void
+        else:
+          assert(false, eq: true)
+
+  match(number_in_range(JsonNumber { value: 1.0 / 0.0 }, at: "$.mass", min: 0.0, max: 10.0))
+    Ok<f64>:
+      assert(false, eq: true)
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.mass")
+      error.kind.match(kind)
+        JsonConstraintFailure:
+          void
+        else:
+          assert(false, eq: true)
+
+fn migrate_versioned_name(version: i32, document: JsonValue) -> Result<JsonValue, JsonDecodeError>
+  if version != 0:
+    return Err<JsonDecodeError> {
+      error: JsonDecodeError {
+        kind: JsonVersionFailure {},
+        path: "$.version",
+        message: "unsupported version"
+      }
+    }
+  document.match(decoded)
+    JsonObject:
+      Ok<JsonValue> {
+        value: JsonObject {
+          value: decoded.value.setting("version", JsonNumber { value: 1.0 })
+        }
+      }
+    else:
+      Err<JsonDecodeError> {
+        error: JsonDecodeError {
+          kind: JsonVersionFailure {},
+          path: "$",
+          message: "document must be an object"
+        }
+      }
+
 test "json parse handles objects, arrays, booleans, and numbers":
   let input = from_ascii([
     123,34,111,107,34,58,116,114,117,101,44,34,110,34,58,49,50,44,

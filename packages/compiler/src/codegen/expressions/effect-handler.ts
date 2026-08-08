@@ -35,15 +35,16 @@ import {
   wasmHeapFieldTypeFor,
   wasmTypeFor,
 } from "../types.js";
-import { liftHeapValueToInline, lowerValueForHeapField } from "../structural.js";
+import {
+  liftHeapValueToInline,
+  lowerValueForHeapField,
+} from "../structural.js";
 import {
   handlerCleanupOps,
   pushHandlerScope,
   popHandlerScope,
 } from "../effects/handler-stack.js";
-import {
-  wrapValueInOutcome,
-} from "../effects/outcome-values.js";
+import { wrapValueInOutcome } from "../effects/outcome-values.js";
 import { RESUME_KIND, type ResumeKind } from "../effects/runtime-abi.js";
 import type { HirEffectHandlerExpr } from "../../semantics/hir/index.js";
 import type {
@@ -55,11 +56,7 @@ import {
   handlerClauseContinuationTempId,
   handlerClauseTailGuardTempId,
 } from "../effects/effect-lowering/handler-clause-temp-ids.js";
-import {
-  buildEffectTypeSubstitution,
-  collectEffectTypeArgs,
-  resolveEffectSignatureTypes,
-} from "../effects/effect-signature.js";
+import { resolveHandlerClauseSignature } from "../effects/effect-signature.js";
 import { walkHirExpression } from "../hir-walk.js";
 import { canonicalEffectOperation } from "../effects/static-specialization.js";
 
@@ -95,7 +92,9 @@ const HANDLER_STATE_KEY = Symbol("voyd.effects.effectHandler.codegenState");
 
 const handlerState = (ctx: CodegenContext): HandlerCodegenState => {
   const memo = ctx.effectsState.memo;
-  const existing = memo.get(HANDLER_STATE_KEY) as HandlerCodegenState | undefined;
+  const existing = memo.get(HANDLER_STATE_KEY) as
+    | HandlerCodegenState
+    | undefined;
   if (existing) return existing;
   const created: HandlerCodegenState = {
     envLayouts: new Map(),
@@ -127,28 +126,29 @@ const handlerBindingLayoutKey = (fnCtx: FunctionContext): string =>
     .sort(([left], [right]) => left - right)
     .map(
       ([symbol, binding]) =>
-        `${symbol}:${binding.typeId ?? "unknown"}:${binding.type}`
+        `${symbol}:${binding.typeId ?? "unknown"}:${binding.type}`,
     )
     .join(",");
 
-const handlerEnvLayoutKey = (
-  fields: readonly ClauseEnvField[],
-): string =>
+const handlerEnvLayoutKey = (fields: readonly ClauseEnvField[]): string =>
   fields
     .map(
-      (field) => `${field.symbol}:${field.typeId}:${field.wasmType}:${field.fieldIndex}`
+      (field) =>
+        `${field.symbol}:${field.typeId}:${field.wasmType}:${field.fieldIndex}`,
     )
     .join(",");
-
 
 const currentHandlerValue = (
   ctx: CodegenContext,
-  fnCtx: FunctionContext
+  fnCtx: FunctionContext,
 ): binaryen.ExpressionRef => {
   if (!fnCtx.currentHandler) {
     return ctx.mod.ref.null(ctx.effectsRuntime.handlerFrameType);
   }
-  return ctx.mod.local.get(fnCtx.currentHandler.index, fnCtx.currentHandler.type);
+  return ctx.mod.local.get(
+    fnCtx.currentHandler.index,
+    fnCtx.currentHandler.type,
+  );
 };
 
 const unwrapValueOnlyBlock = ({
@@ -192,7 +192,10 @@ const tailResumeValueExpr = ({
     return false;
   }
   const callee = ctx.module.hir.expressions.get(body.callee);
-  if (callee?.exprKind !== "identifier" || callee.symbol !== continuation.symbol) {
+  if (
+    callee?.exprKind !== "identifier" ||
+    callee.symbol !== continuation.symbol
+  ) {
     return false;
   }
   if (body.args.length > 1) {
@@ -286,12 +289,19 @@ const buildStaticEffectContext = ({
 
   const handlers = new Map<ProgramSymbolId, StaticEffectHandlerClause>();
   for (let index = 0; index < expr.handlers.length; index += 1) {
-    const resumeValueExpr = tailResumeValueExpr({ expr, clauseIndex: index, ctx });
+    const resumeValueExpr = tailResumeValueExpr({
+      expr,
+      clauseIndex: index,
+      ctx,
+    });
     if (resumeValueExpr === false) {
       continue;
     }
     const clause = expr.handlers[index]!;
-    const signature = ctx.program.functions.getSignature(ctx.moduleId, clause.operation);
+    const signature = ctx.program.functions.getSignature(
+      ctx.moduleId,
+      clause.operation,
+    );
     if (!signature || signature.typeParams.length > 0) {
       continue;
     }
@@ -323,8 +333,12 @@ const buildStaticEffectContext = ({
   const key = [
     `h${expr.id}`,
     `i${instanceKey}`,
-    ...[...handlers.keys()].sort((a, b) => a - b).map((operation) => `o${operation}`),
-    ...captures.map((capture) => `c${capture.symbol}_${capture.typeId}_${capture.mode}`),
+    ...[...handlers.keys()]
+      .sort((a, b) => a - b)
+      .map((operation) => `o${operation}`),
+    ...captures.map(
+      (capture) => `c${capture.symbol}_${capture.typeId}_${capture.mode}`,
+    ),
   ].join("_");
   return { key, handlers, captures };
 };
@@ -360,8 +374,8 @@ const buildClauseEnv = ({
     if (optimizedCaptureSet && syntacticCaptureSet.size > 0) {
       return new Set(
         [...syntacticCaptureSet].filter((symbol) =>
-          optimizedCaptureSet.has(symbol)
-        )
+          optimizedCaptureSet.has(symbol),
+        ),
       );
     }
     if (syntacticCaptureSet.size > 0) {
@@ -392,14 +406,13 @@ const buildClauseEnv = ({
                   getMutableRefStorageType({ typeId, ctx })
                   ? binding.storageType
                   : wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime")
-                : binding.kind === "storage-ref" ||
-                    binding.kind === "capture"
+                : binding.kind === "storage-ref" || binding.kind === "capture"
                   ? binding.storageType
-                : (getInlineHeapBoxType({
-                    typeId,
-                    ctx,
-                    mode: "runtime",
-                  }) ?? binding.type),
+                  : (getInlineHeapBoxType({
+                      typeId,
+                      ctx,
+                      mode: "runtime",
+                    }) ?? binding.type),
           };
         })
         .sort((a, b) => a.symbol - b.symbol)
@@ -450,7 +463,7 @@ const buildClauseEnv = ({
             ctx,
             fnCtx,
           });
-    }) as number[]
+    }) as number[],
   );
   return { envType: layout.envType, envValue, fields: layout.fields };
 };
@@ -476,7 +489,9 @@ const emitClauseFunction = ({
 }): { fnName: string; fnRefType: binaryen.Type } => {
   const bindingKey = sanitize(handlerEnvLayoutKey(env.fields));
   const fnName = `${ctx.moduleLabel}__handler_${expr.id}_${clauseIndex}${
-    typeof typeInstanceId === "number" ? `__inst${typeInstanceId}` : "__instbase"
+    typeof typeInstanceId === "number"
+      ? `__inst${typeInstanceId}`
+      : "__instbase"
   }__env_${bindingKey}`;
   const state = handlerState(ctx);
   const cachedRefType = state.clauseFnRefTypes.get(fnName);
@@ -485,79 +500,17 @@ const emitClauseFunction = ({
   }
 
   const clause = expr.handlers[clauseIndex]!;
-  const signature = ctx.program.functions.getSignature(ctx.moduleId, clause.operation);
-  if (!signature) {
-    throw new Error("missing effect operation signature for handler clause");
-  }
-  const effectTypeArgs = collectEffectTypeArgs({
+  const {
+    params: resolvedParamTypes,
+    returnType: resolvedReturnTypeId,
+    substitution,
+  } = resolveHandlerClauseSignature({
     handlerBody: expr.body,
-    operation: clause.operation,
+    clause,
     ctx,
     typeInstanceId,
-  });
-  const substitution = buildEffectTypeSubstitution({
-    ctx,
-    typeInstanceId,
-    signature,
-    typeArgs: effectTypeArgs,
   });
   const activeSubstitution = substitution.size > 0 ? substitution : undefined;
-  const signatureParamTypes = signature.parameters.map((param) => param.typeId);
-  const paramOffset = clause.parameters[0] ? 1 : 0;
-  const paramTypes = clause.parameters.slice(paramOffset).map((param, index) => {
-    const symbolType = ctx.module.types.getValueType(param.symbol);
-    const fallback = signatureParamTypes[index];
-    const base =
-      typeof symbolType === "number"
-        ? symbolType
-        : fallback ?? ctx.program.primitives.unknown;
-    return base;
-  });
-  const returnTypeInfo = (() => {
-    const continuationParam = clause.parameters[0];
-    if (!continuationParam) {
-      return {
-        returnType: signature.returnType,
-        fallbackReturnType: signature.returnType,
-      };
-    }
-    const continuationTypeId = ctx.module.types.getValueType(
-      continuationParam.symbol
-    );
-    if (typeof continuationTypeId !== "number") {
-      return {
-        returnType: signature.returnType,
-        fallbackReturnType: signature.returnType,
-      };
-    }
-    const continuationDesc = ctx.program.types.getTypeDesc(continuationTypeId);
-    if (continuationDesc.kind !== "function") {
-      return {
-        returnType: signature.returnType,
-        fallbackReturnType: signature.returnType,
-      };
-    }
-    const paramType = continuationDesc.parameters[0]?.type;
-    if (typeof paramType !== "number") {
-      return { returnType: ctx.program.primitives.void };
-    }
-    return {
-      returnType: paramType,
-      fallbackReturnType: signature.returnType,
-    };
-  })();
-  const { params: resolvedParamTypes, returnType: resolvedReturnTypeId } =
-    resolveEffectSignatureTypes({
-      ctx,
-      signature,
-      typeInstanceId,
-      typeArgs: effectTypeArgs,
-      substitution,
-      paramTypes,
-      fallbackParams: signatureParamTypes,
-      returnType: returnTypeInfo.returnType,
-      fallbackReturnType: returnTypeInfo.fallbackReturnType,
-    });
   const registry = ctx.effectsState.effectRegistry;
   if (!registry) {
     throw new Error("missing effect registry for handler clause");
@@ -649,7 +602,7 @@ const emitClauseFunction = ({
       exprRef: refCast(
         ctx.mod,
         ctx.mod.local.get(1, binaryen.anyref),
-        env.envType
+        env.envType,
       ),
     });
     const value =
@@ -659,65 +612,66 @@ const emitClauseFunction = ({
             value: stored,
             typeId: field.typeId,
             ctx,
+            fnCtx,
           });
     return [storeLocalValue({ binding, value, ctx, fnCtx })];
   });
 
   const requestLocal = allocateTempLocal(
     ctx.effectsRuntime.effectRequestType,
-    fnCtx
+    fnCtx,
   );
   initOps.push(
     ctx.mod.local.set(
       requestLocal.index,
-      ctx.mod.local.get(2, ctx.effectsRuntime.effectRequestType)
-    )
+      ctx.mod.local.get(2, ctx.effectsRuntime.effectRequestType),
+    ),
   );
   initOps.push(
     ctx.mod.if(
       ctx.mod.i32.ne(
         ctx.effectsRuntime.requestOpIndex(
-          ctx.mod.local.get(requestLocal.index, requestLocal.type)
+          ctx.mod.local.get(requestLocal.index, requestLocal.type),
         ),
-        ctx.mod.i32.const(opIndex)
+        ctx.mod.i32.const(opIndex),
       ),
       ctx.mod.unreachable(),
-      ctx.mod.nop()
-    )
+      ctx.mod.nop(),
+    ),
   );
 
   const continuationLocal = allocateTempLocal(
     ctx.effectsRuntime.continuationType,
-    fnCtx
+    fnCtx,
   );
   initOps.push(
     ctx.mod.local.set(
       continuationLocal.index,
       ctx.effectsRuntime.requestContinuation(
-        ctx.mod.local.get(requestLocal.index, requestLocal.type)
-      )
-    )
+        ctx.mod.local.get(requestLocal.index, requestLocal.type),
+      ),
+    ),
   );
   const tailGuardLocal = allocateTempLocal(
     ctx.effectsRuntime.tailGuardType,
-    fnCtx
+    fnCtx,
   );
   initOps.push(
     ctx.mod.local.set(
       tailGuardLocal.index,
       ctx.effectsRuntime.requestTailGuard(
-        ctx.mod.local.get(requestLocal.index, requestLocal.type)
-      )
-    )
+        ctx.mod.local.get(requestLocal.index, requestLocal.type),
+      ),
+    ),
   );
 
   fnCtx.tempLocals.set(
     handlerClauseContinuationTempId({ handlerExprId: expr.id, clauseIndex }),
-    continuationLocal
+    continuationLocal,
   );
   fnCtx.tempLocals.set(
     handlerClauseTailGuardTempId({ handlerExprId: expr.id, clauseIndex }),
-    tailGuardLocal
+    tailGuardLocal,
   );
 
   if (clause.parameters[0]) {
@@ -730,7 +684,7 @@ const emitClauseFunction = ({
     const continuationDesc = ctx.program.types.getTypeDesc(continuationTypeId);
     const resumeTypeId =
       continuationDesc.kind === "function"
-        ? continuationDesc.parameters[0]?.type ?? ctx.program.primitives.void
+        ? (continuationDesc.parameters[0]?.type ?? ctx.program.primitives.void)
         : resolvedReturnTypeId;
     if (continuationDesc.kind === "function") {
       const continuationBinding = allocateTempLocal(
@@ -742,8 +696,8 @@ const emitClauseFunction = ({
       initOps.push(
         ctx.mod.local.set(
           continuationBinding.index,
-          ctx.mod.ref.null(ensureNullableRefType(continuationBinding.type))
-        )
+          ctx.mod.ref.null(ensureNullableRefType(continuationBinding.type)),
+        ),
       );
       fnCtx.bindings.set(clause.parameters[0].symbol, {
         ...continuationBinding,
@@ -768,16 +722,23 @@ const emitClauseFunction = ({
     throw new Error("missing effect args type for handler clause");
   }
   const argsRef = ctx.effectsRuntime.requestArgs(
-    ctx.mod.local.get(requestLocal.index, requestLocal.type)
+    ctx.mod.local.get(requestLocal.index, requestLocal.type),
   );
 
-  clause.parameters.slice(clause.parameters[0] ? 1 : 0).forEach((param, index) => {
-    const typeId = resolvedParamTypes[index] ?? ctx.program.primitives.unknown;
-    const wasmType = wasmTypeFor(typeId, ctx);
-    const binding = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
-    const storedArgType = wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime");
-    const storedArg =
-      !argsType
+  clause.parameters
+    .slice(clause.parameters[0] ? 1 : 0)
+    .forEach((param, index) => {
+      const typeId =
+        resolvedParamTypes[index] ?? ctx.program.primitives.unknown;
+      const wasmType = wasmTypeFor(typeId, ctx);
+      const binding = allocateTempLocal(wasmType, fnCtx, typeId, ctx);
+      const storedArgType = wasmHeapFieldTypeFor(
+        typeId,
+        ctx,
+        new Set(),
+        "runtime",
+      );
+      const storedArg = !argsType
         ? ctx.mod.ref.null(ensureNullableRefType(storedArgType))
         : structGetFieldValue({
             mod: ctx.mod,
@@ -785,29 +746,32 @@ const emitClauseFunction = ({
             fieldType: storedArgType,
             exprRef: refCast(ctx.mod, argsRef, argsType),
           });
-    const value =
-      binding.storageType === binding.type
-        ? storedArg
-        : liftHeapValueToInline({
-            value: storedArg,
-            typeId,
-            ctx,
-          });
-    initOps.push(
-      storeLocalValue({ binding, value, ctx, fnCtx })
-    );
-    fnCtx.bindings.set(param.symbol, { ...binding, kind: "local", typeId });
-  });
+      const value =
+        binding.storageType === binding.type
+          ? storedArg
+          : liftHeapValueToInline({
+              value: storedArg,
+              typeId,
+              ctx,
+              fnCtx,
+            });
+      initOps.push(storeLocalValue({ binding, value, ctx, fnCtx }));
+      fnCtx.bindings.set(param.symbol, { ...binding, kind: "local", typeId });
+    });
 
   const expectedClauseReturnTypeId =
     clause.parameters[0] &&
-    typeof ctx.module.types.getValueType(clause.parameters[0].symbol) === "number"
+    typeof ctx.module.types.getValueType(clause.parameters[0].symbol) ===
+      "number"
       ? ((): TypeId => {
           const rawContinuationTypeId = ctx.module.types.getValueType(
-            clause.parameters[0].symbol
+            clause.parameters[0].symbol,
           ) as TypeId;
           const continuationTypeId = activeSubstitution
-            ? ctx.program.types.substitute(rawContinuationTypeId, activeSubstitution)
+            ? ctx.program.types.substitute(
+                rawContinuationTypeId,
+                activeSubstitution,
+              )
             : rawContinuationTypeId;
           const desc = ctx.program.types.getTypeDesc(continuationTypeId);
           return desc.kind === "function"
@@ -842,35 +806,33 @@ const emitClauseFunction = ({
     null,
     [
       ...initOps,
-      resultLocal
-        ? ctx.mod.local.set(resultLocal.index, wrapped)
-        : wrapped,
+      resultLocal ? ctx.mod.local.set(resultLocal.index, wrapped) : wrapped,
       ...(handlerResumeKind === RESUME_KIND.tail && resultLocal
         ? [
             ctx.mod.if(
               ctx.mod.i32.ne(
                 ctx.effectsRuntime.tailGuardObserved(
-                  ctx.mod.local.get(tailGuardLocal.index, tailGuardLocal.type)
+                  ctx.mod.local.get(tailGuardLocal.index, tailGuardLocal.type),
                 ),
                 ctx.effectsRuntime.tailGuardExpected(
-                  ctx.mod.local.get(tailGuardLocal.index, tailGuardLocal.type)
-                )
+                  ctx.mod.local.get(tailGuardLocal.index, tailGuardLocal.type),
+                ),
               ),
               ctx.mod.unreachable(),
-              ctx.mod.nop()
+              ctx.mod.nop(),
             ),
             ctx.mod.local.get(resultLocal.index, resultLocal.type),
           ]
         : []),
     ],
-    ctx.effectsRuntime.outcomeType
+    ctx.effectsRuntime.outcomeType,
   );
   const fnRef = ctx.mod.addFunction(
     fnName,
     binaryen.createType(params as number[]),
     ctx.effectsRuntime.outcomeType,
     fnCtx.locals,
-    bodyBlock
+    bodyBlock,
   );
   const heapType = bin._BinaryenFunctionGetType(fnRef);
   const fnRefType = bin._BinaryenTypeFromHeapType(heapType, false);
@@ -884,7 +846,7 @@ export const compileEffectHandlerExpr = (
   fnCtx: FunctionContext,
   compileExpr: ExpressionCompiler,
   tailPosition: boolean,
-  expectedResultTypeId?: number
+  expectedResultTypeId?: number,
 ): CompiledExpression => {
   const handlerInfo = effectsFacade(ctx).handler(expr.id);
   if (!handlerInfo) {
@@ -897,16 +859,23 @@ export const compileEffectHandlerExpr = (
   const handlerResultTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
 
   const env = buildClauseEnv({ expr, ctx, fnCtx });
-  const staticEffectContext = buildStaticEffectContext({ expr, env, ctx, fnCtx });
+  const staticEffectContext = buildStaticEffectContext({
+    expr,
+    env,
+    ctx,
+    fnCtx,
+  });
+  const envLocal = allocateTempLocal(env.envType, fnCtx);
   const prevHandlerLocal = allocateTempLocal(
     ctx.effectsRuntime.handlerFrameType,
-    fnCtx
+    fnCtx,
   );
   const headLocal = allocateTempLocal(
     ctx.effectsRuntime.handlerFrameType,
-    fnCtx
+    fnCtx,
   );
   const ops: binaryen.ExpressionRef[] = [
+    ctx.mod.local.set(envLocal.index, env.envValue),
     ctx.mod.local.set(headLocal.index, currentHandlerValue(ctx, fnCtx)),
   ];
 
@@ -916,13 +885,13 @@ export const compileEffectHandlerExpr = (
     ctx.mod.i32.const(0),
     ctx.mod.i32.eq(
       ctx.effectsRuntime.handlerLabel(head()),
-      ctx.mod.i32.const(expr.id)
-    )
+      ctx.mod.i32.const(expr.id),
+    ),
   );
 
   const walkPrev = (cursor: binaryen.ExpressionRef): binaryen.ExpressionRef =>
     ctx.effectsRuntime.handlerPrev(
-      refCast(ctx.mod, cursor, ctx.effectsRuntime.handlerFrameType)
+      refCast(ctx.mod, cursor, ctx.effectsRuntime.handlerFrameType),
     );
 
   const prevFromInstalled = (() => {
@@ -940,7 +909,7 @@ export const compileEffectHandlerExpr = (
     ];
     handlerInfo.clauses.forEach((clause, index) => {
       const { effectId, opId, resumeKind } = effectsFacade(ctx).effectOpIds(
-        clause.operation
+        clause.operation,
       );
       const { fnName, fnRefType } = emitClauseFunction({
         expr,
@@ -958,7 +927,7 @@ export const compileEffectHandlerExpr = (
         opId: ctx.mod.i32.const(opId),
         resumeKind: ctx.mod.i32.const(resumeKind),
         clauseFn: refFunc(ctx.mod, fnName, fnRefType),
-        clauseEnv: env.envValue,
+        clauseEnv: ctx.mod.local.get(envLocal.index, envLocal.type),
         tailExpected:
           resumeKind === RESUME_KIND.tail
             ? ctx.mod.i32.const(1)
@@ -966,9 +935,7 @@ export const compileEffectHandlerExpr = (
         label: ctx.mod.i32.const(expr.id),
       });
     });
-    installOps.push(
-      ctx.mod.local.set(fnCtx.currentHandler.index, current)
-    );
+    installOps.push(ctx.mod.local.set(fnCtx.currentHandler.index, current));
     return ctx.mod.block(null, installOps, binaryen.none);
   })();
 
@@ -976,8 +943,8 @@ export const compileEffectHandlerExpr = (
     ctx.mod.if(
       handlerAlreadyInstalled,
       ctx.mod.local.set(prevHandlerLocal.index, prevFromInstalled),
-      installFromScratch
-    )
+      installFromScratch,
+    ),
   );
   pushHandlerScope(fnCtx, { prevHandler: prevHandlerLocal, label: expr.id });
 
@@ -1036,11 +1003,7 @@ export const compileEffectHandlerExpr = (
   }
 
   return {
-    expr: ctx.mod.block(
-      null,
-      ops,
-      resultWasmType
-    ),
+    expr: ctx.mod.block(null, ops, resultWasmType),
     usedReturnCall: body.usedReturnCall,
   };
 };

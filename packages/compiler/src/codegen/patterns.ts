@@ -1095,6 +1095,7 @@ const collectAssignmentsFromValue = ({
         field,
         pointer: () => loadLocalValue(temp, ctx),
         ctx,
+        fnCtx,
       });
       ops.push(storeLocalValue({ binding: elementTemp, value: load, ctx, fnCtx }));
       collected.push(
@@ -1131,6 +1132,7 @@ const collectAssignmentsFromValue = ({
         field,
         pointer: () => loadLocalValue(temp, ctx),
         ctx,
+        fnCtx,
       });
       ops.push(storeLocalValue({ binding: fieldTemp, value: load, ctx, fnCtx }));
       collected.push(

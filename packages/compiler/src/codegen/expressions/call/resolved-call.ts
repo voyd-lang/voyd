@@ -300,6 +300,7 @@ export const emitResolvedCall = ({
             value: operand,
             typeId: resolvedMeta.paramTypeIds[parameter]!,
             ctx,
+            fnCtx,
           })
         : operand;
     return identity === "allocation"
@@ -309,6 +310,7 @@ export const emitResolvedCall = ({
           path: allocationPath ?? [],
           context: `call ${callId}`,
           ctx,
+          fnCtx,
         })
       : allocationIdentity;
   };
@@ -598,6 +600,7 @@ export const emitResolvedCall = ({
       value: ctx.mod.local.get(wideResultStorage.index, wideResultStorage.type),
       typeId: resolvedMeta.resultTypeId,
       ctx,
+      fnCtx,
     });
     const coerced =
       resolvedMeta.resultTypeId === expectedTypeId

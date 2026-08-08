@@ -11,11 +11,20 @@ import {
 import type { MacroEvalResult, MacroLambdaValue } from "./types.js";
 import { isMacroLambdaValue } from "./types.js";
 
-export const recreateForm = (form: Form, elements: Expr[]): Form =>
-  new Form({
+export const recreateForm = (form: Form, elements: Expr[]): Form => {
+  const recreated = new Form({
     location: form.location?.clone(),
     elements,
   });
+  recreated.attributes = form.attributes ? { ...form.attributes } : undefined;
+  recreated.macroProvenance = form.macroProvenance
+    ? {
+        invocation: form.macroProvenance.invocation?.clone(),
+        definition: form.macroProvenance.definition?.clone(),
+      }
+    : undefined;
+  return recreated;
+};
 
 export const ensureForm = (expr: Expr): Form =>
   isForm(expr) ? expr : new Form([expr]);
@@ -23,7 +32,7 @@ export const ensureForm = (expr: Expr): Form =>
 export const cloneExpr = (expr: Expr): Expr => expr.clone();
 
 export const cloneMacroEvalResult = (
-  value: MacroEvalResult
+  value: MacroEvalResult,
 ): MacroEvalResult => {
   if (isMacroLambdaValue(value)) {
     return {
@@ -40,7 +49,7 @@ export const cloneMacroEvalResult = (
 
 export const expectExpr = (
   value: MacroEvalResult | undefined,
-  context = "macro evaluation"
+  context = "macro evaluation",
 ): Expr => {
   if (!value) {
     throw new Error(`Expected expression for ${context}`);
@@ -48,7 +57,7 @@ export const expectExpr = (
 
   if (isMacroLambdaValue(value)) {
     throw new Error(
-      `Expected expression for ${context}, received macro lambda`
+      `Expected expression for ${context}, received macro lambda`,
     );
   }
 
@@ -57,7 +66,7 @@ export const expectExpr = (
 
 export const expectForm = (
   expr: MacroEvalResult | undefined,
-  context: string
+  context: string,
 ): Form => {
   if (!isForm(expr)) {
     throw new Error(`Expected form for ${context}`);
@@ -67,7 +76,7 @@ export const expectForm = (
 
 export const expectIdentifier = (
   expr: MacroEvalResult | undefined,
-  context: string
+  context: string,
 ): IdentifierAtom => {
   if (!isIdentifierAtom(expr)) {
     throw new Error(`Expected identifier for ${context}`);

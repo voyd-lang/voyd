@@ -1,5 +1,9 @@
 import binaryen from "binaryen";
-import { annotateStructNames, TypeBuilder } from "@voyd-lang/lib/binaryen-gc/index.js";
+import {
+  annotateStructNames,
+  annotateTypeName,
+  TypeBuilder,
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { AugmentedBinaryen } from "@voyd-lang/lib/binaryen-gc/types.js";
 import type { CodegenContext, TypeId } from "./context.js";
 
@@ -276,10 +280,10 @@ export const emitRecursiveStructuralHeapTypeGroup = ({
             heapType,
           });
           try {
-            bin._BinaryenModuleSetTypeName(
-              (ctx.mod as any).ptr,
+            annotateTypeName(
+              ctx.mod,
               heapType,
-              bin.stringToUTF8OnStack(`voyd_fixed_array_of_${elementStructuralId}`),
+              `voyd_fixed_array_of_${elementStructuralId}`,
             );
           } catch {
           }

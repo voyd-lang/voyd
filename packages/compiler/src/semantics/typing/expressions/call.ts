@@ -710,6 +710,8 @@ export const typeCallExpr = (
         callId: expr.id,
         calleeExprId: calleeExpr.id,
         calleeModuleId: calleeRef.moduleId,
+        diagnosticConstructorInit: expr.constructorInit,
+        diagnosticCallSpan: expr.constructorInit ? calleeExpr.span : undefined,
         ctx,
         state,
       });
@@ -2093,6 +2095,7 @@ const emitConsensusCallArgumentShapeDiagnostic = <
   span,
   argsForCandidate,
   signatureForCandidate,
+  constructorInit,
 }: {
   candidates: readonly T[];
   args: readonly Arg[];
@@ -2101,6 +2104,7 @@ const emitConsensusCallArgumentShapeDiagnostic = <
   span: SourceSpan;
   argsForCandidate?: (candidate: T) => readonly Arg[];
   signatureForCandidate?: (candidate: T) => FunctionSignature;
+  constructorInit?: string;
 }): boolean => {
   if (candidates.length === 0) {
     return false;
@@ -2141,6 +2145,7 @@ const emitConsensusCallArgumentShapeDiagnostic = <
             param?.name ??
             param?.label ??
             `parameter ${first.failure.paramIndex + 1}`,
+          constructorInit,
         },
         span,
       });
@@ -2153,6 +2158,7 @@ const emitConsensusCallArgumentShapeDiagnostic = <
         params: {
           kind: "call-missing-labeled-argument",
           label: first.failure.label,
+          constructorInit,
         },
         span,
       });
@@ -2166,6 +2172,7 @@ const emitConsensusCallArgumentShapeDiagnostic = <
           argumentIndex: first.failure.argIndex + 1,
           expectedLabel: first.failure.expectedLabel,
           actualLabel: first.failure.actualLabel,
+          constructorInit,
         },
         span,
       });
@@ -2177,6 +2184,7 @@ const emitConsensusCallArgumentShapeDiagnostic = <
         params: {
           kind: "call-extra-arguments",
           extra: first.failure.extra,
+          constructorInit,
         },
         span,
       });
@@ -2302,6 +2310,7 @@ const validateCallArgs = (
   ctx: TypingContext,
   state: TypingState,
   callSpan?: SourceSpan,
+  constructorInit?: string,
 ): { ok: true; plan: readonly CallArgumentPlanEntry[] } | { ok: false } => {
   const span = callSpan ?? ctx.hir.module.span;
   const explicitSyntheticArg = args.find((arg) =>
@@ -2314,6 +2323,7 @@ const validateCallArgs = (
       params: {
         kind: "call-extra-arguments",
         extra: 1,
+        constructorInit,
       },
       span,
     });
@@ -2415,6 +2425,7 @@ const validateCallArgs = (
           kind: "call-missing-argument",
           paramName:
             param.name ?? param.label ?? `parameter ${failure.paramIndex + 1}`,
+          constructorInit,
         },
         span,
       });
@@ -2427,6 +2438,7 @@ const validateCallArgs = (
         params: {
           kind: "call-missing-labeled-argument",
           label: failure.label,
+          constructorInit,
         },
         span,
       });
@@ -2442,6 +2454,7 @@ const validateCallArgs = (
           argumentIndex: failure.argIndex + 1,
           expectedLabel: failure.expectedLabel,
           actualLabel: failure.actualLabel,
+          constructorInit,
         },
         span: normalizeSpan(
           arg ? spanForArg(arg, ctx) : undefined,
@@ -2458,6 +2471,7 @@ const validateCallArgs = (
         params: {
           kind: "call-extra-arguments",
           extra: failure.extra,
+          constructorInit,
         },
         span,
       });
@@ -3714,6 +3728,25 @@ const assertExportedMemberAccess = ({
   if (canAccessExportedMember({ exported, ctx, state })) {
     return;
   }
+  if (
+    exported.visibility.level !== "object" &&
+    exported.packageId !== ctx.packageId &&
+    exported.visibility.api !== true
+  ) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0009",
+      params: {
+        kind: "external-member-requires-api",
+        memberKind: "method",
+        name: methodName,
+        ownerPackage: exported.packageId,
+        consumerPackage: ctx.packageId,
+      },
+      span: normalizeSpan(span),
+    });
+    return;
+  }
   emitDiagnostic({
     ctx,
     code: "TY0009",
@@ -3856,6 +3889,25 @@ const selectMethodCallCandidate = ({
   state: TypingState;
 }): MethodCallSelection => {
   if (!resolution || resolution.candidates.length === 0) {
+    const unimportedImplementation = findUnimportedTraitImplementation({
+      receiverType: probeArgs[0]?.type,
+      methodName: expr.method,
+      ctx,
+    });
+    if (unimportedImplementation) {
+      emitDiagnostic({
+        ctx,
+        code: "TY0022",
+        params: {
+          kind: "trait-implementation-not-imported",
+          name: expr.method,
+          receiver: resolution?.receiverName,
+          ...unimportedImplementation,
+        },
+        span: normalizeSpan(expr.span),
+      });
+      return { usedTraitDispatch: false };
+    }
     reportUnknownMethod({
       methodName: expr.method,
       receiverName: resolution?.receiverName,
@@ -4056,6 +4108,145 @@ const selectMethodCallCandidate = ({
   }
 
   return { selected: matches[0], usedTraitDispatch: false };
+};
+
+const findUnimportedTraitImplementation = ({
+  receiverType,
+  methodName,
+  ctx,
+}: {
+  receiverType: TypeId | undefined;
+  methodName: string;
+  ctx: TypingContext;
+}): { moduleId: string; facadeFile: string } | undefined => {
+  if (typeof receiverType !== "number") {
+    return undefined;
+  }
+  const nominal = getNominalComponent(receiverType, ctx);
+  if (typeof nominal !== "number") {
+    return undefined;
+  }
+  const descriptor = ctx.arena.get(nominal);
+  if (
+    descriptor.kind !== "nominal-object" &&
+    descriptor.kind !== "value-object"
+  ) {
+    return undefined;
+  }
+  const ownerRef = canonicalSymbolRefForModuleSymbol({
+    moduleId: descriptor.owner.moduleId,
+    symbol: descriptor.owner.symbol,
+    ctx,
+  });
+
+  for (const [moduleId] of ctx.moduleExports) {
+    const dependency = ctx.dependencies.get(moduleId);
+    if (!dependency || !moduleIsNamedBySourceUse({ moduleId, ctx })) {
+      continue;
+    }
+    const implementation = dependency.typing.traits
+      .getImplTemplates()
+      .find((template) => {
+        const targetOwner = nominalOwnerForDependencyType({
+          type: template.target,
+          dependency,
+          ctx,
+        });
+        if (!targetOwner || !symbolRefEquals(targetOwner, ownerRef)) {
+          return false;
+        }
+        return Array.from(template.methods.values()).some(
+          (symbol) =>
+            dependency.symbolTable.getSymbol(symbol).name === methodName,
+        );
+      });
+    if (!implementation) {
+      continue;
+    }
+    const facadeFile = dependency.hir.module.span.file;
+    return {
+      moduleId: moduleId.endsWith("::pkg")
+        ? moduleId.slice(0, -"::pkg".length)
+        : moduleId,
+      facadeFile,
+    };
+  }
+  return undefined;
+};
+
+const moduleIsNamedBySourceUse = ({
+  moduleId,
+  ctx,
+}: {
+  moduleId: string;
+  ctx: TypingContext;
+}): boolean => {
+  const logicalModuleId = moduleId.endsWith("::pkg")
+    ? moduleId.slice(0, -"::pkg".length)
+    : moduleId;
+  return ctx.hir.module.items.some((itemId) => {
+    const item = ctx.hir.items.get(itemId);
+    return (
+      item?.kind === "use" &&
+      item.entries.some((entry) => entry.path.join("::") === logicalModuleId)
+    );
+  });
+};
+
+const nominalOwnerForDependencyType = ({
+  type,
+  dependency,
+  ctx,
+  seen = new Set<TypeId>(),
+}: {
+  type: TypeId;
+  dependency: DependencySemantics;
+  ctx: TypingContext;
+  seen?: Set<TypeId>;
+}): SymbolRef | undefined => {
+  if (seen.has(type)) {
+    return undefined;
+  }
+  seen.add(type);
+  const descriptor = dependency.typing.arena.get(type);
+  if (
+    descriptor.kind === "nominal-object" ||
+    descriptor.kind === "value-object"
+  ) {
+    return canonicalSymbolRefForModuleSymbol({
+      moduleId: descriptor.owner.moduleId,
+      symbol: descriptor.owner.symbol,
+      ctx,
+    });
+  }
+  if (descriptor.kind === "borrowed") {
+    return nominalOwnerForDependencyType({
+      type: descriptor.inner,
+      dependency,
+      ctx,
+      seen,
+    });
+  }
+  if (descriptor.kind === "recursive") {
+    return nominalOwnerForDependencyType({
+      type: descriptor.body,
+      dependency,
+      ctx,
+      seen,
+    });
+  }
+  if (
+    descriptor.kind === "intersection" &&
+    typeof descriptor.nominal === "number"
+  ) {
+    return nominalOwnerForDependencyType({
+      type: descriptor.nominal,
+      dependency,
+      ctx,
+      seen,
+    });
+  }
+  return undefined;
 };
 
 const preferLeastGenericMethodAliases = ({
@@ -4755,6 +4946,19 @@ const typeOperatorOverloadCall = ({
   }
 
   if (!traitDispatch) {
+    if (
+      reportUnimportedTopLevelOperator({
+        operatorName,
+        selected,
+        span: call.span,
+        ctx,
+      })
+    ) {
+      return {
+        returnType: ctx.primitives.unknown,
+        effectRow: ctx.effects.emptyRow,
+      };
+    }
     if (selected.exported) {
       assertExportedMemberAccess({
         exported: selected.exported,
@@ -4795,6 +4999,84 @@ const typeOperatorOverloadCall = ({
     calleeModuleId: selected.symbolRef.moduleId,
     nameForSymbol: selected.nameForSymbol,
   });
+};
+
+const reportUnimportedTopLevelOperator = ({
+  operatorName,
+  selected,
+  span,
+  ctx,
+}: {
+  operatorName: string;
+  selected: MethodCallCandidate;
+  span: SourceSpan;
+  ctx: TypingContext;
+}): boolean => {
+  if (selected.symbolRef.moduleId === ctx.moduleId) {
+    return false;
+  }
+  const dependency = ctx.dependencies.get(selected.symbolRef.moduleId);
+  const declaration = dependency?.decls.getFunction(selected.symbolRef.symbol);
+  if (!declaration || declaration.implId !== undefined) {
+    return false;
+  }
+
+  const selectedRef = canonicalSymbolRefForModuleSymbol({
+    moduleId: selected.symbolRef.moduleId,
+    symbol: selected.symbolRef.symbol,
+    ctx,
+  });
+  const isImported = Array.from(ctx.importsByLocal.values()).some((target) =>
+    symbolRefEquals(target, selectedRef),
+  );
+  if (isImported) {
+    return false;
+  }
+
+  const facade = Array.from(ctx.moduleExports.entries()).find(
+    ([moduleId, exports]) => {
+      const exported = exports.get(operatorName);
+      if (!exported) {
+        return false;
+      }
+      if (
+        exported.packageId !== ctx.packageId &&
+        exported.visibility.level !== "public"
+      ) {
+        return false;
+      }
+      const symbols = exported.symbols ?? [exported.symbol];
+      return symbols.some((symbol) =>
+        symbolRefEquals(
+          canonicalSymbolRefForModuleSymbol({ moduleId, symbol, ctx }),
+          selectedRef,
+        ),
+      );
+    },
+  );
+  if (!facade) {
+    return false;
+  }
+  const [facadeModuleId] = facade;
+  const facadeFile = ctx.dependencies.get(facadeModuleId)?.hir.module.span.file;
+  if (!facadeFile) {
+    return false;
+  }
+  const logicalModuleId = facadeModuleId.endsWith("::pkg")
+    ? facadeModuleId.slice(0, -"::pkg".length)
+    : facadeModuleId;
+  emitDiagnostic({
+    ctx,
+    code: "TY0022",
+    params: {
+      kind: "operator-not-imported",
+      name: operatorName,
+      moduleId: logicalModuleId,
+      facadeFile,
+    },
+    span: normalizeSpan(span),
+  });
+  return true;
 };
 
 const resolveNominalMethodCandidates = ({
@@ -5570,6 +5852,8 @@ const typeFunctionCall = ({
   nameForSymbol,
   seedSubstitution,
   trustTypeArgumentConstraints,
+  diagnosticConstructorInit,
+  diagnosticCallSpan,
 }: {
   args: readonly Arg[];
   signature: FunctionSignature;
@@ -5585,6 +5869,8 @@ const typeFunctionCall = ({
   nameForSymbol?: SymbolNameResolver;
   seedSubstitution?: ReadonlyMap<TypeParamId, TypeId>;
   trustTypeArgumentConstraints?: boolean;
+  diagnosticConstructorInit?: string;
+  diagnosticCallSpan?: SourceSpan;
 }): { returnType: TypeId; effectRow: number } => {
   const callerInstanceKey = state.currentFunction?.instanceKey;
   if (!callerInstanceKey) {
@@ -5670,7 +5956,8 @@ const typeFunctionCall = ({
     planParameters,
     ctx,
     state,
-    callSpan,
+    diagnosticCallSpan ?? callSpan,
+    diagnosticConstructorInit,
   );
   if (validation.ok) {
     const existingPlans =
@@ -6524,6 +6811,7 @@ const typeOverloadedCall = (
     ctx,
     state,
   });
+  const constructorInit = call.constructorInit;
   // Scoring speculatively infers lambda returns for each candidate. Preserve
   // those immutable results for the selected-call typing that follows.
   const lambdaReturnInferenceCache: LambdaReturnInferenceCache = new Map();
@@ -6595,7 +6883,8 @@ const typeOverloadedCall = (
           args: resolutionArgs,
           ctx,
           state,
-          span: call.span,
+          span: constructorInit ? callee.span : call.span,
+          constructorInit,
         })
       ) {
         return {
@@ -6606,16 +6895,19 @@ const typeOverloadedCall = (
       emitDiagnostic({
         ctx,
         code: "TY0008",
-        params: noOverloadDiagnosticParams({
-          name: callee.name,
-          candidates: candidatesForResolution,
-          args: resolutionArgs,
-          ctx,
-          state,
-          typeArguments,
-          targetTypeArguments,
-        }),
-        span: call.span,
+        params: {
+          ...noOverloadDiagnosticParams({
+            name: callee.name,
+            candidates: candidatesForResolution,
+            args: resolutionArgs,
+            ctx,
+            state,
+            typeArguments,
+            targetTypeArguments,
+          }),
+          constructorInit,
+        },
+        span: constructorInit ? callee.span : call.span,
       });
     }
 

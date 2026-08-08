@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { getWasmInstance } from "@voyd-lang/lib/wasm.js";
+import { VOYD_BINARYEN_FEATURES } from "@voyd-lang/lib/binaryen-features.js";
 import { codegen } from "../index.js";
 import { createRttContext } from "../rtt/index.js";
 import { createEffectRuntime } from "../effects/runtime-abi.js";
@@ -22,9 +23,22 @@ import { buildRuntimeTypeArtifacts } from "../runtime-pass.js";
 import { wasmRuntimeTypeFor } from "../runtime-types.js";
 import {
   getFixedArrayWasmTypes,
+  getInlineUnionLayout,
   getStructuralTypeInfo,
   resolveStructuralTypeId,
 } from "../types.js";
+import {
+  coerceValueToType,
+  initStructuralValue,
+  loadStructuralField,
+} from "../structural.js";
+import {
+  isAlreadyReplayableValue,
+  stabilizeValueForReplay,
+  withReplayableSetup,
+} from "../replayable-value.js";
+import { captureMultivalueLanes } from "../multivalue.js";
+import { captureInlineUnionMemberPayload } from "../expressions/objects.js";
 import { parse } from "../../parser/index.js";
 import { semanticsPipeline } from "../../semantics/pipeline.js";
 import { buildProgramCodegenView } from "../../semantics/codegen-view/index.js";
@@ -42,6 +56,7 @@ import {
 import { createTypeArena } from "../../semantics/typing/type-arena.js";
 import type {
   CodegenContext,
+  FunctionContext,
   FunctionMetadata,
   OutcomeValueBox,
   RuntimeTypeIdRegistryEntry,
@@ -824,6 +839,517 @@ describe("next codegen", () => {
   it("emits wasm for nominal objects and structural interop", () => {
     const main = loadMain("nominal_objects.voyd");
     expect(main()).toBe(21);
+  });
+
+  it("evaluates a structural field producer once", () => {
+    const semantics = loadSemanticsWithTyping("nominal_objects.voyd", {
+      arena: createTypeArena(),
+      effects: createEffectTable({ interner: createEffectInterner() }),
+    });
+    const {
+      mod,
+      contexts: [ctx],
+    } = buildCodegenProgram([semantics]);
+    if (!ctx) throw new Error("missing codegen context");
+
+    const sumSymbol = semantics.symbols.resolveTopLevel("sum");
+    if (typeof sumSymbol !== "number") throw new Error("missing sum symbol");
+    const vecType = ctx.functions.get(ctx.moduleId)?.get(sumSymbol)?.[0]
+      ?.paramTypeIds[0];
+    if (typeof vecType !== "number") throw new Error("missing Vec type");
+    const info = getStructuralTypeInfo(vecType, ctx);
+    const field = info?.fieldMap.get("x");
+    if (!info || !field) throw new Error("missing Vec.x structural info");
+
+    const counter = "__single_eval_counter";
+    const producer = "__single_eval_producer";
+    const probe = "__single_eval_probe";
+    const readCount = "__single_eval_read_count";
+    mod.addGlobal(counter, binaryen.i32, true, mod.i32.const(0));
+    const produced = initStructuralValue({
+      structInfo: info,
+      fieldValues: [
+        mod.global.get(counter, binaryen.i32),
+        mod.i32.const(2),
+        mod.i32.const(3),
+      ],
+      ctx,
+    });
+    const producerType = binaryen.getExpressionType(produced);
+    mod.addFunction(
+      producer,
+      binaryen.none,
+      producerType,
+      [],
+      mod.block(
+        null,
+        [
+          mod.global.set(
+            counter,
+            mod.i32.add(
+              mod.global.get(counter, binaryen.i32),
+              mod.i32.const(1),
+            ),
+          ),
+          produced,
+        ],
+        producerType,
+      ),
+    );
+
+    const fnCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals: [],
+      nextLocalIndex: 0,
+      returnTypeId: field.typeId,
+      effectful: false,
+    };
+    expect(isAlreadyReplayableValue(mod.call(producer, [], producerType))).toBe(
+      false,
+    );
+    expect(isAlreadyReplayableValue(mod.i32.const(1))).toBe(true);
+    const loaded = loadStructuralField({
+      structInfo: info,
+      field,
+      pointer: () => mod.call(producer, [], producerType),
+      ctx,
+      fnCtx,
+    });
+    mod.addFunction(probe, binaryen.none, binaryen.i32, fnCtx.locals, loaded);
+    mod.addFunctionExport(probe, probe);
+    mod.addFunction(
+      readCount,
+      binaryen.none,
+      binaryen.i32,
+      [],
+      mod.global.get(counter, binaryen.i32),
+    );
+    mod.addFunctionExport(readCount, readCount);
+
+    mod.setFeatures(VOYD_BINARYEN_FEATURES);
+    expect(mod.validate()).toBeTruthy();
+    const expectSingleEvaluation = () => {
+      const instance = getWasmInstance(mod);
+      expect((instance.exports[probe] as () => number)()).toBe(1);
+      expect((instance.exports[readCount] as () => number)()).toBe(1);
+    };
+    expectSingleEvaluation();
+
+    mod.optimize();
+    expect(mod.validate()).toBeTruthy();
+    expectSingleEvaluation();
+  });
+
+  it("preserves tuple operand evaluation order when stabilizing values", () => {
+    const mod = new binaryen.Module();
+    const fnCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals: [binaryen.i32],
+      nextLocalIndex: 1,
+      returnTypeId: 0,
+      effectful: false,
+    };
+    const tuple = mod.tuple.make([
+      mod.local.get(0, binaryen.i32),
+      mod.block(
+        null,
+        [mod.local.set(0, mod.i32.const(9)), mod.local.get(0, binaryen.i32)],
+        binaryen.i32,
+      ),
+    ]);
+    const replayable = stabilizeValueForReplay({
+      value: tuple,
+      ctx: { mod },
+      fnCtx,
+    });
+    const first = () => mod.tuple.extract(replayable.read(), 0);
+    const second = () => mod.tuple.extract(replayable.read(), 1);
+    const probe = "__tuple_replay_order_probe";
+    mod.addFunction(
+      probe,
+      binaryen.none,
+      binaryen.i32,
+      fnCtx.locals,
+      mod.block(
+        null,
+        [
+          mod.local.set(0, mod.i32.const(1)),
+          ...replayable.setup,
+          mod.i32.add(mod.i32.mul(first(), mod.i32.const(10)), second()),
+        ],
+        binaryen.i32,
+      ),
+    );
+    mod.addFunctionExport(probe, probe);
+    mod.setFeatures(VOYD_BINARYEN_FEATURES);
+    expect(mod.validate()).toBeTruthy();
+
+    const runProbe = () =>
+      (getWasmInstance(mod).exports[probe] as () => number)();
+    expect(runProbe()).toBe(19);
+    mod.optimize();
+    expect(mod.validate()).toBeTruthy();
+    expect(runProbe()).toBe(19);
+  });
+
+  it("does not run later tuple setup after an earlier trap", () => {
+    const mod = new binaryen.Module();
+    const counter = "__unreachable_replay_counter";
+    const probe = "__unreachable_replay_probe";
+    const readCount = "__unreachable_replay_read_count";
+    mod.addGlobal(counter, binaryen.i32, true, mod.i32.const(0));
+
+    const fnCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals: [],
+      nextLocalIndex: 0,
+      returnTypeId: 0,
+      effectful: false,
+    };
+    const trap = mod.unreachable();
+    expect(isAlreadyReplayableValue(trap)).toBe(false);
+    const replayable = stabilizeValueForReplay({
+      value: mod.tuple.make([
+        trap,
+        mod.block(
+          null,
+          [mod.global.set(counter, mod.i32.const(1)), mod.i32.const(2)],
+          binaryen.i32,
+        ),
+      ]),
+      ctx: { mod },
+      fnCtx,
+    });
+    mod.addFunction(
+      probe,
+      binaryen.none,
+      binaryen.i32,
+      fnCtx.locals,
+      mod.block(null, [...replayable.setup, mod.i32.const(0)], binaryen.i32),
+    );
+    mod.addFunctionExport(probe, probe);
+    mod.addFunction(
+      readCount,
+      binaryen.none,
+      binaryen.i32,
+      [],
+      mod.global.get(counter, binaryen.i32),
+    );
+    mod.addFunctionExport(readCount, readCount);
+    mod.setFeatures(VOYD_BINARYEN_FEATURES);
+    expect(mod.validate()).toBeTruthy();
+
+    const expectTrapBeforeLaterSetup = () => {
+      const instance = getWasmInstance(mod);
+      expect(() => (instance.exports[probe] as () => number)()).toThrow();
+      expect((instance.exports[readCount] as () => number)()).toBe(0);
+    };
+    expectTrapBeforeLaterSetup();
+    mod.optimize();
+    expect(mod.validate()).toBeTruthy();
+    expectTrapBeforeLaterSetup();
+  });
+
+  it("evaluates inline-union extraction producers once", () => {
+    const semantics = loadSemanticsWithTyping(
+      "inline_union_single_evaluation.voyd",
+      {
+        arena: createTypeArena(),
+        effects: createEffectTable({ interner: createEffectInterner() }),
+      },
+    );
+    const {
+      mod,
+      contexts: [ctx],
+    } = buildCodegenProgram([semantics]);
+    if (!ctx) throw new Error("missing codegen context");
+
+    const functionMetadata = (name: string): FunctionMetadata => {
+      const symbol = semantics.symbols.resolveTopLevel(name);
+      const metadata =
+        typeof symbol === "number"
+          ? ctx.functions.get(ctx.moduleId)?.get(symbol)?.[0]
+          : undefined;
+      if (!metadata) {
+        throw new Error(`missing inline-union function ${name}`);
+      }
+      return metadata;
+    };
+    const pairChoice = functionMetadata("pair_choice");
+    const emptyChoice = functionMetadata("empty_choice");
+    const directPair = functionMetadata("pair_value");
+    const pairEnvelope = functionMetadata("pair_envelope");
+    const optionalPair = functionMetadata("optional_pair");
+    const choiceType = pairChoice.resultTypeId;
+    const layout = getInlineUnionLayout(choiceType, ctx);
+    const pairMember = layout.members.find(
+      (member) => member.abiTypes.length === 2,
+    );
+    const emptyMember = layout.members.find(
+      (member) => member.abiTypes.length === 0,
+    );
+    if (!pairMember || !emptyMember) {
+      throw new Error("missing inline-union test members");
+    }
+    const addProducer = ({
+      name,
+      counter,
+      source,
+    }: {
+      name: string;
+      counter: string;
+      source: FunctionMetadata;
+    }) => {
+      mod.addGlobal(counter, binaryen.i32, true, mod.i32.const(0));
+      mod.addFunction(
+        name,
+        binaryen.none,
+        source.resultType,
+        [],
+        mod.block(
+          null,
+          [
+            mod.global.set(
+              counter,
+              mod.i32.add(
+                mod.global.get(counter, binaryen.i32),
+                mod.i32.const(1),
+              ),
+            ),
+            mod.call(source.wasmName, [], source.resultType),
+          ],
+          source.resultType,
+        ),
+      );
+    };
+
+    const pairCounter = "__inline_union_pair_counter";
+    const pairProducer = "__inline_union_pair_producer";
+    addProducer({
+      name: pairProducer,
+      counter: pairCounter,
+      source: pairChoice,
+    });
+    const pairFnCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals: [],
+      nextLocalIndex: 0,
+      returnTypeId: pairMember.typeId,
+      effectful: false,
+    };
+    const pairValue = coerceValueToType({
+      value: mod.call(pairProducer, [], pairChoice.resultType),
+      actualType: choiceType,
+      targetType: pairMember.typeId,
+      ctx,
+      fnCtx: pairFnCtx,
+    });
+    const capturedPair = captureMultivalueLanes({
+      value: pairValue,
+      abiTypes: pairMember.abiTypes,
+      ctx,
+      fnCtx: pairFnCtx,
+    });
+    const pairProbe = "__inline_union_pair_probe";
+    mod.addFunction(
+      pairProbe,
+      binaryen.none,
+      binaryen.i32,
+      pairFnCtx.locals,
+      mod.block(
+        null,
+        [
+          ...capturedPair.setup,
+          mod.i32.add(
+            mod.i32.mul(
+              mod.i32.add(capturedPair.lanes[0]!, capturedPair.lanes[1]!),
+              mod.i32.const(100),
+            ),
+            mod.global.get(pairCounter, binaryen.i32),
+          ),
+        ],
+        binaryen.i32,
+      ),
+    );
+    mod.addFunctionExport(pairProbe, pairProbe);
+
+    const emptyCounter = "__inline_union_empty_counter";
+    const emptyProducer = "__inline_union_empty_producer";
+    addProducer({
+      name: emptyProducer,
+      counter: emptyCounter,
+      source: emptyChoice,
+    });
+    const emptyFnCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals: [],
+      nextLocalIndex: 0,
+      returnTypeId: emptyMember.typeId,
+      effectful: false,
+    };
+    const emptyValue = coerceValueToType({
+      value: mod.call(emptyProducer, [], emptyChoice.resultType),
+      actualType: choiceType,
+      targetType: emptyMember.typeId,
+      ctx,
+      fnCtx: emptyFnCtx,
+    });
+    const emptyProbe = "__inline_union_empty_probe";
+    mod.addFunction(
+      emptyProbe,
+      binaryen.none,
+      binaryen.i32,
+      emptyFnCtx.locals,
+      mod.block(
+        null,
+        [emptyValue, mod.global.get(emptyCounter, binaryen.i32)],
+        binaryen.i32,
+      ),
+    );
+    mod.addFunctionExport(emptyProbe, emptyProbe);
+
+    const optionalLayout = getInlineUnionLayout(optionalPair.resultTypeId, ctx);
+    const optionalSome = optionalLayout.members.find(
+      (member) => member.abiTypes.length === 2,
+    );
+    if (!optionalSome) {
+      throw new Error("missing optional Pair member layout");
+    }
+    const optionalCounter = "__optional_payload_counter";
+    const optionalProducer = "__optional_payload_producer";
+    addProducer({
+      name: optionalProducer,
+      counter: optionalCounter,
+      source: optionalPair,
+    });
+    const optionalFnCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals: [],
+      nextLocalIndex: 0,
+      returnTypeId: optionalSome.typeId,
+      effectful: false,
+    };
+    const optionalPayload = captureInlineUnionMemberPayload({
+      value: mod.call(optionalProducer, [], optionalPair.resultType),
+      member: optionalSome,
+      ctx,
+      fnCtx: optionalFnCtx,
+    });
+    const capturedOptional = captureMultivalueLanes({
+      value: withReplayableSetup({
+        replayable: optionalPayload.replayable,
+        value: optionalPayload.value,
+        ctx,
+      }),
+      abiTypes: optionalSome.abiTypes,
+      ctx,
+      fnCtx: optionalFnCtx,
+    });
+    const optionalProbe = "__optional_payload_probe";
+    mod.addFunction(
+      optionalProbe,
+      binaryen.none,
+      binaryen.i32,
+      optionalFnCtx.locals,
+      mod.block(
+        null,
+        [
+          ...capturedOptional.setup,
+          mod.i32.add(
+            mod.i32.add(
+              mod.i32.mul(capturedOptional.lanes[0]!, mod.i32.const(1000)),
+              mod.i32.mul(capturedOptional.lanes[1]!, mod.i32.const(100)),
+            ),
+            mod.global.get(optionalCounter, binaryen.i32),
+          ),
+        ],
+        binaryen.i32,
+      ),
+    );
+    mod.addFunctionExport(optionalProbe, optionalProbe);
+
+    const envelopeInfo = getStructuralTypeInfo(pairEnvelope.resultTypeId, ctx);
+    if (!envelopeInfo) {
+      throw new Error("missing PairEnvelope structural info");
+    }
+    const envelopeCounter = "__structural_init_counter";
+    const envelopeProducer = "__structural_init_producer";
+    addProducer({
+      name: envelopeProducer,
+      counter: envelopeCounter,
+      source: directPair,
+    });
+    const envelopeFnCtx: FunctionContext = {
+      bindings: new Map(),
+      tempLocals: new Map(),
+      locals: [],
+      nextLocalIndex: 0,
+      returnTypeId: pairEnvelope.resultTypeId,
+      effectful: false,
+    };
+    const envelopeValue = initStructuralValue({
+      structInfo: envelopeInfo,
+      fieldValues: [
+        mod.call(envelopeProducer, [], directPair.resultType),
+        mod.global.get(envelopeCounter, binaryen.i32),
+      ],
+      ctx,
+      fnCtx: envelopeFnCtx,
+    });
+    const capturedEnvelope = captureMultivalueLanes({
+      value: envelopeValue,
+      abiTypes: [...binaryen.expandType(pairEnvelope.resultType)],
+      ctx,
+      fnCtx: envelopeFnCtx,
+    });
+    const envelopeProbe = "__structural_init_probe";
+    mod.addFunction(
+      envelopeProbe,
+      binaryen.none,
+      binaryen.i32,
+      envelopeFnCtx.locals,
+      mod.block(
+        null,
+        [
+          ...capturedEnvelope.setup,
+          mod.i32.add(
+            mod.i32.add(
+              mod.i32.mul(capturedEnvelope.lanes[0]!, mod.i32.const(1000)),
+              mod.i32.mul(capturedEnvelope.lanes[1]!, mod.i32.const(100)),
+            ),
+            mod.i32.add(
+              mod.i32.mul(capturedEnvelope.lanes[2]!, mod.i32.const(10)),
+              mod.global.get(envelopeCounter, binaryen.i32),
+            ),
+          ),
+        ],
+        binaryen.i32,
+      ),
+    );
+    mod.addFunctionExport(envelopeProbe, envelopeProbe);
+
+    mod.setFeatures(VOYD_BINARYEN_FEATURES);
+    expect(mod.validate()).toBeTruthy();
+    const expectSingleEvaluation = () => {
+      const instance = getWasmInstance(mod);
+      expect((instance.exports[pairProbe] as () => number)()).toBe(1201);
+      expect((instance.exports[emptyProbe] as () => number)()).toBe(1);
+      expect((instance.exports[optionalProbe] as () => number)()).toBe(2101);
+      expect((instance.exports[envelopeProbe] as () => number)()).toBe(2111);
+    };
+    expectSingleEvaluation();
+    mod.optimizeFunction(pairProbe);
+    mod.optimizeFunction(emptyProbe);
+    mod.optimizeFunction(optionalProbe);
+    mod.optimizeFunction(envelopeProbe);
+    expect(mod.validate()).toBeTruthy();
+    expectSingleEvaluation();
   });
 
   it("emits wasm for nominal objects with type parameters", () => {

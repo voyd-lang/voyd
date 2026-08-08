@@ -1,21 +1,23 @@
+use std::shared_cell::SharedCell
+
 eff Local
   next(tail) -> i32
-  next(tail, max: i32) -> i32
+  next_with_max(tail, max: i32) -> i32
 
 fn helper(): Local -> i32
-  Local::next(4) + Local::next()
+  Local::next_with_max(4) + Local::next()
 
 fn big_helper(): Local -> i32
   var total = 0
-  total = total + Local::next(0)
-  total = total + Local::next(1)
-  total = total + Local::next(2)
-  total = total + Local::next(3)
-  total = total + Local::next(4)
-  total = total + Local::next(5)
-  total = total + Local::next(6)
-  total = total + Local::next(7)
-  total = total + Local::next(8)
+  total = total + Local::next_with_max(0)
+  total = total + Local::next_with_max(1)
+  total = total + Local::next_with_max(2)
+  total = total + Local::next_with_max(3)
+  total = total + Local::next_with_max(4)
+  total = total + Local::next_with_max(5)
+  total = total + Local::next_with_max(6)
+  total = total + Local::next_with_max(7)
+  total = total + Local::next_with_max(8)
   total
 
 pub fn direct_local(): () -> i32
@@ -23,7 +25,7 @@ pub fn direct_local(): () -> i32
     Local::next()
   Local::next(tail):
     tail(7)
-  Local::next(tail, max: i32):
+  Local::next_with_max(tail, max: i32):
     tail(max + 1)
 
 pub fn helper_local(): () -> i32
@@ -31,7 +33,7 @@ pub fn helper_local(): () -> i32
     helper()
   Local::next(tail):
     tail(5)
-  Local::next(tail, max: i32):
+  Local::next_with_max(tail, max: i32):
     tail(max + 1)
 
 pub fn big_local(): () -> i32
@@ -39,5 +41,16 @@ pub fn big_local(): () -> i32
     big_helper()
   Local::next(tail):
     tail(5)
-  Local::next(tail, max: i32):
+  Local::next_with_max(tail, max: i32):
     tail(max + 1)
+
+pub fn captured_handler_env(): () -> i32
+  let handled = SharedCell(0)
+  try
+    Local::next()
+  Local::next(tail):
+    handled.with_mut((~count) => count = count + 1)
+    tail(7)
+  Local::next_with_max(tail, max: i32):
+    tail(max + 1)
+  handled.with((count) => count + 0)

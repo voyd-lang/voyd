@@ -49,6 +49,57 @@ The public names and meanings in `std::meta` are intended as stable standard
 library API. Consumers should still handle newly added `ShapeNode` variants
 when upgrading Voyd, because the supported boundary type set may expand.
 
+## Derived MessagePack codecs
+
+`std::msgpack::pack_boundary_value` and `unpack_boundary_value` generate a
+MessagePack codec from the closed Voyd type at the call site. They support the
+same primitives, arrays, records, optional fields, and named union or enum
+payloads as `shape_of<T>()`.
+
+```voyd
+use std::array::Array
+use std::enums::{ enum }
+use std::msgpack::{ pack_boundary_value, unpack_boundary_value }
+use std::string::type::String
+
+enum Event
+  Created { id: i32, labels: Array<String> }
+  Deleted { reason: String }
+
+type EnvelopeV1 = {
+  version: i32,
+  requestId: String,
+  event: Event
+}
+
+let encoded = pack_boundary_value<EnvelopeV1>({
+  version: 1,
+  requestId: "request-7",
+  event: Event::Created { id: 42, labels: ["host"] }
+})
+let decoded = unpack_boundary_value<EnvelopeV1>(encoded)
+```
+
+The wire schema is deliberate and inspectable:
+
+- Record keys are the exact declared field names and are emitted in declaration
+  order. A field rename is therefore a wire-schema change.
+- Missing optional fields are omitted. Present values use the field's normal
+  representation.
+- Named variants are maps whose `$variant` value is the declared variant name;
+  payload fields are siblings of that discriminator.
+- Versioning is explicit. Add a normal `version` field to a versioned DTO and
+  dispatch or migrate it in application code. The codec does not inject a
+  version or perform migrations.
+
+Types marked with `@boundary(type: "payload", field: "payload")` can carry the
+generated `MsgPack` value through existing host-boundary adapters. This keeps
+the typed schema inside Voyd while preserving the established envelope ABI.
+
+Unsupported shapes and ambiguous variant payloads fail at compile time at the
+codec call. In particular, variant payload fields cannot be named `tag` or
+`$variant`, because those names conflict with boundary discriminators.
+
 ## Fallible decoding
 
 Wire-format or configuration providers can translate their own dynamic value

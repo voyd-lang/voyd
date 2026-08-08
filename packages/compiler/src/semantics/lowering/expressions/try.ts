@@ -1,9 +1,7 @@
 import {
-  type Expr,
   type Form,
+  identifierBindingKey,
   isForm,
-  isIdentifierAtom,
-  isInternalIdentifierAtom,
 } from "../../../parser/index.js";
 import {
   parseSurfaceHandlerClause,
@@ -18,52 +16,13 @@ import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveSymbol } from "../resolution.js";
 import { lowerTypeExpr } from "../type-expressions.js";
 import type { LoweringFormParams } from "./types.js";
-import { resolveUnqualifiedEffectOperation } from "../../effect-operation-resolution.js";
-
-const collectNamespaceSegments = (
-  expr: Expr | undefined,
-): readonly string[] | undefined => {
-  if (!expr) return undefined;
-  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
-    return [expr.value];
-  }
-  if (!isForm(expr) || !expr.calls("::")) {
-    return undefined;
-  }
-  const left = collectNamespaceSegments(expr.at(1));
-  const right = collectNamespaceSegments(expr.at(2));
-  if (!left || !right || right.length === 0) {
-    return undefined;
-  }
-  return [...left, ...right];
-};
-
-const resolveQualifiedSymbol = ({
-  segments,
-  scope,
-  ctx,
-}: {
-  segments: readonly string[] | undefined;
-  scope: number;
-  ctx: LoweringFormParams["ctx"];
-}): number | undefined => {
-  if (!segments || segments.length === 0) {
-    return undefined;
-  }
-  let current = resolveSymbol(segments[0]!, scope, ctx);
-  for (let index = 1; index < segments.length; index += 1) {
-    const members = ctx.moduleMembers.get(current);
-    if (!members) {
-      return undefined;
-    }
-    const bucket = members.get(segments[index]!);
-    if (!bucket || bucket.size === 0) {
-      return undefined;
-    }
-    current = bucket.values().next().value as number;
-  }
-  return current;
-};
+import {
+  canonicalEffectIdentitySymbol,
+  canonicalEffectOperationIdentitySymbol,
+  resolveQualifiedEffectOperation,
+  resolveUnqualifiedEffectOperation,
+} from "../../effect-operation-resolution.js";
+import { resolveModulePathSymbol } from "./namespace-resolution.js";
 
 export const lowerTry = ({
   form,
@@ -80,11 +39,13 @@ export const lowerTry = ({
     stripTryHandlerClauses({
       expr: bodyExpr,
       scope: scopes.current(),
-      resolveBareHandlerHead: ({ name, scope }) =>
+      resolveBareHandlerHead: ({ name, scope, syntax }) =>
         typeof resolveUnqualifiedEffectOperation({
           name,
           scope,
           symbolTable: ctx.symbolTable,
+          bindingIdentity: identifierBindingKey(syntax),
+          directSymbol: ctx.directSymbolBySyntax.get(syntax.syntaxId),
         }) === "number",
       getNestedScope: ({ expr, parentScope }) =>
         ctx.scopeByNode.get(expr.syntaxId) ?? parentScope,
@@ -156,10 +117,14 @@ const collectHandlerForms = ({
         isTryHandlerClause({
           expr: entry,
           scope,
-          resolveBareHandlerHead: ({ name, scope: headScope }) =>
-            typeof ctx.symbolTable.resolveByKinds(name, headScope, [
-              "effect-op",
-            ]) === "number",
+          resolveBareHandlerHead: ({ name, scope: headScope, syntax }) =>
+            typeof resolveUnqualifiedEffectOperation({
+              name,
+              scope: headScope,
+              symbolTable: ctx.symbolTable,
+              bindingIdentity: identifierBindingKey(syntax),
+              directSymbol: ctx.directSymbolBySyntax.get(syntax.syntaxId),
+            }) === "number",
         }) &&
         isForm(entry)
       ) {
@@ -172,10 +137,14 @@ const collectHandlerForms = ({
       isTryHandlerClause({
         expr: entry,
         scope,
-        resolveBareHandlerHead: ({ name, scope: headScope }) =>
-          typeof ctx.symbolTable.resolveByKinds(name, headScope, [
-            "effect-op",
-          ]) === "number",
+        resolveBareHandlerHead: ({ name, scope: headScope, syntax }) =>
+          typeof resolveUnqualifiedEffectOperation({
+            name,
+            scope: headScope,
+            symbolTable: ctx.symbolTable,
+            bindingIdentity: identifierBindingKey(syntax),
+            directSymbol: ctx.directSymbolBySyntax.get(syntax.syntaxId),
+          }) === "number",
       }) &&
       isForm(entry)
     ) {
@@ -196,60 +165,94 @@ const lowerHandlerHead = (
   resumable: "ctl" | "fn";
 } => {
   const effectSymbol = head.effectExpr
-    ? isIdentifierAtom(head.effectExpr)
-      ? resolveSymbol(head.effectExpr.value, scope, ctx)
-      : resolveQualifiedSymbol({
-          segments: collectNamespaceSegments(head.effectExpr),
-          scope,
-          ctx,
-        })
+    ? resolveModulePathSymbol(head.effectExpr, scope, ctx)
     : undefined;
+  if (
+    head.effectExpr &&
+    (typeof effectSymbol !== "number" ||
+      ctx.symbolTable.getSymbol(effectSymbol).kind !== "effect")
+  ) {
+    throw new Error(
+      `${head.operation.value} handler qualifier does not resolve to an effect`,
+    );
+  }
   const opName = head.operation.value;
-  const candidates =
-    effectSymbol !== undefined
-      ? ctx.moduleMembers.get(effectSymbol)?.get(opName)
-      : undefined;
   const parameters = head.parameters.map((param) => ({
-    symbol: resolveSymbol(param.name, scope, ctx),
+    symbol: resolveSymbol(param.name, scope, ctx, {
+      bindingIdentity: identifierBindingKey(param.syntax),
+      directSymbol: ctx.directSymbolBySyntax.get(param.syntax.syntaxId),
+    }),
     span: toSourceSpan(param.syntax),
     type: param.typeExpr
       ? lowerTypeExpr(param.typeExpr, ctx, scope)
       : undefined,
   }));
 
-  const resolvedOperation =
-    candidates && candidates.size > 0
-      ? (candidates.values().next().value as number)
-      : undefined;
-
   const operation =
-    resolvedOperation ??
-    resolveEffectOperationSymbol({
-      opName,
-      scope,
-      ctx,
-    });
-  const opDecl = ctx.decls.getEffectOperation(operation);
+    typeof effectSymbol === "number"
+      ? resolveQualifiedEffectOperation({
+          effectSymbol,
+          name: opName,
+          symbolTable: ctx.symbolTable,
+          moduleMembers: ctx.moduleMembers,
+          bindingIdentity: identifierBindingKey(head.operation),
+          directSymbol: ctx.directSymbolBySyntax.get(head.operation.syntaxId),
+        })
+      : resolveUnqualifiedEffectOperation({
+          name: opName,
+          scope,
+          symbolTable: ctx.symbolTable,
+          bindingIdentity: identifierBindingKey(head.operation),
+          directSymbol: ctx.directSymbolBySyntax.get(head.operation.syntaxId),
+        });
+  if (typeof operation !== "number") {
+    const effectName =
+      typeof effectSymbol === "number"
+        ? ctx.symbolTable.getSymbol(effectSymbol).name
+        : undefined;
+    throw new Error(
+      effectName
+        ? `effect ${effectName} does not declare operation ${opName}`
+        : `${opName} does not resolve to an imported effect operation`,
+    );
+  }
+  const opDecl = effectOperationDeclFor({ operation, ctx });
   const resumable = opDecl?.operation.resumable === "tail" ? "fn" : "ctl";
   return {
-    operation,
-    ...(effectSymbol !== undefined ? { effect: effectSymbol } : {}),
+    operation: canonicalEffectOperationIdentitySymbol({
+      operationSymbol: operation,
+      symbolTable: ctx.symbolTable,
+    }),
+    ...(effectSymbol !== undefined
+      ? {
+          effect: canonicalEffectIdentitySymbol({
+            effectSymbol,
+            symbolTable: ctx.symbolTable,
+          }),
+        }
+      : {}),
     parameters,
     resumable,
   };
 };
 
-const resolveEffectOperationSymbol = ({
-  opName,
-  scope,
+const effectOperationDeclFor = ({
+  operation,
   ctx,
 }: {
-  opName: string;
-  scope: number;
+  operation: number;
   ctx: LoweringFormParams["ctx"];
-}): number =>
-  resolveUnqualifiedEffectOperation({
-    name: opName,
-    scope,
-    symbolTable: ctx.symbolTable,
-  }) ?? resolveSymbol(opName, scope, ctx);
+}) => {
+  const local = ctx.decls.getEffectOperation(operation);
+  if (local) {
+    return local;
+  }
+  const metadata = ctx.symbolTable.getSymbol(operation).metadata as
+    | { import?: { moduleId?: unknown; symbol?: unknown } }
+    | undefined;
+  const moduleId = metadata?.import?.moduleId;
+  const importedSymbol = metadata?.import?.symbol;
+  return typeof moduleId === "string" && typeof importedSymbol === "number"
+    ? ctx.dependencies.get(moduleId)?.decls.getEffectOperation(importedSymbol)
+    : undefined;
+};

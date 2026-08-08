@@ -598,6 +598,7 @@ const compileDirectTraitDispatchSwitch = ({
                     value,
                     typeId: meta.paramTypeIds[parameter]!,
                     ctx,
+                    fnCtx,
                   })
                 : value;
             return identity === "allocation"
@@ -607,6 +608,7 @@ const compileDirectTraitDispatchSwitch = ({
                   path: allocationPath ?? [],
                   context: `trait call ${expr.id}`,
                   ctx,
+                  fnCtx,
                 })
               : allocation;
           };
@@ -991,6 +993,7 @@ const compileIndirectTraitDispatchCall = ({
             value,
             typeId: meta.paramTypeIds[parameter]!,
             ctx,
+            fnCtx,
           })
         : value;
     return identity === "allocation"
@@ -1000,6 +1003,7 @@ const compileIndirectTraitDispatchCall = ({
           path: allocationPath ?? [],
           context: `trait call ${expr.id}`,
           ctx,
+          fnCtx,
         })
       : allocation;
   };
@@ -1137,6 +1141,7 @@ const compileIndirectTraitDispatchCall = ({
               ),
               typeId: meta.resultTypeId,
               ctx,
+              fnCtx,
             });
             const coerced =
               meta.resultTypeId === expectedTypeId

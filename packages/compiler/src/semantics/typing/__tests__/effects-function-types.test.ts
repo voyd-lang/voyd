@@ -5,12 +5,23 @@ import { constrainFunctionEffectRows } from "../effects.js";
 import { createTypeArena } from "../type-arena.js";
 import { FunctionStore, type FunctionSignature } from "../types.js";
 
+const effectOp = (name: string) => {
+  const effectName = name.split(".")[0]!;
+  const effect = { Async: 1, Log: 2 }[effectName] ?? 0;
+  return {
+    identity: { moduleId: "test", effect, operation: 0 },
+    name,
+  };
+};
+
 describe("function types carry effect rows", () => {
   it("records annotated effect rows on function signatures", () => {
     const effects = createEffectTable();
     const arena = createTypeArena();
     const i32 = arena.internPrimitive("i32");
-    const effectRow = effects.internRow({ operations: [{ name: "Async.await" }] });
+    const effectRow = effects.internRow({
+      operations: [effectOp("Async.await")],
+    });
 
     const typeId = arena.internFunction({
       parameters: [{ type: i32, optional: false }],
@@ -40,7 +51,7 @@ describe("function types carry effect rows", () => {
     const effects = createEffectTable();
     const arena = createTypeArena();
     const emptyRow = effects.emptyRow;
-    const opRow = effects.internRow({ operations: [{ name: "Log.write" }] });
+    const opRow = effects.internRow({ operations: [effectOp("Log.write")] });
     const voidType = arena.internPrimitive("void");
 
     const pureFn = arena.internFunction({
@@ -58,15 +69,19 @@ describe("function types carry effect rows", () => {
     const effectDesc = arena.get(effectfulFn);
     expect(pureDesc.kind).toBe("function");
     expect(effectDesc.kind).toBe("function");
-    expect(pureDesc.kind === "function" ? pureDesc.effectRow : -1).toBe(emptyRow);
-    expect(effectDesc.kind === "function" ? effectDesc.effectRow : -1).toBe(opRow);
+    expect(pureDesc.kind === "function" ? pureDesc.effectRow : -1).toBe(
+      emptyRow,
+    );
+    expect(effectDesc.kind === "function" ? effectDesc.effectRow : -1).toBe(
+      opRow,
+    );
 
     const scheme = arena.newScheme([], effectfulFn);
     const instantiated = arena.instantiate(scheme, []);
     const instantiatedDesc = arena.get(instantiated);
     expect(instantiatedDesc.kind).toBe("function");
     expect(
-      instantiatedDesc.kind === "function" ? instantiatedDesc.effectRow : -1
+      instantiatedDesc.kind === "function" ? instantiatedDesc.effectRow : -1,
     ).toBe(opRow);
   });
 
@@ -75,7 +90,7 @@ describe("function types carry effect rows", () => {
     const arena = createTypeArena();
     const tail = effects.freshTailVar();
     const tailRow = effects.internRow({
-      operations: [{ name: "Async.await" }],
+      operations: [effectOp("Async.await")],
       tailVar: tail,
     });
 
@@ -94,14 +109,14 @@ describe("function types carry effect rows", () => {
     const instantiatedDesc = arena.get(instantiated);
     expect(instantiatedDesc.kind).toBe("function");
     expect(
-      instantiatedDesc.kind === "function" ? instantiatedDesc.effectRow : -1
+      instantiatedDesc.kind === "function" ? instantiatedDesc.effectRow : -1,
     ).toBe(tailRow);
   });
 
   it("formats explicit open rows with the open marker", () => {
     const effects = createEffectTable();
     const effectRow = effects.internRow({
-      operations: [{ name: "Async.await" }],
+      operations: [effectOp("Async.await")],
       tailVar: effects.freshTailVar(),
     });
 
@@ -112,14 +127,14 @@ describe("function types carry effect rows", () => {
   it("requires prefixed effects on closed rows but preserves open tails", () => {
     const effects = createEffectTable();
     const asyncOpen = effects.internRow({
-      operations: [{ name: "Async.await" }],
+      operations: [effectOp("Async.await")],
       tailVar: effects.freshTailVar(),
     });
     const asyncLog = effects.internRow({
-      operations: [{ name: "Async.await" }, { name: "Log.write" }],
+      operations: [effectOp("Async.await"), effectOp("Log.write")],
     });
     const logOnly = effects.internRow({
-      operations: [{ name: "Log.write" }],
+      operations: [effectOp("Log.write")],
     });
     const genericOpen = effects.internRow({
       operations: [],
@@ -138,7 +153,7 @@ describe("function types carry effect rows", () => {
     expect(closedMatch.ok).toBe(true);
     if (closedMatch.ok) {
       const tailRow = closedMatch.substitution.rows.get(
-        effects.getRow(asyncOpen).tailVar!.id
+        effects.getRow(asyncOpen).tailVar!.id,
       );
       expect(typeof tailRow).toBe("number");
       if (typeof tailRow === "number") {
@@ -157,7 +172,9 @@ describe("function types carry effect rows", () => {
     });
     expect(closedMismatch.ok).toBe(false);
     if (!closedMismatch.ok) {
-      expect(closedMismatch.conflict.message).toContain("missing required effects");
+      expect(closedMismatch.conflict.message).toContain(
+        "missing required effects",
+      );
     }
 
     const polymorphicMatch = constrainFunctionEffectRows({

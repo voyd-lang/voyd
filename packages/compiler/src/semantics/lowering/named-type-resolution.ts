@@ -5,6 +5,7 @@ import {
   formCallsInternal,
   isForm,
   isIdentifierAtom,
+  identifierBindingKey,
 } from "../../parser/index.js";
 import type { HirTypeExpr } from "../hir/index.js";
 import type { ScopeId, SymbolId } from "../ids.js";
@@ -44,7 +45,16 @@ export const resolveNamedTypeTarget = ({
 }): ResolvedNamedTypeTarget | undefined => {
   const local = parseNamedTypeTarget({ expr, parseTypeArguments });
   if (local) {
-    const symbol = resolveTypeSymbol(local.name.value, scope, ctx);
+    const symbol = resolveTypeSymbol(local.name.value, scope, ctx, {
+      bindingIdentity: identifierBindingKey(local.name),
+      definitionModuleId:
+        local.name.lexicalContext?.kind === "macro-template"
+          ? local.name.lexicalContext.definitionModuleId
+          : local.name.lexicalContext?.kind === "symbol-reference"
+            ? local.name.lexicalContext.targetModuleId
+            : undefined,
+      directSymbol: ctx.directSymbolBySyntax.get(local.name.syntaxId),
+    });
     if (requireResolvedLocalSymbol && typeof symbol !== "number") {
       return undefined;
     }

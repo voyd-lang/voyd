@@ -82,6 +82,28 @@ voyd test ./workspace/apps/consumer/test --pkg-dir ../pkgs
 to the target source root. For `voyd test`, it is resolved relative to the test
 root.
 
+Use `assert_close` for floating-point behavior that needs an explicit error
+budget:
+
+```voyd
+use std::test::numeric::assert_close
+
+test "integrator conserves energy":
+  assert_close(
+    measured_energy(),
+    to: expected_energy,
+    absolute: 0.000000001,
+    relative: 0.000001,
+    message: "energy after 1,000 steps"
+  )
+```
+
+The assertion passes when the absolute delta fits either the absolute tolerance
+or the relative tolerance scaled by the larger magnitude. Equal infinities and
+signed zero pass. NaN, unequal infinities, and negative or non-finite tolerances
+fail. Failure output includes the expected and actual values, delta, both
+tolerances, optional context, and the test declaration's source location.
+
 Package directories shared by the CLI and editor can be declared in
 `package.json`:
 

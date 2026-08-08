@@ -36,8 +36,8 @@ pub macro for(case)
   let do = case.get(2)
   let binding = cond.get(1)
   let iterable = cond.get(2)
-  let iterator_id = identifier(__iterable)
-  let iterator_val_id = identifier(__iterable_val)
+  let iterator_id = identifier("__iterable")
+  let iterator_val_id = identifier("__iterable_val")
 
   `
     let ~($iterator_id) = $iterable.iter()

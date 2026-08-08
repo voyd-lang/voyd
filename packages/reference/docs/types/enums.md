@@ -56,5 +56,26 @@ match(drink)
 Qualify the pattern when another visible type has the same name or when the
 discriminant contains ambiguous instances of the same generic variant.
 
+Variant names belong to the enum namespace. Separate enums can therefore use
+the same natural spelling without creating colliding module-level bindings:
+
+```voyd
+enum UploadState
+  Ready
+  Done
+
+enum DownloadState
+  Ready
+  Done
+
+let upload = UploadState::Ready()
+let download = DownloadState::Ready()
+```
+
+The enum macro implements each variant with a private hygienic type identity
+and records the readable spelling in the public enum namespace. Construction,
+matching, and namespace imports use that mapping; the private generated type
+name is not a separate public API.
+
 `enum` is implemented as macro-backed sugar over nominal unions, but the surface
 syntax above is the stable language feature most users should care about.

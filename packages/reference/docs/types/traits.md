@@ -27,6 +27,17 @@ impl Hittable for Sphere
       false
 ```
 
+Trait declarations and implementations keep their canonical identity when an
+owning type or trait is re-exported through a module or package facade. Import
+that owner from the facade that exposes the implementation. If the compiler can
+see an implementation in a named module but the selective import omitted its
+owner, it reports the module and recommends importing the owning type or trait.
+
+Operator methods declared by an `impl` follow the same rule. Across a package
+boundary, an instance method or operator must be `api` and its owning type must
+be exported. A top-level operator is instead an ordinary symbol and must be
+selected explicitly or through the facade's `all` export.
+
 ## Default methods
 
 Traits may provide default method bodies.

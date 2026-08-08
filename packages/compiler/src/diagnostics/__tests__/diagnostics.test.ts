@@ -36,6 +36,35 @@ describe("diagnostic utilities", () => {
     expect(diagnostic.hints?.[0]?.message).toContain("~");
   });
 
+  it("guides effect-test borrows toward owned snapshots and SharedCell", () => {
+    const escaping = diagnosticFromCode({
+      code: "TY0049",
+      params: {
+        kind: "mutable-borrow-escape",
+        binding: "read_payload",
+        through: "an effect continuation",
+      },
+      span: { file: "mock-host.voyd", start: 0, end: 1 },
+    });
+    const suspending = diagnosticFromCode({
+      code: "TY0052",
+      params: { kind: "borrow-across-effect", binding: "writes" },
+      span: { file: "mock-host.voyd", start: 2, end: 3 },
+    });
+
+    expect(escaping.message).toContain("read_payload");
+    expect(escaping.message).toContain("effect continuation");
+    expect(escaping.hints?.map((hint) => hint.message).join(" ")).toContain(
+      "owned snapshot",
+    );
+    expect(escaping.hints?.map((hint) => hint.message).join(" ")).toContain(
+      "SharedCell<T>",
+    );
+    expect(suspending.hints?.map((hint) => hint.message).join(" ")).toContain(
+      "tail/resume",
+    );
+  });
+
   it("guides ambiguous overloads toward explicit annotations", () => {
     const diagnostic = diagnosticFromCode({
       code: "TY0007",

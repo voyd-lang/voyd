@@ -16,7 +16,11 @@ import type {
   StructuralTypeInfo,
   TypeId,
 } from "../context.js";
-import { allocateTempLocal, loadLocalValue, storeLocalValue } from "../locals.js";
+import {
+  allocateTempLocal,
+  loadLocalValue,
+  storeLocalValue,
+} from "../locals.js";
 import {
   coerceValueToType,
   defaultFixedArrayElementValue,
@@ -197,7 +201,13 @@ export const unpackBoundaryValueFromMsgPack = ({
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   const state = createBoundaryCodecState(schema);
-  return unpackBoundaryValueFromMsgPackInternal({ value, schema, ctx, fnCtx, state });
+  return unpackBoundaryValueFromMsgPackInternal({
+    value,
+    schema,
+    ctx,
+    fnCtx,
+    state,
+  });
 };
 
 const unpackBoundaryValueFromMsgPackInternal = ({
@@ -252,7 +262,9 @@ const unpackBoundaryValueFromMsgPackInternal = ({
   }
 };
 
-const createBoundaryCodecState = (schema: BoundarySchema): BoundaryCodecState => {
+const createBoundaryCodecState = (
+  schema: BoundarySchema,
+): BoundaryCodecState => {
   const registry = new Map<TypeId, BoundarySchema>();
   registerBoundarySchema({ schema, registry });
   return {
@@ -325,7 +337,9 @@ const resolveSchemaRef = ({
     });
   }
   if (!resolved || resolved.kind === "ref") {
-    throw new Error(`boundary schema has unresolved recursive ref ${schema.typeId}`);
+    throw new Error(
+      `boundary schema has unresolved recursive ref ${schema.typeId}`,
+    );
   }
   return resolved;
 };
@@ -350,7 +364,11 @@ const ensurePackHelper = ({
   const msgpack = ensureMsgPackFunctions(ctx);
   const ancestorStackType = boundaryAncestorStackType({ ctx, state });
   const valueType = wasmTypeFor(schema.typeId, ctx);
-  const params = binaryen.createType([valueType, ancestorStackType, binaryen.i32]);
+  const params = binaryen.createType([
+    valueType,
+    ancestorStackType,
+    binaryen.i32,
+  ]);
   const result = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const locals: binaryen.Type[] = [];
   const fnCtx: FunctionContext = {
@@ -369,7 +387,10 @@ const ensurePackHelper = ({
     fnCtx,
     state,
     packAncestors: loadLocalValue(nextAncestors, ctx),
-    packAncestorCount: ctx.mod.i32.add(ctx.mod.local.get(2, binaryen.i32), ctx.mod.i32.const(1)),
+    packAncestorCount: ctx.mod.i32.add(
+      ctx.mod.local.get(2, binaryen.i32),
+      ctx.mod.i32.const(1),
+    ),
   });
   ctx.mod.addFunction(
     name,
@@ -649,7 +670,12 @@ const packArray = ({
   const info = requiredStructuralInfo(schema.typeId, ctx);
   const storageField = requiredField(info.fieldMap, "storage", schema.typeId);
   const countField = requiredField(info.fieldMap, "count", schema.typeId);
-  const source = allocateTempLocal(wasmTypeFor(schema.typeId, ctx), fnCtx, schema.typeId, ctx);
+  const source = allocateTempLocal(
+    wasmTypeFor(schema.typeId, ctx),
+    fnCtx,
+    schema.typeId,
+    ctx,
+  );
   const count = allocateTempLocal(binaryen.i32, fnCtx);
   const index = allocateTempLocal(binaryen.i32, fnCtx);
   const out = allocateTempLocal(msgpack.arrayWithCapacity.resultType, fnCtx);
@@ -663,6 +689,7 @@ const packArray = ({
       field: storageField,
       pointer: sourceRef,
       ctx,
+      fnCtx,
     });
   const loopLabel = freshLabel("boundary_array_pack");
 
@@ -677,13 +704,18 @@ const packArray = ({
           field: countField,
           pointer: sourceRef,
           ctx,
+          fnCtx,
         }),
         ctx,
         fnCtx,
       }),
       storeLocalValue({
         binding: out,
-        value: ctx.mod.call(msgpack.arrayWithCapacity.wasmName, [countRef()], out.type),
+        value: ctx.mod.call(
+          msgpack.arrayWithCapacity.wasmName,
+          [countRef()],
+          out.type,
+        ),
         ctx,
         fnCtx,
       }),
@@ -760,17 +792,27 @@ const unpackArray = ({
   const storageField = requiredField(info.fieldMap, "storage", schema.typeId);
   const countField = requiredField(info.fieldMap, "count", schema.typeId);
   const sourceArray = allocateTempLocal(msgpack.unpackArray.resultType, fnCtx);
-  const sourceStorage = allocateTempLocal(msgpack.arrayRawStorage.resultType, fnCtx);
+  const sourceStorage = allocateTempLocal(
+    msgpack.arrayRawStorage.resultType,
+    fnCtx,
+  );
   const count = allocateTempLocal(binaryen.i32, fnCtx);
   const index = allocateTempLocal(binaryen.i32, fnCtx);
-  const targetStorage = allocateTempLocal(storageField.wasmType, fnCtx, storageField.typeId, ctx);
+  const targetStorage = allocateTempLocal(
+    storageField.wasmType,
+    fnCtx,
+    storageField.typeId,
+    ctx,
+  );
   const sourceStorageRef = () => loadLocalValue(sourceStorage, ctx);
   const countRef = () => loadLocalValue(count, ctx);
   const indexRef = () => loadLocalValue(index, ctx);
   const targetStorageRef = () => loadLocalValue(targetStorage, ctx);
   const loopLabel = freshLabel("boundary_array_unpack");
 
-  const fieldValueFor = (field: StructuralFieldInfo): binaryen.ExpressionRef => {
+  const fieldValueFor = (
+    field: StructuralFieldInfo,
+  ): binaryen.ExpressionRef => {
     if (field.name === "storage") {
       return lowerValueForHeapField({
         value: targetStorageRef(),
@@ -796,6 +838,7 @@ const unpackArray = ({
     structInfo: info,
     fieldValues: info.fields.map(fieldValueFor),
     ctx,
+    fnCtx,
   });
 
   return ctx.mod.block(
@@ -803,13 +846,21 @@ const unpackArray = ({
     [
       storeLocalValue({
         binding: sourceArray,
-        value: ctx.mod.call(msgpack.unpackArray.wasmName, [value], sourceArray.type),
+        value: ctx.mod.call(
+          msgpack.unpackArray.wasmName,
+          [value],
+          sourceArray.type,
+        ),
         ctx,
         fnCtx,
       }),
       storeLocalValue({
         binding: count,
-        value: ctx.mod.call(msgpack.arrayLength.wasmName, [loadLocalValue(sourceArray, ctx)], binaryen.i32),
+        value: ctx.mod.call(
+          msgpack.arrayLength.wasmName,
+          [loadLocalValue(sourceArray, ctx)],
+          binaryen.i32,
+        ),
         ctx,
         fnCtx,
       }),
@@ -850,7 +901,13 @@ const unpackArray = ({
               elementTypeId: schema.elementTypeId,
               index: indexRef(),
               value: unpackBoundaryValueFromMsgPackInternal({
-                value: arrayGet(ctx.mod, sourceStorageRef(), indexRef(), msgPackType, false),
+                value: arrayGet(
+                  ctx.mod,
+                  sourceStorageRef(),
+                  indexRef(),
+                  msgPackType,
+                  false,
+                ),
                 schema: schema.element,
                 ctx,
                 fnCtx,
@@ -960,9 +1017,16 @@ const packUnion = ({
 }): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
-  const source = allocateTempLocal(wasmTypeFor(schema.typeId, ctx), fnCtx, schema.typeId, ctx);
+  const source = allocateTempLocal(
+    wasmTypeFor(schema.typeId, ctx),
+    fnCtx,
+    schema.typeId,
+    ctx,
+  );
   const sourceRef = () => loadLocalValue(source, ctx);
-  const encodeVariant = (variant: BoundaryVariantSchema): binaryen.ExpressionRef =>
+  const encodeVariant = (
+    variant: BoundaryVariantSchema,
+  ): binaryen.ExpressionRef =>
     packRecordMap({
       value: coerceValueToType({
         value: sourceRef(),
@@ -1017,7 +1081,9 @@ const unpackUnion = ({
   const msgpack = ensureMsgPackFunctions(ctx);
   const map = allocateTempLocal(msgpack.unpackMap.resultType, fnCtx);
   const mapRef = () => loadLocalValue(map, ctx);
-  const decodeVariant = (variant: BoundaryVariantSchema): binaryen.ExpressionRef =>
+  const decodeVariant = (
+    variant: BoundaryVariantSchema,
+  ): binaryen.ExpressionRef =>
     coerceValueToType({
       value: unpackRecordFromMap({
         map,
@@ -1043,7 +1109,11 @@ const unpackUnion = ({
         decodeVariant(variant),
         fallback,
       ),
-    ctx.mod.block(null, [ctx.mod.unreachable()], wasmTypeFor(schema.typeId, ctx)),
+    ctx.mod.block(
+      null,
+      [ctx.mod.unreachable()],
+      wasmTypeFor(schema.typeId, ctx),
+    ),
   );
 
   return ctx.mod.block(
@@ -1085,7 +1155,12 @@ const packRecordMap = ({
   const msgpack = ensureMsgPackFunctions(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const info = requiredStructuralInfo(typeId, ctx);
-  const source = allocateTempLocal(wasmTypeFor(typeId, ctx), fnCtx, typeId, ctx);
+  const source = allocateTempLocal(
+    wasmTypeFor(typeId, ctx),
+    fnCtx,
+    typeId,
+    ctx,
+  );
   const map = allocateTempLocal(msgpack.mapNew.resultType, fnCtx);
   const sourceRef = () => loadLocalValue(source, ctx);
   const mapRef = () => loadLocalValue(map, ctx);
@@ -1119,6 +1194,7 @@ const packRecordMap = ({
       field: structuralField,
       pointer: sourceRef,
       ctx,
+      fnCtx,
     });
     ops.push(
       field.optional
@@ -1179,7 +1255,9 @@ const unpackRecordFromMap = ({
   const msgpack = ensureMsgPackFunctions(ctx);
   const info = requiredStructuralInfo(typeId, ctx);
   const fieldValues = info.fields.map((field) => {
-    const schemaField = fields.find((candidate) => candidate.name === field.name);
+    const schemaField = fields.find(
+      (candidate) => candidate.name === field.name,
+    );
     if (!schemaField) {
       throw new Error(`boundary schema missing field ${field.name}`);
     }
@@ -1211,7 +1289,7 @@ const unpackRecordFromMap = ({
       fnCtx,
     });
   });
-  return initStructuralValue({ structInfo: info, fieldValues, ctx });
+  return initStructuralValue({ structInfo: info, fieldValues, ctx, fnCtx });
 };
 
 const packOptionalRecordField = ({
@@ -1271,13 +1349,10 @@ const packOptionalRecordField = ({
     ctx,
     fnCtx,
   });
-  return ctx.mod.block(
-    null,
-    [
-      storeLocalValue({ binding: optional, value, ctx, fnCtx }),
-      ctx.mod.if(isSome, setField),
-    ],
-  );
+  return ctx.mod.block(null, [
+    storeLocalValue({ binding: optional, value, ctx, fnCtx }),
+    ctx.mod.if(isSome, setField),
+  ]);
 };
 
 const unpackOptionalRecordField = ({
@@ -1403,6 +1478,7 @@ const unpackOptionalSomePayload = ({
         field: someField,
         pointer: () => refCast(ctx.mod, value(), someInfo.runtimeType),
         ctx,
+        fnCtx,
       }),
       actualType: someField.typeId,
       targetType: optionalInfo.innerType,
@@ -1425,11 +1501,15 @@ const variantMatches = ({
 }): binaryen.ExpressionRef => {
   if (shouldInlineUnionLayout(unionTypeId, ctx)) {
     const layout = getInlineUnionLayout(unionTypeId, ctx);
-    const member = layout.members.find((candidate) => candidate.typeId === variant.typeId);
+    const member = layout.members.find(
+      (candidate) => candidate.typeId === variant.typeId,
+    );
     if (!member) {
       throw new Error(`missing inline union member for ${variant.name}`);
     }
-    const abiTypes = binaryen.expandType(binaryen.getExpressionType(unionValue));
+    const abiTypes = binaryen.expandType(
+      binaryen.getExpressionType(unionValue),
+    );
     const tagValue =
       abiTypes.length <= 1 ? unionValue : ctx.mod.tuple.extract(unionValue, 0);
     return ctx.mod.i32.eq(tagValue, ctx.mod.i32.const(member.tag));
@@ -1577,10 +1657,15 @@ const requiredField = (
   return field;
 };
 
-const stringValue = (value: string, ctx: CodegenContext): binaryen.ExpressionRef =>
-  emitStringLiteral(value, ctx);
+const stringValue = (
+  value: string,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => emitStringLiteral(value, ctx);
 
-const stringMsgPack = (value: string, ctx: CodegenContext): binaryen.ExpressionRef => {
+const stringMsgPack = (
+  value: string,
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => {
   const msgpack = ensureMsgPackFunctions(ctx);
   return ctx.mod.call(
     msgpack.makeString.wasmName,
@@ -1589,8 +1674,9 @@ const stringMsgPack = (value: string, ctx: CodegenContext): binaryen.ExpressionR
   );
 };
 
-const boundaryPackCycleErrorMsgPack = (ctx: CodegenContext): binaryen.ExpressionRef =>
-  stringMsgPack(BOUNDARY_PACK_CYCLE_ERROR, ctx);
+const boundaryPackCycleErrorMsgPack = (
+  ctx: CodegenContext,
+): binaryen.ExpressionRef => stringMsgPack(BOUNDARY_PACK_CYCLE_ERROR, ctx);
 
 let labelCounter = 0;
 

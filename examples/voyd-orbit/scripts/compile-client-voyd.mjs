@@ -5,7 +5,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { voydCommand } from "./voyd-command.mjs";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const entryPath = resolve(rootDir, "src/client.voyd");
+const entryPath = resolve(rootDir, "src/client/pkg.voyd");
 const outPath = resolve(rootDir, "src/generated/client.wasm");
 
 export async function compileClientVoyd({ verbose = true } = {}) {

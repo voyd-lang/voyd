@@ -1,4 +1,5 @@
 import { parseSurfaceLambdaExpression } from "../../../parser/surface/index.js";
+import { identifierBindingKey } from "../../../parser/index.js";
 import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveSymbol, resolveTypeSymbol } from "../resolution.js";
 import {
@@ -29,8 +30,11 @@ export const lowerLambda = ({
 
   const typeParameters = lowerTypeParameters({
     params: signature.typeParameters?.map((param) => {
-      const symbol = resolveTypeSymbol(param.value, scopes.current(), ctx);
-      if (!symbol) {
+      const symbol = resolveTypeSymbol(param.value, scopes.current(), ctx, {
+        bindingIdentity: identifierBindingKey(param),
+        directSymbol: ctx.directSymbolBySyntax.get(param.syntaxId),
+      });
+      if (typeof symbol !== "number") {
         throw new Error(`unknown type parameter ${param.value} in lambda`);
       }
       return { symbol, ast: param };
@@ -66,7 +70,10 @@ const lowerLambdaParameter = (
   ctx: LoweringFormParams["ctx"],
   scopes: LoweringFormParams["scopes"],
 ): HirParameter => {
-  const symbol = resolveSymbol(param.name.value, scopes.current(), ctx);
+  const symbol = resolveSymbol(param.name.value, scopes.current(), ctx, {
+    bindingIdentity: identifierBindingKey(param.name),
+    directSymbol: ctx.directSymbolBySyntax.get(param.name.syntaxId),
+  });
   const lowered = lowerTypeExpr(param.typeExpr, ctx, scopes.current());
   const type =
     lowered && param.optional

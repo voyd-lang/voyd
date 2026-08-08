@@ -4,18 +4,83 @@ import type {
   MacroVariableBinding,
 } from "./types.js";
 
+type HygieneState = {
+  rootId: string;
+  nextExpansionOrdinal: number;
+};
+
+type ExpansionAllocation = {
+  id: string;
+  nextFreshOrdinal: number;
+};
+
 export class MacroScope {
   #parent?: MacroScope;
   #macros = new Map<string, MacroDefinition>();
   #ambiguousMacros = new Set<string>();
   #variables = new Map<string, MacroVariableBinding>();
+  #hygieneState: HygieneState;
+  #expansionAllocation?: ExpansionAllocation;
 
-  constructor(parent?: MacroScope) {
+  constructor(
+    parent?: MacroScope,
+    options: {
+      hygieneRootId?: string;
+      hygieneState?: HygieneState;
+      expansionAllocation?: ExpansionAllocation;
+    } = {},
+  ) {
     this.#parent = parent;
+    this.#hygieneState =
+      options.hygieneState ??
+      (parent ? parent.#hygieneState : undefined) ?? {
+        rootId: options.hygieneRootId ?? "<macro-expansion>",
+        nextExpansionOrdinal: 0,
+      };
+    this.#expansionAllocation =
+      options.expansionAllocation ??
+      (parent ? parent.#expansionAllocation : undefined);
   }
 
   child(): MacroScope {
     return new MacroScope(this);
+  }
+
+  invocationScope({
+    definitionScope,
+    macroKey,
+  }: {
+    definitionScope: MacroScope;
+    macroKey: string;
+  }): MacroScope {
+    const ordinal = this.#hygieneState.nextExpansionOrdinal++;
+    return new MacroScope(definitionScope, {
+      hygieneState: this.#hygieneState,
+      expansionAllocation: {
+        id: `${this.#hygieneState.rootId}:${ordinal}:${macroKey}`,
+        nextFreshOrdinal: 0,
+      },
+    });
+  }
+
+  currentExpansionId(): string {
+    if (!this.#expansionAllocation) {
+      throw new Error("fresh identifiers require an active macro expansion");
+    }
+    return this.#expansionAllocation.id;
+  }
+
+  allocateFreshOrdinal(): number {
+    if (!this.#expansionAllocation) {
+      throw new Error("fresh identifiers require an active macro expansion");
+    }
+    const ordinal = this.#expansionAllocation.nextFreshOrdinal;
+    this.#expansionAllocation.nextFreshOrdinal += 1;
+    return ordinal;
+  }
+
+  hygieneRootId(): string {
+    return this.#hygieneState.rootId;
   }
 
   checkpoint(): () => void {

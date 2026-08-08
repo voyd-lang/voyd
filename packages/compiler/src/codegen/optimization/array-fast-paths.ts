@@ -129,11 +129,13 @@ const directArrayFieldLoad = ({
   structInfo,
   field,
   ctx,
+  fnCtx,
 }: {
   target: () => binaryen.ExpressionRef;
   structInfo: StructuralTypeInfo;
   field: StructuralFieldInfo;
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
 }): binaryen.ExpressionRef =>
   liftHeapValueToInline({
     value: structGetFieldValue({
@@ -148,6 +150,7 @@ const directArrayFieldLoad = ({
     }),
     typeId: field.typeId,
     ctx,
+    fnCtx,
   });
 
 const compileArrayTarget = ({
@@ -1470,6 +1473,7 @@ const compileArrayForLoop = ({
     structInfo: analysis.arrayInfo.structInfo,
     field: analysis.arrayInfo.countField,
     ctx,
+    fnCtx,
   });
   const conditionCheck = ctx.mod.if(
     ctx.mod.i32.ge_s(cursor(), count),
@@ -1482,6 +1486,7 @@ const compileArrayForLoop = ({
       structInfo: analysis.arrayInfo.structInfo,
       field: analysis.arrayInfo.storageField,
       ctx,
+      fnCtx,
     }),
     ctx,
     fnCtx,
@@ -2089,6 +2094,7 @@ const compileArrayLenFastPath = ({
     structInfo: info.structInfo,
     field: info.countField,
     ctx,
+    fnCtx,
   });
   return {
     expr: ctx.mod.block(null, [setup, count], binaryen.i32),
@@ -2195,6 +2201,7 @@ const compileArrayAtFastPath = ({
               structInfo: info.structInfo,
               field: info.storageField,
               ctx,
+              fnCtx,
             }),
             ctx,
             fnCtx,
@@ -2283,6 +2290,7 @@ const compileArrayAtFastPath = ({
             structInfo: info.structInfo,
             field: info.storageField,
             ctx,
+            fnCtx,
           }),
           ctx,
           fnCtx,
@@ -2294,6 +2302,7 @@ const compileArrayAtFastPath = ({
             structInfo: info.structInfo,
             field: info.countField,
             ctx,
+            fnCtx,
           }),
         ),
         ctx.mod.local.set(
@@ -2403,6 +2412,7 @@ const compileArrayGetFastPath = ({
             structInfo: info.structInfo,
             field: info.storageField,
             ctx,
+            fnCtx,
           }),
           ctx,
           fnCtx,

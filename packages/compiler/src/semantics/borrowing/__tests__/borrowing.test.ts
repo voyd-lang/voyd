@@ -3540,6 +3540,41 @@ fn invalid(): () -> i32
     ).toContain("TY0049");
   });
 
+  it("identifies mutable captures passed through effect continuations", () => {
+    const diagnostics = diagnosticsFor(`
+obj Box { value: i32 }
+
+fn mutate(~value: Box) -> void
+  value.value = value.value + 1
+
+eff Store
+  load(tail) -> (fn() -> i32)
+
+fn invalid(): () -> (fn() -> i32)
+  let ~box = Box { value: 0 }
+  let callback = () =>
+    mutate(~box)
+    0
+  try
+    Store::load()
+  Store::load(tail):
+    tail(callback)
+`);
+    const escape = diagnostics.find(
+      (diagnostic) =>
+        diagnostic.code === "TY0049" &&
+        diagnostic.message.includes("effect continuation"),
+    );
+
+    expect(escape?.message).toContain("callback");
+    expect(escape?.hints?.map((hint) => hint.message).join(" ")).toContain(
+      "owned snapshot",
+    );
+    expect(escape?.hints?.map((hint) => hint.message).join(" ")).toContain(
+      "SharedCell<T>",
+    );
+  });
+
   it("tracks ordinary aliases returned from module storage", () => {
     const result = analyzeWithRecovery(`
 obj Box { value: i32 }

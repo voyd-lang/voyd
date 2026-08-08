@@ -299,7 +299,7 @@ describe("node sdk", () => {
       port,
       readinessTimeoutMs: 10_000,
       source: `
-use pkg::web::all
+use pkg::web::{ serve }
 use std::env::self as env
 use std::http::server::HttpServer
 use std::task::self as task

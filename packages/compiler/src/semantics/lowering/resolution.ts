@@ -16,19 +16,48 @@ const resolveValueSymbol = ({
   scope,
   ctx,
 }: {
-  identifier: { name: string; isQuoted: boolean };
+  identifier: {
+    name: string;
+    isQuoted: boolean;
+    bindingIdentity?: string;
+    definitionModuleId?: string;
+  };
   scope: ScopeId;
   ctx: LowerContext;
 }): SymbolId | undefined => {
+  if (identifier.bindingIdentity) {
+    const hygienic = ctx.symbolTable.resolveBinding(
+      identifier.name,
+      identifier.bindingIdentity,
+      scope,
+    );
+    if (typeof hygienic === "number") {
+      return hygienic;
+    }
+    if (identifier.definitionModuleId !== ctx.moduleId) {
+      return undefined;
+    }
+    scope = ctx.symbolTable.rootScope;
+  }
   let currentScope: ScopeId | null = scope;
   let importedFallback: SymbolId | undefined;
   while (currentScope !== null) {
     const matches = Array.from(ctx.symbolTable.symbolsInScope(currentScope))
       .map((symbol) => ({ symbol, record: ctx.symbolTable.getSymbol(symbol) }))
       .filter(({ symbol, record }) => {
+        if (record.bindingIdentity !== undefined) {
+          return false;
+        }
         const metadata = (record.metadata ?? {}) as {
+          qualifiedOnlyEffectOperation?: unknown;
           unqualifiedEffectOperationNames?: readonly string[];
         };
+        if (
+          record.kind === "effect-op" &&
+          metadata.qualifiedOnlyEffectOperation === true
+        ) {
+          return false;
+        }
         const explicitlyImportedEffectOperation =
           record.kind === "effect-op" &&
           metadata.unqualifiedEffectOperationNames?.includes(identifier.name) ===
@@ -73,12 +102,19 @@ const resolveValueSymbol = ({
 };
 
 export const resolveIdentifierValue = (
-  identifier: { name: string; isQuoted: boolean },
+  identifier: {
+    name: string;
+    isQuoted: boolean;
+    bindingIdentity?: string;
+    definitionModuleId?: string;
+    directSymbol?: SymbolId;
+  },
   scope: ScopeId,
   ctx: LowerContext,
 ): IdentifierResolution => {
   const name = identifier.name;
-  const resolved = resolveValueSymbol({ identifier, scope, ctx });
+  const resolved =
+    identifier.directSymbol ?? resolveValueSymbol({ identifier, scope, ctx });
   if (typeof resolved === "number") {
     const record = ctx.symbolTable.getSymbol(resolved);
     if (record.kind === "type") {
@@ -116,8 +152,13 @@ export const resolveSymbol = (
   name: string,
   scope: ScopeId,
   ctx: LowerContext,
+  options: { bindingIdentity?: string; directSymbol?: SymbolId } = {},
 ): SymbolId => {
-  const resolved = ctx.symbolTable.resolve(name, scope);
+  const resolved =
+    options.directSymbol ??
+    (options.bindingIdentity
+      ? ctx.symbolTable.resolveBinding(name, options.bindingIdentity, scope)
+      : ctx.symbolTable.resolve(name, scope));
   if (typeof resolved === "number") {
     return resolved;
   }
@@ -134,8 +175,25 @@ export const resolveTypeSymbol = (
   name: string,
   scope: ScopeId,
   ctx: LowerContext,
+  options: {
+    bindingIdentity?: string;
+    definitionModuleId?: string;
+    directSymbol?: SymbolId;
+  } = {},
 ): SymbolId | undefined => {
-  const resolved = ctx.symbolTable.resolve(name, scope);
+  const hygienic = options.bindingIdentity
+    ? ctx.symbolTable.resolveBinding(name, options.bindingIdentity, scope)
+    : undefined;
+  const fallbackScope =
+    options.bindingIdentity && options.definitionModuleId === ctx.moduleId
+      ? ctx.symbolTable.rootScope
+      : scope;
+  const resolved =
+    options.directSymbol ??
+    hygienic ??
+    (options.bindingIdentity && options.definitionModuleId !== ctx.moduleId
+      ? undefined
+      : ctx.symbolTable.resolve(name, fallbackScope));
   if (typeof resolved === "number") {
     const record = ctx.symbolTable.getSymbol(resolved);
     if (

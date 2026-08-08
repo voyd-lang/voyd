@@ -3,9 +3,10 @@ pub macro inc(value)
 
 pub attribute macro with_companion(args, declaration)
   if args.length() == 1 then:
+    let companion = args.get(0)
     emit_many(
       declaration,
-      `(fn attribute_bonus() -> i32
+      `(pub fn $companion() -> i32
         39)
     )
   else:

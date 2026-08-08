@@ -1,6 +1,8 @@
 import {
   Form,
   type Expr,
+  type IdentifierAtom,
+  type InternalIdentifierAtom,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -10,6 +12,7 @@ import type { ScopeId } from "./ids.js";
 type ResolveBareHandlerHead = (options: {
   name: string;
   scope: ScopeId;
+  syntax: IdentifierAtom | InternalIdentifierAtom;
 }) => boolean;
 
 type GetNestedScope = (options: {
@@ -263,7 +266,11 @@ export const stripTryHandlerClauses = ({
     location: expr.location?.clone(),
     elements: rewritten,
   });
-  return { expr: rebuilt.unwrap(), handlers };
+  return {
+    expr:
+      rewritten.length === 1 && expr.length > 1 ? rebuilt : rebuilt.unwrap(),
+    handlers,
+  };
 };
 
 const isBareEffectHandlerHead = ({
@@ -284,5 +291,5 @@ const isBareEffectHandlerHead = ({
     return false;
   }
 
-  return resolveBareHandlerHead({ name: callee.value, scope });
+  return resolveBareHandlerHead({ name: callee.value, scope, syntax: callee });
 };

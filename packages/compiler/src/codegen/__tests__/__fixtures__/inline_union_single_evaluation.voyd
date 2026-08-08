@@ -1,0 +1,61 @@
+obj Counter {
+  current: i32
+}
+
+val Pair {
+  left: i32,
+  right: i32
+}
+
+val Empty {}
+
+type Choice = Pair | Empty
+
+obj Some<T> {
+  value: T
+}
+
+obj None {}
+
+type Optional<T> = Some<T> | None
+
+val PairEnvelope {
+  value: Pair,
+  tail: i32
+}
+
+pub fn pair_value() -> Pair
+  Pair { left: 1, right: 11 }
+
+pub fn pair_envelope(value: Pair) -> PairEnvelope
+  PairEnvelope { value, tail: 4 }
+
+pub fn optional_pair() -> Optional<Pair>
+  Some<Pair> { value: pair_value() }
+
+pub fn pair_choice() -> Choice
+  Pair { left: 1, right: 11 }
+
+pub fn empty_choice() -> Choice
+  Empty {}
+
+fn next(~counter: Counter, empty: bool) -> Choice
+  counter.current = counter.current + 1
+  if empty then:
+    Empty {}
+  else:
+    Pair {
+      left: counter.current,
+      right: counter.current + 10
+    }
+
+fn read_next(~counter: Counter, empty: bool) -> i32
+  match(next(counter, empty))
+    Pair { left, right }: left + right
+    Empty: 0
+
+pub fn main() -> i32
+  let ~counter = Counter { current: 0 }
+  let pair = read_next(counter, false)
+  let empty = read_next(counter, true)
+  pair * 100 + empty * 10 + counter.current

@@ -1,5 +1,5 @@
 import http from "node:http";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -403,7 +403,7 @@ describe("registerDefaultHostAdapters", () => {
       "/this/path/does/not/exist"
     );
     expect(result.kind).toBe("tail");
-    expect(result.value).toMatchObject({ ok: false });
+    expect(result.value).toMatchObject({ ok: false, kind: "not-found" });
   });
 
   it("creates directories and renames paths through the node fs adapter", async () => {
@@ -458,6 +458,67 @@ describe("registerDefaultHostAdapters", () => {
       );
       expect(sourceResult.kind).toBe("tail");
       expect(sourceResult.value).toMatchObject({ ok: false });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it("atomically replaces files and admits one concurrent exclusive creator on node", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.fs", opName: "write_atomic", opId: 0 },
+      { effectId: "voyd.std.fs", opName: "create_exclusive", opId: 1 },
+    ]);
+    const root = await mkdtemp(join(tmpdir(), "voyd-js-host-atomic-fs-"));
+
+    try {
+      const { host, getHandler } = createFakeHost(table);
+      await registerDefaultHostAdapters({
+        host,
+        options: { runtime: "node" },
+      });
+      const destination = join(root, "orbit.json");
+      await writeFile(destination, "previous");
+
+      const atomicResult = await getHandler("voyd.std.fs", "write_atomic")(
+        tailContinuation,
+        {
+          path: destination,
+          kind: "string",
+          value: "replacement",
+        },
+      );
+      expect(atomicResult).toEqual({ kind: "tail", value: { ok: true } });
+      await expect(readFile(destination, "utf8")).resolves.toBe("replacement");
+      await expect(readdir(root)).resolves.toEqual(["orbit.json"]);
+
+      const exclusivePath = join(root, "exclusive.txt");
+      const createExclusive = getHandler("voyd.std.fs", "create_exclusive");
+      const contenders = await Promise.all([
+        createExclusive(tailContinuation, {
+          path: exclusivePath,
+          kind: "string",
+          value: "first",
+        }),
+        createExclusive(tailContinuation, {
+          path: exclusivePath,
+          kind: "string",
+          value: "second",
+        }),
+      ]);
+      expect(
+        contenders.filter(
+          (result) => (result.value as Record<string, unknown>).ok === true,
+        ),
+      ).toHaveLength(1);
+      expect(
+        contenders.filter(
+          (result) =>
+            (result.value as Record<string, unknown>).kind === "already-exists",
+        ),
+      ).toHaveLength(1);
+      expect(["first", "second"]).toContain(
+        await readFile(exclusivePath, "utf8"),
+      );
     } finally {
       await rm(root, { recursive: true, force: true });
     }
@@ -523,7 +584,10 @@ describe("registerDefaultHostAdapters", () => {
       rename: async () => {},
       remove: async (path: string) => {
         if (path === "/tmp/denied.log") {
-          throw Object.assign(new Error("permission denied"), { errno: 13 });
+          throw Object.assign(new Error("permission denied"), {
+            errno: 13,
+            name: "PermissionDenied",
+          });
         }
         removedPaths.push(path);
       },
@@ -552,7 +616,12 @@ describe("registerDefaultHostAdapters", () => {
     );
     expect(errorResult).toEqual({
       kind: "tail",
-      value: { ok: false, code: 13, message: "permission denied" },
+      value: {
+        ok: false,
+        code: 13,
+        kind: "permission-denied",
+        message: "permission denied",
+      },
     });
   });
 
@@ -596,6 +665,99 @@ describe("registerDefaultHostAdapters", () => {
     );
     expect(renameResult).toEqual({ kind: "tail", value: { ok: true } });
     expect(rename).toHaveBeenCalledWith("/tmp/orbit.tmp", "/tmp/orbit.json");
+  });
+
+  it("matches atomic and exclusive write semantics through the deno fs adapter", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.fs", opName: "write_atomic", opId: 0 },
+      { effectId: "voyd.std.fs", opName: "create_exclusive", opId: 1 },
+    ]);
+    const files = new Map<string, string>();
+    const removed: string[] = [];
+    const writeTextFile = vi.fn(
+      async (
+        path: string,
+        value: string,
+        options?: { createNew?: boolean },
+      ) => {
+        if (options?.createNew && files.has(path)) {
+          throw Object.assign(new Error("already exists"), {
+            name: "AlreadyExists",
+          });
+        }
+        files.set(path, value);
+      },
+    );
+    const rename = vi.fn(async (from: string, to: string) => {
+      if (to.endsWith("rename-fails.txt")) {
+        throw Object.assign(new Error("destination busy"), { name: "Busy" });
+      }
+      files.set(to, files.get(from) ?? "");
+      files.delete(from);
+    });
+    const remove = vi.fn(async (path: string) => {
+      removed.push(path);
+      files.delete(path);
+    });
+    vi.stubGlobal("Deno", {
+      pid: 42,
+      readFile: async () => new Uint8Array(),
+      readTextFile: async () => "",
+      writeFile: async () => {},
+      writeTextFile,
+      stat: async () => ({}),
+      remove,
+      mkdir: async () => {},
+      rename,
+      readDir: () => ({
+        async *[Symbol.asyncIterator]() {},
+      }),
+    });
+    const { host, getHandler } = createFakeHost(table);
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "deno" },
+    });
+
+    const atomicResult = await getHandler("voyd.std.fs", "write_atomic")(
+      tailContinuation,
+      {
+        path: "/tmp/orbit.json",
+        kind: "string",
+        value: "complete",
+      },
+    );
+    expect(atomicResult).toEqual({ kind: "tail", value: { ok: true } });
+    expect(files.get("/tmp/orbit.json")).toBe("complete");
+    expect([...files.keys()]).toEqual(["/tmp/orbit.json"]);
+
+    files.set("/tmp/existing.txt", "owner");
+    const exclusiveResult = await getHandler("voyd.std.fs", "create_exclusive")(
+      tailContinuation,
+      {
+        path: "/tmp/existing.txt",
+        kind: "string",
+        value: "contender",
+      },
+    );
+    expect(exclusiveResult.value).toMatchObject({
+      ok: false,
+      kind: "already-exists",
+      message: "already exists",
+    });
+    expect(files.get("/tmp/existing.txt")).toBe("owner");
+
+    const failedResult = await getHandler("voyd.std.fs", "write_atomic")(
+      tailContinuation,
+      {
+        path: "/tmp/rename-fails.txt",
+        kind: "string",
+        value: "temporary",
+      },
+    );
+    expect(failedResult.value).toMatchObject({ ok: false, kind: "conflict" });
+    expect(removed).toHaveLength(1);
+    expect(removed[0]).toContain("/tmp/rename-fails.txt.voyd-tmp-");
   });
 
   it("returns io errors when fs read/list payloads exceed transport buffer", async () => {
@@ -3381,7 +3543,7 @@ describe("registerDefaultHostAdapters", () => {
     expect(chunkSizes).toEqual([65_536, 4_464]);
   });
 
-  it("bounds fill_bytes payloads to transport-safe size", async () => {
+  it("rejects random fills that exceed the transport-safe size", async () => {
     const table = buildTable([
       { effectId: "voyd.std.random", opName: "fill_bytes", opId: 0 },
     ]);
@@ -3399,17 +3561,13 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
 
-    const result = await getHandler("voyd.std.random", "fill_bytes")(
-      tailContinuation,
-      100
-    );
-    expect(result.kind).toBe("tail");
-    expect(result.value).toEqual(Array.from({ length: 30 }, () => 255));
-    expect(randomBytes).toHaveBeenCalledWith(30);
-    expect(randomBytes).toHaveBeenCalledTimes(1);
+    expect(() =>
+      getHandler("voyd.std.random", "fill_bytes")(tailContinuation, 100)
+    ).toThrow(/exact-response maximum of 30 bytes/i);
+    expect(randomBytes).not.toHaveBeenCalled();
   });
 
-  it("accounts for array32 header overhead when bounding fill_bytes payloads", async () => {
+  it("accounts for array32 header overhead when rejecting oversized random fills", async () => {
     const table = buildTable([
       { effectId: "voyd.std.random", opName: "fill_bytes", opId: 0 },
     ]);
@@ -3427,16 +3585,66 @@ describe("registerDefaultHostAdapters", () => {
       },
     });
 
-    const result = await getHandler("voyd.std.random", "fill_bytes")(
-      tailContinuation,
-      1_000_000
-    );
-    expect(result.kind).toBe("tail");
-    expect(Array.isArray(result.value)).toBe(true);
-    expect((result.value as unknown[]).length).toBe(65_536);
-    expect(randomBytes).toHaveBeenCalledWith(65_536);
-    expect(randomBytes).toHaveBeenCalledTimes(1);
+    expect(() =>
+      getHandler("voyd.std.random", "fill_bytes")(
+        tailContinuation,
+        1_000_000
+      )
+    ).toThrow(/exact-response maximum of 65536 bytes/i);
+    expect(randomBytes).not.toHaveBeenCalled();
   });
+
+  it.each([
+    ["short", new Uint8Array(1)],
+    ["long", new Uint8Array(3)],
+    ["wrong-type", [1, 2]],
+  ])("rejects %s random hook payloads", async (_label, hookResult) => {
+    const table = buildTable([
+      { effectId: "voyd.std.random", opName: "fill_bytes", opId: 0 },
+    ]);
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: {
+        runtime: "browser",
+        runtimeHooks: {
+          randomBytes: () => hookResult as Uint8Array,
+        },
+      },
+    });
+
+    expect(() =>
+      getHandler("voyd.std.random", "fill_bytes")(tailContinuation, 2)
+    ).toThrow(/must return a Uint8Array|expected exactly 2/i);
+  });
+
+  it.each([-1, 1.5, Number.NaN])(
+    "rejects invalid random fill length %s before consuming entropy",
+    async (length) => {
+      const table = buildTable([
+        { effectId: "voyd.std.random", opName: "fill_bytes", opId: 0 },
+      ]);
+      const randomBytes = vi.fn(() => new Uint8Array());
+      const { host, getHandler } = createFakeHost(table);
+
+      await registerDefaultHostAdapters({
+        host,
+        options: {
+          runtime: "browser",
+          runtimeHooks: { randomBytes },
+        },
+      });
+
+      expect(() =>
+        getHandler("voyd.std.random", "fill_bytes")(
+          tailContinuation,
+          length
+        )
+      ).toThrow(/non-negative integer/i);
+      expect(randomBytes).not.toHaveBeenCalled();
+    }
+  );
 
   it("does not consume random hook bytes during adapter registration", async () => {
     const table = buildTable([

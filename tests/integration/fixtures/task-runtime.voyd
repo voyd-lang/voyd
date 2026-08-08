@@ -1,12 +1,17 @@
 use std::array::Array
 use std::async::types::{ Cancelled }
 use std::error::panic
+use std::msgpack::{ MsgPack, make_string }
 use std::number::cast::{ to_i64 }
 use std::result::types::all
 use std::shared_cell::{ SharedCell }
 use std::task::self as task
 use std::time::{ Duration, Overlap }
 use std::time::self as time
+
+@effect(id: "voyd.test.task-boundary")
+eff TaskBoundary
+  roundtrip_i32(resume, value: i32) -> i32
 
 fn millis(value: i32): () -> Duration
   Duration::from_millis(to_i64(value))
@@ -338,3 +343,17 @@ pub fn detached_failure_probe(): task::TaskRuntime -> i32
   let _ = task::detach do:
     panic("detached child failed".as_slice())
   1
+
+pub fn unsupported_detached_outcome_probe(): task::TaskRuntime -> i32
+  let child = task::detach do:
+    () => 41
+  child.id
+
+pub fn oversized_root_outcome_probe(): task::TaskRuntime -> MsgPack
+  let _ = task::yield_now()
+  make_string(
+    "A task result that is intentionally much larger than the host boundary buffer. A task result that is intentionally much larger than the host boundary buffer. A task result that is intentionally much larger than the host boundary buffer. A task result that is intentionally much larger than the host boundary buffer."
+  )
+
+pub fn continuation_boundary_probe(): TaskBoundary -> i32
+  TaskBoundary::roundtrip_i32(7)

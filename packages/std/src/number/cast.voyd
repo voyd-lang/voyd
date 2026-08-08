@@ -13,6 +13,36 @@ pub obj CastError {
   api code: i32
 }
 
+/// Controls how explicit number-formatting APIs handle NaN and infinities.
+pub obj NonFinitePolicy {
+  kind: i32
+}
+
+impl NonFinitePolicy
+  /// Emit `NaN`, `Infinity`, or `-Infinity`.
+  api fn symbols() -> NonFinitePolicy
+    NonFinitePolicy { kind: 1 }
+
+  /// Reject non-finite values with `number_format_error_code_non_finite`.
+  api fn reject() -> NonFinitePolicy
+    NonFinitePolicy { kind: 2 }
+
+/// Error returned by explicit number-formatting APIs.
+pub obj NumberFormatError {
+  /// Machine-readable error code.
+  api code: i32,
+  /// Human-readable failure description.
+  api message: String
+}
+
+/// The requested precision is outside the supported range.
+pub fn number_format_error_code_invalid_precision() -> i32
+  1
+
+/// The policy rejects the provided NaN or infinite value.
+pub fn number_format_error_code_non_finite() -> i32
+  2
+
 /// Error code for non-finite or non-integer checked float inputs.
 pub fn cast_error_code_invalid_input() -> i32
   1
@@ -175,6 +205,217 @@ pub fn to_string(value: f64) -> String
 
   trim_fractional_zeroes(bytes)
   new_string(bytes.to_fixed_array())
+
+/// Formats an `f64` with a fixed number of decimal places.
+///
+/// Rounding uses IEEE-754 ties-to-even semantics. Negative zero is normalized
+/// to unsigned zero. `decimal_places` must be between 0 and 15.
+pub fn format_fixed(
+  value: f64,
+  {
+    decimal_places: i32,
+    trim_trailing_zeros: bool = false,
+    non_finite: NonFinitePolicy = NonFinitePolicy::symbols()
+  }
+): () -> Result<String, NumberFormatError>
+  if decimal_places < 0 or decimal_places > 15:
+    return number_format_error(
+      number_format_error_code_invalid_precision(),
+      "fixed decimal places must be between 0 and 15"
+    )
+  if is_non_finite_f64(value):
+    return format_non_finite(value, non_finite)
+  Ok<String> {
+    value: format_fixed_finite(value, decimal_places, trim_trailing_zeros)
+  }
+
+/// Formats an `f32` with a fixed number of decimal places.
+pub fn format_fixed(
+  value: f32,
+  {
+    decimal_places: i32,
+    trim_trailing_zeros: bool = false,
+    non_finite: NonFinitePolicy = NonFinitePolicy::symbols()
+  }
+): () -> Result<String, NumberFormatError>
+  format_fixed(
+    to_f64(value),
+    decimal_places: decimal_places,
+    trim_trailing_zeros: trim_trailing_zeros,
+    non_finite: non_finite
+  )
+
+/// Formats an `f64` with the requested significant decimal digits.
+///
+/// Values with decimal exponents outside `-6...20` use compact scientific
+/// notation. `digits` must be between 1 and 16.
+pub fn format_significant(
+  value: f64,
+  {
+    digits: i32,
+    trim_trailing_zeros: bool = true,
+    non_finite: NonFinitePolicy = NonFinitePolicy::symbols()
+  }
+): () -> Result<String, NumberFormatError>
+  if digits < 1 or digits > 16:
+    return number_format_error(
+      number_format_error_code_invalid_precision(),
+      "significant digits must be between 1 and 16"
+    )
+  if is_non_finite_f64(value):
+    return format_non_finite(value, non_finite)
+  if value == 0.0:
+    let decimal_places = if trim_trailing_zeros then: 0 else: digits - 1
+    return Ok<String> {
+      value: format_fixed_finite(0.0, decimal_places, trim_trailing_zeros)
+    }
+
+  let magnitude = if value < 0.0 then: 0.0 - value else: value
+  let exponent = decimal_exponent_f64(magnitude)
+  if exponent < -6 or exponent > 20:
+    return format_scientific(
+      value,
+      digits: digits,
+      trim_trailing_zeros: trim_trailing_zeros,
+      non_finite: non_finite
+    )
+
+  let decimal_places = digits - exponent - 1
+  if decimal_places >= 0:
+    return Ok<String> {
+      value: format_fixed_finite(value, decimal_places, trim_trailing_zeros)
+    }
+
+  let scale = pow10_i32(0 - decimal_places)
+  let rounded = round_f64(value / scale) * scale
+  Ok<String> { value: format_fixed_finite(rounded, 0, true) }
+
+/// Formats an `f32` with the requested significant decimal digits.
+pub fn format_significant(
+  value: f32,
+  {
+    digits: i32,
+    trim_trailing_zeros: bool = true,
+    non_finite: NonFinitePolicy = NonFinitePolicy::symbols()
+  }
+): () -> Result<String, NumberFormatError>
+  format_significant(
+    to_f64(value),
+    digits: digits,
+    trim_trailing_zeros: trim_trailing_zeros,
+    non_finite: non_finite
+  )
+
+/// Formats an `f64` in compact scientific notation such as `1.25e6`.
+///
+/// `digits` counts all significant digits and must be between 1 and 16.
+pub fn format_scientific(
+  value: f64,
+  {
+    digits: i32,
+    trim_trailing_zeros: bool = true,
+    non_finite: NonFinitePolicy = NonFinitePolicy::symbols()
+  }
+): () -> Result<String, NumberFormatError>
+  if digits < 1 or digits > 16:
+    return number_format_error(
+      number_format_error_code_invalid_precision(),
+      "scientific significant digits must be between 1 and 16"
+    )
+  if is_non_finite_f64(value):
+    return format_non_finite(value, non_finite)
+  if value == 0.0:
+    let decimals = if trim_trailing_zeros then: 0 else: digits - 1
+    return Ok<String> {
+      value: format_fixed_finite(0.0, decimals, trim_trailing_zeros).concat("e0")
+    }
+
+  let negative = value < 0.0
+  var normalized = if negative then: 0.0 - value else: value
+  var exponent = 0
+  while normalized >= 10.0:
+    normalized = normalized / 10.0
+    exponent = exponent + 1
+  while normalized < 1.0:
+    normalized = normalized * 10.0
+    exponent = exponent - 1
+
+  let scale = pow10_i32(digits - 1)
+  normalized = round_f64(normalized * scale) / scale
+  if normalized >= 10.0:
+    normalized = normalized / 10.0
+    exponent = exponent + 1
+
+  let signed_normalized = if negative then: 0.0 - normalized else: normalized
+  let mantissa = format_fixed_finite(
+    signed_normalized,
+    digits - 1,
+    trim_trailing_zeros
+  )
+  Ok<String> { value: mantissa.concat("e").concat(to_string(exponent)) }
+
+/// Formats an `f32` in compact scientific notation.
+pub fn format_scientific(
+  value: f32,
+  {
+    digits: i32,
+    trim_trailing_zeros: bool = true,
+    non_finite: NonFinitePolicy = NonFinitePolicy::symbols()
+  }
+): () -> Result<String, NumberFormatError>
+  format_scientific(
+    to_f64(value),
+    digits: digits,
+    trim_trailing_zeros: trim_trailing_zeros,
+    non_finite: non_finite
+  )
+
+fn format_fixed_finite(value: f64, decimal_places: i32, trim: bool): () -> String
+  let negative = value < 0.0
+  let magnitude = if negative then: 0.0 - value else: value
+  let scale = pow10_i32(decimal_places)
+  let scaled = magnitude * scale
+  let scaled_is_finite = is_finite_f64(scaled)
+  let rounded_scaled = if scaled_is_finite then: round_f64(scaled) else: magnitude
+  let rounded = if scaled_is_finite then: rounded_scaled / scale else: magnitude
+
+  let ~bytes = Array<i32>::with_capacity(64)
+  if negative and rounded != 0.0:
+    bytes.push(45)
+  append_float_integer_part_f64(bytes, rounded)
+
+  if decimal_places > 0:
+    bytes.push(46)
+    let whole = floor_f64(rounded)
+    var fractional =
+      if scaled_is_finite then: rounded_scaled - (whole * scale) else: rounded - whole
+    var index = 0
+    while index < decimal_places:
+      let digit_scale = pow10_i32(decimal_places - index - 1)
+      let digit = floor_digit_f64(fractional / digit_scale)
+      bytes.push(ascii_digit(digit))
+      fractional = fractional - (to_f64(digit) * digit_scale)
+      if fractional < 0.0:
+        fractional = 0.0
+      index = index + 1
+    if trim:
+      trim_fractional_zeroes(bytes)
+
+  new_string(bytes.to_fixed_array())
+
+fn format_non_finite(
+  value: f64,
+  policy: NonFinitePolicy
+): () -> Result<String, NumberFormatError>
+  if policy.kind == 1:
+    return Ok<String> { value: to_string(value) }
+  number_format_error(
+    number_format_error_code_non_finite(),
+    "number formatting policy rejects NaN and infinite values"
+  )
+
+fn number_format_error<T>(code: i32, message: String): () -> Result<T, NumberFormatError>
+  Err<NumberFormatError> { error: NumberFormatError { code, message } }
 
 fn is_finite_f64(value: f64) -> bool
   (value - value) == 0.0
@@ -372,6 +613,9 @@ fn trunc_i64_f64_s(value: f64): () -> i64 __i64_trunc_f64_s(value)
 
 @intrinsic(name: "__trunc")
 fn trunc_f64(value: f64): () -> f64 __trunc(value)
+
+@intrinsic(name: "__round")
+fn round_f64(value: f64): () -> f64 __round(value)
 
 @intrinsic(name: "__i32_wrap_i64")
 fn wrap_i64(value: i64): () -> i32 __i32_wrap_i64(value)

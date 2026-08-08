@@ -6,7 +6,16 @@
 
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
-use std::error::{ HostError, IoError }
+use std::error::{
+  HostError,
+  IoAlreadyExists,
+  IoConflict,
+  IoError,
+  IoErrorKind,
+  IoNotFound,
+  IoOther,
+  IoPermissionDenied
+}
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::MsgPackError
@@ -46,6 +55,14 @@ pub eff Fs
   ///
   /// `payload` contains `{ from, to }`.
   rename(tail, payload: MsgPack) -> MsgPack
+  /// Atomically replaces a file after fully writing a same-directory temporary.
+  ///
+  /// `payload` contains `{ path, kind, value|bytes }`.
+  write_atomic(tail, payload: MsgPack) -> MsgPack
+  /// Creates and writes a file only when its path does not already exist.
+  ///
+  /// `payload` contains `{ path, kind, value|bytes }`.
+  create_exclusive(tail, payload: MsgPack) -> MsgPack
 
 /// Reads a file as raw bytes.
 ///
@@ -109,18 +126,53 @@ pub fn create_dir_all(path: Path): Fs -> Result<Unit, IoError>
 pub fn rename(source: Path, { to destination: Path }): Fs -> Result<Unit, IoError>
   decode_unit_result(Fs::rename(encode_rename_payload(source, destination)))
 
+/// Atomically writes bytes, replacing the destination only after the complete
+/// value has been written to a temporary file in the same directory.
+///
+/// A successful call guarantees that readers see either the previous complete
+/// file or the new complete file. Host and operating-system durability after a
+/// process or machine crash is outside this contract.
+pub fn write_atomic(path: Path, bytes: Bytes): Fs -> Result<Unit, IoError>
+  decode_unit_result(Fs::write_atomic(encode_write_bytes_payload(path, bytes)))
+
+/// Atomically writes owned UTF-8 text. See the bytes overload for replacement
+/// and durability guarantees.
+pub fn write_atomic(path: Path, value: String): Fs -> Result<Unit, IoError>
+  decode_unit_result(Fs::write_atomic(encode_write_string_payload(path, value)))
+
+/// Atomically writes borrowed UTF-8 text.
+pub fn write_atomic(path: Path, value: StringSlice): Fs -> Result<Unit, IoError>
+  write_atomic(path, value.to_string())
+
+/// Creates and writes a new file atomically with respect to competing creators.
+/// Returns `IoAlreadyExists` when another writer owns the destination.
+pub fn create_exclusive(path: Path, bytes: Bytes): Fs -> Result<Unit, IoError>
+  decode_unit_result(Fs::create_exclusive(encode_write_bytes_payload(path, bytes)))
+
+/// Creates and writes a new UTF-8 text file atomically with respect to competing
+/// creators.
+pub fn create_exclusive(path: Path, value: String): Fs -> Result<Unit, IoError>
+  decode_unit_result(Fs::create_exclusive(encode_write_string_payload(path, value)))
+
+/// Creates and writes a borrowed UTF-8 text file atomically with respect to
+/// competing creators.
+pub fn create_exclusive(path: Path, value: StringSlice): Fs -> Result<Unit, IoError>
+  create_exclusive(path, value.to_string())
+
 fn encode_path(path: Path): () -> MsgPack
   msgpack::make_string(path.as_string())
 
 fn encode_write_bytes_payload(path: Path, bytes: Bytes): () -> MsgPack
   HostDto::init()
     .set("path", encode_path(path))
+    .set("kind", msgpack::make_string("bytes"))
     .set("bytes", encode_byte_array(bytes))
     .pack()
 
 fn encode_write_string_payload(path: Path, value: String): () -> MsgPack
   HostDto::init()
     .set("path", encode_path(path))
+    .set("kind", msgpack::make_string("string"))
     .set("value", msgpack::make_string(value))
     .pack()
 
@@ -221,8 +273,27 @@ fn decode_io_error_result<T>(payload: HostDto): () -> Result<T, IoError>
           Err<IoError> { error: host_error_to_io_error(error) }
         Ok<String> { value: message }:
           Err<IoError> {
-            error: IoError { code: code, message: message }
+            error: IoError {
+              kind: decode_io_error_kind(payload),
+              code: code,
+              message: message
+            }
           }
+
+fn decode_io_error_kind(payload: HostDto): () -> IoErrorKind
+  match(payload.read_string("kind"))
+    Err<HostError>:
+      IoOther {}
+    Ok<String> { value }:
+      if value.equals("not-found"):
+        return IoNotFound {}
+      if value.equals("already-exists"):
+        return IoAlreadyExists {}
+      if value.equals("permission-denied"):
+        return IoPermissionDenied {}
+      if value.equals("conflict"):
+        return IoConflict {}
+      IoOther {}
 
 fn decode_bytes(payload: MsgPack): () -> Result<Bytes, IoError>
   match(msgpack::unpack_array(payload))
@@ -272,7 +343,7 @@ fn normalize_byte(value: i32): () -> i32
     remainder
 
 fn host_error_to_io_error(error: HostError): () -> IoError
-  IoError { code: error.code, message: error.message }
+  IoError { kind: IoOther {}, code: error.code, message: error.message }
 
 fn msgpack_error_to_io_error(error: MsgPackError): () -> IoError
-  IoError { code: error.code, message: error.message }
+  IoError { kind: IoOther {}, code: error.code, message: error.message }

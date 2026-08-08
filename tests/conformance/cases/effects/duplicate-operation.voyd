@@ -1,0 +1,3 @@
+eff Logger
+  info(tail, value: i32) -> void
+  info(tail, value: f64) -> void

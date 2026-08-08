@@ -60,6 +60,7 @@ import {
   isStdIntrinsicNominalType,
   STD_INTRINSIC_TYPE,
 } from "../compiler-contracts/types.js";
+import { wasmSymbolName } from "./symbol-names.js";
 
 const bin = binaryen as unknown as AugmentedBinaryen;
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
@@ -2483,7 +2484,7 @@ const synthesizeConcreteFunctionMeta = ({
       wasmName:
         `${sanitizeIdentifierForWasm(moduleView.hir.module.path)}__` +
         `${sanitizeIdentifierForWasm(
-          symbolNameForModuleSymbol({ moduleId, symbol, ctx }),
+          wasmSymbolName({ moduleId, symbol, ctx }),
         )}_${symbol}` +
         (typeArgs.length === 0
           ? ""

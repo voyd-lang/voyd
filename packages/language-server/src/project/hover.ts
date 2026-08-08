@@ -52,6 +52,18 @@ export const hoverAtPosition = ({
   if (documentation !== undefined) {
     blocks.push(documentation);
   }
+  const declarationName = analysis.declarationsByKey
+    .get(symbol.canonicalKey)
+    ?.find((entry) => entry.kind === "declaration")?.name;
+  if (
+    symbol.kind === "reference" &&
+    declarationName &&
+    declarationName !== symbol.name
+  ) {
+    blocks.push(
+      `Local alias: \`${symbol.name}\` (declared as \`${declarationName}\`)`,
+    );
+  }
 
   const contents: MarkupContent = {
     kind: "markdown",

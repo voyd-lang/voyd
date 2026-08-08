@@ -22,6 +22,80 @@ test "fill_bytes calls host op and fills via fallback":
   assert(optional_i32_or(bytes.get(1), -1), eq: 1)
   assert(optional_i32_or(bytes.get(2), -1), eq: 1)
 
+test "secure_bytes validates exact host bytes without normalization":
+  let result =
+    try
+      secure_bytes(3)
+    Random::fill_bytes(tail, _requested):
+      tail(msgpack::make_array([
+        msgpack::make_i32(0),
+        msgpack::make_i32(127),
+        msgpack::make_i32(255)
+      ]))
+    Random::next_i64(tail):
+      tail(i64_from_i32(0))
+    Random::next_u64(tail):
+      tail(i64_from_i32(0))
+
+  match(result)
+    Err<RandomError>:
+      assert(false, eq: true)
+    Ok<Bytes> { value }:
+      assert(value.len(), eq: 3)
+      assert(value.at(0), eq: 0)
+      assert(value.at(1), eq: 127)
+      assert(value.at(2), eq: 255)
+
+test "secure_bytes rejects malformed host payloads":
+  let result =
+    try
+      secure_bytes(2)
+    Random::fill_bytes(tail, _requested):
+      tail(msgpack::make_array([msgpack::make_i32(300)]))
+    Random::next_i64(tail):
+      tail(i64_from_i32(0))
+    Random::next_u64(tail):
+      tail(i64_from_i32(0))
+
+  match(result)
+    Ok<Bytes>:
+      assert(false, eq: true)
+    Err<RandomError> { error }:
+      assert(error.code, eq: random_error_code_invalid_payload())
+
+test "uuid v4 uses deterministic entropy with canonical version and variant":
+  let result =
+    try
+      Uuid::v4()
+    Random::fill_bytes(tail, requested):
+      tail(deterministic_byte_payload(requested))
+    Random::next_i64(tail):
+      tail(i64_from_i32(0))
+    Random::next_u64(tail):
+      tail(i64_from_i32(0))
+
+  match(result)
+    Err<RandomError>:
+      assert(false, eq: true)
+    Ok<Uuid> { value }:
+      assert(
+        value.to_string().equals("00010203-0405-4607-8809-0a0b0c0d0e0f"),
+        eq: true
+      )
+
+test "uuid parser validates layout and normalizes hexadecimal case":
+  match(Uuid::parse("00010203-0405-4607-8809-0A0B0C0D0E0F"))
+    Err<UuidParseError>:
+      assert(false, eq: true)
+    Ok<Uuid> { value }:
+      assert(
+        value.to_string().equals("00010203-0405-4607-8809-0a0b0c0d0e0f"),
+        eq: true
+      )
+  assert(Uuid::is_valid("00010203-0405-4607-8809-0a0b0c0d0e0f"), eq: true)
+  assert(Uuid::is_valid("000102030405460788090a0b0c0d0e0f"), eq: false)
+  assert(Uuid::is_valid("not-a-uuid"), eq: false)
+
 test "random_i32 defaults to full i32 domain":
   let value = random_i32_from_seed(i64_from_i32(7))
   assert(value, eq: 7)
@@ -395,6 +469,14 @@ fn local_rng_f64_sum_from_seed({ seed: i64, count: i32 }) -> f64
     index = index + 1
 
   sum
+
+fn deterministic_byte_payload(len: i32) -> MsgPack
+  let ~values = Array<MsgPack>::with_capacity(len)
+  var index = 0
+  while index < len:
+    values.push(msgpack::make_i32(index))
+    index = index + 1
+  msgpack::make_array(values)
 
 fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
   match(value)

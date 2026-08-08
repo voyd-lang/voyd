@@ -1,4 +1,8 @@
 use std::memory::self as memory
+use std::array::Array
+use std::dict::{ Dict, DictKey }
+use std::enums::{ enum }
+use std::optional::types::all
 use self::errors::{
   MsgPackError,
   error_code_buffer_too_small,
@@ -8,7 +12,78 @@ use self::errors::{
   error_code_type_mismatch
 }
 use std::number::cast::to_i64
+use std::string::type::String
 use std::test::assertions::all
+
+obj BoundaryCodecProfile {
+  displayName: String,
+  nickname?: String
+}
+
+enum BoundaryCodecEvent
+  Created { id: i32, labels: Array<String> }
+  Deleted { reason: String }
+
+obj BoundaryCodecEnvelope {
+  version: i32,
+  requestId: String,
+  profiles: Array<BoundaryCodecProfile>,
+  event: BoundaryCodecEvent
+}
+
+test "derived msgpack codecs preserve nested records arrays optionals and enum payloads":
+  let source = BoundaryCodecEnvelope {
+    version: 3,
+    requestId: "request-7",
+    profiles: [
+      BoundaryCodecProfile { displayName: "Ada" },
+      BoundaryCodecProfile { displayName: "Grace", nickname: "Amazing Grace" }
+    ],
+    event: BoundaryCodecEvent::Created { id: 42, labels: ["compiler", "host"] }
+  }
+  let packed = pack_boundary_value(source)
+
+  match(unpack_map(packed))
+    Err<MsgPackError>:
+      assert(false, eq: true)
+    Ok<Dict<String, MsgPack>> { value: root }:
+      assert(root.contains("requestId"), eq: true)
+      assert(root.contains("request_id"), eq: false)
+      assert_i32_map_field(root, "version", 3)
+      match(root.get("event"))
+        None:
+          assert(false, eq: true)
+        Some<MsgPack> { value: event }:
+          match(unpack_map(event))
+            Err<MsgPackError>:
+              assert(false, eq: true)
+            Ok<Dict<String, MsgPack>> { value: event_map }:
+              assert_string_map_field(event_map, "$variant", "Created")
+              assert_i32_map_field(event_map, "id", 42)
+
+  let decoded = unpack_boundary_value<BoundaryCodecEnvelope>(packed)
+  assert(decoded.version, eq: 3)
+  assert(decoded.requestId, eq: "request-7")
+  assert(decoded.profiles.len(), eq: 2)
+  match(decoded.profiles.at(0).nickname)
+    Some<String>:
+      assert(false, eq: true)
+    None:
+      void
+  match(decoded.profiles.at(1).nickname)
+    None:
+      assert(false, eq: true)
+    Some<String> { value }:
+      assert(value, eq: "Amazing Grace")
+  decoded.event.match(event)
+    Created:
+      assert(event.id, eq: 42)
+      assert(event.labels.len(), eq: 2)
+      assert(event.labels.at(1), eq: "host")
+    else:
+      assert(false, eq: true)
+
+  assert_same_encoding(packed, pack_boundary_value(source))
 
 test "msgpack encode_value returns error when the destination buffer is too small":
   let base = reserve_test_page()
@@ -55,6 +130,56 @@ test "msgpack unpack_i32 rejects numeric overflow":
       assert(false, eq: true)
     Err<MsgPackError> { error }:
       assert(error.code, eq: error_code_numeric_overflow())
+
+fn assert_i32_map_field(
+  map: Dict<String, MsgPack>,
+  name: String,
+  expected: i32
+) -> void
+  match(map.get(name))
+    None:
+      assert(false, eq: true)
+    Some<MsgPack> { value }:
+      match(unpack_i32(value))
+        Err<MsgPackError>:
+          assert(false, eq: true)
+        Ok<i32> { value: decoded }:
+          assert(decoded, eq: expected)
+
+fn assert_string_map_field(
+  map: Dict<String, MsgPack>,
+  name: String,
+  expected: String
+) -> void
+  match(map.get(name))
+    None:
+      assert(false, eq: true)
+    Some<MsgPack> { value }:
+      match(unpack_string(value))
+        Err<MsgPackError>:
+          assert(false, eq: true)
+        Ok<String> { value: decoded }:
+          assert(decoded, eq: expected)
+
+fn assert_same_encoding(first: MsgPack, second: MsgPack) -> void
+  let base = reserve_test_page()
+  let capacity = 32768
+  match(encode_value(first, base, capacity))
+    Err<MsgPackError>:
+      assert(false, eq: true)
+    Ok<i32> { value: first_len }:
+      match(encode_value(second, base + capacity, capacity))
+        Err<MsgPackError>:
+          assert(false, eq: true)
+        Ok<i32> { value: second_len }:
+          assert(first_len, eq: second_len)
+          var index = 0
+          while index < first_len:
+            assert(
+              memory::load_u8(base + index),
+              eq: memory::load_u8(base + capacity + index)
+            )
+            index = index + 1
 
 fn reserve_test_page(): () -> i32
   let base = memory::size() * 65536

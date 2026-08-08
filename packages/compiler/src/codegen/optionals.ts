@@ -1,6 +1,10 @@
 import binaryen from "binaryen";
 import type { CodegenContext, FunctionContext, TypeId } from "./context.js";
-import { coerceValueToType, initStructuralValue } from "./structural.js";
+import {
+  coerceValueToType,
+  initStructuralValue,
+  lowerValueForHeapField,
+} from "./structural.js";
 import { getStructuralTypeInfo } from "./types.js";
 import { coerceExprToWasmType } from "./wasm-type-coercions.js";
 
@@ -13,7 +17,10 @@ export const compileOptionalNoneValue = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const optionalInfo = ctx.program.optionals.getOptionalInfo(ctx.moduleId, targetTypeId);
+  const optionalInfo = ctx.program.optionals.getOptionalInfo(
+    ctx.moduleId,
+    targetTypeId,
+  );
   if (!optionalInfo) {
     throw new Error("optional default requires an Optional type");
   }
@@ -30,6 +37,7 @@ export const compileOptionalNoneValue = ({
     structInfo: noneInfo,
     fieldValues: [],
     ctx,
+    fnCtx,
   });
   return coerceValueToType({
     value: noneValue,
@@ -53,7 +61,10 @@ export const compileOptionalSomeValue = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const optionalInfo = ctx.program.optionals.getOptionalInfo(ctx.moduleId, targetTypeId);
+  const optionalInfo = ctx.program.optionals.getOptionalInfo(
+    ctx.moduleId,
+    targetTypeId,
+  );
   if (!optionalInfo) {
     throw new Error("optional value requires an Optional type");
   }
@@ -73,14 +84,22 @@ export const compileOptionalSomeValue = ({
   const someValue = initStructuralValue({
     structInfo: someInfo,
     fieldValues: [
-      coerceExprToWasmType({
-        expr: coerced,
-        targetType:
-          someInfo.layoutKind === "value-object" ? field.wasmType : field.heapWasmType,
-        ctx,
-      }),
+      someInfo.layoutKind === "value-object"
+        ? coerceExprToWasmType({
+            expr: coerced,
+            targetType: field.wasmType,
+            ctx,
+          })
+        : lowerValueForHeapField({
+            value: coerced,
+            typeId: field.typeId,
+            targetType: field.heapWasmType,
+            ctx,
+            fnCtx,
+          }),
     ],
     ctx,
+    fnCtx,
   });
   return coerceValueToType({
     value: someValue,

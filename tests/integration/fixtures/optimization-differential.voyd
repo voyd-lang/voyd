@@ -37,6 +37,24 @@ pub fn heap_alias_identity() -> i32
   )
   alias.with((value) => value.x + value.y)
 
+obj SingleEvaluationCounter {
+  value: i32
+}
+
+obj SingleEvaluationEnvelope {
+  value: i32
+}
+
+fn next_envelope(~counter: SingleEvaluationCounter) -> SingleEvaluationEnvelope
+  counter.value = counter.value + 1
+  SingleEvaluationEnvelope { value: counter.value }
+
+pub fn pure_fresh_expression_order() -> i32
+  let ~counter = SingleEvaluationCounter { value: 0 }
+  let first = next_envelope(counter).value
+  let second = next_envelope(counter).value
+  first * 100 + second * 10 + counter.value
+
 obj IteratorBox {
   value: i32
 }
