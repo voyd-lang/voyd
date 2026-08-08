@@ -1,5 +1,12 @@
 import type { CodegenContext } from "../context.js";
-import type { HirExprId, ProgramFunctionInstanceId, SymbolId, TypeId, TypeParamId } from "../../semantics/ids.js";
+import type {
+  HirExprId,
+  ProgramFunctionInstanceId,
+  SymbolId,
+  TypeId,
+  TypeParamId,
+} from "../../semantics/ids.js";
+import type { HirEffectHandlerClause } from "../../semantics/hir/index.js";
 import { buildInstanceSubstitution } from "../type-substitution.js";
 import { walkHirExpression } from "../hir-walk.js";
 
@@ -383,6 +390,82 @@ export const buildEffectTypeSubstitution = ({
   }
 
   return substitution;
+};
+
+export const resolveHandlerClauseSignature = ({
+  ctx,
+  handlerBody,
+  clause,
+  typeInstanceId,
+}: {
+  ctx: CodegenContext;
+  handlerBody: HirExprId;
+  clause: HirEffectHandlerClause;
+  typeInstanceId?: ProgramFunctionInstanceId;
+}): {
+  params: readonly TypeId[];
+  returnType: TypeId;
+  substitution: Map<TypeParamId, TypeId>;
+} => {
+  const signature = ctx.program.functions.getSignature(
+    ctx.moduleId,
+    clause.operation,
+  );
+  if (!signature) {
+    throw new Error("missing effect operation signature for handler clause");
+  }
+
+  const effectTypeArgs = collectEffectTypeArgs({
+    handlerBody,
+    operation: clause.operation,
+    ctx,
+    typeInstanceId,
+  });
+  const substitution = buildEffectTypeSubstitution({
+    ctx,
+    typeInstanceId,
+    signature,
+    typeArgs: effectTypeArgs,
+  });
+  const signatureParamTypes = signature.parameters.map((param) => param.typeId);
+  const paramTypes = clause.parameters.slice(1).map((param, index) => {
+    const symbolType = ctx.module.types.getValueType(param.symbol);
+    return typeof symbolType === "number"
+      ? symbolType
+      : (signatureParamTypes[index] ?? ctx.program.primitives.unknown);
+  });
+  const continuationParam = clause.parameters[0];
+  const continuationTypeId = continuationParam
+    ? ctx.module.types.getValueType(continuationParam.symbol)
+    : undefined;
+  const continuationDesc =
+    typeof continuationTypeId === "number"
+      ? ctx.program.types.getTypeDesc(continuationTypeId)
+      : undefined;
+  const continuationReturnType =
+    continuationDesc?.kind === "function"
+      ? continuationDesc.parameters[0]?.type
+      : undefined;
+  const returnType =
+    continuationDesc?.kind === "function" &&
+    typeof continuationReturnType !== "number"
+      ? ctx.program.primitives.void
+      : (continuationReturnType ?? signature.returnType);
+
+  return {
+    ...resolveEffectSignatureTypes({
+      ctx,
+      signature,
+      typeInstanceId,
+      typeArgs: effectTypeArgs,
+      substitution,
+      paramTypes,
+      fallbackParams: signatureParamTypes,
+      returnType,
+      fallbackReturnType: signature.returnType,
+    }),
+    substitution,
+  };
 };
 
 export const resolveEffectSignatureTypes = ({

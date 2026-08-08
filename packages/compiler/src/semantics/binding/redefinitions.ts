@@ -7,6 +7,7 @@ import {
   findLocalBindingNameCollision,
   reportOverloadNameCollision,
 } from "./name-collisions.js";
+import { bindingIdentityForSyntax } from "./hygiene.js";
 
 export const declareValueOrParameter = ({
   name,
@@ -34,7 +35,14 @@ export const declareValueOrParameter = ({
     });
   }
 
-  const existing = findLocalBindingNameCollision({ name, scope, ctx });
+  const bindingIdentity = bindingIdentityForSyntax(syntax);
+
+  const existing = findLocalBindingNameCollision({
+    name,
+    scope,
+    bindingIdentity,
+    ctx,
+  });
   if (existing) {
     ctx.diagnostics.push(
       diagnosticFromCode({
@@ -58,6 +66,7 @@ export const declareValueOrParameter = ({
       name,
       kind,
       declaredAt,
+      bindingIdentity,
       metadata: { ...metadata, localBinding: true },
     },
     scope

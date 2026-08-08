@@ -209,9 +209,11 @@ const rebuildValueOwner = ({
             field: candidate,
             pointer: () => loadLocalValue(ownerTemp, ctx),
             ctx,
+            fnCtx,
           }),
     ),
     ctx,
+    fnCtx,
   });
 
 export const compileFieldAssignment = ({
@@ -327,6 +329,7 @@ export const compileFieldAssignment = ({
             field: segment.field,
             pointer: () => loadLocalValue(ownerTemps[index]!, ctx),
             ctx,
+            fnCtx,
           }),
           ctx,
           fnCtx,
@@ -433,7 +436,7 @@ export const compileAssignExpr = (
   expr: HirAssignExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler
+  compileExpr: ExpressionCompiler,
 ): CompiledExpression => {
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   if (expr.pattern) {
@@ -464,11 +467,7 @@ export const compileAssignExpr = (
   const valueTypeId = getRequiredExprType(expr.value, ctx, typeInstanceId);
 
   if (targetExpr.exprKind === "field-access") {
-    const targetTypeId = getRequiredExprType(
-      expr.target,
-      ctx,
-      typeInstanceId
-    );
+    const targetTypeId = getRequiredExprType(expr.target, ctx, typeInstanceId);
     const valueExpr = compileExpr({
       exprId: expr.value,
       ctx,
@@ -512,9 +511,10 @@ export const compileAssignExpr = (
     });
     if (scalarStore) {
       return {
-        expr: scalarStore.length === 1
-          ? scalarStore[0]!
-          : ctx.mod.block(null, scalarStore, binaryen.none),
+        expr:
+          scalarStore.length === 1
+            ? scalarStore[0]!
+            : ctx.mod.block(null, scalarStore, binaryen.none),
         usedReturnCall: false,
       };
     }

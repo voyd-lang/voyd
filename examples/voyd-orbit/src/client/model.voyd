@@ -25,9 +25,9 @@ pub enum Tool
 
 pub enum Interaction
   Idle
-  Panning { last_screen: Vec2 }
-  DraggingBody { body_id: String, offset_au: Vec2 }
-  PlacingBody { kind: BodyKind, origin_au: Vec2, cursor_au: Vec2 }
+  Panning { pointer_id: i32, last_screen: Vec2 }
+  DraggingBody { pointer_id: i32, body_id: String, offset_au: Vec2 }
+  PlacingBody { pointer_id: i32, kind: BodyKind, origin_au: Vec2, cursor_au: Vec2 }
 
 pub enum NoticeKind
   Neutral
@@ -83,7 +83,8 @@ pub type UiState = {
   notice: Notice,
   busy: bool,
   field_focused: bool,
-  next_body_serial: i32
+  next_body_serial: i32,
+  canvas_title_width: f64
 }
 
 pub type Model = {
@@ -132,7 +133,8 @@ pub fn model_from_scenario(scenario: BuiltInScenario) -> Model
       notice: Notice::Hidden {},
       busy: false,
       field_focused: false,
-      next_body_serial: scenario.bodies.len() + 1
+      next_body_serial: scenario.bodies.len() + 1,
+      canvas_title_width: 0.0
     },
     trails: empty_trails(scenario.bodies),
     trail_sample_counter: 0
@@ -171,7 +173,8 @@ pub fn model_from_persisted(value: PersistedSimulation) -> Model
       notice: Notice::Visible { kind: NoticeKind::Success {}, message: "Simulation loaded" },
       busy: false,
       field_focused: false,
-      next_body_serial: value.state.bodies.len() + 1
+      next_body_serial: value.state.bodies.len() + 1,
+      canvas_title_width: 0.0
     },
     trails: empty_trails(value.state.bodies),
     trail_sample_counter: 0

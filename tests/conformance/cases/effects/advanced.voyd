@@ -42,18 +42,18 @@ obj Sum {
 }
 
 eff Logger
-  info(tail, value: i32) -> void
-  info(tail, value: f64) -> void
+  info_count(tail, value: i32) -> void
+  info_ratio(tail, value: f64) -> void
 
-pub fn overloaded_handler_alias() -> i32
+pub fn distinct_handler_operations() -> i32
   let ~sum = Sum { value: 0 }
   try
-    Logger::info(10)
-    Logger::info(2.2)
-  Logger::info(tail, value: Count):
+    Logger::info_count(10)
+    Logger::info_ratio(2.2)
+  Logger::info_count(tail, value: Count):
     sum.value = sum.value + value
     tail()
-  Logger::info(tail, value: f64):
+  Logger::info_ratio(tail, value: f64):
     sum.value = sum.value + 2
     tail()
   sum.value

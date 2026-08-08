@@ -119,6 +119,14 @@ impl Counter
     self.current = self.current + 1
     Some<i32> { value }
 
+obj SingleEvaluationEnvelope {
+  value: i32
+}
+
+fn next_envelope(~counter: Counter) -> SingleEvaluationEnvelope
+  counter.current = counter.current + 1
+  SingleEvaluationEnvelope { value: counter.current }
+
 pub fn value_copy_semantics() -> i32
   let ~a = Vec2 { x: 1, y: 2 }
   let b = a
@@ -157,6 +165,17 @@ pub fn optional_binding_evaluates_once() -> i32
   let ~counter = Counter()
   let result = counter.next()
   counter.current
+
+pub fn pure_fresh_identity_evaluates_once() -> i32
+  let ~counter = Counter()
+  let value = next_envelope(counter).value
+  value * 10 + counter.current
+
+pub fn explicit_fresh_identity_occurrences_evaluate_separately() -> i32
+  let ~counter = Counter()
+  let first = next_envelope(counter).value
+  let second = next_envelope(counter).value
+  first * 100 + second * 10 + counter.current
 
 pub fn value_array_storage() -> i32
   let ~items = Array<Vec2>::with_capacity(2)

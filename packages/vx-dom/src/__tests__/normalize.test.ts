@@ -1,7 +1,22 @@
 import { describe, expect, it } from "vitest";
-import { childNamespace, normalizeRenderFrame } from "../normalize.js";
+import {
+  childNamespace,
+  normalizeRenderFrame,
+  ssrDomPropertyRepresentation,
+} from "../normalize.js";
 
 describe("vx-dom VNode normalization", () => {
+  it("shares the form-property representation contract across renderers", () => {
+    expect(ssrDomPropertyRepresentation("input", "value")).toBe("attribute");
+    expect(ssrDomPropertyRepresentation("textarea", "value")).toBe("text");
+    expect(ssrDomPropertyRepresentation("select", "value")).toBe("unsupported");
+    expect(ssrDomPropertyRepresentation("input", "checked")).toBe("attribute");
+    expect(ssrDomPropertyRepresentation("button", "disabled")).toBe(
+      "attribute",
+    );
+    expect(ssrDomPropertyRepresentation("div", "disabled")).toBe("unsupported");
+  });
+
   it("accepts case-sensitive names within SVG trees", () => {
     expect(normalizeRenderFrame({
       version: 1,

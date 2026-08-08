@@ -36,6 +36,7 @@ import {
   getMatchPatternTypeId,
   getUnresolvedExprType,
   shouldInlineUnionLayout,
+  substituteTypeForInstance,
   wasmTypeFor,
 } from "../types.js";
 import { compilePatternInitializationFromValue } from "../patterns.js";
@@ -49,6 +50,7 @@ import type {
   HirContinueExpr,
   HirLoopExpr,
 } from "../../semantics/hir/index.js";
+import { typeContainsUnresolvedParam } from "../../semantics/type-utils.js";
 
 const declarePatternLocals = (
   pattern: HirPattern,
@@ -268,15 +270,29 @@ const lowerToOutResultStorageIfNeeded = ({
 const getMatchPatternTypeIdForPattern = (
   pattern: HirPattern,
   ctx: CodegenContext,
+  instanceId: FunctionContext["typeInstanceId"],
 ): TypeId | undefined => {
   if (pattern.kind === "wildcard") return undefined;
-  if (pattern.kind === "type") {
-    return getMatchPatternTypeId(pattern, ctx);
-  }
-  if (typeof pattern.typeId === "number") {
-    return pattern.typeId;
-  }
-  return undefined;
+  const declaredTypeId =
+    pattern.kind === "type" && typeof pattern.type.typeId === "number"
+      ? pattern.type.typeId
+      : undefined;
+  const declaredTypeNeedsSpecialization =
+    typeof declaredTypeId === "number" &&
+    typeContainsUnresolvedParam({
+      typeId: declaredTypeId,
+      getTypeDesc: (typeId) => ctx.program.types.getTypeDesc(typeId),
+    });
+  const rawTypeId = declaredTypeNeedsSpecialization
+    ? declaredTypeId
+    : typeof pattern.typeId === "number"
+      ? pattern.typeId
+      : pattern.kind === "type"
+        ? getMatchPatternTypeId(pattern, ctx)
+        : undefined;
+  return typeof rawTypeId === "number"
+    ? substituteTypeForInstance({ typeId: rawTypeId, ctx, instanceId })
+    : undefined;
 };
 
 interface MatchDiscriminantState {
@@ -802,7 +818,11 @@ export const compileMatchExpr = (
     const seen = new Set<TypeId>();
     const dupes = new Set<TypeId>();
     expr.arms.forEach((arm) => {
-      const typeId = getMatchPatternTypeIdForPattern(arm.pattern, ctx);
+      const typeId = getMatchPatternTypeIdForPattern(
+        arm.pattern,
+        ctx,
+        typeInstanceId,
+      );
       if (typeof typeId !== "number") {
         return;
       }
@@ -874,7 +894,11 @@ export const compileMatchExpr = (
       continue;
     }
 
-    const patternTypeId = getMatchPatternTypeIdForPattern(arm.pattern, ctx);
+    const patternTypeId = getMatchPatternTypeIdForPattern(
+      arm.pattern,
+      ctx,
+      typeInstanceId,
+    );
     if (typeof patternTypeId !== "number") {
       throw new Error(
         `match pattern missing type annotation (${arm.pattern.kind})`,

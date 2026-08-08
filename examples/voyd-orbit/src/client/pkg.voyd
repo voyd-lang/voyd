@@ -6,11 +6,13 @@ pub use self::model::{ Model, initial_model }
 pub use self::update::{ Msg, step }
 pub use self::view::view
 
-use self::render_scene::draw
+use self::render_scene::{ draw, measure_title }
 use std::array::Array
 use std::string::type::String
 use std::vx::{
   AnimationFrame,
+  CanvasTextMetrics,
+  Cmd,
   KeyboardEvent,
   Program,
   Sub,
@@ -27,10 +29,19 @@ pub fn app() -> Program<Model, Msg>
 
 fn init() -> Program<Model, Msg>
   let model = initial_model()
-  next(model: model, cmd: draw<Msg>(model))
+  next(model: model, cmd: initial_canvas_commands(model))
 
 fn hydrate(model: Model) -> Program<Model, Msg>
-  next(model: model, cmd: draw<Msg>(model))
+  next(model: model, cmd: initial_canvas_commands(model))
+
+fn initial_canvas_commands(model: Model) -> Cmd<Msg>
+  Cmd<Msg>::batch([
+    draw<Msg>(model),
+    measure_title<Msg>(
+      model.session.name,
+      handler: (metrics: CanvasTextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
+    )
+  ])
 
 fn subscriptions(_model: Model) -> Sub<Msg>
   Sub<Msg>::batch([

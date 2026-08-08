@@ -50,5 +50,29 @@ describe("integration: html.voyd", () => {
         },
       ],
     });
+
+    await expect(
+      result.run<Record<string, unknown>>({
+        entryName: "empty_children_with_shadows",
+      }),
+    ).resolves.toEqual({
+      kind: "element",
+      tag: "input",
+      children: [],
+    });
+
+    await expect(
+      result.run<Record<string, unknown>>({
+        entryName: "option_attributes",
+      }),
+    ).resolves.toEqual({
+      attrs: {
+        selected: true,
+        value: "voyd",
+      },
+      kind: "element",
+      tag: "option",
+      children: ["Voyd"],
+    });
   });
 });

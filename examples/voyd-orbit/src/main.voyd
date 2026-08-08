@@ -7,7 +7,7 @@ use src::server::{ SimulationRepository, with_api_routes }
 use pkg::web::{ App, app, document, hydrate, serve_app, serve_dir }
 use std::env::self as env
 use std::error::HostError
-use std::fs::self as fs
+use std::fs::Fs
 use std::http::{ Response, server }
 use std::optional::types::all
 use std::random::self as random
@@ -21,7 +21,7 @@ pub fn main(): (
   server::HttpServer,
   tasks::TaskRuntime,
   env::Env,
-  fs::Fs,
+  Fs,
   random::Random,
   time::Time
 ) -> i32

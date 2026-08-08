@@ -164,7 +164,9 @@ pub fn main() -> i32
 
     const { diagnostics } = analyzeModules({ graph });
     const allDiagnostics = [...graph.diagnostics, ...diagnostics];
-    expect(allDiagnostics.some((diag) => /answer/i.test(diag.message))).toBe(true);
+    expect(allDiagnostics.some((diag) => /answer/i.test(diag.message))).toBe(
+      true,
+    );
   });
 
   it("does not bring raw std constructors into scope through the implicit prelude", async () => {
@@ -194,7 +196,7 @@ pub fn new_string() -> i32
     const { diagnostics } = analyzeModules({ graph });
     const allDiagnostics = [...graph.diagnostics, ...diagnostics];
     expect(
-      allDiagnostics.some((diag) => /new_string/i.test(diag.message))
+      allDiagnostics.some((diag) => /new_string/i.test(diag.message)),
     ).toBe(true);
   });
 
@@ -246,7 +248,7 @@ pub fn new_string() -> i32
     const { semantics, diagnostics } = analyzeModules({ graph });
     const mainSemantics = semantics.get("src::main");
     const addImport = mainSemantics?.binding.imports.find(
-      (entry) => entry.name === "add"
+      (entry) => entry.name === "add",
     );
     expect(addImport).toBeTruthy();
 
@@ -328,8 +330,8 @@ pub fn main() -> i32
     const { diagnostics } = analyzeModules({ graph });
     expect(
       diagnostics.some((diag) =>
-        /does not satisfy.*constraint/i.test(diag.message)
-      )
+        /does not satisfy.*constraint/i.test(diag.message),
+      ),
     ).toBe(true);
   });
 
@@ -353,7 +355,7 @@ pub fn main() -> i32
     const { semantics, diagnostics } = analyzeModules({ graph });
     const consumer = semantics.get("src::consumer");
     expect(
-      consumer?.binding.imports.some((entry) => entry.name === "Point")
+      consumer?.binding.imports.some((entry) => entry.name === "Point"),
     ).toBe(true);
     expect(diagnostics).toHaveLength(0);
   });
@@ -569,6 +571,36 @@ pub fn main() -> i32
     expect(diagnostics).toHaveLength(0);
   });
 
+  it("resolves private imported enum variants used only in match patterns", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}drinks.voyd`]: `
+obj Coffee {}
+obj Tea {}
+pub type Drink = Coffee | Tea
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::drinks::{ Drink }
+
+pub fn classify(value: Drink) -> i32
+  match(value)
+    Drink::Coffee:
+      1
+    Drink::Tea:
+      2
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+
+    const { diagnostics } = analyzeModules({ graph });
+    expect(diagnostics).toHaveLength(0);
+  });
+
   it("preserves concrete enum alias member type arguments across module boundaries", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
@@ -734,9 +766,9 @@ pub fn main() -> i32
     const { diagnostics } = analyzeModules({ graph });
     const allDiagnostics = [...graph.diagnostics, ...diagnostics];
     expect(allDiagnostics).toHaveLength(0);
-    expect(allDiagnostics.some((diagnostic) => diagnostic.code === "TY9999")).toBe(
-      false,
-    );
+    expect(
+      allDiagnostics.some((diagnostic) => diagnostic.code === "TY9999"),
+    ).toBe(false);
   });
 
   it("does not report imported handled operations as unhandled effects", async () => {
@@ -769,8 +801,51 @@ pub fn main() -> f64
     const { diagnostics } = analyzeModules({ graph });
     const allDiagnostics = [...graph.diagnostics, ...diagnostics];
     expect(allDiagnostics).toHaveLength(0);
-    expect(allDiagnostics.some((diagnostic) => diagnostic.code === "TY0013")).toBe(
-      false,
+    expect(
+      allDiagnostics.some((diagnostic) => diagnostic.code === "TY0013"),
+    ).toBe(false);
+  });
+
+  it("keeps same-named imported effect operations distinct in effect rows", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}left.voyd`]: `
+@effect(id: "example.left-store")
+pub eff Store
+  save(tail, value: i32) -> i32
+`,
+      [`${root}${sep}right.voyd`]: `
+@effect(id: "example.right-store")
+pub eff Store
+  save(tail, value: i32) -> i32
+`,
+      [`${root}${sep}main.voyd`]: `
+use src::left::Store as Left
+use src::right::Store as Right
+
+fn run() -> i32
+  try
+    let left = Left::save(1)
+    Right::save(left)
+  Left::save(tail, value):
+    tail(value)
+`,
+    });
+
+    const graph = await loadModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      roots: { src: root },
+      host,
+    });
+    const { diagnostics } = analyzeModules({ graph });
+    const allDiagnostics = [...graph.diagnostics, ...diagnostics];
+    expect(allDiagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "TY0013",
+          message: expect.stringContaining("Store.save(i32)"),
+        }),
+      ]),
     );
   });
 
@@ -1504,7 +1579,9 @@ pub fn bounce() -> i32
     });
 
     const { diagnostics } = analyzeModules({ graph });
-    const unknownMethod = diagnostics.find((diagnostic) => diagnostic.code === "TY0022");
+    const unknownMethod = diagnostics.find(
+      (diagnostic) => diagnostic.code === "TY0022",
+    );
     expect(unknownMethod).toBeDefined();
     expect(
       unknownMethod?.hints?.some((hint) => /import cycle/i.test(hint.message)),
@@ -1533,7 +1610,9 @@ pub fn main() -> i32
     });
 
     const { diagnostics } = analyzeModules({ graph });
-    const unknownField = diagnostics.find((diagnostic) => diagnostic.code === "TY0033");
+    const unknownField = diagnostics.find(
+      (diagnostic) => diagnostic.code === "TY0033",
+    );
     expect(unknownField).toBeDefined();
   });
 

@@ -53,7 +53,6 @@ import { buildProgramSymbolArena } from "../program-symbol-arena.js";
 import type { ProgramSymbolArena, SymbolRef } from "../program-symbol-arena.js";
 import { createCanonicalSymbolRefResolver } from "../canonical-symbol-ref.js";
 import { parseSymbolRefKey } from "../typing/symbol-ref-utils.js";
-import { enumNamespaceMemberNamesFromMetadata } from "../enum-namespace.js";
 
 export type { SymbolRef } from "../program-symbol-arena.js";
 
@@ -1527,51 +1526,20 @@ export const buildProgramCodegenView = (
     if (targetDesc.kind !== "union") {
       return;
     }
+    const variantMethods = mod.binding.staticMethods.get(aliasSymbol);
+    if (!variantMethods) {
+      return;
+    }
     const symbolTable = getSymbolTable(mod);
-    const aliasRecord = symbolTable.getSymbol(aliasSymbol);
-    const metadata = (aliasRecord.metadata ?? {}) as Record<string, unknown>;
-    const memberNames = enumNamespaceMemberNamesFromMetadata(metadata);
-    if (!memberNames || memberNames.length === 0) {
-      return;
-    }
-
-    memberNames.forEach((name) => {
-      const local = symbolTable.resolveWhere(
-        name,
-        symbolTable.rootScope,
-        isObjectTypeRecord,
-      );
-      if (typeof local === "number") {
-        addStandaloneVariantOwner(mod.moduleId, local);
-      }
-    });
-
-    const importMetadata = metadata.import as
-      | { moduleId?: unknown; symbol?: unknown }
-      | undefined;
-    const importedModuleId = importMetadata?.moduleId;
-    if (typeof importedModuleId !== "string") {
-      return;
-    }
-    const importedModule = modulesById.get(importedModuleId);
-    if (!importedModule) {
-      return;
-    }
-    const importedSymbolTable = getSymbolTable(importedModule);
-    memberNames.forEach((name) => {
-      const exported = importedModule.exports.get(name)?.symbol;
-      if (typeof exported === "number") {
-        addStandaloneVariantOwner(importedModule.moduleId, exported);
+    variantMethods.forEach((variantSymbols, memberName) => {
+      if (memberName === "init") {
         return;
       }
-      const local = importedSymbolTable.resolveWhere(
-        name,
-        importedSymbolTable.rootScope,
-        isObjectTypeRecord,
-      );
-      if (typeof local === "number") {
-        addStandaloneVariantOwner(importedModule.moduleId, local);
-      }
+      variantSymbols.forEach((symbol) => {
+        if (isObjectTypeRecord(symbolTable.getSymbol(symbol))) {
+          addStandaloneVariantOwner(mod.moduleId, symbol);
+        }
+      });
     });
   };
 
@@ -2717,6 +2685,7 @@ export const buildProgramCodegenView = (
       });
     });
     const effectsInfo = buildEffectsLoweringInfo({
+      moduleId: mod.moduleId,
       binding: mod.binding,
       symbolTable: getSymbolTable(mod),
       hir: mod.hir,

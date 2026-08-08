@@ -23,3 +23,7 @@ pub fn handle_imported_std_fs_ops(): () -> i32
     tail(_path)
   Fs::rename(tail, _payload: MsgPack):
     tail(_payload)
+  Fs::write_atomic(tail, _payload: MsgPack):
+    tail(_payload)
+  Fs::create_exclusive(tail, _payload: MsgPack):
+    tail(_payload)

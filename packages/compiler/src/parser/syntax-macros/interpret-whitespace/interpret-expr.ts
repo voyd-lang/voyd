@@ -107,6 +107,10 @@ const elideParens = (cursor: FormCursor, startIndentLevel?: number): Expr => {
     if (isNewline(next)) {
       const nextIndent = nextExprIndentLevel(cursor);
       if (nextIndent > indentLevel) {
+        if (isIndentedOperandContinuation(transformed.at(-1))) {
+          pushElement(elideParens(cursor, indentLevel + 1));
+          continue;
+        }
         pushChildBlock();
         continue;
       }
@@ -203,6 +207,12 @@ const consumeLeadingWhitespace = (cursor: FormCursor) => {
 
 const isNewline = (v?: Expr) => p.isWhitespaceAtom(v) && v.isNewline;
 const isIndent = (v?: Expr) => p.isWhitespaceAtom(v) && v.isIndent;
+
+const isIndentedOperandContinuation = (expr?: FormInitElements[number]) => {
+  if (!isContinuationOp(expr)) return false;
+  const value = expr.value;
+  return !isGreedyOp(expr) && value !== ":";
+};
 
 const isObjectLiteral = (expr: Expr): expr is Form =>
   p.isForm(expr) && (expr as Form).callsInternal("object_literal");

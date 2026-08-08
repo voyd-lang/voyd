@@ -47,6 +47,7 @@ export type EventOptions = {
   stopPropagation?: boolean;
   capture?: boolean;
   passive?: boolean;
+  pointerCapture?: boolean;
 };
 
 export type NormalizedEventPayload =
@@ -58,6 +59,7 @@ export type NormalizedEventPayload =
 
 export type MouseEventPayload = {
   kind: "mouse" | "pointer" | "wheel" | "drag";
+  pointer_id: number;
   x: number;
   y: number;
   client_x: number;

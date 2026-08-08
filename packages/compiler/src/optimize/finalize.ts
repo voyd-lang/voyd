@@ -55,6 +55,7 @@ const rebuildEffectsInfo = ({
   moduleView: OptimizedModuleView;
 }): void => {
   const effectsInfo = buildEffectsLoweringInfo({
+    moduleId: moduleView.moduleId,
     binding: moduleView.semantics.binding,
     symbolTable: getSymbolTable(moduleView.semantics),
     hir: moduleView.hir,

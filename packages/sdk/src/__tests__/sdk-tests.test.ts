@@ -5,7 +5,9 @@ const expectCompileSuccess = (
   result: CompileResult,
 ): Extract<CompileResult, { success: true }> => {
   if (!result.success) {
-    throw new Error(result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"));
+    throw new Error(
+      result.diagnostics.map((diagnostic) => diagnostic.message).join("\n"),
+    );
   }
   expect(result.success).toBe(true);
   return result;
@@ -33,7 +35,9 @@ describe("sdk tests collection", { timeout: 120_000 }, () => {
       "first companion test",
     ]);
 
-    const second = expectCompileSuccess(await compile("updated companion test"));
+    const second = expectCompileSuccess(
+      await compile("updated companion test"),
+    );
     expect(second.tests?.cases.map((test) => test.description)).toEqual([
       "updated companion test",
     ]);
@@ -41,16 +45,18 @@ describe("sdk tests collection", { timeout: 120_000 }, () => {
 
   it("keeps explicit boundary export includes scoped to the runnable module", async () => {
     const sdk = createSdk();
-    const result = expectCompileSuccess(await sdk.compile({
-      includeTests: true,
-      boundaryExports: { include: ["main"] },
-      source: `pub fn main() -> i32
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        includeTests: true,
+        boundaryExports: { include: ["main"] },
+        source: `pub fn main() -> i32
   42
 
 test "passes":
   1
 `,
-    }));
+      }),
+    );
 
     expect(result.tests?.cases.length).toBe(1);
     await expect(result.run({ entryName: "main" })).resolves.toBe(42);
@@ -58,9 +64,10 @@ test "passes":
 
   it("discovers and runs tests", async () => {
     const sdk = createSdk();
-    const result = expectCompileSuccess(await sdk.compile({
-      includeTests: true,
-      source: `use std::msgpack::self as __std_msgpack
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        includeTests: true,
+        source: `use std::msgpack::self as __std_msgpack
 use std::string::self as __std_string
 
 eff Test
@@ -80,7 +87,8 @@ test "effect skip":
 test only "only runs when respected":
   1
 `,
-    }));
+      }),
+    );
 
     expect(result.tests).toBeDefined();
     expect(result.tests?.cases.length).toBe(4);
@@ -88,7 +96,11 @@ test only "only runs when respected":
 
     const events: TestEvent[] = [];
     const summary = await result.tests!.run({
-      reporter: { onEvent: (event) => { events.push(event); } },
+      reporter: {
+        onEvent: (event) => {
+          events.push(event);
+        },
+      },
     });
 
     expect(summary.total).toBe(4);
@@ -96,16 +108,74 @@ test only "only runs when respected":
     expect(summary.failed).toBe(0);
     expect(summary.skipped).toBe(3);
 
-    const resultEvents = events.filter(
-      (event) => event.type === "test:result",
-    );
+    const resultEvents = events.filter((event) => event.type === "test:result");
     expect(resultEvents).toHaveLength(4);
-    expect(events.some((event) => event.type === "discovery:start")).toBe(
-      true,
-    );
+    expect(events.some((event) => event.type === "discovery:start")).toBe(true);
     expect(events.some((event) => event.type === "discovery:complete")).toBe(
       true,
     );
     expect(events.some((event) => event.type === "run:complete")).toBe(true);
+  });
+
+  it("reports numeric assertion details with source-aware test metadata", async () => {
+    const sdk = createSdk();
+    const result = expectCompileSuccess(
+      await sdk.compile({
+        includeTests: true,
+        entryPath: "assertion.voyd",
+        source: `use std::test::assertions::all
+use std::test::numeric::assert_close
+
+test "numeric context":
+  assert_close(4.0, to: 5.0, absolute: 0.25, relative: 0.0, message: "energy drift")
+
+test "invalid tolerance":
+  assert_close(4.0, to: 5.0, absolute: -0.25, relative: 0.0)
+`,
+      }),
+    );
+
+    const events: TestEvent[] = [];
+    const summary = await result.tests!.run({
+      reporter: {
+        onEvent: (event) => {
+          events.push(event);
+        },
+      },
+    });
+
+    expect(summary.failed).toBe(2);
+    const failed = events.find(
+      (event) =>
+        event.type === "test:result" &&
+        event.result.status === "failed" &&
+        event.result.test.description === "numeric context",
+    );
+    expect(failed?.type).toBe("test:result");
+    if (failed?.type !== "test:result") return;
+    expect(failed.result.error).toBeInstanceOf(Error);
+    expect((failed.result.error as Error).message).toContain("energy drift");
+    expect((failed.result.error as Error).message).toContain("expected=5");
+    expect((failed.result.error as Error).message).toContain("actual=4");
+    expect(failed.result.test.location).toMatchObject({
+      filePath: expect.stringMatching(/(^|[\\/])assertion\.voyd$/),
+      startLine: 4,
+    });
+
+    const invalidTolerance = events.find(
+      (event) =>
+        event.type === "test:result" &&
+        event.result.status === "failed" &&
+        event.result.test.description === "invalid tolerance",
+    );
+    expect(invalidTolerance?.type).toBe("test:result");
+    if (invalidTolerance?.type !== "test:result") return;
+    const invalidMessage = (invalidTolerance.result.error as Error).message;
+    expect(invalidMessage).toContain("expected=5");
+    expect(invalidMessage).toContain("actual=4");
+    expect(invalidMessage).toContain("delta=1");
+    expect(invalidMessage).toContain("absolute_tolerance=-0.25");
+    expect(invalidMessage).toContain("relative_tolerance=0");
+    expect(invalidMessage).toContain("requires finite non-negative");
   });
 });

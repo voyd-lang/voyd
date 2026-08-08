@@ -7,3 +7,11 @@ pub fn main()
     <span class="big">hi</span>
     <i>This is italic</i>
   </div>
+
+pub fn empty_children_with_shadows()
+  let Array = 1
+  let HtmlNode = 2
+  <input />
+
+pub fn option_attributes()
+  <option value="voyd" selected={true}>Voyd</option>

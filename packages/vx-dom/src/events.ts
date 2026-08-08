@@ -18,6 +18,7 @@ export const listenerKey = (event: EventDescriptor): string =>
     bool(event.options?.passive),
     bool(event.options?.preventDefault),
     bool(event.options?.stopPropagation),
+    bool(event.options?.pointerCapture),
   ].join(":");
 
 export function toListenerOptions(options: EventOptions | undefined): AddEventListenerOptions {
@@ -95,6 +96,9 @@ function normalizeMouseEvent(
 ): MouseEventPayload {
   const payload: MouseEventPayload = {
     kind,
+    pointer_id: "pointerId" in event && typeof event.pointerId === "number"
+      ? event.pointerId
+      : 0,
     x: event.x ?? event.clientX,
     y: event.y ?? event.clientY,
     client_x: event.clientX,

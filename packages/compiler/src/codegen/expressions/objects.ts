@@ -1,5 +1,8 @@
 import binaryen from "binaryen";
-import { refCast, structGetFieldValue } from "@voyd-lang/lib/binaryen-gc/index.js";
+import {
+  refCast,
+  structGetFieldValue,
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
   CompiledExpression,
@@ -46,6 +49,10 @@ import { tryCompileProjectedFieldAccess } from "../projected-element-views.js";
 import { exactNominalForRuntimeTypeCheckElision } from "../optimization/runtime-type-checks.js";
 import { tryCompileSemanticCopyForwardedFieldAccess } from "../optimization/semantic-copy-forwarding.js";
 import { compileCallArgExpressionsWithTemps } from "./call/shared.js";
+import {
+  stabilizeValueForReplay,
+  withReplayableSetup,
+} from "../replayable-value.js";
 
 export const compileObjectLiteralExpr = (
   expr: HirObjectLiteralExpr,
@@ -80,7 +87,11 @@ export const compileObjectLiteralExpr = (
     expr.entries.length === 0;
   if (isDirectSomeToOptional) {
     const valueEntry = expr.entries[0]!;
-    const payloadTypeId = getRequiredExprType(valueEntry.value, ctx, typeInstanceId);
+    const payloadTypeId = getRequiredExprType(
+      valueEntry.value,
+      ctx,
+      typeInstanceId,
+    );
     const payload = compileExpr({
       exprId: valueEntry.value,
       ctx,
@@ -141,15 +152,15 @@ export const compileObjectLiteralExpr = (
   const usesInlineLayout = structInfo.layoutKind === "value-object";
 
   structInfo.fields.forEach((field) => {
-      fieldTemps.set(
-        field.name,
-        allocateTempLocal(
-          usesInlineLayout ? field.wasmType : field.heapWasmType,
-          fnCtx,
-          field.typeId,
-          ctx,
-        ),
-      );
+    fieldTemps.set(
+      field.name,
+      allocateTempLocal(
+        usesInlineLayout ? field.wasmType : field.heapWasmType,
+        fnCtx,
+        field.typeId,
+        ctx,
+      ),
+    );
   });
 
   const entryValues = compileCallArgExpressionsWithTemps({
@@ -173,7 +184,7 @@ export const compileObjectLiteralExpr = (
       const binding = fieldTemps.get(entry.name);
       if (!binding || !field) {
         throw new Error(
-          `object literal cannot set unknown field ${entry.name}`
+          `object literal cannot set unknown field ${entry.name}`,
         );
       }
       const expectedTypeId = field.typeId;
@@ -200,11 +211,7 @@ export const compileObjectLiteralExpr = (
       return;
     }
 
-    const spreadType = getRequiredExprType(
-      entry.value,
-      ctx,
-      typeInstanceId
-    );
+    const spreadType = getRequiredExprType(entry.value, ctx, typeInstanceId);
     const spreadInfo = getStructuralTypeInfo(spreadType, ctx);
     if (!spreadInfo) {
       throw new Error("object spread requires a structural object");
@@ -235,6 +242,7 @@ export const compileObjectLiteralExpr = (
         field: sourceField,
         pointer: () => loadLocalValue(spreadTemp, ctx),
         ctx,
+        fnCtx,
       });
       const expectedTypeId = structInfo.fieldMap.get(sourceField.name)?.typeId;
       const coerced = coerceValueToType({
@@ -273,24 +281,23 @@ export const compileObjectLiteralExpr = (
         if (!binding) {
           throw new Error(`missing binding for field ${field.name}`);
         }
-        const noneValue =
-          usesInlineLayout
-            ? compileOptionalNoneValue({
+        const noneValue = usesInlineLayout
+          ? compileOptionalNoneValue({
+              targetTypeId: field.typeId,
+              ctx,
+              fnCtx,
+            })
+          : lowerValueForHeapField({
+              value: compileOptionalNoneValue({
                 targetTypeId: field.typeId,
                 ctx,
                 fnCtx,
-              })
-            : lowerValueForHeapField({
-                value: compileOptionalNoneValue({
-                  targetTypeId: field.typeId,
-                  ctx,
-                  fnCtx,
-                }),
-                typeId: field.typeId,
-                targetType: binding.type,
-                ctx,
-                fnCtx,
-              });
+              }),
+              typeId: field.typeId,
+              targetType: binding.type,
+              ctx,
+              fnCtx,
+            });
         ops.push(
           storeLocalValue({
             binding,
@@ -329,6 +336,7 @@ export const compileObjectLiteralExpr = (
     structInfo,
     fieldValues,
     ctx,
+    fnCtx,
   });
   const direct = storeDirectOutResultValue({
     value: literal,
@@ -370,7 +378,7 @@ export const compileObjectLiteralExpr = (
     expr: ctx.mod.block(
       null,
       ops,
-      binaryen.getExpressionType(stabilizedLiteral)
+      binaryen.getExpressionType(stabilizedLiteral),
     ),
     usedReturnCall: false,
   };
@@ -467,6 +475,7 @@ export const compileTupleExpr = (
     structInfo,
     fieldValues,
     ctx,
+    fnCtx,
   });
   const direct = storeDirectOutResultValue({
     value: tupleValue,
@@ -508,7 +517,7 @@ export const compileTupleExpr = (
     expr: ctx.mod.block(
       null,
       ops,
-      binaryen.getExpressionType(stabilizedTupleValue)
+      binaryen.getExpressionType(stabilizedTupleValue),
     ),
     usedReturnCall: false,
   };
@@ -570,7 +579,7 @@ export const compileFieldAccessExpr = (
   expr: HirFieldAccessExpr,
   ctx: CodegenContext,
   fnCtx: FunctionContext,
-  compileExpr: ExpressionCompiler
+  compileExpr: ExpressionCompiler,
 ): CompiledExpression => {
   const forwardedBinding = fnCtx.stableFieldLoadBindings?.get(expr.id);
   if (forwardedBinding) {
@@ -591,7 +600,11 @@ export const compileFieldAccessExpr = (
 
   const typeInstanceId = fnCtx.typeInstanceId ?? fnCtx.instanceId;
   const expectedFieldTypeId = getRequiredExprType(expr.id, ctx, typeInstanceId);
-  const expectedFieldWasmType = getExprBinaryenType(expr.id, ctx, typeInstanceId);
+  const expectedFieldWasmType = getExprBinaryenType(
+    expr.id,
+    ctx,
+    typeInstanceId,
+  );
   const copyForwarded = tryCompileSemanticCopyForwardedFieldAccess({
     expr,
     expectedFieldTypeId,
@@ -637,7 +650,11 @@ export const compileFieldAccessExpr = (
     }
   }
 
-  const actualTargetTypeId = getUnresolvedExprType(expr.target, ctx, typeInstanceId);
+  const actualTargetTypeId = getUnresolvedExprType(
+    expr.target,
+    ctx,
+    typeInstanceId,
+  );
   const bindingActualTargetTypeId =
     targetExpr?.exprKind === "identifier"
       ? getRequiredBinding(targetExpr.symbol, ctx, fnCtx).typeId
@@ -653,9 +670,8 @@ export const compileFieldAccessExpr = (
       : undefined;
   const bindingMatchesDeclaredSome =
     declaredOptionalInfo &&
-    typeof bindingActualTargetTypeId === "number"
-      &&
-      !getOptionalLayoutInfo(bindingActualTargetTypeId, ctx)
+    typeof bindingActualTargetTypeId === "number" &&
+    !getOptionalLayoutInfo(bindingActualTargetTypeId, ctx)
       ? ctx.program.types.unify(
           bindingActualTargetTypeId,
           declaredOptionalInfo.someType,
@@ -670,7 +686,11 @@ export const compileFieldAccessExpr = (
   let sourceTargetTypeId = bindingActualTargetTypeId ?? actualTargetTypeId;
   const actualStructInfo = getStructuralTypeInfo(actualTargetTypeId, ctx);
 
-  const requiredTargetTypeId = getRequiredExprType(expr.target, ctx, typeInstanceId);
+  const requiredTargetTypeId = getRequiredExprType(
+    expr.target,
+    ctx,
+    typeInstanceId,
+  );
   const requiredStructInfo = getStructuralTypeInfo(requiredTargetTypeId, ctx);
   if (
     expr.field === "value" &&
@@ -684,7 +704,9 @@ export const compileFieldAccessExpr = (
   if (!structInfo) {
     throw new Error("field access requires a structural object");
   }
-  const targetTypeId = requiredStructInfo ? requiredTargetTypeId : actualTargetTypeId;
+  const targetTypeId = requiredStructInfo
+    ? requiredTargetTypeId
+    : actualTargetTypeId;
   const exactNominalTypeId = exactNominalForRuntimeTypeCheckElision({
     expr,
     targetTypeId,
@@ -716,8 +738,9 @@ export const compileFieldAccessExpr = (
     targetExpr?.exprKind === "identifier"
       ? getRequiredBinding(targetExpr.symbol, ctx, fnCtx)
       : undefined;
-  const targetStorageRef =
-    targetBinding ? loadBindingStorageRef(targetBinding, ctx) : undefined;
+  const targetStorageRef = targetBinding
+    ? loadBindingStorageRef(targetBinding, ctx)
+    : undefined;
   const borrowedTargetPointer =
     targetBinding &&
     targetStorageRef &&
@@ -734,14 +757,13 @@ export const compileFieldAccessExpr = (
     targetTypeId === optionalInfo.someType &&
     expr.field === "value"
   ) {
-    if (
-      targetExpr?.exprKind === "identifier" &&
-      bindingMatchesDeclaredSome
-    ) {
+    if (targetExpr?.exprKind === "identifier" && bindingMatchesDeclaredSome) {
       const someInfo = getStructuralTypeInfo(optionalInfo.someType, ctx);
       const someField = someInfo?.fieldMap.get("value");
       if (!someInfo || !someField) {
-        throw new Error("inline optional Some member is missing its value field");
+        throw new Error(
+          "inline optional Some member is missing its value field",
+        );
       }
       const pointerTemp = allocateTempLocal(
         someInfo.interfaceType,
@@ -778,6 +800,7 @@ export const compileFieldAccessExpr = (
         }),
         typeId: someField.typeId,
         ctx,
+        fnCtx,
       });
       const value = coerceExprToWasmType({
         expr: coerceValueToType({
@@ -795,56 +818,41 @@ export const compileFieldAccessExpr = (
         usedReturnCall: false,
       };
     }
-    const someLayout = getInlineUnionLayout(sourceTargetTypeId, ctx).members.find(
-      (member) => member.typeId === optionalInfo.someType,
-    );
+    const someLayout = getInlineUnionLayout(
+      sourceTargetTypeId,
+      ctx,
+    ).members.find((member) => member.typeId === optionalInfo.someType);
     if (!someLayout) {
       throw new Error("inline optional layout is missing Some member");
     }
     const targetValue =
       targetExpr?.exprKind === "identifier"
-        ? loadBindingValue(getRequiredBinding(targetExpr.symbol, ctx, fnCtx), ctx, fnCtx)
-        : (() => {
-            const targetTemp = allocateTempLocal(
-              wasmTypeFor(sourceTargetTypeId, ctx),
-              fnCtx,
-              sourceTargetTypeId,
-              ctx,
-            );
-            const storeTarget = storeLocalValue({
-              binding: targetTemp,
-              value: coerceValueToType({
-                value: compileExpr({
-                  exprId: expr.target,
-                  ctx,
-                  fnCtx,
-                  expectedResultTypeId: sourceTargetTypeId,
-                }).expr,
-                actualType: sourceTargetTypeId,
-                targetType: sourceTargetTypeId,
-                ctx,
-                fnCtx,
-              }),
+        ? loadBindingValue(
+            getRequiredBinding(targetExpr.symbol, ctx, fnCtx),
+            ctx,
+            fnCtx,
+          )
+        : coerceValueToType({
+            value: compileExpr({
+              exprId: expr.target,
               ctx,
               fnCtx,
-            });
-            return ctx.mod.block(
-              null,
-              [storeTarget, loadLocalValue(targetTemp, ctx)],
-              wasmTypeFor(sourceTargetTypeId, ctx),
-            );
-          })();
-    const payload =
-      someLayout.abiTypes.length === 1
-        ? ctx.mod.tuple.extract(targetValue, someLayout.abiStart)
-        : ctx.mod.tuple.make(
-            someLayout.abiTypes.map((_, index) =>
-              ctx.mod.tuple.extract(targetValue, someLayout.abiStart + index),
-            ),
-          );
+              expectedResultTypeId: sourceTargetTypeId,
+            }).expr,
+            actualType: sourceTargetTypeId,
+            targetType: sourceTargetTypeId,
+            ctx,
+            fnCtx,
+          });
+    const capturedPayload = captureInlineUnionMemberPayload({
+      value: targetValue,
+      member: someLayout,
+      ctx,
+      fnCtx,
+    });
     const value = coerceExprToWasmType({
       expr: coerceValueToType({
-        value: payload,
+        value: capturedPayload.value,
         actualType: optionalInfo.innerType,
         targetType: expectedFieldTypeId,
         ctx,
@@ -854,7 +862,11 @@ export const compileFieldAccessExpr = (
       ctx,
     });
     return {
-      expr: value,
+      expr: withReplayableSetup({
+        replayable: capturedPayload.replayable,
+        value,
+        ctx,
+      }),
       usedReturnCall: false,
     };
   }
@@ -866,6 +878,7 @@ export const compileFieldAccessExpr = (
         field: actualField,
         pointer: () => borrowedTargetPointer,
         ctx,
+        fnCtx,
       });
       const coerced = coerceValueToType({
         value: raw,
@@ -925,6 +938,7 @@ export const compileFieldAccessExpr = (
       field: actualField,
       pointer: () => loadLocalValue(targetTemp, ctx),
       ctx,
+      fnCtx,
     });
     const coerced = coerceValueToType({
       value: raw,
@@ -952,11 +966,7 @@ export const compileFieldAccessExpr = (
     return {
       expr: ctx.mod.block(
         null,
-        [
-          storeTarget,
-          storeField,
-          loadLocalValue(fieldTemp, ctx),
-        ],
+        [storeTarget, storeField, loadLocalValue(fieldTemp, ctx)],
         expectedFieldWasmType,
       ),
       usedReturnCall: false,
@@ -974,26 +984,27 @@ export const compileFieldAccessExpr = (
     ? undefined
     : storeLocalValue({
         binding: pointerTemp,
-        value: targetExpr?.exprKind === "identifier"
-          ? coerceValueToType({
-              value: loadBindingValue(targetBinding!, ctx, fnCtx),
-              actualType: sourceTargetTypeId,
-              targetType: targetTypeId,
-              ctx,
-              fnCtx,
-            })
-          : coerceValueToType({
-              value: compileExpr({
-                exprId: expr.target,
+        value:
+          targetExpr?.exprKind === "identifier"
+            ? coerceValueToType({
+                value: loadBindingValue(targetBinding!, ctx, fnCtx),
+                actualType: sourceTargetTypeId,
+                targetType: targetTypeId,
                 ctx,
                 fnCtx,
-                expectedResultTypeId: targetTypeId,
-              }).expr,
-              actualType: sourceTargetTypeId,
-              targetType: targetTypeId,
-              ctx,
-              fnCtx,
-            }),
+              })
+            : coerceValueToType({
+                value: compileExpr({
+                  exprId: expr.target,
+                  ctx,
+                  fnCtx,
+                  expectedResultTypeId: targetTypeId,
+                }).expr,
+                actualType: sourceTargetTypeId,
+                targetType: targetTypeId,
+                ctx,
+                fnCtx,
+              }),
         ctx,
         fnCtx,
       });
@@ -1003,6 +1014,7 @@ export const compileFieldAccessExpr = (
     pointer: () => directPointer ?? loadLocalValue(pointerTemp, ctx),
     exactNominalTypeId,
     ctx,
+    fnCtx,
   });
 
   const coerced = coerceValueToType({
@@ -1019,10 +1031,32 @@ export const compileFieldAccessExpr = (
   });
 
   return {
-    expr:
-      storePointer
-        ? ctx.mod.block(null, [storePointer, value], expectedFieldWasmType)
-        : value,
+    expr: storePointer
+      ? ctx.mod.block(null, [storePointer, value], expectedFieldWasmType)
+      : value,
     usedReturnCall: false,
   };
+};
+
+export const captureInlineUnionMemberPayload = ({
+  value,
+  member,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  member: ReturnType<typeof getInlineUnionLayout>["members"][number];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+}) => {
+  const replayable = stabilizeValueForReplay({ value, ctx, fnCtx });
+  const payload =
+    member.abiTypes.length === 1
+      ? ctx.mod.tuple.extract(replayable.read(), member.abiStart)
+      : ctx.mod.tuple.make(
+          member.abiTypes.map((_, index) =>
+            ctx.mod.tuple.extract(replayable.read(), member.abiStart + index),
+          ),
+        );
+  return { replayable, value: payload };
 };

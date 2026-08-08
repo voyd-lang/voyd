@@ -1,0 +1,59 @@
+use std::shared_cell::SharedCell
+use std::test::assertions::assert
+
+test "assert_close supports absolute relative infinity and signed-zero policies":
+  assert_close(1.0000000000005, to: 1.0, absolute: 0.000000000001, relative: 0.0)
+  assert_close(1000000.5, to: 1000000.0, absolute: 0.0, relative: 0.000001)
+  assert_close(1.0 / 0.0, to: 1.0 / 0.0)
+  assert_close((0.0 - 1.0) * 0.0, to: 0.0, absolute: 0.0, relative: 0.0)
+  assert_close(
+    f32_from_f64(1.000001),
+    to: f32_from_f64(1.0),
+    absolute: f32_from_f64(0.00001),
+    relative: f32_from_f64(0.0)
+  )
+
+test "assert_close failure invokes the diagnostic test operation":
+  let failures = SharedCell(0)
+  try
+    assert_close(
+      4.0,
+      to: 5.0,
+      absolute: 0.25,
+      relative: 0.0,
+      message: "energy conservation"
+    )
+  Test::fail_with(resume, _pointer, _byte_len):
+    failures.with_mut((~count) => count = count + 1)
+    resume()
+  Test::fail(resume):
+    resume()
+  Test::skip(resume):
+    resume()
+  Test::log(resume):
+    resume()
+
+  let failure_count = failures.with((count) => count + 0)
+  assert(failure_count, eq: 1)
+
+test "assert_close rejects NaN unequal infinities and invalid tolerances":
+  let failures = SharedCell(0)
+  try
+    assert_close(0.0 / 0.0, to: 0.0 / 0.0)
+    assert_close(1.0 / 0.0, to: 0.0 - (1.0 / 0.0))
+    assert_close(1.0, to: 1.0 / 0.0)
+    assert_close(1.0, to: 1.0, absolute: -1.0)
+  Test::fail_with(resume, _pointer, _byte_len):
+    failures.with_mut((~count) => count = count + 1)
+    resume()
+  Test::fail(resume):
+    resume()
+  Test::skip(resume):
+    resume()
+  Test::log(resume):
+    resume()
+  let failure_count = failures.with((count) => count + 0)
+  assert(failure_count, eq: 4)
+
+@intrinsic(name: "__f32_demote_f64")
+fn f32_from_f64(value: f64): () -> f32 __f32_demote_f64(value)

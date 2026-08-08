@@ -535,6 +535,10 @@ export interface HirCallExpr extends HirExpressionBase {
   exprKind: "call";
   callee: HirExprId;
   args: readonly { label?: string; expr: HirExprId }[];
+  /** Exact identity selected by an effect-qualified call. */
+  effectOperation?: { effect: SymbolId; operation: SymbolId };
+  /** Explicit initializer spelling suggested when type-call sugar is invalid. */
+  constructorInit?: string;
   typeArguments?: readonly HirTypeExpr[];
   targetTypeArguments?: readonly HirTypeExpr[];
   /** Static trait method dispatch target, resolved during generic specialization. */

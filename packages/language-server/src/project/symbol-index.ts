@@ -78,7 +78,8 @@ const throwIfCancelled = (isCancelled: (() => boolean) | undefined): void => {
   throw error;
 };
 
-const keyForSymbol = ({ moduleId, symbol }: SymbolRef): string => `${moduleId}::${symbol}`;
+const keyForSymbol = ({ moduleId, symbol }: SymbolRef): string =>
+  `${moduleId}::${symbol}`;
 const keyForMacro = ({
   moduleId,
   macroId,
@@ -148,7 +149,9 @@ const pushOccurrence = ({
   byKey.set(occurrence.canonicalKey, forKey);
 };
 
-const resolveFunctionNameSyntax = (form: Form | undefined): Syntax | undefined => {
+const resolveFunctionNameSyntax = (
+  form: Form | undefined,
+): Syntax | undefined => {
   if (!form) {
     return undefined;
   }
@@ -157,7 +160,9 @@ const resolveFunctionNameSyntax = (form: Form | undefined): Syntax | undefined =
   return parsed?.signature.name;
 };
 
-const resolveTypeAliasNameSyntax = (form: Form | undefined): Syntax | undefined => {
+const resolveTypeAliasNameSyntax = (
+  form: Form | undefined,
+): Syntax | undefined => {
   if (!form) {
     return undefined;
   }
@@ -166,7 +171,9 @@ const resolveTypeAliasNameSyntax = (form: Form | undefined): Syntax | undefined 
   return parsed?.name;
 };
 
-const resolveModuleLetNameSyntax = (form: Form | undefined): Syntax | undefined => {
+const resolveModuleLetNameSyntax = (
+  form: Form | undefined,
+): Syntax | undefined => {
   if (!form) {
     return undefined;
   }
@@ -175,7 +182,9 @@ const resolveModuleLetNameSyntax = (form: Form | undefined): Syntax | undefined 
   return parsed?.name;
 };
 
-const resolveObjectNameSyntax = (form: Form | undefined): Syntax | undefined => {
+const resolveObjectNameSyntax = (
+  form: Form | undefined,
+): Syntax | undefined => {
   if (!form) {
     return undefined;
   }
@@ -193,7 +202,9 @@ const resolveTraitNameSyntax = (form: Form | undefined): Syntax | undefined => {
   return parsed?.name;
 };
 
-const resolveEffectNameSyntax = (form: Form | undefined): Syntax | undefined => {
+const resolveEffectNameSyntax = (
+  form: Form | undefined,
+): Syntax | undefined => {
   if (!form) {
     return undefined;
   }
@@ -202,7 +213,9 @@ const resolveEffectNameSyntax = (form: Form | undefined): Syntax | undefined => 
   return parsed?.name;
 };
 
-const resolveEffectOperationNameSyntax = (form: Form | undefined): Syntax | undefined => {
+const resolveEffectOperationNameSyntax = (
+  form: Form | undefined,
+): Syntax | undefined => {
   if (!form) {
     return undefined;
   }
@@ -257,7 +270,11 @@ const collectPatternSymbols = (
     binding?: unknown;
   };
 
-  if (typed.kind === "identifier" && typeof typed.symbol === "number" && typed.span) {
+  if (
+    typed.kind === "identifier" &&
+    typeof typed.symbol === "number" &&
+    typed.span
+  ) {
     return [{ symbol: typed.symbol, span: typed.span }];
   }
 
@@ -270,7 +287,9 @@ const collectPatternSymbols = (
   }
 
   if (typed.kind === "tuple") {
-    return (typed.elements ?? []).flatMap((entry) => collectPatternSymbols(entry));
+    return (typed.elements ?? []).flatMap((entry) =>
+      collectPatternSymbols(entry),
+    );
   }
 
   if (typed.kind === "type") {
@@ -295,8 +314,9 @@ const isSourceSpan = (value: unknown): value is SourceSpan => {
 
 const collectNamedTypeReferences = (
   value: unknown,
-): Array<{ symbol: SymbolId; span: SourceSpan }> => {
-  const results: Array<{ symbol: SymbolId; span: SourceSpan }> = [];
+): Array<{ symbol: SymbolId; span: SourceSpan; ast?: number }> => {
+  const results: Array<{ symbol: SymbolId; span: SourceSpan; ast?: number }> =
+    [];
 
   const visit = (entry: unknown): void => {
     if (!entry || typeof entry !== "object") {
@@ -312,6 +332,7 @@ const collectNamedTypeReferences = (
       typeKind?: unknown;
       symbol?: unknown;
       span?: unknown;
+      ast?: unknown;
     };
 
     if (
@@ -319,7 +340,11 @@ const collectNamedTypeReferences = (
       typeof candidate.symbol === "number" &&
       isSourceSpan(candidate.span)
     ) {
-      results.push({ symbol: candidate.symbol, span: candidate.span });
+      results.push({
+        symbol: candidate.symbol,
+        span: candidate.span,
+        ...(typeof candidate.ast === "number" ? { ast: candidate.ast } : {}),
+      });
     }
 
     Object.values(entry).forEach((item) => visit(item));
@@ -356,7 +381,9 @@ export const buildSymbolIndex = async ({
       return undefined;
     }
 
-    const target = module.binding.imports.find((entry) => entry.local === ref.symbol)?.target;
+    const target = module.binding.imports.find(
+      (entry) => entry.local === ref.symbol,
+    )?.target;
     if (!target) {
       return undefined;
     }
@@ -364,7 +391,9 @@ export const buildSymbolIndex = async ({
     return { moduleId: target.moduleId, symbol: target.symbol };
   };
 
-  const canonicalize = createCanonicalSymbolRefResolver({ resolveImportTarget });
+  const canonicalize = createCanonicalSymbolRefResolver({
+    resolveImportTarget,
+  });
 
   const symbolNameFor = (ref: SymbolRef): string => {
     const module = semantics.get(ref.moduleId);
@@ -426,6 +455,16 @@ export const buildSymbolIndex = async ({
       });
     });
 
+    entry.binding.effects.forEach((effect) => {
+      remember(effect.symbol, effect.documentation);
+      effect.operations.forEach((operation) => {
+        remember(operation.symbol, operation.documentation);
+        operation.parameters.forEach((parameter) => {
+          remember(parameter.symbol, parameter.documentation);
+        });
+      });
+    });
+
     symbolDocumentationByModule.set(moduleId, docsBySymbol);
   });
 
@@ -439,10 +478,12 @@ export const buildSymbolIndex = async ({
     symbolRef,
     location,
     kind,
+    occurrenceName,
   }: {
     symbolRef: SymbolRef;
     location: SourceLocation | undefined;
     kind: SymbolOccurrence["kind"];
+    occurrenceName?: string;
   }): void => {
     if (!location) {
       return;
@@ -463,7 +504,7 @@ export const buildSymbolIndex = async ({
         symbol: symbolRef.symbol,
         uri: toFileUri(filePath),
         range,
-        name: symbolNameFor(symbolRef),
+        name: occurrenceName ?? symbolNameFor(symbolRef),
         kind,
       },
       byUri: occurrencesByUri,
@@ -551,10 +592,12 @@ export const buildSymbolIndex = async ({
     symbolRef,
     span,
     kind,
+    occurrenceName,
   }: {
     symbolRef: SymbolRef;
     span: SourceSpan;
     kind: SymbolOccurrence["kind"];
+    occurrenceName?: string;
   }): void => {
     const filePath = path.resolve(span.file);
     const lineIndex = lineIndexByFile.get(filePath);
@@ -571,7 +614,7 @@ export const buildSymbolIndex = async ({
         symbol: symbolRef.symbol,
         uri: toFileUri(filePath),
         range,
-        name: symbolNameFor(symbolRef),
+        name: occurrenceName ?? symbolNameFor(symbolRef),
         kind,
       },
       byUri: occurrencesByUri,
@@ -589,7 +632,9 @@ export const buildSymbolIndex = async ({
       return [];
     }
 
-    const fromFunction = module.binding.functions.find((fn) => fn.symbol === symbol);
+    const fromFunction = module.binding.functions.find(
+      (fn) => fn.symbol === symbol,
+    );
     if (fromFunction) {
       return fromFunction.params;
     }
@@ -602,7 +647,9 @@ export const buildSymbolIndex = async ({
     }
 
     for (const effect of module.binding.effects) {
-      const operation = effect.operations.find((entry) => entry.symbol === symbol);
+      const operation = effect.operations.find(
+        (entry) => entry.symbol === symbol,
+      );
       if (operation) {
         return operation.parameters;
       }
@@ -617,12 +664,14 @@ export const buildSymbolIndex = async ({
   }: {
     target: SymbolRef;
     parameter: BoundParameterLike;
-  }): {
-    canonicalKey: string;
-    moduleId: string;
-    symbol: SymbolId;
-    name: string;
-  } | undefined => {
+  }):
+    | {
+        canonicalKey: string;
+        moduleId: string;
+        symbol: SymbolId;
+        name: string;
+      }
+    | undefined => {
     if (!parameter.label) {
       return undefined;
     }
@@ -678,7 +727,9 @@ export const buildSymbolIndex = async ({
       canonicalKey: labelTarget.canonicalKey,
       moduleId: labelTarget.moduleId,
       symbol: labelTarget.symbol,
-      location: parameter.labelAst.location,
+      location:
+        parameter.labelAst.macroProvenance?.definition ??
+        parameter.labelAst.location,
       kind: "declaration",
       name: labelTarget.name,
     });
@@ -688,10 +739,12 @@ export const buildSymbolIndex = async ({
     symbolRef,
     span,
     localName,
+    occurrenceName,
   }: {
     symbolRef: SymbolRef;
     span: SourceSpan;
     localName: string;
+    occurrenceName?: string;
   }): void => {
     const filePath = path.resolve(span.file);
     const source = sourceByFile.get(filePath);
@@ -716,7 +769,10 @@ export const buildSymbolIndex = async ({
     }
 
     const range = selected
-      ? lineIndex.range(start + selected.index, start + selected.index + localName.length)
+      ? lineIndex.range(
+          start + selected.index,
+          start + selected.index + localName.length,
+        )
       : spanRange({ span, lineIndex });
     if (!range) {
       return;
@@ -730,7 +786,7 @@ export const buildSymbolIndex = async ({
         symbol: symbolRef.symbol,
         uri: toFileUri(filePath),
         range,
-        name: symbolNameFor(symbolRef),
+        name: occurrenceName ?? symbolNameFor(symbolRef),
         kind: "reference",
       },
       byUri: occurrencesByUri,
@@ -751,7 +807,9 @@ export const buildSymbolIndex = async ({
   graph.modules.forEach((moduleNode, moduleId) => {
     const filePath = path.resolve(
       moduleNode.ast.location?.filePath ??
-        (moduleNode.origin.kind === "file" ? moduleNode.origin.filePath : moduleId),
+        (moduleNode.origin.kind === "file"
+          ? moduleNode.origin.filePath
+          : moduleId),
     );
     moduleIdByFilePath.set(filePath, moduleId);
 
@@ -828,6 +886,74 @@ export const buildSymbolIndex = async ({
     const syntaxById = collectSyntaxById(moduleNode.ast);
 
     const moduleRef = (symbol: SymbolId): SymbolRef => ({ moduleId, symbol });
+    const addReferenceOccurrence = ({
+      symbol,
+      span,
+      ast,
+    }: {
+      symbol: SymbolId;
+      span: SourceSpan;
+      ast?: number;
+    }): void => {
+      const referenceSyntax =
+        typeof ast === "number" ? syntaxById.get(ast) : undefined;
+      const occurrenceName =
+        referenceSyntax &&
+        (isIdentifierAtom(referenceSyntax) ||
+          isInternalIdentifierAtom(referenceSyntax))
+          ? referenceSyntax.value
+          : undefined;
+      const definitionLocation = referenceSyntax?.macroProvenance?.definition;
+      if (definitionLocation) {
+        addOccurrenceFromLocation({
+          symbolRef: moduleRef(symbol),
+          location: definitionLocation,
+          kind: "reference",
+          occurrenceName,
+        });
+        return;
+      }
+      addOccurrenceFromSpan({
+        symbolRef: moduleRef(symbol),
+        span,
+        kind: "reference",
+        occurrenceName,
+      });
+    };
+    const addDeclarationOccurrence = ({
+      symbol,
+      syntax,
+      span,
+    }: {
+      symbol: SymbolId;
+      syntax?: Syntax;
+      span?: SourceSpan;
+    }): void => {
+      const declaredAt = entry.binding.symbolTable.getSymbol(symbol).declaredAt;
+      const declarationSyntax =
+        syntax ??
+        (typeof declaredAt === "number"
+          ? syntaxById.get(declaredAt)
+          : undefined);
+      const location =
+        declarationSyntax?.macroProvenance?.definition ??
+        declarationSyntax?.location;
+      if (location) {
+        addOccurrenceFromLocation({
+          symbolRef: moduleRef(symbol),
+          location,
+          kind: "declaration",
+        });
+        return;
+      }
+      if (span) {
+        addOccurrenceFromSpan({
+          symbolRef: moduleRef(symbol),
+          span,
+          kind: "declaration",
+        });
+      }
+    };
     const constructorOwnerForOverloadSet = (
       overloadSetId: number,
     ): SymbolRef | undefined => {
@@ -836,14 +962,18 @@ export const buildSymbolIndex = async ({
         return undefined;
       }
 
-      const overloadSymbols = new Set(overloadSet.functions.map((fn) => fn.symbol));
+      const overloadSymbols = new Set(
+        overloadSet.functions.map((fn) => fn.symbol),
+      );
       for (const [targetSymbol, methods] of entry.binding.staticMethods) {
         const constructors = methods.get("init");
         if (!constructors) {
           continue;
         }
 
-        if (Array.from(constructors).some((symbol) => overloadSymbols.has(symbol))) {
+        if (
+          Array.from(constructors).some((symbol) => overloadSymbols.has(symbol))
+        ) {
           return moduleRef(targetSymbol);
         }
       }
@@ -855,11 +985,36 @@ export const buildSymbolIndex = async ({
       if (!imported.target || !imported.span) {
         return;
       }
+      const metadata = entry.binding.symbolTable.getSymbol(imported.local)
+        .metadata as { hygienicReference?: unknown } | undefined;
+      if (metadata?.hygienicReference === true) {
+        return;
+      }
 
       addOccurrenceFromImportSpan({
         symbolRef: moduleRef(imported.local),
         span: imported.span,
         localName: imported.name,
+      });
+    });
+
+    entry.binding.directSymbolBySyntax.forEach((symbol, syntaxId) => {
+      const record = entry.binding.symbolTable.getSymbol(symbol);
+      if (record.kind !== "effect" && record.kind !== "effect-op") {
+        return;
+      }
+      const syntax = syntaxById.get(syntaxId);
+      if (!syntax?.location) {
+        return;
+      }
+      addOccurrenceFromLocation({
+        symbolRef: moduleRef(symbol),
+        location: syntax.macroProvenance?.definition ?? syntax.location,
+        kind: "reference",
+        occurrenceName:
+          isIdentifierAtom(syntax) || isInternalIdentifierAtom(syntax)
+            ? syntax.value
+            : undefined,
       });
     });
 
@@ -869,13 +1024,43 @@ export const buildSymbolIndex = async ({
         return;
       }
 
+      boundUse.entries.forEach((useEntry) => {
+        const targetName = useEntry.targetName;
+        const alias = useEntry.alias;
+        if (!targetName || alias === undefined) {
+          return;
+        }
+        useEntry.imports.forEach((imported) => {
+          if (
+            entry.binding.symbolTable.getSymbol(imported.local).kind !==
+            "effect-op"
+          ) {
+            return;
+          }
+          addOccurrenceFromImportSpan({
+            symbolRef: moduleRef(imported.local),
+            span: useEntry.span,
+            localName: targetName,
+            occurrenceName: targetName,
+          });
+          addOccurrenceFromImportSpan({
+            symbolRef: moduleRef(imported.local),
+            span: useEntry.span,
+            localName: alias,
+            occurrenceName: alias,
+          });
+        });
+      });
+
       const moduleReferences = collectModuleUsePathReferences({
         pathExpr: parsedUseDecl.pathExpr,
         entries: boundUse.entries,
       });
 
       moduleReferences.forEach((reference) => {
-        const declaration = moduleDeclarationResolver.ensureDeclaration(reference.moduleId);
+        const declaration = moduleDeclarationResolver.ensureDeclaration(
+          reference.moduleId,
+        );
         if (!declaration) {
           return;
         }
@@ -902,17 +1087,15 @@ export const buildSymbolIndex = async ({
     });
 
     entry.binding.functions.forEach((fn) => {
-      addOccurrenceFromLocation({
-        symbolRef: moduleRef(fn.symbol),
-        location: resolveFunctionNameSyntax(fn.form)?.location,
-        kind: "declaration",
+      addDeclarationOccurrence({
+        symbol: fn.symbol,
+        syntax: resolveFunctionNameSyntax(fn.form),
       });
 
       fn.params.forEach((param) => {
-        addOccurrenceFromLocation({
-          symbolRef: moduleRef(param.symbol),
-          location: param.ast?.location,
-          kind: "declaration",
+        addDeclarationOccurrence({
+          symbol: param.symbol,
+          syntax: param.ast,
         });
         addExternalLabelDeclaration({
           target: moduleRef(param.symbol),
@@ -922,48 +1105,42 @@ export const buildSymbolIndex = async ({
     });
 
     entry.binding.moduleLets.forEach((moduleLet) => {
-      addOccurrenceFromLocation({
-        symbolRef: moduleRef(moduleLet.symbol),
-        location: resolveModuleLetNameSyntax(moduleLet.form)?.location,
-        kind: "declaration",
+      addDeclarationOccurrence({
+        symbol: moduleLet.symbol,
+        syntax: resolveModuleLetNameSyntax(moduleLet.form),
       });
     });
 
     entry.binding.typeAliases.forEach((alias) => {
-      addOccurrenceFromLocation({
-        symbolRef: moduleRef(alias.symbol),
-        location: resolveTypeAliasNameSyntax(alias.form)?.location,
-        kind: "declaration",
+      addDeclarationOccurrence({
+        symbol: alias.symbol,
+        syntax: resolveTypeAliasNameSyntax(alias.form),
       });
     });
 
     entry.binding.objects.forEach((object) => {
-      addOccurrenceFromLocation({
-        symbolRef: moduleRef(object.symbol),
-        location: resolveObjectNameSyntax(object.form)?.location,
-        kind: "declaration",
+      addDeclarationOccurrence({
+        symbol: object.symbol,
+        syntax: resolveObjectNameSyntax(object.form),
       });
     });
 
     entry.binding.traits.forEach((trait) => {
-      addOccurrenceFromLocation({
-        symbolRef: moduleRef(trait.symbol),
-        location: resolveTraitNameSyntax(trait.form)?.location,
-        kind: "declaration",
+      addDeclarationOccurrence({
+        symbol: trait.symbol,
+        syntax: resolveTraitNameSyntax(trait.form),
       });
 
       trait.methods.forEach((method) => {
-        addOccurrenceFromLocation({
-          symbolRef: moduleRef(method.symbol),
-          location: method.nameAst?.location,
-          kind: "declaration",
+        addDeclarationOccurrence({
+          symbol: method.symbol,
+          syntax: method.nameAst,
         });
 
         method.params.forEach((param) => {
-          addOccurrenceFromLocation({
-            symbolRef: moduleRef(param.symbol),
-            location: param.ast?.location,
-            kind: "declaration",
+          addDeclarationOccurrence({
+            symbol: param.symbol,
+            syntax: param.ast,
           });
           addExternalLabelDeclaration({
             target: moduleRef(param.symbol),
@@ -974,24 +1151,23 @@ export const buildSymbolIndex = async ({
     });
 
     entry.binding.effects.forEach((effect) => {
-      addOccurrenceFromLocation({
-        symbolRef: moduleRef(effect.symbol),
-        location: resolveEffectNameSyntax(effect.form)?.location,
-        kind: "declaration",
+      addDeclarationOccurrence({
+        symbol: effect.symbol,
+        syntax: resolveEffectNameSyntax(effect.form),
       });
 
       effect.operations.forEach((operation) => {
-        addOccurrenceFromLocation({
-          symbolRef: moduleRef(operation.symbol),
-          location: resolveEffectOperationNameSyntax(operation.ast as Form | undefined)?.location,
-          kind: "declaration",
+        addDeclarationOccurrence({
+          symbol: operation.symbol,
+          syntax: resolveEffectOperationNameSyntax(
+            operation.ast as Form | undefined,
+          ),
         });
 
         operation.parameters.forEach((param) => {
-          addOccurrenceFromLocation({
-            symbolRef: moduleRef(param.symbol),
-            location: param.ast?.location,
-            kind: "declaration",
+          addDeclarationOccurrence({
+            symbol: param.symbol,
+            syntax: param.ast,
           });
           addExternalLabelDeclaration({
             target: moduleRef(param.symbol),
@@ -1004,10 +1180,9 @@ export const buildSymbolIndex = async ({
     entry.hir.statements.forEach((statement) => {
       if (statement.kind === "let") {
         collectPatternSymbols(statement.pattern).forEach(({ symbol, span }) => {
-          addOccurrenceFromSpan({
-            symbolRef: moduleRef(symbol),
+          addDeclarationOccurrence({
+            symbol,
             span,
-            kind: "declaration",
           });
         });
       }
@@ -1016,13 +1191,14 @@ export const buildSymbolIndex = async ({
     entry.hir.items.forEach((item) => {
       if (item.kind === "function") {
         item.parameters.forEach((parameter) => {
-          collectPatternSymbols(parameter.pattern).forEach(({ symbol, span }) => {
-            addOccurrenceFromSpan({
-              symbolRef: moduleRef(symbol),
-              span,
-              kind: "declaration",
-            });
-          });
+          collectPatternSymbols(parameter.pattern).forEach(
+            ({ symbol, span }) => {
+              addDeclarationOccurrence({
+                symbol,
+                span,
+              });
+            },
+          );
         });
       }
     });
@@ -1038,7 +1214,9 @@ export const buildSymbolIndex = async ({
           return;
         }
 
-        const labeledArgs = findLabeledArgumentSyntaxes({ callForm: callSyntax });
+        const labeledArgs = findLabeledArgumentSyntaxes({
+          callForm: callSyntax,
+        });
         if (labeledArgs.length === 0) {
           return;
         }
@@ -1075,50 +1253,53 @@ export const buildSymbolIndex = async ({
       };
 
       if (expression.exprKind === "identifier") {
-        addOccurrenceFromSpan({
-          symbolRef: moduleRef(expression.symbol),
+        addReferenceOccurrence({
+          symbol: expression.symbol,
           span: expression.span,
-          kind: "reference",
+          ast: expression.ast,
         });
       }
 
       if (expression.exprKind === "lambda") {
         expression.parameters.forEach((parameter) => {
-          collectPatternSymbols(parameter.pattern).forEach(({ symbol, span }) => {
-            addOccurrenceFromSpan({
-              symbolRef: moduleRef(symbol),
-              span,
-              kind: "declaration",
-            });
-          });
+          collectPatternSymbols(parameter.pattern).forEach(
+            ({ symbol, span }) => {
+              addDeclarationOccurrence({
+                symbol,
+                span,
+              });
+            },
+          );
         });
       }
 
       if (expression.exprKind === "match") {
         expression.arms.forEach((arm) => {
           collectPatternSymbols(arm.pattern).forEach(({ symbol, span }) => {
-            addOccurrenceFromSpan({
-              symbolRef: moduleRef(symbol),
+            addDeclarationOccurrence({
+              symbol,
               span,
-              kind: "declaration",
             });
           });
         });
       }
 
       if (expression.exprKind === "assign" && expression.pattern) {
-        collectPatternSymbols(expression.pattern).forEach(({ symbol, span }) => {
-          addOccurrenceFromSpan({
-            symbolRef: moduleRef(symbol),
-            span,
-            kind: "declaration",
-          });
-        });
+        collectPatternSymbols(expression.pattern).forEach(
+          ({ symbol, span }) => {
+            addDeclarationOccurrence({
+              symbol,
+              span,
+            });
+          },
+        );
       }
 
       if (expression.exprKind === "call") {
         const callTarget = entry.typing.callTargets.get(expression.id);
-        const selected = callTarget ? Array.from(callTarget.values())[0] : undefined;
+        const selected = callTarget
+          ? Array.from(callTarget.values())[0]
+          : undefined;
         if (selected) {
           addLabeledArgumentOccurrences({
             target: {
@@ -1143,7 +1324,9 @@ export const buildSymbolIndex = async ({
 
       if (expression.exprKind === "method-call") {
         const methodTarget = entry.typing.callTargets.get(expression.id);
-        const selected = methodTarget ? Array.from(methodTarget.values())[0] : undefined;
+        const selected = methodTarget
+          ? Array.from(methodTarget.values())[0]
+          : undefined;
         if (selected) {
           const methodSyntax = syntaxById.get(expression.ast);
           const methodNameSyntax =
@@ -1174,26 +1357,20 @@ export const buildSymbolIndex = async ({
         }
       }
 
-      collectNamedTypeReferences(expression).forEach(({ symbol, span }) => {
-        addOccurrenceFromSpan({
-          symbolRef: moduleRef(symbol),
-          span,
-          kind: "reference",
-        });
-      });
+      collectNamedTypeReferences(expression).forEach(addReferenceOccurrence);
     });
 
     entry.hir.items.forEach((item) => {
-      collectNamedTypeReferences(item).forEach(({ symbol, span }) => {
-        addOccurrenceFromSpan({
-          symbolRef: moduleRef(symbol),
-          span,
-          kind: "reference",
-        });
-      });
+      collectNamedTypeReferences(item).forEach(addReferenceOccurrence);
     });
 
     entry.exports.forEach((exported) => {
+      if (
+        exported.kind === "effect-op" &&
+        entry.binding.decls.getEffectOperation(exported.symbol)
+      ) {
+        return;
+      }
       const dedupeKey = `${moduleId}:${exported.name}:${exported.kind}:${exported.symbol}`;
       if (exportDedup.has(dedupeKey)) {
         return;
@@ -1270,7 +1447,9 @@ export const buildSymbolIndex = async ({
     const documentation =
       macroDocumentationByCanonicalKey.get(canonicalKey) ??
       entries
-        .map((entry) => symbolDocumentationByModule.get(entry.moduleId)?.get(entry.symbol))
+        .map((entry) =>
+          symbolDocumentationByModule.get(entry.moduleId)?.get(entry.symbol),
+        )
         .find((doc): doc is string => doc !== undefined);
 
     if (documentation !== undefined) {
@@ -1284,15 +1463,38 @@ export const buildSymbolIndex = async ({
     }
 
     const typeInfo = entries
-      .map((entry) =>
-        typeSummaryForSymbol({
+      .map((entry) => {
+        const summary = typeSummaryForSymbol({
           ref: { moduleId: entry.moduleId, symbol: entry.symbol },
           semanticsByModule: semantics,
           typeParamNamesByModule,
           displayName: entry.name,
           detailLevel: "compact",
-        }),
-      )
+        });
+        const module = semantics.get(entry.moduleId);
+        const operation = module?.binding.decls.getEffectOperation(
+          entry.symbol,
+        );
+        if (!operation) {
+          return summary;
+        }
+        const openParen = summary?.indexOf("(") ?? -1;
+        const closeParen = summary?.lastIndexOf(")") ?? -1;
+        const parameters =
+          summary && openParen >= 0 && closeParen > openParen
+            ? summary.slice(openParen + 1, closeParen)
+            : "";
+        const signatureSuffix =
+          summary && closeParen >= 0 ? summary.slice(closeParen + 1) : "";
+        const continuation = operation.operation.resumable;
+        const signature = `effect operation ${operation.effect.name}::${operation.operation.name}(${continuation}${parameters ? `, ${parameters}` : ""})${signatureSuffix}`;
+        return [
+          signature,
+          `effect id: ${operation.effect.effectId ?? "<not declared>"}`,
+          `resumption: ${continuation}`,
+          `source: ${entry.moduleId}`,
+        ].join("\n");
+      })
       .find((summary): summary is string => summary !== undefined);
     if (typeInfo !== undefined) {
       typeInfoByCanonicalKey.set(canonicalKey, typeInfo);

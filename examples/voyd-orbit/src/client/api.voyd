@@ -16,7 +16,7 @@ use std::error::{ HostError }
 use std::http::{ Body, Response }
 use std::http::client::{ ClientRequest }
 use std::http::client::self as http_client
-use std::json::JsonError
+use std::json::{ JsonDecodeError, JsonError }
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::String
@@ -47,7 +47,7 @@ pub fn fetch_simulations(): http_client::HttpClient -> SummaryResult
           match(summaries_from_json(value))
             Ok<Array<SimulationSummary>> { value: values }:
               SummaryResult::Listed { values }
-            Err<JsonError> { error }:
+            Err<JsonDecodeError> { error }:
               SummaryResult::ListFailed { message: error.message }
 
 pub fn fetch_simulation(id: String): http_client::HttpClient -> SimulationResult
@@ -104,7 +104,7 @@ fn decode_simulation_response(result: Result<Response, HostError>) -> Simulation
           match(simulation_from_json(value))
             Ok<PersistedSimulation> { value: simulation }:
               SimulationResult::Loaded { value: simulation }
-            Err<JsonError> { error }:
+            Err<JsonDecodeError> { error }:
               SimulationResult::SimulationFailed { message: error.message }
 
 fn response_error(response: Response) -> String

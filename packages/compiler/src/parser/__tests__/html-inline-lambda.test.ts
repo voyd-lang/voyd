@@ -1,13 +1,16 @@
 import { parse } from "../parser.js";
 import { test } from "vitest";
+import {
+  type IdentifierAtom,
+  type Syntax,
+  isForm,
+  isIdentifierAtom,
+} from "../ast/index.js";
 
 const toPlain = (code: string) =>
   JSON.parse(JSON.stringify(parse(code).toJSON())) as unknown;
 
-const findFirstCall = (
-  root: unknown,
-  head: string,
-): unknown[] | undefined => {
+const findFirstCall = (root: unknown, head: string): unknown[] | undefined => {
   const stack: unknown[] = [root];
   while (stack.length > 0) {
     const current = stack.pop();
@@ -32,6 +35,21 @@ const findFirstCall = (
 
 const containsNode = (root: unknown, expected: unknown): boolean =>
   JSON.stringify(root).includes(JSON.stringify(expected));
+
+const collectIdentifiers = (root: Syntax): IdentifierAtom[] => {
+  const identifiers: IdentifierAtom[] = [];
+  const visit = (syntax: Syntax): void => {
+    if (isIdentifierAtom(syntax)) {
+      identifiers.push(syntax);
+      return;
+    }
+    if (isForm(syntax)) {
+      syntax.toArray().forEach(visit);
+    }
+  };
+  visit(root);
+  return identifiers;
+};
 
 test("parses lambdas inside HTML interpolation expressions", (t) => {
   const code = `
@@ -70,6 +88,80 @@ pub fn main()
   t.expect(findFirstCall(ast, "disabled")).toBeDefined();
   t.expect(findFirstCall(ast, "html_event_message")).toBeDefined();
   t.expect(findFirstCall(ast, "html_event_handler")).toBeUndefined();
+});
+
+test("lowers tag-specific value syntax to its SSR-stable representation", (t) => {
+  const optionAst = toPlain(`
+use std::all
+use std::vx::all
+
+pub fn main()
+  <option value="voyd" selected>Voyd</option>
+`);
+  t.expect(findFirstCall(optionAst, "attr")).toBeDefined();
+  t.expect(findFirstCall(optionAst, "value")).toBeUndefined();
+
+  const inputAst = toPlain(`
+use std::all
+use std::vx::all
+
+pub fn main()
+  <input value="voyd" />
+`);
+  t.expect(findFirstCall(inputAst, "value")).toBeDefined();
+});
+
+test("ties generated HTML helpers to the VX compiler environment", (t) => {
+  const ast = parse(`
+fn Card({ value: String })
+  <span>{value}</span>
+
+fn view({ value: String, disabled: bool, checked: bool })
+  <div key={value} class="field" data-label={value}>
+    <input
+      value={value}
+      disabled={disabled}
+      checked={checked}
+      on_input={value}
+    />
+    <Card value={value} />
+  </div>
+`);
+  const identifiers = collectIdentifiers(ast);
+  const helperNames = new Set([
+    "html_element",
+    "html_event_message",
+    "attr",
+    "class",
+    "value",
+    "disabled",
+    "checked",
+    "keyed",
+  ]);
+  helperNames.forEach((name) => {
+    const helpers = identifiers.filter(
+      (identifier) =>
+        identifier.value === name &&
+        identifier.lexicalContext?.kind === "symbol-reference" &&
+        identifier.lexicalContext.compilerOwned === true,
+    );
+    t.expect(helpers.length, `${name} helper`).toBeGreaterThan(0);
+    helpers.forEach((helper) => {
+      if (helper.lexicalContext?.kind !== "symbol-reference") return;
+      t.expect(helper.lexicalContext.targetModuleId).toBe("std::vx");
+    });
+  });
+
+  const component = identifiers.find(
+    (identifier) => identifier.value === "Card",
+  );
+  t.expect(component?.lexicalContext).toBeUndefined();
+  t.expect(
+    identifiers.some(
+      (identifier) =>
+        identifier.value === "value" && identifier.lexicalContext === undefined,
+    ),
+  ).toBe(true);
 });
 
 test("lowers HTML key attributes to keyed nodes", (t) => {
@@ -160,10 +252,37 @@ pub fn main() -> MsgPack
   </form>
 `;
 
-  const ast = toPlain(code);
-  t.expect(containsNode(ast, [
+  const ast = parse(code);
+  t.expect(
+    containsNode(ast.toJSON(), [
     "::",
     ["Array", ["generics", "HtmlNode"]],
     ["init"],
-  ])).toBe(true);
+    ]),
+  ).toBe(true);
+  const identifiers = collectIdentifiers(ast);
+  t.expect(
+    identifiers.find(
+      (identifier) =>
+        identifier.value === "Array" &&
+        identifier.lexicalContext?.kind === "symbol-reference" &&
+        identifier.lexicalContext.targetModuleId === "std::array",
+    )?.lexicalContext,
+  ).toMatchObject({
+    kind: "symbol-reference",
+    targetModuleId: "std::array",
+    compilerOwned: true,
+  });
+  t.expect(
+    identifiers.find(
+      (identifier) =>
+        identifier.value === "HtmlNode" &&
+        identifier.lexicalContext?.kind === "symbol-reference" &&
+        identifier.lexicalContext.targetModuleId === "std::vx",
+    )?.lexicalContext,
+  ).toMatchObject({
+    kind: "symbol-reference",
+    targetModuleId: "std::vx",
+    compilerOwned: true,
+  });
 });

@@ -6,9 +6,11 @@ import {
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
+  identifierBindingKey,
 } from "../../ast/index.js";
 import type { SyntaxMacro } from "../types.js";
 import { SyntaxMacroError } from "../macro-error.js";
+import { parseEffectDecl, parseTraitDecl } from "../../surface/declarations.js";
 import {
   ensureForm,
   cloneExpr,
@@ -21,7 +23,6 @@ import { renderFunctionalMacro, renderMacroVariable } from "./renderers.js";
 import { MacroScope } from "./scope.js";
 import { evalMacroExpr, expandMacroCall } from "./evaluator.js";
 import type { MacroDefinition, MacroVariableBinding } from "./types.js";
-import { nextMacroId } from "./macro-id.js";
 
 type MacroDefinitionInput = {
   kind: MacroDefinition["kind"];
@@ -123,7 +124,9 @@ const expandExpr = (
           expr,
         );
       }
-      const expanded = expandMacroCall(expr, macro, scope);
+      const expanded = keepFreshDeclarationsPrivate(
+        expandMacroCall(expr, macro, scope),
+      );
       return expandExpr(expanded, scope, exports, options);
     }
 
@@ -397,7 +400,9 @@ const expandAttributedDeclaration = ({
       location: form.location?.clone(),
       elements: [macro.name.clone(), argumentList, expanded],
     });
-    expanded = expandMacroCall(invocation, macro, scope);
+    expanded = keepFreshDeclarationsPrivate(
+      expandMacroCall(invocation, macro, scope),
+    );
   });
 
   const emitted =
@@ -406,10 +411,12 @@ const expandAttributedDeclaration = ({
     location: expanded.location?.clone(),
     elements: [new InternalIdentifierAtom("ast"), ...emitted.map(cloneExpr)],
   });
-  const recursivelyExpanded = expandExpr(expansionAst, scope, exports, {
-    ...options,
-    attributeExpansionDepth: depth + 1,
-  });
+  const recursivelyExpanded = keepFreshDeclarationsPrivate(
+    expandExpr(expansionAst, scope, exports, {
+      ...options,
+      attributeExpansionDepth: depth + 1,
+    }),
+  );
   return [
     ...reserved,
     ...(isForm(recursivelyExpanded) && isTopLevelAst(recursivelyExpanded)
@@ -500,8 +507,12 @@ const expandVisibilityWrappedMacroCall = ({
     macroName,
     ...expr.toArray().slice(2),
   ]);
-  const expanded = expandMacroCall(invocation, macro, scope);
-  const withVisibility = applyPubVisibility(expanded);
+  const expanded = keepFreshDeclarationsPrivate(
+    expandMacroCall(invocation, macro, scope),
+  );
+  const withVisibility = keepFreshDeclarationsPrivate(
+    applyPubVisibility(expanded),
+  );
   return expandExpr(withVisibility, scope, exports, options);
 };
 
@@ -521,22 +532,207 @@ const applyPubVisibility = (expr: Expr): Expr => {
 };
 
 const withPubModifier = (expr: Expr): Expr => {
-  if (!isForm(expr)) {
+  const privateDeclarations = keepFreshDeclarationsPrivate(expr);
+  if (!isForm(privateDeclarations)) {
     return expr;
   }
 
-  const first = expr.at(0);
-  if (isIdentifierAtom(first) && first.value === "pub") {
-    return expr;
-  }
+  const first = privateDeclarations.at(0);
   if (
     !isIdentifierAtom(first) ||
     !PUB_ELIGIBLE_TOP_LEVEL_HEADS.has(first.value)
   ) {
+    return privateDeclarations;
+  }
+  const declarationName = declarationNameForVisibility(
+    privateDeclarations,
+    first.value,
+  );
+  if (
+    declarationName?.lexicalContext?.kind === "fresh" &&
+    identifierBindingKey(declarationName)
+  ) {
+    return privateDeclarations;
+  }
+
+  return recreateForm(privateDeclarations, [
+    new IdentifierAtom("pub"),
+    ...privateDeclarations.toArray(),
+  ]);
+};
+
+const keepFreshDeclarationsPrivate = (expr: Expr): Expr => {
+  if (!isForm(expr)) {
+    return expr;
+  }
+  const originalElements = expr.toArray();
+  const elements = originalElements.map(keepFreshDeclarationsPrivate);
+  const rewritten = elements.some(
+    (element, index) => element !== originalElements[index],
+  )
+    ? recreateForm(expr, elements)
+    : expr;
+  return keepFreshDeclarationPrivate(rewritten);
+};
+
+const keepFreshDeclarationPrivate = (expr: Form): Form => {
+  const visibility = expr.at(0);
+  if (
+    !isIdentifierAtom(visibility) ||
+    (visibility.value !== "pub" && visibility.value !== "api")
+  ) {
     return expr;
   }
 
-  return recreateForm(expr, [new IdentifierAtom("pub"), ...expr.toArray()]);
+  const head = expr.at(1);
+  const isApiField =
+    visibility.value === "api" && isForm(head) && isFieldDeclaration(head);
+  if (
+    !isApiField &&
+    (!isIdentifierAtom(head) ||
+      !FRESH_VISIBILITY_DECLARATION_HEADS.has(head.value))
+  ) {
+    return expr;
+  }
+
+  const declaration = recreateForm(expr, expr.toArray().slice(1));
+  if (
+    isIdentifierAtom(head) &&
+    head.value === "use" &&
+    containsFreshUseAlias(declaration.at(1))
+  ) {
+    return declaration;
+  }
+  if (
+    isIdentifierAtom(head) &&
+    (head.value === "eff" || head.value === "trait") &&
+    containsImplicitlyVisibleFreshMember(declaration, head.value)
+  ) {
+    return declaration;
+  }
+  const declarationName = isApiField
+    ? fieldDeclarationName(head)
+    : declarationNameForVisibility(declaration, (head as IdentifierAtom).value);
+  return declarationName?.lexicalContext?.kind === "fresh" &&
+    identifierBindingKey(declarationName)
+    ? declaration
+    : expr;
+};
+
+const containsFreshUseAlias = (syntax: Expr | undefined): boolean => {
+  if (!isForm(syntax)) {
+    return false;
+  }
+  if (syntax.calls("as")) {
+    const alias = syntax.at(2);
+    return (
+      isIdentifierAtom(alias) &&
+      alias.lexicalContext?.kind === "fresh" &&
+      Boolean(identifierBindingKey(alias))
+    );
+  }
+  return syntax.toArray().some(containsFreshUseAlias);
+};
+
+const containsImplicitlyVisibleFreshMember = (
+  declaration: Form,
+  head: "eff" | "trait",
+): boolean => {
+  try {
+    const names =
+      head === "eff"
+        ? (parseEffectDecl(declaration)?.operations.map(
+            (entry) => entry.name,
+          ) ?? [])
+        : (parseTraitDecl(declaration)?.methods.map(
+            (entry) => entry.signature.name,
+          ) ?? []);
+    return names.some(
+      (name) =>
+        name.lexicalContext?.kind === "fresh" &&
+        Boolean(identifierBindingKey(name)),
+    );
+  } catch {
+    return false;
+  }
+};
+
+const declarationNameForVisibility = (
+  form: Form,
+  head: string,
+): IdentifierAtom | undefined => {
+  let header = form.at(1);
+  if (head === "fn" && isForm(header)) {
+    const effectTail = header.at(2);
+    if (header.calls("->")) {
+      header = header.at(1);
+    } else if (
+      header.calls(":") &&
+      isForm(effectTail) &&
+      effectTail.calls("->")
+    ) {
+      header = header.at(1);
+    }
+  }
+  if (
+    (head === "let" || head === "var" || head === "macro_let") &&
+    isForm(header) &&
+    header.calls("=")
+  ) {
+    const name = header.at(1);
+    return isIdentifierAtom(name) ? name : undefined;
+  }
+  if (head === "attribute") {
+    const macroKeyword = header;
+    const signature = form.at(2);
+    if (
+      !isIdentifierAtom(macroKeyword) ||
+      macroKeyword.value !== "macro" ||
+      !isForm(signature)
+    ) {
+      return undefined;
+    }
+    const name = signature.at(0);
+    return isIdentifierAtom(name) ? name : undefined;
+  }
+  if (head === "use") {
+    return useAliasName(header);
+  }
+  if (isIdentifierAtom(header)) {
+    return header;
+  }
+  if (!isForm(header)) {
+    return undefined;
+  }
+  if (head === "type" && header.calls("=")) {
+    const name = header.at(1);
+    return isIdentifierAtom(name) ? name : undefined;
+  }
+  const name = header.at(0);
+  return isIdentifierAtom(name) ? name : undefined;
+};
+
+const isFieldDeclaration = (form: Form): boolean =>
+  form.calls(":") || form.calls("?:") || form.calls("=");
+
+const fieldDeclarationName = (form: Form): IdentifierAtom | undefined => {
+  const name = form.at(1);
+  return isIdentifierAtom(name) ? name : undefined;
+};
+
+const useAliasName = (syntax: Expr | undefined): IdentifierAtom | undefined => {
+  if (!isForm(syntax)) {
+    return undefined;
+  }
+  if (syntax.calls("as")) {
+    const alias = syntax.at(2);
+    return isIdentifierAtom(alias) ? alias : undefined;
+  }
+  return syntax
+    .toArray()
+    .reduce<
+      IdentifierAtom | undefined
+    >((found, entry) => found ?? useAliasName(entry), undefined);
 };
 
 const isTopLevelAst = (form: Form): boolean =>
@@ -552,6 +748,8 @@ const isEmitManyForm = (form: Form): boolean => {
 
 const PUB_ELIGIBLE_TOP_LEVEL_HEADS = new Set([
   "fn",
+  "let",
+  "var",
   "type",
   "obj",
   "val",
@@ -561,9 +759,18 @@ const PUB_ELIGIBLE_TOP_LEVEL_HEADS = new Set([
   "mod",
   "use",
   "macro",
+  "attribute",
   "macro_let",
   "functional-macro",
+  "attribute-macro",
   "define-macro-variable",
+  "enum",
+  "test",
+]);
+
+const FRESH_VISIBILITY_DECLARATION_HEADS = new Set([
+  ...PUB_ELIGIBLE_TOP_LEVEL_HEADS,
+  "api",
 ]);
 
 const expandMacroDefinition = (
@@ -591,7 +798,7 @@ const expandMacroDefinition = (
     parameters,
     body: definition.bodyExpressions,
     scope,
-    id: new IdentifierAtom(`${name.value}#${nextMacroId()}`),
+    id: new IdentifierAtom(stableMacroId({ name, moduleId })),
     moduleId,
   };
 
@@ -600,6 +807,21 @@ const expandMacroDefinition = (
     exports.push(macro);
   }
   return renderFunctionalMacro(macro);
+};
+
+const stableMacroId = ({
+  name,
+  moduleId,
+}: {
+  name: IdentifierAtom;
+  moduleId?: string;
+}): string => {
+  const location = name.location;
+  return [
+    moduleId ?? location?.filePath ?? "<macro-module>",
+    location?.startIndex ?? 0,
+    name.value,
+  ].join(":");
 };
 
 const expandMacroLet = (form: Form, scope: MacroScope): Expr => {

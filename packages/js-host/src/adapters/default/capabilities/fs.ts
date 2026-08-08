@@ -20,6 +20,93 @@ import {
 } from "../registration.js";
 import { FS_EFFECT_ID, type CapabilityDefinition } from "../types.js";
 
+type FsErrorKind =
+  | "not-found"
+  | "already-exists"
+  | "permission-denied"
+  | "conflict"
+  | "other";
+
+type FsWriteContent = string | Uint8Array;
+
+const ATOMIC_WRITE_ATTEMPTS = 16;
+let atomicWriteSequence = 0;
+
+const fsErrorCode = (error: unknown): number => {
+  const errno = isRecord(error) ? readField(error, "errno") : undefined;
+  const parsed = toNumberOrUndefined(errno);
+  return parsed === undefined ? 1 : parsed;
+};
+
+const fsErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const fsErrorKind = (error: unknown): FsErrorKind => {
+  const code = isRecord(error)
+    ? toStringOrUndefined(readField(error, "code"))
+    : undefined;
+  const name = isRecord(error)
+    ? toStringOrUndefined(readField(error, "name"))
+    : undefined;
+  const identifier = code ?? name;
+
+  if (identifier === "ENOENT" || identifier === "NotFound") {
+    return "not-found";
+  }
+  if (identifier === "EEXIST" || identifier === "AlreadyExists") {
+    return "already-exists";
+  }
+  if (
+    identifier === "EACCES" ||
+    identifier === "EPERM" ||
+    identifier === "PermissionDenied"
+  ) {
+    return "permission-denied";
+  }
+  if (
+    identifier === "EBUSY" ||
+    identifier === "ETXTBSY" ||
+    identifier === "ENOTEMPTY" ||
+    identifier === "Busy"
+  ) {
+    return "conflict";
+  }
+  return "other";
+};
+
+const fsHostError = (error: unknown): Record<string, unknown> =>
+  hostError(fsErrorMessage(error), fsErrorCode(error), fsErrorKind(error));
+
+const writeContentFromPayload = (payload: unknown): FsWriteContent => {
+  const kind = toStringOrUndefined(readField(payload, "kind"));
+  if (kind === "string") {
+    return toStringOrUndefined(readField(payload, "value")) ?? "";
+  }
+  if (kind === "bytes") {
+    const bytesValue = readField(payload, "bytes");
+    const rawBytes = Array.isArray(bytesValue) ? bytesValue : [];
+    return Uint8Array.from(rawBytes.map(normalizeByte));
+  }
+  throw new Error(
+    "expected filesystem write payload kind to be string or bytes"
+  );
+};
+
+const runtimeProcessId = (): number => {
+  const processValue = readField(globalRecord, "process");
+  const nodePid = toNumberOrUndefined(readField(processValue, "pid"));
+  if (nodePid !== undefined) {
+    return nodePid;
+  }
+  const denoValue = readField(globalRecord, "Deno");
+  return toNumberOrUndefined(readField(denoValue, "pid")) ?? 0;
+};
+
+const nextAtomicTemporaryPath = (destination: string): string => {
+  atomicWriteSequence += 1;
+  return `${destination}.voyd-tmp-${runtimeProcessId()}-${Date.now().toString(36)}-${atomicWriteSequence.toString(36)}`;
+};
+
 export const fsCapabilityDefinition: CapabilityDefinition = {
   capability: "fs",
   effectId: FS_EFFECT_ID,
@@ -29,9 +116,13 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
       return 0;
     }
 
-    const nodeFs = isNodeCompatibleRuntime(runtime) ? await maybeNodeFs() : undefined;
+    const nodeFs = isNodeCompatibleRuntime(runtime)
+      ? await maybeNodeFs()
+      : undefined;
     const deno =
-      runtime === "deno" ? (globalRecord.Deno as Record<string, unknown>) : undefined;
+      runtime === "deno"
+        ? (globalRecord.Deno as Record<string, unknown>)
+        : undefined;
     const denoReadFile = deno?.readFile as
       | ((path: string) => Promise<Uint8Array>)
       | undefined;
@@ -39,13 +130,25 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
       | ((path: string) => Promise<string>)
       | undefined;
     const denoWriteFile = deno?.writeFile as
-      | ((path: string, data: Uint8Array) => Promise<void>)
+      | ((
+          path: string,
+          data: Uint8Array,
+          options?: { createNew?: boolean }
+        ) => Promise<void>)
       | undefined;
     const denoWriteTextFile = deno?.writeTextFile as
-      | ((path: string, data: string) => Promise<void>)
+      | ((
+          path: string,
+          data: string,
+          options?: { createNew?: boolean }
+        ) => Promise<void>)
       | undefined;
-    const denoStat = deno?.stat as ((path: string) => Promise<unknown>) | undefined;
-    const denoRemove = deno?.remove as ((path: string) => Promise<void>) | undefined;
+    const denoStat = deno?.stat as
+      | ((path: string) => Promise<unknown>)
+      | undefined;
+    const denoRemove = deno?.remove as
+      | ((path: string) => Promise<void>)
+      | undefined;
     const denoMkdir = deno?.mkdir as
       | ((path: string, options: { recursive: boolean }) => Promise<void>)
       | undefined;
@@ -81,13 +184,74 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
 
     const implementedOps = new Set<string>();
     let registered = 0;
-    const ioErrorCode = (error: unknown): number => {
-      const errno = isRecord(error) ? readField(error, "errno") : undefined;
-      const parsed = toNumberOrUndefined(errno);
-      return parsed === undefined ? 1 : parsed;
+    const writeExclusive = async (
+      path: string,
+      content: FsWriteContent
+    ): Promise<void> => {
+      if (hasNodeFs) {
+        await nodeFs!.writeFile(path, content, { flag: "wx" });
+        return;
+      }
+      if (typeof content === "string") {
+        await denoWriteTextFile!(path, content, { createNew: true });
+        return;
+      }
+      await denoWriteFile!(path, content, { createNew: true });
     };
-    const ioErrorMessage = (error: unknown): string =>
-      error instanceof Error ? error.message : String(error);
+
+    const removeTemporary = async (path: string): Promise<void> => {
+      try {
+        if (hasNodeFs) {
+          await nodeFs!.unlink(path);
+        } else {
+          await denoRemove!(path);
+        }
+      } catch {
+        // Cleanup is best effort; the original write/rename error is retained.
+      }
+    };
+
+    const writeAtomic = async (
+      destination: string,
+      content: FsWriteContent
+    ): Promise<void> => {
+      let lastCollision: unknown;
+      for (let attempt = 0; attempt < ATOMIC_WRITE_ATTEMPTS; attempt += 1) {
+        const temporary = nextAtomicTemporaryPath(destination);
+        try {
+          await writeExclusive(temporary, content);
+        } catch (error) {
+          if (fsErrorKind(error) === "already-exists") {
+            lastCollision = error;
+            continue;
+          }
+          await removeTemporary(temporary);
+          throw error;
+        }
+
+        try {
+          if (hasNodeFs) {
+            await nodeFs!.rename(temporary, destination);
+          } else {
+            await denoRename!(temporary, destination);
+          }
+          return;
+        } catch (error) {
+          await removeTemporary(temporary);
+          throw error;
+        }
+      }
+      throw (
+        lastCollision ??
+        Object.assign(
+          new Error("could not allocate an atomic write temporary file"),
+          {
+            code: "EEXIST",
+            errno: 17,
+          }
+        )
+      );
+    };
 
     registered += registerOpHandler({
       host,
@@ -114,7 +278,7 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
             })
           );
         } catch (error) {
-          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+          return tail(fsHostError(error));
         }
       },
     });
@@ -138,7 +302,7 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
             })
           );
         } catch (error) {
-          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+          return tail(fsHostError(error));
         }
       },
     });
@@ -161,7 +325,7 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           }
           return tail({ ok: true });
         } catch (error) {
-          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+          return tail(fsHostError(error));
         }
       },
     });
@@ -182,7 +346,7 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           }
           return tail({ ok: true });
         } catch (error) {
-          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+          return tail(fsHostError(error));
         }
       },
     });
@@ -227,7 +391,7 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           }
           return tail({ ok: true });
         } catch (error) {
-          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+          return tail(fsHostError(error));
         }
       },
     });
@@ -262,7 +426,7 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
             })
           );
         } catch (error) {
-          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+          return tail(fsHostError(error));
         }
       },
     });
@@ -282,7 +446,7 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           }
           return tail({ ok: true });
         } catch (error) {
-          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+          return tail(fsHostError(error));
         }
       },
     });
@@ -303,11 +467,43 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           }
           return tail({ ok: true });
         } catch (error) {
-          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+          return tail(fsHostError(error));
         }
       },
     });
     implementedOps.add("rename");
+
+    registered += registerOpHandler({
+      host,
+      effectId: FS_EFFECT_ID,
+      opName: "write_atomic",
+      handler: async ({ tail }, payload) => {
+        try {
+          const destination = toPath(readField(payload, "path"));
+          await writeAtomic(destination, writeContentFromPayload(payload));
+          return tail({ ok: true });
+        } catch (error) {
+          return tail(fsHostError(error));
+        }
+      },
+    });
+    implementedOps.add("write_atomic");
+
+    registered += registerOpHandler({
+      host,
+      effectId: FS_EFFECT_ID,
+      opName: "create_exclusive",
+      handler: async ({ tail }, payload) => {
+        try {
+          const destination = toPath(readField(payload, "path"));
+          await writeExclusive(destination, writeContentFromPayload(payload));
+          return tail({ ok: true });
+        } catch (error) {
+          return tail(fsHostError(error));
+        }
+      },
+    });
+    implementedOps.add("create_exclusive");
 
     return (
       registered +

@@ -11,9 +11,9 @@ fn add_to(~total: i32, value: i32) -> void
   total = total + value
 
 macro manual_array_loop(iterable, total)
-  let iterator_id = identifier(__manual_iterator)
-  let next_id = identifier(__manual_next)
-  let value_id = identifier(__manual_value)
+  let iterator_id = identifier("__manual_iterator")
+  let next_id = identifier("__manual_next")
+  let value_id = identifier("__manual_value")
 
   `
     let ~($iterator_id) = $iterable.iter()

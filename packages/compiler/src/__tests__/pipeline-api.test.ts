@@ -652,6 +652,397 @@ pub fn make_external(): () -> External
     );
   });
 
+  it("preserves macro, overload, operator, and trait metadata through a nested package root", async () => {
+    const root = resolve("/proj/nested-metadata");
+    const mainPath = `${root}${sep}main.voyd`;
+    const packageRootPath = `${root}${sep}feature${sep}pkg.voyd`;
+    const internalPath = `${root}${sep}feature${sep}internal.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use src::feature::all
+
+declare_bonus(generated_bonus)
+
+pub fn main() -> i32
+  let sum = Number { value: 1 } + Number { value: 2 }
+  generated_bonus() + sum.score() + choose(1) + choose(1.0)
+`,
+      [packageRootPath]: `
+pub use self::internal::{ Number, Scored, choose, declare_bonus, '+' }
+`,
+      [internalPath]: `
+pub macro declare_bonus(name)
+  syntax_template (fn $name() -> i32
+    10)
+
+pub obj Number { api value: i32 }
+
+pub trait Scored
+  fn score(self) -> i32
+
+pub fn '+'(left: Number, right: Number) -> Number
+  Number { value: left.value + right.value }
+
+impl Scored for Number
+  api fn score(self) -> i32
+    self.value
+
+pub fn choose(_value: i32) -> i32
+  20
+
+pub fn choose(_value: f64) -> i32
+  30
+`,
+    });
+
+    const compiled = await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root },
+      host,
+    });
+    if (!compiled.success) {
+      throw new Error(JSON.stringify(compiled.diagnostics, null, 2));
+    }
+    const result = expectCompileSuccess(compiled);
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(63);
+  });
+
+  it("classifies module, package, macro, member, operator, and trait boundaries", async () => {
+    const root = resolve("/proj/boundary-diagnostics");
+    const packageRootPath = `${root}${sep}feature${sep}pkg.voyd`;
+    const internalPath = `${root}${sep}feature${sep}internal.voyd`;
+    const supportPath = `${root}${sep}support.voyd`;
+    const macroPath = `${root}${sep}macros.voyd`;
+    const operatorsRootPath = `${root}${sep}operators${sep}pkg.voyd`;
+    const operatorsInternalPath = `${root}${sep}operators${sep}internal.voyd`;
+    const traitModelPath = `${root}${sep}trait_model.voyd`;
+    const traitImplPath = `${root}${sep}trait_impl.voyd`;
+    const files = {
+      [packageRootPath]: `
+pub use self::internal::{ ExportedBox, make_box }
+`,
+      [internalPath]: `
+pub obj ExportedBox { hidden: i32 }
+
+pub fn make_box() -> ExportedBox
+  ExportedBox { hidden: 7 }
+
+pub fn package_only() -> i32
+  11
+
+fn nested_module_only() -> i32
+  12
+`,
+      [supportPath]: `
+fn module_only() -> i32
+  13
+`,
+      [macroPath]: `
+macro private_macro()
+  syntax_template (fn generated() -> i32
+    17)
+`,
+      [operatorsRootPath]: `
+pub use self::internal::{ BoundaryNumber, '+' }
+`,
+      [operatorsInternalPath]: `
+pub val BoundaryNumber { api value: i32 }
+
+pub fn '+'(left: BoundaryNumber, right: BoundaryNumber) -> BoundaryNumber
+  BoundaryNumber { value: left.value + right.value }
+`,
+      [traitModelPath]: `
+pub val TraitNumber { value: i32 }
+
+pub trait Scored
+  fn score(self) -> i32
+`,
+      [traitImplPath]: `
+use src::trait_model::{ TraitNumber, Scored }
+pub use src::trait_model::{ TraitNumber, Scored }
+
+impl Scored for TraitNumber
+  fn score(self) -> i32
+    self.value
+
+pub fn marker() -> i32
+  0
+`,
+    };
+    const cases = [
+      {
+        entry: `${root}${sep}module-private.voyd`,
+        source: "use src::support::module_only\npub fn main() -> i32\n  module_only()",
+        message: "module-private",
+        details: [supportPath],
+      },
+      {
+        entry: `${root}${sep}hidden-internal.voyd`,
+        source:
+          "use src::feature::internal::package_only\npub fn main() -> i32\n  package_only()",
+        message: "hidden nested-package internals",
+        details: ["src::feature", packageRootPath],
+      },
+      {
+        entry: `${root}${sep}hidden-module-private.voyd`,
+        source:
+          "use src::feature::internal::nested_module_only\npub fn main() -> i32\n  nested_module_only()",
+        message: "hidden nested-package internals",
+        details: ["src::feature", packageRootPath],
+      },
+      {
+        entry: `${root}${sep}private-macro.voyd`,
+        source: "use src::macros::private_macro\npub fn main() -> i32\n  0",
+        message: "Macro private_macro",
+        details: ["Add pub"],
+      },
+      {
+        entry: `${root}${sep}missing-api.voyd`,
+        source:
+          "use src::feature::{ ExportedBox, make_box }\npub fn main() -> i32\n  make_box().hidden",
+        message: "requires api visibility",
+        details: ["local:feature -> local"],
+      },
+      {
+        entry: `${root}${sep}missing-operator-import.voyd`,
+        source:
+          "use src::operators::BoundaryNumber\npub fn main() -> i32\n  (BoundaryNumber { value: 1 } + BoundaryNumber { value: 2 }).value",
+        message: "operator '+'",
+        details: [operatorsRootPath],
+      },
+      {
+        entry: `${root}${sep}missing-trait-impl-import.voyd`,
+        source:
+          "use src::trait_model::TraitNumber\nuse src::trait_impl\npub fn main() -> i32\n  TraitNumber { value: 1 }.score()",
+        message: "trait implementation providing 'score'",
+        details: [traitImplPath],
+      },
+    ];
+
+    for (const testCase of cases) {
+      const result = expectCompileFailure(
+        await compileProgram({
+          entryPath: testCase.entry,
+          roots: { src: root },
+          host: createMemoryHost({
+            ...files,
+            [testCase.entry]: testCase.source,
+          }),
+        }),
+      );
+      const matches = result.diagnostics.some(
+        (diagnostic) =>
+          diagnostic.message.includes(testCase.message) &&
+          testCase.details.every((detail) =>
+            diagnostic.message.includes(detail),
+          ),
+      );
+      if (!matches) {
+        throw new Error(
+          JSON.stringify(
+            { testCase, diagnostics: result.diagnostics },
+            null,
+            2,
+          ),
+        );
+      }
+    }
+  });
+
+  it("keeps package-root instance members out of module all imports", async () => {
+    const root = resolve("/proj/package-member-all");
+    const mainPath = `${root}${sep}main.voyd`;
+    const packageRootPath = `${root}${sep}feature${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use src::feature::all
+
+pub fn main() -> i32
+  make_box().score()
+`,
+      [packageRootPath]: `
+pub obj Box { api value: i32 }
+
+impl Box
+  api fn score(self) -> i32
+    self.value
+
+pub fn make_box() -> Box
+  Box { value: 42 }
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const importedNames =
+      result.semantics
+        ?.get("src::main")
+        ?.binding.imports.map((entry) => entry.name) ?? [];
+
+    expect(importedNames).toEqual(expect.arrayContaining(["Box", "make_box"]));
+    expect(importedNames).not.toContain("score");
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
+  it("keeps same-named ordinary exports separate from instance projections", async () => {
+    const root = resolve("/proj/package-member-collision");
+    const packageRootPath = `${root}${sep}feature${sep}pkg.voyd`;
+    const packageSource = `
+pub obj Box { api value: i32 }
+
+impl Box
+  api fn score(self) -> i32
+    self.value
+
+pub fn score(value: i32) -> i32
+  value
+
+pub fn make_box() -> Box
+  Box { value: 42 }
+`;
+    const entrySources = [
+      `use src::feature::all
+
+pub fn main() -> i32
+  score(1) + make_box().score()
+`,
+      `use src::feature::{ score, make_box }
+
+pub fn main() -> i32
+  score(1) + make_box().score()
+`,
+    ];
+
+    for (const [index, source] of entrySources.entries()) {
+      const mainPath = `${root}${sep}main_${index}.voyd`;
+      const result = expectCompileSuccess(
+        await compileProgram({
+          entryPath: mainPath,
+          roots: { src: root },
+          host: createMemoryHost({
+            [mainPath]: source,
+            [packageRootPath]: packageSource,
+          }),
+        }),
+      );
+      const instance = getWasmInstance(result.wasm!);
+      expect((instance.exports.main as () => number)()).toBe(43);
+    }
+  });
+
+  it("keeps instance projections out of module-qualified calls", async () => {
+    const root = resolve("/proj/package-qualified-member");
+    const mainPath = `${root}${sep}main.voyd`;
+    const packageRootPath = `${root}${sep}feature${sep}pkg.voyd`;
+    const result = expectCompileFailure(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root },
+        host: createMemoryHost({
+          [mainPath]: `
+use src::feature
+
+pub fn main() -> i32
+  feature::score(feature::make_box())
+`,
+          [packageRootPath]: `
+pub obj Box { api value: i32 }
+
+impl Box
+  api fn score(self) -> i32
+    self.value
+
+pub fn make_box() -> Box
+  Box { value: 42 }
+`,
+        }),
+      }),
+    );
+
+    expect(result.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "BD0001",
+          message: expect.stringContaining(
+            "Box::score is an instance member and must be accessed through its type",
+          ),
+        }),
+      ]),
+    );
+  });
+
+  it("reports logical package-root misses without hiding declaration diagnostics", async () => {
+    const root = resolve("/proj/logical-package-diagnostics");
+    const packageRootPath = `${root}${sep}feature${sep}pkg.voyd`;
+    const internalPath = `${root}${sep}feature${sep}internal.voyd`;
+    const packageSource = `
+pub use self::internal::public_one
+
+fn root_private() -> i32
+  3
+`;
+    const internalSource = `
+pub fn public_one() -> i32
+  1
+
+pub fn package_only() -> i32
+  2
+`;
+    const missingPath = `${root}${sep}missing.voyd`;
+    const missing = expectCompileFailure(
+      await compileProgram({
+        entryPath: missingPath,
+        roots: { src: root },
+        host: createMemoryHost({
+          [missingPath]: "use src::feature::package_only",
+          [packageRootPath]: packageSource,
+          [internalPath]: internalSource,
+        }),
+      }),
+    );
+    const missingDiagnostic = missing.diagnostics.find(
+      (diagnostic) =>
+        diagnostic.code === "BD0001" &&
+        diagnostic.message.includes("package_only"),
+    );
+    expect(missingDiagnostic?.message).toContain(
+      "Module src::feature does not export package_only",
+    );
+    expect(missingDiagnostic?.message).toContain(packageRootPath);
+    expect(missingDiagnostic?.message).toContain("re-export it");
+    expect(missingDiagnostic?.message).not.toContain("src::feature::pkg");
+
+    const privatePath = `${root}${sep}private.voyd`;
+    const privateResult = expectCompileFailure(
+      await compileProgram({
+        entryPath: privatePath,
+        roots: { src: root },
+        host: createMemoryHost({
+          [privatePath]: "use src::feature::root_private",
+          [packageRootPath]: packageSource,
+          [internalPath]: internalSource,
+        }),
+      }),
+    );
+    expect(privateResult.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "BD0001",
+          message: expect.stringContaining(
+            `root_private from src::feature::pkg: it is module-private in ${packageRootPath}`,
+          ),
+        }),
+      ]),
+    );
+  });
+
   it("rejects pub re-export of instance methods", async () => {
     const root = resolve("/proj/reexport");
     const pkgPath = `${root}${sep}pkg.voyd`;

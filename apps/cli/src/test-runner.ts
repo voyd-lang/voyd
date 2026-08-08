@@ -1,10 +1,13 @@
 import { readdir, readFile, stat } from "node:fs/promises";
-import { isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import {
   createSdk,
   detectSrcRootForPath,
+  type TestCase,
+  type TestCollection,
   type TestEvent,
   type TestReporter,
+  type TestResult,
   type TestRunSummary,
 } from "@voyd-lang/sdk";
 import {
@@ -17,16 +20,9 @@ import { resolveStdRoot } from "@voyd-lang/lib/resolve-std.js";
 import { resolvePackageDirs } from "./package-dirs.js";
 import type { TestShard } from "./config/types.js";
 
-// Each CLI test command compiles one assembled test program before executing
-// it, so retaining dependency snapshots cannot benefit this process.
+// Package-aware directory runs compile independent test programs, so reusable
+// semantics must not carry package-local entry state between batches.
 const sdk = createSdk({ compilerCache: "none" });
-
-type CliTestResult = {
-  displayName: string;
-  status: "passed" | "failed" | "skipped";
-  durationMs: number;
-  error?: unknown;
-};
 
 const TEST_DECLARATION_PATTERN = /(^|[\r\n])\s*test(?=[^A-Za-z0-9_]|$)/;
 
@@ -145,8 +141,7 @@ const isCompanionTestFile = ({
     return false;
   }
 
-  const basePath =
-    primaryFileForCompanion(filePath);
+  const basePath = primaryFileForCompanion(filePath);
   return knownFiles.has(resolve(basePath));
 };
 
@@ -189,19 +184,23 @@ const selectTestModules = async ({
   moduleFiles: readonly string[];
   knownFiles: ReadonlySet<string>;
 }): Promise<string[]> => {
-  const selected = await Promise.all(moduleFiles.map(async (filePath) => {
-    if (!filePath.endsWith(TEST_COMPANION_SUFFIX)) {
-      const companionPath = resolve(companionFileFor(filePath));
-      if (
-        knownFiles.has(companionPath) &&
-        (await sourceContainsTestDeclaration(companionPath))
-      ) {
-        return filePath;
+  const selected = await Promise.all(
+    moduleFiles.map(async (filePath) => {
+      if (!filePath.endsWith(TEST_COMPANION_SUFFIX)) {
+        const companionPath = resolve(companionFileFor(filePath));
+        if (
+          knownFiles.has(companionPath) &&
+          (await sourceContainsTestDeclaration(companionPath))
+        ) {
+          return filePath;
+        }
       }
-    }
 
-    return (await sourceContainsTestDeclaration(filePath)) ? filePath : undefined;
-  }));
+      return (await sourceContainsTestDeclaration(filePath))
+        ? filePath
+        : undefined;
+    }),
+  );
 
   return selected.filter((filePath): filePath is string => Boolean(filePath));
 };
@@ -229,7 +228,9 @@ const buildAllowedTestFiles = ({
     allowedFiles.add(resolvedFilePath);
 
     if (resolvedFilePath.endsWith(TEST_COMPANION_SUFFIX)) {
-      const primaryFilePath = resolve(primaryFileForCompanion(resolvedFilePath));
+      const primaryFilePath = resolve(
+        primaryFileForCompanion(resolvedFilePath),
+      );
       if (knownFiles.has(primaryFilePath)) {
         allowedFiles.add(primaryFilePath);
       }
@@ -285,9 +286,7 @@ const formatModulePathForUse = ({
   packageName,
 }: ReturnType<typeof modulePathFromFile>): string => {
   const prefix =
-    namespace === "pkg" && packageName
-      ? [namespace, packageName]
-      : [namespace];
+    namespace === "pkg" && packageName ? [namespace, packageName] : [namespace];
   return [...prefix, ...segments].map(formatSegment).join("::");
 };
 
@@ -301,7 +300,11 @@ const buildModulePath = ({
   pathAdapter: ReturnType<typeof createFsModuleHost>["path"];
 }): string => {
   const modulePath = modulePathFromFile(filePath, roots, pathAdapter);
-  return formatModulePathForUse(modulePath);
+  const segments =
+    pathAdapter.basename(filePath) === "pkg.voyd"
+      ? modulePath.segments.slice(0, -1)
+      : modulePath.segments;
+  return formatModulePathForUse({ ...modulePath, segments });
 };
 
 const buildTestEntrySource = ({
@@ -318,20 +321,20 @@ const buildTestEntrySource = ({
   });
 
   const uses = modulePaths.map(
-    (modulePath, index) => `use ${modulePath}::self as test_mod_${index}`
+    (modulePath, index) => `use ${modulePath}::self as test_mod_${index}`,
   );
   return [...prelude, ...uses].join("\n");
 };
 
 const resolveTestEntryPath = ({
-  roots,
+  entryDir,
   existingFiles,
 }: {
-  roots: ModuleRoots;
+  entryDir: string;
   existingFiles: string[];
 }): string => {
   const existing = new Set(existingFiles.map((filePath) => resolve(filePath)));
-  const base = join(roots.src, "__voyd_test_entry__");
+  const base = join(entryDir, "__voyd_test_entry__");
   let index = 0;
   let candidate = `${base}.voyd`;
   while (existing.has(resolve(candidate))) {
@@ -341,19 +344,66 @@ const resolveTestEntryPath = ({
   return candidate;
 };
 
-const formatResultLabel = (result: CliTestResult): string => {
+const findOwningSourcePackageDir = async ({
+  filePath,
+  srcRoot,
+}: {
+  filePath: string;
+  srcRoot: string;
+}): Promise<string> => {
+  const resolvedSrcRoot = resolve(srcRoot);
+  let candidate = dirname(resolve(filePath));
+
+  while (isWithinRoot(resolvedSrcRoot, candidate)) {
+    if (await fileExists(join(candidate, "pkg.voyd"))) {
+      return candidate;
+    }
+    if (candidate === resolvedSrcRoot) {
+      break;
+    }
+    const parent = dirname(candidate);
+    if (parent === candidate) {
+      break;
+    }
+    candidate = parent;
+  }
+
+  return resolvedSrcRoot;
+};
+
+const groupTestModulesBySourcePackage = async ({
+  testModules,
+  srcRoot,
+}: {
+  testModules: readonly string[];
+  srcRoot: string;
+}): Promise<Map<string, string[]>> => {
+  const groups = new Map<string, string[]>();
+  for (const filePath of testModules) {
+    const packageDir = await findOwningSourcePackageDir({ filePath, srcRoot });
+    const group = groups.get(packageDir) ?? [];
+    group.push(filePath);
+    groups.set(packageDir, group);
+  }
+  return groups;
+};
+
+const formatResultLabel = (result: TestResult): string => {
   if (result.status === "passed") return "PASS";
   if (result.status === "skipped") return "SKIP";
   return "FAIL";
 };
 
-const reportResult = (result: CliTestResult, reporter: string): void => {
+const reportResult = (result: TestResult, reporter: string): void => {
   if (reporter === "silent") {
     return;
   }
 
   const label = formatResultLabel(result);
-  const line = `${label} ${result.displayName}`;
+  const location = result.test.location
+    ? ` (${result.test.location.filePath}:${result.test.location.startLine}:${result.test.location.startColumn})`
+    : "";
+  const line = `${label} ${result.displayName}${result.status === "failed" ? location : ""}`;
   if (result.status === "failed") {
     console.error(line);
     if (result.error instanceof Error && result.error.message) {
@@ -386,6 +436,60 @@ const createCliReporter = (reporter: string): TestReporter => {
       }
       reportResult(event.result, reporter);
     },
+  };
+};
+
+const buildTestDisplayName = (test: TestCase): string => {
+  if (test.description) {
+    return `${test.modulePath}::${test.description}`;
+  }
+  if (test.location) {
+    return `${test.modulePath}::<${test.location.filePath}:${test.location.startLine}:${test.location.startColumn}>`;
+  }
+  return `${test.modulePath}::<${test.id}>`;
+};
+
+type PreparedTestBatch = {
+  tests: TestCollection;
+  eligibleCases: readonly TestCase[];
+  includes: (test: Pick<TestCase, "location" | "modulePath">) => boolean;
+};
+
+const addSummary = (
+  left: TestRunSummary,
+  right: TestRunSummary,
+): TestRunSummary => ({
+  total: left.total + right.total,
+  passed: left.passed + right.passed,
+  failed: left.failed + right.failed,
+  skipped: left.skipped + right.skipped,
+  durationMs: left.durationMs + right.durationMs,
+});
+
+const skipBatch = ({
+  cases,
+  reporter,
+}: {
+  cases: readonly TestCase[];
+  reporter: string;
+}): TestRunSummary => {
+  cases.forEach((test) => {
+    reportResult(
+      {
+        test,
+        displayName: buildTestDisplayName(test),
+        status: "skipped",
+        durationMs: 0,
+      },
+      reporter,
+    );
+  });
+  return {
+    total: cases.length,
+    passed: 0,
+    failed: 0,
+    skipped: cases.length,
+    durationMs: 0,
   };
 };
 
@@ -430,47 +534,47 @@ export const runTests = async ({
     });
   }
 
-  const modulePaths = testModules.map((filePath) =>
-    buildModulePath({ filePath, roots, pathAdapter: host.path })
-  );
-  const entryPath = resolveTestEntryPath({ roots, existingFiles: files });
-  const entrySource = buildTestEntrySource({ modulePaths });
-
   const startRun = Date.now();
-  const result = await sdk.compile({
-    entryPath,
-    source: entrySource,
-    includeTests: true,
-    testsOnly: true,
-    testScope: "all",
-    roots,
-  });
-  if (!result.success) {
-    throw {
-      diagnostics: result.diagnostics,
-      testPhase: "typing",
-      testTargetPath: scanRoot,
-    };
-  }
-
-  const tests = result.tests;
-  if (!tests || tests.cases.length === 0) {
-    return reportNoTestsFound({
-      reporter,
-      targetPath: scanRoot,
-      failOnEmptyTests,
-      durationMs: Date.now() - startRun,
-    });
-  }
-
-  const allowedFiles = buildAllowedTestFiles({
+  const groupedModules = await groupTestModulesBySourcePackage({
     testModules,
-    knownFiles,
+    srcRoot: roots.src,
   });
-  const allowedModules = new Set(modulePaths);
-  const summary = await tests.run({
-    reporter: cliReporter,
-    filter: (info) => {
+  const batches: PreparedTestBatch[] = [];
+
+  for (const [packageDir, packageTestModules] of groupedModules) {
+    const modulePaths = packageTestModules.map((filePath) =>
+      buildModulePath({ filePath, roots, pathAdapter: host.path }),
+    );
+    const entryPath = resolveTestEntryPath({
+      entryDir: packageDir,
+      existingFiles: files,
+    });
+    const result = await sdk.compile({
+      entryPath,
+      source: buildTestEntrySource({ modulePaths }),
+      includeTests: true,
+      testsOnly: true,
+      testScope: "all",
+      roots,
+    });
+    if (!result.success) {
+      throw {
+        diagnostics: result.diagnostics,
+        testPhase: "typing",
+        testTargetPath: scanRoot,
+      };
+    }
+
+    const tests = result.tests;
+    if (!tests) {
+      continue;
+    }
+    const allowedFiles = buildAllowedTestFiles({
+      testModules: packageTestModules,
+      knownFiles,
+    });
+    const allowedModules = new Set(modulePaths);
+    const includes = (info: Pick<TestCase, "location" | "modulePath">) => {
       if (!isTestingStd) {
         if (info.modulePath.startsWith("std::")) {
           return false;
@@ -486,9 +590,33 @@ export const runTests = async ({
         return allowedFiles.has(resolve(info.location.filePath));
       }
       return allowedModules.has(info.modulePath);
-    },
-  });
-  const finalSummary = { ...summary, durationMs: Date.now() - startRun };
+    };
+    batches.push({
+      tests,
+      eligibleCases: tests.cases.filter(includes),
+      includes,
+    });
+  }
+
+  const hasOnly = batches.some((batch) =>
+    batch.eligibleCases.some((test) => test.modifiers.only),
+  );
+  let aggregate = emptySummary({ durationMs: 0 });
+  for (const batch of batches) {
+    const batchHasOnly = batch.eligibleCases.some(
+      (test) => test.modifiers.only,
+    );
+    const summary =
+      hasOnly && !batchHasOnly
+        ? skipBatch({ cases: batch.eligibleCases, reporter })
+        : await batch.tests.run({
+            reporter: cliReporter,
+            filter: batch.includes,
+          });
+    aggregate = addSummary(aggregate, summary);
+  }
+
+  const finalSummary = { ...aggregate, durationMs: Date.now() - startRun };
   if (finalSummary.total === 0) {
     return reportNoTestsFound({
       reporter,

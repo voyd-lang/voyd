@@ -8,10 +8,37 @@ import type {
 
 export type RegionId = number;
 
+export interface EffectOperationIdentity {
+  moduleId: string;
+  effect: SymbolId;
+  operation: SymbolId;
+}
+
 export interface EffectOp {
+  identity: EffectOperationIdentity;
   name: string;
   region?: RegionId;
 }
+
+export const effectOperationIdentityKey = (
+  op: Pick<EffectOp, "identity">,
+): string =>
+  JSON.stringify([
+    op.identity.moduleId,
+    op.identity.effect,
+    op.identity.operation,
+  ]);
+
+export const effectOpRowKey = (op: EffectOp): string =>
+  `${effectOperationIdentityKey(op)}#${
+    typeof op.region === "number" ? op.region : ""
+  }`;
+
+export const effectOpsHaveSameIdentity = (
+  left: EffectOp,
+  right: EffectOp,
+): boolean =>
+  effectOperationIdentityKey(left) === effectOperationIdentityKey(right);
 
 export interface EffectRowVariable {
   id: number;
@@ -67,7 +94,7 @@ export interface EffectTable {
   constrain(
     sub: EffectRowId,
     sup: EffectRowId,
-    ctx: UnificationContext
+    ctx: UnificationContext,
   ): UnificationResult;
   isEmpty(id: EffectRowId): boolean;
   isOpen(id: EffectRowId): boolean;
@@ -80,7 +107,11 @@ export interface EffectTable {
   popExprEffectScope(): void;
   snapshotExprEffects(): ReadonlyMap<HirExprId, EffectRowId>;
   restoreExprEffects(snapshot: ReadonlyMap<HirExprId, EffectRowId>): void;
-  setFunctionEffect(symbol: SymbolId, scheme: TypeSchemeId, row: EffectRowId): void;
+  setFunctionEffect(
+    symbol: SymbolId,
+    scheme: TypeSchemeId,
+    row: EffectRowId,
+  ): void;
   getFunctionEffect(symbol: SymbolId): EffectRowId | undefined;
   snapshotTable(): EffectTableSnapshot;
 }
@@ -106,36 +137,28 @@ export const createEffectInterner = (
   const rows: EffectRowDesc[] = snapshot?.rows.map(cloneEffectRowDesc) ?? [];
   const rowCache = new Map<string, EffectRowId>();
 
-  const opKey = (op: EffectOp): string =>
-    `${op.name}#${typeof op.region === "number" ? op.region : ""}`;
-
   const canonicalizeOperations = (
-    operations: readonly EffectOp[]
+    operations: readonly EffectOp[],
   ): readonly EffectOp[] => {
     const unique = new Map<string, EffectOp>();
     operations.forEach((op) => {
       const canonical: EffectOp = {
+        identity: Object.freeze({ ...op.identity }),
         name: op.name,
         region: typeof op.region === "number" ? op.region : undefined,
       };
-      const key = opKey(canonical);
+      const key = effectOpRowKey(canonical);
       if (!unique.has(key)) {
         unique.set(key, canonical);
       }
     });
 
     return Object.freeze(
-      Array.from(unique.values()).sort((a, b) => {
-        const nameOrder = a.name.localeCompare(b.name, undefined, {
+      Array.from(unique.values()).sort((a, b) =>
+        effectOpRowKey(a).localeCompare(effectOpRowKey(b), undefined, {
           numeric: true,
-        });
-        if (nameOrder !== 0) {
-          return nameOrder;
-        }
-        const aRegion = typeof a.region === "number" ? a.region : -Infinity;
-        const bRegion = typeof b.region === "number" ? b.region : -Infinity;
-        return aRegion - bRegion;
-      })
+        }),
+      ),
     );
   };
 
@@ -150,7 +173,10 @@ export const createEffectInterner = (
   });
 
   const rowKey = (desc: EffectRowDesc): string =>
-    JSON.stringify(desc, (_, value) => value);
+    JSON.stringify({
+      operations: desc.operations.map(effectOpRowKey),
+      tailVar: desc.tailVar,
+    });
 
   rows.forEach((row, id) => {
     rowCache.set(rowKey(row), id as EffectRowId);
@@ -185,7 +211,7 @@ export const createEffectInterner = (
 
   const mergeTailVars = (
     left?: EffectRowVariable,
-    right?: EffectRowVariable
+    right?: EffectRowVariable,
   ): EffectRowVariable | undefined => {
     if (left && right) {
       if (left.id === right.id && left.rigid === right.rigid) {
@@ -222,13 +248,15 @@ export const createEffectInterner = (
   const constrain = (
     sub: EffectRowId,
     sup: EffectRowId,
-    ctx: UnificationContext
+    ctx: UnificationContext,
   ): UnificationResult => {
     const subRow = getRow(sub);
     const supRow = getRow(sup);
 
-    const supOps = new Set(supRow.operations.map(opKey));
-    const missing = subRow.operations.filter((op) => !supOps.has(opKey(op)));
+    const supOps = new Set(supRow.operations.map(effectOpRowKey));
+    const missing = subRow.operations.filter(
+      (op) => !supOps.has(effectOpRowKey(op)),
+    );
 
     const supAllowsExtra = Boolean(supRow.tailVar && !supRow.tailVar.rigid);
     const supHasTail = Boolean(supRow.tailVar);
@@ -258,7 +286,7 @@ export const createEffectInterner = (
         supRow.tailVar!.id,
         subRow.tailVar
           ? internRow({ operations: [], tailVar: subRow.tailVar })
-          : emptyRow
+          : emptyRow,
       );
     }
 
@@ -320,7 +348,10 @@ export const createEffectInterner = (
 export const createEffectTable = ({
   interner,
   snapshot,
-}: { interner?: EffectInterner; snapshot?: EffectTableSnapshot } = {}): EffectTable => {
+}: {
+  interner?: EffectInterner;
+  snapshot?: EffectTableSnapshot;
+} = {}): EffectTable => {
   const shared = interner ?? createEffectInterner();
   const exprEffects = new Map<HirExprId, EffectRowId>(
     snapshot?.exprEffects ?? [],
@@ -376,7 +407,7 @@ export const createEffectTable = ({
     new Map(exprEffects);
 
   const restoreExprEffects = (
-    snapshot: ReadonlyMap<HirExprId, EffectRowId>
+    snapshot: ReadonlyMap<HirExprId, EffectRowId>,
   ): void => {
     exprEffects.clear();
     snapshot.forEach((row, expr) => {
@@ -387,12 +418,12 @@ export const createEffectTable = ({
   const setFunctionEffect = (
     symbol: SymbolId,
     scheme: TypeSchemeId,
-    row: EffectRowId
+    row: EffectRowId,
   ): void => {
     const existing = functionEffects.get(symbol);
     if (existing && (existing.row !== row || existing.scheme !== scheme)) {
       throw new Error(
-        `conflicting effect rows for function ${symbol}: existing=${existing.row}, next=${row}`
+        `conflicting effect rows for function ${symbol}: existing=${existing.row}, next=${row}`,
       );
     }
     functionEffects.set(symbol, { scheme, row });
@@ -403,10 +434,13 @@ export const createEffectTable = ({
 
   const snapshotTable = (): EffectTableSnapshot => ({
     exprEffects: Array.from(exprEffects.entries()),
-    functionEffects: Array.from(functionEffects.entries(), ([symbol, effect]) => [
-      symbol,
-      { scheme: effect.scheme, row: effect.row },
-    ]),
+    functionEffects: Array.from(
+      functionEffects.entries(),
+      ([symbol, effect]) => [
+        symbol,
+        { scheme: effect.scheme, row: effect.row },
+      ],
+    ),
   });
 
   return {
@@ -425,6 +459,7 @@ export const createEffectTable = ({
 
 const cloneEffectRowDesc = (desc: EffectRowDesc): EffectRowDesc => ({
   operations: desc.operations.map((op) => ({
+    identity: { ...op.identity },
     name: op.name,
     region: typeof op.region === "number" ? op.region : undefined,
   })),

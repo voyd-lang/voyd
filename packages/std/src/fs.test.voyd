@@ -1,6 +1,6 @@
 use std::array::{ Array, new_array_unchecked }
 use std::bytes::{ ByteBuffer, Bytes }
-use std::error::{ HostError, IoError, panic }
+use std::error::{ HostError, IoAlreadyExists, IoError, panic }
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
 use std::msgpack::MsgPackError
@@ -25,6 +25,12 @@ obj BytesWriteCapture {
 obj RenameCapture {
   sources: Array<String>,
   destinations: Array<String>
+}
+
+obj AtomicWriteCapture {
+  paths: Array<String>,
+  kinds: Array<String>,
+  values: Array<String>
 }
 
 test "fs read_string decodes host payload":
@@ -132,6 +138,37 @@ test "fs rename encodes source and destination paths":
     Err<IoError>:
       assert(false, eq: true)
 
+test "fs write_atomic encodes the semantic content kind":
+  let ~capture = AtomicWriteCapture {
+    paths: Array<String>::init(),
+    kinds: Array<String>::init(),
+    values: Array<String>::init()
+  }
+  match(write_atomic_with_capture(capture))
+    Err<IoError>:
+      assert(false, eq: true)
+    Ok<Unit>:
+      assert(optional_string_or(capture.paths.get(0), "missing".as_slice()).equals("/tmp/state.json"), eq: true)
+      assert(optional_string_or(capture.kinds.get(0), "missing".as_slice()).equals("string"), eq: true)
+      assert(optional_string_or(capture.values.get(0), "missing".as_slice()).equals("complete"), eq: true)
+
+test "fs create_exclusive exposes portable already-exists errors":
+  match(create_exclusive_with_payload(io_error_payload(
+    kind: "already-exists",
+    code: 17,
+    message: "host EEXIST detail"
+  )))
+    Ok<Unit>:
+      assert(false, eq: true)
+    Err<IoError> { error }:
+      assert(error.code, eq: 17)
+      assert(error.message.equals("host EEXIST detail"), eq: true)
+      error.kind.match(kind)
+        IoAlreadyExists:
+          void
+        else:
+          assert(false, eq: true)
+
 fn read_string_with_payload(payload: MsgPack): () -> Result<String, IoError>
   try
     read_string(Path::new("/tmp/app.log".as_slice().to_string()))
@@ -152,6 +189,10 @@ fn read_string_with_payload(payload: MsgPack): () -> Result<String, IoError>
   Fs::create_dir_all(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::rename(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_exclusive(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
 
 fn read_bytes_with_payload(payload: MsgPack): () -> Result<Bytes, IoError>
@@ -175,6 +216,10 @@ fn read_bytes_with_payload(payload: MsgPack): () -> Result<Bytes, IoError>
     tail(host_dto_test::host_default_error_payload())
   Fs::rename(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_exclusive(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
 
 fn list_dir_with_payload(payload: MsgPack): () -> Result<Array<Path>, IoError>
   try
@@ -196,6 +241,10 @@ fn list_dir_with_payload(payload: MsgPack): () -> Result<Array<Path>, IoError>
   Fs::create_dir_all(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::rename(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_exclusive(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
 
 fn write_string_with_capture(~capture: StringWriteCapture): () -> Result<Unit, IoError>
@@ -221,6 +270,10 @@ fn write_string_with_capture(~capture: StringWriteCapture): () -> Result<Unit, I
   Fs::create_dir_all(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::rename(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_exclusive(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
 
 fn write_bytes_with_capture(~capture: BytesWriteCapture): () -> Result<Unit, IoError>
@@ -259,6 +312,10 @@ fn write_bytes_with_capture(~capture: BytesWriteCapture): () -> Result<Unit, IoE
     tail(host_dto_test::host_default_error_payload())
   Fs::rename(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_exclusive(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
 
 fn remove_with_capture(~paths: Array<String>): () -> Result<Unit, IoError>
   try
@@ -282,6 +339,10 @@ fn remove_with_capture(~paths: Array<String>): () -> Result<Unit, IoError>
     tail(host_dto_test::host_default_error_payload())
   Fs::rename(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_exclusive(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
 
 fn remove_with_payload(payload: MsgPack): () -> Result<Unit, IoError>
   try
@@ -303,6 +364,10 @@ fn remove_with_payload(payload: MsgPack): () -> Result<Unit, IoError>
   Fs::create_dir_all(tail, _path):
     tail(host_dto_test::host_default_error_payload())
   Fs::rename(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_exclusive(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
 
 fn create_dir_all_with_capture(~paths: Array<String>): () -> Result<Unit, IoError>
@@ -326,6 +391,10 @@ fn create_dir_all_with_capture(~paths: Array<String>): () -> Result<Unit, IoErro
     paths.push(unpack_msgpack_string(path))
     tail(host_dto_test::host_ok_payload())
   Fs::rename(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_exclusive(tail, _payload):
     tail(host_dto_test::host_default_error_payload())
 
 fn rename_with_capture(~capture: RenameCapture): () -> Result<Unit, IoError>
@@ -355,6 +424,80 @@ fn rename_with_capture(~capture: RenameCapture): () -> Result<Unit, IoError>
     capture.sources.push(read_host_string(decoded, "from"))
     capture.destinations.push(read_host_string(decoded, "to"))
     tail(host_dto_test::host_ok_payload())
+  Fs::write_atomic(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_exclusive(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+
+fn write_atomic_with_capture(
+  ~capture: AtomicWriteCapture
+): () -> Result<Unit, IoError>
+  try
+    write_atomic(Path::new("/tmp/state.json"), "complete")
+  Fs::read_bytes(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::read_string(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_bytes(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_string(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::exists(tail, _path):
+    tail(false)
+  Fs::list_dir(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::remove(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_dir_all(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::rename(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, payload):
+    let decoded = unpack_host_dto(payload)
+    capture.paths.push(read_host_string(decoded, "path"))
+    capture.kinds.push(read_host_string(decoded, "kind"))
+    capture.values.push(read_host_string(decoded, "value"))
+    tail(host_dto_test::host_ok_payload())
+  Fs::create_exclusive(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+
+fn create_exclusive_with_payload(payload: MsgPack): () -> Result<Unit, IoError>
+  try
+    create_exclusive(Path::new("/tmp/new.txt"), "value")
+  Fs::read_bytes(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::read_string(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_bytes(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_string(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::exists(tail, _path):
+    tail(false)
+  Fs::list_dir(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::remove(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_dir_all(tail, _path):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::rename(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, _payload):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::create_exclusive(tail, _payload):
+    tail(payload)
+
+fn io_error_payload({
+  kind: String,
+  code: i32,
+  message: String
+}): () -> MsgPack
+  HostDto::init()
+    .set("ok", msgpack::make_bool(false))
+    .set("kind", msgpack::make_string(kind))
+    .set("code", msgpack::make_i32(code))
+    .set("message", msgpack::make_string(message))
+    .pack()
 
 fn path_array_payload(first: String, second: String): () -> MsgPack
   let ~values = Array<MsgPack>::with_capacity(2)

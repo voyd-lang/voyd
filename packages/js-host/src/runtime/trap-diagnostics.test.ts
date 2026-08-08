@@ -181,6 +181,35 @@ describe("createVoydTrapDiagnostics", () => {
     expect(annotated.voyd.trap.span?.startColumn).toBe(7);
   });
 
+  it("preserves task source context for host-boundary outcome traps", () => {
+    const diagnostics = createVoydTrapDiagnostics({
+      module: moduleWithRuntimeDiagnostics(),
+    });
+    const error = withStack(
+      new Error("unreachable"),
+      [
+        "WebAssembly.RuntimeError: unreachable",
+        "encode_task_outcome@wasm://wasm/00112233:1:57",
+        "handle_task_outcome@wasm://wasm/00112233:1:42",
+      ].join("\n"),
+    );
+
+    const annotated = diagnostics.annotateTrap(error, {
+      fallbackFunctionName: "pure_trap",
+      transition: {
+        point: "task_outcome",
+        direction: "vm->host",
+      },
+    });
+
+    expect(annotated).toMatchObject({
+      voyd: {
+        trap: { functionName: "pure_trap", moduleId: "math" },
+        transition: { point: "task_outcome", direction: "vm->host" },
+      },
+    });
+  });
+
   it("annotates explicit panic traps even when the throwing frame is host-side", () => {
     const diagnostics = createVoydTrapDiagnostics({
       module: moduleWithRuntimeDiagnostics(),

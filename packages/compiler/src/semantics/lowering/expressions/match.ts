@@ -1,4 +1,4 @@
-import { type Expr } from "../../../parser/index.js";
+import { type Expr, identifierBindingKey } from "../../../parser/index.js";
 import { toSourceSpan } from "../../../parser/surface/utils.js";
 import type { HirExprId } from "../../ids.js";
 import type { HirMatchArm, HirPattern } from "../../hir/index.js";
@@ -31,7 +31,10 @@ export const lowerMatch = ({
   const match = parseSurfaceMatchExpression(form, operandOverride);
   const operandId = lowerExpr(match.operand, ctx, scopes);
   const binderSymbol = match.binder
-    ? resolveSymbol(match.binder.value, scopes.current(), ctx)
+    ? resolveSymbol(match.binder.value, scopes.current(), ctx, {
+        bindingIdentity: identifierBindingKey(match.binder),
+        directSymbol: ctx.directSymbolBySyntax.get(match.binder.syntaxId),
+      })
     : undefined;
 
   const arms: HirMatchArm[] = match.arms.map((arm) =>

@@ -757,6 +757,7 @@ const tryBuildArrayStorageView = ({
         field: storageField,
         pointer: targetPointer,
         ctx,
+        fnCtx,
       }),
       ctx,
       fnCtx,
@@ -768,6 +769,7 @@ const tryBuildArrayStorageView = ({
         field: countField,
         pointer: targetPointer,
         ctx,
+        fnCtx,
       }),
       ctx,
       fnCtx,
@@ -977,6 +979,7 @@ const loadProjectedField = ({
     field,
     pointer: () => element,
     ctx,
+    fnCtx,
   });
 };
 

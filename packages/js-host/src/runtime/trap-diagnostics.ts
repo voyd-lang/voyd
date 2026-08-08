@@ -486,7 +486,8 @@ const buildDiagnostics = ({
     annotation?.fallbackFunctionName
       ? annotation.panic ||
         frames.length === 1 ||
-        annotation.transition?.point === "run_serialized_entry"
+        annotation.transition?.point === "run_serialized_entry" ||
+        annotation.transition?.point === "task_outcome"
         ? metadataByFunctionName.get(annotation.fallbackFunctionName)
         : undefined
       : undefined;

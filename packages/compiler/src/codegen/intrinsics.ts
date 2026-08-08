@@ -681,12 +681,8 @@ const ensureRetainedCallbackHelper = ({
                     structInfo: info,
                     field: payloadField,
                     pointer: () => resultValue,
-                    // The callback's declared return type is this exact payload
-                    // envelope. A direct load also keeps effectful callbacks
-                    // from being evaluated once for a type check and again for
-                    // the field access.
-                    exactNominalTypeId: info.nominalId,
                     ctx,
+                    fnCtx: helperFnCtx,
                   });
                 })()
               : packBoundaryValueAsMsgPack({
@@ -808,6 +804,7 @@ const compileSharedCellStateIntrinsic = ({
         pointer: cellRef,
         exactNominalTypeId: info.nominalId,
         ctx,
+        fnCtx,
       }),
     ),
   ]);
@@ -906,6 +903,7 @@ const compileSharedCellValueIntrinsic = ({
         pointer: () => ctx.mod.local.get(cell.index, cellType),
         exactNominalTypeId: info.nominalId,
         ctx,
+        fnCtx,
       }),
     ],
     wasmTypeFor(value.typeId, ctx),
@@ -1453,27 +1451,35 @@ export const compileIntrinsicCall = ({
           fnCtx,
         });
       }
-      return packBoundaryValueAsMsgPack({
-        value: args[0]!,
-        schema: deriveBoundarySchema({
-          typeId: valueTypeId,
+      try {
+        return packBoundaryValueAsMsgPack({
+          value: args[0]!,
+          schema: deriveBoundarySchema({
+            typeId: valueTypeId,
+            ctx,
+            label: "__boundary_value_to_msgpack value",
+            options: { tagStandaloneVariants: true },
+          }),
           ctx,
-          label: "__boundary_value_to_msgpack value",
-          options: { tagStandaloneVariants: true },
-        }),
-        ctx,
-        fnCtx,
-      });
+          fnCtx,
+        });
+      } catch (error) {
+        rethrowBoundarySchemaDiagnostic({ error, call });
+      }
     }
     case "__boundary_msgpack_to_value": {
       assertArgCount(name, args, 1);
       const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
-      return emitBoundaryMsgPackToValue({
-        value: args[0]!,
-        returnTypeId,
-        ctx,
-        fnCtx,
-      });
+      try {
+        return emitBoundaryMsgPackToValue({
+          value: args[0]!,
+          returnTypeId,
+          ctx,
+          fnCtx,
+        });
+      } catch (error) {
+        rethrowBoundarySchemaDiagnostic({ error, call });
+      }
     }
     case "__boundary_msgpack_to_value_or_identity": {
       assertArgCount(name, args, 2);
@@ -1492,18 +1498,22 @@ export const compileIntrinsicCall = ({
           fnCtx,
         });
       }
-      return emitBoundaryMsgPackToValue({
-        value: args[1]!,
-        returnTypeId,
-        ctx,
-        fnCtx,
-      });
+      try {
+        return emitBoundaryMsgPackToValue({
+          value: args[1]!,
+          returnTypeId,
+          ctx,
+          fnCtx,
+        });
+      } catch (error) {
+        rethrowBoundarySchemaDiagnostic({ error, call });
+      }
     }
     case "__boundary_shape_of": {
       assertArgCount(name, args, 0);
       const [targetTypeId] = intrinsicCallTypeArgs({ call, ctx, instanceId });
       if (targetTypeId === undefined) {
-        throw shapeReificationDiagnostic({
+        throw intrinsicCodegenDiagnostic({
           call,
           message: "shape_of<T>() requires one resolved type argument",
         });
@@ -1511,7 +1521,7 @@ export const compileIntrinsicCall = ({
       if (
         ctx.program.types.getTypeDesc(targetTypeId).kind === "type-param-ref"
       ) {
-        throw shapeReificationDiagnostic({
+        throw intrinsicCodegenDiagnostic({
           call,
           message:
             "shape_of<T>() requires a closed, resolved type argument; unresolved type parameters cannot be reified",
@@ -1529,7 +1539,7 @@ export const compileIntrinsicCall = ({
           throw error;
         }
         if (error instanceof BoundarySchemaError) {
-          throw shapeReificationDiagnostic({ call, message: error.message });
+          throw intrinsicCodegenDiagnostic({ call, message: error.message });
         }
         throw error;
       }
@@ -1815,7 +1825,7 @@ export const compileIntrinsicCall = ({
   }
 };
 
-const shapeReificationDiagnostic = ({
+const intrinsicCodegenDiagnostic = ({
   call,
   message,
 }: {
@@ -1829,6 +1839,22 @@ const shapeReificationDiagnostic = ({
       span: call.span,
     }),
   );
+
+const rethrowBoundarySchemaDiagnostic = ({
+  error,
+  call,
+}: {
+  error: unknown;
+  call: HirCallExpr;
+}): never => {
+  if (error instanceof DiagnosticError) {
+    throw error;
+  }
+  if (error instanceof BoundarySchemaError) {
+    throw intrinsicCodegenDiagnostic({ call, message: error.message });
+  }
+  throw error;
+};
 
 const emitBoundaryMsgPackToValue = ({
   value,
@@ -2450,6 +2476,7 @@ const emitArrayCopyFromOptions = ({
       field,
       pointer: () => ctx.mod.local.get(temp.index, structInfo.interfaceType),
       ctx,
+      fnCtx,
     });
 
   const copyExpr = arrayCopy(

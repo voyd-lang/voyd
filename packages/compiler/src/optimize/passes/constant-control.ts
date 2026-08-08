@@ -20,6 +20,7 @@ import type {
 } from "../pass.js";
 import type { OptimizedCallInfo, ReadonlyOptimizedModuleView } from "../ir.js";
 import type { ProgramOptimizationIR } from "../ir.js";
+import { effectOperationIdentityKey } from "../../semantics/effects/effect-table.js";
 import {
   exactNominalForType,
   exprTypeFor,
@@ -965,9 +966,10 @@ export const constructorKnownSimplificationPass: ProgramOptimizationPass = {
             : -1;
         const parameterType =
           parameterIndex >= 0
-            ? ctx.ir.baseProgram.functions
-                .getSignature(moduleView.moduleId, functionItem.symbol)
-                ?.parameters[parameterIndex]?.typeId
+            ? ctx.ir.baseProgram.functions.getSignature(
+                moduleView.moduleId,
+                functionItem.symbol,
+              )?.parameters[parameterIndex]?.typeId
             : undefined;
         const optionalInfo =
           typeof parameterType === "number"
@@ -1138,18 +1140,16 @@ export const effectFastPathEliminationPass: ProgramOptimizationPass = {
         }
         const handledOps = new Set(
           handlerInfo.clauses
-            .map(
-              (clause) =>
-                moduleView.effectsInfo.operations.get(clause.operation)?.name,
+            .map((clause) =>
+              moduleView.effectsInfo.operations.get(clause.operation),
             )
-            .filter((name): name is string => typeof name === "string"),
+            .filter((operation) => operation !== undefined)
+            .map((operation) =>
+              effectOperationIdentityKey({ identity: operation.identity }),
+            ),
         );
         const canHandle = row.operations.some((operation) =>
-          Array.from(handledOps).some(
-            (handledName) =>
-              operation.name === handledName ||
-              operation.name.startsWith(`${handledName}(`),
-          ),
+          handledOps.has(effectOperationIdentityKey(operation)),
         );
         if (canHandle) {
           return;

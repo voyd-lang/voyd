@@ -954,6 +954,54 @@ fn main(value: util::Thing): util::Fx -> util::Thing
     );
   });
 
+  it("resolves qualified handler effects declared later in the module", () => {
+    const source = `fn run(): Probe -> i32
+  try
+    Probe::ping()
+  Probe::ping(tail):
+    tail(7)
+
+eff Probe
+  ping(tail) -> i32
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    expect(binding.diagnostics).toEqual([]);
+  });
+
+  it("reports unresolved qualified handler effects after binding declarations", () => {
+    const source = `fn run() -> i32
+  try
+    1
+  Missing::ping(tail):
+    tail(7)
+`;
+    const ast = parse(source, "main.voyd");
+    const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
+    symbolTable.declare({
+      name: "main.voyd",
+      kind: "module",
+      declaredAt: ast.syntaxId,
+    });
+
+    const binding = runBindingPipeline({ moduleForm: ast, symbolTable });
+
+    expect(binding.diagnostics).toEqual([
+      expect.objectContaining({
+        code: "BD0009",
+        message: expect.stringContaining("Missing does not resolve to an effect"),
+      }),
+    ]);
+  });
+
   it("rejects cross-package imports of package-visible exports", () => {
     const source = "use pkg::dep::Thing";
     const ast = parse(source, "main.voyd");
@@ -2333,7 +2381,7 @@ eff async_effect
   it("validates repeatedly hygienic generated type names using their source prefix", () => {
     const source = `
 attribute macro generate_type(arguments, declaration)
-  let first = identifier(GeneratedType)
+  let first = identifier("GeneratedType")
   let generated = identifier(first)
   emit_many(declaration, \`(type $generated = i32))
 

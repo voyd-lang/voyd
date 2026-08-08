@@ -199,11 +199,10 @@ describe("effects wasm e2e", { timeout: 60_000 }, () => {
 
     const bufferPtr = 64;
     const bufferCap = 1024;
-    new Uint8Array(memory.buffer, bufferPtr, 1)[0] = 2;
-
     const first = mainEffectful(bufferPtr, bufferCap);
     expect(effectStatus(first)).toBe(1);
     const continuation = effectCont(first);
+    new Uint8Array(memory.buffer, bufferPtr, 1)[0] = 2;
     const resumed = resumeEffectful(continuation, bufferPtr, 1, bufferCap);
     expect(effectStatus(resumed)).toBe(1);
 

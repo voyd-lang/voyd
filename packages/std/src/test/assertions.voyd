@@ -10,6 +10,11 @@ pub eff Test
   /// Marks the current test as failed and stops normal assertion flow.
   fail(resume) -> void
 
+  /// Marks the current test as failed with a UTF-8 message in linear memory.
+  /// Assertion helpers own this low-level transport; callers normally use
+  /// `std::test::numeric::assert_close`.
+  fail_with(resume, pointer: i32, byte_len: i32) -> void
+
   /// Marks the current test as skipped.
   skip(resume) -> void
 

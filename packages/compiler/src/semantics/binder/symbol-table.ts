@@ -12,7 +12,12 @@ interface ScopeBucket {
   info: ScopeInfo;
   locals: SymbolId[];
   nameIndex: Map<string, SymbolId[]>;
+  bindingIndex: Map<string, SymbolId[]>;
+  surfaceAliases: Map<string, Set<SymbolId>>;
 }
+
+const bindingIndexKey = (name: string, identity: string): string =>
+  `${name}\u0000${identity}`;
 
 const RESERVED_SYMBOL_NAMES = new Set(["void"]);
 
@@ -71,6 +76,8 @@ export class SymbolTable {
       info: { ...info, id },
       locals: [],
       nameIndex: new Map(),
+      bindingIndex: new Map(),
+      surfaceAliases: new Map(),
     };
     this.scopeBuckets[id] = bucket;
     return id;
@@ -122,12 +129,25 @@ export class SymbolTable {
     } else {
       bucket.nameIndex.set(record.name, [id]);
     }
+    if (record.bindingIdentity) {
+      const key = bindingIndexKey(record.name, record.bindingIdentity);
+      const bindingHits = bucket.bindingIndex.get(key);
+      if (bindingHits) {
+        bindingHits.push(id);
+      } else {
+        bucket.bindingIndex.set(key, [id]);
+      }
+    }
 
     return id;
   }
 
   bindAlias(
-    { name, symbol }: Pick<SymbolAliasBinding, "name" | "symbol">,
+    {
+      name,
+      symbol,
+      bindingIdentity,
+    }: Pick<SymbolAliasBinding, "name" | "symbol" | "bindingIdentity">,
     scope: ScopeId = this.currentScope()
   ): void {
     if (RESERVED_SYMBOL_NAMES.has(name)) {
@@ -137,13 +157,28 @@ export class SymbolTable {
       throw new Error(`symbol ${symbol} does not exist`);
     }
     const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
-    const hits = bucket.nameIndex.get(name);
-    if (hits) {
-      hits.push(symbol);
+    if (bindingIdentity) {
+      const key = bindingIndexKey(name, bindingIdentity);
+      const hits = bucket.bindingIndex.get(key);
+      if (hits) {
+        hits.push(symbol);
+      } else {
+        bucket.bindingIndex.set(key, [symbol]);
+      }
     } else {
-      bucket.nameIndex.set(name, [symbol]);
+      const hits = bucket.nameIndex.get(name);
+      if (hits) {
+        if (!hits.includes(symbol)) {
+          hits.push(symbol);
+        }
+      } else {
+        bucket.nameIndex.set(name, [symbol]);
+      }
+      const aliases = bucket.surfaceAliases.get(name) ?? new Set<SymbolId>();
+      aliases.add(symbol);
+      bucket.surfaceAliases.set(name, aliases);
     }
-    this.aliasBindings.push({ name, symbol, scope });
+    this.aliasBindings.push({ name, symbol, scope, bindingIdentity });
   }
 
   getScope(id: ScopeId): Readonly<ScopeInfo> {
@@ -166,11 +201,35 @@ export class SymbolTable {
   }
 
   resolve(name: string, fromScope: ScopeId): SymbolId | undefined {
-    return this.resolveInternal(name, fromScope);
+    return this.resolveInternal(
+      name,
+      fromScope,
+      (record) => record.bindingIdentity === undefined,
+    );
   }
 
   resolveAll(name: string, fromScope: ScopeId): readonly SymbolId[] {
-    return this.resolveAllInternal(name, fromScope);
+    return this.resolveAllInternal(
+      name,
+      fromScope,
+      (record) => record.bindingIdentity === undefined,
+    );
+  }
+
+  resolveBinding(
+    name: string,
+    bindingIdentity: string,
+    fromScope: ScopeId,
+  ): SymbolId | undefined {
+    return this.resolveBindingInternal(name, bindingIdentity, fromScope)[0];
+  }
+
+  resolveAllBindings(
+    name: string,
+    bindingIdentity: string,
+    fromScope: ScopeId,
+  ): readonly SymbolId[] {
+    return this.resolveBindingInternal(name, bindingIdentity, fromScope);
   }
 
   symbolsNamedInScope(name: string, scope: ScopeId): readonly SymbolId[] {
@@ -183,7 +242,11 @@ export class SymbolTable {
     fromScope: ScopeId,
     predicate: SymbolPredicate
   ): SymbolId | undefined {
-    return this.resolveInternal(name, fromScope, predicate);
+    return this.resolveInternal(
+      name,
+      fromScope,
+      (record) => record.bindingIdentity === undefined && predicate(record),
+    );
   }
 
   resolveAllWhere(
@@ -191,7 +254,11 @@ export class SymbolTable {
     fromScope: ScopeId,
     predicate: SymbolPredicate
   ): readonly SymbolId[] {
-    return this.resolveAllInternal(name, fromScope, predicate);
+    return this.resolveAllInternal(
+      name,
+      fromScope,
+      (record) => record.bindingIdentity === undefined && predicate(record),
+    );
   }
 
   resolveByKinds(
@@ -203,7 +270,8 @@ export class SymbolTable {
     return this.resolveInternal(
       name,
       fromScope,
-      (record) => allowedKinds.has(record.kind)
+      (record) =>
+        record.bindingIdentity === undefined && allowedKinds.has(record.kind)
     );
   }
 
@@ -216,7 +284,8 @@ export class SymbolTable {
     return this.resolveAllInternal(
       name,
       fromScope,
-      (record) => allowedKinds.has(record.kind)
+      (record) =>
+        record.bindingIdentity === undefined && allowedKinds.has(record.kind)
     );
   }
 
@@ -237,7 +306,12 @@ export class SymbolTable {
           if (!record || isImportedSymbolRecord(record)) {
             continue;
           }
-          if (!predicate || predicate(record)) {
+          const resolvedRecord = bucket.surfaceAliases
+            .get(name)
+            ?.has(candidate)
+            ? { ...record, bindingIdentity: undefined }
+            : record;
+          if (!predicate || predicate(resolvedRecord)) {
             return candidate;
           }
         }
@@ -248,7 +322,12 @@ export class SymbolTable {
             if (!record) {
               continue;
             }
-            if (!predicate || predicate(record)) {
+            const resolvedRecord = bucket.surfaceAliases
+              .get(name)
+              ?.has(candidate)
+              ? { ...record, bindingIdentity: undefined }
+              : record;
+            if (!predicate || predicate(resolvedRecord)) {
               importedFallback = candidate;
               break;
             }
@@ -260,6 +339,33 @@ export class SymbolTable {
     }
 
     return importedFallback;
+  }
+
+  private resolveBindingInternal(
+    name: string,
+    bindingIdentity: string,
+    fromScope: ScopeId,
+  ): readonly SymbolId[] {
+    const resolved: SymbolId[] = [];
+    let scope: ScopeId | null = fromScope;
+    while (scope !== null) {
+      const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
+      const hits = bucket.bindingIndex.get(
+        bindingIndexKey(name, bindingIdentity),
+      );
+      if (hits?.length) {
+        const local = hits.filter(
+          (candidate) =>
+            !isImportedSymbolRecord(this.symbolRecords[candidate]!),
+        );
+        if (local.length > 0) {
+          return [...local].reverse();
+        }
+        resolved.push(...hits);
+      }
+      scope = bucket.info.parent;
+    }
+    return resolved;
   }
 
   private resolveAllInternal(
@@ -279,7 +385,15 @@ export class SymbolTable {
         } else {
           for (const candidate of hits) {
             const record = this.symbolRecords[candidate];
-            if (record && predicate(record)) {
+            if (!record) {
+              continue;
+            }
+            const resolvedRecord = bucket.surfaceAliases
+              .get(name)
+              ?.has(candidate)
+              ? { ...record, bindingIdentity: undefined }
+              : record;
+            if (predicate(resolvedRecord)) {
               resolved.push(candidate);
             }
           }
@@ -308,6 +422,26 @@ export class SymbolTable {
     yield* bucket.locals;
   }
 
+  surfaceNamesForSymbol(symbol: SymbolId, scope: ScopeId): readonly string[] {
+    const record = this.symbolRecords[symbol];
+    if (!record) {
+      throw new Error(`symbol ${symbol} does not exist`);
+    }
+    const bucket = ensureScopeExists(this.scopeBuckets[scope], scope);
+    const names = new Set<string>();
+
+    if (record.scope === scope && record.bindingIdentity === undefined) {
+      names.add(record.name);
+    }
+    bucket.surfaceAliases.forEach((symbols, name) => {
+      if (symbols.has(symbol)) {
+        names.add(name);
+      }
+    });
+
+    return Array.from(names);
+  }
+
   snapshot(payload?: Record<string, unknown>): SymbolTableSnapshot {
     return {
       nextScope: this.nextScope,
@@ -331,6 +465,8 @@ export class SymbolTable {
         info: { ...info },
         locals: [],
         nameIndex: new Map(),
+        bindingIndex: new Map(),
+        surfaceAliases: new Map(),
       };
     });
 
@@ -350,6 +486,15 @@ export class SymbolTable {
       } else {
         bucket.nameIndex.set(record.name, [record.id]);
       }
+      if (record.bindingIdentity) {
+        const key = bindingIndexKey(record.name, record.bindingIdentity);
+        const bindingHits = bucket.bindingIndex.get(key);
+        if (bindingHits) {
+          bindingHits.push(record.id);
+        } else {
+          bucket.bindingIndex.set(key, [record.id]);
+        }
+      }
     });
 
     this.aliasBindings.length = 0;
@@ -358,11 +503,27 @@ export class SymbolTable {
         this.scopeBuckets[alias.scope],
         alias.scope
       );
-      const hits = bucket.nameIndex.get(alias.name);
-      if (hits) {
-        hits.push(alias.symbol);
+      if (alias.bindingIdentity) {
+        const key = bindingIndexKey(alias.name, alias.bindingIdentity);
+        const hits = bucket.bindingIndex.get(key);
+        if (hits) {
+          hits.push(alias.symbol);
+        } else {
+          bucket.bindingIndex.set(key, [alias.symbol]);
+        }
       } else {
-        bucket.nameIndex.set(alias.name, [alias.symbol]);
+        const hits = bucket.nameIndex.get(alias.name);
+        if (hits) {
+          if (!hits.includes(alias.symbol)) {
+            hits.push(alias.symbol);
+          }
+        } else {
+          bucket.nameIndex.set(alias.name, [alias.symbol]);
+        }
+        const aliases =
+          bucket.surfaceAliases.get(alias.name) ?? new Set<SymbolId>();
+        aliases.add(alias.symbol);
+        bucket.surfaceAliases.set(alias.name, aliases);
       }
       this.aliasBindings.push({ ...alias });
     });

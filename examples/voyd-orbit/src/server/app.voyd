@@ -17,7 +17,7 @@ use pkg::web::{ App, Context, app }
 use std::array::Array
 use std::fs::Fs
 use std::http::{ HttpError, Response }
-use std::json::JsonError
+use std::json::{ JsonDecodeError, JsonError }
 use std::optional::types::all
 use std::random::Random
 use std::result::types::all
@@ -162,7 +162,7 @@ fn request_simulation(ctx: Context) -> Result<PersistedSimulation, Response>
       }
     Ok<String> { value: source }:
       match(simulation_from_json(source))
-        Err<JsonError> { error }:
+        Err<JsonDecodeError> { error }:
           Err<Response> {
             error: error_response(
               Response::bad_request(),
@@ -196,15 +196,10 @@ fn repository_error_response(error: RepositoryError) -> Response
 
 fn is_client_error(error: RepositoryError) -> bool
   let code = error.code
-  if code.equals("storage-failed"):
-    return false
-  if code.equals("serialization-failed"):
-    return false
-  if code.equals("corrupt-simulation"):
-    return false
-  if code.equals("id-generation-failed"):
-    return false
-  true
+  not code.starts_with("storage-") and
+    not code.equals("serialization-failed") and
+    not code.equals("corrupt-simulation") and
+    not code.equals("id-generation-failed")
 
 fn error_response(response: Response, { code: String, message: String }) -> Response
   match(api_error_json({ code, message }))

@@ -1,4 +1,5 @@
 import type { Expr, Form, Syntax } from "../../parser/index.js";
+import type { SurfaceHandlerHead } from "../../parser/surface/index.js";
 import type { SymbolTable } from "../binder/index.js";
 import type {
   Diagnostic,
@@ -66,6 +67,7 @@ export interface BindingResult {
   moduleMembers: ModuleMemberTable;
   dependencies: Map<string, BindingResult>;
   importedOverloadOptions: Map<OverloadSetId, readonly SymbolId[]>;
+  directSymbolBySyntax: Map<NodeId, SymbolId>;
   modulePath: ModulePath;
   packageId: string;
   isPackageRoot: boolean;
@@ -120,7 +122,13 @@ export interface BindingContext {
   memberDeclarationScopesByOwner: Map<SymbolId, ScopeId>;
   memberDeclarationScopesByOwnerAndTrait: Map<SymbolId, Map<SymbolId, ScopeId>>;
   pendingStaticMethods: PendingStaticMethod[];
+  pendingHandlerOperationBindings: {
+    head: SurfaceHandlerHead;
+    scope: ScopeId;
+  }[];
   importedOverloadOptions: Map<OverloadSetId, readonly SymbolId[]>;
+  directSymbolBySyntax: Map<NodeId, SymbolId>;
+  hygienicImportCache: Map<string, readonly SymbolId[]>;
   includeTests: boolean;
 }
 

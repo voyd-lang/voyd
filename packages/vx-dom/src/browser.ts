@@ -4,6 +4,7 @@ import {
   elementNamespace,
   type MarkupNamespace,
   normalizeRenderFrame,
+  ssrDomPropertyRepresentation,
 } from "./normalize.js";
 import {
   listenerKey,
@@ -240,6 +241,7 @@ export function createBrowserVxRuntimeHost(
 ): VxRuntimeHostOptions {
   return {
     commands: {
+      canvas_measure_text: runCanvasMeasureTextCommand,
       canvas_render: runCanvasRenderCommand,
       copy_to_clipboard: runCopyToClipboardCommand,
       delay: runDelayCommand,
@@ -769,6 +771,7 @@ function patchNode(
   const oldElement = oldNode as VxElementNode;
   applyElementProps(element, oldElement, newNode, handlers);
   patchChildren(element, oldElement.children ?? [], newNode.children ?? [], handlers);
+  applyChildDependentProps(element, newNode);
   return element;
 }
 
@@ -795,6 +798,7 @@ function createDom(
   (vnode.children ?? []).forEach((child) =>
     element.appendChild(createDom(child, handlers, childrenNamespace))
   );
+  applyChildDependentProps(element, vnode);
   return element;
 }
 
@@ -871,6 +875,12 @@ function applyElementProps(
   patchEvents(element, oldNode?.events ?? [], newNode.events ?? [], handlers);
 }
 
+function applyChildDependentProps(element: Element, node: VxElementNode): void {
+  if (node.tag !== "select" || !Object.hasOwn(node.props ?? {}, "value"))
+    return;
+  setDomProperty(element, "value", node.props?.value);
+}
+
 function restoreAttrsOverriddenByRemovedProps(
   element: Element,
   oldNode: VxElementNode | undefined,
@@ -906,9 +916,7 @@ function effectiveAttrs(node: VxElementNode | undefined): Record<string, unknown
 }
 
 function serializesPropertyAsAttribute(tag: string, property: string): boolean {
-  if (property === "value") return tag === "input";
-  if (property === "checked") return tag === "input";
-  return property === "disabled";
+  return ssrDomPropertyRepresentation(tag, property) === "attribute";
 }
 
 function effectiveProps(node: VxElementNode | undefined): Record<string, unknown> {
@@ -1039,7 +1047,9 @@ function patchEvents(
       }
       if (event.options?.preventDefault) browserEvent.preventDefault();
       if (event.options?.stopPropagation) browserEvent.stopPropagation();
+      capturePointerForEvent(element, event, browserEvent);
       dispatchEventDescriptor(event, normalizeBrowserEvent(browserEvent), handlers);
+      releasePointerForEvent(element, event, browserEvent);
     };
     const options = toListenerOptions(event.options);
     element.addEventListener(event.event, listener, options);
@@ -1051,6 +1061,47 @@ function patchEvents(
   } else {
     listenerState.delete(element);
   }
+}
+
+function capturePointerForEvent(
+  element: Element,
+  event: EventDescriptor,
+  browserEvent: Event,
+): void {
+  if (!event.options?.pointerCapture || event.event !== "pointerdown") return;
+  const pointerId = readBrowserPointerId(browserEvent);
+  if (
+    pointerId === undefined ||
+    typeof element.setPointerCapture !== "function"
+  )
+    return;
+  element.setPointerCapture(pointerId);
+}
+
+function releasePointerForEvent(
+  element: Element,
+  event: EventDescriptor,
+  browserEvent: Event,
+): void {
+  if (event.event !== "pointerup" && event.event !== "pointercancel") return;
+  const pointerId = readBrowserPointerId(browserEvent);
+  if (
+    pointerId === undefined ||
+    typeof element.hasPointerCapture !== "function" ||
+    typeof element.releasePointerCapture !== "function" ||
+    !element.hasPointerCapture(pointerId)
+  )
+    return;
+  element.releasePointerCapture(pointerId);
+}
+
+function readBrowserPointerId(event: Event): number | undefined {
+  const pointerId = (event as PointerEvent).pointerId;
+  return typeof pointerId === "number" &&
+    Number.isInteger(pointerId) &&
+    pointerId >= 0
+    ? pointerId
+    : undefined;
 }
 
 function dispatchEventDescriptor(
@@ -1674,7 +1725,7 @@ function runTaskCommand(
   };
   context.signal.addEventListener("abort", abortListener, { once: true });
 
-  const completion = observeTask(taskId).then((outcome) => {
+  const completion = Promise.resolve().then(() => observeTask(taskId)).then((outcome) => {
     if (context.signal.aborted) return;
     if (outcome.kind === "failed") {
       context.reportError?.(outcome.error, { phase: "commands" });
@@ -1697,6 +1748,101 @@ function runTaskCommand(
   });
   context.trackRetainedHandlerUse?.(Promise.race([completion, abortCompletion]));
   settleAsyncDispatch(completion);
+}
+
+function runCanvasMeasureTextCommand(
+  command: VxCommandEnvelope,
+  context: VxRuntimeExecutionContext,
+): void {
+  const handlerId = readHandlerId(command);
+  if (handlerId === undefined) {
+    throw new Error(
+      "vx-dom: canvas_measure_text command missing numeric handlerId",
+    );
+  }
+  try {
+    const canvas = findCanvas(
+      readRequiredStringField(
+        command,
+        "selector",
+        "canvas_measure_text command",
+      ),
+      "canvas_measure_text",
+    );
+    const canvasContext = canvas.getContext("2d");
+    if (!canvasContext) {
+      throw new Error(
+        "vx-dom: canvas_measure_text could not create a 2D context",
+      );
+    }
+    const value = readRequiredStringField(
+      command,
+      "value",
+      "canvas_measure_text command",
+    );
+    const font = readRequiredStringField(
+      command,
+      "font",
+      "canvas_measure_text command",
+    );
+    canvasContext.save();
+    let metrics: TextMetrics;
+    try {
+      canvasContext.font = font;
+      metrics = canvasContext.measureText(value);
+    } finally {
+      canvasContext.restore();
+    }
+    if (context.signal.aborted) return;
+    settleAsyncDispatch(
+      context.dispatch({
+        kind: "map",
+        handlerId,
+        message: toVxMessage({
+          width: readTextMetric(metrics, "width"),
+          actual_bounding_box_left: readTextMetric(
+            metrics,
+            "actualBoundingBoxLeft",
+            0,
+          ),
+          actual_bounding_box_right: readTextMetric(
+            metrics,
+            "actualBoundingBoxRight",
+            0,
+          ),
+          actual_bounding_box_ascent: readTextMetric(
+            metrics,
+            "actualBoundingBoxAscent",
+            0,
+          ),
+          actual_bounding_box_descent: readTextMetric(
+            metrics,
+            "actualBoundingBoxDescent",
+            0,
+          ),
+        }),
+      }),
+    );
+  } finally {
+    mappedOwnedHandlerIds(command).forEach((id) =>
+      context.releaseRetainedHandler?.(id),
+    );
+  }
+}
+
+function readTextMetric(
+  metrics: TextMetrics,
+  field: keyof TextMetrics,
+  fallback?: number,
+): number {
+  const value = metrics[field];
+  if (value === undefined && fallback !== undefined) return fallback;
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(
+      `vx-dom: canvas_measure_text returned invalid ${String(field)}`,
+    );
+  }
+  return value;
 }
 
 function runCanvasRenderCommand(command: VxCommandEnvelope): void {
@@ -1731,6 +1877,7 @@ function runCanvasRenderCommand(command: VxCommandEnvelope): void {
     context.clearRect(0, 0, backingWidth, backingHeight);
   }
   context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+  resetCanvasFrameState(context);
 
   if (frame.background !== undefined) {
     context.save();
@@ -1751,6 +1898,7 @@ function drawCanvasPrimitive(
   label: string,
 ): void {
   const kind = readRequiredStringField(draw, "kind", label);
+  if (applyCanvasStateCommand(context, draw, kind, label)) return;
   context.save();
   try {
     applyCanvasDrawState(context, draw, label);
@@ -1760,6 +1908,10 @@ function drawCanvasPrimitive(
     }
     if (kind === "polyline") {
       drawCanvasPolyline(context, draw, label);
+      return;
+    }
+    if (kind === "path") {
+      drawCanvasPath(context, draw, label);
       return;
     }
     if (kind === "circle") {
@@ -1778,6 +1930,64 @@ function drawCanvasPrimitive(
   } finally {
     context.restore();
   }
+}
+
+function applyCanvasStateCommand(
+  context: CanvasRenderingContext2D,
+  draw: Record<string, unknown>,
+  kind: string,
+  label: string,
+): boolean {
+  if (kind === "save") {
+    context.save();
+    return true;
+  }
+  if (kind === "restore") {
+    context.restore();
+    return true;
+  }
+  if (kind === "transform") {
+    context.transform(
+      readFiniteCanvasNumber(draw, "a", label),
+      readFiniteCanvasNumber(draw, "b", label),
+      readFiniteCanvasNumber(draw, "c", label),
+      readFiniteCanvasNumber(draw, "d", label),
+      readFiniteCanvasNumber(draw, "e", label),
+      readFiniteCanvasNumber(draw, "f", label),
+    );
+    return true;
+  }
+  if (kind === "translate") {
+    context.translate(
+      readFiniteCanvasNumber(draw, "x", label),
+      readFiniteCanvasNumber(draw, "y", label),
+    );
+    return true;
+  }
+  if (kind === "rotate") {
+    context.rotate(readFiniteCanvasNumber(draw, "radians", label));
+    return true;
+  }
+  if (kind === "scale") {
+    context.scale(
+      readFiniteCanvasNumber(draw, "x", label),
+      readFiniteCanvasNumber(draw, "y", label),
+    );
+    return true;
+  }
+  if (kind === "lineDash") {
+    context.setLineDash(readCanvasLineDash(draw, label));
+    context.lineDashOffset = readFiniteCanvasNumber(draw, "offset", label);
+    return true;
+  }
+  if (kind === "composite") {
+    context.globalCompositeOperation = readCanvasCompositeOperation(
+      draw,
+      label,
+    );
+    return true;
+  }
+  return false;
 }
 
 function drawCanvasLine(
@@ -1824,6 +2034,114 @@ function drawCanvasPolyline(
   context.stroke();
 }
 
+function drawCanvasPath(
+  context: CanvasRenderingContext2D,
+  draw: Record<string, unknown>,
+  label: string,
+): void {
+  const segments = readCanvasPathSegments(draw, label);
+  context.beginPath();
+  segments.forEach((segment, index) => {
+    drawCanvasPathSegment(context, segment, `${label}.segments[${index}]`);
+  });
+  drawCanvasPathPaint(
+    context,
+    draw,
+    label,
+    undefined,
+    readCanvasFillRule(draw, label),
+  );
+}
+
+function drawCanvasPathSegment(
+  context: CanvasRenderingContext2D,
+  segment: Record<string, unknown>,
+  label: string,
+): void {
+  const kind = readRequiredStringField(segment, "kind", label);
+  if (kind === "moveTo" || kind === "lineTo") {
+    const point = readCanvasPoint(segment.point, `${label}.point`);
+    if (kind === "moveTo") context.moveTo(point.x, point.y);
+    else context.lineTo(point.x, point.y);
+    return;
+  }
+  if (kind === "quadraticCurveTo") {
+    const control = readCanvasPoint(segment.control, `${label}.control`);
+    const to = readCanvasPoint(segment.to, `${label}.to`);
+    context.quadraticCurveTo(control.x, control.y, to.x, to.y);
+    return;
+  }
+  if (kind === "bezierCurveTo") {
+    const control1 = readCanvasPoint(segment.control1, `${label}.control1`);
+    const control2 = readCanvasPoint(segment.control2, `${label}.control2`);
+    const to = readCanvasPoint(segment.to, `${label}.to`);
+    context.bezierCurveTo(
+      control1.x,
+      control1.y,
+      control2.x,
+      control2.y,
+      to.x,
+      to.y,
+    );
+    return;
+  }
+  if (kind === "arc") {
+    const center = readCanvasPoint(segment.center, `${label}.center`);
+    context.arc(
+      center.x,
+      center.y,
+      readPositiveCanvasNumber(segment, "radius", label, true),
+      readFiniteCanvasNumber(segment, "startAngle", label),
+      readFiniteCanvasNumber(segment, "endAngle", label),
+      readOptionalCanvasBool(segment, "counterClockwise", label, false),
+    );
+    return;
+  }
+  if (kind === "arcTo") {
+    const control1 = readCanvasPoint(segment.control1, `${label}.control1`);
+    const control2 = readCanvasPoint(segment.control2, `${label}.control2`);
+    context.arcTo(
+      control1.x,
+      control1.y,
+      control2.x,
+      control2.y,
+      readPositiveCanvasNumber(segment, "radius", label, true),
+    );
+    return;
+  }
+  if (kind === "ellipse") {
+    const center = readCanvasPoint(segment.center, `${label}.center`);
+    context.ellipse(
+      center.x,
+      center.y,
+      readPositiveCanvasNumber(segment, "radiusX", label),
+      readPositiveCanvasNumber(segment, "radiusY", label),
+      readFiniteCanvasNumber(segment, "rotation", label),
+      readFiniteCanvasNumber(segment, "startAngle", label),
+      readFiniteCanvasNumber(segment, "endAngle", label),
+      readOptionalCanvasBool(segment, "counterClockwise", label, false),
+    );
+    return;
+  }
+  if (kind === "rect") {
+    const origin = readCanvasPoint(segment.origin, `${label}.origin`);
+    context.rect(
+      origin.x,
+      origin.y,
+      readFiniteCanvasNumber(segment, "width", label),
+      readFiniteCanvasNumber(segment, "height", label),
+    );
+    return;
+  }
+  if (kind === "closePath") {
+    context.closePath();
+    return;
+  }
+  throw new Error(
+    `vx-dom: ${label} has unsupported kind ${JSON.stringify(kind)}`,
+  );
+}
+
 function drawCanvasCircle(
   context: CanvasRenderingContext2D,
   draw: Record<string, unknown>,
@@ -1856,10 +2174,12 @@ function drawCanvasPathPaint(
   draw: Record<string, unknown>,
   label: string,
   fillOverride?: CanvasGradient,
+  fillRule?: CanvasFillRule,
 ): void {
   if (fillOverride || typeof draw.fill === "string") {
     context.fillStyle = fillOverride ?? draw.fill as string;
-    context.fill();
+    if (fillRule === undefined) context.fill();
+    else context.fill(fillRule);
   } else if (draw.fill !== undefined) {
     throw new Error(`vx-dom: ${label} has non-string fill`);
   }
@@ -1908,7 +2228,6 @@ function applyCanvasDrawState(
   context.globalAlpha = alpha;
   context.lineCap = "round";
   context.lineJoin = "round";
-  context.setLineDash([]);
   context.shadowOffsetX = 0;
   context.shadowOffsetY = 0;
   context.shadowBlur = readOptionalPositiveCanvasNumber(draw, "glowBlur", label, 0, true);
@@ -1918,6 +2237,19 @@ function applyCanvasDrawState(
   } else if (draw.glowColor !== undefined) {
     throw new Error(`vx-dom: ${label} has non-string glowColor`);
   }
+}
+
+function resetCanvasFrameState(context: CanvasRenderingContext2D): void {
+  context.globalAlpha = 1;
+  context.globalCompositeOperation = "source-over";
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.setLineDash([]);
+  context.lineDashOffset = 0;
+  context.shadowOffsetX = 0;
+  context.shadowOffsetY = 0;
+  context.shadowBlur = 0;
+  context.shadowColor = "transparent";
 }
 
 function readCanvasRadialGradient(
@@ -2560,9 +2892,7 @@ function readCanvasFrame(command: VxCommandEnvelope): {
     throw new Error("vx-dom: canvas_render command missing frame value");
   }
   const frame = command.value;
-  if (frame.version !== 1) {
-    throw new Error(`vx-dom: canvas_render unsupported frame version ${String(frame.version)}`);
-  }
+  const version = readCanvasFrameVersion(frame.version);
   if (!Array.isArray(frame.draws)) {
     throw new Error("vx-dom: canvas_render frame missing draws array");
   }
@@ -2570,30 +2900,425 @@ function readCanvasFrame(command: VxCommandEnvelope): {
   if (background !== undefined && typeof background !== "string") {
     throw new Error("vx-dom: canvas_render frame has non-string background");
   }
+  let savedStateDepth = 0;
+  const draws = frame.draws.map((draw, index) => {
+    const label = `canvas_render draws[${index}]`;
+    if (!isRecord(draw)) {
+      throw new Error(`vx-dom: ${label} must be an object`);
+    }
+    validateCanvasDraw(draw, label, version);
+    const kind = readRequiredStringField(draw, "kind", label);
+    if (kind === "save") savedStateDepth += 1;
+    if (kind === "restore") {
+      if (savedStateDepth === 0) {
+        throw new Error(
+          `vx-dom: ${label} restores an empty Canvas state stack`,
+        );
+      }
+      savedStateDepth -= 1;
+    }
+    return draw;
+  });
+  if (savedStateDepth !== 0) {
+    throw new Error(
+      "vx-dom: canvas_render frame has an unbalanced Canvas state stack",
+    );
+  }
   return {
     selector: readRequiredStringField(frame, "selector", "canvas_render frame"),
     width: readPositiveCanvasNumber(frame, "width", "canvas_render frame"),
     height: readPositiveCanvasNumber(frame, "height", "canvas_render frame"),
     clear: readOptionalCanvasBool(frame, "clear", "canvas_render frame", true),
     ...(background !== undefined ? { background } : {}),
-    draws: frame.draws.map((draw, index) => {
-      if (!isRecord(draw)) {
-        throw new Error(`vx-dom: canvas_render draws[${index}] must be an object`);
-      }
-      return draw;
-    }),
+    draws,
   };
 }
 
-function findCanvas(selector: string): HTMLCanvasElement {
+type CanvasFrameVersion = 1 | 2;
+
+function readCanvasFrameVersion(input: unknown): CanvasFrameVersion {
+  if (input === 1 || input === 2) return input;
+  throw new Error(
+    `vx-dom: canvas_render unsupported frame version ${String(input)}`,
+  );
+}
+
+const canvasV2DrawKinds = new Set([
+  "save",
+  "restore",
+  "transform",
+  "translate",
+  "rotate",
+  "scale",
+  "lineDash",
+  "composite",
+  "path",
+]);
+
+function validateCanvasDraw(
+  draw: Record<string, unknown>,
+  label: string,
+  version: CanvasFrameVersion,
+): void {
+  const kind = readRequiredStringField(draw, "kind", label);
+  if (version === 1 && canvasV2DrawKinds.has(kind)) {
+    throw new Error(
+      `vx-dom: ${label} kind ${JSON.stringify(kind)} requires frame version 2`,
+    );
+  }
+  if (kind === "save" || kind === "restore") return;
+  if (kind === "transform") {
+    ["a", "b", "c", "d", "e", "f"].forEach((field) => {
+      readFiniteCanvasNumber(draw, field, label);
+    });
+    return;
+  }
+  if (kind === "translate" || kind === "scale") {
+    readFiniteCanvasNumber(draw, "x", label);
+    readFiniteCanvasNumber(draw, "y", label);
+    return;
+  }
+  if (kind === "rotate") {
+    readFiniteCanvasNumber(draw, "radians", label);
+    return;
+  }
+  if (kind === "lineDash") {
+    readCanvasLineDash(draw, label);
+    readFiniteCanvasNumber(draw, "offset", label);
+    return;
+  }
+  if (kind === "composite") {
+    readCanvasCompositeOperation(draw, label);
+    return;
+  }
+
+  validateCanvasDrawState(draw, label);
+  if (kind === "line") {
+    readCanvasPoint(draw.from, `${label}.from`);
+    readCanvasPoint(draw.to, `${label}.to`);
+    readRequiredStringField(draw, "color", label);
+    readPositiveCanvasNumber(draw, "width", label, true);
+    return;
+  }
+  if (kind === "polyline") {
+    if (!Array.isArray(draw.points))
+      throw new Error(`vx-dom: ${label} missing points array`);
+    draw.points.forEach((point, index) =>
+      readCanvasPoint(point, `${label}.points[${index}]`),
+    );
+    readRequiredStringField(draw, "color", label);
+    readPositiveCanvasNumber(draw, "width", label, true);
+    readOptionalCanvasBool(draw, "closed", label, false);
+    readOptionalCanvasString(draw, "fill", label);
+    return;
+  }
+  if (kind === "path") {
+    readCanvasPathSegments(draw, label).forEach((segment, index) => {
+      validateCanvasPathSegment(segment, `${label}.segments[${index}]`);
+    });
+    readOptionalCanvasString(draw, "fill", label);
+    validateOptionalCanvasStroke(draw, label);
+    readCanvasFillRule(draw, label);
+    return;
+  }
+  if (kind === "circle") {
+    readCanvasPoint(draw.center, `${label}.center`);
+    const radius = readPositiveCanvasNumber(draw, "radius", label, true);
+    readOptionalCanvasString(draw, "fill", label);
+    validateOptionalCanvasStroke(draw, label);
+    validateCanvasRadialGradient(draw.radialGradient, radius, label);
+    return;
+  }
+  if (kind === "ellipse") {
+    readCanvasPoint(draw.center, `${label}.center`);
+    readPositiveCanvasNumber(draw, "radiusX", label, true);
+    readPositiveCanvasNumber(draw, "radiusY", label, true);
+    readFiniteCanvasNumber(draw, "rotation", label);
+    readOptionalCanvasString(draw, "fill", label);
+    validateOptionalCanvasStroke(draw, label);
+    return;
+  }
+  if (kind === "text") {
+    readCanvasPoint(draw.position, `${label}.position`);
+    readRequiredStringField(draw, "value", label);
+    readRequiredStringField(draw, "color", label);
+    readRequiredStringField(draw, "font", label);
+    readCanvasTextAlign(draw, label);
+    readCanvasTextBaseline(draw, label);
+    if (draw.maxWidth !== undefined)
+      readPositiveCanvasNumber(draw, "maxWidth", label);
+    return;
+  }
+  throw new Error(
+    `vx-dom: ${label} has unsupported kind ${JSON.stringify(kind)}`,
+  );
+}
+
+function validateCanvasDrawState(
+  draw: Record<string, unknown>,
+  label: string,
+): void {
+  const alpha = readOptionalFiniteCanvasNumber(draw, "alpha", label, 1);
+  if (alpha < 0 || alpha > 1) {
+    throw new Error(`vx-dom: ${label} alpha must be between 0 and 1`);
+  }
+  readOptionalPositiveCanvasNumber(draw, "glowBlur", label, 0, true);
+  readOptionalCanvasString(draw, "glowColor", label);
+}
+
+function validateOptionalCanvasStroke(
+  draw: Record<string, unknown>,
+  label: string,
+): void {
+  const stroke = readOptionalCanvasString(draw, "stroke", label);
+  if (stroke !== undefined || draw.strokeWidth !== undefined) {
+    readPositiveCanvasNumber(draw, "strokeWidth", label, true);
+  }
+}
+
+function validateCanvasPathSegment(
+  segment: Record<string, unknown>,
+  label: string,
+): void {
+  const kind = readRequiredStringField(segment, "kind", label);
+  if (kind === "moveTo" || kind === "lineTo") {
+    readCanvasPoint(segment.point, `${label}.point`);
+    return;
+  }
+  if (kind === "quadraticCurveTo") {
+    readCanvasPoint(segment.control, `${label}.control`);
+    readCanvasPoint(segment.to, `${label}.to`);
+    return;
+  }
+  if (kind === "bezierCurveTo") {
+    readCanvasPoint(segment.control1, `${label}.control1`);
+    readCanvasPoint(segment.control2, `${label}.control2`);
+    readCanvasPoint(segment.to, `${label}.to`);
+    return;
+  }
+  if (kind === "arc") {
+    readCanvasPoint(segment.center, `${label}.center`);
+    readPositiveCanvasNumber(segment, "radius", label, true);
+    readFiniteCanvasNumber(segment, "startAngle", label);
+    readFiniteCanvasNumber(segment, "endAngle", label);
+    readOptionalCanvasBool(segment, "counterClockwise", label, false);
+    return;
+  }
+  if (kind === "arcTo") {
+    readCanvasPoint(segment.control1, `${label}.control1`);
+    readCanvasPoint(segment.control2, `${label}.control2`);
+    readPositiveCanvasNumber(segment, "radius", label, true);
+    return;
+  }
+  if (kind === "ellipse") {
+    readCanvasPoint(segment.center, `${label}.center`);
+    readPositiveCanvasNumber(segment, "radiusX", label);
+    readPositiveCanvasNumber(segment, "radiusY", label);
+    readFiniteCanvasNumber(segment, "rotation", label);
+    readFiniteCanvasNumber(segment, "startAngle", label);
+    readFiniteCanvasNumber(segment, "endAngle", label);
+    readOptionalCanvasBool(segment, "counterClockwise", label, false);
+    return;
+  }
+  if (kind === "rect") {
+    readCanvasPoint(segment.origin, `${label}.origin`);
+    readFiniteCanvasNumber(segment, "width", label);
+    readFiniteCanvasNumber(segment, "height", label);
+    return;
+  }
+  if (kind === "closePath") return;
+  throw new Error(
+    `vx-dom: ${label} has unsupported kind ${JSON.stringify(kind)}`,
+  );
+}
+
+function validateCanvasRadialGradient(
+  input: unknown,
+  radius: number,
+  label: string,
+): void {
+  if (input === undefined) return;
+  if (!isRecord(input))
+    throw new Error(`vx-dom: ${label} has invalid radialGradient`);
+  const gradientLabel = `${label}.radialGradient`;
+  const innerRadius = readFiniteCanvasNumber(
+    input,
+    "innerRadius",
+    gradientLabel,
+  );
+  const outerRadius =
+    input.outerRadius === undefined
+      ? radius
+      : readPositiveCanvasNumber(input, "outerRadius", gradientLabel, true);
+  if (innerRadius < 0 || outerRadius < innerRadius) {
+    throw new Error(`vx-dom: ${gradientLabel} has invalid radii`);
+  }
+  validateCanvasGradientColor(input, "innerColor", gradientLabel);
+  validateCanvasGradientColor(input, "outerColor", gradientLabel);
+}
+
+function validateCanvasGradientColor(
+  input: Record<string, unknown>,
+  field: string,
+  label: string,
+): void {
+  const color = readRequiredStringField(input, field, label);
+  const cached = canvasGradientColorValidity.get(color);
+  if (cached === true) return;
+  if (cached === false) {
+    throw new Error(
+      `vx-dom: ${label} has invalid CSS color ${JSON.stringify(color)} for ${field}`,
+    );
+  }
   if (typeof document === "undefined") {
     throw new Error("vx-dom: canvas_render requires a document");
+  }
+  const valid = isValidCanvasGradientColor(color);
+  canvasGradientColorValidity.set(color, valid);
+  if (!valid) {
+    throw new Error(
+      `vx-dom: ${label} has invalid CSS color ${JSON.stringify(color)} for ${field}`,
+    );
+  }
+}
+
+const canvasGradientColorValidity = new Map<string, boolean>();
+
+function isValidCanvasGradientColor(color: string): boolean {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (context) {
+    try {
+      context.createLinearGradient(0, 0, 1, 0).addColorStop(0, color);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  const probe = document.createElement("span");
+  probe.style.color = color;
+  const contextDependentColor =
+    /^(?:inherit|initial|revert|revert-layer|unset)$/i.test(color.trim()) ||
+    /(?:^|[^a-z-])(?:attr|env|var)\s*\(/i.test(color);
+  return probe.style.color.length > 0 && !contextDependentColor;
+}
+
+function readCanvasPathSegments(
+  draw: Record<string, unknown>,
+  label: string,
+): Record<string, unknown>[] {
+  if (!Array.isArray(draw.segments))
+    throw new Error(`vx-dom: ${label} missing segments array`);
+  return draw.segments.map((segment, index) => {
+    if (!isRecord(segment)) {
+      throw new Error(`vx-dom: ${label}.segments[${index}] must be an object`);
+    }
+    return segment;
+  });
+}
+
+function readCanvasFillRule(
+  draw: Record<string, unknown>,
+  label: string,
+): CanvasFillRule {
+  const value = readRequiredStringField(draw, "fillRule", label);
+  if (value === "nonzero" || value === "evenodd") return value;
+  throw new Error(
+    `vx-dom: ${label} has invalid fillRule ${JSON.stringify(value)}`,
+  );
+}
+
+function readCanvasLineDash(
+  draw: Record<string, unknown>,
+  label: string,
+): number[] {
+  if (!Array.isArray(draw.pattern))
+    throw new Error(`vx-dom: ${label} missing pattern array`);
+  const pattern = draw.pattern.map((value, index) => {
+    if (typeof value !== "number" || !Number.isFinite(value) || value < 0) {
+      throw new Error(
+        `vx-dom: ${label}.pattern[${index}] must be a non-negative finite number`,
+      );
+    }
+    return value;
+  });
+  if (pattern.length > 0 && pattern.every((value) => value === 0)) {
+    throw new Error(
+      `vx-dom: ${label} pattern cannot contain only zero lengths`,
+    );
+  }
+  return pattern;
+}
+
+const canvasCompositeOperations = new Set<GlobalCompositeOperation>([
+  "source-over",
+  "source-in",
+  "source-out",
+  "source-atop",
+  "destination-over",
+  "destination-in",
+  "destination-out",
+  "destination-atop",
+  "lighter",
+  "copy",
+  "xor",
+  "multiply",
+  "screen",
+  "overlay",
+  "darken",
+  "lighten",
+  "color-dodge",
+  "color-burn",
+  "hard-light",
+  "soft-light",
+  "difference",
+  "exclusion",
+  "hue",
+  "saturation",
+  "color",
+  "luminosity",
+]);
+
+function readCanvasCompositeOperation(
+  draw: Record<string, unknown>,
+  label: string,
+): GlobalCompositeOperation {
+  const value = readRequiredStringField(
+    draw,
+    "operation",
+    label,
+  ) as GlobalCompositeOperation;
+  if (canvasCompositeOperations.has(value)) return value;
+  throw new Error(
+    `vx-dom: ${label} has invalid compositing operation ${JSON.stringify(value)}`,
+  );
+}
+
+function readOptionalCanvasString(
+  input: Record<string, unknown>,
+  field: string,
+  label: string,
+): string | undefined {
+  const value = input[field];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string")
+    throw new Error(`vx-dom: ${label} has non-string ${field}`);
+  return value;
+}
+
+function findCanvas(
+  selector: string,
+  operation = "canvas_render",
+): HTMLCanvasElement {
+  if (typeof document === "undefined") {
+    throw new Error(`vx-dom: ${operation} requires a document`);
   }
   let target: Element | null;
   try {
     target = document.querySelector(selector);
   } catch (error) {
-    throw new Error(`vx-dom: canvas_render has invalid selector ${JSON.stringify(selector)}`, {
+    throw new Error(`vx-dom: ${operation} has invalid selector ${JSON.stringify(selector)}`, {
       cause: error,
     });
   }
@@ -2602,7 +3327,7 @@ function findCanvas(selector: string): HTMLCanvasElement {
     typeof HTMLCanvasElement === "undefined" ||
     !(target instanceof HTMLCanvasElement)
   ) {
-    throw new Error(`vx-dom: canvas_render could not find canvas ${JSON.stringify(selector)}`);
+    throw new Error(`vx-dom: ${operation} could not find canvas ${JSON.stringify(selector)}`);
   }
   return target;
 }

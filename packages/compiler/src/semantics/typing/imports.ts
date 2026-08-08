@@ -109,7 +109,7 @@ export const resolveImportedValue = ({
   });
 
   const exportEntry = findExport(target.symbol, dependency);
-  if (!exportEntry) {
+  if (!exportEntry && !isHygienicDefinitionReference(symbol, ctx)) {
     throw new Error(
       `module ${target.moduleId} does not export symbol ${target.symbol}`,
     );
@@ -293,7 +293,7 @@ export const resolveImportedTypeExpr = ({
   });
 
   const exportEntry = findExport(target.symbol, dependency);
-  if (!exportEntry) {
+  if (!exportEntry && !isHygienicDefinitionReference(symbol, ctx)) {
     throw new Error(
       `module ${target.moduleId} does not export ${expr.path.join("::")}`,
     );
@@ -423,6 +423,16 @@ export const resolveImportedTypeExpr = ({
     ctx.typeAliases.recordInstanceSymbol(localType, symbol);
   }
   return localType;
+};
+
+const isHygienicDefinitionReference = (
+  symbol: SymbolId,
+  ctx: TypingContext,
+): boolean => {
+  const metadata = ctx.symbolTable.getSymbol(symbol).metadata as
+    | { hygienicReference?: unknown }
+    | undefined;
+  return metadata?.hygienicReference === true;
 };
 
 export const resolveImportedAliasInferenceTarget = ({

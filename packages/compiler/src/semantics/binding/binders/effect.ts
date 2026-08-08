@@ -12,6 +12,8 @@ import { reportOverloadNameCollision } from "../name-collisions.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 import { bindTypeExpr } from "./expressions.js";
+import { bindingIdentityForSyntax } from "../hygiene.js";
+import { diagnosticFromCode } from "../../../diagnostics/index.js";
 
 const declareEffectOperationParams = ({
   op,
@@ -79,6 +81,7 @@ export const bindEffectDecl = (
       name: decl.name.value,
       kind: "effect",
       declaredAt: decl.form.syntaxId,
+      bindingIdentity: bindingIdentityForSyntax(decl.name),
       metadata: { entity: "effect" },
     },
     tracker.current(),
@@ -99,9 +102,34 @@ export const bindEffectDecl = (
     );
   });
 
+  const firstOperationByName = new Map<string, ParsedEffectOperation>();
   const operations = decl.operations.map((op) => {
     rememberSyntax(op.form, ctx);
     rememberSyntax(op.name, ctx);
+    const previousOperation = firstOperationByName.get(op.name.value);
+    if (previousOperation) {
+      ctx.diagnostics.push(
+        diagnosticFromCode({
+          code: "BD0009",
+          params: {
+            kind: "duplicate-effect-operation",
+            effectName: decl.name.value,
+            operationName: op.name.value,
+          },
+          span: toSourceSpan(op.name),
+          related: [
+            diagnosticFromCode({
+              code: "BD0009",
+              params: { kind: "previous-effect-operation" },
+              severity: "note",
+              span: toSourceSpan(previousOperation.name),
+            }),
+          ],
+        }),
+      );
+    } else {
+      firstOperationByName.set(op.name.value, op);
+    }
     const scope = ctx.symbolTable.createScope({
       parent: effectScope,
       kind: "function",
@@ -113,6 +141,7 @@ export const bindEffectDecl = (
         name: op.name.value,
         kind: "effect-op",
         declaredAt: op.form.syntaxId,
+        bindingIdentity: bindingIdentityForSyntax(op.name),
         metadata: { ownerEffect: effectSymbol, intrinsic: true },
       },
       tracker.current(),

@@ -3,7 +3,7 @@ use src::macros::all
 pub fn main() -> f64
   inc(2.0)
 
-@with_companion(description: "portable attribute macro")
+@with_companion(attribute_bonus)
 pub fn attribute_original() -> i32
   3
 

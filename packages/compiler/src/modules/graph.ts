@@ -16,6 +16,7 @@ import {
 } from "../docs/doc-comments.js";
 import { toSourceSpan } from "../parser/surface/utils.js";
 import {
+  AmbiguousModulePathError,
   modulePathFromFile,
   modulePathToString,
   resolveModuleFile,
@@ -161,6 +162,7 @@ export const buildModuleGraph = async ({
   const modules = new Map<string, ModuleNode>();
   const modulesByPath = new Map<string, ModuleNode>();
   const moduleDiagnostics: ModuleDiagnostic[] = [];
+  const ambiguousModuleDiagnosticKeys = new Set<string>();
   const docDiagnostics: Diagnostic[] = [];
   const docDiagnosticKeys = new Set<string>();
   const missingModules = new Map<string, Set<string>>();
@@ -298,6 +300,40 @@ export const buildModuleGraph = async ({
     missingModules.set(importer, new Set([pathKey]));
   };
 
+  const addAmbiguousModuleDiagnostic = ({
+    error,
+    importerId,
+    importer,
+    importerFilePath,
+    span,
+  }: {
+    error: AmbiguousModulePathError;
+    importerId?: string;
+    importer?: string;
+    importerFilePath?: string;
+    span?: SourceSpan;
+  }): void => {
+    const key = [
+      modulePathToString(error.modulePath),
+      error.ordinaryFile,
+      error.packageRootFile,
+    ].join(":");
+    if (ambiguousModuleDiagnosticKeys.has(key)) {
+      return;
+    }
+    ambiguousModuleDiagnosticKeys.add(key);
+    moduleDiagnostics.push({
+      kind: "ambiguous-module-path",
+      requested: error.modulePath,
+      ordinaryFile: error.ordinaryFile,
+      packageRootFile: error.packageRootFile,
+      importerId,
+      importer,
+      importerFilePath,
+      span,
+    });
+  };
+
   const preludeStartedAt = COMPILER_PERF_ENABLED ? performance.now() : 0;
   const hasStdPreludeModule = await supportsStdPreludeAutoImport({
     roots,
@@ -310,6 +346,28 @@ export const buildModuleGraph = async ({
 
   const entryFile = host.path.resolve(entryPath);
   const entryModulePath = modulePathFromFile(entryFile, roots, host.path);
+  const entryLogicalPath =
+    host.path.basename(entryFile, VOYD_EXTENSION) === "pkg" &&
+    entryModulePath.segments.length > 1
+      ? {
+          ...entryModulePath,
+          segments: entryModulePath.segments.slice(0, -1),
+        }
+      : entryModulePath;
+  try {
+    await resolveModuleFile(entryLogicalPath, roots, host);
+  } catch (error) {
+    if (error instanceof AmbiguousModulePathError) {
+      addAmbiguousModuleDiagnostic({
+        error,
+        importer: entryFile,
+        importerFilePath: entryFile,
+        span: { file: entryFile, start: 0, end: 0 },
+      });
+    } else {
+      throw error;
+    }
+  }
   const entryReservedSegment = findReservedModuleSegment(entryModulePath);
   if (entryReservedSegment) {
     moduleDiagnostics.push({
@@ -556,6 +614,17 @@ export const buildModuleGraph = async ({
         }
       }
     } catch (error) {
+      if (error instanceof AmbiguousModulePathError) {
+        addAmbiguousModuleDiagnostic({
+          error,
+          importerId,
+          importer: importerLabel,
+          importerFilePath,
+          span: dependency.span,
+        });
+        addMissingModule(importerId, requestedKey);
+        continue;
+      }
       moduleDiagnostics.push({
         kind: "io-error",
         message: formatErrorMessage(error),
@@ -728,9 +797,21 @@ export const buildModuleGraph = async ({
       return false;
     }
     const requestedId = modulePathToString(diagnostic.requested);
-    return importer.dependencies.some(
-      (dependency) => modulePathToString(dependency.path) === requestedId,
-    );
+    return importer.dependencies.some((dependency) => {
+      if (modulePathToString(dependency.path) === requestedId) {
+        return true;
+      }
+      if (diagnostic.kind !== "ambiguous-module-path") {
+        return false;
+      }
+      return (
+        dependency.path.namespace === diagnostic.requested.namespace &&
+        dependency.path.packageName === diagnostic.requested.packageName &&
+        diagnostic.requested.segments.every(
+          (segment, index) => dependency.path.segments[index] === segment,
+        )
+      );
+    });
   };
 
   const unresolvedModuleDiagnostics = moduleDiagnostics.filter(

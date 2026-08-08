@@ -79,7 +79,10 @@ export const createBindingContext = ({
     memberDeclarationScopesByOwner: new Map(),
     memberDeclarationScopesByOwnerAndTrait: new Map(),
     pendingStaticMethods: [],
+    pendingHandlerOperationBindings: [],
     importedOverloadOptions: new Map(),
+    directSymbolBySyntax: new Map(),
+    hygienicImportCache: new Map(),
     includeTests: includeTests ?? false,
   };
 };
@@ -104,6 +107,7 @@ export const toBindingResult = (ctx: BindingContext): BindingResult => ({
   moduleMembers: ctx.moduleMembers,
   dependencies: ctx.dependencies,
   importedOverloadOptions: ctx.importedOverloadOptions,
+  directSymbolBySyntax: ctx.directSymbolBySyntax,
   modulePath: ctx.modulePath,
   packageId: ctx.packageId,
   isPackageRoot: ctx.isPackageRoot,

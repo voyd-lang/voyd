@@ -14,7 +14,32 @@ pub obj HostError {
   api message: String
 }
 
+/// A filesystem path was not found.
+pub obj IoNotFound {}
+
+/// A create-only operation targeted an existing path.
+pub obj IoAlreadyExists {}
+
+/// The host denied access to the requested operation.
+pub obj IoPermissionDenied {}
+
+/// The path is temporarily unavailable because of a filesystem conflict.
+pub obj IoConflict {}
+
+/// The host reported an I/O failure without a more portable category.
+pub obj IoOther {}
+
+/// Portable categories for host I/O failures.
+pub type IoErrorKind = IoNotFound
+  | IoAlreadyExists
+  | IoPermissionDenied
+  | IoConflict
+  | IoOther
+
 pub obj IoError {
+  /// Portable failure category. Host adapters retain their native details in
+  /// `code` and `message`.
+  api kind: IoErrorKind,
   /// Machine-readable error code.
   api code: i32,
   /// Human-readable error message.

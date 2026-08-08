@@ -516,6 +516,19 @@ const deriveUnionSchema = ({
       }),
     };
   });
+  const duplicateVariant = variants.find(
+    (variant, index) =>
+      variants.findIndex((candidate) => candidate.name === variant.name) !==
+      index,
+  );
+  if (duplicateVariant) {
+    return unsupported({
+      typeId,
+      ctx,
+      path: `${path}.${duplicateVariant.name}`,
+      reason: `multiple union variants use the "$variant" discriminator "${duplicateVariant.name}"`,
+    });
+  }
   return {
     kind: "union",
     typeId,

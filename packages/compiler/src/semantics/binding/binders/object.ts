@@ -1,5 +1,4 @@
 import type { Expr } from "../../../parser/index.js";
-import { isForm, isIdentifierAtom } from "../../../parser/index.js";
 import { declarationDocForSyntax, rememberSyntax } from "../context.js";
 import type { ObjectFieldDecl, TypeParameterDecl } from "../../decls.js";
 import type { ScopeId } from "../../ids.js";
@@ -12,6 +11,8 @@ import { bindTypeParameters } from "./type-parameters.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 import { bindTypeExpr } from "./expressions.js";
 import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contracts.js";
+import { bindingIdentityForSyntax } from "../hygiene.js";
+import { resolveNominalTypeSymbol } from "../../nominal-type-target.js";
 
 export const bindObjectDecl = (
   decl: ParsedObjectDecl,
@@ -52,6 +53,7 @@ export const bindObjectDecl = (
     name: decl.name.value,
     kind: "type",
     declaredAt: decl.form.syntaxId,
+    bindingIdentity: bindingIdentityForSyntax(decl.name),
     metadata: {
       entity: "object",
       objectKind: decl.objectKind,
@@ -140,31 +142,13 @@ export const resolveObjectDecl = (
   ctx: BindingContext,
   scope: ScopeId,
 ) => {
-  const identifier = (() => {
-    if (isIdentifierAtom(targetExpr)) {
-      return targetExpr;
-    }
-    if (!isForm(targetExpr)) {
-      return undefined;
-    }
-    if (isIdentifierAtom(targetExpr.first)) {
-      return targetExpr.first;
-    }
-    if (targetExpr.callsInternal("generics")) {
-      const target = targetExpr.at(1);
-      if (isIdentifierAtom(target)) {
-        return target;
-      }
-      if (isForm(target) && isIdentifierAtom(target.first)) {
-        return target.first;
-      }
-    }
-    return undefined;
-  })();
-  if (!identifier) {
-    return undefined;
-  }
-  const targetSymbol = ctx.symbolTable.resolve(identifier.value, scope);
+  const targetSymbol = resolveNominalTypeSymbol({
+    target: targetExpr,
+    scope,
+    symbolTable: ctx.symbolTable,
+    moduleMembers: ctx.moduleMembers,
+    staticMethods: ctx.staticMethods,
+  });
   if (typeof targetSymbol !== "number") {
     return undefined;
   }

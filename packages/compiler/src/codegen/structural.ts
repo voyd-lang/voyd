@@ -48,6 +48,12 @@ import {
 } from "./serializer.js";
 import { captureMultivalueLanes } from "./multivalue.js";
 import { buildInstanceSubstitution } from "./type-substitution.js";
+import {
+  stabilizeValueForReplay,
+  stabilizeValuesForReplay,
+  withReplayableSetup,
+  type ReplayableValue,
+} from "./replayable-value.js";
 
 const NON_REF_TYPES = new Set<number>([
   binaryen.none,
@@ -92,6 +98,34 @@ const defaultValueForWasmType = (
 const expandAbiTypes = (type: binaryen.Type): binaryen.Type[] =>
   type === binaryen.none ? [] : [...binaryen.expandType(type)];
 
+const replayableForConsumers = ({
+  value,
+  consumers,
+  ctx,
+  fnCtx,
+}: {
+  value: binaryen.ExpressionRef;
+  consumers: number;
+  ctx: CodegenContext;
+  fnCtx?: FunctionContext;
+}): ReplayableValue =>
+  consumers === 0
+    ? {
+        setup: [
+          binaryen.getExpressionType(value) === binaryen.none ||
+          binaryen.getExpressionType(value) === binaryen.unreachable
+            ? value
+            : ctx.mod.drop(value),
+        ],
+        read: () => ctx.mod.nop(),
+      }
+    : consumers === 1
+      ? {
+          setup: [],
+          read: () => ctx.mod.copyExpression(value),
+        }
+      : stabilizeValueForReplay({ value, ctx, fnCtx });
+
 const sameWasmTypes = (
   left: readonly binaryen.Type[],
   right: readonly binaryen.Type[],
@@ -129,10 +163,21 @@ const captureAbiValue = ({
   setup: readonly binaryen.ExpressionRef[];
   lanes: readonly binaryen.ExpressionRef[];
 } => {
-  if (abiTypes.length <= 1) {
+  if (abiTypes.length === 0) {
+    return {
+      setup: [
+        binaryen.getExpressionType(value) === binaryen.none ||
+        binaryen.getExpressionType(value) === binaryen.unreachable
+          ? value
+          : ctx.mod.drop(value),
+      ],
+      lanes: [],
+    };
+  }
+  if (abiTypes.length === 1) {
     return {
       setup: [],
-      lanes: abiTypes.length === 0 ? [] : [value],
+      lanes: [value],
     };
   }
 
@@ -285,6 +330,7 @@ const captureHeapUnionMemberLanes = ({
       field,
       pointer: value,
       ctx,
+      fnCtx,
     });
     const abiTypes = expandAbiTypes(binaryen.getExpressionType(fieldValue));
     return captureAbiValue({
@@ -355,6 +401,7 @@ const materializeHeapUnionMemberValue = ({
     structInfo: memberInfo,
     fieldValues,
     ctx,
+    fnCtx,
   });
   if (captured.setup.length === 0) {
     return materialized;
@@ -397,6 +444,7 @@ const boxRefLikeUnionValue = ({
         value,
         typeId: exactMember.typeId,
         ctx,
+        fnCtx,
       }),
       abiTypes: exactMember.abiTypes,
       ctx,
@@ -559,10 +607,12 @@ const unboxInlineValue = ({
   value,
   typeId,
   ctx,
+  fnCtx,
 }: {
   value: binaryen.ExpressionRef;
   typeId: TypeId;
   ctx: CodegenContext;
+  fnCtx?: FunctionContext;
 }): binaryen.ExpressionRef => {
   const desc = ctx.program.types.getTypeDesc(typeId);
   if (desc.kind === "recursive") {
@@ -570,17 +620,20 @@ const unboxInlineValue = ({
       desc.body,
       new Map([[desc.binder, typeId]]),
     );
-    return unboxInlineValue({ value, typeId: unfolded, ctx });
+    return unboxInlineValue({ value, typeId: unfolded, ctx, fnCtx });
   }
 
   const unionBoxType = getInlineHeapBoxType({ typeId, ctx });
   if (desc.kind === "union" && unionBoxType) {
     const layout = getInlineUnionLayout(typeId, ctx);
+    const replayable = replayableForConsumers({
+      value,
+      consumers: layout.abiTypes.length,
+      ctx,
+      fnCtx,
+    });
     const boxRef = () =>
-      refAsNonNull(
-        ctx.mod,
-        refCast(ctx.mod, ctx.mod.copyExpression(value), unionBoxType),
-      );
+      refAsNonNull(ctx.mod, refCast(ctx.mod, replayable.read(), unionBoxType));
     const lanes = layout.abiTypes.map((abiType, index) =>
       structGetFieldValue({
         mod: ctx.mod,
@@ -589,17 +642,31 @@ const unboxInlineValue = ({
         exprRef: boxRef(),
       }),
     );
-    return makeInlineValue({ values: lanes, ctx });
+    return withReplayableSetup({
+      replayable,
+      value: makeInlineValue({ values: lanes, ctx }),
+      ctx,
+    });
   }
 
   const structInfo = getStructuralTypeInfo(typeId, ctx);
   if (!structInfo || structInfo.layoutKind !== "value-object") {
     return value;
   }
+  const laneCount = structInfo.fields.reduce(
+    (count, field) => count + field.inlineWasmTypes.length,
+    0,
+  );
+  const replayable = replayableForConsumers({
+    value,
+    consumers: laneCount,
+    ctx,
+    fnCtx,
+  });
   const boxRef = () =>
     refAsNonNull(
       ctx.mod,
-      refCast(ctx.mod, ctx.mod.copyExpression(value), structInfo.runtimeType),
+      refCast(ctx.mod, replayable.read(), structInfo.runtimeType),
     );
   const lanes = structInfo.fields.flatMap((field) =>
     field.inlineWasmTypes.map((abiType, index) =>
@@ -611,7 +678,11 @@ const unboxInlineValue = ({
       }),
     ),
   );
-  return makeInlineValue({ values: lanes, ctx });
+  return withReplayableSetup({
+    replayable,
+    value: makeInlineValue({ values: lanes, ctx }),
+    ctx,
+  });
 };
 
 export const lowerValueForHeapField = ({
@@ -672,16 +743,18 @@ export const liftHeapValueToInline = ({
   value,
   typeId,
   ctx,
+  fnCtx,
 }: {
   value: binaryen.ExpressionRef;
   typeId: TypeId;
   ctx: CodegenContext;
+  fnCtx?: FunctionContext;
 }): binaryen.ExpressionRef => {
   if (wasmTypeFor(typeId, ctx) === binaryen.none) {
     return ctx.mod.block(null, [ctx.mod.drop(value)], binaryen.none);
   }
   if (getInlineHeapBoxType({ typeId, ctx })) {
-    return unboxInlineValue({ value, typeId, ctx });
+    return unboxInlineValue({ value, typeId, ctx, fnCtx });
   }
   const valueType = binaryen.getExpressionType(value);
   const mutableRefStorage =
@@ -784,7 +857,7 @@ export const liftFixedArrayElementValue = ({
 }): binaryen.ExpressionRef => {
   const inlineBoxType = getInlineHeapBoxType({ typeId, ctx });
   if (!inlineBoxType) {
-    return liftHeapValueToInline({ value, typeId, ctx });
+    return liftHeapValueToInline({ value, typeId, ctx, fnCtx });
   }
 
   const temp = allocateTempLocal(inlineBoxType, fnCtx);
@@ -803,7 +876,7 @@ export const liftFixedArrayElementValue = ({
         temp.index,
         ctx.mod.if(ctx.mod.ref.is_null(stored()), defaultBox, stored()),
       ),
-      liftHeapValueToInline({ value: stored(), typeId, ctx }),
+      liftHeapValueToInline({ value: stored(), typeId, ctx, fnCtx }),
     ],
     wasmTypeFor(typeId, ctx),
   );
@@ -831,7 +904,7 @@ export const storeValueIntoStorageRef = ({
   const inlineBoxType = getInlineHeapBoxType({ typeId, ctx });
   const inlineValue =
     binaryen.getExpressionType(value) === storageType
-      ? liftHeapValueToInline({ value, typeId, ctx })
+      ? liftHeapValueToInline({ value, typeId, ctx, fnCtx })
       : coerceExprToWasmType({
           expr: value,
           targetType: wasmTypeFor(typeId, ctx),
@@ -852,15 +925,22 @@ export const storeValueIntoStorageRef = ({
     ctx,
     fnCtx,
   });
+  const storage = replayableForConsumers({
+    value: pointer(),
+    consumers: abiTypes.length,
+    ctx,
+    fnCtx,
+  });
   return ctx.mod.block(
     null,
     [
+      ...storage.setup,
       ...captured.setup,
       ...abiTypes.map((_, index) =>
         structSetFieldValue({
           mod: ctx.mod,
           fieldIndex: index,
-          ref: refCast(ctx.mod, pointer(), storageType),
+          ref: refCast(ctx.mod, storage.read(), storageType),
           value: captured.lanes[index]!,
         }),
       ),
@@ -891,13 +971,14 @@ const normalizeValueToInlineAbi = ({
     !NON_REF_TYPES.has(valueType);
   if (inlineBoxType && isRefLike) {
     if (valueType === inlineBoxType) {
-      return unboxInlineValue({ value, typeId, ctx });
+      return unboxInlineValue({ value, typeId, ctx, fnCtx });
     }
     if (fnCtx) {
       return unboxInlineValue({
         value: boxInlineValue({ value, typeId, ctx, fnCtx }),
         typeId,
         ctx,
+        fnCtx,
       });
     }
   }
@@ -955,6 +1036,7 @@ const cloneTransferredValue = ({
       field,
       pointer: () => loadLocalValue(temp, ctx),
       ctx,
+      fnCtx,
     });
     return coerceExprToWasmType({
       expr: cloneTransferredValue({
@@ -971,6 +1053,7 @@ const cloneTransferredValue = ({
     structInfo,
     fieldValues,
     ctx,
+    fnCtx,
   });
   const clonedType = binaryen.getExpressionType(cloned);
   const resultTemp =
@@ -1206,21 +1289,42 @@ export const initStructuralValue = ({
   structInfo,
   fieldValues,
   ctx,
+  fnCtx,
 }: {
   structInfo: StructuralTypeInfo;
   fieldValues: readonly binaryen.ExpressionRef[];
   ctx: CodegenContext;
+  fnCtx?: FunctionContext;
 }): binaryen.ExpressionRef => {
   if (structInfo.layoutKind === "value-object") {
-    return makeInlineValue({
-      values: fieldValues.flatMap((value) => {
-        const abiTypes = expandAbiTypes(binaryen.getExpressionType(value));
+    const replayableFields = stabilizeValuesForReplay({
+      values: fieldValues,
+      ctx,
+      fnCtx,
+    });
+    const value = makeInlineValue({
+      values: replayableFields.flatMap((replayable, fieldIndex) => {
+        const fieldValue = fieldValues[fieldIndex]!;
+        const abiTypes = expandAbiTypes(binaryen.getExpressionType(fieldValue));
         return abiTypes.map((_, index) =>
-          extractAbiLane({ value, abiTypes, index, ctx }),
+          extractAbiLane({
+            value: replayable.read(),
+            abiTypes,
+            index,
+            ctx,
+          }),
         );
       }),
       ctx,
     });
+    const setup = replayableFields.flatMap((replayable) => replayable.setup);
+    return setup.length === 0
+      ? value
+      : ctx.mod.block(
+          null,
+          [...setup, value],
+          binaryen.getExpressionType(value),
+        );
   }
   if (
     !structInfo.ancestorsGlobal ||
@@ -1253,11 +1357,13 @@ const makeDirectStructuralFieldLoad = ({
   field,
   pointer,
   ctx,
+  fnCtx,
 }: {
   structInfo: StructuralTypeInfo;
   field: StructuralTypeInfo["fields"][number];
   pointer: () => binaryen.ExpressionRef;
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   if (structInfo.layoutKind === "value-object") {
     const pointerValue = pointer();
@@ -1286,6 +1392,7 @@ const makeDirectStructuralFieldLoad = ({
     value: loaded,
     typeId: field.typeId,
     ctx,
+    fnCtx,
   });
 };
 
@@ -1293,10 +1400,12 @@ const makeDynamicStructuralFieldLoad = ({
   field,
   pointer,
   ctx,
+  fnCtx,
 }: {
   field: StructuralTypeInfo["fields"][number];
   pointer: () => binaryen.ExpressionRef;
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   const lookupTable = structGetFieldValue({
     mod: ctx.mod,
@@ -1315,6 +1424,7 @@ const makeDynamicStructuralFieldLoad = ({
     value: loaded,
     typeId: field.typeId,
     ctx,
+    fnCtx,
   });
 };
 
@@ -1565,6 +1675,14 @@ export const coerceValueToType = ({
         const boxedTemp = canUseBoxedActual
           ? allocateTempLocal(actualBoxType, fnCtx, actualType, ctx)
           : undefined;
+        const capturedActual = canUseBoxedActual
+          ? undefined
+          : captureAbiValue({
+              value: normalizedActual,
+              abiTypes: actualLayout.abiTypes,
+              ctx,
+              fnCtx,
+            });
         const boxedPointer = (): binaryen.ExpressionRef => {
           if (!boxedTemp || !actualBoxType) {
             throw new Error("inline optional box temp is missing");
@@ -1578,9 +1696,7 @@ export const coerceValueToType = ({
               fieldIndex: 0,
               exprRef: boxedPointer(),
             })
-          : actualLayout.abiTypes.length === 1
-            ? normalizedActual
-            : ctx.mod.tuple.extract(normalizedActual, 0);
+          : capturedActual!.lanes[0]!;
         const payload = canUseBoxedActual
           ? makeInlineValue({
               values: actualSomeLayout.abiTypes.map((abiType, index) =>
@@ -1594,13 +1710,9 @@ export const coerceValueToType = ({
               ctx,
             })
           : makeInlineValue({
-              values: actualSomeLayout.abiTypes.map((_, index) =>
-                extractAbiLane({
-                  value: normalizedActual,
-                  abiTypes: actualLayout.abiTypes,
-                  index: actualSomeLayout.abiStart + index,
-                  ctx,
-                }),
+              values: actualSomeLayout.abiTypes.map(
+                (_, index) =>
+                  capturedActual!.lanes[actualSomeLayout.abiStart + index]!,
               ),
               ctx,
             });
@@ -1617,7 +1729,13 @@ export const coerceValueToType = ({
           fnCtx,
         });
         const innerAbiTypes = expandAbiTypes(binaryen.getExpressionType(inner));
-        const someValue = makeInlineValue({
+        const capturedInner = captureAbiValue({
+          value: inner,
+          abiTypes: innerAbiTypes,
+          ctx,
+          fnCtx,
+        });
+        const inlineSomeValue = makeInlineValue({
           values: targetLayout.abiTypes.map((abiType, index) => {
             if (index === 0) {
               return ctx.mod.i32.const(targetSomeLayout.tag);
@@ -1628,17 +1746,20 @@ export const coerceValueToType = ({
               memberIndex < innerAbiTypes.length &&
               targetSomeLayout.abiStart + memberIndex === index
             ) {
-              return extractAbiLane({
-                value: inner,
-                abiTypes: innerAbiTypes,
-                index: memberIndex,
-                ctx,
-              });
+              return capturedInner.lanes[memberIndex]!;
             }
             return defaultValueForWasmType(abiType, ctx);
           }),
           ctx,
         });
+        const someValue =
+          capturedInner.setup.length === 0
+            ? inlineSomeValue
+            : ctx.mod.block(
+                null,
+                [...capturedInner.setup, inlineSomeValue],
+                binaryen.getExpressionType(inlineSomeValue),
+              );
         const noneValue = makeInlineValue({
           values: targetLayout.abiTypes.map((abiType, index) =>
             index === 0
@@ -1653,6 +1774,16 @@ export const coerceValueToType = ({
           someValue,
         );
         if (!boxedTemp || !canUseBoxedActual) {
+          if (!capturedActual || capturedActual.setup.length === 0) {
+            return coerced;
+          }
+          return ctx.mod.block(
+            null,
+            [...capturedActual.setup, coerced],
+            wasmTypeFor(targetType, ctx),
+          );
+        }
+        if (!boxedActual) {
           return coerced;
         }
         return ctx.mod.block(
@@ -1744,6 +1875,7 @@ export const coerceValueToType = ({
             field: actualSomeField,
             pointer: sourceSome,
             ctx,
+            fnCtx,
           }),
           actualType: actualSomeField.typeId,
           targetType: targetOptionalInfo.innerType,
@@ -1762,11 +1894,13 @@ export const coerceValueToType = ({
             }),
           ],
           ctx,
+          fnCtx,
         });
         const noneValue = initStructuralValue({
           structInfo: targetNoneInfo,
           fieldValues: [],
           ctx,
+          fnCtx,
         });
 
         return ctx.mod.block(
@@ -1804,10 +1938,16 @@ export const coerceValueToType = ({
         valueAbiTypes.length === unionAbiTypes.length
           ? unionAbiTypes
           : valueAbiTypes;
+      const source = replayableForConsumers({
+        value,
+        consumers: memberLayout.abiTypes.length,
+        ctx,
+        fnCtx,
+      });
       const extracted = makeInlineValue({
         values: memberLayout.abiTypes.map((_, index) =>
           extractAbiLane({
-            value,
+            value: source.read(),
             abiTypes: sourceAbiTypes,
             index:
               sourceAbiTypes === unionAbiTypes
@@ -1826,6 +1966,7 @@ export const coerceValueToType = ({
                 structInfo: memberInfo,
                 fieldValues: [],
                 ctx,
+                fnCtx,
               })
             : abiTypeFor(memberLayout.abiTypes) !==
                 wasmTypeFor(memberLayout.typeId, ctx)
@@ -1838,12 +1979,16 @@ export const coerceValueToType = ({
                 })
               : undefined
           : undefined;
-      return coerceValueToType({
-        value: materializedMember ?? extracted,
-        actualType: memberLayout.typeId,
-        targetType,
+      return withReplayableSetup({
+        replayable: source,
+        value: coerceValueToType({
+          value: materializedMember ?? extracted,
+          actualType: memberLayout.typeId,
+          targetType,
+          ctx,
+          fnCtx,
+        }),
         ctx,
-        fnCtx,
       });
     }
   }
@@ -1939,6 +2084,7 @@ export const coerceValueToType = ({
         structInfo: someInfo,
         fieldValues: [innerValue],
         ctx,
+        fnCtx,
       });
     }
   }
@@ -1989,12 +2135,14 @@ export const coerceValueToType = ({
                 }),
                 typeId: actualField.typeId,
                 ctx,
+                fnCtx,
               })
             : loadStructuralField({
                 structInfo: actualInfo,
                 field: actualField,
                 pointer: () => loadLocalValue(actualTemp, ctx),
                 ctx,
+                fnCtx,
               }),
         ],
         wasmTypeFor(actualField.typeId, ctx),
@@ -2077,6 +2225,7 @@ export const coerceValueToType = ({
           }),
         ],
         ctx,
+        fnCtx,
       });
     }
   }
@@ -2650,6 +2799,7 @@ export const emitStructuralConversion = ({
               value: loaded,
               typeId: sourceField.typeId,
               ctx,
+              fnCtx,
             });
           })()
         : loadStructuralField({
@@ -2657,6 +2807,7 @@ export const emitStructuralConversion = ({
             field: sourceField,
             pointer: sourceRef,
             ctx,
+            fnCtx,
           });
     const coerced = coerceValueToType({
       value: raw,
@@ -2678,6 +2829,7 @@ export const emitStructuralConversion = ({
     structInfo: target,
     fieldValues,
     ctx,
+    fnCtx,
   });
   ops.push(converted);
   return ctx.mod.block(null, ops, target.interfaceType);
@@ -2689,59 +2841,99 @@ export const loadStructuralField = ({
   pointer,
   exactNominalTypeId,
   ctx,
+  fnCtx,
 }: {
   structInfo: StructuralTypeInfo;
   field: StructuralTypeInfo["fields"][number];
   pointer: () => binaryen.ExpressionRef;
   exactNominalTypeId?: TypeId;
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
+  const exactNominalLayout =
+    typeof exactNominalTypeId === "number" &&
+    exactNominalTypeId === structInfo.nominalId;
+  const nominalFastPath =
+    !exactNominalLayout && shouldUseNominalFieldFastPath(structInfo, ctx);
+  const pointerConsumers =
+    structInfo.layoutKind === "value-object"
+      ? field.inlineWasmTypes.length
+      : exactNominalLayout
+        ? 1
+        : nominalFastPath
+          ? 3
+          : 2;
+  const stablePointer = replayableForConsumers({
+    value: pointer(),
+    consumers: pointerConsumers,
+    ctx,
+    fnCtx,
+  });
+  const readPointer = stablePointer.read;
+
   if (structInfo.layoutKind === "value-object") {
-    return makeDirectStructuralFieldLoad({
-      structInfo,
-      field,
-      pointer,
+    return withReplayableSetup({
+      replayable: stablePointer,
+      value: makeDirectStructuralFieldLoad({
+        structInfo,
+        field,
+        pointer: readPointer,
+        ctx,
+        fnCtx,
+      }),
       ctx,
     });
   }
-  if (
-    typeof exactNominalTypeId === "number" &&
-    exactNominalTypeId === structInfo.nominalId
-  ) {
-    return makeDirectStructuralFieldLoad({
-      structInfo,
-      field,
-      pointer,
+  if (exactNominalLayout) {
+    return withReplayableSetup({
+      replayable: stablePointer,
+      value: makeDirectStructuralFieldLoad({
+        structInfo,
+        field,
+        pointer: readPointer,
+        ctx,
+        fnCtx,
+      }),
       ctx,
     });
   }
   const dynamicLoad = makeDynamicStructuralFieldLoad({
     field,
-    pointer,
+    pointer: readPointer,
     ctx,
+    fnCtx,
   });
-  if (!shouldUseNominalFieldFastPath(structInfo, ctx)) {
-    return dynamicLoad;
+  if (!nominalFastPath) {
+    return withReplayableSetup({
+      replayable: stablePointer,
+      value: dynamicLoad,
+      ctx,
+    });
   }
 
   const exactTypeMatch = ctx.mod.call(
     "__has_type",
     [
       ctx.mod.i32.const(structInfo.runtimeTypeId),
-      makeHeapAncestorsExpr({ pointer, ctx }),
+      makeHeapAncestorsExpr({ pointer: readPointer, ctx }),
     ],
     binaryen.i32,
   );
-  return ctx.mod.if(
-    exactTypeMatch,
-    makeDirectStructuralFieldLoad({
-      structInfo,
-      field,
-      pointer,
-      ctx,
-    }),
-    dynamicLoad,
-  );
+  return withReplayableSetup({
+    replayable: stablePointer,
+    value: ctx.mod.if(
+      exactTypeMatch,
+      makeDirectStructuralFieldLoad({
+        structInfo,
+        field,
+        pointer: readPointer,
+        ctx,
+        fnCtx,
+      }),
+      dynamicLoad,
+    ),
+    ctx,
+  });
 };
 
 export const storeStructuralField = ({
@@ -2786,11 +2978,16 @@ export const storeStructuralField = ({
   if (!field.setterType) {
     throw new Error(`missing setter for structural field ${field.name}`);
   }
+  const stablePointer = stabilizeValueForReplay({
+    value: pointer(),
+    ctx,
+    fnCtx,
+  });
   const lookupTable = structGetFieldValue({
     mod: ctx.mod,
     fieldType: ctx.rtt.fieldLookupHelpers.lookupTableType,
     fieldIndex: RTT_METADATA_SLOTS.FIELD_INDEX_TABLE,
-    exprRef: pointer(),
+    exprRef: stablePointer.read(),
   });
   const accessor = ctx.mod.call(
     LOOKUP_FIELD_ACCESSOR,
@@ -2805,5 +3002,14 @@ export const storeStructuralField = ({
     ctx,
     fnCtx,
   });
-  return callRef(ctx.mod, setter, [pointer(), storedValue], binaryen.none);
+  return withReplayableSetup({
+    replayable: stablePointer,
+    value: callRef(
+      ctx.mod,
+      setter,
+      [stablePointer.read(), storedValue],
+      binaryen.none,
+    ),
+    ctx,
+  });
 };

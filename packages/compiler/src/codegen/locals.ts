@@ -49,7 +49,7 @@ export const declareLocalWithTypeId = (
   symbol: SymbolId,
   typeId: number,
   ctx: CodegenContext,
-  fnCtx: FunctionContext
+  fnCtx: FunctionContext,
 ): LocalBinding => {
   const existing = fnCtx.bindings.get(symbol);
   if (existing) {
@@ -83,7 +83,7 @@ export const declareMutableLocalWithTypeId = (
 export const declareLocal = (
   symbol: SymbolId,
   ctx: CodegenContext,
-  fnCtx: FunctionContext
+  fnCtx: FunctionContext,
 ): LocalBinding => {
   const existing = fnCtx.bindings.get(symbol);
   if (existing) {
@@ -104,17 +104,15 @@ export const declareLocal = (
 export const getRequiredBinding = (
   symbol: SymbolId,
   ctx: CodegenContext,
-  fnCtx: FunctionContext
+  fnCtx: FunctionContext,
 ): LocalBinding => {
   const binding = fnCtx.bindings.get(symbol);
   if (!binding) {
     const name =
       ctx.program.symbols.getName(
-        ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol })
+        ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol }),
       ) ?? `${symbol}`;
-    throw new Error(
-      `codegen missing binding for symbol ${name}`
-    );
+    throw new Error(`codegen missing binding for symbol ${name}`);
   }
   return binding;
 };
@@ -123,15 +121,15 @@ export const allocateTempLocal = (
   type: binaryen.Type,
   fnCtx: FunctionContext,
   typeId?: number,
-  ctx?: CodegenContext
+  ctx?: CodegenContext,
 ): LocalBindingLocal => {
   const storageType =
     typeof typeId === "number" && ctx && binaryen.expandType(type).length > 1
-      ? getInlineHeapBoxType({ typeId, ctx }) ??
+      ? (getInlineHeapBoxType({ typeId, ctx }) ??
         signatureSpillStorageType({
           typeId,
           ctx,
-        })
+        }))
       : type;
   const binding: LocalBindingLocal = {
     kind: "local",
@@ -179,7 +177,9 @@ export const allocateMutableRefLocal = ({
   const type = wasmTypeFor(typeId, ctx);
   const storageType = getMutableRefStorageType({ typeId, ctx });
   if (typeof storageType !== "number") {
-    throw new Error(`mutable ref local requires addressable storage for ${typeId}`);
+    throw new Error(
+      `mutable ref local requires addressable storage for ${typeId}`,
+    );
   }
   const allocated = allocateTempLocal(type, fnCtx, typeId, ctx);
   if (allocated.storageType === storageType) {
@@ -207,7 +207,9 @@ export const createStorageRefBinding = ({
     ? getMutableRefStorageType({ typeId, ctx })
     : getInlineHeapBoxType({ typeId, ctx });
   if (typeof storageType !== "number") {
-    throw new Error(`storage ref binding requires boxed inline storage for ${typeId}`);
+    throw new Error(
+      `storage ref binding requires boxed inline storage for ${typeId}`,
+    );
   }
   return {
     kind: "storage-ref",
@@ -221,7 +223,7 @@ export const createStorageRefBinding = ({
 
 export const loadLocalValue = (
   binding: LocalBindingLocal,
-  ctx: CodegenContext
+  ctx: CodegenContext,
 ): binaryen.ExpressionRef => {
   const stored = ctx.mod.local.get(binding.index, binding.storageType);
   if (
@@ -230,11 +232,13 @@ export const loadLocalValue = (
   ) {
     return stored;
   }
-  if (isSignatureSpillStorage({
-    typeId: binding.typeId,
-    storageType: binding.storageType,
-    ctx,
-  })) {
+  if (
+    isSignatureSpillStorage({
+      typeId: binding.typeId,
+      storageType: binding.storageType,
+      ctx,
+    })
+  ) {
     return unboxSignatureSpillValue({
       value: stored,
       typeId: binding.typeId,
@@ -271,7 +275,9 @@ export const storeLocalValue = ({
       ctx,
       fnCtx,
     });
-    const stabilized = ctx.mod.tuple.make(captured.lanes as binaryen.ExpressionRef[]);
+    const stabilized = ctx.mod.tuple.make(
+      captured.lanes as binaryen.ExpressionRef[],
+    );
     return captured.setup.length === 0
       ? ctx.mod.local.set(binding.index, stabilized)
       : ctx.mod.block(
@@ -293,11 +299,13 @@ export const storeLocalValue = ({
       }),
     );
   }
-  if (isSignatureSpillStorage({
-    typeId: binding.typeId,
-    storageType: binding.storageType,
-    ctx,
-  })) {
+  if (
+    isSignatureSpillStorage({
+      typeId: binding.typeId,
+      storageType: binding.storageType,
+      ctx,
+    })
+  ) {
     return ctx.mod.local.set(
       binding.index,
       boxSignatureSpillValue({
@@ -321,13 +329,14 @@ export const storeLocalValue = ({
 export const loadBindingValue = (
   binding: LocalBinding,
   ctx: CodegenContext,
-  fnCtx?: FunctionContext,
+  fnCtx: FunctionContext,
 ): binaryen.ExpressionRef => {
   if (binding.kind === "storage-ref") {
     return liftHeapValueToInline({
       value: ctx.mod.local.get(binding.index, binding.storageType),
       typeId: binding.typeId!,
       ctx,
+      fnCtx,
     });
   }
   if (binding.kind === "scalar-aggregate") {
@@ -362,11 +371,13 @@ export const loadBindingValue = (
   ) {
     return stored;
   }
-  if (isSignatureSpillStorage({
-    typeId: binding.typeId,
-    storageType: binding.storageType,
-    ctx,
-  })) {
+  if (
+    isSignatureSpillStorage({
+      typeId: binding.typeId,
+      storageType: binding.storageType,
+      ctx,
+    })
+  ) {
     return unboxSignatureSpillValue({
       value: stored,
       typeId: binding.typeId,
@@ -377,6 +388,7 @@ export const loadBindingValue = (
     value: stored,
     typeId: binding.typeId,
     ctx,
+    fnCtx,
   });
 };
 
@@ -491,11 +503,15 @@ export const materializeOwnedBinding = ({
     return { binding: owned, setup };
   }
   if (existing.kind === "capture") {
-    throw new Error("cannot materialize capture binding into owned local storage");
+    throw new Error(
+      "cannot materialize capture binding into owned local storage",
+    );
   }
   const typeId = existing.typeId;
   if (typeof typeId !== "number") {
-    throw new Error(`cannot materialize symbol ${symbol} without a concrete type`);
+    throw new Error(
+      `cannot materialize symbol ${symbol} without a concrete type`,
+    );
   }
   const owned = allocateTempLocal(existing.type, fnCtx, typeId, ctx);
   const setup = [
@@ -527,7 +543,10 @@ export const loadProjectedElementBindingValue = (
   fnCtx?: FunctionContext,
 ): binaryen.ExpressionRef => {
   const arrayRef = () =>
-    ctx.mod.local.get(binding.arrayIndex, wasmTypeFor(binding.arrayTypeId, ctx));
+    ctx.mod.local.get(
+      binding.arrayIndex,
+      wasmTypeFor(binding.arrayTypeId, ctx),
+    );
   const indexRef = () => ctx.mod.local.get(binding.indexIndex, binaryen.i32);
   const loaded = arrayGet(
     ctx.mod,
@@ -608,6 +627,7 @@ const loadProjectedFieldBindingValue = (
       field: segment.field,
       pointer: () => loadLocalValue(ownerTemp, ctx),
       ctx,
+      fnCtx,
     });
     if (index === segments.length - 1) {
       ops.push(loaded);
@@ -728,6 +748,7 @@ export const storeProjectedFieldBindingValue = ({
           field: segment.field,
           pointer: () => loadLocalValue(ownerTemps.at(-1)!, ctx),
           ctx,
+          fnCtx,
         }),
         ctx,
         fnCtx,
@@ -813,9 +834,11 @@ const rebuildProjectedValueOwner = ({
             field,
             pointer: () => loadLocalValue(ownerTemp, ctx),
             ctx,
+            fnCtx,
           }),
     ),
     ctx,
+    fnCtx,
   });
 
 const storeProjectedRootValue = ({
@@ -974,6 +997,7 @@ export const storeScalarAggregateBindingValue = ({
           field,
           pointer: () => loadLocalValue(temp, ctx),
           ctx,
+          fnCtx,
         }),
         ctx,
         fnCtx,
@@ -1006,7 +1030,9 @@ const loadScalarAggregateBindingValue = ({
       });
     }
     if (!fnCtx) {
-      throw new Error("heap scalar aggregate rematerialization requires a function context");
+      throw new Error(
+        "heap scalar aggregate rematerialization requires a function context",
+      );
     }
     return lowerValueForHeapField({
       value,
@@ -1020,5 +1046,6 @@ const loadScalarAggregateBindingValue = ({
     structInfo: binding.structInfo,
     fieldValues,
     ctx,
+    fnCtx,
   });
 };

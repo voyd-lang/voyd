@@ -26,7 +26,10 @@ import {
   methodSignatureKey,
   methodSignatureParamTypeKey,
 } from "../../method-signature-key.js";
-import { bindTypeExpr } from "./expressions.js";
+import {
+  bindTypeExpr,
+  resolveBoundIdentifierSymbol,
+} from "./expressions.js";
 
 const isStaticMethod = (fn: ParsedFunctionDecl): boolean =>
   fn.signature.params.length === 0 || fn.signature.params[0]?.name !== "self";
@@ -85,6 +88,9 @@ export const bindImplDecl = (
   ctx.scopeByNode.set(decl.form.syntaxId, implScope);
   ctx.scopeByNode.set(decl.body.syntaxId, implScope);
 
+  bindTypeExpr(decl.target, ctx, tracker);
+  bindTypeExpr(decl.trait, ctx, tracker);
+
   const typeParameters: TypeParameterDecl[] = [];
   const methods: ReturnType<typeof bindFunctionDecl>[] = [];
   const inferredTypeParams = inferImplTypeParameters({
@@ -107,10 +113,18 @@ export const bindImplDecl = (
       return undefined;
     }
     if (isIdentifierAtom(decl.trait)) {
-      return ctx.symbolTable.resolve(decl.trait.value, tracker.current());
+      return resolveBoundIdentifierSymbol({
+        identifier: decl.trait,
+        ctx,
+        scope: tracker.current(),
+      });
     }
     if (isForm(decl.trait) && isIdentifierAtom(decl.trait.first)) {
-      return ctx.symbolTable.resolve(decl.trait.first.value, tracker.current());
+      return resolveBoundIdentifierSymbol({
+        identifier: decl.trait.first,
+        ctx,
+        scope: tracker.current(),
+      });
     }
     return undefined;
   })();
@@ -166,9 +180,6 @@ export const bindImplDecl = (
     decl.typeParameters.forEach((param) =>
       bindTypeExpr(param.constraint, ctx, tracker),
     );
-    bindTypeExpr(decl.target, ctx, tracker);
-    bindTypeExpr(decl.trait, ctx, tracker);
-
     inferredTypeParams.forEach((name) => {
       if (typeParameters.some((param) => param.name === name)) {
         return;
@@ -197,10 +208,14 @@ export const bindImplDecl = (
         }
       }
 
-      const memberVisibility = inheritMemberVisibility({
+      const inheritedMemberVisibility = inheritMemberVisibility({
         ownerVisibility,
         modifier: parsedFn.memberModifier,
       });
+      const memberVisibility =
+        parsedFn.visibility.level === "module"
+          ? inheritedMemberVisibility
+          : parsedFn.visibility;
 
       const method = bindFunctionDecl(parsedFn, ctx, tracker, {
         declarationScope: staticMethod

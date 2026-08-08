@@ -9,13 +9,13 @@ import { DiagnosticError } from "../../../diagnostics/index.js";
 
 const effectOps = (
   row: number,
-  effects: ReturnType<typeof semanticsPipeline>["typing"]["effects"]
+  effects: ReturnType<typeof semanticsPipeline>["typing"]["effects"],
 ): readonly string[] => effects.getRow(row).operations.map((op) => op.name);
 
 const findCallByCallee = (
   hir: ReturnType<typeof semanticsPipeline>["hir"],
   symbolName: string,
-  symbolTable: SymbolTable
+  symbolTable: SymbolTable,
 ): HirCallExpr | undefined => {
   for (const expr of hir.expressions.values()) {
     if (expr.exprKind !== "call") continue;
@@ -32,7 +32,7 @@ const findCallByCallee = (
 const findCallsByCallee = (
   hir: ReturnType<typeof semanticsPipeline>["hir"],
   symbolName: string,
-  symbolTable: SymbolTable
+  symbolTable: SymbolTable,
 ): HirCallExpr[] =>
   Array.from(hir.expressions.values()).filter((expr): expr is HirCallExpr => {
     if (expr.exprKind !== "call") {
@@ -46,10 +46,10 @@ const findCallsByCallee = (
   });
 
 const findEffectHandler = (
-  hir: ReturnType<typeof semanticsPipeline>["hir"]
+  hir: ReturnType<typeof semanticsPipeline>["hir"],
 ): HirExpression | undefined =>
   Array.from(hir.expressions.values()).find(
-    (expr) => expr.exprKind === "effect-handler"
+    (expr) => expr.exprKind === "effect-handler",
   );
 
 describe("effect inference", () => {
@@ -62,7 +62,7 @@ eff Async
 fn main()
   Async::await()
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -74,7 +74,7 @@ fn main()
 
     const callOps = effectOps(
       typing.effects.getExprEffect(callExpr.id)!,
-      typing.effects
+      typing.effects,
     );
     expect(callOps).toContain("Async.await");
 
@@ -106,14 +106,14 @@ fn from_member(): () -> i32
   Gen::pass(resume, value):
     resume(value)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
     const { hir, typing } = semantics;
     const symbolTable = getSymbolTable(semantics);
     const passCalls = findCallsByCallee(hir, "pass", symbolTable).filter(
-      (expr) => expr.args.length === 1
+      (expr) => expr.args.length === 1,
     );
     expect(passCalls).toHaveLength(2);
 
@@ -128,53 +128,16 @@ fn from_member(): () -> i32
     });
   });
 
-  it("types explicit effect operation type args for overloaded operations", () => {
+  it("diagnoses mismatched arguments for explicit effect operation type args", () => {
     const ast = parse(
       `
 eff Gen<T>
   fn pass(resume, value: T) -> T
-  fn pass(resume) -> T
-
-fn from_target(): () -> i32
-  try
-    Gen<i32>::pass(1)
-  Gen::pass(resume, value: i32):
-    resume(value)
-  Gen::pass(resume):
-    resume(0)
-`,
-      "effects.voyd"
-    );
-
-    const semantics = semanticsPipeline(ast);
-    const { hir, typing } = semantics;
-    const symbolTable = getSymbolTable(semantics);
-    const passCalls = findCallsByCallee(hir, "pass", symbolTable).filter(
-      (expr) => expr.args.length === 1
-    );
-    expect(passCalls).toHaveLength(1);
-    const call = passCalls[0]!;
-
-    const i32 = typing.arena.internPrimitive("i32");
-    const typeArgsByInstance = typing.callTypeArguments.get(call.id);
-    const typeArgs = typeArgsByInstance
-      ? Array.from(typeArgsByInstance.values())[0]
-      : undefined;
-    expect(typeArgs).toEqual([i32]);
-    expect(typing.table.getExprType(call.id)).toBe(i32);
-  });
-
-  it("diagnoses no-overload for explicit type args with mismatched argument types", () => {
-    const ast = parse(
-      `
-eff Gen<T>
-  fn pass(resume, value: T) -> T
-  fn pass(resume) -> T
 
 fn bad()
   Gen<i32>::pass(true)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     let caught: DiagnosticError | undefined;
@@ -184,7 +147,7 @@ fn bad()
       caught = error as DiagnosticError;
     }
 
-    expect(caught?.diagnostic.code).toBe("TY0008");
+    expect(caught?.diagnostic.code).toBe("TY0027");
   });
 
   it("diagnoses mismatched annotations", () => {
@@ -199,7 +162,7 @@ eff Async
 fn log_it(): Async -> void
   Log::write(1)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     let caught: unknown;
@@ -226,7 +189,7 @@ eff Async
 fn inner(x: i32): Async -> i32
   Async::await(x) + 1
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -256,7 +219,7 @@ fn handled()
   Async::await(tail):
     tail(1)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -267,7 +230,7 @@ fn handled()
     if (!handler) return;
     const handlerOps = effectOps(
       typing.effects.getExprEffect(handler.id)!,
-      typing.effects
+      typing.effects,
     );
     expect(handlerOps).toHaveLength(0);
 
@@ -292,7 +255,7 @@ fn missing_tail()
   Async::await(tail):
     1
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     let caught: unknown;
@@ -320,7 +283,7 @@ fn handled()
     tail(1)
     tail(2)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -350,7 +313,7 @@ fn handled(value: i32)
   Async::await(resume, value):
     forward(resume, value)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     let caught: unknown;
@@ -379,7 +342,7 @@ fn handled(flag: bool)
       tail(1)
     tail(2)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -408,7 +371,7 @@ fn handled(flag: bool)
       resume(1)
     resume(2)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -438,7 +401,7 @@ fn main()
   Async::await(tail):
     forward(tail)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     let caught: unknown;
@@ -468,7 +431,7 @@ fn maybe(x: bool)
     else:
       1
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     let caught: unknown;
@@ -495,7 +458,7 @@ fn handled()
   Async::await(resume, value):
     resume(value)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -522,13 +485,16 @@ fn reraises()
   Async::await(resume):
     Async::await()
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
     const { typing } = semantics;
     const symbolTable = getSymbolTable(semantics);
-    const reraisesSymbol = symbolTable.resolve("reraises", symbolTable.rootScope);
+    const reraisesSymbol = symbolTable.resolve(
+      "reraises",
+      symbolTable.rootScope,
+    );
     expect(typeof reraisesSymbol).toBe("number");
     if (typeof reraisesSymbol !== "number") return;
     const signature = typing.functions.getSignature(reraisesSymbol);
@@ -555,7 +521,7 @@ fn mixed()
   Async::await(resume):
     Async::await()
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     let caught: unknown;
@@ -580,7 +546,7 @@ fn run(cb: fn() -> i32)
 fn main()
   run(() => Async::await())
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -599,7 +565,9 @@ fn main()
 
     expect(typing.effects.isOpen(runSig.effectRow)).toBe(true);
     expect(typing.effects.isOpen(mainSig.effectRow)).toBe(false);
-    expect(effectOps(mainSig.effectRow, typing.effects)).toEqual(["Async.await"]);
+    expect(effectOps(mainSig.effectRow, typing.effects)).toEqual([
+      "Async.await",
+    ]);
   });
 
   it("specializes callback effects to pure for pure callbacks", () => {
@@ -611,7 +579,7 @@ fn run(cb: fn() -> i32)
 fn main()
   run(() -> i32 => 1)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -641,7 +609,7 @@ eff Async
 fn missing()
   try Async::await()
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     let caught: unknown;
@@ -670,7 +638,7 @@ fn missing()
   Async::await(tail):
     tail(1)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     let caught: unknown;
@@ -699,13 +667,16 @@ fn forward_partial()
   Async::await(tail):
     tail(1)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
     const { typing } = semantics;
     const symbolTable = getSymbolTable(semantics);
-    const symbol = symbolTable.resolve("forward_partial", symbolTable.rootScope);
+    const symbol = symbolTable.resolve(
+      "forward_partial",
+      symbolTable.rootScope,
+    );
     expect(typeof symbol).toBe("number");
     if (typeof symbol !== "number") {
       return;
@@ -715,7 +686,9 @@ fn forward_partial()
     if (!signature) {
       return;
     }
-    expect(effectOps(signature.effectRow, typing.effects)).toEqual(["Log.write"]);
+    expect(effectOps(signature.effectRow, typing.effects)).toEqual([
+      "Log.write",
+    ]);
   });
 
   it("supports open callback rows with a required handled prefix", () => {
@@ -739,7 +712,7 @@ fn main()
     value
   )
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -778,7 +751,7 @@ fn main()
     1
   cb()
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     let caught: unknown;
@@ -791,7 +764,7 @@ fn main()
     expect((caught as any)?.diagnostic?.code).toBe("TY0027");
     expect((caught as any)?.diagnostic?.message).toContain("Async.await");
     expect((caught as any)?.diagnostic?.message).not.toContain(
-      "expected 'function', received 'function'"
+      "expected 'function', received 'function'",
     );
   });
 
@@ -808,7 +781,7 @@ fn main() : (open) -> i32 = run(() =>
   Async::await()
 )
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -846,7 +819,7 @@ fn main(): (open) -> i32
   let f = (inner: fn() : (open) -> i32) -> i32 => inner()
   run(f)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -889,7 +862,7 @@ fn forward_nested(flag: bool)
   Async::await(tail):
     tail()
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
@@ -905,7 +878,9 @@ fn forward_nested(flag: bool)
     if (!signature) {
       return;
     }
-    expect(effectOps(signature.effectRow, typing.effects)).toEqual(["Log.write"]);
+    expect(effectOps(signature.effectRow, typing.effects)).toEqual([
+      "Log.write",
+    ]);
   });
 
   it("matches handlers nested inside branch bodies", () => {
@@ -928,13 +903,16 @@ fn forward_nested_branch(flag: bool)
         Log::write()
         void
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);
     const { typing } = semantics;
     const symbolTable = getSymbolTable(semantics);
-    const symbol = symbolTable.resolve("forward_nested_branch", symbolTable.rootScope);
+    const symbol = symbolTable.resolve(
+      "forward_nested_branch",
+      symbolTable.rootScope,
+    );
     expect(typeof symbol).toBe("number");
     if (typeof symbol !== "number") {
       return;
@@ -944,7 +922,9 @@ fn forward_nested_branch(flag: bool)
     if (!signature) {
       return;
     }
-    expect(effectOps(signature.effectRow, typing.effects)).toEqual(["Log.write"]);
+    expect(effectOps(signature.effectRow, typing.effects)).toEqual([
+      "Log.write",
+    ]);
   });
 
   it("infers effects for generic functions", () => {
@@ -959,7 +939,7 @@ fn lift<T>(value: T) -> i32
 fn caller() -> i32
   lift(1)
 `,
-      "effects.voyd"
+      "effects.voyd",
     );
 
     const semantics = semanticsPipeline(ast);

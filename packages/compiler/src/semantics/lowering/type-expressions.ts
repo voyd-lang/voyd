@@ -1,7 +1,9 @@
 import {
   type Expr,
   type Form,
+  type IdentifierAtom,
   type Syntax,
+  identifierBindingKey,
   isForm,
   isIdentifierAtom,
 } from "../../parser/index.js";
@@ -112,7 +114,7 @@ export const lowerTypeExpr = (
 };
 
 const lowerNamedType = (
-  atom: Syntax & { value: string },
+  atom: IdentifierAtom,
   ctx: LowerContext,
   scope: ScopeId,
 ): HirTypeExpr => ({
@@ -120,7 +122,16 @@ const lowerNamedType = (
   ast: atom.syntaxId,
   span: toSourceSpan(atom),
   path: [atom.value],
-  symbol: resolveTypeSymbol(atom.value, scope, ctx),
+  symbol: resolveTypeSymbol(atom.value, scope, ctx, {
+    bindingIdentity: identifierBindingKey(atom),
+    definitionModuleId:
+      atom.lexicalContext?.kind === "macro-template"
+        ? atom.lexicalContext.definitionModuleId
+        : atom.lexicalContext?.kind === "symbol-reference"
+          ? atom.lexicalContext.targetModuleId
+          : undefined,
+    directSymbol: ctx.directSymbolBySyntax.get(atom.syntaxId),
+  }),
 });
 
 const lowerNamedTypeForm = (

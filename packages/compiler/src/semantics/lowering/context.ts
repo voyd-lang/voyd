@@ -31,6 +31,7 @@ export const createLowerContext = ({
     decls: binding.decls,
     dependencies: binding.dependencies,
     importSpansByLocal,
+    directSymbolBySyntax: binding.directSymbolBySyntax,
     modulePath,
     packageId,
     isPackageRoot,

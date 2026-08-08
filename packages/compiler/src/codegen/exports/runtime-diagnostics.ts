@@ -1,5 +1,6 @@
 import type binaryen from "binaryen";
 import type { CodegenContext } from "../context.js";
+import { wasmSymbolName } from "../symbol-names.js";
 
 export const RUNTIME_DIAGNOSTICS_SECTION = "voyd.runtime_diagnostics";
 const RUNTIME_DIAGNOSTICS_VERSION = 1;
@@ -36,8 +37,7 @@ const functionNameFor = ({
   ctx: CodegenContext;
   symbol: number;
 }): string => {
-  const id = ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol });
-  return ctx.program.symbols.getName(id) ?? `${symbol}`;
+  return wasmSymbolName({ ctx, moduleId: ctx.moduleId, symbol });
 };
 
 export const emitRuntimeDiagnosticsSection = ({
@@ -98,7 +98,7 @@ export const emitRuntimeDiagnosticsSection = ({
   const payload: RuntimeDiagnosticsSection = {
     version: RUNTIME_DIAGNOSTICS_VERSION,
     functions: Array.from(byWasmName.values()).sort((a, b) =>
-      a.wasmName.localeCompare(b.wasmName)
+      a.wasmName.localeCompare(b.wasmName),
     ),
   };
   const bytes = new TextEncoder().encode(JSON.stringify(payload));

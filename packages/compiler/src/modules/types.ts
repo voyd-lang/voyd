@@ -136,6 +136,12 @@ export type ModuleDiagnostic = ModuleDiagnosticContext &
         segment: string;
         requested: ModulePath;
       }
+    | {
+        kind: "ambiguous-module-path";
+        requested: ModulePath;
+        ordinaryFile: string;
+        packageRootFile: string;
+      }
   );
 
 export interface ModuleGraph {

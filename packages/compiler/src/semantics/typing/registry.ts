@@ -22,7 +22,7 @@ import type {
   HirTraitMethod,
   HirTypeExpr,
 } from "../hir/index.js";
-import { effectOpName, resolveEffectAnnotation } from "./effects.js";
+import { effectOpForSymbol, resolveEffectAnnotation } from "./effects.js";
 import {
   diagnosticFromCode,
   emitDiagnostic,
@@ -707,11 +707,7 @@ export const registerEffectOperations = (
         ) ?? ctx.primitives.void;
 
       const effectRow = ctx.effects.internRow({
-        operations: [
-          {
-            name: effectOpName(op.symbol, ctx),
-          },
-        ],
+        operations: [effectOpForSymbol(op.symbol, ctx)],
       });
 
       const functionType = ctx.arena.internFunction({

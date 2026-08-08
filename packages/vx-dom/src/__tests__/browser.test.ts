@@ -3,11 +3,13 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   createBrowserVxRuntimeHost,
+  createVoydVxAppRuntime,
   createVxDomRenderer,
   hydrateVxApp,
   mountVxApp,
   readVoydHydrationRoot,
   readVoydHydrationRoots,
+  type VoydVxAppHost,
 } from "../browser.js";
 import type {
   NormalizedEventPayload,
@@ -88,6 +90,62 @@ describe("vx-dom browser renderer", () => {
     expect(container.querySelector("input")).toBe(input);
     expect(input.value).toBe("Saved");
     expect(input.disabled).toBe(false);
+  });
+
+  it("patches option values and selection through stable attributes", () => {
+    const renderer = createVxDomRenderer(container);
+    const select = (selected: "voyd" | "other"): VxElementNode => ({
+      kind: "element",
+      tag: "select",
+      children: [
+        {
+          kind: "element",
+          tag: "option",
+          attrs: { value: "voyd", selected: selected === "voyd" },
+          children: [{ kind: "text", value: "Voyd" }],
+        },
+        {
+          kind: "element",
+          tag: "option",
+          attrs: { value: "other", selected: selected === "other" },
+          children: [{ kind: "text", value: "Other" }],
+        },
+      ],
+    });
+
+    renderer.render(frame(select("voyd")));
+    expect(container.querySelector("select")?.value).toBe("voyd");
+
+    renderer.render(frame(select("other")));
+    expect(container.querySelector("select")?.value).toBe("other");
+  });
+
+  it("keeps explicit browser-only select value properties available", () => {
+    const renderer = createVxDomRenderer(container);
+
+    renderer.render(
+      frame({
+        kind: "element",
+        tag: "select",
+        props: { value: "other" },
+        children: [
+          {
+            kind: "element",
+            tag: "option",
+            attrs: { value: "voyd" },
+            children: [{ kind: "text", value: "Voyd" }],
+          },
+          {
+            kind: "element",
+            tag: "option",
+            attrs: { value: "other" },
+            children: [{ kind: "text", value: "Other" }],
+          },
+        ],
+      }),
+    );
+
+    expect(container.querySelector("select")?.value).toBe("other");
   });
 
   it("reorders keyed children without recreating existing DOM nodes", () => {
@@ -914,6 +972,85 @@ describe("vx-dom browser renderer", () => {
     }));
   });
 
+  it("captures pointer drags and releases capture on pointer up", () => {
+    const dispatch = vi.fn<RetainedDispatch>();
+    const renderer = createVxDomRenderer(container, { handlers: { dispatch } });
+    renderer.render(
+      frame({
+        kind: "element",
+        tag: "canvas",
+        events: [
+          {
+            kind: "event",
+            event: "pointerdown",
+            handlerId: 41,
+            options: { pointerCapture: true },
+          },
+          { kind: "event", event: "pointerup", handlerId: 42 },
+        ],
+      }),
+    );
+
+    const canvas = container.querySelector("canvas")!;
+    const captured = new Set<number>();
+    const setPointerCapture = vi.fn((pointerId: number) =>
+      captured.add(pointerId),
+    );
+    const releasePointerCapture = vi.fn((pointerId: number) =>
+      captured.delete(pointerId),
+    );
+    Object.defineProperties(canvas, {
+      setPointerCapture: { configurable: true, value: setPointerCapture },
+      hasPointerCapture: {
+        configurable: true,
+        value: (pointerId: number) => captured.has(pointerId),
+      },
+      releasePointerCapture: {
+        configurable: true,
+        value: releasePointerCapture,
+      },
+    });
+    const pointerEvent = (type: string) => {
+      const event = new Event(type, { bubbles: true });
+      Object.defineProperties(event, {
+        pointerId: { configurable: true, value: 17 },
+        x: { configurable: true, value: 120 },
+        y: { configurable: true, value: 80 },
+        clientX: { configurable: true, value: 120 },
+        clientY: { configurable: true, value: 80 },
+        button: { configurable: true, value: 0 },
+        altKey: { configurable: true, value: false },
+        ctrlKey: { configurable: true, value: false },
+        metaKey: { configurable: true, value: false },
+        shiftKey: { configurable: true, value: false },
+      });
+      return event;
+    };
+
+    canvas.dispatchEvent(pointerEvent("pointerdown"));
+    expect(setPointerCapture).toHaveBeenCalledWith(17);
+    expect(dispatch).toHaveBeenNthCalledWith(
+      1,
+      41,
+      expect.objectContaining({
+        kind: "pointer",
+        pointer_id: 17,
+        x: 120,
+        y: 80,
+      }),
+    );
+
+    canvas.dispatchEvent(pointerEvent("pointerup"));
+    expect(releasePointerCapture).toHaveBeenCalledWith(17);
+    expect(dispatch).toHaveBeenNthCalledWith(
+      2,
+      42,
+      expect.objectContaining({
+        pointer_id: 17,
+      }),
+    );
+  });
+
   it("runs custom command executors and dispatches completions", async () => {
     let count = 0;
     const runCommand = vi.fn(async (_command, { dispatch }) => {
@@ -1562,6 +1699,90 @@ describe("vx-dom browser renderer", () => {
     );
   });
 
+  it("releases task handlers when task observation throws synchronously", async () => {
+    const error = new Error("task observer failed synchronously");
+    const onError = vi.fn();
+    const release = vi.fn<(id: number) => void>();
+    const observeTask = vi.fn(() => {
+      throw error;
+    });
+    const commands = {
+      type: "cmd",
+      kind: "task",
+      taskId: 7,
+      handlerId: 88,
+      __vxOwnedMapHandlerIds: [88],
+    };
+    Object.defineProperty(commands, Symbol.for("voyd.taskObserver"), {
+      configurable: true,
+      value: observeTask,
+    });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => ({
+        frame: counterNode(0),
+        commands,
+      }),
+      render: () => counterNode(0),
+      dispatch: () => counterNode(0),
+    };
+
+    await mountVxApp({ container, app, onError });
+    await nextTurn();
+
+    expect(onError).toHaveBeenCalledWith(
+      error,
+      expect.objectContaining({ phase: "commands" }),
+    );
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(88);
+  });
+
+  it("reports failing retained task mappers and releases their handlers", async () => {
+    const error = new Error("retained task mapper failed");
+    const onError = vi.fn();
+    const release = vi.fn<(id: number) => void>();
+    const dispatch = vi.fn(async () => {
+      throw error;
+    });
+    const result = {
+      $vx: "runtime_result" as const,
+      model: 0,
+      frame: counterNode(0),
+      commands: {
+        type: "cmd",
+        kind: "task",
+        taskId: 7,
+        handlerId: 88,
+        __vxOwnedMapHandlerIds: [88],
+      },
+    };
+    Object.defineProperty(result, Symbol.for("voyd.taskObserver"), {
+      configurable: true,
+      value: async () => ({ kind: "value" as const, value: "task value" }),
+    });
+    const host: VoydVxAppHost = {
+      run: async <T = unknown>() => result as T,
+      retainedCallbacks: {
+        dispatch,
+        release,
+      },
+    };
+    const app = createVoydVxAppRuntime({ host });
+
+    await mountVxApp({ container, app, onError });
+    await nextTurn();
+
+    expect(onError).toHaveBeenCalledWith(
+      error,
+      expect.objectContaining({ phase: "dispatch" }),
+    );
+    expect(dispatch).toHaveBeenCalledTimes(1);
+    expect(dispatch).toHaveBeenCalledWith(88, "task value");
+    expect(release).toHaveBeenCalledTimes(1);
+    expect(release).toHaveBeenCalledWith(88);
+  });
+
   it("settles failed DOM event dispatches after reporting through onError", async () => {
     const onError = vi.fn();
     const app: VxAppRuntime = {
@@ -1782,7 +2003,9 @@ describe("vx-dom browser renderer", () => {
     const radialGradient = { addColorStop } as unknown as CanvasGradient;
     const context = {
       arc: vi.fn(),
+      arcTo: vi.fn(),
       beginPath: vi.fn(),
+      bezierCurveTo: vi.fn(),
       clearRect: vi.fn(),
       closePath: vi.fn(),
       createRadialGradient: vi.fn(() => radialGradient),
@@ -1792,15 +2015,23 @@ describe("vx-dom browser renderer", () => {
       fillText: vi.fn(),
       lineTo: vi.fn(),
       moveTo: vi.fn(),
+      quadraticCurveTo: vi.fn(),
+      rect: vi.fn(),
       restore: vi.fn(),
+      rotate: vi.fn(),
       save: vi.fn(),
+      scale: vi.fn(),
       setLineDash: vi.fn(),
       setTransform: vi.fn(),
       stroke: vi.fn(),
+      transform: vi.fn(),
+      translate: vi.fn(),
       fillStyle: "#000000",
       font: "10px sans-serif",
       globalAlpha: 1,
+      globalCompositeOperation: "source-over",
       lineCap: "butt",
+      lineDashOffset: 0,
       lineJoin: "miter",
       lineWidth: 1,
       shadowBlur: 0,
@@ -1822,13 +2053,69 @@ describe("vx-dom browser renderer", () => {
       type: "cmd",
       kind: "canvas_render",
       value: {
-        version: 1,
+        version: 2,
         selector: "#scene",
         width: 640,
         height: 360,
         clear: true,
         background: "#050711",
         draws: [
+          { kind: "save" },
+          { kind: "translate", x: 50, y: 60 },
+          { kind: "rotate", radians: 0.25 },
+          { kind: "scale", x: 1.5, y: 0.75 },
+          { kind: "transform", a: 1, b: 0, c: 0.1, d: 1, e: 2, f: 3 },
+          { kind: "lineDash", pattern: [4, 2], offset: 1 },
+          { kind: "composite", operation: "lighter" },
+          {
+            kind: "path",
+            segments: [
+              { kind: "moveTo", point: { x: 0, y: 0 } },
+              { kind: "lineTo", point: { x: 12, y: 0 } },
+              {
+                kind: "quadraticCurveTo",
+                control: { x: 18, y: 6 },
+                to: { x: 12, y: 12 },
+              },
+              {
+                kind: "bezierCurveTo",
+                control1: { x: 8, y: 16 },
+                control2: { x: 4, y: 16 },
+                to: { x: 0, y: 12 },
+              },
+              {
+                kind: "arc",
+                center: { x: 6, y: 6 },
+                radius: 3,
+                startAngle: 0,
+                endAngle: 1.5,
+                counterClockwise: false,
+              },
+              {
+                kind: "arcTo",
+                control1: { x: 2, y: 3 },
+                control2: { x: 4, y: 5 },
+                radius: 2,
+              },
+              {
+                kind: "ellipse",
+                center: { x: 6, y: 7 },
+                radiusX: 4,
+                radiusY: 2,
+                rotation: 0.2,
+                startAngle: 0,
+                endAngle: 3,
+                counterClockwise: true,
+              },
+              { kind: "rect", origin: { x: 1, y: 1 }, width: 8, height: 5 },
+              { kind: "closePath" },
+            ],
+            fill: "#224466",
+            stroke: "#88ccff",
+            strokeWidth: 2,
+            fillRule: "evenodd",
+          },
+          { kind: "restore" },
           {
             kind: "line",
             from: { x: 1, y: 2 },
@@ -1893,15 +2180,77 @@ describe("vx-dom browser renderer", () => {
     expect(context.setTransform).toHaveBeenNthCalledWith(2, 2, 0, 0, 2, 0, 0);
     expect(context.clearRect).toHaveBeenCalledWith(0, 0, 1280, 720);
     expect(context.fillRect).toHaveBeenCalledWith(0, 0, 640, 360);
+    expect(context.translate).toHaveBeenCalledWith(50, 60);
+    expect(context.rotate).toHaveBeenCalledWith(0.25);
+    expect(context.scale).toHaveBeenCalledWith(1.5, 0.75);
+    expect(context.transform).toHaveBeenCalledWith(1, 0, 0.1, 1, 2, 3);
+    expect(context.setLineDash).toHaveBeenCalledWith([4, 2]);
+    expect(context.fill).toHaveBeenCalledWith("evenodd");
     expect(context.moveTo).toHaveBeenCalledWith(1, 2);
     expect(context.lineTo).toHaveBeenCalledWith(9, 10);
-    expect(context.closePath).toHaveBeenCalledOnce();
+    expect(context.closePath).toHaveBeenCalledTimes(2);
+    expect(context.quadraticCurveTo).toHaveBeenCalledWith(18, 6, 12, 12);
+    expect(context.bezierCurveTo).toHaveBeenCalledWith(8, 16, 4, 16, 0, 12);
+    expect(context.arcTo).toHaveBeenCalledWith(2, 3, 4, 5, 2);
+    expect(context.rect).toHaveBeenCalledWith(1, 1, 8, 5);
+    expect(context.ellipse).toHaveBeenCalledWith(6, 7, 4, 2, 0.2, 0, 3, true);
     expect(context.arc).toHaveBeenCalledWith(20, 21, 12, 0, Math.PI * 2);
     expect(context.createRadialGradient).toHaveBeenCalledWith(20, 21, 1, 20, 21, 12);
     expect(addColorStop).toHaveBeenNthCalledWith(1, 0, "#ffffff");
     expect(addColorStop).toHaveBeenNthCalledWith(2, 1, "#ff880000");
     expect(context.ellipse).toHaveBeenCalledWith(30, 31, 8, 4, 0.5, 0, Math.PI * 2);
     expect(context.fillText).toHaveBeenCalledWith("Voyd", 40, 41, 120);
+  });
+
+  it("continues to render legacy version 1 canvas frames", () => {
+    const canvas = document.createElement("canvas");
+    canvas.id = "scene";
+    container.appendChild(canvas);
+    const context = {
+      beginPath: vi.fn(),
+      clearRect: vi.fn(),
+      lineTo: vi.fn(),
+      moveTo: vi.fn(),
+      restore: vi.fn(),
+      save: vi.fn(),
+      setLineDash: vi.fn(),
+      setTransform: vi.fn(),
+      stroke: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    Object.defineProperty(canvas, "getContext", {
+      configurable: true,
+      value: vi.fn(() => context),
+    });
+
+    const executor = createBrowserVxRuntimeHost().commands?.canvas_render;
+    expect(() =>
+      executor?.(
+        {
+          type: "cmd",
+          kind: "canvas_render",
+          value: {
+            version: 1,
+            selector: "#scene",
+            width: 100,
+            height: 50,
+            draws: [
+              {
+                kind: "line",
+                from: { x: 1, y: 2 },
+                to: { x: 3, y: 4 },
+                color: "#ffffff",
+                width: 1,
+              },
+            ],
+          },
+        },
+        {
+          dispatch: vi.fn(async () => undefined),
+          signal: new AbortController().signal,
+        },
+      ),
+    ).not.toThrow();
+    expect(context.stroke).toHaveBeenCalledOnce();
   });
 
   it("rejects invalid canvas render targets before drawing", () => {
@@ -1921,6 +2270,256 @@ describe("vx-dom browser renderer", () => {
       dispatch: vi.fn(async () => undefined),
       signal: new AbortController().signal,
     })).toThrow('canvas_render could not find canvas "#missing-canvas"');
+  });
+
+  it("rejects unsupported and malformed canvas frames before mutating a canvas", () => {
+    const canvas = document.createElement("canvas");
+    canvas.id = "scene";
+    container.appendChild(canvas);
+    const getContext = vi.fn();
+    Object.defineProperty(canvas, "getContext", {
+      configurable: true,
+      value: getContext,
+    });
+    const executor = createBrowserVxRuntimeHost().commands?.canvas_render;
+    const runtimeContext = {
+      dispatch: vi.fn(async () => undefined),
+      signal: new AbortController().signal,
+    };
+
+    expect(() =>
+      executor?.(
+        {
+          type: "cmd",
+          kind: "canvas_render",
+          value: {
+            version: 3,
+            selector: "#scene",
+            width: 100,
+            height: 50,
+            draws: [],
+          },
+        },
+        runtimeContext,
+      ),
+    ).toThrow("canvas_render unsupported frame version 3");
+    expect(() =>
+      executor?.(
+        {
+          type: "cmd",
+          kind: "canvas_render",
+          value: {
+            version: 2,
+            selector: "#scene",
+            width: 100,
+            height: 50,
+            draws: [
+              { kind: "save" },
+              {
+                kind: "path",
+                segments: [{ kind: "lineTo", point: { x: Number.NaN, y: 2 } }],
+                stroke: "#fff",
+                strokeWidth: 1,
+                fillRule: "nonzero",
+              },
+              { kind: "restore" },
+            ],
+          },
+        },
+        runtimeContext,
+      ),
+    ).toThrow("segments[0].point missing finite x");
+
+    expect(() =>
+      executor?.(
+        {
+          type: "cmd",
+          kind: "canvas_render",
+          value: {
+            version: 1,
+            selector: "#scene",
+            width: 100,
+            height: 50,
+            draws: [{ kind: "path", segments: [], fillRule: "nonzero" }],
+          },
+        },
+        runtimeContext,
+      ),
+    ).toThrow('draws[0] kind "path" requires frame version 2');
+
+    expect(() =>
+      executor?.(
+        {
+          type: "cmd",
+          kind: "canvas_render",
+          value: {
+            version: 2,
+            selector: "#scene",
+            width: 100,
+            height: 50,
+            draws: [
+              {
+                kind: "circle",
+                center: { x: 10, y: 10 },
+                radius: 8,
+                strokeWidth: 1,
+                radialGradient: {
+                  innerColor: "definitely-not-a-color",
+                  outerColor: "#000000",
+                  innerRadius: 0,
+                  outerRadius: 8,
+                },
+              },
+            ],
+          },
+        },
+        runtimeContext,
+      ),
+    ).toThrow("radialGradient has invalid CSS color");
+
+    expect(getContext).not.toHaveBeenCalled();
+    expect(canvas.style.width).toBe("");
+    expect(canvas.width).toBe(300);
+  });
+
+  it("dispatches explicit typed canvas text metrics and releases its handler", async () => {
+    const canvas = document.createElement("canvas");
+    canvas.id = "scene";
+    container.appendChild(canvas);
+    const metrics = {
+      width: 42,
+      actualBoundingBoxLeft: 1,
+      actualBoundingBoxRight: 41,
+      actualBoundingBoxAscent: 10,
+      actualBoundingBoxDescent: 3,
+    } as TextMetrics;
+    const context = {
+      font: "10px sans-serif",
+      measureText: vi.fn(() => metrics),
+      restore: vi.fn(),
+      save: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    Object.defineProperty(canvas, "getContext", {
+      configurable: true,
+      value: vi.fn(() => context),
+    });
+    const dispatch = vi.fn(async () => undefined);
+    const releaseRetainedHandler = vi.fn();
+
+    await createBrowserVxRuntimeHost().commands?.canvas_measure_text?.(
+      {
+        type: "cmd",
+        kind: "canvas_measure_text",
+        selector: "#scene",
+        value: "Voyd",
+        font: "600 14px sans-serif",
+        handlerId: 73,
+        __vxOwnedMapHandlerIds: [73],
+      },
+      {
+        dispatch,
+        releaseRetainedHandler,
+        signal: new AbortController().signal,
+      },
+    );
+
+    expect(context.measureText).toHaveBeenCalledWith("Voyd");
+    expect(dispatch).toHaveBeenCalledWith({
+      kind: "map",
+      handlerId: 73,
+      message: {
+        kind: "msgpack",
+        value: {
+          width: 42,
+          actual_bounding_box_left: 1,
+          actual_bounding_box_right: 41,
+          actual_bounding_box_ascent: 10,
+          actual_bounding_box_descent: 3,
+        },
+      },
+    });
+    expect(releaseRetainedHandler).toHaveBeenCalledWith(73);
+  });
+
+  it("does not deadlock on text measurement requested by an update command", async () => {
+    const metrics = {
+      width: 42,
+      actualBoundingBoxLeft: 1,
+      actualBoundingBoxRight: 41,
+      actualBoundingBoxAscent: 10,
+      actualBoundingBoxDescent: 3,
+    } as TextMetrics;
+    const context = {
+      font: "10px sans-serif",
+      measureText: vi.fn(() => metrics),
+      restore: vi.fn(),
+      save: vi.fn(),
+    } as unknown as CanvasRenderingContext2D;
+    vi.spyOn(HTMLCanvasElement.prototype, "getContext").mockReturnValue(
+      context,
+    );
+    const release = vi.fn<(id: number) => void>();
+    const seenMessages: unknown[] = [];
+    const canvasFrame = () =>
+      frame({
+        kind: "element",
+        tag: "canvas",
+        attrs: { id: "scene" },
+      });
+    const app: VxAppRuntime = {
+      retainedCallbacks: { release },
+      init: () => canvasFrame(),
+      render: () => canvasFrame(),
+      dispatch: (message) => {
+        seenMessages.push(message);
+        const shouldMeasure =
+          isRecord(message) &&
+          message.kind === "debug" &&
+          message.name === "measure";
+        return {
+          frame: canvasFrame(),
+          ...(shouldMeasure
+            ? {
+                commands: {
+                  type: "cmd",
+                  kind: "canvas_measure_text",
+                  selector: "#scene",
+                  value: "Voyd",
+                  font: "600 14px sans-serif",
+                  handlerId: 73,
+                  __vxOwnedMapHandlerIds: [73],
+                },
+              }
+            : {}),
+        };
+      },
+    };
+    const mounted = await mountVxApp({ container, app });
+
+    const dispatch = mounted.dispatch({ kind: "debug", name: "measure" });
+    await expect(
+      Promise.race([
+        dispatch.then(() => "resolved"),
+        new Promise((resolve) => setTimeout(() => resolve("timeout"), 50)),
+      ]),
+    ).resolves.toBe("resolved");
+    await nextTurn();
+
+    expect(seenMessages).toContainEqual({
+      kind: "map",
+      handlerId: 73,
+      message: {
+        kind: "msgpack",
+        value: {
+          width: 42,
+          actual_bounding_box_left: 1,
+          actual_bounding_box_right: 41,
+          actual_bounding_box_ascent: 10,
+          actual_bounding_box_descent: 3,
+        },
+      },
+    });
+    expect(release).toHaveBeenCalledWith(73);
   });
 
   it("cancels deferred initial location_change emits after subscription removal", async () => {

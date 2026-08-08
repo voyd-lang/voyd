@@ -44,7 +44,10 @@ import {
   type DefaultAdapterOptions,
   type DefaultAdapterRegistration,
 } from "./adapters/default.js";
-import { detectHostRuntime, scheduleTaskForRuntime } from "./runtime/environment.js";
+import {
+  detectHostRuntime,
+  scheduleTaskForRuntime,
+} from "./runtime/environment.js";
 import {
   createVoydTrapDiagnostics,
   type VoydTrapAnnotation,
@@ -82,23 +85,29 @@ export type VoydHost = {
     effectId: string,
     opId: number,
     signatureHash: SignatureHash,
-    handler: EffectHandler
+    handler: EffectHandler,
   ) => void;
   registerHandlersByLabelSuffix: (
-    handlersByLabelSuffix: Record<string, EffectHandler>
+    handlersByLabelSuffix: Record<string, EffectHandler>,
   ) => number;
   registerDefaultAdapters: (
-    options?: DefaultAdapterOptions
+    options?: DefaultAdapterOptions,
   ) => Promise<DefaultAdapterRegistration>;
   initEffects: () => void;
   runPure: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
   runEffectfulManaged: <T = unknown>(
     entryName: string,
-    args?: unknown[]
+    args?: unknown[],
   ) => VoydRunHandle<T>;
   hasExport: (entryName: string) => boolean;
-  runManaged: <T = unknown>(entryName: string, args?: unknown[]) => VoydRunHandle<T>;
-  runEffectful: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
+  runManaged: <T = unknown>(
+    entryName: string,
+    args?: unknown[],
+  ) => VoydRunHandle<T>;
+  runEffectful: <T = unknown>(
+    entryName: string,
+    args?: unknown[],
+  ) => Promise<T>;
   run: <T = unknown>(entryName: string, args?: unknown[]) => Promise<T>;
   retainedCallbacks: RetainedEventHandlerRegistry;
 };
@@ -151,11 +160,13 @@ const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
 const taskFailureMessage = (error: Error): string => {
-  const panic = (error as Error & {
-    voyd?: {
-      panic?: { status: "available"; message: string } | { status: string };
-    };
-  }).voyd?.panic;
+  const panic = (
+    error as Error & {
+      voyd?: {
+        panic?: { status: "available"; message: string } | { status: string };
+      };
+    }
+  ).voyd?.panic;
   if (panic && panic.status === "available" && "message" in panic) {
     return panic.message;
   }
@@ -172,7 +183,9 @@ export class CancelledRunError extends Error {
   }
 }
 
-const unwrapRunOutcome = async <T>(outcome: Promise<RunOutcome<T>>): Promise<T> => {
+const unwrapRunOutcome = async <T>(
+  outcome: Promise<RunOutcome<T>>,
+): Promise<T> => {
   const settled = await outcome;
   if (settled.kind === "value") return settled.value;
   if (settled.kind === "failed") throw settled.error;
@@ -181,7 +194,7 @@ const unwrapRunOutcome = async <T>(outcome: Promise<RunOutcome<T>>): Promise<T> 
 
 const attachTaskObserver = <T>(
   value: T,
-  observeTask: VoydRunHandle["observeTask"] | undefined
+  observeTask: VoydRunHandle["observeTask"] | undefined,
 ): T => {
   if (!observeTask || typeof value !== "object" || value === null) {
     return value;
@@ -233,8 +246,12 @@ const buildTaskRuntimeImportModule = ({
       };
 
       if (descriptor.name.startsWith("spawn_attached__")) {
-        const starterExportName = descriptor.name.slice("spawn_attached__".length);
-        taskRuntimeImports[descriptor.name] = ((...workArgs: unknown[]): number =>
+        const starterExportName = descriptor.name.slice(
+          "spawn_attached__".length,
+        );
+        taskRuntimeImports[descriptor.name] = ((
+          ...workArgs: unknown[]
+        ): number =>
           currentContext().spawnTask({
             detached: false,
             starterExportName,
@@ -244,8 +261,12 @@ const buildTaskRuntimeImportModule = ({
       }
 
       if (descriptor.name.startsWith("spawn_detached__")) {
-        const starterExportName = descriptor.name.slice("spawn_detached__".length);
-        taskRuntimeImports[descriptor.name] = ((...workArgs: unknown[]): number =>
+        const starterExportName = descriptor.name.slice(
+          "spawn_detached__".length,
+        );
+        taskRuntimeImports[descriptor.name] = ((
+          ...workArgs: unknown[]
+        ): number =>
           getContext()?.spawnTask({
             detached: true,
             starterExportName,
@@ -279,7 +300,7 @@ const buildTaskRuntimeImportModule = ({
     ? {}
     : {
         [TASK_RUNTIME_IMPORT_MODULE]: taskRuntimeImports,
-    };
+      };
 };
 
 const buildRetainedCallbackImportModules = ({
@@ -303,7 +324,10 @@ const buildRetainedCallbackImportModules = ({
   scopeManager: RetainedCallbackScopeManager;
   getActiveScopeOwner: () => RetainedCallbackScopeOwner | undefined;
 }): WebAssembly.Imports => {
-  const callbackImportsByModule = new Map<string, Record<string, CallableFunction>>();
+  const callbackImportsByModule = new Map<
+    string,
+    Record<string, CallableFunction>
+  >();
 
   importDescriptors
     .filter(
@@ -319,7 +343,8 @@ const buildRetainedCallbackImportModules = ({
       if (!callbackExportName) {
         return;
       }
-      const callbackImports = callbackImportsByModule.get(descriptor.module) ?? {};
+      const callbackImports =
+        callbackImportsByModule.get(descriptor.module) ?? {};
       callbackImportsByModule.set(descriptor.module, callbackImports);
       callbackImports[descriptor.name] = ((handlerRef: unknown): number => {
         const retain =
@@ -338,7 +363,10 @@ const buildRetainedCallbackImportModules = ({
             hasExportedFunction({ instance, name: rawCallbackExportName }) &&
             hasExportedFunction({ instance, name: "init_effects" }) &&
             hasExportedFunction({ instance, name: OUTCOME_TAG_EXPORT }) &&
-            hasExportedFunction({ instance, name: RESUME_EFFECTFUL_RAW_EXPORT }) &&
+            hasExportedFunction({
+              instance,
+              name: RESUME_EFFECTFUL_RAW_EXPORT,
+            }) &&
             hasExportedFunction({ instance, name: END_REQUEST_RAW_EXPORT }) &&
             hasExportedFunction({ instance, name: HANDLE_OUTCOME_EXPORT });
           if (returnsVoid && hasRawEffectfulCallback) {
@@ -368,9 +396,11 @@ const buildRetainedCallbackImportModules = ({
           });
           const inPtr = 0;
           const outPtr = bufferSize;
-          new Uint8Array(msgpackMemory.buffer, inPtr, encodedPayload.length).set(
-            encodedPayload,
-          );
+          new Uint8Array(
+            msgpackMemory.buffer,
+            inPtr,
+            encodedPayload.length,
+          ).set(encodedPayload);
 
           let written: number;
           try {
@@ -414,7 +444,9 @@ const buildRetainedCallbackImportModules = ({
       }) as CallableFunction;
     });
 
-  return Object.fromEntries(callbackImportsByModule.entries()) as WebAssembly.Imports;
+  return Object.fromEntries(
+    callbackImportsByModule.entries(),
+  ) as WebAssembly.Imports;
 };
 
 const buildRetainedCallbackScopeImportModule = ({
@@ -453,20 +485,29 @@ const buildRetainedCallbackScopeImportModule = ({
   }
   if (importedNames.has("end")) {
     imports.end = ((scopeId: number) =>
-      scopeManager.endScope(requireActiveScopeOwner(), scopeId)) as CallableFunction;
+      scopeManager.endScope(
+        requireActiveScopeOwner(),
+        scopeId,
+      )) as CallableFunction;
   }
   if (importedNames.has("claim")) {
     imports.claim = ((handlerId: number) =>
-      scopeManager.claim(requireActiveScopeOwner(), handlerId)) as CallableFunction;
+      scopeManager.claim(
+        requireActiveScopeOwner(),
+        handlerId,
+      )) as CallableFunction;
   }
   return { [CALLBACK_SCOPE_IMPORT_MODULE]: imports };
 };
 
 const retainedCallbackExportNameFrom = (
-  descriptor: WebAssembly.ModuleImportDescriptor
+  descriptor: WebAssembly.ModuleImportDescriptor,
 ): string | undefined => {
   const importName = descriptor.name;
-  if (descriptor.module === CALLBACK_IMPORT_MODULE && importName.startsWith("retain__")) {
+  if (
+    descriptor.module === CALLBACK_IMPORT_MODULE &&
+    importName.startsWith("retain__")
+  ) {
     return importName.slice("retain__".length);
   }
   if (
@@ -485,13 +526,13 @@ const retainedCallbackExportNameFrom = (
 };
 
 const isImportModuleRecord = (
-  value: unknown
+  value: unknown,
 ): value is Record<string, unknown> =>
   typeof value === "object" && value !== null;
 
 const mergeDefaultImports = (
   defaults: WebAssembly.Imports,
-  imports?: WebAssembly.Imports
+  imports?: WebAssembly.Imports,
 ): WebAssembly.Imports => {
   const defaultModules = defaults as Record<string, unknown>;
   if (!imports) {
@@ -763,7 +804,10 @@ const initEffectsInternal = ({
     handlersByOpIndex[op.opIndex] = handlersByKey.get(key);
   });
 
-  const initEffectsFn = requireExportedFunction({ instance, name: "init_effects" });
+  const initEffectsFn = requireExportedFunction({
+    instance,
+    name: "init_effects",
+  });
   initEffectsFn(tablePtr);
 };
 
@@ -787,10 +831,7 @@ export const createVoydHost = async ({
         workArgs: readonly unknown[];
       }) => number)
     | undefined;
-  const annotateTrap = (
-    error: unknown,
-    opts?: VoydTrapAnnotation
-  ): Error => {
+  const annotateTrap = (error: unknown, opts?: VoydTrapAnnotation): Error => {
     const panic = consumePanicContext({ instance: instanceRef });
     return trapDiagnostics.annotateTrap(error, {
       ...opts,
@@ -802,7 +843,7 @@ export const createVoydHost = async ({
   const exportAbi = parseExportAbi(module);
   const externalRequirements = parseExternalRequirements(module);
   const exportAbiByName = new Map(
-    exportAbi.exports.map((entry) => [entry.name, entry] as const)
+    exportAbi.exports.map((entry) => [entry.name, entry] as const),
   );
   const taskRuntimeImports = buildTaskRuntimeImportModule({
     importDescriptors: WebAssembly.Module.imports(module),
@@ -816,14 +857,17 @@ export const createVoydHost = async ({
   });
   const callbackRegistry =
     retainedCallbacks ?? createRetainedEventHandlerRegistry();
-  const callbackScopeManager = createRetainedCallbackScopeManager(callbackRegistry);
+  const callbackScopeManager =
+    createRetainedCallbackScopeManager(callbackRegistry);
   type StandaloneTaskEntry = {
     outcome: Promise<RunOutcome<unknown>>;
     cleanupTimer?: ReturnType<typeof setTimeout>;
   };
   const standaloneTaskRuns = new Map<number, StandaloneTaskEntry>();
   let nextStandaloneTaskId = 1_000_000;
-  const observeStandaloneTask = async (taskId: number): Promise<RunOutcome<unknown>> => {
+  const observeStandaloneTask = async (
+    taskId: number,
+  ): Promise<RunOutcome<unknown>> => {
     const entry = standaloneTaskRuns.get(taskId);
     if (!entry) {
       return {
@@ -840,20 +884,25 @@ export const createVoydHost = async ({
     });
   };
   let runEffectfulRetainedCallback: RetainedEffectfulCallbackRunner = () => {
-    throw new Error("retained callback called before host runtime initialization");
+    throw new Error(
+      "retained callback called before host runtime initialization",
+    );
   };
   const retainedCallbackImports = buildRetainedCallbackImportModules({
     importDescriptors: WebAssembly.Module.imports(module),
     getInstance: () => {
       if (!instanceRef) {
-        throw new Error("callback import called before host instance initialization");
+        throw new Error(
+          "callback import called before host instance initialization",
+        );
       }
       return instanceRef;
     },
     registry: callbackRegistry,
     bufferSize,
     annotateTrap,
-    runEffectfulRetainedCallback: (params) => runEffectfulRetainedCallback(params),
+    runEffectfulRetainedCallback: (params) =>
+      runEffectfulRetainedCallback(params),
     decorateResult: (value) => attachTaskObserver(value, observeStandaloneTask),
     scopeManager: callbackScopeManager,
     getActiveScopeOwner: () => activeCallbackScopeOwner,
@@ -869,7 +918,9 @@ export const createVoydHost = async ({
     bufferSize,
     getInstance: () => {
       if (!instanceRef) {
-        throw new Error("external import called before host instance initialization");
+        throw new Error(
+          "external import called before host instance initialization",
+        );
       }
       return instanceRef;
     },
@@ -884,8 +935,8 @@ export const createVoydHost = async ({
         ...(retainedCallbackScopeImports as Record<string, unknown>),
         ...(externalImports as Record<string, unknown>),
       } as WebAssembly.Imports,
-      imports
-    )
+      imports,
+    ),
   );
   const instance = instanceRef;
   if (externalRequirements.functions.length > 0) {
@@ -905,7 +956,7 @@ export const createVoydHost = async ({
   });
   const effectRunBufferBasePtr = alignTo(
     handleTableBasePtr(bufferSize) + parsedTable.ops.length * 4,
-    8
+    8,
   );
   const freeEffectRunBufferPtrs: number[] = [];
   let nextEffectRunBufferPtr = effectRunBufferBasePtr;
@@ -933,7 +984,7 @@ export const createVoydHost = async ({
     effectId: string,
     opId: number,
     signatureHash: SignatureHash,
-    handler: EffectHandler
+    handler: EffectHandler,
   ): void => {
     const opEntry = registerHandlerInternal({
       handler,
@@ -972,7 +1023,7 @@ export const createVoydHost = async ({
   const runSerialized = <T = unknown>(
     entryName: string,
     args: unknown[] = [],
-    abi?: Extract<ExportAbiEntry, { abi: "serialized" }>
+    abi?: Extract<ExportAbiEntry, { abi: "serialized" }>,
   ): T => {
     const wrapperName = abi?.wrapperName ?? entryName;
     const entry = requireExportedFunction({ instance, name: wrapperName });
@@ -1002,7 +1053,7 @@ export const createVoydHost = async ({
     const inPtr = 0;
     const outPtr = bufferSize;
     new Uint8Array(msgpackMemory.buffer, inPtr, encodedArgs.length).set(
-      encodedArgs
+      encodedArgs,
     );
     let written: number;
     try {
@@ -1010,7 +1061,7 @@ export const createVoydHost = async ({
         inPtr,
         encodedArgs.length,
         outPtr,
-        bufferSize
+        bufferSize,
       ) as number;
     } catch (error) {
       throw annotateTrap(error, {
@@ -1033,18 +1084,20 @@ export const createVoydHost = async ({
     }
     const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
     const decoded = decode(bytes, MSGPACK_OPTS);
-    return (abi?.result
-      ? decodeBoundaryResult({
-          exportName: entryName,
-          schema: abi.result,
-          value: decoded,
-        })
-      : decoded) as T;
+    return (
+      abi?.result
+        ? decodeBoundaryResult({
+            exportName: entryName,
+            schema: abi.result,
+            value: decoded,
+          })
+        : decoded
+    ) as T;
   };
 
   const runPure = async <T = unknown>(
     entryName: string,
-    args: unknown[] = []
+    args: unknown[] = [],
   ): Promise<T> => {
     const callbackScopeOwner = `pure:${detachedRunCounter++}`;
     const previousCallbackScopeOwner = activeCallbackScopeOwner;
@@ -1078,13 +1131,15 @@ export const createVoydHost = async ({
           fallbackFunctionName: entryName,
         });
       }
-      return (abi?.result
-        ? decodeDirectBoundaryResult({
-            exportName: entryName,
-            schema: abi.result,
-            value: result,
-          })
-        : result) as T;
+      return (
+        abi?.result
+          ? decodeDirectBoundaryResult({
+              exportName: entryName,
+              schema: abi.result,
+              value: result,
+            })
+          : result
+      ) as T;
     } catch (error) {
       didFail = true;
       throw error;
@@ -1106,7 +1161,7 @@ export const createVoydHost = async ({
   const runEffectfulManaged = <T = unknown>(
     entryName: string,
     args: unknown[] = [],
-    startRaw?: RawEffectfulStarter
+    startRaw?: RawEffectfulStarter,
   ): VoydRunHandle<T> => {
     const callbackScopeRunId = detachedRunCounter++;
     const callbackScopeOwnerForTask = (taskId: number): string =>
@@ -1153,7 +1208,9 @@ export const createVoydHost = async ({
         return toError(reason);
       }
     };
-    const registerRunResourceCleanup = (cleanup: EffectResourceCleanup): void => {
+    const registerRunResourceCleanup = (
+      cleanup: EffectResourceCleanup,
+    ): void => {
       if (runResourceScopeClosed) {
         void Promise.resolve()
           .then(cleanup)
@@ -1170,7 +1227,7 @@ export const createVoydHost = async ({
       const cleanups = Array.from(runResourceCleanups);
       runResourceCleanups.clear();
       runResourceCleanupPromise = Promise.allSettled(
-        cleanups.map((cleanup) => Promise.resolve().then(cleanup))
+        cleanups.map((cleanup) => Promise.resolve().then(cleanup)),
       ).then((results) => {
         results.forEach((result) => {
           if (result.status === "rejected") {
@@ -1183,7 +1240,8 @@ export const createVoydHost = async ({
 
     const rawEntryName = `${effectfulExportNameFor(entryName)}_raw`;
     const hasRawTaskRuntime =
-      (startRaw !== undefined || hasExportedFunction({ instance, name: rawEntryName })) &&
+      (startRaw !== undefined ||
+        hasExportedFunction({ instance, name: rawEntryName })) &&
       hasExportedFunction({ instance, name: OUTCOME_TAG_EXPORT }) &&
       hasExportedFunction({ instance, name: RESUME_EFFECTFUL_RAW_EXPORT }) &&
       hasExportedFunction({ instance, name: END_REQUEST_RAW_EXPORT });
@@ -1256,7 +1314,9 @@ export const createVoydHost = async ({
             if (stepResult.kind === "aborted") {
               return {
                 kind: "failed",
-                error: new Error("effect loop step aborted outside scheduler context"),
+                error: new Error(
+                  "effect loop step aborted outside scheduler context",
+                ),
               };
             }
             result = stepResult.result;
@@ -1314,16 +1374,29 @@ export const createVoydHost = async ({
       | { kind: "failed"; error: Error; message: string }
       | { kind: "cancelled"; reason?: unknown };
 
-    type TaskTerminal = TaskCompletion & {
+    type TaskTerminalMetadata = {
       observed: boolean;
       reportedUnhandled?: boolean;
     };
+    type TaskTerminal =
+      | ({
+          kind: "value";
+          rawOutcome: unknown;
+          value: unknown;
+        } & TaskTerminalMetadata)
+      | ({
+          kind: "failed";
+          error: Error;
+          message: string;
+        } & TaskTerminalMetadata)
+      | ({ kind: "cancelled"; reason?: unknown } & TaskTerminalMetadata);
     type FailedTaskTerminal = Extract<TaskTerminal, { kind: "failed" }>;
 
     type TaskRecord = {
       id: number;
       ownerId: number | null;
       detached: boolean;
+      sourceFunctionName: string;
       state: "ready" | "waiting" | "completing" | "terminal";
       starter?: () => unknown;
       pendingRawOutcome?: unknown;
@@ -1350,14 +1423,16 @@ export const createVoydHost = async ({
       if (encoded.length > bufferSize) {
         throw new Error("resume payload exceeds buffer size");
       }
-      new Uint8Array(msgpackMemory.buffer, bufferPtr, encoded.length).set(encoded);
+      new Uint8Array(msgpackMemory.buffer, bufferPtr, encoded.length).set(
+        encoded,
+      );
       return encoded.length;
     };
 
     const decodeFromBuffer = (length: number): unknown =>
       decode(
         new Uint8Array(msgpackMemory.buffer, bufferPtr, length),
-        MSGPACK_OPTS
+        MSGPACK_OPTS,
       );
 
     let resolvePublicOutcome: ((outcome: RunOutcome<T>) => void) | undefined;
@@ -1370,26 +1445,42 @@ export const createVoydHost = async ({
 
     const taskObservers = new Map<
       number,
-      { resolve: (outcome: RunOutcome<unknown>) => void; promise: Promise<RunOutcome<unknown>> }
+      {
+        resolve: (outcome: RunOutcome<unknown>) => void;
+        promise: Promise<RunOutcome<unknown>>;
+      }
     >();
     const completedTaskOutcomes = new Map<number, RunOutcome<unknown>>();
 
     const decodeRawOutcome = (rawOutcome: unknown): unknown => {
       const effectResult = handleOutcome(rawOutcome, bufferPtr, bufferSize);
       const payloadLength = effectLen(effectResult) as number;
-      return decodeFromBuffer(payloadLength);
+      if (!Number.isSafeInteger(payloadLength) || payloadLength < 0) {
+        throw new Error(
+          `task outcome encoding failed (len=${String(payloadLength)}, bufferSize=${bufferSize})`,
+        );
+      }
+      if (payloadLength > bufferSize) {
+        throw new Error(
+          `task outcome payload exceeds buffer size (len=${payloadLength}, bufferSize=${bufferSize})`,
+        );
+      }
+      try {
+        return decodeFromBuffer(payloadLength);
+      } catch (error) {
+        throw new Error("task outcome decoding failed", {
+          cause: toError(error),
+        });
+      }
     };
 
     const taskRunOutcomeFor = (terminal: TaskTerminal): RunOutcome<unknown> => {
-      if (terminal.kind === "failed") return { kind: "failed", error: terminal.error };
+      if (terminal.kind === "failed")
+        return { kind: "failed", error: terminal.error };
       if (terminal.kind === "cancelled") {
         return { kind: "cancelled", reason: terminal.reason };
       }
-      try {
-        return { kind: "value", value: decodeRawOutcome(terminal.rawOutcome) };
-      } catch (error) {
-        return { kind: "failed", error: annotateTrap(error) };
-      }
+      return { kind: "value", value: terminal.value };
     };
 
     const notifyTaskTerminal = (task: TaskRecord): void => {
@@ -1405,7 +1496,10 @@ export const createVoydHost = async ({
       observer.resolve(outcome);
     };
 
-    const settlePublicOutcome = (state: RunState, outcome: RunOutcome<T>): void => {
+    const settlePublicOutcome = (
+      state: RunState,
+      outcome: RunOutcome<T>,
+    ): void => {
       if (state.publicOutcome) return;
       state.publicOutcome = outcome;
       resolvePublicOutcome?.(outcome);
@@ -1413,7 +1507,7 @@ export const createVoydHost = async ({
 
     const runWithActiveTask = <R>(
       context: ActiveTaskContext,
-      fn: () => R
+      fn: () => R,
     ): R => {
       const previous = activeTaskImportContext;
       const previousCallbackScopeOwner = activeCallbackScopeOwner;
@@ -1463,7 +1557,7 @@ export const createVoydHost = async ({
         () => {
           const length = encodeToBuffer(value);
           return resumeEffectfulRaw(request, bufferPtr, length);
-        }
+        },
       );
 
     const currentActiveTaskId = (): number | null => {
@@ -1472,7 +1566,7 @@ export const createVoydHost = async ({
     };
 
     const getFailedTerminal = (
-      terminal?: TaskTerminal
+      terminal?: TaskTerminal,
     ): FailedTaskTerminal | undefined =>
       terminal?.kind === "failed" ? terminal : undefined;
 
@@ -1501,7 +1595,8 @@ export const createVoydHost = async ({
       opId: opEntry.opId,
       opName: opEntry.label.slice(opEntry.label.lastIndexOf(".") + 1),
       label: opEntry.label,
-      resumeKind: opEntry.resumeKind === 1 ? ("tail" as const) : ("resume" as const),
+      resumeKind:
+        opEntry.resumeKind === 1 ? ("tail" as const) : ("resume" as const),
       ...(continuationBoundary ? { continuationBoundary } : {}),
     });
 
@@ -1531,7 +1626,9 @@ export const createVoydHost = async ({
       taskId: number;
     }): void => {
       const reportedError =
-        error.message === message ? error : new Error(message, { cause: error });
+        error.message === message
+          ? error
+          : new Error(message, { cause: error });
       try {
         scheduler?.onUnhandledTaskFailed?.(reportedError, {
           runId: run.id,
@@ -1542,7 +1639,7 @@ export const createVoydHost = async ({
       }
       if (!scheduler?.onUnhandledTaskFailed) {
         console.error(
-          `[voyd] unhandled detached task failure in run ${run.id}: ${message}`
+          `[voyd] unhandled detached task failure in run ${run.id}: ${message}`,
         );
       }
     };
@@ -1568,6 +1665,11 @@ export const createVoydHost = async ({
           }): number => {
             const ownerId = currentActiveTaskId();
             const taskId = state.nextTaskId++;
+            const sourceFunctionName =
+              ownerId === null
+                ? starterExportName
+                : (state.tasks.get(ownerId)?.sourceFunctionName ??
+                  starterExportName);
             const starter = requireExportedFunction({
               instance,
               name: starterExportName,
@@ -1576,6 +1678,7 @@ export const createVoydHost = async ({
               id: taskId,
               ownerId: detached ? null : ownerId,
               detached,
+              sourceFunctionName,
               state: "ready",
               starter: () =>
                 runWithActiveTask(
@@ -1592,10 +1695,10 @@ export const createVoydHost = async ({
                           point: "effectful_entry",
                           direction: "host->vm",
                         },
-                        fallbackFunctionName: starterExportName,
+                        fallbackFunctionName: sourceFunctionName,
                       });
                     }
-                  }
+                  },
                 ),
               waiters: [],
               children: new Set<number>(),
@@ -1668,6 +1771,7 @@ export const createVoydHost = async ({
           id: rootTaskId,
           ownerId: null,
           detached: false,
+          sourceFunctionName: entryName,
           state: "ready",
           starter: () =>
             runWithActiveTask(
@@ -1675,12 +1779,12 @@ export const createVoydHost = async ({
                 state,
                 activeTaskId: rootTaskId,
               }),
-                  () => {
-                    try {
-                      return startRaw
-                        ? startRaw({ bufferPtr, bufferSize })
-                        : rawEntry!(bufferPtr, bufferSize);
-                    } catch (error) {
+              () => {
+                try {
+                  return startRaw
+                    ? startRaw({ bufferPtr, bufferSize })
+                    : rawEntry!(bufferPtr, bufferSize);
+                } catch (error) {
                   throw annotateTrap(error, {
                     transition: {
                       point: "effectful_entry",
@@ -1689,7 +1793,7 @@ export const createVoydHost = async ({
                     fallbackFunctionName: entryName,
                   });
                 }
-              }
+              },
             ),
           waiters: [],
           children: new Set<number>(),
@@ -1701,24 +1805,30 @@ export const createVoydHost = async ({
       step: async (rawState, _context) => {
         const state = rawState as RunState;
         liveState = state;
-        const wakeRun = (): RuntimeStepResult<T> | Promise<RuntimeStepResult<T>> => {
-            if (state.finalOutcome) {
+        const wakeRun = ():
+          | RuntimeStepResult<T>
+          | Promise<RuntimeStepResult<T>> => {
+          if (state.finalOutcome) {
             return state.finalOutcome.kind === "value"
               ? { kind: "value", value: state.finalOutcome.value }
               : state.finalOutcome.kind === "failed"
                 ? Promise.reject(state.finalOutcome.error)
                 : Promise.resolve({ kind: "aborted" });
           }
-            const nextTaskId = state.readyQueue.shift();
-            if (typeof nextTaskId !== "number") {
-              return new Promise<RuntimeStepResult<T>>((resolve) => {
-                state.wakeResolver = (result) =>
-                  resolve(result as RuntimeStepResult<T>);
+          const nextTaskId = state.readyQueue.shift();
+          if (typeof nextTaskId !== "number") {
+            return new Promise<RuntimeStepResult<T>>((resolve) => {
+              state.wakeResolver = (result) =>
+                resolve(result as RuntimeStepResult<T>);
             });
           }
 
           const task = state.tasks.get(nextTaskId);
-          if (!task || task.state === "terminal" || task.state === "completing") {
+          if (
+            !task ||
+            task.state === "terminal" ||
+            task.state === "completing"
+          ) {
             return { kind: "next", result: state };
           }
 
@@ -1742,13 +1852,13 @@ export const createVoydHost = async ({
               (entry) =>
                 entry.state !== "terminal" &&
                 !entry.detached &&
-                !hasDetachedAncestor(entry)
+                !hasDetachedAncestor(entry),
             ).length;
             if (liveBlockingTaskCount === 0 && !state.publicOutcome) {
               if (rootTask.terminal.kind === "value") {
                 settlePublicOutcome(state, {
                   kind: "value",
-                  value: decodeRawOutcome(rootTask.terminal.rawOutcome) as T,
+                  value: rootTask.terminal.value as T,
                 });
               } else if (rootTask.terminal.kind === "failed") {
                 settlePublicOutcome(state, {
@@ -1764,7 +1874,7 @@ export const createVoydHost = async ({
             }
 
             const liveTaskCount = tasks.filter(
-              (entry) => entry.state !== "terminal"
+              (entry) => entry.state !== "terminal",
             ).length;
             if (liveTaskCount > 0 || !state.publicOutcome) {
               return;
@@ -1786,18 +1896,23 @@ export const createVoydHost = async ({
           const liveChildrenFor = (task: TaskRecord): TaskRecord[] =>
             Array.from(task.children)
               .map((childId) => state.tasks.get(childId))
-              .filter((entry): entry is TaskRecord => !!entry && entry.state !== "terminal");
+              .filter(
+                (entry): entry is TaskRecord =>
+                  !!entry && entry.state !== "terminal",
+              );
 
-          const terminalForCompletion = ({
-            taskId,
-            completion,
-            unobservedFailure,
-          }: {
-            taskId: number;
+          type TaskSettlement = {
+            task: TaskRecord;
             completion: TaskCompletion;
             unobservedFailure?: FailedTaskTerminal;
-          }): TaskTerminal => {
-            const cleanupFailure = finishRetainedCallbackScopesForTask(taskId);
+          };
+
+          const buildTaskTerminal = ({
+            task,
+            completion,
+            unobservedFailure,
+          }: TaskSettlement): TaskTerminal => {
+            const cleanupFailure = finishRetainedCallbackScopesForTask(task.id);
             if (
               completion.kind === "value" &&
               !unobservedFailure &&
@@ -1811,7 +1926,10 @@ export const createVoydHost = async ({
               };
             }
             if (cleanupFailure) {
-              reportRetainedCallbackScopeCleanupFailure(taskId, cleanupFailure);
+              reportRetainedCallbackScopeCleanupFailure(
+                task.id,
+                cleanupFailure,
+              );
             }
             if (completion.kind === "value" && unobservedFailure) {
               return {
@@ -1823,12 +1941,55 @@ export const createVoydHost = async ({
                 observed: false,
               };
             }
-            return { ...completion, observed: false };
+            if (completion.kind !== "value") {
+              return { ...completion, observed: false };
+            }
+            try {
+              return {
+                ...completion,
+                value: decodeRawOutcome(completion.rawOutcome),
+                observed: false,
+              };
+            } catch (error) {
+              const normalized = annotateTrap(error, {
+                transition: {
+                  point: "task_outcome",
+                  direction: "vm->host",
+                },
+                fallbackFunctionName: task.sourceFunctionName,
+              });
+              return {
+                kind: "failed",
+                error: normalized,
+                message: taskFailureMessage(normalized),
+                observed: false,
+              };
+            }
+          };
+
+          const terminalForCompletion = (
+            settlement: TaskSettlement,
+          ): TaskTerminal => {
+            try {
+              return buildTaskTerminal(settlement);
+            } catch (error) {
+              const normalized = toError(error);
+              return {
+                kind: "failed",
+                error: normalized,
+                message: taskFailureMessage(normalized),
+                observed: false,
+              };
+            }
           };
 
           const maybeCompleteOwner = (taskId: number): void => {
             const owner = state.tasks.get(taskId);
-            if (!owner || owner.state !== "completing" || !owner.pendingCompletion) {
+            if (
+              !owner ||
+              owner.state !== "completing" ||
+              !owner.pendingCompletion
+            ) {
               return;
             }
             const liveChildren = liveChildrenFor(owner);
@@ -1842,12 +2003,12 @@ export const createVoydHost = async ({
             const pending = owner.pendingCompletion;
             owner.pendingCompletion = undefined;
             owner.pendingResume = undefined;
-            owner.state = "terminal";
             owner.terminal = terminalForCompletion({
-              taskId: owner.id,
+              task: owner,
               completion: pending,
               unobservedFailure,
             });
+            owner.state = "terminal";
             owner.waiters.forEach(({ taskId: waiterTaskId, request }) => {
               try {
                 owner.terminal!.observed = true;
@@ -1896,9 +2057,16 @@ export const createVoydHost = async ({
             finalizeIfDone();
           };
 
-          const completeTask = (taskId: number, completion: TaskCompletion): void => {
+          const completeTask = (
+            taskId: number,
+            completion: TaskCompletion,
+          ): void => {
             const current = state.tasks.get(taskId);
-            if (!current || current.state === "terminal") {
+            if (
+              !current ||
+              current.state === "completing" ||
+              current.state === "terminal"
+            ) {
               return;
             }
             if (completion.kind !== "value") {
@@ -1919,14 +2087,14 @@ export const createVoydHost = async ({
                     owner: current,
                   })
                 : undefined;
-            current.state = "terminal";
             current.pendingCompletion = undefined;
             current.pendingResume = undefined;
             current.terminal = terminalForCompletion({
-              taskId: current.id,
+              task: current,
               completion,
               unobservedFailure,
             });
+            current.state = "terminal";
             current.waiters.forEach(({ taskId: waiterTaskId, request }) => {
               try {
                 current.terminal!.observed = true;
@@ -1959,7 +2127,11 @@ export const createVoydHost = async ({
             current.waiters = [];
             notifyTaskTerminal(current);
             const currentFailure = getFailedTerminal(current.terminal);
-            if (current.detached && currentFailure && !currentFailure.observed) {
+            if (
+              current.detached &&
+              currentFailure &&
+              !currentFailure.observed
+            ) {
               reportUnhandledDetachedFailure({
                 error: currentFailure.error,
                 message: currentFailure.message,
@@ -2019,7 +2191,7 @@ export const createVoydHost = async ({
                   return handlerResult.kind === "end"
                     ? endRequestRaw(request, bufferPtr, length)
                     : resumeEffectfulRaw(request, bufferPtr, length);
-                }
+                },
               );
               current.pendingRawOutcome = resumed;
               current.state = "ready";
@@ -2045,21 +2217,21 @@ export const createVoydHost = async ({
             }
           };
 
-            try {
-              const rawOutcome =
-                task.pendingRawOutcome ??
-                (task.pendingResume
-                  ? (() => {
-                      const pending = task.pendingResume;
-                      task.pendingResume = undefined;
-                      return resumeTask({
-                        state,
-                        taskId: nextTaskId,
-                        request: pending.request,
-                        value: pending.value,
-                      });
-                    })()
-                  : task.starter?.());
+          try {
+            const rawOutcome =
+              task.pendingRawOutcome ??
+              (task.pendingResume
+                ? (() => {
+                    const pending = task.pendingResume;
+                    task.pendingResume = undefined;
+                    return resumeTask({
+                      state,
+                      taskId: nextTaskId,
+                      request: pending.request,
+                      value: pending.value,
+                    });
+                  })()
+                : task.starter?.());
             task.pendingRawOutcome = undefined;
             task.starter = undefined;
             const tag = outcomeTag(rawOutcome) as number;
@@ -2071,10 +2243,16 @@ export const createVoydHost = async ({
               return { kind: "next", result: state };
             }
 
-            const effectResult = handleOutcome(rawOutcome, bufferPtr, bufferSize);
+            const effectResult = handleOutcome(
+              rawOutcome,
+              bufferPtr,
+              bufferSize,
+            );
             const payloadLength = effectLen(effectResult) as number;
             const request = effectCont(effectResult);
-            const decodedEffect = decodeFromBuffer(payloadLength) as EffectOpRequest;
+            const decodedEffect = decodeFromBuffer(
+              payloadLength,
+            ) as EffectOpRequest;
             const opEntry = resolveParsedEffectOp({
               table: parsedTable,
               request: decodedEffect,
@@ -2155,20 +2333,26 @@ export const createVoydHost = async ({
               return { kind: "next", result: state };
             }
 
-            const toContinuationCall = (kind: "resume" | "tail" | "end", value: unknown) => ({
+            const toContinuationCall = (
+              kind: "resume" | "tail" | "end",
+              value: unknown,
+            ) => ({
               kind,
               value,
             });
             const handlerResult = handler(
               {
                 resume: (...args: unknown[]) =>
-                  toContinuationCall("resume", args.length <= 1 ? args[0] : args),
+                  toContinuationCall(
+                    "resume",
+                    args.length <= 1 ? args[0] : args,
+                  ),
                 tail: (...args: unknown[]) =>
                   toContinuationCall("tail", args.length <= 1 ? args[0] : args),
                 end: (value: unknown) => toContinuationCall("end", value),
                 registerResourceCleanup: registerRunResourceCleanup,
               },
-              ...(decodedEffect.args ?? [])
+              ...(decodedEffect.args ?? []),
             );
 
             if (handlerResult instanceof Promise) {
@@ -2205,7 +2389,7 @@ export const createVoydHost = async ({
                     error: normalized,
                     message: taskFailureMessage(normalized),
                   });
-                }
+                },
               );
               return { kind: "next", result: state };
             }
@@ -2252,7 +2436,8 @@ export const createVoydHost = async ({
       const task = state?.tasks.get(taskId);
       if (task?.terminal) {
         task.terminal.observed = true;
-        const outcome = completedTaskOutcomes.get(taskId) ?? taskRunOutcomeFor(task.terminal);
+        const outcome =
+          completedTaskOutcomes.get(taskId) ?? taskRunOutcomeFor(task.terminal);
         return Promise.resolve(outcome);
       }
       const completed = completedTaskOutcomes.get(taskId);
@@ -2315,10 +2500,8 @@ export const createVoydHost = async ({
       name: starterExportName,
     });
     const taskId = nextStandaloneTaskId++;
-    const run = runEffectfulManaged<unknown>(
-      starterExportName,
-      [],
-      () => starter(...workArgs),
+    const run = runEffectfulManaged<unknown>(starterExportName, [], () =>
+      starter(...workArgs),
     );
     const entry: StandaloneTaskEntry = { outcome: run.outcome };
     standaloneTaskRuns.set(taskId, entry);
@@ -2351,15 +2534,20 @@ export const createVoydHost = async ({
     if (encodedPayload.length > bufferSize) {
       throw new Error("retained callback payload exceeds buffer size");
     }
-    const managed = runEffectfulManaged(callbackExportName, [], ({ bufferPtr, bufferSize }) => {
+    const managed = runEffectfulManaged(
+      callbackExportName,
+      [],
+      ({ bufferPtr, bufferSize }) => {
         ensureMemoryCapacity({
           memory: msgpackMemory,
           requiredBytes: bufferPtr + bufferSize,
           label: LINEAR_MEMORY_EXPORT,
         });
-        new Uint8Array(msgpackMemory.buffer, bufferPtr, encodedPayload.length).set(
-          encodedPayload,
-        );
+        new Uint8Array(
+          msgpackMemory.buffer,
+          bufferPtr,
+          encodedPayload.length,
+        ).set(encodedPayload);
         try {
           return (callback as CallableFunction)(
             handlerRef,
@@ -2377,7 +2565,8 @@ export const createVoydHost = async ({
             fallbackFunctionName: rawCallbackExportName,
           });
         }
-      });
+      },
+    );
     return attachTaskObserver(
       await unwrapRunOutcome(managed.outcome),
       managed.observeTask,
@@ -2386,7 +2575,7 @@ export const createVoydHost = async ({
 
   const runManaged = <T = unknown>(
     entryName: string,
-    args: unknown[] = []
+    args: unknown[] = [],
   ): VoydRunHandle<T> => {
     const effectfulName = effectfulExportNameFor(entryName);
     const hasEffectful = typeof instance.exports[effectfulName] === "function";
@@ -2397,7 +2586,10 @@ export const createVoydHost = async ({
     const id = `detached_${detachedRunCounter++}`;
     const outcome = runPure<T>(entryName, args)
       .then<RunOutcome<T>>((value) => ({ kind: "value", value }))
-      .catch<RunOutcome<T>>((error) => ({ kind: "failed", error: toError(error) }));
+      .catch<RunOutcome<T>>((error) => ({
+        kind: "failed",
+        error: toError(error),
+      }));
     return {
       id,
       outcome,
@@ -2407,7 +2599,7 @@ export const createVoydHost = async ({
 
   const runEffectful = async <T = unknown>(
     entryName: string,
-    args: unknown[] = []
+    args: unknown[] = [],
   ): Promise<T> => {
     const managed = runEffectfulManaged<T>(entryName, args);
     return attachTaskObserver(
@@ -2418,7 +2610,7 @@ export const createVoydHost = async ({
 
   const run = async <T = unknown>(
     entryName: string,
-    args: unknown[] = []
+    args: unknown[] = [],
   ): Promise<T> => {
     const managed = runManaged<T>(entryName, args);
     return attachTaskObserver(
@@ -2447,7 +2639,8 @@ export const createVoydHost = async ({
     initEffects,
     runPure,
     runEffectfulManaged,
-    hasExport: (entryName) => hasExportedFunction({ instance, name: entryName }),
+    hasExport: (entryName) =>
+      hasExportedFunction({ instance, name: entryName }),
     runManaged,
     runEffectful,
     run,
@@ -2456,7 +2649,7 @@ export const createVoydHost = async ({
 
   if (defaultAdapters !== false) {
     await host.registerDefaultAdapters(
-      typeof defaultAdapters === "object" ? defaultAdapters : {}
+      typeof defaultAdapters === "object" ? defaultAdapters : {},
     );
   }
 

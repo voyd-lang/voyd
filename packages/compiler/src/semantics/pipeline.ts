@@ -3648,6 +3648,7 @@ const collectModuleExports = ({
       symbol,
       annotated: signature.annotatedEffects,
       operations: desc.operations.map((op) => ({
+        identity: { ...op.identity },
         name: op.name,
         ...(typeof op.region === "number" ? { region: op.region } : {}),
       })),
@@ -3711,8 +3712,20 @@ const collectModuleExports = ({
       : new Set<SymbolId>();
     symbols.add(symbol);
     const overloadSet =
-      binding.overloadBySymbol.get(symbol) ?? existing?.overloadSet;
+      existing && apiProjection === true
+        ? existing.overloadSet
+        : (binding.overloadBySymbol.get(symbol) ?? existing?.overloadSet);
     const record = symbolTable.getSymbol(symbol);
+    const exportKind =
+      existing && apiProjection === true
+        ? existing.kind
+        : existing &&
+            existing.kind !== "effect-op" &&
+            record.kind === "effect-op"
+          ? existing.kind
+          : record.kind;
+    const primarySymbol =
+      existing && existing.kind === exportKind ? existing.symbol : symbol;
     const mergedVisibility = existing
       ? maxVisibility(existing.visibility, visibility)
       : visibility;
@@ -3720,6 +3733,16 @@ const collectModuleExports = ({
     const mergedStatic =
       existing?.isStatic === true ? true : (isStatic ?? existing?.isStatic);
     const projected = existing?.apiProjection || apiProjection === true;
+    const memberSymbols = new Map(
+      (existing?.memberSymbols ?? []).map((member) => [member.symbol, member]),
+    );
+    if (typeof memberOwner === "number") {
+      memberSymbols.set(symbol, {
+        symbol,
+        owner: memberOwner,
+        isStatic: isStatic === true,
+      });
+    }
     const effects = mergeEffects(existing?.effects, exportEffectFor(symbol));
     const importedExport = importedExportFor(symbol);
     const borrowingCoercions = mergeCoercionReachability([
@@ -3781,17 +3804,20 @@ const collectModuleExports = ({
     }
     table.set(name, {
       name,
-      symbol: existing?.symbol ?? symbol,
+      symbol: primarySymbol,
       symbols: Array.from(symbols),
       overloadSet,
       moduleId,
       modulePath,
       packageId,
-      kind: record.kind,
+      kind: exportKind,
       visibility: mergedVisibility,
       memberOwner: owner,
       isStatic: mergedStatic,
       apiProjection: projected,
+      ...(memberSymbols.size > 0
+        ? { memberSymbols: Array.from(memberSymbols.values()) }
+        : {}),
       effects,
       borrowing: Array.from(borrowingContracts.values()),
       ...(borrowingCoercions.length > 0 ? { borrowingCoercions } : {}),
@@ -4042,6 +4068,7 @@ const projectDependencySemantics = (
         decls: entry.binding.decls,
         overloads: collectOverloadOptions(entry.binding.overloads),
         exports: entry.exports,
+        staticMethods: entry.binding.staticMethods,
       },
     ]),
   );

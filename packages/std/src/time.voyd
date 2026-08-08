@@ -5,10 +5,52 @@
 use std::error::{ HostError, panic }
 use std::host_dto::HostDto
 use std::msgpack::MsgPack
-use std::number::cast::{ to_i64 }
+use std::number::cast::{ to_i32_checked, to_i64, to_string }
 use std::result::types::all
-use std::string::type::{ String, new_string }
+use std::string::type::{ String, StringSlice }
 use std::task::self as task
+
+/// Error returned when an RFC 3339 timestamp cannot be parsed or formatted.
+pub obj TimestampError {
+  /// Machine-readable error code. Use the `timestamp_error_code_*` helpers.
+  api code: i32,
+  /// Byte index associated with the error, or `-1` for a formatting error.
+  api index: i32,
+  /// Human-readable failure description.
+  api message: String
+}
+
+/// The timestamp does not match the supported RFC 3339 grammar.
+pub fn timestamp_error_code_invalid_format() -> i32
+  1
+
+/// The timestamp contains an invalid Gregorian calendar date.
+pub fn timestamp_error_code_invalid_date() -> i32
+  2
+
+/// The timestamp contains an invalid wall-clock time.
+pub fn timestamp_error_code_invalid_time() -> i32
+  3
+
+/// The timestamp contains an invalid UTC offset.
+pub fn timestamp_error_code_invalid_offset() -> i32
+  4
+
+/// The timestamp is outside RFC 3339's four-digit year range.
+pub fn timestamp_error_code_out_of_range() -> i32
+  5
+
+/// The timestamp contains more precision than `SystemTime` can preserve.
+pub fn timestamp_error_code_unsupported_precision() -> i32
+  6
+
+/// Timestamp arithmetic exceeded the representable range.
+pub fn timestamp_error_code_overflow() -> i32
+  7
+
+/// `SystemTime` could not be represented in the requested timestamp format.
+pub fn timestamp_error_code_formatting() -> i32
+  8
 
 /// Represents a millisecond-based time span.
 pub obj Duration {
@@ -53,6 +95,10 @@ pub obj SystemTime {
 }
 
 impl SystemTime
+  /// Constructs a wall-clock timestamp from Unix epoch milliseconds.
+  api fn from_unix_millis(value: i64) -> SystemTime
+    SystemTime { unix_millis_value: value }
+
   /// Captures the current time value.
   api fn now(): Time -> SystemTime
     SystemTime { unix_millis_value: Time::system_now_millis() }
@@ -60,6 +106,24 @@ impl SystemTime
   /// Returns milliseconds since the Unix epoch.
   api fn unix_millis(self) -> i64
     self.unix_millis_value
+
+  /// Parses an RFC 3339 timestamp and normalizes any numeric offset to UTC.
+  ///
+  /// Exactly one to three fractional-second digits are accepted. Leap seconds
+  /// are rejected because Unix epoch milliseconds cannot represent them.
+  api fn parse_rfc3339(source: StringSlice): () -> Result<SystemTime, TimestampError>
+    parse_rfc3339_timestamp(source)
+
+  /// Parses an RFC 3339 timestamp and normalizes any numeric offset to UTC.
+  api fn parse_rfc3339(source: String): () -> Result<SystemTime, TimestampError>
+    parse_rfc3339_timestamp(source.as_slice())
+
+  /// Formats this timestamp in UTC with fixed millisecond precision.
+  ///
+  /// RFC 3339 uses four-digit years, so values outside years 0000 through
+  /// 9999 return `timestamp_error_code_formatting`.
+  api fn to_rfc3339(self): () -> Result<String, TimestampError>
+    format_rfc3339_timestamp(self.unix_millis_value)
 
 /// Interval overlap policy.
 ///
@@ -166,3 +230,325 @@ fn decode_host_error_result(payload: HostDto): () -> Result<Unit, HostError>
           Err<HostError> {
             error: HostError { code: code, message: message }
           }
+
+obj CivilDate {
+  year: i32,
+  month: i32,
+  day: i32
+}
+
+fn parse_rfc3339_timestamp(source: StringSlice): () -> Result<SystemTime, TimestampError>
+  let len = source.byte_len()
+  if len < 20:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      len,
+      "RFC 3339 timestamp is incomplete"
+    )
+
+  if byte_at(source, 4) != 45 or byte_at(source, 7) != 45:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      4,
+      "RFC 3339 date must use YYYY-MM-DD"
+    )
+  let separator = byte_at(source, 10)
+  if separator != 84 and separator != 116:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      10,
+      "RFC 3339 date and time must be separated by T"
+    )
+  if byte_at(source, 13) != 58 or byte_at(source, 16) != 58:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      13,
+      "RFC 3339 time must use HH:MM:SS"
+    )
+
+  let year = fixed_digits(source, start: 0, count: 4)
+  let month = fixed_digits(source, start: 5, count: 2)
+  let day = fixed_digits(source, start: 8, count: 2)
+  if year < 0:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      first_invalid_digit(source, start: 0, count: 4),
+      "RFC 3339 date contains a non-decimal digit"
+    )
+  if month < 0:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      first_invalid_digit(source, start: 5, count: 2),
+      "RFC 3339 date contains a non-decimal digit"
+    )
+  if day < 0:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      first_invalid_digit(source, start: 8, count: 2),
+      "RFC 3339 date contains a non-decimal digit"
+    )
+  if not valid_date(year, month, day):
+    return timestamp_error(
+      timestamp_error_code_invalid_date(),
+      0,
+      "RFC 3339 timestamp contains an invalid calendar date"
+    )
+
+  let hour = fixed_digits(source, start: 11, count: 2)
+  let minute = fixed_digits(source, start: 14, count: 2)
+  let second = fixed_digits(source, start: 17, count: 2)
+  if hour < 0:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      first_invalid_digit(source, start: 11, count: 2),
+      "RFC 3339 time contains a non-decimal digit"
+    )
+  if minute < 0:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      first_invalid_digit(source, start: 14, count: 2),
+      "RFC 3339 time contains a non-decimal digit"
+    )
+  if second < 0:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      first_invalid_digit(source, start: 17, count: 2),
+      "RFC 3339 time contains a non-decimal digit"
+    )
+  if hour > 23 or minute > 59 or second > 59:
+    return timestamp_error(
+      timestamp_error_code_invalid_time(),
+      11,
+      "RFC 3339 timestamp contains an invalid wall-clock time"
+    )
+
+  var cursor = 19
+  var milliseconds = 0
+  if byte_at(source, cursor) == 46:
+    cursor = cursor + 1
+    let fraction_start = cursor
+    while cursor < len and is_digit(byte_at(source, cursor)):
+      cursor = cursor + 1
+    let fraction_len = cursor - fraction_start
+    if fraction_len == 0:
+      return timestamp_error(
+        timestamp_error_code_invalid_format(),
+        fraction_start,
+        "RFC 3339 fractional seconds require at least one digit"
+      )
+    if fraction_len > 3:
+      return timestamp_error(
+        timestamp_error_code_unsupported_precision(),
+        fraction_start + 3,
+        "SystemTime preserves at most millisecond precision"
+      )
+    milliseconds = fixed_digits(source, start: fraction_start, count: fraction_len)
+    if fraction_len == 1:
+      milliseconds = milliseconds * 100
+    if fraction_len == 2:
+      milliseconds = milliseconds * 10
+
+  if cursor >= len:
+    return timestamp_error(
+      timestamp_error_code_invalid_format(),
+      cursor,
+      "RFC 3339 timestamp requires Z or a numeric UTC offset"
+    )
+
+  let zone = byte_at(source, cursor)
+  var offset_minutes = 0
+  if zone == 90 or zone == 122:
+    if cursor + 1 != len:
+      return timestamp_error(
+        timestamp_error_code_invalid_format(),
+        cursor + 1,
+        "unexpected content after RFC 3339 UTC designator"
+      )
+  else:
+    if zone != 43 and zone != 45:
+      return timestamp_error(
+        timestamp_error_code_invalid_offset(),
+        cursor,
+        "RFC 3339 timestamp requires Z or a signed numeric offset"
+      )
+    if cursor + 6 != len or byte_at(source, cursor + 3) != 58:
+      return timestamp_error(
+        timestamp_error_code_invalid_offset(),
+        cursor,
+        "RFC 3339 UTC offset must use +HH:MM or -HH:MM"
+      )
+    let offset_hour = fixed_digits(source, start: cursor + 1, count: 2)
+    let offset_minute = fixed_digits(source, start: cursor + 4, count: 2)
+    if offset_hour < 0:
+      return timestamp_error(
+        timestamp_error_code_invalid_offset(),
+        first_invalid_digit(source, start: cursor + 1, count: 2),
+        "RFC 3339 timestamp contains an invalid UTC offset"
+      )
+    if offset_minute < 0:
+      return timestamp_error(
+        timestamp_error_code_invalid_offset(),
+        first_invalid_digit(source, start: cursor + 4, count: 2),
+        "RFC 3339 timestamp contains an invalid UTC offset"
+      )
+    if offset_hour > 23 or offset_minute > 59:
+      return timestamp_error(
+        timestamp_error_code_invalid_offset(),
+        cursor + 1,
+        "RFC 3339 timestamp contains an invalid UTC offset"
+      )
+    let magnitude = offset_hour * 60 + offset_minute
+    offset_minutes = if zone == 43 then: magnitude else: 0 - magnitude
+
+  let day_millis =
+    to_i64(hour) * to_i64(3600000) +
+    to_i64(minute) * to_i64(60000) +
+    to_i64(second) * to_i64(1000) +
+    to_i64(milliseconds)
+  let local_millis =
+    days_from_civil(year, month, day) * to_i64(86400000) + day_millis
+  let utc_millis = local_millis - to_i64(offset_minutes) * to_i64(60000)
+  Ok<SystemTime> { value: SystemTime::from_unix_millis(utc_millis) }
+
+fn format_rfc3339_timestamp(value: i64): () -> Result<String, TimestampError>
+  let day_millis = to_i64(86400000)
+  let days = floor_div_i64(value, day_millis)
+  let first_supported_day = days_from_civil(0, 1, 1)
+  let last_supported_day = days_from_civil(9999, 12, 31)
+  if days < first_supported_day or days > last_supported_day:
+    return timestamp_error(
+      timestamp_error_code_formatting(),
+      -1,
+      "RFC 3339 formatting requires a year from 0000 through 9999"
+    )
+
+  let millis_in_day = value - days * day_millis
+  let date = civil_from_days(days)
+  let hour = i32_from_small_i64(millis_in_day / to_i64(3600000))
+  let after_hour = millis_in_day - to_i64(hour) * to_i64(3600000)
+  let minute = i32_from_small_i64(after_hour / to_i64(60000))
+  let after_minute = after_hour - to_i64(minute) * to_i64(60000)
+  let second = i32_from_small_i64(after_minute / to_i64(1000))
+  let millisecond = i32_from_small_i64(after_minute - to_i64(second) * to_i64(1000))
+
+  let formatted =
+    padded_decimal(date.year, 4)
+      .concat("-")
+      .concat(padded_decimal(date.month, 2))
+      .concat("-")
+      .concat(padded_decimal(date.day, 2))
+      .concat("T")
+      .concat(padded_decimal(hour, 2))
+      .concat(":")
+      .concat(padded_decimal(minute, 2))
+      .concat(":")
+      .concat(padded_decimal(second, 2))
+      .concat(".")
+      .concat(padded_decimal(millisecond, 3))
+      .concat("Z")
+  Ok<String> { value: formatted }
+
+fn timestamp_error<T>(code: i32, index: i32, message: String): () -> Result<T, TimestampError>
+  Err<TimestampError> {
+    error: TimestampError { code, index, message }
+  }
+
+fn byte_at(source: StringSlice, index: i32) -> i32
+  match(source.get_byte(index))
+    Some<i32> { value }:
+      value
+    None:
+      -1
+
+fn is_digit(value: i32) -> bool
+  value >= 48 and value <= 57
+
+fn fixed_digits(source: StringSlice, { start: i32, count: i32 }) -> i32
+  var value = 0
+  var index = 0
+  while index < count:
+    let byte = byte_at(source, start + index)
+    if not is_digit(byte):
+      return -1
+    value = value * 10 + byte - 48
+    index = index + 1
+  value
+
+fn first_invalid_digit(source: StringSlice, { start: i32, count: i32 }) -> i32
+  var index = start
+  let end = start + count
+  while index < end:
+    let byte = byte_at(source, index)
+    if not is_digit(byte):
+      return index
+    index = index + 1
+  start
+
+fn valid_date(year: i32, month: i32, day: i32) -> bool
+  if month < 1 or month > 12 or day < 1:
+    return false
+  day <= days_in_month(year, month)
+
+fn days_in_month(year: i32, month: i32) -> i32
+  if month == 2:
+    if is_leap_year(year):
+      return 29
+    return 28
+  if month == 4 or month == 6 or month == 9 or month == 11:
+    return 30
+  31
+
+fn is_leap_year(year: i32) -> bool
+  year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)
+
+fn days_from_civil(year: i32, month: i32, day: i32) -> i64
+  let adjusted_year = if month <= 2 then: year - 1 else: year
+  let era = floor_div_i32(adjusted_year, 400)
+  let year_of_era = adjusted_year - era * 400
+  let shifted_month = month + (if month > 2 then: -3 else: 9)
+  let day_of_year = (153 * shifted_month + 2) / 5 + day - 1
+  let day_of_era =
+    year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year
+  to_i64(era * 146097 + day_of_era) - to_i64(719468)
+
+fn civil_from_days(days: i64): () -> CivilDate
+  let shifted = i32_from_small_i64(days + to_i64(719468))
+  let era = floor_div_i32(shifted, 146097)
+  let day_of_era = shifted - era * 146097
+  let year_of_era =
+    (day_of_era - day_of_era / 1460 + day_of_era / 36524 - day_of_era / 146096) / 365
+  var year = year_of_era + era * 400
+  let day_of_year =
+    day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100)
+  let shifted_month = (5 * day_of_year + 2) / 153
+  let day = day_of_year - (153 * shifted_month + 2) / 5 + 1
+  let month = shifted_month + (if shifted_month < 10 then: 3 else: -9)
+  if month <= 2:
+    year = year + 1
+  CivilDate { year, month, day }
+
+fn floor_div_i32(value: i32, divisor: i32) -> i32
+  let quotient = value / divisor
+  let remainder = value % divisor
+  if remainder < 0 then: quotient - 1 else: quotient
+
+fn floor_div_i64(value: i64, divisor: i64) -> i64
+  let quotient = value / divisor
+  let remainder = value % divisor
+  if remainder < to_i64(0) then: quotient - to_i64(1) else: quotient
+
+fn i32_from_small_i64(value: i64) -> i32
+  match(to_i32_checked(value))
+    Ok<i32> { value }:
+      value
+    Err:
+      0
+
+fn padded_decimal(value: i32, width: i32) -> String
+  let digits = to_string(value)
+  var out = "".to_string()
+  var remaining = width - digits.byte_len()
+  while remaining > 0:
+    out = out.concat("0")
+    remaining = remaining - 1
+  out.concat(digits)

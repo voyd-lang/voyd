@@ -789,6 +789,7 @@ export const ensureContinuationFunction = ({
               value: storedValue,
               typeId: field.typeId,
               ctx,
+              fnCtx,
             });
       if (field.sourceKind === "handler") {
         initOps.push(ctx.mod.local.set(handlerLocal.index, value));

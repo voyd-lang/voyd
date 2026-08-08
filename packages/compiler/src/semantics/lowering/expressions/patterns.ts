@@ -1,4 +1,4 @@
-import { type Expr } from "../../../parser/index.js";
+import { type Expr, identifierBindingKey } from "../../../parser/index.js";
 import { toSourceSpan } from "../../../parser/surface/utils.js";
 import type { HirPattern } from "../../hir/index.js";
 import type { LowerContext, LowerScopeStack } from "../types.js";
@@ -26,7 +26,10 @@ export const lowerSurfacePattern = (
     if (pattern.name.value === "_") {
       return { kind: "wildcard", span: toSourceSpan(pattern.syntax) };
     }
-    const symbol = resolveSymbol(pattern.name.value, scopes.current(), ctx);
+    const symbol = resolveSymbol(pattern.name.value, scopes.current(), ctx, {
+      bindingIdentity: identifierBindingKey(pattern.name),
+      directSymbol: ctx.directSymbolBySyntax.get(pattern.name.syntaxId),
+    });
     return {
       kind: "identifier",
       symbol,

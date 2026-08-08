@@ -13,6 +13,7 @@ import { wasmHeapFieldTypeFor, wasmTypeFor } from "../../types.js";
 import { walkHirExpression, walkHirPattern } from "../../hir-walk.js";
 import type { ContinuationEnvField } from "./types.js";
 import { effectsFacade } from "../facade.js";
+import { wasmSymbolName } from "../../symbol-names.js";
 
 export const sanitizeIdentifier = (value: string): string =>
   value.replace(/[^a-zA-Z0-9_]/g, "_");
@@ -205,12 +206,8 @@ export const envFieldsFor = ({
     .map((symbol) => {
       const typeId =
         ctx.module.types.getValueType(symbol) ?? ctx.program.primitives.unknown;
-      const symbolId = ctx.program.symbols.idOf({
-        moduleId: ctx.moduleId,
-        symbol,
-      });
       return {
-        name: ctx.program.symbols.getName(symbolId) ?? `${symbol}`,
+        name: wasmSymbolName({ ctx, moduleId: ctx.moduleId, symbol }),
         symbol,
         typeId,
         wasmType: wasmTypeFor(typeId, ctx),
@@ -240,12 +237,10 @@ export const ensureArgsType = ({
     type: wasmHeapFieldTypeFor(typeId, ctx, new Set(), "runtime"),
     mutable: false,
   }));
-  const symbolId = ctx.program.symbols.idOf({
-    moduleId: ctx.moduleId,
-    symbol: opSymbol,
-  });
   const type = defineStructType(ctx.mod, {
-    name: `voydEffectArgs_${sanitizeIdentifier(ctx.program.symbols.getName(symbolId) ?? `${opSymbol}`)}`,
+    name: `voydEffectArgs_${sanitizeIdentifier(
+      wasmSymbolName({ ctx, moduleId: ctx.moduleId, symbol: opSymbol }),
+    )}`,
     fields,
     final: true,
   });

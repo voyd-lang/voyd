@@ -29,6 +29,7 @@ const createTaskHost = async ({
   compiled,
   onUnhandledTaskFailed,
   imports,
+  bufferSize,
 }: {
   compiled: Extract<CompileResult, { success: true }>;
   onUnhandledTaskFailed?: (
@@ -36,11 +37,13 @@ const createTaskHost = async ({
     details: { runId: string; taskId: number },
   ) => void;
   imports?: WebAssembly.Imports;
+  bufferSize?: number;
 }) => {
   const runtime = createDeterministicRuntime();
   const host = await createVoydHost({
     wasm: compiled.wasm,
     imports,
+    ...(bufferSize !== undefined ? { bufferSize } : {}),
     scheduler: {
       scheduleTask: runtime.scheduleTask,
       onUnhandledTaskFailed,
@@ -136,7 +139,10 @@ describe("integration: task runtime", () => {
   beforeAll(async () => {
     const sdk = createSdk();
     compiled = expectCompileSuccess(
-      await sdk.compile({ entryPath: fixtureEntryPath }),
+      await sdk.compile({
+        entryPath: fixtureEntryPath,
+        runtimeDiagnostics: true,
+      }),
     );
   }, 120_000);
 
@@ -180,6 +186,120 @@ describe("integration: task runtime", () => {
     const outcome = host.run<number>("join_failure_probe");
     await drainRuntime(runtime);
     await expect(outcome).resolves.toBe(1);
+  });
+
+  it("settles typed outcomes that exceed the host buffer as failures", async () => {
+    const { host, runtime } = await createTaskHost({
+      compiled,
+      bufferSize: 256,
+    });
+    const run = host.runManaged("oversized_root_outcome_probe");
+    let settled = false;
+    void run.outcome.then(() => {
+      settled = true;
+    });
+
+    await drainRuntime(runtime);
+
+    expect(settled).toBe(true);
+    await expect(run.outcome).resolves.toMatchObject({
+      kind: "failed",
+      error: expect.objectContaining({
+        message: expect.stringContaining("task outcome encoding failed"),
+      }),
+    });
+  });
+
+  it("resolves task observers when detached typed outcome mapping fails", async () => {
+    const { host, runtime } = await createTaskHost({
+      compiled,
+      onUnhandledTaskFailed: () => undefined,
+    });
+    const run = host.runManaged<number>("unsupported_detached_outcome_probe");
+    const observed = run.outcome.then((rootOutcome) => {
+      if (rootOutcome.kind !== "value" || !run.observeTask) {
+        throw new Error("expected a detached task id and observer");
+      }
+      return run.observeTask(rootOutcome.value);
+    });
+    let observerSettled = false;
+    void observed.then(
+      () => {
+        observerSettled = true;
+      },
+      () => {
+        observerSettled = true;
+      },
+    );
+
+    await drainRuntime(runtime);
+
+    expect(observerSettled).toBe(true);
+    await expect(observed).resolves.toMatchObject({
+      kind: "failed",
+      error: {
+        voyd: {
+          trap: {
+            functionName: "unsupported_detached_outcome_probe",
+            span: {
+              file: expect.stringContaining("task-runtime.voyd"),
+              startLine: 347,
+            },
+          },
+          transition: {
+            point: "task_outcome",
+            direction: "vm->host",
+          },
+        },
+      },
+    });
+  });
+
+  it("settles continuation payload encoding failures", async () => {
+    const { host, runtime } = await createTaskHost({ compiled });
+    const op = compiled.effects.findUniqueOpByLabelSuffix(
+      "TaskBoundary::roundtrip_i32",
+    );
+    host.registerHandler(op.effectId, op.opId, op.signatureHash, ({ resume }) =>
+      resume(Symbol("unsupported continuation payload")),
+    );
+    const run = host.runManaged("continuation_boundary_probe");
+
+    await drainRuntime(runtime);
+
+    await expect(run.outcome).resolves.toMatchObject({
+      kind: "failed",
+      error: expect.any(Error),
+    });
+  });
+
+  it("preserves continuation diagnostics when typed decoding traps", async () => {
+    const { host, runtime } = await createTaskHost({ compiled });
+    const op = compiled.effects.findUniqueOpByLabelSuffix(
+      "TaskBoundary::roundtrip_i32",
+    );
+    host.registerHandler(op.effectId, op.opId, op.signatureHash, ({ resume }) =>
+      resume("not an i32"),
+    );
+    const run = host.runManaged("continuation_boundary_probe");
+
+    await drainRuntime(runtime);
+
+    const outcome = await run.outcome;
+    expect(outcome).toMatchObject({ kind: "failed", error: expect.any(Error) });
+    if (outcome.kind !== "failed") return;
+    expect(outcome.error).toMatchObject({
+      voyd: {
+        effect: {
+          effectId: "voyd.test.task-boundary",
+          continuationBoundary: "resume",
+        },
+        transition: {
+          point: "resume_effectful",
+          direction: "host->vm",
+        },
+      },
+    });
   });
 
   it("cancels sleeping tasks and ignores their late completions", async () => {

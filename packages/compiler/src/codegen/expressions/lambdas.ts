@@ -43,6 +43,7 @@ import {
   unboxSignatureSpillValue,
 } from "../signature-spill.js";
 import { coerceExprToWasmType } from "../wasm-type-coercions.js";
+import { wasmSymbolName } from "../symbol-names.js";
 
 type LambdaCaptureInfo = {
   symbol: number;
@@ -140,13 +141,11 @@ const makeNamedFunctionWrapperName = ({
   ctx: CodegenContext;
 }): string => {
   const safeKey = key.replace(/[^a-zA-Z0-9_]/g, "_");
-  const symbolName =
-    ctx.program.symbols.getName(
-      ctx.program.symbols.idOf({
-        moduleId: meta.moduleId,
-        symbol: meta.symbol,
-      }),
-    ) ?? `${meta.symbol}`;
+  const symbolName = wasmSymbolName({
+    ctx,
+    moduleId: meta.moduleId,
+    symbol: meta.symbol,
+  });
   return `${ctx.moduleLabel}__fnref_${symbolName}_${safeKey}`;
 };
 

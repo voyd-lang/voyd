@@ -18,6 +18,16 @@ const voidTags = new Set([
   "param", "source", "track", "wbr",
 ]);
 
+const disableableTags = new Set([
+  "button",
+  "fieldset",
+  "input",
+  "optgroup",
+  "option",
+  "select",
+  "textarea",
+]);
+
 const svgHtmlIntegrationPoints = new Set(["desc", "foreignObject", "title"]);
 const svgForeignContentBreakoutTags = new Set([
   "b", "big", "blockquote", "body", "br", "center", "code", "dd", "div",
@@ -158,6 +168,25 @@ export function validateDomPropertyValue(
   if (!valid) {
     throw new Error(`vx-dom: invalid DOM property value at ${path}: ${JSON.stringify(value)}`);
   }
+}
+
+export type SsrDomPropertyRepresentation = "attribute" | "text" | "unsupported";
+
+export function ssrDomPropertyRepresentation(
+  tag: string,
+  property: string,
+): SsrDomPropertyRepresentation {
+  if (property === "value") {
+    if (tag === "input") return "attribute";
+    return tag === "textarea" ? "text" : "unsupported";
+  }
+  if (property === "checked") {
+    return tag === "input" ? "attribute" : "unsupported";
+  }
+  if (property === "disabled") {
+    return disableableTags.has(tag) ? "attribute" : "unsupported";
+  }
+  return "unsupported";
 }
 
 export function normalizeVNode(input: unknown): VNode {
@@ -574,6 +603,7 @@ function normalizeEventOptions(input: unknown): EventDescriptor["options"] {
     stopPropagation: optionalBool(record.stopPropagation),
     capture: optionalBool(record.capture),
     passive: optionalBool(record.passive),
+    pointerCapture: optionalBool(record.pointerCapture),
   };
   return Object.values(options).some((value) => value !== undefined)
     ? options

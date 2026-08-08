@@ -12,9 +12,7 @@ import {
   type Position,
 } from "vscode-languageserver/lib/node/main.js";
 import { toFilePath } from "./files.js";
-import {
-  resolveImportEdit,
-} from "./auto-imports.js";
+import { resolveImportEdit } from "./auto-imports.js";
 import type { CompletionAnalysis } from "./types.js";
 
 const MAX_COMPLETION_ITEMS = 200;
@@ -67,7 +65,8 @@ const isVisibleSymbolKind = (kind: SymbolKind): boolean =>
   kind === "effect-op" ||
   kind === "module";
 
-const padSortRank = (value: number): string => value.toString().padStart(3, "0");
+const padSortRank = (value: number): string =>
+  value.toString().padStart(3, "0");
 
 const inScopeSymbolPriority = ({
   record,
@@ -82,7 +81,11 @@ const inScopeSymbolPriority = ({
   if (record.kind === "value") {
     return typeInfo?.startsWith("fn ") ? 1 : 0;
   }
-  if (record.kind === "type" || record.kind === "type-parameter" || record.kind === "trait") {
+  if (
+    record.kind === "type" ||
+    record.kind === "type-parameter" ||
+    record.kind === "trait"
+  ) {
     return 2;
   }
   if (record.kind === "effect-op") {
@@ -189,7 +192,9 @@ const findActiveScope = ({
   }
 
   const nodes =
-    analysis.completionIndex.scopedNodesByModuleId.get(moduleId)?.get(filePath) ?? [];
+    analysis.completionIndex.scopedNodesByModuleId
+      .get(moduleId)
+      ?.get(filePath) ?? [];
   for (const node of nodes) {
     if (cursorOffset >= node.start && cursorOffset <= node.end) {
       return node.scope;
@@ -242,7 +247,9 @@ const completionsForInScopeSymbols = ({
     return { items: [], visibleNames: new Set<string>() };
   }
 
-  const symbolLookup = analysis.completionIndex.symbolLookupByUri.get(uri)?.get(moduleId);
+  const symbolLookup = analysis.completionIndex.symbolLookupByUri
+    .get(uri)
+    ?.get(moduleId);
   const declarationOffsetBySymbol = symbolLookup?.declarationOffsetBySymbol;
   const canonicalKeyBySymbol = symbolLookup?.canonicalKeyBySymbol;
 
@@ -255,29 +262,40 @@ const completionsForInScopeSymbols = ({
   const items: CompletionItem[] = [];
   const scopeChain = symbolScopeChain({
     startScope: activeScope,
-    getParentScope: (scope) => semantics.binding.symbolTable.getScope(scope).parent,
+    getParentScope: (scope) =>
+      semantics.binding.symbolTable.getScope(scope).parent,
   });
 
   for (let scopeDepth = 0; scopeDepth < scopeChain.length; scopeDepth += 1) {
     const scope = scopeChain[scopeDepth]!;
-    const scopeSymbols = Array.from(semantics.binding.symbolTable.symbolsInScope(scope));
+    const scopeSymbols = Array.from(
+      semantics.binding.symbolTable.symbolsInScope(scope),
+    );
     for (let index = scopeSymbols.length - 1; index >= 0; index -= 1) {
       const symbol = scopeSymbols[index]!;
       const record = semantics.binding.symbolTable.getSymbol(symbol);
       if (!isVisibleSymbolKind(record.kind)) {
         continue;
       }
-      if (visibleNames.has(record.name)) {
-        continue;
-      }
-      if (!startsWithPrefix({ name: record.name, prefix })) {
+      const metadata = record.metadata as
+        | {
+            implicitCompilerImport?: unknown;
+            qualifiedOnlyEffectOperation?: unknown;
+            unqualifiedEffectOperationNames?: readonly string[];
+          }
+        | undefined;
+      if (
+        record.kind === "effect-op" &&
+        metadata?.qualifiedOnlyEffectOperation === true
+      ) {
         continue;
       }
 
       const declarationOffset = declarationOffsetBySymbol?.get(symbol);
-      const scopeKind = semantics.binding.symbolTable.getScope(record.scope).kind;
-      const isModuleScoped =
-        scopeKind === "module" || scopeKind === "macro";
+      const scopeKind = semantics.binding.symbolTable.getScope(
+        record.scope,
+      ).kind;
+      const isModuleScoped = scopeKind === "module" || scopeKind === "macro";
 
       if (
         !isModuleScoped &&
@@ -286,8 +304,6 @@ const completionsForInScopeSymbols = ({
       ) {
         continue;
       }
-
-      visibleNames.add(record.name);
 
       const canonicalKey = canonicalKeyBySymbol?.get(symbol);
       const typeInfo = canonicalKey
@@ -299,30 +315,55 @@ const completionsForInScopeSymbols = ({
       const markdownDocumentation: MarkupContent | undefined = documentation
         ? { kind: "markdown", value: documentation }
         : undefined;
-      const item: CompletionItem = {
-        label: record.name,
-        kind: kindFromSymbolRecord({ record, typeInfo }),
-        sortText: [
-          "0",
-          padSortRank(scopeDepth),
-          padSortRank(inScopeSymbolPriority({ record, typeInfo })),
-          record.name,
-        ].join(":"),
-        detail: typeInfo,
-        documentation: markdownDocumentation,
-        textEdit: {
-          range: replacementRange,
-          newText: record.name,
-        },
-      };
+      const surfaceNames =
+        semantics.binding.symbolTable.surfaceNamesForSymbol(symbol, scope);
+      const completionSurfaceNames =
+        metadata?.implicitCompilerImport === true
+          ? surfaceNames.filter((name) => name !== record.name)
+          : surfaceNames;
+      const completionNames =
+        record.kind !== "effect-op"
+          ? completionSurfaceNames
+          : metadata?.unqualifiedEffectOperationNames !== undefined
+            ? metadata.unqualifiedEffectOperationNames
+            : isImportedSymbol(record)
+              ? completionSurfaceNames
+              : [];
 
-      if (isImportedSymbol(record)) {
-        item.detail = item.detail ?? "(imported symbol)";
-      }
+      for (const completionName of completionNames) {
+        if (visibleNames.has(completionName)) {
+          continue;
+        }
+        if (!startsWithPrefix({ name: completionName, prefix })) {
+          continue;
+        }
 
-      items.push(item);
-      if (items.length >= MAX_COMPLETION_ITEMS) {
-        return { items, visibleNames };
+        visibleNames.add(completionName);
+        const item: CompletionItem = {
+          label: completionName,
+          kind: kindFromSymbolRecord({ record, typeInfo }),
+          sortText: [
+            "0",
+            padSortRank(scopeDepth),
+            padSortRank(inScopeSymbolPriority({ record, typeInfo })),
+            completionName,
+          ].join(":"),
+          detail: typeInfo,
+          documentation: markdownDocumentation,
+          textEdit: {
+            range: replacementRange,
+            newText: completionName,
+          },
+        };
+
+        if (isImportedSymbol(record)) {
+          item.detail = item.detail ?? "(imported symbol)";
+        }
+
+        items.push(item);
+        if (items.length >= MAX_COMPLETION_ITEMS) {
+          return { items, visibleNames };
+        }
       }
     }
   }
@@ -366,7 +407,9 @@ const completionsForAutoImports = ({
   const suggestions: CompletionItem[] = [];
   const firstCharacter = prefix.slice(0, 1).toLowerCase();
   const matchingEntries =
-    analysis.completionIndex.exportEntriesByFirstCharacter.get(firstCharacter) ?? [];
+    analysis.completionIndex.exportEntriesByFirstCharacter.get(
+      firstCharacter,
+    ) ?? [];
 
   for (const { name: exportedName, candidates } of matchingEntries) {
     if (!startsWithPrefix({ name: exportedName, prefix })) {
@@ -422,6 +465,140 @@ const completionsForAutoImports = ({
   return { items: suggestions, isIncomplete: false };
 };
 
+const completionsForQualifiedNamespace = ({
+  analysis,
+  moduleId,
+  source,
+  prefix,
+  replacementStartOffset,
+  replacementEndOffset,
+  activeScope,
+  uri,
+}: {
+  analysis: CompletionAnalysis;
+  moduleId: string;
+  source: string;
+  prefix: string;
+  replacementStartOffset: number;
+  replacementEndOffset: number;
+  activeScope: ScopeId;
+  uri: string;
+}): CompletionList | undefined => {
+  const qualifierMatch = source
+    .slice(0, replacementStartOffset)
+    .match(/([A-Za-z_][A-Za-z0-9_]*)::\s*$/);
+  const qualifierName = qualifierMatch?.[1];
+  if (!qualifierName) {
+    return undefined;
+  }
+  const semantics = analysis.semantics.get(moduleId);
+  const lineIndex = analysis.lineIndexByFile.get(path.resolve(toFilePath(uri)));
+  if (!semantics || !lineIndex) {
+    return undefined;
+  }
+  const qualifier = semantics.binding.symbolTable.resolveByKinds(
+    qualifierName,
+    activeScope,
+    ["effect", "module"],
+  );
+  if (typeof qualifier !== "number") {
+    return undefined;
+  }
+  const record = semantics.binding.symbolTable.getSymbol(qualifier);
+  const metadata = record.metadata as
+    | { import?: { moduleId?: unknown; symbol?: unknown } }
+    | undefined;
+  const replacementRange = lineIndex.range(
+    replacementStartOffset,
+    replacementEndOffset,
+  );
+
+  if (record.kind === "effect") {
+    const importedModuleId = metadata?.import?.moduleId;
+    const importedSymbol = metadata?.import?.symbol;
+    const sourceModuleId =
+      typeof importedModuleId === "string" ? importedModuleId : moduleId;
+    const sourceSymbol =
+      typeof importedSymbol === "number" ? importedSymbol : qualifier;
+    const sourceSemantics = analysis.semantics.get(sourceModuleId);
+    const effect = sourceSemantics?.binding.decls.getEffect(sourceSymbol);
+    if (!effect) {
+      return { isIncomplete: false, items: [] };
+    }
+    return {
+      isIncomplete: false,
+      items: effect.operations
+        .filter((operation) =>
+          startsWithPrefix({ name: operation.name, prefix }),
+        )
+        .map((operation) => ({
+          label: operation.name,
+          kind: CompletionItemKind.Method,
+          detail: analysis.typeInfoByCanonicalKey.get(
+            `${sourceModuleId}::${operation.symbol}`,
+          ),
+          textEdit: { range: replacementRange, newText: operation.name },
+        })),
+    };
+  }
+
+  const importedModuleId = metadata?.import?.moduleId;
+  if (typeof importedModuleId !== "string") {
+    const members = semantics.binding.moduleMembers.get(qualifier);
+    if (!members) {
+      return { isIncomplete: false, items: [] };
+    }
+    return {
+      isIncomplete: false,
+      items: Array.from(members.entries()).flatMap(([name, symbols]) => {
+        if (!startsWithPrefix({ name, prefix })) {
+          return [];
+        }
+        const symbol = Array.from(symbols).find(
+          (candidate) =>
+            semantics.binding.symbolTable.getSymbol(candidate).kind !==
+            "effect-op",
+        );
+        return typeof symbol === "number"
+          ? [
+              {
+                label: name,
+                kind: kindFromSymbolRecord({
+                  record: semantics.binding.symbolTable.getSymbol(symbol),
+                  typeInfo: undefined,
+                }),
+                textEdit: { range: replacementRange, newText: name },
+              },
+            ]
+          : [];
+      }),
+    };
+  }
+
+  const module = analysis.semantics.get(importedModuleId);
+  return {
+    isIncomplete: false,
+    items: Array.from(module?.exports.values() ?? []).flatMap((exported) => {
+      if (
+        exported.kind === "effect-op" ||
+        !startsWithPrefix({ name: exported.name, prefix })
+      ) {
+        return [];
+      }
+      return [
+        {
+          label: exported.name,
+          kind: kindFromExportKind(exported.kind),
+          detail: analysis.typeInfoByCanonicalKey.get(
+            `${importedModuleId}::${exported.symbol}`,
+          ),
+          textEdit: { range: replacementRange, newText: exported.name },
+        },
+      ];
+    }),
+  };
+};
+
 export const completionsAtPosition = ({
   analysis,
   uri,
@@ -446,9 +623,7 @@ export const completionsAtPosition = ({
     cursorOffset,
   });
   const lineStart = source.lastIndexOf("\n", replacement.start - 1) + 1;
-  const beforeAttributeName = source
-    .slice(lineStart, replacement.start)
-    .trim();
+  const beforeAttributeName = source.slice(lineStart, replacement.start).trim();
   if (beforeAttributeName === "@") {
     const module = analysis.graph.modules.get(moduleId);
     const localAttributeNames =
@@ -470,9 +645,7 @@ export const completionsAtPosition = ({
         ...importedAttributeNames,
       ]),
     )
-      .filter((name) =>
-        startsWithPrefix({ name, prefix: replacement.prefix }),
-      )
+      .filter((name) => startsWithPrefix({ name, prefix: replacement.prefix }))
       .sort();
     return {
       isIncomplete: false,
@@ -501,6 +674,20 @@ export const completionsAtPosition = ({
     return { isIncomplete: false, items: [] };
   }
 
+  const qualifiedNamespace = completionsForQualifiedNamespace({
+    analysis,
+    moduleId,
+    source,
+    prefix: replacement.prefix,
+    replacementStartOffset: replacement.start,
+    replacementEndOffset: replacement.end,
+    activeScope,
+    uri,
+  });
+  if (qualifiedNamespace) {
+    return qualifiedNamespace;
+  }
+
   const inScope = completionsForInScopeSymbols({
     analysis,
     moduleId,
@@ -520,7 +707,10 @@ export const completionsAtPosition = ({
 
   const autoImportLimit = Math.max(
     0,
-    Math.min(MAX_AUTO_IMPORT_ITEMS, MAX_COMPLETION_ITEMS - inScope.items.length),
+    Math.min(
+      MAX_AUTO_IMPORT_ITEMS,
+      MAX_COMPLETION_ITEMS - inScope.items.length,
+    ),
   );
   const autoImports = completionsForAutoImports({
     analysis,
@@ -533,9 +723,13 @@ export const completionsAtPosition = ({
     maxItems: autoImportLimit,
   });
 
-  const items = [...inScope.items, ...autoImports.items].slice(0, MAX_COMPLETION_ITEMS);
+  const items = [...inScope.items, ...autoImports.items].slice(
+    0,
+    MAX_COMPLETION_ITEMS,
+  );
   return {
-    isIncomplete: autoImports.isIncomplete || items.length >= MAX_COMPLETION_ITEMS,
+    isIncomplete:
+      autoImports.isIncomplete || items.length >= MAX_COMPLETION_ITEMS,
     items,
   };
 };

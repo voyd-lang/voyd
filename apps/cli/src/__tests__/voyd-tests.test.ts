@@ -1,4 +1,6 @@
-import { dirname, resolve } from "node:path";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { runTests, selectTestShard } from "../test-runner.js";
@@ -45,5 +47,52 @@ describe("voyd test runner", { timeout: 240_000 }, () => {
     expect(result.passed).toBe(1);
     expect(result.failed).toBe(0);
     expect(result.skipped).toBe(2);
+  });
+
+  it("runs hidden tests within each nested source package", async () => {
+    const projectRoot = await mkdtemp(
+      join(tmpdir(), "voyd-cli-packaged-tests-"),
+    );
+    const srcRoot = join(projectRoot, "src");
+    const firstPackage = join(srcRoot, "first");
+    const secondPackage = join(srcRoot, "second");
+
+    try {
+      await Promise.all([
+        mkdir(firstPackage, { recursive: true }),
+        mkdir(secondPackage, { recursive: true }),
+      ]);
+      await Promise.all([
+        writeFile(
+          join(firstPackage, "pkg.voyd"),
+          'pub fn value() -> i32\n  1\n\ntest "skips at first package root":\n  1\n',
+        ),
+        writeFile(
+          join(firstPackage, "hidden.voyd"),
+          'test only "runs inside first package":\n  1\n',
+        ),
+        writeFile(
+          join(secondPackage, "pkg.voyd"),
+          "pub fn value() -> i32\n  2\n",
+        ),
+        writeFile(
+          join(secondPackage, "hidden.voyd"),
+          'test "skips inside second package":\n  1\n',
+        ),
+        writeFile(
+          join(srcRoot, "root_test.voyd"),
+          'test "skips at source root":\n  1\n',
+        ),
+      ]);
+
+      const result = await runTests({ rootPath: srcRoot, reporter: "silent" });
+
+      expect(result.total).toBe(4);
+      expect(result.passed).toBe(1);
+      expect(result.failed).toBe(0);
+      expect(result.skipped).toBe(3);
+    } finally {
+      await rm(projectRoot, { recursive: true, force: true });
+    }
   });
 });

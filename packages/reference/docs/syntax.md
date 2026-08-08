@@ -18,6 +18,21 @@ let total =
   x + y
 ```
 
+A continuation operator at the end of a line continues the same expression.
+Its indented right-hand operand is not a child block. A trailing `:` still
+opens an indented suite:
+
+```voyd
+let allowed =
+  not blocked(user) and
+    not expired(user) and
+    quota(user) >
+      minimum_quota
+```
+
+Keep the continuation operator on the preceding line so the relationship is
+unambiguous.
+
 ## Calls
 
 Standard calls use parentheses.

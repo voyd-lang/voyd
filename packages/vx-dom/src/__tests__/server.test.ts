@@ -108,6 +108,22 @@ describe("vx-dom server renderer", () => {
     expect(result.html).toBe("<textarea>Draft</textarea>");
   });
 
+  it("renders option values and selection as stable attributes", async () => {
+    const result = await renderVxToString({
+      frame: {
+        version: 1,
+        root: {
+          kind: "element",
+          tag: "option",
+          attrs: { value: "voyd", selected: true },
+          children: [{ kind: "text", value: "Voyd" }],
+        },
+      },
+    });
+
+    expect(result.html).toBe('<option value="voyd" selected>Voyd</option>');
+  });
+
   it("rejects form properties without a stable SSR representation", async () => {
     await expect(renderVxToString({
       frame: {

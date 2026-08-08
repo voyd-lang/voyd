@@ -1,0 +1,4 @@
+use src::conflict::answer
+
+pub fn main() -> i32
+  answer()

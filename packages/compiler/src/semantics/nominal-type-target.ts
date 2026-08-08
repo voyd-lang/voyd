@@ -1,11 +1,14 @@
 import {
   Form,
   type Expr,
+  type IdentifierAtom,
+  type InternalIdentifierAtom,
   formCallsInternal,
   isCallForm,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
+  identifierBindingKey,
 } from "../parser/index.js";
 import type { SymbolTable } from "./binder/index.js";
 import type { ScopeId, SymbolId } from "./ids.js";
@@ -13,6 +16,7 @@ import type { ScopeId, SymbolId } from "./ids.js";
 export type NominalTypeTarget = {
   name: string;
   path: readonly string[];
+  identifier?: IdentifierAtom | InternalIdentifierAtom;
   typeArguments?: readonly Expr[];
 };
 
@@ -56,7 +60,7 @@ export const extractNominalTypeTarget = (
     return undefined;
   }
   if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
-    return { name: target.value, path: [target.value] };
+    return { name: target.value, path: [target.value], identifier: target };
   }
   if (!isForm(target)) {
     return undefined;
@@ -70,6 +74,7 @@ export const extractNominalTypeTarget = (
     return {
       name: right.name,
       path: [...left, right.name],
+      identifier: right.identifier,
       typeArguments: right.typeArguments,
     };
   }
@@ -92,8 +97,13 @@ export const extractNominalTypeTarget = (
       formCallsInternal(second, "generics")
     ) {
       return second.rest.length > 0
-        ? { name: head.value, path: [head.value], typeArguments: second.rest }
-        : { name: head.value, path: [head.value] };
+        ? {
+            name: head.value,
+            path: [head.value],
+            identifier: head,
+            typeArguments: second.rest,
+          }
+        : { name: head.value, path: [head.value], identifier: head };
     }
   }
   return undefined;
@@ -264,12 +274,14 @@ export const resolveNominalTypeSymbol = ({
   scope,
   symbolTable,
   moduleMembers,
+  staticMethods,
   ensureModuleMember,
 }: {
   target: Expr | undefined;
   scope: ScopeId;
   symbolTable: SymbolTable;
   moduleMembers?: ReadonlyMap<SymbolId, ReadonlyMap<string, ReadonlySet<SymbolId>>>;
+  staticMethods?: ReadonlyMap<SymbolId, ReadonlyMap<string, ReadonlySet<SymbolId>>>;
   ensureModuleMember?: ({
     moduleSymbol,
     memberName,
@@ -287,7 +299,12 @@ export const resolveNominalTypeSymbol = ({
   }
 
   if (nominal.path.length === 1) {
-    const symbol = symbolTable.resolve(nominal.name, scope);
+    const bindingIdentity = nominal.identifier
+      ? identifierBindingKey(nominal.identifier)
+      : undefined;
+    const symbol = bindingIdentity
+      ? symbolTable.resolveBinding(nominal.name, bindingIdentity, scope)
+      : symbolTable.resolve(nominal.name, scope);
     return typeof symbol === "number" ? symbol : undefined;
   }
 
@@ -300,7 +317,9 @@ export const resolveNominalTypeSymbol = ({
   for (let index = 0; index < rest.length; index += 1) {
     const segment = rest[index]!;
     ensureModuleMember?.({ moduleSymbol: current, memberName: segment });
-    const members = moduleMembers?.get(current)?.get(segment);
+    const members =
+      moduleMembers?.get(current)?.get(segment) ??
+      staticMethods?.get(current)?.get(segment);
     if (!members || members.size === 0) {
       return undefined;
     }

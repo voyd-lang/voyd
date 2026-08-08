@@ -35,6 +35,68 @@ Macro bodies commonly build syntax with:
 The standard library uses this model to implement surface features such as
 `enum`, `for`, `??`, and `?.`.
 
+### Identifier contexts and hygiene
+
+Macro expansion preserves where each identifier came from:
+
+- Syntax written by the caller keeps call-site context.
+- Literal identifiers in a macro template use the macro's definition context.
+- `$` and `$$` splices keep the context carried by the spliced syntax.
+- `identifier("debug_label")` creates a fresh context.
+- `symbol_reference(symbol)` creates a reference tied to an existing symbol.
+
+These rules apply through cloning, macro variables, lists, nested macros, and
+imported macros. As a result, a binding introduced by a macro cannot capture a
+matching caller name, and a caller name cannot capture a literal helper used by
+the macro.
+
+Use `identifier` when a macro needs to introduce a private binding:
+
+```voyd
+macro evaluate_once(value)
+  let temporary = identifier("evaluate_once_value")
+  `
+    let $temporary = $value
+    $temporary
+```
+
+Every call to `identifier` creates a distinct binding identity, even when the
+debug labels match. Its operand may be a string or existing identifier syntax.
+The identifier-syntax overload uses only that syntax's readable spelling as the
+new identifier's debug label; it does not reuse the operand's binding identity.
+This is useful when transforming names supplied as syntax, such as enum variant
+names. Call `identifier` once, retain the returned syntax, and splice that same
+value into the declaration and every reference. The label remains useful in
+diagnostics and expansion views; it does not affect binding, exports, ABI,
+serialized metadata, or Wasm names.
+If a generated grouped `pub use` contains a fresh alias, the whole import stays
+module-visible. Public effects and traits containing fresh operations or
+requirements also stay module-visible because those members are otherwise
+exposed through their owner.
+
+Use `symbol_reference` when generated code must refer to a specific existing
+value, type, or effect:
+
+```voyd
+fn private_normalize(value: i32) -> i32
+  value + 1
+
+pub macro normalized(value)
+  let normalize = symbol_reference(private_normalize)
+  `($normalize $value)
+```
+
+The operand must be an identifier or qualified symbol, never a string. The
+result is valid only in reference positions and cannot name a declaration. An
+unresolved operand is a compile error, and lookup never falls back to a caller
+binding with the same spelling. Exported macros may reference private
+definition-site helpers this way; the compiler records the helper as an
+encapsulated dependency without exposing its name from the module.
+
+Syntax inspection operations such as `calls` continue to compare readable
+spelling. Voyd does not provide an intentional-capture or raw, unhygienic
+identifier constructor.
+
 When a macro replaces syntax while preserving its source-level role, use
 `with_location(generated, source)` to transfer the source syntax location to
 the generated form. This also preserves documentation provenance when, for
@@ -48,6 +110,35 @@ example, a function parameter becomes an object field.
 ```voyd
 pub use src::base_macros::all
 ```
+
+Macro exports follow the same module and package boundaries as values and
+types:
+
+- an unmodified `macro` is module-private
+- `pub macro` is visible inside its package
+- code outside a nested source package can import the macro only when
+  `pkg.voyd` re-exports it
+- `module::all` includes exported macros at that one module level
+
+For example:
+
+```voyd
+// src/schema/internal.voyd
+pub macro declare_record(name)
+  // ...
+
+// src/schema/pkg.voyd
+pub use self::internal::declare_record
+
+// consumer: the physical `pkg` segment is omitted
+use src::schema::declare_record
+```
+
+If a macro exists but lacks `pub`, the compiler identifies its declaration and
+recommends adding `pub`. If a public macro lives behind a nested package
+boundary, import it through the package root and add a root re-export when it is
+part of the intended API. Declarations emitted by a macro obey their emitted
+visibility; generation does not bypass a module or package boundary.
 
 ## Declaration attribute macros
 
@@ -108,6 +199,12 @@ Preserved syntax retains its source locations, including member and parameter
 locations. This keeps documentation and diagnostics attached to the preserved
 declaration. Generated syntax is attributed to the attribute invocation while
 syntax spliced from the input retains its original provenance.
+
+The same provenance rules apply to functional macros. Diagnostics point first
+to caller syntax or the macro invocation. When generated template syntax is the
+cause, tooling may also show its macro-definition location. Navigation and
+rename follow binding identity, so a generated helper resolves to its actual
+declaration rather than to an equal-looking caller name.
 
 ## What this page does not cover
 

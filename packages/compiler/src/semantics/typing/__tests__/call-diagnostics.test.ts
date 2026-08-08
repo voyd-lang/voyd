@@ -66,6 +66,86 @@ pub fn main() -> i32
     expect(source.slice(start, end)).toBe("x");
   });
 
+  it("suggests an explicit init call for positional value constructors", () => {
+    const source = `
+val Vec2 { x: f64, y: f64 }
+
+impl Vec2
+  api fn init(x: f64, y: f64) -> Vec2
+    Vec2 { x, y }
+
+pub fn main() -> Vec2
+  Vec2(1.0)
+`;
+    const ast = parse(source, "/proj/src/value-constructor.voyd");
+
+    let caught: unknown;
+    try {
+      semanticsPipeline(ast);
+    } catch (error) {
+      caught = error;
+    }
+
+    expect(caught instanceof DiagnosticError).toBe(true);
+    if (!(caught instanceof DiagnosticError)) {
+      return;
+    }
+
+    expect(caught.diagnostic.message).toContain("Vec2::init");
+    expect(source.slice(caught.diagnostic.span.start, caught.diagnostic.span.end)).toBe(
+      "Vec2",
+    );
+  });
+
+  it("keeps indented boolean and arithmetic continuations in one expression", () => {
+    const source = `
+fn blocked(value: i32) -> bool
+  value == 1
+
+pub fn classify(value: i32) -> bool
+  not blocked(value) and
+    not blocked(value + 1) and
+    not blocked(value + 2)
+
+pub fn adjusted(value: i32) -> i32
+  value +
+    2 *
+    3
+`;
+
+    const ast = parse(source, "/proj/src/multiline-boolean.voyd");
+    const plain = JSON.parse(JSON.stringify(ast.toJSON()));
+    expect(plain).toMatchObject([
+      "ast",
+      expect.anything(),
+      [
+        "pub",
+        "fn",
+        expect.anything(),
+        [
+          "block",
+          [
+            "and",
+            ["not", ["blocked", "value"]],
+            [
+              "and",
+              ["not", ["blocked", ["+", "value", "1"]]],
+              ["not", ["blocked", ["+", "value", "2"]]],
+            ],
+          ],
+        ],
+      ],
+      [
+        "pub",
+        "fn",
+        expect.anything(),
+        ["block", ["+", "value", ["*", "2", "3"]]],
+      ],
+    ]);
+    const result = semanticsPipeline(ast);
+    expect(result.diagnostics).toEqual([]);
+  });
+
   it("reports diagnostics for calling a missing function", () => {
     const ast = loadAst("missing_function_call.voyd");
 
