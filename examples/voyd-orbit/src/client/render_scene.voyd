@@ -1,0 +1,758 @@
+//! Pure projection of Orbit application state into generic VX canvas commands.
+//! All coordinates passed to VX are logical CSS pixels; the browser host owns
+//! high-DPI backing-store scaling.
+
+use super::model::{ Interaction, Model, Trail }
+use src::simulation::{ Body, BodyKind, Vec2 }
+use std::array::Array
+use std::math::{ abs, clamp, floor, max, min, round, sin, sqrt }
+use std::number::cast::{ to_f64, to_string }
+use std::optional::types::all
+use std::string::type::String
+use std::vx::{
+  CanvasDraw,
+  CanvasPoint,
+  Cmd,
+  canvas_circle,
+  canvas_ellipse,
+  canvas_frame,
+  canvas_line,
+  canvas_polyline,
+  canvas_radial_gradient,
+  canvas_text
+}
+
+type RenderView = {
+  width: f64,
+  height: f64,
+  center_au: Vec2,
+  pixels_per_au: f64
+}
+
+/// Draws the current simulation into the full-screen Orbit canvas.
+pub fn draw<Msg>(model: Model) -> Cmd<Msg>
+  let view = render_view(model)
+  let ~draws = Array<CanvasDraw>::with_capacity(
+    128 + (model.session.simulation.bodies.len() * 12)
+  )
+  append_spatial_grid(draws, view)
+  append_trails(draws, model, view)
+  append_velocity_vectors(draws, model, view)
+  append_bodies(draws, model, view)
+  append_body_adornments(draws, model, view)
+  append_placement_preview(draws, model, view)
+  Cmd<Msg>::canvas_render(canvas_frame(
+    selector: ".simulation-canvas",
+    width: view.width,
+    height: view.height,
+    draws: draws,
+    clear: true,
+    background: "rgba(3, 6, 14, 0.74)"
+  ))
+
+fn append_spatial_grid(~draws: Array<CanvasDraw>, view: RenderView) -> void
+  let major_step_au = adaptive_grid_step(view.pixels_per_au)
+  let minor_step_au = major_step_au / 5.0
+  let half_width_au = view.width / (2.0 * view.pixels_per_au)
+  let half_height_au = view.height / (2.0 * view.pixels_per_au)
+  let left_au = view.center_au.x - half_width_au
+  let right_au = view.center_au.x + half_width_au
+  let top_au = view.center_au.y - half_height_au
+  let bottom_au = view.center_au.y + half_height_au
+
+  var x_au = floor(left_au / minor_step_au) * minor_step_au
+  var line_count = 0
+  while x_au <= right_au + minor_step_au and line_count < 256:
+    let x = canvas_x(view, x_au)
+    draws.push(canvas_line(
+      from: point(x, 0.0),
+      to: point(x, view.height),
+      color: "#8da9d4",
+      width: 0.6,
+      alpha: 0.035
+    ))
+    x_au = x_au + minor_step_au
+    line_count = line_count + 1
+
+  var y_au = floor(top_au / minor_step_au) * minor_step_au
+  line_count = 0
+  while y_au <= bottom_au + minor_step_au and line_count < 256:
+    let y = canvas_y(view, y_au)
+    draws.push(canvas_line(
+      from: point(0.0, y),
+      to: point(view.width, y),
+      color: "#8da9d4",
+      width: 0.6,
+      alpha: 0.035
+    ))
+    y_au = y_au + minor_step_au
+    line_count = line_count + 1
+
+  x_au = floor(left_au / major_step_au) * major_step_au
+  line_count = 0
+  while x_au <= right_au + major_step_au and line_count < 128:
+    let x = canvas_x(view, x_au)
+    draws.push(canvas_line(
+      from: point(x, 0.0),
+      to: point(x, view.height),
+      color: "#9eb7dd",
+      width: 0.85,
+      alpha: 0.075
+    ))
+    x_au = x_au + major_step_au
+    line_count = line_count + 1
+
+  y_au = floor(top_au / major_step_au) * major_step_au
+  line_count = 0
+  while y_au <= bottom_au + major_step_au and line_count < 128:
+    let y = canvas_y(view, y_au)
+    draws.push(canvas_line(
+      from: point(0.0, y),
+      to: point(view.width, y),
+      color: "#9eb7dd",
+      width: 0.85,
+      alpha: 0.075
+    ))
+    y_au = y_au + major_step_au
+    line_count = line_count + 1
+
+  if left_au <= 0.0 and right_au >= 0.0:
+    let origin_x = canvas_x(view, 0.0)
+    draws.push(canvas_line(
+      from: point(origin_x, 0.0),
+      to: point(origin_x, view.height),
+      color: "#a8c7ed",
+      width: 1.0,
+      alpha: 0.13
+    ))
+  if top_au <= 0.0 and bottom_au >= 0.0:
+    let origin_y = canvas_y(view, 0.0)
+    draws.push(canvas_line(
+      from: point(0.0, origin_y),
+      to: point(view.width, origin_y),
+      color: "#a8c7ed",
+      width: 1.0,
+      alpha: 0.13
+    ))
+
+fn append_trails(~draws: Array<CanvasDraw>, model: Model, view: RenderView) -> void
+  if not model.session.simulation.settings.trails_enabled:
+    return void
+  var trail_index = 0
+  while trail_index < model.trails.len():
+    let trail = model.trails.at(trail_index)
+    var body_index = 0
+    while body_index < model.session.simulation.bodies.len():
+      let body = model.session.simulation.bodies.at(body_index)
+      if body.id == trail.body_id:
+        append_fading_trail(draws, model, view, trail, body)
+        body_index = model.session.simulation.bodies.len()
+      else:
+        body_index = body_index + 1
+    trail_index = trail_index + 1
+
+fn append_fading_trail(
+  ~draws: Array<CanvasDraw>,
+  model: Model,
+  view: RenderView,
+  trail: Trail,
+  body: Body
+) -> void
+  let count = trail.points_au.len()
+  if count < 2:
+    return void
+  var chunk_start = 0
+  while chunk_start < count - 1:
+    let chunk_end = min(count - 1, chunk_start + 12)
+    let ~points = Array<CanvasPoint>::with_capacity((chunk_end - chunk_start) + 1)
+    var point_index = chunk_start
+    while point_index <= chunk_end:
+      points.push(world_to_canvas(view, trail.points_au.at(point_index)))
+      point_index = point_index + 1
+    let age = to_f64(chunk_end + 1) / to_f64(count)
+    let selected_boost = if body_selected(model, body) then: 0.12 else: 0.0
+    draws.push(canvas_polyline(
+      points: points,
+      color: body.appearance.trail_color,
+      width: if body_selected(model, body) then: 1.45 else: 0.9,
+      alpha: clamp(0.025 + (0.42 * age * age) + selected_boost, 0.0, 0.64)
+    ))
+    chunk_start = chunk_end
+
+fn append_velocity_vectors(
+  ~draws: Array<CanvasDraw>,
+  model: Model,
+  view: RenderView
+) -> void
+  if not model.session.simulation.settings.velocity_vectors_enabled:
+    return void
+  var index = 0
+  while index < model.session.simulation.bodies.len():
+    let body = model.session.simulation.bodies.at(index)
+    let start = world_to_canvas(view, body.position_au)
+    let raw_dx = body.velocity_au_per_day.x * view.pixels_per_au * 28.0
+    let raw_dy = body.velocity_au_per_day.y * view.pixels_per_au * 28.0
+    let magnitude = sqrt((raw_dx * raw_dx) + (raw_dy * raw_dy))
+    if magnitude >= 1.0 and point_visible(start, view, 160.0):
+      let length_scale = if magnitude > 120.0 then: 120.0 / magnitude else: 1.0
+      append_arrow(
+        draws,
+        from: start,
+        to: point(start.x + (raw_dx * length_scale), start.y + (raw_dy * length_scale)),
+        color: body.appearance.trail_color,
+        alpha: if body_selected(model, body) then: 0.9 else: 0.48,
+        width: if body_selected(model, body) then: 1.6 else: 1.0,
+        glow_blur: if body_selected(model, body) then: 5.0 else: 0.0
+      )
+    index = index + 1
+
+fn append_bodies(~draws: Array<CanvasDraw>, model: Model, view: RenderView) -> void
+  var index = 0
+  while index < model.session.simulation.bodies.len():
+    let body = model.session.simulation.bodies.at(index)
+    let center = world_to_canvas(view, body.position_au)
+    let radius = body_visual_radius(body, view.pixels_per_au)
+    if point_visible(center, view, radius * 3.5):
+      match(body.kind)
+        BodyKind::Star:
+          append_star(draws, body, center, radius)
+        BodyKind::Planet:
+          append_planet(draws, body, center, radius)
+        BodyKind::Moon:
+          append_moon(draws, body, center, radius)
+        BodyKind::Asteroid:
+          append_asteroid(draws, body, center, radius)
+        BodyKind::BlackHole:
+          append_black_hole(draws, body, center, radius)
+    index = index + 1
+
+fn append_star(
+  ~draws: Array<CanvasDraw>,
+  body: Body,
+  center: CanvasPoint,
+  radius: f64
+) -> void
+  let glow = 12.0 + (22.0 * clamp(body.appearance.glow_strength, 0.0, 1.0))
+  draws.push(canvas_circle(
+    center: center,
+    radius: radius * 2.45,
+    fill: body.appearance.secondary_color,
+    alpha: 0.075,
+    glow_color: body.appearance.primary_color,
+    glow_blur: glow
+  ))
+  draws.push(canvas_circle(
+    center: center,
+    radius: radius,
+    alpha: 1.0,
+    glow_color: body.appearance.primary_color,
+    glow_blur: glow,
+    radial_gradient: canvas_radial_gradient(
+      inner_color: "#ffffff",
+      outer_color: body.appearance.secondary_color,
+      inner_radius: radius * 0.08,
+      outer_radius: radius
+    )
+  ))
+  draws.push(canvas_circle(
+    center: point(center.x - (radius * 0.22), center.y - (radius * 0.24)),
+    radius: max(1.2, radius * 0.32),
+    fill: body.appearance.primary_color,
+    alpha: 0.74
+  ))
+
+fn append_planet(
+  ~draws: Array<CanvasDraw>,
+  body: Body,
+  center: CanvasPoint,
+  radius: f64
+) -> void
+  draws.push(canvas_circle(
+    center: center,
+    radius: radius * 1.24,
+    fill: body.appearance.trail_color,
+    alpha: 0.08,
+    glow_color: body.appearance.trail_color,
+    glow_blur: 4.0 + (clamp(body.appearance.glow_strength, 0.0, 1.0) * 14.0)
+  ))
+  draws.push(canvas_circle(
+    center: center,
+    radius: radius,
+    stroke: body.appearance.primary_color,
+    stroke_width: 0.7,
+    radial_gradient: canvas_radial_gradient(
+      inner_color: body.appearance.primary_color,
+      outer_color: body.appearance.secondary_color,
+      inner_radius: 0.0,
+      outer_radius: radius
+    )
+  ))
+  draws.push(canvas_circle(
+    center: point(center.x - (radius * 0.3), center.y - (radius * 0.32)),
+    radius: max(0.9, radius * 0.2),
+    fill: "#ffffff",
+    alpha: 0.32
+  ))
+
+fn append_moon(
+  ~draws: Array<CanvasDraw>,
+  body: Body,
+  center: CanvasPoint,
+  radius: f64
+) -> void
+  draws.push(canvas_circle(
+    center: center,
+    radius: radius,
+    fill: body.appearance.primary_color,
+    stroke: body.appearance.secondary_color,
+    stroke_width: 0.8,
+    alpha: 0.96
+  ))
+  draws.push(canvas_circle(
+    center: point(center.x - (radius * 0.22), center.y + (radius * 0.08)),
+    radius: max(0.65, radius * 0.18),
+    fill: body.appearance.secondary_color,
+    alpha: 0.38
+  ))
+  draws.push(canvas_circle(
+    center: point(center.x + (radius * 0.24), center.y - (radius * 0.24)),
+    radius: max(0.45, radius * 0.12),
+    fill: body.appearance.secondary_color,
+    alpha: 0.28
+  ))
+
+fn append_asteroid(
+  ~draws: Array<CanvasDraw>,
+  body: Body,
+  center: CanvasPoint,
+  radius: f64
+) -> void
+  let rotation = sin((body.position_au.x * 17.0) + (body.position_au.y * 31.0)) * 0.72
+  draws.push(canvas_ellipse(
+    center: center,
+    radius_x: radius * 1.2,
+    radius_y: radius * 0.78,
+    rotation: rotation,
+    fill: body.appearance.primary_color,
+    stroke: body.appearance.secondary_color,
+    stroke_width: 0.7,
+    alpha: 0.92
+  ))
+  draws.push(canvas_circle(
+    center: point(center.x - (radius * 0.22), center.y - (radius * 0.12)),
+    radius: max(0.35, radius * 0.11),
+    fill: body.appearance.secondary_color,
+    alpha: 0.48
+  ))
+
+fn append_black_hole(
+  ~draws: Array<CanvasDraw>,
+  body: Body,
+  center: CanvasPoint,
+  radius: f64
+) -> void
+  let ring_width = max(1.4, radius * 0.14)
+  draws.push(canvas_circle(
+    center: center,
+    radius: radius * 2.45,
+    fill: body.appearance.secondary_color,
+    alpha: 0.055,
+    glow_color: body.appearance.secondary_color,
+    glow_blur: 22.0
+  ))
+  draws.push(canvas_ellipse(
+    center: center,
+    radius_x: radius * 2.08,
+    radius_y: max(2.2, radius * 0.42),
+    rotation: -0.22,
+    fill: body.appearance.secondary_color,
+    alpha: 0.22
+  ))
+  draws.push(canvas_ellipse(
+    center: center,
+    radius_x: radius * 1.72,
+    radius_y: max(1.4, radius * 0.24),
+    rotation: -0.22,
+    fill: body.appearance.primary_color,
+    stroke: body.appearance.trail_color,
+    stroke_width: 0.8,
+    alpha: 0.72
+  ))
+  draws.push(canvas_circle(
+    center: center,
+    radius: radius * 1.42,
+    stroke: body.appearance.secondary_color,
+    stroke_width: 0.8,
+    alpha: 0.28
+  ))
+  draws.push(canvas_circle(
+    center: center,
+    radius: radius,
+    fill: "#010107",
+    stroke: body.appearance.secondary_color,
+    stroke_width: ring_width,
+    alpha: 1.0,
+    glow_color: body.appearance.secondary_color,
+    glow_blur: 10.0
+  ))
+  draws.push(canvas_circle(
+    center: center,
+    radius: radius * 0.62,
+    fill: "#000000",
+    alpha: 1.0
+  ))
+
+fn append_body_adornments(
+  ~draws: Array<CanvasDraw>,
+  model: Model,
+  view: RenderView
+) -> void
+  let ~label_positions = Array<CanvasPoint>::init()
+  var index = 0
+  while index < model.session.simulation.bodies.len():
+    let body = model.session.simulation.bodies.at(index)
+    let center = world_to_canvas(view, body.position_au)
+    let radius = body_visual_radius(body, view.pixels_per_au)
+    if point_visible(center, view, radius + 100.0):
+      let selected = body_selected(model, body)
+      if selected:
+        append_selection_indicator(draws, center, radius)
+      if body_followed(model, body):
+        draws.push(canvas_circle(
+          center: center,
+          radius: radius + (if selected then: 12.0 else: 7.0),
+          stroke: "#ffd28a",
+          stroke_width: 0.8,
+          alpha: 0.42
+        ))
+      if should_label_body(model, body, selected):
+        let label_on_left = index % 2 == 1
+        var label_position = point(center.x + radius + 8.0, center.y - radius - 4.0)
+        if label_on_left:
+          label_position = point(center.x - radius - 8.0, center.y + radius + 4.0)
+        if selected or label_position_available(label_positions, label_position):
+          draws.push(canvas_text(
+            position: label_position,
+            value: body.name,
+            color: if selected then: "#f4fbff" else: "#b4c1d7",
+            font: if selected then: "600 12px Inter, sans-serif" else: "500 11px Inter, sans-serif",
+            align: if label_on_left then: "right" else: "left",
+            baseline: "middle",
+            alpha: if selected then: 0.96 else: 0.76
+          ))
+          label_positions.push(label_position)
+    index = index + 1
+
+fn label_position_available(positions: Array<CanvasPoint>, candidate: CanvasPoint) -> bool
+  var index = 0
+  while index < positions.len():
+    let existing = positions.at(index)
+    if abs(candidate.x - existing.x) < 76.0 and abs(candidate.y - existing.y) < 15.0:
+      return false
+    index = index + 1
+  true
+
+fn append_selection_indicator(
+  ~draws: Array<CanvasDraw>,
+  center: CanvasPoint,
+  radius: f64
+) -> void
+  let ring = radius + 6.0
+  draws.push(canvas_circle(
+    center: center,
+    radius: ring,
+    stroke: "#83e7ff",
+    stroke_width: 1.15,
+    alpha: 0.82,
+    glow_color: "#5dd9ff",
+    glow_blur: 7.0
+  ))
+  append_tick(draws, from: point(center.x - ring - 6.0, center.y), to: point(center.x - ring + 1.0, center.y))
+  append_tick(draws, from: point(center.x + ring - 1.0, center.y), to: point(center.x + ring + 6.0, center.y))
+  append_tick(draws, from: point(center.x, center.y - ring - 6.0), to: point(center.x, center.y - ring + 1.0))
+  append_tick(draws, from: point(center.x, center.y + ring - 1.0), to: point(center.x, center.y + ring + 6.0))
+
+fn append_tick(~draws: Array<CanvasDraw>, { from: CanvasPoint, to: CanvasPoint }) -> void
+  draws.push(canvas_line(
+    from: from,
+    to: to,
+    color: "#a9f1ff",
+    width: 1.15,
+    alpha: 0.9,
+    glow_color: "#5dd9ff",
+    glow_blur: 4.0
+  ))
+
+fn append_placement_preview(
+  ~draws: Array<CanvasDraw>,
+  model: Model,
+  view: RenderView
+) -> void
+  match(model.ui.interaction)
+    Interaction::PlacingBody { kind, origin_au, cursor_au }:
+      let origin = world_to_canvas(view, origin_au)
+      let cursor = world_to_canvas(view, cursor_au)
+      let radius = preview_radius(kind)
+      append_preview_body(draws, kind, origin, radius)
+      draws.push(canvas_circle(
+        center: origin,
+        radius: radius + 7.0,
+        stroke: "#8cecff",
+        stroke_width: 1.0,
+        alpha: 0.62,
+        glow_color: "#67dcff",
+        glow_blur: 6.0
+      ))
+      append_arrow(
+        draws,
+        from: origin,
+        to: cursor,
+        color: "#8cecff",
+        alpha: 0.86,
+        width: 1.4,
+        glow_blur: 6.0
+      )
+      draws.push(canvas_circle(
+        center: cursor,
+        radius: 2.7,
+        fill: "#d9fbff",
+        alpha: 0.9,
+        glow_color: "#67dcff",
+        glow_blur: 7.0
+      ))
+      let velocity = (cursor_au - origin_au) * 0.02
+      let speed = round(velocity.length() * 100000.0) / 100000.0
+      let drag_pixels = canvas_distance(origin, cursor)
+      let release_hint = "Release · ".concat(to_string(speed)).concat(" AU/day")
+      let hint = if drag_pixels < 7.0 then: "Drag to set initial velocity" else: release_hint
+      draws.push(canvas_text(
+        position: point(cursor.x + 12.0, cursor.y - 12.0),
+        value: hint,
+        color: "#d9f8ff",
+        font: "600 11px Inter, sans-serif",
+        baseline: "middle",
+        alpha: 0.92
+      ))
+    else:
+      void
+
+fn append_preview_body(
+  ~draws: Array<CanvasDraw>,
+  kind: BodyKind,
+  center: CanvasPoint,
+  radius: f64
+) -> void
+  match(kind)
+    BodyKind::Star:
+      draws.push(canvas_circle(
+        center: center,
+        radius: radius,
+        alpha: 0.82,
+        glow_color: "#ffd279",
+        glow_blur: 18.0,
+        radial_gradient: canvas_radial_gradient(
+          inner_color: "#ffffff",
+          outer_color: "#f2a447",
+          outer_radius: radius
+        )
+      ))
+    BodyKind::Planet:
+      draws.push(canvas_circle(
+        center: center,
+        radius: radius,
+        stroke: "#a6ddff",
+        stroke_width: 0.8,
+        alpha: 0.82,
+        radial_gradient: canvas_radial_gradient(
+          inner_color: "#7fd1ff",
+          outer_color: "#31558c",
+          outer_radius: radius
+        )
+      ))
+    BodyKind::Moon:
+      draws.push(canvas_circle(
+        center: center,
+        radius: radius,
+        fill: "#cbd4e0",
+        stroke: "#717d8b",
+        stroke_width: 0.8,
+        alpha: 0.82
+      ))
+    BodyKind::Asteroid:
+      draws.push(canvas_ellipse(
+        center: center,
+        radius_x: radius * 1.2,
+        radius_y: radius * 0.74,
+        rotation: -0.42,
+        fill: "#aea295",
+        stroke: "#625951",
+        stroke_width: 0.8,
+        alpha: 0.82
+      ))
+    BodyKind::BlackHole:
+      draws.push(canvas_ellipse(
+        center: center,
+        radius_x: radius * 1.8,
+        radius_y: radius * 0.34,
+        rotation: -0.22,
+        fill: "#e89d59",
+        alpha: 0.36
+      ))
+      draws.push(canvas_circle(
+        center: center,
+        radius: radius,
+        fill: "#010107",
+        stroke: "#e89d59",
+        stroke_width: 1.4,
+        alpha: 0.9,
+        glow_color: "#e89d59",
+        glow_blur: 12.0
+      ))
+
+fn append_arrow(
+  ~draws: Array<CanvasDraw>,
+  {
+    from: CanvasPoint,
+    to: CanvasPoint,
+    color: String,
+    alpha: f64,
+    width: f64,
+    glow_blur: f64
+  }
+) -> void
+  draws.push(canvas_line(
+    from: from,
+    to: to,
+    color: color,
+    width: width,
+    alpha: alpha,
+    glow_color: color,
+    glow_blur: glow_blur
+  ))
+  let dx = to.x - from.x
+  let dy = to.y - from.y
+  let length = sqrt((dx * dx) + (dy * dy))
+  if length < 7.0:
+    return void
+  let unit_x = dx / length
+  let unit_y = dy / length
+  let head_length = clamp(length * 0.18, 6.0, 10.0)
+  let wing = head_length * 0.48
+  let base_x = to.x - (unit_x * head_length)
+  let base_y = to.y - (unit_y * head_length)
+  let perpendicular_x = 0.0 - unit_y
+  let perpendicular_y = unit_x
+  draws.push(canvas_line(
+    from: to,
+    to: point(base_x + (perpendicular_x * wing), base_y + (perpendicular_y * wing)),
+    color: color,
+    width: width,
+    alpha: alpha,
+    glow_color: color,
+    glow_blur: glow_blur
+  ))
+  draws.push(canvas_line(
+    from: to,
+    to: point(base_x - (perpendicular_x * wing), base_y - (perpendicular_y * wing)),
+    color: color,
+    width: width,
+    alpha: alpha,
+    glow_color: color,
+    glow_blur: glow_blur
+  ))
+
+fn render_view(model: Model) -> RenderView
+  {
+    width: max(1.0, model.ui.viewport.width),
+    height: max(1.0, model.ui.viewport.height),
+    center_au: model.camera.center_au,
+    pixels_per_au: max(0.000001, model.camera.pixels_per_au)
+  }
+
+fn adaptive_grid_step(pixels_per_au: f64) -> f64
+  var spacing_au = 0.000001
+  var iterations = 0
+  while spacing_au * pixels_per_au < 150.0 and iterations < 24:
+    spacing_au = spacing_au * 10.0
+    iterations = iterations + 1
+  while spacing_au * pixels_per_au > 1500.0 and iterations < 48:
+    spacing_au = spacing_au / 10.0
+    iterations = iterations + 1
+  spacing_au
+
+fn body_visual_radius(body: Body, pixels_per_au: f64) -> f64
+  let base = match(body.kind)
+    BodyKind::Star: 11.0
+    BodyKind::Planet: 7.0
+    BodyKind::Moon: 4.5
+    BodyKind::Asteroid: 3.0
+    BodyKind::BlackHole: 13.0
+  let maximum = match(body.kind)
+    BodyKind::Star: 58.0
+    BodyKind::Planet: 42.0
+    BodyKind::Moon: 30.0
+    BodyKind::Asteroid: 20.0
+    BodyKind::BlackHole: 54.0
+  clamp(max(base, body.radius_au * pixels_per_au), base, maximum)
+
+fn preview_radius(kind: BodyKind) -> f64
+  match(kind)
+    BodyKind::Star: 11.0
+    BodyKind::Planet: 7.0
+    BodyKind::Moon: 4.5
+    BodyKind::Asteroid: 3.5
+    BodyKind::BlackHole: 13.0
+
+fn should_label_body(model: Model, body: Body, selected: bool) -> bool
+  if selected:
+    return true
+  if not model.session.simulation.settings.labels_enabled:
+    return false
+  if is_asteroid(body.kind) and model.session.simulation.bodies.len() > 20:
+    return false
+  true
+
+fn is_asteroid(kind: BodyKind) -> bool
+  match(kind)
+    BodyKind::Asteroid: true
+    else: false
+
+fn body_selected(model: Model, body: Body) -> bool
+  match(model.ui.selected_body_id)
+    Some<String> { value }:
+      value == body.id
+    None:
+      false
+
+fn body_followed(model: Model, body: Body) -> bool
+  match(model.camera.follow_body_id)
+    Some<String> { value }:
+      value == body.id
+    None:
+      false
+
+fn world_to_canvas(view: RenderView, world: Vec2) -> CanvasPoint
+  point(
+    (view.width * 0.5) + ((world.x - view.center_au.x) * view.pixels_per_au),
+    (view.height * 0.5) + ((world.y - view.center_au.y) * view.pixels_per_au)
+  )
+
+fn canvas_x(view: RenderView, world_x_au: f64) -> f64
+  (view.width * 0.5) + ((world_x_au - view.center_au.x) * view.pixels_per_au)
+
+fn canvas_y(view: RenderView, world_y_au: f64) -> f64
+  (view.height * 0.5) + ((world_y_au - view.center_au.y) * view.pixels_per_au)
+
+fn point(x: f64, y: f64) -> CanvasPoint
+  CanvasPoint { x, y }
+
+fn canvas_distance(left: CanvasPoint, right: CanvasPoint) -> f64
+  let dx = right.x - left.x
+  let dy = right.y - left.y
+  sqrt((dx * dx) + (dy * dy))
+
+fn point_visible(point: CanvasPoint, view: RenderView, margin: f64) -> bool
+  point.x >= 0.0 - margin and
+    point.x <= view.width + margin and
+    point.y >= 0.0 - margin and
+    point.y <= view.height + margin

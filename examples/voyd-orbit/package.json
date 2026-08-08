@@ -1,0 +1,22 @@
+{
+  "name": "voyd-orbit",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "node --import tsx --conditions=development scripts/dev.mjs",
+    "build": "vite build && npm run voyd:check",
+    "start": "node --import tsx --conditions=development scripts/serve.mjs",
+    "test": "node scripts/test-voyd.mjs",
+    "voyd:check": "node --import tsx --conditions=development scripts/check-voyd.mjs"
+  },
+  "dependencies": {
+    "@voyd-lang/sdk": "^0.3.1",
+    "@voyd-lang/vx-dom": "^0.3.1",
+    "@voyd-lang/web": "^0.3.1"
+  },
+  "devDependencies": {
+    "@voyd-lang/cli": "^0.3.1",
+    "tsx": "^4.20.4",
+    "vite": "^7.3.5"
+  }
+}

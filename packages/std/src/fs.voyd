@@ -40,6 +40,12 @@ pub eff Fs
   list_dir(tail, path: MsgPack) -> MsgPack
   /// Removes the file or empty directory at `path`, or returns an I/O error DTO.
   remove(tail, path: MsgPack) -> MsgPack
+  /// Creates `path` and any missing parent directories, or returns an I/O error DTO.
+  create_dir_all(tail, path: MsgPack) -> MsgPack
+  /// Renames a file or directory.
+  ///
+  /// `payload` contains `{ from, to }`.
+  rename(tail, payload: MsgPack) -> MsgPack
 
 /// Reads a file as raw bytes.
 ///
@@ -89,6 +95,20 @@ pub fn remove(path: Path): Fs -> Result<Unit, IoError>
 pub fn list_dir(path: Path): Fs -> Result<Array<Path>, IoError>
   decode_list_dir_result(Fs::list_dir(encode_path(path)))
 
+/// Creates a directory and all missing parent directories.
+///
+/// Existing directories are accepted as success.
+pub fn create_dir_all(path: Path): Fs -> Result<Unit, IoError>
+  decode_unit_result(Fs::create_dir_all(encode_path(path)))
+
+/// Renames a file or directory from `source` to `destination`.
+///
+/// Host filesystem rename semantics apply. Renaming a temporary file over its
+/// destination can be used for atomic replacement when both paths share a
+/// filesystem.
+pub fn rename(source: Path, { to destination: Path }): Fs -> Result<Unit, IoError>
+  decode_unit_result(Fs::rename(encode_rename_payload(source, destination)))
+
 fn encode_path(path: Path): () -> MsgPack
   msgpack::make_string(path.as_string())
 
@@ -102,6 +122,12 @@ fn encode_write_string_payload(path: Path, value: String): () -> MsgPack
   HostDto::init()
     .set("path", encode_path(path))
     .set("value", msgpack::make_string(value))
+    .pack()
+
+fn encode_rename_payload(source: Path, destination: Path): () -> MsgPack
+  HostDto::init()
+    .set("from", encode_path(source))
+    .set("to", encode_path(destination))
     .pack()
 
 fn encode_byte_array(bytes: Bytes): () -> MsgPack

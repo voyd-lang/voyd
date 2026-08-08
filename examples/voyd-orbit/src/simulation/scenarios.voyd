@@ -1,0 +1,599 @@
+//! Curated deterministic starting systems for Voyd Orbit.
+
+use super::types::{
+  Body,
+  BodyAppearance,
+  BodyKind,
+  BuiltInScenario,
+  CameraView,
+  ScenarioKey,
+  SimulationSettings
+}
+use super::engine::{
+  GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2,
+  default_settings
+}
+use super::vector::Vec2
+use std::array::Array
+use std::math::{ cos, sqrt, sin }
+use std::number::cast::{ to_f64, to_string }
+use std::string::type::String
+
+pub fn built_in_scenarios() -> Array<BuiltInScenario>
+  [
+    stable_planetary_system(),
+    binary_star(),
+    three_body_chaos(),
+    slingshot(),
+    asteroid_belt(),
+    black_hole_flyby()
+  ]
+
+pub fn default_scenario() -> BuiltInScenario
+  stable_planetary_system()
+
+pub fn stable_planetary_system() -> BuiltInScenario
+  let helios = make_body(
+    id: "helios",
+    name: "Helios",
+    kind: BodyKind::Star {},
+    mass_solar: 1.0,
+    radius_au: 0.00465047,
+    position_au: Vec2::zero(),
+    velocity_au_per_day: Vec2::zero(),
+    appearance: make_appearance(
+      primary_color: "#fff4c2",
+      secondary_color: "#ff9f43",
+      trail_color: "#ffd78a",
+      glow_strength: 1.0
+    )
+  )
+  let cinder = orbiting_body(
+    id: "cinder",
+    name: "Cinder",
+    kind: BodyKind::Planet {},
+    mass_solar: 0.000000165,
+    radius_au: 0.0000163,
+    orbit_radius_au: 0.42,
+    angle_radians: 0.22,
+    central_position_au: helios.position_au,
+    central_velocity_au_per_day: helios.velocity_au_per_day,
+    central_mass_solar: helios.mass_solar,
+    clockwise: false,
+    appearance: make_appearance(
+      primary_color: "#d98b5f",
+      secondary_color: "#703b35",
+      trail_color: "#d98b5f",
+      glow_strength: 0.0
+    )
+  )
+  let aurelia = orbiting_body(
+    id: "aurelia",
+    name: "Aurelia",
+    kind: BodyKind::Planet {},
+    mass_solar: 0.000003003,
+    radius_au: 0.00004263,
+    orbit_radius_au: 1.0,
+    angle_radians: 2.05,
+    central_position_au: helios.position_au,
+    central_velocity_au_per_day: helios.velocity_au_per_day,
+    central_mass_solar: helios.mass_solar,
+    clockwise: false,
+    appearance: make_appearance(
+      primary_color: "#79c7ff",
+      secondary_color: "#315da8",
+      trail_color: "#58b9ef",
+      glow_strength: 0.06
+    )
+  )
+  let luma = orbiting_body(
+    id: "luma",
+    name: "Luma",
+    kind: BodyKind::Moon {},
+    mass_solar: 0.00000003694,
+    radius_au: 0.00001162,
+    orbit_radius_au: 0.00257,
+    angle_radians: 0.72,
+    central_position_au: aurelia.position_au,
+    central_velocity_au_per_day: aurelia.velocity_au_per_day,
+    central_mass_solar: aurelia.mass_solar,
+    clockwise: false,
+    appearance: make_appearance(
+      primary_color: "#d7e0ea",
+      secondary_color: "#6f7b8b",
+      trail_color: "#a7b7ca",
+      glow_strength: 0.0
+    )
+  )
+  let talon = orbiting_body(
+    id: "talon",
+    name: "Talon",
+    kind: BodyKind::Planet {},
+    mass_solar: 0.0009543,
+    radius_au: 0.0004779,
+    orbit_radius_au: 2.55,
+    angle_radians: 4.15,
+    central_position_au: helios.position_au,
+    central_velocity_au_per_day: helios.velocity_au_per_day,
+    central_mass_solar: helios.mass_solar,
+    clockwise: false,
+    appearance: make_appearance(
+      primary_color: "#e2b17c",
+      secondary_color: "#905d4c",
+      trail_color: "#d8a66f",
+      glow_strength: 0.03
+    )
+  )
+  let mote = orbiting_body(
+    id: "mote",
+    name: "Mote",
+    kind: BodyKind::Moon {},
+    mass_solar: 0.000000047,
+    radius_au: 0.000012,
+    orbit_radius_au: 0.006,
+    angle_radians: 5.2,
+    central_position_au: talon.position_au,
+    central_velocity_au_per_day: talon.velocity_au_per_day,
+    central_mass_solar: talon.mass_solar,
+    clockwise: false,
+    appearance: make_appearance(
+      primary_color: "#e8dac6",
+      secondary_color: "#8d8075",
+      trail_color: "#c6b8a4",
+      glow_strength: 0.0
+    )
+  )
+  let nereid = orbiting_body(
+    id: "nereid",
+    name: "Nereid",
+    kind: BodyKind::Planet {},
+    mass_solar: 0.0000515,
+    radius_au: 0.0001646,
+    orbit_radius_au: 4.4,
+    angle_radians: 5.68,
+    central_position_au: helios.position_au,
+    central_velocity_au_per_day: helios.velocity_au_per_day,
+    central_mass_solar: helios.mass_solar,
+    clockwise: false,
+    appearance: make_appearance(
+      primary_color: "#628be7",
+      secondary_color: "#293f8a",
+      trail_color: "#6b91e9",
+      glow_strength: 0.04
+    )
+  )
+  make_scenario(
+    key: ScenarioKey::StablePlanetarySystem {},
+    slug: "stable-planetary-system",
+    name: "The Helios System",
+    description: "A calm multi-planet system with two moons and room to experiment.",
+    bodies: [helios, cinder, aurelia, luma, talon, mote, nereid],
+    settings: settings(timestep_days: 0.125, softening_au: 0.00005),
+    camera: camera(center_au: Vec2::zero(), pixels_per_au: 82.0)
+  )
+
+pub fn binary_star() -> BuiltInScenario
+  let primary_mass = 1.0
+  let companion_mass = 0.78
+  let separation_au = 1.6
+  let total_mass = primary_mass + companion_mass
+  let relative_speed = circular_speed(total_mass, separation_au)
+  let primary = make_body(
+    id: "vesper-a",
+    name: "Vesper A",
+    kind: BodyKind::Star {},
+    mass_solar: primary_mass,
+    radius_au: 0.00465,
+    position_au: Vec2::init(0.0 - (separation_au * companion_mass / total_mass), 0.0),
+    velocity_au_per_day: Vec2::init(0.0, relative_speed * companion_mass / total_mass),
+    appearance: make_appearance(
+      primary_color: "#fff2bc",
+      secondary_color: "#ff9b42",
+      trail_color: "#ffd27c",
+      glow_strength: 1.0
+    )
+  )
+  let companion = make_body(
+    id: "vesper-b",
+    name: "Vesper B",
+    kind: BodyKind::Star {},
+    mass_solar: companion_mass,
+    radius_au: 0.0039,
+    position_au: Vec2::init(separation_au * primary_mass / total_mass, 0.0),
+    velocity_au_per_day: Vec2::init(0.0, 0.0 - (relative_speed * primary_mass / total_mass)),
+    appearance: make_appearance(
+      primary_color: "#dff2ff",
+      secondary_color: "#6ba5ff",
+      trail_color: "#8fc5ff",
+      glow_strength: 0.92
+    )
+  )
+  let circumbinary = orbiting_body(
+    id: "far-harbor",
+    name: "Far Harbor",
+    kind: BodyKind::Planet {},
+    mass_solar: 0.00043,
+    radius_au: 0.00027,
+    orbit_radius_au: 4.1,
+    angle_radians: 1.1,
+    central_position_au: Vec2::zero(),
+    central_velocity_au_per_day: Vec2::zero(),
+    central_mass_solar: total_mass,
+    clockwise: false,
+    appearance: make_appearance(
+      primary_color: "#b7d6bc",
+      secondary_color: "#426e69",
+      trail_color: "#87b69e",
+      glow_strength: 0.02
+    )
+  )
+  make_scenario(
+    key: ScenarioKey::BinaryStar {},
+    slug: "binary-star",
+    name: "Vesper Binary",
+    description: "Two suns orbit a shared barycenter while a distant world circles both.",
+    bodies: [primary, companion, circumbinary],
+    settings: settings(timestep_days: 0.075, softening_au: 0.00008),
+    camera: camera(center_au: Vec2::zero(), pixels_per_au: 92.0)
+  )
+
+pub fn three_body_chaos() -> BuiltInScenario
+  let velocity = 0.0061
+  let ember = make_body(
+    id: "ember",
+    name: "Ember",
+    kind: BodyKind::Star {},
+    mass_solar: 1.0,
+    radius_au: 0.0045,
+    position_au: Vec2::init(-0.85, -0.45),
+    velocity_au_per_day: Vec2::init(velocity, -0.002),
+    appearance: make_appearance(
+      primary_color: "#ffd09a",
+      secondary_color: "#ff694f",
+      trail_color: "#ff9670",
+      glow_strength: 1.0
+    )
+  )
+  let cobalt = make_body(
+    id: "cobalt",
+    name: "Cobalt",
+    kind: BodyKind::Star {},
+    mass_solar: 0.92,
+    radius_au: 0.0042,
+    position_au: Vec2::init(0.88, -0.38),
+    velocity_au_per_day: Vec2::init(-0.0055, -0.0025),
+    appearance: make_appearance(
+      primary_color: "#d9eeff",
+      secondary_color: "#5d8dff",
+      trail_color: "#8fb3ff",
+      glow_strength: 0.93
+    )
+  )
+  let rose = make_body(
+    id: "rose",
+    name: "Rose",
+    kind: BodyKind::Star {},
+    mass_solar: 0.73,
+    radius_au: 0.0037,
+    position_au: Vec2::init(-0.05, 0.92),
+    velocity_au_per_day: Vec2::init(-0.0012, 0.0061),
+    appearance: make_appearance(
+      primary_color: "#ffd7e4",
+      secondary_color: "#d65c85",
+      trail_color: "#f38aaa",
+      glow_strength: 0.88
+    )
+  )
+  make_scenario(
+    key: ScenarioKey::ThreeBodyChaos {},
+    slug: "three-body-chaos",
+    name: "Three-Body Waltz",
+    description: "Three mismatched stars trade partners in an exquisitely unstable dance.",
+    bodies: [ember, cobalt, rose],
+    settings: settings(timestep_days: 0.035, softening_au: 0.003),
+    camera: camera(center_au: Vec2::zero(), pixels_per_au: 245.0)
+  )
+
+pub fn slingshot() -> BuiltInScenario
+  let sun = make_body(
+    id: "slingshot-sun",
+    name: "Solis",
+    kind: BodyKind::Star {},
+    mass_solar: 1.0,
+    radius_au: 0.00465,
+    position_au: Vec2::zero(),
+    velocity_au_per_day: Vec2::zero(),
+    appearance: make_appearance(
+      primary_color: "#fff5c9",
+      secondary_color: "#ffae45",
+      trail_color: "#ffcf76",
+      glow_strength: 1.0
+    )
+  )
+  let giant = orbiting_body(
+    id: "atlas",
+    name: "Atlas",
+    kind: BodyKind::Planet {},
+    mass_solar: 0.00125,
+    radius_au: 0.00054,
+    orbit_radius_au: 1.35,
+    angle_radians: 0.0,
+    central_position_au: sun.position_au,
+    central_velocity_au_per_day: sun.velocity_au_per_day,
+    central_mass_solar: sun.mass_solar,
+    clockwise: false,
+    appearance: make_appearance(
+      primary_color: "#e7b77e",
+      secondary_color: "#794c59",
+      trail_color: "#d49a73",
+      glow_strength: 0.03
+    )
+  )
+  let messenger = make_body(
+    id: "messenger",
+    name: "Messenger",
+    kind: BodyKind::Asteroid {},
+    mass_solar: 0.0000000000008,
+    radius_au: 0.0000022,
+    position_au: Vec2::init(-2.8, -0.72),
+    velocity_au_per_day: Vec2::init(0.021, 0.0043),
+    appearance: make_appearance(
+      primary_color: "#e7f6ff",
+      secondary_color: "#7595ad",
+      trail_color: "#b8edff",
+      glow_strength: 0.08
+    )
+  )
+  make_scenario(
+    key: ScenarioKey::Slingshot {},
+    slug: "slingshot",
+    name: "The Messenger",
+    description: "A fast visitor dives through a giant planet's moving gravity well.",
+    bodies: [sun, giant, messenger],
+    settings: settings(timestep_days: 0.025, softening_au: 0.00025),
+    camera: camera(center_au: Vec2::init(-0.55, 0.0), pixels_per_au: 155.0)
+  )
+
+pub fn asteroid_belt() -> BuiltInScenario
+  let sun = make_body(
+    id: "forge",
+    name: "Forge",
+    kind: BodyKind::Star {},
+    mass_solar: 1.05,
+    radius_au: 0.0048,
+    position_au: Vec2::zero(),
+    velocity_au_per_day: Vec2::zero(),
+    appearance: make_appearance(
+      primary_color: "#fff1b5",
+      secondary_color: "#ff8d3d",
+      trail_color: "#ffc267",
+      glow_strength: 1.0
+    )
+  )
+  let sentinel = orbiting_body(
+    id: "sentinel",
+    name: "Sentinel",
+    kind: BodyKind::Planet {},
+    mass_solar: 0.00063,
+    radius_au: 0.00036,
+    orbit_radius_au: 3.65,
+    angle_radians: 1.82,
+    central_position_au: sun.position_au,
+    central_velocity_au_per_day: sun.velocity_au_per_day,
+    central_mass_solar: sun.mass_solar,
+    clockwise: false,
+    appearance: make_appearance(
+      primary_color: "#77a8c3",
+      secondary_color: "#31546f",
+      trail_color: "#6f9eb8",
+      glow_strength: 0.02
+    )
+  )
+  let ~bodies: Array<Body> = [sun, sentinel]
+  var index = 0
+  while index < 48:
+    let band = to_f64(index % 11)
+    let orbit_radius_au = 1.55 + (band * 0.072)
+    let angle = (to_f64(index) * 2.399963229728653) + (band * 0.013)
+    let radial = Vec2::init(cos(angle), sin(angle))
+    let tangent = radial.perpendicular()
+    let jitter = (to_f64((index * 7) % 9) - 4.0) * 0.000004
+    bodies.push(make_body(
+      id: "rock-".concat(to_string(index)),
+      name: "Belt object ".concat(to_string(index + 1)),
+      kind: BodyKind::Asteroid {},
+      mass_solar: 0.00000000000015 + (to_f64(index % 5) * 0.00000000000004),
+      radius_au: 0.0000015 + (to_f64(index % 4) * 0.00000035),
+      position_au: radial * orbit_radius_au,
+      velocity_au_per_day: (tangent * circular_speed(sun.mass_solar, orbit_radius_au)) +
+        (radial * jitter),
+      appearance: make_appearance(
+        primary_color: asteroid_primary(index),
+        secondary_color: "#4c4948",
+        trail_color: "#918b83",
+        glow_strength: 0.0
+      )
+    ))
+    index = index + 1
+  make_scenario(
+    key: ScenarioKey::AsteroidBelt {},
+    slug: "asteroid-belt",
+    name: "Forge Belt",
+    description: "Forty-eight deterministic minor worlds form a living ring around Forge.",
+    bodies: bodies,
+    settings: settings(timestep_days: 0.15, softening_au: 0.00008),
+    camera: camera(center_au: Vec2::zero(), pixels_per_au: 102.0)
+  )
+
+pub fn black_hole_flyby() -> BuiltInScenario
+  let abyss = make_body(
+    id: "abyss",
+    name: "Abyss",
+    kind: BodyKind::BlackHole {},
+    mass_solar: 4.8,
+    radius_au: 0.00014,
+    position_au: Vec2::init(0.35, 0.0),
+    velocity_au_per_day: Vec2::init(0.0, -0.00025),
+    appearance: make_appearance(
+      primary_color: "#090b16",
+      secondary_color: "#f5a65b",
+      trail_color: "#7d6ac7",
+      glow_strength: 0.72
+    )
+  )
+  let wanderer = make_body(
+    id: "wanderer",
+    name: "Wanderer",
+    kind: BodyKind::Star {},
+    mass_solar: 0.72,
+    radius_au: 0.0038,
+    position_au: Vec2::init(-4.2, -1.05),
+    velocity_au_per_day: Vec2::init(0.0315, 0.0068),
+    appearance: make_appearance(
+      primary_color: "#dceeff",
+      secondary_color: "#6f92e8",
+      trail_color: "#93b8ff",
+      glow_strength: 0.9
+    )
+  )
+  let pilgrim = orbiting_body(
+    id: "pilgrim",
+    name: "Pilgrim",
+    kind: BodyKind::Planet {},
+    mass_solar: 0.0000025,
+    radius_au: 0.000039,
+    orbit_radius_au: 0.42,
+    angle_radians: 2.4,
+    central_position_au: wanderer.position_au,
+    central_velocity_au_per_day: wanderer.velocity_au_per_day,
+    central_mass_solar: wanderer.mass_solar,
+    clockwise: true,
+    appearance: make_appearance(
+      primary_color: "#8bc5aa",
+      secondary_color: "#315d5c",
+      trail_color: "#71b09b",
+      glow_strength: 0.02
+    )
+  )
+  make_scenario(
+    key: ScenarioKey::BlackHoleFlyby {},
+    slug: "black-hole-flyby",
+    name: "Abyss Flyby",
+    description: "A star and its planet enter a close hyperbolic encounter with a black hole.",
+    bodies: [abyss, wanderer, pilgrim],
+    settings: settings(timestep_days: 0.018, softening_au: 0.0025),
+    camera: camera(center_au: Vec2::init(-1.1, -0.25), pixels_per_au: 115.0)
+  )
+
+fn orbiting_body(
+  {
+    id: String,
+    name: String,
+    kind: BodyKind,
+    mass_solar: f64,
+    radius_au: f64,
+    orbit_radius_au: f64,
+    angle_radians: f64,
+    central_position_au: Vec2,
+    central_velocity_au_per_day: Vec2,
+    central_mass_solar: f64,
+    clockwise: bool,
+    appearance: BodyAppearance
+  }
+) -> Body
+  let radial_direction = Vec2::init(cos(angle_radians), sin(angle_radians))
+  let tangent_direction = radial_direction.perpendicular()
+  let signed_tangent = if clockwise then: tangent_direction * -1.0 else: tangent_direction
+  make_body(
+    id: id,
+    name: name,
+    kind: kind,
+    mass_solar: mass_solar,
+    radius_au: radius_au,
+    position_au: central_position_au + (radial_direction * orbit_radius_au),
+    velocity_au_per_day: central_velocity_au_per_day +
+      (signed_tangent * circular_speed(central_mass_solar, orbit_radius_au)),
+    appearance: appearance
+  )
+
+fn circular_speed(central_mass_solar: f64, orbit_radius_au: f64) -> f64
+  sqrt(GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2 * central_mass_solar / orbit_radius_au)
+
+fn make_body(
+  {
+    id: String,
+    name: String,
+    kind: BodyKind,
+    mass_solar: f64,
+    radius_au: f64,
+    position_au: Vec2,
+    velocity_au_per_day: Vec2,
+    appearance: BodyAppearance
+  }
+) -> Body
+  {
+    id: id,
+    name: name,
+    kind: kind,
+    mass_solar: mass_solar,
+    radius_au: radius_au,
+    position_au: position_au,
+    velocity_au_per_day: velocity_au_per_day,
+    appearance: appearance
+  }
+
+fn make_appearance(
+  {
+    primary_color: String,
+    secondary_color: String,
+    trail_color: String,
+    glow_strength: f64
+  }
+) -> BodyAppearance
+  {
+    primary_color: primary_color,
+    secondary_color: secondary_color,
+    trail_color: trail_color,
+    glow_strength: glow_strength
+  }
+
+fn settings({ timestep_days: f64, softening_au: f64 }) -> SimulationSettings
+  let defaults = default_settings()
+  {
+    fixed_timestep_days: timestep_days,
+    softening_au: softening_au,
+    trails_enabled: defaults.trails_enabled,
+    velocity_vectors_enabled: defaults.velocity_vectors_enabled,
+    labels_enabled: defaults.labels_enabled
+  }
+
+fn camera({ center_au: Vec2, pixels_per_au: f64 }) -> CameraView
+  { center_au: center_au, pixels_per_au: pixels_per_au }
+
+fn make_scenario(
+  {
+    key: ScenarioKey,
+    slug: String,
+    name: String,
+    description: String,
+    bodies: Array<Body>,
+    settings: SimulationSettings,
+    camera: CameraView
+  }
+) -> BuiltInScenario
+  {
+    key: key,
+    slug: slug,
+    name: name,
+    description: description,
+    bodies: bodies,
+    settings: settings,
+    camera: camera
+  }
+
+fn asteroid_primary(index: i32) -> String
+  if index % 3 == 0:
+    return "#b9a38e"
+  if index % 3 == 1:
+    return "#8f9aa3"
+  "#c28368"

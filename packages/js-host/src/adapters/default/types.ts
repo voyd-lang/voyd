@@ -204,6 +204,8 @@ export type NodeFsPromises = {
   rmdir: (path: string) => Promise<void>;
   unlink: (path: string) => Promise<void>;
   readdir: (path: string) => Promise<string[]>;
+  mkdir: (path: string, options: { recursive: true }) => Promise<unknown>;
+  rename: (oldPath: string, newPath: string) => Promise<void>;
 };
 
 export type NodeReadlinePromises = {

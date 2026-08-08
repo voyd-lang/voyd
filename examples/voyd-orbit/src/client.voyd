@@ -1,0 +1,69 @@
+//! Voyd Orbit browser entrypoint. The complete application runtime—including
+//! frame scheduling, keyboard handling, HTTP, state, physics, and rendering—is
+//! retained in this Voyd program.
+
+pub use self::model::{ Model, initial_model }
+pub use self::update::{ Msg, step }
+pub use self::view::view
+
+use self::render_scene::draw
+use std::array::Array
+use std::string::type::String
+use std::vx::{
+  AnimationFrame,
+  KeyboardEvent,
+  Program,
+  Sub,
+  WindowSize,
+  animation_frame,
+  keyboard_on_key_down,
+  next,
+  program,
+  window_on_resize
+}
+
+pub fn app() -> Program<Model, Msg>
+  program({ init, hydrate, step, view, subscriptions })
+
+fn init() -> Program<Model, Msg>
+  let model = initial_model()
+  next(model: model, cmd: draw<Msg>(model))
+
+fn hydrate(model: Model) -> Program<Model, Msg>
+  next(model: model, cmd: draw<Msg>(model))
+
+fn subscriptions(_model: Model) -> Sub<Msg>
+  Sub<Msg>::batch([
+    animation_frame<Msg>(
+      key: "orbit-animation",
+      handler: (frame: AnimationFrame) -> Msg => Msg::AnimationTick {
+        timestamp_millis: frame.timestamp
+      }
+    ),
+    window_on_resize<Msg>(
+      key: "orbit-viewport",
+      handler: (size: WindowSize) -> Msg => Msg::ViewportChanged {
+        width: size.width,
+        height: size.height
+      }
+    ),
+    keyboard(" "),
+    keyboard("Spacebar"),
+    keyboard("r"),
+    keyboard("R"),
+    keyboard("f"),
+    keyboard("F"),
+    keyboard("Delete"),
+    keyboard("Backspace"),
+    keyboard("Escape"),
+    keyboard("+"),
+    keyboard("="),
+    keyboard("-"),
+    keyboard("_")
+  ])
+
+fn keyboard(key: String) -> Sub<Msg>
+  keyboard_on_key_down<Msg>(
+    key: key,
+    handler: (event: KeyboardEvent) -> Msg => Msg::KeyPressed { key: event.key }
+  )

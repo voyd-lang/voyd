@@ -1,0 +1,335 @@
+//! Browser application state and pure state helpers.
+
+use src::shared::{ PersistedSimulation, SimulationSummary, persisted_simulation }
+use src::simulation::{
+  Body,
+  BodyAppearance,
+  BodyKind,
+  BuiltInScenario,
+  CameraView,
+  SimulationState,
+  Vec2,
+  built_in_scenarios,
+  default_scenario,
+  state_from_scenario
+}
+use std::array::Array
+use std::enums::{ enum }
+use std::number::cast::to_string
+use std::optional::types::all
+use std::string::type::{ String, StringSlice }
+
+pub enum Tool
+  Navigate
+  AddBody { kind: BodyKind }
+
+pub enum Interaction
+  Idle
+  Panning { last_screen: Vec2 }
+  DraggingBody { body_id: String, offset_au: Vec2 }
+  PlacingBody { kind: BodyKind, origin_au: Vec2, cursor_au: Vec2 }
+
+pub enum NoticeKind
+  Neutral
+  Busy
+  Success
+  Error
+
+pub enum Notice
+  Hidden
+  Visible { kind: NoticeKind, message: String }
+
+pub type Viewport = {
+  width: f64,
+  height: f64
+}
+
+pub type CameraState = {
+  center_au: Vec2,
+  target_center_au: Vec2,
+  pixels_per_au: f64,
+  target_pixels_per_au: f64,
+  follow_body_id?: String
+}
+
+pub type PlaybackState = {
+  running: bool,
+  speed_index: i32,
+  accumulator_days: f64,
+  last_frame_millis: f64
+}
+
+pub type SessionState = {
+  name: String,
+  simulation: SimulationState,
+  baseline: SimulationState,
+  scenario_slug: String,
+  persisted_id?: String,
+  created_at: i64
+}
+
+pub type Trail = {
+  body_id: String,
+  points_au: Array<Vec2>
+}
+
+pub type UiState = {
+  selected_body_id?: String,
+  tool: Tool,
+  interaction: Interaction,
+  viewport: Viewport,
+  library_open: bool,
+  saved_simulations: Array<SimulationSummary>,
+  notice: Notice,
+  busy: bool,
+  field_focused: bool,
+  next_body_serial: i32
+}
+
+pub type Model = {
+  session: SessionState,
+  playback: PlaybackState,
+  camera: CameraState,
+  ui: UiState,
+  trails: Array<Trail>,
+  trail_sample_counter: i32
+}
+
+pub fn initial_model() -> Model
+  model_from_scenario(default_scenario())
+
+pub fn model_from_scenario(scenario: BuiltInScenario) -> Model
+  let simulation = state_from_scenario(scenario)
+  {
+    session: {
+      name: scenario.name,
+      simulation,
+      baseline: simulation,
+      scenario_slug: scenario.slug,
+      persisted_id: None {},
+      created_at: 0i64
+    },
+    playback: {
+      running: true,
+      speed_index: 1,
+      accumulator_days: 0.0,
+      last_frame_millis: 0.0
+    },
+    camera: {
+      center_au: scenario.camera.center_au,
+      target_center_au: scenario.camera.center_au,
+      pixels_per_au: scenario.camera.pixels_per_au,
+      target_pixels_per_au: scenario.camera.pixels_per_au,
+      follow_body_id: None {}
+    },
+    ui: {
+      selected_body_id: None {},
+      tool: Tool::Navigate {},
+      interaction: Interaction::Idle {},
+      viewport: { width: 1440.0, height: 900.0 },
+      library_open: false,
+      saved_simulations: Array<SimulationSummary>::init(),
+      notice: Notice::Hidden {},
+      busy: false,
+      field_focused: false,
+      next_body_serial: scenario.bodies.len() + 1
+    },
+    trails: empty_trails(scenario.bodies),
+    trail_sample_counter: 0
+  }
+
+pub fn model_from_persisted(value: PersistedSimulation) -> Model
+  {
+    session: {
+      name: value.name,
+      simulation: value.state,
+      baseline: value.state,
+      scenario_slug: "saved",
+      persisted_id: Some<String> { value: value.id },
+      created_at: value.created_at
+    },
+    playback: {
+      running: false,
+      speed_index: 1,
+      accumulator_days: 0.0,
+      last_frame_millis: 0.0
+    },
+    camera: {
+      center_au: value.camera.center_au,
+      target_center_au: value.camera.center_au,
+      pixels_per_au: value.camera.pixels_per_au,
+      target_pixels_per_au: value.camera.pixels_per_au,
+      follow_body_id: None {}
+    },
+    ui: {
+      selected_body_id: None {},
+      tool: Tool::Navigate {},
+      interaction: Interaction::Idle {},
+      viewport: { width: 1440.0, height: 900.0 },
+      library_open: false,
+      saved_simulations: Array<SimulationSummary>::init(),
+      notice: Notice::Visible { kind: NoticeKind::Success {}, message: "Simulation loaded" },
+      busy: false,
+      field_focused: false,
+      next_body_serial: value.state.bodies.len() + 1
+    },
+    trails: empty_trails(value.state.bodies),
+    trail_sample_counter: 0
+  }
+
+pub fn persisted_from_model(model: Model) -> PersistedSimulation
+  persisted_simulation(
+    id: model.session.persisted_id ?? String::init(),
+    name: model.session.name,
+    created_at: model.session.created_at,
+    updated_at: 0i64,
+    state: model.session.simulation,
+    camera: {
+      center_au: model.camera.target_center_au,
+      pixels_per_au: model.camera.target_pixels_per_au
+    }
+  )
+
+pub fn scenario_by_slug(slug: String) -> BuiltInScenario
+  let scenarios = built_in_scenarios()
+  match(scenarios.find(where: (scenario: BuiltInScenario) -> bool => scenario.slug == slug))
+    Some<BuiltInScenario> { value }:
+      value
+    None:
+      default_scenario()
+
+pub fn selected_body(model: Model) -> Option<Body>
+  match(model.ui.selected_body_id)
+    Some<String> { value: id }:
+      find_body(model.session.simulation.bodies, id)
+    None:
+      None {}
+
+pub fn find_body(bodies: Array<Body>, id: String) -> Option<Body>
+  bodies.find(where: (body: Body) -> bool => body.id == id)
+
+pub fn replace_body(bodies: Array<Body>, replacement: Body) -> Array<Body>
+  bodies.map((body: Body) -> Body =>
+    if body.id == replacement.id then: replacement else: body
+  )
+
+pub fn remove_body(bodies: Array<Body>, id: String) -> Array<Body>
+  bodies.filter(where: (body: Body) -> bool => not (body.id == id))
+
+pub fn default_body(kind: BodyKind, { id: String, position_au: Vec2, velocity_au_per_day: Vec2 }) -> Body
+  match(kind)
+    BodyKind::Star:
+      body(
+        id,
+        name: "New star ".concat(to_string(id_suffix(id))),
+        kind: kind,
+        mass_solar: 1.0,
+        radius_au: 0.00465,
+        position_au: position_au,
+        velocity_au_per_day: velocity_au_per_day,
+        appearance: appearance("#fff1b8", "#ff9e48", "#ffd07c", glow: 1.0)
+      )
+    BodyKind::Planet:
+      body(
+        id,
+        name: "New planet ".concat(to_string(id_suffix(id))),
+        kind: kind,
+        mass_solar: 0.000003,
+        radius_au: 0.000043,
+        position_au: position_au,
+        velocity_au_per_day: velocity_au_per_day,
+        appearance: appearance("#76b9ee", "#31558c", "#68b6e5", glow: 0.02)
+      )
+    BodyKind::Moon:
+      body(
+        id,
+        name: "New moon ".concat(to_string(id_suffix(id))),
+        kind: kind,
+        mass_solar: 0.000000037,
+        radius_au: 0.000012,
+        position_au: position_au,
+        velocity_au_per_day: velocity_au_per_day,
+        appearance: appearance("#d8dee8", "#6e7886", "#aab8c8", glow: 0.0)
+      )
+    BodyKind::Asteroid:
+      body(
+        id,
+        name: "New asteroid ".concat(to_string(id_suffix(id))),
+        kind: kind,
+        mass_solar: 0.0000000000002,
+        radius_au: 0.000002,
+        position_au: position_au,
+        velocity_au_per_day: velocity_au_per_day,
+        appearance: appearance("#b6aa9c", "#504944", "#8f867d", glow: 0.0)
+      )
+    BodyKind::BlackHole:
+      body(
+        id,
+        name: "New black hole ".concat(to_string(id_suffix(id))),
+        kind: kind,
+        mass_solar: 4.0,
+        radius_au: 0.00014,
+        position_au: position_au,
+        velocity_au_per_day: velocity_au_per_day,
+        appearance: appearance("#080a13", "#e89d59", "#7666b5", glow: 0.7)
+      )
+
+pub fn speed_days_per_second(index: i32) -> f64
+  if index == 0:
+    return 2.0
+  if index == 2:
+    return 60.0
+  if index == 3:
+    return 180.0
+  12.0
+
+pub fn speed_label(index: i32) -> String
+  if index == 0:
+    return "0.25×"
+  if index == 2:
+    return "5×"
+  if index == 3:
+    return "15×"
+  "1×"
+
+pub fn empty_trails(bodies: Array<Body>) -> Array<Trail>
+  bodies.map((body: Body) -> Trail => {
+    body_id: body.id,
+    points_au: Array<Vec2>::init()
+  })
+
+pub fn camera_view(camera: CameraState) -> CameraView
+  { center_au: camera.target_center_au, pixels_per_au: camera.target_pixels_per_au }
+
+fn body(
+  id: String,
+  {
+    name: String,
+    kind: BodyKind,
+    mass_solar: f64,
+    radius_au: f64,
+    position_au: Vec2,
+    velocity_au_per_day: Vec2,
+    appearance: BodyAppearance
+  }
+) -> Body
+  { id, name, kind, mass_solar, radius_au, position_au, velocity_au_per_day, appearance }
+
+fn appearance(
+  primary_color: String,
+  secondary_color: String,
+  trail_color: String,
+  { glow: f64 }
+) -> BodyAppearance
+  { primary_color, secondary_color, trail_color, glow_strength: glow }
+
+fn id_suffix(id: String) -> i32
+  match(id.split(on: "-", keep_empty: false).last())
+    Some<StringSlice> { value }:
+      match(value.parse_int())
+        Ok<i32> { value }:
+          value
+        Err:
+          1
+    None:
+      1

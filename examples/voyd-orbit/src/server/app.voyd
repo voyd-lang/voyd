@@ -1,0 +1,225 @@
+//! Voyd Orbit's JSON REST API.
+//!
+//! `api_app` returns a pure route table. Its handlers retain the repository's
+//! explicit filesystem, clock, and random capabilities, allowing callers to
+//! serve it normally or exercise it directly through `App.handle` in tests.
+
+use super::repository::{ RepositoryError, SimulationRepository }
+use src::shared::{
+  PersistedSimulation,
+  SimulationSummary,
+  api_error_json,
+  simulation_from_json,
+  simulation_json,
+  summaries_json
+}
+use pkg::web::{ App, Context, app }
+use std::array::Array
+use std::fs::Fs
+use std::http::{ HttpError, Response }
+use std::json::JsonError
+use std::optional::types::all
+use std::random::Random
+use std::result::types::all
+use std::string::type::String
+use std::time::Time
+
+/// Builds the production API using `./data/simulations`.
+pub fn api_app() -> App
+  api_app(SimulationRepository::orbit_data())
+
+/// Builds the API around an explicit repository for composition and tests.
+pub fn api_app(repository: SimulationRepository) -> App
+  with_api_routes(app(), repository)
+
+/// Adds API routes to an existing Web app while preserving its outer policies.
+pub fn with_api_routes(base: App, repository: SimulationRepository) -> App
+  base
+    .get("/api/simulations", handler: () -> Response => list_simulations(repository))
+    .get("/api/simulations/:id", handler: (ctx: Context) -> Response =>
+      get_simulation(repository, route_id(ctx))
+    )
+    .post("/api/simulations", handler: (ctx: Context) -> Response =>
+      create_simulation(repository, ctx)
+    )
+    .put("/api/simulations/:id", handler: (ctx: Context) -> Response =>
+      update_simulation(repository, route_id(ctx), ctx)
+    )
+    .delete("/api/simulations/:id", handler: (ctx: Context) -> Response =>
+      delete_simulation(repository, route_id(ctx))
+    )
+    .method_not_allowed((_ctx: Context) -> Response =>
+      error_response(
+        Response::method_not_allowed(),
+        code: "method-not-allowed",
+        message: "The requested method is not supported for this endpoint"
+      )
+    )
+    .not_found((_ctx: Context) -> Response =>
+      error_response(
+        Response::not_found(),
+        code: "not-found",
+        message: "The requested endpoint does not exist"
+      )
+    )
+
+fn list_simulations(repository: SimulationRepository): Fs -> Response
+  match(repository.list())
+    Err<RepositoryError> { error }:
+      repository_error_response(error)
+    Ok<Array<SimulationSummary>> { value }:
+      match(summaries_json(value))
+        Err<JsonError> { error }:
+          error_response(
+            Response::internal_server_error(),
+            code: "serialization-failed",
+            message: error.message
+          )
+        Ok<String> { value: encoded }:
+          json_text(Response::ok(), encoded)
+
+fn get_simulation(
+  repository: SimulationRepository,
+  id: String
+): Fs -> Response
+  match(repository.get(id))
+    Err<RepositoryError> { error }:
+      repository_error_response(error)
+    Ok<Option<PersistedSimulation>> { value }:
+      match(value)
+        None:
+          error_response(
+            Response::not_found(),
+            code: "not-found",
+            message: "Simulation was not found"
+          )
+        Some<PersistedSimulation> { value }:
+          simulation_response(Response::ok(), value)
+
+fn create_simulation(
+  repository: SimulationRepository,
+  ctx: Context
+): (Fs, Random, Time) -> Response
+  match(request_simulation(ctx))
+    Err<Response> { error }:
+      error
+    Ok<PersistedSimulation> { value }:
+      match(repository.create(value))
+        Err<RepositoryError> { error }:
+          repository_error_response(error)
+        Ok<PersistedSimulation> { value: created }:
+          simulation_response(Response::created(), created)
+
+fn update_simulation(
+  repository: SimulationRepository,
+  id: String,
+  ctx: Context
+): (Fs, Random, Time) -> Response
+  match(request_simulation(ctx))
+    Err<Response> { error }:
+      error
+    Ok<PersistedSimulation> { value }:
+      match(repository.update(id, value))
+        Err<RepositoryError> { error }:
+          repository_error_response(error)
+        Ok<Option<PersistedSimulation>> { value }:
+          match(value)
+            None:
+              error_response(
+                Response::not_found(),
+                code: "not-found",
+                message: "Simulation was not found"
+              )
+            Some<PersistedSimulation> { value: updated }:
+              simulation_response(Response::ok(), updated)
+
+fn delete_simulation(
+  repository: SimulationRepository,
+  id: String
+): Fs -> Response
+  match(repository.delete(id))
+    Err<RepositoryError> { error }:
+      repository_error_response(error)
+    Ok<bool> { value: deleted }:
+      if deleted:
+        Response::no_content().empty()
+      else:
+        error_response(
+          Response::not_found(),
+          code: "not-found",
+          message: "Simulation was not found"
+        )
+
+fn request_simulation(ctx: Context) -> Result<PersistedSimulation, Response>
+  match(ctx.text())
+    Err<HttpError> { error }:
+      Err<Response> {
+        error: error_response(
+          Response::bad_request(),
+          code: "invalid-body",
+          message: "Request body is not valid UTF-8: ".concat(error.message)
+        )
+      }
+    Ok<String> { value: source }:
+      match(simulation_from_json(source))
+        Err<JsonError> { error }:
+          Err<Response> {
+            error: error_response(
+              Response::bad_request(),
+              code: "invalid-json",
+              message: "Request body is not a valid simulation: ".concat(error.message)
+            )
+          }
+        Ok<PersistedSimulation> { value }:
+          Ok<PersistedSimulation> { value }
+
+fn simulation_response(response: Response, value: PersistedSimulation) -> Response
+  match(simulation_json(value))
+    Err<JsonError> { error }:
+      error_response(
+        Response::internal_server_error(),
+        code: "serialization-failed",
+        message: error.message
+      )
+    Ok<String> { value: encoded }:
+      json_text(response, encoded)
+
+fn repository_error_response(error: RepositoryError) -> Response
+  if is_client_error(error):
+    error_response(Response::bad_request(), code: error.code, message: error.message)
+  else:
+    error_response(
+      Response::internal_server_error(),
+      code: error.code,
+      message: error.message
+    )
+
+fn is_client_error(error: RepositoryError) -> bool
+  let code = error.code
+  if code.equals("storage-failed"):
+    return false
+  if code.equals("serialization-failed"):
+    return false
+  if code.equals("corrupt-simulation"):
+    return false
+  if code.equals("id-generation-failed"):
+    return false
+  true
+
+fn error_response(response: Response, { code: String, message: String }) -> Response
+  match(api_error_json({ code, message }))
+    Ok<String> { value }:
+      json_text(response, value)
+    Err<JsonError>:
+      json_text(
+        Response::internal_server_error(),
+        "{\"code\":\"serialization-failed\",\"message\":\"Could not encode API error\"}"
+      )
+
+fn json_text(response: Response, value: String) -> Response
+  response
+    .with(header: "content-type", value: "application/json; charset=utf-8")
+    .text(value)
+
+fn route_id(ctx: Context) -> String
+  ctx.param("id") ?? String::init()

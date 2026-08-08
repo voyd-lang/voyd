@@ -1,7 +1,6 @@
 use std::enums::{ enum }
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
-use std::result::types::all
 use std::string::type::String
 use std::task::self as tasks
 use std::vx::all
@@ -15,6 +14,9 @@ enum Msg
   SaveIgnored
   Saved { value: i32 }
 
+enum WorkResult
+  Done { value: i32 }
+
 pub fn app() -> Program<Model, Msg>
   program({ init, step, view })
 
@@ -27,8 +29,10 @@ fn step(model: Model, msg: Msg): tasks::TaskRuntime -> Program<Model, Msg>
       next(
         model: Model { status: "Saving..." },
         cmd: Cmd<Msg>::task(
-          work: () -> MsgPack => msgpack::make_i32(41),
-          handler: (value: MsgPack) -> Msg => Msg::Saved { value: saved_value(value) }
+          work: () -> WorkResult => WorkResult::Done { value: 41 },
+          handler: (result: WorkResult) -> Msg => Msg::Saved {
+            value: work_result_value(result)
+          }
         )
       )
     Msg::SaveIgnored:
@@ -58,9 +62,7 @@ fn saved_label(value: i32) -> String
     value == 42: "Saved: 42"
     else: "Saved"
 
-fn saved_value(value: MsgPack) -> i32
-  match(msgpack::unpack_i32(value))
-    Ok<i32> { value }:
+fn work_result_value(result: WorkResult) -> i32
+  match(result)
+    WorkResult::Done { value }:
       value
-    Err:
-      0

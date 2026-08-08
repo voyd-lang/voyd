@@ -1,0 +1,695 @@
+//! Voyd Orbit's declarative browser and server-rendered interface.
+
+use super::model::{
+  Interaction,
+  Model,
+  Notice,
+  NoticeKind,
+  Tool,
+  selected_body,
+  speed_label
+}
+use super::update::Msg
+use src::shared::SimulationSummary
+use src::simulation::{ Body, BodyKind, BuiltInScenario, built_in_scenarios }
+use std::array::Array
+use std::math::{ round }
+use std::msgpack::MsgPack
+use std::number::cast::{ to_i64_checked, to_string }
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+use std::vx::all
+
+pub fn view(model: Model) -> Html<Msg>
+  <main class="orbit-shell" role="application" aria-label="Voyd Orbit gravity sandbox">
+    <SimulationCanvas model={model} />
+    <TopBar model={model} />
+    <ScenarioPicker model={model} />
+    <ToolShelf model={model} />
+    <PlacementHint model={model} />
+    <Inspector model={model} />
+    <ControlDock model={model} />
+    <ShortcutHints />
+    <MetricReadout model={model} />
+    <NoticeToast notice={model.ui.notice} />
+    <Library model={model} />
+  </main>
+
+fn SimulationCanvas({ model: Model }) -> Html<Msg>
+  <canvas
+    id="orbit-canvas"
+    class={canvas_class(model)}
+    aria-label="Interactive orbital simulation. Drag empty space to pan, scroll to zoom, and select bodies to inspect them."
+    on_pointer_down={(event: MouseEvent) -> Msg => Msg::PointerPressed {
+      x: event.x,
+      y: event.y
+    }}
+    on_pointer_move={(event: MouseEvent) -> Msg => Msg::PointerMoved {
+      x: event.x,
+      y: event.y
+    }}
+    on_pointer_up={(event: MouseEvent) -> Msg => Msg::PointerReleased {
+      x: event.x,
+      y: event.y
+    }}
+    on_wheel={(event: MouseEvent) -> Msg => Msg::WheelZoomed {
+      x: event.x,
+      y: event.y,
+      delta_y: event.delta_y
+    }}
+  ></canvas>
+
+fn TopBar({ model: Model }) -> Html<Msg>
+  <header class="chrome topbar">
+    <div class="brand" aria-label="Voyd Orbit">
+      <span class="brand-mark" aria-hidden="true"><span class="brand-dot"></span></span>
+      <span class="brand-copy">
+        <strong>Voyd Orbit</strong>
+        <span>Gravity, composed</span>
+      </span>
+    </div>
+    <div class="top-actions">
+      <label class="field">
+        <span class="sr-only">Simulation name</span>
+        <input
+          type="text"
+          aria-label="Simulation name"
+          maxlength="80"
+          placeholder="Untitled system"
+          value={model.session.name}
+          disabled={model.ui.busy}
+          on_focus={Msg::FieldFocused {}}
+          on_blur={Msg::FieldBlurred {}}
+          on_input={(event: InputEvent) -> Msg => Msg::SessionNameChanged { value: event.value }}
+        />
+      </label>
+      <button
+        class="quiet-button"
+        type="button"
+        disabled={model.ui.busy}
+        on_click={Msg::OpenLibrary {}}
+      >
+        Library
+      </button>
+      <button
+        class="primary-button"
+        type="button"
+        disabled={model.ui.busy}
+        on_click={Msg::SaveCurrent {}}
+      >
+        {save_label(model)}
+      </button>
+    </div>
+  </header>
+
+fn ScenarioPicker({ model: Model }) -> Html<Msg>
+  let scenarios = built_in_scenarios()
+  <div class="chrome scenario-picker glass">
+    <label for="scenario-select">Scenario</label>
+    <select
+      id="scenario-select"
+      aria-label="Built-in scenario"
+      disabled={model.ui.busy}
+      on_change={(event: InputEvent) -> Msg => Msg::ScenarioChanged { slug: event.value }}
+    >
+      {scenarios.map((scenario: BuiltInScenario) =>
+        ScenarioOption(
+          scenario: scenario,
+          selected: scenario.slug == model.session.scenario_slug
+        )
+      )}
+    </select>
+  </div>
+
+fn ScenarioOption({ scenario: BuiltInScenario, selected: bool }) -> Html<Msg>
+  element(
+    tag: "option",
+    attrs: [
+      attr(name: "value", value: scenario.slug),
+      attr(name: "selected", value: selected)
+    ],
+    children: [text(scenario.name)]
+  )
+
+fn ToolShelf({ model: Model }) -> Html<Msg>
+  <aside class="chrome tool-shelf glass" aria-label="Canvas tools">
+    <span class="tool-label">Create</span>
+    <button
+      class={navigate_tool_class(model.ui.tool)}
+      type="button"
+      aria-label="Navigate and select"
+      aria-pressed={aria_bool(is_navigate_tool(model.ui.tool))}
+      on_click={Msg::ChooseNavigateTool {}}
+    >
+      <span aria-hidden="true">✥</span>
+      <span class="tooltip">Navigate · drag to pan</span>
+    </button>
+    <BodyTool model={model} kind={BodyKind::Star {}} label="Star" color="#ffd778" />
+    <BodyTool model={model} kind={BodyKind::Planet {}} label="Planet" color="#72c5ff" />
+    <BodyTool model={model} kind={BodyKind::Moon {}} label="Moon" color="#d7dfeb" />
+    <BodyTool model={model} kind={BodyKind::Asteroid {}} label="Asteroid" color="#aa9784" />
+    <BodyTool model={model} kind={BodyKind::BlackHole {}} label="Black hole" color="#070914" />
+  </aside>
+
+fn BodyTool({ model: Model, kind: BodyKind, label: String, color: String }) -> Html<Msg>
+  <button
+    class={body_tool_class(model.ui.tool, kind)}
+    type="button"
+    aria-label={"Add ".concat(label.lowered())}
+    aria-pressed={aria_bool(is_body_tool(model.ui.tool, kind))}
+    on_click={Msg::ChooseBodyTool { kind }}
+  >
+    <BodyGlyph kind={kind} color={color} />
+    <span class="tooltip">{label} · click then drag</span>
+  </button>
+
+fn BodyGlyph({ kind: BodyKind, color: String }) -> Html<Msg>
+  element(
+    tag: "span",
+    attrs: [
+      class(glyph_class(kind)),
+      attr(name: "aria-hidden", value: "true"),
+      style(name: "--glyph-color", value: color),
+      style(name: "--glyph-size", value: glyph_size(kind)),
+      style(name: "--glyph-glow", value: glyph_glow(kind))
+    ],
+    children: Array<MsgPack>::init()
+  )
+
+fn PlacementHint({ model: Model }) -> Html<Msg>
+  match(model.ui.interaction)
+    Interaction::PlacingBody:
+      <div class="chrome placement-hint glass" role="status">
+        <span>Drag to aim the velocity vector, then release to launch</span>
+        <kbd>Esc</kbd>
+      </div>
+    else:
+      match(model.ui.tool)
+        Tool::AddBody { kind }:
+          <div class="chrome placement-hint glass" role="status">
+            <span>Click to place a {body_kind_label(kind).lowered()}, then drag to set velocity</span>
+            <kbd>Esc</kbd>
+          </div>
+        Tool::Navigate:
+          empty()
+
+fn Inspector({ model: Model }) -> Html<Msg>
+  let content = match(selected_body(model))
+    Some<Body> { value }:
+      SelectedBodyInspector(model: model, body: value)
+    None:
+      EmptyInspector({})
+  <aside class="chrome inspector glass" aria-label="Body inspector">
+    {content}
+  </aside>
+
+fn EmptyInspector(_props: {}) -> Html<Msg>
+  <div class="selection-empty">
+    <strong>No body selected</strong>
+    Click a body in the simulation to inspect its mass, orbit, velocity, and appearance.
+  </div>
+
+fn SelectedBodyInspector({ model: Model, body: Body }) -> Html<Msg>
+  <div>
+    <header class="inspector-header">
+      <div class="inspector-title">
+        <BodyGlyph kind={body.kind} color={body.appearance.primary_color} />
+        <span>
+          <strong>{body.name}</strong>
+          <small>{body_kind_label(body.kind)}</small>
+        </span>
+      </div>
+      <button
+        class="icon-button"
+        type="button"
+        aria-label="Close body inspector"
+        on_click={Msg::Deselect {}}
+      >×</button>
+    </header>
+    <div class="inspector-body">
+      <section class="inspector-section">
+        <p class="section-label">{"Identity & scale"}</p>
+        <div class="field-grid">
+          <label class="field wide">
+            <span>Name</span>
+            <input
+              type="text"
+              maxlength="80"
+              value={body.name}
+              disabled={model.ui.busy}
+              on_focus={Msg::FieldFocused {}}
+              on_blur={Msg::FieldBlurred {}}
+              on_input={(event: InputEvent) -> Msg => Msg::BodyNameChanged { value: event.value }}
+            />
+          </label>
+          <label class="field field-unit" data-unit="M☉">
+            <span>Mass</span>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={to_string(body.mass_solar)}
+              disabled={model.ui.busy}
+              on_focus={Msg::FieldFocused {}}
+              on_blur={Msg::FieldBlurred {}}
+              on_input={(event: InputEvent) -> Msg => Msg::BodyMassChanged { value: event.value }}
+            />
+          </label>
+          <label class="field field-unit" data-unit="AU">
+            <span>Radius</span>
+            <input
+              type="number"
+              min="0"
+              step="any"
+              value={to_string(body.radius_au)}
+              disabled={model.ui.busy}
+              on_focus={Msg::FieldFocused {}}
+              on_blur={Msg::FieldBlurred {}}
+              on_input={(event: InputEvent) -> Msg => Msg::BodyRadiusChanged { value: event.value }}
+            />
+          </label>
+        </div>
+      </section>
+      <section class="inspector-section">
+        <p class="section-label">Position · astronomical units</p>
+        <div class="field-grid">
+          <NumberField
+            label="X"
+            unit="AU"
+            number={body.position_au.x}
+            busy={model.ui.busy}
+            changed={(value: String) -> Msg => Msg::BodyPositionXChanged { value }}
+          />
+          <NumberField
+            label="Y"
+            unit="AU"
+            number={body.position_au.y}
+            busy={model.ui.busy}
+            changed={(value: String) -> Msg => Msg::BodyPositionYChanged { value }}
+          />
+        </div>
+      </section>
+      <section class="inspector-section">
+        <p class="section-label">Velocity · astronomical units per day</p>
+        <div class="field-grid">
+          <NumberField
+            label="X"
+            unit="AU/d"
+            number={body.velocity_au_per_day.x}
+            busy={model.ui.busy}
+            changed={(value: String) -> Msg => Msg::BodyVelocityXChanged { value }}
+          />
+          <NumberField
+            label="Y"
+            unit="AU/d"
+            number={body.velocity_au_per_day.y}
+            busy={model.ui.busy}
+            changed={(value: String) -> Msg => Msg::BodyVelocityYChanged { value }}
+          />
+        </div>
+      </section>
+      <section class="inspector-section">
+        <p class="section-label">Appearance</p>
+        <div class="field-grid">
+          <label class="field wide">
+            <span>{"Body & trail color"}</span>
+            <input
+              type="color"
+              value={body.appearance.primary_color}
+              disabled={model.ui.busy}
+              on_focus={Msg::FieldFocused {}}
+              on_blur={Msg::FieldBlurred {}}
+              on_input={(event: InputEvent) -> Msg => Msg::BodyColorChanged { value: event.value }}
+            />
+          </label>
+        </div>
+      </section>
+      <div class="inspector-actions">
+        <button
+          class={follow_button_class(model, body)}
+          type="button"
+          disabled={model.ui.busy}
+          aria-pressed={aria_bool(is_following(model, body))}
+          on_click={Msg::ToggleFollow {}}
+        >
+          {follow_button_label(model, body)}
+        </button>
+        <button
+          class="danger-button"
+          type="button"
+          disabled={model.ui.busy}
+          on_click={Msg::DeleteSelected {}}
+        >
+          Delete body
+        </button>
+      </div>
+    </div>
+  </div>
+
+fn NumberField({
+  label: String,
+  unit: String,
+  number: f64,
+  busy: bool,
+  changed: fn(String) -> Msg
+}) -> Html<Msg>
+  <label class="field field-unit" data-unit={unit}>
+    <span>{label}</span>
+    <input
+      type="number"
+      step="any"
+      value={to_string(number)}
+      disabled={busy}
+      on_focus={Msg::FieldFocused {}}
+      on_blur={Msg::FieldBlurred {}}
+      on_input={(event: InputEvent) -> Msg => changed(event.value)}
+    />
+  </label>
+
+fn ControlDock({ model: Model }) -> Html<Msg>
+  let settings = model.session.simulation.settings
+  <nav class="chrome control-dock glass" aria-label="Simulation controls">
+    <div class="transport">
+      <button
+        class="play-button"
+        type="button"
+        aria-label={if model.playback.running then: "Pause simulation" else: "Play simulation"}
+        aria-pressed={aria_bool(model.playback.running)}
+        on_click={Msg::TogglePlayback {}}
+      >
+        <span aria-hidden="true">{if model.playback.running then: "Ⅱ" else: "▶"}</span>
+      </button>
+      <button
+        class="icon-button"
+        type="button"
+        aria-label="Reset simulation"
+        on_click={Msg::ResetSimulation {}}
+      >↺</button>
+    </div>
+    <span class="divider" aria-hidden="true"></span>
+    <div class="speed-control" aria-label="Simulation speed">
+      <button
+        class="speed-button"
+        type="button"
+        aria-label="Decrease speed"
+        on_click={Msg::ChangeSpeed { delta: -1 }}
+      >−</button>
+      <span class="speed-label">{speed_label(model.playback.speed_index)}</span>
+      <button
+        class="speed-button"
+        type="button"
+        aria-label="Increase speed"
+        on_click={Msg::ChangeSpeed { delta: 1 }}
+      >+</button>
+    </div>
+    <span class="divider" aria-hidden="true"></span>
+    <div class="toggle-row">
+      <ToggleChip
+        label="Trails"
+        active={settings.trails_enabled}
+        message={Msg::ToggleTrails {}}
+      />
+      <ToggleChip
+        label="Vectors"
+        active={settings.velocity_vectors_enabled}
+        message={Msg::ToggleVelocityVectors {}}
+      />
+      <ToggleChip
+        label="Labels"
+        active={settings.labels_enabled}
+        message={Msg::ToggleLabels {}}
+      />
+    </div>
+  </nav>
+
+fn ToggleChip({ label: String, active: bool, message: Msg }) -> Html<Msg>
+  <button
+    class={toggle_class(active)}
+    type="button"
+    aria-pressed={aria_bool(active)}
+    on_click={message}
+  >{label}</button>
+
+fn ShortcutHints(_props: {}) -> Html<Msg>
+  <div class="chrome shortcut-hints" aria-label="Keyboard shortcuts">
+    <span class="shortcut"><kbd>Space</kbd><span>Play / pause</span></span>
+    <span class="shortcut"><kbd>R</kbd><span>Reset</span></span>
+    <span class="shortcut"><kbd>F</kbd><span>Follow</span></span>
+    <span class="shortcut"><kbd>Del</kbd><span>Remove</span></span>
+    <span class="shortcut"><kbd>＋ / −</kbd><span>Speed</span></span>
+    <span class="shortcut"><kbd>Esc</kbd><span>Deselect</span></span>
+  </div>
+
+fn MetricReadout({ model: Model }) -> Html<Msg>
+  <div class="chrome metric-readout" aria-label="Simulation metrics">
+    <span>{elapsed_label(model.session.simulation.elapsed_days)}</span>
+    <span>{to_string(model.session.simulation.bodies.len()).concat(" bodies")}</span>
+    <span>{one_decimal(model.camera.pixels_per_au).concat(" px/AU")}</span>
+  </div>
+
+fn NoticeToast({ notice: Notice }) -> Html<Msg>
+  match(notice)
+    Notice::Hidden:
+      empty()
+    Notice::Visible { kind, message }:
+      <div class={notice_class(kind)} role="status" aria-live="polite">{message}</div>
+
+fn Library({ model: Model }) -> Html<Msg>
+  if not model.ui.library_open:
+    return empty()
+  <div class="library-backdrop" role="presentation">
+    <section
+      class="library-panel glass"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="library-title"
+    >
+      <header class="library-header">
+        <div>
+          <p class="eyebrow">Local observatory</p>
+          <h2 id="library-title">Saved systems</h2>
+          <p>Each system is stored as a readable, versioned JSON document on the Voyd server.</p>
+        </div>
+        <button
+          class="icon-button"
+          type="button"
+          aria-label="Close saved simulations"
+          on_click={Msg::CloseLibrary {}}
+        >×</button>
+      </header>
+      <div class="library-toolbar">
+        <small>{library_status(model)}</small>
+        <button
+          class="primary-button"
+          type="button"
+          disabled={model.ui.busy}
+          on_click={Msg::SaveCurrent {}}
+        >Save current</button>
+      </div>
+      <SavedList model={model} />
+    </section>
+  </div>
+
+fn SavedList({ model: Model }) -> Html<Msg>
+  if model.ui.saved_simulations.is_empty():
+    <div class="library-empty">
+      <strong>Your observatory is empty</strong>
+      Save the current system, then return here to load, duplicate, or remove it.
+    </div>
+  else:
+    <div class="saved-list">
+      {model.ui.saved_simulations.map((summary: SimulationSummary) =>
+        <SavedCard summary={summary} busy={model.ui.busy} />
+      )}
+    </div>
+
+fn SavedCard({ summary: SimulationSummary, busy: bool }) -> Html<Msg>
+  <article class="saved-card" key={summary.id}>
+    <div class="saved-main">
+      <strong>{summary.name}</strong>
+      <div class="saved-meta">
+        <span>{to_string(summary.body_count).concat(" bodies")}</span>
+        <span>JSON · format v1</span>
+      </div>
+    </div>
+    <div class="saved-actions">
+      <button
+        class="primary-button"
+        type="button"
+        disabled={busy}
+        on_click={Msg::LoadSaved { id: summary.id }}
+      >Open</button>
+      <button
+        class="quiet-button"
+        type="button"
+        disabled={busy}
+        on_click={Msg::DuplicateSaved { id: summary.id }}
+      >Duplicate</button>
+      <button
+        class="danger-button"
+        type="button"
+        disabled={busy}
+        aria-label={"Delete ".concat(summary.name)}
+        on_click={Msg::DeleteSaved { id: summary.id }}
+      >Delete</button>
+    </div>
+  </article>
+
+fn canvas_class(model: Model) -> String
+  match(model.ui.interaction)
+    Interaction::Panning:
+      "simulation-canvas dragging"
+    Interaction::DraggingBody:
+      "simulation-canvas dragging"
+    Interaction::PlacingBody:
+      "simulation-canvas placing"
+    Interaction::Idle:
+      match(model.ui.tool)
+        Tool::AddBody:
+          "simulation-canvas placing"
+        Tool::Navigate:
+          "simulation-canvas"
+
+fn save_label(model: Model) -> String
+  if model.ui.busy:
+    return "Working…"
+  match(model.session.persisted_id)
+    Some<String>:
+      "Update"
+    None:
+      "Save"
+
+fn navigate_tool_class(tool: Tool) -> String
+  if is_navigate_tool(tool) then: "tool-button active" else: "tool-button"
+
+fn body_tool_class(tool: Tool, kind: BodyKind) -> String
+  if is_body_tool(tool, kind) then: "tool-button active" else: "tool-button"
+
+fn is_navigate_tool(tool: Tool) -> bool
+  match(tool)
+    Tool::Navigate:
+      true
+    Tool::AddBody:
+      false
+
+fn is_body_tool(tool: Tool, kind: BodyKind) -> bool
+  match(tool)
+    Tool::Navigate:
+      false
+    Tool::AddBody { kind: selected_kind }:
+      same_body_kind(selected_kind, kind)
+
+fn same_body_kind(left: BodyKind, right: BodyKind) -> bool
+  match(left)
+    BodyKind::Star:
+      match(right)
+        BodyKind::Star: true
+        else: false
+    BodyKind::Planet:
+      match(right)
+        BodyKind::Planet: true
+        else: false
+    BodyKind::Moon:
+      match(right)
+        BodyKind::Moon: true
+        else: false
+    BodyKind::Asteroid:
+      match(right)
+        BodyKind::Asteroid: true
+        else: false
+    BodyKind::BlackHole:
+      match(right)
+        BodyKind::BlackHole: true
+        else: false
+
+fn body_kind_label(kind: BodyKind) -> String
+  match(kind)
+    BodyKind::Star: "Star"
+    BodyKind::Planet: "Planet"
+    BodyKind::Moon: "Moon"
+    BodyKind::Asteroid: "Asteroid"
+    BodyKind::BlackHole: "Black hole"
+
+fn glyph_class(kind: BodyKind) -> String
+  match(kind)
+    BodyKind::BlackHole:
+      "body-glyph black-hole"
+    else:
+      "body-glyph"
+
+fn glyph_size(kind: BodyKind) -> String
+  match(kind)
+    BodyKind::Star: "17px"
+    BodyKind::Planet: "13px"
+    BodyKind::Moon: "9px"
+    BodyKind::Asteroid: "7px"
+    BodyKind::BlackHole: "15px"
+
+fn glyph_glow(kind: BodyKind) -> String
+  match(kind)
+    BodyKind::Star: "15px"
+    BodyKind::Planet: "9px"
+    BodyKind::Moon: "5px"
+    BodyKind::Asteroid: "3px"
+    BodyKind::BlackHole: "12px"
+
+fn follow_button_class(model: Model, body: Body) -> String
+  if is_following(model, body) then: "primary-button" else: "quiet-button"
+
+fn follow_button_label(model: Model, body: Body) -> String
+  if is_following(model, body) then: "Following" else: "Follow body"
+
+fn is_following(model: Model, body: Body) -> bool
+  match(model.camera.follow_body_id)
+    Some<String> { value }:
+      value == body.id
+    None:
+      false
+
+fn toggle_class(active: bool) -> String
+  if active then: "toggle-chip active" else: "toggle-chip"
+
+fn aria_bool(value: bool) -> String
+  if value then: "true" else: "false"
+
+fn elapsed_label(elapsed_days: f64) -> String
+  if elapsed_days < 365.25:
+    return one_decimal(elapsed_days).concat(" d")
+  one_decimal(elapsed_days / 365.25).concat(" yr")
+
+fn one_decimal(value: f64) -> String
+  match(to_i64_checked(round(value * 10.0)))
+    Err:
+      to_string(value)
+    Ok<i64> { value: scaled }:
+      let negative = scaled < 0i64
+      let magnitude = if negative then: 0i64 - scaled else: scaled
+      let whole = magnitude / 10i64
+      let fraction = magnitude % 10i64
+      let sign = if negative then: "-" else: String::init()
+      if fraction == 0i64:
+        return sign.concat(to_string(whole))
+      sign.concat(to_string(whole)).concat(".").concat(to_string(fraction))
+
+fn notice_class(kind: NoticeKind) -> String
+  match(kind)
+    NoticeKind::Neutral: "chrome toast glass"
+    NoticeKind::Busy: "chrome toast glass busy"
+    NoticeKind::Success: "chrome toast glass success"
+    NoticeKind::Error: "chrome toast glass error"
+
+fn library_status(model: Model) -> String
+  if model.ui.busy:
+    match(model.ui.notice)
+      Notice::Visible { message }:
+        return message
+      Notice::Hidden:
+        return "Working…"
+  let count = model.ui.saved_simulations.len()
+  if count == 1:
+    return "1 saved system"
+  to_string(count).concat(" saved systems")
+
+fn empty() -> Html<Msg>
+  fragment(Array<MsgPack>::init())

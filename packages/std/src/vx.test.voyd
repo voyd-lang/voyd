@@ -372,6 +372,125 @@ test "vx command constructors encode runtime payloads":
   assert_i64_payload_field(delayed.payload, "ms", 250i64)
   assert_string_payload_field(delayed.payload, "value", "later")
 
+test "vx canvas constructors encode typed draw primitives":
+  let line = canvas_line(
+    from: CanvasPoint { x: 1.0, y: 2.0 },
+    to: CanvasPoint { x: 3.0, y: 4.0 },
+    color: "#ffffff",
+    width: 2.5,
+    alpha: 0.75,
+    glow_color: "#88ccff",
+    glow_blur: 6.0
+  )
+  assert_string_payload_field(line.payload, "kind", "line")
+  assert_f64_payload_field(line.payload, "width", 2.5)
+  assert_f64_payload_field(line.payload, "alpha", 0.75)
+  assert_string_payload_field(line.payload, "glowColor", "#88ccff")
+
+  let polyline = canvas_polyline(
+    points: [
+      CanvasPoint { x: 0.0, y: 0.0 },
+      CanvasPoint { x: 5.0, y: 8.0 }
+    ],
+    color: "#6699ff",
+    closed: true,
+    fill: "#112244"
+  )
+  assert_string_payload_field(polyline.payload, "kind", "polyline")
+  assert_array_payload_len(polyline.payload, "points", 2)
+
+  let ellipse = canvas_ellipse(
+    center: CanvasPoint { x: 12.0, y: 18.0 },
+    radius_x: 9.0,
+    radius_y: 4.0,
+    rotation: 0.5,
+    stroke: "#aabbcc"
+  )
+  assert_string_payload_field(ellipse.payload, "kind", "ellipse")
+  assert_f64_payload_field(ellipse.payload, "radiusX", 9.0)
+  assert_f64_payload_field(ellipse.payload, "radiusY", 4.0)
+
+  let label = canvas_text(
+    position: CanvasPoint { x: 20.0, y: 24.0 },
+    value: "Voyd",
+    color: "#ffffff",
+    font: "600 14px sans-serif",
+    align: "center",
+    baseline: "middle",
+    max_width: 120.0
+  )
+  assert_string_payload_field(label.payload, "kind", "text")
+  assert_string_payload_field(label.payload, "value", "Voyd")
+  assert_f64_payload_field(label.payload, "maxWidth", 120.0)
+
+test "vx canvas frame and command encode radial circle rendering":
+  let gradient = canvas_radial_gradient(
+    inner_color: "#ffffff",
+    outer_color: "#ff880000",
+    inner_radius: 1.0,
+    outer_radius: 16.0
+  )
+  let circle = canvas_circle(
+    center: CanvasPoint { x: 80.0, y: 64.0 },
+    radius: 16.0,
+    stroke: "#ffcc88",
+    stroke_width: 2.0,
+    glow_color: "#ff8800",
+    glow_blur: 12.0,
+    radial_gradient: gradient
+  )
+  assert_string_payload_field(circle.payload, "kind", "circle")
+  assert_f64_payload_field(circle.payload, "radius", 16.0)
+  assert_payload_has_field(circle.payload, "radialGradient")
+
+  match(msgpack::unpack_map(circle.payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      match(value.get("radialGradient"))
+        Some<MsgPack> { value: radial }:
+          match(msgpack::unpack_map(radial))
+            Ok<Dict<String, MsgPack>> { value: radial_map }:
+              assert_string_field(radial_map, "innerColor", "#ffffff")
+              assert_string_field(radial_map, "outerColor", "#ff880000")
+              assert_f64_field(radial_map, "outerRadius", 16.0)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+  let canvas = canvas_frame(
+    selector: "#scene",
+    width: 960.0,
+    height: 540.0,
+    draws: [circle],
+    background: "#050711"
+  )
+  match(msgpack::unpack_map(canvas.payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_i32_field(value, "version", 1)
+      assert_string_field(value, "selector", "#scene")
+      assert_f64_field(value, "width", 960.0)
+      assert_f64_field(value, "height", 540.0)
+      assert_bool_field(value, "clear", true)
+      assert_string_field(value, "background", "#050711")
+      match(value.get("draws"))
+        Some<MsgPack> { value: draws }:
+          match(msgpack::unpack_array(draws))
+            Ok<Array<MsgPack>> { value: list }:
+              assert(list.len(), eq: 1)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
+    Err:
+      assert(false, eq: true)
+
+  let render = Cmd<MsgPack>::canvas_render(canvas)
+  assert_string_payload_field(render.payload, "type", "cmd")
+  assert_string_payload_field(render.payload, "kind", "canvas_render")
+  assert_payload_has_field(render.payload, "value")
+
 test "vx typed command constructors encode messages through the boundary":
   let message = Cmd<TypedVxTestMsg>::message(TypedVxTestMsg::Saved {})
   assert_string_payload_field(message.payload, "type", "cmd")
@@ -729,6 +848,20 @@ fn assert_i32_field(map: Dict<String, MsgPack>, field: StringSlice, expected: i3
 fn assert_i32_field(map: Dict<String, MsgPack>, field: String, expected: i32) -> void
   assert_i32_field(map, field.as_slice(), expected)
 
+fn assert_f64_field(map: Dict<String, MsgPack>, field: StringSlice, expected: f64) -> void
+  match(map.get(field.to_string()))
+    Some<MsgPack> { value }:
+      match(msgpack::unpack_f64(value))
+        Ok<f64> { value: actual }:
+          assert(actual, eq: expected)
+        Err:
+          assert(false, eq: true)
+    None:
+      assert(false, eq: true)
+
+fn assert_f64_field(map: Dict<String, MsgPack>, field: String, expected: f64) -> void
+  assert_f64_field(map, field.as_slice(), expected)
+
 fn assert_event_descriptor(value: MsgPack, event_name: StringSlice, handler_id: i32) -> void
   match(msgpack::unpack_map(value))
     Ok<Dict<String, MsgPack>> { value: event }:
@@ -785,6 +918,16 @@ fn assert_i32_payload_field(payload: MsgPack, field: StringSlice, expected: i32)
 
 fn assert_i32_payload_field(payload: MsgPack, field: String, expected: i32) -> void
   assert_i32_payload_field(payload, field.as_slice(), expected)
+
+fn assert_f64_payload_field(payload: MsgPack, field: StringSlice, expected: f64) -> void
+  match(msgpack::unpack_map(payload))
+    Ok<Dict<String, MsgPack>> { value }:
+      assert_f64_field(value, field, expected)
+    Err:
+      assert(false, eq: true)
+
+fn assert_f64_payload_field(payload: MsgPack, field: String, expected: f64) -> void
+  assert_f64_payload_field(payload, field.as_slice(), expected)
 
 fn assert_i64_payload_field(payload: MsgPack, field: StringSlice, expected: i64) -> void
   match(msgpack::unpack_map(payload))

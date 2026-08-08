@@ -1,0 +1,122 @@
+//! Browser REST client. Network and JSON failures are values consumed by the
+//! Voyd update loop, so a failed save never tears down the simulation.
+
+use src::shared::{
+  ApiError,
+  PersistedSimulation,
+  SimulationSummary,
+  api_error_from_json,
+  simulation_from_json,
+  simulation_json,
+  summaries_from_json
+}
+use std::array::Array
+use std::enums::{ enum }
+use std::error::{ HostError }
+use std::http::{ Body, Response }
+use std::http::client::{ ClientRequest }
+use std::http::client::self as http_client
+use std::json::JsonError
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+
+pub enum SimulationResult
+  Loaded { value: PersistedSimulation }
+  SimulationFailed { message: String }
+
+pub enum SummaryResult
+  Listed { values: Array<SimulationSummary> }
+  ListFailed { message: String }
+
+pub enum DeleteResult
+  Deleted { id: String }
+  DeleteFailed { message: String }
+
+pub fn fetch_simulations(): http_client::HttpClient -> SummaryResult
+  match(http_client::send(ClientRequest::get("/api/simulations")))
+    Err<HostError> { error }:
+      SummaryResult::ListFailed { message: error.message }
+    Ok<Response> { value: response }:
+      if not response.is_success():
+        return SummaryResult::ListFailed { message: response_error(response) }
+      match(response.text())
+        Err:
+          SummaryResult::ListFailed { message: "The server returned an unreadable simulation list" }
+        Ok<String> { value }:
+          match(summaries_from_json(value))
+            Ok<Array<SimulationSummary>> { value: values }:
+              SummaryResult::Listed { values }
+            Err<JsonError> { error }:
+              SummaryResult::ListFailed { message: error.message }
+
+pub fn fetch_simulation(id: String): http_client::HttpClient -> SimulationResult
+  decode_simulation_response(http_client::send(ClientRequest::get(simulation_url(id))))
+
+pub fn save_simulation(value: PersistedSimulation): http_client::HttpClient -> SimulationResult
+  match(simulation_json(value))
+    Err<JsonError> { error }:
+      SimulationResult::SimulationFailed { message: error.message }
+    Ok<String> { value: body }:
+      var request = ClientRequest::post(url: "/api/simulations", body: Body::text(body))
+      if not value.id.is_empty():
+        request = ClientRequest::put(url: simulation_url(value.id), body: Body::text(body))
+      decode_simulation_response(http_client::send(
+        request.with(header: "content-type", value: "application/json")
+      ))
+
+pub fn duplicate_simulation(id: String): http_client::HttpClient -> SimulationResult
+  match(fetch_simulation(id))
+    SimulationResult::SimulationFailed { message }:
+      SimulationResult::SimulationFailed { message }
+    SimulationResult::Loaded { value }:
+      save_simulation({
+        version: value.version,
+        id: String::init(),
+        name: value.name.concat(" copy"),
+        created_at: 0i64,
+        updated_at: 0i64,
+        state: value.state,
+        camera: value.camera
+      })
+
+pub fn delete_simulation(id: String): http_client::HttpClient -> DeleteResult
+  match(http_client::send(ClientRequest::delete(simulation_url(id))))
+    Err<HostError> { error }:
+      DeleteResult::DeleteFailed { message: error.message }
+    Ok<Response> { value: response }:
+      if response.is_success() then:
+        DeleteResult::Deleted { id }
+      else:
+        DeleteResult::DeleteFailed { message: response_error(response) }
+
+fn decode_simulation_response(result: Result<Response, HostError>) -> SimulationResult
+  match(result)
+    Err<HostError> { error }:
+      SimulationResult::SimulationFailed { message: error.message }
+    Ok<Response> { value: response }:
+      if not response.is_success():
+        return SimulationResult::SimulationFailed { message: response_error(response) }
+      match(response.text())
+        Err:
+          SimulationResult::SimulationFailed { message: "The server returned an unreadable simulation" }
+        Ok<String> { value }:
+          match(simulation_from_json(value))
+            Ok<PersistedSimulation> { value: simulation }:
+              SimulationResult::Loaded { value: simulation }
+            Err<JsonError> { error }:
+              SimulationResult::SimulationFailed { message: error.message }
+
+fn response_error(response: Response) -> String
+  match(response.text())
+    Err:
+      "The server could not complete that request"
+    Ok<String> { value }:
+      match(api_error_from_json(value))
+        Ok<ApiError> { value: error }:
+          error.message
+        Err:
+          if value.is_empty() then: "The server could not complete that request" else: value
+
+fn simulation_url(id: String) -> String
+  "/api/simulations/".concat(id)

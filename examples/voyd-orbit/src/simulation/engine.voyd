@@ -1,0 +1,196 @@
+//! Deterministic Newtonian gravity and velocity Verlet integration.
+//!
+//! Units are AU for distance, solar masses for mass, and days for time. Close
+//! encounters use Plummer softening instead of collisions or singular forces.
+
+use super::types::{ Body, BuiltInScenario, SimulationSettings, SimulationState }
+use super::vector::Vec2
+use std::array::Array
+use std::math::{ abs, sqrt }
+
+/// Newton's gravitational constant in AU³ / (solar mass · day²).
+pub let GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2 = 0.0002959122082855911
+
+pub fn default_settings() -> SimulationSettings
+  {
+    fixed_timestep_days: 0.125,
+    softening_au: 0.00005,
+    trails_enabled: true,
+    velocity_vectors_enabled: false,
+    labels_enabled: true
+  }
+
+pub fn state_from_scenario(scenario: BuiltInScenario) -> SimulationState
+  {
+    bodies: scenario.bodies,
+    settings: scenario.settings,
+    elapsed_days: 0.0
+  }
+
+/// Advances one configured fixed timestep.
+pub fn step(state: SimulationState) -> SimulationState
+  let timestep_days = state.settings.fixed_timestep_days
+  if timestep_days <= 0.0:
+    return state
+  {
+    bodies: integrate(
+      state.bodies,
+      timestep_days: timestep_days,
+      softening_au: state.settings.softening_au
+    ),
+    settings: state.settings,
+    elapsed_days: state.elapsed_days + timestep_days
+  }
+
+/// Advances an exact integer number of fixed timesteps.
+pub fn advance(state: SimulationState, { steps: i32 }) -> SimulationState
+  if steps <= 0:
+    return state
+  var current = state
+  var index = 0
+  while index < steps:
+    current = step(current)
+    index = index + 1
+  current
+
+/// Applies one velocity Verlet step without mutating the input collection.
+pub fn integrate(
+  bodies: Array<Body>,
+  { timestep_days: f64, softening_au: f64 }
+) -> Array<Body>
+  if timestep_days <= 0.0 or bodies.is_empty():
+    return bodies.copied()
+
+  let acceleration_before = accelerations(bodies, softening_au: softening_au)
+  let half_timestep_squared = 0.5 * timestep_days * timestep_days
+  let ~positioned = Array<Body>::with_capacity(bodies.len())
+  var index = 0
+  while index < bodies.len():
+    let body = bodies.at(index)
+    let next_position = body.position_au +
+      (body.velocity_au_per_day * timestep_days) +
+      (acceleration_before.at(index) * half_timestep_squared)
+    positioned.push(with_kinematics(
+      body,
+      position_au: next_position,
+      velocity_au_per_day: body.velocity_au_per_day
+    ))
+    index = index + 1
+
+  let acceleration_after = accelerations(positioned, softening_au: softening_au)
+  let half_timestep = 0.5 * timestep_days
+  let ~integrated = Array<Body>::with_capacity(positioned.len())
+  index = 0
+  while index < positioned.len():
+    let body = positioned.at(index)
+    let average_acceleration = acceleration_before.at(index) + acceleration_after.at(index)
+    integrated.push(with_kinematics(
+      body,
+      position_au: body.position_au,
+      velocity_au_per_day: body.velocity_au_per_day + (average_acceleration * half_timestep)
+    ))
+    index = index + 1
+  integrated
+
+/// Returns every body's acceleration in input order.
+pub fn accelerations(bodies: Array<Body>, { softening_au: f64 }) -> Array<Vec2>
+  let ~result = Array<Vec2>::with_capacity(bodies.len())
+  var target_index = 0
+  while target_index < bodies.len():
+    result.push(acceleration_for_body(
+      bodies,
+      target_index,
+      softening_au: softening_au
+    ))
+    target_index = target_index + 1
+  result
+
+/// Returns the acceleration at `position_au` caused by one source mass.
+pub fn gravitational_acceleration(
+  position_au: Vec2,
+  {
+    toward source_position_au: Vec2,
+    source_mass_solar: f64,
+    softening_au: f64
+  }
+) -> Vec2
+  if source_mass_solar <= 0.0:
+    return Vec2::zero()
+  let displacement_au = source_position_au - position_au
+  let epsilon_au = abs(softening_au)
+  let softened_distance_squared = displacement_au.length_squared() + (epsilon_au * epsilon_au)
+  if softened_distance_squared <= 0.0:
+    return Vec2::zero()
+  let inverse_distance_cubed =
+    1.0 / (softened_distance_squared * sqrt(softened_distance_squared))
+  let acceleration_scale = GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2 * source_mass_solar * inverse_distance_cubed
+  displacement_au * acceleration_scale
+
+/// Sums linear momentum in solar-mass · AU / day.
+pub fn total_momentum(bodies: Array<Body>) -> Vec2
+  var momentum = Vec2::zero()
+  var index = 0
+  while index < bodies.len():
+    let body = bodies.at(index)
+    momentum = momentum + (body.velocity_au_per_day * body.mass_solar)
+    index = index + 1
+  momentum
+
+/// Returns kinetic plus softened potential energy in solar-mass · AU² / day².
+pub fn total_energy(bodies: Array<Body>, { softening_au: f64 }) -> f64
+  let epsilon_au = abs(softening_au)
+  var energy = 0.0
+  var first_index = 0
+  while first_index < bodies.len():
+    let first = bodies.at(first_index)
+    energy = energy + (
+      0.5 * first.mass_solar * first.velocity_au_per_day.length_squared()
+    )
+    var second_index = first_index + 1
+    while second_index < bodies.len():
+      let second = bodies.at(second_index)
+      let separation_squared =
+        (second.position_au - first.position_au).length_squared() +
+          (epsilon_au * epsilon_au)
+      if separation_squared > 0.0:
+        let mass_product = first.mass_solar * second.mass_solar
+        let potential = GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2 * mass_product / sqrt(separation_squared)
+        energy = energy - potential
+      second_index = second_index + 1
+    first_index = first_index + 1
+  energy
+
+fn acceleration_for_body(
+  bodies: Array<Body>,
+  target_index: i32,
+  { softening_au: f64 }
+) -> Vec2
+  let target = bodies.at(target_index)
+  var acceleration = Vec2::zero()
+  var source_index = 0
+  while source_index < bodies.len():
+    if source_index != target_index:
+      let source = bodies.at(source_index)
+      acceleration = acceleration + gravitational_acceleration(
+        target.position_au,
+        toward: source.position_au,
+        source_mass_solar: source.mass_solar,
+        softening_au: softening_au
+      )
+    source_index = source_index + 1
+  acceleration
+
+fn with_kinematics(
+  body: Body,
+  { position_au: Vec2, velocity_au_per_day: Vec2 }
+) -> Body
+  {
+    id: body.id,
+    name: body.name,
+    kind: body.kind,
+    mass_solar: body.mass_solar,
+    radius_au: body.radius_au,
+    position_au: position_au,
+    velocity_au_per_day: velocity_au_per_day,
+    appearance: body.appearance
+  }

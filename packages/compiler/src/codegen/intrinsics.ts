@@ -43,6 +43,7 @@ import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 import { ensureDispatcher } from "./effects/dispatcher.js";
 import { ensureMsgPackFunctions } from "./effects/host-boundary/msgpack.js";
 import {
+  getOutcomeValueBoxType,
   unboxOutcomeValue,
   wrapValueInOutcome,
 } from "./effects/outcome-values.js";
@@ -388,6 +389,18 @@ const ensureTaskStarterHelper = ({
     callArgs as number[],
     base.resultType,
   );
+  const taskResultType = wasmTypeFor(desc.returnType, ctx);
+  if (taskResultType !== binaryen.none) {
+    // Host-boundary outcome encoding snapshots registered boxes after function
+    // codegen. Effectful task starters forward their typed result without
+    // boxing it in this helper, so register it for that later encoder emission.
+    getOutcomeValueBoxType({
+      valueType: taskResultType,
+      typeId: desc.returnType,
+      serializer: findSerializerForType(desc.returnType, ctx),
+      ctx,
+    });
+  }
   const body = effectful
     ? ctx.mod.call(
         ensureDispatcher(ctx),
@@ -668,6 +681,11 @@ const ensureRetainedCallbackHelper = ({
                     structInfo: info,
                     field: payloadField,
                     pointer: () => resultValue,
+                    // The callback's declared return type is this exact payload
+                    // envelope. A direct load also keeps effectful callbacks
+                    // from being evaluated once for a type check and again for
+                    // the field access.
+                    exactNominalTypeId: info.nominalId,
                     ctx,
                   });
                 })()

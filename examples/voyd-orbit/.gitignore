@@ -1,0 +1,4 @@
+public/assets/
+src/generated/
+data/simulations/*.json
+!data/simulations/.gitkeep

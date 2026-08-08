@@ -19,3 +19,7 @@ pub fn handle_imported_std_fs_ops(): () -> i32
     tail(_path)
   Fs::list_dir(tail, _path: MsgPack):
     tail(_path)
+  Fs::create_dir_all(tail, _path: MsgPack):
+    tail(_path)
+  Fs::rename(tail, _payload: MsgPack):
+    tail(_payload)

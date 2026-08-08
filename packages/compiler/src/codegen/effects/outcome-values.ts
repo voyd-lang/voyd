@@ -72,7 +72,10 @@ const ensureOutcomeValueBox = ({
   const cached = ctx.outcomeValueTypes.get(key);
   if (cached) return cached;
   const abiTypes = expandValueType(valueType);
-  const markerValue = typeId === ctx.program.primitives.bool ? 1 : undefined;
+  // Wasm GC canonicalizes structurally identical box types. Keep typed boxes
+  // distinguishable even when their values share the same erased Wasm type
+  // (for example, unrelated enums represented by the common object ref).
+  const markerValue = typeof typeId === "number" ? typeId : undefined;
   const storageTypes =
     typeof markerValue === "number" ? [...abiTypes, binaryen.i32] : abiTypes;
 

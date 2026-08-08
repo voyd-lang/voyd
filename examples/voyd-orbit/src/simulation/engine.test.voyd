@@ -1,0 +1,125 @@
+use super::engine::{
+  GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2,
+  gravitational_acceleration,
+  integrate,
+  total_energy,
+  total_momentum
+}
+use super::scenarios::{ built_in_scenarios, default_scenario }
+use super::vector::{ Vec2, distance, lerp }
+use super::types::{ Body, BodyKind }
+use std::array::Array
+use std::math::{ abs, sqrt }
+use std::string::type::String
+use std::test::assertions::all
+
+test "Vec2 operations compose without losing value semantics":
+  let first = Vec2::init(3.0, 4.0)
+  let second = Vec2::init(-1.0, 2.0)
+  let sum = first + second
+  let difference = first - second
+  assert(close(sum.x, 2.0, 0.000000000001), eq: true)
+  assert(close(sum.y, 6.0, 0.000000000001), eq: true)
+  assert(close(difference.x, 4.0, 0.000000000001), eq: true)
+  assert(close(first.length(), 5.0, 0.000000000001), eq: true)
+  assert(close(first.dot(second), 5.0, 0.000000000001), eq: true)
+  assert(close(distance(first, second), sqrt(20.0), 0.000000000001), eq: true)
+  let midpoint = lerp(first, to: second, at: 0.5)
+  assert(close(midpoint.x, 1.0, 0.000000000001), eq: true)
+  assert(close(midpoint.y, 3.0, 0.000000000001), eq: true)
+
+test "gravity points toward the source with the expected AU-day magnitude":
+  let acceleration = gravitational_acceleration(
+    Vec2::init(1.0, 0.0),
+    toward: Vec2::zero(),
+    source_mass_solar: 1.0,
+    softening_au: 0.0
+  )
+  assert(
+    close(
+      acceleration.x,
+      0.0 - GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2,
+      0.000000000000001
+    ),
+    eq: true
+  )
+  assert(close(acceleration.y, 0.0, 0.000000000000001), eq: true)
+  let coincident = gravitational_acceleration(
+    Vec2::zero(),
+    toward: Vec2::zero(),
+    source_mass_solar: 1.0,
+    softening_au: 0.0001
+  )
+  assert(coincident.length_squared(), eq: 0.0)
+
+test "velocity Verlet preserves inertial motion for an isolated body":
+  let initial = test_body(
+    id: "drifter",
+    mass_solar: 0.000001,
+    position_au: Vec2::init(-1.0, 2.0),
+    velocity_au_per_day: Vec2::init(0.25, -0.125)
+  )
+  let next = integrate([initial], timestep_days: 2.0, softening_au: 0.0001).at(0)
+  assert(close(next.position_au.x, -0.5, 0.000000000001), eq: true)
+  assert(close(next.position_au.y, 1.75, 0.000000000001), eq: true)
+  assert(close(next.velocity_au_per_day.x, 0.25, 0.000000000001), eq: true)
+  assert(close(next.velocity_au_per_day.y, -0.125, 0.000000000001), eq: true)
+
+test "a symmetric orbit conserves momentum and bounded energy":
+  let relative_speed = sqrt(2.0 * GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2)
+  let left = test_body(
+    id: "left",
+    mass_solar: 1.0,
+    position_au: Vec2::init(-0.5, 0.0),
+    velocity_au_per_day: Vec2::init(0.0, 0.5 * relative_speed)
+  )
+  let right = test_body(
+    id: "right",
+    mass_solar: 1.0,
+    position_au: Vec2::init(0.5, 0.0),
+    velocity_au_per_day: Vec2::init(0.0, -0.5 * relative_speed)
+  )
+  let softening_au = 0.00001
+  let initial: Array<Body> = [left, right]
+  let initial_momentum = total_momentum(initial)
+  let initial_energy = total_energy(initial, softening_au: softening_au)
+  var evolved = initial
+  var index = 0
+  while index < 1200:
+    evolved = integrate(evolved, timestep_days: 0.05, softening_au: softening_au)
+    index = index + 1
+  let momentum_drift = (total_momentum(evolved) - initial_momentum).length()
+  let energy_drift = abs(total_energy(evolved, softening_au: softening_au) - initial_energy)
+  assert(momentum_drift <= 0.000000000001, eq: true)
+  assert(energy_drift <= 0.000000001, eq: true)
+
+test "the curated catalogue exposes all six scenarios":
+  assert(built_in_scenarios().len(), eq: 6)
+  assert(default_scenario().bodies.len() >= 6, eq: true)
+
+fn test_body(
+  {
+    id: String,
+    mass_solar: f64,
+    position_au: Vec2,
+    velocity_au_per_day: Vec2
+  }
+) -> Body
+  {
+    id: id,
+    name: id,
+    kind: BodyKind::Planet {},
+    mass_solar: mass_solar,
+    radius_au: 0.00001,
+    position_au: position_au,
+    velocity_au_per_day: velocity_au_per_day,
+    appearance: {
+      primary_color: "#ffffff",
+      secondary_color: "#888888",
+      trail_color: "#ffffff",
+      glow_strength: 0.0
+    }
+  }
+
+fn close(left: f64, right: f64, epsilon: f64) -> bool
+  abs(left - right) <= epsilon

@@ -1,5 +1,8 @@
 import http from "node:http";
+import { mkdtemp, rm } from "node:fs/promises";
 import net from "node:net";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type {
   EffectContinuation,
@@ -403,6 +406,63 @@ describe("registerDefaultHostAdapters", () => {
     expect(result.value).toMatchObject({ ok: false });
   });
 
+  it("creates directories and renames paths through the node fs adapter", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.fs", opName: "create_dir_all", opId: 0 },
+      { effectId: "voyd.std.fs", opName: "write_string", opId: 1 },
+      { effectId: "voyd.std.fs", opName: "rename", opId: 2 },
+      { effectId: "voyd.std.fs", opName: "read_string", opId: 3 },
+    ]);
+    const root = await mkdtemp(join(tmpdir(), "voyd-js-host-fs-"));
+
+    try {
+      const { host, getHandler } = createFakeHost(table);
+      await registerDefaultHostAdapters({
+        host,
+        options: { runtime: "node" },
+      });
+
+      const nestedDirectory = join(root, "nested", "deep");
+      const sourcePath = join(nestedDirectory, "orbit.tmp");
+      const destinationPath = join(nestedDirectory, "orbit.json");
+
+      const createResult = await getHandler("voyd.std.fs", "create_dir_all")(
+        tailContinuation,
+        nestedDirectory
+      );
+      expect(createResult).toEqual({ kind: "tail", value: { ok: true } });
+
+      const writeResult = await getHandler("voyd.std.fs", "write_string")(
+        tailContinuation,
+        { path: sourcePath, value: "orbit" }
+      );
+      expect(writeResult).toEqual({ kind: "tail", value: { ok: true } });
+
+      const renameResult = await getHandler("voyd.std.fs", "rename")(
+        tailContinuation,
+        { from: sourcePath, to: destinationPath }
+      );
+      expect(renameResult).toEqual({ kind: "tail", value: { ok: true } });
+
+      const readResult = await getHandler("voyd.std.fs", "read_string")(
+        tailContinuation,
+        destinationPath
+      );
+      expect(readResult).toEqual({
+        kind: "tail",
+        value: { ok: true, value: "orbit" },
+      });
+      const sourceResult = await getHandler("voyd.std.fs", "read_string")(
+        tailContinuation,
+        sourcePath
+      );
+      expect(sourceResult.kind).toBe("tail");
+      expect(sourceResult.value).toMatchObject({ ok: false });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it("normalizes list_dir child paths for root and trailing separators", async () => {
     const table = buildTable([
       { effectId: "voyd.std.fs", opName: "list_dir", opId: 0 },
@@ -414,6 +474,8 @@ describe("registerDefaultHostAdapters", () => {
       writeTextFile: async () => {},
       stat: async () => ({}),
       remove: async () => {},
+      mkdir: async () => {},
+      rename: async () => {},
       readDir: (path: string) => ({
         async *[Symbol.asyncIterator]() {
           if (path === "/") {
@@ -457,6 +519,8 @@ describe("registerDefaultHostAdapters", () => {
       writeFile: async () => {},
       writeTextFile: async () => {},
       stat: async () => ({}),
+      mkdir: async () => {},
+      rename: async () => {},
       remove: async (path: string) => {
         if (path === "/tmp/denied.log") {
           throw Object.assign(new Error("permission denied"), { errno: 13 });
@@ -492,6 +556,48 @@ describe("registerDefaultHostAdapters", () => {
     });
   });
 
+  it("creates directories and renames paths through the deno fs adapter", async () => {
+    const table = buildTable([
+      { effectId: "voyd.std.fs", opName: "create_dir_all", opId: 0 },
+      { effectId: "voyd.std.fs", opName: "rename", opId: 1 },
+    ]);
+    const mkdir = vi.fn(async () => {});
+    const rename = vi.fn(async () => {});
+    vi.stubGlobal("Deno", {
+      readFile: async () => new Uint8Array(),
+      readTextFile: async () => "",
+      writeFile: async () => {},
+      writeTextFile: async () => {},
+      stat: async () => ({}),
+      remove: async () => {},
+      mkdir,
+      rename,
+      readDir: () => ({
+        async *[Symbol.asyncIterator]() {},
+      }),
+    });
+    const { host, getHandler } = createFakeHost(table);
+
+    await registerDefaultHostAdapters({
+      host,
+      options: { runtime: "deno" },
+    });
+
+    const createResult = await getHandler("voyd.std.fs", "create_dir_all")(
+      tailContinuation,
+      "/tmp/orbit/data"
+    );
+    expect(createResult).toEqual({ kind: "tail", value: { ok: true } });
+    expect(mkdir).toHaveBeenCalledWith("/tmp/orbit/data", { recursive: true });
+
+    const renameResult = await getHandler("voyd.std.fs", "rename")(
+      tailContinuation,
+      { from: "/tmp/orbit.tmp", to: "/tmp/orbit.json" }
+    );
+    expect(renameResult).toEqual({ kind: "tail", value: { ok: true } });
+    expect(rename).toHaveBeenCalledWith("/tmp/orbit.tmp", "/tmp/orbit.json");
+  });
+
   it("returns io errors when fs read/list payloads exceed transport buffer", async () => {
     const table = buildTable([
       { effectId: "voyd.std.fs", opName: "read_bytes", opId: 0 },
@@ -505,6 +611,8 @@ describe("registerDefaultHostAdapters", () => {
       writeTextFile: async () => {},
       stat: async () => ({}),
       remove: async () => {},
+      mkdir: async () => {},
+      rename: async () => {},
       readDir: () => ({
         async *[Symbol.asyncIterator]() {
           for (let index = 0; index < 16; index += 1) {
