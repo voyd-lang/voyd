@@ -1,0 +1,97 @@
+use super::persistence::{
+  PersistedSimulation,
+  persisted_simulation,
+  simulation_from_json,
+  simulation_json,
+  summaries_from_json,
+  summaries_json,
+  simulation_summary
+}
+use super::validation::{ ValidationError, is_hex_color, is_safe_id, validate_simulation }
+use src::simulation::default_scenario
+use std::json::JsonError
+use std::math::abs
+use std::result::types::all
+use std::string::type::String
+use std::test::assertions::all
+
+test "versioned simulation JSON round trips shared state":
+  let original = example_simulation()
+  let encoded = match(simulation_json(original))
+    Err<JsonError>:
+      String::init()
+    Ok<String> { value }:
+      value
+
+  match(simulation_from_json(encoded))
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<PersistedSimulation> { value }:
+      assert(value.version, eq: 1)
+      assert(value.id.equals(original.id), eq: true)
+      assert(value.name.equals(original.name), eq: true)
+      assert(value.created_at, eq: original.created_at)
+      assert(value.state.bodies.len(), eq: original.state.bodies.len())
+      assert(abs(value.state.bodies.at(1).position_au.x - original.state.bodies.at(1).position_au.x) < 0.000000000001, eq: true)
+      assert(abs(value.state.bodies.at(1).velocity_au_per_day.y - original.state.bodies.at(1).velocity_au_per_day.y) < 0.000000000001, eq: true)
+      assert(value.camera.pixels_per_au, eq: original.camera.pixels_per_au)
+
+test "summary list JSON round trips metadata without body payloads":
+  let summary = simulation_summary(example_simulation())
+  let encoded = match(summaries_json([summary]))
+    Err<JsonError>:
+      String::init()
+    Ok<String> { value }:
+      value
+  assert(encoded.contains("\"bodyCount\""), eq: true)
+  assert(encoded.contains("\"bodies\""), eq: false)
+
+  match(summaries_from_json(encoded))
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok { value }:
+      assert(value.len(), eq: 1)
+      assert(value.at(0).body_count, eq: summary.body_count)
+      assert(value.at(0).name.equals(summary.name), eq: true)
+
+test "persistence validation rejects unsafe ids and duplicate body ids":
+  assert(is_safe_id("orbit-42"), eq: true)
+  assert(is_safe_id("../orbit"), eq: false)
+  assert(is_safe_id("nested/orbit"), eq: false)
+  assert(is_hex_color("#74e1f8"), eq: true)
+  assert(is_hex_color("violet"), eq: false)
+
+  let original = example_simulation()
+  let duplicate = {
+    version: original.version,
+    id: original.id,
+    name: original.name,
+    created_at: original.created_at,
+    updated_at: original.updated_at,
+    state: {
+      bodies: [original.state.bodies.at(0), original.state.bodies.at(0)],
+      settings: original.state.settings,
+      elapsed_days: original.state.elapsed_days
+    },
+    camera: original.camera
+  }
+  match(validate_simulation(duplicate))
+    Ok<Unit>:
+      assert(false, eq: true)
+    Err<ValidationError> { error }:
+      assert(error.code.equals("duplicate-body-id"), eq: true)
+
+fn example_simulation() -> PersistedSimulation
+  let scenario = default_scenario()
+  persisted_simulation(
+    id: "round-trip",
+    name: "Round trip system",
+    created_at: 1700000000000i64,
+    updated_at: 1700000000123i64,
+    state: {
+      bodies: scenario.bodies,
+      settings: scenario.settings,
+      elapsed_days: 84.25
+    },
+    camera: scenario.camera
+  )

@@ -176,6 +176,10 @@ fn handle_static_with_fs(
     tail(host_dto_test::host_default_error_payload())
   Fs::list_dir(tail, _path: MsgPack):
     tail(host_dto_test::host_default_error_payload())
+  Fs::create_dir_all(tail, _path: MsgPack):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::rename(tail, _payload: MsgPack):
+    tail(host_dto_test::host_default_error_payload())
 
 fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
   match(value)

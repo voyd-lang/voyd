@@ -46,6 +46,12 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
       | undefined;
     const denoStat = deno?.stat as ((path: string) => Promise<unknown>) | undefined;
     const denoRemove = deno?.remove as ((path: string) => Promise<void>) | undefined;
+    const denoMkdir = deno?.mkdir as
+      | ((path: string, options: { recursive: boolean }) => Promise<void>)
+      | undefined;
+    const denoRename = deno?.rename as
+      | ((oldPath: string, newPath: string) => Promise<void>)
+      | undefined;
     const denoReadDir = deno?.readDir as
       | ((path: string) => AsyncIterable<{ name: string }>)
       | undefined;
@@ -58,6 +64,8 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
       !!denoWriteTextFile &&
       !!denoStat &&
       !!denoRemove &&
+      !!denoMkdir &&
+      !!denoRename &&
       !!denoReadDir;
 
     if (!hasNodeFs && !hasDenoFs) {
@@ -259,6 +267,47 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
       },
     });
     implementedOps.add("list_dir");
+
+    registered += registerOpHandler({
+      host,
+      effectId: FS_EFFECT_ID,
+      opName: "create_dir_all",
+      handler: async ({ tail }, path) => {
+        try {
+          const resolvedPath = toPath(path);
+          if (hasNodeFs) {
+            await nodeFs!.mkdir(resolvedPath, { recursive: true });
+          } else {
+            await denoMkdir!(resolvedPath, { recursive: true });
+          }
+          return tail({ ok: true });
+        } catch (error) {
+          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+        }
+      },
+    });
+    implementedOps.add("create_dir_all");
+
+    registered += registerOpHandler({
+      host,
+      effectId: FS_EFFECT_ID,
+      opName: "rename",
+      handler: async ({ tail }, payload) => {
+        try {
+          const fromPath = toPath(readField(payload, "from"));
+          const toPathValue = toPath(readField(payload, "to"));
+          if (hasNodeFs) {
+            await nodeFs!.rename(fromPath, toPathValue);
+          } else {
+            await denoRename!(fromPath, toPathValue);
+          }
+          return tail({ ok: true });
+        } catch (error) {
+          return tail(hostError(ioErrorMessage(error), ioErrorCode(error)));
+        }
+      },
+    });
+    implementedOps.add("rename");
 
     return (
       registered +

@@ -1,0 +1,869 @@
+//! Voyd Orbit's state transition system. Physics ticks are fixed-step and
+//! independent from the display frame rate; animation frames only feed time
+//! into the accumulator and request a draw packet.
+
+use super::api::{
+  DeleteResult,
+  SimulationResult,
+  SummaryResult,
+  delete_simulation,
+  duplicate_simulation,
+  fetch_simulation,
+  fetch_simulations,
+  save_simulation
+}
+use super::model::{
+  CameraState,
+  Interaction,
+  Model,
+  Notice,
+  NoticeKind,
+  PlaybackState,
+  SessionState,
+  Tool,
+  Trail,
+  UiState,
+  Viewport,
+  default_body,
+  empty_trails,
+  find_body,
+  model_from_persisted,
+  model_from_scenario,
+  persisted_from_model,
+  remove_body,
+  replace_body,
+  scenario_by_slug,
+  selected_body,
+  speed_days_per_second
+}
+use super::render_scene
+use src::shared::{
+  PersistedSimulation,
+  SimulationSummary,
+  is_hex_color
+}
+use src::simulation::{
+  Body,
+  BodyAppearance,
+  BodyKind,
+  SimulationSettings,
+  SimulationState,
+  Vec2,
+  lerp,
+  step as simulation_step
+}
+use std::array::Array
+use std::enums::{ enum }
+use std::http::client::self as http_client
+use std::math::{ abs, clamp, is_finite, max }
+use std::number::cast::to_string
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+use std::task::self as tasks
+use std::vx::{ Cmd, Program, next }
+
+pub enum Msg
+  AnimationTick { timestamp_millis: f64 }
+  ViewportChanged { width: f64, height: f64 }
+  PointerPressed { x: f64, y: f64 }
+  PointerMoved { x: f64, y: f64 }
+  PointerReleased { x: f64, y: f64 }
+  WheelZoomed { x: f64, y: f64, delta_y: f64 }
+  KeyPressed { key: String }
+  TogglePlayback
+  ChangeSpeed { delta: i32 }
+  ResetSimulation
+  ScenarioChanged { slug: String }
+  ChooseBodyTool { kind: BodyKind }
+  ChooseNavigateTool
+  ToggleTrails
+  ToggleVelocityVectors
+  ToggleLabels
+  ToggleFollow
+  Deselect
+  DeleteSelected
+  SessionNameChanged { value: String }
+  BodyNameChanged { value: String }
+  BodyMassChanged { value: String }
+  BodyRadiusChanged { value: String }
+  BodyPositionXChanged { value: String }
+  BodyPositionYChanged { value: String }
+  BodyVelocityXChanged { value: String }
+  BodyVelocityYChanged { value: String }
+  BodyColorChanged { value: String }
+  FieldFocused
+  FieldBlurred
+  OpenLibrary
+  CloseLibrary
+  SaveCurrent
+  SaveFinished { result: SimulationResult }
+  LibraryFinished { result: SummaryResult }
+  LoadSaved { id: String }
+  LoadFinished { result: SimulationResult }
+  DuplicateSaved { id: String }
+  DuplicateFinished { result: SimulationResult }
+  DeleteSaved { id: String }
+  DeleteSavedFinished { result: DeleteResult }
+
+pub fn step(model: Model, message: Msg): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+  match(message)
+    Msg::AnimationTick { timestamp_millis }:
+      let updated = advance_frame(model, timestamp_millis)
+      next(model: updated, cmd: render_scene::draw<Msg>(updated))
+    Msg::ViewportChanged { width, height }:
+      next(with_viewport(model, { width, height }))
+    Msg::PointerPressed { x, y }:
+      next(pointer_pressed(model, Vec2::init(x, y)))
+    Msg::PointerMoved { x, y }:
+      next(pointer_moved(model, Vec2::init(x, y)))
+    Msg::PointerReleased { x, y }:
+      next(pointer_released(model, Vec2::init(x, y)))
+    Msg::WheelZoomed { x, y, delta_y }:
+      next(zoom_at(model, Vec2::init(x, y), delta_y))
+    Msg::KeyPressed { key }:
+      next(handle_key(model, key))
+    Msg::TogglePlayback:
+      next(with_playback(model, playback_with_running(model.playback, not model.playback.running)))
+    Msg::ChangeSpeed { delta }:
+      next(change_speed(model, delta))
+    Msg::ResetSimulation:
+      next(reset_simulation(model))
+    Msg::ScenarioChanged { slug }:
+      next(model_from_scenario(scenario_by_slug(slug)))
+    Msg::ChooseBodyTool { kind }:
+      next(with_ui(model, ui_with_tool(model.ui, Tool::AddBody { kind })))
+    Msg::ChooseNavigateTool:
+      next(with_ui(model, ui_with_tool(model.ui, Tool::Navigate {})))
+    Msg::ToggleTrails:
+      next(toggle_setting(model, 0))
+    Msg::ToggleVelocityVectors:
+      next(toggle_setting(model, 1))
+    Msg::ToggleLabels:
+      next(toggle_setting(model, 2))
+    Msg::ToggleFollow:
+      next(toggle_follow(model))
+    Msg::Deselect:
+      next(deselect(model))
+    Msg::DeleteSelected:
+      next(delete_selected(model))
+    Msg::SessionNameChanged { value }:
+      next(with_session(model, session_with_name(model.session, value)))
+    Msg::BodyNameChanged { value }:
+      next(map_selected_body(model, (body: Body) -> Body => body_with_name(body, value)))
+    Msg::BodyMassChanged { value }:
+      next(update_selected_number(model, value, field: 0))
+    Msg::BodyRadiusChanged { value }:
+      next(update_selected_number(model, value, field: 1))
+    Msg::BodyPositionXChanged { value }:
+      next(update_selected_number(model, value, field: 2))
+    Msg::BodyPositionYChanged { value }:
+      next(update_selected_number(model, value, field: 3))
+    Msg::BodyVelocityXChanged { value }:
+      next(update_selected_number(model, value, field: 4))
+    Msg::BodyVelocityYChanged { value }:
+      next(update_selected_number(model, value, field: 5))
+    Msg::BodyColorChanged { value }:
+      if is_hex_color(value):
+        return next(map_selected_body(model, (body: Body) -> Body => body_with_color(body, value)))
+      next(model)
+    Msg::FieldFocused:
+      next(with_ui(model, ui_with_field_focus(model.ui, true)))
+    Msg::FieldBlurred:
+      next(with_ui(model, ui_with_field_focus(model.ui, false)))
+    Msg::OpenLibrary:
+      open_library(model)
+    Msg::CloseLibrary:
+      next(with_ui(model, ui_with_library(model.ui, false)))
+    Msg::SaveCurrent:
+      save_current(model)
+    Msg::SaveFinished { result }:
+      save_finished(model, result)
+    Msg::LibraryFinished { result }:
+      library_finished(model, result)
+    Msg::LoadSaved { id }:
+      load_saved(model, id)
+    Msg::LoadFinished { result }:
+      load_finished(model, result)
+    Msg::DuplicateSaved { id }:
+      duplicate_saved(model, id)
+    Msg::DuplicateFinished { result }:
+      duplicate_finished(model, result)
+    Msg::DeleteSaved { id }:
+      delete_saved(model, id)
+    Msg::DeleteSavedFinished { result }:
+      delete_saved_finished(model, result)
+
+fn advance_frame(model: Model, timestamp_millis: f64) -> Model
+  let previous_millis = model.playback.last_frame_millis
+  let measured_millis = clamp(timestamp_millis - previous_millis, 0.0, 50.0)
+  let elapsed_millis = if previous_millis <= 0.0 then: 0.0 else: measured_millis
+
+  var simulation = model.session.simulation
+  var accumulator = model.playback.accumulator_days
+  var steps = 0
+  if model.playback.running:
+    accumulator = accumulator + ((elapsed_millis / 1000.0) * speed_days_per_second(model.playback.speed_index))
+    let timestep = simulation.settings.fixed_timestep_days
+    while timestep > 0.0 and accumulator >= timestep and steps < 48:
+      simulation = simulation_step(simulation)
+      accumulator = accumulator - timestep
+      steps = steps + 1
+    if timestep > 0.0 and accumulator > timestep * 4.0:
+      accumulator = timestep * 4.0
+
+  let next_counter = if steps > 0 then: model.trail_sample_counter + 1 else: model.trail_sample_counter
+  let should_sample = steps > 0 and next_counter >= 3
+  let trails = if should_sample then: sample_trails(model.trails, simulation.bodies) else: model.trails
+  let camera = smooth_camera(model.camera, simulation.bodies)
+  {
+    session: session_with_simulation(model.session, simulation),
+    playback: {
+      running: model.playback.running,
+      speed_index: model.playback.speed_index,
+      accumulator_days: accumulator,
+      last_frame_millis: timestamp_millis
+    },
+    camera,
+    ui: model.ui,
+    trails,
+    trail_sample_counter: if should_sample then: 0 else: next_counter
+  }
+
+fn pointer_pressed(model: Model, screen: Vec2) -> Model
+  let world = screen_to_world(model, screen)
+  match(model.ui.tool)
+    Tool::AddBody { kind }:
+      with_ui(model, ui_with_interaction(
+        model.ui,
+        Interaction::PlacingBody { kind, origin_au: world, cursor_au: world }
+      ))
+    Tool::Navigate:
+      match(hit_test(model, screen))
+        Some<Body> { value: body }:
+          let selected_ui = ui_with_selected(model.ui, Some<String> { value: body.id })
+          let dragging_ui = ui_with_interaction(
+            selected_ui,
+            Interaction::DraggingBody {
+              body_id: body.id,
+              offset_au: body.position_au - world
+            }
+          )
+          with_playback(with_ui(model, dragging_ui), playback_with_running(model.playback, false))
+        None:
+          with_ui(model, ui_with_interaction(model.ui, Interaction::Panning { last_screen: screen }))
+
+fn pointer_moved(model: Model, screen: Vec2) -> Model
+  match(model.ui.interaction)
+    Interaction::Idle:
+      model
+    Interaction::Panning { last_screen }:
+      let delta = screen - last_screen
+      let moved_camera = camera_with_target(
+        model.camera,
+        model.camera.target_center_au - (delta / model.camera.target_pixels_per_au)
+      )
+      with_camera(
+        with_ui(model, ui_with_interaction(model.ui, Interaction::Panning { last_screen: screen })),
+        camera_without_follow(moved_camera)
+      )
+    Interaction::DraggingBody { body_id, offset_au }:
+      let position = screen_to_world(model, screen) + offset_au
+      let updated = map_body_by_id(model, body_id, (body: Body) -> Body => body_with_position(body, position))
+      with_trails(updated, empty_trails(updated.session.simulation.bodies))
+    Interaction::PlacingBody { kind, origin_au, cursor_au: _ }:
+      with_ui(model, ui_with_interaction(
+        model.ui,
+        Interaction::PlacingBody { kind, origin_au, cursor_au: screen_to_world(model, screen) }
+      ))
+
+fn pointer_released(model: Model, screen: Vec2) -> Model
+  match(model.ui.interaction)
+    Interaction::Idle:
+      model
+    Interaction::Panning:
+      with_ui(model, ui_with_interaction(model.ui, Interaction::Idle {}))
+    Interaction::DraggingBody:
+      with_ui(model, ui_with_interaction(model.ui, Interaction::Idle {}))
+    Interaction::PlacingBody { kind, origin_au, cursor_au: _ }:
+      let cursor = screen_to_world(model, screen)
+      let velocity = (cursor - origin_au) * 0.02
+      let id = "body-".concat(to_string(model.ui.next_body_serial))
+      let created = default_body(kind, id: id, position_au: origin_au, velocity_au_per_day: velocity)
+      let bodies = model.session.simulation.bodies.pushed(created)
+      let simulation = state_with_bodies(model.session.simulation, bodies)
+      let updated_session = session_with_simulation(model.session, simulation)
+      let selected_ui = ui_with_selected(model.ui, Some<String> { value: id })
+      let idle_ui = ui_with_interaction(ui_with_tool(selected_ui, Tool::Navigate {}), Interaction::Idle {})
+      let numbered_ui = ui_with_next_serial(idle_ui, model.ui.next_body_serial + 1)
+      {
+        session: updated_session,
+        playback: model.playback,
+        camera: model.camera,
+        ui: numbered_ui,
+        trails: model.trails.pushed({ body_id: id, points_au: Array<Vec2>::init() }),
+        trail_sample_counter: model.trail_sample_counter
+      }
+
+fn zoom_at(model: Model, screen: Vec2, delta_y: f64) -> Model
+  let before = screen_to_world(model, screen)
+  let factor = if delta_y > 0.0 then: 0.86 else: 1.16
+  let zoom = clamp(model.camera.target_pixels_per_au * factor, 2.0, 20000.0)
+  let viewport_center = Vec2::init(model.ui.viewport.width * 0.5, model.ui.viewport.height * 0.5)
+  let world_offset = (screen - viewport_center) / zoom
+  let target_center = before - world_offset
+  with_camera(model, {
+    center_au: model.camera.center_au,
+    target_center_au: target_center,
+    pixels_per_au: model.camera.pixels_per_au,
+    target_pixels_per_au: zoom,
+    follow_body_id: None {}
+  })
+
+fn handle_key(model: Model, key: String) -> Model
+  if model.ui.field_focused:
+    if key == "Escape":
+      return with_ui(model, ui_with_field_focus(model.ui, false))
+    return model
+  if key == " " or key == "Spacebar":
+    return with_playback(model, playback_with_running(model.playback, not model.playback.running))
+  if key == "r" or key == "R":
+    return reset_simulation(model)
+  if key == "f" or key == "F":
+    return toggle_follow(model)
+  if key == "Delete" or key == "Backspace":
+    return delete_selected(model)
+  if key == "Escape":
+    if model.ui.library_open:
+      return with_ui(model, ui_with_library(model.ui, false))
+    return deselect(model)
+  if key == "+" or key == "=":
+    return change_speed(model, 1)
+  if key == "-" or key == "_":
+    return change_speed(model, -1)
+  model
+
+fn reset_simulation(model: Model) -> Model
+  let simulation = model.session.baseline
+  {
+    session: session_with_simulation(model.session, simulation),
+    playback: {
+      running: false,
+      speed_index: model.playback.speed_index,
+      accumulator_days: 0.0,
+      last_frame_millis: 0.0
+    },
+    camera: camera_without_follow(model.camera),
+    ui: ui_with_selected(ui_with_interaction(model.ui, Interaction::Idle {}), None {}),
+    trails: empty_trails(simulation.bodies),
+    trail_sample_counter: 0
+  }
+
+fn toggle_setting(model: Model, field: i32) -> Model
+  let current = model.session.simulation.settings
+  let settings: SimulationSettings = {
+    fixed_timestep_days: current.fixed_timestep_days,
+    softening_au: current.softening_au,
+    trails_enabled: if field == 0 then: not current.trails_enabled else: current.trails_enabled,
+    velocity_vectors_enabled: if field == 1 then: not current.velocity_vectors_enabled else: current.velocity_vectors_enabled,
+    labels_enabled: if field == 2 then: not current.labels_enabled else: current.labels_enabled
+  }
+  with_session(model, session_with_simulation(
+    model.session,
+    {
+      bodies: model.session.simulation.bodies,
+      settings,
+      elapsed_days: model.session.simulation.elapsed_days
+    }
+  ))
+
+fn toggle_follow(model: Model) -> Model
+  match(model.ui.selected_body_id)
+    None:
+      model
+    Some<String> { value: selected_id }:
+      match(model.camera.follow_body_id)
+        Some<String> { value: followed }:
+          if followed == selected_id:
+            return with_camera(model, camera_without_follow(model.camera))
+        None:
+          void
+      with_camera(model, camera_with_follow(model.camera, selected_id))
+
+fn deselect(model: Model) -> Model
+  let ui = ui_with_selected(
+    ui_with_interaction(ui_with_tool(model.ui, Tool::Navigate {}), Interaction::Idle {}),
+    None {}
+  )
+  with_camera(with_ui(model, ui), camera_without_follow(model.camera))
+
+fn delete_selected(model: Model) -> Model
+  match(model.ui.selected_body_id)
+    None:
+      model
+    Some<String> { value: id }:
+      let bodies = remove_body(model.session.simulation.bodies, id)
+      let simulation = state_with_bodies(model.session.simulation, bodies)
+      let cleared = with_session(model, session_with_simulation(model.session, simulation))
+      let ui = ui_with_selected(ui_with_interaction(cleared.ui, Interaction::Idle {}), None {})
+      with_camera(
+        with_trails(with_ui(cleared, ui), empty_trails(bodies)),
+        camera_without_follow(cleared.camera)
+      )
+
+fn update_selected_number(model: Model, source: String, { field: i32 }) -> Model
+  match(source.parse_float())
+    Err:
+      model
+    Ok<f64> { value }:
+      if not valid_numeric_edit(value, field):
+        return model
+      map_selected_body(model, (body: Body) -> Body => body_with_number(body, value, field))
+
+fn valid_numeric_edit(value: f64, field: i32) -> bool
+  if not is_finite(value):
+    return false
+  if field == 0:
+    return value >= 0.000000000000001 and value <= 1000000000000.0
+  if field == 1:
+    return value >= 0.0000000001 and value <= 1000000.0
+  if field == 2 or field == 3:
+    return abs(value) <= 1000000000.0
+  if field == 4 or field == 5:
+    return abs(value) <= 1000000.0
+  false
+
+fn map_selected_body(model: Model, transform: fn(Body) -> Body) -> Model
+  match(selected_body(model))
+    None:
+      model
+    Some<Body> { value }:
+      map_body_by_id(model, value.id, transform)
+
+fn map_body_by_id(model: Model, id: String, transform: fn(Body) -> Body) -> Model
+  match(find_body(model.session.simulation.bodies, id))
+    None:
+      model
+    Some<Body> { value }:
+      let bodies = replace_body(model.session.simulation.bodies, transform(value))
+      with_session(model, session_with_simulation(model.session, state_with_bodies(model.session.simulation, bodies)))
+
+fn open_library(model: Model): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+  if model.ui.busy:
+    return next(model)
+  let ui = ui_with_notice(
+    ui_with_busy(ui_with_library(model.ui, true), true),
+    Notice::Visible { kind: NoticeKind::Busy {}, message: "Loading saved simulations…" }
+  )
+  next(
+    model: with_ui(model, ui),
+    cmd: Cmd<Msg>::task(
+      work: () -> SummaryResult => fetch_simulations(),
+      handler: (result: SummaryResult) -> Msg => Msg::LibraryFinished { result }
+    )
+  )
+
+fn save_current(model: Model): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+  if model.ui.busy:
+    return next(model)
+  let ui = ui_with_notice(
+    ui_with_busy(model.ui, true),
+    Notice::Visible { kind: NoticeKind::Busy {}, message: "Saving simulation…" }
+  )
+  let value = persisted_from_model(model)
+  next(
+    model: with_ui(model, ui),
+    cmd: Cmd<Msg>::task(
+      work: () -> SimulationResult => save_simulation(value),
+      handler: (result: SimulationResult) -> Msg => Msg::SaveFinished { result }
+    )
+  )
+
+fn save_finished(model: Model, result: SimulationResult) -> Program<Model, Msg>
+  match(result)
+    SimulationResult::SimulationFailed { message }:
+      next(with_ui(model, ui_with_notice(
+        ui_with_busy(model.ui, false),
+        Notice::Visible { kind: NoticeKind::Error {}, message }
+      )))
+    SimulationResult::Loaded { value }:
+      let session = {
+        name: value.name,
+        simulation: value.state,
+        baseline: model.session.baseline,
+        scenario_slug: model.session.scenario_slug,
+        persisted_id: Some<String> { value: value.id },
+        created_at: value.created_at
+      }
+      let ui = ui_with_notice(
+        ui_with_busy(model.ui, false),
+        Notice::Visible { kind: NoticeKind::Success {}, message: "Simulation saved" }
+      )
+      next(with_ui(with_session(model, session), ui))
+
+fn library_finished(model: Model, result: SummaryResult) -> Program<Model, Msg>
+  match(result)
+    SummaryResult::ListFailed { message }:
+      next(with_ui(model, ui_with_notice(
+        ui_with_busy(model.ui, false),
+        Notice::Visible { kind: NoticeKind::Error {}, message }
+      )))
+    SummaryResult::Listed { values }:
+      let ui = ui_with_notice(
+        ui_with_saved(ui_with_busy(model.ui, false), values),
+        Notice::Hidden {}
+      )
+      next(with_ui(model, ui))
+
+fn load_saved(model: Model, id: String): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+  if model.ui.busy:
+    return next(model)
+  let ui = ui_with_notice(
+    ui_with_busy(model.ui, true),
+    Notice::Visible { kind: NoticeKind::Busy {}, message: "Opening simulation…" }
+  )
+  next(
+    model: with_ui(model, ui),
+    cmd: Cmd<Msg>::task(
+      work: () -> SimulationResult => fetch_simulation(id),
+      handler: (result: SimulationResult) -> Msg => Msg::LoadFinished { result }
+    )
+  )
+
+fn load_finished(model: Model, result: SimulationResult) -> Program<Model, Msg>
+  match(result)
+    SimulationResult::SimulationFailed { message }:
+      next(with_ui(model, ui_with_notice(
+        ui_with_busy(model.ui, false),
+        Notice::Visible { kind: NoticeKind::Error {}, message }
+      )))
+    SimulationResult::Loaded { value }:
+      let loaded = model_from_persisted(value)
+      let ui = ui_with_saved(loaded.ui, model.ui.saved_simulations)
+      next(with_ui(with_viewport(loaded, model.ui.viewport), ui))
+
+fn duplicate_saved(model: Model, id: String): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+  if model.ui.busy:
+    return next(model)
+  let ui = ui_with_notice(
+    ui_with_busy(model.ui, true),
+    Notice::Visible { kind: NoticeKind::Busy {}, message: "Duplicating simulation…" }
+  )
+  next(
+    model: with_ui(model, ui),
+    cmd: Cmd<Msg>::task(
+      work: () -> SimulationResult => duplicate_simulation(id),
+      handler: (result: SimulationResult) -> Msg => Msg::DuplicateFinished { result }
+    )
+  )
+
+fn duplicate_finished(model: Model, result: SimulationResult): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+  match(result)
+    SimulationResult::SimulationFailed { message }:
+      next(with_ui(model, ui_with_notice(
+        ui_with_busy(model.ui, false),
+        Notice::Visible { kind: NoticeKind::Error {}, message }
+      )))
+    SimulationResult::Loaded:
+      let ui = ui_with_notice(
+        ui_with_busy(model.ui, true),
+        Notice::Visible { kind: NoticeKind::Success {}, message: "Simulation duplicated" }
+      )
+      next(
+        model: with_ui(model, ui),
+        cmd: Cmd<Msg>::task(
+          work: () -> SummaryResult => fetch_simulations(),
+          handler: (result: SummaryResult) -> Msg => Msg::LibraryFinished { result }
+        )
+      )
+
+fn delete_saved(model: Model, id: String): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
+  if model.ui.busy:
+    return next(model)
+  let ui = ui_with_notice(
+    ui_with_busy(model.ui, true),
+    Notice::Visible { kind: NoticeKind::Busy {}, message: "Deleting simulation…" }
+  )
+  next(
+    model: with_ui(model, ui),
+    cmd: Cmd<Msg>::task(
+      work: () -> DeleteResult => delete_simulation(id),
+      handler: (result: DeleteResult) -> Msg => Msg::DeleteSavedFinished { result }
+    )
+  )
+
+fn delete_saved_finished(model: Model, result: DeleteResult) -> Program<Model, Msg>
+  match(result)
+    DeleteResult::DeleteFailed { message }:
+      next(with_ui(model, ui_with_notice(
+        ui_with_busy(model.ui, false),
+        Notice::Visible { kind: NoticeKind::Error {}, message }
+      )))
+    DeleteResult::Deleted { id }:
+      let saved = model.ui.saved_simulations.filter(where: (item: SimulationSummary) -> bool => not (item.id == id))
+      let ui = ui_with_notice(
+        ui_with_saved(ui_with_busy(model.ui, false), saved),
+        Notice::Visible { kind: NoticeKind::Success {}, message: "Simulation deleted" }
+      )
+      next(with_ui(model, ui))
+
+fn smooth_camera(camera: CameraState, bodies: Array<Body>) -> CameraState
+  var target = camera.target_center_au
+  match(camera.follow_body_id)
+    Some<String> { value }:
+      match(find_body(bodies, value))
+        Some<Body> { value: body }:
+          target = body.position_au
+        None:
+          void
+    None:
+      void
+  {
+    center_au: lerp(camera.center_au, to: target, at: 0.16),
+    target_center_au: target,
+    pixels_per_au: camera.pixels_per_au + ((camera.target_pixels_per_au - camera.pixels_per_au) * 0.18),
+    target_pixels_per_au: camera.target_pixels_per_au,
+    follow_body_id: camera.follow_body_id
+  }
+
+fn sample_trails(existing: Array<Trail>, bodies: Array<Body>) -> Array<Trail>
+  bodies.map((body: Body) -> Trail =>
+    match(existing.find(where: (trail: Trail) -> bool => trail.body_id == body.id))
+      Some<Trail> { value }:
+        { body_id: body.id, points_au: append_bounded(value.points_au, body.position_au, 72) }
+      None:
+        { body_id: body.id, points_au: [body.position_au] }
+  )
+
+fn append_bounded(points: Array<Vec2>, point: Vec2, limit: i32) -> Array<Vec2>
+  let keep = max(0, limit - 1)
+  let start = max(0, points.len() - keep)
+  let ~out = Array<Vec2>::with_capacity(limit)
+  var index = start
+  while index < points.len():
+    out.push(points.at(index))
+    index = index + 1
+  out.push(point)
+  out
+
+fn screen_to_world(model: Model, screen: Vec2) -> Vec2
+  let viewport_center = Vec2::init(model.ui.viewport.width * 0.5, model.ui.viewport.height * 0.5)
+  model.camera.center_au + ((screen - viewport_center) / model.camera.pixels_per_au)
+
+fn world_to_screen(model: Model, world: Vec2) -> Vec2
+  let viewport_center = Vec2::init(model.ui.viewport.width * 0.5, model.ui.viewport.height * 0.5)
+  viewport_center + ((world - model.camera.center_au) * model.camera.pixels_per_au)
+
+fn hit_test(model: Model, screen: Vec2) -> Option<Body>
+  var index = model.session.simulation.bodies.len() - 1
+  while index >= 0:
+    let body = model.session.simulation.bodies.at(index)
+    let distance = (world_to_screen(model, body.position_au) - screen).length()
+    if distance <= visual_radius(body.kind) + 7.0:
+      return Some<Body> { value: body }
+    index = index - 1
+  None {}
+
+fn visual_radius(kind: BodyKind) -> f64
+  match(kind)
+    BodyKind::Star: 11.0
+    BodyKind::Planet: 7.0
+    BodyKind::Moon: 4.5
+    BodyKind::Asteroid: 3.0
+    BodyKind::BlackHole: 13.0
+
+fn body_with_name(body: Body, name: String) -> Body
+  body_copy(body, name: name, mass: body.mass_solar, radius: body.radius_au, position: body.position_au, velocity: body.velocity_au_per_day, appearance: body.appearance)
+
+fn body_with_position(body: Body, position: Vec2) -> Body
+  body_copy(body, name: body.name, mass: body.mass_solar, radius: body.radius_au, position: position, velocity: body.velocity_au_per_day, appearance: body.appearance)
+
+fn body_with_color(body: Body, color: String) -> Body
+  let appearance: BodyAppearance = {
+    primary_color: color,
+    secondary_color: body.appearance.secondary_color,
+    trail_color: color,
+    glow_strength: body.appearance.glow_strength
+  }
+  body_copy(body, name: body.name, mass: body.mass_solar, radius: body.radius_au, position: body.position_au, velocity: body.velocity_au_per_day, appearance: appearance)
+
+fn body_with_number(body: Body, value: f64, field: i32) -> Body
+  let position = Vec2::init(
+    if field == 2 then: value else: body.position_au.x,
+    if field == 3 then: value else: body.position_au.y
+  )
+  let velocity = Vec2::init(
+    if field == 4 then: value else: body.velocity_au_per_day.x,
+    if field == 5 then: value else: body.velocity_au_per_day.y
+  )
+  body_copy(
+    body,
+    name: body.name,
+    mass: if field == 0 then: value else: body.mass_solar,
+    radius: if field == 1 then: value else: body.radius_au,
+    position: position,
+    velocity: velocity,
+    appearance: body.appearance
+  )
+
+fn body_copy(
+  body: Body,
+  {
+    name: String,
+    mass: f64,
+    radius: f64,
+    position: Vec2,
+    velocity: Vec2,
+    appearance: BodyAppearance
+  }
+) -> Body
+  {
+    id: body.id,
+    name,
+    kind: body.kind,
+    mass_solar: mass,
+    radius_au: radius,
+    position_au: position,
+    velocity_au_per_day: velocity,
+    appearance
+  }
+
+fn state_with_bodies(state: SimulationState, bodies: Array<Body>) -> SimulationState
+  { bodies, settings: state.settings, elapsed_days: state.elapsed_days }
+
+fn session_with_simulation(session: SessionState, simulation: SimulationState) -> SessionState
+  {
+    name: session.name,
+    simulation,
+    baseline: session.baseline,
+    scenario_slug: session.scenario_slug,
+    persisted_id: session.persisted_id,
+    created_at: session.created_at
+  }
+
+fn session_with_name(session: SessionState, name: String) -> SessionState
+  {
+    name,
+    simulation: session.simulation,
+    baseline: session.baseline,
+    scenario_slug: session.scenario_slug,
+    persisted_id: session.persisted_id,
+    created_at: session.created_at
+  }
+
+fn playback_with_running(playback: PlaybackState, running: bool) -> PlaybackState
+  {
+    running,
+    speed_index: playback.speed_index,
+    accumulator_days: playback.accumulator_days,
+    last_frame_millis: playback.last_frame_millis
+  }
+
+fn change_speed(model: Model, delta: i32) -> Model
+  with_playback(model, {
+    running: model.playback.running,
+    speed_index: clamp(model.playback.speed_index + delta, 0, 3),
+    accumulator_days: model.playback.accumulator_days,
+    last_frame_millis: model.playback.last_frame_millis
+  })
+
+fn camera_with_target(camera: CameraState, target: Vec2) -> CameraState
+  {
+    center_au: camera.center_au,
+    target_center_au: target,
+    pixels_per_au: camera.pixels_per_au,
+    target_pixels_per_au: camera.target_pixels_per_au,
+    follow_body_id: camera.follow_body_id
+  }
+
+fn camera_with_follow(camera: CameraState, id: String) -> CameraState
+  {
+    center_au: camera.center_au,
+    target_center_au: camera.target_center_au,
+    pixels_per_au: camera.pixels_per_au,
+    target_pixels_per_au: camera.target_pixels_per_au,
+    follow_body_id: Some<String> { value: id }
+  }
+
+fn camera_without_follow(camera: CameraState) -> CameraState
+  {
+    center_au: camera.center_au,
+    target_center_au: camera.target_center_au,
+    pixels_per_au: camera.pixels_per_au,
+    target_pixels_per_au: camera.target_pixels_per_au,
+    follow_body_id: None {}
+  }
+
+fn ui_with_tool(ui: UiState, tool: Tool) -> UiState
+  ui_copy(ui, selected: ui.selected_body_id, tool: tool, interaction: Interaction::Idle {}, viewport: ui.viewport, library_open: ui.library_open, saved: ui.saved_simulations, notice: ui.notice, busy: ui.busy, field_focused: ui.field_focused, next_serial: ui.next_body_serial)
+
+fn ui_with_interaction(ui: UiState, interaction: Interaction) -> UiState
+  ui_copy(ui, selected: ui.selected_body_id, tool: ui.tool, interaction: interaction, viewport: ui.viewport, library_open: ui.library_open, saved: ui.saved_simulations, notice: ui.notice, busy: ui.busy, field_focused: ui.field_focused, next_serial: ui.next_body_serial)
+
+fn ui_with_selected(ui: UiState, selected: Option<String>) -> UiState
+  ui_copy(ui, selected: selected, tool: ui.tool, interaction: ui.interaction, viewport: ui.viewport, library_open: ui.library_open, saved: ui.saved_simulations, notice: ui.notice, busy: ui.busy, field_focused: ui.field_focused, next_serial: ui.next_body_serial)
+
+fn ui_with_library(ui: UiState, open: bool) -> UiState
+  ui_copy(ui, selected: ui.selected_body_id, tool: ui.tool, interaction: ui.interaction, viewport: ui.viewport, library_open: open, saved: ui.saved_simulations, notice: ui.notice, busy: ui.busy, field_focused: ui.field_focused, next_serial: ui.next_body_serial)
+
+fn ui_with_saved(ui: UiState, saved: Array<SimulationSummary>) -> UiState
+  ui_copy(ui, selected: ui.selected_body_id, tool: ui.tool, interaction: ui.interaction, viewport: ui.viewport, library_open: ui.library_open, saved: saved, notice: ui.notice, busy: ui.busy, field_focused: ui.field_focused, next_serial: ui.next_body_serial)
+
+fn ui_with_notice(ui: UiState, notice: Notice) -> UiState
+  ui_copy(ui, selected: ui.selected_body_id, tool: ui.tool, interaction: ui.interaction, viewport: ui.viewport, library_open: ui.library_open, saved: ui.saved_simulations, notice: notice, busy: ui.busy, field_focused: ui.field_focused, next_serial: ui.next_body_serial)
+
+fn ui_with_busy(ui: UiState, busy: bool) -> UiState
+  ui_copy(ui, selected: ui.selected_body_id, tool: ui.tool, interaction: ui.interaction, viewport: ui.viewport, library_open: ui.library_open, saved: ui.saved_simulations, notice: ui.notice, busy: busy, field_focused: ui.field_focused, next_serial: ui.next_body_serial)
+
+fn ui_with_field_focus(ui: UiState, focused: bool) -> UiState
+  ui_copy(ui, selected: ui.selected_body_id, tool: ui.tool, interaction: ui.interaction, viewport: ui.viewport, library_open: ui.library_open, saved: ui.saved_simulations, notice: ui.notice, busy: ui.busy, field_focused: focused, next_serial: ui.next_body_serial)
+
+fn ui_with_next_serial(ui: UiState, serial: i32) -> UiState
+  ui_copy(ui, selected: ui.selected_body_id, tool: ui.tool, interaction: ui.interaction, viewport: ui.viewport, library_open: ui.library_open, saved: ui.saved_simulations, notice: ui.notice, busy: ui.busy, field_focused: ui.field_focused, next_serial: serial)
+
+fn ui_copy(
+  _ui: UiState,
+  {
+    selected: Option<String>,
+    tool: Tool,
+    interaction: Interaction,
+    viewport: Viewport,
+    library_open: bool,
+    saved: Array<SimulationSummary>,
+    notice: Notice,
+    busy: bool,
+    field_focused: bool,
+    next_serial: i32
+  }
+) -> UiState
+  {
+    selected_body_id: selected,
+    tool,
+    interaction,
+    viewport,
+    library_open,
+    saved_simulations: saved,
+    notice,
+    busy,
+    field_focused,
+    next_body_serial: next_serial
+  }
+
+fn with_session(model: Model, session: SessionState) -> Model
+  { session, playback: model.playback, camera: model.camera, ui: model.ui, trails: model.trails, trail_sample_counter: model.trail_sample_counter }
+
+fn with_playback(model: Model, playback: PlaybackState) -> Model
+  { session: model.session, playback, camera: model.camera, ui: model.ui, trails: model.trails, trail_sample_counter: model.trail_sample_counter }
+
+fn with_camera(model: Model, camera: CameraState) -> Model
+  { session: model.session, playback: model.playback, camera, ui: model.ui, trails: model.trails, trail_sample_counter: model.trail_sample_counter }
+
+fn with_ui(model: Model, ui: UiState) -> Model
+  { session: model.session, playback: model.playback, camera: model.camera, ui, trails: model.trails, trail_sample_counter: model.trail_sample_counter }
+
+fn with_trails(model: Model, trails: Array<Trail>) -> Model
+  { session: model.session, playback: model.playback, camera: model.camera, ui: model.ui, trails, trail_sample_counter: model.trail_sample_counter }
+
+fn with_viewport(model: Model, viewport: Viewport) -> Model
+  let ui = ui_copy(model.ui, selected: model.ui.selected_body_id, tool: model.ui.tool, interaction: model.ui.interaction, viewport: viewport, library_open: model.ui.library_open, saved: model.ui.saved_simulations, notice: model.ui.notice, busy: model.ui.busy, field_focused: model.ui.field_focused, next_serial: model.ui.next_body_serial)
+  with_ui(model, ui)

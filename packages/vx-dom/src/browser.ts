@@ -240,6 +240,7 @@ export function createBrowserVxRuntimeHost(
 ): VxRuntimeHostOptions {
   return {
     commands: {
+      canvas_render: runCanvasRenderCommand,
       copy_to_clipboard: runCopyToClipboardCommand,
       delay: runDelayCommand,
       focus: runFocusCommand,
@@ -1698,6 +1699,258 @@ function runTaskCommand(
   settleAsyncDispatch(completion);
 }
 
+function runCanvasRenderCommand(command: VxCommandEnvelope): void {
+  const frame = readCanvasFrame(command);
+  const canvas = findCanvas(frame.selector);
+  const context = canvas.getContext("2d");
+  if (!context) {
+    throw new Error(`vx-dom: canvas_render could not create a 2D context for ${JSON.stringify(frame.selector)}`);
+  }
+
+  const pixelRatio = readCanvasPixelRatio();
+  const backingWidth = Math.round(frame.width * pixelRatio);
+  const backingHeight = Math.round(frame.height * pixelRatio);
+  if (
+    !Number.isSafeInteger(backingWidth) ||
+    !Number.isSafeInteger(backingHeight) ||
+    backingWidth <= 0 ||
+    backingHeight <= 0
+  ) {
+    throw new Error("vx-dom: canvas_render dimensions produce an invalid backing store");
+  }
+
+  canvas.style.width = `${frame.width}px`;
+  canvas.style.height = `${frame.height}px`;
+  if (canvas.width !== backingWidth || canvas.height !== backingHeight) {
+    canvas.width = backingWidth;
+    canvas.height = backingHeight;
+  }
+
+  if (frame.clear) {
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.clearRect(0, 0, backingWidth, backingHeight);
+  }
+  context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0);
+
+  if (frame.background !== undefined) {
+    context.save();
+    context.globalAlpha = 1;
+    context.fillStyle = frame.background;
+    context.fillRect(0, 0, frame.width, frame.height);
+    context.restore();
+  }
+
+  frame.draws.forEach((draw, index) => {
+    drawCanvasPrimitive(context, draw, `canvas_render draws[${index}]`);
+  });
+}
+
+function drawCanvasPrimitive(
+  context: CanvasRenderingContext2D,
+  draw: Record<string, unknown>,
+  label: string,
+): void {
+  const kind = readRequiredStringField(draw, "kind", label);
+  context.save();
+  try {
+    applyCanvasDrawState(context, draw, label);
+    if (kind === "line") {
+      drawCanvasLine(context, draw, label);
+      return;
+    }
+    if (kind === "polyline") {
+      drawCanvasPolyline(context, draw, label);
+      return;
+    }
+    if (kind === "circle") {
+      drawCanvasCircle(context, draw, label);
+      return;
+    }
+    if (kind === "ellipse") {
+      drawCanvasEllipse(context, draw, label);
+      return;
+    }
+    if (kind === "text") {
+      drawCanvasText(context, draw, label);
+      return;
+    }
+    throw new Error(`vx-dom: ${label} has unsupported kind ${JSON.stringify(kind)}`);
+  } finally {
+    context.restore();
+  }
+}
+
+function drawCanvasLine(
+  context: CanvasRenderingContext2D,
+  draw: Record<string, unknown>,
+  label: string,
+): void {
+  const from = readCanvasPoint(draw.from, `${label}.from`);
+  const to = readCanvasPoint(draw.to, `${label}.to`);
+  context.strokeStyle = readRequiredStringField(draw, "color", label);
+  context.lineWidth = readPositiveCanvasNumber(draw, "width", label, true);
+  context.beginPath();
+  context.moveTo(from.x, from.y);
+  context.lineTo(to.x, to.y);
+  context.stroke();
+}
+
+function drawCanvasPolyline(
+  context: CanvasRenderingContext2D,
+  draw: Record<string, unknown>,
+  label: string,
+): void {
+  if (!Array.isArray(draw.points)) {
+    throw new Error(`vx-dom: ${label} missing points array`);
+  }
+  const points = draw.points.map((point, index) =>
+    readCanvasPoint(point, `${label}.points[${index}]`)
+  );
+  if (points.length === 0) return;
+
+  context.strokeStyle = readRequiredStringField(draw, "color", label);
+  context.lineWidth = readPositiveCanvasNumber(draw, "width", label, true);
+  context.beginPath();
+  context.moveTo(points[0].x, points[0].y);
+  points.slice(1).forEach((point) => context.lineTo(point.x, point.y));
+  const closed = readOptionalCanvasBool(draw, "closed", label, false);
+  if (closed) context.closePath();
+  if (typeof draw.fill === "string") {
+    context.fillStyle = draw.fill;
+    context.fill();
+  } else if (draw.fill !== undefined) {
+    throw new Error(`vx-dom: ${label} has non-string fill`);
+  }
+  context.stroke();
+}
+
+function drawCanvasCircle(
+  context: CanvasRenderingContext2D,
+  draw: Record<string, unknown>,
+  label: string,
+): void {
+  const center = readCanvasPoint(draw.center, `${label}.center`);
+  const radius = readPositiveCanvasNumber(draw, "radius", label, true);
+  context.beginPath();
+  context.arc(center.x, center.y, radius, 0, Math.PI * 2);
+  const gradient = readCanvasRadialGradient(context, draw.radialGradient, center, radius, label);
+  drawCanvasPathPaint(context, draw, label, gradient);
+}
+
+function drawCanvasEllipse(
+  context: CanvasRenderingContext2D,
+  draw: Record<string, unknown>,
+  label: string,
+): void {
+  const center = readCanvasPoint(draw.center, `${label}.center`);
+  const radiusX = readPositiveCanvasNumber(draw, "radiusX", label, true);
+  const radiusY = readPositiveCanvasNumber(draw, "radiusY", label, true);
+  const rotation = readFiniteCanvasNumber(draw, "rotation", label);
+  context.beginPath();
+  context.ellipse(center.x, center.y, radiusX, radiusY, rotation, 0, Math.PI * 2);
+  drawCanvasPathPaint(context, draw, label);
+}
+
+function drawCanvasPathPaint(
+  context: CanvasRenderingContext2D,
+  draw: Record<string, unknown>,
+  label: string,
+  fillOverride?: CanvasGradient,
+): void {
+  if (fillOverride || typeof draw.fill === "string") {
+    context.fillStyle = fillOverride ?? draw.fill as string;
+    context.fill();
+  } else if (draw.fill !== undefined) {
+    throw new Error(`vx-dom: ${label} has non-string fill`);
+  }
+
+  if (typeof draw.stroke === "string") {
+    context.strokeStyle = draw.stroke;
+    context.lineWidth = readPositiveCanvasNumber(draw, "strokeWidth", label, true);
+    context.stroke();
+  } else if (draw.stroke !== undefined) {
+    throw new Error(`vx-dom: ${label} has non-string stroke`);
+  }
+}
+
+function drawCanvasText(
+  context: CanvasRenderingContext2D,
+  draw: Record<string, unknown>,
+  label: string,
+): void {
+  const position = readCanvasPoint(draw.position, `${label}.position`);
+  const value = readRequiredStringField(draw, "value", label);
+  context.fillStyle = readRequiredStringField(draw, "color", label);
+  context.font = readRequiredStringField(draw, "font", label);
+  context.textAlign = readCanvasTextAlign(draw, label);
+  context.textBaseline = readCanvasTextBaseline(draw, label);
+  if (draw.maxWidth === undefined) {
+    context.fillText(value, position.x, position.y);
+    return;
+  }
+  context.fillText(
+    value,
+    position.x,
+    position.y,
+    readPositiveCanvasNumber(draw, "maxWidth", label),
+  );
+}
+
+function applyCanvasDrawState(
+  context: CanvasRenderingContext2D,
+  draw: Record<string, unknown>,
+  label: string,
+): void {
+  const alpha = readOptionalFiniteCanvasNumber(draw, "alpha", label, 1);
+  if (alpha < 0 || alpha > 1) {
+    throw new Error(`vx-dom: ${label} alpha must be between 0 and 1`);
+  }
+  context.globalAlpha = alpha;
+  context.lineCap = "round";
+  context.lineJoin = "round";
+  context.setLineDash([]);
+  context.shadowOffsetX = 0;
+  context.shadowOffsetY = 0;
+  context.shadowBlur = readOptionalPositiveCanvasNumber(draw, "glowBlur", label, 0, true);
+  context.shadowColor = "transparent";
+  if (typeof draw.glowColor === "string") {
+    context.shadowColor = draw.glowColor;
+  } else if (draw.glowColor !== undefined) {
+    throw new Error(`vx-dom: ${label} has non-string glowColor`);
+  }
+}
+
+function readCanvasRadialGradient(
+  context: CanvasRenderingContext2D,
+  input: unknown,
+  center: { x: number; y: number },
+  radius: number,
+  label: string,
+): CanvasGradient | undefined {
+  if (input === undefined) return undefined;
+  if (!isRecord(input)) {
+    throw new Error(`vx-dom: ${label} has invalid radialGradient`);
+  }
+  const innerRadius = readFiniteCanvasNumber(input, "innerRadius", `${label}.radialGradient`);
+  const outerRadius = input.outerRadius === undefined
+    ? radius
+    : readPositiveCanvasNumber(input, "outerRadius", `${label}.radialGradient`, true);
+  if (innerRadius < 0 || outerRadius < innerRadius) {
+    throw new Error(`vx-dom: ${label}.radialGradient has invalid radii`);
+  }
+  const gradient = context.createRadialGradient(
+    center.x,
+    center.y,
+    innerRadius,
+    center.x,
+    center.y,
+    outerRadius,
+  );
+  gradient.addColorStop(0, readRequiredStringField(input, "innerColor", `${label}.radialGradient`));
+  gradient.addColorStop(1, readRequiredStringField(input, "outerColor", `${label}.radialGradient`));
+  return gradient;
+}
+
 async function runCopyToClipboardCommand(command: VxCommandEnvelope): Promise<void> {
   const value = readRequiredStringValue(command, "copy_to_clipboard");
   const clipboard = typeof navigator === "undefined" ? undefined : navigator.clipboard;
@@ -2293,6 +2546,162 @@ function readRequiredStringValue(
     throw new Error(`vx-dom: ${commandKind} command missing string value`);
   }
   return input.value;
+}
+
+function readCanvasFrame(command: VxCommandEnvelope): {
+  selector: string;
+  width: number;
+  height: number;
+  clear: boolean;
+  background?: string;
+  draws: Record<string, unknown>[];
+} {
+  if (!isRecord(command.value)) {
+    throw new Error("vx-dom: canvas_render command missing frame value");
+  }
+  const frame = command.value;
+  if (frame.version !== 1) {
+    throw new Error(`vx-dom: canvas_render unsupported frame version ${String(frame.version)}`);
+  }
+  if (!Array.isArray(frame.draws)) {
+    throw new Error("vx-dom: canvas_render frame missing draws array");
+  }
+  const background = frame.background;
+  if (background !== undefined && typeof background !== "string") {
+    throw new Error("vx-dom: canvas_render frame has non-string background");
+  }
+  return {
+    selector: readRequiredStringField(frame, "selector", "canvas_render frame"),
+    width: readPositiveCanvasNumber(frame, "width", "canvas_render frame"),
+    height: readPositiveCanvasNumber(frame, "height", "canvas_render frame"),
+    clear: readOptionalCanvasBool(frame, "clear", "canvas_render frame", true),
+    ...(background !== undefined ? { background } : {}),
+    draws: frame.draws.map((draw, index) => {
+      if (!isRecord(draw)) {
+        throw new Error(`vx-dom: canvas_render draws[${index}] must be an object`);
+      }
+      return draw;
+    }),
+  };
+}
+
+function findCanvas(selector: string): HTMLCanvasElement {
+  if (typeof document === "undefined") {
+    throw new Error("vx-dom: canvas_render requires a document");
+  }
+  let target: Element | null;
+  try {
+    target = document.querySelector(selector);
+  } catch (error) {
+    throw new Error(`vx-dom: canvas_render has invalid selector ${JSON.stringify(selector)}`, {
+      cause: error,
+    });
+  }
+  if (
+    !target ||
+    typeof HTMLCanvasElement === "undefined" ||
+    !(target instanceof HTMLCanvasElement)
+  ) {
+    throw new Error(`vx-dom: canvas_render could not find canvas ${JSON.stringify(selector)}`);
+  }
+  return target;
+}
+
+function readCanvasPixelRatio(): number {
+  const ratio = typeof window === "undefined" ? 1 : window.devicePixelRatio;
+  return typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+}
+
+function readCanvasPoint(input: unknown, label: string): { x: number; y: number } {
+  if (!isRecord(input)) throw new Error(`vx-dom: ${label} must be a point`);
+  return {
+    x: readFiniteCanvasNumber(input, "x", label),
+    y: readFiniteCanvasNumber(input, "y", label),
+  };
+}
+
+function readFiniteCanvasNumber(
+  input: Record<string, unknown>,
+  field: string,
+  label: string,
+): number {
+  const value = input[field];
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`vx-dom: ${label} missing finite ${field}`);
+  }
+  return value;
+}
+
+function readOptionalFiniteCanvasNumber(
+  input: Record<string, unknown>,
+  field: string,
+  label: string,
+  fallback: number,
+): number {
+  return input[field] === undefined
+    ? fallback
+    : readFiniteCanvasNumber(input, field, label);
+}
+
+function readPositiveCanvasNumber(
+  input: Record<string, unknown>,
+  field: string,
+  label: string,
+  allowZero = false,
+): number {
+  const value = readFiniteCanvasNumber(input, field, label);
+  if (allowZero ? value < 0 : value <= 0) {
+    throw new Error(`vx-dom: ${label} ${field} must be ${allowZero ? "non-negative" : "positive"}`);
+  }
+  return value;
+}
+
+function readOptionalPositiveCanvasNumber(
+  input: Record<string, unknown>,
+  field: string,
+  label: string,
+  fallback: number,
+  allowZero = false,
+): number {
+  return input[field] === undefined
+    ? fallback
+    : readPositiveCanvasNumber(input, field, label, allowZero);
+}
+
+function readOptionalCanvasBool(
+  input: Record<string, unknown>,
+  field: string,
+  label: string,
+  fallback: boolean,
+): boolean {
+  const value = input[field];
+  if (value === undefined) return fallback;
+  if (typeof value !== "boolean") {
+    throw new Error(`vx-dom: ${label} has non-boolean ${field}`);
+  }
+  return value;
+}
+
+function readCanvasTextAlign(
+  input: Record<string, unknown>,
+  label: string,
+): CanvasTextAlign {
+  const value = readRequiredStringField(input, "align", label);
+  if (["center", "end", "left", "right", "start"].includes(value)) {
+    return value as CanvasTextAlign;
+  }
+  throw new Error(`vx-dom: ${label} has invalid text align ${JSON.stringify(value)}`);
+}
+
+function readCanvasTextBaseline(
+  input: Record<string, unknown>,
+  label: string,
+): CanvasTextBaseline {
+  const value = readRequiredStringField(input, "baseline", label);
+  if (["alphabetic", "bottom", "hanging", "ideographic", "middle", "top"].includes(value)) {
+    return value as CanvasTextBaseline;
+  }
+  throw new Error(`vx-dom: ${label} has invalid text baseline ${JSON.stringify(value)}`);
 }
 
 function readBrowserStorage(commandKind: string, storageKind: "local" | "session"): Storage {

@@ -41,6 +41,30 @@ pub obj EventOptions {
 
 pub obj DomElement {}
 
+/// A logical point in CSS-pixel canvas coordinates.
+pub val CanvasPoint {
+  api x: f64,
+  api y: f64
+}
+
+/// A typed canvas draw operation produced by the canvas primitive constructors.
+@boundary(type: "payload", field: "payload")
+pub obj CanvasDraw {
+  api payload: MsgPack
+}
+
+/// A versioned canvas frame ready for the browser VX runtime.
+@boundary(type: "payload", field: "payload")
+pub obj CanvasFrame {
+  api payload: MsgPack
+}
+
+/// A radial fill used by canvas circles.
+@boundary(type: "payload", field: "payload")
+pub obj CanvasRadialGradient {
+  api payload: MsgPack
+}
+
 pub obj Ref<T> {
   api id: String
 }
@@ -320,6 +344,10 @@ impl<Msg> Cmd<Msg>
 
   api fn copy_to_clipboard(value: StringSlice) -> Cmd<Msg>
     Cmd<Msg>::copy_to_clipboard(value.to_string())
+
+  /// Paints a typed canvas frame through the browser VX runtime host.
+  api fn canvas_render(value: CanvasFrame) -> Cmd<Msg>
+    Cmd<Msg>::runtime(kind: "canvas_render", value: value.payload)
 
   /// Reads text from the browser clipboard and dispatches the handler result.
   api fn read_clipboard({ handler_id: i32 }) -> Cmd<Msg>
@@ -1072,6 +1100,149 @@ fn claim_server_render_callback_field(value: Dict<String, MsgPack>, name: String
       claim_server_render_callbacks(value)
     None:
       void
+
+/// Creates a radial color fill for a canvas circle.
+pub fn canvas_radial_gradient({
+  inner_color: String,
+  outer_color: String,
+  inner_radius: f64 = 0.0,
+  outer_radius?: f64
+}) -> CanvasRadialGradient
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("innerColor", msgpack::make_string(inner_color))
+  out.set("outerColor", msgpack::make_string(outer_color))
+  out.set("innerRadius", msgpack::make_f64(inner_radius))
+  set_f64_option(out, "outerRadius", outer_radius)
+  CanvasRadialGradient { payload: msgpack::make_map(out) }
+
+/// Creates a versioned canvas frame in CSS-pixel logical coordinates.
+pub fn canvas_frame({
+  selector: String,
+  width: f64,
+  height: f64,
+  draws: Array<CanvasDraw>,
+  clear: bool = true,
+  background?: String
+}) -> CanvasFrame
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("version", msgpack::make_i32(1))
+  out.set("selector", msgpack::make_string(selector))
+  out.set("width", msgpack::make_f64(width))
+  out.set("height", msgpack::make_f64(height))
+  out.set("clear", msgpack::make_bool(clear))
+  set_string_option(out, "background", background)
+  out.set("draws", canvas_draw_values(draws))
+  CanvasFrame { payload: msgpack::make_map(out) }
+
+/// Creates a straight canvas line.
+pub fn canvas_line({
+  from: CanvasPoint,
+  to: CanvasPoint,
+  color: String,
+  width: f64 = 1.0,
+  alpha: f64 = 1.0,
+  glow_color?: String,
+  glow_blur: f64 = 0.0
+}) -> CanvasDraw
+  let ~out = canvas_draw_map("line")
+  out.set("from", canvas_point_value(from))
+  out.set("to", canvas_point_value(to))
+  out.set("color", msgpack::make_string(color))
+  out.set("width", msgpack::make_f64(width))
+  out.set("alpha", msgpack::make_f64(alpha))
+  set_string_option(out, "glowColor", glow_color)
+  out.set("glowBlur", msgpack::make_f64(glow_blur))
+  CanvasDraw { payload: msgpack::make_map(out) }
+
+/// Creates a connected canvas path, optionally closed and filled.
+pub fn canvas_polyline({
+  points: Array<CanvasPoint>,
+  color: String,
+  width: f64 = 1.0,
+  alpha: f64 = 1.0,
+  closed: bool = false,
+  fill?: String
+}) -> CanvasDraw
+  let ~out = canvas_draw_map("polyline")
+  out.set("points", canvas_point_values(points))
+  out.set("color", msgpack::make_string(color))
+  out.set("width", msgpack::make_f64(width))
+  out.set("alpha", msgpack::make_f64(alpha))
+  out.set("closed", msgpack::make_bool(closed))
+  set_string_option(out, "fill", fill)
+  CanvasDraw { payload: msgpack::make_map(out) }
+
+/// Creates a canvas circle with optional stroke, glow, and radial fill.
+pub fn canvas_circle({
+  center: CanvasPoint,
+  radius: f64,
+  fill?: String,
+  stroke?: String,
+  stroke_width: f64 = 1.0,
+  alpha: f64 = 1.0,
+  glow_color?: String,
+  glow_blur: f64 = 0.0,
+  radial_gradient?: CanvasRadialGradient
+}) -> CanvasDraw
+  let ~out = canvas_draw_map("circle")
+  out.set("center", canvas_point_value(center))
+  out.set("radius", msgpack::make_f64(radius))
+  set_string_option(out, "fill", fill)
+  set_string_option(out, "stroke", stroke)
+  out.set("strokeWidth", msgpack::make_f64(stroke_width))
+  out.set("alpha", msgpack::make_f64(alpha))
+  set_string_option(out, "glowColor", glow_color)
+  out.set("glowBlur", msgpack::make_f64(glow_blur))
+  match(radial_gradient)
+    Some<CanvasRadialGradient> { value }:
+      out.set("radialGradient", value.payload)
+    None:
+      void
+  CanvasDraw { payload: msgpack::make_map(out) }
+
+/// Creates a canvas ellipse. Rotation is expressed in radians.
+pub fn canvas_ellipse({
+  center: CanvasPoint,
+  radius_x: f64,
+  radius_y: f64,
+  rotation: f64 = 0.0,
+  fill?: String,
+  stroke?: String,
+  stroke_width: f64 = 1.0,
+  alpha: f64 = 1.0
+}) -> CanvasDraw
+  let ~out = canvas_draw_map("ellipse")
+  out.set("center", canvas_point_value(center))
+  out.set("radiusX", msgpack::make_f64(radius_x))
+  out.set("radiusY", msgpack::make_f64(radius_y))
+  out.set("rotation", msgpack::make_f64(rotation))
+  set_string_option(out, "fill", fill)
+  set_string_option(out, "stroke", stroke)
+  out.set("strokeWidth", msgpack::make_f64(stroke_width))
+  out.set("alpha", msgpack::make_f64(alpha))
+  CanvasDraw { payload: msgpack::make_map(out) }
+
+/// Creates canvas text using a CSS canvas font string.
+pub fn canvas_text({
+  position: CanvasPoint,
+  value: String,
+  color: String,
+  font: String = "12px sans-serif",
+  align: String = "left",
+  baseline: String = "alphabetic",
+  alpha: f64 = 1.0,
+  max_width?: f64
+}) -> CanvasDraw
+  let ~out = canvas_draw_map("text")
+  out.set("position", canvas_point_value(position))
+  out.set("value", msgpack::make_string(value))
+  out.set("color", msgpack::make_string(color))
+  out.set("font", msgpack::make_string(font))
+  out.set("align", msgpack::make_string(align))
+  out.set("baseline", msgpack::make_string(baseline))
+  out.set("alpha", msgpack::make_f64(alpha))
+  set_f64_option(out, "maxWidth", max_width)
+  CanvasDraw { payload: msgpack::make_map(out) }
 
 /// Creates a versioned VX render frame.
 pub fn frame(root: MsgPack): () -> MsgPack
@@ -2349,6 +2520,63 @@ fn consume_named_attr(entry: Dict<String, MsgPack>, ~attrs: Dict<String, MsgPack
               void
         Err:
           void
+    None:
+      void
+
+fn canvas_draw_map(kind: String) -> Dict<String, MsgPack>
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("kind", msgpack::make_string(kind))
+  out
+
+fn canvas_point_value(point: CanvasPoint) -> MsgPack
+  let ~out = Dict<String, MsgPack>::init()
+  out.set("x", msgpack::make_f64(point.x))
+  out.set("y", msgpack::make_f64(point.y))
+  msgpack::make_map(out)
+
+fn canvas_point_values(points: Array<CanvasPoint>) -> MsgPack
+  let ~out = Array<MsgPack>::with_capacity(points.len())
+  var index = 0
+  while index < points.len():
+    match(points.get(index))
+      Some<CanvasPoint> { value }:
+        out.push(canvas_point_value(value))
+      None:
+        void
+    index = index + 1
+  msgpack::make_array(out)
+
+fn canvas_draw_values(draws: Array<CanvasDraw>) -> MsgPack
+  let ~out = Array<MsgPack>::with_capacity(draws.len())
+  var index = 0
+  while index < draws.len():
+    match(draws.get(index))
+      Some<CanvasDraw> { value }:
+        out.push(value.payload)
+      None:
+        void
+    index = index + 1
+  msgpack::make_array(out)
+
+fn set_string_option(
+  ~out: Dict<String, MsgPack>,
+  name: String,
+  value: Optional<String>
+) -> void
+  match(value)
+    Some<String> { value }:
+      out.set(name, msgpack::make_string(value))
+    None:
+      void
+
+fn set_f64_option(
+  ~out: Dict<String, MsgPack>,
+  name: String,
+  value: Optional<f64>
+) -> void
+  match(value)
+    Some<f64> { value }:
+      out.set(name, msgpack::make_f64(value))
     None:
       void
 

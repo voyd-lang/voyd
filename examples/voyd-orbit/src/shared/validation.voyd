@@ -1,0 +1,135 @@
+//! Validation at persistence and HTTP trust boundaries.
+
+use super::persistence::PersistedSimulation
+use src::simulation::{ Body, BodyAppearance, CameraView, SimulationSettings, Vec2 }
+use std::array::Array
+use std::math::is_finite
+use std::result::types::all
+use std::string::type::String
+
+pub type ValidationError = {
+  code: String,
+  message: String
+}
+
+pub fn validate_simulation(value: PersistedSimulation) -> Result<Unit, ValidationError>
+  if value.version != 1:
+    return invalid("unsupported-version", "Only Voyd Orbit persistence version 1 is supported")
+  if not is_safe_id(value.id):
+    return invalid("invalid-id", "Simulation id must contain only lower-case letters, numbers, and hyphens")
+  if value.name.trimmed().is_empty() or value.name.byte_len() > 96:
+    return invalid("invalid-name", "Simulation name must be between 1 and 96 bytes")
+  if value.created_at < 0i64 or value.updated_at < 0i64:
+    return invalid("invalid-timestamp", "Simulation timestamps cannot be negative")
+  if value.state.bodies.len() > 250:
+    return invalid("invalid-bodies", "A simulation cannot contain more than 250 bodies")
+  match(validate_settings(value.state.settings))
+    Err<ValidationError> { error }:
+      return Err<ValidationError> { error }
+    Ok<Unit>:
+      void
+  match(validate_camera(value.camera))
+    Err<ValidationError> { error }:
+      return Err<ValidationError> { error }
+    Ok<Unit>:
+      void
+  if not finite_in_range(value.state.elapsed_days, min: 0.0, max: 1000000000000.0):
+    return invalid("invalid-elapsed-time", "Elapsed simulation time is out of range")
+
+  var index = 0
+  while index < value.state.bodies.len():
+    let body = value.state.bodies.at(index)
+    match(validate_body(body))
+      Err<ValidationError> { error }:
+        return Err<ValidationError> { error }
+      Ok<Unit>:
+        void
+    if body_id_is_duplicated(value.state.bodies, index):
+      return invalid("duplicate-body-id", "Every body id must be unique within a simulation")
+    index = index + 1
+  Ok<Unit> { value: Unit {} }
+
+pub fn validate_body(body: Body) -> Result<Unit, ValidationError>
+  if not is_safe_id(body.id):
+    return invalid("invalid-body-id", "Body id must contain only lower-case letters, numbers, and hyphens")
+  if body.name.trimmed().is_empty() or body.name.byte_len() > 80:
+    return invalid("invalid-body-name", "Body names must be between 1 and 80 bytes")
+  if not finite_in_range(body.mass_solar, min: 0.000000000000001, max: 1000000000000.0):
+    return invalid("invalid-mass", "Body mass must be finite and positive")
+  if not finite_in_range(body.radius_au, min: 0.0000000001, max: 1000000.0):
+    return invalid("invalid-radius", "Body radius must be finite and positive")
+  if not vector_in_range(body.position_au, 1000000000.0):
+    return invalid("invalid-position", "Body position is not finite or is out of range")
+  if not vector_in_range(body.velocity_au_per_day, 1000000.0):
+    return invalid("invalid-velocity", "Body velocity is not finite or is out of range")
+  validate_appearance(body.appearance)
+
+pub fn validate_settings(value: SimulationSettings) -> Result<Unit, ValidationError>
+  if not finite_in_range(value.fixed_timestep_days, min: 0.000001, max: 10.0):
+    return invalid("invalid-timestep", "Fixed timestep must be between 0.000001 and 10 days")
+  if not finite_in_range(value.softening_au, min: 0.0, max: 10.0):
+    return invalid("invalid-softening", "Gravity softening must be finite and between 0 and 10 AU")
+  Ok<Unit> { value: Unit {} }
+
+pub fn validate_camera(value: CameraView) -> Result<Unit, ValidationError>
+  if not vector_in_range(value.center_au, 1000000000.0):
+    return invalid("invalid-camera", "Camera center is not finite or is out of range")
+  if not finite_in_range(value.pixels_per_au, min: 0.000001, max: 100000000.0):
+    return invalid("invalid-camera", "Camera zoom is out of range")
+  Ok<Unit> { value: Unit {} }
+
+pub fn is_safe_id(value: String) -> bool
+  let id = value.trimmed()
+  if id.is_empty() or id.byte_len() > 64:
+    return false
+  if id.starts_with("-") or id.ends_with("-"):
+    return false
+  not id.contains(where: (rune: i32) -> bool => not is_id_rune(rune))
+
+pub fn is_hex_color(value: String) -> bool
+  if value.byte_len() != 7 or not value.starts_with("#"):
+    return false
+  let bytes = value.to_utf8()
+  var index = 1
+  while index < bytes.len():
+    if not is_hex_digit(bytes.at(index)):
+      return false
+    index = index + 1
+  true
+
+fn validate_appearance(value: BodyAppearance) -> Result<Unit, ValidationError>
+  let colors_valid = is_hex_color(value.primary_color) and is_hex_color(value.secondary_color) and is_hex_color(value.trail_color)
+  if not colors_valid:
+    return invalid("invalid-color", "Body colors must use six-digit hexadecimal notation")
+  if not finite_in_range(value.glow_strength, min: 0.0, max: 100.0):
+    return invalid("invalid-glow", "Body glow strength must be between 0 and 100")
+  Ok<Unit> { value: Unit {} }
+
+fn vector_in_range(value: Vec2, limit: f64) -> bool
+  finite_in_range(value.x, min: 0.0 - limit, max: limit) and
+    finite_in_range(value.y, min: 0.0 - limit, max: limit)
+
+fn finite_in_range(value: f64, { min: f64, max: f64 }) -> bool
+  is_finite(value) and value >= min and value <= max
+
+fn body_id_is_duplicated(bodies: Array<Body>, index: i32) -> bool
+  let target_id = bodies.at(index).id
+  var candidate = index + 1
+  while candidate < bodies.len():
+    if bodies.at(candidate).id == target_id:
+      return true
+    candidate = candidate + 1
+  false
+
+fn is_id_rune(value: i32) -> bool
+  (value >= 97 and value <= 122) or
+    (value >= 48 and value <= 57) or
+    value == 45
+
+fn is_hex_digit(value: i32) -> bool
+  (value >= 48 and value <= 57) or
+    (value >= 65 and value <= 70) or
+    (value >= 97 and value <= 102)
+
+fn invalid<T>(code: String, message: String) -> Result<T, ValidationError>
+  Err<ValidationError> { error: { code, message } }

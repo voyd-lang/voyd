@@ -1,0 +1,351 @@
+//! Filesystem-backed persistence for Voyd Orbit simulations.
+//!
+//! Every persisted system owns one JSON file. IDs are validated before they
+//! participate in path construction, and writes use a same-directory temporary
+//! file followed by rename so readers never observe a partial document.
+
+use src::shared::{
+  PersistedSimulation,
+  SimulationSummary,
+  ValidationError,
+  is_safe_id,
+  simulation_from_json,
+  simulation_json_pretty,
+  simulation_summary,
+  validate_simulation
+}
+use std::array::Array
+use std::bytes::ByteBuffer
+use std::encoding::hex
+use std::error::IoError
+use std::fs::{
+  Fs,
+  create_dir_all as create_directories,
+  exists as path_exists,
+  list_dir as list_directory,
+  read_string as read_file_string,
+  remove as remove_path,
+  rename as rename_path,
+  write_string as write_file_string
+}
+use std::json::JsonError
+use std::optional::types::all
+use std::path::Path
+use std::random::self as random
+use std::result::types::all
+use std::string::type::String
+use std::time::{ SystemTime, Time }
+
+pub obj RepositoryError {
+  api code: String,
+  api message: String
+}
+
+pub obj SimulationRepository {
+  data_directory: Path
+}
+
+impl SimulationRepository
+  /// Creates a repository rooted at an explicit directory.
+  api fn init(data_directory: Path) -> SimulationRepository
+    SimulationRepository { data_directory }
+
+  /// Creates the application repository under the source-controlled data root.
+  api fn orbit_data() -> SimulationRepository
+    SimulationRepository::init(Path::new("./data/simulations"))
+
+  /// Returns a safe per-simulation path, rejecting path-like identifiers first.
+  api fn path_for(self, id: String) -> Result<Path, RepositoryError>
+    if not is_safe_id(id):
+      return repository_error(
+        "invalid-id",
+        "Simulation id must contain only lower-case letters, numbers, and hyphens"
+      )
+    Ok<Path> { value: self.data_directory.join(id.concat(".json")) }
+
+  /// Creates the persistence directory and any missing parents.
+  api fn initialize(self): Fs -> Result<Unit, RepositoryError>
+    match(create_directories(self.data_directory))
+      Ok<Unit> { value }:
+        Ok<Unit> { value }
+      Err<IoError> { error }:
+        storage_error<Unit>(error)
+
+  /// Lists valid simulations newest-first.
+  ///
+  /// Unreadable, malformed, invalid, temporary, and unrelated files are skipped
+  /// independently so one damaged save cannot make the catalogue unavailable.
+  api fn list(self): Fs -> Result<Array<SimulationSummary>, RepositoryError>
+    match(self.initialize())
+      Err<RepositoryError> { error }:
+        return Err<RepositoryError> { error }
+      Ok<Unit>:
+        void
+
+    match(list_directory(self.data_directory))
+      Err<IoError> { error }:
+        storage_error<Array<SimulationSummary>>(error)
+      Ok<Array<Path>> { value: paths }:
+        let ~summaries = Array<SimulationSummary>::init()
+        var index = 0
+        while index < paths.len():
+          match(simulation_id_from_path(paths.at(index)))
+            None:
+              void
+            Some<String> { value: id }:
+              match(self.read_existing(id))
+                Ok<PersistedSimulation> { value }:
+                  summaries.push(simulation_summary(value))
+                Err<RepositoryError>:
+                  void
+          index = index + 1
+        Ok<Array<SimulationSummary>> {
+          value: summaries.sorted(compare_summaries)
+        }
+
+  /// Loads a simulation when the validated ID exists.
+  api fn get(self, id: String): Fs -> Result<Option<PersistedSimulation>, RepositoryError>
+    match(self.path_for(id))
+      Err<RepositoryError> { error }:
+        Err<RepositoryError> { error }
+      Ok<Path> { value: path }:
+        match(self.initialize())
+          Err<RepositoryError> { error }:
+            Err<RepositoryError> { error }
+          Ok<Unit>:
+            if not path_exists(path):
+              return Ok<Option<PersistedSimulation>> { value: None {} }
+            match(self.read_existing(id))
+              Ok<PersistedSimulation> { value }:
+                Ok<Option<PersistedSimulation>> {
+                  value: Some<PersistedSimulation> { value }
+                }
+              Err<RepositoryError> { error }:
+                Err<RepositoryError> { error }
+
+  /// Creates a new simulation with a server-owned ID and timestamps.
+  api fn create(
+    self,
+    input: PersistedSimulation
+  ): (Fs, random::Random, Time) -> Result<PersistedSimulation, RepositoryError>
+    match(self.initialize())
+      Err<RepositoryError> { error }:
+        return Err<RepositoryError> { error }
+      Ok<Unit>:
+        void
+
+    match(self.available_id())
+      Err<RepositoryError> { error }:
+        Err<RepositoryError> { error }
+      Ok<String> { value: id }:
+        let now = SystemTime::now().unix_millis()
+        let created = with_identity(
+          input,
+          id: id,
+          created_at: now,
+          updated_at: now
+        )
+        match(validate_simulation(created))
+          Err<ValidationError> { error }:
+            validation_error<PersistedSimulation>(error)
+          Ok<Unit>:
+            match(self.write_atomic(created))
+              Err<RepositoryError> { error }:
+                Err<RepositoryError> { error }
+              Ok<Unit>:
+                Ok<PersistedSimulation> { value: created }
+
+  /// Replaces an existing simulation while retaining its original creation time.
+  api fn update(
+    self,
+    id: String,
+    input: PersistedSimulation
+  ): (Fs, random::Random, Time) -> Result<Option<PersistedSimulation>, RepositoryError>
+    match(self.get(id))
+      Err<RepositoryError> { error }:
+        return Err<RepositoryError> { error }
+      Ok<Option<PersistedSimulation>> { value }:
+        match(value)
+          None:
+            return Ok<Option<PersistedSimulation>> { value: None {} }
+          Some<PersistedSimulation> { value: existing }:
+            let now = SystemTime::now().unix_millis()
+            let updated_at = if now > existing.updated_at then: now else: existing.updated_at + 1i64
+            let updated = with_identity(
+              input,
+              id: id,
+              created_at: existing.created_at,
+              updated_at: updated_at
+            )
+            match(validate_simulation(updated))
+              Err<ValidationError> { error }:
+                return validation_error<Option<PersistedSimulation>>(error)
+              Ok<Unit>:
+                match(self.write_atomic(updated))
+                  Err<RepositoryError> { error }:
+                    return Err<RepositoryError> { error }
+                  Ok<Unit>:
+                    return Ok<Option<PersistedSimulation>> {
+                      value: Some<PersistedSimulation> { value: updated }
+                    }
+    Ok<Option<PersistedSimulation>> { value: None {} }
+
+  /// Removes one simulation. Missing IDs are reported without treating them as I/O failures.
+  api fn delete(self, id: String): Fs -> Result<bool, RepositoryError>
+    match(self.path_for(id))
+      Err<RepositoryError> { error }:
+        Err<RepositoryError> { error }
+      Ok<Path> { value: path }:
+        match(self.initialize())
+          Err<RepositoryError> { error }:
+            Err<RepositoryError> { error }
+          Ok<Unit>:
+            if not path_exists(path):
+              return Ok<bool> { value: false }
+            match(remove_path(path))
+              Ok<Unit>:
+                Ok<bool> { value: true }
+              Err<IoError> { error }:
+                storage_error<bool>(error)
+
+  fn available_id(self): (Fs, random::Random) -> Result<String, RepositoryError>
+    var attempts = 0
+    while attempts < 8:
+      let id = random_hex_id()
+      if not self.id_exists(id):
+        return Ok<String> { value: id }
+      attempts = attempts + 1
+    repository_error(
+      "id-generation-failed",
+      "Could not allocate a unique simulation id"
+    )
+
+  fn id_exists(self, id: String): Fs -> bool
+    match(self.path_for(id))
+      Ok<Path> { value }:
+        path_exists(value)
+      Err<RepositoryError>:
+        true
+
+  fn read_existing(self, id: String): Fs -> Result<PersistedSimulation, RepositoryError>
+    match(self.path_for(id))
+      Err<RepositoryError> { error }:
+        Err<RepositoryError> { error }
+      Ok<Path> { value: path }:
+        match(read_file_string(path))
+          Err<IoError> { error }:
+            storage_error<PersistedSimulation>(error)
+          Ok<String> { value: source }:
+            match(simulation_from_json(source))
+              Err<JsonError> { error }:
+                repository_error(
+                  "corrupt-simulation",
+                  "Saved simulation JSON could not be decoded: ".concat(error.message)
+                )
+              Ok<PersistedSimulation> { value }:
+                if value.id != id:
+                  return repository_error(
+                    "corrupt-simulation",
+                    "Saved simulation id does not match its file name"
+                  )
+                match(validate_simulation(value))
+                  Err<ValidationError> { error }:
+                    repository_error(
+                      "corrupt-simulation",
+                      "Saved simulation failed validation: ".concat(error.message)
+                    )
+                  Ok<Unit>:
+                    Ok<PersistedSimulation> { value }
+
+  fn write_atomic(
+    self,
+    value: PersistedSimulation
+  ): (Fs, random::Random) -> Result<Unit, RepositoryError>
+    match(self.path_for(value.id))
+      Err<RepositoryError> { error }:
+        Err<RepositoryError> { error }
+      Ok<Path> { value: destination }:
+        match(simulation_json_pretty(value))
+          Err<JsonError> { error }:
+            repository_error(
+              "serialization-failed",
+              "Simulation JSON could not be encoded: ".concat(error.message)
+            )
+          Ok<String> { value: encoded }:
+            let temporary = self.temporary_path(value.id)
+            match(write_file_string(temporary, encoded))
+              Err<IoError> { error }:
+                let _ = remove_if_present(temporary)
+                storage_error<Unit>(error)
+              Ok<Unit>:
+                match(rename_path(temporary, to: destination))
+                  Ok<Unit> { value }:
+                    Ok<Unit> { value }
+                  Err<IoError> { error }:
+                    let _ = remove_if_present(temporary)
+                    storage_error<Unit>(error)
+
+  fn temporary_path(self, id: String): random::Random -> Path
+    self.data_directory.join(
+      ".".concat(id).concat(".").concat(random_hex_id()).concat(".tmp")
+    )
+
+fn with_identity(
+  value: PersistedSimulation,
+  { id: String, created_at: i64, updated_at: i64 }
+) -> PersistedSimulation
+  {
+    version: value.version,
+    id,
+    name: value.name,
+    created_at,
+    updated_at,
+    state: value.state,
+    camera: value.camera
+  }
+
+/// Generates a 128-bit lower-case hexadecimal identifier in Voyd.
+fn random_hex_id(): random::Random -> String
+  let ~bytes = ByteBuffer::with_capacity(16)
+  var index = 0
+  while index < 16:
+    bytes.push(normalize_byte(random::random_i32()))
+    index = index + 1
+  hex::encode(bytes.as_bytes())
+
+fn simulation_id_from_path(path: Path) -> Option<String>
+  match(path.file_name())
+    None:
+      None {}
+    Some<String> { value: name }:
+      if not name.ends_with(".json") or name.byte_len() <= 5:
+        return None {}
+      let id = name.slice(bytes: 0, len: name.byte_len() - 5).to_string()
+      if is_safe_id(id) then: Some<String> { value: id } else: None {}
+
+fn normalize_byte(value: i32) -> i32
+  let remainder = value % 256
+  if remainder < 0 then: remainder + 256 else: remainder
+
+fn compare_summaries(left: SimulationSummary, right: SimulationSummary) -> i32
+  if
+    left.updated_at > right.updated_at: -1
+    left.updated_at < right.updated_at: 1
+    else: 0
+
+fn remove_if_present(path: Path): Fs -> Unit
+  if path_exists(path):
+    let _ = remove_path(path)
+  Unit {}
+
+fn validation_error<T>(error: ValidationError) -> Result<T, RepositoryError>
+  repository_error(error.code, error.message)
+
+fn storage_error<T>(error: IoError) -> Result<T, RepositoryError>
+  repository_error(
+    "storage-failed",
+    "Simulation storage operation failed: ".concat(error.message)
+  )
+
+fn repository_error<T>(code: String, message: String) -> Result<T, RepositoryError>
+  Err<RepositoryError> { error: RepositoryError { code, message } }

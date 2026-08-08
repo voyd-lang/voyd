@@ -72,6 +72,24 @@
     "rationale": "Keep co-located: protects the mini-wikipedia example's Voyd-owned article model and behavior through the native test runner."
   },
   {
+    "file": "examples/voyd-orbit/src/server/app.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects the example application's Voyd-owned REST, validation, and atomic filesystem persistence contracts."
+  },
+  {
+    "file": "examples/voyd-orbit/src/shared/persistence.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects the example application's versioned JSON round trips and persisted-data validation contracts."
+  },
+  {
+    "file": "examples/voyd-orbit/src/simulation/engine.test.voyd",
+    "owner": "voyd-library",
+    "disposition": "library-local",
+    "rationale": "Keep co-located: protects the example application's vector math, gravity, integration, and conservation behavior."
+  },
+  {
     "file": "packages/compiler/src/__tests__/call-shape-diagnostics.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",

@@ -1,0 +1,446 @@
+//! Versioned, human-readable persistence model and explicit JSON codecs.
+//!
+//! The same code is compiled into the browser and server programs. Keeping the
+//! codec here makes the wire format a real shared contract rather than a host
+//! implementation detail.
+
+use src::simulation::{
+  Body,
+  BodyAppearance,
+  BodyKind,
+  CameraView,
+  SimulationSettings,
+  SimulationState,
+  Vec2
+}
+use std::array::Array
+use std::dict::Dict
+use std::json::{
+  JsonArray,
+  JsonBool,
+  JsonError,
+  JsonNull,
+  JsonNumber,
+  JsonObject,
+  JsonString,
+  JsonValue,
+  parse as parse_json,
+  stringify as stringify_json,
+  stringify_pretty as stringify_json_pretty
+}
+use std::number::cast::{ to_f64, to_i32_checked, to_i64_checked }
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
+
+pub type PersistedSimulation = {
+  version: i32,
+  id: String,
+  name: String,
+  created_at: i64,
+  updated_at: i64,
+  state: SimulationState,
+  camera: CameraView
+}
+
+pub type SimulationSummary = {
+  id: String,
+  name: String,
+  created_at: i64,
+  updated_at: i64,
+  body_count: i32
+}
+
+pub type ApiError = {
+  code: String,
+  message: String
+}
+
+pub fn persistence_version() -> i32
+  1
+
+pub fn persisted_simulation({
+  id: String,
+  name: String,
+  created_at: i64,
+  updated_at: i64,
+  state: SimulationState,
+  camera: CameraView
+}) -> PersistedSimulation
+  {
+    version: persistence_version(),
+    id,
+    name,
+    created_at,
+    updated_at,
+    state,
+    camera
+  }
+
+pub fn simulation_summary(value: PersistedSimulation) -> SimulationSummary
+  {
+    id: value.id,
+    name: value.name,
+    created_at: value.created_at,
+    updated_at: value.updated_at,
+    body_count: value.state.bodies.len()
+  }
+
+pub fn simulation_json(value: PersistedSimulation) -> Result<String, JsonError>
+  stringify_json(simulation_json_value(value))
+
+pub fn simulation_json_pretty(value: PersistedSimulation) -> Result<String, JsonError>
+  stringify_json_pretty(simulation_json_value(value))
+
+pub fn simulation_from_json(source: String) -> Result<PersistedSimulation, JsonError>
+  match(parse_json(source))
+    Ok<JsonValue> { value }:
+      simulation_from_json_value(value)
+    Err<JsonError> { error }:
+      Err<JsonError> { error }
+
+pub fn simulation_from_json_value(value: JsonValue) -> Result<PersistedSimulation, JsonError>
+  value.match(decoded)
+    JsonObject:
+      decode_simulation(decoded.value)
+    else:
+      codec_error("simulation must be a JSON object")
+
+pub fn summaries_json(values: Array<SimulationSummary>) -> Result<String, JsonError>
+  stringify_json(JsonArray {
+    value: values.map((value: SimulationSummary) -> JsonValue => summary_json_value(value))
+  })
+
+pub fn summaries_from_json(source: String) -> Result<Array<SimulationSummary>, JsonError>
+  match(parse_json(source))
+    Err<JsonError> { error }:
+      Err<JsonError> { error }
+    Ok<JsonValue> { value }:
+      value.match(decoded)
+        JsonArray:
+          decode_summaries(decoded.value)
+        else:
+          codec_error("simulation list must be a JSON array")
+
+pub fn api_error_json(error: ApiError) -> Result<String, JsonError>
+  stringify_json(api_error_json_value(error))
+
+pub fn api_error_from_json(source: String) -> Result<ApiError, JsonError>
+  match(parse_json(source))
+    Err<JsonError> { error }:
+      Err<JsonError> { error }
+    Ok<JsonValue> { value }:
+      value.match(decoded)
+        JsonObject:
+          Ok<ApiError> {
+            value: {
+              code: json_string(decoded.value, "code"),
+              message: json_string(decoded.value, "message")
+            }
+          }
+        else:
+          codec_error("API error must be a JSON object")
+
+pub fn kind_name(kind: BodyKind) -> String
+  match(kind)
+    BodyKind::Star:
+      "star"
+    BodyKind::Planet:
+      "planet"
+    BodyKind::Moon:
+      "moon"
+    BodyKind::Asteroid:
+      "asteroid"
+    BodyKind::BlackHole:
+      "black-hole"
+
+pub fn kind_from_name(value: String) -> Option<BodyKind>
+  let normalized = value.trimmed().lowered()
+  if normalized == "star":
+    return Some<BodyKind> { value: BodyKind::Star {} }
+  if normalized == "planet":
+    return Some<BodyKind> { value: BodyKind::Planet {} }
+  if normalized == "moon":
+    return Some<BodyKind> { value: BodyKind::Moon {} }
+  if normalized == "asteroid":
+    return Some<BodyKind> { value: BodyKind::Asteroid {} }
+  if normalized == "black-hole":
+    return Some<BodyKind> { value: BodyKind::BlackHole {} }
+  None {}
+
+fn decode_simulation(fields: Dict<String, JsonValue>) -> Result<PersistedSimulation, JsonError>
+  let version = json_i32(fields, "version")
+  if version != persistence_version():
+    return codec_error("unsupported simulation version")
+
+  match(json_bodies(fields, "bodies"))
+    Err<JsonError> { error }:
+      Err<JsonError> { error }
+    Ok<Array<Body>> { value: bodies }:
+      Ok<PersistedSimulation> {
+        value: {
+          version,
+          id: json_string(fields, "id"),
+          name: json_string(fields, "name"),
+          created_at: json_i64(fields, "createdAt"),
+          updated_at: json_i64(fields, "updatedAt"),
+          state: {
+            bodies,
+            settings: json_settings(fields, "simulationSettings"),
+            elapsed_days: json_number(fields, "elapsedDays")
+          },
+          camera: json_camera(fields, "camera")
+        }
+      }
+
+fn simulation_json_value(value: PersistedSimulation) -> JsonValue
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set("version", JsonNumber { value: to_f64(value.version) })
+  fields.set("id", JsonString { value: value.id })
+  fields.set("name", JsonString { value: value.name })
+  fields.set("createdAt", JsonNumber { value: to_f64(value.created_at) })
+  fields.set("updatedAt", JsonNumber { value: to_f64(value.updated_at) })
+  fields.set("bodies", JsonArray {
+    value: value.state.bodies.map((body: Body) -> JsonValue => body_json_value(body))
+  })
+  fields.set("simulationSettings", settings_json_value(value.state.settings))
+  fields.set("elapsedDays", JsonNumber { value: value.state.elapsed_days })
+  fields.set("camera", camera_json_value(value.camera))
+  JsonObject { value: fields }
+
+fn body_json_value(body: Body) -> JsonValue
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set("id", JsonString { value: body.id })
+  fields.set("name", JsonString { value: body.name })
+  fields.set("kind", JsonString { value: kind_name(body.kind) })
+  fields.set("massSolar", JsonNumber { value: body.mass_solar })
+  fields.set("radiusAu", JsonNumber { value: body.radius_au })
+  fields.set("positionAu", vector_json_value(body.position_au))
+  fields.set("velocityAuPerDay", vector_json_value(body.velocity_au_per_day))
+  fields.set("appearance", appearance_json_value(body.appearance))
+  JsonObject { value: fields }
+
+fn appearance_json_value(value: BodyAppearance) -> JsonValue
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set("primaryColor", JsonString { value: value.primary_color })
+  fields.set("secondaryColor", JsonString { value: value.secondary_color })
+  fields.set("trailColor", JsonString { value: value.trail_color })
+  fields.set("glowStrength", JsonNumber { value: value.glow_strength })
+  JsonObject { value: fields }
+
+fn vector_json_value(value: Vec2) -> JsonValue
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set("x", JsonNumber { value: value.x })
+  fields.set("y", JsonNumber { value: value.y })
+  JsonObject { value: fields }
+
+fn settings_json_value(value: SimulationSettings) -> JsonValue
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set("fixedTimestepDays", JsonNumber { value: value.fixed_timestep_days })
+  fields.set("softeningAu", JsonNumber { value: value.softening_au })
+  fields.set("trailsEnabled", JsonBool { value: value.trails_enabled })
+  fields.set("velocityVectorsEnabled", JsonBool { value: value.velocity_vectors_enabled })
+  fields.set("labelsEnabled", JsonBool { value: value.labels_enabled })
+  JsonObject { value: fields }
+
+fn camera_json_value(value: CameraView) -> JsonValue
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set("centerAu", vector_json_value(value.center_au))
+  fields.set("pixelsPerAu", JsonNumber { value: value.pixels_per_au })
+  JsonObject { value: fields }
+
+fn summary_json_value(value: SimulationSummary) -> JsonValue
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set("id", JsonString { value: value.id })
+  fields.set("name", JsonString { value: value.name })
+  fields.set("createdAt", JsonNumber { value: to_f64(value.created_at) })
+  fields.set("updatedAt", JsonNumber { value: to_f64(value.updated_at) })
+  fields.set("bodyCount", JsonNumber { value: to_f64(value.body_count) })
+  JsonObject { value: fields }
+
+fn api_error_json_value(value: ApiError) -> JsonValue
+  let ~fields = Dict<String, JsonValue>::init()
+  fields.set("code", JsonString { value: value.code })
+  fields.set("message", JsonString { value: value.message })
+  JsonObject { value: fields }
+
+fn decode_bodies(values: Array<JsonValue>) -> Result<Array<Body>, JsonError>
+  let ~bodies = Array<Body>::with_capacity(values.len())
+  var index = 0
+  while index < values.len():
+    match(decode_body(values.at(index)))
+      Ok<Body> { value }:
+        bodies.push(value)
+      Err<JsonError> { error }:
+        return Err<JsonError> { error }
+    index = index + 1
+  Ok<Array<Body>> { value: bodies }
+
+fn decode_body(value: JsonValue) -> Result<Body, JsonError>
+  value.match(decoded)
+    JsonObject:
+      let fields = decoded.value
+      match(kind_from_name(json_string(fields, "kind")))
+        None:
+          codec_error("body kind is invalid")
+        Some<BodyKind> { value: kind }:
+          Ok<Body> {
+            value: {
+              id: json_string(fields, "id"),
+              name: json_string(fields, "name"),
+              kind,
+              mass_solar: json_number(fields, "massSolar"),
+              radius_au: json_number(fields, "radiusAu"),
+              position_au: json_vector(fields, "positionAu"),
+              velocity_au_per_day: json_vector(fields, "velocityAuPerDay"),
+              appearance: json_appearance(fields, "appearance")
+            }
+          }
+    else:
+      codec_error("body entry must be a JSON object")
+
+fn decode_summaries(values: Array<JsonValue>) -> Result<Array<SimulationSummary>, JsonError>
+  let ~out = Array<SimulationSummary>::with_capacity(values.len())
+  var index = 0
+  while index < values.len():
+    let value = values.at(index)
+    value.match(decoded)
+      JsonObject:
+        out.push({
+          id: json_string(decoded.value, "id"),
+          name: json_string(decoded.value, "name"),
+          created_at: json_i64(decoded.value, "createdAt"),
+          updated_at: json_i64(decoded.value, "updatedAt"),
+          body_count: json_i32(decoded.value, "bodyCount")
+        })
+      else:
+        return codec_error("simulation summary must be a JSON object")
+    index = index + 1
+  Ok<Array<SimulationSummary>> { value: out }
+
+fn json_bodies(fields: Dict<String, JsonValue>, key: String) -> Result<Array<Body>, JsonError>
+  match(fields.get(key))
+    Some<JsonValue> { value }:
+      value.match(decoded)
+        JsonArray:
+          decode_bodies(decoded.value)
+        else:
+          codec_error("bodies must be a JSON array")
+    None:
+      codec_error("bodies field is required")
+
+fn json_settings(fields: Dict<String, JsonValue>, key: String) -> SimulationSettings
+  match(json_object(fields, key))
+    Some<Dict<String, JsonValue>> { value }:
+      {
+        fixed_timestep_days: json_number(value, "fixedTimestepDays"),
+        softening_au: json_number(value, "softeningAu"),
+        trails_enabled: json_bool(value, "trailsEnabled"),
+        velocity_vectors_enabled: json_bool(value, "velocityVectorsEnabled"),
+        labels_enabled: json_bool(value, "labelsEnabled")
+      }
+    None:
+      {
+        fixed_timestep_days: 0.0,
+        softening_au: 0.0,
+        trails_enabled: true,
+        velocity_vectors_enabled: false,
+        labels_enabled: true
+      }
+
+fn json_camera(fields: Dict<String, JsonValue>, key: String) -> CameraView
+  match(json_object(fields, key))
+    Some<Dict<String, JsonValue>> { value }:
+      {
+        center_au: json_vector(value, "centerAu"),
+        pixels_per_au: json_number(value, "pixelsPerAu")
+      }
+    None:
+      { center_au: Vec2::zero(), pixels_per_au: 80.0 }
+
+fn json_appearance(fields: Dict<String, JsonValue>, key: String) -> BodyAppearance
+  match(json_object(fields, key))
+    Some<Dict<String, JsonValue>> { value }:
+      {
+        primary_color: json_string(value, "primaryColor"),
+        secondary_color: json_string(value, "secondaryColor"),
+        trail_color: json_string(value, "trailColor"),
+        glow_strength: json_number(value, "glowStrength")
+      }
+    None:
+      {
+        primary_color: "#ffffff",
+        secondary_color: "#8899bb",
+        trail_color: "#8899bb",
+        glow_strength: 0.0
+      }
+
+fn json_vector(fields: Dict<String, JsonValue>, key: String) -> Vec2
+  match(json_object(fields, key))
+    Some<Dict<String, JsonValue>> { value }:
+      let x = json_number(value, "x")
+      let y = json_number(value, "y")
+      Vec2::init(x, y)
+    None:
+      Vec2::zero()
+
+fn json_object(fields: Dict<String, JsonValue>, key: String) -> Option<Dict<String, JsonValue>>
+  match(fields.get(key))
+    Some<JsonValue> { value }:
+      value.match(decoded)
+        JsonObject:
+          Some<Dict<String, JsonValue>> { value: decoded.value }
+        else:
+          None {}
+    None:
+      None {}
+
+fn json_string(fields: Dict<String, JsonValue>, key: String) -> String
+  match(fields.get(key))
+    Some<JsonValue> { value }:
+      value.match(decoded)
+        JsonString:
+          decoded.value
+        else:
+          String::init()
+    None:
+      String::init()
+
+fn json_number(fields: Dict<String, JsonValue>, key: String) -> f64
+  match(fields.get(key))
+    Some<JsonValue> { value }:
+      value.match(decoded)
+        JsonNumber:
+          decoded.value
+        else:
+          0.0
+    None:
+      0.0
+
+fn json_i32(fields: Dict<String, JsonValue>, key: String) -> i32
+  match(to_i32_checked(json_number(fields, key)))
+    Ok<i32> { value }:
+      value
+    Err:
+      0
+
+fn json_i64(fields: Dict<String, JsonValue>, key: String) -> i64
+  match(to_i64_checked(json_number(fields, key)))
+    Ok<i64> { value }:
+      value
+    Err:
+      0i64
+
+fn json_bool(fields: Dict<String, JsonValue>, key: String) -> bool
+  match(fields.get(key))
+    Some<JsonValue> { value }:
+      value.match(decoded)
+        JsonBool:
+          decoded.value
+        else:
+          false
+    None:
+      false
+
+fn codec_error<T>(message: String) -> Result<T, JsonError>
+  Err<JsonError> { error: JsonError { code: 1, message } }

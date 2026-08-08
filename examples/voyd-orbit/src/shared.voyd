@@ -1,0 +1,4 @@
+//! Browser/server persistence contract and validation surface.
+
+pub use self::persistence::all
+pub use self::validation::all

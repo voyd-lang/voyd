@@ -2,6 +2,7 @@ import binaryen from "binaryen";
 import {
   refCast,
   refTest,
+  structGetFieldValue,
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import { wasmTypeFor } from "../../types.js";
 import {
@@ -78,14 +79,51 @@ export const createHandleOutcomeDynamic = ({
     const boxTypeF32 = getOutcomeValueBoxType({ valueType: binaryen.f32, ctx });
     const boxTypeF64 = getOutcomeValueBoxType({ valueType: binaryen.f64, ctx });
     const boxTypeMsgPack = getOutcomeValueBoxType({ valueType: msgPackType, ctx });
-    const fixedBoxTypes = new Set([
-      boxTypeI32,
-      boxTypeBool,
-      boxTypeI64,
-      boxTypeF32,
-      boxTypeF64,
-      boxTypeMsgPack,
-    ]);
+    const isFixedBox = ({
+      valueType,
+      typeId,
+    }: {
+      valueType: binaryen.Type;
+      typeId?: number;
+    }): boolean =>
+      (typeId === undefined &&
+        (valueType === binaryen.i32 ||
+          valueType === binaryen.i64 ||
+          valueType === binaryen.f32 ||
+          valueType === binaryen.f64 ||
+          valueType === msgPackType)) ||
+      (typeId === ctx.program.primitives.bool && valueType === binaryen.i32);
+
+    const matchesMarkedBox = ({
+      boxType,
+      markerFieldIndex,
+      markerValue,
+    }: {
+      boxType: binaryen.Type;
+      markerFieldIndex: number;
+      markerValue: number;
+    }): binaryen.ExpressionRef =>
+      ctx.mod.if(
+        refTest(
+          ctx.mod,
+          ctx.mod.local.get(payloadLocal, binaryen.eqref),
+          boxType
+        ),
+        ctx.mod.i32.eq(
+          structGetFieldValue({
+            mod: ctx.mod,
+            fieldIndex: markerFieldIndex,
+            fieldType: binaryen.i32,
+            exprRef: refCast(
+              ctx.mod,
+              ctx.mod.local.get(payloadLocal, binaryen.eqref),
+              boxType
+            ),
+          }),
+          ctx.mod.i32.const(markerValue)
+        ),
+        ctx.mod.i32.const(0)
+      );
 
     const encodeToBuffer = (value: binaryen.ExpressionRef): binaryen.ExpressionRef =>
       ctx.mod.block(null, [
@@ -125,11 +163,11 @@ export const createHandleOutcomeDynamic = ({
         ])
       ),
       ctx.mod.if(
-        refTest(
-          ctx.mod,
-          ctx.mod.local.get(payloadLocal, binaryen.eqref),
-          boxTypeBool
-        ),
+        matchesMarkedBox({
+          boxType: boxTypeBool,
+          markerFieldIndex: 1,
+          markerValue: ctx.program.primitives.bool,
+        }),
         ctx.mod.block(null, [
           encodeToBuffer(
             ctx.mod.call(
@@ -266,9 +304,18 @@ export const createHandleOutcomeDynamic = ({
           (box) =>
             typeof box.typeId === "number" &&
             box.valueType !== binaryen.none &&
-            !fixedBoxTypes.has(box.boxType)
+            !isFixedBox(box)
         )
         .flatMap((box) => {
+          const markerValue = box.markerValue;
+          if (typeof markerValue !== "number") {
+            return [];
+          }
+          const matchesBox = matchesMarkedBox({
+            boxType: box.boxType,
+            markerFieldIndex: box.abiTypes.length,
+            markerValue,
+          });
           const serializerFormat =
             box.serializer?.formatId ?? findSerializerFormatForType(box.typeId!, ctx);
           if (serializerFormat) {
@@ -277,11 +324,7 @@ export const createHandleOutcomeDynamic = ({
             }
             return [
               ctx.mod.if(
-                refTest(
-                  ctx.mod,
-                  ctx.mod.local.get(payloadLocal, binaryen.eqref),
-                  box.boxType
-                ),
+                matchesBox,
                 ctx.mod.block(null, [
                   encodeToBuffer(
                     refCast(
@@ -308,11 +351,7 @@ export const createHandleOutcomeDynamic = ({
             });
             return [
               ctx.mod.if(
-                refTest(
-                  ctx.mod,
-                  ctx.mod.local.get(payloadLocal, binaryen.eqref),
-                  box.boxType
-                ),
+                matchesBox,
                 ctx.mod.block(null, [
                   encodeToBuffer(
                     packBoundaryValueAsMsgPack({

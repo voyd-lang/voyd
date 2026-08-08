@@ -1,0 +1,71 @@
+//! Domain types owned by the simulation engine.
+//!
+//! Physical values use astronomical units (AU), solar masses, and days. Unit
+//! suffixes make accidental mixing visible at every application boundary.
+
+use super::vector::Vec2
+use std::array::Array
+use std::enums::{ enum }
+use std::string::type::String
+
+pub enum BodyKind
+  Star
+  Planet
+  Moon
+  Asteroid
+  BlackHole
+
+pub enum ScenarioKey
+  StablePlanetarySystem
+  BinaryStar
+  ThreeBodyChaos
+  Slingshot
+  AsteroidBelt
+  BlackHoleFlyby
+
+pub type BodyAppearance = {
+  primary_color: String,
+  secondary_color: String,
+  trail_color: String,
+  glow_strength: f64
+}
+
+pub type Body = {
+  id: String,
+  name: String,
+  kind: BodyKind,
+  mass_solar: f64,
+  radius_au: f64,
+  position_au: Vec2,
+  velocity_au_per_day: Vec2,
+  appearance: BodyAppearance
+}
+
+pub type SimulationSettings = {
+  fixed_timestep_days: f64,
+  softening_au: f64,
+  trails_enabled: bool,
+  velocity_vectors_enabled: bool,
+  labels_enabled: bool
+}
+
+pub type CameraView = {
+  center_au: Vec2,
+  pixels_per_au: f64
+}
+
+pub type SimulationState = {
+  bodies: Array<Body>,
+  settings: SimulationSettings,
+  elapsed_days: f64
+}
+
+pub type BuiltInScenario = {
+  key: ScenarioKey,
+  slug: String,
+  name: String,
+  description: String,
+  bodies: Array<Body>,
+  settings: SimulationSettings,
+  camera: CameraView
+}

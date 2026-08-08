@@ -1,0 +1,89 @@
+//! Voyd Orbit server entrypoint. Static delivery, HTML rendering, REST routing,
+//! validation, serialization, timestamps, ID allocation, and filesystem
+//! persistence all stay inside the Voyd program.
+
+use src::client::{ Model, Msg, initial_model, view as orbit_view }
+use src::server::{ SimulationRepository, with_api_routes }
+use pkg::web::{ App, app, document, hydrate, serve_app, serve_dir }
+use std::env::self as env
+use std::error::HostError
+use std::fs::self as fs
+use std::http::{ Response, server }
+use std::optional::types::all
+use std::random::self as random
+use std::result::types::all
+use std::string::type::String
+use std::task::self as tasks
+use std::time::self as time
+use std::vx::all
+
+pub fn main(): (
+  server::HttpServer,
+  tasks::TaskRuntime,
+  env::Env,
+  fs::Fs,
+  random::Random,
+  time::Time
+) -> i32
+  let result = serve_app(
+    web_app(),
+    port: app_port(),
+    host: app_host(),
+    shutdown_timeout: 30000,
+    max_body_bytes: 1048576,
+    max_pending_requests: 256
+  )
+  match(result)
+    Ok<Unit>:
+      0
+    Err<HostError> { error }:
+      -error.code
+
+fn web_app() -> App
+  let base = app()
+    .get("/", handler: () -> Response => orbit_page())
+    .adopt(serve_dir("./public"))
+  with_api_routes(base, SimulationRepository::orbit_data())
+
+fn orbit_page() -> Response
+  let model = initial_model()
+  Response::ok()
+    .with(header: "content-type", value: "text/html; charset=utf-8")
+    .with(header: "x-content-type-options", value: "nosniff")
+    .with(header: "referrer-policy", value: "same-origin")
+    .with(header: "content-security-policy", value: "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; object-src 'none'; base-uri 'self'")
+    .text(document(
+      view: page_view(model),
+      hydrate: hydrate<Model>(target: "#orbit-app", entry: "/assets/client.js", model: model)
+    ))
+
+fn page_view(model: Model) -> Html<Msg>
+  <html lang="en">
+    <head>
+      <meta charset="utf-8"></meta>
+      <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1"></meta>
+      <meta name="theme-color" content="#03050b"></meta>
+      <meta name="description" content="Voyd Orbit is a full-stack orbital mechanics sandbox written entirely in Voyd."></meta>
+      <title>Voyd Orbit · Gravity sandbox</title>
+      <link rel="icon" href="/orbit.svg" type="image/svg+xml"></link>
+      <link rel="stylesheet" href="/assets/bootstrap.css"></link>
+      <link rel="modulepreload" href="/assets/client.js"></link>
+    </head>
+    <body>
+      <div id="orbit-app">{orbit_view(model)}</div>
+    </body>
+  </html>
+
+fn app_port(): env::Env -> i32
+  match(env::get_int("VOYD_WEB_PORT"))
+    Some<i32> { value }:
+      value
+    None:
+      3000
+
+fn app_host(): env::Env -> String
+  match(env::get("VOYD_WEB_HOST"))
+    Some<String> { value }:
+      value
+    None:
+      "127.0.0.1"

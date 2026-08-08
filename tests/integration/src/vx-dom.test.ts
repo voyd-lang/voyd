@@ -547,13 +547,15 @@ pub fn multi_document() -> String
     const app = createVoydVxAppRuntime({ host });
 
     const container = document.createElement("div");
-    const mounted = await mountVxApp({ container, app });
+    const onError = vi.fn();
+    const mounted = await mountVxApp({ container, app, onError });
 
     expect(container.querySelector("button")?.textContent).toBe("Idle");
 
     container.querySelector<HTMLButtonElement>("button")?.click();
     await waitForTextContaining(container, "button", "Saved: 41");
 
+    expect(onError).not.toHaveBeenCalled();
     expect(container.querySelector("button")?.textContent).toBe("Saved: 41");
 
     container
@@ -644,6 +646,7 @@ pub fn multi_document() -> String
 
       await waitForTextContaining(firstContainer, "main", "Article saved");
       expect(savedBodies.get("home")).toBe(editedBody);
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
 
       saveStatus = 500;
       firstContainer
@@ -670,6 +673,7 @@ pub fn multi_document() -> String
       );
 
       expect(savedBodies.get("home")).toBe(editedBody);
+      expect(fetchSpy).toHaveBeenCalledTimes(2);
 
       firstMounted.dispose();
 

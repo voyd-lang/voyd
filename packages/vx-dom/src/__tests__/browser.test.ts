@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  createBrowserVxRuntimeHost,
   createVxDomRenderer,
   hydrateVxApp,
   mountVxApp,
@@ -1769,6 +1770,157 @@ describe("vx-dom browser renderer", () => {
     expect(window.scrollBy).toHaveBeenCalledWith(1, 2);
     expect(localStorage.length).toBe(0);
     expect(sessionStorage.length).toBe(0);
+  });
+
+  it("renders high-DPI typed canvas frames with every supported primitive", async () => {
+    const canvas = document.createElement("canvas");
+    canvas.id = "scene";
+    container.appendChild(canvas);
+    vi.spyOn(window, "devicePixelRatio", "get").mockReturnValue(2);
+
+    const addColorStop = vi.fn();
+    const radialGradient = { addColorStop } as unknown as CanvasGradient;
+    const context = {
+      arc: vi.fn(),
+      beginPath: vi.fn(),
+      clearRect: vi.fn(),
+      closePath: vi.fn(),
+      createRadialGradient: vi.fn(() => radialGradient),
+      ellipse: vi.fn(),
+      fill: vi.fn(),
+      fillRect: vi.fn(),
+      fillText: vi.fn(),
+      lineTo: vi.fn(),
+      moveTo: vi.fn(),
+      restore: vi.fn(),
+      save: vi.fn(),
+      setLineDash: vi.fn(),
+      setTransform: vi.fn(),
+      stroke: vi.fn(),
+      fillStyle: "#000000",
+      font: "10px sans-serif",
+      globalAlpha: 1,
+      lineCap: "butt",
+      lineJoin: "miter",
+      lineWidth: 1,
+      shadowBlur: 0,
+      shadowColor: "transparent",
+      shadowOffsetX: 0,
+      shadowOffsetY: 0,
+      strokeStyle: "#000000",
+      textAlign: "start",
+      textBaseline: "alphabetic",
+    } as unknown as CanvasRenderingContext2D;
+    Object.defineProperty(canvas, "getContext", {
+      configurable: true,
+      value: vi.fn(() => context),
+    });
+
+    const executor = createBrowserVxRuntimeHost().commands?.canvas_render;
+    expect(executor).toBeTypeOf("function");
+    await executor?.({
+      type: "cmd",
+      kind: "canvas_render",
+      value: {
+        version: 1,
+        selector: "#scene",
+        width: 640,
+        height: 360,
+        clear: true,
+        background: "#050711",
+        draws: [
+          {
+            kind: "line",
+            from: { x: 1, y: 2 },
+            to: { x: 3, y: 4 },
+            color: "#ffffff",
+            width: 2,
+            alpha: 0.8,
+          },
+          {
+            kind: "polyline",
+            points: [{ x: 5, y: 6 }, { x: 7, y: 8 }, { x: 9, y: 10 }],
+            color: "#6699ff",
+            width: 1,
+            closed: true,
+            fill: "#112244",
+          },
+          {
+            kind: "circle",
+            center: { x: 20, y: 21 },
+            radius: 12,
+            stroke: "#ffcc88",
+            strokeWidth: 2,
+            glowColor: "#ff8800",
+            glowBlur: 8,
+            radialGradient: {
+              innerColor: "#ffffff",
+              outerColor: "#ff880000",
+              innerRadius: 1,
+              outerRadius: 12,
+            },
+          },
+          {
+            kind: "ellipse",
+            center: { x: 30, y: 31 },
+            radiusX: 8,
+            radiusY: 4,
+            rotation: 0.5,
+            fill: "#334455",
+          },
+          {
+            kind: "text",
+            position: { x: 40, y: 41 },
+            value: "Voyd",
+            color: "#ffffff",
+            font: "600 14px sans-serif",
+            align: "center",
+            baseline: "middle",
+            maxWidth: 120,
+          },
+        ],
+      },
+    }, {
+      dispatch: vi.fn(async () => undefined),
+      signal: new AbortController().signal,
+    });
+
+    expect(canvas.style.width).toBe("640px");
+    expect(canvas.style.height).toBe("360px");
+    expect(canvas.width).toBe(1280);
+    expect(canvas.height).toBe(720);
+    expect(context.setTransform).toHaveBeenNthCalledWith(1, 1, 0, 0, 1, 0, 0);
+    expect(context.setTransform).toHaveBeenNthCalledWith(2, 2, 0, 0, 2, 0, 0);
+    expect(context.clearRect).toHaveBeenCalledWith(0, 0, 1280, 720);
+    expect(context.fillRect).toHaveBeenCalledWith(0, 0, 640, 360);
+    expect(context.moveTo).toHaveBeenCalledWith(1, 2);
+    expect(context.lineTo).toHaveBeenCalledWith(9, 10);
+    expect(context.closePath).toHaveBeenCalledOnce();
+    expect(context.arc).toHaveBeenCalledWith(20, 21, 12, 0, Math.PI * 2);
+    expect(context.createRadialGradient).toHaveBeenCalledWith(20, 21, 1, 20, 21, 12);
+    expect(addColorStop).toHaveBeenNthCalledWith(1, 0, "#ffffff");
+    expect(addColorStop).toHaveBeenNthCalledWith(2, 1, "#ff880000");
+    expect(context.ellipse).toHaveBeenCalledWith(30, 31, 8, 4, 0.5, 0, Math.PI * 2);
+    expect(context.fillText).toHaveBeenCalledWith("Voyd", 40, 41, 120);
+  });
+
+  it("rejects invalid canvas render targets before drawing", () => {
+    const executor = createBrowserVxRuntimeHost().commands?.canvas_render;
+    expect(executor).toBeTypeOf("function");
+    expect(() => executor?.({
+      type: "cmd",
+      kind: "canvas_render",
+      value: {
+        version: 1,
+        selector: "#missing-canvas",
+        width: 640,
+        height: 360,
+        draws: [],
+      },
+    }, {
+      dispatch: vi.fn(async () => undefined),
+      signal: new AbortController().signal,
+    })).toThrow('canvas_render could not find canvas "#missing-canvas"');
   });
 
   it("cancels deferred initial location_change emits after subscription removal", async () => {
