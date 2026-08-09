@@ -363,7 +363,12 @@ const bindHygienicIdentifierReference = (
   }
 
   const locals = targetSymbols.map((targetSymbol) => {
-    const targetRecord = dependency.symbolTable.getSymbol(targetSymbol);
+    const target = resolveHygienicImportTarget({
+      moduleId: targetModuleId,
+      symbol: targetSymbol,
+      ctx,
+    });
+    const targetRecord = target.dependency.symbolTable.getSymbol(target.symbol);
     const referencedModuleId = importedModuleIdFrom(
       targetRecord.metadata as Record<string, unknown> | undefined,
     );
@@ -380,7 +385,7 @@ const bindHygienicIdentifierReference = (
           import:
             targetRecord.kind === "module" && referencedModuleId
               ? { moduleId: referencedModuleId }
-              : { moduleId: targetModuleId, symbol: targetSymbol },
+              : { moduleId: target.moduleId, symbol: target.symbol },
           hygienicReference: true,
           ...(importableMetadata ?? {}),
         },
@@ -390,7 +395,7 @@ const bindHygienicIdentifierReference = (
     ctx.imports.push({
       name: identifier.value,
       local,
-      target: { moduleId: targetModuleId, symbol: targetSymbol },
+      target: { moduleId: target.moduleId, symbol: target.symbol },
       visibility: moduleVisibility(),
       span: toSourceSpan(identifier),
     });
@@ -416,6 +421,48 @@ const bindHygienicIdentifierReference = (
 
   ctx.hygienicImportCache.set(cacheKey, locals);
   ctx.directSymbolBySyntax.set(identifier.syntaxId, locals[0]!);
+};
+
+const resolveHygienicImportTarget = ({
+  moduleId,
+  symbol,
+  ctx,
+}: {
+  moduleId: string;
+  symbol: SymbolId;
+  ctx: BindingContext;
+}): {
+  moduleId: string;
+  symbol: SymbolId;
+  dependency: BindingResult;
+} => {
+  const seen = new Set<string>();
+  let currentModuleId = moduleId;
+  let currentSymbol = symbol;
+  let dependency = ctx.dependencies.get(currentModuleId)!;
+
+  while (true) {
+    const key = `${currentModuleId}:${currentSymbol}`;
+    if (seen.has(key)) {
+      return { moduleId: currentModuleId, symbol: currentSymbol, dependency };
+    }
+    seen.add(key);
+
+    const record = dependency.symbolTable.getSymbol(currentSymbol);
+    const imported = importedSymbolTargetFromMetadata(
+      record.metadata as Record<string, unknown> | undefined,
+    );
+    if (!imported) {
+      return { moduleId: currentModuleId, symbol: currentSymbol, dependency };
+    }
+    const importedDependency = ctx.dependencies.get(imported.moduleId);
+    if (!importedDependency) {
+      return { moduleId: currentModuleId, symbol: currentSymbol, dependency };
+    }
+    currentModuleId = imported.moduleId;
+    currentSymbol = imported.symbol;
+    dependency = importedDependency;
+  }
 };
 
 const reportUnresolvedSymbolReference = ({

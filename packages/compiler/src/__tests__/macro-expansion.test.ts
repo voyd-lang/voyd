@@ -192,6 +192,46 @@ pub macro serve(value)
     expect((instance.exports.main as () => number)()).toBe(43);
   });
 
+  it("keeps definition-site helper references in a public ordinary macro module", async () => {
+    const root = resolve("/proj/src");
+    const pkgDir = resolve("/proj/node_modules");
+    const packageRoot = `${pkgDir}${sep}macros${sep}src`;
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use pkg::macros::dsl::serve
+
+pub fn main() -> i32
+  serve(2)
+`,
+      [`${packageRoot}${sep}pkg.voyd`]: `
+pub src::dsl
+pub use src::dsl::serve
+`,
+      [`${packageRoot}${sep}dsl.voyd`]: `
+use super::helpers::helper
+
+pub macro serve(value)
+  let helper_ref = symbol_reference(helper)
+  \`($helper_ref $value)
+`,
+      [`${packageRoot}${sep}helpers.voyd`]: `
+pub fn helper(value: i32) -> i32
+  value + 40
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root, pkgDirs: [pkgDir] },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("keeps macros in non-exported modules and non-pub macros hidden", async () => {
     const root = resolve("/proj/src");
     const pkgDir = resolve("/proj/node_modules");
