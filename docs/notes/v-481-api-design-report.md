@@ -20,6 +20,21 @@ may not move setup across control flow, effect handlers or suspension,
 argument/default ordering, borrow activation, or runtime guards. No new
 library/API symbol is introduced; this is a language semantic guarantee.
 
+### Example
+
+```voyd
+pub macro '??'(left, right)
+  let item = identifier("__item")
+  `(let $item = $left
+    if $item is Some:
+      $item.value
+    else:
+      $right)
+```
+
+The generated binding ensures that the caller's `left` expression occurs once,
+even though the expansion reads its result twice.
+
 ## V-483 — Task settlement failure semantics
 
 No callable API or public type signatures change. `VoydRunHandle.outcome` and
@@ -31,6 +46,20 @@ boundary carry transition metadata `{ point: "task_outcome", direction:
 "vm->host" }` with source-function fallback. VX reports task-observer failures
 through the `commands` error phase and retained-mapper failures through the
 existing dispatch path, while releasing owned retained handlers exactly once.
+
+### Example
+
+```ts
+const run = host.runManaged<number>("main");
+const outcome = await run.outcome;
+
+if (outcome.kind === "failed") {
+  console.error(outcome.error);
+}
+```
+
+`outcome` settles to `value`, `failed`, or `cancelled`; callers do not need a
+separate failure path for task-result encoding or decoding errors.
 
 ## V-484 — Compiler-derived MessagePack boundary codecs
 
@@ -79,6 +108,17 @@ their declared type and range. Missing required fields, malformed values,
 overflow, and non-record targets produce a `400` response. This keeps coercion
 at the HTTP adapter boundary without weakening the codec contract.
 
+### Example
+
+```voyd
+use std::msgpack::{ pack_boundary_value, unpack_boundary_value }
+
+obj Profile { displayName: String, nickname?: String }
+
+let encoded = pack_boundary_value(Profile { displayName: "Ada" })
+let decoded = unpack_boundary_value<Profile>(encoded)
+```
+
 ## V-485 — Strict typed JSON decoding
 
 `std::json::decode<T>` derives a closed structural decoder from `T` for records,
@@ -101,6 +141,20 @@ wire records whose camel-case field names exactly preserve the existing readable
 JSON contract. Simulation readers return `JsonDecodeError`, reject unknown
 versions and fields, and never replace missing or mistyped nested values with
 defaults. Encoding remains unchanged.
+
+### Example
+
+```voyd
+use std::json::{ decode, permissive_decode_options }
+
+obj Profile { name: String }
+
+let strict = decode<Profile>("{\"name\":\"Ada\"}")
+let forward_compatible = decode<Profile>(
+  "{\"name\":\"Ada\",\"futureField\":true}",
+  options: permissive_decode_options()
+)
+```
 
 ## V-486 — Hygienic macro identifiers
 
@@ -139,6 +193,20 @@ caller-scoped. Enum variants use private fresh symbols, while the public enum
 namespace separately exposes each natural variant spelling. Unrelated enums may
 therefore reuse names without a module-level collision.
 
+### Example
+
+```voyd
+fn private_helper(value: i32) -> i32
+  value + 38
+
+pub macro call_private_helper(value)
+  let helper = symbol_reference(private_helper)
+  `($helper $value)
+```
+
+`symbol_reference` captures the macro definition's declaration, rather than a
+same-named caller declaration.
+
 ## V-487 — Atomic filesystem persistence and portable errors
 
 `std::fs` adds overloaded `write_atomic(path, contents)` and
@@ -158,6 +226,17 @@ decode as `IoOther`. Orbit exposes stable repository categories
 `storage-not-found`, `storage-conflict`, `storage-permission-denied`, and
 `storage-failed` and treats all storage failures as server errors.
 
+### Example
+
+```voyd
+use std::fs::{ create_exclusive, write_atomic }
+use std::path::Path
+
+let path = Path::new("/var/lib/app/state.json")
+let created = create_exclusive(path, "{\"version\":1}")
+let replaced = write_atomic(path, "{\"version\":2}")
+```
+
 ## V-488 — UTC timestamps
 
 `SystemTime::from_unix_millis` constructs a timestamp without a host effect.
@@ -167,6 +246,15 @@ leap seconds and malformed or out-of-range dates. `to_rfc3339` emits canonical
 UTC text with a fixed three-digit millisecond field and supports years
 `0000...9999`. Failures use `TimestampError { code, index, message }` so callers
 can distinguish syntax, range, precision, overflow, and formatting failures.
+
+### Example
+
+```voyd
+use std::time::SystemTime
+
+let parsed = SystemTime::parse_rfc3339("2026-08-08T12:34:56+02:00")
+let rendered = SystemTime::from_unix_millis(0).to_rfc3339()
+```
 
 ## V-489 — Locale-independent number formatting
 
@@ -179,6 +267,15 @@ decimal exponents `-6...20` and scientific notation outside that range.
 `NonFinitePolicy::reject` returns `NumberFormatError`. Formatting is deliberately
 locale-independent and performs no grouping.
 
+### Example
+
+```voyd
+use std::number::cast::{ format_fixed, format_scientific }
+
+let price = format_fixed(12.5, decimal_places: 2)
+let distance = format_scientific(1234567.0, digits: 3)
+```
+
 ## V-490 — Secure bytes and UUIDs
 
 `secure_bytes(len)` validates that the host returns exactly the requested byte
@@ -189,6 +286,15 @@ renders canonical lower-case `8-4-4-4-12` text. `Uuid::parse` accepts canonical
 upper- or lower-case hexadecimal input, while `Uuid::is_valid` and `to_string`
 provide validation and canonicalization. Owned and borrowed string overloads
 have equivalent behavior.
+
+### Example
+
+```voyd
+use std::random::Uuid
+
+let generated = Uuid::v4()
+let parsed = Uuid::parse("00010203-0405-4607-8809-0A0B0C0D0E0F")
+```
 
 ## V-491 — Source-aware approximate assertions
 
@@ -210,6 +316,20 @@ test declaration's source location. Application tests should call
 requires exhaustive closed handlers of `voyd.std.test.assertions` to account for
 it.
 
+### Example
+
+```voyd
+use std::test::numeric::assert_close
+
+assert_close(
+  simulated_distance,
+  to: expected_distance,
+  absolute: 0.000000000001,
+  relative: 0.0,
+  message: "orbital distance"
+)
+```
+
 ## V-492 — Multiline expressions and constructor diagnostics
 
 An indented line after a continuation operator remains part of that expression.
@@ -222,6 +342,13 @@ diagnostic points at the type spelling and names the explicit
 `Type::init(...)` alternative. The sugar remains supported when its arguments
 match; the explicit spelling is diagnostic guidance, not a new construction
 rule.
+
+### Example
+
+```voyd
+let total = 4 +
+  5
+```
 
 ## V-493 — Tag-aware JSX form properties
 
@@ -241,6 +368,14 @@ representation contract for supported properties, including textarea text
 content. Orbit's scenario picker now uses typed
 `<option value={...} selected={...}>` syntax.
 
+### Example
+
+```voyd
+<select>
+  <option value="earth" selected={selected == "earth"}>Earth</option>
+</select>
+```
+
 ## V-494 — Module and package boundary policy
 
 Voyd keeps its existing visibility model and adds one deliberate compatibility
@@ -248,6 +383,15 @@ break: an ordinary `foo.voyd` and nested `foo/pkg.voyd` may not coexist because
 both own the logical path `foo`. Compilation now reports both files and chooses
 neither. A nested package root remains physically named `pkg.voyd` but is
 imported as `src::foo`; no new path or visibility syntax is introduced.
+
+### Example
+
+```voyd
+// src/simulation/pkg.voyd is imported through its logical package path.
+use src::simulation::default_scenario
+
+let scenario = default_scenario()
+```
 
 An ordinary module facade remains an organizational boundary inside its package.
 Unmodified top-level declarations are module-private, `pub` in ordinary modules
@@ -315,6 +459,25 @@ declaring effect, stable effect ID, signature, continuation mode, source module,
 and any local alias; go-to-definition and rename retain canonical operation
 identity without including a same-named wrapper.
 
+### Example
+
+```voyd
+use std::fs
+use std::fs::Fs
+use std::path::Path
+use std::test::host_dto::host_ok_payload
+
+let source = Path::new("/tmp/draft.txt")
+let destination = Path::new("/tmp/published.txt")
+let result = try
+  fs::rename(source, to: destination)
+Fs::rename(tail, _payload):
+  tail(host_ok_payload())
+```
+
+`fs::rename` is the typed wrapper; `Fs::rename` names the raw effect operation
+only in the handler clause.
+
 ## V-496 — Effect-test ownership guidance
 
 The borrow rules and callable surface are unchanged. Diagnostics for an escaping
@@ -325,6 +488,29 @@ must finish before invoking the continuation. The documented mock-host pattern
 keeps responses as ordinary values and confines captured writes or counters to
 short `with`/`with_mut` callbacks; it does not weaken continuation ownership or
 borrow checking.
+
+### Example
+
+```voyd
+use std::array::Array
+use std::fs
+use std::fs::Fs
+use std::msgpack::MsgPack
+use std::path::Path
+use std::shared_cell::SharedCell
+use std::test::host_dto::host_ok_payload
+
+let observed = SharedCell(Array<MsgPack>::init())
+
+let result = try
+  fs::write_atomic(Path::new("/tmp/state.json"), "complete")
+Fs::write_atomic(tail, payload):
+  observed.with_mut((~writes) => writes.push(payload))
+  tail(host_ok_payload())
+```
+
+The `with_mut` callback completes before `tail` is invoked, so no borrow crosses
+the continuation boundary.
 
 ## V-497 — Composable effect-handler policy
 
@@ -337,6 +523,36 @@ effect continues to make closed outer handlers fail compilation until they
 choose explicit typed behavior. Public naming guidance favors policy-bearing
 names such as `with_fixture_console` or `with_read_only_files` when multiple
 handling behaviors exist.
+
+### Example
+
+```voyd
+@effect(id: "com.example.async")
+eff Async
+  fn await(tail, value: i32) -> i32
+
+@effect(id: "com.example.log")
+eff Log
+  fn write(tail, value: i32) -> void
+
+fn call<T>(work: fn() : (Async, open) -> T) : (open) -> T
+  try open
+    work()
+  Async::await(tail, value):
+    tail(value + 1)
+
+try
+  call(() =>
+    let value = Async::await(10)
+    Log::write(value)
+    value
+  )
+Log::write(tail, _value):
+  tail()
+```
+
+The inner `try open` overrides `Async::await`; the outer `Log` handler remains
+the policy for operations the inner handler does not select.
 
 ## V-498 — VX Canvas v2 interaction surface
 
@@ -367,3 +583,28 @@ accepting the expanded grammar only in version 2. Additive optional fields may
 remain within a version; another breaking change increments it. Unsupported,
 malformed, or unbalanced frames are rejected before the target Canvas is
 resized or painted.
+
+### Example
+
+```voyd
+use std::vx::{
+  CanvasPoint,
+  canvas_frame,
+  canvas_path,
+  canvas_path_line_to,
+  canvas_path_move_to
+}
+
+let frame = canvas_frame({
+  selector: "#orbit",
+  width: 640.0,
+  height: 480.0,
+  draws: [canvas_path({
+    segments: [
+      canvas_path_move_to(CanvasPoint { x: 10.0, y: 10.0 }),
+      canvas_path_line_to(CanvasPoint { x: 100.0, y: 100.0 })
+    ],
+    stroke: "#fff"
+  })]
+})
+```
