@@ -303,7 +303,7 @@ Orbit exercises the completed surface in production: velocity arrows are
 transformed paths, its measured title drives a path-backed, dashed, and
 composited overlay, and active-pointer tracking plus pointer capture keeps pan,
 drag, and placement gestures coherent outside the canvas until release or
-cancellation. The Canvas MessagePack DTOs are compiler-derived from typed
+cancellation. The Canvas MessagePack wire records are compiler-derived from typed
 records, with their explicit version and established field names covered by the
 VX boundary regressions.
 

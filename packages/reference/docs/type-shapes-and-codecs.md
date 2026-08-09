@@ -88,7 +88,7 @@ The wire schema is deliberate and inspectable:
   representation.
 - Named variants are maps whose `$variant` value is the declared variant name;
   payload fields are siblings of that discriminator.
-- Versioning is explicit. Add a normal `version` field to a versioned DTO and
+- Versioning is explicit. Add a normal `version` field to a versioned record and
   dispatch or migrate it in application code. The codec does not inject a
   version or perform migrations.
 

@@ -79,7 +79,7 @@ name plus sibling payload fields. Variant payload fields named `tag` or
 rejected as ambiguous. Renaming a field or variant is therefore a wire-schema
 change; there is no implicit renaming policy.
 
-Versioning is opt-in through an ordinary explicit `version` field in the DTO.
+Versioning is opt-in through an ordinary explicit `version` field in the serialized record.
 The compiler neither injects version tags nor performs migrations. This keeps
 the encoded map inspectable and makes version dispatch an application-owned
 decision. Unsupported or ambiguous shapes produce a compile diagnostic at the

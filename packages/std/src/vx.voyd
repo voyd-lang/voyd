@@ -60,14 +60,14 @@ pub val CanvasTransform {
   api f: f64
 }
 
-type CanvasRadialGradientDto = {
+type CanvasRadialGradientWireRecord = {
   innerColor: String,
   outerColor: String,
   innerRadius: f64,
   outerRadius?: f64
 }
 
-type CanvasPathSegmentDto = {
+type CanvasPathSegmentWireRecord = {
   kind: String,
   point?: CanvasPoint,
   control?: CanvasPoint,
@@ -87,7 +87,7 @@ type CanvasPathSegmentDto = {
   height?: f64
 }
 
-type CanvasDrawDto = {
+type CanvasDrawWireRecord = {
   kind: String,
   from?: CanvasPoint,
   to?: CanvasPoint,
@@ -103,7 +103,7 @@ type CanvasDrawDto = {
   radius?: f64,
   stroke?: String,
   strokeWidth?: f64,
-  radialGradient?: CanvasRadialGradientDto,
+  radialGradient?: CanvasRadialGradientWireRecord,
   radiusX?: f64,
   radiusY?: f64,
   rotation?: f64,
@@ -113,7 +113,7 @@ type CanvasDrawDto = {
   align?: String,
   baseline?: String,
   maxWidth?: f64,
-  segments?: Array<CanvasPathSegmentDto>,
+  segments?: Array<CanvasPathSegmentWireRecord>,
   fillRule?: String,
   a?: f64,
   b?: f64,
@@ -129,21 +129,21 @@ type CanvasDrawDto = {
   operation?: String
 }
 
-type CanvasFrameDto = {
+type CanvasFrameWireRecord = {
   version: i32,
   selector: String,
   width: f64,
   height: f64,
   clear: bool,
   background?: String,
-  draws: Array<CanvasDrawDto>
+  draws: Array<CanvasDrawWireRecord>
 }
 
 /// A typed segment in a Canvas path.
 @boundary(type: "payload", field: "payload")
 pub obj CanvasPathSegment {
   api payload: MsgPack,
-  pri dto?: CanvasPathSegmentDto
+  pri cached_wire_record?: CanvasPathSegmentWireRecord
 }
 
 pub enum CanvasFillRule
@@ -182,7 +182,7 @@ pub enum CanvasCompositeOperation
 @boundary(type: "payload", field: "payload")
 pub obj CanvasDraw {
   api payload: MsgPack,
-  pri dto?: CanvasDrawDto
+  pri cached_wire_record?: CanvasDrawWireRecord
 }
 
 /// A versioned canvas frame ready for the browser VX runtime.
@@ -195,50 +195,50 @@ pub obj CanvasFrame {
 @boundary(type: "payload", field: "payload")
 pub obj CanvasRadialGradient {
   api payload: MsgPack,
-  pri dto?: CanvasRadialGradientDto
+  pri cached_wire_record?: CanvasRadialGradientWireRecord
 }
 
 impl CanvasPathSegment
-  fn from_boundary_dto(dto: CanvasPathSegmentDto) -> CanvasPathSegment
+  fn from_wire_record(record: CanvasPathSegmentWireRecord) -> CanvasPathSegment
     CanvasPathSegment {
-      payload: msgpack::pack_boundary_value(dto),
-      dto
+      payload: msgpack::pack_boundary_value(record),
+      cached_wire_record: record
     }
 
-  fn boundary_dto(self) -> CanvasPathSegmentDto
-    match(self.dto)
-      Some<CanvasPathSegmentDto> { value }:
+  fn to_wire_record(self) -> CanvasPathSegmentWireRecord
+    match(self.cached_wire_record)
+      Some<CanvasPathSegmentWireRecord> { value }:
         value
       None:
-        msgpack::unpack_boundary_value<CanvasPathSegmentDto>(self.payload)
+        msgpack::unpack_boundary_value<CanvasPathSegmentWireRecord>(self.payload)
 
 impl CanvasDraw
-  fn from_boundary_dto(dto: CanvasDrawDto) -> CanvasDraw
+  fn from_wire_record(record: CanvasDrawWireRecord) -> CanvasDraw
     CanvasDraw {
-      payload: msgpack::pack_boundary_value(dto),
-      dto
+      payload: msgpack::pack_boundary_value(record),
+      cached_wire_record: record
     }
 
-  fn boundary_dto(self) -> CanvasDrawDto
-    match(self.dto)
-      Some<CanvasDrawDto> { value }:
+  fn to_wire_record(self) -> CanvasDrawWireRecord
+    match(self.cached_wire_record)
+      Some<CanvasDrawWireRecord> { value }:
         value
       None:
-        msgpack::unpack_boundary_value<CanvasDrawDto>(self.payload)
+        msgpack::unpack_boundary_value<CanvasDrawWireRecord>(self.payload)
 
 impl CanvasRadialGradient
-  fn from_boundary_dto(dto: CanvasRadialGradientDto) -> CanvasRadialGradient
+  fn from_wire_record(record: CanvasRadialGradientWireRecord) -> CanvasRadialGradient
     CanvasRadialGradient {
-      payload: msgpack::pack_boundary_value(dto),
-      dto
+      payload: msgpack::pack_boundary_value(record),
+      cached_wire_record: record
     }
 
-  fn boundary_dto(self) -> CanvasRadialGradientDto
-    match(self.dto)
-      Some<CanvasRadialGradientDto> { value }:
+  fn to_wire_record(self) -> CanvasRadialGradientWireRecord
+    match(self.cached_wire_record)
+      Some<CanvasRadialGradientWireRecord> { value }:
         value
       None:
-        msgpack::unpack_boundary_value<CanvasRadialGradientDto>(self.payload)
+        msgpack::unpack_boundary_value<CanvasRadialGradientWireRecord>(self.payload)
 
 /// Logical CSS-pixel metrics returned by `Cmd::canvas_measure_text`.
 pub type CanvasTextMetrics = {
@@ -1435,7 +1435,7 @@ pub fn canvas_path({
 }) -> CanvasDraw
   canvas_draw({
     kind: "path",
-    segments: canvas_path_segment_dtos(segments),
+    segments: canvas_path_segment_wire_records(segments),
     fill,
     stroke,
     strokeWidth: stroke_width,
@@ -1497,14 +1497,14 @@ pub fn canvas_frame({
   clear: bool = true,
   background?: String
 }) -> CanvasFrame
-  let value: CanvasFrameDto = {
+  let value: CanvasFrameWireRecord = {
     version: 2,
     selector,
     width,
     height,
     clear,
     background,
-    draws: canvas_draw_dtos(draws)
+    draws: canvas_draw_wire_records(draws)
   }
   CanvasFrame { payload: msgpack::pack_boundary_value(value) }
 
@@ -1562,7 +1562,7 @@ pub fn canvas_circle({
     alpha,
     glowColor: glow_color,
     glowBlur: glow_blur,
-    radialGradient: canvas_radial_gradient_dto(radial_gradient)
+    radialGradient: canvas_radial_gradient_wire_record(radial_gradient)
   })
 
 /// Creates a canvas ellipse. Rotation is expressed in radians.
@@ -2920,45 +2920,45 @@ fn consume_named_attr(entry: Dict<String, MsgPack>, ~attrs: Dict<String, MsgPack
     None:
       void
 
-fn canvas_radial_gradient_value(dto: CanvasRadialGradientDto) -> CanvasRadialGradient
-  CanvasRadialGradient::from_boundary_dto(dto)
+fn canvas_radial_gradient_value(record: CanvasRadialGradientWireRecord) -> CanvasRadialGradient
+  CanvasRadialGradient::from_wire_record(record)
 
-fn canvas_radial_gradient_dto(
+fn canvas_radial_gradient_wire_record(
   value: Optional<CanvasRadialGradient>
-) -> Optional<CanvasRadialGradientDto>
+) -> Optional<CanvasRadialGradientWireRecord>
   match(value)
     Some<CanvasRadialGradient> { value }:
-      Some<CanvasRadialGradientDto> { value: value.boundary_dto() }
+      Some<CanvasRadialGradientWireRecord> { value: value.to_wire_record() }
     None:
       None {}
 
-fn canvas_path_segment(dto: CanvasPathSegmentDto) -> CanvasPathSegment
-  CanvasPathSegment::from_boundary_dto(dto)
+fn canvas_path_segment(record: CanvasPathSegmentWireRecord) -> CanvasPathSegment
+  CanvasPathSegment::from_wire_record(record)
 
-fn canvas_path_segment_dtos(
+fn canvas_path_segment_wire_records(
   segments: Array<CanvasPathSegment>
-) -> Array<CanvasPathSegmentDto>
-  let ~out = Array<CanvasPathSegmentDto>::with_capacity(segments.len())
+) -> Array<CanvasPathSegmentWireRecord>
+  let ~out = Array<CanvasPathSegmentWireRecord>::with_capacity(segments.len())
   var index = 0
   while index < segments.len():
     match(segments.get(index))
       Some<CanvasPathSegment> { value }:
-        out.push(value.boundary_dto())
+        out.push(value.to_wire_record())
       None:
         void
     index = index + 1
   out
 
-fn canvas_draw(dto: CanvasDrawDto) -> CanvasDraw
-  CanvasDraw::from_boundary_dto(dto)
+fn canvas_draw(record: CanvasDrawWireRecord) -> CanvasDraw
+  CanvasDraw::from_wire_record(record)
 
-fn canvas_draw_dtos(draws: Array<CanvasDraw>) -> Array<CanvasDrawDto>
-  let ~out = Array<CanvasDrawDto>::with_capacity(draws.len())
+fn canvas_draw_wire_records(draws: Array<CanvasDraw>) -> Array<CanvasDrawWireRecord>
+  let ~out = Array<CanvasDrawWireRecord>::with_capacity(draws.len())
   var index = 0
   while index < draws.len():
     match(draws.get(index))
       Some<CanvasDraw> { value }:
-        out.push(value.boundary_dto())
+        out.push(value.to_wire_record())
       None:
         void
     index = index + 1
