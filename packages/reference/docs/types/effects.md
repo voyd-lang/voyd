@@ -10,7 +10,6 @@ with typed handlers.
 ## Declaring effects
 
 ```voyd
-@effect(id: "com.example.async")
 eff Async
   await(resume, value: i32) -> i32
   await_tail(tail, value: i32) -> i32
@@ -22,17 +21,43 @@ The first parameter on an operation declares its continuation behavior:
 - `tail`: the handler must tail-resume exactly once before returning or
   propagating another effect
 
-Effect operations can overload by parameter types. A qualified call
-searches only that effect, then uses ordinary call typing to select an overload.
-Handlers must annotate every non-continuation parameter when a handler head is
-overloaded.
+## Handling effects
+
+Use try clauses like this to handle effects
 
 ```voyd
-@effect(id: "com.example.log")
+fn load_default(value: i32): () -> i32
+  try
+    Async::await(value)
+  Async::await(resume, current):
+    if i_want_to_resume:
+      resume(current + 1)
+  Async::await_tail(tail, current):
+    tail(current) // Tail operations *must* return
+```
+
+Normal `try` handlers *must* be exhaustive. That is, they must handle all
+operations of the effects they capture. Use `try open` to forward unhandled
+operations up the callstack.
+
+```voyd
+fn load_default(value: i32): () -> i32
+  try open
+    Async::await(value)
+  Async::await(resume, current):
+    if i_want_to_resume:
+      resume(current + 1)
+```
+
+### Overloaded operations
+
+Like normal functions, effect operations can be overloaded. To disambiguate
+overloaded operations in a handler, add the corresponding type annotations
+to the op handler
+
+```voyd
 eff Log
-  @operation(id: "write-text")
   write(tail, value: String) -> void
-  @operation(id: "write-code")
   write(tail, value: i32) -> void
 
 fn emit(): Log -> void
@@ -42,33 +67,12 @@ fn emit(): Log -> void
 fn handled() -> void
   try
     Log::write(200)
-  Log::write(tail, value: i32):
+  Log::write(tail, value: String):
+    // Do something with string
     tail()
-```
-
-`@operation(id: "...")` gives an operation a stable host-facing identity. IDs
-are unique inside their effect and may not contain `::`. `@type` is reserved
-for the language and is not an operation attribute.
-
-## Using effects in function types
-
-```voyd
-fn load(value: i32): Async -> i32
-  Async::await(value)
-
-fn load_twice(value: i32): Async -> i32
-  let first = Async::await(value)
-  Async::await_tail(first + 1)
-```
-
-If an effect row is omitted, Voyd infers it locally. Exported APIs should spell
-effects out explicitly.
-
-Function types can also spell effect rows directly:
-
-```voyd
-fn load_with(cb: fn() : Async -> i32) -> i32
-  cb()
+  Log::write(tail, value: i32):
+    // Do something with int
+    tail()
 ```
 
 ## Importing operations
@@ -133,108 +137,86 @@ Effect names should describe the required capability with a noun such as
 `ArticleStorage` or `ArticleAccess`; a universal `Effect` suffix usually adds no
 meaning.
 
-## Handling effects
+## Reusable With Handlers
+
+With handlers are functions that handle the effects of a callback. This
+can be useful whenever you need to re-use an effect handler
 
 ```voyd
-fn load_default(value: i32): () -> i32
-  try
-    Async::await(value)
-  Async::await(resume, current):
-    resume(current + 1)
-```
-
-`try open` handles selected operations and leaves the rest open to the caller.
-The handler qualifier must name an effect (or an alias of one), and the clause
-matches the exact operation identity used by the call. Its first binder must use
-the operation's declared `tail` or `resume` mode.
-
-### Reusable `with_*` handlers
-
-Use an ordinary higher-order function when the same complete effect policy is
-needed in several places. This is useful for repeated host setup, test doubles,
-resource scoping, and a shared policy for operations that a test does not
-exercise. Name the policy, not only the effect, when several behaviors exist:
-`with_fixture_console`, `with_read_only_files`, or `with_transaction` is clearer
-than a collection of anonymous fallbacks.
-
-The reusable outer handler should normally be closed and exhaustive. Each
-operation resumes with its declared result type, so effects whose operations
-return different types remain statically checked:
-
-```voyd
-@effect(id: "example.console")
 eff Console
   read(tail) -> String
   write(tail, value: String) -> void
 
-fn with_fixture_console<T>(work: fn() : Console -> T) -> T
+fn with_fake_console(work: fn(): Console -> T)
   try
     work()
   Console::read(tail):
     tail("fixture")
   Console::write(tail, _value):
     tail()
+
+fn main()
+  with_fake_console do:
+    let echo = Console::read()
+    Console::write(echo)
 ```
 
-When one call needs a focused override, place an inner `try open` inside the
-outer policy. Operations named by the inner handler use the override; unmatched
-operations propagate to the exhaustive outer handler:
+With handlers can also be useful when you only need to partially implement an
+effect handler and can fallback to with handler behavior for other effect ops
 
 ```voyd
-fn with_empty_read<T>(work: fn() : Console -> T) -> T
-  with_fixture_console(() =>
-    try open
-      work()
+fn custom_read_handler()
+  with_fake_console do:
+    try open // this will forward unhandled effects up to the `with_fake_console` handler
+      let echo = Console::read()
+      Console::write(echo)
     Console::read(tail):
-      tail("")
-  )
+      tail("hiii")
+    // Console::write is handled by with_fake_console
 ```
 
-Keep an inline handler when the policy is used once or depends closely on local
-control flow. Adding an operation to an effect intentionally breaks closed outer
-handlers until they choose typed behavior for it. `try open` is the only
-forwarding mechanism: there is no value-producing fallback clause, implicit
-result-type selection, or erased continuation.
+## Using effects in function types
 
-### Effect hosts in tests
-
-Treat an effect continuation as an ownership boundary. A value passed to
-`tail` or `resume` must be owned independently of any active mutable borrow.
-The most direct mock-host pattern separates fixed response fixtures from
-mutable observations:
+Effects can be annotated in a normal function signature with this syntax:
 
 ```voyd
-use std::array::Array
-use std::shared_cell::SharedCell
-
-@effect(id: "example.storage")
-eff Storage
-  read(tail, key: String) -> String
-  write(tail, key: String, value: String) -> void
-
-obj MockStorage {
-  read_fixture: String,
-  writes: SharedCell<Array<String>>
-}
-
-fn with_mock_storage<T>(host: MockStorage, work: fn() : Storage -> T) -> T
-  try
-    work()
-  Storage::read(tail, _key):
-    // The immutable fixture is already an owned stable value.
-    tail(host.read_fixture)
-  Storage::write(tail, value):
-    host.writes.with_mut((~writes) => writes.push(value))
-    // The SharedCell borrow has ended before the continuation runs.
-    tail()
+fn name(...params): Effects -> ReturnType
 ```
 
-For a mutable source, take an owned snapshot inside `with` or `with_mut`, end
-the callback, and only then invoke the continuation. Keep immutable response
-fixtures as ordinary values. Use `SharedCell<T>` for counters, captured writes,
-and other observations that must change across handler calls. Do not invoke a
-continuation from inside a `SharedCell` callback or weaken the borrow contract
-to make a test double compile.
+When a functions effects are explicitly annotated, voyd will automatically
+error if any additional unhandled effects are forwarded from the function.
+Put multiple effects in a parenthetical list.
+
+You may also add `open` if you wish to allow additional effects be forwarded
+from the function without erroring. This is helpful when the annotations are
+more for documentation, or you are documenting a closure who's effects you wish
+to handle, but still want to allow the closure to have additional effects
+
+```voyd
+// Single effect annotation
+fn load(value: i32): Async -> i32
+  Async::await(value)
+
+fn load_twice(value: i32): (Async, Console) -> i32
+  let first = Async::await(value)
+  Console::write(first + 1)
+
+fn load_twice(value: i32): (Async, open) -> i32
+  let first = Async::await(value)
+  Logger::info(first + 1)
+```
+
+If an effect row is omitted, Voyd infers it locally.
+
+Function types can also spell effect rows directly:
+
+```voyd
+fn load_with(cb: fn(): Async -> i32) -> i32
+  cb()
+```
+
+Note: Exported APIs *must* annotate their effects.
+
 
 ## Row polymorphism
 
@@ -283,14 +265,85 @@ Nested callback parameters use the same spelling. In
 effects and the outer callback remains polymorphic over effects caused by
 calling it.
 
+## Effect hosts in tests
+
+Treat an effect continuation as an ownership boundary. A value passed to
+`tail` or `resume` must be owned independently of any active mutable borrow.
+The most direct mock-host pattern separates fixed response fixtures from
+mutable observations:
+
+```voyd
+use std::array::Array
+use std::shared_cell::SharedCell
+
+@effect(id: "example.storage")
+eff Storage
+  read(tail, key: String) -> String
+  write(tail, key: String, value: String) -> void
+
+obj MockStorage {
+  read_fixture: String,
+  writes: SharedCell<Array<String>>
+}
+
+fn with_mock_storage<T>(host: MockStorage, work: fn() : Storage -> T) -> T
+  try
+    work()
+  Storage::read(tail, _key):
+    // The immutable fixture is already an owned stable value.
+    tail(host.read_fixture)
+  Storage::write(tail, value):
+    host.writes.with_mut((~writes) => writes.push(value))
+    // The SharedCell borrow has ended before the continuation runs.
+    tail()
+```
+
+For a mutable source, take an owned snapshot inside `with` or `with_mut`, end
+the callback, and only then invoke the continuation. Keep immutable response
+fixtures as ordinary values. Use `SharedCell<T>` for counters, captured writes,
+and other observations that must change across handler calls. Do not invoke a
+continuation from inside a `SharedCell` callback or weaken the borrow contract
+to make a test double compile.
+
 ## Exported APIs
 
-Smoke tests enforce these rules:
+Functions exported from a package must either be pure *or* have all of their
+effects explicitly annotated.
 
-- exported pure APIs may omit an effect annotation
-- exported effectful APIs must declare their effect row explicitly
+If an effectful function is handled by the host, you should use `@effect` and
+`@operation` wrappers to supply a stable id. This makes supplying handlers
+for those effects much easier
 
-## Stable ids
+```voyd
+@effect(id: "com.example.log")
+eff Log
+  @operation(id: "write.String")
+  write(tail, value: String) -> void
+  @operation(id: "write.i32")
+  write(tail, value: i32) -> void
 
-Public effects should use stable dotted ids such as
-`@effect(id: "voyd.std.fs")`.
+fn main(): Log -> i32
+  Log::write("Hello world!")
+  Log::write(42)
+  0
+```
+
+From the host:
+```ts
+const result = await sdk.compile({ source: "the above example" })
+const output = await result.run({
+  entryName: "main",
+  handlers: {
+    "com.example.log::write.i32": ({ tail }, value) => {
+      console.log(value * 5)
+      tail()
+    },
+    "com.example.log::write.String": ({ tail }, value) => {
+      console.log(value)
+      tail()
+    },
+  },
+});
+```
+
+In general effects should use dotted stable id's similar to the above example.

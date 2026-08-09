@@ -109,11 +109,6 @@ Color { x: 1, y: 2, z: 3 }
 Color(1, 2, 3)
 ```
 
-When a parenthesized call does not match a declared initializer, the compiler
-points at the type and suggests the explicit `Color::init(...)` spelling. That
-spelling is also useful whenever the constructor call would be unclear at the
-call site.
-
 Both fieldwise calls and declared constructors resolve through aliases that
 target nominal objects.
 
