@@ -50,7 +50,7 @@ migration.
 
 | Surface | Breaking or stricter change | Migration |
 | --- | --- | --- |
-| Effects | Operation names must be unique within an effect. Effect operations are no longer overloads or first-class values, and qualified lookup no longer falls back to ordinary functions. | Rename same-named operations, call them through their declaring effect, and replace stored operation designators with ordinary wrapper functions. |
+| Effects | Qualified lookup stays within the resolved effect. Operations may overload and host-visible operations can declare stable `@operation` IDs; operation designators remain non-first-class. | Add handler parameter annotations for overloaded heads and use `@operation(id: "...")` for stable JS registration keys. |
 | Closed effect handlers | `std::fs::Fs` adds `write_atomic` and `create_exclusive`; `std::test::assertions::Test` adds `fail_with`. | Add clauses to exhaustive handlers, even if they only return an unsupported-operation fixture. |
 | I/O errors | `IoError` gains the required public field `kind: IoErrorKind`. | Add `kind`, normally `IoOther {}`, to hand-constructed values and update exhaustive matches. |
 | Derived structural shapes | Duplicate union discriminator names and other unsupported or ambiguous shapes fail compilation through the shared shape derivation used by `shape_of`, typed MessagePack, typed JSON, and Web query extraction. MessagePack field and variant spelling is now an explicit wire contract. | Give every union variant a distinct declared name, remove unsupported functions/private fields from DTOs, avoid `tag`/`$variant` variant payload fields, and version intentional wire renames. |
@@ -63,7 +63,7 @@ migration.
 | Orbit | Persisted simulation IDs become canonical lowercase UUIDs, and four JSON readers now return `JsonDecodeError` instead of `JsonError`. | Rename stored files/IDs if preserving old data, and update result matches to the new error type. Existing v1 camel-case JSON fields are preserved. |
 
 There are also newly enforced failures that may expose previously accepted bad
-programs: ambiguous module paths, duplicate effect operations, non-`api`
+programs: ambiguous module paths, duplicate operation IDs, non-`api`
 cross-package members, imported operators or trait implementations omitted from
 the import selection, bare effect-operation values, invalid JSX property/tag
 pairs, and invalid generic type-argument counts.
@@ -209,17 +209,33 @@ symbol. Aliases, calls, handler clauses, imports, re-exports, effect rows, hover
 rename, and code generation preserve that identity. Same-spelled operations in
 different effects remain distinct.
 
-Operation names must be unique inside one effect. Effect operations no longer
-form overload sets:
+Operations may overload inside one effect. Qualified lookup resolves `Metrics`
+first and ordinary call typing chooses only from that effect's overloads:
 
 ```voyd
 @effect(id: "example.metrics")
 eff Metrics
-  info_count(tail, value: i32) -> void
-  info_ratio(tail, value: f64) -> void
+  @operation(id: "record-count")
+  record(tail, value: i32) -> void
+  @operation(id: "record-ratio")
+  record(tail, value: f64) -> void
 ```
 
-`Metrics::info_count(...)` resolves `Metrics` first and then searches only that
+An overloaded handler head annotates each non-continuation parameter:
+
+```voyd
+try
+  Metrics::record(1)
+Metrics::record(tail, value: i32):
+  tail()
+```
+
+The host registers those entries as `example.metrics::record-count` and
+`example.metrics::record-ratio`. Operations without `@operation` retain the
+legacy `effectId::opName` key; a same-name overload without IDs remains
+ambiguous unless its signature hash is included.
+
+`Metrics::record(...)` resolves `Metrics` first and then searches only that
 effect's operation table. A module qualifier searches only ordinary module
 exports. Missing operations do not fall back to lexical functions, static
 methods, trait methods, general overloads, or same-named wrappers.
@@ -227,8 +243,8 @@ methods, trait methods, general overloads, or same-named wrappers.
 Effect operations are not first-class values:
 
 ```voyd
-let operation = Metrics::info_count // BD0009
-Metrics::info_count(3)              // valid call
+let operation = Metrics::record // BD0009
+Metrics::record(3)              // valid call
 ```
 
 A designator is valid only as a call target, handler head, explicit import or
@@ -240,8 +256,7 @@ as an effect handler merely because its name matches.
 Explicit unqualified selection remains available:
 
 ```voyd
-use Metrics::info_count
-use Metrics::info_ratio as record_ratio
+use Metrics::record as record_metric
 use Metrics::all
 ```
 
@@ -1538,8 +1553,9 @@ package root and do not add Voyd source or supported end-user compiler API.
 
 Before adopting this branch:
 
-1. Search effects for duplicate operation names and closed handlers for `Fs` or
-   `Test`.
+1. Review overloaded effect handlers and add non-continuation parameter
+   annotations; add `@operation(id: "...")` where host registration must stay
+   stable across source renames.
 2. Add `kind` to constructed `IoError` values and handle the five portable
    variants.
 3. Replace raw Canvas wrapper literals with constructors, accept Canvas wire v2,

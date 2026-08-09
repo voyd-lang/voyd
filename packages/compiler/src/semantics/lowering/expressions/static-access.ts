@@ -440,12 +440,11 @@ const lowerQualifiedEffectOperationCall = ({
     ...(argument.label ? { label: argument.label.value } : {}),
     expr: lowerExpr(argument.value, ctx, scopes),
   }));
+  const overloadSet = ctx.overloadBySymbol.get(operation);
   const callee = lowerResolvedCallee({
-    resolution: {
-      kind: "symbol",
-      symbol: operation,
-      name: calleeExpr.value,
-    },
+    resolution: typeof overloadSet === "number"
+      ? { kind: "overload-set", name: calleeExpr.value, set: overloadSet }
+      : { kind: "symbol", symbol: operation, name: calleeExpr.value },
     syntax: calleeExpr,
     ctx,
   });

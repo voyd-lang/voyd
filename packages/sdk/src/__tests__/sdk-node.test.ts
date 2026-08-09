@@ -618,7 +618,10 @@ pub fn main() -> i32
     const artifact = producer.exportCompilerArtifact();
 
     expect(artifact?.schema).toBe("voyd.compiler-dependency-borrow-cache");
-    const consumer = createSdk({ compilerCache: "artifact", compilerArtifact: artifact });
+    const consumer = createSdk({
+      compilerCache: "artifact",
+      compilerArtifact: artifact,
+    });
     const result = expectCompileSuccess(await consumer.compile({ entryPath }));
     await expect(result.run<number>({ entryName: "main" })).resolves.toBe(
       428_553,
@@ -1175,6 +1178,35 @@ pub fn main() -> i32
       handlers,
     });
     expect(output).toBe(43);
+  });
+
+  it("routes overloaded @operation ids and legacy operation-name keys", async () => {
+    const result = expectCompileSuccess(
+      await createSdk().compile({
+        source: `@effect(id: "com.example.operations")
+eff Operations
+  @operation(id: "read-int")
+  read(resume, value: i32) -> i32
+  @operation(id: "read-bool")
+  read(resume, value: bool) -> i32
+  ping(resume) -> i32
+
+pub fn main(): Operations -> i32
+  Operations::read(4) + Operations::read(true) + Operations::ping()
+`,
+      }),
+    );
+    const output = await result.run<number>({
+      entryName: "main",
+      handlers: {
+        "com.example.operations::read-int": ({ resume }, value: unknown) =>
+          resume((value as number) + 1),
+        "com.example.operations::read-bool": ({ resume }, value: unknown) =>
+          resume(value ? 20 : 0),
+        "com.example.operations::ping": ({ resume }) => resume(3),
+      },
+    });
+    expect(output).toBe(28);
   });
 
   it("exposes signatureHashFor and handlerKeyFor helpers", async () => {

@@ -1081,69 +1081,79 @@ const ensureQualifiedEffectOperationImport = ({
     return;
   }
   const dependency = ctx.dependencies.get(importedEffect.moduleId);
-  const operation = dependency?.decls
+  const operations = dependency?.decls
     .getEffect(importedEffect.symbol)
-    ?.operations.find((candidate) => candidate.name === operationName);
-  if (!dependency || !operation) {
+    ?.operations.filter((candidate) => candidate.name === operationName);
+  if (!dependency || !operations || operations.length === 0) {
     return;
   }
-
-  const operationRecord = dependency.symbolTable.getSymbol(operation.symbol);
   const explicitlyTargetsStdSubmodule =
     importedModuleExplicitStdSubmoduleFrom(
       effectRecord.metadata as Record<string, unknown> | undefined,
     ) ?? false;
-  const existingImport = ctx.imports.find((candidate) => {
-    const record = ctx.symbolTable.getSymbol(candidate.local);
-    const metadata = record.metadata as
-      | { qualifiedOnlyEffectOperation?: unknown }
-      | undefined;
-    return (
-      candidate.target?.moduleId === importedEffect.moduleId &&
-      candidate.target.symbol === operation.symbol &&
-      record.kind === "effect-op" &&
-      metadata?.qualifiedOnlyEffectOperation === true
+  const locals = operations.map((operation) => {
+    const existingImport = ctx.imports.find(
+      (candidate) =>
+        candidate.target?.moduleId === importedEffect.moduleId &&
+        candidate.target.symbol === operation.symbol &&
+        ctx.symbolTable.getSymbol(candidate.local).kind === "effect-op",
     );
-  });
-  const local =
-    existingImport?.local ??
-    ctx.symbolTable.declare(
-      {
-        name: operationName,
-        kind: "effect-op",
-        declaredAt: syntax.syntaxId,
-        metadata: {
-          import: {
-            moduleId: importedEffect.moduleId,
-            symbol: operation.symbol,
-            explicitlyTargetsStdSubmodule,
+    const local =
+      existingImport?.local ??
+      ctx.symbolTable.declare(
+        {
+          name: operationName,
+          kind: "effect-op",
+          declaredAt: syntax.syntaxId,
+          metadata: {
+            import: {
+              moduleId: importedEffect.moduleId,
+              symbol: operation.symbol,
+              explicitlyTargetsStdSubmodule,
+            },
+            qualifiedOnlyEffectOperation: true,
+            ...(importableMetadataFrom(
+              dependency.symbolTable.getSymbol(operation.symbol).metadata as
+                | Record<string, unknown>
+                | undefined,
+            ) ?? {}),
           },
-          qualifiedOnlyEffectOperation: true,
-          ...(importableMetadataFrom(
-            operationRecord.metadata as Record<string, unknown> | undefined,
-          ) ?? {}),
         },
-      },
-      ctx.symbolTable.rootScope,
-    );
-  if (!existingImport) {
-    ctx.imports.push({
-      name: operationName,
-      local,
-      target: {
-        moduleId: importedEffect.moduleId,
-        symbol: operation.symbol,
-      },
-      visibility: moduleVisibility(),
-      span: toSourceSpan(syntax),
-    });
-  }
+        ctx.symbolTable.rootScope,
+      );
+    if (!existingImport) {
+      ctx.imports.push({
+        name: operationName,
+        local,
+        target: {
+          moduleId: importedEffect.moduleId,
+          symbol: operation.symbol,
+        },
+        visibility: moduleVisibility(),
+        span: toSourceSpan(syntax),
+      });
+    }
+    return local;
+  });
   const operationTable =
     ctx.moduleMembers.get(effectSymbol) ?? new Map<string, Set<SymbolId>>();
   const operationSymbols = operationTable.get(operationName) ?? new Set();
-  operationSymbols.add(local);
+  locals.forEach((local) => operationSymbols.add(local));
   operationTable.set(operationName, operationSymbols);
   ctx.moduleMembers.set(effectSymbol, operationTable);
+  if (
+    locals.length > 1 &&
+    !locals.some((local) => ctx.overloadBySymbol.has(local))
+  ) {
+    const id =
+      Math.max(
+        -1,
+        ...ctx.overloads.keys(),
+        ...ctx.importedOverloadOptions.keys(),
+      ) + 1;
+    locals.forEach((local) => ctx.overloadBySymbol.set(local, id));
+    ctx.importedOverloadOptions.set(id, locals);
+  }
 };
 
 const validateHandlerOperationBinding = ({

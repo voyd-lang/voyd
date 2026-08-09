@@ -64,9 +64,11 @@ fn contains({ key: String }) -> bool
 fn contains({ value: User }) -> bool
 ```
 
-Effect operations have a different identity model and cannot overload within an
-effect. A qualified operation such as `Fs::rename` is valid where an operation
-designator is expected—a call, handler, import, or re-export—but is not a
+Effect operations have a different identity model: they can overload only with
+other operations in the same resolved effect. A qualified call selects from that
+effect's overload set by ordinary argument typing. Overloaded handler heads
+annotate each non-continuation parameter. An operation designator such as
+`Fs::rename` is valid in a call, handler, import, or re-export, but is not a
 first-class function value. See [Effects](./types/effects.md#importing-operations).
 
 ## Labeled parameters

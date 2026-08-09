@@ -5,6 +5,7 @@ export interface EffectTableOpEntry {
   effectId: string;
   effectIdHash: string;
   opId: number;
+  operationId?: string;
   resumeKind: ResumeKind;
   signatureHash: number;
   label: string;

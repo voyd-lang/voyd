@@ -11,6 +11,7 @@ import type {
   BorrowContractAttribute,
   CompilerContractAttribute,
   EffectAttribute,
+  OperationAttribute,
   IntrinsicAttribute,
 } from "../attributes.js";
 import { ParserSyntaxError } from "../errors.js";
@@ -138,6 +139,7 @@ export interface ParsedEffectOperation {
   params: SignatureParam[];
   resumable: "resume" | "tail";
   returnType?: Expr;
+  operationId?: string;
 }
 
 export interface ParsedEffectDecl {
@@ -196,6 +198,12 @@ export const parseFunctionDecl = (form: Form): ParsedFunctionDecl | null => {
   const keyword = form.at(index);
   if (!isIdentifierWithValue(keyword, "fn")) {
     return null;
+  }
+  if (form.attributes?.operation) {
+    throw new ParserSyntaxError(
+      "@operation can only annotate an effect operation",
+      form.location,
+    );
   }
 
   let signatureExpr: Expr | undefined = form.at(index + 1);
@@ -911,6 +919,8 @@ const parseEffectOperation = (form: Form): ParsedEffectOperation => {
     params: signature.params,
     resumable: signature.resumable,
     returnType: signature.returnType,
+    operationId: (form.attributes?.operation as OperationAttribute | undefined)
+      ?.id,
   };
 };
 

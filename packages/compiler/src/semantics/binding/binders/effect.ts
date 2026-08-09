@@ -102,33 +102,34 @@ export const bindEffectDecl = (
     );
   });
 
-  const firstOperationByName = new Map<string, ParsedEffectOperation>();
+  const operationsByHostKey = new Map<string, ParsedEffectOperation>();
   const operations = decl.operations.map((op) => {
     rememberSyntax(op.form, ctx);
     rememberSyntax(op.name, ctx);
-    const previousOperation = firstOperationByName.get(op.name.value);
-    if (previousOperation) {
+    const hostKey = op.operationId ?? op.name.value;
+    const previousOperation = operationsByHostKey.get(hostKey);
+    if (previousOperation && (op.operationId || previousOperation.operationId)) {
       ctx.diagnostics.push(
         diagnosticFromCode({
           code: "BD0009",
           params: {
-            kind: "duplicate-effect-operation",
+            kind: "duplicate-operation-id",
             effectName: decl.name.value,
-            operationName: op.name.value,
+            operationName: hostKey,
           },
           span: toSourceSpan(op.name),
           related: [
             diagnosticFromCode({
               code: "BD0009",
-              params: { kind: "previous-effect-operation" },
+              params: { kind: "previous-operation-id" },
               severity: "note",
               span: toSourceSpan(previousOperation.name),
             }),
           ],
         }),
       );
-    } else {
-      firstOperationByName.set(op.name.value, op);
+    } else if (!previousOperation) {
+      operationsByHostKey.set(hostKey, op);
     }
     const scope = ctx.symbolTable.createScope({
       parent: effectScope,
@@ -168,6 +169,7 @@ export const bindEffectDecl = (
       parameters: params,
       resumable: op.resumable,
       returnTypeExpr: op.returnType,
+      operationId: op.operationId,
       documentation: declarationDocForSyntax(op.name, ctx),
     };
   });

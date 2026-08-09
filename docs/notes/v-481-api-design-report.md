@@ -454,12 +454,45 @@ general-overload, or unqualified same-name fallback between these paths. This
 allows the canonical pairing `use std::fs` / `fs::rename(...)` for a typed wrapper
 and `use std::fs::Fs` / `Fs::rename(...)` for the raw operation and handler.
 
-An operation's public identity is its declaring effect plus its declaration
-symbol. Effect aliases preserve that identity, and calls and handler clauses
-record and match the same exact pair. Operation names must be unique within one
-effect; effect operations do not overload. A duplicate declaration diagnoses the
-second declaration and points to the first. An ordinary function with the same
-spelling remains an independent declaration.
+An operation's public compiler identity is its declaring effect plus its exact
+declaration symbol. Effect aliases preserve that identity, and calls, rows, and
+handler clauses record and match the same exact pair. Operations may overload;
+qualified resolution first fixes the effect and ordinary call typing then selects
+only among that effect's matching overloads. Handler heads annotate their
+non-continuation parameters to disambiguate overloads. `@operation(id: "...")`
+adds a unique, stable host registration identity for an operation; `@type` is
+reserved and has no operation meaning.
+
+```voyd
+@effect(id: "example.metrics")
+eff Metrics
+  @operation(id: "record-count")
+  record(tail, value: i32) -> void
+  @operation(id: "record-ratio")
+  record(tail, value: f64) -> void
+
+try
+  Metrics::record(1)
+Metrics::record(tail, value: i32):
+  tail()
+```
+
+```ts
+handlers: {
+  "example.metrics::record-count": ({ tail }) => tail(),
+}
+```
+
+The compiler emits effect table version 2 when no operation has an explicit ID,
+preserving the existing entry layout and host behavior. It emits version 3 when
+any operation has `@operation(id: "...")`; v3 adds one optional operation-ID
+word to every entry. The bundled JS host accepts both versions. Other hosts that
+parse effect tables must add the v3 word before accepting explicit operation
+IDs. For a v3 entry with an explicit ID, JS registration uses
+`effectId::operationId`; an implicit declaration retains
+`effectId::opName`. The compiler still dispatches internally by the exact
+effect, operation, and signature identity, so a stable host ID does not replace
+the declaration identity used by rows, handlers, or code generation.
 
 Explicit unqualified selection remains supported through
 `use Effect::operation`, `use Effect::operation as alias`, grouped selections,
@@ -475,7 +508,7 @@ Effect operations are not first-class values. A bare designator such as
 only by calls, handler clauses, imports, re-exports, and tooling. Handler
 qualifiers must resolve to an effect, and their first binder uses the declared
 `tail` or `resume` mode. Diagnostics separately identify a non-effect qualifier,
-a missing operation, an import collision, a duplicate operation, a bare
+a missing operation, an import collision, a duplicate operation ID, a bare
 designator, and an ordinary function used as a handler.
 
 Language-server completion follows the same namespace split. Hover reports the

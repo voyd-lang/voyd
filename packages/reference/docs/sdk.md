@@ -207,6 +207,7 @@ Compiled results expose effect metadata and accept host handlers.
 const result = await sdk.compile({
   source: `@effect(id: "com.example.async")
 eff Async
+  @operation(id: "await-i32")
   await(resume, value: i32) -> i32
 
 pub fn main(): Async -> i32
@@ -218,12 +219,17 @@ if (result.success) {
   const output = await result.run<number>({
     entryName: "main",
     handlers: {
-      "com.example.async::await": ({ resume }, value) =>
+      "com.example.async::await-i32": ({ resume }, value) =>
         resume(Number(value) + 10),
     },
   });
 }
 ```
+
+`@operation(id: "...")` makes the second handler-key segment stable across
+source renames. Without an operation ID, use the operation name instead. An
+overloaded operation without explicit IDs requires a legacy signature-hash key;
+name-only registration is intentionally ambiguous.
 
 ## External package adapters
 

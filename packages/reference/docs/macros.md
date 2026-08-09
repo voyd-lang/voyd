@@ -185,11 +185,16 @@ expansions; exceeding the limit is a compile-time diagnostic at the attribute
 invocation.
 
 Compiler attributes (`@boundary`, `@compiler_contract`, `@effect`,
-`@external`, `@intrinsic`, `@intrinsic_type`, and `@serializer`) are reserved.
+`@external`, `@intrinsic`, `@intrinsic_type`, `@operation`, `@serializer`, and
+`@type`) are reserved.
 They cannot be declared as user attribute macros. When compiler and user
 attributes are stacked, all user expansion runs first and compiler attributes
 are then attached to the first emitted declaration. Put the preserved target
 first when an attribute macro also emits companions.
+
+`@operation(id: "...")` applies only to an effect operation and supplies its
+stable host-facing identifier. `@type` is reserved for the language; it is not
+currently a user-authored operation or attribute-macro feature.
 
 Two imported macros with the same unaliased name are ambiguous. Use normal
 import aliases to select explicit attribute names. Unknown attributes and using

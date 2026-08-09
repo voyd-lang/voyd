@@ -64,12 +64,27 @@ describe("parseHandlerKey", () => {
 
   it("throws on invalid handler keys", () => {
     expect(() => parseHandlerKey("invalid")).toThrowError(
-      "Invalid handler key invalid. Expected effectId::opName or effectId::opName::signatureHash"
+      "Invalid handler key invalid. Expected effectId::opName or effectId::opName::signatureHash",
     );
   });
 });
 
 describe("resolveEffectOp", () => {
+  it("uses explicit operation ids as host keys", () => {
+    const table = createTable();
+    table.ops[0]!.operationId = "await-i32";
+    expect(
+      resolveEffectOp({
+        table,
+        effectId: "com.example.async",
+        opName: "await-i32",
+      }).opId,
+    ).toBe(0);
+    expect(
+      resolveEffectOp({ table, effectId: "com.example.async", opName: "await" })
+        .opId,
+    ).toBe(1);
+  });
   it("resolves unique ops without a signature", () => {
     const table = createTable();
     const op = resolveEffectOp({
@@ -90,9 +105,9 @@ describe("resolveEffectOp", () => {
         effectId: "com.example.async",
         opName: "await",
         key: "com.example.async::await",
-      })
+      }),
     ).toThrowError(
-      "Ambiguous handler key com.example.async::await. com.example.async::await has multiple signatures (0x00000011, 0x00000012). Include signature hash."
+      "Ambiguous handler key com.example.async::await. com.example.async::await has multiple signatures (0x00000011, 0x00000012). Include signature hash.",
     );
   });
 
@@ -103,9 +118,9 @@ describe("resolveEffectOp", () => {
         table,
         effectId: "com.example.async",
         opName: "missing",
-      })
+      }),
     ).toThrowError(
-      "Unknown effect op for com.example.async::missing. Known ops: await, sleep"
+      "Unknown effect op for com.example.async::missing. Known ops: await, sleep",
     );
   });
 
@@ -117,10 +132,44 @@ describe("resolveEffectOp", () => {
         effectId: "com.example.async",
         opName: "await",
         signatureHash: "0x99",
-      })
+      }),
     ).toThrowError(
-      "Unknown effect op for com.example.async::await::0x00000099. Known signatures: 0x00000011, 0x00000012"
+      "Unknown effect op for com.example.async::await::0x00000099. Known signatures: 0x00000011, 0x00000012",
     );
+  });
+});
+
+describe("registerHandlersByKey", () => {
+  it("fans an explicit operation id out to every concrete signature", () => {
+    const table = createTable();
+    table.ops[0]!.operationId = "await-any";
+    table.ops[1]!.operationId = "await-any";
+    const registerHandler = vi.fn();
+    registerHandlersByKey({
+      host: { table, registerHandler },
+      handlers: { "com.example.async::await-any": vi.fn() },
+    });
+    expect(registerHandler).toHaveBeenCalledTimes(2);
+    expect(registerHandler.mock.calls.map((call) => call[1])).toEqual([0, 1]);
+  });
+
+  it("filters explicit operation ids by a requested signature hash", () => {
+    const table = createTable();
+    table.ops[0]!.operationId = "await-any";
+    table.ops[1]!.operationId = "await-any";
+    const registerHandler = vi.fn();
+    registerHandlersByKey({
+      host: { table, registerHandler },
+      handlers: { "com.example.async::await-any::0x00000012": vi.fn() },
+    });
+    expect(registerHandler).toHaveBeenCalledTimes(1);
+    expect(registerHandler.mock.calls[0]?.[1]).toBe(1);
+    expect(() =>
+      registerHandlersByKey({
+        host: { table, registerHandler },
+        handlers: { "com.example.async::await-any::0x00000099": vi.fn() },
+      }),
+    ).toThrow(/Unknown effect op/);
   });
 });
 
@@ -144,7 +193,7 @@ describe("buildHandlerKey", () => {
         effectId: "com.example.async",
         opName: "await",
         signatureHash: "18",
-      })
+      }),
     ).toBe("com.example.async::await::0x00000012");
   });
 });
@@ -170,13 +219,13 @@ describe("registerHandlersByKey", () => {
       "com.example.async",
       1,
       "0x00000012",
-      awaitHandler
+      awaitHandler,
     );
     expect(registerHandler).toHaveBeenCalledWith(
       "com.example.async",
       2,
       "0x00000013",
-      sleepHandler
+      sleepHandler,
     );
   });
 });

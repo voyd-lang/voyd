@@ -1,7 +1,11 @@
 import type { HirExpression, HirGraph } from "../../hir/index.js";
 import type { HirExprId, SymbolId } from "../../ids.js";
 import type { EffectsLoweringInfo } from "../analysis.js";
-import type { EffectsIr, EffectsIrCallKind, EffectsIrCallNode } from "./types.js";
+import type {
+  EffectsIr,
+  EffectsIrCallKind,
+  EffectsIrCallNode,
+} from "./types.js";
 
 const callTarget = (expr: HirExpression | undefined): SymbolId | undefined =>
   expr?.exprKind === "identifier" ? expr.symbol : undefined;
@@ -39,9 +43,10 @@ export const buildEffectsIr = ({
     if (expr.exprKind !== "call" && expr.exprKind !== "method-call") return;
 
     const calleeSymbol =
-      expr.exprKind === "call"
+      info.calls.get(expr.id)?.callee ??
+      (expr.exprKind === "call"
         ? callTarget(hir.expressions.get(expr.callee))
-        : undefined;
+        : undefined);
     const kind = callKindFor({ callId: expr.id, calleeSymbol, info });
     calls.set(expr.id, {
       exprId: expr.id,

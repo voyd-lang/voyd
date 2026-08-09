@@ -1400,9 +1400,9 @@
     },
     {
       "id": "effects.advanced",
-      "title": "Continuation and operation identity behavior",
+      "title": "Continuation and overload behavior",
       "entry": "cases/effects/advanced.voyd",
-      "tags": ["effects", "continuations", "identity", "runtime"],
+      "tags": ["effects", "continuations", "overloads", "runtime"],
       "cases": [
         {
           "id": "effects.continuations.while-no-replay",
@@ -1435,23 +1435,10 @@
           "expect": { "kind": "equals", "value": 25 }
         },
         {
-          "id": "effects.operations.distinct-identity",
-          "title": "matches distinct operation calls and handlers by identity",
-          "entryName": "distinct_handler_operations",
+          "id": "effects.overloads.semantic-alias",
+          "title": "selects overloaded handler clauses through aliases",
+          "entryName": "overloaded_handler_alias",
           "expect": { "kind": "equals", "value": 12 }
-        }
-      ]
-    },
-    {
-      "id": "effects.duplicate-operation",
-      "title": "Duplicate effect operation diagnostics",
-      "entry": "cases/effects/duplicate-operation.voyd",
-      "tags": ["effects", "diagnostics", "identity"],
-      "cases": [
-        {
-          "id": "effects.diagnostics.duplicate-operation",
-          "title": "rejects duplicate operation names within one effect",
-          "expect": { "kind": "diagnostics", "codes": ["BD0009"] }
         }
       ]
     },

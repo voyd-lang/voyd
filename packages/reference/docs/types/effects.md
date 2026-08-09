@@ -22,9 +22,33 @@ The first parameter on an operation declares its continuation behavior:
 - `tail`: the handler must tail-resume exactly once before returning or
   propagating another effect
 
-Each operation name must be unique within its declaring effect. Ordinary
-functions may overload, but effect operations do not: the declaring effect and
-operation declaration form one stable identity used by calls and handlers.
+Effect operations can overload by parameter types. A qualified call
+searches only that effect, then uses ordinary call typing to select an overload.
+Handlers must annotate every non-continuation parameter when a handler head is
+overloaded.
+
+```voyd
+@effect(id: "com.example.log")
+eff Log
+  @operation(id: "write-text")
+  write(tail, value: String) -> void
+  @operation(id: "write-code")
+  write(tail, value: i32) -> void
+
+fn emit(): Log -> void
+  Log::write("ready")
+  Log::write(200)
+
+fn handled() -> void
+  try
+    Log::write(200)
+  Log::write(tail, value: i32):
+    tail()
+```
+
+`@operation(id: "...")` gives an operation a stable host-facing identity. IDs
+are unique inside their effect and may not contain `::`. `@type` is reserved
+for the language and is not an operation attribute.
 
 ## Using effects in function types
 

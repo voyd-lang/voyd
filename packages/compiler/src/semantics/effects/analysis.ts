@@ -132,6 +132,36 @@ const effectNameFor = ({
 const callTarget = (expr: HirExpression): SymbolId | undefined =>
   expr.exprKind === "identifier" ? expr.symbol : undefined;
 
+const resolvedCallTarget = ({
+  exprId,
+  fallback,
+  binding,
+  moduleId,
+  typing,
+}: {
+  exprId: HirExprId;
+  fallback?: SymbolId;
+  binding: BindingResult;
+  moduleId: string;
+  typing: TypingResult;
+}): SymbolId | undefined => {
+  const target = typing.callTargets.get(exprId)?.values().next().value;
+  if (!target) return fallback;
+  if (target.moduleId === moduleId) return target.symbol;
+  return (
+    binding.imports.find((entry) => {
+      const imported = importedTargetFor({
+        symbol: entry.local,
+        symbolTable: binding.symbolTable,
+      });
+      return (
+        imported?.moduleId === target.moduleId &&
+        imported.symbol === target.symbol
+      );
+    })?.local ?? fallback
+  );
+};
+
 const importedTargetFor = ({
   symbol,
   symbolTable,
@@ -281,6 +311,16 @@ export const buildEffectsLoweringInfo = ({
       if (callee?.exprKind === "identifier") {
         referencedEffectOps.add(callee.symbol);
       }
+      const resolved = resolvedCallTarget({
+        exprId: expr.id,
+        fallback: callee ? callTarget(callee) : undefined,
+        binding,
+        moduleId,
+        typing,
+      });
+      if (typeof resolved === "number") {
+        referencedEffectOps.add(resolved);
+      }
     }
     if (expr.exprKind === "effect-handler") {
       expr.handlers.forEach((clause) => {
@@ -357,7 +397,13 @@ export const buildEffectsLoweringInfo = ({
     const effectRow = exprEffectRow({ expr: expr.id, typing });
     calls.set(expr.id, {
       expr: expr.id,
-      callee: calleeExpr ? callTarget(calleeExpr) : undefined,
+      callee: resolvedCallTarget({
+        exprId: expr.id,
+        fallback: calleeExpr ? callTarget(calleeExpr) : undefined,
+        binding,
+        moduleId,
+        typing,
+      }),
       effectRow,
       effectful: !isPureEffectRow(effectRow, typing),
     });

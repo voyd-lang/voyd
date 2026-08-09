@@ -33,6 +33,10 @@ export type EffectAttribute = {
   id?: string;
 };
 
+export type OperationAttribute = {
+  id: string;
+};
+
 export type ExternalAttribute = {
   id: string;
 };

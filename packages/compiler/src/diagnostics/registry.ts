@@ -154,11 +154,11 @@ type DiagnosticParamsMap = {
     | { kind: "macro-definition-reference" };
   BD0009:
     | {
-        kind: "duplicate-effect-operation";
+        kind: "duplicate-operation-id";
         effectName: string;
         operationName: string;
       }
-    | { kind: "previous-effect-operation" }
+    | { kind: "previous-operation-id" }
     | {
         kind: "missing-effect-operation";
         effectName: string;
@@ -621,10 +621,9 @@ export const diagnosticsRegistry: {
           return `Cannot import ${params.target} from ${params.moduleId}; ${ownerPrefix}${params.target} is an instance member and must be accessed through its type`;
         }
         case "import-name-conflict": {
-          const operationGuidance =
-            params.effectName
-              ? `; call ${params.effectName}::${params.name}(...) or import it with an alias, for example \`use ${params.effectName}::${params.name} as ${params.name}_effect\``
-              : "";
+          const operationGuidance = params.effectName
+            ? `; call ${params.effectName}::${params.name}(...) or import it with an alias, for example \`use ${params.effectName}::${params.name} as ${params.name}_effect\``
+            : "";
           return `Cannot import ${params.name} as ${params.incomingKind}; ${params.name} is already bound as ${params.existingKind} in this scope${operationGuidance}`;
         }
         case "previous-import-name-conflict":
@@ -705,10 +704,10 @@ export const diagnosticsRegistry: {
     code: "BD0009",
     message: (params) => {
       switch (params.kind) {
-        case "duplicate-effect-operation":
-          return `effect ${params.effectName} already declares operation ${params.operationName}; operation names within an effect must be unique`;
-        case "previous-effect-operation":
-          return "previous effect operation declared here";
+        case "duplicate-operation-id":
+          return `effect ${params.effectName} already declares host operation key ${params.operationName}; an @operation id must not collide with another operation name or ID`;
+        case "previous-operation-id":
+          return "previous operation with this host registration key declared here";
         case "missing-effect-operation":
           return `effect ${params.effectName} does not declare operation ${params.operationName}`;
         case "invalid-effect-handler-qualifier":

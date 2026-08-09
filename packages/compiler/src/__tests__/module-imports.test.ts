@@ -349,7 +349,7 @@ fn save(value: i32) -> i32
     expect(conflicts).toHaveLength(1);
   });
 
-  it("rejects duplicate operation names within an effect", async () => {
+  it("allows imported overloaded effect operations", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
       [`${root}${sep}effects.voyd`]: `pub eff Store
@@ -373,19 +373,8 @@ pub fn fetch_flag(): Store -> bool
       host,
     });
     const { diagnostics } = analyzeModules({ graph });
-    const duplicate = [...graph.diagnostics, ...diagnostics].find(
-      (diagnostic) => diagnostic.code === "BD0009",
-    );
-
-    expect(duplicate?.message).toContain(
-      "operation names within an effect must be unique",
-    );
-    expect(duplicate?.related).toEqual(
-      expect.arrayContaining([
-        expect.objectContaining({
-          message: "previous effect operation declared here",
-        }),
-      ]),
+    expect([...graph.diagnostics, ...diagnostics]).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ code: "BD0009" })]),
     );
   });
 

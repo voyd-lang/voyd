@@ -51,6 +51,7 @@ export type EffectOpEntry = {
   label: string;
   effectName: string;
   opName: string;
+  operationId?: string;
   external?: {
     params: readonly BoundarySchema[];
     result: BoundarySchema;
@@ -640,6 +641,7 @@ export const buildEffectRegistry = (
           label,
           effectName,
           opName,
+          operationId: effectMeta?.operations[info.opIndex]?.operationId,
           ...(external ? { external } : {}),
         });
       });
@@ -714,6 +716,7 @@ export const buildEffectRegistry = (
             label,
             effectName,
             opName,
+            operationId: effectMeta?.operations[info.opIndex]?.operationId,
           });
         });
       });
@@ -785,6 +788,7 @@ export const buildEffectRegistry = (
             label: `${ctx.moduleId}::${effectName}.${opName}`,
             effectName,
             opName,
+            operationId: op.operationId,
             external,
           });
         });

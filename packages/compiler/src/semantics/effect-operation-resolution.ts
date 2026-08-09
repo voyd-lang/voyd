@@ -130,7 +130,9 @@ export const resolveQualifiedEffectOperation = ({
       return hygienic;
     }
   }
-  return operations.length === 1 ? operations[0] : undefined;
+  // The selected symbol is an overload-set representative. Call typing selects
+  // the exact operation from this effect's own member bucket.
+  return operations[0];
 };
 
 export const resolveUnqualifiedEffectOperation = ({

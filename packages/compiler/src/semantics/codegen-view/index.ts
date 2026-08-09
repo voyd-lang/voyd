@@ -413,6 +413,7 @@ export type ModuleCodegenMetadata = {
     symbol: SymbolId;
     operations: readonly {
       name: string;
+      operationId?: string;
       resumable: "resume" | "tail";
       symbol: SymbolId;
     }[];
@@ -1403,6 +1404,7 @@ export const buildProgramCodegenView = (
         symbol: effect.symbol,
         operations: effect.operations.map((op) => ({
           name: op.name,
+          operationId: op.operationId,
           resumable: op.resumable,
           symbol: op.symbol,
         })),

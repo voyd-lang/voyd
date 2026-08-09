@@ -54,7 +54,9 @@ const RESERVED_ATTRIBUTE_NAMES = new Set([
   "external",
   "intrinsic",
   "intrinsic_type",
+  "operation",
   "serializer",
+  "type",
 ]);
 
 export const functionalMacroExpander: SyntaxMacro = (form: Form): Form =>
@@ -312,7 +314,10 @@ const expandAttributedDeclaration = ({
   exports: MacroDefinition[];
   options: ExpandFunctionalMacroOptions;
 }): Expr[] => {
-  if (!isSupportedAttributeTarget(target)) {
+  const operationOnly = attributes.every(
+    (attribute) => attribute.name.value === "operation",
+  );
+  if (!isSupportedAttributeTarget(target) && !operationOnly) {
     throw new SyntaxMacroError(
       "attributes must precede a supported declaration",
       target,

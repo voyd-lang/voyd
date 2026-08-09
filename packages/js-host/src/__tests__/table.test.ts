@@ -68,6 +68,33 @@ const createEffectTablePayload = (): Uint8Array => {
   ]);
 };
 
+const createV3EffectTablePayload = (): Uint8Array => {
+  const effectId = encoder.encode("com.example.async");
+  const label = encoder.encode("Async.await");
+  const operationId = encoder.encode("await-i32");
+  const names = concat([
+    effectId,
+    Uint8Array.of(0),
+    label,
+    Uint8Array.of(0),
+    operationId,
+    Uint8Array.of(0),
+  ]);
+  return concat([
+    encodeU32LE(3),
+    encodeU32LE(1),
+    encodeU32LE(0x34),
+    encodeU32LE(0x12),
+    encodeU32LE(0),
+    encodeU32LE(7),
+    encodeU32LE(RESUME_KIND.resume),
+    encodeU32LE(0xface),
+    encodeU32LE(effectId.length + 1),
+    encodeU32LE(effectId.length + label.length + 2),
+    names,
+  ]);
+};
+
 const createCustomSection = ({
   name,
   payload,
@@ -111,6 +138,32 @@ const expectSingleParsedOp = (table: ParsedEffectTable): void => {
 };
 
 describe("parseEffectTable", () => {
+  it("retains v2 compatibility without an operation id", () => {
+    const parsed = parseEffectTable(
+      concat([
+        Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00),
+        createCustomSection({
+          name: "__voyd_effect_table",
+          payload: createEffectTablePayload(),
+        }),
+      ]),
+    );
+    expect(parsed.ops[0]?.operationId).toBeUndefined();
+    expect(Object.hasOwn(parsed.ops[0] ?? {}, "operationId")).toBe(false);
+  });
+
+  it("parses v3 operation ids", () => {
+    const parsed = parseEffectTable(
+      concat([
+        Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00),
+        createCustomSection({
+          name: "__voyd_effect_table",
+          payload: createV3EffectTablePayload(),
+        }),
+      ]),
+    );
+    expect(parsed.ops[0]?.operationId).toBe("await-i32");
+  });
   it("parses effect table custom sections from raw bytes without wasm validation", () => {
     const wasm = createInvalidWasmWithEffectTable();
     expect(() => new WebAssembly.Module(toArrayBuffer(wasm))).toThrow();
@@ -120,13 +173,22 @@ describe("parseEffectTable", () => {
   });
 
   it("parses effect table from WebAssembly.Module inputs", () => {
-    const header = Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00);
+    const header = Uint8Array.of(
+      0x00,
+      0x61,
+      0x73,
+      0x6d,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+    );
     const customSection = createCustomSection({
       name: "__voyd_effect_table",
       payload: createEffectTablePayload(),
     });
     const module = new WebAssembly.Module(
-      toArrayBuffer(concat([header, customSection]))
+      toArrayBuffer(concat([header, customSection])),
     );
 
     const parsed = parseEffectTable(module);
@@ -134,10 +196,23 @@ describe("parseEffectTable", () => {
   });
 
   it("rejects custom sections with varuint32 sizes at or above 0x80000000", () => {
-    const header = Uint8Array.of(0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00);
+    const header = Uint8Array.of(
+      0x00,
+      0x61,
+      0x73,
+      0x6d,
+      0x01,
+      0x00,
+      0x00,
+      0x00,
+    );
     const oversizedCustomSection = Uint8Array.of(
       0x00, // custom section id
-      0x80, 0x80, 0x80, 0x80, 0x08 // varuint32 section size = 0x80000000
+      0x80,
+      0x80,
+      0x80,
+      0x80,
+      0x08, // varuint32 section size = 0x80000000
     );
     const wasm = concat([header, oversizedCustomSection]);
 

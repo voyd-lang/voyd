@@ -1369,6 +1369,14 @@
     "portableCaseIds": ["modules.defaults.imported-call"]
   },
   {
+    "file": "packages/compiler/src/semantics/typing/__tests__/effect-handler-overloads.test.ts",
+    "owner": "compiler-implementation",
+    "reviewed": "2026-07-10",
+    "disposition": "compiler-local-portable-gap",
+    "rationale": "Detailed implementation assertions remain co-located; the hand audit found an observable contract that still needs a representative conformance case.",
+    "portableGap": "Ambiguous overloaded effect handlers must produce TY0019, a user-facing rule absent from conformance."
+  },
+  {
     "file": "packages/compiler/src/semantics/typing/__tests__/effects-function-types.test.ts",
     "owner": "compiler-implementation",
     "reviewed": "2026-07-10",

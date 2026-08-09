@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   compileEffectFixture,
   parseEffectTable,
+  runEffectfulExport,
 } from "./support/effects-harness.js";
 import { wasmBufferSource } from "./support/wasm-utils.js";
 
@@ -34,5 +35,26 @@ describe("effects call imported callee", () => {
       .handle_imported_effectful_call as CallableFunction;
 
     expect(target()).toBe(15);
+  });
+
+  it("compiles and runs directly performed imported overloaded operations", async () => {
+    const { module } = await compileEffectFixture({ entryPath: fixturePath });
+    const parsed = parseEffectTable(module);
+    const awaitOps = parsed.ops.filter((op) =>
+      op.label.endsWith("Async.await"),
+    );
+    expect(awaitOps).toHaveLength(2);
+
+    const { value } = await runEffectfulExport<number>({
+      wasm: module,
+      entryName: "perform_imported_overloads",
+      handlers: Object.fromEntries(
+        awaitOps.map((op) => [
+          `${op.opIndex}`,
+          (_request, value: unknown) => (typeof value === "boolean" ? 20 : 10),
+        ]),
+      ),
+    });
+    expect(value).toBe(30);
   });
 });

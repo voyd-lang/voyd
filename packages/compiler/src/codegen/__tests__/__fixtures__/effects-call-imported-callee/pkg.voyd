@@ -1,4 +1,4 @@
-use src::dep::{ f, g, Async }
+use src::dep::{ f, flag, g, Async }
 
 pub fn main_effectful(): Async -> i32
   Async::await(f(g()))
@@ -6,5 +6,10 @@ pub fn main_effectful(): Async -> i32
 pub fn handle_imported_effectful_call(): () -> i32
   try
     f(4)
-  Async::await(resume, value):
+  Async::await(resume, value: i32):
     resume(value + 10)
+  Async::await(resume, value: bool):
+    resume(1)
+
+pub fn perform_imported_overloads(): Async -> i32
+  Async::await(4) + flag()

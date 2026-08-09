@@ -2,8 +2,10 @@ import type { HostProtocolTable } from "./types.js";
 import { RESUME_KIND } from "../runtime/constants.js";
 
 const TABLE_HEADER_SIZE = 8;
-const OP_ENTRY_SIZE = 28;
-const TABLE_VERSION = 2;
+const OP_ENTRY_SIZE_V2 = 28;
+const OP_ENTRY_SIZE = 32;
+const TABLE_VERSION_V2 = 2;
+const TABLE_VERSION = 3;
 
 export const EFFECT_TABLE_EXPORT = "__voyd_effect_table";
 
@@ -24,6 +26,7 @@ export type ParsedEffectOp = {
   resumeKind: ResumeKindCode;
   signatureHash: number;
   label: string;
+  operationId?: string;
 };
 
 export type ParsedEffectTable = {
@@ -70,7 +73,7 @@ const toBase64 = (data: Uint8Array): string => {
 type BinaryenModuleLike = { emitBinary: () => Uint8Array };
 
 const toUint8Array = (
-  wasm: Uint8Array | ArrayBuffer | BinaryenModuleLike
+  wasm: Uint8Array | ArrayBuffer | BinaryenModuleLike,
 ): Uint8Array => {
   if (wasm instanceof Uint8Array) return wasm;
   if (wasm instanceof ArrayBuffer) return new Uint8Array(wasm);
@@ -125,7 +128,7 @@ const ensureWasmHeader = (bytes: Uint8Array): void => {
 
   const hasMagic = WASM_MAGIC.every((byte, index) => bytes[index] === byte);
   const hasVersion = WASM_VERSION_V1.every(
-    (byte, index) => bytes[index + WASM_MAGIC.length] === byte
+    (byte, index) => bytes[index + WASM_MAGIC.length] === byte,
   );
 
   if (!hasMagic || !hasVersion) {
@@ -170,7 +173,7 @@ const getCustomSectionPayloadFromBytes = ({
       }
 
       const sectionName = new TextDecoder().decode(
-        wasmBytes.subarray(sectionNameStart, sectionNameEnd)
+        wasmBytes.subarray(sectionNameStart, sectionNameEnd),
       );
       if (sectionName === tableExport) {
         return wasmBytes.slice(sectionNameEnd, sectionEnd);
@@ -251,7 +254,7 @@ export const normalizeSignatureHash = (hash: string): number => {
 
 export const parseEffectTable = (
   wasm: Uint8Array | ArrayBuffer | WebAssembly.Module | BinaryenModuleLike,
-  tableExport = EFFECT_TABLE_EXPORT
+  tableExport = EFFECT_TABLE_EXPORT,
 ): ParsedEffectTable => {
   const payload =
     wasm instanceof WebAssembly.Module
@@ -272,7 +275,7 @@ export const parseEffectTable = (
   const view = new DataView(
     payload.buffer,
     payload.byteOffset,
-    payload.byteLength
+    payload.byteLength,
   );
   let offset = 0;
   const read = () => {
@@ -282,7 +285,7 @@ export const parseEffectTable = (
   };
 
   const version = read();
-  if (version !== TABLE_VERSION) {
+  if (version !== TABLE_VERSION && version !== TABLE_VERSION_V2) {
     throw new Error(`Unsupported effect table version ${version}`);
   }
   const opCount = read();
@@ -296,9 +299,13 @@ export const parseEffectTable = (
     resumeKind: read(),
     signatureHash: read(),
     labelOffset: read(),
+    ...(version === TABLE_VERSION ? { operationIdOffset: read() } : {}),
   }));
 
-  const namesStart = TABLE_HEADER_SIZE + opEntries.length * OP_ENTRY_SIZE;
+  const namesStart =
+    TABLE_HEADER_SIZE +
+    opEntries.length *
+      (version === TABLE_VERSION ? OP_ENTRY_SIZE : OP_ENTRY_SIZE_V2);
   if (namesStart > payload.length) {
     throw new Error("Effect table payload is truncated");
   }
@@ -307,6 +314,10 @@ export const parseEffectTable = (
 
   const ops: ParsedEffectOp[] = opEntries.map((entry) => {
     const effectId = decodeName(names, entry.effectIdNameOffset);
+    const operationId =
+      typeof entry.operationIdOffset === "number"
+        ? decodeName(names, entry.operationIdOffset)
+        : undefined;
     return {
       opIndex: entry.opIndex,
       effectId,
@@ -315,6 +326,7 @@ export const parseEffectTable = (
       resumeKind: parseResumeKind(entry.resumeKind),
       signatureHash: entry.signatureHash,
       label: decodeName(names, entry.labelOffset),
+      ...(operationId ? { operationId } : {}),
     };
   });
 
@@ -336,7 +348,7 @@ export const parseEffectTable = (
 };
 
 export const toHostProtocolTable = (
-  table: ParsedEffectTable
+  table: ParsedEffectTable,
 ): HostProtocolTable => ({
   version: table.version,
   ops: table.ops.map((op) => {
@@ -346,6 +358,7 @@ export const toHostProtocolTable = (
       effectId: op.effectId,
       opId: op.opId,
       opName: opNameFromLabel(label),
+      ...(op.operationId ? { operationId: op.operationId } : {}),
       resumeKind: resumeKindName(op.resumeKind),
       signatureHash: formatSignatureHash(op.signatureHash),
       ...(label ? { label } : {}),
