@@ -11,7 +11,6 @@ use std::array::Array
 use std::string::type::String
 use std::vx::{
   AnimationFrame,
-  CanvasTextMetrics,
   Cmd,
   KeyboardEvent,
   Program,
@@ -23,6 +22,7 @@ use std::vx::{
   program,
   window_on_resize
 }
+use std::vx::canvas::TextMetrics
 
 pub fn app() -> Program<Model, Msg>
   program({ init, hydrate, step, view, subscriptions })
@@ -39,7 +39,7 @@ fn initial_canvas_commands(model: Model) -> Cmd<Msg>
     draw<Msg>(model),
     measure_title<Msg>(
       model.session.name,
-      handler: (metrics: CanvasTextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
+      handler: (metrics: TextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
     )
   ])
 

@@ -1,5 +1,6 @@
 use std::enums::{ enum }
 use std::vx::all
+use std::vx::canvas::self as canvas
 
 obj Model {
   count: i32
@@ -27,20 +28,20 @@ fn view(model: Model) -> Html<Msg>
 pub fn echo_command(command: Cmd<Msg>) -> Cmd<Msg>
   command
 
-pub fn derived_canvas_frame() -> CanvasFrame
-  canvas_frame(
+pub fn derived_canvas_frame() -> canvas::Frame
+  canvas::frame(
     selector: "#scene",
     width: 320.0,
     height: 180.0,
-    draws: [canvas_line(
-      from: CanvasPoint { x: 1.0, y: 2.0 },
-      to: CanvasPoint { x: 3.0, y: 4.0 },
+    draws: [canvas::line(
+      from: canvas::Point { x: 1.0, y: 2.0 },
+      to: canvas::Point { x: 3.0, y: 4.0 },
       color: "#ffffff"
     )]
   )
 
-pub fn repack_canvas_frame(draw: CanvasDraw) -> CanvasFrame
-  canvas_frame(
+pub fn repack_canvas_frame(draw: canvas::Draw) -> canvas::Frame
+  canvas::frame(
     selector: "#repacked",
     width: 640.0,
     height: 360.0,

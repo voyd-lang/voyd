@@ -89,7 +89,7 @@ Generated `MsgPack` values remain compatible with
 `@boundary(type: "payload", field: "payload")` envelopes. VX Canvas gradients,
 path segments, draw/state operations, and version-2 frames now use private typed
 wire records instead of handwritten maps while preserving their existing host
-payloads. `CanvasPathSegment`, `CanvasDraw`, and `CanvasRadialGradient` keep an
+payloads. `canvas::PathSegment`, `canvas::Draw`, and `canvas::RadialGradient` keep an
 optional object-private typed cache so composition does not decode and re-encode
 values created by their constructors; host-originated payload envelopes leave
 that cache absent and are decoded when composed.
@@ -613,15 +613,20 @@ the policy for operations the inner handler does not select.
 
 ## V-498 — VX Canvas v2 interaction surface
 
-`CanvasPathSegment` has typed constructors for moves, lines, quadratic and
+The typed Canvas API is owned by the ordinary public `std::vx::canvas` module.
+Its types and constructors use concise names within that namespace, and its
+commands are `canvas::render` and `canvas::measure_text`; the former root-level
+`Canvas*`, `canvas_*`, and `Cmd::canvas_*` spellings are not retained.
+
+`canvas::PathSegment` has typed constructors for moves, lines, quadratic and
 cubic Bézier curves, arcs, tangent arcs, ellipses, rectangles, and closing a
-subpath. `CanvasTransform`, balanced save/restore, matrix/translate/rotate/scale,
-line dashes, `CanvasFillRule`, and the standard Canvas compositing operations are
-also public. State operations remain ordered `CanvasDraw` values, preserving the
+subpath. `canvas::Transform`, balanced save/restore, matrix/translate/rotate/scale,
+line dashes, `canvas::FillRule`, and the standard Canvas compositing operations are
+also public. State operations remain ordered `canvas::Draw` values, preserving the
 existing frame builder while making host execution deterministic.
 
-`CanvasTextMetrics` and
-`Cmd::canvas_measure_text(selector: value: font: handler:)` model browser
+`canvas::TextMetrics` and
+`canvas::measure_text(selector: value: font: handler:)` model browser
 measurement as an asynchronous VX command/result. The typed handler follows
 normal command ownership: Voyd retains it and the browser releases it after the
 result is dispatched.
@@ -633,7 +638,7 @@ the active pointer ID and ignores move, release, and cancellation events from
 other pointers.
 
 Applications draw and receive text metrics in logical CSS pixels; the browser
-owns device-pixel-ratio backing-store scaling. `canvas_frame` emits version 2
+owns device-pixel-ratio backing-store scaling. `canvas::frame` emits version 2
 because paths and ordered state operations break the version-1 draw grammar.
 The new host continues to validate and render legacy version-1 primitives while
 accepting the expanded grammar only in version 2. Additive optional fields may
@@ -644,24 +649,28 @@ resized or painted.
 ### Example
 
 ```voyd
-use std::vx::{
-  CanvasPoint,
-  canvas_frame,
-  canvas_path,
-  canvas_path_line_to,
-  canvas_path_move_to
-}
+use std::vx::Cmd
+use std::vx::canvas::self as canvas
 
-let frame = canvas_frame({
+let frame = canvas::frame(
   selector: "#orbit",
   width: 640.0,
   height: 480.0,
-  draws: [canvas_path({
+  draws: [canvas::path(
     segments: [
-      canvas_path_move_to(CanvasPoint { x: 10.0, y: 10.0 }),
-      canvas_path_line_to(CanvasPoint { x: 100.0, y: 100.0 })
+      canvas::path_move_to(canvas::Point { x: 10.0, y: 10.0 }),
+      canvas::path_line_to(canvas::Point { x: 100.0, y: 100.0 })
     ],
     stroke: "#fff"
-  })]
-})
+  )]
+)
+
+let render: Cmd<Msg> = canvas::render(frame)
+let measure: Cmd<Msg> = canvas::measure_text(
+  selector: "#orbit",
+  value: model.session.name,
+  font: "600 12px Inter, sans-serif",
+  handler: (metrics: canvas::TextMetrics) -> Msg =>
+    Msg::CanvasTitleMeasured { metrics }
+)
 ```

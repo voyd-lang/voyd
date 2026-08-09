@@ -57,7 +57,7 @@ migration.
 | JSON decoding | New `decode<T>` is strict by default and rejects unknown fields. | Use `permissive_decode_options()` only where forward-compatible unknown fields are intentional. Existing `parse` and `stringify` remain available. |
 | Modules/packages | `foo.voyd` and `foo/pkg.voyd` cannot both claim logical module `foo`. Nested package internals are hidden across the package boundary. | Keep the ordinary file as the facade or replace it with the nested package; re-export external API from `pkg.voyd`. |
 | Web package | The public route-DSL `serve` macro is now owned by `pkg::web::dsl` and re-exported from the package root. | Import `serve` from `pkg::web` directly, through `use pkg::web::all`, or explicitly from `pkg::web::dsl`; do not import the route-DSL macro from `pkg::web::router`. |
-| VX Canvas | `canvas_frame` now emits wire version 2. `CanvasPathSegment`, `CanvasDraw`, and `CanvasRadialGradient` cannot be constructed externally with raw object literals because they contain private typed caches. | Build values with the public constructors. Hosts that accept frames must accept v2 for the expanded grammar; the bundled host still reads legacy v1 frames. |
+| VX Canvas | The API moves to `std::vx::canvas` and drops public `Canvas*`, `canvas_*`, and `Cmd::canvas_*` spellings. `canvas::frame` emits wire version 2, and `canvas::PathSegment`, `canvas::Draw`, and `canvas::RadialGradient` cannot be constructed externally with raw object literals because they contain private typed caches. | Import `std::vx::canvas` and use concise names such as `canvas::Point`, `canvas::path`, `canvas::render`, and `canvas::measure_text`. Hosts that accept frames must accept v2 for the expanded grammar; the bundled host still reads legacy v1 frames. |
 | VX events | Voyd `MouseEvent` and TypeScript `MouseEventPayload` gain required `pointer_id`; TypeScript `EventOptions` gains `pointerCapture?`. | Add `pointer_id` when constructing or destructuring event fixtures. Non-pointer mouse, wheel, and drag events use `0`. |
 | Host adapters | A custom `randomBytes` hook must return a `Uint8Array` of exactly the requested length. `NodeFsPromises.writeFile` must permit an optional `{ flag?: string }`. | Update mocks and adapters; do not return oversized entropy buffers expecting truncation. |
 | Orbit | Persisted simulation IDs become canonical lowercase UUIDs, and four JSON readers now return `JsonDecodeError` instead of `JsonError`. | Rename stored files/IDs if preserving old data, and update result matches to the new error type. Existing v1 camel-case JSON fields are preserved. |
@@ -994,191 +994,50 @@ representation. Browser updates and hydration preserve option `value` and
 `selected`; textarea property state has a stable text representation only when
 it is compatible with the rendered children.
 
-### Canvas v2 types and calls
+### Canvas v2 module and calls
 
-The new public data types are:
-
-```voyd
-pub val CanvasTransform {
-  api a: f64, api b: f64, api c: f64,
-  api d: f64, api e: f64, api f: f64
-}
-
-pub obj CanvasPathSegment {
-  api payload: MsgPack,
-  pri dto?: CanvasPathSegmentDto
-}
-
-pub enum CanvasFillRule
-  NonZero
-  EvenOdd
-
-pub enum CanvasCompositeOperation
-  SourceOver
-  SourceIn
-  SourceOut
-  SourceAtop
-  DestinationOver
-  DestinationIn
-  DestinationOut
-  DestinationAtop
-  Lighter
-  Copy
-  Xor
-  Multiply
-  Screen
-  Overlay
-  Darken
-  Lighten
-  ColorDodge
-  ColorBurn
-  HardLight
-  SoftLight
-  Difference
-  Exclusion
-  Hue
-  Saturation
-  Color
-  Luminosity
-
-pub type CanvasTextMetrics = {
-  width: f64,
-  actual_bounding_box_left: f64,
-  actual_bounding_box_right: f64,
-  actual_bounding_box_ascent: f64,
-  actual_bounding_box_descent: f64
-}
-```
-
-All new path constructors are:
+The typed Canvas API is now grouped under `std::vx::canvas`. Its public types
+use concise names such as `Point`, `Transform`, `PathSegment`, `FillRule`,
+`CompositeOperation`, `Draw`, `Frame`, `RadialGradient`, and `TextMetrics`.
+Constructors and commands likewise drop the repeated `canvas_` prefix: use
+`canvas::frame`, `canvas::path`, `canvas::render`, and
+`canvas::measure_text`. The old root-level `Canvas*`, `canvas_*`, and
+`Cmd::canvas_*` names are removed.
 
 ```voyd
-pub fn canvas_path_move_to(point: CanvasPoint) -> CanvasPathSegment
-pub fn canvas_path_line_to(point: CanvasPoint) -> CanvasPathSegment
-pub fn canvas_path_quadratic_curve_to(
-  { control: CanvasPoint, to: CanvasPoint }
-) -> CanvasPathSegment
-pub fn canvas_path_bezier_curve_to(
-  { control_1: CanvasPoint, control_2: CanvasPoint, to: CanvasPoint }
-) -> CanvasPathSegment
-pub fn canvas_path_arc(
-  { center: CanvasPoint, radius: f64, start_angle: f64, end_angle: f64,
-    counter_clockwise: bool = false }
-) -> CanvasPathSegment
-pub fn canvas_path_arc_to(
-  { control_1: CanvasPoint, control_2: CanvasPoint, radius: f64 }
-) -> CanvasPathSegment
-pub fn canvas_path_ellipse(
-  { center: CanvasPoint, radius_x: f64, radius_y: f64, rotation: f64,
-    start_angle: f64, end_angle: f64,
-    counter_clockwise: bool = false }
-) -> CanvasPathSegment
-pub fn canvas_path_rect(
-  { origin: CanvasPoint, width: f64, height: f64 }
-) -> CanvasPathSegment
-pub fn canvas_path_close() -> CanvasPathSegment
+use std::vx::Cmd
+use std::vx::canvas::self as canvas
 
-pub fn canvas_path(
-  { segments: Array<CanvasPathSegment>, fill?: String, stroke?: String,
-    stroke_width: f64 = 1.0,
-    fill_rule: CanvasFillRule = CanvasFillRule::NonZero {},
-    alpha: f64 = 1.0, glow_color?: String, glow_blur: f64 = 0.0 }
-) -> CanvasDraw
-```
-
-Angles and rotation use radians. Points and dimensions use logical CSS pixels.
-The new ordered state operations are:
-
-```voyd
-pub fn canvas_save() -> CanvasDraw
-pub fn canvas_restore() -> CanvasDraw
-pub fn canvas_transform(matrix: CanvasTransform) -> CanvasDraw
-pub fn canvas_translate({ x: f64, y: f64 }) -> CanvasDraw
-pub fn canvas_rotate(radians: f64) -> CanvasDraw
-pub fn canvas_scale({ x: f64, y: f64 }) -> CanvasDraw
-pub fn canvas_line_dash(
-  { pattern: Array<f64>, offset: f64 = 0.0 }
-) -> CanvasDraw
-pub fn canvas_composite(operation: CanvasCompositeOperation) -> CanvasDraw
-```
-
-`save` and `restore` preserve transform, dash, compositing, and paint state.
-An empty dash pattern resets the dash. The existing changed frame and gradient
-constructors have these exact signatures:
-
-```voyd
-pub fn canvas_radial_gradient(
-  { inner_color: String, outer_color: String,
-    inner_radius: f64 = 0.0, outer_radius?: f64 }
-) -> CanvasRadialGradient
-
-pub fn canvas_frame(
-  { selector: String, width: f64, height: f64,
-    draws: Array<CanvasDraw>, clear: bool = true, background?: String }
-) -> CanvasFrame
-```
-
-`canvas_frame` now emits `version: 2`. The existing line, polyline, circle,
-ellipse, text, and radial-gradient constructors remain usable in a v2 frame.
-`CanvasPathSegment`, `CanvasDraw`, and `CanvasRadialGradient` now have a private
-optional typed DTO cache. External code can read `payload` but can no longer
-construct these nominal objects with raw object literals; use the typed
-constructors. A host-originated payload can omit the cache and is decoded when
-composed, preserving wire compatibility.
-
-```voyd
-use std::vx::{
-  CanvasPoint,
-  canvas_frame,
-  canvas_path,
-  canvas_path_line_to,
-  canvas_path_move_to
-}
-
-let frame = canvas_frame({
+let frame = canvas::frame(
   selector: "#orbit-canvas",
   width: 640.0,
   height: 480.0,
-  draws: [canvas_path({
+  draws: [canvas::path(
     segments: [
-      canvas_path_move_to(CanvasPoint { x: 10.0, y: 10.0 }),
-      canvas_path_line_to(CanvasPoint { x: 100.0, y: 100.0 })
+      canvas::path_move_to(canvas::Point { x: 10.0, y: 10.0 }),
+      canvas::path_line_to(canvas::Point { x: 100.0, y: 100.0 })
     ],
     stroke: "#ffffff"
-  })]
-})
-```
+  )]
+)
 
-Text measurement is a new asynchronous command with two exact overloads:
-
-```voyd
-impl<Msg> Cmd<Msg>
-  api fn canvas_measure_text(
-    { selector: String, value: String, font: String = "12px sans-serif",
-      handler_id: i32 }
-  ) -> Cmd<Msg>
-
-  api fn canvas_measure_text(
-    { selector: String, value: String, font: String = "12px sans-serif",
-      handler: fn(CanvasTextMetrics) -> Msg }
-  ) -> Cmd<Msg>
-```
-
-There are no `StringSlice` overloads for this command. The browser finds the
-selected canvas, applies the font, returns logical CSS-pixel metrics, dispatches
-the retained typed mapper, and releases an owned mapper once. Missing targets,
-invalid commands, measurement, mapping, and observer failures are reported
-through the runtime's `commands` error phase.
-
-```voyd
-let measure = Cmd<Msg>::canvas_measure_text(
+let render: Cmd<Msg> = canvas::render(frame)
+let measure: Cmd<Msg> = canvas::measure_text(
   selector: "#orbit-canvas",
   value: model.session.name,
   font: "600 12px Inter, sans-serif",
-  handler: (metrics: CanvasTextMetrics) -> Msg =>
+  handler: (metrics: canvas::TextMetrics) -> Msg =>
     Msg::CanvasTitleMeasured { metrics }
 )
 ```
+
+`canvas::frame` emits `version: 2`. Paths and ordered state operations require
+v2; the browser host continues to validate and render legacy v1 primitives.
+`canvas::PathSegment`, `canvas::Draw`, and `canvas::RadialGradient` retain
+private optional DTO caches, so callers construct them through the typed module
+functions instead of raw object literals. Text measurement remains a retained,
+one-shot command callback, and all Canvas coordinates and metrics use logical CSS
+pixels.
 
 ### Canvas host validation and rendering
 
@@ -1445,7 +1304,7 @@ Orbit also adds one public helper around the new Canvas command:
 ```voyd
 pub fn measure_title<Msg>(
   value: String,
-  { handler: fn(CanvasTextMetrics) -> Msg }
+  { handler: fn(canvas::TextMetrics) -> Msg }
 ) -> Cmd<Msg>
 ```
 
@@ -1519,7 +1378,7 @@ is a subpath export, not a new root export from `@voyd-lang/vx-dom`.
 import { ssrDomPropertyRepresentation } from "@voyd-lang/vx-dom/normalize.js";
 
 ssrDomPropertyRepresentation("textarea", "value"); // "text"
-ssrDomPropertyRepresentation("select", "value");   // "unsupported"
+ssrDomPropertyRepresentation("select", "value"); // "unsupported"
 ```
 
 Third, `@voyd-lang/lib/binaryen-gc/index.js` adds:

@@ -83,7 +83,7 @@ into a version-2 frame; the browser host remains compatible with legacy
 version-1 primitives. VX derives the Canvas MessagePack schema from typed wire
 records, so Orbit does not repeat host field names or build boundary maps. The
 title is measured through an explicit
-`canvas_measure_text` command and the result is stored in the model before the
+`canvas::measure_text` command and the result is stored in the model before the
 next frame. Canvas pointer-down events request pointer capture, so panning,
 body dragging, and velocity placement keep receiving moves and the final
 release outside the canvas. The model tracks the active pointer ID, ignores

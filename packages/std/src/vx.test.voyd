@@ -12,7 +12,6 @@ enum TypedVxTestMsg
   Saved
   Tick
   Rename { value: String }
-  Measured { metrics: CanvasTextMetrics }
 
 obj TypedVxTestModel {
   api count: i32
@@ -381,175 +380,6 @@ test "vx command constructors encode runtime payloads":
   assert_i64_payload_field(delayed.payload, "ms", 250i64)
   assert_string_payload_field(delayed.payload, "value", "later")
 
-test "vx canvas constructors encode typed draw primitives":
-  let line = canvas_line(
-    from: CanvasPoint { x: 1.0, y: 2.0 },
-    to: CanvasPoint { x: 3.0, y: 4.0 },
-    color: "#ffffff",
-    width: 2.5,
-    alpha: 0.75,
-    glow_color: "#88ccff",
-    glow_blur: 6.0
-  )
-  assert_string_payload_field(line.payload, "kind", "line")
-  assert_f64_payload_field(line.payload, "width", 2.5)
-  assert_f64_payload_field(line.payload, "alpha", 0.75)
-  assert_string_payload_field(line.payload, "glowColor", "#88ccff")
-
-  let polyline = canvas_polyline(
-    points: [
-      CanvasPoint { x: 0.0, y: 0.0 },
-      CanvasPoint { x: 5.0, y: 8.0 }
-    ],
-    color: "#6699ff",
-    closed: true,
-    fill: "#112244"
-  )
-  assert_string_payload_field(polyline.payload, "kind", "polyline")
-  assert_array_payload_len(polyline.payload, "points", 2)
-
-  let ellipse = canvas_ellipse(
-    center: CanvasPoint { x: 12.0, y: 18.0 },
-    radius_x: 9.0,
-    radius_y: 4.0,
-    rotation: 0.5,
-    stroke: "#aabbcc"
-  )
-  assert_string_payload_field(ellipse.payload, "kind", "ellipse")
-  assert_f64_payload_field(ellipse.payload, "radiusX", 9.0)
-  assert_f64_payload_field(ellipse.payload, "radiusY", 4.0)
-
-  let label = canvas_text(
-    position: CanvasPoint { x: 20.0, y: 24.0 },
-    value: "Voyd",
-    color: "#ffffff",
-    font: "600 14px sans-serif",
-    align: "center",
-    baseline: "middle",
-    max_width: 120.0
-  )
-  assert_string_payload_field(label.payload, "kind", "text")
-  assert_string_payload_field(label.payload, "value", "Voyd")
-  assert_f64_payload_field(label.payload, "maxWidth", 120.0)
-
-test "vx canvas frame and command encode radial circle rendering":
-  let gradient = canvas_radial_gradient(
-    inner_color: "#ffffff",
-    outer_color: "#ff880000",
-    inner_radius: 1.0,
-    outer_radius: 16.0
-  )
-  let circle = canvas_circle(
-    center: CanvasPoint { x: 80.0, y: 64.0 },
-    radius: 16.0,
-    stroke: "#ffcc88",
-    stroke_width: 2.0,
-    glow_color: "#ff8800",
-    glow_blur: 12.0,
-    radial_gradient: gradient
-  )
-  assert_string_payload_field(circle.payload, "kind", "circle")
-  assert_f64_payload_field(circle.payload, "radius", 16.0)
-  assert_payload_has_field(circle.payload, "radialGradient")
-
-  match(msgpack::unpack_map(circle.payload))
-    Ok<Dict<String, MsgPack>> { value }:
-      match(value.get("radialGradient"))
-        Some<MsgPack> { value: radial }:
-          match(msgpack::unpack_map(radial))
-            Ok<Dict<String, MsgPack>> { value: radial_map }:
-              assert_string_field(radial_map, "innerColor", "#ffffff")
-              assert_string_field(radial_map, "outerColor", "#ff880000")
-              assert_f64_field(radial_map, "outerRadius", 16.0)
-            Err:
-              assert(false, eq: true)
-        None:
-          assert(false, eq: true)
-    Err:
-      assert(false, eq: true)
-
-  let canvas = canvas_frame(
-    selector: "#scene",
-    width: 960.0,
-    height: 540.0,
-    draws: [circle],
-    background: "#050711"
-  )
-  match(msgpack::unpack_map(canvas.payload))
-    Ok<Dict<String, MsgPack>> { value }:
-      assert_i32_field(value, "version", 2)
-      assert_string_field(value, "selector", "#scene")
-      assert_f64_field(value, "width", 960.0)
-      assert_f64_field(value, "height", 540.0)
-      assert_bool_field(value, "clear", true)
-      assert_string_field(value, "background", "#050711")
-      match(value.get("draws"))
-        Some<MsgPack> { value: draws }:
-          match(msgpack::unpack_array(draws))
-            Ok<Array<MsgPack>> { value: list }:
-              assert(list.len(), eq: 1)
-            Err:
-              assert(false, eq: true)
-        None:
-          assert(false, eq: true)
-    Err:
-      assert(false, eq: true)
-
-  let render = Cmd<MsgPack>::canvas_render(canvas)
-  assert_string_payload_field(render.payload, "type", "cmd")
-  assert_string_payload_field(render.payload, "kind", "canvas_render")
-  assert_payload_has_field(render.payload, "value")
-
-test "vx canvas paths and state operations encode validated wire primitives":
-  let path = canvas_path(
-    segments: [
-      canvas_path_move_to(CanvasPoint { x: 0.0, y: 0.0 }),
-      canvas_path_line_to(CanvasPoint { x: 12.0, y: 0.0 }),
-      canvas_path_quadratic_curve_to(
-        control: CanvasPoint { x: 18.0, y: 6.0 },
-        to: CanvasPoint { x: 12.0, y: 12.0 }
-      ),
-      canvas_path_bezier_curve_to(
-        control_1: CanvasPoint { x: 8.0, y: 16.0 },
-        control_2: CanvasPoint { x: 4.0, y: 16.0 },
-        to: CanvasPoint { x: 0.0, y: 12.0 }
-      ),
-      canvas_path_close()
-    ],
-    fill: "#224466",
-    stroke: "#88ccff",
-    stroke_width: 2.0,
-    fill_rule: CanvasFillRule::EvenOdd {}
-  )
-  assert_string_payload_field(path.payload, "kind", "path")
-  assert_array_payload_len(path.payload, "segments", 5)
-  assert_string_payload_field(path.payload, "fillRule", "evenodd")
-
-  let transform = canvas_transform(CanvasTransform {
-    a: 1.0,
-    b: 0.0,
-    c: 0.0,
-    d: 1.0,
-    e: 20.0,
-    f: 30.0
-  })
-  assert_string_payload_field(transform.payload, "kind", "transform")
-  assert_f64_payload_field(transform.payload, "e", 20.0)
-  assert_string_payload_field(canvas_save().payload, "kind", "save")
-  assert_string_payload_field(canvas_restore().payload, "kind", "restore")
-  assert_string_payload_field(canvas_rotate(0.5).payload, "kind", "rotate")
-  assert_string_payload_field(canvas_translate(x: 4.0, y: 5.0).payload, "kind", "translate")
-  assert_string_payload_field(canvas_scale(x: 2.0, y: 3.0).payload, "kind", "scale")
-
-  let dash = canvas_line_dash(pattern: [3.0, 2.0], offset: 1.0)
-  assert_string_payload_field(dash.payload, "kind", "lineDash")
-  assert_array_payload_len(dash.payload, "pattern", 2)
-  assert_f64_payload_field(dash.payload, "offset", 1.0)
-
-  let composite = canvas_composite(CanvasCompositeOperation::Lighter {})
-  assert_string_payload_field(composite.payload, "kind", "composite")
-  assert_string_payload_field(composite.payload, "operation", "lighter")
-
 test "vx typed command constructors encode messages through the boundary":
   let message = Cmd<TypedVxTestMsg>::message(TypedVxTestMsg::Saved {})
   assert_string_payload_field(message.payload, "type", "cmd")
@@ -581,20 +411,6 @@ test "vx typed command constructors encode messages through the boundary":
   assert_string_payload_field(read_clipboard.payload, "kind", "read_clipboard")
   assert_payload_has_field(read_clipboard.payload, "handlerId")
   assert_array_payload_len(read_clipboard.payload, "__vxOwnedMapHandlerIds", 1)
-
-  let measure = Cmd<TypedVxTestMsg>::canvas_measure_text(
-    selector: "#scene",
-    value: "Voyd",
-    font: "600 14px sans-serif",
-    handler: (metrics: CanvasTextMetrics) -> TypedVxTestMsg =>
-      TypedVxTestMsg::Measured { metrics: metrics }
-  )
-  assert_string_payload_field(measure.payload, "type", "cmd")
-  assert_string_payload_field(measure.payload, "kind", "canvas_measure_text")
-  assert_string_payload_field(measure.payload, "selector", "#scene")
-  assert_string_payload_field(measure.payload, "value", "Voyd")
-  assert_payload_has_field(measure.payload, "handlerId")
-  assert_array_payload_len(measure.payload, "__vxOwnedMapHandlerIds", 1)
 
   let task = Task<String> { id: 23 }
   let performed = Cmd<TypedVxTestMsg>::perform<String>(

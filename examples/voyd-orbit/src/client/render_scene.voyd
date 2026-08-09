@@ -9,32 +9,8 @@ use std::math::{ abs, atan2, clamp, floor, max, min, sin, sqrt }
 use std::number::cast::{ format_significant, to_f64, to_string }
 use std::optional::types::all
 use std::string::type::String
-use std::vx::{
-  CanvasCompositeOperation,
-  CanvasDraw,
-  CanvasPathSegment,
-  CanvasPoint,
-  CanvasTextMetrics,
-  Cmd,
-  canvas_circle,
-  canvas_composite,
-  canvas_ellipse,
-  canvas_frame,
-  canvas_line,
-  canvas_line_dash,
-  canvas_path,
-  canvas_path_close,
-  canvas_path_line_to,
-  canvas_path_move_to,
-  canvas_path_rect,
-  canvas_polyline,
-  canvas_radial_gradient,
-  canvas_restore,
-  canvas_rotate,
-  canvas_save,
-  canvas_text,
-  canvas_translate
-}
+use std::vx::Cmd
+use std::vx::canvas::all
 
 type RenderView = {
   width: f64,
@@ -46,7 +22,7 @@ type RenderView = {
 /// Draws the current simulation into the full-screen Orbit canvas.
 pub fn draw<Msg>(model: Model) -> Cmd<Msg>
   let view = render_view(model)
-  let ~draws = Array<CanvasDraw>::with_capacity(
+  let ~draws = Array<Draw>::with_capacity(
     128 + (model.session.simulation.bodies.len() * 12)
   )
   append_spatial_grid(draws, view)
@@ -56,7 +32,7 @@ pub fn draw<Msg>(model: Model) -> Cmd<Msg>
   append_body_adornments(draws, model, view)
   append_placement_preview(draws, model, view)
   append_canvas_title(draws, model, view)
-  Cmd<Msg>::canvas_render(canvas_frame(
+  render<Msg>(frame(
     selector: ".simulation-canvas",
     width: view.width,
     height: view.height,
@@ -68,16 +44,16 @@ pub fn draw<Msg>(model: Model) -> Cmd<Msg>
 /// Measures the canvas title using the same font used by the scene projection.
 pub fn measure_title<Msg>(
   value: String,
-  { handler: fn(CanvasTextMetrics) -> Msg }
+  { handler: fn(TextMetrics) -> Msg }
 ) -> Cmd<Msg>
-  Cmd<Msg>::canvas_measure_text(
+  measure_text<Msg>(
     selector: "#orbit-canvas",
     value: value,
     font: "600 12px Inter, sans-serif",
     handler: handler
   )
 
-fn append_spatial_grid(~draws: Array<CanvasDraw>, view: RenderView) -> void
+fn append_spatial_grid(~draws: Array<Draw>, view: RenderView) -> void
   let major_step_au = adaptive_grid_step(view.pixels_per_au)
   let minor_step_au = major_step_au / 5.0
   let half_width_au = view.width / (2.0 * view.pixels_per_au)
@@ -91,7 +67,7 @@ fn append_spatial_grid(~draws: Array<CanvasDraw>, view: RenderView) -> void
   var line_count = 0
   while x_au <= right_au + minor_step_au and line_count < 256:
     let x = canvas_x(view, x_au)
-    draws.push(canvas_line(
+    draws.push(line(
       from: point(x, 0.0),
       to: point(x, view.height),
       color: "#8da9d4",
@@ -105,7 +81,7 @@ fn append_spatial_grid(~draws: Array<CanvasDraw>, view: RenderView) -> void
   line_count = 0
   while y_au <= bottom_au + minor_step_au and line_count < 256:
     let y = canvas_y(view, y_au)
-    draws.push(canvas_line(
+    draws.push(line(
       from: point(0.0, y),
       to: point(view.width, y),
       color: "#8da9d4",
@@ -119,7 +95,7 @@ fn append_spatial_grid(~draws: Array<CanvasDraw>, view: RenderView) -> void
   line_count = 0
   while x_au <= right_au + major_step_au and line_count < 128:
     let x = canvas_x(view, x_au)
-    draws.push(canvas_line(
+    draws.push(line(
       from: point(x, 0.0),
       to: point(x, view.height),
       color: "#9eb7dd",
@@ -133,7 +109,7 @@ fn append_spatial_grid(~draws: Array<CanvasDraw>, view: RenderView) -> void
   line_count = 0
   while y_au <= bottom_au + major_step_au and line_count < 128:
     let y = canvas_y(view, y_au)
-    draws.push(canvas_line(
+    draws.push(line(
       from: point(0.0, y),
       to: point(view.width, y),
       color: "#9eb7dd",
@@ -145,7 +121,7 @@ fn append_spatial_grid(~draws: Array<CanvasDraw>, view: RenderView) -> void
 
   if left_au <= 0.0 and right_au >= 0.0:
     let origin_x = canvas_x(view, 0.0)
-    draws.push(canvas_line(
+    draws.push(line(
       from: point(origin_x, 0.0),
       to: point(origin_x, view.height),
       color: "#a8c7ed",
@@ -154,7 +130,7 @@ fn append_spatial_grid(~draws: Array<CanvasDraw>, view: RenderView) -> void
     ))
   if top_au <= 0.0 and bottom_au >= 0.0:
     let origin_y = canvas_y(view, 0.0)
-    draws.push(canvas_line(
+    draws.push(line(
       from: point(0.0, origin_y),
       to: point(view.width, origin_y),
       color: "#a8c7ed",
@@ -162,7 +138,7 @@ fn append_spatial_grid(~draws: Array<CanvasDraw>, view: RenderView) -> void
       alpha: 0.13
     ))
 
-fn append_trails(~draws: Array<CanvasDraw>, model: Model, view: RenderView) -> void
+fn append_trails(~draws: Array<Draw>, model: Model, view: RenderView) -> void
   if not model.session.simulation.settings.trails_enabled:
     return void
   var trail_index = 0
@@ -179,7 +155,7 @@ fn append_trails(~draws: Array<CanvasDraw>, model: Model, view: RenderView) -> v
     trail_index = trail_index + 1
 
 fn append_fading_trail(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   model: Model,
   view: RenderView,
   trail: Trail,
@@ -191,14 +167,14 @@ fn append_fading_trail(
   var chunk_start = 0
   while chunk_start < count - 1:
     let chunk_end = min(count - 1, chunk_start + 12)
-    let ~points = Array<CanvasPoint>::with_capacity((chunk_end - chunk_start) + 1)
+    let ~points = Array<Point>::with_capacity((chunk_end - chunk_start) + 1)
     var point_index = chunk_start
     while point_index <= chunk_end:
       points.push(world_to_canvas(view, trail.points_au.at(point_index)))
       point_index = point_index + 1
     let age = to_f64(chunk_end + 1) / to_f64(count)
     let selected_boost = if body_selected(model, body) then: 0.12 else: 0.0
-    draws.push(canvas_polyline(
+    draws.push(polyline(
       points: points,
       color: body.appearance.trail_color,
       width: if body_selected(model, body) then: 1.45 else: 0.9,
@@ -207,7 +183,7 @@ fn append_fading_trail(
     chunk_start = chunk_end
 
 fn append_velocity_vectors(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   model: Model,
   view: RenderView
 ) -> void
@@ -233,7 +209,7 @@ fn append_velocity_vectors(
       )
     index = index + 1
 
-fn append_bodies(~draws: Array<CanvasDraw>, model: Model, view: RenderView) -> void
+fn append_bodies(~draws: Array<Draw>, model: Model, view: RenderView) -> void
   var index = 0
   while index < model.session.simulation.bodies.len():
     let body = model.session.simulation.bodies.at(index)
@@ -254,13 +230,13 @@ fn append_bodies(~draws: Array<CanvasDraw>, model: Model, view: RenderView) -> v
     index = index + 1
 
 fn append_star(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   body: Body,
-  center: CanvasPoint,
+  center: Point,
   radius: f64
 ) -> void
   let glow = 12.0 + (22.0 * clamp(body.appearance.glow_strength, 0.0, 1.0))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: center,
     radius: radius * 2.45,
     fill: body.appearance.secondary_color,
@@ -268,20 +244,20 @@ fn append_star(
     glow_color: body.appearance.primary_color,
     glow_blur: glow
   ))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: center,
     radius: radius,
     alpha: 1.0,
     glow_color: body.appearance.primary_color,
     glow_blur: glow,
-    radial_gradient: canvas_radial_gradient(
+    radial_gradient: radial_gradient(
       inner_color: "#ffffff",
       outer_color: body.appearance.secondary_color,
       inner_radius: radius * 0.08,
       outer_radius: radius
     )
   ))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: point(center.x - (radius * 0.22), center.y - (radius * 0.24)),
     radius: max(1.2, radius * 0.32),
     fill: body.appearance.primary_color,
@@ -289,12 +265,12 @@ fn append_star(
   ))
 
 fn append_planet(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   body: Body,
-  center: CanvasPoint,
+  center: Point,
   radius: f64
 ) -> void
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: center,
     radius: radius * 1.24,
     fill: body.appearance.trail_color,
@@ -302,19 +278,19 @@ fn append_planet(
     glow_color: body.appearance.trail_color,
     glow_blur: 4.0 + (clamp(body.appearance.glow_strength, 0.0, 1.0) * 14.0)
   ))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: center,
     radius: radius,
     stroke: body.appearance.primary_color,
     stroke_width: 0.7,
-    radial_gradient: canvas_radial_gradient(
+    radial_gradient: radial_gradient(
       inner_color: body.appearance.primary_color,
       outer_color: body.appearance.secondary_color,
       inner_radius: 0.0,
       outer_radius: radius
     )
   ))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: point(center.x - (radius * 0.3), center.y - (radius * 0.32)),
     radius: max(0.9, radius * 0.2),
     fill: "#ffffff",
@@ -322,12 +298,12 @@ fn append_planet(
   ))
 
 fn append_moon(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   body: Body,
-  center: CanvasPoint,
+  center: Point,
   radius: f64
 ) -> void
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: center,
     radius: radius,
     fill: body.appearance.primary_color,
@@ -335,13 +311,13 @@ fn append_moon(
     stroke_width: 0.8,
     alpha: 0.96
   ))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: point(center.x - (radius * 0.22), center.y + (radius * 0.08)),
     radius: max(0.65, radius * 0.18),
     fill: body.appearance.secondary_color,
     alpha: 0.38
   ))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: point(center.x + (radius * 0.24), center.y - (radius * 0.24)),
     radius: max(0.45, radius * 0.12),
     fill: body.appearance.secondary_color,
@@ -349,13 +325,13 @@ fn append_moon(
   ))
 
 fn append_asteroid(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   body: Body,
-  center: CanvasPoint,
+  center: Point,
   radius: f64
 ) -> void
   let rotation = sin((body.position_au.x * 17.0) + (body.position_au.y * 31.0)) * 0.72
-  draws.push(canvas_ellipse(
+  draws.push(ellipse(
     center: center,
     radius_x: radius * 1.2,
     radius_y: radius * 0.78,
@@ -365,7 +341,7 @@ fn append_asteroid(
     stroke_width: 0.7,
     alpha: 0.92
   ))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: point(center.x - (radius * 0.22), center.y - (radius * 0.12)),
     radius: max(0.35, radius * 0.11),
     fill: body.appearance.secondary_color,
@@ -373,13 +349,13 @@ fn append_asteroid(
   ))
 
 fn append_black_hole(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   body: Body,
-  center: CanvasPoint,
+  center: Point,
   radius: f64
 ) -> void
   let ring_width = max(1.4, radius * 0.14)
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: center,
     radius: radius * 2.45,
     fill: body.appearance.secondary_color,
@@ -387,7 +363,7 @@ fn append_black_hole(
     glow_color: body.appearance.secondary_color,
     glow_blur: 22.0
   ))
-  draws.push(canvas_ellipse(
+  draws.push(ellipse(
     center: center,
     radius_x: radius * 2.08,
     radius_y: max(2.2, radius * 0.42),
@@ -395,7 +371,7 @@ fn append_black_hole(
     fill: body.appearance.secondary_color,
     alpha: 0.22
   ))
-  draws.push(canvas_ellipse(
+  draws.push(ellipse(
     center: center,
     radius_x: radius * 1.72,
     radius_y: max(1.4, radius * 0.24),
@@ -405,14 +381,14 @@ fn append_black_hole(
     stroke_width: 0.8,
     alpha: 0.72
   ))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: center,
     radius: radius * 1.42,
     stroke: body.appearance.secondary_color,
     stroke_width: 0.8,
     alpha: 0.28
   ))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: center,
     radius: radius,
     fill: "#010107",
@@ -422,7 +398,7 @@ fn append_black_hole(
     glow_color: body.appearance.secondary_color,
     glow_blur: 10.0
   ))
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: center,
     radius: radius * 0.62,
     fill: "#000000",
@@ -430,11 +406,11 @@ fn append_black_hole(
   ))
 
 fn append_body_adornments(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   model: Model,
   view: RenderView
 ) -> void
-  let ~label_positions = Array<CanvasPoint>::init()
+  let ~label_positions = Array<Point>::init()
   var index = 0
   while index < model.session.simulation.bodies.len():
     let body = model.session.simulation.bodies.at(index)
@@ -445,7 +421,7 @@ fn append_body_adornments(
       if selected:
         append_selection_indicator(draws, center, radius)
       if body_followed(model, body):
-        draws.push(canvas_circle(
+        draws.push(circle(
           center: center,
           radius: radius + (if selected then: 12.0 else: 7.0),
           stroke: "#ffd28a",
@@ -458,7 +434,7 @@ fn append_body_adornments(
         if label_on_left:
           label_position = point(center.x - radius - 8.0, center.y + radius + 4.0)
         if selected or label_position_available(label_positions, label_position):
-          draws.push(canvas_text(
+          draws.push(text(
             position: label_position,
             value: body.name,
             color: if selected then: "#f4fbff" else: "#b4c1d7",
@@ -470,7 +446,7 @@ fn append_body_adornments(
           label_positions.push(label_position)
     index = index + 1
 
-fn label_position_available(positions: Array<CanvasPoint>, candidate: CanvasPoint) -> bool
+fn label_position_available(positions: Array<Point>, candidate: Point) -> bool
   var index = 0
   while index < positions.len():
     let existing = positions.at(index)
@@ -480,12 +456,12 @@ fn label_position_available(positions: Array<CanvasPoint>, candidate: CanvasPoin
   true
 
 fn append_selection_indicator(
-  ~draws: Array<CanvasDraw>,
-  center: CanvasPoint,
+  ~draws: Array<Draw>,
+  center: Point,
   radius: f64
 ) -> void
   let ring = radius + 6.0
-  draws.push(canvas_circle(
+  draws.push(circle(
     center: center,
     radius: ring,
     stroke: "#83e7ff",
@@ -499,8 +475,8 @@ fn append_selection_indicator(
   append_tick(draws, from: point(center.x, center.y - ring - 6.0), to: point(center.x, center.y - ring + 1.0))
   append_tick(draws, from: point(center.x, center.y + ring - 1.0), to: point(center.x, center.y + ring + 6.0))
 
-fn append_tick(~draws: Array<CanvasDraw>, { from: CanvasPoint, to: CanvasPoint }) -> void
-  draws.push(canvas_line(
+fn append_tick(~draws: Array<Draw>, { from: Point, to: Point }) -> void
+  draws.push(line(
     from: from,
     to: to,
     color: "#a9f1ff",
@@ -511,7 +487,7 @@ fn append_tick(~draws: Array<CanvasDraw>, { from: CanvasPoint, to: CanvasPoint }
   ))
 
 fn append_placement_preview(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   model: Model,
   view: RenderView
 ) -> void
@@ -521,7 +497,7 @@ fn append_placement_preview(
       let cursor = world_to_canvas(view, cursor_au)
       let radius = preview_radius(kind)
       append_preview_body(draws, kind, origin, radius)
-      draws.push(canvas_circle(
+      draws.push(circle(
         center: origin,
         radius: radius + 7.0,
         stroke: "#8cecff",
@@ -539,7 +515,7 @@ fn append_placement_preview(
         width: 1.4,
         glow_blur: 6.0
       )
-      draws.push(canvas_circle(
+      draws.push(circle(
         center: cursor,
         radius: 2.7,
         fill: "#d9fbff",
@@ -553,7 +529,7 @@ fn append_placement_preview(
       let speed_label = unwrap_or(format_significant(speed, digits: 6), to_string(speed))
       let release_hint = "Release · ".concat(speed_label).concat(" AU/day")
       let hint = if drag_pixels < 7.0 then: "Drag to set initial velocity" else: release_hint
-      draws.push(canvas_text(
+      draws.push(text(
         position: point(cursor.x + 12.0, cursor.y - 12.0),
         value: hint,
         color: "#d9f8ff",
@@ -565,7 +541,7 @@ fn append_placement_preview(
       void
 
 fn append_canvas_title(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   model: Model,
   view: RenderView
 ) -> void
@@ -575,25 +551,25 @@ fn append_canvas_title(
   let box_height = 30.0
   let x = max(16.0, view.width - box_width - 24.0)
   let y = max(16.0, view.height - box_height - 24.0)
-  let ~box_segments = Array<CanvasPathSegment>::with_capacity(2)
-  box_segments.push(canvas_path_rect(
+  let ~box_segments = Array<PathSegment>::with_capacity(2)
+  box_segments.push(path_rect(
     origin: point(0.0, 0.0),
     width: box_width,
     height: box_height
   ))
-  box_segments.push(canvas_path_close())
+  box_segments.push(path_close())
 
-  draws.push(canvas_save())
-  draws.push(canvas_translate(x: x, y: y))
-  draws.push(canvas_composite(CanvasCompositeOperation::SourceOver {}))
-  draws.push(canvas_path(
+  draws.push(save())
+  draws.push(translate(x: x, y: y))
+  draws.push(composite(CompositeOperation::SourceOver {}))
+  draws.push(path(
     segments: box_segments,
     fill: "rgba(7, 14, 27, 0.72)",
     stroke: "rgba(132, 218, 255, 0.28)",
     stroke_width: 0.8,
     alpha: 0.95
   ))
-  draws.push(canvas_text(
+  draws.push(text(
     position: point(12.0, 14.0),
     value: model.session.name,
     color: "#cceeff",
@@ -602,12 +578,12 @@ fn append_canvas_title(
     alpha: 0.88,
     max_width: title_width
   ))
-  draws.push(canvas_line_dash(pattern: [4.0, 3.0], offset: 0.0))
-  draws.push(canvas_composite(CanvasCompositeOperation::Lighter {}))
-  draws.push(canvas_path(
+  draws.push(line_dash(pattern: [4.0, 3.0], offset: 0.0))
+  draws.push(composite(CompositeOperation::Lighter {}))
+  draws.push(path(
     segments: [
-      canvas_path_move_to(point(12.0, box_height - 5.0)),
-      canvas_path_line_to(point(12.0 + title_width, box_height - 5.0))
+      path_move_to(point(12.0, box_height - 5.0)),
+      path_line_to(point(12.0 + title_width, box_height - 5.0))
     ],
     stroke: "#5edcff",
     stroke_width: 0.8,
@@ -615,43 +591,43 @@ fn append_canvas_title(
     glow_color: "#42d5ff",
     glow_blur: 4.0
   ))
-  draws.push(canvas_restore())
+  draws.push(restore())
 
 fn append_preview_body(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   kind: BodyKind,
-  center: CanvasPoint,
+  center: Point,
   radius: f64
 ) -> void
   match(kind)
     BodyKind::Star:
-      draws.push(canvas_circle(
+      draws.push(circle(
         center: center,
         radius: radius,
         alpha: 0.82,
         glow_color: "#ffd279",
         glow_blur: 18.0,
-        radial_gradient: canvas_radial_gradient(
+        radial_gradient: radial_gradient(
           inner_color: "#ffffff",
           outer_color: "#f2a447",
           outer_radius: radius
         )
       ))
     BodyKind::Planet:
-      draws.push(canvas_circle(
+      draws.push(circle(
         center: center,
         radius: radius,
         stroke: "#a6ddff",
         stroke_width: 0.8,
         alpha: 0.82,
-        radial_gradient: canvas_radial_gradient(
+        radial_gradient: radial_gradient(
           inner_color: "#7fd1ff",
           outer_color: "#31558c",
           outer_radius: radius
         )
       ))
     BodyKind::Moon:
-      draws.push(canvas_circle(
+      draws.push(circle(
         center: center,
         radius: radius,
         fill: "#cbd4e0",
@@ -660,7 +636,7 @@ fn append_preview_body(
         alpha: 0.82
       ))
     BodyKind::Asteroid:
-      draws.push(canvas_ellipse(
+      draws.push(ellipse(
         center: center,
         radius_x: radius * 1.2,
         radius_y: radius * 0.74,
@@ -671,7 +647,7 @@ fn append_preview_body(
         alpha: 0.82
       ))
     BodyKind::BlackHole:
-      draws.push(canvas_ellipse(
+      draws.push(ellipse(
         center: center,
         radius_x: radius * 1.8,
         radius_y: radius * 0.34,
@@ -679,7 +655,7 @@ fn append_preview_body(
         fill: "#e89d59",
         alpha: 0.36
       ))
-      draws.push(canvas_circle(
+      draws.push(circle(
         center: center,
         radius: radius,
         fill: "#010107",
@@ -691,10 +667,10 @@ fn append_preview_body(
       ))
 
 fn append_arrow(
-  ~draws: Array<CanvasDraw>,
+  ~draws: Array<Draw>,
   {
-    from: CanvasPoint,
-    to: CanvasPoint,
+    from: Point,
+    to: Point,
     color: String,
     alpha: f64,
     width: f64,
@@ -706,22 +682,22 @@ fn append_arrow(
   let length = sqrt((dx * dx) + (dy * dy))
   if length <= 0.0:
     return void
-  let ~segments = Array<CanvasPathSegment>::with_capacity(6)
-  segments.push(canvas_path_move_to(point(0.0, 0.0)))
-  segments.push(canvas_path_line_to(point(length, 0.0)))
+  let ~segments = Array<PathSegment>::with_capacity(6)
+  segments.push(path_move_to(point(0.0, 0.0)))
+  segments.push(path_line_to(point(length, 0.0)))
   if length >= 7.0:
     let head_length = clamp(length * 0.18, 6.0, 10.0)
     let wing = head_length * 0.48
-    segments.push(canvas_path_move_to(point(length, 0.0)))
-    segments.push(canvas_path_line_to(point(length - head_length, wing)))
-    segments.push(canvas_path_move_to(point(length, 0.0)))
-    segments.push(canvas_path_line_to(point(length - head_length, 0.0 - wing)))
+    segments.push(path_move_to(point(length, 0.0)))
+    segments.push(path_line_to(point(length - head_length, wing)))
+    segments.push(path_move_to(point(length, 0.0)))
+    segments.push(path_line_to(point(length - head_length, 0.0 - wing)))
 
-  draws.push(canvas_save())
-  draws.push(canvas_translate(x: from.x, y: from.y))
-  draws.push(canvas_rotate(atan2(dy, dx)))
-  draws.push(canvas_composite(CanvasCompositeOperation::Lighter {}))
-  draws.push(canvas_path(
+  draws.push(save())
+  draws.push(translate(x: from.x, y: from.y))
+  draws.push(rotate(atan2(dy, dx)))
+  draws.push(composite(CompositeOperation::Lighter {}))
+  draws.push(path(
     segments: segments,
     stroke: color,
     stroke_width: width,
@@ -729,7 +705,7 @@ fn append_arrow(
     glow_color: color,
     glow_blur: glow_blur
   ))
-  draws.push(canvas_restore())
+  draws.push(restore())
 
 fn render_view(model: Model) -> RenderView
   {
@@ -801,7 +777,7 @@ fn body_followed(model: Model, body: Body) -> bool
     None:
       false
 
-fn world_to_canvas(view: RenderView, world: Vec2) -> CanvasPoint
+fn world_to_canvas(view: RenderView, world: Vec2) -> Point
   point(
     (view.width * 0.5) + ((world.x - view.center_au.x) * view.pixels_per_au),
     (view.height * 0.5) + ((world.y - view.center_au.y) * view.pixels_per_au)
@@ -813,15 +789,15 @@ fn canvas_x(view: RenderView, world_x_au: f64) -> f64
 fn canvas_y(view: RenderView, world_y_au: f64) -> f64
   (view.height * 0.5) + ((world_y_au - view.center_au.y) * view.pixels_per_au)
 
-fn point(x: f64, y: f64) -> CanvasPoint
-  CanvasPoint { x, y }
+fn point(x: f64, y: f64) -> Point
+  Point { x, y }
 
-fn canvas_distance(left: CanvasPoint, right: CanvasPoint) -> f64
+fn canvas_distance(left: Point, right: Point) -> f64
   let dx = right.x - left.x
   let dy = right.y - left.y
   sqrt((dx * dx) + (dy * dy))
 
-fn point_visible(point: CanvasPoint, view: RenderView, margin: f64) -> bool
+fn point_visible(point: Point, view: RenderView, margin: f64) -> bool
   point.x >= 0.0 - margin and
     point.x <= view.width + margin and
     point.y >= 0.0 - margin and

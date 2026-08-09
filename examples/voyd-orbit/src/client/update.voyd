@@ -61,7 +61,8 @@ use std::optional::types::all
 use std::result::types::all
 use std::string::type::String
 use std::task::self as tasks
-use std::vx::{ CanvasTextMetrics, Cmd, Program, next }
+use std::vx::{ Cmd, Program, next }
+use std::vx::canvas::TextMetrics
 
 pub enum Msg
   AnimationTick { timestamp_millis: f64 }
@@ -70,7 +71,7 @@ pub enum Msg
   PointerMoved { pointer_id: i32, x: f64, y: f64 }
   PointerReleased { pointer_id: i32, x: f64, y: f64 }
   PointerCancelled { pointer_id: i32 }
-  CanvasTitleMeasured { metrics: CanvasTextMetrics }
+  CanvasTitleMeasured { metrics: TextMetrics }
   WheelZoomed { x: f64, y: f64, delta_y: f64 }
   KeyPressed { key: String }
   TogglePlayback
@@ -142,7 +143,7 @@ pub fn step(model: Model, message: Msg): (http_client::HttpClient, tasks::TaskRu
         model: updated,
         cmd: render_scene::measure_title<Msg>(
           updated.session.name,
-          handler: (metrics: CanvasTextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
+          handler: (metrics: TextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
         )
       )
     Msg::ChooseBodyTool { kind }:
@@ -167,7 +168,7 @@ pub fn step(model: Model, message: Msg): (http_client::HttpClient, tasks::TaskRu
         model: updated,
         cmd: render_scene::measure_title<Msg>(
           updated.session.name,
-          handler: (metrics: CanvasTextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
+          handler: (metrics: TextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
         )
       )
     Msg::BodyNameChanged { value }:
@@ -618,7 +619,7 @@ fn load_finished(model: Model, result: SimulationResult) -> Program<Model, Msg>
         model: updated,
         cmd: render_scene::measure_title<Msg>(
           updated.session.name,
-          handler: (metrics: CanvasTextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
+          handler: (metrics: TextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
         )
       )
 

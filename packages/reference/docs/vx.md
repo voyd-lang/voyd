@@ -464,7 +464,7 @@ returned `JsonValue` into the boundary-safe application type your API expects.
 The built-in commands cover common browser work:
 
 - Flow: `Cmd.none`, `Cmd.message`, `Cmd.delay`, `Cmd.batch`, and `Cmd.task`.
-- Canvas: `canvas_render` and `canvas_measure_text`.
+- Canvas: `canvas::render` and `canvas::measure_text`.
 - Clipboard: `copy_to_clipboard` and `read_clipboard`.
 - Document and history: `set_document_title`, `push_url`, `replace_url`,
   `set_hash`, `navigate_back`, `navigate_forward`, and `open_url`.
@@ -491,37 +491,38 @@ Most applications should use `Cmd.task`.
 ## Canvas Rendering And Interaction
 
 VX Canvas keeps scene construction in Voyd and browser details in the runtime.
-Build a `CanvasFrame` from typed draw operations, then return
-`Cmd::canvas_render(frame)` from `init` or `step`:
+Build a `canvas::Frame` from typed draw operations, then return
+`canvas::render(frame)` from `init` or `step`:
 
 ```voyd
 use std::array::Array
 use std::vx::all
+use std::vx::canvas::self as canvas
 
 fn draw_scene() -> Cmd<Msg>
-  let arrow = canvas_path(
+  let arrow = canvas::path(
     segments: [
-      canvas_path_move_to(CanvasPoint { x: 0.0, y: 0.0 }),
-      canvas_path_line_to(CanvasPoint { x: 80.0, y: 0.0 }),
-      canvas_path_line_to(CanvasPoint { x: 70.0, y: -6.0 }),
-      canvas_path_move_to(CanvasPoint { x: 80.0, y: 0.0 }),
-      canvas_path_line_to(CanvasPoint { x: 70.0, y: 6.0 })
+      canvas::path_move_to(canvas::Point { x: 0.0, y: 0.0 }),
+      canvas::path_line_to(canvas::Point { x: 80.0, y: 0.0 }),
+      canvas::path_line_to(canvas::Point { x: 70.0, y: -6.0 }),
+      canvas::path_move_to(canvas::Point { x: 80.0, y: 0.0 }),
+      canvas::path_line_to(canvas::Point { x: 70.0, y: 6.0 })
     ],
     stroke: "#77ddff",
     stroke_width: 2.0
   )
-  Cmd<Msg>::canvas_render(canvas_frame(
+  canvas::render<Msg>(canvas::frame(
     selector: "#scene",
     width: 800.0,
     height: 450.0,
     draws: [
-      canvas_save(),
-      canvas_translate(x: 120.0, y: 90.0),
-      canvas_rotate(0.35),
-      canvas_line_dash(pattern: [6.0, 3.0]),
-      canvas_composite(CanvasCompositeOperation::Lighter {}),
+      canvas::save(),
+      canvas::translate(x: 120.0, y: 90.0),
+      canvas::rotate(0.35),
+      canvas::line_dash(pattern: [6.0, 3.0]),
+      canvas::composite(canvas::CompositeOperation::Lighter {}),
       arrow,
-      canvas_restore()
+      canvas::restore()
     ]
   ))
 ```
@@ -547,19 +548,19 @@ metrics in the model, then use them in a later frame:
 
 ```voyd
 enum Msg
-  TitleMeasured { metrics: CanvasTextMetrics }
+  TitleMeasured { metrics: canvas::TextMetrics }
 
 fn measure_title(title: String) -> Cmd<Msg>
-  Cmd<Msg>::canvas_measure_text(
+  canvas::measure_text<Msg>(
     selector: "#scene",
     value: title,
     font: "600 14px sans-serif",
-    handler: (metrics: CanvasTextMetrics) -> Msg =>
+    handler: (metrics: canvas::TextMetrics) -> Msg =>
       Msg::TitleMeasured { metrics }
   )
 ```
 
-`canvas_frame` emits wire version 2 because paths and ordered state operations
+`canvas::frame` emits wire version 2 because paths and ordered state operations
 expand the version-1 draw grammar. The browser host continues to accept and
 validate version-1 frames containing lines, polylines, circles, ellipses, and
 text. It accepts the expanded grammar only in version 2. Additive optional
