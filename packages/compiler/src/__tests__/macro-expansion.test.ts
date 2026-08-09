@@ -158,6 +158,84 @@ pub src::base_macros::all
     expect((instance.exports.main as () => number)()).toBe(3);
   });
 
+  it("imports a macro through a public ordinary module in an installed package", async () => {
+    const root = resolve("/proj/src");
+    const pkgDir = resolve("/proj/node_modules");
+    const packageRoot = `${pkgDir}${sep}macros${sep}src`;
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use pkg::macros::dsl::serve
+use pkg::macros::dsl::{ serve as serve_alias }
+
+pub fn main() -> f64
+  serve(40.0) + serve_alias(1.0)
+`,
+      [`${packageRoot}${sep}pkg.voyd`]: `
+pub src::dsl
+pub use src::dsl::serve
+`,
+      [`${packageRoot}${sep}dsl.voyd`]: `
+pub macro serve(value)
+  syntax_template (+ $value 1.0)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: mainPath,
+        roots: { src: root, pkgDirs: [pkgDir] },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(43);
+  });
+
+  it("keeps macros in non-exported modules and non-pub macros hidden", async () => {
+    const root = resolve("/proj/src");
+    const pkgDir = resolve("/proj/node_modules");
+    const packageRoot = `${pkgDir}${sep}macros${sep}src`;
+    const mainPath = `${root}${sep}main.voyd`;
+    const host = createMemoryHost({
+      [mainPath]: `
+use pkg::macros::dsl::internal
+use pkg::macros::private::hidden
+`,
+      [`${packageRoot}${sep}pkg.voyd`]: `
+pub src::dsl
+pub use src::dsl::serve
+`,
+      [`${packageRoot}${sep}dsl.voyd`]: `
+pub macro serve(value)
+  syntax_template (+ $value 1.0)
+
+macro internal(value)
+  syntax_template (+ $value 1.0)
+`,
+      [`${packageRoot}${sep}private.voyd`]: `
+pub macro hidden(value)
+  syntax_template (+ $value 1.0)
+`,
+    });
+
+    const result = await compileProgram({
+      entryPath: mainPath,
+      roots: { src: root, pkgDirs: [pkgDir] },
+      host,
+    });
+
+    expect(result.success).toBe(false);
+    if (result.success) {
+      throw new Error("Expected hidden macros to fail compilation");
+    }
+    const messages = result.diagnostics.map((diagnostic) => diagnostic.message);
+    expect(messages).toContainEqual(expect.stringContaining("Macro internal"));
+    expect(messages).toContainEqual(
+      expect.stringContaining("Cannot import hidden"),
+    );
+  });
+
   it("preserves inline pkg scope when re-exporting macros from nested pkg.voyd", async () => {
     const root = resolve("/proj/src");
     const mainPath = `${root}${sep}main.voyd`;

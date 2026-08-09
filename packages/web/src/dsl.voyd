@@ -1,0 +1,250 @@
+//! Route-serving DSL and its definition-site helpers.
+
+use std::http::Method
+use super::openapi::expose as expose_openapi
+use super::router::{ AppBuild, app, serve_app, serve_build }
+use super::routes::{
+  adopt,
+  group,
+  method_not_allowed,
+  not_found,
+  on_error,
+  on_rejection,
+  route,
+  route_context,
+  route_cookies,
+  route_cookies_context,
+  route_headers,
+  route_headers_context,
+  route_params,
+  route_params_context,
+  route_params_headers,
+  route_params_headers_context,
+  route_params_query,
+  route_params_query_context,
+  route_params_query_headers,
+  route_params_query_headers_context,
+  route_query_context,
+  route_query_headers_context,
+  route_unit
+}
+
+fn get_method() -> Method
+  Method::Get {}
+
+fn post_method() -> Method
+  Method::Post {}
+
+fn put_method() -> Method
+  Method::Put {}
+
+fn patch_method() -> Method
+  Method::Patch {}
+
+fn delete_method() -> Method
+  Method::Delete {}
+
+pub macro serve(first, second)
+  let all_args = body
+  let app_ref = symbol_reference(app)
+  let serve_app_ref = symbol_reference(serve_app)
+  let serve_build_ref = symbol_reference(serve_build)
+  let routes_arg = all_args.get(all_args.length - 1)
+  let fallback = () =>
+    if
+      is_list(first) and first.calls(:):
+        `($serve_build_ref($$all_args))
+      else:
+        `($serve_app_ref($$all_args))
+  if is_list(routes_arg) and routes_arg.calls(:):
+    let routes_callback = routes_arg.get(2)
+    if is_list(routes_callback) and routes_callback.calls(=>):
+      let callback_params = routes_callback.get(1)
+      if is_list(callback_params) and callback_params.length == 0:
+        let serve_args = all_args.slice(0, all_args.length - 1)
+        let is_openapi_arg = (arg) =>
+          is_list(arg) and arg.calls(:) and arg.get(1) == openapi
+        let openapi_arg_count = serve_args.reduce(0, (count, arg) =>
+          if is_openapi_arg(arg): count + 1 else: count
+        )
+        if openapi_arg_count > 1:
+          panic("serve accepts only one openapi argument")
+        let forwarded_serve_args = serve_args.reduce(`(), (args, arg) =>
+          if is_openapi_arg(arg): args else: args.push(arg)
+        )
+        let initial_app = serve_args.reduce(`($app_ref()), (current, arg) =>
+          if is_openapi_arg(arg):
+            `($app_ref(openapi: $(arg.get(2))))
+          else:
+            current
+        )
+        let get_method_ref = symbol_reference(get_method)
+        let post_method_ref = symbol_reference(post_method)
+        let put_method_ref = symbol_reference(put_method)
+        let patch_method_ref = symbol_reference(patch_method)
+        let delete_method_ref = symbol_reference(delete_method)
+        let expose_openapi_ref = symbol_reference(expose_openapi)
+        let invalid_handler = () =>
+          panic("web route handler extractor parameters must be named params, query, headers, cookies, and optional final ctx")
+        let query_requires_context = () =>
+          panic("web query-only route handlers must include a final ctx parameter in Phase 1; use do(query: Query, ctx: Context): ...")
+        let handler_param_count = (handler) =>
+          if is_list(handler) and handler.calls(=>):
+            let handler_params = handler.get(1)
+            if
+              not is_list(handler_params): 0
+              handler_params.length == 0: 0
+              handler_params.calls(:) and handler_params.length == 3: 1
+              else: handler_params.length
+          else:
+            -1
+        let handler_param_at = (handler, index) =>
+          if is_list(handler) and handler.calls(=>):
+            let handler_params = handler.get(1)
+            if
+              not is_list(handler_params): void
+              handler_params.calls(:) and handler_params.length == 3 and index == 0: handler_params
+              handler_params.calls(:) and handler_params.length == 3: void
+              else: handler_params.get(index)
+          else:
+            void
+        let handler_param_name_at = (handler, index) =>
+          let param = handler_param_at(handler, index)
+          if
+            is_list(param) and param.calls(:): param.get(1)
+            else: param
+        let handler_has_final_ctx = (handler) =>
+          let count = handler_param_count(handler)
+          if
+            count > 0: handler_param_name_at(handler, count - 1) == ctx
+            else: false
+        let route_extractor_name = (first, second, third, extraction_count, final_ctx) =>
+          if
+            extraction_count == 1 and first == params:
+              if final_ctx then: symbol_reference(route_params_context) else: symbol_reference(route_params)
+            extraction_count == 1 and first == query:
+              if final_ctx then: symbol_reference(route_query_context) else: query_requires_context()
+            extraction_count == 1 and first == headers:
+              if final_ctx then: symbol_reference(route_headers_context) else: symbol_reference(route_headers)
+            extraction_count == 1 and first == cookies:
+              if final_ctx then: symbol_reference(route_cookies_context) else: symbol_reference(route_cookies)
+            extraction_count == 2 and first == params and second == query:
+              if final_ctx then: symbol_reference(route_params_query_context) else: symbol_reference(route_params_query)
+            extraction_count == 2 and first == params and second == headers:
+              if final_ctx then: symbol_reference(route_params_headers_context) else: symbol_reference(route_params_headers)
+            extraction_count == 2 and first == query and second == headers:
+              if final_ctx then: symbol_reference(route_query_headers_context) else: symbol_reference(route_query_headers)
+            extraction_count == 3 and first == params and second == query and third == headers:
+              if final_ctx then: symbol_reference(route_params_query_headers_context) else: symbol_reference(route_params_query_headers)
+            else:
+              invalid_handler()
+        let route_helper_for = (handler) =>
+          let count = handler_param_count(handler)
+          let final_ctx = handler_has_final_ctx(handler)
+          if
+            count == 0:
+              symbol_reference(route_unit)
+            count == 1 and final_ctx:
+              symbol_reference(route_context)
+            else:
+              let extraction_count =
+                if
+                  final_ctx: count - 1
+                  else: count
+              route_extractor_name(
+                handler_param_name_at(handler, 0),
+                handler_param_name_at(handler, 1),
+                handler_param_name_at(handler, 2),
+                extraction_count,
+                final_ctx
+              )
+        let is_route_extractor_param = (name) =>
+          name == params or name == query or name == headers or name == cookies or name == ctx
+        let should_infer_method_route = (args, handler) =>
+          args.length == 1 or handler_param_count(handler) == 0 or is_route_extractor_param(handler_param_name_at(handler, 0))
+        let should_infer_manual_route = (args, handler) =>
+          args.length <= 2 or handler_param_count(handler) == 0 or is_route_extractor_param(handler_param_name_at(handler, 0))
+        let lower_method_route = (builder, statement, method_expr) =>
+          let name = statement.get(0)
+          let path = statement.get(1)
+          let args = statement.slice(2)
+          let handler = statement.get(statement.length - 1)
+          if
+            should_infer_method_route(args, handler):
+              let helper = route_helper_for(handler)
+              `($helper $builder ($path).as_slice() method: $method_expr $$args)
+            else:
+              `($name $builder ($path).as_slice() $$args)
+        let lower_manual_route = (builder, statement) =>
+          let path = statement.get(1)
+          let args = statement.slice(2)
+          let handler = statement.get(statement.length - 1)
+          if
+            should_infer_manual_route(args, handler):
+              let helper = route_helper_for(handler)
+              `($helper $builder ($path).as_slice() $$args)
+            else:
+              `(route $builder ($path).as_slice() $$args)
+        let lower_group = (builder, statement) =>
+          let prefix = statement.get(1)
+          let group_routes_arg = statement.get(2)
+          if is_list(group_routes_arg) and group_routes_arg.calls(:):
+            let group_callback = group_routes_arg.get(2)
+            if is_list(group_callback) and group_callback.calls(=>):
+              let group_params = group_callback.get(1)
+              if is_list(group_params) and group_params.length == 0:
+                let group_body = group_callback.get(2)
+                let group_statements = group_body.slice(1)
+                `(group $builder ($prefix).as_slice() routes: (child: AppBuild) -> AppBuild =>
+                  $(build_routes(`(child), group_statements))
+                )
+              else:
+                `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
+            else:
+              `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
+          else:
+            `(group $builder ($prefix).as_slice() $$((statement.slice(2))))
+        let build_routes = (initial, route_statements) =>
+          route_statements.reduce(initial, (builder, statement) =>
+            let statement_name = statement.get(0)
+            if
+              statement_name == adopt:
+                let args = statement.slice(1)
+                `(adopt $builder $$args)
+              statement_name == not_found or statement_name == method_not_allowed or statement_name == on_error or statement_name == on_rejection:
+                let args = statement.slice(1)
+                let name = statement.get(0)
+                `($name $builder $$args)
+              statement_name == group:
+                lower_group(builder, statement)
+              statement_name == get:
+                lower_method_route(builder, statement, `($get_method_ref()))
+              statement_name == post:
+                lower_method_route(builder, statement, `($post_method_ref()))
+              statement_name == put:
+                lower_method_route(builder, statement, `($put_method_ref()))
+              statement_name == patch:
+                lower_method_route(builder, statement, `($patch_method_ref()))
+              statement_name == delete:
+                lower_method_route(builder, statement, `($delete_method_ref()))
+              statement_name == route:
+                lower_manual_route(builder, statement)
+              statement_name == expose_openapi:
+                let args = statement.slice(1)
+                `($expose_openapi_ref $builder $$args)
+              else:
+                let name = statement.get(0)
+                let path = statement.get(1)
+                let args = statement.slice(2)
+                `($name $builder ($path).as_slice() $$args)
+          )
+        let route_body = routes_callback.get(2)
+        let statements = route_body.slice(1)
+        let app_expr = build_routes(initial_app, statements)
+        `($serve_app_ref($app_expr, $$forwarded_serve_args))
+      else:
+        fallback()
+    else:
+      fallback()
+  else:
+    fallback()

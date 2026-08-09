@@ -56,7 +56,7 @@ migration.
 | Derived structural shapes | Duplicate union discriminator names and other unsupported or ambiguous shapes fail compilation through the shared shape derivation used by `shape_of`, typed MessagePack, typed JSON, and Web query extraction. MessagePack field and variant spelling is now an explicit wire contract. | Give every union variant a distinct declared name, remove unsupported functions/private fields from DTOs, avoid `tag`/`$variant` variant payload fields, and version intentional wire renames. |
 | JSON decoding | New `decode<T>` is strict by default and rejects unknown fields. | Use `permissive_decode_options()` only where forward-compatible unknown fields are intentional. Existing `parse` and `stringify` remain available. |
 | Modules/packages | `foo.voyd` and `foo/pkg.voyd` cannot both claim logical module `foo`. Nested package internals are hidden across the package boundary. | Keep the ordinary file as the facade or replace it with the nested package; re-export external API from `pkg.voyd`. |
-| Web package | The legacy child module physically represented by `src/all.voyd` is no longer re-exported, and the public route-DSL `serve` macro is owned by the Web package root. | Import `serve` from `pkg::web` directly or through the still-valid `use pkg::web::all` root selection; do not import the route-DSL macro from `pkg::web::router`. |
+| Web package | The public route-DSL `serve` macro is now owned by `pkg::web::dsl` and re-exported from the package root. | Import `serve` from `pkg::web` directly, through `use pkg::web::all`, or explicitly from `pkg::web::dsl`; do not import the route-DSL macro from `pkg::web::router`. |
 | VX Canvas | `canvas_frame` now emits wire version 2. `CanvasPathSegment`, `CanvasDraw`, and `CanvasRadialGradient` cannot be constructed externally with raw object literals because they contain private typed caches. | Build values with the public constructors. Hosts that accept frames must accept v2 for the expanded grammar; the bundled host still reads legacy v1 frames. |
 | VX events | Voyd `MouseEvent` and TypeScript `MouseEventPayload` gain required `pointer_id`; TypeScript `EventOptions` gains `pointerCapture?`. | Add `pointer_id` when constructing or destructuring event fixtures. Non-pointer mouse, wheel, and drag events use `0`. |
 | Host adapters | A custom `randomBytes` hook must return a `Uint8Array` of exactly the requested length. `NodeFsPromises.writeFile` must permit an optional `{ flag?: string }`. | Update mocks and adapters; do not return oversized entropy buffers expecting truncation. |
@@ -919,12 +919,9 @@ let result = extract_query<SearchQuery>(query)
 same validation without decoding; `decode_query` is the unchecked companion and
 can panic when used on invalid input.
 
-The Web package root no longer contains `pub src::all`, so the legacy child
-module backed by `src/all.voyd` is not part of the public package surface. This
-does not remove the language's `all` selection: `use pkg::web::all` remains
-valid and selects the curated exports of the package root. Consumers may also
-select those exports individually. The public route-building macro is now owned
-by the package root:
+`all` is a language selection operator, so `use pkg::web::all` remains valid
+and selects the curated exports of the package root. The public route-building
+macro is owned by `pkg::web::dsl` and re-exported from the package root:
 
 ```voyd
 pub macro serve(first, second)
@@ -933,9 +930,11 @@ pub macro serve(first, second)
 Its call syntax is unchanged. It still accepts an app/build form or a route DSL,
 infers route helpers from handler parameters named `params`, `query`, `headers`,
 `cookies`, and optional final `ctx`, accepts at most one `openapi:` argument,
-and delegates to `serve_app` or `serve_build`. The implementation now uses
+and delegates to `serve_app` or `serve_build`. The implementation uses
 definition-site symbol references, so caller names cannot capture its router,
-method, extractor, or OpenAPI helpers. Import and call it from `pkg::web::serve`.
+method, extractor, or OpenAPI helpers. Import and call it from `pkg::web::serve`
+for the convenient path, or from `pkg::web::dsl::serve` for the explicit DSL
+namespace.
 
 ```voyd
 use pkg::web::{ Context, Response, serve }
@@ -1547,9 +1546,9 @@ Before adopting this branch:
    and add `pointer_id` to event fixtures.
 4. Remove `foo.voyd`/`foo/pkg.voyd` path collisions and expose nested-package API
    through `pkg.voyd` with `api` members where needed.
-5. Stop importing the legacy Web child module or router-owned route-DSL macro;
-   import from the curated package root, either explicitly or with the valid
-   `use pkg::web::all` selection.
+5. Stop importing the router-owned route-DSL macro; import `serve` from
+   `pkg::web`, the valid `use pkg::web::all` selection, or the explicit
+   `pkg::web::dsl` namespace.
 6. Treat derived MessagePack field/variant spelling as wire schema and choose
    strict or permissive JSON decoding intentionally.
 7. Update host random hooks and filesystem mocks to the exact contracts above.

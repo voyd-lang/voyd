@@ -207,6 +207,30 @@ pub macro call_private_helper(value)
 `symbol_reference` captures the macro definition's declaration, rather than a
 same-named caller declaration.
 
+### Web route DSL ownership
+
+The Web route DSL is implemented by the public ordinary module
+`pkg::web::dsl`. Its
+`serve` macro is re-exported from `pkg::web` for the concise import path, while
+the ordinary `router::serve` function overloads remain available from the
+package root. This keeps macro-owned definition-site helpers separate from the
+package facade without creating a `router`/`routes` dependency cycle.
+
+```voyd
+use pkg::web::{ get, serve }
+use pkg::web::dsl::{ serve as dsl_serve }
+
+serve(port: 3000) routes():
+  get("/") do:
+    "root".as_slice().to_string()
+
+dsl_serve(port: 3001) routes():
+  get("/health") do:
+    "ok".as_slice().to_string()
+```
+
+`pkg::web::router::serve` is not the route-DSL macro entrypoint.
+
 ## V-487 — Atomic filesystem persistence and portable errors
 
 `std::fs` adds overloaded `write_atomic(path, contents)` and

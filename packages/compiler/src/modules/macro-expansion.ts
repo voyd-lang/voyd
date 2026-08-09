@@ -21,6 +21,7 @@ import {
   type SurfaceModuleItem,
 } from "../parser/surface/index.js";
 import { requireModuleHeader } from "./views.js";
+import { isPubliclyExportedOrdinaryModule } from "./package-visibility.js";
 
 export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] =>
   createModuleMacroExpander().expand(graph).diagnostics;
@@ -755,8 +756,9 @@ const canImportMacroExports = ({
     return true;
   }
   return (
-    exporter.origin.kind === "file" &&
-    exporter.path.segments.at(-1) === "pkg"
+    (exporter.origin.kind === "file" &&
+      exporter.path.segments.at(-1) === "pkg") ||
+    isPubliclyExportedOrdinaryModule({ module: exporter, graph })
   );
 };
 

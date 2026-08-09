@@ -65,6 +65,7 @@ import {
   requireModuleSurface,
 } from "../../../modules/views.js";
 import { resolveNominalTypeSymbol } from "../../nominal-type-target.js";
+import { isPubliclyExportedOrdinaryModule } from "../../../modules/package-visibility.js";
 
 export const bindModule = (
   surface: SurfaceModuleView,
@@ -1656,7 +1657,11 @@ const bindImportsFromExportTable = ({
       moduleId,
       ctx,
       explicitlyTargetsStdSubmodule,
-    })
+    }) &&
+    !(
+      isMacroExportedFromModule({ moduleId, targetName, ctx }) &&
+      isPubliclyExportedMacroModule({ moduleId, ctx })
+    )
   ) {
     recordOutOfScopeExportDiagnostic({
       exported,
@@ -1776,7 +1781,13 @@ const bindImportsFromExportSurface = ({
     return [];
   }
 
-  if (!isAccessible(exported)) {
+  if (
+    !isAccessible(exported) &&
+    !(
+      isMacroExportedFromModule({ moduleId, targetName, ctx }) &&
+      isPubliclyExportedMacroModule({ moduleId, ctx })
+    )
+  ) {
     recordOutOfScopeExportDiagnostic({
       exported,
       moduleId,
@@ -1950,6 +1961,7 @@ const recordMacroBoundaryDiagnostic = ({
     !module ||
     module.path.namespace === "std" ||
     modulePackageId(module) === ctx.packageId ||
+    isPubliclyExportedMacroModule({ moduleId, ctx }) ||
     isPackageRootModule(module.path, {
       sourcePackageRoot: module.sourcePackageRoot,
     })
@@ -1972,6 +1984,20 @@ const recordMacroBoundaryDiagnostic = ({
     span,
     ctx,
   });
+};
+
+const isPubliclyExportedMacroModule = ({
+  moduleId,
+  ctx,
+}: {
+  moduleId: string;
+  ctx: BindingContext;
+}): boolean => {
+  const module = ctx.graph.modules.get(moduleId);
+  return (
+    module !== undefined &&
+    isPubliclyExportedOrdinaryModule({ module, graph: ctx.graph })
+  );
 };
 
 const recordOutOfScopeExportDiagnostic = ({

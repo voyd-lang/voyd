@@ -881,4 +881,38 @@ fn invalid_route_dsl()
       "web route handler extractor parameters must be named params, query, headers",
     );
   });
+
+  it("supports hygienic route DSL imports from root, all, and dsl", async () => {
+    const result = await webFrameworkSdk.compile({
+      source: `
+use pkg::web::all
+use pkg::web::{ serve as root_serve }
+use pkg::web::dsl::{ serve as dsl_serve }
+
+fn get_method() -> i32
+  0
+
+fn all_serve_import_path()
+  serve(port: 2999) routes():
+    get("/all") do:
+      "all".as_slice().to_string()
+
+fn root_serve_import_path()
+  root_serve(port: 3000) routes():
+    get("/root") do:
+      "root".as_slice().to_string()
+
+fn dsl_serve_import_path()
+  dsl_serve(port: 3001) routes():
+    get("/dsl") do:
+      "dsl".as_slice().to_string()
+`,
+      roots: {
+        src: fixtureRoot,
+        pkgDirs: [path.join(repoRoot, "packages")],
+      },
+    });
+
+    expectCompileSuccess(result);
+  });
 });

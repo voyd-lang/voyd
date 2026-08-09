@@ -735,6 +735,15 @@ export const buildModuleGraph = async ({
       });
     });
     addDocDiagnostics(nextModule.diagnostics);
+    enqueueOwningPackageRoot({
+      dependency,
+      importerId,
+      importerFilePath,
+      resolvedModulePath,
+      pending,
+      pendingNestedPrefixCounts,
+      modulesByPath,
+    });
     enqueueDependencies(nextModule, pending, (queued) => {
       if (COMPILER_PERF_ENABLED) {
         incrementCompilerPerfCounter("graph.pending.enqueued");
@@ -763,6 +772,9 @@ export const buildModuleGraph = async ({
     entry: entryModule.node.id,
     modules,
   });
+  reachablePackageRootIds({ reachable, modules }).forEach((moduleId) =>
+    reachable.add(moduleId),
+  );
   modules.forEach((module, moduleId) => {
     if (reachable.has(moduleId)) {
       return;
@@ -892,6 +904,80 @@ const enqueueDependencies = (
     }),
   );
 };
+
+const enqueueOwningPackageRoot = ({
+  dependency,
+  importerId,
+  importerFilePath,
+  resolvedModulePath,
+  pending,
+  pendingNestedPrefixCounts,
+  modulesByPath,
+}: {
+  dependency: ModuleDependency;
+  importerId: string;
+  importerFilePath: string | undefined;
+  resolvedModulePath: ModulePath;
+  pending: PendingDependency[];
+  pendingNestedPrefixCounts: Map<string, number>;
+  modulesByPath: ReadonlyMap<string, ModuleNode>;
+}): void => {
+  if (
+    resolvedModulePath.namespace !== "pkg" ||
+    (resolvedModulePath.segments.length === 1 &&
+      resolvedModulePath.segments[0] === "pkg")
+  ) {
+    return;
+  }
+
+  const packageRootPath: ModulePath = {
+    namespace: "pkg",
+    packageName: resolvedModulePath.packageName,
+    segments: ["pkg"],
+  };
+  const packageRootId = modulePathToString(packageRootPath);
+  if (
+    modulesByPath.has(packageRootId) ||
+    pending.some(
+      (queued) => modulePathToString(queued.dependency.path) === packageRootId,
+    )
+  ) {
+    return;
+  }
+
+  const rootDependency: ModuleDependency = {
+    kind: "export",
+    path: packageRootPath,
+    span: dependency.span,
+  };
+  const queued = { dependency: rootDependency, importerId, importerFilePath };
+  pending.push(queued);
+  updateNestedPrefixCounts({
+    counts: pendingNestedPrefixCounts,
+    pathKey: packageRootId,
+    delta: 1,
+  });
+};
+
+const reachablePackageRootIds = ({
+  reachable,
+  modules,
+}: {
+  reachable: ReadonlySet<string>;
+  modules: ReadonlyMap<string, ModuleNode>;
+}): string[] =>
+  Array.from(reachable).flatMap((moduleId) => {
+    const module = modules.get(moduleId);
+    if (!module || module.path.namespace !== "pkg") {
+      return [];
+    }
+    const packageRootId = modulePathToString({
+      namespace: "pkg",
+      packageName: module.path.packageName,
+      segments: ["pkg"],
+    });
+    return modules.has(packageRootId) ? [packageRootId] : [];
+  });
 
 type LoadedModule = {
   node: ModuleNode;
