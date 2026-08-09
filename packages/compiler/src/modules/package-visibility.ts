@@ -12,6 +12,7 @@ export const isPubliclyExportedOrdinaryModule = ({
   module: ModuleNode;
   graph: ModuleGraph;
 }): boolean =>
+  packageFacadePubliclyExports({ module, graph }) ||
   Array.from(graph.modules.values()).some((candidate) => {
     if (!isContainingPackageRoot({ packageRoot: candidate, module })) {
       return false;
@@ -27,6 +28,43 @@ export const isPubliclyExportedOrdinaryModule = ({
         ),
     );
   });
+
+const packageFacadePubliclyExports = ({
+  module,
+  graph,
+}: {
+  module: ModuleNode;
+  graph: ModuleGraph;
+}): boolean => {
+  if (module.path.namespace !== "pkg") {
+    return false;
+  }
+  const packageRootPath = {
+    namespace: "pkg" as const,
+    packageName: module.path.packageName,
+    segments: ["pkg"],
+  };
+  const header = graph.packageFacadeHeaders?.get(
+    modulePathToString(packageRootPath),
+  );
+  if (!header) {
+    return false;
+  }
+  return header.items.some(
+    (item) =>
+      item.kind === "use" &&
+      item.visibility === "pub" &&
+      item.entries.some(
+        (entry) =>
+          entry.selectionKind === "module" &&
+          resolvesToModule({
+            packageRoot: { path: packageRootPath },
+            entry,
+            module,
+          }),
+      ),
+  );
+};
 
 const isContainingPackageRoot = ({
   packageRoot,
@@ -54,7 +92,7 @@ const resolvesToModule = ({
   entry,
   module,
 }: {
-  packageRoot: ModuleNode;
+  packageRoot: Pick<ModuleNode, "path">;
   entry: NormalizedUseEntry;
   module: ModuleNode;
 }): boolean =>

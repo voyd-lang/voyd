@@ -175,6 +175,11 @@ export const buildModuleGraph = async ({
   const macroExpander = createModuleMacroExpander();
   const macroDiagnosticsByModule = new Map<string, Diagnostic[]>();
   const surfaceDiagnosticsByModule = new Map<string, Diagnostic[]>();
+  const packageFacadeHeaders = new Map<
+    string,
+    ReturnType<typeof createModuleHeaderView>
+  >();
+  const attemptedPackageFacadeIds = new Set<string>();
   const isReplaceableSurfaceDiagnostic = (diagnostic: Diagnostic): boolean =>
     diagnostic.code === "MD0005";
 
@@ -431,6 +436,7 @@ export const buildModuleGraph = async ({
       const expansion = macroExpander.expand({
         entry: entryModule.node.id,
         modules,
+        packageFacadeHeaders,
         diagnostics: [],
       });
       expansion.diagnosticsByModule.forEach((diagnostics, moduleId) =>
@@ -735,14 +741,12 @@ export const buildModuleGraph = async ({
       });
     });
     addDocDiagnostics(nextModule.diagnostics);
-    enqueueOwningPackageRoot({
-      dependency,
-      importerId,
-      importerFilePath,
-      resolvedModulePath,
-      pending,
-      pendingNestedPrefixCounts,
-      modulesByPath,
+    await collectPackageFacadeHeader({
+      modulePath: resolvedModulePath,
+      host,
+      roots,
+      headers: packageFacadeHeaders,
+      attemptedIds: attemptedPackageFacadeIds,
     });
     enqueueDependencies(nextModule, pending, (queued) => {
       if (COMPILER_PERF_ENABLED) {
@@ -772,9 +776,6 @@ export const buildModuleGraph = async ({
     entry: entryModule.node.id,
     modules,
   });
-  reachablePackageRootIds({ reachable, modules }).forEach((moduleId) =>
-    reachable.add(moduleId),
-  );
   modules.forEach((module, moduleId) => {
     if (reachable.has(moduleId)) {
       return;
@@ -850,6 +851,7 @@ export const buildModuleGraph = async ({
   return {
     entry: entryModule.node.id,
     modules,
+    packageFacadeHeaders,
     diagnostics: [
       ...baseDiagnostics,
       ...docDiagnostics.filter(
@@ -905,79 +907,49 @@ const enqueueDependencies = (
   );
 };
 
-const enqueueOwningPackageRoot = ({
-  dependency,
-  importerId,
-  importerFilePath,
-  resolvedModulePath,
-  pending,
-  pendingNestedPrefixCounts,
-  modulesByPath,
+const collectPackageFacadeHeader = async ({
+  modulePath,
+  host,
+  roots,
+  headers,
+  attemptedIds,
 }: {
-  dependency: ModuleDependency;
-  importerId: string;
-  importerFilePath: string | undefined;
-  resolvedModulePath: ModulePath;
-  pending: PendingDependency[];
-  pendingNestedPrefixCounts: Map<string, number>;
-  modulesByPath: ReadonlyMap<string, ModuleNode>;
-}): void => {
+  modulePath: ModulePath;
+  host: ModuleHost;
+  roots: ModuleRoots;
+  headers: Map<string, ReturnType<typeof createModuleHeaderView>>;
+  attemptedIds: Set<string>;
+}): Promise<void> => {
   if (
-    resolvedModulePath.namespace !== "pkg" ||
-    (resolvedModulePath.segments.length === 1 &&
-      resolvedModulePath.segments[0] === "pkg")
+    modulePath.namespace !== "pkg" ||
+    (modulePath.segments.length === 1 && modulePath.segments[0] === "pkg")
   ) {
     return;
   }
-
-  const packageRootPath: ModulePath = {
+  const facadePath: ModulePath = {
     namespace: "pkg",
-    packageName: resolvedModulePath.packageName,
+    packageName: modulePath.packageName,
     segments: ["pkg"],
   };
-  const packageRootId = modulePathToString(packageRootPath);
-  if (
-    modulesByPath.has(packageRootId) ||
-    pending.some(
-      (queued) => modulePathToString(queued.dependency.path) === packageRootId,
-    )
-  ) {
+  const facadeId = modulePathToString(facadePath);
+  if (attemptedIds.has(facadeId)) {
     return;
   }
-
-  const rootDependency: ModuleDependency = {
-    kind: "export",
-    path: packageRootPath,
-    span: dependency.span,
-  };
-  const queued = { dependency: rootDependency, importerId, importerFilePath };
-  pending.push(queued);
-  updateNestedPrefixCounts({
-    counts: pendingNestedPrefixCounts,
-    pathKey: packageRootId,
-    delta: 1,
-  });
-};
-
-const reachablePackageRootIds = ({
-  reachable,
-  modules,
-}: {
-  reachable: ReadonlySet<string>;
-  modules: ReadonlyMap<string, ModuleNode>;
-}): string[] =>
-  Array.from(reachable).flatMap((moduleId) => {
-    const module = modules.get(moduleId);
-    if (!module || module.path.namespace !== "pkg") {
-      return [];
-    }
-    const packageRootId = modulePathToString({
-      namespace: "pkg",
-      packageName: module.path.packageName,
-      segments: ["pkg"],
+  attemptedIds.add(facadeId);
+  try {
+    const resolved = await resolveModuleFile(facadePath, roots, host);
+    if (!resolved) return;
+    const source = await host.readFile(resolved.filePath);
+    const parsed = parseModuleAst({
+      source: parseModuleDirectives(source).sanitizedSource,
+      filePath: resolved.filePath,
+      modulePath: resolved.modulePath,
     });
-    return modules.has(packageRootId) ? [packageRootId] : [];
-  });
+    headers.set(facadeId, createModuleHeaderView(parsed.ast));
+  } catch {
+    // A facade probe does not add diagnostics; absent facades leave children private.
+  }
+};
 
 type LoadedModule = {
   node: ModuleNode;

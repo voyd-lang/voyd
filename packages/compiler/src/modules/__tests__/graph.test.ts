@@ -979,6 +979,43 @@ mod pkg
     expect(modules).not.toContain("std::msgpack");
   });
 
+  it("reads a package facade without adding it or its physical submodules to the graph", async () => {
+    const srcRoot = resolve("/proj/src");
+    const packageRoot = resolve("/proj/packages/web/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use pkg::web::dsl::all",
+      [`${packageRoot}${sep}pkg.voyd`]: "pub src::dsl",
+      [`${packageRoot}${sep}dsl.voyd`]: "pub fn serve()\n  1",
+      [`${packageRoot}${sep}pkg${sep}unrelated.voyd`]: "pub fn unused()\n  1",
+    });
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`, host,
+      roots: { src: srcRoot, pkgDirs: [resolve("/proj/packages")] },
+    });
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(graph.modules.has("pkg:web::pkg")).toBe(false);
+    expect(graph.modules.has("pkg:web::pkg::unrelated")).toBe(false);
+    expect(graph.packageFacadeHeaders?.has("pkg:web::pkg")).toBe(true);
+  });
+
+  it("fails closed when a package facade is missing or malformed", async () => {
+    const srcRoot = resolve("/proj/src");
+    const packagesRoot = resolve("/proj/packages");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use pkg::missing::dsl::all\nuse pkg::broken::dsl::all",
+      [`${packagesRoot}${sep}missing${sep}src${sep}dsl.voyd`]: "pub fn serve()\n  1",
+      [`${packagesRoot}${sep}broken${sep}src${sep}pkg.voyd`]: "pub src::",
+      [`${packagesRoot}${sep}broken${sep}src${sep}dsl.voyd`]: "pub fn serve()\n  1",
+    });
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`, host,
+      roots: { src: srcRoot, pkgDirs: [packagesRoot] },
+    });
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(graph.packageFacadeHeaders?.has("pkg:missing::pkg")).toBe(false);
+    expect(graph.modules.has("pkg:broken::pkg")).toBe(false);
+  });
+
   it("resolves self-relative imports from std pkg.voyd", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");

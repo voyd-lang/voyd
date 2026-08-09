@@ -147,6 +147,11 @@ export type ModuleDiagnostic = ModuleDiagnosticContext &
 export interface ModuleGraph {
   entry: string;
   modules: Map<string, ModuleNode>;
+  /**
+   * Headers read from installed package facades to validate direct imports from
+   * public ordinary child modules without loading the facade into the graph.
+   */
+  packageFacadeHeaders?: ReadonlyMap<string, ModuleHeaderView>;
   diagnostics: readonly Diagnostic[];
 }
 
