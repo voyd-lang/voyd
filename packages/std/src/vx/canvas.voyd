@@ -1,6 +1,7 @@
 //! Typed Canvas rendering and measurement commands for VX.
 
 use std::array::Array
+use std::data::{ CustomDto, CustomDtoError }
 use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
@@ -13,13 +14,13 @@ use std::string::type::String
 use super::command::{ Cmd, retain_typed_message_mapper }
 
 /// A logical point in CSS-pixel canvas coordinates.
-pub val Point {
+pub obj Point {
   api x: f64,
   api y: f64
 }
 
 /// A 2D affine transform using the browser Canvas matrix convention.
-pub val Transform {
+pub obj Transform {
   api a: f64,
   api b: f64,
   api c: f64,
@@ -28,83 +29,83 @@ pub val Transform {
   api f: f64
 }
 
-type RadialGradientDto = {
-  innerColor: String,
-  outerColor: String,
-  innerRadius: f64,
-  outerRadius?: f64
+pub obj RadialGradientDto {
+  api innerColor: String,
+  api outerColor: String,
+  api innerRadius: f64,
+  api outerRadius?: f64
 }
 
-type PathSegmentDto = {
-  kind: String,
-  point?: Point,
-  control?: Point,
-  to?: Point,
-  control1?: Point,
-  control2?: Point,
-  center?: Point,
-  origin?: Point,
-  radius?: f64,
-  radiusX?: f64,
-  radiusY?: f64,
-  rotation?: f64,
-  startAngle?: f64,
-  endAngle?: f64,
-  counterClockwise?: bool,
-  width?: f64,
-  height?: f64
+pub obj PathSegmentDto {
+  api kind: String,
+  api point?: Point,
+  api control?: Point,
+  api to?: Point,
+  api control1?: Point,
+  api control2?: Point,
+  api center?: Point,
+  api origin?: Point,
+  api radius?: f64,
+  api radiusX?: f64,
+  api radiusY?: f64,
+  api rotation?: f64,
+  api startAngle?: f64,
+  api endAngle?: f64,
+  api counterClockwise?: bool,
+  api width?: f64,
+  api height?: f64
 }
 
-type DrawDto = {
-  kind: String,
-  from?: Point,
-  to?: Point,
-  color?: String,
-  width?: f64,
-  alpha?: f64,
-  glowColor?: String,
-  glowBlur?: f64,
-  points?: Array<Point>,
-  closed?: bool,
-  fill?: String,
-  center?: Point,
-  radius?: f64,
-  stroke?: String,
-  strokeWidth?: f64,
-  radialGradient?: RadialGradientDto,
-  radiusX?: f64,
-  radiusY?: f64,
-  rotation?: f64,
-  position?: Point,
-  value?: String,
-  font?: String,
-  align?: String,
-  baseline?: String,
-  maxWidth?: f64,
-  segments?: Array<PathSegmentDto>,
-  fillRule?: String,
-  a?: f64,
-  b?: f64,
-  c?: f64,
-  d?: f64,
-  e?: f64,
-  f?: f64,
-  x?: f64,
-  y?: f64,
-  radians?: f64,
-  pattern?: Array<f64>,
-  offset?: f64,
-  operation?: String
+pub obj DrawDto {
+  api kind: String,
+  api from?: Point,
+  api to?: Point,
+  api color?: String,
+  api width?: f64,
+  api alpha?: f64,
+  api glowColor?: String,
+  api glowBlur?: f64,
+  api points?: Array<Point>,
+  api closed?: bool,
+  api fill?: String,
+  api center?: Point,
+  api radius?: f64,
+  api stroke?: String,
+  api strokeWidth?: f64,
+  api radialGradient?: RadialGradientDto,
+  api radiusX?: f64,
+  api radiusY?: f64,
+  api rotation?: f64,
+  api position?: Point,
+  api value?: String,
+  api font?: String,
+  api align?: String,
+  api baseline?: String,
+  api maxWidth?: f64,
+  api segments?: Array<PathSegmentDto>,
+  api fillRule?: String,
+  api a?: f64,
+  api b?: f64,
+  api c?: f64,
+  api d?: f64,
+  api e?: f64,
+  api f?: f64,
+  api x?: f64,
+  api y?: f64,
+  api radians?: f64,
+  api pattern?: Array<f64>,
+  api offset?: f64,
+  api operation?: String
 }
 
-type FrameDto = {
-  version: i32,
-  selector: String,
-  width: f64,
-  height: f64,
-  clear: bool,
-  background?: String,
-  draws: Array<DrawDto>
+pub obj FrameDto {
+  api version: i32,
+  api selector: String,
+  api width: f64,
+  api height: f64,
+  api clear: bool,
+  api background?: String,
+  api draws: Array<DrawDto>
 }
 
 /// A typed segment in a Canvas path.
@@ -153,7 +154,8 @@ pub obj Draw {
 
 /// A versioned canvas frame ready for the browser VX runtime.
 pub obj Frame {
-  payload: MsgPack
+  payload: MsgPack,
+  pri dto: FrameDto
 }
 
 /// A radial fill used by canvas circles.
@@ -203,6 +205,39 @@ impl RadialGradient
         value
       None:
         msgpack_to_dto<RadialGradientDto>(self.payload)
+
+impl CustomDto<PathSegment, PathSegmentDto> for PathSegment
+  fn write(value: PathSegment) -> PathSegmentDto
+    value.boundary_dto()
+
+  fn read(value: PathSegmentDto) -> Result<PathSegment, CustomDtoError>
+    Ok<PathSegment> { value: PathSegment::from_boundary_dto(value) }
+
+impl CustomDto<Draw, DrawDto> for Draw
+  fn write(value: Draw) -> DrawDto
+    value.boundary_dto()
+
+  fn read(value: DrawDto) -> Result<Draw, CustomDtoError>
+    Ok<Draw> { value: Draw::from_boundary_dto(value) }
+
+impl CustomDto<RadialGradient, RadialGradientDto> for RadialGradient
+  fn write(value: RadialGradient) -> RadialGradientDto
+    value.boundary_dto()
+
+  fn read(value: RadialGradientDto) -> Result<RadialGradient, CustomDtoError>
+    Ok<RadialGradient> { value: RadialGradient::from_boundary_dto(value) }
+
+impl CustomDto<Frame, FrameDto> for Frame
+  fn write(value: Frame) -> FrameDto
+    value.dto
+
+  fn read(value: FrameDto) -> Result<Frame, CustomDtoError>
+    Ok<Frame> {
+      value: Frame {
+        payload: msgpack::from_data_value(data::encode(value)),
+        dto: value
+      }
+    }
 
 /// Logical CSS-pixel metrics returned by `measure_text`.
 pub type TextMetrics = {
@@ -257,7 +292,7 @@ pub fn radial_gradient({
   inner_radius: f64 = 0.0,
   outer_radius?: f64
 }) -> RadialGradient
-  radial_gradient_value({
+  radial_gradient_value(RadialGradientDto {
     innerColor: inner_color,
     outerColor: outer_color,
     innerRadius: inner_radius,
@@ -266,18 +301,18 @@ pub fn radial_gradient({
 
 /// Starts a path at a logical CSS-pixel point without drawing a segment.
 pub fn path_move_to(point: Point) -> PathSegment
-  path_segment({ kind: "moveTo", point })
+  path_segment(PathSegmentDto { kind: "moveTo", point })
 
 /// Adds a straight segment to a logical CSS-pixel point.
 pub fn path_line_to(point: Point) -> PathSegment
-  path_segment({ kind: "lineTo", point })
+  path_segment(PathSegmentDto { kind: "lineTo", point })
 
 /// Adds a quadratic Bézier segment.
 pub fn path_quadratic_curve_to({
   control: Point,
   to: Point
 }) -> PathSegment
-  path_segment({ kind: "quadraticCurveTo", control, to })
+  path_segment(PathSegmentDto { kind: "quadraticCurveTo", control, to })
 
 /// Adds a cubic Bézier segment.
 pub fn path_bezier_curve_to({
@@ -285,7 +320,7 @@ pub fn path_bezier_curve_to({
   control_2: Point,
   to: Point
 }) -> PathSegment
-  path_segment({
+  path_segment(PathSegmentDto {
     kind: "bezierCurveTo",
     control1: control_1,
     control2: control_2,
@@ -300,7 +335,7 @@ pub fn path_arc({
   end_angle: f64,
   counter_clockwise: bool = false
 }) -> PathSegment
-  path_segment({
+  path_segment(PathSegmentDto {
     kind: "arc",
     center,
     radius,
@@ -315,7 +350,7 @@ pub fn path_arc_to({
   control_2: Point,
   radius: f64
 }) -> PathSegment
-  path_segment({
+  path_segment(PathSegmentDto {
     kind: "arcTo",
     control1: control_1,
     control2: control_2,
@@ -332,7 +367,7 @@ pub fn path_ellipse({
   end_angle: f64,
   counter_clockwise: bool = false
 }) -> PathSegment
-  path_segment({
+  path_segment(PathSegmentDto {
     kind: "ellipse",
     center,
     radiusX: radius_x,
@@ -349,11 +384,11 @@ pub fn path_rect({
   width: f64,
   height: f64
 }) -> PathSegment
-  path_segment({ kind: "rect", origin, width, height })
+  path_segment(PathSegmentDto { kind: "rect", origin, width, height })
 
 /// Closes the current path subpath.
 pub fn path_close() -> PathSegment
-  path_segment({ kind: "closePath" })
+  path_segment(PathSegmentDto { kind: "closePath" })
 
 /// Paints a typed path from its segments.
 pub fn path({
@@ -366,7 +401,7 @@ pub fn path({
   glow_color?: String,
   glow_blur: f64 = 0.0
 }) -> Draw
-  draw({
+  draw(DrawDto {
     kind: "path",
     segments: path_segment_dtos(segments),
     fill,
@@ -380,15 +415,15 @@ pub fn path({
 
 /// Saves the current transform, dash, compositing, and paint state.
 pub fn save() -> Draw
-  draw({ kind: "save" })
+  draw(DrawDto { kind: "save" })
 
 /// Restores the most recently saved Canvas state.
 pub fn restore() -> Draw
-  draw({ kind: "restore" })
+  draw(DrawDto { kind: "restore" })
 
 /// Multiplies the current Canvas transform by an affine matrix.
 pub fn transform(matrix: Transform) -> Draw
-  draw({
+  draw(DrawDto {
     kind: "transform",
     a: matrix.a,
     b: matrix.b,
@@ -400,23 +435,23 @@ pub fn transform(matrix: Transform) -> Draw
 
 /// Translates subsequent draws in logical CSS pixels.
 pub fn translate({ x: f64, y: f64 }) -> Draw
-  draw({ kind: "translate", x, y })
+  draw(DrawDto { kind: "translate", x, y })
 
 /// Rotates subsequent draws by radians.
 pub fn rotate(radians: f64) -> Draw
-  draw({ kind: "rotate", radians })
+  draw(DrawDto { kind: "rotate", radians })
 
 /// Scales subsequent draws along each axis.
 pub fn scale({ x: f64, y: f64 }) -> Draw
-  draw({ kind: "scale", x, y })
+  draw(DrawDto { kind: "scale", x, y })
 
 /// Sets the line-dash pattern for subsequent draws. An empty pattern resets it.
 pub fn line_dash({ pattern: Array<f64>, offset: f64 = 0.0 }) -> Draw
-  draw({ kind: "lineDash", pattern, offset })
+  draw(DrawDto { kind: "lineDash", pattern, offset })
 
 /// Sets the compositing operation for subsequent draws.
 pub fn composite(operation: CompositeOperation) -> Draw
-  draw({
+  draw(DrawDto {
     kind: "composite",
     operation: composite_operation_name(operation)
   })
@@ -430,7 +465,7 @@ pub fn frame({
   clear: bool = true,
   background?: String
 }) -> Frame
-  let value: FrameDto = {
+  let value = FrameDto {
     version: 2,
     selector,
     width,
@@ -439,7 +474,7 @@ pub fn frame({
     background,
     draws: draw_dtos(draws)
   }
-  Frame { payload: msgpack::from_data_value(data::encode(value)) }
+  Frame { payload: msgpack::from_data_value(data::encode(value)), dto: value }
 
 /// Creates a straight canvas line.
 pub fn line({
@@ -451,7 +486,7 @@ pub fn line({
   glow_color?: String,
   glow_blur: f64 = 0.0
 }) -> Draw
-  draw({
+  draw(DrawDto {
     kind: "line",
     from,
     to,
@@ -471,7 +506,7 @@ pub fn polyline({
   closed: bool = false,
   fill?: String
 }) -> Draw
-  draw({ kind: "polyline", points, color, width, alpha, closed, fill })
+  draw(DrawDto { kind: "polyline", points, color, width, alpha, closed, fill })
 
 /// Creates a canvas circle with optional stroke, glow, and radial fill.
 pub fn circle({
@@ -485,7 +520,7 @@ pub fn circle({
   glow_blur: f64 = 0.0,
   radial_gradient?: RadialGradient
 }) -> Draw
-  draw({
+  draw(DrawDto {
     kind: "circle",
     center,
     radius,
@@ -509,7 +544,7 @@ pub fn ellipse({
   stroke_width: f64 = 1.0,
   alpha: f64 = 1.0
 }) -> Draw
-  draw({
+  draw(DrawDto {
     kind: "ellipse",
     center,
     radiusX: radius_x,
@@ -532,7 +567,7 @@ pub fn text({
   alpha: f64 = 1.0,
   max_width?: f64
 }) -> Draw
-  draw({
+  draw(DrawDto {
     kind: "text",
     position,
     value,

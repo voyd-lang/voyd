@@ -97,6 +97,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
   it("unwraps compiler-derived canvas payloads through boundary metadata", async () => {
     const wasm = await buildModule({
       entryFile: "boundary-export-contract.voyd",
+      codegenOptions: { boundaryExports: "auto" },
     });
     const host = await createVoydHost({ wasm });
 

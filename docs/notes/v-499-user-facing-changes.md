@@ -59,6 +59,9 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   typed body route is no longer supported; use a typed request DTO.
 - Canvas wrapper payloads are private. Construct paths, draws, gradients, and
   frames through the typed canvas API.
+- Canvas paths, draws, gradients, and frames now use one typed custom DTO
+  representation at host boundaries. `Point` and `Transform` are immutable
+  objects so nested optional canvas fields have a stable DTO layout.
 - VX events, HTML/program mappers, and canvas measurement commands no longer
   accept caller-owned numeric handler IDs or raw MessagePack callbacks. Use
   typed message values and typed closures; the runtime owns callback
