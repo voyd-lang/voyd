@@ -1238,31 +1238,21 @@ pub fn main(): Operations -> i32
     const envKey = "VOYD_SDK_DEFAULT_ADAPTER_TEST";
     const original = process.env[envKey];
     const sdk = createSdk();
-    const source = `use std::host_dto::HostDto
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
-use std::string::type::{ String, new_string }
+    const source = `use std::env
+use std::optional::types::all
+use std::result::types::all
+use std::string::type::String
 
-@effect(id: "voyd.std.env")
-eff Env
-  get(tail, key: MsgPack) -> MsgPack
-  set(tail, payload: MsgPack) -> MsgPack
-
-pub fn main(): Env -> i32
-  let set_payload = HostDto::init()
-    .set("key", msgpack::make_string("${envKey}"))
-    .set("value", msgpack::make_string("41"))
-    .pack()
-  let _ = Env::set(set_payload)
-  let payload = Env::get(msgpack::make_string("${envKey}"))
-  payload.match(active)
-    String:
-      if active.equals("41") then:
-        41
-      else:
-        -2
-    else:
+pub fn main(): env::Env -> i32
+  match(env::set("${envKey}", "41"))
+    Err:
       -3
+    Ok<Unit>:
+      match(env::get("${envKey}"))
+        Some<String> { value }:
+          if value.equals("41") then: 41 else: -2
+        None:
+          -3
 `;
 
     try {

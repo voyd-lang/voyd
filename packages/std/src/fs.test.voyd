@@ -66,6 +66,13 @@ test "fs lists typed child paths":
     Err<IoError>:
       assert(false, eq: true)
 
+test "fs preserves an empty typed child path list":
+  match(list_dir_with_payload(fs_ok(Array<String>::init())))
+    Ok<Array<Path>> { value }:
+      assert(value.len(), eq: 0)
+    Err<IoError>:
+      assert(false, eq: true)
+
 test "fs preserves portable error categories":
   match(create_exclusive_with_payload(fs_error<Unit>(
     value: Unit {},

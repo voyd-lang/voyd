@@ -127,16 +127,26 @@ pub fn remove(path: Path): Fs -> Result<Unit, IoError>
 ///
 /// Each returned `Path` is decoded from host-provided string entries.
 pub fn list_dir(path: Path): Fs -> Result<Array<Path>, IoError>
-  match(decode_result(Fs::list_dir(path.as_string())))
-    Err<IoError> { error }:
-      Err<IoError> { error: error }
-    Ok<Array<String>> { value }:
-      let ~paths = Array<Path>::with_capacity(value.len())
-      var index = 0
-      while index < value.len():
-        paths.push(Path { raw: value.at(index) })
-        index = index + 1
-      Ok<Array<Path>> { value: paths }
+  let result = Fs::list_dir(path.as_string())
+  if not result.ok:
+    return Err<IoError> {
+      error: IoError {
+        kind: decode_io_error_kind(result.error_kind),
+        code: result.error_code,
+        message: result.error_message
+      }
+    }
+
+  let value = result.value
+  if value.is_empty():
+    return Ok<Array<Path>> { value: Array<Path>::init() }
+
+  let ~paths = Array<Path>::with_capacity(value.len())
+  var index = 0
+  while index < value.len():
+    paths.push(Path { raw: value.at(index) })
+    index = index + 1
+  Ok<Array<Path>> { value: paths }
 
 /// Creates a directory and all missing parent directories.
 ///
