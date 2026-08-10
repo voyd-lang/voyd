@@ -55,6 +55,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
   until the host adapter receives the event.
 - Secure random byte requests return `Bytes` directly. Hosts provide a binary
   payload instead of an array of MessagePack integer values.
+- Environment effects exchange typed request and result DTOs. Host adapters no
+  longer receive or return MessagePack envelopes for environment operations.
 - Retained callback invocations and non-effectful callback completions use
   invocation-scoped frames. Effectful callbacks use the same framed effect
   request/outcome loop.

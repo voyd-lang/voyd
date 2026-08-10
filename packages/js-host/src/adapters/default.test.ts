@@ -163,7 +163,7 @@ describe("registerDefaultHostAdapters", () => {
     const getEnvHandler = getHandler("voyd.std.env", "get");
     const getResult = await getEnvHandler(tailContinuation, envKey);
     expect(getResult.kind).toBe("tail");
-    expect(getResult.value).toBe("hello");
+    expect(getResult.value).toEqual({ found: true, value: "hello" });
   });
 
   it("registers bun env handlers through node-compatible process env", async () => {
@@ -191,13 +191,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     expect(
       getHandler("voyd.std.env", "get")(tailContinuation, "VOYD_BUN_ENV_TEST")
     ).toEqual({
       kind: "tail",
-      value: "ok",
+      value: { found: true, value: "ok" },
     });
   });
 
@@ -3703,7 +3703,7 @@ describe("registerDefaultHostAdapters", () => {
     expect(randomBytes).toHaveBeenCalledTimes(3);
   });
 
-  it("returns null for denied deno env reads", async () => {
+  it("returns a missing result for denied deno env reads", async () => {
     const table = buildTable([
       { effectId: "voyd.std.env", opName: "get", opId: 0 },
       { effectId: "voyd.std.env", opName: "set", opId: 1 },
@@ -3728,6 +3728,6 @@ describe("registerDefaultHostAdapters", () => {
       "HOME"
     );
     expect(result.kind).toBe("tail");
-    expect(result.value).toBeNull();
+    expect(result.value).toEqual({ found: false, value: "" });
   });
 });
