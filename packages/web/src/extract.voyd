@@ -8,10 +8,9 @@ use std::dict::Dict
 use std::error::panic
 use std::http::self as http
 use std::http::{ Header, Headers, HttpError, IncomingRequest, QueryString, Response, Status }
-use std::json::{ JsonArray, JsonBool, JsonNull, JsonNumber, JsonObject, JsonString, JsonValue, parse as parse_json }
+use std::json::{ JsonValue }
+use std::json::self as json
 use std::meta::{ BoolShape, F32Shape, F64Shape, I32Shape, I64Shape, RecordShape, RefShape, Shape, ShapeDefinition, ShapeNode, StringShape, shape_of }
-use std::msgpack::{ MsgPack }
-use std::msgpack::self as msgpack
 use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
@@ -322,10 +321,12 @@ pub fn decode_cookies<T>(cookies: CookieJar) -> T
   decode_data_or_panic<T>(name_values_to_data(cookies.entries), label: "cookies".as_slice())
 
 pub fn decode_json_value<T>(value: JsonValue) -> T
-  msgpack::unpack_boundary_value_or_identity<T, JsonValue>(
-    value,
-    json_to_msgpack(value)
-  )
+  match(json::decode<T>(value))
+    Ok<T> { value }:
+      value
+    Err:
+      panic("JSON value does not match the requested DTO".as_slice())
+      decode_json_value<T>(value)
 
 fn decode_data<T>(payload: DataValue, { label: StringSlice }) -> Result<T, Rejection>
   match(data::decode<T>(payload))
@@ -545,7 +546,7 @@ pub fn default_required_session(request: IncomingRequest) -> Result<String, Reje
 pub fn default_required_session_as<T>(request: IncomingRequest) -> Result<T, Rejection>
   match(request.header("authorization".as_slice()))
     Some<String> { value }:
-      Ok<T> { value: msgpack::unpack_boundary_value<T>(authorization_to_msgpack(value)) }
+      Ok<T> { value: decode_authorization<T>(value) }
     None:
       Err<Rejection> { error: Rejection::unauthorized("missing auth".as_slice()) }
 
@@ -703,55 +704,6 @@ fn headers_to_data(headers: Headers): () -> DataValue
     index = index + 1
   DataObject { fields }
 
-fn json_to_msgpack(value: JsonValue): () -> MsgPack
-  value.match(decoded)
-    JsonNull:
-      msgpack::make_null()
-    JsonBool:
-      msgpack::make_bool(decoded.value)
-    JsonNumber:
-      json_number_to_msgpack(decoded.value)
-    JsonString:
-      msgpack::make_string(decoded.value)
-    JsonArray:
-      json_array_to_msgpack(decoded.value)
-    JsonObject:
-      json_object_to_msgpack(decoded.value)
-
-fn json_number_to_msgpack(value: f64): () -> MsgPack
-  match(cast::to_i64_checked(value))
-    Ok<i64> { value: integer }:
-      if cast::to_f64(integer) == value:
-        return msgpack::make_i64(integer)
-      msgpack::make_f64(value)
-    Err:
-      msgpack::make_f64(value)
-
-fn json_array_to_msgpack(values: Array<JsonValue>): () -> MsgPack
-  let ~out = Array<MsgPack>::with_capacity(values.len())
-  var index = 0
-  while index < values.len():
-    match(values.get(index))
-      Some<JsonValue> { value }:
-        out.push(json_to_msgpack(value))
-      None:
-        void
-    index = index + 1
-  msgpack::make_array(out)
-
-fn json_object_to_msgpack(values: Dict<String, JsonValue>): () -> MsgPack
-  let entries = values.entries()
-  let ~out = Dict<String, MsgPack>::with_capacity(entries.len())
-  var index = 0
-  while index < entries.len():
-    match(entries.get(index))
-      Some<(String, JsonValue)> { value }:
-        out.set(value.0, json_to_msgpack(value.1))
-      None:
-        void
-    index = index + 1
-  msgpack::make_map(out)
-
 pub fn default_optional_session(request: IncomingRequest) -> Result<Option<String>, Rejection>
   Ok<Option<String>> { value: request.header("authorization".as_slice()) }
 
@@ -760,18 +712,18 @@ pub fn default_optional_session_as<T>(request: IncomingRequest) -> Result<Option
     Some<String> { value }:
       Ok<Option<T>> {
         value: Some<T> {
-          value: msgpack::unpack_boundary_value<T>(authorization_to_msgpack(value))
+          value: decode_authorization<T>(value)
         }
       }
     None:
       Ok<Option<T>> { value: None {} }
 
-fn authorization_to_msgpack(value: String): () -> MsgPack
-  match(parse_json(value))
-    Ok<JsonValue> { value: parsed }:
-      json_to_msgpack(parsed)
+fn decode_authorization<T>(value: String) -> T
+  match(json::decode<T>(value))
+    Ok<T> { value }:
+      value
     Err:
-      msgpack::make_string(value)
+      decode_data_or_panic<T>(DataString { value }, label: "authorization".as_slice())
 
 fn find_value(entries: Array<NameValue>, name: StringSlice): () -> Option<String>
   var index = 0

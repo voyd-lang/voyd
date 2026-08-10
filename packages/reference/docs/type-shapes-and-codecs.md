@@ -49,17 +49,16 @@ The public names and meanings in `std::meta` are intended as stable standard
 library API. Consumers should still handle newly added `ShapeNode` variants
 when upgrading Voyd, because the supported boundary type set may expand.
 
-## Derived MessagePack codecs
+## Typed MessagePack codecs
 
-`std::msgpack::pack_boundary_value` and `unpack_boundary_value` generate a
-MessagePack codec from the closed Voyd type at the call site. They support the
-same primitives, arrays, records, optional fields, and named union or enum
-payloads as `shape_of<T>()`.
+`std::msgpack::encode` and `decode` apply the compiler-derived DTO plan for the
+closed Voyd type at the call site. They support the same primitives, arrays,
+records, optional fields, and named union or enum payloads as `shape_of<T>()`.
 
 ```voyd
 use std::array::Array
 use std::enums::{ enum }
-use std::msgpack::{ pack_boundary_value, unpack_boundary_value }
+use std::msgpack::{ encode, decode }
 use std::string::type::String
 
 enum Event
@@ -72,12 +71,16 @@ type EnvelopeV1 = {
   event: Event
 }
 
-let encoded = pack_boundary_value<EnvelopeV1>({
+let encoded = encode<EnvelopeV1>({
   version: 1,
   requestId: "request-7",
   event: Event::Created { id: 42, labels: ["host"] }
 })
-let decoded = unpack_boundary_value<EnvelopeV1>(encoded)
+let decoded = match(encoded)
+  Ok { value: bytes }:
+    decode<EnvelopeV1>(bytes)
+  Err { error }:
+    Err { error }
 ```
 
 The wire schema is deliberate and inspectable:
@@ -91,6 +94,11 @@ The wire schema is deliberate and inspectable:
 - Versioning is explicit. Add a normal `version` field to a versioned DTO and
   dispatch or migrate it in application code. The codec does not inject a
   version or perform migrations.
+
+The parsed `MsgPack` tree remains available for format-specific tooling.
+`from_data_value` and `to_data_value` convert explicitly between it and the
+provider-neutral `DataValue` tree; ordinary typed encoding does not use the
+parsed tree API.
 
 Exceptional nominal types declare one provider-neutral wire representation by
 implementing `CustomDto<T, Representation>`. The same representation is used

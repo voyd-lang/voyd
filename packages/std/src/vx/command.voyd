@@ -1,6 +1,7 @@
 //! Core VX command envelope and constructors shared by VX feature modules.
 
 use std::array::Array
+use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
@@ -41,7 +42,7 @@ impl<Msg> Cmd<Msg>
   /// Creates a command that dispatches a typed application message.
   api fn message(value: Msg) -> Cmd<Msg>
     let ~out = command_map("message")
-    out.set("value", boundary_value_to_msgpack(value))
+    out.set("value", msgpack::from_data_value(data::encode(value)))
     Cmd<Msg> { payload: msgpack::make_map(out) }
 
   /// Creates a command batch from existing command values.
@@ -231,7 +232,7 @@ impl<Msg> Cmd<Msg>
   api fn delay({ millis: i64, value: Msg }) -> Cmd<Msg>
     let ~out = command_map("delay")
     out.set("ms", msgpack::make_i64(millis))
-    out.set("value", boundary_value_to_msgpack(value))
+    out.set("value", msgpack::from_data_value(data::encode(value)))
     Cmd<Msg> { payload: msgpack::make_map(out) }
 
   /// Creates a DOM focus command for a constrained VX ref.
@@ -246,10 +247,6 @@ impl<Msg> Cmd<Msg>
   api fn select_text<T>(target: Ref<T>) -> Cmd<Msg>
     Cmd<Msg>::runtime(kind: "select_text", value: msgpack::make_string(target.id))
 
-
-@intrinsic(name: "__boundary_value_to_msgpack")
-fn boundary_value_to_msgpack<Msg>(message: Msg): () -> MsgPack
-  __boundary_value_to_msgpack(message)
 
 fn window_scroll_value({ x: f64, y: f64 }) -> MsgPack
   let ~out = Dict<String, MsgPack>::init()

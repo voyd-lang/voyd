@@ -112,18 +112,6 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
     "__render_claim_callback",
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
-  [
-    "__boundary_value_to_msgpack",
-    { intrinsicUsesSignature: false, access: "std-only" },
-  ],
-  [
-    "__boundary_msgpack_to_value",
-    { intrinsicUsesSignature: false, access: "std-only" },
-  ],
-  [
-    "__boundary_msgpack_to_value_or_identity",
-    { intrinsicUsesSignature: false, access: "std-only" },
-  ],
   ["__dto_value_to_data", { intrinsicUsesSignature: false, access: "std-only" }],
   ["__data_to_dto_value", { intrinsicUsesSignature: false, access: "std-only" }],
   [

@@ -1480,73 +1480,6 @@ export const compileIntrinsicCall = ({
       assertArgCount(name, args, 0);
       return ctx.mod.i32.const(stableCallsiteIdFor(call.span));
     }
-    case "__boundary_value_to_msgpack": {
-      assertArgCount(name, args, 1);
-      const msgpack = ensureSelectedHostTransportProvider(ctx);
-      const valueTypeId = getRequiredExprType(
-        call.args[0]!.expr,
-        ctx,
-        instanceId,
-      );
-      try {
-        return writeDtoValueToTree({
-          value: args[0]!,
-          schema: deriveBoundarySchema({
-            typeId: valueTypeId,
-            ctx,
-            label: "__boundary_value_to_msgpack value",
-            options: { tagStandaloneVariants: true },
-          }),
-          ctx,
-          fnCtx,
-          provider: msgpack,
-        });
-      } catch (error) {
-        rethrowBoundarySchemaDiagnostic({ error, call });
-      }
-    }
-    case "__boundary_msgpack_to_value": {
-      assertArgCount(name, args, 1);
-      const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
-      try {
-        return emitDtoTreeToValue({
-          value: args[0]!,
-          returnTypeId,
-          ctx,
-          fnCtx,
-        });
-      } catch (error) {
-        rethrowBoundarySchemaDiagnostic({ error, call });
-      }
-    }
-    case "__boundary_msgpack_to_value_or_identity": {
-      assertArgCount(name, args, 2);
-      const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
-      const sourceTypeId = getRequiredExprType(
-        call.args[0]!.expr,
-        ctx,
-        instanceId,
-      );
-      if (sourceTypeId === returnTypeId) {
-        return coerceValueToType({
-          value: args[0]!,
-          actualType: sourceTypeId,
-          targetType: returnTypeId,
-          ctx,
-          fnCtx,
-        });
-      }
-      try {
-        return emitDtoTreeToValue({
-          value: args[1]!,
-          returnTypeId,
-          ctx,
-          fnCtx,
-        });
-      } catch (error) {
-        rethrowBoundarySchemaDiagnostic({ error, call });
-      }
-    }
     case "__dto_value_to_data": {
       assertArgCount(name, args, 1);
       const valueTypeId = getRequiredExprType(
@@ -1936,32 +1869,6 @@ const rethrowBoundarySchemaDiagnostic = ({
     throw intrinsicCodegenDiagnostic({ call, message: error.message });
   }
   throw error;
-};
-
-const emitDtoTreeToValue = ({
-  value,
-  returnTypeId,
-  ctx,
-  fnCtx,
-}: {
-  value: binaryen.ExpressionRef;
-  returnTypeId: TypeId;
-  ctx: CodegenContext;
-  fnCtx: FunctionContext;
-}): binaryen.ExpressionRef => {
-  const msgpack = ensureSelectedHostTransportProvider(ctx);
-  return readDtoValueFromTree({
-    value,
-    schema: deriveBoundarySchema({
-      typeId: returnTypeId,
-      ctx,
-      label: "__boundary_msgpack_to_value target",
-      options: { tagStandaloneVariants: true },
-    }),
-    ctx,
-    fnCtx,
-    provider: msgpack,
-  });
 };
 
 const intrinsicCallTypeArgs = ({

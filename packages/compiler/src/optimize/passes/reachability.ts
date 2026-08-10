@@ -33,8 +33,6 @@ export const HOST_TRANSPORT_DEPENDENT_INTRINSICS = new Set([
   "__retain_callback",
   "__boundary_retain_callback",
   "__render_retain_callback",
-  "__boundary_value_to_msgpack",
-  "__boundary_msgpack_to_value",
 ]);
 
 const SHAPE_REIFICATION_INTRINSICS = new Set(["__boundary_shape_of"]);

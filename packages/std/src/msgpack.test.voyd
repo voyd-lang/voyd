@@ -2,6 +2,7 @@ use std::memory::self as memory
 use std::array::Array
 use std::bytes::ByteBuffer
 use std::data::{ DataReader, DataWriter }
+use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
 use std::optional::types::all
@@ -43,7 +44,7 @@ test "derived msgpack codecs preserve nested records arrays optionals and enum p
     ],
     event: BoundaryCodecEvent::Created { id: 42, labels: ["compiler", "host"] }
   }
-  let packed = pack_boundary_value(source)
+  let packed = from_data_value(data::encode(source))
 
   match(unpack_map(packed))
     Err<MsgPackError>:
@@ -63,29 +64,7 @@ test "derived msgpack codecs preserve nested records arrays optionals and enum p
               assert_string_map_field(event_map, "$variant", "Created")
               assert_i32_map_field(event_map, "id", 42)
 
-  let decoded = unpack_boundary_value<BoundaryCodecEnvelope>(packed)
-  assert(decoded.version, eq: 3)
-  assert(decoded.requestId, eq: "request-7")
-  assert(decoded.profiles.len(), eq: 2)
-  match(decoded.profiles.at(0).nickname)
-    Some<String>:
-      assert(false, eq: true)
-    None:
-      void
-  match(decoded.profiles.at(1).nickname)
-    None:
-      assert(false, eq: true)
-    Some<String> { value }:
-      assert(value, eq: "Amazing Grace")
-  decoded.event.match(event)
-    Created:
-      assert(event.id, eq: 42)
-      assert(event.labels.len(), eq: 2)
-      assert(event.labels.at(1), eq: "host")
-    else:
-      assert(false, eq: true)
-
-  assert_same_encoding(packed, pack_boundary_value(source))
+  assert_same_encoding(packed, from_data_value(data::encode(source)))
 
 test "typed msgpack encode and decode use immutable bytes":
   let source = BoundaryCodecEnvelope {

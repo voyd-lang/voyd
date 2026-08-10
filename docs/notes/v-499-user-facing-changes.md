@@ -50,6 +50,15 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   serialized mapper overloads, or caller-supplied handler IDs. Use typed
   built-in constructors and typed closure overloads; custom host listeners
   belong in versioned effect or external packages.
+- `std::msgpack` no longer exposes boundary-tree packing/unpacking helpers.
+  Use typed `encode`/`decode` for bytes, or explicitly convert between
+  `MsgPack` and the neutral `DataValue` tree with `from_data_value` and
+  `to_data_value`.
+- Web JSON bodies and authorization values now decode through typed JSON and
+  neutral DTO data. Passing the dynamic `JsonValue` type through a generic
+  typed body route is no longer supported; use a typed request DTO.
+- Canvas wrapper payloads are private. Construct paths, draws, gradients, and
+  frames through the typed canvas API.
 
 This record will be extended as the remaining obsolete boundary and VX APIs are
 removed.

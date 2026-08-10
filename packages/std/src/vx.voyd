@@ -1,5 +1,6 @@
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
+use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
 use std::error::panic
@@ -201,10 +202,6 @@ fn retain_program_callback_id<Handler>(handler: Handler): () -> i32
 fn stable_callsite_id(): () -> i32
   0
 
-@intrinsic(name: "__boundary_value_to_msgpack")
-fn boundary_value_to_msgpack<Msg>(message: Msg): () -> MsgPack
-  __boundary_value_to_msgpack(message)
-
 fn encode_vx_payload<T>(value: T) -> Bytes
   match(msgpack::encode(value))
     Ok<Bytes> { value }:
@@ -307,7 +304,7 @@ impl<Msg> Sub<Msg>
     let ~out = subscription_map("interval")
     out.set("key", key)
     out.set("ms", msgpack::make_i64(millis))
-    out.set("value", boundary_value_to_msgpack(value))
+    out.set("value", msgpack::from_data_value(data::encode(value)))
     Sub<Msg> { payload: msgpack::make_map(out) }
 
   api fn every({ key: StringSlice, millis: i64, value: Msg }) -> Sub<Msg>
@@ -315,7 +312,7 @@ impl<Msg> Sub<Msg>
 
 /// Subscribes to global keydown events through the browser VX runtime host.
 pub fn keyboard_on_key_down<Msg>({ key: String, value: Msg }) -> Sub<Msg>
-  keyboard_subscription(kind: "keydown", key: key, value: boundary_value_to_msgpack(value))
+  keyboard_subscription(kind: "keydown", key: key, value: msgpack::from_data_value(data::encode(value)))
 
 pub fn keyboard_on_key_down<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
   keyboard_payload_subscription(kind: "keydown", key: key).map<Msg>(handler)
@@ -331,7 +328,7 @@ pub fn keyboard_on_key_down<Msg>({
 
 /// Subscribes to global keyup events through the browser VX runtime host.
 pub fn keyboard_on_key_up<Msg>({ key: String, value: Msg }) -> Sub<Msg>
-  keyboard_subscription(kind: "keyup", key: key, value: boundary_value_to_msgpack(value))
+  keyboard_subscription(kind: "keyup", key: key, value: msgpack::from_data_value(data::encode(value)))
 
 pub fn keyboard_on_key_up<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
   keyboard_payload_subscription(kind: "keyup", key: key).map<Msg>(handler)
@@ -350,7 +347,7 @@ pub fn online_status<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "online_status",
     key: key,
-    value: boundary_value_to_msgpack(value)
+    value: msgpack::from_data_value(data::encode(value))
   )
 
 pub fn online_status<Msg>({ key: String, handler: fn(bool) -> Msg }) -> Sub<Msg>
@@ -367,7 +364,7 @@ pub fn window_on_resize<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "window_resize",
     key: key,
-    value: boundary_value_to_msgpack(value)
+    value: msgpack::from_data_value(data::encode(value))
   )
 
 pub fn window_on_resize<Msg>({
@@ -390,7 +387,7 @@ pub fn document_on_visibility_change<Msg>({ key: String, value: Msg }) -> Sub<Ms
   Sub<Msg>::runtime(
     kind: "visibility_change",
     key: key,
-    value: boundary_value_to_msgpack(value)
+    value: msgpack::from_data_value(data::encode(value))
   )
 
 pub fn document_on_visibility_change<Msg>({
@@ -417,7 +414,7 @@ pub fn location_on_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "location_change",
     key: key,
-    value: boundary_value_to_msgpack(value)
+    value: msgpack::from_data_value(data::encode(value))
   )
 
 pub fn location_on_change<Msg>({ key: String, handler: fn(Location) -> Msg }) -> Sub<Msg>
@@ -435,7 +432,7 @@ pub fn window_on_focus<Msg>({ key: String, value: Msg }) -> Sub<Msg>
     kind: "window_focus",
     event: "focus",
     key: key,
-    value: boundary_value_to_msgpack(value)
+    value: msgpack::from_data_value(data::encode(value))
   )
 
 pub fn window_on_focus<Msg>({ key: String, handler: fn(GenericEvent) -> Msg }) -> Sub<Msg>
@@ -456,7 +453,7 @@ pub fn window_on_blur<Msg>({ key: String, value: Msg }) -> Sub<Msg>
     kind: "window_blur",
     event: "blur",
     key: key,
-    value: boundary_value_to_msgpack(value)
+    value: msgpack::from_data_value(data::encode(value))
   )
 
 pub fn window_on_blur<Msg>({ key: String, handler: fn(GenericEvent) -> Msg }) -> Sub<Msg>
@@ -476,7 +473,7 @@ pub fn animation_frame<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "animation_frame",
     key: key,
-    value: boundary_value_to_msgpack(value)
+    value: msgpack::from_data_value(data::encode(value))
   )
 
 pub fn animation_frame<Msg>({
@@ -496,7 +493,7 @@ pub fn animation_frame<Msg>({
 
 /// Subscribes to a browser media query.
 pub fn media_query<Msg>({ query: String, value: Msg }) -> Sub<Msg>
-  media_query_subscription<Msg>(query: query, value: boundary_value_to_msgpack(value))
+  media_query_subscription<Msg>(query: query, value: msgpack::from_data_value(data::encode(value)))
 
 pub fn media_query<Msg>({ query: String, handler: fn(MediaQuery) -> Msg }) -> Sub<Msg>
   media_query_payload_subscription(query).map<Msg>(handler)
@@ -512,7 +509,7 @@ pub fn storage_on_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "storage",
     key: key,
-    value: boundary_value_to_msgpack(value)
+    value: msgpack::from_data_value(data::encode(value))
   )
 
 pub fn storage_on_change<Msg>({ key: String, handler: fn(StorageChange) -> Msg }) -> Sub<Msg>
@@ -529,7 +526,7 @@ pub fn storage_on_change<Msg>({
 
 /// Subscribes to messages from a browser BroadcastChannel.
 pub fn broadcast_channel<Msg>({ name: String, value: Msg }) -> Sub<Msg>
-  broadcast_channel_subscription<Msg>(name: name, value: boundary_value_to_msgpack(value))
+  broadcast_channel_subscription<Msg>(name: name, value: msgpack::from_data_value(data::encode(value)))
 
 pub fn broadcast_channel<Payload, Msg>({
   name: String,
@@ -973,7 +970,7 @@ pub fn event_message<Event, Msg>({ name: StringSlice, message: fn(Event) -> Msg,
   event_message<Event, Msg>(name: name.to_string(), message: message, options: options)
 
 pub fn event_message<Msg>({ name: String, message: Msg, options?: EventOptions }): () -> MsgPack
-  event(name: name, message: boundary_value_to_msgpack(message), options: options)
+  event(name: name, message: msgpack::from_data_value(data::encode(message)), options: options)
 
 pub fn event_message<Msg>({ name: StringSlice, message: Msg, options?: EventOptions }): () -> MsgPack
   event_message<Msg>(name: name.to_string(), message: message, options: options)
@@ -1780,7 +1777,7 @@ pub fn program<Model, Msg>({
 }) -> Program<Model, Msg>
   let ~out = Dict<String, MsgPack>::init()
   out.set("$vx", "runtime_result")
-  out.set("model", boundary_value_to_msgpack(model))
+  out.set("model", msgpack::from_data_value(data::encode(model)))
   if frame is Some:
     out.set("frame", frame.value)
   if commands is Some:

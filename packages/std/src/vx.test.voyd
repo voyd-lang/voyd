@@ -238,46 +238,6 @@ test "vx event helpers encode browser names and options":
   )
   assert_event_descriptor(on_pointer_cancel(6), "pointercancel", 6)
 
-test "vx event helpers encode static runtime messages":
-  let click = on_click_message(msgpack::make_string("save"))
-  match(msgpack::unpack_map(click))
-    Ok<Dict<String, MsgPack>> { value }:
-      assert_string_field(value, "kind", "event")
-      assert_string_field(value, "event", "click")
-      assert_string_field(value, "message", "save")
-    Err:
-      assert(false, eq: true)
-
-  let submit = on_submit_with(
-    options: EventOptions { prevent_default: true },
-    message: msgpack::make_string("submit")
-  )
-  match(msgpack::unpack_map(submit))
-    Ok<Dict<String, MsgPack>> { value }:
-      assert_string_field(value, "kind", "event")
-      assert_string_field(value, "event", "submit")
-      assert_string_field(value, "message", "submit")
-      match(value.get("options"))
-        Some<MsgPack> { value: options }:
-          match(msgpack::unpack_map(options))
-            Ok<Dict<String, MsgPack>> { value: option_map }:
-              assert_bool_field(option_map, "preventDefault", true)
-            Err:
-              assert(false, eq: true)
-        None:
-          assert(false, eq: true)
-    Err:
-      assert(false, eq: true)
-
-  let input = on_input_message(msgpack::make_string("draft"))
-  match(msgpack::unpack_map(input))
-    Ok<Dict<String, MsgPack>> { value }:
-      assert_string_field(value, "kind", "event")
-      assert_string_field(value, "event", "input")
-      assert_string_field(value, "message", "draft")
-    Err:
-      assert(false, eq: true)
-
 test "vx typed event messages encode through the boundary":
   let click = event_message(name: "click", message: TypedVxTestMsg::Saved {})
   match(msgpack::unpack_map(click))

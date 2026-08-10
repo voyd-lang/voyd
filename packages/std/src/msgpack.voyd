@@ -118,20 +118,13 @@ pub fn decode<T>(bytes: Bytes): () -> Result<T, MsgPackError>
 pub fn decode_value_bytes(bytes: Bytes): () -> Result<MsgPack, MsgPackError>
   msgpack_fns::decode_value_bytes(bytes)
 
-/// Encodes a boundary-compatible DTO value with its compiler-derived schema.
-///
-/// Record keys use their declared source names, optional fields are omitted
-/// when absent, and named variants use `$variant` plus their payload fields.
-pub fn pack_boundary_value<T>(value: T): () -> MsgPack
-  boundary_value_to_msgpack(value)
+/// Converts a provider-neutral dynamic value into the parsed MessagePack tree.
+pub fn from_data_value(value: DataValue): () -> MsgPack
+  data_value_to_msgpack(value)
 
-/// Decodes MessagePack using the compiler-derived schema for `T`.
-pub fn unpack_boundary_value<T>(value: MsgPack): () -> T
-  boundary_msgpack_to_value<T>(value)
-
-/// Returns `source` when it already has the target type; otherwise decodes `value`.
-pub fn unpack_boundary_value_or_identity<T, U>(source: U, value: MsgPack): () -> T
-  boundary_msgpack_to_value_or_identity<T, U>(source, value)
+/// Converts a parsed MessagePack tree into a provider-neutral dynamic value.
+pub fn to_data_value(value: MsgPack): () -> DataValue
+  msgpack_to_data_value(value)
 
 pub fn unpack_bool(value: MsgPack): () -> Result<bool, MsgPackError>
   value.match(decoded)
@@ -272,18 +265,6 @@ fn msgpack_make_bytes(value: Bytes): () -> MsgPack
 @compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-bytes")
 fn msgpack_unpack_bytes(value: MsgPack): () -> Bytes
   Bytes { storage: msgpack_fns::unpack_binary(value).bytes }
-
-@intrinsic(name: "__boundary_value_to_msgpack")
-fn boundary_value_to_msgpack<T>(value: T): () -> MsgPack
-  __boundary_value_to_msgpack(value)
-
-@intrinsic(name: "__boundary_msgpack_to_value")
-fn boundary_msgpack_to_value<T>(value: MsgPack): () -> T
-  __boundary_msgpack_to_value<T>(value)
-
-@intrinsic(name: "__boundary_msgpack_to_value_or_identity")
-fn boundary_msgpack_to_value_or_identity<T, U>(source: U, value: MsgPack): () -> T
-  __boundary_msgpack_to_value_or_identity<T, U>(source, value)
 
 /// Encodes `value` into the caller-provided memory region `[ptr, ptr + len)`.
 ///

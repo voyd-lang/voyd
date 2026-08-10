@@ -1,9 +1,9 @@
-use std::msgpack::{ make_null, unpack_boundary_value }
+use std::data::encode
 
 obj UnsupportedBoundaryValue {
   callback: fn() -> i32
 }
 
 pub fn main() -> void
-  unpack_boundary_value<UnsupportedBoundaryValue>(make_null())
+  encode(UnsupportedBoundaryValue { callback: () -> i32 => 1 })
   void

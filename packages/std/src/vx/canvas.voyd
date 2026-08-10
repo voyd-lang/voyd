@@ -1,8 +1,10 @@
 //! Typed Canvas rendering and measurement commands for VX.
 
 use std::array::Array
+use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
+use std::error::panic
 use std::msgpack::MsgPack
 use std::msgpack::self as msgpack
 use std::optional::types::all
@@ -107,7 +109,7 @@ type FrameDto = {
 
 /// A typed segment in a Canvas path.
 pub obj PathSegment {
-  api payload: MsgPack,
+  payload: MsgPack,
   pri dto?: PathSegmentDto
 }
 
@@ -145,25 +147,25 @@ pub enum CompositeOperation
 
 /// A typed canvas draw or state operation produced by the Canvas constructors.
 pub obj Draw {
-  api payload: MsgPack,
+  payload: MsgPack,
   pri dto?: DrawDto
 }
 
 /// A versioned canvas frame ready for the browser VX runtime.
 pub obj Frame {
-  api payload: MsgPack
+  payload: MsgPack
 }
 
 /// A radial fill used by canvas circles.
 pub obj RadialGradient {
-  api payload: MsgPack,
+  payload: MsgPack,
   pri dto?: RadialGradientDto
 }
 
 impl PathSegment
   fn from_boundary_dto(dto: PathSegmentDto) -> PathSegment
     PathSegment {
-      payload: msgpack::pack_boundary_value(dto),
+      payload: msgpack::from_data_value(data::encode(dto)),
       dto
     }
 
@@ -172,12 +174,12 @@ impl PathSegment
       Some<PathSegmentDto> { value }:
         value
       None:
-        msgpack::unpack_boundary_value<PathSegmentDto>(self.payload)
+        msgpack_to_dto<PathSegmentDto>(self.payload)
 
 impl Draw
   fn from_boundary_dto(dto: DrawDto) -> Draw
     Draw {
-      payload: msgpack::pack_boundary_value(dto),
+      payload: msgpack::from_data_value(data::encode(dto)),
       dto
     }
 
@@ -186,12 +188,12 @@ impl Draw
       Some<DrawDto> { value }:
         value
       None:
-        msgpack::unpack_boundary_value<DrawDto>(self.payload)
+        msgpack_to_dto<DrawDto>(self.payload)
 
 impl RadialGradient
   fn from_boundary_dto(dto: RadialGradientDto) -> RadialGradient
     RadialGradient {
-      payload: msgpack::pack_boundary_value(dto),
+      payload: msgpack::from_data_value(data::encode(dto)),
       dto
     }
 
@@ -200,7 +202,7 @@ impl RadialGradient
       Some<RadialGradientDto> { value }:
         value
       None:
-        msgpack::unpack_boundary_value<RadialGradientDto>(self.payload)
+        msgpack_to_dto<RadialGradientDto>(self.payload)
 
 /// Logical CSS-pixel metrics returned by `measure_text`.
 pub type TextMetrics = {
@@ -438,7 +440,7 @@ pub fn frame({
     background,
     draws: draw_dtos(draws)
   }
-  Frame { payload: msgpack::pack_boundary_value(value) }
+  Frame { payload: msgpack::from_data_value(data::encode(value)) }
 
 /// Creates a straight canvas line.
 pub fn line({
@@ -586,6 +588,14 @@ fn draw_dtos(draws: Array<Draw>) -> Array<DrawDto>
         void
     index = index + 1
   out
+
+fn msgpack_to_dto<T>(value: MsgPack) -> T
+  match(data::decode<T>(msgpack::to_data_value(value)))
+    Ok<T> { value }:
+      value
+    Err:
+      panic("invalid internal canvas DTO".as_slice())
+      msgpack_to_dto<T>(value)
 
 fn fill_rule_name(value: FillRule) -> String
   value.match(active)

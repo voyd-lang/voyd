@@ -8451,30 +8451,6 @@ const typeIntrinsicCall = (
       });
       assertNoIntrinsicTypeArgs("__stable_callsite_id", typeArguments);
       return getPrimitiveType(ctx, "i32");
-    case "__boundary_value_to_msgpack":
-      return typeBoundaryValueToMsgPackIntrinsic({
-        args,
-        ctx,
-        typeArguments,
-        expectedReturnType,
-      });
-    case "__boundary_msgpack_to_value":
-      return typeBoundaryMsgPackToValueIntrinsic({
-        args,
-        typeArguments,
-      });
-    case "__boundary_msgpack_to_value_or_identity":
-      assertIntrinsicArgCount({
-        name: "__boundary_msgpack_to_value_or_identity",
-        args,
-        expected: 2,
-      });
-      if ((typeArguments?.length ?? 0) !== 2) {
-        throw new Error(
-          "intrinsic __boundary_msgpack_to_value_or_identity requires exactly 2 type arguments",
-        );
-      }
-      return typeArguments![0]!;
     case "__dto_value_to_data":
       assertIntrinsicArgCount({
         name: "__dto_value_to_data",
@@ -9329,47 +9305,6 @@ const typeBoundaryRetainCallbackIntrinsic = ({
     throw new Error(`${name} expects a function argument`);
   }
   return getPrimitiveType(ctx, "i32");
-};
-
-const typeBoundaryValueToMsgPackIntrinsic = ({
-  args,
-  ctx,
-  typeArguments,
-  expectedReturnType,
-}: {
-  args: readonly Arg[];
-  ctx: TypingContext;
-  typeArguments?: readonly TypeId[];
-  expectedReturnType?: TypeId;
-}): TypeId => {
-  assertIntrinsicArgCount({
-    name: "__boundary_value_to_msgpack",
-    args,
-    expected: 1,
-    detail: "boundary value",
-  });
-  assertNoIntrinsicTypeArgs("__boundary_value_to_msgpack", typeArguments);
-  return expectedReturnType ?? ctx.primitives.unknown;
-};
-
-const typeBoundaryMsgPackToValueIntrinsic = ({
-  args,
-  typeArguments,
-}: {
-  args: readonly Arg[];
-  typeArguments?: readonly TypeId[];
-}): TypeId => {
-  assertIntrinsicArgCount({
-    name: "__boundary_msgpack_to_value",
-    args,
-    expected: 1,
-    detail: "MessagePack value",
-  });
-  return requireSingleTypeArgument({
-    name: "__boundary_msgpack_to_value",
-    typeArguments,
-    detail: "target type",
-  });
 };
 
 const typeTaskTakeValueIntrinsic = ({

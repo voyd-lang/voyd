@@ -25,7 +25,7 @@ const expectCompileSuccess = (
 };
 
 const buildModule = async ({
-  entryFile = "msgpack-export.voyd",
+  entryFile = "boundary-export.voyd",
   codegenOptions,
 }: {
   entryFile?: string;
@@ -56,28 +56,6 @@ const buildModule = async ({
 };
 
 describe("export abi metadata", { timeout: 60_000 }, () => {
-  it("marks msgpack signatures as serialized", async () => {
-    const wasm = await buildModule();
-    const module = new WebAssembly.Module(wasmBufferSource(wasm));
-    const abi = parseExportAbi(module);
-
-    expect(abi.version).toBe(2);
-    expect(abi.host).toEqual({
-      hostAbi: 2,
-      dtoSchemaAbi: 1,
-      transport: { id: "voyd.std.msgpack", version: 1 },
-    });
-    expect(withoutExportIds(abi.exports)).toEqual([
-      { name: "add", abi: "direct" },
-      { name: "echo", abi: "serialized" },
-      {
-        name: "fetch_items",
-        abi: "serialized",
-        params: [],
-      },
-    ]);
-  });
-
   it("does not serialize unrelated DTO-compatible exports in boundary modules", async () => {
     const wasm = await buildModule({
       entryFile: "boundary-export-contract.voyd",
@@ -194,59 +172,22 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     ).toContain("boundary DTO incompatibility");
   });
 
-  it("round-trips msgpack values for serialized exports", async () => {
-    const wasm = await buildModule();
-    const host = await createVoydHost({ wasm });
-    const payload = [1, "hi", [true, 2]];
-    const result = await host.runPure("echo", [payload]);
-    expect(result).toEqual(payload);
-  });
-
-  it("fetches msgpack values for serialized exports", async () => {
-    const wasm = await buildModule();
-    const host = await createVoydHost({ wasm });
-    const result = await host.runPure("fetch_items", []);
-    expect(result).toEqual(["a", "b", "c"]);
-  });
-
-  it("keeps serialized export helpers reachable under optimization without boundary exports", async () => {
-    const wasm = await buildModule({
-      codegenOptions: { optimize: true, boundaryExports: false },
-    });
-    const host = await createVoydHost({ wasm });
-    const result = await host.runPure("fetch_items", []);
-    expect(result).toEqual(["a", "b", "c"]);
-  });
-
-  it("keeps helpers for reachable internal boundary intrinsics under optimization", async () => {
-    const wasm = await buildModule({
-      entryFile: "internal-boundary-intrinsics.voyd",
-      codegenOptions: {
-        optimizationLevel: "release",
-        boundaryExports: false,
-      },
-    });
-    const host = await createVoydHost({ wasm });
-
-    await expect(host.runPure("main", [])).resolves.toBe(42);
-  });
-
-  it("locates unsupported and ambiguous derived boundary codec shapes", async () => {
+  it("locates unsupported and ambiguous DTO shapes", async () => {
     const cases = [
       {
         fixture: "boundary-derived-codec-unsupported.voyd",
-        path: "__boundary_msgpack_to_value target",
+        path: "data::encode value",
         expected: "fn() -> i32 is not a supported DTO shape",
       },
       {
         fixture: "boundary-derived-codec-ambiguous.voyd",
-        path: "__boundary_value_to_msgpack value",
+        path: "data::encode value",
         expected:
           'variant payload fields named "tag" conflict with the JS boundary discriminator',
       },
       {
         fixture: "boundary-derived-codec-duplicate-variant.voyd",
-        path: "__boundary_value_to_msgpack value.RepeatedBoundaryVariant",
+        path: "data::encode value.RepeatedBoundaryVariant",
         expected:
           'multiple union variants use the "$variant" discriminator "RepeatedBoundaryVariant"',
       },
@@ -285,50 +226,6 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
       (entry) => entry.name,
     );
     expect(exports).toContain("memory");
-  });
-
-  it("round-trips complex msgpack values", async () => {
-    const wasm = await buildModule();
-    const host = await createVoydHost({ wasm });
-    const payload = {
-      user: { name: "Ada", tags: ["math", "logic"] },
-      counts: [1, 2, 3],
-      ok: true,
-      nested: [{ id: 1 }, { id: 2, flags: [true, false] }],
-    };
-    const result = await host.runPure("echo", [payload]);
-
-    const normalize = (value: unknown): unknown => {
-      if (Array.isArray(value)) {
-        return value.map(normalize);
-      }
-      if (value instanceof Map) {
-        return Object.fromEntries(
-          Array.from(value.entries()).map(([key, entry]) => [
-            String(key),
-            normalize(entry),
-          ]),
-        );
-      }
-      if (value && typeof value === "object") {
-        return Object.fromEntries(
-          Object.entries(value).map(([key, entry]) => [key, normalize(entry)]),
-        );
-      }
-      return value;
-    };
-
-    expect(normalize(result)).toEqual(payload);
-  });
-
-  it("marks imported recursive msgpack aliases as serialized", async () => {
-    const wasm = await buildModule({ entryFile: "msgpack_import_main.voyd" });
-    const module = new WebAssembly.Module(wasmBufferSource(wasm));
-    const abi = parseExportAbi(module);
-
-    expect(withoutExportIds(abi.exports)).toEqual([
-      { name: "fetch", abi: "serialized" },
-    ]);
   });
 
   it("emits schema metadata and distinct wrappers for automatic boundary exports", async () => {
