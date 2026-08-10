@@ -13,25 +13,25 @@ const parseFunction = (text: string) => {
 
 test("@compiler_contract attaches an ordinary function contract id", (t) => {
   const fn =
-    parseFunction(`@compiler_contract(id: "voyd.std.boundary.msgpack.make-null")
+    parseFunction(`@compiler_contract(id: "voyd.std.host-transport.msgpack.make-null")
 fn make_null() -> i32
   0`);
 
   t.expect(
     fn.attributes?.compilerContract as CompilerContractAttribute | undefined,
-  ).toEqual({ id: "voyd.std.boundary.msgpack.make-null" });
+  ).toEqual({ id: "voyd.std.host-transport.msgpack.make-null" });
   t.expect(fn.attributes?.intrinsic).toBeUndefined();
 });
 
 test("@compiler_contract composes with @intrinsic", (t) => {
   const fn =
-    parseFunction(`@compiler_contract(id: "voyd.std.boundary.msgpack.string-new")
+    parseFunction(`@compiler_contract(id: "voyd.std.host-transport.msgpack.string-new")
 @intrinsic(name: "__string_new", uses_signature: true)
 fn new_string(bytes: i32) -> i32
   bytes`);
 
   t.expect(fn.attributes?.compilerContract).toEqual({
-    id: "voyd.std.boundary.msgpack.string-new",
+    id: "voyd.std.host-transport.msgpack.string-new",
   });
   t.expect(fn.attributes?.intrinsic).toEqual({
     name: "__string_new",
@@ -41,7 +41,7 @@ fn new_string(bytes: i32) -> i32
 
 test("@compiler_contract requires exactly one labeled string id", (t) => {
   t.expect(() =>
-    parse(`@compiler_contract("voyd.std.boundary.msgpack.make-null")
+    parse(`@compiler_contract("voyd.std.host-transport.msgpack.make-null")
 fn bad() -> i32
   0`),
   ).toThrow(/must be labeled with ':'/);
@@ -67,14 +67,14 @@ fn bad() -> i32
 
 test("@compiler_contract rejects duplicate attributes and wrong targets", (t) => {
   t.expect(() =>
-    parse(`@compiler_contract(id: "voyd.std.boundary.msgpack.make-null")
-@compiler_contract(id: "voyd.std.boundary.msgpack.make-bool")
+    parse(`@compiler_contract(id: "voyd.std.host-transport.msgpack.make-null")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.make-bool")
 fn bad() -> i32
   0`),
   ).toThrow(/duplicate @compiler_contract attribute/);
 
   t.expect(() =>
-    parse(`@compiler_contract(id: "voyd.std.boundary.msgpack.make-null")
+    parse(`@compiler_contract(id: "voyd.std.host-transport.msgpack.make-null")
 let bad = 0`),
   ).toThrow(/must precede a function/);
 });

@@ -79,7 +79,7 @@ The supported metadata has four distinct jobs:
 
 - `@compiler_contract(id: "...")` assigns an ordinary std function a stable,
   compiler-owned role. Role IDs use dotted capability names; the current
-  catalog is the `voyd.std.boundary.msgpack.*` family in
+  catalog is the `voyd.std.host-transport.msgpack.*` family in
   `packages/compiler/src/compiler-contracts/function-contracts.ts`. The
   boundary serializer, decoder, value constructors/accessors, array/map
   helpers, and string constructor each have a separate role ID. Optimizer
@@ -87,7 +87,7 @@ The supported metadata has four distinct jobs:
   symbol arena instead of repeating function names and module paths.
   Synthetic loaders that must place providers in the module graph before this
   metadata exists use the single catalog-owned
-  `BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES` bootstrap list; it is never used
+  `MSGPACK_HOST_TRANSPORT_CONTRACT_PROVIDER_MODULES` bootstrap list; it is never used
   as a codegen identity.
 - `@intrinsic_type(type: "...")` supplies nominal type identity for
   compiler-known types. The std identities currently consumed by optimization

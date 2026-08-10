@@ -10,7 +10,7 @@ import { parse } from "../parser/index.js";
 import { semanticsPipeline } from "../semantics/pipeline.js";
 import type { ModuleGraph, ModuleNode, ModulePath } from "../modules/types.js";
 import {
-  BOUNDARY_MSGPACK_CONTRACT_IDS,
+  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
   STD_INTRINSIC_TYPE,
 } from "../compiler-contracts/index.js";
 
@@ -96,7 +96,9 @@ pub fn main() -> i32
     });
 
     const { semantics, diagnostics } = analyzeModules({ graph });
-    expect(diagnostics.filter((diag) => diag.severity === "error")).toHaveLength(0);
+    expect(
+      diagnostics.filter((diag) => diag.severity === "error"),
+    ).toHaveLength(0);
 
     const modules = Array.from(semantics.values());
     const arenaA = buildProgramSymbolArena(modules);
@@ -123,7 +125,7 @@ pub fn main() -> i32
   });
 
   it("rejects duplicate contract declarations deterministically", () => {
-    const contractId = BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull;
+    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull;
     const left = analyzeContractModule({ name: "left", contractId });
     const right = analyzeContractModule({ name: "right", contractId });
 
@@ -140,7 +142,7 @@ pub fn main() -> i32
     const reverse = captureError([right, left]);
     expect(forward).toBe(reverse);
     expect(forward).toMatch(
-      /duplicate compiler function contract 'voyd\.std\.boundary\.msgpack\.make-null'/,
+      /duplicate compiler function contract 'voyd\.std\.host-transport\.msgpack\.make-null'/,
     );
     expect(forward).toMatch(/std::left.*std::right/);
   });
@@ -178,7 +180,7 @@ pub fn main() -> i32
   it("does not expose compiler contracts on imported aliases", async () => {
     const srcRoot = resolve("/contract-alias/src");
     const stdRoot = resolve("/contract-alias/std");
-    const contractId = BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull;
+    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull;
     const host = createMemoryHost({
       [`${srcRoot}${sep}main.voyd`]: `use std::{ contract_target }
 
@@ -257,9 +259,7 @@ pub obj ArrayProvider {}`,
     if (alias === undefined) {
       return;
     }
-    expect(main.symbols.getIntrinsicType(alias)).toBe(
-      STD_INTRINSIC_TYPE.array,
-    );
+    expect(main.symbols.getIntrinsicType(alias)).toBe(STD_INTRINSIC_TYPE.array);
     expect(main.symbols.getStdIntrinsicTypeContract(alias)).toBeUndefined();
 
     const arena = buildProgramSymbolArena(Array.from(semantics.values()));

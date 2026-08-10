@@ -1,7 +1,7 @@
 import binaryen from "binaryen";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
-import { BOUNDARY_MSGPACK_CONTRACT_IDS } from "../../compiler-contracts/index.js";
+import { MSGPACK_HOST_TRANSPORT_CONTRACT_IDS } from "../../compiler-contracts/index.js";
 import { isPackageVisible } from "../../semantics/hir/index.js";
 import {
   collectEffectOperationSignatures,
@@ -48,7 +48,11 @@ const widenSignature: EffectsAbiStrategy["widenSignature"] = ({
         resultType: effectfulResultType(ctx),
         userParamOffset: 1,
       }
-    : { paramTypes: userParamTypes, resultType: userResultType, userParamOffset: 0 };
+    : {
+        paramTypes: userParamTypes,
+        resultType: userResultType,
+        userParamOffset: 0,
+      };
 
 const parseSignatureLabel = (
   label: string,
@@ -95,7 +99,11 @@ const emitMissingEffectIdWarningsForHostBoundary = ({
     const effectMeta = moduleCtx.module.meta.effects.find(
       (effect) => effect.name === parsed.effectName,
     );
-    if (!effectMeta || effectMeta.effectId || !isPackageVisible(effectMeta.visibility)) {
+    if (
+      !effectMeta ||
+      effectMeta.effectId ||
+      !isPackageVisible(effectMeta.visibility)
+    ) {
       return;
     }
 
@@ -134,7 +142,9 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
     return;
   }
 
-  const missingContracts = Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS).filter(
+  const missingContracts = Object.values(
+    MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
+  ).filter(
     (contractId) =>
       entryCtx.program.symbols.resolveCompilerFunctionContract(contractId) ===
       undefined,
@@ -145,12 +155,12 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
         code: "CG0001",
         params: {
           kind: "codegen-error",
-          message: `effectful exports require boundary-msgpack compiler contracts; missing: ${missingContracts.join(
+          message: `effectful exports require host-transport-msgpack compiler contracts; missing: ${missingContracts.join(
             ", ",
           )} (provide a compatible std root or disable the host boundary via effectsHostBoundary: "off")`,
         },
         span: entryCtx.module.hir.module.span,
-      })
+      }),
     );
     return;
   }
@@ -185,7 +195,7 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
             message: formatHostBoundaryPayloadViolation(violation),
           },
           span: violation.span,
-        })
+        }),
       );
     });
     return;
@@ -217,27 +227,31 @@ const emitHostBoundary: EffectsAbiStrategy["emitHostBoundary"] = ({
     runtime: entryCtx.effectsRuntime,
     resumeContinuation,
   });
-  ensureEffectResultAccessors({ ctx: entryCtx, runtime: entryCtx.effectsRuntime });
+  ensureEffectResultAccessors({
+    ctx: entryCtx,
+    runtime: entryCtx.effectsRuntime,
+  });
 
   effectfulExports
-    .filter((target): target is typeof target & { meta: FunctionMetadata } =>
-      target.emitEntry !== false
+    .filter(
+      (target): target is typeof target & { meta: FunctionMetadata } =>
+        target.emitEntry !== false,
     )
     .forEach(({ meta, exportName }) => {
-    createEffectfulEntry({
-      ctx: entryCtx,
-      runtime: entryCtx.effectsRuntime,
-      meta,
-      handleOutcome,
-      exportName: `${exportName}_effectful`,
+      createEffectfulEntry({
+        ctx: entryCtx,
+        runtime: entryCtx.effectsRuntime,
+        meta,
+        handleOutcome,
+        exportName: `${exportName}_effectful`,
+      });
+      createEffectfulEntryRaw({
+        ctx: entryCtx,
+        runtime: entryCtx.effectsRuntime,
+        meta,
+        exportName: `${exportName}_effectful_raw`,
+      });
     });
-    createEffectfulEntryRaw({
-      ctx: entryCtx,
-      runtime: entryCtx.effectsRuntime,
-      meta,
-      exportName: `${exportName}_effectful_raw`,
-    });
-  });
 };
 
 export const gcTrampolineAbiStrategy: EffectsAbiStrategy = {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
-  BOUNDARY_MSGPACK_CONTRACT_IDS,
+  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
   getCompilerFunctionContractSpec,
 } from "../../compiler-contracts/index.js";
 import type {
@@ -34,7 +34,7 @@ const analyze = ({ source, path }: { source: string; path: ModulePath }) => {
 
 describe("compiler function contracts", () => {
   it("binds typed metadata without making an ordinary function intrinsic", () => {
-    const contractId = BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull;
+    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull;
     const semantics = analyze({
       source: `@compiler_contract(id: "${contractId}")
 fn contract_target() -> i32
@@ -73,7 +73,7 @@ fn contract_target() -> i32
   });
 
   it("rejects contracts outside std, unknown ids, and wrong arity", () => {
-    const contractId = BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull;
+    const contractId = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull;
     expect(() =>
       analyze({
         source: `@compiler_contract(id: "${contractId}")

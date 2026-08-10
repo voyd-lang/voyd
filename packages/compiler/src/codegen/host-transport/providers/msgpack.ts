@@ -1,8 +1,8 @@
 import type { CodegenContext, FunctionMetadata } from "../../context.js";
 import type { ProgramSymbolId, TypeId } from "../../../semantics/ids.js";
 import {
-  BOUNDARY_MSGPACK_CONTRACT_IDS,
-  validateBoundaryMsgpackFunctionContracts,
+  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
+  validateMsgpackHostTransportFunctionContracts,
   type CompilerFunctionContractId,
 } from "../../../compiler-contracts/index.js";
 import { requireFunctionMetaByCompilerContract } from "../../function-lookup.js";
@@ -42,7 +42,9 @@ export type MsgPackProviderFunctions = {
   mapTagIs: FunctionMetadata;
 };
 
-const MSGPACK_PROVIDER_FUNCS_KEY = Symbol("voyd.hostTransport.msgpackProviderFunctions");
+const MSGPACK_PROVIDER_FUNCS_KEY = Symbol(
+  "voyd.hostTransport.msgpackProviderFunctions",
+);
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 
 type ReachabilityState = {
@@ -76,75 +78,120 @@ const requireContract = (
   requireFunctionMetaByCompilerContract({ ctx, contractId });
 
 export const ensureMsgPackProviderFunctions = (
-  ctx: CodegenContext
+  ctx: CodegenContext,
 ): MsgPackProviderFunctions =>
   stateFor(ctx, MSGPACK_PROVIDER_FUNCS_KEY, () => {
     const { msgpack: valueTypeId } =
-      validateBoundaryMsgpackFunctionContracts(ctx.program);
+      validateMsgpackHostTransportFunctionContracts(ctx.program);
     const functions = {
       encodeValue: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.encodeValue,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue,
       ),
       decodeValue: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.decodeValue,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.decodeValue,
       ),
-      makeNull: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull),
-      makeBool: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeBool),
+      makeNull: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull,
+      ),
+      makeBool: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeBool,
+      ),
       makeString: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.makeString,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeString,
       ),
       makeBytes: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.makeBytes,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeBytes,
       ),
-      makeArray: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeArray),
-      makeI32: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeI32),
-      makeI64: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeI64),
-      makeF32: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeF32),
-      makeF64: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeF64),
-      makeMap: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.makeMap),
+      makeArray: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeArray,
+      ),
+      makeI32: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeI32,
+      ),
+      makeI64: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeI64,
+      ),
+      makeF32: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeF32,
+      ),
+      makeF64: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeF64,
+      ),
+      makeMap: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeMap,
+      ),
       unpackBool: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.unpackBool,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackBool,
       ),
       unpackString: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.unpackString,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackString,
       ),
       unpackBytes: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.unpackBytes,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackBytes,
       ),
       unpackArray: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.unpackArray,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackArray,
       ),
-      unpackI32: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.unpackI32),
-      unpackI64: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.unpackI64),
-      unpackF32: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.unpackF32),
-      unpackF64: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.unpackF64),
-      unpackMap: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.unpackMap),
+      unpackI32: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackI32,
+      ),
+      unpackI64: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackI64,
+      ),
+      unpackF32: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackF32,
+      ),
+      unpackF64: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackF64,
+      ),
+      unpackMap: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackMap,
+      ),
       arrayWithCapacity: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.arrayWithCapacity,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayWithCapacity,
       ),
-      arrayPush: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.arrayPush),
+      arrayPush: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayPush,
+      ),
       arrayLength: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.arrayLength,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayLength,
       ),
       arrayRawStorage: requireContract(
         ctx,
-        BOUNDARY_MSGPACK_CONTRACT_IDS.arrayRawStorage,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayRawStorage,
       ),
-      mapNew: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapNew),
-      mapSet: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapSet),
-      mapGet: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapGet),
-      mapHas: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapHas),
-      mapTagIs: requireContract(ctx, BOUNDARY_MSGPACK_CONTRACT_IDS.mapTagIs),
+      mapNew: requireContract(ctx, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapNew),
+      mapSet: requireContract(ctx, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapSet),
+      mapGet: requireContract(ctx, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapGet),
+      mapHas: requireContract(ctx, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapHas),
+      mapTagIs: requireContract(
+        ctx,
+        MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapTagIs,
+      ),
     };
     const msgpack: MsgPackProviderFunctions = {
       valueTypeId,
@@ -160,7 +207,7 @@ export const ensureMsgPackProviderFunctions = (
     );
     const stringNew = requireContract(
       ctx,
-      BOUNDARY_MSGPACK_CONTRACT_IDS.newString,
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.newString,
     );
     markReachable({
       ctx,

@@ -1,35 +1,35 @@
-export const BOUNDARY_MSGPACK_CONTRACT_IDS = {
-  encodeValue: "voyd.std.boundary.msgpack.encode-value",
-  decodeValue: "voyd.std.boundary.msgpack.decode-value",
-  makeNull: "voyd.std.boundary.msgpack.make-null",
-  makeBool: "voyd.std.boundary.msgpack.make-bool",
-  makeString: "voyd.std.boundary.msgpack.make-string",
-  makeBytes: "voyd.std.boundary.msgpack.make-bytes",
-  makeArray: "voyd.std.boundary.msgpack.make-array",
-  makeI32: "voyd.std.boundary.msgpack.make-i32",
-  makeI64: "voyd.std.boundary.msgpack.make-i64",
-  makeF32: "voyd.std.boundary.msgpack.make-f32",
-  makeF64: "voyd.std.boundary.msgpack.make-f64",
-  makeMap: "voyd.std.boundary.msgpack.make-map",
-  unpackBool: "voyd.std.boundary.msgpack.unpack-bool",
-  unpackString: "voyd.std.boundary.msgpack.unpack-string",
-  unpackBytes: "voyd.std.boundary.msgpack.unpack-bytes",
-  unpackArray: "voyd.std.boundary.msgpack.unpack-array",
-  unpackI32: "voyd.std.boundary.msgpack.unpack-i32",
-  unpackI64: "voyd.std.boundary.msgpack.unpack-i64",
-  unpackF32: "voyd.std.boundary.msgpack.unpack-f32",
-  unpackF64: "voyd.std.boundary.msgpack.unpack-f64",
-  unpackMap: "voyd.std.boundary.msgpack.unpack-map",
-  arrayWithCapacity: "voyd.std.boundary.msgpack.array-with-capacity",
-  arrayPush: "voyd.std.boundary.msgpack.array-push",
-  arrayLength: "voyd.std.boundary.msgpack.array-length",
-  arrayRawStorage: "voyd.std.boundary.msgpack.array-raw-storage",
-  mapNew: "voyd.std.boundary.msgpack.map-new",
-  mapSet: "voyd.std.boundary.msgpack.map-set",
-  mapGet: "voyd.std.boundary.msgpack.map-get",
-  mapHas: "voyd.std.boundary.msgpack.map-has",
-  mapTagIs: "voyd.std.boundary.msgpack.map-tag-is",
-  newString: "voyd.std.boundary.msgpack.string-new",
+export const MSGPACK_HOST_TRANSPORT_CONTRACT_IDS = {
+  encodeValue: "voyd.std.host-transport.msgpack.encode-value",
+  decodeValue: "voyd.std.host-transport.msgpack.decode-value",
+  makeNull: "voyd.std.host-transport.msgpack.make-null",
+  makeBool: "voyd.std.host-transport.msgpack.make-bool",
+  makeString: "voyd.std.host-transport.msgpack.make-string",
+  makeBytes: "voyd.std.host-transport.msgpack.make-bytes",
+  makeArray: "voyd.std.host-transport.msgpack.make-array",
+  makeI32: "voyd.std.host-transport.msgpack.make-i32",
+  makeI64: "voyd.std.host-transport.msgpack.make-i64",
+  makeF32: "voyd.std.host-transport.msgpack.make-f32",
+  makeF64: "voyd.std.host-transport.msgpack.make-f64",
+  makeMap: "voyd.std.host-transport.msgpack.make-map",
+  unpackBool: "voyd.std.host-transport.msgpack.unpack-bool",
+  unpackString: "voyd.std.host-transport.msgpack.unpack-string",
+  unpackBytes: "voyd.std.host-transport.msgpack.unpack-bytes",
+  unpackArray: "voyd.std.host-transport.msgpack.unpack-array",
+  unpackI32: "voyd.std.host-transport.msgpack.unpack-i32",
+  unpackI64: "voyd.std.host-transport.msgpack.unpack-i64",
+  unpackF32: "voyd.std.host-transport.msgpack.unpack-f32",
+  unpackF64: "voyd.std.host-transport.msgpack.unpack-f64",
+  unpackMap: "voyd.std.host-transport.msgpack.unpack-map",
+  arrayWithCapacity: "voyd.std.host-transport.msgpack.array-with-capacity",
+  arrayPush: "voyd.std.host-transport.msgpack.array-push",
+  arrayLength: "voyd.std.host-transport.msgpack.array-length",
+  arrayRawStorage: "voyd.std.host-transport.msgpack.array-raw-storage",
+  mapNew: "voyd.std.host-transport.msgpack.map-new",
+  mapSet: "voyd.std.host-transport.msgpack.map-set",
+  mapGet: "voyd.std.host-transport.msgpack.map-get",
+  mapHas: "voyd.std.host-transport.msgpack.map-has",
+  mapTagIs: "voyd.std.host-transport.msgpack.map-tag-is",
+  newString: "voyd.std.host-transport.msgpack.string-new",
 } as const;
 
 export const DTO_DATA_CONTRACT_IDS = {
@@ -87,7 +87,7 @@ export const WEB_RENDER_CONTRACT_IDS = {
 } as const;
 
 export type CompilerFunctionContractId =
-  | (typeof BOUNDARY_MSGPACK_CONTRACT_IDS)[keyof typeof BOUNDARY_MSGPACK_CONTRACT_IDS]
+  | (typeof MSGPACK_HOST_TRANSPORT_CONTRACT_IDS)[keyof typeof MSGPACK_HOST_TRANSPORT_CONTRACT_IDS]
   | (typeof DTO_DATA_CONTRACT_IDS)[keyof typeof DTO_DATA_CONTRACT_IDS]
   | (typeof WEB_RENDER_CONTRACT_IDS)[keyof typeof WEB_RENDER_CONTRACT_IDS];
 
@@ -96,14 +96,14 @@ export type CompilerFunctionContractId =
  * graph before contract metadata can be indexed. Consumers must resolve roles
  * by ID after loading; these paths are not codegen identities.
  */
-export const BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES = [
+export const MSGPACK_HOST_TRANSPORT_CONTRACT_PROVIDER_MODULES = [
   "std::msgpack",
   "std::msgpack::fns",
   "std::string",
 ] as const;
 
 export type CompilerContractFeature =
-  | "boundary-msgpack"
+  | "host-transport-msgpack"
   | "dto-data"
   | "retained-callback-call-scope";
 
@@ -187,7 +187,7 @@ const contract = (
   result: CompilerContractTypeSpec,
 ): CompilerFunctionContractSpec => ({
   id,
-  feature: "boundary-msgpack",
+  feature: "host-transport-msgpack",
   expectedArity: parameters.length,
   provider: { namespace: "std" },
   signature: {
@@ -201,99 +201,156 @@ const contract = (
   },
 });
 
-const boundaryMsgpackContractSpecs: readonly CompilerFunctionContractSpec[] = [
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.encodeValue,
-    [type.msgpack, type.i32, type.i32],
-    type.i32,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.decodeValue,
-    [type.i32, type.i32],
-    type.msgpack,
-  ),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull, [], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeBool, [type.bool], type.msgpack),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.makeString,
-    [type.string],
-    type.msgpack,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.makeBytes,
-    [type.bytes],
-    type.msgpack,
-  ),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeArray, [type.array], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeI32, [type.i32], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeI64, [type.i64], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeF32, [type.f32], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeF64, [type.f64], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.makeMap, [type.map], type.msgpack),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackBool, [type.msgpack], type.bool),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.unpackString,
-    [type.msgpack],
-    type.string,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.unpackBytes,
-    [type.msgpack],
-    type.bytes,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.unpackArray,
-    [type.msgpack],
-    type.array,
-  ),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackI32, [type.msgpack], type.i32),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackI64, [type.msgpack], type.i64),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackF32, [type.msgpack], type.f32),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackF64, [type.msgpack], type.f64),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.unpackMap, [type.msgpack], type.map),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.arrayWithCapacity,
-    [type.i32],
-    type.array,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.arrayPush,
-    [type.array, type.msgpack],
-    type.array,
-  ),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.arrayLength, [type.array], type.i32),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.arrayRawStorage,
-    [type.array],
-    fixedArray(type.msgpack),
-  ),
-  contract(BOUNDARY_MSGPACK_CONTRACT_IDS.mapNew, [], type.map),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.mapSet,
-    [type.map, type.string, type.msgpack],
-    type.map,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.mapGet,
-    [type.map, type.string],
-    type.msgpack,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.mapHas,
-    [type.map, type.string],
-    type.bool,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.mapTagIs,
-    [type.map, type.string],
-    type.bool,
-  ),
-  contract(
-    BOUNDARY_MSGPACK_CONTRACT_IDS.newString,
-    [fixedArray(type.i32)],
-    type.string,
-  ),
-];
+const msgpackHostTransportContractSpecs: readonly CompilerFunctionContractSpec[] =
+  [
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue,
+      [type.msgpack, type.i32, type.i32],
+      type.i32,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.decodeValue,
+      [type.i32, type.i32],
+      type.msgpack,
+    ),
+    contract(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull, [], type.msgpack),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeBool,
+      [type.bool],
+      type.msgpack,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeString,
+      [type.string],
+      type.msgpack,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeBytes,
+      [type.bytes],
+      type.msgpack,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeArray,
+      [type.array],
+      type.msgpack,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeI32,
+      [type.i32],
+      type.msgpack,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeI64,
+      [type.i64],
+      type.msgpack,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeF32,
+      [type.f32],
+      type.msgpack,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeF64,
+      [type.f64],
+      type.msgpack,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeMap,
+      [type.map],
+      type.msgpack,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackBool,
+      [type.msgpack],
+      type.bool,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackString,
+      [type.msgpack],
+      type.string,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackBytes,
+      [type.msgpack],
+      type.bytes,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackArray,
+      [type.msgpack],
+      type.array,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackI32,
+      [type.msgpack],
+      type.i32,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackI64,
+      [type.msgpack],
+      type.i64,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackF32,
+      [type.msgpack],
+      type.f32,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackF64,
+      [type.msgpack],
+      type.f64,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.unpackMap,
+      [type.msgpack],
+      type.map,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayWithCapacity,
+      [type.i32],
+      type.array,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayPush,
+      [type.array, type.msgpack],
+      type.array,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayLength,
+      [type.array],
+      type.i32,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.arrayRawStorage,
+      [type.array],
+      fixedArray(type.msgpack),
+    ),
+    contract(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapNew, [], type.map),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapSet,
+      [type.map, type.string, type.msgpack],
+      type.map,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapGet,
+      [type.map, type.string],
+      type.msgpack,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapHas,
+      [type.map, type.string],
+      type.bool,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.mapTagIs,
+      [type.map, type.string],
+      type.bool,
+    ),
+    contract(
+      MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.newString,
+      [fixedArray(type.i32)],
+      type.string,
+    ),
+  ];
 
 const dataContract = (
   id: CompilerFunctionContractId,
@@ -325,16 +382,48 @@ const dtoDataContractSpecs: readonly CompilerFunctionContractSpec[] = [
   dataContract(DTO_DATA_CONTRACT_IDS.unpackF32, [type.data], type.f32),
   dataContract(DTO_DATA_CONTRACT_IDS.unpackF64, [type.data], type.f64),
   dataContract(DTO_DATA_CONTRACT_IDS.unpackMap, [type.data], type.dataMap),
-  dataContract(DTO_DATA_CONTRACT_IDS.arrayWithCapacity, [type.i32], type.dataArray),
-  dataContract(DTO_DATA_CONTRACT_IDS.arrayPush, [type.dataArray, type.data], type.dataArray),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.arrayWithCapacity,
+    [type.i32],
+    type.dataArray,
+  ),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.arrayPush,
+    [type.dataArray, type.data],
+    type.dataArray,
+  ),
   dataContract(DTO_DATA_CONTRACT_IDS.arrayLength, [type.dataArray], type.i32),
-  dataContract(DTO_DATA_CONTRACT_IDS.arrayRawStorage, [type.dataArray], fixedArray(type.data)),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.arrayRawStorage,
+    [type.dataArray],
+    fixedArray(type.data),
+  ),
   dataContract(DTO_DATA_CONTRACT_IDS.mapNew, [], type.dataMap),
-  dataContract(DTO_DATA_CONTRACT_IDS.mapSet, [type.dataMap, type.string, type.data], type.dataMap),
-  dataContract(DTO_DATA_CONTRACT_IDS.mapGet, [type.dataMap, type.string], type.data),
-  dataContract(DTO_DATA_CONTRACT_IDS.mapHas, [type.dataMap, type.string], type.bool),
-  dataContract(DTO_DATA_CONTRACT_IDS.mapTagIs, [type.dataMap, type.string], type.bool),
-  dataContract(DTO_DATA_CONTRACT_IDS.newString, [fixedArray(type.i32)], type.string),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.mapSet,
+    [type.dataMap, type.string, type.data],
+    type.dataMap,
+  ),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.mapGet,
+    [type.dataMap, type.string],
+    type.data,
+  ),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.mapHas,
+    [type.dataMap, type.string],
+    type.bool,
+  ),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.mapTagIs,
+    [type.dataMap, type.string],
+    type.bool,
+  ),
+  dataContract(
+    DTO_DATA_CONTRACT_IDS.newString,
+    [fixedArray(type.i32)],
+    type.string,
+  ),
 ];
 
 const webRenderContract = ({
@@ -440,10 +529,11 @@ export const COMPILER_FUNCTION_CONTRACTS: ReadonlyMap<
   CompilerFunctionContractId,
   CompilerFunctionContractSpec
 > = new Map(
-  [...boundaryMsgpackContractSpecs, ...dtoDataContractSpecs, ...webRenderContractSpecs].map((spec) => [
-    spec.id,
-    spec,
-  ]),
+  [
+    ...msgpackHostTransportContractSpecs,
+    ...dtoDataContractSpecs,
+    ...webRenderContractSpecs,
+  ].map((spec) => [spec.id, spec]),
 );
 
 export const getCompilerFunctionContractSpec = (

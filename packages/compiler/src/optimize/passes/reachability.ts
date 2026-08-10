@@ -10,7 +10,7 @@ import type {
 } from "../../semantics/ids.js";
 import type { CodegenOptions } from "../../codegen/context.js";
 import {
-  BOUNDARY_MSGPACK_CONTRACT_IDS,
+  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
   DTO_DATA_CONTRACT_IDS,
   type CompilerFunctionContractId,
 } from "../../compiler-contracts/index.js";
@@ -29,7 +29,7 @@ import {
   resolveTargetsForCaller,
 } from "./shared.js";
 
-export const BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS = new Set([
+export const MSGPACK_HOST_TRANSPORT_DEPENDENT_INTRINSICS = new Set([
   "__retain_callback",
   "__boundary_retain_callback",
   "__render_retain_callback",
@@ -518,7 +518,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
     };
 
     const enqueueMsgPackProviderFunctions = (): void => {
-      Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS).forEach(
+      Object.values(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS).forEach(
         enqueueCompilerFunctionContract,
       );
     };
@@ -773,7 +773,7 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
                   ctx.ir.baseProgram.symbols.getIntrinsicName(calleeId);
                 if (
                   intrinsicName &&
-                  BOUNDARY_MSGPACK_DEPENDENT_INTRINSICS.has(intrinsicName)
+                  MSGPACK_HOST_TRANSPORT_DEPENDENT_INTRINSICS.has(intrinsicName)
                 ) {
                   enqueueMsgPackProviderFunctions();
                 }

@@ -6,11 +6,11 @@ import type {
 } from "../../semantics/codegen-view/index.js";
 import type { ProgramSymbolId, TypeId } from "../../semantics/ids.js";
 import {
-  BOUNDARY_MSGPACK_CONTRACT_IDS,
+  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
   COMPILER_FUNCTION_CONTRACTS,
   DTO_DATA_CONTRACT_IDS,
   STD_INTRINSIC_TYPE,
-  validateBoundaryMsgpackFunctionContracts,
+  validateMsgpackHostTransportFunctionContracts,
   validateDtoDataFunctionContracts,
   type CompilerContractTypeSpec,
   type CompilerFunctionContractId,
@@ -186,7 +186,7 @@ const makeProgramFor = (
             ? { id: STD_INTRINSIC_TYPE.array, providerKind: "nominal-object" }
             : owner === owners.bytes
               ? { id: STD_INTRINSIC_TYPE.bytes, providerKind: "nominal-object" }
-            : undefined,
+              : undefined,
     },
     functions: {
       getSignature: (_moduleId: string, symbol: number) => {
@@ -202,7 +202,7 @@ const makeProgram = (
     signatures: Map<CompilerFunctionContractId, CodegenFunctionSignature>,
   ) => void,
 ): ProgramCodegenView =>
-  makeProgramFor(Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS), mutate);
+  makeProgramFor(Object.values(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS), mutate);
 
 const makeDataProgram = (
   mutate?: (
@@ -217,22 +217,22 @@ const replace = (
   update: Partial<CodegenFunctionSignature>,
 ) => signatures.set(id, { ...signatures.get(id)!, ...update });
 
-describe("boundary-msgpack compiler contract signature validation", () => {
+describe("MessagePack host transport compiler contract signature validation", () => {
   it("accepts the complete relational ABI", () => {
-    expect(validateBoundaryMsgpackFunctionContracts(makeProgram())).toEqual(
-      {
-        msgpack: shared.msgpack,
-        string: shared.string,
-        bytes: shared.bytes,
-        array: shared.array,
-        map: shared.map,
-      },
-    );
+    expect(
+      validateMsgpackHostTransportFunctionContracts(makeProgram()),
+    ).toEqual({
+      msgpack: shared.msgpack,
+      string: shared.string,
+      bytes: shared.bytes,
+      array: shared.array,
+      map: shared.map,
+    });
   });
 
   it("rejects wrong parameter and result types with the contract and signatures", () => {
     const wrongParameter = makeProgram((signatures) => {
-      const id = BOUNDARY_MSGPACK_CONTRACT_IDS.encodeValue;
+      const id = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue;
       const signature = signatures.get(id)!;
       replace(signatures, id, {
         parameters: signature.parameters.map((parameter, index) =>
@@ -241,50 +241,50 @@ describe("boundary-msgpack compiler contract signature validation", () => {
       });
     });
     expect(() =>
-      validateBoundaryMsgpackFunctionContracts(wrongParameter),
+      validateMsgpackHostTransportFunctionContracts(wrongParameter),
     ).toThrow(
       /encode-value.*expected \(MsgPack, i32, i32\).*parameter 2 expected i32, got bool/,
     );
 
     const wrongResult = makeProgram((signatures) =>
-      replace(signatures, BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull, {
+      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull, {
         returnType: ids.bool,
       }),
     );
-    expect(() => validateBoundaryMsgpackFunctionContracts(wrongResult)).toThrow(
-      /make-null.*result expected MsgPack, got bool/,
-    );
+    expect(() =>
+      validateMsgpackHostTransportFunctionContracts(wrongResult),
+    ).toThrow(/make-null.*result expected MsgPack, got bool/);
   });
 
   it("rejects generic, optional, and effectful providers", () => {
     const generic = makeProgram((signatures) =>
-      replace(signatures, BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull, {
+      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull, {
         typeParams: [{ symbol: 1, typeParam: 1, typeRef: 1 }],
       }),
     );
-    expect(() => validateBoundaryMsgpackFunctionContracts(generic)).toThrow(
-      /make-null.*expected no type parameters, got 1/,
-    );
+    expect(() =>
+      validateMsgpackHostTransportFunctionContracts(generic),
+    ).toThrow(/make-null.*expected no type parameters, got 1/);
 
     const optional = makeProgram((signatures) => {
-      const id = BOUNDARY_MSGPACK_CONTRACT_IDS.makeBool;
+      const id = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeBool;
       const signature = signatures.get(id)!;
       replace(signatures, id, {
         parameters: [{ ...signature.parameters[0]!, optional: true }],
       });
     });
-    expect(() => validateBoundaryMsgpackFunctionContracts(optional)).toThrow(
-      /make-bool.*parameter 1 must not be optional/,
-    );
+    expect(() =>
+      validateMsgpackHostTransportFunctionContracts(optional),
+    ).toThrow(/make-bool.*parameter 1 must not be optional/);
 
     const effectful = makeProgram((signatures) =>
-      replace(signatures, BOUNDARY_MSGPACK_CONTRACT_IDS.makeNull, {
+      replace(signatures, MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.makeNull, {
         effectRow: 1,
       }),
     );
-    expect(() => validateBoundaryMsgpackFunctionContracts(effectful)).toThrow(
-      /make-null.*expected a pure effect row/,
-    );
+    expect(() =>
+      validateMsgpackHostTransportFunctionContracts(effectful),
+    ).toThrow(/make-null.*expected a pure effect row/);
   });
 });
 

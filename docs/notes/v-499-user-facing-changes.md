@@ -25,6 +25,9 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - Compiler DTO tree traversal is provider-neutral and requires an explicit
   concrete tree provider. The default MessagePack roles are isolated behind
   the selected host-transport provider instead of being a traversal fallback.
+- MessagePack provider roles use the
+  `voyd.std.host-transport.msgpack.*` compiler-contract namespace. The former
+  boundary-specific contract namespace is removed.
 - Wasm modules declare host ABI v2, their DTO schema ABI, and the selected
   transport. The JavaScript host rejects missing or incompatible transport
   metadata before running user code.

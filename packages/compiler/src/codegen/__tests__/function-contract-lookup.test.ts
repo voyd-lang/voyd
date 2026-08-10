@@ -1,11 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
-import { BOUNDARY_MSGPACK_CONTRACT_IDS } from "../../compiler-contracts/index.js";
+import { MSGPACK_HOST_TRANSPORT_CONTRACT_IDS } from "../../compiler-contracts/index.js";
 import { DiagnosticEmitter } from "../../diagnostics/index.js";
 import { gcTrampolineAbiStrategy } from "../effects/gc-trampoline-abi-strategy.js";
 import { requireFunctionMetaByCompilerContract } from "../function-lookup.js";
 
-const CONTRACT_ID = BOUNDARY_MSGPACK_CONTRACT_IDS.encodeValue;
+const CONTRACT_ID = MSGPACK_HOST_TRANSPORT_CONTRACT_IDS.encodeValue;
 
 describe("compiler function contract lookup", () => {
   it("resolves codegen metadata without depending on module or function names", () => {
@@ -22,9 +22,7 @@ describe("compiler function contract lookup", () => {
           refOf: () => ({ moduleId: meta.moduleId, symbol: meta.symbol }),
         },
       },
-      functions: new Map([
-        [meta.moduleId, new Map([[meta.symbol, [meta]]])],
-      ]),
+      functions: new Map([[meta.moduleId, new Map([[meta.symbol, [meta]]])]]),
     } as unknown as CodegenContext;
 
     expect(
@@ -67,11 +65,11 @@ describe("effect host-boundary compiler contracts", () => {
     });
 
     expect(resolveCompilerFunctionContract).toHaveBeenCalledTimes(
-      Object.keys(BOUNDARY_MSGPACK_CONTRACT_IDS).length,
+      Object.keys(MSGPACK_HOST_TRANSPORT_CONTRACT_IDS).length,
     );
     expect(diagnostics.diagnostics).toHaveLength(1);
     expect(diagnostics.diagnostics[0]?.message).toContain(
-      "effectful exports require boundary-msgpack compiler contracts",
+      "effectful exports require host-transport-msgpack compiler contracts",
     );
     expect(diagnostics.diagnostics[0]?.message).toContain(CONTRACT_ID);
   });

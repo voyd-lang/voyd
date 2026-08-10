@@ -135,7 +135,7 @@ values, stable-ID sharing, and budget fallback.
 Compiler/std optimization dependencies now use semantic role metadata instead
 of duplicated source-name, module-path, and structural heuristics.
 `@compiler_contract` gives each boundary MsgPack helper a stable
-`voyd.std.boundary.msgpack.*` function role, while compiler-recognized std
+`voyd.std.host-transport.msgpack.*` function role, while compiler-recognized std
 containers use `@intrinsic_type` nominal IDs. Binding rejects unknown roles,
 wrong arities, non-std or nested providers, and the program symbol arena rejects
 duplicate providers. At feature use, the typed signature catalog validates the

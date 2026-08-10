@@ -1,6 +1,6 @@
 export {
-  BOUNDARY_MSGPACK_CONTRACT_IDS,
-  BOUNDARY_MSGPACK_CONTRACT_PROVIDER_MODULES,
+  MSGPACK_HOST_TRANSPORT_CONTRACT_IDS,
+  MSGPACK_HOST_TRANSPORT_CONTRACT_PROVIDER_MODULES,
   DTO_DATA_CONTRACT_IDS,
   WEB_RENDER_CONTRACT_IDS,
   COMPILER_FUNCTION_CONTRACTS,
@@ -15,11 +15,11 @@ export {
   type CompilerFunctionContractSpec,
 } from "./function-contracts.js";
 export {
-  validateBoundaryMsgpackFunctionContracts,
+  validateMsgpackHostTransportFunctionContracts,
   validateDtoDataFunctionContracts,
-  type BoundaryMsgpackContractTypes,
+  type MsgpackHostTransportContractTypes,
   type DtoDataContractTypes,
-} from "./validate-boundary-msgpack.js";
+} from "./validate-host-transport-msgpack.js";
 export {
   getStdIntrinsicTypeContractSpec,
   isStdIntrinsicNominalType,

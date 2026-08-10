@@ -855,7 +855,7 @@ pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>
     )
   }
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.encode-value")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.encode-value")
 pub fn encode_value(value: MsgPack, ptr: i32, len: i32): () -> i32
   encode_value_raw(value, ptr, len)
 
@@ -911,7 +911,7 @@ pub fn decode_value_bytes(bytes: Bytes): () -> Result<MsgPack, MsgPackError>
     }
   Ok<MsgPack> { value: value }
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.decode-value")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.decode-value")
 pub fn decode_value(ptr: i32, len: i32): () -> MsgPack
   decode_value_raw(ptr, len)
 
@@ -1078,7 +1078,7 @@ pub fn unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
     else:
       empty_map()
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-i32")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-i32")
 fn boundary_unpack_i32(value: MsgPack): () -> i32
   value.match(decoded)
     I32:
@@ -1089,7 +1089,7 @@ fn boundary_unpack_i32(value: MsgPack): () -> i32
       panic("msgpack boundary decode expected i32")
       0
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-i64")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-i64")
 fn boundary_unpack_i64(value: MsgPack): () -> i64
   value.match(decoded)
     I64:
@@ -1100,7 +1100,7 @@ fn boundary_unpack_i64(value: MsgPack): () -> i64
       panic("msgpack boundary decode expected i64")
       cast::to_i64(0)
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-f32")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-f32")
 fn boundary_unpack_f32(value: MsgPack): () -> f32
   value.match(decoded)
     F32:
@@ -1115,7 +1115,7 @@ fn boundary_unpack_f32(value: MsgPack): () -> f32
       panic("msgpack boundary decode expected f32")
       cast::reinterpret_f32(0)
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-f64")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-f64")
 fn boundary_unpack_f64(value: MsgPack): () -> f64
   value.match(decoded)
     F64:
@@ -1130,7 +1130,7 @@ fn boundary_unpack_f64(value: MsgPack): () -> f64
       panic("msgpack boundary decode expected f64")
       0.0
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-bool")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-bool")
 fn boundary_unpack_bool(value: MsgPack): () -> bool
   value.match(decoded)
     Bool:
@@ -1139,7 +1139,7 @@ fn boundary_unpack_bool(value: MsgPack): () -> bool
       panic("msgpack boundary decode expected bool")
       false
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-string")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-string")
 fn boundary_unpack_string(value: MsgPack): () -> String
   value.match(decoded)
     String:
@@ -1148,7 +1148,7 @@ fn boundary_unpack_string(value: MsgPack): () -> String
       panic("msgpack boundary decode expected string")
       empty_text()
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-array")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-array")
 fn boundary_unpack_array(value: MsgPack): () -> Array<MsgPack>
   value.match(decoded)
     Array<MsgPack>:
@@ -1157,7 +1157,7 @@ fn boundary_unpack_array(value: MsgPack): () -> Array<MsgPack>
       panic("msgpack boundary decode expected array")
       empty_array()
 
-@compiler_contract(id: "voyd.std.boundary.msgpack.unpack-map")
+@compiler_contract(id: "voyd.std.host-transport.msgpack.unpack-map")
 fn boundary_unpack_map(value: MsgPack): () -> Dict<String, MsgPack>
   value.match(decoded)
     MsgPackMap:
