@@ -20,12 +20,12 @@ export type HostOutcome =
 export type HostFrame =
   | {
       kind: "export-invocation";
-      exportName: string;
+      exportId: number;
       args: readonly TypedHostPayload[];
     }
   | {
       kind: "export-completion";
-      exportName: string;
+      exportId: number;
       outcome: HostOutcome;
     }
   | {

@@ -29,14 +29,14 @@ export const toMsgPackHostFrame = (frame: HostFrame): unknown[] => {
       return [
         HOST_FRAME_VERSION,
         TAG.exportInvocation,
-        frame.exportName,
+        frame.exportId,
         frame.args.map(toTypedPayload),
       ];
     case "export-completion":
       return [
         HOST_FRAME_VERSION,
         TAG.exportCompletion,
-        frame.exportName,
+        frame.exportId,
         toOutcome(frame.outcome),
       ];
     case "effect-request":
@@ -151,13 +151,13 @@ export const fromMsgPackHostFrame = (value: unknown): HostFrame => {
     case TAG.exportInvocation:
       return {
         kind: "export-invocation",
-        exportName: stringValue(frame[2], "export name"),
+        exportId: numberValue(frame[2], "export id"),
         args: typedPayloads(frame[3], "export arguments"),
       };
     case TAG.exportCompletion:
       return {
         kind: "export-completion",
-        exportName: stringValue(frame[2], "export name"),
+        exportId: numberValue(frame[2], "export id"),
         outcome: outcomeValue(frame[3]),
       };
     case TAG.effectRequest:

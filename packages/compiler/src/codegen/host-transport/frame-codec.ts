@@ -45,14 +45,45 @@ export const makeSelectedTypedPayload = ({
   });
 
 export const makeSelectedExportCompletion = ({
-  exportName,
+  exportId,
   fingerprint,
   value,
   ctx,
   fnCtx,
   provider,
 }: {
-  exportName: string;
+  exportId: number;
+  fingerprint: string;
+  value: binaryen.ExpressionRef;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  provider: SelectedHostTransportProvider;
+}): binaryen.ExpressionRef =>
+  makeSelectedCompletion({
+    frameTag: makeSelectedI32(
+      SELECTED_HOST_FRAME_TAG.exportCompletion,
+      ctx,
+      provider,
+    ),
+    identity: makeSelectedI32(exportId, ctx, provider),
+    fingerprint,
+    value,
+    ctx,
+    fnCtx,
+    provider,
+  });
+
+export const makeSelectedCompletion = ({
+  frameTag,
+  identity,
+  fingerprint,
+  value,
+  ctx,
+  fnCtx,
+  provider,
+}: {
+  frameTag: binaryen.ExpressionRef;
+  identity: binaryen.ExpressionRef;
   fingerprint: string;
   value: binaryen.ExpressionRef;
   ctx: CodegenContext;
@@ -75,8 +106,8 @@ export const makeSelectedExportCompletion = ({
   return makeSelectedArray({
     elements: [
       makeSelectedI32(SELECTED_HOST_FRAME_VERSION, ctx, provider),
-      makeSelectedI32(SELECTED_HOST_FRAME_TAG.exportCompletion, ctx, provider),
-      makeSelectedString(exportName, ctx, provider),
+      frameTag,
+      identity,
       outcome,
     ],
     ctx,
@@ -186,36 +217,20 @@ export const makeSelectedCallbackCompletion = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
   provider: SelectedHostTransportProvider;
-}): binaryen.ExpressionRef => {
-  const typedPayload = makeSelectedTypedPayload({
+}): binaryen.ExpressionRef =>
+  makeSelectedCompletion({
+    frameTag: makeSelectedI32(
+      SELECTED_HOST_FRAME_TAG.callbackCompletion,
+      ctx,
+      provider,
+    ),
+    identity: invocationId,
     fingerprint,
     value,
     ctx,
     fnCtx,
     provider,
   });
-  const outcome = makeSelectedArray({
-    elements: [makeSelectedI32(0, ctx, provider), typedPayload],
-    ctx,
-    fnCtx,
-    provider,
-  });
-  return makeSelectedArray({
-    elements: [
-      makeSelectedI32(SELECTED_HOST_FRAME_VERSION, ctx, provider),
-      makeSelectedI32(
-        SELECTED_HOST_FRAME_TAG.callbackCompletion,
-        ctx,
-        provider,
-      ),
-      invocationId,
-      outcome,
-    ],
-    ctx,
-    fnCtx,
-    provider,
-  });
-};
 
 const makeSelectedArray = ({
   elements,

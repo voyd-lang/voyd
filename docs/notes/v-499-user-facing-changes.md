@@ -25,11 +25,12 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - Compiler DTO tree traversal is provider-neutral and requires an explicit
   concrete tree provider. The default MessagePack roles are isolated behind
   the selected host-transport provider instead of being a traversal fallback.
-- Wasm modules declare their host ABI, DTO schema ABI, and selected transport.
-  Host ABI v2 will replace the current unframed ABI when complete frame support
-  is enabled.
-  The JavaScript host rejects missing or incompatible transport metadata before
-  running user code.
+- Wasm modules declare host ABI v2, their DTO schema ABI, and the selected
+  transport. The JavaScript host rejects missing or incompatible transport
+  metadata before running user code.
+- Export metadata includes a stable numeric identity. Export calls, effectful
+  results, child-task continuations, and retained callbacks use complete
+  versioned frames; transport adapters no longer expose unframed value codecs.
 - The JavaScript SDK can register host transport adapters through
   `transportAdapters`.
 - Serialized export calls use versioned invocation and completion frames with
@@ -75,6 +76,5 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - Generate typed JSON and MessagePack traversal directly against `DataReader`
   and `DataWriter` without constructing an intermediate `DataValue` tree.
 - Replace raw VX MessagePack payloads with typed plans and final wire lowering.
-- Replace the legacy unframed host protocol with complete ABI v2 frames.
 - Add custom DTO representations for types that cannot use automatic structural
   DTO derivation.

@@ -48,6 +48,7 @@ import { isGeneratedTestId } from "../tests/prefix.js";
 import { emitSerializedExportWrapper } from "./exports/serialized-abi.js";
 import {
   emitExportAbiSection,
+  hostExportId,
   type ExportAbiEntry,
 } from "./exports/export-abi.js";
 import {
@@ -303,19 +304,23 @@ const boundarySchemasForExport = ({
   exportName: string;
 }): { params: BoundarySchema[]; result: BoundarySchema } => ({
   params: meta.paramTypeIds.map((typeId, index) =>
-    withDtoFingerprint(deriveBoundarySchema({
-      typeId,
-      ctx,
-      label: `${exportName} arg${index}`,
-      options: { tagStandaloneVariants: true, portableNames: true },
-    })),
+    withDtoFingerprint(
+      deriveBoundarySchema({
+        typeId,
+        ctx,
+        label: `${exportName} arg${index}`,
+        options: { tagStandaloneVariants: true, portableNames: true },
+      }),
+    ),
   ),
-  result: withDtoFingerprint(deriveBoundarySchema({
-    typeId: meta.resultTypeId,
-    ctx,
-    label: `${exportName} result`,
-    options: { tagStandaloneVariants: true, portableNames: true },
-  })),
+  result: withDtoFingerprint(
+    deriveBoundarySchema({
+      typeId: meta.resultTypeId,
+      ctx,
+      label: `${exportName} result`,
+      options: { tagStandaloneVariants: true, portableNames: true },
+    }),
+  ),
 });
 
 const scalarBoundaryWasmType = (
@@ -1580,6 +1585,11 @@ export const emitModuleExports = (
           return;
         }
         effectfulExports.push({ meta, exportName, emitEntry: true });
+        exportAbiEntries.push({
+          id: hostExportId(exportName),
+          name: exportName,
+          abi: "direct",
+        });
         return;
       }
       let serializers: readonly SerializerMetadata[];
@@ -1617,6 +1627,7 @@ export const emitModuleExports = (
             ...serializerOverridesForExport({ meta, ctx: exportCtx }),
           });
           exportAbiEntries.push({
+            id: hostExportId(exportName),
             name: exportName,
             abi: "serialized",
             ...(specialSerializedExport?.params
@@ -1660,6 +1671,7 @@ export const emitModuleExports = (
           });
           if (supportsDirectScalarBoundary({ meta, schemas })) {
             exportAbiEntries.push({
+              id: hostExportId(exportName),
               name: exportName,
               abi: "direct",
               params: schemas.params,
@@ -1681,6 +1693,7 @@ export const emitModuleExports = (
             ...serializerOverridesForExport({ meta, ctx: exportCtx }),
           });
           exportAbiEntries.push({
+            id: hostExportId(exportName),
             name: exportName,
             abi: "serialized",
             wrapperName: wrapper.wrapperName,
@@ -1703,7 +1716,11 @@ export const emitModuleExports = (
           }
         }
       }
-      exportAbiEntries.push({ name: exportName, abi: "direct" });
+      exportAbiEntries.push({
+        id: hostExportId(exportName),
+        name: exportName,
+        abi: "direct",
+      });
     });
   });
 

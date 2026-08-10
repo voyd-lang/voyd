@@ -54,6 +54,7 @@ import {
   SELECTED_HOST_FRAME_TAG,
   SELECTED_HOST_FRAME_VERSION,
 } from "../host-transport/frame-codec.js";
+import { hostExportId } from "./export-abi.js";
 
 export type SerializedExportTypeAdapter = {
   acceptsType?: (params: { typeId: TypeId; ctx: CodegenContext }) => boolean;
@@ -179,13 +180,27 @@ export const emitSerializedExportWrapper = ({
 
   const checkFrame = ctx.mod.if(
     ctx.mod.i32.or(
-      ctx.mod.i32.ne(
-        ctx.mod.call(msgpack.unpackI32.wasmName, [frameField(0)], binaryen.i32),
-        ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+      ctx.mod.i32.or(
+        ctx.mod.i32.ne(
+          ctx.mod.call(
+            msgpack.unpackI32.wasmName,
+            [frameField(0)],
+            binaryen.i32,
+          ),
+          ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+        ),
+        ctx.mod.i32.ne(
+          ctx.mod.call(
+            msgpack.unpackI32.wasmName,
+            [frameField(1)],
+            binaryen.i32,
+          ),
+          ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportInvocation),
+        ),
       ),
       ctx.mod.i32.ne(
-        ctx.mod.call(msgpack.unpackI32.wasmName, [frameField(1)], binaryen.i32),
-        ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportInvocation),
+        ctx.mod.call(msgpack.unpackI32.wasmName, [frameField(2)], binaryen.i32),
+        ctx.mod.i32.const(hostExportId(exportName)),
       ),
     ),
     ctx.mod.unreachable(),
@@ -311,7 +326,7 @@ export const emitSerializedExportWrapper = ({
     throw new Error(`missing DTO fingerprint for ${exportName} result`);
   }
   const completionFrame = makeSelectedExportCompletion({
-    exportName,
+    exportId: hostExportId(exportName),
     fingerprint: resultFingerprint,
     value: encodeValue,
     ctx,

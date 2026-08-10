@@ -15,6 +15,7 @@ import type { EffectRuntime } from "../runtime-abi.js";
 import {
   BoundarySchemaError,
   deriveBoundarySchema,
+  withDtoFingerprint,
 } from "../../boundary/schema.js";
 import { writeDtoValueToTree } from "../../boundary/dto-tree-codec.js";
 import { EFFECT_RESULT_STATUS } from "./constants.js";
@@ -23,6 +24,15 @@ import { ensureSelectedHostTransportProvider } from "../../host-transport/select
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
 import { findSerializerFormatForType } from "../../serializer.js";
+import {
+  makeSelectedCompletion,
+  SELECTED_HOST_FRAME_TAG,
+} from "../../host-transport/frame-codec.js";
+
+export const HOST_COMPLETION_KIND = {
+  export: 0,
+  callback: 1,
+} as const;
 
 const HANDLE_OUTCOME_DYNAMIC_KEY = Symbol(
   "voyd.effects.hostBoundary.handleOutcomeDynamic",
@@ -48,6 +58,8 @@ export const createHandleOutcomeDynamic = ({
       runtime.outcomeType,
       binaryen.i32,
       binaryen.i32,
+      binaryen.i32,
+      binaryen.i32,
     ]);
     const locals: binaryen.Type[] = [
       runtime.effectRequestType, // requestLocal
@@ -59,16 +71,18 @@ export const createHandleOutcomeDynamic = ({
     const outcomeLocal = 0;
     const bufPtrLocal = 1;
     const bufLenLocal = 2;
-    const requestLocal = 3;
-    const opIndexLocal = 4;
-    const payloadLenLocal = 5;
-    const payloadLocal = 6;
-    const arrayLocal = 7;
+    const completionKindLocal = 3;
+    const completionIdLocal = 4;
+    const requestLocal = 5;
+    const opIndexLocal = 6;
+    const payloadLenLocal = 7;
+    const payloadLocal = 8;
+    const arrayLocal = 9;
     const fnCtx: FunctionContext = {
       bindings: new Map(),
       tempLocals: new Map(),
       locals,
-      nextLocalIndex: 8,
+      nextLocalIndex: 10,
       returnTypeId: ctx.program.primitives.void,
       effectful: false,
     };
@@ -132,7 +146,7 @@ export const createHandleOutcomeDynamic = ({
         ctx.mod.i32.const(0),
       );
 
-    const encodeToBuffer = (
+    const encodeTransportValueToBuffer = (
       value: binaryen.ExpressionRef,
     ): binaryen.ExpressionRef =>
       ctx.mod.block(null, [
@@ -149,6 +163,46 @@ export const createHandleOutcomeDynamic = ({
           ),
         ),
       ]);
+
+    const encodeCompletionToBuffer = ({
+      value,
+      fingerprint,
+    }: {
+      value: binaryen.ExpressionRef;
+      fingerprint: string;
+    }): binaryen.ExpressionRef =>
+      encodeTransportValueToBuffer(
+        makeSelectedCompletion({
+          frameTag: ctx.mod.call(
+            msgpack.makeI32.wasmName,
+            [
+              ctx.mod.if(
+                ctx.mod.i32.eq(
+                  ctx.mod.local.get(completionKindLocal, binaryen.i32),
+                  ctx.mod.i32.const(HOST_COMPLETION_KIND.export),
+                ),
+                ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportCompletion),
+                ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.callbackCompletion),
+              ),
+            ],
+            msgPackType,
+          ),
+          identity: ctx.mod.call(
+            msgpack.makeI32.wasmName,
+            [ctx.mod.local.get(completionIdLocal, binaryen.i32)],
+            msgPackType,
+          ),
+          fingerprint,
+          value,
+          ctx,
+          fnCtx,
+          provider: msgpack,
+        }),
+      );
+
+    const fingerprintFor = (typeId: number, label: string): string =>
+      withDtoFingerprint(deriveBoundarySchema({ typeId, ctx, label }))
+        .fingerprint!;
 
     const finishValue = (): binaryen.ExpressionRef =>
       ctx.mod.return(
@@ -169,9 +223,13 @@ export const createHandleOutcomeDynamic = ({
       ctx.mod.if(
         ctx.mod.ref.is_null(ctx.mod.local.get(payloadLocal, binaryen.eqref)),
         ctx.mod.block(null, [
-          encodeToBuffer(
-            ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType),
-          ),
+          encodeCompletionToBuffer({
+            value: ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType),
+            fingerprint: fingerprintFor(
+              ctx.program.primitives.void,
+              "void completion",
+            ),
+          }),
           finishValue(),
         ]),
       ),
@@ -182,8 +240,8 @@ export const createHandleOutcomeDynamic = ({
           markerValue: ctx.program.primitives.bool,
         }),
         ctx.mod.block(null, [
-          encodeToBuffer(
-            ctx.mod.call(
+          encodeCompletionToBuffer({
+            value: ctx.mod.call(
               msgpack.makeBool.wasmName,
               [
                 unboxOutcomeValue({
@@ -195,7 +253,11 @@ export const createHandleOutcomeDynamic = ({
               ],
               msgPackType,
             ),
-          ),
+            fingerprint: fingerprintFor(
+              ctx.program.primitives.bool,
+              "bool completion",
+            ),
+          }),
           finishValue(),
         ]),
       ),
@@ -206,8 +268,8 @@ export const createHandleOutcomeDynamic = ({
           boxTypeI32,
         ),
         ctx.mod.block(null, [
-          encodeToBuffer(
-            ctx.mod.call(
+          encodeCompletionToBuffer({
+            value: ctx.mod.call(
               msgpack.makeI32.wasmName,
               [
                 unboxOutcomeValue({
@@ -218,7 +280,11 @@ export const createHandleOutcomeDynamic = ({
               ],
               msgPackType,
             ),
-          ),
+            fingerprint: fingerprintFor(
+              ctx.program.primitives.i32,
+              "i32 completion",
+            ),
+          }),
           finishValue(),
         ]),
       ),
@@ -229,8 +295,8 @@ export const createHandleOutcomeDynamic = ({
           boxTypeI64,
         ),
         ctx.mod.block(null, [
-          encodeToBuffer(
-            ctx.mod.call(
+          encodeCompletionToBuffer({
+            value: ctx.mod.call(
               msgpack.makeI64.wasmName,
               [
                 unboxOutcomeValue({
@@ -241,7 +307,11 @@ export const createHandleOutcomeDynamic = ({
               ],
               msgPackType,
             ),
-          ),
+            fingerprint: fingerprintFor(
+              ctx.program.primitives.i64,
+              "i64 completion",
+            ),
+          }),
           finishValue(),
         ]),
       ),
@@ -252,8 +322,8 @@ export const createHandleOutcomeDynamic = ({
           boxTypeF32,
         ),
         ctx.mod.block(null, [
-          encodeToBuffer(
-            ctx.mod.call(
+          encodeCompletionToBuffer({
+            value: ctx.mod.call(
               msgpack.makeF32.wasmName,
               [
                 unboxOutcomeValue({
@@ -264,7 +334,11 @@ export const createHandleOutcomeDynamic = ({
               ],
               msgPackType,
             ),
-          ),
+            fingerprint: fingerprintFor(
+              ctx.program.primitives.f32,
+              "f32 completion",
+            ),
+          }),
           finishValue(),
         ]),
       ),
@@ -275,8 +349,8 @@ export const createHandleOutcomeDynamic = ({
           boxTypeF64,
         ),
         ctx.mod.block(null, [
-          encodeToBuffer(
-            ctx.mod.call(
+          encodeCompletionToBuffer({
+            value: ctx.mod.call(
               msgpack.makeF64.wasmName,
               [
                 unboxOutcomeValue({
@@ -287,7 +361,11 @@ export const createHandleOutcomeDynamic = ({
               ],
               msgPackType,
             ),
-          ),
+            fingerprint: fingerprintFor(
+              ctx.program.primitives.f64,
+              "f64 completion",
+            ),
+          }),
           finishValue(),
         ]),
       ),
@@ -298,8 +376,8 @@ export const createHandleOutcomeDynamic = ({
           boxTypeMsgPack,
         ),
         ctx.mod.block(null, [
-          encodeToBuffer(
-            refCast(
+          encodeCompletionToBuffer({
+            value: refCast(
               ctx.mod,
               unboxOutcomeValue({
                 payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
@@ -308,7 +386,8 @@ export const createHandleOutcomeDynamic = ({
               }),
               msgPackType,
             ),
-          ),
+            fingerprint: "legacy:msgpack",
+          }),
           finishValue(),
         ]),
       ),
@@ -340,8 +419,8 @@ export const createHandleOutcomeDynamic = ({
               ctx.mod.if(
                 matchesBox,
                 ctx.mod.block(null, [
-                  encodeToBuffer(
-                    refCast(
+                  encodeCompletionToBuffer({
+                    value: refCast(
                       ctx.mod,
                       unboxOutcomeValue({
                         payload: ctx.mod.local.get(
@@ -354,7 +433,8 @@ export const createHandleOutcomeDynamic = ({
                       }),
                       msgPackType,
                     ),
-                  ),
+                    fingerprint: `legacy:${box.typeId}`,
+                  }),
                   finishValue(),
                 ]),
               ),
@@ -370,8 +450,8 @@ export const createHandleOutcomeDynamic = ({
               ctx.mod.if(
                 matchesBox,
                 ctx.mod.block(null, [
-                  encodeToBuffer(
-                    writeDtoValueToTree({
+                  encodeCompletionToBuffer({
+                    value: writeDtoValueToTree({
                       value: unboxOutcomeValue({
                         payload: ctx.mod.local.get(
                           payloadLocal,
@@ -386,7 +466,8 @@ export const createHandleOutcomeDynamic = ({
                       fnCtx,
                       provider: msgpack,
                     }),
-                  ),
+                    fingerprint: withDtoFingerprint(schema).fingerprint!,
+                  }),
                   finishValue(),
                 ]),
               ),
@@ -419,7 +500,7 @@ export const createHandleOutcomeDynamic = ({
       });
 
       const effectOps = ctx.mod.block(null, [
-        encodeToBuffer(msgpackMap),
+        encodeTransportValueToBuffer(msgpackMap),
         ctx.mod.return(
           runtime.makeEffectResult({
             status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.effect),

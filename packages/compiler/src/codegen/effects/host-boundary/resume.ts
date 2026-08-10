@@ -407,11 +407,15 @@ export const createResumeEffectful = ({
       binaryen.i32,
       binaryen.i32,
       binaryen.i32,
+      binaryen.i32,
+      binaryen.i32,
     ]);
     const contParam = 0;
     const bufPtrParam = 1;
     const resumeLenParam = 2;
     const bufCapParam = 3;
+    const completionKindParam = 4;
+    const completionIdParam = 5;
 
     const resumedOutcome = ctx.mod.call(
       resumeContinuation,
@@ -438,6 +442,8 @@ export const createResumeEffectful = ({
           ),
           ctx.mod.local.get(bufPtrParam, binaryen.i32),
           ctx.mod.local.get(bufCapParam, binaryen.i32),
+          ctx.mod.local.get(completionKindParam, binaryen.i32),
+          ctx.mod.local.get(completionIdParam, binaryen.i32),
         ],
         runtime.effectResultType,
       ),

@@ -3,6 +3,7 @@ import { decodeBoundaryArgs } from "../boundary-values.js";
 import { resolveHostTransport } from "../protocol/host-transport.js";
 import type { HostFrame } from "../protocol/host-frame.js";
 import { msgPackHostTransport } from "../transports/msgpack.js";
+import { encode } from "@msgpack/msgpack";
 
 describe("boundary DTO decoding", () => {
   it("restores adapter-facing tags for unions and standalone variants", () => {
@@ -44,14 +45,12 @@ describe("host transport negotiation", () => {
         operationId: 1,
         accepted: true,
       }),
-      encode: () => new Uint8Array([1]),
-      decode: () => "decoded",
     };
 
     expect(
       resolveHostTransport({
         metadata: {
-          hostAbi: 1,
+          hostAbi: 2,
           dtoSchemaAbi: 1,
           transport: { id: "example.transport", version: 3 },
         },
@@ -67,16 +66,16 @@ describe("host transport negotiation", () => {
     expect(() =>
       resolveHostTransport({
         metadata: {
-          hostAbi: 2,
+          hostAbi: 1,
           dtoSchemaAbi: 1,
           transport: { id: "voyd.std.msgpack", version: 1 },
         },
       }),
-    ).toThrow("Unsupported Voyd host ABI 2");
+    ).toThrow("Unsupported Voyd host ABI 1");
     expect(() =>
       resolveHostTransport({
         metadata: {
-          hostAbi: 1,
+          hostAbi: 2,
           dtoSchemaAbi: 1,
           transport: { id: "voyd.std.msgpack", version: 2 },
         },
@@ -90,8 +89,8 @@ describe("host ABI v2 frames", () => {
     const value = { fingerprint: "sha256:abc", value: { count: 2 } };
     const outcome = { kind: "success" as const, value };
     const frames: readonly HostFrame[] = [
-      { kind: "export-invocation", exportName: "main", args: [value] },
-      { kind: "export-completion", exportName: "main", outcome },
+      { kind: "export-invocation", exportId: 42, args: [value] },
+      { kind: "export-completion", exportId: 42, outcome },
       {
         kind: "effect-request",
         requestId: 1,
@@ -162,8 +161,8 @@ describe("host ABI v2 frames", () => {
   });
 
   it("rejects a value that is not a complete frame", () => {
-    expect(() =>
-      msgPackHostTransport.decodeFrame(msgPackHostTransport.encode([2, 99])),
-    ).toThrow("Unknown Voyd host frame tag 99");
+    expect(() => msgPackHostTransport.decodeFrame(encode([2, 99]))).toThrow(
+      "Unknown Voyd host frame tag 99",
+    );
   });
 });

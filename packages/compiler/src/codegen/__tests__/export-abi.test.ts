@@ -10,6 +10,10 @@ const fixtureRoot = resolve(import.meta.dirname, "__fixtures__");
 const stdRoot = resolve(import.meta.dirname, "../../../../std/src");
 const buildModuleCache = new Map<string, Promise<Uint8Array>>();
 
+const withoutExportIds = (
+  entries: ReturnType<typeof parseExportAbi>["exports"],
+) => entries.map(({ id: _id, ...entry }) => entry);
+
 const expectCompileSuccess = (
   result: CompileProgramResult,
 ): Extract<CompileProgramResult, { success: true }> => {
@@ -59,11 +63,11 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
 
     expect(abi.version).toBe(2);
     expect(abi.host).toEqual({
-      hostAbi: 1,
+      hostAbi: 2,
       dtoSchemaAbi: 1,
       transport: { id: "voyd.std.msgpack", version: 1 },
     });
-    expect(abi.exports).toEqual([
+    expect(withoutExportIds(abi.exports)).toEqual([
       { name: "add", abi: "direct" },
       { name: "echo", abi: "serialized" },
       {
@@ -328,7 +332,9 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
     const abi = parseExportAbi(module);
 
-    expect(abi.exports).toEqual([{ name: "fetch", abi: "serialized" }]);
+    expect(withoutExportIds(abi.exports)).toEqual([
+      { name: "fetch", abi: "serialized" },
+    ]);
   });
 
   it("emits schema metadata and distinct wrappers for automatic boundary exports", async () => {
@@ -351,7 +357,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     expect(abi.exports).not.toContainEqual(
       expect.objectContaining({ name: "call_callback", abi: "serialized" }),
     );
-    expect(abi.exports).toEqual([
+    expect(withoutExportIds(abi.exports)).toEqual([
       {
         name: "echo_bool",
         abi: "direct",
@@ -502,7 +508,9 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
 
       expect(exports).toContain("translate");
       expect(exports).not.toContain("__voyd_serialized_export_translate");
-      expect(abi.exports).toContainEqual({ name: "translate", abi: "direct" });
+      expect(abi.exports).toContainEqual(
+        expect.objectContaining({ name: "translate", abi: "direct" }),
+      );
     },
   );
 

@@ -22,19 +22,47 @@ import type { HostTransportAdapter } from "../protocol/host-transport.js";
 const toError = (error: unknown): Error =>
   error instanceof Error ? error : new Error(String(error));
 
-const decodePayload = ({
+export type HostCompletionIdentity =
+  | { kind: "export"; id: number }
+  | { kind: "callback"; id: number };
+
+export const decodeHostCompletion = ({
   memory,
   ptr,
   length,
   transport,
+  completion,
 }: {
   memory: WebAssembly.Memory;
   ptr: number;
   length: number;
   transport: HostTransportAdapter;
+  completion: HostCompletionIdentity;
 }): unknown => {
   const bytes = new Uint8Array(memory.buffer, ptr, length);
-  return transport.decode(bytes);
+  const frame = transport.decodeFrame(bytes);
+  if (completion.kind === "export") {
+    if (
+      frame.kind !== "export-completion" ||
+      frame.exportId !== completion.id
+    ) {
+      throw new Error(
+        "effect boundary returned an incompatible completion frame",
+      );
+    }
+  } else if (
+    frame.kind !== "callback-completion" ||
+    frame.invocationId !== completion.id
+  ) {
+    throw new Error(
+      "effect boundary returned an incompatible completion frame",
+    );
+  }
+  const outcome = frame.outcome;
+  if (outcome.kind === "failure") {
+    throw new Error(outcome.failure.message);
+  }
+  return outcome.value.value;
 };
 
 const invalidPayloadLengthMessage = ({
@@ -115,6 +143,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   annotateTrap,
   fallbackFunctionName,
   transport,
+  completion,
 }: {
   result: unknown;
   effectStatus: CallableFunction;
@@ -138,6 +167,7 @@ export const continueEffectLoopStep = async <T = unknown>({
   ) => Error;
   fallbackFunctionName?: string;
   transport: HostTransportAdapter;
+  completion: HostCompletionIdentity;
 }): Promise<EffectLoopStepResult<T>> => {
   const withTrapContext = ({
     error,
@@ -182,11 +212,12 @@ export const continueEffectLoopStep = async <T = unknown>({
   if (status === EFFECT_RESULT_STATUS.value) {
     return {
       kind: "value",
-      value: decodePayload({
+      value: decodeHostCompletion({
         memory: msgpackMemory,
         ptr: bufferPtr,
         length: payloadLength,
         transport,
+        completion,
       }) as T,
     };
   }
@@ -280,6 +311,8 @@ export const continueEffectLoopStep = async <T = unknown>({
         bufferPtr,
         encoded.length,
         bufferSize,
+        completion.kind === "export" ? 0 : 1,
+        completion.id,
       );
     } catch (error) {
       throw withTrapContext({
@@ -315,6 +348,7 @@ export const runEffectLoop = async <T = unknown>({
   bufferPtr,
   bufferSize,
   transport,
+  completion,
 }: {
   entry: CallableFunction;
   effectStatus: CallableFunction;
@@ -327,6 +361,7 @@ export const runEffectLoop = async <T = unknown>({
   bufferPtr: number;
   bufferSize: number;
   transport: HostTransportAdapter;
+  completion: HostCompletionIdentity;
 }): Promise<T> => {
   let result = entry(bufferPtr, bufferSize);
 
@@ -344,6 +379,7 @@ export const runEffectLoop = async <T = unknown>({
       bufferPtr,
       bufferSize,
       transport,
+      completion,
     });
     if (stepResult.kind === "value") {
       return stepResult.value;

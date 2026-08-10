@@ -61,12 +61,14 @@ export type BoundarySchema = (
 
 export type ExportAbiEntry =
   | {
+      id: number;
       name: string;
       abi: "direct";
       params?: readonly BoundarySchema[];
       result?: BoundarySchema;
     }
   | {
+      id: number;
       name: string;
       abi: "serialized";
       wrapperName?: string;
@@ -84,7 +86,7 @@ export const EXPORT_ABI_SECTION = "voyd.export_abi";
 
 export const parseExportAbi = (
   module: WebAssembly.Module,
-  sectionName = EXPORT_ABI_SECTION
+  sectionName = EXPORT_ABI_SECTION,
 ): ParsedExportAbi => {
   const sections = WebAssembly.Module.customSections(module, sectionName);
   if (sections.length === 0) {

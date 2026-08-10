@@ -41,7 +41,11 @@ import {
   type RuntimeSchedulerOptions,
   type RuntimeStepResult,
 } from "./runtime/scheduler.js";
-import { continueEffectLoopStep } from "./runtime/dispatch.js";
+import {
+  continueEffectLoopStep,
+  decodeHostCompletion,
+  type HostCompletionIdentity,
+} from "./runtime/dispatch.js";
 import {
   registerDefaultHostAdapters,
   type DefaultAdapterOptions,
@@ -1060,7 +1064,7 @@ export const createVoydHost = async ({
   const runSerialized = <T = unknown>(
     entryName: string,
     args: unknown[] = [],
-    abi?: Extract<ExportAbiEntry, { abi: "serialized" }>,
+    abi: Extract<ExportAbiEntry, { abi: "serialized" }>,
   ): T => {
     const wrapperName = abi?.wrapperName ?? entryName;
     const entry = requireExportedFunction({ instance, name: wrapperName });
@@ -1083,11 +1087,10 @@ export const createVoydHost = async ({
       : args;
     const encodedArgs = transport.encodeFrame({
       kind: "export-invocation",
-      exportName: entryName,
+      exportId: abi.id,
       args: boundaryArgs.map((value, index) => ({
         fingerprint:
-          abi?.params?.[index]?.fingerprint ??
-          `legacy:${entryName}:arg${index}`,
+          abi.params?.[index]?.fingerprint ?? `export:${abi.id}:arg${index}`,
         value,
       })),
     });
@@ -1132,7 +1135,7 @@ export const createVoydHost = async ({
     const completion = transport.decodeFrame(bytes);
     if (
       completion.kind !== "export-completion" ||
-      completion.exportName !== entryName
+      completion.exportId !== abi.id
     ) {
       throw new Error(
         `serialized export ${entryName} returned an incompatible host frame`,
@@ -1145,7 +1148,7 @@ export const createVoydHost = async ({
         `serialized export ${entryName} failed (${code})${at}: ${message}`,
       );
     }
-    const expectedFingerprint = abi?.result?.fingerprint;
+    const expectedFingerprint = abi.result?.fingerprint;
     if (
       expectedFingerprint &&
       completion.outcome.value.fingerprint !== expectedFingerprint
@@ -1156,7 +1159,7 @@ export const createVoydHost = async ({
     }
     const decoded = completion.outcome.value.value;
     return (
-      abi?.result
+      abi.result
         ? decodeBoundaryResult({
             exportName: entryName,
             schema: abi.result,
@@ -1230,6 +1233,7 @@ export const createVoydHost = async ({
     entryName: string,
     args: unknown[] = [],
     startRaw?: RawEffectfulStarter,
+    completionOverride?: HostCompletionIdentity,
   ): VoydRunHandle<T> => {
     const callbackScopeRunId = detachedRunCounter++;
     const callbackScopeOwnerForTask = (taskId: number): string =>
@@ -1240,6 +1244,20 @@ export const createVoydHost = async ({
     if (!initialized) {
       initEffects();
     }
+    const rootCompletion =
+      completionOverride ??
+      (() => {
+        const abiName = entryName.endsWith("_effectful")
+          ? entryName.slice(0, -"_effectful".length)
+          : entryName;
+        const abi = exportAbiByName.get(abiName);
+        if (!abi) {
+          throw new Error(
+            `effectful export ${entryName} is missing ABI metadata`,
+          );
+        }
+        return { kind: "export", id: abi.id } as const;
+      })();
 
     const msgpackMemory = requireExportedMemory({
       instance,
@@ -1376,6 +1394,7 @@ export const createVoydHost = async ({
               fallbackFunctionName: startRaw
                 ? entryName
                 : effectfulExportNameFor(entryName),
+              completion: rootCompletion,
             });
             if (stepResult.kind === "value") {
               return { kind: "value", value: stepResult.value };
@@ -1514,9 +1533,6 @@ export const createVoydHost = async ({
       return encoded.length;
     };
 
-    const decodeFromBuffer = (length: number): unknown =>
-      transport.decode(new Uint8Array(msgpackMemory.buffer, bufferPtr, length));
-
     let resolvePublicOutcome: ((outcome: RunOutcome<T>) => void) | undefined;
     const publicOutcome = new Promise<RunOutcome<T>>((resolve) => {
       resolvePublicOutcome = resolve;
@@ -1534,8 +1550,17 @@ export const createVoydHost = async ({
     >();
     const completedTaskOutcomes = new Map<number, RunOutcome<unknown>>();
 
-    const decodeRawOutcome = (rawOutcome: unknown): unknown => {
-      const effectResult = handleOutcome(rawOutcome, bufferPtr, bufferSize);
+    const decodeRawOutcome = (
+      rawOutcome: unknown,
+      completion: HostCompletionIdentity,
+    ): unknown => {
+      const effectResult = handleOutcome(
+        rawOutcome,
+        bufferPtr,
+        bufferSize,
+        completion.kind === "export" ? 0 : 1,
+        completion.id,
+      );
       const payloadLength = effectLen(effectResult) as number;
       if (!Number.isSafeInteger(payloadLength) || payloadLength < 0) {
         throw new Error(
@@ -1548,7 +1573,13 @@ export const createVoydHost = async ({
         );
       }
       try {
-        return decodeFromBuffer(payloadLength);
+        return decodeHostCompletion({
+          memory: msgpackMemory,
+          ptr: bufferPtr,
+          length: payloadLength,
+          transport,
+          completion,
+        });
       } catch (error) {
         throw new Error("task outcome decoding failed", {
           cause: toError(error),
@@ -2029,7 +2060,12 @@ export const createVoydHost = async ({
             try {
               return {
                 ...completion,
-                value: decodeRawOutcome(completion.rawOutcome),
+                value: decodeRawOutcome(
+                  completion.rawOutcome,
+                  task.ownerId === null
+                    ? rootCompletion
+                    : { kind: "callback", id: task.id },
+                ),
                 observed: false,
               };
             } catch (error) {
@@ -2329,6 +2365,12 @@ export const createVoydHost = async ({
               rawOutcome,
               bufferPtr,
               bufferSize,
+              task.ownerId === null
+                ? rootCompletion.kind === "export"
+                  ? 0
+                  : 1
+                : 1,
+              task.ownerId === null ? rootCompletion.id : task.id,
             );
             const payloadLength = effectLen(effectResult) as number;
             const request = effectCont(effectResult);
@@ -2611,8 +2653,11 @@ export const createVoydHost = async ({
       name: starterExportName,
     });
     const taskId = nextStandaloneTaskId++;
-    const run = runEffectfulManaged<unknown>(starterExportName, [], () =>
-      starter(...workArgs),
+    const run = runEffectfulManaged<unknown>(
+      starterExportName,
+      [],
+      () => starter(...workArgs),
+      { kind: "callback", id: taskId },
     );
     const entry: StandaloneTaskEntry = { outcome: run.outcome };
     standaloneTaskRuns.set(taskId, entry);
@@ -2688,6 +2733,7 @@ export const createVoydHost = async ({
           });
         }
       },
+      { kind: "callback", id: invocationId },
     );
     return attachTaskObserver(
       await unwrapRunOutcome(managed.outcome),

@@ -1,6 +1,10 @@
 import binaryen from "binaryen";
 import { arrayGet } from "@voyd-lang/lib/binaryen-gc/index.js";
-import type { CodegenContext, FunctionContext, FunctionMetadata } from "../../context.js";
+import type {
+  CodegenContext,
+  FunctionContext,
+  FunctionMetadata,
+} from "../../context.js";
 import { findSerializerFormatForType } from "../../serializer.js";
 import { coerceValueToType } from "../../structural.js";
 import { wasmTypeFor } from "../../types.js";
@@ -8,6 +12,8 @@ import type { EffectRuntime } from "../runtime-abi.js";
 import { ensureDispatcher } from "../dispatcher.js";
 import { ensureSelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 import { unpackMsgPackValueForType } from "./msgpack-values.js";
+import { HOST_COMPLETION_KIND } from "./handle-outcome.js";
+import { hostExportId } from "../../exports/export-abi.js";
 
 export const createEffectfulEntry = ({
   ctx,
@@ -24,7 +30,7 @@ export const createEffectfulEntry = ({
 }): string => {
   if (meta.paramTypes.length > 1) {
     throw new Error(
-      `effectful exports with parameters are not supported yet (${exportName})`
+      `effectful exports with parameters are not supported yet (${exportName})`,
     );
   }
 
@@ -39,7 +45,7 @@ export const createEffectfulEntry = ({
   const dispatched = ctx.mod.call(
     ensureDispatcher(ctx),
     [entry.result],
-    runtime.outcomeType
+    runtime.outcomeType,
   );
   ctx.mod.addFunction(
     name,
@@ -52,9 +58,11 @@ export const createEffectfulEntry = ({
         dispatched,
         ctx.mod.local.get(entry.outPtrLocal, binaryen.i32),
         ctx.mod.local.get(entry.outLenLocal, binaryen.i32),
+        ctx.mod.i32.const(HOST_COMPLETION_KIND.export),
+        ctx.mod.i32.const(hostExportId(exportName.replace(/_effectful$/, ""))),
       ],
-      runtime.effectResultType
-    )
+      runtime.effectResultType,
+    ),
   );
   ctx.mod.addFunctionExport(name, exportName);
   return name;
@@ -73,7 +81,7 @@ export const createEffectfulEntryRaw = ({
 }): string => {
   if (meta.paramTypes.length > 1) {
     throw new Error(
-      `effectful exports with parameters are not supported yet (${exportName})`
+      `effectful exports with parameters are not supported yet (${exportName})`,
     );
   }
 
@@ -85,7 +93,13 @@ export const createEffectfulEntryRaw = ({
     exportName,
     dispatch: true,
   });
-  ctx.mod.addFunction(name, entry.params, runtime.outcomeType, entry.locals, entry.result);
+  ctx.mod.addFunction(
+    name,
+    entry.params,
+    runtime.outcomeType,
+    entry.locals,
+    entry.result,
+  );
   ctx.mod.addFunctionExport(name, exportName);
   return name;
 };
@@ -134,11 +148,7 @@ const buildEffectfulEntryBody = ({
   const argsArrayLocal = paramCount;
   const storageLocal = paramCount + 1;
   const argsCountLocal = paramCount + 2;
-  const locals: binaryen.Type[] = [
-    arrayType,
-    storageType,
-    binaryen.i32,
-  ];
+  const locals: binaryen.Type[] = [arrayType, storageType, binaryen.i32];
   const fnCtx: FunctionContext = {
     bindings: new Map(),
     tempLocals: new Map(),
@@ -156,7 +166,7 @@ const buildEffectfulEntryBody = ({
       ctx.mod.local.get(inputPtrLocal, binaryen.i32),
       ctx.mod.local.get(inputLenLocal, binaryen.i32),
     ],
-    decode.resultType
+    decode.resultType,
   );
   const decodedValue = coerceValueToType({
     value: decoded,
@@ -168,25 +178,25 @@ const buildEffectfulEntryBody = ({
   const argsArray = ctx.mod.call(
     msgpack.unpackArray.wasmName,
     [decodedValue],
-    arrayType
+    arrayType,
   );
   const argsCount = ctx.mod.call(
     msgpack.arrayLength.wasmName,
     [ctx.mod.local.get(argsArrayLocal, arrayType)],
-    binaryen.i32
+    binaryen.i32,
   );
   const storage = ctx.mod.call(
     msgpack.arrayRawStorage.wasmName,
     [ctx.mod.local.get(argsArrayLocal, arrayType)],
-    storageType
+    storageType,
   );
   const checkArgs = ctx.mod.if(
     ctx.mod.i32.lt_s(
       ctx.mod.local.get(argsCountLocal, binaryen.i32),
-      ctx.mod.i32.const(meta.paramTypeIds.length)
+      ctx.mod.i32.const(meta.paramTypeIds.length),
     ),
     ctx.mod.unreachable(),
-    ctx.mod.nop()
+    ctx.mod.nop(),
   );
   const userArgs = meta.paramTypeIds.map((typeId, index) => {
     const element = arrayGet(
@@ -194,7 +204,7 @@ const buildEffectfulEntryBody = ({
       ctx.mod.local.get(storageLocal, storageType),
       ctx.mod.i32.const(index),
       msgPackType,
-      false
+      false,
     );
     const serializerFormat =
       meta.parameters[index]?.serializer?.formatId ??
@@ -223,15 +233,24 @@ const buildEffectfulEntryBody = ({
     : result;
 
   return {
-    params: binaryen.createType([binaryen.i32, binaryen.i32, binaryen.i32, binaryen.i32]),
+    params: binaryen.createType([
+      binaryen.i32,
+      binaryen.i32,
+      binaryen.i32,
+      binaryen.i32,
+    ]),
     locals,
-    result: ctx.mod.block(null, [
-      ctx.mod.local.set(argsArrayLocal, argsArray),
-      ctx.mod.local.set(storageLocal, storage),
-      ctx.mod.local.set(argsCountLocal, argsCount),
-      checkArgs,
-      dispatched,
-    ], runtime.outcomeType),
+    result: ctx.mod.block(
+      null,
+      [
+        ctx.mod.local.set(argsArrayLocal, argsArray),
+        ctx.mod.local.set(storageLocal, storage),
+        ctx.mod.local.set(argsCountLocal, argsCount),
+        checkArgs,
+        dispatched,
+      ],
+      runtime.outcomeType,
+    ),
     outPtrLocal,
     outLenLocal,
   };
@@ -251,5 +270,5 @@ const effectfulCall = ({
   ctx.mod.call(
     meta.wasmName,
     [ctx.mod.ref.null(runtime.handlerFrameType), ...args],
-    runtime.outcomeType
+    runtime.outcomeType,
   );
