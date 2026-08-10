@@ -5,86 +5,117 @@ use std::data::self as data
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
 use std::error::panic
+use std::fixed_array::fns::all
 use std::msgpack::self as msgpack
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
 use std::task::{ Task, TaskRuntime }
 use std::task::self as tasks
-pub use std::msgpack::MsgPack
+use std::msgpack::MsgPack
 
 pub self::canvas
-use self::command::retain_typed_message_mapper
+use self::command::{ command_plan, lower_command, retain_typed_message_mapper }
 pub use self::command::{ Cmd, Ref }
 
 /// Opaque virtual DOM node plan. The message parameter records the event
 /// message type while the renderer wire stays private to VX.
-pub obj HtmlNode {
-  payload: MsgPack
-}
+type VxLower = fn() : () -> MsgPack
+
+pub obj HtmlNode { thunk: FixedArray<VxLower> }
 
 pub type Html<Msg> = HtmlNode
 
 /// Opaque virtual DOM attribute or event plan.
-pub obj HtmlAttr {
-  payload: MsgPack
-}
+pub obj HtmlAttr { thunk: FixedArray<VxLower> }
 
 pub type Attr<Msg> = HtmlAttr
 pub type RenderKey = String
 
-pub obj ProgramPlan {
-  payload: MsgPack
-}
+pub obj ProgramPlan { thunk: FixedArray<VxLower> }
 
 pub type Program<Model, Msg> = ProgramPlan
 
-pub obj SubPlan {
-  payload: MsgPack
-}
+pub obj SubPlan { thunk: FixedArray<VxLower> }
 
 pub type Sub<Msg> = SubPlan
 
+fn lower_program(value: ProgramPlan) -> MsgPack
+  lower_vx_thunk(value.thunk)
+
+fn lower_sub(value: SubPlan) -> MsgPack
+  lower_vx_thunk(value.thunk)
+
+fn lower_html_node(value: HtmlNode) -> MsgPack
+  lower_vx_thunk(value.thunk)
+
+fn lower_html_attr(value: HtmlAttr) -> MsgPack
+  lower_vx_thunk(value.thunk)
+
+fn lower_vx_thunk(thunk: FixedArray<VxLower>) -> MsgPack
+  match(thunk.get<VxLower>(0))
+    Some<VxLower> { value: run }:
+      run()
+    None:
+      msgpack::make_null()
+
+fn vx_thunk(run: VxLower) -> FixedArray<VxLower>
+  let thunk = new_fixed_array<VxLower>(1)
+  thunk.set<VxLower>(0, run)
+  thunk
+
+fn html_plan(run: VxLower) -> HtmlNode
+  HtmlNode { thunk: vx_thunk(run) }
+
+fn attr_plan(run: VxLower) -> HtmlAttr
+  HtmlAttr { thunk: vx_thunk(run) }
+
+fn program_plan(run: VxLower) -> ProgramPlan
+  ProgramPlan { thunk: vx_thunk(run) }
+
+fn subscription_plan(run: VxLower) -> SubPlan
+  SubPlan { thunk: vx_thunk(run) }
+
 impl CustomDto<ProgramPlan, Bytes> for ProgramPlan
   fn write(value: ProgramPlan) -> Bytes
-    encode_vx_wire(value.payload)
+    encode_vx_wire(lower_program(value))
 
   fn read(value: Bytes) -> Result<ProgramPlan, CustomDtoError>
     Ok<ProgramPlan> {
-      value: ProgramPlan { payload: decode_vx_wire(value) }
+      value: program_plan(() -> MsgPack => decode_vx_wire(value))
     }
 
 impl CustomDto<SubPlan, Bytes> for SubPlan
   fn write(value: SubPlan) -> Bytes
-    encode_vx_wire(value.payload)
+    encode_vx_wire(lower_sub(value))
 
   fn read(value: Bytes) -> Result<SubPlan, CustomDtoError>
     Ok<SubPlan> {
-      value: SubPlan { payload: decode_vx_wire(value) }
+      value: subscription_plan(() -> MsgPack => decode_vx_wire(value))
     }
 
 impl<Msg> CustomDto<Cmd<Msg>, Bytes> for Cmd<Msg>
   fn write(value: Cmd<Msg>) -> Bytes
-    encode_vx_wire(value.payload)
+    encode_vx_wire(lower_command(value))
 
   fn read(value: Bytes) -> Result<Cmd<Msg>, CustomDtoError>
     Ok<Cmd<Msg>> {
-      value: Cmd<Msg> { payload: decode_vx_wire(value) }
+      value: command_plan<Msg>(() -> MsgPack => decode_vx_wire(value))
     }
 
 impl CustomDto<HtmlNode, Bytes> for HtmlNode
   fn write(value: HtmlNode) -> Bytes
-    encode_vx_wire(value.payload)
+    encode_vx_wire(lower_html_node(value))
 
   fn read(value: Bytes) -> Result<HtmlNode, CustomDtoError>
-    Ok<HtmlNode> { value: HtmlNode { payload: decode_vx_wire(value) } }
+    Ok<HtmlNode> { value: html_plan(() -> MsgPack => decode_vx_wire(value)) }
 
 impl CustomDto<HtmlAttr, Bytes> for HtmlAttr
   fn write(value: HtmlAttr) -> Bytes
-    encode_vx_wire(value.payload)
+    encode_vx_wire(lower_html_attr(value))
 
   fn read(value: Bytes) -> Result<HtmlAttr, CustomDtoError>
-    Ok<HtmlAttr> { value: HtmlAttr { payload: decode_vx_wire(value) } }
+    Ok<HtmlAttr> { value: attr_plan(() -> MsgPack => decode_vx_wire(value)) }
 
 fn encode_vx_wire(value: MsgPack) -> Bytes
   match(msgpack::encode_value_bytes(value))
@@ -102,13 +133,13 @@ fn decode_vx_wire(value: Bytes) -> MsgPack
 
 /// Lowers an opaque HTML plan to the immutable VX renderer wire.
 pub fn lower_html(value: HtmlNode) -> Bytes
-  encode_vx_wire(value.payload)
+  encode_vx_wire(lower_html_node(value))
 
 fn html_node_payloads(values: Array<HtmlNode>) -> Array<MsgPack>
   let ~out = Array<MsgPack>::with_capacity(values.len())
   var index = 0
   while index < values.len():
-    out.push(values.at(index).payload)
+    out.push(lower_html_node(values.at(index)))
     index = index + 1
   out
 
@@ -116,7 +147,7 @@ fn html_attr_payloads(values: Array<HtmlAttr>) -> Array<MsgPack>
   let ~out = Array<MsgPack>::with_capacity(values.len())
   var index = 0
   while index < values.len():
-    out.push(values.at(index).payload)
+    out.push(lower_html_attr(values.at(index)))
     index = index + 1
   out
 
@@ -220,10 +251,6 @@ pub type GenericEvent = {
   event: String
 }
 
-@effect(id: "voyd.std.vx.dom")
-pub eff Dom
-  dispatch(tail, payload: MsgPack) -> MsgPack
-
 @effect(id: "voyd.std.vx.component")
 pub eff Component
   state_scope(tail, key: Bytes) -> void
@@ -301,33 +328,35 @@ impl SubPlan
 impl<Msg> SubPlan
   /// Creates an empty subscription set.
   api fn none() -> Sub<Msg>
-    SubPlan { payload: subscription_payload("none") }
+    subscription_plan(() -> MsgPack => subscription_payload("none"))
 
   /// Creates a subscription batch from existing subscription values.
   api fn batch(values: Array<Sub<Msg>>) -> Sub<Msg>
-    let ~children = Array<MsgPack>::with_capacity(values.len())
-    var index = 0
-    while index < values.len():
-      let value = values.at(index)
-      children.push(value.payload)
-      index = index + 1
-
-    let ~out = subscription_map("batch")
-    out.set("children", msgpack::make_array(children))
-    SubPlan { payload: msgpack::make_map(out) }
+    subscription_plan(() -> MsgPack =>
+      let ~children = Array<MsgPack>::with_capacity(values.len())
+      var index = 0
+      while index < values.len():
+        children.push(lower_sub(values.at(index)))
+        index = index + 1
+      let ~out = subscription_map("batch")
+      out.set("children", msgpack::make_array(children))
+      msgpack::make_map(out)
+    )
 
   /// Creates a host/runtime subscription envelope for a registered VX subscription runner.
-  fn runtime({ kind: String, key: String, value?: MsgPack }) -> Sub<Msg>
-    let out = subscription_map(kind).setting("key", key)
-    let complete =
-      match(value)
-        Some<MsgPack> { value: payload }:
-          out.setting("value", payload)
-        None:
-          out
-    SubPlan { payload: msgpack::make_map(complete) }
+  fn runtime({ kind: String, key: String, value?: VxLower }) -> Sub<Msg>
+    subscription_plan(() -> MsgPack =>
+      let out = subscription_map(kind).setting("key", key)
+      let complete =
+        match(value)
+          Some<VxLower> { value: lower_value }:
+            out.setting("value", lower_value())
+          None:
+            out
+      msgpack::make_map(complete)
+    )
 
-  fn runtime({ kind: StringSlice, key: StringSlice, value?: MsgPack }) -> Sub<Msg>
+  fn runtime({ kind: StringSlice, key: StringSlice, value?: VxLower }) -> Sub<Msg>
     Sub<Msg>::runtime(kind: kind.to_string(), key: key.to_string(), value: value)
 
   /// Creates a host/runtime subscription and maps incoming payloads through a typed handler.
@@ -351,18 +380,24 @@ impl<Msg> SubPlan
 
   /// Creates an interval subscription that dispatches a typed message.
   api fn every({ key: String, millis: i64, value: Msg }) -> Sub<Msg>
-    let ~out = subscription_map("interval")
-    out.set("key", key)
-    out.set("ms", msgpack::make_i64(millis))
-    out.set("value", msgpack::from_data_value(data::encode(value)))
-    SubPlan { payload: msgpack::make_map(out) }
+    subscription_plan(() -> MsgPack =>
+      let ~out = subscription_map("interval")
+      out.set("key", key)
+      out.set("ms", msgpack::make_i64(millis))
+      out.set("value", msgpack::from_data_value(data::encode(value)))
+      msgpack::make_map(out)
+    )
 
   api fn every({ key: StringSlice, millis: i64, value: Msg }) -> Sub<Msg>
     Sub<Msg>::every(key: key.to_string(), millis: millis, value: value)
 
 /// Subscribes to global keydown events through the browser VX runtime host.
 pub fn keyboard_on_key_down<Msg>({ key: String, value: Msg }) -> Sub<Msg>
-  keyboard_subscription<Msg>(kind: "keydown", key: key, value: msgpack::from_data_value(data::encode(value)))
+  keyboard_subscription<Msg>(
+    kind: "keydown",
+    key: key,
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+  )
 
 pub fn keyboard_on_key_down<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
   keyboard_payload_subscription(kind: "keydown", key: key).map<Msg>(handler)
@@ -378,7 +413,11 @@ pub fn keyboard_on_key_down<Msg>({
 
 /// Subscribes to global keyup events through the browser VX runtime host.
 pub fn keyboard_on_key_up<Msg>({ key: String, value: Msg }) -> Sub<Msg>
-  keyboard_subscription<Msg>(kind: "keyup", key: key, value: msgpack::from_data_value(data::encode(value)))
+  keyboard_subscription<Msg>(
+    kind: "keyup",
+    key: key,
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+  )
 
 pub fn keyboard_on_key_up<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
   keyboard_payload_subscription(kind: "keyup", key: key).map<Msg>(handler)
@@ -397,7 +436,7 @@ pub fn online_status<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "online_status",
     key: key,
-    value: msgpack::from_data_value(data::encode(value))
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
   )
 
 pub fn online_status<Msg>({ key: String, handler: fn(bool) -> Msg }) -> Sub<Msg>
@@ -414,7 +453,7 @@ pub fn window_on_resize<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "window_resize",
     key: key,
-    value: msgpack::from_data_value(data::encode(value))
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
   )
 
 pub fn window_on_resize<Msg>({
@@ -437,7 +476,7 @@ pub fn document_on_visibility_change<Msg>({ key: String, value: Msg }) -> Sub<Ms
   Sub<Msg>::runtime(
     kind: "visibility_change",
     key: key,
-    value: msgpack::from_data_value(data::encode(value))
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
   )
 
 pub fn document_on_visibility_change<Msg>({
@@ -464,7 +503,7 @@ pub fn location_on_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "location_change",
     key: key,
-    value: msgpack::from_data_value(data::encode(value))
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
   )
 
 pub fn location_on_change<Msg>({ key: String, handler: fn(Location) -> Msg }) -> Sub<Msg>
@@ -482,7 +521,7 @@ pub fn window_on_focus<Msg>({ key: String, value: Msg }) -> Sub<Msg>
     kind: "window_focus",
     event: "focus",
     key: key,
-    value: msgpack::from_data_value(data::encode(value))
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
   )
 
 pub fn window_on_focus<Msg>({ key: String, handler: fn(GenericEvent) -> Msg }) -> Sub<Msg>
@@ -503,7 +542,7 @@ pub fn window_on_blur<Msg>({ key: String, value: Msg }) -> Sub<Msg>
     kind: "window_blur",
     event: "blur",
     key: key,
-    value: msgpack::from_data_value(data::encode(value))
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
   )
 
 pub fn window_on_blur<Msg>({ key: String, handler: fn(GenericEvent) -> Msg }) -> Sub<Msg>
@@ -523,7 +562,7 @@ pub fn animation_frame<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "animation_frame",
     key: key,
-    value: msgpack::from_data_value(data::encode(value))
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
   )
 
 pub fn animation_frame<Msg>({
@@ -543,7 +582,10 @@ pub fn animation_frame<Msg>({
 
 /// Subscribes to a browser media query.
 pub fn media_query<Msg>({ query: String, value: Msg }) -> Sub<Msg>
-  media_query_subscription<Msg>(query: query, value: msgpack::from_data_value(data::encode(value)))
+  media_query_subscription<Msg>(
+    query: query,
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+  )
 
 pub fn media_query<Msg>({ query: String, handler: fn(MediaQuery) -> Msg }) -> Sub<Msg>
   media_query_payload_subscription(query).map<Msg>(handler)
@@ -559,7 +601,7 @@ pub fn storage_on_change<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   Sub<Msg>::runtime(
     kind: "storage",
     key: key,
-    value: msgpack::from_data_value(data::encode(value))
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
   )
 
 pub fn storage_on_change<Msg>({ key: String, handler: fn(StorageChange) -> Msg }) -> Sub<Msg>
@@ -576,7 +618,10 @@ pub fn storage_on_change<Msg>({
 
 /// Subscribes to messages from a browser BroadcastChannel.
 pub fn broadcast_channel<Msg>({ name: String, value: Msg }) -> Sub<Msg>
-  broadcast_channel_subscription<Msg>(name: name, value: msgpack::from_data_value(data::encode(value)))
+  broadcast_channel_subscription<Msg>(
+    name: name,
+    value: () -> MsgPack => msgpack::from_data_value(data::encode(value))
+  )
 
 pub fn broadcast_channel<Payload, Msg>({
   name: String,
@@ -638,7 +683,7 @@ pub fn task<Key, T>({ key: Key, task: Task<T> }): Component -> Unit
 
 /// Associates closure-backed handlers in a prebuilt view with the active server render.
 pub fn claim_server_render_callbacks(value: HtmlNode): () -> void
-  claim_server_render_callbacks_in(value.payload)
+  claim_server_render_callbacks_in(lower_html_node(value))
 
 fn claim_server_render_callbacks_in(value: MsgPack): () -> void
   match(msgpack::unpack_array(value))
@@ -710,17 +755,21 @@ fn claim_server_render_callback_field(value: Dict<String, MsgPack>, name: String
 
 /// Creates a versioned VX render frame.
 pub fn frame(root: HtmlNode): () -> HtmlNode
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("version", msgpack::make_i32(1))
-  out.set("root", root.payload)
-  HtmlNode { payload: msgpack::make_map(out) }
+  html_plan(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("version", msgpack::make_i32(1))
+    out.set("root", lower_html_node(root))
+    msgpack::make_map(out)
+  )
 
 /// Creates a VX text node.
 pub fn text(value: String): () -> HtmlNode
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "text")
-  out.set("value", value)
-  HtmlNode { payload: msgpack::make_map(out) }
+  html_plan(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "text")
+    out.set("value", value)
+    msgpack::make_map(out)
+  )
 
 /// Creates a VX text node from a string slice.
 pub fn text(value: StringSlice): () -> HtmlNode
@@ -743,10 +792,12 @@ pub fn html_child(value: Array<HtmlNode>): () -> HtmlNode
 
 /// Creates a VX fragment node.
 pub fn fragment(children: Array<HtmlNode>): () -> HtmlNode
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "fragment")
-  out.set("children", html_node_payloads(children))
-  HtmlNode { payload: msgpack::make_map(out) }
+  html_plan(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "fragment")
+    out.set("children", html_node_payloads(children))
+    msgpack::make_map(out)
+  )
 
 /// Creates a VX element node using the versioned renderer schema.
 pub fn element({
@@ -754,21 +805,23 @@ pub fn element({
   attrs?: Array<HtmlAttr>,
   children: Array<HtmlNode>
 }) -> HtmlNode
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "element")
-  out.set("tag", tag)
-  out.set("children", html_node_payloads(children))
-  if attrs is Some:
-    let normalized = normalize_attrs(html_attr_payloads(attrs.value))
-    if normalized.attrs.len() > 0:
-      out.set("attrs", msgpack::make_map(normalized.attrs))
-    if normalized.props.len() > 0:
-      out.set("props", msgpack::make_map(normalized.props))
-    if normalized.styles.len() > 0:
-      out.set("styles", msgpack::make_map(normalized.styles))
-    if normalized.events.len() > 0:
-      out.set("events", normalized.events)
-  HtmlNode { payload: msgpack::make_map(out) }
+  html_plan(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "element")
+    out.set("tag", tag)
+    out.set("children", html_node_payloads(children))
+    if attrs is Some:
+      let normalized = normalize_attrs(html_attr_payloads(attrs.value))
+      if normalized.attrs.len() > 0:
+        out.set("attrs", msgpack::make_map(normalized.attrs))
+      if normalized.props.len() > 0:
+        out.set("props", msgpack::make_map(normalized.props))
+      if normalized.styles.len() > 0:
+        out.set("styles", msgpack::make_map(normalized.styles))
+      if normalized.events.len() > 0:
+        out.set("events", normalized.events)
+    msgpack::make_map(out)
+  )
 
 pub fn html_element({
   tag: String,
@@ -779,25 +832,13 @@ pub fn html_element({
 
 /// Creates a string-valued DOM attribute.
 pub fn attr({ name: String, value: String }): () -> HtmlAttr
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "attr")
-  out.set("name", name)
-  out.set("value", value)
-  HtmlAttr { payload: msgpack::make_map(out) }
+  attr_plan(() -> MsgPack => named_value("attr", name, value))
 
 pub fn attr({ name: String, value: bool }): () -> HtmlAttr
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "attr")
-  out.set("name", name)
-  out.set("value", msgpack::make_bool(value))
-  HtmlAttr { payload: msgpack::make_map(out) }
+  attr_plan(() -> MsgPack => named_value("attr", name, msgpack::make_bool(value)))
 
 pub fn attr({ name: String, value: i32 }): () -> HtmlAttr
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "attr")
-  out.set("name", name)
-  out.set("value", msgpack::make_i32(value))
-  HtmlAttr { payload: msgpack::make_map(out) }
+  attr_plan(() -> MsgPack => named_value("attr", name, msgpack::make_i32(value)))
 
 pub fn attr({ name: StringSlice, value: String }): () -> HtmlAttr
   attr(name: name.to_string(), value: value)
@@ -871,29 +912,29 @@ pub fn disabled(value: bool): () -> HtmlAttr
 pub fn checked(value: bool): () -> HtmlAttr
   prop(name: "checked", value: value)
 
-fn prop_value({ name: String, value: MsgPack }): () -> HtmlAttr
-  HtmlAttr { payload: named_value("prop", name, value) }
+fn prop_value({ name: String, value: VxLower }): () -> HtmlAttr
+  attr_plan(() -> MsgPack => named_value("prop", name, value()))
 
 pub fn prop({ name: String, value: String }): () -> HtmlAttr
-  prop_value(name: name, value: msgpack::make_string(value))
+  prop_value(name: name, value: () -> MsgPack => msgpack::make_string(value))
 
 pub fn prop({ name: StringSlice, value: StringSlice }): () -> HtmlAttr
   prop(name: name.to_string(), value: value.to_string())
 
 pub fn prop({ name: String, value: bool }): () -> HtmlAttr
-  prop_value(name: name, value: msgpack::make_bool(value))
+  prop_value(name: name, value: () -> MsgPack => msgpack::make_bool(value))
 
 pub fn prop({ name: StringSlice, value: bool }): () -> HtmlAttr
   prop(name: name.to_string(), value: value)
 
 pub fn prop({ name: String, value: i32 }): () -> HtmlAttr
-  prop_value(name: name, value: msgpack::make_i32(value))
+  prop_value(name: name, value: () -> MsgPack => msgpack::make_i32(value))
 
 pub fn prop({ name: StringSlice, value: i32 }): () -> HtmlAttr
   prop(name: name.to_string(), value: value)
 
 pub fn style({ name: String, value: String }): () -> HtmlAttr
-  HtmlAttr { payload: named_value("style", name, value) }
+  attr_plan(() -> MsgPack => named_value("style", name, value))
 
 pub fn style({ name: StringSlice, value: StringSlice }): () -> HtmlAttr
   style(name: name.to_string(), value: value.to_string())
@@ -911,11 +952,13 @@ pub fn styles(values: Array<(String, String)>): () -> Array<HtmlAttr>
   out
 
 pub fn keyed({ key: String, child: HtmlNode }): () -> HtmlNode
-  match(msgpack::unpack_map(child.payload))
-    Ok<Dict<String, MsgPack>> { value }:
-      HtmlNode { payload: msgpack::make_map(value.setting("key", key)) }
-    Err:
-      child
+  html_plan(() -> MsgPack =>
+    match(msgpack::unpack_map(lower_html_node(child)))
+      Ok<Dict<String, MsgPack>> { value }:
+        msgpack::make_map(value.setting("key", key))
+      Err:
+        lower_html_node(child)
+  )
 
 pub fn keyed({ key: StringSlice, child: HtmlNode }): () -> HtmlNode
   keyed(key: key.to_string(), child: child)
@@ -935,20 +978,24 @@ pub fn map_html<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler: fn(ChildMs
   )
 
 fn map_html_with_handler_id<ChildMsg, ParentMsg>({ html: Html<ChildMsg>, handler_id: i32 }) -> Html<ParentMsg>
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "map")
-  out.set("child", html.payload)
-  out.set("handlerId", msgpack::make_i32(handler_id))
-  HtmlNode { payload: msgpack::make_map(out) }
+  html_plan(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "map")
+    out.set("child", lower_html_node(html))
+    out.set("handlerId", msgpack::make_i32(handler_id))
+    msgpack::make_map(out)
+  )
 
 fn event_with_handler_id({ name: String, handler_id: i32, options?: EventOptions }): () -> HtmlAttr
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "event")
-  out.set("event", name)
-  out.set("handlerId", msgpack::make_i32(handler_id))
-  if options is Some:
-    out.set("options", msgpack::make_map(event_options_to_map(options.value)))
-  HtmlAttr { payload: msgpack::make_map(out) }
+  attr_plan(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "event")
+    out.set("event", name)
+    out.set("handlerId", msgpack::make_i32(handler_id))
+    if options is Some:
+      out.set("options", msgpack::make_map(event_options_to_map(options.value)))
+    msgpack::make_map(out)
+  )
 
 pub fn event_handler<Msg>({ name: String, handler: fn() -> Msg, options?: EventOptions }): () -> HtmlAttr
   event_with_handler_id(name: name, handler_id: retain_typed_event_handler_id(handler), options: options)
@@ -1159,16 +1206,18 @@ pub fn program<Model, Msg>({
   commands?: Cmd<Msg>,
   subscriptions?: Sub<Msg>
 }) -> Program<Model, Msg>
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("$vx", "runtime_result")
-  out.set("model", msgpack::from_data_value(data::encode(model)))
-  if frame is Some:
-    out.set("frame", frame.value.payload)
-  if commands is Some:
-    out.set("commands", commands.value.payload)
-  if subscriptions is Some:
-    out.set("subscriptions", subscriptions.value.payload)
-  ProgramPlan { payload: msgpack::make_map(out) }
+  program_plan(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("$vx", "runtime_result")
+    out.set("model", msgpack::from_data_value(data::encode(model)))
+    if frame is Some:
+      out.set("frame", lower_html_node(frame.value))
+    if commands is Some:
+      out.set("commands", lower_command(commands.value))
+    if subscriptions is Some:
+      out.set("subscriptions", lower_sub(subscriptions.value))
+    msgpack::make_map(out)
+  )
 
 /// Creates the next program transition from an explicit model.
 pub fn next<Model>(model: Model) -> ProgramPlan
@@ -1183,13 +1232,15 @@ fn map_model_with_handler_ids({
   handler_id: i32,
   hydrate_handler_id?: i32
 }) -> ProgramPlan
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "program_map_model")
-  out.set("child", program.payload)
-  out.set("handlerId", msgpack::make_i32(handler_id))
-  if hydrate_handler_id is Some:
-    out.set("hydrateHandlerId", msgpack::make_i32(hydrate_handler_id.value))
-  ProgramPlan { payload: msgpack::make_map(out) }
+  program_plan(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "program_map_model")
+    out.set("child", lower_program(program))
+    out.set("handlerId", msgpack::make_i32(handler_id))
+    if hydrate_handler_id is Some:
+      out.set("hydrateHandlerId", msgpack::make_i32(hydrate_handler_id.value))
+    msgpack::make_map(out)
+  )
 
 /// Lifts a child program result through a typed model mapper.
 pub fn map_model<Model, NextModel>(
@@ -1218,11 +1269,13 @@ fn map_message_with_handler_id({
   program: ProgramPlan,
   handler_id: i32
 }) -> ProgramPlan
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "program_map_message")
-  out.set("child", program.payload)
-  out.set("handlerId", msgpack::make_i32(handler_id))
-  ProgramPlan { payload: msgpack::make_map(out) }
+  program_plan(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "program_map_message")
+    out.set("child", lower_program(program))
+    out.set("handlerId", msgpack::make_i32(handler_id))
+    msgpack::make_map(out)
+  )
 
 /// Lifts a child program result through a typed message mapper.
 pub fn map_message<ChildMsg, ParentMsg>(
@@ -1271,34 +1324,17 @@ fn program_handlers<Model, Msg>({
   view_id: i32,
   subscriptions_id?: i32
 }) -> Program<Model, Msg>
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", "program")
-  out.set("initHandlerId", msgpack::make_i32(init_id))
-  out.set("hydrateHandlerId", msgpack::make_i32(hydrate_id))
-  out.set("stepHandlerId", msgpack::make_i32(step_id))
-  out.set("viewHandlerId", msgpack::make_i32(view_id))
-  if subscriptions_id is Some:
-    out.set("subscriptionsHandlerId", msgpack::make_i32(subscriptions_id.value))
-  ProgramPlan { payload: msgpack::make_map(out) }
-
-/// Creates a virtual DOM element payload for renderer consumption.
-///
-/// The returned value is a MsgPack map with `name`, `children`, and optional `attributes`.
-pub fn create_element({
-  /// Element tag or component identifier.
-  name: String,
-  /// Optional list of two-item key/value MsgPack pairs.
-  attributes?: Array<Array<MsgPack>>,
-  /// Ordered child node payloads.
-  children: Array<MsgPack>
-}) -> MsgPack
-  let ~element = Dict<String, MsgPack>::init()
-  element.set("name", name)
-  element.set("children", children)
-  if attributes is Some:
-    let attrs = attributes_to_map(attributes.value)
-    element.set("attributes", msgpack::make_map(attrs))
-  msgpack::make_map(element)
+  program_plan(() -> MsgPack =>
+    let ~out = Dict<String, MsgPack>::init()
+    out.set("kind", "program")
+    out.set("initHandlerId", msgpack::make_i32(init_id))
+    out.set("hydrateHandlerId", msgpack::make_i32(hydrate_id))
+    out.set("stepHandlerId", msgpack::make_i32(step_id))
+    out.set("viewHandlerId", msgpack::make_i32(view_id))
+    if subscriptions_id is Some:
+      out.set("subscriptionsHandlerId", msgpack::make_i32(subscriptions_id.value))
+    msgpack::make_map(out)
+  )
 
 obj NormalizedAttrs {
   attrs: Dict<String, MsgPack>,
@@ -1366,9 +1402,6 @@ fn consume_named_attr(entry: Dict<String, MsgPack>, ~attrs: Dict<String, MsgPack
     None:
       void
 
-fn bool_attr({ name: String, value: bool }): () -> MsgPack
-  named_value("attr", name, msgpack::make_bool(value))
-
 fn named_value(kind: String, name: String, value: MsgPack): () -> MsgPack
   let ~out = Dict<String, MsgPack>::init()
   out.set("kind", kind)
@@ -1411,22 +1444,26 @@ fn set_bool_option(~out: Dict<String, MsgPack>, name: String, value: Optional<bo
       void
 
 fn mark_owned_subscription(sub: SubPlan, handler_id: i32) -> SubPlan
-  match(msgpack::unpack_map(sub.payload))
-    Ok<Dict<String, MsgPack>> { value }:
-      SubPlan { payload: msgpack::make_map(with_owned_handler(value, handler_id)) }
-    Err:
-      sub
+  subscription_plan(() -> MsgPack =>
+    match(msgpack::unpack_map(lower_sub(sub)))
+      Ok<Dict<String, MsgPack>> { value }:
+        msgpack::make_map(with_owned_handler(value, handler_id))
+      Err:
+        lower_sub(sub)
+  )
 
 fn sub_map_with_handler_id(
   sub: SubPlan,
   { handler_id: i32, handler_key?: i32 }
 ) -> SubPlan
-  let ~out = subscription_map("map")
-  out.set("child", sub.payload)
-  out.set("handlerId", msgpack::make_i32(handler_id))
-  if handler_key is Some:
-    out.set("handlerKey", msgpack::make_i32(handler_key.value))
-  SubPlan { payload: msgpack::make_map(out) }
+  subscription_plan(() -> MsgPack =>
+    let ~out = subscription_map("map")
+    out.set("child", lower_sub(sub))
+    out.set("handlerId", msgpack::make_i32(handler_id))
+    if handler_key is Some:
+      out.set("handlerKey", msgpack::make_i32(handler_key.value))
+    msgpack::make_map(out)
+  )
 
 fn with_owned_handler(
   out: Dict<String, MsgPack>,
@@ -1442,93 +1479,85 @@ fn subscription_payload(kind: String): () -> MsgPack
 fn subscription_map(kind: String): () -> Dict<String, MsgPack>
   tagged_vx_runtime_map("sub", kind)
 
-fn keyboard_subscription<Msg>({ kind: String, key: String, value: MsgPack }) -> Sub<Msg>
-  let ~out = subscription_map("keyboard")
-  out.set("key", key)
-  out.set("event", kind)
-  out.set("value", value)
-  SubPlan { payload: msgpack::make_map(out) }
+fn keyboard_subscription<Msg>({ kind: String, key: String, value: VxLower }) -> Sub<Msg>
+  subscription_plan(() -> MsgPack =>
+    let ~out = subscription_map("keyboard")
+    out.set("key", key)
+    out.set("event", kind)
+    out.set("value", value())
+    msgpack::make_map(out)
+  )
 
 fn keyboard_payload_subscription({ kind: String, key: String }) -> Sub<KeyboardEvent>
-  let ~out = subscription_map("keyboard")
-  out.set("key", key)
-  out.set("event", kind)
-  SubPlan { payload: msgpack::make_map(out) }
+  subscription_plan(() -> MsgPack =>
+    let ~out = subscription_map("keyboard")
+    out.set("key", key)
+    out.set("event", kind)
+    msgpack::make_map(out)
+  )
 
 fn window_event_subscription<Msg>({
   kind: String,
   event: String,
   key: String,
-  value: MsgPack
+  value: VxLower
 }) -> Sub<Msg>
-  let out = subscription_map(kind)
-    .setting("key", key)
-    .setting("event", event)
-    .setting("value", value)
-  SubPlan { payload: msgpack::make_map(out) }
+  subscription_plan(() -> MsgPack =>
+    let out = subscription_map(kind)
+      .setting("key", key)
+      .setting("event", event)
+      .setting("value", value())
+    msgpack::make_map(out)
+  )
 
 fn window_event_payload_subscription({
   kind: String,
   event: String,
   key: String
 }) -> Sub<GenericEvent>
-  let out = subscription_map(kind)
-    .setting("key", key)
-    .setting("event", event)
-  SubPlan { payload: msgpack::make_map(out) }
+  subscription_plan(() -> MsgPack =>
+    let out = subscription_map(kind)
+      .setting("key", key)
+      .setting("event", event)
+    msgpack::make_map(out)
+  )
 
-fn media_query_subscription<Msg>({ query: String, value: MsgPack }) -> Sub<Msg>
-  let ~out = subscription_map("media_query")
-  out.set("key", query)
-  out.set("query", query)
-  out.set("value", value)
-  SubPlan { payload: msgpack::make_map(out) }
+fn media_query_subscription<Msg>({ query: String, value: VxLower }) -> Sub<Msg>
+  subscription_plan(() -> MsgPack =>
+    let ~out = subscription_map("media_query")
+    out.set("key", query)
+    out.set("query", query)
+    out.set("value", value())
+    msgpack::make_map(out)
+  )
 
 fn media_query_payload_subscription(query: String) -> Sub<MediaQuery>
-  let ~out = subscription_map("media_query")
-  out.set("key", query)
-  out.set("query", query)
-  SubPlan { payload: msgpack::make_map(out) }
+  subscription_plan(() -> MsgPack =>
+    let ~out = subscription_map("media_query")
+    out.set("key", query)
+    out.set("query", query)
+    msgpack::make_map(out)
+  )
 
-fn broadcast_channel_subscription<Msg>({ name: String, value: MsgPack }) -> Sub<Msg>
-  let ~out = subscription_map("broadcast_channel")
-  out.set("key", name)
-  out.set("name", name)
-  out.set("value", value)
-  SubPlan { payload: msgpack::make_map(out) }
+fn broadcast_channel_subscription<Msg>({ name: String, value: VxLower }) -> Sub<Msg>
+  subscription_plan(() -> MsgPack =>
+    let ~out = subscription_map("broadcast_channel")
+    out.set("key", name)
+    out.set("name", name)
+    out.set("value", value())
+    msgpack::make_map(out)
+  )
 
 fn broadcast_channel_payload_subscription<Payload>(name: String) -> Sub<Payload>
-  let ~out = subscription_map("broadcast_channel")
-  out.set("key", name)
-  out.set("name", name)
-  SubPlan { payload: msgpack::make_map(out) }
+  subscription_plan(() -> MsgPack =>
+    let ~out = subscription_map("broadcast_channel")
+    out.set("key", name)
+    out.set("name", name)
+    msgpack::make_map(out)
+  )
 
 fn tagged_vx_runtime_map(type_name: String, kind: String): () -> Dict<String, MsgPack>
   let ~out = Dict<String, MsgPack>::init()
   out.set("type", type_name)
   out.set("kind", kind)
   out
-
-fn attributes_to_map(attributes: Array<Array<MsgPack>>): () -> Dict<String, MsgPack>
-  let ~acc = Dict<String, MsgPack>::init()
-  var index = 0
-  while index < attributes.len():
-    match(attributes.get(index))
-      Some<Array<MsgPack>> { value: pair }:
-        match(pair.get(0))
-          Some<MsgPack> { value: key }:
-            match(pair.get(1))
-              Some<MsgPack> { value: value }:
-                match(msgpack::unpack_string(key))
-                  Ok<String> { value: name }:
-                    acc.set(name, value)
-                  Err:
-                    panic("vx attribute key must decode as string".as_slice())
-              None:
-                void
-          None:
-            void
-      None:
-        void
-    index = index + 1
-  acc
