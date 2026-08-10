@@ -23,11 +23,15 @@ generic containers, pattern matching, closures, and separate compilation. A
 public trait can use named regions and `@borrow_contract` to describe where a
 borrowed result came from.
 
+The current spelling is also a parser special case. The parser treats `borrow`
+as a contextual prefix operator and has extra handling for generic inner types.
+The new scoped model does not need this unusual syntax.
+
 The standard library uses this full model only for `ViewIterator`. No product
 code in this repository uses a borrowed result. Ordinary `Iterator<T>` already
 returns values and has compiler optimizations for wide values.
 
-`SharedCell<T>` has a real use for `borrow T`. Its callbacks lend access to the
+`SharedCell<T>` has a real use for `Borrow<T>`. Its callbacks lend access to the
 stored value for a short scope:
 
 ```voyd
@@ -56,18 +60,38 @@ Voyd will keep this small source model:
 
 1. `T` is an ordinary value or GC-managed object handle.
 2. `~T` grants exclusive access for a bounded call or callback.
-3. `borrow T` grants shared access for a bounded call or callback.
+3. `Borrow<T>` grants shared access for a bounded call or callback.
 4. `SharedCell<T>` provides explicit runtime-checked shared mutation.
 
 Garbage collection continues to manage allocation lifetime. Borrow checking
 continues to prevent overlapping access that includes mutation.
 
-### Limit `borrow T` to scoped parameters
+### Spell scoped borrows as `Borrow<T>`
 
-`borrow T` may appear in a function or method parameter:
+Voyd will replace the prefix spelling `borrow T` with the built-in type
+constructor `Borrow<T>`. This follows the syntax and naming used by other Voyd
+types:
 
 ```voyd
-fn inspect<T>(value: borrow T) -> i32
+fn inspect<T>(value: Borrow<T>) -> i32
+```
+
+`Borrow<T>` looks like a generic type, but it is not an ordinary library type.
+The compiler defines its scope, escape, alias, and runtime-representation rules.
+Programs cannot construct it as an ordinary value.
+
+The parser must remove all special-case handling for `borrow T`. This includes
+removing `borrow` as a contextual prefix operator and removing its custom
+generic-inner-type parsing. `Borrow<T>` must use the same generic type syntax as
+other type constructors. Backwards compatibility for `borrow T` is not
+required.
+
+### Limit `Borrow<T>` to scoped parameters
+
+`Borrow<T>` may appear in a function or method parameter:
+
+```voyd
+fn inspect<T>(value: Borrow<T>) -> i32
   // Read value without taking ownership.
 ```
 
@@ -76,7 +100,7 @@ It may also appear in a callback parameter:
 ```voyd
 fn with_value<T, R>(
   value: T,
-  { body: fn(value: borrow T) : () -> R }
+  { body: fn(value: Borrow<T>) : () -> R }
 ): () -> R
   body(value)
 ```
@@ -84,11 +108,11 @@ fn with_value<T, R>(
 A local binding may refer to the same borrow while that parameter scope is
 active. The local binding does not extend the scope.
 
-A borrowed parameter may be passed to another parameter that also spells
-`borrow`. This supports small helper functions:
+A borrowed parameter may be passed to another `Borrow<T>` parameter. This
+supports small helper functions:
 
 ```voyd
-fn checksum(bytes: borrow Bytes) -> i32
+fn checksum(bytes: Borrow<Bytes>) -> i32
   // ...
 
 cell.with((bytes) =>
@@ -101,14 +125,14 @@ cell.with((bytes) =>
 No function, method, callback, or trait method may return a borrow:
 
 ```voyd
-fn item_at<T>(items: Array<T>, index: i32) -> borrow T
+fn item_at<T>(items: Array<T>, index: i32) -> Borrow<T>
   // error: borrowed results are not supported
 ```
 
 A borrow may not appear inside a result container:
 
 ```voyd
-fn item_at<T>(items: Array<T>, index: i32) -> Option<borrow T>
+fn item_at<T>(items: Array<T>, index: i32) -> Option<Borrow<T>>
   // error: borrowed results are not supported
 ```
 
@@ -121,7 +145,7 @@ trait CollectionAccess<T>
   fn with_item<R>(
     self,
     index: i32,
-    { body: fn(item: borrow T) : () -> R }
+    { body: fn(item: Borrow<T>) : () -> R }
   ): () -> Option<R>
 ```
 
@@ -152,7 +176,7 @@ A borrow must not become a plain `T` and escape.
 Direct conversion is rejected:
 
 ```voyd
-fn leak(value: borrow Box) -> Box
+fn leak(value: Borrow<Box>) -> Box
   value
 // error: the borrow escapes as a plain value
 ```
@@ -164,7 +188,7 @@ obj Holder {
   value: Box
 }
 
-fn leak(value: borrow Box) -> Holder
+fn leak(value: Borrow<Box>) -> Holder
   Holder { value }
 // error: Holder would retain the borrow
 ```
@@ -183,13 +207,14 @@ fn identity<T>(value: T) -> T
 cell.with((value) =>
   identity(value)
 )
-// error: borrow T cannot be used as ordinary T
+// error: Borrow<T> cannot be used as ordinary T
 ```
 
-Generic helpers that accept scoped access must spell `borrow` on the parameter:
+Generic helpers that accept scoped access must spell `Borrow<T>` on the
+parameter:
 
 ```voyd
-fn inspect<T>(value: borrow T) -> i32
+fn inspect<T>(value: Borrow<T>) -> i32
   // ...
 ```
 
@@ -275,7 +300,7 @@ The following rules are required for safety:
 
 - plain `T` never hides a source-level borrow;
 - `~T` remains exclusive for its active scope;
-- `borrow T` cannot escape, be stored, or be erased by generics;
+- `Borrow<T>` cannot escape, be stored, or be erased by generics;
 - borrowed method receivers cannot escape through method results;
 - borrows cannot cross suspending or continuation-capturing operations;
 - uncertain overlap is guarded or rejected;
@@ -371,7 +396,7 @@ Rejected for now because the repository has no production use for them.
 Keeping them would preserve much of the result-provenance system that this
 decision aims to remove.
 
-### Remove `borrow` completely
+### Remove explicit borrows completely
 
 Rejected because `SharedCell` needs a clear, general way to lend non-escaping
 access. Removing the marker would require another scoped-access feature or a
@@ -394,19 +419,21 @@ compiler cost directly.
 
 Implementation should proceed in this order:
 
-1. Remove `ViewIterator`, `Array.view_iter()`, and their exports.
-2. Reject `borrow` in all result positions.
-3. Reject `borrow` inside containers, aggregates, stored values, and ordinary
+1. Replace `borrow T` with `Borrow<T>` and remove the parser's contextual prefix
+   operator and custom generic-inner-type handling for `borrow`.
+2. Remove `ViewIterator`, `Array.view_iter()`, and their exports.
+3. Reject `Borrow<T>` in all result positions.
+4. Reject `Borrow<T>` inside containers, aggregates, stored values, and ordinary
    generic arguments.
-4. Add focused diagnostics for direct, wrapped, generic, method, capture,
+5. Add focused diagnostics for direct, wrapped, generic, method, capture,
    storage, suspension, and host-boundary escapes.
-5. Preserve scoped parameter and callback behavior used by `SharedCell`.
-6. Remove named-region and `@borrow_contract` syntax and semantics.
-7. Remove borrowed-result propagation from compiler summaries, module
+6. Preserve scoped parameter and callback behavior used by `SharedCell`.
+7. Remove named-region and `@borrow_contract` syntax and semantics.
+8. Remove borrowed-result propagation from compiler summaries, module
    interfaces, and dependency caches.
-8. Make detailed borrow analysis demand-driven.
-9. Update the memory-safety specification, language reference, conformance
-   manifest, and test inventory.
+9. Make detailed borrow analysis demand-driven.
+10. Update the memory-safety specification, language reference, conformance
+    manifest, and test inventory.
 
 ## Validation
 
@@ -417,8 +444,11 @@ Required cases include:
 - shared and exclusive `SharedCell` callbacks;
 - nested shared callbacks and runtime conflict behavior;
 - scoped borrow helper parameters;
+- normal generic-type parsing for `Borrow<T>` and nested inner types;
+- rejection of the removed `borrow T` prefix syntax;
+- absence of parser special cases for `borrow` as a contextual prefix operator;
 - rejection of direct and nested borrowed result types;
-- rejection of `borrow` in containers, aggregate fields, stored values, and
+- rejection of `Borrow<T>` in containers, aggregate fields, stored values, and
   ordinary generic arguments;
 - rejection of removed `region`, region-mapping, `deref(...)`, `disjoint`, and
   `@borrow_contract` syntax;
