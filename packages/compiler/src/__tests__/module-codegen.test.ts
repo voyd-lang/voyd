@@ -86,6 +86,90 @@ pub fn main() -> i32
     expect((instance.exports.main as () => number)()).toBe(42);
   });
 
+  it("keeps module wrappers and effect operations in distinct qualified namespaces", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use src::effects
+use src::effects::Store
+use src::effects::Store as Files
+
+pub fn main() -> i32
+  try
+    let wrapper = effects::save(1)
+    let effect_value = Files::save(40)
+    wrapper + effect_value
+  Store::save(tail, value):
+    tail(value + 1)
+`,
+      [`${root}${sep}effects.voyd`]: `pub eff Store
+  save(tail, value: i32) -> i32
+
+pub fn save(value: i32) -> i32
+  value + 100
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const main = result.semantics?.get("src::main");
+    const qualifiedCall = Array.from(main?.hir.expressions.values() ?? []).find(
+      (expression) =>
+        expression.exprKind === "call" && expression.effectOperation,
+    );
+    const handler = Array.from(main?.hir.expressions.values() ?? []).find(
+      (expression) => expression.exprKind === "effect-handler",
+    );
+    expect(qualifiedCall?.exprKind).toBe("call");
+    expect(handler?.exprKind).toBe("effect-handler");
+    if (
+      qualifiedCall?.exprKind === "call" &&
+      handler?.exprKind === "effect-handler"
+    ) {
+      expect(qualifiedCall.effectOperation?.operation).toBe(
+        handler.handlers[0]?.operation,
+      );
+      expect(qualifiedCall.effectOperation?.effect).toBe(
+        handler.handlers[0]?.effect,
+      );
+    }
+
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(142);
+  });
+
+  it("registers qualified handler operations without perform sites", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `eff Action
+  unused(resume) -> i32
+  used(resume) -> i32
+
+pub fn main() -> i32
+  try
+    Action::used()
+  Action::unused(resume):
+    resume(0)
+  Action::used(resume):
+    resume(42)
+`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
+  });
+
   it("prefers a selected external operation over an unselected local handler operation", async () => {
     const root = resolve("/proj/src");
     const host = createMemoryHost({
@@ -345,6 +429,55 @@ pub fn main() -> i32
     expect(result.wasm).toBeInstanceOf(Uint8Array);
     const instance = getWasmInstance(result.wasm!);
     expect((instance.exports.main as () => number)()).toBe(5);
+  });
+
+  it("specializes imported generic match patterns for each caller instance", async () => {
+    const root = resolve("/proj/src");
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: `use src::outer::rewrap
+use src::result::{ GenericError, GenericOk }
+
+obj Age { age: i32 }
+obj Score { score: i32 }
+
+pub fn main() -> i32
+  let age = match(rewrap<Age>(Age { age: 20 }))
+    GenericOk<Age> { value }:
+      value.age
+    GenericError:
+      0
+  let score = match(rewrap<Score>(Score { score: 22 }))
+    GenericOk<Score> { value }:
+      value.score
+    GenericError:
+      0
+  age + score`,
+      [`${root}${sep}outer.voyd`]: `use src::result::{ GenericError, GenericOk, GenericResult, wrap }
+
+pub fn rewrap<T>(value: T) -> GenericResult<T>
+  match(wrap<T>(value))
+    GenericOk<T> { value }:
+      GenericOk<T> { value }
+    GenericError:
+      GenericError {}`,
+      [`${root}${sep}result.voyd`]: `pub obj GenericOk<T> { api value: T }
+pub obj GenericError {}
+pub type GenericResult<T> = GenericOk<T> | GenericError
+
+pub fn wrap<T>(value: T) -> GenericResult<T>
+  GenericOk<T> { value }`,
+    });
+
+    const result = expectCompileSuccess(
+      await compileProgram({
+        entryPath: `${root}${sep}main.voyd`,
+        roots: { src: root },
+        host,
+      }),
+    );
+
+    const instance = getWasmInstance(result.wasm!);
+    expect((instance.exports.main as () => number)()).toBe(42);
   });
 
   it("runs generic overloads across modules", async () => {

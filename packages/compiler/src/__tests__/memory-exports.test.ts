@@ -70,7 +70,7 @@ pub fn size(): () -> i32
 pub fn main() -> i32
   try
     Ping::ping()
-  ping(resume):
+  Ping::ping(resume):
     7`,
     });
 

@@ -96,6 +96,16 @@ export const lowerCallFromElements = ({
     return isTypeCheck;
   }
 
+  const nominalTarget = resolveAllowedNominalTarget({
+    callee: calleeExpr,
+    ctx,
+    scope: scopes.current(),
+  });
+  const constructorInit =
+    nominalTarget && nominalTypeDeclaresInit(nominalTarget.symbol, ctx)
+      ? `${nominalTarget.path.join("::")}::init`
+      : undefined;
+
   const calleeId = lowerExpr(calleeExpr, ctx, scopes);
   const args = parseSurfaceCallArguments(callArgsExprs).map((argument) => ({
     ...(argument.label ? { label: argument.label.value } : {}),
@@ -109,6 +119,7 @@ export const lowerCallFromElements = ({
     span: toSourceSpan(ast),
     callee: calleeId,
     args,
+    constructorInit,
     typeArguments:
       callTypeArguments && callTypeArguments.length > 0
         ? callTypeArguments

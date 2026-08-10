@@ -4,7 +4,48 @@
 //! numbers must be finite.
 
 use std::array::Array
+use std::data::{
+  DataArray,
+  DataBool,
+  DataF32,
+  DataF64,
+  DataField,
+  DataI32,
+  DataI64,
+  DataNull,
+  DataObject,
+  DataString,
+  DataValue,
+  DataVariant,
+  DecodeError,
+  DecodeOptions,
+  IgnoreUnknownFields,
+  RejectUnknownFields,
+  UnknownFieldPolicy,
+  decode as decode_data
+}
 use std::dict::Dict
+use std::meta::{
+  ArrayShape,
+  BoolShape,
+  F32Shape,
+  F64Shape,
+  I32Shape,
+  I64Shape,
+  RecordShape,
+  RefShape,
+  Shape,
+  ShapeDefinition,
+  ShapeField,
+  ShapeNode,
+  ShapeVariant,
+  StringShape,
+  UnionShape,
+  UnitShape,
+  shape_of
+}
+use std::math::{ floor, is_finite }
+use std::number::cast::{ to_f32, to_i32_checked, to_i64_checked }
 use std::number::cast::self as number_cast
 use std::optional::types::all
 use std::result::types::{ Result, Ok, Err, Unit }
@@ -16,6 +57,42 @@ pub obj JsonError {
   /// Human-readable error message.
   api message: String
 }
+
+/// The JSON text itself was malformed.
+pub obj JsonParseFailure {}
+
+/// A parsed value did not match the requested Voyd type.
+pub obj JsonSchemaFailure {}
+
+/// A versioned document could not be dispatched or migrated.
+pub obj JsonVersionFailure {}
+
+/// A decoded number violated an explicit application constraint.
+pub obj JsonConstraintFailure {}
+
+/// Stable categories for typed JSON decoding failures.
+pub type JsonDecodeErrorKind = JsonParseFailure
+  | JsonSchemaFailure
+  | JsonVersionFailure
+  | JsonConstraintFailure
+
+/// Typed JSON failure with a rooted JSON path and retained cause text.
+pub obj JsonDecodeError {
+  api kind: JsonDecodeErrorKind,
+  api path: String,
+  api message: String
+}
+
+/// Unknown-field behavior used by typed JSON decoding.
+pub obj JsonDecodeOptions {
+  api unknown_fields: UnknownFieldPolicy
+}
+
+/// Migration callback for a parsed versioned document.
+pub type JsonMigration = fn(
+  version: i32,
+  document: JsonValue
+) -> Result<JsonValue, JsonDecodeError>
 
 /// Represents the JSON `null` literal.
 pub obj JsonNull {}
@@ -129,6 +206,498 @@ pub fn stringify_pretty(value: JsonValue) -> Result<String, JsonError>
       Ok<String> { value: new_string(bytes.to_fixed_array()) }
     Err<JsonError> { error }:
       Err<JsonError> { error: error }
+
+/// Returns strict typed-decoder options that reject unknown record fields.
+pub fn strict_decode_options() -> JsonDecodeOptions
+  JsonDecodeOptions { unknown_fields: RejectUnknownFields {} }
+
+/// Returns forward-compatible typed-decoder options that ignore unknown fields.
+pub fn permissive_decode_options() -> JsonDecodeOptions
+  JsonDecodeOptions { unknown_fields: IgnoreUnknownFields {} }
+
+/// Parses and strictly decodes JSON into a closed boundary-compatible type.
+pub fn decode<T>(source: String): () -> Result<T, JsonDecodeError>
+  decode<T>(source.as_slice())
+
+/// Parses and strictly decodes a borrowed JSON source.
+pub fn decode<T>(source: StringSlice): () -> Result<T, JsonDecodeError>
+  decode<T>(source, options: strict_decode_options())
+
+/// Parses and decodes JSON with an explicit unknown-field policy.
+pub fn decode<T>(
+  source: String,
+  { options: JsonDecodeOptions }
+): () -> Result<T, JsonDecodeError>
+  decode<T>(source.as_slice(), options: options)
+
+/// Parses and decodes borrowed JSON with an explicit unknown-field policy.
+pub fn decode<T>(
+  source: StringSlice,
+  { options: JsonDecodeOptions }
+): () -> Result<T, JsonDecodeError>
+  match(parse(source))
+    Ok<JsonValue> { value }:
+      decode<T>(value, options: options)
+    Err<JsonError> { error }:
+      decode_failure<T>(
+        JsonParseFailure {},
+        "$",
+        error.message
+      )
+
+/// Strictly decodes an already-parsed JSON value.
+pub fn decode<T>(value: JsonValue): () -> Result<T, JsonDecodeError>
+  decode<T>(value, options: strict_decode_options())
+
+/// Decodes an already-parsed JSON value with explicit field policy.
+pub fn decode<T>(
+  value: JsonValue,
+  { options: JsonDecodeOptions }
+): () -> Result<T, JsonDecodeError>
+  let shape = shape_of<T>()
+  match(json_value_to_data(value, shape.root, shape, "$"))
+    Err<JsonDecodeError> { error }:
+      Err<JsonDecodeError> { error }
+    Ok<DataValue> { value: data_value }:
+      match(decode_data<T>(
+        data_value,
+        options: DecodeOptions { unknown_fields: options.unknown_fields }
+      ))
+        Ok<T> { value }:
+          Ok<T> { value }
+        Err<DecodeError> { error }:
+          decode_failure<T>(
+            JsonSchemaFailure {},
+            error.path,
+            "expected ".concat(error.expected).concat(", received ").concat(error.actual)
+          )
+
+/// Decodes a versioned document and requires migrations to produce `current`.
+pub fn decode_versioned<T>(
+  source: String,
+  {
+    current current_version: i32,
+    migrate: JsonMigration
+  }
+): () -> Result<T, JsonDecodeError>
+  decode_versioned<T>(
+    source.as_slice(),
+    current: current_version,
+    migrate: migrate
+  )
+
+/// Decodes a borrowed versioned document with explicit migration dispatch.
+pub fn decode_versioned<T>(
+  source: StringSlice,
+  {
+    current current_version: i32,
+    migrate: JsonMigration
+  }
+): () -> Result<T, JsonDecodeError>
+  match(parse(source))
+    Err<JsonError> { error }:
+      decode_failure<T>(JsonParseFailure {}, "$", error.message)
+    Ok<JsonValue> { value: document }:
+      decode_versioned<T>(
+        document,
+        current: current_version,
+        migrate: migrate
+      )
+
+/// Decodes an already-parsed versioned document with explicit migration dispatch.
+pub fn decode_versioned<T>(
+  document: JsonValue,
+  {
+    current current_version: i32,
+    migrate: JsonMigration
+  }
+): () -> Result<T, JsonDecodeError>
+  match(document_version(document))
+    Err<JsonDecodeError> { error }:
+      Err<JsonDecodeError> { error }
+    Ok<i32> { value: version }:
+      if version == current_version:
+        return decode<T>(document)
+      match(migrate(version, document))
+        Err<JsonDecodeError> { error }:
+          Err<JsonDecodeError> { error }
+        Ok<JsonValue> { value: migrated }:
+          match(document_version(migrated))
+            Err<JsonDecodeError> { error }:
+              Err<JsonDecodeError> { error }
+            Ok<i32> { value: migrated_version }:
+              if migrated_version != current_version:
+                return decode_failure<T>(
+                  JsonVersionFailure {},
+                  "$.version",
+                  "migration did not produce the requested document version"
+                )
+              decode<T>(migrated)
+
+/// Reads a JSON number and enforces an inclusive finite range.
+pub fn number_in_range(
+  value: JsonValue,
+  { at path: String, min: f64, max: f64 }
+): () -> Result<f64, JsonDecodeError>
+  value.match(decoded)
+    JsonNumber:
+      if is_finite(decoded.value) and decoded.value >= min and decoded.value <= max:
+        Ok<f64> { value: decoded.value }
+      else:
+        decode_failure<f64>(
+          JsonConstraintFailure {},
+          path,
+          "number is outside the allowed range"
+        )
+    else:
+      decode_failure<f64>(JsonSchemaFailure {}, path, "expected number")
+
+/// Reads a ranged JSON number using a borrowed path.
+pub fn number_in_range(
+  value: JsonValue,
+  { at path: StringSlice, min: f64, max: f64 }
+): () -> Result<f64, JsonDecodeError>
+  number_in_range(value, at: path.to_string(), min: min, max: max)
+
+fn json_value_to_data(
+  value: JsonValue,
+  shape: ShapeNode,
+  graph: Shape,
+  path: String
+): () -> Result<DataValue, JsonDecodeError>
+  shape.match(active)
+    BoolShape:
+      value.match(decoded)
+        JsonBool:
+          Ok<DataValue> { value: DataBool { value: decoded.value } }
+        else:
+          schema_mismatch(path, "boolean")
+    I32Shape:
+      value.match(decoded)
+        JsonNumber:
+          if is_integral(decoded.value):
+            match(to_i32_checked(decoded.value))
+              Ok<i32> { value }:
+                Ok<DataValue> { value: DataI32 { value } }
+              Err:
+                schema_mismatch(path, "32-bit integer")
+          else:
+            schema_mismatch(path, "32-bit integer")
+        else:
+          schema_mismatch(path, "32-bit integer")
+    I64Shape:
+      value.match(decoded)
+        JsonNumber:
+          if is_integral(decoded.value):
+            match(to_i64_checked(decoded.value))
+              Ok<i64> { value }:
+                Ok<DataValue> { value: DataI64 { value } }
+              Err:
+                schema_mismatch(path, "64-bit integer")
+          else:
+            schema_mismatch(path, "64-bit integer")
+        else:
+          schema_mismatch(path, "64-bit integer")
+    F32Shape:
+      value.match(decoded)
+        JsonNumber:
+          let demoted = to_f32(decoded.value)
+          if is_finite(demoted):
+            Ok<DataValue> { value: DataF32 { value: demoted } }
+          else:
+            schema_mismatch(path, "finite 32-bit number")
+        else:
+          schema_mismatch(path, "number")
+    F64Shape:
+      value.match(decoded)
+        JsonNumber:
+          Ok<DataValue> { value: DataF64 { value: decoded.value } }
+        else:
+          schema_mismatch(path, "number")
+    StringShape:
+      value.match(decoded)
+        JsonString:
+          Ok<DataValue> { value: DataString { value: decoded.value } }
+        else:
+          schema_mismatch(path, "string")
+    UnitShape:
+      value.match(decoded)
+        JsonNull:
+          Ok<DataValue> { value: DataNull {} }
+        else:
+          schema_mismatch(path, "null")
+    ArrayShape:
+      value.match(decoded)
+        JsonArray:
+          json_array_to_data(decoded, active.element, graph, path)
+        else:
+          schema_mismatch(path, "array")
+    RecordShape:
+      value.match(decoded)
+        JsonObject:
+          json_object_to_data(decoded, active.fields, graph, path)
+        else:
+          schema_mismatch(path, "object")
+    UnionShape:
+      json_union_to_data(value, active, graph, path)
+    RefShape:
+      match(find_shape_definition(graph.definitions, active.key))
+        Some<ShapeNode> { value: target }:
+          json_value_to_data(value, target, graph, path)
+        None:
+          decode_failure<DataValue>(
+            JsonSchemaFailure {},
+            path,
+            "type shape contains an unresolved reference"
+          )
+
+fn json_array_to_data(
+  value: JsonArray,
+  element: ShapeNode,
+  graph: Shape,
+  path: String
+): () -> Result<DataValue, JsonDecodeError>
+  let ~out = Array<DataValue>::with_capacity(value.value.len())
+  var index = 0
+  while index < value.value.len():
+    match(json_value_to_data(
+      value.value.at(index),
+      element,
+      graph,
+      json_index_path(path, index)
+    ))
+      Err<JsonDecodeError> { error }:
+        return Err<JsonDecodeError> { error }
+      Ok<DataValue> { value: item }:
+        out.push(item)
+    index = index + 1
+  Ok<DataValue> { value: DataArray { values: out } }
+
+fn json_object_to_data(
+  value: JsonObject,
+  fields: Array<ShapeField>,
+  graph: Shape,
+  path: String
+): () -> Result<DataValue, JsonDecodeError>
+  let entries = value.value.entries()
+  let ~out = Array<DataField>::with_capacity(entries.len())
+  var index = 0
+  while index < entries.len():
+    let entry = entries.at(index)
+    let name = entry.0
+    let nested_path = json_field_path(path, name)
+    match(find_shape_field(fields, name))
+      Some<ShapeField> { value: field }:
+        match(json_value_to_data(entry.1, field.shape, graph, nested_path))
+          Err<JsonDecodeError> { error }:
+            return Err<JsonDecodeError> { error }
+          Ok<DataValue> { value: field_value }:
+            out.push(DataField { name, value: field_value })
+      None:
+        out.push(DataField {
+          name,
+          value: json_untyped_data(entry.1)
+        })
+    index = index + 1
+  Ok<DataValue> { value: DataObject { fields: out } }
+
+fn json_union_to_data(
+  value: JsonValue,
+  shape: UnionShape,
+  graph: Shape,
+  path: String
+): () -> Result<DataValue, JsonDecodeError>
+  value.match(decoded)
+    JsonString:
+      match(find_shape_variant(shape.variants, decoded.value))
+        Some<ShapeVariant> { value: variant }:
+          if variant.fields.is_empty():
+            return Ok<DataValue> {
+              value: DataVariant {
+                name: decoded.value,
+                fields: Array<DataField>::init()
+              }
+            }
+          schema_mismatch(path, "variant object with payload fields")
+        None:
+          decode_failure<DataValue>(
+            JsonSchemaFailure {},
+            path,
+            "unknown variant ".concat(decoded.value)
+          )
+    JsonObject:
+      match(decoded.value.get("$variant"))
+        None:
+          decode_failure<DataValue>(
+            JsonSchemaFailure {},
+            json_field_path(path, "$variant"),
+            "variant discriminator is required"
+          )
+        Some<JsonValue> { value: discriminator }:
+          discriminator.match(tag)
+            JsonString:
+              match(find_shape_variant(shape.variants, tag.value))
+                None:
+                  decode_failure<DataValue>(
+                    JsonSchemaFailure {},
+                    json_field_path(path, "$variant"),
+                    "unknown variant ".concat(tag.value)
+                  )
+                Some<ShapeVariant> { value: variant }:
+                  json_variant_object_to_data(decoded, variant, graph, path)
+            else:
+              schema_mismatch(json_field_path(path, "$variant"), "string")
+    else:
+      schema_mismatch(path, "variant string or object")
+
+fn json_variant_object_to_data(
+  value: JsonObject,
+  variant: ShapeVariant,
+  graph: Shape,
+  path: String
+): () -> Result<DataValue, JsonDecodeError>
+  let entries = value.value.entries()
+  let capacity = if entries.len() > 0 then: entries.len() - 1 else: 0
+  let ~out = Array<DataField>::with_capacity(capacity)
+  var index = 0
+  while index < entries.len():
+    let entry = entries.at(index)
+    let name = entry.0
+    if name != "$variant":
+      let nested_path = json_field_path(path, name)
+      match(find_shape_field(variant.fields, name))
+        Some<ShapeField> { value: field }:
+          match(json_value_to_data(entry.1, field.shape, graph, nested_path))
+            Err<JsonDecodeError> { error }:
+              return Err<JsonDecodeError> { error }
+            Ok<DataValue> { value: field_value }:
+              out.push(DataField { name, value: field_value })
+        None:
+          out.push(DataField { name, value: json_untyped_data(entry.1) })
+    index = index + 1
+  Ok<DataValue> {
+    value: DataVariant { name: variant.name, fields: out }
+  }
+
+fn json_untyped_data(value: JsonValue) -> DataValue
+  value.match(decoded)
+    JsonNull:
+      DataNull {}
+    JsonBool:
+      DataBool { value: decoded.value }
+    JsonNumber:
+      DataF64 { value: decoded.value }
+    JsonString:
+      DataString { value: decoded.value }
+    JsonArray:
+      DataArray {
+        values: decoded.value.map((item: JsonValue) -> DataValue => json_untyped_data(item))
+      }
+    JsonObject:
+      let entries = decoded.value.entries()
+      let ~fields = Array<DataField>::with_capacity(entries.len())
+      var index = 0
+      while index < entries.len():
+        let entry = entries.at(index)
+        fields.push(DataField { name: entry.0, value: json_untyped_data(entry.1) })
+        index = index + 1
+      DataObject { fields }
+
+fn document_version(value: JsonValue) -> Result<i32, JsonDecodeError>
+  value.match(decoded)
+    JsonObject:
+      match(decoded.value.get("version"))
+        None:
+          decode_failure<i32>(
+            JsonVersionFailure {},
+            "$.version",
+            "version field is required"
+          )
+        Some<JsonValue> { value: version }:
+          version.match(number)
+            JsonNumber:
+              if is_integral(number.value):
+                match(to_i32_checked(number.value))
+                  Ok<i32> { value }:
+                    Ok<i32> { value }
+                  Err:
+                    decode_failure<i32>(
+                      JsonVersionFailure {},
+                      "$.version",
+                      "version must be a 32-bit integer"
+                    )
+              else:
+                decode_failure<i32>(
+                  JsonVersionFailure {},
+                  "$.version",
+                  "version must be a 32-bit integer"
+                )
+            else:
+              decode_failure<i32>(
+                JsonVersionFailure {},
+                "$.version",
+                "version must be a number"
+              )
+    else:
+      decode_failure<i32>(JsonVersionFailure {}, "$", "versioned document must be an object")
+
+fn find_shape_field(fields: Array<ShapeField>, name: String) -> Option<ShapeField>
+  var index = 0
+  while index < fields.len():
+    let field = fields.at(index)
+    if field.name == name:
+      return Some<ShapeField> { value: field }
+    index = index + 1
+  None {}
+
+fn find_shape_variant(
+  variants: Array<ShapeVariant>,
+  name: String
+) -> Option<ShapeVariant>
+  var index = 0
+  while index < variants.len():
+    let variant = variants.at(index)
+    if variant.name == name:
+      return Some<ShapeVariant> { value: variant }
+    index = index + 1
+  None {}
+
+fn find_shape_definition(
+  definitions: Array<ShapeDefinition>,
+  key: String
+) -> Option<ShapeNode>
+  var index = 0
+  while index < definitions.len():
+    let definition = definitions.at(index)
+    if definition.key == key:
+      return Some<ShapeNode> { value: definition.shape }
+    index = index + 1
+  None {}
+
+fn json_field_path(path: String, name: String) -> String
+  path.concat(".").concat(name)
+
+fn json_index_path(path: String, index: i32) -> String
+  path.concat("[").concat(number_cast::to_string(index)).concat("]")
+
+fn is_integral(value: f64) -> bool
+  is_finite(value) and value == floor(value)
+
+fn schema_mismatch<T>(path: String, expected: String) -> Result<T, JsonDecodeError>
+  decode_failure<T>(
+    JsonSchemaFailure {},
+    path,
+    "expected ".concat(expected)
+  )
+
+fn decode_failure<T>(
+  kind: JsonDecodeErrorKind,
+  path: String,
+  message: String
+) -> Result<T, JsonDecodeError>
+  Err<JsonDecodeError> {
+    error: JsonDecodeError { kind, path, message }
+  }
 
 fn parse_value(~parser: JsonParser): () -> Result<JsonValue, JsonError>
   skip_whitespace(parser)

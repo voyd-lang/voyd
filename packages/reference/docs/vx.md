@@ -252,6 +252,27 @@ the right choice for controlled form elements:
 <button disabled={model.saving}>Save</button>
 ```
 
+Built-in JSX is tag-aware. On `<option>`, `value` is an ordinary HTML attribute,
+so the idiomatic selection markup remains stable across server rendering and
+hydration:
+
+```voyd
+<select>
+  <option value="voyd" selected={model.choice == "voyd"}>Voyd</option>
+</select>
+```
+
+The compiler rejects property/tag combinations without a stable server
+representation at the attribute location. For example, `<select value={...}>`
+reports that selection belongs on the matching option's `selected` attribute.
+`checked` is valid on `input`, and `disabled` is valid on disableable form
+controls.
+
+Names in the surrounding component do not shadow helpers inserted by HTML
+syntax. A component may safely declare a property or parameter named `value`,
+`checked`, `disabled`, `class`, or `attr`; generated HTML uses VX's compiler
+helper identities while component names and `{expressions}` keep caller scope.
+
 For computed attributes and lower-level helpers, use:
 
 ```voyd
@@ -270,8 +291,8 @@ HTML defines matching behavior: `value` on `input` and `textarea`, `checked` on
 `input`, and `disabled` on disableable form controls. A controlled `textarea`
 must render the same value as its text child. In particular, `value` on `select`
 is browser-only because HTML derives its initial selection from `selected`
-options. Other `prop` names remain available for browser-only views, but the SSR
-renderers reject combinations that would emit different server semantics. Use
+options. Use the explicit `prop` helper for such browser-only views; SSR rejects
+property/tag combinations that would emit different server semantics. Use
 `attr` for ordinary HTML attributes. Structured style values are single
 declaration values and reject semicolons, exclamation marks, and control
 characters; use classes for more complex styling.
@@ -318,7 +339,7 @@ The common payload types are:
 
 - `InputEvent`: `value`, `checked`, and `input_type`.
 - `SubmitEvent`: `form_keys` and `form_values`.
-- `MouseEvent`: coordinates, button, wheel deltas, and modifier keys.
+- `MouseEvent`: coordinates, `pointer_id`, button, wheel deltas, and modifier keys.
 - `KeyboardEvent`: `key`, `code`, and modifier keys.
 - `GenericEvent`: event name for events without a richer payload.
 
@@ -342,7 +363,30 @@ Prevent a form's browser submission with `EventOptions`:
 </form>
 ```
 
-`EventOptions` also supports `stop_propagation`, `capture`, and `passive`.
+`EventOptions` also supports `stop_propagation`, `capture`, `passive`, and
+`pointer_capture`. Pointer capture is meaningful on `pointerdown`: the browser
+keeps routing that pointer's move and release events to the element even after
+the pointer leaves its bounds, then releases capture on `pointerup` or
+`pointercancel`. Handle `pointercancel` by abandoning the active interaction.
+
+```voyd
+html_event_payload_handler<MouseEvent, Msg>(
+  name: "pointerdown",
+  options: EventOptions {
+    prevent_default: false,
+    stop_propagation: false,
+    capture: false,
+    passive: false,
+    pointer_capture: true
+  },
+  handler: (event: MouseEvent) -> Msg => Msg::DragStarted {
+    pointer_id: event.pointer_id,
+    x: event.x,
+    y: event.y
+  }
+)
+```
+
 Named helpers cover click, double-click, pointer, mouse, keyboard, input,
 change, submit, focus, blur, scroll, wheel, drag, drop, and context-menu events.
 Use `event_message` when no named helper fits.
@@ -420,6 +464,7 @@ returned `JsonValue` into the boundary-safe application type your API expects.
 The built-in commands cover common browser work:
 
 - Flow: `Cmd.none`, `Cmd.message`, `Cmd.delay`, `Cmd.batch`, and `Cmd.task`.
+- Canvas: `canvas::render` and `canvas::measure_text`.
 - Clipboard: `copy_to_clipboard` and `read_clipboard`.
 - Document and history: `set_document_title`, `push_url`, `replace_url`,
   `set_hash`, `navigate_back`, `navigate_forward`, and `open_url`.
@@ -442,6 +487,87 @@ Cmd::batch([
 
 `Cmd.perform` is the lower-level task API for an existing `Task<T>` or task id.
 Most applications should use `Cmd.task`.
+
+## Canvas Rendering And Interaction
+
+VX Canvas keeps scene construction in Voyd and browser details in the runtime.
+Build a `canvas::Frame` from typed draw operations, then return
+`canvas::render(frame)` from `init` or `step`:
+
+```voyd
+use std::array::Array
+use std::vx::all
+use std::vx::canvas::self as canvas
+
+fn draw_scene() -> Cmd<Msg>
+  let arrow = canvas::path(
+    segments: [
+      canvas::path_move_to(canvas::Point { x: 0.0, y: 0.0 }),
+      canvas::path_line_to(canvas::Point { x: 80.0, y: 0.0 }),
+      canvas::path_line_to(canvas::Point { x: 70.0, y: -6.0 }),
+      canvas::path_move_to(canvas::Point { x: 80.0, y: 0.0 }),
+      canvas::path_line_to(canvas::Point { x: 70.0, y: 6.0 })
+    ],
+    stroke: "#77ddff",
+    stroke_width: 2.0
+  )
+  canvas::render<Msg>(canvas::frame(
+    selector: "#scene",
+    width: 800.0,
+    height: 450.0,
+    draws: [
+      canvas::save(),
+      canvas::translate(x: 120.0, y: 90.0),
+      canvas::rotate(0.35),
+      canvas::line_dash(pattern: [6.0, 3.0]),
+      canvas::composite(canvas::CompositeOperation::Lighter {}),
+      arrow,
+      canvas::restore()
+    ]
+  ))
+```
+
+Path segments cover moves, lines, quadratic and cubic Bézier curves, arcs,
+tangent arcs, ellipses, rectangles, and closing a subpath. State operations
+cover affine transforms, translate/rotate/scale, line dashes, compositing, and
+balanced save/restore scopes. A frame with an unknown primitive, invalid field,
+or unbalanced state stack is rejected before the canvas is resized or painted.
+
+The constructors derive their MessagePack encoding from private typed records.
+Their declared camel-case field names are the wire keys, absent optional values
+are omitted, and the explicit frame `version` is encoded like any other field.
+Callers use the typed constructors rather than assembling boundary maps.
+
+All coordinates, dimensions, line widths, and text metrics are logical CSS
+pixels. The browser host sizes the backing store using the current device pixel
+ratio and applies the matching transform. Application code should never
+multiply values by `devicePixelRatio`.
+
+Text measurement is an explicit command/result contract. Store the returned
+metrics in the model, then use them in a later frame:
+
+```voyd
+enum Msg
+  TitleMeasured { metrics: canvas::TextMetrics }
+
+fn measure_title(title: String) -> Cmd<Msg>
+  canvas::measure_text<Msg>(
+    selector: "#scene",
+    value: title,
+    font: "600 14px sans-serif",
+    handler: (metrics: canvas::TextMetrics) -> Msg =>
+      Msg::TitleMeasured { metrics }
+  )
+```
+
+`canvas::frame` emits wire version 2 because paths and ordered state operations
+expand the version-1 draw grammar. The browser host continues to accept and
+validate version-1 frames containing lines, polylines, circles, ellipses, and
+text. It accepts the expanded grammar only in version 2. Additive optional
+fields may be introduced within a version, while another breaking wire change
+requires a version increment. Unsupported versions and malformed frames are
+rejected before the target Canvas is resized or painted. This fail-before-paint
+rule makes mixed application and host versions deterministic.
 
 ## Ongoing Input With Subscriptions
 

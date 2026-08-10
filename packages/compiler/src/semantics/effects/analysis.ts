@@ -10,8 +10,11 @@ import type {
 } from "../hir/index.js";
 import type { EffectRowId, HirExprId, SymbolId, TypeId } from "../ids.js";
 import type { TypingResult } from "../typing/types.js";
+import type { EffectOperationIdentity } from "./effect-table.js";
+import { modulePathToString } from "../../modules/path.js";
 
 export interface EffectOperationRuntimeInfo {
+  identity: EffectOperationIdentity;
   symbol: SymbolId;
   effectSymbol: SymbolId;
   localEffectIndex: number;
@@ -73,6 +76,7 @@ export interface EffectsLoweringInfo {
 }
 
 export interface EffectsLoweringInfoInputs {
+  moduleId?: string;
   binding: BindingResult;
   symbolTable: SymbolTable;
   hir: HirGraph;
@@ -115,8 +119,9 @@ const effectNameFor = ({
     const effectRecord = symbolTable.getSymbol(effect);
     return `${effectRecord.name}.${opRecord.name}`;
   }
-  const ownerEffect = (opRecord.metadata as { ownerEffect?: SymbolId } | undefined)
-    ?.ownerEffect;
+  const ownerEffect = (
+    opRecord.metadata as { ownerEffect?: SymbolId } | undefined
+  )?.ownerEffect;
   if (typeof ownerEffect === "number") {
     const effectRecord = symbolTable.getSymbol(ownerEffect);
     return `${effectRecord.name}.${opRecord.name}`;
@@ -126,6 +131,36 @@ const effectNameFor = ({
 
 const callTarget = (expr: HirExpression): SymbolId | undefined =>
   expr.exprKind === "identifier" ? expr.symbol : undefined;
+
+const resolvedCallTarget = ({
+  exprId,
+  fallback,
+  binding,
+  moduleId,
+  typing,
+}: {
+  exprId: HirExprId;
+  fallback?: SymbolId;
+  binding: BindingResult;
+  moduleId: string;
+  typing: TypingResult;
+}): SymbolId | undefined => {
+  const target = typing.callTargets.get(exprId)?.values().next().value;
+  if (!target) return fallback;
+  if (target.moduleId === moduleId) return target.symbol;
+  return (
+    binding.imports.find((entry) => {
+      const imported = importedTargetFor({
+        symbol: entry.local,
+        symbolTable: binding.symbolTable,
+      });
+      return (
+        imported?.moduleId === target.moduleId &&
+        imported.symbol === target.symbol
+      );
+    })?.local ?? fallback
+  );
+};
 
 const importedTargetFor = ({
   symbol,
@@ -175,6 +210,11 @@ const importedEffectOpInfoFor = ({
         continue;
       }
       return {
+        identity: {
+          moduleId: imported.moduleId,
+          effect: effect.symbol,
+          operation: op.symbol,
+        },
         symbol: localSymbol,
         effectSymbol: effect.symbol,
         localEffectIndex,
@@ -214,7 +254,10 @@ const containsEffectHandler = ({
   return found;
 };
 
-const lambdaEffectfulType = (expr: HirLambdaExpr, typing: TypingResult): boolean => {
+const lambdaEffectfulType = (
+  expr: HirLambdaExpr,
+  typing: TypingResult,
+): boolean => {
   const typeId: TypeId =
     typing.resolvedExprTypes.get(expr.id) ??
     typing.table.getExprType(expr.id) ??
@@ -228,10 +271,12 @@ const lambdaEffectfulType = (expr: HirLambdaExpr, typing: TypingResult): boolean
 const lambdaBodyIsEffectful = (
   expr: HirLambdaExpr,
   typing: TypingResult,
-): boolean => !isPureEffectRow(exprEffectRow({ expr: expr.body, typing }), typing);
+): boolean =>
+  !isPureEffectRow(exprEffectRow({ expr: expr.body, typing }), typing);
 
 export const buildEffectsLoweringInfo = ({
   binding,
+  moduleId = modulePathToString(binding.modulePath),
   symbolTable,
   hir,
   typing,
@@ -240,6 +285,11 @@ export const buildEffectsLoweringInfo = ({
   binding.effects.forEach((effect, localEffectIndex) => {
     effect.operations.forEach((op, opIndex) => {
       operations.set(op.symbol, {
+        identity: {
+          moduleId,
+          effect: effect.symbol,
+          operation: op.symbol,
+        },
         symbol: op.symbol,
         effectSymbol: effect.symbol,
         localEffectIndex,
@@ -260,6 +310,16 @@ export const buildEffectsLoweringInfo = ({
       const callee = hir.expressions.get(expr.callee);
       if (callee?.exprKind === "identifier") {
         referencedEffectOps.add(callee.symbol);
+      }
+      const resolved = resolvedCallTarget({
+        exprId: expr.id,
+        fallback: callee ? callTarget(callee) : undefined,
+        binding,
+        moduleId,
+        typing,
+      });
+      if (typeof resolved === "number") {
+        referencedEffectOps.add(resolved);
       }
     }
     if (expr.exprKind === "effect-handler") {
@@ -289,7 +349,8 @@ export const buildEffectsLoweringInfo = ({
   hir.items.forEach((item) => {
     if (item.kind !== "function") return;
     const signature = typing.functions.getSignature(item.symbol);
-    const effectRow = signature?.effectRow ?? typing.primitives.defaultEffectRow;
+    const effectRow =
+      signature?.effectRow ?? typing.primitives.defaultEffectRow;
     const hasHandlerInBody = containsEffectHandler({
       rootExprId: item.body,
       hir,
@@ -310,14 +371,16 @@ export const buildEffectsLoweringInfo = ({
   const handlers = new Map<HirExprId, EffectsLoweringHandlerInfo>();
   hir.expressions.forEach((expr) => {
     if (expr.exprKind !== "effect-handler") return;
-    const clauses: EffectsLoweringHandlerClauseInfo[] = expr.handlers.map((clause) => ({
-      operation: clause.operation,
-      effect: clause.effect,
-      resumeKind: clause.resumable === "fn" ? "tail" : "resume",
-      parameters: clause.parameters,
-      body: clause.body,
-      tailResumption: typing.tailResumptions.get(clause.body),
-    }));
+    const clauses: EffectsLoweringHandlerClauseInfo[] = expr.handlers.map(
+      (clause) => ({
+        operation: clause.operation,
+        effect: clause.effect,
+        resumeKind: clause.resumable === "fn" ? "tail" : "resume",
+        parameters: clause.parameters,
+        body: clause.body,
+        tailResumption: typing.tailResumptions.get(clause.body),
+      }),
+    );
     handlers.set(expr.id, {
       expr,
       effectRow: exprEffectRow({ expr: expr.id, typing }),
@@ -330,13 +393,17 @@ export const buildEffectsLoweringInfo = ({
   hir.expressions.forEach((expr) => {
     if (expr.exprKind !== "call" && expr.exprKind !== "method-call") return;
     const calleeExpr =
-      expr.exprKind === "call"
-        ? hir.expressions.get(expr.callee)
-        : undefined;
+      expr.exprKind === "call" ? hir.expressions.get(expr.callee) : undefined;
     const effectRow = exprEffectRow({ expr: expr.id, typing });
     calls.set(expr.id, {
       expr: expr.id,
-      callee: calleeExpr ? callTarget(calleeExpr) : undefined,
+      callee: resolvedCallTarget({
+        exprId: expr.id,
+        fallback: calleeExpr ? callTarget(calleeExpr) : undefined,
+        binding,
+        moduleId,
+        typing,
+      }),
       effectRow,
       effectful: !isPureEffectRow(effectRow, typing),
     });

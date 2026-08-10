@@ -23,6 +23,7 @@ import {
   lambdaParamSymbols,
   sanitizeIdentifier,
 } from "./layout.js";
+import { wasmSymbolName } from "../../symbol-names.js";
 
 type TempCaptureKey = string;
 
@@ -434,7 +435,7 @@ export const buildEffectLoweringEir = ({
       symbol: item.symbol,
     });
     const fnName = sanitizeIdentifier(
-      ctx.program.symbols.getName(symbolId) ?? `${item.symbol}`,
+      wasmSymbolName({ ctx, moduleId: ctx.moduleId, symbol: item.symbol }),
     );
     const contBaseName = `__cont_${sanitizeIdentifier(ctx.moduleLabel)}_${fnName}_${item.symbol}`;
 

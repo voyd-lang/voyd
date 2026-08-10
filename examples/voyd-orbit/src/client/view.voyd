@@ -13,12 +13,12 @@ use super::update::Msg
 use src::shared::SimulationSummary
 use src::simulation::{ Body, BodyKind, BuiltInScenario, built_in_scenarios }
 use std::array::Array
-use std::math::{ round }
 use std::msgpack::MsgPack
-use std::number::cast::{ to_i64_checked, to_string }
+use std::number::cast::{ format_fixed, format_significant, to_string }
 use std::optional::types::all
 use std::result::types::all
 use std::string::type::String
+use std::time::{ SystemTime, TimestampError }
 use std::vx::all
 
 pub fn view(model: Model) -> Html<Msg>
@@ -37,28 +37,63 @@ pub fn view(model: Model) -> Html<Msg>
   </main>
 
 fn SimulationCanvas({ model: Model }) -> Html<Msg>
-  <canvas
-    id="orbit-canvas"
-    class={canvas_class(model)}
-    aria-label="Interactive orbital simulation. Drag empty space to pan, scroll to zoom, and select bodies to inspect them."
-    on_pointer_down={(event: MouseEvent) -> Msg => Msg::PointerPressed {
-      x: event.x,
-      y: event.y
-    }}
-    on_pointer_move={(event: MouseEvent) -> Msg => Msg::PointerMoved {
-      x: event.x,
-      y: event.y
-    }}
-    on_pointer_up={(event: MouseEvent) -> Msg => Msg::PointerReleased {
-      x: event.x,
-      y: event.y
-    }}
-    on_wheel={(event: MouseEvent) -> Msg => Msg::WheelZoomed {
-      x: event.x,
-      y: event.y,
-      delta_y: event.delta_y
-    }}
-  ></canvas>
+  element(
+    tag: "canvas",
+    attrs: [
+      attr(name: "id", value: "orbit-canvas"),
+      class(canvas_class(model)),
+      attr(
+        name: "aria-label",
+        value: "Interactive orbital simulation. Drag empty space to pan, scroll to zoom, and select bodies to inspect them."
+      ),
+      html_event_payload_handler<MouseEvent, Msg>(
+        name: "pointerdown",
+        options: EventOptions {
+          prevent_default: true,
+          stop_propagation: false,
+          capture: false,
+          passive: false,
+          pointer_capture: true
+        },
+        handler: (event: MouseEvent) -> Msg => Msg::PointerPressed {
+          pointer_id: event.pointer_id,
+          x: event.x,
+          y: event.y
+        }
+      ),
+      html_event_payload_handler<MouseEvent, Msg>(
+        name: "pointermove",
+        handler: (event: MouseEvent) -> Msg => Msg::PointerMoved {
+          pointer_id: event.pointer_id,
+          x: event.x,
+          y: event.y
+        }
+      ),
+      html_event_payload_handler<MouseEvent, Msg>(
+        name: "pointerup",
+        handler: (event: MouseEvent) -> Msg => Msg::PointerReleased {
+          pointer_id: event.pointer_id,
+          x: event.x,
+          y: event.y
+        }
+      ),
+      html_event_payload_handler<MouseEvent, Msg>(
+        name: "pointercancel",
+        handler: (event: MouseEvent) -> Msg => Msg::PointerCancelled {
+          pointer_id: event.pointer_id
+        }
+      ),
+      html_event_payload_handler<MouseEvent, Msg>(
+        name: "wheel",
+        handler: (event: MouseEvent) -> Msg => Msg::WheelZoomed {
+          x: event.x,
+          y: event.y,
+          delta_y: event.delta_y
+        }
+      )
+    ],
+    children: Array<MsgPack>::init()
+  )
 
 fn TopBar({ model: Model }) -> Html<Msg>
   <header class="chrome topbar">
@@ -123,14 +158,7 @@ fn ScenarioPicker({ model: Model }) -> Html<Msg>
   </div>
 
 fn ScenarioOption({ scenario: BuiltInScenario, selected: bool }) -> Html<Msg>
-  element(
-    tag: "option",
-    attrs: [
-      attr(name: "value", value: scenario.slug),
-      attr(name: "selected", value: selected)
-    ],
-    children: [text(scenario.name)]
-  )
+  <option value={scenario.slug} selected={selected}>{scenario.name}</option>
 
 fn ToolShelf({ model: Model }) -> Html<Msg>
   <aside class="chrome tool-shelf glass" aria-label="Canvas tools">
@@ -249,7 +277,10 @@ fn SelectedBodyInspector({ model: Model, body: Body }) -> Html<Msg>
               type="number"
               min="0"
               step="any"
-              value={to_string(body.mass_solar)}
+              value={unwrap_or(
+                format_significant(body.mass_solar, digits: 12),
+                to_string(body.mass_solar)
+              )}
               disabled={model.ui.busy}
               on_focus={Msg::FieldFocused {}}
               on_blur={Msg::FieldBlurred {}}
@@ -262,7 +293,10 @@ fn SelectedBodyInspector({ model: Model, body: Body }) -> Html<Msg>
               type="number"
               min="0"
               step="any"
-              value={to_string(body.radius_au)}
+              value={unwrap_or(
+                format_significant(body.radius_au, digits: 12),
+                to_string(body.radius_au)
+              )}
               disabled={model.ui.busy}
               on_focus={Msg::FieldFocused {}}
               on_blur={Msg::FieldBlurred {}}
@@ -277,14 +311,14 @@ fn SelectedBodyInspector({ model: Model, body: Body }) -> Html<Msg>
           <NumberField
             label="X"
             unit="AU"
-            number={body.position_au.x}
+            value={body.position_au.x}
             busy={model.ui.busy}
             changed={(value: String) -> Msg => Msg::BodyPositionXChanged { value }}
           />
           <NumberField
             label="Y"
             unit="AU"
-            number={body.position_au.y}
+            value={body.position_au.y}
             busy={model.ui.busy}
             changed={(value: String) -> Msg => Msg::BodyPositionYChanged { value }}
           />
@@ -296,14 +330,14 @@ fn SelectedBodyInspector({ model: Model, body: Body }) -> Html<Msg>
           <NumberField
             label="X"
             unit="AU/d"
-            number={body.velocity_au_per_day.x}
+            value={body.velocity_au_per_day.x}
             busy={model.ui.busy}
             changed={(value: String) -> Msg => Msg::BodyVelocityXChanged { value }}
           />
           <NumberField
             label="Y"
             unit="AU/d"
-            number={body.velocity_au_per_day.y}
+            value={body.velocity_au_per_day.y}
             busy={model.ui.busy}
             changed={(value: String) -> Msg => Msg::BodyVelocityYChanged { value }}
           />
@@ -350,7 +384,7 @@ fn SelectedBodyInspector({ model: Model, body: Body }) -> Html<Msg>
 fn NumberField({
   label: String,
   unit: String,
-  number: f64,
+  value: f64,
   busy: bool,
   changed: fn(String) -> Msg
 }) -> Html<Msg>
@@ -359,7 +393,7 @@ fn NumberField({
     <input
       type="number"
       step="any"
-      value={to_string(number)}
+      value={unwrap_or(format_significant(value, digits: 12), to_string(value))}
       disabled={busy}
       on_focus={Msg::FieldFocused {}}
       on_blur={Msg::FieldBlurred {}}
@@ -445,7 +479,10 @@ fn MetricReadout({ model: Model }) -> Html<Msg>
   <div class="chrome metric-readout" aria-label="Simulation metrics">
     <span>{elapsed_label(model.session.simulation.elapsed_days)}</span>
     <span>{to_string(model.session.simulation.bodies.len()).concat(" bodies")}</span>
-    <span>{one_decimal(model.camera.pixels_per_au).concat(" px/AU")}</span>
+    <span>{unwrap_or(
+      format_fixed(model.camera.pixels_per_au, decimal_places: 1, trim_trailing_zeros: true),
+      to_string(model.camera.pixels_per_au)
+    ).concat(" px/AU")}</span>
   </div>
 
 fn NoticeToast({ notice: Notice }) -> Html<Msg>
@@ -510,6 +547,7 @@ fn SavedCard({ summary: SimulationSummary, busy: bool }) -> Html<Msg>
       <strong>{summary.name}</strong>
       <div class="saved-meta">
         <span>{to_string(summary.body_count).concat(" bodies")}</span>
+        <span>{saved_timestamp_label(summary.updated_at)}</span>
         <span>JSON · format v1</span>
       </div>
     </div>
@@ -535,6 +573,13 @@ fn SavedCard({ summary: SimulationSummary, busy: bool }) -> Html<Msg>
       >Delete</button>
     </div>
   </article>
+
+fn saved_timestamp_label(unix_millis: i64) -> String
+  match(SystemTime::from_unix_millis(unix_millis).to_rfc3339())
+    Ok<String> { value }:
+      "Updated ".concat(value)
+    Err<TimestampError>:
+      "Updated time unavailable"
 
 fn canvas_class(model: Model) -> String
   match(model.ui.interaction)
@@ -655,22 +700,15 @@ fn aria_bool(value: bool) -> String
 
 fn elapsed_label(elapsed_days: f64) -> String
   if elapsed_days < 365.25:
-    return one_decimal(elapsed_days).concat(" d")
-  one_decimal(elapsed_days / 365.25).concat(" yr")
-
-fn one_decimal(value: f64) -> String
-  match(to_i64_checked(round(value * 10.0)))
-    Err:
-      to_string(value)
-    Ok<i64> { value: scaled }:
-      let negative = scaled < 0i64
-      let magnitude = if negative then: 0i64 - scaled else: scaled
-      let whole = magnitude / 10i64
-      let fraction = magnitude % 10i64
-      let sign = if negative then: "-" else: String::init()
-      if fraction == 0i64:
-        return sign.concat(to_string(whole))
-      sign.concat(to_string(whole)).concat(".").concat(to_string(fraction))
+    return unwrap_or(
+      format_fixed(elapsed_days, decimal_places: 1, trim_trailing_zeros: true),
+      to_string(elapsed_days)
+    ).concat(" d")
+  let years = elapsed_days / 365.25
+  unwrap_or(
+    format_fixed(years, decimal_places: 1, trim_trailing_zeros: true),
+    to_string(years)
+  ).concat(" yr")
 
 fn notice_class(kind: NoticeKind) -> String
   match(kind)

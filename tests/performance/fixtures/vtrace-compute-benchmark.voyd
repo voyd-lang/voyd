@@ -82,12 +82,12 @@ fn render_with_seed({
       .render_checksum(world)
   RenderCtx::rand_f64(tail):
     tail(rng.random_f64())
-  RenderCtx::rand_f64(tail, range: Range<f64>):
+  RenderCtx::rand_f64_in(tail, range: Range<f64>):
     tail(rng.random_f64(range))
 
 eff RenderCtx
   rand_f64(tail) -> f64
-  rand_f64(tail, range: Range<f64>) -> f64
+  rand_f64_in(tail, range: Range<f64>) -> f64
 
 type Color = Vec3
 type Point3 = Vec3
@@ -156,9 +156,9 @@ impl Vec3
 
   fn random(range: Range<f64>) -> Vec3
     Vec3(
-      RenderCtx::rand_f64(range),
-      RenderCtx::rand_f64(range),
-      RenderCtx::rand_f64(range)
+      RenderCtx::rand_f64_in(range),
+      RenderCtx::rand_f64_in(range),
+      RenderCtx::rand_f64_in(range)
     )
 
   fn random_unit_vector() -> Vec3
@@ -181,8 +181,8 @@ impl Vec3
   fn random_in_unit_disk() -> Vec3
     while true:
       let p = Vec3(
-        RenderCtx::rand_f64(-1.0..1.0),
-        RenderCtx::rand_f64(-1.0..1.0),
+        RenderCtx::rand_f64_in(-1.0..1.0),
+        RenderCtx::rand_f64_in(-1.0..1.0),
         0.0
       )
 

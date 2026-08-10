@@ -4,11 +4,13 @@ import type { EffectTableSidecar } from "./effect-table-types.js";
 import type { EffectRegistry } from "./effect-registry.js";
 import { toBase64 } from "./base64.js";
 
-const TABLE_VERSION = 2;
+const TABLE_VERSION_V2 = 2;
+const TABLE_VERSION = 3;
 export const EFFECT_TABLE_EXPORT = "__voyd_effect_table";
 
 const TABLE_HEADER_SIZE = 8; // version + opCount (u32 each)
-const OP_ENTRY_SIZE = 28; // effectIdLo, effectIdHi, effectIdName, opId, resumeKind, signatureHash, label (u32 each)
+const OP_ENTRY_SIZE_V2 = 28; // effectIdLo, effectIdHi, effectIdName, opId, resumeKind, signatureHash, label (u32 each)
+const OP_ENTRY_SIZE = 32; // effectIdLo, effectIdHi, effectIdName, opId, resumeKind, signatureHash, label, operationId (u32 each)
 
 interface OpEntry {
   effectIdLo: number;
@@ -18,6 +20,7 @@ interface OpEntry {
   resumeKind: number;
   signatureHash: number;
   labelOffset: number;
+  operationIdOffset?: number;
 }
 
 class NamesBlobBuilder {
@@ -66,6 +69,9 @@ export const emitEffectTableSection = ({
   }
 
   const names = new NamesBlobBuilder();
+  const version = effectRegistry.entries.some((entry) => entry.operationId)
+    ? TABLE_VERSION
+    : TABLE_VERSION_V2;
   const opEntries: OpEntry[] = effectRegistry.entries.map((entry) => ({
     effectIdLo: entry.effectId.hash.low,
     effectIdHi: entry.effectId.hash.high,
@@ -74,10 +80,15 @@ export const emitEffectTableSection = ({
     resumeKind: entry.resumeKind,
     signatureHash: entry.signatureHash,
     labelOffset: names.intern(entry.label),
+    ...(version === TABLE_VERSION
+      ? { operationIdOffset: names.intern(entry.operationId ?? "") }
+      : {}),
   }));
 
   const namesBlob = names.finish();
-  const namesStart = TABLE_HEADER_SIZE + opEntries.length * OP_ENTRY_SIZE;
+  const entrySize =
+    version === TABLE_VERSION ? OP_ENTRY_SIZE : OP_ENTRY_SIZE_V2;
+  const namesStart = TABLE_HEADER_SIZE + opEntries.length * entrySize;
   const buffer = new ArrayBuffer(namesStart + namesBlob.byteLength);
   const view = new DataView(buffer);
   let offset = 0;
@@ -87,7 +98,7 @@ export const emitEffectTableSection = ({
     offset += 4;
   };
 
-  write(TABLE_VERSION);
+  write(version);
   write(opEntries.length);
 
   opEntries.forEach((entry) => {
@@ -98,6 +109,9 @@ export const emitEffectTableSection = ({
     write(entry.resumeKind);
     write(entry.signatureHash);
     write(entry.labelOffset);
+    if (version === TABLE_VERSION) {
+      write(entry.operationIdOffset ?? 0);
+    }
   });
 
   new Uint8Array(buffer, namesStart).set(namesBlob);
@@ -105,15 +119,19 @@ export const emitEffectTableSection = ({
   mod.addCustomSection(exportName, sectionBytes);
 
   return {
-    version: TABLE_VERSION,
+    version,
     moduleId: entryModuleId,
     tableExport: exportName,
     namesBlob: toBase64(namesBlob),
     ops: effectRegistry.entries.map((entry) => ({
       opIndex: entry.opIndex,
       effectId: entry.effectId.id,
-      effectIdHash: formatEffectIdHash(entry.effectId.hash.low, entry.effectId.hash.high),
+      effectIdHash: formatEffectIdHash(
+        entry.effectId.hash.low,
+        entry.effectId.hash.high,
+      ),
       opId: entry.opId,
+      ...(entry.operationId ? { operationId: entry.operationId } : {}),
       resumeKind: entry.resumeKind,
       signatureHash: entry.signatureHash,
       label: entry.label,

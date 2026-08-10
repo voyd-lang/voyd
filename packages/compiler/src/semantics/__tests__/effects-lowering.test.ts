@@ -165,6 +165,8 @@ fn choose(flag: bool): Async -> i32
 eff Async
   fn Await() -> i32
 
+use Async::Await
+
 fn main(): Async -> i32
   try
     Async::Await()

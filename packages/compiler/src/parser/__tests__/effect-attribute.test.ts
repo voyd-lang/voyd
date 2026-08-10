@@ -32,3 +32,25 @@ eff Log
   info`)
   ).toThrow(/@effect id must be a string/);
 });
+
+test("@operation attaches a stable operation id", (t) => {
+  const effect = parseFirstForm(`eff Log
+  @operation(id: "write-text")
+  write(tail, value: String) -> void`);
+  const body = effect.at(2);
+  if (!isForm(body)) throw new Error("expected effect body");
+  const operation = body.at(1);
+  if (!isForm(operation)) throw new Error("expected operation");
+  t.expect(operation.attributes?.operation).toEqual({ id: "write-text" });
+});
+
+test("@operation rejects unsafe ids", (t) => {
+  t.expect(() => parse(`eff Log
+  @operation(id: "write::text")
+  write(tail, value: String) -> void`)).toThrow(/without '::'/);
+});
+
+test("@operation rejects non-effect-operation targets", (t) => {
+  t.expect(() => parse(`@operation(id: "x")
+fn value() -> i32 = 1`)).toThrow(/only annotate an effect operation/);
+});

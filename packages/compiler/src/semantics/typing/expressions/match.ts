@@ -30,7 +30,10 @@ import {
 } from "../symbol-ref-utils.js";
 import { bindPatternFromType, recordPatternType } from "./patterns.js";
 import { isPackageVisible, isPublicVisibility } from "../../hir/index.js";
-import { importedSymbolTargetFromMetadata } from "../../enum-namespace.js";
+import {
+  enumNamespaceMemberNamesFromMetadata,
+  importedSymbolTargetFromMetadata,
+} from "../../enum-namespace.js";
 
 export const typeMatchExpr = (
   expr: HirMatchExpr,
@@ -537,19 +540,19 @@ const collectNominalPatternHints = (
     ) {
       return;
     }
-    const localOwner = localSymbolForSymbolRef(nominalDesc.owner, ctx);
-    const isContextuallyReachable = !(
-      nominalDesc.owner.moduleId !== ctx.moduleId &&
-      (typeof localOwner !== "number" ||
-        !isReachableNominalPatternOwner(nominalDesc.owner, ctx))
-    );
-    const ownerKey = symbolRefKeyForTyping(
-      canonicalSymbolRefInTypingContext(nominalDesc.owner, ctx),
-    );
     const name = nominalDesc.name;
     if (!name) {
       return;
     }
+    const localOwner = localSymbolForSymbolRef(nominalDesc.owner, ctx);
+    const isContextuallyReachable = !(
+      nominalDesc.owner.moduleId !== ctx.moduleId &&
+      (typeof localOwner !== "number" ||
+        !isReachableNominalPatternOwner(nominalDesc.owner, name, ctx))
+    );
+    const ownerKey = symbolRefKeyForTyping(
+      canonicalSymbolRefInTypingContext(nominalDesc.owner, ctx),
+    );
     const hint = { nominal, memberType: member, name };
     if (isContextuallyReachable) {
       const named = byName.get(name) ?? [];
@@ -573,6 +576,7 @@ const collectNominalPatternHints = (
 
 const isReachableNominalPatternOwner = (
   owner: { moduleId: string; symbol: number },
+  memberName: string,
   ctx: TypingContext,
 ): boolean => {
   const canonicalOwner = canonicalSymbolRefInTypingContext(owner, ctx);
@@ -593,6 +597,66 @@ const isReachableNominalPatternOwner = (
         candidate.moduleId === canonicalOwner.moduleId &&
         candidate.symbol === canonicalOwner.symbol;
       if (reachesOwner) {
+        return true;
+      }
+    }
+  }
+  return isImportedFreshEnumVariantOwner({
+    owner: canonicalOwner,
+    memberName,
+    ctx,
+  });
+};
+
+const isImportedFreshEnumVariantOwner = ({
+  owner,
+  memberName,
+  ctx,
+}: {
+  owner: { moduleId: string; symbol: SymbolId };
+  memberName: string;
+  ctx: TypingContext;
+}): boolean => {
+  const ownerRecord = ctx.dependencies
+    .get(owner.moduleId)
+    ?.symbolTable.getSymbol(owner.symbol);
+  if (ownerRecord?.bindingIdentity?.startsWith("fresh:") !== true) {
+    return false;
+  }
+
+  for (const local of ctx.symbolTable.symbolsInScope(
+    ctx.symbolTable.rootScope,
+  )) {
+    if (!ctx.sourceImportLocals.has(local)) {
+      continue;
+    }
+    const localRecord = ctx.symbolTable.getSymbol(local);
+    const metadata = localRecord.metadata as
+      | Record<string, unknown>
+      | undefined;
+    const importedAlias = importedSymbolTargetFromMetadata(metadata);
+    if (
+      !importedAlias ||
+      !enumNamespaceMemberNamesFromMetadata(metadata)?.includes(memberName)
+    ) {
+      continue;
+    }
+    const variantSymbols = ctx.dependencies
+      .get(importedAlias.moduleId)
+      ?.staticMethods?.get(importedAlias.symbol)
+      ?.get(memberName);
+    if (!variantSymbols) {
+      continue;
+    }
+    for (const variantSymbol of variantSymbols) {
+      const candidate = canonicalSymbolRefInTypingContext(
+        { moduleId: importedAlias.moduleId, symbol: variantSymbol },
+        ctx,
+      );
+      if (
+        candidate.moduleId === owner.moduleId &&
+        candidate.symbol === owner.symbol
+      ) {
         return true;
       }
     }

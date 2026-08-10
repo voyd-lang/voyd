@@ -329,6 +329,16 @@ describe("effect perform lowering", { timeout: 60_000 }, () => {
     await expect(host.run<number>("big_local")).resolves.toBe(45);
   });
 
+  it("retains object captures used only by a handler clause", async () => {
+    const compiled = await compileEffectFixture({
+      entryPath: localFastPathFixturePath,
+      codegenOptions: { effectsHostBoundary: "off" },
+    });
+
+    const host = await createVoydHost({ wasm: compiled.wasm });
+    await expect(host.run<number>("captured_handler_env")).resolves.toBe(1);
+  });
+
   it("removes the residual effect ABI from fully handled recursive call graphs", async () => {
     const unoptimized = await compileEffectFixture({
       entryPath: localRecursiveFastPathFixturePath,

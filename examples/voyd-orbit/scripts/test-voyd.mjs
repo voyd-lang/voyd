@@ -4,7 +4,7 @@ import { fileURLToPath } from "node:url";
 import { voydCommand } from "./voyd-command.mjs";
 
 const rootDir = resolve(fileURLToPath(new URL("..", import.meta.url)));
-const invocation = voydCommand(rootDir, ["test", "src"]);
+const invocation = voydCommand(rootDir, ["test", "src", "--fail-empty-tests"]);
 const child = spawn(invocation.command, invocation.args, {
   cwd: rootDir,
   env: invocation.env,

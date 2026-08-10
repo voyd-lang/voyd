@@ -58,11 +58,12 @@ accumulators, and other ephemeral UI state.
 
 The repository treats the filesystem as an untrusted boundary:
 
-1. IDs accept only bounded lower-case alphanumeric/hyphen values.
+1. IDs accept only canonical UUID values.
 2. The server owns IDs and timestamps for creates and preserves creation time on
    updates.
-3. Each write is encoded to a hidden same-directory temporary file and renamed
-   over its destination.
+3. New files use `create_exclusive`; replacements use `write_atomic`, whose
+   host implementation writes a same-directory temporary and replaces the
+   destination only after the complete payload is ready.
 4. Reads validate both the document and the relationship between its ID and
    filename.
 5. Listing isolates failures per file, so one corrupt JSON document cannot hide
@@ -70,8 +71,8 @@ The repository treats the filesystem as an untrusted boundary:
 
 The REST layer stays intentionally small: five CRUD routes, JSON content types,
 useful status codes, and `{code, message}` failures. Route tests drive the actual
-Web `App` through its public in-memory handler while mock effects observe writes,
-renames, time, and random bytes.
+Web `App` through its public in-memory handler while mock effects observe atomic
+and exclusive writes, time, and random bytes.
 
 ## 4. Building the browser as a Voyd state machine
 
@@ -138,12 +139,12 @@ The live save flow uncovered the most consequential compiler issue in the
 project: one click created two files. A retained callback returning a VX
 `Program` was evaluated once while checking the callback result's nominal type
 and again while loading its payload. Each evaluation started its own detached
-HTTP task, so every save, list, duplicate, and delete request ran twice. The
-generic callback code generator now uses the statically known payload-envelope
-type for a direct field load, and an integration regression asserts one fetch
-per action. Effectful expressions must have once-only evaluation semantics;
-making this invariant explicit in the IR and testing it across other structural
-loads would guard against the same class of bug elsewhere.
+HTTP task, so every save, list, duplicate, and delete request ran twice. Value
+lowering now evaluates each source expression once, stores its result, and
+replays only the stored value while constructing tuples, unions, and other
+multi-lane values. Compiler regressions cover effectful nested shapes before
+and after optimization, and the Orbit integration regression asserts exactly
+one fetch per action.
 
 ### Preserve types across asynchronous task results
 
@@ -158,128 +159,168 @@ Typed outcome boxes now carry an explicit type marker, and the encoder checks
 the wrapper shape before reading that marker. The integration fixture returns a
 custom enum with a payload, while Voyd Orbit's list, save, load, duplicate, and
 delete commands all pass their result enums directly—there is no manual
-MessagePack bridge in application code. Longer term, a failed outcome-encoding
-step should always settle the host task with a surfaced error; that would have
-made this failure immediate instead of presenting as a permanently busy UI.
+MessagePack bridge in application code. Outcome encoding, oversized payload,
+and decoding failures now settle the host task with a surfaced error instead of
+leaving the UI permanently busy; observers reuse that same terminal result.
 
-### Derive a boundary serializer
+### Derive boundary serializers from Voyd types
 
-VX command payloads and some host adapters still construct MessagePack maps by
-hand and repeat their string field names. The Canvas extension is typed to Voyd
-callers, but its implementation is longer and more fragile than the domain code.
-A derived boundary serializer for records, enums, and version tags would make
-new host capabilities much smaller while preserving an explicit wire contract.
+Voyd now derives MessagePack codecs for closed records, arrays, optional fields,
+and enum payloads. Field spellings and variant names remain the inspectable wire
+contract, while versioned records opt in with an ordinary `version` field.
+Unsupported or discriminator-ambiguous shapes fail at the codec call during
+compilation.
+
+VX's Canvas implementation now uses private typed records for gradients, path
+segments, draw operations, and version-2 frames. Orbit still uses the same typed
+Canvas constructors and browser wire format, while the repeated map allocation
+and string-key plumbing has disappeared from that production boundary.
 
 ### Add strict, composable JSON decoding
 
-The JSON value API is capable, but a handwritten decoder needs many tiny
-`json_string`, `json_number`, and object/array helpers. Missing and wrong-typed
-fields can easily collapse to default values unless every caller adds validation.
-Decoder combinators that accumulate a field path—or a derive facility with
-version hooks—would improve diagnostics and reduce accidental leniency.
+Voyd's JSON layer now derives strict structural decoding from ordinary records,
+arrays, optional fields, and tagged unions. Failures retain a rooted field path,
+unknown fields follow an explicit strict or permissive policy, and versioned
+documents require a migration callback that rejects unsupported versions.
 
-### Round out filesystem transactions
+Orbit's readable v1 simulation and summary format is unchanged, but its readers
+now decode private typed wire records. The handwritten field helpers and their
+silent zero, empty-string, and default-object fallbacks are gone. A malformed
+body reports the exact `$.bodies[index].field`, while repository listing still
+isolates that corrupt file from valid sibling documents.
 
-Voyd Orbit added recursive directory creation and rename because safe persistence
-needed both. A standard `write_atomic(path, contents)` helper would be a useful
-next layer. Longer term, file locking or an exclusive-create primitive would
-make concurrent writers easier to reason about. `IoError` is currently coarse,
-so distinguishing “not found,” permissions, and transient failures often needs
-host-specific interpretation.
+### Filesystem transactions now expose portable outcomes
 
-### Provide UUIDs and date formatting
+Orbit uses `create_exclusive` for new documents so concurrent creators produce
+one winner, and `write_atomic` for replacements. Temporary files stay beside
+their destination and are cleaned up after failed writes or renames where the
+host permits it. Repository errors branch on portable not-found, conflict,
+permission, and generic I/O kinds while preserving host detail, so server
+behavior no longer depends on platform-specific messages.
 
-Random bytes and epoch milliseconds are sufficient to implement safe IDs and
-timestamps, but applications should not each invent those conventions. Standard
-UUID/opaque-ID generation and ISO-8601 parse/format APIs would improve both JSON
-readability and UI metadata. A compact, locale-independent number formatter
-would also help scientific interfaces; raw `to_string(f64)` is not an ideal
-inspector display.
+### IDs, timestamps, and numbers now share standard contracts
 
-### Improve numerical test assertions
+Saved-system IDs come from `Uuid::v4()` and are parsed before becoming path
+components; deterministic tests still inject the secure-random effect. Saved
+timestamps use the UTC RFC 3339 parser/formatter, including structured calendar
+and offset failures. Metric and inspector labels use locale-independent fixed,
+significant, and scientific formatting with explicit rounding, trailing-zero,
+and non-finite policies. Orbit no longer carries local entropy, date, or decimal
+conventions.
 
-The test library has equality assertions but no `assert_close`, tolerance, or
-custom failure message. Physics and JSON floating-point round trips need
-approximate comparisons, and a failed test currently does not identify which
-of several assertions failed. First-class numeric tolerances and source-aware
-failure output would shorten the feedback loop considerably.
+### Numerical failures now carry useful context
 
-### Clarify identifier collisions across generated syntax
+The gravity, integration, and conservation tests use
+`std::test::numeric::assert_close` with explicit absolute and relative
+tolerances. Failures report the expected and actual values, delta, tolerances,
+the caller's context message, and the test source location. Equal infinities and
+signed zero pass; NaN, unequal infinities, and invalid tolerances fail. The local
+boolean `close` helper is gone.
 
-Two integration failures had almost no useful source location. Reusing
-`Loaded` and `Failed` as variants across several result enums caused the enum
-macro's generated names to collide only when the API module was imported by the
-larger client. In the view, a `NumberField` prop named `value` shadowed VX's
-generated JSX `value` attribute function, producing only “cannot call a
-non-function value” at an unknown location. Namespacing generated enum variants
-and JSX attribute helpers hygienically—or at least reporting both colliding
-bindings—would make large applications much safer to assemble.
+### Generated identifiers now compose without collisions
 
-The server surfaced a related parser failure: a line-broken chain of
-`not condition and not condition` checks reported only “call expression missing
-callee” against the first line of the file. Rewriting the classifier as small
-early-return checks fixed it. Preserving the parser's candidate interpretation
-in the diagnostic would turn a long isolation exercise into a local edit.
+Macro-created bindings now carry deterministic identities independent of their
+readable labels. Reusing `Loaded` and `Failed` across result enums is safe, each
+enum exposes its variants through its own namespace, and fresh implementation
+symbols cannot leak through public expansion visibility. Compiler-inserted JSX
+helpers resolve through explicit standard-library identities, so component
+props cannot shadow them. Orbit's `NumberField` prop has therefore returned to
+the natural `value` name.
+
+Generated-syntax diagnostics point to the macro invocation and retain the
+definition location as related context. Navigation and rename follow each
+generated binding back to its visible allocation syntax, while the private
+identity stays out of AST output, metadata, ABI, and Wasm names. The multiline
+server predicate also uses its original readable boolean chain now that
+continuation operators preserve the following indented operand.
 
 ### Make package boundaries easier to stage
 
-The first layout used nested package facades for `shared`, `simulation`,
-`client`, and `server`. Moving types across those boundaries exposed subtle
-differences between package visibility, module visibility, enum macro exports,
-and operator imports. Top-level facade modules ultimately provided the intended
-architecture with less ceremony. Better diagnostics for an inaccessible type,
-and a documented pattern for growing a folder of modules into a package, would
-make incremental application architecture less trial-and-error.
+`shared`, `simulation`, `client`, and `server` now use deliberate nested source
+packages. Each folder owns a `pkg.voyd`; outside code imports only the logical
+package path and consumes that root's curated exports. The old top-level
+`shared.voyd`, `simulation.voyd`, `client.voyd`, and `server.voyd` facade
+workaround is gone. `client/pkg.voyd` is also the browser compile entrypoint,
+while `main.voyd` remains the server program.
 
-### Smooth effect names and test captures
+The compiler now preserves nominal, overload, operator, trait, macro, and
+generated-declaration metadata through those roots. Diagnostics distinguish a
+module-private declaration, a package-private declaration, a hidden nested
+internal, a missing `api` member, and an omitted operator or macro import, and
+they point to the package root that can repair the boundary. A folder can be
+staged as an ordinary facade until isolation is wanted, then migrated by moving
+the facade to `foo/pkg.voyd`; the compiler rejects leaving both logical-path
+owners in place.
 
-Filesystem wrapper functions and their underlying effect operations share names,
-which required import aliases to make some server calls unambiguous. Random byte
-generation had a similar wrapper/effect ambiguity, so the repository builds its
-128-bit IDs from sixteen normalized random integers. Qualified effect-operation
-syntax that never competes with ordinary functions would remove that friction.
+### Effect names and test captures are explicit
 
-The REST tests also exposed a steep borrow-rule corner: returning a mutable mock
-host's stored `MsgPack` through an effect continuation was rejected as escaping a
-borrow. The final host keeps read payloads immutable and uses `SharedCell` only
-for write/rename observations. The rule is sound, but an effect-test cookbook
-and diagnostics that suggest an owned copy or shared cell would help application
-authors reach the right pattern sooner.
+Voyd now resolves a qualified effect operation from its effect identity before
+considering ordinary functions. Orbit imports `std::fs` for typed wrappers and
+`std::fs::Fs` for handler clauses, so `fs::rename(...)` and
+`Fs::rename(...)` can keep their natural names without local aliases. Saved IDs
+come from `Uuid::v4()`, which obtains and validates 16 secure bytes through the
+standard random effect instead of assembling normalized integer samples.
 
-### Catch SSR-unstable form properties before runtime
+The REST tests exposed a steep borrow-rule corner: an effect continuation cannot
+receive a value through an active mutable borrow. The compiler now identifies
+the captured value and continuation boundary and recommends an owned snapshot,
+an immutable fixture, or `SharedCell` according to the situation. The effects
+reference includes a complete mock-host pattern. Orbit follows it directly:
+read payloads are immutable fixtures, changing write observations live in
+`SharedCell`, and every cell callback ends before `tail` runs.
 
-The first real page request found something the server and client compilers did
-not: VX's convenient `value(...)` helper represents a DOM property, and an
-`option` value has no supported property-to-HTML mapping in the SSR renderer.
-The scenario picker now emits an explicit typed `value` attribute, which is the
-correct stable form. Tag-aware JSX checking, or an SSR validation pass during
-compilation, should report this before a server accepts its first request.
+### Form properties now fail before the first request
+
+The first real page request exposed a mismatch between an option's HTML value
+attribute and VX's live DOM `value` property. Built-in JSX now checks the tag as
+it lowers form syntax: option values become ordinary attributes, while input
+and textarea values remain controlled properties. Unsupported combinations
+point to the attribute and suggest the stable form—for example, `selected` on
+the matching option instead of `value` on a select. The scenario picker uses
+idiomatic typed `<option value={...} selected={...}>` syntax, and browser and
+server rendering consult the same property-representation contract.
 
 ### Make constructor and multiline diagnostics more direct
 
-`val` types are initialized through their `init` API (`Vec2::init(...)`), which
-was not obvious when coming from record construction and initially led to using
-`Vec2(...)`. Separately, a line-broken arithmetic expression produced a
-misleading “expression is not callable” diagnostic because the next line looked
-like a call. Diagnostics that suggest the intended constructor or point at the
-line-break parse would make these errors much easier to resolve.
+Voyd now keeps indented operands after boolean and arithmetic continuation
+operators in the same expression. Orbit's server error classifier is back to a
+single readable multiline predicate instead of a sequence of early-return
+workarounds. When type-call construction does not match a `val` initializer,
+the diagnostic points at the type and suggests its explicit `Type::init(...)`
+API; Orbit continues to use `Vec2::init(...)` as the idiomatic spelling.
 
-### Add a native Canvas surface to VX's documented core
+### Canvas graduated into VX's documented core
 
-The reusable command added here is intentionally small—lines, polylines,
-circles, ellipses, text, glow, and radial fills—and is already enough for a
-convincing scientific toy. Future examples would benefit from documented paths,
-transforms, line dashes, compositing, text metrics, and pointer capture. Keeping
-those as typed VX operations preserves the valuable rule that application logic
-stays in Voyd.
+The first Orbit renderer exposed only lines, polylines, circles, ellipses, text,
+glow, and radial fills. VX now provides typed paths, affine transforms, balanced
+save/restore scopes, line dashes, compositing, and explicit text measurement
+results. The expanded draw grammar is Canvas frame version 2; the browser still
+validates legacy version-1 frames. It validates each complete frame before
+mutating the target and owns high-DPI backing-store scaling while Voyd stays in
+logical CSS pixels.
 
-### Reduce effect-handler churn when an effect grows
+Orbit exercises the completed surface in production: velocity arrows are
+transformed paths, its measured title drives a path-backed, dashed, and
+composited overlay, and active-pointer tracking plus pointer capture keeps pan,
+drag, and placement gestures coherent outside the canvas until release or
+cancellation. The Canvas MessagePack DTOs are compiler-derived from typed
+records, with their explicit version and established field names covered by the
+VX boundary regressions.
+
+### Compose reusable effect-host policy with `with_*`
 
 Adding filesystem operations correctly forced every closed `Fs` handler to
-account for them. That exhaustiveness is valuable, but it also meant updating
-unrelated test fixtures that only wanted a default error. A concise forwarding
-or “unhandled operations use this fallback” syntax could retain safety while
-reducing mechanical edits in mock hosts.
+account for them. Orbit now centralizes that exhaustive, operation-specific
+policy in `with_mock_host`. Individual tests use an inner `try open` only when
+they need to override one operation, and every unmatched operation propagates
+to the reusable outer handler.
+
+This keeps heterogeneous operation result types fully typed and preserves the
+useful compile-time signal when `Fs` grows, without adding a dynamically typed
+fallback clause. The [effects reference's reusable `with_*` handler
+guidance](../../packages/reference/docs/types/effects.md#reusable-with_-handlers)
+explains when to use a policy-bearing function and when a small inline handler
+is clearer.
 
 ## Bottom line
 

@@ -1,6 +1,9 @@
 import type { ScopeId } from "../ids.js";
 import { diagnosticFromCode } from "../../diagnostics/index.js";
-import { formatTypeAnnotation, toSourceSpan } from "../../parser/surface/utils.js";
+import {
+  formatTypeAnnotation,
+  toSourceSpan,
+} from "../../parser/surface/utils.js";
 import type {
   BindingContext,
   BoundFunction,
@@ -10,15 +13,19 @@ import type {
 import type { TypeParameterDecl } from "../decls.js";
 import { findNonOverloadNameCollision } from "./name-collisions.js";
 
-const makeOverloadBucketKey = (scope: ScopeId, name: string): string =>
-  `${scope}:${name}`;
+const makeOverloadBucketKey = (
+  scope: ScopeId,
+  name: string,
+  bindingIdentity?: string,
+): string => `${scope}:${bindingIdentity ?? "surface"}:${name}`;
 
 export const recordFunctionOverload = (
   fn: BoundFunction,
   declarationScope: ScopeId,
-  ctx: BindingContext
+  ctx: BindingContext,
 ): void => {
-  const key = makeOverloadBucketKey(declarationScope, fn.name);
+  const bindingIdentity = ctx.symbolTable.getSymbol(fn.symbol).bindingIdentity;
+  const key = makeOverloadBucketKey(declarationScope, fn.name, bindingIdentity);
   let bucket = ctx.overloadBuckets.get(key);
   if (!bucket) {
     bucket = {
@@ -51,7 +58,7 @@ export const recordFunctionOverload = (
             severity: "note",
           }),
         ],
-      })
+      }),
     );
   } else {
     bucket.signatureIndex.set(signature.key, fn);
@@ -63,6 +70,7 @@ export const recordFunctionOverload = (
     name: fn.name,
     scope: declarationScope,
     skipSymbol: fn.symbol,
+    bindingIdentity,
     ctx,
   });
   if (conflict && !bucket.nonFunctionConflictReported) {
@@ -83,7 +91,7 @@ export const recordFunctionOverload = (
             span: conflict.span,
           }),
         ],
-      })
+      }),
     );
     bucket.nonFunctionConflictReported = true;
   }
@@ -94,7 +102,7 @@ export const recordFunctionOverload = (
 };
 
 const createOverloadSignature = (
-  fn: BoundFunction
+  fn: BoundFunction,
 ): { key: string; label: string } => {
   const params = fn.params.map((param) => {
     const annotation = formatTypeAnnotation(param.typeExpr);
@@ -110,7 +118,9 @@ const createOverloadSignature = (
   const returnAnnotation = formatTypeAnnotation(fn.returnTypeExpr);
   const typeParameterConstraints = typeParameterConstraintKey(fn);
   const constraintLabel =
-    typeParameterConstraints.length > 0 ? ` where ${typeParameterConstraints}` : "";
+    typeParameterConstraints.length > 0
+      ? ` where ${typeParameterConstraints}`
+      : "";
   return {
     key: `${overloadSignatureKeyFromParams(fn.params, {
       includeLabels: true,
@@ -133,13 +143,16 @@ const typeParameterConstraintKey = (fn: BoundFunction): string => {
   return params
     .filter((param) =>
       signatureAnnotations.some((annotation) =>
-        referencesTypeParameter(annotation, param.name)
-      )
+        referencesTypeParameter(annotation, param.name),
+      ),
     )
     .map((param) => {
       const normalizedIndex = params.indexOf(param);
       return param.constraint
-        ? normalizeTypeParameterNames(formatTypeAnnotation(param.constraint), params)
+        ? normalizeTypeParameterNames(
+            formatTypeAnnotation(param.constraint),
+            params,
+          )
         : `$${normalizedIndex}:_`;
     })
     .join(",");
@@ -150,12 +163,15 @@ const referencesTypeParameter = (annotation: string, name: string): boolean =>
 
 const normalizeTypeParameterNames = (
   value: string,
-  params: readonly TypeParameterDecl[]
+  params: readonly TypeParameterDecl[],
 ): string =>
   params.reduce(
     (out, param, index) =>
-      out.replace(new RegExp(`\\b${escapeRegExp(param.name)}\\b`, "g"), `$${index}`),
-    value
+      out.replace(
+        new RegExp(`\\b${escapeRegExp(param.name)}\\b`, "g"),
+        `$${index}`,
+      ),
+    value,
   );
 
 const escapeRegExp = (value: string): string =>
@@ -176,7 +192,7 @@ const formatParameterDisplayName = (param: BoundParameter): string => {
 
 const ensureOverloadParameterAnnotations = (
   bucket: OverloadBucket,
-  ctx: BindingContext
+  ctx: BindingContext,
 ): void => {
   const missingAnnotationSymbols = new Set<number>();
   bucket.functions.forEach((fn) => {
@@ -207,7 +223,7 @@ const ensureOverloadParameterAnnotations = (
                 }),
               ]
             : undefined,
-        })
+        }),
       );
       missingAnnotationSymbols.add(param.symbol);
     });
@@ -240,6 +256,75 @@ export const finalizeOverloadSets = (ctx: BindingContext): void => {
   }
 };
 
+export const finalizeEffectOperationOverloadSets = (
+  ctx: BindingContext,
+): void => {
+  const existingIds = [
+    ...ctx.overloads.keys(),
+    ...ctx.importedOverloadOptions.keys(),
+  ];
+  let nextOverloadSetId =
+    existingIds.length > 0 ? Math.max(...existingIds) + 1 : 0;
+  ctx.decls.effects.forEach((effect) => {
+    const byName = new Map<string, typeof effect.operations>();
+    effect.operations.forEach((operation) => {
+      byName.set(operation.name, [
+        ...(byName.get(operation.name) ?? []),
+        operation,
+      ]);
+    });
+    byName.forEach((operations, name) => {
+      if (operations.length < 2) return;
+      const signatures = new Map<string, (typeof operations)[number]>();
+      const missing = new Set<number>();
+      operations.forEach((operation) => {
+        const key = overloadSignatureKeyFromParams(operation.parameters);
+        const previous = signatures.get(key);
+        if (previous) {
+          ctx.diagnostics.push(
+            diagnosticFromCode({
+              code: "BD0002",
+              span: toSourceSpan(operation.ast),
+              params: {
+                kind: "duplicate-overload",
+                functionName: `${effect.name}.${name}`,
+                signature: `${effect.name}.${name}(${operation.parameters.map((param) => `${param.name}: ${formatTypeAnnotation(param.typeExpr)}`).join(", ")})`,
+              },
+              related: [
+                diagnosticFromCode({
+                  code: "BD0002",
+                  params: { kind: "previous-overload" },
+                  severity: "note",
+                  span: toSourceSpan(previous.ast),
+                }),
+              ],
+            }),
+          );
+        } else signatures.set(key, operation);
+        operation.parameters.forEach((param) => {
+          if (param.typeExpr || missing.has(param.symbol)) return;
+          ctx.diagnostics.push(
+            diagnosticFromCode({
+              code: "BD0004",
+              span: toSourceSpan(param.ast),
+              params: {
+                kind: "missing-annotation",
+                functionName: `${effect.name}.${name}`,
+                parameter: param.name,
+              },
+            }),
+          );
+          missing.add(param.symbol);
+        });
+      });
+      const id = nextOverloadSetId++;
+      const symbols = operations.map((operation) => operation.symbol);
+      symbols.forEach((symbol) => ctx.overloadBySymbol.set(symbol, id));
+      ctx.importedOverloadOptions.set(id, symbols);
+    });
+  });
+};
+
 const overloadSignatureKeyFromParams = (
   params: readonly BoundParameter[],
   options?: { includeLabels?: boolean },
@@ -255,89 +340,4 @@ const overloadSignatureKeyFromParams = (
     return `${labelKey}:${annotation}`;
   });
   return `${params.length}|${rendered.join(",")}`;
-};
-
-export const finalizeEffectOperationOverloadSets = (ctx: BindingContext): void => {
-  const existingIds = [
-    ...ctx.overloads.keys(),
-    ...ctx.importedOverloadOptions.keys(),
-  ];
-  let nextOverloadSetId =
-    existingIds.length > 0 ? Math.max(...existingIds) + 1 : 0;
-
-  ctx.decls.effects.forEach((effect) => {
-    const operationsByName = new Map<string, typeof effect.operations>();
-    effect.operations.forEach((op) => {
-      const existing = operationsByName.get(op.name);
-      if (existing) {
-        operationsByName.set(op.name, [...existing, op]);
-      } else {
-        operationsByName.set(op.name, [op]);
-      }
-    });
-
-    operationsByName.forEach((operations, opName) => {
-      if (operations.length < 2) {
-        return;
-      }
-
-      const signatureIndex = new Map<string, (typeof operations)[number]>();
-      const missingAnnotationSymbols = new Set<number>();
-      operations.forEach((op) => {
-        const signatureKey = overloadSignatureKeyFromParams(op.parameters);
-        const duplicate = signatureIndex.get(signatureKey);
-        if (duplicate) {
-          ctx.diagnostics.push(
-            diagnosticFromCode({
-              code: "BD0002",
-              span: toSourceSpan(op.ast),
-              params: {
-                kind: "duplicate-overload",
-                functionName: `${effect.name}.${opName}`,
-                signature: `${effect.name}.${opName}(${op.parameters
-                  .map((param) => `${param.name}: ${formatTypeAnnotation(param.typeExpr)}`)
-                  .join(", ")})`,
-              },
-              related: [
-                diagnosticFromCode({
-                  code: "BD0002",
-                  params: { kind: "previous-overload" },
-                  span: toSourceSpan(duplicate.ast),
-                  severity: "note",
-                }),
-              ],
-            })
-          );
-        } else {
-          signatureIndex.set(signatureKey, op);
-        }
-
-        op.parameters.forEach((param) => {
-          if (param.typeExpr) {
-            return;
-          }
-          if (missingAnnotationSymbols.has(param.symbol)) {
-            return;
-          }
-          ctx.diagnostics.push(
-            diagnosticFromCode({
-              code: "BD0004",
-              params: {
-                kind: "missing-annotation",
-                functionName: `${effect.name}.${opName}`,
-                parameter: param.name,
-              },
-              span: toSourceSpan(param.ast),
-            })
-          );
-          missingAnnotationSymbols.add(param.symbol);
-        });
-      });
-
-      const id = nextOverloadSetId++;
-      const symbols = operations.map((op) => op.symbol);
-      symbols.forEach((symbol) => ctx.overloadBySymbol.set(symbol, id));
-      ctx.importedOverloadOptions.set(id, symbols);
-    });
-  });
 };

@@ -12,9 +12,33 @@ export type AtomOpts = {
   value?: string;
 };
 
+/**
+ * Compilation-local identifier context. It is deliberately omitted from both
+ * compact and verbose AST serialization: spelling is the public syntax, while
+ * binding identity is an implementation detail.
+ */
+export type IdentifierLexicalContext =
+  | {
+      kind: "macro-template";
+      definitionModuleId: string;
+      expansionId: string;
+    }
+  | {
+      kind: "fresh";
+      expansionId: string;
+      allocationOrdinal: number;
+    }
+  | {
+      kind: "symbol-reference";
+      targetModuleId: string;
+      bindingKey: string;
+      compilerOwned?: boolean;
+    };
+
 export class Atom extends Syntax {
   readonly syntaxType: string = "atom";
   value: string;
+  lexicalContext?: IdentifierLexicalContext;
 
   constructor(opts: AtomOpts | Token | string = "") {
     if (typeof opts === "string") {
@@ -49,6 +73,10 @@ export class Atom extends Syntax {
       value: this.value,
     });
     cloned.attributes = this.attributes ? { ...this.attributes } : undefined;
+    cloned.lexicalContext = this.lexicalContext
+      ? { ...this.lexicalContext }
+      : undefined;
+    this.cloneSyntaxInto(cloned);
     this.cloneInto(cloned);
     return cloned;
   }
@@ -92,6 +120,22 @@ export class InternalIdentifierAtom extends Atom {
     super(value);
   }
 }
+
+export const identifierBindingKey = (
+  identifier: IdentifierAtom | InternalIdentifierAtom,
+): string | undefined => {
+  const context = identifier.lexicalContext;
+  if (!context) {
+    return undefined;
+  }
+  if (context.kind === "macro-template") {
+    return `template:${context.definitionModuleId}:${context.expansionId}`;
+  }
+  if (context.kind === "fresh") {
+    return `fresh:${context.expansionId}:${context.allocationOrdinal}`;
+  }
+  return context.bindingKey;
+};
 
 export class BoolAtom extends Atom {
   readonly syntaxType = "bool";

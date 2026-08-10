@@ -18,6 +18,10 @@ enum Signal
   Idle
   Ready
 
+enum SecondarySignal
+  Idle
+  Ready
+
 use Signal::{ Idle, Ready }
 
 fn fruit_age(fruit: Fruit) -> i32
@@ -48,4 +52,12 @@ pub fn local_namespace_use() -> i32
     Idle:
       0
     Ready:
+      1
+
+pub fn reused_variant_names() -> i32
+  let signal: SecondarySignal = SecondarySignal::Ready()
+  match(signal)
+    SecondarySignal::Idle:
+      0
+    SecondarySignal::Ready:
       1

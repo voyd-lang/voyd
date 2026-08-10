@@ -148,6 +148,7 @@ type BodyContext = {
   terminations: Termination[];
   mutableParameters: ReadonlySet<SymbolId>;
   closureCaptures: Map<SymbolId, readonly SymbolId[]>;
+  effectContinuationSymbols: ReadonlySet<SymbolId>;
   bindingInitializers: Map<SymbolId, HirExprId>;
   initialBindingInitializers: Map<SymbolId, HirExprId>;
   externalizedPlaces: {
@@ -8468,11 +8469,18 @@ const validateCall = (
         return;
       }
     }
+    const callee =
+      expr.exprKind === "call" ? bodyExpression(expr.callee, ctx) : undefined;
+    const escapeBoundary =
+      callee?.exprKind === "identifier" &&
+      ctx.effectContinuationSymbols.has(callee.symbol)
+        ? "an effect continuation"
+        : "a retaining call";
     validateBorrowFormationIntoExistingStorage({
       value: actual,
       storageType: info.signature?.parameters[index]?.type,
       span: event.span,
-      through: "a retaining call",
+      through: escapeBoundary,
       projectionPaths:
         parameter.retainedPaths && parameter.retainedPaths.length > 0
           ? parameter.retainedPaths
@@ -8482,7 +8490,7 @@ const validateCall = (
     escapeExpression({
       exprId: actual,
       span: event.span,
-      through: "a retaining call",
+      through: escapeBoundary,
       projectionPaths:
         parameter.retainedPaths && parameter.retainedPaths.length > 0
           ? parameter.retainedPaths.flatMap((path) => {
@@ -9375,6 +9383,20 @@ const initializeCallableContext = ({
     aliasesForSymbol.push(alias);
     assignmentAliasesBySymbol.set(alias.symbol, aliasesForSymbol);
   });
+  const effectContinuationSymbols = new Set(
+    [facts, ...lambdaFacts.values()].flatMap((callableFacts) =>
+      callableFacts.expressionIds.flatMap((exprId) => {
+        const expression = callableFacts.expressions.get(exprId);
+        if (expression?.exprKind !== "effect-handler") {
+          return [];
+        }
+        return expression.handlers.flatMap((handler) => {
+          const continuation = handler.parameters[0];
+          return continuation ? [continuation.symbol] : [];
+        });
+      }),
+    ),
+  );
   return {
     typing,
     symbolTable,
@@ -9403,6 +9425,7 @@ const initializeCallableContext = ({
     terminations: [],
     mutableParameters,
     closureCaptures: new Map(),
+    effectContinuationSymbols,
     bindingInitializers: new Map(),
     initialBindingInitializers: new Map(),
     externalizedPlaces: [],

@@ -112,11 +112,13 @@ export const hostOk = (value?: unknown): Record<string, unknown> =>
 
 export const hostError = (
   message: string,
-  code = 1
+  code = 1,
+  kind?: string
 ): Record<string, unknown> => ({
   ok: false,
   code,
   message,
+  ...(kind === undefined ? {} : { kind }),
 });
 
 export const normalizeEffectBufferSize = (
@@ -268,7 +270,10 @@ export const maxTransportSafeHttpServerChunkBytes = ({
   let high = effectBufferSize;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    const payload = hostOk({ chunk: Array.from({ length: mid }, () => 255), done: false });
+    const payload = hostOk({
+      chunk: Array.from({ length: mid }, () => 255),
+      done: false,
+    });
     if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
       low = mid;
       continue;

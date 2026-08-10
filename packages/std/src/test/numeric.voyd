@@ -1,0 +1,156 @@
+//! Approximate numeric assertions with source-aware failure details.
+
+use std::memory::self as memory
+use std::number::cast::{ to_f32, to_f64, to_string }
+use std::optional::types::{ Some, None }
+use std::string::type::String
+use std::test::assertions::Test
+
+/// Asserts that two `f64` values are within absolute or relative tolerance.
+///
+/// The comparison passes when `delta <= max(absolute, relative * scale)`,
+/// where `scale` is the larger magnitude. Equal infinities pass, every NaN
+/// comparison fails, and positive and negative zero compare equal. Tolerances
+/// must be finite and non-negative.
+pub fn assert_close(
+  actual: f64,
+  {
+    to expected: f64,
+    absolute: f64 = 0.000000000001,
+    relative: f64 = 0.000000001,
+    message: String = String::init()
+  }
+): Test -> void
+  assert_close_f64(
+    actual,
+    expected: expected,
+    absolute: absolute,
+    relative: relative,
+    message: message
+  )
+
+/// Asserts that two `f32` values are within absolute or relative tolerance.
+///
+/// Equal infinities pass, every NaN comparison fails, and positive and
+/// negative zero compare equal. Tolerances must be finite and non-negative.
+pub fn assert_close(
+  actual: f32,
+  {
+    to expected: f32,
+    absolute: f32 = to_f32(0.00001),
+    relative: f32 = to_f32(0.00001),
+    message: String = String::init()
+  }
+): Test -> void
+  assert_close_f64(
+    to_f64(actual),
+    expected: to_f64(expected),
+    absolute: to_f64(absolute),
+    relative: to_f64(relative),
+    message: message
+  )
+
+fn assert_close_f64(
+  actual: f64,
+  {
+    expected: f64,
+    absolute: f64,
+    relative: f64,
+    message: String
+  }
+): Test -> void
+  let delta = absolute_value(actual - expected)
+  if not valid_tolerance(absolute) or not valid_tolerance(relative):
+    fail_with_message(
+      failure_detail(
+        actual,
+        expected: expected,
+        delta: delta,
+        absolute: absolute,
+        relative: relative,
+        message: message
+      ).concat(
+        ", reason=assert_close requires finite non-negative absolute and relative tolerances"
+      )
+    )
+    return void
+
+  if actual == expected:
+    return void
+
+  let actual_magnitude = absolute_value(actual)
+  let expected_magnitude = absolute_value(expected)
+  let scale = if actual_magnitude > expected_magnitude then: actual_magnitude else: expected_magnitude
+  let relative_limit = relative * scale
+  let allowed = if absolute > relative_limit then: absolute else: relative_limit
+  if finite(actual) and finite(expected) and delta <= allowed:
+    return void
+
+  fail_with_message(
+    failure_detail(
+      actual,
+      expected: expected,
+      delta: delta,
+      absolute: absolute,
+      relative: relative,
+      message: message
+    )
+  )
+
+fn failure_detail(
+  actual: f64,
+  {
+    expected: f64,
+    delta: f64,
+    absolute: f64,
+    relative: f64,
+    message: String
+  }
+) -> String
+  var detail = assertion_context(message).concat("assert_close failed: expected=")
+  detail = detail.concat(to_string(expected))
+  detail = detail.concat(", actual=")
+  detail = detail.concat(to_string(actual))
+  detail = detail.concat(", delta=")
+  detail = detail.concat(to_string(delta))
+  detail = detail.concat(", absolute_tolerance=")
+  detail = detail.concat(to_string(absolute))
+  detail = detail.concat(", relative_tolerance=")
+  detail.concat(to_string(relative))
+
+fn fail_with_message(message: String): Test -> void
+  let byte_len = message.byte_len()
+  if byte_len <= 0:
+    Test::fail_with(0, 0)
+    return void
+
+  let pages = (byte_len + 65535) / 65536
+  let pointer = memory::size() * 65536
+  if memory::grow(pages) < 0:
+    Test::fail_with(0, 0)
+    return void
+
+  var index = 0
+  while index < byte_len:
+    match(message.get_byte(index))
+      Some<i32> { value }:
+        memory::store_u8(pointer + index, value)
+      None:
+        Test::fail_with(0, 0)
+        return void
+    index = index + 1
+  Test::fail_with(pointer, byte_len)
+
+fn valid_tolerance(value: f64) -> bool
+  value >= 0.0 and finite(value)
+
+fn finite(value: f64) -> bool
+  (value - value) == 0.0
+
+fn absolute_value(value: f64) -> f64
+  if value < 0.0 then: 0.0 - value else: value
+
+fn assertion_context(message: String) -> String
+  if message.is_empty():
+    return String::init()
+  String::init().concat("context: ").concat(message).concat("; ")

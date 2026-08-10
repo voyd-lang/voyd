@@ -55,6 +55,3 @@ match(drink)
 
 Qualify the pattern when another visible type has the same name or when the
 discriminant contains ambiguous instances of the same generic variant.
-
-`enum` is implemented as macro-backed sugar over nominal unions, but the surface
-syntax above is the stable language feature most users should care about.

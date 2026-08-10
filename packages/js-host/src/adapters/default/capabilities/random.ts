@@ -29,15 +29,18 @@ const createRandomSource = ({
       isAvailable: true,
       unavailableReason: "",
       readBytes: (length) => {
-        const fromHook = randomBytes(length);
-        if (fromHook.byteLength < length) {
+        const fromHook: unknown = randomBytes(length);
+        if (!(fromHook instanceof Uint8Array)) {
           throw new Error(
-            `runtime randomBytes hook returned ${fromHook.byteLength} bytes, expected at least ${length}`
+            "runtime randomBytes hook must return a Uint8Array"
           );
         }
-        return fromHook.byteLength === length
-          ? fromHook
-          : fromHook.subarray(0, length);
+        if (fromHook.byteLength !== length) {
+          throw new Error(
+            `runtime randomBytes hook returned ${fromHook.byteLength} bytes, expected exactly ${length}`
+          );
+        }
+        return fromHook;
       },
     };
   }
@@ -137,13 +140,26 @@ export const randomCapabilityDefinition: CapabilityDefinition = {
       effectId: RANDOM_EFFECT_ID,
       opName: "fill_bytes",
       handler: ({ tail }, lenPayload) => {
-        const requested = Math.max(0, toNumberOrUndefined(lenPayload) ?? 0);
-        const length = Math.min(
-          Math.trunc(requested),
+        const requested = toNumberOrUndefined(lenPayload);
+        if (
+          requested === undefined ||
+          !Number.isInteger(requested) ||
+          requested < 0
+        ) {
+          throw new Error(
+            "Default random adapter fill_bytes length must be a non-negative integer"
+          );
+        }
+        const maximum = Math.min(
           RANDOM_FILL_MAX_REQUEST_BYTES,
           maxTransportSafeRandomFillBytes({ effectBufferSize })
         );
-        const bytes = randomSource.readBytes(length);
+        if (requested > maximum) {
+          throw new Error(
+            `Default random adapter fill_bytes request ${requested} exceeds the exact-response maximum of ${maximum} bytes. Request fewer bytes or split the request into multiple calls.`
+          );
+        }
+        const bytes = randomSource.readBytes(requested);
         return tail(Array.from(bytes.values()));
       },
     });

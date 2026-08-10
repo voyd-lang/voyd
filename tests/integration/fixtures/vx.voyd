@@ -61,7 +61,8 @@ pub fn full_event_options_form() -> MsgPack
         prevent_default: true,
         stop_propagation: false,
         capture: false,
-        passive: false
+        passive: false,
+        pointer_capture: false
       },
       message: VxMessage::Save {}
     )}
@@ -75,7 +76,8 @@ pub fn full_event_options_descriptor() -> MsgPack
       prevent_default: true,
       stop_propagation: false,
       capture: false,
-      passive: false
+      passive: false,
+      pointer_capture: false
     },
     handler_id: 42
   )

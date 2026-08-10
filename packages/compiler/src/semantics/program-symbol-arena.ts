@@ -23,6 +23,7 @@ export type ProgramSymbolArena = {
   tryIdOf(ref: SymbolRef): ProgramSymbolId | undefined;
   refOf(id: ProgramSymbolId): SymbolRef;
   getName(id: ProgramSymbolId): string | undefined;
+  isFresh(id: ProgramSymbolId): boolean;
   getDocumentation(id: ProgramSymbolId): string | undefined;
   getPackageId(id: ProgramSymbolId): string;
   getIntrinsicType(id: ProgramSymbolId): string | undefined;
@@ -56,15 +57,19 @@ const getOrCreateMap = <K, V>(map: Map<K, V>, key: K, create: () => V): V => {
 };
 
 export const buildProgramSymbolArena = (
-  modules: readonly SemanticsPipelineResult[]
+  modules: readonly SemanticsPipelineResult[],
 ): ProgramSymbolArena => {
   const stableModules = [...modules].sort((a, b) =>
-    a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true })
+    a.moduleId.localeCompare(b.moduleId, undefined, { numeric: true }),
   );
 
-  const idsByModuleAndSymbol = new Map<string, Map<SymbolId, ProgramSymbolId>>();
+  const idsByModuleAndSymbol = new Map<
+    string,
+    Map<SymbolId, ProgramSymbolId>
+  >();
   const refsById: SymbolRef[] = [];
   const namesById: (string | undefined)[] = [];
+  const freshById: boolean[] = [];
   const documentationById: (string | undefined)[] = [];
   const packageIdsById: string[] = [];
   const intrinsicTypesById: (string | undefined)[] = [];
@@ -103,12 +108,13 @@ export const buildProgramSymbolArena = (
       const bySymbol = getOrCreateMap(
         idsByModuleAndSymbol,
         mod.moduleId,
-        () => new Map<SymbolId, ProgramSymbolId>()
+        () => new Map<SymbolId, ProgramSymbolId>(),
       );
       bySymbol.set(symbol, id);
 
       refsById[id] = { moduleId: mod.moduleId, symbol };
       namesById[id] = mod.symbols.getName(symbol);
+      freshById[id] = record.bindingIdentity?.startsWith("fresh:") === true;
       documentationById[id] =
         mod.binding.decls.getObject(symbol)?.documentation ??
         mod.binding.decls.getTypeAlias(symbol)?.documentation;
@@ -160,7 +166,9 @@ export const buildProgramSymbolArena = (
     if (typeof id === "number") {
       return id;
     }
-    throw new Error(`missing ProgramSymbolId for ${ref.moduleId}::${ref.symbol}`);
+    throw new Error(
+      `missing ProgramSymbolId for ${ref.moduleId}::${ref.symbol}`,
+    );
   };
 
   const refOf = (id: ProgramSymbolId): SymbolRef => {
@@ -186,6 +194,7 @@ export const buildProgramSymbolArena = (
     tryIdOf,
     refOf,
     getName,
+    isFresh: (id) => freshById[id] === true,
     getDocumentation: (id) => documentationById[id],
     getPackageId,
     getIntrinsicType: (id) => intrinsicTypesById[id],

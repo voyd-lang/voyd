@@ -1,5 +1,12 @@
-import { formatSignatureHash, normalizeSignatureHash } from "./protocol/table.js";
-import type { EffectHandler, HostProtocolTable, SignatureHash } from "./protocol/types.js";
+import {
+  formatSignatureHash,
+  normalizeSignatureHash,
+} from "./protocol/table.js";
+import type {
+  EffectHandler,
+  HostProtocolTable,
+  SignatureHash,
+} from "./protocol/types.js";
 
 export type ParsedHandlerKey = {
   effectId: string;
@@ -17,7 +24,9 @@ type EffectLookup = {
 const invalidKeyMessage = (key: string): string =>
   `Invalid handler key ${key}. Expected effectId::opName or effectId::opName::signatureHash`;
 
-const tryNormalizeSignatureHash = (value: string): SignatureHash | undefined => {
+const tryNormalizeSignatureHash = (
+  value: string,
+): SignatureHash | undefined => {
   try {
     return formatSignatureHash(normalizeSignatureHash(value));
   } catch {
@@ -36,7 +45,9 @@ export const parseHandlerKey = (key: string): ParsedHandlerKey => {
       ? tryNormalizeSignatureHash(segments[segments.length - 1] ?? "")
       : undefined;
   const opNameIndex =
-    maybeSignatureHash !== undefined ? segments.length - 2 : segments.length - 1;
+    maybeSignatureHash !== undefined
+      ? segments.length - 2
+      : segments.length - 1;
   const opName = segments[opNameIndex] ?? "";
   const effectId = segments.slice(0, opNameIndex).join("::").trim();
 
@@ -60,7 +71,10 @@ const findOpsByEffectAndName = ({
   effectId: string;
   opName: string;
 }): HostProtocolTable["ops"] =>
-  table.ops.filter((op) => op.effectId === effectId && op.opName === opName);
+  table.ops.filter(
+    (op) =>
+      op.effectId === effectId && (op.operationId ?? op.opName) === opName,
+  );
 
 const knownOpNamesForEffect = ({
   table,
@@ -73,8 +87,8 @@ const knownOpNamesForEffect = ({
     new Set(
       table.ops
         .filter((op) => op.effectId === effectId)
-        .map((op) => op.opName)
-    )
+        .map((op) => op.operationId ?? op.opName),
+    ),
   );
 
 const unknownOpMessage = ({
@@ -136,14 +150,18 @@ export const resolveEffectOp = ({
         signatureHash,
         knownSignatures,
         knownOpNames,
-      })
+      }),
     );
   }
 
   if (signatureHash) {
-    const normalized = formatSignatureHash(normalizeSignatureHash(signatureHash));
+    const normalized = formatSignatureHash(
+      normalizeSignatureHash(signatureHash),
+    );
     const found = matchingOps.find(
-      (op) => formatSignatureHash(normalizeSignatureHash(op.signatureHash)) === normalized
+      (op) =>
+        formatSignatureHash(normalizeSignatureHash(op.signatureHash)) ===
+        normalized,
     );
     if (!found) {
       throw new Error(
@@ -153,7 +171,7 @@ export const resolveEffectOp = ({
           signatureHash: normalized,
           knownSignatures,
           knownOpNames,
-        })
+        }),
       );
     }
     return found;
@@ -169,7 +187,7 @@ export const resolveEffectOp = ({
       effectId,
       opName,
       knownSignatures,
-    })
+    }),
   );
 };
 
@@ -207,7 +225,7 @@ export const buildHandlerKey = ({
     return `${effectId}::${opName}`;
   }
   return `${effectId}::${opName}::${formatSignatureHash(
-    normalizeSignatureHash(signatureHash)
+    normalizeSignatureHash(signatureHash),
   )}`;
 };
 
@@ -217,7 +235,7 @@ export type KeyedHandlerHost = {
     effectId: string,
     opId: number,
     signatureHash: SignatureHash,
-    handler: EffectHandler
+    handler: EffectHandler,
   ) => void;
 };
 
@@ -231,6 +249,27 @@ export const registerHandlersByKey = ({
   const entries = Object.entries(handlers);
   entries.forEach(([key, handler]) => {
     const parsed = parseHandlerKey(key);
+    const explicitMatches = host.table.ops.filter(
+      (op) =>
+        op.effectId === parsed.effectId &&
+        op.operationId === parsed.opName &&
+        (!parsed.signatureHash ||
+          formatSignatureHash(normalizeSignatureHash(op.signatureHash)) ===
+            parsed.signatureHash),
+    );
+    const hasExplicitId = host.table.ops.some(
+      (op) =>
+        op.effectId === parsed.effectId && op.operationId === parsed.opName,
+    );
+    if (hasExplicitId && explicitMatches.length === 0) {
+      throw new Error(`Unknown effect op for ${key}`);
+    }
+    if (explicitMatches.length > 0) {
+      explicitMatches.forEach((op) =>
+        host.registerHandler(op.effectId, op.opId, op.signatureHash, handler),
+      );
+      return;
+    }
     const op = resolveEffectOp({
       table: host.table,
       effectId: parsed.effectId,

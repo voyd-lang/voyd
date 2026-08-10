@@ -585,6 +585,96 @@ mod pkg
     expect(diagnostic.related?.[0]?.message).toContain("main.voyd");
   });
 
+  it("rejects ordinary modules that conflict with nested package roots", async () => {
+    const root = resolve("/proj/src");
+    const ordinaryFile = `${root}${sep}physics.voyd`;
+    const packageRootFile = `${root}${sep}physics${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [`${root}${sep}main.voyd`]: "use src::physics::all",
+      [ordinaryFile]: "pub fn ordinary() -> i32\n  1",
+      [packageRootFile]: "pub fn packaged() -> i32\n  2",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: `${root}${sep}main.voyd`,
+      host,
+      roots: { src: root },
+    });
+
+    const diagnostic = graph.diagnostics.find(
+      (entry) => entry.code === "MD0006",
+    );
+    expect(diagnostic?.message).toContain("src::physics");
+    expect(diagnostic?.message).toContain(ordinaryFile);
+    expect(diagnostic?.message).toContain(packageRootFile);
+    expect(diagnostic?.message).toContain("facade");
+    expect(diagnostic?.related?.map((entry) => entry.span.file)).toEqual([
+      ordinaryFile,
+      packageRootFile,
+    ]);
+  });
+
+  it("rejects an ambiguous nested package root selected as the entry", async () => {
+    const root = resolve("/proj/src");
+    const ordinaryFile = `${root}${sep}physics.voyd`;
+    const packageRootFile = `${root}${sep}physics${sep}pkg.voyd`;
+    const host = createMemoryHost({
+      [ordinaryFile]: "pub fn ordinary() -> i32\n  1",
+      [packageRootFile]: "pub fn packaged() -> i32\n  2",
+    });
+
+    const graph = await buildModuleGraph({
+      entryPath: packageRootFile,
+      host,
+      roots: { src: root },
+    });
+
+    expect(graph.diagnostics).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          code: "MD0006",
+          message: expect.stringContaining("src::physics"),
+        }),
+      ]),
+    );
+  });
+
+  it("rejects ancestor package ambiguity before resolving a descendant", async () => {
+    const root = resolve("/proj/src");
+    const mainFile = `${root}${sep}main.voyd`;
+    const ordinaryFile = `${root}${sep}physics.voyd`;
+    const packageRootFile = `${root}${sep}physics${sep}pkg.voyd`;
+    const descendantFile = `${root}${sep}physics${sep}vectors.voyd`;
+    const host = createMemoryHost({
+      [mainFile]: "use src::physics::vectors::answer",
+      [ordinaryFile]: "pub fn ordinary() -> i32\n  1",
+      [packageRootFile]: "pub use self::vectors::answer",
+      [descendantFile]: "pub fn answer() -> i32\n  42",
+    });
+
+    const graphs = await Promise.all([
+      buildModuleGraph({
+        entryPath: mainFile,
+        host,
+        roots: { src: root },
+      }),
+      buildModuleGraph({
+        entryPath: descendantFile,
+        host,
+        roots: { src: root },
+      }),
+    ]);
+
+    graphs.forEach((graph) => {
+      const diagnostic = graph.diagnostics.find(
+        (entry) => entry.code === "MD0006",
+      );
+      expect(diagnostic?.message).toContain("src::physics");
+      expect(diagnostic?.message).toContain(ordinaryFile);
+      expect(diagnostic?.message).toContain(packageRootFile);
+    });
+  });
+
   it("reports parse failures as diagnostics without crashing graph construction", async () => {
     const root = resolve("/proj/src");
     const entryPath = `${root}${sep}main.voyd`;
@@ -889,6 +979,43 @@ mod pkg
     expect(modules).not.toContain("std::msgpack");
   });
 
+  it("reads a package facade without adding it or its physical submodules to the graph", async () => {
+    const srcRoot = resolve("/proj/src");
+    const packageRoot = resolve("/proj/packages/web/src");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use pkg::web::dsl::all",
+      [`${packageRoot}${sep}pkg.voyd`]: "pub src::dsl",
+      [`${packageRoot}${sep}dsl.voyd`]: "pub fn serve()\n  1",
+      [`${packageRoot}${sep}pkg${sep}unrelated.voyd`]: "pub fn unused()\n  1",
+    });
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`, host,
+      roots: { src: srcRoot, pkgDirs: [resolve("/proj/packages")] },
+    });
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(graph.modules.has("pkg:web::pkg")).toBe(false);
+    expect(graph.modules.has("pkg:web::pkg::unrelated")).toBe(false);
+    expect(graph.packageFacadeHeaders?.has("pkg:web::pkg")).toBe(true);
+  });
+
+  it("fails closed when a package facade is missing or malformed", async () => {
+    const srcRoot = resolve("/proj/src");
+    const packagesRoot = resolve("/proj/packages");
+    const host = createMemoryHost({
+      [`${srcRoot}${sep}main.voyd`]: "use pkg::missing::dsl::all\nuse pkg::broken::dsl::all",
+      [`${packagesRoot}${sep}missing${sep}src${sep}dsl.voyd`]: "pub fn serve()\n  1",
+      [`${packagesRoot}${sep}broken${sep}src${sep}pkg.voyd`]: "pub src::",
+      [`${packagesRoot}${sep}broken${sep}src${sep}dsl.voyd`]: "pub fn serve()\n  1",
+    });
+    const graph = await buildModuleGraph({
+      entryPath: `${srcRoot}${sep}main.voyd`, host,
+      roots: { src: srcRoot, pkgDirs: [packagesRoot] },
+    });
+    expect(graph.diagnostics).toHaveLength(0);
+    expect(graph.packageFacadeHeaders?.has("pkg:missing::pkg")).toBe(false);
+    expect(graph.modules.has("pkg:broken::pkg")).toBe(false);
+  });
+
   it("resolves self-relative imports from std pkg.voyd", async () => {
     const srcRoot = resolve("/proj/src");
     const stdRoot = resolve("/proj/std");
@@ -1173,16 +1300,17 @@ pub use self::outer::all
       [`${root}${sep}main.voyd`]: `
 use src::macros::companion as generate_companion
 
-@generate_companion(description: "generated")
+@generate_companion(generated)
 fn original() -> i32
   1
 `,
       [`${root}${sep}macros.voyd`]: `
 pub attribute macro companion(args, declaration)
   if args.length() == 1 then:
+    let companion_name = args.get(0)
     emit_many(
       declaration,
-      \`(fn generated() -> i32
+      \`(fn $companion_name() -> i32
         42)
     )
   else:

@@ -10,6 +10,7 @@ import {
   isInternalIdentifierAtom,
   isIntAtom,
   isStringAtom,
+  identifierBindingKey,
 } from "../../../parser/index.js";
 import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveIdentifierValue } from "../resolution.js";
@@ -186,6 +187,14 @@ export const lowerExpr: LowerExprFn = (
       {
         name: identifierAtom.value,
         isQuoted: isIdentifierAtom(identifierAtom) ? identifierAtom.isQuoted : false,
+        bindingIdentity: identifierBindingKey(identifierAtom),
+        definitionModuleId:
+          identifierAtom.lexicalContext?.kind === "macro-template"
+            ? identifierAtom.lexicalContext.definitionModuleId
+            : identifierAtom.lexicalContext?.kind === "symbol-reference"
+              ? identifierAtom.lexicalContext.targetModuleId
+              : undefined,
+        directSymbol: ctx.directSymbolBySyntax.get(identifierAtom.syntaxId),
       },
       scopes.current(),
       ctx

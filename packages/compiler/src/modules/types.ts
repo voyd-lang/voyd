@@ -136,11 +136,22 @@ export type ModuleDiagnostic = ModuleDiagnosticContext &
         segment: string;
         requested: ModulePath;
       }
+    | {
+        kind: "ambiguous-module-path";
+        requested: ModulePath;
+        ordinaryFile: string;
+        packageRootFile: string;
+      }
   );
 
 export interface ModuleGraph {
   entry: string;
   modules: Map<string, ModuleNode>;
+  /**
+   * Headers read from installed package facades to validate direct imports from
+   * public ordinary child modules without loading the facade into the graph.
+   */
+  packageFacadeHeaders?: ReadonlyMap<string, ModuleHeaderView>;
   diagnostics: readonly Diagnostic[];
 }
 

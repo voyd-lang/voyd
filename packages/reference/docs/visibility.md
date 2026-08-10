@@ -6,6 +6,22 @@ order: 70
 
 Voyd separates module visibility, package visibility, and public API export.
 
+## Visibility matrix
+
+| Declaration | Declaring module | Same package | Outside package |
+| --- | --- | --- | --- |
+| top-level, no modifier | yes | no | no |
+| top-level `pub` in an ordinary module | yes | yes | no |
+| top-level `pub` or `pub use` exported by `pkg.voyd` | yes | yes | yes |
+| member, no modifier | yes when its owner is visible | yes when its owner is visible | no |
+| `pri` member | owning object only | no | no |
+| `api` member on an exported owner | yes | yes | yes |
+| macro, no modifier | yes | no | no |
+| `pub macro` | yes | yes | only when exported by `pkg.voyd` |
+
+A nested source package has its own “same package” column. Its parent package is
+an outside consumer and cannot reach nested internals directly.
+
 ## Top-level declarations
 
 By default, top-level declarations are module-private.
@@ -28,6 +44,11 @@ Only `pkg.voyd` defines the public API that other packages can import.
 // pkg.voyd
 pub use src::helpers::helper
 ```
+
+For a nested `src/foo/pkg.voyd`, public consumers use the logical path
+`src::foo`; the physical `pkg` segment never appears in the import. A `pub`
+declaration in `src/foo/internal.voyd` remains private to the `foo` package until
+`src/foo/pkg.voyd` re-exports it.
 
 ## Members
 
@@ -73,6 +94,16 @@ impl Counter
   api fn init(value: i32) -> Counter
     Counter { value, hidden: 0 }
 ```
+
+Operators declared as top-level functions use top-level visibility and must be
+selected like other exported symbols. Operators and methods declared inside an
+`impl` use member visibility, so external use requires `api` when the owning
+type crosses a package boundary.
+
+Generated declarations use the visibility emitted by their macro. A generated
+`pub` declaration in an internal module remains package-private, and a nested
+package root must re-export it for external callers. Hygienic fresh helper names
+remain private implementation details.
 
 Rules of thumb:
 

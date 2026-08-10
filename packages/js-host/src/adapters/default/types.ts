@@ -128,9 +128,7 @@ export type DefaultAdapterRuntimeHooks = {
   httpServerReadRequest?: (
     requestId: number
   ) => Promise<DefaultAdapterHttpRequestChunk>;
-  httpServerRespond?: (
-    response: DefaultAdapterHttpResponse
-  ) => Promise<void>;
+  httpServerRespond?: (response: DefaultAdapterHttpResponse) => Promise<void>;
   httpServerStartResponse?: (
     response: DefaultAdapterHttpResponseHead
   ) => Promise<void>;
@@ -198,7 +196,11 @@ export type NodeFsPromises = {
   readFile: (path: string) => Promise<Uint8Array>;
   readFileSync?: never;
   readTextFile?: never;
-  writeFile: (path: string, data: string | Uint8Array) => Promise<void>;
+  writeFile: (
+    path: string,
+    data: string | Uint8Array,
+    options?: { flag?: string }
+  ) => Promise<void>;
   access: (path: string) => Promise<void>;
   lstat: (path: string) => Promise<{ isDirectory: () => boolean }>;
   rmdir: (path: string) => Promise<void>;

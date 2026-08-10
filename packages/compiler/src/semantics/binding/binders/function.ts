@@ -16,6 +16,7 @@ import { bindTypeParameters } from "./type-parameters.js";
 import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { declareValueOrParameter } from "../redefinitions.js";
 import { getCompilerFunctionContractSpec } from "../../../compiler-contracts/index.js";
+import { bindingIdentityForSyntax } from "../hygiene.js";
 
 export type BindFunctionOptions = {
   declarationScope?: ScopeId;
@@ -81,6 +82,7 @@ export const bindFunctionDecl = (
       name: decl.signature.name.value,
       kind: "value",
       declaredAt: decl.form.syntaxId,
+      bindingIdentity: bindingIdentityForSyntax(decl.signature.name),
       metadata: symbolMetadata,
     },
     declarationScope,

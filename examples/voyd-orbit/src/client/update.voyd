@@ -62,13 +62,16 @@ use std::result::types::all
 use std::string::type::String
 use std::task::self as tasks
 use std::vx::{ Cmd, Program, next }
+use std::vx::canvas::TextMetrics
 
 pub enum Msg
   AnimationTick { timestamp_millis: f64 }
   ViewportChanged { width: f64, height: f64 }
-  PointerPressed { x: f64, y: f64 }
-  PointerMoved { x: f64, y: f64 }
-  PointerReleased { x: f64, y: f64 }
+  PointerPressed { pointer_id: i32, x: f64, y: f64 }
+  PointerMoved { pointer_id: i32, x: f64, y: f64 }
+  PointerReleased { pointer_id: i32, x: f64, y: f64 }
+  PointerCancelled { pointer_id: i32 }
+  CanvasTitleMeasured { metrics: TextMetrics }
   WheelZoomed { x: f64, y: f64, delta_y: f64 }
   KeyPressed { key: String }
   TogglePlayback
@@ -113,12 +116,17 @@ pub fn step(model: Model, message: Msg): (http_client::HttpClient, tasks::TaskRu
       next(model: updated, cmd: render_scene::draw<Msg>(updated))
     Msg::ViewportChanged { width, height }:
       next(with_viewport(model, { width, height }))
-    Msg::PointerPressed { x, y }:
-      next(pointer_pressed(model, Vec2::init(x, y)))
-    Msg::PointerMoved { x, y }:
-      next(pointer_moved(model, Vec2::init(x, y)))
-    Msg::PointerReleased { x, y }:
-      next(pointer_released(model, Vec2::init(x, y)))
+    Msg::PointerPressed { pointer_id, x, y }:
+      next(pointer_pressed(model, pointer_id, Vec2::init(x, y)))
+    Msg::PointerMoved { pointer_id, x, y }:
+      next(pointer_moved(model, pointer_id, Vec2::init(x, y)))
+    Msg::PointerReleased { pointer_id, x, y }:
+      next(pointer_released(model, pointer_id, Vec2::init(x, y)))
+    Msg::PointerCancelled { pointer_id }:
+      next(pointer_cancelled(model, pointer_id))
+    Msg::CanvasTitleMeasured { metrics }:
+      let updated = with_ui(model, ui_with_canvas_title_width(model.ui, max(0.0, metrics.width)))
+      next(model: updated, cmd: render_scene::draw<Msg>(updated))
     Msg::WheelZoomed { x, y, delta_y }:
       next(zoom_at(model, Vec2::init(x, y), delta_y))
     Msg::KeyPressed { key }:
@@ -130,7 +138,14 @@ pub fn step(model: Model, message: Msg): (http_client::HttpClient, tasks::TaskRu
     Msg::ResetSimulation:
       next(reset_simulation(model))
     Msg::ScenarioChanged { slug }:
-      next(model_from_scenario(scenario_by_slug(slug)))
+      let updated = model_from_scenario(scenario_by_slug(slug))
+      next(
+        model: updated,
+        cmd: render_scene::measure_title<Msg>(
+          updated.session.name,
+          handler: (metrics: TextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
+        )
+      )
     Msg::ChooseBodyTool { kind }:
       next(with_ui(model, ui_with_tool(model.ui, Tool::AddBody { kind })))
     Msg::ChooseNavigateTool:
@@ -148,7 +163,14 @@ pub fn step(model: Model, message: Msg): (http_client::HttpClient, tasks::TaskRu
     Msg::DeleteSelected:
       next(delete_selected(model))
     Msg::SessionNameChanged { value }:
-      next(with_session(model, session_with_name(model.session, value)))
+      let updated = with_session(model, session_with_name(model.session, value))
+      next(
+        model: updated,
+        cmd: render_scene::measure_title<Msg>(
+          updated.session.name,
+          handler: (metrics: TextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
+        )
+      )
     Msg::BodyNameChanged { value }:
       next(map_selected_body(model, (body: Body) -> Body => body_with_name(body, value)))
     Msg::BodyMassChanged { value }:
@@ -230,13 +252,24 @@ fn advance_frame(model: Model, timestamp_millis: f64) -> Model
     trail_sample_counter: if should_sample then: 0 else: next_counter
   }
 
-fn pointer_pressed(model: Model, screen: Vec2) -> Model
+fn pointer_pressed(model: Model, pointer_id: i32, screen: Vec2) -> Model
+  match(model.ui.interaction)
+    Interaction::Idle:
+      start_pointer_interaction(model, pointer_id, screen)
+    Interaction::Panning:
+      model
+    Interaction::DraggingBody:
+      model
+    Interaction::PlacingBody:
+      model
+
+fn start_pointer_interaction(model: Model, pointer_id: i32, screen: Vec2) -> Model
   let world = screen_to_world(model, screen)
   match(model.ui.tool)
     Tool::AddBody { kind }:
       with_ui(model, ui_with_interaction(
         model.ui,
-        Interaction::PlacingBody { kind, origin_au: world, cursor_au: world }
+        Interaction::PlacingBody { pointer_id, kind, origin_au: world, cursor_au: world }
       ))
     Tool::Navigate:
       match(hit_test(model, screen))
@@ -245,47 +278,71 @@ fn pointer_pressed(model: Model, screen: Vec2) -> Model
           let dragging_ui = ui_with_interaction(
             selected_ui,
             Interaction::DraggingBody {
+              pointer_id,
               body_id: body.id,
               offset_au: body.position_au - world
             }
           )
           with_playback(with_ui(model, dragging_ui), playback_with_running(model.playback, false))
         None:
-          with_ui(model, ui_with_interaction(model.ui, Interaction::Panning { last_screen: screen }))
+          with_ui(model, ui_with_interaction(
+            model.ui,
+            Interaction::Panning { pointer_id, last_screen: screen }
+          ))
 
-fn pointer_moved(model: Model, screen: Vec2) -> Model
+fn pointer_moved(model: Model, pointer_id: i32, screen: Vec2) -> Model
   match(model.ui.interaction)
     Interaction::Idle:
       model
-    Interaction::Panning { last_screen }:
+    Interaction::Panning { pointer_id: active_pointer_id, last_screen }:
+      if active_pointer_id != pointer_id:
+        return model
       let delta = screen - last_screen
       let moved_camera = camera_with_target(
         model.camera,
         model.camera.target_center_au - (delta / model.camera.target_pixels_per_au)
       )
       with_camera(
-        with_ui(model, ui_with_interaction(model.ui, Interaction::Panning { last_screen: screen })),
+        with_ui(model, ui_with_interaction(
+          model.ui,
+          Interaction::Panning { pointer_id, last_screen: screen }
+        )),
         camera_without_follow(moved_camera)
       )
-    Interaction::DraggingBody { body_id, offset_au }:
+    Interaction::DraggingBody { pointer_id: active_pointer_id, body_id, offset_au }:
+      if active_pointer_id != pointer_id:
+        return model
       let position = screen_to_world(model, screen) + offset_au
       let updated = map_body_by_id(model, body_id, (body: Body) -> Body => body_with_position(body, position))
       with_trails(updated, empty_trails(updated.session.simulation.bodies))
-    Interaction::PlacingBody { kind, origin_au, cursor_au: _ }:
+    Interaction::PlacingBody { pointer_id: active_pointer_id, kind, origin_au, cursor_au: _ }:
+      if active_pointer_id != pointer_id:
+        return model
       with_ui(model, ui_with_interaction(
         model.ui,
-        Interaction::PlacingBody { kind, origin_au, cursor_au: screen_to_world(model, screen) }
+        Interaction::PlacingBody {
+          pointer_id,
+          kind,
+          origin_au,
+          cursor_au: screen_to_world(model, screen)
+        }
       ))
 
-fn pointer_released(model: Model, screen: Vec2) -> Model
+fn pointer_released(model: Model, pointer_id: i32, screen: Vec2) -> Model
   match(model.ui.interaction)
     Interaction::Idle:
       model
-    Interaction::Panning:
+    Interaction::Panning { pointer_id: active_pointer_id }:
+      if active_pointer_id != pointer_id:
+        return model
       with_ui(model, ui_with_interaction(model.ui, Interaction::Idle {}))
-    Interaction::DraggingBody:
+    Interaction::DraggingBody { pointer_id: active_pointer_id }:
+      if active_pointer_id != pointer_id:
+        return model
       with_ui(model, ui_with_interaction(model.ui, Interaction::Idle {}))
-    Interaction::PlacingBody { kind, origin_au, cursor_au: _ }:
+    Interaction::PlacingBody { pointer_id: active_pointer_id, kind, origin_au, cursor_au: _ }:
+      if active_pointer_id != pointer_id:
+        return model
       let cursor = screen_to_world(model, screen)
       let velocity = (cursor - origin_au) * 0.02
       let id = "body-".concat(to_string(model.ui.next_body_serial))
@@ -304,6 +361,23 @@ fn pointer_released(model: Model, screen: Vec2) -> Model
         trails: model.trails.pushed({ body_id: id, points_au: Array<Vec2>::init() }),
         trail_sample_counter: model.trail_sample_counter
       }
+
+fn pointer_cancelled(model: Model, pointer_id: i32) -> Model
+  match(model.ui.interaction)
+    Interaction::Idle:
+      model
+    Interaction::Panning { pointer_id: active_pointer_id }:
+      if active_pointer_id == pointer_id:
+        return with_ui(model, ui_with_interaction(model.ui, Interaction::Idle {}))
+      model
+    Interaction::DraggingBody { pointer_id: active_pointer_id }:
+      if active_pointer_id == pointer_id:
+        return with_ui(model, ui_with_interaction(model.ui, Interaction::Idle {}))
+      model
+    Interaction::PlacingBody { pointer_id: active_pointer_id }:
+      if active_pointer_id == pointer_id:
+        return with_ui(model, ui_with_interaction(model.ui, Interaction::Idle {}))
+      model
 
 fn zoom_at(model: Model, screen: Vec2, delta_y: f64) -> Model
   let before = screen_to_world(model, screen)
@@ -540,7 +614,14 @@ fn load_finished(model: Model, result: SimulationResult) -> Program<Model, Msg>
     SimulationResult::Loaded { value }:
       let loaded = model_from_persisted(value)
       let ui = ui_with_saved(loaded.ui, model.ui.saved_simulations)
-      next(with_ui(with_viewport(loaded, model.ui.viewport), ui))
+      let updated = with_ui(with_viewport(loaded, model.ui.viewport), ui)
+      next(
+        model: updated,
+        cmd: render_scene::measure_title<Msg>(
+          updated.session.name,
+          handler: (metrics: TextMetrics) -> Msg => Msg::CanvasTitleMeasured { metrics }
+        )
+      )
 
 fn duplicate_saved(model: Model, id: String): (http_client::HttpClient, tasks::TaskRuntime) -> Program<Model, Msg>
   if model.ui.busy:
@@ -821,6 +902,22 @@ fn ui_with_field_focus(ui: UiState, focused: bool) -> UiState
 fn ui_with_next_serial(ui: UiState, serial: i32) -> UiState
   ui_copy(ui, selected: ui.selected_body_id, tool: ui.tool, interaction: ui.interaction, viewport: ui.viewport, library_open: ui.library_open, saved: ui.saved_simulations, notice: ui.notice, busy: ui.busy, field_focused: ui.field_focused, next_serial: serial)
 
+fn ui_with_canvas_title_width(ui: UiState, width: f64) -> UiState
+  ui_copy(
+    ui,
+    selected: ui.selected_body_id,
+    tool: ui.tool,
+    interaction: ui.interaction,
+    viewport: ui.viewport,
+    library_open: ui.library_open,
+    saved: ui.saved_simulations,
+    notice: ui.notice,
+    busy: ui.busy,
+    field_focused: ui.field_focused,
+    next_serial: ui.next_body_serial,
+    canvas_title_width: width
+  )
+
 fn ui_copy(
   _ui: UiState,
   {
@@ -833,7 +930,8 @@ fn ui_copy(
     notice: Notice,
     busy: bool,
     field_focused: bool,
-    next_serial: i32
+    next_serial: i32,
+    canvas_title_width?: f64
   }
 ) -> UiState
   {
@@ -846,7 +944,8 @@ fn ui_copy(
     notice,
     busy,
     field_focused,
-    next_body_serial: next_serial
+    next_body_serial: next_serial,
+    canvas_title_width: canvas_title_width ?? _ui.canvas_title_width
   }
 
 fn with_session(model: Model, session: SessionState) -> Model

@@ -1248,6 +1248,7 @@ const materializeCallArgumentPlan = ({
       field,
       pointer: () => loadLocalValue(temp, ctx),
       ctx,
+      fnCtx,
     });
     const coerced = coerceValueToType({
       value: loaded,

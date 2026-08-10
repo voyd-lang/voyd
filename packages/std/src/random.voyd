@@ -3,7 +3,9 @@
 //! randomness when available.
 
 use std::array::Array
-use std::bytes::ByteBuffer
+use std::bytes::{ ByteBuffer, Bytes }
+use std::encoding::errors::DecodeError
+use std::encoding::hex
 use std::math::{ MathError, mod_euclid }
 use std::msgpack::MsgPack
 use std::msgpack::MsgPackError
@@ -11,6 +13,94 @@ use std::msgpack::self as msgpack
 use std::number::cast::{ to_f32, to_f64, to_i32_wrapping, to_i64 }
 use std::optional::types::all
 use std::range::Range
+use std::result::types::all
+use std::string::type::{ String, StringSlice }
+
+/// Error returned when secure host entropy cannot satisfy a byte request.
+pub obj RandomError {
+  /// Machine-readable error code.
+  api code: i32,
+  /// Human-readable failure description.
+  api message: String
+}
+
+/// The requested secure-byte length is negative.
+pub fn random_error_code_invalid_length() -> i32
+  1
+
+/// The host returned a malformed, truncated, or out-of-range byte payload.
+pub fn random_error_code_invalid_payload() -> i32
+  2
+
+/// Error returned when UUID text is not in canonical hyphenated form.
+pub obj UuidParseError {
+  /// Byte index associated with the failure.
+  api index: i32,
+  /// Human-readable failure description.
+  api message: String
+}
+
+/// A 128-bit universally unique identifier.
+///
+/// `Uuid::v4` uses the host `Random` effect's cryptographically secure byte
+/// source. Text formatting is canonical lower-case `8-4-4-4-12` hexadecimal.
+pub obj Uuid {
+  bytes: Bytes
+}
+
+impl Uuid
+  /// Generates a version-4 UUID from 16 secure host bytes.
+  api fn v4(): Random -> Result<Uuid, RandomError>
+    match(secure_bytes(16))
+      Err<RandomError> { error }:
+        Err<RandomError> { error }
+      Ok<Bytes> { value }:
+        let ~bytes = ByteBuffer::with_capacity(16)
+        var index = 0
+        while index < 16:
+          let source = value.at(index)
+          if index == 6:
+            bytes.push(source % 16 + 64)
+          else:
+            if index == 8:
+              bytes.push(source % 64 + 128)
+            else:
+              bytes.push(source)
+          index = index + 1
+        Ok<Uuid> { value: Uuid { bytes: bytes.as_bytes() } }
+
+  /// Parses canonical hyphenated UUID text. Hexadecimal input is case-insensitive.
+  api fn parse(source: StringSlice): () -> Result<Uuid, UuidParseError>
+    parse_uuid(source)
+
+  /// Parses canonical hyphenated UUID text. Hexadecimal input is case-insensitive.
+  api fn parse(source: String): () -> Result<Uuid, UuidParseError>
+    parse_uuid(source.as_slice())
+
+  /// Returns whether the source is a canonical hyphenated UUID.
+  api fn is_valid(source: StringSlice) -> bool
+    match(parse_uuid(source))
+      Ok<Uuid>:
+        true
+      Err<UuidParseError>:
+        false
+
+  /// Returns whether the source is a canonical hyphenated UUID.
+  api fn is_valid(source: String) -> bool
+    Uuid::is_valid(source.as_slice())
+
+  /// Formats this UUID as canonical lower-case `8-4-4-4-12` text.
+  api fn to_string(self) -> String
+    let compact = hex::encode(self.bytes)
+    compact.slice(bytes: 0, len: 8).to_string()
+      .concat("-")
+      .concat(compact.slice(bytes: 8, len: 4))
+      .concat("-")
+      .concat(compact.slice(bytes: 12, len: 4))
+      .concat("-")
+      .concat(compact.slice(bytes: 16, len: 4))
+      .concat("-")
+      .concat(compact.slice(bytes: 20, len: 12))
 
 /// Host-provided random source effect.
 ///
@@ -134,6 +224,51 @@ pub fn next_i64(): Random -> i64
 pub fn next_u64(): Random -> U64Bits
   U64Bits { bits: Random::next_u64() }
 
+/// Returns exactly `len` cryptographically secure random bytes.
+///
+/// The host payload is validated without normalization or pseudo-random
+/// fallback. A deterministic `Random::fill_bytes` handler can supply fixtures
+/// in tests.
+pub fn secure_bytes(len: i32): Random -> Result<Bytes, RandomError>
+  if len < 0:
+    return random_error(
+      random_error_code_invalid_length(),
+      "secure byte length cannot be negative"
+    )
+  if len == 0:
+    return Ok<Bytes> { value: ByteBuffer::init().as_bytes() }
+
+  match(msgpack::unpack_array(Random::fill_bytes(len)))
+    Err<MsgPackError>:
+      random_error(
+        random_error_code_invalid_payload(),
+        "random host returned a non-array byte payload"
+      )
+    Ok<Array<MsgPack>> { value }:
+      if value.len() != len:
+        return random_error(
+          random_error_code_invalid_payload(),
+          "random host returned a truncated byte payload"
+        )
+      let ~bytes = ByteBuffer::with_capacity(len)
+      var index = 0
+      while index < len:
+        match(msgpack::unpack_i32(value.at(index)))
+          Err<MsgPackError>:
+            return random_error(
+              random_error_code_invalid_payload(),
+              "random host byte payload contains a non-integer value"
+            )
+          Ok<i32> { value: byte }:
+            if byte < 0 or byte > 255:
+              return random_error(
+                random_error_code_invalid_payload(),
+                "random host byte payload contains a value outside 0...255"
+              )
+            bytes.push(byte)
+        index = index + 1
+      Ok<Bytes> { value: bytes.as_bytes() }
+
 /// Fills a byte buffer with cryptographically secure random bytes.
 /// `len` controls the number of bytes appended to `buf`.
 /// Example:
@@ -174,6 +309,59 @@ fn decode_random_byte_payload(payload: MsgPack): () -> Array<MsgPack>
       value
     Err<MsgPackError>:
       Array<MsgPack>::init()
+
+fn parse_uuid(source: StringSlice): () -> Result<Uuid, UuidParseError>
+  if source.byte_len() != 36:
+    return uuid_parse_error(
+      source.byte_len(),
+      "UUID text must contain exactly 36 bytes"
+    )
+  let first_pair = byte_at(source, 8) == 45 and byte_at(source, 13) == 45
+  let second_pair = byte_at(source, 18) == 45 and byte_at(source, 23) == 45
+  let valid_hyphens = first_pair and second_pair
+  if not valid_hyphens:
+    return uuid_parse_error(8, "UUID text must use the canonical 8-4-4-4-12 layout")
+
+  let compact = source.slice(bytes: 0, len: 8).to_string()
+    .concat(source.slice(bytes: 9, len: 4))
+    .concat(source.slice(bytes: 14, len: 4))
+    .concat(source.slice(bytes: 19, len: 4))
+    .concat(source.slice(bytes: 24, len: 12))
+  match(hex::decode(compact))
+    Err<DecodeError>:
+      uuid_parse_error(first_invalid_uuid_hex(source), "UUID text contains a non-hexadecimal digit")
+    Ok<Bytes> { value }:
+      if value.len() != 16:
+        return uuid_parse_error(0, "UUID text must encode exactly 16 bytes")
+      Ok<Uuid> { value: Uuid { bytes: value } }
+
+fn byte_at(source: StringSlice, index: i32) -> i32
+  match(source.get_byte(index))
+    Some<i32> { value }:
+      value
+    None:
+      -1
+
+fn first_invalid_uuid_hex(source: StringSlice) -> i32
+  var index = 0
+  while index < source.byte_len():
+    let value = byte_at(source, index)
+    let hyphen = index == 8 or index == 13 or index == 18 or index == 23
+    if not hyphen and not is_hex_digit(value):
+      return index
+    index = index + 1
+  0
+
+fn is_hex_digit(value: i32) -> bool
+  (value >= 48 and value <= 57) or
+    (value >= 65 and value <= 70) or
+    (value >= 97 and value <= 102)
+
+fn uuid_parse_error<T>(index: i32, message: String): () -> Result<T, UuidParseError>
+  Err<UuidParseError> { error: UuidParseError { index, message } }
+
+fn random_error<T>(code: i32, message: String): () -> Result<T, RandomError>
+  Err<RandomError> { error: RandomError { code, message } }
 
 /// Returns a random boolean value.
 pub fn random_bool(): Random -> bool

@@ -1,6 +1,9 @@
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
-import { compileEffectFixture, parseEffectTable } from "./support/effects-harness.js";
+import {
+  compileEffectFixture,
+  parseEffectTable,
+} from "./support/effects-harness.js";
 
 const fixturePath = (name: string) =>
   resolve(import.meta.dirname, "__fixtures__", name);
@@ -20,8 +23,12 @@ describe("explicit effect ids", () => {
     if (!opA || !opB) {
       throw new Error("missing ops in explicit id fixtures");
     }
+    expect(tableA.version).toBe(3);
+    expect(tableB.version).toBe(3);
     expect(opA.effectId).toBe("com.example.log");
     expect(opB.effectId).toBe("com.example.log");
+    expect(opA.operationId).toBe("log-entry");
+    expect(opB.operationId).toBe("log-entry");
     expect(opA.effectIdHash.hex).toBe(opB.effectIdHash.hex);
   }, 120_000);
 });

@@ -150,7 +150,7 @@ export type RunOptions = {
   wasm: Uint8Array;
   entryName: string;
   args?: unknown[];
-  /** handlers keyed as "effectId::opName" or "effectId::opName::signatureHash", each returning resume(...), tail(...), or end(...) */
+  /** Handlers keyed as "effectId::operationId" for @operation IDs, or legacy "effectId::opName" (optionally with ::signatureHash). */
   handlers?: Record<string, EffectHandler>;
   /** handlers matched against effect labels by suffix (prefer "::", e.g. "Async::await") */
   handlersByLabelSuffix?: Record<string, EffectHandler>;

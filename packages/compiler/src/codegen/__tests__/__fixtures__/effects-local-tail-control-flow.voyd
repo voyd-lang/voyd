@@ -1,6 +1,6 @@
 eff Local
   next(tail) -> i32
-  next(tail, max: i32) -> i32
+  next_with_max(tail, max: i32) -> i32
   ping(tail, value: i32) -> i32
 
 eff Other
@@ -42,7 +42,7 @@ fn loop_sum(count: i32): Local -> i32
   var index = 0
   var total = 0
   while index < count:
-    total = total + Local::next(index)
+    total = total + Local::next_with_max(index)
     index = index + 1
   total
 
@@ -63,7 +63,7 @@ pub fn triple_sum(): () -> i32
     v.x + v.y + v.z
   Local::next(tail):
     tail(2)
-  Local::next(tail, max: i32):
+  Local::next_with_max(tail, max: i32):
     tail(max + 1)
   Local::ping(tail, value: i32):
     tail(value + 1)
@@ -73,7 +73,7 @@ pub fn loop_local(): () -> i32
     loop_sum(4)
   Local::next(tail):
     tail(2)
-  Local::next(tail, max: i32):
+  Local::next_with_max(tail, max: i32):
     tail(max + 1)
   Local::ping(tail, value: i32):
     tail(value + 1)
@@ -83,7 +83,7 @@ pub fn match_local(): () -> i32
     match_value(Right { value: 3 })
   Local::next(tail):
     tail(2)
-  Local::next(tail, max: i32):
+  Local::next_with_max(tail, max: i32):
     tail(max + 1)
   Local::ping(tail, value: i32):
     tail(value + 1)
@@ -93,7 +93,7 @@ pub fn open_local(): Other -> i32
     open_sum()
   Local::next(tail):
     tail(2)
-  Local::next(tail, max: i32):
+  Local::next_with_max(tail, max: i32):
     tail(max + 1)
   Local::ping(tail, value: i32):
     tail(value + 1)
@@ -103,7 +103,7 @@ pub fn dynamic_trait_residual(): Other -> i32
     local_then_dynamic(OtherRunner { value: 4 })
   Local::next(tail):
     tail(2)
-  Local::next(tail, max: i32):
+  Local::next_with_max(tail, max: i32):
     tail(max + 1)
   Local::ping(tail, value: i32):
     tail(value + 1)

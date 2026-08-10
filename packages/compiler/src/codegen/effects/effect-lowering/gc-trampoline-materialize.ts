@@ -22,6 +22,7 @@ import type {
   EffectLoweringResult,
 } from "./types.js";
 import { getInlineHeapBoxType } from "../../types.js";
+import { wasmSymbolName } from "../../symbol-names.js";
 
 const baseEnvFields = (ctx: CodegenContext): ContinuationEnvField[] => [
   {
@@ -113,16 +114,12 @@ const captureFields = ({
     if (typeof symbol !== "number") {
       throw new Error("missing symbol for continuation capture");
     }
-    const symbolId = ctx.program.symbols.idOf({
-      moduleId: ctx.moduleId,
-      symbol,
-    });
     const storageRefType =
       field.bindingKind === "mutable-ref"
         ? getMutableRefStorageType({ typeId: field.typeId, ctx })
         : undefined;
     return {
-      name: ctx.program.symbols.getName(symbolId) ?? `${symbol}`,
+      name: wasmSymbolName({ ctx, moduleId: ctx.moduleId, symbol }),
       symbol,
       typeId: field.typeId,
       wasmType: storageRefType ?? wasmTypeFor(field.typeId, ctx),

@@ -32,6 +32,7 @@ import {
 import { importedModuleIdFrom } from "../../imports/metadata.js";
 import { toSourceSpan } from "../../../parser/surface/utils.js";
 import { resolveStdIntrinsicTypeContractProvider } from "../intrinsic-type-contracts.js";
+import { bindingIdentityForSyntax } from "../hygiene.js";
 
 export const bindTypeAlias = (
   decl: ParsedTypeAliasDecl,
@@ -84,6 +85,7 @@ export const bindTypeAlias = (
     name: decl.name.value,
     kind: "type",
     declaredAt: decl.form.syntaxId,
+    bindingIdentity: bindingIdentityForSyntax(decl.name),
     metadata: {
       entity: "type-alias",
       ...intrinsicTypeMetadata,
@@ -119,6 +121,12 @@ export const bindTypeAlias = (
     moduleIndex: ctx.nextModuleIndex++,
     documentation: declarationDocForSyntax(decl.name, ctx),
   });
+  seedEnumVariantNamespace({
+    aliasSymbol: symbol,
+    target: decl.target,
+    scope: ctx.symbolTable.rootScope,
+    ctx,
+  });
 };
 
 const boundaryMetadataFromAttribute = (value: unknown): unknown | undefined => {
@@ -145,7 +153,12 @@ const reportDuplicateTypeAlias = ({
   ctx: BindingContext;
   syntax: ParsedTypeAliasDecl["name"];
 }): void => {
-  const duplicate = duplicateTypeAliasInScope({ name, scope, ctx });
+  const duplicate = duplicateTypeAliasInScope({
+    name,
+    scope,
+    bindingIdentity: bindingIdentityForSyntax(syntax),
+    ctx,
+  });
   if (!duplicate) {
     return;
   }
@@ -170,10 +183,12 @@ const reportDuplicateTypeAlias = ({
 const duplicateTypeAliasInScope = ({
   name,
   scope,
+  bindingIdentity,
   ctx,
 }: {
   name: string;
   scope: ScopeId;
+  bindingIdentity?: string;
   ctx: BindingContext;
 }): SymbolId | undefined => {
   for (const symbolId of ctx.symbolTable.symbolsInScope(scope)) {
@@ -181,7 +196,11 @@ const duplicateTypeAliasInScope = ({
     const metadata = record.metadata as
       | { entity?: unknown; import?: unknown }
       | undefined;
-    if (record.name !== name || record.kind !== "type") {
+    if (
+      record.name !== name ||
+      record.kind !== "type" ||
+      record.bindingIdentity !== bindingIdentity
+    ) {
       continue;
     }
     if (metadata?.import !== undefined) {

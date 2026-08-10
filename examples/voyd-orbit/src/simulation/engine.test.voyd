@@ -12,21 +12,22 @@ use std::array::Array
 use std::math::{ abs, sqrt }
 use std::string::type::String
 use std::test::assertions::all
+use std::test::numeric::assert_close
 
 test "Vec2 operations compose without losing value semantics":
   let first = Vec2::init(3.0, 4.0)
   let second = Vec2::init(-1.0, 2.0)
   let sum = first + second
   let difference = first - second
-  assert(close(sum.x, 2.0, 0.000000000001), eq: true)
-  assert(close(sum.y, 6.0, 0.000000000001), eq: true)
-  assert(close(difference.x, 4.0, 0.000000000001), eq: true)
-  assert(close(first.length(), 5.0, 0.000000000001), eq: true)
-  assert(close(first.dot(second), 5.0, 0.000000000001), eq: true)
-  assert(close(distance(first, second), sqrt(20.0), 0.000000000001), eq: true)
+  assert_close(sum.x, to: 2.0, absolute: 0.000000000001, relative: 0.0, message: "sum.x")
+  assert_close(sum.y, to: 6.0, absolute: 0.000000000001, relative: 0.0, message: "sum.y")
+  assert_close(difference.x, to: 4.0, absolute: 0.000000000001, relative: 0.0, message: "difference.x")
+  assert_close(first.length(), to: 5.0, absolute: 0.000000000001, relative: 0.0, message: "vector length")
+  assert_close(first.dot(second), to: 5.0, absolute: 0.000000000001, relative: 0.0, message: "dot product")
+  assert_close(distance(first, second), to: sqrt(20.0), absolute: 0.000000000001, relative: 0.0, message: "distance")
   let midpoint = lerp(first, to: second, at: 0.5)
-  assert(close(midpoint.x, 1.0, 0.000000000001), eq: true)
-  assert(close(midpoint.y, 3.0, 0.000000000001), eq: true)
+  assert_close(midpoint.x, to: 1.0, absolute: 0.000000000001, relative: 0.0, message: "midpoint.x")
+  assert_close(midpoint.y, to: 3.0, absolute: 0.000000000001, relative: 0.0, message: "midpoint.y")
 
 test "gravity points toward the source with the expected AU-day magnitude":
   let acceleration = gravitational_acceleration(
@@ -35,15 +36,20 @@ test "gravity points toward the source with the expected AU-day magnitude":
     source_mass_solar: 1.0,
     softening_au: 0.0
   )
-  assert(
-    close(
-      acceleration.x,
-      0.0 - GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2,
-      0.000000000000001
-    ),
-    eq: true
+  assert_close(
+    acceleration.x,
+    to: 0.0 - GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2,
+    absolute: 0.000000000000001,
+    relative: 0.0,
+    message: "gravity x acceleration"
   )
-  assert(close(acceleration.y, 0.0, 0.000000000000001), eq: true)
+  assert_close(
+    acceleration.y,
+    to: 0.0,
+    absolute: 0.000000000000001,
+    relative: 0.0,
+    message: "gravity y acceleration"
+  )
   let coincident = gravitational_acceleration(
     Vec2::zero(),
     toward: Vec2::zero(),
@@ -60,10 +66,10 @@ test "velocity Verlet preserves inertial motion for an isolated body":
     velocity_au_per_day: Vec2::init(0.25, -0.125)
   )
   let next = integrate([initial], timestep_days: 2.0, softening_au: 0.0001).at(0)
-  assert(close(next.position_au.x, -0.5, 0.000000000001), eq: true)
-  assert(close(next.position_au.y, 1.75, 0.000000000001), eq: true)
-  assert(close(next.velocity_au_per_day.x, 0.25, 0.000000000001), eq: true)
-  assert(close(next.velocity_au_per_day.y, -0.125, 0.000000000001), eq: true)
+  assert_close(next.position_au.x, to: -0.5, absolute: 0.000000000001, relative: 0.0, message: "inertial position.x")
+  assert_close(next.position_au.y, to: 1.75, absolute: 0.000000000001, relative: 0.0, message: "inertial position.y")
+  assert_close(next.velocity_au_per_day.x, to: 0.25, absolute: 0.000000000001, relative: 0.0, message: "inertial velocity.x")
+  assert_close(next.velocity_au_per_day.y, to: -0.125, absolute: 0.000000000001, relative: 0.0, message: "inertial velocity.y")
 
 test "a symmetric orbit conserves momentum and bounded energy":
   let relative_speed = sqrt(2.0 * GRAVITATIONAL_CONSTANT_AU3_PER_SOLAR_MASS_DAY2)
@@ -90,8 +96,20 @@ test "a symmetric orbit conserves momentum and bounded energy":
     index = index + 1
   let momentum_drift = (total_momentum(evolved) - initial_momentum).length()
   let energy_drift = abs(total_energy(evolved, softening_au: softening_au) - initial_energy)
-  assert(momentum_drift <= 0.000000000001, eq: true)
-  assert(energy_drift <= 0.000000001, eq: true)
+  assert_close(
+    momentum_drift,
+    to: 0.0,
+    absolute: 0.000000000001,
+    relative: 0.0,
+    message: "symmetric orbit momentum drift"
+  )
+  assert_close(
+    energy_drift,
+    to: 0.0,
+    absolute: 0.000000001,
+    relative: 0.0,
+    message: "symmetric orbit energy drift"
+  )
 
 test "the curated catalogue exposes all six scenarios":
   assert(built_in_scenarios().len(), eq: 6)
@@ -120,6 +138,3 @@ fn test_body(
       glow_strength: 0.0
     }
   }
-
-fn close(left: f64, right: f64, epsilon: f64) -> bool
-  abs(left - right) <= epsilon

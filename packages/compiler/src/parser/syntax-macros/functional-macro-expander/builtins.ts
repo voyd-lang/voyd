@@ -3,6 +3,7 @@ import {
   Expr,
   IdentifierAtom,
   InternalIdentifierAtom,
+  identifierBindingKey,
   isBoolAtom,
   isFloatAtom,
   isForm,
@@ -10,7 +11,6 @@ import {
   isIntAtom,
   isStringAtom,
 } from "../../ast/index.js";
-import { getSyntaxId } from "../../ast/syntax.js";
 import { parseStringValue } from "../string-value.js";
 import type { MacroScope } from "./scope.js";
 import {
@@ -299,7 +299,8 @@ export const createBuiltins = (
       const flattened =
         values.length === 1 &&
         isForm(single) &&
-        (single.length === 0 || single.toArray().every((entry) => isForm(entry)))
+        (single.length === 0 ||
+          single.toArray().every((entry) => isForm(entry)))
           ? single.toArray()
           : values;
       return new Form([
@@ -405,7 +406,10 @@ export const createBuiltins = (
       const call = expectForm(args.at(0), "calls target");
       const label = expectIdentifier(args.at(1), "calls identifier");
       const target = call.at(0);
-      if (!isIdentifierAtom(target) && !(target instanceof InternalIdentifierAtom)) {
+      if (
+        !isIdentifierAtom(target) &&
+        !(target instanceof InternalIdentifierAtom)
+      ) {
         return bool(false);
       }
       return bool(target.value === label.value);
@@ -427,12 +431,56 @@ export const createBuiltins = (
       const values = collectFormLabels(call, label.value);
       return new Form(values.map(cloneExpr));
     },
-    identifier: ({ args }) => {
-      const prefix = expectIdentifier(args.at(0), "identifier prefix");
-      const identifier = new IdentifierAtom(
-        `${prefix.value}$macro_id$${getSyntaxId()}`,
-      );
+    identifier: ({ args, originalArgs, scope }) => {
+      const labelSyntax = expectExpr(args.at(0), "identifier debug label");
+      const label = parseStringValue(labelSyntax);
+      if (label === null) {
+        throw new Error(
+          "identifier requires a string or identifier debug label",
+        );
+      }
+      const identifier = new IdentifierAtom(label);
+      const definitionSyntax = originalArgs.at(0);
+      const definitionLocation =
+        definitionSyntax?.macroProvenance?.definition ??
+        definitionSyntax?.location;
+      if (definitionLocation) {
+        identifier.macroProvenance = {
+          definition: definitionLocation.clone(),
+        };
+      }
+      identifier.lexicalContext = {
+        kind: "fresh",
+        expansionId: scope.currentExpansionId(),
+        allocationOrdinal: scope.allocateFreshOrdinal(),
+      };
       return identifier;
+    },
+    symbol_reference: ({ args, scope }) => {
+      const operand = cloneExpr(
+        expectExpr(args.at(0), "symbol_reference target"),
+      );
+      const rootIdentifier = symbolReferenceRootIdentifier(operand);
+      if (!rootIdentifier) {
+        throw new Error(
+          "symbol_reference requires an identifier or qualified symbol",
+        );
+      }
+      const existingKey = identifierBindingKey(rootIdentifier);
+      const targetModuleId =
+        rootIdentifier.lexicalContext?.kind === "macro-template"
+          ? rootIdentifier.lexicalContext.definitionModuleId
+          : rootIdentifier.lexicalContext?.kind === "symbol-reference"
+            ? rootIdentifier.lexicalContext.targetModuleId
+            : scope.hygieneRootId();
+      rootIdentifier.lexicalContext = {
+        kind: "symbol-reference",
+        targetModuleId,
+        bindingKey:
+          existingKey ??
+          `symbol-reference:${scope.currentExpansionId()}:${scope.allocateFreshOrdinal()}`,
+      };
+      return operand;
     },
     syntax_template: syntaxTemplateBuiltin,
     "`": syntaxTemplateBuiltin,
@@ -638,4 +686,21 @@ export const createBuiltins = (
       throw new Error("Unsupported value for char_to_code");
     },
   } satisfies Record<string, BuiltinFn | undefined>;
+};
+
+const symbolReferenceRootIdentifier = (
+  operand: Expr,
+): IdentifierAtom | undefined => {
+  if (isIdentifierAtom(operand)) {
+    return operand;
+  }
+  if (!isForm(operand) || !operand.calls("::") || operand.length !== 3) {
+    return undefined;
+  }
+  const left = operand.at(1);
+  const right = operand.at(2);
+  if (!left || !isIdentifierAtom(right)) {
+    return undefined;
+  }
+  return symbolReferenceRootIdentifier(left);
 };

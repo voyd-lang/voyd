@@ -132,10 +132,7 @@ export const emitBoundaryShape = ({
   }
 
   definitions.sort((left, right) => {
-    const byKey = comparePortableText(
-      left.reference.key,
-      right.reference.key,
-    );
+    const byKey = comparePortableText(left.reference.key, right.reference.key);
     return byKey === 0 ? left.typeId - right.typeId : byKey;
   });
 
@@ -349,10 +346,7 @@ const emitShapeFields = ({
       typeId: fieldTypeId,
       fields: new Map([
         ["name", emitStringLiteral(field.name, ctx)],
-        [
-          "shape",
-          emitShapeNode({ schema: field.schema, state, ctx, fnCtx }),
-        ],
+        ["shape", emitShapeNode({ schema: field.schema, state, ctx, fnCtx })],
         ["optional", ctx.mod.i32.const(field.optional === true ? 1 : 0)],
         [
           "documentation",
@@ -443,11 +437,7 @@ const emitShapeVariant = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const memberTypeId = shapeVariantTypeId(
-    state.model.nodeTypeId,
-    name,
-    ctx,
-  );
+  const memberTypeId = shapeVariantTypeId(state.model.nodeTypeId, name, ctx);
   try {
     return coerceValueToType({
       value: emitObject({ typeId: memberTypeId, fields, ctx, fnCtx }),
@@ -492,7 +482,7 @@ const emitObject = ({
       );
     }
   });
-  return initStructuralValue({ structInfo: info, fieldValues, ctx });
+  return initStructuralValue({ structInfo: info, fieldValues, ctx, fnCtx });
 };
 
 const emitOptionalString = ({
@@ -572,7 +562,7 @@ const emitArray = ({
       );
     }
   });
-  return initStructuralValue({ structInfo: info, fieldValues, ctx });
+  return initStructuralValue({ structInfo: info, fieldValues, ctx, fnCtx });
 };
 
 const lowerFieldValue = ({
@@ -658,10 +648,7 @@ const nominalTypeName = (typeId: TypeId, ctx: CodegenContext): string => {
   return "";
 };
 
-const arrayElementType = (
-  arrayTypeId: TypeId,
-  ctx: CodegenContext,
-): TypeId => {
+const arrayElementType = (arrayTypeId: TypeId, ctx: CodegenContext): TypeId => {
   const storage = getStructuralTypeInfo(arrayTypeId, ctx)?.fieldMap.get(
     "storage",
   );

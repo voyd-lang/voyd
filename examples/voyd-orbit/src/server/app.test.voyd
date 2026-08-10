@@ -4,6 +4,7 @@ use src::shared::{ persisted_simulation, simulation_json }
 use src::simulation::default_scenario
 use std::array::Array
 use std::fs::Fs
+use std::host_dto::HostDto
 use std::http::{ Body, Headers, IncomingRequest, Method, Response }
 use std::json::JsonError
 use std::msgpack::MsgPack
@@ -22,17 +23,22 @@ obj MockHost {
   existing: bool,
   list_payload: MsgPack,
   read_payload: MsgPack,
-  writes: SharedCell<Array<MsgPack>>,
-  renames: SharedCell<Array<MsgPack>>
+  atomic_writes: SharedCell<Array<MsgPack>>,
+  exclusive_writes: SharedCell<Array<MsgPack>>
 }
 
 test "repository paths are rooted and reject path traversal ids":
   let repository = SimulationRepository::init(Path::new("/srv/orbit/simulations"))
-  match(repository.path_for("alpha-42"))
+  match(repository.path_for(test_uuid()))
     Err<RepositoryError>:
       assert(false, eq: true)
     Ok<Path> { value }:
-      assert(value.as_string().equals("/srv/orbit/simulations/alpha-42.json"), eq: true)
+      assert(
+        value.as_string().equals(
+          "/srv/orbit/simulations/00010203-0405-4607-8809-0a0b0c0d0e0f.json"
+        ),
+        eq: true
+      )
 
   match(repository.path_for("../secrets"))
     Ok<Path>:
@@ -46,6 +52,12 @@ test "repository paths are rooted and reject path traversal ids":
     Err<RepositoryError>:
       assert(true, eq: true)
 
+  match(repository.path_for("00010203-0405-4607-8809-0A0B0C0D0E0F"))
+    Ok<Path>:
+      assert(false, eq: true)
+    Err<RepositoryError> { error }:
+      assert(error.code.equals("invalid-id"), eq: true)
+
 test "REST routes return structured client and routing statuses":
   let host = empty_host()
   let repository = SimulationRepository::init(Path::new("/memory/simulations"))
@@ -54,7 +66,8 @@ test "REST routes return structured client and routing statuses":
   assert(listing.status.code(), eq: 200)
   assert(response_text(listing).equals("[]"), eq: true)
 
-  let missing = handle(host, repository, request(Method::Get {}, "/api/simulations/missing", Body::empty()))
+  let missing_path = "/api/simulations/".concat(test_uuid())
+  let missing = handle(host, repository, request(Method::Get {}, missing_path, Body::empty()))
   assert(missing.status.code(), eq: 404)
   assert(response_text(missing).contains("\"code\":\"not-found\""), eq: true)
 
@@ -86,7 +99,7 @@ test "REST routes return structured client and routing statuses":
   assert(unknown.status.code(), eq: 404)
   assert(response_text(unknown).contains("\"code\":\"not-found\""), eq: true)
 
-test "POST assigns server metadata and persists through write then rename":
+test "POST assigns metadata and uses an exclusive filesystem create":
   let host = empty_host()
   let repository = SimulationRepository::init(Path::new("/memory/simulations"))
   let response = handle(
@@ -96,10 +109,28 @@ test "POST assigns server metadata and persists through write then rename":
   )
 
   assert(response.status.code(), eq: 201)
-  assert(response_text(response).contains("\"id\":\"01010101010101010101010101010101\""), eq: true)
+  assert(
+    response_text(response).contains(
+      "\"id\":\"00010203-0405-4607-8809-0a0b0c0d0e0f\""
+    ),
+    eq: true
+  )
   assert(response_text(response).contains("\"createdAt\":1700000000000"), eq: true)
-  assert(host.writes.with((writes) => writes.len()), eq: 1)
-  assert(host.renames.with((renames) => renames.len()), eq: 1)
+  assert(host.exclusive_writes.with((writes) => writes.len()), eq: 1)
+  assert(host.atomic_writes.with((writes) => writes.len()), eq: 0)
+
+test "a focused open handler overrides exclusive create and forwards the rest":
+  let host = empty_host()
+  let repository = SimulationRepository::init(Path::new("/memory/simulations"))
+  let response = handle_with_create_conflict(
+    host,
+    repository,
+    request(Method::Post {}, "/api/simulations", Body::text(valid_simulation_json()))
+  )
+
+  assert(response.status.code(), eq: 500)
+  assert(response_text(response).contains("\"code\":\"storage-conflict\""), eq: true)
+  assert(host.exclusive_writes.with((writes) => writes.len()), eq: 0)
 
 test "GET PUT and DELETE expose the remaining CRUD status contracts":
   let host = mock_host(
@@ -111,25 +142,26 @@ test "GET PUT and DELETE expose the remaining CRUD status contracts":
   )
   let repository = SimulationRepository::init(Path::new("/memory/simulations"))
 
-  let fetched = handle(host, repository, request(Method::Get {}, "/api/simulations/draft", Body::empty()))
+  let item_path = "/api/simulations/".concat(test_uuid())
+  let fetched = handle(host, repository, request(Method::Get {}, item_path, Body::empty()))
   assert(fetched.status.code(), eq: 200)
-  assert(response_text(fetched).contains("\"id\":\"draft\""), eq: true)
+  assert(response_text(fetched).contains("\"id\":\"00010203-0405-4607-8809-0a0b0c0d0e0f\""), eq: true)
 
   let updated = handle(
     host,
     repository,
     request(
       Method::Put {},
-      "/api/simulations/draft",
+      item_path,
       Body::text(simulation_json_with_name("Renamed orbit"))
     )
   )
   assert(updated.status.code(), eq: 200)
   assert(response_text(updated).contains("\"name\":\"Renamed orbit\""), eq: true)
-  assert(host.writes.with((writes) => writes.len()), eq: 1)
-  assert(host.renames.with((renames) => renames.len()), eq: 1)
+  assert(host.atomic_writes.with((writes) => writes.len()), eq: 1)
+  assert(host.exclusive_writes.with((writes) => writes.len()), eq: 0)
 
-  let deleted = handle(host, repository, request(Method::Delete {}, "/api/simulations/draft", Body::empty()))
+  let deleted = handle(host, repository, request(Method::Delete {}, item_path, Body::empty()))
   assert(deleted.status.code(), eq: 204)
   assert(response_text(deleted).is_empty(), eq: true)
 
@@ -137,7 +169,11 @@ test "a corrupt file is skipped without breaking the simulation list":
   let host = mock_host(
     existing: false,
     list_payload: host_dto_test::host_ok_with_value(
-      msgpack::make_array([msgpack::make_string("/memory/simulations/broken.json")])
+      msgpack::make_array([
+        msgpack::make_string(
+          "/memory/simulations/00010203-0405-4607-8809-0a0b0c0d0e0f.json"
+        )
+      ])
     ),
     read_payload: host_dto_test::host_ok_with_value(msgpack::make_string("not-json"))
   )
@@ -152,17 +188,38 @@ fn handle(
   repository: SimulationRepository,
   request_value: IncomingRequest
 ) -> Response
+  with_mock_host(host, () => api_app(repository).handle(request_value))
+
+fn handle_with_create_conflict(
+  host: MockHost,
+  repository: SimulationRepository,
+  request_value: IncomingRequest
+) -> Response
+  with_mock_host(host, () =>
+    try open
+      api_app(repository).handle(request_value)
+    Fs::create_exclusive(tail, _payload: MsgPack):
+      tail(io_error_payload(
+        kind: "already-exists",
+        code: 17,
+        message: "host EEXIST detail"
+      ))
+  )
+
+fn with_mock_host<T>(
+  host: MockHost,
+  work: fn() : (Fs, Random, Time) -> T
+) -> T
   try
-    api_app(repository).handle(request_value)
+    work()
   Fs::read_bytes(tail, _path: MsgPack):
     tail(host_dto_test::host_default_error_payload())
   Fs::read_string(tail, _path: MsgPack):
     tail(host.read_payload)
   Fs::write_bytes(tail, _payload: MsgPack):
     tail(host_dto_test::host_default_error_payload())
-  Fs::write_string(tail, payload: MsgPack):
-    host.writes.with_mut((~writes) => writes.push(payload))
-    tail(host_dto_test::host_ok_payload())
+  Fs::write_string(tail, _payload: MsgPack):
+    tail(host_dto_test::host_default_error_payload())
   Fs::exists(tail, _path: MsgPack):
     tail(host.existing)
   Fs::list_dir(tail, _path: MsgPack):
@@ -171,11 +228,16 @@ fn handle(
     tail(host_dto_test::host_ok_payload())
   Fs::create_dir_all(tail, _path: MsgPack):
     tail(host_dto_test::host_ok_payload())
-  Fs::rename(tail, payload: MsgPack):
-    host.renames.with_mut((~renames) => renames.push(payload))
+  Fs::rename(tail, _payload: MsgPack):
+    tail(host_dto_test::host_default_error_payload())
+  Fs::write_atomic(tail, payload: MsgPack):
+    host.atomic_writes.with_mut((~writes) => writes.push(payload))
     tail(host_dto_test::host_ok_payload())
-  Random::fill_bytes(tail, _len):
-    tail(msgpack::make_null())
+  Fs::create_exclusive(tail, payload: MsgPack):
+    host.exclusive_writes.with_mut((~writes) => writes.push(payload))
+    tail(host_dto_test::host_ok_payload())
+  Random::fill_bytes(tail, len):
+    tail(deterministic_byte_payload(len))
   Random::next_i64(tail):
     tail(1i64)
   Random::next_u64(tail):
@@ -186,6 +248,18 @@ fn handle(
     tail(1700000000000i64)
   Time::sleep_millis(tail, _millis):
     tail(host_dto_test::host_ok_payload())
+
+fn io_error_payload({
+  kind: String,
+  code: i32,
+  message: String
+}) -> MsgPack
+  HostDto::init()
+    .set("ok", msgpack::make_bool(false))
+    .set("kind", msgpack::make_string(kind))
+    .set("code", msgpack::make_i32(code))
+    .set("message", msgpack::make_string(message))
+    .pack()
 
 fn empty_host() -> MockHost
   mock_host(
@@ -203,8 +277,8 @@ fn mock_host({
     existing,
     list_payload,
     read_payload,
-    writes: SharedCell(Array<MsgPack>::init()),
-    renames: SharedCell(Array<MsgPack>::init())
+    atomic_writes: SharedCell(Array<MsgPack>::init()),
+    exclusive_writes: SharedCell(Array<MsgPack>::init())
   }
 
 fn empty_list_payload() -> MsgPack
@@ -225,7 +299,7 @@ fn valid_simulation_json() -> String
 fn simulation_json_with_name(name: String) -> String
   let scenario = default_scenario()
   let value = persisted_simulation(
-    id: "draft",
+    id: test_uuid(),
     name: name,
     created_at: 0i64,
     updated_at: 0i64,
@@ -248,3 +322,14 @@ fn response_text(response: Response) -> String
       value
     Err:
       String::init()
+
+fn test_uuid() -> String
+  "00010203-0405-4607-8809-0a0b0c0d0e0f"
+
+fn deterministic_byte_payload(len: i32) -> MsgPack
+  let ~values = Array<MsgPack>::with_capacity(len)
+  var index = 0
+  while index < len:
+    values.push(msgpack::make_i32(index))
+    index = index + 1
+  msgpack::make_array(values)

@@ -91,6 +91,11 @@ pub fn write(value: String): Output -> Result<Unit, IoError>
   `@effect(id: "voyd.std.fs")`.
 - Effect names are UpperCamelCase; operation names are snake_case.
 - Canonical effect operation declarations omit `fn` inside `eff` blocks.
+- Effect operations may overload. Handler clauses for overloaded operations
+  annotate each non-continuation parameter, for example `Log::write(tail,
+  value: i32):`.
+- Use `@operation(id: "...")` for stable host-facing operation identities;
+  operation IDs are unique within an effect.
 - The first operation parameter is continuation behavior:
   `resume` may resume zero or one time; `tail` must tail-resume exactly once
   before returning or propagating another effect.

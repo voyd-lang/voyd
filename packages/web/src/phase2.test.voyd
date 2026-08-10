@@ -163,6 +163,20 @@ test "structural query extraction rejects missing and invalid fields":
       assert(error.status.code(), eq: 400)
       assert(error.message.contains("page".as_slice()), eq: true)
 
+  match(extract_query<RequiredSearchQuery>(parse_query("page=2147483648&verbose=true".as_slice())))
+    Ok<RequiredSearchQuery>:
+      assert(false, eq: true)
+    Err<Rejection> { error }:
+      assert(error.status.code(), eq: 400)
+      assert(error.message.contains("page".as_slice()), eq: true)
+
+test "query extraction rejects non-record targets before decoding":
+  match(extract_query<i32>(parse_query("value=1".as_slice())))
+    Ok<i32>:
+      assert(false, eq: true)
+    Err<Rejection> { error }:
+      assert(error.status.code(), eq: 400)
+
 test "route body record helper converts handler record returns":
   let web_app = route_body_json(
     app(),

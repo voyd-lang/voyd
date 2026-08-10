@@ -5,7 +5,7 @@
 
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
-use std::error::{ HostError, IoError }
+use std::error::{ HostError, IoError, IoOther }
 use std::host_dto::HostDto
 use std::math::{ MathError, mod_euclid }
 use std::msgpack::MsgPack
@@ -193,7 +193,9 @@ fn decode_io_error_result(payload: HostDto): () -> Result<Option<Bytes>, IoError
         Err<HostError> { error }:
           Err<IoError> { error: host_error_to_io_error(error) }
         Ok<String> { value: message }:
-          Err<IoError> { error: IoError { code: code, message: message } }
+          Err<IoError> {
+            error: IoError { kind: IoOther {}, code: code, message: message }
+          }
 
 fn decode_host_error_result(payload: HostDto): () -> Result<Option<String>, HostError>
   match(payload.read_i32("code"))
@@ -207,10 +209,10 @@ fn decode_host_error_result(payload: HostDto): () -> Result<Option<String>, Host
           Err<HostError> { error: HostError { code: code, message: message } }
 
 fn host_error_to_io_error(error: HostError): () -> IoError
-  IoError { code: error.code, message: error.message }
+  IoError { kind: IoOther {}, code: error.code, message: error.message }
 
 fn msgpack_error_to_io_error(error: MsgPackError): () -> IoError
-  IoError { code: error.code, message: error.message }
+  IoError { kind: IoOther {}, code: error.code, message: error.message }
 
 fn msgpack_error_to_host_error(error: MsgPackError): () -> HostError
   HostError { code: error.code, message: error.message }

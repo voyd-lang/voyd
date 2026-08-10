@@ -1,5 +1,6 @@
 use std::array::Array
 use std::dict::{ Dict, DictKey }
+use std::enums::{ enum }
 use std::error::panic
 use std::msgpack::self as msgpack
 use std::optional::types::all
@@ -8,6 +9,9 @@ use std::string::type::{ String, StringSlice, new_string }
 use std::task::{ Task, TaskRuntime }
 use std::task::self as tasks
 pub use std::msgpack::MsgPack
+
+pub self::canvas
+pub use self::command::{ Cmd, Ref, retain_message_mapper, retain_typed_message_mapper }
 
 @boundary(type: "value")
 pub type Html<Msg> = MsgPack
@@ -23,11 +27,6 @@ pub obj Program<Model, Msg> {
 }
 
 @boundary(type: "payload", field: "payload")
-pub obj Cmd<Msg> {
-  api payload: MsgPack
-}
-
-@boundary(type: "payload", field: "payload")
 pub obj Sub<Msg> {
   api payload: MsgPack
 }
@@ -36,38 +35,12 @@ pub obj EventOptions {
   api prevent_default?: bool,
   api stop_propagation?: bool,
   api capture?: bool,
-  api passive?: bool
+  api passive?: bool,
+  /// Captures the active pointer on pointer down and releases it on pointer up or cancel.
+  api pointer_capture?: bool
 }
 
 pub obj DomElement {}
-
-/// A logical point in CSS-pixel canvas coordinates.
-pub val CanvasPoint {
-  api x: f64,
-  api y: f64
-}
-
-/// A typed canvas draw operation produced by the canvas primitive constructors.
-@boundary(type: "payload", field: "payload")
-pub obj CanvasDraw {
-  api payload: MsgPack
-}
-
-/// A versioned canvas frame ready for the browser VX runtime.
-@boundary(type: "payload", field: "payload")
-pub obj CanvasFrame {
-  api payload: MsgPack
-}
-
-/// A radial fill used by canvas circles.
-@boundary(type: "payload", field: "payload")
-pub obj CanvasRadialGradient {
-  api payload: MsgPack
-}
-
-pub obj Ref<T> {
-  api id: String
-}
 
 pub obj StateHandle<T> {
   api id: i32,
@@ -76,6 +49,7 @@ pub obj StateHandle<T> {
 
 pub type MouseEvent = {
   kind: String,
+  pointer_id: i32,
   x: f64,
   y: f64,
   client_x: f64,
@@ -202,14 +176,6 @@ fn claim_render_callback_id(handler_id: i32): () -> void
   void
 
 @intrinsic(name: "__boundary_retain_callback", uses_signature: true)
-fn retain_message_mapper_id(handler: fn(MsgPack) -> MsgPack): () -> i32
-  0
-
-@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
-fn retain_typed_message_mapper_id<From, To>(handler: fn(From) -> To): () -> i32
-  __boundary_retain_callback(handler)
-
-@intrinsic(name: "__boundary_retain_callback", uses_signature: true)
 fn retain_explicit_event_handler_id(handler: fn() -> MsgPack): () -> i32
   0
 
@@ -276,252 +242,6 @@ impl StateHandle<i32>
   api fn update(self, value: i32): Component -> StateHandle<i32>
     Component::state_set(self.id, msgpack::make_i32(value))
     StateHandle<i32> { id: self.id, value: value }
-
-impl<Msg> Cmd<Msg>
-  /// Creates an empty command.
-  api fn none() -> Cmd<Msg>
-    Cmd<Msg> { payload: command_payload("none") }
-
-  /// Creates a command that dispatches a serialized host/runtime message.
-  api fn message_serialized(value: MsgPack) -> Cmd<Msg>
-    let ~out = command_map("message")
-    out.set("value", value)
-    Cmd<Msg> { payload: msgpack::make_map(out) }
-
-  /// Creates a command that dispatches a typed application message.
-  api fn message(value: Msg) -> Cmd<Msg>
-    let ~out = command_map("message")
-    out.set("value", boundary_value_to_msgpack(value))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
-
-  /// Creates a command batch from existing command values.
-  api fn batch(values: Array<Cmd<Msg>>) -> Cmd<Msg>
-    let ~children = Array<MsgPack>::with_capacity(values.len())
-    var index = 0
-    while index < values.len():
-      let value = values.at(index)
-      children.push(value.payload)
-      index = index + 1
-
-    let ~out = command_map("batch")
-    out.set("children", msgpack::make_array(children))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
-
-  /// Lifts a child command through a retained message mapper.
-  api fn map<NextMsg>(self, { handler_id: i32 }) -> Cmd<NextMsg>
-    let ~out = command_map("map")
-    out.set("child", self.payload)
-    out.set("handlerId", msgpack::make_i32(handler_id))
-    Cmd<NextMsg> { payload: msgpack::make_map(out) }
-
-  /// Lifts a child command through a retained serialized message mapper.
-  api fn map_serialized<NextMsg>(self, handler: fn(MsgPack) -> MsgPack) -> Cmd<NextMsg>
-    let handler_id = retain_message_mapper(handler)
-    Cmd<NextMsg> { payload: msgpack::make_map(command_map_with_owned_handler(self.payload, handler_id)) }
-
-  /// Lifts a child command through a retained typed message mapper.
-  api fn map<NextMsg>(self, handler: fn(Msg) -> NextMsg) -> Cmd<NextMsg>
-    let handler_id = retain_typed_message_mapper(handler)
-    Cmd<NextMsg> { payload: msgpack::make_map(command_map_with_owned_handler(self.payload, handler_id)) }
-
-  /// Creates a host/runtime command envelope for a registered VX command executor.
-  api fn runtime({ kind: String, value?: MsgPack }) -> Cmd<Msg>
-    let out = command_map(kind)
-    let complete =
-      match(value)
-        Some<MsgPack> { value: payload }:
-          out.setting("value", payload)
-        None:
-          out
-    Cmd<Msg> { payload: msgpack::make_map(complete) }
-
-  api fn runtime({ kind: StringSlice, value?: MsgPack }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: kind.to_string(), value: value)
-
-  /// Copies text to the browser clipboard through the VX runtime host.
-  api fn copy_to_clipboard(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "copy_to_clipboard", value: msgpack::make_string(value))
-
-  api fn copy_to_clipboard(value: StringSlice) -> Cmd<Msg>
-    Cmd<Msg>::copy_to_clipboard(value.to_string())
-
-  /// Paints a typed canvas frame through the browser VX runtime host.
-  api fn canvas_render(value: CanvasFrame) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "canvas_render", value: value.payload)
-
-  /// Reads text from the browser clipboard and dispatches the handler result.
-  api fn read_clipboard({ handler_id: i32 }) -> Cmd<Msg>
-    let ~out = command_map("read_clipboard")
-    out.set("handlerId", msgpack::make_i32(handler_id))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
-
-  api fn read_clipboard(handler: fn(String) -> Msg) -> Cmd<Msg>
-    let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::read_clipboard(handler_id: handler_id), handler_id)
-
-  /// Sets the browser document title through the VX runtime host.
-  api fn set_document_title(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "set_document_title", value: msgpack::make_string(value))
-
-  api fn set_document_title(value: StringSlice) -> Cmd<Msg>
-    Cmd<Msg>::set_document_title(value.to_string())
-
-  /// Pushes a URL into browser history through the VX runtime host.
-  api fn push_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "push_url", value: msgpack::make_string(value))
-
-  api fn push_url(value: StringSlice) -> Cmd<Msg>
-    Cmd<Msg>::push_url(value.to_string())
-
-  /// Replaces the current browser history URL through the VX runtime host.
-  api fn replace_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "replace_url", value: msgpack::make_string(value))
-
-  api fn replace_url(value: StringSlice) -> Cmd<Msg>
-    Cmd<Msg>::replace_url(value.to_string())
-
-  /// Replaces the browser location hash through the VX runtime host.
-  api fn set_hash(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "set_hash", value: msgpack::make_string(value))
-
-  api fn set_hash(value: StringSlice) -> Cmd<Msg>
-    Cmd<Msg>::set_hash(value.to_string())
-
-  /// Navigates one entry back in browser history.
-  api fn navigate_back() -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "navigate_back")
-
-  /// Navigates one entry forward in browser history.
-  api fn navigate_forward() -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "navigate_forward")
-
-  /// Opens a URL in a browser window or tab.
-  api fn open_url(value: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "open_url", value: msgpack::make_string(value))
-
-  api fn open_url(value: StringSlice) -> Cmd<Msg>
-    Cmd<Msg>::open_url(value.to_string())
-
-  api fn open_url({ url: String, target: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "open_url", value: open_url_value(url: url, target: target))
-
-  api fn open_url({ url: StringSlice, target: StringSlice }) -> Cmd<Msg>
-    Cmd<Msg>::open_url(url: url.to_string(), target: target.to_string())
-
-  /// Scrolls the browser window to an absolute coordinate.
-  api fn scroll_window_to({ x: f64, y: f64 }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_window_to", value: window_scroll_value(x: x, y: y))
-
-  /// Scrolls the browser window by a relative coordinate.
-  api fn scroll_window_by({ x: f64, y: f64 }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_window_by", value: window_scroll_value(x: x, y: y))
-
-  /// Writes a string value into localStorage.
-  api fn local_storage_set({ key: String, value: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "local_storage_set", value: storage_entry_value(key: key, value: value))
-
-  api fn local_storage_set({ key: StringSlice, value: StringSlice }) -> Cmd<Msg>
-    Cmd<Msg>::local_storage_set(key: key.to_string(), value: value.to_string())
-
-  /// Removes a localStorage key.
-  api fn local_storage_remove(key: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "local_storage_remove", value: msgpack::make_string(key))
-
-  api fn local_storage_remove(key: StringSlice) -> Cmd<Msg>
-    Cmd<Msg>::local_storage_remove(key.to_string())
-
-  /// Clears localStorage.
-  api fn local_storage_clear() -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "local_storage_clear")
-
-  /// Writes a string value into sessionStorage.
-  api fn session_storage_set({ key: String, value: String }) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "session_storage_set", value: storage_entry_value(key: key, value: value))
-
-  api fn session_storage_set({ key: StringSlice, value: StringSlice }) -> Cmd<Msg>
-    Cmd<Msg>::session_storage_set(key: key.to_string(), value: value.to_string())
-
-  /// Removes a sessionStorage key.
-  api fn session_storage_remove(key: String) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "session_storage_remove", value: msgpack::make_string(key))
-
-  api fn session_storage_remove(key: StringSlice) -> Cmd<Msg>
-    Cmd<Msg>::session_storage_remove(key.to_string())
-
-  /// Clears sessionStorage.
-  api fn session_storage_clear() -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "session_storage_clear")
-
-  /// Creates a task command envelope for a retained result mapper.
-  api fn perform({ task_id: i32, handler_id: i32 }) -> Cmd<Msg>
-    let ~out = command_map("task")
-    out.set("taskId", msgpack::make_i32(task_id))
-    out.set("handlerId", msgpack::make_i32(handler_id))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
-
-  /// Creates a task command envelope for a retained Voyd result mapper.
-  api fn perform({ task_id: i32, handler: fn(MsgPack) -> MsgPack }) -> Cmd<Msg>
-    let handler_id = retain_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform(task_id: task_id, handler_id: handler_id), handler_id)
-
-  /// Creates a task command envelope for a retained typed result mapper.
-  api fn perform<T>({ task_id: i32, handler: fn(T) -> Msg }) -> Cmd<Msg>
-    let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform(task_id: task_id, handler_id: handler_id), handler_id)
-
-  /// Creates a task command envelope from a Voyd task and retained result mapper.
-  api fn perform<T>({ task: Task<T>, handler_id: i32 }) -> Cmd<Msg>
-    let ~out = command_map("task")
-    out.set("taskId", msgpack::make_i32(task.id))
-    out.set("handlerId", msgpack::make_i32(handler_id))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
-
-  /// Creates a task command envelope from a Voyd task and retained result mapper.
-  api fn perform<T>({ task: Task<T>, handler: fn(MsgPack) -> MsgPack }) -> Cmd<Msg>
-    let handler_id = retain_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform<T>(task: task, handler_id: handler_id), handler_id)
-
-  /// Creates a task command envelope from a Voyd task and retained typed result mapper.
-  api fn perform<T>({ task: Task<T>, handler: fn(T) -> Msg }) -> Cmd<Msg>
-    let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform<T>(task: task, handler_id: handler_id), handler_id)
-
-  /// Starts one-off async work and dispatches the mapped result when it completes.
-  api fn task<T>({
-    work: fn() : (open) -> T,
-    handler: fn(T) -> Msg
-  }): (TaskRuntime, open) -> Cmd<Msg>
-    let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform<T>(
-      task: tasks::detach(work),
-      handler_id: handler_id
-    ), handler_id)
-
-  /// Creates a timer command that dispatches a serialized value after the delay.
-  api fn delay_serialized({ millis: i64, value: MsgPack }) -> Cmd<Msg>
-    let ~out = command_map("delay")
-    out.set("ms", msgpack::make_i64(millis))
-    out.set("value", value)
-    Cmd<Msg> { payload: msgpack::make_map(out) }
-
-  /// Creates a timer command that dispatches a typed message after the delay.
-  api fn delay({ millis: i64, value: Msg }) -> Cmd<Msg>
-    let ~out = command_map("delay")
-    out.set("ms", msgpack::make_i64(millis))
-    out.set("value", boundary_value_to_msgpack(value))
-    Cmd<Msg> { payload: msgpack::make_map(out) }
-
-  /// Creates a DOM focus command for a constrained VX ref.
-  api fn focus<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "focus", value: msgpack::make_string(target.id))
-
-  /// Creates a scroll-into-view command for a constrained VX ref.
-  api fn scroll_into_view<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "scroll_into_view", value: msgpack::make_string(target.id))
-
-  /// Selects text in an input-like DOM element found by `data-vx-ref`.
-  api fn select_text<T>(target: Ref<T>) -> Cmd<Msg>
-    Cmd<Msg>::runtime(kind: "select_text", value: msgpack::make_string(target.id))
 
 impl<Msg> Sub<Msg>
   /// Creates an empty subscription set.
@@ -1016,10 +736,6 @@ pub fn retain_event_handler(handler: fn() -> void): () -> i32
 pub fn retain_event_payload_handler(handler: fn(MsgPack) -> MsgPack): () -> i32
   retain_explicit_event_handler_with_payload_id(handler)
 
-/// Retains a pure Voyd message mapper for commands, subscriptions, or events.
-pub fn retain_message_mapper(handler: fn(MsgPack) -> MsgPack): () -> i32
-  retain_message_mapper_id(handler)
-
 /// Retains a pure typed Voyd event callback in the host and returns its DOM handler id.
 pub fn retain_typed_event_handler<Msg>(handler: fn() -> Msg): () -> i32
   retain_explicit_typed_event_handler_id(handler)
@@ -1027,10 +743,6 @@ pub fn retain_typed_event_handler<Msg>(handler: fn() -> Msg): () -> i32
 /// Retains a pure typed Voyd event callback that receives the normalized event payload.
 pub fn retain_typed_event_payload_handler<Event, Msg>(handler: fn(Event) -> Msg): () -> i32
   retain_explicit_typed_event_handler_with_payload_id(handler)
-
-/// Retains a pure typed Voyd message mapper for commands, subscriptions, or events.
-pub fn retain_typed_message_mapper<From, To>(handler: fn(From) -> To): () -> i32
-  retain_typed_message_mapper_id(handler)
 
 /// Associates closure-backed handlers in a prebuilt view with the active server render.
 pub fn claim_server_render_callbacks(value: MsgPack): () -> void
@@ -1100,149 +812,6 @@ fn claim_server_render_callback_field(value: Dict<String, MsgPack>, name: String
       claim_server_render_callbacks(value)
     None:
       void
-
-/// Creates a radial color fill for a canvas circle.
-pub fn canvas_radial_gradient({
-  inner_color: String,
-  outer_color: String,
-  inner_radius: f64 = 0.0,
-  outer_radius?: f64
-}) -> CanvasRadialGradient
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("innerColor", msgpack::make_string(inner_color))
-  out.set("outerColor", msgpack::make_string(outer_color))
-  out.set("innerRadius", msgpack::make_f64(inner_radius))
-  set_f64_option(out, "outerRadius", outer_radius)
-  CanvasRadialGradient { payload: msgpack::make_map(out) }
-
-/// Creates a versioned canvas frame in CSS-pixel logical coordinates.
-pub fn canvas_frame({
-  selector: String,
-  width: f64,
-  height: f64,
-  draws: Array<CanvasDraw>,
-  clear: bool = true,
-  background?: String
-}) -> CanvasFrame
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("version", msgpack::make_i32(1))
-  out.set("selector", msgpack::make_string(selector))
-  out.set("width", msgpack::make_f64(width))
-  out.set("height", msgpack::make_f64(height))
-  out.set("clear", msgpack::make_bool(clear))
-  set_string_option(out, "background", background)
-  out.set("draws", canvas_draw_values(draws))
-  CanvasFrame { payload: msgpack::make_map(out) }
-
-/// Creates a straight canvas line.
-pub fn canvas_line({
-  from: CanvasPoint,
-  to: CanvasPoint,
-  color: String,
-  width: f64 = 1.0,
-  alpha: f64 = 1.0,
-  glow_color?: String,
-  glow_blur: f64 = 0.0
-}) -> CanvasDraw
-  let ~out = canvas_draw_map("line")
-  out.set("from", canvas_point_value(from))
-  out.set("to", canvas_point_value(to))
-  out.set("color", msgpack::make_string(color))
-  out.set("width", msgpack::make_f64(width))
-  out.set("alpha", msgpack::make_f64(alpha))
-  set_string_option(out, "glowColor", glow_color)
-  out.set("glowBlur", msgpack::make_f64(glow_blur))
-  CanvasDraw { payload: msgpack::make_map(out) }
-
-/// Creates a connected canvas path, optionally closed and filled.
-pub fn canvas_polyline({
-  points: Array<CanvasPoint>,
-  color: String,
-  width: f64 = 1.0,
-  alpha: f64 = 1.0,
-  closed: bool = false,
-  fill?: String
-}) -> CanvasDraw
-  let ~out = canvas_draw_map("polyline")
-  out.set("points", canvas_point_values(points))
-  out.set("color", msgpack::make_string(color))
-  out.set("width", msgpack::make_f64(width))
-  out.set("alpha", msgpack::make_f64(alpha))
-  out.set("closed", msgpack::make_bool(closed))
-  set_string_option(out, "fill", fill)
-  CanvasDraw { payload: msgpack::make_map(out) }
-
-/// Creates a canvas circle with optional stroke, glow, and radial fill.
-pub fn canvas_circle({
-  center: CanvasPoint,
-  radius: f64,
-  fill?: String,
-  stroke?: String,
-  stroke_width: f64 = 1.0,
-  alpha: f64 = 1.0,
-  glow_color?: String,
-  glow_blur: f64 = 0.0,
-  radial_gradient?: CanvasRadialGradient
-}) -> CanvasDraw
-  let ~out = canvas_draw_map("circle")
-  out.set("center", canvas_point_value(center))
-  out.set("radius", msgpack::make_f64(radius))
-  set_string_option(out, "fill", fill)
-  set_string_option(out, "stroke", stroke)
-  out.set("strokeWidth", msgpack::make_f64(stroke_width))
-  out.set("alpha", msgpack::make_f64(alpha))
-  set_string_option(out, "glowColor", glow_color)
-  out.set("glowBlur", msgpack::make_f64(glow_blur))
-  match(radial_gradient)
-    Some<CanvasRadialGradient> { value }:
-      out.set("radialGradient", value.payload)
-    None:
-      void
-  CanvasDraw { payload: msgpack::make_map(out) }
-
-/// Creates a canvas ellipse. Rotation is expressed in radians.
-pub fn canvas_ellipse({
-  center: CanvasPoint,
-  radius_x: f64,
-  radius_y: f64,
-  rotation: f64 = 0.0,
-  fill?: String,
-  stroke?: String,
-  stroke_width: f64 = 1.0,
-  alpha: f64 = 1.0
-}) -> CanvasDraw
-  let ~out = canvas_draw_map("ellipse")
-  out.set("center", canvas_point_value(center))
-  out.set("radiusX", msgpack::make_f64(radius_x))
-  out.set("radiusY", msgpack::make_f64(radius_y))
-  out.set("rotation", msgpack::make_f64(rotation))
-  set_string_option(out, "fill", fill)
-  set_string_option(out, "stroke", stroke)
-  out.set("strokeWidth", msgpack::make_f64(stroke_width))
-  out.set("alpha", msgpack::make_f64(alpha))
-  CanvasDraw { payload: msgpack::make_map(out) }
-
-/// Creates canvas text using a CSS canvas font string.
-pub fn canvas_text({
-  position: CanvasPoint,
-  value: String,
-  color: String,
-  font: String = "12px sans-serif",
-  align: String = "left",
-  baseline: String = "alphabetic",
-  alpha: f64 = 1.0,
-  max_width?: f64
-}) -> CanvasDraw
-  let ~out = canvas_draw_map("text")
-  out.set("position", canvas_point_value(position))
-  out.set("value", msgpack::make_string(value))
-  out.set("color", msgpack::make_string(color))
-  out.set("font", msgpack::make_string(font))
-  out.set("align", msgpack::make_string(align))
-  out.set("baseline", msgpack::make_string(baseline))
-  out.set("alpha", msgpack::make_f64(alpha))
-  set_f64_option(out, "maxWidth", max_width)
-  CanvasDraw { payload: msgpack::make_map(out) }
 
 /// Creates a versioned VX render frame.
 pub fn frame(root: MsgPack): () -> MsgPack
@@ -1813,6 +1382,30 @@ pub fn on_pointer_move_with({ options: EventOptions, message: MsgPack }): () -> 
 pub fn on_pointer_move_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
   event_payload(name: "pointermove", handler: handler, options: options)
 
+pub fn on_pointer_cancel(handler: fn() -> MsgPack): () -> MsgPack
+  event(name: "pointercancel", handler: handler)
+
+pub fn on_pointer_cancel_payload(handler: fn(MsgPack) -> MsgPack): () -> MsgPack
+  event_payload(name: "pointercancel", handler: handler)
+
+pub fn on_pointer_cancel(handler_id: i32): () -> MsgPack
+  event(name: "pointercancel", handler_id: handler_id)
+
+pub fn on_pointer_cancel_message(message: MsgPack): () -> MsgPack
+  event(name: "pointercancel", message: message)
+
+pub fn on_pointer_cancel_with({ options: EventOptions, handler_id: i32 }): () -> MsgPack
+  event(name: "pointercancel", handler_id: handler_id, options: options)
+
+pub fn on_pointer_cancel_with({ options: EventOptions, handler: fn() -> MsgPack }): () -> MsgPack
+  event(name: "pointercancel", handler: handler, options: options)
+
+pub fn on_pointer_cancel_with({ options: EventOptions, message: MsgPack }): () -> MsgPack
+  event(name: "pointercancel", message: message, options: options)
+
+pub fn on_pointer_cancel_payload_with({ options: EventOptions, handler: fn(MsgPack) -> MsgPack }): () -> MsgPack
+  event_payload(name: "pointercancel", handler: handler, options: options)
+
 pub fn on_key_down(handler: fn() -> MsgPack): () -> MsgPack
   event(name: "keydown", handler: handler)
 
@@ -2224,6 +1817,12 @@ pub fn on_pointer_move_message<Msg>(message: Msg): () -> MsgPack
 pub fn on_pointer_move_with<Msg>({ options: EventOptions, message: Msg }): () -> MsgPack
   event_message<Msg>(name: "pointermove", message: message, options: options)
 
+pub fn on_pointer_cancel_message<Msg>(message: Msg): () -> MsgPack
+  event_message<Msg>(name: "pointercancel", message: message)
+
+pub fn on_pointer_cancel_with<Msg>({ options: EventOptions, message: Msg }): () -> MsgPack
+  event_message<Msg>(name: "pointercancel", message: message, options: options)
+
 pub fn on_key_down_message<Msg>(message: Msg): () -> MsgPack
   event_message<Msg>(name: "keydown", message: message)
 
@@ -2523,63 +2122,6 @@ fn consume_named_attr(entry: Dict<String, MsgPack>, ~attrs: Dict<String, MsgPack
     None:
       void
 
-fn canvas_draw_map(kind: String) -> Dict<String, MsgPack>
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("kind", msgpack::make_string(kind))
-  out
-
-fn canvas_point_value(point: CanvasPoint) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("x", msgpack::make_f64(point.x))
-  out.set("y", msgpack::make_f64(point.y))
-  msgpack::make_map(out)
-
-fn canvas_point_values(points: Array<CanvasPoint>) -> MsgPack
-  let ~out = Array<MsgPack>::with_capacity(points.len())
-  var index = 0
-  while index < points.len():
-    match(points.get(index))
-      Some<CanvasPoint> { value }:
-        out.push(canvas_point_value(value))
-      None:
-        void
-    index = index + 1
-  msgpack::make_array(out)
-
-fn canvas_draw_values(draws: Array<CanvasDraw>) -> MsgPack
-  let ~out = Array<MsgPack>::with_capacity(draws.len())
-  var index = 0
-  while index < draws.len():
-    match(draws.get(index))
-      Some<CanvasDraw> { value }:
-        out.push(value.payload)
-      None:
-        void
-    index = index + 1
-  msgpack::make_array(out)
-
-fn set_string_option(
-  ~out: Dict<String, MsgPack>,
-  name: String,
-  value: Optional<String>
-) -> void
-  match(value)
-    Some<String> { value }:
-      out.set(name, msgpack::make_string(value))
-    None:
-      void
-
-fn set_f64_option(
-  ~out: Dict<String, MsgPack>,
-  name: String,
-  value: Optional<f64>
-) -> void
-  match(value)
-    Some<f64> { value }:
-      out.set(name, msgpack::make_f64(value))
-    None:
-      void
-
 fn bool_attr({ name: String, value: bool }): () -> MsgPack
   named_value("attr", name, msgpack::make_bool(value))
 
@@ -2614,6 +2156,7 @@ fn event_options_to_map(options: EventOptions): () -> Dict<String, MsgPack>
   set_bool_option(out, "stopPropagation", options.stop_propagation)
   set_bool_option(out, "capture", options.capture)
   set_bool_option(out, "passive", options.passive)
+  set_bool_option(out, "pointerCapture", options.pointer_capture)
   out
 
 fn set_bool_option(~out: Dict<String, MsgPack>, name: String, value: Optional<bool>) -> void
@@ -2623,55 +2166,12 @@ fn set_bool_option(~out: Dict<String, MsgPack>, name: String, value: Optional<bo
     None:
       void
 
-fn window_scroll_value({ x: f64, y: f64 }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("x", msgpack::make_f64(x))
-  out.set("y", msgpack::make_f64(y))
-  msgpack::make_map(out)
-
-fn storage_entry_value({ key: String, value: String }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("key", key)
-  out.set("value", value)
-  msgpack::make_map(out)
-
-fn open_url_value({ url: String, target: String }) -> MsgPack
-  let ~out = Dict<String, MsgPack>::init()
-  out.set("url", url)
-  out.set("target", target)
-  msgpack::make_map(out)
-
-fn command_payload(kind: String): () -> MsgPack
-  msgpack::make_map(command_map(kind))
-
-fn command_map(kind: String): () -> Dict<String, MsgPack>
-  tagged_vx_runtime_map("cmd", kind)
-
-fn command_map_with_owned_handler(child: MsgPack, handler_id: i32): () -> Dict<String, MsgPack>
-  let ~out = command_map("map")
-  out.set("child", child)
-  out.set("handlerId", msgpack::make_i32(handler_id))
-  set_owned_handler(~out, handler_id)
-  out
-
-fn mark_owned_handler<Msg>(cmd: Cmd<Msg>, handler_id: i32) -> Cmd<Msg>
-  match(msgpack::unpack_map(cmd.payload))
-    Ok<Dict<String, MsgPack>> { value }:
-      Cmd<Msg> { payload: msgpack::make_map(with_owned_handler(value, handler_id)) }
-    Err:
-      cmd
-
 fn mark_owned_subscription<Msg>(sub: Sub<Msg>, handler_id: i32) -> Sub<Msg>
   match(msgpack::unpack_map(sub.payload))
     Ok<Dict<String, MsgPack>> { value }:
       Sub<Msg> { payload: msgpack::make_map(with_owned_handler(value, handler_id)) }
     Err:
       sub
-
-fn set_owned_handler(~out: Dict<String, MsgPack>, handler_id: i32) -> void
-  let ~owned = Array<MsgPack>::with_capacity(1)
-  owned.push(msgpack::make_i32(handler_id))
-  out.set("__vxOwnedMapHandlerIds", msgpack::make_array(owned))
 
 fn with_owned_handler(
   out: Dict<String, MsgPack>,

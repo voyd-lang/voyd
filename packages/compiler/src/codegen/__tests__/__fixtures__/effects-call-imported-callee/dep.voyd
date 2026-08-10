@@ -1,8 +1,12 @@
 pub eff Async
   await(resume, value: i32) -> i32
+  await(resume, value: bool) -> i32
 
 pub fn f(x: i32): Async -> i32
   Async::await(x) + 1
 
 pub fn g(): Async -> i32
   Async::await(1)
+
+pub fn flag(): Async -> i32
+  Async::await(true)

@@ -46,13 +46,7 @@ export const defineArrayType = (
     );
     const result = builder.build();
 
-    if (name) {
-      bin._BinaryenModuleSetTypeName(
-        mod.ptr,
-        result,
-        bin.stringToUTF8OnStack(name)
-      );
-    }
+    if (name) annotateTypeName(mod, result, name);
 
     return bin._BinaryenTypeFromHeapType(result, true); // Has to be nullable for now so initialize an array of ref types
   } finally {
@@ -105,7 +99,9 @@ export const refFunc = (
   func: string,
   type: TypeRef
 ): ExpressionRef =>
-  bin._BinaryenRefFunc(mod.ptr, bin.stringToUTF8OnStack(func), type);
+  withUtf8String(func, (funcName) =>
+    bin._BinaryenRefFunc(mod.ptr, funcName, type)
+  );
 
 export const refCast = (
   mod: binaryen.Module,
@@ -284,19 +280,35 @@ export const annotateStructNames = (
 ) => {
   struct.fields.forEach(({ name }, index) => {
     if (!name) return;
-    bin._BinaryenModuleSetFieldName(
-      mod.ptr,
-      typeRef,
-      index,
-      bin.stringToUTF8OnStack(name)
+    withUtf8String(name, (fieldName) =>
+      bin._BinaryenModuleSetFieldName(mod.ptr, typeRef, index, fieldName)
     );
   });
 
-  if (struct.name) {
-    bin._BinaryenModuleSetTypeName(
-      mod.ptr,
-      typeRef,
-      bin.stringToUTF8OnStack(struct.name)
-    );
+  if (struct.name) annotateTypeName(mod, typeRef, struct.name);
+};
+
+export const annotateTypeName = (
+  mod: binaryen.Module,
+  typeRef: HeapTypeRef,
+  name: string,
+): void => {
+  withUtf8String(name, (typeName) =>
+    bin._BinaryenModuleSetTypeName(mod.ptr, typeRef, typeName)
+  );
+};
+
+const withUtf8String = <T>(
+  value: string,
+  useString: (pointer: number) => T,
+): T => {
+  const bytes = new TextEncoder().encode(value);
+  const pointer = bin._malloc(bytes.length + 1);
+  try {
+    bytes.forEach((byte, index) => bin.__i32_store8(pointer + index, byte));
+    bin.__i32_store8(pointer + bytes.length, 0);
+    return useString(pointer);
+  } finally {
+    bin._free(pointer);
   }
 };

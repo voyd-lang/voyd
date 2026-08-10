@@ -1,36 +1,33 @@
 //! Filesystem-backed persistence for Voyd Orbit simulations.
 //!
 //! Every persisted system owns one JSON file. IDs are validated before they
-//! participate in path construction, and writes use a same-directory temporary
-//! file followed by rename so readers never observe a partial document.
+//! participate in path construction, and standard filesystem primitives keep
+//! concurrent creates exclusive and replacements atomic.
 
 use src::shared::{
   PersistedSimulation,
   SimulationSummary,
   ValidationError,
-  is_safe_id,
   simulation_from_json,
   simulation_json_pretty,
   simulation_summary,
   validate_simulation
 }
 use std::array::Array
-use std::bytes::ByteBuffer
-use std::encoding::hex
-use std::error::IoError
-use std::fs::{
-  Fs,
-  create_dir_all as create_directories,
-  exists as path_exists,
-  list_dir as list_directory,
-  read_string as read_file_string,
-  remove as remove_path,
-  rename as rename_path,
-  write_string as write_file_string
+use std::error::{
+  IoAlreadyExists,
+  IoConflict,
+  IoError,
+  IoNotFound,
+  IoOther,
+  IoPermissionDenied
 }
-use std::json::JsonError
+use std::fs
+use std::fs::Fs
+use std::json::{ JsonDecodeError, JsonError }
 use std::optional::types::all
 use std::path::Path
+use std::random::{ Random, RandomError, Uuid }
 use std::random::self as random
 use std::result::types::all
 use std::string::type::String
@@ -56,16 +53,16 @@ impl SimulationRepository
 
   /// Returns a safe per-simulation path, rejecting path-like identifiers first.
   api fn path_for(self, id: String) -> Result<Path, RepositoryError>
-    if not is_safe_id(id):
+    if not is_canonical_uuid(id):
       return repository_error(
         "invalid-id",
-        "Simulation id must contain only lower-case letters, numbers, and hyphens"
+        "Simulation id must be a canonical UUID"
       )
     Ok<Path> { value: self.data_directory.join(id.concat(".json")) }
 
   /// Creates the persistence directory and any missing parents.
   api fn initialize(self): Fs -> Result<Unit, RepositoryError>
-    match(create_directories(self.data_directory))
+    match(fs::create_dir_all(self.data_directory))
       Ok<Unit> { value }:
         Ok<Unit> { value }
       Err<IoError> { error }:
@@ -82,7 +79,7 @@ impl SimulationRepository
       Ok<Unit>:
         void
 
-    match(list_directory(self.data_directory))
+    match(fs::list_dir(self.data_directory))
       Err<IoError> { error }:
         storage_error<Array<SimulationSummary>>(error)
       Ok<Array<Path>> { value: paths }:
@@ -113,7 +110,7 @@ impl SimulationRepository
           Err<RepositoryError> { error }:
             Err<RepositoryError> { error }
           Ok<Unit>:
-            if not path_exists(path):
+            if not fs::exists(path):
               return Ok<Option<PersistedSimulation>> { value: None {} }
             match(self.read_existing(id))
               Ok<PersistedSimulation> { value }:
@@ -149,7 +146,7 @@ impl SimulationRepository
           Err<ValidationError> { error }:
             validation_error<PersistedSimulation>(error)
           Ok<Unit>:
-            match(self.write_atomic(created))
+            match(self.write_new(created))
               Err<RepositoryError> { error }:
                 Err<RepositoryError> { error }
               Ok<Unit>:
@@ -181,7 +178,7 @@ impl SimulationRepository
               Err<ValidationError> { error }:
                 return validation_error<Option<PersistedSimulation>>(error)
               Ok<Unit>:
-                match(self.write_atomic(updated))
+                match(self.write_replacement(updated))
                   Err<RepositoryError> { error }:
                     return Err<RepositoryError> { error }
                   Ok<Unit>:
@@ -200,9 +197,9 @@ impl SimulationRepository
           Err<RepositoryError> { error }:
             Err<RepositoryError> { error }
           Ok<Unit>:
-            if not path_exists(path):
+            if not fs::exists(path):
               return Ok<bool> { value: false }
-            match(remove_path(path))
+            match(fs::remove(path))
               Ok<Unit>:
                 Ok<bool> { value: true }
               Err<IoError> { error }:
@@ -211,9 +208,13 @@ impl SimulationRepository
   fn available_id(self): (Fs, random::Random) -> Result<String, RepositoryError>
     var attempts = 0
     while attempts < 8:
-      let id = random_hex_id()
-      if not self.id_exists(id):
-        return Ok<String> { value: id }
+      match(Uuid::v4())
+        Err<RandomError> { error }:
+          return random_error<String>(error)
+        Ok<Uuid> { value }:
+          let id = value.to_string()
+          if not self.id_exists(id):
+            return Ok<String> { value: id }
       attempts = attempts + 1
     repository_error(
       "id-generation-failed",
@@ -223,7 +224,7 @@ impl SimulationRepository
   fn id_exists(self, id: String): Fs -> bool
     match(self.path_for(id))
       Ok<Path> { value }:
-        path_exists(value)
+        fs::exists(value)
       Err<RepositoryError>:
         true
 
@@ -232,12 +233,12 @@ impl SimulationRepository
       Err<RepositoryError> { error }:
         Err<RepositoryError> { error }
       Ok<Path> { value: path }:
-        match(read_file_string(path))
+        match(fs::read_string(path))
           Err<IoError> { error }:
             storage_error<PersistedSimulation>(error)
           Ok<String> { value: source }:
             match(simulation_from_json(source))
-              Err<JsonError> { error }:
+              Err<JsonDecodeError> { error }:
                 repository_error(
                   "corrupt-simulation",
                   "Saved simulation JSON could not be decoded: ".concat(error.message)
@@ -257,10 +258,10 @@ impl SimulationRepository
                   Ok<Unit>:
                     Ok<PersistedSimulation> { value }
 
-  fn write_atomic(
+  fn write_new(
     self,
     value: PersistedSimulation
-  ): (Fs, random::Random) -> Result<Unit, RepositoryError>
+  ): Fs -> Result<Unit, RepositoryError>
     match(self.path_for(value.id))
       Err<RepositoryError> { error }:
         Err<RepositoryError> { error }
@@ -272,23 +273,32 @@ impl SimulationRepository
               "Simulation JSON could not be encoded: ".concat(error.message)
             )
           Ok<String> { value: encoded }:
-            let temporary = self.temporary_path(value.id)
-            match(write_file_string(temporary, encoded))
+            match(fs::create_exclusive(destination, encoded))
+              Ok<Unit> { value }:
+                Ok<Unit> { value }
               Err<IoError> { error }:
-                let _ = remove_if_present(temporary)
                 storage_error<Unit>(error)
-              Ok<Unit>:
-                match(rename_path(temporary, to: destination))
-                  Ok<Unit> { value }:
-                    Ok<Unit> { value }
-                  Err<IoError> { error }:
-                    let _ = remove_if_present(temporary)
-                    storage_error<Unit>(error)
 
-  fn temporary_path(self, id: String): random::Random -> Path
-    self.data_directory.join(
-      ".".concat(id).concat(".").concat(random_hex_id()).concat(".tmp")
-    )
+  fn write_replacement(
+    self,
+    value: PersistedSimulation
+  ): Fs -> Result<Unit, RepositoryError>
+    match(self.path_for(value.id))
+      Err<RepositoryError> { error }:
+        Err<RepositoryError> { error }
+      Ok<Path> { value: destination }:
+        match(simulation_json_pretty(value))
+          Err<JsonError> { error }:
+            repository_error(
+              "serialization-failed",
+              "Simulation JSON could not be encoded: ".concat(error.message)
+            )
+          Ok<String> { value: encoded }:
+            match(fs::write_atomic(destination, encoded))
+              Ok<Unit> { value }:
+                Ok<Unit> { value }
+              Err<IoError> { error }:
+                storage_error<Unit>(error)
 
 fn with_identity(
   value: PersistedSimulation,
@@ -304,15 +314,6 @@ fn with_identity(
     camera: value.camera
   }
 
-/// Generates a 128-bit lower-case hexadecimal identifier in Voyd.
-fn random_hex_id(): random::Random -> String
-  let ~bytes = ByteBuffer::with_capacity(16)
-  var index = 0
-  while index < 16:
-    bytes.push(normalize_byte(random::random_i32()))
-    index = index + 1
-  hex::encode(bytes.as_bytes())
-
 fn simulation_id_from_path(path: Path) -> Option<String>
   match(path.file_name())
     None:
@@ -321,11 +322,14 @@ fn simulation_id_from_path(path: Path) -> Option<String>
       if not name.ends_with(".json") or name.byte_len() <= 5:
         return None {}
       let id = name.slice(bytes: 0, len: name.byte_len() - 5).to_string()
-      if is_safe_id(id) then: Some<String> { value: id } else: None {}
+      if is_canonical_uuid(id) then: Some<String> { value: id } else: None {}
 
-fn normalize_byte(value: i32) -> i32
-  let remainder = value % 256
-  if remainder < 0 then: remainder + 256 else: remainder
+fn is_canonical_uuid(value: String) -> bool
+  match(Uuid::parse(value.as_slice()))
+    Err:
+      false
+    Ok<Uuid> { value: uuid }:
+      uuid.to_string().equals(value)
 
 fn compare_summaries(left: SimulationSummary, right: SimulationSummary) -> i32
   if
@@ -333,18 +337,27 @@ fn compare_summaries(left: SimulationSummary, right: SimulationSummary) -> i32
     left.updated_at < right.updated_at: 1
     else: 0
 
-fn remove_if_present(path: Path): Fs -> Unit
-  if path_exists(path):
-    let _ = remove_path(path)
-  Unit {}
-
 fn validation_error<T>(error: ValidationError) -> Result<T, RepositoryError>
   repository_error(error.code, error.message)
 
 fn storage_error<T>(error: IoError) -> Result<T, RepositoryError>
+  let message = "Simulation storage operation failed: ".concat(error.message)
+  error.kind.match(kind)
+    IoNotFound:
+      repository_error("storage-not-found", message)
+    IoAlreadyExists:
+      repository_error("storage-conflict", message)
+    IoConflict:
+      repository_error("storage-conflict", message)
+    IoPermissionDenied:
+      repository_error("storage-permission-denied", message)
+    IoOther:
+      repository_error("storage-failed", message)
+
+fn random_error<T>(error: RandomError) -> Result<T, RepositoryError>
   repository_error(
-    "storage-failed",
-    "Simulation storage operation failed: ".concat(error.message)
+    "id-generation-failed",
+    "Secure simulation id generation failed: ".concat(error.message)
   )
 
 fn repository_error<T>(code: String, message: String) -> Result<T, RepositoryError>

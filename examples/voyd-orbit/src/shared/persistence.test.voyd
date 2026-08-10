@@ -9,11 +9,12 @@ use super::persistence::{
 }
 use super::validation::{ ValidationError, is_hex_color, is_safe_id, validate_simulation }
 use src::simulation::default_scenario
-use std::json::JsonError
+use std::json::{ JsonDecodeError, JsonError }
 use std::math::abs
 use std::result::types::all
 use std::string::type::String
 use std::test::assertions::all
+use std::time::{ SystemTime, TimestampError }
 
 test "versioned simulation JSON round trips shared state":
   let original = example_simulation()
@@ -24,7 +25,7 @@ test "versioned simulation JSON round trips shared state":
       value
 
   match(simulation_from_json(encoded))
-    Err<JsonError>:
+    Err<JsonDecodeError>:
       assert(false, eq: true)
     Ok<PersistedSimulation> { value }:
       assert(value.version, eq: 1)
@@ -47,12 +48,49 @@ test "summary list JSON round trips metadata without body payloads":
   assert(encoded.contains("\"bodies\""), eq: false)
 
   match(summaries_from_json(encoded))
-    Err<JsonError>:
+    Err<JsonDecodeError>:
       assert(false, eq: true)
     Ok { value }:
       assert(value.len(), eq: 1)
       assert(value.at(0).body_count, eq: summary.body_count)
       assert(value.at(0).name.equals(summary.name), eq: true)
+
+test "typed persistence decoding reports nested paths and rejects unknown versions":
+  let encoded = match(simulation_json(example_simulation()))
+    Err<JsonError>:
+      String::init()
+    Ok<String> { value }:
+      value
+
+  let mistyped = encoded.replaced(
+    old: "\"name\":\"Cinder\"",
+    with: "\"name\":42",
+    max_replacements: 1
+  )
+  match(simulation_from_json(mistyped))
+    Ok<PersistedSimulation>:
+      assert(false, eq: true)
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.bodies[1].name")
+
+  let future = encoded.replaced(
+    old: "\"version\":1",
+    with: "\"version\":9",
+    max_replacements: 1
+  )
+  match(simulation_from_json(future))
+    Ok<PersistedSimulation>:
+      assert(false, eq: true)
+    Err<JsonDecodeError> { error }:
+      assert(error.path, eq: "$.version")
+
+test "saved metadata uses the standard RFC 3339 timestamp surface":
+  let summary = simulation_summary(example_simulation())
+  match(SystemTime::from_unix_millis(summary.updated_at).to_rfc3339())
+    Err<TimestampError>:
+      assert(false, eq: true)
+    Ok<String> { value }:
+      assert(value.equals("2023-11-14T22:13:20.123Z"), eq: true)
 
 test "persistence validation rejects unsafe ids and duplicate body ids":
   assert(is_safe_id("orbit-42"), eq: true)

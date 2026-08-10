@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 import { parse, parseBase } from "../../parser.js";
-import { Form } from "../../ast/index.js";
+import {
+  Form,
+  identifierBindingKey,
+  isForm,
+  isIdentifierAtom,
+} from "../../ast/index.js";
 import { readFileSync } from "fs";
 import { resolve } from "path";
 import { expandFunctionalMacros } from "../functional-macro-expander/index.js";
@@ -9,7 +14,11 @@ type Plain = (string | Plain)[];
 
 const functionalMacrosVoydFile = readFileSync(
   resolve(import.meta.dirname, "__fixtures__", "functional_macros.voyd"),
-  "utf-8"
+  "utf-8",
+);
+const enumMacroVoydFile = readFileSync(
+  resolve(import.meta.dirname, "../../../../../std/src/enums.voyd"),
+  "utf-8",
 );
 
 const toPlain = (form: Form): Plain =>
@@ -32,6 +41,481 @@ const containsDeep = (value: unknown, target: unknown): boolean => {
 };
 
 describe("functional macro expansion", () => {
+  test("gives enum variants private identities independent of display spelling", () => {
+    const ast = parse(
+      `${enumMacroVoydFile}\n\nenum First\n  Ready\n  Done\n\nenum Second\n  Ready\n  Done\n`,
+    );
+    const objectNames = ast.rest.flatMap((entry) => {
+      if (!isForm(entry) || !entry.calls("obj")) return [];
+      const name = entry.at(1);
+      return isIdentifierAtom(name) ? [name] : [];
+    });
+    expect(objectNames.map((entry) => entry.value)).toEqual([
+      "Ready",
+      "Done",
+      "Ready",
+      "Done",
+    ]);
+    const keys = objectNames.map(identifierBindingKey);
+    expect(new Set(keys).size).toBe(4);
+    expect(JSON.stringify(ast.toJSON())).not.toContain("fresh:");
+  });
+  test("creates deterministic, opaque identities for fresh identifiers", () => {
+    const source = `\
+macro generated_ids()
+  let first = identifier("same_label")
+  let second = identifier("same_label")
+  \`($first $first $second)
+generated_ids()
+`;
+
+    const firstExpansion = parse(source);
+    const secondExpansion = parse(source);
+    const readKeys = (ast: Form) => {
+      const expansion = ast.last;
+      expect(isForm(expansion)).toBe(true);
+      if (!isForm(expansion)) return [];
+      const identifiers = expansion
+        .toArray()
+        .filter((entry) => isIdentifierAtom(entry));
+      expect(identifiers.map((entry) => entry.value)).toEqual([
+        "same_label",
+        "same_label",
+        "same_label",
+      ]);
+      return identifiers.map(identifierBindingKey);
+    };
+
+    const firstKeys = readKeys(firstExpansion);
+    expect(firstKeys[0]).toBe(firstKeys[1]);
+    expect(firstKeys[0]).not.toBe(firstKeys[2]);
+    expect(readKeys(secondExpansion)).toEqual(firstKeys);
+    expect(JSON.stringify(firstExpansion.toJSON())).not.toContain("fresh:");
+  });
+
+  test("keeps fresh declarations private when generated with public visibility", () => {
+    const ast = parse(`\
+macro declare_private()
+  let name = identifier("debug_helper")
+  \`(pub fn $name() -> i32 1)
+declare_private()
+`);
+    const declaration = ast.last;
+    expect(isForm(declaration)).toBe(true);
+    if (!isForm(declaration)) return;
+    expect(declaration.calls("fn")).toBe(true);
+    const signature = declaration.at(1);
+    expect(isForm(signature)).toBe(true);
+    if (!isForm(signature)) return;
+    const callable = signature.calls("->") ? signature.at(1) : signature;
+    const name = isForm(callable) ? callable.at(0) : callable;
+    expect(isIdentifierAtom(name)).toBe(true);
+    if (!isIdentifierAtom(name)) return;
+    expect(identifierBindingKey(name)).toMatch(/^fresh:/);
+  });
+
+  test("keeps fresh module values and nested API members private", () => {
+    const valueAst = parse(`\
+macro declare_value()
+  let name = identifier("debug_value")
+  \`(pub let $name = 1)
+declare_value()
+`);
+    expect(valueAst.last?.toJSON()).toEqual(["let", ["=", "debug_value", "1"]]);
+
+    const objectAst = parse(`\
+macro declare_container()
+  let field = identifier("debug_field")
+  let method = identifier("debug_method")
+  \`(obj Container {
+    api $field: i32
+    api fn $method(self) -> i32
+      1
+  })
+declare_container()
+`);
+    const declaration = objectAst.last;
+    expect(isForm(declaration)).toBe(true);
+    const plain = declaration?.toJSON();
+    expect(JSON.stringify(plain)).not.toContain('"api"');
+    expect(containsDeep(plain, [":", "debug_field", "i32"])).toBe(true);
+    expect(containsDeep(plain, ["->", ["debug_method", "self"], "i32"])).toBe(
+      true,
+    );
+  });
+
+  test("keeps every fresh grouped-use alias private", () => {
+    const ast = parse(`\
+macro expose_helpers()
+  let hidden = identifier("hidden_helper")
+  \`(pub use src::tools::{ helper as visible_helper, helper as $hidden })
+expose_helpers()
+`);
+
+    expect(ast.last?.toJSON()).toEqual([
+      "use",
+      [
+        "::",
+        ["::", "src", "tools"],
+        [
+          "object_literal",
+          ["as", "helper", "visible_helper"],
+          ["as", "helper", "hidden_helper"],
+        ],
+      ],
+    ]);
+  });
+
+  test("keeps public effects and traits private when they contain fresh members", () => {
+    const ast = parse(`\
+macro declare_containers()
+  let operation = identifier("hidden_operation")
+  let method = identifier("hidden_method")
+  emit_many(
+    \`(pub eff PublicFx
+      fn $operation(tail) -> i32),
+    \`(pub trait PublicTrait
+      fn $method(self) -> i32)
+  )
+declare_containers()
+`);
+
+    const declarations = ast.rest.slice(-2);
+    expect(declarations.map((entry) => entry.toJSON())).toEqual([
+      [
+        "eff",
+        "PublicFx",
+        [
+          "block",
+          ["fn", ["->", ["hidden_operation", "tail"], "i32"]],
+        ],
+      ],
+      [
+        "trait",
+        "PublicTrait",
+        ["block", ["fn", ["->", ["hidden_method", "self"], "i32"]]],
+      ],
+    ]);
+  });
+
+  test("keeps fresh declarations private after attribute expansion", () => {
+    const ast = parse(`\
+attribute macro replace(args, declaration)
+  let name = identifier("attribute_helper")
+  \`(pub fn $name() -> i32
+    1)
+
+@replace
+fn original() -> i32
+  0
+`);
+    const declaration = ast.last;
+    expect(isForm(declaration)).toBe(true);
+    if (!isForm(declaration)) return;
+    expect(declaration.calls("fn")).toBe(true);
+    expect(declaration.toJSON()).toEqual([
+      "fn",
+      ["->", ["attribute_helper"], "i32"],
+      ["block", "1"],
+    ]);
+  });
+
+  test("preserves definition and symbol-reference identifier contexts", () => {
+    const source = `\
+macro references()
+  let direct = symbol_reference(helper)
+  let qualified = symbol_reference(tools::helper)
+  \`($direct $qualified)
+references()
+`;
+
+    const ast = parse(source, "macros.voyd");
+    const expansion = ast.last;
+    expect(isForm(expansion)).toBe(true);
+    if (!isForm(expansion)) return;
+    const direct = expansion.at(0);
+    const qualified = expansion.at(1);
+    expect(isIdentifierAtom(direct)).toBe(true);
+    if (isIdentifierAtom(direct)) {
+      expect(direct.lexicalContext).toMatchObject({
+        kind: "symbol-reference",
+      });
+    }
+    expect(isForm(qualified)).toBe(true);
+    if (isForm(qualified)) {
+      const root = qualified.at(1);
+      expect(isIdentifierAtom(root)).toBe(true);
+      if (isIdentifierAtom(root)) {
+        expect(root.lexicalContext).toMatchObject({
+          kind: "symbol-reference",
+        });
+      }
+    }
+  });
+
+  test("rejects strings and declaration names in symbol_reference", () => {
+    const stringErrors: string[] = [];
+    expandFunctionalMacros(
+      parseBase(`macro bad()\n  symbol_reference("helper")\nbad()`),
+      {
+        strictMacroSignatures: true,
+        onError: (error) => stringErrors.push(error.message),
+      },
+    );
+    expect(stringErrors).toHaveLength(1);
+    expect(stringErrors[0]).toContain(
+      "requires an identifier or qualified symbol",
+    );
+
+    const declarationErrors: string[] = [];
+    expandFunctionalMacros(
+      parseBase(`\
+macro bad_declaration()
+  let ref = symbol_reference(helper)
+  \`(fn $ref() -> i32 1)
+bad_declaration()
+`),
+      {
+        strictMacroSignatures: true,
+        onError: (error) => declarationErrors.push(error.message),
+      },
+    );
+    expect(declarationErrors).toHaveLength(1);
+    expect(declarationErrors[0]).toContain(
+      "reference-only and cannot be used as a declaration name",
+    );
+
+    const publicDeclarationErrors: string[] = [];
+    expandFunctionalMacros(
+      parseBase(`\
+macro bad_public_declaration()
+  let ref = symbol_reference(helper)
+  \`(pub fn $ref() -> i32 1)
+bad_public_declaration()
+`),
+      {
+        strictMacroSignatures: true,
+        onError: (error) => publicDeclarationErrors.push(error.message),
+      },
+    );
+    expect(publicDeclarationErrors[0]).toContain(
+      "reference-only and cannot be used as a declaration name",
+    );
+
+    const parameterErrors: string[] = [];
+    expandFunctionalMacros(
+      parseBase(`\
+macro bad_parameter()
+  let ref = symbol_reference(helper)
+  \`(fn generated($ref: i32) -> i32 $ref)
+bad_parameter()
+`),
+      {
+        strictMacroSignatures: true,
+        onError: (error) => parameterErrors.push(error.message),
+      },
+    );
+    expect(parameterErrors[0]).toContain(
+      "reference-only and cannot be used as a declaration name",
+    );
+  });
+
+  test("rejects symbol references in handler parameters while allowing operation references", () => {
+    const operationOnlyErrors: string[] = [];
+    expandFunctionalMacros(
+      parseBase(`\
+macro referenced_operation()
+  let operation = symbol_reference(read)
+  let resume = identifier("resume")
+  \`(fn generated(): GeneratedFx -> i32
+    try
+      GeneratedFx::$operation()
+    GeneratedFx::$operation($resume):
+      $resume(42))
+referenced_operation()
+`),
+      {
+        strictMacroSignatures: true,
+        onError: (error) => operationOnlyErrors.push(error.message),
+      },
+    );
+    expect(operationOnlyErrors).toEqual([]);
+
+    const bareOperationOnlyErrors: string[] = [];
+    expandFunctionalMacros(
+      parseBase(`\
+macro referenced_bare_operation()
+  let operation = symbol_reference(read)
+  let resume = identifier("resume")
+  \`(fn generated(): GeneratedFx -> i32
+    try
+      GeneratedFx::$operation()
+    $operation($resume):
+      $resume(42))
+referenced_bare_operation()
+`),
+      {
+        strictMacroSignatures: true,
+        onError: (error) => bareOperationOnlyErrors.push(error.message),
+      },
+    );
+    expect(bareOperationOnlyErrors).toEqual([]);
+
+    const parameterErrors: string[] = [];
+    const parameterAst = parseBase(`\
+macro referenced_parameter()
+  let operation = symbol_reference(read)
+  let resume = symbol_reference(existing_resume)
+  \`(fn generated(): GeneratedFx -> i32
+    try
+      GeneratedFx::$operation()
+    GeneratedFx::$operation($resume):
+      $resume(42))
+referenced_parameter()
+`);
+    expandFunctionalMacros(
+      parameterAst,
+      {
+        strictMacroSignatures: true,
+        onError: (error) => parameterErrors.push(error.message),
+      },
+    );
+    expect(parameterErrors).toHaveLength(1);
+    expect(parameterErrors[0]).toContain(
+      "symbol_reference(existing_resume) is reference-only",
+    );
+
+    const bareParameterErrors: string[] = [];
+    expandFunctionalMacros(
+      parseBase(`\
+macro referenced_bare_parameter()
+  let operation = symbol_reference(read)
+  let resume = symbol_reference(existing_resume)
+  \`(fn generated(): GeneratedFx -> i32
+    try
+      GeneratedFx::$operation()
+    $operation($resume):
+      $resume(42))
+referenced_bare_parameter()
+`),
+      {
+        strictMacroSignatures: true,
+        onError: (error) => bareParameterErrors.push(error.message),
+      },
+    );
+    expect(bareParameterErrors).toHaveLength(1);
+    expect(bareParameterErrors[0]).toContain(
+      "symbol_reference(existing_resume) is reference-only",
+    );
+  });
+
+  test("allows symbol references in type annotations and trait signatures", () => {
+    const errors: string[] = [];
+    expandFunctionalMacros(
+      parseBase(`\
+macro typed_local()
+  let type_ref = symbol_reference(PrivateType)
+  let local = identifier("local")
+  \`(fn generated(value: $type_ref) -> $type_ref
+    let $local: $type_ref = value
+    $local)
+
+macro typed_trait()
+  let type_ref = symbol_reference(PrivateType)
+  \`(trait Generated
+    fn convert(value: $type_ref) -> $type_ref)
+
+typed_local()
+typed_trait()
+`),
+      {
+        strictMacroSignatures: true,
+        onError: (error) => errors.push(error.message),
+      },
+    );
+    expect(errors).toEqual([]);
+  });
+
+  test("rejects symbol references in every macro and import binding slot", () => {
+    const expansions = [
+      "`(macro $ref() 1)",
+      "`(pub macro $ref() 1)",
+      "`(macro generated($ref) 1)",
+      "`(attribute macro $ref(args, declaration) declaration)",
+      "`(pub attribute macro generated($ref, declaration) declaration)",
+      "`(macro_let $ref = 1)",
+      "`(use src::tools::helper as $ref)",
+      "`(pub use src::tools::helper as $ref)",
+      "`(use src::tools::$ref)",
+      "`(pub use src::tools::$ref)",
+      "`(use src::tools::{ $ref })",
+      "`(pub use src::tools::{ helper, $ref })",
+    ];
+
+    expansions.forEach((expansion) => {
+      const errors: string[] = [];
+      expandFunctionalMacros(
+        parseBase(`\
+macro reject_binding()
+  let ref = symbol_reference(existing)
+  ${expansion}
+reject_binding()
+`),
+        {
+          strictMacroSignatures: true,
+          onError: (error) => errors.push(error.message),
+        },
+      );
+      expect(errors, expansion).toHaveLength(1);
+      expect(errors[0], expansion).toContain(
+        "reference-only and cannot be used as a declaration name",
+      );
+    });
+  });
+
+  test("allows symbol references on the referenced side of an import", () => {
+    const errors: string[] = [];
+    expandFunctionalMacros(
+      parseBase(`\
+macro import_helper()
+  let module_ref = symbol_reference(tools)
+  let helper_ref = symbol_reference(helper)
+  emit_many(
+    \`(use $module_ref::helper as imported_helper),
+    \`(use src::tools::$helper_ref as renamed_helper),
+    \`(use src::tools::{ $helper_ref as grouped_helper })
+  )
+import_helper()
+`),
+      {
+        strictMacroSignatures: true,
+        onError: (error) => errors.push(error.message),
+      },
+    );
+    expect(errors).toEqual([]);
+  });
+
+  test("rejects symbol references in tuple match binding slots", () => {
+    const errors: string[] = [];
+    expandFunctionalMacros(
+      parseBase(`\
+macro bad_match_binding()
+  let ref = symbol_reference(bound)
+  \`(match(value)
+    ($ref, other): other)
+bad_match_binding()
+`),
+      {
+        strictMacroSignatures: true,
+        onError: (error) => errors.push(error.message),
+      },
+    );
+    expect(errors).toHaveLength(1);
+    expect(errors[0]).toContain(
+      "reference-only and cannot be used as a declaration name",
+    );
+  });
+
   test("retains successful exports when later expansion fails", () => {
     const ast = parseBase(`\
 pub macro keep(x)
@@ -69,7 +553,7 @@ macro binaryen_gc_call
         "extract_parameters",
         ["reserved-for-type"],
         ["is-mutable", "false"],
-      ])
+      ]),
     ).toBe(true);
   });
 
@@ -84,7 +568,7 @@ bin_type_to_heap_type(FixedArray<Int>)
     const ast = parse(code);
     const plain = toPlain(ast);
     const binaryenCall = plain.find(
-      (item) => Array.isArray(item) && item.at(0) === "binaryen"
+      (item) => Array.isArray(item) && item.at(0) === "binaryen",
     );
     expect(binaryenCall).toEqual([
       "binaryen",
@@ -109,7 +593,7 @@ wrap()
         [":", "func", "modBinaryenTypeToHeapType"],
         [":", "namespace", "gc"],
         [":", "args", "arg"],
-      ])
+      ]),
     ).toBe(true);
   });
 
@@ -433,11 +917,13 @@ fn value() -> i32
   });
 
   test("preserves unresolved attributes in context-free parser output", () => {
-    const plain = toPlain(parse(`\
+    const plain = toPlain(
+      parse(`\
 @imported_attribute
 fn value() -> i32
   1
-`));
+`),
+    );
 
     expect(plain).toContainEqual(["@", "imported_attribute"]);
   });

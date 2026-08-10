@@ -21,6 +21,7 @@ import {
   type SurfaceModuleItem,
 } from "../parser/surface/index.js";
 import { requireModuleHeader } from "./views.js";
+import { isPubliclyExportedOrdinaryModule } from "./package-visibility.js";
 
 export const expandModuleMacros = (graph: ModuleGraph): Diagnostic[] =>
   createModuleMacroExpander().expand(graph).diagnostics;
@@ -107,12 +108,13 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
         const importedMacros = collectMacroImports({
           module,
           entries: scopeUseEntries,
+          graph,
           exportsByModule,
           sourceEntryKeys: new Set(
             collectUseEntries(headerItems).map(useEntryKey),
           ),
         });
-        const scope = new MacroScope();
+        const scope = new MacroScope(undefined, { hygieneRootId: id });
         importedMacros.macros.forEach((macro) => scope.defineMacro(macro));
         importedMacros.ambiguousNames.forEach((name) =>
           scope.defineAmbiguousMacro(name),
@@ -218,6 +220,7 @@ export const createModuleMacroExpander = (): ModuleMacroExpander => {
           module,
           entries: surfaceUseEntries,
           inlineModuleNames: surfaceInlineModuleNames,
+          graph,
           exportsByModule,
           localExports,
         });
@@ -475,11 +478,13 @@ const collectInlineModuleNames = (
 const collectMacroImports = ({
   module,
   entries,
+  graph,
   exportsByModule,
   sourceEntryKeys,
 }: {
   module: ModuleNode;
   entries: MacroScopeUseEntry[];
+  graph: ModuleGraph;
   exportsByModule: Map<string, MacroExportTable>;
   sourceEntryKeys: ReadonlySet<string>;
 }): {
@@ -536,16 +541,16 @@ const collectMacroImports = ({
       typeof firstSegment === "string" &&
       inlineModuleNames.has(firstSegment);
 
-    const resolvedPath = resolveModuleRequest(
-      { segments: entry.moduleSegments, span: entry.span },
-      module.path,
-      {
-        anchorToSelf: entry.anchorToSelf,
-        parentHops: entry.parentHops ?? 0,
-        importerIsPackageRoot: moduleIsPackageRoot && !preservesInlinePkgScope,
-      },
-    );
-    const moduleId = modulePathToString(resolvedPath);
+    const moduleId = resolveMacroDependencyModuleId({
+      module,
+      entry,
+      graph,
+      importerIsPackageRoot:
+        moduleIsPackageRoot && !preservesInlinePkgScope,
+    });
+    if (!canImportMacroExports({ importer: module, moduleId, graph })) {
+      return;
+    }
     const exportedMacros = exportsByModule.get(moduleId);
     if (!exportedMacros) {
       return;
@@ -591,12 +596,14 @@ const collectMacroReexports = ({
   module,
   entries,
   inlineModuleNames,
+  graph,
   exportsByModule,
   localExports,
 }: {
   module: ModuleNode;
   entries: UseEntryWithVisibility[];
   inlineModuleNames: ReadonlySet<string>;
+  graph: ModuleGraph;
   exportsByModule: Map<string, MacroExportTable>;
   localExports: MacroExportTable;
 }): MacroExportTable => {
@@ -646,17 +653,16 @@ const collectMacroReexports = ({
         typeof firstSegment === "string" &&
         inlineModuleNames.has(firstSegment);
 
-      const resolvedPath = resolveModuleRequest(
-        { segments: entry.moduleSegments, span: entry.span },
-        module.path,
-        {
-          anchorToSelf: entry.anchorToSelf,
-          parentHops: entry.parentHops ?? 0,
-          importerIsPackageRoot:
-            moduleIsPackageRoot && !preservesInlinePkgScope,
-        },
-      );
-      const moduleId = modulePathToString(resolvedPath);
+      const moduleId = resolveMacroDependencyModuleId({
+        module,
+        entry,
+        graph,
+        importerIsPackageRoot:
+          moduleIsPackageRoot && !preservesInlinePkgScope,
+      });
+      if (!canImportMacroExports({ importer: module, moduleId, graph })) {
+        return;
+      }
       const exportedMacros = exportsByModule.get(moduleId);
       if (!exportedMacros) {
         return;
@@ -693,6 +699,79 @@ const collectMacroReexports = ({
     });
 
   return { macros: exports, ambiguousNames };
+};
+
+const resolveMacroDependencyModuleId = ({
+  module,
+  entry,
+  graph,
+  importerIsPackageRoot,
+}: {
+  module: ModuleNode;
+  entry: NormalizedUseEntry;
+  graph: ModuleGraph;
+  importerIsPackageRoot: boolean;
+}): string => {
+  const resolvedPath = resolveModuleRequest(
+    { segments: entry.moduleSegments, span: entry.span },
+    module.path,
+    {
+      anchorToSelf: entry.anchorToSelf,
+      parentHops: entry.parentHops ?? 0,
+      importerIsPackageRoot,
+    },
+  );
+  const directId = modulePathToString(resolvedPath);
+  if (graph.modules.has(directId)) {
+    return directId;
+  }
+  const packageRootId = `${directId}::pkg`;
+  const packageRoot = graph.modules.get(packageRootId);
+  return packageRoot?.origin.kind === "file" ? packageRootId : directId;
+};
+
+const canImportMacroExports = ({
+  importer,
+  moduleId,
+  graph,
+}: {
+  importer: ModuleNode;
+  moduleId: string;
+  graph: ModuleGraph;
+}): boolean => {
+  const exporter = graph.modules.get(moduleId);
+  if (!exporter) {
+    return true;
+  }
+  if (exporter.path.namespace === "std") {
+    return true;
+  }
+  if (
+    exporter.path.namespace === "src" &&
+    !exporter.sourcePackageRoot?.length
+  ) {
+    return true;
+  }
+  if (macroPackageId(importer) === macroPackageId(exporter)) {
+    return true;
+  }
+  return (
+    (exporter.origin.kind === "file" &&
+      exporter.path.segments.at(-1) === "pkg") ||
+    isPubliclyExportedOrdinaryModule({ module: exporter, graph })
+  );
+};
+
+const macroPackageId = (module: ModuleNode): string => {
+  if (module.path.namespace === "std") {
+    return "std";
+  }
+  if (module.path.namespace === "pkg") {
+    return `pkg:${module.path.packageName ?? "unknown"}`;
+  }
+  return module.sourcePackageRoot && module.sourcePackageRoot.length > 0
+    ? `local:${module.sourcePackageRoot.join("::")}`
+    : "local";
 };
 
 const collectUseEntries = (

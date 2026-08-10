@@ -73,6 +73,45 @@ const extractMessage = (value: unknown): string | undefined => {
   return undefined;
 };
 
+const readLinearMemoryMessage = ({
+  host,
+  pointer,
+  byteLength,
+}: {
+  host: VoydHost;
+  pointer: unknown;
+  byteLength: unknown;
+}): string | undefined => {
+  if (
+    typeof pointer !== "number" ||
+    typeof byteLength !== "number" ||
+    !Number.isInteger(pointer) ||
+    !Number.isInteger(byteLength) ||
+    pointer < 0 ||
+    byteLength <= 0
+  ) {
+    return undefined;
+  }
+
+  const memory = host.instance.exports.memory;
+  if (!(memory instanceof WebAssembly.Memory)) {
+    return undefined;
+  }
+
+  const end = pointer + byteLength;
+  if (!Number.isSafeInteger(end) || end > memory.buffer.byteLength) {
+    return undefined;
+  }
+
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(
+      new Uint8Array(memory.buffer, pointer, byteLength),
+    );
+  } catch {
+    return undefined;
+  }
+};
+
 const buildLogMessage = (args: unknown[]): string => {
   if (args.length === 0) {
     return "";
@@ -145,6 +184,15 @@ const registerTestHandlers = ({
   host.registerHandlersByLabelSuffix({
     "::fail": (_continuation, ...args: unknown[]) => {
       throw new TestFailure(extractMessage(args[0]));
+    },
+    "::fail_with": (_continuation, ...args: unknown[]) => {
+      throw new TestFailure(
+        readLinearMemoryMessage({
+          host,
+          pointer: args[0],
+          byteLength: args[1],
+        }),
+      );
     },
     "::skip": (_continuation, ...args: unknown[]) => {
       throw new TestSkip(extractMessage(args[0]));

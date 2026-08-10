@@ -10,3 +10,9 @@ pub fn main() -> MsgPack
 
 pub fn input_echo() -> MsgPack
   <input value="hello" on_input={(payload: MsgPack) -> MsgPack => clicked(payload)} />
+
+fn ValueField({ value: String }) -> MsgPack
+  <input value={value} />
+
+pub fn value_shadow() -> MsgPack
+  <ValueField value="hello" />

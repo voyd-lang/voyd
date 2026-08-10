@@ -12,6 +12,8 @@ import { reportOverloadNameCollision } from "../name-collisions.js";
 import { bindTypeParameters } from "./type-parameters.js";
 import { reportInvalidTypeDeclarationName } from "../type-name-convention.js";
 import { bindTypeExpr } from "./expressions.js";
+import { bindingIdentityForSyntax } from "../hygiene.js";
+import { diagnosticFromCode } from "../../../diagnostics/index.js";
 
 const declareEffectOperationParams = ({
   op,
@@ -79,6 +81,7 @@ export const bindEffectDecl = (
       name: decl.name.value,
       kind: "effect",
       declaredAt: decl.form.syntaxId,
+      bindingIdentity: bindingIdentityForSyntax(decl.name),
       metadata: { entity: "effect" },
     },
     tracker.current(),
@@ -99,9 +102,35 @@ export const bindEffectDecl = (
     );
   });
 
+  const operationsByHostKey = new Map<string, ParsedEffectOperation>();
   const operations = decl.operations.map((op) => {
     rememberSyntax(op.form, ctx);
     rememberSyntax(op.name, ctx);
+    const hostKey = op.operationId ?? op.name.value;
+    const previousOperation = operationsByHostKey.get(hostKey);
+    if (previousOperation && (op.operationId || previousOperation.operationId)) {
+      ctx.diagnostics.push(
+        diagnosticFromCode({
+          code: "BD0009",
+          params: {
+            kind: "duplicate-operation-id",
+            effectName: decl.name.value,
+            operationName: hostKey,
+          },
+          span: toSourceSpan(op.name),
+          related: [
+            diagnosticFromCode({
+              code: "BD0009",
+              params: { kind: "previous-operation-id" },
+              severity: "note",
+              span: toSourceSpan(previousOperation.name),
+            }),
+          ],
+        }),
+      );
+    } else if (!previousOperation) {
+      operationsByHostKey.set(hostKey, op);
+    }
     const scope = ctx.symbolTable.createScope({
       parent: effectScope,
       kind: "function",
@@ -113,6 +142,7 @@ export const bindEffectDecl = (
         name: op.name.value,
         kind: "effect-op",
         declaredAt: op.form.syntaxId,
+        bindingIdentity: bindingIdentityForSyntax(op.name),
         metadata: { ownerEffect: effectSymbol, intrinsic: true },
       },
       tracker.current(),
@@ -139,6 +169,7 @@ export const bindEffectDecl = (
       parameters: params,
       resumable: op.resumable,
       returnTypeExpr: op.returnType,
+      operationId: op.operationId,
       documentation: declarationDocForSyntax(op.name, ctx),
     };
   });

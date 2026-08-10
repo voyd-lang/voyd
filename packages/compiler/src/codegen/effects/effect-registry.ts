@@ -9,7 +9,11 @@ import type {
   TypeParamId,
 } from "../../semantics/ids.js";
 import { getRequiredExprType } from "../types.js";
-import { resolveEffectSignatureTypes } from "./effect-signature.js";
+import {
+  resolveEffectSignatureTypes,
+  resolveHandlerClauseSignature,
+} from "./effect-signature.js";
+import { resolveEffectOpRuntimeInfo } from "./op-ids.js";
 import { walkHirExpression } from "../hir-walk.js";
 import type { ContinuationSite } from "./effect-lowering/types.js";
 import { performSiteArgTypes } from "./perform-site.js";
@@ -47,6 +51,7 @@ export type EffectOpEntry = {
   label: string;
   effectName: string;
   opName: string;
+  operationId?: string;
   external?: {
     params: readonly BoundarySchema[];
     result: BoundarySchema;
@@ -456,25 +461,72 @@ const collectEffectIds = (ctx: CodegenContext): EffectIdInfo[] => {
   return ctx.module.meta.effects.map((effect) =>
     resolveEffectId({
       ctx,
-      effectName: effect.name,
+      effectName: registrySymbolName({
+        ctx,
+        moduleId: ctx.moduleId,
+        symbol: effect.symbol,
+        sourceName: effect.name,
+        freshPrefix: "effect",
+      }),
       explicitId: effect.effectId,
     }),
   );
 };
 
-const fallbackEffectAndOpNames = (
-  qualifiedName: string,
-): { effectName: string; opName: string } => {
-  const separatorIndex = qualifiedName.lastIndexOf(".");
-  if (separatorIndex <= 0 || separatorIndex >= qualifiedName.length - 1) {
-    return {
-      effectName: qualifiedName || "effect",
-      opName: qualifiedName || "operation",
-    };
-  }
+const registrySymbolName = ({
+  ctx,
+  moduleId,
+  symbol,
+  sourceName,
+  freshPrefix,
+}: {
+  ctx: CodegenContext;
+  moduleId: string;
+  symbol: SymbolId;
+  sourceName: string;
+  freshPrefix: "effect" | "operation";
+}): string => {
+  const programSymbol = ctx.program.symbols.idOf({ moduleId, symbol });
+  return ctx.program.symbols.isFresh(programSymbol)
+    ? `${freshPrefix}_${symbol}`
+    : sourceName;
+};
+
+const registryEffectAndOpNames = ({
+  ctx,
+  sourceModuleId,
+  effectMeta,
+  localEffectIndex,
+  opIndex,
+}: {
+  ctx: CodegenContext;
+  sourceModuleId: string;
+  effectMeta:
+    | CodegenContext["module"]["meta"]["effects"][number]
+    | undefined;
+  localEffectIndex: number;
+  opIndex: number;
+}): { effectName: string; opName: string } => {
+  const opMeta = effectMeta?.operations[opIndex];
   return {
-    effectName: qualifiedName.slice(0, separatorIndex),
-    opName: qualifiedName.slice(separatorIndex + 1),
+    effectName: effectMeta
+      ? registrySymbolName({
+          ctx,
+          moduleId: sourceModuleId,
+          symbol: effectMeta.symbol,
+          sourceName: effectMeta.name,
+          freshPrefix: "effect",
+        })
+      : `effect_${localEffectIndex}`,
+    opName: opMeta
+      ? registrySymbolName({
+          ctx,
+          moduleId: sourceModuleId,
+          symbol: opMeta.symbol,
+          sourceName: opMeta.name,
+          freshPrefix: "operation",
+        })
+      : `operation_${opIndex}`,
   };
 };
 
@@ -529,10 +581,13 @@ export const buildEffectRegistry = (
         );
       }
       const effectMeta = sourceModule.meta.effects[info.localEffectIndex];
-      const fallbackNames = fallbackEffectAndOpNames(info.name);
-      const opMeta = effectMeta?.operations[info.opIndex];
-      const opName = opMeta?.name ?? fallbackNames.opName;
-      const effectName = effectMeta?.name ?? fallbackNames.effectName;
+      const { effectName, opName } = registryEffectAndOpNames({
+        ctx,
+        sourceModuleId,
+        effectMeta,
+        localEffectIndex: info.localEffectIndex,
+        opIndex: info.opIndex,
+      });
       const label = `${sourceModuleId}::${effectName}.${opName}`;
       const resumeKind =
         info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
@@ -586,7 +641,83 @@ export const buildEffectRegistry = (
           label,
           effectName,
           opName,
+          operationId: effectMeta?.operations[info.opIndex]?.operationId,
           ...(external ? { external } : {}),
+        });
+      });
+    });
+
+    ctx.module.effectsIr.info.handlers.forEach((handler, handlerExprId) => {
+      const owner = ownerByExpr.get(handlerExprId);
+      const instances =
+        owner !== undefined ? (instancesBySymbol.get(owner) ?? []) : [];
+      const instanceList = instances.length > 0 ? instances : [undefined];
+
+      handler.expr.handlers.forEach((clause) => {
+        const resolved = resolveEffectOpRuntimeInfo(clause.operation, ctx);
+        if (!resolved) {
+          throw new Error(
+            `missing effect info for handler op ${clause.operation}`,
+          );
+        }
+        const { info, moduleId } = resolved;
+        const sourceModuleId = info.sourceModuleId ?? moduleId;
+        const sourceModule = ctx.program.modules.get(sourceModuleId);
+        if (!sourceModule) {
+          throw new Error(
+            `missing source module for handler op ${clause.operation}`,
+          );
+        }
+        const effectIds = effectIdsByModule.get(sourceModuleId);
+        const effectId = effectIds?.[info.localEffectIndex];
+        if (!effectId) {
+          throw new Error(
+            `missing effect id for ${sourceModuleId}:${info.localEffectIndex}`,
+          );
+        }
+        const effectMeta = sourceModule.meta.effects[info.localEffectIndex];
+        const { effectName, opName } = registryEffectAndOpNames({
+          ctx,
+          sourceModuleId,
+          effectMeta,
+          localEffectIndex: info.localEffectIndex,
+          opIndex: info.opIndex,
+        });
+        const label = `${sourceModuleId}::${effectName}.${opName}`;
+        const resumeKind =
+          info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
+
+        instanceList.forEach((instanceId) => {
+          const signature = resolveHandlerClauseSignature({
+            ctx,
+            handlerBody: handler.expr.body,
+            clause,
+            typeInstanceId: instanceId,
+          });
+          const signatureHash = signatureHashFor({
+            params: signature.params,
+            returnType: signature.returnType,
+            ctx,
+          });
+          const key = toEffectOpKey(
+            effectId.hash,
+            info.opIndex,
+            signatureHash,
+          );
+          if (entriesByKey.has(key)) {
+            return;
+          }
+          entriesByKey.set(key, {
+            opIndex: -1,
+            effectId,
+            opId: info.opIndex,
+            resumeKind,
+            signatureHash,
+            label,
+            effectName,
+            opName,
+            operationId: effectMeta?.operations[info.opIndex]?.operationId,
+          });
         });
       });
     });
@@ -603,6 +734,13 @@ export const buildEffectRegistry = (
         const effectId = effectIds[localEffectIndex];
         if (!effectId) throw new Error(`missing external effect id for ${effect.name}`);
         effect.operations.forEach((op, opId) => {
+          const { effectName, opName } = registryEffectAndOpNames({
+            ctx,
+            sourceModuleId: ctx.moduleId,
+            effectMeta: effect,
+            localEffectIndex,
+            opIndex: opId,
+          });
           const signature = ctx.program.functions.getSignature(ctx.moduleId, op.symbol);
           if (!signature) throw new Error(`missing external effect signature for ${effect.name}.${op.name}`);
           if (signature.typeParams.length > 0) {
@@ -625,13 +763,13 @@ export const buildEffectRegistry = (
             params: params.map((typeId, index) => deriveBoundarySchema({
               typeId,
               ctx,
-              label: `${effectId.id}::${op.name} arg${index}`,
+              label: `${effectId.id}::${opName} arg${index}`,
               options: { tagStandaloneVariants: true },
             })),
             result: deriveBoundarySchema({
               typeId: signature.returnType,
               ctx,
-              label: `${effectId.id}::${op.name} result`,
+              label: `${effectId.id}::${opName} result`,
               options: { tagStandaloneVariants: true },
             }),
             declaredOnly: true,
@@ -647,9 +785,10 @@ export const buildEffectRegistry = (
             opId,
             resumeKind: op.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume,
             signatureHash,
-            label: `${ctx.moduleId}::${effect.name}.${op.name}`,
-            effectName: effect.name,
-            opName: op.name,
+            label: `${ctx.moduleId}::${effectName}.${opName}`,
+            effectName,
+            opName,
+            operationId: op.operationId,
             external,
           });
         });
@@ -725,10 +864,13 @@ export const getEffectOpInstanceInfo = ({
   }
   const resumeKind =
     info.resumable === "tail" ? RESUME_KIND.tail : RESUME_KIND.resume;
-  const fallbackNames = fallbackEffectAndOpNames(info.name);
-  const opMeta = effectMeta?.operations[info.opIndex];
-  const opName = opMeta?.name ?? fallbackNames.opName;
-  const effectName = effectMeta?.name ?? fallbackNames.effectName;
+  const { effectName, opName } = registryEffectAndOpNames({
+    ctx,
+    sourceModuleId,
+    effectMeta,
+    localEffectIndex: info.localEffectIndex,
+    opIndex: info.opIndex,
+  });
   const label = `${sourceModuleId}::${effectName}.${opName}`;
   const signature = resolvePerformSignature({ site, ctx, typeInstanceId });
   const signatureHash = signatureHashFor({

@@ -12,11 +12,12 @@ import type {
   CallableBorrowSummary,
 } from "./borrowing/index.js";
 import type { SymbolRef } from "./typing/symbol-ref.js";
+import type { EffectOp } from "./effects/effect-table.js";
 
 export interface ModuleExportEffect {
   symbol: SymbolId;
   annotated: boolean;
-  operations: readonly { name: string; region?: number }[];
+  operations: readonly EffectOp[];
   tail?: { rigid: boolean };
 }
 
@@ -33,6 +34,15 @@ export interface ModuleExportEntry {
   memberOwner?: SymbolId;
   isStatic?: boolean;
   apiProjection?: boolean;
+  /**
+   * Per-symbol member metadata retained when an exported member shares its
+   * display name with an ordinary module export or another member.
+   */
+  memberSymbols?: readonly {
+    symbol: SymbolId;
+    owner: SymbolId;
+    isStatic: boolean;
+  }[];
   effects?: readonly ModuleExportEffect[];
   borrowing?: readonly {
     symbol: SymbolId;
@@ -79,6 +89,40 @@ export interface ModuleExportEntry {
     contract: CallableBorrowContract;
   }[];
 }
+
+export const moduleNamespaceExportEntry = (
+  exported: ModuleExportEntry,
+): ModuleExportEntry | undefined => {
+  const symbols =
+    exported.symbols && exported.symbols.length > 0
+      ? exported.symbols
+      : [exported.symbol];
+  const instanceMembers = new Set(
+    (exported.memberSymbols ?? [])
+      .filter((member) => !member.isStatic)
+      .map((member) => member.symbol),
+  );
+  const moduleSymbols = symbols.filter(
+    (symbol) => !instanceMembers.has(symbol),
+  );
+  if (moduleSymbols.length === 0) {
+    return undefined;
+  }
+
+  return {
+    ...exported,
+    symbol: moduleSymbols.includes(exported.symbol)
+      ? exported.symbol
+      : moduleSymbols[0]!,
+    symbols: moduleSymbols,
+  };
+};
+
+export const firstInstanceMemberOwner = (
+  exported: ModuleExportEntry,
+): SymbolId | undefined =>
+  exported.memberSymbols?.find((member) => !member.isStatic)?.owner ??
+  (exported.isStatic !== true ? exported.memberOwner : undefined);
 
 export interface ModuleBorrowingTraitImplementation {
   concrete: SymbolRef;

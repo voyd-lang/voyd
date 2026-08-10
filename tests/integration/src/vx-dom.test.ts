@@ -5,6 +5,7 @@ import { describe, expect, it, vi } from "vitest";
 import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 import { createVoydHost } from "@voyd-lang/sdk/js-host";
 import {
+  createBrowserVxRuntimeHost,
   createVxDomRenderer,
   createVoydVxAppRuntime,
   mountVxApp,
@@ -20,6 +21,10 @@ const siteExampleRoot = path.resolve(
 const miniWikipediaRoot = path.resolve(
   import.meta.dirname,
   "../../../examples/mini-wikipedia",
+);
+const voydOrbitRoot = path.resolve(
+  import.meta.dirname,
+  "../../../examples/voyd-orbit",
 );
 const typedCounterEntryPath = path.join(fixtureRoot, "vx-typed-counter.voyd");
 const asyncTaskCommandEntryPath = path.join(
@@ -477,6 +482,21 @@ pub fn multi_document() -> String
     expect(message).toEqual(payload);
   });
 
+  it("keeps a component value property distinct from the generated VX helper", async () => {
+    const entryPath = path.join(fixtureRoot, "vx-retained-event.voyd");
+    const result = await compileFixture(entryPath);
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 256 * 1024,
+    });
+    const tree = await host.run("value_shadow");
+    const container = document.createElement("div");
+    const renderer = renderMsgPackNode(tree, container);
+
+    expect(container.querySelector("input")?.value).toBe("hello");
+    renderer.dispose();
+  });
+
   it("updates a typed VX app counter in a mounted Voyd app", async () => {
     const result = await compileFixture(typedCounterEntryPath);
     const host = await createVoydHost({
@@ -571,6 +591,99 @@ pub fn multi_document() -> String
     mounted.dispose();
     expect(container.innerHTML).toBe("");
   });
+
+  it("keeps Voyd Orbit interactive after a typed API failure", async () => {
+    const result = expectCompileSuccess(
+      await vxDomSdk.compile({
+        entryPath: path.join(voydOrbitRoot, "src/client/pkg.voyd"),
+        roots: {
+          src: path.join(voydOrbitRoot, "src"),
+          pkgDirs: [path.resolve(import.meta.dirname, "../../../packages")],
+        },
+      }),
+    );
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("Orbit API unavailable", { status: 503 }),
+    );
+    const host = await createVoydHost({
+      wasm: result.wasm,
+      bufferSize: 4 * 1024 * 1024,
+      defaultAdapters: { runtime: "browser" },
+    });
+    const noSubscription = () => () => undefined;
+    const runtimeHost = createBrowserVxRuntimeHost({
+      commands: {
+        canvas_render: () => undefined,
+        canvas_measure_text: () => undefined,
+      },
+      subscriptions: {
+        animation_frame: noSubscription,
+        keyboard: noSubscription,
+        window_resize: noSubscription,
+      },
+    });
+    const container = document.createElement("div");
+    const onError = vi.fn();
+
+    try {
+      const mounted = await mountVxApp({
+        container,
+        app: createVoydVxAppRuntime({ host }),
+        runtimeHost,
+        onError,
+      });
+      const canvas = container.querySelector<HTMLCanvasElement>("#orbit-canvas");
+      expect(canvas).toBeDefined();
+      const pointerEvent = (type: string, pointerId: number) => {
+        const event = new Event(type, { bubbles: true });
+        Object.defineProperties(event, {
+          pointerId: { configurable: true, value: pointerId },
+          x: { configurable: true, value: 1 },
+          y: { configurable: true, value: 1 },
+          clientX: { configurable: true, value: 1 },
+          clientY: { configurable: true, value: 1 },
+          button: { configurable: true, value: 0 },
+          altKey: { configurable: true, value: false },
+          ctrlKey: { configurable: true, value: false },
+          metaKey: { configurable: true, value: false },
+          shiftKey: { configurable: true, value: false },
+        });
+        return event;
+      };
+
+      canvas?.dispatchEvent(pointerEvent("pointerdown", 7));
+      await nextTurn();
+      expect(container.querySelector("#orbit-canvas")?.className).toContain("dragging");
+      canvas?.dispatchEvent(pointerEvent("pointercancel", 8));
+      await nextTurn();
+      expect(container.querySelector("#orbit-canvas")?.className).toContain("dragging");
+      canvas?.dispatchEvent(pointerEvent("pointercancel", 7));
+      await nextTurn();
+      expect(container.querySelector("#orbit-canvas")?.className).toBe("simulation-canvas");
+
+      const saveButton = Array.from(
+        container.querySelectorAll<HTMLButtonElement>("button"),
+      ).find((button) => button.textContent?.trim() === "Save");
+      expect(saveButton).toBeDefined();
+
+      saveButton?.click();
+      await waitForTextContaining(container, "main", "Orbit API unavailable");
+
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(fetchSpy.mock.calls[0]?.[0]).toBe("/api/simulations");
+      expect(onError).not.toHaveBeenCalled();
+      expect(saveButton?.disabled).toBe(false);
+      expect(saveButton?.textContent?.trim()).toBe("Save");
+      expect(container.querySelector('[role="status"]')?.textContent).toBe(
+        "Orbit API unavailable",
+      );
+
+      mounted.dispose();
+      expect(container.innerHTML).toBe("");
+    } finally {
+      fetchSpy.mockRestore();
+    }
+  }, WEB_PACKAGE_COMPILE_TIMEOUT_MS);
 
   it("runs the mini-wikipedia browser edit, save, and reload flow", async () => {
     const result = expectCompileSuccess(

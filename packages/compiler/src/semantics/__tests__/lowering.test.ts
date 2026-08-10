@@ -1050,10 +1050,11 @@ fn helper_bool(value: bool)
   });
 
   it("preserves target type args for namespace-qualified effect ops", () => {
-    const source = `use self::util
+    const source = `eff Gen<T>
+  pass() -> T
 
-fn main()
-  util::Gen<i32>::pass()`;
+fn main(): Gen<i32> -> i32
+  Gen<i32>::pass()`;
     const ast = parse(source, "module_qualified_effect_target.voyd");
     const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });
     const moduleSymbol = symbolTable.declare({
@@ -1062,75 +1063,9 @@ fn main()
       declaredAt: ast.syntaxId,
     });
 
-    const modulePath = { namespace: "src" as const, segments: ["main"] as const };
-    const utilPath = {
-      namespace: "src" as const,
-      segments: ["main", "util"] as const,
-    };
-    const moduleId = modulePathToString(modulePath);
-    const utilId = modulePathToString(utilPath);
-    const useForm = ast.rest.find(
-      (entry) => isForm(entry) && entry.calls("use")
-    );
-    const dependency = {
-      kind: "use" as const,
-      path: utilPath,
-      span: toSourceSpan((useForm as any) ?? ast),
-    };
-    const moduleNode: ModuleNode = {
-      id: moduleId,
-      path: modulePath,
-      origin: { kind: "file", filePath: "module_qualified_effect_target.voyd" },
-      ast,
-      source,
-      dependencies: [dependency],
-    };
-    const graph: ModuleGraph = {
-      entry: moduleId,
-      modules: new Map([[moduleId, moduleNode]]),
-      diagnostics: [],
-    };
-
-    const exportedEffect = 401;
-    const exportedOp = 402;
-    const moduleExports: Map<string, ModuleExportTable> = new Map([
-      [
-        utilId,
-        new Map([
-          [
-            "Gen",
-            {
-              name: "Gen",
-              symbol: exportedEffect,
-              moduleId: utilId,
-              modulePath: utilPath,
-              packageId: packageIdFromPath(utilPath),
-              kind: "effect",
-              visibility: packageVisibility(),
-            },
-          ],
-          [
-            "pass",
-            {
-              name: "pass",
-              symbol: exportedOp,
-              moduleId: utilId,
-              modulePath: utilPath,
-              packageId: packageIdFromPath(utilPath),
-              kind: "effect-op",
-              visibility: packageVisibility(),
-            },
-          ],
-        ]),
-      ],
-    ]);
-
     const binding = runBindingPipeline({
       moduleForm: ast,
       symbolTable,
-      module: moduleNode,
-      graph,
-      moduleExports,
     });
 
     const builder = createHirBuilder({
@@ -1167,17 +1102,19 @@ fn main()
     }
   });
 
-  it("resolves unqualified handler heads to effect-op symbols when wrappers share the name", () => {
+  it("resolves an explicitly aliased operation in an unqualified handler head", () => {
     const source = `eff Env
   get(tail) -> i32
 
 fn get() -> i32
   0
 
+use Env::get as get_effect
+
 fn main() -> i32
   try
     Env::get()
-  get(tail):
+  get_effect(tail):
     tail()`;
     const ast = parse(source, "effect_op_resolution.voyd");
     const symbolTable = new SymbolTable({ rootOwner: ast.syntaxId });

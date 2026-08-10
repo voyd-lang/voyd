@@ -925,7 +925,8 @@ pub fn view(model: Model) -> Html<Msg>
       prevent_default: true,
       stop_propagation: false,
       capture: false,
-      passive: false
+      passive: false,
+      pointer_capture: false
     }
   ))
   html_element(

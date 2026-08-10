@@ -13,6 +13,30 @@ export type ResolvedModuleFile = {
   modulePath: ModulePath;
 };
 
+export class AmbiguousModulePathError extends Error {
+  readonly modulePath: ModulePath;
+  readonly ordinaryFile: string;
+  readonly packageRootFile: string;
+
+  constructor({
+    modulePath,
+    ordinaryFile,
+    packageRootFile,
+  }: {
+    modulePath: ModulePath;
+    ordinaryFile: string;
+    packageRootFile: string;
+  }) {
+    super(
+      `Both ${ordinaryFile} and ${packageRootFile} declare ${modulePathToString(modulePath)}`,
+    );
+    this.name = "AmbiguousModulePathError";
+    this.modulePath = modulePath;
+    this.ordinaryFile = ordinaryFile;
+    this.packageRootFile = packageRootFile;
+  }
+}
+
 export const modulePathToString = (path: ModulePath): string => {
   const namespace =
     path.namespace === "pkg" && path.packageName
@@ -78,6 +102,7 @@ export const resolveModuleFile = async (
     const resolved = await resolveFromRoot({
       root: normalizedRoots.src,
       requestedSegments,
+      requestedPath: path,
       host,
     });
     if (!resolved) return undefined;
@@ -92,6 +117,7 @@ export const resolveModuleFile = async (
     const resolved = await resolveFromRoot({
       root: normalizedRoots.std,
       requestedSegments,
+      requestedPath: path,
       host,
     });
     if (!resolved) return undefined;
@@ -113,6 +139,7 @@ export const resolveModuleFile = async (
     const resolved = await resolveFromRoot({
       root,
       requestedSegments,
+      requestedPath: path,
       host,
     });
     if (!resolved) continue;
@@ -291,34 +318,61 @@ const packageSourceRootCandidates = ({
 const resolveFromRoot = async ({
   root,
   requestedSegments,
+  requestedPath,
   host,
 }: {
   root: string;
   requestedSegments: readonly string[];
+  requestedPath: ModulePath;
   host: ModuleHost;
 }): Promise<{ filePath: string; segments: string[] } | undefined> => {
-  for (let length = requestedSegments.length; length > 0; length -= 1) {
-    const candidateSegments = requestedSegments.slice(0, length);
-    const candidateFile =
-      host.path.join(root, ...candidateSegments) + VOYD_EXTENSION;
-    const exists = await host.fileExists(candidateFile);
-    if (exists) {
+  const candidates = await Promise.all(
+    requestedSegments.map(async (_segment, index) => {
+      const length = requestedSegments.length - index;
+      const segments = requestedSegments.slice(0, length);
+      const file = host.path.join(root, ...segments) + VOYD_EXTENSION;
+      const packageRootFile =
+        host.path.join(root, ...segments, "pkg") + VOYD_EXTENSION;
+      const [fileExists, packageRootExists] = await Promise.all([
+        host.fileExists(file),
+        host.fileExists(packageRootFile),
+      ]);
       return {
-        filePath: host.path.resolve(candidateFile),
-        segments: [...candidateSegments],
+        segments,
+        file,
+        packageRootFile,
+        fileExists,
+        packageRootExists,
+      };
+    }),
+  );
+
+  const ambiguous = candidates.find(
+    ({ fileExists, packageRootExists }) =>
+      fileExists && packageRootExists,
+  );
+  if (ambiguous) {
+    throw new AmbiguousModulePathError({
+      modulePath: { ...requestedPath, segments: [...ambiguous.segments] },
+      ordinaryFile: host.path.resolve(ambiguous.file),
+      packageRootFile: host.path.resolve(ambiguous.packageRootFile),
+    });
+  }
+
+  for (const candidate of candidates) {
+    if (candidate.fileExists) {
+      return {
+        filePath: host.path.resolve(candidate.file),
+        segments: [...candidate.segments],
       };
     }
-
-    const candidatePkgFile =
-      host.path.join(root, ...candidateSegments, "pkg") + VOYD_EXTENSION;
-    const pkgExists = await host.fileExists(candidatePkgFile);
-    if (!pkgExists) {
+    if (!candidate.packageRootExists) {
       continue;
     }
 
     return {
-      filePath: host.path.resolve(candidatePkgFile),
-      segments: [...candidateSegments, "pkg"],
+      filePath: host.path.resolve(candidate.packageRootFile),
+      segments: [...candidate.segments, "pkg"],
     };
   }
   return undefined;

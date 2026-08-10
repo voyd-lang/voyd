@@ -100,6 +100,26 @@ export const assertFieldAccess = ({
   if (canAccessField(field, ctx, state, { allowOwnerPrivate })) {
     return;
   }
+  const ownerPackage = field.packageId ?? ctx.packageId;
+  if (
+    field.visibility?.level !== "object" &&
+    ownerPackage !== ctx.packageId &&
+    field.visibility?.api !== true
+  ) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0009",
+      params: {
+        kind: "external-member-requires-api",
+        memberKind: "field",
+        name: field.name,
+        ownerPackage,
+        consumerPackage: ctx.packageId,
+      },
+      span: normalizeSpan(span),
+    });
+    return;
+  }
   emitDiagnostic({
     ctx,
     code: "TY0009",
@@ -132,6 +152,26 @@ export const assertMemberAccess = ({
     return;
   }
   const name = ctx.symbolTable.getSymbol(symbol).name;
+  const ownerPackage = metadata.packageId ?? ctx.packageId;
+  if (
+    metadata.visibility?.level !== "object" &&
+    ownerPackage !== ctx.packageId &&
+    metadata.visibility?.api !== true
+  ) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0009",
+      params: {
+        kind: "external-member-requires-api",
+        memberKind: "method",
+        name,
+        ownerPackage,
+        consumerPackage: ctx.packageId,
+      },
+      span: normalizeSpan(span),
+    });
+    return;
+  }
   emitDiagnostic({
     ctx,
     code: "TY0009",
@@ -162,6 +202,26 @@ export const reportInaccessibleFieldRequirement = ({
   allowOwnerPrivate?: boolean;
 }): void => {
   if (canAccessField(field, ctx, state, { allowOwnerPrivate })) {
+    return;
+  }
+  const ownerPackage = field.packageId ?? ctx.packageId;
+  if (
+    field.visibility?.level !== "object" &&
+    ownerPackage !== ctx.packageId &&
+    field.visibility?.api !== true
+  ) {
+    emitDiagnostic({
+      ctx,
+      code: "TY0010",
+      params: {
+        kind: "external-construction-requires-api",
+        typeName,
+        member: field.name,
+        ownerPackage,
+        consumerPackage: ctx.packageId,
+      },
+      span: normalizeSpan(span),
+    });
     return;
   }
   emitDiagnostic({

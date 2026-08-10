@@ -2,13 +2,16 @@ import { walkExpression, type HirEffectHandlerExpr } from "../../hir/index.js";
 import { typeExpression } from "../expressions.js";
 import {
   composeEffectRows,
+  effectOpForSymbol,
   effectOpName,
   getExprEffectRow,
 } from "../effects.js";
 import {
-  ensureTypeMatches,
-  resolveTypeExpr,
-} from "../type-system.js";
+  effectOperationIdentityKey,
+  effectOpsHaveSameIdentity,
+  type EffectOp,
+} from "../../effects/effect-table.js";
+import { ensureTypeMatches, resolveTypeExpr } from "../type-system.js";
 import { satisfies as typeSatisfies } from "../type-relations.js";
 import type { TypingContext, TypingState } from "../types.js";
 import {
@@ -27,16 +30,18 @@ import type {
 
 const dropHandledOperation = ({
   row,
-  opName,
+  operation,
   ctx,
 }: {
   row: number;
-  opName: string;
+  operation: EffectOp;
   ctx: TypingContext;
 }): number => {
   const desc = ctx.effects.getRow(row);
   return ctx.effects.internRow({
-    operations: desc.operations.filter((op) => op.name !== opName),
+    operations: desc.operations.filter(
+      (op) => !effectOpsHaveSameIdentity(op, operation),
+    ),
     tailVar: desc.tailVar,
   });
 };
@@ -360,12 +365,9 @@ const typeHandlerClause = ({
     ctx.valueTypes.set(param.symbol, paramType);
   });
 
-  const clauseReturn = typeExpression(
-    clause.body,
-    ctx,
-    state,
-    { expectedType: handlerReturnTypeId },
-  );
+  const clauseReturn = typeExpression(clause.body, ctx, state, {
+    expectedType: handlerReturnTypeId,
+  });
   if (handlerReturnTypeId !== ctx.primitives.unknown) {
     ensureTypeMatches(
       clauseReturn,
@@ -390,11 +392,7 @@ const enforceResumptionUsage = ({
   opName: string;
   span: SourceSpan;
 }): void => {
-  const operationDecl = ctx.decls.getEffectOperation(clause.operation);
-  const resumable = operationDecl?.operation.resumable;
-  if (resumable !== "tail" && resumable !== "resume") {
-    return;
-  }
+  const resumable = clause.resumable === "fn" ? "tail" : "resume";
   const continuationSymbol = clause.parameters[0]?.symbol;
   const usage: ContinuationUsage =
     typeof continuationSymbol === "number"
@@ -476,16 +474,20 @@ export const typeEffectHandlerExpr = (
   const handlerEffects: number[] = [];
   let remainingRow = bodyEffectRow;
   const reRaisedOps = new Set<string>();
-  const handledOpNames = new Set(
-    expr.handlers.map((clause) => effectOpName(clause.operation, ctx)),
-  );
-  const continuationEffectRow = Array.from(handledOpNames).reduce(
-    (row, opName) => dropHandledOperation({ row, opName, ctx }),
+  const handledOps = new Map<string, EffectOp>();
+  expr.handlers.forEach((clause) => {
+    const operation = effectOpForSymbol(clause.operation, ctx);
+    handledOps.set(effectOperationIdentityKey(operation), operation);
+  });
+  const continuationEffectRow = Array.from(handledOps.values()).reduce(
+    (row, operation) => dropHandledOperation({ row, operation, ctx }),
     bodyEffectRow,
   );
 
   expr.handlers.forEach((clause) => {
-    const opName = effectOpName(clause.operation, ctx);
+    const operation = effectOpForSymbol(clause.operation, ctx);
+    const opName = operation.name;
+    const operationKey = effectOperationIdentityKey(operation);
     const clauseEffectRow = typeHandlerClause({
       handlerBody: expr.body,
       clause,
@@ -496,11 +498,17 @@ export const typeEffectHandlerExpr = (
     });
     handlerEffects.push(clauseEffectRow);
     const clauseDesc = ctx.effects.getRow(clauseEffectRow);
-    const reRaises = clauseDesc.operations.some((op) => op.name === opName);
+    const reRaises = clauseDesc.operations.some((op) =>
+      effectOpsHaveSameIdentity(op, operation),
+    );
     if (reRaises) {
-      reRaisedOps.add(opName);
+      reRaisedOps.add(operationKey);
     } else {
-      remainingRow = dropHandledOperation({ row: remainingRow, opName, ctx });
+      remainingRow = dropHandledOperation({
+        row: remainingRow,
+        operation,
+        ctx,
+      });
     }
     const clauseSpan = ctx.hir.expressions.get(clause.body)?.span ?? expr.span;
     enforceResumptionUsage({ clause, ctx, opName, span: clauseSpan });
@@ -510,12 +518,9 @@ export const typeEffectHandlerExpr = (
   let effectRow = composeEffectRows(ctx.effects, [remainingRow, handlersRow]);
 
   if (typeof expr.finallyBranch === "number") {
-    const finallyType = typeExpression(
-      expr.finallyBranch,
-      ctx,
-      state,
-      { expectedType: bodyType },
-    );
+    const finallyType = typeExpression(expr.finallyBranch, ctx, state, {
+      expectedType: bodyType,
+    });
     if (bodyType !== ctx.primitives.unknown) {
       ensureTypeMatches(finallyType, bodyType, ctx, state, "handler finally");
     }
@@ -527,7 +532,7 @@ export const typeEffectHandlerExpr = (
 
   const remainingDesc = ctx.effects.getRow(remainingRow);
   const unhandled = remainingDesc.operations.filter(
-    (op) => !reRaisedOps.has(op.name),
+    (op) => !reRaisedOps.has(effectOperationIdentityKey(op)),
   );
   if (
     unhandled.length > 0 &&

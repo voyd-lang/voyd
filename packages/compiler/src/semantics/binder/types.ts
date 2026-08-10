@@ -40,6 +40,8 @@ export interface SymbolRecord {
   kind: SymbolKind;
   declaredAt: NodeId;
   scope: ScopeId;
+  /** Compilation-local hygienic identity; never participates in display names. */
+  bindingIdentity?: string;
   scheme?: TypeSchemeId;
   metadata?: Record<string, unknown>;
 }
@@ -64,4 +66,5 @@ export interface SymbolAliasBinding {
   name: string;
   symbol: SymbolId;
   scope: ScopeId;
+  bindingIdentity?: string;
 }

@@ -9,19 +9,24 @@ import type { ProgramSymbolId } from "../semantics/ids.js";
 import type { HirModuleLet } from "../semantics/hir/index.js";
 import { compileExpression } from "./expressions/index.js";
 import { liftHeapValueToInline, lowerValueForHeapField } from "./structural.js";
-import { getInlineHeapBoxType, getSignatureWasmType, wasmTypeFor } from "./types.js";
+import {
+  getInlineHeapBoxType,
+  getSignatureWasmType,
+  wasmTypeFor,
+} from "./types.js";
 import { walkHirExpression } from "./hir-walk.js";
 import { markDependencyFunctionReachable } from "./function-dependencies.js";
 import { boxSignatureSpillValue } from "./signature-spill.js";
+import {
+  sanitizeWasmIdentifier,
+  sanitizedWasmSymbolName,
+} from "./symbol-names.js";
 
 const REACHABILITY_STATE = Symbol.for("voyd.codegen.reachabilityState");
 
 type ReachabilityState = {
   symbols?: Set<ProgramSymbolId>;
 };
-
-const sanitizeIdentifier = (value: string): string =>
-  value.replace(/[^a-zA-Z0-9_]/g, "_");
 
 const defaultValueForWasmType = (
   wasmType: binaryen.Type,
@@ -47,11 +52,6 @@ const moduleLetItems = (ctx: CodegenContext): HirModuleLet[] =>
     (item): item is HirModuleLet => item.kind === "module-let",
   );
 
-const localSymbolName = (ctx: CodegenContext, symbol: SymbolId): string =>
-  ctx.program.symbols.getName(
-    ctx.program.symbols.idOf({ moduleId: ctx.moduleId, symbol }),
-  ) ?? `${symbol}`;
-
 const getterNameFor = ({
   ctx,
   symbol,
@@ -59,9 +59,13 @@ const getterNameFor = ({
   ctx: CodegenContext;
   symbol: SymbolId;
 }): string =>
-  `__module_let__${sanitizeIdentifier(ctx.moduleLabel)}__${sanitizeIdentifier(
-    localSymbolName(ctx, symbol),
-  )}__${symbol}`;
+  `__module_let__${sanitizeWasmIdentifier(
+    ctx.moduleLabel,
+  )}__${sanitizedWasmSymbolName({
+    ctx,
+    moduleId: ctx.moduleId,
+    symbol,
+  })}__${symbol}`;
 
 const resolveImportedSymbol = ({
   ctx,
@@ -82,7 +86,10 @@ const resolveImportedSymbol = ({
       return { moduleId: currentModuleId, symbol: currentSymbol };
     }
     seen.add(key);
-    const targetId = ctx.program.imports.getTarget(currentModuleId, currentSymbol);
+    const targetId = ctx.program.imports.getTarget(
+      currentModuleId,
+      currentSymbol,
+    );
     if (typeof targetId !== "number") {
       return { moduleId: currentModuleId, symbol: currentSymbol };
     }
@@ -237,6 +244,7 @@ const compileModuleLetGetter = ({
           value: ctx.mod.global.get(valueGlobal, storageType),
           typeId,
           ctx,
+          fnCtx,
         });
   const getterValue = (value: binaryen.ExpressionRef): binaryen.ExpressionRef =>
     boxSignatureSpillValue({
@@ -268,7 +276,10 @@ const compileModuleLetGetter = ({
   );
 
   const body = ctx.mod.if(
-    ctx.mod.i32.eq(ctx.mod.global.get(readyGlobal, binaryen.i32), ctx.mod.i32.const(1)),
+    ctx.mod.i32.eq(
+      ctx.mod.global.get(readyGlobal, binaryen.i32),
+      ctx.mod.i32.const(1),
+    ),
     getterValue(loadStoredValue()),
     initializeBranch,
   );
@@ -277,9 +288,12 @@ const compileModuleLetGetter = ({
 };
 
 export const registerModuleLetGetters = (ctx: CodegenContext): void => {
-  const reachableModuleLets = ctx.optimization?.reachableModuleLets.get(ctx.moduleId);
+  const reachableModuleLets = ctx.optimization?.reachableModuleLets.get(
+    ctx.moduleId,
+  );
   const moduleLets = moduleLetItems(ctx).filter(
-    (moduleLet) => !reachableModuleLets || reachableModuleLets.has(moduleLet.symbol),
+    (moduleLet) =>
+      !reachableModuleLets || reachableModuleLets.has(moduleLet.symbol),
   );
   if (moduleLets.length === 0) {
     return;

@@ -73,11 +73,14 @@ pub fn make_i64(value: i64): () -> MsgPack
 pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
   msgpack_fns::make_map(value)
 
-/// Encodes a boundary-compatible DTO value as MessagePack.
+/// Encodes a boundary-compatible DTO value with its compiler-derived schema.
+///
+/// Record keys use their declared source names, optional fields are omitted
+/// when absent, and named variants use `$variant` plus their payload fields.
 pub fn pack_boundary_value<T>(value: T): () -> MsgPack
   boundary_value_to_msgpack(value)
 
-/// Decodes a boundary-compatible DTO value from MessagePack.
+/// Decodes MessagePack using the compiler-derived schema for `T`.
 pub fn unpack_boundary_value<T>(value: MsgPack): () -> T
   boundary_msgpack_to_value<T>(value)
 

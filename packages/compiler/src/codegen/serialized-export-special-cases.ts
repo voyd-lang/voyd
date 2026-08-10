@@ -58,7 +58,7 @@ const boundaryMsgPackTypeAdapter: SerializedExportTypeAdapter = {
   acceptsType: ({ typeId, ctx }) =>
     isBoundaryMsgPackValue(typeId, ctx) ||
     Boolean(boundaryMsgPackPayloadField(typeId, ctx)),
-  packResultValue: ({ value, typeId, ctx }) => {
+  packResultValue: ({ value, typeId, ctx, fnCtx }) => {
     if (isBoundaryMsgPackValue(typeId, ctx)) {
       return value;
     }
@@ -75,6 +75,7 @@ const boundaryMsgPackTypeAdapter: SerializedExportTypeAdapter = {
       field: payloadField,
       pointer: () => value,
       ctx,
+      fnCtx,
     });
   },
 };

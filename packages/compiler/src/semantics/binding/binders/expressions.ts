@@ -8,6 +8,7 @@ import {
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
+  identifierBindingKey,
 } from "../../../parser/index.js";
 import {
   parseIfBranches,
@@ -21,7 +22,11 @@ import type { BindingContext, BindingResult } from "../types.js";
 import type { ScopeId, SymbolId } from "../../ids.js";
 import type { BinderScopeTracker } from "./scope-tracker.js";
 import { moduleVisibility } from "../../hir/index.js";
-import type { ModuleExportEntry } from "../../modules.js";
+import {
+  firstInstanceMemberOwner,
+  moduleNamespaceExportEntry,
+  type ModuleExportEntry,
+} from "../../modules.js";
 import type { ModuleMemberTable } from "../types.js";
 import { extractConstructorTargetIdentifier } from "../../constructors.js";
 import {
@@ -43,10 +48,12 @@ import {
   canAccessExport,
   canAccessSymbolVisibility,
 } from "../export-visibility.js";
+import { isPackageRootModule } from "../../packages.js";
 import {
-  enumVariantTypeNamesFromAliasTarget,
+  enumVariantTypeTargetsFromAliasTarget,
   importedSymbolTargetFromMetadata,
 } from "../../enum-namespace.js";
+import { resolveNominalTypeSymbol } from "../../nominal-type-target.js";
 import {
   ARRAY_LITERAL_CONSTRUCTOR_EXPORT,
   ARRAY_LITERAL_CONSTRUCTOR_MODULE_ID,
@@ -59,14 +66,56 @@ import {
   collectTryHandlerClauses,
   isTryHandlerClause,
 } from "../../try-handler-clauses.js";
-import { resolveUnqualifiedEffectOperation } from "../../effect-operation-resolution.js";
+import {
+  resolveQualifiedEffectOperation,
+  resolveUnqualifiedEffectOperation,
+} from "../../effect-operation-resolution.js";
+import { bindingIdentityForSyntax } from "../hygiene.js";
 
 export const bindExpr = (
   expr: Expr | undefined,
   ctx: BindingContext,
   tracker: BinderScopeTracker,
+): void => bindExprAtPosition(expr, ctx, tracker, "value");
+
+export const flushPendingHandlerOperationBindings = (
+  ctx: BindingContext,
+  tracker: BinderScopeTracker,
 ): void => {
-  if (!expr || !isForm(expr)) return;
+  const pending = ctx.pendingHandlerOperationBindings;
+  ctx.pendingHandlerOperationBindings = [];
+  pending.forEach(({ head, scope }) => {
+    tracker.enterScope(scope, () => {
+      bindExpr(head.syntax, ctx, tracker);
+      validateHandlerOperationBinding({
+        head,
+        ctx,
+        scope,
+        deferUnresolvedQualifier: false,
+      });
+    });
+  });
+};
+
+const bindExprAtPosition = (
+  expr: Expr | undefined,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker,
+  position: "value" | "callee",
+): void => {
+  if (!expr) return;
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    bindHygienicIdentifierReference(expr, ctx, tracker.current());
+    if (position === "value") {
+      reportFirstClassEffectOperationReference({
+        identifier: expr,
+        ctx,
+        scope: tracker.current(),
+      });
+    }
+    return;
+  }
+  if (!isForm(expr)) return;
 
   if (expr.callsInternal("new_string")) {
     ensureGeneratedStringLiteralImport({
@@ -128,9 +177,65 @@ export const bindExpr = (
     maybeBindConstructorCall(expr, ctx, tracker);
   }
 
-  for (const child of expr.toArray()) {
-    bindExpr(child, ctx, tracker);
+  const [callee, ...args] = expr.toArray();
+  bindExprAtPosition(callee, ctx, tracker, "callee");
+  const argPosition =
+    position === "callee" && expr.callsInternal("generics")
+      ? "callee"
+      : "value";
+  for (const arg of args) {
+    bindExprAtPosition(arg, ctx, tracker, argPosition);
   }
+};
+
+const reportFirstClassEffectOperationReference = ({
+  identifier,
+  ctx,
+  scope,
+}: {
+  identifier: IdentifierAtom | InternalIdentifierAtom;
+  ctx: BindingContext;
+  scope: ScopeId;
+}): void => {
+  const symbol = resolveUnqualifiedEffectOperation({
+    name: identifier.value,
+    scope,
+    symbolTable: ctx.symbolTable,
+    bindingIdentity: identifierBindingKey(identifier),
+    directSymbol: ctx.directSymbolBySyntax.get(identifier.syntaxId),
+  });
+  if (typeof symbol !== "number") {
+    return;
+  }
+
+  const local = ctx.decls.getEffectOperation(symbol);
+  const importedTarget = local
+    ? undefined
+    : importedSymbolTargetFromMetadata(
+        ctx.symbolTable.getSymbol(symbol).metadata as
+          | Record<string, unknown>
+          | undefined,
+      );
+  const operation =
+    local ??
+    (importedTarget
+      ? ctx.dependencies
+          .get(importedTarget.moduleId)
+          ?.decls.getEffectOperation(importedTarget.symbol)
+      : undefined);
+  const record = ctx.symbolTable.getSymbol(symbol);
+
+  ctx.diagnostics.push(
+    diagnosticFromCode({
+      code: "BD0009",
+      params: {
+        kind: "first-class-effect-operation",
+        effectName: operation?.effect.name ?? "effect",
+        operationName: operation?.operation.name ?? record.name,
+      },
+      span: toSourceSpan(identifier),
+    }),
+  );
 };
 
 export const bindTypeExpr = (
@@ -138,7 +243,12 @@ export const bindTypeExpr = (
   ctx: BindingContext,
   tracker: BinderScopeTracker,
 ): void => {
-  if (!expr || !isForm(expr)) return;
+  if (!expr) return;
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    bindHygienicIdentifierReference(expr, ctx, tracker.current());
+    return;
+  }
+  if (!isForm(expr)) return;
 
   if (expr.calls("::")) {
     bindTypeNamespaceAccess(expr, ctx, tracker);
@@ -148,6 +258,252 @@ export const bindTypeExpr = (
   for (const child of expr.toArray()) {
     bindTypeExpr(child, ctx, tracker);
   }
+};
+
+const bindHygienicIdentifierReference = (
+  identifier: IdentifierAtom | InternalIdentifierAtom,
+  ctx: BindingContext,
+  scope: ScopeId,
+): void => {
+  const lexicalContext = identifier.lexicalContext;
+  const bindingIdentity = identifierBindingKey(identifier);
+  if (!lexicalContext || !bindingIdentity || lexicalContext.kind === "fresh") {
+    return;
+  }
+
+  const existing = ctx.symbolTable.resolveBinding(
+    identifier.value,
+    bindingIdentity,
+    scope,
+  );
+  if (typeof existing === "number") {
+    ctx.directSymbolBySyntax.set(identifier.syntaxId, existing);
+    return;
+  }
+
+  const targetModuleId =
+    lexicalContext.kind === "macro-template"
+      ? lexicalContext.definitionModuleId
+      : lexicalContext.targetModuleId;
+  const isCurrentModule = targetModuleId === ctx.module.id;
+  if (isCurrentModule) {
+    const exact = ctx.symbolTable.resolveAllBindings(
+      identifier.value,
+      bindingIdentity,
+      ctx.symbolTable.rootScope,
+    );
+    const targets =
+      exact.length > 0
+        ? exact
+        : ctx.symbolTable.resolveAll(
+            identifier.value,
+            ctx.symbolTable.rootScope,
+          );
+    if (targets.length === 0) {
+      return;
+    }
+    targets.forEach((symbol) =>
+      ctx.symbolTable.bindAlias(
+        { name: identifier.value, symbol, bindingIdentity },
+        ctx.symbolTable.rootScope,
+      ),
+    );
+    ctx.directSymbolBySyntax.set(identifier.syntaxId, targets[0]!);
+    return;
+  }
+
+  const cacheKey = `${targetModuleId}:${identifier.value}:${bindingIdentity}`;
+  const cached = ctx.hygienicImportCache.get(cacheKey);
+  if (cached !== undefined) {
+    if (cached.length > 0) {
+      ctx.directSymbolBySyntax.set(identifier.syntaxId, cached[0]!);
+    }
+    return;
+  }
+
+  const dependency = ctx.dependencies.get(targetModuleId);
+  if (!dependency) {
+    ctx.hygienicImportCache.set(cacheKey, []);
+    reportUnresolvedSymbolReference({ identifier, targetModuleId, ctx });
+    return;
+  }
+  const targetSymbols = (() => {
+    if (
+      lexicalContext.kind === "symbol-reference" &&
+      lexicalContext.compilerOwned
+    ) {
+      const exported = ctx.moduleExports
+        .get(targetModuleId)
+        ?.get(identifier.value);
+      if (!exported || exported.kind === "module") {
+        return [];
+      }
+      return exported.symbols?.length
+        ? [...exported.symbols]
+        : [exported.symbol];
+    }
+    const exact = dependency.symbolTable.resolveAllBindings(
+      identifier.value,
+      bindingIdentity,
+      dependency.symbolTable.rootScope,
+    );
+    return exact.length > 0
+      ? [...exact]
+      : [
+          ...dependency.symbolTable.resolveAll(
+            identifier.value,
+            dependency.symbolTable.rootScope,
+          ),
+        ];
+  })();
+  if (targetSymbols.length === 0) {
+    ctx.hygienicImportCache.set(cacheKey, []);
+    reportUnresolvedSymbolReference({ identifier, targetModuleId, ctx });
+    return;
+  }
+
+  const locals = targetSymbols.map((targetSymbol) => {
+    const target = resolveHygienicImportTarget({
+      moduleId: targetModuleId,
+      symbol: targetSymbol,
+      ctx,
+    });
+    const targetRecord = target.dependency.symbolTable.getSymbol(target.symbol);
+    const referencedModuleId = importedModuleIdFrom(
+      targetRecord.metadata as Record<string, unknown> | undefined,
+    );
+    const importableMetadata = importableMetadataFrom(
+      targetRecord.metadata as Record<string, unknown> | undefined,
+    );
+    const local = ctx.symbolTable.declare(
+      {
+        name: identifier.value,
+        kind: targetRecord.kind,
+        declaredAt: identifier.syntaxId,
+        bindingIdentity,
+        metadata: {
+          import:
+            targetRecord.kind === "module" && referencedModuleId
+              ? { moduleId: referencedModuleId }
+              : { moduleId: target.moduleId, symbol: target.symbol },
+          hygienicReference: true,
+          ...(importableMetadata ?? {}),
+        },
+      },
+      ctx.symbolTable.rootScope,
+    );
+    ctx.imports.push({
+      name: identifier.value,
+      local,
+      target: { moduleId: target.moduleId, symbol: target.symbol },
+      visibility: moduleVisibility(),
+      span: toSourceSpan(identifier),
+    });
+    return local;
+  });
+
+  const dependencyOverloadSets = new Set(
+    targetSymbols.flatMap((symbol) => {
+      const set = dependency.overloadBySymbol.get(symbol);
+      return typeof set === "number" ? [set] : [];
+    }),
+  );
+  if (locals.length > 1 || dependencyOverloadSets.size > 0) {
+    const nextId =
+      Math.max(
+        -1,
+        ...ctx.importedOverloadOptions.keys(),
+        ...ctx.overloads.keys(),
+      ) + 1;
+    ctx.importedOverloadOptions.set(nextId, locals);
+    locals.forEach((local) => ctx.overloadBySymbol.set(local, nextId));
+  }
+
+  ctx.hygienicImportCache.set(cacheKey, locals);
+  ctx.directSymbolBySyntax.set(identifier.syntaxId, locals[0]!);
+};
+
+const resolveHygienicImportTarget = ({
+  moduleId,
+  symbol,
+  ctx,
+}: {
+  moduleId: string;
+  symbol: SymbolId;
+  ctx: BindingContext;
+}): {
+  moduleId: string;
+  symbol: SymbolId;
+  dependency: BindingResult;
+} => {
+  const seen = new Set<string>();
+  let currentModuleId = moduleId;
+  let currentSymbol = symbol;
+  let dependency = ctx.dependencies.get(currentModuleId)!;
+
+  while (true) {
+    const key = `${currentModuleId}:${currentSymbol}`;
+    if (seen.has(key)) {
+      return { moduleId: currentModuleId, symbol: currentSymbol, dependency };
+    }
+    seen.add(key);
+
+    const record = dependency.symbolTable.getSymbol(currentSymbol);
+    const imported = importedSymbolTargetFromMetadata(
+      record.metadata as Record<string, unknown> | undefined,
+    );
+    if (!imported) {
+      return { moduleId: currentModuleId, symbol: currentSymbol, dependency };
+    }
+    const importedDependency = ctx.dependencies.get(imported.moduleId);
+    if (!importedDependency) {
+      return { moduleId: currentModuleId, symbol: currentSymbol, dependency };
+    }
+    currentModuleId = imported.moduleId;
+    currentSymbol = imported.symbol;
+    dependency = importedDependency;
+  }
+};
+
+const reportUnresolvedSymbolReference = ({
+  identifier,
+  targetModuleId,
+  ctx,
+}: {
+  identifier: IdentifierAtom | InternalIdentifierAtom;
+  targetModuleId: string;
+  ctx: BindingContext;
+}): void => {
+  if (identifier.lexicalContext?.kind !== "symbol-reference") {
+    return;
+  }
+  const definition = identifier.macroProvenance?.definition;
+  const related = definition
+    ? [
+        diagnosticFromCode({
+          code: "BD0008",
+          params: { kind: "macro-definition-reference" },
+          severity: "note",
+          span: {
+            file: definition.filePath,
+            start: definition.startIndex,
+            end: definition.endIndex,
+          },
+        }),
+      ]
+    : undefined;
+  ctx.diagnostics.push(
+    diagnosticFromCode({
+      code: "BD0008",
+      params: {
+        kind: "unresolved-symbol-reference",
+        name: identifier.value,
+        moduleId: targetModuleId,
+      },
+      span: toSourceSpan(identifier),
+      related,
+    }),
+  );
 };
 
 const bindTry = (
@@ -163,11 +519,13 @@ const bindTry = (
         isTryHandlerClause({
           expr: entry,
           scope: tracker.current(),
-          resolveBareHandlerHead: ({ name, scope }) =>
+          resolveBareHandlerHead: ({ name, scope, syntax }) =>
             typeof resolveUnqualifiedEffectOperation({
               name,
               scope,
               symbolTable: ctx.symbolTable,
+              bindingIdentity: identifierBindingKey(syntax),
+              directSymbol: ctx.directSymbolBySyntax.get(syntax.syntaxId),
             }) === "number",
         }) &&
         isForm(entry)
@@ -180,11 +538,13 @@ const bindTry = (
     ...collectTryHandlerClauses({
       expr: body,
       scope: tracker.current(),
-      resolveBareHandlerHead: ({ name, scope }) =>
+      resolveBareHandlerHead: ({ name, scope, syntax }) =>
         typeof resolveUnqualifiedEffectOperation({
           name,
           scope,
           symbolTable: ctx.symbolTable,
+          bindingIdentity: identifierBindingKey(syntax),
+          directSymbol: ctx.directSymbolBySyntax.get(syntax.syntaxId),
         }) === "number",
     }),
   );
@@ -214,6 +574,11 @@ const bindTry = (
       // Bind the head itself so namespace member imports are materialized before
       // lowering resolves handler operation symbols.
       bindExpr(head.syntax, ctx, tracker);
+      validateHandlerOperationBinding({
+        head,
+        ctx,
+        scope: clauseScope,
+      });
       declareHandlerParams(head, ctx, clauseScope);
       bindExpr(handlerBody, ctx, tracker);
     });
@@ -319,11 +684,26 @@ const bindMatch = (
       ctx.scopeByNode.set(arm.form.syntaxId, caseScope);
 
       tracker.enterScope(caseScope, () => {
+        bindMatchPatternType(arm.pattern, ctx, tracker);
         declareMatchPatternBindings(arm.pattern, ctx, caseScope);
         bindExpr(arm.value, ctx, tracker);
       });
     });
   });
+};
+
+const bindMatchPatternType = (
+  pattern: SurfaceMatchPattern,
+  ctx: BindingContext,
+  tracker: BinderScopeTracker,
+): void => {
+  if (
+    pattern.kind === "type" ||
+    pattern.kind === "type-binding" ||
+    pattern.kind === "destructure"
+  ) {
+    bindTypeExpr(pattern.typeExpr, ctx, tracker);
+  }
 };
 
 const bindWhile = (
@@ -379,6 +759,7 @@ const bindLambda = (
         name: param.value,
         kind: "type-parameter",
         declaredAt: param.syntaxId,
+        bindingIdentity: bindingIdentityForSyntax(param),
       });
     });
 
@@ -409,7 +790,7 @@ const declareLambdaParam = (
     declaredAt: param.syntax.syntaxId,
     metadata: { bindingKind: param.bindingKind, declarationSpan },
     scope,
-    syntax: param.syntax,
+    syntax: param.name,
     ctx,
   });
 };
@@ -424,6 +805,9 @@ const maybeBindConstructorCall = (
   }
   const callee = form.at(0);
   const identifier = extractConstructorTargetIdentifier(callee);
+  if (identifier) {
+    bindHygienicIdentifierReference(identifier, ctx, tracker.current());
+  }
   ensureConstructorImportForTarget({
     identifier,
     ctx,
@@ -479,9 +863,57 @@ const bindNamespaceAccessCore = ({
     return;
   }
 
-  const moduleSymbol = resolveNamespaceModuleSymbol(target, scope, ctx);
-  if (typeof moduleSymbol === "number") {
-    const targetRecord = ctx.symbolTable.getSymbol(moduleSymbol);
+  const namespaceSymbol = resolveNamespaceModuleSymbol(target, scope, ctx);
+  if (typeof namespaceSymbol === "number") {
+    const targetRecord = ctx.symbolTable.getSymbol(namespaceSymbol);
+    if (targetRecord.kind === "effect") {
+      const operationSyntax = extractConstructorTargetIdentifier(member);
+      if (!operationSyntax) {
+        return;
+      }
+      ensureQualifiedEffectOperationImport({
+        effectSymbol: namespaceSymbol,
+        operationName: memberName,
+        syntax: operationSyntax,
+        ctx,
+      });
+      const operation = resolveQualifiedEffectOperation({
+        effectSymbol: namespaceSymbol,
+        name: memberName,
+        symbolTable: ctx.symbolTable,
+        moduleMembers: ctx.moduleMembers,
+      });
+      if (typeof operation !== "number") {
+        ctx.diagnostics.push(
+          diagnosticFromCode({
+            code: "BD0009",
+            params: {
+              kind: "missing-effect-operation",
+              effectName: targetRecord.name,
+              operationName: memberName,
+            },
+            span: toSourceSpan(operationSyntax),
+          }),
+        );
+        return;
+      }
+      ctx.directSymbolBySyntax.set(operationSyntax.syntaxId, operation);
+      if (!isForm(member)) {
+        ctx.diagnostics.push(
+          diagnosticFromCode({
+            code: "BD0009",
+            params: {
+              kind: "first-class-effect-operation",
+              effectName: targetRecord.name,
+              operationName: memberName,
+            },
+            span: toSourceSpan(member as Syntax),
+          }),
+        );
+      }
+      return;
+    }
+
     const importMeta = targetRecord.metadata as {
       import?: { moduleId?: string };
     };
@@ -492,7 +924,7 @@ const bindNamespaceAccessCore = ({
 
     ensureModuleMemberImport({
       moduleId,
-      moduleSymbol,
+      moduleSymbol: namespaceSymbol,
       memberName,
       syntax: member as Syntax,
       scope,
@@ -511,7 +943,15 @@ const bindNamespaceAccessCore = ({
     return;
   }
 
-  const targetSymbol = ctx.symbolTable.resolve(identifier.value, scope);
+  const targetSymbol =
+    ctx.directSymbolBySyntax.get(identifier.syntaxId) ??
+    (identifierBindingKey(identifier)
+      ? ctx.symbolTable.resolveBinding(
+          identifier.value,
+          identifierBindingKey(identifier)!,
+          scope,
+        )
+      : ctx.symbolTable.resolve(identifier.value, scope));
   if (typeof targetSymbol !== "number") {
     return;
   }
@@ -552,7 +992,13 @@ const resolveNamespaceModuleSymbol = (
   }
 
   if (isIdentifierAtom(target) || isInternalIdentifierAtom(target)) {
-    const symbol = ctx.symbolTable.resolve(target.value, scope);
+    const direct = ctx.directSymbolBySyntax.get(target.syntaxId);
+    const bindingIdentity = identifierBindingKey(target);
+    const symbol =
+      direct ??
+      (bindingIdentity
+        ? ctx.symbolTable.resolveBinding(target.value, bindingIdentity, scope)
+        : ctx.symbolTable.resolve(target.value, scope));
     if (typeof symbol !== "number") {
       return undefined;
     }
@@ -560,9 +1006,7 @@ const resolveNamespaceModuleSymbol = (
     if (record.kind !== "module" && record.kind !== "effect") {
       return undefined;
     }
-    if (!record.metadata || !("import" in record.metadata)) {
-      return undefined;
-    }
+    ctx.directSymbolBySyntax.set(target.syntaxId, symbol);
     return symbol;
   }
 
@@ -597,13 +1041,195 @@ const resolveNamespaceModuleSymbol = (
     if (record.kind !== "module" && record.kind !== "effect") {
       continue;
     }
-    if (!record.metadata || !("import" in record.metadata)) {
-      continue;
+    const memberSyntax = extractConstructorTargetIdentifier(right);
+    if (memberSyntax) {
+      ctx.directSymbolBySyntax.set(memberSyntax.syntaxId, candidate);
     }
     return candidate;
   }
 
   return undefined;
+};
+
+const ensureQualifiedEffectOperationImport = ({
+  effectSymbol,
+  operationName,
+  syntax,
+  ctx,
+}: {
+  effectSymbol: SymbolId;
+  operationName: string;
+  syntax: Syntax;
+  ctx: BindingContext;
+}): void => {
+  if (
+    typeof resolveQualifiedEffectOperation({
+      effectSymbol,
+      name: operationName,
+      symbolTable: ctx.symbolTable,
+      moduleMembers: ctx.moduleMembers,
+    }) === "number"
+  ) {
+    return;
+  }
+
+  const effectRecord = ctx.symbolTable.getSymbol(effectSymbol);
+  const importedEffect = importedSymbolTargetFromMetadata(
+    effectRecord.metadata as Record<string, unknown> | undefined,
+  );
+  if (!importedEffect) {
+    return;
+  }
+  const dependency = ctx.dependencies.get(importedEffect.moduleId);
+  const operations = dependency?.decls
+    .getEffect(importedEffect.symbol)
+    ?.operations.filter((candidate) => candidate.name === operationName);
+  if (!dependency || !operations || operations.length === 0) {
+    return;
+  }
+  const explicitlyTargetsStdSubmodule =
+    importedModuleExplicitStdSubmoduleFrom(
+      effectRecord.metadata as Record<string, unknown> | undefined,
+    ) ?? false;
+  const locals = operations.map((operation) => {
+    const existingImport = ctx.imports.find(
+      (candidate) =>
+        candidate.target?.moduleId === importedEffect.moduleId &&
+        candidate.target.symbol === operation.symbol &&
+        ctx.symbolTable.getSymbol(candidate.local).kind === "effect-op",
+    );
+    const local =
+      existingImport?.local ??
+      ctx.symbolTable.declare(
+        {
+          name: operationName,
+          kind: "effect-op",
+          declaredAt: syntax.syntaxId,
+          metadata: {
+            import: {
+              moduleId: importedEffect.moduleId,
+              symbol: operation.symbol,
+              explicitlyTargetsStdSubmodule,
+            },
+            qualifiedOnlyEffectOperation: true,
+            ...(importableMetadataFrom(
+              dependency.symbolTable.getSymbol(operation.symbol).metadata as
+                | Record<string, unknown>
+                | undefined,
+            ) ?? {}),
+          },
+        },
+        ctx.symbolTable.rootScope,
+      );
+    if (!existingImport) {
+      ctx.imports.push({
+        name: operationName,
+        local,
+        target: {
+          moduleId: importedEffect.moduleId,
+          symbol: operation.symbol,
+        },
+        visibility: moduleVisibility(),
+        span: toSourceSpan(syntax),
+      });
+    }
+    return local;
+  });
+  const operationTable =
+    ctx.moduleMembers.get(effectSymbol) ?? new Map<string, Set<SymbolId>>();
+  const operationSymbols = operationTable.get(operationName) ?? new Set();
+  locals.forEach((local) => operationSymbols.add(local));
+  operationTable.set(operationName, operationSymbols);
+  ctx.moduleMembers.set(effectSymbol, operationTable);
+  if (
+    locals.length > 1 &&
+    !locals.some((local) => ctx.overloadBySymbol.has(local))
+  ) {
+    const id =
+      Math.max(
+        -1,
+        ...ctx.overloads.keys(),
+        ...ctx.importedOverloadOptions.keys(),
+      ) + 1;
+    locals.forEach((local) => ctx.overloadBySymbol.set(local, id));
+    ctx.importedOverloadOptions.set(id, locals);
+  }
+};
+
+const validateHandlerOperationBinding = ({
+  head,
+  ctx,
+  scope,
+  deferUnresolvedQualifier = true,
+}: {
+  head: SurfaceHandlerHead;
+  ctx: BindingContext;
+  scope: ScopeId;
+  deferUnresolvedQualifier?: boolean;
+}): void => {
+  if (head.effectExpr) {
+    const qualifier = resolveNamespaceModuleSymbol(head.effectExpr, scope, ctx);
+    if (
+      typeof qualifier === "number" &&
+      ctx.symbolTable.getSymbol(qualifier).kind === "effect"
+    ) {
+      return;
+    }
+    if (qualifier === undefined && deferUnresolvedQualifier) {
+      ctx.pendingHandlerOperationBindings.push({ head, scope });
+      return;
+    }
+    ctx.diagnostics.push(
+      diagnosticFromCode({
+        code: "BD0009",
+        params: {
+          kind: "invalid-effect-handler-qualifier",
+          qualifier: displayNamespaceQualifier(head.effectExpr),
+          operationName: head.operation.value,
+        },
+        span: toSourceSpan(head.effectExpr),
+      }),
+    );
+    return;
+  }
+
+  const operation = resolveUnqualifiedEffectOperation({
+    name: head.operation.value,
+    scope,
+    symbolTable: ctx.symbolTable,
+  });
+  if (typeof operation === "number") {
+    ctx.directSymbolBySyntax.set(head.operation.syntaxId, operation);
+    return;
+  }
+  ctx.diagnostics.push(
+    diagnosticFromCode({
+      code: "BD0009",
+      params: {
+        kind: "handler-not-effect-operation",
+        operationName: head.operation.value,
+      },
+      span: toSourceSpan(head.operation),
+    }),
+  );
+};
+
+const displayNamespaceQualifier = (expr: Expr): string => {
+  const stripped = stripTypeArguments(expr);
+  if (stripped !== expr) {
+    return displayNamespaceQualifier(stripped);
+  }
+  if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
+    return expr.value;
+  }
+  if (!isForm(expr) || !expr.calls("::")) {
+    return "this qualifier";
+  }
+  const left = expr.at(1);
+  const right = extractMemberName(expr.at(2));
+  return left && right
+    ? `${displayNamespaceQualifier(left)}::${right}`
+    : "this qualifier";
 };
 
 const stripTypeArguments = (expr: Expr): Expr => {
@@ -657,6 +1283,9 @@ export const ensureStaticMethodImport = ({
   const exportedSymbol = importMeta?.import?.symbol;
   const explicitlyTargetsStdSubmodule =
     importMeta?.import?.explicitlyTargetsStdSubmodule === true;
+  const hygienicReference =
+    (targetRecord.metadata as { hygienicReference?: unknown } | undefined)
+      ?.hygienicReference === true;
   if (!moduleId || typeof exportedSymbol !== "number") {
     return;
   }
@@ -698,6 +1327,7 @@ export const ensureStaticMethodImport = ({
       moduleId,
       dependency,
       explicitlyTargetsStdSubmodule,
+      hygienicReference,
       allowSyntheticAliasConstructorFallback:
         memberName === "init" &&
         typeof syntheticAliasConstructorTarget === "number",
@@ -712,7 +1342,10 @@ export const ensureStaticMethodImport = ({
         name: memberName,
         kind: record.kind,
         declaredAt: syntax.syntaxId,
-        metadata: { import: { moduleId, symbol: importTargetSymbol } },
+        metadata: {
+          import: { moduleId, symbol: importTargetSymbol },
+          ...(hygienicReference ? { hygienicReference: true } : {}),
+        },
       },
       scope,
     );
@@ -786,6 +1419,7 @@ const canImportStaticMethodSymbol = ({
   moduleId,
   dependency,
   explicitlyTargetsStdSubmodule,
+  hygienicReference,
   allowSyntheticAliasConstructorFallback,
   ctx,
 }: {
@@ -793,9 +1427,14 @@ const canImportStaticMethodSymbol = ({
   moduleId: string;
   dependency: BindingResult;
   explicitlyTargetsStdSubmodule: boolean;
+  hygienicReference: boolean;
   allowSyntheticAliasConstructorFallback: boolean;
   ctx: BindingContext;
 }): boolean => {
+  if (hygienicReference) {
+    return true;
+  }
+
   const fn = dependency.functions.find(
     (entry) => entry.symbol === importTargetSymbol,
   );
@@ -968,80 +1607,68 @@ const ensureEnumNamespaceImport = ({
     return;
   }
 
-  const variantNames = enumVariantTypeNamesFromAliasTarget(aliasDecl.target);
-  if (!variantNames || !variantNames.includes(memberName)) {
+  const variantTarget = enumVariantTypeTargetsFromAliasTarget(
+    aliasDecl.target,
+  )?.find((entry) => entry.name === memberName);
+  if (!variantTarget) {
     return;
   }
 
-  const exportTable = ctx.moduleExports.get(importedTarget.moduleId);
-  const exported = exportTable?.get(memberName);
-  if (!exported) {
-    ctx.diagnostics.push(
-      diagnosticFromCode({
-        code: "BD0001",
-        params: {
-          kind: "missing-export",
+  const variantSymbol = resolveNominalTypeSymbol({
+    target: variantTarget.target,
+    scope: dependency.symbolTable.rootScope,
+    symbolTable: dependency.symbolTable,
+    moduleMembers: dependency.moduleMembers,
+  });
+  if (typeof variantSymbol !== "number") {
+    return;
+  }
+  const variantRecord = dependency.symbolTable.getSymbol(variantSymbol);
+  const metadata = variantRecord.metadata as { entity?: string } | undefined;
+  if (variantRecord.kind !== "type" || metadata?.entity !== "object") {
+    return;
+  }
+
+  // The public enum alias owns access to its private variant types. Import the
+  // selected target directly without publishing its display name as a module
+  // export.
+  const importableMetadata = importableMetadataFrom(
+    variantRecord.metadata as Record<string, unknown> | undefined,
+  );
+  const local = ctx.symbolTable.declare(
+    {
+      name: memberName,
+      kind: variantRecord.kind,
+      declaredAt: syntax.syntaxId,
+      metadata: {
+        import: {
           moduleId: importedTarget.moduleId,
-          target: memberName,
+          symbol: variantSymbol,
+          explicitlyTargetsStdSubmodule,
         },
-        span: toSourceSpan(syntax),
-      }),
-    );
-    return;
-  }
-  if (
-    !canAccessExport({
-      exported,
-      moduleId: importedTarget.moduleId,
-      ctx,
-      explicitlyTargetsStdSubmodule,
-    })
-  ) {
-    ctx.diagnostics.push(
-      diagnosticFromCode({
-        code: "BD0001",
-        params: {
-          kind: "out-of-scope-export",
-          moduleId: importedTarget.moduleId,
-          target: memberName,
-          visibility: exported.visibility.level,
-        },
-        span: toSourceSpan(syntax),
-      }),
-    );
-    return;
-  }
-
-  const exportedRecord = dependency.symbolTable.getSymbol(exported.symbol);
-  const metadata = exportedRecord.metadata as { entity?: string } | undefined;
-  if (exportedRecord.kind !== "type" || metadata?.entity !== "object") {
-    return;
-  }
-
-  const locals = declareModuleMemberImport({
-    exported,
-    explicitlyTargetsStdSubmodule,
+        ...(importableMetadata ?? {}),
+      },
+    },
+    scope,
+  );
+  ctx.imports.push({
+    name: memberName,
+    local,
+    target: { moduleId: importedTarget.moduleId, symbol: variantSymbol },
+    visibility: moduleVisibility(),
+    span: toSourceSpan(syntax),
+  });
+  const bucket = ctx.staticMethods.get(targetSymbol) ?? new Map();
+  const members = bucket.get(memberName) ?? new Set<SymbolId>();
+  members.add(local);
+  bucket.set(memberName, members);
+  ctx.staticMethods.set(targetSymbol, bucket);
+  ensureConstructorImport({
+    targetSymbol: local,
     syntax,
     scope,
     ctx,
   });
-  if (locals.length === 0) {
-    return;
-  }
-
-  const bucket = ctx.staticMethods.get(targetSymbol) ?? new Map();
-  const members = bucket.get(memberName) ?? new Set<SymbolId>();
-  locals.forEach((local) => members.add(local));
-  bucket.set(memberName, members);
-  ctx.staticMethods.set(targetSymbol, bucket);
-  locals.forEach((local) =>
-    ensureConstructorImport({
-      targetSymbol: local,
-      syntax,
-      scope,
-      ctx,
-    }),
-  );
 };
 
 export const ensureConstructorImport = ({
@@ -1080,7 +1707,11 @@ const ensureConstructorImportForTarget = ({
   if (!identifier) {
     return;
   }
-  const targetSymbol = ctx.symbolTable.resolve(identifier.value, scope);
+  const targetSymbol = resolveBoundIdentifierSymbol({
+    identifier,
+    ctx,
+    scope,
+  });
   if (typeof targetSymbol !== "number") {
     return;
   }
@@ -1094,6 +1725,25 @@ const ensureConstructorImportForTarget = ({
     scope,
     ctx,
   });
+};
+
+export const resolveBoundIdentifierSymbol = ({
+  identifier,
+  ctx,
+  scope,
+}: {
+  identifier: IdentifierAtom | InternalIdentifierAtom;
+  ctx: BindingContext;
+  scope: ScopeId;
+}): SymbolId | undefined => {
+  const direct = ctx.directSymbolBySyntax.get(identifier.syntaxId);
+  if (typeof direct === "number") {
+    return direct;
+  }
+  const bindingIdentity = identifierBindingKey(identifier);
+  return bindingIdentity
+    ? ctx.symbolTable.resolveBinding(identifier.value, bindingIdentity, scope)
+    : ctx.symbolTable.resolve(identifier.value, scope);
 };
 
 const extractMemberName = (expr: Expr | undefined): string | undefined => {
@@ -1137,18 +1787,53 @@ export const ensureModuleMemberImport = ({
     ) ?? false;
   const exportTable = ctx.moduleExports.get(moduleId);
   const exported = exportTable?.get(memberName);
-  if (!exported) {
+  const moduleExport = exported
+    ? moduleNamespaceExportEntry(exported)
+    : undefined;
+  if (!moduleExport || moduleExport.kind === "effect-op") {
+    const module = ctx.graph.modules.get(moduleId);
+    const packageRootFile =
+      module?.origin.kind === "file" &&
+      isPackageRootModule(module.path, {
+        sourcePackageRoot: module.sourcePackageRoot,
+      })
+        ? module.origin.filePath
+        : undefined;
+    const diagnosticModuleId = packageRootFile
+      ? moduleId.replace(/::pkg$/, "")
+      : moduleId;
+    const ownerSymbol = exported
+      ? firstInstanceMemberOwner(exported)
+      : undefined;
+    const dependency = ctx.dependencies.get(moduleId);
+    const owner =
+      typeof ownerSymbol === "number" && dependency
+        ? dependency.symbolTable.getSymbol(ownerSymbol).name
+        : undefined;
     ctx.diagnostics.push(
       diagnosticFromCode({
         code: "BD0001",
-        params: { kind: "missing-export", moduleId, target: memberName },
+        params:
+          exported && exported.kind !== "effect-op" && owner
+            ? {
+                kind: "instance-member-import",
+                moduleId: diagnosticModuleId,
+                target: memberName,
+                owner,
+              }
+            : {
+                kind: "missing-export",
+                moduleId: diagnosticModuleId,
+                target: memberName,
+                packageRootFile,
+              },
         span: toSourceSpan(syntax),
       }),
     );
     return;
   }
   const locals = declareModuleMemberImport({
-    exported,
+    exported: moduleExport,
     explicitlyTargetsStdSubmodule,
     syntax,
     scope,
@@ -1319,12 +2004,18 @@ const declareModuleMemberImport = ({
   scope: ScopeId;
   ctx: BindingContext;
 }): number[] => {
-  const symbols =
+  const exportedSymbols =
     exported.symbols && exported.symbols.length > 0
       ? exported.symbols
       : [exported.symbol];
-  const locals: number[] = [];
   const dependency = ctx.dependencies.get(exported.moduleId);
+  const symbols = dependency
+    ? exportedSymbols.filter(
+        (symbol) =>
+          dependency.symbolTable.getSymbol(symbol).kind === exported.kind,
+      )
+    : exportedSymbols;
+  const locals: number[] = [];
   symbols.forEach((symbol) => {
     const dependencyRecord = dependency?.symbolTable.getSymbol(symbol);
     const importableMetadata = importableMetadataFrom(
@@ -1411,7 +2102,7 @@ const declareSurfacePatternBindings = (
         bindingKind: pattern.bindingKind,
       },
       scope,
-      syntax: options.declarationSyntax ?? pattern.syntax,
+      syntax: pattern.name,
       ctx,
     });
     return;

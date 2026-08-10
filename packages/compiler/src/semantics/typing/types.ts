@@ -813,6 +813,10 @@ export interface DependencySemantics {
   decls: DeclTable;
   overloads: ReadonlyMap<OverloadSetId, readonly SymbolId[]>;
   exports: ModuleExportTable;
+  staticMethods?: ReadonlyMap<
+    SymbolId,
+    ReadonlyMap<string, ReadonlySet<SymbolId>>
+  >;
 }
 
 export interface TraitMethodImpl {

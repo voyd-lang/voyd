@@ -44,6 +44,7 @@ export type EffectDescriptor = {
   effectId: EffectId;
   opId: OpId;
   opName: string;
+  operationId?: string;
   resumeKind: ResumeKind;
   signatureHash: SignatureHash;
   label?: string;

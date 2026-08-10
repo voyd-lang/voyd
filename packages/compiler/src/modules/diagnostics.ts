@@ -49,6 +49,35 @@ export const moduleDiagnosticToDiagnostic = (
     });
   }
 
+  if (diagnostic.kind === "ambiguous-module-path") {
+    const related = [
+      diagnosticFromCode({
+        code: "MD0006",
+        params: { kind: "ordinary-declaration", requested },
+        span: { file: diagnostic.ordinaryFile, start: 0, end: 0 },
+        severity: "note",
+      }),
+      diagnosticFromCode({
+        code: "MD0006",
+        params: { kind: "package-root-declaration", requested },
+        span: { file: diagnostic.packageRootFile, start: 0, end: 0 },
+        severity: "note",
+      }),
+    ];
+
+    return diagnosticFromCode({
+      code: "MD0006",
+      params: {
+        kind: "ambiguous-module-path",
+        requested,
+        ordinaryFile: diagnostic.ordinaryFile,
+        packageRootFile: diagnostic.packageRootFile,
+      },
+      span,
+      related,
+    });
+  }
+
   const related =
     importer && importerSpan
       ? [

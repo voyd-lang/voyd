@@ -33,12 +33,14 @@ export const projectRuntimeAllocationIdentity = ({
   path,
   context,
   ctx,
+  fnCtx,
 }: {
   allocation: binaryen.ExpressionRef;
   typeId: TypeId;
   path: readonly CodegenPlaceProjection[];
   context: string;
   ctx: CodegenContext;
+  fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
   let value = allocation;
   let currentType = typeId;
@@ -67,6 +69,7 @@ export const projectRuntimeAllocationIdentity = ({
       pointer: () => pointer,
       exactNominalTypeId: exactNominalForType({ typeId: currentType, ctx }),
       ctx,
+      fnCtx,
     });
     currentType = field.typeId;
   });

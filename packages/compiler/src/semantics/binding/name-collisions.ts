@@ -4,6 +4,7 @@ import type { SymbolKind, SymbolRecord } from "../binder/index.js";
 import type { ScopeId, SourceSpan, SymbolId } from "../ids.js";
 import { toSourceSpan } from "../../parser/surface/utils.js";
 import type { BindingContext } from "./types.js";
+import { bindingIdentityForSyntax } from "./hygiene.js";
 
 type ScopeSymbol = {
   symbolId: SymbolId;
@@ -22,11 +23,13 @@ const symbolsNamedInScope = ({
   scope,
   ctx,
   skipSymbol,
+  bindingIdentity,
 }: {
   name: string;
   scope: ScopeId;
   ctx: BindingContext;
   skipSymbol?: SymbolId;
+  bindingIdentity?: string;
 }): ScopeSymbol[] => {
   const symbols: ScopeSymbol[] = [];
   for (const symbolId of ctx.symbolTable.symbolsNamedInScope(name, scope)) {
@@ -34,6 +37,9 @@ const symbolsNamedInScope = ({
       continue;
     }
     const record = ctx.symbolTable.getSymbol(symbolId);
+    if (record.bindingIdentity !== bindingIdentity) {
+      continue;
+    }
     symbols.push({
       symbolId,
       record,
@@ -70,14 +76,22 @@ export const findNonOverloadNameCollision = ({
   name,
   scope,
   skipSymbol,
+  bindingIdentity,
   ctx,
 }: {
   name: string;
   scope: ScopeId;
   skipSymbol?: SymbolId;
+  bindingIdentity?: string;
   ctx: BindingContext;
 }): BindingNameCollision | undefined => {
-  const symbols = symbolsNamedInScope({ name, scope, skipSymbol, ctx });
+  const symbols = symbolsNamedInScope({
+    name,
+    scope,
+    skipSymbol,
+    bindingIdentity,
+    ctx,
+  });
   const conflict = symbols.find((entry) => !overloadAllowsSymbol(entry.record));
   if (!conflict) {
     return undefined;
@@ -100,7 +114,12 @@ export const findModuleNamespaceNameCollision = ({
   incomingKind: SymbolKind;
   ctx: BindingContext;
 }): BindingNameCollision | undefined => {
-  const symbols = symbolsNamedInScope({ name, scope, ctx });
+  const symbols = symbolsNamedInScope({
+    name,
+    scope,
+    bindingIdentity: undefined,
+    ctx,
+  });
   const conflict = symbols.find((entry) =>
     isModuleNamespaceCollision({
       existingKind: entry.record.kind,
@@ -120,13 +139,15 @@ export const findModuleNamespaceNameCollision = ({
 export const findLocalBindingNameCollision = ({
   name,
   scope,
+  bindingIdentity,
   ctx,
 }: {
   name: string;
   scope: ScopeId;
+  bindingIdentity?: string;
   ctx: BindingContext;
 }): BindingNameCollision | undefined => {
-  const symbols = symbolsNamedInScope({ name, scope, ctx });
+  const symbols = symbolsNamedInScope({ name, scope, bindingIdentity, ctx });
   const conflict = symbols.find((entry) => isLocalBinding(entry.record));
   if (!conflict) {
     return undefined;
@@ -165,7 +186,10 @@ export const reportOverloadNameCollision = ({
   syntax: Syntax;
   ctx: BindingContext;
 }): void => {
-  const bucket = ctx.overloadBuckets.get(`${scope}:${name}`);
+  const bindingIdentity = bindingIdentityForSyntax(syntax);
+  const bucket = ctx.overloadBuckets.get(
+    `${scope}:${bindingIdentity ?? "surface"}:${name}`,
+  );
   if (
     !bucket ||
     bucket.functions.length === 0 ||

@@ -447,6 +447,7 @@ const packExternalValue = ({
       field: payloadField,
       pointer: () => value,
       ctx,
+      fnCtx,
     });
   }
   return packBoundaryValueAsMsgPack({ value, schema, ctx, fnCtx });

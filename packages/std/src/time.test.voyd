@@ -1,6 +1,6 @@
 use std::error::HostError
 use std::result::types::all
-use std::string::type::StringSlice
+use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
 use std::test::host_dto::self as host_dto_test
 
@@ -11,6 +11,93 @@ test "system_time unix_millis is pure":
   let now = system_time_now_with_millis(i64_from_i32(123))
 
   assert(read_unix_millis(now), eq: i64_from_i32(123))
+
+test "system_time formats deterministic RFC 3339 UTC milliseconds":
+  assert_rfc3339(i64_from_i32(0), "1970-01-01T00:00:00.000Z")
+  assert_rfc3339(1700000000123i64, "2023-11-14T22:13:20.123Z")
+  assert_rfc3339(0i64 - 1i64, "1969-12-31T23:59:59.999Z")
+  assert_rfc3339(-62167219200000i64, "0000-01-01T00:00:00.000Z")
+  assert_rfc3339(253402300799999i64, "9999-12-31T23:59:59.999Z")
+
+test "system_time parses UTC and normalizes numeric offsets":
+  assert_parsed_millis("2023-11-14T22:13:20.123Z", 1700000000123i64)
+  assert_parsed_millis("2023-11-15T00:13:20.123+02:00", 1700000000123i64)
+  assert_parsed_millis("2023-11-14T17:43:20.123-04:30", 1700000000123i64)
+  assert_parsed_slice_millis("2023-11-15T22:12:20.123+23:59", 1700000000123i64)
+  assert_parsed_millis("2000-02-29T00:00:00Z", 951782400000i64)
+
+test "system_time reports structured RFC 3339 errors":
+  assert_timestamp_error(
+    "2023-02-29T00:00:00Z",
+    timestamp_error_code_invalid_date(),
+    0
+  )
+  assert_timestamp_error(
+    "2023-01-01T00:00:00+24:00",
+    timestamp_error_code_invalid_offset(),
+    20
+  )
+  assert_timestamp_error(
+    "2023-01-01T00:00:00.1234Z",
+    timestamp_error_code_unsupported_precision(),
+    23
+  )
+  assert_timestamp_error(
+    "2023-01-01T24:00:00Z",
+    timestamp_error_code_invalid_time(),
+    11
+  )
+  assert_timestamp_error(
+    "2023-0a-01T00:00:00Z",
+    timestamp_error_code_invalid_format(),
+    6
+  )
+  assert_timestamp_error(
+    "2023-01-01T00:00:00+0a:00",
+    timestamp_error_code_invalid_offset(),
+    21
+  )
+  assert_timestamp_error(
+    "2023-01-01T00:00:00+00:0a",
+    timestamp_error_code_invalid_offset(),
+    24
+  )
+
+test "system_time rejects RFC 3339 formatting outside the four-digit year range":
+  match(SystemTime::from_unix_millis(253402300800000i64).to_rfc3339())
+    Ok<String>:
+      assert(false, eq: true)
+    Err<TimestampError> { error }:
+      assert(error.code, eq: timestamp_error_code_formatting())
+
+fn assert_rfc3339(millis: i64, expected: String) -> void
+  match(SystemTime::from_unix_millis(millis).to_rfc3339())
+    Ok<String> { value }:
+      assert(value.equals(expected), eq: true)
+    Err<TimestampError>:
+      assert(false, eq: true)
+
+fn assert_parsed_millis(source: String, expected: i64) -> void
+  match(SystemTime::parse_rfc3339(source))
+    Ok<SystemTime> { value }:
+      assert(value.unix_millis(), eq: expected)
+    Err<TimestampError>:
+      assert(false, eq: true)
+
+fn assert_parsed_slice_millis(source: String, expected: i64) -> void
+  match(SystemTime::parse_rfc3339(source.as_slice()))
+    Ok<SystemTime> { value }:
+      assert(value.unix_millis(), eq: expected)
+    Err<TimestampError>:
+      assert(false, eq: true)
+
+fn assert_timestamp_error(source: String, code: i32, index: i32) -> void
+  match(SystemTime::parse_rfc3339(source))
+    Ok<SystemTime>:
+      assert(false, eq: true)
+    Err<TimestampError> { error }:
+      assert(error.code, eq: code)
+      assert(error.index, eq: index)
 
 fn system_time_now_with_millis(ms: i64): () -> SystemTime
   try

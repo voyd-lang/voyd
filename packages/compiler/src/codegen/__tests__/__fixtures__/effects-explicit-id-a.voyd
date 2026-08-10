@@ -1,5 +1,6 @@
 @effect(id: "com.example.log")
 eff Log
+  @operation(id: "log-entry")
   info(resume, value: i32) -> void
 
 pub fn main(): Log -> i32

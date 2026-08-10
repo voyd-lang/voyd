@@ -10,7 +10,7 @@ import type { EffectRowId } from "../../semantics/ids.js";
 const fixturePath = resolve(
   import.meta.dirname,
   "__fixtures__",
-  "effects-call-convention.voyd"
+  "effects-call-convention.voyd",
 );
 const fixtureVirtualPath = "/proj/src/effects-call-convention.voyd";
 
@@ -39,7 +39,12 @@ const setEffectRowFor = ({
 
 const markEffectful = (semantics: SemanticsPipelineResult): void => {
   const effectRow = semantics.typing.effects.internRow({
-    operations: [{ name: "Test.effect" }],
+    operations: [
+      {
+        identity: { moduleId: "test", effect: 0, operation: 0 },
+        name: "Test.effect",
+      },
+    ],
   });
   setEffectRowFor({
     semantics,
@@ -56,7 +61,8 @@ const markEffectful = (semantics: SemanticsPipelineResult): void => {
     if (expr.exprKind !== "call") return;
     const callee = semantics.hir.expressions.get(expr.callee);
     if (callee?.exprKind !== "identifier") return;
-    const calleeName = semantics.symbols.getName(callee.symbol) ?? `${callee.symbol}`;
+    const calleeName =
+      semantics.symbols.getName(callee.symbol) ?? `${callee.symbol}`;
     if (calleeName === "effectful_value" || calleeName === "run") {
       semantics.typing.effects.setExprEffect(expr.id, effectRow);
     }
@@ -83,7 +89,7 @@ const loadModuleText = (): string => {
 
 const emittedFunction = (text: string, name: string): string => {
   const match = text.match(
-    new RegExp(`\\(func \\$[^\\s)]*${name}[^\\n]*[\\s\\S]*?\\n \\)`, "m")
+    new RegExp(`\\(func \\$[^\\s)]*${name}[^\\n]*[\\s\\S]*?\\n \\)`, "m"),
   );
   expect(match, name).not.toBeNull();
   return match?.[0] ?? "";
@@ -93,17 +99,17 @@ describe("effectful call convention lowering", () => {
   it("widens effectful functions with handler params and $Outcome results", () => {
     const text = loadModuleText();
     expect(text).toMatch(
-      /\(func \$[^\s)]*effectful_value[\s\S]*\(param(?: \$\d+)? \(ref null \$voydHandlerFrame\)\)[\s\S]*\(result \(ref null \$voydOutcome\)\)/
+      /\(func \$[^\s)]*effectful_value[\s\S]*\(param(?: \$\d+)? \(ref null \$voydHandlerFrame\)\)[\s\S]*\(result \(ref null \$voydOutcome\)\)/,
     );
     expect(text).toMatch(
-      /\(func \$[^\s)]*run[\s\S]*\(param(?: \$\d+)? \(ref null \$voydHandlerFrame\)[\s\S]*\(result \(ref null \$voydOutcome\)\)/
+      /\(func \$[^\s)]*run[\s\S]*\(param(?: \$\d+)? \(ref null \$voydHandlerFrame\)[\s\S]*\(result \(ref null \$voydOutcome\)\)/,
     );
   });
 
   it("passes ref.null handlers for pure direct and closure calls", () => {
     const text = loadModuleText();
     expect(text).toMatch(
-      /\(func \$[^\s)]*call_direct[\s\S]*call \$[^\s)]*effectful_value[^\)]*\(ref\.null none\)/
+      /\(func \$[^\s)]*call_direct[\s\S]*call \$[^\s)]*effectful_value[^\)]*\(ref\.null none\)/,
     );
     const callClosure = emittedFunction(text, "call_closure");
     expect(callClosure).toMatch(/call_ref[\s\S]*\(ref\.null none\)/);
@@ -112,7 +118,7 @@ describe("effectful call convention lowering", () => {
   it("threads handler locals through effectful and direct trait-dispatched calls", () => {
     const text = loadModuleText();
     expect(text).toMatch(
-      /\(func \$[^\s)]*effectful_forward[\s\S]*\(param(?: \$\d+)? \(ref null \$voydHandlerFrame\)\)[\s\S]*call \$[^\s)]*effectful_value[^\)]*\(local\.get \$0\)/
+      /\(func \$[^\s)]*effectful_forward[\s\S]*\(param(?: \$\d+)? \(ref null \$voydHandlerFrame\)\)[\s\S]*call \$[^\s)]*effectful_value[^\)]*\(local\.get \$0\)/,
     );
     const callTrait = emittedFunction(text, "call_trait");
     expect(callTrait).toContain("call $__has_type");

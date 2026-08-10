@@ -2,6 +2,7 @@ import {
   type Expr,
   type Form,
   formCallsInternal,
+  identifierBindingKey,
   isForm,
   isIdentifierAtom,
   isInternalIdentifierAtom,
@@ -86,7 +87,10 @@ export const resolveModulePathSymbol = (
   }
 
   if (isIdentifierAtom(expr) || isInternalIdentifierAtom(expr)) {
-    const symbol = resolveSymbol(expr.value, scope, ctx);
+    const symbol = resolveSymbol(expr.value, scope, ctx, {
+      bindingIdentity: identifierBindingKey(expr),
+      directSymbol: ctx.directSymbolBySyntax.get(expr.syntaxId),
+    });
     if (typeof symbol !== "number") {
       return undefined;
     }
