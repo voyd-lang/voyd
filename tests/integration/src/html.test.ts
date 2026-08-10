@@ -1,4 +1,5 @@
 import path from "node:path";
+import { decode } from "@msgpack/msgpack";
 import { describe, expect, it } from "vitest";
 import { createSdk, type CompileResult } from "@voyd-lang/sdk";
 
@@ -17,14 +18,15 @@ const expectCompileSuccess = (
 };
 
 describe("integration: html.voyd", () => {
-  it("returns the expected MsgPack object", async () => {
+  it("returns the expected opaque HTML plan", async () => {
     const sdk = createSdk();
     const entryPath = path.join(fixtureRoot, "html.voyd");
     const result = expectCompileSuccess(await sdk.compile({ entryPath }));
 
-    const output = await result.run<Record<string, unknown>>({
+    const encoded = await result.run<Uint8Array>({
       entryName: "main",
     });
+    const output = decode(encoded);
 
     expect(output).toEqual({
       attrs: {
@@ -34,27 +36,27 @@ describe("integration: html.voyd", () => {
       kind: "element",
       tag: "div",
       children: [
-        "Hi there ",
+        { kind: "text", value: "Hi there " },
         {
           attrs: {
             class: "big",
           },
           kind: "element",
           tag: "span",
-          children: ["hi"],
+          children: [{ kind: "text", value: "hi" }],
         },
         {
           kind: "element",
           tag: "i",
-          children: ["This is italic"],
+          children: [{ kind: "text", value: "This is italic" }],
         },
       ],
     });
 
     await expect(
-      result.run<Record<string, unknown>>({
-        entryName: "empty_children_with_shadows",
-      }),
+      result
+        .run<Uint8Array>({ entryName: "empty_children_with_shadows" })
+        .then((value) => decode(value)),
     ).resolves.toEqual({
       kind: "element",
       tag: "input",
@@ -62,9 +64,9 @@ describe("integration: html.voyd", () => {
     });
 
     await expect(
-      result.run<Record<string, unknown>>({
-        entryName: "option_attributes",
-      }),
+      result
+        .run<Uint8Array>({ entryName: "option_attributes" })
+        .then((value) => decode(value)),
     ).resolves.toEqual({
       attrs: {
         selected: true,
@@ -72,7 +74,7 @@ describe("integration: html.voyd", () => {
       },
       kind: "element",
       tag: "option",
-      children: ["Voyd"],
+      children: [{ kind: "text", value: "Voyd" }],
     });
   });
 });

@@ -90,6 +90,8 @@ const fsHostError = <T>(
   error_message: fsErrorMessage(error),
 });
 
+const UNIT_VALUE = Object.freeze({});
+
 const bytesFromPayload = (payload: unknown): Uint8Array => {
   const value = readField(payload, "bytes");
   if (!(value instanceof Uint8Array)) {
@@ -342,9 +344,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           } else {
             await denoWriteFile!(pathValue, bytes);
           }
-          return tail(fsSuccess(null));
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error, null));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -363,9 +365,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           } else {
             await denoWriteTextFile!(pathValue, value);
           }
-          return tail(fsSuccess(null));
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error, null));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -408,9 +410,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           } else {
             await denoRemove!(resolvedPath);
           }
-          return tail(fsSuccess(null));
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error, null));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -472,9 +474,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           } else {
             await denoMkdir!(resolvedPath, { recursive: true });
           }
-          return tail(fsSuccess(null));
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error, null));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -493,9 +495,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
           } else {
             await denoRename!(fromPath, toPathValue);
           }
-          return tail(fsSuccess(null));
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error, null));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -509,9 +511,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
         try {
           const destination = toPath(readField(payload, "path"));
           await writeAtomic(destination, writeContentFromPayload(payload));
-          return tail(fsSuccess(null));
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error, null));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });
@@ -525,9 +527,9 @@ export const fsCapabilityDefinition: CapabilityDefinition = {
         try {
           const destination = toPath(readField(payload, "path"));
           await writeExclusive(destination, writeContentFromPayload(payload));
-          return tail(fsSuccess(null));
+          return tail(fsSuccess(UNIT_VALUE));
         } catch (error) {
-          return tail(fsHostError(error, null));
+          return tail(fsHostError(error, UNIT_VALUE));
         }
       },
     });

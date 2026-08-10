@@ -11,5 +11,6 @@ export const msgPackHostTransport: HostTransportAdapter = Object.freeze({
     (encode(value, OPTIONS) as Uint8Array).byteLength,
   encodeFrame: (frame) =>
     encode(toMsgPackHostFrame(frame), OPTIONS) as Uint8Array,
-  decodeFrame: (bytes) => fromMsgPackHostFrame(decode(bytes, OPTIONS)),
+  decodeFrame: (bytes) =>
+    fromMsgPackHostFrame(decode(bytes.slice(), OPTIONS)),
 });

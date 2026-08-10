@@ -61,6 +61,8 @@ const httpServerErrorPayload = <T>(
   };
 };
 
+const UNIT_VALUE = Object.freeze({});
+
 const emptyPendingRequest = (): Record<string, unknown> => ({
   request_id: 0,
   method: "GET",
@@ -2008,9 +2010,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
       handler: async ({ tail }, payload) => {
         try {
           await httpServerSource.respond(decodeResponsePayload(payload));
-          return tail(httpServerResult(null));
+          return tail(httpServerResult(UNIT_VALUE));
         } catch (error) {
-          return tail(httpServerErrorPayload(error, null));
+          return tail(httpServerErrorPayload(error, UNIT_VALUE));
         }
       },
     });
@@ -2023,9 +2025,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
       handler: async ({ tail }, payload) => {
         try {
           await httpServerSource.startResponse(decodeResponseHeadPayload(payload));
-          return tail(httpServerResult(null));
+          return tail(httpServerResult(UNIT_VALUE));
         } catch (error) {
-          return tail(httpServerErrorPayload(error, null));
+          return tail(httpServerErrorPayload(error, UNIT_VALUE));
         }
       },
     });
@@ -2038,9 +2040,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
       handler: async ({ tail }, payload) => {
         try {
           await httpServerSource.writeResponse(decodeResponseChunkPayload(payload));
-          return tail(httpServerResult(null));
+          return tail(httpServerResult(UNIT_VALUE));
         } catch (error) {
-          return tail(httpServerErrorPayload(error, null));
+          return tail(httpServerErrorPayload(error, UNIT_VALUE));
         }
       },
     });
@@ -2057,9 +2059,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
             throw new Error("http server finish response requires a request id");
           }
           await httpServerSource.finishResponse(Math.trunc(parsedRequestId));
-          return resume(httpServerResult(null));
+          return resume(httpServerResult(UNIT_VALUE));
         } catch (error) {
-          return resume(httpServerErrorPayload(error, null));
+          return resume(httpServerErrorPayload(error, UNIT_VALUE));
         }
       },
     });
@@ -2076,9 +2078,9 @@ export const httpServerCapabilityDefinition: CapabilityDefinition = {
             throw new Error("http server close requires a server id");
           }
           await httpServerSource.close(Math.trunc(parsedServerId));
-          return tail(httpServerResult(null));
+          return tail(httpServerResult(UNIT_VALUE));
         } catch (error) {
-          return tail(httpServerErrorPayload(error, null));
+          return tail(httpServerErrorPayload(error, UNIT_VALUE));
         }
       },
     });

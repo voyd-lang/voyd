@@ -624,7 +624,7 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: false,
-        value: null,
+        value: {},
         error_code: 13,
         error_kind: "permission-denied",
         error_message: "permission denied",

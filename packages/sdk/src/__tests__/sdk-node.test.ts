@@ -666,6 +666,26 @@ pub fn main() -> i32
     await expect(warm.run<number>({ entryName: "main" })).resolves.toBe(
       428_553,
     );
+
+    const secondWarm = expectCompileSuccess(
+      await sdk.compile({
+        entryPath,
+        source: `${source}\nfn second_dependency_snapshot_app_edit_marker() -> i32\n  2\n`,
+      }),
+    );
+    await expect(secondWarm.run<number>({ entryName: "main" })).resolves.toBe(
+      428_553,
+    );
+
+    const thirdWarm = expectCompileSuccess(
+      await sdk.compile({
+        entryPath,
+        source: `${source}\nfn third_dependency_snapshot_app_edit_marker() -> i32\n  3\n`,
+      }),
+    );
+    await expect(thirdWarm.run<number>({ entryName: "main" })).resolves.toBe(
+      428_553,
+    );
   });
 
   it("emits the same optimized wasm for fresh and dependency snapshot app edits", async () => {

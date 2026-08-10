@@ -677,7 +677,7 @@ pub fn method_body_route_probe() -> i32
     await expect(
       result.run<number>({ entryName: "method_body_route_probe" }),
     ).resolves.toBe(200);
-  });
+  }, WEB_FRAMEWORK_COMPILE_TIMEOUT_MS);
 
   it("cancels route handlers that exceed timeout policies", async () => {
     const sdk = webFrameworkSdk;
@@ -748,7 +748,7 @@ pub fn timeout_route_probe(): (task::TaskRuntime, Time) -> i32
         defaultAdapters: true,
       }),
     ).resolves.toBe(504);
-  });
+  }, WEB_FRAMEWORK_COMPILE_TIMEOUT_MS);
 
   it("converts responses from free get helpers", async () => {
     const sdk = webFrameworkSdk;
@@ -828,7 +828,7 @@ pub fn free_get_response_probe() -> i32
     await expect(
       result.run<number>({ entryName: "free_get_response_probe" }),
     ).resolves.toBe(200);
-  });
+  }, WEB_FRAMEWORK_COMPILE_TIMEOUT_MS);
 
   it("rejects unknown route DSL extractor parameter names", async () => {
     const sdk = webFrameworkSdk;
@@ -898,5 +898,5 @@ fn dsl_serve_import_path()
     });
 
     expectCompileSuccess(result);
-  });
+  }, WEB_FRAMEWORK_COMPILE_TIMEOUT_MS);
 });

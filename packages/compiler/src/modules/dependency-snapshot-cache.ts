@@ -177,6 +177,7 @@ export const prepareDependencySnapshotReuse = ({
     includeTests: includeTests === true,
     roots: serializableDependencyRoots(roots),
     modules: Array.from(moduleFingerprints.entries()),
+    sourceImports: sourceModuleImportSurfacesFor(graph),
   });
   const borrowArtifactKey = stableSerialize({
     compiler: COMPILER_BORROW_CACHE_VERSION,
@@ -247,6 +248,7 @@ export const commitDependencySnapshot = ({
 }): void => {
   if (
     !prepared?.cache ||
+    prepared.hit ||
     !prepared.key ||
     !prepared.moduleFingerprints ||
     !dependencySnapshot
@@ -335,6 +337,32 @@ const dependencyModuleFingerprintsFor = (
       )
       .map(([moduleId, module]) => [moduleId, moduleFingerprint(module)]),
   );
+
+const sourceModuleImportSurfacesFor = (graph: ModuleGraph): readonly unknown[] =>
+  Array.from(graph.modules.entries())
+    .filter(([, module]) => module.path.namespace === "src")
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([moduleId, module]) => ({
+      moduleId,
+      imports: (module.header?.items ?? [])
+        .filter((item) => item.kind === "use")
+        .flatMap((item) =>
+          item.entries.map((entry) => ({
+            visibility: item.visibility,
+            moduleSegments: [...entry.moduleSegments],
+            path: [...entry.path],
+            targetName: entry.targetName,
+            alias: entry.alias,
+            selectionKind: entry.selectionKind,
+            anchorToSelf: entry.anchorToSelf === true,
+            parentHops: entry.parentHops ?? 0,
+            hasExplicitPrefix: entry.hasExplicitPrefix,
+          })),
+        )
+        .sort((left, right) =>
+          stableSerialize(left).localeCompare(stableSerialize(right)),
+        ),
+    }));
 
 const moduleFingerprint = (module: ModuleNode): string =>
   stableSerialize({

@@ -151,6 +151,31 @@ describe("compiler dependency snapshots", () => {
     expect(second.analyzed.recomputedModuleIds).toEqual(["src::main"]);
   });
 
+  it("invalidates dependency semantics when the source import surface changes", async () => {
+    const cache = createCompilerDependencySnapshotCache();
+    const initial = buildFiles({ appValue: 1, stdValue: 10, pkgValue: 100 });
+    await loadAndAnalyze({
+      files: initial.files,
+      roots: initial.roots,
+      cache,
+    });
+    const mainPath = `${initial.roots.src}${sep}main.voyd`;
+    const changedMain = initial.files[mainPath]!
+      .replace(
+        "use pkg::dep::all",
+        "use pkg::dep::{ pkg_value as selected_value }",
+      )
+      .replace("pkg_value()", "selected_value()");
+
+    const second = await loadAndAnalyze({
+      files: { ...initial.files, [mainPath]: changedMain },
+      roots: initial.roots,
+      cache,
+    });
+
+    expect(second.prepared.hit).toBe(false);
+  });
+
   it("reuses dependency semantics without retaining borrowing artifact queries", async () => {
     const cache = createCompilerDependencySnapshotCache(undefined, {
       artifactEnabled: false,

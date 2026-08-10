@@ -5,8 +5,6 @@ use pkg::web::router
 use std::http::{ Body, Headers, HttpError, IncomingRequest, Method, QueryString, Response }
 use std::http::{ Response as HttpResponse }
 use std::json::{ JsonBool, JsonValue, stringify }
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
 use std::number::cast::to_string
 use std::optional::types::all
 use std::result::types::all
@@ -503,7 +501,7 @@ fn streaming_body_response(ctx: Context): HttpServer -> Response
       Response::ok().text(to_string(length))
 
 pub fn direct_ssr_callback_scope_probe() -> String
-  document<MsgPack>(retained_ssr_view(false))
+  document(retained_ssr_view(false))
 
 pub fn direct_typed_ssr_callback_scope_probe() -> String
   document(typed_retained_ssr_view())
@@ -518,7 +516,7 @@ pub fn html_response_callback_scope_probe() -> String
   response_text(html_response(Response::ok(), retained_ssr_view(false)))
 
 pub fn explicit_generic_html_response_callback_scope_probe() -> String
-  response_text(server_html::html_response<MsgPack>(Response::ok(), retained_ssr_view(false)))
+  response_text(server_html::html_response(Response::ok(), retained_ssr_view(false)))
 
 pub fn qualified_html_function_callback_scope_probe() -> String
   response_text(server_html::html(Response::ok(), retained_ssr_view(false)))
@@ -534,7 +532,7 @@ pub fn aliased_response_html_callback_scope_probe() -> String
   response_text(HttpResponse::ok().html(retained_ssr_view(false)))
 
 pub fn explicit_generic_response_html_callback_scope_probe() -> String
-  response_text(Response::ok().html<MsgPack>(retained_ssr_view(false)))
+  response_text(Response::ok().html(retained_ssr_view(false)))
 
 pub fn hydrated_response_html_callback_scope_probe() -> String
   response_text(

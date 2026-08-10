@@ -198,4 +198,24 @@ describe("host ABI v2 frames", () => {
       "Unknown Voyd host frame tag 99",
     );
   });
+
+  it("detaches decoded bytes from reusable transport memory", () => {
+    const encoded = msgPackHostTransport.encodeFrame({
+      kind: "effect-outcome",
+      requestId: 1,
+      outcome: {
+        kind: "success",
+        value: {
+          fingerprint: "sha256:bytes",
+          value: new Uint8Array([1, 2, 3]),
+        },
+      },
+    });
+    const decoded = msgPackHostTransport.decodeFrame(encoded);
+    encoded.fill(0);
+
+    expect(decoded).toMatchObject({
+      outcome: { value: { value: new Uint8Array([1, 2, 3]) } },
+    });
+  });
 });
