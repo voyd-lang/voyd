@@ -846,18 +846,10 @@ const app = createVoydVxAppRuntime({
 
 ### Custom Host Capabilities
 
-Use a runtime command for fire-and-forget work implemented in JavaScript:
-
-```voyd
-use std::msgpack::self as msgpack
-
-Cmd<Msg>::runtime(
-  kind: "analytics_track",
-  value: msgpack::make_string(event_name)
-)
-```
-
-Register an executor when mounting:
+Define typed custom host work as a versioned effect or external package
+interface. VX commands are a closed set of typed constructors, so application
+payloads cannot enter the renderer through a raw command name or encoded value.
+The resulting adapter can still be installed alongside the VX runtime:
 
 ```ts
 const mounted = await mountVxApp({
@@ -865,16 +857,14 @@ const mounted = await mountVxApp({
   app,
   runtimeHost: {
     commands: {
-      analytics_track: async (command) => {
-        await analytics.track(command.value);
-      },
+      // Typed built-in command overrides, when needed.
     },
   },
 });
 ```
 
 By default, `mountVxApp` installs the standard browser commands and
-subscriptions, then applies `runtimeHost` as overrides. Set
+subscriptions, then applies typed `runtimeHost` overrides. Set
 `runtimeHostMode: "explicit"` when an embedder needs an exact capability set:
 
 ```ts

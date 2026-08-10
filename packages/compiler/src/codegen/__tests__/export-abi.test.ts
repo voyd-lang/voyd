@@ -180,12 +180,6 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     );
   });
 
-  it("retains callbacks returning the public recursive MsgPack alias", async () => {
-    await expect(
-      buildModule({ entryFile: "retained-callback-public-msgpack.voyd" }),
-    ).resolves.toBeInstanceOf(Uint8Array);
-  });
-
   it("reports unsupported explicit boundary export DTOs", async () => {
     const result = await compileProgram({
       entryPath: resolve(fixtureRoot, "boundary-export-unsupported.voyd"),

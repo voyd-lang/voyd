@@ -12,7 +12,8 @@ use std::task::self as tasks
 pub use std::msgpack::MsgPack
 
 pub self::canvas
-pub use self::command::{ Cmd, Ref, retain_message_mapper, retain_typed_message_mapper }
+use self::command::retain_typed_message_mapper
+pub use self::command::{ Cmd, Ref }
 
 pub type Html<Msg> = MsgPack
 pub type HtmlNode = MsgPack

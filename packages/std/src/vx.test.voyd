@@ -318,69 +318,6 @@ test "vx typed event messages encode through the boundary":
     Err:
       assert(false, eq: true)
 
-test "vx command constructors encode runtime payloads":
-  let none = Cmd<MsgPack>::none()
-  assert_string_payload_field(none.payload, "type", "cmd")
-  assert_string_payload_field(none.payload, "kind", "none")
-
-  let message = Cmd<MsgPack>::message_serialized(msgpack::make_string("save"))
-  assert_string_payload_field(message.payload, "type", "cmd")
-  assert_string_payload_field(message.payload, "kind", "message")
-  assert_string_payload_field(message.payload, "value", "save")
-
-  let batch = Cmd<MsgPack>::batch([none, message])
-  assert_string_payload_field(batch.payload, "type", "cmd")
-  assert_string_payload_field(batch.payload, "kind", "batch")
-  assert_array_payload_len(batch.payload, "children", 2)
-
-  let mapped_message = message.map<MsgPack>(handler_id: 77)
-  assert_string_payload_field(mapped_message.payload, "type", "cmd")
-  assert_string_payload_field(mapped_message.payload, "kind", "map")
-  assert_i32_payload_field(mapped_message.payload, "handlerId", 77)
-  assert_payload_has_field(mapped_message.payload, "child")
-
-  let runtime = Cmd<MsgPack>::runtime(
-    kind: "focus",
-    value: msgpack::make_string("editor")
-  )
-  assert_string_payload_field(runtime.payload, "type", "cmd")
-  assert_string_payload_field(runtime.payload, "kind", "focus")
-  assert_string_payload_field(runtime.payload, "value", "editor")
-
-  let task = Cmd<MsgPack>::perform(task_id: 9, handler_id: 12)
-  assert_string_payload_field(task.payload, "type", "cmd")
-  assert_string_payload_field(task.payload, "kind", "task")
-  assert_i32_payload_field(task.payload, "taskId", 9)
-  assert_i32_payload_field(task.payload, "handlerId", 12)
-
-  let task_value = Task<MsgPack> { id: 10 }
-  let task_from_handle = Cmd<MsgPack>::perform<MsgPack>(task: task_value, handler_id: 13)
-  assert_string_payload_field(task_from_handle.payload, "type", "cmd")
-  assert_string_payload_field(task_from_handle.payload, "kind", "task")
-  assert_i32_payload_field(task_from_handle.payload, "taskId", 10)
-  assert_i32_payload_field(task_from_handle.payload, "handlerId", 13)
-
-  let editor_ref = Ref<DomElement> { id: "editor".to_string() }
-  let focus = Cmd<MsgPack>::focus<DomElement>(editor_ref)
-  assert_string_payload_field(focus.payload, "type", "cmd")
-  assert_string_payload_field(focus.payload, "kind", "focus")
-  assert_string_payload_field(focus.payload, "value", "editor")
-
-  let scroll_ref = Ref<DomElement> { id: "editor".to_string() }
-  let scroll = Cmd<MsgPack>::scroll_into_view<DomElement>(scroll_ref)
-  assert_string_payload_field(scroll.payload, "type", "cmd")
-  assert_string_payload_field(scroll.payload, "kind", "scroll_into_view")
-  assert_string_payload_field(scroll.payload, "value", "editor")
-
-  let delayed = Cmd<MsgPack>::delay_serialized(
-    millis: 250i64,
-    value: msgpack::make_string("later")
-  )
-  assert_string_payload_field(delayed.payload, "type", "cmd")
-  assert_string_payload_field(delayed.payload, "kind", "delay")
-  assert_i64_payload_field(delayed.payload, "ms", 250i64)
-  assert_string_payload_field(delayed.payload, "value", "later")
-
 test "vx typed command constructors encode messages through the boundary":
   let message = Cmd<TypedVxTestMsg>::message(TypedVxTestMsg::Saved {})
   assert_string_payload_field(message.payload, "type", "cmd")
@@ -398,7 +335,9 @@ test "vx typed command constructors encode messages through the boundary":
   assert_string_payload_field(batch.payload, "kind", "batch")
   assert_array_payload_len(batch.payload, "children", 2)
 
-  let mapped = message.map<MsgPack>((_msg: TypedVxTestMsg) -> MsgPack => msgpack::make_string("mapped"))
+  let mapped = message.map<TypedVxTestMsg>(
+    (_msg: TypedVxTestMsg) -> TypedVxTestMsg => TypedVxTestMsg::Saved {}
+  )
   assert_string_payload_field(mapped.payload, "type", "cmd")
   assert_string_payload_field(mapped.payload, "kind", "map")
   assert_payload_has_field(mapped.payload, "handlerId")

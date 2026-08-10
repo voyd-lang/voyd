@@ -11,7 +11,7 @@ use std::task::{ Task, TaskRuntime }
 use std::task::self as tasks
 
 pub obj Cmd<Msg> {
-  api payload: MsgPack
+  payload: MsgPack
 }
 
 pub obj Ref<T> {
@@ -26,8 +26,7 @@ fn retain_message_mapper_id(handler: fn(MsgPack) -> MsgPack): () -> i32
 fn retain_typed_message_mapper_id<From, To>(handler: fn(From) -> To): () -> i32
   __boundary_retain_callback(handler)
 
-/// Retains a pure Voyd message mapper for commands, subscriptions, or events.
-pub fn retain_message_mapper(handler: fn(MsgPack) -> MsgPack): () -> i32
+fn retain_message_mapper(handler: fn(MsgPack) -> MsgPack): () -> i32
   retain_message_mapper_id(handler)
 
 /// Retains a pure typed Voyd message mapper for commands, subscriptions, or events.
@@ -38,12 +37,6 @@ impl<Msg> Cmd<Msg>
   /// Creates an empty command.
   api fn none() -> Cmd<Msg>
     Cmd<Msg> { payload: command_payload("none") }
-
-  /// Creates a command that dispatches a serialized host/runtime message.
-  api fn message_serialized(value: MsgPack) -> Cmd<Msg>
-    let ~out = command_map("message")
-    out.set("value", value)
-    Cmd<Msg> { payload: msgpack::make_map(out) }
 
   /// Creates a command that dispatches a typed application message.
   api fn message(value: Msg) -> Cmd<Msg>
@@ -65,16 +58,11 @@ impl<Msg> Cmd<Msg>
     Cmd<Msg> { payload: msgpack::make_map(out) }
 
   /// Lifts a child command through a retained message mapper.
-  api fn map<NextMsg>(self, { handler_id: i32 }) -> Cmd<NextMsg>
+  fn map_with_handler_id<NextMsg>(self, handler_id: i32) -> Cmd<NextMsg>
     let ~out = command_map("map")
     out.set("child", self.payload)
     out.set("handlerId", msgpack::make_i32(handler_id))
     Cmd<NextMsg> { payload: msgpack::make_map(out) }
-
-  /// Lifts a child command through a retained serialized message mapper.
-  api fn map_serialized<NextMsg>(self, handler: fn(MsgPack) -> MsgPack) -> Cmd<NextMsg>
-    let handler_id = retain_message_mapper(handler)
-    Cmd<NextMsg> { payload: msgpack::make_map(command_map_with_owned_handler(self.payload, handler_id)) }
 
   /// Lifts a child command through a retained typed message mapper.
   api fn map<NextMsg>(self, handler: fn(Msg) -> NextMsg) -> Cmd<NextMsg>
@@ -82,7 +70,7 @@ impl<Msg> Cmd<Msg>
     Cmd<NextMsg> { payload: msgpack::make_map(command_map_with_owned_handler(self.payload, handler_id)) }
 
   /// Creates a host/runtime command envelope for a registered VX command executor.
-  api fn runtime({ kind: String, value?: MsgPack }) -> Cmd<Msg>
+  fn runtime({ kind: String, value?: MsgPack }) -> Cmd<Msg>
     let out = command_map(kind)
     let complete =
       match(value)
@@ -92,7 +80,7 @@ impl<Msg> Cmd<Msg>
           out
     Cmd<Msg> { payload: msgpack::make_map(complete) }
 
-  api fn runtime({ kind: StringSlice, value?: MsgPack }) -> Cmd<Msg>
+  fn runtime({ kind: StringSlice, value?: MsgPack }) -> Cmd<Msg>
     Cmd<Msg>::runtime(kind: kind.to_string(), value: value)
 
   /// Copies text to the browser clipboard through the VX runtime host.
@@ -103,14 +91,14 @@ impl<Msg> Cmd<Msg>
     Cmd<Msg>::copy_to_clipboard(value.to_string())
 
   /// Reads text from the browser clipboard and dispatches the handler result.
-  api fn read_clipboard({ handler_id: i32 }) -> Cmd<Msg>
+  fn read_clipboard_with_handler_id(handler_id: i32) -> Cmd<Msg>
     let ~out = command_map("read_clipboard")
     out.set("handlerId", msgpack::make_i32(handler_id))
     Cmd<Msg> { payload: msgpack::make_map(out) }
 
   api fn read_clipboard(handler: fn(String) -> Msg) -> Cmd<Msg>
     let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::read_clipboard(handler_id: handler_id), handler_id)
+    mark_owned_handler(Cmd<Msg>::read_clipboard_with_handler_id(handler_id), handler_id)
 
   /// Sets the browser document title through the VX runtime host.
   api fn set_document_title(value: String) -> Cmd<Msg>
@@ -206,56 +194,38 @@ impl<Msg> Cmd<Msg>
     Cmd<Msg>::runtime(kind: "session_storage_clear")
 
   /// Creates a task command envelope for a retained result mapper.
-  api fn perform({ task_id: i32, handler_id: i32 }) -> Cmd<Msg>
+  fn perform_with_ids({ task_id: i32, handler_id: i32 }) -> Cmd<Msg>
     let ~out = command_map("task")
     out.set("taskId", msgpack::make_i32(task_id))
     out.set("handlerId", msgpack::make_i32(handler_id))
     Cmd<Msg> { payload: msgpack::make_map(out) }
 
-  /// Creates a task command envelope for a retained Voyd result mapper.
-  api fn perform({ task_id: i32, handler: fn(MsgPack) -> MsgPack }) -> Cmd<Msg>
-    let handler_id = retain_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform(task_id: task_id, handler_id: handler_id), handler_id)
-
   /// Creates a task command envelope for a retained typed result mapper.
   api fn perform<T>({ task_id: i32, handler: fn(T) -> Msg }) -> Cmd<Msg>
     let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform(task_id: task_id, handler_id: handler_id), handler_id)
+    mark_owned_handler(Cmd<Msg>::perform_with_ids(task_id: task_id, handler_id: handler_id), handler_id)
 
   /// Creates a task command envelope from a Voyd task and retained result mapper.
-  api fn perform<T>({ task: Task<T>, handler_id: i32 }) -> Cmd<Msg>
+  fn perform_task_with_handler_id<T>({ task: Task<T>, handler_id: i32 }) -> Cmd<Msg>
     let ~out = command_map("task")
     out.set("taskId", msgpack::make_i32(task.id))
     out.set("handlerId", msgpack::make_i32(handler_id))
     Cmd<Msg> { payload: msgpack::make_map(out) }
 
-  /// Creates a task command envelope from a Voyd task and retained result mapper.
-  api fn perform<T>({ task: Task<T>, handler: fn(MsgPack) -> MsgPack }) -> Cmd<Msg>
-    let handler_id = retain_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform<T>(task: task, handler_id: handler_id), handler_id)
-
   /// Creates a task command envelope from a Voyd task and retained typed result mapper.
   api fn perform<T>({ task: Task<T>, handler: fn(T) -> Msg }) -> Cmd<Msg>
     let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform<T>(task: task, handler_id: handler_id), handler_id)
+    mark_owned_handler(Cmd<Msg>::perform_task_with_handler_id<T>(task: task, handler_id: handler_id), handler_id)
 
   /// Starts one-off async work and dispatches the mapped result when it completes.
   api fn task<T>({
     work: fn() : (open) -> T,
     handler: fn(T) -> Msg
   }): (TaskRuntime, open) -> Cmd<Msg>
-    let handler_id = retain_typed_message_mapper(handler)
-    mark_owned_handler(Cmd<Msg>::perform<T>(
+    Cmd<Msg>::perform<T>(
       task: tasks::detach(work),
-      handler_id: handler_id
-    ), handler_id)
-
-  /// Creates a timer command that dispatches a serialized value after the delay.
-  api fn delay_serialized({ millis: i64, value: MsgPack }) -> Cmd<Msg>
-    let ~out = command_map("delay")
-    out.set("ms", msgpack::make_i64(millis))
-    out.set("value", value)
-    Cmd<Msg> { payload: msgpack::make_map(out) }
+      handler: handler
+    )
 
   /// Creates a timer command that dispatches a typed message after the delay.
   api fn delay({ millis: i64, value: Msg }) -> Cmd<Msg>

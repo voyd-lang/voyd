@@ -41,6 +41,10 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - Web route parameters, query values, headers, and cookies decode through the
   provider-neutral DTO data model. Rejection messages now identify failures
   with rooted DTO paths such as `$.page`.
+- `Cmd<Msg>` no longer exposes its wire payload, raw runtime command
+  construction, serialized message/delay constructors, serialized mapper
+  overloads, or caller-supplied handler IDs. Use the typed command constructors
+  and typed closure overloads.
 
 This record will be extended as the remaining obsolete boundary and VX APIs are
 removed.
