@@ -59,6 +59,9 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - `JsonWriter` implements the provider-neutral data writer contract directly
   over compact UTF-8 JSON output. Typed JSON encoding no longer constructs an
   intermediate `JsonValue` tree.
+- `JsonReader` implements the provider-neutral pull-reader contract directly
+  over JSON source text. Typed JSON source decoding validates against the
+  requested shape without constructing an intermediate `JsonValue` tree.
 
 ## Planned removals and replacements
 

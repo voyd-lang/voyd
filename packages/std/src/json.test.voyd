@@ -12,7 +12,8 @@ obj DecodeProfile {
 
 obj DecodeStarted { id: i32 }
 obj DecodeStopped { reason: String }
-type DecodeEvent = DecodeStarted | DecodeStopped
+obj DecodeReady {}
+type DecodeEvent = DecodeStarted | DecodeStopped | DecodeReady
 
 obj DecodeRequest {
   version: i32,
@@ -96,7 +97,7 @@ test "typed JSON decode reports precise nested paths and strict unknown fields":
         else:
           assert(false, eq: true)
 
-  let unknown = "{\"version\":1,\"name\":\"orbit\",\"extra\":true}"
+  let unknown = "{\"version\":1,\"name\":\"orbit\",\"extra\":{\"nested\":[1,true,null]}}"
   match(decode<VersionedName>(unknown))
     Ok<VersionedName>:
       assert(false, eq: true)
@@ -108,6 +109,79 @@ test "typed JSON decode reports precise nested paths and strict unknown fields":
       assert(false, eq: true)
     Ok<VersionedName> { value }:
       assert(value.name, eq: "orbit")
+
+test "typed JSON decode accepts scalar variants through the direct reader":
+  let source = "{\"version\":1,\"profiles\":[],\"event\":\"DecodeReady\"}"
+  match(decode<DecodeRequest>(source))
+    Err<JsonDecodeError>:
+      assert(false, eq: true)
+    Ok<DecodeRequest> { value }:
+      value.event.match(event)
+        DecodeReady:
+          void
+        else:
+          assert(false, eq: true)
+
+test "JsonReader pulls balanced arrays and records":
+  let ~reader = JsonReader::init("[7,{\"name\":\"voyd\"}]")
+  match(reader.begin_array())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<i32> { value: length }:
+      assert(length, eq: 2)
+  match(reader.read_i32())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<i32> { value }:
+      assert(value, eq: 7)
+  match(reader.kind())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<DataKind> { value }:
+      value.match(kind)
+        RecordKind:
+          void
+        else:
+          assert(false, eq: true)
+  match(reader.begin_record())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<Unit>:
+      void
+  match(reader.next_field())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<Option<String>> { value }:
+      value.match(field)
+        None:
+          assert(false, eq: true)
+        Some<String>:
+          assert(field.value, eq: "name")
+  match(reader.read_string())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<String> { value }:
+      assert(value, eq: "voyd")
+  match(reader.next_field())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<Option<String>> { value }:
+      value.match(field)
+        None:
+          void
+        Some<String>:
+          assert(false, eq: true)
+  match(reader.end_record())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<Unit>:
+      void
+  match(reader.end_array())
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<Unit>:
+      void
+  assert(reader.is_complete(), eq: true)
 
 test "version dispatch requires explicit migration to the current version":
   match(decode_versioned<VersionedName>(
