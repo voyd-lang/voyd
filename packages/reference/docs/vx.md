@@ -888,44 +888,23 @@ capabilities. Structural VX commands such as `none`, `message`, `batch`, and
 `map` remain available, while any unknown external capability fails with the
 normal missing-handler error.
 
-For an ongoing host listener, use a configured runtime subscription:
+For an ongoing custom host listener, define a versioned effect or external
+package whose operations use typed DTOs. Raw subscription names and encoded
+configuration values are not part of the VX application API.
+
+Built-in browser listeners remain available through typed constructors:
 
 ```voyd
-use std::msgpack::self as msgpack
-
-Sub::runtime_configured(
-  kind: "websocket",
-  key: "project:".concat(model.project_id),
-  value: msgpack::make_string(model.socket_url),
-  handler: (message) =>
+broadcast_channel<String, Msg>(
+  name: "project-updates",
+  handler: (message: String) -> Msg =>
     Msg::SocketMessage { value: message }
 )
 ```
 
-The JavaScript runner starts the listener, dispatches payloads, and returns a
-cleanup function:
-
-```ts
-runtimeHost: {
-  subscriptions: {
-    websocket: (subscription, context) => {
-      const socket = new WebSocket(String(subscription.value));
-      socket.addEventListener("message", (event) => {
-        void context.dispatch({
-          kind: "subscription",
-          subscriptionKind: "websocket",
-          key: String(subscription.key),
-          payload: String(event.data),
-        });
-      });
-      return () => socket.close();
-    },
-  },
-}
-```
-
 Use `Cmd.task` when work should produce a typed Voyd result. Use runtime commands
-and subscriptions for capabilities owned by the browser or another host.
+and built-in subscriptions for capabilities owned by the browser. Put custom
+capabilities behind typed effect or external adapters.
 
 Runtime errors are reported with a phase such as `init`, `dispatch`, `render`,
 `subscriptions`, `commands`, or `dispose`. Use `mountVxApp({ onError })` or

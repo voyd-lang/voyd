@@ -45,6 +45,11 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   construction, serialized message/delay constructors, serialized mapper
   overloads, or caller-supplied handler IDs. Use the typed command constructors
   and typed closure overloads.
+- `Sub<Msg>` no longer exposes its wire payload, raw runtime subscription
+  construction/configuration, serialized interval and keyboard constructors,
+  serialized mapper overloads, or caller-supplied handler IDs. Use typed
+  built-in constructors and typed closure overloads; custom host listeners
+  belong in versioned effect or external packages.
 
 This record will be extended as the remaining obsolete boundary and VX APIs are
 removed.

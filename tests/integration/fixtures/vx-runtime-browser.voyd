@@ -120,12 +120,6 @@ pub fn standard_subscriptions() -> Sub<Msg>
       key: "storage",
       handler: (_change: StorageChange) -> Msg => Msg::Changed {}
     ),
-    Sub<Msg>::runtime_configured<String>(
-      kind: "websocket",
-      key: "socket",
-      value: msgpack::make_string("updates"),
-      handler: (value: String) -> Msg => Msg::Broadcast { value: value }
-    ),
     broadcast_channel<String, Msg>(
       name: "updates",
       handler: (value: String) -> Msg => Msg::Broadcast { value: value }

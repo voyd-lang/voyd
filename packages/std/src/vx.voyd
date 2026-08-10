@@ -26,7 +26,7 @@ pub obj Program<Model, Msg> {
 }
 
 pub obj Sub<Msg> {
-  api payload: MsgPack
+  payload: MsgPack
 }
 
 pub obj EventOptions {
@@ -249,25 +249,13 @@ impl<Msg> Sub<Msg>
     Sub<Msg> { payload: msgpack::make_map(out) }
 
   /// Lifts a child subscription through a retained message mapper.
-  api fn map<NextMsg>(self, { handler_id: i32, handler_key?: i32 }) -> Sub<NextMsg>
+  fn map_with_handler_id<NextMsg>(self, { handler_id: i32, handler_key?: i32 }) -> Sub<NextMsg>
     let ~out = subscription_map("map")
     out.set("child", self.payload)
     out.set("handlerId", msgpack::make_i32(handler_id))
     if handler_key is Some:
       out.set("handlerKey", msgpack::make_i32(handler_key.value))
     Sub<NextMsg> { payload: msgpack::make_map(out) }
-
-  /// Lifts a child subscription through a retained serialized message mapper.
-  api fn map_serialized<NextMsg>(
-    self,
-    handler: fn(MsgPack) -> MsgPack,
-    { handler_key: i32 = stable_callsite_id() }
-  ) -> Sub<NextMsg>
-    let handler_id = retain_message_mapper(handler)
-    mark_owned_subscription(
-      self.map<NextMsg>(handler_id: handler_id, handler_key: handler_key),
-      handler_id
-    )
 
   /// Lifts a child subscription through a retained typed message mapper.
   api fn map<NextMsg>(
@@ -277,12 +265,12 @@ impl<Msg> Sub<Msg>
   ) -> Sub<NextMsg>
     let handler_id = retain_typed_message_mapper(handler)
     mark_owned_subscription(
-      self.map<NextMsg>(handler_id: handler_id, handler_key: handler_key),
+      self.map_with_handler_id<NextMsg>(handler_id: handler_id, handler_key: handler_key),
       handler_id
     )
 
   /// Creates a host/runtime subscription envelope for a registered VX subscription runner.
-  api fn runtime({ kind: String, key: String, value?: MsgPack }) -> Sub<Msg>
+  fn runtime({ kind: String, key: String, value?: MsgPack }) -> Sub<Msg>
     let out = subscription_map(kind).setting("key", key)
     let complete =
       match(value)
@@ -292,18 +280,18 @@ impl<Msg> Sub<Msg>
           out
     Sub<Msg> { payload: msgpack::make_map(complete) }
 
-  api fn runtime({ kind: StringSlice, key: StringSlice, value?: MsgPack }) -> Sub<Msg>
+  fn runtime({ kind: StringSlice, key: StringSlice, value?: MsgPack }) -> Sub<Msg>
     Sub<Msg>::runtime(kind: kind.to_string(), key: key.to_string(), value: value)
 
   /// Creates a host/runtime subscription and maps incoming payloads through a typed handler.
-  api fn runtime_payload<Payload>({
+  fn runtime_payload<Payload>({
     kind: String,
     key: String,
     handler: fn(Payload) -> Msg
   }) -> Sub<Msg>
     Sub<Payload>::runtime(kind: kind, key: key).map<Msg>(handler)
 
-  api fn runtime_payload<Payload>({
+  fn runtime_payload<Payload>({
     kind: StringSlice,
     key: StringSlice,
     handler: fn(Payload) -> Msg
@@ -314,40 +302,6 @@ impl<Msg> Sub<Msg>
       handler: handler
     )
 
-  /// Creates a configured host/runtime subscription and maps incoming payloads.
-  api fn runtime_configured<Payload>({
-    kind: String,
-    key: String,
-    value: MsgPack,
-    handler: fn(Payload) -> Msg
-  }) -> Sub<Msg>
-    let out = subscription_map(kind)
-      .setting("key", key)
-      .setting("value", value)
-      .setting("valueRole", "config")
-    Sub<Payload> { payload: msgpack::make_map(out) }.map<Msg>(handler)
-
-  api fn runtime_configured<Payload>({
-    kind: StringSlice,
-    key: StringSlice,
-    value: MsgPack,
-    handler: fn(Payload) -> Msg
-  }) -> Sub<Msg>
-    Sub<Msg>::runtime_configured<Payload>(
-      kind: kind.to_string(),
-      key: key.to_string(),
-      value: value,
-      handler: handler
-    )
-
-  /// Creates an interval subscription envelope for a serialized host runtime value.
-  api fn every_serialized({ key: String, millis: i64, value: MsgPack }) -> Sub<Msg>
-    let ~out = subscription_map("interval")
-    out.set("key", key)
-    out.set("ms", msgpack::make_i64(millis))
-    out.set("value", value)
-    Sub<Msg> { payload: msgpack::make_map(out) }
-
   /// Creates an interval subscription that dispatches a typed message.
   api fn every({ key: String, millis: i64, value: Msg }) -> Sub<Msg>
     let ~out = subscription_map("interval")
@@ -356,24 +310,15 @@ impl<Msg> Sub<Msg>
     out.set("value", boundary_value_to_msgpack(value))
     Sub<Msg> { payload: msgpack::make_map(out) }
 
-  api fn every_serialized({ key: StringSlice, millis: i64, value: MsgPack }) -> Sub<Msg>
-    Sub<Msg>::every_serialized(key: key.to_string(), millis: millis, value: value)
-
   api fn every({ key: StringSlice, millis: i64, value: Msg }) -> Sub<Msg>
     Sub<Msg>::every(key: key.to_string(), millis: millis, value: value)
 
 /// Subscribes to global keydown events through the browser VX runtime host.
-pub fn keyboard_on_key_down_serialized<Msg>({ key: String, value: MsgPack }) -> Sub<Msg>
-  keyboard_subscription(kind: "keydown", key: key, value: value)
-
 pub fn keyboard_on_key_down<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   keyboard_subscription(kind: "keydown", key: key, value: boundary_value_to_msgpack(value))
 
 pub fn keyboard_on_key_down<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
   keyboard_payload_subscription(kind: "keydown", key: key).map<Msg>(handler)
-
-pub fn keyboard_on_key_down_serialized<Msg>({ key: StringSlice, value: MsgPack }) -> Sub<Msg>
-  keyboard_on_key_down_serialized<Msg>(key: key.to_string(), value: value)
 
 pub fn keyboard_on_key_down<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
   keyboard_on_key_down<Msg>(key: key.to_string(), value: value)
@@ -385,17 +330,11 @@ pub fn keyboard_on_key_down<Msg>({
   keyboard_on_key_down<Msg>(key: key.to_string(), handler: handler)
 
 /// Subscribes to global keyup events through the browser VX runtime host.
-pub fn keyboard_on_key_up_serialized<Msg>({ key: String, value: MsgPack }) -> Sub<Msg>
-  keyboard_subscription(kind: "keyup", key: key, value: value)
-
 pub fn keyboard_on_key_up<Msg>({ key: String, value: Msg }) -> Sub<Msg>
   keyboard_subscription(kind: "keyup", key: key, value: boundary_value_to_msgpack(value))
 
 pub fn keyboard_on_key_up<Msg>({ key: String, handler: fn(KeyboardEvent) -> Msg }) -> Sub<Msg>
   keyboard_payload_subscription(kind: "keyup", key: key).map<Msg>(handler)
-
-pub fn keyboard_on_key_up_serialized<Msg>({ key: StringSlice, value: MsgPack }) -> Sub<Msg>
-  keyboard_on_key_up_serialized<Msg>(key: key.to_string(), value: value)
 
 pub fn keyboard_on_key_up<Msg>({ key: StringSlice, value: Msg }) -> Sub<Msg>
   keyboard_on_key_up<Msg>(key: key.to_string(), value: value)
