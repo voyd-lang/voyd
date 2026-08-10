@@ -26,7 +26,10 @@ import {
 } from "../types.js";
 import { ensureLinearMemoryExport } from "../memory-exports.js";
 import { ensureSelectedHostTransportProvider } from "../host-transport/selected-provider.js";
-import { deriveBoundarySchema } from "../boundary/schema.js";
+import {
+  deriveBoundarySchema,
+  withDtoFingerprint,
+} from "../boundary/schema.js";
 import {
   packBoundaryValueAsMsgPack,
   unpackBoundaryValueFromMsgPack,
@@ -46,6 +49,11 @@ import {
   isBoundaryMsgPackValue,
 } from "../boundary-metadata.js";
 import { compileOptionalNoneValue } from "../optionals.js";
+import {
+  makeSelectedExportCompletion,
+  SELECTED_HOST_FRAME_TAG,
+  SELECTED_HOST_FRAME_VERSION,
+} from "../host-transport/frame-codec.js";
 
 export type SerializedExportTypeAdapter = {
   acceptsType?: (params: { typeId: TypeId; ctx: CodegenContext }) => boolean;
@@ -100,8 +108,10 @@ export const emitSerializedExportWrapper = ({
   ]);
   const locals: binaryen.Type[] = [
     msgPackType, // decodedLocal
+    arrayType, // frameArrayLocal
+    storageType, // frameStorageLocal
     arrayType, // argsArrayLocal
-    storageType, // storageLocal
+    storageType, // argsStorageLocal
     binaryen.i32, // argsCountLocal
   ];
   const argsPtrLocal = 0;
@@ -109,9 +119,11 @@ export const emitSerializedExportWrapper = ({
   const outPtrLocal = 2;
   const outLenLocal = 3;
   const decodedLocal = 4;
-  const argsArrayLocal = 5;
-  const storageLocal = 6;
-  const argsCountLocal = 7;
+  const frameArrayLocal = 5;
+  const frameStorageLocal = 6;
+  const argsArrayLocal = 7;
+  const argsStorageLocal = 8;
+  const argsCountLocal = 9;
   const fnCtx: FunctionContext = {
     bindings: new Map(),
     tempLocals: new Map(),
@@ -131,9 +143,27 @@ export const emitSerializedExportWrapper = ({
     msgPackType,
   );
 
-  const argsArray = ctx.mod.call(
+  const frameArray = ctx.mod.call(
     msgpack.unpackArray.wasmName,
     [ctx.mod.local.get(decodedLocal, msgPackType)],
+    arrayType,
+  );
+  const frameStorage = ctx.mod.call(
+    msgpack.arrayRawStorage.wasmName,
+    [ctx.mod.local.get(frameArrayLocal, arrayType)],
+    storageType,
+  );
+  const frameField = (index: number): binaryen.ExpressionRef =>
+    arrayGet(
+      ctx.mod,
+      ctx.mod.local.get(frameStorageLocal, storageType),
+      ctx.mod.i32.const(index),
+      msgPackType,
+      false,
+    );
+  const argsArray = ctx.mod.call(
+    msgpack.unpackArray.wasmName,
+    [frameField(3)],
     arrayType,
   );
   const argsCount = ctx.mod.call(
@@ -141,14 +171,28 @@ export const emitSerializedExportWrapper = ({
     [ctx.mod.local.get(argsArrayLocal, arrayType)],
     binaryen.i32,
   );
-  const storage = ctx.mod.call(
+  const argsStorage = ctx.mod.call(
     msgpack.arrayRawStorage.wasmName,
     [ctx.mod.local.get(argsArrayLocal, arrayType)],
     storageType,
   );
 
+  const checkFrame = ctx.mod.if(
+    ctx.mod.i32.or(
+      ctx.mod.i32.ne(
+        ctx.mod.call(msgpack.unpackI32.wasmName, [frameField(0)], binaryen.i32),
+        ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+      ),
+      ctx.mod.i32.ne(
+        ctx.mod.call(msgpack.unpackI32.wasmName, [frameField(1)], binaryen.i32),
+        ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.exportInvocation),
+      ),
+    ),
+    ctx.mod.unreachable(),
+    ctx.mod.nop(),
+  );
   const checkArgs = ctx.mod.if(
-    ctx.mod.i32.lt_s(
+    ctx.mod.i32.ne(
       ctx.mod.local.get(argsCountLocal, binaryen.i32),
       ctx.mod.i32.const(meta.paramTypeIds.length),
     ),
@@ -162,8 +206,25 @@ export const emitSerializedExportWrapper = ({
   ): binaryen.ExpressionRef => {
     const element = arrayGet(
       ctx.mod,
-      ctx.mod.local.get(storageLocal, storageType),
+      ctx.mod.local.get(argsStorageLocal, storageType),
       ctx.mod.i32.const(index),
+      msgPackType,
+      false,
+    );
+    const typedPayload = ctx.mod.call(
+      msgpack.unpackArray.wasmName,
+      [element],
+      arrayType,
+    );
+    const typedPayloadStorage = ctx.mod.call(
+      msgpack.arrayRawStorage.wasmName,
+      [typedPayload],
+      storageType,
+    );
+    const payload = arrayGet(
+      ctx.mod,
+      typedPayloadStorage,
+      ctx.mod.i32.const(1),
       msgPackType,
       false,
     );
@@ -176,7 +237,7 @@ export const emitSerializedExportWrapper = ({
         );
       }
       return coerceValueToType({
-        value: element,
+        value: payload,
         actualType: msgpack.msgPackTypeId,
         targetType: typeId,
         ctx,
@@ -185,7 +246,7 @@ export const emitSerializedExportWrapper = ({
     }
     if (isBoundaryMsgPackValue(typeId, ctx)) {
       return coerceValueToType({
-        value: element,
+        value: payload,
         actualType: msgpack.msgPackTypeId,
         targetType: typeId,
         ctx,
@@ -195,7 +256,7 @@ export const emitSerializedExportWrapper = ({
     const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
     if (payloadField) {
       return buildPayloadEnvelopeParamExpr({
-        value: element,
+        value: payload,
         typeId,
         payloadField,
         ctx,
@@ -205,7 +266,7 @@ export const emitSerializedExportWrapper = ({
     }
     return unpackBoundaryValueFromMsgPack({
       ctx,
-      value: element,
+      value: payload,
       schema: deriveBoundarySchema({
         typeId,
         ctx,
@@ -233,10 +294,33 @@ export const emitSerializedExportWrapper = ({
     typeAdapter,
     serializerOverride: returnSerializerOverride,
   });
+  const resultFingerprint = ctx.program.dtoPlans.isEligible({
+    typeId: meta.resultTypeId,
+    moduleId: ctx.moduleId,
+  })
+    ? withDtoFingerprint(
+        deriveBoundarySchema({
+          typeId: meta.resultTypeId,
+          ctx,
+          label: `${exportName} result`,
+        }),
+      ).fingerprint
+    : `legacy:${meta.resultTypeId}`;
+  if (!resultFingerprint) {
+    throw new Error(`missing DTO fingerprint for ${exportName} result`);
+  }
+  const completionFrame = makeSelectedExportCompletion({
+    exportName,
+    fingerprint: resultFingerprint,
+    value: encodeValue,
+    ctx,
+    fnCtx,
+    provider: msgpack,
+  });
   const encodedLength = ctx.mod.call(
     msgpack.encodeValue.wasmName,
     [
-      encodeValue,
+      completionFrame,
       ctx.mod.local.get(outPtrLocal, binaryen.i32),
       ctx.mod.local.get(outLenLocal, binaryen.i32),
     ],
@@ -250,8 +334,11 @@ export const emitSerializedExportWrapper = ({
     locals,
     ctx.mod.block(null, [
       ctx.mod.local.set(decodedLocal, decoded),
+      ctx.mod.local.set(frameArrayLocal, frameArray),
+      ctx.mod.local.set(frameStorageLocal, frameStorage),
+      checkFrame,
       ctx.mod.local.set(argsArrayLocal, argsArray),
-      ctx.mod.local.set(storageLocal, storage),
+      ctx.mod.local.set(argsStorageLocal, argsStorage),
       ctx.mod.local.set(argsCountLocal, argsCount),
       checkArgs,
       ...loweredCall.setup,

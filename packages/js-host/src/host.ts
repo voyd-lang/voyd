@@ -1056,7 +1056,16 @@ export const createVoydHost = async ({
           args,
         })
       : args;
-    const encodedArgs = transport.encode(boundaryArgs);
+    const encodedArgs = transport.encodeFrame({
+      kind: "export-invocation",
+      exportName: entryName,
+      args: boundaryArgs.map((value, index) => ({
+        fingerprint:
+          abi?.params?.[index]?.fingerprint ??
+          `legacy:${entryName}:arg${index}`,
+        value,
+      })),
+    });
     if (encodedArgs.length > bufferSize) {
       throw new Error(
         `serialized export ${entryName} args exceed buffer size (${encodedArgs.length} > ${bufferSize}); increase createVoydHost({ bufferSize }) or pass a smaller payload`,
@@ -1095,7 +1104,32 @@ export const createVoydHost = async ({
       );
     }
     const bytes = new Uint8Array(msgpackMemory.buffer, outPtr, written);
-    const decoded = transport.decode(bytes);
+    const completion = transport.decodeFrame(bytes);
+    if (
+      completion.kind !== "export-completion" ||
+      completion.exportName !== entryName
+    ) {
+      throw new Error(
+        `serialized export ${entryName} returned an incompatible host frame`,
+      );
+    }
+    if (completion.outcome.kind === "failure") {
+      const { code, message, path } = completion.outcome.failure;
+      const at = path && path.length > 0 ? ` at ${path.join(".")}` : "";
+      throw new Error(
+        `serialized export ${entryName} failed (${code})${at}: ${message}`,
+      );
+    }
+    const expectedFingerprint = abi?.result?.fingerprint;
+    if (
+      expectedFingerprint &&
+      completion.outcome.value.fingerprint !== expectedFingerprint
+    ) {
+      throw new Error(
+        `serialized export ${entryName} result fingerprint mismatch`,
+      );
+    }
+    const decoded = completion.outcome.value.value;
     return (
       abi?.result
         ? decodeBoundaryResult({
@@ -1440,9 +1474,7 @@ export const createVoydHost = async ({
     };
 
     const decodeFromBuffer = (length: number): unknown =>
-      transport.decode(
-        new Uint8Array(msgpackMemory.buffer, bufferPtr, length),
-      );
+      transport.decode(new Uint8Array(msgpackMemory.buffer, bufferPtr, length));
 
     let resolvePublicOutcome: ((outcome: RunOutcome<T>) => void) | undefined;
     const publicOutcome = new Promise<RunOutcome<T>>((resolve) => {
