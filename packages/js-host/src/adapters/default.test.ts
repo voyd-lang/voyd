@@ -403,7 +403,10 @@ describe("registerDefaultHostAdapters", () => {
       "/this/path/does/not/exist"
     );
     expect(result.kind).toBe("tail");
-    expect(result.value).toMatchObject({ ok: false, kind: "not-found" });
+    expect(result.value).toMatchObject({
+      ok: false,
+      error_kind: "not-found",
+    });
   });
 
   it("creates directories and renames paths through the node fs adapter", async () => {
@@ -430,25 +433,25 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         nestedDirectory
       );
-      expect(createResult).toEqual({ kind: "tail", value: { ok: true } });
+      expect(createResult).toMatchObject({ kind: "tail", value: { ok: true } });
 
       const writeResult = await getHandler("voyd.std.fs", "write_string")(
         tailContinuation,
         { path: sourcePath, value: "orbit" }
       );
-      expect(writeResult).toEqual({ kind: "tail", value: { ok: true } });
+      expect(writeResult).toMatchObject({ kind: "tail", value: { ok: true } });
 
       const renameResult = await getHandler("voyd.std.fs", "rename")(
         tailContinuation,
         { from: sourcePath, to: destinationPath }
       );
-      expect(renameResult).toEqual({ kind: "tail", value: { ok: true } });
+      expect(renameResult).toMatchObject({ kind: "tail", value: { ok: true } });
 
       const readResult = await getHandler("voyd.std.fs", "read_string")(
         tailContinuation,
         destinationPath
       );
-      expect(readResult).toEqual({
+      expect(readResult).toMatchObject({
         kind: "tail",
         value: { ok: true, value: "orbit" },
       });
@@ -487,7 +490,7 @@ describe("registerDefaultHostAdapters", () => {
           value: "replacement",
         },
       );
-      expect(atomicResult).toEqual({ kind: "tail", value: { ok: true } });
+      expect(atomicResult).toMatchObject({ kind: "tail", value: { ok: true } });
       await expect(readFile(destination, "utf8")).resolves.toBe("replacement");
       await expect(readdir(root)).resolves.toEqual(["orbit.json"]);
 
@@ -513,7 +516,8 @@ describe("registerDefaultHostAdapters", () => {
       expect(
         contenders.filter(
           (result) =>
-            (result.value as Record<string, unknown>).kind === "already-exists",
+            (result.value as Record<string, unknown>).error_kind ===
+            "already-exists",
         ),
       ).toHaveLength(1);
       expect(["first", "second"]).toContain(
@@ -607,7 +611,7 @@ describe("registerDefaultHostAdapters", () => {
       "/tmp/old.log"
     );
 
-    expect(result).toEqual({ kind: "tail", value: { ok: true } });
+    expect(result).toMatchObject({ kind: "tail", value: { ok: true } });
     expect(removedPaths).toEqual(["/tmp/old.log"]);
 
     const errorResult = await getHandler("voyd.std.fs", "remove")(
@@ -618,9 +622,10 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: false,
-        code: 13,
-        kind: "permission-denied",
-        message: "permission denied",
+        value: null,
+        error_code: 13,
+        error_kind: "permission-denied",
+        error_message: "permission denied",
       },
     });
   });
@@ -656,14 +661,14 @@ describe("registerDefaultHostAdapters", () => {
       tailContinuation,
       "/tmp/orbit/data"
     );
-    expect(createResult).toEqual({ kind: "tail", value: { ok: true } });
+    expect(createResult).toMatchObject({ kind: "tail", value: { ok: true } });
     expect(mkdir).toHaveBeenCalledWith("/tmp/orbit/data", { recursive: true });
 
     const renameResult = await getHandler("voyd.std.fs", "rename")(
       tailContinuation,
       { from: "/tmp/orbit.tmp", to: "/tmp/orbit.json" }
     );
-    expect(renameResult).toEqual({ kind: "tail", value: { ok: true } });
+    expect(renameResult).toMatchObject({ kind: "tail", value: { ok: true } });
     expect(rename).toHaveBeenCalledWith("/tmp/orbit.tmp", "/tmp/orbit.json");
   });
 
@@ -727,7 +732,7 @@ describe("registerDefaultHostAdapters", () => {
         value: "complete",
       },
     );
-    expect(atomicResult).toEqual({ kind: "tail", value: { ok: true } });
+    expect(atomicResult).toMatchObject({ kind: "tail", value: { ok: true } });
     expect(files.get("/tmp/orbit.json")).toBe("complete");
     expect([...files.keys()]).toEqual(["/tmp/orbit.json"]);
 
@@ -742,8 +747,8 @@ describe("registerDefaultHostAdapters", () => {
     );
     expect(exclusiveResult.value).toMatchObject({
       ok: false,
-      kind: "already-exists",
-      message: "already exists",
+      error_kind: "already-exists",
+      error_message: "already exists",
     });
     expect(files.get("/tmp/existing.txt")).toBe("owner");
 
@@ -755,7 +760,10 @@ describe("registerDefaultHostAdapters", () => {
         value: "temporary",
       },
     );
-    expect(failedResult.value).toMatchObject({ ok: false, kind: "conflict" });
+    expect(failedResult.value).toMatchObject({
+      ok: false,
+      error_kind: "conflict",
+    });
     expect(removed).toHaveLength(1);
     expect(removed[0]).toContain("/tmp/rename-fails.txt.voyd-tmp-");
   });
@@ -800,10 +808,10 @@ describe("registerDefaultHostAdapters", () => {
     expect(readBytesResult.kind).toBe("tail");
     expect(readBytesResult.value).toMatchObject({
       ok: false,
-      code: 1,
+      error_code: 1,
     });
     expect(
-      toStringOrUndefinedFromRecord(readBytesResult.value, "message")
+      toStringOrUndefinedFromRecord(readBytesResult.value, "error_message")
     ).toMatch(/read_bytes response exceeds effect transport buffer/i);
 
     const readStringResult = await getHandler("voyd.std.fs", "read_string")(
@@ -813,10 +821,10 @@ describe("registerDefaultHostAdapters", () => {
     expect(readStringResult.kind).toBe("tail");
     expect(readStringResult.value).toMatchObject({
       ok: false,
-      code: 1,
+      error_code: 1,
     });
     expect(
-      toStringOrUndefinedFromRecord(readStringResult.value, "message")
+      toStringOrUndefinedFromRecord(readStringResult.value, "error_message")
     ).toMatch(/read_string response exceeds effect transport buffer/i);
 
     const listDirResult = await getHandler("voyd.std.fs", "list_dir")(
@@ -826,10 +834,10 @@ describe("registerDefaultHostAdapters", () => {
     expect(listDirResult.kind).toBe("tail");
     expect(listDirResult.value).toMatchObject({
       ok: false,
-      code: 1,
+      error_code: 1,
     });
     expect(
-      toStringOrUndefinedFromRecord(listDirResult.value, "message")
+      toStringOrUndefinedFromRecord(listDirResult.value, "error_message")
     ).toMatch(/list_dir response exceeds effect transport buffer/i);
   });
 

@@ -57,6 +57,9 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
   payload instead of an array of MessagePack integer values.
 - Environment effects exchange typed request and result DTOs. Host adapters no
   longer receive or return MessagePack envelopes for environment operations.
+- File-system effects exchange typed paths, binary `Bytes`, requests, and
+  result DTOs. Filesystem error categories remain explicit without HostDto or
+  MessagePack wrappers.
 - Retained callback invocations and non-effectful callback completions use
   invocation-scoped frames. Effectful callbacks use the same framed effect
   request/outcome loop.
