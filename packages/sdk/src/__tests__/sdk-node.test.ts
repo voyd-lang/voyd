@@ -745,12 +745,16 @@ pub fn main() -> i32
       host.run("echo_i64", [Number.MAX_SAFE_INTEGER + 1]),
     ).rejects.toThrow("typed export echo_i64 arg0 expected i64, got number");
     expect(exports).not.toContain("__voyd_serialized_export_primitive");
-    expect(abi.exports).toContainEqual({
+    expect(abi.exports).toContainEqual(expect.objectContaining({
+      id: expect.any(Number),
       name: "primitive",
       abi: "direct",
       params: [],
-      result: expect.objectContaining({ kind: "i32" }),
-    });
+      result: expect.objectContaining({
+        kind: "i32",
+        fingerprint: expect.any(String),
+      }),
+    }));
     await expect(
       host.run("translate", [{ x: 1, y: 2 }, 10, 20]),
     ).resolves.toEqual({ x: 11, y: 22 });
@@ -869,12 +873,21 @@ pub fn main() -> i32
 
     expect(result.wasm.byteLength).toBeLessThan(2_000);
     expect(exports).not.toContain("__voyd_serialized_export_increment");
-    expect(abi.exports).toContainEqual({
+    expect(abi.exports).toContainEqual(expect.objectContaining({
+      id: expect.any(Number),
       name: "increment",
       abi: "direct",
-      params: [expect.objectContaining({ kind: "i32" })],
-      result: expect.objectContaining({ kind: "i32" }),
-    });
+      params: [
+        expect.objectContaining({
+          kind: "i32",
+          fingerprint: expect.any(String),
+        }),
+      ],
+      result: expect.objectContaining({
+        kind: "i32",
+        fingerprint: expect.any(String),
+      }),
+    }));
     await expect(host.run("increment", [41])).resolves.toBe(42);
     await expect(host.run("increment", ["41"])).rejects.toThrow(
       "typed export increment arg0 expected i32, got string",
@@ -921,7 +934,13 @@ pub fn shift(point: AliasPoint) -> AliasPoint
 
     expect(exports).toContain("translate");
     expect(exports).not.toContain("__voyd_serialized_export_translate");
-    expect(abi.exports).toContainEqual({ name: "translate", abi: "direct" });
+    expect(abi.exports).toContainEqual(
+      expect.objectContaining({
+        id: expect.any(Number),
+        name: "translate",
+        abi: "direct",
+      }),
+    );
   });
 
   it("compiles when entryPath is relative with subdirectories", async () => {

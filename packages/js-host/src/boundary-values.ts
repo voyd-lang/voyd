@@ -9,7 +9,7 @@ const I32_MAX = 2147483647;
 const I64_MIN = -(1n << 63n);
 const I64_MAX = (1n << 63n) - 1n;
 const BOUNDARY_PACK_CYCLE_ERROR =
-  "__voyd_boundary_error: cannot encode cyclic object graph or boundary object graph exceeds maximum depth";
+  "__voyd_dto_error: cannot encode cyclic object graph or DTO object graph exceeds maximum depth";
 
 export const encodeBoundaryArgs = ({
   exportName,

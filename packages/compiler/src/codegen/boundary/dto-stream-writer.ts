@@ -44,7 +44,7 @@ import {
 } from "./dto-tree-codec.js";
 
 const DTO_STREAM_CYCLE_ERROR =
-  "cannot encode a cyclic DTO object graph or a graph that exceeds the maximum depth";
+  "__voyd_dto_error: cannot encode cyclic object graph or DTO object graph exceeds maximum depth";
 
 type StreamWriterState = {
   writerTypeId: TypeId;
