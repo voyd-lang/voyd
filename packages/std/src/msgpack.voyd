@@ -8,7 +8,23 @@
 use self::fns::self as msgpack_fns
 use self::fns::{ MsgPack as RawMsgPack }
 use std::array::Array
-use std::bytes::Bytes
+use std::bytes::{ ByteBuffer, Bytes }
+use std::data::{
+  DataArray,
+  DataBool,
+  DataBytes,
+  DataF32,
+  DataF64,
+  DataField,
+  DataI32,
+  DataI64,
+  DataNull,
+  DataObject,
+  DataString,
+  DataValue,
+  DataVariant,
+  decode as decode_data,
+}
 use std::dict::{ Dict, DictKey }
 use std::msgpack::errors::{
   MsgPackError,
@@ -73,6 +89,35 @@ pub fn make_i64(value: i64): () -> MsgPack
 @compiler_contract(id: "voyd.std.boundary.msgpack.make-map")
 pub fn make_map(value: Dict<String, MsgPack>): () -> MsgPack
   msgpack_fns::make_map(value)
+
+/// Encodes a DTO-compatible value into immutable MessagePack bytes.
+pub fn encode<T>(value: T): () -> Result<Bytes, MsgPackError>
+  msgpack_fns::encode_value_bytes(data_value_to_msgpack(dto_value_to_data(value)))
+
+/// Encodes an explicitly constructed MessagePack value into immutable bytes.
+pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>
+  msgpack_fns::encode_value_bytes(value)
+
+/// Decodes immutable MessagePack bytes into a DTO-compatible value.
+pub fn decode<T>(bytes: Bytes): () -> Result<T, MsgPackError>
+  match(msgpack_fns::decode_value_bytes(bytes))
+    Err<MsgPackError> { error }:
+      Err<MsgPackError> { error }
+    Ok<MsgPack> { value }:
+      match(decode_data<T>(msgpack_to_data_value(value)))
+        Ok<T> { value }:
+          Ok<T> { value }
+        Err { error }:
+          Err<MsgPackError> {
+            error: make_error(
+              error_code_type_mismatch(),
+              "msgpack typed decode failed at ".concat(error.path)
+            )
+          }
+
+/// Decodes immutable bytes into the parsed MessagePack value tree.
+pub fn decode_value_bytes(bytes: Bytes): () -> Result<MsgPack, MsgPackError>
+  msgpack_fns::decode_value_bytes(bytes)
 
 /// Encodes a boundary-compatible DTO value with its compiler-derived schema.
 ///
@@ -270,3 +315,110 @@ fn type_mismatch_result<T>(expected: String): () -> Result<T, MsgPackError>
       "msgpack unpack failed: expected ".concat(expected)
     )
   }
+
+fn data_value_to_msgpack(value: DataValue) -> MsgPack
+  value.match(decoded)
+    DataNull:
+      make_null()
+    DataBool:
+      make_bool(decoded.value)
+    DataI32:
+      make_i32(decoded.value)
+    DataI64:
+      make_i64(decoded.value)
+    DataF32:
+      make_f32(decoded.value)
+    DataF64:
+      make_f64(decoded.value)
+    DataString:
+      make_string(decoded.value)
+    DataBytes:
+      make_binary(Binary { bytes: decoded.value.to_array() })
+    DataArray:
+      let ~values = Array<MsgPack>::with_capacity(decoded.values.len())
+      var index = 0
+      while index < decoded.values.len():
+        values.push(data_value_to_msgpack(decoded.values.at(index)))
+        index = index + 1
+      make_array(values)
+    DataObject:
+      make_map(data_fields_to_msgpack(decoded.fields))
+    DataVariant:
+      let ~map = data_fields_to_msgpack(decoded.fields)
+      map.set("$variant", make_string(decoded.name))
+      make_map(map)
+
+fn data_fields_to_msgpack(fields: Array<DataField>) -> Dict<String, MsgPack>
+  let ~out = Dict<String, MsgPack>::init()
+  var index = 0
+  while index < fields.len():
+    let field = fields.at(index)
+    out.set(field.name, data_value_to_msgpack(field.value))
+    index = index + 1
+  out
+
+fn msgpack_to_data_value(value: MsgPack) -> DataValue
+  value.match(decoded)
+    Null:
+      DataNull {}
+    Bool:
+      DataBool { value: decoded.value }
+    I32:
+      DataI32 { value: decoded.value }
+    I64:
+      DataI64 { value: decoded.value }
+    F32:
+      DataF32 { value: decoded.value }
+    F64:
+      DataF64 { value: decoded.value }
+    String:
+      DataString { value: decoded }
+    Binary:
+      DataBytes { value: bytes_from_array(decoded.bytes) }
+    Array<MsgPack>:
+      let ~values = Array<DataValue>::with_capacity(decoded.len())
+      var index = 0
+      while index < decoded.len():
+        values.push(msgpack_to_data_value(decoded.at(index)))
+        index = index + 1
+      DataArray { values }
+    MsgPackMap:
+      msgpack_map_to_data_value(msgpack_fns::unpack_map(value))
+
+fn msgpack_map_to_data_value(value: Dict<String, MsgPack>) -> DataValue
+  let entries = value.entries()
+  let ~fields = Array<DataField>::with_capacity(entries.len())
+  var variant_name = "".to_string()
+  var has_variant = false
+  var index = 0
+  while index < entries.len():
+    let entry = entries.at(index)
+    if entry.0 == "$variant":
+      entry.1.match(tag)
+        String:
+          variant_name = tag
+          has_variant = true
+        else:
+          void
+    else:
+      fields.push(DataField {
+        name: entry.0,
+        value: msgpack_to_data_value(entry.1)
+      })
+    index = index + 1
+  if has_variant:
+    DataVariant { name: variant_name, fields }
+  else:
+    DataObject { fields }
+
+fn bytes_from_array(source: Array<i32>) -> Bytes
+  let ~buffer = ByteBuffer::with_capacity(source.len())
+  var index = 0
+  while index < source.len():
+    buffer.push(source.at(index))
+    index = index + 1
+  buffer.as_bytes()
+
+@intrinsic(name: "__dto_value_to_data")
+fn dto_value_to_data<T>(value: T): () -> DataValue
+  __dto_value_to_data(value)

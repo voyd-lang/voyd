@@ -7,6 +7,7 @@ use std::array::Array
 use std::data::{
   DataArray,
   DataBool,
+  DataBytes,
   DataF32,
   DataF64,
   DataField,
@@ -215,6 +216,17 @@ pub fn strict_decode_options() -> JsonDecodeOptions
 /// Returns forward-compatible typed-decoder options that ignore unknown fields.
 pub fn permissive_decode_options() -> JsonDecodeOptions
   JsonDecodeOptions { unknown_fields: IgnoreUnknownFields {} }
+
+/// Encodes a DTO-compatible value as compact JSON text.
+///
+/// Signed 64-bit integers outside JavaScript's exact integer range are
+/// rejected. `Bytes` requires an explicit application representation.
+pub fn encode<T>(value: T): () -> Result<String, JsonError>
+  match(data_value_to_json(dto_value_to_data(value), "$"))
+    Err<JsonError> { error }:
+      Err<JsonError> { error }
+    Ok<JsonValue> { value }:
+      stringify(value)
 
 /// Parses and strictly decodes JSON into a closed boundary-compatible type.
 pub fn decode<T>(source: String): () -> Result<T, JsonDecodeError>
@@ -453,6 +465,124 @@ fn json_value_to_data(
             path,
             "type shape contains an unresolved reference"
           )
+
+fn data_value_to_json(
+  value: DataValue,
+  path: String
+): () -> Result<JsonValue, JsonError>
+  value.match(decoded)
+    DataNull:
+      Ok<JsonValue> { value: JsonNull {} }
+    DataBool:
+      Ok<JsonValue> { value: JsonBool { value: decoded.value } }
+    DataI32:
+      Ok<JsonValue> {
+        value: JsonNumber { value: number_cast::to_f64(decoded.value) }
+      }
+    DataI64:
+      let exact_max = exact_json_i64_max()
+      if decoded.value < -exact_max or decoded.value > exact_max:
+        Err<JsonError> {
+          error: json_stringify_error(
+            "json encode failed at ".concat(path).concat(
+              ": i64 is outside the exact JSON integer range"
+            )
+          )
+        }
+      else:
+        Ok<JsonValue> {
+          value: JsonNumber { value: number_cast::to_f64(decoded.value) }
+        }
+    DataF32:
+      Ok<JsonValue> {
+        value: JsonNumber { value: number_cast::to_f64(decoded.value) }
+      }
+    DataF64:
+      Ok<JsonValue> { value: JsonNumber { value: decoded.value } }
+    DataString:
+      Ok<JsonValue> { value: JsonString { value: decoded.value } }
+    DataBytes:
+      Err<JsonError> {
+        error: json_stringify_error(
+          "json encode failed at ".concat(path).concat(
+            ": bytes require an explicit JSON representation"
+          )
+        )
+      }
+    DataArray:
+      data_array_to_json(decoded, path)
+    DataObject:
+      data_fields_to_json(decoded.fields, path)
+    DataVariant:
+      data_variant_to_json(decoded, path)
+
+fn data_array_to_json(
+  value: DataArray,
+  path: String
+): () -> Result<JsonValue, JsonError>
+  let ~out = Array<JsonValue>::with_capacity(value.values.len())
+  var index = 0
+  while index < value.values.len():
+    match(data_value_to_json(value.values.at(index), index_path(path, index)))
+      Err<JsonError> { error }:
+        return Err<JsonError> { error }
+      Ok<JsonValue> { value }:
+        out.push(value)
+    index = index + 1
+  Ok<JsonValue> { value: JsonArray { value: out } }
+
+fn data_fields_to_json(
+  fields: Array<DataField>,
+  path: String
+): () -> Result<JsonValue, JsonError>
+  let ~out = Dict<String, JsonValue>::init()
+  var index = 0
+  while index < fields.len():
+    let field = fields.at(index)
+    match(data_value_to_json(field.value, field_path(path, field.name)))
+      Err<JsonError> { error }:
+        return Err<JsonError> { error }
+      Ok<JsonValue> { value }:
+        out.set(field.name, value)
+    index = index + 1
+  Ok<JsonValue> { value: JsonObject { value: out } }
+
+fn data_variant_to_json(
+  value: DataVariant,
+  path: String
+): () -> Result<JsonValue, JsonError>
+  match(data_fields_to_json(value.fields, path))
+    Err<JsonError> { error }:
+      Err<JsonError> { error }
+    Ok<JsonValue> { value: object }:
+      object.match(decoded)
+        JsonObject:
+          Ok<JsonValue> {
+            value: JsonObject {
+              value: decoded.value.setting(
+                "$variant",
+                JsonString { value: value.name }
+              )
+            }
+          }
+        else:
+          Err<JsonError> {
+            error: json_stringify_error("json encode failed: invalid variant")
+          }
+
+fn field_path(path: String, field: String) -> String
+  path.concat(".").concat(field)
+
+fn index_path(path: String, index: i32) -> String
+  path.concat("[").concat(number_cast::to_string(index)).concat("]")
+
+fn exact_json_i64_max() -> i64
+  number_cast::to_i64(2147483647) * number_cast::to_i64(4194304)
+    + number_cast::to_i64(4194303)
+
+@intrinsic(name: "__dto_value_to_data")
+fn dto_value_to_data<T>(value: T): () -> DataValue
+  __dto_value_to_data(value)
 
 fn json_array_to_data(
   value: JsonArray,

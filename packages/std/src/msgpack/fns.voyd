@@ -2,6 +2,7 @@
 //! This module owns the in-memory codec and value constructors/unpackers.
 
 use std::array::Array
+use std::bytes::{ ByteBuffer, Bytes }
 use std::fixed_array::fns::{ new_fixed_array }
 use std::dict::{ Dict, DictKey }
 use std::error::panic
@@ -22,19 +23,53 @@ pub obj MsgPackMap {
   entries: Array<(String, MsgPack)>
 }
 
-obj Encoder {
+obj MemoryEncoderSink {
   ptr: i32,
+  len: i32
+}
+
+obj BytesEncoderSink {}
+
+type EncoderSink = MemoryEncoderSink | BytesEncoderSink
+
+obj Encoder {
+  sink: EncoderSink,
+  buffer: ByteBuffer,
   pos: i32,
-  len: i32,
   ok: bool
 }
 
-obj Decoder {
+obj MemoryDecoderSource {
   ptr: i32,
+  len: i32
+}
+
+obj BytesDecoderSource {
+  bytes: Bytes
+}
+
+type DecoderSource = MemoryDecoderSource | BytesDecoderSource
+
+obj Decoder {
+  source: DecoderSource,
   pos: i32,
-  end: i32,
   ok: bool
 }
+
+fn byte_encoder() -> Encoder
+  Encoder {
+    sink: BytesEncoderSink {},
+    buffer: ByteBuffer::with_capacity(64),
+    pos: 0,
+    ok: true
+  }
+
+fn bytes_decoder(bytes: Bytes) -> Decoder
+  Decoder {
+    source: BytesDecoderSource { bytes },
+    pos: 0,
+    ok: true
+  }
 
 /// Encodes one MessagePack value into a caller-provided memory region.
 ///
@@ -59,6 +94,19 @@ pub fn encode_value_result(value: MsgPack, ptr: i32, len: i32): () -> Result<i32
     error: make_error(
       error_code_buffer_too_small(),
       "msgpack encode failed: destination buffer is too small"
+    )
+  }
+
+/// Encodes one parsed MessagePack value into immutable bytes.
+pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>
+  let ~encoder = byte_encoder()
+  encoder.encode_any(value)
+  if encoder.ok:
+    return Ok<Bytes> { value: encoder.encoded_bytes() }
+  Err<MsgPackError> {
+    error: make_error(
+      error_code_buffer_too_small(),
+      "msgpack encode failed"
     )
   }
 
@@ -90,6 +138,26 @@ pub fn decode_value_result(ptr: i32, len: i32): () -> Result<MsgPack, MsgPackErr
       )
     }
   if decoder.pos != len:
+    return Err<MsgPackError> {
+      error: make_error(
+        error_code_trailing_bytes(),
+        "msgpack decode failed: trailing bytes remain after one value"
+      )
+    }
+  Ok<MsgPack> { value: value }
+
+/// Decodes exactly one parsed MessagePack value from immutable bytes.
+pub fn decode_value_bytes(bytes: Bytes): () -> Result<MsgPack, MsgPackError>
+  let ~decoder = bytes_decoder(bytes)
+  let value = decoder.decode_any()
+  if decoder.ok == false:
+    return Err<MsgPackError> {
+      error: make_error(
+        error_code_decode_failed(),
+        "msgpack decode failed: malformed or truncated payload"
+      )
+    }
+  if decoder.pos != bytes.len():
     return Err<MsgPackError> {
       error: make_error(
         error_code_trailing_bytes(),
@@ -368,7 +436,12 @@ pub fn unpack_map_result(value: MsgPack): () -> Result<Dict<String, MsgPack>, Ms
 impl Encoder
   /// Initializes a codec cursor over the provided memory region.
   pub fn init(ptr: i32, len: i32)
-    Encoder { ptr: ptr, pos: 0, len: len, ok: true }
+    Encoder {
+      sink: MemoryEncoderSink { ptr: ptr, len: len },
+      buffer: ByteBuffer::init(),
+      pos: 0,
+      ok: true
+    }
 
   fn can_write(~self, count: i32) -> bool
     if self.ok == false:
@@ -376,20 +449,36 @@ impl Encoder
     if count <= 0:
       return true
     let next = self.pos + count
-    if next > self.len:
-      self.ok = false
-      return false
-    let memory_end = memory::size() * 65536
-    if (self.ptr + next) > memory_end:
-      self.ok = false
-      return false
-    true
+    self.sink.match(active)
+      MemoryEncoderSink:
+        if next > active.len:
+          self.ok = false
+          return false
+        let memory_end = memory::size() * 65536
+        if (active.ptr + next) > memory_end:
+          self.ok = false
+          return false
+        true
+      BytesEncoderSink:
+        true
 
   fn write_u8(~self, value: i32) -> void
     if self.can_write(1) == false:
       return void
-    memory::store_u8(self.ptr + self.pos, value)
+    self.sink.match(active)
+      MemoryEncoderSink:
+        memory::store_u8(active.ptr + self.pos, value)
+      BytesEncoderSink:
+        self.buffer.push(value)
     self.pos = self.pos + 1
+
+  fn encoded_bytes(self) -> Bytes
+    self.sink.match(active)
+      BytesEncoderSink:
+        self.buffer.as_bytes()
+      MemoryEncoderSink:
+        panic()
+        ByteBuffer::init().as_bytes()
 
   fn write_u16(~self, value: i32) -> void
     if self.can_write(2) == false:
@@ -562,27 +651,42 @@ impl Encoder
 impl Decoder
   /// Initializes a codec cursor over the provided memory region.
   pub fn init(ptr: i32, len: i32)
-    Decoder { ptr: ptr, pos: 0, end: ptr + len, ok: true }
+    Decoder {
+      source: MemoryDecoderSource { ptr: ptr, len: len },
+      pos: 0,
+      ok: true
+    }
 
   fn can_read(~self, count: i32) -> bool
     if self.ok == false:
       return false
     if count <= 0:
       return true
-    let next = self.ptr + self.pos + count
-    let memory_end = memory::size() * 65536
-    if next > self.end:
-      self.ok = false
-      return false
-    if next > memory_end:
-      self.ok = false
-      return false
-    true
+    let next = self.pos + count
+    self.source.match(active)
+      MemoryDecoderSource:
+        if next > active.len:
+          self.ok = false
+          return false
+        let memory_end = memory::size() * 65536
+        if active.ptr + next > memory_end:
+          self.ok = false
+          return false
+        true
+      BytesDecoderSource:
+        if next > active.bytes.len():
+          self.ok = false
+          return false
+        true
 
   fn read_u8(~self) -> i32
     if self.can_read(1) == false:
       return 0
-    let value = memory::load_u8(self.ptr + self.pos)
+    let value = self.source.match(active)
+      MemoryDecoderSource:
+        memory::load_u8(active.ptr + self.pos)
+      BytesDecoderSource:
+        active.bytes.at(self.pos)
     self.pos = self.pos + 1
     value
 

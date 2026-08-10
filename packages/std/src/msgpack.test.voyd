@@ -85,6 +85,32 @@ test "derived msgpack codecs preserve nested records arrays optionals and enum p
 
   assert_same_encoding(packed, pack_boundary_value(source))
 
+test "typed msgpack encode and decode use immutable bytes":
+  let source = BoundaryCodecEnvelope {
+    version: 4,
+    requestId: "request-8",
+    profiles: [BoundaryCodecProfile { displayName: "Lin" }],
+    event: BoundaryCodecEvent::Deleted { reason: "complete" }
+  }
+
+  match(encode(source))
+    Err<MsgPackError>:
+      assert(false, eq: true)
+    Ok { value: bytes }:
+      assert(bytes.is_empty(), eq: false)
+      match(decode<BoundaryCodecEnvelope>(bytes))
+        Err<MsgPackError>:
+          assert(false, eq: true)
+        Ok<BoundaryCodecEnvelope> { value }:
+          assert(value.version, eq: 4)
+          assert(value.requestId, eq: "request-8")
+          assert(value.profiles.at(0).displayName, eq: "Lin")
+          value.event.match(event)
+            Deleted:
+              assert(event.reason, eq: "complete")
+            else:
+              assert(false, eq: true)
+
 test "msgpack encode_value returns error when the destination buffer is too small":
   let base = reserve_test_page()
 

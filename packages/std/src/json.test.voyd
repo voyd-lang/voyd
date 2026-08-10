@@ -1,5 +1,7 @@
 use std::array::{ Array, new_array_unchecked }
 use std::dict::Dict
+use std::optional::types::all
+use std::number::cast::to_i64
 use std::string::{ String, new_string }
 use std::test::assertions::all
 
@@ -24,6 +26,47 @@ obj VersionedName {
 }
 
 obj DecodeFloat { value: f32 }
+obj EncodeWideInteger { value: i64 }
+
+test "typed JSON encode preserves DTO field and variant structure":
+  let source = DecodeRequest {
+    version: 2,
+    profiles: [DecodeProfile { age: 11, nickname: "eleven" }],
+    event: DecodeStopped { reason: "done" }
+  }
+  match(encode(source))
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<String> { value: text }:
+      match(decode<DecodeRequest>(text))
+        Err<JsonDecodeError>:
+          assert(false, eq: true)
+        Ok<DecodeRequest> { value }:
+          assert(value.version, eq: 2)
+          match(value.profiles.at(0).nickname)
+            Some<String> { value: nickname }:
+              assert(nickname, eq: "eleven")
+            None:
+              assert(false, eq: true)
+          value.event.match(event)
+            DecodeStopped:
+              assert(event.reason, eq: "done")
+            else:
+              assert(false, eq: true)
+
+test "typed JSON encode enforces the exact i64 range":
+  let exact_max = exact_json_i64_max()
+  match(encode(EncodeWideInteger { value: exact_max }))
+    Err<JsonError>:
+      assert(false, eq: true)
+    Ok<String>:
+      void
+
+  match(encode(EncodeWideInteger { value: exact_max + to_i64(1) }))
+    Ok<String>:
+      assert(false, eq: true)
+    Err<JsonError> { error }:
+      assert(error.code, eq: 2)
 
 test "typed JSON decode composes nested arrays optional fields and enum payloads":
   let source = "{\"version\":1,\"profiles\":[{\"age\":7},{\"age\":9,\"nickname\":\"nine\"}],\"event\":{\"$variant\":\"DecodeStarted\",\"id\":42}}"

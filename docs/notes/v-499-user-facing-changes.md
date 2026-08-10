@@ -29,6 +29,13 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - OpenAPI shape rendering represents `Bytes` as a binary string.
 - `ByteBuffer.push` traps when given an integer outside `0...255`; invalid
   values can no longer be silently truncated during encoding.
+- `std::msgpack::encode<T>` returns immutable `Bytes`, and
+  `std::msgpack::decode<T>` decodes immutable bytes into a checked DTO value.
+  Parsed-tree byte conversion remains available as `encode_value_bytes` and
+  `decode_value_bytes`.
+- `std::json::encode<T>` produces compact JSON and rejects `i64` values outside
+  JavaScript's exact integer range. `Bytes` requires an explicit application
+  representation in JSON.
 
 ## Planned removals and replacements
 
@@ -36,8 +43,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - Remove public MessagePack boundary helpers and compiler contracts.
 - Replace format-specific compiler traversal with the single `AutoDtoPlan`
   exposed through `ProgramCodegenView`.
-- Add streaming `DataReader` and `DataWriter` APIs, including typed JSON and
-  MessagePack entry points.
+- Add streaming `DataReader` and `DataWriter` implementations underneath the
+  typed JSON and MessagePack entry points.
 - Replace raw VX MessagePack payloads with typed plans and final wire lowering.
 - Replace the legacy unframed host protocol with complete ABI v2 frames.
 - Add custom DTO representations for types that cannot use automatic structural
