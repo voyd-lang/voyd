@@ -219,8 +219,7 @@ pub fn render<Msg>(value: Frame) -> Cmd<Msg>
   out.set("value", value.payload)
   Cmd<Msg> { payload: msgpack::make_map(out) }
 
-/// Measures text in logical CSS pixels and dispatches through a retained handler id.
-pub fn measure_text<Msg>({
+fn measure_text_with_handler_id<Msg>({
   selector: String,
   value: String,
   font: String = "12px sans-serif",
@@ -242,7 +241,7 @@ pub fn measure_text<Msg>({
 }) -> Cmd<Msg>
   let handler_id = retain_typed_message_mapper(handler)
   mark_owned_handler(
-    measure_text<Msg>(
+    measure_text_with_handler_id<Msg>(
       selector: selector,
       value: value,
       font: font,

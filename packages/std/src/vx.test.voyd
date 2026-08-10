@@ -51,7 +51,12 @@ test "vx frame encodes version marker and root":
       assert(false, eq: true)
 
 test "vx element separates attributes and events":
-  let attrs = [class("primary"), disabled(true), style(name: "display", value: "grid"), on_click_id(7)]
+  let attrs = [
+    class("primary"),
+    disabled(true),
+    style(name: "display", value: "grid"),
+    event_message(name: "click", message: TypedVxTestMsg::Saved {})
+  ]
   let button = element(
     tag: "button",
     attrs: attrs,
@@ -182,10 +187,21 @@ test "vx class prop styles and keyed helpers encode renderer fields":
     tail()
   assert(seen_scopes.len(), eq: 1)
 
-  match(msgpack::unpack_map(map_html<MsgPack, MsgPack>(html: text("Child"), handler_id: 21)))
+  match(msgpack::unpack_map(map_html<TypedVxTestMsg, TypedVxTestMsg>(
+    html: text("Child"),
+    handler: (message: TypedVxTestMsg) -> TypedVxTestMsg => message
+  )))
     Ok<Dict<String, MsgPack>> { value }:
       assert_string_field(value, "kind", "map")
-      assert_i32_field(value, "handlerId", 21)
+      match(value.get("handlerId"))
+        Some<MsgPack> { value: id }:
+          match(msgpack::unpack_i32(id))
+            Ok<i32> { value: handler_id }:
+              assert(handler_id > 0, eq: true)
+            Err:
+              assert(false, eq: true)
+        None:
+          assert(false, eq: true)
       match(value.get("child"))
         Some<MsgPack>:
           assert(true, eq: true)
@@ -193,50 +209,6 @@ test "vx class prop styles and keyed helpers encode renderer fields":
           assert(false, eq: true)
     Err:
       assert(false, eq: true)
-
-test "vx event helpers encode browser names and options":
-  let click = on_click_with(
-    options: EventOptions {
-      prevent_default: true,
-      stop_propagation: true,
-      capture: false,
-      passive: false,
-      pointer_capture: true
-    },
-    handler_id: 42
-  )
-  assert_event_descriptor(click, "click", 42)
-
-  match(msgpack::unpack_map(click))
-    Ok<Dict<String, MsgPack>> { value }:
-      match(value.get("options"))
-        Some<MsgPack> { value: options }:
-          match(msgpack::unpack_map(options))
-            Ok<Dict<String, MsgPack>> { value: option_map }:
-              assert_bool_field(option_map, "preventDefault", true)
-              assert_bool_field(option_map, "stopPropagation", true)
-              assert_bool_field(option_map, "pointerCapture", true)
-            Err:
-              assert(false, eq: true)
-        None:
-          assert(false, eq: true)
-    Err:
-      assert(false, eq: true)
-
-  assert_event_descriptor(on_double_click(1), "dblclick", 1)
-  assert_event_descriptor(on_drag_start(2), "dragstart", 2)
-  assert_event_descriptor(on_context_menu(3), "contextmenu", 3)
-  assert_event_descriptor(
-    on_submit_with(options: EventOptions { prevent_default: true }, handler_id: 4),
-    "submit",
-    4
-  )
-  assert_event_descriptor(
-    on_key_up_with(options: EventOptions { stop_propagation: true }, handler_id: 5),
-    "keyup",
-    5
-  )
-  assert_event_descriptor(on_pointer_cancel(6), "pointercancel", 6)
 
 test "vx typed event messages encode through the boundary":
   let click = event_message(name: "click", message: TypedVxTestMsg::Saved {})
@@ -428,38 +400,6 @@ test "vx program map helpers encode retained mappers":
     commands: Cmd<TypedVxTestMsg>::message(TypedVxTestMsg::Saved {})
   )
 
-  let mapped_model = map_model<TypedVxTestModel, ParentVxTestModel, TypedVxTestMsg>(
-    program: step,
-    handler_id: 31
-  )
-  match(msgpack::unpack_map(mapped_model.payload))
-    Ok<Dict<String, MsgPack>> { value }:
-      assert_string_field(value, "kind", "program_map_model")
-      assert_i32_field(value, "handlerId", 31)
-      match(value.get("child"))
-        Some<MsgPack>:
-          assert(true, eq: true)
-        None:
-          assert(false, eq: true)
-    Err:
-      assert(false, eq: true)
-
-  let mapped_message = map_message<TypedVxTestModel, TypedVxTestMsg, MsgPack>(
-    program: step,
-    handler_id: 42
-  )
-  match(msgpack::unpack_map(mapped_message.payload))
-    Ok<Dict<String, MsgPack>> { value }:
-      assert_string_field(value, "kind", "program_map_message")
-      assert_i32_field(value, "handlerId", 42)
-      match(value.get("child"))
-        Some<MsgPack>:
-          assert(true, eq: true)
-        None:
-          assert(false, eq: true)
-    Err:
-      assert(false, eq: true)
-
   let typed_model = map_model(
     step,
     (model: TypedVxTestModel) -> i32 => model.count
@@ -491,7 +431,7 @@ test "vx program map helpers encode retained mappers":
 
   let typed_message = map_message(
     step,
-    (message: TypedVxTestMsg) -> MsgPack => msgpack::make_string("parent")
+    (_message: TypedVxTestMsg) -> TypedVxTestMsg => TypedVxTestMsg::Saved {}
   )
   match(msgpack::unpack_map(typed_message.payload))
     Ok<Dict<String, MsgPack>> { value }:
@@ -582,26 +522,6 @@ fn assert_f64_field(map: Dict<String, MsgPack>, field: StringSlice, expected: f6
 
 fn assert_f64_field(map: Dict<String, MsgPack>, field: String, expected: f64) -> void
   assert_f64_field(map, field.as_slice(), expected)
-
-fn assert_event_descriptor(value: MsgPack, event_name: StringSlice, handler_id: i32) -> void
-  match(msgpack::unpack_map(value))
-    Ok<Dict<String, MsgPack>> { value: event }:
-      assert_string_field(event, "kind", "event")
-      assert_string_field(event, "event".as_slice(), event_name)
-      match(event.get("handlerId"))
-        Some<MsgPack> { value: id }:
-          match(msgpack::unpack_i32(id))
-            Ok<i32> { value: actual_id }:
-              assert(actual_id, eq: handler_id)
-            Err:
-              assert(false, eq: true)
-        None:
-          assert(false, eq: true)
-    Err:
-      assert(false, eq: true)
-
-fn assert_event_descriptor(value: MsgPack, event_name: String, handler_id: i32) -> void
-  assert_event_descriptor(value, event_name.as_slice(), handler_id)
 
 fn assert_string_payload_field(payload: MsgPack, field: StringSlice, expected: StringSlice) -> void
   match(msgpack::unpack_map(payload))

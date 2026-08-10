@@ -52,7 +52,7 @@ pub fn main()
   App()
 
 pub fn event_message_button() -> MsgPack
-  <button on_click={msgpack::make_string("save")}>Save</button>
+  <button on_click={VxMessage::Save {}}>Save</button>
 
 pub fn full_event_options_form() -> MsgPack
   <form
@@ -69,15 +69,3 @@ pub fn full_event_options_form() -> MsgPack
   >
     Save
   </form>
-
-pub fn full_event_options_descriptor() -> MsgPack
-  on_submit_with(
-    options: EventOptions {
-      prevent_default: true,
-      stop_propagation: false,
-      capture: false,
-      passive: false,
-      pointer_capture: false
-    },
-    handler_id: 42
-  )

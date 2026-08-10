@@ -75,6 +75,9 @@ mod unrelated_response
 
 use self::unrelated_response::{ Response as UnrelatedResponse }
 
+enum MappedHtmlTestMsg
+  Child
+
 @effect(id: "voyd.web.test.log")
 eff WebTestLog
   info(resume, value: i32) -> void
@@ -1234,7 +1237,10 @@ test "VX renderer uses HTML for children of SVG integration points":
 
 test "html rendering unwraps mapped child views":
   let child: MsgPack = <p class="child">Mapped child</p>
-  let mapped = map_html<MsgPack, MsgPack>(html: child, handler_id: 7)
+  let mapped = map_html<MappedHtmlTestMsg, MappedHtmlTestMsg>(
+    html: child,
+    handler: (message: MappedHtmlTestMsg) -> MappedHtmlTestMsg => message
+  )
   let rendered = render(mapped)
 
   assert(rendered.contains("<p class=\"child\">Mapped child</p>".as_slice()), eq: true)

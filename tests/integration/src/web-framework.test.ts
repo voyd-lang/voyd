@@ -378,22 +378,6 @@ describe("integration: pkg::web", () => {
     ).resolves.toContain("<button>Mapped</button>");
     expect(host.retainedCallbacks.size()).toBe(0);
 
-    const mapperId = await host.run<number>("durable_message_mapper_probe");
-    expect(host.retainedCallbacks.size()).toBe(1);
-    await expect(host.retainedCallbacks.dispatch(mapperId, 41)).resolves.toBe(
-      42,
-    );
-    host.retainedCallbacks.release(mapperId);
-
-    const explicitHandlerId = await host.run<number>(
-      "explicit_event_id_survives_ssr_probe",
-    );
-    expect(host.retainedCallbacks.size()).toBe(1);
-    await expect(
-      host.retainedCallbacks.dispatch(explicitHandlerId, undefined),
-    ).resolves.toBe(42);
-    host.retainedCallbacks.release(explicitHandlerId);
-
     await host.run("browser_callback_lifetime_probe");
     expect(host.retainedCallbacks.size()).toBe(1);
     host.retainedCallbacks.clear();

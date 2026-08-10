@@ -182,18 +182,6 @@ test "vx canvas paths and state operations encode validated wire primitives":
   assert_string_payload_field(composite_draw.payload, "operation", "lighter")
 
 test "vx canvas command constructors preserve runtime envelopes":
-  let measure_by_id = measure_text<i32>(
-    selector: "#scene",
-    value: "Voyd",
-    font: "600 14px sans-serif",
-    handler_id: 91
-  )
-  assert_string_payload_field(measure_by_id.payload, "type", "cmd")
-  assert_string_payload_field(measure_by_id.payload, "kind", "canvas_measure_text")
-  assert_string_payload_field(measure_by_id.payload, "selector", "#scene")
-  assert_string_payload_field(measure_by_id.payload, "value", "Voyd")
-  assert_payload_has_field(measure_by_id.payload, "handlerId")
-
   let measure_typed = measure_text<CanvasTestMsg>(
     selector: "#scene",
     value: "Voyd",
@@ -201,6 +189,10 @@ test "vx canvas command constructors preserve runtime envelopes":
     handler: (metrics: TextMetrics) -> CanvasTestMsg =>
       CanvasTestMsg::Measured { metrics }
   )
+  assert_string_payload_field(measure_typed.payload, "type", "cmd")
+  assert_string_payload_field(measure_typed.payload, "kind", "canvas_measure_text")
+  assert_string_payload_field(measure_typed.payload, "selector", "#scene")
+  assert_string_payload_field(measure_typed.payload, "value", "Voyd")
   assert_payload_has_field(measure_typed.payload, "handlerId")
   assert_array_payload_len(measure_typed.payload, "__vxOwnedMapHandlerIds", 1)
 

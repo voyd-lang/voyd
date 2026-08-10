@@ -430,7 +430,7 @@ pub fn multi_document() -> String
     container.querySelector("button")?.click();
     await nextTurn();
 
-    expect(seenMessages).toEqual([{ kind: "msgpack", value: "save" }]);
+    expect(seenMessages).toEqual([{ Save: {} }]);
 
     mounted.dispose();
     expect(container.innerHTML).toBe("");
