@@ -23,7 +23,7 @@ use std::data::{
   DataString,
   DataValue,
   DataVariant,
-  decode as decode_data,
+  read as read_dto,
   write as write_dto,
 }
 use std::dict::{ Dict, DictKey }
@@ -105,20 +105,19 @@ pub fn encode_value_bytes(value: MsgPack): () -> Result<Bytes, MsgPackError>
 
 /// Decodes immutable MessagePack bytes into a DTO-compatible value.
 pub fn decode<T>(bytes: Bytes): () -> Result<T, MsgPackError>
-  match(msgpack_fns::decode_data_value_bytes(bytes))
+  let ~reader = MsgPackReader::init(bytes)
+  match(read_dto<T, MsgPackError, MsgPackReader>(reader, true))
     Err<MsgPackError> { error }:
       Err<MsgPackError> { error }
-    Ok<DataValue> { value }:
-      match(decode_data<T>(value))
-        Ok<T> { value }:
-          Ok<T> { value }
-        Err { error }:
-          Err<MsgPackError> {
-            error: make_error(
-              error_code_type_mismatch(),
-              "msgpack typed decode failed at ".concat(error.path)
-            )
-          }
+    Ok<T> { value }:
+      if reader.is_complete():
+        return Ok<T> { value }
+      Err<MsgPackError> {
+        error: make_error(
+          error_code_type_mismatch(),
+          "msgpack typed decode has trailing bytes"
+        )
+      }
 
 /// Decodes immutable bytes into the parsed MessagePack value tree.
 pub fn decode_value_bytes(bytes: Bytes): () -> Result<MsgPack, MsgPackError>

@@ -34,6 +34,11 @@ obj BoundaryCodecEnvelope {
   event: BoundaryCodecEvent
 }
 
+obj RecursiveCodecNode {
+  value: i32,
+  next?: RecursiveCodecNode
+}
+
 test "derived msgpack codecs preserve nested records arrays optionals and enum payloads":
   let source = BoundaryCodecEnvelope {
     version: 3,
@@ -91,6 +96,26 @@ test "typed msgpack encode and decode use immutable bytes":
               assert(event.reason, eq: "complete")
             else:
               assert(false, eq: true)
+
+test "typed msgpack codecs stream recursive DTO values":
+  let source = RecursiveCodecNode {
+    value: 1,
+    next: RecursiveCodecNode { value: 2 }
+  }
+  match(encode(source))
+    Err<MsgPackError>:
+      assert(false, eq: true)
+    Ok { value: bytes }:
+      match(decode<RecursiveCodecNode>(bytes))
+        Err<MsgPackError>:
+          assert(false, eq: true)
+        Ok<RecursiveCodecNode> { value }:
+          assert(value.value, eq: 1)
+          match(value.next)
+            None:
+              assert(false, eq: true)
+            Some<RecursiveCodecNode> { value: next }:
+              assert(next.value, eq: 2)
 
 test "msgpack encode_value returns error when the destination buffer is too small":
   let base = reserve_test_page()

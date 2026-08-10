@@ -37,6 +37,7 @@ use std::data::{
   VariantKind,
   UnknownFieldPolicy,
   decode as decode_data,
+  read as read_dto,
   write as write_dto
 }
 use std::dict::Dict
@@ -284,6 +285,110 @@ impl DataWriter<JsonError> for JsonWriter
   fn end_variant(~self) -> Result<Unit, JsonError>
     self.end_container(kind: 2)
 
+/// Path-aware JSON source used by compiler-generated typed decoding.
+obj JsonDtoReader {
+  reader: JsonReader,
+  path: String,
+  parents: Array<String>
+}
+
+impl JsonDtoReader
+  fn init(source: StringSlice) -> JsonDtoReader
+    JsonDtoReader {
+      reader: JsonReader::init(source),
+      path: "$".to_string(),
+      parents: Array<String>::init()
+    }
+
+  fn is_complete(self) -> bool
+    self.reader.is_complete()
+
+  fn mapped<T>(
+    self,
+    result: Result<T, JsonError>,
+    kind: JsonDecodeErrorKind
+  ) -> Result<T, JsonDecodeError>
+    match(result)
+      Ok<T> { value }:
+        Ok<T> { value }
+      Err<JsonError> { error }:
+        decode_failure<T>(kind, self.path, error.message)
+
+impl DataReader<JsonDecodeError> for JsonDtoReader
+  fn reject(~self, message: String) -> Result<Unit, JsonDecodeError>
+    decode_failure<Unit>(JsonSchemaFailure {}, self.path, message)
+
+  fn matches_name(self, actual: String, expected: String) -> bool
+    actual == expected
+
+  fn enter_field(~self, name: String) -> void
+    self.parents.push(self.path)
+    self.path = json_field_path(self.path, name)
+
+  fn enter_index(~self, index: i32) -> void
+    self.parents.push(self.path)
+    self.path = json_index_path(self.path, index)
+
+  fn leave(~self) -> void
+    if self.parents.is_empty() == false:
+      let index = self.parents.len() - 1
+      self.path = self.parents.at(index)
+      self.parents.pop()
+
+  fn kind(self) -> Result<DataKind, JsonDecodeError>
+    self.mapped(self.reader.kind(), JsonParseFailure {})
+
+  fn read_null(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.read_null(), JsonSchemaFailure {})
+
+  fn read_bool(~self) -> Result<bool, JsonDecodeError>
+    self.mapped(self.reader.read_bool(), JsonSchemaFailure {})
+
+  fn read_i32(~self) -> Result<i32, JsonDecodeError>
+    self.mapped(self.reader.read_i32(), JsonSchemaFailure {})
+
+  fn read_i64(~self) -> Result<i64, JsonDecodeError>
+    self.mapped(self.reader.read_i64(), JsonSchemaFailure {})
+
+  fn read_f32(~self) -> Result<f32, JsonDecodeError>
+    self.mapped(self.reader.read_f32(), JsonSchemaFailure {})
+
+  fn read_f64(~self) -> Result<f64, JsonDecodeError>
+    self.mapped(self.reader.read_f64(), JsonSchemaFailure {})
+
+  fn read_string(~self) -> Result<String, JsonDecodeError>
+    self.mapped(self.reader.read_string(), JsonSchemaFailure {})
+
+  fn read_bytes(~self) -> Result<Bytes, JsonDecodeError>
+    self.mapped(self.reader.read_bytes(), JsonSchemaFailure {})
+
+  fn begin_array(~self) -> Result<i32, JsonDecodeError>
+    self.mapped(self.reader.begin_array(), JsonSchemaFailure {})
+
+  fn has_next_element(self) -> Result<bool, JsonDecodeError>
+    self.mapped(self.reader.has_next_element(), JsonParseFailure {})
+
+  fn end_array(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.end_array(), JsonParseFailure {})
+
+  fn begin_record(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.begin_record(), JsonSchemaFailure {})
+
+  fn next_field(~self) -> Result<Option<String>, JsonDecodeError>
+    self.mapped(self.reader.next_field(), JsonParseFailure {})
+
+  fn skip_value(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.skip_value(), JsonParseFailure {})
+
+  fn end_record(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.end_record(), JsonParseFailure {})
+
+  fn begin_variant(~self) -> Result<String, JsonDecodeError>
+    self.mapped(self.reader.begin_variant(), JsonSchemaFailure {})
+
+  fn end_variant(~self) -> Result<Unit, JsonDecodeError>
+    self.mapped(self.reader.end_variant(), JsonParseFailure {})
+
 fn json_writer_success() -> Result<Unit, JsonError>
   Ok<Unit> { value: Unit {} }
 
@@ -485,6 +590,21 @@ impl JsonReader
                 self.fail<f64>("json reader expected number")
 
 impl DataReader<JsonError> for JsonReader
+  fn reject(~self, message: String) -> Result<Unit, JsonError>
+    self.fail<Unit>(message)
+
+  fn matches_name(self, actual: String, expected: String) -> bool
+    actual == expected
+
+  fn enter_field(~self, name: String) -> void
+    void
+
+  fn enter_index(~self, index: i32) -> void
+    void
+
+  fn leave(~self) -> void
+    void
+
   fn kind(self) -> Result<DataKind, JsonError>
     let ~probe = JsonParser {
       source: self.parser.source,
@@ -857,25 +977,21 @@ pub fn decode<T>(
   source: StringSlice,
   { options: JsonDecodeOptions }
 ): () -> Result<T, JsonDecodeError>
-  let shape = shape_of<T>()
-  let ~reader = JsonReader::init(source)
-  match(json_reader_to_data(
+  let ~reader = JsonDtoReader::init(source)
+  match(read_dto<T, JsonDecodeError, JsonDtoReader>(
     reader,
-    shape.root,
-    shape,
-    "$",
-    options.unknown_fields
+    rejects_unknown_fields(options.unknown_fields)
   ))
     Err<JsonDecodeError> { error }:
       Err<JsonDecodeError> { error }
-    Ok<DataValue> { value }:
+    Ok<T> { value }:
       if reader.is_complete() == false:
         return decode_failure<T>(
           JsonParseFailure {},
           "$",
           "json parse error: trailing characters"
         )
-      decode_data_result<T>(value, options)
+      Ok<T> { value }
 
 /// Strictly decodes an already-parsed JSON value.
 pub fn decode<T>(value: JsonValue): () -> Result<T, JsonDecodeError>

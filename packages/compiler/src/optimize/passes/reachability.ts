@@ -39,6 +39,7 @@ const SHAPE_REIFICATION_INTRINSICS = new Set(["__dto_shape_of"]);
 const DATA_DTO_INTRINSICS = new Set([
   "__dto_value_to_data",
   "__dto_write",
+  "__dto_read",
   "__data_to_dto_value",
 ]);
 

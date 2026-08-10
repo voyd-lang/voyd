@@ -201,6 +201,11 @@ pub trait DataWriter<SinkError>
 
 /// Stateful pull source used by generated DTO traversal.
 pub trait DataReader<SourceError>
+  fn reject(~self, message: String) -> Result<Unit, SourceError>
+  fn matches_name(self, actual: String, expected: String) -> bool
+  fn enter_field(~self, name: String) -> void
+  fn enter_index(~self, index: i32) -> void
+  fn leave(~self) -> void
   fn kind(self) -> Result<DataKind, SourceError>
   fn read_null(~self) -> Result<Unit, SourceError>
   fn read_bool(~self) -> Result<bool, SourceError>
@@ -534,6 +539,21 @@ impl DataValueReader
     data_reader_failure<T>(message)
 
 impl DataReader<DataValueReadError> for DataValueReader
+  fn reject(~self, message: String) -> Result<Unit, DataValueReadError>
+    self.fail<Unit>(message)
+
+  fn matches_name(self, actual: String, expected: String) -> bool
+    actual == expected
+
+  fn enter_field(~self, name: String) -> void
+    void
+
+  fn enter_index(~self, index: i32) -> void
+    void
+
+  fn leave(~self) -> void
+    void
+
   fn kind(self) -> Result<DataKind, DataValueReadError>
     data_event_kind(self.events, self.index)
 
@@ -956,6 +976,14 @@ pub fn write<T, SinkError, Writer>(
   value: T
 ): () -> Result<Unit, SinkError>
   __dto_write(writer, value)
+
+/// Reads a closed DTO directly from a stateful provider source.
+@intrinsic(name: "__dto_read")
+pub fn read<T, SourceError, Reader>(
+  reader: Reader,
+  reject_unknown_fields: bool
+): () -> Result<T, SourceError>
+  __dto_read<T, SourceError, Reader>(reader, reject_unknown_fields)
 
 /// Fallibly decodes a neutral value into a boundary-compatible Voyd type.
 pub fn decode<T>(value: DataValue): () -> Result<T, DecodeError>

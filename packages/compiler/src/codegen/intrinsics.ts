@@ -63,6 +63,7 @@ import {
   readDtoValueFromTree,
 } from "./boundary/dto-tree-codec.js";
 import { writeDtoValueToStream } from "./boundary/dto-stream-writer.js";
+import { readDtoValueFromStream } from "./boundary/dto-stream-reader.js";
 import { stableCallsiteIdFor } from "../stable-callsite-id.js";
 import { currentHandlerValue } from "./expressions/call/shared.js";
 import { compileExternalCall } from "./external/imports.js";
@@ -1537,6 +1538,46 @@ export const compileIntrinsicCall = ({
         rethrowBoundarySchemaDiagnostic({ error, call });
       }
     }
+    case "__dto_read": {
+      assertArgCount(name, args, 2);
+      const [intrinsicTargetTypeId, , intrinsicReaderTypeId] =
+        intrinsicCallTypeArgs({
+          call,
+          ctx,
+          instanceId,
+        });
+      const resultTypeId = getRequiredExprType(call.id, ctx, instanceId);
+      const targetTypeId =
+        intrinsicTargetTypeId ?? resultOkPayloadType({ resultTypeId, ctx });
+      if (targetTypeId === undefined) {
+        throw intrinsicCodegenDiagnostic({
+          call,
+          message: "data::read requires a resolved target type",
+        });
+      }
+      const readerTypeId =
+        intrinsicReaderTypeId ??
+        paramTypeIds?.[0] ??
+        getRequiredExprType(call.args[0]!.expr, ctx, instanceId);
+      try {
+        return readDtoValueFromStream({
+          reader: args[0]!,
+          readerTypeId,
+          rejectUnknownFields: args[1]!,
+          schema: deriveBoundarySchema({
+            typeId: targetTypeId,
+            ctx,
+            label: "data::read target",
+            options: { tagStandaloneVariants: true },
+          }),
+          resultTypeId,
+          ctx,
+          fnCtx,
+        });
+      } catch (error) {
+        rethrowBoundarySchemaDiagnostic({ error, call });
+      }
+    }
     case "__data_to_dto_value": {
       assertArgCount(name, args, 1);
       const returnTypeId = getRequiredExprType(call.id, ctx, instanceId);
@@ -1929,6 +1970,29 @@ const intrinsicCallTypeArgs = ({
   return substitution
     ? raw.map((typeId) => ctx.program.types.substitute(typeId, substitution))
     : raw;
+};
+
+const resultOkPayloadType = ({
+  resultTypeId,
+  ctx,
+}: {
+  resultTypeId: TypeId;
+  ctx: CodegenContext;
+}): TypeId | undefined => {
+  const desc = ctx.program.types.getTypeDesc(resultTypeId);
+  if (desc.kind !== "union") return undefined;
+  const ok = desc.members.find((typeId) => {
+    const member = ctx.program.types.getTypeDesc(typeId);
+    const owner = ctx.program.types.getNominalOwner(
+      member.kind === "intersection" && member.nominal !== undefined
+        ? member.nominal
+        : typeId,
+    );
+    return owner !== undefined && ctx.program.symbols.getName(owner) === "Ok";
+  });
+  return ok === undefined
+    ? undefined
+    : getStructuralTypeInfo(ok, ctx)?.fieldMap.get("value")?.typeId;
 };
 
 const emitArithmeticIntrinsic = ({

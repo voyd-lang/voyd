@@ -8468,6 +8468,14 @@ const typeIntrinsicCall = (
         detail: "writer and DTO value",
       });
       return expectedReturnType ?? ctx.primitives.unknown;
+    case "__dto_read":
+      assertIntrinsicArgCount({
+        name: "__dto_read",
+        args,
+        expected: 2,
+        detail: "reader and unknown-field policy",
+      });
+      return expectedReturnType ?? ctx.primitives.unknown;
     case "__data_to_dto_value":
       assertIntrinsicArgCount({
         name: "__data_to_dto_value",

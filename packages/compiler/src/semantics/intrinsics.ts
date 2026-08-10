@@ -117,6 +117,7 @@ const VALUE_INTRINSICS = new Map<string, IntrinsicValueMetadata>([
     { intrinsicUsesSignature: false, access: "std-only" },
   ],
   ["__dto_write", { intrinsicUsesSignature: false, access: "std-only" }],
+  ["__dto_read", { intrinsicUsesSignature: false, access: "std-only" }],
   [
     "__data_to_dto_value",
     { intrinsicUsesSignature: false, access: "std-only" },

@@ -353,6 +353,21 @@ impl DataWriter<MsgPackError> for MsgPackWriter
     self.end_container(kind: 2)
 
 impl DataReader<MsgPackError> for MsgPackReader
+  fn reject(~self, message: String) -> Result<Unit, MsgPackError>
+    self.fail<Unit>(message)
+
+  fn matches_name(self, actual: String, expected: String) -> bool
+    actual == expected
+
+  fn enter_field(~self, name: String) -> void
+    void
+
+  fn enter_index(~self, index: i32) -> void
+    void
+
+  fn leave(~self) -> void
+    void
+
   fn kind(self) -> Result<DataKind, MsgPackError>
     let prefix = self.decoder.peek_u8()
     if self.decoder.ok == false or prefix < 0:

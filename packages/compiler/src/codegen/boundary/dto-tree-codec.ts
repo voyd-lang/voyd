@@ -380,7 +380,7 @@ export const callCustomDtoWrite = ({
   );
 };
 
-const callCustomDtoRead = ({
+export const callCustomDtoRead = ({
   value,
   schema,
   ctx,
@@ -440,7 +440,7 @@ const callCustomDtoRead = ({
   });
 };
 
-const customDtoMethod = ({
+export const customDtoMethod = ({
   schema,
   name,
   ctx,
@@ -1784,7 +1784,7 @@ export const variantMatches = ({
   );
 };
 
-const fixedArrayNew = ({
+export const fixedArrayNew = ({
   arrayTypeId,
   elementTypeId,
   length,
@@ -1831,7 +1831,7 @@ export const fixedArrayGet = ({
   });
 };
 
-const fixedArraySet = ({
+export const fixedArraySet = ({
   array,
   elementTypeId,
   index,
@@ -1859,7 +1859,7 @@ const fixedArraySet = ({
   );
 };
 
-const lowerFieldValueForInit = ({
+export const lowerFieldValueForInit = ({
   structInfo,
   field,
   value,
