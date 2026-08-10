@@ -886,7 +886,7 @@ fn save(model: Model): (http_client::HttpClient, tasks::TaskRuntime) -> Program<
     return next(model)
   program<Model, Msg>(
     model: start_saving(model),
-    commands: Cmd<Msg>::task(
+    commands: Cmd<Msg>::perform(
       work: () -> bool => save_article(slug: model.slug, body: model.body),
       handler: (succeeded: bool) -> Msg => Msg::SaveFinished { succeeded: succeeded }
     )

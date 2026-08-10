@@ -527,6 +527,50 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
       });
     };
 
+    const enqueueEffectfulFunctionBoundaryDependencies = ({
+      moduleId,
+      symbol,
+      typeArgs,
+    }: {
+      moduleId: string;
+      symbol: SymbolId;
+      typeArgs: readonly TypeId[];
+    }): void => {
+      if (ctx.ir.options.effectsHostBoundary === "off") {
+        return;
+      }
+      const signature = ctx.ir.baseProgram.functions.getSignature(
+        moduleId,
+        symbol,
+      );
+      if (!signature || isPureSignature({ effectRow: signature.effectRow, ir: ctx.ir })) {
+        return;
+      }
+      const typeId = ctx.ir.baseProgram.types.instantiate(
+        signature.scheme,
+        typeArgs,
+      );
+      const descriptor = ctx.ir.baseProgram.types.getTypeDesc(typeId);
+      if (descriptor.kind !== "function") {
+        return;
+      }
+      [
+        ...descriptor.parameters.map((parameter) => parameter.type),
+        descriptor.returnType,
+      ].forEach((boundaryTypeId) => {
+        try {
+          enqueueCustomDtoPlan(
+            ctx.ir.baseProgram.dtoPlans.get({
+              typeId: boundaryTypeId,
+              moduleId,
+            }),
+          );
+        } catch {
+          // Normal boundary diagnostics report unsupported effectful values.
+        }
+      });
+    };
+
     const enqueueCustomDtoPlan = (plan: AutoDtoPlan): void => {
       if (plan.kind === "custom") {
         [plan.writeFunction, plan.readFunction].forEach((functionId) =>
@@ -822,6 +866,11 @@ export const wholeProgramSpecializationPruningPass: ProgramOptimizationPass = {
         reachableInstances.add(instanceId);
         processedInstances += 1;
         const instance = ctx.ir.baseProgram.functions.getInstance(instanceId);
+        enqueueEffectfulFunctionBoundaryDependencies({
+          moduleId: instance.symbolRef.moduleId,
+          symbol: instance.symbolRef.symbol,
+          typeArgs: instance.typeArgs,
+        });
         reachableSymbols.add(
           canonicalProgramSymbolIdOf({
             moduleId: instance.symbolRef.moduleId,

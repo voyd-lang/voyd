@@ -475,8 +475,14 @@ export const customDtoMethod = ({
         candidate.typeArgs.every((arg, index) => arg === typeArgs[index]),
     ) ?? (methods?.length === 1 ? methods[0] : undefined);
   if (!method) {
+    const typeName =
+      (nominalDesc.kind === "nominal-object" ||
+      nominalDesc.kind === "value-object" ||
+      nominalDesc.kind === "trait"
+        ? nominalDesc.name
+        : undefined) ?? `type ${schema.typeId}`;
     throw new Error(
-      `CustomDto.${name} is not linked for type ${schema.typeId}`,
+      `CustomDto.${name} is not linked for ${typeName} (${schema.typeId})`,
     );
   }
   return method;
