@@ -1,30 +1,23 @@
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
-use std::error::{ HostError, IoError, panic }
-use std::host_dto::HostDto
-use std::msgpack::MsgPack
-use std::msgpack::self as msgpack
+use std::error::{ HostError, IoError }
 use std::optional::types::all
 use std::result::types::all
-use std::string::type::{ String, StringSlice, new_string }
+use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
-use std::test::host_dto::self as host_dto_test
 
 test "input request init accepts string":
   let request = InputRequest::init("Name: ".as_slice().to_string())
-
   match(request.prompt)
     Some<String> { value }:
       assert(value.equals("Name: "), eq: true)
     None:
       assert(false, eq: true)
 
-test "input read_line encodes prompt and decodes line":
+test "input read_line forwards prompt and decodes line":
   let ~prompts = Array<String>::init()
   let result = read_line_with_capture(prompts)
-
   assert(optional_string_or(prompts.get(0), "missing".as_slice()).equals("Name: "), eq: true)
-
   match(result)
     Ok<Option<String>> { value }:
       match(value)
@@ -35,35 +28,28 @@ test "input read_line encodes prompt and decodes line":
     Err<HostError>:
       assert(false, eq: true)
 
-test "input read_line decodes null as none":
-  let result = read_line_with_payload(host_dto_test::host_ok_with_value(msgpack::make_null()))
-
-  match(result)
+test "input read_line decodes end and errors":
+  match(read_line_with_result(line_result(false, "", 0)))
     Ok<Option<String>> { value }:
       match(value)
-        Some<String>:
-          assert(false, eq: true)
         None:
           assert(true, eq: true)
+        Some<String>:
+          assert(false, eq: true)
     Err<HostError>:
       assert(false, eq: true)
 
-test "input read_line decodes host errors":
-  let result = read_line_with_payload(host_dto_test::host_error_payload(code: 7, message: "denied"))
-
-  match(result)
+  match(read_line_with_result(line_result(false, "", 7)))
     Err<HostError> { error }:
       assert(error.code, eq: 7)
       assert(error.message.equals("denied"), eq: true)
     Ok<Option<String>>:
       assert(false, eq: true)
 
-test "input read_bytes encodes max_bytes and decodes payload":
+test "input read_bytes forwards limit and decodes bytes":
   let ~max_values = Array<i32>::init()
   let result = read_bytes_with_capture(max_values)
-
   assert(optional_i32_or(max_values.get(0), -1), eq: 3)
-
   match(result)
     Ok<Option<Bytes>> { value }:
       match(value)
@@ -71,88 +57,77 @@ test "input read_bytes encodes max_bytes and decodes payload":
           let decoded = bytes.to_array()
           assert(decoded.len(), eq: 3)
           assert(optional_i32_or(decoded.get(0), -1), eq: 7)
-          assert(optional_i32_or(decoded.get(1), -1), eq: 8)
           assert(optional_i32_or(decoded.get(2), -1), eq: 9)
         None:
           assert(false, eq: true)
     Err<IoError>:
       assert(false, eq: true)
 
-test "input read_bytes decodes null as none":
-  let result = read_bytes_with_payload(host_dto_test::host_ok_with_value(msgpack::make_null()))
-
-  match(result)
-    Ok<Option<Bytes>> { value }:
-      match(value)
-        Some<Bytes>:
-          assert(false, eq: true)
-        None:
-          assert(true, eq: true)
-    Err<IoError>:
-      assert(false, eq: true)
-
-test "input read_bytes decodes host errors":
-  let result = read_bytes_with_payload(host_dto_test::host_error_payload(code: 13, message: "stdin unavailable"))
-
-  match(result)
-    Err<IoError> { error }:
-      assert(error.code, eq: 13)
-      assert(error.message.equals("stdin unavailable"), eq: true)
-    Ok<Option<Bytes>>:
-      assert(false, eq: true)
-
 test "input is_tty forwards bool from host":
-  let tty_result = is_tty_with_payload(true)
-  let piped_result = is_tty_with_payload(false)
+  assert(is_tty_with_payload(true), eq: true)
+  assert(is_tty_with_payload(false), eq: false)
 
-  assert(tty_result, eq: true)
-  assert(piped_result, eq: false)
+fn line_result(found: bool, value: String, code: i32): () -> InputLineResult
+  InputLineResult {
+    ok: code == 0,
+    found: found,
+    value: value,
+    code: code,
+    message: if code == 0 then: "" else: "denied"
+  }
 
-fn read_line_with_payload(payload: MsgPack): () -> Result<Option<String>, HostError>
+fn bytes_error() -> InputBytesResult
+  InputBytesResult {
+    ok: false,
+    found: false,
+    value: ByteBuffer::init().as_bytes(),
+    code: 1,
+    message: "unavailable"
+  }
+
+fn read_line_with_result(result: InputLineResult): () -> Result<Option<String>, HostError>
   try
     read_line()
-  Input::read_line(tail, _payload):
-    tail(payload)
-  Input::read_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+  Input::read_line(tail, _request):
+    tail(result)
+  Input::read_bytes_op(tail, _request):
+    tail(bytes_error())
   Input::is_tty_op(tail):
     tail(false)
 
 fn read_line_with_capture(~prompts: Array<String>): () -> Result<Option<String>, HostError>
   try
     read_line("Name: ".as_slice().to_string())
-  Input::read_line(tail, payload):
-    let decoded = unpack_host_dto(payload)
-    prompts.push(read_host_string(decoded, "prompt"))
-    tail(host_dto_test::host_ok_with_value(msgpack::make_string("voyd".as_slice().to_string())))
-  Input::read_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
-  Input::is_tty_op(tail):
-    tail(false)
-
-fn read_bytes_with_payload(payload: MsgPack): () -> Result<Option<Bytes>, IoError>
-  try
-    read_bytes(8)
-  Input::read_bytes_op(tail, _payload):
-    tail(payload)
-  Input::read_line(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+  Input::read_line(tail, request):
+    match(request.prompt)
+      Some<String> { value }:
+        prompts.push(value)
+      None:
+        void
+    tail(line_result(true, "voyd", 0))
+  Input::read_bytes_op(tail, _request):
+    tail(bytes_error())
   Input::is_tty_op(tail):
     tail(false)
 
 fn read_bytes_with_capture(~max_values: Array<i32>): () -> Result<Option<Bytes>, IoError>
   try
     read_bytes(3)
-  Input::read_bytes_op(tail, payload):
-    let decoded = unpack_host_dto(payload)
-    max_values.push(read_host_i32(decoded, "max_bytes"))
+  Input::read_bytes_op(tail, request):
+    max_values.push(request.max_bytes)
     let ~bytes = ByteBuffer::with_capacity(3)
     bytes.push(7)
     bytes.push(8)
     bytes.push(9)
-    tail(host_dto_test::host_ok_with_value(encode_bytes(bytes.as_bytes())))
-  Input::read_line(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(InputBytesResult {
+      ok: true,
+      found: true,
+      value: bytes.as_bytes(),
+      code: 0,
+      message: ""
+    })
+  Input::read_line(tail, _request):
+    tail(line_result(false, "", 1))
   Input::is_tty_op(tail):
     tail(false)
 
@@ -161,23 +136,10 @@ fn is_tty_with_payload(value: bool): () -> bool
     is_tty()
   Input::is_tty_op(tail):
     tail(value)
-  Input::read_line(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
-  Input::read_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
-
-fn encode_bytes(bytes: Bytes): () -> MsgPack
-  let source = bytes.to_array()
-  let ~encoded = Array<MsgPack>::with_capacity(source.len())
-  var index = 0
-  while index < source.len():
-    match(source.get(index))
-      Some<i32> { value }:
-        encoded.push(msgpack::make_i32(value))
-      None:
-        void
-    index = index + 1
-  msgpack::make_array(encoded)
+  Input::read_line(tail, _request):
+    tail(line_result(false, "", 1))
+  Input::read_bytes_op(tail, _request):
+    tail(bytes_error())
 
 fn optional_string_or(value: Option<String>, fallback: StringSlice): () -> String
   match(value)
@@ -192,27 +154,3 @@ fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
       present
     None:
       fallback
-
-fn unpack_host_dto(payload: MsgPack): () -> HostDto
-  match(HostDto::unpack(payload))
-    Ok<HostDto> { value }:
-      value
-    Err<HostError>:
-      panic("invalid host dto".as_slice())
-      HostDto::init()
-
-fn read_host_string(payload: HostDto, key: String): () -> String
-  match(payload.read_string(key))
-    Ok<String> { value }:
-      value
-    Err<HostError>:
-      panic("invalid host dto string".as_slice())
-      String::init()
-
-fn read_host_i32(payload: HostDto, key: String): () -> i32
-  match(payload.read_i32(key))
-    Ok<i32> { value }:
-      value
-    Err<HostError>:
-      panic("invalid host dto i32".as_slice())
-      0

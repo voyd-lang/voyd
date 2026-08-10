@@ -2949,7 +2949,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: "voyd" },
+      value: { ok: true, found: true, value: "voyd", code: 0, message: "" },
     });
 
     await expect(
@@ -2958,7 +2958,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: null },
+      value: { ok: true, found: false, value: "", code: 0, message: "" },
     });
 
     await expect(
@@ -2969,6 +2969,8 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: false,
+        found: false,
+        value: "",
         code: 1,
         message: "input unavailable",
       },
@@ -2980,7 +2982,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: [7, 8] },
+      value: {
+        ok: true,
+        found: true,
+        value: Uint8Array.from([7, 8]),
+        code: 0,
+        message: "",
+      },
     });
 
     await expect(
@@ -2989,7 +2997,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: [7, 8, 9] },
+      value: {
+        ok: true,
+        found: true,
+        value: Uint8Array.from([7, 8, 9]),
+        code: 0,
+        message: "",
+      },
     });
 
     await expect(
@@ -2998,7 +3012,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: null },
+      value: {
+        ok: true,
+        found: false,
+        value: new Uint8Array(),
+        code: 0,
+        message: "",
+      },
     });
 
     await expect(
@@ -3009,6 +3029,8 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: false,
+        found: false,
+        value: new Uint8Array(),
         code: 1,
         message: "bytes unavailable",
       },
@@ -3060,7 +3082,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
 
     await expect(
@@ -3079,11 +3101,11 @@ describe("registerDefaultHostAdapters", () => {
     await expect(
       getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
         target: "stderr",
-        bytes: [7, 8, 9],
+        bytes: Uint8Array.from([7, 8, 9]),
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
 
     await expect(
@@ -3092,7 +3114,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
 
     expect(
@@ -3170,7 +3192,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: [7, 8] },
+      value: {
+        ok: true,
+        found: true,
+        value: Uint8Array.from([7, 8]),
+        code: 0,
+        message: "",
+      },
     });
     expect(getHandler("voyd.std.input", "is_tty")(tailContinuation)).toEqual({
       kind: "tail",
@@ -3210,7 +3238,13 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true, value: null },
+      value: {
+        ok: true,
+        found: false,
+        value: new Uint8Array(),
+        code: 0,
+        message: "",
+      },
     });
   });
 
@@ -3242,6 +3276,8 @@ describe("registerDefaultHostAdapters", () => {
       kind: "tail",
       value: {
         ok: false,
+        found: false,
+        value: new Uint8Array(),
         code: 1,
         message:
           "stdin is configured for text decoding; read_bytes requires raw byte chunks",
@@ -3302,12 +3338,12 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     await expect(
       (async () =>
         getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
-          bytes: [1, 2, 3],
+          bytes: Uint8Array.from([1, 2, 3]),
         }))()
     ).rejects.toThrow(/does not implement op write_bytes/i);
     await expect(
@@ -3316,7 +3352,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     expect(
       getHandler("voyd.std.output", "is_tty")(tailContinuation, {
@@ -3361,16 +3397,16 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     await expect(
       getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
         target: "stderr",
-        bytes: [255, 0, 1],
+        bytes: Uint8Array.from([255, 0, 1]),
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     await expect(
       getHandler("voyd.std.output", "flush")(tailContinuation, {
@@ -3378,7 +3414,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     expect(
       getHandler("voyd.std.output", "is_tty")(tailContinuation, {
@@ -3443,7 +3479,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     expect(byteWrites).toEqual([
       { target: "stdout", bytes: [104, 101, 108, 108, 111] },
@@ -3487,16 +3523,16 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     await expect(
       getHandler("voyd.std.output", "write_bytes")(tailContinuation, {
         target: "stderr",
-        bytes: [4, 5, 6],
+        bytes: Uint8Array.from([4, 5, 6]),
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     await expect(
       getHandler("voyd.std.output", "flush")(tailContinuation, {
@@ -3504,7 +3540,7 @@ describe("registerDefaultHostAdapters", () => {
       })
     ).resolves.toEqual({
       kind: "tail",
-      value: { ok: true },
+      value: { ok: true, code: 0, message: "" },
     });
     expect(
       getHandler("voyd.std.output", "is_tty")(tailContinuation, {

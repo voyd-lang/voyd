@@ -1,7 +1,6 @@
 import { inputErrorCode, inputErrorMessage, isInputClosedError } from "../errors.js";
 import {
   globalRecord,
-  hostError,
   inputSuccessPayload,
   isNodeCompatibleRuntime,
   readBytesFromNodeStream,
@@ -31,6 +30,20 @@ type InputSource = {
   readBytes?: (maxBytes: number) => Promise<Uint8Array | null>;
   isTty: () => boolean;
 };
+
+const inputFailure = ({
+  error,
+  fallback,
+}: {
+  error: unknown;
+  fallback: string | Uint8Array;
+}): Record<string, unknown> => ({
+  ok: false,
+  found: false,
+  value: fallback,
+  code: inputErrorCode(error),
+  message: inputErrorMessage(error),
+});
 
 const createInputSource = async ({
   runtime,
@@ -157,11 +170,12 @@ export const inputCapabilityDefinition: CapabilityDefinition = {
               inputSuccessPayload({
                 opName: "read_line",
                 value: line,
+                fallback: "",
                 effectBufferSize,
               })
             );
           } catch (error) {
-            return tail(hostError(inputErrorMessage(error), inputErrorCode(error)));
+            return tail(inputFailure({ error, fallback: "" }));
           }
         },
       });
@@ -181,13 +195,13 @@ export const inputCapabilityDefinition: CapabilityDefinition = {
             return tail(
               inputSuccessPayload({
                 opName: "read_bytes",
-                value:
-                  boundedBytes === null ? null : Array.from(boundedBytes.values()),
+                value: boundedBytes,
+                fallback: new Uint8Array(),
                 effectBufferSize,
               })
             );
           } catch (error) {
-            return tail(hostError(inputErrorMessage(error), inputErrorCode(error)));
+            return tail(inputFailure({ error, fallback: new Uint8Array() }));
           }
         },
       });

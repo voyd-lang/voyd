@@ -1,15 +1,10 @@
 use std::array::Array
 use std::bytes::{ ByteBuffer, Bytes }
-use std::error::{ HostError, IoError, panic }
-use std::host_dto::HostDto
-use std::msgpack::MsgPack
-use std::msgpack::MsgPackError
-use std::msgpack::self as msgpack
+use std::error::IoError
 use std::optional::types::all
 use std::result::types::all
-use std::string::type::{ String, StringSlice, new_string }
+use std::string::type::{ String, StringSlice }
 use std::test::assertions::all
-use std::test::host_dto::self as host_dto_test
 
 obj StringOutputCapture {
   values: Array<String>,
@@ -117,7 +112,7 @@ test "output is_tty forwards host bool with selected target":
   assert(optional_string_or(targets.get(1), "missing".as_slice()).equals("stderr"), eq: true)
 
 test "output write decodes host errors":
-  let result = write_with_payload(host_dto_test::host_error_payload(code: 32, message: "broken pipe"))
+  let result = write_with_payload(output_error(code: 32, message: "broken pipe"))
 
   match(result)
     Err<IoError> { error }:
@@ -130,14 +125,13 @@ fn write_with_capture(~capture: StringOutputCapture): () -> Result<Unit, IoError
   try
     write("hello".as_slice().to_string())
   Output::write_op(tail, payload):
-    let decoded = unpack_host_dto(payload)
-    capture.values.push(read_host_string(decoded, "value"))
-    capture.targets.push(read_host_string(decoded, "target"))
-    tail(host_dto_test::host_ok_payload())
+    capture.values.push(payload.value)
+    capture.targets.push(payload.target)
+    tail(output_ok())
   Output::write_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::flush_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::is_tty_op(tail, _payload):
     tail(false)
 
@@ -145,13 +139,12 @@ fn write_stderr_with_capture(~targets: Array<String>): () -> Result<Unit, IoErro
   try
     write("warn".as_slice().to_string(), StdErr {})
   Output::write_op(tail, payload):
-    let decoded = unpack_host_dto(payload)
-    targets.push(read_host_string(decoded, "target"))
-    tail(host_dto_test::host_ok_payload())
+    targets.push(payload.target)
+    tail(output_ok())
   Output::write_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::flush_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::is_tty_op(tail, _payload):
     tail(false)
 
@@ -159,14 +152,13 @@ fn write_line_with_capture(~capture: StringOutputCapture): () -> Result<Unit, Io
   try
     write_line("hi".as_slice().to_string())
   Output::write_op(tail, payload):
-    let decoded = unpack_host_dto(payload)
-    capture.targets.push(read_host_string(decoded, "target"))
-    capture.values.push(read_host_string(decoded, "value"))
-    tail(host_dto_test::host_ok_payload())
+    capture.targets.push(payload.target)
+    capture.values.push(payload.value)
+    tail(output_ok())
   Output::write_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::flush_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::is_tty_op(tail, _payload):
     tail(false)
 
@@ -174,14 +166,13 @@ fn print_with_capture(~capture: StringOutputCapture): () -> void
   try
     print("hi".as_slice().to_string())
   Output::write_op(tail, payload):
-    let decoded = unpack_host_dto(payload)
-    capture.targets.push(read_host_string(decoded, "target"))
-    capture.values.push(read_host_string(decoded, "value"))
-    tail(host_dto_test::host_ok_payload())
+    capture.targets.push(payload.target)
+    capture.values.push(payload.value)
+    tail(output_ok())
   Output::write_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::flush_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::is_tty_op(tail, _payload):
     tail(false)
 
@@ -193,14 +184,13 @@ fn write_byte_payload_with_capture(~capture: ByteOutputCapture): () -> Result<Un
   try
     write(buffer.as_bytes(), StdErr {})
   Output::write_bytes_op(tail, payload):
-    let decoded = unpack_host_dto(payload)
-    capture.targets.push(read_host_string(decoded, "target"))
-    decode_bytes_into(read_host_msgpack(decoded, "bytes"), capture.values)
-    tail(host_dto_test::host_ok_payload())
+    capture.targets.push(payload.target)
+    decode_bytes_into(payload.bytes, capture.values)
+    tail(output_ok())
   Output::write_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::flush_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::is_tty_op(tail, _payload):
     tail(false)
 
@@ -208,13 +198,12 @@ fn flush_with_capture(~targets: Array<String>): () -> Result<Unit, IoError>
   try
     flush()
   Output::flush_op(tail, payload):
-    let decoded = unpack_host_dto(payload)
-    targets.push(read_host_string(decoded, "target"))
-    tail(host_dto_test::host_ok_payload())
+    targets.push(payload.target)
+    tail(output_ok())
   Output::write_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::write_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::is_tty_op(tail, _payload):
     tail(false)
 
@@ -222,49 +211,47 @@ fn is_tty_with_stdout_payload({ value: bool, ~targets: Array<String> }): () -> b
   try
     is_tty()
   Output::is_tty_op(tail, payload):
-    let decoded = unpack_host_dto(payload)
-    targets.push(read_host_string(decoded, "target"))
+    targets.push(payload.target)
     tail(value)
   Output::write_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::write_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::flush_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
 
 fn is_tty_with_stderr_payload({ value: bool, ~targets: Array<String> }): () -> bool
   try
     is_tty(StdErr {})
   Output::is_tty_op(tail, payload):
-    let decoded = unpack_host_dto(payload)
-    targets.push(read_host_string(decoded, "target"))
+    targets.push(payload.target)
     tail(value)
   Output::write_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::write_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::flush_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
 
-fn write_with_payload(payload: MsgPack): () -> Result<Unit, IoError>
+fn write_with_payload(payload: OutputResult): () -> Result<Unit, IoError>
   try
     write("hello".as_slice().to_string())
   Output::write_op(tail, _payload):
     tail(payload)
   Output::write_bytes_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::flush_op(tail, _payload):
-    tail(host_dto_test::host_default_error_payload())
+    tail(output_error(code: 1, message: "unexpected"))
   Output::is_tty_op(tail, _payload):
     tail(false)
 
-fn decode_bytes_into(payload: MsgPack, ~values: Array<i32>) -> void
-  let source = unpack_msgpack_array(payload)
+fn decode_bytes_into(payload: Bytes, ~values: Array<i32>) -> void
+  let source = payload.to_array()
   var index = 0
   while index < source.len():
     match(source.get(index))
-      Some<MsgPack> { value }:
-        values.push(unpack_msgpack_i32(value))
+      Some<i32> { value }:
+        values.push(value)
       None:
         void
     index = index + 1
@@ -283,42 +270,8 @@ fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
     None:
       fallback
 
-fn unpack_host_dto(payload: MsgPack): () -> HostDto
-  match(HostDto::unpack(payload))
-    Ok<HostDto> { value }:
-      value
-    Err<HostError>:
-      panic("invalid host dto".as_slice())
-      HostDto::init()
+fn output_ok() -> OutputResult
+  OutputResult { ok: true, code: 0, message: "" }
 
-fn read_host_string(payload: HostDto, key: String): () -> String
-  match(payload.read_string(key))
-    Ok<String> { value }:
-      value
-    Err<HostError>:
-      panic("invalid host dto string".as_slice())
-      String::init()
-
-fn read_host_msgpack(payload: HostDto, key: String): () -> MsgPack
-  match(payload.read_msgpack(key))
-    Ok<MsgPack> { value }:
-      value
-    Err<HostError>:
-      panic("invalid host dto msgpack".as_slice())
-      msgpack::make_null()
-
-fn unpack_msgpack_array(payload: MsgPack): () -> Array<MsgPack>
-  match(msgpack::unpack_array(payload))
-    Ok<Array<MsgPack>> { value }:
-      value
-    Err<MsgPackError>:
-      panic("invalid msgpack array".as_slice())
-      Array<MsgPack>::init()
-
-fn unpack_msgpack_i32(payload: MsgPack): () -> i32
-  match(msgpack::unpack_i32(payload))
-    Ok<i32> { value }:
-      value
-    Err<MsgPackError>:
-      panic("invalid msgpack i32".as_slice())
-      0
+fn output_error({ code: i32, message: String }) -> OutputResult
+  OutputResult { ok: false, code: code, message: message }

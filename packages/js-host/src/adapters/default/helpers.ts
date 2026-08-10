@@ -64,16 +64,6 @@ export const toNonNegativeI64 = (value: unknown): bigint => {
   return normalized > 0n ? normalized : 0n;
 };
 
-export const normalizeByte = (value: unknown): number => {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return ((Math.trunc(value) % 256) + 256) % 256;
-  }
-  if (typeof value === "bigint") {
-    return Number(((value % 256n) + 256n) % 256n);
-  }
-  return 0;
-};
-
 export const toNodeReadBytesChunk = (value: unknown): Uint8Array => {
   if (typeof value === "string") {
     throw new Error(
@@ -101,20 +91,6 @@ export const toPath = (value: unknown): string => {
   }
   return path;
 };
-
-export const hostOk = (value?: unknown): Record<string, unknown> =>
-  value === undefined ? { ok: true } : { ok: true, value };
-
-export const hostError = (
-  message: string,
-  code = 1,
-  kind?: string
-): Record<string, unknown> => ({
-  ok: false,
-  code,
-  message,
-  ...(kind === undefined ? {} : { kind }),
-});
 
 export const normalizeEffectBufferSize = (
   value: number | undefined
@@ -173,10 +149,15 @@ export const maxTransportSafeHttpServerChunkBytes = ({
   let high = effectBufferSize;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    const payload = hostOk({
-      chunk: Array.from({ length: mid }, () => 255),
-      done: false,
-    });
+    const payload = {
+      ok: true,
+      value: {
+        chunk: new Uint8Array(mid).fill(255),
+        done: false,
+      },
+      error_code: 0,
+      error_message: "",
+    };
     if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
       low = mid;
       continue;
@@ -189,28 +170,41 @@ export const maxTransportSafeHttpServerChunkBytes = ({
 export const inputTransportOverflowError = ({
   opName,
   effectBufferSize,
+  fallback,
 }: {
   opName: string;
   effectBufferSize: number;
-}): Record<string, unknown> =>
-  hostError(
-    `Default input adapter ${opName} response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or provide shorter input.`
-  );
+  fallback: string | Uint8Array;
+}): Record<string, unknown> => ({
+  ok: false,
+  found: false,
+  value: fallback,
+  code: 1,
+  message: `Default input adapter ${opName} response exceeds effect transport buffer (${effectBufferSize} bytes). Increase createVoydHost({ bufferSize }) or provide shorter input.`,
+});
 
 export const inputSuccessPayload = ({
   opName,
   value,
+  fallback,
   effectBufferSize,
 }: {
   opName: string;
-  value: unknown;
+  value: string | Uint8Array | null;
+  fallback: string | Uint8Array;
   effectBufferSize: number;
 }): Record<string, unknown> => {
-  const payload = hostOk(value);
+  const payload = {
+    ok: true,
+    found: value !== null,
+    value: value ?? fallback,
+    code: 0,
+    message: "",
+  };
   if (payloadFitsEffectTransport({ payload, effectBufferSize })) {
     return payload;
   }
-  return inputTransportOverflowError({ opName, effectBufferSize });
+  return inputTransportOverflowError({ opName, effectBufferSize, fallback });
 };
 
 export const joinListDirChildPath = ({

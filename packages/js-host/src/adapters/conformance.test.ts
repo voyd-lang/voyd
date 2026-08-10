@@ -238,7 +238,7 @@ describe.each(["node"] as const)(
       await runtime.advanceBy(1);
       await expect(sleepResult).resolves.toEqual({
         kind: "tail",
-        value: { ok: true },
+        value: { ok: true, code: 0, message: "" },
       });
 
       await expect(invokeHandler(monotonicHandler)).resolves.toEqual({
@@ -277,7 +277,7 @@ describe.each(["node"] as const)(
           method: "POST",
           url: "https://example.test/echo",
           headers: [{ name: "accept", value: "text/plain" }],
-          body: [104, 101, 108, 108, 111],
+          body: Uint8Array.from([104, 101, 108, 108, 111]),
           timeout_millis: 25,
           redirect_policy: { kind: "follow", max_redirects: 20 },
         })
@@ -311,7 +311,7 @@ describe.each(["node"] as const)(
           method: "GET",
           url: "https://example.test/timeout",
           headers: [],
-          body: [],
+          body: new Uint8Array(),
           redirect_policy: { kind: "follow", max_redirects: 20 },
         })
       ).resolves.toMatchObject({
@@ -327,14 +327,14 @@ describe.each(["node"] as const)(
         invokeHandler(inputLineHandler, { prompt: "Name: " })
       ).resolves.toEqual({
         kind: "tail",
-        value: { ok: true, value: "voyd" },
+        value: { ok: true, found: true, value: "voyd", code: 0, message: "" },
       });
 
       await expect(
         invokeHandler(inputLineHandler, { prompt: "eof" })
       ).resolves.toEqual({
         kind: "tail",
-        value: { ok: true, value: null },
+        value: { ok: true, found: false, value: "", code: 0, message: "" },
       });
 
       await expect(
@@ -343,6 +343,8 @@ describe.each(["node"] as const)(
         kind: "tail",
         value: {
           ok: false,
+          found: false,
+          value: "",
           code: 1,
           message: "input device failure",
         },
@@ -352,14 +354,26 @@ describe.each(["node"] as const)(
         invokeHandler(inputReadBytesHandler, { max_bytes: 8 })
       ).resolves.toEqual({
         kind: "tail",
-        value: { ok: true, value: [7, 8, 9] },
+        value: {
+          ok: true,
+          found: true,
+          value: Uint8Array.from([7, 8, 9]),
+          code: 0,
+          message: "",
+        },
       });
 
       await expect(
         invokeHandler(inputReadBytesHandler, { max_bytes: 0 })
       ).resolves.toEqual({
         kind: "tail",
-        value: { ok: true, value: null },
+        value: {
+          ok: true,
+          found: false,
+          value: new Uint8Array(),
+          code: 0,
+          message: "",
+        },
       });
 
       await expect(
@@ -368,6 +382,8 @@ describe.each(["node"] as const)(
         kind: "tail",
         value: {
           ok: false,
+          found: false,
+          value: new Uint8Array(),
           code: 1,
           message: "input bytes failure",
         },
@@ -384,7 +400,7 @@ describe.each(["node"] as const)(
         })
       ).resolves.toEqual({
         kind: "tail",
-        value: { ok: true },
+        value: { ok: true, code: 0, message: "" },
       });
 
       await expect(
@@ -403,18 +419,18 @@ describe.each(["node"] as const)(
       await expect(
         invokeHandler(outputWriteBytesHandler, {
           target: "stderr",
-          bytes: [9, 10],
+          bytes: Uint8Array.from([9, 10]),
         })
       ).resolves.toEqual({
         kind: "tail",
-        value: { ok: true },
+        value: { ok: true, code: 0, message: "" },
       });
 
       await expect(
         invokeHandler(outputFlushHandler, { target: "stderr" })
       ).resolves.toEqual({
         kind: "tail",
-        value: { ok: true },
+        value: { ok: true, code: 0, message: "" },
       });
 
       await expect(
