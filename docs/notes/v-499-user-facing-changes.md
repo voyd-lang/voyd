@@ -56,6 +56,9 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - `std::json::encode<T>` produces compact JSON and rejects `i64` values outside
   JavaScript's exact integer range. `Bytes` requires an explicit application
   representation in JSON.
+- `JsonWriter` implements the provider-neutral data writer contract directly
+  over compact UTF-8 JSON output. Typed JSON encoding no longer constructs an
+  intermediate `JsonValue` tree.
 
 ## Planned removals and replacements
 
@@ -63,8 +66,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - Remove public MessagePack boundary helpers and compiler contracts.
 - Replace format-specific compiler traversal with the single `AutoDtoPlan`
   exposed through `ProgramCodegenView`.
-- Route typed JSON and MessagePack traversal directly through `DataReader` and
-  `DataWriter` without constructing an intermediate `DataValue` tree.
+- Generate typed JSON and MessagePack traversal directly against `DataReader`
+  and `DataWriter` without constructing an intermediate `DataValue` tree.
 - Replace raw VX MessagePack payloads with typed plans and final wire lowering.
 - Replace the legacy unframed host protocol with complete ABI v2 frames.
 - Add custom DTO representations for types that cannot use automatic structural

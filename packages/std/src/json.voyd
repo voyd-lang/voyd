@@ -4,6 +4,7 @@
 //! numbers must be finite.
 
 use std::array::Array
+use std::bytes::Bytes
 use std::data::{
   DataArray,
   DataBool,
@@ -18,6 +19,7 @@ use std::data::{
   DataString,
   DataValue,
   DataVariant,
+  DataWriter,
   DecodeError,
   DecodeOptions,
   IgnoreUnknownFields,
@@ -59,6 +61,219 @@ pub obj JsonError {
   /// Human-readable error message.
   api message: String
 }
+
+/// Direct compact-JSON sink used by compiler-generated DTO traversal.
+pub obj JsonWriter {
+  out: Array<i32>,
+  container_kinds: Array<i32>,
+  expected_values: Array<i32>,
+  written_values: Array<i32>,
+  pending_fields: Array<i32>,
+  root_count: i32,
+  failed: bool
+}
+
+impl JsonWriter
+  /// Creates an empty compact JSON writer.
+  pub fn init() -> JsonWriter
+    JsonWriter {
+      out: Array<i32>::with_capacity(64),
+      container_kinds: Array<i32>::init(),
+      expected_values: Array<i32>::init(),
+      written_values: Array<i32>::init(),
+      pending_fields: Array<i32>::init(),
+      root_count: 0,
+      failed: false
+    }
+
+  /// Finishes exactly one balanced JSON value.
+  api fn finish(self) -> Result<String, JsonError>
+    if self.failed:
+      return json_writer_failure<String>("json writer session has failed")
+    if self.container_kinds.is_empty() == false:
+      return json_writer_failure<String>("json writer has unclosed containers")
+    if self.root_count != 1:
+      return json_writer_failure<String>("json writer expected one root value")
+    Ok<String> { value: new_string(self.out.to_fixed_array()) }
+
+  fn fail(~self, message: String) -> Result<Unit, JsonError>
+    self.failed = true
+    json_writer_failure<Unit>(message)
+
+  fn before_value(~self) -> Result<Unit, JsonError>
+    if self.failed:
+      return json_writer_failure<Unit>("json writer session has failed")
+    if self.container_kinds.is_empty():
+      if self.root_count != 0:
+        return self.fail("json writer received more than one root value")
+      self.root_count = 1
+      return json_writer_success()
+    let index = self.container_kinds.len() - 1
+    let written = self.written_values.at(index)
+    if written >= self.expected_values.at(index):
+      return self.fail("json writer container received too many values")
+    if self.container_kinds.at(index) == 0:
+      if written > 0:
+        self.out.push(44)
+    else:
+      if self.pending_fields.at(index) == 0:
+        return self.fail("json writer field is missing its descriptor")
+      self.pending_fields.replace(index, with: 0)
+    self.written_values.replace(index, with: written + 1)
+    json_writer_success()
+
+  fn begin_container(
+    ~self,
+    { kind: i32, length: i32 }
+  ) -> Result<Unit, JsonError>
+    if length < 0:
+      return self.fail("json writer container length cannot be negative")
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        self.out.push(if kind == 0 then: 91 else: 123)
+        self.container_kinds.push(kind)
+        self.expected_values.push(length)
+        self.written_values.push(0)
+        self.pending_fields.push(0)
+        json_writer_success()
+
+  fn end_container(~self, { kind: i32 }) -> Result<Unit, JsonError>
+    if self.container_kinds.is_empty():
+      return self.fail("json writer has no container to close")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) != kind:
+      return self.fail("json writer closed a different container")
+    if self.written_values.at(index) != self.expected_values.at(index) or self.pending_fields.at(index) != 0:
+      return self.fail("json writer container is incomplete")
+    self.container_kinds.pop()
+    self.expected_values.pop()
+    self.written_values.pop()
+    self.pending_fields.pop()
+    self.out.push(if kind == 0 then: 93 else: 125)
+    json_writer_success()
+
+  fn write_dynamic_field(~self, name: String) -> Result<Unit, JsonError>
+    if self.container_kinds.is_empty():
+      return self.fail("json writer field is outside a record or variant")
+    let index = self.container_kinds.len() - 1
+    if self.container_kinds.at(index) == 0 or self.pending_fields.at(index) != 0:
+      return self.fail("json writer field is not ready")
+    if self.written_values.at(index) > 0:
+      self.out.push(44)
+    append_json_string(self.out, name.as_slice())
+    self.out.push(58)
+    self.pending_fields.replace(index, with: 1)
+    json_writer_success()
+
+impl DataWriter<JsonError> for JsonWriter
+  fn write_null(~self) -> Result<Unit, JsonError>
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_ascii(self.out, "null".as_slice())
+        json_writer_success()
+
+  fn write_bool(~self, value: bool) -> Result<Unit, JsonError>
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_ascii(self.out, if value then: "true".as_slice() else: "false".as_slice())
+        json_writer_success()
+
+  fn write_i32(~self, value: i32) -> Result<Unit, JsonError>
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_string(self.out, number_cast::to_string(value).as_slice())
+        json_writer_success()
+
+  fn write_i64(~self, value: i64) -> Result<Unit, JsonError>
+    let exact_max = exact_json_i64_max()
+    if value < -exact_max or value > exact_max:
+      return self.fail("json writer i64 exceeds the exact integer range")
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_string(self.out, number_cast::to_string(value).as_slice())
+        json_writer_success()
+
+  fn write_f32(~self, value: f32) -> Result<Unit, JsonError>
+    if is_finite(value) == false:
+      return self.fail("json writer number must be finite")
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_string(self.out, number_cast::to_string(value).as_slice())
+        json_writer_success()
+
+  fn write_f64(~self, value: f64) -> Result<Unit, JsonError>
+    if is_finite(value) == false:
+      return self.fail("json writer number must be finite")
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_string(self.out, number_cast::to_string(value).as_slice())
+        json_writer_success()
+
+  fn write_string(~self, value: String) -> Result<Unit, JsonError>
+    match(self.before_value())
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        append_json_string(self.out, value.as_slice())
+        json_writer_success()
+
+  fn write_bytes(~self, value: Bytes) -> Result<Unit, JsonError>
+    self.fail("json writer bytes require an explicit representation")
+
+  fn begin_array(~self, { length: i32 }) -> Result<Unit, JsonError>
+    self.begin_container(kind: 0, length: length)
+
+  fn end_array(~self) -> Result<Unit, JsonError>
+    self.end_container(kind: 0)
+
+  fn begin_record(
+    ~self,
+    { shape: RecordShape, field_count: i32 }
+  ) -> Result<Unit, JsonError>
+    self.begin_container(kind: 1, length: field_count)
+
+  fn write_field(~self, { field: ShapeField }) -> Result<Unit, JsonError>
+    self.write_dynamic_field(field.name)
+
+  fn end_record(~self) -> Result<Unit, JsonError>
+    self.end_container(kind: 1)
+
+  fn begin_variant(
+    ~self,
+    { shape: UnionShape, variant: ShapeVariant }
+  ) -> Result<Unit, JsonError>
+    match(self.begin_container(kind: 2, length: variant.fields.len() + 1))
+      Err<JsonError> { error }:
+        Err<JsonError> { error }
+      Ok<Unit>:
+        match(self.write_dynamic_field("$variant"))
+          Err<JsonError> { error }:
+            Err<JsonError> { error }
+          Ok<Unit>:
+            self.write_string(variant.name)
+
+  fn end_variant(~self) -> Result<Unit, JsonError>
+    self.end_container(kind: 2)
+
+fn json_writer_success() -> Result<Unit, JsonError>
+  Ok<Unit> { value: Unit {} }
+
+fn json_writer_failure<T>(message: String) -> Result<T, JsonError>
+  Err<JsonError> { error: json_stringify_error(message) }
 
 /// The JSON text itself was malformed.
 pub obj JsonParseFailure {}
@@ -222,11 +437,12 @@ pub fn permissive_decode_options() -> JsonDecodeOptions
 /// Signed 64-bit integers outside JavaScript's exact integer range are
 /// rejected. `Bytes` requires an explicit application representation.
 pub fn encode<T>(value: T): () -> Result<String, JsonError>
-  match(data_value_to_json(dto_value_to_data(value), "$"))
+  let ~writer = JsonWriter::init()
+  match(write_data_value_json(writer, dto_value_to_data(value)))
     Err<JsonError> { error }:
       Err<JsonError> { error }
-    Ok<JsonValue> { value }:
-      stringify(value)
+    Ok<Unit>:
+      writer.finish()
 
 /// Parses and strictly decodes JSON into a closed boundary-compatible type.
 pub fn decode<T>(source: String): () -> Result<T, JsonDecodeError>
@@ -515,6 +731,91 @@ fn data_value_to_json(
       data_fields_to_json(decoded.fields, path)
     DataVariant:
       data_variant_to_json(decoded, path)
+
+fn write_data_value_json(
+  ~writer: JsonWriter,
+  value: DataValue
+) -> Result<Unit, JsonError>
+  value.match(data)
+    DataNull:
+      writer.write_null()
+    DataBool:
+      writer.write_bool(data.value)
+    DataI32:
+      writer.write_i32(data.value)
+    DataI64:
+      writer.write_i64(data.value)
+    DataF32:
+      writer.write_f32(data.value)
+    DataF64:
+      writer.write_f64(data.value)
+    DataString:
+      writer.write_string(data.value)
+    DataBytes:
+      writer.write_bytes(data.value)
+    DataArray:
+      match(writer.begin_array(length: data.values.len()))
+        Err<JsonError> { error }:
+          Err<JsonError> { error }
+        Ok<Unit>:
+          var index = 0
+          while index < data.values.len():
+            match(write_data_value_json(writer, data.values.at(index)))
+              Err<JsonError> { error }:
+                return Err<JsonError> { error }
+              Ok<Unit>:
+                void
+            index = index + 1
+          writer.end_array()
+    DataObject:
+      write_data_fields_json(writer, data.fields, variant_name: None {})
+    DataVariant:
+      write_data_fields_json(
+        writer,
+        data.fields,
+        variant_name: Some<String> { value: data.name }
+      )
+
+fn write_data_fields_json(
+  ~writer: JsonWriter,
+  fields: Array<DataField>,
+  { variant_name: Option<String> }
+) -> Result<Unit, JsonError>
+  let extra = variant_name.match(value)
+    Some<String>: 1
+    None: 0
+  let kind = if extra == 1 then: 2 else: 1
+  match(writer.begin_container(kind: kind, length: fields.len() + extra))
+    Err<JsonError> { error }:
+      Err<JsonError> { error }
+    Ok<Unit>:
+      match(variant_name)
+        Some<String> { value: name }:
+          match(writer.write_dynamic_field("$variant"))
+            Err<JsonError> { error }:
+              return Err<JsonError> { error }
+            Ok<Unit>:
+              match(writer.write_string(name))
+                Err<JsonError> { error }:
+                  return Err<JsonError> { error }
+                Ok<Unit>:
+                  void
+        None:
+          void
+      var index = 0
+      while index < fields.len():
+        let field = fields.at(index)
+        match(writer.write_dynamic_field(field.name))
+          Err<JsonError> { error }:
+            return Err<JsonError> { error }
+          Ok<Unit>:
+            match(write_data_value_json(writer, field.value))
+              Err<JsonError> { error }:
+                return Err<JsonError> { error }
+              Ok<Unit>:
+                void
+        index = index + 1
+      writer.end_container(kind: kind)
 
 fn data_array_to_json(
   value: DataArray,
