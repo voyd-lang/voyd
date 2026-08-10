@@ -69,12 +69,15 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   typed message values and typed closures; the runtime owns callback
   capabilities and their lifetime.
 - `Html<Msg>`, `Attr<Msg>`, `Program<Model, Msg>`, and `Sub<Msg>` are opaque.
-  Their previous wire payload fields are no longer accessible.
+  Their previous wire payload fields are no longer accessible. HTML, command,
+  subscription, program, and canvas composition now retains typed semantic
+  plans and creates the private MessagePack renderer wire only at the VX host
+  boundary.
 - `Cmd::task(work:, handler:)` has been removed. Use
   `Cmd::perform(work:, handler:)` or pass an existing `Task<T>` with
   `Cmd::perform(task:, handler:)`.
 - `std::web::render` and `render_static` accept typed VX HTML only; the raw
   MessagePack overloads have been removed.
 
-This record will be extended as the remaining obsolete boundary and VX APIs are
-removed.
+Obsolete boundary annotations, intrinsic names, raw VX constructors, and
+MessagePack-specific compatibility paths were removed rather than deprecated.

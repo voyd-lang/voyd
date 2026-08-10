@@ -117,6 +117,11 @@ The main types are:
 - `Cmd<Msg>`: one-off work, such as a request or navigation.
 - `Sub<Msg>`: an ongoing source of messages, such as a timer or global listener.
 
+These values are opaque typed plans. Composition keeps application values and
+child plans typed; VX creates its private renderer/command wire only when the
+plan crosses the runtime boundary. Application code cannot read or construct a
+raw MessagePack payload for these types.
+
 Add a `subscriptions` function when the app needs ongoing outside input:
 
 ```voyd
@@ -398,21 +403,22 @@ Return commands from `init` or `step`; do not perform browser work in `view`.
 
 ### Async Tasks
 
-Use `Cmd.task` for API calls, storage services, and other Voyd tasks. Map the
+Use `Cmd.perform` for API calls, storage services, and other Voyd tasks. Map the
 result back into the application as a message:
 
 ```voyd
 use std::task::TaskRuntime
 
 fn load_todos(): TaskRuntime -> Cmd<Msg>
-  Cmd::task(
+  Cmd::perform(
     work: () => fetch_todos(),
     handler: (result) =>
       Msg::TodosLoaded { result: result }
   )
 ```
 
-The function that constructs a `Cmd.task` needs the `TaskRuntime` effect. Handle
+The function that constructs a `Cmd.perform` from `work` needs the `TaskRuntime`
+effect. Handle
 loading, success, and expected failure in `step`:
 
 ```voyd
@@ -448,7 +454,7 @@ fn fetch_message(): http_client::HttpClient -> Result<String, String>
       Err<String> { error: error.message }
 
 fn load_message(): (http_client::HttpClient, TaskRuntime) -> Cmd<Msg>
-  Cmd::task(
+  Cmd::perform(
     work: () => fetch_message(),
     handler: (result) =>
       Msg::MessageLoaded { result: result }
@@ -463,7 +469,7 @@ returned `JsonValue` into the boundary-safe application type your API expects.
 
 The built-in commands cover common browser work:
 
-- Flow: `Cmd.none`, `Cmd.message`, `Cmd.delay`, `Cmd.batch`, and `Cmd.task`.
+- Flow: `Cmd.none`, `Cmd.message`, `Cmd.delay`, `Cmd.batch`, and `Cmd.perform`.
 - Canvas: `canvas::render` and `canvas::measure_text`.
 - Clipboard: `copy_to_clipboard` and `read_clipboard`.
 - Document and history: `set_document_title`, `push_url`, `replace_url`,
@@ -485,8 +491,8 @@ Cmd::batch([
 ])
 ```
 
-`Cmd.perform` is the lower-level task API for an existing `Task<T>` or task id.
-Most applications should use `Cmd.task`.
+`Cmd.perform` accepts effectful work, an existing `Task<T>`, or a task id and
+maps its typed result into `Msg`.
 
 ## Canvas Rendering And Interaction
 
@@ -902,7 +908,7 @@ broadcast_channel<String, Msg>(
 )
 ```
 
-Use `Cmd.task` when work should produce a typed Voyd result. Use runtime commands
+Use `Cmd.perform` when work should produce a typed Voyd result. Use runtime commands
 and built-in subscriptions for capabilities owned by the browser. Put custom
 capabilities behind typed effect or external adapters.
 
