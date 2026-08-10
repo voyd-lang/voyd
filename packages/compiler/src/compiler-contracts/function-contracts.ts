@@ -33,6 +33,7 @@ export const BOUNDARY_MSGPACK_CONTRACT_IDS = {
 } as const;
 
 export const DTO_DATA_CONTRACT_IDS = {
+  cycleError: "voyd.std.data.cycle-error",
   makeNull: "voyd.std.data.make-null",
   makeBool: "voyd.std.data.make-bool",
   makeString: "voyd.std.data.make-string",
@@ -61,6 +62,7 @@ export const DTO_DATA_CONTRACT_IDS = {
   mapGet: "voyd.std.data.map-get",
   mapHas: "voyd.std.data.map-has",
   mapTagIs: "voyd.std.data.map-tag-is",
+  newString: "voyd.std.data.string-new",
 } as const;
 
 export const WEB_RENDER_CONTRACT_IDS = {
@@ -303,6 +305,7 @@ const dataContract = (
 });
 
 const dtoDataContractSpecs: readonly CompilerFunctionContractSpec[] = [
+  dataContract(DTO_DATA_CONTRACT_IDS.cycleError, [], type.data),
   dataContract(DTO_DATA_CONTRACT_IDS.makeNull, [], type.data),
   dataContract(DTO_DATA_CONTRACT_IDS.makeBool, [type.bool], type.data),
   dataContract(DTO_DATA_CONTRACT_IDS.makeString, [type.string], type.data),
@@ -331,6 +334,7 @@ const dtoDataContractSpecs: readonly CompilerFunctionContractSpec[] = [
   dataContract(DTO_DATA_CONTRACT_IDS.mapGet, [type.dataMap, type.string], type.data),
   dataContract(DTO_DATA_CONTRACT_IDS.mapHas, [type.dataMap, type.string], type.bool),
   dataContract(DTO_DATA_CONTRACT_IDS.mapTagIs, [type.dataMap, type.string], type.bool),
+  dataContract(DTO_DATA_CONTRACT_IDS.newString, [fixedArray(type.i32)], type.string),
 ];
 
 const webRenderContract = ({

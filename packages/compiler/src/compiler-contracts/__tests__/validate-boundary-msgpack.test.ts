@@ -8,15 +8,26 @@ import type { ProgramSymbolId, TypeId } from "../../semantics/ids.js";
 import {
   BOUNDARY_MSGPACK_CONTRACT_IDS,
   COMPILER_FUNCTION_CONTRACTS,
+  DTO_DATA_CONTRACT_IDS,
   STD_INTRINSIC_TYPE,
   validateBoundaryMsgpackFunctionContracts,
+  validateDtoDataFunctionContracts,
   type CompilerContractTypeSpec,
   type CompilerFunctionContractId,
 } from "../index.js";
 
 const ids = { bool: 1, i32: 2, i64: 3, f32: 4, f64: 5 } as const;
-const shared = { msgpack: 10, string: 11, array: 12, map: 13, bytes: 16 } as const;
-const fixed = { msgpack: 14, i32: 15 } as const;
+const shared = {
+  msgpack: 10,
+  string: 11,
+  array: 12,
+  map: 13,
+  bytes: 16,
+  data: 17,
+  dataArray: 18,
+  dataMap: 19,
+} as const;
+const fixed = { msgpack: 14, i32: 15, data: 20 } as const;
 const owners = {
   string: 101 as ProgramSymbolId,
   array: 102 as ProgramSymbolId,
@@ -33,22 +44,25 @@ const typeIdFor = (spec: CompilerContractTypeSpec): TypeId => {
       bytes: shared.bytes,
       "msgpack-array": shared.array,
       "msgpack-map": shared.map,
-      data: shared.msgpack,
-      "data-array": shared.array,
-      "data-map": shared.map,
+      data: shared.data,
+      "data-array": shared.dataArray,
+      "data-map": shared.dataMap,
     }[spec.name] as TypeId;
   }
+  if (spec.element.kind === "primitive") return fixed.i32 as TypeId;
   return (
-    spec.element.kind === "primitive" ? fixed.i32 : fixed.msgpack
+    spec.element.kind === "shared" && spec.element.name === "data"
+      ? fixed.data
+      : fixed.msgpack
   ) as TypeId;
 };
 
-const makeProgram = (
+const makeProgramFor = (
+  contractIds: readonly CompilerFunctionContractId[],
   mutate?: (
     signatures: Map<CompilerFunctionContractId, CodegenFunctionSignature>,
   ) => void,
 ): ProgramCodegenView => {
-  const contractIds = Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS);
   const signatures = new Map<
     CompilerFunctionContractId,
     CodegenFunctionSignature
@@ -76,6 +90,7 @@ const makeProgram = (
     [ids.f32, { kind: "primitive", name: "f32" }],
     [ids.f64, { kind: "primitive", name: "f64" }],
     [shared.msgpack, { kind: "union", members: [] }],
+    [shared.data, { kind: "union", members: [] }],
     [
       shared.bytes,
       {
@@ -112,8 +127,27 @@ const makeProgram = (
         typeArgs: [shared.string, shared.msgpack],
       },
     ],
+    [
+      shared.dataArray,
+      {
+        kind: "nominal-object",
+        owner: owners.array,
+        name: "Array",
+        typeArgs: [shared.data],
+      },
+    ],
+    [
+      shared.dataMap,
+      {
+        kind: "nominal-object",
+        owner: owners.map,
+        name: "Dict",
+        typeArgs: [shared.string, shared.data],
+      },
+    ],
     [fixed.msgpack, { kind: "fixed-array", element: shared.msgpack }],
     [fixed.i32, { kind: "fixed-array", element: ids.i32 }],
+    [fixed.data, { kind: "fixed-array", element: shared.data }],
   ]);
   const contractBySymbol = new Map(
     contractIds.map((contractId, index) => [index, contractId]),
@@ -163,6 +197,20 @@ const makeProgram = (
   } as unknown as ProgramCodegenView;
 };
 
+const makeProgram = (
+  mutate?: (
+    signatures: Map<CompilerFunctionContractId, CodegenFunctionSignature>,
+  ) => void,
+): ProgramCodegenView =>
+  makeProgramFor(Object.values(BOUNDARY_MSGPACK_CONTRACT_IDS), mutate);
+
+const makeDataProgram = (
+  mutate?: (
+    signatures: Map<CompilerFunctionContractId, CodegenFunctionSignature>,
+  ) => void,
+): ProgramCodegenView =>
+  makeProgramFor(Object.values(DTO_DATA_CONTRACT_IDS), mutate);
+
 const replace = (
   signatures: Map<CompilerFunctionContractId, CodegenFunctionSignature>,
   id: CompilerFunctionContractId,
@@ -172,7 +220,13 @@ const replace = (
 describe("boundary-msgpack compiler contract signature validation", () => {
   it("accepts the complete relational ABI", () => {
     expect(validateBoundaryMsgpackFunctionContracts(makeProgram())).toEqual(
-      shared,
+      {
+        msgpack: shared.msgpack,
+        string: shared.string,
+        bytes: shared.bytes,
+        array: shared.array,
+        map: shared.map,
+      },
     );
   });
 
@@ -230,6 +284,34 @@ describe("boundary-msgpack compiler contract signature validation", () => {
     );
     expect(() => validateBoundaryMsgpackFunctionContracts(effectful)).toThrow(
       /make-null.*expected a pure effect row/,
+    );
+  });
+});
+
+describe("dto-data compiler contract signature validation", () => {
+  it("accepts the complete relational ABI", () => {
+    expect(validateDtoDataFunctionContracts(makeDataProgram())).toEqual({
+      data: shared.data,
+      string: shared.string,
+      bytes: shared.bytes,
+      array: shared.dataArray,
+      map: shared.dataMap,
+    });
+  });
+
+  it("rejects a provider whose map value relation drifts", () => {
+    const invalid = makeDataProgram((signatures) => {
+      const id = DTO_DATA_CONTRACT_IDS.mapSet;
+      const signature = signatures.get(id)!;
+      replace(signatures, id, {
+        parameters: signature.parameters.map((parameter, index) =>
+          index === 2 ? { ...parameter, typeId: ids.bool } : parameter,
+        ),
+      });
+    });
+
+    expect(() => validateDtoDataFunctionContracts(invalid)).toThrow(
+      /map-set.*parameter 3 expected DataValue, got bool/,
     );
   });
 });

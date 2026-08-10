@@ -16,7 +16,9 @@ export {
 } from "./function-contracts.js";
 export {
   validateBoundaryMsgpackFunctionContracts,
+  validateDtoDataFunctionContracts,
   type BoundaryMsgpackContractTypes,
+  type DtoDataContractTypes,
 } from "./validate-boundary-msgpack.js";
 export {
   getStdIntrinsicTypeContractSpec,

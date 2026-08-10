@@ -38,7 +38,7 @@ describe("compiler function contract catalog", () => {
 
   it("defines one provider-neutral data spec for every stable role", () => {
     const ids = Object.values(DTO_DATA_CONTRACT_IDS);
-    expect(ids).toHaveLength(28);
+    expect(ids).toHaveLength(30);
     expect(new Set(ids).size).toBe(ids.length);
 
     ids.forEach((id) => {

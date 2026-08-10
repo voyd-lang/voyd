@@ -7,6 +7,7 @@ import type { NodeId, TypeId } from "../semantics/ids.js";
 import {
   BOUNDARY_MSGPACK_CONTRACT_IDS,
   COMPILER_FUNCTION_CONTRACTS,
+  DTO_DATA_CONTRACT_IDS,
   type CompilerContractSharedType,
   type CompilerContractTypeSpec,
   type CompilerFunctionContractId,
@@ -26,6 +27,18 @@ export type BoundaryMsgpackContractTypes = {
   readonly array: TypeId;
   readonly map: TypeId;
 };
+
+export type DtoDataContractTypes = {
+  readonly data: TypeId;
+  readonly string: TypeId;
+  readonly bytes: TypeId;
+  readonly array: TypeId;
+  readonly map: TypeId;
+};
+
+type ContractTypes = Partial<
+  Record<CompilerContractSharedType, TypeId>
+>;
 
 /** Validates the whole relational ABI only when boundary MessagePack is used. */
 export const validateBoundaryMsgpackFunctionContracts = (
@@ -55,12 +68,79 @@ export const validateBoundaryMsgpackFunctionContracts = (
     array: parameterType(resolved, BOUNDARY_MSGPACK_CONTRACT_IDS.makeArray, 0),
     map: parameterType(resolved, BOUNDARY_MSGPACK_CONTRACT_IDS.makeMap, 0),
   };
+  const sharedTypes: ContractTypes = {
+    msgpack: types.msgpack,
+    string: types.string,
+    bytes: types.bytes,
+    "msgpack-array": types.array,
+    "msgpack-map": types.map,
+  };
 
   validateSharedDomainTypes(program, types);
   resolved.forEach(({ spec, signature }) =>
-    validateSignature({ program, spec, signature, types }),
+    validateSignature({ program, spec, signature, types: sharedTypes }),
   );
   return types;
+};
+
+/** Validates the relational ABI for the provider-neutral DataValue tree. */
+export const validateDtoDataFunctionContracts = (
+  program: ProgramCodegenView,
+): DtoDataContractTypes => {
+  const resolved = resolveContracts(program, Object.values(DTO_DATA_CONTRACT_IDS));
+  const types: DtoDataContractTypes = {
+    data: resultType(resolved, DTO_DATA_CONTRACT_IDS.makeNull),
+    string: parameterType(resolved, DTO_DATA_CONTRACT_IDS.makeString, 0),
+    bytes: parameterType(resolved, DTO_DATA_CONTRACT_IDS.makeBytes, 0),
+    array: parameterType(resolved, DTO_DATA_CONTRACT_IDS.makeArray, 0),
+    map: parameterType(resolved, DTO_DATA_CONTRACT_IDS.makeMap, 0),
+  };
+  const sharedTypes: ContractTypes = {
+    data: types.data,
+    string: types.string,
+    bytes: types.bytes,
+    "data-array": types.array,
+    "data-map": types.map,
+  };
+  validateDtoDataSharedDomainTypes(program, types);
+  resolved.forEach(({ spec, signature }) =>
+    validateSignature({ program, spec, signature, types: sharedTypes }),
+  );
+  return types;
+};
+
+const resolveContracts = (
+  program: ProgramCodegenView,
+  contractIds: readonly CompilerFunctionContractId[],
+): Map<CompilerFunctionContractId, ResolvedContract> => {
+  const resolved = new Map<CompilerFunctionContractId, ResolvedContract>();
+  contractIds.forEach((contractId) => {
+    const programSymbol = program.symbols.resolveCompilerFunctionContract(contractId);
+    if (typeof programSymbol !== "number") {
+      throw new Error(`missing compiler function contract '${contractId}'`);
+    }
+    const ref = program.symbols.refOf(programSymbol);
+    const signature = program.functions.getSignature(ref.moduleId, ref.symbol);
+    if (!signature) {
+      throw new Error(`compiler function contract '${contractId}' has no typed signature`);
+    }
+    resolved.set(contractId, {
+      spec: COMPILER_FUNCTION_CONTRACTS.get(contractId)!,
+      signature,
+    });
+  });
+  return resolved;
+};
+
+const resultType = (
+  resolved: ReadonlyMap<CompilerFunctionContractId, ResolvedContract>,
+  contractId: CompilerFunctionContractId,
+): TypeId => {
+  const value = resolved.get(contractId)?.signature.returnType;
+  if (typeof value !== "number") {
+    throw new Error(`compiler function contract '${contractId}' is missing a result`);
+  }
+  return value;
 };
 
 const parameterType = (
@@ -117,6 +197,41 @@ const validateSharedDomainTypes = (
   }
 };
 
+const validateDtoDataSharedDomainTypes = (
+  program: ProgramCodegenView,
+  types: DtoDataContractTypes,
+): void => {
+  if (!isStdIntrinsicNominalType({
+    program,
+    typeId: types.string,
+    intrinsicType: STD_INTRINSIC_TYPE.string,
+  })) {
+    throwDomainTypeError(program, "string", "the std String nominal type", types.string);
+  }
+  if (!isStdIntrinsicNominalType({
+    program,
+    typeId: types.bytes,
+    intrinsicType: STD_INTRINSIC_TYPE.bytes,
+  })) {
+    throwDomainTypeError(program, "bytes", "the std Bytes nominal type", types.bytes);
+  }
+  const arrayArgs = nominalTypeArgs(program, types.array);
+  if (
+    arrayArgs.length !== 1 ||
+    !sameContractType(program, arrayArgs[0]!, types.data)
+  ) {
+    throwDomainTypeError(program, "data-array", "Array<DataValue>", types.array);
+  }
+  const mapArgs = nominalTypeArgs(program, types.map);
+  if (
+    mapArgs.length !== 2 ||
+    !sameContractType(program, mapArgs[0]!, types.string) ||
+    !sameContractType(program, mapArgs[1]!, types.data)
+  ) {
+    throwDomainTypeError(program, "data-map", "Dict<String, DataValue>", types.map);
+  }
+};
+
 const nominalTypeArgs = (
   program: ProgramCodegenView,
   typeId: TypeId,
@@ -150,7 +265,7 @@ const validateSignature = ({
   program: ProgramCodegenView;
   spec: CompilerFunctionContractSpec;
   signature: CodegenFunctionSignature;
-  types: BoundaryMsgpackContractTypes;
+  types: ContractTypes;
 }): void => {
   const mismatch = signatureMismatch({ program, spec, signature, types });
   if (!mismatch) return;
@@ -168,7 +283,7 @@ const signatureMismatch = ({
   program: ProgramCodegenView;
   spec: CompilerFunctionContractSpec;
   signature: CodegenFunctionSignature;
-  types: BoundaryMsgpackContractTypes;
+  types: ContractTypes;
 }): string | undefined => {
   if (signature.typeParams.length !== spec.signature.typeParameters) {
     return `expected no type parameters, got ${signature.typeParams.length}`;
@@ -209,7 +324,7 @@ const matchesType = ({
   program: ProgramCodegenView;
   expected: CompilerContractTypeSpec;
   actual: TypeId;
-  types: BoundaryMsgpackContractTypes;
+  types: ContractTypes;
 }): boolean => {
   if (expected.kind === "primitive") return actual === program.primitives[expected.name];
   if (expected.kind === "shared") {
@@ -225,25 +340,12 @@ const matchesType = ({
 };
 
 const sharedTypeId = (
-  types: BoundaryMsgpackContractTypes,
+  types: ContractTypes,
   name: CompilerContractSharedType,
 ): TypeId => {
-  switch (name) {
-    case "msgpack":
-      return types.msgpack;
-    case "string":
-      return types.string;
-    case "bytes":
-      return types.bytes;
-    case "msgpack-array":
-      return types.array;
-    case "msgpack-map":
-      return types.map;
-    case "data":
-    case "data-array":
-    case "data-map":
-      throw new Error(`unexpected ${name} in MessagePack contract`);
-  }
+  const typeId = types[name];
+  if (typeof typeId === "number") return typeId;
+  throw new Error(`compiler contract shared type '${name}' is unavailable`);
 };
 
 const sameContractType = (

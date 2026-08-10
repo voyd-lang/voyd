@@ -7,6 +7,7 @@
 use std::array::Array
 use std::bytes::Bytes
 use std::dict::{ Dict, DictKey }
+use std::error::panic
 use std::meta::{
   ArrayShape,
   BoolShape,
@@ -30,6 +31,7 @@ use std::meta::{
 use std::number::cast::self as cast
 use std::optional::types::all
 use std::result::types::all
+use std::string::new_string
 use std::string::type::{ String, StringSlice }
 
 /// Neutral null/unit value.
@@ -439,6 +441,11 @@ fn dto_value_to_data<T>(value: T): () -> DataValue
 fn data_to_dto_value<T>(value: DataValue): () -> T
   __data_to_dto_value<T>(value)
 
+@compiler_contract(id: "voyd.std.data.cycle-error")
+fn data_cycle_error() -> DataValue
+  panic("cannot encode a cyclic DTO value".as_slice())
+  DataNull {}
+
 @compiler_contract(id: "voyd.std.data.make-null")
 fn data_make_null() -> DataValue
   DataNull {}
@@ -591,6 +598,10 @@ fn data_map_tag_is(values: Dict<String, DataValue>, expected: String) -> bool
         DataString: active.value == expected
         else: false
     None: false
+
+@compiler_contract(id: "voyd.std.data.string-new")
+fn data_new_string(from_bytes: FixedArray<i32>) -> String
+  new_string(from_bytes)
 
 fn data_fields(values: Dict<String, DataValue>) -> Array<DataField>
   let entries = values.entries()

@@ -10,6 +10,7 @@ import {
 } from "@voyd-lang/lib/binaryen-gc/index.js";
 import type {
   CodegenContext,
+  FunctionMetadata,
   FunctionContext,
   LocalBindingLocal,
   StructuralFieldInfo,
@@ -72,7 +73,7 @@ type BoundaryCodecState = {
 export type DtoTreeFunctions = Omit<
   MsgPackFunctions,
   "encodeValue" | "decodeValue"
->;
+> & { cycleError?: FunctionMetadata };
 
 const BOUNDARY_PACK_CYCLE_ERROR =
   "__voyd_boundary_error: cannot encode cyclic object graph or boundary object graph exceeds maximum depth";
@@ -1729,8 +1730,16 @@ const stringMsgPack = (
 const boundaryPackCycleErrorMsgPack = (
   ctx: CodegenContext,
   state: BoundaryCodecState,
-): binaryen.ExpressionRef =>
-  stringMsgPack(BOUNDARY_PACK_CYCLE_ERROR, ctx, state);
+): binaryen.ExpressionRef => {
+  const cycleError = state.provider.cycleError;
+  return cycleError
+    ? ctx.mod.call(
+        cycleError.wasmName,
+        [],
+        wasmTypeFor(state.provider.msgPackTypeId, ctx),
+      )
+    : stringMsgPack(BOUNDARY_PACK_CYCLE_ERROR, ctx, state);
+};
 
 let labelCounter = 0;
 

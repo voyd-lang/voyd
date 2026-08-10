@@ -1,4 +1,7 @@
-import { DTO_DATA_CONTRACT_IDS } from "../../compiler-contracts/index.js";
+import {
+  DTO_DATA_CONTRACT_IDS,
+  validateDtoDataFunctionContracts,
+} from "../../compiler-contracts/index.js";
 import type { ProgramSymbolId } from "../../semantics/ids.js";
 import type { CodegenContext, FunctionMetadata } from "../context.js";
 import { requireFunctionMetaByCompilerContract } from "../function-lookup.js";
@@ -14,11 +17,13 @@ export const ensureDataValueFunctions = (
   ctx: CodegenContext,
 ): DtoTreeFunctions =>
   stateFor(ctx, FUNCTIONS_KEY, () => {
+    const { data: dataTypeId } = validateDtoDataFunctionContracts(ctx.program);
     const requireContract = (
       id: (typeof DTO_DATA_CONTRACT_IDS)[keyof typeof DTO_DATA_CONTRACT_IDS],
     ): FunctionMetadata =>
       requireFunctionMetaByCompilerContract({ ctx, contractId: id });
     const functions = {
+      cycleError: requireContract(DTO_DATA_CONTRACT_IDS.cycleError),
       makeNull: requireContract(DTO_DATA_CONTRACT_IDS.makeNull),
       makeBool: requireContract(DTO_DATA_CONTRACT_IDS.makeBool),
       makeString: requireContract(DTO_DATA_CONTRACT_IDS.makeString),
@@ -47,6 +52,7 @@ export const ensureDataValueFunctions = (
       mapGet: requireContract(DTO_DATA_CONTRACT_IDS.mapGet),
       mapHas: requireContract(DTO_DATA_CONTRACT_IDS.mapHas),
       mapTagIs: requireContract(DTO_DATA_CONTRACT_IDS.mapTagIs),
+      newString: requireContract(DTO_DATA_CONTRACT_IDS.newString),
     };
     const state = ctx.programHelpers.getHelperState<ReachabilityState>(
       REACHABILITY_STATE,
@@ -63,7 +69,7 @@ export const ensureDataValueFunctions = (
       ),
     );
     return {
-      msgPackTypeId: functions.makeNull.resultTypeId,
+      msgPackTypeId: dataTypeId,
       ...functions,
     };
   });

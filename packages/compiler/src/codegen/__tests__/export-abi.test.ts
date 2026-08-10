@@ -446,6 +446,26 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     expect(Array.from(result)).toEqual(Array.from(source));
   });
 
+  it("rejects integers outside the byte domain before transport encoding", async () => {
+    const wasm = await buildModule({
+      entryFile: "dto-boundary-errors.voyd",
+      codegenOptions: { boundaryExports: "auto" },
+    });
+    const host = await createVoydHost({ wasm });
+
+    await expect(host.runPure("reject_invalid_byte")).rejects.toThrow();
+  });
+
+  it("rejects cyclic data encoding instead of returning sentinel data", async () => {
+    const wasm = await buildModule({
+      entryFile: "dto-boundary-errors.voyd",
+      codegenOptions: { boundaryExports: "auto" },
+    });
+    const host = await createVoydHost({ wasm });
+
+    await expect(host.runPure("reject_cyclic_data")).rejects.toThrow();
+  });
+
   it("keeps typed boundary export helpers reachable under optimization", async () => {
     const wasm = await buildModule({
       entryFile: "boundary-export.voyd",
