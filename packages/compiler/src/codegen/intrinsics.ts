@@ -41,7 +41,7 @@ import {
 import type { HeapTypeRef } from "@voyd-lang/lib/binaryen-gc/types.js";
 import { LINEAR_MEMORY_INTERNAL } from "./effects/host-boundary/constants.js";
 import { ensureDispatcher } from "./effects/dispatcher.js";
-import { ensureMsgPackProviderFunctions } from "./host-transport/providers/msgpack.js";
+import { ensureSelectedHostTransportProvider } from "./host-transport/selected-provider.js";
 import { ensureDataValueFunctions } from "./boundary/data-value.js";
 import {
   getOutcomeValueBoxType,
@@ -448,18 +448,28 @@ const ensureRetainedCallbackHelper = ({
     throw new Error("callback retention requires a function value");
   }
   ensureLinearMemoryExport(ctx);
-  const msgpack = ensureMsgPackProviderFunctions(ctx);
-  const parameterCodecs = desc.parameters.map((parameter, index) => ({
-    typeId: parameter.type,
-    schema: deriveBoundarySchema({
+  const provider = ensureSelectedHostTransportProvider(ctx);
+  const providerValueType = wasmTypeFor(provider.valueTypeId, ctx);
+  const parameterCodecs = desc.parameters.map((parameter, index) => {
+    const isProviderValue =
+      wasmTypeFor(parameter.type, ctx) === providerValueType;
+    return {
       typeId: parameter.type,
-      ctx,
-      label: `callback parameter ${index + 1}`,
-    }),
-  }));
+      isProviderValue,
+      schema: isProviderValue
+        ? undefined
+        : deriveBoundarySchema({
+            typeId: parameter.type,
+            ctx,
+            label: `callback parameter ${index + 1}`,
+          }),
+    };
+  });
   const returnWasmType = wasmTypeFor(desc.returnType, ctx);
   const returnsVoid = returnWasmType === binaryen.none;
-  const returnSchema = returnsVoid
+  const returnsProviderValue =
+    !returnsVoid && returnWasmType === providerValueType;
+  const returnSchema = returnsVoid || returnsProviderValue
     ? undefined
     : deriveBoundarySchema({
         typeId: desc.returnType,
@@ -470,7 +480,7 @@ const ensureRetainedCallbackHelper = ({
     typeof desc.effectRow === "number" &&
     !ctx.program.effects.isEmpty(desc.effectRow);
 
-  const msgPackType = wasmTypeFor(msgpack.valueTypeId, ctx);
+  const msgPackType = providerValueType;
   const base = getClosureTypeInfo(closureTypeId, ctx);
   const exportName = `__voyd_callback_${sanitizeTaskKey(base.key)}`;
   const locals: binaryen.Type[] = [];
@@ -493,7 +503,7 @@ const ensureRetainedCallbackHelper = ({
   const decodedPayloadValue = (): binaryen.ExpressionRef =>
     (() => {
       const decodedFrame = ctx.mod.call(
-        msgpack.decodeValue.wasmName,
+        provider.decodeValue.wasmName,
         [
           ctx.mod.local.get(1, binaryen.i32),
           ctx.mod.local.get(2, binaryen.i32),
@@ -501,14 +511,14 @@ const ensureRetainedCallbackHelper = ({
         msgPackType,
       );
       const frameArray = ctx.mod.call(
-        msgpack.unpackArray.wasmName,
+        provider.unpackArray.wasmName,
         [decodedFrame],
-        msgpack.arrayWithCapacity.resultType,
+        provider.arrayWithCapacity.resultType,
       );
       const frameStorage = ctx.mod.call(
-        msgpack.arrayRawStorage.wasmName,
+        provider.arrayRawStorage.wasmName,
         [frameArray],
-        msgpack.arrayRawStorage.resultType,
+        provider.arrayRawStorage.resultType,
       );
       const argsValue = arrayGet(
         ctx.mod,
@@ -518,14 +528,14 @@ const ensureRetainedCallbackHelper = ({
         false,
       );
       const argsArray = ctx.mod.call(
-        msgpack.unpackArray.wasmName,
+        provider.unpackArray.wasmName,
         [argsValue],
-        msgpack.arrayWithCapacity.resultType,
+        provider.arrayWithCapacity.resultType,
       );
       const argsStorage = ctx.mod.call(
-        msgpack.arrayRawStorage.wasmName,
+        provider.arrayRawStorage.wasmName,
         [argsArray],
-        msgpack.arrayRawStorage.resultType,
+        provider.arrayRawStorage.resultType,
       );
       const typedPayloadValue = arrayGet(
         ctx.mod,
@@ -535,14 +545,14 @@ const ensureRetainedCallbackHelper = ({
         false,
       );
       const typedPayloadArray = ctx.mod.call(
-        msgpack.unpackArray.wasmName,
+        provider.unpackArray.wasmName,
         [typedPayloadValue],
-        msgpack.arrayWithCapacity.resultType,
+        provider.arrayWithCapacity.resultType,
       );
       const typedPayloadStorage = ctx.mod.call(
-        msgpack.arrayRawStorage.wasmName,
+        provider.arrayRawStorage.wasmName,
         [typedPayloadArray],
-        msgpack.arrayRawStorage.resultType,
+        provider.arrayRawStorage.resultType,
       );
       return arrayGet(
         ctx.mod,
@@ -554,19 +564,19 @@ const ensureRetainedCallbackHelper = ({
     })();
   const callbackInvocationIdValue = (): binaryen.ExpressionRef => {
     const decodedFrame = ctx.mod.call(
-      msgpack.decodeValue.wasmName,
+      provider.decodeValue.wasmName,
       [ctx.mod.local.get(1, binaryen.i32), ctx.mod.local.get(2, binaryen.i32)],
       msgPackType,
     );
     const frameArray = ctx.mod.call(
-      msgpack.unpackArray.wasmName,
+      provider.unpackArray.wasmName,
       [decodedFrame],
-      msgpack.arrayWithCapacity.resultType,
+      provider.arrayWithCapacity.resultType,
     );
     const frameStorage = ctx.mod.call(
-      msgpack.arrayRawStorage.wasmName,
+      provider.arrayRawStorage.wasmName,
       [frameArray],
-      msgpack.arrayRawStorage.resultType,
+      provider.arrayRawStorage.resultType,
     );
     return arrayGet(
       ctx.mod,
@@ -581,14 +591,14 @@ const ensureRetainedCallbackHelper = ({
       return decodedPayloadValue();
     }
     const argsArray = ctx.mod.call(
-      msgpack.unpackArray.wasmName,
+      provider.unpackArray.wasmName,
       [decodedPayloadValue()],
-      msgpack.arrayWithCapacity.resultType,
+      provider.arrayWithCapacity.resultType,
     );
     const storage = ctx.mod.call(
-      msgpack.arrayRawStorage.wasmName,
+      provider.arrayRawStorage.wasmName,
       [argsArray],
-      msgpack.arrayRawStorage.resultType,
+      provider.arrayRawStorage.resultType,
     );
     return arrayGet(
       ctx.mod,
@@ -600,13 +610,15 @@ const ensureRetainedCallbackHelper = ({
   };
   const payloadValues = parameterCodecs.map((codec, index) => {
     const value = payloadElementValue(index);
-    return readDtoValueFromTree({
-      value,
-      schema: codec.schema,
-      ctx,
-      fnCtx: helperFnCtx,
-      provider: msgpack,
-    });
+    return codec.isProviderValue
+      ? value
+      : readDtoValueFromTree({
+          value,
+          schema: codec.schema!,
+          ctx,
+          fnCtx: helperFnCtx,
+          provider,
+        });
   });
   const fnField = structGetFieldValue({
     mod: ctx.mod,
@@ -703,19 +715,23 @@ const ensureRetainedCallbackHelper = ({
         ctx,
         fnCtx: helperFnCtx,
       });
-  const returnFingerprint = returnSchema
-    ? withDtoFingerprint(returnSchema).fingerprint
-    : undefined;
+  const returnFingerprint = returnsProviderValue
+    ? `host-transport:${provider.identity.id}@${provider.identity.version}:value`
+    : returnSchema
+      ? withDtoFingerprint(returnSchema).fingerprint
+      : undefined;
   const encodedLength = returnsVoid
     ? ctx.mod.block(null, [resultValue, ctx.mod.i32.const(-2)], binaryen.i32)
     : (() => {
-        const encodedResultValue = writeDtoValueToTree({
-          value: resultValue,
-          schema: returnSchema!,
-          ctx,
-          fnCtx: helperFnCtx,
-          provider: msgpack,
-        });
+        const encodedResultValue = returnsProviderValue
+          ? resultValue
+          : writeDtoValueToTree({
+              value: resultValue,
+              schema: returnSchema!,
+              ctx,
+              fnCtx: helperFnCtx,
+              provider,
+            });
         if (!returnFingerprint) {
           throw new Error("callback return is missing a DTO fingerprint");
         }
@@ -725,10 +741,10 @@ const ensureRetainedCallbackHelper = ({
           value: encodedResultValue,
           ctx,
           fnCtx: helperFnCtx,
-          provider: msgpack as SelectedHostTransportProvider,
+          provider: provider as SelectedHostTransportProvider,
         });
         return ctx.mod.call(
-          msgpack.encodeValue.wasmName,
+          provider.encodeValue.wasmName,
           [
             completionFrame,
             ctx.mod.local.get(3, binaryen.i32),
@@ -1466,7 +1482,7 @@ export const compileIntrinsicCall = ({
     }
     case "__boundary_value_to_msgpack": {
       assertArgCount(name, args, 1);
-      const msgpack = ensureMsgPackProviderFunctions(ctx);
+      const msgpack = ensureSelectedHostTransportProvider(ctx);
       const valueTypeId = getRequiredExprType(
         call.args[0]!.expr,
         ctx,
@@ -1933,7 +1949,7 @@ const emitDtoTreeToValue = ({
   ctx: CodegenContext;
   fnCtx: FunctionContext;
 }): binaryen.ExpressionRef => {
-  const msgpack = ensureMsgPackProviderFunctions(ctx);
+  const msgpack = ensureSelectedHostTransportProvider(ctx);
   return readDtoValueFromTree({
     value,
     schema: deriveBoundarySchema({
