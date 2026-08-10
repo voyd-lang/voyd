@@ -11,6 +11,10 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - `DataValue` includes `DataBytes`.
 - `std::data::encode<T>` converts an eligible value into its provider-neutral
   `DataValue` representation.
+- `std::data` defines balanced `DataWriter` and pull-based `DataReader`
+  contracts, with explicit depth, byte, and collection-size limit types.
+  `DataValueWriter` and `DataValueReader` provide checked tree bridges for
+  callers that need an explicit neutral value.
 - DTO decoding rejects unknown fields by default. Callers must explicitly use
   `IgnoreUnknownFields` for forward-compatible input.
 - Exported DTO schemas carry stable SHA-256 fingerprints.
@@ -43,8 +47,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 - Remove public MessagePack boundary helpers and compiler contracts.
 - Replace format-specific compiler traversal with the single `AutoDtoPlan`
   exposed through `ProgramCodegenView`.
-- Add streaming `DataReader` and `DataWriter` implementations underneath the
-  typed JSON and MessagePack entry points.
+- Route typed JSON and MessagePack traversal directly through `DataReader` and
+  `DataWriter` without constructing an intermediate `DataValue` tree.
 - Replace raw VX MessagePack payloads with typed plans and final wire lowering.
 - Replace the legacy unframed host protocol with complete ABI v2 frames.
 - Add custom DTO representations for types that cannot use automatic structural

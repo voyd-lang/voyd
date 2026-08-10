@@ -103,6 +103,789 @@ pub obj DecodeOptions {
   api unknown_fields: UnknownFieldPolicy
 }
 
+/// Resource limits applied while writing a DTO value.
+pub obj EncodeLimits {
+  api max_depth: i32,
+  api max_bytes: i32,
+  api max_collection_length: i32
+}
+
+/// Resource limits applied before allocating decoded DTO storage.
+pub obj DecodeLimits {
+  api max_depth: i32,
+  api max_bytes: i32,
+  api max_collection_length: i32
+}
+
+/// Returns conservative default encoding limits.
+pub fn default_encode_limits() -> EncodeLimits
+  EncodeLimits {
+    max_depth: 128,
+    max_bytes: 16777216,
+    max_collection_length: 1048576
+  }
+
+/// Returns conservative default decoding limits.
+pub fn default_decode_limits() -> DecodeLimits
+  DecodeLimits {
+    max_depth: 128,
+    max_bytes: 16777216,
+    max_collection_length: 1048576
+  }
+
+pub obj NullKind {}
+pub obj BoolKind {}
+pub obj I32Kind {}
+pub obj I64Kind {}
+pub obj F32Kind {}
+pub obj F64Kind {}
+pub obj StringKind {}
+pub obj BytesKind {}
+pub obj ArrayKind {}
+pub obj RecordKind {}
+pub obj VariantKind {}
+
+/// Provider-neutral kinds reported by a `DataReader`.
+pub type DataKind = NullKind
+  | BoolKind
+  | I32Kind
+  | I64Kind
+  | F32Kind
+  | F64Kind
+  | StringKind
+  | BytesKind
+  | ArrayKind
+  | RecordKind
+  | VariantKind
+
+/// Stateful sink used by generated DTO traversal.
+///
+/// Calls must form one balanced root value. A writer becomes unusable after
+/// the first sink failure.
+pub trait DataWriter<SinkError>
+  fn write_null(~self) -> Result<Unit, SinkError>
+  fn write_bool(~self, value: bool) -> Result<Unit, SinkError>
+  fn write_i32(~self, value: i32) -> Result<Unit, SinkError>
+  fn write_i64(~self, value: i64) -> Result<Unit, SinkError>
+  fn write_f32(~self, value: f32) -> Result<Unit, SinkError>
+  fn write_f64(~self, value: f64) -> Result<Unit, SinkError>
+  fn write_string(~self, value: String) -> Result<Unit, SinkError>
+  fn write_bytes(~self, value: Bytes) -> Result<Unit, SinkError>
+  fn begin_array(~self, { length: i32 }) -> Result<Unit, SinkError>
+  fn end_array(~self) -> Result<Unit, SinkError>
+  fn begin_record(
+    ~self,
+    { shape: RecordShape, field_count: i32 }
+  ) -> Result<Unit, SinkError>
+  fn write_field(~self, { field: ShapeField }) -> Result<Unit, SinkError>
+  fn end_record(~self) -> Result<Unit, SinkError>
+  fn begin_variant(
+    ~self,
+    { shape: UnionShape, variant: ShapeVariant }
+  ) -> Result<Unit, SinkError>
+  fn end_variant(~self) -> Result<Unit, SinkError>
+
+/// Stateful pull source used by generated DTO traversal.
+pub trait DataReader<SourceError>
+  fn kind(self) -> Result<DataKind, SourceError>
+  fn read_null(~self) -> Result<Unit, SourceError>
+  fn read_bool(~self) -> Result<bool, SourceError>
+  fn read_i32(~self) -> Result<i32, SourceError>
+  fn read_i64(~self) -> Result<i64, SourceError>
+  fn read_f32(~self) -> Result<f32, SourceError>
+  fn read_f64(~self) -> Result<f64, SourceError>
+  fn read_string(~self) -> Result<String, SourceError>
+  fn read_bytes(~self) -> Result<Bytes, SourceError>
+  fn begin_array(~self) -> Result<i32, SourceError>
+  fn has_next_element(self) -> Result<bool, SourceError>
+  fn end_array(~self) -> Result<Unit, SourceError>
+  fn begin_record(~self) -> Result<Unit, SourceError>
+  fn next_field(~self) -> Result<Option<String>, SourceError>
+  fn skip_value(~self) -> Result<Unit, SourceError>
+  fn end_record(~self) -> Result<Unit, SourceError>
+  fn begin_variant(~self) -> Result<String, SourceError>
+  fn end_variant(~self) -> Result<Unit, SourceError>
+
+/// Balanced-stream error reported by `DataValueWriter`.
+pub obj DataValueWriteError {
+  api message: String
+}
+
+obj DataValueLiteralEvent { value: DataValue }
+obj DataValueBeginArrayEvent { length: i32 }
+obj DataValueEndArrayEvent {}
+obj DataValueBeginRecordEvent { field_count: i32 }
+obj DataValueFieldEvent { name: String }
+obj DataValueEndRecordEvent {}
+obj DataValueBeginVariantEvent { name: String, field_count: i32 }
+obj DataValueEndVariantEvent {}
+
+type DataValueWriteEvent = DataValueLiteralEvent
+  | DataValueBeginArrayEvent
+  | DataValueEndArrayEvent
+  | DataValueBeginRecordEvent
+  | DataValueFieldEvent
+  | DataValueEndRecordEvent
+  | DataValueBeginVariantEvent
+  | DataValueEndVariantEvent
+
+obj ParsedDataValue {
+  value: DataValue,
+  next_index: i32
+}
+
+/// Concrete balanced writer that constructs one explicit `DataValue` tree.
+pub obj DataValueWriter {
+  events: Array<DataValueWriteEvent>,
+  depth: i32,
+  root_count: i32,
+  failed: bool
+}
+
+impl DataValueWriter
+  /// Creates an empty writer session.
+  pub fn init() -> DataValueWriter
+    DataValueWriter {
+      events: Array<DataValueWriteEvent>::init(),
+      depth: 0,
+      root_count: 0,
+      failed: false
+    }
+
+  /// Returns true when exactly one balanced root value is ready.
+  api fn is_complete(self) -> bool
+    self.finish().match(result)
+      Ok<DataValue>:
+        true
+      Err<DataValueWriteError>:
+        false
+
+  /// Finishes the session after exactly one balanced root value.
+  api fn finish(self) -> Result<DataValue, DataValueWriteError>
+    if self.failed:
+      return data_writer_failure<DataValue>("data writer session has failed")
+    if self.depth != 0:
+      return data_writer_failure<DataValue>("data writer has unclosed containers")
+    if self.root_count != 1:
+      return data_writer_failure<DataValue>("data writer has no root value")
+    match(parse_data_value(self.events, 0))
+      Err<DataValueWriteError> { error }:
+        Err<DataValueWriteError> { error }
+      Ok<ParsedDataValue> { value: parsed }:
+        if parsed.next_index != self.events.len():
+          return data_writer_failure<DataValue>("data writer has trailing events")
+        Ok<DataValue> { value: parsed.value }
+
+  fn start_value(~self) -> Result<Unit, DataValueWriteError>
+    if self.failed:
+      return data_writer_failure<Unit>("data writer session has failed")
+    if self.depth == 0:
+      if self.root_count != 0:
+        return self.fail("data writer received more than one root value")
+      self.root_count = 1
+    data_writer_success()
+
+  fn write_literal(
+    ~self,
+    value: DataValue
+  ) -> Result<Unit, DataValueWriteError>
+    match(self.start_value())
+      Err<DataValueWriteError> { error }:
+        Err<DataValueWriteError> { error }
+      Ok<Unit>:
+        self.events.push(DataValueLiteralEvent { value })
+        data_writer_success()
+
+  fn fail(~self, message: String) -> Result<Unit, DataValueWriteError>
+    self.failed = true
+    data_writer_failure<Unit>(message)
+
+impl DataWriter<DataValueWriteError> for DataValueWriter
+  fn write_null(~self) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataNull {})
+
+  fn write_bool(~self, value: bool) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataBool { value })
+
+  fn write_i32(~self, value: i32) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataI32 { value })
+
+  fn write_i64(~self, value: i64) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataI64 { value })
+
+  fn write_f32(~self, value: f32) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataF32 { value })
+
+  fn write_f64(~self, value: f64) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataF64 { value })
+
+  fn write_string(~self, value: String) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataString { value })
+
+  fn write_bytes(~self, value: Bytes) -> Result<Unit, DataValueWriteError>
+    self.write_literal(DataBytes { value })
+
+  fn begin_array(
+    ~self,
+    { length: i32 }
+  ) -> Result<Unit, DataValueWriteError>
+    if length < 0:
+      return self.fail("data writer array length cannot be negative")
+    match(self.start_value())
+      Err<DataValueWriteError> { error }:
+        Err<DataValueWriteError> { error }
+      Ok<Unit>:
+        self.events.push(DataValueBeginArrayEvent { length })
+        self.depth = self.depth + 1
+        data_writer_success()
+
+  fn end_array(~self) -> Result<Unit, DataValueWriteError>
+    if self.depth <= 0:
+      return self.fail("data writer end_array has no matching container")
+    self.events.push(DataValueEndArrayEvent {})
+    self.depth = self.depth - 1
+    data_writer_success()
+
+  fn begin_record(
+    ~self,
+    { shape: RecordShape, field_count: i32 }
+  ) -> Result<Unit, DataValueWriteError>
+    if field_count < 0:
+      return self.fail("data writer record field count cannot be negative")
+    match(self.start_value())
+      Err<DataValueWriteError> { error }:
+        Err<DataValueWriteError> { error }
+      Ok<Unit>:
+        self.events.push(DataValueBeginRecordEvent { field_count })
+        self.depth = self.depth + 1
+        data_writer_success()
+
+  fn write_field(
+    ~self,
+    { field: ShapeField }
+  ) -> Result<Unit, DataValueWriteError>
+    if self.depth <= 0:
+      return self.fail("data writer field is outside a record or variant")
+    self.events.push(DataValueFieldEvent { name: field.name })
+    data_writer_success()
+
+  fn end_record(~self) -> Result<Unit, DataValueWriteError>
+    if self.depth <= 0:
+      return self.fail("data writer end_record has no matching container")
+    self.events.push(DataValueEndRecordEvent {})
+    self.depth = self.depth - 1
+    data_writer_success()
+
+  fn begin_variant(
+    ~self,
+    { shape: UnionShape, variant: ShapeVariant }
+  ) -> Result<Unit, DataValueWriteError>
+    match(self.start_value())
+      Err<DataValueWriteError> { error }:
+        Err<DataValueWriteError> { error }
+      Ok<Unit>:
+        self.events.push(DataValueBeginVariantEvent {
+          name: variant.name,
+          field_count: variant.fields.len()
+        })
+        self.depth = self.depth + 1
+        data_writer_success()
+
+  fn end_variant(~self) -> Result<Unit, DataValueWriteError>
+    if self.depth <= 0:
+      return self.fail("data writer end_variant has no matching container")
+    self.events.push(DataValueEndVariantEvent {})
+    self.depth = self.depth - 1
+    data_writer_success()
+
+fn parse_data_value(
+  events: Array<DataValueWriteEvent>,
+  index: i32
+) -> Result<ParsedDataValue, DataValueWriteError>
+  if index < 0 or index >= events.len():
+    return data_writer_failure<ParsedDataValue>("data writer expected a value")
+  events.at(index).match(event)
+    DataValueLiteralEvent:
+      data_writer_parsed(event.value, index + 1)
+    DataValueBeginArrayEvent:
+      parse_data_array(events, index, event.length)
+    DataValueBeginRecordEvent:
+      parse_data_fields(events, index, event.field_count, record_name: None {})
+    DataValueBeginVariantEvent:
+      parse_data_fields(
+        events,
+        index,
+        event.field_count,
+        record_name: Some<String> { value: event.name }
+      )
+    else:
+      data_writer_failure<ParsedDataValue>("data writer expected a value event")
+
+fn parse_data_array(
+  events: Array<DataValueWriteEvent>,
+  index: i32,
+  length: i32
+) -> Result<ParsedDataValue, DataValueWriteError>
+  let ~values = Array<DataValue>::with_capacity(length)
+  var next_index = index + 1
+  while values.len() < length:
+    match(parse_data_value(events, next_index))
+      Err<DataValueWriteError> { error }:
+        return Err<DataValueWriteError> { error }
+      Ok<ParsedDataValue> { value: parsed }:
+        values.push(parsed.value)
+        next_index = parsed.next_index
+  if next_index >= events.len():
+    return data_writer_failure<ParsedDataValue>("data writer array is not closed")
+  events.at(next_index).match(event)
+    DataValueEndArrayEvent:
+      data_writer_parsed(DataArray { values }, next_index + 1)
+    else:
+      data_writer_failure<ParsedDataValue>("data writer array length does not match")
+
+fn parse_data_fields(
+  events: Array<DataValueWriteEvent>,
+  index: i32,
+  field_count: i32,
+  { record_name: Option<String> }
+) -> Result<ParsedDataValue, DataValueWriteError>
+  let ~fields = Array<DataField>::with_capacity(field_count)
+  var next_index = index + 1
+  while fields.len() < field_count:
+    if next_index >= events.len():
+      return data_writer_failure<ParsedDataValue>("data writer field is missing")
+    events.at(next_index).match(event)
+      DataValueFieldEvent:
+        match(parse_data_value(events, next_index + 1))
+          Err<DataValueWriteError> { error }:
+            return Err<DataValueWriteError> { error }
+          Ok<ParsedDataValue> { value: parsed }:
+            fields.push(DataField { name: event.name, value: parsed.value })
+            next_index = parsed.next_index
+      else:
+        return data_writer_failure<ParsedDataValue>("data writer expected a field")
+  if next_index >= events.len():
+    return data_writer_failure<ParsedDataValue>("data writer record is not closed")
+  match(record_name)
+    None:
+      events.at(next_index).match(event)
+        DataValueEndRecordEvent:
+          data_writer_parsed(DataObject { fields }, next_index + 1)
+        else:
+          data_writer_failure<ParsedDataValue>("data writer record field count does not match")
+    Some<String> { value: name }:
+      events.at(next_index).match(event)
+        DataValueEndVariantEvent:
+          data_writer_parsed(DataVariant { name, fields }, next_index + 1)
+        else:
+          data_writer_failure<ParsedDataValue>("data writer variant field count does not match")
+
+fn data_writer_parsed(
+  value: DataValue,
+  next_index: i32
+) -> Result<ParsedDataValue, DataValueWriteError>
+  Ok<ParsedDataValue> { value: ParsedDataValue { value, next_index } }
+
+fn data_writer_success() -> Result<Unit, DataValueWriteError>
+  Ok<Unit> { value: Unit {} }
+
+fn data_writer_failure<T>(message: String) -> Result<T, DataValueWriteError>
+  Err<DataValueWriteError> { error: DataValueWriteError { message } }
+
+/// Pull-stream error reported by `DataValueReader`.
+pub obj DataValueReadError {
+  api message: String
+}
+
+/// Concrete pull reader over one explicit `DataValue` tree.
+pub obj DataValueReader {
+  events: Array<DataValueWriteEvent>,
+  index: i32,
+  failed: bool
+}
+
+impl DataValueReader
+  /// Creates a reader positioned at the root value.
+  pub fn init(value: DataValue) -> DataValueReader
+    let ~events = Array<DataValueWriteEvent>::init()
+    append_data_value_events(events, value)
+    DataValueReader { events, index: 0, failed: false }
+
+  /// Returns true after the root value and all containers have been consumed.
+  api fn is_complete(self) -> bool
+    self.failed == false and self.index == self.events.len()
+
+  fn fail<T>(~self, message: String) -> Result<T, DataValueReadError>
+    self.failed = true
+    data_reader_failure<T>(message)
+
+impl DataReader<DataValueReadError> for DataValueReader
+  fn kind(self) -> Result<DataKind, DataValueReadError>
+    data_event_kind(self.events, self.index)
+
+  fn read_null(~self) -> Result<Unit, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Unit>("data reader expected null")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataNull:
+            self.index = self.index + 1
+            Ok<Unit> { value: Unit {} }
+          else:
+            self.fail<Unit>("data reader expected null")
+      else:
+        self.fail<Unit>("data reader expected null")
+
+  fn read_bool(~self) -> Result<bool, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<bool>("data reader expected bool")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataBool:
+            self.index = self.index + 1
+            Ok<bool> { value: value.value }
+          else:
+            self.fail<bool>("data reader expected bool")
+      else:
+        self.fail<bool>("data reader expected bool")
+
+  fn read_i32(~self) -> Result<i32, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<i32>("data reader expected i32")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataI32:
+            self.index = self.index + 1
+            Ok<i32> { value: value.value }
+          else:
+            self.fail<i32>("data reader expected i32")
+      else:
+        self.fail<i32>("data reader expected i32")
+
+  fn read_i64(~self) -> Result<i64, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<i64>("data reader expected i64")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataI64:
+            self.index = self.index + 1
+            Ok<i64> { value: value.value }
+          else:
+            self.fail<i64>("data reader expected i64")
+      else:
+        self.fail<i64>("data reader expected i64")
+
+  fn read_f32(~self) -> Result<f32, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<f32>("data reader expected f32")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataF32:
+            self.index = self.index + 1
+            Ok<f32> { value: value.value }
+          else:
+            self.fail<f32>("data reader expected f32")
+      else:
+        self.fail<f32>("data reader expected f32")
+
+  fn read_f64(~self) -> Result<f64, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<f64>("data reader expected f64")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataF64:
+            self.index = self.index + 1
+            Ok<f64> { value: value.value }
+          else:
+            self.fail<f64>("data reader expected f64")
+      else:
+        self.fail<f64>("data reader expected f64")
+
+  fn read_string(~self) -> Result<String, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<String>("data reader expected string")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataString:
+            let result = value.value.as_slice().to_string()
+            self.index = self.index + 1
+            Ok<String> { value: result }
+          else:
+            self.fail<String>("data reader expected string")
+      else:
+        self.fail<String>("data reader expected string")
+
+  fn read_bytes(~self) -> Result<Bytes, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Bytes>("data reader expected bytes")
+    self.events.at(self.index).match(event)
+      DataValueLiteralEvent:
+        event.value.match(value)
+          DataBytes:
+            let result = value.value.copied()
+            self.index = self.index + 1
+            Ok<Bytes> { value: result }
+          else:
+            self.fail<Bytes>("data reader expected bytes")
+      else:
+        self.fail<Bytes>("data reader expected bytes")
+
+  fn begin_array(~self) -> Result<i32, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<i32>("data reader expected array")
+    self.events.at(self.index).match(event)
+      DataValueBeginArrayEvent:
+        self.index = self.index + 1
+        Ok<i32> { value: event.length }
+      else:
+        self.fail<i32>("data reader expected array")
+
+  fn has_next_element(self) -> Result<bool, DataValueReadError>
+    if self.index >= self.events.len():
+      return data_reader_failure<bool>("data reader array is not closed")
+    self.events.at(self.index).match(event)
+      DataValueEndArrayEvent:
+        Ok<bool> { value: false }
+      DataValueLiteralEvent:
+        Ok<bool> { value: true }
+      DataValueBeginArrayEvent:
+        Ok<bool> { value: true }
+      DataValueBeginRecordEvent:
+        Ok<bool> { value: true }
+      DataValueBeginVariantEvent:
+        Ok<bool> { value: true }
+      else:
+        data_reader_failure<bool>("data reader expected an array element")
+
+  fn end_array(~self) -> Result<Unit, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Unit>("data reader array is not closed")
+    self.events.at(self.index).match(event)
+      DataValueEndArrayEvent:
+        self.index = self.index + 1
+        Ok<Unit> { value: Unit {} }
+      else:
+        self.fail<Unit>("data reader array has unread elements")
+
+  fn begin_record(~self) -> Result<Unit, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Unit>("data reader expected record")
+    self.events.at(self.index).match(event)
+      DataValueBeginRecordEvent:
+        self.index = self.index + 1
+        Ok<Unit> { value: Unit {} }
+      else:
+        self.fail<Unit>("data reader expected record")
+
+  fn next_field(~self) -> Result<Option<String>, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Option<String>>("data reader record is not closed")
+    self.events.at(self.index).match(event)
+      DataValueEndRecordEvent:
+        Ok<Option<String>> { value: None {} }
+      DataValueEndVariantEvent:
+        Ok<Option<String>> { value: None {} }
+      DataValueFieldEvent:
+        let name = event.name.as_slice().to_string()
+        self.index = self.index + 1
+        Ok<Option<String>> { value: Some<String> { value: name } }
+      else:
+        self.fail<Option<String>>("data reader expected a field")
+
+  fn skip_value(~self) -> Result<Unit, DataValueReadError>
+    match(skip_data_value_event(self.events, self.index))
+      Err<DataValueReadError> { error }:
+        self.failed = true
+        Err<DataValueReadError> { error }
+      Ok<i32> { value: next_index }:
+        self.index = next_index
+        Ok<Unit> { value: Unit {} }
+
+  fn end_record(~self) -> Result<Unit, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Unit>("data reader record is not closed")
+    self.events.at(self.index).match(event)
+      DataValueEndRecordEvent:
+        self.index = self.index + 1
+        Ok<Unit> { value: Unit {} }
+      else:
+        self.fail<Unit>("data reader record has unread fields")
+
+  fn begin_variant(~self) -> Result<String, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<String>("data reader expected variant")
+    self.events.at(self.index).match(event)
+      DataValueBeginVariantEvent:
+        let name = event.name.as_slice().to_string()
+        self.index = self.index + 1
+        Ok<String> { value: name }
+      else:
+        self.fail<String>("data reader expected variant")
+
+  fn end_variant(~self) -> Result<Unit, DataValueReadError>
+    if self.index >= self.events.len():
+      return self.fail<Unit>("data reader variant is not closed")
+    self.events.at(self.index).match(event)
+      DataValueEndVariantEvent:
+        self.index = self.index + 1
+        Ok<Unit> { value: Unit {} }
+      else:
+        self.fail<Unit>("data reader variant has unread fields")
+
+fn append_data_value_events(
+  ~events: Array<DataValueWriteEvent>,
+  value: DataValue
+) -> void
+  value.match(data)
+    DataNull:
+      events.push(DataValueLiteralEvent { value: DataNull {} })
+    DataBool:
+      events.push(DataValueLiteralEvent { value: DataBool { value: data.value } })
+    DataI32:
+      events.push(DataValueLiteralEvent { value: DataI32 { value: data.value } })
+    DataI64:
+      events.push(DataValueLiteralEvent { value: DataI64 { value: data.value } })
+    DataF32:
+      events.push(DataValueLiteralEvent { value: DataF32 { value: data.value } })
+    DataF64:
+      events.push(DataValueLiteralEvent { value: DataF64 { value: data.value } })
+    DataString:
+      events.push(DataValueLiteralEvent {
+        value: DataString { value: data.value.as_slice().to_string() }
+      })
+    DataBytes:
+      events.push(DataValueLiteralEvent {
+        value: DataBytes { value: data.value.copied() }
+      })
+    DataArray:
+      events.push(DataValueBeginArrayEvent { length: data.values.len() })
+      var index = 0
+      while index < data.values.len():
+        append_data_value_events(events, data.values.at(index))
+        index = index + 1
+      events.push(DataValueEndArrayEvent {})
+    DataObject:
+      events.push(DataValueBeginRecordEvent { field_count: data.fields.len() })
+      append_data_field_events(events, data.fields)
+      events.push(DataValueEndRecordEvent {})
+    DataVariant:
+      events.push(DataValueBeginVariantEvent {
+        name: data.name.as_slice().to_string(),
+        field_count: data.fields.len()
+      })
+      append_data_field_events(events, data.fields)
+      events.push(DataValueEndVariantEvent {})
+
+fn append_data_field_events(
+  ~events: Array<DataValueWriteEvent>,
+  fields: Array<DataField>
+) -> void
+  var index = 0
+  while index < fields.len():
+    let field = fields.at(index)
+    events.push(DataValueFieldEvent { name: field.name.as_slice().to_string() })
+    append_data_value_events(events, field.value)
+    index = index + 1
+
+fn data_event_kind(
+  events: Array<DataValueWriteEvent>,
+  index: i32
+) -> Result<DataKind, DataValueReadError>
+  if index < 0 or index >= events.len():
+    return data_reader_failure<DataKind>("data reader has no current value")
+  events.at(index).match(event)
+    DataValueBeginArrayEvent:
+      Ok<DataKind> { value: ArrayKind {} }
+    DataValueBeginRecordEvent:
+      Ok<DataKind> { value: RecordKind {} }
+    DataValueBeginVariantEvent:
+      Ok<DataKind> { value: VariantKind {} }
+    DataValueLiteralEvent:
+      event.value.match(value)
+        DataNull:
+          Ok<DataKind> { value: NullKind {} }
+        DataBool:
+          Ok<DataKind> { value: BoolKind {} }
+        DataI32:
+          Ok<DataKind> { value: I32Kind {} }
+        DataI64:
+          Ok<DataKind> { value: I64Kind {} }
+        DataF32:
+          Ok<DataKind> { value: F32Kind {} }
+        DataF64:
+          Ok<DataKind> { value: F64Kind {} }
+        DataString:
+          Ok<DataKind> { value: StringKind {} }
+        DataBytes:
+          Ok<DataKind> { value: BytesKind {} }
+        else:
+          data_reader_failure<DataKind>("data reader literal is invalid")
+    else:
+      data_reader_failure<DataKind>("data reader has no current value")
+
+fn skip_data_value_event(
+  events: Array<DataValueWriteEvent>,
+  index: i32
+) -> Result<i32, DataValueReadError>
+  if index < 0 or index >= events.len():
+    return data_reader_failure<i32>("data reader has no value to skip")
+  events.at(index).match(event)
+    DataValueLiteralEvent:
+      Ok<i32> { value: index + 1 }
+    DataValueBeginArrayEvent:
+      skip_data_container(events, index, event.length, is_record: false)
+    DataValueBeginRecordEvent:
+      skip_data_container(events, index, event.field_count, is_record: true)
+    DataValueBeginVariantEvent:
+      skip_data_container(events, index, event.field_count, is_record: true)
+    else:
+      data_reader_failure<i32>("data reader has no value to skip")
+
+fn skip_data_container(
+  events: Array<DataValueWriteEvent>,
+  index: i32,
+  count: i32,
+  { is_record: bool }
+) -> Result<i32, DataValueReadError>
+  var next_index = index + 1
+  var consumed = 0
+  while consumed < count:
+    if is_record:
+      if next_index >= events.len():
+        return data_reader_failure<i32>("data reader field is missing")
+      events.at(next_index).match(event)
+        DataValueFieldEvent:
+          next_index = next_index + 1
+        else:
+          return data_reader_failure<i32>("data reader expected a field")
+    match(skip_data_value_event(events, next_index))
+      Err<DataValueReadError> { error }:
+        return Err<DataValueReadError> { error }
+      Ok<i32> { value }:
+        next_index = value
+    consumed = consumed + 1
+  if next_index >= events.len():
+    return data_reader_failure<i32>("data reader container is not closed")
+  events.at(next_index).match(event)
+    DataValueEndArrayEvent:
+      Ok<i32> { value: next_index + 1 }
+    DataValueEndRecordEvent:
+      Ok<i32> { value: next_index + 1 }
+    DataValueEndVariantEvent:
+      Ok<i32> { value: next_index + 1 }
+    else:
+      data_reader_failure<i32>("data reader container is not closed")
+
+fn data_reader_failure<T>(message: String) -> Result<T, DataValueReadError>
+  Err<DataValueReadError> { error: DataValueReadError { message } }
+
 /// A required field was absent.
 pub obj MissingField {}
 
