@@ -1462,8 +1462,24 @@ export const createVoydHost = async ({
       onTaskTerminal?: (taskId: number) => void;
     };
 
-    const encodeToBuffer = (value: unknown): number => {
-      const encoded = transport.encode(value);
+    const effectFramesByRequest = new Map<
+      unknown,
+      { requestId: number; resultFingerprint: string }
+    >();
+
+    const encodeToBuffer = (request: unknown, value: unknown): number => {
+      const frame = effectFramesByRequest.get(request);
+      if (!frame) {
+        throw new Error("effect request is missing frame metadata");
+      }
+      const encoded = transport.encodeFrame({
+        kind: "effect-outcome",
+        requestId: frame.requestId,
+        outcome: {
+          kind: "success",
+          value: { fingerprint: frame.resultFingerprint, value },
+        },
+      });
       if (encoded.length > bufferSize) {
         throw new Error("resume payload exceeds buffer size");
       }
@@ -1596,7 +1612,7 @@ export const createVoydHost = async ({
           activeTaskId: taskId,
         }),
         () => {
-          const length = encodeToBuffer(value);
+          const length = encodeToBuffer(request, value);
           return resumeEffectfulRaw(request, bufferPtr, length);
         },
       );
@@ -2228,7 +2244,7 @@ export const createVoydHost = async ({
                   activeTaskId: taskId,
                 }),
                 () => {
-                  const length = encodeToBuffer(handlerResult.value);
+                  const length = encodeToBuffer(request, handlerResult.value);
                   return handlerResult.kind === "end"
                     ? endRequestRaw(request, bufferPtr, length)
                     : resumeEffectfulRaw(request, bufferPtr, length);
@@ -2291,9 +2307,38 @@ export const createVoydHost = async ({
             );
             const payloadLength = effectLen(effectResult) as number;
             const request = effectCont(effectResult);
-            const decodedEffect = decodeFromBuffer(
-              payloadLength,
-            ) as EffectOpRequest;
+            const frame = transport.decodeFrame(
+              new Uint8Array(msgpackMemory.buffer, bufferPtr, payloadLength),
+            );
+            if (frame.kind !== "effect-request") {
+              throw new Error(
+                "effect boundary returned an incompatible host frame",
+              );
+            }
+            const framedOp = parsedTable.ops[frame.requestId];
+            if (
+              !framedOp ||
+              framedOp.effectId !== frame.effectId ||
+              framedOp.opId !== frame.operationId ||
+              framedOp.signatureHash !== frame.signatureHash >>> 0 ||
+              framedOp.resumeKind !== frame.resumeKind
+            ) {
+              throw new Error(
+                "effect request frame does not match the effect table",
+              );
+            }
+            effectFramesByRequest.set(request, {
+              requestId: frame.requestId,
+              resultFingerprint: frame.resultFingerprint,
+            });
+            const decodedEffect: EffectOpRequest = {
+              effectId: framedOp.effectIdHash.value,
+              opId: framedOp.opId,
+              opIndex: framedOp.opIndex,
+              resumeKind: framedOp.resumeKind,
+              handle: framedOp.opIndex,
+              args: frame.args.map((payload) => payload.value),
+            };
             const opEntry = resolveParsedEffectOp({
               table: parsedTable,
               request: decodedEffect,

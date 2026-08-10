@@ -132,6 +132,46 @@ export const makeSelectedExternalInvocation = ({
   });
 };
 
+export const makeSelectedEffectRequest = ({
+  requestId,
+  effectId,
+  operationId,
+  signatureHash,
+  resumeKind,
+  typedArgs,
+  resultFingerprint,
+  ctx,
+  fnCtx,
+  provider,
+}: {
+  requestId: number;
+  effectId: string;
+  operationId: number;
+  signatureHash: number;
+  resumeKind: number;
+  typedArgs: binaryen.ExpressionRef;
+  resultFingerprint: string;
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  provider: SelectedHostTransportProvider;
+}): binaryen.ExpressionRef =>
+  makeSelectedArray({
+    elements: [
+      makeSelectedI32(SELECTED_HOST_FRAME_VERSION, ctx, provider),
+      makeSelectedI32(SELECTED_HOST_FRAME_TAG.effectRequest, ctx, provider),
+      makeSelectedI32(requestId, ctx, provider),
+      makeSelectedString(effectId, ctx, provider),
+      makeSelectedI32(operationId, ctx, provider),
+      makeSelectedI32(signatureHash, ctx, provider),
+      makeSelectedI32(resumeKind, ctx, provider),
+      typedArgs,
+      makeSelectedString(resultFingerprint, ctx, provider),
+    ],
+    ctx,
+    fnCtx,
+    provider,
+  });
+
 const makeSelectedArray = ({
   elements,
   ctx,

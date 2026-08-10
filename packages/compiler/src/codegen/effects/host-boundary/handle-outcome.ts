@@ -24,7 +24,9 @@ import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
 import { findSerializerFormatForType } from "../../serializer.js";
 
-const HANDLE_OUTCOME_DYNAMIC_KEY = Symbol("voyd.effects.hostBoundary.handleOutcomeDynamic");
+const HANDLE_OUTCOME_DYNAMIC_KEY = Symbol(
+  "voyd.effects.hostBoundary.handleOutcomeDynamic",
+);
 
 export const createHandleOutcomeDynamic = ({
   ctx,
@@ -42,14 +44,17 @@ export const createHandleOutcomeDynamic = ({
     const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
 
     const name = `${ctx.moduleLabel}__handle_outcome_dynamic`;
-    const params = binaryen.createType([runtime.outcomeType, binaryen.i32, binaryen.i32]);
+    const params = binaryen.createType([
+      runtime.outcomeType,
+      binaryen.i32,
+      binaryen.i32,
+    ]);
     const locals: binaryen.Type[] = [
       runtime.effectRequestType, // requestLocal
       binaryen.i32, // opIndexLocal
       binaryen.i32, // payloadLenLocal
       binaryen.eqref, // payloadLocal
       msgpack.arrayWithCapacity.resultType, // arrayLocal
-      msgpack.mapNew.resultType, // mapLocal
     ];
     const outcomeLocal = 0;
     const bufPtrLocal = 1;
@@ -59,12 +64,11 @@ export const createHandleOutcomeDynamic = ({
     const payloadLenLocal = 5;
     const payloadLocal = 6;
     const arrayLocal = 7;
-    const mapLocal = 8;
     const fnCtx: FunctionContext = {
       bindings: new Map(),
       tempLocals: new Map(),
       locals,
-      nextLocalIndex: 9,
+      nextLocalIndex: 8,
       returnTypeId: ctx.program.primitives.void,
       effectful: false,
     };
@@ -78,7 +82,10 @@ export const createHandleOutcomeDynamic = ({
     const boxTypeI64 = getOutcomeValueBoxType({ valueType: binaryen.i64, ctx });
     const boxTypeF32 = getOutcomeValueBoxType({ valueType: binaryen.f32, ctx });
     const boxTypeF64 = getOutcomeValueBoxType({ valueType: binaryen.f64, ctx });
-    const boxTypeMsgPack = getOutcomeValueBoxType({ valueType: msgPackType, ctx });
+    const boxTypeMsgPack = getOutcomeValueBoxType({
+      valueType: msgPackType,
+      ctx,
+    });
     const isFixedBox = ({
       valueType,
       typeId,
@@ -107,7 +114,7 @@ export const createHandleOutcomeDynamic = ({
         refTest(
           ctx.mod,
           ctx.mod.local.get(payloadLocal, binaryen.eqref),
-          boxType
+          boxType,
         ),
         ctx.mod.i32.eq(
           structGetFieldValue({
@@ -117,15 +124,17 @@ export const createHandleOutcomeDynamic = ({
             exprRef: refCast(
               ctx.mod,
               ctx.mod.local.get(payloadLocal, binaryen.eqref),
-              boxType
+              boxType,
             ),
           }),
-          ctx.mod.i32.const(markerValue)
+          ctx.mod.i32.const(markerValue),
         ),
-        ctx.mod.i32.const(0)
+        ctx.mod.i32.const(0),
       );
 
-    const encodeToBuffer = (value: binaryen.ExpressionRef): binaryen.ExpressionRef =>
+    const encodeToBuffer = (
+      value: binaryen.ExpressionRef,
+    ): binaryen.ExpressionRef =>
       ctx.mod.block(null, [
         ctx.mod.local.set(
           payloadLenLocal,
@@ -136,8 +145,8 @@ export const createHandleOutcomeDynamic = ({
               ctx.mod.local.get(bufPtrLocal, binaryen.i32),
               ctx.mod.local.get(bufLenLocal, binaryen.i32),
             ],
-            binaryen.i32
-          )
+            binaryen.i32,
+          ),
         ),
       ]);
 
@@ -147,20 +156,24 @@ export const createHandleOutcomeDynamic = ({
           status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.value),
           cont: ctx.mod.ref.null(binaryen.anyref),
           payloadLen: ctx.mod.local.get(payloadLenLocal, binaryen.i32),
-        })
+        }),
       );
 
     const valueOps: binaryen.ExpressionRef[] = [
       ctx.mod.local.set(
         payloadLocal,
-        runtime.outcomePayload(ctx.mod.local.get(outcomeLocal, runtime.outcomeType))
+        runtime.outcomePayload(
+          ctx.mod.local.get(outcomeLocal, runtime.outcomeType),
+        ),
       ),
       ctx.mod.if(
         ctx.mod.ref.is_null(ctx.mod.local.get(payloadLocal, binaryen.eqref)),
         ctx.mod.block(null, [
-          encodeToBuffer(ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType)),
+          encodeToBuffer(
+            ctx.mod.call(msgpack.makeNull.wasmName, [], msgPackType),
+          ),
           finishValue(),
-        ])
+        ]),
       ),
       ctx.mod.if(
         matchesMarkedBox({
@@ -180,17 +193,17 @@ export const createHandleOutcomeDynamic = ({
                   ctx,
                 }),
               ],
-              msgPackType
-            )
+              msgPackType,
+            ),
           ),
           finishValue(),
-        ])
+        ]),
       ),
       ctx.mod.if(
         refTest(
           ctx.mod,
           ctx.mod.local.get(payloadLocal, binaryen.eqref),
-          boxTypeI32
+          boxTypeI32,
         ),
         ctx.mod.block(null, [
           encodeToBuffer(
@@ -203,17 +216,17 @@ export const createHandleOutcomeDynamic = ({
                   ctx,
                 }),
               ],
-              msgPackType
-            )
+              msgPackType,
+            ),
           ),
           finishValue(),
-        ])
+        ]),
       ),
       ctx.mod.if(
         refTest(
           ctx.mod,
           ctx.mod.local.get(payloadLocal, binaryen.eqref),
-          boxTypeI64
+          boxTypeI64,
         ),
         ctx.mod.block(null, [
           encodeToBuffer(
@@ -226,17 +239,17 @@ export const createHandleOutcomeDynamic = ({
                   ctx,
                 }),
               ],
-              msgPackType
-            )
+              msgPackType,
+            ),
           ),
           finishValue(),
-        ])
+        ]),
       ),
       ctx.mod.if(
         refTest(
           ctx.mod,
           ctx.mod.local.get(payloadLocal, binaryen.eqref),
-          boxTypeF32
+          boxTypeF32,
         ),
         ctx.mod.block(null, [
           encodeToBuffer(
@@ -249,17 +262,17 @@ export const createHandleOutcomeDynamic = ({
                   ctx,
                 }),
               ],
-              msgPackType
-            )
+              msgPackType,
+            ),
           ),
           finishValue(),
-        ])
+        ]),
       ),
       ctx.mod.if(
         refTest(
           ctx.mod,
           ctx.mod.local.get(payloadLocal, binaryen.eqref),
-          boxTypeF64
+          boxTypeF64,
         ),
         ctx.mod.block(null, [
           encodeToBuffer(
@@ -272,17 +285,17 @@ export const createHandleOutcomeDynamic = ({
                   ctx,
                 }),
               ],
-              msgPackType
-            )
+              msgPackType,
+            ),
           ),
           finishValue(),
-        ])
+        ]),
       ),
       ctx.mod.if(
         refTest(
           ctx.mod,
           ctx.mod.local.get(payloadLocal, binaryen.eqref),
-          boxTypeMsgPack
+          boxTypeMsgPack,
         ),
         ctx.mod.block(null, [
           encodeToBuffer(
@@ -293,18 +306,18 @@ export const createHandleOutcomeDynamic = ({
                 valueType: msgPackType,
                 ctx,
               }),
-              msgPackType
-            )
+              msgPackType,
+            ),
           ),
           finishValue(),
-        ])
+        ]),
       ),
       ...getOutcomeValueBoxes(ctx)
         .filter(
           (box) =>
             typeof box.typeId === "number" &&
             box.valueType !== binaryen.none &&
-            !isFixedBox(box)
+            !isFixedBox(box),
         )
         .flatMap((box) => {
           const markerValue = box.markerValue;
@@ -317,7 +330,8 @@ export const createHandleOutcomeDynamic = ({
             markerValue,
           });
           const serializerFormat =
-            box.serializer?.formatId ?? findSerializerFormatForType(box.typeId!, ctx);
+            box.serializer?.formatId ??
+            findSerializerFormatForType(box.typeId!, ctx);
           if (serializerFormat) {
             if (serializerFormat !== "msgpack") {
               return [];
@@ -330,16 +344,19 @@ export const createHandleOutcomeDynamic = ({
                     refCast(
                       ctx.mod,
                       unboxOutcomeValue({
-                        payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                        payload: ctx.mod.local.get(
+                          payloadLocal,
+                          binaryen.eqref,
+                        ),
                         valueType: box.valueType,
                         typeId: box.typeId,
                         ctx,
                       }),
-                      msgPackType
-                    )
+                      msgPackType,
+                    ),
                   ),
                   finishValue(),
-                ])
+                ]),
               ),
             ];
           }
@@ -356,7 +373,10 @@ export const createHandleOutcomeDynamic = ({
                   encodeToBuffer(
                     packBoundaryValueAsMsgPack({
                       value: unboxOutcomeValue({
-                        payload: ctx.mod.local.get(payloadLocal, binaryen.eqref),
+                        payload: ctx.mod.local.get(
+                          payloadLocal,
+                          binaryen.eqref,
+                        ),
                         valueType: box.valueType,
                         typeId: box.typeId,
                         ctx,
@@ -364,10 +384,10 @@ export const createHandleOutcomeDynamic = ({
                       schema,
                       ctx,
                       fnCtx,
-                    })
+                    }),
                   ),
                   finishValue(),
-                ])
+                ]),
               ),
             ];
           } catch (error) {
@@ -383,15 +403,15 @@ export const createHandleOutcomeDynamic = ({
     const branches = signatures.map((sig) => {
       const matches = ctx.mod.i32.eq(
         ctx.mod.local.get(opIndexLocal, binaryen.i32),
-        ctx.mod.i32.const(sig.opIndex)
+        ctx.mod.i32.const(sig.opIndex),
       );
       const msgpackMap = buildEffectRequestMsgPack({
         sig,
-        request: () => ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+        request: () =>
+          ctx.mod.local.get(requestLocal, runtime.effectRequestType),
         msgPackType,
         msgpack,
         arrayLocal,
-        mapLocal,
         ctx,
         runtime,
         fnCtx,
@@ -404,7 +424,7 @@ export const createHandleOutcomeDynamic = ({
             status: ctx.mod.i32.const(EFFECT_RESULT_STATUS.effect),
             cont: ctx.mod.local.get(requestLocal, runtime.effectRequestType),
             payloadLen: ctx.mod.local.get(payloadLenLocal, binaryen.i32),
-          })
+          }),
         ),
       ]);
 
@@ -416,15 +436,17 @@ export const createHandleOutcomeDynamic = ({
         requestLocal,
         refCast(
           ctx.mod,
-          runtime.outcomePayload(ctx.mod.local.get(outcomeLocal, runtime.outcomeType)),
-          runtime.effectRequestType
-        )
+          runtime.outcomePayload(
+            ctx.mod.local.get(outcomeLocal, runtime.outcomeType),
+          ),
+          runtime.effectRequestType,
+        ),
       ),
       ctx.mod.local.set(
         opIndexLocal,
         runtime.requestOpIndex(
-          ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-        )
+          ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+        ),
       ),
       ...branches,
       ctx.mod.unreachable(),
@@ -438,13 +460,15 @@ export const createHandleOutcomeDynamic = ({
       ctx.mod.block(null, [
         ctx.mod.if(
           ctx.mod.i32.eq(
-            runtime.outcomeTag(ctx.mod.local.get(outcomeLocal, runtime.outcomeType)),
-            ctx.mod.i32.const(EFFECT_RESULT_STATUS.value)
+            runtime.outcomeTag(
+              ctx.mod.local.get(outcomeLocal, runtime.outcomeType),
+            ),
+            ctx.mod.i32.const(EFFECT_RESULT_STATUS.value),
           ),
           ctx.mod.block(null, valueOps),
-          ctx.mod.block(null, effectOps)
+          ctx.mod.block(null, effectOps),
         ),
-      ])
+      ]),
     );
 
     ctx.mod.addFunctionExport(name, exportName);

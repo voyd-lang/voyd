@@ -1,14 +1,20 @@
 import binaryen from "binaryen";
-import { refCast, structGetFieldValue } from "@voyd-lang/lib/binaryen-gc/index.js";
-import { emitStringLiteral } from "../../expressions/primitives.js";
+import {
+  refCast,
+  structGetFieldValue,
+} from "@voyd-lang/lib/binaryen-gc/index.js";
 import type { CodegenContext } from "../../context.js";
 import type { FunctionContext } from "../../context.js";
 import { packBoundaryValueAsMsgPack } from "../../boundary/msgpack-codec.js";
 import type { EffectRuntime } from "../runtime-abi.js";
-import { EFFECT_REQUEST_MSGPACK_KEYS } from "./constants.js";
 import { ensureMsgPackFunctions } from "./msgpack.js";
 import { packMsgPackValueForType } from "./msgpack-values.js";
 import type { EffectOpSignature } from "./types.js";
+import {
+  makeSelectedEffectRequest,
+  makeSelectedTypedPayload,
+} from "../../host-transport/frame-codec.js";
+import type { SelectedHostTransportProvider } from "../../host-transport/selected-provider.js";
 
 const buildArgsArray = ({
   sig,
@@ -34,14 +40,16 @@ const buildArgsArray = ({
   const initArray = ctx.mod.call(
     msgpack.arrayWithCapacity.wasmName,
     [ctx.mod.i32.const(argsCount)],
-    arrayType
+    arrayType,
   );
   const argsRef = runtime.requestArgs(request());
   const typedArgs = sig.argsType
     ? refCast(ctx.mod, argsRef, sig.argsType)
     : ctx.mod.ref.null(binaryen.eqref);
 
-  const ops: binaryen.ExpressionRef[] = [ctx.mod.local.set(arrayLocal, initArray)];
+  const ops: binaryen.ExpressionRef[] = [
+    ctx.mod.local.set(arrayLocal, initArray),
+  ];
   sig.paramTypeIds.forEach((paramTypeId, index) => {
     const argValue = structGetFieldValue({
       mod: ctx.mod,
@@ -51,156 +59,47 @@ const buildArgsArray = ({
     });
     const boundarySchema = sig.externalBoundary?.params[index];
     const msgpackValue = boundarySchema
-      ? packBoundaryValueAsMsgPack({ value: argValue, schema: boundarySchema, ctx, fnCtx })
+      ? packBoundaryValueAsMsgPack({
+          value: argValue,
+          schema: boundarySchema,
+          ctx,
+          fnCtx,
+        })
       : packMsgPackValueForType({
-      value: argValue,
-      typeId: paramTypeId,
-      msgPackType,
-      msgpack,
-      ctx,
-      label: `${sig.label} arg${index}`,
-      serializerOverride: sig.paramSerializerOverrides?.[index],
-      onUnsupported: "trap",
+          value: argValue,
+          typeId: paramTypeId,
+          msgPackType,
+          msgpack,
+          ctx,
+          label: `${sig.label} arg${index}`,
+          serializerOverride: sig.paramSerializerOverrides?.[index],
+          onUnsupported: "trap",
         });
     ops.push(
       ctx.mod.local.set(
         arrayLocal,
         ctx.mod.call(
           msgpack.arrayPush.wasmName,
-          [ctx.mod.local.get(arrayLocal, arrayType), msgpackValue],
-          arrayType
-        )
-      )
+          [
+            ctx.mod.local.get(arrayLocal, arrayType),
+            makeSelectedTypedPayload({
+              fingerprint: sig.paramFingerprints[index]!,
+              value: msgpackValue,
+              ctx,
+              fnCtx,
+              provider: msgpack as SelectedHostTransportProvider,
+            }),
+          ],
+          arrayType,
+        ),
+      ),
     );
   });
 
   return ctx.mod.block(
     null,
     [...ops, ctx.mod.local.get(arrayLocal, arrayType)],
-    arrayType
-  );
-};
-
-const buildEffectRequestMap = ({
-  request,
-  argsArray,
-  msgPackType,
-  msgpack,
-  mapLocal,
-  ctx,
-  runtime,
-}: {
-  request: () => binaryen.ExpressionRef;
-  argsArray: binaryen.ExpressionRef;
-  msgPackType: binaryen.Type;
-  msgpack: ReturnType<typeof ensureMsgPackFunctions>;
-  mapLocal: number;
-  ctx: CodegenContext;
-  runtime: EffectRuntime;
-}): binaryen.ExpressionRef => {
-  const mapType = msgpack.mapNew.resultType;
-  const mapInit = ctx.mod.call(msgpack.mapNew.wasmName, [], mapType);
-  const effectId = runtime.requestEffectId(request());
-  const opId = runtime.requestOpId(request());
-  const opIndex = runtime.requestOpIndex(request());
-  const resumeKind = runtime.requestResumeKind(request());
-  const handle = runtime.requestHandle(request());
-  const keys = {
-    effectId: emitStringLiteral(EFFECT_REQUEST_MSGPACK_KEYS.effectId, ctx),
-    opId: emitStringLiteral(EFFECT_REQUEST_MSGPACK_KEYS.opId, ctx),
-    opIndex: emitStringLiteral(EFFECT_REQUEST_MSGPACK_KEYS.opIndex, ctx),
-    resumeKind: emitStringLiteral(EFFECT_REQUEST_MSGPACK_KEYS.resumeKind, ctx),
-    handle: emitStringLiteral(EFFECT_REQUEST_MSGPACK_KEYS.handle, ctx),
-    args: emitStringLiteral(EFFECT_REQUEST_MSGPACK_KEYS.args, ctx),
-  };
-
-  const ops: binaryen.ExpressionRef[] = [
-    ctx.mod.local.set(mapLocal, mapInit),
-    ctx.mod.local.set(
-      mapLocal,
-      ctx.mod.call(
-        msgpack.mapSet.wasmName,
-        [
-          ctx.mod.local.get(mapLocal, mapType),
-          keys.effectId,
-          ctx.mod.call(msgpack.makeI64.wasmName, [effectId], msgPackType),
-        ],
-        mapType
-      )
-    ),
-    ctx.mod.local.set(
-      mapLocal,
-      ctx.mod.call(
-        msgpack.mapSet.wasmName,
-        [
-          ctx.mod.local.get(mapLocal, mapType),
-          keys.opId,
-          ctx.mod.call(msgpack.makeI32.wasmName, [opId], msgPackType),
-        ],
-        mapType
-      )
-    ),
-    ctx.mod.local.set(
-      mapLocal,
-      ctx.mod.call(
-        msgpack.mapSet.wasmName,
-        [
-          ctx.mod.local.get(mapLocal, mapType),
-          keys.opIndex,
-          ctx.mod.call(msgpack.makeI32.wasmName, [opIndex], msgPackType),
-        ],
-        mapType
-      )
-    ),
-    ctx.mod.local.set(
-      mapLocal,
-      ctx.mod.call(
-        msgpack.mapSet.wasmName,
-        [
-          ctx.mod.local.get(mapLocal, mapType),
-          keys.resumeKind,
-          ctx.mod.call(msgpack.makeI32.wasmName, [resumeKind], msgPackType),
-        ],
-        mapType
-      )
-    ),
-    ctx.mod.local.set(
-      mapLocal,
-      ctx.mod.call(
-        msgpack.mapSet.wasmName,
-        [
-          ctx.mod.local.get(mapLocal, mapType),
-          keys.handle,
-          ctx.mod.call(msgpack.makeI32.wasmName, [handle], msgPackType),
-        ],
-        mapType
-      )
-    ),
-    ctx.mod.local.set(
-      mapLocal,
-      ctx.mod.call(
-        msgpack.mapSet.wasmName,
-        [
-          ctx.mod.local.get(mapLocal, mapType),
-          keys.args,
-          ctx.mod.call(msgpack.makeArray.wasmName, [argsArray], msgPackType),
-        ],
-        mapType
-      )
-    ),
-  ];
-
-  return ctx.mod.block(
-    null,
-    [
-      ...ops,
-      ctx.mod.call(
-        msgpack.makeMap.wasmName,
-        [ctx.mod.local.get(mapLocal, mapType)],
-        msgPackType
-      ),
-    ],
-    msgPackType
+    arrayType,
   );
 };
 
@@ -210,7 +109,6 @@ export const buildEffectRequestMsgPack = ({
   msgPackType,
   msgpack,
   arrayLocal,
-  mapLocal,
   ctx,
   runtime,
   fnCtx,
@@ -220,7 +118,6 @@ export const buildEffectRequestMsgPack = ({
   msgPackType: binaryen.Type;
   msgpack: ReturnType<typeof ensureMsgPackFunctions>;
   arrayLocal: number;
-  mapLocal: number;
   ctx: CodegenContext;
   runtime: EffectRuntime;
   fnCtx: FunctionContext;
@@ -235,13 +132,20 @@ export const buildEffectRequestMsgPack = ({
     runtime,
     fnCtx,
   });
-  return buildEffectRequestMap({
-    request,
-    argsArray,
-    msgPackType,
-    msgpack,
-    mapLocal,
+  return makeSelectedEffectRequest({
+    requestId: sig.opIndex,
+    effectId: sig.effectIdentity,
+    operationId: sig.opId,
+    signatureHash: sig.signatureHash,
+    resumeKind: sig.resumeKind,
+    typedArgs: ctx.mod.call(
+      msgpack.makeArray.wasmName,
+      [argsArray],
+      msgPackType,
+    ),
+    resultFingerprint: sig.resultFingerprint,
     ctx,
-    runtime,
+    fnCtx,
+    provider: msgpack as SelectedHostTransportProvider,
   });
 };

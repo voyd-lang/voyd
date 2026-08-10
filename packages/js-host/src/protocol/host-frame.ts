@@ -33,7 +33,10 @@ export type HostFrame =
       requestId: number;
       effectId: string;
       operationId: number;
+      signatureHash: number;
+      resumeKind: number;
       args: readonly TypedHostPayload[];
+      resultFingerprint: DtoFingerprint;
     }
   | {
       kind: "effect-outcome";

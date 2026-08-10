@@ -7,14 +7,17 @@ import type { BoundarySchema } from "../../boundary/schema.js";
 export type EffectOpSignature = {
   opIndex: number;
   effectId: bigint;
+  effectIdentity: string;
   opId: number;
   resumeKind: number;
   signatureHash: number;
   params: readonly binaryen.Type[];
   paramTypeIds: readonly TypeId[];
+  paramFingerprints: readonly string[];
   paramSerializerOverrides?: readonly (SerializerMetadata | undefined)[];
   returnType: binaryen.Type;
   returnTypeId: TypeId;
+  resultFingerprint: string;
   returnSerializerOverride?: SerializerMetadata;
   argsType?: binaryen.Type;
   label: string;

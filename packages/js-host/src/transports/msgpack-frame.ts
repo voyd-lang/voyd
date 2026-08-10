@@ -46,7 +46,10 @@ export const toMsgPackHostFrame = (frame: HostFrame): unknown[] => {
         frame.requestId,
         frame.effectId,
         frame.operationId,
+        frame.signatureHash,
+        frame.resumeKind,
         frame.args.map(toTypedPayload),
+        frame.resultFingerprint,
       ];
     case "effect-outcome":
       return [
@@ -163,7 +166,10 @@ export const fromMsgPackHostFrame = (value: unknown): HostFrame => {
         requestId: numberValue(frame[2], "effect request id"),
         effectId: stringValue(frame[3], "effect id"),
         operationId: numberValue(frame[4], "effect operation id"),
-        args: typedPayloads(frame[5], "effect arguments"),
+        signatureHash: numberValue(frame[5], "effect signature hash"),
+        resumeKind: numberValue(frame[6], "effect resume kind"),
+        args: typedPayloads(frame[7], "effect arguments"),
+        resultFingerprint: stringValue(frame[8], "effect result fingerprint"),
       };
     case TAG.effectOutcome:
       return {

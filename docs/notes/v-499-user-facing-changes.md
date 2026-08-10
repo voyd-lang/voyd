@@ -33,6 +33,9 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
   export identity, normalized outcomes, and schema fingerprints.
 - Synchronous external-package calls use the same module transport frames and
   validate interface, function, argument, and result schema identities.
+- Effect requests and outcomes use framed transport with stable effect and
+  operation identity, signature hash, resume kind, and typed payload
+  fingerprints. This also covers asynchronous external-package calls.
 - Generated TypeScript adapter contracts represent `Bytes` as `Uint8Array`;
   generated WIT represents it as `list<u8>`.
 - OpenAPI shape rendering represents `Bytes` as a binary string.

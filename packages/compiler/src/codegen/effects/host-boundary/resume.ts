@@ -1,6 +1,14 @@
 import binaryen from "binaryen";
-import { callRef, refCast } from "@voyd-lang/lib/binaryen-gc/index.js";
-import { getFunctionRefType, getRequiredExprType, wasmTypeFor } from "../../types.js";
+import {
+  arrayGet,
+  callRef,
+  refCast,
+} from "@voyd-lang/lib/binaryen-gc/index.js";
+import {
+  getFunctionRefType,
+  getRequiredExprType,
+  wasmTypeFor,
+} from "../../types.js";
 import { boxOutcomeValue } from "../outcome-values.js";
 import type { CodegenContext, FunctionContext } from "../../context.js";
 import type { EffectRuntime } from "../runtime-abi.js";
@@ -12,11 +20,19 @@ import { hostBoundaryPayloadSupportForType } from "./payload-compatibility.js";
 import { stateFor } from "./state.js";
 import type { EffectOpSignature } from "./types.js";
 import type { ContinuationSite } from "../effect-lowering/types.js";
+import {
+  SELECTED_HOST_FRAME_TAG,
+  SELECTED_HOST_FRAME_VERSION,
+} from "../../host-transport/frame-codec.js";
 
-const RESUME_CONTINUATION_KEY = Symbol("voyd.effects.hostBoundary.resumeContinuation");
-const RESUME_EFFECTFUL_KEY = Symbol("voyd.effects.hostBoundary.resumeEffectful");
+const RESUME_CONTINUATION_KEY = Symbol(
+  "voyd.effects.hostBoundary.resumeContinuation",
+);
+const RESUME_EFFECTFUL_KEY = Symbol(
+  "voyd.effects.hostBoundary.resumeEffectful",
+);
 const RESUME_EFFECTFUL_RAW_KEY = Symbol(
-  "voyd.effects.hostBoundary.resumeEffectfulRaw"
+  "voyd.effects.hostBoundary.resumeEffectfulRaw",
 );
 const END_REQUEST_RAW_KEY = Symbol("voyd.effects.hostBoundary.endRequestRaw");
 
@@ -46,7 +62,7 @@ const ownerReturnTypeId = ({
       throw new Error("missing lambda owner for continuation site");
     }
     const lambdaType = ctx.program.types.getTypeDesc(
-      getRequiredExprType(site.owner.exprId, ctx)
+      getRequiredExprType(site.owner.exprId, ctx),
     );
     if (lambdaType.kind !== "function") {
       throw new Error("lambda continuation owner must have a function type");
@@ -89,6 +105,8 @@ export const createResumeContinuation = ({
   stateFor(ctx, RESUME_CONTINUATION_KEY, () => {
     const msgpack = ensureSelectedHostTransportProvider(ctx);
     const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+    const arrayType = msgpack.unpackArray.resultType;
+    const storageType = msgpack.arrayRawStorage.resultType;
 
     const name = `${ctx.moduleLabel}__resume_continuation`;
     const params = binaryen.createType([
@@ -100,6 +118,12 @@ export const createResumeContinuation = ({
       runtime.tailGuardType,
       runtime.continuationType,
       msgPackType,
+      arrayType,
+      storageType,
+      arrayType,
+      storageType,
+      arrayType,
+      storageType,
     ];
     const scratch: FunctionContext = {
       bindings: new Map(),
@@ -115,29 +139,62 @@ export const createResumeContinuation = ({
     const guardLocal = 3;
     const contLocal = 4;
     const decodedLocal = 5;
+    const frameArrayLocal = 6;
+    const frameStorageLocal = 7;
+    const outcomeArrayLocal = 8;
+    const outcomeStorageLocal = 9;
+    const typedPayloadArrayLocal = 10;
+    const typedPayloadStorageLocal = 11;
     const opIndexExpr = (): binaryen.ExpressionRef =>
       runtime.requestOpIndex(
-        ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+        ctx.mod.local.get(requestLocal, runtime.effectRequestType),
       );
 
     const guard = (): binaryen.ExpressionRef =>
       ctx.mod.local.get(guardLocal, runtime.tailGuardType);
+    const frameField = (index: number): binaryen.ExpressionRef =>
+      arrayGet(
+        ctx.mod,
+        ctx.mod.local.get(frameStorageLocal, storageType),
+        ctx.mod.i32.const(index),
+        msgPackType,
+        false,
+      );
+    const outcomeField = (index: number): binaryen.ExpressionRef =>
+      arrayGet(
+        ctx.mod,
+        ctx.mod.local.get(outcomeStorageLocal, storageType),
+        ctx.mod.i32.const(index),
+        msgPackType,
+        false,
+      );
+    const typedPayloadField = (index: number): binaryen.ExpressionRef =>
+      arrayGet(
+        ctx.mod,
+        ctx.mod.local.get(typedPayloadStorageLocal, storageType),
+        ctx.mod.i32.const(index),
+        msgPackType,
+        false,
+      );
     const guardInit = ctx.mod.if(
       ctx.mod.ref.is_null(guard()),
       ctx.mod.local.set(guardLocal, runtime.makeTailGuard()),
-      ctx.mod.nop()
+      ctx.mod.nop(),
     );
     const guardOps = [
       ctx.mod.if(
         ctx.mod.i32.and(
-          ctx.mod.i32.gt_u(runtime.tailGuardExpected(guard()), ctx.mod.i32.const(0)),
+          ctx.mod.i32.gt_u(
+            runtime.tailGuardExpected(guard()),
+            ctx.mod.i32.const(0),
+          ),
           ctx.mod.i32.ge_u(
             runtime.tailGuardObserved(guard()),
-            runtime.tailGuardExpected(guard())
-          )
+            runtime.tailGuardExpected(guard()),
+          ),
         ),
         ctx.mod.unreachable(),
-        ctx.mod.nop()
+        ctx.mod.nop(),
       ),
       runtime.bumpTailGuardObserved(guard()),
     ];
@@ -152,26 +209,26 @@ export const createResumeContinuation = ({
     const branches = signatures.map((sig) => {
       const matches = ctx.mod.i32.eq(
         opIndexExpr(),
-        ctx.mod.i32.const(sig.opIndex)
+        ctx.mod.i32.const(sig.opIndex),
       );
       const resumeValue =
         sig.returnType === binaryen.none
           ? ctx.mod.nop()
           : sig.externalBoundary
-          ? unpackBoundaryValueFromMsgPack({
-              value: ctx.mod.local.get(decodedLocal, msgPackType),
-              schema: sig.externalBoundary.result,
-              ctx,
-              fnCtx: scratch,
-            })
-          : unpackMsgPackValueForType({
-              value: ctx.mod.local.get(decodedLocal, msgPackType),
-              typeId: sig.returnTypeId,
-              msgpack,
-              ctx,
-              label: sig.label,
-              serializerOverride: sig.returnSerializerOverride,
-            });
+            ? unpackBoundaryValueFromMsgPack({
+                value: ctx.mod.local.get(decodedLocal, msgPackType),
+                schema: sig.externalBoundary.result,
+                ctx,
+                fnCtx: scratch,
+              })
+            : unpackMsgPackValueForType({
+                value: ctx.mod.local.get(decodedLocal, msgPackType),
+                typeId: sig.returnTypeId,
+                msgpack,
+                ctx,
+                label: sig.label,
+                serializerOverride: sig.returnSerializerOverride,
+              });
       const resumeBox =
         sig.returnType === binaryen.none
           ? ctx.mod.ref.null(binaryen.eqref)
@@ -188,7 +245,7 @@ export const createResumeContinuation = ({
         ctx.mod,
         refCast(ctx.mod, runtime.continuationFn(contRef()), fnRefType),
         operands as number[],
-        runtime.outcomeType
+        runtime.outcomeType,
       );
       return ctx.mod.if(matches, ctx.mod.return(call));
     });
@@ -201,11 +258,15 @@ export const createResumeContinuation = ({
       ctx.mod.block(null, [
         ctx.mod.local.set(
           guardLocal,
-          runtime.requestTailGuard(ctx.mod.local.get(requestLocal, runtime.effectRequestType))
+          runtime.requestTailGuard(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+          ),
         ),
         ctx.mod.local.set(
           contLocal,
-          runtime.requestContinuation(ctx.mod.local.get(requestLocal, runtime.effectRequestType))
+          runtime.requestContinuation(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+          ),
         ),
         guardInit,
         ...guardOps,
@@ -217,14 +278,109 @@ export const createResumeContinuation = ({
               ctx.mod.local.get(bufPtrLocal, binaryen.i32),
               ctx.mod.local.get(resumeLenLocal, binaryen.i32),
             ],
-            msgPackType
-          )
+            msgPackType,
+          ),
         ),
+        ctx.mod.local.set(
+          frameArrayLocal,
+          ctx.mod.call(
+            msgpack.unpackArray.wasmName,
+            [ctx.mod.local.get(decodedLocal, msgPackType)],
+            arrayType,
+          ),
+        ),
+        ctx.mod.local.set(
+          frameStorageLocal,
+          ctx.mod.call(
+            msgpack.arrayRawStorage.wasmName,
+            [ctx.mod.local.get(frameArrayLocal, arrayType)],
+            storageType,
+          ),
+        ),
+        ctx.mod.if(
+          ctx.mod.i32.or(
+            ctx.mod.i32.or(
+              ctx.mod.i32.ne(
+                ctx.mod.call(
+                  msgpack.unpackI32.wasmName,
+                  [frameField(0)],
+                  binaryen.i32,
+                ),
+                ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+              ),
+              ctx.mod.i32.ne(
+                ctx.mod.call(
+                  msgpack.unpackI32.wasmName,
+                  [frameField(1)],
+                  binaryen.i32,
+                ),
+                ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.effectOutcome),
+              ),
+            ),
+            ctx.mod.i32.ne(
+              ctx.mod.call(
+                msgpack.unpackI32.wasmName,
+                [frameField(2)],
+                binaryen.i32,
+              ),
+              opIndexExpr(),
+            ),
+          ),
+          ctx.mod.unreachable(),
+          ctx.mod.nop(),
+        ),
+        ctx.mod.local.set(
+          outcomeArrayLocal,
+          ctx.mod.call(
+            msgpack.unpackArray.wasmName,
+            [frameField(3)],
+            arrayType,
+          ),
+        ),
+        ctx.mod.local.set(
+          outcomeStorageLocal,
+          ctx.mod.call(
+            msgpack.arrayRawStorage.wasmName,
+            [ctx.mod.local.get(outcomeArrayLocal, arrayType)],
+            storageType,
+          ),
+        ),
+        ctx.mod.if(
+          ctx.mod.i32.ne(
+            ctx.mod.call(
+              msgpack.unpackI32.wasmName,
+              [outcomeField(0)],
+              binaryen.i32,
+            ),
+            ctx.mod.i32.const(0),
+          ),
+          ctx.mod.unreachable(),
+          ctx.mod.nop(),
+        ),
+        ctx.mod.local.set(
+          typedPayloadArrayLocal,
+          ctx.mod.call(
+            msgpack.unpackArray.wasmName,
+            [outcomeField(1)],
+            arrayType,
+          ),
+        ),
+        ctx.mod.local.set(
+          typedPayloadStorageLocal,
+          ctx.mod.call(
+            msgpack.arrayRawStorage.wasmName,
+            [ctx.mod.local.get(typedPayloadArrayLocal, arrayType)],
+            storageType,
+          ),
+        ),
+        ctx.mod.local.set(decodedLocal, typedPayloadField(1)),
         ...branches,
         ctx.mod.return(
-          runtime.makeOutcomeEffect(ctx.mod.local.get(requestLocal, runtime.effectRequestType))
+          runtime.makeOutcomeEffect(
+            ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+          ),
         ),
-      ])
+      ]),
     );
     ctx.mod.addFunctionExport(name, exportName);
     return name;
@@ -263,7 +419,7 @@ export const createResumeEffectful = ({
         ctx.mod.local.get(bufPtrParam, binaryen.i32),
         ctx.mod.local.get(resumeLenParam, binaryen.i32),
       ],
-      runtime.outcomeType
+      runtime.outcomeType,
     );
 
     ctx.mod.addFunction(
@@ -277,13 +433,13 @@ export const createResumeEffectful = ({
           ctx.mod.call(
             ensureDispatcher(ctx),
             [resumedOutcome],
-            runtime.outcomeType
+            runtime.outcomeType,
           ),
           ctx.mod.local.get(bufPtrParam, binaryen.i32),
           ctx.mod.local.get(bufCapParam, binaryen.i32),
         ],
-        runtime.effectResultType
-      )
+        runtime.effectResultType,
+      ),
     );
     ctx.mod.addFunctionExport(name, exportName);
     return name;
@@ -314,7 +470,7 @@ export const createResumeEffectfulRaw = ({
         ctx.mod.local.get(1, binaryen.i32),
         ctx.mod.local.get(2, binaryen.i32),
       ],
-      runtime.outcomeType
+      runtime.outcomeType,
     );
 
     ctx.mod.addFunction(
@@ -325,8 +481,8 @@ export const createResumeEffectfulRaw = ({
       ctx.mod.call(
         ensureDispatcher(ctx),
         [resumedOutcome],
-        runtime.outcomeType
-      )
+        runtime.outcomeType,
+      ),
     );
     ctx.mod.addFunctionExport(name, exportName);
     return name;
@@ -346,6 +502,8 @@ export const createEndRequestRaw = ({
   stateFor(ctx, END_REQUEST_RAW_KEY, () => {
     const msgpack = ensureSelectedHostTransportProvider(ctx);
     const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
+    const arrayType = msgpack.unpackArray.resultType;
+    const storageType = msgpack.arrayRawStorage.resultType;
     const specializedSites = [...ctx.effectsState.contSiteByKey.values()];
     const specializedSiteIds = new Set(
       specializedSites.map((site) => site.siteId),
@@ -358,8 +516,8 @@ export const createEndRequestRaw = ({
       ...ctx.effectLowering.sites.filter(
         (site) => !specializedSiteIds.has(site.siteId),
       ),
-    ]
-      .reduce((sites, variant) => {
+    ].reduce(
+      (sites, variant) => {
         if (sites.some((site) => site.siteOrder === variant.siteOrder)) {
           return sites;
         }
@@ -375,11 +533,13 @@ export const createEndRequestRaw = ({
             }),
           },
         ];
-      }, [] as Array<{
+      },
+      [] as Array<{
         siteOrder: number;
         typeId: number;
         support: ReturnType<typeof hostBoundaryPayloadSupportForType>;
-      }>);
+      }>,
+    );
 
     const name = `${ctx.moduleLabel}__end_request_raw`;
     const params = binaryen.createType([
@@ -387,7 +547,15 @@ export const createEndRequestRaw = ({
       binaryen.i32,
       binaryen.i32,
     ]);
-    const locals: binaryen.Type[] = [msgPackType];
+    const locals: binaryen.Type[] = [
+      msgPackType,
+      arrayType,
+      storageType,
+      arrayType,
+      storageType,
+      arrayType,
+      storageType,
+    ];
     const scratch: FunctionContext = {
       bindings: new Map(),
       tempLocals: new Map(),
@@ -400,24 +568,54 @@ export const createEndRequestRaw = ({
     const bufPtrLocal = 1;
     const resumeLenLocal = 2;
     const decodedLocal = 3;
+    const frameArrayLocal = 4;
+    const frameStorageLocal = 5;
+    const outcomeArrayLocal = 6;
+    const outcomeStorageLocal = 7;
+    const typedPayloadArrayLocal = 8;
+    const typedPayloadStorageLocal = 9;
     const opIndexExpr = (): binaryen.ExpressionRef =>
       runtime.requestOpIndex(
-        ctx.mod.local.get(requestLocal, runtime.effectRequestType)
+        ctx.mod.local.get(requestLocal, runtime.effectRequestType),
       );
     const continuationSiteExpr = (): binaryen.ExpressionRef =>
       runtime.continuationSite(
         runtime.requestContinuation(
-          ctx.mod.local.get(requestLocal, runtime.effectRequestType)
-        )
+          ctx.mod.local.get(requestLocal, runtime.effectRequestType),
+        ),
       );
 
     const decodedValue = (): binaryen.ExpressionRef =>
       ctx.mod.local.get(decodedLocal, msgPackType);
+    const frameField = (index: number): binaryen.ExpressionRef =>
+      arrayGet(
+        ctx.mod,
+        ctx.mod.local.get(frameStorageLocal, storageType),
+        ctx.mod.i32.const(index),
+        msgPackType,
+        false,
+      );
+    const outcomeField = (index: number): binaryen.ExpressionRef =>
+      arrayGet(
+        ctx.mod,
+        ctx.mod.local.get(outcomeStorageLocal, storageType),
+        ctx.mod.i32.const(index),
+        msgPackType,
+        false,
+      );
+    const typedPayloadField = (index: number): binaryen.ExpressionRef =>
+      arrayGet(
+        ctx.mod,
+        ctx.mod.local.get(typedPayloadStorageLocal, storageType),
+        ctx.mod.i32.const(index),
+        msgPackType,
+        false,
+      );
 
     const siteBranches = endSites.map((siteInfo) => {
       const matches = ctx.mod.i32.eq(
         continuationSiteExpr(),
-        ctx.mod.i32.const(siteInfo.siteOrder)
+        ctx.mod.i32.const(siteInfo.siteOrder),
       );
       if (!siteInfo.support.supported) {
         return ctx.mod.if(matches, ctx.mod.unreachable());
@@ -440,13 +638,16 @@ export const createEndRequestRaw = ({
               ctx,
               fnCtx: scratch,
             });
-      return ctx.mod.if(matches, ctx.mod.return(runtime.makeOutcomeValue(payload)));
+      return ctx.mod.if(
+        matches,
+        ctx.mod.return(runtime.makeOutcomeValue(payload)),
+      );
     });
 
     const signatureBranches = signatures.map((sig) => {
       const matches = ctx.mod.i32.eq(
         opIndexExpr(),
-        ctx.mod.i32.const(sig.opIndex)
+        ctx.mod.i32.const(sig.opIndex),
       );
       const payload =
         sig.returnType === binaryen.none
@@ -475,7 +676,7 @@ export const createEndRequestRaw = ({
             });
       return ctx.mod.if(
         matches,
-        ctx.mod.return(runtime.makeOutcomeValue(payload))
+        ctx.mod.return(runtime.makeOutcomeValue(payload)),
       );
     });
 
@@ -493,13 +694,106 @@ export const createEndRequestRaw = ({
               ctx.mod.local.get(bufPtrLocal, binaryen.i32),
               ctx.mod.local.get(resumeLenLocal, binaryen.i32),
             ],
-            msgPackType
-          )
+            msgPackType,
+          ),
         ),
+        ctx.mod.local.set(
+          frameArrayLocal,
+          ctx.mod.call(
+            msgpack.unpackArray.wasmName,
+            [ctx.mod.local.get(decodedLocal, msgPackType)],
+            arrayType,
+          ),
+        ),
+        ctx.mod.local.set(
+          frameStorageLocal,
+          ctx.mod.call(
+            msgpack.arrayRawStorage.wasmName,
+            [ctx.mod.local.get(frameArrayLocal, arrayType)],
+            storageType,
+          ),
+        ),
+        ctx.mod.if(
+          ctx.mod.i32.or(
+            ctx.mod.i32.or(
+              ctx.mod.i32.ne(
+                ctx.mod.call(
+                  msgpack.unpackI32.wasmName,
+                  [frameField(0)],
+                  binaryen.i32,
+                ),
+                ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+              ),
+              ctx.mod.i32.ne(
+                ctx.mod.call(
+                  msgpack.unpackI32.wasmName,
+                  [frameField(1)],
+                  binaryen.i32,
+                ),
+                ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.effectOutcome),
+              ),
+            ),
+            ctx.mod.i32.ne(
+              ctx.mod.call(
+                msgpack.unpackI32.wasmName,
+                [frameField(2)],
+                binaryen.i32,
+              ),
+              opIndexExpr(),
+            ),
+          ),
+          ctx.mod.unreachable(),
+          ctx.mod.nop(),
+        ),
+        ctx.mod.local.set(
+          outcomeArrayLocal,
+          ctx.mod.call(
+            msgpack.unpackArray.wasmName,
+            [frameField(3)],
+            arrayType,
+          ),
+        ),
+        ctx.mod.local.set(
+          outcomeStorageLocal,
+          ctx.mod.call(
+            msgpack.arrayRawStorage.wasmName,
+            [ctx.mod.local.get(outcomeArrayLocal, arrayType)],
+            storageType,
+          ),
+        ),
+        ctx.mod.if(
+          ctx.mod.i32.ne(
+            ctx.mod.call(
+              msgpack.unpackI32.wasmName,
+              [outcomeField(0)],
+              binaryen.i32,
+            ),
+            ctx.mod.i32.const(0),
+          ),
+          ctx.mod.unreachable(),
+          ctx.mod.nop(),
+        ),
+        ctx.mod.local.set(
+          typedPayloadArrayLocal,
+          ctx.mod.call(
+            msgpack.unpackArray.wasmName,
+            [outcomeField(1)],
+            arrayType,
+          ),
+        ),
+        ctx.mod.local.set(
+          typedPayloadStorageLocal,
+          ctx.mod.call(
+            msgpack.arrayRawStorage.wasmName,
+            [ctx.mod.local.get(typedPayloadArrayLocal, arrayType)],
+            storageType,
+          ),
+        ),
+        ctx.mod.local.set(decodedLocal, typedPayloadField(1)),
         ...siteBranches,
         ...signatureBranches,
         ctx.mod.unreachable(),
-      ])
+      ]),
     );
     ctx.mod.addFunctionExport(name, exportName);
     return name;

@@ -8,10 +8,7 @@ import {
   resumeKindName,
   type EffectOpRequest,
 } from "../effect-op.js";
-import {
-  EFFECT_RESULT_STATUS,
-  RESUME_KIND,
-} from "./constants.js";
+import { EFFECT_RESULT_STATUS, RESUME_KIND } from "./constants.js";
 import {
   createEffectContinuation,
   isEffectContinuationCall,
@@ -131,11 +128,14 @@ export const continueEffectLoopStep = async <T = unknown>({
   bufferSize: number;
   shouldContinue?: () => boolean;
   registerResourceCleanup?: (cleanup: EffectResourceCleanup) => void;
-  annotateTrap?: (error: unknown, opts: {
-    effect?: VoydRuntimeEffectContext;
-    transition?: VoydRuntimeTransitionContext;
-    fallbackFunctionName?: string;
-  }) => Error;
+  annotateTrap?: (
+    error: unknown,
+    opts: {
+      effect?: VoydRuntimeEffectContext;
+      transition?: VoydRuntimeTransitionContext;
+      fallbackFunctionName?: string;
+    },
+  ) => Error;
   fallbackFunctionName?: string;
   transport: HostTransportAdapter;
 }): Promise<EffectLoopStepResult<T>> => {
@@ -176,22 +176,46 @@ export const continueEffectLoopStep = async <T = unknown>({
         status,
         payloadLength,
         bufferSize,
-      })
+      }),
     );
   }
-  const decoded = decodePayload({
-    memory: msgpackMemory,
-    ptr: bufferPtr,
-    length: payloadLength,
-    transport,
-  });
-
   if (status === EFFECT_RESULT_STATUS.value) {
-    return { kind: "value", value: decoded as T };
+    return {
+      kind: "value",
+      value: decodePayload({
+        memory: msgpackMemory,
+        ptr: bufferPtr,
+        length: payloadLength,
+        transport,
+      }) as T,
+    };
   }
 
   if (status === EFFECT_RESULT_STATUS.effect) {
-    const decodedEffect = decoded as EffectOpRequest;
+    const frame = transport.decodeFrame(
+      new Uint8Array(msgpackMemory.buffer, bufferPtr, payloadLength),
+    );
+    if (frame.kind !== "effect-request") {
+      throw new Error("effect boundary returned an incompatible host frame");
+    }
+    const framedOp = table.ops[frame.requestId];
+    if (
+      !framedOp ||
+      framedOp.effectId !== frame.effectId ||
+      framedOp.opId !== frame.operationId ||
+      framedOp.signatureHash !== frame.signatureHash >>> 0 ||
+      framedOp.resumeKind !== frame.resumeKind
+    ) {
+      throw new Error("effect request frame does not match the effect table");
+    }
+    const decodedEffect: EffectOpRequest = {
+      effectId: framedOp.effectIdHash.value,
+      opId: framedOp.opId,
+      opIndex: framedOp.opIndex,
+      resumeKind: framedOp.resumeKind,
+      handle: framedOp.opIndex,
+      args: frame.args.map((payload) => payload.value),
+    };
     const opEntry = resolveParsedEffectOp({
       table,
       request: decodedEffect,
@@ -199,13 +223,13 @@ export const continueEffectLoopStep = async <T = unknown>({
     const handler = handlersByOpIndex[opEntry.opIndex];
     if (!handler) {
       throw new Error(
-        `Unhandled effect ${opEntry.label} (${resumeKindName(opEntry.resumeKind)})`
+        `Unhandled effect ${opEntry.label} (${resumeKindName(opEntry.resumeKind)})`,
       );
     }
     const continuation = createEffectContinuation({ registerResourceCleanup });
     const handlerResult = await handler(
       continuation,
-      ...(decodedEffect.args ?? [])
+      ...(decodedEffect.args ?? []),
     );
     if (!shouldContinue()) {
       return { kind: "aborted" };
@@ -232,18 +256,30 @@ export const continueEffectLoopStep = async <T = unknown>({
       throw new Error(nonReturningHandlerMessage(opEntry.label));
     }
 
-    const encoded = transport.encode(handlerResult.value);
+    const encoded = transport.encodeFrame({
+      kind: "effect-outcome",
+      requestId: frame.requestId,
+      outcome: {
+        kind: "success",
+        value: {
+          fingerprint: frame.resultFingerprint,
+          value: handlerResult.value,
+        },
+      },
+    });
     if (encoded.length > bufferSize) {
       throw new Error("resume payload exceeds buffer size");
     }
-    new Uint8Array(msgpackMemory.buffer, bufferPtr, encoded.length).set(encoded);
+    new Uint8Array(msgpackMemory.buffer, bufferPtr, encoded.length).set(
+      encoded,
+    );
     let resumed: unknown;
     try {
       resumed = resumeEffectful(
         effectCont(result),
         bufferPtr,
         encoded.length,
-        bufferSize
+        bufferSize,
       );
     } catch (error) {
       throw withTrapContext({

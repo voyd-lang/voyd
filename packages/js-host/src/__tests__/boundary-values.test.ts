@@ -97,7 +97,10 @@ describe("host ABI v2 frames", () => {
         requestId: 1,
         effectId: "voyd.std.fs",
         operationId: 2,
+        signatureHash: 3,
+        resumeKind: 0,
         args: [value],
+        resultFingerprint: "sha256:result",
       },
       { kind: "effect-outcome", requestId: 1, outcome },
       {
