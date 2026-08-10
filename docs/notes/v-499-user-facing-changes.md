@@ -18,6 +18,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
   `ProgramCodegenView`. Shape reification, schema metadata, fingerprints, and
   generated traversal consume that canonical plan.
 - Wasm modules declare their host ABI, DTO schema ABI, and selected transport.
+  Host ABI v2 will replace the current unframed ABI when complete frame support
+  is enabled.
   The JavaScript host rejects missing or incompatible transport metadata before
   running user code.
 - The JavaScript SDK can register host transport adapters through

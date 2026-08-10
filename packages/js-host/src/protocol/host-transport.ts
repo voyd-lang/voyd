@@ -1,6 +1,6 @@
 import { msgPackHostTransport } from "../transports/msgpack.js";
 
-export const HOST_ABI_VERSION = 2;
+export const HOST_ABI_VERSION = 1;
 export const DTO_SCHEMA_ABI_VERSION = 1;
 
 export type HostTransportIdentity = {

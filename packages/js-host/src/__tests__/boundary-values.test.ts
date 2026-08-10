@@ -40,7 +40,7 @@ describe("host transport negotiation", () => {
     expect(
       resolveHostTransport({
         metadata: {
-          hostAbi: 2,
+          hostAbi: 1,
           dtoSchemaAbi: 1,
           transport: { id: "example.transport", version: 3 },
         },
@@ -56,16 +56,16 @@ describe("host transport negotiation", () => {
     expect(() =>
       resolveHostTransport({
         metadata: {
-          hostAbi: 1,
+          hostAbi: 2,
           dtoSchemaAbi: 1,
           transport: { id: "voyd.std.msgpack", version: 1 },
         },
       }),
-    ).toThrow("Unsupported Voyd host ABI 1");
+    ).toThrow("Unsupported Voyd host ABI 2");
     expect(() =>
       resolveHostTransport({
         metadata: {
-          hostAbi: 2,
+          hostAbi: 1,
           dtoSchemaAbi: 1,
           transport: { id: "voyd.std.msgpack", version: 2 },
         },
