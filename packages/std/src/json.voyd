@@ -827,6 +827,12 @@ pub fn encode<T>(value: T): () -> Result<String, JsonError>
     Ok<Unit>:
       writer.finish()
 
+/// Encodes a DTO-compatible value as an explicit JSON value tree.
+///
+/// Use this when an API needs to inspect or compose JSON before stringifying it.
+pub fn encode_value<T>(value: T): () -> Result<JsonValue, JsonError>
+  data_value_to_json(dto_value_to_data(value), "$")
+
 /// Parses and strictly decodes JSON into a closed boundary-compatible type.
 pub fn decode<T>(source: String): () -> Result<T, JsonDecodeError>
   decode<T>(source.as_slice())

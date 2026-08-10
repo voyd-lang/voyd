@@ -29,6 +29,9 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   overloads and `set_serialized`/`update_serialized` methods have been removed.
 - `std::host_dto::HostDto` has been removed. Host effects declare ordinary
   typed request and result records directly.
+- `std::json::encode_value<T>` produces an explicit `JsonValue` tree from the
+  shared DTO plan. Web responses and OpenAPI helpers no longer route typed JSON
+  through MessagePack.
 
 This record will be extended as the remaining obsolete boundary and VX APIs are
 removed.
