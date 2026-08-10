@@ -6,7 +6,11 @@ import {
   type VoydPackageAdapterInvocationContext,
 } from "@voyd-lang/package-adapter";
 import { decodeBoundaryArgs, encodeBoundaryArgs } from "../boundary-values.js";
-import type { EffectContinuation, EffectHandler, HostProtocolTable } from "./types.js";
+import type {
+  EffectContinuation,
+  EffectHandler,
+  HostProtocolTable,
+} from "./types.js";
 import type { HostTransportAdapter } from "./host-transport.js";
 
 export const EXTERNAL_IMPORT_MODULE = "voyd.external";
@@ -15,12 +19,43 @@ export const EXTERNAL_BUFFER_SIZE_IMPORT = "buffer_size";
 export const EXTERNAL_BUFFER_ERROR_IMPORT = "buffer_error";
 
 /** Internal schema emitted by the core-Wasm fallback compiler ABI. */
-export type VoydBoundarySchema =
-  | { kind: "bool" | "i32" | "i64" | "f32" | "f64" | "void" | "string" | "bytes"; typeId?: number }
-  | { kind: "array"; typeId?: number; aliases?: readonly number[]; elementTypeId?: number; element: VoydBoundarySchema }
-  | { kind: "record"; typeId?: number; aliases?: readonly number[]; name?: string; tag?: string; fields: readonly VoydBoundaryFieldSchema[] }
-  | { kind: "union"; typeId?: number; aliases?: readonly number[]; name?: string; variants: readonly VoydBoundaryVariantSchema[] }
-  | { kind: "ref"; typeId: number };
+export type VoydBoundarySchema = (
+  | {
+      kind:
+        | "bool"
+        | "i32"
+        | "i64"
+        | "f32"
+        | "f64"
+        | "void"
+        | "string"
+        | "bytes";
+      typeId?: number;
+    }
+  | {
+      kind: "array";
+      typeId?: number;
+      aliases?: readonly number[];
+      elementTypeId?: number;
+      element: VoydBoundarySchema;
+    }
+  | {
+      kind: "record";
+      typeId?: number;
+      aliases?: readonly number[];
+      name?: string;
+      tag?: string;
+      fields: readonly VoydBoundaryFieldSchema[];
+    }
+  | {
+      kind: "union";
+      typeId?: number;
+      aliases?: readonly number[];
+      name?: string;
+      variants: readonly VoydBoundaryVariantSchema[];
+    }
+  | { kind: "ref"; typeId: number }
+) & { fingerprint?: string };
 
 type VoydBoundaryFieldSchema = {
   name: string;
@@ -53,7 +88,9 @@ export type ParsedExternalRequirements = {
   functions: readonly ExternalFunctionRequirement[];
 };
 
-const INVOCATION_CONTEXT: VoydPackageAdapterInvocationContext = Object.freeze({});
+const INVOCATION_CONTEXT: VoydPackageAdapterInvocationContext = Object.freeze(
+  {},
+);
 
 export const parseExternalRequirements = (
   module: WebAssembly.Module,
@@ -94,9 +131,11 @@ export const buildExternalImportModule = ({
 
   const providers = buildProviderMap(
     adapters,
-    new Set(requirements.functions.map((requirement) =>
-      externalFunctionKey(requirement.interfaceId, requirement.functionName),
-    )),
+    new Set(
+      requirements.functions.map((requirement) =>
+        externalFunctionKey(requirement.interfaceId, requirement.functionName),
+      ),
+    ),
   );
   const imports: Record<string, CallableFunction | (() => number)> = {
     [EXTERNAL_BUFFER_SIZE_IMPORT]: () => bufferSize,
@@ -106,59 +145,66 @@ export const buildExternalImportModule = ({
       );
     }) as CallableFunction,
   };
-  requirements.functions.filter((requirement) => requirement.kind !== "async").forEach((requirement) => {
-    const key = externalFunctionKey(
-      requirement.interfaceId,
-      requirement.functionName,
-    );
-    const provider = providers.get(key);
-    if (!provider) {
-      throw new Error(
-        `Missing Voyd package adapter for external function ${key}`,
+  requirements.functions
+    .filter((requirement) => requirement.kind !== "async")
+    .forEach((requirement) => {
+      const key = externalFunctionKey(
+        requirement.interfaceId,
+        requirement.functionName,
       );
-    }
-    assertCompatibleContract({ requirement, provider });
-    imports[key] = (inPtr: number, inLen: number, outPtr: number, outCap: number) => {
-      const memory = requireMemory(getInstance());
-      const argsValue = transport.decode(
-        new Uint8Array(memory.buffer, inPtr, inLen),
-      );
-      if (!Array.isArray(argsValue)) {
-        throw externalCallError(key, "arguments payload was not an array");
-      }
-      const args = decodeBoundaryArgs({
-        exportName: `external function ${key}`,
-        schemas: requirement.params,
-        args: argsValue,
-      });
-      let result: unknown;
-      try {
-        result = provider.fn.call(INVOCATION_CONTEXT, ...args);
-      } catch (cause) {
-        throw externalCallError(key, "adapter threw", cause);
-      }
-      if (isPromiseLike(result)) {
-        throw externalCallError(
-          key,
-          "returned a Promise from a synchronous external function",
+      const provider = providers.get(key);
+      if (!provider) {
+        throw new Error(
+          `Missing Voyd package adapter for external function ${key}`,
         );
       }
-      const boundaryResult = encodeBoundaryArgs({
-        exportName: `external function ${key}`,
-        schemas: [requirement.result],
-        args: [result],
-      })[0];
-      const encoded = transport.encode(boundaryResult);
-      if (encoded.length > outCap) {
-        throw externalCallError(
-          key,
-          `result requires ${encoded.length} bytes but bufferSize is ${bufferSize}; increase createVoydHost({ bufferSize })`,
+      assertCompatibleContract({ requirement, provider });
+      imports[key] = (
+        inPtr: number,
+        inLen: number,
+        outPtr: number,
+        outCap: number,
+      ) => {
+        const memory = requireMemory(getInstance());
+        const argsValue = transport.decode(
+          new Uint8Array(memory.buffer, inPtr, inLen),
         );
-      }
-      new Uint8Array(memory.buffer, outPtr, encoded.length).set(encoded);
-      return encoded.length;
-    };
-  });
+        if (!Array.isArray(argsValue)) {
+          throw externalCallError(key, "arguments payload was not an array");
+        }
+        const args = decodeBoundaryArgs({
+          exportName: `external function ${key}`,
+          schemas: requirement.params,
+          args: argsValue,
+        });
+        let result: unknown;
+        try {
+          result = provider.fn.call(INVOCATION_CONTEXT, ...args);
+        } catch (cause) {
+          throw externalCallError(key, "adapter threw", cause);
+        }
+        if (isPromiseLike(result)) {
+          throw externalCallError(
+            key,
+            "returned a Promise from a synchronous external function",
+          );
+        }
+        const boundaryResult = encodeBoundaryArgs({
+          exportName: `external function ${key}`,
+          schemas: [requirement.result],
+          args: [result],
+        })[0];
+        const encoded = transport.encode(boundaryResult);
+        if (encoded.length > outCap) {
+          throw externalCallError(
+            key,
+            `result requires ${encoded.length} bytes but bufferSize is ${bufferSize}; increase createVoydHost({ bufferSize })`,
+          );
+        }
+        new Uint8Array(memory.buffer, outPtr, encoded.length).set(encoded);
+        return encoded.length;
+      };
+    });
   return { [EXTERNAL_IMPORT_MODULE]: imports };
 };
 
@@ -184,16 +230,27 @@ export const registerExternalAdapterHandlers = ({
   if (asyncRequirements.length === 0) return;
   const providers = buildProviderMap(
     adapters,
-    new Set(requirements.functions.map((requirement) =>
-      externalFunctionKey(requirement.interfaceId, requirement.functionName),
-    )),
+    new Set(
+      requirements.functions.map((requirement) =>
+        externalFunctionKey(requirement.interfaceId, requirement.functionName),
+      ),
+    ),
   );
   asyncRequirements.forEach((requirement) => {
-    const key = externalFunctionKey(requirement.interfaceId, requirement.functionName);
+    const key = externalFunctionKey(
+      requirement.interfaceId,
+      requirement.functionName,
+    );
     const effect = requirement.effect;
-    if (!effect) throw new Error(`External async function ${key} is missing effect metadata`);
+    if (!effect)
+      throw new Error(
+        `External async function ${key} is missing effect metadata`,
+      );
     const provider = providers.get(key);
-    if (!provider) throw new Error(`Missing Voyd package adapter for external function ${key}`);
+    if (!provider)
+      throw new Error(
+        `Missing Voyd package adapter for external function ${key}`,
+      );
     assertCompatibleContract({ requirement, provider });
     const descriptor = table.ops.find(
       (op) =>
@@ -201,7 +258,10 @@ export const registerExternalAdapterHandlers = ({
         op.opId === effect.opId &&
         op.signatureHash === effect.signatureHash,
     );
-    if (!descriptor) throw new Error(`External async function ${key} has no matching effect operation`);
+    if (!descriptor)
+      throw new Error(
+        `External async function ${key} has no matching effect operation`,
+      );
     const handler: EffectHandler = async (
       continuation: EffectContinuation,
       ...rawArgs: unknown[]
@@ -241,7 +301,10 @@ const buildProviderMap = (
   {
     packageName: string;
     contract: VoydPackageAdapter["contract"]["functions"][number];
-    fn: (this: VoydPackageAdapterInvocationContext, ...args: readonly unknown[]) => unknown;
+    fn: (
+      this: VoydPackageAdapterInvocationContext,
+      ...args: readonly unknown[]
+    ) => unknown;
   }
 > => {
   const providers = new Map<
@@ -249,7 +312,10 @@ const buildProviderMap = (
     {
       packageName: string;
       contract: VoydPackageAdapter["contract"]["functions"][number];
-      fn: (this: VoydPackageAdapterInvocationContext, ...args: readonly unknown[]) => unknown;
+      fn: (
+        this: VoydPackageAdapterInvocationContext,
+        ...args: readonly unknown[]
+      ) => unknown;
     }
   >();
   const interfaceProviders = new Map<string, string>();
@@ -259,7 +325,11 @@ const buildProviderMap = (
     }
     const requiredInterfaces = new Set(
       adapter.contract.functions
-        .filter((contract) => requiredKeys.has(externalFunctionKey(contract.interfaceId, contract.functionName)))
+        .filter((contract) =>
+          requiredKeys.has(
+            externalFunctionKey(contract.interfaceId, contract.functionName),
+          ),
+        )
         .map(({ interfaceId }) => interfaceId),
     );
     requiredInterfaces.forEach((interfaceId) => {
@@ -272,14 +342,21 @@ const buildProviderMap = (
       interfaceProviders.set(interfaceId, adapter.contract.packageName);
     });
     adapter.contract.functions.forEach((contract) => {
-      const key = externalFunctionKey(contract.interfaceId, contract.functionName);
+      const key = externalFunctionKey(
+        contract.interfaceId,
+        contract.functionName,
+      );
       if (!requiredKeys.has(key)) return;
       if (providers.has(key)) {
         throw new Error(`Multiple Voyd package adapters provide ${key}`);
       }
-      const implementation = adapter.implementation[contract.interfaceId]?.[contract.functionName];
+      const implementation =
+        adapter.implementation[contract.interfaceId]?.[contract.functionName];
       const fn = implementation as
-        | ((this: VoydPackageAdapterInvocationContext, ...args: readonly unknown[]) => unknown)
+        | ((
+            this: VoydPackageAdapterInvocationContext,
+            ...args: readonly unknown[]
+          ) => unknown)
         | undefined;
       if (!fn) {
         throw new Error(
@@ -348,7 +425,9 @@ const canonicalContract = ({
       return;
     }
     if (
-      (schema.kind === "array" || schema.kind === "record" || schema.kind === "union") &&
+      (schema.kind === "array" ||
+        schema.kind === "record" ||
+        schema.kind === "union") &&
       "typeId" in schema &&
       schema.typeId !== undefined
     ) {
@@ -360,15 +439,20 @@ const canonicalContract = ({
       });
     }
     if (schema.kind === "array") register(schema.element);
-    if (schema.kind === "record") schema.fields.forEach((field) => register(field.schema));
+    if (schema.kind === "record")
+      schema.fields.forEach((field) => register(field.schema));
     if (schema.kind === "union") {
-      schema.variants.forEach((variant) => variant.fields.forEach((field) => register(field.schema)));
+      schema.variants.forEach((variant) =>
+        variant.fields.forEach((field) => register(field.schema)),
+      );
     }
   };
   [...params, result].forEach(register);
   return JSON.stringify({
     kind,
-    params: params.map((schema) => canonicalSchema(schema, normalizeId, runtimeSchemas)),
+    params: params.map((schema) =>
+      canonicalSchema(schema, normalizeId, runtimeSchemas),
+    ),
     result: canonicalSchema(result, normalizeId, runtimeSchemas),
   });
 };
@@ -380,7 +464,10 @@ const canonicalSchema = (
 ): unknown => {
   switch (schema.kind) {
     case "array":
-      return { kind: schema.kind, element: canonicalSchema(schema.element, normalizeId, runtimeSchemas) };
+      return {
+        kind: schema.kind,
+        element: canonicalSchema(schema.element, normalizeId, runtimeSchemas),
+      };
     case "record":
       return {
         kind: schema.kind,

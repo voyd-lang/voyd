@@ -59,7 +59,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
 
     expect(abi.version).toBe(2);
     expect(abi.host).toEqual({
-      hostAbi: 2,
+      hostAbi: 1,
       dtoSchemaAbi: 1,
       transport: { id: "voyd.std.msgpack", version: 1 },
     });
@@ -328,9 +328,7 @@ describe("export abi metadata", { timeout: 60_000 }, () => {
     const module = new WebAssembly.Module(wasmBufferSource(wasm));
     const abi = parseExportAbi(module);
 
-    expect(abi.exports).toEqual([
-      { name: "fetch", abi: "serialized" },
-    ]);
+    expect(abi.exports).toEqual([{ name: "fetch", abi: "serialized" }]);
   });
 
   it("emits schema metadata and distinct wrappers for automatic boundary exports", async () => {

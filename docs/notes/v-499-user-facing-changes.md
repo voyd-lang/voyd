@@ -17,7 +17,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
   callers that need an explicit neutral value.
 - DTO decoding rejects unknown fields by default. Callers must explicitly use
   `IgnoreUnknownFields` for forward-compatible input.
-- Exported DTO schemas carry stable SHA-256 fingerprints.
+- Export, effect, and external-package DTO schemas carry stable SHA-256
+  fingerprints at every typed payload position.
 - Every closed eligible type now has one cached `AutoDtoPlan` in
   `ProgramCodegenView`. Shape reification, schema metadata, fingerprints, and
   generated traversal consume that canonical plan.

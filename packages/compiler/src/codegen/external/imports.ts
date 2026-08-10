@@ -13,7 +13,11 @@ import {
   getStructuralTypeInfo,
   getRequiredExprType,
 } from "../types.js";
-import { deriveBoundarySchema, type BoundarySchema } from "../boundary/schema.js";
+import {
+  deriveBoundarySchema,
+  withDtoFingerprint,
+  type BoundarySchema,
+} from "../boundary/schema.js";
 import {
   packBoundaryValueAsMsgPack,
   unpackBoundaryValueFromMsgPack,
@@ -65,27 +69,33 @@ export const compileExternalCall = ({
   instanceId?: ProgramFunctionInstanceId;
   paramTypeIds?: readonly TypeId[];
 }): binaryen.ExpressionRef => {
-  const paramTypeIds = plannedParamTypeIds ?? call.args.map((arg) =>
-    getRequiredExprType(arg.expr, ctx, instanceId),
-  );
+  const paramTypeIds =
+    plannedParamTypeIds ??
+    call.args.map((arg) => getRequiredExprType(arg.expr, ctx, instanceId));
   if (paramTypeIds.length !== args.length) {
-    throw new Error(`external call argument plan mismatch for ${identity.interfaceId}::${identity.functionName}`);
+    throw new Error(
+      `external call argument plan mismatch for ${identity.interfaceId}::${identity.functionName}`,
+    );
   }
   const resultTypeId = getRequiredExprType(call.id, ctx, instanceId);
   const params = paramTypeIds.map((typeId, index) =>
+    withDtoFingerprint(
+      deriveBoundarySchema({
+        typeId,
+        ctx,
+        label: `${identity.interfaceId}::${identity.functionName} arg${index}`,
+        options: { tagStandaloneVariants: true },
+      }),
+    ),
+  );
+  const result = withDtoFingerprint(
     deriveBoundarySchema({
-      typeId,
+      typeId: resultTypeId,
       ctx,
-      label: `${identity.interfaceId}::${identity.functionName} arg${index}`,
+      label: `${identity.interfaceId}::${identity.functionName} result`,
       options: { tagStandaloneVariants: true },
     }),
   );
-  const result = deriveBoundarySchema({
-    typeId: resultTypeId,
-    ctx,
-    label: `${identity.interfaceId}::${identity.functionName} result`,
-    options: { tagStandaloneVariants: true },
-  });
 
   recordExternalRequirement({
     ctx,
@@ -112,8 +122,7 @@ export const compileExternalCall = ({
     ctx.mod.local.get(capacityLocal.index, binaryen.i32);
   const encodedLengthRef = () =>
     ctx.mod.local.get(encodedLengthLocal.index, binaryen.i32);
-  const writtenRef = () =>
-    ctx.mod.local.get(writtenLocal.index, binaryen.i32);
+  const writtenRef = () => ctx.mod.local.get(writtenLocal.index, binaryen.i32);
 
   const setup: binaryen.ExpressionRef[] = [
     ctx.mod.local.set(
@@ -165,7 +174,10 @@ export const compileExternalCall = ({
       ctx.mod.block(null, [
         ctx.mod.call(
           bufferErrorImport,
-          [ctx.mod.i32.sub(ctx.mod.i32.const(0), encodedLengthRef()), ctx.mod.i32.const(0)],
+          [
+            ctx.mod.i32.sub(ctx.mod.i32.const(0), encodedLengthRef()),
+            ctx.mod.i32.const(0),
+          ],
           binaryen.none,
         ),
         ctx.mod.unreachable(),
@@ -219,7 +231,11 @@ export const emitExternalRequirementsSection = ({
     () => new Map<string, ExternalFunctionRequirement>(),
   );
   effectRegistry.entries.forEach((entry) => {
-    if (!entry.external || (entry.external.declaredOnly && !includeDeclarations)) return;
+    if (
+      !entry.external ||
+      (entry.external.declaredOnly && !includeDeclarations)
+    )
+      return;
     const requirement: ExternalFunctionRequirement = {
       kind: "async",
       interfaceId: entry.effectId.id,
@@ -257,16 +273,21 @@ const assertComponentCompatibleSchemas = (
   const register = (schema: BoundarySchema): void => {
     if (schema.kind === "ref") return;
     if (
-      (schema.kind === "array" || schema.kind === "record" || schema.kind === "union") &&
+      (schema.kind === "array" ||
+        schema.kind === "record" ||
+        schema.kind === "union") &&
       schema.typeId !== undefined
     ) {
       declarations.set(schema.typeId, schema);
       schema.aliases?.forEach((alias) => declarations.set(alias, schema));
     }
     if (schema.kind === "array") register(schema.element);
-    if (schema.kind === "record") schema.fields.forEach((field) => register(field.schema));
+    if (schema.kind === "record")
+      schema.fields.forEach((field) => register(field.schema));
     if (schema.kind === "union") {
-      schema.variants.forEach((variant) => variant.fields.forEach((field) => register(field.schema)));
+      schema.variants.forEach((variant) =>
+        variant.fields.forEach((field) => register(field.schema)),
+      );
     }
   };
   const roots = functions.flatMap((fn) => [...fn.params, fn.result]);
@@ -278,13 +299,17 @@ const assertComponentCompatibleSchemas = (
     if (schema.kind === "ref") {
       const target = declarations.get(schema.typeId);
       if (!target) {
-        throw new Error(`external DTO ${label} references unknown type ${schema.typeId}`);
+        throw new Error(
+          `external DTO ${label} references unknown type ${schema.typeId}`,
+        );
       }
       visit(target, label);
       return;
     }
     const typeId =
-      schema.kind === "array" || schema.kind === "record" || schema.kind === "union"
+      schema.kind === "array" ||
+      schema.kind === "record" ||
+      schema.kind === "union"
         ? schema.typeId
         : undefined;
     if (typeId !== undefined) {
@@ -297,9 +322,12 @@ const assertComponentCompatibleSchemas = (
       active.add(typeId);
     }
     if (schema.kind === "array") visit(schema.element, label);
-    if (schema.kind === "record") schema.fields.forEach((field) => visit(field.schema, label));
+    if (schema.kind === "record")
+      schema.fields.forEach((field) => visit(field.schema, label));
     if (schema.kind === "union") {
-      schema.variants.forEach((variant) => variant.fields.forEach((field) => visit(field.schema, label)));
+      schema.variants.forEach((variant) =>
+        variant.fields.forEach((field) => visit(field.schema, label)),
+      );
     }
     if (typeId !== undefined) {
       active.delete(typeId);
@@ -405,7 +433,10 @@ const recordExternalRequirement = ({
 };
 
 const externalRequirementKey = (
-  requirement: Pick<ExternalFunctionRequirement, "interfaceId" | "functionName">,
+  requirement: Pick<
+    ExternalFunctionRequirement,
+    "interfaceId" | "functionName"
+  >,
 ): string => `${requirement.interfaceId}::${requirement.functionName}`;
 
 const packExternalValue = ({
@@ -441,7 +472,8 @@ const packExternalValue = ({
   const payloadField = boundaryMsgPackPayloadField(typeId, ctx);
   if (payloadField) {
     const info = getStructuralTypeInfo(typeId, ctx);
-    if (!info) throw new Error(`external payload ${label} is missing structural info`);
+    if (!info)
+      throw new Error(`external payload ${label} is missing structural info`);
     return loadStructuralField({
       structInfo: info,
       field: payloadField,
