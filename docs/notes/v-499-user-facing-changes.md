@@ -14,8 +14,8 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
 - `Bytes` is a first-class DTO primitive and crosses JavaScript boundaries as
   `Uint8Array`.
 - Typed JSON and MessagePack APIs share the provider-neutral data reader and
-  writer contract. Their typed paths stream directly instead of constructing a
-  `DataValue` tree first.
+  writer contract. Explicit `JsonValue`, `MsgPack`, and `DataValue` trees remain
+  available for callers that intentionally need dynamic values.
 - `CustomDto<T>` can define a type's boundary representation and conversion
   functions. The representation participates in the canonical DTO plan.
 - The `@boundary` and `@serializer` annotations have been removed.
@@ -66,6 +66,13 @@ The language is pre-adoption, so removed surfaces have no compatibility layer.
   accept caller-owned numeric handler IDs or raw MessagePack callbacks. Use
   typed message values and typed closures; the runtime owns callback
   capabilities and their lifetime.
+- `Html<Msg>`, `Attr<Msg>`, `Program<Model, Msg>`, and `Sub<Msg>` are opaque.
+  Their previous wire payload fields are no longer accessible.
+- `Cmd::task(work:, handler:)` has been removed. Use
+  `Cmd::perform(work:, handler:)` or pass an existing `Task<T>` with
+  `Cmd::perform(task:, handler:)`.
+- `std::web::render` and `render_static` accept typed VX HTML only; the raw
+  MessagePack overloads have been removed.
 
 This record will be extended as the remaining obsolete boundary and VX APIs are
 removed.

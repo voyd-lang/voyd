@@ -105,10 +105,10 @@ The supported metadata has four distinct jobs:
 Contract validation is deliberately strict. `@compiler_contract` accepts one
 known string ID, is restricted to an ordinary top-level function in the std
 namespace, and validates the catalogued arity during binding. Each role also
-declares a symbolic typed signature; boundary MsgPack feature use validates the
+declares a symbolic typed signature; selected-provider feature use validates the
 complete relational ABI after typing, including primitive and shared types,
 fixed-array elements, generic/optional parameters, and purity, before emitting
-host-boundary calls. Imported aliases do not acquire the contract, duplicate
+host calls. Imported aliases do not acquire the contract, duplicate
 providers fail when the program symbol arena is built, and a feature that needs
 a missing or incompatible role fails with a diagnostic instead of silently
 selecting a name-based fallback. Attribute syntax rejects duplicate attributes,
