@@ -8,6 +8,7 @@ import { msgPackHostTransport } from "../transports/msgpack.js";
 
 const BUFFER_PTR = 0;
 const BUFFER_SIZE = 1024;
+const COMPLETION = { kind: "export", id: 1 } as const;
 
 type FakeResult = {
   status: number;
@@ -116,7 +117,14 @@ const createRuntimeDriver = ({
         resultFingerprint: "test:result",
       });
     } else {
-      encoded = msgPackHostTransport.encode(result.payload);
+      encoded = msgPackHostTransport.encodeFrame({
+        kind: "export-completion",
+        exportId: COMPLETION.id,
+        outcome: {
+          kind: "success",
+          value: { fingerprint: "test:completion", value: result.payload },
+        },
+      });
     }
     new Uint8Array(memory.buffer, BUFFER_PTR, encoded.length).set(encoded);
     return encoded.length;
@@ -216,6 +224,7 @@ describe("runEffectLoop", () => {
       bufferPtr: BUFFER_PTR,
       bufferSize: BUFFER_SIZE,
       transport: msgPackHostTransport,
+      completion: COMPLETION,
     });
 
     expect(output).toBe(40);
@@ -263,6 +272,7 @@ describe("runEffectLoop", () => {
       bufferPtr: BUFFER_PTR,
       bufferSize: BUFFER_SIZE,
       transport: msgPackHostTransport,
+      completion: COMPLETION,
     });
 
     expect(output).toBe(99);
@@ -296,6 +306,7 @@ describe("runEffectLoop", () => {
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
         transport: msgPackHostTransport,
+        completion: COMPLETION,
       }),
     ).rejects.toThrow(/Unhandled effect/i);
   });
@@ -331,6 +342,7 @@ describe("runEffectLoop", () => {
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
         transport: msgPackHostTransport,
+        completion: COMPLETION,
       }),
     ).rejects.toThrow("boom");
   });
@@ -362,6 +374,7 @@ describe("runEffectLoop", () => {
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
         transport: msgPackHostTransport,
+        completion: COMPLETION,
       }),
     ).rejects.toThrow(/payload encoding failed/i);
   });
@@ -393,6 +406,7 @@ describe("runEffectLoop", () => {
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
         transport: msgPackHostTransport,
+        completion: COMPLETION,
       }),
     ).rejects.toThrow(/cannot return tail/i);
     expect(resumeRuntime.resumeCalls()).toBe(0);
@@ -423,6 +437,7 @@ describe("runEffectLoop", () => {
         bufferPtr: BUFFER_PTR,
         bufferSize: BUFFER_SIZE,
         transport: msgPackHostTransport,
+        completion: COMPLETION,
       }),
     ).rejects.toThrow(/must return tail/i);
     expect(tailRuntime.resumeCalls()).toBe(0);
@@ -461,6 +476,7 @@ describe("runEffectLoop", () => {
       bufferPtr: BUFFER_PTR,
       bufferSize: BUFFER_SIZE,
       transport: msgPackHostTransport,
+      completion: COMPLETION,
       shouldContinue: () => false,
     });
 
