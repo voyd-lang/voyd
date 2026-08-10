@@ -30,6 +30,12 @@ import {
 import { coerceValueToType, loadStructuralField } from "../structural.js";
 import type { EffectRegistry } from "../effects/effect-registry.js";
 import { murmurHash3 } from "@voyd-lang/lib/murmur-hash.js";
+import { arrayGet } from "@voyd-lang/lib/binaryen-gc/index.js";
+import {
+  makeSelectedExternalInvocation,
+  SELECTED_HOST_FRAME_TAG,
+  SELECTED_HOST_FRAME_VERSION,
+} from "../host-transport/frame-codec.js";
 
 export const EXTERNAL_IMPORT_MODULE = "voyd.external";
 export const EXTERNAL_REQUIREMENTS_SECTION = "voyd.external_requirements";
@@ -113,16 +119,71 @@ export const compileExternalCall = ({
   const msgpack = ensureSelectedHostTransportProvider(ctx);
   const msgPackType = wasmTypeFor(msgpack.msgPackTypeId, ctx);
   const arrayType = msgpack.arrayWithCapacity.resultType;
-  const arrayLocal = allocateTempLocal(arrayType, fnCtx);
+  const storageType = msgpack.arrayRawStorage.resultType;
   const capacityLocal = allocateTempLocal(binaryen.i32, fnCtx);
   const encodedLengthLocal = allocateTempLocal(binaryen.i32, fnCtx);
   const writtenLocal = allocateTempLocal(binaryen.i32, fnCtx);
-  const arrayRef = () => ctx.mod.local.get(arrayLocal.index, arrayType);
+  const decodedLocal = allocateTempLocal(msgPackType, fnCtx);
+  const frameArrayLocal = allocateTempLocal(arrayType, fnCtx);
+  const frameStorageLocal = allocateTempLocal(storageType, fnCtx);
+  const outcomeArrayLocal = allocateTempLocal(arrayType, fnCtx);
+  const outcomeStorageLocal = allocateTempLocal(storageType, fnCtx);
+  const typedPayloadArrayLocal = allocateTempLocal(arrayType, fnCtx);
+  const typedPayloadStorageLocal = allocateTempLocal(storageType, fnCtx);
   const capacityRef = () =>
     ctx.mod.local.get(capacityLocal.index, binaryen.i32);
   const encodedLengthRef = () =>
     ctx.mod.local.get(encodedLengthLocal.index, binaryen.i32);
   const writtenRef = () => ctx.mod.local.get(writtenLocal.index, binaryen.i32);
+  const frameField = (index: number) =>
+    arrayGet(
+      ctx.mod,
+      ctx.mod.local.get(frameStorageLocal.index, storageType),
+      ctx.mod.i32.const(index),
+      msgPackType,
+      false,
+    );
+  const outcomeField = (index: number) =>
+    arrayGet(
+      ctx.mod,
+      ctx.mod.local.get(outcomeStorageLocal.index, storageType),
+      ctx.mod.i32.const(index),
+      msgPackType,
+      false,
+    );
+  const typedPayloadField = (index: number) =>
+    arrayGet(
+      ctx.mod,
+      ctx.mod.local.get(typedPayloadStorageLocal.index, storageType),
+      ctx.mod.i32.const(index),
+      msgPackType,
+      false,
+    );
+  const invocationFrame = makeSelectedExternalInvocation({
+    ...identity,
+    args: args.map((arg, index) => {
+      const schema = params[index]!;
+      if (!schema.fingerprint) {
+        throw new Error(
+          `missing DTO fingerprint for ${identity.interfaceId}::${identity.functionName} arg${index}`,
+        );
+      }
+      return {
+        fingerprint: schema.fingerprint,
+        value: packExternalValue({
+          value: arg,
+          typeId: paramTypeIds[index]!,
+          schema,
+          ctx,
+          fnCtx,
+          label: `${identity.interfaceId}::${identity.functionName} arg${index}`,
+        }),
+      };
+    }),
+    ctx,
+    fnCtx,
+    provider: msgpack,
+  });
 
   const setup: binaryen.ExpressionRef[] = [
     ctx.mod.local.set(
@@ -130,42 +191,10 @@ export const compileExternalCall = ({
       ctx.mod.call(bufferSizeImport, [], binaryen.i32),
     ),
     ctx.mod.local.set(
-      arrayLocal.index,
-      ctx.mod.call(
-        msgpack.arrayWithCapacity.wasmName,
-        [ctx.mod.i32.const(args.length)],
-        arrayType,
-      ),
-    ),
-    ...args.map((arg, index) =>
-      ctx.mod.local.set(
-        arrayLocal.index,
-        ctx.mod.call(
-          msgpack.arrayPush.wasmName,
-          [
-            arrayRef(),
-            packExternalValue({
-              value: arg,
-              typeId: paramTypeIds[index]!,
-              schema: params[index]!,
-              ctx,
-              fnCtx,
-              label: `${identity.interfaceId}::${identity.functionName} arg${index}`,
-            }),
-          ],
-          arrayType,
-        ),
-      ),
-    ),
-    ctx.mod.local.set(
       encodedLengthLocal.index,
       ctx.mod.call(
         msgpack.encodeValue.wasmName,
-        [
-          ctx.mod.call(msgpack.makeArray.wasmName, [arrayRef()], msgPackType),
-          ctx.mod.i32.const(0),
-          capacityRef(),
-        ],
+        [invocationFrame, ctx.mod.i32.const(0), capacityRef()],
         binaryen.i32,
       ),
     ),
@@ -197,15 +226,92 @@ export const compileExternalCall = ({
       ),
     ),
     trapIfNegative(writtenRef(), ctx),
+    ctx.mod.local.set(
+      decodedLocal.index,
+      ctx.mod.call(
+        msgpack.decodeValue.wasmName,
+        [capacityRef(), writtenRef()],
+        msgPackType,
+      ),
+    ),
+    ctx.mod.local.set(
+      frameArrayLocal.index,
+      ctx.mod.call(
+        msgpack.unpackArray.wasmName,
+        [ctx.mod.local.get(decodedLocal.index, msgPackType)],
+        arrayType,
+      ),
+    ),
+    ctx.mod.local.set(
+      frameStorageLocal.index,
+      ctx.mod.call(
+        msgpack.arrayRawStorage.wasmName,
+        [ctx.mod.local.get(frameArrayLocal.index, arrayType)],
+        storageType,
+      ),
+    ),
+    ctx.mod.if(
+      ctx.mod.i32.or(
+        ctx.mod.i32.ne(
+          ctx.mod.call(
+            msgpack.unpackI32.wasmName,
+            [frameField(0)],
+            binaryen.i32,
+          ),
+          ctx.mod.i32.const(SELECTED_HOST_FRAME_VERSION),
+        ),
+        ctx.mod.i32.ne(
+          ctx.mod.call(
+            msgpack.unpackI32.wasmName,
+            [frameField(1)],
+            binaryen.i32,
+          ),
+          ctx.mod.i32.const(SELECTED_HOST_FRAME_TAG.externalCompletion),
+        ),
+      ),
+      ctx.mod.unreachable(),
+      ctx.mod.nop(),
+    ),
+    ctx.mod.local.set(
+      outcomeArrayLocal.index,
+      ctx.mod.call(msgpack.unpackArray.wasmName, [frameField(4)], arrayType),
+    ),
+    ctx.mod.local.set(
+      outcomeStorageLocal.index,
+      ctx.mod.call(
+        msgpack.arrayRawStorage.wasmName,
+        [ctx.mod.local.get(outcomeArrayLocal.index, arrayType)],
+        storageType,
+      ),
+    ),
+    ctx.mod.if(
+      ctx.mod.i32.ne(
+        ctx.mod.call(
+          msgpack.unpackI32.wasmName,
+          [outcomeField(0)],
+          binaryen.i32,
+        ),
+        ctx.mod.i32.const(0),
+      ),
+      ctx.mod.unreachable(),
+      ctx.mod.nop(),
+    ),
+    ctx.mod.local.set(
+      typedPayloadArrayLocal.index,
+      ctx.mod.call(msgpack.unpackArray.wasmName, [outcomeField(1)], arrayType),
+    ),
+    ctx.mod.local.set(
+      typedPayloadStorageLocal.index,
+      ctx.mod.call(
+        msgpack.arrayRawStorage.wasmName,
+        [ctx.mod.local.get(typedPayloadArrayLocal.index, arrayType)],
+        storageType,
+      ),
+    ),
   ];
 
-  const decoded = ctx.mod.call(
-    msgpack.decodeValue.wasmName,
-    [capacityRef(), writtenRef()],
-    msgPackType,
-  );
   const value = unpackExternalValue({
-    value: decoded,
+    value: typedPayloadField(1),
     typeId: resultTypeId,
     schema: result,
     ctx,

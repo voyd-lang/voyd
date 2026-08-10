@@ -85,6 +85,53 @@ export const makeSelectedExportCompletion = ({
   });
 };
 
+export const makeSelectedExternalInvocation = ({
+  interfaceId,
+  functionName,
+  args,
+  ctx,
+  fnCtx,
+  provider,
+}: {
+  interfaceId: string;
+  functionName: string;
+  args: readonly { fingerprint: string; value: binaryen.ExpressionRef }[];
+  ctx: CodegenContext;
+  fnCtx: FunctionContext;
+  provider: SelectedHostTransportProvider;
+}): binaryen.ExpressionRef => {
+  const typedArgs = makeSelectedArray({
+    elements: args.map(({ fingerprint, value }) =>
+      makeSelectedTypedPayload({
+        fingerprint,
+        value,
+        ctx,
+        fnCtx,
+        provider,
+      }),
+    ),
+    ctx,
+    fnCtx,
+    provider,
+  });
+  return makeSelectedArray({
+    elements: [
+      makeSelectedI32(SELECTED_HOST_FRAME_VERSION, ctx, provider),
+      makeSelectedI32(
+        SELECTED_HOST_FRAME_TAG.externalInvocation,
+        ctx,
+        provider,
+      ),
+      makeSelectedString(interfaceId, ctx, provider),
+      makeSelectedString(functionName, ctx, provider),
+      typedArgs,
+    ],
+    ctx,
+    fnCtx,
+    provider,
+  });
+};
+
 const makeSelectedArray = ({
   elements,
   ctx,

@@ -166,12 +166,32 @@ export const buildExternalImportModule = ({
         outCap: number,
       ) => {
         const memory = requireMemory(getInstance());
-        const argsValue = transport.decode(
+        const invocation = transport.decodeFrame(
           new Uint8Array(memory.buffer, inPtr, inLen),
         );
-        if (!Array.isArray(argsValue)) {
-          throw externalCallError(key, "arguments payload was not an array");
+        if (
+          invocation.kind !== "external-invocation" ||
+          invocation.interfaceId !== requirement.interfaceId ||
+          invocation.functionName !== requirement.functionName
+        ) {
+          throw externalCallError(key, "received an incompatible host frame");
         }
+        if (invocation.args.length !== requirement.params.length) {
+          throw externalCallError(
+            key,
+            "argument count does not match the contract",
+          );
+        }
+        const argsValue = invocation.args.map((payload, index) => {
+          const expected = requirement.params[index]?.fingerprint;
+          if (expected && payload.fingerprint !== expected) {
+            throw externalCallError(
+              key,
+              `argument ${index} fingerprint does not match the contract`,
+            );
+          }
+          return payload.value;
+        });
         const args = decodeBoundaryArgs({
           exportName: `external function ${key}`,
           schemas: requirement.params,
@@ -194,7 +214,22 @@ export const buildExternalImportModule = ({
           schemas: [requirement.result],
           args: [result],
         })[0];
-        const encoded = transport.encode(boundaryResult);
+        const resultFingerprint = requirement.result.fingerprint;
+        if (!resultFingerprint) {
+          throw externalCallError(
+            key,
+            "result schema is missing a fingerprint",
+          );
+        }
+        const encoded = transport.encodeFrame({
+          kind: "external-completion",
+          interfaceId: requirement.interfaceId,
+          functionName: requirement.functionName,
+          outcome: {
+            kind: "success",
+            value: { fingerprint: resultFingerprint, value: boundaryResult },
+          },
+        });
         if (encoded.length > outCap) {
           throw externalCallError(
             key,

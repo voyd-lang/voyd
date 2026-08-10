@@ -31,6 +31,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
   `transportAdapters`.
 - Serialized export calls use versioned invocation and completion frames with
   export identity, normalized outcomes, and schema fingerprints.
+- Synchronous external-package calls use the same module transport frames and
+  validate interface, function, argument, and result schema identities.
 - Generated TypeScript adapter contracts represent `Bytes` as `Uint8Array`;
   generated WIT represents it as `list<u8>`.
 - OpenAPI shape rendering represents `Bytes` as a binary string.
