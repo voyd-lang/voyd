@@ -1,5 +1,4 @@
-use std::bytes::ByteBuffer
-use std::msgpack::self as msgpack
+use std::bytes::{ ByteBuffer, Bytes }
 use std::test::assertions::all
 
 test "fill_bytes calls host op and fills via fallback":
@@ -10,7 +9,7 @@ test "fill_bytes calls host op and fills via fallback":
       fill_bytes(ByteBuffer::init(), 3)
     Random::fill_bytes(tail, requested):
       requested_lengths.push(requested)
-      tail(msgpack::make_null())
+      tail(ByteBuffer::init().as_bytes())
     Random::next_i64(tail):
       tail(i64_from_i32(1))
     Random::next_u64(tail):
@@ -27,11 +26,11 @@ test "secure_bytes validates exact host bytes without normalization":
     try
       secure_bytes(3)
     Random::fill_bytes(tail, _requested):
-      tail(msgpack::make_array([
-        msgpack::make_i32(0),
-        msgpack::make_i32(127),
-        msgpack::make_i32(255)
-      ]))
+      let ~bytes = ByteBuffer::init()
+      bytes.push(0)
+      bytes.push(127)
+      bytes.push(255)
+      tail(bytes.as_bytes())
     Random::next_i64(tail):
       tail(i64_from_i32(0))
     Random::next_u64(tail):
@@ -46,12 +45,12 @@ test "secure_bytes validates exact host bytes without normalization":
       assert(value.at(1), eq: 127)
       assert(value.at(2), eq: 255)
 
-test "secure_bytes rejects malformed host payloads":
+test "secure_bytes rejects host payloads with the wrong length":
   let result =
     try
       secure_bytes(2)
     Random::fill_bytes(tail, _requested):
-      tail(msgpack::make_array([msgpack::make_i32(300)]))
+      tail(ByteBuffer::init().as_bytes())
     Random::next_i64(tail):
       tail(i64_from_i32(0))
     Random::next_u64(tail):
@@ -296,7 +295,7 @@ test "local_rng seeded_from_host consumes one host seed":
     tail(i64_from_i32(0))
   Random::fill_bytes(tail, _len):
     calls.push(3)
-    tail(msgpack::make_null())
+    tail(ByteBuffer::init().as_bytes())
 
   let unit = optional_f64_or(unit_values.get(0), -1.0)
   let ranged = optional_f64_or(ranged_values.get(0), -1.0)
@@ -366,7 +365,7 @@ fn random_i32_from_seed(seed: i64) -> i32
   try
     random_i32()
   Random::fill_bytes(tail, _len):
-    tail(msgpack::make_null())
+    tail(ByteBuffer::init().as_bytes())
   Random::next_i64(tail):
     tail(seed)
   Random::next_u64(tail):
@@ -376,7 +375,7 @@ fn random_i32_from_seed_with_range({ seed: i64, range: Range<i32> }) -> i32
   try
     random_i32(range)
   Random::fill_bytes(tail, _len):
-    tail(msgpack::make_null())
+    tail(ByteBuffer::init().as_bytes())
   Random::next_i64(tail):
     tail(seed)
   Random::next_u64(tail):
@@ -386,7 +385,7 @@ fn random_i64_from_seed(seed: i64) -> i64
   try
     random_i64()
   Random::fill_bytes(tail, _len):
-    tail(msgpack::make_null())
+    tail(ByteBuffer::init().as_bytes())
   Random::next_i64(tail):
     tail(seed)
   Random::next_u64(tail):
@@ -403,7 +402,7 @@ fn random_i64_from_seeds_with_range({ i64_seed: i64, u64_seed: i64, range: Range
   try
     random_i64(range)
   Random::fill_bytes(tail, _len):
-    tail(msgpack::make_null())
+    tail(ByteBuffer::init().as_bytes())
   Random::next_i64(tail):
     tail(i64_seed)
   Random::next_u64(tail):
@@ -413,7 +412,7 @@ fn random_f64_from_seed(seed: i64) -> f64
   try
     random_f64()
   Random::fill_bytes(tail, _len):
-    tail(msgpack::make_null())
+    tail(ByteBuffer::init().as_bytes())
   Random::next_u64(tail):
     tail(seed)
   Random::next_i64(tail):
@@ -423,7 +422,7 @@ fn random_f64_from_seed_with_range({ seed: i64, range: Range<f64> }) -> f64
   try
     random_f64(range)
   Random::fill_bytes(tail, _len):
-    tail(msgpack::make_null())
+    tail(ByteBuffer::init().as_bytes())
   Random::next_u64(tail):
     tail(seed)
   Random::next_i64(tail):
@@ -433,7 +432,7 @@ fn random_f32_from_seed(seed: i64) -> f32
   try
     random_f32()
   Random::fill_bytes(tail, _len):
-    tail(msgpack::make_null())
+    tail(ByteBuffer::init().as_bytes())
   Random::next_u64(tail):
     tail(seed)
   Random::next_i64(tail):
@@ -443,7 +442,7 @@ fn random_f32_from_seed_with_range({ seed: i64, range: Range<f32> }) -> f32
   try
     random_f32(range)
   Random::fill_bytes(tail, _len):
-    tail(msgpack::make_null())
+    tail(ByteBuffer::init().as_bytes())
   Random::next_u64(tail):
     tail(seed)
   Random::next_i64(tail):
@@ -453,7 +452,7 @@ fn next_u64_from_seed(seed: i64) -> U64Bits
   try
     next_u64()
   Random::fill_bytes(tail, _len):
-    tail(msgpack::make_null())
+    tail(ByteBuffer::init().as_bytes())
   Random::next_i64(tail):
     tail(i64_from_i32(0))
   Random::next_u64(tail):
@@ -470,13 +469,13 @@ fn local_rng_f64_sum_from_seed({ seed: i64, count: i32 }) -> f64
 
   sum
 
-fn deterministic_byte_payload(len: i32) -> MsgPack
-  let ~values = Array<MsgPack>::with_capacity(len)
+fn deterministic_byte_payload(len: i32) -> Bytes
+  let ~values = ByteBuffer::with_capacity(len)
   var index = 0
   while index < len:
-    values.push(msgpack::make_i32(index))
+    values.push(index)
     index = index + 1
-  msgpack::make_array(values)
+  values.as_bytes()
 
 fn optional_i32_or(value: Option<i32>, fallback: i32): () -> i32
   match(value)

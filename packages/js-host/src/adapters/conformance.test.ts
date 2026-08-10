@@ -260,7 +260,7 @@ describe.each(["node"] as const)(
       });
       await expect(invokeHandler(fillBytesHandler, 4)).resolves.toEqual({
         kind: "tail",
-        value: [1, 2, 3, 4],
+        value: Uint8Array.from([1, 2, 3, 4]),
       });
 
       const httpClientHandler = getHandler("voyd.std.http.client", "request");

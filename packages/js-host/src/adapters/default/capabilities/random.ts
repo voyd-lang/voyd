@@ -160,7 +160,7 @@ export const randomCapabilityDefinition: CapabilityDefinition = {
           );
         }
         const bytes = randomSource.readBytes(requested);
-        return tail(Array.from(bytes.values()));
+        return tail(bytes);
       },
     });
     implementedOps.add("fill_bytes");

@@ -11,12 +11,11 @@ export const MAX_TIMER_DELAY_MILLIS = 2_147_483_647;
 const MAX_TIMER_DELAY_MILLIS_BIGINT = 2_147_483_647n;
 export const RANDOM_FILL_MAX_REQUEST_BYTES = 1_000_000;
 
-const MSGPACK_FIXARRAY_HEADER_BYTES = 1;
-const MSGPACK_ARRAY16_HEADER_BYTES = 3;
-const MSGPACK_ARRAY32_HEADER_BYTES = 5;
-const MSGPACK_FIXARRAY_MAX_LENGTH = 15;
-const MSGPACK_ARRAY16_MAX_LENGTH = 65_535;
-const MSGPACK_MAX_BYTES_PER_BYTE_VALUE = 2;
+const MSGPACK_BIN8_HEADER_BYTES = 2;
+const MSGPACK_BIN16_HEADER_BYTES = 3;
+const MSGPACK_BIN32_HEADER_BYTES = 5;
+const MSGPACK_BIN8_MAX_LENGTH = 255;
+const MSGPACK_BIN16_MAX_LENGTH = 65_535;
 const MSGPACK_OPTS = { useBigInt64: true } as const;
 
 export const globalRecord = globalThis as Record<string, unknown>;
@@ -332,26 +331,25 @@ export const maxTransportSafeRandomFillBytes = ({
 }: {
   effectBufferSize: number;
 }): number => {
-  if (effectBufferSize <= MSGPACK_FIXARRAY_HEADER_BYTES) {
+  if (effectBufferSize <= MSGPACK_BIN8_HEADER_BYTES) {
     return 0;
   }
 
-  const arrayHeaderSize = (length: number): number => {
-    if (length <= MSGPACK_FIXARRAY_MAX_LENGTH) {
-      return MSGPACK_FIXARRAY_HEADER_BYTES;
+  const binaryHeaderSize = (length: number): number => {
+    if (length <= MSGPACK_BIN8_MAX_LENGTH) {
+      return MSGPACK_BIN8_HEADER_BYTES;
     }
-    if (length <= MSGPACK_ARRAY16_MAX_LENGTH) {
-      return MSGPACK_ARRAY16_HEADER_BYTES;
+    if (length <= MSGPACK_BIN16_MAX_LENGTH) {
+      return MSGPACK_BIN16_HEADER_BYTES;
     }
-    return MSGPACK_ARRAY32_HEADER_BYTES;
+    return MSGPACK_BIN32_HEADER_BYTES;
   };
 
   let low = 0;
   let high = effectBufferSize;
   while (low < high) {
     const mid = Math.ceil((low + high) / 2);
-    const encodedWorstCaseBytes =
-      arrayHeaderSize(mid) + mid * MSGPACK_MAX_BYTES_PER_BYTE_VALUE;
+    const encodedWorstCaseBytes = binaryHeaderSize(mid) + mid;
     if (encodedWorstCaseBytes <= effectBufferSize) {
       low = mid;
       continue;

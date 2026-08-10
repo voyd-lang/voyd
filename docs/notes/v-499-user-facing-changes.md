@@ -53,6 +53,8 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
   fingerprints. This also covers asynchronous external-package calls.
 - Structured logging sends a typed `LogEvent` DTO. Log fields remain typed
   until the host adapter receives the event.
+- Secure random byte requests return `Bytes` directly. Hosts provide a binary
+  payload instead of an array of MessagePack integer values.
 - Retained callback invocations and non-effectful callback completions use
   invocation-scoped frames. Effectful callbacks use the same framed effect
   request/outcome loop.
@@ -83,8 +85,4 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
 ## Planned replacements
 
 - Remove public MessagePack boundary helpers and compiler contracts.
-- Replace format-specific compiler traversal with the single `AutoDtoPlan`
-  exposed through `ProgramCodegenView`.
-- Generate typed JSON and MessagePack traversal directly against `DataReader`
-  and `DataWriter` without constructing an intermediate `DataValue` tree.
 - Replace raw VX MessagePack payloads with typed plans and final wire lowering.

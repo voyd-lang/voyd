@@ -242,8 +242,8 @@ describe("registerDefaultHostAdapters", () => {
       tailContinuation,
       8
     );
-    expect(Array.isArray(randomBytes.value)).toBe(true);
-    expect((randomBytes.value as unknown[]).length).toBe(8);
+    expect(randomBytes.value).toBeInstanceOf(Uint8Array);
+    expect((randomBytes.value as Uint8Array).length).toBe(8);
 
     const mono = await getHandler("voyd.std.time", "monotonic_now_millis")(
       tailContinuation
@@ -3538,8 +3538,8 @@ describe("registerDefaultHostAdapters", () => {
       70_000
     );
     expect(result.kind).toBe("tail");
-    expect(Array.isArray(result.value)).toBe(true);
-    expect((result.value as unknown[]).length).toBe(70_000);
+    expect(result.value).toBeInstanceOf(Uint8Array);
+    expect((result.value as Uint8Array).length).toBe(70_000);
     expect(chunkSizes).toEqual([65_536, 4_464]);
   });
 
@@ -3563,11 +3563,11 @@ describe("registerDefaultHostAdapters", () => {
 
     expect(() =>
       getHandler("voyd.std.random", "fill_bytes")(tailContinuation, 100)
-    ).toThrow(/exact-response maximum of 30 bytes/i);
+    ).toThrow(/exact-response maximum of 62 bytes/i);
     expect(randomBytes).not.toHaveBeenCalled();
   });
 
-  it("accounts for array32 header overhead when rejecting oversized random fills", async () => {
+  it("accounts for binary header overhead when rejecting oversized random fills", async () => {
     const table = buildTable([
       { effectId: "voyd.std.random", opName: "fill_bytes", opId: 0 },
     ]);
@@ -3590,7 +3590,7 @@ describe("registerDefaultHostAdapters", () => {
         tailContinuation,
         1_000_000
       )
-    ).toThrow(/exact-response maximum of 65536 bytes/i);
+    ).toThrow(/exact-response maximum of 131073 bytes/i);
     expect(randomBytes).not.toHaveBeenCalled();
   });
 
@@ -3698,7 +3698,7 @@ describe("registerDefaultHostAdapters", () => {
     );
     expect(fillBytesResult).toEqual({
       kind: "tail",
-      value: [17, 18, 19, 20],
+      value: Uint8Array.from([17, 18, 19, 20]),
     });
     expect(randomBytes).toHaveBeenCalledTimes(3);
   });
