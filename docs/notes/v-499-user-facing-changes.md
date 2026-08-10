@@ -48,6 +48,9 @@ change. Compatibility aliases and deprecated forms are intentionally omitted.
   `std::msgpack::decode<T>` decodes immutable bytes into a checked DTO value.
   Parsed-tree byte conversion remains available as `encode_value_bytes` and
   `decode_value_bytes`.
+- `MsgPackWriter` and `MsgPackReader` implement the provider-neutral data
+  contracts directly over immutable MessagePack bytes, including balanced
+  containers and allocation-free value skipping.
 - `std::json::encode<T>` produces compact JSON and rejects `i64` values outside
   JavaScript's exact integer range. `Bytes` requires an explicit application
   representation in JSON.

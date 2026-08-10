@@ -1,5 +1,7 @@
 use std::memory::self as memory
 use std::array::Array
+use std::bytes::ByteBuffer
+use std::data::{ DataReader, DataWriter }
 use std::dict::{ Dict, DictKey }
 use std::enums::{ enum }
 use std::optional::types::all
@@ -156,6 +158,67 @@ test "msgpack unpack_i32 rejects numeric overflow":
       assert(false, eq: true)
     Err<MsgPackError> { error }:
       assert(error.code, eq: error_code_numeric_overflow())
+
+test "MsgPackWriter streams nested DTO values directly to bytes":
+  let ~source = ByteBuffer::with_capacity(2)
+  source.push(255)
+  source.push(0)
+  let ~writer = MsgPackWriter::init()
+  match(writer.begin_array(length: 2))
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.write_i32(1))
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.write_bytes(source.as_bytes()))
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.end_array())
+    Err<MsgPackError>:
+      Test::fail()
+    Ok<Unit>:
+      void
+  match(writer.finish())
+    Err<MsgPackError>:
+      Test::fail()
+    Ok { value: encoded }:
+      assert(encoded.len(), eq: 6)
+      assert(encoded.at(0), eq: 146)
+      assert(encoded.at(1), eq: 1)
+      assert(encoded.at(2), eq: 196)
+      assert(encoded.at(3), eq: 2)
+      assert(encoded.at(4), eq: 255)
+      assert(encoded.at(5), eq: 0)
+      let ~reader = MsgPackReader::init(encoded)
+      match(reader.begin_array())
+        Err<MsgPackError>:
+          Test::fail()
+        Ok<i32> { value: length }:
+          assert(length, eq: 2)
+      match(reader.read_i32())
+        Err<MsgPackError>:
+          Test::fail()
+        Ok<i32> { value }:
+          assert(value, eq: 1)
+      match(reader.read_bytes())
+        Err<MsgPackError>:
+          Test::fail()
+        Ok { value: bytes }:
+          assert(bytes.len(), eq: 2)
+          assert(bytes.at(0), eq: 255)
+          assert(bytes.at(1), eq: 0)
+      match(reader.end_array())
+        Err<MsgPackError>:
+          Test::fail()
+        Ok<Unit>:
+          void
+      assert(reader.is_complete(), eq: true)
 
 fn assert_i32_map_field(
   map: Dict<String, MsgPack>,

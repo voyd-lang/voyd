@@ -37,7 +37,7 @@ use std::number::cast::self as cast
 use std::number::cast::CastError
 use std::result::types::all
 use std::string::type::{ String, StringSlice, new_string }
-pub use self::fns::MsgPackMap
+pub use self::fns::{ MsgPackMap, MsgPackReader, MsgPackWriter }
 pub use self::errors::MsgPackError
 pub use self::types::{ Binary, Bool, F32, F64, I32, I64, Null, Numeric }
 
